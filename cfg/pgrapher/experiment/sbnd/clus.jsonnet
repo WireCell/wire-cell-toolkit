@@ -1104,11 +1104,15 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
 function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, reality='data') {
     // Reco-chain reality config -- ONE place grouping every reality-dependent
     // toggle.  use_sce: run the all-APA clustering + Bee in SCE true space
-    // (x_sce, sim) vs T0-corrected reco (x_t0cor, data).  pos_offset_on: per-TPC
+    // (x_sce) vs the T0-corrected reco scope (x_t0cor).  pos_offset_on: per-TPC
     // transverse (y,z) calibration, data-only (see the pos_offset_a0/a1 comment
     // above).
+    // NOTE: sim use_sce set to false to match sbnd_xin's MC chain (Xin runs MC
+    // in the T0-corrected reco scope, not SCE true space).  Both realities now
+    // cluster in x_t0cor; sim differs only by pos_offset_on=false (MC has no
+    // per-TPC transverse misalignment).
     local reco = {
-        sim:  { use_sce: true,  pos_offset_on: false },
+        sim:  { use_sce: false, pos_offset_on: false },
         data: { use_sce: false, pos_offset_on: true },
     }[reality],
     local use_sce = reco.use_sce,
