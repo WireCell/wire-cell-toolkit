@@ -383,7 +383,7 @@ local clus_per_face(anode, face, dump, output_dir, runNo, subRunNo, eventNo, bee
 // population iso_cathode_guard leaves unabsorbed) into a beam-window cluster
 // on raw proximity under the beam-T0 hypothesis.  false omits the keys =>
 // compiled config byte-identical to before the knob existed.
-local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=null, premerged=false, rse_from_ident=false, pos_offset_on=true, tensor_outname='', save_real_cluster_id=false, trace_bee=false, save_assoc_cluster_id=false, real_cluster_id_global=null, cathode_rescue_on=true, cathode_rescue_unmatched=true, adopt_nu_fragments=false) = {
+local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=null, premerged=false, rse_from_ident=false, pos_offset_on=true, tensor_outname='', save_real_cluster_id=false, trace_bee=false, save_assoc_cluster_id=false, real_cluster_id_global=null, cathode_rescue_on=true, cathode_rescue_unmatched=true, adopt_nu_fragments=false, save_bundle_main_provenance=false) = {
     local nanodes = std.length(anodes),
     local pcmerging = g.pnode({
         type: 'PointTreeMerging',
@@ -475,7 +475,13 @@ local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=
         // co-merged fragment loses flag_main_cluster to it (SBND evt284349:
         // the 2173-pt beam track lost it to a 3-pt TPC1 speck, leaving the flag
         // only on its own out-of-volume shard).  The taggers key on that flag.
-        cm.examine_bundles(use_flash_t0=true, flags_from_longest=true),
+        // save_bundle_main_provenance (doc pr/20 Part I P1; C++ default false,
+        // key omitted when off => byte-identical pre-knob config): also record,
+        // per blob, which members were matched bundle MAINS before this merge
+        // demoted them.  Only this merge destroys that fact, and only the
+        // all-APA instance runs it, so per-APA output cannot move.
+        cm.examine_bundles(use_flash_t0=true, flags_from_longest=true,
+                           save_bundle_main_provenance=save_bundle_main_provenance),
     ],
     local bee_zip_path = (if output_dir == '' then '' else output_dir + '/') + 'mabc-all-apa.zip',
     local mabc = g.pnode({
@@ -650,6 +656,15 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               tgm_fv_zmax_margin=5, tgm_fv_zmax_margin_interior=3,
               tgm_fv_x_margin=2.5, tgm_fv_y_margin=3,
               save_stm_fit=false, unmerge_bundle_mode='real',
+              // restore_demoted_mains (doc pr/20 Part I P2; C++ default false,
+              // key omitted when null => byte-identical pre-knob config): tag a
+              // split-off part that was ITSELF a matched bundle main before the
+              // flash-time merge with flag_demoted_main.  Requires the Q/L stage
+              // to have run with save_bundle_main_provenance, else the visitor
+              // warns and flags nothing.  Only the OUTER (flash) un-merge takes
+              // it -- unmerge_assoc undoes the isolated grouping, a different
+              // question.
+              restore_demoted_mains=null,
               // mip_dqdx: SBND MIP dQ/dx scale in e/cm handed to
               // TaggerCheckSTM AND (since docs pr/7-pr/8) to
               // tagger_check_neutrino as the PR chain's flat-template/cal_4mom
@@ -1026,7 +1041,8 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
         // creation (the visitor erases a stale steiner_pc and warns if not).
         // Not in pipeline_names => absent from the compiled config => no
         // behavior change.  Runner flag: -unmerge / -unmerge-comp.
-        unmerge_bundle: cm.unmerge_bundle(mode=unmerge_bundle_mode),
+        unmerge_bundle: cm.unmerge_bundle(mode=unmerge_bundle_mode,
+                                          restore_demoted_mains=restore_demoted_mains),
         // Second, INNER un-merge: undo the per-APA isolated GROUPING
         // (clustering_isolated save_assoc_id), which merges a main cluster with
         // the small clusters that are near it but NOT connected to it.  The
@@ -1568,7 +1584,8 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                       output_dir=output_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo,
                       bee_sink=bee_sink, rse_from_ident=rse_from_ident, pos_offset_on=pos_offset_on),
     all_apa(anodes, dump=true, bee_sink=null, premerged=false, tensor_outname='', save_real_cluster_id=false, save_assoc_cluster_id=false,
-            trace_bee=false, real_cluster_id_global=null, cathode_rescue_on=true, cathode_rescue_unmatched=true, adopt_nu_fragments=false)::
+            trace_bee=false, real_cluster_id_global=null, cathode_rescue_on=true, cathode_rescue_unmatched=true, adopt_nu_fragments=false,
+            save_bundle_main_provenance=false)::
         clus_all_apa(anodes, dump=dump,
                      output_dir=output_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo,
                      bee_sink=bee_sink, premerged=premerged, rse_from_ident=rse_from_ident, pos_offset_on=pos_offset_on,
@@ -1577,7 +1594,8 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                      real_cluster_id_global=real_cluster_id_global,
                      trace_bee=trace_bee, cathode_rescue_on=cathode_rescue_on,
                      cathode_rescue_unmatched=cathode_rescue_unmatched,
-                     adopt_nu_fragments=adopt_nu_fragments),
+                     adopt_nu_fragments=adopt_nu_fragments,
+                     save_bundle_main_provenance=save_bundle_main_provenance),
     // PR job: input is the reloaded post-QL tarball (see clus_pr above).
     // The TGM/FC and beam-window defaults here mirror clus_pr's -- i.e. the SBND
     // production operating point (see the comment block on clus_pr's arg list for
@@ -1595,6 +1613,8 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
        tgm_fv_zmax_margin=5, tgm_fv_zmax_margin_interior=3,
        tgm_fv_x_margin=2.5, tgm_fv_y_margin=3,
        save_stm_fit=false, unmerge_bundle_mode='real',
+       // doc pr/20 Part I P2; null = C++ default false = OFF.  See clus_pr.
+       restore_demoted_mains=null,
        mip_dqdx=56000, stm_consistent_fv=true, stm_accept_guards=true,
        stm_proton_muon_guard=true, stm_cathode_guard=true,
        stm_anode_dist_fix=true, stm_second_track_guard=true,
@@ -1682,6 +1702,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 tgm_fv_y_margin=tgm_fv_y_margin,
                 save_stm_fit=save_stm_fit,
                 unmerge_bundle_mode=unmerge_bundle_mode,
+                restore_demoted_mains=restore_demoted_mains,
                 mip_dqdx=mip_dqdx,
                 stm_consistent_fv=stm_consistent_fv,
                 stm_accept_guards=stm_accept_guards,

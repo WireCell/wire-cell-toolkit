@@ -31,6 +31,7 @@ static void clustering_examine_bundles(
         const bool use_flash_t0,
         const double flash_t0_window,
         const bool flags_from_longest,
+        const bool save_bundle_main_provenance,
         WireCell::Log::logptr_t log);
 
 class ClusteringExamineBundles : public IConfigurable, public Clus::IEnsembleVisitor, public Aux::Logger, private NeedDV, private NeedPCTS, private NeedScope {
@@ -53,12 +54,18 @@ public:
         // Default false = historical (arbitrary donor) flag behavior on the
         // flash-time merge.  See merge_clusters() in ClusteringFuncs.h.
         flags_from_longest_ = get<bool>(config, "flags_from_longest", flags_from_longest_);
+        // Default false = the array is never created, so the "perblob" key set
+        // is unchanged and every detector's output is byte-identical.  See
+        // merge_clusters()'s orig_wasmain_aname (doc pr/20 Part I P1).
+        save_bundle_main_provenance_ =
+            get<bool>(config, "save_bundle_main_provenance", save_bundle_main_provenance_);
     }
 
     void visit(Ensemble& ensemble) const {
         auto& live = *ensemble.with_name("live").at(0);
         clustering_examine_bundles(live, m_dv, m_pcts, m_scope, use_ctpc_, graph_name_,
-                                   use_flash_t0_, flash_t0_window_, flags_from_longest_, log);
+                                   use_flash_t0_, flash_t0_window_, flags_from_longest_,
+                                   save_bundle_main_provenance_, log);
     }
 
 private:
@@ -67,6 +74,7 @@ private:
     bool use_flash_t0_{false};
     double flash_t0_window_{80*units::ns};
     bool flags_from_longest_{false};
+    bool save_bundle_main_provenance_{false};
 };
 
 
@@ -92,6 +100,7 @@ static void clustering_examine_bundles(
     const bool use_flash_t0,
     const double flash_t0_window,
     const bool flags_from_longest,
+    const bool save_bundle_main_provenance,
     WireCell::Log::logptr_t log)
 {
     // std::cout << "Test Examine Bundles" << std::endl;
@@ -150,8 +159,15 @@ static void clustering_examine_bundles(
         // main_component_mode="real" reads the main flags so the TGM verdict can
         // follow the pre-merge main cluster.  Only here, under use_flash_t0
         // (all-APA), so per-APA / other-detector output is bit-identical.
+        // "real_cluster_was_main" (opt-in) additionally records, per blob,
+        // whether the member it came from carried flag_main_cluster on the way
+        // in -- the fact this merge destroys and that nothing downstream can
+        // otherwise recover (doc pr/20 Part I P1).  Note it is NOT
+        // "real_cluster_main": that one marks the single representative member,
+        // this one marks every member that was a matched bundle main.
         merge_clusters(g, live_grouping, "", "perblob", "real_cluster_id", flags_from_longest,
-                       "real_cluster_main");
+                       "real_cluster_main",
+                       save_bundle_main_provenance ? "real_cluster_was_main" : "");
     }
 
     std::vector<Cluster *> live_clusters = live_grouping.children();

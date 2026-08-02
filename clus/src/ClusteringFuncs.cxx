@@ -82,7 +82,8 @@ std::vector<Cluster*> WireCell::Clus::Facade::merge_clusters(
     Grouping& grouping,
     const std::string& aname, const std::string& pcname,
     const std::string& orig_id_aname, bool flags_from_longest,
-    const std::string& orig_main_aname)
+    const std::string& orig_main_aname,
+    const std::string& orig_wasmain_aname)
 {
     std::unordered_map<int, int> desc2id;
     std::map<int, std::set<int> > id2desc;
@@ -108,6 +109,10 @@ std::vector<Cluster*> WireCell::Clus::Facade::merge_clusters(
     const bool savecc = aname.size() > 0 && pcname.size() > 0;
     const bool save_origid = orig_id_aname.size() > 0 && pcname.size() > 0;
     const bool save_origmain = orig_main_aname.size() > 0 && pcname.size() > 0;
+    // Per-blob "the member this blob came from was a bundle main before this
+    // merge" (doc pr/20 Part I P1).  Independent of save_origid: the value is
+    // read off each member's own flag, not derived from the recorded idents.
+    const bool save_wasmain = orig_wasmain_aname.size() > 0 && pcname.size() > 0;
 
     // Provenance pairs CARRIED across this merge (doc 52 Stage 2, defect D4).
     // A merge can WRITE provenance (orig_id_aname/orig_main_aname) and a split
@@ -168,6 +173,12 @@ std::vector<Cluster*> WireCell::Clus::Facade::merge_clusters(
         // group can merge several bundles -- all mains of their own bundle.
         // The representative is the one main the merged cluster reports.
         std::vector<int> orig_main;
+        // Per-blob record of flag_main_cluster as each member carried it ON THE
+        // WAY IN.  Distinct from orig_main above: that one marks the single
+        // representative, this one marks every member that was a matched bundle
+        // main -- i.e. exactly the ones this merge is about to demote, which is
+        // the fact that has no other surviving witness afterwards.
+        std::vector<int> orig_wasmain;
 
         // Accumulators for the carried provenance pairs (see carry_pairs above).
         //
@@ -321,6 +332,13 @@ std::vector<Cluster*> WireCell::Clus::Facade::merge_clusters(
                 orig_id.resize(fresh_cluster.nchildren(), live->ident());
             }
 
+            if (save_wasmain) {
+                // resize-fills-the-new-rows, same idiom as orig_id above; the
+                // value is constant within a member.
+                orig_wasmain.resize(fresh_cluster.nchildren(),
+                                    live->get_flag(Flags::main_cluster) ? 1 : 0);
+            }
+
             grouping.destroy_child(live);
             assert(live == nullptr);
         }
@@ -329,6 +347,9 @@ std::vector<Cluster*> WireCell::Clus::Facade::merge_clusters(
         }
         if (save_origid) {
             fresh_cluster.put_pcarray(orig_id, orig_id_aname, pcname);
+        }
+        if (save_wasmain) {
+            fresh_cluster.put_pcarray(orig_wasmain, orig_wasmain_aname, pcname);
         }
         // Re-attach the carried provenance pairs, placing every row at the
         // position its own blob ended up in.  Only when some member really had

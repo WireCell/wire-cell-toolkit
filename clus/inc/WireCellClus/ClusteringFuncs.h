@@ -69,7 +69,17 @@ namespace WireCell::Clus::Facade {
         inline const std::string main_cluster = "main_cluster";
 
         // associated cluster
-        inline const std::string associated_cluster = "associated_cluster"; 
+        inline const std::string associated_cluster = "associated_cluster";
+
+        /// Set by ClusteringUnmergeBundle (restore_demoted_mains) on a split-off
+        /// part that WAS a matched Q/L bundle main before the flash-time merge
+        /// demoted it (doc pr/20 Part I P2).  Deliberately NOT main_cluster:
+        /// nu_skip_cosmic_bundle builds its bundle-level veto set from
+        /// main_cluster (TaggerCheckNeutrino.cxx), so restoring that flag would
+        /// make the neutrino's survival contingent on the unrelated
+        /// nu_skip_cosmic_bundle_min_length guard.  The cosmic taggers opt in to
+        /// this flag explicitly (evaluate_demoted_mains); nothing else reads it.
+        inline const std::string demoted_main = "demoted_main";
 
         /// This flag is set by ClusteringTaggerCheckSTM algorithm when specific STM conditions are met
         inline const std::string STM = "STM";
@@ -165,13 +175,33 @@ namespace WireCell::Clus::Facade {
     // See the long comment at the top of merge_clusters() for why each of those
     // three choices is what it is; doc 52 4b has the full argument.  Absent
     // arrays => no-op, so this costs nothing when the writer knob is off.
+    // orig_wasmain_aname: when set (with pcname), save a per-blob marker (1/0)
+    // of whether the member each blob came from carried flag_main_cluster
+    // BEFORE the merge.  Read it against orig_main_aname above, which it is one
+    // word away from in the name and different in what it marks:
+    //
+    //   real_cluster_main      1 on the rows of the ONE representative member
+    //                          (the flash/flags donor) -- "which member does the
+    //                          merged cluster now speak for".
+    //   real_cluster_was_main  1 on the rows of EVERY member that was a matched
+    //                          bundle main -- "which members lost that status to
+    //                          this merge".  A flash group can merge several
+    //                          bundles, each of them a main of its own bundle,
+    //                          so this is 1 on more rows than the other whenever
+    //                          the merge demoted anybody (doc pr/20 Part I P1).
+    //
+    // Independent of orig_id_aname (unlike orig_main_aname, which needs it for
+    // the representative-ident comparison): the flag is read off each member
+    // directly.  Empty name => array never created => no key-set change => every
+    // caller stays byte-identical.
     std::vector<Cluster*> merge_clusters(cluster_connectivity_graph_t& g, //
                                          Grouping& grouping,
                                          const std::string& aname="",
                                          const std::string& pcname="perblob",
                                          const std::string& orig_id_aname="",
                                          bool flags_from_longest=false,
-                                         const std::string& orig_main_aname="");
+                                         const std::string& orig_main_aname="",
+                                         const std::string& orig_wasmain_aname="");
 
     // Assign each cluster an integer "flash-time group" id.  Clusters whose
     // matched flash time (cluster_t0) differ by less than `window` share a group

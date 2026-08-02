@@ -238,6 +238,14 @@ function(
     // designed to run WITH iso_cathode_guard.  false omits the keys =>
     // compiled config byte-identical (runner: SBND_ADOPT_NU_FRAG=1).
     adopt_nu_fragments = false,
+    // save_bundle_main_provenance (doc pr/20 Part I P1; C++ default false):
+    // on the all-APA flash-time merge, also write the per-blob
+    // "real_cluster_was_main" array -- 1 on every member that was a matched
+    // bundle MAIN before the merge demoted it.  That fact has no other
+    // surviving witness downstream; the PR job's restore_demoted_mains is its
+    // only consumer.  false omits the key => compiled config byte-identical
+    // (runner: SBND_SAVE_WASMAIN=1).
+    save_bundle_main_provenance = false,
 )
     // Build params inside the function so all physics values are TLAs.  These
     // are the documented Q/L drift/diffusion values (matching run_clust_QL_evt.sh),
@@ -330,7 +338,7 @@ function(
                                                beam_pref_rescue=(if beam_pref then beam_pref_rescue else null),
                                                main_flag=main_flag, lm=lm, realign_perblob=realign);
             // MABC takes the single pre-merged tree directly (no PointTreeMerging).
-            local clus_all = clus_maker.all_apa(anodes, dump=true, premerged=true, tensor_outname=save_tensors, save_real_cluster_id=save_rcid, save_assoc_cluster_id=save_assoc, trace_bee=trace_bee, real_cluster_id_global=rcid_global, cathode_rescue_on=cathode_rescue, cathode_rescue_unmatched=cathode_rescue_unmatched, adopt_nu_fragments=adopt_nu_fragments);
+            local clus_all = clus_maker.all_apa(anodes, dump=true, premerged=true, tensor_outname=save_tensors, save_real_cluster_id=save_rcid, save_assoc_cluster_id=save_assoc, trace_bee=trace_bee, real_cluster_id_global=rcid_global, cathode_rescue_on=cathode_rescue, cathode_rescue_unmatched=cathode_rescue_unmatched, adopt_nu_fragments=adopt_nu_fragments, save_bundle_main_provenance=save_bundle_main_provenance);
             local per_apa_pre = [g.intern(
                 innodes=[active_clusters[n], masked_clusters[n], opflash_sources[n]],
                 centernodes=[clus_pipes[n]],
@@ -365,7 +373,7 @@ function(
                     g.edge(flash_attach[n], matching_pipes[n], 0, 0),
                 ]
             ) for n in std.range(0, nanodes - 1)];
-            local clus_all = clus_maker.all_apa(anodes, dump=true, tensor_outname=save_tensors, save_real_cluster_id=save_rcid, save_assoc_cluster_id=save_assoc, trace_bee=trace_bee, real_cluster_id_global=rcid_global, cathode_rescue_on=cathode_rescue, cathode_rescue_unmatched=cathode_rescue_unmatched, adopt_nu_fragments=adopt_nu_fragments);
+            local clus_all = clus_maker.all_apa(anodes, dump=true, tensor_outname=save_tensors, save_real_cluster_id=save_rcid, save_assoc_cluster_id=save_assoc, trace_bee=trace_bee, real_cluster_id_global=rcid_global, cathode_rescue_on=cathode_rescue, cathode_rescue_unmatched=cathode_rescue_unmatched, adopt_nu_fragments=adopt_nu_fragments, save_bundle_main_provenance=save_bundle_main_provenance);
             g.intern(
                 innodes=per_apa,
                 outnodes=[clus_all],

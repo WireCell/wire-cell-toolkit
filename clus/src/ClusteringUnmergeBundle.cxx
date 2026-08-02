@@ -111,6 +111,18 @@ public:
         // (wire-cell-prod-stm.cxx:816-828).
         m_id_aname = get<std::string>(config, "id_aname", m_id_aname);
         m_main_aname = get<std::string>(config, "main_aname", m_main_aname);
+        // restore_demoted_mains (default false = no flag is ever set, so the
+        // cluster_scalar key set is unchanged and output is byte-identical):
+        // additionally tag each split-off part that was ITSELF a matched bundle
+        // main before the flash-time merge with Flags::demoted_main, read off
+        // the per-blob array ClusteringExamineBundles writes under
+        // save_bundle_main_provenance (doc pr/20 Part I P1/P2).  The part still
+        // gets flag_associated_cluster and still does NOT get flag_main_cluster
+        // back -- see the Flags::demoted_main comment in ClusteringFuncs.h for
+        // why restoring main_cluster is the wrong shape.
+        m_restore_demoted_mains =
+            get<bool>(config, "restore_demoted_mains", m_restore_demoted_mains);
+        m_wasmain_aname = get<std::string>(config, "wasmain_aname", m_wasmain_aname);
         if (m_mode != "real" && m_mode != "component") {
             raise<ValueError>("ClusteringUnmergeBundle: unknown mode \"%s\" (want \"real\" or \"component\")",
                               m_mode);
@@ -131,6 +143,8 @@ public:
         cfg["require_in_scope"] = m_require_in_scope;
         cfg["id_aname"] = m_id_aname;
         cfg["main_aname"] = m_main_aname;
+        cfg["restore_demoted_mains"] = m_restore_demoted_mains;
+        cfg["wasmain_aname"] = m_wasmain_aname;
         return cfg;
     }
 
@@ -180,6 +194,8 @@ private:
     std::string m_pcarray_name{"perblob"};
     std::string m_graph_name{"relaxed"};
     bool m_require_in_scope{true};
+    bool m_restore_demoted_mains{false};
+    std::string m_wasmain_aname{"real_cluster_was_main"};
 
     /// Outcome of reading the flash-merge provenance.
     enum class Prov {
@@ -377,8 +393,53 @@ private:
             part->set_ident(alloc_ident(taken, main_ident * 100 + sub_id));
             ++sub_id;
             carve(part, gid);
+            // STRICTLY after carve(): separate()->from() hands the part a
+            // FULL-LENGTH copy of the merged cluster's "perblob" PC, so reading
+            // the array before the carve would test the whole bundle's rows
+            // instead of this part's -- silently, and wrong on exactly the
+            // events this is for.  carve() either installs the correct subset or
+            // erases the PC, so a read here is right or absent, never stale.
+            if (m_restore_demoted_mains) mark_demoted_main(part);
         }
         return true;
+    }
+
+    /// Flag a split-off part that was ITSELF a matched bundle main before the
+    /// flash-time merge (doc pr/20 Part I P2).  Fails CLOSED -- no array, wrong
+    /// size, or an empty part leaves the flag unset -- matching this visitor's
+    /// standing "no usable provenance => skip, never guess" stance.
+    void mark_demoted_main(Cluster* part) const {
+        if (!part->has_pcarray<int>(m_wasmain_aname, m_pcarray_name)) {
+            log->warn("cluster {}: restore_demoted_mains is on but '{}' is absent "
+                      "(save the pctree with ClusteringExamineBundles "
+                      "save_bundle_main_provenance); not flagged",
+                      part->ident(), m_wasmain_aname);
+            return;
+        }
+        const auto w = part->get_pcarray<int>(m_wasmain_aname, m_pcarray_name);
+        const size_t nb = (size_t) part->nchildren();
+        if (w.size() != nb || nb == 0) {
+            log->warn("cluster {}: '{}' has {} rows for {} blobs; not flagged",
+                      part->ident(), m_wasmain_aname, w.size(), nb);
+            return;
+        }
+        size_t n1 = 0;
+        for (int v : w) if (v != 0) ++n1;
+        if (n1 == nb) {
+            part->set_flag(Flags::demoted_main);
+            log->debug("cluster {}: demoted_main ({} blob(s) were a bundle main "
+                       "before the flash merge)", part->ident(), nb);
+            return;
+        }
+        if (n1 != 0) {
+            // A split part is one pre-merge member by construction, and the
+            // array is constant within a member, so mixed rows mean the
+            // provenance pair and the was-main array disagree about member
+            // boundaries.  Never expected; report rather than pick a side.
+            log->warn("cluster {}: '{}' is MIXED ({} of {} rows set) -- the "
+                      "flash-merge provenance and the was-main array disagree; "
+                      "not flagged", part->ident(), m_wasmain_aname, n1, nb);
+        }
     }
 
     /// `want` if free, else the lowest free integer above every taken ident.

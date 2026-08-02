@@ -2631,6 +2631,38 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
             // (doc 53).  See restamp_real_cluster_id(), called right after the
             // clustering pipeline.
         }
+        // "real_cluster_was_main" (doc pr/20 Part I P1) needs the same
+        // key-homogeneity fill-in as the pair above, but is deliberately
+        // PRESENCE-triggered instead of getting a knob of its own: the writer is
+        // ClusteringExamineBundles' save_bundle_main_provenance, and two
+        // independent booleans would admit the one configuration that throws
+        // (writer on, fill-in off => a "perblob" PC whose key set differs
+        // between clusters => Dataset::append raises on the next merge, see
+        // aux/src/TensorDMpointtree.cxx).  Fill iff somebody actually wrote it.
+        {
+            bool any_wasmain = false;
+            for (Cluster* cluster : grouping.children()) {
+                if (cluster->has_pcarray<int>("real_cluster_was_main", "perblob")) {
+                    any_wasmain = true;
+                    break;
+                }
+            }
+            if (any_wasmain) {
+                // Gate on "has a perblob PC at all", which is the exact scope of
+                // the invariant append enforces -- wider than the flash pair's
+                // "isolated" gate, for the reason spelled out above it.
+                for (Cluster* cluster : grouping.children()) {
+                    const auto& lpcs = cluster->value().local_pcs();
+                    if (lpcs.find("perblob") == lpcs.end()) continue;
+                    if (cluster->has_pcarray<int>("real_cluster_was_main", "perblob")) continue;
+                    // A cluster the flash merge never touched still speaks for
+                    // itself: all 1, the same "absent provenance => own main"
+                    // sentinel real_cluster_main uses.
+                    cluster->put_pcarray(std::vector<int>(cluster->nchildren(), 1),
+                                         "real_cluster_was_main", "perblob");
+                }
+            }
+        }
         auto node = ensemble.remove_child(grouping);
         check_perblob_provenance(*node, "save:" + outpath(name, ident));
         auto tens = as_tensors(*node, outpath(name, ident));

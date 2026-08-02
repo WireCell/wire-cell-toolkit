@@ -113,8 +113,17 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
         // merge.  Run the flash one first (outer) and the isolated one second
         // (inner): that order reproduces the prototype's main_cluster +
         // additional_clusters layout, and both must precede the steiner stage.
+        // restore_demoted_mains (C++ default false; key omitted when null =>
+        // byte-identical pre-knob config): additionally tag a split-off part
+        // that was ITSELF a matched Q/L bundle main before the flash-time merge
+        // with flag_demoted_main, read from the per-blob "real_cluster_was_main"
+        // array (examine_bundles save_bundle_main_provenance must be on, or the
+        // visitor warns and flags nothing).  The part keeps
+        // flag_associated_cluster and deliberately does NOT get
+        // flag_main_cluster back -- nu_skip_cosmic_bundle builds its veto set
+        // from main_cluster.  Doc pr/20 Part I P2.
         unmerge_bundle(name="", mode="real", graph_name="relaxed", require_in_scope=true,
-                       id_aname=null, main_aname=null) :: {
+                       id_aname=null, main_aname=null, restore_demoted_mains=null) :: {
             type: "ClusteringUnmergeBundle",
             name: prefix + name,
             data: dv_cfg + pcts_cfg + {
@@ -125,6 +134,7 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
                 require_in_scope: require_in_scope,
                 [if id_aname != null then 'id_aname']: id_aname,
                 [if main_aname != null then 'main_aname']: main_aname,
+                [if restore_demoted_mains != null then 'restore_demoted_mains']: restore_demoted_mains,
             },
             uses: [detector_volumes, pc_transforms],
         },
@@ -1058,15 +1068,23 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
         // matched main cannot lose flag_main_cluster to a co-merged fragment.
         // Key emitted only when true so existing compiled configs stay
         // byte-identical.  See merge_clusters() in clus/inc/.../ClusteringFuncs.h.
+        // save_bundle_main_provenance (C++ default false; key omitted when off
+        // => byte-identical pre-knob config): on the flash-time merge, also
+        // write the per-blob "real_cluster_was_main" array -- 1 on the rows of
+        // EVERY member that carried flag_main_cluster on the way in, i.e. the
+        // bundle mains this merge demotes.  Distinct from "real_cluster_main",
+        // which marks only the single representative member.  Consumed by
+        // unmerge_bundle's restore_demoted_mains.  Doc pr/20 Part I P1.
         examine_bundles(name="", graph_name="relaxed", use_flash_t0=false, flash_t0_window=80*wc.ns,
-                        flags_from_longest=false) :: {
+                        flags_from_longest=false, save_bundle_main_provenance=false) :: {
             type: "ClusteringExamineBundles",
             name: prefix+name,
             data: dv_cfg + pcts_cfg + scope_cfg + {
                 graph_name: graph_name,
                 use_flash_t0: use_flash_t0,
                 flash_t0_window: flash_t0_window,
-            } + (if flags_from_longest then { flags_from_longest: true } else {}),
+            } + (if flags_from_longest then { flags_from_longest: true } else {})
+              + (if save_bundle_main_provenance then { save_bundle_main_provenance: true } else {}),
             uses: [detector_volumes, pc_transforms],
         },
 

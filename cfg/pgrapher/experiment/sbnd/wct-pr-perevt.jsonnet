@@ -380,6 +380,16 @@ function(
     // component -- a clustering decision (breaks cathode crossers), opt-in
     // only.  Runner flags: -unmerge / -unmerge-comp (doc 45).
     unmerge_bundle_mode = 'real',
+    // restore_demoted_mains (doc pr/20 Part I P2; C++ default false = OFF):
+    // when the OUTER (flash) un-merge splits a bundle, additionally tag each
+    // split-off part that was ITSELF a matched bundle main before the merge
+    // with flag_demoted_main -- read from the per-blob "real_cluster_was_main"
+    // array, so the Q/L stage must have run with save_bundle_main_provenance
+    // (else the visitor warns and flags nothing).  The part keeps
+    // flag_associated_cluster and does NOT get flag_main_cluster back.
+    // null omits the key => compiled config byte-identical
+    // (runner: SBND_RESTORE_DEMOTED_MAINS=1).
+    restore_demoted_mains = null,
 )
     local base = import 'pgrapher/experiment/sbnd/simparams.jsonnet';
     local params = base {
@@ -436,6 +446,7 @@ function(
                              tgm_fv_y_margin=tgm_fv_y_margin,
                              save_stm_fit=save_stm_fit,
                              unmerge_bundle_mode=unmerge_bundle_mode,
+                             restore_demoted_mains=restore_demoted_mains,
                              mip_dqdx=mip_dqdx,
                              stm_consistent_fv=stm_consistent_fv,
                              stm_accept_guards=stm_accept_guards,
