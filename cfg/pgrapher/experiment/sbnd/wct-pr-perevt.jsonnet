@@ -387,25 +387,51 @@ function(
     // array, so the Q/L stage must have run with save_bundle_main_provenance
     // (else the visitor warns and flags nothing).  The part keeps
     // flag_associated_cluster and does NOT get flag_main_cluster back.
-    // null omits the key => compiled config byte-identical
-    // (runner: SBND_RESTORE_DEMOTED_MAINS=1).
-    restore_demoted_mains = null,
+    //
+    // SBND DEFAULT ON since doc pr/20 Part X.  Fails CLOSED: on a legacy Q/L
+    // tree without the array the visitor warns once per cluster and flags
+    // nothing, so the chain still runs -- but P3/P4 below are then inert and
+    // the run is NOT the production operating point.  Regenerate the Q/L tree.
+    // Set false to restore the pre-flip behaviour (runner:
+    // SBND_RESTORE_DEMOTED_MAINS=0).
+    restore_demoted_mains = true,
     // evaluate_demoted_mains (doc pr/20 Part I P3; C++ default false = OFF):
     // let TaggerCheckTGM / STM / FC evaluate a cluster carrying
     // flag_demoted_main.  Inert unless restore_demoted_mains above is on, since
-    // nothing else sets that flag.  false omits the key => compiled config
-    // byte-identical (runner: SBND_EVAL_DEMOTED_MAINS=1).
-    evaluate_demoted_mains = false,
+    // nothing else sets that flag.
+    //
+    // SBND DEFAULT ON since doc pr/20 Part X.  On its own this produces a
+    // verdict and acts on nothing -- gated at 1000 events (doc pr/20 Part IX
+    // sec 4): 4 differing cells vs the knob-off arm, all `kine_reco_Enu` last
+    // digit, and 3 of the 4 events also differ in the A/A control with the
+    // identical value change.  Set false to restore the pre-flip behaviour
+    // (runner: SBND_EVAL_DEMOTED_MAINS=0).
+    evaluate_demoted_mains = true,
     // skip_cosmic_companions / cosmic_companion_min_length (doc pr/20 Part I
     // P4; C++ defaults false / 0 = OFF): drop a TGM- or STM-tagged COMPANION
     // from the neutrino's other_clusters, so its charge cannot reach the
     // particle-flow tree or kine_reco_Enu.  A tagged companion SHORTER than the
     // floor (cm) stays in regardless, so a mis-tagged neutrino daughter is
     // never silently lost.  Inert without evaluate_demoted_mains above.
-    // Keys omitted when off => compiled config byte-identical
-    // (runner: SBND_SKIP_COSMIC_COMPANIONS=1 SBND_COSMIC_COMPANION_MIN_LEN=<cm>).
-    skip_cosmic_companions = false,
-    cosmic_companion_min_length = null,
+    //
+    // SBND DEFAULT ON since doc pr/20 Part X.  **This changes reconstructed
+    // physics** -- 14 of 1000 mcp1k events move (doc pr/20 Part IX sec 5-6),
+    // zero beam labels change, and the motivating event 18255/59003 goes
+    // kine_reco_Enu 1202.5 -> 841.0 MeV.  nueCC48 is untouched: 0 of its 69
+    // admitted demoted mains is convicted (gate PI-8, run at floor 0, which by
+    // the monotonicity of `L >= floor` discharges it at every floor).
+    //
+    // THE FLOOR IS NOT DERIVED FROM THE IMPACT DISTRIBUTION.  Part IX sec 6b:
+    // length does not predict impact (the four inert drops span 3.3-158.7 cm)
+    // and a floor does not stop the vertex relocations (the largest is at
+    // 39.5 cm).  15 cm is a tagger-plausibility guard -- every conviction in
+    // 1000 events came from STM, never TGM, and evt 73004's companion is an
+    // 11.9 cm "stopping muon" that stops 177 cm from the cathode.  Do not
+    // re-derive this number from a length histogram; it is not in there.
+    // Set false / null to restore the pre-flip behaviour (runner:
+    // SBND_SKIP_COSMIC_COMPANIONS=0).
+    skip_cosmic_companions = true,
+    cosmic_companion_min_length = 15,
 )
     local base = import 'pgrapher/experiment/sbnd/simparams.jsonnet';
     local params = base {

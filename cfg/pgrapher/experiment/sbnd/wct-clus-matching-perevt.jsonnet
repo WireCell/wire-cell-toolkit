@@ -243,9 +243,16 @@ function(
     // "real_cluster_was_main" array -- 1 on every member that was a matched
     // bundle MAIN before the merge demoted it.  That fact has no other
     // surviving witness downstream; the PR job's restore_demoted_mains is its
-    // only consumer.  false omits the key => compiled config byte-identical
-    // (runner: SBND_SAVE_WASMAIN=1).
-    save_bundle_main_provenance = false,
+    // only consumer.
+    //
+    // SBND DEFAULT ON since doc pr/20 Part X (owner decision on the Part IX
+    // census + the two Bee sets).  **This changes the Q/L job's OUTPUT**: the
+    // pctree gains a "perblob" array, so the tarball is NOT byte-identical to
+    // a pre-flip one and any production Q/L tree the PR chain is meant to read
+    // with restore_demoted_mains must be REGENERATED.  Nothing else moves --
+    // the array is written and read, never acted on, here.
+    // Set false to restore the pre-flip output (runner: SBND_SAVE_WASMAIN=0).
+    save_bundle_main_provenance = true,
 )
     // Build params inside the function so all physics values are TLAs.  These
     // are the documented Q/L drift/diffusion values (matching run_clust_QL_evt.sh),
