@@ -64,10 +64,13 @@ function(
     // See sbnd_xin/docs/64_cfg-sync.md sec 4.
     lifetime       = 35.0,
     driftSpeed     = 1.563,
-    // Joint multi-APA matching toggle. false (default) = historical per-APA path
-    // (one QLMatching per APA -> PointTreeMerging -> all-APA MABC). true = one
-    // joint QLMatching node matches both APAs and merges, feeding MABC directly.
-    joint          = false,
+    // Joint multi-APA matching toggle. true (DEFAULT since doc 68) = one joint
+    // QLMatching node matches both APAs and merges, feeding MABC directly --
+    // the SBND production graph (run_ql_evt.sh always passed joint=true; the
+    // joint node is where the joint algorithm lands). false = historical
+    // per-APA path (one QLMatching per APA -> PointTreeMerging -> all-APA
+    // MABC); runner escape: --per-apa / SBND_JOINT=0.
+    joint          = true,
     // Hand-scan calibration dump path. '' (default) = off, production-identical.
     // When set, QLMatching writes one per-event JSON (both TPCs) for the Q/L
     // hand-scan viewer (sbnd_xin/ql_scan). run_ql_evt.sh -calib points it at
@@ -133,9 +136,13 @@ function(
     // the tensor serializer drops heterogeneous PC keys, so without this the
     // arrays exist only in-memory and the PR job cannot tell which points
     // were the bundle's main cluster (doc 38).  Only meaningful WITH
-    // save_tensors.  false (default) = byte-identical legacy tarball (C++
-    // default false; key omitted when off).  Runner flag: -save-rcid.
-    save_rcid      = false,
+    // save_tensors.
+    // DEFAULT TRUE since doc 68 = SBND production (run_ql_evt.sh's RCID_GLOBAL
+    // was 1, which implied -save-rcid).  The PR job's default pipeline runs
+    // unmerge_bundle in "real" mode, which reads exactly these arrays.
+    // false = byte-identical legacy tarball (C++ default false; key omitted
+    // when off).  Runner flag: -no-save-rcid / SBND_QL_SAVE_RCID=0.
+    save_rcid      = true,
     // DIAGNOSTIC (default false): dump one Bee "clustering" layer per clustering
     // step (per-APA AND all-APA), named tr<NN>_<Type>, so a merge can be
     // attributed to the pass that made it instead of guessed.  See
@@ -143,7 +150,7 @@ function(
     // bee_points_sets lists are unchanged => compiled config byte-identical.
     // run_ql_evt.sh -trace-bee / SBND_TRACE_BEE=1.
     trace_bee      = false,
-    // save_assoc (default false): turn on doc 52's isolated-grouping provenance.
+    // save_assoc (DEFAULT TRUE since doc 68): doc 52's isolated-grouping provenance.
     // clustering_isolated writes the per-blob pair assoc_cluster_id /
     // assoc_cluster_main recording which pre-merge cluster each blob came from
     // and which member was the MAIN; merge_clusters carries that pair across
@@ -152,9 +159,13 @@ function(
     // a second ClusteringUnmergeBundle (pipeline visitor 'unmerge_assoc') to
     // undo the grouping, so TaggerCheckSTM / the PR chain fit the main alone --
     // the prototype's main_cluster + additional_clusters layout.
-    // Only meaningful WITH save_tensors.  Off => both keys omitted => compiled
-    // config byte-identical.  Runner flag: -save-assoc / SBND_SAVE_ASSOC=1.
-    save_assoc     = false,
+    // TRUE is what the PR job's DEFAULT pipeline_names needs: it already lists
+    // unmerge_assoc, which without these arrays degrades to a per-cluster
+    // WARNING and a silent no-op -- the latent inconsistency doc 68 closes.
+    // Only meaningful WITH save_tensors.  false => both keys omitted =>
+    // compiled config byte-identical to pre-doc-68.
+    // Runner flag: -no-save-assoc / SBND_SAVE_ASSOC=0.
+    save_assoc     = true,
     // rcid_global (default null = inherit the C++ default, which is TRUE since
     // doc 53): re-stamp real_cluster_id at save time into ONE globally unique
     // ident epoch.  Without it the array mixes the numbering examine_bundles
