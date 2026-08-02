@@ -195,6 +195,13 @@ function(
     // ladder).  false omits the key => compiled config byte-identical to
     // before the knob existed (runner: SBND_SEP_VVETO=0).
     sep_vertex_veto = true,
+    // nu_iso_band_guard (SBND default TRUE since doc pr/18, owner decision
+    // 2026-08-01): the per-APA neutrino stage may not merge an isochronous
+    // band with a non-band cluster spanning > 20 cm of drift, even on touch
+    // (run 18255 evt 10550: separate correctly split the nu candidate off the
+    // cosmic band, neutrino re-merged them at 0.31 cm).  false omits the keys
+    // => byte-identical pre-knob config (runner: SBND_NU_ISO_GUARD=0).
+    nu_iso_band_guard = true,
 )
     // Build params inside the function so all physics values are TLAs.  These
     // are the documented Q/L drift/diffusion values (matching run_clust_QL_evt.sh),
@@ -230,7 +237,7 @@ function(
         subRunNo=subrun,
         eventNo=event,
         reality=reality);
-    local clus_pipes = [clus_maker.per_apa(anodes[n], dump=false, trace_bee=trace_bee, save_assoc_id=save_assoc, sep_vertex_veto=sep_vertex_veto)
+    local clus_pipes = [clus_maker.per_apa(anodes[n], dump=false, trace_bee=trace_bee, save_assoc_id=save_assoc, sep_vertex_veto=sep_vertex_veto, nu_iso_band_guard=nu_iso_band_guard)
                         for n in std.range(0, nanodes - 1)];
 
     // --- Q/L matching nodes ---

@@ -25,7 +25,8 @@ static void clustering_neutrino(
     const Tree::Scope& scope,
     bool use_flash_t0 = false,
     double flash_t0_window = 80*units::ns,
-    bool protect_iso_band = false
+    bool protect_iso_band = false,
+    double protect_iso_band_xext = 0
     );
 
 class ClusteringNeutrino :  public IConfigurable, public Clus::IEnsembleVisitor, private NeedDV, private NeedScope {
@@ -44,12 +45,21 @@ public:
         // footprint) with a non-band cluster unless the two genuinely touch
         // (default OFF => byte-identical).  See iso_band_like().
         protect_iso_band_ = get(config, "protect_iso_band", false);
+        // Stricter band/non-band veto: refuse the merge REGARDLESS of touch
+        // when the non-band partner extends more than this in drift x -- an
+        // isochronous band cannot legitimately claim charge that spans tens
+        // of cm of drift (doc pr/18, SBND evt 10550: the nu candidate's
+        // 45.6 cm drift-spanning tip touches the cosmic band at 0.31 cm, so
+        // the 6 cm touch rule alone cannot discriminate).  0 (default) =>
+        // off => byte-identical; only read when protect_iso_band is on.
+        protect_iso_band_xext_ = get(config, "protect_iso_band_xext", protect_iso_band_xext_);
     }
 
     void visit(Ensemble& ensemble) const {
         auto& live = *ensemble.with_name("live").at(0);
         for (int i = 0; i != num_try_; i++) {
-            clustering_neutrino(live, i, m_dv, m_scope, use_flash_t0_, flash_t0_window_, protect_iso_band_);
+            clustering_neutrino(live, i, m_dv, m_scope, use_flash_t0_, flash_t0_window_, protect_iso_band_,
+                                protect_iso_band_xext_);
         }
     }
 
@@ -58,6 +68,7 @@ private:
     bool use_flash_t0_{false};
     double flash_t0_window_{80*units::ns};
     bool protect_iso_band_{false};
+    double protect_iso_band_xext_{0};
 };
 
 // The original developers do not care.
@@ -82,6 +93,19 @@ static bool iso_band_like(const Cluster* c)
     return (xmax - xmin) < std::max(25 * units::cm, 0.18 * len);
 }
 
+// Blob-center drift-x extent, same measure iso_band_like uses.  Used by the
+// protect_iso_band_xext veto (doc pr/18).
+static double blob_center_xext(const Cluster* c)
+{
+    double xmin = 1e300, xmax = -1e300;
+    for (const Blob* b : c->children()) {
+        const double x = b->center_pos().x();
+        xmin = std::min(xmin, x);
+        xmax = std::max(xmax, x);
+    }
+    return xmax - xmin;
+}
+
 // handle all APA/Face
 static void clustering_neutrino(
     Grouping &live_grouping,
@@ -90,7 +114,8 @@ static void clustering_neutrino(
     const Tree::Scope& scope,
     bool use_flash_t0,
     double flash_t0_window,
-    bool protect_iso_band)
+    bool protect_iso_band,
+    double protect_iso_band_xext)
 {
     // Get all the wire plane IDs from the grouping
     const auto& wpids = live_grouping.wpids();
@@ -1013,7 +1038,30 @@ static void clustering_neutrino(
         // tracks onto isochronous bands.
         if (protect_iso_band && iso_band_like(cluster1) != iso_band_like(cluster2)) {
             const auto res = cluster1->get_closest_points(*cluster2);
-            if (std::get<2>(res) > 6 * units::cm) continue;
+            if (std::get<2>(res) > 6 * units::cm) {
+                // Marker only when the xext knob is active (SBND): PDHD/PDVD
+                // run protect_iso_band without it and keep their exact stdout.
+                if (protect_iso_band_xext > 0) {
+                    std::cout << "Neutrino iso_band_guard: refused band/non-band far merge, gap "
+                              << std::get<2>(res) / units::cm << " cm, lens " << cluster1->get_length() / units::cm
+                              << "/" << cluster2->get_length() / units::cm << " cm" << std::endl;
+                }
+                continue;
+            }
+            // Even a genuine touch cannot justify a band claiming a
+            // drift-spanning partner (doc pr/18, SBND evt 10550: nu candidate
+            // tip touches the cosmic band at 0.31 cm).
+            if (protect_iso_band_xext > 0) {
+                const Cluster* nonband = iso_band_like(cluster1) ? cluster2 : cluster1;
+                const double xext = blob_center_xext(nonband);
+                if (xext > protect_iso_band_xext) {
+                    std::cout << "Neutrino iso_band_guard: refused band/non-band merge, nonband xext "
+                              << xext / units::cm << " cm, lens " << cluster1->get_length() / units::cm << "/"
+                              << cluster2->get_length() / units::cm << " cm, touch "
+                              << std::get<2>(res) / units::cm << " cm" << std::endl;
+                    continue;
+                }
+            }
         }
         boost::add_edge(map_cluster_index[cluster1], map_cluster_index[cluster2], g);
     }

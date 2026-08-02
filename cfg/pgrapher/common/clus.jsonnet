@@ -1045,7 +1045,7 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
         // an isochronous band (narrow drift slab, large y-z footprint) with a
         // non-band cluster unless the two genuinely touch — the extended-cloud
         // prolongations otherwise bridge tens of cm.
-        neutrino(name="", num_try=1, use_flash_t0=false, flash_t0_window=80*wc.ns, protect_iso_band=false) :: {
+        neutrino(name="", num_try=1, use_flash_t0=false, flash_t0_window=80*wc.ns, protect_iso_band=false, protect_iso_band_xext=null) :: {
             type: "ClusteringNeutrino",
             name: prefix+name,
             data: {
@@ -1053,6 +1053,12 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
                 use_flash_t0: use_flash_t0,
                 flash_t0_window: flash_t0_window,
                 [if protect_iso_band then 'protect_iso_band']: protect_iso_band,
+                // C++ default 0 (off).  Key omitted when null => byte-identical
+                // pre-knob config.  When set (needs protect_iso_band on), a
+                // band/non-band merge is refused even on genuine touch if the
+                // non-band partner spans more than this in drift x (doc pr/18,
+                // SBND evt 10550).
+                [if protect_iso_band_xext != null then 'protect_iso_band_xext']: protect_iso_band_xext,
             } + dv_cfg + scope_cfg,
             uses: [detector_volumes],
         },

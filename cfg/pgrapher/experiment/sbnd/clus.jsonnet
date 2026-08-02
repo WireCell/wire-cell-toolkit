@@ -186,7 +186,13 @@ local bs_dead_face(apa, face) = {
 // at their mutual closest approach (run 18255 evt 56463: the nu was cut in two
 // at its vertex by the top-cosmic angle ladder).  false omits the key => the
 // compiled config is byte-identical to before the knob existed.
-local clus_per_face(anode, face, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=null, rse_from_ident=false, pos_offset_on=true, trace_bee=false, save_assoc_id=false, sep_vertex_veto=true) = {
+// nu_iso_band_guard (SBND default TRUE since doc pr/18, owner decision 2026-08-01):
+// the neutrino stage may not merge an isochronous band (narrow drift slab,
+// large y-z footprint) with a non-band cluster that spans > 20 cm of drift,
+// even when they touch (run 18255 evt 10550: separate correctly splits the nu
+// candidate off the cosmic band, then neutrino re-merged them at 0.31 cm
+// touch).  false omits both keys => byte-identical pre-knob config.
+local clus_per_face(anode, face, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=null, rse_from_ident=false, pos_offset_on=true, trace_bee=false, save_assoc_id=false, sep_vertex_veto=true, nu_iso_band_guard=true) = {
     local dv = detector_volumes([anode], face, pos_offset_on),
     local pcts = pctransforms(dv),
     local bsl = bs_live_face(anode.name, face),
@@ -246,7 +252,9 @@ local clus_per_face(anode, face, dump, output_dir, runNo, subRunNo, eventNo, bee
         cm.deghost(),
         cm.examine_x_boundary(),
         cm.protect_overclustering(),
-        cm.neutrino(),
+        // nu_iso_band_guard: see the clus_per_face header comment (doc pr/18).
+        cm.neutrino(protect_iso_band=nu_iso_band_guard,
+                    protect_iso_band_xext=(if nu_iso_band_guard then 20 * wc.cm else null)),
         // SBND: tighten the isolated small/big length_cut from the 20 cm default
         // to 15 cm so a ~16 cm EM (gamma) blob is no longer auto-classified
         // "small" and absorbed into a nearby long cosmic track by the
@@ -1480,11 +1488,12 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                       bee_sink=bee_sink, rse_from_ident=rse_from_ident, pos_offset_on=pos_offset_on),
     // trace_bee (default false): per-step Bee layers for merge attribution; see
     // trace_sets above.  Diagnostic only, off => byte-identical compiled config.
-    per_apa(anode, dump=true, bee_sink=null, trace_bee=false, save_assoc_id=false, sep_vertex_veto=true)::
+    per_apa(anode, dump=true, bee_sink=null, trace_bee=false, save_assoc_id=false, sep_vertex_veto=true, nu_iso_band_guard=true)::
         clus_per_face(anode, face=0, dump=dump,
                       output_dir=output_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo,
                       bee_sink=bee_sink, rse_from_ident=rse_from_ident, pos_offset_on=pos_offset_on,
-                      trace_bee=trace_bee, save_assoc_id=save_assoc_id, sep_vertex_veto=sep_vertex_veto),
+                      trace_bee=trace_bee, save_assoc_id=save_assoc_id, sep_vertex_veto=sep_vertex_veto,
+                      nu_iso_band_guard=nu_iso_band_guard),
     // Production (LArSoft) entry point used by wcls-img-clus.jsonnet.
     per_volume(anode, face=0, dump=true, bee_sink=null)::
         clus_per_face(anode, face=face, dump=dump,
