@@ -2528,6 +2528,21 @@ namespace WireCell::Clus::PR {
         const size_t assoc_npts = dpcloud_assoc->npoints();
         if (assoc_npts == 0) return false;
 
+        // sbnd_xin doc pr/25 sec 3: WCT_SHOWER_TOPO_DEBUG=1 dumps the decision
+        // terms segment_is_shower_topology never otherwise logs (this function
+        // had zero active log lines before this change), so the mechanism
+        // behind a topology-vs-trajectory misclassification can be measured
+        // directly instead of inferred from a 3-D geometric proxy (the trap
+        // recorded after doc pr/25 sec 2 -- a proxy predicted "should not
+        // fire" on SBND evt 321107/cluster 13, which did fire).  Read once,
+        // env-gated, default off => zero behavior change either way.
+        // Round 2 hoisted the flag above the per-fit-point loop so the loop can
+        // record |dir_3.xhat|: dir_3 = dir_1 x (xhat x dir_1), so
+        // dir_3.xhat = sin(angle-to-drift) and the sole axis this function
+        // measures collapses onto the drift axis for an isochronous segment.
+        static const bool s_shower_topo_dbg = (std::getenv("WCT_SHOWER_TOPO_DEBUG") != nullptr);
+        std::vector<double> dbg_dir3x;  // |dir_3 . xhat| per populated bucket
+
         // Initialize vectors to store analysis results for each fit point
         std::vector<std::vector<WireCell::Point>> local_points_vec(fits.size());
         std::vector<std::tuple<double, double, double>> vec_rms_vals(fits.size(), std::make_tuple(0,0,0));
@@ -2611,8 +2626,12 @@ namespace WireCell::Clus::PR {
                 std::get<0>(vec_rms_vals.at(i)) = std::sqrt(std::get<0>(vec_rms_vals.at(i)) / ncount);
                 std::get<1>(vec_rms_vals.at(i)) = std::sqrt(std::get<1>(vec_rms_vals.at(i)) / ncount);
                 std::get<2>(vec_rms_vals.at(i)) = std::sqrt(std::get<2>(vec_rms_vals.at(i)) / ncount);
+
+                // doc pr/25 sec 3 round 2 diagnostic only -- see the hoisted
+                // s_shower_topo_dbg comment above.
+                if (s_shower_topo_dbg) dbg_dir3x.push_back(std::abs(dir_3.dot(drift_dir_abs)));
             }
-            
+
             // Calculate dQ/dx
             vec_dQ_dx.at(i) = fits[i].dQ / (fits[i].dx + 1e-9) / MIP_dQ_dx;
         }
@@ -2660,15 +2679,6 @@ namespace WireCell::Clus::PR {
 
         // std::cout << "Shower Topology Check: " << max_spread/units::cm << " " << large_spread_length/units::cm << " " << total_effective_length/units::cm << std::endl;
 
-        // sbnd_xin doc pr/25 sec 3: WCT_SHOWER_TOPO_DEBUG=1 dumps the decision
-        // terms segment_is_shower_topology never otherwise logs (this function
-        // had zero active log lines before this change), so the mechanism
-        // behind a topology-vs-trajectory misclassification can be measured
-        // directly instead of inferred from a 3-D geometric proxy (the trap
-        // recorded after doc pr/25 sec 2 -- a proxy predicted "should not
-        // fire" on SBND evt 321107/cluster 13, which did fire).  Read once,
-        // env-gated, default off => zero behavior change either way.
-        static const bool s_shower_topo_dbg = (std::getenv("WCT_SHOWER_TOPO_DEBUG") != nullptr);
         int dbg_branch = 0;
         double dbg_frac_lsl = (total_effective_length > 0) ? large_spread_length / total_effective_length : 0;
         if (s_shower_topo_dbg) {
@@ -2692,22 +2702,59 @@ namespace WireCell::Clus::PR {
                 if (r != 0) dbg_rms.push_back(r);
             }
             std::sort(dbg_rms.begin(), dbg_rms.end());
-            size_t n_over = std::count_if(dbg_rms.begin(), dbg_rms.end(),
-                                           [](double r) { return r > 0.4*units::cm; });
+            auto n_over_cut = [&](double c) -> size_t {
+                return std::count_if(dbg_rms.begin(), dbg_rms.end(),
+                                     [c](double r) { return r > c*units::cm; });
+            };
             auto pct = [&](double q) -> double {
                 if (dbg_rms.empty()) return 0;
                 size_t idx = std::min(dbg_rms.size() - 1, static_cast<size_t>(q * dbg_rms.size()));
                 return dbg_rms[idx];
             };
+
+            // Round 2: the longest CONTIGUOUS large-spread run.  The function
+            // already computes max_cont_length above and discards it -- and
+            // that copy only records a run when the run *ends*, so a run
+            // reaching the last bucket is never counted.  Recomputed here
+            // without that omission, for measurement only.
+            double dbg_max_cont = 0, dbg_cur_cont = 0;
+            for (size_t i = 0; i + 1 < local_points_vec.size(); i++) {
+                if (std::get<2>(vec_rms_vals.at(i)) == 0) continue;
+                double length = std::sqrt(
+                    std::pow(fits[i+1].point.x() - fits[i].point.x(), 2) +
+                    std::pow(fits[i+1].point.y() - fits[i].point.y(), 2) +
+                    std::pow(fits[i+1].point.z() - fits[i].point.z(), 2));
+                if (std::get<2>(vec_rms_vals.at(i)) > 0.4*units::cm) {
+                    dbg_cur_cont += length;
+                    if (dbg_cur_cont > dbg_max_cont) dbg_max_cont = dbg_cur_cont;
+                } else {
+                    dbg_cur_cont = 0;
+                }
+            }
+
+            // Median |dir_3 . xhat| = median sin(angle-to-drift): 1.0 means the
+            // measured axis IS the drift axis (isochronous segment).
+            double dbg_dir3x_med = 0;
+            if (!dbg_dir3x.empty()) {
+                std::vector<double> tmp = dbg_dir3x;
+                std::sort(tmp.begin(), tmp.end());
+                dbg_dir3x_med = tmp[tmp.size()/2];
+            }
+
             double dbg_geom_len = segment_track_length(segment, 0);
             SPDLOG_LOGGER_INFO(s_log,
                 "shower_topo dbg: seg {} L {:.1f}cm assoc_npts {} nbuckets {} n_over0.4cm {} "
-                "rms_p50 {:.2f}cm rms_p90 {:.2f}cm max_spread {:.2f}cm lsl {:.1f}cm tel {:.1f}cm "
-                "lsl/tel {:.3f} tel/L {:.3f} branch {}",
-                segment->id(), dbg_geom_len/units::cm, assoc_npts, dbg_rms.size(), n_over,
-                pct(0.5)/units::cm, pct(0.9)/units::cm,
-                max_spread/units::cm, large_spread_length/units::cm, total_effective_length/units::cm,
-                dbg_frac_lsl, (dbg_geom_len > 0 ? total_effective_length/dbg_geom_len : 0), dbg_branch);
+                "n_over0.7cm {} n_over0.8cm {} n_over1.0cm {} "
+                "rms_p50 {:.2f}cm rms_p75 {:.2f}cm rms_p90 {:.2f}cm rms_p95 {:.2f}cm "
+                "max_spread {:.2f}cm maxcont {:.1f}cm lsl {:.1f}cm tel {:.1f}cm "
+                "lsl/tel {:.3f} tel/L {:.3f} dir3x {:.4f} branch {}",
+                segment->id(), dbg_geom_len/units::cm, assoc_npts, dbg_rms.size(),
+                n_over_cut(0.4), n_over_cut(0.7), n_over_cut(0.8), n_over_cut(1.0),
+                pct(0.5)/units::cm, pct(0.75)/units::cm, pct(0.9)/units::cm, pct(0.95)/units::cm,
+                max_spread/units::cm, dbg_max_cont/units::cm,
+                large_spread_length/units::cm, total_effective_length/units::cm,
+                dbg_frac_lsl, (dbg_geom_len > 0 ? total_effective_length/dbg_geom_len : 0),
+                dbg_dir3x_med, dbg_branch);
         }
 
         // Determine if this is shower topology based on spread patterns
