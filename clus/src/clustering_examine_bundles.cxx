@@ -61,6 +61,34 @@ public:
             get<bool>(config, "save_bundle_main_provenance", save_bundle_main_provenance_);
     }
 
+    // Round-trip this class's own knobs.  Previously absent, so the inherited
+    // empty default_configuration() left every one of them invisible to a
+    // config dump and discoverable only by reading this file.
+    //
+    // Output-neutral by construction: configure() reads each key with
+    // get<T>(config, key, member_), which returns member_ when the key is
+    // absent.  Emitting the key WITH member_'s value therefore makes get()
+    // return exactly what it returned before, for every caller, whether or not
+    // the jsonnet overrides it.  (Gated on the SBND 48-event PR chain; see
+    // sbnd_xin/docs/70.)
+    //
+    // Deliberately NOT emitting the NeedDV / NeedPCTS / NeedScope keys: those
+    // belong to the mixins, which apply their own defaults when the key is
+    // absent, and duplicating them here would be a second source of truth.
+    virtual WireCell::Configuration default_configuration() const {
+        WireCell::Configuration cfg;
+        cfg["use_ctpc"] = use_ctpc_;
+        cfg["graph_name"] = graph_name_;
+        cfg["use_flash_t0"] = use_flash_t0_;
+        cfg["flash_t0_window"] = flash_t0_window_;
+        // false = historical (arbitrary donor) flag behavior on the flash-time merge
+        cfg["flags_from_longest"] = flags_from_longest_;
+        // false = the provenance array is never created, so the "perblob" key
+        // set is unchanged and every detector's output is byte-identical
+        cfg["save_bundle_main_provenance"] = save_bundle_main_provenance_;
+        return cfg;
+    }
+
     void visit(Ensemble& ensemble) const {
         auto& live = *ensemble.with_name("live").at(0);
         clustering_examine_bundles(live, m_dv, m_pcts, m_scope, use_ctpc_, graph_name_,

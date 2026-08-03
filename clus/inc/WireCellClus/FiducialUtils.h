@@ -52,7 +52,12 @@ namespace WireCell::Clus {
             const Facade::Grouping& dead;
         };
 
-        FiducialUtils();
+        // Defaulted, not merely declared: the bare declaration had no definition
+        // anywhere in the tree, so any use of it failed at link time with an
+        // undefined-reference to FiducialUtils::FiducialUtils().  The class is
+        // designed to be constructible empty (see feed_static below), so give
+        // the ctor the compiler-generated body rather than dropping it.
+        FiducialUtils() = default;
 
         // Create it with whatever "static" data sources are required.  Add to
         // this argument list as needed as the methods are populated.
@@ -103,7 +108,19 @@ namespace WireCell::Clus {
         struct InternalData {
 
             // save live grouping ...
-            Facade::Grouping* live;
+            //
+            // The initializer honors the requirement stated just above, which
+            // the code did not previously meet.  feed_static/feed_dynamic
+            // assign `m_internal = InternalData{}`, which VALUE-initializes and
+            // so already produced nullptr; but the FiducialUtils(StaticData)
+            // ctor leaves m_internal DEFAULT-initialized, which left this
+            // pointer indeterminate until the first feed_*().  The only
+            // production construction site (make_fiducialutils.cxx) calls
+            // feed_dynamic three lines later and nothing reads m_internal in
+            // between, so this was latent rather than live -- but it is the
+            // doc pr/11 class-C shape and a garbage pointer here is a segfault,
+            // not a diagnosable null.
+            Facade::Grouping* live{nullptr};
         };
         InternalData m_internal;
     };

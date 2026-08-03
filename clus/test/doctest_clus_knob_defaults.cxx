@@ -238,27 +238,24 @@ TEST_CASE("clus knob defaults: ClusteringProtectBundle")
     CHECK_KNOB_BOOL(cfg, "skip_convicted", true);
 }
 
-TEST_CASE("clus knob defaults: ClusteringExamineBundles round-trips nothing")
+TEST_CASE("clus knob defaults: ClusteringExamineBundles")
 {
-    // NOT a knob-default check -- it documents why one is impossible here.
-    //
-    // ClusteringExamineBundles implements configure() but NOT
-    // default_configuration(), so it inherits IConfigurable's empty one and
-    // NONE of its knobs round-trip -- not save_bundle_main_provenance (added by
-    // this branch, doc pr/20 Part I P1) and not the pre-existing use_ctpc /
-    // graph_name / use_flash_t0 / flags_from_longest either.  That predates the
-    // port, so the branch is compliant with "round-trip new keys in
-    // default_configuration() WHEN THE COMPONENT HAS ONE"; it is a pre-existing
-    // gap, reported and deliberately not fixed here.
-    //
-    // Consequence worth knowing: this component's defaults are invisible to a
-    // config dump, so the only statement of save_bundle_main_provenance{false}
-    // is its in-class initializer.  If someone gives this component a real
-    // default_configuration(), this case fails -- replace it then with the
-    // CHECK_KNOB_BOOL(cfg, "save_bundle_main_provenance", false) it deserves.
     auto cfg = defaults_of("ClusteringExamineBundles");
-    CHECK_FALSE(cfg.isMember("save_bundle_main_provenance"));
-    CHECK_FALSE(cfg.isMember("use_ctpc"));
+
+    // Off => the provenance array is never created => the "perblob" key set is
+    // unchanged and every detector's output is byte-identical
+    // (doc pr/20 Part I P1).
+    CHECK_KNOB_BOOL(cfg, "save_bundle_main_provenance", false);
+
+    // The four pre-existing knobs, pinned in the same pass.  This component had
+    // no default_configuration() at all until doc 70 added one, so NONE of them
+    // round-tripped and all five were invisible to a config dump.
+    CHECK_KNOB_BOOL(cfg, "use_ctpc", true);
+    CHECK_KNOB_BOOL(cfg, "use_flash_t0", false);
+    CHECK_KNOB_BOOL(cfg, "flags_from_longest", false);  // historical arbitrary-donor merge
+    CHECK_KNOB_NUM(cfg, "flash_t0_window", 80 * units::ns);
+    REQUIRE(cfg.isMember("graph_name"));
+    CHECK(cfg["graph_name"].asString() == "relaxed");
 }
 
 // ---------------------------------------------------------------------------
