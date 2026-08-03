@@ -697,13 +697,20 @@ function(
 
     // WireCellRoot hosts SbndMagnifyTrackingVisitor and the PR output
     // components (SbndPrMagnifyTrackingVisitor, UbooneTaggerOutputVisitor,
-    // the Uboone BDT scorers); loaded only when something in the job needs it
-    // so the default compiled config stays byte-identical.
-    local needs_root = save_stm_fit
-        || std.member(pipeline_names, 'numu_bdt_scorer')
-        || std.member(pipeline_names, 'nue_bdt_scorer')
-        || std.member(pipeline_names, 'tracking_visitor')
-        || std.member(pipeline_names, 'tagger_output');
+    // the Uboone BDT scorers).  It used to be loaded only when one of those
+    // was in the job, so the default compiled config stayed byte-identical.
+    // That is no longer possible: master commit 8d069234 ("add sce and
+    // dumper", merged here in 87ada3d5) put SCEFieldTH3 -- which lives in
+    // WireCellRoot -- unconditionally into the DetectorVolumes `uses` of
+    // pgrapher/experiment/sbnd/clus.jsonnet, so EVERY job importing that
+    // module instantiates it.  Without the plugin the job aborts at
+    // configure time with "No factory for class SCEFieldTH3" (the Q/L job
+    // never saw this because it always loads WireCellRoot).  The component
+    // is inert here -- both SBND realities set use_sce=false -- so loading
+    // the plugin only pays the SCE-map open, and no reconstruction changes.
+    // The narrower alternative is to gate that `uses` entry on use_sce in
+    // clus.jsonnet, which also moves the Q/L job's compiled config.
+    local needs_root = true;
 
     local cmdline = {
         type: 'wire-cell',
