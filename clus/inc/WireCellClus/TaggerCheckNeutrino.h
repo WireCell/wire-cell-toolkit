@@ -78,6 +78,18 @@ public:
         // and NeutrinoVertexFinder, so one segment cannot be classified two
         // ways within one event.
         double m_shower_topo_demote_len{0};
+        // Isochronous first-segment endpoint finding (doc sbnd_xin/docs/pr/24
+        // round 2, SBND evt 271851); lengths in cm.  false => legacy
+        // wire-footprint boundary endpoints, byte-identical.  When on, a
+        // long cluster whose quantile-trimmed drift-x extent is small (a
+        // filled 2-D sheet) gets its first-segment endpoints from the sheet's
+        // principal axis instead, and the local-PCA endpoint refinement is
+        // skipped on that branch.
+        bool   m_iso_endpoint{false};
+        double m_iso_endpoint_min_length{40};   // cm
+        double m_iso_endpoint_max_xext{25};     // cm
+        double m_iso_endpoint_xext_frac{0.35};
+        double m_iso_endpoint_xext_quantile{0.02};
         // Detector-extent literals (docs/pr/2 sec. 2e(iv)), all in cm.
         // Defaults = the uBooNE prototype values (active volume y in
         // [-116,+117], z in [0,1037]) => absent keys are byte-identical.

@@ -154,6 +154,21 @@ function(
     // guard uses), so ~45 would cover all 10.
     // Set null for the legacy behavior (long segments stay shower-eligible).
     shower_topo_demote_len = 50,
+    // Isochronous first-segment endpoint finding (doc pr/24 round 2, SBND evt
+    // 271851): for a long cluster whose quantile-trimmed drift-x extent is
+    // small (a filled 2-D sheet), the first PR segment's endpoints come from
+    // the sheet's principal axis instead of the wire-footprint boundary
+    // metric (which degenerates to sheet-edge corners and produces the
+    // two-edge-track fan), and the local-PCA endpoint refinement is skipped
+    // on that branch.  false/nulls = C++ defaults (false / 40 cm / 25 cm /
+    // 0.35 / 0.02) = OFF => keys omitted => byte-identical.  SHIPS OFF.
+    // Pass -A iso_endpoint=true to enable (SBND_ISO_ENDPOINT=1 on the
+    // run_pr_chain_batch.sh runner).
+    iso_endpoint = false,
+    iso_endpoint_min_length = null,
+    iso_endpoint_max_xext = null,
+    iso_endpoint_xext_frac = null,
+    iso_endpoint_xext_quantile = null,
     // protect_bundle stage knobs (doc pr/23): the PR-stage overclustering
     // protection (uboone's second graph examination).  The stage is in
     // pipeline_names by DEFAULT since the sec 9 production flip; the knobs
@@ -616,6 +631,11 @@ function(
                              cathode_x=cathode_x,
                              cathode_kink_xcut=cathode_kink_xcut,
                              shower_topo_demote_len=shower_topo_demote_len,
+                             iso_endpoint=iso_endpoint,
+                             iso_endpoint_min_length=iso_endpoint_min_length,
+                             iso_endpoint_max_xext=iso_endpoint_max_xext,
+                             iso_endpoint_xext_frac=iso_endpoint_xext_frac,
+                             iso_endpoint_xext_quantile=iso_endpoint_xext_quantile,
                              protect_graph_name=protect_graph_name,
                              protect_skip_convicted=protect_skip_convicted,
                              protect_cathode_x=protect_cathode_x,

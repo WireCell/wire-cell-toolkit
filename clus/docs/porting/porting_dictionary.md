@@ -373,3 +373,30 @@ vs 1793 with 0.7815, not 3.126), and physical sigma_L is sane (2.22 mm uBooNE
 "for prototype parity" would inflate sigma 4x against tick-indexed data.
 Full record: wcp-porting-validation
 `sbnd_xin/docs/pr/2_uboone-chain-gap-analysis-and-validation-plan.md` sec 8.3a.
+
+## Isochronous first-segment endpoints: `iso_endpoint` bypasses the boundary metric ON PURPOSE, knob-gated
+
+WCP's `get_two_boundary_wcps` non-cosmic metric
+(`prototype_base/pid/src/PR3DCluster_path.h:530-536`, ported verbatim to
+`clus/src/Facade_Cluster.cxx calculate_boundary_metric`) deliberately zeroes
+the wire-index-separation terms (`* 0`), scoring a candidate endpoint pair by
+`|dx|/one_tick + live_wire_count(U+V+W)` only.  On an isochronous cluster
+(charge in one narrow drift slab, imaged as a filled 2-D sheet) `|dx| ~ 0`, so
+the winner is the widest wire-footprint pair — two corners on the sheet's
+edges, not the tip of its axis — and the cheapest Steiner-graph paths between
+such corners are the sheet's boundary edges (the two-edge-track fan, SBND evt
+18255-271851, doc wcp-porting-validation `sbnd_xin/docs/pr/24` round 2).
+
+The toolkit-only fix (`PatternAlgorithms::find_iso_first_segment_endpoints`,
+`clus/src/NeutrinoPatternBase.cxx`, knob `iso_endpoint`, C++ default false)
+gates on a quantile-trimmed corrected-frame drift-x extent and, when it
+fires, takes the endpoints from the sheet's principal axis and SKIPS the
+local-PCA endpoint refinement (itself a toolkit addition with no prototype
+counterpart, commit 1eb097a9) on that branch.  Knob off = the prototype
+metric byte-identically, `* 0.0` coefficients preserved.  Do NOT "fix" the
+`* 0.0` coefficients in `calculate_boundary_metric` itself: the zeroing is
+intentional prototype behavior and every non-isochronous cluster depends on
+it.  Prototype precedents (neither reachable from NeutrinoID):
+`adjust_wcpoints_parallel` (`prototype_base/data/src/PR3DCluster.cxx:428`,
+cluster-separation only) and `search_for_connection_isochronous`
+(`prototype_base/pid/src/PR3DCluster_graph.h:1445`, call site commented out).

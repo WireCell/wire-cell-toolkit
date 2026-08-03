@@ -3,9 +3,11 @@
 #include "WireCellUtil/Logging.h"
 
 #include <Eigen/Dense>
+#include <algorithm>
 #include <chrono>
 #include <iostream>
 #include <limits>
+#include <unordered_map>
 
 using namespace WireCell::Clus::PR;
 using namespace WireCell::Clus;
@@ -220,6 +222,195 @@ SegmentPtr PatternAlgorithms::create_segment_from_vertices(Graph& graph, Facade:
 
 
 
+bool PatternAlgorithms::find_iso_first_segment_endpoints(const Facade::Cluster& cluster,
+                                                         Facade::geo_point_t& p1,
+                                                         Facade::geo_point_t& p2) const
+{
+    // Isochronous first-segment endpoints (doc sbnd_xin/docs/pr/24 round 2).
+    //
+    // The legacy boundary metric (Facade_Cluster.cxx calculate_boundary_metric,
+    // a faithful port of prototype PR3DCluster_path.h:530-536) scores a
+    // candidate pair by |dx|/one_tick plus the count of live wires spanned in
+    // U+V+W -- the wire-delta terms carry *0.0 coefficients.  On an
+    // isochronous cluster (charge confined to a narrow drift slab, imaged as
+    // a filled 2-D sheet) |dx| ~ 0, so the winner is the widest wire-footprint
+    // pair: two corners on the sheet's edges, not the tip of its axis.  The
+    // cheapest Steiner-graph paths between such corners are the sheet's
+    // boundary edges, which is the observed two-edge-track fan.
+    //
+    // Here instead: endpoints = the quantile-trimmed extreme points along the
+    // principal axis of the charge-qualified points, each taken as the band
+    // point nearest its end-band centroid (interior, not a corner), then
+    // snapped to a Steiner terminal exactly like the legacy path.
+
+    const double length = cluster.get_length();
+    if (length < m_iso_endpoint_min_length) return false;
+
+    const int npts = cluster.npoints();
+    if (npts < 10) return false;
+
+    // Charge-qualified default-scope (T0-corrected) points: same exclusion
+    // and blob-charge cut as the legacy boundary search
+    // (Facade_Cluster.cxx get_two_boundary_wcps).  Keyed lookups only -- the
+    // blob-charge memo is never iterated, so pointer keys are determinism-safe.
+    std::unordered_map<const Facade::Blob*, double> blob_total_charge;
+    std::vector<int> qual;
+    qual.reserve(npts);
+    for (int i = 0; i < npts; ++i) {
+        if (cluster.is_point_excluded(i)) continue;
+        const auto* blob = cluster.blob_with_point(i);
+        auto bc_it = blob_total_charge.find(blob);
+        if (bc_it == blob_total_charge.end()) {
+            bc_it = blob_total_charge.emplace(blob, blob->estimate_total_charge()).first;
+        }
+        if (bc_it->second < 1500) continue;
+        qual.push_back(i);
+    }
+    if (qual.size() < 10) return false;
+
+    // Quantile-trimmed drift-x extent in the corrected frame.  A raw min-max
+    // or blob-centre extent over-reads on this topology (multi-(apa,face)
+    // transform inflation and stray-point tails, doc pr/24 sec 4.1): the
+    // trimmed extent is the honest slab thickness.
+    std::vector<double> xs;
+    xs.reserve(qual.size());
+    for (int i : qual) xs.push_back(cluster.point3d(i).x());
+    std::sort(xs.begin(), xs.end());
+    const size_t nq = xs.size();
+    const size_t klo = static_cast<size_t>(m_iso_endpoint_xext_quantile * (nq - 1));
+    const double xext = xs[nq - 1 - klo] - xs[klo];
+    if (xext >= m_iso_endpoint_max_xext) return false;
+    if (xext >= m_iso_endpoint_xext_frac * length) return false;
+
+    // Principal axis of the qualified points: covariance + power iteration
+    // (same numerical pattern as the local-PCA refinement below), seeded with
+    // the cluster's global PCA axis 0 so the sign is stable.
+    double cx = 0, cy = 0, cz = 0;
+    for (int i : qual) {
+        const auto p = cluster.point3d(i);
+        cx += p.x();  cy += p.y();  cz += p.z();
+    }
+    const double nn = static_cast<double>(qual.size());
+    cx /= nn;  cy /= nn;  cz /= nn;
+
+    double Sxx=0, Sxy=0, Sxz=0, Syy=0, Syz=0, Szz=0;
+    for (int i : qual) {
+        const auto p = cluster.point3d(i);
+        const double dx = p.x() - cx, dy = p.y() - cy, dz = p.z() - cz;
+        Sxx += dx*dx;  Sxy += dx*dy;  Sxz += dx*dz;
+        Syy += dy*dy;  Syz += dy*dz;  Szz += dz*dz;
+    }
+
+    const auto& seed = cluster.get_pca().axis.at(0);
+    double vx = seed.x(), vy = seed.y(), vz = seed.z();
+    {
+        const double smag = std::sqrt(vx*vx + vy*vy + vz*vz);
+        if (smag < 1e-12) return false;
+        vx /= smag;  vy /= smag;  vz /= smag;
+    }
+    for (int iter = 0; iter < 10; ++iter) {
+        const double wx = Sxx*vx + Sxy*vy + Sxz*vz;
+        const double wy = Sxy*vx + Syy*vy + Syz*vz;
+        const double wz = Sxz*vx + Syz*vy + Szz*vz;
+        const double mag = std::sqrt(wx*wx + wy*wy + wz*wz);
+        if (mag < 1e-12) break;
+        vx = wx/mag;  vy = wy/mag;  vz = wz/mag;
+    }
+    if (vx*seed.x() + vy*seed.y() + vz*seed.z() < 0) { vx = -vx; vy = -vy; vz = -vz; }
+
+    // Axis projections; trimmed extremes; end bands.  The same quantile trim
+    // keeps a stray far tail from hijacking the extreme; the band bounds
+    // exclude what the trim excluded.
+    std::vector<double> ss;
+    ss.reserve(qual.size());
+    for (int i : qual) {
+        const auto p = cluster.point3d(i);
+        ss.push_back((p.x()-cx)*vx + (p.y()-cy)*vy + (p.z()-cz)*vz);
+    }
+    std::vector<double> ss_sorted(ss);
+    std::sort(ss_sorted.begin(), ss_sorted.end());
+    const double s_lo = ss_sorted[klo];
+    const double s_hi = ss_sorted[nq - 1 - klo];
+    const double band = 3 * units::cm;
+    if (s_hi - s_lo < 3 * band) return false;  // degenerate axis: end bands would overlap
+    auto pick_band_point = [&](double s_ref) -> int {
+        // Band centroid ...
+        double bx = 0, by = 0, bz = 0;
+        int nb = 0;
+        for (size_t k = 0; k < qual.size(); ++k) {
+            if (std::abs(ss[k] - s_ref) > band) continue;
+            const auto p = cluster.point3d(qual[k]);
+            bx += p.x();  by += p.y();  bz += p.z();
+            ++nb;
+        }
+        if (nb == 0) return -1;
+        bx /= nb;  by /= nb;  bz /= nb;
+        // ... and the band point nearest it (interior pick; strict < keeps the
+        // lowest qualifying index on ties -- deterministic).
+        double best_d2 = std::numeric_limits<double>::max();
+        int best = -1;
+        for (size_t k = 0; k < qual.size(); ++k) {
+            if (std::abs(ss[k] - s_ref) > band) continue;
+            const auto p = cluster.point3d(qual[k]);
+            const double dx = p.x()-bx, dy = p.y()-by, dz = p.z()-bz;
+            const double d2 = dx*dx + dy*dy + dz*dz;
+            if (d2 < best_d2) { best_d2 = d2; best = qual[k]; }
+        }
+        return best;
+    };
+
+    const int iA = pick_band_point(s_lo);
+    const int iB = pick_band_point(s_hi);
+    if (iA < 0 || iB < 0 || iA == iB) return false;
+
+    const auto pA = cluster.point3d(iA);
+    const auto pB = cluster.point3d(iB);
+
+    // Snap to Steiner terminals, same contract as
+    // get_two_boundary_steiner_graph_idx: endpoints must be terminals
+    // (original data points), not auxiliary Steiner nodes.
+    if (!cluster.has_pc("steiner_pc")) return false;
+    const auto& steiner_pc = cluster.get_pc("steiner_pc");
+    const auto& coords = cluster.get_default_scope().coords;
+    const auto xa = steiner_pc.get(coords.at(0));
+    const auto ya = steiner_pc.get(coords.at(1));
+    const auto za = steiner_pc.get(coords.at(2));
+    const auto fa = steiner_pc.get("flag_steiner_terminal");
+    if (!xa || !ya || !za || !fa) return false;
+    const auto& sx = xa->elements<double>();
+    const auto& sy = ya->elements<double>();
+    const auto& sz = za->elements<double>();
+    const auto& sterm = fa->elements<int>();
+    const size_t nst = sx.size();
+    if (nst < 2) return false;
+
+    auto nearest_terminal = [&](const Facade::geo_point_t& target) -> int {
+        double best_d2 = std::numeric_limits<double>::max();
+        int best = -1;
+        for (size_t i = 0; i < nst; ++i) {
+            if (!sterm[i]) continue;
+            const double dx = sx[i]-target.x(), dy = sy[i]-target.y(), dz = sz[i]-target.z();
+            const double d2 = dx*dx + dy*dy + dz*dz;
+            if (d2 < best_d2) { best_d2 = d2; best = static_cast<int>(i); }
+        }
+        return best;
+    };
+
+    const int tA = nearest_terminal(pA);
+    const int tB = nearest_terminal(pB);
+    if (tA < 0 || tB < 0 || tA == tB) return false;
+
+    p1 = Facade::geo_point_t(sx[tA], sy[tA], sz[tA]);
+    p2 = Facade::geo_point_t(sx[tB], sy[tB], sz[tB]);
+
+    SPDLOG_LOGGER_DEBUG(s_log,
+        "iso endpoint: fired (L={:.1f} cm, xext={:.1f} cm) A=({:.1f},{:.1f},{:.1f}) B=({:.1f},{:.1f},{:.1f})",
+        length/units::cm, xext/units::cm,
+        p1.x()/units::cm, p1.y()/units::cm, p1.z()/units::cm,
+        p2.x()/units::cm, p2.y()/units::cm, p2.z()/units::cm);
+    return true;
+}
+
 SegmentPtr PatternAlgorithms::init_first_segment(Graph& graph, Facade::Cluster& cluster, Facade::Cluster* main_cluster,TrackFitting& track_fitter, IDetectorVolumes::pointer dv, bool flag_back_search)
 {
     using IFS_Clock = std::chrono::steady_clock;
@@ -228,6 +419,17 @@ SegmentPtr PatternAlgorithms::init_first_segment(Graph& graph, Facade::Cluster& 
     // Require a NON-EMPTY steiner_pc BEFORE the boundary call below, which
     // throws on an empty cloud (zero-length arrays; SBND MC evt 11).
     if (!cluster.has_pc("steiner_pc") || cluster.get_pc("steiner_pc").size_major() == 0) return nullptr;
+    Facade::geo_point_t first_pt, second_pt;
+
+    // Isochronous sheet endpoints (m_iso_endpoint, C++ default OFF; doc
+    // sbnd_xin/docs/pr/24 round 2).  When the gate fires, the whole legacy
+    // block below -- boundary metric AND local-PCA refinement, both of which
+    // degenerate on a filled 2-D sheet -- is bypassed.
+    bool iso_endpoints_used = false;
+    if (m_iso_endpoint) {
+        iso_endpoints_used = find_iso_first_segment_endpoints(cluster, first_pt, second_pt);
+    }
+    if (!iso_endpoints_used) {
     // Get two boundary points from the cluster
     auto boundary_indices = cluster.get_two_boundary_steiner_graph_idx("steiner_graph", "steiner_pc");
     const auto& steiner_pc = cluster.get_pc("steiner_pc");
@@ -250,8 +452,8 @@ SegmentPtr PatternAlgorithms::init_first_segment(Graph& graph, Facade::Cluster& 
     // boundary_point_second = Facade::geo_point_t(2296.69, 872.262, 5818);
     // // end hack
                                 
-    Facade::geo_point_t first_pt = boundary_point_first;
-    Facade::geo_point_t second_pt = boundary_point_second;
+    first_pt = boundary_point_first;
+    second_pt = boundary_point_second;
 
     // Local PCA refinement of each boundary endpoint.
     //
@@ -363,6 +565,7 @@ SegmentPtr PatternAlgorithms::init_first_segment(Graph& graph, Facade::Cluster& 
             // std::cout << boundary_point_second << " -> " << second_pt << std::endl;
         }
     }
+    } // !iso_endpoints_used: legacy boundary endpoints + local-PCA refinement
 
     // Determine the starting point based on whether this is the main cluster or not
     const bool is_main_flag = cluster.get_flag(Facade::Flags::main_cluster);

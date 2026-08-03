@@ -873,6 +873,16 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               // a selected nu-candidate main cluster are tracks, none showers.
               // null = C++ default 0 = OFF (key omitted => byte-identical).
               shower_topo_demote_len=null,
+              // Isochronous first-segment endpoint finding (doc pr/24 round 2,
+              // SBND evt 271851): principal-axis endpoints for filled 2-D
+              // sheet clusters instead of the wire-footprint boundary metric.
+              // false/nulls = C++ defaults (false / 40 cm / 25 cm / 0.35 /
+              // 0.02) = OFF (keys omitted => byte-identical).
+              iso_endpoint=false,
+              iso_endpoint_min_length=null,
+              iso_endpoint_max_xext=null,
+              iso_endpoint_xext_frac=null,
+              iso_endpoint_xext_quantile=null,
               // protect_bundle stage knobs (doc pr/23): the PR-stage
               // overclustering protection (uboone's second graph examination,
               // ProtectOverClustering.cxx).  The stage only acts when
@@ -1397,6 +1407,11 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
             cathode_x=cathode_x,
             cathode_kink_xcut=cathode_kink_xcut,
             shower_topo_demote_len=shower_topo_demote_len,
+            iso_endpoint=iso_endpoint,
+            iso_endpoint_min_length=iso_endpoint_min_length,
+            iso_endpoint_max_xext=iso_endpoint_max_xext,
+            iso_endpoint_xext_frac=iso_endpoint_xext_frac,
+            iso_endpoint_xext_quantile=iso_endpoint_xext_quantile,
             cosmic_y_top_main=cosmic_y_top_main,
             cosmic_y_top_strict=cosmic_y_top_strict,
             cosmic_y_top_loose=cosmic_y_top_loose,
@@ -1787,6 +1802,13 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
        // null = C++ default 0 = OFF = byte-identical.  Ships OFF; the SBND
        // operating point lives in wct-pr-perevt.jsonnet (doc 68).
        shower_topo_demote_len=null,
+       // Isochronous first-segment endpoint finding (doc pr/24 round 2, SBND
+       // evt 271851).  false/nulls = C++ defaults = OFF = byte-identical.
+       iso_endpoint=false,
+       iso_endpoint_min_length=null,
+       iso_endpoint_max_xext=null,
+       iso_endpoint_xext_frac=null,
+       iso_endpoint_xext_quantile=null,
        // protect_bundle (doc pr/23): PR-stage overclustering protection.
        // Named in the production pipeline_names by DEFAULT since the sec 9
        // flip (owner 2026-08-02); inert when dropped from the list.  The
@@ -1902,6 +1924,11 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 cathode_x=cathode_x,
                 cathode_kink_xcut=cathode_kink_xcut,
                 shower_topo_demote_len=shower_topo_demote_len,
+                iso_endpoint=iso_endpoint,
+                iso_endpoint_min_length=iso_endpoint_min_length,
+                iso_endpoint_max_xext=iso_endpoint_max_xext,
+                iso_endpoint_xext_frac=iso_endpoint_xext_frac,
+                iso_endpoint_xext_quantile=iso_endpoint_xext_quantile,
                 protect_graph_name=protect_graph_name,
                 protect_skip_convicted=protect_skip_convicted,
                 protect_cathode_x=protect_cathode_x,

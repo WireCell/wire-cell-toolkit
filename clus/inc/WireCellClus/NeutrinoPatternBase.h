@@ -131,6 +131,26 @@ namespace WireCell::Clus::PR {
         // 49.1 cm by segment_track_length, the length this guard uses).
         double m_shower_topo_demote_len{0};
 
+        // Isochronous first-segment endpoint finding (doc sbnd_xin/docs/pr/24
+        // round 2, SBND evt 271851).  When ON and the cluster is sheet-like
+        // (long, with a small quantile-trimmed drift-x extent), the first PR
+        // segment's endpoints are picked as the quantile-trimmed extremes
+        // along the sheet's principal axis (each snapped to a Steiner
+        // terminal) instead of the wire-footprint boundary metric, and the
+        // local-PCA endpoint refinement (degenerate on a filled 2-D sheet) is
+        // skipped on that branch.  No prototype counterpart; the prototype's
+        // boundary metric (PR3DCluster_path.h:530-536, wire-delta coefficients
+        // *0.0) is preserved byte-identically when off.  Precedents:
+        // adjust_wcpoints_parallel (data/src/PR3DCluster.cxx:428, separation
+        // only) and search_for_connection_isochronous
+        // (pid/src/PR3DCluster_graph.h:1445, call site disabled upstream).
+        // C++ default false => legacy path byte-identical.
+        bool   m_iso_endpoint{false};
+        double m_iso_endpoint_min_length{40 * units::cm};
+        double m_iso_endpoint_max_xext{25 * units::cm};
+        double m_iso_endpoint_xext_frac{0.35};
+        double m_iso_endpoint_xext_quantile{0.02};
+
         // Cathode kink veto (doc sbnd_xin/docs/pr/20 Part II, B0).  Passed to
         // segment_search_kink from break_segments: a candidate fit point within
         // m_cathode_kink_xcut of the cathode plane at m_cathode_x is skipped, so
@@ -294,6 +314,13 @@ namespace WireCell::Clus::PR {
         bool clean_up_graph(Graph& graph, const Facade::Cluster& cluster);
 
         SegmentPtr init_first_segment(Graph& graph, Facade::Cluster& cluster, Facade::Cluster* main_cluster, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, bool flag_back_search = true);
+
+        // Isochronous first-segment endpoints (m_iso_endpoint; doc
+        // sbnd_xin/docs/pr/24 round 2).  Returns true and fills p1/p2 (both
+        // snapped to Steiner terminals of "steiner_pc") when the cluster
+        // passes the sheet gate; false => caller uses the legacy boundary
+        // search unchanged.
+        bool find_iso_first_segment_endpoints(const Facade::Cluster& cluster, Facade::geo_point_t& p1, Facade::geo_point_t& p2) const;
 
         // find the shortest path using steiner graph
         std::vector<Facade::geo_point_t> do_rough_path(const Facade::Cluster& cluster,Facade::geo_point_t& first_point, Facade::geo_point_t& last_point);
