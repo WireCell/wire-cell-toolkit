@@ -192,7 +192,7 @@ Tests carry **labels** and their tests can be selected with `-L`:
 
 ```bash
 ctest --test-dir build -L atomic       # the test_*/atomic* unit tests
-ctest --test-dir build -L doctest      # the aggregated wcdoctest-<pkg> runners
+ctest --test-dir build -L doctest      # the single aggregated wcdoctest runner
 ctest --test-dir build -L script       # interpreted (.py/.sh/.bats/.jsonnet) tests
 ctest --test-dir build -L history      # history-group tests (need test data, below)
 ctest --test-dir build -R WireCellUtil # by name regex

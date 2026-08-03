@@ -55,6 +55,37 @@ local trace_sets(pipeline, coords) = [
     for i in std.range(0, std.length(pipeline) - 1)
 ];
 
+// SBND Space-Charge-Effect displacement field (per-TPC TH3 maps).  Wired into
+// DetectorVolumes per-APA metadata (key "sce_field"); PCTransformSet picks it up
+// by TypeName and builds a real (non-no-op) SCECorrection.  Used for sim
+// (use_sce=true) so the all-APA clustering + Bee run in SCE true space (x_sce).
+local sce_field = {
+    type: 'SCEFieldTH3',
+    name: 'sbnd_dualmap',
+    data: {
+        sce_map_file: '/cvmfs/sbnd.opensciencegrid.org/products/sbnd/sbnd_data/v01_42_00/SCEoffsets/SCEoffsets_SBND_E500_dualmap_CV_voxelTH3.root',
+        // sign=+1: the map holds the TrueBkwd (reco->true) offset, so
+        // SCECorrection::forward (x_t0 + displacement) gives the true position.
+        sign: 1,
+    },
+};
+// FORWARD (true->reco) SCE displacement from the same dualmap file: used by the
+// truth labeler to shift the priorSCE (true position) SimEnergyDeposits onto the
+// spatially-distorted charge the blobs were reconstructed from.
+local sce_field_fwd = {
+    type: 'SCEFieldTH3',
+    name: 'sbnd_dualmap_fwd',
+    data: sce_field.data {
+        th3_name_E:   'TrueFwd_Displacement_X_E',
+        th3_name_W:   'TrueFwd_Displacement_X_W',
+        th3_name_E_y: 'TrueFwd_Displacement_Y_E',
+        th3_name_W_y: 'TrueFwd_Displacement_Y_W',
+        th3_name_E_z: 'TrueFwd_Displacement_Z_E',
+        th3_name_W_z: 'TrueFwd_Displacement_Z_W',
+        sign: 1,
+    },
+};
+
 // Per-TPC transverse (Y,Z) position offset, materialized in the post-QLMatching
 // scope by T0Correction as y_cor/z_cor (see match/docs/cathode-offset-correction.md).
 // One flag drives BOTH the metadata injection (which the C++ keys on for the
@@ -70,8 +101,13 @@ local trace_sets(pipeline, coords) = [
 local pos_offset_a0 = [0, -0.11 * wc.cm, 0.67 * wc.cm];   // TPC0 (East, x<0)
 local pos_offset_a1 = [0, 0.11 * wc.cm, -0.67 * wc.cm];   // TPC1 (West, x>=0)
 
-local common_corr_coords(pos_offset_on) =
+local common_t0cor_coords(pos_offset_on) =
     if pos_offset_on then ['x_t0cor', 'y_cor', 'z_cor'] else ['x_t0cor', 'y', 'z'];
+// SCE-corrected (true) scope, produced by a backward SCECorrection step.
+local common_sce_coords = ['x_sce', 'y_sce', 'z_sce'];
+// use_sce=true -> SCE true space; false -> the T0-corrected reco scope above.
+local common_corr_coords(pos_offset_on, use_sce=false) =
+    if use_sce then common_sce_coords else common_t0cor_coords(pos_offset_on);
 
 // SBND cathode-crossing connector: connect the two halves of a cathode-crossing
 // cosmic that the generic all-APA merge passes leave unmerged (their closest-point
@@ -126,6 +162,9 @@ local dvm(pos_offset_on) = {
         FV_ymax_margin: $.overall.FV_ymax_margin,
         FV_zmin_margin: $.overall.FV_zmin_margin,
         FV_zmax_margin: $.overall.FV_zmax_margin,
+        // SCE displacement field for this APA (PCTransformSet reads this key to
+        // build a real SCECorrection; a1f0pA inherits it via $.a0f0pA below).
+        sce_field: wc.tn(sce_field),
     } + (if pos_offset_on then { pos_offset: pos_offset_a0 } else {}),
     a1f0pA: $.a0f0pA + {
         FV_xmin:    2.5  * wc.cm,  // data CPA face (+1.5) + 1 cm toward TPC1 interior
@@ -155,7 +194,7 @@ local pctransforms(dv) = {
     type: 'PCTransformSet',
     name: dv.name,
     data: { detector_volumes: wc.tn(dv) },
-    uses: [dv],
+    uses: [dv, sce_field],
 };
 
 local bs_live_face(apa, face) = {
@@ -383,7 +422,11 @@ local clus_per_face(anode, face, dump, output_dir, runNo, subRunNo, eventNo, bee
 // population iso_cathode_guard leaves unabsorbed) into a beam-window cluster
 // on raw proximity under the beam-T0 hypothesis.  false omits the keys =>
 // compiled config byte-identical to before the knob existed.
-local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=null, premerged=false, rse_from_ident=false, pos_offset_on=true, tensor_outname='', save_real_cluster_id=false, trace_bee=false, save_assoc_cluster_id=false, real_cluster_id_global=null, cathode_rescue_on=true, cathode_rescue_unmatched=true, adopt_nu_fragments=false, save_bundle_main_provenance=false) = {
+// use_sce / reality (from master, merged 2026-08-03): use_sce=true runs the
+// all-APA clustering + Bee in SCE true space (x_sce) instead of the T0-corrected
+// reco scope (x_t0cor).  Both SBND realities currently set use_sce=false (see
+// the reco table in the tail function), so this is a no-op for our chain.
+local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=null, premerged=false, rse_from_ident=false, pos_offset_on=true, tensor_outname='', save_real_cluster_id=false, trace_bee=false, save_assoc_cluster_id=false, real_cluster_id_global=null, cathode_rescue_on=true, cathode_rescue_unmatched=true, adopt_nu_fragments=false, save_bundle_main_provenance=false, use_sce=false, reality='data') = {
     local nanodes = std.length(anodes),
     local pcmerging = g.pnode({
         type: 'PointTreeMerging',
@@ -404,7 +447,7 @@ local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=
     local cm_old = clus.clustering_methods(
         prefix='all', detector_volumes=dv, pc_transforms=pcts, coords=common_coords),
     local cm = clus.clustering_methods(
-        prefix='all', detector_volumes=dv, pc_transforms=pcts, coords=common_corr_coords(pos_offset_on)),
+        prefix='all', detector_volumes=dv, pc_transforms=pcts, coords=common_corr_coords(pos_offset_on, use_sce)),
     // Combined (all-APA) clustering runs AFTER QL charge-light matching, so every
     // cluster carries a matched flash time (cluster_t0).  switch_scope applies the
     // per-cluster T0 correction (x_t0cor scope) and drops any stale per-APA
@@ -414,7 +457,9 @@ local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=
     // one cluster carrying a fresh "isolated"/"perblob" array (main sub-component
     // = -1), like clustering_isolated but grouped by flash time instead of geometry.
     local cm_pipeline = [
-        cm_old.switch_scope(),
+        // Scope step: use_sce=true -> SCECorrection (x_sce = reco->true, so the whole
+        // downstream pipeline + Bee run in SCE true space); false -> T0Correction (x_t0cor).
+        if use_sce then cm_old.switch_scope(correction_name='SCECorrection') else cm_old.switch_scope(),
         cm.extend(flag=4, length_cut=60 * wc.cm, num_try=0, length_2_cut=15 * wc.cm, num_dead_try=1, use_flash_t0=true),
         cm.regular(name='1', length_cut=60 * wc.cm, flag_enable_extend=false, use_flash_t0=true),
         cm.regular(name='2', length_cut=30 * wc.cm, flag_enable_extend=true, use_flash_t0=true),
@@ -569,10 +614,10 @@ local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=
                     // Same corrected coords as the clustering scope, so the Bee
                     // display reflects the transverse shift when it is on (makes the
                     // separate Bee-zip transverse shift redundant -- pick one).
-                    coords: common_corr_coords(pos_offset_on),
+                    coords: common_corr_coords(pos_offset_on, use_sce),
                     individual: false,
                 },
-            ] + (if trace_bee then trace_sets(cm_pipeline, common_corr_coords(pos_offset_on)) else []),
+            ] + (if trace_bee then trace_sets(cm_pipeline, common_corr_coords(pos_offset_on, use_sce)) else []),
             pipeline: wc.tns(cm_pipeline),
         },
     }, nin=1, nout=1, uses=anodes + [dv, pcts] + cm_pipeline
@@ -583,9 +628,18 @@ local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=
         data: {
             outname: if tensor_outname == '' then 'trash-all-apa.tar.gz' else tensor_outname,
             prefix: 'clustering_',
+            // Write a real tensor output when a tensor_outname is set; otherwise
+            // keep the historical discard.
             dump_mode: tensor_outname == '',
         },
     }, nin=1, nout=0),
+    // This maker produces ONLY the clustering + matching all-APA MABC (optionally
+    // terminated by its own TensorFileSink when dump=true).  The follow-up PR
+    // tagger pass (clus_pr / the maker's pr() method) and the larwirecell
+    // wclsTensorSetLabeler are NOT wired here: the entry configuration
+    // (e.g. sbnd/wcls-img-clus-matching-xin.jsonnet) assembles
+    //   MABC -> pr() -> wclsTensorSetLabeler -> dump
+    // itself, so clus.jsonnet stays clustering+matching only.
     local end = if dump then g.pipeline([mabc, sink]) else g.pipeline([mabc]),
     // premerged: input is already one merged tree (joint QLMatching) -> feed MABC
     // directly, no PointTreeMerging.  Else: fan the per-APA inputs into pcmerging.
@@ -1700,11 +1754,21 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
 // (one wire-cell call over many events) whose ident already carries the real event
 // id.  Default false keeps production byte-identical (the key is omitted).
 function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, reality='data') {
-    // pos_offset (per-TPC transverse y,z calibration) is data-only -- see the
-    // pos_offset_a0/a1 comment above.  reality='data' (default; keeps the data
-    // chain byte-identical to the previous always-on state) -> on; reality='sim'
-    // (MC) -> off, so the MC chain carries no transverse shift.
-    local pos_offset_on = reality == 'data',
+    // Reco-chain reality config -- ONE place grouping every reality-dependent
+    // toggle.  use_sce: run the all-APA clustering + Bee in SCE true space
+    // (x_sce) vs the T0-corrected reco scope (x_t0cor).  pos_offset_on: per-TPC
+    // transverse (y,z) calibration, data-only (see the pos_offset_a0/a1 comment
+    // above).
+    // NOTE: sim use_sce set to false to match sbnd_xin's MC chain (Xin runs MC
+    // in the T0-corrected reco scope, not SCE true space).  Both realities now
+    // cluster in x_t0cor; sim differs only by pos_offset_on=false (MC has no
+    // per-TPC transverse misalignment).
+    local reco = {
+        sim:  { use_sce: false, pos_offset_on: false },
+        data: { use_sce: false, pos_offset_on: true },
+    }[reality],
+    local use_sce = reco.use_sce,
+    local pos_offset_on = reco.pos_offset_on,
     // bee_sink (default null): when set to a shared IBeeSink node, all Bee
     // output for this node goes into that single shared zip instead of this
     // node's own bee_zip.  Default null -> own zip (production byte-identical).
@@ -1728,6 +1792,9 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
     all_apa(anodes, dump=true, bee_sink=null, premerged=false, tensor_outname='', save_real_cluster_id=false, save_assoc_cluster_id=false,
             trace_bee=false, real_cluster_id_global=null, cathode_rescue_on=true, cathode_rescue_unmatched=true, adopt_nu_fragments=false,
             save_bundle_main_provenance=false)::
+        // Clustering + matching ONLY (all-APA MABC).  The follow-up PR tagger
+        // pass (pr() below) and the wclsTensorSetLabeler are wired by the entry
+        // configuration, not here -- see the note in clus_all_apa.
         clus_all_apa(anodes, dump=dump,
                      output_dir=output_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo,
                      bee_sink=bee_sink, premerged=premerged, rse_from_ident=rse_from_ident, pos_offset_on=pos_offset_on,
@@ -1737,7 +1804,8 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                      trace_bee=trace_bee, cathode_rescue_on=cathode_rescue_on,
                      cathode_rescue_unmatched=cathode_rescue_unmatched,
                      adopt_nu_fragments=adopt_nu_fragments,
-                     save_bundle_main_provenance=save_bundle_main_provenance),
+                     save_bundle_main_provenance=save_bundle_main_provenance,
+                     use_sce=use_sce, reality=reality),
     // PR job: input is the reloaded post-QL tarball (see clus_pr above).
     // The TGM/FC and beam-window defaults here mirror clus_pr's -- i.e. the SBND
     // production operating point (see the comment block on clus_pr's arg list for
@@ -1968,4 +2036,31 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 sp_mean_dedx_cut=sp_mean_dedx_cut,
                 dl_vtx_cut=dl_vtx_cut),
     detector_volumes(anodes, face=0):: detector_volumes(anodes=anodes, face=face, pos_offset_on=pos_offset_on),
+    // Primitives the entry configuration needs to build the wclsTensorSetLabeler
+    // node itself (it is no longer wired inside clus_all_apa).  All are the exact
+    // objects the labeler used to receive, with the reality-correct pos_offset_on.
+    pc_transforms(dv):: pctransforms(dv),
+    // The corrected coordinate-array names the all-APA MABC uses for its Bee
+    // (clustering_global): data ['x_t0cor','y_cor'/'y','z_cor'/'z'], sim
+    // ['x_sce','y_sce','z_sce'].  The entry hands these to the labeler so the
+    // tagger_stm/tgm/fc sets overlay clustering_global.
+    bee_coords:: common_corr_coords(pos_offset_on, use_sce),
+    sce_field_fwd:: sce_field_fwd,
+    drift_speed:: drift_speed,
+    time_offset:: time_offset,
+    // FV box (spans both TPCs) for the labeler's particle-flow fiducial cut.
+    fiducial_box()::
+        local fvm = dvm(pos_offset_on).overall;
+        {
+            type: 'BoxFiducial',
+            name: 'all-overall-fv',
+            data: { bounds: {
+                tail: { x: fvm.FV_xmin + fvm.FV_xmin_margin,
+                        y: fvm.FV_ymin + fvm.FV_ymin_margin,
+                        z: fvm.FV_zmin + fvm.FV_zmin_margin },
+                head: { x: fvm.FV_xmax - fvm.FV_xmax_margin,
+                        y: fvm.FV_ymax - fvm.FV_ymax_margin,
+                        z: fvm.FV_zmax - fvm.FV_zmax_margin },
+            } },
+        },
 }
