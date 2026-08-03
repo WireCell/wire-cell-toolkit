@@ -8,6 +8,7 @@
 #include <array>
 #include <chrono>
 #include <cmath>
+#include <cstdlib>
 #include <numeric>
 #include <algorithm>
 
@@ -2658,7 +2659,57 @@ namespace WireCell::Clus::PR {
         (void)max_cont_weighted_length; // Currently unused
 
         // std::cout << "Shower Topology Check: " << max_spread/units::cm << " " << large_spread_length/units::cm << " " << total_effective_length/units::cm << std::endl;
-        
+
+        // sbnd_xin doc pr/25 sec 3: WCT_SHOWER_TOPO_DEBUG=1 dumps the decision
+        // terms segment_is_shower_topology never otherwise logs (this function
+        // had zero active log lines before this change), so the mechanism
+        // behind a topology-vs-trajectory misclassification can be measured
+        // directly instead of inferred from a 3-D geometric proxy (the trap
+        // recorded after doc pr/25 sec 2 -- a proxy predicted "should not
+        // fire" on SBND evt 321107/cluster 13, which did fire).  Read once,
+        // env-gated, default off => zero behavior change either way.
+        static const bool s_shower_topo_dbg = (std::getenv("WCT_SHOWER_TOPO_DEBUG") != nullptr);
+        int dbg_branch = 0;
+        double dbg_frac_lsl = (total_effective_length > 0) ? large_spread_length / total_effective_length : 0;
+        if (s_shower_topo_dbg) {
+            if (max_spread > 0.7*units::cm && dbg_frac_lsl > 0.2 &&
+                total_effective_length > 3*units::cm && total_effective_length < 15*units::cm &&
+                (large_spread_length > 2.7*units::cm || dbg_frac_lsl > 0.35)) dbg_branch = 1;
+            else if (max_spread > 0.8*units::cm && dbg_frac_lsl > 0.3 &&
+                      total_effective_length >= 15*units::cm) dbg_branch = 2;
+            else if (max_spread > 0.8*units::cm && large_spread_length > 8*units::cm &&
+                      dbg_frac_lsl > 0.18) dbg_branch = 3;
+            else if (max_spread > 1.0*units::cm && dbg_frac_lsl > 0.4) dbg_branch = 4;
+            else if (max_spread > 1.0*units::cm && large_spread_length > 5*units::cm &&
+                      dbg_frac_lsl > 0.23) dbg_branch = 5;
+
+            // Per-bucket dir_3 RMS distribution over populated fit-point
+            // buckets -- needed to tell "one bucket carries max_spread" from
+            // "fifty do", which max_spread alone cannot.
+            std::vector<double> dbg_rms;
+            for (size_t i = 0; i + 1 < local_points_vec.size(); i++) {
+                double r = std::get<2>(vec_rms_vals.at(i));
+                if (r != 0) dbg_rms.push_back(r);
+            }
+            std::sort(dbg_rms.begin(), dbg_rms.end());
+            size_t n_over = std::count_if(dbg_rms.begin(), dbg_rms.end(),
+                                           [](double r) { return r > 0.4*units::cm; });
+            auto pct = [&](double q) -> double {
+                if (dbg_rms.empty()) return 0;
+                size_t idx = std::min(dbg_rms.size() - 1, static_cast<size_t>(q * dbg_rms.size()));
+                return dbg_rms[idx];
+            };
+            double dbg_geom_len = segment_track_length(segment, 0);
+            SPDLOG_LOGGER_INFO(s_log,
+                "shower_topo dbg: seg {} L {:.1f}cm assoc_npts {} nbuckets {} n_over0.4cm {} "
+                "rms_p50 {:.2f}cm rms_p90 {:.2f}cm max_spread {:.2f}cm lsl {:.1f}cm tel {:.1f}cm "
+                "lsl/tel {:.3f} tel/L {:.3f} branch {}",
+                segment->id(), dbg_geom_len/units::cm, assoc_npts, dbg_rms.size(), n_over,
+                pct(0.5)/units::cm, pct(0.9)/units::cm,
+                max_spread/units::cm, large_spread_length/units::cm, total_effective_length/units::cm,
+                dbg_frac_lsl, (dbg_geom_len > 0 ? total_effective_length/dbg_geom_len : 0), dbg_branch);
+        }
+
         // Determine if this is shower topology based on spread patterns
         if ((max_spread > 0.7*units::cm && large_spread_length > 0.2 * total_effective_length && 
              total_effective_length > 3*units::cm && total_effective_length < 15*units::cm && 
@@ -2764,11 +2815,22 @@ namespace WireCell::Clus::PR {
             
             // Override shower topology for very long segments with little spread
             double tmp_total_length = segment_track_length(segment, 0);
-            if (tmp_total_length > 50*units::cm && 
-                total_length1 < 0.25 * tmp_total_length && 
+            bool dbg_guard_demoted = false;
+            if (tmp_total_length > 50*units::cm &&
+                total_length1 < 0.25 * tmp_total_length &&
                 total_length2 < 0.25 * tmp_total_length) {
                 flag_dir = 0;
                 flag_shower_topology = false;
+                dbg_guard_demoted = true;
+            }
+            if (s_shower_topo_dbg) {
+                SPDLOG_LOGGER_INFO(s_log,
+                    "shower_topo dbg: seg {} guard branch {} L {:.1f}cm total_length1 {:.1f}cm({:.3f}) "
+                    "total_length2 {:.1f}cm({:.3f}) demoted {} final_shower {}",
+                    segment->id(), dbg_branch, tmp_total_length/units::cm,
+                    total_length1/units::cm, (tmp_total_length > 0 ? total_length1/tmp_total_length : 0),
+                    total_length2/units::cm, (tmp_total_length > 0 ? total_length2/tmp_total_length : 0),
+                    dbg_guard_demoted, flag_shower_topology);
             }
         }
 
