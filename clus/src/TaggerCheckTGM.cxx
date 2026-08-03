@@ -188,6 +188,20 @@ public:
                                m_main_component_mode);
             m_main_component_mode = "path";
         }
+        // exempt_demoted_main_pairs (default false = historical behavior):
+        // skip main_pair_rejects entirely for a cluster carrying
+        // Flags::demoted_main.  A demoted main's OWN real_cluster_main /
+        // path-component provenance is all-zero by construction after
+        // ClusteringUnmergeBundle::carve (it was A bundle main, but never
+        // the merge's chosen representative, and nothing re-stamps the array
+        // post-split) -- so with main_component_pairs on, every demoted-main
+        // pair was vetoed unconditionally, independent of geometry (sbnd_xin
+        // doc pr/25, SBND evt 320029/18255-1: cluster 30, a 37 cm
+        // corner-clipping CASE-A shape with both ends on a boundary, rejected
+        // before the boundary geometry ran).  Only meaningful together with
+        // evaluate_demoted_mains (which is what lets such a cluster reach
+        // this tagger at all).  Default off => byte-identical.
+        m_exempt_demoted_main_pairs = get<bool>(config, "exempt_demoted_main_pairs", m_exempt_demoted_main_pairs);
         auto tol = config["fv_tolerance"];
         if (!tol.isNull() && tol.isArray()) {
             m_fv_tolerance.clear();
@@ -237,6 +251,7 @@ public:
         cfg["rescue_chord_check"] = m_rescue_chord_check;
         cfg["main_component_pairs"] = m_main_component_pairs;
         cfg["main_component_mode"] = m_main_component_mode;
+        cfg["exempt_demoted_main_pairs"] = m_exempt_demoted_main_pairs;
         return cfg;
     }
 
@@ -322,6 +337,7 @@ private:
     bool m_rescue_chord_check{false};
     bool m_main_component_pairs{false};
     std::string m_main_component_mode{"path"};
+    bool m_exempt_demoted_main_pairs{false};
     std::vector<double> m_fv_tolerance;
     std::vector<double> m_interior_fv_tolerance;
 
@@ -846,6 +862,7 @@ private:
         auto main_pair_rejects = [&](const geo_point_t& a, const geo_point_t& b,
                                      const char* case_tag, size_t gi, size_t gk) {
             if (!m_main_component_pairs) return false;
+            if (m_exempt_demoted_main_pairs && cluster.get_flag(Flags::demoted_main)) return false;
             if (real_main.empty() && main_comp < 0) return false;
             if (end_in_main(a) != 0 || end_in_main(b) != 0) return false;
             SPDLOG_LOGGER_DEBUG(t_log, "check_tgm: cluster {} {} pair ({},{}) rejected: neither end in the {} ({:.1f} cm chord)",

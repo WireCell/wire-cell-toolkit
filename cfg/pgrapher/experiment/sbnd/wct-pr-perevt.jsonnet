@@ -393,6 +393,17 @@ function(
     // needs a pctree saved with run_ql_evt.sh -save-rcid; falls back to the
     // proxy on old tarballs (doc 38).  Runner flag: -main-pair-real.
     tgm_main_pair_mode = 'real',
+    // Exempt a flag_demoted_main cluster from main_pair_rejects (C++ default
+    // false; key omitted when off => byte-identical).  With tgm_main_pair on,
+    // a demoted main's own real_cluster_main/path-component provenance is
+    // all-zero by construction post-carve, so the guard vetoed EVERY
+    // demoted-main pair unconditionally, before any CASE-A/CASE-B geometry
+    // ran (doc pr/25, SBND evt 320029/18255-1: cluster 30, a 37 cm
+    // corner-clipping shape with both ends on a boundary).  DESIGNED, NOT
+    // the SBND default -- changes cosmic verdicts, owner sign-off pending.
+    // Only meaningful with evaluate_demoted_mains below.  Runner flag:
+    // SBND_TGM_EXEMPT_DEMOTED_MAIN=1.
+    tgm_exempt_demoted_main = false,
     // Downstream-z (z ~ 500 cm face) inset of the TGM/FC fiducial box, in cm
     // (default 3 = byte-identical legacy margin).  Shared by tagger_check_tgm
     // and tagger_check_fc so containment keeps one meaning.  Runner flag:
@@ -545,6 +556,7 @@ function(
                              restore_demoted_mains=restore_demoted_mains,
                              require_provenance=require_provenance,
                              evaluate_demoted_mains=evaluate_demoted_mains,
+                             tgm_exempt_demoted_main=tgm_exempt_demoted_main,
                              skip_cosmic_companions=skip_cosmic_companions,
                              cosmic_companion_min_length=cosmic_companion_min_length,
                              mip_dqdx=mip_dqdx,

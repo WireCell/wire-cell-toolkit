@@ -677,6 +677,17 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               // flag_demoted_main.  Inert unless restore_demoted_mains above put
               // the flag there.
               evaluate_demoted_mains=false,
+              // tgm_exempt_demoted_main (doc pr/25, SBND evt 320029; C++ default
+              // false, key omitted when false => byte-identical pre-knob
+              // config): with tgm_main_pair on, TaggerCheckTGM's
+              // main_pair_rejects vetoes EVERY demoted-main pair
+              // unconditionally (its own real_cluster_main/path-component
+              // provenance is all-zero by construction post-carve) -- this
+              // exempts flag_demoted_main clusters from that veto so the
+              // usual CASE-A/CASE-B boundary geometry actually runs on them.
+              // DESIGNED, NOT the SBND default -- changes cosmic verdicts,
+              // owner sign-off pending (escalation rule 1).
+              tgm_exempt_demoted_main=false,
               // skip_cosmic_companions / cosmic_companion_min_length (doc pr/20
               // Part I P4; C++ defaults false / 0, keys omitted when off =>
               // byte-identical): act on the verdict P3 produced -- drop a TGM/
@@ -1325,7 +1336,10 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
             // then => byte-identical.  "real" = per-blob flash-merge
             // provenance (needs a save_real_cluster_id pctree; falls back to
             // the proxy on old tarballs).
-            main_component_mode=tgm_main_pair_mode),
+            main_component_mode=tgm_main_pair_mode,
+            // C++ default false. Key omitted when off => byte-identical.
+            // See the clus_pr arg comment (doc pr/25, SBND evt 320029).
+            exempt_demoted_main_pairs=tgm_exempt_demoted_main),
         // Fully-contained tagger.  Independent of TGM/STM: it evaluates every
         // in-scope main cluster and only records a containment verdict (flag
         // "FC"), so it neither vetoes nor is vetoed by them.  Placed LAST in
@@ -1733,6 +1747,8 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
        require_provenance=null,
        // doc pr/20 Part I P3; false = C++ default = OFF.  See clus_pr.
        evaluate_demoted_mains=false,
+       // doc pr/25, SBND evt 320029; false = C++ default = OFF.  See clus_pr.
+       tgm_exempt_demoted_main=false,
        // doc pr/20 Part I P4; false / null = C++ defaults = OFF.  See clus_pr.
        skip_cosmic_companions=false, cosmic_companion_min_length=null,
        mip_dqdx=56000, stm_consistent_fv=true, stm_accept_guards=true,
@@ -1857,6 +1873,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 restore_demoted_mains=restore_demoted_mains,
                 require_provenance=require_provenance,
                 evaluate_demoted_mains=evaluate_demoted_mains,
+                tgm_exempt_demoted_main=tgm_exempt_demoted_main,
                 skip_cosmic_companions=skip_cosmic_companions,
                 cosmic_companion_min_length=cosmic_companion_min_length,
                 mip_dqdx=mip_dqdx,

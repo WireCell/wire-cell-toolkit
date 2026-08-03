@@ -382,7 +382,7 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
         // SAME [beam_window_low, beam_window_high) window the in-beam
         // protection already uses.  Same gate as the steiner stage and
         // tagger_check_{stm,fc}; verdicts on surviving mains are unchanged.
-        tagger_check_tgm(name="", fiducial="", fv_tolerance=[], beam_window_low=0, beam_window_high=0, beam_window_only=false, length_limit_frac=0.45, enable_case_b=true, require_in_scope=false, check_neutrino_candidate=false, require_chord_charge=false, chord_support_radius=null, chord_max_gap=null, chord_charge_mode="chord", component_extremes=false, component_min_length=null, component_rescue=false, rescue_chord_check=false, main_component_pairs=false, main_component_mode="path", interior_fv_tolerance=[], evaluate_demoted_mains=false) :: {
+        tagger_check_tgm(name="", fiducial="", fv_tolerance=[], beam_window_low=0, beam_window_high=0, beam_window_only=false, length_limit_frac=0.45, enable_case_b=true, require_in_scope=false, check_neutrino_candidate=false, require_chord_charge=false, chord_support_radius=null, chord_max_gap=null, chord_charge_mode="chord", component_extremes=false, component_min_length=null, component_rescue=false, rescue_chord_check=false, main_component_pairs=false, main_component_mode="path", interior_fv_tolerance=[], evaluate_demoted_mains=false, exempt_demoted_main_pairs=false) :: {
             type: "TaggerCheckTGM",
             name: prefix + name,
             data: {
@@ -413,6 +413,13 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
               // a runner may pass the mode unconditionally without disturbing
               // the knob-off compiled config.
               + (if main_component_pairs && main_component_mode != "path" then { main_component_mode: main_component_mode } else {})
+              // C++ default false. Key omitted when off => byte-identical.
+              // Exempts a cluster carrying flag_demoted_main from
+              // main_pair_rejects (doc pr/25, SBND evt 320029): its own
+              // real_cluster_main/path-component provenance is all-zero by
+              // construction, so with main_component_pairs on this guard
+              // rejected every demoted-main pair unconditionally.
+              + (if exempt_demoted_main_pairs then { exempt_demoted_main_pairs: true } else {})
               // C++ default empty (= use fv_tolerance). Key omitted when
               // empty => byte-identical pre-knob config.  Separate tolerance
               // for the CASE-A interior-support tests only (doc 32 caveat:
