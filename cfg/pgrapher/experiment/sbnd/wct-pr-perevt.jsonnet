@@ -127,6 +127,22 @@ function(
     // Pass -A cathode_kink_xcut=null -A cathode_x=null for the legacy search.
     cathode_x         = 0,
     cathode_kink_xcut = 5,
+    // shower_topo_demote_len (cm, doc pr/25 sec 3): demote any segment the
+    // topology test flags kShowerTopology whose geometric length exceeds this,
+    // so it receives real track PID instead of the hard-coded pdg=11/score=100.
+    // Rationale: the test's only measurement axis satisfies
+    // dir_3.xhat = sin(angle-to-drift), so for a near-isochronous segment it
+    // measures spread along the DRIFT axis, where points sit on a 0.313 cm
+    // time-slice lattice -- against a 0.4 cm "large spread" cut.  86 of 91 long
+    // firings across the 572-event valfast manifest carry no evidence above
+    // that noise floor, and an owner hand-scan of all 10 such segments on a
+    // selected nu-candidate main cluster found 10/10 tracks, 0 showers.
+    // null = C++ default 0 = OFF = byte-identical.  SHIPS OFF: the flip is the
+    // owner's call.  50 reproduces the scan-supported rule for 9 of the 10
+    // scanned events; ~45 covers all 10 (evt 400504 measures 49.1 cm by
+    // segment_track_length, the length the guard uses).
+    // Enable with -A shower_topo_demote_len=50.
+    shower_topo_demote_len = null,
     // protect_bundle stage knobs (doc pr/23): the PR-stage overclustering
     // protection (uboone's second graph examination).  The stage is in
     // pipeline_names by DEFAULT since the sec 9 production flip; the knobs
@@ -580,6 +596,7 @@ function(
                              cosmic_y_small_piece=pr_y_top - 67,
                              cathode_x=cathode_x,
                              cathode_kink_xcut=cathode_kink_xcut,
+                             shower_topo_demote_len=shower_topo_demote_len,
                              protect_graph_name=protect_graph_name,
                              protect_skip_convicted=protect_skip_convicted,
                              protect_cathode_x=protect_cathode_x,

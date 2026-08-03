@@ -78,6 +78,7 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_fit_vertex_min_seg_length = get(config, "fit_vertex_min_seg_length", m_fit_vertex_min_seg_length);  // cm
     m_cathode_x          = get(config, "cathode_x",          m_cathode_x);           // cm
     m_cathode_kink_xcut  = get(config, "cathode_kink_xcut",  m_cathode_kink_xcut);   // cm
+    m_shower_topo_demote_len = get(config, "shower_topo_demote_len", m_shower_topo_demote_len);  // cm
     // Detector-extent literals (docs/pr/2 sec. 2e(iv)), all cm.
     m_cosmic_y_top_main    = get(config, "cosmic_y_top_main",    m_cosmic_y_top_main);
     m_cosmic_y_top_strict  = get(config, "cosmic_y_top_strict",  m_cosmic_y_top_strict);
@@ -210,6 +211,7 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["fit_vertex_min_seg_length"] = m_fit_vertex_min_seg_length;  // cm; 0 = legacy (all segments enter the vertex fit)
     cfg["cathode_x"]         = m_cathode_x;          // cm, T0-corrected frame
     cfg["cathode_kink_xcut"] = m_cathode_kink_xcut;  // cm; 0 = legacy (the kink search sees every fit point)
+    cfg["shower_topo_demote_len"] = m_shower_topo_demote_len;  // cm; 0 = legacy (long segments stay eligible for kShowerTopology)
     // Detector-extent literals (docs/pr/2 sec. 2e(iv)); defaults = uBooNE prototype, cm.
     cfg["cosmic_y_top_main"]    = m_cosmic_y_top_main;     // 100 = 17 cm below the uBooNE y=+117 top
     cfg["cosmic_y_top_strict"]  = m_cosmic_y_top_strict;   // 102 = 15 cm below
@@ -491,6 +493,7 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
     pattern_algos.m_fit_vertex_min_seg_length = m_fit_vertex_min_seg_length * units::cm;  // cm -> internal
     pattern_algos.m_cathode_x         = m_cathode_x * units::cm;          // cm -> internal
     pattern_algos.m_cathode_kink_xcut = m_cathode_kink_xcut * units::cm;  // cm -> internal
+    pattern_algos.m_shower_topo_demote_len = m_shower_topo_demote_len * units::cm;  // cm -> internal
     // Detector-extent literals, cm -> internal (docs/pr/2 sec. 2e(iv)).
     pattern_algos.m_cosmic_y_top_main    = m_cosmic_y_top_main    * units::cm;
     pattern_algos.m_cosmic_y_top_strict  = m_cosmic_y_top_strict  * units::cm;

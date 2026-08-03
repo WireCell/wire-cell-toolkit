@@ -2284,7 +2284,7 @@ void PatternAlgorithms::improve_vertex(Graph& graph, Facade::Cluster& cluster, V
             if (!sg1 || sg1->cluster() != &cluster) continue;
             
             if (!sg1->particle_info()) {
-                segment_is_shower_topology(sg1, false, m_mip_dqdx_median);
+                segment_is_shower_topology(sg1, false, m_mip_dqdx_median, m_shower_topo_demote_len);
                 
                 VertexPtr start_v = nullptr, end_v = nullptr;
                 auto source_v = boost::source(*it, graph);
@@ -2324,7 +2324,7 @@ void PatternAlgorithms::improve_vertex(Graph& graph, Facade::Cluster& cluster, V
                     SegmentPtr sg = graph[*it].segment;
                     if (!sg || sg->cluster() != &cluster) continue;
                     
-                    if (!sg->particle_info()) segment_is_shower_topology(sg, false, m_mip_dqdx_median);
+                    if (!sg->particle_info()) segment_is_shower_topology(sg, false, m_mip_dqdx_median, m_shower_topo_demote_len);
                     
                     VertexPtr start_v = nullptr, end_v = nullptr;
                     auto source_v = boost::source(*it, graph);
@@ -2394,7 +2394,7 @@ void PatternAlgorithms::improve_vertex(Graph& graph, Facade::Cluster& cluster, V
                 }
                 
                 // Examine topology case
-                if (pair_result.first == 1 && segment_is_shower_topology(sg, false, m_mip_dqdx_median)) {
+                if (pair_result.first == 1 && segment_is_shower_topology(sg, false, m_mip_dqdx_median, m_shower_topo_demote_len)) {
                     int dir_save = sg->dirsign();
                     
                     VertexPtr start_v = nullptr, end_v = nullptr;

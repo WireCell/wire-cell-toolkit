@@ -161,7 +161,16 @@ namespace WireCell::Clus::PR {
     void segment_determine_shower_direction_trajectory(SegmentPtr segment, int start_n, int end_n, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, double MIP_dQdx = 43000/units::cm, bool flag_print = false, const TrackPidOptions& pid_opts = {});
     
     bool segment_determine_shower_direction(SegmentPtr segment, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, const std::string& cloud_name = "associate_points", double MIP_dQdx = 43000/units::cm, double rms_cut= 0.4*units::cm, double mip_dqdx = 50000/units::cm);
-    bool segment_is_shower_topology(SegmentPtr seg, bool tmp_val=false, double MIP_dQ_dx = 43000/units::cm);
+    // sbnd_xin doc pr/25 sec 3: `demote_len` > 0 makes the existing long-track
+    // guard unconditional -- any segment this function would flag
+    // kShowerTopology whose geometric length (segment_track_length(seg,0),
+    // the same measure the legacy >50cm guard uses) exceeds `demote_len` is
+    // demoted to a track instead.  Default 0 == off == byte-identical.
+    // Motivation: an owner hand-scan of every long shower-topology segment on
+    // a selected nu-candidate main cluster in the 572-event valfast manifest
+    // (2026-08-03, 10/10 events) found NO showers -- all tracks.  See sec 3.8.
+    bool segment_is_shower_topology(SegmentPtr seg, bool tmp_val=false, double MIP_dQ_dx = 43000/units::cm,
+                                    double demote_len = 0);
 }
 
 #endif

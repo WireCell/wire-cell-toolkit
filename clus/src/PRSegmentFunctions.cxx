@@ -2510,7 +2510,7 @@ namespace WireCell::Clus::PR {
         return (flag_dir != 0);
     }
 
-    bool segment_is_shower_topology(SegmentPtr segment, bool tmp_val, double MIP_dQ_dx){
+    bool segment_is_shower_topology(SegmentPtr segment, bool tmp_val, double MIP_dQ_dx, double demote_len){
         int flag_dir = 0;
         bool flag_shower_topology = tmp_val; 
         const auto& fits = segment->fits();
@@ -2866,6 +2866,23 @@ namespace WireCell::Clus::PR {
             if (tmp_total_length > 50*units::cm &&
                 total_length1 < 0.25 * tmp_total_length &&
                 total_length2 < 0.25 * tmp_total_length) {
+                flag_dir = 0;
+                flag_shower_topology = false;
+                dbg_guard_demoted = true;
+            }
+
+            // sbnd_xin doc pr/25 sec 3: make that guard unconditional above a
+            // configurable length.  The legacy guard only demotes when the
+            // large-spread runs are BOTH under 0.25*L, a condition that on
+            // SBND evt 321107 missed by 0.008 (0.258/0.256) -- and the
+            // discriminant behind it is drift-direction quantization noise
+            // (sec 3.2-3.4: dir_3.xhat = sin(angle-to-drift), so for an
+            // isochronous segment the only measured axis IS the drift axis,
+            // where points are quantized on a 0.313cm time-slice lattice
+            // against a 0.4cm cut).  An owner hand-scan of all 10 such
+            // nu-candidate-main segments found 10/10 tracks, 0 showers.
+            // Default 0 => never fires => byte-identical legacy path.
+            if (demote_len > 0 && tmp_total_length > demote_len) {
                 flag_dir = 0;
                 flag_shower_topology = false;
                 dbg_guard_demoted = true;

@@ -70,6 +70,14 @@ public:
         // ClusteringCathodeConnect's cathode_x uses).
         double m_cathode_x{0};
         double m_cathode_kink_xcut{0};
+        // Long shower-topology demote length, cm (doc sbnd_xin/docs/pr/25
+        // sec 3).  0 => the guard never fires => byte-identical.  50 is the
+        // scan-supported operating point (9/10 owner-scanned events; ~45
+        // covers all 10).  Threaded to PatternAlgorithms and thence to every
+        // segment_is_shower_topology call site -- both NeutrinoTrackShowerSep
+        // and NeutrinoVertexFinder, so one segment cannot be classified two
+        // ways within one event.
+        double m_shower_topo_demote_len{0};
         // Detector-extent literals (docs/pr/2 sec. 2e(iv)), all in cm.
         // Defaults = the uBooNE prototype values (active volume y in
         // [-116,+117], z in [0,1037]) => absent keys are byte-identical.

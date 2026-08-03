@@ -867,6 +867,12 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               // angle arithmetic itself is untouched.
               // null = C++ default 0 = OFF (key omitted => byte-identical).
               cathode_x=null, cathode_kink_xcut=null,
+              // shower_topo_demote_len (cm, doc pr/25 sec 3): demote any
+              // kShowerTopology segment longer than this to a track.  Owner
+              // hand-scan 2026-08-03: 10/10 long shower-topology segments on
+              // a selected nu-candidate main cluster are tracks, none showers.
+              // null = C++ default 0 = OFF (key omitted => byte-identical).
+              shower_topo_demote_len=null,
               // protect_bundle stage knobs (doc pr/23): the PR-stage
               // overclustering protection (uboone's second graph examination,
               // ProtectOverClustering.cxx).  The stage only acts when
@@ -1390,6 +1396,7 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
             fit_vertex_min_seg_length=fit_vertex_min_seg_length,
             cathode_x=cathode_x,
             cathode_kink_xcut=cathode_kink_xcut,
+            shower_topo_demote_len=shower_topo_demote_len,
             cosmic_y_top_main=cosmic_y_top_main,
             cosmic_y_top_strict=cosmic_y_top_strict,
             cosmic_y_top_loose=cosmic_y_top_loose,
@@ -1772,6 +1779,14 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
        // 10 of them relocating the neutrino vertex (doc pr/20 Part VI sec 1).
        // Set both to null for the legacy kink search.
        cathode_x=0, cathode_kink_xcut=5,
+       // shower_topo_demote_len (cm, doc pr/25 sec 3): demote any
+       // kShowerTopology segment longer than this to a track, so it gets real
+       // track PID instead of the hard-coded pdg=11/score=100.  Owner
+       // hand-scan 2026-08-03: 10/10 long shower-topology segments on a
+       // selected nu-candidate main cluster are tracks, none showers.
+       // null = C++ default 0 = OFF = byte-identical.  Ships OFF; the SBND
+       // operating point lives in wct-pr-perevt.jsonnet (doc 68).
+       shower_topo_demote_len=null,
        // protect_bundle (doc pr/23): PR-stage overclustering protection.
        // Named in the production pipeline_names by DEFAULT since the sec 9
        // flip (owner 2026-08-02); inert when dropped from the list.  The
@@ -1886,6 +1901,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 fit_vertex_min_seg_length=fit_vertex_min_seg_length,
                 cathode_x=cathode_x,
                 cathode_kink_xcut=cathode_kink_xcut,
+                shower_topo_demote_len=shower_topo_demote_len,
                 protect_graph_name=protect_graph_name,
                 protect_skip_convicted=protect_skip_convicted,
                 protect_cathode_x=protect_cathode_x,

@@ -113,6 +113,24 @@ namespace WireCell::Clus::PR {
         double m_mip_dqdx{50000/units::cm};
         double m_mip_dqdx_median{43000/units::cm};
 
+        // Long shower-topology demote length (doc sbnd_xin/docs/pr/25 sec 3).
+        // Passed to every segment_is_shower_topology call site: a segment the
+        // topology test would flag kShowerTopology whose geometric length
+        // exceeds this is demoted to a track instead, so it receives real
+        // track PID rather than the hard-coded pdg=11/score=100.
+        // Motivation: the test's only measurement axis satisfies
+        // dir_3.xhat = sin(angle-to-drift), so for a near-isochronous segment
+        // it measures spread along the DRIFT axis, where points sit on a
+        // 0.313 cm time-slice lattice -- against a 0.4 cm "large spread" cut.
+        // 86 of 91 long firings across a 572-event manifest carry no evidence
+        // above that noise floor, and an owner hand-scan of all 10 such
+        // segments on a selected nu-candidate main cluster found 10/10 tracks.
+        // C++ default 0 => the guard never fires => byte-identical.
+        // 50*units::cm reproduces the scan-supported rule for 9 of the 10
+        // scanned events; ~45*units::cm covers all 10 (evt 400504 measures
+        // 49.1 cm by segment_track_length, the length this guard uses).
+        double m_shower_topo_demote_len{0};
+
         // Cathode kink veto (doc sbnd_xin/docs/pr/20 Part II, B0).  Passed to
         // segment_search_kink from break_segments: a candidate fit point within
         // m_cathode_kink_xcut of the cathode plane at m_cathode_x is skipped, so

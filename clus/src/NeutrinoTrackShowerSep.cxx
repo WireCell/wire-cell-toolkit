@@ -50,7 +50,7 @@ void PatternAlgorithms::separate_track_shower(Graph&graph, Facade::Cluster& clus
 
         // First check if segment is a shower topology
         auto t0 = Clock::now();
-        segment_is_shower_topology(seg, false, m_mip_dqdx_median);
+        segment_is_shower_topology(seg, false, m_mip_dqdx_median, m_shower_topo_demote_len);
         t_topology += MS(Clock::now() - t0);
 
         // If not shower topology, check if it's a shower trajectory
