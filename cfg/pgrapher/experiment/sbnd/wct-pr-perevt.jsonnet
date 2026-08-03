@@ -391,11 +391,22 @@ function(
     // all-zero by construction post-carve, so the guard vetoed EVERY
     // demoted-main pair unconditionally, before any CASE-A/CASE-B geometry
     // ran (doc pr/25, SBND evt 320029/18255-1: cluster 30, a 37 cm
-    // corner-clipping shape with both ends on a boundary).  DESIGNED, NOT
-    // the SBND default -- changes cosmic verdicts, owner sign-off pending.
-    // Only meaningful with evaluate_demoted_mains below.  Runner flag:
-    // SBND_TGM_EXEMPT_DEMOTED_MAIN=1.
-    tgm_exempt_demoted_main = false,
+    // corner-clipping shape with both ends on a boundary).
+    //
+    // SBND DEFAULT ON (owner 2026-08-02, doc pr/25 sec 2): small-group
+    // measurement (15 events: the target + the pr/20 Part I 14-event
+    // demoted-main census) showed the fix works on the target (cluster 30
+    // correctly convicts and its charge is excluded via the already-shipped
+    // skip_cosmic_companions guard) but ALSO surfaces a pre-existing,
+    // unrelated check_tgm CASE-A gap (the "2 extreme groups" branch has no
+    // length floor), letting a handful of wall-hugging demoted-main debris
+    // specks (8-14 points) pick up a spurious tag.  Owner judged the
+    // measured impact small enough to accept (one event moved
+    // kine_reco_Enu_MeV by +3.6 out of ~800, i.e. ~0.4%) rather than block
+    // on a separate co-requisite fix to check_tgm.  NOT bit-identical.
+    // Set false to restore the pre-flip behavior (runner:
+    // SBND_TGM_EXEMPT_DEMOTED_MAIN=0).
+    tgm_exempt_demoted_main = true,
     // Downstream-z (z ~ 500 cm face) inset of the TGM/FC fiducial box, in cm
     // (default 3 = byte-identical legacy margin).  Shared by tagger_check_tgm
     // and tagger_check_fc so containment keeps one meaning.  Runner flag:
