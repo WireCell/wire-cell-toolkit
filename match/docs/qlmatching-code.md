@@ -6,7 +6,7 @@ larsoft→WCT porting history, JSON schema and build details see
 [`qlmatching-port.md`](qlmatching-port.md) and
 [`porting-summary.md`](porting-summary.md). For how this component is wired into
 a runnable pipeline and packaged for BEE, see the chain doc
-`wcp-porting-img/sbnd/sbnd_xin/docs/ql-chain.md`.
+`wcp-porting-img/sbnd/sbnd_xin/docs/8_ql-chain.md`.
 
 All line references are into `match/src/QLMatching.cxx`, `match/src/Util.cxx`,
 etc., as of the `apply-pointcloud` branch.
@@ -137,12 +137,12 @@ factory type string is `"FlashTensorToOpticalPCs"` (unchanged by the package mov
 | `chi2_pmt_inflate` | `0.5` | `m_chi2_pmt_inflate` | denominator widened by `(pe·this)²`. |
 | `lasso_flag_weight` | `false` (SBND: **true**) | `m_lasso_flag_weight` | when true the LASSO per-column L1 weight of a `flag_at_x_boundary`‖`flag_close_to_PMT`‖`flag_window_truncated` bundle is multiplied by `lasso_boundary_weight` (`chisquare_flags_comparison.md` §6.2). Default OFF = factor 1.0, bit-identical. |
 | `lasso_boundary_weight` | `0.2` | `m_lasso_boundary_weight` | the boundary down-weight factor (prototype value). Inert unless `lasso_flag_weight`. |
-| `xtpc_flag` | `false` (SBND: **true**) | `m_xtpc_flag` | **cross-TPC cathode-crossing pre-fit cull** (`cull_cross_tpc`, run between the all-APA prefit and all-APA fit loops): a coincident candidate main-cluster pair confirmed as one cathode-crosser sets `flag_xtpc_consistent` on both bundles and drops each marked cluster's non-consistent rivals before the LASSO. Default OFF ⇒ pass not called, single-loop pipeline, production output bit-identical. **Changes matching** (it culls bundles). See `chisquare_flags_comparison.md` §16. |
-| `xtpc_dmax` | `5 cm` | `m_xtpc_dmax` | scenario-1 closest-approach cut (T0-corrected, per-TPC `dy/dz` applied). |
+| `xtpc_flag` | `false` (SBND: **true**, PDVD: **true**) | `m_xtpc_flag` | **cross-TPC cathode-crossing pre-fit cull** (`cull_cross_tpc`, run between the all-APA prefit and all-APA fit loops): a coincident candidate main-cluster pair confirmed as one cathode-crosser sets `flag_xtpc_consistent` on both bundles and drops each marked cluster's non-consistent rivals before the LASSO. Default OFF ⇒ pass not called, single-loop pipeline, production output bit-identical. **Changes matching** (it culls bundles). See `chisquare_flags_comparison.md` §16. |
+| `xtpc_dmax` | `5 cm` (PDVD: **25 cm**) | `m_xtpc_dmax` | scenario-1 closest-approach cut (T0-corrected, per-TPC `dy/dz` applied). PDVD needs 25 cm: each drift volume's active edge sits ~3 cm from the x=0 cathode (`cathode_x = ±3 cm`) and the top/bottom trigger-crate skew adds up to ~5 cm, so the 17 validated run-039252 crosser pairs meet at 10–22 cm (wcp `pdvd/ql_display/docs/ql-cathode-crosser-recipe.md`). |
 | `xtpc_dmax2` | `300 cm` | `m_xtpc_dmax2` | scenario-2 closest-approach **ceiling** — the candidate population admits far-apart collinear truncated pairs that angle cannot reject (§16). |
 | `xtpc_angle_max` | `20` (deg) | `m_xtpc_angle_max` | scenario-2 collinearity cut (truncated half): `conn`,`dir0`,`dir1` mutual angles all below this. |
 | `xtpc_hough_radius` | `15 cm` | `m_xtpc_hough_radius` | radius for the local `vhough_transform` direction at each closest-point. |
-| `xtpc_joint_pin` | `false` (PDHD: **true**) | `m_xtpc_joint_pin` | **cross-TPC joint-flash pin** (§4.4c). A direction-confirmed scenario-1 pair is bound to ONE coincident flash — both halves keep only that bundle and it survives the strength cutoff + rescues. Fixes crossers split across two flashes (incl. the low-light partner). Default OFF ⇒ no `flag_xtpc_pin` ⇒ bit-identical. **Changes matching.** |
+| `xtpc_joint_pin` | `false` (PDHD: **true**, PDVD: **true**) | `m_xtpc_joint_pin` | **cross-TPC joint-flash pin** (§4.4c). A direction-confirmed scenario-1 pair is bound to ONE coincident flash — both halves keep only that bundle and it survives the strength cutoff + rescues. Fixes crossers split across two flashes (incl. the low-light partner). Default OFF ⇒ no `flag_xtpc_pin` ⇒ bit-identical. **Changes matching.** |
 | `xtpc_pin_angle` | `20` (deg) | `m_xtpc_pin_angle` | joint-pin track-axis collinearity cut: `min(folded vhough_a01, folded global-PCA_a01) < this`. Connector angles a0c/a1c are NOT used (a ~1 cm inter-TPC transverse shift makes them ~⊥ even for true crossers). |
 
 **§4.4c — Cross-TPC joint-flash pin (`xtpc_joint_pin`, PDHD-on).** `xtpc_flag`'s scenario-1 priority is
@@ -203,6 +203,59 @@ carries the per-channel role/efficiency rationale); chain-level docs live in
 `vd_surface_flags`) is diagnostic-only: no behavioral consumer, exported as
 `at_cathode` in the calib dump (key present only in vd mode — legacy dumps
 byte-identical).
+
+**xTPC under `shared_flash` (PDVD, enabled 2026-07-11).** The cathode-crosser
+machinery (§4.4) needs no code change to run on the PDVD joint node:
+`cull_cross_tpc` splits sides by `run.anode_x < m_cathode_x` (PDVD ±335.8 cm
+vs 0) and pairs candidates by flash-TIME coincidence — under `shared_flash`
+the two ports' instances of one physical flash carry identical times
+(asserted by `fit_round1_shared`), so `|t0−t1| = 0` and the same flash pairs
+across the sides. The pin's strength-cutoff exemption was already implemented
+in `fit_round1_shared`/`fit_round2_shared`; the rescues (which pins also
+guard) are skipped under `shared_flash` anyway. Two PDVD-specific values in
+`protodunevd/qlmatching.jsonnet`: `xtpc_dmax: 25 cm` (see the §4.4 table) and
+`cathode_ext2: −12 cm` — the default −2 cm at-cathode window is too tight for
+PDVD, where a clean untruncated crosser half stops 2–7 cm short of the
+cathode (plus crate skew) and would otherwise carry neither `at_x_boundary`
+nor `window_truncated`, making it invisible to the candidate gather
+(admission = `at_x_boundary || window_truncated`; the run-039252 evt298567
+gid83 hand-picked pair is the concrete case). Side effect of the wider
+window, intended: newly-flagged cathode-proximal bundles join the
+`lasso_flag_weight` boundary down-weight group (~2 % of bundles flip on
+evt298567).
+
+Validation (run 039252, 18 events reprocessed 2026-07-11, pre-change dumps
+archived as `prextpc-*`): the 17 hand/finder-validated crosser pairs went
+from 4/17 auto-matched together (1/17 on the correct flash) to **17/17
+together, 9/17 exact**. The remaining 8 pairs are pinned one neighboring
+flash away (3.5–43 µs, 6 of 8 later): with same-flash-only pairings (80 ns
+default `flash_group_window`) the pin's per-pair flash choice is min ks-sum
+over the flashes where the pair is scenario-1-confirmed, and geometry (`d`)
+only tie-breaks — the PDHD rationale ("light picks the same-time wall")
+doesn't transfer to PDVD, where the confirmed flashes differ in TIME, so a
+marginal ks preference can move the pinned T0 by tens of µs (evt298581
+c183+c4000360: pinned at d = 19.8 cm over the d = 3.8 cm flash). **Possible
+follow-up knob** (not implemented): a `xtpc_pin_by_distance` pin flash
+choice (min d, ks tie-break) for detectors where confirmed pairings span
+different times. The hand-scan `crossers` viewer tag (wcp) keeps the
+geometric choice as ground truth.
+
+### Per-input trigger offsets (8a765d5e, 2026-07-10)
+
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `trigger_offsets` | `[]` | per-INPUT-port trigger offsets, for detectors whose charge readout windows start at different times per drift volume. PDVD: the TDE (top CRPs) and BDE (bottom CRPs) crates each open on their own 64-sample frame boundary, up to ~32 µs apart, and float ±15 µs vs the trigger while the light window is trigger-locked — so the light→charge offset is per event AND per crate. `trigger_offset_for(input_idx)` returns the array value when set, else the scalar `trigger_offset` (empty = bit-identical). Used at every `flash_time + offset` site via `run.input_idx` (flash_x_offset, xtpc/cathode candidate pairing, opflash PC `time`, calib-dump `f["time"]` — the dump/PC use input-0 = the trigger-locked BDE side under `shared_flash`). When set, the dump exports `trigger_offsets_us` at top level. **Per-side display times** (`shared_flash` + non-empty array only; keys absent otherwise ⇒ PDHD/SBND outputs byte-identical): the opflash PC gains a `time1` column and the calib dump a per-flash `time1` (µs) = the same flash on **input-1's (top) clock**, so top-volume drift math needs no re-basing by `Δ = trigger_offsets_us[1] − trigger_offsets_us[0]`; `fill_bee_flashes` forwards it as the Bee `op_t1` array, consumed by bee3's per-TPC `flashTimeForTPC` (bee3 40c3629). |
+| `drift_speeds` | `[]` | per-INPUT-port drift speeds (WCT units), the velocity analogue of `trigger_offsets`, for detectors whose drift volumes carry different calibrated speeds (PDVD: bottom volume = port 0, top = port 1; see `pdvd-anode-time-consistency.md` §8.12). `drift_speed_for(input_idx)` returns the array value when set, else the scalar `drift_speed` (empty = bit-identical). Used at every `flash_time → x` site via `run.input_idx`: `build_bundles` `flash_x_offset`, `cull_cross_tpc` candidate offsets (each crosser half's x is baked with its OWN side's speed before cross-cathode pairing), and `dump_cathode_diag`. Size must equal the input multiplicity (configure-time error otherwise). When set, the calib dump exports `drift_speeds` (cm/µs, top level) and a per-geometry `drift_speed` keyed by apa; the top-level scalar `drift_speed` stays the scalar config value for backward compatibility. Keys absent when unset ⇒ PDHD/SBND/uboone dumps byte-identical. |
+
+Companion (flash/): `OpFlashFinder` gained `metadata_extra` — a config object
+merged verbatim into the output tensor-set metadata (null default = unchanged).
+PDVD's light pass stamps `offset_bot_us`/`offset_top_us` through it
+(`cfg/pgrapher/experiment/protodunevd/flash.jsonnet:opflash_finder`), and
+`protodunevd/clus.jsonnet` gained `trigger_offset_top` so the stage-4
+`x_t0cor` uses the per-volume value (PCTransforms already reads a per-(apa,
+face) `trigger_offset` from the DetectorVolumes metadata). Root:
+`PDVDOpWaveformSource` also reads the nested `rawdump/raw_waveform` layout.
+Offset semantics + closure: wcp `pdvd/docs/pdvd-ql-pending.md` §1.
 
 ---
 
@@ -621,7 +674,7 @@ display). A bundle only counts as "matched" output if its predicted PE total is
 The per-APA `…-img/op-apa<tpc>.json` files are merged across APAs by
 `merge-apa.py` and unioned with the clustering zips by `bee-upload.sh` into
 `combined.zip`, whose upload returns the BEE URL. That packaging half lives in
-the chain doc (`sbnd_xin/docs/ql-chain.md`); here the contract is just the file
+the chain doc (`sbnd_xin/docs/8_ql-chain.md`); here the contract is just the file
 naming + fields above.
 
 ---

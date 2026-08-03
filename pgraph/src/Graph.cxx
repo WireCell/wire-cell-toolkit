@@ -150,7 +150,7 @@ bool Graph::execute()
 
             if (ok) {
                 if (m_enable_em) {
-                  m_em(format("called %d: %s", count, node->ident()));
+                  m_em(String::format("called %d: %s", count, node->ident()));
                 }
                 SPDLOG_LOGGER_TRACE(l, "ran node {}: {}", count, node->ident());
                 did_something = true;

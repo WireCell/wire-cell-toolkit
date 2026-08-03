@@ -27,15 +27,29 @@ local clus = import "pgrapher/common/clus.jsonnet";
 //     trigger_offset) so flash-matched charge lands on the light time base.
 //     QLMatching folds the same value into its matching geometry.  Default 0
 //     => x_t0cor unchanged (bit-identical).
+//   trigger_offset_top: optional separate offset for the TOP drift volume
+//     (anodes 4-7).  The PDVD TDE/BDE charge-readout crates open their windows
+//     up to ~32 us apart, so the light->charge offset is per crate:
+//     trigger_offset = bottom (BDE), trigger_offset_top = top (TDE).  null
+//     (default) => trigger_offset everywhere (bit-identical).
 function (output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=false,
           time_offset=0 * wc.us, relax_containment_filter=true,
-          trigger_offset=0 * wc.us)
+          trigger_offset=0 * wc.us, trigger_offset_top=null,
+          drift_speed_b=null, drift_speed_t=null)
 
 // Calibrated from PDVD data (anode->cathode crossing tracks: reconstructed drift
 // x-span vs the collection-plane->cathode-surface distance 338.55 cm; cathode
 // surface corrected 2.54->3.0 cm, so 1.57->1.568, v proportional to D); was 1.6.
 // See pdvd/docs/clus-workflow.md (drift-velocity calibration).
 local drift_speed = 1.568 * wc.mm / wc.us;
+// Optional per-side calibrated speeds (sec 8.12 of
+// pdvd-anode-time-consistency.md): bottom volume = anodes 0-3, top = 4-7.
+// null => the common legacy value above; compiled config byte-identical when
+// both are null.  These feed BOTH the per-face BlobSampler (x_raw) and the
+// dvm blocks below (T0Correction / grouping x_t0cor) from the same resolved
+// value, so the two coordinates cannot drift apart.
+local drift_speed_bot = if drift_speed_b == null then drift_speed else drift_speed_b;
+local drift_speed_top = if drift_speed_t == null then drift_speed else drift_speed_t;
 
 local initial_index = "0";
 local index = std.parseInt(initial_index);
@@ -55,13 +69,29 @@ local apa_drift_groups = [
     { name: "group4567", apas: [4, 5, 6, 7] },
 ];
 
+// Per-drift-side raw-imaging Bee groups (opt-in bee_img_per_side).  Same anode
+// split as apa_drift_groups, but named for the display: bottom drift = anodes
+// 0-3 (x0=-341.5cm), top drift = anodes 4-7 (x0=+341.5cm).  Routed by physical
+// anode (wpid.apa()), NOT by reconstructed x -- the two volumes overlap in the
+// pre-T0 apparent-x frame, so only anode membership separates them.  Emitted as
+// a second pre-pipeline "img" set => instances img-side-bot / img-side-top in
+// the SAME raw coordinate frame as img-global (they join after T0 in
+// clustering-global).
+local img_side_groups = [
+    { name: "side-bot", apas: [0, 1, 2, 3] },
+    { name: "side-top", apas: [4, 5, 6, 7] },
+];
+
 
 // ProtoDUNE-VD geometry parameters
 // 8 anodes total: anodes 0-3 are bottom drift (centerline x=-3415.5mm, drift in +x direction)
 //                 anodes 4-7 are top    drift (centerline x=+3415.5mm, drift in -x direction)
-// apa_plane = 57.15mm (half of apa_g2g=114.3mm), cpa_plane = 3385.5mm
-// Bottom drift anode face x ~ -3358.35mm, cathode x ~ -30.0mm
-// Top    drift anode face x ~  3358.35mm, cathode x ~   30.0mm
+// apa_plane = 16.4mm (physical CRP shield plane, drift-facing boundary of the
+// active LAr; 2026-07-13, supersedes the 2026-07-12 U-plane 0.4mm choice --
+// see params.jsonnet and pdvd/docs/qlmatch/pdvd-crp-anode-plane-geometry.md),
+// cpa_plane = 3385.5mm
+// Bottom drift anode face x ~ -3399.1mm, cathode x ~ -30.0mm
+// Top    drift anode face x ~  3399.1mm, cathode x ~   30.0mm
 local dvm = {
     overall: {
         FV_xmin: -3415.5 * wc.mm,
@@ -79,16 +109,16 @@ local dvm = {
         vertical_dir: [0,1,0],
         beam_dir: [0,0,1]
     },
-    // Bottom drift (anodes 0-3): anode face at ~-3358.35mm, cathode at ~-30.0mm
+    // Bottom drift (anodes 0-3): anode face at ~-3399.1mm (shield), cathode at ~-30.0mm
     // Both faces share same x-bounds (2-sided CRP, same drift direction)
     a0f0pA: {
-        drift_speed: drift_speed,
+        drift_speed: drift_speed_bot,
         tick: 0.5 * wc.us,  // 0.5 mm per tick
         tick_drift: self.drift_speed * self.tick,
         time_offset: time_offset,
         trigger_offset: trigger_offset,
         nticks_live_slice: 4,
-        FV_xmin: -3358.35 * wc.mm,
+        FV_xmin: -3399.1 * wc.mm,
         FV_xmax: -30.0 * wc.mm,
         FV_xmin_margin: 2 * wc.cm,
         FV_xmax_margin: 2 * wc.cm,
@@ -100,10 +130,14 @@ local dvm = {
     a2f1pA: $.a0f0pA,
     a3f0pA: $.a0f0pA,
     a3f1pA: $.a0f0pA,
-    // Top drift (anodes 4-7): cathode at ~30.0mm, anode face at ~3358.35mm
+    // Top drift (anodes 4-7): cathode at ~30.0mm, anode face at ~3399.1mm (shield)
     a4f0pA: $.a0f0pA + {
+        drift_speed: drift_speed_top,
         FV_xmin: 30.0 * wc.mm,
-        FV_xmax: 3358.35 * wc.mm,
+        FV_xmax: 3399.1 * wc.mm,
+        // Top volume charge is read by the TDE crate (its own window start).
+        trigger_offset: if trigger_offset_top == null then trigger_offset
+                        else trigger_offset_top,
     },
     a4f1pA: $.a4f0pA,
     a5f0pA: $.a4f0pA,
@@ -152,11 +186,11 @@ local pctransforms(dv) = {
 
 
 
-local bs_live_face(apa, face, center_fallback=false) = {
+local bs_live_face(apa, face, center_fallback=false, speed=drift_speed) = {
     type: "BlobSampler",
     name: "live-%s-%d"%[apa, face],
     data: {
-        drift_speed: drift_speed,
+        drift_speed: speed,
         time_offset: time_offset,
         // center_fallback: emit one point at the blob center when the stepped
         // grid yields none (tiny 1-wire blobs); default off -> bit-identical.
@@ -208,7 +242,9 @@ local clus_per_face (
         }
     }, nin=1, nout=1, uses=[]),
 
-    local bsl = bs_live_face(anode.name, face, center_fallback=stepped_center_fallback),
+    local bsl = bs_live_face(anode.name, face, center_fallback=stepped_center_fallback,
+                             speed=if anode.data.ident < 4 then drift_speed_bot
+                                   else drift_speed_top),
     local bsd = bs_dead_face(anode.name, face),
 
     local ptb = g.pnode({
@@ -572,6 +608,50 @@ local clus_all_tpc (
     eventNo = 1,
     save_opflash = false,
     premerged = false,   // skip the input PointTreeMerging (joint QLMatching already merged)
+    // Tip-touch relaxation for the cathode-crossing connector (see the
+    // cm.cathode_connect call below).  null => the C++ defaults leave the
+    // relaxation OFF, so the compiled config is byte-identical when unset.
+    cc_tip_touch_cut = null,
+    cc_tip_touch_angle_cut = null,
+    // Cathode-crossing connector distance gates (cm.cathode_connect below).
+    // PDVD's cathode is ~6 cm thick, so a genuine crosser's two halves stop at
+    // their own cathode face (~+-3 cm) and meet 6-9 cm apart in drift-x -- past
+    // the SBND-tuned defaults.  These args default to the CURRENT effective PDVD
+    // values (cathode_x_cut=5 cm, drift_cut=8 cm, dis_cut=5 cm), so leaving them
+    // unset keeps the compiled config byte-identical; the runner supplies an
+    // enlarged census operating point.  All three are always-emitted keys in the
+    // common cathode_connect() helper, so pass native internal units here.
+    cc_cathode_x_cut = 5*wc.cm,
+    cc_drift_cut = 8*wc.cm,
+    cc_dis_cut = 5*wc.cm,
+    // 6cm-cathode crosser relaxation (cm.cathode_connect below): loosen the
+    // cc_pca connection-vector bound for a drift-gated crosser (both tips at the
+    // cathode, same drift depth, same flash), because the two half-tracks stop at
+    // the two faces of the 6 cm cathode so the tip-to-tip connection spans pure
+    // cathode geometry (drift gap + SCE transverse shift), not track direction --
+    // an SCE-noisy estimate (34-69 deg on confirmed PDVD crossers) while the
+    // cluster PCA stays tight (<10 deg).  null => C++ default 0 => relaxation OFF
+    // => byte-identical when unset; the runner supplies the census operating point.
+    cc_crosser_conn_relax = null,
+    // 6cm-cathode crosser tt_pca bound raise (cm.cathode_connect below): admit a bent
+    // crosser (delta-ray / SCE curvature) whose two halves' cluster-PCA axes differ by
+    // up to ~15 deg while still one track.  QL-pin truth: real crossers reach ttP~18
+    // (p90); coincidences sit at ttP p50~24, so a ~15 deg bound recovers bent crossers
+    // without admitting coincidences.  null => C++ default 0 => bound stays angle_cut
+    // => byte-identical when unset; runner supplies the census operating point.
+    cc_crosser_pca_angle = null,
+    // 6cm-cathode near-cathode closest-approach retry (cm.cathode_connect below): when
+    // the GLOBAL closest 3D point pair hard-gates (a long inclined crosser whose closest
+    // approach falls mid-track, tip>=cathode_x_cut or drift>=drift_cut), retry with the
+    // closest approach restricted to points within this distance of the cathode, then
+    // re-apply the gates to the near-cathode tips.  Additive (only rescues would-be
+    // rejects).  null => C++ default 0 => retry OFF => byte-identical; runner supplies
+    // the census operating point (~10 cm).
+    cc_cathode_band_dis = null,
+    // Add a second pre-pipeline raw-imaging Bee set split by drift side
+    // (img-side-bot / img-side-top), alongside the whole img-global.  false =>
+    // the bee_points_sets list is unchanged => compiled config byte-identical.
+    bee_img_per_side = false,
     ) = {
     local pcmerging = g.pnode({
         type: "PointTreeMerging",
@@ -612,10 +692,25 @@ local clus_all_tpc (
         // NB PDVD has ONE all-PD flash, so a genuine crosser's two halves
         // normally share the SAME matched flash — the 1 us window is a
         // formality that also admits a rare split match.
-        cm.cathode_connect(cathode_x_cut=5*wc.cm, drift_cut=8*wc.cm,
+        //
+        // cc_tip_touch_cut / cc_tip_touch_angle_cut port the PDHD tip-touch
+        // relaxation (pdhd/clus.jsonnet): when the two cathode tips nearly touch
+        // (~1cm gap) drop the cc_pca connection-alignment term (tip_touch_cut)
+        // and accept on the local charge-weighted Hough within
+        // tip_touch_angle_cut even if a curved half inflates the global PCA
+        // above angle_cut.  null => C++ defaults tip_touch_cut=0 (OFF) and
+        // tip_touch_angle_cut=angle_cut (OFF) => byte-identical when unset.
+        // PDVD values are set from the runner (census-tuned operating point).
+        cm.cathode_connect(cathode_x_cut=cc_cathode_x_cut, drift_cut=cc_drift_cut,
+                           dis_cut=cc_dis_cut,
                            min_length_short=2*wc.cm, short_dir_len=25*wc.cm,
                            conn_short_cut=30.0, use_flash_t0=premerged,
-                           flash_t0_window=1*wc.us),
+                           flash_t0_window=1*wc.us,
+                           tip_touch_cut=cc_tip_touch_cut,
+                           tip_touch_angle_cut=cc_tip_touch_angle_cut,
+                           crosser_conn_relax=cc_crosser_conn_relax,
+                           crosser_pca_angle=cc_crosser_pca_angle,
+                           cathode_band_dis=cc_cathode_band_dis),
     ],
 
     local mabc = g.pnode({
@@ -669,21 +764,46 @@ local clus_all_tpc (
                     individual: false            // Output individual APA/Face
                 },
             {
-                    // name "img" dumps the live grouping BEFORE the all-TPC
-                    // pipeline -> the per-drift-group clustering result (stage
-                    // 3, post group merging), grouped by drift side:
-                    // clustering-group0123 / clustering-group4567.  The
-                    // "clustering" set above (end dump) gives
-                    // clustering-global (full-detector clustering).
+                    // The hard-coded "img" name is MABC's pre-pipeline hook: this
+                    // set is dumped from the live grouping BEFORE the all-TPC
+                    // clustering pipeline runs -- i.e. the raw imaged charge (the
+                    // per-anode matched clusters).  With no apa_groups it is
+                    // dumped whole -> img-global (PDHD/SBND parity).  Its cluster
+                    // ids are the SAME enumeration the pre-pipeline "op" dump
+                    // writes into each flash's op_cluster_ids (fill_bee_flashes
+                    // runs at the same point), so the Bee viewer's flash<->cluster
+                    // pairing must be checked against THIS instance -- neither the
+                    // post-pipeline clustering-global (re-enumerated) nor a
+                    // separate bee-blobs imaging pass (own numbering) matches.
+                    // The hook can host only one set, so emitting img-global here
+                    // replaces the former per-drift-side stage-3
+                    // clustering-group0123/4567 dump (cf. PDHD clus.jsonnet).
                     name: "img",
                     detector: "protodunevd",
-                    algorithm: "clustering",    // -> clustering-group0123 / clustering-group4567
+                    algorithm: "img",           // -> img-global (raw imaged charge)
                     pcname: "3d",
-                    coords: ["x", "y", "z"],    // uncorrected, matching the global set
+                    coords: ["x", "y", "z"],    // raw drift coords, matching the op dump point
                     individual: false,
-                    apa_groups: apa_drift_groups,
                 }
-            ],
+            ] + (if bee_img_per_side then [
+                {
+                    // Opt-in second pre-pipeline raw set, split by drift side via
+                    // apa_groups (routed by physical anode).  prepipeline:true lets
+                    // it dump at the same pre-clustering point as "img" without the
+                    // name=="img" collision.  algorithm "img" + group names =>
+                    // instances img-side-bot / img-side-top, in the SAME raw
+                    // apparent-x frame as img-global (the two halves overlap here and
+                    // join after T0 in clustering-global -- that overlap is intended).
+                    name: "imgside",
+                    detector: "protodunevd",
+                    algorithm: "img",
+                    pcname: "3d",
+                    coords: ["x", "y", "z"],
+                    individual: false,
+                    prepipeline: true,
+                    apa_groups: img_side_groups,
+                },
+            ] else []),
             pipeline: wc.tns(cm_pipeline),
         },
     }, nin=1, nout=1, uses=anodes+[dv, pcts]+cm_pipeline),
@@ -719,7 +839,7 @@ local clus_all_tpc (
     per_face(anode, face=0, dump=true) :: clus_per_face(anode, face=face, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo, stepped_center_fallback=stepped_center_fallback),
     per_apa(anode, dump=true) :: clus_per_apa(anode, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo, stepped_center_fallback=stepped_center_fallback),
     per_group(anodes, group_name, dump=true) :: clus_per_group(anodes, group_name, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo),
-    all_tpc(anodes, ngroups=2, dump=true, save_opflash=false, premerged=false) :: clus_all_tpc(anodes, ngroups=ngroups, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo, save_opflash=save_opflash, premerged=premerged),
+    all_tpc(anodes, ngroups=2, dump=true, save_opflash=false, premerged=false, cc_tip_touch_cut=null, cc_tip_touch_angle_cut=null, cc_cathode_x_cut=5*wc.cm, cc_drift_cut=8*wc.cm, cc_dis_cut=5*wc.cm, cc_crosser_conn_relax=null, cc_crosser_pca_angle=null, cc_cathode_band_dis=null, bee_img_per_side=false) :: clus_all_tpc(anodes, ngroups=ngroups, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo, save_opflash=save_opflash, premerged=premerged, cc_tip_touch_cut=cc_tip_touch_cut, cc_tip_touch_angle_cut=cc_tip_touch_angle_cut, cc_cathode_x_cut=cc_cathode_x_cut, cc_drift_cut=cc_drift_cut, cc_dis_cut=cc_dis_cut, cc_crosser_conn_relax=cc_crosser_conn_relax, cc_crosser_pca_angle=cc_crosser_pca_angle, cc_cathode_band_dis=cc_cathode_band_dis, bee_img_per_side=bee_img_per_side),
     // Expose the DetectorVolumes node builder so the Q/L matching graph can
     // reference the SAME all-anode DV the clustering uses (deterministic by name).
     detector_volumes(anodes, face="") :: detector_volumes(anodes, face),

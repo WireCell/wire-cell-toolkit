@@ -150,6 +150,27 @@ std::map<int, Cluster*> Grouping::separate(
     bool notify_value)
 {
     const int ident = cluster->ident();
+
+    // Perblob row-order invariant (clus/docs/perblob_invariant.md): the base
+    // separate() moves blob children but knows nothing of the cluster-level
+    // N-row "perblob" Dataset whose row i must describe child i.  Snapshot it
+    // here and carve it across the survivor and the splits below, so every
+    // caller gets consistent per-part provenance for free.  Clusters without
+    // the Dataset (the overwhelmingly common case, e.g. the whole pre-isolated
+    // clustering stage) pay one map lookup.
+    Dataset pb_snap;
+    bool pb_entry = false, pb_ok = false;
+    {
+        const auto& lpcs = cluster->value().local_pcs();
+        auto it = lpcs.find("perblob");
+        if (it != lpcs.end()) {
+            pb_entry = true;
+            pb_ok = !it->second.empty()
+                && it->second.size_major() == (size_t) cluster->nchildren();
+            if (pb_ok) pb_snap = it->second;  // copy
+        }
+    }
+
     auto ret = this->NaryTree::FacadeParent<Cluster, points_t>::separate(cluster, groups, false, notify_value);
 
     // Clear cache of original cluster after separation
@@ -162,11 +183,192 @@ std::map<int, Cluster*> Grouping::separate(
         c->from(*cluster);
     }
 
+    if (pb_entry && !ret.empty()) {
+        static auto pblog = Log::logger("clus");
+        if (!pb_ok) {
+            // Rows already disagreed with the children on the way in -- a
+            // truthful carve is impossible.  Drop it loudly rather than let a
+            // misaligned array propagate (a loud absence beats a silent lie).
+            pblog->warn("Grouping::separate: cluster {} 'perblob' rows do not "
+                        "match its children -- dropping the dataset",
+                        ident);
+            if (!remove) cluster->value().local_pcs().erase("perblob");
+        }
+        else {
+            auto rows_of = [&groups](int want) {
+                std::vector<size_t> rows;
+                for (size_t i = 0; i < groups.size(); ++i) {
+                    if (want < 0 ? groups[i] < 0 : groups[i] == want) {
+                        rows.push_back(i);
+                    }
+                }
+                return rows;
+            };
+            if (!remove) {
+                auto kept = rows_of(-1);
+                auto& lpcs = cluster->value().local_pcs();
+                if (kept.empty()) {
+                    // subset({}) would be a keyless Dataset; an absent entry
+                    // is the cleaner representation of "no rows".
+                    lpcs.erase("perblob");
+                }
+                else {
+                    lpcs["perblob"] = pb_snap.subset(kept);
+                }
+            }
+            for (auto& [gid, c] : ret) {
+                c->value().local_pcs()["perblob"] = pb_snap.subset(rows_of(gid));
+            }
+        }
+    }
+
     if(remove){
         // Remove the original cluster from the grouping.
         this->destroy_child(cluster, notify_value);
     }
-    return ret;    
+    return ret;
+}
+
+namespace {
+    // Snapshot of one merge participant's "perblob" state, taken BEFORE the
+    // base merge moves children / destroys shells.
+    struct PBPart {
+        Facade::Cluster* c{nullptr};
+        size_t nkids{0};
+        bool entry{false};   // has a "perblob" entry at all
+        bool usable{false};  // entry with non-empty keys and rows == children
+        Dataset ds;          // copy, only when usable
+    };
+
+    PBPart pb_snap_of(Facade::Cluster* c)
+    {
+        PBPart p;
+        p.c = c;
+        if (!c) return p;
+        p.nkids = (size_t) c->nchildren();
+        const auto& lpcs = c->value().local_pcs();
+        auto it = lpcs.find("perblob");
+        if (it == lpcs.end()) return p;
+        p.entry = true;
+        if (!it->second.empty() && it->second.size_major() == p.nkids) {
+            p.usable = true;
+            p.ds = it->second;  // copy
+        }
+        return p;
+    }
+
+    // After the base merge: concatenate the parts' datasets onto the target's
+    // in adoption order, or drop the target's dataset loudly when a truthful
+    // concatenation is impossible.  See the Grouping::merge() header docs.
+    void pb_concat(PBPart& tsnap, std::vector<PBPart>& psnaps,
+                   Facade::Cluster* target, bool keep)
+    {
+        static auto pblog = WireCell::Log::logger("clus");
+
+        // keep=true leaves the emptied part shells alive; a retained
+        // "perblob" entry there would be rows without children.
+        if (keep) {
+            for (auto& p : psnaps) {
+                if (p.entry) p.c->value().local_pcs().erase("perblob");
+            }
+        }
+
+        // Contributors are the participants that brought children (and hence
+        // must bring rows).  Zero-child participants have nothing to say.
+        size_t nwith = 0, nwithout = 0;
+        if (tsnap.c && tsnap.nkids > 0) (tsnap.usable ? ++nwith : ++nwithout);
+        for (const auto& p : psnaps) {
+            if (p.nkids > 0) (p.usable ? ++nwith : ++nwithout);
+        }
+
+        if (!target) {
+            // Base merge made its own fresh target which we cannot reach from
+            // here; any carried provenance died with the shells.
+            if (nwith) {
+                pblog->warn("Grouping::merge: {} part(s) carried 'perblob' but "
+                            "no target was given -- provenance dropped",
+                            nwith);
+            }
+            return;
+        }
+
+        if (nwith == 0) {
+            // Nothing carried.  If the target holds a stale entry (e.g. rows
+            // that disagreed with its children on the way in) drop it now
+            // that the child list changed.
+            if (tsnap.entry && !tsnap.usable) {
+                target->value().local_pcs().erase("perblob");
+                if (tsnap.nkids > 0) {
+                    pblog->warn("Grouping::merge: target cluster {} 'perblob' "
+                                "rows did not match its children -- dropped",
+                                target->ident());
+                }
+            }
+            return;
+        }
+
+        bool ok = (nwithout == 0);
+        if (ok) {
+            // Key sets must agree for a truthful row-wise concatenation.
+            const PBPart* ref = (tsnap.c && tsnap.nkids > 0 && tsnap.usable)
+                                    ? &tsnap : nullptr;
+            for (const auto& p : psnaps) {
+                if (!(p.nkids > 0 && p.usable)) continue;
+                if (!ref) { ref = &p; continue; }
+                if (p.ds.keys() != ref->ds.keys()) { ok = false; break; }
+            }
+        }
+        if (ok) {
+            Dataset out;
+            if (tsnap.c && tsnap.nkids > 0) out = tsnap.ds;  // copy
+            for (const auto& p : psnaps) {
+                if (p.nkids > 0) out.append(p.ds);
+            }
+            if (out.size_major() == (size_t) target->nchildren()) {
+                target->value().local_pcs()["perblob"] = std::move(out);
+                return;
+            }
+            ok = false;
+        }
+
+        // Could not concatenate truthfully: loud absence beats silent lie.
+        target->value().local_pcs().erase("perblob");
+        pblog->warn("Grouping::merge: cluster {} 'perblob' could not be "
+                    "carried through the merge ({} with / {} without usable "
+                    "rows) -- dropped",
+                    target->ident(), nwith, nwithout);
+    }
+}
+
+std::vector<int> Grouping::merge(std::map<int, Cluster*>& splits, Cluster* target,
+                                 bool keep, int existingID)
+{
+    PBPart tsnap = pb_snap_of(target);
+    std::vector<PBPart> psnaps;
+    psnaps.reserve(splits.size());
+    for (auto& [gid, c] : splits) {  // ascending gid == base adoption order
+        (void) gid;
+        psnaps.push_back(pb_snap_of(c));
+    }
+    auto cc = this->NaryTree::FacadeParent<Cluster, points_t>::merge(
+        splits.begin(), splits.end(), target, keep, existingID);
+    pb_concat(tsnap, psnaps, target, keep);
+    return cc;
+}
+
+std::vector<int> Grouping::merge(std::vector<Cluster*>& parts, Cluster* target,
+                                 bool keep, int existingID)
+{
+    PBPart tsnap = pb_snap_of(target);
+    std::vector<PBPart> psnaps;
+    psnaps.reserve(parts.size());
+    for (auto* c : parts) {  // vector order == base adoption order
+        psnaps.push_back(pb_snap_of(c));
+    }
+    auto cc = this->NaryTree::FacadeParent<Cluster, points_t>::merge(
+        parts.begin(), parts.end(), target, keep, existingID);
+    pb_concat(tsnap, psnaps, target, keep);
+    return cc;
 }
 
 void Grouping::fill_cache(GroupingCache& gc) const
@@ -813,7 +1015,19 @@ std::pair<double, double> Grouping::get_wire_charge(int apa, int face, int plane
     return wire_it->second;
 }
 
-bool Grouping::is_wire_dead(int apa, int face, int plane, 
+const std::unordered_map<int, std::pair<double, double>>*
+Grouping::wire_charge_row(int apa, int face, int plane, int time_slice) const {
+    build_wire_cache(apa, face, plane);
+    auto& gc = this->cache();
+    const auto& cache = gc.wire_caches[apa][face];
+    auto time_it = cache.charge_data[plane].find(time_slice);
+    if (time_it == cache.charge_data[plane].end()) {
+        return nullptr;
+    }
+    return &time_it->second;
+}
+
+bool Grouping::is_wire_dead(int apa, int face, int plane,
                            int wire_index, int time_slice) const {
     // Ensure cache is built for this APA/face/plane
     build_wire_cache(apa, face, plane);
@@ -996,6 +1210,19 @@ Facade::Flash Facade::Grouping::flash_at(int flash_index) const
         flash.m_times.push_back(l_times[light_index]);
         flash.m_values.push_back(l_values[light_index]);
         flash.m_errors.push_back(l_errors[light_index]);
+    }
+
+    // Sparse readout-coverage rows (channels with coverage < 1 of this
+    // flash's window).  Absent PC (legacy archives) => empty, fully covered.
+    if (this->has_pc("flashcov")) {
+        const auto c_flash = this->get_pcarray<int>("flash", "flashcov");
+        const auto c_chan  = this->get_pcarray<int>("channel", "flashcov");
+        const auto c_cov   = this->get_pcarray<double>("cov", "flashcov");
+        for (size_t r = 0; r < c_flash.size(); ++r) {
+            if (c_flash[r] != flash_index) continue;
+            flash.m_cov_idents.push_back(c_chan[r]);
+            flash.m_covs.push_back(c_cov[r]);
+        }
     }
     return flash;
 }

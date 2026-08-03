@@ -226,7 +226,11 @@ std::vector<int> Cluster::add_corrected_points(
                                              blob->wpid().face(), blob->wpid().apa());
 
         // Persist only the arrays that actually changed (per the transform).
+        // erase first: on a tree reloaded from disk the corrected arrays may
+        // already exist (they persist through the tensor round trip) and
+        // add() throws on duplicates.
         for (const auto& name : store_names) {
+            lpc_3d.erase(name);
             lpc_3d.add(name, *corrected_points.get(name));
         }
 
@@ -3325,10 +3329,21 @@ std::pair<int, int> Cluster::get_two_boundary_steiner_graph_idx(const std::strin
     }
     auto& steiner_pc = get_pc(steiner_pc_name);
     const auto& coords = get_default_scope().coords;
-    const auto& x_coords = steiner_pc.get(coords.at(0))->elements<double>();
-    const auto& y_coords = steiner_pc.get(coords.at(1))->elements<double>();
-    const auto& z_coords = steiner_pc.get(coords.at(2))->elements<double>();
-    const auto& flag_terminal = steiner_pc.get("flag_steiner_terminal")->elements<int>();
+    // An EMPTY steiner point cloud carries no arrays at all (Dataset::get
+    // returns null) -- report it as the empty-cloud error below instead of
+    // dereferencing null (segfault seen on SBND MC evt 11, whose main cluster
+    // yields zero steiner points).
+    const auto xa = steiner_pc.get(coords.at(0));
+    const auto ya = steiner_pc.get(coords.at(1));
+    const auto za = steiner_pc.get(coords.at(2));
+    const auto fa = steiner_pc.get("flag_steiner_terminal");
+    if (!xa || !ya || !za || !fa) {
+        throw std::runtime_error("Empty Steiner point cloud");
+    }
+    const auto& x_coords = xa->elements<double>();
+    const auto& y_coords = ya->elements<double>();
+    const auto& z_coords = za->elements<double>();
+    const auto& flag_terminal = fa->elements<int>();
 
     const size_t npts = x_coords.size();
     if (npts == 0) {
@@ -3431,14 +3446,26 @@ std::pair<geo_point_t, geo_point_t> Cluster::get_two_boundary_wcps(bool flag_cos
 
 
     
+    // Memoize the per-blob charge estimate: estimate_total_charge() is a pure
+    // function of the blob and the grouping's static CTPC data, but it walks
+    // every wire of the blob through hash lookups.  Recomputing it for every
+    // POINT of the blob dominated this function (doc 54 round 2).  Keyed
+    // lookups only -- the map is never iterated, so pointer keys are
+    // determinism-safe.
+    std::unordered_map<const Blob*, double> blob_total_charge;
+
     // Find extreme points
     for (int i = 0; i < npoints(); i++) {
          // Skip excluded points
          if (is_point_excluded(i)) continue;
-        
+
         // Get blob and check charge threshold
         const Blob* blob = blob_with_point(i);
-        if (blob->estimate_total_charge() < 1500) continue;
+        auto bc_it = blob_total_charge.find(blob);
+        if (bc_it == blob_total_charge.end()) {
+            bc_it = blob_total_charge.emplace(blob, blob->estimate_total_charge()).first;
+        }
+        if (bc_it->second < 1500) continue;
         auto wpid = blob->wpid();
         auto apa = wpid.apa();
         auto face = wpid.face();
@@ -3627,9 +3654,16 @@ std::pair<geo_point_t, geo_point_t> Cluster::get_two_boundary_wcps(bool flag_cos
 
     }
 
-    // Collect all points, avoiding duplicates
+    // Collect all points, avoiding duplicates.  Skip (apa,face) keys that
+    // never saw a qualifying point (no blob above the charge cut): their
+    // extreme points are still default-constructed (0,0,0), and letting the
+    // origin into the farthest-pair scan below fabricates a boundary point
+    // outside the detector (SBND evt285999 main 18: the origin beat both real
+    // track endpoints and, snapped to a steiner terminal, became an interior
+    // "exit" that failed cluster_fc_check).
     std::vector<geo_point_t> all_points;
     for (const auto& entry : boundary_points_map) {
+        if (!initialized_map[entry.first]) continue;
         all_points.push_back(entry.second.first);
         all_points.push_back(entry.second.second);
     }

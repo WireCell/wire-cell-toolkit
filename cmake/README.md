@@ -93,7 +93,7 @@ Pass these as `-D<NAME>=<VALUE>` at configure time.
 | `CMAKE_INSTALL_PREFIX` | `/usr/local` | Install destination (§6). |
 | `CMAKE_BUILD_TYPE` | `RelWithDebInfo` | `Debug`/`Release`/`RelWithDebInfo`/`MinSizeRel` (≈ waf `-O2 -ggdb3`). |
 | `WCT_BUILD_MODE` | `` (auto) | Force `development` (relaxed warnings) or `release` (strict, `-Werror`). Auto-detected from the git branch otherwise. |
-| `WCT_CXX_STANDARD` | `17` | C++ standard (`17`/`20`/`23`); mirrors `--cxxstd`. |
+| `CMAKE_CXX_STANDARD` | `17` | C++ standard (`17`/`20`/`23`); native CMake variable (mirrors `--cxxstd`). |
 | `WCT_SPDLOG_ACTIVE_LEVEL` | `trace` | Compiled-in minimum spdlog level (`trace`…`off`). |
 | `WCT_SPDLOG_STATIC` | `ON` | Define `SPDLOG_COMPILED_LIB`. |
 | `WCT_WITH_TESTS` | `OFF` | Build and register the test suite (§5); mirrors `--tests`. |
@@ -238,7 +238,7 @@ This installs libraries to `<prefix>/lib`, headers to `<prefix>/include`
 (including the generated `WireCellUtil/BuildConfig.h`), apps to `<prefix>/bin`,
 Jsonnet configuration to `<prefix>/share/wirecell`, the pkg-config file
 `<prefix>/lib/pkgconfig/wire-cell-toolkit.pc`, and the CMake package config
-under `<prefix>/lib/cmake/WireCellToolkit/`.
+under `<prefix>/lib/cmake/WireCell/`.
 
 ## 7. Using WCT from a downstream project
 
@@ -246,7 +246,7 @@ CMake `find_package` (targets are namespaced `WireCell::`, with an aggregate
 `WireCell::WireCell`):
 
 ```cmake
-find_package(WireCellToolkit REQUIRED)
+find_package(WireCell REQUIRED)
 target_link_libraries(myapp PRIVATE WireCell::Util WireCell::Aux)
 ```
 

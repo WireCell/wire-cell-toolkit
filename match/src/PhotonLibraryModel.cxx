@@ -47,6 +47,24 @@ PhotonLibraryModel::PhotonLibraryModel(const std::string& meta_file)
     }
     const float* data = arr.data<float>();
     m_vis.assign(data, data + arr.num_vals);
+
+    // Optional per-channel position, for the caller's own channel-order
+    // cross-check (see the header comment).  Absent in older/hand-written
+    // meta files -- leave m_pos_cm empty, has_positions() stays false.
+    const auto& cpc = meta["chan_pos_cm"];
+    if (cpc.isArray()) {
+        if (cpc.size() != m_nch) {
+            raise<ValueError>("PhotonLibraryModel: chan_pos_cm length %d != nchan %d in '%s'",
+                              (int) cpc.size(), (int) m_nch, meta_path);
+        }
+        m_pos_cm.reserve(m_nch);
+        for (const auto& p : cpc) {
+            if (!p.isArray() || p.size() != 3) {
+                raise<ValueError>("PhotonLibraryModel: malformed chan_pos_cm entry in '%s'", meta_path);
+            }
+            m_pos_cm.emplace_back(p[0].asDouble(), p[1].asDouble(), p[2].asDouble());
+        }
+    }
 }
 
 void PhotonLibraryModel::visibilities(std::vector<double>& vis, const WireCell::Point& p_cm,

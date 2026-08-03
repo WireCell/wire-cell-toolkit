@@ -2,12 +2,12 @@
 # (epic wct-ike, task wct-ike.11).
 #
 # Call once at the end of the top-level CMakeLists, after all packages are
-# added (so the WireCellToolkitTargets export set and the WCT::<TOKEN> wrapper
+# added (so the WireCellTargets export set and the WCT::<TOKEN> wrapper
 # targets are complete).  Produces, installed under the conventional locations:
 #
-#   lib/cmake/WireCellToolkit/WireCellToolkitTargets.cmake        (install(EXPORT))
-#   lib/cmake/WireCellToolkit/WireCellToolkitConfig.cmake         (find_package entry)
-#   lib/cmake/WireCellToolkit/WireCellToolkitConfigVersion.cmake
+#   lib/cmake/WireCell/WireCellTargets.cmake        (install(EXPORT))
+#   lib/cmake/WireCell/WireCellConfig.cmake         (find_package(WireCell) entry)
+#   lib/cmake/WireCell/WireCellConfigVersion.cmake
 #   lib/pkgconfig/wire-cell-toolkit.pc
 #
 # The native install(EXPORT) carries the WCT-internal target graph and library
@@ -20,7 +20,7 @@
 include_guard(GLOBAL)
 include(CMakePackageConfigHelpers)
 
-set(WCT_CMAKE_INSTALL_DIR "${CMAKE_INSTALL_LIBDIR}/cmake/WireCellToolkit")
+set(WCT_CMAKE_INSTALL_DIR "${CMAKE_INSTALL_LIBDIR}/cmake/WireCell")
 
 # How a consumer re-discovers each external token.  Sets, in the caller:
 #   _cmd       commands (a ;-list of lines) to run before recreating the wrapper
@@ -123,10 +123,10 @@ function(wct_install_exports)
           DESTINATION "${CMAKE_INSTALL_LIBDIR}/pkgconfig")
 
   # ---- native target export ----
-  install(EXPORT WireCellToolkitTargets
+  install(EXPORT WireCellTargets
           NAMESPACE WireCell::
           DESTINATION "${WCT_CMAKE_INSTALL_DIR}"
-          FILE WireCellToolkitTargets.cmake)
+          FILE WireCellTargets.cmake)
 
   # ---- generate the external-wrapper recreation block for the Config ----
   set(_block "")
@@ -164,15 +164,15 @@ function(wct_install_exports)
   set(WCT_EXPORT_FIND_BLOCK "${_block}")
 
   configure_package_config_file(
-    "${CMAKE_SOURCE_DIR}/cmake/WireCellToolkitConfig.cmake.in"
-    "${CMAKE_BINARY_DIR}/WireCellToolkitConfig.cmake"
+    "${CMAKE_SOURCE_DIR}/cmake/WireCellConfig.cmake.in"
+    "${CMAKE_BINARY_DIR}/WireCellConfig.cmake"
     INSTALL_DESTINATION "${WCT_CMAKE_INSTALL_DIR}")
   write_basic_package_version_file(
-    "${CMAKE_BINARY_DIR}/WireCellToolkitConfigVersion.cmake"
+    "${CMAKE_BINARY_DIR}/WireCellConfigVersion.cmake"
     VERSION "${WCT_VERSION_TRIPLET}"
     COMPATIBILITY SameMajorVersion)
   install(FILES
-    "${CMAKE_BINARY_DIR}/WireCellToolkitConfig.cmake"
-    "${CMAKE_BINARY_DIR}/WireCellToolkitConfigVersion.cmake"
+    "${CMAKE_BINARY_DIR}/WireCellConfig.cmake"
+    "${CMAKE_BINARY_DIR}/WireCellConfigVersion.cmake"
     DESTINATION "${WCT_CMAKE_INSTALL_DIR}")
 endfunction()

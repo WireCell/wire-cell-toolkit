@@ -317,6 +317,18 @@ namespace WireCell {
 
             IDFT::pointer m_dft;
 
+            // If true, route the real<->complex time-axis FFTs
+            // through the native r2c/c2r transforms (about half the
+            // flops of the widened complex path).  Results agree with
+            // the legacy path only up to round-off, so default false
+            // = bit-identical.
+            bool m_use_real_dft{false};
+
+            // Dispatch on m_use_real_dft.
+            Array::array_xxc dft_fwd_r2c(const Array::array_xxf& arr, int axis) const;
+            Array::array_xxf dft_inv_c2r(const Array::array_xxc& spec, int axis) const;
+            Waveform::compseq_t dft_fwd_r2c(const Waveform::realseq_t& wave) const;
+
             //------Padding members
             //Needed when physically separate planes are concatenated together
             //for processing. i.e. DUNE collection planes on opposite faces or

@@ -78,6 +78,26 @@ namespace WireCell {
             // more than max_fired of the SAME PDs.  Strictly additive to the
             // existing merges.  Off by default; on for PDHD via flash.jsonnet.
             bool   m_refine_subset_merge{false};
+            // Slow-tail merge: absorb a later, dimmer flash whose PE is
+            // dominated by wide (>= tail_min_width_us) ophits on OpDets the
+            // earlier flash already lights -- the LAr slow (triplet) tail of
+            // one physical flash, split off by the OpHit splitter + 1us
+            // accumulators (PDVD cathode X-ARAPUCA full streams; doc
+            // pdvd 23 §7d: late member 97-99.9% cathode-XA slow-tail PE,
+            // dt 1.2-1.3 us, PE ratio 0.53-0.82 so the refine gate above
+            // cannot catch it).  Narrow passenger hits on other PDs (late
+            // self-trigger records) are tolerated via the PE-dominance
+            // fraction.  On a tail-only merge the surviving flash KEEPS the
+            // earlier member's time/time_width (scintillation onset), unlike
+            // the PE-weighted recompute of the refine merge.  Independent of
+            // flash_refine (either enables the pass; criteria are OR-ed).
+            // Off by default => bit-identical; the adjacency grid is NOT
+            // consulted (built with horizontal-drift assumptions).
+            bool   m_flash_tail_merge{false};
+            double m_tail_window_us{3.0};     // absorb j iff t_j - t_i <= this [us]
+            double m_tail_min_width_us{1.0};  // hit counts as slow-tail iff width >= this [us]
+            double m_tail_pe_frac{0.7};       // wide+seed-lit PE >= this fraction of j's PE
+            double m_tail_pe_ratio{1.0};      // sanity cap: pe_j <= ratio * pe_i
             // Per-OpDet grid coordinate within its cathode side, built once in
             // configure(): row = y-rank 0..9, col = z-rank 0..7, side = 0 (x>=0)
             // / 1 (x<0).  Drives the 8-neighbour (Chebyshev<=1) adjacency test.
@@ -110,6 +130,12 @@ namespace WireCell {
             // for downstream charge clustering / Q-L matching.  0 => key written as
             // 0 (no offset applied downstream).
             double m_offset_us{0.0};
+
+            // Extra key/values merged verbatim into the output tensor-set
+            // metadata (e.g. PDVD's per-crate offsets offset_bot_us /
+            // offset_top_us).  Null (default) => nothing stamped, output
+            // byte-identical.
+            Configuration m_metadata_extra;
 
             std::vector<double> m_opdet_x, m_opdet_y, m_opdet_z;  // [nchan], mm
 

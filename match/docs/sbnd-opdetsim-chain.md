@@ -379,7 +379,7 @@ separate study), since the current tuning already absorbed the average response.
 
 ### Per-PMT light error and the data/MC normalization (PE-error study)
 
-`sbnd_xin/ql_pe_error.py` (see `sbnd_xin/docs/pe-error-study.md`) uses the 10 data + 10 MC
+`sbnd_xin/ql_pe_error.py` (see `sbnd_xin/docs/17_pe-error-study.md`) uses the 10 data + 10 MC
 hand-scans to fit the per-PMT light error `a` from `E[(pred−meas)²]=meas+a·pred²` (the matcher
 assumes 30% ⇒ `a=0.09`). Findings: the robust per-PMT error is **~30% for data** (≈33% on clean
 matches) and **tighter for MC** (~15–24%). The notable result is a **data/MC normalization

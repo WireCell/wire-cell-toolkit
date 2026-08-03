@@ -76,6 +76,13 @@ namespace WireCell::Clus::Facade {
 
         inline const std::string TGM = "TGM";
 
+        /// Set by TaggerCheckFC when cluster_fc_check() finds the main cluster
+        /// fully contained inside the fiducial volume.  Tagger-computed sibling
+        /// of STM/TGM above -- NOT the same as the lowercase "fully_contained"
+        /// flag, which is an imported uBooNE verdict copied out of a
+        /// tagger_info point cloud by ClusteringTaggerFlagTransfer.
+        inline const std::string FC = "FC";
+
     }
 
     struct ClusterLess {
@@ -118,11 +125,53 @@ namespace WireCell::Clus::Facade {
     // ident() of the sub-cluster each blob came from, so a downstream consumer
     // (e.g. the Bee writer) can recover the pre-merge cluster identity of every
     // blob.  This is independent of the aname/parent_id ("perblob") array above.
+    //
+    // SCOPE INVARIANT -- the recorded ids are meaningful only WITHIN one
+    // cluster.  Equal values in two DIFFERENT clusters name different objects
+    // and must never be joined on.  MultiAlgBlobClustering re-runs
+    // Grouping::enumerate_idents() after every visitor, so the ident() values
+    // captured here belong to the numbering epoch in force at THIS call, while
+    // the save-time fill-in for a cluster that was never merged writes the
+    // ident of the LATEST epoch.  Both epochs are dense 1..N and nothing in the
+    // array says which one a row belongs to, so the two overlap: measured 31%
+    // of distinct "real_cluster_id" values name two clusters on the SBND d52ron
+    // 30-event set (all of them recorded-vs-fill-in; recorded-vs-recorded
+    // cannot collide, since idents are unique at the instant of this call).
+    // See sbnd_xin/docs/53_unmerge-vs-cathode-crossers.md.  Set
+    // MultiAlgBlobClustering's "real_cluster_id_global" to re-stamp the array
+    // into one globally unique epoch at save time.
+    // flags_from_longest (default false = historical behavior): Cluster::from()
+    // is called once per member and flags_from() copies the donor's flag VALUES
+    // (including zeros), so the merged cluster's flags are those of whichever
+    // member happened to be visited last -- arbitrary.  A cluster that was the
+    // matched main of its bundle can therefore lose flag_main_cluster to a tiny
+    // co-merged fragment.  With this true, the flags are re-applied after the
+    // merge from the same representative member that donates the flash (the
+    // longest flash-bearing one; longest overall when no member has a flash),
+    // mirroring the cluster_t0/flash/matched_flash_gid fixup below so that the
+    // merged cluster's flags and flash describe one coherent donor.
+    // orig_main_aname: when set (with orig_id_aname and pcname), additionally
+    // save a per-blob marker (1/0) of the merged cluster's REPRESENTATIVE
+    // member -- the flash/flags donor, i.e. the one main the merged cluster
+    // reports -- so its points stay identifiable inside the merged cluster
+    // (read back by TaggerCheckTGM main_component_mode="real").  The
+    // "main_cluster" flag cannot serve: a flash group can merge several
+    // bundles, each of whose mains carries it.
+    // Independently of all of the above, a fixed registry of provenance PAIRS
+    // (currently just "assoc_cluster_id"/"assoc_cluster_main") is CARRIED across
+    // the merge whenever the members have them: the main array is concatenated
+    // verbatim and the id array is rebased per member into a fresh dense range,
+    // with a member lacking the arrays contributing one fresh id and main=1.
+    // See the long comment at the top of merge_clusters() for why each of those
+    // three choices is what it is; doc 52 4b has the full argument.  Absent
+    // arrays => no-op, so this costs nothing when the writer knob is off.
     std::vector<Cluster*> merge_clusters(cluster_connectivity_graph_t& g, //
                                          Grouping& grouping,
                                          const std::string& aname="",
                                          const std::string& pcname="perblob",
-                                         const std::string& orig_id_aname="");
+                                         const std::string& orig_id_aname="",
+                                         bool flags_from_longest=false,
+                                         const std::string& orig_main_aname="");
 
     // Assign each cluster an integer "flash-time group" id.  Clusters whose
     // matched flash time (cluster_t0) differ by less than `window` share a group
@@ -133,6 +182,36 @@ namespace WireCell::Clus::Facade {
     // restrict merging to clusters coincident in flash time.
     std::map<const Cluster*, int> assign_flash_t0_groups(
         const std::vector<Cluster*>& clusters, double window);
+
+    // Diagnostic-only (env WCT_PROV_CHECK=1, else a fast no-op returning 0):
+    // validate the per-blob provenance arrays of every cluster child of the
+    // given grouping NODE -- per-key row counts vs blob count, and spatial
+    // compactness of each assoc_cluster_main==0 group -- logging any violation
+    // under logger "clus.provchk" tagged with `tag`.  Returns the number of
+    // problems found.  Takes the raw node (not the facade) so it can run
+    // where facades are not set up (PointTreeMerging, serialization
+    // round-trips).  See clus/src/prov_check.cxx and doc 52 §11.
+    size_t check_perblob_provenance(
+        const WireCell::PointCloud::Tree::Points::node_t& groot,
+        const std::string& tag);
+
+    // Restore the "perblob" row-i == child-i invariant after a
+    // separate-then-merge-back (or total take-back) round trip.  The round
+    // trip permutes the blob children -- kept (cc<0) blobs stay in place,
+    // split-off groups are re-appended at the END in ascending group-id order
+    // (both FacadeParent::merge() and an ascending-key take_children loop do
+    // this) -- while the cluster's node-local per-blob Dataset keeps its
+    // original row order.  This applies the SAME permutation to the whole
+    // Dataset (all arrays at once, via Dataset::subset), exactly as
+    // QLMatching::recompose_cluster_groups() does (doc 52 §12.4).  `cc` is
+    // the per-blob group array that was given to separate(), in PRE-split
+    // children order.  Fail-open no-op (returns false) unless the Dataset
+    // exists and both its major size and the cluster's current child count
+    // equal cc.size() -- so at any pipeline stage where the array was never
+    // written this is byte-identical to not calling it.
+    bool realign_perblob_after_regroup(Cluster& cluster,
+                                       const std::vector<int>& cc,
+                                       const std::string& pcname = "perblob");
 
 
 
@@ -298,7 +377,21 @@ namespace WireCell::Clus::Facade {
     /// Used by:
     ///   - TaggerCheckNeutrino to fill tagger_info.match_isFC
     ///   - TaggerCheckSTM to drive STM / TGM classification
-    FCCheckResult cluster_fc_check(Cluster& cluster, IDetectorVolumes::pointer dv);
+    ///   - TaggerCheckFC to set the "FC" cluster flag
+    ///
+    /// fiducial (optional, default nullptr): when null, the direct
+    /// inside/outside tests use the grouping's FiducialUtils
+    /// (DetectorVolumes = union of per-face sensitive volumes, no margin) --
+    /// the historical behavior, unchanged for every caller that omits it.
+    /// When given, those tests instead run against this IFiducial with
+    /// fv_tolerance applied (negative = inset), matching how TaggerCheckTGM
+    /// evaluates containment so the FC and TGM verdicts can be compared.
+    /// Only the DIRECT fiducial tests are redirected: the dead-region and
+    /// signal-processing checks keep using FiducialUtils' per-(apa,face)
+    /// logic, exactly as TaggerCheckTGM does.
+    FCCheckResult cluster_fc_check(Cluster& cluster, IDetectorVolumes::pointer dv,
+                                   IFiducial::pointer fiducial = nullptr,
+                                   const std::vector<double>& fv_tolerance = {});
 
 
 }  // namespace WireCell::Clus::Facade

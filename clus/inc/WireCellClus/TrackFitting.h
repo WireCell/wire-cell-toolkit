@@ -375,6 +375,14 @@ namespace WireCell::Clus {
         /// (e.g. at the end of TaggerCheckNeutrino::visit, before set_track_fitting).
         void assemble_fitted_charge_2d();
 
+        /// Merge an externally-accumulated fitted-charge map into
+        /// m_fitted_charge_2d (last-writer-wins on overlap, same semantics as
+        /// assemble_fitted_charge_2d).  Used by TaggerCheckSTM's save_stm_fit
+        /// dump to hand per-pass snapshots to a fresh holder fitter that
+        /// downstream writers (SbndMagnifyTrackingVisitor) read from the
+        /// grouping's named "stm" slot.
+        void merge_fitted_charge_2d(const std::map<APAFacePlane, std::map<WireTime, FittedCharge2D>>& other);
+
         // point associations
         void form_point_association(std::shared_ptr<PR::Segment> segment, WireCell::Point &p, PlaneData& temp_2dut, PlaneData& temp_2dvt, PlaneData& temp_2dwt, double dis_cut, int nlevel, double time_tick_cut );
 

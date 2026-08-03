@@ -88,7 +88,10 @@ static void clustering_cathode_connect(
     double tip_touch_cut,    // below this 3D gap the cc connection term is dropped (both-long PCA branch)
     double tip_touch_angle_cut, // degrees; relaxed local-Hough collinearity in the tip-touch branch
     bool use_flash_t0,
-    double flash_t0_window);
+    double flash_t0_window,
+    double crosser_conn_relax, // degrees; loose cc_pca bound for drift-gated 6cm-cathode crossers (0=off)
+    double crosser_pca_angle,  // degrees; raised tt_pca bound for drift-gated bent crossers (0=off)
+    double cathode_band_dis);  // distance; near-cathode closest-approach retry for hard-gated crossers (0=off)
 
 class ClusteringCathodeConnect : public IConfigurable, public Clus::IEnsembleVisitor, private NeedScope {
 public:
@@ -130,6 +133,36 @@ public:
         // cluster carries a matched flash and the gate would veto every pair.
         use_flash_t0_    = get(config, "use_flash_t0", true);
         flash_t0_window_ = get(config, "flash_t0_window", 80*units::ns);
+        // default crosser_conn_relax == 0: the both-long PCA branch keeps its cc_pca
+        // gate at conn_far_cut (byte-identical).  When > conn_far_cut, a drift-gated
+        // cathode crosser (already past the drift_cut + cathode_x_cut + same-flash
+        // gates, i.e. a same-depth opposite-TPC pair whose tips end at the cathode)
+        // is accepted on PCA collinearity with the connection-vector bound RELAXED to
+        // this looser value.  Rationale: for a real crosser the two truncated cathode
+        // tips are displaced transversely by space charge, so the p1->p2 connection
+        // vector is a poor (SCE-noisy) track-direction estimate (observed 34-69 deg on
+        // confirmed PDVD crossers) while the cluster PCA stays tight (<10 deg); a full
+        // drop would readmit perpendicular-connection parallel cosmics (~90 deg), so we
+        // relax rather than drop.
+        crosser_conn_relax_ = get(config, "crosser_conn_relax", 0.0);  // degrees
+        // default crosser_pca_angle == 0: the both-long PCA branch keeps its tt_pca
+        // collinearity bound at angle_cut (byte-identical).  When > angle_cut, a
+        // drift-gated crosser is accepted with the tt_pca bound raised to this value:
+        // a genuine crosser can bend (delta ray / SCE curvature) so its two halves'
+        // GLOBAL PCA axes differ by 10-15 deg while remaining one track; the QL-pin
+        // truth shows real crossers reach ttP~18 deg (p90) whereas coincidences sit
+        // at ttP p50~24 / p90~51, so raising the bound to ~15 recovers bent crossers
+        // without admitting the higher-ttP coincidences.
+        crosser_pca_angle_ = get(config, "crosser_pca_angle", 0.0);    // degrees
+        // default cathode_band_dis == 0: use only the global closest 3D point pair
+        // (byte-identical).  When > 0, if that global pair hard-gates (a tip far from
+        // the cathode or a large drift separation -- as happens for a long inclined
+        // crosser whose global closest approach falls mid-track), retry with the
+        // closest approach RESTRICTED to points within this distance of the cathode
+        // plane, then apply the SAME gates to the near-cathode pair.  Additive: only
+        // ever converts a hard-gate reject into a candidate that must still pass the
+        // collinearity/connection gates; the legacy pair and all accepts are unchanged.
+        cathode_band_dis_ = get(config, "cathode_band_dis", 0.0);
     }
     virtual Configuration default_configuration() const {
         Configuration cfg;
@@ -141,7 +174,8 @@ public:
         clustering_cathode_connect(live, m_scope, drift_cut_, dis_cut_, max_dis_, angle_cut_,
                                    conn_far_cut_, cathode_x_, cathode_x_cut_, hough_radius_,
                                    min_length_, min_length_short_, short_dir_len_, conn_short_cut_,
-                                   tip_touch_cut_, tip_touch_angle_cut_, use_flash_t0_, flash_t0_window_);
+                                   tip_touch_cut_, tip_touch_angle_cut_, use_flash_t0_, flash_t0_window_,
+                                   crosser_conn_relax_, crosser_pca_angle_, cathode_band_dis_);
     }
 
 private:
@@ -161,6 +195,9 @@ private:
     double tip_touch_angle_cut_{10.0};
     bool use_flash_t0_{true};
     double flash_t0_window_{80*units::ns};
+    double crosser_conn_relax_{0.0};
+    double crosser_pca_angle_{0.0};
+    double cathode_band_dis_{0.0};
 };
 
 
@@ -169,6 +206,39 @@ static inline double collinear_deg(double angle_rad)
 {
     double a = angle_rad / 3.1415926 * 180.0;
     return std::min(a, 180.0 - a);
+}
+
+// Closest 3D approach between the two clusters RESTRICTED to points within `band` of
+// the cathode plane.  Find_Closest_Points returns the GLOBAL closest pair, which for a
+// long inclined crosser can fall mid-track (far from the cathode); this finds the pair
+// at the two cathode tips instead.  Brute force over the (small) near-cathode subsets;
+// only invoked when the global pair hard-gated and the knob is on.  Returns 1e9 if
+// either cluster has < 3 points in the band.
+static double cathode_band_closest(const Cluster& c1, const Cluster& c2,
+                                   double cathode_x, double band,
+                                   geo_point_t& q1, geo_point_t& q2)
+{
+    std::vector<geo_point_t> b1, b2;
+    const int n1 = c1.npoints();
+    for (int i = 0; i < n1; ++i) {
+        geo_point_t p = c1.point3d(i);
+        if (std::fabs(p.x() - cathode_x) < band) b1.push_back(p);
+    }
+    const int n2 = c2.npoints();
+    for (int i = 0; i < n2; ++i) {
+        geo_point_t p = c2.point3d(i);
+        if (std::fabs(p.x() - cathode_x) < band) b2.push_back(p);
+    }
+    if (b1.size() < 3 || b2.size() < 3) return 1e9;
+    double best = 1e9;
+    for (const auto& a : b1) {
+        for (const auto& b : b2) {
+            const double dx = a.x() - b.x(), dy = a.y() - b.y(), dz = a.z() - b.z();
+            const double d = std::sqrt(dx*dx + dy*dy + dz*dz);
+            if (d < best) { best = d; q1 = a; q2 = b; }
+        }
+    }
+    return best;
 }
 
 // Return true if (cluster1, cluster2) is a cathode-crossing pair to connect.
@@ -188,7 +258,10 @@ static bool is_cathode_crossing_pair(
     double short_dir_len,
     double conn_short_cut,
     double tip_touch_cut,
-    double tip_touch_angle_cut)
+    double tip_touch_angle_cut,
+    double crosser_conn_relax,
+    double crosser_pca_angle,
+    double cathode_band_dis)
 {
     geo_point_t p1;
     geo_point_t p2;
@@ -217,22 +290,91 @@ static bool is_cathode_crossing_pair(
     }
     if (wpid_p1.apa() == wpid_p2.apa()) return false;
 
+    // --- CATHODE-BAND closest-approach retry (default OFF: cathode_band_dis == 0).
+    //     If the GLOBAL closest pair hard-gates (a tip far from the cathode, or a large
+    //     drift separation -- a long inclined crosser whose global closest approach
+    //     falls mid-track), retry with the closest approach restricted to the cathode
+    //     band and adopt it, so the gates below re-test the near-cathode tips.  Additive:
+    //     can only rescue a would-be hard-gate reject; an already-passing pair keeps its
+    //     global closest.  Both band points are cross-TPC by construction (each is its
+    //     own cluster's near-cathode point), so the apa relation above still holds. ---
+    if (cathode_band_dis > 0) {
+        const bool global_hardgated =
+            std::fabs(p1.x() - cathode_x) >= cathode_x_cut ||
+            std::fabs(p2.x() - cathode_x) >= cathode_x_cut ||
+            std::fabs(p1.x() - p2.x())    >= drift_cut;
+        if (global_hardgated) {
+            geo_point_t q1, q2;
+            double bd = cathode_band_closest(cluster1, cluster2, cathode_x,
+                                             cathode_band_dis, q1, q2);
+            if (bd < max_dis) { p1 = q1; p2 = q2; dis = bd; }
+        }
+    }
+
+    // --- CATHODE_CONNECT_DEBUG per-return tracer (removable; env-gated) ---
+    double _ttH = -1, _ttP = -1, _ccb = -1;
+    auto DBG = [&](const char* why, bool acc) -> bool {
+        if (cc_dbg && dis < max_dis) {
+            std::fprintf(stderr,
+                "[ccx] c%d<->c%d %-16s dis=%.2f dX=%.2f tip=%.2f/%.2f ttH=%.1f ttP=%.1f cc=%.1f len=%.0f/%.0f -> %s\n",
+                (int)cluster1.ident(), (int)cluster2.ident(), why, dis/units::cm,
+                std::fabs(p1.x()-p2.x())/units::cm,
+                std::fabs(p1.x()-cathode_x)/units::cm, std::fabs(p2.x()-cathode_x)/units::cm,
+                _ttH, _ttP, _ccb, length_1/units::cm, length_2/units::cm,
+                acc ? "ACCEPT" : "reject");
+        }
+        return acc;
+    };
+
+    // --- CC_FEATURE_DUMP: full labeled feature vector for EVERY cross-APA candidate
+    //     pair (removable; env-gated).  Computes all directions unconditionally (local
+    //     copies, does not touch the real logic below) + p1/p2 world coords so an
+    //     offline join can label each pair by QL-pin truth (point-membership).  Used
+    //     to data-drive a geometric separator of real crossers vs coincidences. ---
+    static const bool cc_feat = std::getenv("CC_FEATURE_DUMP") != nullptr;
+    if (cc_feat && dis < max_dis) {
+        geo_point_t fd1 = cluster1.vhough_transform(p1, hough_radius);
+        geo_point_t fd2 = cluster2.vhough_transform(p2, hough_radius);
+        double f_ttH = collinear_deg(fd1.angle(fd2));
+        double f_ttP = 999, f_ccH = 999, f_ccP = 999;
+        const auto& fax1 = cluster1.get_pca().axis;
+        const auto& fax2 = cluster2.get_pca().axis;
+        geo_point_t fconn(p1.x()-p2.x(), p1.y()-p2.y(), p1.z()-p2.z());
+        f_ccH = collinear_deg(fconn.angle(fd1));
+        if (!fax1.empty() && !fax2.empty()) {
+            geo_point_t fp1(fax1.at(0).x(), fax1.at(0).y(), fax1.at(0).z());
+            geo_point_t fp2(fax2.at(0).x(), fax2.at(0).y(), fax2.at(0).z());
+            f_ttP = collinear_deg(fp1.angle(fp2));
+            f_ccP = std::min(collinear_deg(fconn.angle(fp1)), collinear_deg(fconn.angle(fp2)));
+        }
+        std::fprintf(stderr,
+            "[feat] dis=%.2f dX=%.2f tip1=%.2f tip2=%.2f ttH=%.1f ttP=%.1f ccH=%.1f ccP=%.1f "
+            "len1=%.1f len2=%.1f p1=%.1f,%.1f,%.1f p2=%.1f,%.1f,%.1f apa=%d/%d\n",
+            dis/units::cm, std::fabs(p1.x()-p2.x())/units::cm,
+            std::fabs(p1.x()-cathode_x)/units::cm, std::fabs(p2.x()-cathode_x)/units::cm,
+            f_ttH, f_ttP, f_ccH, f_ccP, length_1/units::cm, length_2/units::cm,
+            p1.x()/units::cm, p1.y()/units::cm, p1.z()/units::cm,
+            p2.x()/units::cm, p2.y()/units::cm, p2.z()/units::cm,
+            wpid_p1.apa(), wpid_p2.apa());
+    }
+
     // (2) both closest points must end at the cathode plane.
-    if (std::fabs(p1.x() - cathode_x) >= cathode_x_cut) return false;
-    if (std::fabs(p2.x() - cathode_x) >= cathode_x_cut) return false;
+    if (std::fabs(p1.x() - cathode_x) >= cathode_x_cut) return DBG("tipx1", false);
+    if (std::fabs(p2.x() - cathode_x) >= cathode_x_cut) return DBG("tipx2", false);
 
     // (4) the two points must be at the same DRIFT depth (always tight): the only
     //     thing between the two halves is the ~1.5 cm cathode gap plus a drift-x
     //     calibration residual (observed up to ~4.1 cm in data).
-    if (std::fabs(p1.x() - p2.x()) >= drift_cut) return false;
+    if (std::fabs(p1.x() - p2.x()) >= drift_cut) return DBG("drift", false);
 
     // outer 3D distance ceiling.
-    if (dis >= max_dis) return false;
+    if (dis >= max_dis) return DBG("maxdis", false);
 
     // (1) local track directions, from the Hough transform at the closest points.
     geo_point_t dir1 = cluster1.vhough_transform(p1, hough_radius);
     geo_point_t dir2 = cluster2.vhough_transform(p2, hough_radius);
     double tt_hough = collinear_deg(dir1.angle(dir2));
+    _ttH = tt_hough;
 
     // cluster PCA principal axes (an alternative, global direction estimate used by both
     // the short-stub branch and the far regime; empty/invalid axis is guarded).
@@ -253,7 +395,7 @@ static bool is_cathode_crossing_pair(
         //   (the calibration artifact, ~along the drift axis), not the track, so the
         //   generic passes' connection-alignment test rejects these crossers -- the hole
         //   this pass fills.  Accept on the local half-track collinearity alone.
-        if (tt_hough < angle_cut) return true;
+        if (tt_hough < angle_cut) return DBG("close_primary", true);
 
         // BOTH-LONG PCA fallback (default OFF: short_dir_len == 0).  When BOTH halves
         //   are long enough for their cluster PCA to be reliable (>= short_dir_len) but
@@ -271,6 +413,7 @@ static bool is_cathode_crossing_pair(
             geo_point_t conn(p1.x() - p2.x(), p1.y() - p2.y(), p1.z() - p2.z());
             double cc_pca = std::min(collinear_deg(conn.angle(pca1)),
                                      collinear_deg(conn.angle(pca2)));
+            _ttP = tt_pca; _ccb = cc_pca;
             // TIP-TOUCH relaxation (default OFF: tip_touch_cut == 0).  When the two
             //   halves nearly touch (dis < tip_touch_cut, e.g. a genuine crosser whose
             //   cathode tips meet within ~1 cm), the p1->p2 connection vector spans only
@@ -282,8 +425,24 @@ static bool is_cathode_crossing_pair(
             //   still goes through the cc_pca gate below).  Gate pairs on flash-time
             //   coincidence (use_flash_t0) so only same-flash tips are relaxed this way.
             const bool tip_touch = (tip_touch_cut > 0 && dis < tip_touch_cut);
-            // global-PCA acceptance (original, plus cc_pca dropped when tips touch).
-            const bool acc_pca = (tt_pca < angle_cut && (tip_touch || cc_pca < conn_far_cut));
+            // 6cm-CATHODE crosser relaxation (default OFF: crosser_conn_relax == 0).
+            //   Reaching this branch already means a drift-gated crosser: opposite TPC,
+            //   both tips within cathode_x_cut of the cathode, same DRIFT depth
+            //   (|dX| < drift_cut), same flash.  The two half-tracks stop at the two
+            //   FACES of the 6cm-thick cathode, so the p1->p2 connection spans ~6cm of
+            //   pure cathode geometry (drift gap + SCE transverse shift), not track --
+            //   an SCE-noisy direction estimate.  Relax the cc_pca bound from
+            //   conn_far_cut to the looser crosser_conn_relax (still rejecting the
+            //   ~perpendicular connection of two distinct parallel cosmics).
+            const double conn_bound =
+                (crosser_conn_relax > conn_far_cut) ? crosser_conn_relax : conn_far_cut;
+            // crosser_pca_angle raises the tt_pca collinearity bound for bent crossers
+            // (default 0 => angle_cut => byte-identical).
+            const double pca_ang =
+                (crosser_pca_angle > angle_cut) ? crosser_pca_angle : angle_cut;
+            // global-PCA acceptance (original; cc_pca dropped when tips touch, else
+            // tested against conn_bound == conn_far_cut unless the crosser relax is on).
+            const bool acc_pca = (tt_pca < pca_ang && (tip_touch || cc_pca < conn_bound));
             // LOCAL-Hough acceptance (default OFF: tip_touch_angle_cut == angle_cut, so
             //   this reduces to the primary close test that already ran).  When tips
             //   touch, a curved half can inflate its GLOBAL PCA above angle_cut while its
@@ -301,7 +460,7 @@ static bool is_cathode_crossing_pair(
                     (int)tip_touch, tip_touch_cut/units::cm, tip_touch_angle_cut,
                     (acc_pca || acc_hough) ? "ACCEPT" : "reject");
             }
-            if (acc_pca || acc_hough) return true;
+            if (acc_pca || acc_hough) return DBG("close_bothlong", true);
         }
 
         // SHORT-STUB prolongation (default OFF: short_dir_len == 0).  When one half is
@@ -328,9 +487,10 @@ static bool is_cathode_crossing_pair(
                              anchor_pt.z() - stub_pt.z());
             double cc_hough = collinear_deg(conn.angle(anchor_hough));
             double cc_pca = have_pca ? collinear_deg(conn.angle(anchor_pca)) : 999.0;
-            return std::min(cc_hough, cc_pca) < conn_short_cut;
+            _ccb = std::min(cc_hough, cc_pca);
+            return DBG("close_shortstub", std::min(cc_hough, cc_pca) < conn_short_cut);
         }
-        return false;
+        return DBG("close_fallthrough", false);
     }
 
     // FAR regime: the two halves are offset within the cathode plane (large transverse
@@ -342,17 +502,19 @@ static bool is_cathode_crossing_pair(
     //   align with the track (PCA or Hough) -- this rejects parallel-offset cosmics,
     //   whose connection is ~perpendicular (>=50 deg), while passing a real crosser.
     double tt_pca = have_pca ? collinear_deg(pca1.angle(pca2)) : 999.0;
+    _ttP = tt_pca;
     // track-track collinear: Hough OR (additional) PCA.
-    if (tt_hough >= angle_cut && tt_pca >= angle_cut) return false;
+    if (tt_hough >= angle_cut && tt_pca >= angle_cut) return DBG("far_notcollinear", false);
 
     // connection vector aligned with the track: Hough OR (additional) PCA.
     geo_point_t conn(p1.x() - p2.x(), p1.y() - p2.y(), p1.z() - p2.z());
     double cc_hough = collinear_deg(conn.angle(dir1));
     double cc_pca = have_pca ? std::min(collinear_deg(conn.angle(pca1)),
                                         collinear_deg(conn.angle(pca2))) : 999.0;
-    if (cc_hough >= conn_far_cut && cc_pca >= conn_far_cut) return false;
+    _ccb = std::min(cc_hough, cc_pca);
+    if (cc_hough >= conn_far_cut && cc_pca >= conn_far_cut) return DBG("far_conn", false);
 
-    return true;
+    return DBG("far_accept", true);
 }
 
 
@@ -374,7 +536,10 @@ static void clustering_cathode_connect(
     double tip_touch_cut,
     double tip_touch_angle_cut,
     bool use_flash_t0,
-    double flash_t0_window)
+    double flash_t0_window,
+    double crosser_conn_relax,
+    double crosser_pca_angle,
+    double cathode_band_dis)
 {
     // prepare graph ... (same skeleton as the other merge passes)
     typedef cluster_connectivity_graph_t Graph;
@@ -416,13 +581,23 @@ static void clustering_cathode_connect(
             // crosser) while forbidding short<->short pairs.  With min_length_short ==
             // min_length (the default) this is the original "both >= min_length" gate.
             if (std::max(cluster_1->get_length(), cluster_2->get_length()) < min_length) continue;
-            if (use_flash_t0 && flash_t0_group.at(cluster_1) != flash_t0_group.at(cluster_2)) continue;
+            if (use_flash_t0 && flash_t0_group.at(cluster_1) != flash_t0_group.at(cluster_2)) {
+                static const bool cc_dbg2 = std::getenv("CATHODE_CONNECT_DEBUG") != nullptr;
+                if (cc_dbg2 && std::min(cluster_1->get_length(), cluster_2->get_length()) >= 15*units::cm) {
+                    std::fprintf(stderr, "[ccflash] c%d<->c%d FLASH-GATE reject len=%.0f/%.0f t0=%.3f/%.3fus\n",
+                        (int)cluster_1->ident(), (int)cluster_2->ident(),
+                        cluster_1->get_length()/units::cm, cluster_2->get_length()/units::cm,
+                        cluster_1->get_cluster_t0()/units::us, cluster_2->get_cluster_t0()/units::us);
+                }
+                continue;
+            }
             if (is_cathode_crossing_pair(*cluster_1, *cluster_2,
                                          cluster_1->get_length(), cluster_2->get_length(),
                                          drift_cut, dis_cut, max_dis, angle_cut, conn_far_cut,
                                          cathode_x, cathode_x_cut, hough_radius,
                                          short_dir_len, conn_short_cut, tip_touch_cut,
-                                         tip_touch_angle_cut)) {
+                                         tip_touch_angle_cut, crosser_conn_relax, crosser_pca_angle,
+                                         cathode_band_dis)) {
                 boost::add_edge(ilive2desc[map_cluster_index[cluster_1]],
                                 ilive2desc[map_cluster_index[cluster_2]], g);
             }
