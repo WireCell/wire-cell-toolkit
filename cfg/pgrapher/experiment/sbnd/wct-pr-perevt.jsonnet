@@ -400,6 +400,19 @@ function(
     // byte-identical to the pre-doc-56 one.  Inert when beam_window_us is empty.
     // Runner flag: -no-bwonly.
     beam_window_only = true,
+    // nu_skip_cosmic / nu_skip_cosmic_bundle: TaggerCheckNeutrino refuses to run
+    // neutrino PR on an in-window main already convicted as cosmic -- per-main
+    // (TGM/STM/lm_flag) and, lifted to the whole flash bundle, per-bundle.
+    // BOTH TRUE = the SBND production operating point (docs/pr/3 sec. 8,
+    // docs/pr/16 sec. 7); these TLAs only surface what clus.jsonnet's pr()
+    // already defaults to, so the compiled config is unchanged when they are
+    // not passed.  Setting them false is a DIAGNOSTIC, not an operating point:
+    // it makes PR run on a convicted cosmic, which is how you get track_fit /
+    // shower_track / vertices layers for an event that legitimately has no
+    // neutrino candidate (e.g. SBND evt 116962, sole in-window main TGM).
+    // Runner env: SBND_NU_SKIP_COSMIC=0|1.
+    nu_skip_cosmic = true,
+    nu_skip_cosmic_bundle = true,
     // Enable the ported check_neutrino_candidate veto in tagger_check_tgm so
     // in-beam-window bundles may be tagged TGM (C++ default false; key
     // omitted when off => byte-identical pre-port config).
@@ -611,6 +624,8 @@ function(
                              dl_weights=dl_weights,
                              beam_window=[t * wc.us for t in beam_window_us],
                              beam_window_only=beam_window_only,
+                             nu_skip_cosmic=nu_skip_cosmic,
+                             nu_skip_cosmic_bundle=nu_skip_cosmic_bundle,
                              tgm_neutrino_candidate=tgm_neutrino_candidate,
                              tgm_chord_charge=tgm_chord_charge,
                              tgm_chord_mode=tgm_chord_mode,
