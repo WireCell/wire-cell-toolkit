@@ -160,16 +160,28 @@ function(
     // the sheet's principal axis instead of the wire-footprint boundary
     // metric (which degenerates to sheet-edge corners and produces the
     // two-edge-track fan), and the local-PCA endpoint refinement is skipped
-    // on that branch.  false/nulls = C++ defaults (false / 40 cm / 25 cm /
-    // 0.35 / 0.02 / 4 cm / 0.12) = OFF => keys omitted => byte-identical.
-    // SHIPS OFF.  Pass -A iso_endpoint=true to enable (SBND_ISO_ENDPOINT=1 on
-    // the run_pr_chain_batch.sh runner).  Round 3 (doc pr/24 sec 15) added
-    // iso_endpoint_tube_radius (diagnostic only: reports whether the endpoint
-    // is laterally central; the endpoint itself is the untrimmed axial extreme,
-    // so no tip stub is left behind) and
-    // iso_endpoint_min_aspect (require real 2-D sheet-ness, so 1-D tracks are
-    // handed back to the legacy path).
-    iso_endpoint = false,
+    // on that branch.
+    // **SBND PRODUCTION DEFAULT ON, owner 2026-08-03**, after the doc pr/24
+    // sec 15 (round 3) scan.  Round 3 is what made it flippable: the endpoint
+    // is the UNTRIMMED axial extreme (round 2's quantile-trimmed one left a tip
+    // stub that find_other_segments claimed, planting a 0.9 deg "vertex" in the
+    // straight track of evt 284794), and iso_endpoint_min_aspect requires real
+    // 2-D sheet-ness so 1-D tracks never enter the branch -- evts 284794 and
+    // 59899 are byte-identical to legacy again.  Evidence: evt 271851 vertex
+    // 30.9 -> 2.4 cm from truth on the DL arm (the production chain), nue_score
+    // -15 -> +4.30; evt 122660 nue -15 -> +4.30; 0/17 mcp1k events gain a
+    // straight-through segment junction (round 2: 4/17); every non-firing event
+    // stays archive-identical.  CAVEAT on record (doc pr/24 sec 15.6): on the
+    // DIAGNOSTIC geometric-vertex arm evt 271851 goes 1.7 -> 6.6 cm and loses
+    // the nue selection -- accepted by the owner, and the first thing to check
+    // if the next valfast census surprises.
+    // The four sizing knobs stay null = the C++ defaults (40 cm min length,
+    // 25 cm max drift extent, 0.35 frac, 0.02 quantile, 4 cm diagnostic tube
+    // radius, 0.12 min sheet aspect).
+    // Set iso_endpoint=false for the legacy wire-footprint boundary endpoints
+    // (SBND_ISO_ENDPOINT=0 on the run_pr_chain_batch.sh runner).
+    // NOT bit-identical to the pre-flip chain -- a deliberate production change.
+    iso_endpoint = true,
     iso_endpoint_min_length = null,
     iso_endpoint_max_xext = null,
     iso_endpoint_xext_frac = null,
