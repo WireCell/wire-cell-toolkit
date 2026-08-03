@@ -167,11 +167,24 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
         // splitting -- the relaxed graph does not join the two halves of a
         // cathode crosser (SBND geometry uboone did not have; doc pr/20,
         // pr/23).  Internal units.
+        // cathode_rejoin_perp / cathode_rejoin_angle / cathode_rejoin_dir_radius
+        // / cathode_rejoin_dir_npts (C++ defaults 0 = fallback disabled / 20.0
+        // deg / 15 cm / 20 pts; keys omitted when null => prototype-faithful,
+        // i.e. dyz-only, behavior): direction-agreement fallback for a pair
+        // that fails ONLY cathode_rejoin_dyz.  dyz is a frame-aligned bound on
+        // transverse offset and is right for a near-drift-parallel crosser,
+        // but for an OBLIQUE crosser the transverse offset across the cathode
+        // x-gap is real track travel and dyz rejects it by construction (doc
+        // pr/25, SBND evt 489327).  cathode_rejoin_angle is degrees; the rest
+        // are internal units like the block above (NOT cm, unlike
+        // cathode_kink_xcut elsewhere -- the doc pr/20 trap).
         protect_bundle(name="", graph_name="relaxed",
                        beam_window_only=null, beam_window_low=null, beam_window_high=null,
                        skip_convicted=null,
                        cathode_x=null, cathode_rejoin_xcut=null,
-                       cathode_rejoin_dyz=null, cathode_rejoin_dis=null) :: {
+                       cathode_rejoin_dyz=null, cathode_rejoin_dis=null,
+                       cathode_rejoin_perp=null, cathode_rejoin_angle=null,
+                       cathode_rejoin_dir_radius=null, cathode_rejoin_dir_npts=null) :: {
             type: "ClusteringProtectBundle",
             name: prefix + name,
             data: dv_cfg + pcts_cfg + {
@@ -189,6 +202,10 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
                 [if cathode_rejoin_xcut != null then 'cathode_rejoin_xcut']: cathode_rejoin_xcut,
                 [if cathode_rejoin_dyz != null then 'cathode_rejoin_dyz']: cathode_rejoin_dyz,
                 [if cathode_rejoin_dis != null then 'cathode_rejoin_dis']: cathode_rejoin_dis,
+                [if cathode_rejoin_perp != null then 'cathode_rejoin_perp']: cathode_rejoin_perp,
+                [if cathode_rejoin_angle != null then 'cathode_rejoin_angle']: cathode_rejoin_angle,
+                [if cathode_rejoin_dir_radius != null then 'cathode_rejoin_dir_radius']: cathode_rejoin_dir_radius,
+                [if cathode_rejoin_dir_npts != null then 'cathode_rejoin_dir_npts']: cathode_rejoin_dir_npts,
             },
             uses: [detector_volumes, pc_transforms],
         },
@@ -447,7 +464,7 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
                  } else {}),
         },
 
-        tagger_check_neutrino(name="", trackfitting_config_file="", particle_dataset="", recombination_model="", perf=false, dl_weights="", dQdx_scale=0.1, dQdx_offset=-1000.0, clus_geom_helper="", dl_vtx_rerank=true, dl_vtx_top_k=5, dl_vtx_min_accept_score=4.0, dl_vtx_score_scale=1000.0, beam_window_low=0, beam_window_high=0, nu_skip_cosmic=false, nu_skip_cosmic_bundle=false, nu_skip_cosmic_bundle_min_length=0, dir_weak_use_score=false, mip_dqdx=null, mip_dqdx_median=null, proton_dir_vote=false, proton_dir_score_max=null, proton_dir_asym_min=null, endpoint_trim_retry=false, fit_vertex_min_seg_length=null, cathode_x=null, cathode_kink_xcut=null, cosmic_y_top_main=null, cosmic_y_top_strict=null, cosmic_y_top_loose=null, cosmic_y_small_piece=null, vertex_z_prior_scale=null, ssm_target_dir=null, ssm_absorber_dir=null, kine_fudge_factor=null, kine_recom_factor=null, kine_shower_fudge_factor=null, kine_shower_recom_factor=null, kine_proton_recom_factor=null, kine_plane_weights=null, kine_plane_asym_switch=null, kine_w_value=null, muon_dqdx_curve=null, sp_dedx_use_recomb_model=false, sp_mean_dedx_cut=null, dl_vtx_cut=null, skip_cosmic_companions=false, cosmic_companion_min_length=null) :: {
+        tagger_check_neutrino(name="", trackfitting_config_file="", particle_dataset="", recombination_model="", perf=false, dl_weights="", dQdx_scale=0.1, dQdx_offset=-1000.0, clus_geom_helper="", dl_vtx_rerank=true, dl_vtx_top_k=5, dl_vtx_min_accept_score=4.0, dl_vtx_score_scale=1000.0, beam_window_low=0, beam_window_high=0, nu_skip_cosmic=false, nu_skip_cosmic_bundle=false, nu_skip_cosmic_bundle_min_length=0, dir_weak_use_score=false, mip_dqdx=null, mip_dqdx_median=null, proton_dir_vote=false, proton_dir_score_max=null, proton_dir_asym_min=null, endpoint_trim_retry=false, fit_vertex_min_seg_length=null, cathode_x=null, cathode_kink_xcut=null, cosmic_y_top_main=null, cosmic_y_top_strict=null, cosmic_y_top_loose=null, cosmic_y_small_piece=null, vertex_z_prior_scale=null, ssm_target_dir=null, ssm_absorber_dir=null, kine_fudge_factor=null, kine_recom_factor=null, kine_shower_fudge_factor=null, kine_shower_recom_factor=null, kine_proton_recom_factor=null, kine_plane_weights=null, kine_plane_asym_switch=null, kine_w_value=null, muon_dqdx_curve=null, sp_dedx_use_recomb_model=false, sp_mean_dedx_cut=null, dl_vtx_cut=null, skip_cosmic_companions=false, cosmic_companion_min_length=null, dl_vtx_swap_min_len=null, dl_vtx_swap_min_frac=null) :: {
             type: "TaggerCheckNeutrino",
             name: prefix + name,
             data: {
@@ -531,6 +548,18 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
               // point is ever skipped => keys omitted when null are byte-identical.
               + (if cathode_x != null then { cathode_x: cathode_x } else {})
               + (if cathode_kink_xcut != null then { cathode_kink_xcut: cathode_kink_xcut } else {})
+              // DL main-cluster swap guard (doc sbnd_xin/docs/pr/24).  The
+              // composite re-rank scales the raw SCN score by dl_vtx_score_scale
+              // (1000), so in the net's own "uncertain" regime a noise-level
+              // score difference outranks the geometric priors and the neutrino
+              // can be handed to a centimetre-scale stub.  When the DL vertex
+              // would move the main cluster to a host shorter than
+              // dl_vtx_swap_min_len (internal units) or than
+              // dl_vtx_swap_min_frac of the incumbent, the DL pick is rejected
+              // and the traditional vertex runs instead.  C++ defaults 0/0 =
+              // guard off => keys omitted when null are byte-identical.
+              + (if dl_vtx_swap_min_len != null then { dl_vtx_swap_min_len: dl_vtx_swap_min_len } else {})
+              + (if dl_vtx_swap_min_frac != null then { dl_vtx_swap_min_frac: dl_vtx_swap_min_frac } else {})
               // Detector-extent literals (docs/pr/2 sec 2e(iv)), all in cm.  C++
               // defaults = the uBooNE prototype values, so keys omitted when null =>
               // byte-identical pre-knob config.

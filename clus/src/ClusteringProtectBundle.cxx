@@ -1,3 +1,7 @@
+#include "WireCellUtil/Array.h"  // Eigen, for the local-PCA direction fallback; must precede
+                                 // other headers that transitively pull in SIMD intrinsics
+                                 // (matches the include order in Facade_Cluster.cxx)
+
 #include "WireCellClus/IEnsembleVisitor.h"
 #include "WireCellClus/ClusteringFuncs.h"
 #include "WireCellClus/ClusteringFuncsMixins.h"
@@ -78,6 +82,22 @@ using namespace WireCell::Clus::Facade;
  * whose closest points both lie within cathode_rejoin_xcut of cathode_x,
  * within cathode_rejoin_dis in 3D and cathode_rejoin_dyz transversely, are
  * re-united before the split.
+ *
+ * cathode_rejoin_dyz is frame-aligned (a bound on transverse offset in the
+ * detector's y-z plane) and is right for a crosser nearly parallel to the
+ * drift direction, but for an OBLIQUE crosser the transverse offset across
+ * the ~2 cm cathode x-gap is real track travel (dyz ~ |dx|*tan(theta)), so
+ * the frame-aligned bound rejects it by construction (sbnd_xin doc pr/25,
+ * SBND evt 489327: dyz 6.50 cm on two halves collinear to 1.5 deg at a 75
+ * deg angle to drift).  When cathode_rejoin_perp > 0, a dyz failure falls
+ * back to a direction-agreement test: local-PCA collinearity
+ * (cathode_rejoin_angle) plus a perpendicular-offset bound
+ * (cathode_rejoin_perp) between each tip and the other component's local
+ * direction line.  dis and xcut are unchanged by this fallback -- a 572-event
+ * population census (pr25_rejoin_census.py) found exactly 6 pairs failing
+ * ONLY dyz, separating cleanly at 1.5-7.1 deg / perp 1.50-2.68 cm for 5
+ * genuine crossers vs 89.2 deg / perp 6.11 cm for the one same-side junk
+ * stub (which also fails the point-count floor independently).
  */
 class ClusteringProtectBundle : public IConfigurable,
                                 public Clus::IEnsembleVisitor,
@@ -121,6 +141,14 @@ public:
         m_cathode_rejoin_xcut = get<double>(config, "cathode_rejoin_xcut", m_cathode_rejoin_xcut);
         m_cathode_rejoin_dyz = get<double>(config, "cathode_rejoin_dyz", m_cathode_rejoin_dyz);
         m_cathode_rejoin_dis = get<double>(config, "cathode_rejoin_dis", m_cathode_rejoin_dis);
+        // Direction-agreement fallback for a dyz-only failure (SBND doc
+        // pr/25).  cathode_rejoin_perp <= 0 (default) disables the fallback
+        // entirely => byte-identical to the dyz-only behavior above.
+        // Internal units except cathode_rejoin_angle (degrees).
+        m_cathode_rejoin_perp = get<double>(config, "cathode_rejoin_perp", m_cathode_rejoin_perp);
+        m_cathode_rejoin_angle = get<double>(config, "cathode_rejoin_angle", m_cathode_rejoin_angle);
+        m_cathode_rejoin_dir_radius = get<double>(config, "cathode_rejoin_dir_radius", m_cathode_rejoin_dir_radius);
+        m_cathode_rejoin_dir_npts = get<int>(config, "cathode_rejoin_dir_npts", m_cathode_rejoin_dir_npts);
     }
 
     virtual Configuration default_configuration() const {
@@ -139,6 +167,10 @@ public:
         cfg["cathode_rejoin_xcut"] = m_cathode_rejoin_xcut;
         cfg["cathode_rejoin_dyz"] = m_cathode_rejoin_dyz;
         cfg["cathode_rejoin_dis"] = m_cathode_rejoin_dis;
+        cfg["cathode_rejoin_perp"] = m_cathode_rejoin_perp;
+        cfg["cathode_rejoin_angle"] = m_cathode_rejoin_angle;
+        cfg["cathode_rejoin_dir_radius"] = m_cathode_rejoin_dir_radius;
+        cfg["cathode_rejoin_dir_npts"] = m_cathode_rejoin_dir_npts;
         return cfg;
     }
 
@@ -225,6 +257,86 @@ private:
     double m_cathode_rejoin_xcut{0};       // <= 0: pass disabled (prototype behavior)
     double m_cathode_rejoin_dyz{4 * units::cm};
     double m_cathode_rejoin_dis{8 * units::cm};
+    double m_cathode_rejoin_perp{0};       // <= 0: direction fallback disabled (default)
+    double m_cathode_rejoin_angle{20.0};   // degrees
+    double m_cathode_rejoin_dir_radius{15 * units::cm};
+    int m_cathode_rejoin_dir_npts{20};
+
+    // Fold an angle (radians, 0..pi) about pi -> collinearity in degrees
+    // (0 = parallel or anti-parallel).  Same convention as
+    // clustering_cathode_connect.cxx / clustering_cathode_bundle_rescue.cxx
+    // (file-local by the repo's fork-by-duplication convention, not shared).
+    static double collinear_deg(double angle_rad) {
+        const double a = angle_rad / 3.1415926 * 180.0;
+        return std::min(a, 180.0 - a);
+    }
+
+    /// Local principal-axis direction of `cloud` within
+    /// m_cathode_rejoin_dir_radius of `tip`, oriented away from the local
+    /// centroid (i.e. pointing outward from the tip into the component).
+    /// Returns false if fewer than m_cathode_rejoin_dir_npts points fall in
+    /// the radius (a floor against a direction estimated from a handful of
+    /// points -- the doc pr/25 census's rejected junk stub is 12 points
+    /// total and fails this independently of the angle test).
+    bool local_direction(const Simple3DPointCloud& cloud, const geo_point_t& tip,
+                         geo_point_t& dir) const {
+        const auto near = cloud.get_closest_wcpoints_radius(tip, m_cathode_rejoin_dir_radius);
+        if ((int) near.size() < m_cathode_rejoin_dir_npts) return false;
+
+        geo_point_t center;
+        for (const auto& [ind, p] : near) center += p;
+        center /= (double) near.size();
+
+        // Same 3x3 covariance + SelfAdjointEigenSolver pattern as
+        // Facade_Cluster::get_pca(), restricted to the local neighborhood.
+        Eigen::MatrixXd cov(3, 3);
+        for (int i = 0; i != 3; ++i) {
+            for (int j = i; j != 3; ++j) {
+                double s = 0;
+                for (const auto& [ind, p] : near) s += (p[i] - center[i]) * (p[j] - center[j]);
+                cov(i, j) = s;
+            }
+        }
+        cov(1, 0) = cov(0, 1);
+        cov(2, 0) = cov(0, 2);
+        cov(2, 1) = cov(1, 2);
+
+        Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> es(cov);
+        const auto vecs = es.eigenvectors();
+        // Eigen returns ascending eigenvalues; the principal axis is the last column.
+        geo_point_t v(vecs(0, 2), vecs(1, 2), vecs(2, 2));
+        const double norm = v.magnitude();
+        if (norm <= 0) return false;
+        v = v / norm;
+        // Orient outward from the tip (away from the local centroid), so the
+        // two tips' directions can be compared for anti-collinearity without
+        // a sign ambiguity flipping the perpendicular-offset test below.
+        if ((tip - center).dot(v) < 0) v = v * -1;
+        dir = v;
+        return true;
+    }
+
+    /// Direction-agreement fallback for a dyz-only cathode_rejoin failure:
+    /// local-PCA collinearity at the two tips plus a perpendicular-offset
+    /// bound, in place of the frame-aligned dyz cut.  cloud1/cloud2 MUST be
+    /// the same per-component point clouds cathode_rejoin() already built --
+    /// do not query Cluster::vhough_transform() here, since at re-join time
+    /// both components are still blobs of the same not-yet-split cluster and
+    /// a cluster-level direction query would mix in the OTHER component's
+    /// points.
+    bool direction_agrees(const Simple3DPointCloud& cloud1, const Simple3DPointCloud& cloud2,
+                          const geo_point_t& p1, const geo_point_t& p2) const {
+        geo_point_t v1, v2;
+        if (!local_direction(cloud1, p1, v1)) return false;
+        if (!local_direction(cloud2, p2, v2)) return false;
+        if (collinear_deg(v1.angle(v2)) >= m_cathode_rejoin_angle) return false;
+
+        const geo_point_t d12 = p2 - p1;
+        const double perp1 = (d12 - v1 * d12.dot(v1)).magnitude();
+        const geo_point_t d21 = p1 - p2;
+        const double perp2 = (d21 - v2 * d21.dot(v2)).magnitude();
+        return std::max(perp1, perp2) < m_cathode_rejoin_perp;
+    }
 
     /// Union components that meet across the cathode band.  `b2g` is edited
     /// in place; returns the number of pair unions applied.
@@ -264,16 +376,26 @@ private:
                 if (std::abs(p1.x() - m_cathode_x) >= m_cathode_rejoin_xcut) continue;
                 if (std::abs(p2.x() - m_cathode_x) >= m_cathode_rejoin_xcut) continue;
                 const double dyz = std::hypot(p1.y() - p2.y(), p1.z() - p2.z());
-                if (dyz >= m_cathode_rejoin_dyz) continue;
+                bool via_direction = false;
+                if (dyz >= m_cathode_rejoin_dyz) {
+                    // Oblique crosser: dyz is real track travel across the
+                    // cathode x-gap, not misalignment (doc pr/25, SBND evt
+                    // 489327).  Disabled by default (m_cathode_rejoin_perp
+                    // <= 0) => byte-identical to the check above.
+                    if (m_cathode_rejoin_perp <= 0) continue;
+                    if (!direction_agrees(j->second, k->second, p1, p2)) continue;
+                    via_direction = true;
+                }
                 const int ra = find(j->first), rb = find(k->first);
                 if (ra == rb) continue;
                 parent[std::max(ra, rb)] = std::min(ra, rb);   // keep lowest id
                 ++n_union;
                 SPDLOG_LOGGER_DEBUG(log,
                     "cluster {}: cathode re-join comp {}+{} (gap {:.2f} cm, dyz {:.2f} cm, "
-                    "x {:.2f}/{:.2f} cm)",
+                    "x {:.2f}/{:.2f} cm{})",
                     cluster->ident(), j->first, k->first, dis / units::cm,
-                    dyz / units::cm, p1.x() / units::cm, p2.x() / units::cm);
+                    dyz / units::cm, p1.x() / units::cm, p2.x() / units::cm,
+                    via_direction ? ", via direction fallback" : "");
             }
         }
         if (n_union) {

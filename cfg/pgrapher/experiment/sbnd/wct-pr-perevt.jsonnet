@@ -143,6 +143,16 @@ function(
     protect_cathode_rejoin_xcut = 5 * wc.cm,
     protect_cathode_rejoin_dyz  = 4 * wc.cm,
     protect_cathode_rejoin_dis  = 8 * wc.cm,
+    // Direction-agreement fallback for a dyz-only failure (doc pr/25, SBND
+    // evt 489327): DESIGNED, NOT YET the SBND default -- owner sign-off
+    // pending (escalation rule 1).  nulls => C++ default 0 = fallback
+    // disabled => byte-identical to the block above.  Both this file AND
+    // clus.jsonnet's pr() must be set together (doc pr/23 both-files trap:
+    // one file's explicit null overrides the other's non-null back OFF).
+    protect_cathode_rejoin_perp       = null,
+    protect_cathode_rejoin_angle      = null,
+    protect_cathode_rejoin_dir_radius = null,
+    protect_cathode_rejoin_dir_npts   = null,
     // TaggerCheckSTM's containment gate (cluster_fc_check) uses the same fiducial
     // + margins as tagger_check_tgm / tagger_check_fc, so "contained" means one
     // thing across all three verdicts.  true = SBND production (docs/49); false
@@ -290,6 +300,14 @@ function(
     // dl_vtx_cut (mm) is a configurability thread only (docs/pr/2 sec
     // 7.4); null keeps the C++ 25.0 (= 2.5 cm) default.
     dl_vtx_cut               = null,
+    // DL main-cluster swap guard (docs/pr/24): reject a DL (SCN) vertex that
+    // would move the neutrino's main cluster onto a host whose total track
+    // length is below dl_vtx_swap_min_len (CM) or below dl_vtx_swap_min_frac
+    // of the incumbent main cluster; the traditional vertex then runs instead.
+    // C++ defaults 0/0 = OFF, and null emits no key, so a bare run is
+    // byte-identical to the pre-knob config.
+    dl_vtx_swap_min_len      = null,
+    dl_vtx_swap_min_frac     = null,
     // When set, re-save the (post-PR) tree to this TensorDM tarball.  Used by the
     // round-trip gate (re-save with pipeline_names=[] and compare member hashes
     // against the input tarball).
@@ -553,6 +571,10 @@ function(
                              protect_cathode_rejoin_xcut=protect_cathode_rejoin_xcut,
                              protect_cathode_rejoin_dyz=protect_cathode_rejoin_dyz,
                              protect_cathode_rejoin_dis=protect_cathode_rejoin_dis,
+                             protect_cathode_rejoin_perp=protect_cathode_rejoin_perp,
+                             protect_cathode_rejoin_angle=protect_cathode_rejoin_angle,
+                             protect_cathode_rejoin_dir_radius=protect_cathode_rejoin_dir_radius,
+                             protect_cathode_rejoin_dir_npts=protect_cathode_rejoin_dir_npts,
                              vertex_z_prior_scale=vertex_z_prior_scale,
                              ssm_target_dir=ssm_target_dir,
                              ssm_absorber_dir=ssm_absorber_dir,
@@ -568,7 +590,9 @@ function(
                              use_power_recomb=use_power_recomb,
                              sp_dedx_use_recomb_model=sp_dedx_use_recomb_model,
                              sp_mean_dedx_cut=sp_mean_dedx_cut,
-                             dl_vtx_cut=dl_vtx_cut);
+                             dl_vtx_cut=dl_vtx_cut,
+                             dl_vtx_swap_min_len=dl_vtx_swap_min_len,
+                             dl_vtx_swap_min_frac=dl_vtx_swap_min_frac);
 
     local graph = g.intern(
         innodes=[source],
