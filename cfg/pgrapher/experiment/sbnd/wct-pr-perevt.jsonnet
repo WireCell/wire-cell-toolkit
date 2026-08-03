@@ -86,9 +86,21 @@ function(
     //  'tracking_visitor','tagger_output'] -- ordering matters (BDTs after the
     // neutrino stage, nue after numu, tagger_output after tracking_visitor
     // because it opens tracking-pr.root in UPDATE mode).
+    // protect_bundle + steiner_refresh (doc pr/23 sec 9): SBND PRODUCTION
+    // DEFAULT since 2026-08-02 (owner, after the sec 8 fresh-tree gate: 0
+    // event_label / nu_evaluated flips in 572 valfast events).  They sit
+    // after tagger_check_fc (cosmic verdicts on UNSPLIT clusters,
+    // prototype wire-cell-prod-stm.cxx:806) and before any appended
+    // tagger_check_neutrino (prototype wire-cell-prod-nue.cxx:1322).
+    // steiner_refresh (replace=false) MUST follow protect_bundle: it
+    // rebuilds only the steiner products the split purged; a replace=true
+    // second pass dangles the tagger-stage GraphAlgorithms (evt 54095).
+    // NOT bit-identical to the pre-pr/23 chain by design; drop BOTH names
+    // from pipeline_names for the pre-flip chain (runner:
+    // SBND_PROTECT_BUNDLE=0).
     pipeline_names = ['switch_scope', 'unmerge_bundle', 'unmerge_assoc', 'steiner',
                       'fiducialutils', 'tagger_check_tgm', 'tagger_check_stm',
-                      'tagger_check_fc'],
+                      'tagger_check_fc', 'protect_bundle', 'steiner_refresh'],
     // TrackFitting parameter JSON, required whenever tagger_check_stm is in the
     // pipeline: the C++ preset defaults are uBooNE-hard-coded, never right for
     // SBND.  DEFAULT = the canonical in-tree file; TaggerCheckSTM resolves it
@@ -116,8 +128,9 @@ function(
     cathode_x         = 0,
     cathode_kink_xcut = 5,
     // protect_bundle stage knobs (doc pr/23): the PR-stage overclustering
-    // protection (uboone's second graph examination).  Inert unless
-    // 'protect_bundle' is named in pipeline_names.  The cathode re-join
+    // protection (uboone's second graph examination).  The stage is in
+    // pipeline_names by DEFAULT since the sec 9 production flip; the knobs
+    // are inert only when it is dropped.  The cathode re-join
     // values are the SBND operating point in INTERNAL units (unlike
     // cathode_kink_xcut above, which is cm), matching clus.jsonnet's pr()
     // defaults so a bare run is production; nulls = prototype-faithful

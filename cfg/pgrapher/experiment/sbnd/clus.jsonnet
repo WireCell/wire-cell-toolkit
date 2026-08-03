@@ -859,8 +859,9 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               // protect_bundle stage knobs (doc pr/23): the PR-stage
               // overclustering protection (uboone's second graph examination,
               // ProtectOverClustering.cxx).  The stage only acts when
-              // 'protect_bundle' is named in pipeline_names, so these are
-              // inert otherwise.  protect_graph_name: connected_blobs flavor
+              // 'protect_bundle' is named in pipeline_names -- which the
+              // production jobs do by DEFAULT since the doc pr/23 sec 9 flip
+              // (owner 2026-08-02).  protect_graph_name: connected_blobs flavor
               // (null => 'relaxed').  protect_cathode_*: the SBND cathode
               // re-join divergence -- INTERNAL units (unlike cathode_kink_xcut
               // one block up, which is cm); nulls => C++ defaults, i.e. the
@@ -1118,8 +1119,9 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
         // Protect_Over_Clustering only in the nue executable
         // (wire-cell-prod-nue.cxx:1322).  The cathode re-join
         // knobs keep it from splitting cathode crossers, an SBND geometry
-        // uboone did not have (doc pr/20).  Not in pipeline_names => absent
-        // from the compiled config => no behavior change.
+        // uboone did not have (doc pr/20).  In the production pipeline_names
+        // by DEFAULT since doc pr/23 sec 9; dropped from the list => absent
+        // from the compiled config => the pre-pr/23 chain.
         protect_bundle: cm.protect_bundle(
             graph_name=if protect_graph_name == null then 'relaxed' else protect_graph_name,
             beam_window_only=beam_gate,
@@ -1144,8 +1146,9 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
         // erase+emplace every in-window cluster's steiner_graph and dangle
         // the GraphAlgorithms the STM fit cached in the tagger stage
         // (bad_alloc from garbage num_vertices, SBND evt 54095).  Distinct
-        // component name => distinct instance; not in pipeline_names =>
-        // absent from the compiled config.
+        // component name => distinct instance; in the production
+        // pipeline_names by DEFAULT since doc pr/23 sec 9, always paired
+        // with protect_bundle.
         steiner_refresh: cm.steiner(name='refresh',
                             retiler=improve2, perf=true, require_beam_flash=false,
                             beam_window_only=beam_gate,
@@ -1739,7 +1742,8 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
        // Set both to null for the legacy kink search.
        cathode_x=0, cathode_kink_xcut=5,
        // protect_bundle (doc pr/23): PR-stage overclustering protection.
-       // Inert unless 'protect_bundle' is named in pipeline_names.  The
+       // Named in the production pipeline_names by DEFAULT since the sec 9
+       // flip (owner 2026-08-02); inert when dropped from the list.  The
        // cathode re-join values are the SBND operating point (INTERNAL units,
        // unlike cathode_kink_xcut above): re-unite graph components whose
        // closest points both sit within 5 cm of the cathode, within 8 cm in
