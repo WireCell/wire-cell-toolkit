@@ -174,6 +174,19 @@ void Steiner::CreateSteinerGraph::visit(Ensemble& ensemble) const
             ? std::string("main ") + std::to_string(src->ident())
             : std::string("assoc ") + std::to_string(src->get_cluster_id());
 
+        // replace=false (doc pr/23 second pass): keep an existing
+        // steiner_graph untouched.  Rebuilding would give_graph()
+        // (erase+emplace) the store node and dangle every GraphAlgorithms
+        // handed out since it was built -- the tagger-stage STM fit caches
+        // one, and the dangling reference aborts the neutrino PR
+        // (garbage num_vertices, SBND evts 54095/163543).  m_replace
+        // defaults true = the historical always-rebuild path, so configs
+        // without the key are byte-identical.
+        if (!m_replace && src->has_graph("steiner_graph")) {
+            SPDLOG_LOGGER_TRACE(log, "CreateSteinerGraph: [{}] keeping existing steiner_graph (replace=false)", tag);
+            return true;
+        }
+
         t0 = Clock::now();
         auto new_node = m_grapher_config.retile->mutate(*src->node());
         auto new_cluster_1 = new_node->value.facade<Cluster>();
