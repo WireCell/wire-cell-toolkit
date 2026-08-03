@@ -90,6 +90,8 @@ public:
         double m_iso_endpoint_max_xext{25};     // cm
         double m_iso_endpoint_xext_frac{0.35};
         double m_iso_endpoint_xext_quantile{0.02};
+        double m_iso_endpoint_tube_radius{4};   // cm
+        double m_iso_endpoint_min_aspect{0.12};
         // Detector-extent literals (docs/pr/2 sec. 2e(iv)), all in cm.
         // Defaults = the uBooNE prototype values (active volume y in
         // [-116,+117], z in [0,1037]) => absent keys are byte-identical.

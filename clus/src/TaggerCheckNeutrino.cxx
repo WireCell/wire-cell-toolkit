@@ -84,6 +84,8 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_iso_endpoint_max_xext      = get(config, "iso_endpoint_max_xext",      m_iso_endpoint_max_xext);       // cm
     m_iso_endpoint_xext_frac     = get(config, "iso_endpoint_xext_frac",     m_iso_endpoint_xext_frac);
     m_iso_endpoint_xext_quantile = get(config, "iso_endpoint_xext_quantile", m_iso_endpoint_xext_quantile);
+    m_iso_endpoint_tube_radius   = get(config, "iso_endpoint_tube_radius",   m_iso_endpoint_tube_radius);     // cm
+    m_iso_endpoint_min_aspect    = get(config, "iso_endpoint_min_aspect",    m_iso_endpoint_min_aspect);
     // Detector-extent literals (docs/pr/2 sec. 2e(iv)), all cm.
     m_cosmic_y_top_main    = get(config, "cosmic_y_top_main",    m_cosmic_y_top_main);
     m_cosmic_y_top_strict  = get(config, "cosmic_y_top_strict",  m_cosmic_y_top_strict);
@@ -222,6 +224,8 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["iso_endpoint_max_xext"]      = m_iso_endpoint_max_xext;       // cm
     cfg["iso_endpoint_xext_frac"]     = m_iso_endpoint_xext_frac;
     cfg["iso_endpoint_xext_quantile"] = m_iso_endpoint_xext_quantile;
+    cfg["iso_endpoint_tube_radius"]   = m_iso_endpoint_tube_radius;    // cm
+    cfg["iso_endpoint_min_aspect"]    = m_iso_endpoint_min_aspect;     // trimmed transverse/axial extent ratio
     // Detector-extent literals (docs/pr/2 sec. 2e(iv)); defaults = uBooNE prototype, cm.
     cfg["cosmic_y_top_main"]    = m_cosmic_y_top_main;     // 100 = 17 cm below the uBooNE y=+117 top
     cfg["cosmic_y_top_strict"]  = m_cosmic_y_top_strict;   // 102 = 15 cm below
@@ -509,6 +513,8 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
     pattern_algos.m_iso_endpoint_max_xext      = m_iso_endpoint_max_xext * units::cm;    // cm -> internal
     pattern_algos.m_iso_endpoint_xext_frac     = m_iso_endpoint_xext_frac;
     pattern_algos.m_iso_endpoint_xext_quantile = m_iso_endpoint_xext_quantile;
+    pattern_algos.m_iso_endpoint_tube_radius   = m_iso_endpoint_tube_radius * units::cm;  // cm -> internal
+    pattern_algos.m_iso_endpoint_min_aspect    = m_iso_endpoint_min_aspect;
     // Detector-extent literals, cm -> internal (docs/pr/2 sec. 2e(iv)).
     pattern_algos.m_cosmic_y_top_main    = m_cosmic_y_top_main    * units::cm;
     pattern_algos.m_cosmic_y_top_strict  = m_cosmic_y_top_strict  * units::cm;

@@ -161,14 +161,21 @@ function(
     // metric (which degenerates to sheet-edge corners and produces the
     // two-edge-track fan), and the local-PCA endpoint refinement is skipped
     // on that branch.  false/nulls = C++ defaults (false / 40 cm / 25 cm /
-    // 0.35 / 0.02) = OFF => keys omitted => byte-identical.  SHIPS OFF.
-    // Pass -A iso_endpoint=true to enable (SBND_ISO_ENDPOINT=1 on the
-    // run_pr_chain_batch.sh runner).
+    // 0.35 / 0.02 / 4 cm / 0.12) = OFF => keys omitted => byte-identical.
+    // SHIPS OFF.  Pass -A iso_endpoint=true to enable (SBND_ISO_ENDPOINT=1 on
+    // the run_pr_chain_batch.sh runner).  Round 3 (doc pr/24 sec 15) added
+    // iso_endpoint_tube_radius (diagnostic only: reports whether the endpoint
+    // is laterally central; the endpoint itself is the untrimmed axial extreme,
+    // so no tip stub is left behind) and
+    // iso_endpoint_min_aspect (require real 2-D sheet-ness, so 1-D tracks are
+    // handed back to the legacy path).
     iso_endpoint = false,
     iso_endpoint_min_length = null,
     iso_endpoint_max_xext = null,
     iso_endpoint_xext_frac = null,
     iso_endpoint_xext_quantile = null,
+    iso_endpoint_tube_radius = null,
+    iso_endpoint_min_aspect = null,
     // protect_bundle stage knobs (doc pr/23): the PR-stage overclustering
     // protection (uboone's second graph examination).  The stage is in
     // pipeline_names by DEFAULT since the sec 9 production flip; the knobs
@@ -636,6 +643,8 @@ function(
                              iso_endpoint_max_xext=iso_endpoint_max_xext,
                              iso_endpoint_xext_frac=iso_endpoint_xext_frac,
                              iso_endpoint_xext_quantile=iso_endpoint_xext_quantile,
+                             iso_endpoint_tube_radius=iso_endpoint_tube_radius,
+                             iso_endpoint_min_aspect=iso_endpoint_min_aspect,
                              protect_graph_name=protect_graph_name,
                              protect_skip_convicted=protect_skip_convicted,
                              protect_cathode_x=protect_cathode_x,

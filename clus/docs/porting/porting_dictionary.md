@@ -400,3 +400,14 @@ it.  Prototype precedents (neither reachable from NeutrinoID):
 `adjust_wcpoints_parallel` (`prototype_base/data/src/PR3DCluster.cxx:428`,
 cluster-separation only) and `search_for_connection_isochronous`
 (`prototype_base/pid/src/PR3DCluster_graph.h:1445`, call site commented out).
+
+Round 3 (doc pr/24 §15) additionally requires 2-D sheet-ness before the branch
+may act (`iso_endpoint_min_aspect`, trimmed transverse/axial extent ratio,
+default 0.12), so a 1-D track-like cluster is handed back to the prototype
+metric rather than merely tolerated by it; and the endpoint is the UNTRIMMED
+axial extreme (laterally centred only within a 3 cm end band), because a
+trimmed extreme left a tip stub that `find_other_segments` then claimed as a
+segment — a 0.9 deg "vertex" inside a straight track (SBND mcp1k evt 284794).
+`iso_endpoint_tube_radius` is diagnostic only; a hard tube filter around the
+straight axis line was measured to pull endpoints up to 28.6 cm INWARD on long
+or curved clusters and was rejected.

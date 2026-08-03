@@ -238,10 +238,23 @@ bool PatternAlgorithms::find_iso_first_segment_endpoints(const Facade::Cluster& 
     // cheapest Steiner-graph paths between such corners are the sheet's
     // boundary edges, which is the observed two-edge-track fan.
     //
-    // Here instead: endpoints = the quantile-trimmed extreme points along the
-    // principal axis of the charge-qualified points, each taken as the band
-    // point nearest its end-band centroid (interior, not a corner), then
-    // snapped to a Steiner terminal exactly like the legacy path.
+    // Here instead: endpoints = the extreme points along the principal axis of
+    // the charge-qualified points, restricted to a tube around the axis line so
+    // that on a sheet the pick is the axial tip at mid-width (the narrow
+    // corner) rather than an edge corner, then snapped to a Steiner terminal
+    // exactly like the legacy path.
+    //
+    // ROUND 3 (doc pr/24 sec 15).  Round 2 took the QUANTILE-TRIMMED axial
+    // extreme and then the band point nearest the end-band centroid.  Both
+    // steps pull the endpoint inward -- 8.4 / 15.1 cm on the 7200-point track
+    // of SBND mcp1k evt 284794 -- and since nothing downstream of
+    // init_first_segment is modified, find_other_segments correctly claimed the
+    // uncovered tip as a separate segment: a 260.1 + 15.7 cm pair joined at a
+    // 0.9 degree "vertex" in the middle of a straight track (evt 59899: an 8.0
+    // degree junction where the legacy trajectory bends 1.6-2.8 degrees).  The
+    // quantile trim now serves only the GATE measurements, where it belongs;
+    // the endpoints are the true untrimmed tube extremes.  The aspect gate
+    // keeps 1-D track-like clusters out of this branch altogether.
 
     const double length = cluster.get_length();
     if (length < m_iso_endpoint_min_length) return false;
@@ -301,66 +314,152 @@ bool PatternAlgorithms::find_iso_first_segment_endpoints(const Facade::Cluster& 
         Syy += dy*dy;  Syz += dy*dz;  Szz += dz*dz;
     }
 
-    const auto& seed = cluster.get_pca().axis.at(0);
-    double vx = seed.x(), vy = seed.y(), vz = seed.z();
-    {
-        const double smag = std::sqrt(vx*vx + vy*vy + vz*vz);
+    // Power iteration on a 3x3 symmetric matrix, seeded with a global PCA axis
+    // so the sign (and the pick order downstream) is stable.
+    auto power_axis = [](const double S[6], const Facade::geo_point_t& seed,
+                         double& ax, double& ay, double& az) -> bool {
+        // S = {Sxx, Sxy, Sxz, Syy, Syz, Szz}
+        ax = seed.x();  ay = seed.y();  az = seed.z();
+        const double smag = std::sqrt(ax*ax + ay*ay + az*az);
         if (smag < 1e-12) return false;
-        vx /= smag;  vy /= smag;  vz /= smag;
-    }
-    for (int iter = 0; iter < 10; ++iter) {
-        const double wx = Sxx*vx + Sxy*vy + Sxz*vz;
-        const double wy = Sxy*vx + Syy*vy + Syz*vz;
-        const double wz = Sxz*vx + Syz*vy + Szz*vz;
-        const double mag = std::sqrt(wx*wx + wy*wy + wz*wz);
-        if (mag < 1e-12) break;
-        vx = wx/mag;  vy = wy/mag;  vz = wz/mag;
-    }
-    if (vx*seed.x() + vy*seed.y() + vz*seed.z() < 0) { vx = -vx; vy = -vy; vz = -vz; }
+        ax /= smag;  ay /= smag;  az /= smag;
+        for (int iter = 0; iter < 10; ++iter) {
+            const double wx = S[0]*ax + S[1]*ay + S[2]*az;
+            const double wy = S[1]*ax + S[3]*ay + S[4]*az;
+            const double wz = S[2]*ax + S[4]*ay + S[5]*az;
+            const double mag = std::sqrt(wx*wx + wy*wy + wz*wz);
+            if (mag < 1e-12) break;
+            ax = wx/mag;  ay = wy/mag;  az = wz/mag;
+        }
+        if (ax*seed.x() + ay*seed.y() + az*seed.z() < 0) { ax = -ax; ay = -ay; az = -az; }
+        return true;
+    };
 
-    // Axis projections; trimmed extremes; end bands.  The same quantile trim
-    // keeps a stray far tail from hijacking the extreme; the band bounds
-    // exclude what the trim excluded.
-    std::vector<double> ss;
+    const double S0[6] = {Sxx, Sxy, Sxz, Syy, Syz, Szz};
+    const auto& seed = cluster.get_pca().axis.at(0);
+    double vx = 0, vy = 0, vz = 0;
+    if (!power_axis(S0, seed, vx, vy, vz)) return false;
+
+    // Second axis (in-sheet transverse) for the aspect gate: deflate with the
+    // Rayleigh quotient lambda0 = v0^T S v0 -- the power iteration normalises
+    // the eigenvalue away, so it has to be recovered explicitly.
+    double ux = 0, uy = 0, uz = 0;
+    {
+        const double Sv_x = Sxx*vx + Sxy*vy + Sxz*vz;
+        const double Sv_y = Sxy*vx + Syy*vy + Syz*vz;
+        const double Sv_z = Sxz*vx + Syz*vy + Szz*vz;
+        const double lam0 = vx*Sv_x + vy*Sv_y + vz*Sv_z;
+        const double S1[6] = {Sxx - lam0*vx*vx, Sxy - lam0*vx*vy, Sxz - lam0*vx*vz,
+                              Syy - lam0*vy*vy, Syz - lam0*vy*vz, Szz - lam0*vz*vz};
+        const auto& seed1 = cluster.get_pca().axis.at(1);
+        if (!power_axis(S1, seed1, ux, uy, uz)) return false;
+    }
+
+    // Axis projections and transverse distances from the axis line through the
+    // centroid.  The quantile-trimmed axial extremes s_lo/s_hi serve the GATE
+    // only (degeneracy guard + aspect denominator); the endpoints below are
+    // untrimmed.
+    std::vector<double> ss, ts, dperp;
     ss.reserve(qual.size());
+    ts.reserve(qual.size());
+    dperp.reserve(qual.size());
     for (int i : qual) {
         const auto p = cluster.point3d(i);
-        ss.push_back((p.x()-cx)*vx + (p.y()-cy)*vy + (p.z()-cz)*vz);
+        const double dx = p.x()-cx, dy = p.y()-cy, dz = p.z()-cz;
+        const double s = dx*vx + dy*vy + dz*vz;
+        ss.push_back(s);
+        ts.push_back(dx*ux + dy*uy + dz*uz);
+        const double r2 = dx*dx + dy*dy + dz*dz - s*s;
+        dperp.push_back(std::sqrt(r2 > 0 ? r2 : 0.0));
     }
     std::vector<double> ss_sorted(ss);
     std::sort(ss_sorted.begin(), ss_sorted.end());
     const double s_lo = ss_sorted[klo];
     const double s_hi = ss_sorted[nq - 1 - klo];
     const double band = 3 * units::cm;
-    if (s_hi - s_lo < 3 * band) return false;  // degenerate axis: end bands would overlap
-    auto pick_band_point = [&](double s_ref) -> int {
-        // Band centroid ...
-        double bx = 0, by = 0, bz = 0;
-        int nb = 0;
-        for (size_t k = 0; k < qual.size(); ++k) {
-            if (std::abs(ss[k] - s_ref) > band) continue;
-            const auto p = cluster.point3d(qual[k]);
-            bx += p.x();  by += p.y();  bz += p.z();
-            ++nb;
+    if (s_hi - s_lo < 3 * band) return false;  // degenerate axis
+
+    // Sheet-aspect gate: trimmed transverse extent over trimmed axial extent.
+    // A track-like (1-D) cluster is thin in BOTH transverse directions and is
+    // handed back to the legacy path here, so this branch can only act on
+    // genuine 2-D sheets (doc pr/24 sec 15).
+    std::vector<double> ts_sorted(ts);
+    std::sort(ts_sorted.begin(), ts_sorted.end());
+    const double ext0 = s_hi - s_lo;
+    const double ext1 = ts_sorted[nq - 1 - klo] - ts_sorted[klo];
+    const double aspect = ext1 / ext0;
+    if (aspect < m_iso_endpoint_min_aspect) {
+        SPDLOG_LOGGER_DEBUG(s_log,
+            "iso endpoint: rejected by aspect (L={:.1f} cm, xext={:.1f} cm, aspect={:.3f} < {:.3f})",
+            length/units::cm, xext/units::cm, aspect, m_iso_endpoint_min_aspect);
+        return false;
+    }
+
+    // Endpoint = axial extreme FIRST, lateral centring SECOND.
+    //
+    // A first draft filtered to a tube of radius m_iso_endpoint_tube_radius
+    // around the axis line and took the extreme of that subset.  Measured on
+    // the 38 gated clusters of the doc pr/24 sec 15 set, that re-introduced the
+    // very inward bias this round removes: a straight axis line through the
+    // centroid leaves a long or curved object near its tips, so the tube held
+    // only 383/2097 points on SBND mcp1k evt 282204 and its extreme sat 28.6 cm
+    // INSIDE the round-2 endpoint (evt 284794: 20.8 cm).  The failure mode is
+    // curvature over a long lever arm, not width.  So the axial extreme is now
+    // taken over ALL qualified points -- the endpoint can never move inward,
+    // which is what makes "cannot leave a stub for find_other_segments" true by
+    // construction -- and the tube radius survives only as a diagnostic on how
+    // laterally central the chosen point is.
+    //
+    // Lateral centring still matters, and is what keeps the sheet-corner
+    // degeneracy from coming back: among the points within `band` of the axial
+    // extreme, the one nearest the axis line is taken.  On a sheet's wide end
+    // that is mid-width rather than a corner; on the narrow end it is the apex.
+    auto support_at = [&](double s_j) -> ptrdiff_t {
+        return std::upper_bound(ss_sorted.begin(), ss_sorted.end(), s_j + band)
+             - std::lower_bound(ss_sorted.begin(), ss_sorted.end(), s_j - band);
+    };
+
+    auto pick_end_point = [&](int sign, double& s_raw, double& walk_in,
+                              double& d_perp_pick) -> int {
+        std::vector<size_t> order(qual.size());
+        for (size_t k = 0; k < qual.size(); ++k) order[k] = k;
+        std::sort(order.begin(), order.end(),
+                  [&](size_t a, size_t b) {
+                      const double sa = sign * ss[a], sb = sign * ss[b];
+                      if (sa != sb) return sa > sb;   // most extreme first
+                      return a < b;                   // deterministic tie-break
+                  });
+        s_raw = ss[order.front()];
+        // Walk inward only past isolated spikes: the accepted axial position
+        // must carry at least three qualified points (itself included) within
+        // `band`.  No quantile discard; walk_in is logged and is ~0 on healthy
+        // objects.
+        double s_ext = 0;
+        bool found = false;
+        for (size_t j = 0; j < order.size(); ++j) {
+            const double s_j = ss[order[j]];
+            if (support_at(s_j) < 3) continue;
+            s_ext = s_j;
+            found = true;
+            break;
         }
-        if (nb == 0) return -1;
-        bx /= nb;  by /= nb;  bz /= nb;
-        // ... and the band point nearest it (interior pick; strict < keeps the
+        if (!found) return -1;
+        walk_in = std::abs(s_raw - s_ext);
+        // Laterally most central point of the end band (strict < keeps the
         // lowest qualifying index on ties -- deterministic).
-        double best_d2 = std::numeric_limits<double>::max();
+        double best_d = std::numeric_limits<double>::max();
         int best = -1;
         for (size_t k = 0; k < qual.size(); ++k) {
-            if (std::abs(ss[k] - s_ref) > band) continue;
-            const auto p = cluster.point3d(qual[k]);
-            const double dx = p.x()-bx, dy = p.y()-by, dz = p.z()-bz;
-            const double d2 = dx*dx + dy*dy + dz*dz;
-            if (d2 < best_d2) { best_d2 = d2; best = qual[k]; }
+            if (std::abs(ss[k] - s_ext) > band) continue;
+            if (dperp[k] < best_d) { best_d = dperp[k]; best = qual[k]; }
         }
+        d_perp_pick = best_d;
         return best;
     };
 
-    const int iA = pick_band_point(s_lo);
-    const int iB = pick_band_point(s_hi);
+    double s_rawA = 0, s_rawB = 0, walk_inA = 0, walk_inB = 0, dpA = 0, dpB = 0;
+    const int iA = pick_end_point(-1, s_rawA, walk_inA, dpA);
+    const int iB = pick_end_point(+1, s_rawB, walk_inB, dpB);
     if (iA < 0 || iB < 0 || iA == iB) return false;
 
     const auto pA = cluster.point3d(iA);
@@ -403,11 +502,21 @@ bool PatternAlgorithms::find_iso_first_segment_endpoints(const Facade::Cluster& 
     p1 = Facade::geo_point_t(sx[tA], sy[tA], sz[tA]);
     p2 = Facade::geo_point_t(sx[tB], sy[tB], sz[tB]);
 
+    // `gain` = how much further out each endpoint now reaches than round 2's
+    // quantile-trimmed extreme would have; `walk` = the spike-guard walk-in
+    // (expected ~0; a persistent walk > 1-2 cm would mean the guard is
+    // re-introducing the inward bias this round removes).
     SPDLOG_LOGGER_DEBUG(s_log,
-        "iso endpoint: fired (L={:.1f} cm, xext={:.1f} cm) A=({:.1f},{:.1f},{:.1f}) B=({:.1f},{:.1f},{:.1f})",
-        length/units::cm, xext/units::cm,
+        "iso endpoint: fired (L={:.1f} cm, xext={:.1f} cm, aspect={:.3f}, n={}) "
+        "A=({:.1f},{:.1f},{:.1f}) B=({:.1f},{:.1f},{:.1f}) gain={:.1f}/{:.1f} cm "
+        "walk={:.2f}/{:.2f} cm dperp={:.1f}/{:.1f} cm intube={}/{}",
+        length/units::cm, xext/units::cm, aspect, qual.size(),
         p1.x()/units::cm, p1.y()/units::cm, p1.z()/units::cm,
-        p2.x()/units::cm, p2.y()/units::cm, p2.z()/units::cm);
+        p2.x()/units::cm, p2.y()/units::cm, p2.z()/units::cm,
+        (s_lo - s_rawA)/units::cm, (s_rawB - s_hi)/units::cm,
+        walk_inA/units::cm, walk_inB/units::cm,
+        dpA/units::cm, dpB/units::cm,
+        dpA <= m_iso_endpoint_tube_radius, dpB <= m_iso_endpoint_tube_radius);
     return true;
 }
 

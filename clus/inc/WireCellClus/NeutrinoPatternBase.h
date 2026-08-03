@@ -150,6 +150,26 @@ namespace WireCell::Clus::PR {
         double m_iso_endpoint_max_xext{25 * units::cm};
         double m_iso_endpoint_xext_frac{0.35};
         double m_iso_endpoint_xext_quantile{0.02};
+        // Round 3 (doc pr/24 sec 15).  Round 2 picked each endpoint as the band
+        // point nearest the centroid of a 3 cm band at the QUANTILE-TRIMMED
+        // axial extreme -- inward-biased by construction (8-15 cm on a
+        // 7000-point track), which left a tip stub for find_other_segments to
+        // claim as its own segment and put a 0.9 deg "vertex" in a straight
+        // track (SBND mcp1k evt 284794, 59899).  Instead: the endpoint is the
+        // TRUE, untrimmed axial extreme over all qualified points (so it can
+        // never move inward -- "leaves no stub" holds by construction), and
+        // lateral centring is applied only WITHIN the 3 cm end band, which is
+        // what still keeps the pick off a sheet's edge corner.
+        // m_iso_endpoint_min_aspect additionally requires real 2-D sheet-ness
+        // (trimmed transverse/axial extent ratio), so the branch is inert on
+        // 1-D track-like clusters rather than merely harmless.
+        // m_iso_endpoint_tube_radius is DIAGNOSTIC ONLY: the DEBUG line reports
+        // whether the chosen endpoint lies within it of the axis line.  It was
+        // a hard filter in a first draft; measured on the 38 gated clusters
+        // that filter pulled endpoints up to 28.6 cm inward on long/curved
+        // objects (doc pr/24 sec 15), the same failure it was meant to cure.
+        double m_iso_endpoint_tube_radius{4 * units::cm};
+        double m_iso_endpoint_min_aspect{0.12};
 
         // Cathode kink veto (doc sbnd_xin/docs/pr/20 Part II, B0).  Passed to
         // segment_search_kink from break_segments: a candidate fit point within
