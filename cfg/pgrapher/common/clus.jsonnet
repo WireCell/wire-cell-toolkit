@@ -471,7 +471,7 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
                  } else {}),
         },
 
-        tagger_check_neutrino(name="", trackfitting_config_file="", particle_dataset="", recombination_model="", perf=false, dl_weights="", dQdx_scale=0.1, dQdx_offset=-1000.0, clus_geom_helper="", dl_vtx_rerank=true, dl_vtx_top_k=5, dl_vtx_min_accept_score=4.0, dl_vtx_score_scale=1000.0, beam_window_low=0, beam_window_high=0, nu_skip_cosmic=false, nu_skip_cosmic_bundle=false, nu_skip_cosmic_bundle_min_length=0, dir_weak_use_score=false, mip_dqdx=null, mip_dqdx_median=null, proton_dir_vote=false, proton_dir_score_max=null, proton_dir_asym_min=null, endpoint_trim_retry=false, fit_vertex_min_seg_length=null, cathode_x=null, cathode_kink_xcut=null, cosmic_y_top_main=null, cosmic_y_top_strict=null, cosmic_y_top_loose=null, cosmic_y_small_piece=null, vertex_z_prior_scale=null, ssm_target_dir=null, ssm_absorber_dir=null, kine_fudge_factor=null, kine_recom_factor=null, kine_shower_fudge_factor=null, kine_shower_recom_factor=null, kine_proton_recom_factor=null, kine_plane_weights=null, kine_plane_asym_switch=null, kine_w_value=null, muon_dqdx_curve=null, sp_dedx_use_recomb_model=false, sp_mean_dedx_cut=null, dl_vtx_cut=null, skip_cosmic_companions=false, cosmic_companion_min_length=null, dl_vtx_swap_min_len=null, dl_vtx_swap_min_frac=null) :: {
+        tagger_check_neutrino(name="", trackfitting_config_file="", particle_dataset="", recombination_model="", perf=false, dl_weights="", dQdx_scale=0.1, dQdx_offset=-1000.0, clus_geom_helper="", dl_vtx_rerank=true, dl_vtx_top_k=5, dl_vtx_min_accept_score=4.0, dl_vtx_score_scale=1000.0, beam_window_low=0, beam_window_high=0, nu_skip_cosmic=false, nu_skip_cosmic_bundle=false, nu_skip_cosmic_bundle_min_length=0, dir_weak_use_score=false, mip_dqdx=null, mip_dqdx_median=null, proton_dir_vote=false, proton_dir_score_max=null, proton_dir_asym_min=null, endpoint_trim_retry=false, fit_vertex_min_seg_length=null, cathode_x=null, cathode_kink_xcut=null, cosmic_y_top_main=null, cosmic_y_top_strict=null, cosmic_y_top_loose=null, cosmic_y_small_piece=null, vertex_z_prior_scale=null, ssm_target_dir=null, ssm_absorber_dir=null, kine_fudge_factor=null, kine_recom_factor=null, kine_shower_fudge_factor=null, kine_shower_recom_factor=null, kine_proton_recom_factor=null, kine_plane_weights=null, kine_plane_asym_switch=null, kine_w_value=null, muon_dqdx_curve=null, sp_dedx_use_recomb_model=false, sp_mean_dedx_cut=null, dl_vtx_cut=null, skip_cosmic_companions=false, cosmic_companion_min_length=null) :: {
             type: "TaggerCheckNeutrino",
             name: prefix + name,
             data: {
@@ -555,18 +555,6 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
               // point is ever skipped => keys omitted when null are byte-identical.
               + (if cathode_x != null then { cathode_x: cathode_x } else {})
               + (if cathode_kink_xcut != null then { cathode_kink_xcut: cathode_kink_xcut } else {})
-              // DL main-cluster swap guard (doc sbnd_xin/docs/pr/24).  The
-              // composite re-rank scales the raw SCN score by dl_vtx_score_scale
-              // (1000), so in the net's own "uncertain" regime a noise-level
-              // score difference outranks the geometric priors and the neutrino
-              // can be handed to a centimetre-scale stub.  When the DL vertex
-              // would move the main cluster to a host shorter than
-              // dl_vtx_swap_min_len (internal units) or than
-              // dl_vtx_swap_min_frac of the incumbent, the DL pick is rejected
-              // and the traditional vertex runs instead.  C++ defaults 0/0 =
-              // guard off => keys omitted when null are byte-identical.
-              + (if dl_vtx_swap_min_len != null then { dl_vtx_swap_min_len: dl_vtx_swap_min_len } else {})
-              + (if dl_vtx_swap_min_frac != null then { dl_vtx_swap_min_frac: dl_vtx_swap_min_frac } else {})
               // Detector-extent literals (docs/pr/2 sec 2e(iv)), all in cm.  C++
               // defaults = the uBooNE prototype values, so keys omitted when null =>
               // byte-identical pre-knob config.

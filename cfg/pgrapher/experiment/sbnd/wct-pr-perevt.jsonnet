@@ -300,14 +300,6 @@ function(
     // dl_vtx_cut (mm) is a configurability thread only (docs/pr/2 sec
     // 7.4); null keeps the C++ 25.0 (= 2.5 cm) default.
     dl_vtx_cut               = null,
-    // DL main-cluster swap guard (docs/pr/24): reject a DL (SCN) vertex that
-    // would move the neutrino's main cluster onto a host whose total track
-    // length is below dl_vtx_swap_min_len (CM) or below dl_vtx_swap_min_frac
-    // of the incumbent main cluster; the traditional vertex then runs instead.
-    // C++ defaults 0/0 = OFF, and null emits no key, so a bare run is
-    // byte-identical to the pre-knob config.
-    dl_vtx_swap_min_len      = null,
-    dl_vtx_swap_min_frac     = null,
     // When set, re-save the (post-PR) tree to this TensorDM tarball.  Used by the
     // round-trip gate (re-save with pipeline_names=[] and compare member hashes
     // against the input tarball).
@@ -602,9 +594,7 @@ function(
                              use_power_recomb=use_power_recomb,
                              sp_dedx_use_recomb_model=sp_dedx_use_recomb_model,
                              sp_mean_dedx_cut=sp_mean_dedx_cut,
-                             dl_vtx_cut=dl_vtx_cut,
-                             dl_vtx_swap_min_len=dl_vtx_swap_min_len,
-                             dl_vtx_swap_min_frac=dl_vtx_swap_min_frac);
+                             dl_vtx_cut=dl_vtx_cut);
 
     local graph = g.intern(
         innodes=[source],
