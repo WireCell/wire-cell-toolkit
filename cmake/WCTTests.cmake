@@ -4,7 +4,8 @@
 # WCT_WITH_TESTS is on.  Reproduces the test machinery of
 # waft/smplpkgs.py:ValidationContext + waft/wcb_unit_test.py under CTest:
 #
-#   test/doctest*.cxx       -> aggregated into one wcdoctest-<pkg> runner
+#   test/doctest*.cxx       -> per-package OBJECT lib, all linked into one
+#                              `wcdoctest` runner by wct_finalize_doctest()
 #   test/test_*.cxx         -> one program each, run as a test  (label: atomic)
 #   test/atomic*.cxx        ->   "" (label: atomic)
 #   test/check_*.cxx        -> built only, NOT run               (label: check)
@@ -72,20 +73,25 @@ function(wct_register_tests NAME pkgdir have_lib test_use)
 
   set(_inc "${pkgdir}/inc" "${_testdir}" "${WCT_GENERATED_INCLUDE_DIR}")
 
-  # ---- aggregated doctest runner ----
+  # ---- doctest sources -> per-package OBJECT library ----
+  # Each package's doctest*.cxx are compiled with that package's own include and
+  # link context (as an OBJECT library), then all packages' objects are linked
+  # into a single `wcdoctest` executable by wct_finalize_doctest() after the
+  # package loop.  Compiling per package (rather than dumping every test dir onto
+  # one include path) preserves each package's compile context and avoids
+  # cross-package test-header collisions.
   file(GLOB _dts CONFIGURE_DEPENDS "${_testdir}/doctest*.cxx")
   if(_dts)
-    set(_main "${CMAKE_CURRENT_BINARY_DIR}/wcdoctest-${NAME}.cxx")
-    configure_file("${CMAKE_SOURCE_DIR}/cmake/wcdoctest-main.cxx.in" "${_main}" @ONLY)
-    set(_dtexe "wcdoctest-${NAME}")
-    add_executable(${_dtexe} "${_main}" ${_dts})
-    target_include_directories(${_dtexe} PRIVATE ${_inc})
+    set(_dtobj "wcdoctest-obj-${NAME}")
+    add_library(${_dtobj} OBJECT ${_dts})
+    target_include_directories(${_dtobj} PRIVATE ${_inc})
     if(_link)
-      target_link_libraries(${_dtexe} PRIVATE ${_link})
+      # PRIVATE deps give this object library the packages' include dirs and
+      # compile definitions; the real link happens on the final executable.
+      target_link_libraries(${_dtobj} PRIVATE ${_link})
     endif()
-    add_test(NAME "${NAME}/wcdoctest" COMMAND ${WCT_TEST_LAUNCHER} $<TARGET_FILE:${_dtexe}>)
-    set_tests_properties("${NAME}/wcdoctest" PROPERTIES
-      LABELS "atomic;doctest;${NAME}" ENVIRONMENT "${WCT_TEST_ENV}")
+    set_property(GLOBAL APPEND PROPERTY WCT_DOCTEST_OBJLIBS ${_dtobj})
+    set_property(GLOBAL APPEND PROPERTY WCT_DOCTEST_LINKLIBS ${_link})
   endif()
 
   # ---- compiled programs by prefix/group ----
@@ -132,4 +138,33 @@ function(wct_register_tests NAME pkgdir have_lib test_use)
       endforeach()
     endforeach()
   endforeach()
+endfunction()
+
+# Link every package's doctest OBJECT library into a single `wcdoctest`
+# executable with one doctest main, registered as one CTest test.  Call once
+# after all package subdirectories have been added.
+function(wct_finalize_doctest)
+  get_property(_objs GLOBAL PROPERTY WCT_DOCTEST_OBJLIBS)
+  if(NOT _objs)
+    return()
+  endif()
+  get_property(_libs GLOBAL PROPERTY WCT_DOCTEST_LINKLIBS)
+  if(_libs)
+    list(REMOVE_DUPLICATES _libs)
+  endif()
+
+  set(_main "${CMAKE_BINARY_DIR}/wcdoctest-main.cxx")
+  configure_file("${CMAKE_SOURCE_DIR}/cmake/wcdoctest-main.cxx.in" "${_main}" @ONLY)
+
+  # Linking the OBJECT libraries pulls in their compiled test objects; the union
+  # of package/test libraries below resolves their symbols (OBJECT libraries do
+  # not propagate their own PRIVATE link deps to consumers).
+  add_executable(wcdoctest "${_main}")
+  # Linking OBJECT libraries via target_link_libraries (CMake >= 3.12) adds their
+  # objects to the executable; ${_libs} then resolves the referenced symbols.
+  target_link_libraries(wcdoctest PRIVATE ${_objs} ${_libs})
+
+  add_test(NAME "wcdoctest" COMMAND ${WCT_TEST_LAUNCHER} $<TARGET_FILE:wcdoctest>)
+  set_tests_properties("wcdoctest" PROPERTIES
+    LABELS "atomic;doctest" ENVIRONMENT "${WCT_TEST_ENV}")
 endfunction()

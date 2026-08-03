@@ -56,7 +56,6 @@
 .beads
 .cache
 .clangd
-.claude
 .fuse*
 .gitattributes
 .lock-waf*
@@ -64,9 +63,7 @@
 .vscode
 .waf-*
 .waf3*
-AGENTS.md
 AutoDict_*
-CLAUDE.md
 GPATH
 GRTAGS
 GTAGS
@@ -113,7 +110,11 @@ wct-deps.dot
 .dolt/
 *.db
 .beads*
-.claude
+
+# Claude Code: keep personal/local settings out of git, but share the official
+# CLAUDE.md, .claude/skills/, .claude/hooks/, and .claude/settings.json.
+.claude/settings.local.json
+.claude/**/*.local.json
 
 # CMake build (parallel to waf): the blanket *.txt rule above otherwise hides
 # CMake's mandatory CMakeLists.txt files, so re-include them explicitly.

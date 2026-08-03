@@ -226,6 +226,11 @@ foreach(_pkg IN LISTS WCT_PACKAGES)
   add_subdirectory(${_pkg})
 endforeach()
 
+# Aggregate every package's doctest objects into the single `wcdoctest` binary.
+if(WCT_WITH_TESTS AND COMMAND wct_finalize_doctest)
+  wct_finalize_doctest()
+endif()
+
 # ---------------------------------------------------------------------------
 # Install/export: pkg-config .pc, native install(EXPORT) target file, and the
 # WireCellToolkitConfig package config for downstream find_package (wct-ike.11).
