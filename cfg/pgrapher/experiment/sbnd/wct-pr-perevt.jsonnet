@@ -141,8 +141,19 @@ function(
     // owner's call.  50 reproduces the scan-supported rule for 9 of the 10
     // scanned events; ~45 covers all 10 (evt 400504 measures 49.1 cm by
     // segment_track_length, the length the guard uses).
-    // Enable with -A shower_topo_demote_len=50.
-    shower_topo_demote_len = null,
+    // **SBND PRODUCTION DEFAULT ON at 50 cm, owner 2026-08-03**, after a
+    // hand-scan of all 10 long shower-topology segments on a selected
+    // nu-candidate main cluster returned 10/10 TRACKS, 0 showers.
+    // Measured at 50 cm over 572 events: 23 long segments flip
+    // shower->track across 22 events, 0 the other way; 17/572 events (3.0%)
+    // move numu_score; evt 321107 goes pdg 11 -> 13, numu_score
+    // -0.783 -> +0.317.  Score moves are MIXED -- evt 286353 drops
+    // 2.023 -> -1.139 -- accepted by the owner with that caveat on record
+    // (doc pr/25 sec 3.10).  50 covers 9 of the 10 scanned events; evt
+    // 400504 measures 49.1 cm by segment_track_length (the length this
+    // guard uses), so ~45 would cover all 10.
+    // Set null for the legacy behavior (long segments stay shower-eligible).
+    shower_topo_demote_len = 50,
     // protect_bundle stage knobs (doc pr/23): the PR-stage overclustering
     // protection (uboone's second graph examination).  The stage is in
     // pipeline_names by DEFAULT since the sec 9 production flip; the knobs
@@ -159,16 +170,24 @@ function(
     protect_cathode_rejoin_xcut = 5 * wc.cm,
     protect_cathode_rejoin_dyz  = 4 * wc.cm,
     protect_cathode_rejoin_dis  = 8 * wc.cm,
-    // Direction-agreement fallback for a dyz-only failure (doc pr/25, SBND
-    // evt 489327): DESIGNED, NOT YET the SBND default -- owner sign-off
-    // pending (escalation rule 1).  nulls => C++ default 0 = fallback
-    // disabled => byte-identical to the block above.  Both this file AND
-    // clus.jsonnet's pr() must be set together (doc pr/23 both-files trap:
-    // one file's explicit null overrides the other's non-null back OFF).
-    protect_cathode_rejoin_perp       = null,
-    protect_cathode_rejoin_angle      = null,
-    protect_cathode_rejoin_dir_radius = null,
-    protect_cathode_rejoin_dir_npts   = null,
+    // Direction-agreement fallback for a dyz-only failure (doc pr/25 sec 1,
+    // SBND evt 489327).  **SBND PRODUCTION DEFAULT ON, owner 2026-08-03.**
+    // A cathode crosser whose two halves are collinear but whose transverse
+    // travel exceeds cathode_rejoin_dyz -- which happens by construction as
+    // a track tips toward the cathode plane -- is re-joined on direction
+    // agreement instead of being left split.  Operating point from doc
+    // pr/25 sec 1: measured 5/5 target re-joins, 1/1 junk pair still
+    // rejected (89.2 deg direction mismatch, also fails dir_npts), 8/8
+    // regression events byte- AND score-identical.
+    // INTERNAL units except _angle (degrees) and _dir_npts (count).
+    // Set null for the legacy dyz-only behavior.  Per doc 68 the SBND
+    // operating point lives HERE only; clus.jsonnet's clus_pr()/pr()
+    // function defaults stay null (the doc pr/23 both-files trap is about
+    // an explicit null in the OTHER direction overriding a value set here).
+    protect_cathode_rejoin_perp       = 3 * wc.cm,
+    protect_cathode_rejoin_angle      = 20.0,
+    protect_cathode_rejoin_dir_radius = 15 * wc.cm,
+    protect_cathode_rejoin_dir_npts   = 20,
     // TaggerCheckSTM's containment gate (cluster_fc_check) uses the same fiducial
     // + margins as tagger_check_tgm / tagger_check_fc, so "contained" means one
     // thing across all three verdicts.  true = SBND production (docs/49); false
