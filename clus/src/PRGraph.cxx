@@ -120,9 +120,14 @@ namespace WireCell::Clus::PR {
             const auto n = g_port_audit.endpoint_mismatch.fetch_add(1, std::memory_order_relaxed);
             if (n < 20) {   // bound the log; the counter carries the full rate
                 auto log = Log::logger("clus");
+                // DEBUG, not WARN (doc pr/30 §12.10).  This fires ~108 times
+                // per 48 SBND events and every one of those is the benign
+                // crawl_segment transient documented above.  At WARN it is
+                // noise that trains the reader to ignore the one channel that
+                // would matter if it ever fired from another call site.
                 const auto& f = seg->wcpts().front().point;
                 const auto& b = seg->wcpts().back().point;
-                SPDLOG_LOGGER_WARN(log,
+                SPDLOG_LOGGER_DEBUG(log,
                     "PR::add_segment: vertex/segment endpoint mismatch (doc pr/30 P8): "
                     "seg nwcpts={} front=({:.3f},{:.3f},{:.3f}) back=({:.3f},{:.3f},{:.3f}) "
                     "v1=({:.3f},{:.3f},{:.3f}) v2=({:.3f},{:.3f},{:.3f}) tol={:.3f} cm strict={}",

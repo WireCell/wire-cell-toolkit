@@ -179,7 +179,22 @@ function(
     fit_exclusion = false,
     graph_endpoint_strict = false,
     graph_endpoint_tol = null,
-    oov_prototype_parity = false,
+    // **SBND PRODUCTION DEFAULT ON, owner 2026-08-04** (doc pr/30 §12.10).
+    // This is a port BUG, not tunable behaviour: at all three out-of-TPC guard
+    // sites the toolkit's implicit vote is the OPPOSITE of what the
+    // prototype's own helper returns for a point with no readout --
+    //   modify_segment_isochronous  toolkit "connected" vs is_good_point FALSE
+    //   examine_vertices_1p         toolkit "dead"      vs get_closest_dead_chs FALSE
+    //   examine_vertices_3          toolkit "not unique" (the segment is then
+    //                               REMOVED) vs a normally-evaluated distance
+    // Flipped ON while it is provably free: measured byte-identical on 48/48
+    // nueCC data events (work-pr30-baseHEAD vs work-pr30-f2on), because the
+    // guards fire once in total on this manifest.  The population where they
+    // WOULD fire -- the cathode region and the readout-window edges -- is
+    // barely represented here, so landing it now costs nothing and avoids
+    // having to A/B it later as a real behaviour change.
+    // Set false for the pre-flip arm.
+    oov_prototype_parity = true,
     first_seg_local_pca = null,
     other_seg_relaxed_accept = null,
     // Steiner TERMINAL filter fidelity -- doc pr/29 D1 and D12.
