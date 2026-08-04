@@ -286,6 +286,54 @@ namespace WireCell::Clus::PR {
         // C++ default true => byte-identical.
         bool   m_other_seg_relaxed_accept{true};
 
+        // doc sbnd_xin/docs/pr/31 §11 -- F2 (was P2): the stage-3 shower
+        // direction call site that has no prototype counterpart.
+        //
+        // determine_direction's kShowerTopology branch
+        // (NeutrinoTrackShowerSep.cxx:121-135) calls
+        // segment_determine_shower_direction -- 305 lines of associated-point
+        // PCA, spread profiling and endpoint comparison
+        // (PRSegmentFunctions.cxx:2208-2512) -- whose prototype original
+        // ProtoSegment::determine_shower_direction() is called from exactly
+        // ONE place in the whole prototype tree,
+        // NeutrinoID_track_shower.h:1532, inside
+        // compare_main_vertices_all_showers: stage 4, all-showers path only.
+        // What the prototype runs HERE is determine_dir_shower_topology
+        // (ProtoSegment.cxx:1677-1710), four live lines that set
+        // particle_type=11 and particle_mass and DO NOT touch flag_dir -- so
+        // in the prototype a topology shower leaves stage 3 with whatever
+        // direction is_shower_topology's forward/backward large-spread
+        // comparison left (ProtoSegment.cxx:523-527).
+        //
+        // The call mutates exactly one thing, twice: segment->dirsign(0) at
+        // entry (:2209) and segment->dirsign(flag_dir) at the end (:2509).
+        // Nothing else on the segment is written and the return value is
+        // discarded at the call site, so suppressing it suppresses precisely
+        // the direction overwrite.
+        //
+        // NOT filed as a clear porting bug: the prototype's own function
+        // carries a "// hack for now" comment above particle_type = 11 and
+        // has both of its direction blocks commented out, i.e. it is
+        // self-declared provisional, and the toolkit's PCA may well be the
+        // better physics.  What is certain is that the substitution is
+        // unconditional, undeclared and reaches this stage's in/out maps and
+        // stage 4's vertex scorer through dirsign.  This knob exists so the
+        // question can be measured instead of argued.
+        //
+        // TRUE = prototype behaviour (skip the call).  C++ default FALSE =>
+        // today's path => byte-identical.
+        //
+        // Residual when ON, stated because it is not full parity: the
+        // prototype clears flag_dir at is_shower_topology's entry
+        // (ProtoSegment.cxx:321, before its early returns) while the toolkit's
+        // segment_is_shower_topology skips dirsign entirely on its four early
+        // returns (PRSegmentFunctions.cxx:2518-2529).  Today that hole is
+        // masked by this call's entry-side dirsign(0); with the knob ON it is
+        // exposed, but only for a segment carrying a STALE kShowerTopology
+        // flag -- i.e. only in combination with F3 (P13), which is what closes
+        // it.  Do not fix that here.
+        bool   m_shower_topo_proto_dir{false};
+
         // Proton-template direction vote (doc pr/8; default false = legacy).
         // Thresholds are initial values pending the pr/8 sec. 6 calibration.
         bool   m_proton_dir_vote{false};

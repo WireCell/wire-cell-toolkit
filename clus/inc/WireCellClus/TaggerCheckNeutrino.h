@@ -92,6 +92,13 @@ public:
         bool   m_oov_prototype_parity{false};      // F2 (all three sites)
         bool   m_first_seg_local_pca{true};        // P2
         bool   m_other_seg_relaxed_accept{true};   // P4
+        // doc sbnd_xin/docs/pr/31 §11 -- F2 (was P2).  true => skip the
+        // stage-3 segment_determine_shower_direction call, so a topology
+        // shower keeps the direction segment_is_shower_topology set, which is
+        // what the prototype does.  false => today's path, byte-identical.
+        // Rationale, the mutation audit and the F3 residual: see
+        // NeutrinoPatternBase.h's m_shower_topo_proto_dir.
+        bool   m_shower_topo_proto_dir{false};     // pr/31 F2
         // Isochronous first-segment endpoint finding (doc sbnd_xin/docs/pr/24
         // round 2, SBND evt 271851); lengths in cm.  false => legacy
         // wire-footprint boundary endpoints, byte-identical.  When on, a

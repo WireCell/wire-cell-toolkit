@@ -197,6 +197,22 @@ function(
     oov_prototype_parity = true,
     first_seg_local_pca = null,
     other_seg_relaxed_accept = null,
+    // shower_topo_proto_dir (doc pr/31 §11, F2 was P2)
+    //                               true  => skip the stage-3
+    //                                        segment_determine_shower_direction
+    //                                        call, so a kShowerTopology segment
+    //                                        keeps the direction
+    //                                        segment_is_shower_topology set.
+    // The prototype runs determine_dir_shower_topology here, which does not
+    // touch flag_dir; its determine_shower_direction() is called from exactly
+    // one place in the whole prototype tree and that place is stage 4
+    // (NeutrinoID_track_shower.h:1532).  Deliberately NOT flipped on: unlike
+    // oov_prototype_parity this is not a clear port bug -- the prototype's own
+    // function carries a "// hack for now" comment and has both of its
+    // direction blocks commented out, so the toolkit's 305-line PCA may be the
+    // better physics.  OFF here = today's path = byte-identical; the arm that
+    // measures it sets this true.
+    shower_topo_proto_dir = false,
     // Steiner TERMINAL filter fidelity -- doc pr/29 D1 and D12.
     //
     // **SBND PRODUCTION DEFAULT ON, owner 2026-08-04**: both are port BUGS, not
@@ -780,6 +796,7 @@ function(
                              oov_prototype_parity=oov_prototype_parity,
                              first_seg_local_pca=first_seg_local_pca,
                              other_seg_relaxed_accept=other_seg_relaxed_accept,
+                             shower_topo_proto_dir=shower_topo_proto_dir,
                              steiner_terminal_wire_tol=steiner_terminal_wire_tol,
                              steiner_terminal_adjacent_slice=steiner_terminal_adjacent_slice,
                              steiner_edge_charge_forward_dead_mix=steiner_edge_charge_forward_dead_mix,

@@ -120,7 +120,21 @@ void PatternAlgorithms::determine_direction(Graph& graph, Facade::Cluster& clust
             t_shower_traj += MS(Clock::now() - t0);
         } else if (seg->flags_any(SegmentFlags::kShowerTopology)) {
             // Topology shower: determine direction, then set electron particle info
-            segment_determine_shower_direction(seg, particle_data, recomb_model, "associate_points", m_mip_dqdx_median, 0.4*units::cm, m_mip_dqdx);
+            //
+            // doc sbnd_xin/docs/pr/31 §11 (F2, was P2).  The prototype runs
+            // determine_dir_shower_topology here (ProtoSegment.cxx:1677-1710),
+            // which sets particle_type/particle_mass and does NOT touch
+            // flag_dir; its determine_shower_direction() is called from one
+            // place in the whole tree and that place is stage 4
+            // (NeutrinoID_track_shower.h:1532,
+            // compare_main_vertices_all_showers).  This call mutates only
+            // dirsign -- dirsign(0) on entry, dirsign(flag_dir) at the end --
+            // and its return is discarded, so skipping it leaves the direction
+            // segment_is_shower_topology set, which is the prototype's state.
+            // Default false => the call runs => byte-identical.
+            if (!m_shower_topo_proto_dir) {
+                segment_determine_shower_direction(seg, particle_data, recomb_model, "associate_points", m_mip_dqdx_median, 0.4*units::cm, m_mip_dqdx);
+            }
             {
                 const int pdg_code = 11; // electron
                 auto four_momentum = segment_cal_4mom(seg, pdg_code, particle_data, recomb_model, m_mip_dqdx_median);

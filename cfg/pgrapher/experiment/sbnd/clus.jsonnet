@@ -945,6 +945,11 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               // prototype's narrower version.
               fit_exclusion=false, graph_endpoint_strict=false, graph_endpoint_tol=null,
               oov_prototype_parity=false, first_seg_local_pca=null, other_seg_relaxed_accept=null,
+              // shower_topo_proto_dir (doc pr/31 sec 11, F2 was P2): true skips the
+              // stage-3 segment_determine_shower_direction call, leaving the topology
+              // shower with the direction segment_is_shower_topology set -- the
+              // prototype's state.  C++ default false = today's path = byte-identical.
+              shower_topo_proto_dir=false,
               // Steiner TERMINAL filter fidelity (doc pr/29 D1 and D12).  Both
               // OFF here = the historical toolkit behaviour, keys omitted =>
               // byte-identical config.  Turning either on can only ADD Steiner
@@ -1525,6 +1530,7 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
             oov_prototype_parity=oov_prototype_parity,
             first_seg_local_pca=first_seg_local_pca,
             other_seg_relaxed_accept=other_seg_relaxed_accept,
+            shower_topo_proto_dir=shower_topo_proto_dir,
             iso_endpoint=iso_endpoint,
             iso_endpoint_min_length=iso_endpoint_min_length,
             iso_endpoint_max_xext=iso_endpoint_max_xext,
@@ -1984,6 +1990,11 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
        // prototype's narrower version.
        fit_exclusion=false, graph_endpoint_strict=false, graph_endpoint_tol=null,
        oov_prototype_parity=false, first_seg_local_pca=null, other_seg_relaxed_accept=null,
+       // shower_topo_proto_dir (doc pr/31 sec 11, F2 was P2): true skips the
+       // stage-3 segment_determine_shower_direction call, leaving the topology
+       // shower with the direction segment_is_shower_topology set -- the
+       // prototype's state.  C++ default false = today's path = byte-identical.
+       shower_topo_proto_dir=false,
        // Steiner TERMINAL filter fidelity (doc pr/29 D1 and D12).  Both OFF =
        // the historical toolkit behaviour = byte-identical (keys omitted).
        // Ships OFF; the SBND operating point lives in wct-pr-perevt.jsonnet.
@@ -2124,6 +2135,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 oov_prototype_parity=oov_prototype_parity,
                 first_seg_local_pca=first_seg_local_pca,
                 other_seg_relaxed_accept=other_seg_relaxed_accept,
+                shower_topo_proto_dir=shower_topo_proto_dir,
                 steiner_terminal_wire_tol=steiner_terminal_wire_tol,
                 steiner_terminal_adjacent_slice=steiner_terminal_adjacent_slice,
                 steiner_edge_charge_forward_dead_mix=steiner_edge_charge_forward_dead_mix,

@@ -86,6 +86,8 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_oov_prototype_parity     = get(config, "oov_prototype_parity",     m_oov_prototype_parity);
     m_first_seg_local_pca      = get(config, "first_seg_local_pca",      m_first_seg_local_pca);
     m_other_seg_relaxed_accept = get(config, "other_seg_relaxed_accept", m_other_seg_relaxed_accept);
+    // doc sbnd_xin/docs/pr/31 §11 port-fidelity knob (F2, was P2).
+    m_shower_topo_proto_dir    = get(config, "shower_topo_proto_dir",    m_shower_topo_proto_dir);
     m_iso_endpoint               = get(config, "iso_endpoint",               m_iso_endpoint);
     m_iso_endpoint_min_length    = get(config, "iso_endpoint_min_length",    m_iso_endpoint_min_length);     // cm
     m_iso_endpoint_max_xext      = get(config, "iso_endpoint_max_xext",      m_iso_endpoint_max_xext);       // cm
@@ -235,6 +237,8 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["oov_prototype_parity"]     = m_oov_prototype_parity;      // false = legacy (today's three polarities)
     cfg["first_seg_local_pca"]      = m_first_seg_local_pca;       // true  = legacy (the refinement runs)
     cfg["other_seg_relaxed_accept"] = m_other_seg_relaxed_accept;  // true  = legacy (the 0.72/15cm/1.05 clause is live)
+    // doc sbnd_xin/docs/pr/31 §11.
+    cfg["shower_topo_proto_dir"]    = m_shower_topo_proto_dir;     // false = legacy (the stage-3 PCA direction call runs)
     cfg["iso_endpoint"]               = m_iso_endpoint;                // false = legacy wire-footprint boundary endpoints
     cfg["iso_endpoint_min_length"]    = m_iso_endpoint_min_length;     // cm
     cfg["iso_endpoint_max_xext"]      = m_iso_endpoint_max_xext;       // cm
@@ -532,6 +536,8 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
     pattern_algos.m_oov_prototype_parity     = m_oov_prototype_parity;
     pattern_algos.m_first_seg_local_pca      = m_first_seg_local_pca;
     pattern_algos.m_other_seg_relaxed_accept = m_other_seg_relaxed_accept;
+    // doc sbnd_xin/docs/pr/31 §11 (F2).
+    pattern_algos.m_shower_topo_proto_dir    = m_shower_topo_proto_dir;
     // add_segment() is a free function with no component config in reach, so
     // the P8 policy travels through a process-wide struct written here, once,
     // before any graph is built (doc pr/30 §11 P8).
