@@ -54,9 +54,15 @@ void MyFCN::AddSegment(SegmentPtr sg)
     Facade::geo_point_t center(0, 0, 0);
     double min_dis = 1e9;
 
-    // Get raw steiner points from segment (consistent with prototype's get_point_vec())
-    const auto& wcpts = sg->wcpts();
-    if (wcpts.empty()) {
+    // prototype (NeutrinoID_improve_vertex.h:538): WCP::PointVector& pts =
+    // sg->get_point_vec(), and ProtoSegment.h:16 defines get_point_vec() as
+    // {return fit_pt_vec;} -- the *fitted* trajectory written by the
+    // do_multi_tracking that always precedes fit_vertex, NOT the raw Steiner
+    // path (that is get_wcpt_vec()).  The toolkit counterpart of fit_pt_vec is
+    // Segment::fits().  Reading wcpts() here fed the vertex fit the unfitted
+    // skeleton; see sbnd_xin/docs/pr/28 sec. 3.1.
+    const auto& fits = sg->fits();
+    if (fits.empty()) {
         Facade::geo_point_t a(0, 0, 0);
         vec_PCA_dirs.push_back(std::make_tuple(a, a, a));
         vec_PCA_vals.push_back(std::make_tuple(0, 0, 0));
@@ -65,8 +71,9 @@ void MyFCN::AddSegment(SegmentPtr sg)
     }
 
     std::vector<Facade::geo_point_t> pts;
-    for (const auto& wcp : wcpts) {
-        pts.push_back(wcp.point);
+    pts.reserve(fits.size());
+    for (const auto& f : fits) {
+        pts.push_back(f.point);
     }
     double length = 0;
     if (pts.size() > 1) {
@@ -211,7 +218,22 @@ std::pair<bool, WireCell::Clus::Facade::geo_point_t> MyFCN::FitVertex()
             Eigen::Vector3d dir2(std::get<0>(vec_PCA_dirs.at(j)).x(), 
                                 std::get<0>(vec_PCA_dirs.at(j)).y(), 
                                 std::get<0>(vec_PCA_dirs.at(j)).z());
-            double angle = std::acos(dir1.dot(dir2)) * 180.0 / M_PI;
+            // prototype (NeutrinoID_improve_vertex.h:689): dir1.Angle(dir2).
+            // ROOT's TVector3::Angle returns 0 when either vector is null and
+            // clamps the cosine to [-1,1].  A bare std::acos(dot) instead gives
+            // 90 deg for a null direction -- which is what AddSegment pushes for
+            // a segment with <2 points inside the annulus -- so a stub counted
+            // as a large angle and could open a gate the prototype keeps shut;
+            // and it gives NaN when FP rounding pushes the dot past -1, losing a
+            // genuine anti-parallel pair.  See sbnd_xin/docs/pr/28 sec. 3.2.
+            const double ptot2 = dir1.squaredNorm() * dir2.squaredNorm();
+            double angle = 0.0;
+            if (ptot2 > 0) {
+                double arg = dir1.dot(dir2) / std::sqrt(ptot2);
+                if (arg > 1.0) arg = 1.0;
+                if (arg < -1.0) arg = -1.0;
+                angle = std::acos(arg) * 180.0 / M_PI;
+            }
             if (angle > 15) n_large_angles++;
         }
     }
