@@ -94,6 +94,11 @@ TEST_CASE("clus knob defaults: TaggerCheckNeutrino switches are all OFF")
     CHECK_KNOB_BOOL(cfg, "nu_skip_cosmic", false);           // doc pr/3 sec 8
     CHECK_KNOB_BOOL(cfg, "nu_skip_cosmic_bundle", false);
     CHECK_KNOB_BOOL(cfg, "skip_cosmic_companions", false);   // doc pr/20 I P4
+    // doc pr/26 sec 9: store singlephoton_tagger()'s verdict in
+    // TaggerInfo::photon_flag (prototype NeutrinoID.cxx:271).  The C++ default
+    // stays the legacy gap even though SBND's cfg now flips it on, so every
+    // other detector's tagger ntuple keeps a constant-0 photon_flag branch.
+    CHECK_KNOB_BOOL(cfg, "sp_photon_flag", false);
 
     // Numeric knobs whose legacy value is the INERT one: 0 disables the guard,
     // so an absent key leaves the code path untouched.
