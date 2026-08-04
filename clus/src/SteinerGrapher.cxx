@@ -931,6 +931,14 @@ void establish_same_blob_steiner_edges_steiner_graph(EnhancedSteinerResult& resu
     const auto& majs = skd.major_indices();
 
     for (const auto& [old_index, new_index] : result.old_to_new_index) {
+        // Guard the INDEX, not only the result.  Unlike form_cell_points_map,
+        // which walks point_idx < npoints() and so cannot go out of range, the
+        // keys here are base-graph vertex descriptors carried through
+        // old_to_new_index.  They should all be points of this cluster's sv3d
+        // by construction, but an out-of-range read of major_indices() would be
+        // silent rather than fatal, so it is checked the same way
+        // get_blob_for_vertex checks it (doc pr/29 §13.3).
+        if (old_index >= majs.size()) continue;
         size_t blob_node_idx = majs[old_index];
         if (blob_node_idx >= nodes.size()) continue;
         // Null guard: skip if blob facade is invalid

@@ -263,7 +263,125 @@ PID / direction-finding / kinematics algorithms (`do_track_comp`, `eval_ks_ratio
 
 Full function-by-function table: `clus/docs/patternrecognition/prvertex_prsegment_prshower_review.md §1`.
 
-### [Steiner Tree](https://github.com/BNLIF/wire-cell-pid/blob/537a3fd17f8a7b3cf5412594267c14c4cc1775cb/docs/PR3DCluster_steiner.md) (WCP) vvs. **xxx** :warning: (WCT)
+### [Steiner Tree](https://github.com/BNLIF/wire-cell-pid/blob/537a3fd17f8a7b3cf5412594267c14c4cc1775cb/docs/PR3DCluster_steiner.md) (WCP) vs. **`WireCell::Clus::Steiner::Grapher`** (WCT)
+
+`Steiner::Grapher` (`clus/src/SteinerGrapher.{h,cxx}`) plus the free functions in
+`WireCell::Clus::Graphs::Weighted` are the WCT equivalent of
+`WCPPID::PR3DCluster`'s Steiner half; the orchestration that WCP does inline in
+`create_steiner_graph` lives in the `CreateSteinerGraph` visitor.
+
+| WCP (`PR3DCluster_steiner.h` / `_graph.h`) | WCT | Notes |
+|---|---|---|
+| `create_steiner_graph(ct_point_cloud, gds, …)` | `Steiner::CreateSteinerGraph::visit` → `process_cluster_steiner` lambda | Component, not a member |
+| `Improve_PR3DCluster_2(...)` + `calc_sampling_points` + `Create_point_cloud` | `m_grapher_config.retile->mutate(*src->node())` (`RetileCluster`) | The retiled cluster is a real grouping child, **not** deleted mid-algorithm |
+| `Create_steiner_tree(pc_steiner, flags, gds, old_mcells, flag_path, disable_dead_mix_cell)` | `Grapher::create_steiner_tree(ref_cluster, path_indices, graph, steiner_graph, disable_dead_mix_cell, steiner_pc)` | Reference cluster passed explicitly instead of `old_mcells` |
+| `find_steiner_terminals(gds, disable_dead_mix_cell)` | `Grapher::find_steiner_terminals(graph, disable_dead_mix_cell[, cell_points_map])` | Map may be passed in to avoid recomputing |
+| `find_peak_point_indices(...)` | `Grapher::find_peak_point_indices(...)` (blob + live overloads) | |
+| `calc_charge_wcp(wcp, gds, disable_dead_mix_cell)` | `Facade::Cluster::calc_charge_wcp(point_index, charge_cut, disable_dead_mix_cell)` | |
+| `establish_same_mcell_steiner_edges(gds, ddmc)` — **flag=1** | `Grapher::establish_same_blob_steiner_edges(graph, ddmc)` + `form_cell_points_map()` | Both group by the **retiled** blob |
+| `establish_same_mcell_steiner_edges(gds, true, 2)` — **flag=2** | `Graphs::Weighted::establish_same_blob_steiner_edges_steiner_graph(result, cluster)` | Grouping key differs — see K5 |
+| `remove_same_mcell_steiner_edges()` | `Grapher::remove_same_blob_steiner_edges(graph)` | |
+| `WCP::ToyPointCloud* point_cloud_steiner` (owns `WCPoint::mcell`) | a `"steiner_pc"` `PointCloud::Dataset` on the cluster | **No blob pointer per point** — see K5 |
+| `std::vector<bool> flag_steiner_terminal` | `flag_steiner_terminal` column on `steiner_pc` | |
+| `get_two_boundary_wcps(2)` / `get_extreme_wcps(2)` | `Facade::Cluster::get_two_boundary_steiner_graph_idx(...)` | Different construction — see K6 |
+| `WCPPaal/steiner_tree_greedy.h` | `clus/src/PAAL.h` + `Graphs::Weighted::voronoi` | Character-for-character port |
+| `MCUGraph` (`listS`/`setS`, `float` weights) | `Graphs::Weighted::graph_type` (`vecS`, `double` weights) | See K1, K2 |
+
+Full audit, with per-line anchors on both sides:
+`sbnd_xin/docs/pr/29_steiner-graph-build-port-audit.md` (wcp-porting-validation).
+
+#### Known divergences — do NOT "correct" these back
+
+**K1. Edge weights are `double` in WCT, `float` in WCP.** Deliberate. It blocks
+bit-identicality with WCP output and is not a bug. (pr/29 D4)
+
+**K2. Tree-edge dedup is by vertex pair, not by edge descriptor.** WCP sorts
+edge descriptors whose `operator<` compares the edge-property **pointer**
+(`PR3DCluster_steiner.h:505-506`), so its dedup result is allocation-order
+dependent. WCT keys on `(source, target)`. **WCT is the deterministic side; keep
+it.** The same applies to WCP's `std::map<SlimMergeGeomCell*, …>` in both
+same-blob passes (`PR3DCluster_graph.h:60`, `:99`), which is *iterated* — the
+edge set is order-independent but the insertion order is not. WCT's
+`form_cell_points_map` keys on a `size_t` blob node index for exactly this
+reason. (pr/29 D6, §6)
+
+**K3. The Steiner terminal filter takes ±1 wire of slack; `get_extreme_wcps`
+takes none.** WCP uses two different tolerances at two call sites
+(`PR3DCluster_steiner.h:285-290` vs `PR3DCluster_path.h:111-119`); WCT serves
+both from one helper, `Cluster::check_wire_ranges_match`, so the slack is a
+**per-call-site parameter** (`terminal_wire_tol`, default 0), never an edit to
+the shared body. **The arithmetic is the trap:** WCT blob wire ranges are
+half-open `[min, max)` while WCP's are inclusive `[low, high]` with
+`high == max - 1`, so WCP's `index <= high + 1` translates to `index < max + 1`,
+**not** `<= max + 1` — the literal transcription is two wires loose on the high
+side and one on the low. (pr/29 D1, and CLAUDE.md M7)
+
+**K4. The adjacent-time-slice fallback must step by ticks-per-slice, not by 1.**
+`time_blob_map` is keyed on `Blob::slice_index_min()`, which is in **ticks**
+(`Facade_Blob.h:33`), so consecutive slice starts are `nticks_per_slice` apart
+(SBND: 4). A literal `±1` names no real slice and the whole fallback is dead
+code. WCT reads the stride from
+`Grouping::get_nticks_per_slice().at(apa).at(face)` — never a hard-coded 4,
+which would work on SBND and break elsewhere. (pr/29 D12)
+
+**K5. The flag=2 same-blob pass groups by the RETILED blob in WCT and by the
+ORIGINAL mcell in WCP — and WCT is correct.** WCP resolves each selected point
+back to an original-cluster mcell by strict wire containment
+(`PR3DCluster_steiner.h:542-563`) and skips points that match none
+(`PR3DCluster_graph.h:90-91`). That is **not** a physics choice: `point_cloud_steiner`
+is a member of the *original* cluster while the retiled cluster and its mcell
+holder are `delete`d immediately after the tree is built (`:53-56`), so a
+retiled `SlimMergeGeomCell*` stored on it would dangle, and a WCP `WCPoint` has
+exactly one `mcell` field. WCP itself groups by the **retiled** blob one step
+earlier, at flag=1. WCT's `steiner_pc` is a `Dataset` with no blob pointer, so
+the constraint does not exist; the "skip points with no mcell" branch is that
+lookup's failure path, not a rule. **Do not reintroduce it.** (pr/29 D3,
+§10.2.9)
+
+**K6. `get_two_boundary_wcps(2)`'s `mcell == 0` and
+`Estimate_total_charge() < 1500` cuts are replaced, not dropped.** They depend
+on the per-point original-mcell association K5 removes. WCT's
+`get_two_boundary_steiner_graph_idx` scores boundaries on the **regular** point
+cloud, where blob charge and dead-wire counts exist, then snaps each to the
+nearest Steiner **terminal** (`Facade_Cluster.cxx:3423-3435`).
+
+**K7. The path skeleton is resampled finer in WCT.** WCP uses
+`num_steps = floor(dis/step)` and so *undershoots* its own 0.6 cm target by up
+to a factor two; WCT uses `floor(dis/step) + 1` and never exceeds it
+(`DynamicPointCloud.cxx:744`). A denser sample of the same curve is a more
+accurate nearest-distance. WCP's duplicated endpoint is inert. **Keep WCT's.**
+Note `make_points_cluster_skeleton` has a single body shared with
+`clustering_deghost`, so any change there is not local. (pr/29 D7, §10.2.8)
+
+**K8. `disable_dead_mix_cell` must reach the edge-weight charges.** WCP computes
+the `Qs`/`Qt` in the edge weight with the same value `Create_steiner_tree` was
+called with (`PR3DCluster_steiner.h:514`, `:521`; the chain passes `false`).
+WCT's `create_enhanced_steiner_graph` defaults the parameter to `true`, so
+dropping it at the call silently selects the other branch of `calc_charge_wcp`:
+`true` sums all three planes then subtracts **dead** ones
+(`charge_uncertainty > 1e10`), `false` sums only planes with a **nonzero**
+charge value — independent predicates. Behind
+`edge_charge_forward_dead_mix`. (pr/29 D2, §12)
+
+**K9. Containment additionally requires the same APA and face in WCT.** Forced:
+`time_blob_map` is `apa → face → tick → blobs`, and WCP is single-APA so it has
+no counterpart. Correct as written. (pr/29 D8)
+
+**K10. `recover_steiner_graph` is not ported.** It is WCP's only MST
+(`PR3DCluster_steiner.h:77-180`) and no `wire-cell-pid` app calls it — verified
+by an exhaustive `prototype_base/pid/apps/` grep. A gap on paper only. (pr/29
+D11)
+
+#### Config knobs that select WCP-faithful behaviour
+
+All three default **OFF** in C++ (so no detector moves without opting in) and
+are **ON in the SBND operating point** (`cfg/pgrapher/experiment/sbnd/wct-pr-perevt.jsonnet`):
+
+| key on `CreateSteinerGraph` | restores | dictionary entry |
+|---|---|---|
+| `terminal_wire_tol` (int, 0) | WCP's ±1 wire slack in the terminal filter only | K3 |
+| `terminal_adjacent_slice` (bool, false) | makes WCP's t±1 slice fallback actually resolve | K4 |
+| `edge_charge_forward_dead_mix` (bool, false) | honours the caller's `disable_dead_mix_cell` in edge weights | K8 |
 
 ## WCP Algorithms
 
