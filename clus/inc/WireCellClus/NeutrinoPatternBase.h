@@ -447,11 +447,15 @@ namespace WireCell::Clus::PR {
         // ON PURPOSE.  It is iterated once, in the Case-5 block, where the body
         // only takes a running min over three distances -- order-insensitive.
         // Its find()/count() must stay POINTER identity: an index-ordered set
-        // would compare by Segment::get_graph_index(), and a segment removed
-        // from the graph can have its edge index inherited by a later segment
-        // (PRGraph.cxx:88-90), so an index-keyed lookup would match a stale
-        // entry against a different live segment.  Measured: making that swap
-        // moved kine_reco_Enu on SBND evt 239794 from 2930 to 1687 MeV.
+        // would compare by Segment::get_graph_index(), and that value is NOT
+        // unique across live Segment objects.  PR::add_segment on a vertex pair
+        // that already carries an edge takes the "edge already existed" path
+        // (PRGraph.cxx:86-89): it overwrites g[desc].segment with the new
+        // segment and copies the existing edge index into it.  The displaced
+        // segment keeps that same index, so any SegmentPtr still held to it --
+        // which is exactly what this set holds -- now compares EQUAL to a
+        // different live segment.  Measured: making that swap moved
+        // kine_reco_Enu on SBND evt 239794 from 2930 to 1687 MeV.
         bool eliminate_short_vertex_activities(Graph& graph, Facade::Cluster& cluster, VertexPtr main_vertex, std::set<SegmentPtr>& existing_segments, TrackFitting& track_fitter, IDetectorVolumes::pointer dv);
         std::tuple<bool, int, int> examine_main_vertex_candidate(Graph& graph, VertexPtr vertex);
         VertexPtr compare_main_vertices_all_showers(Graph& graph, Facade::Cluster& cluster, std::vector<VertexPtr>& vertex_candidates, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model);

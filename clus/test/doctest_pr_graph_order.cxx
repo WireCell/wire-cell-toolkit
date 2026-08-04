@@ -107,6 +107,42 @@ TEST_CASE("pr graph indices stay unique after removal and re-add")
     CHECK(eidx.size() == edges.size());
 }
 
+// The "edge already existed" path of PR::add_segment (PRGraph.cxx:86-89):
+// adding a second segment between an already-connected vertex pair overwrites
+// the edge bundle's segment and COPIES the existing edge index into the new
+// segment.  The displaced segment keeps that index, so two live Segment objects
+// then report the same get_graph_index().
+//
+// Two separate things must hold, and they are not the same thing:
+//   * EdgeBundle::index stays unique -- otherwise ordered_edges' sort key ties
+//     and silently degrades to pointer order;
+//   * Segment::get_graph_index() does NOT stay unique -- which is why a set or
+//     map keyed on it cannot be used for identity lookups.  See the note on
+//     eliminate_short_vertex_activities in NeutrinoPatternBase.h; making that
+//     swap moved kine_reco_Enu on SBND evt 239794 by 1.2 GeV.
+TEST_CASE("pr graph edge index stays unique when a segment index is inherited")
+{
+    PR::Graph g;
+    auto vtxs = make_chain(g, 4);
+
+    auto first = std::make_shared<PR::Segment>();
+    PR::add_segment(g, first, vtxs[0], vtxs[2]);      // new edge
+    const size_t nedges_before = PR::ordered_edges(g).size();
+
+    auto second = std::make_shared<PR::Segment>();
+    PR::add_segment(g, second, vtxs[0], vtxs[2]);      // same pair: inherit path
+
+    // No new edge was created, and the two segments now alias on index.
+    auto edges = PR::ordered_edges(g);
+    CHECK(edges.size() == nedges_before);
+    CHECK(first->get_graph_index() == second->get_graph_index());
+
+    // ...but the sort key ordered_edges actually uses is still pairwise unique.
+    std::set<size_t> eidx;
+    for (const auto& ed : edges) eidx.insert(g[ed].index);
+    CHECK(eidx.size() == edges.size());
+}
+
 TEST_CASE("pr graph ordered_nodes and graph_nodes hold the same set")
 {
     // graph_nodes() is the raw pointer-ordered walk -- it is NOT a determinism
