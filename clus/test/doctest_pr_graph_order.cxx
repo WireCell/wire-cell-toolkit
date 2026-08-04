@@ -120,6 +120,14 @@ TEST_CASE("pr graph indices stay unique after removal and re-add")
 //     map keyed on it cannot be used for identity lookups.  See the note on
 //     eliminate_short_vertex_activities in NeutrinoPatternBase.h; making that
 //     swap moved kine_reco_Enu on SBND evt 239794 by 1.2 GeV.
+//
+// The 1.2 GeV move is a measurement and stands.  Its ATTRIBUTION to this
+// inherit path does NOT: probing that container at its call site on six events,
+// including evt 239794, found no two segments sharing an index and no unindexed
+// member (sbnd_xin/docs/pr/28 §14.8).  A more common aliasing source is the
+// SIZE_MAX default of Segment::m_graph_index (PRSegment.h:153), shared by every
+// segment not yet handed to PR::add_segment.  This case pins the non-uniqueness
+// itself, which is what the rule rests on -- not the attribution.
 TEST_CASE("pr graph edge index stays unique when a segment index is inherited")
 {
     PR::Graph g;

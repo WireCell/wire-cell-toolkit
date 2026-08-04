@@ -448,14 +448,22 @@ namespace WireCell::Clus::PR {
         // only takes a running min over three distances -- order-insensitive.
         // Its find()/count() must stay POINTER identity: an index-ordered set
         // would compare by Segment::get_graph_index(), and that value is NOT
-        // unique across live Segment objects.  PR::add_segment on a vertex pair
-        // that already carries an edge takes the "edge already existed" path
-        // (PRGraph.cxx:86-89): it overwrites g[desc].segment with the new
-        // segment and copies the existing edge index into it.  The displaced
-        // segment keeps that same index, so any SegmentPtr still held to it --
-        // which is exactly what this set holds -- now compares EQUAL to a
-        // different live segment.  Measured: making that swap moved
-        // kine_reco_Enu on SBND evt 239794 from 2930 to 1687 MeV.
+        // guaranteed unique across live Segment objects -- two sources exist.
+        //   (1) Segment::m_graph_index defaults to SIZE_MAX (PRSegment.h:153),
+        //       so EVERY segment not yet passed to PR::add_segment compares
+        //       equal to every other such segment.
+        //   (2) PR::add_segment on a vertex pair that already carries an edge
+        //       takes the "edge already existed" path (PRGraph.cxx:86-89): it
+        //       overwrites g[desc].segment and copies the existing edge index
+        //       into the new segment, leaving the displaced one aliased.
+        // MEASURED: making that swap moved kine_reco_Enu on SBND evt 239794
+        // from 2930 to 1687 MeV -- that observation stands and is why this
+        // container is not converted.  The CAUSE is NOT confirmed: probing this
+        // exact set at its call site (NeutrinoVertexFinder.cxx:2289) on six
+        // events INCLUDING evt 239794 found zero index collisions and zero
+        // unindexed members, so neither (1) nor (2) reproduces here.  See
+        // sbnd_xin/docs/pr/28 §14.8.  Do not cite the mechanism as established;
+        // do keep the container pointer-keyed.
         bool eliminate_short_vertex_activities(Graph& graph, Facade::Cluster& cluster, VertexPtr main_vertex, std::set<SegmentPtr>& existing_segments, TrackFitting& track_fitter, IDetectorVolumes::pointer dv);
         std::tuple<bool, int, int> examine_main_vertex_candidate(Graph& graph, VertexPtr vertex);
         VertexPtr compare_main_vertices_all_showers(Graph& graph, Facade::Cluster& cluster, std::vector<VertexPtr>& vertex_candidates, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model);

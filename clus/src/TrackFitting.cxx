@@ -1102,7 +1102,7 @@ void TrackFitting::fill_fitted_charge_2d(
             }
 
             // Get cluster associations from global_rb_map
-            std::set<Facade::Cluster*> clusters;
+            std::set<Facade::Cluster*, PR::ClusterPtrCmp> clusters;
             auto rb_it = global_rb_map.find(coord_key);
             if (rb_it != global_rb_map.end()) {
                 for (auto* blob : rb_it->second) {
@@ -1134,6 +1134,19 @@ void TrackFitting::fill_fitted_charge_2d(
     // Persist this cluster's cells so they survive when the next
     // do_multi_tracking(..., &other_cluster) clears m_fitted_charge_2d.
     if (m_cluster_filter) {
+        // The key is ordered by ident (PR::ClusterPtrCmp), so two live clusters
+        // sharing an ident would silently collapse -- the second would discard
+        // the first's whole snapshot rather than merely reorder it.  Idents are
+        // dense and unique within a grouping at the instant enumerate_idents()
+        // runs, and it runs only between visitors, so this cannot fire; say so
+        // out loud rather than assume it.
+        auto held = m_cluster_fitted_charge_2d.find(m_cluster_filter);
+        if (held != m_cluster_fitted_charge_2d.end() && held->first != m_cluster_filter) {
+            SPDLOG_LOGGER_WARN(s_log,
+                "fill_fitted_charge_2d: cluster ident {} is shared by two live clusters; "
+                "the earlier snapshot ({} plane group(s)) is being discarded",
+                m_cluster_filter->get_cluster_id(), held->second.size());
+        }
         m_cluster_fitted_charge_2d[m_cluster_filter] = m_fitted_charge_2d;
     }
 }

@@ -1,4 +1,6 @@
 #include "WireCellClus/NeutrinoPatternBase.h"
+#include <algorithm>
+#include <vector>
 #include "WireCellClus/PRSegmentFunctions.h"
 #include "WireCellClus/FiducialUtils.h"
 #include "WireCellClus/MyFCN.h"
@@ -2931,7 +2933,36 @@ void PatternAlgorithms::examine_main_vertices_local(Graph& graph, std::vector<Ve
                     // Change particle types to muons for back-to-back tracks
                     double muon_mass = particle_data->get_particle_mass(13);
                     
-                    for (auto sg1 : used_segments) {
+                    // used_segments is a std::set<SegmentPtr>, i.e. ADDRESS
+                    // ordered, and this body mutates: it rewrites particle_info
+                    // (pdg/mass), clears kShowerTopology, and calls
+                    // change_daughter_type, which propagates the type change
+                    // through the graph.  A later iteration then reads a
+                    // current_pdg (:2953 below) that an earlier one may have
+                    // written, so the outcome depended on heap layout.  Iterate
+                    // a copy sorted by graph index instead.
+                    //
+                    // The SET ITSELF stays pointer-keyed on purpose: its
+                    // find() at :2905 must remain IDENTITY, and an index-ordered
+                    // set would compare by Segment::get_graph_index(), which is
+                    // not guaranteed unique across live Segment objects (doc
+                    // pr/28 §11.7, §14.7 -- SIZE_MAX is shared by every segment
+                    // not yet added to a graph).  Sorting only at the point of
+                    // iteration changes the order and nothing else.  The key is
+                    // unique here because every member came from vertex_segments
+                    // above, i.e. from live graph edges.
+                    std::vector<SegmentPtr> ordered_used_segments(used_segments.begin(),
+                                                                  used_segments.end());
+                    std::sort(ordered_used_segments.begin(), ordered_used_segments.end(),
+                              [](const SegmentPtr& a, const SegmentPtr& b) {
+                                  return a->get_graph_index() < b->get_graph_index();
+                              });
+                    SPDLOG_LOGGER_TRACE(s_log,
+                        "improve_vertex: back-to-back retype over {} segment(s) in graph-index order "
+                        "(order matters only when this is >1)",
+                        ordered_used_segments.size());
+
+                    for (auto sg1 : ordered_used_segments) {
                         // Skip shower trajectory
                         if (sg1->flags_any(SegmentFlags::kShowerTrajectory)) continue;
                         

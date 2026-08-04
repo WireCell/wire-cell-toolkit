@@ -354,7 +354,11 @@ namespace WireCell::Clus {
             double charge_err;    // original measurement uncertainty
             double pred_charge;   // predicted charge (un-whitened, same units as charge)
             int flag;             // 0=dead, 1=live, 2=bad
-            std::set<Facade::Cluster*> clusters;
+            /// Clusters owning this cell.  Ident-ordered, not pointer-ordered:
+            /// the only current consumer (PrDisplayDump::dump_proj) sorts the
+            /// ids itself, so this changes no output today -- it removes the
+            /// trap for the next consumer that iterates it directly.
+            std::set<Facade::Cluster*, PR::ClusterPtrCmp> clusters;
         };
 
         using WireTime = std::pair<int, int>;            // (wire_index, time_slice)
@@ -673,8 +677,20 @@ namespace WireCell::Clus {
         /// Overwriting the same key on each refill gives "latest fit wins per
         /// cluster", correctly handling re-fits during pattern recognition.
         /// Merged into m_fitted_charge_2d by assemble_fitted_charge_2d().
+        ///
+        /// Ordered by PR::ClusterPtrCmp (cluster ident), NOT by pointer: the
+        /// merge in assemble_fitted_charge_2d() is last-writer-wins on cells
+        /// claimed by more than one cluster, so a pointer-ordered walk made
+        /// pred_charge run-dependent -- 10.2% of cells moved between two
+        /// `setarch -R` runs of SBND evt 388 (doc pr/28 §4.3, §14).  Same
+        /// comparator as m_clusters above.  Safe here because the map lives
+        /// entirely inside one visitor's visit(): idents are re-enumerated
+        /// only between visitors (MultiAlgBlobClustering.cxx:2445), never
+        /// while entries are held.  fill_fitted_charge_2d() warns if two
+        /// distinct clusters ever reach it with the same ident.
         std::map<Facade::Cluster*,
-                 std::map<APAFacePlane, std::map<WireTime, FittedCharge2D>>>
+                 std::map<APAFacePlane, std::map<WireTime, FittedCharge2D>>,
+                 PR::ClusterPtrCmp>
             m_cluster_fitted_charge_2d;
 
         // global geometry
