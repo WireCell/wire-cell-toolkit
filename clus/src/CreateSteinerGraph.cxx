@@ -49,6 +49,18 @@ void Steiner::CreateSteinerGraph::configure(const WireCell::Configuration& cfg)
     m_grapher_config.dv = m_dv;
     m_grapher_config.pcts = m_pcts;
     m_grapher_config.perf = m_perf; // propagate perf flag into Grapher instances
+    // doc pr/29 D1 / D12 -- Steiner terminal filter fidelity.  Both default to
+    // the historical toolkit behaviour, so a config without these keys compiles
+    // and runs bit-for-bit as before.
+    m_grapher_config.terminal_wire_tol =
+        get(cfg, "terminal_wire_tol", m_grapher_config.terminal_wire_tol);
+    m_grapher_config.terminal_adjacent_slice =
+        get(cfg, "terminal_adjacent_slice", m_grapher_config.terminal_adjacent_slice);
+    if (m_grapher_config.terminal_wire_tol < 0) {
+        log->warn("configure: terminal_wire_tol {} is negative -- that SHRINKS the "
+                  "reference band; clamping to 0", m_grapher_config.terminal_wire_tol);
+        m_grapher_config.terminal_wire_tol = 0;
+    }
     const std::string retiler_tn = get<std::string>(cfg, "retiler", "RetileCluster");
     m_grapher_config.retile = Factory::find_tn<IPCTreeMutate>(retiler_tn);
 }
@@ -77,6 +89,13 @@ Configuration Steiner::CreateSteinerGraph::default_configuration() const
     cfg["beam_window_only"] = m_beam_window_only;
     cfg["beam_window_low"] = m_beam_window_low;
     cfg["beam_window_high"] = m_beam_window_high;
+    // doc pr/29 D1: wire slack, in wires, for the Steiner terminal filter ONLY
+    // (the prototype uses 1 there and 0 in get_extreme_wcps).  0 = legacy.
+    cfg["terminal_wire_tol"] = m_grapher_config.terminal_wire_tol;
+    // doc pr/29 D12: step the terminal filter's adjacent-slice lookup by the
+    // face's ticks-per-slice instead of by 1.  The map is tick-keyed, so the
+    // legacy step of 1 never matches and the fallback is dead.  false = legacy.
+    cfg["terminal_adjacent_slice"] = m_grapher_config.terminal_adjacent_slice;
 
     return cfg;
 }

@@ -3241,9 +3241,11 @@ std::vector<std::vector<geo_point_t>> Cluster::get_extreme_wcps(const Cluster* r
 }
 // Updated is_point_spatially_related_to_time_blobs to match prototype exactly
 bool Cluster::is_point_spatially_related_to_time_blobs(
-    size_t point_index, 
+    size_t point_index,
     const time_blob_map_t& ref_time_blob_map,
-    bool flag_nearby_timeslice
+    bool flag_nearby_timeslice,
+    int wire_tol,
+    int slice_stride
 ) const {
     
     // Get current point's time slice information
@@ -3288,23 +3290,31 @@ bool Cluster::is_point_spatially_related_to_time_blobs(
            
 
 
-            if (check_wire_ranges_match(point_index, ref_blob)) {
+            if (check_wire_ranges_match(point_index, ref_blob, wire_tol)) {
                 return true;  // Equivalent to flag_add = true; break;
             }
         }
     }
 
     if (flag_nearby_timeslice) {
-        // Check adjacent time slices (±1) if flag_nearby_timeslice is true
+        // Check adjacent time slices if flag_nearby_timeslice is true.
         // Equivalent to: if (old_time_mcells_map->find(time_slice-1)!=old_time_mcells_map->end())
         // and old_time_mcells_map->find(time_slice+1)!=old_time_mcells_map->end()
-        
-        for (int offset : {-1, 1}) {
+        //
+        // The prototype's map is keyed by SLICE NUMBER, so its +-1 is the
+        // neighbouring slice.  This map is keyed by blob->slice_index_min(),
+        // which is in TICKS (Facade_Blob.h "unit: tick"), and slice starts are
+        // one nticks-per-slice apart.  So slice_stride must be that tick span
+        // for this branch to resolve at all; the default of 1 reproduces the
+        // historical behaviour, in which it never does.  See doc pr/29 D12 and
+        // the caller in SteinerGrapher::filter_by_reference_cluster.
+        const int stride = slice_stride > 0 ? slice_stride : 1;
+        for (int offset : {-stride, stride}) {
             int adjacent_time_slice = current_time_slice + offset;
             auto time_it_adj = face_it->second.find(adjacent_time_slice);
             if (time_it_adj != face_it->second.end()) {
                 for (const Blob* ref_blob : time_it_adj->second) {
-                    if (check_wire_ranges_match(point_index, ref_blob)) {
+                    if (check_wire_ranges_match(point_index, ref_blob, wire_tol)) {
                         return true;  // Equivalent to flag_add = true; break;
                     }
                 }
@@ -3319,8 +3329,9 @@ bool Cluster::is_point_spatially_related_to_time_blobs(
     return false;  // Equivalent to flag_add remains false
 }
 
-// Updated check_wire_ranges_match to match prototype exactly  
-bool Cluster::check_wire_ranges_match(size_t point_index, const Blob* ref_blob) const
+// Updated check_wire_ranges_match to match prototype exactly
+bool Cluster::check_wire_ranges_match(size_t point_index, const Blob* ref_blob,
+                                      int wire_tol) const
 {
     try {
         // Get current point's wire indices (equivalent to cloud.pts[i].index_u, index_v, index_w)
@@ -3341,11 +3352,27 @@ bool Cluster::check_wire_ranges_match(size_t point_index, const Blob* ref_blob) 
         
 
 
-        // NO tolerance added - use exact wire ranges like prototype
-        // Removed: u_min = u_min - 1; u_max = u_max + 1; etc.
-        
+        // Apply the caller's slack.  wire_tol == 0 (the default, and what
+        // get_extreme_wcps wants) leaves the bounds untouched, so that path is
+        // bit-for-bit what it was before this parameter existed.
+        //
+        // THE CONVENTION TRAP, spelled out because it is invisible in a diff.
+        // Blob ranges here are half-open [min, max); the prototype's are
+        // inclusive [low, high] with high == max - 1.  The prototype's slack of
+        // one wire is
+        //     index <= high + 1   and   index >= low - 1
+        // which, substituting high = max - 1 and low = min, is
+        //     index <  max + 1    and   index >= min - 1
+        // i.e. the HIGH bound gains exactly wire_tol, the same as the low bound
+        // loses.  Writing `<= max + wire_tol` instead would be one wire too
+        // loose on the high side only -- an asymmetric band, and the mistake
+        // this comment exists to prevent.  See CLAUDE.md M7 and doc pr/29 D1.
+        u_min -= wire_tol;  u_max += wire_tol;
+        v_min -= wire_tol;  v_max += wire_tol;
+        w_min -= wire_tol;  w_max += wire_tol;
+
         // Check if current point's wire indices fall within ALL THREE ranges
-        // This is the exact prototype condition:
+        // This is the exact prototype condition (with wire_tol == 0):
         // if (cloud.pts[i].index_u <= u1_high_index && cloud.pts[i].index_u >= u1_low_index &&
         //     cloud.pts[i].index_v <= v1_high_index && cloud.pts[i].index_v >= v1_low_index &&
         //     cloud.pts[i].index_w <= w1_high_index && cloud.pts[i].index_w >= w1_low_index)
@@ -3354,7 +3381,7 @@ bool Cluster::check_wire_ranges_match(size_t point_index, const Blob* ref_blob) 
             current_wire_w >= w_min && current_wire_w < w_max) {
             return true;  // Equivalent to flag_add = true; break;
         }
-        
+
     } catch (...) {
         // If wire information is not available, continue
     }

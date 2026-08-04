@@ -935,6 +935,23 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               // a selected nu-candidate main cluster are tracks, none showers.
               // null = C++ default 0 = OFF (key omitted => byte-identical).
               shower_topo_demote_len=null,
+              // Steiner TERMINAL filter fidelity (doc pr/29 D1 and D12).  Both
+              // OFF here = the historical toolkit behaviour, keys omitted =>
+              // byte-identical config.  Turning either on can only ADD Steiner
+              // terminals, never remove them, because both restore a way for a
+              // terminal to PASS the reference-containment test:
+              //   steiner_terminal_wire_tol=1     the prototype's one wire of
+              //     slack on both sides of all three planes.  Applies ONLY to
+              //     the terminal filter; get_extreme_wcps shares the C++ helper
+              //     and correctly keeps the exact test the prototype gives it.
+              //   steiner_terminal_adjacent_slice=true   makes the t+-1 slice
+              //     fallback actually resolve.  The time_blob_map key is in
+              //     TICKS, so the historical step of 1 matches nothing on SBND
+              //     (4 ticks per slice) and the whole branch is dead.
+              // NOT flipped on by default: that is an unconditional production
+              // output change (CLAUDE.md sec.5 rule 1) and is the owner's call.
+              steiner_terminal_wire_tol=0,
+              steiner_terminal_adjacent_slice=false,
               // Isochronous first-segment endpoint finding (doc pr/24 round 2,
               // SBND evt 271851): principal-axis endpoints for filled 2-D
               // sheet clusters instead of the wire-footprint boundary metric.
@@ -1245,7 +1262,9 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
         steiner: cm.steiner(retiler=improve2, perf=true, require_beam_flash=false,
                             beam_window_only=beam_gate,
                             beam_window_low=beam_window[0],
-                            beam_window_high=beam_window[1]),
+                            beam_window_high=beam_window[1],
+                            terminal_wire_tol=steiner_terminal_wire_tol,
+                            terminal_adjacent_slice=steiner_terminal_adjacent_slice),
         // The doc pr/23 second steiner pass, named right after protect_bundle:
         // replace=false rebuilds ONLY the clusters protect_bundle purged
         // (split retained + fragments).  A replace=true second pass would
@@ -1260,6 +1279,12 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
                             beam_window_only=beam_gate,
                             beam_window_low=beam_window[0],
                             beam_window_high=beam_window[1],
+                            // Same terminal-filter settings as the first pass:
+                            // the refresh rebuilds only the clusters
+                            // protect_bundle purged, and they must be built the
+                            // same way as their peers (doc pr/29 D1, D12).
+                            terminal_wire_tol=steiner_terminal_wire_tol,
+                            terminal_adjacent_slice=steiner_terminal_adjacent_slice,
                             replace=false),
         fiducialutils: cm.fiducialutils(),
         tagger_check_stm: cm.tagger_check_stm(
@@ -1921,6 +1946,11 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
        // null = C++ default 0 = OFF = byte-identical.  Ships OFF; the SBND
        // operating point lives in wct-pr-perevt.jsonnet (doc 68).
        shower_topo_demote_len=null,
+       // Steiner TERMINAL filter fidelity (doc pr/29 D1 and D12).  Both OFF =
+       // the historical toolkit behaviour = byte-identical (keys omitted).
+       // Ships OFF; the SBND operating point lives in wct-pr-perevt.jsonnet.
+       steiner_terminal_wire_tol=0,
+       steiner_terminal_adjacent_slice=false,
        // Isochronous first-segment endpoint finding (doc pr/24 round 2, SBND
        // evt 271851).  false/nulls = C++ defaults = OFF = byte-identical.
        iso_endpoint=false,
@@ -2046,6 +2076,8 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 cathode_x=cathode_x,
                 cathode_kink_xcut=cathode_kink_xcut,
                 shower_topo_demote_len=shower_topo_demote_len,
+                steiner_terminal_wire_tol=steiner_terminal_wire_tol,
+                steiner_terminal_adjacent_slice=steiner_terminal_adjacent_slice,
                 iso_endpoint=iso_endpoint,
                 iso_endpoint_min_length=iso_endpoint_min_length,
                 iso_endpoint_max_xext=iso_endpoint_max_xext,

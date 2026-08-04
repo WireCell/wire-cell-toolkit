@@ -39,6 +39,27 @@ namespace WireCell::Clus::Steiner {
             // std::map<int, std::map<int, WireCell::IBlobSampler::pointer>> samplers;
             /// Enable per-step timing printouts (set via grapher_config.perf = true)
             bool perf{false};
+
+            /// doc pr/29 D1.  Wire slack, in wires, used ONLY by the Steiner
+            /// terminal filter (filter_by_reference_cluster).  The WCP
+            /// prototype tests terminal containment with one wire of slack on
+            /// each side of all three planes
+            /// (PR3DCluster_steiner.h:285-290, :310-315, :336-341) while its
+            /// get_extreme_wcps filter uses none (PR3DCluster_path.h:111-119).
+            /// The toolkit implements both with one function, so the slack has
+            /// to be a per-call-site parameter rather than an edit.
+            /// 0 = the historical toolkit behaviour (no slack anywhere);
+            /// 1 = prototype parity for the terminal filter alone.
+            int terminal_wire_tol{0};
+
+            /// doc pr/29 D12.  When true, the terminal filter's adjacent-slice
+            /// fallback steps by the face's nticks-per-slice instead of by 1.
+            /// The map it searches is keyed in TICKS, so the historical step of
+            /// 1 never resolves and the whole fallback is dead code on any
+            /// detector with more than one tick per slice (SBND: 4).
+            /// false = that historical dead branch, bit-for-bit;
+            /// true = the prototype's t, t+-1 slice search actually happens.
+            bool terminal_adjacent_slice{false};
         };
         Log::logptr_t log;
 
@@ -269,10 +290,21 @@ namespace WireCell::Clus::Steiner {
 
 
         /// Check if a point is spatially related to reference cluster's time-blob mapping
+        /// @param wire_tol wire slack (Config::terminal_wire_tol); 0 = historical
+        /// @param slice_stride adjacent-slice key step in TICKS; 1 = historical
+        ///        (and, on any detector with >1 tick per slice, never matches)
         bool is_point_spatially_related_to_reference(
             size_t point_idx,
-            const Facade::Cluster::time_blob_map_t& ref_time_blob_map
+            const Facade::Cluster::time_blob_map_t& ref_time_blob_map,
+            int wire_tol = 0,
+            int slice_stride = 1
         ) const;
+
+        /// Ticks per slice for (apa, face), the correct step for an
+        /// adjacent-slice lookup in a time_blob_map.  Returns 1 -- the
+        /// historical, never-matching step -- when the grouping does not know
+        /// this face, rather than throwing out of a hot filter loop.
+        int nticks_per_slice_or_1(int apa, int face) const;
 
 
 

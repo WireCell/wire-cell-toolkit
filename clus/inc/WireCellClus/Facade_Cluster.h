@@ -673,11 +673,25 @@ namespace WireCell::Clus::Facade {
         /// Implements the same filtering logic as prototype's old_time_mcells_map checking
         /// @param point_index Index of point in current cluster
         /// @param ref_time_blob_map Reference cluster's time-indexed blob map
+        /// @param flag_nearby_timeslice Also try the two adjacent slices
+        /// @param wire_tol Wire-index slack, in wires, applied to every ref blob
+        ///        bound (see check_wire_ranges_match).  0 = exact containment.
+        /// @param slice_stride Key distance to the adjacent slice, in the SAME
+        ///        unit as the time_blob_map key -- which is TICKS, not slices
+        ///        (Blob cache slice_index_min is documented "unit: tick").  The
+        ///        default 1 is a tick, so on any detector with more than one
+        ///        tick per slice the flag_nearby_timeslice branch cannot match
+        ///        anything: no blob starts one tick off the slice grid.  Pass
+        ///        the face's nticks-per-slice to make it live.  Kept at 1 by
+        ///        default so existing callers are bit-for-bit unchanged; see
+        ///        doc pr/29 D12.
         /// @return True if point's wire indices fall within reference cluster's spatial regions
         bool is_point_spatially_related_to_time_blobs(
-            size_t point_index, 
+            size_t point_index,
             const time_blob_map_t& ref_time_blob_map,
-            bool flag_nearby_timeslice
+            bool flag_nearby_timeslice,
+            int wire_tol = 0,
+            int slice_stride = 1
        ) const;
 
        private:
@@ -710,10 +724,25 @@ namespace WireCell::Clus::Facade {
         
 
         /// Helper function to check wire range overlap between a point and a reference blob
+        ///
+        /// Toolkit blob wire ranges are HALF-OPEN [min, max) -- max is one past
+        /// the last wire -- while the WCP prototype's are inclusive [low, high]
+        /// with high == max-1 (CLAUDE.md M7).  So the tolerance-free test here,
+        /// `>= min && < max`, already IS the prototype's `>= low && <= high`;
+        /// it must not be "fixed" to `<= max`.
+        ///
         /// @param point_index Index of point in current cluster
         /// @param ref_blob Reference blob to check against
+        /// @param wire_tol Slack in WIRES, applied symmetrically: the accepted
+        ///        band becomes [min - wire_tol, max + wire_tol).  Under the
+        ///        half-open convention the prototype's `<= high + 1` translates
+        ///        to `< max + 1`, NOT to `<= max + 1` -- the latter is two wires
+        ///        loose on the high side and one on the low, an asymmetry that
+        ///        does not show up in a diff.  0 (the default) = exact
+        ///        containment, i.e. every existing caller unchanged.
         /// @return True if point's wire indices fall within reference blob's wire ranges
-        bool check_wire_ranges_match(size_t point_index, const Blob* ref_blob) const;
+        bool check_wire_ranges_match(size_t point_index, const Blob* ref_blob,
+                                     int wire_tol = 0) const;
 
         /// @brief Get live wire indices for a given plane across all blobs in cluster, grouped by (apa, face)
         /// @param plane Wire plane index (0=U, 1=V, 2=W)

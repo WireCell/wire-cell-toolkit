@@ -1366,8 +1366,14 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
         // companions sharing their matched_flash_gid.  Pass the same window the
         // taggers get: with tagger_check_{tgm,stm,fc} gated the same way, the
         // clusters that lose their graph are exactly the ones no tagger reads.
+        // terminal_wire_tol / terminal_adjacent_slice (doc pr/29 D1, D12) fix
+        // the Steiner TERMINAL filter only -- get_extreme_wcps shares the same
+        // C++ helper and keeps the exact, no-slack, no-fallback behaviour the
+        // prototype gives it.  Both default to the historical toolkit values
+        // and their keys are omitted when off => byte-identical pre-knob config.
         steiner(name="", retiler={}, grouping="live", graph="steiner", perf=true, require_beam_flash=true,
-                beam_window_only=false, beam_window_low=0, beam_window_high=0, replace=null) :: {
+                beam_window_only=false, beam_window_low=0, beam_window_high=0, replace=null,
+                terminal_wire_tol=0, terminal_adjacent_slice=false) :: {
             type: "CreateSteinerGraph",
             name: prefix+name,
             data: {
@@ -1383,6 +1389,17 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
                 // GraphAlgorithms made in the tagger stage).  Key omitted
                 // when null => byte-identical pre-knob config.
                 [if replace != null then 'replace']: replace,
+                // C++ default 0.  1 = the prototype's one wire of slack on
+                // both sides of all three planes in the terminal filter
+                // (PR3DCluster_steiner.h:285-290); get_extreme_wcps is
+                // unaffected.  Key omitted when 0 => byte-identical pre-knob
+                // config.
+                [if terminal_wire_tol != 0 then 'terminal_wire_tol']: terminal_wire_tol,
+                // C++ default false.  true = the adjacent-slice fallback steps
+                // by the face's ticks-per-slice, which is what makes it resolve
+                // at all (the time_blob_map key is in ticks).  Key omitted when
+                // false => byte-identical pre-knob config.
+                [if terminal_adjacent_slice then 'terminal_adjacent_slice']: true,
             } + dv_cfg + pcts_cfg
               + (if beam_window_only then {
                      beam_window_only: true,

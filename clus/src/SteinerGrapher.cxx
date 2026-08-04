@@ -5,6 +5,8 @@
 #include "WireCellUtil/Point.h"
 #include "WireCellClus/Graphs.h"
 #include "WireCellClus/DynamicPointCloud.h"
+// for Grouping::get_nticks_per_slice() -- the adjacent-slice step (doc pr/29 D12)
+#include "WireCellClus/Facade_Grouping.h"
 #include <algorithm>
 #include <set>
 #include <unordered_set>
@@ -44,8 +46,12 @@ void Steiner::Grapher::create_steiner_tree(
     if (reference_cluster) {
         vertex_set original_size = steiner_terminals;
         steiner_terminals = filter_by_reference_cluster(steiner_terminals, reference_cluster);
-        SPDLOG_LOGGER_TRACE(log, "create_steiner_tree: reference cluster filtering: {} -> {} terminals",
-                   original_size.size(), steiner_terminals.size());
+        // wire_tol / adjacent_slice are echoed so a log alone identifies which
+        // arm produced a terminal count (doc pr/29 D1, D12).
+        SPDLOG_LOGGER_TRACE(log, "create_steiner_tree: reference cluster filtering: {} -> {} terminals"
+                   " (wire_tol={} adjacent_slice={})",
+                   original_size.size(), steiner_terminals.size(),
+                   m_config.terminal_wire_tol, m_config.terminal_adjacent_slice);
     }
 
     // std::cout << "Test2: " << steiner_terminals.size() << std::endl;
@@ -144,15 +150,67 @@ Steiner::Grapher::vertex_set Steiner::Grapher::filter_by_reference_cluster(
         return terminals;
     }
 
+    // doc pr/29 D1 + D12.  Both knobs default to the historical behaviour --
+    // wire_tol 0, and a slice step of 1 that (the map being tick-keyed) never
+    // resolves.  Neither is derived here unless asked for, so with the default
+    // Config this loop is bit-for-bit what it was.
+    const int wire_tol = m_config.terminal_wire_tol;
+
+    // Ticks-per-slice is per (apa, face), so it is resolved per terminal rather
+    // than once -- but through a small memo, since the accessor returns the
+    // whole map by value and this runs once per terminal.
+    std::map<std::pair<int,int>, int> stride_memo;
+
     // Filter terminals based on spatial relationship with reference cluster
     for (auto terminal_idx : terminals) {
         //std::cout << "Test: " << terminal_idx << " " << ref_time_blob_map.size() << std::endl;
-        if (is_point_spatially_related_to_reference(terminal_idx, ref_time_blob_map)) {
+        int slice_stride = 1;
+        if (m_config.terminal_adjacent_slice) {
+            // The point belongs to m_cluster (retiled); the map belongs to the
+            // reference cluster.  Both are blobs of the same detector, so the
+            // tick span for a given (apa, face) is the same -- and the key we
+            // step is one of the reference map's own keys.
+            const auto* blob = m_cluster.blob_with_point(terminal_idx);
+            if (blob) {
+                const auto wpid = blob->wpid();
+                const auto key = std::make_pair(wpid.apa(), wpid.face());
+                auto memo_it = stride_memo.find(key);
+                if (memo_it == stride_memo.end()) {
+                    memo_it = stride_memo.emplace(
+                        key, nticks_per_slice_or_1(key.first, key.second)).first;
+                }
+                slice_stride = memo_it->second;
+            }
+        }
+        if (is_point_spatially_related_to_reference(terminal_idx, ref_time_blob_map,
+                                                    wire_tol, slice_stride)) {
             filtered_terminals.insert(terminal_idx);
         }
     }
 
     return filtered_terminals;
+}
+
+int Steiner::Grapher::nticks_per_slice_or_1(int apa, int face) const
+{
+    const auto* grouping = m_cluster.grouping();
+    if (!grouping) return 1;
+    const auto nticks = grouping->get_nticks_per_slice();
+    auto apa_it = nticks.find(apa);
+    if (apa_it == nticks.end()) {
+        SPDLOG_LOGGER_WARN(log, "nticks_per_slice_or_1: apa {} unknown to the grouping,"
+                                " adjacent-slice step falls back to 1 (never matches)", apa);
+        return 1;
+    }
+    auto face_it = apa_it->second.find(face);
+    if (face_it == apa_it->second.end()) {
+        SPDLOG_LOGGER_WARN(log, "nticks_per_slice_or_1: apa {} face {} unknown to the grouping,"
+                                " adjacent-slice step falls back to 1 (never matches)", apa, face);
+        return 1;
+    }
+    // A degenerate 0 or negative span would make the +-offset loop test the
+    // point's own slice twice; 1 is the historical no-op.
+    return face_it->second > 0 ? face_it->second : 1;
 }
 
 Steiner::Grapher::vertex_set Steiner::Grapher::filter_by_path_constraints(
@@ -284,11 +342,18 @@ Steiner::Grapher::vertex_set Steiner::Grapher::get_extreme_points_for_reference(
 
 bool Steiner::Grapher::is_point_spatially_related_to_reference(
     size_t point_idx,
-    const Facade::Cluster::time_blob_map_t& ref_time_blob_map) const
+    const Facade::Cluster::time_blob_map_t& ref_time_blob_map,
+    int wire_tol,
+    int slice_stride) const
 {
     // Delegate to the cluster's existing method which implements the proper logic
-    // for checking spatial relationships with the complex time_blob_map structure
-    return m_cluster.is_point_spatially_related_to_time_blobs(point_idx, ref_time_blob_map, true);
+    // for checking spatial relationships with the complex time_blob_map structure.
+    //
+    // This is the ONLY site that passes flag_nearby_timeslice = true;
+    // get_extreme_wcps (Facade_Cluster.cxx:3106) passes false and takes the
+    // defaults, so doc pr/29's D1 and D12 both begin and end here.
+    return m_cluster.is_point_spatially_related_to_time_blobs(
+        point_idx, ref_time_blob_map, true, wire_tol, slice_stride);
 }
 
 

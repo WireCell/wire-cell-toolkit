@@ -154,6 +154,40 @@ function(
     // guard uses), so ~45 would cover all 10.
     // Set null for the legacy behavior (long segments stay shower-eligible).
     shower_topo_demote_len = 50,
+    // Steiner TERMINAL filter fidelity -- doc pr/29 D1 and D12.
+    //
+    // **SBND PRODUCTION DEFAULT ON, owner 2026-08-04**: both are port BUGS, not
+    // tunable behaviour.  The toolkit filter was strictly tighter than the WCP
+    // prototype in two independent ways, and on SBND evt 388 that discarded
+    // 47.7% of every cluster's Steiner terminals and left 24 clusters below the
+    // two-terminal minimum -- i.e. with no Steiner tree at all.  With both on:
+    // 20.0% and 3.  NOT bit-identical: PR segments 75 -> 88, vertices 118 ->
+    // 131, numu_score -3.199 -> -2.166, kine_reco_Enu 2900.5 -> 2865.6 MeV,
+    // and the event's pi0 candidate disappears (kine_pio_flag 1 -> 0) -- the
+    // event label, TGM/STM/FC verdicts do not move.  Measured on ONE event
+    // against a zero noise floor (same-binary repeat byte-identical); doc pr/29
+    // sec.11.4/11.7.
+    //
+    // The C++ defaults stay OFF, so uBooNE/ICARUS/PDHD/PDVD are unaffected --
+    // this is an SBND operating-point decision and lives here (doc 68: the
+    // operating point is in cfg only, and a bare run IS production).
+    // Set steiner_terminal_wire_tol=0 and steiner_terminal_adjacent_slice=false
+    // for the pre-fix arm that every legacy comparison needs.
+    //   steiner_terminal_wire_tol = 1     restores the prototype's one wire of
+    //     slack on both sides of all three planes in the terminal containment
+    //     test (PR3DCluster_steiner.h:285-290, :310-315, :336-341).  Under the
+    //     toolkit's half-open [min,max) convention that is `>= min-1 && < max+1`
+    //     -- NOT `<= max+1`, which would be asymmetric.  get_extreme_wcps shares
+    //     the same C++ helper and is deliberately left at 0, matching its own
+    //     prototype counterpart (PR3DCluster_path.h:111-119), which has no slack.
+    //   steiner_terminal_adjacent_slice = true    makes the prototype's t+-1
+    //     slice fallback resolve.  The map is keyed by blob->slice_index_min(),
+    //     which is in TICKS, so the historical step of 1 names no real slice on
+    //     SBND (nticks_live_slice = 4) and the branch is dead code.  ON, the
+    //     step comes from the face's own nticks-per-slice, not a literal 4.
+    // Both can only ADD terminals: each restores a way to PASS the filter.
+    steiner_terminal_wire_tol = 1,
+    steiner_terminal_adjacent_slice = true,
     // Isochronous first-segment endpoint finding (doc pr/24 round 2, SBND evt
     // 271851): for a long cluster whose quantile-trimmed drift-x extent is
     // small (a filled 2-D sheet), the first PR segment's endpoints come from
@@ -682,6 +716,8 @@ function(
                              cathode_x=cathode_x,
                              cathode_kink_xcut=cathode_kink_xcut,
                              shower_topo_demote_len=shower_topo_demote_len,
+                             steiner_terminal_wire_tol=steiner_terminal_wire_tol,
+                             steiner_terminal_adjacent_slice=steiner_terminal_adjacent_slice,
                              iso_endpoint=iso_endpoint,
                              iso_endpoint_min_length=iso_endpoint_min_length,
                              iso_endpoint_max_xext=iso_endpoint_max_xext,
