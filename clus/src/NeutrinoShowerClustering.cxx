@@ -178,7 +178,13 @@ void PatternAlgorithms::shower_clustering_with_nv_in_main_cluster(Graph& graph, 
         // Single pass: collect segments and gather statistics simultaneously
         // to avoid iterating shower->edges() twice.
         std::vector<SegmentPtr> shower_segs;
-        for (auto edesc : shower->edges()) {
+        // ordered_edges, not shower->edges(): edges() is an unordered_set hashed
+        // on heap addresses (doc pr/28 §15.2).  length_muons/length_others are FP
+        // accumulations and they feed a BRANCH --
+        // `length_others > 0.33 * length_muons` below -- so the walk order is not
+        // confined to rounding: it can decide whether this muon is retyped to an
+        // EM shower.
+        for (auto edesc : ordered_edges(*shower, graph)) {
             auto sg1 = shower->view_graph()[edesc].segment;
             if (!sg1) continue;
             shower_segs.push_back(sg1);
@@ -314,7 +320,10 @@ void PatternAlgorithms::shower_clustering_connecting_to_main_vertex(Graph& graph
             bool flag_good_track = false;
             std::map<VertexPtr, int> vtx_segment_count;
 
-            for (auto edesc : shower->edges()) {
+            // ordered_edges: total_length is an FP accumulation feeding the
+            // length/track cuts below, so the walk order can move a cut
+            // (doc pr/28 §15.2).
+            for (auto edesc : ordered_edges(*shower, graph)) {
                 auto sg1 = shower->view_graph()[edesc].segment;
                 if (!sg1) continue;
 
@@ -1826,10 +1835,13 @@ void PatternAlgorithms::examine_shower_1(Graph& graph, VertexPtr main_vertex, In
             double total_length = 0;
             bool flag_good_track = false;
             
-            for (auto edesc : traj.edges()) {
+            // ordered_edges: total_length is an FP accumulation and it feeds the
+            // hard cuts below (`total_length < 70cm`, `< n_tracks * 36cm`, ...),
+            // so the walk order can move a cut (doc pr/28 §15.2).
+            for (auto edesc : ordered_edges(traj, graph)) {
                 auto sg1 = traj.view_graph()[edesc].segment;
                 if (!sg1) continue;
-                
+
                 double length = segment_track_length(sg1);
                 double medium_dQ_dx = segment_median_dQ_dx(sg1) / m_mip_dqdx_median;
                 
@@ -1885,7 +1897,12 @@ void PatternAlgorithms::examine_shower_1(Graph& graph, VertexPtr main_vertex, In
                 
                 n_tracks++;
                 total_length += length;
-                if (max_length < length) {
+                // Tie-broken on id(), matching the same max-segment idiom at
+                // :188 and :327 in this file.  This one was the odd site out:
+                // with a bare `<`, two equal-length segments were separated by
+                // the walk order alone (doc pr/28 §15.8).
+                if (max_length < length ||
+                    (max_length == length && max_sg && sg1->id() < max_sg->id())) {
                     max_length = length;
                     max_sg = sg1;
                 }
@@ -2141,7 +2158,9 @@ void PatternAlgorithms::examine_showers(Graph& graph, VertexPtr main_vertex, Ind
             // Composition check: track-fraction within shower's start cluster
             TrajectoryView& traj = sh->fill_maps();
             double ttl = 0, ttrk = 0;
-            for (auto edesc : traj.edges()) {
+            // ordered_edges: ttl/ttrk are FP accumulations feeding the
+            // `ttrk > 0.25 * ttl` composition test just below (doc pr/28 §15.2).
+            for (auto edesc : ordered_edges(traj, graph)) {
                 auto sg1 = traj.view_graph()[edesc].segment;
                 if (!sg1 || sg1->cluster() != sh->start_segment()->cluster()) continue;
                 double len = segment_track_length(sg1);
