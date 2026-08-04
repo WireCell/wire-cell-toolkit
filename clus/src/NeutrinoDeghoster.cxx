@@ -599,11 +599,10 @@ void PatternAlgorithms::deghosting(Graph& graph, ClusterVertexMap& map_cluster_m
         VertexPtr vertex = it->second;
         
         // Check if this vertex still has segments connected to it by checking the graph
-        auto [vbegin, vend] = boost::vertices(graph);
         bool vertex_has_connections = false;
-        for (auto vit = vbegin; vit != vend; ++vit) {
-            if (graph[*vit].vertex == vertex) {
-                if (boost::out_degree(*vit, graph) > 0) {
+        for (const auto& vd_it : ordered_nodes(graph)) {
+            if (graph[vd_it].vertex == vertex) {
+                if (boost::out_degree(vd_it, graph) > 0) {
                     vertex_has_connections = true;
                 }
                 break;

@@ -1192,8 +1192,9 @@ bool PatternAlgorithms::ssm_tagger(
 
     Point main_vtx_pt = vtx_fit_pt(ssm_main_vtx);
 
-    for (auto [eit,end] = boost::edges(graph); eit != end; ++eit) {
-        SegmentPtr sg = graph[*eit].segment;
+    // ordered_edges, not boost::edges: mom_offvtx_* accumulate in FP order.
+    for (const auto& ed : ordered_edges(graph)) {
+        SegmentPtr sg = graph[ed].segment;
         if (!sg) continue;
 
         // skip segments directly connected to ssm_main_vtx or ssm_second_vtx

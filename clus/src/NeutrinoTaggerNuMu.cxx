@@ -276,8 +276,10 @@ std::pair<bool, double> PatternAlgorithms::numu_tagger(
     double max_length_all   = 0;  // longest non-shower segment in main cluster
     SegmentPtr tmp_max_muon = nullptr;
 
-    for (auto [eit, eit_end] = boost::edges(graph); eit != eit_end; ++eit) {
-        SegmentPtr sg = graph[*eit].segment;
+    // ordered_edges, not boost::edges: acc_track_length accumulates in FP and
+    // max_length_all/tmp_max_muon are tie-broken by iteration order.
+    for (const auto& ed : ordered_edges(graph)) {
+        SegmentPtr sg = graph[ed].segment;
         if (!sg || !sg->cluster()) continue;
         if (sg->cluster()->get_cluster_id() != main_cl_id) continue;
 

@@ -36,14 +36,15 @@ bool PatternAlgorithms::examine_structure_1(Graph& graph, Facade::Cluster& clust
         return false;
     }
     
-    // Iterate through all edges (segments) in the graph
-    auto [ebegin, eend] = boost::edges(graph);
-    for (auto eit = ebegin; eit != eend; ++eit) {
-        SegmentPtr sg = graph[*eit].segment;
-        
+    // Iterate through all edges (segments) in the graph, in stable edge-index
+    // order.  This loop rewrites segment paths in place (no graph mutation),
+    // so a snapshot vector is safe here.
+    for (const auto& ed : ordered_edges(graph)) {
+        SegmentPtr sg = graph[ed].segment;
+
         // Skip if segment doesn't belong to this cluster
         if (!sg || sg->cluster() != &cluster) continue;
-        
+
         // Get segment properties
         double length = segment_track_length(sg);
         double medium_dQ_dx = segment_median_dQ_dx(sg) / m_mip_dqdx_median;
@@ -2537,8 +2538,8 @@ void PatternAlgorithms::examine_vertices_3(Graph& graph, Facade::Cluster& main_c
         // Pre-snapshot the other-segment list once (outside the point loop) so
         // we avoid re-iterating boost::edges and re-filtering on every point.
         std::vector<SegmentPtr> other_segs;
-        for (auto [e2b, e2e] = boost::edges(graph); e2b != e2e; ++e2b) {
-            SegmentPtr sg1 = graph[*e2b].segment;
+        for (const auto& ed2 : ordered_edges(graph)) {
+            SegmentPtr sg1 = graph[ed2].segment;
             if (sg1 && sg1 != sg) other_segs.push_back(sg1);
         }
 

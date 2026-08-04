@@ -127,9 +127,9 @@ void PatternAlgorithms::set_default_shower_particle_info(Graph& graph, Facade::C
     // Any segment flagged as a shower but missing particle_info (e.g. because it was
     // newly classified as kShowerTrajectory after determine_direction ran) gets PDG=11.
     const int pdg_code = 11;
-    auto [ebegin, eend] = boost::edges(graph);
-    for (auto eit = ebegin; eit != eend; ++eit) {
-        SegmentPtr sg = graph[*eit].segment; 
+    // ordered_edges: stable edge-index order (boost::edges is pointer order).
+    for (const auto& ed : ordered_edges(graph)) {
+        SegmentPtr sg = graph[ed].segment;
         if (!sg || sg->cluster() != &cluster) continue;
         if (!sg->flags_any(SegmentFlags::kShowerTrajectory) &&
             !sg->flags_any(SegmentFlags::kShowerTopology)) continue;
@@ -2155,16 +2155,15 @@ void PatternAlgorithms::transfer_info_from_segment_to_cluster(Graph& graph, Faca
     std::vector<int> point_segment_id(npoints, -1);
     std::vector<int> point_flag_shower(npoints, 0);
     
-    // Iterate through all edges (segments) in the graph
-    auto [ebegin, eend] = boost::edges(graph);
-    for (auto eit = ebegin; eit != eend; ++eit) {
-        SegmentPtr seg = graph[*eit].segment;
-        
+    // Iterate through all edges (segments) in the graph, in stable edge-index order.
+    for (const auto& ed : ordered_edges(graph)) {
+        SegmentPtr seg = graph[ed].segment;
+
         // Skip if segment is null or doesn't belong to this cluster
         if (!seg || seg->cluster() != &cluster) continue;
-        
+
         // Get the edge index as the segment ID
-        const auto& edge_bundle = graph[*eit];
+        const auto& edge_bundle = graph[ed];
         int segment_id = static_cast<int>(edge_bundle.index);
         
         seg->set_id(segment_id);
@@ -2514,9 +2513,8 @@ Facade::geo_vector_t PatternAlgorithms::calc_dir_cluster(Graph& graph, Facade::C
             }
             
             // Check all segments to see if any cluster has non-shower segments
-            auto [ebegin, eend] = boost::edges(graph);
-            for (auto eit = ebegin; eit != eend; ++eit) {
-                SegmentPtr sg = graph[*eit].segment;
+            for (const auto& ed : ordered_edges(graph)) {
+                SegmentPtr sg = graph[ed].segment;
                 if (!sg) continue;
                 
                 int cluster_id = sg->cluster() ? sg->cluster()->get_cluster_id() : -1;

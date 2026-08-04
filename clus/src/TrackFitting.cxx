@@ -275,17 +275,22 @@ void TrackFitting::clear_segments(){
 void TrackFitting::sync_from_graph(){
     if (!m_graph) return;
 
-    std::set<std::shared_ptr<PR::Segment>> segments_set;
-    for (auto e_it = boost::edges(*m_graph).first; e_it != boost::edges(*m_graph).second; ++e_it) {
-        auto& edge_bundle = (*m_graph)[*e_it];
+    // ordered_edges, not boost::edges: segments_first below is the first
+    // segment in a *stable* order, where (*segments_set.begin()) used to be
+    // the lowest shared_ptr address, i.e. pointer order.
+    std::shared_ptr<PR::Segment> segments_first;
+    size_t nsegments = 0;
+    for (const auto& ed : PR::ordered_edges(*m_graph)) {
+        auto& edge_bundle = (*m_graph)[ed];
         if (edge_bundle.segment) {
-            segments_set.insert(edge_bundle.segment);
+            if (!segments_first) segments_first = edge_bundle.segment;
+            ++nsegments;
             m_clusters.insert(edge_bundle.segment->cluster());
         }
     }
 
-    if (m_grouping == nullptr && !segments_set.empty()) {
-        m_grouping = (*segments_set.begin())->cluster()->grouping();
+    if (m_grouping == nullptr && segments_first) {
+        m_grouping = segments_first->cluster()->grouping();
         BuildGeometry();
     }
 
@@ -295,7 +300,7 @@ void TrackFitting::sync_from_graph(){
         }
     }
 
-    SPDLOG_LOGGER_TRACE(s_log, "sync_from_graph: segments={} clusters={} blobs={}", segments_set.size(), m_clusters.size(), m_blobs.size());
+    SPDLOG_LOGGER_TRACE(s_log, "sync_from_graph: segments={} clusters={} blobs={}", nsegments, m_clusters.size(), m_blobs.size());
 }
 
 void TrackFitting::inherit_from(const TrackFitting& src, Facade::Cluster* cluster)

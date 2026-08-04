@@ -13,6 +13,7 @@
 
 #include <chrono>
 #include <cmath>
+#include <unordered_set>
 
 using namespace WireCell::Clus::PR;
 using namespace WireCell::Clus;
@@ -770,11 +771,11 @@ VertexPtr PatternAlgorithms::compare_main_vertices(Graph& graph, Facade::Cluster
     SegmentPtr max_length_muon = nullptr;
     double max_length = 0;
     
-    auto [ebegin, eend] = boost::edges(graph);
-    for (auto eit = ebegin; eit != eend; ++eit) {
-        SegmentPtr sg = graph[*eit].segment;
+    // ordered_edges: max_length_muon is a tie-broken max over all segments.
+    for (const auto& ed : ordered_edges(graph)) {
+        SegmentPtr sg = graph[ed].segment;
         if (!sg || sg->cluster() != &cluster) continue;
-        
+
         // Skip showers
         bool is_shower = sg->flags_any(SegmentFlags::kShowerTrajectory) ||
                         sg->flags_any(SegmentFlags::kShowerTopology) ||
@@ -1085,12 +1086,11 @@ bool PatternAlgorithms::examine_direction(Graph& graph, VertexPtr vertex, Vertex
         }
     }
     
-    // Check all vertices in the cluster
-    auto [vbegin, vend] = boost::vertices(graph);
-    for (auto vit = vbegin; vit != vend; ++vit) {
-        VertexPtr vtx = graph[*vit].vertex;
+    // Check all vertices in the cluster, in stable node-index order.
+    for (const auto& vd_it : ordered_nodes(graph)) {
+        VertexPtr vtx = graph[vd_it].vertex;
         if (!vtx || vtx->cluster() != &cluster) continue;
-        
+
         auto results = examine_main_vertex_candidate(graph, vtx);
         bool flag_in = std::get<0>(results);
         int ntracks = std::get<1>(results);
@@ -1102,9 +1102,8 @@ bool PatternAlgorithms::examine_direction(Graph& graph, VertexPtr vertex, Vertex
     }
     
     // Count total segments in cluster
-    auto [ebegin, eend] = boost::edges(graph);
-    for (auto eit = ebegin; eit != eend; ++eit) {
-        SegmentPtr seg = graph[*eit].segment;
+    for (const auto& ed : ordered_edges(graph)) {
+        SegmentPtr seg = graph[ed].segment;
         if (seg && seg->cluster() == &cluster) {
             num_total_segments++;
         }
@@ -1549,9 +1548,8 @@ bool PatternAlgorithms::examine_direction(Graph& graph, VertexPtr vertex, Vertex
     }
     
     // Find Michel electrons
-    auto [ebegin2, eend2] = boost::edges(graph);
-    for (auto eit = ebegin2; eit != eend2; ++eit) {
-        SegmentPtr sg = graph[*eit].segment;
+    for (const auto& ed : ordered_edges(graph)) {
+        SegmentPtr sg = graph[ed].segment;
         if (!sg || sg->cluster() != &cluster) continue;
         
         // Check if segment has particle info with mass but no 4-momentum yet, and is not shower topology
@@ -1570,9 +1568,8 @@ bool PatternAlgorithms::examine_direction(Graph& graph, VertexPtr vertex, Vertex
                 // Find the two vertices of this segment
                 VertexPtr start_v = nullptr, end_v = nullptr;
                 
-                auto [vbegin, vend] = boost::vertices(graph);
-                for (auto vit = vbegin; vit != vend; ++vit) {
-                    VertexPtr vtx = graph[*vit].vertex;
+                for (const auto& vd_it : ordered_nodes(graph)) {
+                    VertexPtr vtx = graph[vd_it].vertex;
                     if (!vtx || !vtx->descriptor_valid()) continue;
                     
                     // Check if this vertex is connected to our segment
@@ -1830,26 +1827,29 @@ bool PatternAlgorithms::eliminate_short_vertex_activities(Graph& graph, Facade::
             if (!flag_continue && existing_segments.find(sg) == existing_segments.end() && length > 0.45*units::cm) {
                 const auto& wcpts = sg->wcpts();
                 int n_good = 0;
-                
+
+                // Hoisted out of the point x existing-segment double loop: the
+                // "is this segment still in the graph" test is a pure existence
+                // check, so it can be answered once from a snapshot instead of
+                // re-walking every edge per (point, existing segment) pair.
+                // POINTER identity, like the scan it replaces -- see the note
+                // on this function in NeutrinoPatternBase.h.  Unordered because
+                // it is only ever count()-ed, never iterated.
+                std::unordered_set<SegmentPtr> segs_in_graph;
+                for (const auto& ed2 : ordered_edges(graph)) {
+                    if (graph[ed2].segment) segs_in_graph.insert(graph[ed2].segment);
+                }
+
                 for (size_t i = 0; i < wcpts.size(); i++) {
                     WireCell::Point pt = wcpts[i].point;
                     auto wpid = dv->contained_by(pt);
                     if (wpid.face() == -1 || wpid.apa() == -1) continue;
-                    
+
                     double dis_u = 1e9, dis_v = 1e9, dis_w = 1e9;
-                    
+
                     for (auto existing_sg : existing_segments) {
-                        // Check if segment exists in graph
-                        bool seg_exists = false;
-                        auto [ebegin2, eend2] = boost::edges(graph);
-                        for (auto eit2 = ebegin2; eit2 != eend2; ++eit2) {
-                            if (graph[*eit2].segment == existing_sg) {
-                                seg_exists = true;
-                                break;
-                            }
-                        }
-                        if (!seg_exists) continue;
-                        
+                        if (!segs_in_graph.count(existing_sg)) continue;
+
                         auto [dist_u, dist_v, dist_w] = segment_get_closest_2d_distances(existing_sg, pt, wpid.apa(), wpid.face(), "fit");
                         if (dist_u < dis_u) dis_u = dist_u;
                         if (dist_v < dis_v) dis_v = dist_v;
@@ -2020,14 +2020,14 @@ void PatternAlgorithms::improve_vertex(Graph& graph, Facade::Cluster& cluster, V
     s_log->trace("improve_vertex: cluster {} flag_search_vertex_activity={} flag_final_vertex={}", cluster.ident(), flag_search_vertex_activity, flag_final_vertex);
 
     IndexedVertexSet fitted_vertices;  // order by stable graph index, not pointer address
-    std::set<SegmentPtr> existing_segments;
+    std::set<SegmentPtr> existing_segments;   // pointer-keyed on purpose, see header
     
     // Check if all segments are showers, no need to fit vertex with only two legs
     bool flag_skip_two_legs = false;
     {
         int ntracks = 0;
-        for (auto it = boost::edges(graph).first; it != boost::edges(graph).second; ++it) {
-            SegmentPtr sg = graph[*it].segment;
+        for (const auto& ed : ordered_edges(graph)) {
+            SegmentPtr sg = graph[ed].segment;
             if (!sg || sg->cluster() != &cluster) continue;
             existing_segments.insert(sg);
             bool is_shower = sg->flags_any(SegmentFlags::kShowerTrajectory) || sg->flags_any(SegmentFlags::kShowerTopology) ||
@@ -2291,17 +2291,18 @@ void PatternAlgorithms::improve_vertex(Graph& graph, Facade::Cluster& cluster, V
             detv_dump("iv:final_dmt", graph);
         }
         
-        // Determine directions for segments
-        for (auto it = boost::edges(graph).first; it != boost::edges(graph).second; ++it) {
-            SegmentPtr sg1 = graph[*it].segment;
+        // Determine directions for segments (ordered_edges: this mutates
+        // per-segment direction/PID, so iteration order is an input).
+        for (const auto& ed : ordered_edges(graph)) {
+            SegmentPtr sg1 = graph[ed].segment;
             if (!sg1 || sg1->cluster() != &cluster) continue;
-            
+
             if (!sg1->particle_info()) {
                 segment_is_shower_topology(sg1, false, m_mip_dqdx_median, m_shower_topo_demote_len);
-                
+
                 VertexPtr start_v = nullptr, end_v = nullptr;
-                auto source_v = boost::source(*it, graph);
-                auto target_v = boost::target(*it, graph);
+                auto source_v = boost::source(ed, graph);
+                auto target_v = boost::target(ed, graph);
                 
                 auto& wcpts = sg1->wcpts();
                 if (!wcpts.empty()) {
@@ -3134,11 +3135,11 @@ VertexPtr PatternAlgorithms::compare_main_vertices_global(Graph& graph, std::vec
             double total_length = 0;
             int num_tracks = 0;
             
-            auto [ebegin, eend] = boost::edges(graph);
-            for (auto eit = ebegin; eit != eend; ++eit) {
-                SegmentPtr seg = graph[*eit].segment;
+            // ordered_edges: total_length is an FP accumulation.
+            for (const auto& ed : ordered_edges(graph)) {
+                SegmentPtr seg = graph[ed].segment;
                 if (!seg || seg->cluster() != vtx->cluster()) continue;
-                
+
                 total_length += segment_track_length(seg);
                 num_tracks++;
             }
@@ -3512,9 +3513,9 @@ bool PatternAlgorithms::determine_overall_main_vertex_DL(
             // --- Precompute cluster total track lengths (avoid O(N_edges) per candidate) ---
             std::map<Facade::Cluster*, double> cluster_total_len;
             {
-                auto [ebegin, eend] = boost::edges(graph);
-                for (auto eit = ebegin; eit != eend; ++eit) {
-                    SegmentPtr seg = graph[*eit].segment;
+                // ordered_edges: the += is an FP accumulation.
+                for (const auto& ed : ordered_edges(graph)) {
+                    SegmentPtr seg = graph[ed].segment;
                     if (seg && seg->cluster())
                         cluster_total_len[seg->cluster()] += segment_track_length(seg);
                 }

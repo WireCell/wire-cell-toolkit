@@ -443,6 +443,15 @@ namespace WireCell::Clus::PR {
 
         // vertex related functions 
         bool search_for_vertex_activities(Graph& graph, VertexPtr vertex, std::vector<SegmentPtr>& segments_set, Facade::Cluster& cluster, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, double search_range = 1.5*units::cm);
+        // existing_segments stays a plain std::set<SegmentPtr> (pointer-keyed)
+        // ON PURPOSE.  It is iterated once, in the Case-5 block, where the body
+        // only takes a running min over three distances -- order-insensitive.
+        // Its find()/count() must stay POINTER identity: an index-ordered set
+        // would compare by Segment::get_graph_index(), and a segment removed
+        // from the graph can have its edge index inherited by a later segment
+        // (PRGraph.cxx:88-90), so an index-keyed lookup would match a stale
+        // entry against a different live segment.  Measured: making that swap
+        // moved kine_reco_Enu on SBND evt 239794 from 2930 to 1687 MeV.
         bool eliminate_short_vertex_activities(Graph& graph, Facade::Cluster& cluster, VertexPtr main_vertex, std::set<SegmentPtr>& existing_segments, TrackFitting& track_fitter, IDetectorVolumes::pointer dv);
         std::tuple<bool, int, int> examine_main_vertex_candidate(Graph& graph, VertexPtr vertex);
         VertexPtr compare_main_vertices_all_showers(Graph& graph, Facade::Cluster& cluster, std::vector<VertexPtr>& vertex_candidates, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model);

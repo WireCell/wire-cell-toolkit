@@ -40,10 +40,11 @@ void PatternAlgorithms::separate_track_shower(Graph&graph, Facade::Cluster& clus
     auto t_total = Clock::now();
     MS t_topology{0}, t_trajectory{0};
 
-    // Iterate through all edges (segments) in the graph
-    auto [ebegin, eend] = boost::edges(graph);
-    for (auto eit = ebegin; eit != eend; ++eit) {
-        SegmentPtr seg = graph[*eit].segment;
+    // Iterate through all edges (segments) in the graph, in stable edge-index
+    // order (boost::edges on a setS graph is pointer order, which varies run
+    // to run).
+    for (const auto& ed : ordered_edges(graph)) {
+        SegmentPtr seg = graph[ed].segment;
 
         // Skip if segment is null or doesn't belong to this cluster
         if (!seg || seg->cluster() != &cluster) continue;
@@ -71,10 +72,9 @@ void PatternAlgorithms::determine_direction(Graph& graph, Facade::Cluster& clust
     auto t_total = Clock::now();
     MS t_shower_traj{0}, t_shower_topo{0}, t_track{0};
 
-    // Iterate through all edges (segments) in the graph
-    auto [ebegin, eend] = boost::edges(graph);
-    for (auto eit = ebegin; eit != eend; ++eit) {
-        SegmentPtr seg = graph[*eit].segment;
+    // Iterate through all edges (segments) in the graph, in stable edge-index order.
+    for (const auto& ed : ordered_edges(graph)) {
+        SegmentPtr seg = graph[ed].segment;
 
         // Skip if segment is null or doesn't belong to this cluster
         if (!seg || seg->cluster() != &cluster) continue;
@@ -328,14 +328,13 @@ std::pair<SegmentPtr, VertexPtr> PatternAlgorithms::find_cont_muon_segment_nue(
 }
 
 void PatternAlgorithms::examine_good_tracks(Graph& graph, Facade::Cluster& cluster, const Clus::ParticleDataSet::pointer& particle_data) {
-    // Iterate through all edges (segments) in the graph
-    auto [ebegin, eend] = boost::edges(graph);
-    for (auto eit = ebegin; eit != eend; ++eit) {
-        SegmentPtr sg = graph[*eit].segment;
-        
+    // Iterate through all edges (segments) in the graph, in stable edge-index order.
+    for (const auto& ed : ordered_edges(graph)) {
+        SegmentPtr sg = graph[ed].segment;
+
         // Skip if segment is null or doesn't belong to this cluster
         if (!sg || sg->cluster() != &cluster) continue;
-        
+
         // Skip if segment is a shower (trajectory, topology, or electron by dQ/dx)
         // matches prototype get_flag_shower() = flag_shower_trajectory || flag_shower_topology || (particle_type==11)
         if (sg->flags_any(SegmentFlags::kShowerTrajectory) || sg->flags_any(SegmentFlags::kShowerTopology) ||
@@ -441,10 +440,10 @@ void PatternAlgorithms::examine_good_tracks(Graph& graph, Facade::Cluster& clust
 }
 
 void PatternAlgorithms::fix_maps_multiple_tracks_in(Graph& graph, Facade::Cluster& cluster){
-    // Iterate through all vertices in the graph
-    auto [vbegin, vend] = boost::vertices(graph);
-    for (auto vit = vbegin; vit != vend; ++vit) {
-        VertexPtr vtx = graph[*vit].vertex;
+    // Iterate through all vertices in the graph, in stable node-index order
+    // (boost::vertices on a setS graph is pointer order).
+    for (const auto& vd_it : ordered_nodes(graph)) {
+        VertexPtr vtx = graph[vd_it].vertex;
         
         // Skip if vertex is null or doesn't belong to this cluster
         if (!vtx || !vtx->cluster() || vtx->cluster() != &cluster) continue;
@@ -1470,14 +1469,13 @@ void PatternAlgorithms::judge_no_dir_tracks_close_to_showers(Graph& graph, Facad
 bool PatternAlgorithms::examine_maps(Graph&graph, Facade::Cluster& cluster){
     bool flag_return = true;
     
-    // Iterate through all vertices in the graph
-    auto [vbegin, vend] = boost::vertices(graph);
-    for (auto vit = vbegin; vit != vend; ++vit) {
-        VertexPtr vtx = graph[*vit].vertex;
-        
+    // Iterate through all vertices in the graph, in stable node-index order.
+    for (const auto& vd_it : ordered_nodes(graph)) {
+        VertexPtr vtx = graph[vd_it].vertex;
+
         // Skip if vertex is null or doesn't belong to this cluster
         if (!vtx || vtx->cluster() != &cluster) continue;
-        
+
         // Skip vertices with only 1 segment
         if (!vtx->descriptor_valid()) continue;
         auto vd = vtx->get_descriptor();

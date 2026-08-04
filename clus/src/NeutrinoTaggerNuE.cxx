@@ -628,14 +628,20 @@ static bool pi0_identification(NuEContext& ctx,
 
         if (dir1.magnitude() > 0) {
             // Precompute total track length per cluster (used to check acc_length > 0)
+            // ordered_edges (not boost::edges): the += accumulates in iteration
+            // order and FP addition is not associative, so a pointer-ordered
+            // walk gives a last-ulp-different acc_length between runs.
             std::map<Facade::Cluster*, double> cluster_acc_length;
-            for (auto [eit, eend] = boost::edges(ctx.graph); eit != eend; ++eit) {
-                SegmentPtr sg1 = ctx.graph[*eit].segment;
+            for (const auto& ed : ordered_edges(ctx.graph)) {
+                SegmentPtr sg1 = ctx.graph[ed].segment;
                 if (sg1 && sg1->cluster())
                     cluster_acc_length[sg1->cluster()] += segment_track_length(sg1);
             }
 
-            for (const auto& vd : graph_nodes(ctx.graph)) {
+            // ordered_nodes (not graph_nodes): this loop push_back()s one entry
+            // per surviving vertex into pio_2_v_*, so the *order* of the output
+            // vectors is the loop order.  graph_nodes() is pointer order.
+            for (const auto& vd : ordered_nodes(ctx.graph)) {
                 VertexPtr vtx1 = ctx.graph[vd].vertex;
                 if (!vtx1) continue;
                 if (vtx1->cluster() == vertex->cluster()) continue;
@@ -2298,7 +2304,7 @@ static bool bad_reconstruction_1(NuEContext& ctx, ShowerPtr shower,
 //   fid->inside_fiducial_volume(p, offset_x, &tol) → fiducial_utils->inside_fiducial_volume(p, tol)
 //   shower->get_particle_type()                     → shower->get_particle_type()  (direct)
 //   shower->get_end_point()                         → shower->get_end_point()      (direct)
-//   stw_3 global vertex loop                        → graph_nodes(ctx.graph)
+//   stw_3 global vertex loop                        → ordered_nodes(ctx.graph)
 //   vtx1->get_wcpt().{x,y,z}                        → vtx1->wcpt().point.{x,y,z}
 // ===========================================================================
 static bool shower_to_wall(NuEContext& ctx, ShowerPtr shower,
@@ -2441,7 +2447,9 @@ static bool shower_to_wall(NuEContext& ctx, ShowerPtr shower,
     // ------------------------------------------------------------------
     // flag_bad3: vertices of other clusters in backward direction
     // ------------------------------------------------------------------
-    for (const auto& vd : graph_nodes(ctx.graph)) {
+    // ordered_nodes (not graph_nodes): push_back()s one entry per surviving
+    // vertex into stw_3_v_*, so loop order IS the output vector order.
+    for (const auto& vd : ordered_nodes(ctx.graph)) {
         VertexPtr vtx1 = ctx.graph[vd].vertex;
         if (!vtx1) continue;
         if (vtx1->cluster() == vertex->cluster()) continue;

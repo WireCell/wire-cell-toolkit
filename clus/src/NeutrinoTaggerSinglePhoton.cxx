@@ -2048,14 +2048,17 @@ static bool pi0_identification_sp(SpContext& ctx,
 
         if (dir1.magnitude() > 0) {
             // Precompute total track length per cluster
+            // ordered_edges (not boost::edges): FP += is order-sensitive.
             std::map<Facade::Cluster*, double> cluster_acc_length;
-            for (auto [eit, eend] = boost::edges(ctx.graph); eit != eend; ++eit) {
-                SegmentPtr sg1 = ctx.graph[*eit].segment;
+            for (const auto& ed : ordered_edges(ctx.graph)) {
+                SegmentPtr sg1 = ctx.graph[ed].segment;
                 if (sg1 && sg1->cluster())
                     cluster_acc_length[sg1->cluster()] += segment_track_length(sg1);
             }
 
-            for (const auto& vd : graph_nodes(ctx.graph)) {
+            // ordered_nodes (not graph_nodes): loop order IS the order of the
+            // shw_sp_pio_2_v_* output vectors.  graph_nodes() is pointer order.
+            for (const auto& vd : ordered_nodes(ctx.graph)) {
                 VertexPtr vtx1 = ctx.graph[vd].vertex;
                 if (!vtx1) continue;
                 if (vtx1->cluster() == vertex->cluster()) continue;

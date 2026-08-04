@@ -1078,9 +1078,12 @@ bool PatternAlgorithms::cosmic_tagger(
             }
         }
 
-        // Collect segment points for big clusters
-        for (auto [eit, eit_end] = boost::edges(graph); eit != eit_end; ++eit) {
-            SegmentPtr sg = graph[*eit].segment;
+        // Collect segment points for big clusters.  ordered_edges, not
+        // boost::edges: this loop does a first-wins insert into map_cl_high_pt
+        // and push_back()s into map_cl_pts (whose order feeds a PCA), so the
+        // iteration order is an input to the result.
+        for (const auto& ed : ordered_edges(graph)) {
+            SegmentPtr sg = graph[ed].segment;
             if (!sg || !sg->cluster()) continue;
             int cl_id = sg->cluster()->get_cluster_id();
             if (!big_cluster_ids.count(cl_id)) continue;
@@ -1101,9 +1104,10 @@ bool PatternAlgorithms::cosmic_tagger(
                 map_cl_shower_pts[cl_id] += static_cast<int>(fits.size());
         }
 
-        // Add vertex positions to cluster point clouds
-        for (auto [vit, vit_end] = boost::vertices(graph); vit != vit_end; ++vit) {
-            VertexPtr vtx = graph[*vit].vertex;
+        // Add vertex positions to cluster point clouds (ordered_nodes: the
+        // push_back order feeds a PCA, and the y-max update is tie-sensitive).
+        for (const auto& vd_it : ordered_nodes(graph)) {
+            VertexPtr vtx = graph[vd_it].vertex;
             if (!vtx || !vtx->cluster()) continue;
             int cl_id = vtx->cluster()->get_cluster_id();
             if (!big_cluster_ids.count(cl_id)) continue;
@@ -1295,8 +1299,8 @@ bool PatternAlgorithms::cosmic_tagger(
             }
         }
 
-        for (auto [vit, vit_end] = boost::vertices(graph); vit != vit_end; ++vit) {
-            VertexPtr vtx = graph[*vit].vertex;
+        for (const auto& vd_it : ordered_nodes(graph)) {
+            VertexPtr vtx = graph[vd_it].vertex;
             if (!vtx) continue;
             if (!vtx->cluster() || !main_cluster) continue;
             if (vtx->cluster()->get_cluster_id() != main_cluster->get_cluster_id()) continue;
