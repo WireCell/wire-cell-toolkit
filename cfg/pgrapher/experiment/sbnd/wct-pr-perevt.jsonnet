@@ -589,11 +589,15 @@ function(
     // return value was discarded, leaving the uBooNE tagger ntuple's
     // photon_flag branch a constant 0.
     //
-    // NOT the SBND default: it changes a written output branch, so the flip is
-    // the owner's call (escalation rule 1).  Nothing in the chain reads
-    // photon_flag, so ON changes that one branch and no reconstruction, no
-    // selection and no other tagger field (runner: SBND_SP_PHOTON_FLAG=1).
-    sp_photon_flag = false,
+    // SBND DEFAULT ON (owner 2026-08-03).  This changes ONE written output
+    // branch and nothing else: photon_flag has no readers anywhere in clus/,
+    // root/ or cfg/ -- its only other occurrence is
+    // UbooneTaggerOutputVisitor.cxx:1078's SCALAR_BR -- so no reconstruction,
+    // no selection and no other tagger field moves.  Measured on the 7-event
+    // gate (doc pr/26 sec. 9.3): 1215 of 1216 T_tagger branch-values identical,
+    // the one that moves is photon_flag 0 -> 1 on evt 172230.
+    // Set false to restore the pre-fix gap (runner: SBND_SP_PHOTON_FLAG=0).
+    sp_photon_flag = true,
 )
     local base = import 'pgrapher/experiment/sbnd/simparams.jsonnet';
     local params = base {
