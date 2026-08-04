@@ -59,6 +59,32 @@ namespace WireCell::Clus::PR {
     /// The one instance.  Defined in PRGraph.cxx.
     extern PortAuditCounters g_port_audit;
 
+    /// doc sbnd_xin/docs/pr/32 §11 -- stage-4 (neutrino vertex ID) audit
+    /// instrumentation, same contract as PortAuditCounters above: process-wide,
+    /// one event per wire-cell process, never reset, pure diagnostics.
+    struct Pr32AuditCounters {
+        // F1 -- how often the fit point and the snapped wcpt actually differ,
+        // and by how much (microns, so an integer atomic suffices).
+        std::atomic<uint64_t> f1_reads{0};        // vertex-position reads at the 11 sites
+        std::atomic<uint64_t> f1_fit_valid{0};    // ... of which had a valid fit
+        std::atomic<uint64_t> f1_moved_um_sum{0}; // summed |fit - wcpt| over valid reads
+        std::atomic<uint64_t> f1_moved_um_max{0};
+        // F2 -- how often the stored kShowerTrajectory flag and a fresh 10 cm
+        // recomputation disagree at the two outer gates, and how often the
+        // recheck body actually runs.
+        std::atomic<uint64_t> f2_gate_calls{0};
+        std::atomic<uint64_t> f2_gate_disagree{0};
+        std::atomic<uint64_t> f2_body_runs{0};
+        std::atomic<uint64_t> f2_flag_cleared{0}; // refresh actually demoted a segment
+        // F3 -- candidates the descriptor filter would drop.  If this is 0
+        // everywhere, P7 is confirmed dead code and the knob can be retired.
+        std::atomic<uint64_t> f3_candidates{0};
+        std::atomic<uint64_t> f3_dropped{0};
+        // F4 -- vertices flagged as main-vertex candidates.
+        std::atomic<uint64_t> f4_flagged{0};
+    };
+    extern Pr32AuditCounters g_pr32_audit;
+
     /// P8 knob transport.  add_segment() is a free function reached from ~30
     /// call sites and has no access to component configuration, so the two
     /// values it needs are written once per event by TaggerCheckNeutrino

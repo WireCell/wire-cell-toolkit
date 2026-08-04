@@ -334,6 +334,85 @@ namespace WireCell::Clus::PR {
         // it.  Do not fix that here.
         bool   m_shower_topo_proto_dir{false};
 
+        // ---- doc sbnd_xin/docs/pr/32 §11 -- the four kept findings of the
+        // stage-4 (neutrino vertex identification) port audit.  All four are
+        // C++ default FALSE = today's path = byte-identical; the SBND
+        // operating point turns them on in wct-pr-perevt.jsonnet.
+
+        // F1 (was P1).  calc_conflict_maps and compare_main_vertices_all_showers
+        // measure their direction vectors, PCA projection and z tie-breaks from
+        // `vtx->wcpt().point` -- the vertex fit SNAPPED to the nearest Steiner
+        // node -- where the prototype uses `get_fit_pt()`, the continuous fit
+        // (NeutrinoID_track_shower.h:1804/1808 for the two direction vectors,
+        // :1468/:1480/:1504-1505/:1542/:1551/:1567/:1574 in the all-showers
+        // scorer).  Eleven expressions in two functions; the same file already
+        // reads `fit().valid() ? fit().point : wcpt().point` at 23 other
+        // expressions, so the file is inconsistent with itself and the
+        // prototype has exactly one convention.
+        //
+        // The gap is Vertex::fit_distance() -- a quantisation onto the Steiner
+        // lattice, not a fitted-vs-unfitted swap: MyFCN::UpdateInfo writes both
+        // members (MyFCN.cxx:487 the fit, :496 the snap).  It matters because
+        // these angles feed the <35/<70/<85/<110 conflict ladder whose rungs
+        // are worth +5/+3/+1/+0.25 before the /4, against topology terms spaced
+        // 0.125 apart.
+        //
+        // NOT byte-identical when ON, and known so in advance: fit_distance()
+        // is nonzero on 127/127 vertices of evt 388 (doc pr/28 A4).
+        //
+        // The fallback to wcpt() is load-bearing and stays: PR::Vertex has no
+        // constructor initialising m_fit.point from m_wcpt.point the way
+        // ProtoVertex's does (ProtoVertex.cxx:17-19), so a vertex created after
+        // the last fit and never fitted carries fit().point == (0,0,0).
+        bool   m_vertex_dir_use_fit_point{false};
+
+        // F2 (was P3).  The improve_vertex shower-trajectory recheck.  Three
+        // changes that must move together:
+        //   (a) prototype's two outer gates READ the stored flag
+        //       (NeutrinoID_improve_vertex.h:248 and :287); the toolkit
+        //       RECOMPUTES at both (NeutrinoVertexFinder.cxx:2337, :2409);
+        //   (b) the inner test runs at 1.0 cm where the prototype uses the
+        //       10 cm default (ProtoSegment.h:85);
+        //   (c) the inner test passes m_mip_dqdx_median where the prototype's
+        //       is_shower_trajectory divides by 50000/units::cm internally
+        //       (ProtoSegment.cxx:566), i.e. the m_mip_dqdx analog.
+        //
+        // Fixing (b)+(c) ALONE makes the block dead code: with the outer gate
+        // also recomputing at (10 cm, m_mip_dqdx), the inner
+        // `!segment_is_shower_trajectory(...)` negates a condition established
+        // one line earlier and never fires.  The 1.0 cm step is what keeps the
+        // block alive after (a); it is not an independent typo.
+        //
+        // (a) is only possible once the flag can be cleared -- see
+        // PR::g_shower_traj_refresh_flag, which this knob also drives.
+        bool   m_shower_traj_recheck_parity{false};
+
+        // F3 (was P7).  compare_main_vertices guards its proton-topology
+        // pre-pass and its z-prior/per-segment ladder on descriptor_valid()
+        // but NOT the min_z scan, the fiducial +0.5, the conflict penalty or
+        // the argmax.  An invalid-descriptor candidate therefore reaches the
+        // argmax carrying `0 + (0.5 if in FV) - conflicts/4`, and real
+        // candidates routinely score negative, so it can win.  The prototype
+        // has no descriptor concept and no such path.
+        //
+        // Believed unreachable today -- candidates come from ordered_nodes()
+        // and nothing between collection and use removes a vertex -- but that
+        // is a control-flow argument, not a measurement, which is why the drop
+        // is counted (see the PR32AUDIT log line) rather than assumed zero.
+        bool   m_main_vertex_require_descriptor{false};
+
+        // F4 (was P12).  The prototype records the per-cluster candidate list
+        // before filtering (NeutrinoID_track_shower.h:1332) and exposes it
+        // (NeutrinoID.h:1720); the toolkit has no equivalent, which is why doc
+        // pr/27 §6 records "candidate list, per-cluster and global -> nothing".
+        // Every prototype consumer is an app-level output-tree filler, so this
+        // is DIAGNOSTIC ONLY -- no algorithm reads it on either side.
+        //
+        // Ported as PR::VertexFlags::kMainCandidate rather than a new container
+        // so it needs no plumbing and travels with the vertex; PrDisplayDump
+        // emits it as "main_candidate".
+        bool   m_main_vertex_candidate_flag{false};
+
         // Proton-template direction vote (doc pr/8; default false = legacy).
         // Thresholds are initial values pending the pr/8 sec. 6 calibration.
         bool   m_proton_dir_vote{false};

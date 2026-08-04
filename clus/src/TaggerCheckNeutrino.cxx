@@ -88,6 +88,11 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_other_seg_relaxed_accept = get(config, "other_seg_relaxed_accept", m_other_seg_relaxed_accept);
     // doc sbnd_xin/docs/pr/31 §11 port-fidelity knob (F2, was P2).
     m_shower_topo_proto_dir    = get(config, "shower_topo_proto_dir",    m_shower_topo_proto_dir);
+    // doc sbnd_xin/docs/pr/32 §11 port-fidelity knobs (F1-F4).
+    m_vertex_dir_use_fit_point       = get(config, "vertex_dir_use_fit_point",       m_vertex_dir_use_fit_point);
+    m_shower_traj_recheck_parity     = get(config, "shower_traj_recheck_parity",     m_shower_traj_recheck_parity);
+    m_main_vertex_require_descriptor = get(config, "main_vertex_require_descriptor", m_main_vertex_require_descriptor);
+    m_main_vertex_candidate_flag     = get(config, "main_vertex_candidate_flag",     m_main_vertex_candidate_flag);
     m_iso_endpoint               = get(config, "iso_endpoint",               m_iso_endpoint);
     m_iso_endpoint_min_length    = get(config, "iso_endpoint_min_length",    m_iso_endpoint_min_length);     // cm
     m_iso_endpoint_max_xext      = get(config, "iso_endpoint_max_xext",      m_iso_endpoint_max_xext);       // cm
@@ -239,6 +244,11 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["other_seg_relaxed_accept"] = m_other_seg_relaxed_accept;  // true  = legacy (the 0.72/15cm/1.05 clause is live)
     // doc sbnd_xin/docs/pr/31 §11.
     cfg["shower_topo_proto_dir"]    = m_shower_topo_proto_dir;     // false = legacy (the stage-3 PCA direction call runs)
+    // doc sbnd_xin/docs/pr/32 §11.
+    cfg["vertex_dir_use_fit_point"]       = m_vertex_dir_use_fit_point;       // false = legacy (raw wcpt at the 11 sites)
+    cfg["shower_traj_recheck_parity"]     = m_shower_traj_recheck_parity;     // false = legacy (recomputed gate, 1 cm inner)
+    cfg["main_vertex_require_descriptor"] = m_main_vertex_require_descriptor; // false = legacy (unguarded argmax)
+    cfg["main_vertex_candidate_flag"]     = m_main_vertex_candidate_flag;     // false = legacy (no kMainCandidate)
     cfg["iso_endpoint"]               = m_iso_endpoint;                // false = legacy wire-footprint boundary endpoints
     cfg["iso_endpoint_min_length"]    = m_iso_endpoint_min_length;     // cm
     cfg["iso_endpoint_max_xext"]      = m_iso_endpoint_max_xext;       // cm
@@ -538,6 +548,16 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
     pattern_algos.m_other_seg_relaxed_accept = m_other_seg_relaxed_accept;
     // doc sbnd_xin/docs/pr/31 §11 (F2).
     pattern_algos.m_shower_topo_proto_dir    = m_shower_topo_proto_dir;
+    // doc sbnd_xin/docs/pr/32 §11 (F1-F4).
+    pattern_algos.m_vertex_dir_use_fit_point       = m_vertex_dir_use_fit_point;
+    pattern_algos.m_shower_traj_recheck_parity     = m_shower_traj_recheck_parity;
+    pattern_algos.m_main_vertex_require_descriptor = m_main_vertex_require_descriptor;
+    pattern_algos.m_main_vertex_candidate_flag     = m_main_vertex_candidate_flag;
+    // segment_is_shower_trajectory is a free function reached from three files
+    // with no component config in scope, so F2's flag-refresh half travels
+    // through a process-wide flag written here, once, before any graph is
+    // built -- same transport as PR::g_graph_endpoint_policy below.
+    PR::g_shower_traj_refresh_flag = m_shower_traj_recheck_parity;
     // add_segment() is a free function with no component config in reach, so
     // the P8 policy travels through a process-wide struct written here, once,
     // before any graph is built (doc pr/30 §11 P8).
@@ -946,6 +966,25 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
             pa.oseg_accept_proto.load(), pa.oseg_accept_relaxed.load(), pa.oseg_reject.load(),
             m_fit_exclusion, m_graph_endpoint_strict, m_oov_prototype_parity,
             m_first_seg_local_pca, m_other_seg_relaxed_accept);
+    }
+
+    // doc sbnd_xin/docs/pr/32 §11 -- same contract as PR30AUDIT above.
+    {
+        const auto& pb = WireCell::Clus::PR::g_pr32_audit;
+        const uint64_t nfit = pb.f1_fit_valid.load();
+        SPDLOG_LOGGER_INFO(log,
+            "PR32AUDIT f1_reads={} f1_fit_valid={} f1_mean_cm={:.4f} f1_max_cm={:.4f} "
+            "f2_gate={} f2_disagree={} f2_body={} f2_demoted={} "
+            "f3_cand={} f3_dropped={} f4_flagged={} "
+            "knobs[use_fit_point={} traj_parity={} require_desc={} cand_flag={}]",
+            pb.f1_reads.load(), nfit,
+            nfit ? (double(pb.f1_moved_um_sum.load()) / nfit) * units::um / units::cm : 0.0,
+            double(pb.f1_moved_um_max.load()) * units::um / units::cm,
+            pb.f2_gate_calls.load(), pb.f2_gate_disagree.load(),
+            pb.f2_body_runs.load(), pb.f2_flag_cleared.load(),
+            pb.f3_candidates.load(), pb.f3_dropped.load(), pb.f4_flagged.load(),
+            m_vertex_dir_use_fit_point, m_shower_traj_recheck_parity,
+            m_main_vertex_require_descriptor, m_main_vertex_candidate_flag);
     }
 }
 

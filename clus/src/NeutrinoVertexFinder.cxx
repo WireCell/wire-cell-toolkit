@@ -22,6 +22,67 @@ using namespace WireCell::Clus;
 
 static auto s_log = WireCell::Log::logger("clus.NeutrinoPattern");
 
+// doc sbnd_xin/docs/pr/32 §11 F1 -- the prototype's ProtoVertex::get_fit_pt().
+//
+// use_fit == false reproduces today's raw `wcpt()` read exactly, so every call
+// site below is byte-identical with the knob off.  use_fit == true is the
+// prototype's convention, and the `fit().valid()` fallback stands in for
+// ProtoVertex's constructor initialising fit_pt = wcpt (ProtoVertex.cxx:17-19),
+// which PR::Vertex does not do -- without it a never-fitted vertex would put
+// (0,0,0) into a score ladder.
+// The counter block is unconditional -- it runs in the knob-off arm too, which
+// is what measures how often the divergence is reachable at all.  Incrementing
+// an atomic cannot change reconstruction output.
+static inline WireCell::Point pr32_vtx_pt(const VertexPtr& v, bool use_fit)
+{
+    g_pr32_audit.f1_reads.fetch_add(1, std::memory_order_relaxed);
+    if (v->fit().valid()) {
+        g_pr32_audit.f1_fit_valid.fetch_add(1, std::memory_order_relaxed);
+        const uint64_t um = static_cast<uint64_t>(
+            (v->fit().point - v->wcpt().point).magnitude() / WireCell::units::micrometer);
+        g_pr32_audit.f1_moved_um_sum.fetch_add(um, std::memory_order_relaxed);
+        uint64_t prev = g_pr32_audit.f1_moved_um_max.load(std::memory_order_relaxed);
+        while (um > prev &&
+               !g_pr32_audit.f1_moved_um_max.compare_exchange_weak(prev, um,
+                                                                   std::memory_order_relaxed)) {}
+        if (use_fit) return v->fit().point;
+    }
+    return v->wcpt().point;
+}
+
+// doc sbnd_xin/docs/pr/32 §11 -- per-event diagnostics for the four findings.
+namespace WireCell::Clus::PR {
+    Pr32AuditCounters g_pr32_audit;
+}
+
+// doc sbnd_xin/docs/pr/32 §11 F2(a) -- the improve_vertex shower-trajectory
+// outer gate, at both of its sites.
+//
+// parity == false is today's path: recompute at (10 cm, m_mip_dqdx) and use
+// that.  The recomputation is not free of side effects -- it can SET
+// kShowerTrajectory on a segment whose stored label said otherwise -- which is
+// itself part of the divergence.
+//
+// parity == true is the prototype's: read the stored label
+// (NeutrinoID_improve_vertex.h:248 and :287) and do not touch it.  That is only
+// meaningful once PR::g_shower_traj_refresh_flag lets the label be cleared;
+// without it the stored bit is a monotone OR over history.
+//
+// The disagreement counter fills on the legacy path only, because that is the
+// path where both answers are already in hand.  Asking for the fresh answer
+// under parity would re-introduce the mutation the knob exists to remove.
+static inline bool pr32_shower_traj_gate(const SegmentPtr& sg, bool parity, double mip_dqdx)
+{
+    g_pr32_audit.f2_gate_calls.fetch_add(1, std::memory_order_relaxed);
+    const bool stored = sg->flags_any(SegmentFlags::kShowerTrajectory);
+    if (parity) return stored;
+    const bool fresh = segment_is_shower_trajectory(sg, 10*WireCell::units::cm, mip_dqdx);
+    if (stored != fresh) {
+        g_pr32_audit.f2_gate_disagree.fetch_add(1, std::memory_order_relaxed);
+    }
+    return fresh;
+}
+
 // Temporary determinism-debug helper (WCT_DET_DEBUG=1): content hash of the
 // PR graph including wcpt/fit coordinates, to localize run-to-run divergence.
 namespace {
@@ -381,11 +442,12 @@ VertexPtr PatternAlgorithms::compare_main_vertices_all_showers(Graph& graph, Fac
         }
     }
 
-    // Collect points from vertices
+    // Collect points from vertices.
+    // doc pr/32 §11 F1: prototype :1468 pushes get_fit_pt().
     for (auto nd : ordered_nodes(graph)) {
         VertexPtr vtx = graph[nd].vertex;
         if (!vtx || vtx->cluster() != &cluster) continue;
-        pts.push_back(vtx->wcpt().point);
+        pts.push_back(pr32_vtx_pt(vtx, m_vertex_dir_use_fit_point));
     }
     
     if (pts.size() <= 3) {
@@ -402,9 +464,11 @@ VertexPtr PatternAlgorithms::compare_main_vertices_all_showers(Graph& graph, Fac
     VertexPtr min_vtx = nullptr, max_vtx = nullptr;
     
     for (auto vtx : vertex_candidates) {
-        double val = (vtx->wcpt().point.x() - center.x()) * dir.x() + 
-                    (vtx->wcpt().point.y() - center.y()) * dir.y() + 
-                    (vtx->wcpt().point.z() - center.z()) * dir.z();
+        // doc pr/32 §11 F1: prototype :1480 projects get_fit_pt().
+        const WireCell::Point vpt = pr32_vtx_pt(vtx, m_vertex_dir_use_fit_point);
+        double val = (vpt.x() - center.x()) * dir.x() +
+                    (vpt.y() - center.y()) * dir.y() +
+                    (vpt.z() - center.z()) * dir.z();
         
         // Adjust for single short segment vertices
         if (vtx->descriptor_valid()) {
@@ -438,25 +502,36 @@ VertexPtr PatternAlgorithms::compare_main_vertices_all_showers(Graph& graph, Fac
     if (!min_vtx || !max_vtx || min_vtx == max_vtx) {
         return temp_main_vertex;
     }
-    
+
+    // doc pr/32 §11 F1: every remaining use of these two vertices' positions --
+    // the four forward-z tie-breaks (prototype :1542, :1551, :1567, :1574) and
+    // the Steiner path endpoints (prototype :1504-1505) -- reads get_fit_pt()
+    // on the prototype side.  do_rough_path snaps to the nearest steiner_pc
+    // point internally (NeutrinoPatternBase.cxx:97-104), which is exactly the
+    // prototype's get_closest_wcpoint(get_fit_pt()), so the fit point is the
+    // faithful argument there too.  Named locals: do_rough_path takes
+    // non-const Point&.
+    WireCell::Point max_pt = pr32_vtx_pt(max_vtx, m_vertex_dir_use_fit_point);
+    WireCell::Point min_pt = pr32_vtx_pt(min_vtx, m_vertex_dir_use_fit_point);
+
     // Check if steiner point cloud exists and has enough points
     if (!cluster.has_pc("steiner_pc")) {
         // Fall through to backup vertex selection below
         // Pick forward vertex based on z coordinate
-        if (max_vtx->wcpt().point.z() < min_vtx->wcpt().point.z()) {
+        if (max_pt.z() < min_pt.z()) {
             temp_main_vertex = max_vtx;
         } else {
             temp_main_vertex = min_vtx;
         }
         return temp_main_vertex;
     }
-    
+
     // Find path between min and max vertices using steiner graph
-    auto path_points = do_rough_path(cluster, max_vtx->wcpt().point, min_vtx->wcpt().point);
-    
+    auto path_points = do_rough_path(cluster, max_pt, min_pt);
+
     if (path_points.size() <= 2) {
         // Pick forward vertex based on z coordinate
-        if (max_vtx->wcpt().point.z() < min_vtx->wcpt().point.z()) {
+        if (max_pt.z() < min_pt.z()) {
             temp_main_vertex = max_vtx;
         } else {
             temp_main_vertex = min_vtx;
@@ -479,7 +554,7 @@ VertexPtr PatternAlgorithms::compare_main_vertices_all_showers(Graph& graph, Fac
     // Create temporary segment
     auto tmp_sg = create_segment_for_cluster(cluster, dv, path_points);
     if (!tmp_sg) {
-        if (max_vtx->wcpt().point.z() < min_vtx->wcpt().point.z()) {
+        if (max_pt.z() < min_pt.z()) {
             temp_main_vertex = max_vtx;
         } else {
             temp_main_vertex = min_vtx;
@@ -523,17 +598,17 @@ VertexPtr PatternAlgorithms::compare_main_vertices_all_showers(Graph& graph, Fac
         temp_main_vertex = min_vtx;
     } else {
         // No clear direction, pick forward vertex
-        if (max_vtx->wcpt().point.z() < min_vtx->wcpt().point.z()) {
+        if (max_pt.z() < min_pt.z()) {
             temp_main_vertex = max_vtx;
         } else {
             temp_main_vertex = min_vtx;
         }
     }
-    
+
     // For large showers, always pick forward vertex
-    if (tmp_sg_length > 80 * units::cm && 
-        std::abs(max_vtx->wcpt().point.z() - min_vtx->wcpt().point.z()) > 40 * units::cm) {
-        if (max_vtx->wcpt().point.z() < min_vtx->wcpt().point.z()) {
+    if (tmp_sg_length > 80 * units::cm &&
+        std::abs(max_pt.z() - min_pt.z()) > 40 * units::cm) {
+        if (max_pt.z() < min_pt.z()) {
             temp_main_vertex = max_vtx;
         } else {
             temp_main_vertex = min_vtx;
@@ -668,11 +743,16 @@ float PatternAlgorithms::calc_conflict_maps(Graph& graph, VertexPtr vertex){
         std::map<SegmentPtr, Facade::geo_vector_t, PR::SegmentIndexCmp> map_in_segment_dirs;
         std::map<SegmentPtr, Facade::geo_vector_t, PR::SegmentIndexCmp> map_out_segment_dirs;
         
+        // doc pr/32 §11 F1: the point BOTH direction vectors are measured from.
+        // segment_cal_dir_3vector takes a non-const Point&, so this must be a
+        // named local; it is the same vertex for the whole loop.
+        WireCell::Point vtx_dir_pt = pr32_vtx_pt(vtx, m_vertex_dir_use_fit_point);
+
         // Analyze each segment connected to this vertex
         for (auto e_it : vtx_edge_range) {
             SegmentPtr sg = graph[e_it].segment;
             if (!sg || map_seg_dir.find(sg) == map_seg_dir.end()) continue;
-            
+
             VertexPtr start_vtx = map_seg_dir[sg].first;
             bool is_shower = sg->flags_any(SegmentFlags::kShowerTrajectory) ||
                             sg->flags_any(SegmentFlags::kShowerTopology) ||
@@ -683,7 +763,9 @@ float PatternAlgorithms::calc_conflict_maps(Graph& graph, VertexPtr vertex){
                 // Segment is incoming to this vertex
                 n_in++;
                 if (is_shower) n_in_shower++;
-                map_in_segment_dirs[sg] = segment_cal_dir_3vector(sg, vtx->wcpt().point, 10*units::cm);
+                // doc pr/32 §11 F1: prototype NeutrinoID_track_shower.h:1804
+                // measures from get_fit_pt(), not the Steiner-snapped wcpt.
+                map_in_segment_dirs[sg] = segment_cal_dir_3vector(sg, vtx_dir_pt, 10*units::cm);
             } else {
                 // Segment is outgoing from this vertex
                 if (!is_shower) {
@@ -691,7 +773,8 @@ float PatternAlgorithms::calc_conflict_maps(Graph& graph, VertexPtr vertex){
                 } else {
                     n_out_showers++;
                 }
-                map_out_segment_dirs[sg] = segment_cal_dir_3vector(sg, vtx->wcpt().point, 10*units::cm);
+                // doc pr/32 §11 F1: prototype :1808, same substitution.
+                map_out_segment_dirs[sg] = segment_cal_dir_3vector(sg, vtx_dir_pt, 10*units::cm);
             }
         }
         
@@ -777,8 +860,29 @@ VertexPtr PatternAlgorithms::compare_main_vertices(Graph& graph, Facade::Cluster
     s_log->trace("compare_main_vertices: cluster {} ncandidates={}", cluster.ident(), vertex_candidates.size());
     if (vertex_candidates.empty()) return nullptr;
 
-    std::map<VertexPtr, double> map_vertex_num;
+    // doc pr/32 §11 F3 (was P7): two of the six scoring blocks guard on
+    // descriptor_valid() and four do not -- the min_z scan, the fiducial +0.5,
+    // the conflict penalty and the argmax.  An invalid-descriptor candidate
+    // therefore reaches the argmax carrying `0 + (0.5 if in FV) - conflicts/4`,
+    // and real candidates routinely score negative, so it can win.  Filtering
+    // once here makes the whole scorer see one candidate set instead of
+    // patching four more guards in.  The caller's vector is NOT mutated.
+    //
+    // The drop is COUNTED unconditionally: if it is 0 on every event then P7 is
+    // confirmed dead code and this knob can be retired, which is a measurement
+    // rather than the control-flow argument doc pr/32 §10.4 had to settle for.
+    std::vector<VertexPtr> filtered;
     for (auto vtx : vertex_candidates) {
+        if (vtx->descriptor_valid()) filtered.push_back(vtx);
+        else g_pr32_audit.f3_dropped.fetch_add(1, std::memory_order_relaxed);
+    }
+    g_pr32_audit.f3_candidates.fetch_add(vertex_candidates.size(), std::memory_order_relaxed);
+    std::vector<VertexPtr>& scored =
+        (m_main_vertex_require_descriptor ? filtered : vertex_candidates);
+    if (scored.empty()) return nullptr;
+
+    std::map<VertexPtr, double> map_vertex_num;
+    for (auto vtx : scored) {
         map_vertex_num[vtx] = 0;
     }
     
@@ -808,7 +912,7 @@ VertexPtr PatternAlgorithms::compare_main_vertices(Graph& graph, Facade::Cluster
     }
     
     // Analyze proton topology for each vertex candidate
-    for (auto vtx : vertex_candidates) {
+    for (auto vtx : scored) {
         if (!vtx->descriptor_valid()) continue;
         
         int n_proton_in = 0;
@@ -886,11 +990,11 @@ VertexPtr PatternAlgorithms::compare_main_vertices(Graph& graph, Facade::Cluster
         return v->fit().valid() ? v->fit().point : v->wcpt().point;
     };
     double min_z = 1e9;
-    for (auto vtx : vertex_candidates) {
+    for (auto vtx : scored) {
         if (vtx_pt(vtx).z() < min_z) min_z = vtx_pt(vtx).z();
     }
 
-    for (auto vtx : vertex_candidates) {
+    for (auto vtx : scored) {
         if (!vtx->descriptor_valid()) continue;
 
         // Position penalty (uBooNE 200 cm; m_vertex_z_prior_scale, doc pr/2 2e(iv))
@@ -939,7 +1043,7 @@ VertexPtr PatternAlgorithms::compare_main_vertices(Graph& graph, Facade::Cluster
     // Score based on fiducial volume — use fit position (improve_vertex has already run)
     auto fiducial_utils = cluster.grouping()->get_fiducialutils();
     if (fiducial_utils) {
-        for (auto vtx : vertex_candidates) {
+        for (auto vtx : scored) {
             if (fiducial_utils->inside_fiducial_volume(vtx_pt(vtx))) {
                 map_vertex_num[vtx] += 0.5; // good - inside fiducial volume
             }
@@ -947,7 +1051,7 @@ VertexPtr PatternAlgorithms::compare_main_vertices(Graph& graph, Facade::Cluster
     }
     
     // Score based on topology conflicts
-    for (auto vtx : vertex_candidates) {
+    for (auto vtx : scored) {
         double num_conflicts = calc_conflict_maps(graph, vtx);
         map_vertex_num[vtx] -= num_conflicts / 4.0;
     }
@@ -956,7 +1060,7 @@ VertexPtr PatternAlgorithms::compare_main_vertices(Graph& graph, Facade::Cluster
     double max_val = -1e9;
     VertexPtr max_vertex = nullptr;
     
-    for (auto vtx : vertex_candidates) {
+    for (auto vtx : scored) {
         if (map_vertex_num[vtx] > max_val) {
             max_val = map_vertex_num[vtx];
             max_vertex = vtx;
@@ -2334,7 +2438,12 @@ void PatternAlgorithms::improve_vertex(Graph& graph, Facade::Cluster& cluster, V
                     int start_n = boost::out_degree(source_v, graph);
                     int end_n = boost::out_degree(target_v, graph);
                     
-                    if (segment_is_shower_trajectory(sg1, 10*units::cm, m_mip_dqdx)) {
+                    // doc pr/32 §11 F2(a): prototype
+                    // NeutrinoID_improve_vertex.h:248 READS the stored flag
+                    // here.  The toolkit recomputes, which also has the side
+                    // effect of SETTING kShowerTrajectory on a segment the
+                    // stored label said was not one.
+                    if (pr32_shower_traj_gate(sg1, m_shower_traj_recheck_parity, m_mip_dqdx)) {
                         // Trajectory shower
                         segment_determine_shower_direction_trajectory(sg1, start_n, end_n, particle_data, recomb_model, m_mip_dqdx_median, false, track_pid_options());
                     } else {
@@ -2406,8 +2515,20 @@ void PatternAlgorithms::improve_vertex(Graph& graph, Facade::Cluster& cluster, V
                 std::pair<int, double> pair_result = calculate_num_daughter_showers(graph, main_vertex, sg, false);
                 
                 double medium_dQdx = segment_median_dQ_dx(sg);
-                if ((pair_result.first <= 2 || (medium_dQdx/m_mip_dqdx_median > 1.6 && pair_result.first <= 3)) && segment_is_shower_trajectory(sg, 10*units::cm, m_mip_dqdx)) {
-                    if (!segment_is_shower_trajectory(sg, 1.0*units::cm, m_mip_dqdx_median)) {
+                // doc pr/32 §11 F2: outer gate = prototype
+                // NeutrinoID_improve_vertex.h:287 (stored flag); inner test =
+                // :288, `!sg->is_shower_trajectory()` at the 10 cm default with
+                // the function's own 50000-analog scale.  With the gate ALSO
+                // recomputing (today's path), an inner call at those same
+                // parameters would negate the line above it and the body would
+                // be dead -- which is why the toolkit's inner call runs at
+                // 1.0 cm.  The two move together or not at all.
+                if ((pair_result.first <= 2 || (medium_dQdx/m_mip_dqdx_median > 1.6 && pair_result.first <= 3)) && pr32_shower_traj_gate(sg, m_shower_traj_recheck_parity, m_mip_dqdx)) {
+                    const bool inner_traj = m_shower_traj_recheck_parity
+                        ? segment_is_shower_trajectory(sg, 10*units::cm,  m_mip_dqdx)
+                        : segment_is_shower_trajectory(sg, 1.0*units::cm, m_mip_dqdx_median);
+                    if (!inner_traj) {
+                        g_pr32_audit.f2_body_runs.fetch_add(1, std::memory_order_relaxed);
                         VertexPtr start_v = nullptr, end_v = nullptr;
                         auto source_v = boost::source(edesc, graph);
                         auto target_v = boost::target(edesc, graph);
@@ -2611,6 +2732,25 @@ void PatternAlgorithms::determine_main_vertex(Graph& graph, Facade::Cluster& clu
         }
     }
     MS t_select_candidates(Clock::now() - t0); t0 = Clock::now();
+
+    // doc pr/32 §11 F4 (was P12): the prototype records the per-cluster
+    // candidate list HERE, after both branches have pushed and before any
+    // filtering (NeutrinoID_track_shower.h:1332), and exposes it via
+    // get_map_cluster_candidate_vertices() (NeutrinoID.h:1720).  The toolkit
+    // has no equivalent, which is why doc pr/27 §6 records "candidate list,
+    // per-cluster and global -> nothing".
+    //
+    // Ported as a per-vertex flag rather than a new container: it needs no
+    // plumbing, it travels with the vertex, and the per-cluster list is
+    // recoverable as "the flagged vertices of that cluster".  DIAGNOSTIC ONLY
+    // -- nothing in clus reads kMainCandidate except PrDisplayDump, exactly as
+    // in the prototype where every consumer is an app-level tree filler.
+    if (m_main_vertex_candidate_flag) {
+        for (auto vtx : main_vertex_candidates) {
+            vtx->set_flags(PR::VertexFlags::kMainCandidate);
+            g_pr32_audit.f4_flagged.fetch_add(1, std::memory_order_relaxed);
+        }
+    }
 
     s_log->trace("determine_main_vertex: cluster {} ncandidates={}", cluster.ident(), main_vertex_candidates.size());
 

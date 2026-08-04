@@ -981,8 +981,33 @@ namespace WireCell::Clus::PR {
         return false;
     }
 
+    /// doc sbnd_xin/docs/pr/32 §11 F2.  false = today's set-only behaviour.
+    bool g_shower_traj_refresh_flag = false;
+
     bool segment_is_shower_trajectory(SegmentPtr seg, double step_size, double mip_dQ_dx){
         bool flag_shower_trajectory = false;
+        // doc pr/32 §11 F2: the prototype opens is_shower_trajectory() with
+        // `flag_shower_trajectory = false` (ProtoSegment.cxx:544), BEFORE its
+        // own `length > 50 cm` early return, so even the early-out path clears
+        // the label.  Mirror that placement exactly.
+        // f2_flag_cleared counts NET demotions -- the bit was set on entry and
+        // this call did not put it back -- not every clear, because the common
+        // case is clear-then-set-again and that is not a behaviour change.
+        // Cheap enough to evaluate unconditionally; used only under the knob.
+        const bool traj_was_set = seg->flags_any(SegmentFlags::kShowerTrajectory);
+        if (g_shower_traj_refresh_flag) {
+            seg->unset_flags(SegmentFlags::kShowerTrajectory);
+        }
+        // Count a net demotion at every exit that returns false.
+        struct DemotionCounter {
+            bool armed;
+            const bool* result;
+            ~DemotionCounter() {
+                if (armed && !*result) {
+                    g_pr32_audit.f2_flag_cleared.fetch_add(1, std::memory_order_relaxed);
+                }
+            }
+        } demotion_counter{g_shower_traj_refresh_flag && traj_was_set, &flag_shower_trajectory};
         double length = segment_track_length(seg, 0);
 
         // Too long

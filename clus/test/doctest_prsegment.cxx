@@ -128,3 +128,73 @@ TEST_CASE("clus pr segment track functions n2 minus1 clamp") {
     CHECK(segment_track_max_deviation(seg, 0, 4) ==
           doctest::Approx(segment_track_max_deviation(seg, 0, -1)));
 }
+
+// doc sbnd_xin/docs/pr/32 §11 F2 (was P3).
+//
+// The prototype's ProtoSegment::is_shower_trajectory() opens with
+// `flag_shower_trajectory = false` (ProtoSegment.cxx:544) and only sets it true
+// if the test fires (:608), so every call RE-CACHES the label and a segment that
+// no longer qualifies is demoted.  The toolkit's port only ever calls set_flags,
+// so kShowerTrajectory is monotone -- which is why the two improve_vertex gates
+// recompute instead of reading it.
+//
+// PR::g_shower_traj_refresh_flag restores the prototype's semantics.  These two
+// cases pin BOTH polarities, so reverting the refresh block in
+// segment_is_shower_trajectory fails the second one.
+TEST_CASE("clus pr32 F2 shower-trajectory flag is monotone by default") {
+    Graph g;
+    auto vtx1 = make_vertex(g);
+    vtx1->wcpt().point = Point(0, 0, 0);
+    auto vtx2 = make_vertex(g);
+    vtx2->wcpt().point = Point(60*units::cm, 0, 0);
+    auto seg = make_segment(g, vtx1, vtx2);
+
+    // Longer than the function's 50 cm ceiling, so it returns false on the
+    // early-out path -- the same path the prototype still clears on.
+    for (int i = 0; i <= 6; ++i) {
+        Fit f;
+        f.point = Point(i * 10*units::cm, 0, 0);
+        f.index = i;
+        seg->fits().push_back(f);
+    }
+    REQUIRE(segment_track_length(seg, 0) > 50*units::cm);
+
+    seg->set_flags(SegmentFlags::kShowerTrajectory);
+
+    const bool saved = g_shower_traj_refresh_flag;
+    g_shower_traj_refresh_flag = false;
+    CHECK(segment_is_shower_trajectory(seg, 10*units::cm, 50000/units::cm) == false);
+    // Today's behaviour: the negative answer does NOT demote the label.
+    CHECK(seg->flags_any(SegmentFlags::kShowerTrajectory) == true);
+    g_shower_traj_refresh_flag = saved;
+}
+
+TEST_CASE("clus pr32 F2 refresh clears the flag on a negative answer") {
+    Graph g;
+    auto vtx1 = make_vertex(g);
+    vtx1->wcpt().point = Point(0, 0, 0);
+    auto vtx2 = make_vertex(g);
+    vtx2->wcpt().point = Point(60*units::cm, 0, 0);
+    auto seg = make_segment(g, vtx1, vtx2);
+
+    for (int i = 0; i <= 6; ++i) {
+        Fit f;
+        f.point = Point(i * 10*units::cm, 0, 0);
+        f.index = i;
+        seg->fits().push_back(f);
+    }
+
+    seg->set_flags(SegmentFlags::kShowerTrajectory);
+
+    const bool saved = g_shower_traj_refresh_flag;
+    g_shower_traj_refresh_flag = true;
+    CHECK(segment_is_shower_trajectory(seg, 10*units::cm, 50000/units::cm) == false);
+    // Prototype behaviour: the label is demoted, so a stored-flag read
+    // downstream now agrees with the test.
+    CHECK(seg->flags_any(SegmentFlags::kShowerTrajectory) == false);
+    // Other flags must survive -- unset_flags is bit-masked, not clear_flags.
+    seg->set_flags(SegmentFlags::kShowerTopology);
+    CHECK(segment_is_shower_trajectory(seg, 10*units::cm, 50000/units::cm) == false);
+    CHECK(seg->flags_any(SegmentFlags::kShowerTopology) == true);
+    g_shower_traj_refresh_flag = saved;
+}

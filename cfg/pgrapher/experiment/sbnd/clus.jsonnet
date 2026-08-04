@@ -950,6 +950,11 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               // shower with the direction segment_is_shower_topology set -- the
               // prototype's state.  C++ default false = today's path = byte-identical.
               shower_topo_proto_dir=false,
+              // doc pr/32 sec 11: the four stage-4 vertex-ID port fixes.  C++
+              // default false = today's path; keys omitted => byte-identical.
+              // The SBND operating point lives in wct-pr-perevt.jsonnet.
+              vertex_dir_use_fit_point=false, shower_traj_recheck_parity=false,
+              main_vertex_require_descriptor=false, main_vertex_candidate_flag=false,
               // Steiner TERMINAL filter fidelity (doc pr/29 D1 and D12).  Both
               // OFF here = the historical toolkit behaviour, keys omitted =>
               // byte-identical config.  Turning either on can only ADD Steiner
@@ -1531,6 +1536,10 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
             first_seg_local_pca=first_seg_local_pca,
             other_seg_relaxed_accept=other_seg_relaxed_accept,
             shower_topo_proto_dir=shower_topo_proto_dir,
+            vertex_dir_use_fit_point=vertex_dir_use_fit_point,
+            shower_traj_recheck_parity=shower_traj_recheck_parity,
+            main_vertex_require_descriptor=main_vertex_require_descriptor,
+            main_vertex_candidate_flag=main_vertex_candidate_flag,
             iso_endpoint=iso_endpoint,
             iso_endpoint_min_length=iso_endpoint_min_length,
             iso_endpoint_max_xext=iso_endpoint_max_xext,
@@ -1995,6 +2004,10 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
        // shower with the direction segment_is_shower_topology set -- the
        // prototype's state.  C++ default false = today's path = byte-identical.
        shower_topo_proto_dir=false,
+       // doc pr/32 sec 11: the four stage-4 vertex-ID port fixes.  Ship OFF =
+       // byte-identical; the SBND operating point lives in wct-pr-perevt.jsonnet.
+       vertex_dir_use_fit_point=false, shower_traj_recheck_parity=false,
+       main_vertex_require_descriptor=false, main_vertex_candidate_flag=false,
        // Steiner TERMINAL filter fidelity (doc pr/29 D1 and D12).  Both OFF =
        // the historical toolkit behaviour = byte-identical (keys omitted).
        // Ships OFF; the SBND operating point lives in wct-pr-perevt.jsonnet.
@@ -2136,6 +2149,10 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 first_seg_local_pca=first_seg_local_pca,
                 other_seg_relaxed_accept=other_seg_relaxed_accept,
                 shower_topo_proto_dir=shower_topo_proto_dir,
+                vertex_dir_use_fit_point=vertex_dir_use_fit_point,
+                shower_traj_recheck_parity=shower_traj_recheck_parity,
+                main_vertex_require_descriptor=main_vertex_require_descriptor,
+                main_vertex_candidate_flag=main_vertex_candidate_flag,
                 steiner_terminal_wire_tol=steiner_terminal_wire_tol,
                 steiner_terminal_adjacent_slice=steiner_terminal_adjacent_slice,
                 steiner_edge_charge_forward_dead_mix=steiner_edge_charge_forward_dead_mix,

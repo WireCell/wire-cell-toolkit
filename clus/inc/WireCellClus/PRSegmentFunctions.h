@@ -157,6 +157,28 @@ namespace WireCell::Clus::PR {
     // EMshower PID
     void clustering_points_segments(std::vector<SegmentPtr> segments, const IDetectorVolumes::pointer& dv, const std::string& cloud_name = "associate_points", double search_range = 1.2*units::cm, double scaling_2d = 0.7);
 
+    /// doc sbnd_xin/docs/pr/32 §11 F2 -- knob transport for
+    /// segment_is_shower_trajectory's flag semantics.
+    ///
+    /// The prototype's ProtoSegment::is_shower_trajectory() opens with
+    /// `flag_shower_trajectory = false` (ProtoSegment.cxx:544) and sets it true
+    /// only if the test fires (:608), so EVERY call re-caches the label and a
+    /// segment that no longer qualifies is DEMOTED.  The toolkit's port only
+    /// ever calls set_flags (PRSegmentFunctions.cxx), so kShowerTrajectory is
+    /// monotone: once set it survives every later negative test.  That is why
+    /// the two improve_vertex call sites recompute instead of reading the flag
+    /// (doc pr/32 §10.3) -- reading it would return an OR over history.
+    ///
+    /// true => mirror the prototype: clear the bit on entry, set it on a
+    /// positive result.  false => today's set-only behaviour, byte-identical.
+    ///
+    /// This is a free function reached from three files with no component
+    /// configuration in scope, so the value travels through a process-wide
+    /// flag written once per event by TaggerCheckNeutrino before any graph is
+    /// built -- the same transport as PR::g_graph_endpoint_policy (doc pr/30
+    /// §11 P8).  Read-mostly; never written concurrently with clustering.
+    extern bool g_shower_traj_refresh_flag;
+
     bool segment_is_shower_trajectory(SegmentPtr seg, double step_size = 10*units::cm, double mip_dQ_dx = 50000 / units::cm);
     void segment_determine_shower_direction_trajectory(SegmentPtr segment, int start_n, int end_n, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, double MIP_dQdx = 43000/units::cm, bool flag_print = false, const TrackPidOptions& pid_opts = {});
     

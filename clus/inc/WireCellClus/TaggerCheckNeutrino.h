@@ -99,6 +99,14 @@ public:
         // Rationale, the mutation audit and the F3 residual: see
         // NeutrinoPatternBase.h's m_shower_topo_proto_dir.
         bool   m_shower_topo_proto_dir{false};     // pr/31 F2
+        // doc sbnd_xin/docs/pr/32 §11 -- the four kept findings of the stage-4
+        // (neutrino vertex identification) audit.  All C++ default false =
+        // today's path = byte-identical; the SBND operating point turns them
+        // on.  Rationale and prototype anchors: NeutrinoPatternBase.h.
+        bool   m_vertex_dir_use_fit_point{false};       // pr/32 F1 (was P1)
+        bool   m_shower_traj_recheck_parity{false};     // pr/32 F2 (was P3)
+        bool   m_main_vertex_require_descriptor{false}; // pr/32 F3 (was P7)
+        bool   m_main_vertex_candidate_flag{false};     // pr/32 F4 (was P12)
         // Isochronous first-segment endpoint finding (doc sbnd_xin/docs/pr/24
         // round 2, SBND evt 271851); lengths in cm.  false => legacy
         // wire-footprint boundary endpoints, byte-identical.  When on, a

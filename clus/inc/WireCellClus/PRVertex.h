@@ -21,6 +21,16 @@ namespace WireCell::Clus::PR {
         kUndefined = 0,
         /// The vertex is determined to location of neutrino interaction.
         kNeutrinoVertex = 1<<1,
+        /// The vertex entered determine_main_vertex's candidate list for its
+        /// cluster, i.e. it is one of the vertices the main-vertex scorer chose
+        /// between.  This is the toolkit's stand-in for the prototype's
+        /// `map_cluster_main_candidate_vertices` (NeutrinoID_track_shower.h:1332,
+        /// exposed by NeutrinoID.h:1720), which has no port -- see
+        /// sbnd_xin/docs/pr/32 §10.5 / §11.  Set only when
+        /// PatternAlgorithms::m_main_vertex_candidate_flag is true.  DIAGNOSTIC
+        /// ONLY: no algorithm reads it, exactly as in the prototype where every
+        /// consumer is an app-level output-tree filler.
+        kMainCandidate = 1<<2,
     };
 
     /** A PR::Vertex instance represents a connection with one or more PR::Segment intances.

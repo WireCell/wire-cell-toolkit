@@ -280,6 +280,13 @@ Configuration Clus::PrDisplayDump::dump_graph(Facade::Grouping& grouping) const
         j["cluster_id"] = cluster_id;
         j["id"] = cluster_id * 1000 + static_cast<int>(vertex->get_graph_index());
         j["is_main"] = is_main;
+        // doc sbnd_xin/docs/pr/32 §11 F4 (was P12): the prototype's
+        // map_cluster_main_candidate_vertices, i.e. the per-cluster list of
+        // vertices determine_main_vertex scored between before filtering.
+        // Always false unless TaggerCheckNeutrino ran with
+        // main_vertex_candidate_flag=true, so a dump taken without that knob
+        // reads "no candidate information", not "no candidates".
+        j["main_candidate"] = vertex->flags_any(PR::VertexFlags::kMainCandidate);
         j["degree"] = static_cast<int>(boost::out_degree(node_desc, *pr_graph));
         // How far improve_vertex/MyFCN moved this vertex off its seed point.
         // A main vertex sitting at fit_distance 0 did not move -- one of the

@@ -213,6 +213,57 @@ function(
     // better physics.  OFF here = today's path = byte-identical; the arm that
     // measures it sets this true.
     shower_topo_proto_dir = false,
+    // ---- doc pr/32 §11: the four kept findings of the stage-4 (neutrino
+    // vertex identification) port audit.
+    //
+    // **ALL FOUR ARE SBND PRODUCTION DEFAULTS ON, owner 2026-08-04.**  Each is
+    // a port BUG or a missing port, not a toolkit design choice, and all four
+    // land byte-identical on the nueCC48 manifest: work-pr32r2-off48 vs
+    // work-pr32r2-{f1on48,f2on48,f34on48,allon48} is 48/48 on pctree-pr
+    // member-content hashes and identical on nusel-table.tsv /
+    // nusel-events.tsv.  They are engaged, not inert -- see the PR32AUDIT
+    // counters quoted per knob below.
+    //
+    // vertex_dir_use_fit_point (F1, was P1): calc_conflict_maps and
+    //   compare_main_vertices_all_showers measure from the vertex fit SNAPPED
+    //   to the nearest Steiner node; the prototype uses get_fit_pt(), the
+    //   continuous fit (NeutrinoID_track_shower.h:1804/1808, :1468/:1480/
+    //   :1504-1505/:1542/:1551/:1567/:1574).  Eleven expressions in two
+    //   functions, against 23 expressions in the same file that already read
+    //   `fit().valid() ? fit : wcpt`.  NOT byte-identical when on.
+    // MEASURED: 5047 reads on 48 events, ALL with a valid fit;
+    //   mean |fit - wcpt| 0.613 cm, max 11.41 cm.
+    vertex_dir_use_fit_point = true,
+    // shower_traj_recheck_parity (F2, was P3): the improve_vertex
+    //   shower-trajectory recheck.  Prototype reads the STORED flag at both
+    //   outer gates (NeutrinoID_improve_vertex.h:248, :287) and recomputes the
+    //   inner test at the 10 cm default with the 50000-analog scale; the
+    //   toolkit recomputes both gates and runs the inner test at 1.0 cm with
+    //   the 43e3-analog.  Fixing the inner parameters ALONE makes the block
+    //   dead code, so this knob moves all three together -- including letting
+    //   segment_is_shower_trajectory clear kShowerTrajectory, which the
+    //   prototype's is_shower_trajectory does on every call and the toolkit
+    //   has never done.
+    // MEASURED: the stored flag and a fresh 10 cm test
+    //   disagree 22 times on 48 events; parity demotes 4 segments and runs the
+    //   recheck body 4 times instead of 7.
+    shower_traj_recheck_parity = true,
+    // main_vertex_require_descriptor (F3, was P7): compare_main_vertices
+    //   guards two of its six blocks on descriptor_valid(); an
+    //   invalid-descriptor candidate reaches the argmax with score
+    //   `0 + (0.5 if in FV) - conflicts/4` and can beat real candidates.
+    //   Expected byte-identical -- the path looks unreachable -- but that is a
+    //   control-flow argument, so the drop is counted (PR32AUDIT f3_dropped).
+    // MEASURED: 0 of 2219 candidates dropped on 48
+    //   events -- P7 is now MEASURED dead code, not argued dead code.
+    main_vertex_require_descriptor = true,
+    // main_vertex_candidate_flag (F4, was P12): set kMainCandidate on each
+    //   per-cluster main-vertex candidate, the prototype's
+    //   map_cluster_main_candidate_vertices (NeutrinoID_track_shower.h:1332).
+    //   DIAGNOSTIC ONLY: only PrDisplayDump reads it, exactly as the prototype
+    //   exposes it only to app-level tree fillers.
+    // MEASURED: 3774 vertices flagged on 48 events.
+    main_vertex_candidate_flag = true,
     // Steiner TERMINAL filter fidelity -- doc pr/29 D1 and D12.
     //
     // **SBND PRODUCTION DEFAULT ON, owner 2026-08-04**: both are port BUGS, not
@@ -797,6 +848,10 @@ function(
                              first_seg_local_pca=first_seg_local_pca,
                              other_seg_relaxed_accept=other_seg_relaxed_accept,
                              shower_topo_proto_dir=shower_topo_proto_dir,
+                             vertex_dir_use_fit_point=vertex_dir_use_fit_point,
+                             shower_traj_recheck_parity=shower_traj_recheck_parity,
+                             main_vertex_require_descriptor=main_vertex_require_descriptor,
+                             main_vertex_candidate_flag=main_vertex_candidate_flag,
                              steiner_terminal_wire_tol=steiner_terminal_wire_tol,
                              steiner_terminal_adjacent_slice=steiner_terminal_adjacent_slice,
                              steiner_edge_charge_forward_dead_mix=steiner_edge_charge_forward_dead_mix,
