@@ -1564,6 +1564,36 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
         // tracking file in UPDATE mode, so it must be named AFTER
         // tracking_visitor (and after both BDT scorers so the scores are set).
         tagger_output: cm.tagger_output(output_filename=tracking_pr_root),
+        // PR event-display calib dump (docs/pr/26): ONE self-contained JSON per
+        // event carrying the PR-graph segments as polylines, the associated
+        // track/shower points, the Steiner skeleton with its terminal flag, the
+        // fitted 2-D charge per (apa,face,plane) and the dead regions -- i.e.
+        // the union of what the Bee PR layers and the Magnify tracking file
+        // carry, in one file the Bokeh viewer can read with the stdlib alone.
+        // Read-only; mutates nothing.  Only active when named in
+        // pipeline_names => compiled config byte-identical otherwise.
+        // Must run AFTER tagger_check_neutrino (it reads the TrackFitting slot
+        // and the PR graph that stage fills).
+        pr_display: {
+            type: 'PrDisplayDump',
+            name: 'pr',
+            data: {
+                grouping: 'live',
+                output_filename: (if output_dir == '' then '' else output_dir + '/')
+                                 + 'calib-pr-evt' + std.toString(eventNo) + '.json',
+                runNo: runNo,
+                subRunNo: subRunNo,
+                eventNo: eventNo,
+                anodes: [wc.tn(a) for a in anodes],
+                detector_volumes: wc.tn(dv),
+                // Same convention as the Bee track_fit layer and the Magnify
+                // writer; the dump stores RAW dQ and records these so the
+                // viewer can reproduce the Bee colouring if it wants to.
+                dQdx_scale: 0.1,
+                dQdx_offset: -1000.0,
+                nticks: 3427,
+            },
+        },
     },
     local cm_pipeline = [cm_by_name[n] for n in pipeline_names],
     // The taggers' configs only name the recombination/particle-dataset

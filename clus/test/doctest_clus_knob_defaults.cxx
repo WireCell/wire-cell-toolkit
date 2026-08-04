@@ -334,3 +334,53 @@ TEST_CASE("clus knob defaults: muon dQ/dx envelope agrees in both unit conventio
     // sits closer to MIP), which is the property every caller relies on.
     CHECK(algo.muon_dqdx_cut(10 * units::cm) > algo.muon_dqdx_cut(100 * units::cm));
 }
+
+// ---------------------------------------------------------------------------
+// PrDisplayDump -- the PR event-display calib dump (sbnd_xin/docs/pr/26).
+//
+// This component is READ-ONLY: it walks the PR graph, the steiner point clouds
+// and the fitted 2-D charge and writes one JSON.  Its safety claim is therefore
+// not about a behavior default but about REACHABILITY: it exists under the name
+// the SBND cm_by_name entry uses, and it is inert unless that name appears in
+// pipeline_names.  If the factory registration were lost, the compiled config
+// would still be valid and the job would still run -- it would just die at
+// component lookup, at the end of a 12-second-per-event PR chain.  So pin the
+// registration.
+//
+// The dQdx_scale/offset defaults are pinned too.  They are not used to TRANSFORM
+// anything in the dump (charges go out raw, unlike the Bee layers), only to be
+// recorded in "meta" so a viewer can reproduce the Bee colouring.  A silent
+// change would therefore not fail any gate -- it would just make the display
+// disagree with Bee for no visible reason.
+// ---------------------------------------------------------------------------
+
+TEST_CASE("clus knob defaults: PrDisplayDump is registered and inert by default")
+{
+    auto cfg = defaults_of("PrDisplayDump");
+
+    // Same convention as the Bee track_fit layer and SbndPrMagnifyTrackingVisitor.
+    CHECK_KNOB_NUM(cfg, "dQdx_scale", 0.1);
+    CHECK_KNOB_NUM(cfg, "dQdx_offset", -1000);
+    CHECK_KNOB_NUM(cfg, "nticks", 3427);
+
+    // 0 = keep every fitted 2-D cell.  A non-zero default would silently thin
+    // the six projection panels.
+    CHECK_KNOB_NUM(cfg, "proj_charge_min", 0);
+
+    // Compact JSON: these dumps are multi-MB per event and are read by a
+    // machine, not a human.
+    CHECK_KNOB_BOOL(cfg, "pretty", false);
+
+    // No anodes and no detector volumes by default: the component must be
+    // constructible without geometry, which is what makes it safe to leave
+    // defined in cm_by_name for every job whether or not it is named.
+    REQUIRE(cfg.isMember("anodes"));
+    CHECK(cfg["anodes"].size() == 0);
+    REQUIRE(cfg.isMember("detector_volumes"));
+    CHECK(cfg["detector_volumes"].asString() == "");
+
+    // The grouping it reads.  "live" is the only grouping that carries a
+    // TrackFitting slot; a typo here would produce a silently empty dump.
+    REQUIRE(cfg.isMember("grouping"));
+    CHECK(cfg["grouping"].asString() == "live");
+}
