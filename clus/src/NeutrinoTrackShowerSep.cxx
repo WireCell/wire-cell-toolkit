@@ -8,6 +8,65 @@ using namespace WireCell::Clus;
 
 static auto s_log = WireCell::Log::logger("clus.NeutrinoPattern");
 
+// doc sbnd_xin/docs/pr/31 §12 (F1, was P1 + P3's 4-momentum half + P4).
+//
+// The prototype's reclassification idiom mutates two members and GUARDS the
+// third (NeutrinoID_track_shower.h:372-374 and identically at 10 more sites):
+//     sg->set_particle_type(11);
+//     sg->set_particle_mass(mp.get_mass_electron());
+//     if (sg->get_particle_4mom(3)>0) sg->cal_4mom();
+// particle_4mom[3] = kine_energy + particle_mass (ProtoSegment.cxx:1437-1444),
+// so ">0" means "previously computed": a segment that never had an energy
+// keeps zeros.  The toolkit has no independent members -- reclassification
+// constructs a whole new Aux::ParticleInfo -- which forces a 4-momentum
+// decision the prototype never makes.  Fifteen sites made it three ways
+// (11x unconditional recompute, 1x topology-branch recompute, 3x rest-mass
+// (m,0,0,0) overwrite) and only the two guarded sites (improve_maps_one_in,
+// improve_maps_shower_in_track_out's shower re-calc, which comments the
+// guard) made it the prototype's way.
+//
+// preserve=false reproduces today's recompute-and-construct byte-for-byte
+// (the shape-C sites keep their legacy rest-mass expression on their own
+// else-branch).  preserve=true is the prototype's single rule at every
+// site: recompute only where the prototype's guard passes
+// (proto_recomputes && previously-had-energy), otherwise carry the
+// existing 4-momentum forward verbatim, or zeros if there never was one.
+// energy() reads m_four_momentum.e(), the exact analog of the prototype's
+// get_particle_4mom(3).
+//
+// Why the preserve path cannot use the validating constructor: the carried
+// states are exactly the ones Aux::ParticleInfo::validate_inputs forbids --
+// all-zero (E < m) for never-computed, and an old on-shell 4-momentum
+// carried across a mass change (energy-momentum relation violated).  The
+// prototype holds both states as a matter of course (type and mass move,
+// particle_4mom does not), and validate_inputs itself carries a
+// commented-out "Allow zero 4-momentum as a placeholder" block for the
+// first.  Rather than relax the shared aux validator, the preserve path
+// constructs a legal placeholder and then writes the carried value through
+// set_four_momentum() -- the class's own non-validating setter -- so KE
+// lands at E - m (i.e. -m for never-computed), which is what any
+// prototype consumer subtracting mass sees.
+static std::shared_ptr<WireCell::Aux::ParticleInfo> reclass_pinfo(
+    const SegmentPtr& sg, int pdg_code,
+    const WireCell::Clus::ParticleDataSet::pointer& particle_data,
+    const WireCell::IRecombinationModel::pointer& recomb_model,
+    double mip_scale, bool preserve, bool proto_recomputes)
+{
+    const double mass = particle_data->get_particle_mass(pdg_code);
+    const bool had = sg->has_particle_info() && sg->particle_info()->energy() > 0;
+    if (!preserve || (proto_recomputes && had)) {
+        auto four_momentum = segment_cal_4mom(sg, pdg_code, particle_data, recomb_model, mip_scale);
+        return std::make_shared<WireCell::Aux::ParticleInfo>(
+            pdg_code, mass, particle_data->pdg_to_name(pdg_code), four_momentum);
+    }
+    auto pinfo = std::make_shared<WireCell::Aux::ParticleInfo>(
+        pdg_code, mass, particle_data->pdg_to_name(pdg_code),
+        WireCell::D4Vector<double>(mass, 0, 0, 0));
+    pinfo->set_four_momentum(had ? sg->particle_info()->four_momentum()
+                                 : WireCell::D4Vector<double>(0, 0, 0, 0));
+    return pinfo;
+}
+
 void PatternAlgorithms::clustering_points(Graph& graph, Facade::Cluster& cluster, const IDetectorVolumes::pointer& dv, const std::string& cloud_name, double search_range, double scaling_2d){
     using Clock = std::chrono::steady_clock;
     using MS = std::chrono::duration<double, std::milli>;
@@ -51,7 +110,7 @@ void PatternAlgorithms::separate_track_shower(Graph&graph, Facade::Cluster& clus
 
         // First check if segment is a shower topology
         auto t0 = Clock::now();
-        segment_is_shower_topology(seg, false, m_mip_dqdx_median, m_shower_topo_demote_len);
+        segment_is_shower_topology(seg, false, m_mip_dqdx_median, m_shower_topo_demote_len, m_shower_topo_reset);
         t_topology += MS(Clock::now() - t0);
 
         // If not shower topology, check if it's a shower trajectory
@@ -133,17 +192,14 @@ void PatternAlgorithms::determine_direction(Graph& graph, Facade::Cluster& clust
             // segment_is_shower_topology set, which is the prototype's state.
             // Default false => the call runs => byte-identical.
             if (!m_shower_topo_proto_dir) {
-                segment_determine_shower_direction(seg, particle_data, recomb_model, "associate_points", m_mip_dqdx_median, 0.4*units::cm, m_mip_dqdx);
+                segment_determine_shower_direction(seg, particle_data, recomb_model, "associate_points", m_mip_dqdx_median, 0.4*units::cm, m_mip_dqdx, m_dir_track_median_local);
             }
             {
                 const int pdg_code = 11; // electron
-                auto four_momentum = segment_cal_4mom(seg, pdg_code, particle_data, recomb_model, m_mip_dqdx_median);
-                auto pinfo = std::make_shared<Aux::ParticleInfo>(
-                    pdg_code,
-                    particle_data->get_particle_mass(pdg_code),
-                    particle_data->pdg_to_name(pdg_code),
-                    four_momentum
-                );
+                // doc pr/31 §12 F1 shape B: the prototype's
+                // determine_dir_shower_topology writes type and mass only --
+                // NO 4-momentum recompute here (proto_recomputes=false).
+                auto pinfo = reclass_pinfo(seg, pdg_code, particle_data, recomb_model, m_mip_dqdx_median, m_reclass_preserve_4mom, false);
                 seg->particle_info(pinfo);
                 seg->particle_score(100.0);
             }
@@ -297,7 +353,16 @@ std::pair<SegmentPtr, VertexPtr> PatternAlgorithms::find_cont_muon_segment_nue(
     WireCell::Point vtx_pt = vtx->fit().valid() ? vtx->fit().point : vtx->wcpt().point;
 
     WireCell::Vector dir1 = segment_cal_dir_3vector(sg, vtx_pt, 15 * units::cm);
-    WireCell::Vector dir3 = (sg_length > 30 * units::cm)
+    // doc sbnd_xin/docs/pr/31 §12 (F5, was P6).  The prototype computes dir3
+    // INSIDE the per-neighbour loop, always at 30 cm, whenever either length
+    // qualifies (NeutrinoID_track_shower.h:2402-2408).  The toolkit's hoist is
+    // correct -- dir3 does not depend on the loop variable -- but its fallback
+    // to dir1 silently turns the reachable case "short reference segment, long
+    // neighbour" (sg_length <= 30 cm < length) into a 15cm-vs-30cm comparison
+    // where the prototype compares two 30 cm directions; angle1 feeds the
+    // <12.5 deg muon-continuation test.  ON = unconditional 30 cm (still
+    // hoisted).  OFF = today's conditional = byte-identical.
+    WireCell::Vector dir3 = (m_cont_muon_dir3_30cm || sg_length > 30 * units::cm)
                                 ? segment_cal_dir_3vector(sg, vtx_pt, 30 * units::cm)
                                 : dir1;
 
@@ -433,14 +498,22 @@ void PatternAlgorithms::examine_good_tracks(Graph& graph, Facade::Cluster& clust
             length < 15*units::cm) {
             
             // Reclassify as electron (PDG 11)
-            double em_mass = particle_data->get_particle_mass(11);
-            auto pinfo = std::make_shared<Aux::ParticleInfo>(
-                11,                                              // electron PDG
-                em_mass,                                         // electron mass
-                particle_data->pdg_to_name(11),                 // "e-"
-                WireCell::D4Vector<double>(em_mass, 0, 0, 0)    // at-rest 4-momentum
-            );
-            sg->particle_info(pinfo);
+            // doc pr/31 §12 F1 shape C: the prototype writes type and mass only
+            // (NeutrinoID_track_shower.h:257-261) -- the 4-momentum is untouched,
+            // not zeroed to rest mass.
+            if (m_reclass_preserve_4mom) {
+                sg->particle_info(reclass_pinfo(sg, 11, particle_data, m_recomb_model, m_mip_dqdx, true, false));
+            }
+            else {
+                double em_mass = particle_data->get_particle_mass(11);
+                auto pinfo = std::make_shared<Aux::ParticleInfo>(
+                    11,                                              // electron PDG
+                    em_mass,                                         // electron mass
+                    particle_data->pdg_to_name(11),                 // "e-"
+                    WireCell::D4Vector<double>(em_mass, 0, 0, 0)    // at-rest 4-momentum
+                );
+                sg->particle_info(pinfo);
+            }
             
             // Reset direction and mark as weak
             sg->dirsign(0);
@@ -778,14 +851,7 @@ void PatternAlgorithms::improve_maps_shower_in_track_out(Graph& graph, Facade::C
                     
                     // Set as electron (PDG 11)
                     int pdg_code = 11;
-                    auto four_momentum = segment_cal_4mom(sg1, pdg_code, particle_data, recomb_model, m_mip_dqdx);
-
-                    auto pinfo = std::make_shared<Aux::ParticleInfo>(
-                        pdg_code,
-                        particle_data->get_particle_mass(pdg_code),
-                        particle_data->pdg_to_name(pdg_code),
-                        four_momentum
-                    );
+                    auto pinfo = reclass_pinfo(sg1, pdg_code, particle_data, recomb_model, m_mip_dqdx, m_reclass_preserve_4mom, true);
                     sg1->particle_info(pinfo);
                     sg1->dirsign(0);
                     
@@ -803,13 +869,7 @@ void PatternAlgorithms::improve_maps_shower_in_track_out(Graph& graph, Facade::C
                                       (sg1->has_particle_info() && std::abs(sg1->particle_info()->pdg()) == 11);
                     if (!is_shower1) {
                         int pdg_code = 11;
-                        auto four_momentum = segment_cal_4mom(sg1, pdg_code, particle_data, recomb_model, m_mip_dqdx);
-                        auto pinfo = std::make_shared<Aux::ParticleInfo>(
-                            pdg_code,
-                            particle_data->get_particle_mass(pdg_code),
-                            particle_data->pdg_to_name(pdg_code),
-                            four_momentum
-                        );
+                        auto pinfo = reclass_pinfo(sg1, pdg_code, particle_data, recomb_model, m_mip_dqdx, m_reclass_preserve_4mom, true);
                         sg1->particle_info(pinfo);
                     }
 
@@ -948,13 +1008,7 @@ void PatternAlgorithms::improve_maps_no_dir_tracks(Graph& graph, Facade::Cluster
                      nshowers[0] > 0 && nshowers[1] > 0 && length < 5*units::cm)) {
 
                     int pdg_code = 11;
-                    auto four_momentum = segment_cal_4mom(sg, pdg_code, particle_data, recomb_model, m_mip_dqdx);
-                    auto pinfo = std::make_shared<Aux::ParticleInfo>(
-                        pdg_code,
-                        particle_data->get_particle_mass(pdg_code),
-                        particle_data->pdg_to_name(pdg_code),
-                        four_momentum
-                    );
+                    auto pinfo = reclass_pinfo(sg, pdg_code, particle_data, recomb_model, m_mip_dqdx, m_reclass_preserve_4mom, true);
                     sg->particle_info(pinfo);
                     flag_update = true;
                 }
@@ -990,13 +1044,7 @@ void PatternAlgorithms::improve_maps_no_dir_tracks(Graph& graph, Facade::Cluster
                             sg->dirsign(1);
 
                         int pdg_code = 11;
-                        auto four_momentum = segment_cal_4mom(sg, pdg_code, particle_data, recomb_model, m_mip_dqdx);
-                        auto pinfo = std::make_shared<Aux::ParticleInfo>(
-                            pdg_code,
-                            particle_data->get_particle_mass(pdg_code),
-                            particle_data->pdg_to_name(pdg_code),
-                            four_momentum
-                        );
+                        auto pinfo = reclass_pinfo(sg, pdg_code, particle_data, recomb_model, m_mip_dqdx, m_reclass_preserve_4mom, true);
                         sg->particle_info(pinfo);
                         flag_update = true;
                     }
@@ -1032,13 +1080,7 @@ void PatternAlgorithms::improve_maps_no_dir_tracks(Graph& graph, Facade::Cluster
                             sg->dirsign(1);
 
                         int pdg_code = 11;
-                        auto four_momentum = segment_cal_4mom(sg, pdg_code, particle_data, recomb_model, m_mip_dqdx);
-                        auto pinfo = std::make_shared<Aux::ParticleInfo>(
-                            pdg_code,
-                            particle_data->get_particle_mass(pdg_code),
-                            particle_data->pdg_to_name(pdg_code),
-                            four_momentum
-                        );
+                        auto pinfo = reclass_pinfo(sg, pdg_code, particle_data, recomb_model, m_mip_dqdx, m_reclass_preserve_4mom, true);
                         sg->particle_info(pinfo);
                         flag_update = true;
                     }
@@ -1058,13 +1100,7 @@ void PatternAlgorithms::improve_maps_no_dir_tracks(Graph& graph, Facade::Cluster
                                                    (nprotons[1] + nshowers[1] == 0 && nshowers[0] >= 2)))) {
                         
                         int pdg_code = 11;
-                        auto four_momentum = segment_cal_4mom(sg, pdg_code, particle_data, recomb_model, m_mip_dqdx);
-                        auto pinfo = std::make_shared<Aux::ParticleInfo>(
-                            pdg_code,
-                            particle_data->get_particle_mass(pdg_code),
-                            particle_data->pdg_to_name(pdg_code),
-                            four_momentum
-                        );
+                        auto pinfo = reclass_pinfo(sg, pdg_code, particle_data, recomb_model, m_mip_dqdx, m_reclass_preserve_4mom, true);
                         sg->particle_info(pinfo);
                         flag_update = true;
                     }
@@ -1121,13 +1157,7 @@ void PatternAlgorithms::improve_maps_no_dir_tracks(Graph& graph, Facade::Cluster
                                                       (num_s2 >= 4 && length_s2 > 20*units::cm)))) {
                             
                             int pdg_code = 11;
-                            auto four_momentum = segment_cal_4mom(sg, pdg_code, particle_data, recomb_model, m_mip_dqdx);
-                            auto pinfo = std::make_shared<Aux::ParticleInfo>(
-                                pdg_code,
-                                particle_data->get_particle_mass(pdg_code),
-                                particle_data->pdg_to_name(pdg_code),
-                                four_momentum
-                            );
+                            auto pinfo = reclass_pinfo(sg, pdg_code, particle_data, recomb_model, m_mip_dqdx, m_reclass_preserve_4mom, true);
                             sg->particle_info(pinfo);
                             flag_update = true;
                         }
@@ -1174,13 +1204,7 @@ void PatternAlgorithms::improve_maps_no_dir_tracks(Graph& graph, Facade::Cluster
                     
                     if (flag_change) {
                         int pdg_code = 11;
-                        auto four_momentum = segment_cal_4mom(sg, pdg_code, particle_data, recomb_model, m_mip_dqdx);
-                        auto pinfo = std::make_shared<Aux::ParticleInfo>(
-                            pdg_code,
-                            particle_data->get_particle_mass(pdg_code),
-                            particle_data->pdg_to_name(pdg_code),
-                            four_momentum
-                        );
+                        auto pinfo = reclass_pinfo(sg, pdg_code, particle_data, recomb_model, m_mip_dqdx, m_reclass_preserve_4mom, true);
                         sg->particle_info(pinfo);
                         flag_update = true;
                     }
@@ -1217,13 +1241,7 @@ void PatternAlgorithms::improve_maps_no_dir_tracks(Graph& graph, Facade::Cluster
                         sg->dir_weak(true);
 
                         int pdg_code = 11;
-                        auto four_momentum = segment_cal_4mom(sg, pdg_code, particle_data, recomb_model, m_mip_dqdx);
-                        auto pinfo = std::make_shared<Aux::ParticleInfo>(
-                            pdg_code,
-                            particle_data->get_particle_mass(pdg_code),
-                            particle_data->pdg_to_name(pdg_code),
-                            four_momentum
-                        );
+                        auto pinfo = reclass_pinfo(sg, pdg_code, particle_data, recomb_model, m_mip_dqdx, m_reclass_preserve_4mom, true);
                         sg->particle_info(pinfo);
                         flag_update = true;
                     }
@@ -1296,13 +1314,7 @@ void PatternAlgorithms::improve_maps_no_dir_tracks(Graph& graph, Facade::Cluster
                     
                     if (flag_change) {
                         int pdg_code = 11;
-                        auto four_momentum = segment_cal_4mom(sg, pdg_code, particle_data, recomb_model, m_mip_dqdx);
-                        auto pinfo = std::make_shared<Aux::ParticleInfo>(
-                            pdg_code,
-                            particle_data->get_particle_mass(pdg_code),
-                            particle_data->pdg_to_name(pdg_code),
-                            four_momentum
-                        );
+                        auto pinfo = reclass_pinfo(sg, pdg_code, particle_data, recomb_model, m_mip_dqdx, m_reclass_preserve_4mom, true);
                         sg->particle_info(pinfo);
                         flag_update = true;
                     }
@@ -1384,14 +1396,7 @@ void PatternAlgorithms::improve_maps_multiple_tracks_in(Graph& graph, Facade::Cl
                     SegmentPtr sg1 = *it1;
                     
                     int pdg_code = 11;
-                    auto four_momentum = segment_cal_4mom(sg1, pdg_code, particle_data, recomb_model, m_mip_dqdx);
-
-                    auto pinfo = std::make_shared<Aux::ParticleInfo>(
-                        pdg_code,
-                        particle_data->get_particle_mass(pdg_code),
-                        particle_data->pdg_to_name(pdg_code),
-                        four_momentum
-                    );
+                    auto pinfo = reclass_pinfo(sg1, pdg_code, particle_data, recomb_model, m_mip_dqdx, m_reclass_preserve_4mom, true);
                     sg1->particle_info(pinfo);
                     flag_update = true;
                 }
@@ -1468,14 +1473,21 @@ void PatternAlgorithms::judge_no_dir_tracks_close_to_showers(Graph& graph, Facad
         // Reclassify segment as electron if all points are close to showers
         if (flag_change) {
             int pdg_code = 11;
-            double em_mass = particle_data->get_particle_mass(pdg_code);
-            auto pinfo = std::make_shared<Aux::ParticleInfo>(
-                pdg_code,
-                em_mass,
-                particle_data->pdg_to_name(pdg_code),
-                WireCell::D4Vector<double>(em_mass, 0, 0, 0)
-            );
-            sg->particle_info(pinfo);
+            // doc pr/31 §12 F1 shape C: prototype writes type and mass only
+            // (NeutrinoID_track_shower.h:1238-1239), 4-momentum untouched.
+            if (m_reclass_preserve_4mom) {
+                sg->particle_info(reclass_pinfo(sg, pdg_code, particle_data, m_recomb_model, m_mip_dqdx, true, false));
+            }
+            else {
+                double em_mass = particle_data->get_particle_mass(pdg_code);
+                auto pinfo = std::make_shared<Aux::ParticleInfo>(
+                    pdg_code,
+                    em_mass,
+                    particle_data->pdg_to_name(pdg_code),
+                    WireCell::D4Vector<double>(em_mass, 0, 0, 0)
+                );
+                sg->particle_info(pinfo);
+            }
         }
     }
 }
@@ -1605,7 +1617,26 @@ void PatternAlgorithms::examine_all_showers(Graph& graph, Facade::Cluster& clust
     // If there is only one good track
     if (n_good_tracks == 1 && (length_good_tracks < 0.15 * (length_showers + length_tracks)) && length_good_tracks < 10*units::cm) {
         auto pair_vertices = find_vertices(graph, good_track);
-        
+        // doc sbnd_xin/docs/pr/31 §12 (F7, was P5; pr/30 F4's sibling).  The
+        // two acceptance branches below are ASYMMETRIC -- the .second-side
+        // branch has a relaxed 150-degree clause the .first-side branch lacks,
+        // faithfully ported from the prototype -- but which physical vertex
+        // lands in .first differs: prototype orders by vertex id
+        // (NeutrinoID_proto_vertex.h:3227-3243), the toolkit by proximity to
+        // the segment's first fit point (PRGraph.cxx find_vertices).  The
+        // owner's positional clearance covers .first meaning "an end"; it does
+        // not cover .first selecting a branch.  ON: order the pair by
+        // get_graph_index() -- a creation-order counter, the SHAPE of the
+        // prototype's get_id(), but the two trees create vertices in different
+        // orders, so this restores A deterministic topological convention, not
+        // provably the prototype's.  Site-local on purpose: reordering
+        // find_vertices itself is pr/30 F4's decision and hits every caller.
+        // OFF = today's proximity order = byte-identical.
+        if (m_examine_showers_vertex_by_index && pair_vertices.first && pair_vertices.second
+            && pair_vertices.first->get_graph_index() > pair_vertices.second->get_graph_index()) {
+            std::swap(pair_vertices.first, pair_vertices.second);
+        }
+
         int num_s1 = 0, num_s2 = 0;
         double length_s1 = 0, length_s2 = 0;
         
@@ -1871,14 +1902,21 @@ void PatternAlgorithms::examine_all_showers(Graph& graph, Facade::Cluster& clust
 
             if (!is_shower) {
                 int pdg_code = 11;
-                double electron_mass = particle_data->get_particle_mass(pdg_code);
-                auto pinfo = std::make_shared<Aux::ParticleInfo>(
-                    pdg_code,
-                    electron_mass,
-                    particle_data->pdg_to_name(pdg_code),
-                    WireCell::D4Vector<double>(electron_mass, 0, 0, 0)
-                );
-                sg->particle_info(pinfo);
+                // doc pr/31 §12 F1 shape C: prototype writes type and mass only
+                // (NeutrinoID_track_shower.h:313-315), 4-momentum untouched.
+                if (m_reclass_preserve_4mom) {
+                    sg->particle_info(reclass_pinfo(sg, pdg_code, particle_data, m_recomb_model, m_mip_dqdx, true, false));
+                }
+                else {
+                    double electron_mass = particle_data->get_particle_mass(pdg_code);
+                    auto pinfo = std::make_shared<Aux::ParticleInfo>(
+                        pdg_code,
+                        electron_mass,
+                        particle_data->pdg_to_name(pdg_code),
+                        WireCell::D4Vector<double>(electron_mass, 0, 0, 0)
+                    );
+                    sg->particle_info(pinfo);
+                }
             }
         }
     }

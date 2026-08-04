@@ -264,6 +264,56 @@ function(
     //   exposes it only to app-level tree fillers.
     // MEASURED: 3774 vertices flagged on 48 events.
     main_vertex_candidate_flag = true,
+    // ---- doc pr/31 §12: the §10.12 topology/PID/direction port-fidelity
+    // round.  All five fixes ship default-OFF in C++/cfg; the values here are
+    // the SBND operating point.
+    //
+    // **ALL FIVE ARE SBND PRODUCTION DEFAULTS ON, owner 2026-08-04** (the
+    // owner's standing instruction for this round: production keeps bug
+    // fixes and improvements).  Each restores a prototype behaviour the port
+    // dropped by accident, and every one is MEASURED NULL on the nueCC48
+    // manifest: gate work-pr31r2-off48 vs work-pr32r2-allon48 48/48; per-knob
+    // arms work-pr31r2-{f5on,f6on,f3on,f1onb,f4on}48 and the joint
+    // work-pr31r2-allonb48 are 48/48 pctree-hash identical to off, with both
+    // nusel TSVs, every T_tagger/T_kine leaf and every mabc-pr.zip member
+    // unchanged.  Null does NOT mean inert: F1's preserve path fires on 47/48
+    // events (its first implementation crashed there, doc pr/31 §12.5) -- the
+    // rewritten 4-momenta are simply never consumed by any persisted output.
+    // The flips therefore change no production number today and close five
+    // latent divergence classes.
+    //
+    // cont_muon_dir3_30cm (F5, was P6): find_cont_muon_segment_nue's hoisted
+    //   dir3 always at 30 cm as the prototype computes it, instead of falling
+    //   back to the 15 cm dir1 for a short reference segment.  The reachable
+    //   divergent case is "short reference segment, long neighbour".
+    cont_muon_dir3_30cm = true,
+    // track_comp_empty_abstain (F6, was P7): an empty dQ/dx comparison window
+    //   ABSTAINS from the direction gate instead of confirming the
+    //   orientation.  0.0 is the prototype's degenerate answer, verified by
+    //   execution (zero-bin TH1F KolmogorovTest -> ks1 == ks2 == 0 ->
+    //   eval_ks_ratio false).
+    track_comp_empty_abstain = true,
+    // shower_topo_reset (F3, was P13): segment_is_shower_topology clears
+    //   kShowerTopology and dirsign at entry, before its early returns, as the
+    //   prototype does (ProtoSegment.cxx:319-321) -- no stale flag survives a
+    //   re-test.  Also closes shower_topo_proto_dir's stated residual.
+    shower_topo_reset = true,
+    // reclass_preserve_4mom (F1, was P1+P3a+P4): the 15 reclassification
+    //   sites preserve the existing 4-momentum, recomputing only where the
+    //   prototype's get_particle_4mom(3)>0 guard passes.  The only fix in this
+    //   round that moves kine_reco_Enu directly.
+    reclass_preserve_4mom = true,
+    // dir_track_median_local (F4, was P8): determine_dir_track's median
+    //   dQ/dx over the SAME local vector the PID receives (prototype
+    //   nth_element), not the filtered helper rebuild.
+    dir_track_median_local = true,
+    // examine_showers_vertex_by_index (F7, was P5): DELIBERATELY DORMANT.
+    //   Orders examine_all_showers' vertex pair by graph index before the
+    //   asymmetric 165/150-degree branches -- A deterministic convention, not
+    //   provably the prototype's.  Stays false pending pr/30 F4's
+    //   find_vertices adjudication (that decision owns all three known
+    //   order-sensitive callers).
+    examine_showers_vertex_by_index = false,
     // Steiner TERMINAL filter fidelity -- doc pr/29 D1 and D12.
     //
     // **SBND PRODUCTION DEFAULT ON, owner 2026-08-04**: both are port BUGS, not
@@ -852,6 +902,12 @@ function(
                              shower_traj_recheck_parity=shower_traj_recheck_parity,
                              main_vertex_require_descriptor=main_vertex_require_descriptor,
                              main_vertex_candidate_flag=main_vertex_candidate_flag,
+                             cont_muon_dir3_30cm=cont_muon_dir3_30cm,
+                             track_comp_empty_abstain=track_comp_empty_abstain,
+                             shower_topo_reset=shower_topo_reset,
+                             reclass_preserve_4mom=reclass_preserve_4mom,
+                             dir_track_median_local=dir_track_median_local,
+                             examine_showers_vertex_by_index=examine_showers_vertex_by_index,
                              steiner_terminal_wire_tol=steiner_terminal_wire_tol,
                              steiner_terminal_adjacent_slice=steiner_terminal_adjacent_slice,
                              steiner_edge_charge_forward_dead_mix=steiner_edge_charge_forward_dead_mix,

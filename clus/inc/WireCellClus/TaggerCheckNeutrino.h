@@ -107,6 +107,17 @@ public:
         bool   m_shower_traj_recheck_parity{false};     // pr/32 F2 (was P3)
         bool   m_main_vertex_require_descriptor{false}; // pr/32 F3 (was P7)
         bool   m_main_vertex_candidate_flag{false};     // pr/32 F4 (was P12)
+        // doc sbnd_xin/docs/pr/31 §12 -- the §10.12 port-fidelity round
+        // (topology/PID/direction audit, owner-filtered survivors).  All C++
+        // default false = today's path = byte-identical; the SBND operating
+        // point decides which are on.  Rationale and prototype anchors:
+        // NeutrinoPatternBase.h.
+        bool   m_cont_muon_dir3_30cm{false};            // pr/31 F5 (was P6)
+        bool   m_track_comp_empty_abstain{false};       // pr/31 F6 (was P7)
+        bool   m_shower_topo_reset{false};              // pr/31 F3 (was P13)
+        bool   m_reclass_preserve_4mom{false};          // pr/31 F1 (was P1+P3a+P4)
+        bool   m_dir_track_median_local{false};         // pr/31 F4 (was P8)
+        bool   m_examine_showers_vertex_by_index{false}; // pr/31 F7 (was P5) -- stays OFF pending pr/30 F4
         // Isochronous first-segment endpoint finding (doc sbnd_xin/docs/pr/24
         // round 2, SBND evt 271851); lengths in cm.  false => legacy
         // wire-footprint boundary endpoints, byte-identical.  When on, a

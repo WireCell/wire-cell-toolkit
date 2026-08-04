@@ -93,6 +93,13 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_shower_traj_recheck_parity     = get(config, "shower_traj_recheck_parity",     m_shower_traj_recheck_parity);
     m_main_vertex_require_descriptor = get(config, "main_vertex_require_descriptor", m_main_vertex_require_descriptor);
     m_main_vertex_candidate_flag     = get(config, "main_vertex_candidate_flag",     m_main_vertex_candidate_flag);
+    // doc sbnd_xin/docs/pr/31 §12 port-fidelity knobs (the §10.12 round).
+    m_cont_muon_dir3_30cm            = get(config, "cont_muon_dir3_30cm",            m_cont_muon_dir3_30cm);
+    m_track_comp_empty_abstain       = get(config, "track_comp_empty_abstain",       m_track_comp_empty_abstain);
+    m_shower_topo_reset              = get(config, "shower_topo_reset",              m_shower_topo_reset);
+    m_reclass_preserve_4mom          = get(config, "reclass_preserve_4mom",          m_reclass_preserve_4mom);
+    m_dir_track_median_local         = get(config, "dir_track_median_local",         m_dir_track_median_local);
+    m_examine_showers_vertex_by_index = get(config, "examine_showers_vertex_by_index", m_examine_showers_vertex_by_index);
     m_iso_endpoint               = get(config, "iso_endpoint",               m_iso_endpoint);
     m_iso_endpoint_min_length    = get(config, "iso_endpoint_min_length",    m_iso_endpoint_min_length);     // cm
     m_iso_endpoint_max_xext      = get(config, "iso_endpoint_max_xext",      m_iso_endpoint_max_xext);       // cm
@@ -249,6 +256,13 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["shower_traj_recheck_parity"]     = m_shower_traj_recheck_parity;     // false = legacy (recomputed gate, 1 cm inner)
     cfg["main_vertex_require_descriptor"] = m_main_vertex_require_descriptor; // false = legacy (unguarded argmax)
     cfg["main_vertex_candidate_flag"]     = m_main_vertex_candidate_flag;     // false = legacy (no kMainCandidate)
+    // doc sbnd_xin/docs/pr/31 §12.
+    cfg["cont_muon_dir3_30cm"]            = m_cont_muon_dir3_30cm;            // false = legacy (15 cm fallback for short reference segments)
+    cfg["track_comp_empty_abstain"]       = m_track_comp_empty_abstain;       // false = legacy (empty window "confirms" the direction)
+    cfg["shower_topo_reset"]              = m_shower_topo_reset;              // false = legacy (set-only kShowerTopology, stale dirsign)
+    cfg["reclass_preserve_4mom"]          = m_reclass_preserve_4mom;          // false = legacy (unconditional 4-momentum rewrite)
+    cfg["dir_track_median_local"]         = m_dir_track_median_local;         // false = legacy (filtered median helper)
+    cfg["examine_showers_vertex_by_index"] = m_examine_showers_vertex_by_index; // false = legacy (proximity-ordered pair)
     cfg["iso_endpoint"]               = m_iso_endpoint;                // false = legacy wire-footprint boundary endpoints
     cfg["iso_endpoint_min_length"]    = m_iso_endpoint_min_length;     // cm
     cfg["iso_endpoint_max_xext"]      = m_iso_endpoint_max_xext;       // cm
@@ -553,6 +567,13 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
     pattern_algos.m_shower_traj_recheck_parity     = m_shower_traj_recheck_parity;
     pattern_algos.m_main_vertex_require_descriptor = m_main_vertex_require_descriptor;
     pattern_algos.m_main_vertex_candidate_flag     = m_main_vertex_candidate_flag;
+    // doc sbnd_xin/docs/pr/31 §12 (the §10.12 round: F5, F6, F3, F1, F4, F7).
+    pattern_algos.m_cont_muon_dir3_30cm             = m_cont_muon_dir3_30cm;
+    pattern_algos.m_track_comp_empty_abstain        = m_track_comp_empty_abstain;
+    pattern_algos.m_shower_topo_reset               = m_shower_topo_reset;
+    pattern_algos.m_reclass_preserve_4mom           = m_reclass_preserve_4mom;
+    pattern_algos.m_dir_track_median_local          = m_dir_track_median_local;
+    pattern_algos.m_examine_showers_vertex_by_index = m_examine_showers_vertex_by_index;
     // segment_is_shower_trajectory is a free function reached from three files
     // with no component config in scope, so F2's flag-refresh half travels
     // through a process-wide flag written here, once, before any graph is
@@ -985,6 +1006,23 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
             pb.f3_candidates.load(), pb.f3_dropped.load(), pb.f4_flagged.load(),
             m_vertex_dir_use_fit_point, m_shower_traj_recheck_parity,
             m_main_vertex_require_descriptor, m_main_vertex_candidate_flag);
+    }
+
+    // doc sbnd_xin/docs/pr/31 §12 -- same contract as PR30AUDIT above.  The
+    // two F9 counters are the §10.10 reachability measurement: both 0 across
+    // the manifest => F9 (self-loop / parallel-edge representability) closes
+    // as vacuous.
+    {
+        const auto& pa = WireCell::Clus::PR::g_port_audit;
+        SPDLOG_LOGGER_INFO(log,
+            "PR31AUDIT selfloop_segment={} edge_aliased={} "
+            "knobs[cont_muon_dir3_30cm={} track_comp_empty_abstain={} shower_topo_reset={} "
+            "reclass_preserve_4mom={} dir_track_median_local={} examine_showers_vertex_by_index={} "
+            "shower_topo_proto_dir={}]",
+            pa.selfloop_segment.load(), pa.edge_aliased.load(),
+            m_cont_muon_dir3_30cm, m_track_comp_empty_abstain, m_shower_topo_reset,
+            m_reclass_preserve_4mom, m_dir_track_median_local, m_examine_showers_vertex_by_index,
+            m_shower_topo_proto_dir);
     }
 }
 

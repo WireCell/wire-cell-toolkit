@@ -1329,7 +1329,7 @@ namespace WireCell::Clus::PR {
         return kine_energy;
     }
 
-    std::vector<double> do_track_comp(std::vector<double>& L , std::vector<double>& dQ_dx, double compare_range, double offset_length, const Clus::ParticleDataSet::pointer& particle_data,  double MIP_dQdx, int skip_stop_samples){
+    std::vector<double> do_track_comp(std::vector<double>& L , std::vector<double>& dQ_dx, double compare_range, double offset_length, const Clus::ParticleDataSet::pointer& particle_data,  double MIP_dQdx, int skip_stop_samples, bool empty_abstain){
 
         double end_L = L.back() + 0.15*units::cm - offset_length;
 
@@ -1356,15 +1356,26 @@ namespace WireCell::Clus::PR {
         }
 
         // If no points fall inside the comparison window, return "no direction signal" defaults.
+        // doc sbnd_xin/docs/pr/31 §12 (F6, was P7): element 0 is read as
+        // flag_forward = round(result.at(0)), so the legacy 1.0 means "this
+        // orientation PASSED the direction gate" -- a segment about which
+        // nothing is known becomes a directed muon on the both-pass branch.
+        // empty_abstain returns 0.0 instead, the prototype's degenerate
+        // answer (executed, not inferred: zero-bin TH1F KolmogorovTest gives
+        // ks1 == ks2 == 0, so eval_ks_ratio's first gate returns false).
+        // Elements 1-3 keep the 1e9 filler either way -- the finding is the
+        // direction flag, not the particle scores.  The same literal is
+        // applied at the missing-dEdx-function return below: it is the same
+        // copy-pasted filler with the same consumer.
         if (ncount == 0) {
-            return {1.0, 1e9, 1e9, 1e9};
+            return {empty_abstain ? 0.0 : 1.0, 1e9, 1e9, 1e9};
         }
 
         auto muon_fn     = particle_data->get_dEdx_function("muon");
         auto proton_fn   = particle_data->get_dEdx_function("proton");
         auto electron_fn = particle_data->get_dEdx_function("electron");
         if (!muon_fn || !proton_fn || !electron_fn) {
-            return {1.0, 1e9, 1e9, 1e9};
+            return {empty_abstain ? 0.0 : 1.0, 1e9, 1e9, 1e9};
         }
 
         // Create reference vectors for different particles
@@ -1456,8 +1467,8 @@ namespace WireCell::Clus::PR {
             rdQ_dx.at(i) = dQ_dx.at(L.size() - 1 - i);
         }
         
-        std::vector<double> result_forward = do_track_comp(L, dQ_dx, compare_range, offset_length, particle_data, MIP_dQdx);
-        std::vector<double> result_backward = do_track_comp(rL, rdQ_dx, compare_range, offset_length, particle_data, MIP_dQdx);
+        std::vector<double> result_forward = do_track_comp(L, dQ_dx, compare_range, offset_length, particle_data, MIP_dQdx, 0, pid_opts.track_comp_empty_abstain);
+        std::vector<double> result_backward = do_track_comp(rL, rdQ_dx, compare_range, offset_length, particle_data, MIP_dQdx, 0, pid_opts.track_comp_empty_abstain);
         
         // Direction determination
         bool flag_forward = static_cast<bool>(std::round(result_forward.at(0)));
@@ -1554,8 +1565,8 @@ namespace WireCell::Clus::PR {
         // exactly 1 sample, per-orientation at that orientation's hypothesized
         // stop end, template anchor unchanged, value-agnostic.
         if (pid_opts.endpoint_trim_retry && !flag_force) {
-            std::vector<double> retry_forward  = do_track_comp(L,  dQ_dx,  compare_range, offset_length, particle_data, MIP_dQdx, 1);
-            std::vector<double> retry_backward = do_track_comp(rL, rdQ_dx, compare_range, offset_length, particle_data, MIP_dQdx, 1);
+            std::vector<double> retry_forward  = do_track_comp(L,  dQ_dx,  compare_range, offset_length, particle_data, MIP_dQdx, 1, pid_opts.track_comp_empty_abstain);
+            std::vector<double> retry_backward = do_track_comp(rL, rdQ_dx, compare_range, offset_length, particle_data, MIP_dQdx, 1, pid_opts.track_comp_empty_abstain);
 
             const bool rf = static_cast<bool>(std::round(retry_forward.at(0)));
             const bool rb = static_cast<bool>(std::round(retry_backward.at(0)));
@@ -1765,7 +1776,28 @@ namespace WireCell::Clus::PR {
         double length = segment_track_length(segment, 0);
 
         // Compute median dQ/dx once over the trimmed range — reused in three branches below.
-        double medium_dQ_dx = segment_median_dQ_dx(segment, start_n1, end_n1);
+        // doc sbnd_xin/docs/pr/31 §12 (F4, was P8).  The prototype takes this
+        // median over the SAME dQ_dx vector it hands to do_track_pid, at all
+        // three of its sites (ProtoSegment.cxx:1574-1576 pdg==0 branch,
+        // :1602-1611 both vertex-activity branches: nth_element over a copy of
+        // dQ_dx, element size()/2).  segment_median_dQ_dx instead rebuilds a
+        // FILTERED sample from fits() (drops !valid()/dx<=0/dQ<0), so one bad
+        // fit is "a zero" to the PID and "not there" to the median, and the
+        // filter changes the vector length so nth_element selects a different
+        // order statistic.  dir_track_median_local restores the prototype's
+        // self-consistency; the filtered helper itself is kept (its exclusion
+        // of the dQ/1e-9 sentinel is judged an improvement) for every other
+        // caller.  Same internal-unit scale on both paths.  false =>
+        // filtered helper => byte-identical.
+        double medium_dQ_dx = 0;
+        if (opts.dir_track_median_local) {
+            std::vector<double> tmp = dQ_dx;
+            std::nth_element(tmp.begin(), tmp.begin() + tmp.size()/2, tmp.end());
+            medium_dQ_dx = *std::next(tmp.begin(), tmp.size()/2);
+        }
+        else {
+            medium_dQ_dx = segment_median_dQ_dx(segment, start_n1, end_n1);
+        }
 
         // Short track what to do???
         if (pdg_code == 0) {
@@ -2230,7 +2262,7 @@ namespace WireCell::Clus::PR {
         // std::cout << "[clustering_points_segments] TOTAL took " << MS(Clock::now() - t_total).count() << " ms" << std::endl;
     }
 
-    bool segment_determine_shower_direction(SegmentPtr segment, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, const std::string& cloud_name, double MIP_dQdx, double rms_cut, double mip_dqdx){
+    bool segment_determine_shower_direction(SegmentPtr segment, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, const std::string& cloud_name, double MIP_dQdx, double rms_cut, double mip_dqdx, bool median_local){
         segment->dirsign(0);
         const auto& fits = segment->fits();
         
@@ -2503,7 +2535,17 @@ namespace WireCell::Clus::PR {
                 // docs/pr/2 sec 8.1a: forward the configured MIP scales instead of the
                 // uBooNE header defaults (50000/43000 e/cm).  uBooNE byte-identical:
                 // the forwarded values equal the old defaults there.
-                if (!segment_is_shower_trajectory(segment, 10*units::cm, mip_dqdx)) segment_determine_dir_track(segment, 0, fits.size(), particle_data, recomb_model, MIP_dQdx);
+                // doc pr/31 §12 (F4): this interior call passes a
+                // default-constructed TrackPidOptions (NOT the caller's full
+                // option set -- forwarding that here would unconditionally
+                // switch proton_dir_vote et al. at this site), carrying ONLY
+                // the median-source choice.  median_local=false => defaults
+                // all the way => byte-identical.
+                if (!segment_is_shower_trajectory(segment, 10*units::cm, mip_dqdx)) {
+                    TrackPidOptions med_opts{};
+                    med_opts.dir_track_median_local = median_local;
+                    segment_determine_dir_track(segment, 0, fits.size(), particle_data, recomb_model, MIP_dQdx, false, med_opts);
+                }
                 // For short segments, could call determine_dir_track here if needed
             } else {
                 // Count consistent directions at each end
@@ -2535,9 +2577,27 @@ namespace WireCell::Clus::PR {
         return (flag_dir != 0);
     }
 
-    bool segment_is_shower_topology(SegmentPtr segment, bool tmp_val, double MIP_dQ_dx, double demote_len){
+    bool segment_is_shower_topology(SegmentPtr segment, bool tmp_val, double MIP_dQ_dx, double demote_len, bool reset){
         int flag_dir = 0;
-        bool flag_shower_topology = tmp_val; 
+        bool flag_shower_topology = tmp_val;
+        // doc sbnd_xin/docs/pr/31 §12 (F3, was P13).  The prototype's first two
+        // statements are segment-state assignments made BEFORE any early return
+        // (ProtoSegment.cxx:319-321): flag_shower_topology = tmp_val (every
+        // caller passes false, so the flag is cleared on entry and re-set only
+        // if the test still passes) and flag_dir = 0.  The toolkit port assigns
+        // a LOCAL and the tail only ever set_flags, so a segment that qualified
+        // on an earlier pass keeps a stale kShowerTopology flag -- which is what
+        // routes determine_direction into the topology branch -- and a segment
+        // whose clouds hit the four early returns below keeps a stale direction.
+        // Re-entry is the normal path: this function runs in stage 3
+        // (separate_track_shower) and at three stage-4 sites.  unset_flags
+        // clears exactly the named bit (Flagged.h: other flags survive);
+        // never clear_flags() here.  reset=false => set-only legacy path =>
+        // byte-identical.
+        if (reset) {
+            if (!tmp_val) segment->unset_flags(SegmentFlags::kShowerTopology);
+            segment->dirsign(0);
+        }
         const auto& fits = segment->fits();
 
         if (fits.empty()) return false;

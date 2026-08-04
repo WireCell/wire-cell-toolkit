@@ -955,6 +955,16 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               // The SBND operating point lives in wct-pr-perevt.jsonnet.
               vertex_dir_use_fit_point=false, shower_traj_recheck_parity=false,
               main_vertex_require_descriptor=false, main_vertex_candidate_flag=false,
+              // doc pr/31 sec 12: the sec 10.12 topology/PID/direction port
+              // fixes (F5 cont-muon 30cm dir3, F6 empty-window abstain, F3
+              // shower-topo reset, F1 preserve-4mom, F4 local median, F7
+              // vertex-by-index -- F7 deliberately dormant pending pr/30 F4).
+              // C++ default false = today's path; keys omitted =>
+              // byte-identical.  The SBND operating point lives in
+              // wct-pr-perevt.jsonnet.
+              cont_muon_dir3_30cm=false, track_comp_empty_abstain=false,
+              shower_topo_reset=false, reclass_preserve_4mom=false,
+              dir_track_median_local=false, examine_showers_vertex_by_index=false,
               // Steiner TERMINAL filter fidelity (doc pr/29 D1 and D12).  Both
               // OFF here = the historical toolkit behaviour, keys omitted =>
               // byte-identical config.  Turning either on can only ADD Steiner
@@ -1536,6 +1546,12 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
             first_seg_local_pca=first_seg_local_pca,
             other_seg_relaxed_accept=other_seg_relaxed_accept,
             shower_topo_proto_dir=shower_topo_proto_dir,
+            cont_muon_dir3_30cm=cont_muon_dir3_30cm,
+            track_comp_empty_abstain=track_comp_empty_abstain,
+            shower_topo_reset=shower_topo_reset,
+            reclass_preserve_4mom=reclass_preserve_4mom,
+            dir_track_median_local=dir_track_median_local,
+            examine_showers_vertex_by_index=examine_showers_vertex_by_index,
             vertex_dir_use_fit_point=vertex_dir_use_fit_point,
             shower_traj_recheck_parity=shower_traj_recheck_parity,
             main_vertex_require_descriptor=main_vertex_require_descriptor,
@@ -2008,6 +2024,13 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
        // byte-identical; the SBND operating point lives in wct-pr-perevt.jsonnet.
        vertex_dir_use_fit_point=false, shower_traj_recheck_parity=false,
        main_vertex_require_descriptor=false, main_vertex_candidate_flag=false,
+       // doc pr/31 sec 12: the sec 10.12 topology/PID/direction port fixes.
+       // Ship OFF = byte-identical; the SBND operating point lives in
+       // wct-pr-perevt.jsonnet.  F7 (examine_showers_vertex_by_index) is
+       // deliberately dormant pending pr/30 F4.
+       cont_muon_dir3_30cm=false, track_comp_empty_abstain=false,
+       shower_topo_reset=false, reclass_preserve_4mom=false,
+       dir_track_median_local=false, examine_showers_vertex_by_index=false,
        // Steiner TERMINAL filter fidelity (doc pr/29 D1 and D12).  Both OFF =
        // the historical toolkit behaviour = byte-identical (keys omitted).
        // Ships OFF; the SBND operating point lives in wct-pr-perevt.jsonnet.
@@ -2149,6 +2172,12 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 first_seg_local_pca=first_seg_local_pca,
                 other_seg_relaxed_accept=other_seg_relaxed_accept,
                 shower_topo_proto_dir=shower_topo_proto_dir,
+            cont_muon_dir3_30cm=cont_muon_dir3_30cm,
+            track_comp_empty_abstain=track_comp_empty_abstain,
+            shower_topo_reset=shower_topo_reset,
+            reclass_preserve_4mom=reclass_preserve_4mom,
+            dir_track_median_local=dir_track_median_local,
+            examine_showers_vertex_by_index=examine_showers_vertex_by_index,
                 vertex_dir_use_fit_point=vertex_dir_use_fit_point,
                 shower_traj_recheck_parity=shower_traj_recheck_parity,
                 main_vertex_require_descriptor=main_vertex_require_descriptor,

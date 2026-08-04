@@ -154,6 +154,25 @@ namespace WireCell::Clus::PR {
             }
         }
 
+        // doc sbnd_xin/docs/pr/31 §10.10 (F9): a self-loop connection about to
+        // be made.  boost::add_edge accepts it and boost::degree then counts
+        // it TWICE, where the prototype's map_vertex_segments set counts one
+        // segment -- so every start_n/end_n "== 1" free-end test downstream
+        // scores such a segment differently in the two trees.  Counted, not
+        // fixed: if this never fires the divergence is vacuous.
+        if (vtx1 == vtx2) {
+            const auto n = g_port_audit.selfloop_segment.fetch_add(1, std::memory_order_relaxed);
+            if (n < 20) {
+                auto log = Log::logger("clus");
+                SPDLOG_LOGGER_DEBUG(log,
+                    "PR::add_segment: self-loop connection (doc pr/31 F9): "
+                    "seg nwcpts={} vtx=({:.3f},{:.3f},{:.3f})",
+                    seg ? seg->wcpts().size() : 0,
+                    vtx1->wcpt().point.x()/units::cm, vtx1->wcpt().point.y()/units::cm,
+                    vtx1->wcpt().point.z()/units::cm);
+            }
+        }
+
         auto& gb = g[boost::graph_bundle];
         const size_t index = gb.num_edge_indices;
         auto [desc,added] = boost::add_edge(vtx1->get_descriptor(),
@@ -192,6 +211,22 @@ namespace WireCell::Clus::PR {
 
         // Edge already existed, assure its object is this one.
         // Inherit the existing edge's graph index so m_graph_index is not left at SIZE_MAX.
+        // doc sbnd_xin/docs/pr/31 §10.10 (F9): when a DIFFERENT segment already
+        // owns this edge, the reassignment below orphans it from graph
+        // iteration while it still holds a descriptor it believes valid; the
+        // prototype's map_vertex_segments holds BOTH segments (a 2-cycle).
+        // Counted before the overwrite, not fixed -- relaxing the graph type
+        // (multisetS) or rejecting the call is its own escalation.
+        if (seg && g[desc].segment && g[desc].segment != seg) {
+            const auto n = g_port_audit.edge_aliased.fetch_add(1, std::memory_order_relaxed);
+            if (n < 20) {
+                auto log = Log::logger("clus");
+                SPDLOG_LOGGER_DEBUG(log,
+                    "PR::add_segment: parallel segment aliased onto existing edge (doc pr/31 F9): "
+                    "edge idx={} old nwcpts={} new nwcpts={}",
+                    g[desc].index, g[desc].segment->wcpts().size(), seg->wcpts().size());
+            }
+        }
         g[desc].segment = seg;
         seg->set_graph_index(g[desc].index);
 

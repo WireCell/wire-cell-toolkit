@@ -55,6 +55,16 @@ namespace WireCell::Clus::PR {
         std::atomic<uint64_t> oseg_accept_proto{0};   // a prototype clause fired
         std::atomic<uint64_t> oseg_accept_relaxed{0}; // ONLY the toolkit clause fired
         std::atomic<uint64_t> oseg_reject{0};
+        // doc sbnd_xin/docs/pr/31 §10.10 (F9, was P12) -- the two degenerate
+        // topologies the prototype's map_vertex_segments can hold and the PR
+        // adjacency_list cannot: a self-loop counts 2 in boost::degree where
+        // the prototype's set counts 1, and a second segment on an existing
+        // vertex pair silently takes over the first segment's edge
+        // (add_segment's !added branch).  Both PERMITTED by add_segment (no
+        // guard), reachability unmeasured until now.  If both counters stay 0
+        // across the nueCC48 manifest, F9 closes as vacuous.
+        std::atomic<uint64_t> selfloop_segment{0};  // add_segment with vtx1 == vtx2
+        std::atomic<uint64_t> edge_aliased{0};      // !added and a DIFFERENT live segment owned the edge
     };
     /// The one instance.  Defined in PRGraph.cxx.
     extern PortAuditCounters g_port_audit;

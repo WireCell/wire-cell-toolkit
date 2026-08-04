@@ -101,7 +101,15 @@ namespace WireCell::Clus::PR {
     // stopping tip's dQ/dx is unreliable when the endpoint is ill-defined
     // (diluted OR piled-up), and it is compared against the template's Bragg
     // maximum, so one bad tip sample can veto an otherwise clean decision.
-    std::vector<double> do_track_comp(std::vector<double>& L , std::vector<double>& dQ_dx, double compare_range, double offset_length, const Clus::ParticleDataSet::pointer& particle_data, double MIP_dQdx = 50000/units::cm, int skip_stop_samples = 0);
+    // empty_abstain (doc sbnd_xin/docs/pr/31 §12, F6 was P7): when the
+    // comparison window holds no samples (or a dEdx template is missing), the
+    // degenerate return's element 0 becomes 0.0 ("abstain") instead of 1.0
+    // ("this orientation passed the direction gate").  0.0 is the prototype's
+    // degenerate answer, verified by execution: zero-bin TH1F KolmogorovTest
+    // returns 0 for both templates, so eval_ks_ratio's first gate
+    // (ks1-ks2 >= 0.0) fails and results[0] is false.  false = legacy 1.0 =
+    // byte-identical.
+    std::vector<double> do_track_comp(std::vector<double>& L , std::vector<double>& dQ_dx, double compare_range, double offset_length, const Clus::ParticleDataSet::pointer& particle_data, double MIP_dQdx = 50000/units::cm, int skip_stop_samples = 0, bool empty_abstain = false);
 
     // Options for segment_do_track_pid / segment_determine_dir_track.
     // Defaults reproduce legacy behavior byte-for-byte (uBooNE values, vote off).
@@ -123,6 +131,20 @@ namespace WireCell::Clus::PR {
     //   means the first attempt already decides and nothing is trimmed;
     //   never trims more than 1 sample; value-agnostic (robust to diluted
     //   AND piled-up tips).  Runs BEFORE the proton_dir_vote fallback.
+    // - track_comp_empty_abstain: doc sbnd_xin/docs/pr/31 §12 (F6, was P7).
+    //   Forwarded to do_track_comp's empty_abstain (see its comment above).
+    //   false = legacy "confirmed" filler = byte-identical.
+    // - dir_track_median_local: doc sbnd_xin/docs/pr/31 §12 (F4, was P8).
+    //   segment_determine_dir_track takes its median dQ/dx over the SAME local
+    //   dQ_dx vector it hands to the PID (prototype ProtoSegment.cxx:1574-1576,
+    //   :1602-1611: nth_element over a copy of dQ_dx), instead of
+    //   segment_median_dQ_dx's filtered rebuild from fits() -- which drops
+    //   invalid/dx<=0/dQ<0 samples the PID vector keeps as zeros, so the two
+    //   disagree about the same pathological point in opposite directions and
+    //   nth_element selects a different order statistic.  Same internal-unit
+    //   scale either way (charge per internal length; see the unit-convention
+    //   comment in segment_determine_dir_track).  false = filtered helper =
+    //   byte-identical.
     struct TrackPidOptions {
         double mip_dqdx{50000/units::cm};
         bool   proton_dir_vote{false};
@@ -131,6 +153,8 @@ namespace WireCell::Clus::PR {
         bool   endpoint_trim_retry{false};
         int    start_n{1};
         int    end_n{1};
+        bool   track_comp_empty_abstain{false};
+        bool   dir_track_median_local{false};
     };
 
     // success, flag_dir, pdg_code, particle_score
@@ -182,7 +206,13 @@ namespace WireCell::Clus::PR {
     bool segment_is_shower_trajectory(SegmentPtr seg, double step_size = 10*units::cm, double mip_dQ_dx = 50000 / units::cm);
     void segment_determine_shower_direction_trajectory(SegmentPtr segment, int start_n, int end_n, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, double MIP_dQdx = 43000/units::cm, bool flag_print = false, const TrackPidOptions& pid_opts = {});
     
-    bool segment_determine_shower_direction(SegmentPtr segment, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, const std::string& cloud_name = "associate_points", double MIP_dQdx = 43000/units::cm, double rms_cut= 0.4*units::cm, double mip_dqdx = 50000/units::cm);
+    // median_local (doc sbnd_xin/docs/pr/31 §12, F4): forwarded to the interior
+    // segment_determine_dir_track call on the short-segment branch as
+    // TrackPidOptions::dir_track_median_local ONLY -- that interior call
+    // otherwise passes a default-constructed TrackPidOptions, and forwarding a
+    // caller's full option set there would unconditionally change proton_dir_vote
+    // et al. at that site.  false = legacy = byte-identical.
+    bool segment_determine_shower_direction(SegmentPtr segment, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, const std::string& cloud_name = "associate_points", double MIP_dQdx = 43000/units::cm, double rms_cut= 0.4*units::cm, double mip_dqdx = 50000/units::cm, bool median_local = false);
     // sbnd_xin doc pr/25 sec 3: `demote_len` > 0 makes the existing long-track
     // guard unconditional -- any segment this function would flag
     // kShowerTopology whose geometric length (segment_track_length(seg,0),
@@ -191,8 +221,19 @@ namespace WireCell::Clus::PR {
     // Motivation: an owner hand-scan of every long shower-topology segment on
     // a selected nu-candidate main cluster in the 572-event valfast manifest
     // (2026-08-03, 10/10 events) found NO showers -- all tracks.  See sec 3.8.
+    // reset (doc sbnd_xin/docs/pr/31 §12, F3 was P13): the prototype's
+    // is_shower_topology opens with two assignments BEFORE its early returns
+    // (ProtoSegment.cxx:319-321): flag_shower_topology = tmp_val (all callers
+    // pass false => the flag is CLEARED on every entry) and flag_dir = 0.  The
+    // toolkit's port assigns a local and never clears the segment flag, and its
+    // four early returns skip dirsign() -- so a segment that qualified on an
+    // earlier pass keeps a stale kShowerTopology flag and a stale direction.
+    // true => clear the flag bit (unset_flags, not clear_flags -- other bits
+    // survive) and zero dirsign at entry, mirroring the prototype; the tail
+    // re-sets both when the answer is still yes.  false = set-only legacy =
+    // byte-identical.
     bool segment_is_shower_topology(SegmentPtr seg, bool tmp_val=false, double MIP_dQ_dx = 43000/units::cm,
-                                    double demote_len = 0);
+                                    double demote_len = 0, bool reset = false);
 }
 
 #endif

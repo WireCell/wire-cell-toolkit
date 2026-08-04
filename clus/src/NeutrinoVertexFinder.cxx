@@ -586,7 +586,7 @@ VertexPtr PatternAlgorithms::compare_main_vertices_all_showers(Graph& graph, Fac
     clustering_points_segments({tmp_sg}, dv, "associate_points", 0.5*units::cm, 3.0);
     
     // Determine shower direction
-    segment_determine_shower_direction(tmp_sg, particle_data, recomb_model, "associate_points", m_mip_dqdx_median, 0.4*units::cm, m_mip_dqdx);
+    segment_determine_shower_direction(tmp_sg, particle_data, recomb_model, "associate_points", m_mip_dqdx_median, 0.4*units::cm, m_mip_dqdx, m_dir_track_median_local);
     
     double tmp_sg_length = segment_track_length(tmp_sg);
     int tmp_sg_dir = tmp_sg->dirsign();
@@ -2417,7 +2417,7 @@ void PatternAlgorithms::improve_vertex(Graph& graph, Facade::Cluster& cluster, V
             if (!sg1 || sg1->cluster() != &cluster) continue;
 
             if (!sg1->particle_info()) {
-                segment_is_shower_topology(sg1, false, m_mip_dqdx_median, m_shower_topo_demote_len);
+                segment_is_shower_topology(sg1, false, m_mip_dqdx_median, m_shower_topo_demote_len, m_shower_topo_reset);
 
                 VertexPtr start_v = nullptr, end_v = nullptr;
                 auto source_v = boost::source(ed, graph);
@@ -2468,7 +2468,7 @@ void PatternAlgorithms::improve_vertex(Graph& graph, Facade::Cluster& cluster, V
                     SegmentPtr sg = graph[edesc].segment;
                     if (!sg || sg->cluster() != &cluster) continue;
 
-                    if (!sg->particle_info()) segment_is_shower_topology(sg, false, m_mip_dqdx_median, m_shower_topo_demote_len);
+                    if (!sg->particle_info()) segment_is_shower_topology(sg, false, m_mip_dqdx_median, m_shower_topo_demote_len, m_shower_topo_reset);
 
                     VertexPtr start_v = nullptr, end_v = nullptr;
                     auto source_v = boost::source(edesc, graph);
@@ -2553,7 +2553,7 @@ void PatternAlgorithms::improve_vertex(Graph& graph, Facade::Cluster& cluster, V
                 }
                 
                 // Examine topology case
-                if (pair_result.first == 1 && segment_is_shower_topology(sg, false, m_mip_dqdx_median, m_shower_topo_demote_len)) {
+                if (pair_result.first == 1 && segment_is_shower_topology(sg, false, m_mip_dqdx_median, m_shower_topo_demote_len, m_shower_topo_reset)) {
                     int dir_save = sg->dirsign();
                     
                     VertexPtr start_v = nullptr, end_v = nullptr;

@@ -413,6 +413,77 @@ namespace WireCell::Clus::PR {
         // emits it as "main_candidate".
         bool   m_main_vertex_candidate_flag{false};
 
+        // ---- doc sbnd_xin/docs/pr/31 §12 -- the §10.12 port-fidelity round:
+        // the five surviving bug-class findings of the topology/PID/direction
+        // audit (F5, F6, F3, F1, F4) plus the deliberately-dormant F7.  All
+        // C++ default FALSE = today's path = byte-identical; the SBND
+        // operating point in wct-pr-perevt.jsonnet decides which are on.
+
+        // F5 (was P6).  find_cont_muon_segment_nue's hoisted dir3 falls back
+        // to the 15 cm dir1 when sg_length <= 30 cm; the prototype always
+        // compares two 30 cm directions when either segment is long
+        // (NeutrinoID_track_shower.h:2402-2408).  TRUE = unconditional 30 cm.
+        bool   m_cont_muon_dir3_30cm{false};
+
+        // F6 (was P7, value half).  do_track_comp's empty-comparison-window
+        // (and missing-dEdx) return declares "direction confirmed" (1.0); the
+        // prototype's degenerate answer is abstain (0.0) -- executed, not
+        // inferred (zero-bin TH1F KolmogorovTest returns 0 for both templates,
+        // eval_ks_ratio's first gate fails).  Travels via
+        // TrackPidOptions::track_comp_empty_abstain.
+        bool   m_track_comp_empty_abstain{false};
+
+        // F3 (was P13).  segment_is_shower_topology never clears
+        // kShowerTopology (set-only tail) and its four early returns skip
+        // dirsign(); the prototype clears both at entry, before its early
+        // returns (ProtoSegment.cxx:319-321).  Re-entry on the same segment is
+        // the normal path: stage 3 plus three stage-4 sites.  TRUE = clear the
+        // flag bit and zero dirsign at entry (unset_flags -- other flags
+        // survive).  Also the closer of m_shower_topo_proto_dir's stated
+        // residual (see its comment above): with BOTH on, a segment whose
+        // clouds hit the early returns leaves undirected instead of keeping a
+        // stale direction.  Interaction watched when ON:
+        // m_shower_topo_demote_len's demotion is no longer undone by a stale
+        // flag on the next pass.
+        bool   m_shower_topo_reset{false};
+
+        // F1 (was P1 + P3's 4-momentum half + P4) -- the largest-reach item.
+        // Fifteen reclassification sites in NeutrinoTrackShowerSep.cxx rewrite
+        // the 4-momentum where the prototype writes type and mass and guards
+        // the recompute on a previously computed energy
+        // (if (get_particle_4mom(3)>0) cal_4mom()).  See reclass_4mom's
+        // comment in NeutrinoTrackShowerSep.cxx for the three shapes and the
+        // accident evidence (the guard survives at exactly one site, WITH a
+        // comment paraphrasing it).  TRUE = preserve the existing 4-momentum;
+        // recompute only where the prototype's guard passes.  Moves
+        // kine_reco_Enu directly -- validate alone (doc pr/31 §10.2).
+        bool   m_reclass_preserve_4mom{false};
+
+        // F4 (was P8).  segment_determine_dir_track's median dQ/dx comes from
+        // segment_median_dQ_dx's FILTERED rebuild while the PID receives the
+        // local unfiltered vector (zeros kept) -- the toolkit disagreeing with
+        // itself about the same pathological point.  The prototype takes the
+        // median over the very vector it hands to do_track_pid at all three of
+        // its sites.  TRUE = median over the local vector.  Travels via
+        // TrackPidOptions::dir_track_median_local (and a dedicated
+        // median-only forward into segment_determine_shower_direction's
+        // short-segment interior call, which otherwise passes default
+        // options).  The filtered helper itself is unchanged for every other
+        // caller.
+        bool   m_dir_track_median_local{false};
+
+        // F7 (was P5; pr/30 F4's sibling) -- IMPLEMENTED BUT DELIBERATELY NOT
+        // FLIPPED.  examine_all_showers' asymmetric 165/150-degree acceptance
+        // pair is keyed on find_vertices().first, which the toolkit orders by
+        // proximity to the segment's first fit point where the prototype
+        // orders by vertex id.  TRUE = order the pair by get_graph_index() at
+        // this one call site -- A deterministic convention, not provably the
+        // prototype's (creation orders differ between the trees).  Stays OFF
+        // pending pr/30 F4's adjudication, which owns the global
+        // find_vertices-ordering question; flipping this alone would fix one
+        // of three known order-sensitive callers.
+        bool   m_examine_showers_vertex_by_index{false};
+
         // Proton-template direction vote (doc pr/8; default false = legacy).
         // Thresholds are initial values pending the pr/8 sec. 6 calibration.
         bool   m_proton_dir_vote{false};
@@ -479,6 +550,8 @@ namespace WireCell::Clus::PR {
             o.proton_dir_score_max = m_proton_dir_score_max;
             o.proton_dir_asym_min = m_proton_dir_asym_min;
             o.endpoint_trim_retry = m_endpoint_trim_retry;
+            o.track_comp_empty_abstain = m_track_comp_empty_abstain;   // doc pr/31 §12 F6
+            o.dir_track_median_local = m_dir_track_median_local;       // doc pr/31 §12 F4
             return o;
         }
 
