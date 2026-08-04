@@ -2790,8 +2790,8 @@ void PatternAlgorithms::id_pi0_without_vertex(int acc_segment_id, IndexedShowerS
     std::vector<SegmentPtr> main_vertex_segs;
     {
         auto vd = main_vertex->get_descriptor();
-        for (auto [eit, eend] = boost::out_edges(vd, graph); eit != eend; ++eit) {
-            SegmentPtr seg = graph[*eit].segment;
+        for (auto eit : sorted_out_edges(vd, graph)) {
+            SegmentPtr seg = graph[eit].segment;
             if (seg) main_vertex_segs.push_back(seg);
         }
         std::sort(main_vertex_segs.begin(), main_vertex_segs.end(), [&graph](const SegmentPtr& a, const SegmentPtr& b) {

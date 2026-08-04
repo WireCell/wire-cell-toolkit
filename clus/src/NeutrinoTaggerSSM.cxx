@@ -280,8 +280,8 @@ static SegmentPtr find_incoming_segment(const Graph& graph, VertexPtr vtx,
                                          const std::set<SegmentPtr>& used_segments)
 {
     if (!vtx || !vtx->descriptor_valid()) return nullptr;
-    for (auto [eit,end] = boost::out_edges(vtx->get_descriptor(), graph); eit != end; ++eit) {
-        SegmentPtr sg = graph[*eit].segment;
+    for (auto eit : sorted_out_edges(vtx->get_descriptor(), graph)) {
+        SegmentPtr sg = graph[eit].segment;
         if (sg && used_segments.count(sg)) return sg;
     }
     return nullptr;
@@ -314,8 +314,8 @@ static void fill_ssmsp_all(
         used_segments.insert(ssm_sg);
         to_examine.push_back({ssm_second_vtx, ssm_sg});
 
-        for (auto [eit,end] = boost::out_edges(ssm_main_vtx->get_descriptor(), graph); eit != end; ++eit) {
-            SegmentPtr sg = graph[*eit].segment;
+        for (auto eit : sorted_out_edges(ssm_main_vtx->get_descriptor(), graph)) {
+            SegmentPtr sg = graph[eit].segment;
             if (!sg || sg == ssm_sg) continue;
             fill_ssmsp(sg, 2212, 0, sg->dirsign(), ti, map_segment_in_shower, particle_data);
             used_segments.insert(sg);
@@ -325,8 +325,8 @@ static void fill_ssmsp_all(
         used_vertices.insert(ssm_main_vtx);
     } else {
         // exit: start from main_vertex with nominal PDG
-        for (auto [eit,end] = boost::out_edges(main_vertex->get_descriptor(), graph); eit != end; ++eit) {
-            SegmentPtr sg = graph[*eit].segment;
+        for (auto eit : sorted_out_edges(main_vertex->get_descriptor(), graph)) {
+            SegmentPtr sg = graph[eit].segment;
             if (!sg) continue;
             int pdg = sg->has_particle_info() ? sg->particle_info()->pdg() : 2212;
             fill_ssmsp(sg, pdg, 0, sg->dirsign(), ti, map_segment_in_shower, particle_data);
@@ -342,8 +342,8 @@ static void fill_ssmsp_all(
         std::vector<std::pair<VertexPtr,SegmentPtr>> next;
         for (auto& [curr_vtx, prev_sg] : to_examine) {
             if (!curr_vtx || used_vertices.count(curr_vtx)) continue;
-            for (auto [eit,end] = boost::out_edges(curr_vtx->get_descriptor(), graph); eit != end; ++eit) {
-                SegmentPtr curr_sg = graph[*eit].segment;
+            for (auto eit : sorted_out_edges(curr_vtx->get_descriptor(), graph)) {
+                SegmentPtr curr_sg = graph[eit].segment;
                 if (!curr_sg || used_segments.count(curr_sg)) continue;
                 used_segments.insert(curr_sg);
                 int pdg = curr_sg->has_particle_info() ? curr_sg->particle_info()->pdg() : 2212;
@@ -481,8 +481,8 @@ static ParticleBlock fill_particle_block_at_vtx(
 
     double len_t1=-1e9, len_t2=-1e9, len_s1=-1e9, len_s2=-1e9;
 
-    for (auto [eit,end] = boost::out_edges(vtx->get_descriptor(), graph); eit != end; ++eit) {
-        SegmentPtr sg = graph[*eit].segment;
+    for (auto eit : sorted_out_edges(vtx->get_descriptor(), graph)) {
+        SegmentPtr sg = graph[eit].segment;
         if (!sg || sg == skip_sg) continue;
 
         double sg_len    = segment_track_length(sg) / units::cm;
@@ -610,8 +610,8 @@ bool PatternAlgorithms::ssm_tagger(
     if (!main_vertex || !main_vertex->descriptor_valid()) {
         // nothing to do — fall through to exit path
     } else {
-        for (auto [eit,end] = boost::out_edges(main_vertex->get_descriptor(), graph); eit != end; ++eit) {
-            SegmentPtr sg = graph[*eit].segment;
+        for (auto eit : sorted_out_edges(main_vertex->get_descriptor(), graph)) {
+            SegmentPtr sg = graph[eit].segment;
             if (!sg) continue;
 
             double sg_length        = segment_track_length(sg) / units::cm;
@@ -1199,12 +1199,12 @@ bool PatternAlgorithms::ssm_tagger(
         // skip segments directly connected to ssm_main_vtx or ssm_second_vtx
         bool at_main = false, at_second = false;
         if (ssm_main_vtx && ssm_main_vtx->descriptor_valid()) {
-            for (auto [e2,e2e] = boost::out_edges(ssm_main_vtx->get_descriptor(), graph); e2 != e2e; ++e2)
-                if (graph[*e2].segment == sg) { at_main = true; break; }
+            for (auto e2 : sorted_out_edges(ssm_main_vtx->get_descriptor(), graph)) 
+                if (graph[e2].segment == sg) { at_main = true; break; }
         }
         if (!at_main && ssm_second_vtx && ssm_second_vtx->descriptor_valid()) {
-            for (auto [e2,e2e] = boost::out_edges(ssm_second_vtx->get_descriptor(), graph); e2 != e2e; ++e2)
-                if (graph[*e2].segment == sg) { at_second = true; break; }
+            for (auto e2 : sorted_out_edges(ssm_second_vtx->get_descriptor(), graph)) 
+                if (graph[e2].segment == sg) { at_second = true; break; }
         }
         if (at_main || at_second) continue;
 

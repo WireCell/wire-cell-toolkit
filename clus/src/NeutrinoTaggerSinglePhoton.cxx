@@ -543,9 +543,9 @@ static bool bad_reconstruction_1_sp(SpContext& ctx, ShowerPtr shower,
     if (other_vertex) {
         Point other_pt  = vtx_fit_pt(other_vertex);
         Vector dir_stem = segment_cal_dir_3vector(sg, other_pt, 10 * units::cm);
-        auto [eit, eend] = boost::out_edges(other_vertex->get_descriptor(), ctx.graph);
-        for (; eit != eend; ++eit) {
-            SegmentPtr sg1 = ctx.graph[*eit].segment;
+        const auto eit_edges = sorted_out_edges(other_vertex->get_descriptor(), ctx.graph);
+        for (auto eit : eit_edges) {
+            SegmentPtr sg1 = ctx.graph[eit].segment;
             if (!sg1 || sg1 == sg) continue;
             Vector dir_other = segment_cal_dir_3vector(sg1, other_pt, 10 * units::cm);
             double ang = dir_stem.angle(dir_other) / M_PI * 180.0;
@@ -812,9 +812,8 @@ static bool bad_reconstruction_2_sp(SpContext& ctx,
     if (other_vertex && other_vertex->descriptor_valid()) {
         Point  ovp = vtx_fit_pt(other_vertex);
         size_t n_other_vtx_segs = boost::out_degree(other_vertex->get_descriptor(), ctx.graph);
-        for (auto [eit, eend] = boost::out_edges(other_vertex->get_descriptor(), ctx.graph);
-             eit != eend; ++eit) {
-            SegmentPtr sg1 = ctx.graph[*eit].segment;
+        for (auto eit : sorted_out_edges(other_vertex->get_descriptor(), ctx.graph)) {
+            SegmentPtr sg1 = ctx.graph[eit].segment;
             if (!sg1 || sg1 == sg) continue;
             VertexPtr vtx_1 = find_other_vertex(ctx.graph, sg1, other_vertex);
             if (!vtx_1) continue;
@@ -1271,8 +1270,8 @@ static int mip_identification_sp(SpContext& ctx,
     int n_good_tracks = 0;
     if (vertex && vertex->descriptor_valid()) {
         auto vd = vertex->get_descriptor();
-        for (auto [eit, eend] = boost::out_edges(vd, ctx.graph); eit != eend; ++eit) {
-            SegmentPtr sg1 = ctx.graph[*eit].segment;
+        for (auto eit : sorted_out_edges(vd, ctx.graph)) {
+            SegmentPtr sg1 = ctx.graph[eit].segment;
             if (!sg1 || sg1 == sg) continue;
             if (!ctx.self.seg_dir_weak(sg1) || segment_track_length(sg1) > 10*units::cm) ++n_good_tracks;
         }
@@ -1630,8 +1629,8 @@ static bool high_energy_overlapping_sp(SpContext& ctx, ShowerPtr shower, TaggerI
         bool   flag_all_showers = true;
 
         auto vd = vtx->get_descriptor();
-        for (auto [eit, eend] = boost::out_edges(vd, ctx.graph); eit != eend; ++eit) {
-            SegmentPtr sg1 = ctx.graph[*eit].segment;
+        for (auto eit : sorted_out_edges(vd, ctx.graph)) {
+            SegmentPtr sg1 = ctx.graph[eit].segment;
             if (!sg1 || sg1 == sg) continue;
             bool is_pdg11 = sg1->has_particle_info() && sg1->particle_info()->pdg() == 11;
             bool is_weak_muon = sg1->has_particle_info() &&
@@ -1702,8 +1701,8 @@ static bool high_energy_overlapping_sp(SpContext& ctx, ShowerPtr shower, TaggerI
             double min_ang2 = 180;
             SegmentPtr min_sg = nullptr;
 
-            for (auto [eit, eend] = boost::out_edges(vd, ctx.graph); eit != eend; ++eit) {
-                SegmentPtr sg1 = ctx.graph[*eit].segment;
+            for (auto eit : sorted_out_edges(vd, ctx.graph)) {
+                SegmentPtr sg1 = ctx.graph[eit].segment;
                 if (!sg1 || sg1 == sg) continue;
                 Point dp3 = vtx_point;
                 Vector dir2 = segment_cal_dir_3vector(sg1, dp3, 5*units::cm);
@@ -1716,9 +1715,8 @@ static bool high_energy_overlapping_sp(SpContext& ctx, ShowerPtr shower, TaggerI
             auto iterate_pts = [&](auto begin_it, auto end_it) {
                 for (auto it1 = begin_it; it1 != end_it; ++it1) {
                     double min_dis = 1e9;
-                    for (auto [eit2, eend2] = boost::out_edges(vd, ctx.graph);
-                         eit2 != eend2; ++eit2) {
-                        SegmentPtr sg2 = ctx.graph[*eit2].segment;
+                    for (auto eit2 : sorted_out_edges(vd, ctx.graph)) {
+                        SegmentPtr sg2 = ctx.graph[eit2].segment;
                         if (!sg2 || sg2 == sg) continue;
                         double dis = segment_get_closest_point(sg2, it1->point).first;
                         if (dis < min_dis) min_dis = dis;
@@ -1813,8 +1811,8 @@ static bool low_energy_overlapping_sp(SpContext& ctx, ShowerPtr shower, TaggerIn
 
     if (vtx && vtx->descriptor_valid()) {
         auto vd = vtx->get_descriptor();
-        for (auto [eit, eend] = boost::out_edges(vd, ctx.graph); eit != eend; ++eit) {
-            SegmentPtr sg1 = ctx.graph[*eit].segment;
+        for (auto eit : sorted_out_edges(vd, ctx.graph)) {
+            SegmentPtr sg1 = ctx.graph[eit].segment;
             if (!sg1 || sg1 == sg) continue;
             Point dp = vtx_point;
             Vector dir2 = segment_cal_dir_3vector(sg1, dp, 5*units::cm);
@@ -1856,9 +1854,8 @@ static bool low_energy_overlapping_sp(SpContext& ctx, ShowerPtr shower, TaggerIn
         if (!vtx1->descriptor_valid()) continue;
 
         std::vector<SegmentPtr> vtx_ss;
-        for (auto [eit, eend] = boost::out_edges(vtx1->get_descriptor(), ctx.graph);
-             eit != eend; ++eit) {
-            SegmentPtr sg1 = ctx.graph[*eit].segment;
+        for (auto eit : sorted_out_edges(vtx1->get_descriptor(), ctx.graph)) {
+            SegmentPtr sg1 = ctx.graph[eit].segment;
             if (sg1 && shower_segs.count(sg1)) vtx_ss.push_back(sg1);
         }
         if (vtx_ss.empty()) continue;
@@ -1889,8 +1886,8 @@ static bool low_energy_overlapping_sp(SpContext& ctx, ShowerPtr shower, TaggerIn
     // ------------------------------------------------------------------
     if (vtx && vtx->descriptor_valid()) {
         auto vd = vtx->get_descriptor();
-        for (auto [eit, eend] = boost::out_edges(vd, ctx.graph); eit != eend; ++eit) {
-            SegmentPtr sg1 = ctx.graph[*eit].segment;
+        for (auto eit : sorted_out_edges(vd, ctx.graph)) {
+            SegmentPtr sg1 = ctx.graph[eit].segment;
             if (!sg1 || sg1 == sg) continue;
             bool flag_ov2 = false;
             Point dp = vtx_point;
@@ -2127,9 +2124,8 @@ static bool low_energy_michel_sp(SpContext& ctx, ShowerPtr shower, TaggerInfo& t
         if (!vtx1->cluster() || vtx1->cluster() != start_cl) continue;
         if (!vtx1->descriptor_valid()) continue;
         int cnt = 0;
-        for (auto [eit, eend] = boost::out_edges(vtx1->get_descriptor(), ctx.graph);
-             eit != eend; ++eit)
-            if (sh_segs.count(ctx.graph[*eit].segment)) ++cnt;
+        for (auto eit : sorted_out_edges(vtx1->get_descriptor(), ctx.graph)) 
+            if (sh_segs.count(ctx.graph[eit].segment)) ++cnt;
         if (cnt >= 3) ++n_3seg;
     }
 
@@ -2324,17 +2320,16 @@ bool PatternAlgorithms::singlephoton_tagger(
 
         // Is sg directly connected to main_vertex?
         bool sg_at_main = false;
-        for (auto [eit, eend] = boost::out_edges(main_vertex->get_descriptor(), graph);
-             eit != eend; ++eit)
-            if (graph[*eit].segment == sg) { sg_at_main = true; break; }
+        for (auto eit : sorted_out_edges(main_vertex->get_descriptor(), graph)) 
+            if (graph[eit].segment == sg) { sg_at_main = true; break; }
 
         // Count valid tracks at main_vertex for this shower (skipping sg).
         // Mirrors prototype lines 183-190.
         int first_pass_valid_tracks = 0;
         {
             auto vd = main_vertex->get_descriptor();
-            for (auto [eit, eend] = boost::out_edges(vd, graph); eit != eend; ++eit) {
-                SegmentPtr sg1 = graph[*eit].segment;
+            for (auto eit : sorted_out_edges(vd, graph)) {
+                SegmentPtr sg1 = graph[eit].segment;
                 if (!sg1 || sg1 == sg) continue;
                 double len1 = segment_track_length(sg1);
                 if (!seg_is_shower(sg1) &&
@@ -2435,9 +2430,8 @@ bool PatternAlgorithms::singlephoton_tagger(
 
     // Is max_shower's start segment at main_vertex?
     bool sg_at_main = false;
-    for (auto [eit, eend] = boost::out_edges(main_vertex->get_descriptor(), graph);
-         eit != eend; ++eit)
-        if (graph[*eit].segment == sg) { sg_at_main = true; break; }
+    for (auto eit : sorted_out_edges(main_vertex->get_descriptor(), graph)) 
+        if (graph[eit].segment == sg) { sg_at_main = true; break; }
 
     // Vertex to use for br2/br3 checks
     VertexPtr shw_vtx = find_vertices(ctx.graph, sg).first;
@@ -2445,9 +2439,8 @@ bool PatternAlgorithms::singlephoton_tagger(
 
     // Count valid tracks at main_vertex
     int num_valid_tracks = 0;
-    for (auto [eit, eend] = boost::out_edges(main_vertex->get_descriptor(), graph);
-         eit != eend; ++eit) {
-        SegmentPtr sg1 = graph[*eit].segment;
+    for (auto eit : sorted_out_edges(main_vertex->get_descriptor(), graph)) {
+        SegmentPtr sg1 = graph[eit].segment;
         if (!sg1 || sg1 == sg) continue;
         double len1 = segment_track_length(sg1);
         if (!seg_is_shower(sg1) &&

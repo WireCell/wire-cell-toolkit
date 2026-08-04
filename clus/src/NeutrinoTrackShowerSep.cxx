@@ -397,9 +397,9 @@ void PatternAlgorithms::examine_good_tracks(Graph& graph, Facade::Cluster& clust
         // Get all segments connected to end_vertex
         if (end_vertex->descriptor_valid()) {
             auto vd = end_vertex->get_descriptor();
-            auto edge_range = boost::out_edges(vd, graph);
-            for (auto eit2 = edge_range.first; eit2 != edge_range.second; ++eit2) {
-                SegmentPtr sg1 = graph[*eit2].segment;
+            const auto edge_range = sorted_out_edges(vd, graph);
+            for (auto eit2 : edge_range) {
+                SegmentPtr sg1 = graph[eit2].segment;
                 if (!sg1 || sg1 == sg) continue;
                 
                 WireCell::Vector dir2 = segment_cal_dir_3vector(sg1, end_pt, 15*units::cm);
@@ -462,9 +462,9 @@ void PatternAlgorithms::fix_maps_multiple_tracks_in(Graph& graph, Facade::Cluste
         WireCell::Point vtx_point = vtx->wcpt().point;
         
         // Iterate through all segments connected to this vertex
-        auto edge_range = boost::out_edges(vd, graph);
-        for (auto eit = edge_range.first; eit != edge_range.second; ++eit) {
-            SegmentPtr sg = graph[*eit].segment;
+        const auto edge_range = sorted_out_edges(vd, graph);
+        for (auto eit : edge_range) {
+            SegmentPtr sg = graph[eit].segment;
             if (!sg) continue;
             
             // Determine if this vertex is at the front or back of the segment
@@ -527,9 +527,9 @@ void PatternAlgorithms::fix_maps_shower_in_track_out(Graph& graph, Facade::Clust
         WireCell::Point vtx_point = vtx->wcpt().point;
         
         // Iterate through all segments connected to this vertex
-        auto edge_range = boost::out_edges(vd, graph);
-        for (auto eit = edge_range.first; eit != edge_range.second; ++eit) {
-            SegmentPtr sg = graph[*eit].segment;
+        const auto edge_range = sorted_out_edges(vd, graph);
+        for (auto eit : edge_range) {
+            SegmentPtr sg = graph[eit].segment;
             if (!sg) continue;
             
             // Determine if this vertex is at the front or back of the segment
@@ -604,9 +604,9 @@ void PatternAlgorithms::improve_maps_one_in(Graph& graph, Facade::Cluster& clust
             WireCell::Point vtx_point = vtx->wcpt().point;
             
             // Iterate through all segments connected to this vertex
-            auto edge_range = boost::out_edges(vd, graph);
-            for (auto eit = edge_range.first; eit != edge_range.second; ++eit) {
-                SegmentPtr sg = graph[*eit].segment;
+            const auto edge_range = sorted_out_edges(vd, graph);
+            for (auto eit : edge_range) {
+                SegmentPtr sg = graph[eit].segment;
                 if (!sg) continue;
                 
                 // Skip if segment already processed
@@ -713,9 +713,9 @@ void PatternAlgorithms::improve_maps_shower_in_track_out(Graph& graph, Facade::C
             WireCell::Point vtx_point = vtx->wcpt().point;
             
             // Iterate through all segments connected to this vertex
-            auto edge_range = boost::out_edges(vd, graph);
-            for (auto eit = edge_range.first; eit != edge_range.second; ++eit) {
-                SegmentPtr sg = graph[*eit].segment;
+            const auto edge_range = sorted_out_edges(vd, graph);
+            for (auto eit : edge_range) {
+                SegmentPtr sg = graph[eit].segment;
                 if (!sg) continue;
                 
                 // Determine if this vertex is at the front or back of the segment
@@ -869,9 +869,9 @@ void PatternAlgorithms::improve_maps_no_dir_tracks(Graph& graph, Facade::Cluster
                 WireCell::Point vtx2_pt = two_vertices.second->wcpt().point;
                 
                 // Count segments at first vertex
-                auto edge_range1 = boost::out_edges(vd1, graph);
-                for (auto e_it = edge_range1.first; e_it != edge_range1.second; ++e_it) {
-                    SegmentPtr sg1 = graph[*e_it].segment;
+                const auto edge_range1 = sorted_out_edges(vd1, graph);
+                for (auto e_it : edge_range1) {
+                    SegmentPtr sg1 = graph[e_it].segment;
                     if (!sg1) continue;
                     
                     const auto& wcpts = sg1->wcpts();
@@ -898,9 +898,9 @@ void PatternAlgorithms::improve_maps_no_dir_tracks(Graph& graph, Facade::Cluster
                 }
                 
                 // Count segments at second vertex
-                auto edge_range2 = boost::out_edges(vd2, graph);
-                for (auto e_it = edge_range2.first; e_it != edge_range2.second; ++e_it) {
-                    SegmentPtr sg1 = graph[*e_it].segment;
+                const auto edge_range2 = sorted_out_edges(vd2, graph);
+                for (auto e_it : edge_range2) {
+                    SegmentPtr sg1 = graph[e_it].segment;
                     if (!sg1) continue;
                     
                     const auto& wcpts = sg1->wcpts();
@@ -950,8 +950,8 @@ void PatternAlgorithms::improve_maps_no_dir_tracks(Graph& graph, Facade::Cluster
                     WireCell::Vector v1 = segment_cal_dir_3vector(sg, vtx1_pt, 5*units::cm);
                     double min_angle = 180;
                     
-                    for (auto e_it = edge_range1.first; e_it != edge_range1.second; ++e_it) {
-                        SegmentPtr sg2 = graph[*e_it].segment;
+                    for (auto e_it : edge_range1) {
+                        SegmentPtr sg2 = graph[e_it].segment;
                         if (!sg2 || sg2 == sg) continue;
                         WireCell::Vector v2 = segment_cal_dir_3vector(sg2, vtx1_pt, 5*units::cm);
                         double angle = std::abs(v1.angle(v2) / 3.14159265 * 180.0 - 180.0);
@@ -992,8 +992,8 @@ void PatternAlgorithms::improve_maps_no_dir_tracks(Graph& graph, Facade::Cluster
                     WireCell::Vector v1 = segment_cal_dir_3vector(sg, vtx2_pt, 5*units::cm);
                     double min_angle = 180;
                     
-                    for (auto e_it = edge_range2.first; e_it != edge_range2.second; ++e_it) {
-                        SegmentPtr sg2 = graph[*e_it].segment;
+                    for (auto e_it : edge_range2) {
+                        SegmentPtr sg2 = graph[e_it].segment;
                         if (!sg2 || sg2 == sg) continue;
                         WireCell::Vector v2 = segment_cal_dir_3vector(sg2, vtx2_pt, 5*units::cm);
                         double angle = std::abs(v1.angle(v2) / 3.14159265 * 180.0 - 180.0);
@@ -1065,8 +1065,8 @@ void PatternAlgorithms::improve_maps_no_dir_tracks(Graph& graph, Facade::Cluster
                         double max_angle1 = 0, max_angle2 = 0;
                         
                         WireCell::Vector dir1 = segment_cal_dir_3vector(sg, vtx1_pt, 15*units::cm);
-                        for (auto e_it = edge_range1.first; e_it != edge_range1.second; ++e_it) {
-                            SegmentPtr sg1 = graph[*e_it].segment;
+                        for (auto e_it : edge_range1) {
+                            SegmentPtr sg1 = graph[e_it].segment;
                             if (!sg1 || sg1 == sg) continue;
                             
                             WireCell::Vector dir2 = segment_cal_dir_3vector(sg1, vtx1_pt, 15*units::cm);
@@ -1084,8 +1084,8 @@ void PatternAlgorithms::improve_maps_no_dir_tracks(Graph& graph, Facade::Cluster
                         }
                         
                         dir1 = segment_cal_dir_3vector(sg, vtx2_pt, 10*units::cm);
-                        for (auto e_it = edge_range2.first; e_it != edge_range2.second; ++e_it) {
-                            SegmentPtr sg1 = graph[*e_it].segment;
+                        for (auto e_it : edge_range2) {
+                            SegmentPtr sg1 = graph[e_it].segment;
                             if (!sg1 || sg1 == sg) continue;
                             
                             WireCell::Vector dir2 = segment_cal_dir_3vector(sg1, vtx2_pt, 15*units::cm);
@@ -1129,8 +1129,8 @@ void PatternAlgorithms::improve_maps_no_dir_tracks(Graph& graph, Facade::Cluster
                     
                     if (nvtx1_segs == 2) {
                         SegmentPtr tmp_sg = nullptr;
-                        for (auto e_it = edge_range1.first; e_it != edge_range1.second; ++e_it) {
-                            SegmentPtr candidate = graph[*e_it].segment;
+                        for (auto e_it : edge_range1) {
+                            SegmentPtr candidate = graph[e_it].segment;
                             if (candidate && candidate != sg) {
                                 tmp_sg = candidate;
                                 break;
@@ -1144,8 +1144,8 @@ void PatternAlgorithms::improve_maps_no_dir_tracks(Graph& graph, Facade::Cluster
                         }
                     } else if (nvtx2_segs == 2) {
                         SegmentPtr tmp_sg = nullptr;
-                        for (auto e_it = edge_range2.first; e_it != edge_range2.second; ++e_it) {
-                            SegmentPtr candidate = graph[*e_it].segment;
+                        for (auto e_it : edge_range2) {
+                            SegmentPtr candidate = graph[e_it].segment;
                             if (candidate && candidate != sg) {
                                 tmp_sg = candidate;
                                 break;
@@ -1230,8 +1230,8 @@ void PatternAlgorithms::improve_maps_no_dir_tracks(Graph& graph, Facade::Cluster
                         double min_angle = 180;
                         double para_angle = 90;
                         
-                        for (auto e_it = edge_range1.first; e_it != edge_range1.second; ++e_it) {
-                            SegmentPtr sg2 = graph[*e_it].segment;
+                        for (auto e_it : edge_range1) {
+                            SegmentPtr sg2 = graph[e_it].segment;
                             if (!sg2 || sg2 == sg) continue;
                             bool is_shower2 = sg2->flags_any(SegmentFlags::kShowerTrajectory) ||
                                              sg2->flags_any(SegmentFlags::kShowerTopology) ||
@@ -1258,8 +1258,8 @@ void PatternAlgorithms::improve_maps_no_dir_tracks(Graph& graph, Facade::Cluster
                         double min_angle = 180;
                         double para_angle = 90;
                         
-                        for (auto e_it = edge_range2.first; e_it != edge_range2.second; ++e_it) {
-                            SegmentPtr sg2 = graph[*e_it].segment;
+                        for (auto e_it : edge_range2) {
+                            SegmentPtr sg2 = graph[e_it].segment;
                             if (!sg2 || sg2 == sg) continue;
                             bool is_shower2 = sg2->flags_any(SegmentFlags::kShowerTrajectory) ||
                                              sg2->flags_any(SegmentFlags::kShowerTopology) ||
@@ -1331,9 +1331,9 @@ void PatternAlgorithms::improve_maps_multiple_tracks_in(Graph& graph, Facade::Cl
             WireCell::Point vtx_point = vtx->wcpt().point;
             
             // Iterate through all segments connected to this vertex
-            auto edge_range = boost::out_edges(vd, graph);
-            for (auto eit = edge_range.first; eit != edge_range.second; ++eit) {
-                SegmentPtr sg = graph[*eit].segment;
+            const auto edge_range = sorted_out_edges(vd, graph);
+            for (auto eit : edge_range) {
+                SegmentPtr sg = graph[eit].segment;
                 if (!sg) continue;
                 
                 // Determine if this vertex is at the front or back of the segment
@@ -1491,9 +1491,9 @@ bool PatternAlgorithms::examine_maps(Graph&graph, Facade::Cluster& cluster){
         WireCell::Point vtx_point = vtx->wcpt().point;
         
         // Iterate through all segments connected to this vertex
-        auto edge_range = boost::out_edges(vd, graph);
-        for (auto eit = edge_range.first; eit != edge_range.second; ++eit) {
-            SegmentPtr sg = graph[*eit].segment;
+        const auto edge_range = sorted_out_edges(vd, graph);
+        for (auto eit : edge_range) {
+            SegmentPtr sg = graph[eit].segment;
             if (!sg) continue;
             
             // Determine if this vertex is at the front or back of the segment
@@ -1611,9 +1611,9 @@ void PatternAlgorithms::examine_all_showers(Graph& graph, Facade::Cluster& clust
             
             if (pair_vertices.second->descriptor_valid()) {
                 auto vd2 = pair_vertices.second->get_descriptor();
-                auto edge_range = boost::out_edges(vd2, graph);
-                for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
-                    SegmentPtr sg1 = graph[*e_it].segment;
+                const auto edge_range = sorted_out_edges(vd2, graph);
+                for (auto e_it : edge_range) {
+                    SegmentPtr sg1 = graph[e_it].segment;
                     if (!sg1 || sg1 == good_track) continue;
                     
                     WireCell::Vector dir2 = segment_cal_dir_3vector(sg1, vtx2_pt, 15*units::cm);
@@ -1635,9 +1635,9 @@ void PatternAlgorithms::examine_all_showers(Graph& graph, Facade::Cluster& clust
             
             if (pair_vertices.first->descriptor_valid()) {
                 auto vd1 = pair_vertices.first->get_descriptor();
-                auto edge_range = boost::out_edges(vd1, graph);
-                for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
-                    SegmentPtr sg1 = graph[*e_it].segment;
+                const auto edge_range = sorted_out_edges(vd1, graph);
+                for (auto e_it : edge_range) {
+                    SegmentPtr sg1 = graph[e_it].segment;
                     if (!sg1 || sg1 == good_track) continue;
                     
                     WireCell::Vector dir2 = segment_cal_dir_3vector(sg1, vtx1_pt, 15*units::cm);
@@ -1813,9 +1813,9 @@ void PatternAlgorithms::examine_all_showers(Graph& graph, Facade::Cluster& clust
 
                     if (pair_vertices.first && pair_vertices.first->descriptor_valid()) {
                         auto vd1 = pair_vertices.first->get_descriptor();
-                        auto edge_range = boost::out_edges(vd1, graph);
-                        for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
-                            SegmentPtr sg1 = graph[*e_it].segment;
+                        const auto edge_range = sorted_out_edges(vd1, graph);
+                        for (auto e_it : edge_range) {
+                            SegmentPtr sg1 = graph[e_it].segment;
                             if (sg1 && (sg1->flags_any(SegmentFlags::kShowerTrajectory) ||
                                        sg1->flags_any(SegmentFlags::kShowerTopology) ||
                                        (sg1->has_particle_info() && std::abs(sg1->particle_info()->pdg()) == 11))) {
@@ -1827,9 +1827,9 @@ void PatternAlgorithms::examine_all_showers(Graph& graph, Facade::Cluster& clust
 
                     if (!flag_shower && pair_vertices.second && pair_vertices.second->descriptor_valid()) {
                         auto vd2 = pair_vertices.second->get_descriptor();
-                        auto edge_range = boost::out_edges(vd2, graph);
-                        for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
-                            SegmentPtr sg1 = graph[*e_it].segment;
+                        const auto edge_range = sorted_out_edges(vd2, graph);
+                        for (auto e_it : edge_range) {
+                            SegmentPtr sg1 = graph[e_it].segment;
                             if (sg1 && (sg1->flags_any(SegmentFlags::kShowerTrajectory) ||
                                        sg1->flags_any(SegmentFlags::kShowerTopology) ||
                                        (sg1->has_particle_info() && std::abs(sg1->particle_info()->pdg()) == 11))) {

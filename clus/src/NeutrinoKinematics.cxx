@@ -168,9 +168,9 @@ KineInfo PatternAlgorithms::fill_kine_tree(
     // -------------------------------------------------------------------------
     std::vector<std::pair<VertexPtr, SegmentPtr>> segments_to_be_examined;
 
-    auto [ei_begin, ei_end] = boost::out_edges(main_vertex->get_descriptor(), graph);
-    for (auto ei = ei_begin; ei != ei_end; ++ei) {
-        SegmentPtr seg = graph[*ei].segment;
+    const auto ei_begin_edges = sorted_out_edges(main_vertex->get_descriptor(), graph);
+    for (auto ei : ei_begin_edges) {
+        SegmentPtr seg = graph[ei].segment;
 
         auto it = map_sg_shower.find(seg);
         if (it != map_sg_shower.end()) {
@@ -202,9 +202,9 @@ KineInfo PatternAlgorithms::fill_kine_tree(
             int  prev_pdg = 0;
             if (prev_sg->particle_info()) prev_pdg = prev_sg->particle_info()->pdg();
 
-            auto [ei2_begin, ei2_end] = boost::out_edges(curr_vtx->get_descriptor(), graph);
-            for (auto ei2 = ei2_begin; ei2 != ei2_end; ++ei2) {
-                SegmentPtr curr_sg = graph[*ei2].segment;
+            const auto ei2_begin_edges = sorted_out_edges(curr_vtx->get_descriptor(), graph);
+            for (auto ei2 : ei2_begin_edges) {
+                SegmentPtr curr_sg = graph[ei2].segment;
                 if (curr_sg == prev_sg) continue;
 
                 int curr_pdg = 0;

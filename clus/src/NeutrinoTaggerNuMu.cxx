@@ -61,8 +61,8 @@ static inline bool seg_is_shower(SegmentPtr seg) {
 // Prototype: map_vertex_segments[main_vertex].find(sg) != end()
 static bool seg_at_main_vertex(SegmentPtr sg, VertexPtr main_vertex, const Graph& graph) {
     if (!main_vertex || !main_vertex->descriptor_valid()) return false;
-    for (auto [eit, end] = boost::out_edges(main_vertex->get_descriptor(), graph); eit != end; ++eit) {
-        if (graph[*eit].segment == sg) return true;
+    for (auto eit : sorted_out_edges(main_vertex->get_descriptor(), graph)) {
+        if (graph[eit].segment == sg) return true;
     }
     return false;
 }
@@ -187,8 +187,8 @@ std::pair<bool, double> PatternAlgorithms::numu_tagger(
     // -----------------------------------------------------------------------
     if (main_vertex && main_vertex->descriptor_valid()) {
         auto vd = main_vertex->get_descriptor();
-        for (auto [eit, eit_end] = boost::out_edges(vd, graph); eit != eit_end; ++eit) {
-            SegmentPtr sg = graph[*eit].segment;
+        for (auto eit : sorted_out_edges(vd, graph)) {
+            SegmentPtr sg = graph[eit].segment;
             if (!sg) continue;
 
             bool flag_numu_cc_1 = false;

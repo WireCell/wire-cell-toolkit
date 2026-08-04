@@ -1577,8 +1577,8 @@ bool PatternAlgorithms::merge_nearby_vertices(Graph& graph, Facade::Cluster& clu
             // a self-loop after the merge and must be removed beforehand).
             std::vector<SegmentPtr> direct_segs;
             auto v2d = vtx2->get_descriptor();
-            for (auto [eit, eend] = boost::out_edges(v2d, graph); eit != eend; ++eit) {
-                SegmentPtr sg = graph[*eit].segment;
+            for (auto eit : sorted_out_edges(v2d, graph)) {
+                SegmentPtr sg = graph[eit].segment;
                 if (!sg) continue;
                 auto [sv1, sv2] = find_vertices(graph, sg);
                 if ((sv1 == vtx1 || sv2 == vtx1) && (sv1 == vtx2 || sv2 == vtx2))
@@ -1896,9 +1896,9 @@ Facade::geo_vector_t PatternAlgorithms::vertex_segment_get_dir(VertexPtr& vertex
     
     bool segment_connected = false;
     auto vd = vertex->get_descriptor();
-    auto edge_range = boost::out_edges(vd, graph);
-    for (auto eit = edge_range.first; eit != edge_range.second; ++eit) {
-        if (graph[*eit].segment == segment) {
+    const auto edge_range = sorted_out_edges(vd, graph);
+    for (auto eit : edge_range) {
+        if (graph[eit].segment == segment) {
             segment_connected = true;
             break;
         }
@@ -2437,10 +2437,10 @@ Facade::geo_vector_t PatternAlgorithms::calc_dir_cluster(Graph& graph, Facade::C
                 // Check segments connected to this vertex
                 if (vertex->descriptor_valid()) {
                     auto vd = vertex->get_descriptor();
-                    auto edge_range = boost::out_edges(vd, graph);
+                    const auto edge_range = sorted_out_edges(vd, graph);
                     
-                    for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
-                        SegmentPtr seg = graph[*e_it].segment;
+                    for (auto e_it : edge_range) {
+                        SegmentPtr seg = graph[e_it].segment;
                         if (!seg) continue;
                         
                         bool is_shower = seg->flags_any(SegmentFlags::kShowerTrajectory) ||

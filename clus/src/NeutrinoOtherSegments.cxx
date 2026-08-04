@@ -1116,9 +1116,9 @@ bool PatternAlgorithms::modify_vertex_isochronous(Graph& graph, Facade::Cluster&
     auto vd = vtx->get_descriptor();
     std::vector<SegmentPtr> vtx_segs;
     {
-        auto edge_range = boost::out_edges(vd, graph);
-        for (auto eit = edge_range.first; eit != edge_range.second; ++eit) {
-            SegmentPtr sg1 = graph[*eit].segment;
+        const auto edge_range = sorted_out_edges(vd, graph);
+        for (auto eit : edge_range) {
+            SegmentPtr sg1 = graph[eit].segment;
             if (sg1) vtx_segs.push_back(sg1);
         }
     }

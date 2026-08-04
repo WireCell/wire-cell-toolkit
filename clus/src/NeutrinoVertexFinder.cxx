@@ -329,9 +329,9 @@ std::tuple<bool, int, int> PatternAlgorithms::examine_main_vertex_candidate(Grap
     
     // Check Michel electron case: 2 segments (1 track + 1 shower)
     int num_segments = 0;
-    auto edge_range2 = boost::out_edges(vd, graph);
-    for (auto eit = edge_range2.first; eit != edge_range2.second; ++eit) {
-        if (graph[*eit].segment) num_segments++;
+    const auto edge_range2 = sorted_out_edges(vd, graph);
+    for (auto eit : edge_range2) {
+        if (graph[eit].segment) num_segments++;
     }
     
     if (num_segments == 2 && ntracks == 1 && nshowers == 1 && track_cand && shower_cand) {
@@ -406,13 +406,13 @@ VertexPtr PatternAlgorithms::compare_main_vertices_all_showers(Graph& graph, Fac
         // Adjust for single short segment vertices
         if (vtx->descriptor_valid()) {
             auto vd = vtx->get_descriptor();
-            auto edge_range = boost::out_edges(vd, graph);
+            const auto edge_range = sorted_out_edges(vd, graph);
             int num_segs = 0;
             double seg_length = 0;
-            for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
-                if (graph[*e_it].segment) {
+            for (auto e_it : edge_range) {
+                if (graph[e_it].segment) {
                     num_segs++;
-                    seg_length = segment_track_length(graph[*e_it].segment);
+                    seg_length = segment_track_length(graph[e_it].segment);
                 }
             }
             
@@ -635,12 +635,12 @@ float PatternAlgorithms::calc_conflict_maps(Graph& graph, VertexPtr vertex){
         if (!vtx->descriptor_valid()) continue;
         
         auto vtx_vd = vtx->get_descriptor();
-        auto vtx_edge_range = boost::out_edges(vtx_vd, graph);
+        const auto vtx_edge_range = sorted_out_edges(vtx_vd, graph);
         
         // Count number of segments
         int num_segments = 0;
-        for (auto e_it = vtx_edge_range.first; e_it != vtx_edge_range.second; ++e_it) {
-            if (graph[*e_it].segment) num_segments++;
+        for (auto e_it : vtx_edge_range) {
+            if (graph[e_it].segment) num_segments++;
         }
         if (num_segments <= 1) continue;
         
@@ -653,8 +653,8 @@ float PatternAlgorithms::calc_conflict_maps(Graph& graph, VertexPtr vertex){
         std::map<SegmentPtr, Facade::geo_vector_t> map_out_segment_dirs;
         
         // Analyze each segment connected to this vertex
-        for (auto e_it = vtx_edge_range.first; e_it != vtx_edge_range.second; ++e_it) {
-            SegmentPtr sg = graph[*e_it].segment;
+        for (auto e_it : vtx_edge_range) {
+            SegmentPtr sg = graph[e_it].segment;
             if (!sg || map_seg_dir.find(sg) == map_seg_dir.end()) continue;
             
             VertexPtr start_vtx = map_seg_dir[sg].first;
@@ -799,10 +799,10 @@ VertexPtr PatternAlgorithms::compare_main_vertices(Graph& graph, Facade::Cluster
         int n_proton_out = 0;
         
         auto vd = vtx->get_descriptor();
-        auto edge_range = boost::out_edges(vd, graph);
+        const auto edge_range = sorted_out_edges(vd, graph);
         
-        for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
-            SegmentPtr sg = graph[*e_it].segment;
+        for (auto e_it : edge_range) {
+            SegmentPtr sg = graph[e_it].segment;
             if (!sg) continue;
             
             bool is_proton = sg->has_particle_info() && std::abs(sg->particle_info()->pdg()) == 2212;
@@ -816,16 +816,16 @@ VertexPtr PatternAlgorithms::compare_main_vertices(Graph& graph, Facade::Cluster
                 if (!other_vertex || !other_vertex->descriptor_valid()) continue;
                 
                 auto other_vd = other_vertex->get_descriptor();
-                auto other_edge_range = boost::out_edges(other_vd, graph);
+                const auto other_edge_range = sorted_out_edges(other_vd, graph);
                 
                 int num_segs = 0;
-                for (auto oe_it = other_edge_range.first; oe_it != other_edge_range.second; ++oe_it) {
-                    if (graph[*oe_it].segment) num_segs++;
+                for (auto oe_it : other_edge_range) {
+                    if (graph[oe_it].segment) num_segs++;
                 }
                 
                 if (num_segs > 1) {
-                    for (auto oe_it = other_edge_range.first; oe_it != other_edge_range.second; ++oe_it) {
-                        SegmentPtr other_sg = graph[*oe_it].segment;
+                    for (auto oe_it : other_edge_range) {
+                        SegmentPtr other_sg = graph[oe_it].segment;
                         if (!other_sg) continue;
                         
                         const auto& wcps = other_sg->wcpts();
@@ -882,10 +882,10 @@ VertexPtr PatternAlgorithms::compare_main_vertices(Graph& graph, Facade::Cluster
         
         // Score based on connected segments
         auto vd = vtx->get_descriptor();
-        auto edge_range = boost::out_edges(vd, graph);
+        const auto edge_range = sorted_out_edges(vd, graph);
         
-        for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
-            SegmentPtr sg = graph[*e_it].segment;
+        for (auto e_it : edge_range) {
+            SegmentPtr sg = graph[e_it].segment;
             if (!sg) continue;
             
             bool is_shower = sg->flags_any(SegmentFlags::kShowerTrajectory) ||
@@ -982,10 +982,10 @@ std::pair<SegmentPtr, VertexPtr> PatternAlgorithms::find_cont_muon_segment(Graph
     
     // Iterate through all segments connected to this vertex
     auto vd = vtx->get_descriptor();
-    auto edge_range = boost::out_edges(vd, graph);
+    const auto edge_range = sorted_out_edges(vd, graph);
     
-    for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
-        SegmentPtr sg2 = graph[*e_it].segment;
+    for (auto e_it : edge_range) {
+        SegmentPtr sg2 = graph[e_it].segment;
         if (!sg2 || sg2 == sg) continue;
         
         // Find the other vertex of sg2
@@ -1074,9 +1074,9 @@ bool PatternAlgorithms::examine_direction(Graph& graph, VertexPtr vertex, Vertex
     // Examine vertex segments to determine characteristics
     if (vertex->descriptor_valid()) {
         auto vd = vertex->get_descriptor();
-        auto edge_range = boost::out_edges(vd, graph);
-        for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
-            SegmentPtr seg = graph[*e_it].segment;
+        const auto edge_range = sorted_out_edges(vd, graph);
+        for (auto e_it : edge_range) {
+            SegmentPtr seg = graph[e_it].segment;
             if (!seg) continue;
             
             double length = segment_track_length(seg);
@@ -1114,9 +1114,9 @@ bool PatternAlgorithms::examine_direction(Graph& graph, VertexPtr vertex, Vertex
     if (vertex->descriptor_valid()) {
         auto vd = vertex->get_descriptor();
         int num_vertex_segments = 0;
-        auto edge_range = boost::out_edges(vd, graph);
-        for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
-            if (graph[*e_it].segment) num_vertex_segments++;
+        const auto edge_range = sorted_out_edges(vd, graph);
+        for (auto e_it : edge_range) {
+            if (graph[e_it].segment) num_vertex_segments++;
         }
         
         if ((num_vertex_segments == 2 && (max_vtx_length > 30*units::cm || min_vtx_length > 15*units::cm)) ||
@@ -1166,9 +1166,9 @@ bool PatternAlgorithms::examine_direction(Graph& graph, VertexPtr vertex, Vertex
             std::vector<SegmentPtr> in_showers;
             
             auto prev_vd = prev_vtx->get_descriptor();
-            auto prev_edge_range = boost::out_edges(prev_vd, graph);
-            for (auto e_it = prev_edge_range.first; e_it != prev_edge_range.second; ++e_it) {
-                SegmentPtr sg = graph[*e_it].segment;
+            const auto prev_edge_range = sorted_out_edges(prev_vd, graph);
+            for (auto e_it : prev_edge_range) {
+                SegmentPtr sg = graph[e_it].segment;
                 if (!sg || sg == current_sg) continue;
                 // Only count a segment as "incoming shower" if it was already processed
                 // in an earlier BFS level. Sibling segments in the same BFS level may
@@ -1263,9 +1263,9 @@ bool PatternAlgorithms::examine_direction(Graph& graph, VertexPtr vertex, Vertex
                                 Facade::geo_vector_t tmp_dir1 = segment_cal_dir_3vector(current_sg, next_vertex->wcpt().point, 15*units::cm);
                                 
                                 auto next_vd = next_vertex->get_descriptor();
-                                auto next_edge_range = boost::out_edges(next_vd, graph);
-                                for (auto ne_it = next_edge_range.first; ne_it != next_edge_range.second; ++ne_it) {
-                                    SegmentPtr other_sg = graph[*ne_it].segment;
+                                const auto next_edge_range = sorted_out_edges(next_vd, graph);
+                                for (auto ne_it : next_edge_range) {
+                                    SegmentPtr other_sg = graph[ne_it].segment;
                                     if (!other_sg || other_sg == current_sg) continue;
                                     
                                     Facade::geo_vector_t tmp_dir2 = segment_cal_dir_3vector(other_sg, next_vertex->wcpt().point, 15*units::cm);
@@ -1417,10 +1417,10 @@ bool PatternAlgorithms::examine_direction(Graph& graph, VertexPtr vertex, Vertex
     
     if (flag_fill_long_muon && vertex->descriptor_valid()) {
         auto vd = vertex->get_descriptor();
-        auto edge_range = boost::out_edges(vd, graph);
+        const auto edge_range = sorted_out_edges(vd, graph);
         
-        for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
-            SegmentPtr sg = graph[*e_it].segment;
+        for (auto e_it : edge_range) {
+            SegmentPtr sg = graph[e_it].segment;
             if (!sg) continue;
             
             double dqdx_ratio = segment_median_dQ_dx(sg) / m_mip_dqdx_median;
@@ -1473,10 +1473,10 @@ bool PatternAlgorithms::examine_direction(Graph& graph, VertexPtr vertex, Vertex
         std::vector<SegmentPtr> pion_sgs;
         
         auto vd = vertex->get_descriptor();
-        auto edge_range = boost::out_edges(vd, graph);
+        const auto edge_range = sorted_out_edges(vd, graph);
         
-        for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
-            SegmentPtr sg = graph[*e_it].segment;
+        for (auto e_it : edge_range) {
+            SegmentPtr sg = graph[e_it].segment;
             if (!sg) continue;
             
             int pdg = sg->has_particle_info() ? sg->particle_info()->pdg() : 0;
@@ -1488,9 +1488,9 @@ bool PatternAlgorithms::examine_direction(Graph& graph, VertexPtr vertex, Vertex
                 
                 int n_proton = 0;
                 auto other_vd = other_vertex->get_descriptor();
-                auto other_edge_range = boost::out_edges(other_vd, graph);
-                for (auto oe_it = other_edge_range.first; oe_it != other_edge_range.second; ++oe_it) {
-                    SegmentPtr other_sg = graph[*oe_it].segment;
+                const auto other_edge_range = sorted_out_edges(other_vd, graph);
+                for (auto oe_it : other_edge_range) {
+                    SegmentPtr other_sg = graph[oe_it].segment;
                     if (other_sg && other_sg->has_particle_info() && 
                         std::abs(other_sg->particle_info()->pdg()) == 2212) {
                         n_proton++;
@@ -1509,9 +1509,9 @@ bool PatternAlgorithms::examine_direction(Graph& graph, VertexPtr vertex, Vertex
                 
                 int n_proton = 0;
                 auto other_vd = other_vertex->get_descriptor();
-                auto other_edge_range = boost::out_edges(other_vd, graph);
-                for (auto oe_it = other_edge_range.first; oe_it != other_edge_range.second; ++oe_it) {
-                    SegmentPtr other_sg = graph[*oe_it].segment;
+                const auto other_edge_range = sorted_out_edges(other_vd, graph);
+                for (auto oe_it : other_edge_range) {
+                    SegmentPtr other_sg = graph[oe_it].segment;
                     if (other_sg && other_sg->has_particle_info() && 
                         std::abs(other_sg->particle_info()->pdg()) == 2212) {
                         n_proton++;
@@ -1577,9 +1577,9 @@ bool PatternAlgorithms::examine_direction(Graph& graph, VertexPtr vertex, Vertex
                     
                     // Check if this vertex is connected to our segment
                     auto vtx_vd = vtx->get_descriptor();
-                    auto vtx_edge_range = boost::out_edges(vtx_vd, graph);
-                    for (auto ve_it = vtx_edge_range.first; ve_it != vtx_edge_range.second; ++ve_it) {
-                        if (graph[*ve_it].segment == sg) {
+                    const auto vtx_edge_range = sorted_out_edges(vtx_vd, graph);
+                    for (auto ve_it : vtx_edge_range) {
+                        if (graph[ve_it].segment == sg) {
                             // This vertex is connected to our segment
                             const auto& wcps = sg->wcpts();
                             if (!wcps.empty()) {
@@ -1604,16 +1604,16 @@ bool PatternAlgorithms::examine_direction(Graph& graph, VertexPtr vertex, Vertex
                 int num_segs_start = 0, num_segs_end = 0;
                 if (start_v->descriptor_valid()) {
                     auto start_vd = start_v->get_descriptor();
-                    auto start_edge_range = boost::out_edges(start_vd, graph);
-                    for (auto se_it = start_edge_range.first; se_it != start_edge_range.second; ++se_it) {
-                        if (graph[*se_it].segment) num_segs_start++;
+                    const auto start_edge_range = sorted_out_edges(start_vd, graph);
+                    for (auto se_it : start_edge_range) {
+                        if (graph[se_it].segment) num_segs_start++;
                     }
                 }
                 if (end_v->descriptor_valid()) {
                     auto end_vd = end_v->get_descriptor();
-                    auto end_edge_range = boost::out_edges(end_vd, graph);
-                    for (auto ee_it = end_edge_range.first; ee_it != end_edge_range.second; ++ee_it) {
-                        if (graph[*ee_it].segment) num_segs_end++;
+                    const auto end_edge_range = sorted_out_edges(end_vd, graph);
+                    for (auto ee_it : end_edge_range) {
+                        if (graph[ee_it].segment) num_segs_end++;
                     }
                 }
                 
@@ -1636,9 +1636,9 @@ bool PatternAlgorithms::examine_direction(Graph& graph, VertexPtr vertex, Vertex
                 else if (num_segs_end == 2 && end_v->descriptor_valid()) {
                     bool flag_Michel = false;
                     auto end_vd = end_v->get_descriptor();
-                    auto end_edge_range = boost::out_edges(end_vd, graph);
-                    for (auto ee_it = end_edge_range.first; ee_it != end_edge_range.second; ++ee_it) {
-                        SegmentPtr other_sg = graph[*ee_it].segment;
+                    const auto end_edge_range = sorted_out_edges(end_vd, graph);
+                    for (auto ee_it : end_edge_range) {
+                        SegmentPtr other_sg = graph[ee_it].segment;
                         if (!other_sg || other_sg == sg) continue;
                         // Check if other segment is a shower (kShowerTrajectory flag or electron PDG)
                         if (other_sg->flags_any(SegmentFlags::kShowerTrajectory) ||
@@ -1653,9 +1653,9 @@ bool PatternAlgorithms::examine_direction(Graph& graph, VertexPtr vertex, Vertex
                 else if (num_segs_start == 2 && start_v->descriptor_valid()) {
                     bool flag_Michel = false;
                     auto start_vd = start_v->get_descriptor();
-                    auto start_edge_range = boost::out_edges(start_vd, graph);
-                    for (auto se_it = start_edge_range.first; se_it != start_edge_range.second; ++se_it) {
-                        SegmentPtr other_sg = graph[*se_it].segment;
+                    const auto start_edge_range = sorted_out_edges(start_vd, graph);
+                    for (auto se_it : start_edge_range) {
+                        SegmentPtr other_sg = graph[se_it].segment;
                         if (!other_sg || other_sg == sg) continue;
                         // Check if other segment is a shower (kShowerTrajectory flag or electron PDG)
                         if (other_sg->flags_any(SegmentFlags::kShowerTrajectory) ||
@@ -1713,16 +1713,16 @@ bool PatternAlgorithms::eliminate_short_vertex_activities(Graph& graph, Facade::
             int num_segs_v1 = 0, num_segs_v2 = 0;
             if (v1->descriptor_valid()) {
                 auto v1d = v1->get_descriptor();
-                auto v1_edge_range = boost::out_edges(v1d, graph);
-                for (auto ve_it = v1_edge_range.first; ve_it != v1_edge_range.second; ++ve_it) {
-                    if (graph[*ve_it].segment) num_segs_v1++;
+                const auto v1_edge_range = sorted_out_edges(v1d, graph);
+                for (auto ve_it : v1_edge_range) {
+                    if (graph[ve_it].segment) num_segs_v1++;
                 }
             }
             if (v2->descriptor_valid()) {
                 auto v2d = v2->get_descriptor();
-                auto v2_edge_range = boost::out_edges(v2d, graph);
-                for (auto ve_it = v2_edge_range.first; ve_it != v2_edge_range.second; ++ve_it) {
-                    if (graph[*ve_it].segment) num_segs_v2++;
+                const auto v2_edge_range = sorted_out_edges(v2d, graph);
+                for (auto ve_it : v2_edge_range) {
+                    if (graph[ve_it].segment) num_segs_v2++;
                 }
             }
             
@@ -1781,9 +1781,9 @@ bool PatternAlgorithms::eliminate_short_vertex_activities(Graph& graph, Facade::
                 
                 if (num_segs_v1 == 1 && num_segs_v2 > 1 && v2->descriptor_valid()) {
                     auto v2d = v2->get_descriptor();
-                    auto v2_edge_range = boost::out_edges(v2d, graph);
-                    for (auto ve_it = v2_edge_range.first; ve_it != v2_edge_range.second; ++ve_it) {
-                        SegmentPtr sg1 = graph[*ve_it].segment;
+                    const auto v2_edge_range = sorted_out_edges(v2d, graph);
+                    for (auto ve_it : v2_edge_range) {
+                        SegmentPtr sg1 = graph[ve_it].segment;
                         if (!sg1 || sg1 == sg) continue;
                         
                         auto [dis, closest_pt] = segment_get_closest_point(sg1, v1_pt, "fit");
@@ -1803,9 +1803,9 @@ bool PatternAlgorithms::eliminate_short_vertex_activities(Graph& graph, Facade::
                     }
                 } else if (num_segs_v2 == 1 && num_segs_v1 > 1 && v1->descriptor_valid()) {
                     auto v1d = v1->get_descriptor();
-                    auto v1_edge_range = boost::out_edges(v1d, graph);
-                    for (auto ve_it = v1_edge_range.first; ve_it != v1_edge_range.second; ++ve_it) {
-                        SegmentPtr sg1 = graph[*ve_it].segment;
+                    const auto v1_edge_range = sorted_out_edges(v1d, graph);
+                    for (auto ve_it : v1_edge_range) {
+                        SegmentPtr sg1 = graph[ve_it].segment;
                         if (!sg1 || sg1 == sg) continue;
                         
                         auto [dis, closest_pt] = segment_get_closest_point(sg1, v2_pt, "fit");
@@ -2563,9 +2563,9 @@ void PatternAlgorithms::determine_main_vertex(Graph& graph, Facade::Cluster& clu
             int num_segs = 0;
             if (vtx->descriptor_valid()) {
                 auto vd = vtx->get_descriptor();
-                auto edge_range = boost::out_edges(vd, graph);
-                for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
-                    if (graph[*e_it].segment) num_segs++;
+                const auto edge_range = sorted_out_edges(vd, graph);
+                for (auto e_it : edge_range) {
+                    if (graph[e_it].segment) num_segs++;
                 }
             }
 
@@ -2629,9 +2629,9 @@ void PatternAlgorithms::determine_main_vertex(Graph& graph, Facade::Cluster& clu
             std::string seg_list;
             if (vtx->descriptor_valid()) {
                 auto vd = vtx->get_descriptor();
-                auto edge_range = boost::out_edges(vd, graph);
-                for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
-                    SegmentPtr sg = graph[*e_it].segment;
+                const auto edge_range = sorted_out_edges(vd, graph);
+                for (auto e_it : edge_range) {
+                    SegmentPtr sg = graph[e_it].segment;
                     if (sg) seg_list += std::to_string(sg->id()) + ", ";
                 }
             }
@@ -2694,9 +2694,9 @@ void PatternAlgorithms::determine_main_vertex(Graph& graph, Facade::Cluster& clu
         std::string seg_list;
         if (main_vertex->descriptor_valid()) {
             auto vd = main_vertex->get_descriptor();
-            auto edge_range = boost::out_edges(vd, graph);
-            for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
-                SegmentPtr sg = graph[*e_it].segment;
+            const auto edge_range = sorted_out_edges(vd, graph);
+            for (auto e_it : edge_range) {
+                SegmentPtr sg = graph[e_it].segment;
                 if (sg) seg_list += std::to_string(sg->id()) + ", ";
             }
         }
@@ -2732,10 +2732,10 @@ void PatternAlgorithms::change_daughter_type(Graph& graph, VertexPtr vertex, Seg
     
     // Iterate through all segments connected to the other vertex
     auto other_vd = other_vtx->get_descriptor();
-    auto edge_range = boost::out_edges(other_vd, graph);
+    const auto edge_range = sorted_out_edges(other_vd, graph);
     
-    for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
-        SegmentPtr sg1 = graph[*e_it].segment;
+    for (auto e_it : edge_range) {
+        SegmentPtr sg1 = graph[e_it].segment;
         if (!sg1 || sg1 == segment) continue;
         
         // Skip if already the same particle type
@@ -2825,9 +2825,9 @@ void PatternAlgorithms::examine_main_vertices_local(Graph& graph, std::vector<Ve
         // Count segments connected to this vertex
         int num_segs = 0;
         auto vd = vtx->get_descriptor();
-        auto edge_range = boost::out_edges(vd, graph);
-        for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
-            if (graph[*e_it].segment) num_segs++;
+        const auto edge_range = sorted_out_edges(vd, graph);
+        for (auto e_it : edge_range) {
+            if (graph[e_it].segment) num_segs++;
         }
         
         // If only 1 segment, add to tmp_vertices
@@ -2840,8 +2840,8 @@ void PatternAlgorithms::examine_main_vertices_local(Graph& graph, std::vector<Ve
             
             // Collect all segments and check pairs
             std::vector<SegmentPtr> vertex_segments;
-            for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
-                SegmentPtr sg = graph[*e_it].segment;
+            for (auto e_it : edge_range) {
+                SegmentPtr sg = graph[e_it].segment;
                 if (sg) vertex_segments.push_back(sg);
             }
             
@@ -2898,8 +2898,8 @@ void PatternAlgorithms::examine_main_vertices_local(Graph& graph, std::vector<Ve
             if (used_segments.size() > 0) {
                 bool flag_skip = true;
                 
-                for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
-                    SegmentPtr sg1 = graph[*e_it].segment;
+                for (auto e_it : edge_range) {
+                    SegmentPtr sg1 = graph[e_it].segment;
                     if (!sg1) continue;
                     if (used_segments.find(sg1) != used_segments.end()) continue;
                     
@@ -3036,10 +3036,10 @@ VertexPtr PatternAlgorithms::compare_main_vertices_global(Graph& graph, std::vec
         // Score based on segments connected to this vertex
         if (vtx->descriptor_valid()) {
             auto vd = vtx->get_descriptor();
-            auto edge_range = boost::out_edges(vd, graph);
+            const auto edge_range = sorted_out_edges(vd, graph);
             
-            for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
-                SegmentPtr sg = graph[*e_it].segment;
+            for (auto e_it : edge_range) {
+                SegmentPtr sg = graph[e_it].segment;
                 if (!sg) continue;
                 
                 bool is_shower = sg->flags_any(SegmentFlags::kShowerTrajectory) ||
@@ -3183,10 +3183,10 @@ Facade::Cluster* PatternAlgorithms::check_switch_main_cluster(Graph& graph, Clus
         // Count showers connected to this vertex
         if (temp_main_vertex && temp_main_vertex->descriptor_valid()) {
             auto vd = temp_main_vertex->get_descriptor();
-            auto edge_range = boost::out_edges(vd, graph);
+            const auto edge_range = sorted_out_edges(vd, graph);
             
-            for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
-                SegmentPtr seg = graph[*e_it].segment;
+            for (auto e_it : edge_range) {
+                SegmentPtr seg = graph[e_it].segment;
                 if (!seg) continue;
                 
                 n_total++;
@@ -3226,9 +3226,9 @@ Facade::Cluster* PatternAlgorithms::check_switch_main_cluster(Graph& graph, Clus
             std::string seg_list;
             if (vtx->descriptor_valid()) {
                 auto vd = vtx->get_descriptor();
-                auto edge_range = boost::out_edges(vd, graph);
-                for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
-                    SegmentPtr seg = graph[*e_it].segment;
+                const auto edge_range = sorted_out_edges(vd, graph);
+                for (auto e_it : edge_range) {
+                    SegmentPtr seg = graph[e_it].segment;
                     if (seg) seg_list += std::to_string(seg->id()) + ", ";
                 }
             }
@@ -3272,10 +3272,10 @@ Facade::Cluster* PatternAlgorithms::check_switch_main_cluster_2(Graph& graph, Ve
     
     if (temp_main_vertex->descriptor_valid()) {
         auto vd = temp_main_vertex->get_descriptor();
-        auto edge_range = boost::out_edges(vd, graph);
+        const auto edge_range = sorted_out_edges(vd, graph);
         
-        for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
-            SegmentPtr seg = graph[*e_it].segment;
+        for (auto e_it : edge_range) {
+            SegmentPtr seg = graph[e_it].segment;
             if (!seg) continue;
             
             n_total++;
@@ -3417,9 +3417,9 @@ bool PatternAlgorithms::determine_overall_main_vertex_DL(
                 int num_tracks = 0;
                 if (min_vertex->descriptor_valid()) {
                     auto vd = min_vertex->get_descriptor();
-                    auto edge_range = boost::out_edges(vd, graph);
-                    for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
-                        SegmentPtr sg = graph[*e_it].segment;
+                    const auto edge_range = sorted_out_edges(vd, graph);
+                    for (auto e_it : edge_range) {
+                        SegmentPtr sg = graph[e_it].segment;
                         if (!sg) continue;
                         double length = segment_track_length(sg);
                         double medium_dqdx = segment_median_dQ_dx(sg);
@@ -3686,9 +3686,9 @@ bool PatternAlgorithms::determine_overall_main_vertex_DL(
             // Proton tagging: short stubs with high dQ/dx near the new vertex are likely protons
             if (main_vertex->descriptor_valid()) {
                 auto vd = main_vertex->get_descriptor();
-                auto edge_range = boost::out_edges(vd, graph);
-                for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
-                    SegmentPtr sg = graph[*e_it].segment;
+                const auto edge_range = sorted_out_edges(vd, graph);
+                for (auto e_it : edge_range) {
+                    SegmentPtr sg = graph[e_it].segment;
                     if (!sg) continue;
                     auto pair_results = calculate_num_daughter_showers(graph, main_vertex, sg, false);
                     double length = segment_track_length(sg);
@@ -3827,10 +3827,10 @@ VertexPtr PatternAlgorithms::determine_overall_main_vertex(Graph& graph, Cluster
     // Examine tracks connected to main vertex - look for short high dQ/dx proton candidates
     if (main_vertex->descriptor_valid()) {
         auto vd = main_vertex->get_descriptor();
-        auto edge_range = boost::out_edges(vd, graph);
+        const auto edge_range = sorted_out_edges(vd, graph);
 
-        for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
-            SegmentPtr sg = graph[*e_it].segment;
+        for (auto e_it : edge_range) {
+            SegmentPtr sg = graph[e_it].segment;
             if (!sg) continue;
 
             auto pair_results = calculate_num_daughter_showers(graph, main_vertex, sg, false);

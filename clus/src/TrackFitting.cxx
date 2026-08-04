@@ -3078,8 +3078,8 @@ void TrackFitting::form_map_graph(bool flag_exclusion, double end_point_factor, 
     for (auto vd : m_ordered_nodes_vec) {
         if (m_cluster_filter) {
             bool has_cluster_seg = false;
-            for (auto oe = boost::out_edges(vd, *m_graph); oe.first != oe.second; ++oe.first) {
-                auto& eb = (*m_graph)[*oe.first];
+            for (auto oe_e : sorted_out_edges(vd, *m_graph)) {
+                auto& eb = (*m_graph)[oe_e];
                 if (eb.segment && eb.segment->cluster() == m_cluster_filter) { has_cluster_seg = true; break; }
             }
             if (!has_cluster_seg) continue;
@@ -3261,8 +3261,8 @@ void TrackFitting::form_map_graph(bool flag_exclusion, double end_point_factor, 
         // and wrong charge associations, producing ghost fit points.
         if (m_cluster_filter) {
             bool has_cluster_seg = false;
-            for (auto oe = boost::out_edges(vd, *m_graph); oe.first != oe.second; ++oe.first) {
-                auto& eb = (*m_graph)[*oe.first];
+            for (auto oe_e : sorted_out_edges(vd, *m_graph)) {
+                auto& eb = (*m_graph)[oe_e];
                 if (eb.segment && eb.segment->cluster() == m_cluster_filter) { has_cluster_seg = true; break; }
             }
             if (!has_cluster_seg) continue;
@@ -3827,8 +3827,8 @@ void TrackFitting::multi_trajectory_fit(int charge_div_method, double div_sigma)
         // those clusters' vertex fit positions with data from the current cluster's charge map.
         if (m_cluster_filter) {
             bool has_cluster_seg = false;
-            for (auto oe = boost::out_edges(vd, *m_graph); oe.first != oe.second; ++oe.first) {
-                auto& eb = (*m_graph)[*oe.first];
+            for (auto oe_e : sorted_out_edges(vd, *m_graph)) {
+                auto& eb = (*m_graph)[oe_e];
                 if (eb.segment && eb.segment->cluster() == m_cluster_filter) { has_cluster_seg = true; break; }
             }
             if (!has_cluster_seg) continue;
@@ -7767,8 +7767,8 @@ void TrackFitting::do_multi_tracking(bool flag_dQ_dx_fit_reg, bool flag_dQ_dx_fi
     for (auto vd : m_ordered_nodes_vec) {
         if (m_cluster_filter) {
             bool has_cluster_seg = false;
-            for (auto oe = boost::out_edges(vd, *m_graph); oe.first != oe.second; ++oe.first) {
-                auto& eb = (*m_graph)[*oe.first];
+            for (auto oe_e : sorted_out_edges(vd, *m_graph)) {
+                auto& eb = (*m_graph)[oe_e];
                 if (eb.segment && eb.segment->cluster() == m_cluster_filter) { has_cluster_seg = true; break; }
             }
             if (!has_cluster_seg) continue;
@@ -8235,8 +8235,8 @@ void TrackFitting::do_multi_tracking(bool flag_dQ_dx_fit_reg, bool flag_dQ_dx_fi
         for (auto vd : m_ordered_nodes_vec) {
             if (m_cluster_filter) {
                 bool has_cluster_seg = false;
-                for (auto oe = boost::out_edges(vd, *m_graph); oe.first != oe.second; ++oe.first) {
-                    auto& eb = (*m_graph)[*oe.first];
+                for (auto oe_e : sorted_out_edges(vd, *m_graph)) {
+                    auto& eb = (*m_graph)[oe_e];
                     if (eb.segment && eb.segment->cluster() == m_cluster_filter) { has_cluster_seg = true; break; }
                 }
                 if (!has_cluster_seg) continue;

@@ -512,8 +512,8 @@ bool PatternAlgorithms::cosmic_tagger(
     auto segs_at_vtx = [&](VertexPtr vtx, auto callback) {
         if (!vtx || !vtx->descriptor_valid()) return;
         auto vd = vtx->get_descriptor();
-        for (auto [eit, eit_end] = boost::out_edges(vd, graph); eit != eit_end; ++eit) {
-            SegmentPtr seg = graph[*eit].segment;
+        for (auto eit : sorted_out_edges(vd, graph)) {
+            SegmentPtr seg = graph[eit].segment;
             if (seg) callback(seg);
         }
     };
