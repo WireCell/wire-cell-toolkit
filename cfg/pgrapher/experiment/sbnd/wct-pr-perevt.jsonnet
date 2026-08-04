@@ -582,6 +582,18 @@ function(
     // SBND_SKIP_COSMIC_COMPANIONS=0).
     skip_cosmic_companions = true,
     cosmic_companion_min_length = 15,
+    // sp_photon_flag (doc pr/26 sec. 8.2; C++ default false = OFF): store the
+    // single-photon tagger's verdict in TaggerInfo::photon_flag, the way
+    // prototype NeutrinoID.cxx:271 does.  The port already runs
+    // singlephoton_tagger() and fills its ~90 shw_sp_* BDT features -- only the
+    // return value was discarded, leaving the uBooNE tagger ntuple's
+    // photon_flag branch a constant 0.
+    //
+    // NOT the SBND default: it changes a written output branch, so the flip is
+    // the owner's call (escalation rule 1).  Nothing in the chain reads
+    // photon_flag, so ON changes that one branch and no reconstruction, no
+    // selection and no other tagger field (runner: SBND_SP_PHOTON_FLAG=1).
+    sp_photon_flag = false,
 )
     local base = import 'pgrapher/experiment/sbnd/simparams.jsonnet';
     local params = base {
@@ -646,6 +658,7 @@ function(
                              tgm_exempt_demoted_main=tgm_exempt_demoted_main,
                              skip_cosmic_companions=skip_cosmic_companions,
                              cosmic_companion_min_length=cosmic_companion_min_length,
+                             sp_photon_flag=sp_photon_flag,
                              mip_dqdx=mip_dqdx,
                              stm_consistent_fv=stm_consistent_fv,
                              stm_accept_guards=stm_accept_guards,

@@ -185,6 +185,7 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_nu_skip_cosmic_bundle_min_length = get(config, "nu_skip_cosmic_bundle_min_length", m_nu_skip_cosmic_bundle_min_length);  // cm
     m_skip_cosmic_companions  = get(config, "skip_cosmic_companions",  m_skip_cosmic_companions);
     m_cosmic_companion_min_length = get(config, "cosmic_companion_min_length", m_cosmic_companion_min_length);  // cm
+    m_sp_photon_flag          = get(config, "sp_photon_flag",          m_sp_photon_flag);
 
     if (!m_trackfitting_config_file.empty()) {
         load_trackfitting_config(m_trackfitting_config_file);
@@ -270,6 +271,7 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["nu_skip_cosmic_bundle_min_length"] = m_nu_skip_cosmic_bundle_min_length;  // cm; > 0 spares untagged bundle-mates at least this long (docs/pr/16 design A); 0 = veto all
     cfg["skip_cosmic_companions"] = m_skip_cosmic_companions;          // doc pr/20 I P4; drop a TGM/STM-tagged companion from other_clusters
     cfg["cosmic_companion_min_length"] = m_cosmic_companion_min_length;  // cm; a tagged companion shorter than this stays in regardless
+    cfg["sp_photon_flag"] = m_sp_photon_flag;     // doc pr/26 sec. 8.2; store singlephoton_tagger()'s verdict in TaggerInfo::photon_flag (prototype NeutrinoID.cxx:271)
 
 
     return cfg;
@@ -810,15 +812,34 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
                                  m_dv, particle_data(),
                                  muon_length, tagger_info);
 
-        pattern_algos.singlephoton_tagger(*pr_graph, main_cluster,
-                                          final_main_vertex,
-                                          showers,
-                                          map_vertex_to_shower,
-                                          map_shower_pio_id,
-                                          map_pio_id_showers,
-                                          map_pio_id_mass,
-                                          m_dv,
-                                          tagger_info);
+        // prototype (NeutrinoID.cxx lines 269-271):
+        //     bool flag_sp = singlephoton_tagger(results.second);
+        //     if (flag_sp){tagger_info.photon_flag = true;}
+        // The port ran the tagger -- filling its ~90 shw_sp_* BDT features --
+        // but dropped the verdict on the floor, leaving photon_flag at the 0
+        // init_tagger_info() gives it (doc sbnd_xin/docs/pr/26 sec. 8.2).
+        // C++ default false = that legacy behaviour, so the uBooNE tagger
+        // ntuple's photon_flag branch is byte-identical when the knob is off.
+        const bool flag_sp =
+            pattern_algos.singlephoton_tagger(*pr_graph, main_cluster,
+                                              final_main_vertex,
+                                              showers,
+                                              map_vertex_to_shower,
+                                              map_shower_pio_id,
+                                              map_pio_id_showers,
+                                              map_pio_id_mass,
+                                              m_dv,
+                                              tagger_info);
+        if (m_sp_photon_flag) {
+            // Logged unconditionally so a knob-on run proves the branch
+            // executed even on a sample where nothing is tagged.
+            SPDLOG_LOGGER_DEBUG(log, "TaggerCheckNeutrino sp_photon_flag: singlephoton_tagger returned {}",
+                                flag_sp);
+            if (flag_sp) tagger_info.photon_flag = 1.0f;
+        }
+        else {
+            (void)flag_sp;  // legacy: verdict computed and discarded
+        }
     }
 
     if (m_perf) SPDLOG_LOGGER_DEBUG(log, "TaggerCheckNeutrino timing: taggers took {} ms", MS(Clock::now() - t0).count());

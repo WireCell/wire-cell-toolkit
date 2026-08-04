@@ -748,6 +748,14 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               // STM-tagged companion from the neutrino's other_clusters, unless
               // it is shorter than the floor (cm).  Inert without P3.
               skip_cosmic_companions=false, cosmic_companion_min_length=null,
+              // sp_photon_flag: store the single-photon tagger's verdict in
+              // TaggerInfo::photon_flag, as prototype NeutrinoID.cxx:271 does.
+              // The port ran singlephoton_tagger() and filled its shw_sp_*
+              // features but discarded the verdict (docs/pr/26 sec. 8.2).
+              // C++ default false = that gap; key omitted when off =>
+              // byte-identical.  Only the uBooNE tagger ntuple's photon_flag
+              // branch changes when on -- nothing in the chain reads it.
+              sp_photon_flag=false,
               // mip_dqdx: SBND MIP dQ/dx scale in e/cm handed to
               // TaggerCheckSTM AND (since docs pr/7-pr/8) to
               // tagger_check_neutrino as the PR chain's flat-template/cal_4mom
@@ -1454,6 +1462,7 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
             nu_skip_cosmic_bundle_min_length=nu_skip_cosmic_bundle_min_length,
             skip_cosmic_companions=skip_cosmic_companions,
             cosmic_companion_min_length=cosmic_companion_min_length,
+            sp_photon_flag=sp_photon_flag,
             dir_weak_use_score=dir_weak_use_score,
             mip_dqdx=mip_dqdx,
             mip_dqdx_median=mip_dqdx_median,
@@ -1863,6 +1872,14 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
        tgm_exempt_demoted_main=false,
        // doc pr/20 Part I P4; false / null = C++ defaults = OFF.  See clus_pr.
        skip_cosmic_companions=false, cosmic_companion_min_length=null,
+       // sp_photon_flag: store the single-photon tagger's verdict in
+       // TaggerInfo::photon_flag, as prototype NeutrinoID.cxx:271 does.
+       // The port ran singlephoton_tagger() and filled its shw_sp_*
+       // features but discarded the verdict (docs/pr/26 sec. 8.2).
+       // C++ default false = that gap; key omitted when off =>
+       // byte-identical.  Only the uBooNE tagger ntuple's photon_flag
+       // branch changes when on -- nothing in the chain reads it.
+       sp_photon_flag=false,
        mip_dqdx=56000, stm_consistent_fv=true, stm_accept_guards=true,
        stm_proton_muon_guard=true, stm_cathode_guard=true,
        stm_anode_dist_fix=true, stm_second_track_guard=true,
@@ -2002,6 +2019,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 tgm_exempt_demoted_main=tgm_exempt_demoted_main,
                 skip_cosmic_companions=skip_cosmic_companions,
                 cosmic_companion_min_length=cosmic_companion_min_length,
+                sp_photon_flag=sp_photon_flag,
                 mip_dqdx=mip_dqdx,
                 stm_consistent_fv=stm_consistent_fv,
                 stm_accept_guards=stm_accept_guards,

@@ -471,7 +471,7 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
                  } else {}),
         },
 
-        tagger_check_neutrino(name="", trackfitting_config_file="", particle_dataset="", recombination_model="", perf=false, dl_weights="", dQdx_scale=0.1, dQdx_offset=-1000.0, clus_geom_helper="", dl_vtx_rerank=true, dl_vtx_top_k=5, dl_vtx_min_accept_score=4.0, dl_vtx_score_scale=1000.0, beam_window_low=0, beam_window_high=0, nu_skip_cosmic=false, nu_skip_cosmic_bundle=false, nu_skip_cosmic_bundle_min_length=0, dir_weak_use_score=false, mip_dqdx=null, mip_dqdx_median=null, proton_dir_vote=false, proton_dir_score_max=null, proton_dir_asym_min=null, endpoint_trim_retry=false, fit_vertex_min_seg_length=null, cathode_x=null, cathode_kink_xcut=null, shower_topo_demote_len=null, iso_endpoint=false, iso_endpoint_min_length=null, iso_endpoint_max_xext=null, iso_endpoint_xext_frac=null, iso_endpoint_xext_quantile=null, iso_endpoint_tube_radius=null, iso_endpoint_min_aspect=null, cosmic_y_top_main=null, cosmic_y_top_strict=null, cosmic_y_top_loose=null, cosmic_y_small_piece=null, vertex_z_prior_scale=null, ssm_target_dir=null, ssm_absorber_dir=null, kine_fudge_factor=null, kine_recom_factor=null, kine_shower_fudge_factor=null, kine_shower_recom_factor=null, kine_proton_recom_factor=null, kine_plane_weights=null, kine_plane_asym_switch=null, kine_w_value=null, muon_dqdx_curve=null, sp_dedx_use_recomb_model=false, sp_mean_dedx_cut=null, dl_vtx_cut=null, skip_cosmic_companions=false, cosmic_companion_min_length=null) :: {
+        tagger_check_neutrino(name="", trackfitting_config_file="", particle_dataset="", recombination_model="", perf=false, dl_weights="", dQdx_scale=0.1, dQdx_offset=-1000.0, clus_geom_helper="", dl_vtx_rerank=true, dl_vtx_top_k=5, dl_vtx_min_accept_score=4.0, dl_vtx_score_scale=1000.0, beam_window_low=0, beam_window_high=0, nu_skip_cosmic=false, nu_skip_cosmic_bundle=false, nu_skip_cosmic_bundle_min_length=0, dir_weak_use_score=false, mip_dqdx=null, mip_dqdx_median=null, proton_dir_vote=false, proton_dir_score_max=null, proton_dir_asym_min=null, endpoint_trim_retry=false, fit_vertex_min_seg_length=null, cathode_x=null, cathode_kink_xcut=null, shower_topo_demote_len=null, iso_endpoint=false, iso_endpoint_min_length=null, iso_endpoint_max_xext=null, iso_endpoint_xext_frac=null, iso_endpoint_xext_quantile=null, iso_endpoint_tube_radius=null, iso_endpoint_min_aspect=null, cosmic_y_top_main=null, cosmic_y_top_strict=null, cosmic_y_top_loose=null, cosmic_y_small_piece=null, vertex_z_prior_scale=null, ssm_target_dir=null, ssm_absorber_dir=null, kine_fudge_factor=null, kine_recom_factor=null, kine_shower_fudge_factor=null, kine_shower_recom_factor=null, kine_proton_recom_factor=null, kine_plane_weights=null, kine_plane_asym_switch=null, kine_w_value=null, muon_dqdx_curve=null, sp_dedx_use_recomb_model=false, sp_mean_dedx_cut=null, dl_vtx_cut=null, skip_cosmic_companions=false, cosmic_companion_min_length=null, sp_photon_flag=false) :: {
             type: "TaggerCheckNeutrino",
             name: prefix + name,
             data: {
@@ -515,6 +515,16 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
               // defaults false / 0; keys omitted when off => byte-identical.
               + (if skip_cosmic_companions then { skip_cosmic_companions: true } else {})
               + (if cosmic_companion_min_length != null then { cosmic_companion_min_length: cosmic_companion_min_length } else {})
+              // sp_photon_flag: store singlephoton_tagger()'s verdict in
+              // TaggerInfo::photon_flag, the way prototype NeutrinoID.cxx:271
+              // does.  The port already runs that tagger and fills its ~90
+              // shw_sp_* BDT features; only the verdict was dropped, leaving
+              // the uBooNE tagger ntuple's photon_flag branch a constant 0
+              // (sbnd_xin/docs/pr/26 sec. 8.2).  Nothing in the chain reads
+              // the field, so this changes one output branch and no
+              // reconstruction.  C++ default false; key omitted when off =>
+              // byte-identical pre-knob config.
+              + (if sp_photon_flag then { sp_photon_flag: true } else {})
               // C++ default false.  Key omitted when off => byte-identical pre-knob config (uBooNE).
               // When on: direction-weakness reads use segment_is_dir_weak() (score thresholds),
               // the faithful port of prototype ProtoSegment::is_dir_weak() -- see sbnd_xin/docs/pr/6.

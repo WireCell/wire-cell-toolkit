@@ -166,6 +166,15 @@ public:
                                                // tags a companion today unless the taggers run
                                                // with evaluate_demoted_mains (P3), so this is
                                                // inert without it.
+        bool m_sp_photon_flag{false};  // doc pr/26 sec. 8.2 port gap.  If true, the single-photon
+                                       // tagger's verdict is stored in TaggerInfo::photon_flag,
+                                       // as prototype NeutrinoID.cxx:271 does
+                                       // (`if (flag_sp) tagger_info.photon_flag = true;`).  The
+                                       // port already runs singlephoton_tagger() and fills its
+                                       // ~90 shw_sp_* features; only the return value was
+                                       // discarded.  C++ default false = legacy: photon_flag
+                                       // stays at its init_tagger_info() 0, so the uBooNE tagger
+                                       // ntuple branch is byte-identical.
         double m_cosmic_companion_min_length{0};  // cm.  A tagged companion SHORTER than this
                                                   // stays in regardless of verdict, so a
                                                   // mis-tagged short neutrino daughter can never
