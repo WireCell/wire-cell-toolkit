@@ -16,11 +16,59 @@
 #include "WireCellUtil/Graph.h"
 #include "WireCellUtil/Exceptions.h"
 #include "WireCellUtil/Logging.h"
+#include "WireCellUtil/Units.h"
 #include <atomic>
+#include <cstdint>
 #include <limits>
 #include <set>
 
 namespace WireCell::Clus::PR {
+
+    /// doc sbnd_xin/docs/pr/30 §11 -- port-fidelity audit instrumentation.
+    ///
+    /// Process-wide counters.  Every SBND runner drives ONE event per
+    /// wire-cell process, so a cumulative total read at the end of
+    /// TaggerCheckNeutrino::visit() IS the per-event total; nothing here
+    /// needs resetting.  Atomic because clusters may be visited from more
+    /// than one thread.
+    ///
+    /// These are pure diagnostics: incrementing them cannot change any
+    /// reconstruction output, so they are unconditional and stay on in the
+    /// knob-off arm.  That is the point -- the knob-off arm is what measures
+    /// how often each divergence is reachable at all.
+    struct PortAuditCounters {
+        // F2 / P9 -- times a point outside every TPC hit each guard.
+        std::atomic<uint64_t> oov_isochronous{0};   // modify_segment_isochronous
+        std::atomic<uint64_t> oov_dead_scan{0};     // examine_vertices_1p
+        std::atomic<uint64_t> oov_unique_scan{0};   // examine_vertices_3
+        // P8 -- add_segment endpoint consistency.
+        std::atomic<uint64_t> add_segment_calls{0};
+        std::atomic<uint64_t> add_segment_reentry{0}; // seg already in the graph => no-op
+        std::atomic<uint64_t> endpoint_mismatch{0}; // a connection being MADE is inconsistent
+        std::atomic<uint64_t> endpoint_refused{0};  // ... and strict mode dropped it
+        // P2 -- local-PCA first-segment endpoint refinement.
+        std::atomic<uint64_t> pca_refine_calls{0};
+        std::atomic<uint64_t> pca_refine_moved{0};
+        std::atomic<uint64_t> pca_move_um_sum{0};   // summed |move| in microns
+        std::atomic<uint64_t> pca_move_um_max{0};
+        // P4 -- find_other_segments acceptance attribution.
+        std::atomic<uint64_t> oseg_accept_proto{0};   // a prototype clause fired
+        std::atomic<uint64_t> oseg_accept_relaxed{0}; // ONLY the toolkit clause fired
+        std::atomic<uint64_t> oseg_reject{0};
+    };
+    /// The one instance.  Defined in PRGraph.cxx.
+    extern PortAuditCounters g_port_audit;
+
+    /// P8 knob transport.  add_segment() is a free function reached from ~30
+    /// call sites and has no access to component configuration, so the two
+    /// values it needs are written once per event by TaggerCheckNeutrino
+    /// before any graph is built.  Read-mostly; never written concurrently
+    /// with graph construction.
+    struct GraphEndpointPolicy {
+        bool   strict{false};              // refuse an inconsistent connection
+        double tol{0.3 * units::cm};       // positional stand-in for wcpt-index equality
+    };
+    extern GraphEndpointPolicy g_graph_endpoint_policy;
 
 
     /// Make a vertex and add it to the graph.

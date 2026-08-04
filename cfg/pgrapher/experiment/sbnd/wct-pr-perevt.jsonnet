@@ -154,6 +154,34 @@ function(
     // guard uses), so ~45 would cover all 10.
     // Set null for the legacy behavior (long segments stay shower-eligible).
     shower_topo_demote_len = 50,
+    // ---- doc sbnd_xin/docs/pr/30 §11 port-fidelity knobs -----------------
+    // SBND operating point for the four pr/30 findings.  ALL FIVE ARE AT THE
+    // LEGACY VALUE: this file is the single source of the SBND operating point
+    // (doc 68), so a bare run reproduces production exactly, and the knob-on
+    // arms are produced by editing a COPY of cfg/ (WIRECELL_PATH override),
+    // never by flipping a default here.
+    //   fit_exclusion (P1)            true  => the 27 knobbed do_multi_tracking
+    //                                          sites pass flag_exclusion, as 28
+    //                                          of 30 live prototype sites do.
+    //   graph_endpoint_strict (P8)    true  => PR::add_segment REFUSES a
+    //                                          vertex/segment pair whose vertices
+    //                                          are not at the segment's ends.
+    //                                          The WARN + counter are always on.
+    //   oov_prototype_parity (F2)     true  => a point outside every TPC votes
+    //                                          the way the prototype's own helper
+    //                                          answers, at all three sites.
+    //   first_seg_local_pca (P2)      false => drop the toolkit-only local-PCA
+    //                                          refinement of the first segment's
+    //                                          endpoints (null/true = production).
+    //   other_seg_relaxed_accept (P4) false => drop the toolkit-only
+    //                                          0.72/15cm/1.05 acceptance clause
+    //                                          (null/true = production).
+    fit_exclusion = false,
+    graph_endpoint_strict = false,
+    graph_endpoint_tol = null,
+    oov_prototype_parity = false,
+    first_seg_local_pca = null,
+    other_seg_relaxed_accept = null,
     // Steiner TERMINAL filter fidelity -- doc pr/29 D1 and D12.
     //
     // **SBND PRODUCTION DEFAULT ON, owner 2026-08-04**: both are port BUGS, not
@@ -731,6 +759,12 @@ function(
                              cathode_x=cathode_x,
                              cathode_kink_xcut=cathode_kink_xcut,
                              shower_topo_demote_len=shower_topo_demote_len,
+                             fit_exclusion=fit_exclusion,
+                             graph_endpoint_strict=graph_endpoint_strict,
+                             graph_endpoint_tol=graph_endpoint_tol,
+                             oov_prototype_parity=oov_prototype_parity,
+                             first_seg_local_pca=first_seg_local_pca,
+                             other_seg_relaxed_accept=other_seg_relaxed_accept,
                              steiner_terminal_wire_tol=steiner_terminal_wire_tol,
                              steiner_terminal_adjacent_slice=steiner_terminal_adjacent_slice,
                              steiner_edge_charge_forward_dead_mix=steiner_edge_charge_forward_dead_mix,

@@ -577,7 +577,14 @@ SegmentPtr PatternAlgorithms::init_first_segment(Graph& graph, Facade::Cluster& 
     // the bias that arises from using the candidate endpoint itself to define the
     // direction.  The power iteration is seeded with fallback_dir (the global
     // outward direction) so the sign is consistent and convergence is fast.
-    {
+    // doc pr/30 §11, P2.  m_first_seg_local_pca defaults TRUE -- unlike the
+    // other pr/30 knobs this behaviour is already production, so the DEFAULT
+    // is what ships today and OFF is the new option.  The point of the knob is
+    // that an unconditional, un-knobbed departure from the prototype in the
+    // single most load-bearing function of the stage could not be measured at
+    // all; the prototype takes get_two_boundary_wcps(2) and uses it as-is
+    // (NeutrinoID_proto_vertex.h:426).
+    if (m_first_seg_local_pca) {
         const double r_local = 10.0 * units::cm;
 
         Facade::geo_vector_t global_dir(
@@ -669,6 +676,32 @@ SegmentPtr PatternAlgorithms::init_first_segment(Graph& graph, Facade::Cluster& 
                 -global_dir.x(), -global_dir.y(), -global_dir.z());
             first_pt  = refine_endpoint(boundary_point_first,  neg_global_dir);
             second_pt = refine_endpoint(boundary_point_second, global_dir);
+
+            // doc pr/30 §11, P2 instrumentation.  Unconditional and log-only:
+            // this runs in the knob-ON (= production) arm too, which is the
+            // arm that answers "how much does the refinement actually move
+            // the seed of the whole stage".
+            for (const auto& mv : {std::make_pair(boundary_point_first,  first_pt),
+                                   std::make_pair(boundary_point_second, second_pt)}) {
+                const double d = ray_length(Ray{mv.first, mv.second});
+                g_port_audit.pca_refine_calls.fetch_add(1, std::memory_order_relaxed);
+                if (d > 0) {
+                    const uint64_t um = static_cast<uint64_t>(d / units::um);
+                    g_port_audit.pca_refine_moved.fetch_add(1, std::memory_order_relaxed);
+                    g_port_audit.pca_move_um_sum.fetch_add(um, std::memory_order_relaxed);
+                    uint64_t prev = g_port_audit.pca_move_um_max.load(std::memory_order_relaxed);
+                    while (um > prev &&
+                           !g_port_audit.pca_move_um_max.compare_exchange_weak(prev, um,
+                                                                std::memory_order_relaxed)) {}
+                    SPDLOG_LOGGER_DEBUG(s_log,
+                        "pr30 P2 local-PCA endpoint moved {:.3f} cm: ({:.2f},{:.2f},{:.2f}) -> "
+                        "({:.2f},{:.2f},{:.2f}) cluster {}",
+                        d/units::cm,
+                        mv.first.x()/units::cm, mv.first.y()/units::cm, mv.first.z()/units::cm,
+                        mv.second.x()/units::cm, mv.second.y()/units::cm, mv.second.z()/units::cm,
+                        cluster.get_cluster_id());
+                }
+            }
 
             // std::cout << boundary_point_first << " -> " << first_pt << std::endl;
             // std::cout << boundary_point_second << " -> " << second_pt << std::endl;
@@ -1488,6 +1521,13 @@ bool PatternAlgorithms::replace_segment_and_vertex(Graph& graph, SegmentPtr& seg
                             // Perform tracking
                             // track_fitter.add_graph(&graph); added already
                             auto t_op_mt = BS_Clock::now();
+                            // flag_exclusion stays hard false here, NOT m_fit_exclusion
+                            // (doc pr/30 §11 P1): break_segments is one of only two
+                            // places the PROTOTYPE also turns exclusion off --
+                            // NeutrinoID_proto_vertex.h:722/751, "fit dQ/dx here, do
+                            // not exclude others".  This is the one site pair where
+                            // the port already matches; knobbing it would break the
+                            // parity it is meant to restore.
                             track_fitter.do_multi_tracking(true, true, false, false, false, cluster);
                             t_do_multi_tracking += BS_MS(BS_Clock::now() - t_op_mt);
                         }
@@ -1504,6 +1544,8 @@ bool PatternAlgorithms::replace_segment_and_vertex(Graph& graph, SegmentPtr& seg
                         // Perform tracking
                         // track_fitter.add_graph(&graph); added already
                         auto t_op_mt = BS_Clock::now();
+                        // Hard false, as above: break_segments matches prototype
+                        // NeutrinoID_proto_vertex.h:751 (doc pr/30 §11 P1).
                         track_fitter.do_multi_tracking(true, true, false, false, false, cluster);
                         t_do_multi_tracking += BS_MS(BS_Clock::now() - t_op_mt);
                         if (out_seg2) {
@@ -1689,6 +1731,13 @@ bool PatternAlgorithms::merge_nearby_vertices(Graph& graph, Facade::Cluster& clu
     }
 
     if (any_modified) {
+        // Hard false, deliberately NOT knobbed (doc pr/30 §11 P1).
+        // merge_nearby_vertices is toolkit-only (doc pr/30 P6): the prototype's
+        // nearest analogue, clean_up_maps_vertices_segments, has both call sites
+        // commented out.  There is therefore no prototype answer for what
+        // flag_exclusion should be here, and inventing one is exactly what
+        // CLAUDE.md §5 rule 4 forbids.  It is also called from the tail of
+        // break_segments, whose regime is exclusion-off.
         track_fitter.do_multi_tracking(true, true, false, false, false, &cluster);
     }
 
@@ -2039,7 +2088,7 @@ bool PatternAlgorithms::find_proto_vertex(Graph& graph, Facade::Cluster& cluster
         if (m_perf) SPDLOG_LOGGER_TRACE(s_log, "find_proto_vertex timing: examine_structure took {} ms", MS(Clock::now() - t0).count());
     } else {
         t0 = Clock::now();
-        track_fitter.do_multi_tracking(true, true, false, false, false, &cluster);
+        track_fitter.do_multi_tracking(true, true, false, m_fit_exclusion, false, &cluster);
         if (m_perf) SPDLOG_LOGGER_TRACE(s_log, "find_proto_vertex timing: do_multi_tracking (no break) took {} ms", MS(Clock::now() - t0).count());
     }
 
@@ -2057,7 +2106,7 @@ bool PatternAlgorithms::find_proto_vertex(Graph& graph, Facade::Cluster& cluster
     if (is_main_cluster) {
         t0 = Clock::now();
         if (examine_structure_3(graph, cluster, track_fitter, dv)) {
-            track_fitter.do_multi_tracking(true, true, false, false, false, &cluster);
+            track_fitter.do_multi_tracking(true, true, false, m_fit_exclusion, false, &cluster);
         }
         if (m_perf) SPDLOG_LOGGER_TRACE(s_log, "find_proto_vertex timing: examine_structure_3 took {} ms", MS(Clock::now() - t0).count());
     }
@@ -2081,7 +2130,7 @@ bool PatternAlgorithms::find_proto_vertex(Graph& graph, Facade::Cluster& cluster
 
     // Final multi-tracking
     t0 = Clock::now();
-    track_fitter.do_multi_tracking(true, true, false, false, false, &cluster);
+    track_fitter.do_multi_tracking(true, true, false, m_fit_exclusion, false, &cluster);
     if (m_perf) SPDLOG_LOGGER_TRACE(s_log, "find_proto_vertex timing: final do_multi_tracking took {} ms", MS(Clock::now() - t0).count());
 
     // Verify that at least one segment for this cluster survived all the merging/cleanup.
@@ -2144,7 +2193,7 @@ void PatternAlgorithms::init_point_segment(Graph& graph, Facade::Cluster& cluste
     
     // Perform multi-tracking to fit the segment
     track_fitter.add_segment(sg1);
-    track_fitter.do_multi_tracking(true, true, false, false, false, &cluster);
+    track_fitter.do_multi_tracking(true, true, false, m_fit_exclusion, false, &cluster);
 }
 
 void PatternAlgorithms::transfer_info_from_segment_to_cluster(Graph& graph, Facade::Cluster& cluster,  const std::string& cloud_name){

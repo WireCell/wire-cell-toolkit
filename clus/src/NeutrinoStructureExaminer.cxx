@@ -13,12 +13,12 @@ static auto s_log = WireCell::Log::logger("clus.NeutrinoPattern");
 void PatternAlgorithms::examine_structure(Graph& graph, Facade::Cluster& cluster, TrackFitting& track_fitter, IDetectorVolumes::pointer dv){
     // Change 2 to 1 (merge two segments into one straight segment)
     if (examine_structure_2(graph, cluster, track_fitter, dv)) {
-        track_fitter.do_multi_tracking(true, true, false, false, false, &cluster);
+        track_fitter.do_multi_tracking(true, true, false, m_fit_exclusion, false, &cluster);
     }
 
     // Straighten 1 (replace curved segments with straight lines)
     if (examine_structure_1(graph, cluster, track_fitter, dv)) {
-        track_fitter.do_multi_tracking(true, true, false, false, false, &cluster);
+        track_fitter.do_multi_tracking(true, true, false, m_fit_exclusion, false, &cluster);
     }
 }
 
@@ -952,7 +952,7 @@ bool PatternAlgorithms::crawl_segment(Graph& graph, Facade::Cluster& cluster, Se
         }
         
         // Perform multi-tracking
-        track_fitter.do_multi_tracking(true, true, false, false, false, &cluster);
+        track_fitter.do_multi_tracking(true, true, false, m_fit_exclusion, false, &cluster);
         
         flag = true;
         break;
@@ -1270,7 +1270,22 @@ bool PatternAlgorithms::examine_vertices_1p(Graph&graph, VertexPtr v1, VertexPtr
                 // m_trigger_offsets.at(-1) -> std::out_of_range, aborting the
                 // job (the class-C crash shape, doc pr/11 sec 6.3).  Skip the
                 // point rather than the event.
-                if (test_wpid.apa() == -1 || test_wpid.face() == -1) continue;
+                if (test_wpid.apa() == -1 || test_wpid.face() == -1) {
+                    // doc pr/30 §11, F2 site 2 (was P9).  flag_dead starts
+                    // true and only a LIVE point clears it, so a skipped point
+                    // votes "this segment lies in a dead region" -- the
+                    // opposite polarity to site 1 in the very same stage.
+                    //
+                    // The prototype's answer: get_closest_dead_chs() looks the
+                    // channel up in dead_uchs/dead_vchs/dead_wchs; an
+                    // out-of-detector point projects to a channel that is not
+                    // in those maps, so it returns FALSE, and the prototype's
+                    // caller (NeutrinoID_proto_vertex.h:3094) then sets
+                    // flag_dead = false.  EXACT parity restoration.
+                    g_port_audit.oov_dead_scan.fetch_add(1, std::memory_order_relaxed);
+                    if (m_oov_prototype_parity) { flag_dead = false; break; }
+                    continue;
+                }
                 auto p_raw = transform->backward(seg_fits[i].point, cluster_t0, test_wpid.face(), test_wpid.apa());
                 if (!cluster.grouping()->get_closest_dead_chs(p_raw, 1, test_wpid.apa(), test_wpid.face(), pind)) {
                     flag_dead = false;
@@ -1486,7 +1501,7 @@ bool PatternAlgorithms::examine_vertices_1(Graph&graph, Facade::Cluster&cluster,
         remove_vertex(graph, v1);
         
         // Update tracking
-        track_fitter.do_multi_tracking(true, true, false, false, false, &cluster);
+        track_fitter.do_multi_tracking(true, true, false, m_fit_exclusion, false, &cluster);
     }
     
     return flag_continue;
@@ -1606,7 +1621,7 @@ bool PatternAlgorithms::examine_vertices_2(Graph&graph, Facade::Cluster&cluster,
             }
             
             // Update tracking
-            track_fitter.do_multi_tracking(true, true, false, false, false, &cluster);
+            track_fitter.do_multi_tracking(true, true, false, m_fit_exclusion, false, &cluster);
         }else{
             flag_continue = false;
         }
@@ -1917,7 +1932,7 @@ bool PatternAlgorithms::examine_vertices_4(Graph&graph, Facade::Cluster&cluster,
                 
                 flag_continue = true;
                 // std::cout << "Cluster: " << cluster.ident() << " Merge Vertices Type III" << std::endl;
-                track_fitter.do_multi_tracking(true, true, false, false, false, &cluster);
+                track_fitter.do_multi_tracking(true, true, false, m_fit_exclusion, false, &cluster);
                 break;
                 
             } else if (boost::degree(vd2, graph) >= 2 && examine_vertices_4p(graph, v2, v1, track_fitter, dv) && v2 != main_vertex) {
@@ -2066,7 +2081,7 @@ bool PatternAlgorithms::examine_vertices_4(Graph&graph, Facade::Cluster&cluster,
                 
                 flag_continue = true;
                 // std::cout << "Cluster: " << cluster.ident() << " Merge Vertices Type III" << std::endl;
-                track_fitter.do_multi_tracking(true, true, false, false, false, &cluster);
+                track_fitter.do_multi_tracking(true, true, false, m_fit_exclusion, false, &cluster);
                 break;
             }
         }
@@ -2274,7 +2289,7 @@ void PatternAlgorithms::examine_partial_identical_segments(Graph& graph, Facade:
                         }
                     }
                     
-                    track_fitter.do_multi_tracking(true, true, false, false, false, &cluster);
+                    track_fitter.do_multi_tracking(true, true, false, m_fit_exclusion, false, &cluster);
                     
                 } else {
                     // Create new vertex at split point
@@ -2353,7 +2368,7 @@ void PatternAlgorithms::examine_partial_identical_segments(Graph& graph, Facade:
                             }
                         }
                         
-                        track_fitter.do_multi_tracking(true, true, false, false, false, &cluster);
+                        track_fitter.do_multi_tracking(true, true, false, m_fit_exclusion, false, &cluster);
                     }
                 }
                 
@@ -2500,7 +2515,7 @@ void PatternAlgorithms::examine_vertices_3(Graph& graph, Facade::Cluster& main_c
     }
     
     if (flag_refit) {
-        track_fitter.do_multi_tracking(true, true, false, false, false, &main_cluster);
+        track_fitter.do_multi_tracking(true, true, false, m_fit_exclusion, false, &main_cluster);
     }
 
     // Find and remove redundant short segments
@@ -2549,7 +2564,33 @@ void PatternAlgorithms::examine_vertices_3(Graph& graph, Facade::Cluster& main_c
         for (size_t i = 0; i < pts.size(); i++) {
             // Get APA and face for this point
             auto wpid = dv->contained_by(pts[i].point);
-            if (wpid.apa() == -1 || wpid.face() == -1) continue;
+            if (wpid.apa() == -1 || wpid.face() == -1) {
+                // doc pr/30 §11, F2 site 3 (was P9) -- the consequential one.
+                // A skipped point cannot contribute num_unique, and
+                // num_unique == 0 puts the segment on
+                // segments_to_be_removed: the guard's default answer here
+                // DELETES a segment from the graph.  Third distinct polarity
+                // of the same guard in the same stage.
+                //
+                // The prototype does not vote at all: get_closest_2d_dis is a
+                // pure kd-tree 2-D distance over the segment's own projected
+                // point cloud with NO volume check
+                // (ProtoSegment.cxx:1094-1103), so the point participates
+                // normally and, being outside every TPC, will generally sit
+                // far from every other segment in some view -- i.e. count as
+                // unique and keep the segment.
+                //
+                // HONEST LABEL: unlike sites 1 and 2 this is a DIRECTIONAL
+                // INFERENCE, not an exact parity restoration -- the prototype
+                // computes a real distance rather than returning a fixed
+                // false, so "outside every TPC => unique" is very likely but
+                // not proven.  It is also the non-destructive choice, which is
+                // the right tiebreak for a branch whose other outcome removes
+                // a segment.
+                g_port_audit.oov_unique_scan.fetch_add(1, std::memory_order_relaxed);
+                if (m_oov_prototype_parity) { num_unique++; break; }
+                continue;
+            }
 
             double min_u = 1e9;
             double min_v = 1e9;
@@ -2635,7 +2676,7 @@ void PatternAlgorithms::examine_vertices_3(Graph& graph, Facade::Cluster& main_c
     
     // Refit if segments were removed
     if (segments_to_be_removed.size() > 0) {
-        track_fitter.do_multi_tracking(true, true, false, false, false, &main_cluster);
+        track_fitter.do_multi_tracking(true, true, false, m_fit_exclusion, false, &main_cluster);
     }
 }
 
@@ -2767,7 +2808,7 @@ bool PatternAlgorithms::examine_structure_final_1(Graph& graph, VertexPtr main_v
     } // while continue
     
     if (flag_update) {
-        track_fitter.do_multi_tracking(true, true, false, false, false, &cluster);
+        track_fitter.do_multi_tracking(true, true, false, m_fit_exclusion, false, &cluster);
     }
     
     return flag_update;
@@ -3014,7 +3055,7 @@ bool PatternAlgorithms::examine_structure_final_1p(Graph& graph, VertexPtr main_
 
         // If we updated, redo multi-tracking
         if (flag_update) {
-            track_fitter.do_multi_tracking(true, true, false, false, false, &cluster);
+            track_fitter.do_multi_tracking(true, true, false, m_fit_exclusion, false, &cluster);
         }
     }
 
@@ -3201,7 +3242,7 @@ bool PatternAlgorithms::examine_structure_final_2(Graph& graph, VertexPtr main_v
         if (flag_update) {
             flag_continue = true;
             flag_updated = true;
-            track_fitter.do_multi_tracking(true, true, false, false, false, &cluster);
+            track_fitter.do_multi_tracking(true, true, false, m_fit_exclusion, false, &cluster);
         }
     }
     
@@ -3494,7 +3535,7 @@ bool PatternAlgorithms::examine_structure_final_3(Graph& graph, VertexPtr main_v
         if (flag_update) {
             flag_continue = true;
             flag_updated = true;
-            track_fitter.do_multi_tracking(true, true, false, false, false, &cluster);
+            track_fitter.do_multi_tracking(true, true, false, m_fit_exclusion, false, &cluster);
         }
     }
     

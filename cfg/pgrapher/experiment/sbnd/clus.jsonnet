@@ -935,6 +935,16 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               // a selected nu-candidate main cluster are tracks, none showers.
               // null = C++ default 0 = OFF (key omitted => byte-identical).
               shower_topo_demote_len=null,
+              // ---- doc sbnd_xin/docs/pr/30 §11 port-fidelity knobs ------------
+              // All five default to the pre-pr/30 behaviour, so the compiled JSON is
+              // byte-identical until one is set.  See cfg/pgrapher/common/clus.jsonnet
+              // for what each does.  fit_exclusion (P1), graph_endpoint_strict (P8) and
+              // oov_prototype_parity (F2) turn NEW behaviour on (default off);
+              // first_seg_local_pca (P2) and other_seg_relaxed_accept (P4) gate behaviour
+              // that is ALREADY production, so null = on = legacy and false restores the
+              // prototype's narrower version.
+              fit_exclusion=false, graph_endpoint_strict=false, graph_endpoint_tol=null,
+              oov_prototype_parity=false, first_seg_local_pca=null, other_seg_relaxed_accept=null,
               // Steiner TERMINAL filter fidelity (doc pr/29 D1 and D12).  Both
               // OFF here = the historical toolkit behaviour, keys omitted =>
               // byte-identical config.  Turning either on can only ADD Steiner
@@ -1509,6 +1519,12 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
             cathode_x=cathode_x,
             cathode_kink_xcut=cathode_kink_xcut,
             shower_topo_demote_len=shower_topo_demote_len,
+            fit_exclusion=fit_exclusion,
+            graph_endpoint_strict=graph_endpoint_strict,
+            graph_endpoint_tol=graph_endpoint_tol,
+            oov_prototype_parity=oov_prototype_parity,
+            first_seg_local_pca=first_seg_local_pca,
+            other_seg_relaxed_accept=other_seg_relaxed_accept,
             iso_endpoint=iso_endpoint,
             iso_endpoint_min_length=iso_endpoint_min_length,
             iso_endpoint_max_xext=iso_endpoint_max_xext,
@@ -1958,6 +1974,16 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
        // null = C++ default 0 = OFF = byte-identical.  Ships OFF; the SBND
        // operating point lives in wct-pr-perevt.jsonnet (doc 68).
        shower_topo_demote_len=null,
+       // ---- doc sbnd_xin/docs/pr/30 §11 port-fidelity knobs ------------
+       // All five default to the pre-pr/30 behaviour, so the compiled JSON is
+       // byte-identical until one is set.  See cfg/pgrapher/common/clus.jsonnet
+       // for what each does.  fit_exclusion (P1), graph_endpoint_strict (P8) and
+       // oov_prototype_parity (F2) turn NEW behaviour on (default off);
+       // first_seg_local_pca (P2) and other_seg_relaxed_accept (P4) gate behaviour
+       // that is ALREADY production, so null = on = legacy and false restores the
+       // prototype's narrower version.
+       fit_exclusion=false, graph_endpoint_strict=false, graph_endpoint_tol=null,
+       oov_prototype_parity=false, first_seg_local_pca=null, other_seg_relaxed_accept=null,
        // Steiner TERMINAL filter fidelity (doc pr/29 D1 and D12).  Both OFF =
        // the historical toolkit behaviour = byte-identical (keys omitted).
        // Ships OFF; the SBND operating point lives in wct-pr-perevt.jsonnet.
@@ -2092,6 +2118,12 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 cathode_x=cathode_x,
                 cathode_kink_xcut=cathode_kink_xcut,
                 shower_topo_demote_len=shower_topo_demote_len,
+                fit_exclusion=fit_exclusion,
+                graph_endpoint_strict=graph_endpoint_strict,
+                graph_endpoint_tol=graph_endpoint_tol,
+                oov_prototype_parity=oov_prototype_parity,
+                first_seg_local_pca=first_seg_local_pca,
+                other_seg_relaxed_accept=other_seg_relaxed_accept,
                 steiner_terminal_wire_tol=steiner_terminal_wire_tol,
                 steiner_terminal_adjacent_slice=steiner_terminal_adjacent_slice,
                 steiner_edge_charge_forward_dead_mix=steiner_edge_charge_forward_dead_mix,

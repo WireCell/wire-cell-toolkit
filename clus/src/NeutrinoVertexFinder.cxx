@@ -497,6 +497,11 @@ VertexPtr PatternAlgorithms::compare_main_vertices_all_showers(Graph& graph, Fac
     local_fitter.add_graph(local_graph);
     
     // Do fitting on local graph
+    // 3-argument form: flag_exclusion takes its default (false), and that is
+    // correct here regardless of m_fit_exclusion (doc pr/30 §11 P1).
+    // local_graph holds exactly ONE segment, so update_association -- which
+    // strips the 2-D cells belonging to OTHER segments -- has nothing to
+    // strip.  Knobbing this site would be a no-op that reads as a divergence.
     local_fitter.do_multi_tracking(true, true, false);
     
     // Create fit point cloud
@@ -2056,7 +2061,7 @@ void PatternAlgorithms::improve_vertex(Graph& graph, Facade::Cluster& cluster, V
     detv_dump("iv:entry", graph);
         if (examine_structure_4(main_vertex, flag_final_vertex, graph, cluster, track_fitter, dv)) {
             flag_found_vertex_activities = true;
-            track_fitter.do_multi_tracking(true, true, true, false, false, &cluster);
+            track_fitter.do_multi_tracking(true, true, true, m_fit_exclusion, false, &cluster);
             detv_dump("iv:examine_structure_4a", graph);
         }
     }
@@ -2113,7 +2118,7 @@ void PatternAlgorithms::improve_vertex(Graph& graph, Facade::Cluster& cluster, V
                 vtx->wcpt().point.x()/units::cm, vtx->wcpt().point.y()/units::cm, vtx->wcpt().point.z()/units::cm);
 
             if (tmp_dis > 0.5*units::cm) { // if the vertex moved far, refit
-                track_fitter.do_multi_tracking(true, true, true, false, false, &cluster);
+                track_fitter.do_multi_tracking(true, true, true, m_fit_exclusion, false, &cluster);
                 fit_vertex(cluster, vtx, main_vertex, vertex_segments, track_fitter, dv);
                 s_log->trace("improve_vertex: cluster {} second fit_vertex done -> ({:.2f}, {:.2f}, {:.2f})",
                     cluster.ident(),
@@ -2129,7 +2134,7 @@ void PatternAlgorithms::improve_vertex(Graph& graph, Facade::Cluster& cluster, V
     
     if (flag_update_fit) {
         // Do the overall fit again
-        track_fitter.do_multi_tracking(true, true, true, false, false, &cluster);
+        track_fitter.do_multi_tracking(true, true, true, m_fit_exclusion, false, &cluster);
         detv_dump("iv:post_fitloop_dmt", graph);
 
         bool flag_keep_main_vertex = false;
@@ -2257,7 +2262,7 @@ void PatternAlgorithms::improve_vertex(Graph& graph, Facade::Cluster& cluster, V
         
         if (flag_update_fit) {
             // Do the overall fit again
-            track_fitter.do_multi_tracking(true, true, true, false, false, &cluster);
+            track_fitter.do_multi_tracking(true, true, true, m_fit_exclusion, false, &cluster);
             detv_dump("iv:post_search_dmt", graph);
             flag_update_fit = false;
 
@@ -2291,13 +2296,13 @@ void PatternAlgorithms::improve_vertex(Graph& graph, Facade::Cluster& cluster, V
                 }
             }
             if (flag_update_fit) {
-                track_fitter.do_multi_tracking(true, true, true, false, false, &cluster);
+                track_fitter.do_multi_tracking(true, true, true, m_fit_exclusion, false, &cluster);
             }
         }
         
         // Eliminate short tracks
         if (eliminate_short_vertex_activities(graph, cluster, main_vertex, existing_segments, track_fitter, dv)) {
-            track_fitter.do_multi_tracking(true, true, true, false, false, &cluster);
+            track_fitter.do_multi_tracking(true, true, true, m_fit_exclusion, false, &cluster);
             detv_dump("iv:final_dmt", graph);
         }
         

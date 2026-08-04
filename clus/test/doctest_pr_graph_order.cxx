@@ -248,3 +248,102 @@ TEST_CASE("pr unindexed segments collapse in an index-ordered set")
     PR::IndexedSegmentSet indexed{a, b, c};
     CHECK(indexed.size() == 3);
 }
+
+// ---------------------------------------------------------------------------
+// doc sbnd_xin/docs/pr/30 §11, P8 -- the endpoint-consistency check that the
+// port dropped (prototype NeutrinoID::add_proto_connection,
+// NeutrinoID_proto_vertex.h:1952-1956, "Error! Vertex and Segment does not
+// match").
+//
+// Two properties are pinned:
+//   1. The check only judges a connection actually being MADE.  A re-call on a
+//      segment already in the graph is a no-op and must NOT be counted -- the
+//      first draft counted those and reported 108 "mismatches" on 48 events
+//      that were all no-op re-entries.
+//   2. Strict mode withholds the EDGE but still records the vertices, which is
+//      what the prototype does (it returns before touching the connection maps
+//      but any vertex it had already seen stays in proto_vertices).
+//
+// Revert proof: moving the check back above the descriptor_valid() early
+// return makes "re-adding a segment is not judged" fail; dropping the
+// g_graph_endpoint_policy.strict branch makes "strict mode withholds the
+// edge" fail.
+static PR::SegmentPtr make_seg_with_ends(const WireCell::Point& a, const WireCell::Point& b)
+{
+    auto seg = std::make_shared<PR::Segment>();
+    std::vector<PR::WCPoint> wcpts(2);
+    wcpts[0].point = a;
+    wcpts[1].point = b;
+    seg->wcpts(wcpts);
+    return seg;
+}
+static PR::VertexPtr make_vtx_at(const WireCell::Point& p)
+{
+    auto v = std::make_shared<PR::Vertex>();
+    v->wcpt().point = p;
+    return v;
+}
+
+TEST_CASE("pr30 P8 inconsistent endpoints are counted only when a connection is made")
+{
+    const WireCell::Point a(0, 0, 0), b(10 * units::cm, 0, 0);
+    const WireCell::Point far_off(0, 5 * units::cm, 0);   // 5 cm from either end
+
+    PR::g_graph_endpoint_policy.strict = false;
+    PR::g_graph_endpoint_policy.tol = 0.3 * units::cm;
+
+    PR::Graph g;
+    auto seg = make_seg_with_ends(a, b);
+    auto v1 = make_vtx_at(a);
+    auto v2 = make_vtx_at(far_off);          // NOT at either end
+
+    const auto n0 = PR::g_port_audit.endpoint_mismatch.load();
+    const auto r0 = PR::g_port_audit.add_segment_reentry.load();
+
+    CHECK(PR::add_segment(g, seg, v1, v2) == true);
+    CHECK(PR::g_port_audit.endpoint_mismatch.load() == n0 + 1);   // judged once
+    CHECK(PR::g_port_audit.add_segment_reentry.load() == r0);     // first call is not a re-entry
+    CHECK(boost::num_edges(g) == 1u);        // not strict => the edge is still made
+
+    // Re-call on the SAME segment: it already has a descriptor, so this is a
+    // no-op and must not be judged again.
+    PR::add_segment(g, seg, v1, v2);
+    CHECK(PR::g_port_audit.endpoint_mismatch.load() == n0 + 1);   // still 1, not 2
+    CHECK(PR::g_port_audit.add_segment_reentry.load() == r0 + 1);
+    CHECK(boost::num_edges(g) == 1u);
+
+    // A consistent pair is never judged.
+    PR::Graph g2;
+    auto seg2 = make_seg_with_ends(a, b);
+    CHECK(PR::add_segment(g2, seg2, make_vtx_at(a), make_vtx_at(b)) == true);
+    CHECK(PR::g_port_audit.endpoint_mismatch.load() == n0 + 1);
+}
+
+TEST_CASE("pr30 P8 strict mode withholds the edge but keeps the vertices")
+{
+    const WireCell::Point a(0, 0, 0), b(10 * units::cm, 0, 0);
+    const WireCell::Point far_off(0, 5 * units::cm, 0);
+
+    PR::g_graph_endpoint_policy.strict = true;
+    PR::g_graph_endpoint_policy.tol = 0.3 * units::cm;
+
+    PR::Graph g;
+    auto seg = make_seg_with_ends(a, b);
+    const auto ref0 = PR::g_port_audit.endpoint_refused.load();
+
+    PR::add_segment(g, seg, make_vtx_at(a), make_vtx_at(far_off));
+
+    CHECK(PR::g_port_audit.endpoint_refused.load() == ref0 + 1);
+    CHECK(boost::num_edges(g) == 0u);        // the connection is NOT made
+    CHECK(boost::num_vertices(g) == 2u);     // ... but the vertices are recorded
+    CHECK(seg->descriptor_valid() == false); // and the segment stays detached
+
+    // A consistent pair still connects with strict on.
+    PR::Graph g2;
+    auto seg2 = make_seg_with_ends(a, b);
+    PR::add_segment(g2, seg2, make_vtx_at(a), make_vtx_at(b));
+    CHECK(boost::num_edges(g2) == 1u);
+    CHECK(PR::g_port_audit.endpoint_refused.load() == ref0 + 1);
+
+    PR::g_graph_endpoint_policy.strict = false;   // restore for other cases
+}

@@ -180,6 +180,112 @@ namespace WireCell::Clus::PR {
         double m_cathode_x{0};
         double m_cathode_kink_xcut{0};
 
+        // ---- doc sbnd_xin/docs/pr/30 §11: four port-fidelity knobs ----------
+        //
+        // P1 / F1 -- `flag_exclusion` on do_multi_tracking.
+        // 28 of the 30 live prototype call sites pass flag_exclusion = true
+        // (NeutrinoID_proto_vertex.h:108,140,170,319,355,415,1363,1479,2358,
+        //  2471,2537,2604,2724,2813,2995 + 13 more in improve_vertex /
+        //  final_structure / examine_structure / track_shower); the toolkit
+        // passes false at all 31.  Both signatures DEFAULT the flag to false
+        // (prototype PR3DCluster.h:182, toolkit TrackFitting.h:446), so the
+        // prototype's 28 are explicit overrides the port stopped writing --
+        // the signature of a dropped argument, not a design choice.  With
+        // exclusion on, form_map_graph calls update_association
+        // (TrackFitting.cxx:3187, a faithful port of
+        // PR3DCluster_multi_track_fitting.h:820/970-1075) which strips from
+        // this segment's 2-D associations the (wire,tick) cells belonging to
+        // OTHER segments.  Off, two segments crossing the same wire region
+        // both claim the same charge.
+        // C++ default false => every call site keeps passing false =>
+        // byte-identical to the pre-pr/30 behaviour.
+        // NOT applied at NeutrinoPatternBase.cxx:1491/1507 (break_segments --
+        // the toolkit's correct match to the prototype's own two false sites,
+        // NeutrinoID_proto_vertex.h:722/751, "fit dQ/dx here, do not exclude
+        // others") nor at NeutrinoVertexFinder.cxx:500 (a single-segment local
+        // graph, where exclusion has nothing to exclude).
+        bool   m_fit_exclusion{false};
+
+        // P8 -- endpoint-consistency check on PR::add_segment.
+        // The prototype refuses a vertex/segment connection whose vertex wcpt
+        // index is neither the segment's front nor its back
+        // (NeutrinoID_proto_vertex.h:1952-1956, "Error! Vertex and Segment
+        // does not match").  The toolkit has no index to compare, and no
+        // positional analogue was written, so the check is absent rather than
+        // translated.  It is the invariant find_vertices() silently depends on
+        // (PRGraph.cxx:105-141 orders its pair by distance to the segment's
+        // FIRST wcpt, which is only meaningful if both vertices really do sit
+        // at the segment's two ends).
+        // The WARN is unconditional and log-only.  m_graph_endpoint_strict
+        // additionally REFUSES the connection, which changes the graph =>
+        // C++ default false => byte-identical.
+        // m_graph_endpoint_tol is the positional stand-in for wcpt-index
+        // equality; 0.3 cm is well under the Steiner point spacing so it
+        // cannot merge distinct ends, and well over FP noise in a copied point.
+        bool   m_graph_endpoint_strict{false};
+        double m_graph_endpoint_tol{0.3 * units::cm};
+
+        // F2 / P9 -- polarity of the out-of-detector-volume point guard.
+        // dv->contained_by(p) returns apa()/face() == -1 outside every TPC and
+        // the downstream m_trigger_offsets.at(-1) / m_anodes.at(-1) then
+        // throws, so the guard itself is REQUIRED (class-C crash, doc pr/11
+        // §6.3; SBND MCP2025C evt 49951).  What was never chosen is what the
+        // skipped point MEANS -- and the three in-scope sites silently picked
+        // three different answers, all three the opposite of what the
+        // prototype's own helper returns for a point with no readout:
+        //   NeutrinoOtherSegments.cxx  modify_segment_isochronous
+        //     toolkit: cannot increment n_bad          => "good/connected"
+        //     prototype: is_good_point -> get_closest_points empty AND
+        //       get_closest_dead_chs false => num_planes 0 => FALSE
+        //       (ToyCTPointCloud.cxx:399-431)          => n_bad++  ("bad")
+        //   NeutrinoStructureExaminer.cxx  examine_vertices_1p
+        //     toolkit: flag_dead stays true            => "dead"
+        //     prototype: get_closest_dead_chs -> channel absent from
+        //       dead_uchs/vchs/wchs => FALSE           => flag_dead=false
+        //   NeutrinoStructureExaminer.cxx  examine_vertices_3
+        //     toolkit: cannot contribute num_unique    => "not unique" (the
+        //       segment is then REMOVED from the graph)
+        //     prototype: get_closest_2d_dis is a pure kd-tree 2-D distance
+        //       with no volume check (ProtoSegment.cxx:1094-1103), so the
+        //       point participates normally.
+        // The first two restorations are EXACT (the helper demonstrably
+        // returns false); the third is a DIRECTIONAL INFERENCE -- the
+        // prototype computes a real distance rather than voting, and
+        // "outside every TPC => far from every other segment in some view"
+        // is very likely but not proven.  It is also the non-destructive
+        // default, which is the right tiebreak for a branch whose other
+        // outcome deletes a segment.  Flagged as such at the site.
+        // C++ default false => all three keep today's polarity =>
+        // byte-identical.
+        bool   m_oov_prototype_parity{false};
+
+        // P2 -- local-PCA refinement of the first segment's two boundary
+        // endpoints (NeutrinoPatternBase.cxx, commit 1eb097a9 "fix a bug and
+        // randomness").  Toolkit-only: the prototype takes
+        // get_two_boundary_wcps(2) and uses it as-is
+        // (NeutrinoID_proto_vertex.h:426).  Unlike the knobs above this is
+        // ALREADY the production behaviour, so its default is TRUE and OFF is
+        // the new option -- the point of the knob is that an unconditional,
+        // un-knobbed departure in the single most load-bearing function of the
+        // stage could not be measured at all.  Everything downstream of
+        // init_first_segment derives from these two points.
+        // C++ default true => byte-identical to the pre-pr/30 behaviour.
+        // (Inert when m_iso_endpoint fires -- that branch bypasses the whole
+        // legacy block including this refinement.)
+        bool   m_first_seg_local_pca{true};
+
+        // P4 -- the extra acceptance clause in find_other_segments.
+        // Prototype NeutrinoID_proto_vertex.h:1368 accepts
+        //   length > 30 cm || (direct/length < 0.78 && length > 10 cm &&
+        //                      median_dQdx/MIP > 1.6)
+        // the toolkit adds
+        //   || (direct/length < 0.72 && length > 15 cm && median_dQdx/MIP > 1.05)
+        // -- a strict widening (less curved, longer, less ionising), so it can
+        // only ADD segments.  Same default logic as P2: this is production
+        // today, so default TRUE, and OFF restores the prototype's clause.
+        // C++ default true => byte-identical.
+        bool   m_other_seg_relaxed_accept{true};
+
         // Proton-template direction vote (doc pr/8; default false = legacy).
         // Thresholds are initial values pending the pr/8 sec. 6 calibration.
         bool   m_proton_dir_vote{false};

@@ -547,7 +547,7 @@ void PatternAlgorithms::find_other_segments(Graph& graph, Facade::Cluster& clust
                 // At least one endpoint connects to the existing graph
                 if (v1v2_dist > 0.1 * units::cm) {
                     add_segment(graph, new_seg, v1, v2);
-                    track_fitter.do_multi_tracking(true, true, false, false, false, &cluster);
+                    track_fitter.do_multi_tracking(true, true, false, m_fit_exclusion, false, &cluster);
 
                     double length        = segment_track_length(new_seg);
                     double direct_length = segment_track_direct_length(new_seg);
@@ -555,9 +555,41 @@ void PatternAlgorithms::find_other_segments(Graph& graph, Facade::Cluster& clust
 
                     
 
-                    if (length > 30 * units::cm ||
+                    // doc pr/30 §11, P4.  The first two clauses are the
+                    // prototype's (NeutrinoID_proto_vertex.h:1368); the third
+                    // is toolkit-only and a strict WIDENING -- less curved
+                    // (0.72 vs 0.78 direct/total), longer (15 vs 10 cm), less
+                    // ionising (1.05 vs 1.6 x MIP) -- so it can only ADD
+                    // segments, never reject one the prototype accepted.
+                    // m_other_seg_relaxed_accept defaults TRUE because this is
+                    // already production; OFF restores the prototype's clause.
+                    // The attribution below is unconditional and log-only: it
+                    // is what answers "is the extra clause admitting garbage",
+                    // which is the whole reason the knob exists.
+                    const bool accept_proto =
+                        length > 30 * units::cm ||
                         (direct_length < 0.78 * length && length > 10 * units::cm &&
-                         medium_dQ_dx / mip_dQdx > 1.6) || (direct_length< 0.72 * length && length > 15 * units::cm && medium_dQ_dx / mip_dQdx > 1.05)) {
+                         medium_dQ_dx / mip_dQdx > 1.6);
+                    const bool accept_relaxed =
+                        direct_length < 0.72 * length && length > 15 * units::cm &&
+                        medium_dQ_dx / mip_dQdx > 1.05;
+                    if (accept_proto) {
+                        g_port_audit.oseg_accept_proto.fetch_add(1, std::memory_order_relaxed);
+                    }
+                    else if (accept_relaxed) {
+                        g_port_audit.oseg_accept_relaxed.fetch_add(1, std::memory_order_relaxed);
+                        SPDLOG_LOGGER_DEBUG(s_log,
+                            "pr30 P4 relaxed-only accept: cluster {} length={:.2f} cm "
+                            "direct={:.2f} cm ratio={:.3f} medQdx/MIP={:.3f}",
+                            cluster.get_cluster_id(), length/units::cm,
+                            direct_length/units::cm,
+                            length > 0 ? direct_length/length : -1.0,
+                            medium_dQ_dx / mip_dQdx);
+                    }
+                    else {
+                        g_port_audit.oseg_reject.fetch_add(1, std::memory_order_relaxed);
+                    }
+                    if (accept_proto || (m_other_seg_relaxed_accept && accept_relaxed)) {
                         new_segments.push_back(new_seg);
                         // std::cout << "Cluster " << cluster.get_cluster_id() << " New segment: length = " << length / units::cm << " cm, direct_length = " << direct_length / units::cm 
                             //   << " cm, medium_dQ_dx = " << medium_dQ_dx / (units::MeV / units::cm) << " MeV/cm" << " " << v1_fit_pt << " " << v2_fit_pt << std::endl;
@@ -667,7 +699,7 @@ void PatternAlgorithms::find_other_segments(Graph& graph, Facade::Cluster& clust
                     remove_vertex(graph, v2);
                 } else {
                     // Isochronous connection found (segment already added by modify_*)
-                    track_fitter.do_multi_tracking(true, true, false, false, false, &cluster);
+                    track_fitter.do_multi_tracking(true, true, false, m_fit_exclusion, false, &cluster);
 
                     double direct_length = segment_track_direct_length(new_seg);
                     double length        = segment_track_length(new_seg);
@@ -1249,7 +1281,27 @@ bool PatternAlgorithms::modify_segment_isochronous(Graph& graph, Facade::Cluster
                 pt.z() + (new_pt.z() - pt.z()) / ncount * j
             );
             auto test_wpid = dv->contained_by(step_p);
-            if (test_wpid.face() != -1 && test_wpid.apa() != -1) {
+            if (test_wpid.face() == -1 || test_wpid.apa() == -1) {
+                // doc pr/30 §11, F2 site 1 (was P9).  The guard is REQUIRED:
+                // transform->backward() would do m_trigger_offsets.at(-1) and
+                // throw (class-C crash, doc pr/11 §6.3).  What was never
+                // chosen is what the skipped point MEANS.  This test is
+                // `n_bad == 0`, so a point that cannot increment n_bad votes
+                // "the bridge is connected" -- the permissive answer.
+                //
+                // The prototype's answer is the opposite, and it is not a
+                // judgement call: it calls is_good_point(test_p, 0.2 cm, 0, 0)
+                // (NeutrinoID_proto_vertex.h:1645), and for a point outside
+                // the detector get_closest_points() comes back empty on all
+                // three planes AND get_closest_dead_chs() finds no dead
+                // channel, so num_planes == 0 and is_good_point returns FALSE
+                // (ToyCTPointCloud.cxx:399-431) -- i.e. n_bad++.
+                // EXACT parity restoration when the knob is on.
+                g_port_audit.oov_isochronous.fetch_add(1, std::memory_order_relaxed);
+                if (m_oov_prototype_parity) { n_bad++; }
+                continue;
+            }
+            {
                 auto temp_p_raw = transform->backward(step_p, cluster_t0, test_wpid.face(), test_wpid.apa());
                 if (!grouping->is_good_point(temp_p_raw, test_wpid.apa(), test_wpid.face(), 0.2 * units::cm, 0, 0)) {
                     n_bad++;

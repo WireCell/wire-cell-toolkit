@@ -79,6 +79,13 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_cathode_x          = get(config, "cathode_x",          m_cathode_x);           // cm
     m_cathode_kink_xcut  = get(config, "cathode_kink_xcut",  m_cathode_kink_xcut);   // cm
     m_shower_topo_demote_len = get(config, "shower_topo_demote_len", m_shower_topo_demote_len);  // cm
+    // doc sbnd_xin/docs/pr/30 §11 port-fidelity knobs.
+    m_fit_exclusion            = get(config, "fit_exclusion",            m_fit_exclusion);
+    m_graph_endpoint_strict    = get(config, "graph_endpoint_strict",    m_graph_endpoint_strict);
+    m_graph_endpoint_tol       = get(config, "graph_endpoint_tol",       m_graph_endpoint_tol);       // cm
+    m_oov_prototype_parity     = get(config, "oov_prototype_parity",     m_oov_prototype_parity);
+    m_first_seg_local_pca      = get(config, "first_seg_local_pca",      m_first_seg_local_pca);
+    m_other_seg_relaxed_accept = get(config, "other_seg_relaxed_accept", m_other_seg_relaxed_accept);
     m_iso_endpoint               = get(config, "iso_endpoint",               m_iso_endpoint);
     m_iso_endpoint_min_length    = get(config, "iso_endpoint_min_length",    m_iso_endpoint_min_length);     // cm
     m_iso_endpoint_max_xext      = get(config, "iso_endpoint_max_xext",      m_iso_endpoint_max_xext);       // cm
@@ -220,6 +227,14 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["cathode_x"]         = m_cathode_x;          // cm, T0-corrected frame
     cfg["cathode_kink_xcut"] = m_cathode_kink_xcut;  // cm; 0 = legacy (the kink search sees every fit point)
     cfg["shower_topo_demote_len"] = m_shower_topo_demote_len;  // cm; 0 = legacy (long segments stay eligible for kShowerTopology)
+    // doc sbnd_xin/docs/pr/30 §11.  Round-tripped so the compiled config
+    // records the operating point; each default reproduces the pre-pr/30 tree.
+    cfg["fit_exclusion"]            = m_fit_exclusion;             // false = legacy (all sites pass flag_exclusion=false)
+    cfg["graph_endpoint_strict"]    = m_graph_endpoint_strict;     // false = legacy (WARN only, connection still made)
+    cfg["graph_endpoint_tol"]       = m_graph_endpoint_tol;        // cm
+    cfg["oov_prototype_parity"]     = m_oov_prototype_parity;      // false = legacy (today's three polarities)
+    cfg["first_seg_local_pca"]      = m_first_seg_local_pca;       // true  = legacy (the refinement runs)
+    cfg["other_seg_relaxed_accept"] = m_other_seg_relaxed_accept;  // true  = legacy (the 0.72/15cm/1.05 clause is live)
     cfg["iso_endpoint"]               = m_iso_endpoint;                // false = legacy wire-footprint boundary endpoints
     cfg["iso_endpoint_min_length"]    = m_iso_endpoint_min_length;     // cm
     cfg["iso_endpoint_max_xext"]      = m_iso_endpoint_max_xext;       // cm
@@ -510,6 +525,18 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
     pattern_algos.m_cathode_x         = m_cathode_x * units::cm;          // cm -> internal
     pattern_algos.m_cathode_kink_xcut = m_cathode_kink_xcut * units::cm;  // cm -> internal
     pattern_algos.m_shower_topo_demote_len = m_shower_topo_demote_len * units::cm;  // cm -> internal
+    // doc sbnd_xin/docs/pr/30 §11 port-fidelity knobs.
+    pattern_algos.m_fit_exclusion            = m_fit_exclusion;
+    pattern_algos.m_graph_endpoint_strict    = m_graph_endpoint_strict;
+    pattern_algos.m_graph_endpoint_tol       = m_graph_endpoint_tol * units::cm;   // cm -> internal
+    pattern_algos.m_oov_prototype_parity     = m_oov_prototype_parity;
+    pattern_algos.m_first_seg_local_pca      = m_first_seg_local_pca;
+    pattern_algos.m_other_seg_relaxed_accept = m_other_seg_relaxed_accept;
+    // add_segment() is a free function with no component config in reach, so
+    // the P8 policy travels through a process-wide struct written here, once,
+    // before any graph is built (doc pr/30 §11 P8).
+    WireCell::Clus::PR::g_graph_endpoint_policy.strict = m_graph_endpoint_strict;
+    WireCell::Clus::PR::g_graph_endpoint_policy.tol    = m_graph_endpoint_tol * units::cm;
     pattern_algos.m_iso_endpoint               = m_iso_endpoint;
     pattern_algos.m_iso_endpoint_min_length    = m_iso_endpoint_min_length * units::cm;  // cm -> internal
     pattern_algos.m_iso_endpoint_max_xext      = m_iso_endpoint_max_xext * units::cm;    // cm -> internal
@@ -889,6 +916,31 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
     grouping.set_track_fitting(m_track_fitter);
     if (m_perf) SPDLOG_LOGGER_DEBUG(log, "TaggerCheckNeutrino timing: finalize took {} ms", MS(Clock::now() - t0).count());
     if (m_perf) SPDLOG_LOGGER_DEBUG(log, "TaggerCheckNeutrino timing: visit() TOTAL took {} ms", MS(Clock::now() - t_total).count());
+
+    // doc sbnd_xin/docs/pr/30 §11 -- one machine-readable line per event.
+    // The counters are process-wide and every SBND runner drives one event
+    // per wire-cell process, so these cumulative totals ARE this event's.
+    // Emitted in EVERY arm, knob-off included: the knob-off arm is what
+    // measures how often each divergence is reachable at all.
+    {
+        const auto& pa = WireCell::Clus::PR::g_port_audit;
+        const uint64_t moved = pa.pca_refine_moved.load();
+        SPDLOG_LOGGER_INFO(log,
+            "PR30AUDIT oov_iso={} oov_dead={} oov_uniq={} "
+            "addseg={} addseg_reentry={} ep_mismatch={} ep_refused={} "
+            "pca_calls={} pca_moved={} pca_mean_cm={:.4f} pca_max_cm={:.4f} "
+            "oseg_proto={} oseg_relaxed_only={} oseg_reject={} "
+            "knobs[fit_exclusion={} endpoint_strict={} oov_parity={} local_pca={} relaxed_accept={}]",
+            pa.oov_isochronous.load(), pa.oov_dead_scan.load(), pa.oov_unique_scan.load(),
+            pa.add_segment_calls.load(), pa.add_segment_reentry.load(),
+            pa.endpoint_mismatch.load(), pa.endpoint_refused.load(),
+            pa.pca_refine_calls.load(), moved,
+            moved ? (double(pa.pca_move_um_sum.load()) / moved) * units::um / units::cm : 0.0,
+            double(pa.pca_move_um_max.load()) * units::um / units::cm,
+            pa.oseg_accept_proto.load(), pa.oseg_accept_relaxed.load(), pa.oseg_reject.load(),
+            m_fit_exclusion, m_graph_endpoint_strict, m_oov_prototype_parity,
+            m_first_seg_local_pca, m_other_seg_relaxed_accept);
+    }
 }
 
 void TaggerCheckNeutrino::load_trackfitting_config(const std::string& config_file)

@@ -78,6 +78,20 @@ public:
         // and NeutrinoVertexFinder, so one segment cannot be classified two
         // ways within one event.
         double m_shower_topo_demote_len{0};
+
+        // ---- doc sbnd_xin/docs/pr/30 §11 port-fidelity knobs ----------------
+        // Threaded verbatim to PatternAlgorithms / PR::g_graph_endpoint_policy.
+        // See PatternAlgorithms::m_fit_exclusion etc. for the full rationale.
+        // The first three default to today's behaviour by being FALSE (new
+        // behaviour is opt-in); the last two default to TRUE because the
+        // behaviour they gate is already production.  Either way, defaults =>
+        // byte-identical to the pre-pr/30 tree.
+        bool   m_fit_exclusion{false};             // P1
+        bool   m_graph_endpoint_strict{false};     // P8 (the WARN is unconditional)
+        double m_graph_endpoint_tol{0.3};          // cm
+        bool   m_oov_prototype_parity{false};      // F2 (all three sites)
+        bool   m_first_seg_local_pca{true};        // P2
+        bool   m_other_seg_relaxed_accept{true};   // P4
         // Isochronous first-segment endpoint finding (doc sbnd_xin/docs/pr/24
         // round 2, SBND evt 271851); lengths in cm.  false => legacy
         // wire-footprint boundary endpoints, byte-identical.  When on, a

@@ -6,6 +6,10 @@
 
 namespace WireCell::Clus::PR {
 
+    // doc pr/30 §11 instrumentation (see PRGraph.h).
+    PortAuditCounters   g_port_audit;
+    GraphEndpointPolicy g_graph_endpoint_policy;
+
     // Determinism-debug (WCT_DET_DEBUG=2): log every segment creation with
     // its stable index and a mini backtrace so creation-order divergence
     // between two runs can be diffed and attributed to the calling function.
@@ -38,14 +42,111 @@ namespace WireCell::Clus::PR {
         return true;
     }
 
+    // doc pr/30 §11, P8 -- the endpoint-consistency check the port dropped.
+    //
+    // Prototype NeutrinoID::add_proto_connection refuses the connection and
+    // prints "Error! Vertex and Segment does not match" unless the vertex's
+    // wcpt INDEX equals the segment's front or back index
+    // (NeutrinoID_proto_vertex.h:1952-1956).  The toolkit carries no Steiner
+    // point-cloud index on a PR::Vertex, so the check is restated
+    // positionally -- which is the owner-accepted substitution (doc pr/30
+    // §10, clarification 1) -- rather than left out, which is what it was.
+    //
+    // The tolerance is a stand-in for index equality, not a physics cut: a
+    // consistent vertex holds a COPY of the segment's terminal wcpt, so the
+    // distance is exactly 0 in the normal case and the tolerance only absorbs
+    // a later fit nudge.  0.3 cm is far under Steiner point spacing (it
+    // cannot merge two distinct ends) and far over FP noise.
+    //
+    // Returns true when the pair is consistent.  Counting is unconditional;
+    // only the REFUSAL is knobbed.
+    //
+    // WHAT THIS ACTUALLY CATCHES ON SBND -- read before turning strict on.
+    // 108 firings over 22 of the 48 nueCC events (doc pr/30 §11.4), and every
+    // one traced with WCT_DET_DEBUG=2 comes from PatternAlgorithms::
+    // crawl_segment (NeutrinoStructureExaminer.cxx:892 and :944).  That
+    // function rebuilds each of the vertex's segments so the new path
+    // TERMINATES at vtx_new_point, attaches them, and only then assigns
+    // `vertex->wcpt().point = vtx_new_point` (:948).  So the inconsistency is
+    // TRANSIENT and self-healing: by the time crawl_segment returns, every
+    // one of those connections is consistent.  It is not a lost invariant.
+    // Consequently m_graph_endpoint_strict is a FALSE POSITIVE as placed --
+    // it refuses legitimate connections mid-repair, and measurably damages
+    // the result (22/48 events change, 5 nue candidates lost vs 1 gained).
+    // A check for a PERSISTENT violation would have to run at end-of-stage,
+    // not here.  This one is retained as a tripwire, not as a fix.
+    static bool endpoint_consistent(const SegmentPtr& seg,
+                                    const VertexPtr& vtx1, const VertexPtr& vtx2)
+    {
+        if (seg->wcpts().empty()) { return true; }   // nothing to check against
+        const auto& front = seg->wcpts().front().point;
+        const auto& back  = seg->wcpts().back().point;
+        const double tol  = g_graph_endpoint_policy.tol;
+
+        auto at_an_end = [&](const VertexPtr& v) {
+            if (!v) { return true; }                 // null handled by callers
+            const auto& p = v->wcpt().point;
+            return ray_length(Ray{p, front}) <= tol || ray_length(Ray{p, back}) <= tol;
+        };
+        // The prototype tests each connection separately (one call per
+        // vertex), so a pair is consistent exactly when BOTH ends are.
+        return at_an_end(vtx1) && at_an_end(vtx2);
+    }
+
     bool add_segment(Graph& g, SegmentPtr seg, VertexPtr vtx1, VertexPtr vtx2)
     {
+        g_port_audit.add_segment_calls.fetch_add(1, std::memory_order_relaxed);
+
+        // The check sits AFTER the descriptor_valid() early return, because the
+        // prototype's counterpart guards add_proto_connection -- a connection
+        // being MADE -- not a call that turns out to be a no-op.  On the 48
+        // nueCC events this placement is measured to make no difference
+        // (add_segment_reentry == 0 in every event: no call ever arrives with
+        // the segment already in the graph), but the ordering is the correct
+        // one on the argument and the doctest pins it.
+        if (seg && seg->descriptor_valid()) {
+            g_port_audit.add_segment_reentry.fetch_add(1, std::memory_order_relaxed);
+        }
+
         bool changed = false;
         changed = add_vertex(g, vtx1) || changed;
         changed = add_vertex(g, vtx2) || changed;
 
         if (seg->descriptor_valid()) {
             return changed;
+        }
+
+        if (seg && vtx1 && vtx2 && !endpoint_consistent(seg, vtx1, vtx2)) {
+            const auto n = g_port_audit.endpoint_mismatch.fetch_add(1, std::memory_order_relaxed);
+            if (n < 20) {   // bound the log; the counter carries the full rate
+                auto log = Log::logger("clus");
+                const auto& f = seg->wcpts().front().point;
+                const auto& b = seg->wcpts().back().point;
+                SPDLOG_LOGGER_WARN(log,
+                    "PR::add_segment: vertex/segment endpoint mismatch (doc pr/30 P8): "
+                    "seg nwcpts={} front=({:.3f},{:.3f},{:.3f}) back=({:.3f},{:.3f},{:.3f}) "
+                    "v1=({:.3f},{:.3f},{:.3f}) v2=({:.3f},{:.3f},{:.3f}) tol={:.3f} cm strict={}",
+                    seg->wcpts().size(),
+                    f.x()/units::cm, f.y()/units::cm, f.z()/units::cm,
+                    b.x()/units::cm, b.y()/units::cm, b.z()/units::cm,
+                    vtx1->wcpt().point.x()/units::cm, vtx1->wcpt().point.y()/units::cm,
+                    vtx1->wcpt().point.z()/units::cm,
+                    vtx2->wcpt().point.x()/units::cm, vtx2->wcpt().point.y()/units::cm,
+                    vtx2->wcpt().point.z()/units::cm,
+                    g_graph_endpoint_policy.tol/units::cm,
+                    g_graph_endpoint_policy.strict);
+            }
+            if (g_graph_endpoint_policy.strict) {
+                // Prototype behaviour: the connection is NOT made.  Most
+                // prototype callers ignore add_proto_connection's return
+                // value, so this reproduces the effective outcome as well as
+                // the nominal one.  Default OFF -- this changes the graph.
+                // NOTE the two vertices have already been added above, exactly
+                // as the prototype leaves any vertex it had already recorded;
+                // only the connection is withheld.
+                g_port_audit.endpoint_refused.fetch_add(1, std::memory_order_relaxed);
+                return changed;
+            }
         }
 
         auto& gb = g[boost::graph_bundle];

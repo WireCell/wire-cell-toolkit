@@ -471,7 +471,7 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
                  } else {}),
         },
 
-        tagger_check_neutrino(name="", trackfitting_config_file="", particle_dataset="", recombination_model="", perf=false, dl_weights="", dQdx_scale=0.1, dQdx_offset=-1000.0, clus_geom_helper="", dl_vtx_rerank=true, dl_vtx_top_k=5, dl_vtx_min_accept_score=4.0, dl_vtx_score_scale=1000.0, beam_window_low=0, beam_window_high=0, nu_skip_cosmic=false, nu_skip_cosmic_bundle=false, nu_skip_cosmic_bundle_min_length=0, dir_weak_use_score=false, mip_dqdx=null, mip_dqdx_median=null, proton_dir_vote=false, proton_dir_score_max=null, proton_dir_asym_min=null, endpoint_trim_retry=false, fit_vertex_min_seg_length=null, cathode_x=null, cathode_kink_xcut=null, shower_topo_demote_len=null, iso_endpoint=false, iso_endpoint_min_length=null, iso_endpoint_max_xext=null, iso_endpoint_xext_frac=null, iso_endpoint_xext_quantile=null, iso_endpoint_tube_radius=null, iso_endpoint_min_aspect=null, cosmic_y_top_main=null, cosmic_y_top_strict=null, cosmic_y_top_loose=null, cosmic_y_small_piece=null, vertex_z_prior_scale=null, ssm_target_dir=null, ssm_absorber_dir=null, kine_fudge_factor=null, kine_recom_factor=null, kine_shower_fudge_factor=null, kine_shower_recom_factor=null, kine_proton_recom_factor=null, kine_plane_weights=null, kine_plane_asym_switch=null, kine_w_value=null, muon_dqdx_curve=null, sp_dedx_use_recomb_model=false, sp_mean_dedx_cut=null, dl_vtx_cut=null, skip_cosmic_companions=false, cosmic_companion_min_length=null, sp_photon_flag=false) :: {
+        tagger_check_neutrino(name="", trackfitting_config_file="", particle_dataset="", recombination_model="", perf=false, dl_weights="", dQdx_scale=0.1, dQdx_offset=-1000.0, clus_geom_helper="", dl_vtx_rerank=true, dl_vtx_top_k=5, dl_vtx_min_accept_score=4.0, dl_vtx_score_scale=1000.0, beam_window_low=0, beam_window_high=0, nu_skip_cosmic=false, nu_skip_cosmic_bundle=false, nu_skip_cosmic_bundle_min_length=0, dir_weak_use_score=false, mip_dqdx=null, mip_dqdx_median=null, proton_dir_vote=false, proton_dir_score_max=null, proton_dir_asym_min=null, endpoint_trim_retry=false, fit_vertex_min_seg_length=null, cathode_x=null, cathode_kink_xcut=null, shower_topo_demote_len=null, iso_endpoint=false, iso_endpoint_min_length=null, iso_endpoint_max_xext=null, iso_endpoint_xext_frac=null, iso_endpoint_xext_quantile=null, iso_endpoint_tube_radius=null, iso_endpoint_min_aspect=null, cosmic_y_top_main=null, cosmic_y_top_strict=null, cosmic_y_top_loose=null, cosmic_y_small_piece=null, vertex_z_prior_scale=null, ssm_target_dir=null, ssm_absorber_dir=null, kine_fudge_factor=null, kine_recom_factor=null, kine_shower_fudge_factor=null, kine_shower_recom_factor=null, kine_proton_recom_factor=null, kine_plane_weights=null, kine_plane_asym_switch=null, kine_w_value=null, muon_dqdx_curve=null, sp_dedx_use_recomb_model=false, sp_mean_dedx_cut=null, dl_vtx_cut=null, skip_cosmic_companions=false, cosmic_companion_min_length=null, sp_photon_flag=false, fit_exclusion=false, graph_endpoint_strict=false, graph_endpoint_tol=null, oov_prototype_parity=false, first_seg_local_pca=null, other_seg_relaxed_accept=null) :: {
             type: "TaggerCheckNeutrino",
             name: prefix + name,
             data: {
@@ -574,6 +574,36 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
               // against a 0.4 cm cut.  C++ default 0 => the guard never fires
               // => key omitted when null is byte-identical.
               + (if shower_topo_demote_len != null then { shower_topo_demote_len: shower_topo_demote_len } else {})
+              // ---- doc sbnd_xin/docs/pr/30 §11 port-fidelity knobs -------------
+              // fit_exclusion (P1): pass flag_exclusion=true to the 27 knobbed
+              // do_multi_tracking call sites, as 28 of the 30 live prototype
+              // sites do.  With it on, form_map_graph calls update_association
+              // and strips from each segment's 2-D associations the (wire,tick)
+              // cells belonging to OTHER segments.  break_segments' two sites
+              // and the single-segment local fitter are never knobbed -- they
+              // already match the prototype.  C++ default false.
+              + (if fit_exclusion then { fit_exclusion: true } else {})
+              // graph_endpoint_strict (P8): REFUSE a PR::add_segment whose
+              // vertices do not sit within graph_endpoint_tol of the segment's
+              // two wcpt ends, as the prototype's add_proto_connection does.
+              // The WARN and the counter are unconditional in C++; only the
+              // refusal is gated.  C++ defaults false / 0.3 cm.
+              + (if graph_endpoint_strict then { graph_endpoint_strict: true } else {})
+              + (if graph_endpoint_tol != null then { graph_endpoint_tol: graph_endpoint_tol } else {})
+              // oov_prototype_parity (F2, was P9): make a point outside every
+              // TPC vote the way the prototype's own helper answers for it, at
+              // all three sites -- bad (not connected) in
+              // modify_segment_isochronous, not-dead in examine_vertices_1p,
+              // unique (segment kept) in examine_vertices_3.  Today all three
+              // vote the opposite way.  C++ default false.
+              + (if oov_prototype_parity then { oov_prototype_parity: true } else {})
+              // first_seg_local_pca (P2) and other_seg_relaxed_accept (P4) are
+              // the two knobs whose C++ default is TRUE, because the behaviour
+              // they gate is already production.  null => key omitted => the
+              // C++ default => byte-identical; pass false to restore the
+              // prototype's narrower behaviour for measurement.
+              + (if first_seg_local_pca != null then { first_seg_local_pca: first_seg_local_pca } else {})
+              + (if other_seg_relaxed_accept != null then { other_seg_relaxed_accept: other_seg_relaxed_accept } else {})
               // Isochronous first-segment endpoint finding (doc pr/24 round 2,
               // SBND evt 271851): for a long cluster whose quantile-trimmed
               // drift-x extent is small (a filled 2-D sheet), pick the first
