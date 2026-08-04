@@ -400,8 +400,11 @@ namespace WireCell::Clus {
         void multi_trajectory_fit(int charge_div_method = 1, double div_sigma = 0.6*units::cm);
 
         // examine trajectory ...
-        std::vector<WireCell::Point> examine_segment_trajectory(std::shared_ptr<PR::Segment> segment, std::vector<WireCell::Point>& final_ps_vec, std::vector<WireCell::Point>& init_ps_vec);
-        bool skip_trajectory_point(WireCell::Point& p, std::pair<int,int>& apa_face, int i, std::vector<std::pair<WireCell::Point, std::shared_ptr<PR::Segment>>>& pss_vec,  std::vector<std::pair<WireCell::Point, std::shared_ptr<PR::Segment>>>& fine_tracking_path); 
+        // doc pr/28 T3: init_indices carries the GLOBAL m_3d_to_2d key of each
+        // point (prototype's init_indices, multi_track_fitting.h:429).  The
+        // per-segment loop position is NOT that key in the multi-track path.
+        std::vector<WireCell::Point> examine_segment_trajectory(std::shared_ptr<PR::Segment> segment, std::vector<WireCell::Point>& final_ps_vec, std::vector<WireCell::Point>& init_ps_vec, const std::vector<int>& init_indices);
+        bool skip_trajectory_point(WireCell::Point& p, std::pair<int,int>& apa_face, int i, int index, std::vector<std::pair<WireCell::Point, std::shared_ptr<PR::Segment>>>& pss_vec,  std::vector<std::pair<WireCell::Point, std::shared_ptr<PR::Segment>>>& fine_tracking_path);
 
         // prepare for dQ/dx fitting
         double cal_gaus_integral(int tbin, int wbin, double t_center, double t_sigma, 

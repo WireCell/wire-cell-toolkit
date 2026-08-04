@@ -1225,13 +1225,19 @@ void TrackFitting::check_and_reset_close_vertices() {
                 end_fit.point = end_v->wcpt().point;
                 end_v->fit(end_fit);
             }
-            // Also rebuild the segment's fits so the first and last fit points are
-            // consistent with the (now corrected) vertex fit positions.
-            if (segment->cluster()) {
-                segment->fits(generate_fits_with_projections(
-                    segment,
-                    {start_v->fit().point, end_v->fit().point}));
-            }
+            // doc pr/28 T6: do NOT rebuild the segment's fits here.  The prototype
+            // (multi_track_fitting.h:1383-1392, and again at :1158) resets only the
+            // two vertex fit points and leaves the fitted trajectory alone.
+            // Replacing fits() with the two endpoints discarded every interior
+            // point, and since organize_segments_path_{2nd,3rd} rebuild curr_pts
+            // from segment->fits() (:1358-1361), the segment came back as a
+            // straight line between its vertices.  Both organisers already take
+            // their endpoints from the vertex fits (:1384-1401), so the
+            // consistency this was reaching for is provided downstream anyway.
+            SPDLOG_LOGGER_TRACE(s_log,
+                                "check_and_reset_close_vertices: vertices {} cm apart on a "
+                                "segment with {} fit point(s); vertex points reset, trajectory kept",
+                                vertex_distance / units::cm, segment->fits().size());
         }
     }
 }
@@ -3991,7 +3997,7 @@ void TrackFitting::multi_trajectory_fit(int charge_div_method, double div_sigma)
         }
         
         // Apply trajectory examination/smoothing
-        std::vector<WireCell::Point> examined_ps = examine_segment_trajectory(segment, final_ps, init_ps);
+        std::vector<WireCell::Point> examined_ps = examine_segment_trajectory(segment, final_ps, init_ps, init_indices);
         
         // std::cout  << " fitted with " << examined_ps.size() << " " << init_ps.size() << " " << final_ps.size() << " points." << std::endl;
 
@@ -4518,7 +4524,10 @@ void TrackFitting::trajectory_fit(std::vector<std::pair<WireCell::Point, std::sh
         auto p = transform->forward(p_raw, cluster_t0, test_wpid.face(), test_wpid.apa());
         auto apa_face = std::make_pair(test_wpid.apa(), test_wpid.face());
         // all corrected points ...
-        bool flag_skip =  skip_trajectory_point(p, apa_face, i, pss_vec, fine_tracking_path);
+        // Single-track path: form_map compacted ptss to the surviving points
+        // (`ptss = saved_pts`, :3397), so the loop position IS the m_3d_to_2d key
+        // and index == i here -- unchanged by the T3 fix.
+        bool flag_skip =  skip_trajectory_point(p, apa_face, i, i, pss_vec, fine_tracking_path);
 
         // std::cout << "Skip: " << i << " " << flag_skip << std::endl;
         // Protection against too many consecutive skips
@@ -4691,7 +4700,7 @@ void TrackFitting::trajectory_fit(std::vector<std::pair<WireCell::Point, std::sh
     pss_vec = fine_tracking_path;
 }
 
-std::vector<WireCell::Point> TrackFitting::examine_segment_trajectory(std::shared_ptr<PR::Segment> segment, std::vector<WireCell::Point>& final_ps_vec, std::vector<WireCell::Point>& init_ps_vec){
+std::vector<WireCell::Point> TrackFitting::examine_segment_trajectory(std::shared_ptr<PR::Segment> segment, std::vector<WireCell::Point>& final_ps_vec, std::vector<WireCell::Point>& init_ps_vec, const std::vector<int>& init_indices){
     // Create local trajectory data structures
     std::vector<std::pair<WireCell::Point, std::shared_ptr<PR::Segment>>> pss_vec;
     std::vector<std::pair<WireCell::Point, std::shared_ptr<PR::Segment>>> fine_tracking_path;
@@ -4703,23 +4712,38 @@ std::vector<WireCell::Point> TrackFitting::examine_segment_trajectory(std::share
         return std::vector<WireCell::Point>(); // Return empty if sizes don't match
     }
     
+    // doc pr/28 T1/T2: pss_vec is skip_trajectory_point's COMPARISON path and must
+    // hold the PRE-fit points -- the prototype passes init_ps_vec here
+    // (multi_track_fitting.h:429) while p carries the fitted point.  Filling it
+    // from final_ps_vec made p and pss_vec[i] the same point, so the charge ratio
+    // was identically 3/3 with ratio_1 == 1 and the whole charge veto (and its
+    // `p = ps_point` revert) was unreachable; the fold-back comparison angle1 was
+    // likewise measured on the fitted rather than the initial path.  The
+    // do_single_tracking caller (:4521) always passed pre-fit points and was right.
     for (size_t i = 0; i < final_ps_vec.size(); i++) {
         // std::cout << i << " " << final_ps_vec[i].x() << " " << final_ps_vec[i].y() << " " << final_ps_vec[i].z() << " : " << init_ps_vec[i].x() << " " << init_ps_vec[i].y() << " " << init_ps_vec[i].z() << std::endl;
 
-        pss_vec.push_back(std::make_pair(final_ps_vec[i], segment));
+        pss_vec.push_back(std::make_pair(init_ps_vec[i], segment));
     }
-    
+
     // First pass: apply skip_trajectory_point logic
     int skip_count = 0;
+    size_t n_reverted = 0, n_index_mismatch = 0;   // liveness (doc pr/28 T1/T3)
     for (size_t i = 0; i < pss_vec.size(); i++) {
         WireCell::Point p = final_ps_vec[i];
-        
-        // Get APA and face information
-        auto test_wpid = m_dv->contained_by(p);
+
+        // Get APA and face information from the COMPARISON point, mirroring the
+        // single-track caller (:4510).  This is also what makes the face-crossing
+        // guard at the top of skip_trajectory_point meaningful: it exists to catch
+        // the fit having moved p out of the reference point's face.
+        auto test_wpid = m_dv->contained_by(pss_vec[i].first);
         auto apa_face = std::make_pair(test_wpid.apa(), test_wpid.face());
-        
-        // Apply skip trajectory point check
-        bool flag_skip = skip_trajectory_point(p, apa_face, i, pss_vec, fine_tracking_path);
+
+        // Apply skip trajectory point check.  init_indices[i] is the GLOBAL
+        // m_3d_to_2d key (T3); the loop position i is not.
+        bool flag_skip = skip_trajectory_point(p, apa_face, i,
+                                               i < init_indices.size() ? init_indices[i] : -1,
+                                               pss_vec, fine_tracking_path);
         
         // std::cout << "Skip Check: " << i << " " << flag_skip << std::endl;
 
@@ -4738,12 +4762,22 @@ std::vector<WireCell::Point> TrackFitting::examine_segment_trajectory(std::share
             }
         }
         
+        if (i < init_indices.size() && init_indices[i] != static_cast<int>(i)) ++n_index_mismatch;
+        if ((p - final_ps_vec[i]).magnitude() > 0) ++n_reverted;
+
         // Store points for trajectory smoothing
         temp_fine_tracking_path.push_back(std::make_pair(init_ps_vec[i], segment));
         fine_tracking_path.push_back(std::make_pair(p, segment));
         saved_paf.push_back(std::make_pair(test_wpid.apa(), test_wpid.face()));
     }
-    
+
+    SPDLOG_LOGGER_TRACE(s_log,
+                        "examine_segment_trajectory: segment {} -- {} point(s) in, {} kept, "
+                        "{} charge-reverted, {} with a global index != loop position",
+                        segment->get_graph_index(), final_ps_vec.size(),
+                        fine_tracking_path.size(), n_reverted, n_index_mismatch);
+
+
     // Second pass: Apply trajectory smoothing (area-based correction)
     for (size_t i = 0; i < fine_tracking_path.size(); i++) {
         bool flag_replace = false;
@@ -4851,7 +4885,7 @@ std::vector<WireCell::Point> TrackFitting::examine_segment_trajectory(std::share
 }
 
 
-bool TrackFitting::skip_trajectory_point(WireCell::Point& p, std::pair<int, int>& apa_face, int i, std::vector<std::pair<WireCell::Point, std::shared_ptr<PR::Segment>>>& pss_vec,  std::vector<std::pair<WireCell::Point, std::shared_ptr<PR::Segment>>>& fine_tracking_path){
+bool TrackFitting::skip_trajectory_point(WireCell::Point& p, std::pair<int, int>& apa_face, int i, int index, std::vector<std::pair<WireCell::Point, std::shared_ptr<PR::Segment>>>& pss_vec,  std::vector<std::pair<WireCell::Point, std::shared_ptr<PR::Segment>>>& fine_tracking_path){
     // Extract APA and face information from the reference (comparison) point
     int apa = apa_face.first;
     int face = apa_face.second;
@@ -5042,8 +5076,14 @@ bool TrackFitting::skip_trajectory_point(WireCell::Point& p, std::pair<int, int>
 
     // std::cout << "Inside: " << ratio << " " << ratio_1 << std::endl;
     
-    // Apply charge-based correction
+    // Apply charge-based correction: the fitted point sits on less charge than the
+    // point it came from, so revert it.  (prototype trajectory_fit.h:745-750)
     if (ratio / 3.0 < m_params.skip_ratio_cut || ratio_1 < m_params.skip_ratio_1_cut) {
+        SPDLOG_LOGGER_TRACE(s_log,
+                            "skip_trajectory_point: charge revert at i={} index={} "
+                            "ratio/3={} ratio_1={} moved={} cm",
+                            i, index, ratio / 3.0, ratio_1,
+                            (p - ps_point).magnitude() / units::cm);
         p = ps_point;
     }
     
@@ -5099,16 +5139,20 @@ bool TrackFitting::skip_trajectory_point(WireCell::Point& p, std::pair<int, int>
             }
         }
         
-        // Get hit information for dead channel detection.
-        // Invariant: pss_vec here equals the cleaned ptss produced by form_map (which
-        // does ptss = saved_pts after filtering zero-charge points), so the loop index
-        // i corresponds exactly to the m_3d_to_2d key 'count' assigned in form_map.
-        // A find() miss means this point legitimately had no 2D associations (e.g. it
-        // is a vertex point whose slot was shared with another segment).
+        // Get hit information for dead channel detection, keyed by the caller's
+        // `index` (T3).  In the single-track path form_map compacted ptss so that
+        // index == i; in the multi-track path the key is the GLOBAL count assigned
+        // by form_map_graph across every segment plus the vertices, which the
+        // per-segment loop position does not track.  Reading m_3d_to_2d at `i`
+        // there returned another point's plane quantities, or missed entirely and
+        // left all three planes "dead" -- opening the angle>45 skip below on any
+        // point past 45 degrees.  A genuine miss (index<0, or a vertex slot shared
+        // with another segment) still lands here; the prototype's operator[] on an
+        // absent key gives quantity 0 the same way (trajectory_fit.h:780-782).
         bool has_u_hits = false, has_v_hits = false, has_w_hits = false;
         // float n_u_hits = 0, n_v_hits = 0, n_w_hits = 0;
-        if (m_3d_to_2d.find(i) != m_3d_to_2d.end()) {
-            const auto& point_info = m_3d_to_2d.at(i);
+        if (m_3d_to_2d.find(index) != m_3d_to_2d.end()) {
+            const auto& point_info = m_3d_to_2d.at(index);
             has_u_hits = point_info.get_plane_data(kUlayer).quantity > 0;
             has_v_hits = point_info.get_plane_data(kVlayer).quantity > 0;
             has_w_hits = point_info.get_plane_data(kWlayer).quantity > 0;
@@ -8277,7 +8321,31 @@ void TrackFitting::do_multi_tracking(bool flag_dQ_dx_fit_reg, bool flag_dQ_dx_fi
             auto& edge_bundle = (*m_graph)[ed];
             if (edge_bundle.segment) edge_bundle.segment->reset_fit_prop();
         }
+        // doc pr/28 T4: this third form_map_graph has no prototype counterpart --
+        // the prototype's ProtoSegment::reset_fit_prop() is a resize(), so the fit
+        // indices survive the reset above and dQ_dx_multi_fit can reuse them, while
+        // PR::Fit::reset() clears index outright and they must be rebuilt here.
+        // Re-deriving the associations for the final post-_3rd positions is the
+        // more defensible of the two, but it also re-runs form_map_graph's
+        // zero-quantity point drop (:3201) on the final trajectory, which the
+        // prototype never does.  Count the drop so it is never silent.
+        size_t n_fits_before = 0;
+        for (const auto& ed : get_segment_edges()) {
+            auto& eb = (*m_graph)[ed];
+            if (eb.segment) n_fits_before += eb.segment->fits().size();
+        }
         form_map_graph(flag_exclusion, m_params.end_point_factor, m_params.mid_point_factor, m_params.nlevel, m_params.time_tick_cut, m_params.charge_cut);
+        size_t n_fits_after = 0;
+        for (const auto& ed : get_segment_edges()) {
+            auto& eb = (*m_graph)[ed];
+            if (eb.segment) n_fits_after += eb.segment->fits().size();
+        }
+        if (n_fits_after != n_fits_before) {
+            SPDLOG_LOGGER_DEBUG(s_log,
+                                "do_multi_tracking: pre-dQ/dx form_map_graph dropped {} of {} "
+                                "trajectory point(s) with zero plane quantity",
+                                n_fits_before - n_fits_after, n_fits_before);
+        }
         // if (m_perf) std::cout << "do_multiple_tracking timing: form_map_graph took " << DST_MS(DST_Clock::now() - t_dst).count() << " ms" << std::endl; t_dst = DST_Clock::now();
 
 
