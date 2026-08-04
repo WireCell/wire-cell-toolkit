@@ -102,6 +102,9 @@
 #include "WireCellIface/ITiling.h"
 #include "WireCellIface/ITrace.h"
 #include "WireCellIface/ITraceRanker.h"
+#include "WireCellIface/ITrackSegment.h"
+#include "WireCellIface/ITrackSegmentSampler.h"
+#include "WireCellIface/ITrackSegmentSet.h"
 #include "WireCellIface/IWaveform.h"
 #include "WireCellIface/IWaveformMap.h"
 #include "WireCellIface/IWireGenerator.h"
@@ -208,6 +211,9 @@ ITerminal::~ITerminal() {}
 ITiling::~ITiling() {}
 ITrace::~ITrace() {}
 ITraceRanker::~ITraceRanker() {}
+ITrackSegment::~ITrackSegment() {}
+ITrackSegmentSampler::~ITrackSegmentSampler() {}
+ITrackSegmentSet::~ITrackSegmentSet() {}
 IWaveform::~IWaveform() {}
 IWaveformMap::~IWaveformMap() {}
 IWireGenerator::~IWireGenerator() {}
