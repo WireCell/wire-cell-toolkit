@@ -36,6 +36,24 @@ WIRECELL_FACTORY(PrDisplayDump, WireCell::Clus::PrDisplayDump,
 using namespace WireCell;
 using namespace WireCell::Clus;
 
+// The node-id encoding fill_bee_pf_tree uses for a particle-flow node
+// (MultiAlgBlobClustering.cxx, seg_display_id): cluster_id*1000 + segment id,
+// with the graph index standing in when the segment id was never assigned.
+// NeutrinoPatternBase.cxx sets seg->set_id(edge_bundle.index), so in practice
+// the two agree -- but keep the same fallback so a segment that missed that
+// pass still lands on the same number the Bee producer would print.
+//
+// This is the JOIN KEY between an mc.json shower node and the segments of that
+// shower.  It must not drift from the Bee producer.
+static int pf_node_id(const WireCell::Clus::PR::SegmentPtr& seg)
+{
+    if (!seg) return -1;
+    int sid = seg->id();
+    if (sid < 0) sid = static_cast<int>(seg->get_graph_index());
+    const auto* cl = seg->cluster();
+    return cl ? cl->get_cluster_id() * 1000 + sid : sid;
+}
+
 Clus::PrDisplayDump::PrDisplayDump()
   : Aux::Logger("PrDisplayDump", "clus")
 {
@@ -134,6 +152,10 @@ void Clus::PrDisplayDump::visit(Facade::Ensemble& ensemble) const
     top["vertices"] = graph["vertices"];
     top["main_vertex"] = graph["main_vertex"];
 
+    top["showers"] = dump_showers(grouping);
+    top["kine"] = dump_kine(grouping);
+    top["tagger"] = dump_tagger(grouping);
+
     top["track_shower"] = dump_track_shower(grouping);
     top["steiner"] = dump_steiner(grouping);
     top["proj"] = dump_proj(grouping);
@@ -141,9 +163,9 @@ void Clus::PrDisplayDump::visit(Facade::Ensemble& ensemble) const
 
     Persist::dump(m_output_filename, top, m_pretty);
 
-    log->debug("wrote {}: {} segment(s), {} vertex(es), {} steiner cluster(s), {} proj plane(s)",
+    log->debug("wrote {}: {} segment(s), {} vertex(es), {} shower(s), {} steiner cluster(s), {} proj plane(s)",
                m_output_filename, top["segments"].size(), top["vertices"].size(),
-               top["steiner"].size(), top["proj"].size());
+               top["showers"].size(), top["steiner"].size(), top["proj"].size());
 }
 
 Configuration Clus::PrDisplayDump::dump_meta(Facade::Grouping& grouping, const ChanScheme& cs) const
@@ -211,6 +233,20 @@ Configuration Clus::PrDisplayDump::dump_graph(Facade::Grouping& grouping) const
 
     const double cm = units::cm;
 
+    // Shower membership, same construction as dump_track_shower(): a segment
+    // absorbed into a shower from another cluster may carry none of the
+    // per-segment shower flags, so the shower's own segment set is the only
+    // authoritative answer.
+    std::map<PR::SegmentPtr, PR::ShowerPtr, PR::SegmentIndexCmp> seg_to_shower;
+    if (auto tf = grouping.get_track_fitting()) {
+        for (const auto& shower : tf->get_showers()) {
+            PR::IndexedVertexSet sv;
+            PR::IndexedSegmentSet ss;
+            shower->fill_sets(sv, ss, /*flag_exclude_start_segment=*/false);
+            for (const auto& seg : ss) seg_to_shower[seg] = shower;
+        }
+    }
+
     auto fit_json = [&cm](const PR::Fit& fit) {
         Configuration j;
         j["x"] = fit.point.x() / cm;
@@ -245,6 +281,10 @@ Configuration Clus::PrDisplayDump::dump_graph(Facade::Grouping& grouping) const
         j["id"] = cluster_id * 1000 + static_cast<int>(vertex->get_graph_index());
         j["is_main"] = is_main;
         j["degree"] = static_cast<int>(boost::out_degree(node_desc, *pr_graph));
+        // How far improve_vertex/MyFCN moved this vertex off its seed point.
+        // A main vertex sitting at fit_distance 0 did not move -- one of the
+        // three gates in doc pr/27 sec 12 fired.
+        j["fit_distance"] = vertex->fit_distance() / cm;
         j["fit"] = fit_json(vertex->fit());
         out["vertices"].append(j);
 
@@ -278,6 +318,14 @@ Configuration Clus::PrDisplayDump::dump_graph(Facade::Grouping& grouping) const
         j["dirsign"] = segment->dirsign();
         j["is_main_cluster"] = segment->cluster()
             ? segment->cluster()->get_flag(Facade::Flags::main_cluster) : false;
+        // The particle-flow join key: -1 for a segment in no shower, otherwise
+        // the mc.json node id of the shower this segment belongs to.  Clicking
+        // that node in the display highlights every segment carrying this id.
+        {
+            auto sit = seg_to_shower.find(segment);
+            j["shower_id"] = (sit == seg_to_shower.end())
+                ? -1 : pf_node_id(sit->second->start_segment());
+        }
 
         // Residual range, verbatim from write_t_rec_data: accumulate arclength,
         // orient by dirsign, then blank (-1) an end that meets a branching
@@ -315,6 +363,205 @@ Configuration Clus::PrDisplayDump::dump_graph(Facade::Grouping& grouping) const
         out["segments"].append(j);
     }
 
+    return out;
+}
+
+// One row per reconstructed shower, keyed by the SAME id the Bee particle-flow
+// tree (mc.json) puts on its shower nodes.
+//
+// DELTA vs fill_bee_pf_tree: that producer bakes the energy into a display
+// STRING ("e-  1148 MeV") and drops everything else.  The display needs the
+// numbers, so they are emitted here and the tree itself is left to mc.json --
+// there is exactly one particle-flow producer and this is not it.
+Configuration Clus::PrDisplayDump::dump_showers(Facade::Grouping& grouping) const
+{
+    Configuration out = Json::arrayValue;
+
+    auto tf = grouping.get_track_fitting();
+    if (!tf) return out;
+
+    const double cm = units::cm;
+    const double MeV = units::MeV;
+
+    const auto& map_shower_pio_id = tf->get_map_shower_pio_id();
+    const auto& map_pio_id_mass = tf->get_map_pio_id_mass();
+
+    auto point_json = [&cm](const WireCell::Point& p) {
+        Configuration j;
+        j["x"] = p.x() / cm;
+        j["y"] = p.y() / cm;
+        j["z"] = p.z() / cm;
+        return j;
+    };
+
+    // IndexedShowerSet is ordered by shower index, not by pointer.
+    for (const auto& shower : tf->get_showers()) {
+        if (!shower) continue;
+
+        auto [start_vtx, conn_type] = shower->get_start_vertex_and_type();
+
+        Configuration j;
+        j["id"] = pf_node_id(shower->start_segment());
+        j["shower_id"] = shower->get_shower_id();
+        j["particle_id"] = shower->get_particle_type();
+        j["kine_best"] = shower->get_kine_best() / MeV;
+        j["kine_range"] = shower->get_kine_range() / MeV;
+        j["kine_dQdx"] = shower->get_kine_dQdx() / MeV;
+        j["kine_charge"] = shower->get_kine_charge() / MeV;
+        j["flag_kinematics"] = shower->get_flag_kinematics();
+        j["start"] = point_json(shower->get_start_point());
+        j["end"] = point_json(shower->get_end_point());
+        // 1 direct, 2 indirect, 3 gap, 4 not clearly connected (mc.json drops
+        // type 4 entirely -- such a shower has a row here and no PF node).
+        j["start_connection_type"] = conn_type;
+        j["start_vertex_id"] = start_vtx
+            ? (start_vtx->cluster() ? start_vtx->cluster()->get_cluster_id() * 1000 : 0)
+              + static_cast<int>(start_vtx->get_graph_index())
+            : -1;
+        j["num_segments"] = shower->get_num_segments();
+        j["num_main_segments"] = shower->get_num_main_segments();
+        j["total_length"] = shower->get_total_length() / cm;
+
+        auto pit = map_shower_pio_id.find(shower);
+        if (pit == map_shower_pio_id.end()) {
+            j["pio_id"] = -1;
+            j["pio_mass"] = -1.0;
+        }
+        else {
+            j["pio_id"] = pit->second;
+            auto mit = map_pio_id_mass.find(pit->second);
+            j["pio_mass"] = (mit == map_pio_id_mass.end()) ? -1.0
+                                                           : mit->second.first / MeV;
+        }
+        out.append(j);
+    }
+
+    log->debug("showers: {} row(s)", out.size());
+    return out;
+}
+
+// KineInfo verbatim.  Already in MeV and cm at the source
+// (NeutrinoKinematics.cxx divides by units::MeV / units::cm before storing), so
+// nothing is rescaled here.
+Configuration Clus::PrDisplayDump::dump_kine(Facade::Grouping& grouping) const
+{
+    Configuration out;
+
+    auto tf = grouping.get_track_fitting();
+    if (!tf) return out;
+    const auto& k = tf->get_kine_info();
+
+    out["kine_reco_Enu"] = k.kine_reco_Enu;
+    out["kine_reco_add_energy"] = k.kine_reco_add_energy;
+    out["kine_nu_x_corr"] = k.kine_nu_x_corr;
+    out["kine_nu_y_corr"] = k.kine_nu_y_corr;
+    out["kine_nu_z_corr"] = k.kine_nu_z_corr;
+
+    out["kine_energy_particle"] = Json::arrayValue;
+    out["kine_energy_info"] = Json::arrayValue;
+    out["kine_particle_type"] = Json::arrayValue;
+    out["kine_energy_included"] = Json::arrayValue;
+    for (float v : k.kine_energy_particle) out["kine_energy_particle"].append(v);
+    for (int v : k.kine_energy_info) out["kine_energy_info"].append(v);
+    for (int v : k.kine_particle_type) out["kine_particle_type"].append(v);
+    for (int v : k.kine_energy_included) out["kine_energy_included"].append(v);
+
+    out["kine_pio_mass"] = k.kine_pio_mass;
+    out["kine_pio_flag"] = k.kine_pio_flag;
+    out["kine_pio_vtx_dis"] = k.kine_pio_vtx_dis;
+    out["kine_pio_energy_1"] = k.kine_pio_energy_1;
+    out["kine_pio_theta_1"] = k.kine_pio_theta_1;
+    out["kine_pio_phi_1"] = k.kine_pio_phi_1;
+    out["kine_pio_dis_1"] = k.kine_pio_dis_1;
+    out["kine_pio_energy_2"] = k.kine_pio_energy_2;
+    out["kine_pio_theta_2"] = k.kine_pio_theta_2;
+    out["kine_pio_phi_2"] = k.kine_pio_phi_2;
+    out["kine_pio_dis_2"] = k.kine_pio_dis_2;
+    out["kine_pio_angle"] = k.kine_pio_angle;
+
+    return out;
+}
+
+// The selection numbers: the BDT scores plus the handful of top-level flags the
+// display puts next to the picture.  The sub-BDT scores come along so a score
+// that looks wrong can be decomposed on the spot.
+//
+// This stage is appended AFTER numu_bdt_scorer / nue_bdt_scorer in the PR
+// pipeline (run_pr_chain_batch.sh), which is what makes these non-zero -- both
+// scorers write through TrackFitting::get_tagger_info_mutable().
+Configuration Clus::PrDisplayDump::dump_tagger(Facade::Grouping& grouping) const
+{
+    Configuration out;
+
+    auto tf = grouping.get_track_fitting();
+    if (!tf) return out;
+    const auto& t = tf->get_tagger_info();
+
+    // SBND books the uBooNE-TRAINED weight XMLs (sbnd/clus.jsonnet), so these
+    // scores carry availability and relative ranking only.  The caveat travels
+    // WITH the data so a display cannot show the number without it.
+    out["weights"] = "uboone-trained -- UNCALIBRATED on SBND (doc pr/2 gap G1)";
+
+    // ---- the four the display headlines ----------------------------------
+    // NOTE there is no "cosmic_score".  cosmic_flag is the cosmic tagger's own
+    // top-level boolean (1 = cosmic-like, its default); cosmict_score is the
+    // numu-BDT cosmic score.  Both are emitted, distinctly named.
+    out["nue_score"] = t.nue_score;
+    out["numu_score"] = t.numu_score;
+    out["cosmict_score"] = t.cosmict_score;
+    out["cosmic_flag"] = t.cosmic_flag;
+    out["match_isFC"] = t.match_isFC;
+
+    // ---- numu sub-scores --------------------------------------------------
+    out["cosmict_2_4_score"] = t.cosmict_2_4_score;
+    out["cosmict_3_5_score"] = t.cosmict_3_5_score;
+    out["cosmict_6_score"] = t.cosmict_6_score;
+    out["cosmict_7_score"] = t.cosmict_7_score;
+    out["cosmict_8_score"] = t.cosmict_8_score;
+    out["cosmict_10_score"] = t.cosmict_10_score;
+    out["numu_1_score"] = t.numu_1_score;
+    out["numu_2_score"] = t.numu_2_score;
+    out["numu_3_score"] = t.numu_3_score;
+
+    // ---- nue sub-scores ---------------------------------------------------
+    out["mipid_score"] = t.mipid_score;
+    out["gap_score"] = t.gap_score;
+    out["hol_lol_score"] = t.hol_lol_score;
+    out["cme_anc_score"] = t.cme_anc_score;
+    out["mgo_mgt_score"] = t.mgo_mgt_score;
+    out["br1_score"] = t.br1_score;
+    out["br3_score"] = t.br3_score;
+    out["br3_3_score"] = t.br3_3_score;
+    out["br3_5_score"] = t.br3_5_score;
+    out["br3_6_score"] = t.br3_6_score;
+    out["stemdir_br2_score"] = t.stemdir_br2_score;
+    out["trimuon_score"] = t.trimuon_score;
+    out["br4_tro_score"] = t.br4_tro_score;
+    out["mipquality_score"] = t.mipquality_score;
+    out["pio_1_score"] = t.pio_1_score;
+    out["pio_2_score"] = t.pio_2_score;
+    out["stw_spt_score"] = t.stw_spt_score;
+    out["vis_1_score"] = t.vis_1_score;
+    out["vis_2_score"] = t.vis_2_score;
+    out["stw_2_score"] = t.stw_2_score;
+    out["stw_3_score"] = t.stw_3_score;
+    out["stw_4_score"] = t.stw_4_score;
+    out["sig_1_score"] = t.sig_1_score;
+    out["sig_2_score"] = t.sig_2_score;
+    out["lol_1_score"] = t.lol_1_score;
+    out["lol_2_score"] = t.lol_2_score;
+    out["tro_1_score"] = t.tro_1_score;
+    out["tro_2_score"] = t.tro_2_score;
+    out["tro_4_score"] = t.tro_4_score;
+    out["tro_5_score"] = t.tro_5_score;
+
+    // ---- single-photon -----------------------------------------------------
+    out["photon_flag"] = t.photon_flag;
+
+    log->debug("tagger: nue_score {:.3f} numu_score {:.3f} cosmict_score {:.3f} "
+               "cosmic_flag {:.0f} Enu {:.1f} MeV",
+               t.nue_score, t.numu_score, t.cosmict_score, t.cosmic_flag,
+               tf->get_kine_info().kine_reco_Enu);
     return out;
 }
 

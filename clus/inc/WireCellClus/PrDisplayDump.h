@@ -20,6 +20,14 @@
  * positions in cm, `pu/pv/pw` kept FRACTIONAL per-APA wire indices, and time as
  * a slice index (`pt / nticks_per_slice`).
  *
+ * Stage 2 (doc pr/26 sec 7) adds what makes an event JUDGEABLE rather than just
+ * visible: a `shower_id` on every segment, `showers`, `kine` and `tagger`.  The
+ * particle-flow TREE is deliberately NOT rebuilt here -- the display reads it
+ * from the Bee zip's `mc.json`, which MultiAlgBlobClustering::fill_bee_pf_tree
+ * already writes.  `shower_id` uses that producer's node encoding exactly
+ * (`cluster_id*1000 + start_segment id`) so it is the join key from an mc.json
+ * shower node to every segment of that shower.
+ *
  * DEFAULT OFF.  Like every other entry in the SBND `cm_by_name` table this is
  * only instantiated when named in `pipeline_names`, so with the name absent the
  * compiled configuration -- and hence every production output -- is unchanged.
@@ -82,6 +90,9 @@ namespace WireCell::Clus {
 
         Configuration dump_meta(Facade::Grouping& grouping, const ChanScheme& cs) const;
         Configuration dump_graph(Facade::Grouping& grouping) const;      // segments + vertices
+        Configuration dump_showers(Facade::Grouping& grouping) const;    // PR::Shower rows
+        Configuration dump_kine(Facade::Grouping& grouping) const;       // KineInfo
+        Configuration dump_tagger(Facade::Grouping& grouping) const;     // TaggerInfo
         Configuration dump_track_shower(Facade::Grouping& grouping) const;
         Configuration dump_steiner(Facade::Grouping& grouping) const;
         Configuration dump_proj(Facade::Grouping& grouping) const;
