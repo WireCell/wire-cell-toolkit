@@ -92,7 +92,10 @@ namespace WireCell::Clus {
         Configuration dump_graph(Facade::Grouping& grouping) const;      // segments + vertices
         Configuration dump_showers(Facade::Grouping& grouping) const;    // PR::Shower rows
         Configuration dump_kine(Facade::Grouping& grouping) const;       // KineInfo
-        Configuration dump_tagger(Facade::Grouping& grouping) const;     // TaggerInfo
+        // TaggerInfo -- the COMPUTED subset only (scores + the cosmic tagger's
+        // verdict and its ten per-test flags).  See the definition for why the
+        // legacy-TMVA slots are left out.
+        Configuration dump_tagger(Facade::Grouping& grouping) const;
         Configuration dump_track_shower(Facade::Grouping& grouping) const;
         Configuration dump_steiner(Facade::Grouping& grouping) const;
         Configuration dump_proj(Facade::Grouping& grouping) const;

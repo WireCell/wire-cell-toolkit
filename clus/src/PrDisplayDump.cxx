@@ -482,13 +482,21 @@ Configuration Clus::PrDisplayDump::dump_kine(Facade::Grouping& grouping) const
     return out;
 }
 
-// The selection numbers: the BDT scores plus the handful of top-level flags the
-// display puts next to the picture.  The sub-BDT scores come along so a score
-// that looks wrong can be decomposed on the spot.
+// The selection numbers: the BDT scores, the cosmic tagger's verdict and its
+// per-test decomposition.  The sub-BDT scores come along so a score that looks
+// wrong can be decomposed on the spot.
 //
 // This stage is appended AFTER numu_bdt_scorer / nue_bdt_scorer in the PR
 // pipeline (run_pr_chain_batch.sh), which is what makes these non-zero -- both
 // scorers write through TrackFitting::get_tagger_info_mutable().
+//
+// ONLY FIELDS THAT ARE ACTUALLY COMPUTED ARE EMITTED.  TaggerInfo carries the
+// uBooNE ntuple schema, a large part of which belongs to the legacy TMVA BDT
+// path (prototype cal_bdts() / cal_numu_bdts()).  Neither has a caller: the
+// prototype selects the xgboost variants at NeutrinoID.cxx:277,282
+// (flag_bdt == 1) and only those are ported here.  A dumped field that no code
+// ever assigns reads as a physics answer of 0 on the display, which is worse
+// than its absence -- so the dead slots are left out and named in doc pr/26.
 Configuration Clus::PrDisplayDump::dump_tagger(Facade::Grouping& grouping) const
 {
     Configuration out;
@@ -502,47 +510,90 @@ Configuration Clus::PrDisplayDump::dump_tagger(Facade::Grouping& grouping) const
     // WITH the data so a display cannot show the number without it.
     out["weights"] = "uboone-trained -- UNCALIBRATED on SBND (doc pr/2 gap G1)";
 
-    // ---- the four the display headlines ----------------------------------
-    // NOTE there is no "cosmic_score".  cosmic_flag is the cosmic tagger's own
-    // top-level boolean (1 = cosmic-like, its default); cosmict_score is the
-    // numu-BDT cosmic score.  Both are emitted, distinctly named.
+    // ---- the two live discriminants ---------------------------------------
     out["nue_score"] = t.nue_score;
     out["numu_score"] = t.numu_score;
-    out["cosmict_score"] = t.cosmict_score;
-    out["cosmic_flag"] = t.cosmic_flag;
     out["match_isFC"] = t.match_isFC;
 
-    // ---- numu sub-scores --------------------------------------------------
-    out["cosmict_2_4_score"] = t.cosmict_2_4_score;
-    out["cosmict_3_5_score"] = t.cosmict_3_5_score;
-    out["cosmict_6_score"] = t.cosmict_6_score;
-    out["cosmict_7_score"] = t.cosmict_7_score;
-    out["cosmict_8_score"] = t.cosmict_8_score;
+    // ---- the cosmic answer -------------------------------------------------
+    // cosmict_flag is the cosmic tagger's VERDICT: the OR of its ten tests
+    // (NeutrinoTaggerCosmic.cxx:1342-1347).  It is the field to read when
+    // asking "did the cosmic tagger fire on this event".
+    //
+    // cosmic_flag is NOT a second verdict and NOT the same polarity.  It is a
+    // BDT input feature written only inside the flag-9 block, and it is exactly
+    // !cosmict_flag_9: 0 means flag 9 fired, 1 means either the flag-9 block
+    // never ran (cosmic_filled == 0) or it ran and a neutrino-like shower at
+    // the main vertex rescued the event (cosmic_filled == 1).  Its in-class
+    // default is 1, so 1 on its own proves nothing -- hence cosmic_filled is
+    // emitted beside it.  (Prototype: NeutrinoID_cosmic_tagger.h:781-783.)
+    out["cosmict_flag"] = t.cosmict_flag;
+    out["cosmic_flag"] = t.cosmic_flag;
+    out["cosmic_filled"] = t.cosmic_filled;
+
+    // Per-test decomposition -- which of the ten fired.  This is what makes a
+    // cosmic tag actionable when tuning; the verdict alone does not say why.
+    out["cosmict_flag_1"] = t.cosmict_flag_1;
+    out["cosmict_flag_2"] = t.cosmict_flag_2;
+    out["cosmict_flag_3"] = t.cosmict_flag_3;
+    out["cosmict_flag_4"] = t.cosmict_flag_4;
+    out["cosmict_flag_5"] = t.cosmict_flag_5;
+    out["cosmict_flag_6"] = t.cosmict_flag_6;
+    out["cosmict_flag_7"] = t.cosmict_flag_7;
+    out["cosmict_flag_8"] = t.cosmict_flag_8;
+    out["cosmict_flag_9"] = t.cosmict_flag_9;
+
+    // The "did this test even run" companions.  Tests 2-8 each fill their
+    // feature block only when their topology precondition is met (a muon
+    // candidate at the main vertex, a stopped muon with a secondary, ...), so
+    // a 0 flag with a 0 _filled means NOT EVALUATED, while a 0 flag with a 1
+    // _filled means evaluated and not fired.  Without these the display cannot
+    // tell an inactive tagger from a quiet one.  Tests 1 and 9 have no _filled
+    // of their own (1 always evaluates; 9 uses cosmic_filled above) and test
+    // 10's is the length of its vector.
+    out["cosmict_2_filled"] = t.cosmict_2_filled;
+    out["cosmict_3_filled"] = t.cosmict_3_filled;
+    out["cosmict_4_filled"] = t.cosmict_4_filled;
+    out["cosmict_5_filled"] = t.cosmict_5_filled;
+    out["cosmict_6_filled"] = t.cosmict_6_filled;
+    out["cosmict_7_filled"] = t.cosmict_7_filled;
+    out["cosmict_8_filled"] = t.cosmict_8_filled;
+
+    // Test 10 is per-(vertex,segment), not per-event: cosmict_flag_10 is a
+    // vector with one entry per near-front-face candidate, and the tagger ORs
+    // it into cosmict_flag through a local that is never stored.  Emit BOTH the
+    // vector and the derived OR, because an EMPTY vector ("no candidate was
+    // ever examined") is a different statement from an all-false one and only
+    // the vector distinguishes them.
+    {
+        Configuration arr(Json::arrayValue);
+        bool any10 = false;
+        for (float f : t.cosmict_flag_10) {
+            arr.append(f);
+            if (f != 0) any10 = true;
+        }
+        out["cosmict_flag_10"] = arr;
+        out["cosmict_flag_10_any"] = any10 ? 1.0f : 0.0f;
+    }
+
+    // ---- numu sub-scores (the four the xgboost path fills) -----------------
+    // cosmict_2_4 / 3_5 / 6 / 7 / 8_score are legacy cal_numu_bdts() slots and
+    // are never assigned; cosmict_score is never assigned in the prototype
+    // either (initialised to 0 at NeutrinoID.cxx:3365 and left there).
     out["cosmict_10_score"] = t.cosmict_10_score;
     out["numu_1_score"] = t.numu_1_score;
     out["numu_2_score"] = t.numu_2_score;
     out["numu_3_score"] = t.numu_3_score;
 
-    // ---- nue sub-scores ---------------------------------------------------
-    out["mipid_score"] = t.mipid_score;
-    out["gap_score"] = t.gap_score;
-    out["hol_lol_score"] = t.hol_lol_score;
-    out["cme_anc_score"] = t.cme_anc_score;
-    out["mgo_mgt_score"] = t.mgo_mgt_score;
-    out["br1_score"] = t.br1_score;
-    out["br3_score"] = t.br3_score;
+    // ---- nue sub-scores (the fifteen the xgboost path fills) ---------------
+    // UbooneNueBDTScorer.cxx:1631-1645.  The other fifteen uBooNE nue slots
+    // (mipid/gap/hol_lol/cme_anc/mgo_mgt/br1/br3/stemdir_br2/trimuon/br4_tro/
+    // mipquality/pio_1/stw_spt/vis_1/vis_2) belong to the legacy cal_bdts()
+    // path (flag_bdt == 2), which is not ported.
     out["br3_3_score"] = t.br3_3_score;
     out["br3_5_score"] = t.br3_5_score;
     out["br3_6_score"] = t.br3_6_score;
-    out["stemdir_br2_score"] = t.stemdir_br2_score;
-    out["trimuon_score"] = t.trimuon_score;
-    out["br4_tro_score"] = t.br4_tro_score;
-    out["mipquality_score"] = t.mipquality_score;
-    out["pio_1_score"] = t.pio_1_score;
     out["pio_2_score"] = t.pio_2_score;
-    out["stw_spt_score"] = t.stw_spt_score;
-    out["vis_1_score"] = t.vis_1_score;
-    out["vis_2_score"] = t.vis_2_score;
     out["stw_2_score"] = t.stw_2_score;
     out["stw_3_score"] = t.stw_3_score;
     out["stw_4_score"] = t.stw_4_score;
@@ -555,12 +606,21 @@ Configuration Clus::PrDisplayDump::dump_tagger(Facade::Grouping& grouping) const
     out["tro_4_score"] = t.tro_4_score;
     out["tro_5_score"] = t.tro_5_score;
 
-    // ---- single-photon -----------------------------------------------------
-    out["photon_flag"] = t.photon_flag;
+    // photon_flag is deliberately NOT emitted: TaggerCheckNeutrino.cxx:813
+    // discards singlephoton_tagger()'s return value, where the prototype does
+    // `if (flag_sp) tagger_info.photon_flag = true;` (NeutrinoID.cxx:271).  The
+    // field is therefore always 0 here regardless of the tagger's answer.
+    // Reported in doc pr/26 sec 7.5, not fixed in this change.
 
-    log->debug("tagger: nue_score {:.3f} numu_score {:.3f} cosmict_score {:.3f} "
-               "cosmic_flag {:.0f} Enu {:.1f} MeV",
-               t.nue_score, t.numu_score, t.cosmict_score, t.cosmic_flag,
+    log->debug("tagger: nue_score {:.3f} numu_score {:.3f} cosmict_flag {:.0f} "
+               "(flags 1-9 {}{}{}{}{}{}{}{}{} 10 {}) cosmic_flag {:.0f} filled {:.0f} "
+               "Enu {:.1f} MeV",
+               t.nue_score, t.numu_score, t.cosmict_flag,
+               (int)t.cosmict_flag_1, (int)t.cosmict_flag_2, (int)t.cosmict_flag_3,
+               (int)t.cosmict_flag_4, (int)t.cosmict_flag_5, (int)t.cosmict_flag_6,
+               (int)t.cosmict_flag_7, (int)t.cosmict_flag_8, (int)t.cosmict_flag_9,
+               out["cosmict_flag_10_any"].asFloat() != 0 ? 1 : 0,
+               t.cosmic_flag, t.cosmic_filled,
                tf->get_kine_info().kine_reco_Enu);
     return out;
 }
