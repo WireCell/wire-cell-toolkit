@@ -305,7 +305,7 @@ std::pair<bool, WireCell::Clus::Facade::geo_point_t> MyFCN::FitVertex()
     return std::make_pair(fit_flag, fit_pos);
 }
 
-void MyFCN::UpdateInfo(Facade::geo_point_t fit_pos, Facade::Cluster& temp_cluster, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, double default_dis_cut){
+bool MyFCN::UpdateInfo(Facade::geo_point_t fit_pos, Facade::Cluster& temp_cluster, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, double default_dis_cut){
     
     // Get PC transform and cluster parameters
     auto pcts = track_fitter.get_pc_transforms();
@@ -316,7 +316,7 @@ void MyFCN::UpdateInfo(Facade::geo_point_t fit_pos, Facade::Cluster& temp_cluste
     auto test_wpid = dv->contained_by(fit_pos);
     if (test_wpid.apa() == -1 || test_wpid.face() == -1) {
         SPDLOG_LOGGER_TRACE(s_log, "UpdateInfo: Warning: fit_pos not contained in detector volume");
-        return;
+        return false;
     }
     int apa = test_wpid.apa();
     int face = test_wpid.face();
@@ -331,7 +331,7 @@ void MyFCN::UpdateInfo(Facade::geo_point_t fit_pos, Facade::Cluster& temp_cluste
     
     if (offset_it == wpid_offsets.end() || slope_it == wpid_slopes.end()) {
         SPDLOG_LOGGER_TRACE(s_log, "UpdateInfo: Warning: geometry parameters not found for APA {} Face {}", apa, face);
-        return;
+        return false;
     }
     
     auto offset_t = std::get<0>(offset_it->second);
@@ -373,7 +373,7 @@ void MyFCN::UpdateInfo(Facade::geo_point_t fit_pos, Facade::Cluster& temp_cluste
     if (!temp_cluster.has_pc("steiner_pc") || temp_cluster.get_pc("steiner_pc").size() == 0
         || temp_cluster.get_pc("steiner_pc").size_major() == 0) {
         SPDLOG_LOGGER_TRACE(s_log, "UpdateInfo: Warning: steiner_pc not found in cluster");
-        return;
+        return false;
     }
     const auto& steiner_pc = temp_cluster.get_pc("steiner_pc");
     const auto& coords = temp_cluster.get_default_scope().coords;
@@ -494,4 +494,6 @@ void MyFCN::UpdateInfo(Facade::geo_point_t fit_pos, Facade::Cluster& temp_cluste
     
     // Update vertex wcpt
     vtx->wcpt().point = vtx_new_pt;
+
+    return true;
 }

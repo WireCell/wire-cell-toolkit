@@ -1958,9 +1958,11 @@ bool PatternAlgorithms::fit_vertex(Facade::Cluster& cluster, VertexPtr vertex, V
     // Get grouping for charge calculation
     auto grouping = cluster.grouping();
     if (!grouping) {
-        if (results.first)
-            fcn.UpdateInfo(results.second, cluster, track_fitter, dv);
-        return results.first;
+        // && short-circuits exactly like the previous `if (results.first)`:
+        // UpdateInfo is not called when the fit failed.  Its return now
+        // propagates so a guard-aborted (no-op) update is not reported as a
+        // successful fit -- see MyFCN.h and docs/pr/28 sec. 3.3.
+        return results.first && fcn.UpdateInfo(results.second, cluster, track_fitter, dv);
     }
     
     // Get transform for coordinate conversion
@@ -1980,12 +1982,18 @@ bool PatternAlgorithms::fit_vertex(Facade::Cluster& cluster, VertexPtr vertex, V
     double old_charge = 0;
     double new_charge = 0;
     
+    // Sampling radius: the prototype (NeutrinoID_improve_vertex.h:22-23) calls
+    // get_ave_3d_charge(pt) with no radius, taking the ToyCTPointCloud.h:35
+    // default of 0.3 cm; Facade_Grouping.h:315 carries the same 0.3 cm default.
+    // This passed 0.6 cm explicitly (since 6b66163e, uncommented), sampling 8x
+    // the volume and averaging in charge from well outside the vertex.  Left
+    // implicit so the two defaults cannot drift apart.  docs/pr/28 sec. 3.3.
     if (old_wpid.apa() != -1 && old_wpid.face() != -1) {
-        old_charge = grouping->get_ave_3d_charge(old_pos, old_wpid.apa(), old_wpid.face(), 0.6*units::cm);
+        old_charge = grouping->get_ave_3d_charge(old_pos, old_wpid.apa(), old_wpid.face());
     }
-    
+
     if (new_wpid.apa() != -1 && new_wpid.face() != -1) {
-        new_charge = grouping->get_ave_3d_charge(new_pos, new_wpid.apa(), new_wpid.face(), 0.6*units::cm);
+        new_charge = grouping->get_ave_3d_charge(new_pos, new_wpid.apa(), new_wpid.face());
     }
     
     // Check charge conditions - if new position has much lower charge, keep old position.
@@ -2001,11 +2009,10 @@ bool PatternAlgorithms::fit_vertex(Facade::Cluster& cluster, VertexPtr vertex, V
         new_charge = old_charge;
     }
     
-    // Update vertex and segment information with fitted position
-    if (results.first)
-        fcn.UpdateInfo(results.second, cluster, track_fitter, dv);
-    
-    return results.first;
+    // Update vertex and segment information with fitted position.  The && is
+    // the former `if (results.first)` guard; UpdateInfo's return propagates so
+    // that a guard-aborted no-op is not reported as a fit (docs/pr/28 sec 3.3).
+    return results.first && fcn.UpdateInfo(results.second, cluster, track_fitter, dv);
 }
 
 
@@ -2218,10 +2225,13 @@ void PatternAlgorithms::improve_vertex(Graph& graph, Facade::Cluster& cluster, V
             detv_dump("iv:search_vtx_act", graph);
 
             if (flag_update) {
-                // Get updated segments
+                // Get updated segments.  Stable order, matching the first loop
+                // at :2247: this set feeds only the size()==3 test below, so
+                // the change is byte-identical, but an iterated unordered edge
+                // set must not be left on a path that could later feed output.
                 vertex_segments.clear();
-                for (auto it = boost::out_edges(v, graph).first; it != boost::out_edges(v, graph).second; ++it) {
-                    SegmentPtr sg = graph[*it].segment;
+                for (auto edesc : sorted_out_edges(v, graph)) {
+                    SegmentPtr sg = graph[edesc].segment;
                     if (sg && sg->cluster() == &cluster) {
                         vertex_segments.push_back(sg);
                     }

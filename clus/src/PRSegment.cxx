@@ -104,12 +104,19 @@ namespace WireCell::Clus::PR {
             }
         }
         
-        // Reset direction and particle information
-        m_dirsign = 0;
-        m_dir_weak = false;
-        m_particle_score = 100;
-        m_particle_info = nullptr;
-        
+        // Direction and particle identification are deliberately NOT reset here.
+        // prototype (ProtoSegment.cxx:1012-1040): clear_fit() clears only the fit
+        // arrays (fit_pt_vec, dQ/dx, pu/pv/pw/pt, reduced_chi2, fit_index_vec,
+        // fit_flag_skip) and rebuilds pcloud_fit; particle_type, flag_dir,
+        // dir_weak and particle_score survive untouched.  This function has a
+        // single caller in each tree -- MyFCN::UpdateInfo (MyFCN.cxx:482,
+        // prototype NeutrinoID_improve_vertex.h:943) -- so resetting PID here
+        // discarded the identification of every leg of every fitted vertex.
+        // That is observable at NeutrinoVertexFinder.cxx:2327, whose
+        // `if (!sg->particle_info())` gate (prototype: `get_particle_type()==0`)
+        // was therefore always true and re-ran segment_is_shower_topology on
+        // legs the prototype leaves alone.  See sbnd_xin/docs/pr/28 sec. 3.3.
+
         // Recreate the dynamic point cloud for fit points
         if (dv) {
             create_segment_fit_point_cloud(shared_from_this(), dv, cloud_name);

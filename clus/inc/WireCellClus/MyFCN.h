@@ -48,9 +48,17 @@ namespace WireCell::Clus::PR {
         /// @param fit_pos The fitted position
         /// @param temp_cluster The cluster being processed
         /// @param default_dis_cut Default distance cut
-        void UpdateInfo(Facade::geo_point_t fit_pos, 
+        /// @return true if the vertex and its segments were actually updated.
+        ///         The prototype counterpart (NeutrinoID_improve_vertex.h:816)
+        ///         is void and cannot fail; the toolkit adds three guards for
+        ///         conditions the prototype's single-APA geometry cannot reach
+        ///         (fit_pos outside every detector volume, missing wpid
+        ///         offset/slope entry, missing steiner_pc).  Each aborts before
+        ///         any write, so callers must not treat that as a fit.
+        ///         See sbnd_xin/docs/pr/28 sec. 3.3.
+        bool UpdateInfo(Facade::geo_point_t fit_pos,
                        Facade::Cluster& temp_cluster,
-                       TrackFitting& track_fitter, IDetectorVolumes::pointer dv, 
+                       TrackFitting& track_fitter, IDetectorVolumes::pointer dv,
                        double default_dis_cut = 4.0*units::cm);
         
         /// Get segment information at index i
