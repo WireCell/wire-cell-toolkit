@@ -2173,8 +2173,11 @@ void PatternAlgorithms::improve_vertex(Graph& graph, Facade::Cluster& cluster, V
                 std::vector<SegmentPtr> main_vertex_segments;
                 for (auto v : ordered_nodes(graph)) {
                     if (graph[v].vertex == main_vertex) {
-                        for (auto it = boost::out_edges(v, graph).first; it != boost::out_edges(v, graph).second; ++it) {
-                            SegmentPtr sg = graph[*it].segment;
+                        // Stable order.  Byte-identical here (the vector feeds
+                        // only the size()==3 test below), but improve_vertex
+                        // now has no unordered edge iteration left.
+                        for (auto edesc : sorted_out_edges(v, graph)) {
+                            SegmentPtr sg = graph[edesc].segment;
                             if (sg && sg->cluster() == &cluster) {
                                 main_vertex_segments.push_back(sg);
                             }
@@ -2330,15 +2333,21 @@ void PatternAlgorithms::improve_vertex(Graph& graph, Facade::Cluster& cluster, V
             for (auto v : ordered_nodes(graph)) {
                 if (graph[v].vertex != vtx) continue;
                 
-                for (auto it = boost::out_edges(v, graph).first; it != boost::out_edges(v, graph).second; ++it) {
-                    SegmentPtr sg = graph[*it].segment;
+                // Stable edge-index order.  This loop MUTATES segments --
+                // segment_is_shower_topology sets kShowerTopology and
+                // segment_determine_dir_track writes dirsign/particle_info --
+                // and boost::out_edges iterates a setS edge list in *pointer*
+                // order (PRTrajectoryView.h:151), so the results were
+                // run-to-run nondeterministic.  docs/pr/28 sec 3.3 / sec 9.
+                for (auto edesc : sorted_out_edges(v, graph)) {
+                    SegmentPtr sg = graph[edesc].segment;
                     if (!sg || sg->cluster() != &cluster) continue;
-                    
+
                     if (!sg->particle_info()) segment_is_shower_topology(sg, false, m_mip_dqdx_median, m_shower_topo_demote_len);
-                    
+
                     VertexPtr start_v = nullptr, end_v = nullptr;
-                    auto source_v = boost::source(*it, graph);
-                    auto target_v = boost::target(*it, graph);
+                    auto source_v = boost::source(edesc, graph);
+                    auto target_v = boost::target(edesc, graph);
                     
                     auto& wcpts = sg->wcpts();
                     if (!wcpts.empty()) {
@@ -2371,18 +2380,21 @@ void PatternAlgorithms::improve_vertex(Graph& graph, Facade::Cluster& cluster, V
         for (auto v : ordered_nodes(graph)) {
             if (graph[v].vertex != main_vertex) continue;
             
-            for (auto it = boost::out_edges(v, graph).first; it != boost::out_edges(v, graph).second; ++it) {
-                SegmentPtr sg = graph[*it].segment;
+            // Stable edge-index order -- same reason as the fitted_vertices
+            // loop above: this one mutates harder still (unset_flags plus
+            // segment_determine_dir_track on every branch).  docs/pr/28 sec 9.
+            for (auto edesc : sorted_out_edges(v, graph)) {
+                SegmentPtr sg = graph[edesc].segment;
                 if (!sg || sg->cluster() != &cluster) continue;
-                
+
                 std::pair<int, double> pair_result = calculate_num_daughter_showers(graph, main_vertex, sg, false);
                 
                 double medium_dQdx = segment_median_dQ_dx(sg);
                 if ((pair_result.first <= 2 || (medium_dQdx/m_mip_dqdx_median > 1.6 && pair_result.first <= 3)) && segment_is_shower_trajectory(sg, 10*units::cm, m_mip_dqdx)) {
                     if (!segment_is_shower_trajectory(sg, 1.0*units::cm, m_mip_dqdx_median)) {
                         VertexPtr start_v = nullptr, end_v = nullptr;
-                        auto source_v = boost::source(*it, graph);
-                        auto target_v = boost::target(*it, graph);
+                        auto source_v = boost::source(edesc, graph);
+                        auto target_v = boost::target(edesc, graph);
                         
                         auto& wcpts = sg->wcpts();
                         if (!wcpts.empty()) {
@@ -2408,8 +2420,8 @@ void PatternAlgorithms::improve_vertex(Graph& graph, Facade::Cluster& cluster, V
                     int dir_save = sg->dirsign();
                     
                     VertexPtr start_v = nullptr, end_v = nullptr;
-                    auto source_v = boost::source(*it, graph);
-                    auto target_v = boost::target(*it, graph);
+                    auto source_v = boost::source(edesc, graph);
+                    auto target_v = boost::target(edesc, graph);
                     
                     auto& wcpts = sg->wcpts();
                     if (!wcpts.empty()) {
@@ -2446,8 +2458,8 @@ void PatternAlgorithms::improve_vertex(Graph& graph, Facade::Cluster& cluster, V
                 
                 if (flag_skip_two_legs && existing_segments.find(sg) == existing_segments.end()) {
                     VertexPtr start_v = nullptr, end_v = nullptr;
-                    auto source_v = boost::source(*it, graph);
-                    auto target_v = boost::target(*it, graph);
+                    auto source_v = boost::source(edesc, graph);
+                    auto target_v = boost::target(edesc, graph);
                     
                     auto& wcpts = sg->wcpts();
                     if (!wcpts.empty()) {
