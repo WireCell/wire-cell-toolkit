@@ -1,16 +1,6 @@
 #include "WireCellClus/GroupingHelper.h"
 
-namespace {
-    /// Order clusters by their stable ident() instead of their address.
-    struct ClusterIdentLess {
-        bool operator()(const WireCell::Clus::Facade::Cluster* a,
-                        const WireCell::Clus::Facade::Cluster* b) const {
-            return a->ident() < b->ident();
-        }
-    };
-}
-
-std::map<WireCell::Clus::Facade::Cluster*, std::tuple<WireCell::Clus::Facade::Cluster*, int, WireCell::Clus::Facade::Cluster*>>
+std::map<WireCell::Clus::Facade::Cluster*, std::tuple<WireCell::Clus::Facade::Cluster*, int, WireCell::Clus::Facade::Cluster*>, WireCell::Clus::Facade::ClusterIdentLess>
 WireCell::Clus::Facade::process_groupings_helper(
     WireCell::Clus::Facade::Grouping& original,
     WireCell::Clus::Facade::Grouping& shadow,
@@ -18,7 +8,9 @@ WireCell::Clus::Facade::process_groupings_helper(
     const std::string& pname)  // Removed const here
 {
     // current cluster,  corresponding shadow_cluster, its id, the main cluster of this cluster ...
-    std::map<Cluster*, std::tuple<Cluster*, int, Cluster*>> result;
+    // Ident-ordered like orig_to_shadow below -- this is the RETURN VALUE, and a
+    // caller iterating an address-ordered map would just relocate the defect.
+    std::map<Cluster*, std::tuple<Cluster*, int, Cluster*>, ClusterIdentLess> result;
     
     // Step 1: Map original clusters to shadow clusters.
     //
