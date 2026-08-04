@@ -188,6 +188,21 @@ function(
     // Both can only ADD terminals: each restores a way to PASS the filter.
     steiner_terminal_wire_tol = 1,
     steiner_terminal_adjacent_slice = true,
+    // Steiner EDGE-WEIGHT charge fidelity (doc pr/29 D2).  ON at the owner's
+    // instruction, same reasoning as the two above: the prototype weights
+    // steiner edges with charges computed under the disable_dead_mix_cell this
+    // chain actually passes (false, CreateSteinerGraph.cxx:234 ->
+    // PR3DCluster_steiner.h:514,:521), and the toolkit dropped the argument at
+    // the call so create_enhanced_steiner_graph's `= true` default won.  Not a
+    // tunable: the toolkit was computing a charge the port did not intend.
+    //   ON  -> only planes with a NONZERO charge value enter the Qs/Qt RMS.
+    //   OFF -> all three planes enter and DEAD ones (charge_uncertainty > 1e10)
+    //          are subtracted -- an independent predicate, so the two disagree
+    //          on any live-but-zero or dead-but-nonzero plane.
+    // Unlike the terminal-filter knobs this moves weights in EITHER direction,
+    // so it can add or drop tree edges rather than only add terminals.
+    // Set to false for the pre-fix arm.
+    steiner_edge_charge_forward_dead_mix = true,
     // Isochronous first-segment endpoint finding (doc pr/24 round 2, SBND evt
     // 271851): for a long cluster whose quantile-trimmed drift-x extent is
     // small (a filled 2-D sheet), the first PR segment's endpoints come from
@@ -718,6 +733,7 @@ function(
                              shower_topo_demote_len=shower_topo_demote_len,
                              steiner_terminal_wire_tol=steiner_terminal_wire_tol,
                              steiner_terminal_adjacent_slice=steiner_terminal_adjacent_slice,
+                             steiner_edge_charge_forward_dead_mix=steiner_edge_charge_forward_dead_mix,
                              iso_endpoint=iso_endpoint,
                              iso_endpoint_min_length=iso_endpoint_min_length,
                              iso_endpoint_max_xext=iso_endpoint_max_xext,

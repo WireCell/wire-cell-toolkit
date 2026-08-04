@@ -27,8 +27,12 @@ void Steiner::Grapher::create_steiner_tree(
     bool disable_dead_mix_cell,
     const std::string& steiner_pc_name)
 {
-    SPDLOG_LOGGER_TRACE(log, "create_steiner_tree: starting with reference_cluster={}, path_size={}",
-               (reference_cluster ? "provided" : "null"), path_point_indices.size());
+    // edge_charge_forward_dead_mix is echoed so a log alone identifies which
+    // arm produced an edge-weight set (doc pr/29 D2).
+    SPDLOG_LOGGER_TRACE(log, "create_steiner_tree: starting with reference_cluster={}, path_size={}"
+               " (disable_dead_mix_cell={} forward={})",
+               (reference_cluster ? "provided" : "null"), path_point_indices.size(),
+               disable_dead_mix_cell, m_config.edge_charge_forward_dead_mix);
 
     // Phase 1: Find initial steiner terminals
     vertex_set steiner_terminals = find_steiner_terminals(graph_name, disable_dead_mix_cell);
@@ -94,9 +98,19 @@ void Steiner::Grapher::create_steiner_tree(
     charge_config.factor2 = 0.4;          // From prototype
     charge_config.enable_weighting = true; // Enable charge weighting
     
+    // doc pr/29 D2.  The prototype weights steiner edges with charges computed
+    // under the SAME disable_dead_mix_cell this function was called with; the
+    // toolkit historically dropped the argument here and inherited
+    // create_enhanced_steiner_graph's `= true` default.  Honouring the caller
+    // is a behaviour change on every point whose dead-plane and zero-charge
+    // predicates disagree, so it is opt-in and OFF reproduces the old call.
+    const bool edge_dead_mix =
+        m_config.edge_charge_forward_dead_mix ? disable_dead_mix_cell : true;
+
     // Use the enhanced approach with cluster reference for charge calculation
     auto steiner_result = Graphs::Weighted::create_enhanced_steiner_graph(
-        base_graph, steiner_terminals, original_pc, m_cluster, charge_config);
+        base_graph, steiner_terminals, original_pc, m_cluster, charge_config,
+        edge_dead_mix);
 
     // std::cout << "Test5: " <<  " Graph vertices: " << boost::num_vertices(steiner_result.graph) << ", edges: " << boost::num_edges(steiner_result.graph) << std::endl;
 

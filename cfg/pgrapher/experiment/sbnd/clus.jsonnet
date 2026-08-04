@@ -952,6 +952,16 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               // output change (CLAUDE.md sec.5 rule 1) and is the owner's call.
               steiner_terminal_wire_tol=0,
               steiner_terminal_adjacent_slice=false,
+              // Steiner EDGE-WEIGHT charge fidelity (doc pr/29 D2).  OFF here =
+              // the historical toolkit behaviour, key omitted => byte-identical.
+              //   steiner_edge_charge_forward_dead_mix=true   weights steiner
+              //     edges with charges computed under the disable_dead_mix_cell
+              //     this chain actually passes (false), as the prototype does;
+              //     the toolkit dropped the argument at the call and always
+              //     took the true branch of calc_charge_wcp.
+              // Unlike the two above this can move a weight in EITHER
+              // direction, so it can add or drop tree edges.
+              steiner_edge_charge_forward_dead_mix=false,
               // Isochronous first-segment endpoint finding (doc pr/24 round 2,
               // SBND evt 271851): principal-axis endpoints for filled 2-D
               // sheet clusters instead of the wire-footprint boundary metric.
@@ -1264,7 +1274,8 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
                             beam_window_low=beam_window[0],
                             beam_window_high=beam_window[1],
                             terminal_wire_tol=steiner_terminal_wire_tol,
-                            terminal_adjacent_slice=steiner_terminal_adjacent_slice),
+                            terminal_adjacent_slice=steiner_terminal_adjacent_slice,
+                            edge_charge_forward_dead_mix=steiner_edge_charge_forward_dead_mix),
         // The doc pr/23 second steiner pass, named right after protect_bundle:
         // replace=false rebuilds ONLY the clusters protect_bundle purged
         // (split retained + fragments).  A replace=true second pass would
@@ -1285,6 +1296,7 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
                             // same way as their peers (doc pr/29 D1, D12).
                             terminal_wire_tol=steiner_terminal_wire_tol,
                             terminal_adjacent_slice=steiner_terminal_adjacent_slice,
+                            edge_charge_forward_dead_mix=steiner_edge_charge_forward_dead_mix,
                             replace=false),
         fiducialutils: cm.fiducialutils(),
         tagger_check_stm: cm.tagger_check_stm(
@@ -1951,6 +1963,10 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
        // Ships OFF; the SBND operating point lives in wct-pr-perevt.jsonnet.
        steiner_terminal_wire_tol=0,
        steiner_terminal_adjacent_slice=false,
+       // Steiner EDGE-WEIGHT charge fidelity (doc pr/29 D2).  OFF = historical
+       // toolkit behaviour = byte-identical (key omitted).  Ships OFF; the SBND
+       // operating point lives in wct-pr-perevt.jsonnet.
+       steiner_edge_charge_forward_dead_mix=false,
        // Isochronous first-segment endpoint finding (doc pr/24 round 2, SBND
        // evt 271851).  false/nulls = C++ defaults = OFF = byte-identical.
        iso_endpoint=false,
@@ -2078,6 +2094,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 shower_topo_demote_len=shower_topo_demote_len,
                 steiner_terminal_wire_tol=steiner_terminal_wire_tol,
                 steiner_terminal_adjacent_slice=steiner_terminal_adjacent_slice,
+                steiner_edge_charge_forward_dead_mix=steiner_edge_charge_forward_dead_mix,
                 iso_endpoint=iso_endpoint,
                 iso_endpoint_min_length=iso_endpoint_min_length,
                 iso_endpoint_max_xext=iso_endpoint_max_xext,

@@ -61,6 +61,11 @@ void Steiner::CreateSteinerGraph::configure(const WireCell::Configuration& cfg)
                   "reference band; clamping to 0", m_grapher_config.terminal_wire_tol);
         m_grapher_config.terminal_wire_tol = 0;
     }
+    // doc pr/29 D2 -- forward create_steiner_tree's disable_dead_mix_cell to
+    // the edge-weight charge path.  Default false = the historical dropped
+    // argument, so an unchanged config is bit-for-bit as before.
+    m_grapher_config.edge_charge_forward_dead_mix =
+        get(cfg, "edge_charge_forward_dead_mix", m_grapher_config.edge_charge_forward_dead_mix);
     const std::string retiler_tn = get<std::string>(cfg, "retiler", "RetileCluster");
     m_grapher_config.retile = Factory::find_tn<IPCTreeMutate>(retiler_tn);
 }
@@ -96,6 +101,10 @@ Configuration Steiner::CreateSteinerGraph::default_configuration() const
     // face's ticks-per-slice instead of by 1.  The map is tick-keyed, so the
     // legacy step of 1 never matches and the fallback is dead.  false = legacy.
     cfg["terminal_adjacent_slice"] = m_grapher_config.terminal_adjacent_slice;
+    // doc pr/29 D2: honour the caller's disable_dead_mix_cell when weighting
+    // steiner edges (the prototype does; the toolkit dropped the argument and
+    // always used true).  false = legacy.
+    cfg["edge_charge_forward_dead_mix"] = m_grapher_config.edge_charge_forward_dead_mix;
 
     return cfg;
 }

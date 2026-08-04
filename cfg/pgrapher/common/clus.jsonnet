@@ -1373,7 +1373,8 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
         // and their keys are omitted when off => byte-identical pre-knob config.
         steiner(name="", retiler={}, grouping="live", graph="steiner", perf=true, require_beam_flash=true,
                 beam_window_only=false, beam_window_low=0, beam_window_high=0, replace=null,
-                terminal_wire_tol=0, terminal_adjacent_slice=false) :: {
+                terminal_wire_tol=0, terminal_adjacent_slice=false,
+                edge_charge_forward_dead_mix=false) :: {
             type: "CreateSteinerGraph",
             name: prefix+name,
             data: {
@@ -1400,6 +1401,13 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
                 // at all (the time_blob_map key is in ticks).  Key omitted when
                 // false => byte-identical pre-knob config.
                 [if terminal_adjacent_slice then 'terminal_adjacent_slice']: true,
+                // C++ default false.  true = the edge-weight charges honour
+                // the disable_dead_mix_cell create_steiner_tree was called
+                // with (false in this chain), as the prototype does
+                // (PR3DCluster_steiner.h:514,:521); false keeps the dropped
+                // argument and its always-true downstream default.  Key
+                // omitted when false => byte-identical pre-knob config.
+                [if edge_charge_forward_dead_mix then 'edge_charge_forward_dead_mix']: true,
             } + dv_cfg + pcts_cfg
               + (if beam_window_only then {
                      beam_window_only: true,

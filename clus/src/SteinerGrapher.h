@@ -60,6 +60,25 @@ namespace WireCell::Clus::Steiner {
             /// false = that historical dead branch, bit-for-bit;
             /// true = the prototype's t, t+-1 slice search actually happens.
             bool terminal_adjacent_slice{false};
+
+            /// doc pr/29 D2.  Forward create_steiner_tree's
+            /// disable_dead_mix_cell down to the edge-weight charge
+            /// calculation instead of letting create_enhanced_steiner_graph's
+            /// `= true` default win.  The prototype computes the Qs/Qt that
+            /// enter the edge weight with the SAME false it was called with
+            /// (PR3DCluster_steiner.h:514,:521 inheriting
+            /// Create_steiner_tree's parameter, passed false at
+            /// create_steiner_graph:46); the toolkit drops the argument at the
+            /// call and silently takes the other branch of calc_charge_wcp.
+            /// The two branches differ in which planes enter the RMS: `true`
+            /// sums all three then subtracts DEAD planes
+            /// (charge_uncertainty > 1e10), `false` sums only planes with a
+            /// NONZERO charge value.  Those predicates are independent, so
+            /// this is not a no-op wherever they disagree.
+            /// false = the historical toolkit behaviour (always `true`
+            /// downstream, whatever the caller asked for);
+            /// true = prototype parity, the caller's value is honoured.
+            bool edge_charge_forward_dead_mix{false};
         };
         Log::logptr_t log;
 
