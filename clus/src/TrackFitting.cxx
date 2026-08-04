@@ -6740,12 +6740,24 @@ void TrackFitting::dQ_dx_multi_fit(double dis_end_point_ext, bool flag_dQ_dx_fit
     // Build regularization matrix using triplet accumulation (avoids repeated binary-search inserts)
     const double dead_ind_weight = m_params.dead_ind_weight;
     const double dead_col_weight = m_params.dead_col_weight;
-    const double close_ind_weight = m_params.close_ind_weight;
-    const double close_col_weight = m_params.close_col_weight;
+    // The multi-track fit uses STRONGER close-wire (overlap) regularisation than
+    // the single-track fit, exactly as it uses a stronger lambda below.  The
+    // prototype hardcodes both pairs separately:
+    //   single: close_ind 0.15 / close_col 0.45   (PR3DCluster_dQ_dx_fit.h:873-874)
+    //   multi:  close_ind 0.25 / close_col 0.75   (PR3DCluster_multi_dQ_dx_fit.h:762-763)
+    // i.e. x5/3 going single -> multi, alongside lambda's x8/5 (:933 -> :793).
+    // m_params carries the single-track values (the config sets 0.15/0.45), so
+    // scale here rather than adding a second knob -- same shape as the lambda
+    // line below.  Written left-to-right so the arithmetic is FP-exact:
+    // (0.15*5)/3 == 0.25 and (0.45*5)/3 == 0.75 to the last bit.
+    const double close_ind_weight = m_params.close_ind_weight * 5.0 / 3.0;
+    const double close_col_weight = m_params.close_col_weight * 5.0 / 3.0;
 
     std::vector<Eigen::Triplet<double>> F_triplets;
     F_triplets.reserve(n_3D_pos * 4);
     const size_t n3d = static_cast<size_t>(n_3D_pos);
+    size_t n_close_terms = 0;   // how many overlap terms actually fire (liveness)
+    size_t n_pairs = 0;
     for (size_t i = 0; i < n3d; i++) {
         if (i >= connected_vec.size()) continue;
 
@@ -6766,16 +6778,22 @@ void TrackFitting::dQ_dx_multi_fit(double dis_end_point_ext, bool flag_dQ_dx_fit
             int col = connected_vec[i][j];
 
             double ou = overlap_u[i][j], ov = overlap_v[i][j], ow = overlap_w[i][j];
-            if (ou > m_params.overlap_th) weight1 += close_ind_weight * (ou - 0.5) * (ou - 0.5);
-            if (ov > m_params.overlap_th) weight1 += close_ind_weight * (ov - 0.5) * (ov - 0.5);
-            if (ow > m_params.overlap_th) weight1 += close_col_weight * (ow - 0.5) * (ow - 0.5);
+            if (ou > m_params.overlap_th) { weight1 += close_ind_weight * (ou - 0.5) * (ou - 0.5); ++n_close_terms; }
+            if (ov > m_params.overlap_th) { weight1 += close_ind_weight * (ov - 0.5) * (ov - 0.5); ++n_close_terms; }
+            if (ow > m_params.overlap_th) { weight1 += close_col_weight * (ow - 0.5) * (ow - 0.5); ++n_close_terms; }
 
             double dx_norm_row = (local_dx[row] + 0.001 * units::cm) / m_params.dx_norm_length;
             double dx_norm_col = (local_dx[col] + 0.001 * units::cm) / m_params.dx_norm_length;
             F_triplets.emplace_back(row, row, -weight1 * scaling / dx_norm_row);
             F_triplets.emplace_back(row, col,  weight1 * scaling / dx_norm_col);
+            ++n_pairs;
         }
     }
+
+    SPDLOG_LOGGER_TRACE(s_log,
+                        "dQ_dx_multi_fit: close-wire regulariser fired on {} of {} plane-pair terms "
+                        "({} 3D positions); close_ind={} close_col={}",
+                        n_close_terms, 3 * n_pairs, n_3D_pos, close_ind_weight, close_col_weight);
 
     Eigen::SparseMatrix<double> FMatrix(n_3D_pos, n_3D_pos);
     FMatrix.setFromTriplets(F_triplets.begin(), F_triplets.end());
