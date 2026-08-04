@@ -21,6 +21,7 @@
 #include "WireCellClus/PRGraph.h"
 #include "WireCellClus/PRVertex.h"
 #include "WireCellClus/PRSegment.h"
+#include "WireCellClus/PRTrajectoryView.h"
 
 #include "WireCellUtil/doctest.h"
 
@@ -166,4 +167,84 @@ TEST_CASE("pr graph ordered_nodes and graph_nodes hold the same set")
     std::set<PR::node_descriptor> a(raw.begin(), raw.end());
     std::set<PR::node_descriptor> b(ord.begin(), ord.end());
     CHECK(a == b);
+}
+
+// --- round 9 (doc pr/28 §15) ------------------------------------------------
+
+// TrajectoryView::edges()/nodes() are std::unordered_set.  The edge hash is
+// over the two node_descriptors, and with boost::setS vertices a
+// node_descriptor is a HEAP ADDRESS -- so the bucket walk differs between runs
+// of the identical binary.  Shower::get_total_length() and
+// Shower::calculate_kinematics() accumulated FP over that walk, which moved
+// showers[]/kine_dQdx by one ULP (1314.124434586102 -> ...103) between two
+// `setarch -R` runs of SBND evt 388.
+//
+// Reverting ordered_edges(view, g) back to view.edges() in PRShower.cxx does
+// NOT fail this case -- it pins the helper, not the call sites, because a
+// single-process test cannot re-randomize the heap.  What it does pin is that
+// the helper the call sites were converted to actually sorts by the stable
+// index and covers the view exactly.  Deleting the std::sort from
+// PR::ordered_edges(view, g) fails it.
+TEST_CASE("pr trajectory view ordered_edges sorts an address-hashed set by index")
+{
+    PR::Graph g;
+    auto vtxs = make_chain(g, 6);
+
+    PR::TrajectoryView view(g);
+    for (const auto& v : vtxs) view.add_vertex(v);
+    for (const auto& ed : PR::ordered_edges(g)) view.add_segment(g[ed].segment);
+
+    auto ord = PR::ordered_edges(view, g);
+    REQUIRE(ord.size() == view.edges().size());
+
+    // Sorted, strictly increasing on the stable EdgeBundle::index.
+    for (size_t i = 0; i + 1 < ord.size(); ++i) {
+        CHECK(g[ord[i]].index < g[ord[i + 1]].index);
+    }
+
+    // Same membership as the raw walk -- conversion changes order only.
+    PR::edge_unordered_set raw(view.edges().begin(), view.edges().end(),
+                               0, PR::EdgeDescriptorHash(g), PR::EdgeDescriptorEqual(g));
+    PR::edge_unordered_set from_ord(ord.begin(), ord.end(),
+                                    0, PR::EdgeDescriptorHash(g), PR::EdgeDescriptorEqual(g));
+    CHECK(raw.size() == from_ord.size());
+    for (const auto& ed : ord) CHECK(raw.count(ed) == 1);
+
+    auto onodes = PR::ordered_nodes(view, g);
+    REQUIRE(onodes.size() == view.nodes().size());
+    for (size_t i = 0; i + 1 < onodes.size(); ++i) {
+        CHECK(g[onodes[i]].index < g[onodes[i + 1]].index);
+    }
+}
+
+// The SIZE_MAX hazard the round-9 warning guards.  Every PR::Segment that has
+// never been handed to PR::add_segment carries PR::kUnindexed, so under
+// SegmentIndexCmp they all compare EQUAL -- an IndexedSegmentSet keeps one and
+// silently drops the rest.  This is the reason the guard exists; the case pins
+// the collapse so that "index-keyed sets are safe" can never be assumed.
+//
+// Removing PR::kUnindexed / changing Segment's default m_graph_index fails it.
+TEST_CASE("pr unindexed segments collapse in an index-ordered set")
+{
+    auto a = std::make_shared<PR::Segment>();
+    auto b = std::make_shared<PR::Segment>();
+    auto c = std::make_shared<PR::Segment>();
+    CHECK(a->get_graph_index() == PR::kUnindexed);
+    CHECK(b->get_graph_index() == PR::kUnindexed);
+
+    PR::IndexedSegmentSet unindexed{a, b, c};
+    CHECK(unindexed.size() == 1);            // three distinct objects, one survivor
+    CHECK(unindexed.count(b) == 1);          // ...and find() answers for any of them
+
+    // Once they are in a graph the indices are distinct and nothing collapses.
+    PR::Graph g;
+    auto v0 = std::make_shared<PR::Vertex>();
+    auto v1 = std::make_shared<PR::Vertex>();
+    auto v2 = std::make_shared<PR::Vertex>();
+    auto v3 = std::make_shared<PR::Vertex>();
+    PR::add_segment(g, a, v0, v1);
+    PR::add_segment(g, b, v1, v2);
+    PR::add_segment(g, c, v2, v3);
+    PR::IndexedSegmentSet indexed{a, b, c};
+    CHECK(indexed.size() == 3);
 }

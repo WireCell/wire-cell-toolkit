@@ -213,9 +213,20 @@ namespace WireCell::Clus::PR {
 
     using ShowerPtr = std::shared_ptr<Shower>;
 
+    /// Shower::m_shower_id before set_shower_id() has been called.  Same hazard
+    /// as PR::kUnindexed but a DIFFERENT sentinel (-1, not SIZE_MAX): showers
+    /// are numbered by the clustering pass, not by graph insertion.
+    constexpr int kUnassignedShowerId = -1;
+
     struct ShowerIndexCmp {
         bool operator()(const ShowerPtr& a, const ShowerPtr& b) const {
-            return a->get_shower_id() < b->get_shower_id();
+            const int ia = a->get_shower_id();
+            const int ib = b->get_shower_id();
+            if (ia == kUnassignedShowerId || ib == kUnassignedShowerId) [[unlikely]] {
+                static std::atomic<bool> warned{false};
+                if (!warned.exchange(true)) warn_unindexed("PR::Shower");
+            }
+            return ia < ib;
         }
     };
     using IndexedShowerSet   = std::set<ShowerPtr, ShowerIndexCmp>;

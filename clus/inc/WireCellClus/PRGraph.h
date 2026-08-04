@@ -15,6 +15,9 @@
 
 #include "WireCellUtil/Graph.h"
 #include "WireCellUtil/Exceptions.h"
+#include "WireCellUtil/Logging.h"
+#include <atomic>
+#include <limits>
 #include <set>
 
 namespace WireCell::Clus::PR {
@@ -146,14 +149,60 @@ namespace WireCell::Clus::PR {
      *  std::set<VertexPtr> or std::set<SegmentPtr> must produce a deterministic
      *  iteration order across runs.
      */
+    /// The value Vertex::m_graph_index / Segment::m_graph_index hold before the
+    /// object has ever been handed to PR::add_vertex / PR::add_segment.
+    ///
+    /// This is the index-keyed containers' one real hazard, and it is much
+    /// broader than the rare "edge already existed, inherit its index" path in
+    /// add_segment(): EVERY not-yet-added object carries this same value, so
+    /// under VertexIndexCmp/SegmentIndexCmp they all compare EQUAL to one
+    /// another.  An IndexedSegmentSet handed two such segments silently keeps
+    /// one and drops the other, and find() on either returns whichever is held.
+    /// Probing six SBND events found zero live occurrences, so this is latent
+    /// rather than firing -- the warning below is what keeps it that way.
+    constexpr size_t kUnindexed = std::numeric_limits<size_t>::max();
+
+    /// Emit a one-time warning that an index-ordered container was asked to
+    /// compare an object with no graph index.  noinline+cold on purpose: these
+    /// comparators run O(n log n) inside clustering, so the hot path must stay
+    /// at the two integer loads and compares below.  Defined here rather than in
+    /// PRGraph.cxx because wcdoctest-clus compiles its own subset of clus/src
+    /// and does not link libWireCellClus.
+    [[gnu::noinline, gnu::cold]]
+    inline void warn_unindexed(const char* what)
+    {
+        auto log = Log::logger("clus.PRGraph");
+        log->warn("{} with no graph index reached an index-ordered container.  "
+                  "All such objects compare EQUAL, so a set/map may silently drop "
+                  "one and find() may return the wrong one.  Add the object to a "
+                  "graph first, or key the container on the pointer.  Reported "
+                  "once per process (doc pr/28 sec 14.7).",
+                  what);
+    }
+
     struct VertexIndexCmp {
         bool operator()(const VertexPtr& a, const VertexPtr& b) const {
-            return a->get_graph_index() < b->get_graph_index();
+            const size_t ia = a->get_graph_index();
+            const size_t ib = b->get_graph_index();
+            if (ia == kUnindexed || ib == kUnindexed) [[unlikely]] {
+                // Function-local so the atomic is shared across every
+                // instantiation and the check stays thread-safe; wire-cell runs
+                // these comparators from several worker threads.
+                static std::atomic<bool> warned{false};
+                if (!warned.exchange(true)) warn_unindexed("PR::Vertex");
+            }
+            return ia < ib;
         }
     };
     struct SegmentIndexCmp {
         bool operator()(const SegmentPtr& a, const SegmentPtr& b) const {
-            return a->get_graph_index() < b->get_graph_index();
+            const size_t ia = a->get_graph_index();
+            const size_t ib = b->get_graph_index();
+            if (ia == kUnindexed || ib == kUnindexed) [[unlikely]] {
+                static std::atomic<bool> warned{false};
+                if (!warned.exchange(true)) warn_unindexed("PR::Segment");
+            }
+            return ia < ib;
         }
     };
     using IndexedVertexSet  = std::set<VertexPtr,  VertexIndexCmp>;

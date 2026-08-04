@@ -652,8 +652,16 @@ float PatternAlgorithms::calc_conflict_maps(Graph& graph, VertexPtr vertex){
         int n_out_tracks = 0;
         int n_out_showers = 0;
         
-        std::map<SegmentPtr, Facade::geo_vector_t> map_in_segment_dirs;
-        std::map<SegmentPtr, Facade::geo_vector_t> map_out_segment_dirs;
+        // Index-ordered, not address-ordered: the (in,out) search below keeps the
+        // FIRST pair reaching max_angle (strict `>` at :697), so an exact tie --
+        // two outgoing legs at the same angle to one incoming leg -- was resolved
+        // by heap layout.  Both maps are insert-and-iterate only; the operator[]
+        // at :719 uses a key taken from this same map, so switching the key from
+        // address identity to graph-index identity does not change what it finds
+        // (every key here came from a live graph edge, so its index is set and
+        // unique -- never the SIZE_MAX sentinel, doc pr/28 sec 14.7).
+        std::map<SegmentPtr, Facade::geo_vector_t, PR::SegmentIndexCmp> map_in_segment_dirs;
+        std::map<SegmentPtr, Facade::geo_vector_t, PR::SegmentIndexCmp> map_out_segment_dirs;
         
         // Analyze each segment connected to this vertex
         for (auto e_it : vtx_edge_range) {
@@ -3540,6 +3548,17 @@ bool PatternAlgorithms::determine_overall_main_vertex_DL(
             std::vector<SnappedCand> snapped;
             snapped.reserve(snap_map.size());
             for (auto& [vtx, sc] : snap_map) snapped.push_back(sc);
+            // snap_map is keyed on VertexPtr with the default (ADDRESS) comparator,
+            // so the walk above lands in heap order, and the scoring loop below
+            // keeps the first candidate reaching best_score (strict `>`) -- an
+            // exact tie was decided by allocation layout.  Sort the ITERATION, not
+            // the container: snap_map.find() at :3534 must stay address identity
+            // (an index-keyed map would compare on get_graph_index(), which is
+            // SIZE_MAX for any vertex not yet added to a graph, doc pr/28 sec 14.7).
+            std::sort(snapped.begin(), snapped.end(),
+                      [](const SnappedCand& a, const SnappedCand& b) {
+                          return a.vtx->get_graph_index() < b.vtx->get_graph_index();
+                      });
 
             // --- Precompute cluster total track lengths (avoid O(N_edges) per candidate) ---
             std::map<Facade::Cluster*, double> cluster_total_len;

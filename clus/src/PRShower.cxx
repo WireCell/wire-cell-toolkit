@@ -258,7 +258,14 @@ namespace WireCell::Clus::PR {
 
         invalidate_segment_caches();
 
-        for (auto vdesc : shower.nodes()) {
+        // ordered_nodes/ordered_edges rather than the raw view sets: those are
+        // unordered_sets keyed on heap addresses (see get_total_length()).  The
+        // node loop is set-insertion and so order-blind, but the edge loop
+        // below appends points into batch_fit/batch_associate, and THAT order
+        // becomes the shower point cloud's row order -- which decides kNN ties
+        // in shower_get_closest_point().  Ordered for the same reason both
+        // loops are here (doc pr/28 sec 15).
+        for (auto vdesc : ordered_nodes(shower, m_full_graph)) {
             VertexPtr vtx = m_full_graph[vdesc].vertex;
             if (vtx && vtx->descriptor_valid()) this->add_vertex(vtx);
         }
@@ -269,7 +276,7 @@ namespace WireCell::Clus::PR {
         Facade::DPCBatch batch_fit;
         Facade::DPCBatch batch_associate;
 
-        for (auto edesc : shower.edges()) {
+        for (auto edesc : ordered_edges(shower, m_full_graph)) {
             SegmentPtr seg = m_full_graph[edesc].segment;
             if (!seg || !seg->descriptor_valid()) continue;
             // Membership gate -- same rationale as add_segment(): a segment
@@ -648,6 +655,10 @@ namespace WireCell::Clus::PR {
             return 0;
         }
         const auto& view = this->view_graph();
+        // Left on the raw (address-hashed) edge set deliberately: this body is
+        // an unconditional integer count, so no walk order is observable and
+        // ordered_edges() would only buy a vector allocation.  Every loop in
+        // this file that ACCUMULATES or picks does use ordered_edges.
         for (auto edesc : this->edges()) {
             SegmentPtr seg = view[edesc].segment;
             if (seg && seg->cluster() == start_cluster) ++num;
@@ -665,7 +676,13 @@ namespace WireCell::Clus::PR {
 
         double total_length = 0;
         const auto& view = this->view_graph();
-        for (auto edesc : this->edges()) {
+        // ordered_edges, not this->edges(): edges() is an unordered_set whose
+        // hash is over two node_descriptors, and with boost::setS vertices a
+        // node_descriptor is a HEAP ADDRESS -- so the bucket walk differs
+        // between runs of the identical binary.  This += is an FP accumulation,
+        // so that walk order is observable at the ULP: one leaf of SBND evt 388
+        // (doc pr/28 sec 15).
+        for (auto edesc : ordered_edges(*this, m_full_graph)) {
             SegmentPtr seg = view[edesc].segment;
             if (seg) total_length += segment_track_length(seg);
         }
@@ -682,11 +699,12 @@ namespace WireCell::Clus::PR {
         // Get the view graph to access segments
         const auto& view = this->view_graph();
         
-        // Iterate through all segments in the shower
-        for (auto edesc : this->edges()) {
+        // Iterate through all segments in the shower (ordered_edges: FP
+        // accumulation, see get_total_length() above)
+        for (auto edesc : ordered_edges(*this, m_full_graph)) {
             SegmentPtr seg = view[edesc].segment;
             if (!seg) continue;
-            
+
             // Check if segment's cluster matches the input cluster
             if (seg->cluster() == cluster) {
                 total_length += segment_track_length(seg);
@@ -701,11 +719,12 @@ namespace WireCell::Clus::PR {
         // Get the view graph to access segments
         const auto& view = this->view_graph();
         
-        // Iterate through all segments in the shower
-        for (auto edesc : this->edges()) {
+        // Iterate through all segments in the shower (ordered_edges: FP
+        // accumulation, see get_total_length() above)
+        for (auto edesc : ordered_edges(*this, m_full_graph)) {
             SegmentPtr seg = view[edesc].segment;
             if (!seg) continue;
-            
+
             // Mirrors prototype: only count if !get_flag_shower()
             // = !(trajectory || topology || |pdg|==11)
             bool is_shower_seg = seg->flags_any(SegmentFlags::kShowerTrajectory) ||
@@ -731,11 +750,15 @@ namespace WireCell::Clus::PR {
         // Get the view graph to access segments
         const auto& view = this->view_graph();
         
-        // Iterate through all segments in the shower
-        for (auto edesc : this->edges()) {
+        // Iterate through all segments in the shower.  ordered_edges, NOT
+        // this->edges(): the two accumulators below feed the
+        // `shower_length > track_length` branch, so an ULP move here can flip
+        // the branch and retype the start segment to an electron.  This is the
+        // one converted site whose effect is not confined to output rounding.
+        for (auto edesc : ordered_edges(*this, m_full_graph)) {
             SegmentPtr seg = view[edesc].segment;
             if (!seg) continue;
-            
+
             double length = segment_track_length(seg);
             
             // Check if segment is a shower segment OR not a proton (PDG 2212)
@@ -1131,7 +1154,14 @@ namespace WireCell::Clus::PR {
             // Collect dQ and dx from all segments; accumulate total_length for range-based energy
             double total_length = 0;
             std::vector<double> vec_dQ, vec_dx;
-            for (auto edesc : this->edges()) {
+            // ordered_edges: this is the site that was actually caught.  Both
+            // the `total_length +=` and the push order of vec_dQ/vec_dx are
+            // observable -- cal_kine_dQdx() is a plain `kine_energy += dE` over
+            // the vector (PRSegmentFunctions.cxx:1281), so the summation order
+            // sets the last bit.  showers[1]/kine_dQdx moved 1314.124434586102
+            // -> ...103 (rel 6.9e-16) between two `setarch -R` runs of the same
+            // binary on SBND evt 388 (doc pr/28 sec 15).
+            for (auto edesc : ordered_edges(*this, m_full_graph)) {
                 SegmentPtr seg = view[edesc].segment;
                 if (!seg) continue;
                 total_length += segment_track_length(seg);
