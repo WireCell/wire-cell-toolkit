@@ -1349,5 +1349,8 @@ bool PatternAlgorithms::cosmic_tagger(
                        flag_cosmic_10_save;
 
     ti.cosmict_flag = flag_cosmic;
+    // doc pr/36 §10.8 (F7 = P4).  prototype (NeutrinoID_cosmic_tagger.h
+    // lines 860-862): if (flag_cosmic){ neutrino_type |= 1UL << 1; }
+    if (m_neutrino_type_bitmask && flag_cosmic) ti.neutrino_type |= 1 << 1;
     return flag_cosmic;
 }

@@ -631,6 +631,40 @@ namespace WireCell::Clus::PR {
         // alongside the kine transfer.  Null when the component has none.
         IRecombinationModel::pointer m_recomb_model{};
 
+        // ---- doc sbnd_xin/docs/pr/36 §10 tagger-stage knobs -----------------
+        // All C++ default false = today's path = byte-identical; the SBND
+        // operating point decides which are on.  Set by
+        // TaggerCheckNeutrino::visit() alongside the other transfers.
+        //
+        // F4 (= P3 + P5 + track_overclustering's muon_segs): iterate the three
+        // std::set<SegmentPtr>/std::set<ShowerPtr> accumulation loops in
+        // NeutrinoTaggerNuE.cxx in graph-index order instead of
+        // pointer-address order.  This is an M4 / CLAUDE.md §2 determinism
+        // house-rule fix, NOT a fidelity fix: the prototype does the same
+        // address-ordered thing (std::set<ProtoSegment*>,
+        // NeutrinoID_nue_tagger.h:1036 iterated :1139), so turning this on
+        // moves the toolkit FURTHER from the prototype's (unreproducible)
+        // order while making our own runs order-stable.
+        bool m_tagger_ordered_segment_sets{false};
+        // F5 (= P6): pick the stem fit endpoint by the prototype's wcpt
+        // identity rule (NeutrinoID_nue_tagger.h:71-75) instead of the
+        // nearest-fit-endpoint proximity substitute, at the 18
+        // seg_endpoint_near call sites.  WCPoint::index is not ported
+        // (PRCommon.h:99) so identity is EXACT wcpt-position equality --
+        // deliberately no tolerance (doc pr/36 §10.15b).
+        bool m_stem_endpoint_wcpt_parity{false};
+        // F6 (= P8): broken_muon_id's multi-cluster test counts distinct
+        // cluster IDS (prototype NeutrinoID_nue_tagger.h ~:1183) instead of
+        // distinct Facade::Cluster POINTERS.  Equal iff cluster<->id is
+        // injective within the event -- doc 53's real_cluster_id epochs are
+        // why this is a knob and not an assumption.
+        bool m_broken_muon_cluster_id_count{false};
+        // F7 (= P4): compute the prototype's per-tagger neutrino_type verdict
+        // bitmask (see TaggerInfo::neutrino_type).  The matching T_tagger
+        // branch is booked by UbooneTaggerOutputVisitor under the same
+        // config key.
+        bool m_neutrino_type_bitmask{false};
+
         // 2D charge maps cached for the duration of shower_clustering_with_nv.
         // Populated once by collect_charge_maps(); reused by calculate_shower_kinematics
         // and all cal_kine_charge call sites to avoid O(N_hits) re-collection per shower.
@@ -899,6 +933,11 @@ namespace WireCell::Clus::PR {
         // Prototype: WCPPID::NeutrinoID::singlephoton_tagger() in NeutrinoID_singlephoton_tagger.h.
         // apa/face are derived internally from dv->contained_by(main_vertex_pt) so callers
         // do not need to know detector geometry details.
+        // geom_helper (doc pr/36 §10.4, F3 = P2): the prototype SCE-corrects
+        // every position feeding the shw_sp_* features
+        // (func_pos_SCE_correction at NeutrinoID_singlephoton_tagger.h:13,
+        // :103, :132, :317; :222 is commented out there).  Null (the legacy
+        // and the knob-off value) => raw positions, byte-identical.
         bool singlephoton_tagger(Graph& graph,
                                  Facade::Cluster* main_cluster,
                                  VertexPtr main_vertex,
@@ -908,6 +947,7 @@ namespace WireCell::Clus::PR {
                                  std::map<int, std::vector<ShowerPtr>>& map_pio_id_showers,
                                  std::map<int, std::pair<double,int>>& map_pio_id_mass,
                                  IDetectorVolumes::pointer dv,
+                                 WireCell::IClusGeomHelper::pointer geom_helper,
                                  TaggerInfo& ti);
 
         // ssm_tagger: fills TaggerInfo ssm_* and ssmsp_* features and returns flag_ssm.

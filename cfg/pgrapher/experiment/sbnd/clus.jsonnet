@@ -1110,6 +1110,31 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               // four fill_kine_tree sites (prototype parity).  C++ default
               // false; key omitted when off => byte-identical pre-knob config.
               kine_shower_pdg_live=false,
+              // ---- doc sbnd_xin/docs/pr/36 sec 10 tagger-stage knobs -------
+              // F1 (= P1): give the match_isFC recompute the SAME fiducial +
+              // margins tagger_check_{stm,tgm,fc} use (sbnd_pr_fv +
+              // sbnd_pr_fv_margins), mirroring stm_consistent_fv above.
+              // false => keys omitted => the historical FiducialUtils
+              // fallback, byte-identical pre-knob config.
+              neutrino_consistent_fv=false,
+              // F3 (= P2): single-photon SCE correction gate.  Vacuous on
+              // SBND today (clus_geom_helper is ''); kept OFF by owner
+              // decision 2026-08-04 so a future SBND SCE helper enables it
+              // as its own explicit step.  C++ default false.
+              sp_sce_correction=false,
+              // F4 (= P3+P5): graph-index-ordered tagger accumulation sets
+              // (M4 house-rule determinism fix).  C++ default false.
+              tagger_ordered_segment_sets=false,
+              // F5 (= P6): prototype wcpt-identity stem-endpoint rule at the
+              // 18 seg_endpoint_near sites.  C++ default false.
+              stem_endpoint_wcpt_parity=false,
+              // F6 (= P8): broken_muon_id counts distinct cluster ids.  C++
+              // default false.
+              broken_muon_cluster_id_count=false,
+              // F7 (= P4): neutrino_type verdict bitmask + its T_tagger
+              // branch (threaded to BOTH tagger_check_neutrino and
+              // tagger_output).  C++ default false.
+              neutrino_type_bitmask=false,
               // muon_dqdx_curve [c0, c1, pivot_cm, power]: the muon
               // median-dQ/dx-vs-length envelope used by nine tagger cuts, as a
               // multiple of mip_dqdx_median.  DEFAULT = the SBND fit
@@ -1591,6 +1616,16 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
             kine_plane_asym_switch=kine_plane_asym_switch,
             kine_w_value=kine_w_value,
             kine_shower_pdg_live=kine_shower_pdg_live,
+            // doc pr/36 sec 10 (F1): same fiducial + margins as
+            // tagger_check_{stm,tgm,fc} above -- one containment definition
+            // across the stage.  Keys omitted when off.
+            fiducial=(if neutrino_consistent_fv then wc.tn(sbnd_pr_fv) else null),
+            fv_tolerance=(if neutrino_consistent_fv then sbnd_pr_fv_margins else []),
+            sp_sce_correction=sp_sce_correction,
+            tagger_ordered_segment_sets=tagger_ordered_segment_sets,
+            stem_endpoint_wcpt_parity=stem_endpoint_wcpt_parity,
+            broken_muon_cluster_id_count=broken_muon_cluster_id_count,
+            neutrino_type_bitmask=neutrino_type_bitmask,
             muon_dqdx_curve=muon_dqdx_curve,
             sp_dedx_use_recomb_model=sp_dedx_use_recomb_model,
             sp_mean_dedx_cut=sp_mean_dedx_cut,
@@ -1669,7 +1704,10 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
         // is a pure TaggerInfo/KineInfo dump with no geometry).  Opens the
         // tracking file in UPDATE mode, so it must be named AFTER
         // tracking_visitor (and after both BDT scorers so the scores are set).
-        tagger_output: cm.tagger_output(output_filename=tracking_pr_root),
+        // doc pr/36 sec 10.8 (F7): neutrino_type_bitmask books the
+        // neutrino_type/I branch; key omitted when off => schema-identical.
+        tagger_output: cm.tagger_output(output_filename=tracking_pr_root,
+                                        neutrino_type_bitmask=neutrino_type_bitmask),
         // PR event-display calib dump (docs/pr/26): ONE self-contained JSON per
         // event carrying the PR-graph segments as polylines, the associated
         // track/shower points, the Steiner skeleton with its terminal flag, the
@@ -1712,6 +1750,13 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
                            || std.member(pipeline_names, 'tagger_check_fc')
                            || (stm_consistent_fv
                                && std.member(pipeline_names, 'tagger_check_stm'))
+                           // doc pr/36 sec 10 (F1): the neutrino tagger also
+                           // names sbnd_pr_fv when its consistent-FV knob is
+                           // on.  Redundant in the default pipeline (TGM/FC
+                           // already pull it in) => compiled config unchanged
+                           // there; load-bearing only for a reduced pipeline.
+                           || (neutrino_consistent_fv
+                               && std.member(pipeline_names, 'tagger_check_neutrino'))
                            then [sbnd_pr_fv] else []),
     local bee_zip_path = (if output_dir == '' then '' else output_dir + '/') + 'mabc-pr.zip',
     local mabc = g.pnode({
@@ -2130,6 +2175,16 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
        // doc pr/35 sec 10.2 (F1): live shower PDG at fill_kine_tree.
        // C++ default false; key omitted when off => byte-identical.
        kine_shower_pdg_live=false,
+       // doc pr/36 sec 10 tagger-stage knobs -- see the clus_pr arg
+       // comments.  All false = keys omitted = byte-identical pre-knob
+       // config (and, for neutrino_type_bitmask, an identical T_tagger
+       // schema).
+       neutrino_consistent_fv=false,
+       sp_sce_correction=false,
+       tagger_ordered_segment_sets=false,
+       stem_endpoint_wcpt_parity=false,
+       broken_muon_cluster_id_count=false,
+       neutrino_type_bitmask=false,
        // Muon dQ/dx-vs-length envelope: DEFAULT = the docs/pr/10 SBND fit
        // (see the clus_pr arg comment; null restores the uBooNE refit).
        // Recombination-model selection + single-photon dE/dx routing:
@@ -2253,6 +2308,12 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 kine_plane_asym_switch=kine_plane_asym_switch,
                 kine_w_value=kine_w_value,
                 kine_shower_pdg_live=kine_shower_pdg_live,
+                neutrino_consistent_fv=neutrino_consistent_fv,
+                sp_sce_correction=sp_sce_correction,
+                tagger_ordered_segment_sets=tagger_ordered_segment_sets,
+                stem_endpoint_wcpt_parity=stem_endpoint_wcpt_parity,
+                broken_muon_cluster_id_count=broken_muon_cluster_id_count,
+                neutrino_type_bitmask=neutrino_type_bitmask,
                 muon_dqdx_curve=muon_dqdx_curve,
                 use_power_recomb=use_power_recomb,
                 sp_dedx_use_recomb_model=sp_dedx_use_recomb_model,

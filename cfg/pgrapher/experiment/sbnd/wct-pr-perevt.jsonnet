@@ -833,6 +833,43 @@ function(
     // the one that moves is photon_flag 0 -> 1 on evt 172230.
     // Set false to restore the pre-fix gap (runner: SBND_SP_PHOTON_FLAG=0).
     sp_photon_flag = true,
+    // ---- doc sbnd_xin/docs/pr/36 sec 11 tagger-stage knobs -----------------
+    // SBND PRODUCTION DEFAULTS (owner 2026-08-04, doc pr/36 sec 11): the
+    // gate for this stage is TWO artifacts (sec 10.9): T_tagger in
+    // tracking-pr.root (leaf compare) PLUS the tagger block of
+    // calib-pr-evt<ID>.json (PR_EXTRA_STAGES=pr_display) -- match_isFC is NOT
+    // booked in T_tagger.  Gate labels: work-pr35-prod48 vs work-pr36-off48
+    // 48/48 everything; work-pr36-allon48 (env-forced) == work-pr36-prod48
+    // (bare).  Escape hatches: SBND_NEUTRINO_CONSISTENT_FV=0 etc.
+    //
+    // F1 ON: match_isFC recomputed on the same fiducial + margins the
+    // STM/TGM/FC taggers use (mirrors stm_consistent_fv above).  Measured
+    // 6/48 nueCC events flip contained->exiting (54095 74544 137238 168596
+    // 268784 360535), numu_score moves on all six, nue_score only on 137238;
+    // no nusel verdict flips.  =false restores the FiducialUtils fallback.
+    neutrino_consistent_fv = true,
+    // F3 OFF (owner 2026-08-04): single-photon SCE gate.  Vacuous today (no
+    // SBND SCE helper; clus_geom_helper is ''), proven zero-movement with
+    // the knob forced; OFF keeps kine and single-photon independently
+    // gateable when a helper lands.
+    sp_sce_correction = false,
+    // F4 ON: graph-index-ordered tagger accumulation sets (M4 house rule,
+    // prototype n/a).  48/48 byte-identical on nueCC48 -- value is run-to-run
+    // stability under a different address layout.
+    tagger_ordered_segment_sets = true,
+    // F5 ON: prototype wcpt-identity stem-endpoint rule (18 sites).  16/18
+    // sites exact-match every call; the two neither-match firings (268067,
+    // 350186, site 17) measured at 4.8-95 cm = the indirect-shower
+    // population where the prototype also picks back.  Movement: those two
+    // events, 4 shw_sp_lol_* ntuple fields each, scores untouched.
+    stem_endpoint_wcpt_parity = true,
+    // F6 ON: broken_muon_id counts distinct cluster IDs (prototype
+    // semantics).  48/48 byte-identical; id==pointer count everywhere on
+    // this sample (counter f6_id_ptr_disagree is the doc-53 tripwire).
+    broken_muon_cluster_id_count = true,
+    // F7 ON: neutrino_type verdict bitmask + its T_tagger branch (/I).
+    // Knob-on diff = exactly the one new branch on 47/47 PR events.
+    neutrino_type_bitmask = true,
 )
     local base = import 'pgrapher/experiment/sbnd/simparams.jsonnet';
     local params = base {
@@ -971,6 +1008,12 @@ function(
                              kine_plane_asym_switch=kine_plane_asym_switch,
                              kine_w_value=kine_w_value,
                              kine_shower_pdg_live=kine_shower_pdg_live,
+                             neutrino_consistent_fv=neutrino_consistent_fv,
+                             sp_sce_correction=sp_sce_correction,
+                             tagger_ordered_segment_sets=tagger_ordered_segment_sets,
+                             stem_endpoint_wcpt_parity=stem_endpoint_wcpt_parity,
+                             broken_muon_cluster_id_count=broken_muon_cluster_id_count,
+                             neutrino_type_bitmask=neutrino_type_bitmask,
                              muon_dqdx_curve=muon_dqdx_curve,
                              use_power_recomb=use_power_recomb,
                              sp_dedx_use_recomb_model=sp_dedx_use_recomb_model,

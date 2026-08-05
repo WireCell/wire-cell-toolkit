@@ -1350,6 +1350,16 @@ namespace WireCell::Clus::PR {
         // ---- fiducial-volume flag (placeholder: filled by TaggerCheckNeutrino) //
         float match_isFC{0};
 
+        // ---- per-tagger verdict bitmask (doc pr/36 §10.8, F7 = P4) ------ //
+        // prototype NeutrinoID.h:1976, init 0 (NeutrinoID.cxx:58).  Live
+        // writers: cosmic_tagger.h:861 (bit 1), numu_tagger.h:252/:254
+        // (bit 2 numu / bit 3 nc), nue_tagger.h:259 (bit 5).  The
+        // singlephoton write (singlephoton_tagger.h:536-539) is commented
+        // out in the prototype and is not reproduced.  Filled only when
+        // PatternAlgorithms::m_neutrino_type_bitmask is on; stays 0 (and the
+        // T_tagger branch is not booked) when off.
+        int neutrino_type{0};
+
         // ---- numu BDT scores ------------------------------------------- //
         float cosmict_2_4_score{0};
         float cosmict_3_5_score{0};

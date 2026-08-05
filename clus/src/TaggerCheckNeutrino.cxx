@@ -209,6 +209,39 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_cosmic_companion_min_length = get(config, "cosmic_companion_min_length", m_cosmic_companion_min_length);  // cm
     m_sp_photon_flag          = get(config, "sp_photon_flag",          m_sp_photon_flag);
 
+    // ---- doc sbnd_xin/docs/pr/36 §10 tagger-stage knobs ---------------------
+    // F1: fiducial volume for the match_isFC recompute.  Same knob shape and
+    // rationale as TaggerCheckSTM.cxx:69-116: "fiducial" absent => the
+    // historical FiducialUtils fallback (sensitive-volume union, no margin),
+    // which is NOT the volume TaggerCheckTGM/FC/STM test against; setting
+    // "fiducial" + "fv_tolerance" to the values those taggers get restores
+    // one containment definition across the stage.  NeedFiducial::configure
+    // runs ONLY when the key is present: it otherwise falls back to the
+    // type-only name "DetectorVolumes", which is not an instantiated
+    // component in the SBND PR config (it is named dv-apa0-1) and would
+    // throw.  Same guard as TaggerCheckSTM.cxx:101 / TaggerCheckFC.cxx:82.
+    m_use_fiducial = !config["fiducial"].isNull();
+    if (m_use_fiducial) NeedFiducial::configure(config);
+    // fv_tolerance: [x_lo,x_hi,y_lo,y_hi,z_lo,z_hi] margins, negative =
+    // inset (FiducialUtils::inside_fiducial_volume convention; 3 or 1
+    // element also accepted).
+    {
+        auto tol = config["fv_tolerance"];
+        if (!tol.isNull() && tol.isArray()) {
+            m_fv_tolerance.clear();
+            for (const auto& t : tol) m_fv_tolerance.push_back(t.asDouble());
+        }
+    }
+    if (m_use_fiducial) {
+        SPDLOG_LOGGER_DEBUG(log, "TaggerCheckNeutrino: match_isFC uses the configured fiducial with {} tolerance value(s)",
+                            m_fv_tolerance.size());
+    }
+    m_sp_sce_correction            = get(config, "sp_sce_correction",            m_sp_sce_correction);
+    m_tagger_ordered_segment_sets  = get(config, "tagger_ordered_segment_sets",  m_tagger_ordered_segment_sets);
+    m_stem_endpoint_wcpt_parity    = get(config, "stem_endpoint_wcpt_parity",    m_stem_endpoint_wcpt_parity);
+    m_broken_muon_cluster_id_count = get(config, "broken_muon_cluster_id_count", m_broken_muon_cluster_id_count);
+    m_neutrino_type_bitmask        = get(config, "neutrino_type_bitmask",        m_neutrino_type_bitmask);
+
     if (!m_trackfitting_config_file.empty()) {
         load_trackfitting_config(m_trackfitting_config_file);
     }
@@ -317,6 +350,14 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["skip_cosmic_companions"] = m_skip_cosmic_companions;          // doc pr/20 I P4; drop a TGM/STM-tagged companion from other_clusters
     cfg["cosmic_companion_min_length"] = m_cosmic_companion_min_length;  // cm; a tagged companion shorter than this stays in regardless
     cfg["sp_photon_flag"] = m_sp_photon_flag;     // doc pr/26 sec. 8.2; store singlephoton_tagger()'s verdict in TaggerInfo::photon_flag (prototype NeutrinoID.cxx:271)
+    // doc sbnd_xin/docs/pr/36 §10.
+    cfg["fiducial"] = Json::Value();                 // null = the historical FiducialUtils containment fallback
+    cfg["fv_tolerance"] = Json::Value(Json::arrayValue);  // [x_lo,x_hi,y_lo,y_hi,z_lo,z_hi] margins, negative = inset
+    cfg["sp_sce_correction"]            = m_sp_sce_correction;            // false = legacy raw single-photon positions
+    cfg["tagger_ordered_segment_sets"]  = m_tagger_ordered_segment_sets;  // false = legacy pointer-address iteration (M4 fix when true)
+    cfg["stem_endpoint_wcpt_parity"]    = m_stem_endpoint_wcpt_parity;    // false = legacy nearest-fit-endpoint proximity rule
+    cfg["broken_muon_cluster_id_count"] = m_broken_muon_cluster_id_count; // false = legacy distinct-pointer cluster count
+    cfg["neutrino_type_bitmask"]        = m_neutrino_type_bitmask;        // false = legacy (no verdict bitmask, no T_tagger branch)
 
 
     return cfg;
@@ -613,6 +654,11 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
     pattern_algos.m_kine_charge.plane_asym_switch   = m_kine_plane_asym_switch;
     pattern_algos.m_kine_charge.shower_pdg_live     = m_kine_shower_pdg_live;
     pattern_algos.m_kine_charge.w_value             = m_kine_w_value;
+    // doc sbnd_xin/docs/pr/36 §10 tagger-stage knobs (F4/F5/F6/F7).
+    pattern_algos.m_tagger_ordered_segment_sets  = m_tagger_ordered_segment_sets;
+    pattern_algos.m_stem_endpoint_wcpt_parity    = m_stem_endpoint_wcpt_parity;
+    pattern_algos.m_broken_muon_cluster_id_count = m_broken_muon_cluster_id_count;
+    pattern_algos.m_neutrino_type_bitmask        = m_neutrino_type_bitmask;
     // Muon dQ/dx-vs-length envelope: c0/c1/power dimensionless, pivot cm -> internal.
     pattern_algos.m_muon_dqdx_curve = {m_muon_dqdx_curve[0], m_muon_dqdx_curve[1],
                                        m_muon_dqdx_curve[2] * units::cm, m_muon_dqdx_curve[3]};
@@ -823,6 +869,26 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
     all_clusters.push_back(main_cluster);
     all_clusters.insert(all_clusters.end(), other_clusters.begin(), other_clusters.end());
 
+    // doc pr/36 §10.3 / §10.15a (F2 = P12): the population sweep, run FIRST.
+    // The prototype's get_particle_type() coerces any shower-flagged segment
+    // to PDG 11 on read (ProtoSegment.cxx:10-15); the toolkit's
+    // has_particle_info() gates skip such a segment.  This one pass over the
+    // graph decides whether that population EXISTS on this event; the
+    // per-gate counters (f2_gate_skip, incremented inside the taggers)
+    // attribute it.  Zero across the manifest => F2 is dead by construction.
+    {
+        auto& audit = WireCell::Clus::PR::g_pr36_audit;
+        for (auto ed : WireCell::Clus::PR::ordered_edges(*pr_graph)) {
+            SegmentPtr sg = (*pr_graph)[ed].segment;
+            if (!sg) continue;
+            audit.f2_sweep_segments.fetch_add(1, std::memory_order_relaxed);
+            if (!sg->has_particle_info() &&
+                (sg->flags_any(PR::SegmentFlags::kShowerTrajectory) ||
+                 sg->flags_any(PR::SegmentFlags::kShowerTopology)))
+                audit.f2_sweep_hits.fetch_add(1, std::memory_order_relaxed);
+        }
+    }
+
     // Run cosmic and numu taggers to fill BDT input features in tagger_info.
     // Both require a valid neutrino vertex to have been found.
     if (final_main_vertex) {
@@ -906,6 +972,12 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
                                               map_pio_id_showers,
                                               map_pio_id_mass,
                                               m_dv,
+                                              // doc pr/36 §10.4 (F3): SCE helper,
+                                              // gated separately from kine's use of
+                                              // clus_geom_helper.  Off (or helper
+                                              // unconfigured) => nullptr => raw
+                                              // positions, byte-identical legacy.
+                                              m_sp_sce_correction ? m_geom_helper : nullptr,
                                               tagger_info);
         if (m_sp_photon_flag) {
             // Logged unconditionally so a knob-on run proves the branch
@@ -925,8 +997,31 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
     // Compute match_isFC: 1 if the main cluster is fully contained inside the
     // fiducial volume, 0 otherwise.  Uses the same two-round boundary check as
     // TaggerCheckSTM so the definition is consistent across both users.
+    // doc pr/36 §10.2 (F1 = P1): when a "fiducial" is configured the direct
+    // containment tests run against it (the TGM/FC/STM volume) instead of the
+    // historical FiducialUtils fallback -- cluster_fc_check's nullptr path is
+    // documented bit-for-bit (Clustering_Util.cxx:108-116), so an absent key
+    // is byte-identical.  The prototype reads this verdict from the upstream
+    // light-matching stage (NeutrinoID.cxx:62, branch T_eval), computed on
+    // the ONE ToyFiducial volume -- so a consistent volume here is the parity
+    // reading that is implementable as a knob (reading (ii), threading the
+    // upstream verdict itself, is a data-flow change out of this round's
+    // scope).  Both verdicts are computed when the knob is on; disagreement
+    // is the §7.1 diagnostic, logged and counted.
     if (main_cluster) {
-        auto fc_result = Facade::cluster_fc_check(*main_cluster, m_dv);
+        auto fc_result = Facade::cluster_fc_check(*main_cluster, m_dv,
+                                                  m_use_fiducial ? m_fiducial : nullptr,
+                                                  m_fv_tolerance);
+        if (m_use_fiducial) {
+            auto& audit = WireCell::Clus::PR::g_pr36_audit;
+            audit.f1_fc_checks.fetch_add(1, std::memory_order_relaxed);
+            auto legacy = Facade::cluster_fc_check(*main_cluster, m_dv);
+            if (legacy.is_fc != fc_result.is_fc) {
+                audit.f1_fc_disagree.fetch_add(1, std::memory_order_relaxed);
+                SPDLOG_LOGGER_INFO(log, "PR36AUDIT match_isFC disagree: legacy={} fiducial={}",
+                                   legacy.is_fc, fc_result.is_fc);
+            }
+        }
         tagger_info.match_isFC = fc_result.is_fc ? 1.0f : 0.0f;
     }
     if (m_perf) SPDLOG_LOGGER_DEBUG(log, "TaggerCheckNeutrino timing: fc_check took {} ms", MS(Clock::now() - t0).count());
@@ -1026,6 +1121,39 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
             m_cont_muon_dir3_30cm, m_track_comp_empty_abstain, m_shower_topo_reset,
             m_reclass_preserve_4mom, m_dir_track_median_local, m_examine_showers_vertex_by_index,
             m_shower_topo_proto_dir);
+    }
+
+    // doc sbnd_xin/docs/pr/36 §10 -- same contract as PR30AUDIT above.  The
+    // per-site vectors are fixed-width so the line is machine-parseable:
+    // f2_gates = the 11 skip-gates (ids on Pr36AuditCounters::f2_gate_skip),
+    // f5_* = the 18 seg_endpoint_near call sites (ids on ::f5_calls).
+    {
+        const auto& pc = WireCell::Clus::PR::g_pr36_audit;
+        auto join = [](const std::atomic<uint64_t>* a, int n) {
+            std::string s;
+            for (int i = 0; i < n; ++i) {
+                if (i) s += ",";
+                s += std::to_string(a[i].load());
+            }
+            return s;
+        };
+        SPDLOG_LOGGER_INFO(log,
+            "PR36AUDIT f1_checks={} f1_disagree={} "
+            "f2_sweep={}/{} f2_gates=[{}] "
+            "f5_calls=[{}] f5_disagree=[{}] f5_neither=[{}] "
+            "f6_id_ptr_disagree={} "
+            "knobs[use_fiducial={} sp_sce={} ordered_sets={} wcpt_parity={} "
+            "cluster_id_count={} nu_type_bitmask={}]",
+            pc.f1_fc_checks.load(), pc.f1_fc_disagree.load(),
+            pc.f2_sweep_hits.load(), pc.f2_sweep_segments.load(),
+            join(pc.f2_gate_skip, pc.f2_ngates),
+            join(pc.f5_calls, pc.f5_nsites),
+            join(pc.f5_disagree, pc.f5_nsites),
+            join(pc.f5_neither, pc.f5_nsites),
+            pc.f6_id_vs_ptr_disagree.load(),
+            m_use_fiducial, m_sp_sce_correction, m_tagger_ordered_segment_sets,
+            m_stem_endpoint_wcpt_parity, m_broken_muon_cluster_id_count,
+            m_neutrino_type_bitmask);
     }
 }
 

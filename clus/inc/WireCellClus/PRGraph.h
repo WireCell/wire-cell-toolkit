@@ -95,6 +95,42 @@ namespace WireCell::Clus::PR {
     };
     extern Pr32AuditCounters g_pr32_audit;
 
+    /// doc sbnd_xin/docs/pr/36 §10 -- tagger-stage audit instrumentation,
+    /// same contract as PortAuditCounters above: process-wide, one event per
+    /// wire-cell process, never reset, pure diagnostics (unconditional, on in
+    /// the knob-off arm).
+    struct Pr36AuditCounters {
+        // F1 (match_isFC): both-ways containment check, counted only when a
+        // fiducial is configured (the knob-off arm cannot measure this).
+        std::atomic<uint64_t> f1_fc_checks{0};
+        std::atomic<uint64_t> f1_fc_disagree{0};  // legacy FiducialUtils vs configured fiducial
+        // F2 (PDG-gate population): segments that the prototype's
+        // get_particle_type() coercion (ProtoSegment.cxx:10-15) would process
+        // as electrons and the toolkit's has_particle_info() gates skip.
+        // Sweep = one pass over the graph before the tagger block; per-gate =
+        // skips at each gate (0 = NuE:396 bare info gate, 1-9 = the NuE
+        // pdg-11 gates in file order, 10 = SinglePhoton's).
+        std::atomic<uint64_t> f2_sweep_segments{0};  // segments swept
+        std::atomic<uint64_t> f2_sweep_hits{0};      // shower-flagged && !has_particle_info()
+        static constexpr int f2_ngates = 11;
+        std::atomic<uint64_t> f2_gate_skip[f2_ngates]{};
+        // F5 (stem endpoint rule): per-call-site attribution across the 18
+        // seg_endpoint_near sites (0-12 = NeutrinoTaggerNuE.cxx in file
+        // order, 13-17 = NeutrinoTaggerSinglePhoton.cxx).  disagree = the
+        // prototype wcpt rule and the legacy proximity rule pick different
+        // fit endpoints; neither = neither wcpt endpoint equals the vertex
+        // wcpt EXACTLY (fires => the skeleton-node coincidence premise of
+        // doc pr/36 §10.15b is wrong and F5 needs redesign, not tolerance).
+        static constexpr int f5_nsites = 18;
+        std::atomic<uint64_t> f5_calls[f5_nsites]{};
+        std::atomic<uint64_t> f5_disagree[f5_nsites]{};
+        std::atomic<uint64_t> f5_neither[f5_nsites]{};
+        // F6 (broken_muon cluster count): distinct-cluster-id count differs
+        // from distinct-cluster-pointer count (id non-injectivity, doc 53).
+        std::atomic<uint64_t> f6_id_vs_ptr_disagree{0};
+    };
+    extern Pr36AuditCounters g_pr36_audit;
+
     /// P8 knob transport.  add_segment() is a free function reached from ~30
     /// call sites and has no access to component configuration, so the two
     /// values it needs are written once per event by TaggerCheckNeutrino

@@ -471,7 +471,7 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
                  } else {}),
         },
 
-        tagger_check_neutrino(name="", trackfitting_config_file="", particle_dataset="", recombination_model="", perf=false, dl_weights="", dQdx_scale=0.1, dQdx_offset=-1000.0, clus_geom_helper="", dl_vtx_rerank=true, dl_vtx_top_k=5, dl_vtx_min_accept_score=4.0, dl_vtx_score_scale=1000.0, beam_window_low=0, beam_window_high=0, nu_skip_cosmic=false, nu_skip_cosmic_bundle=false, nu_skip_cosmic_bundle_min_length=0, dir_weak_use_score=false, mip_dqdx=null, mip_dqdx_median=null, proton_dir_vote=false, proton_dir_score_max=null, proton_dir_asym_min=null, endpoint_trim_retry=false, fit_vertex_min_seg_length=null, cathode_x=null, cathode_kink_xcut=null, shower_topo_demote_len=null, iso_endpoint=false, iso_endpoint_min_length=null, iso_endpoint_max_xext=null, iso_endpoint_xext_frac=null, iso_endpoint_xext_quantile=null, iso_endpoint_tube_radius=null, iso_endpoint_min_aspect=null, cosmic_y_top_main=null, cosmic_y_top_strict=null, cosmic_y_top_loose=null, cosmic_y_small_piece=null, vertex_z_prior_scale=null, ssm_target_dir=null, ssm_absorber_dir=null, kine_fudge_factor=null, kine_recom_factor=null, kine_shower_fudge_factor=null, kine_shower_recom_factor=null, kine_proton_recom_factor=null, kine_plane_weights=null, kine_plane_asym_switch=null, kine_w_value=null, kine_shower_pdg_live=false, muon_dqdx_curve=null, sp_dedx_use_recomb_model=false, sp_mean_dedx_cut=null, dl_vtx_cut=null, skip_cosmic_companions=false, cosmic_companion_min_length=null, sp_photon_flag=false, fit_exclusion=false, graph_endpoint_strict=false, graph_endpoint_tol=null, oov_prototype_parity=false, first_seg_local_pca=null, other_seg_relaxed_accept=null, shower_topo_proto_dir=false, vertex_dir_use_fit_point=false, shower_traj_recheck_parity=false, main_vertex_require_descriptor=false, main_vertex_candidate_flag=false, cont_muon_dir3_30cm=false, track_comp_empty_abstain=false, shower_topo_reset=false, reclass_preserve_4mom=false, dir_track_median_local=false, examine_showers_vertex_by_index=false) :: {
+        tagger_check_neutrino(name="", trackfitting_config_file="", particle_dataset="", recombination_model="", perf=false, dl_weights="", dQdx_scale=0.1, dQdx_offset=-1000.0, clus_geom_helper="", dl_vtx_rerank=true, dl_vtx_top_k=5, dl_vtx_min_accept_score=4.0, dl_vtx_score_scale=1000.0, beam_window_low=0, beam_window_high=0, nu_skip_cosmic=false, nu_skip_cosmic_bundle=false, nu_skip_cosmic_bundle_min_length=0, dir_weak_use_score=false, mip_dqdx=null, mip_dqdx_median=null, proton_dir_vote=false, proton_dir_score_max=null, proton_dir_asym_min=null, endpoint_trim_retry=false, fit_vertex_min_seg_length=null, cathode_x=null, cathode_kink_xcut=null, shower_topo_demote_len=null, iso_endpoint=false, iso_endpoint_min_length=null, iso_endpoint_max_xext=null, iso_endpoint_xext_frac=null, iso_endpoint_xext_quantile=null, iso_endpoint_tube_radius=null, iso_endpoint_min_aspect=null, cosmic_y_top_main=null, cosmic_y_top_strict=null, cosmic_y_top_loose=null, cosmic_y_small_piece=null, vertex_z_prior_scale=null, ssm_target_dir=null, ssm_absorber_dir=null, kine_fudge_factor=null, kine_recom_factor=null, kine_shower_fudge_factor=null, kine_shower_recom_factor=null, kine_proton_recom_factor=null, kine_plane_weights=null, kine_plane_asym_switch=null, kine_w_value=null, kine_shower_pdg_live=false, muon_dqdx_curve=null, sp_dedx_use_recomb_model=false, sp_mean_dedx_cut=null, dl_vtx_cut=null, skip_cosmic_companions=false, cosmic_companion_min_length=null, sp_photon_flag=false, fit_exclusion=false, graph_endpoint_strict=false, graph_endpoint_tol=null, oov_prototype_parity=false, first_seg_local_pca=null, other_seg_relaxed_accept=null, shower_topo_proto_dir=false, vertex_dir_use_fit_point=false, shower_traj_recheck_parity=false, main_vertex_require_descriptor=false, main_vertex_candidate_flag=false, cont_muon_dir3_30cm=false, track_comp_empty_abstain=false, shower_topo_reset=false, reclass_preserve_4mom=false, dir_track_median_local=false, examine_showers_vertex_by_index=false, fiducial=null, fv_tolerance=[], sp_sce_correction=false, tagger_ordered_segment_sets=false, stem_endpoint_wcpt_parity=false, broken_muon_cluster_id_count=false, neutrino_type_bitmask=false) :: {
             type: "TaggerCheckNeutrino",
             name: prefix + name,
             data: {
@@ -791,7 +791,36 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
               // the legacy literal (compared as float => bit-identical); key
               // omitted when null.  Tuned against the INLINE (uBooNE-field)
               // dE/dx scale -- retune together with the knob above.
-              + (if sp_mean_dedx_cut != null then { sp_mean_dedx_cut: sp_mean_dedx_cut } else {}),
+              + (if sp_mean_dedx_cut != null then { sp_mean_dedx_cut: sp_mean_dedx_cut } else {})
+              // ---- doc sbnd_xin/docs/pr/36 sec 10 tagger-stage knobs -------
+              // F1 (= P1): fiducial + margins for the match_isFC recompute --
+              // the SAME objects tagger_check_{stm,tgm,fc} receive, restoring
+              // one containment definition across the stage.  C++: an absent
+              // "fiducial" key keeps the historical FiducialUtils fallback
+              // (cluster_fc_check's nullptr path, documented bit-for-bit) =>
+              // byte-identical pre-knob config.  Same key pair as
+              // tagger_check_stm above.
+              + (if fiducial != null then { fiducial: fiducial } else {})
+              + (if std.length(fv_tolerance) > 0 then { fv_tolerance: fv_tolerance } else {})
+              // F3 (= P2): single-photon SCE correction gate.  A SEPARATE
+              // bool from clus_geom_helper so the two consumers of that key
+              // (kine + single-photon) stay independently gateable.  C++
+              // default false.  Key omitted when off => byte-identical.
+              + (if sp_sce_correction then { sp_sce_correction: true } else {})
+              // F4 (= P3+P5): iterate the three tagger accumulation sets in
+              // graph-index order (M4 house-rule determinism fix; prototype
+              // n/a -- it is address-ordered too).  C++ default false.
+              + (if tagger_ordered_segment_sets then { tagger_ordered_segment_sets: true } else {})
+              // F5 (= P6): prototype wcpt-identity stem-endpoint rule at the
+              // 18 seg_endpoint_near sites.  C++ default false.
+              + (if stem_endpoint_wcpt_parity then { stem_endpoint_wcpt_parity: true } else {})
+              // F6 (= P8): broken_muon_id counts distinct cluster IDS
+              // (prototype) instead of pointers.  C++ default false.
+              + (if broken_muon_cluster_id_count then { broken_muon_cluster_id_count: true } else {})
+              // F7 (= P4): compute the prototype's neutrino_type verdict
+              // bitmask.  The matching T_tagger branch is booked by
+              // tagger_output under the same key.  C++ default false.
+              + (if neutrino_type_bitmask then { neutrino_type_bitmask: true } else {}),
         },
 
         // Run pattern recognition (find_proto_vertex) on the main cluster.
@@ -897,13 +926,20 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
         // Write T_tagger and T_kine trees into the existing tracking output ROOT file.
         // Must run AFTER numu_bdt_scorer and nue_bdt_scorer (BDT scores must be filled).
         // Must run AFTER UbooneMagnifyTrackingVisitor (file must already exist to UPDATE).
-        tagger_output(name="", output_filename="tracking_proj.root") :: {
+        tagger_output(name="", output_filename="tracking_proj.root", neutrino_type_bitmask=false) :: {
             type: "UbooneTaggerOutputVisitor",
             name: prefix + name,
             data: {
                 grouping: "live",
                 output_filename: output_filename,
             }
+              // doc sbnd_xin/docs/pr/36 sec 10.8 (F7 = P4): book the
+              // neutrino_type/I branch (prototype
+              // wire-cell-prod-nue-port.cxx:1486).  Same key as
+              // tagger_check_neutrino's computing knob.  C++ default false =
+              // branch not booked; key omitted when off => byte-identical
+              // pre-knob config AND schema.
+              + (if neutrino_type_bitmask then { neutrino_type_bitmask: true } else {}),
         },
 
         pointed(name="", groupings=["live"]) :: {

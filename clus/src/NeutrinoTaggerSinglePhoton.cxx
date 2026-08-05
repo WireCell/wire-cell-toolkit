@@ -94,6 +94,49 @@ static Point seg_endpoint_near(SegmentPtr seg, const Point& ref_pt) {
            ? front : back;
 }
 
+// doc pr/36 §10.6 (F5 = P6).  Prototype wcpt-identity endpoint rule with the
+// legacy proximity fallback -- twin of NeutrinoTaggerNuE.cxx's
+// seg_endpoint_near_vtx (fork-by-duplication file convention); see the full
+// rationale there.  Site ids 13-17 belong to this file.
+static Point seg_endpoint_near_vtx(const PatternAlgorithms& pa, int site,
+                                   SegmentPtr seg, VertexPtr vtx) {
+    const Point legacy = seg_endpoint_near(seg, vtx_fit_pt(vtx));
+    if (!vtx) return legacy;
+    auto& audit = PR::g_pr36_audit;
+    audit.f5_calls[site].fetch_add(1, std::memory_order_relaxed);
+    const auto& fits  = seg->fits();
+    const auto& wcpts = seg->wcpts();
+    const bool front_match = !wcpts.empty() && wcpts.front().point == vtx->wcpt().point;
+    const bool back_match  = !wcpts.empty() && wcpts.back().point  == vtx->wcpt().point;
+    if (!front_match && !back_match) {
+        audit.f5_neither[site].fetch_add(1, std::memory_order_relaxed);
+        // Premise classification (doc pr/36 §10.15b): ~zero distances would
+        // mean arithmetic drift broke an identity the prototype's integer
+        // index test would keep (redesign needed); large distances mean the
+        // vertex is genuinely a different skeleton node, where the prototype
+        // rule ALSO picks back -- faithful.
+        SPDLOG_LOGGER_INFO(s_log,
+            "PR36AUDIT f5 site {} neither-match: d_front={:.6g} cm d_back={:.6g} cm",
+            site, ray_length(Ray{vtx->wcpt().point, wcpts.front().point}) / units::cm,
+            ray_length(Ray{vtx->wcpt().point, wcpts.back().point}) / units::cm);
+    }
+    // Prototype rule (NeutrinoID_nue_tagger.h:71-75): front on an exact
+    // front match, otherwise back.
+    const Point proto = front_match ? fits.front().point : fits.back().point;
+    if (proto != legacy)
+        audit.f5_disagree[site].fetch_add(1, std::memory_order_relaxed);
+    return pa.m_stem_endpoint_wcpt_parity ? proto : legacy;
+}
+
+// doc pr/36 §10.3 (F2 = P12).  Twin of NeutrinoTaggerNuE.cxx's
+// pr36_count_gate_skip; this file's gate id is 10.
+static inline void pr36_count_gate_skip(SegmentPtr sg, int gate) {
+    if (sg && !sg->has_particle_info() &&
+        (sg->flags_any(SegmentFlags::kShowerTrajectory) ||
+         sg->flags_any(SegmentFlags::kShowerTopology)))
+        PR::g_pr36_audit.f2_gate_skip[gate].fetch_add(1, std::memory_order_relaxed);
+}
+
 // ---------------------------------------------------------------------------
 // SpContext: file-local bundle of shared state for singlephoton_tagger helpers.
 //
@@ -499,7 +542,7 @@ static bool bad_reconstruction_1_sp(SpContext& ctx, ShowerPtr shower,
 
     // Overall shower direction from the vertex end.
     // Prototype: dir_shower = shower->cal_dir_3vector(vertex_point, 100*units::cm)
-    Point vertex_point = seg_endpoint_near(sg, vtx_fit_pt(vertex));
+    Point vertex_point = seg_endpoint_near_vtx(ctx.self, 13, sg, vertex);
     Vector dir_shower  = shower_cal_dir_3vector(*shower, vertex_point, 100 * units::cm);
 
     // PCA of shower points → main axis.
@@ -709,7 +752,7 @@ static bool bad_reconstruction_2_sp(SpContext& ctx,
     // br3_3 / br3_4: backward segments in main cluster.
     // Prototype lines 3556-3617.
     // -------------------------------------------------------------------
-    Point vertex_point = seg_endpoint_near(sg, vtx_fit_pt(vertex));
+    Point vertex_point = seg_endpoint_near_vtx(ctx.self, 14, sg, vertex);
     Point other_point  = (ray_length(Ray{vtx_fit_pt(vertex), sg_fits.front().point}) <=
                           ray_length(Ray{vtx_fit_pt(vertex), sg_fits.back().point}))
                          ? sg_fits.back().point : sg_fits.front().point;
@@ -1000,7 +1043,7 @@ static bool bad_reconstruction_3_sp(SpContext& ctx,
     // -------------------------------------------------------------------
     {
         SegmentPtr sg = shower->start_segment();
-        Point vp = seg_endpoint_near(sg, vtx_fit_pt(vertex));
+        Point vp = seg_endpoint_near_vtx(ctx.self, 15, sg, vertex);
 
         Vector dir_sg = segment_cal_dir_3vector(sg, vp, 15*units::cm);
         Vector dir;
@@ -1123,7 +1166,7 @@ static int mip_identification_sp(SpContext& ctx,
     Vector dir_drift(1, 0, 0);
     double Eshower = shower_energy(shower);
 
-    Point vertex_point = seg_endpoint_near(sg, vtx_fit_pt(vertex));
+    Point vertex_point = seg_endpoint_near_vtx(ctx.self, 16, sg, vertex);
 
     // Stem direction: use start segment if long enough, else use shower direction
     Vector dir_shower;
@@ -1397,7 +1440,10 @@ static int mip_identification_sp(SpContext& ctx,
 
         for (ShowerPtr shower1 : ctx.showers) {
             SegmentPtr sg1 = shower1->start_segment();
-            if (!sg1 || !sg1->has_particle_info() || sg1->particle_info()->pdg() != 11) continue;
+            if (!sg1 || !sg1->has_particle_info() || sg1->particle_info()->pdg() != 11) {
+                pr36_count_gate_skip(sg1, 10);  // doc pr/36 F2
+                continue;
+            }
             if (shower1 == shower) continue;
             auto [vtx1, conn1] = shower1->get_start_vertex_and_type();
             double E1 = shower_energy(shower1);
@@ -1790,7 +1836,7 @@ static bool low_energy_overlapping_sp(SpContext& ctx, ShowerPtr shower, TaggerIn
 
     auto [vtx, conn_type] = shower->get_start_vertex_and_type();
     SegmentPtr sg = shower->start_segment();
-    Point vtx_point = seg_endpoint_near(sg, vtx_fit_pt(vtx));
+    Point vtx_point = seg_endpoint_near_vtx(ctx.self, 17, sg, vtx);
 
     IndexedSegmentSet shower_segs;
     IndexedVertexSet  shower_vtxs;
@@ -2191,6 +2237,7 @@ bool PatternAlgorithms::singlephoton_tagger(
     std::map<int, std::vector<ShowerPtr>>& map_pio_id_showers,
     std::map<int, std::pair<double,int>>& map_pio_id_mass,
     IDetectorVolumes::pointer dv,
+    WireCell::IClusGeomHelper::pointer geom_helper,
     TaggerInfo& ti)
 {
     bool flag_sp = false;
@@ -2219,7 +2266,21 @@ bool PatternAlgorithms::singlephoton_tagger(
     SpContext ctx{*this, graph, main_cluster, main_vertex, apa, face,
                   showers, map_vertex_to_shower,
                   map_shower_pio_id, map_pio_id_showers, map_pio_id_mass,
-                  dv, nullptr};
+                  dv, geom_helper};
+
+    // doc pr/36 §10.4 (F3 = P2).  The prototype SCE-corrects every position
+    // feeding the shw_sp_* distance features via func_pos_SCE_correction
+    // (NeutrinoID_singlephoton_tagger.h:13 nu vertex, :103 proton track
+    // start, :132 MIP track start, :317 shower start; the :222 block is
+    // commented out there).  max_shw_dis / shw_vtx_dis then derive from the
+    // corrected coordinates (:318-330), so correcting the four inputs also
+    // fixes the distances.  geom_helper is non-null only when the driver's
+    // sp_sce_correction knob is on AND clus_geom_helper is configured; null
+    // (the default) => raw positions, byte-identical legacy.
+    auto sp_corr = [&](const Point& p) -> Point {
+        if (!geom_helper) return p;
+        return geom_helper->get_corrected_point(p, IClusGeomHelper::SCE, apa, face);
+    };
 
     // ------------------------------------------------------------------
     // Aggregate shower statistics
@@ -2273,7 +2334,8 @@ bool PatternAlgorithms::singlephoton_tagger(
             double energy    = length / units::cm * med_dqdx;
             if (energy > 0) {
                 num_protons++;
-                Point trk_vtx = shower->get_start_point();
+                // prototype :101-106: SCE-corrected (sp_corr = identity when off)
+                Point trk_vtx = sp_corr(shower->get_start_point());
                 trk_x.push_back(trk_vtx.x() / units::cm);
                 trk_y.push_back(trk_vtx.y() / units::cm);
                 trk_z.push_back(trk_vtx.z() / units::cm);
@@ -2301,7 +2363,8 @@ bool PatternAlgorithms::singlephoton_tagger(
                 if (std::abs(pdg) == 13)  num_muons++;
                 if (std::abs(pdg) == 211) num_pions++;
             }
-            Point trk_vtx = shower->get_start_point();
+            // prototype :130-135: SCE-corrected (sp_corr = identity when off)
+            Point trk_vtx = sp_corr(shower->get_start_point());
             trk_x.push_back(trk_vtx.x() / units::cm);
             trk_y.push_back(trk_vtx.y() / units::cm);
             trk_z.push_back(trk_vtx.z() / units::cm);
@@ -2451,14 +2514,15 @@ bool PatternAlgorithms::singlephoton_tagger(
             ++num_valid_tracks;
     }
 
-    // Shower start position (raw, no SCE correction)
-    Point shw_vtx_pt = max_shower->get_start_point();
+    // Shower start position (prototype :316-321: SCE-corrected; sp_corr is
+    // the identity when the correction is off => raw, the legacy behavior)
+    Point shw_vtx_pt = sp_corr(max_shower->get_start_point());
     float shw_x = shw_vtx_pt.x() / units::cm;
     float shw_y = shw_vtx_pt.y() / units::cm;
     float shw_z = shw_vtx_pt.z() / units::cm;
 
-    // Neutrino vertex position
-    Point nu_vtx = vtx_fit_pt(main_vertex);
+    // Neutrino vertex position (prototype :10-16: SCE-corrected)
+    Point nu_vtx = sp_corr(vtx_fit_pt(main_vertex));
     float nu_x   = nu_vtx.x() / units::cm;
     float nu_y   = nu_vtx.y() / units::cm;
     float nu_z   = nu_vtx.z() / units::cm;

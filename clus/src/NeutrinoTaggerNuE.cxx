@@ -90,6 +90,64 @@ static Point seg_endpoint_near(SegmentPtr seg, const Point& ref_pt) {
            ? front : back;
 }
 
+// doc pr/36 §10.6 (F5 = P6).  The prototype picks the stem fit endpoint by
+// wcpt INDEX identity with the vertex:
+//     // prototype (NeutrinoID_nue_tagger.h lines 71-75)
+//     if (main_vertex->get_wcpt().index == sg->get_wcpt_vec().front().index)
+//         test_p = sg->get_point_vec().front();
+//     else
+//         test_p = sg->get_point_vec().back();
+// WCPoint::index is not ported (PRCommon.h:99), so the knob-on rule compares
+// wcpt POSITIONS with EXACT equality: both are copies of the same skeleton
+// node, and any tolerance would re-create the proximity rule this replaces
+// (doc pr/36 §10.15b).  Both rules are computed unconditionally; per-call-site
+// disagreement and the neither-endpoint-matches premise check are counted in
+// g_pr36_audit (site = the stable index of the call site, 0-12 in this file).
+static Point seg_endpoint_near_vtx(const PatternAlgorithms& pa, int site,
+                                   SegmentPtr seg, VertexPtr vtx) {
+    const Point legacy = seg_endpoint_near(seg, vtx_fit_pt(vtx));
+    // Null vertex: the legacy path compared against Point{} (vtx_fit_pt's
+    // fallback); the prototype rule has no wcpt to compare.  Keep legacy.
+    if (!vtx) return legacy;
+    auto& audit = PR::g_pr36_audit;
+    audit.f5_calls[site].fetch_add(1, std::memory_order_relaxed);
+    const auto& fits  = seg->fits();
+    const auto& wcpts = seg->wcpts();
+    const bool front_match = !wcpts.empty() && wcpts.front().point == vtx->wcpt().point;
+    const bool back_match  = !wcpts.empty() && wcpts.back().point  == vtx->wcpt().point;
+    if (!front_match && !back_match) {
+        audit.f5_neither[site].fetch_add(1, std::memory_order_relaxed);
+        // Premise classification (doc pr/36 §10.15b): ~zero distances would
+        // mean arithmetic drift broke an identity the prototype's integer
+        // index test would keep (redesign needed); large distances mean the
+        // vertex is genuinely a different skeleton node, where the prototype
+        // rule ALSO picks back -- faithful.
+        SPDLOG_LOGGER_INFO(s_log,
+            "PR36AUDIT f5 site {} neither-match: d_front={:.6g} cm d_back={:.6g} cm",
+            site, ray_length(Ray{vtx->wcpt().point, wcpts.front().point}) / units::cm,
+            ray_length(Ray{vtx->wcpt().point, wcpts.back().point}) / units::cm);
+    }
+    // Prototype rule: front on an exact front match, otherwise back.
+    const Point proto = front_match ? fits.front().point : fits.back().point;
+    if (proto != legacy)
+        audit.f5_disagree[site].fetch_add(1, std::memory_order_relaxed);
+    return pa.m_stem_endpoint_wcpt_parity ? proto : legacy;
+}
+
+// doc pr/36 §10.3 (F2 = P12).  The prototype's get_particle_type() COERCES a
+// shower-flagged segment to PDG 11 on read -- and latches it
+// (ProtoSegment.cxx:10-15: "shower are all treated as electron") -- so a
+// shower-flagged segment with no explicit ParticleInfo is processed as an
+// electron there while the toolkit's has_particle_info() gates skip it.
+// Count such skips per gate (pure diagnostic; gate ids are documented on
+// Pr36AuditCounters::f2_gate_skip).
+static inline void pr36_count_gate_skip(SegmentPtr sg, int gate) {
+    if (sg && !sg->has_particle_info() &&
+        (sg->flags_any(SegmentFlags::kShowerTrajectory) ||
+         sg->flags_any(SegmentFlags::kShowerTopology)))
+        PR::g_pr36_audit.f2_gate_skip[gate].fetch_add(1, std::memory_order_relaxed);
+}
+
 // ---------------------------------------------------------------------------
 // NuEContext: file-local bundle of all shared state for nue_tagger helpers.
 //
@@ -235,7 +293,7 @@ static bool angular_cut(NuEContext& ctx, ShowerPtr shower,
 
     VertexPtr  vertex = shower->get_start_vertex_and_type().first;
     SegmentPtr sg     = shower->start_segment();
-    Point vertex_point = seg_endpoint_near(sg, vtx_fit_pt(vertex));
+    Point vertex_point = seg_endpoint_near_vtx(ctx.self, 0, sg, vertex);
 
     Vector dir_beam(0, 0, 1);
     Vector dir_shower = shower_cal_dir_3vector(*shower, vertex_point, 30*units::cm);
@@ -367,7 +425,7 @@ static bool compare_muon_energy(NuEContext& ctx, ShowerPtr shower,
     Vector dir_drift(1, 0, 0);
     VertexPtr  vertex = shower->get_start_vertex_and_type().first;
     SegmentPtr sg     = shower->start_segment();
-    Point vertex_point = seg_endpoint_near(sg, vtx_fit_pt(vertex));
+    Point vertex_point = seg_endpoint_near_vtx(ctx.self, 1, sg, vertex);
 
     // Shower direction
     Vector dir_shower;
@@ -393,7 +451,10 @@ static bool compare_muon_energy(NuEContext& ctx, ShowerPtr shower,
         auto vd = ctx.main_vertex->get_descriptor();
         for (auto eit : sorted_out_edges(vd, ctx.graph)) {
             SegmentPtr sg1 = ctx.graph[eit].segment;
-            if (!sg1 || !sg1->has_particle_info()) continue;
+            if (!sg1 || !sg1->has_particle_info()) {
+                pr36_count_gate_skip(sg1, 0);  // doc pr/36 F2
+                continue;
+            }
             int pdg = sg1->particle_info()->pdg();
             if (pdg == 13 || pdg == 2212) {
                 double length       = segment_track_length(sg1);
@@ -707,7 +768,7 @@ static bool single_shower(NuEContext& ctx, ShowerPtr shower,
 
     VertexPtr  vertex = shower->get_start_vertex_and_type().first;
     SegmentPtr sg     = shower->start_segment();
-    Point vertex_point = seg_endpoint_near(sg, vtx_fit_pt(vertex));
+    Point vertex_point = seg_endpoint_near_vtx(ctx.self, 2, sg, vertex);
 
     double Eshower = (shower->get_kine_best() != 0)
                      ? shower->get_kine_best()
@@ -849,7 +910,10 @@ static bool multiple_showers(NuEContext& ctx, ShowerPtr max_shower,
     if (mv_it != ctx.map_vertex_to_shower.end()) {
         for (ShowerPtr shower : mv_it->second) {
             SegmentPtr sg = shower->start_segment();
-            if (!sg || !sg->has_particle_info() || sg->particle_info()->pdg() != 11) continue;
+            if (!sg || !sg->has_particle_info() || sg->particle_info()->pdg() != 11) {
+                pr36_count_gate_skip(sg, 1);  // doc pr/36 F2
+                continue;
+            }
             if (shower == max_shower) continue;
             auto [vtx, conn_type] = shower->get_start_vertex_and_type();
             if (conn_type > 1) continue;
@@ -894,7 +958,10 @@ static bool multiple_showers(NuEContext& ctx, ShowerPtr max_shower,
 
     for (ShowerPtr shower : ctx.showers) {
         SegmentPtr sg = shower->start_segment();
-        if (!sg || !sg->has_particle_info() || sg->particle_info()->pdg() != 11) continue;
+        if (!sg || !sg->has_particle_info() || sg->particle_info()->pdg() != 11) {
+            pr36_count_gate_skip(sg, 2);  // doc pr/36 F2
+            continue;
+        }
         if (sg->cluster() == ctx.main_vertex->cluster()) continue;
 
         auto [vtx, conn_type] = shower->get_start_vertex_and_type();
@@ -976,7 +1043,7 @@ static bool other_showers(NuEContext& ctx, ShowerPtr shower,
 
     VertexPtr  vertex = shower->get_start_vertex_and_type().first;
     SegmentPtr sg     = shower->start_segment();
-    Point vertex_point = seg_endpoint_near(sg, vtx_fit_pt(vertex));
+    Point vertex_point = seg_endpoint_near_vtx(ctx.self, 3, sg, vertex);
 
     // ------------------------------------------------------------------
     // Quick survey: off-main-cluster showers for flag_single_shower path.
@@ -986,7 +1053,10 @@ static bool other_showers(NuEContext& ctx, ShowerPtr shower,
 
     for (ShowerPtr shower1 : ctx.showers) {
         SegmentPtr sg1 = shower1->start_segment();
-        if (!sg1 || !sg1->has_particle_info() || sg1->particle_info()->pdg() != 11) continue;
+        if (!sg1 || !sg1->has_particle_info() || sg1->particle_info()->pdg() != 11) {
+            pr36_count_gate_skip(sg1, 3);  // doc pr/36 F2
+            continue;
+        }
         if (sg1->cluster() == ctx.main_vertex->cluster()) continue;
         auto [vtx1, conn1] = shower1->get_start_vertex_and_type();
         double E_shower1 = (shower1->get_kine_best() != 0)
@@ -1011,7 +1081,10 @@ static bool other_showers(NuEContext& ctx, ShowerPtr shower,
 
     for (ShowerPtr shower1 : ctx.showers) {
         SegmentPtr sg1 = shower1->start_segment();
-        if (!sg1 || !sg1->has_particle_info() || sg1->particle_info()->pdg() != 11) continue;
+        if (!sg1 || !sg1->has_particle_info() || sg1->particle_info()->pdg() != 11) {
+            pr36_count_gate_skip(sg1, 4);  // doc pr/36 F2
+            continue;
+        }
         if (shower1 == shower) continue;
 
         auto [vtx1, conn1] = shower1->get_start_vertex_and_type();
@@ -1148,7 +1221,7 @@ static bool vertex_inside_shower(NuEContext& ctx, ShowerPtr shower, TaggerInfo& 
 
     VertexPtr  vertex = shower->get_start_vertex_and_type().first;
     SegmentPtr sg     = shower->start_segment();
-    Point vertex_point = seg_endpoint_near(sg, vtx_fit_pt(vertex));
+    Point vertex_point = seg_endpoint_near_vtx(ctx.self, 4, sg, vertex);
 
     // ------------------------------------------------------------------
     // Block 1: check for segments nearly anti-parallel to the shower.
@@ -1380,7 +1453,7 @@ static bool broken_muon_id(NuEContext& ctx, ShowerPtr shower, TaggerInfo& ti) {
 
     VertexPtr  vertex = shower->get_start_vertex_and_type().first;
     SegmentPtr sg     = shower->start_segment();
-    Point vertex_point = seg_endpoint_near(sg, vtx_fit_pt(vertex));
+    Point vertex_point = seg_endpoint_near_vtx(ctx.self, 5, sg, vertex);
 
     // Pre-fill shower internal segment/vertex sets (replaces get_map_seg_vtxs / get_map_vtx_segs)
     IndexedSegmentSet shower_segs;
@@ -1514,12 +1587,31 @@ static bool broken_muon_id(NuEContext& ctx, ShowerPtr shower, TaggerInfo& ti) {
     double acc_length        = 0;
     double acc_direct_length = 0;
     std::set<Facade::Cluster*> tmp_clusters;
+    // doc pr/36 §10.7 (F6 = P8): the prototype counts distinct cluster IDS
+    // (std::set<int>, NeutrinoID_nue_tagger.h ~:1183) where the toolkit
+    // counts distinct pointers.  Both sets are filled; the knob picks which
+    // size feeds the multi-cluster test below.  Disagreement (= cluster<->id
+    // non-injectivity, doc 53) is counted regardless.
+    std::set<int> tmp_cluster_ids;
 
-    for (SegmentPtr mseg : muon_segments) {
+    // doc pr/36 §10.5 (F4 = P3): float sums in pointer-address order.  The
+    // prototype does the same (std::set<ProtoSegment*>,
+    // NeutrinoID_nue_tagger.h:1036 iterated :1139) -- hazard reproduced, not
+    // introduced; ordering by graph index is the M4 house-rule fix and moves
+    // FURTHER from the prototype's order.  Knob-off iterates the set as
+    // before, byte-identical.
+    std::vector<SegmentPtr> muon_seg_iter(muon_segments.begin(), muon_segments.end());
+    if (ctx.self.m_tagger_ordered_segment_sets)
+        std::sort(muon_seg_iter.begin(), muon_seg_iter.end(), SegmentIndexCmp{});
+    for (SegmentPtr mseg : muon_seg_iter) {
         acc_length        += segment_track_length(mseg);
         acc_direct_length += segment_track_direct_length(mseg);
         tmp_clusters.insert(mseg->cluster());
+        // Null cluster keeps the legacy behavior of a distinct set entry.
+        tmp_cluster_ids.insert(mseg->cluster() ? mseg->cluster()->get_cluster_id() : -1);
     }
+    if (tmp_cluster_ids.size() != tmp_clusters.size())
+        PR::g_pr36_audit.f6_id_vs_ptr_disagree.fetch_add(1, std::memory_order_relaxed);
 
     auto muon_range_fn = ctx.particle_data->get_range_function("muon");
     double Ep = muon_range_fn->scalar_function(acc_length / units::cm) * units::MeV;
@@ -1563,7 +1655,9 @@ static bool broken_muon_id(NuEContext& ctx, ShowerPtr shower, TaggerInfo& ti) {
         (Ep > Eshower * 0.55 ||
          acc_length > 0.65 * shower->get_total_length() ||
          connected_length > 0.95 * shower->get_total_length()) &&
-        tmp_clusters.size() > 1 &&
+        // doc pr/36 §10.7 (F6): id count (prototype) vs pointer count (legacy).
+        (ctx.self.m_broken_muon_cluster_id_count
+             ? tmp_cluster_ids.size() : tmp_clusters.size()) > 1 &&
         acc_direct_length > 0.94 * acc_length &&
         Eshower < 350*units::MeV) {
         // 7004_989_49482: cut only if shower is simple and muon dominates
@@ -1690,8 +1784,10 @@ static bool mip_quality(NuEContext& ctx,
         if (mv_it != ctx.map_vertex_to_shower.end()) {
             for (ShowerPtr shower1 : mv_it->second) {
                 SegmentPtr sg1 = shower1->start_segment();
-                if (!sg1 || !sg1->has_particle_info() || sg1->particle_info()->pdg() != 11)
+                if (!sg1 || !sg1->has_particle_info() || sg1->particle_info()->pdg() != 11) {
+                    pr36_count_gate_skip(sg1, 5);  // doc pr/36 F2
                     continue;
+                }
                 // Check if sg1 is connected at main_vertex
                 bool at_main = false;
                 if (ctx.main_vertex && ctx.main_vertex->descriptor_valid()) {
@@ -1727,7 +1823,14 @@ static bool mip_quality(NuEContext& ctx,
         Point v_pt = vtx_fit_pt(vertex);
         Vector dir1 = shower_cal_dir_3vector(*shower, v_pt, 6*units::cm);
 
-        for (ShowerPtr shower1 : connected_showers) {
+        // doc pr/36 §10.5 (F4 = P5): first-wins booleans and shortest-length
+        // tie-breaks over a std::set<ShowerPtr> iterate in pointer-address
+        // order; the prototype's std::set<WCShower*> does the same (hazard
+        // reproduced).  Knob-on iterates in shower-id order (M4 house rule).
+        std::vector<ShowerPtr> conn_shower_iter(connected_showers.begin(), connected_showers.end());
+        if (ctx.self.m_tagger_ordered_segment_sets)
+            std::sort(conn_shower_iter.begin(), conn_shower_iter.end(), ShowerIndexCmp{});
+        for (ShowerPtr shower1 : conn_shower_iter) {
             if (shower1 == shower) continue;
             SegmentPtr sg1  = shower1->start_segment();
             double norm_dQ  = segment_median_dQ_dx(sg1) / ctx.self.m_mip_dqdx_median;
@@ -1864,8 +1967,10 @@ static bool high_energy_overlapping(NuEContext& ctx, ShowerPtr shower, TaggerInf
             for (ShowerPtr shower1 : mv_it->second) {
                 if (shower1 == shower) continue;
                 SegmentPtr sg1 = shower1->start_segment();
-                if (!sg1 || !sg1->has_particle_info() || sg1->particle_info()->pdg() != 11)
+                if (!sg1 || !sg1->has_particle_info() || sg1->particle_info()->pdg() != 11) {
+                    pr36_count_gate_skip(sg1, 6);  // doc pr/36 F2
                     continue;
+                }
                 auto [vtx1, conn1] = shower1->get_start_vertex_and_type();
                 double E1 = (shower1->get_kine_best() != 0)
                             ? shower1->get_kine_best() : shower1->get_kine_charge();
@@ -1995,7 +2100,7 @@ static bool low_energy_overlapping(NuEContext& ctx, ShowerPtr shower, TaggerInfo
 
     VertexPtr  vtx      = shower->get_start_vertex_and_type().first;
     SegmentPtr sg       = shower->start_segment();
-    Point vtx_point = seg_endpoint_near(sg, vtx_fit_pt(vtx));
+    Point vtx_point = seg_endpoint_near_vtx(ctx.self, 6, sg, vtx);
 
     // Pre-fill shower internal sets
     IndexedSegmentSet shower_segs;
@@ -2554,7 +2659,7 @@ static bool single_shower_pio_tagger(NuEContext& ctx, ShowerPtr shower,
 
     VertexPtr  vtx = shower->get_start_vertex_and_type().first;
     SegmentPtr sg  = shower->start_segment();
-    Point vertex_point = seg_endpoint_near(sg, vtx_fit_pt(vtx));
+    Point vertex_point = seg_endpoint_near_vtx(ctx.self, 7, sg, vtx);
 
     Vector shower_dir = shower_cal_dir_3vector(*shower, vertex_point, 15*units::cm);
     double shower_angle = shower_dir.angle(dir_beam) / M_PI * 180.0;
@@ -2566,8 +2671,10 @@ static bool single_shower_pio_tagger(NuEContext& ctx, ShowerPtr shower,
     if (mv_it != ctx.map_vertex_to_shower.end()) {
         for (ShowerPtr shower1 : mv_it->second) {
             SegmentPtr sg1 = shower1->start_segment();
-            if (!sg1 || !sg1->has_particle_info() || sg1->particle_info()->pdg() != 11)
+            if (!sg1 || !sg1->has_particle_info() || sg1->particle_info()->pdg() != 11) {
+                pr36_count_gate_skip(sg1, 7);  // doc pr/36 F2
                 continue;
+            }
             if (shower1 == shower) continue;
             if (shower1->get_start_vertex_and_type().second > 2) continue;
 
@@ -2978,7 +3085,7 @@ static bool bad_reconstruction_3(NuEContext& ctx,
     // ------------------------------------------------------------------
     {
         SegmentPtr sg = shower->start_segment();
-        Point vp = seg_endpoint_near(sg, vtx_fit_pt(vertex));
+        Point vp = seg_endpoint_near_vtx(ctx.self, 8, sg, vertex);
 
         Vector dir_sg = segment_cal_dir_3vector(sg, vp, 15*units::cm);
         Vector dir;
@@ -3185,7 +3292,7 @@ static bool bad_reconstruction_2(NuEContext& ctx,
     // ------------------------------------------------------------------
     // br3_3/br3_4: backward segments in main cluster
     // ------------------------------------------------------------------
-    Point vertex_point = seg_endpoint_near(sg, vtx_fit_pt(vertex));
+    Point vertex_point = seg_endpoint_near_vtx(ctx.self, 9, sg, vertex);
     Point other_point  = (ray_length(Ray{vtx_fit_pt(vertex), sg_fits.front().point}) <=
                           ray_length(Ray{vtx_fit_pt(vertex), sg_fits.back().point}))
                          ? sg_fits.back().point : sg_fits.front().point;
@@ -3410,7 +3517,7 @@ static bool track_overclustering(NuEContext& ctx, ShowerPtr shower, TaggerInfo& 
 
     VertexPtr  vertex = shower->get_start_vertex_and_type().first;
     SegmentPtr sg     = shower->start_segment();
-    Point vertex_point = seg_endpoint_near(sg, vtx_fit_pt(vertex));
+    Point vertex_point = seg_endpoint_near_vtx(ctx.self, 10, sg, vertex);
 
     // Pre-fill shower internal sets
     IndexedSegmentSet shower_segs;
@@ -3517,7 +3624,16 @@ static bool track_overclustering(NuEContext& ctx, ShowerPtr shower, TaggerInfo& 
     }
 
     double stem_length_1 = 0;
-    for (SegmentPtr s : muon_segs) stem_length_1 += segment_track_length(s);
+    // doc pr/36 §10.5 (F4): address-ordered float sum; prototype identical
+    // (std::set<ProtoSegment*>).  Knob-on sums in graph-index order.  The
+    // tro_3 sum over the same (grown) set below gets the same treatment --
+    // a fourth live site the audit's §6 census missed.
+    {
+        std::vector<SegmentPtr> iter(muon_segs.begin(), muon_segs.end());
+        if (ctx.self.m_tagger_ordered_segment_sets)
+            std::sort(iter.begin(), iter.end(), SegmentIndexCmp{});
+        for (SegmentPtr s : iter) stem_length_1 += segment_track_length(s);
+    }
 
     // Shower direction for use in tro_2 cross-product check
     Vector dir_shower;
@@ -3659,7 +3775,13 @@ static bool track_overclustering(NuEContext& ctx, ShowerPtr shower, TaggerInfo& 
     }
 
     double stem_length_3 = 0;
-    for (SegmentPtr s : muon_segs) stem_length_3 += segment_track_length(s);
+    // doc pr/36 §10.5 (F4): see stem_length_1 above.
+    {
+        std::vector<SegmentPtr> iter(muon_segs.begin(), muon_segs.end());
+        if (ctx.self.m_tagger_ordered_segment_sets)
+            std::sort(iter.begin(), iter.end(), SegmentIndexCmp{});
+        for (SegmentPtr s : iter) stem_length_3 += segment_track_length(s);
+    }
     if (stem_length_3 > 120*units::cm) flag_bad3 = true;
 
     ti.tro_3_stem_length = stem_length_3 / units::cm;
@@ -3831,7 +3953,7 @@ static int mip_identification(NuEContext& ctx,
     double Eshower = (shower->get_kine_best() != 0)
                      ? shower->get_kine_best() : shower->get_kine_charge();
 
-    Point vertex_point = seg_endpoint_near(sg, vtx_fit_pt(vertex));
+    Point vertex_point = seg_endpoint_near_vtx(ctx.self, 11, sg, vertex);
 
     // Shower direction (same logic as single_shower / bad_reconstruction_1)
     Vector dir_shower;
@@ -4086,7 +4208,10 @@ static int mip_identification(NuEContext& ctx,
     for (ShowerPtr shower1 : ctx.showers) {
         if (shower1 == shower) continue;
         SegmentPtr sg1 = shower1->start_segment();
-        if (!sg1 || !sg1->has_particle_info() || sg1->particle_info()->pdg() != 11) continue;
+        if (!sg1 || !sg1->has_particle_info() || sg1->particle_info()->pdg() != 11) {
+            pr36_count_gate_skip(sg1, 8);  // doc pr/36 F2
+            continue;
+        }
         auto [vtx1, conn1] = shower1->get_start_vertex_and_type();
         double E1 = (shower1->get_kine_best() != 0)
                     ? shower1->get_kine_best() : shower1->get_kine_charge();
@@ -4271,7 +4396,10 @@ bool PatternAlgorithms::nue_tagger(
     if (mv_it != map_vertex_to_shower.end()) {
         for (ShowerPtr shower : mv_it->second) {
             SegmentPtr sg = shower->start_segment();
-            if (!sg || !sg->has_particle_info() || sg->particle_info()->pdg() != 11) continue;
+            if (!sg || !sg->has_particle_info() || sg->particle_info()->pdg() != 11) {
+                pr36_count_gate_skip(sg, 9);  // doc pr/36 F2
+                continue;
+            }
 
             double tmp_energy = (shower->get_kine_best() != 0)
                                 ? shower->get_kine_best() : shower->get_kine_charge();
@@ -4313,7 +4441,7 @@ bool PatternAlgorithms::nue_tagger(
     flag_nue = true;
 
     SegmentPtr sg = max_shower->start_segment();
-    Point test_p  = seg_endpoint_near(sg, vtx_fit_pt(main_vertex));
+    Point test_p  = seg_endpoint_near_vtx(*this, 12, sg, main_vertex);
     Vector dir_beam(0, 0, 1);
     Vector dir    = shower_cal_dir_3vector(*max_shower, test_p, 15*units::cm);
     double angle_beam = dir.angle(dir_beam) / M_PI * 180.0;
@@ -4409,6 +4537,12 @@ bool PatternAlgorithms::nue_tagger(
 
     // track_overclustering
     if (track_overclustering(ctx, max_shower, ti)) flag_nue = false;
+
+    // doc pr/36 §10.8 (F7 = P4).  prototype (NeutrinoID_nue_tagger.h lines
+    // 257-260): if (flag_nue){ neutrino_type |= 1UL << 5; }.  The
+    // singlephoton counterpart (NeutrinoID_singlephoton_tagger.h:536-539) is
+    // commented out in the prototype and is deliberately NOT reproduced.
+    if (m_neutrino_type_bitmask && flag_nue) ti.neutrino_type |= 1 << 5;
 
     return flag_nue;
 }

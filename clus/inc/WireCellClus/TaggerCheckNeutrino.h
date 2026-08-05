@@ -18,7 +18,7 @@ using namespace WireCell;
 using namespace WireCell::Clus;
 using namespace WireCell::Clus::Facade;
 
-class TaggerCheckNeutrino : public Aux::Logger, public IConfigurable, public Clus::IEnsembleVisitor, private Clus::NeedDV, private Clus::NeedPCTS, private Clus::NeedRecombModel, private Clus::NeedParticleData, private Clus::NeedClusGeomHelper {
+class TaggerCheckNeutrino : public Aux::Logger, public IConfigurable, public Clus::IEnsembleVisitor, private Clus::NeedDV, private Clus::NeedPCTS, private Clus::NeedRecombModel, private Clus::NeedParticleData, private Clus::NeedClusGeomHelper, private Clus::NeedFiducial {
 public:
     TaggerCheckNeutrino() : Aux::Logger("TaggerCheckNeutrino", "clus") {
         // Initialize with default preset
@@ -225,6 +225,30 @@ public:
                                                   // the verdict alone.  Own tuning, deliberately
                                                   // NOT inheriting nu_skip_cosmic_bundle_min_length
                                                   // -- a different question.
+        // ---- doc sbnd_xin/docs/pr/36 §10 tagger-stage knobs -----------------
+        // F1 (= P1): fiducial volume for the match_isFC (cluster_fc_check)
+        // recompute.  Unset by default => the historical FiducialUtils /
+        // sensitive-volume-union fallback, i.e. an absent "fiducial" key is
+        // byte-identical to the pre-knob code.  Same knob, semantics and
+        // rationale as TaggerCheckSTM's (TaggerCheckSTM.cxx:69-116): the
+        // fallback volume is NOT the one TaggerCheckTGM/FC/STM use, and
+        // match_isFC is numu XGBoost input 70 -- a binary feature, so a
+        // containment disagreement moves it full-range.
+        bool m_use_fiducial{false};
+        std::vector<double> m_fv_tolerance;
+        // F3 (= P2): gate for the single-photon SCE correction.  A SEPARATE
+        // bool from clus_geom_helper on purpose: the key is shared with
+        // fill_kine_tree, and reusing it alone would silently couple the two
+        // consumers the day someone configures the helper for kine (doc
+        // pr/36 §10.4).  Owner decision 2026-08-04: ships OFF on SBND (no
+        // SBND SCE helper exists), so this is plumbing, not behavior.
+        bool m_sp_sce_correction{false};
+        // F4/F5/F6/F7: threaded to PatternAlgorithms; see
+        // NeutrinoPatternBase.h for the full rationale of each.
+        bool m_tagger_ordered_segment_sets{false};
+        bool m_stem_endpoint_wcpt_parity{false};
+        bool m_broken_muon_cluster_id_count{false};
+        bool m_neutrino_type_bitmask{false};
         mutable std::shared_ptr<TrackFitting> m_track_fitter;
 
         void load_trackfitting_config(const std::string& config_file);

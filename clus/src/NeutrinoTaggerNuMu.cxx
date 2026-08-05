@@ -373,10 +373,16 @@ std::pair<bool, double> PatternAlgorithms::numu_tagger(
     // -----------------------------------------------------------------------
     // Final numu CC decision.
     // Prototype: NeutrinoID_numu_tagger.h lines 240-260.
-    // neutrino_type bit-setting is omitted; caller uses the returned bool.
     // -----------------------------------------------------------------------
     flag_numu_cc = flag_numu_cc_1_save || flag_numu_cc_2_save || flag_numu_cc_3;
     ti.numu_cc_flag = static_cast<float>(flag_numu_cc);
+    // doc pr/36 §10.8 (F7 = P4).  prototype (NeutrinoID_numu_tagger.h lines
+    // 251-255): numu bit when CC, nc bit otherwise -- unconditional at the
+    // end of numu_tagger, so set whenever this tagger runs.
+    if (m_neutrino_type_bitmask) {
+        if (flag_numu_cc) ti.neutrino_type |= 1 << 2;  // numu
+        else              ti.neutrino_type |= 1 << 3;  // nc
+    }
 
     if ((max_muon_length > 100*units::cm || max_length_all > 120*units::cm) && flag_numu_cc)
         flag_long_muon = true;

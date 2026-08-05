@@ -37,6 +37,13 @@ namespace WireCell {
             Log::logptr_t log;
             std::string m_output_filename{"tracking_proj.root"};
             std::string m_grouping_name{"live"};
+            // doc sbnd_xin/docs/pr/36 §10.8 (F7 = P4): book the neutrino_type
+            // verdict-bitmask branch (prototype
+            // wire-cell-prod-nue-port.cxx:1486, neutrino_type/I).  Same
+            // config key as TaggerCheckNeutrino's computing knob.  C++
+            // default false => branch not booked => the T_tagger schema is
+            // byte-identical to the pre-knob tree.
+            bool m_neutrino_type_bitmask{false};
         };
 
     }  // namespace Root
