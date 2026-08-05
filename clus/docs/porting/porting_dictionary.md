@@ -219,7 +219,8 @@ The final portion of porting covers the transformation from clusters of blobs an
 | `get_point_vec()` | `seg->fits()` | |
 | `set_fit_associate_vec(pts, skip, idx)` | `seg->set_fit_associate_vec(fits, dv, cloud_name)` | Now takes by value + `IDetectorVolumes` |
 | `get_closest_wcpt(point)` | `segment_get_closest_point(seg, point, cloud_name)` | In `PRSegmentFunctions.cxx` |
-| `get_flag_shower()` | `seg->flags_any(SegmentFlags::kShowerTrajectory \| kShowerTopology)` | Split into two flags |
+| `get_flag_shower()` | `seg->flags_any(SegmentFlags::kShowerTrajectory \| kShowerTopology) \|\| std::abs(pdg) == 11` | **THREE disjuncts, not two.** `ProtoSegment.cxx:1305` is `flag_shower_trajectory \|\| flag_shower_topology \|\| get_flag_shower_dQdx()`, and `get_flag_shower_dQdx()` (`:1309`) is *only* `fabs(particle_type)==11` — despite the name it tests nothing about dQ/dx. An earlier revision of this row omitted the third term, and doc pr/33 P6 traces two live toolkit sites to that omission |
+| `get_flag_shower_dQdx()` | `std::abs(seg->particle_info()->pdg()) == 11` | Name is misleading in the prototype too; carries no dQ/dx test |
 | `get_direct_length()` | `segment_track_direct_length(seg)` | In `PRSegmentFunctions.cxx` |
 | `get_length()` | `segment_track_length(seg)` | |
 | `search_kink(start, cloud, threshold)` | `segment_search_kink(seg, start, cloud, threshold)` | |
