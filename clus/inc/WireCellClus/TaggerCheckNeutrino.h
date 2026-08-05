@@ -249,6 +249,17 @@ public:
         bool m_stem_endpoint_wcpt_parity{false};
         bool m_broken_muon_cluster_id_count{false};
         bool m_neutrino_type_bitmask{false};
+        // doc pr/33 §10 EM-shower-clustering knobs (F1a/F1b, F2a/F2b/F2c,
+        // F3, F4, F5): threaded to PatternAlgorithms; see
+        // NeutrinoPatternBase.h for the full rationale of each.
+        bool m_daughter_count_proto_main_vertex{false};
+        bool m_daughter_count_proto_examine_showers{false};
+        bool m_shower_pdg_from_start_segment{false};
+        bool m_shower_pdg_from_shower_type{false};
+        bool m_shower_pdg_exact_muon_test{false};
+        bool m_pi0_id_shared_allocator{false};
+        bool m_shower_flag_pdg_electron{false};
+        bool m_shower_less_id_tiebreak{false};
         mutable std::shared_ptr<TrackFitting> m_track_fitter;
 
         void load_trackfitting_config(const std::string& config_file);

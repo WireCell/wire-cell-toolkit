@@ -1135,6 +1135,31 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               // branch (threaded to BOTH tagger_check_neutrino and
               // tagger_output).  C++ default false.
               neutrino_type_bitmask=false,
+              // ---- doc sbnd_xin/docs/pr/33 §10 EM-shower-clustering knobs.
+              // All C++ default false = keys omitted = byte-identical
+              // pre-knob config.
+              // F1 (= P1): prototype calculate_num_daughter_tracks callee at
+              // the main-vertex proton-skip site / the examine_showers
+              // daughter_length site.
+              daughter_count_proto_main_vertex=false,
+              daughter_count_proto_examine_showers=false,
+              // F2 (= P2): read the PDG off the object the prototype reads
+              // (4 sites start-segment; 1 inverted site shower-type; 2 sites
+              // exact ==13 muon test).  Parity at the :170 site needs
+              // from_start_segment AND exact_muon_test together.
+              shower_pdg_from_start_segment=false,
+              shower_pdg_from_shower_type=false,
+              shower_pdg_exact_muon_test=false,
+              // F3 (= P3): shared pi0-id allocation stream across the two
+              // pi0 finders (prevents pio_id collision in the nue tagger
+              // pi0 block and the Bee mc.json grouping).
+              pi0_id_shared_allocator=false,
+              // F4 (= P6): is_shower gains the prototype's abs(pdg)==11
+              // disjunct at the cluster-center-point site.
+              shower_flag_pdg_electron=false,
+              // F5 (= P12): shower_less same-index tie-break by stable
+              // shower id (house-rule determinism fix, prototype n/a).
+              shower_less_id_tiebreak=false,
               // muon_dqdx_curve [c0, c1, pivot_cm, power]: the muon
               // median-dQ/dx-vs-length envelope used by nine tagger cuts, as a
               // multiple of mip_dqdx_median.  DEFAULT = the SBND fit
@@ -1626,6 +1651,14 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
             stem_endpoint_wcpt_parity=stem_endpoint_wcpt_parity,
             broken_muon_cluster_id_count=broken_muon_cluster_id_count,
             neutrino_type_bitmask=neutrino_type_bitmask,
+            daughter_count_proto_main_vertex=daughter_count_proto_main_vertex,
+            daughter_count_proto_examine_showers=daughter_count_proto_examine_showers,
+            shower_pdg_from_start_segment=shower_pdg_from_start_segment,
+            shower_pdg_from_shower_type=shower_pdg_from_shower_type,
+            shower_pdg_exact_muon_test=shower_pdg_exact_muon_test,
+            pi0_id_shared_allocator=pi0_id_shared_allocator,
+            shower_flag_pdg_electron=shower_flag_pdg_electron,
+            shower_less_id_tiebreak=shower_less_id_tiebreak,
             muon_dqdx_curve=muon_dqdx_curve,
             sp_dedx_use_recomb_model=sp_dedx_use_recomb_model,
             sp_mean_dedx_cut=sp_mean_dedx_cut,
@@ -2185,6 +2218,17 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
        stem_endpoint_wcpt_parity=false,
        broken_muon_cluster_id_count=false,
        neutrino_type_bitmask=false,
+       // doc pr/33 sec 10 EM-shower-clustering knobs -- see the clus_pr arg
+       // comments.  All false = keys omitted = byte-identical pre-knob
+       // config.
+       daughter_count_proto_main_vertex=false,
+       daughter_count_proto_examine_showers=false,
+       shower_pdg_from_start_segment=false,
+       shower_pdg_from_shower_type=false,
+       shower_pdg_exact_muon_test=false,
+       pi0_id_shared_allocator=false,
+       shower_flag_pdg_electron=false,
+       shower_less_id_tiebreak=false,
        // Muon dQ/dx-vs-length envelope: DEFAULT = the docs/pr/10 SBND fit
        // (see the clus_pr arg comment; null restores the uBooNE refit).
        // Recombination-model selection + single-photon dE/dx routing:
@@ -2314,6 +2358,14 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 stem_endpoint_wcpt_parity=stem_endpoint_wcpt_parity,
                 broken_muon_cluster_id_count=broken_muon_cluster_id_count,
                 neutrino_type_bitmask=neutrino_type_bitmask,
+                daughter_count_proto_main_vertex=daughter_count_proto_main_vertex,
+                daughter_count_proto_examine_showers=daughter_count_proto_examine_showers,
+                shower_pdg_from_start_segment=shower_pdg_from_start_segment,
+                shower_pdg_from_shower_type=shower_pdg_from_shower_type,
+                shower_pdg_exact_muon_test=shower_pdg_exact_muon_test,
+                pi0_id_shared_allocator=pi0_id_shared_allocator,
+                shower_flag_pdg_electron=shower_flag_pdg_electron,
+                shower_less_id_tiebreak=shower_less_id_tiebreak,
                 muon_dqdx_curve=muon_dqdx_curve,
                 use_power_recomb=use_power_recomb,
                 sp_dedx_use_recomb_model=sp_dedx_use_recomb_model,

@@ -11,6 +11,8 @@ namespace WireCell::Clus::PR {
     GraphEndpointPolicy g_graph_endpoint_policy;
     // doc pr/36 §10 tagger-stage instrumentation (see PRGraph.h).
     Pr36AuditCounters   g_pr36_audit;
+    // doc pr/33 §10 EM-shower-clustering instrumentation (see PRGraph.h).
+    Pr33AuditCounters   g_pr33_audit;
 
     // Determinism-debug (WCT_DET_DEBUG=2): log every segment creation with
     // its stable index and a mini backtrace so creation-order divergence

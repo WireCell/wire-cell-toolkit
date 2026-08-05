@@ -167,7 +167,23 @@ void PatternAlgorithms::shower_clustering_with_nv_in_main_cluster(Graph& graph, 
     IndexedSegmentSet tmp_segments;
     IndexedVertexSet  tmp_vertices;
     for (auto shower : showers) {
-        if (std::abs(shower->get_particle_type()) != 13) continue;
+        // doc pr/33 F2: the prototype reads the START SEGMENT's PDG with an
+        // EXACT muon test here (NeutrinoID_shower_clustering.h:1716,
+        // get_start_segment()->get_particle_type()!=13); the port reads the
+        // shower's cached type through std::abs.  Both readings feed the
+        // audit counter; prototype parity needs BOTH knobs on (either alone
+        // is neither tree's behavior).
+        {
+            const int type_shower = shower->get_particle_type();
+            int type_startseg = 0;
+            if (shower->start_segment() && shower->start_segment()->has_particle_info() && shower->start_segment()->particle_info()) {
+                type_startseg = shower->start_segment()->particle_info()->pdg();
+            }
+            g_pr33_audit.f2_calls[0]++;
+            if ((std::abs(type_shower) != 13) != (type_startseg != 13)) g_pr33_audit.f2_disagree[0]++;
+            const int type_used = m_shower_pdg_from_start_segment ? type_startseg : type_shower;
+            if (m_shower_pdg_exact_muon_test ? (type_used != 13) : (std::abs(type_used) != 13)) continue;
+        }
         if (!shower->start_segment()) continue;
 
         double n_muons = 0, length_muons = 0;
@@ -285,8 +301,17 @@ void PatternAlgorithms::shower_clustering_connecting_to_main_vertex(Graph& graph
             // Skip segments already claimed by a shower before the expensive BFS traversal.
             if (map_segment_in_shower.find(sg) != map_segment_in_shower.end()) continue;
 
-            // Calculate total number of daughter segments for this segment
-            auto pair_result = calculate_num_daughter_showers(graph, main_vertex, sg);
+            // Calculate total number of daughter segments for this segment.
+            // doc pr/33 F1: the prototype calls calculate_num_daughter_tracks
+            // here (NeutrinoID_shower_clustering.h:140, flag=true => count
+            // everything with length > 0); the port calls _showers
+            // (shower-flagged only).  Both computed unconditionally so the
+            // audit counter bounds the reach of the restored callee.
+            auto pair_result_legacy = calculate_num_daughter_showers(graph, main_vertex, sg);
+            auto pair_result_proto  = calculate_num_daughter_tracks(graph, main_vertex, sg, true, 0);
+            g_pr33_audit.f1_mv_calls++;
+            if (pair_result_legacy.first != pair_result_proto.first) g_pr33_audit.f1_mv_differ++;
+            auto pair_result = m_daughter_count_proto_main_vertex ? pair_result_proto : pair_result_legacy;
 
             // Get segment properties
             double medium_dQ_dx = segment_median_dQ_dx(sg);
@@ -296,6 +321,18 @@ void PatternAlgorithms::shower_clustering_connecting_to_main_vertex(Graph& graph
             int particle_type = 0;
             if (sg->has_particle_info() && sg->particle_info()) {
                 particle_type = sg->particle_info()->pdg();
+            }
+
+            // F1 audit: would the skip verdict below change with the other
+            // callee's count?
+            {
+                auto skip_with = [&](int nd) {
+                    return (particle_type == 11) ||
+                           (particle_type == 2212 && ((medium_dQ_dx_1 > 1.45 && nd <= 3) || medium_dQ_dx_1 > 2.7)) ||
+                           (particle_type == 211 && medium_dQ_dx_1 > 2.0);
+                };
+                if (skip_with(pair_result_legacy.first) != skip_with(pair_result_proto.first))
+                    g_pr33_audit.f1_mv_gate_flip++;
             }
 
             // Skip segments with certain particle types and high dQ/dx
@@ -517,12 +554,22 @@ void PatternAlgorithms::shower_clustering_with_nv_from_main_cluster(Graph& graph
         
         ShowerPtr shower = map_segment_in_shower[seg];
         
-        // Skip long muons
+        // Skip long muons.  doc pr/33 F2 (the inverted site): the prototype
+        // reads the SHOWER's cached type here
+        // (NeutrinoID_shower_clustering.h:1800,
+        // fabs(shower->get_particle_type())==13); the port reads the start
+        // segment's PDG.  Both readings feed the audit counter.
         int particle_type = 0;
         if (shower->start_segment() && shower->start_segment()->has_particle_info() && shower->start_segment()->particle_info()) {
             particle_type = shower->start_segment()->particle_info()->pdg();
         }
-        if (std::abs(particle_type) == 13) continue;
+        {
+            const bool skip_legacy = std::abs(particle_type) == 13;
+            const bool skip_proto  = std::abs(shower->get_particle_type()) == 13;
+            g_pr33_audit.f2_calls[1]++;
+            if (skip_legacy != skip_proto) g_pr33_audit.f2_disagree[1]++;
+            if (m_shower_pdg_from_shower_type ? skip_proto : skip_legacy) continue;
+        }
         
         double total_length = shower->get_total_length();
         
@@ -799,8 +846,17 @@ void PatternAlgorithms::shower_clustering_with_nv_from_vertices(Graph& graph, Ve
             if (seg->has_particle_info() && seg->particle_info()) {
                 particle_type = seg->particle_info()->pdg();
             }
-            
-            if (is_shower || particle_type == 0 || 
+            // doc pr/33 F4: the prototype's get_flag_shower() carries a third
+            // disjunct this mirror dropped (ProtoSegment.cxx:1305-1312,
+            // fabs(particle_type)==11).  It feeds the acc_length read below
+            // AND the acc_length1 read (a pdg -11 segment lands in
+            // acc_length1 without it), i.e. one gate at the center-point cut.
+            if (!is_shower && std::abs(particle_type) == 11) {
+                g_pr33_audit.f4_flip++;
+                if (m_shower_flag_pdg_electron) is_shower = true;
+            }
+
+            if (is_shower || particle_type == 0 ||
                 ((std::abs(particle_type) == 13 || std::abs(particle_type) == 211) && seg_dir_weak(seg))) {
                 double length = segment_track_length(seg);
                 acc_length += length;
@@ -1244,7 +1300,20 @@ void PatternAlgorithms::examine_merge_showers(IndexedShowerSet& showers, VertexP
     std::vector<ShowerPtr> type1_showers, type2_showers;
     std::unordered_map<Shower*, WireCell::Vector> type2_dirs;
     for (auto& shower : sorted_showers) {
-        if (shower->get_particle_type() == 13) continue;
+        // doc pr/33 F2: the prototype reads the start segment's PDG here
+        // (NeutrinoID_shower_clustering.h:387/:394, exact ==13); the port
+        // reads the shower's cached type.  Both feed the audit counter.
+        {
+            int type_startseg = 0;
+            if (shower->start_segment() && shower->start_segment()->has_particle_info() && shower->start_segment()->particle_info()) {
+                type_startseg = shower->start_segment()->particle_info()->pdg();
+            }
+            const bool skip_legacy = shower->get_particle_type() == 13;
+            const bool skip_proto  = type_startseg == 13;
+            g_pr33_audit.f2_calls[2]++;
+            if (skip_legacy != skip_proto) g_pr33_audit.f2_disagree[2]++;
+            if (m_shower_pdg_from_start_segment ? skip_proto : skip_legacy) continue;
+        }
         auto [sv, stype] = shower->get_start_vertex_and_type();
         if (stype == 1) {
             type1_showers.push_back(shower);
@@ -2190,7 +2259,16 @@ void PatternAlgorithms::examine_showers(Graph& graph, VertexPtr main_vertex, Ind
     if (map_vertex_segments.count(main_vertex)) {
         for (auto sg : map_vertex_segments[main_vertex]) {
             if (map_segment_in_shower.count(sg)) {
-                if (!sg->has_particle_info() || std::abs(sg->particle_info()->pdg()) != 13) continue;
+                // doc pr/33 F2: the prototype's muon test is EXACT here
+                // (NeutrinoID_em_shower.h:10, get_particle_type()!=13), so a
+                // pdg -13 segment is skipped there and processed by the abs()
+                // port.  The !has_particle_info() term is NOT a divergence
+                // (no info => type 0 => continue in both trees).
+                const bool skip_legacy = !sg->has_particle_info() || std::abs(sg->particle_info()->pdg()) != 13;
+                const bool skip_proto  = !sg->has_particle_info() || sg->particle_info()->pdg() != 13;
+                g_pr33_audit.f2_calls[3]++;
+                if (skip_legacy != skip_proto) g_pr33_audit.f2_disagree[3]++;
+                if (m_shower_pdg_exact_muon_test ? skip_proto : skip_legacy) continue;
             }
 
             double sg_length = segment_track_length(sg);
@@ -2202,8 +2280,16 @@ void PatternAlgorithms::examine_showers(Graph& graph, VertexPtr main_vertex, Ind
             VertexPtr vtx  = (v1 == main_vertex) ? v2 : v1;
             if (!vtx) continue;
 
-            auto daughter_result = calculate_num_daughter_showers(graph, main_vertex, sg, false);
-            double daughter_length = daughter_result.second;
+            // doc pr/33 F1: the prototype calls calculate_num_daughter_tracks
+            // here (NeutrinoID_em_shower.h:17, flag=false => track-only
+            // lengths, length > 0); the port's _showers(...,false) sums every
+            // daughter segment.  Both computed unconditionally for the counter.
+            auto daughter_legacy = calculate_num_daughter_showers(graph, main_vertex, sg, false);
+            auto daughter_proto  = calculate_num_daughter_tracks(graph, main_vertex, sg, false, 0);
+            g_pr33_audit.f1_ex_calls++;
+            if (daughter_legacy.second != daughter_proto.second) g_pr33_audit.f1_ex_differ++;
+            double daughter_length = m_daughter_count_proto_examine_showers ? daughter_proto.second
+                                                                            : daughter_legacy.second;
 
             // Pre-compute segment directions shared across Cases I, II, III
             WireCell::Point  vtx_pt           = vtx->fit().valid() ? vtx->fit().point : vtx->wcpt().point;
@@ -2455,7 +2541,7 @@ void PatternAlgorithms::examine_showers(Graph& graph, VertexPtr main_vertex, Ind
 }
 
 
-void PatternAlgorithms::id_pi0_with_vertex(int acc_segment_id, IndexedShowerSet& pi0_showers, ShowerIntMap& map_shower_pio_id, std::map<int, std::vector<ShowerPtr > >& map_pio_id_showers, std::map<int, std::pair<double, int> >& map_pio_id_mass, std::map<int, std::pair<int, int> >& map_pio_id_saved_pair, Pi0KineFeatures& pio_kine, Graph& graph, VertexPtr main_vertex, IndexedShowerSet& showers, Facade::Cluster* main_cluster, std::vector<Facade::Cluster*>& other_clusters, ClusterVertexMap map_cluster_main_vertices, ShowerVertexMap& map_vertex_in_shower, ShowerSegmentMap& map_segment_in_shower, VertexShowerSetMap& map_vertex_to_shower, ClusterPtrSet& used_shower_clusters, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model){
+void PatternAlgorithms::id_pi0_with_vertex(int& acc_segment_id, IndexedShowerSet& pi0_showers, ShowerIntMap& map_shower_pio_id, std::map<int, std::vector<ShowerPtr > >& map_pio_id_showers, std::map<int, std::pair<double, int> >& map_pio_id_mass, std::map<int, std::pair<int, int> >& map_pio_id_saved_pair, Pi0KineFeatures& pio_kine, Graph& graph, VertexPtr main_vertex, IndexedShowerSet& showers, Facade::Cluster* main_cluster, std::vector<Facade::Cluster*>& other_clusters, ClusterVertexMap map_cluster_main_vertices, ShowerVertexMap& map_vertex_in_shower, ShowerSegmentMap& map_segment_in_shower, VertexShowerSetMap& map_vertex_to_shower, ClusterPtrSet& used_shower_clusters, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model){
 
     if (!main_vertex) return;
 
@@ -2729,6 +2815,7 @@ void PatternAlgorithms::id_pi0_with_vertex(int acc_segment_id, IndexedShowerSet&
         pi0_showers.insert(shower_2);
 
         int pio_id = acc_segment_id++;
+        g_pr33_audit.f3_pi0_with_vertex++;
         map_shower_pio_id[shower_1]  = pio_id;
         map_shower_pio_id[shower_2]  = pio_id;
         map_pio_id_mass[pio_id]      = {mass_save, 1};
@@ -2799,7 +2886,7 @@ void PatternAlgorithms::id_pi0_with_vertex(int acc_segment_id, IndexedShowerSet&
 }
 
 
-void PatternAlgorithms::id_pi0_without_vertex(int acc_segment_id, IndexedShowerSet& pi0_showers, ShowerIntMap& map_shower_pio_id, std::map<int, std::vector<ShowerPtr > >& map_pio_id_showers, std::map<int, std::pair<double, int> >& map_pio_id_mass, std::map<int, std::pair<int, int> >& map_pio_id_saved_pair, Pi0KineFeatures& pio_kine, Graph& graph, VertexPtr main_vertex, IndexedShowerSet& showers, Facade::Cluster* main_cluster, std::vector<Facade::Cluster*>& other_clusters, ClusterVertexMap map_cluster_main_vertices, ShowerVertexMap& map_vertex_in_shower, ShowerSegmentMap& map_segment_in_shower, VertexShowerSetMap& map_vertex_to_shower, ClusterPtrSet& used_shower_clusters, IndexedSegmentSet& segments_in_long_muon, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model){
+void PatternAlgorithms::id_pi0_without_vertex(int& acc_segment_id, IndexedShowerSet& pi0_showers, ShowerIntMap& map_shower_pio_id, std::map<int, std::vector<ShowerPtr > >& map_pio_id_showers, std::map<int, std::pair<double, int> >& map_pio_id_mass, std::map<int, std::pair<int, int> >& map_pio_id_saved_pair, Pi0KineFeatures& pio_kine, Graph& graph, VertexPtr main_vertex, IndexedShowerSet& showers, Facade::Cluster* main_cluster, std::vector<Facade::Cluster*>& other_clusters, ClusterVertexMap map_cluster_main_vertices, ShowerVertexMap& map_vertex_in_shower, ShowerSegmentMap& map_segment_in_shower, VertexShowerSetMap& map_vertex_to_shower, ClusterPtrSet& used_shower_clusters, IndexedSegmentSet& segments_in_long_muon, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model){
 
     if (!main_vertex) return;
 
@@ -2835,7 +2922,7 @@ void PatternAlgorithms::id_pi0_without_vertex(int acc_segment_id, IndexedShowerS
     
     // Stable shower comparator: order by start_segment graph index to eliminate
     // pointer-address-based non-determinism in all shower containers below.
-    auto shower_less = [&graph](const ShowerPtr& a, const ShowerPtr& b) {
+    auto shower_less = [this, &graph](const ShowerPtr& a, const ShowerPtr& b) {
         auto sa = a->start_segment();
         auto sb = b->start_segment();
         if (sa && sb) {
@@ -2845,6 +2932,12 @@ void PatternAlgorithms::id_pi0_without_vertex(int acc_segment_id, IndexedShowerS
         }
         else if (!sa &&  sb) return true;
         else if ( sa && !sb) return false;
+        // doc pr/33 F5: unconditional reachability counter for the
+        // same-index fallback (0 on a manifest = never reached there);
+        // knob-on orders by the stable per-run shower id (PRShower.cxx:45)
+        // instead of heap addresses.  House-rule fix, prototype n/a.
+        g_pr33_audit.f5_fallback_hits++;
+        if (m_shower_less_id_tiebreak) return a->get_shower_id() < b->get_shower_id();
         return a.get() < b.get(); // same-index fallback: stable within a run
     };
 
@@ -2908,10 +3001,22 @@ void PatternAlgorithms::id_pi0_without_vertex(int acc_segment_id, IndexedShowerS
     auto it_main = map_vertex_to_shower.find(main_vertex);
     if (it_main != map_vertex_to_shower.end()) {
         for (auto shower : it_main->second) {
-            if (shower->get_particle_type() == 13) continue;
+            // doc pr/33 F2: prototype reads the start segment's PDG here
+            // (NeutrinoID_shower_clustering.h:497, exact ==13).
+            {
+                int type_startseg = 0;
+                if (shower->start_segment() && shower->start_segment()->has_particle_info() && shower->start_segment()->particle_info()) {
+                    type_startseg = shower->start_segment()->particle_info()->pdg();
+                }
+                const bool skip_legacy = shower->get_particle_type() == 13;
+                const bool skip_proto  = type_startseg == 13;
+                g_pr33_audit.f2_calls[4]++;
+                if (skip_legacy != skip_proto) g_pr33_audit.f2_disagree[4]++;
+                if (m_shower_pdg_from_start_segment ? skip_proto : skip_legacy) continue;
+            }
             if (shower->get_total_length() < 3 * units::cm) continue;
             if (pi0_showers.find(shower) != pi0_showers.end()) continue;
-            
+
             WireCell::Point test_p = shower->get_start_point();
             WireCell::Vector dir = shower_cal_dir_3vector(*shower, test_p, 15 * units::cm);
             WireCell::Point p2(test_p.x() + dir.x(), test_p.y() + dir.y(), test_p.z() + dir.z());
@@ -2924,10 +3029,22 @@ void PatternAlgorithms::id_pi0_without_vertex(int acc_segment_id, IndexedShowerS
         if (vtx == main_vertex) continue;
         
         for (auto shower : shower_set) {
-            if (shower->get_particle_type() == 13) continue;
+            // doc pr/33 F2: prototype reads the start segment's PDG here
+            // (NeutrinoID_shower_clustering.h:511, exact ==13).
+            {
+                int type_startseg = 0;
+                if (shower->start_segment() && shower->start_segment()->has_particle_info() && shower->start_segment()->particle_info()) {
+                    type_startseg = shower->start_segment()->particle_info()->pdg();
+                }
+                const bool skip_legacy = shower->get_particle_type() == 13;
+                const bool skip_proto  = type_startseg == 13;
+                g_pr33_audit.f2_calls[5]++;
+                if (skip_legacy != skip_proto) g_pr33_audit.f2_disagree[5]++;
+                if (m_shower_pdg_from_start_segment ? skip_proto : skip_legacy) continue;
+            }
             if (shower->get_total_length() < 3 * units::cm) continue;
             if (pi0_showers.find(shower) != pi0_showers.end()) continue;
-            
+
             auto [start_vtx, conn_type] = shower->get_start_vertex_and_type();
             if (conn_type != 3) continue;
             
@@ -3132,7 +3249,8 @@ void PatternAlgorithms::id_pi0_without_vertex(int acc_segment_id, IndexedShowerS
             
             int pio_id = acc_segment_id;
             acc_segment_id++;
-            
+            g_pr33_audit.f3_pi0_without_vertex++;
+
             map_shower_pio_id[shower_1] = pio_id;
             map_shower_pio_id[shower_2] = pio_id;
             map_pio_id_mass[pio_id] = std::make_pair(mass_save, 2);
@@ -3300,8 +3418,14 @@ void PatternAlgorithms::shower_clustering_with_nv(int acc_segment_id, IndexedSho
     t_examine_showers = MS(Clock::now() - t0); t0 = Clock::now();
     // check_used_shower_cluster_933("examine_showers");
     
-    // Identify pi0 with vertex
-    id_pi0_with_vertex(acc_segment_id, pi0_showers, map_shower_pio_id, map_pio_id_showers, map_pio_id_mass,
+    // Identify pi0 with vertex.
+    // doc pr/33 F3: both finders get a reference to the same local copy, so
+    // nothing propagates past this function either way (the caller's
+    // variable is separately seeded by reference into ssm_tagger -- §10.10
+    // amendment 1).  Knob-off restores the copy between the two finders, so
+    // each seeds from the same base = the legacy by-value behavior.
+    int pi0_acc = acc_segment_id;
+    id_pi0_with_vertex(pi0_acc, pi0_showers, map_shower_pio_id, map_pio_id_showers, map_pio_id_mass,
                       map_pio_id_saved_pair, pio_kine, graph, main_vertex, showers, main_cluster,
                       other_clusters, map_cluster_main_vertices, map_vertex_in_shower,
                       map_segment_in_shower, map_vertex_to_shower, used_shower_clusters,
@@ -3310,7 +3434,8 @@ void PatternAlgorithms::shower_clustering_with_nv(int acc_segment_id, IndexedSho
     // check_used_shower_cluster_933("id_pi0_with_vertex");
 
     // Identify pi0 without vertex (displaced vertex)
-    id_pi0_without_vertex(acc_segment_id, pi0_showers, map_shower_pio_id, map_pio_id_showers,
+    if (!m_pi0_id_shared_allocator) pi0_acc = acc_segment_id;
+    id_pi0_without_vertex(pi0_acc, pi0_showers, map_shower_pio_id, map_pio_id_showers,
                          map_pio_id_mass, map_pio_id_saved_pair, pio_kine, graph, main_vertex, showers,
                          main_cluster, other_clusters, map_cluster_main_vertices,
                          map_vertex_in_shower, map_segment_in_shower, map_vertex_to_shower,

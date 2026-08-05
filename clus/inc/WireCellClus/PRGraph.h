@@ -131,6 +131,43 @@ namespace WireCell::Clus::PR {
     };
     extern Pr36AuditCounters g_pr36_audit;
 
+    /// doc sbnd_xin/docs/pr/33 §10 -- EM-shower-clustering audit
+    /// instrumentation, same contract as PortAuditCounters above:
+    /// process-wide, one event per wire-cell process, never reset, pure
+    /// diagnostics (unconditional, on in the knob-off arm).
+    struct Pr33AuditCounters {
+        // F1 (daughter-count callee): both callees computed at both sites.
+        // differ = the consumed value (.first at the main-vertex site,
+        // .second at the examine_showers site) differs between
+        // calculate_num_daughter_showers (current) and _tracks (prototype).
+        // gate_flip = the :303 proton-skip verdict itself would change.
+        std::atomic<uint64_t> f1_mv_calls{0};
+        std::atomic<uint64_t> f1_mv_differ{0};
+        std::atomic<uint64_t> f1_mv_gate_flip{0};
+        std::atomic<uint64_t> f1_ex_calls{0};
+        std::atomic<uint64_t> f1_ex_differ{0};
+        // F2 (whose PDG): per-site skip-verdict disagreement between the
+        // legacy reading and the full prototype reading.  Site ids:
+        // 0=:170 (in_main_cluster), 1=:525 (from_main_cluster, inverted),
+        // 2=:1247 (examine_merge_showers), 3=:2193 (examine_showers),
+        // 4=:2911 5=:2927 (id_pi0_without_vertex).
+        static constexpr int f2_nsites = 6;
+        std::atomic<uint64_t> f2_calls[f2_nsites]{};
+        std::atomic<uint64_t> f2_disagree[f2_nsites]{};
+        // F3 (pi0 id allocator): pi0s minted per finder.  Both nonzero in
+        // one event = the collision the by-value seed makes possible.
+        std::atomic<uint64_t> f3_pi0_with_vertex{0};
+        std::atomic<uint64_t> f3_pi0_without_vertex{0};
+        // F4 (get_flag_shower's abs(pdg)==11 term): segments at the :797
+        // site where appending the term would flip is_shower.
+        std::atomic<uint64_t> f4_flip{0};
+        // F5 (shower_less tie-break): entries into the same-index
+        // pointer-address fallback at :2848.  0 = unreachable on this
+        // manifest (pr/32 P7 precedent: 0/2219).
+        std::atomic<uint64_t> f5_fallback_hits{0};
+    };
+    extern Pr33AuditCounters g_pr33_audit;
+
     /// P8 knob transport.  add_segment() is a free function reached from ~30
     /// call sites and has no access to component configuration, so the two
     /// values it needs are written once per event by TaggerCheckNeutrino

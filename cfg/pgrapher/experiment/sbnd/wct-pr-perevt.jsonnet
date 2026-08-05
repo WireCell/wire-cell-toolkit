@@ -870,6 +870,43 @@ function(
     // F7 ON: neutrino_type verdict bitmask + its T_tagger branch (/I).
     // Knob-on diff = exactly the one new branch on 47/47 PR events.
     neutrino_type_bitmask = true,
+    // ---- doc sbnd_xin/docs/pr/33 sec 11 EM-shower-clustering knobs, ALL ON
+    // (owner 2026-08-05; see the sbnd clus.jsonnet clus_pr arg comments).
+    // Gate labels: work-pr33-base48 (clean-HEAD binary) vs work-pr33-off48
+    // 48/48 everything; per-knob arms vs off48; work-pr33-allon48
+    // (env-forced 8) == work-pr33-prod48 (bare).  NOTE: baselines predating
+    // 2026-08-05 (work-pr35/36-*) are NOT comparable -- they were produced
+    // by a stale-object binary (doc pr/33 sec 11.2).  Escape hatches:
+    // SBND_DAUGHTER_COUNT_PROTO_MAIN_VERTEX=0 etc (run_pr_chain_batch.sh).
+    //
+    // F1a/F1b ON: prototype calculate_num_daughter_tracks callee at both
+    // sites.  Measured NULL 48/48 (main-vertex site: 3 calls, 2 events
+    // value-differ, proton-skip verdict flips 0; examine site: 40 calls,
+    // 2 value-differ, no cut crossed).
+    daughter_count_proto_main_vertex = true,
+    daughter_count_proto_examine_showers = true,
+    // F2a/F2b/F2c ON: read the PDG off the prototype's object (4 sites
+    // start-segment, 1 inverted site shower-type, 2 sites exact ==13).
+    // Each measured NULL 48/48; all counter disagreements live in evt
+    // 137238 (sites :170 x1, :525 x5, :1247 x1) and never cross a decision.
+    shower_pdg_from_start_segment = true,
+    shower_pdg_from_shower_type = true,
+    shower_pdg_exact_muon_test = true,
+    // F3 ON: shared pi0-id allocation stream across the two finders.
+    // Measured NULL 48/48 (finders fire 10-with/1-without, overlap 0;
+    // ssmsp_* branches stable = the sec 10.10 scoping holds).
+    pi0_id_shared_allocator = true,
+    // F4 ON: is_shower gains the prototype's abs(pdg)==11 disjunct at the
+    // center-point site (147 firings / 35 events).  Moves 17/48 events in
+    // shower-derived channels only (T_kine pio block, shw_sp_*/mgo_*/sig_*,
+    // nue_score on 4 events, Bee mc.json + shower_track); NO nusel verdict
+    // flips; pctree + steiner + proj stable 48/48.
+    shower_flag_pdg_electron = true,
+    // F5 ON: shower_less same-index tie-break by stable shower id (house
+    // rule, prototype n/a).  The fallback IS reachable (2 hits, evt 235435,
+    // the one id_pi0_without_vertex event) but knob-on is byte-identical
+    // 48/48 -- the counter stays as the doc-53-style tripwire.
+    shower_less_id_tiebreak = true,
 )
     local base = import 'pgrapher/experiment/sbnd/simparams.jsonnet';
     local params = base {
@@ -1014,6 +1051,14 @@ function(
                              stem_endpoint_wcpt_parity=stem_endpoint_wcpt_parity,
                              broken_muon_cluster_id_count=broken_muon_cluster_id_count,
                              neutrino_type_bitmask=neutrino_type_bitmask,
+                             daughter_count_proto_main_vertex=daughter_count_proto_main_vertex,
+                             daughter_count_proto_examine_showers=daughter_count_proto_examine_showers,
+                             shower_pdg_from_start_segment=shower_pdg_from_start_segment,
+                             shower_pdg_from_shower_type=shower_pdg_from_shower_type,
+                             shower_pdg_exact_muon_test=shower_pdg_exact_muon_test,
+                             pi0_id_shared_allocator=pi0_id_shared_allocator,
+                             shower_flag_pdg_electron=shower_flag_pdg_electron,
+                             shower_less_id_tiebreak=shower_less_id_tiebreak,
                              muon_dqdx_curve=muon_dqdx_curve,
                              use_power_recomb=use_power_recomb,
                              sp_dedx_use_recomb_model=sp_dedx_use_recomb_model,

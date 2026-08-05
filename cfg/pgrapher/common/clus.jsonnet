@@ -471,7 +471,7 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
                  } else {}),
         },
 
-        tagger_check_neutrino(name="", trackfitting_config_file="", particle_dataset="", recombination_model="", perf=false, dl_weights="", dQdx_scale=0.1, dQdx_offset=-1000.0, clus_geom_helper="", dl_vtx_rerank=true, dl_vtx_top_k=5, dl_vtx_min_accept_score=4.0, dl_vtx_score_scale=1000.0, beam_window_low=0, beam_window_high=0, nu_skip_cosmic=false, nu_skip_cosmic_bundle=false, nu_skip_cosmic_bundle_min_length=0, dir_weak_use_score=false, mip_dqdx=null, mip_dqdx_median=null, proton_dir_vote=false, proton_dir_score_max=null, proton_dir_asym_min=null, endpoint_trim_retry=false, fit_vertex_min_seg_length=null, cathode_x=null, cathode_kink_xcut=null, shower_topo_demote_len=null, iso_endpoint=false, iso_endpoint_min_length=null, iso_endpoint_max_xext=null, iso_endpoint_xext_frac=null, iso_endpoint_xext_quantile=null, iso_endpoint_tube_radius=null, iso_endpoint_min_aspect=null, cosmic_y_top_main=null, cosmic_y_top_strict=null, cosmic_y_top_loose=null, cosmic_y_small_piece=null, vertex_z_prior_scale=null, ssm_target_dir=null, ssm_absorber_dir=null, kine_fudge_factor=null, kine_recom_factor=null, kine_shower_fudge_factor=null, kine_shower_recom_factor=null, kine_proton_recom_factor=null, kine_plane_weights=null, kine_plane_asym_switch=null, kine_w_value=null, kine_shower_pdg_live=false, muon_dqdx_curve=null, sp_dedx_use_recomb_model=false, sp_mean_dedx_cut=null, dl_vtx_cut=null, skip_cosmic_companions=false, cosmic_companion_min_length=null, sp_photon_flag=false, fit_exclusion=false, graph_endpoint_strict=false, graph_endpoint_tol=null, oov_prototype_parity=false, first_seg_local_pca=null, other_seg_relaxed_accept=null, shower_topo_proto_dir=false, vertex_dir_use_fit_point=false, shower_traj_recheck_parity=false, main_vertex_require_descriptor=false, main_vertex_candidate_flag=false, cont_muon_dir3_30cm=false, track_comp_empty_abstain=false, shower_topo_reset=false, reclass_preserve_4mom=false, dir_track_median_local=false, examine_showers_vertex_by_index=false, fiducial=null, fv_tolerance=[], sp_sce_correction=false, tagger_ordered_segment_sets=false, stem_endpoint_wcpt_parity=false, broken_muon_cluster_id_count=false, neutrino_type_bitmask=false) :: {
+        tagger_check_neutrino(name="", trackfitting_config_file="", particle_dataset="", recombination_model="", perf=false, dl_weights="", dQdx_scale=0.1, dQdx_offset=-1000.0, clus_geom_helper="", dl_vtx_rerank=true, dl_vtx_top_k=5, dl_vtx_min_accept_score=4.0, dl_vtx_score_scale=1000.0, beam_window_low=0, beam_window_high=0, nu_skip_cosmic=false, nu_skip_cosmic_bundle=false, nu_skip_cosmic_bundle_min_length=0, dir_weak_use_score=false, mip_dqdx=null, mip_dqdx_median=null, proton_dir_vote=false, proton_dir_score_max=null, proton_dir_asym_min=null, endpoint_trim_retry=false, fit_vertex_min_seg_length=null, cathode_x=null, cathode_kink_xcut=null, shower_topo_demote_len=null, iso_endpoint=false, iso_endpoint_min_length=null, iso_endpoint_max_xext=null, iso_endpoint_xext_frac=null, iso_endpoint_xext_quantile=null, iso_endpoint_tube_radius=null, iso_endpoint_min_aspect=null, cosmic_y_top_main=null, cosmic_y_top_strict=null, cosmic_y_top_loose=null, cosmic_y_small_piece=null, vertex_z_prior_scale=null, ssm_target_dir=null, ssm_absorber_dir=null, kine_fudge_factor=null, kine_recom_factor=null, kine_shower_fudge_factor=null, kine_shower_recom_factor=null, kine_proton_recom_factor=null, kine_plane_weights=null, kine_plane_asym_switch=null, kine_w_value=null, kine_shower_pdg_live=false, muon_dqdx_curve=null, sp_dedx_use_recomb_model=false, sp_mean_dedx_cut=null, dl_vtx_cut=null, skip_cosmic_companions=false, cosmic_companion_min_length=null, sp_photon_flag=false, fit_exclusion=false, graph_endpoint_strict=false, graph_endpoint_tol=null, oov_prototype_parity=false, first_seg_local_pca=null, other_seg_relaxed_accept=null, shower_topo_proto_dir=false, vertex_dir_use_fit_point=false, shower_traj_recheck_parity=false, main_vertex_require_descriptor=false, main_vertex_candidate_flag=false, cont_muon_dir3_30cm=false, track_comp_empty_abstain=false, shower_topo_reset=false, reclass_preserve_4mom=false, dir_track_median_local=false, examine_showers_vertex_by_index=false, fiducial=null, fv_tolerance=[], sp_sce_correction=false, tagger_ordered_segment_sets=false, stem_endpoint_wcpt_parity=false, broken_muon_cluster_id_count=false, neutrino_type_bitmask=false, daughter_count_proto_main_vertex=false, daughter_count_proto_examine_showers=false, shower_pdg_from_start_segment=false, shower_pdg_from_shower_type=false, shower_pdg_exact_muon_test=false, pi0_id_shared_allocator=false, shower_flag_pdg_electron=false, shower_less_id_tiebreak=false) :: {
             type: "TaggerCheckNeutrino",
             name: prefix + name,
             data: {
@@ -820,7 +820,34 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
               // F7 (= P4): compute the prototype's neutrino_type verdict
               // bitmask.  The matching T_tagger branch is booked by
               // tagger_output under the same key.  C++ default false.
-              + (if neutrino_type_bitmask then { neutrino_type_bitmask: true } else {}),
+              + (if neutrino_type_bitmask then { neutrino_type_bitmask: true } else {})
+              // ---- doc sbnd_xin/docs/pr/33 §10 EM-shower-clustering knobs.
+              // All C++ default false.  Key omitted when off => byte-identical
+              // pre-knob config.
+              // F1 (= P1): restore the prototype's calculate_num_daughter_tracks
+              // callee at the two sites that call _showers.  Two knobs: the
+              // sites err in opposite directions.
+              + (if daughter_count_proto_main_vertex then { daughter_count_proto_main_vertex: true } else {})
+              + (if daughter_count_proto_examine_showers then { daughter_count_proto_examine_showers: true } else {})
+              // F2 (= P2): read the PDG off the object the prototype reads.
+              // NOTE: prototype parity at the :170 site needs BOTH
+              // shower_pdg_from_start_segment AND shower_pdg_exact_muon_test
+              // on; from_start_segment alone is neither tree's behavior there.
+              + (if shower_pdg_from_start_segment then { shower_pdg_from_start_segment: true } else {})
+              + (if shower_pdg_from_shower_type then { shower_pdg_from_shower_type: true } else {})
+              + (if shower_pdg_exact_muon_test then { shower_pdg_exact_muon_test: true } else {})
+              // F3 (= P3): the two pi0 finders share one id allocation
+              // stream (prototype member semantics), preventing pio_id
+              // collisions in the tagger pi0 block and the Bee mc.json
+              // grouping.  Scoped to the finders only.
+              + (if pi0_id_shared_allocator then { pi0_id_shared_allocator: true } else {})
+              // F4 (= P6): is_shower at the center-point site gains the
+              // prototype's missing abs(pdg)==11 disjunct.
+              + (if shower_flag_pdg_electron then { shower_flag_pdg_electron: true } else {})
+              // F5 (= P12): shower_less same-index tie-break by stable
+              // shower id instead of pointer address (house-rule determinism
+              // fix; prototype n/a -- it is address-ordered everywhere).
+              + (if shower_less_id_tiebreak then { shower_less_id_tiebreak: true } else {}),
         },
 
         // Run pattern recognition (find_proto_vertex) on the main cluster.

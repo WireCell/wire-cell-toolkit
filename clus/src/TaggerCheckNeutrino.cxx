@@ -241,6 +241,15 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_stem_endpoint_wcpt_parity    = get(config, "stem_endpoint_wcpt_parity",    m_stem_endpoint_wcpt_parity);
     m_broken_muon_cluster_id_count = get(config, "broken_muon_cluster_id_count", m_broken_muon_cluster_id_count);
     m_neutrino_type_bitmask        = get(config, "neutrino_type_bitmask",        m_neutrino_type_bitmask);
+    // doc sbnd_xin/docs/pr/33 §10 EM-shower-clustering knobs.
+    m_daughter_count_proto_main_vertex     = get(config, "daughter_count_proto_main_vertex",     m_daughter_count_proto_main_vertex);
+    m_daughter_count_proto_examine_showers = get(config, "daughter_count_proto_examine_showers", m_daughter_count_proto_examine_showers);
+    m_shower_pdg_from_start_segment        = get(config, "shower_pdg_from_start_segment",        m_shower_pdg_from_start_segment);
+    m_shower_pdg_from_shower_type          = get(config, "shower_pdg_from_shower_type",          m_shower_pdg_from_shower_type);
+    m_shower_pdg_exact_muon_test           = get(config, "shower_pdg_exact_muon_test",           m_shower_pdg_exact_muon_test);
+    m_pi0_id_shared_allocator              = get(config, "pi0_id_shared_allocator",              m_pi0_id_shared_allocator);
+    m_shower_flag_pdg_electron             = get(config, "shower_flag_pdg_electron",             m_shower_flag_pdg_electron);
+    m_shower_less_id_tiebreak              = get(config, "shower_less_id_tiebreak",              m_shower_less_id_tiebreak);
 
     if (!m_trackfitting_config_file.empty()) {
         load_trackfitting_config(m_trackfitting_config_file);
@@ -358,6 +367,15 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["stem_endpoint_wcpt_parity"]    = m_stem_endpoint_wcpt_parity;    // false = legacy nearest-fit-endpoint proximity rule
     cfg["broken_muon_cluster_id_count"] = m_broken_muon_cluster_id_count; // false = legacy distinct-pointer cluster count
     cfg["neutrino_type_bitmask"]        = m_neutrino_type_bitmask;        // false = legacy (no verdict bitmask, no T_tagger branch)
+    // doc sbnd_xin/docs/pr/33 §10.
+    cfg["daughter_count_proto_main_vertex"]     = m_daughter_count_proto_main_vertex;     // false = legacy _showers callee at the main-vertex site
+    cfg["daughter_count_proto_examine_showers"] = m_daughter_count_proto_examine_showers; // false = legacy _showers callee in examine_showers
+    cfg["shower_pdg_from_start_segment"]        = m_shower_pdg_from_start_segment;        // false = legacy shower->get_particle_type() at the 4 sites
+    cfg["shower_pdg_from_shower_type"]          = m_shower_pdg_from_shower_type;          // false = legacy start-segment read at the inverted site
+    cfg["shower_pdg_exact_muon_test"]           = m_shower_pdg_exact_muon_test;           // false = legacy abs() muon test (parity at :170 needs from_start_segment too)
+    cfg["pi0_id_shared_allocator"]              = m_pi0_id_shared_allocator;              // false = legacy independent pi0-id seeds (collision possible)
+    cfg["shower_flag_pdg_electron"]             = m_shower_flag_pdg_electron;             // false = legacy is_shower without the abs(pdg)==11 term
+    cfg["shower_less_id_tiebreak"]              = m_shower_less_id_tiebreak;              // false = legacy pointer-address tie-break (house-rule fix when true)
 
 
     return cfg;
@@ -659,6 +677,15 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
     pattern_algos.m_stem_endpoint_wcpt_parity    = m_stem_endpoint_wcpt_parity;
     pattern_algos.m_broken_muon_cluster_id_count = m_broken_muon_cluster_id_count;
     pattern_algos.m_neutrino_type_bitmask        = m_neutrino_type_bitmask;
+    // doc sbnd_xin/docs/pr/33 §10 EM-shower-clustering knobs.
+    pattern_algos.m_daughter_count_proto_main_vertex     = m_daughter_count_proto_main_vertex;
+    pattern_algos.m_daughter_count_proto_examine_showers = m_daughter_count_proto_examine_showers;
+    pattern_algos.m_shower_pdg_from_start_segment        = m_shower_pdg_from_start_segment;
+    pattern_algos.m_shower_pdg_from_shower_type          = m_shower_pdg_from_shower_type;
+    pattern_algos.m_shower_pdg_exact_muon_test           = m_shower_pdg_exact_muon_test;
+    pattern_algos.m_pi0_id_shared_allocator              = m_pi0_id_shared_allocator;
+    pattern_algos.m_shower_flag_pdg_electron             = m_shower_flag_pdg_electron;
+    pattern_algos.m_shower_less_id_tiebreak              = m_shower_less_id_tiebreak;
     // Muon dQ/dx-vs-length envelope: c0/c1/power dimensionless, pivot cm -> internal.
     pattern_algos.m_muon_dqdx_curve = {m_muon_dqdx_curve[0], m_muon_dqdx_curve[1],
                                        m_muon_dqdx_curve[2] * units::cm, m_muon_dqdx_curve[3]};
@@ -1154,6 +1181,39 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
             m_use_fiducial, m_sp_sce_correction, m_tagger_ordered_segment_sets,
             m_stem_endpoint_wcpt_parity, m_broken_muon_cluster_id_count,
             m_neutrino_type_bitmask);
+    }
+
+    // doc sbnd_xin/docs/pr/33 §10 -- same contract as PR30AUDIT above.  The
+    // f2 vectors are the 6 PDG-read sites (ids on Pr33AuditCounters::f2_calls);
+    // f1_* are the two daughter-count sites; f3_* count pi0s minted per
+    // finder (both nonzero in one event = the collision F3 prevents);
+    // f5_fallback = entries into shower_less's same-index tie-break.
+    {
+        const auto& pd = WireCell::Clus::PR::g_pr33_audit;
+        auto join = [](const std::atomic<uint64_t>* a, int n) {
+            std::string s;
+            for (int i = 0; i < n; ++i) {
+                if (i) s += ",";
+                s += std::to_string(a[i].load());
+            }
+            return s;
+        };
+        SPDLOG_LOGGER_INFO(log,
+            "PR33AUDIT f1_mv={}/{}/{} f1_ex={}/{} "
+            "f2_calls=[{}] f2_disagree=[{}] "
+            "f3_pi0=with:{},without:{} f4_flip={} f5_fallback={} "
+            "knobs[dc_mv={} dc_ex={} pdg_startseg={} pdg_showertype={} "
+            "pdg_exact={} pi0_alloc={} flag_pdg_e={} shower_less_id={}]",
+            pd.f1_mv_differ.load(), pd.f1_mv_gate_flip.load(), pd.f1_mv_calls.load(),
+            pd.f1_ex_differ.load(), pd.f1_ex_calls.load(),
+            join(pd.f2_calls, pd.f2_nsites),
+            join(pd.f2_disagree, pd.f2_nsites),
+            pd.f3_pi0_with_vertex.load(), pd.f3_pi0_without_vertex.load(),
+            pd.f4_flip.load(), pd.f5_fallback_hits.load(),
+            m_daughter_count_proto_main_vertex, m_daughter_count_proto_examine_showers,
+            m_shower_pdg_from_start_segment, m_shower_pdg_from_shower_type,
+            m_shower_pdg_exact_muon_test, m_pi0_id_shared_allocator,
+            m_shower_flag_pdg_electron, m_shower_less_id_tiebreak);
     }
 }
 

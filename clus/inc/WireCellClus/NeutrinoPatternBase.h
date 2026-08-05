@@ -665,6 +665,52 @@ namespace WireCell::Clus::PR {
         // config key.
         bool m_neutrino_type_bitmask{false};
 
+        // ---- doc sbnd_xin/docs/pr/33 §10 EM-shower-clustering knobs -------
+        // All C++ default false = today's path = byte-identical; the SBND
+        // operating point decides which are on.  Set by
+        // TaggerCheckNeutrino::visit() alongside the pr/36 transfers.
+        //
+        // F1 (= P1): restore the prototype's calculate_num_daughter_tracks
+        // callee (prototype NeutrinoID_shower_clustering.h:140 /
+        // NeutrinoID_em_shower.h:17) where the port calls
+        // calculate_num_daughter_showers.  Two knobs because the two sites
+        // err in opposite directions and one knob could not attribute which
+        // site moved a decision.
+        bool m_daughter_count_proto_main_vertex{false};
+        bool m_daughter_count_proto_examine_showers{false};
+        // F2 (= P2): read the PDG off the object the prototype reads.
+        // from_start_segment: four sites read shower->get_particle_type()
+        // where the prototype reads get_start_segment()->get_particle_type()
+        // (NeutrinoID_shower_clustering.h:1716,:387,:394,:497,:511).
+        // from_shower_type: the one inverted site (:525 here, prototype
+        // :1800) reads the start segment where the prototype reads the
+        // shower.  exact_muon_test: drop std::abs at the two sites where
+        // the prototype's muon test is exact (proto :1716, em_shower.h:10).
+        // Prototype parity at the :170 site needs from_start_segment AND
+        // exact_muon_test together; either alone is neither tree's behavior.
+        bool m_shower_pdg_from_start_segment{false};
+        bool m_shower_pdg_from_shower_type{false};
+        bool m_shower_pdg_exact_muon_test{false};
+        // F3 (= P3): the two pi0 finders share one id allocation stream
+        // (prototype: member NeutrinoID.h:1982 mutated at :933 and :688),
+        // so a with-vertex and a without-vertex pi0 in one event cannot
+        // collide on pio_id.  Scoped to the two finders only --
+        // shower_clustering_with_nv stays by value because the caller's
+        // local is also seeded by-reference into ssm_tagger (doc pr/33
+        // §10.10 amendment 1); the seeding-at-0 divergence is a recorded
+        // gap, not part of this knob.
+        bool m_pi0_id_shared_allocator{false};
+        // F4 (= P6): the :797 is_shower mirror of the prototype's
+        // get_flag_shower() gains the missing third disjunct
+        // (ProtoSegment.cxx:1305-1312: fabs(particle_type)==11).
+        bool m_shower_flag_pdg_electron{false};
+        // F5 (= P12): shower_less's same-index tie-break compares
+        // get_shower_id() instead of pointer addresses.  NOT a
+        // prototype-fidelity fix (the prototype orders these by pointer):
+        // a CLAUDE.md §2 determinism house-rule fix, shipped with an
+        // unconditional fallback-hit counter (g_pr33_audit).
+        bool m_shower_less_id_tiebreak{false};
+
         // 2D charge maps cached for the duration of shower_clustering_with_nv.
         // Populated once by collect_charge_maps(); reused by calculate_shower_kinematics
         // and all cal_kine_charge call sites to avoid O(N_hits) re-collection per shower.
@@ -864,8 +910,12 @@ namespace WireCell::Clus::PR {
         void shower_clustering_in_other_clusters(Graph& graph, VertexPtr main_vertex, IndexedShowerSet& showers, Facade::Cluster* main_cluster, std::vector<Facade::Cluster*>& other_clusters, ClusterVertexMap map_cluster_main_vertices, ShowerVertexMap& map_vertex_in_shower, ShowerSegmentMap& map_segment_in_shower, VertexShowerSetMap& map_vertex_to_shower, ClusterPtrSet& used_shower_clusters, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, bool flag_save = true);
         void examine_shower_1(Graph& graph, VertexPtr main_vertex, IndexedShowerSet& showers, Facade::Cluster* main_cluster, std::vector<Facade::Cluster*>& other_clusters, ClusterVertexMap map_cluster_main_vertices, ShowerVertexMap& map_vertex_in_shower, ShowerSegmentMap& map_segment_in_shower, VertexShowerSetMap& map_vertex_to_shower, ClusterPtrSet& used_shower_clusters, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model);
         void examine_showers(Graph& graph, VertexPtr main_vertex, IndexedShowerSet& showers, Facade::Cluster* main_cluster, std::vector<Facade::Cluster*>& other_clusters, ClusterVertexMap map_cluster_main_vertices, ShowerVertexMap& map_vertex_in_shower, ShowerSegmentMap& map_segment_in_shower, VertexShowerSetMap& map_vertex_to_shower, ClusterPtrSet& used_shower_clusters, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model);
-        void id_pi0_with_vertex(int acc_segment_id, IndexedShowerSet& pi0_showers, ShowerIntMap& map_shower_pio_id, std::map<int, std::vector<ShowerPtr > >& map_pio_id_showers, std::map<int, std::pair<double, int> >& map_pio_id_mass, std::map<int, std::pair<int, int> >& map_pio_id_saved_pair, Pi0KineFeatures& pio_kine, Graph& graph, VertexPtr main_vertex, IndexedShowerSet& showers, Facade::Cluster* main_cluster, std::vector<Facade::Cluster*>& other_clusters, ClusterVertexMap map_cluster_main_vertices, ShowerVertexMap& map_vertex_in_shower, ShowerSegmentMap& map_segment_in_shower, VertexShowerSetMap& map_vertex_to_shower, ClusterPtrSet& used_shower_clusters, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model);
-        void id_pi0_without_vertex(int acc_segment_id, IndexedShowerSet& pi0_showers, ShowerIntMap& map_shower_pio_id, std::map<int, std::vector<ShowerPtr > >& map_pio_id_showers, std::map<int, std::pair<double, int> >& map_pio_id_mass, std::map<int, std::pair<int, int> >& map_pio_id_saved_pair, Pi0KineFeatures& pio_kine, Graph& graph, VertexPtr main_vertex, IndexedShowerSet& showers, Facade::Cluster* main_cluster, std::vector<Facade::Cluster*>& other_clusters, ClusterVertexMap map_cluster_main_vertices, ShowerVertexMap& map_vertex_in_shower, ShowerSegmentMap& map_segment_in_shower, VertexShowerSetMap& map_vertex_to_shower, ClusterPtrSet& used_shower_clusters, IndexedSegmentSet& segments_in_long_muon, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model);
+        // acc_segment_id is int& (doc pr/33 F3): the two pi0 finders share
+        // one allocation stream when m_pi0_id_shared_allocator is on.  The
+        // caller (shower_clustering_with_nv) binds a local copy, so nothing
+        // propagates past it either way.
+        void id_pi0_with_vertex(int& acc_segment_id, IndexedShowerSet& pi0_showers, ShowerIntMap& map_shower_pio_id, std::map<int, std::vector<ShowerPtr > >& map_pio_id_showers, std::map<int, std::pair<double, int> >& map_pio_id_mass, std::map<int, std::pair<int, int> >& map_pio_id_saved_pair, Pi0KineFeatures& pio_kine, Graph& graph, VertexPtr main_vertex, IndexedShowerSet& showers, Facade::Cluster* main_cluster, std::vector<Facade::Cluster*>& other_clusters, ClusterVertexMap map_cluster_main_vertices, ShowerVertexMap& map_vertex_in_shower, ShowerSegmentMap& map_segment_in_shower, VertexShowerSetMap& map_vertex_to_shower, ClusterPtrSet& used_shower_clusters, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model);
+        void id_pi0_without_vertex(int& acc_segment_id, IndexedShowerSet& pi0_showers, ShowerIntMap& map_shower_pio_id, std::map<int, std::vector<ShowerPtr > >& map_pio_id_showers, std::map<int, std::pair<double, int> >& map_pio_id_mass, std::map<int, std::pair<int, int> >& map_pio_id_saved_pair, Pi0KineFeatures& pio_kine, Graph& graph, VertexPtr main_vertex, IndexedShowerSet& showers, Facade::Cluster* main_cluster, std::vector<Facade::Cluster*>& other_clusters, ClusterVertexMap map_cluster_main_vertices, ShowerVertexMap& map_vertex_in_shower, ShowerSegmentMap& map_segment_in_shower, VertexShowerSetMap& map_vertex_to_shower, ClusterPtrSet& used_shower_clusters, IndexedSegmentSet& segments_in_long_muon, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model);
         void shower_clustering_with_nv(int acc_segment_id, IndexedShowerSet& pi0_showers, ShowerIntMap& map_shower_pio_id, std::map<int, std::vector<ShowerPtr > >& map_pio_id_showers, std::map<int, std::pair<double, int> >& map_pio_id_mass, std::map<int, std::pair<int, int> >& map_pio_id_saved_pair, Pi0KineFeatures& pio_kine, IndexedVertexSet& vertices_in_long_muon, IndexedSegmentSet& segments_in_long_muon, Graph& graph, VertexPtr main_vertex, IndexedShowerSet& showers, Facade::Cluster* main_cluster, std::vector<Facade::Cluster*>& other_clusters, ClusterVertexMap map_cluster_main_vertices, ShowerVertexMap& map_vertex_in_shower, ShowerSegmentMap& map_segment_in_shower, VertexShowerSetMap& map_vertex_to_shower, ClusterPtrSet& used_shower_clusters, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model);
 
 
