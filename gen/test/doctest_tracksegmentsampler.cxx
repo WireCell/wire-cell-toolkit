@@ -5,6 +5,7 @@
 #include "WireCellIface/IConfigurable.h"
 #include "WireCellIface/IRecombinationModel.h"
 #include "WireCellIface/ITrackSegmentSampler.h"
+#include "WireCellGen/TrackSegmentSampler.h"
 #include "WireCellAux/SimpleTrackSegment.h"
 #include "WireCellAux/SimpleTrackSegmentSet.h"
 
@@ -108,6 +109,80 @@ TEST_CASE("gen tracksegmentsampler recombination MIP") {
     CHECK(first->energy() == doctest::Approx(energy / 10));
     CHECK(first->extent_long() == 0.0);
     CHECK(first->extent_tran() == 0.0);
+}
+
+TEST_CASE("gen tracksegmentsampler recombination models") {
+    PluginManager& pm = PluginManager::instance();
+    pm.add("WireCellGen");
+
+    // One MIP-like 1 cm segment reused for every model: dE/dx ~ 2.1 MeV/cm at
+    // the models' default 500 V/cm.
+    const double energy = 2.1 * units::MeV;
+    const double length = 1 * units::cm;
+    const Point start(10 * units::cm, 0, 0);
+    const Point stop(10 * units::cm, 0, length);
+
+    // Run the SAME segment through the sampler once per recombination model.
+    // Each iteration is a FULL sampler object lifecycle -- construct, take the
+    // default configuration, update it, configure(), operator(), then destruct
+    // at scope exit -- as WCT's per-component configuration protocol prescribes
+    // (re-configuring one instance is not a guaranteed WCT capability).
+    for (const std::string& model_name :
+         {std::string("BoxRecombination"), std::string("BirksRecombination"),
+          std::string("MipRecombination")}) {
+        CAPTURE(model_name);
+
+        // The recombination model the sampler references must itself be
+        // constructed + configured first, per WCT's config-order protocol.
+        preconfigure(model_name);
+
+        // 0. Construct the configurable under test.
+        Gen::TrackSegmentSampler sampler;
+        // 1. Take its default configuration.
+        Configuration cfg = sampler.default_configuration();
+        // 2. Update with the desired configuration.
+        cfg["ionization"] = "recombination";
+        cfg["recombination"] = model_name;
+        // 3. Configure.
+        sampler.configure(cfg);
+
+        // 4. Run one segment through operator().
+        ITrackSegment::vector segs{std::make_shared<SimpleTrackSegment>(
+            start, stop, 0.0, 0.05 * units::us, energy, 0.0, -1.0, length, 42, 13)};
+        ITrackSegmentSampler::output_pointer out;
+        REQUIRE(sampler(std::make_shared<SimpleTrackSegmentSet>(3, segs), out));
+        REQUIRE(out != nullptr);
+        CHECK(out->ident() == 3);
+
+        auto depos = out->depos();
+        REQUIRE(depos != nullptr);
+        // 10 mm at the default 1 mm step.
+        REQUIRE(depos->size() == 10);
+
+        // The sampler's total charge matches the model evaluated directly and
+        // is negative (WCT electron-charge convention).
+        auto model = Factory::lookup_tn<IRecombinationModel>(model_name);
+        const double expected = (*model)(energy, length);
+        const double got = total_charge(out);
+        CHECK(got < 0);
+        CHECK(got == doctest::Approx(expected).epsilon(1e-9));
+
+        // Per-sample energy conservation, equal charge split, truth-key
+        // propagation.
+        CHECK(depos->at(0)->energy() == doctest::Approx(energy / 10));
+        CHECK(depos->at(0)->charge() == doctest::Approx(got / 10).epsilon(1e-9));
+        CHECK(depos->at(0)->id() == 42);
+        CHECK(depos->at(0)->pdg() == 13);
+
+        // Model-agnostic MIP physics anchor: recombination factor
+        // R = nele*Wi/E sits near 0.7 at 500 V/cm for all three models.
+        const double nele = std::abs(got);
+        const double rfactor = nele * 23.6 * units::eV / energy;
+        CHECK(rfactor > 0.6);
+        CHECK(rfactor < 0.8);
+
+        // 5. Destruct: `sampler` leaves scope at the end of the iteration.
+    }
 }
 
 TEST_CASE("gen tracksegmentsampler quanta mode") {
