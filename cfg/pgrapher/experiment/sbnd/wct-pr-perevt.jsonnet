@@ -723,6 +723,21 @@ function(
     // to pipeline_names) tracking-stm.root for Magnify-tracking-SBND.  Also
     // gates loading the WireCellRoot plugin.  Runner flag: -stm-fit.
     save_stm_fit = false,
+    // ---- doc pr/34 §10: particle-flow (Bee mc tree) port-fidelity knobs ----
+    // **ALL FIVE ARE SBND PRODUCTION DEFAULTS ON, owner 2026-08-04** (doc
+    // pr/34 §11; C++ defaults stay false).  Display-only, MEASURED: the ON
+    // arms move ONLY mabc-pr.zip::data/0/0-mc.json (F2 5/48 evts, F3 6/48,
+    // F1/F4/F5 null) while pctree-pr, the other six mabc members and both
+    // nusel TSVs are 48/48 byte-identical (gate work-pr34-off48 vs
+    // work-pr31r2-prod48; joint work-pr34-allon48; bare==prod
+    // work-pr34-prod48).  F4's merged pi0 home = HIGHEST-ENERGY daughter's
+    // parent (owner decision 2026-08-04, deliberately not prototype
+    // first-writer-wins).  Runner env overrides: SBND_PF_* (tri-state).
+    pf_track_main_cluster_only = true,
+    pf_shower_vertex_barrier = true,
+    pf_shower_parent_precedence = true,
+    pf_pi0_node_per_id = true,
+    pf_pdg_name_prototype_fallback = true,
     // How 'unmerge_bundle' (when named in pipeline_names) identifies the main
     // sub-cluster of a flash-merged bundle (C++ default "real").  "real" =
     // per-blob real_cluster_main/real_cluster_id provenance -- exact, needs a
@@ -864,6 +879,11 @@ function(
                              tgm_fv_x_margin=tgm_fv_x_margin,
                              tgm_fv_y_margin=tgm_fv_y_margin,
                              save_stm_fit=save_stm_fit,
+                             pf_track_main_cluster_only=pf_track_main_cluster_only,
+                             pf_shower_vertex_barrier=pf_shower_vertex_barrier,
+                             pf_shower_parent_precedence=pf_shower_parent_precedence,
+                             pf_pi0_node_per_id=pf_pi0_node_per_id,
+                             pf_pdg_name_prototype_fallback=pf_pdg_name_prototype_fallback,
                              unmerge_bundle_mode=unmerge_bundle_mode,
                              restore_demoted_mains=restore_demoted_mains,
                              require_provenance=require_provenance,

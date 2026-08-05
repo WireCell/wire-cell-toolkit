@@ -710,6 +710,14 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               tgm_fv_zmax_margin=5, tgm_fv_zmax_margin_interior=3,
               tgm_fv_x_margin=2.5, tgm_fv_y_margin=3,
               save_stm_fit=false, unmerge_bundle_mode='real',
+              // doc pr/34 §10 particle-flow (Bee mc tree) port-fidelity knobs.
+              // C++ defaults false; keys omitted when off => byte-identical
+              // pre-knob config.  Display-only stage: mc.json is the artifact.
+              pf_track_main_cluster_only=false,
+              pf_shower_vertex_barrier=false,
+              pf_shower_parent_precedence=false,
+              pf_pi0_node_per_id=false,
+              pf_pdg_name_prototype_fallback=false,
               // restore_demoted_mains (doc pr/20 Part I P2; C++ default false,
               // key omitted when null => byte-identical pre-knob config): tag a
               // split-off part that was ITSELF a matched bundle main before the
@@ -1854,6 +1862,13 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
                      then 'em_ke_min']: 5 * wc.MeV,
                     [if std.member(pipeline_names, 'tagger_check_neutrino')
                      then 'np_ke_min']: 10 * wc.MeV,
+                    // doc pr/34 §10 port-fidelity knobs.  C++ defaults false;
+                    // key omitted when off => byte-identical pre-knob config.
+                    [if pf_track_main_cluster_only then 'pf_track_main_cluster_only']: true,
+                    [if pf_shower_vertex_barrier then 'pf_shower_vertex_barrier']: true,
+                    [if pf_shower_parent_precedence then 'pf_shower_parent_precedence']: true,
+                    [if pf_pi0_node_per_id then 'pf_pi0_node_per_id']: true,
+                    [if pf_pdg_name_prototype_fallback then 'pf_pdg_name_prototype_fallback']: true,
                 },
             ],
             pipeline: wc.tns(cm_pipeline),
@@ -1946,6 +1961,13 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
        tgm_fv_zmax_margin=5, tgm_fv_zmax_margin_interior=3,
        tgm_fv_x_margin=2.5, tgm_fv_y_margin=3,
        save_stm_fit=false, unmerge_bundle_mode='real',
+       // doc pr/34 §10 particle-flow port-fidelity knobs; false = C++ default
+       // = OFF, key omitted => byte-identical.  See clus_pr.
+       pf_track_main_cluster_only=false,
+       pf_shower_vertex_barrier=false,
+       pf_shower_parent_precedence=false,
+       pf_pi0_node_per_id=false,
+       pf_pdg_name_prototype_fallback=false,
        // doc pr/20 Part I P2; null = C++ default false = OFF.  See clus_pr.
        restore_demoted_mains=null,
        // doc pr/23 sec 4.2; null = C++ default false = warn-and-skip.  See clus_pr.
@@ -2131,6 +2153,11 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 tgm_fv_x_margin=tgm_fv_x_margin,
                 tgm_fv_y_margin=tgm_fv_y_margin,
                 save_stm_fit=save_stm_fit,
+                pf_track_main_cluster_only=pf_track_main_cluster_only,
+                pf_shower_vertex_barrier=pf_shower_vertex_barrier,
+                pf_shower_parent_precedence=pf_shower_parent_precedence,
+                pf_pi0_node_per_id=pf_pi0_node_per_id,
+                pf_pdg_name_prototype_fallback=pf_pdg_name_prototype_fallback,
                 unmerge_bundle_mode=unmerge_bundle_mode,
                 restore_demoted_mains=restore_demoted_mains,
                 require_provenance=require_provenance,

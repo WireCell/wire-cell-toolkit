@@ -173,6 +173,31 @@ namespace WireCell::Clus {
             // (prototype WCReader::KeepMC: 5 MeV / 10 MeV).
             double em_ke_min{0.0};
             double np_ke_min{0.0};
+            // ---- doc sbnd_xin/docs/pr/34 §10 port-fidelity knobs ----
+            // pf_track_main_cluster_only: the track BFS skips segments whose
+            // cluster ident differs from the main vertex's, restoring the
+            // prototype's dropped guard (NeutrinoID.cxx:1488).  Ident, not
+            // pointer: split products inherit the parent's ident.
+            bool pf_track_main_cluster_only{false};
+            // pf_shower_vertex_barrier: pre-seed visited_vtxs from every
+            // shower's vertex set so the BFS does not expand THROUGH a shower
+            // (prototype used_vertices seed, NeutrinoID.cxx:1597-1602).
+            bool pf_shower_vertex_barrier{false};
+            // pf_shower_parent_precedence: record the parent shower for
+            // track-attached shower vertices and consult it before the
+            // incoming track segment when a shower picks its parent
+            // (prototype map_vertex_in_shower-first order, :1655/:1680/:1720).
+            bool pf_shower_parent_precedence{false};
+            // pf_pi0_node_per_id: one pi0 node per pi0 id instead of one per
+            // parent (prototype map_pio_id_saved_pair, :1326/:1361).  The
+            // merged node's home is the HIGHEST-ENERGY daughter's parent --
+            // owner decision 2026-08-04, deliberately NOT the prototype's
+            // first-writer-wins (a jsTree node has exactly one parent).
+            bool pf_pi0_node_per_id{false};
+            // pf_pdg_name_prototype_fallback: pi0/nuclei entries in the PDG
+            // name table plus the prototype's numeric fallback
+            // (WCReader.cc:529-547) instead of "particle".
+            bool pf_pdg_name_prototype_fallback{false};
         };
         std::vector<BeePFConfig> m_bee_pf_configs;
 
