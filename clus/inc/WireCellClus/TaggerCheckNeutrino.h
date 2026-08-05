@@ -162,6 +162,9 @@ public:
         std::vector<double> m_kine_plane_weights{0.25, 0.25, 1.0};  // {U,V,W}
         double m_kine_plane_asym_switch{0.04};
         double m_kine_w_value{23.6};  // eV per electron-ion pair
+        // doc pr/35 §10.2 (F1): read the shower PDG live from the start
+        // segment at the fill_kine_tree sites instead of the cached field.
+        bool m_kine_shower_pdg_live{false};
         // Muon median-dQ/dx-vs-length envelope {c0, c1, pivot_cm, power}:
         // cut = c0 + c1*pow(pivot/L, power), a multiple of mip_dqdx_median,
         // used at nine tagger sites (docs/pr/2 sec. 2e(iv)).  Defaults = the

@@ -1106,6 +1106,10 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               kine_plane_weights=null,
               kine_plane_asym_switch=null,
               kine_w_value=null,
+              // doc pr/35 sec 10.2 (F1 = P1+P8): live start-segment PDG at the
+              // four fill_kine_tree sites (prototype parity).  C++ default
+              // false; key omitted when off => byte-identical pre-knob config.
+              kine_shower_pdg_live=false,
               // muon_dqdx_curve [c0, c1, pivot_cm, power]: the muon
               // median-dQ/dx-vs-length envelope used by nine tagger cuts, as a
               // multiple of mip_dqdx_median.  DEFAULT = the SBND fit
@@ -1586,6 +1590,7 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
             kine_plane_weights=kine_plane_weights,
             kine_plane_asym_switch=kine_plane_asym_switch,
             kine_w_value=kine_w_value,
+            kine_shower_pdg_live=kine_shower_pdg_live,
             muon_dqdx_curve=muon_dqdx_curve,
             sp_dedx_use_recomb_model=sp_dedx_use_recomb_model,
             sp_mean_dedx_cut=sp_mean_dedx_cut,
@@ -2122,6 +2127,9 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
        kine_shower_fudge_factor=null, kine_shower_recom_factor=0.58,
        kine_proton_recom_factor=0.51, kine_plane_weights=null,
        kine_plane_asym_switch=null, kine_w_value=null,
+       // doc pr/35 sec 10.2 (F1): live shower PDG at fill_kine_tree.
+       // C++ default false; key omitted when off => byte-identical.
+       kine_shower_pdg_live=false,
        // Muon dQ/dx-vs-length envelope: DEFAULT = the docs/pr/10 SBND fit
        // (see the clus_pr arg comment; null restores the uBooNE refit).
        // Recombination-model selection + single-photon dE/dx routing:
@@ -2244,6 +2252,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 kine_plane_weights=kine_plane_weights,
                 kine_plane_asym_switch=kine_plane_asym_switch,
                 kine_w_value=kine_w_value,
+                kine_shower_pdg_live=kine_shower_pdg_live,
                 muon_dqdx_curve=muon_dqdx_curve,
                 use_power_recomb=use_power_recomb,
                 sp_dedx_use_recomb_model=sp_dedx_use_recomb_model,

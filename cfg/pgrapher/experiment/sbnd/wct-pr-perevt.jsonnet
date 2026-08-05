@@ -548,6 +548,17 @@ function(
     kine_plane_weights       = null,
     kine_plane_asym_switch   = null,
     kine_w_value             = null,
+    // doc pr/35 sec 10.2 (F1 = P1+P8): read the shower PDG live from the
+    // start segment at the four fill_kine_tree sites (prototype kine.h:53
+    // :67 :175 :187) instead of Shower's cached particle_type, whose refresh
+    // path is incomplete.  C++ default false = the cached read.
+    // SBND PRODUCTION DEFAULT ON (owner 2026-08-04, doc pr/35 sec 11): the
+    // unconditional cached-vs-live counter measured 2/48 nueCC events with a
+    // stale cache (13 vs live 11); knob-on moves ONLY the calib-pr kine block
+    // on exactly those two (137238: type 13->11 + Enu -0.511 MeV; 469665:
+    // type array only).  Gate work-pr35-off48 vs work-pr34-prod48 +
+    // work-pr35-prod48 vs work-pr35-f1on48.  =false restores the cached read.
+    kine_shower_pdg_live     = true,
     // Muon median-dQ/dx-vs-length envelope [c0, c1, pivot_cm, power]:
     //   dQ_dx_cut = c0 + c1*(pivot/L)^power   (a multiple of mip_dqdx_median)
     // used by nine tagger cuts (numu x2, vertex-finder, nue x4, ssm, cosmic).
@@ -959,6 +970,7 @@ function(
                              kine_plane_weights=kine_plane_weights,
                              kine_plane_asym_switch=kine_plane_asym_switch,
                              kine_w_value=kine_w_value,
+                             kine_shower_pdg_live=kine_shower_pdg_live,
                              muon_dqdx_curve=muon_dqdx_curve,
                              use_power_recomb=use_power_recomb,
                              sp_dedx_use_recomb_model=sp_dedx_use_recomb_model,

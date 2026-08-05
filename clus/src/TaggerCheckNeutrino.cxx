@@ -146,6 +146,7 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_kine_proton_recom_factor = get(config, "kine_proton_recom_factor", m_kine_proton_recom_factor);
     m_kine_plane_asym_switch   = get(config, "kine_plane_asym_switch",   m_kine_plane_asym_switch);
     m_kine_w_value             = get(config, "kine_w_value",             m_kine_w_value);
+    m_kine_shower_pdg_live     = get(config, "kine_shower_pdg_live",     m_kine_shower_pdg_live);
     // Per-plane weights {U,V,W}.  Unlike the SSM directions a single zero entry
     // is legitimate ("ignore this plane"); only a malformed array or an all-zero
     // triple is rejected -- a zero sum would divide the plane average by zero.
@@ -294,6 +295,7 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     for (double w : m_kine_plane_weights) cfg["kine_plane_weights"].append(w);
     cfg["kine_plane_asym_switch"]   = m_kine_plane_asym_switch;    // (med,max) asymmetry above which the max plane is dropped
     cfg["kine_w_value"]             = m_kine_w_value;              // eV per electron-ion pair
+    cfg["kine_shower_pdg_live"]     = m_kine_shower_pdg_live;      // live start-segment PDG at fill_kine_tree (doc pr/35 §10.2)
     cfg["muon_dqdx_curve"] = Json::arrayValue;                     // {c0, c1, pivot_cm, power} of the muon
     for (double c : m_muon_dqdx_curve) cfg["muon_dqdx_curve"].append(c);  // median-dQ/dx-vs-length envelope
     cfg["sp_dedx_use_recomb_model"] = m_sp_dedx_use_recomb_model;  // false = inline uBooNE-field inverse Box
@@ -609,6 +611,7 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
     pattern_algos.m_kine_charge.proton_recom_factor = m_kine_proton_recom_factor;
     pattern_algos.m_kine_charge.plane_weights       = {m_kine_plane_weights[0], m_kine_plane_weights[1], m_kine_plane_weights[2]};
     pattern_algos.m_kine_charge.plane_asym_switch   = m_kine_plane_asym_switch;
+    pattern_algos.m_kine_charge.shower_pdg_live     = m_kine_shower_pdg_live;
     pattern_algos.m_kine_charge.w_value             = m_kine_w_value;
     // Muon dQ/dx-vs-length envelope: c0/c1/power dimensionless, pivot cm -> internal.
     pattern_algos.m_muon_dqdx_curve = {m_muon_dqdx_curve[0], m_muon_dqdx_curve[1],

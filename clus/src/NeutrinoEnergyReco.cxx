@@ -230,6 +230,9 @@ void PatternAlgorithms::collect_charge_maps(TrackFitting& track_fitter)
     m_charge_2d_w.clear();
     m_map_apa_ch_plane_wires.clear();
     track_fitter.collect_2D_charge(m_charge_2d_u, m_charge_2d_v, m_charge_2d_w, m_map_apa_ch_plane_wires);
+    // doc pr/35 §10.11a (F3): record when this cache was taken, for the
+    // staleness check in the segment cal_kine_charge overload.
+    m_charge_data_size_at_collect = track_fitter.get_charge_data().size();
 }
 
 
@@ -259,9 +262,29 @@ double PatternAlgorithms::cal_kine_charge(SegmentPtr segment, Graph& graph, Trac
         recom_factor = m_kine_charge.proton_recom_factor;
     }
 
-    ChargeMap charge_2d_u, charge_2d_v, charge_2d_w;
-    WireMap   map_apa_ch_plane_wires;
-    track_fitter.collect_2D_charge(charge_2d_u, charge_2d_v, charge_2d_w, map_apa_ch_plane_wires);
+    // doc pr/35 §10.4/§10.11b (F3 = P4): reuse the cached charge maps the way
+    // the shower overload at :242 does, instead of re-collecting the whole 2-D
+    // charge map on every per-segment call (the prototype hoists this once via
+    // collect_2D_charges(); the port did not).  Output-identical: §5.6 shows
+    // this path reads only .charge, and the §10.11a growth check measured
+    // m_charge_data unchanged between cache time and every fill_kine_tree
+    // call over nueCC48 (33/48 events engaged, 0 growth).  The check below
+    // stays as the invariant's guard: if charge data ever grows after the
+    // cache is taken, the cached maps are stale and this becomes a behaviour
+    // question again -- warn loudly rather than silently drift.
+    {
+        const size_t now = track_fitter.get_charge_data().size();
+        if (m_charge_data_size_at_collect != 0 && now != m_charge_data_size_at_collect) {
+            SPDLOG_LOGGER_WARN(s_log, "cal_kine_charge(segment): charge data grew since cache: {} -> {} "
+                               "-- cached maps stale, kine_charge may be undercounting",
+                               m_charge_data_size_at_collect, now);
+        }
+        else {
+            SPDLOG_LOGGER_DEBUG(s_log, "cal_kine_charge(segment): charge data size {} == cache-time size",
+                                now);
+        }
+    }
+    if (m_charge_2d_u.empty()) collect_charge_maps(track_fitter);
 
     auto pcloud1 = segment->dpcloud("associate_points");
     auto pcloud2 = segment->dpcloud("fit");
@@ -271,7 +294,7 @@ double PatternAlgorithms::cal_kine_charge(SegmentPtr segment, Graph& graph, Trac
 
     return kine_charge_from_maps(
         pcloud1, pcloud2, fudge_factor, recom_factor,
-        charge_2d_u, charge_2d_v, charge_2d_w, map_apa_ch_plane_wires,
+        m_charge_2d_u, m_charge_2d_v, m_charge_2d_w, m_map_apa_ch_plane_wires,
         grouping,
         [&](WireCell::Point& pt) { return cal_corr_factor(pt, track_fitter, dv); },
         0.6 * units::cm, m_kine_charge);

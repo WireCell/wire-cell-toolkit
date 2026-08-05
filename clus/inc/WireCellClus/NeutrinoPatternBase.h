@@ -62,6 +62,12 @@ namespace WireCell::Clus::PR {
         /// "low risk, note only") -- if the model's Wi is ever wired in, this
         /// knob is what it replaces.
         double w_value{23.6};
+        /// doc pr/35 §10.2 (F1 = P1 + P8).  false = today's cached
+        /// Shower::get_particle_type() read at the four fill_kine_tree sites.
+        /// true = the prototype's live start-segment read (kine.h:53 :67 :175
+        /// :187), correct independently of the cache's refresh schedule.
+        /// Config key kine_shower_pdg_live; absent => legacy, byte-identical.
+        bool shower_pdg_live{false};
     };
 
     struct Pi0KineFeatures {
@@ -630,6 +636,13 @@ namespace WireCell::Clus::PR {
         // and all cal_kine_charge call sites to avoid O(N_hits) re-collection per shower.
         ChargeMap m_charge_2d_u, m_charge_2d_v, m_charge_2d_w;
         WireMap   m_map_apa_ch_plane_wires;
+        // doc pr/35 §10.11a (F3) discriminating diagnostic: TrackFitting's
+        // m_charge_data size at the moment the cache above was filled.  The
+        // segment cal_kine_charge overload compares it against the size at its
+        // own (fresh, per-call) collection; a mismatch means the cache and a
+        // fresh collection would see different charge, i.e. caching the segment
+        // path would be a behaviour change, not a perf change.  Log-only.
+        size_t m_charge_data_size_at_collect{0};
 
         // Populate the cached charge maps from track_fitter.
         // Call once at the start of shower_clustering_with_nv; the maps are then

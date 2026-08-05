@@ -69,6 +69,12 @@ KineInfo PatternAlgorithms::fill_kine_tree(
     }
     else {
         // TODO: SCE correction requires a valid geom_helper; using raw vertex position for now.
+        // doc pr/35 §10.5 (F4 = P5): the prototype SCE-corrects unconditionally
+        // (kine.h:3-9); without a geom_helper the _corr branches are raw and
+        // nothing downstream can tell.  Owner decision 2026-08-04: keep the raw
+        // vertex on SBND, but say so at runtime.
+        SPDLOG_LOGGER_WARN(s_log, "fill_kine_tree: no geom_helper -- kine_nu_*_corr are "
+                                  "the RAW fitted vertex despite the _corr name");
         ktree.kine_nu_x_corr = static_cast<float>(nu_vtx.x() / units::cm);
         ktree.kine_nu_y_corr = static_cast<float>(nu_vtx.y() / units::cm);
         ktree.kine_nu_z_corr = static_cast<float>(nu_vtx.z() / units::cm);
@@ -97,6 +103,27 @@ KineInfo PatternAlgorithms::fill_kine_tree(
     }
 
     // -------------------------------------------------------------------------
+    // Helper: the shower PDG this tree publishes.
+    // doc pr/35 §10.2 (F1 = P1 + P8): the prototype reads the LIVE start-segment
+    // PDG at every fill_kine_tree site (kine.h:53 :67 :175 :187) where the
+    // toolkit reads Shower's cached particle_type, whose refresh path is
+    // incomplete (P1).  kine_shower_pdg_live selects the live read; the
+    // cached-vs-live PAIR is logged unconditionally (pr/32 F3 counter
+    // precedent) so the mismatch population is measurable without an A/B --
+    // the 11-vs-211 and cache-stuck-at-0 classes must stay distinguishable.
+    // -------------------------------------------------------------------------
+    auto shower_kine_pdg = [&](const ShowerPtr& shower) -> int {
+        const int  cached   = shower->get_particle_type();
+        const bool has_live = shower->start_segment() && shower->start_segment()->has_particle_info();
+        const int  live     = has_live ? shower->start_segment()->particle_info()->pdg() : cached;
+        if (cached != live) {
+            SPDLOG_LOGGER_INFO(s_log, "fill_kine_tree: kine_shower_pdg cached={} live={} shower_id={}",
+                               cached, live, shower->get_shower_id());
+        }
+        return (m_kine_charge.shower_pdg_live && has_live) ? live : cached;
+    };
+
+    // -------------------------------------------------------------------------
     // Helper: push one shower's kinematics into ktree vectors.
     // kine_energy_included is pushed by the caller (value differs by context).
     // -------------------------------------------------------------------------
@@ -104,9 +131,10 @@ KineInfo PatternAlgorithms::fill_kine_tree(
         double kine_best   = shower->get_kine_best();
         double kine_charge = shower->get_kine_charge();
         double kine_range  = shower->get_kine_range();
+        const int pdg      = shower_kine_pdg(shower);
 
         ktree.kine_energy_particle.push_back(static_cast<float>(kine_best / units::MeV));
-        ktree.kine_particle_type.push_back(shower->get_particle_type());
+        ktree.kine_particle_type.push_back(pdg);
 
         if (std::fabs(kine_best - kine_charge) < 0.001 * kine_best)
             ktree.kine_energy_info.push_back(2); // charge
@@ -116,7 +144,7 @@ KineInfo PatternAlgorithms::fill_kine_tree(
             ktree.kine_energy_info.push_back(0); // dQdx
 
         // Add rest-mass correction for non-electrons/positrons
-        if (shower->get_particle_type() != 11) {
+        if (pdg != 11) {
             SegmentPtr start_sg = shower->start_segment();
             if (start_sg && start_sg->particle_info()) {
                 ktree.kine_reco_add_energy += static_cast<float>(
@@ -269,9 +297,10 @@ KineInfo PatternAlgorithms::fill_kine_tree(
         double kine_best   = shower->get_kine_best();
         double kine_charge = shower->get_kine_charge();
         double kine_range  = shower->get_kine_range();
+        const int pdg      = shower_kine_pdg(shower);
 
         ktree.kine_energy_particle.push_back(static_cast<float>(kine_best / units::MeV));
-        ktree.kine_particle_type.push_back(shower->get_particle_type());
+        ktree.kine_particle_type.push_back(pdg);
 
         if (std::fabs(kine_best - kine_charge) < 0.001 * kine_best)
             ktree.kine_energy_info.push_back(2);
@@ -283,7 +312,7 @@ KineInfo PatternAlgorithms::fill_kine_tree(
         ktree.kine_energy_included.push_back(vtx_type != 3 ? 1 : vtx_type);
 
         // Binding energy correction for proton showers with length > 5 cm
-        if (shower->get_particle_type() == 2212) {
+        if (pdg == 2212) {
             SegmentPtr start_sg = shower->start_segment();
             if (start_sg && segment_track_length(start_sg) > 5.0 * units::cm) {
                 ktree.kine_reco_add_energy += static_cast<float>(ave_binding_energy / units::MeV);
