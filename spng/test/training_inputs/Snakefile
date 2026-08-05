@@ -186,7 +186,7 @@ rule spng_mpsigproc:
     input:
         "cosmics_{sample}_wct-depos.npz",
     envmodules:
-      "wire-cell-toolkit/spng-gcc-11.5.0-lspm56h",
+      "wire-cell-toolkit/spng-gcc-11.5.0-fk4b2v4"
     output:
         "sigproc-spng-mp-cosmics_{sample}.tar"
     params:
@@ -198,7 +198,7 @@ rule spng_mpsigproc:
     shadow: "minimal"
     shell:
         """
-        export WIRECELL_PATH=/lbne/u/jcalcutt/wire-cell-toolkit/spng/:/lbne/u/jcalcutt/wire-cell-toolkit/spng/cfg:/lbne/u/jcalcutt/wire-cell-data:${{WIRECELL_PATH}}
+        #export WIRECELL_PATH=/lbne/u/jcalcutt/wire-cell-toolkit/spng/:/lbne/u/jcalcutt/wire-cell-toolkit/spng/cfg:/lbne/u/jcalcutt/wire-cell-data:${{WIRECELL_PATH}}
         wire-cell -l stdout -L debug cfg/spng/{params.jsonnet} -A "input={input}" \
             -A "tpcid={params.tpcid}" -A "detname={params.detname}" --tla-code "crossed_views=[1,1,1]" \
             -A "device={params.device}"
@@ -208,6 +208,8 @@ rule spng_mpsigproc:
         """
 
 rule spng_mpsigproc_lines:
+    resources:
+        gpu = 1 if config['device'] == 'gpu' else 0
     input:
         'linedepos-pdhd-{plane}plane-t1_{t1}-t2_{t2}_wct-depos.npz'
     output:
@@ -412,34 +414,61 @@ rule run_one:
     input:
         rec=lambda w : ('linedepos-pdhd-{plane}plane-t1_{t1}-t2_{t2}-g4-rec-' + f'{plane_to_view[w.plane]}.h5'),
         tru=lambda w : ('linedepos-pdhd-{plane}plane-t1_{t1}-t2_{t2}-g4-tru-' + f'{plane_to_view[w.plane]}.h5'),
+    benchmark:
+        '<benchmarks>/run_one_{t1}_{t2}_{plane}'
     output:
         '<results>/test_line_{plane}plane_t1-{t1}-t2-{t2}.pt'
     params:
-        device='cpu',
+        device=config['device'],
         model=config['model'],
         app=config['dnnapp'],
         cfg=config['cfg'],
+    resources:
+        gpu = 1 if config['device'] == 'gpu' else 0
     shell: """
     wcpy dnn run_one \
     {input.rec} {input.tru} \
     --app {params.app} \
     -l {params.model} \
     -c {params.cfg} \
+    --manual-sigmoid \
+    -d {params.device} \
     -o {output}
-    """     
+    """
 
 config.setdefault('cpt_dir', '.')
+config.setdefault('proc', '0')
+config.setdefault('cluster', '0')
 use rule run_one as run_one_epoch with:
     pathvars:
-      results="epoch_{epoch}"
+      results="epoch_{epoch}",
+      benchmarks="epoch_benchmarks_{epoch}"
     params:
-      model=f'{config["cpt_dir"]}/checkpoint_0_0_{{epoch}}.pt'
+      model=f'{config["cpt_dir"]}/checkpoint_{config["proc"]}_{config["cluster"]}_{{epoch}}.pt'
 
+use rule run_one as run_one_xvu with:
+    input:
+        rec=[f'linedepos-pdhd-{{plane}}plane-t1_{{t1}}-t2_{{t2}}-g4-rec-{i}.h5' for i in range(3)],
+        tru=[f'linedepos-pdhd-{{plane}}plane-t1_{{t1}}-t2_{{t2}}-g4-tru-{i}.h5' for i in range(3)],
+    output:
+        '<results>/xvu-test_line_{plane}plane_t1-{t1}-t2-{t2}.pt'
+
+use rule run_one_xvu as run_one_xvu_epoch with:
+    pathvars:
+      results="epoch_{epoch}",
+      benchmarks="epoch_benchmarks_{epoch}"
+    params:
+      model=f'{config["cpt_dir"]}/checkpoint_{config["proc"]}_{config["cluster"]}_{{epoch}}.pt'
 
 def get_input_by_plane(wildcards):
     angles = get_angles_by_plane(wildcards.plane)
     return [
         f'<results>/test_line_{wildcards.plane}plane_t1-{t1}-t2-{t2}.pt' for t1,t2 in angles
+    ]
+def get_input_by_plane_xvu(wildcards):
+    angles = get_angles_by_plane(wildcards.plane)
+    return [
+        f'<results>/xvu-test_line_{wildcards.plane}plane_t1-{t1}-t2-{t2}.pt' for t1,t2 in angles
     ]
 
 rule plot_eff_pur:
@@ -449,8 +478,9 @@ rule plot_eff_pur:
         png='<results>/all_eff_pur_{plane}plane.png',
         npz='<results>/all_eff_pur_{plane}plane.npz',
     params:
-        test_tpcs = [int(i) for i in config['test_tpcs']]
-
+        test_tpcs = [int(i) for i in config['test_tpcs']] #This is a bad name for this but oh well
+    benchmark:
+        '<benchmarks>/{plane}_plot_eff_pur'
     run:
         import torch
         import matplotlib.pyplot as plt
@@ -501,7 +531,21 @@ rule plot_eff_pur:
 
 use rule plot_eff_pur as plot_eff_pur_epoch with:
     pathvars:
-        results="epoch_{epoch}"
+        results="epoch_{epoch}",
+        benchmarks="{plane}_epoch_{epoch}_plot_eff_pur_benchmarks"
+
+use rule plot_eff_pur as plot_eff_pur_xvu with:
+    input: get_input_by_plane_xvu
+    output:
+        png='<results>/all_eff_pur_{plane}plane-xvu.png',
+        npz='<results>/all_eff_pur_{plane}plane-xvu.npz',
+    params:
+        test_tpcs = lambda wildcards: [plane_to_view[wildcards.plane]]
+
+use rule plot_eff_pur_xvu as plot_eff_pur_xvu_epoch with:
+    pathvars:
+        results="epoch_{epoch}",
+        benchmarks="{plane}_epoch_{epoch}_plot_eff_pur_benchmarks"
 
 def get_input(wildcards):
     return f'test_line_{wildcards.plane}plane_t1-{wildcards.t1}-t2-{wildcards.t2}.pt'
@@ -512,7 +556,8 @@ rule plot_feat_y_labels:
         # 'test_line_txzu82-txzv82.pt'
         get_input
     output:
-        temp('line-display-{plane}plane-t1_{t1}-t2_{t2}.pickle')
+        pickle=temp('line-display-{plane}plane-t1_{t1}-t2_{t2}.pickle'),
+        png='line-display-{plane}plane-t1_{t1}-t2_{t2}.png'
     run:
         import torch
         import matplotlib
@@ -537,11 +582,21 @@ rule plot_feat_y_labels:
             im = axs[i].imshow(f[0].detach().cpu(), aspect='auto'); plt.colorbar(im)
         # plt.title(f'XZu:{wildcards.txzu}, XZv:{wildcards.txzv}')
 
-        f = output[0]
+        f = output.png
+        plt.savefig(f)
+
+        f = output.pickle
         # print(f)
         # plt.savefig(f)
         import pickle
         pickle.dump(fig, open(f, 'wb'))
+
+use rule plot_feat_y_labels as plot_feat_y_labels_xvu with:
+    input: '<results>/xvu-test_line_{plane}plane_t1-{t1}-t2-{t2}.pt'
+    output: 
+        pickle=temp('xvu-line-display-{plane}plane-t1_{t1}-t2_{t2}.pickle'),
+        png='line-display-{plane}plane-t1_{t1}-t2_{t2}.png'
+
 
 def get_plot_input_by_plane(w):
     if w.plane == 'u':
@@ -553,6 +608,9 @@ def get_plot_input_by_plane(w):
     res = [f'line-display-{w.plane}plane-t1_{t1}-t2_{t2}.pickle' for t1, t2 in angles]
     return res
 
+def xvu_get_plot_input_by_plane(w):
+    return ['xvu-' + r for r in get_plot_input_by_plane(w)]
+
 rule collect_feat_y_labels_uvplane:
     input:
         get_plot_input_by_plane
@@ -560,6 +618,12 @@ rule collect_feat_y_labels_uvplane:
         'line-displays_{plane}plane.tar'
     shell:
         'tar -cf {output} {input}'
+
+use rule collect_feat_y_labels_uvplane as xvu_collect_feat_y_labels_uvplane with:
+    input:
+        xvu_get_plot_input_by_plane
+    output:
+        'xvu-line-displays_{plane}plane.tar'
 
 rule all_plots_u:
     input:
@@ -576,6 +640,39 @@ rule all_plots_w:
         tar=f'line-displays_wplane.tar',
         effpur=f'all_eff_pur_wplane.png',
         npy=f'all_eff_pur_wplane.npz',
+
+rule all_plots_u_xvu:
+    input:
+        tar=f'xvu-line-displays_uplane.tar',
+        effpur=f'<results>/all_eff_pur_uplane-xvu.png',
+        npy=f'<results>/all_eff_pur_uplane-xvu.npz',
+rule all_plots_v_xvu:
+    input:
+        tar=f'xvu-line-displays_vplane.tar',
+        effpur=f'<results>/all_eff_pur_vplane-xvu.png',
+        npy=f'<results>/all_eff_pur_vplane-xvu.npz',
+rule all_plots_w_xvu:
+    input:
+        tar=f'xvu-line-displays_wplane.tar',
+        effpur=f'<results>/all_eff_pur_wplane-xvu.png',
+        npy=f'<results>/all_eff_pur_wplane-xvu.npz',
+
+rule all_eff_pur_xvu:
+    input:
+        '<results>/all_eff_pur_uplane-xvu.npz',
+        '<results>/all_eff_pur_vplane-xvu.npz',
+        '<results>/all_eff_pur_wplane-xvu.npz',
+
+
+def glob_epochs(w):
+    from glob import glob
+    # epoch_dirs = list(set(glob("epoch_**/")) - set(glob("epoch_benchmarks_**/")))
+    cpts = glob(f'{config["cpt_dir"]}/checkpoint*.pt')
+    return [f'epoch_{d}/all_eff_pur_{p}plane-xvu.npz' for d in range(len(cpts)) for p in ('u', 'v', 'w')]
+
+rule all_epochs_xvu:
+    input: glob_epochs
+        
 
 #rule run_checkpoints:
 #    input:
@@ -594,11 +691,17 @@ def get_epochs(wildcards):
         key = lambda s : int(s.split('/')[0].split('_')[-1])
     )
 
+def get_epochs_xvu(wildcards):
+    from glob import glob
+    return sorted(
+        glob(f'epoch_*/all_eff_pur_{wildcards.plane}plane-xvu.npz'),
+        key = lambda s : int(s.split('/')[0].split('_')[-1])
+    )
 
 rule compare_effpur_epochs:
     input: get_epochs
     output:
-        pdf='eff_pur_epochs_{plane}plane.pdf',
+        pdf='<results>/eff_pur_epochs_{plane}plane.pdf',
         # npz='eff_pur_epochs_{plane}plane.npz',
     run:
         print(input)
@@ -641,7 +744,6 @@ rule compare_effpur_epochs:
             plt.grid(True, axis='both')
             for i, eff in enumerate(effs.T):
                 plt.plot(eff, label=f'Epoch {epoch_nums[i]}')
-            plt.legend()
             pdf.savefig()
             plt.close()
 
@@ -653,6 +755,28 @@ rule compare_effpur_epochs:
             plt.grid(True, axis='both')
             for i, pur in enumerate(purs.T):
                 plt.plot(pur, label=f'Epoch {epoch_nums[i]}')
-            plt.legend()
             pdf.savefig()
             plt.close()
+
+            plt.figure()
+            plt.title('Purity -- all epochs')
+            img = plt.imshow(purs, aspect='auto', interpolation='none', vmin=0.5, vmax=1.0)
+            plt.xlabel('Epoch')
+            plt.ylabel('Angle')
+            cbar = plt.colorbar(img); cbar.ax.set_title('Purity', pad=10)
+            pdf.savefig()
+            plt.close()
+
+            plt.figure()
+            plt.title('Efficiency -- all epochs')
+            img = plt.imshow(effs, aspect='auto', interpolation='none', vmin=0.5, vmax=1.0)
+            plt.xlabel('Epoch')
+            plt.ylabel('Angle')
+            cbar = plt.colorbar(img); cbar.ax.set_title('Efficiency', pad=10)
+            pdf.savefig()
+            plt.close()
+
+use rule compare_effpur_epochs as compare_effpur_epochs_xvu with:
+    input: get_epochs_xvu
+    output:
+        pdf='<results>/eff_pur_epochs_{plane}plane-xvu.pdf',
