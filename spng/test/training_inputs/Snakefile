@@ -246,10 +246,13 @@ rule spng_depos_to_adc:
         "drifted-{name}_wct-depos.npz"
     output:
         "spng-sigproc-{name}_wct-depos.npz"
+    params:
+        device=config.get('device', 'cpu'),
+        detname=config.get('detname', 'pdhd')
     shadow: "minimal"
     shell:
         """
-        wire-cell -l stdout -L debug -A "input={input}" -A "output={output}" spng/adc-to-spng-simple.jsonnet
+        wire-cell -l stdout -L debug -A "input={input}" -A "output={output}" -A "device={params.device}" -A "detname={params.detname}" spng/adc-to-spng-simple.jsonnet
         """
         
 config.setdefault('tpcid', '0')
