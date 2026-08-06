@@ -98,6 +98,7 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_track_comp_empty_abstain       = get(config, "track_comp_empty_abstain",       m_track_comp_empty_abstain);
     m_shower_topo_reset              = get(config, "shower_topo_reset",              m_shower_topo_reset);
     m_reclass_preserve_4mom          = get(config, "reclass_preserve_4mom",          m_reclass_preserve_4mom);
+    m_reclass_never_computed_ke_floor = get(config, "reclass_never_computed_ke_floor", m_reclass_never_computed_ke_floor);
     m_dir_track_median_local         = get(config, "dir_track_median_local",         m_dir_track_median_local);
     m_examine_showers_vertex_by_index = get(config, "examine_showers_vertex_by_index", m_examine_showers_vertex_by_index);
     m_iso_endpoint               = get(config, "iso_endpoint",               m_iso_endpoint);
@@ -258,6 +259,9 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_track_pid_persist_dqdx      = get(config, "track_pid_persist_dqdx",      m_track_pid_persist_dqdx);
     m_shower_reclass_dqdx_guard   = get(config, "shower_reclass_dqdx_guard",   m_shower_reclass_dqdx_guard);
     m_shower_topo_dqdx_guard      = get(config, "shower_topo_dqdx_guard",      m_shower_topo_dqdx_guard);
+    // doc sbnd_xin/docs/pr/40 round 2 -- follow-on fixes to the pr/40 round.
+    m_track_pid_persist_4mom      = get(config, "track_pid_persist_4mom",      m_track_pid_persist_4mom);
+    m_shower_proton_daughter_pion = get(config, "shower_proton_daughter_pion", m_shower_proton_daughter_pion);
 
     if (!m_trackfitting_config_file.empty()) {
         load_trackfitting_config(m_trackfitting_config_file);
@@ -312,6 +316,7 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["track_comp_empty_abstain"]       = m_track_comp_empty_abstain;       // false = legacy (empty window "confirms" the direction)
     cfg["shower_topo_reset"]              = m_shower_topo_reset;              // false = legacy (set-only kShowerTopology, stale dirsign)
     cfg["reclass_preserve_4mom"]          = m_reclass_preserve_4mom;          // false = legacy (unconditional 4-momentum rewrite)
+    cfg["reclass_never_computed_ke_floor"] = m_reclass_never_computed_ke_floor; // false = legacy (never-computed reads KE = -mass)
     cfg["dir_track_median_local"]         = m_dir_track_median_local;         // false = legacy (filtered median helper)
     cfg["examine_showers_vertex_by_index"] = m_examine_showers_vertex_by_index; // false = legacy (proximity-ordered pair)
     cfg["iso_endpoint"]               = m_iso_endpoint;                // false = legacy wire-footprint boundary endpoints
@@ -391,6 +396,9 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["track_pid_persist_dqdx"]    = m_track_pid_persist_dqdx;    // false = legacy free-end-gated persistence
     cfg["shower_reclass_dqdx_guard"] = m_shower_reclass_dqdx_guard; // false = legacy unconditional wholesale reclassification
     cfg["shower_topo_dqdx_guard"]    = m_shower_topo_dqdx_guard;    // false = legacy (dQ/dx never consulted by the topology test)
+    // doc sbnd_xin/docs/pr/40 round 2 -- two follow-on defects from the pr/40 fix round.
+    cfg["track_pid_persist_4mom"]      = m_track_pid_persist_4mom;      // false = legacy rest-mass-only 4-mom stub (zero KE)
+    cfg["shower_proton_daughter_pion"] = m_shower_proton_daughter_pion; // false = legacy (proton daughter never consulted)
 
 
     return cfg;
@@ -648,6 +656,7 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
     pattern_algos.m_track_comp_empty_abstain        = m_track_comp_empty_abstain;
     pattern_algos.m_shower_topo_reset               = m_shower_topo_reset;
     pattern_algos.m_reclass_preserve_4mom           = m_reclass_preserve_4mom;
+    pattern_algos.m_reclass_never_computed_ke_floor = m_reclass_never_computed_ke_floor; // doc pr/40 round 2 F6
     pattern_algos.m_dir_track_median_local          = m_dir_track_median_local;
     pattern_algos.m_examine_showers_vertex_by_index = m_examine_showers_vertex_by_index;
     // segment_is_shower_trajectory is a free function reached from three files
@@ -708,6 +717,9 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
     pattern_algos.m_track_pid_persist_dqdx    = m_track_pid_persist_dqdx;    // F1: threaded via track_pid_options()
     pattern_algos.m_shower_reclass_dqdx_guard = m_shower_reclass_dqdx_guard; // F2
     pattern_algos.m_shower_topo_dqdx_guard    = m_shower_topo_dqdx_guard;    // F3
+    // doc sbnd_xin/docs/pr/40 round 2 -- two follow-on defects from the pr/40 round.
+    pattern_algos.m_track_pid_persist_4mom      = m_track_pid_persist_4mom;      // F4: threaded via track_pid_options()
+    pattern_algos.m_shower_proton_daughter_pion = m_shower_proton_daughter_pion; // F5
     // Muon dQ/dx-vs-length envelope: c0/c1/power dimensionless, pivot cm -> internal.
     pattern_algos.m_muon_dqdx_curve = {m_muon_dqdx_curve[0], m_muon_dqdx_curve[1],
                                        m_muon_dqdx_curve[2] * units::cm, m_muon_dqdx_curve[3]};

@@ -2,6 +2,7 @@
 #include "WireCellClus/Facade_Cluster.h"
 #include "WireCellClus/DynamicPointCloud.h"
 #include "WireCellClus/ClusteringFuncs.h"
+#include "WireCellClus/PRTrajectoryView.h"
 #include "WireCellUtil/Units.h"
 #include "WireCellUtil/KSTest.h"
 #include "WireCellUtil/Logging.h"
@@ -913,6 +914,53 @@ namespace WireCell::Clus::PR {
         if (median <= 0) return false;  // no evidence, not MIP-like evidence
         const double ratio = median / MIP_dQdx;
         return (ratio > 1.75) || (ratio < 1.2);
+    }
+
+    // doc sbnd_xin/docs/pr/40 round 2 F5 -- see the header comment.
+    bool segment_has_proton_daughter(Graph& graph, SegmentPtr seg, VertexPtr main_vertex, double MIP_dQdx) {
+        static const bool dbg = std::getenv("WCT_PROTON_DAUGHTER_DEBUG") != nullptr;
+        if (!main_vertex || !seg || MIP_dQdx <= 0) {
+            if (dbg) std::fprintf(stderr, "PROTON_DAUGHTER_DEBUG seg=%p: early false (main_vertex=%p seg=%p MIP=%g)\n",
+                                   (void*)seg.get(), (void*)main_vertex.get(), (void*)seg.get(), MIP_dQdx);
+            return false;
+        }
+
+        auto [v1, v2] = find_vertices(graph, seg);
+        if (dbg) std::fprintf(stderr, "PROTON_DAUGHTER_DEBUG seg=%p (clus=%d idx=%zu): v1=%p v2=%p main_vertex=%p\n",
+                               (void*)seg.get(), seg->cluster() ? seg->cluster()->get_cluster_id() : -1,
+                               seg->get_graph_index(), (void*)v1.get(), (void*)v2.get(), (void*)main_vertex.get());
+        if (!v1 || !v2) return false;
+
+        VertexPtr far_v = nullptr;
+        if (v1 == main_vertex) far_v = v2;
+        else if (v2 == main_vertex) far_v = v1;
+        else {
+            if (dbg) std::fprintf(stderr, "PROTON_DAUGHTER_DEBUG seg=%p: neither endpoint IS main_vertex\n", (void*)seg.get());
+            return false;  // does not emanate from the neutrino vertex
+        }
+
+        if (!far_v->descriptor_valid()) {
+            if (dbg) std::fprintf(stderr, "PROTON_DAUGHTER_DEBUG seg=%p: far_v descriptor invalid\n", (void*)seg.get());
+            return false;
+        }
+
+        int nnbr = 0;
+        for (auto edesc : sorted_out_edges(far_v->get_descriptor(), graph)) {
+            SegmentPtr nbr = graph[edesc].segment;
+            if (!nbr || nbr == seg) continue;
+            ++nnbr;
+            const bool has_pi = nbr->has_particle_info();
+            const int pdg = has_pi ? nbr->particle_info()->pdg() : 0;
+            const double median = segment_median_dQ_dx(nbr);
+            if (dbg) std::fprintf(stderr, "PROTON_DAUGHTER_DEBUG seg=%p: nbr=%p (clus=%d idx=%zu) has_pi=%d pdg=%d median/MIP=%g\n",
+                                   (void*)seg.get(), (void*)nbr.get(),
+                                   nbr->cluster() ? nbr->cluster()->get_cluster_id() : -1, nbr->get_graph_index(),
+                                   has_pi, pdg, median / MIP_dQdx);
+            if (!has_pi || pdg != 2212) continue;
+            if (median > 0 && median / MIP_dQdx > 1.75) return true;
+        }
+        if (dbg) std::fprintf(stderr, "PROTON_DAUGHTER_DEBUG seg=%p: %d neighbour(s), none qualified\n", (void*)seg.get(), nnbr);
+        return false;
     }
 
     double segment_rms_dQ_dx(SegmentPtr seg)
@@ -1878,8 +1926,24 @@ namespace WireCell::Clus::PR {
             // because downstream consumers gate on pdg/flag_shower, not on
             // this vector's orientation, for exactly the segments this knob
             // targets (see doc pr/40 Part 0).
+            //
+            // doc sbnd_xin/docs/pr/40 round 2 F4: the non-free-end branch below used
+            // to store a rest-mass-only 4-vector (E = m, zero momentum) as a
+            // literal stand-in for "the prototype's zero-momentum stub".
+            // That makes Aux::ParticleInfo's kinetic_energy() (= E - mass)
+            // exactly ZERO for every segment F1 rescues this way -- measured
+            // as a real defect (SBND evt 174637 seg 9050, Bee PF node
+            // "mu- 0 MeV") once track_pid_persist_dqdx went SBND-default-ON.
+            // segment_cal_4mom itself has NO free-end dependence (its only
+            // direction coupling is segment_cal_dir_3vector, which already
+            // degrades gracefully to a zero 3-vector when dirsign()==0) --
+            // the free-end gate here was purely external and stricter than
+            // it needed to be.  track_pid_persist_4mom calls it
+            // unconditionally instead, giving a correct KE with (at worst) a
+            // zero-direction momentum.  Independent of
+            // track_pid_persist_dqdx: false = legacy stub, byte-identical.
             WireCell::D4Vector<double> four_momentum(0.0, 0.0, 0.0, 0.0);
-            if (free_end_dir) {
+            if (free_end_dir || pid_opts.track_pid_persist_4mom) {
                 four_momentum = segment_cal_4mom(segment, pdg_code, particle_data, recomb_model, MIP_dQdx);
             } else {
                 const double mass = particle_data->get_particle_mass(pdg_code);

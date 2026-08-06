@@ -499,6 +499,19 @@ namespace WireCell::Clus::PR {
         // kine_reco_Enu directly -- validate alone (doc pr/31 §10.2).
         bool   m_reclass_preserve_4mom{false};
 
+        // doc sbnd_xin/docs/pr/40 round 2 F6.  reclass_pinfo (NeutrinoTrackShowerSep.cxx)
+        // is reachable, with m_reclass_preserve_4mom true, on a segment that
+        // never had a particle_info (had==false): the legacy code finishes by
+        // overwriting the just-built (mass,0,0,0) placeholder to an all-zero
+        // 4-vector, so ParticleInfo::kinetic_energy() (= e() - mass) reads
+        // -mass -- a NEGATIVE kinetic energy wherever a caller (the Bee
+        // PF-tree writer among them) reads it.  TRUE = leave the (mass,0,0,0)
+        // placeholder alone in that case (KE == 0) instead of zeroing further.
+        // Independent of m_reclass_preserve_4mom's own value (only reached
+        // through one of its sub-branches) and of F4/F5.  C++ default false =
+        // legacy = byte-identical.
+        bool   m_reclass_never_computed_ke_floor{false};
+
         // F4 (was P8).  segment_determine_dir_track's median dQ/dx comes from
         // segment_median_dQ_dx's FILTERED rebuild while the PID receives the
         // local unfiltered vector (zeros kept) -- the toolkit disagreeing with
@@ -552,6 +565,11 @@ namespace WireCell::Clus::PR {
         // byte-identical.
         bool   m_track_pid_persist_dqdx{false};
 
+        // doc sbnd_xin/docs/pr/40 round 2 F4.  Travels via
+        // TrackPidOptions::track_pid_persist_4mom -- see its comment in
+        // PRSegmentFunctions.h.  C++ default false = legacy = byte-identical.
+        bool   m_track_pid_persist_4mom{false};
+
         // doc sbnd_xin/docs/pr/40 F2: spare a segment from an unconditional
         // track-to-electron reclassification when its own median dQ/dx is
         // decisively proton- or muon-like (segment_dqdx_spares_electron_
@@ -574,6 +592,49 @@ namespace WireCell::Clus::PR {
         // PRSegmentFunctions.h.  Same designed-divergence status as F2.
         // C++ default false = legacy = byte-identical.
         bool   m_shower_topo_dqdx_guard{false};
+
+        // doc sbnd_xin/docs/pr/40 round 2 F5: an electron cannot father a proton.
+        // Unlike F2/F3 (which guard the stage-3 wholesale conversion sites in
+        // NeutrinoTrackShowerSep.cxx), this fires inside
+        // set_default_shower_particle_info -- the SINGLE stage-4 choke point
+        // where any flag_shower segment still missing particle_info gets
+        // defaulted to electron (NeutrinoPatternBase.cxx, called from
+        // examine_direction).  The stage-3 sites have no main_vertex yet
+        // (determine_main_vertex has not run), so the neutrino-vertex
+        // topology test below cannot be evaluated there; this choke point is
+        // also where SBND evt 256587 seg 11079 -- the actual owner-reported
+        // case this closes -- was traced to (doc pr/40's Part-0 "topology
+        // path; PID never ran").  Relabel to PION (211) instead of electron
+        // when the candidate segment (a) emanates from the neutrino vertex
+        // (graph identity, not a distance cut -- every measured case sits at
+        // d=0.00 cm) and (b) its FAR end is a vertex whose out-edges include
+        // a segment already PID'd proton (2212) AND independently
+        // charge-confirmed (median dQ/dx > 1.75x MIP by its own points).
+        // Measured (doc pr/40 round 2): 5/2209 electron-labelled segments in the
+        // 48-event nueCC48 population satisfy both; a naive "any electron
+        // segment with a >1.75x MIP neighbour" rule (no vertex requirement,
+        // no charge confirmation) fires 348/2209 -- the neutrino-vertex
+        // requirement is what excludes the ordinary, CORRECT nueCC topology
+        // where an electron and a proton merely share the neutrino vertex
+        // as siblings rather than parent/daughter.  This is a designed
+        // divergence, not a port-fidelity fix -- the prototype has no
+        // proton-daughter veto anywhere -- see porting_dictionary.md.  C++
+        // default false = legacy = byte-identical.
+        //
+        // KNOWN BROKEN END-TO-END (doc pr/40 round 2, not yet fixed): this
+        // override DOES fire correctly here (traced: pdg 11 -> 211 at this
+        // call site) but a THIRD writer, Shower::update_particle_type
+        // (PRShower.cxx ~788-801, called from 9 sites in
+        // NeutrinoShowerClustering.cxx), runs later in the same pass and
+        // unconditionally reasserts electron on the shower's start segment
+        // whenever shower_length > track_length -- with no PID/topology
+        // awareness at all.  For evt 256587 seg 11079 this reverts the fix
+        // (traced: pdg 211 -> 11 at PRShower.cxx:801); the census shows the
+        // override survives in only 1/2209 cases where that third writer
+        // happens not to fire on the same shower.  Turning this knob ON does
+        // NOT reliably deliver the fix yet -- left OFF pending a round-3 guard
+        // in update_particle_type itself.
+        bool   m_shower_proton_daughter_pion{false};
 
         // ---- Detector-extent literals (doc sbnd_xin/docs/pr/2 sec. 2e(iv)) ----
         // The uBooNE active volume the prototype was written against is
@@ -622,6 +683,7 @@ namespace WireCell::Clus::PR {
             o.track_comp_empty_abstain = m_track_comp_empty_abstain;   // doc pr/31 §12 F6
             o.dir_track_median_local = m_dir_track_median_local;       // doc pr/31 §12 F4
             o.track_pid_persist_dqdx = m_track_pid_persist_dqdx;       // doc pr/40 F1
+            o.track_pid_persist_4mom = m_track_pid_persist_4mom;       // doc pr/40 round 2 F4
             return o;
         }
 
@@ -911,7 +973,12 @@ namespace WireCell::Clus::PR {
         bool examine_maps(Graph&graph, Facade::Cluster& cluster);
         void examine_all_showers(Graph& graph, Facade::Cluster& cluster, const Clus::ParticleDataSet::pointer& particle_data);
         void shower_determining_in_main_cluster(Graph& graph, Facade::Cluster& cluster, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, IDetectorVolumes::pointer dv);
-        void set_default_shower_particle_info(Graph& graph, Facade::Cluster& cluster, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model);
+        // main_vertex: doc sbnd_xin/docs/pr/40 round 2 F5 -- defaults to nullptr so
+        // any hypothetical other call site (there is currently exactly one,
+        // examine_direction, which always has a main_vertex) stays source-
+        // compatible; segment_has_proton_daughter always returns false for a
+        // null vertex, so an omitted argument is byte-identical to F5 off.
+        void set_default_shower_particle_info(Graph& graph, Facade::Cluster& cluster, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, VertexPtr main_vertex = nullptr);
 
         // PCA calculation
         std::pair<Facade::geo_point_t, Facade::geo_vector_t> calc_PCA_main_axis(std::vector<Facade::geo_point_t>& points);

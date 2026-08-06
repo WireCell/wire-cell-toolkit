@@ -5,6 +5,8 @@
 #include <Eigen/Dense>
 #include <algorithm>
 #include <chrono>
+#include <cstdio>
+#include <cstdlib>
 #include <iostream>
 #include <limits>
 #include <unordered_map>
@@ -121,19 +123,68 @@ std::vector<Facade::geo_point_t> PatternAlgorithms::do_rough_path(const Facade::
         return path_points;
 }
 
-void PatternAlgorithms::set_default_shower_particle_info(Graph& graph, Facade::Cluster& cluster, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model) {
+void PatternAlgorithms::set_default_shower_particle_info(Graph& graph, Facade::Cluster& cluster, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, VertexPtr main_vertex) {
     // Mirrors prototype ProtoSegment::get_particle_type() which always returns 11 for
     // any shower segment (flag_shower_trajectory || flag_shower_topology).
     // Any segment flagged as a shower but missing particle_info (e.g. because it was
     // newly classified as kShowerTrajectory after determine_direction ran) gets PDG=11.
-    const int pdg_code = 11;
+    //
+    // doc sbnd_xin/docs/pr/40 round 2 F5: an electron cannot father a proton.
+    // This function's DEFAULT-fill role (below) is the single choke point
+    // where a flag_shower segment with no PID gets defaulted to electron --
+    // but it is NOT the only writer of pdg 11: determine_direction's
+    // kShowerTopology branch (NeutrinoTrackShowerSep.cxx, prototype
+    // determine_dir_shower_topology parity) writes type+mass UNCONDITIONALLY
+    // at STAGE 3, before determine_main_vertex has run -- there is no
+    // main_vertex yet at that call site to test against, so the check cannot
+    // live there.  SBND evt 256587 seg 11079 (a 29 cm segment emanating from
+    // the neutrino vertex whose far end abuts a PID'd, charge-confirmed
+    // proton, segment 11080) is exactly this case: it already carries pdg 11
+    // by the time this function -- called post-main_vertex, from
+    // examine_direction -- ever sees it.  So the guard below runs as an
+    // OVERRIDE on every existing pdg-11 shower segment, not only a DEFAULT
+    // on segments still missing particle_info.  Designed divergence, not a
+    // port-fidelity fix (the prototype has no such veto); see
+    // porting_dictionary.md.  false = legacy = byte-identical.
     // ordered_edges: stable edge-index order (boost::edges is pointer order).
+    static const bool dbg = std::getenv("WCT_PROTON_DAUGHTER_DEBUG") != nullptr;
     for (const auto& ed : ordered_edges(graph)) {
         SegmentPtr sg = graph[ed].segment;
         if (!sg || sg->cluster() != &cluster) continue;
         if (!sg->flags_any(SegmentFlags::kShowerTrajectory) &&
             !sg->flags_any(SegmentFlags::kShowerTopology)) continue;
-        if (sg->has_particle_info()) continue;  // already set, leave it
+
+        if (dbg) {
+            std::fprintf(stderr, "SET_DEFAULT_SHOWER_DEBUG clus=%d idx=%zu has_pi=%d pdg=%d m_shower_proton_daughter_pion=%d main_vertex=%p\n",
+                         cluster.get_cluster_id(), sg->get_graph_index(), (int)sg->has_particle_info(),
+                         sg->has_particle_info() ? sg->particle_info()->pdg() : 0,
+                         (int)m_shower_proton_daughter_pion, (void*)main_vertex.get());
+        }
+
+        if (sg->has_particle_info()) {
+            // OVERRIDE path: an earlier stage already assigned a pdg.  Only
+            // touch it if that pdg is electron (11) and the proton-daughter
+            // rule fires -- never override a track PID or an already-pion
+            // segment.
+            if (m_shower_proton_daughter_pion && sg->particle_info()->pdg() == 11 &&
+                segment_has_proton_daughter(graph, sg, main_vertex, m_mip_dqdx_median)) {
+                const int pdg_code = 211;
+                auto four_momentum = segment_cal_4mom(sg, pdg_code, particle_data, recomb_model, m_mip_dqdx_median);
+                auto pinfo = std::make_shared<Aux::ParticleInfo>(
+                    pdg_code, particle_data->get_particle_mass(pdg_code),
+                    particle_data->pdg_to_name(pdg_code), four_momentum);
+                sg->particle_info(pinfo);
+                sg->particle_score(100.0);
+            }
+            continue;
+        }
+
+        // DEFAULT-fill path: no particle_info at all yet.
+        int pdg_code = 11;
+        if (m_shower_proton_daughter_pion &&
+            segment_has_proton_daughter(graph, sg, main_vertex, m_mip_dqdx_median)) {
+            pdg_code = 211;
+        }
 
         auto four_momentum = segment_cal_4mom(sg, pdg_code, particle_data, recomb_model, m_mip_dqdx_median);
         auto pinfo = std::make_shared<Aux::ParticleInfo>(

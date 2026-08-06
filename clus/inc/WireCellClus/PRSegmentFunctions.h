@@ -80,8 +80,24 @@ namespace WireCell::Clus::PR {
     /// reclassification.  A zero/absent median (no valid dQ/dx samples) never
     /// spares -- that is "no evidence", not "MIP-like evidence".
     bool segment_dqdx_spares_electron_reclass(SegmentPtr seg, double MIP_dQdx);
-    
-    
+
+    /// doc sbnd_xin/docs/pr/40 round 2 F5 -- an electron cannot father a proton.
+    ///
+    /// True iff `seg` emanates from `main_vertex` (graph identity at either
+    /// endpoint, not a distance cut -- every measured case sits at exactly
+    /// d=0.00 cm) and its FAR endpoint's out-edges include a segment that is
+    /// (a) already PID'd proton (pdg 2212, i.e. has_particle_info() and
+    /// pdg()==2212) and (b) independently charge-confirmed by its own
+    /// median dQ/dx (> 1.75x MIP_dQdx, the same threshold
+    /// segment_dqdx_spares_electron_reclass and segment_determine_dir_track's
+    /// own short-track fallback already trust).  `main_vertex` may be null
+    /// (e.g. before stage 4 determines one), in which case this always
+    /// returns false -- there is no vertex to require the segment emanate
+    /// from.  Callers own the `flag_shower` check; this only judges the
+    /// proton-daughter topology.
+    bool segment_has_proton_daughter(Graph& graph, SegmentPtr seg, VertexPtr main_vertex, double MIP_dQdx);
+
+
     /// Create and associate a DynamicPointCloud with a segment from path points
     ///
     /// @param segment The segment to associate the DynamicPointCloud with
@@ -173,6 +189,20 @@ namespace WireCell::Clus::PR {
     //   reported track-to-electron cases, this persistence gate is why 4 of
     //   them (evt 74544, 174637, 267597, 269774) had NO particle_info at all
     //   by the time a wholesale shower-reclassification site looked at them.
+    // - track_pid_persist_4mom: doc sbnd_xin/docs/pr/40 round 2 (F4).  When
+    //   track_pid_persist_dqdx rescues a non-free-end store, the legacy
+    //   4-momentum stub is D4Vector(mass,0,0,0) -- E = mass exactly, so
+    //   Aux::ParticleInfo::kinetic_energy() (= E - mass) is ZERO for that
+    //   segment, byte-for-byte, forever (SBND evt 174637 seg 9050 measured
+    //   as "mu- 0 MeV" in the Bee PF tree once track_pid_persist_dqdx went
+    //   SBND-default-ON).  segment_cal_4mom has NO dependence on the
+    //   direction being a free end -- its only direction coupling is
+    //   segment_cal_dir_3vector, which already returns a zero 3-vector when
+    //   dirsign()==0 -- so the free-end gate on it was purely external and
+    //   unnecessarily strict.  true = call segment_cal_4mom unconditionally
+    //   whenever pdg_code != 0 (correct KE, momentum direction only as good
+    //   as dirsign allows).  false = legacy rest-mass-only stub =
+    //   byte-identical.  Independent of track_pid_persist_dqdx.
     struct TrackPidOptions {
         double mip_dqdx{50000/units::cm};
         bool   proton_dir_vote{false};
@@ -184,6 +214,7 @@ namespace WireCell::Clus::PR {
         bool   track_comp_empty_abstain{false};
         bool   dir_track_median_local{false};
         bool   track_pid_persist_dqdx{false};
+        bool   track_pid_persist_4mom{false};
     };
 
     // success, flag_dir, pdg_code, particle_score

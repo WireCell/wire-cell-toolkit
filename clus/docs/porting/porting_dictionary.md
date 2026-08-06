@@ -660,6 +660,70 @@ regression on the 48-event population).
 **Do NOT make either guard unconditional or widen its threshold band.** The
 gap between 1.2× and 1.75× MIP is deliberately left untouched — doc pr/40's
 evt 256587 (median 1.26× MIP, still electron with the guard on) sits in that
-band, and its own charge is genuinely ambiguous, not a guard failure.
-Widening the band to catch it would sweep a much larger, less-certain
-population into an automatic override with no principled stopping point.
+band, and its own *intra-segment* charge is genuinely ambiguous, not a guard
+failure. Widening the band to catch it would sweep a much larger,
+less-certain population into an automatic override with no principled
+stopping point.
+
+**Superseded in part, doc pr/40 round 2**: evt 256587's own median dQ/dx really
+is ambiguous, but its *topology* is not — segment 11079 starts exactly at
+the neutrino vertex and its far end abuts a PID'd, charge-confirmed proton
+(segment 11080, 3.72× MIP). An electron cannot father a proton. This is a
+different evidence axis (topology, not the segment's own charge profile) and
+does not widen the band above — see the new entry below for the
+`shower_proton_daughter_pion` knob that resolves it.
+
+## `set_default_shower_particle_info`'s electron default never consults graph topology — `shower_proton_daughter_pion` is a designed divergence, not a port correction
+
+Doc pr/40 round 2 (owner: reviewing the pr/40 fix's own Bee display, "for
+256587... in the end of the particle, there is a proton, which is high
+dQ/dx... an electron cannot change to proton. So the fact that we identified
+a proton should change it to pion instead of electron"). A third mechanism,
+distinct from the two above: `set_default_shower_particle_info`
+(`NeutrinoPatternBase.cxx`) is the single stage-4 choke point where any
+`flag_shower` segment still missing `particle_info` gets defaulted to
+electron (mirrors prototype `ProtoSegment::get_particle_type()`, which
+**always** returns 11 for any shower segment, unconditionally — this default
+itself is prototype-faithful and stays). Neither this function nor the
+prototype it mirrors ever looks at the *graph* around the segment: not the
+neutrino vertex, not the segment's neighbours' own PID. The prototype has
+**no** proton-daughter veto anywhere — a designed divergence, not a port
+correction.
+
+Measured (48-event nueCC48 population, `work-pr40-on48` arm): of 2209
+electron-labelled segments, a naive "has a >1.75× MIP neighbour anywhere"
+rule fires on 348 — far too broad, since most electrons in a shower
+legitimately sit next to a high-dQ/dx track. Requiring the segment (a) to
+emanate from the neutrino vertex by graph identity (not a distance cut —
+every measured case sits at exactly d=0.00 cm) **and** (b) its far end to be
+a vertex whose out-edges include a segment already PID'd proton (2212) that
+is *independently* charge-confirmed (its own median dQ/dx > 1.75× MIP)
+narrows this to 5/2209. The neutrino-vertex requirement is what does the
+work: it excludes the ordinary, correct nueCC topology where an electron and
+a proton merely *share* the neutrino vertex as siblings, not parent/daughter.
+
+`shower_proton_daughter_pion` (config key, threaded via
+`m_shower_proton_daughter_pion`) relabels the candidate segment PION (211)
+instead of electron when `segment_has_proton_daughter`
+(`PRSegmentFunctions.h/.cxx`) fires. C++ default `false` = legacy
+unconditional electron default, byte-identical.
+
+**KNOWN BROKEN END-TO-END, left OFF (doc pr/40 round 2).** The override
+fires correctly at this choke point — traced, `pdg 11 -> 211` at
+`NeutrinoPatternBase.cxx` — but a fourth mechanism sits downstream of it:
+`Shower::update_particle_type` (`PRShower.cxx` ~788-801, called from 9 sites
+in `NeutrinoShowerClustering.cxx`) unconditionally reasserts electron on a
+shower's start segment whenever `shower_length > track_length`, with zero
+awareness of PID or topology. For the motivating case, evt 256587 seg 11079,
+this reverts the override in the same pass (traced, `pdg 211 -> 11` at
+`PRShower.cxx:801`); population census on the 48-event manifest shows the
+override survives end-to-end in only 1/2209 cases. **Do not flip this knob
+ON** until `update_particle_type` itself is guarded the same way (round 3) —
+turning it on today changes nothing observable for the reported case and
+only unpredictably affects the 1-in-2209 segments where the fourth writer
+happens not to fire on the same shower.
+
+**Do not widen this to "any high-dQ/dx neighbour."** The 348-vs-5 gap above
+is the reason both the neutrino-vertex-emanation requirement and the
+independent charge-confirmation requirement exist; dropping either
+reintroduces the false-positive population this knob was designed to avoid.

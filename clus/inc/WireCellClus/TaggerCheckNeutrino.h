@@ -116,6 +116,7 @@ public:
         bool   m_track_comp_empty_abstain{false};       // pr/31 F6 (was P7)
         bool   m_shower_topo_reset{false};              // pr/31 F3 (was P13)
         bool   m_reclass_preserve_4mom{false};          // pr/31 F1 (was P1+P3a+P4)
+        bool   m_reclass_never_computed_ke_floor{false}; // pr/40 round 2 F6
         bool   m_dir_track_median_local{false};         // pr/31 F4 (was P8)
         bool   m_examine_showers_vertex_by_index{false}; // pr/31 F7 (was P5) -- stays OFF pending pr/30 F4
         // Isochronous first-segment endpoint finding (doc sbnd_xin/docs/pr/24
@@ -282,6 +283,16 @@ public:
         bool m_track_pid_persist_dqdx{false};
         bool m_shower_reclass_dqdx_guard{false};
         bool m_shower_topo_dqdx_guard{false};
+        // doc sbnd_xin/docs/pr/40 round 2 -- two follow-on defects measured on the
+        // Bee display of pr/40's fix: F4 replaces the rest-mass-only 4-mom
+        // stub with an unconditional segment_cal_4mom call (zero KE ->
+        // correct KE); F5 relabels an electron-labelled segment to pion when
+        // it emanates from the neutrino vertex and its far end is a
+        // charge-confirmed PID'd proton (a daughter no electron can
+        // produce); F6 fixes a related negative-KE construction in
+        // reclass_pinfo.  See NeutrinoPatternBase.h for the full rationale.
+        bool m_track_pid_persist_4mom{false};
+        bool m_shower_proton_daughter_pion{false};
         mutable std::shared_ptr<TrackFitting> m_track_fitter;
 
         void load_trackfitting_config(const std::string& config_file);

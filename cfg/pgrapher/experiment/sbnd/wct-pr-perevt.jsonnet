@@ -958,6 +958,33 @@ function(
     track_pid_persist_dqdx = true,
     shower_reclass_dqdx_guard = true,
     shower_topo_dqdx_guard = true,
+    // doc sbnd_xin/docs/pr/40 round 2: two follow-on defects measured on the Bee
+    // display of the pr/40 fix above.  F4 track_pid_persist_4mom: the
+    // non-free-end persistence branch stored a rest-mass-only 4-momentum
+    // (E=mass, zero momentum), so Aux::ParticleInfo::kinetic_energy()
+    // (=E-mass) read exactly ZERO for every segment it rescued (SBND evt
+    // 174637 seg 9050, Bee PF node "mu- 0 MeV"); segment_cal_4mom has no
+    // free-end dependence, so it is now called unconditionally instead.
+    // SBND PRODUCTION DEFAULT ON: G1 48/48 byte-identical, G2a fixes the
+    // reported case (0 -> 86 MeV), G4 census 1 -> 0 zero-energy PF nodes.
+    // F6 reclass_never_computed_ke_floor: a related reclass_pinfo
+    // negative-KE construction (KE = -mass on the never-computed path),
+    // fixed alongside.  SBND PRODUCTION DEFAULT ON: verified by direct unit
+    // test (the negative-KE precondition was not observed on the 48-event
+    // census either arm, so this flip rests on the doctest, not population
+    // evidence -- see doc pr/40 round 2).
+    // F5 shower_proton_daughter_pion: an electron cannot father a proton --
+    // set_default_shower_particle_info relabels pion (211) instead of
+    // electron when the candidate segment emanates from the neutrino
+    // vertex and its far end is a PID'd, charge-confirmed proton (SBND evt
+    // 256587 seg 11079, daughter segment 11080 at 3.72x MIP).  STILL
+    // DEFAULT OFF, NOT flipped: the override fires but is reverted
+    // end-to-end by a downstream writer (Shower::update_particle_type,
+    // PRShower.cxx) for the reported case; see porting_dictionary.md and
+    // doc pr/40 round 2.  Blocked pending a round-3 fix.
+    track_pid_persist_4mom = true,
+    shower_proton_daughter_pion = false,
+    reclass_never_computed_ke_floor = true,
 )
     local base = import 'pgrapher/experiment/sbnd/simparams.jsonnet';
     local params = base {
@@ -1116,6 +1143,9 @@ function(
                              track_pid_persist_dqdx=track_pid_persist_dqdx,
                              shower_reclass_dqdx_guard=shower_reclass_dqdx_guard,
                              shower_topo_dqdx_guard=shower_topo_dqdx_guard,
+                             track_pid_persist_4mom=track_pid_persist_4mom,
+                             shower_proton_daughter_pion=shower_proton_daughter_pion,
+                             reclass_never_computed_ke_floor=reclass_never_computed_ke_floor,
                              muon_dqdx_curve=muon_dqdx_curve,
                              use_power_recomb=use_power_recomb,
                              sp_dedx_use_recomb_model=sp_dedx_use_recomb_model,

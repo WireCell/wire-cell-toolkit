@@ -106,6 +106,10 @@ TEST_CASE("clus knob defaults: TaggerCheckNeutrino switches are all OFF")
     CHECK_KNOB_BOOL(cfg, "track_pid_persist_dqdx", false);      // F1
     CHECK_KNOB_BOOL(cfg, "shower_reclass_dqdx_guard", false);   // F2
     CHECK_KNOB_BOOL(cfg, "shower_topo_dqdx_guard", false);      // F3
+    // doc pr/40 round 2: two follow-on defects from the pr/40 fix round.
+    CHECK_KNOB_BOOL(cfg, "track_pid_persist_4mom", false);            // F4
+    CHECK_KNOB_BOOL(cfg, "shower_proton_daughter_pion", false);       // F5
+    CHECK_KNOB_BOOL(cfg, "reclass_never_computed_ke_floor", false);   // F6
 
     // Numeric knobs whose legacy value is the INERT one: 0 disables the guard,
     // so an absent key leaves the code path untouched.
@@ -305,6 +309,7 @@ TEST_CASE("clus knob defaults: TrackPidOptions in-class initializers")
     CHECK(o.start_n == 1);
     CHECK(o.end_n == 1);
     CHECK(o.track_pid_persist_dqdx == false);  // doc pr/40 F1
+    CHECK(o.track_pid_persist_4mom == false);  // doc pr/40 round 2 F4
 }
 
 // ---------------------------------------------------------------------------
@@ -351,6 +356,125 @@ TEST_CASE("clus knob defaults: segment_dqdx_spares_electron_reclass")
     CHECK(segment_dqdx_spares_electron_reclass(make_seg_with_dqdx(1.4 * MIP), MIP) == false);
     // Degenerate scale: never spares (guards the division).
     CHECK(segment_dqdx_spares_electron_reclass(make_seg_with_dqdx(3.0 * MIP), 0.0) == false);
+}
+
+// ---------------------------------------------------------------------------
+// doc sbnd_xin/docs/pr/40 round 2 F5 -- an electron cannot father a proton.
+// segment_has_proton_daughter is the shared topology check
+// shower_proton_daughter_pion uses; pin its behavior directly on a small
+// hand-built graph, mirroring doctest_pr_graph_order.cxx's PR::add_segment
+// idiom (vertices need no fit point -- find_vertices only reads graph
+// structure).
+// ---------------------------------------------------------------------------
+
+TEST_CASE("clus knob defaults: segment_has_proton_daughter")
+{
+    using namespace WireCell::Clus::PR;
+    const double MIP = 43000 / units::cm;
+
+    auto make_seg_with_dqdx = [&](double dqdx_per_cm) {
+        auto seg = std::make_shared<Segment>();
+        std::vector<Fit> fits;
+        for (int i = 0; i < 5; ++i) {
+            Fit f;
+            f.point = WireCell::Point(i * units::cm, 0, 0);
+            f.dx = 1 * units::cm;
+            f.dQ = dqdx_per_cm * units::cm;
+            f.index = i;
+            fits.push_back(f);
+        }
+        seg->fits(fits);
+        return seg;
+    };
+    auto make_proton = [&](double dqdx_per_cm) {
+        auto seg = make_seg_with_dqdx(dqdx_per_cm);
+        auto pinfo = std::make_shared<Aux::ParticleInfo>(
+            2212, 938.272 * units::MeV, "proton",
+            WireCell::D4Vector<double>(938.272 * units::MeV, 0, 0, 0));
+        seg->particle_info(pinfo);
+        return seg;
+    };
+
+    // Bare electron-candidate segment, no neighbours at all: never fires.
+    {
+        Graph g;
+        auto main_vertex = std::make_shared<Vertex>();
+        auto far_vertex = std::make_shared<Vertex>();
+        auto seg = std::make_shared<Segment>();
+        add_segment(g, seg, main_vertex, far_vertex);
+        CHECK(segment_has_proton_daughter(g, seg, main_vertex, MIP) == false);
+    }
+
+    // Emanates from the neutrino vertex, far end abuts a PID'd AND
+    // charge-confirmed proton (>1.75x MIP): fires.
+    {
+        Graph g;
+        auto main_vertex = std::make_shared<Vertex>();
+        auto far_vertex = std::make_shared<Vertex>();
+        auto far2 = std::make_shared<Vertex>();
+        auto seg = std::make_shared<Segment>();
+        add_segment(g, seg, main_vertex, far_vertex);
+        auto proton = make_proton(3.0 * MIP);
+        add_segment(g, proton, far_vertex, far2);
+        CHECK(segment_has_proton_daughter(g, seg, main_vertex, MIP) == true);
+    }
+
+    // Far-end neighbour IS pdg 2212 but its own charge is only ambiguous
+    // (between the 1.2x/1.75x MIP band): not independently confirmed, does
+    // not fire -- a raw PID label alone is not enough.
+    {
+        Graph g;
+        auto main_vertex = std::make_shared<Vertex>();
+        auto far_vertex = std::make_shared<Vertex>();
+        auto far2 = std::make_shared<Vertex>();
+        auto seg = std::make_shared<Segment>();
+        add_segment(g, seg, main_vertex, far_vertex);
+        auto proton = make_proton(1.4 * MIP);
+        add_segment(g, proton, far_vertex, far2);
+        CHECK(segment_has_proton_daughter(g, seg, main_vertex, MIP) == false);
+    }
+
+    // Proton hangs off the main_vertex end, not the far end -- a SIBLING,
+    // not a daughter (the ordinary, correct nueCC topology).  Never fires.
+    {
+        Graph g;
+        auto main_vertex = std::make_shared<Vertex>();
+        auto far_vertex = std::make_shared<Vertex>();
+        auto far3 = std::make_shared<Vertex>();
+        auto seg = std::make_shared<Segment>();
+        add_segment(g, seg, main_vertex, far_vertex);
+        auto proton = make_proton(3.0 * MIP);
+        add_segment(g, proton, main_vertex, far3);
+        CHECK(segment_has_proton_daughter(g, seg, main_vertex, MIP) == false);
+    }
+
+    // No main_vertex yet (e.g. stage 3, before determine_main_vertex):
+    // never fires, regardless of what the far end looks like.
+    {
+        Graph g;
+        auto main_vertex = std::make_shared<Vertex>();
+        auto far_vertex = std::make_shared<Vertex>();
+        auto far2 = std::make_shared<Vertex>();
+        auto seg = std::make_shared<Segment>();
+        add_segment(g, seg, main_vertex, far_vertex);
+        auto proton = make_proton(3.0 * MIP);
+        add_segment(g, proton, far_vertex, far2);
+        CHECK(segment_has_proton_daughter(g, seg, nullptr, MIP) == false);
+    }
+
+    // Degenerate scale: never fires (guards the division, same contract as
+    // segment_dqdx_spares_electron_reclass).
+    {
+        Graph g;
+        auto main_vertex = std::make_shared<Vertex>();
+        auto far_vertex = std::make_shared<Vertex>();
+        auto far2 = std::make_shared<Vertex>();
+        auto seg = std::make_shared<Segment>();
+        add_segment(g, seg, main_vertex, far_vertex);
+        auto proton = make_proton(3.0 * MIP);
+        add_segment(g, proton, far_vertex, far2);
+        CHECK(segment_has_proton_daughter(g, seg, main_vertex, 0.0) == false);
+    }
 }
 
 TEST_CASE("clus knob defaults: KineChargeOptions in-class initializers")

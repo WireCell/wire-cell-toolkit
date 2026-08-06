@@ -1176,6 +1176,13 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               track_pid_persist_dqdx=false,
               shower_reclass_dqdx_guard=false,
               shower_topo_dqdx_guard=false,
+              // doc sbnd_xin/docs/pr/40 round 2 -- two follow-on defects from the
+              // pr/40 round: F1 zero-KE persistence stub, F2 proton-
+              // daughter -> pion, F3 reclass_pinfo negative-KE stub.  All
+              // default false = legacy = byte-identical.
+              reclass_never_computed_ke_floor=false,
+              track_pid_persist_4mom=false,
+              shower_proton_daughter_pion=false,
               // muon_dqdx_curve [c0, c1, pivot_cm, power]: the muon
               // median-dQ/dx-vs-length envelope used by nine tagger cuts, as a
               // multiple of mip_dqdx_median.  DEFAULT = the SBND fit
@@ -1681,6 +1688,9 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
             track_pid_persist_dqdx=track_pid_persist_dqdx,
             shower_reclass_dqdx_guard=shower_reclass_dqdx_guard,
             shower_topo_dqdx_guard=shower_topo_dqdx_guard,
+            reclass_never_computed_ke_floor=reclass_never_computed_ke_floor,
+            track_pid_persist_4mom=track_pid_persist_4mom,
+            shower_proton_daughter_pion=shower_proton_daughter_pion,
             muon_dqdx_curve=muon_dqdx_curve,
             sp_dedx_use_recomb_model=sp_dedx_use_recomb_model,
             sp_mean_dedx_cut=sp_mean_dedx_cut,
@@ -2268,6 +2278,11 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
        track_pid_persist_dqdx=false,
        shower_reclass_dqdx_guard=false,
        shower_topo_dqdx_guard=false,
+       // doc sbnd_xin/docs/pr/40 round 2 -- two follow-on defects from the pr/40
+       // round.  All default false = legacy = byte-identical.
+       reclass_never_computed_ke_floor=false,
+       track_pid_persist_4mom=false,
+       shower_proton_daughter_pion=false,
        // Muon dQ/dx-vs-length envelope: DEFAULT = the docs/pr/10 SBND fit
        // (see the clus_pr arg comment; null restores the uBooNE refit).
        // Recombination-model selection + single-photon dE/dx routing:
@@ -2411,6 +2426,9 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 track_pid_persist_dqdx=track_pid_persist_dqdx,
                 shower_reclass_dqdx_guard=shower_reclass_dqdx_guard,
                 shower_topo_dqdx_guard=shower_topo_dqdx_guard,
+                reclass_never_computed_ke_floor=reclass_never_computed_ke_floor,
+                track_pid_persist_4mom=track_pid_persist_4mom,
+                shower_proton_daughter_pion=shower_proton_daughter_pion,
                 muon_dqdx_curve=muon_dqdx_curve,
                 use_power_recomb=use_power_recomb,
                 sp_dedx_use_recomb_model=sp_dedx_use_recomb_model,

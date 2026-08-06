@@ -1813,7 +1813,7 @@ bool PatternAlgorithms::examine_direction(Graph& graph, VertexPtr vertex, Vertex
     // Final pass: ensure every shower segment has particle_info set to electron.
     // Mirrors prototype get_particle_type() which returns 11 for any shower regardless
     // of whether determine_dir_shower_trajectory was called.
-    set_default_shower_particle_info(graph, cluster, particle_data, recomb_model);
+    set_default_shower_particle_info(graph, cluster, particle_data, recomb_model, main_vertex);
 
     return examine_maps(graph, cluster);
 }

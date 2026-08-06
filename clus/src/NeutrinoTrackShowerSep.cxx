@@ -47,11 +47,29 @@ static auto s_log = WireCell::Log::logger("clus.NeutrinoPattern");
 // set_four_momentum() -- the class's own non-validating setter -- so KE
 // lands at E - m (i.e. -m for never-computed), which is what any
 // prototype consumer subtracting mass sees.
+// doc sbnd_xin/docs/pr/40 round 2 F6: the !had branch below used to finish with
+// pinfo->set_four_momentum(D4Vector(0,0,0,0)) -- an explicit, deliberate
+// choice (see the block comment above) to make energy()==0 read exactly
+// like the prototype's never-computed particle_4mom[3]==0.  But
+// ParticleInfo::kinetic_energy() is e() - mass, so that same zero 4-vector
+// makes kinetic_energy() == -mass: a NEGATIVE kinetic energy, wherever a
+// caller (e.g. the Bee PF-tree writer, MultiAlgBlobClustering.cxx
+// fill_bee_pf_tree) reads kinetic_energy() rather than energy() directly.
+// Found while chasing pr/40 round 2 F4's zero-KE display defect; same failure
+// shape, sharper (a negative MeV is worse than a zero one on a display no
+// prototype consumer or Bee viewer ever actually reads as a raw
+// particle_4mom[3] subtraction).  reclass_never_computed_ke_floor=true
+// leaves the just-constructed (mass,0,0,0) placeholder in place instead
+// of overwriting it to all-zero, i.e. never-computed reads KE==0, matching
+// the had==true branch's own "keep it sane" spirit.  false = legacy
+// set_four_momentum(0,0,0,0) = byte-identical.  Independent of `preserve`
+// (this only touches the !preserve-recompute, !had sub-case) and of F4/F5.
 static std::shared_ptr<WireCell::Aux::ParticleInfo> reclass_pinfo(
     const SegmentPtr& sg, int pdg_code,
     const WireCell::Clus::ParticleDataSet::pointer& particle_data,
     const WireCell::IRecombinationModel::pointer& recomb_model,
-    double mip_scale, bool preserve, bool proto_recomputes)
+    double mip_scale, bool preserve, bool proto_recomputes,
+    bool never_computed_ke_floor = false)
 {
     const double mass = particle_data->get_particle_mass(pdg_code);
     const bool had = sg->has_particle_info() && sg->particle_info()->energy() > 0;
@@ -63,8 +81,12 @@ static std::shared_ptr<WireCell::Aux::ParticleInfo> reclass_pinfo(
     auto pinfo = std::make_shared<WireCell::Aux::ParticleInfo>(
         pdg_code, mass, particle_data->pdg_to_name(pdg_code),
         WireCell::D4Vector<double>(mass, 0, 0, 0));
-    pinfo->set_four_momentum(had ? sg->particle_info()->four_momentum()
-                                 : WireCell::D4Vector<double>(0, 0, 0, 0));
+    if (had) {
+        pinfo->set_four_momentum(sg->particle_info()->four_momentum());
+    } else if (!never_computed_ke_floor) {
+        pinfo->set_four_momentum(WireCell::D4Vector<double>(0, 0, 0, 0));  // legacy: KE = -mass
+    }
+    // else: leave the (mass,0,0,0) placeholder constructed above -- KE == 0.
     return pinfo;
 }
 
@@ -208,7 +230,7 @@ void PatternAlgorithms::determine_direction(Graph& graph, Facade::Cluster& clust
                 // doc pr/31 §12 F1 shape B: the prototype's
                 // determine_dir_shower_topology writes type and mass only --
                 // NO 4-momentum recompute here (proto_recomputes=false).
-                auto pinfo = reclass_pinfo(seg, pdg_code, particle_data, recomb_model, m_mip_dqdx_median, m_reclass_preserve_4mom, false);
+                auto pinfo = reclass_pinfo(seg, pdg_code, particle_data, recomb_model, m_mip_dqdx_median, m_reclass_preserve_4mom, false, m_reclass_never_computed_ke_floor);
                 seg->particle_info(pinfo);
                 seg->particle_score(100.0);
             }
@@ -511,7 +533,7 @@ void PatternAlgorithms::examine_good_tracks(Graph& graph, Facade::Cluster& clust
             // (NeutrinoID_track_shower.h:257-261) -- the 4-momentum is untouched,
             // not zeroed to rest mass.
             if (m_reclass_preserve_4mom) {
-                sg->particle_info(reclass_pinfo(sg, 11, particle_data, m_recomb_model, m_mip_dqdx, true, false));
+                sg->particle_info(reclass_pinfo(sg, 11, particle_data, m_recomb_model, m_mip_dqdx, true, false, m_reclass_never_computed_ke_floor));
             }
             else {
                 double em_mass = particle_data->get_particle_mass(11);
@@ -869,7 +891,7 @@ void PatternAlgorithms::improve_maps_shower_in_track_out(Graph& graph, Facade::C
 
                     // Set as electron (PDG 11)
                     int pdg_code = 11;
-                    auto pinfo = reclass_pinfo(sg1, pdg_code, particle_data, recomb_model, m_mip_dqdx, m_reclass_preserve_4mom, true);
+                    auto pinfo = reclass_pinfo(sg1, pdg_code, particle_data, recomb_model, m_mip_dqdx, m_reclass_preserve_4mom, true, m_reclass_never_computed_ke_floor);
                     sg1->particle_info(pinfo);
                     sg1->dirsign(0);
 
@@ -889,7 +911,7 @@ void PatternAlgorithms::improve_maps_shower_in_track_out(Graph& graph, Facade::C
                     // loop above).
                     if (!is_shower1 && !(m_shower_reclass_dqdx_guard && segment_dqdx_spares_electron_reclass(sg1, m_mip_dqdx))) {
                         int pdg_code = 11;
-                        auto pinfo = reclass_pinfo(sg1, pdg_code, particle_data, recomb_model, m_mip_dqdx, m_reclass_preserve_4mom, true);
+                        auto pinfo = reclass_pinfo(sg1, pdg_code, particle_data, recomb_model, m_mip_dqdx, m_reclass_preserve_4mom, true, m_reclass_never_computed_ke_floor);
                         sg1->particle_info(pinfo);
                     }
 
@@ -1028,7 +1050,7 @@ void PatternAlgorithms::improve_maps_no_dir_tracks(Graph& graph, Facade::Cluster
                      nshowers[0] > 0 && nshowers[1] > 0 && length < 5*units::cm)) {
 
                     int pdg_code = 11;
-                    auto pinfo = reclass_pinfo(sg, pdg_code, particle_data, recomb_model, m_mip_dqdx, m_reclass_preserve_4mom, true);
+                    auto pinfo = reclass_pinfo(sg, pdg_code, particle_data, recomb_model, m_mip_dqdx, m_reclass_preserve_4mom, true, m_reclass_never_computed_ke_floor);
                     sg->particle_info(pinfo);
                     flag_update = true;
                 }
@@ -1064,7 +1086,7 @@ void PatternAlgorithms::improve_maps_no_dir_tracks(Graph& graph, Facade::Cluster
                             sg->dirsign(1);
 
                         int pdg_code = 11;
-                        auto pinfo = reclass_pinfo(sg, pdg_code, particle_data, recomb_model, m_mip_dqdx, m_reclass_preserve_4mom, true);
+                        auto pinfo = reclass_pinfo(sg, pdg_code, particle_data, recomb_model, m_mip_dqdx, m_reclass_preserve_4mom, true, m_reclass_never_computed_ke_floor);
                         sg->particle_info(pinfo);
                         flag_update = true;
                     }
@@ -1100,7 +1122,7 @@ void PatternAlgorithms::improve_maps_no_dir_tracks(Graph& graph, Facade::Cluster
                             sg->dirsign(1);
 
                         int pdg_code = 11;
-                        auto pinfo = reclass_pinfo(sg, pdg_code, particle_data, recomb_model, m_mip_dqdx, m_reclass_preserve_4mom, true);
+                        auto pinfo = reclass_pinfo(sg, pdg_code, particle_data, recomb_model, m_mip_dqdx, m_reclass_preserve_4mom, true, m_reclass_never_computed_ke_floor);
                         sg->particle_info(pinfo);
                         flag_update = true;
                     }
@@ -1128,7 +1150,7 @@ void PatternAlgorithms::improve_maps_no_dir_tracks(Graph& graph, Facade::Cluster
                         // mutually-exclusive case selection).
                         if (!(m_shower_reclass_dqdx_guard && segment_dqdx_spares_electron_reclass(sg, m_mip_dqdx))) {
                             int pdg_code = 11;
-                            auto pinfo = reclass_pinfo(sg, pdg_code, particle_data, recomb_model, m_mip_dqdx, m_reclass_preserve_4mom, true);
+                            auto pinfo = reclass_pinfo(sg, pdg_code, particle_data, recomb_model, m_mip_dqdx, m_reclass_preserve_4mom, true, m_reclass_never_computed_ke_floor);
                             sg->particle_info(pinfo);
                             flag_update = true;
                         }
@@ -1186,7 +1208,7 @@ void PatternAlgorithms::improve_maps_no_dir_tracks(Graph& graph, Facade::Cluster
                                                       (num_s2 >= 4 && length_s2 > 20*units::cm)))) {
                             
                             int pdg_code = 11;
-                            auto pinfo = reclass_pinfo(sg, pdg_code, particle_data, recomb_model, m_mip_dqdx, m_reclass_preserve_4mom, true);
+                            auto pinfo = reclass_pinfo(sg, pdg_code, particle_data, recomb_model, m_mip_dqdx, m_reclass_preserve_4mom, true, m_reclass_never_computed_ke_floor);
                             sg->particle_info(pinfo);
                             flag_update = true;
                         }
@@ -1233,7 +1255,7 @@ void PatternAlgorithms::improve_maps_no_dir_tracks(Graph& graph, Facade::Cluster
                     
                     if (flag_change) {
                         int pdg_code = 11;
-                        auto pinfo = reclass_pinfo(sg, pdg_code, particle_data, recomb_model, m_mip_dqdx, m_reclass_preserve_4mom, true);
+                        auto pinfo = reclass_pinfo(sg, pdg_code, particle_data, recomb_model, m_mip_dqdx, m_reclass_preserve_4mom, true, m_reclass_never_computed_ke_floor);
                         sg->particle_info(pinfo);
                         flag_update = true;
                     }
@@ -1270,7 +1292,7 @@ void PatternAlgorithms::improve_maps_no_dir_tracks(Graph& graph, Facade::Cluster
                         sg->dir_weak(true);
 
                         int pdg_code = 11;
-                        auto pinfo = reclass_pinfo(sg, pdg_code, particle_data, recomb_model, m_mip_dqdx, m_reclass_preserve_4mom, true);
+                        auto pinfo = reclass_pinfo(sg, pdg_code, particle_data, recomb_model, m_mip_dqdx, m_reclass_preserve_4mom, true, m_reclass_never_computed_ke_floor);
                         sg->particle_info(pinfo);
                         flag_update = true;
                     }
@@ -1343,7 +1365,7 @@ void PatternAlgorithms::improve_maps_no_dir_tracks(Graph& graph, Facade::Cluster
                     
                     if (flag_change) {
                         int pdg_code = 11;
-                        auto pinfo = reclass_pinfo(sg, pdg_code, particle_data, recomb_model, m_mip_dqdx, m_reclass_preserve_4mom, true);
+                        auto pinfo = reclass_pinfo(sg, pdg_code, particle_data, recomb_model, m_mip_dqdx, m_reclass_preserve_4mom, true, m_reclass_never_computed_ke_floor);
                         sg->particle_info(pinfo);
                         flag_update = true;
                     }
@@ -1425,7 +1447,7 @@ void PatternAlgorithms::improve_maps_multiple_tracks_in(Graph& graph, Facade::Cl
                     SegmentPtr sg1 = *it1;
                     
                     int pdg_code = 11;
-                    auto pinfo = reclass_pinfo(sg1, pdg_code, particle_data, recomb_model, m_mip_dqdx, m_reclass_preserve_4mom, true);
+                    auto pinfo = reclass_pinfo(sg1, pdg_code, particle_data, recomb_model, m_mip_dqdx, m_reclass_preserve_4mom, true, m_reclass_never_computed_ke_floor);
                     sg1->particle_info(pinfo);
                     flag_update = true;
                 }
@@ -1505,7 +1527,7 @@ void PatternAlgorithms::judge_no_dir_tracks_close_to_showers(Graph& graph, Facad
             // doc pr/31 §12 F1 shape C: prototype writes type and mass only
             // (NeutrinoID_track_shower.h:1238-1239), 4-momentum untouched.
             if (m_reclass_preserve_4mom) {
-                sg->particle_info(reclass_pinfo(sg, pdg_code, particle_data, m_recomb_model, m_mip_dqdx, true, false));
+                sg->particle_info(reclass_pinfo(sg, pdg_code, particle_data, m_recomb_model, m_mip_dqdx, true, false, m_reclass_never_computed_ke_floor));
             }
             else {
                 double em_mass = particle_data->get_particle_mass(pdg_code);
@@ -1941,7 +1963,7 @@ void PatternAlgorithms::examine_all_showers(Graph& graph, Facade::Cluster& clust
                 // doc pr/31 §12 F1 shape C: prototype writes type and mass only
                 // (NeutrinoID_track_shower.h:313-315), 4-momentum untouched.
                 if (m_reclass_preserve_4mom) {
-                    sg->particle_info(reclass_pinfo(sg, pdg_code, particle_data, m_recomb_model, m_mip_dqdx, true, false));
+                    sg->particle_info(reclass_pinfo(sg, pdg_code, particle_data, m_recomb_model, m_mip_dqdx, true, false, m_reclass_never_computed_ke_floor));
                 }
                 else {
                     double electron_mass = particle_data->get_particle_mass(pdg_code);
