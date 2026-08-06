@@ -616,6 +616,10 @@ local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=
                     // separate Bee-zip transverse shift redundant -- pick one).
                     coords: common_corr_coords(pos_offset_on, use_sce),
                     individual: false,
+                    // Add a per-point "opflash_time" column (cluster matched flash
+                    // time in us; -999999 if unmatched).  Bee ignores the unknown
+                    // column; downstream analysis can read it.
+                    opflash_time: true,
                 },
             ] + (if trace_bee then trace_sets(cm_pipeline, common_corr_coords(pos_offset_on, use_sce)) else []),
             pipeline: wc.tns(cm_pipeline),

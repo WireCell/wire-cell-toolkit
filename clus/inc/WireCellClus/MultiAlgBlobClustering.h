@@ -83,6 +83,7 @@ namespace WireCell::Clus {
             std::vector<std::string> coords;
             bool individual;
             int filter{1};// 1 for on, 0 for off, -1 for inverse filter
+            bool opflash_time{false}; // add a per-point "opflash_time" column (cluster matched flash time, us; -999999 if none)
             double dQdx_scale{1.0};
             double dQdx_offset{0.0};
             bool use_associate_points{false};  // use dpcloud("associate_points") + shower-based charge
@@ -121,6 +122,9 @@ namespace WireCell::Clus {
             
             // Global points (used when individual == false)
             Bee::Points global;
+            // Parallel per-point opflash_time column for `global` (only filled
+            // when the set's config has opflash_time=true; injected at flush).
+            std::vector<double> global_oft;
             
             // Individual points (used when individual == true)
             // Key is "anode_id-face_id" string
@@ -149,7 +153,8 @@ namespace WireCell::Clus {
         void fill_bee_points_from_cluster(
             Bee::Points& bpts, const Facade::Cluster& cluster,
             const std::string& pcname, const std::vector<std::string>& coords,
-            int filter, double dQdx_scale = 1.0, double dQdx_offset = 0.0);
+            int filter, double dQdx_scale = 1.0, double dQdx_offset = 0.0,
+            std::vector<double>* oft_out = nullptr);
         void fill_bee_points_from_pr_graph(const std::string& name, const Facade::Grouping& grouping);
         void fill_bee_vertices_from_pr_graph(const std::string& name, const Facade::Grouping& grouping);
 

@@ -36,6 +36,18 @@ using namespace WireCell;
 using namespace WireCell::Clus;
 using namespace WireCell::Aux;
 using namespace WireCell::Aux::TensorDM;
+
+namespace {
+    // A Bee::Object that serializes a pre-built JSON verbatim -- used to emit a
+    // point set (Bee::Points geometry) with an extra "opflash_time" column that
+    // the Bee viewer ignores.  Bee::Object's ctor is protected, hence a subclass.
+    struct RawBeeObject : public WireCell::Bee::Object {
+        WireCell::Configuration m_json;
+        RawBeeObject(const std::string& nm, const WireCell::Configuration& j)
+            : WireCell::Bee::Object(nm), m_json(j) {}
+        WireCell::Configuration asJson() const override { return m_json; }
+    };
+}
 using namespace WireCell::Clus::Facade;
 using namespace WireCell::PointCloud::Tree;
 using WireCell::GraphTools::mir;
@@ -239,6 +251,7 @@ void MultiAlgBlobClustering::configure(const WireCell::Configuration& cfg)
             bpc.grouping = get<std::string>(bps, "grouping", "live");
             bpc.visitor = get<std::string>(bps, "visitor", "");
             bpc.filter = get<int>(bps, "filter", 1); // 1 for on, 0 for off, -1 for inverse filter
+            bpc.opflash_time = get<bool>(bps, "opflash_time", false);
             
             // Get coordinates
             if (bps.isMember("coords")) {
@@ -507,7 +520,19 @@ void MultiAlgBlobClustering::flush(int ident)
         } else {
             // Write global bee points
             if (!apa_bpts.global.empty()) {
-                write_obj(apa_bpts.global);
+                const bool with_oft = (it != m_bee_points_configs.end()) && it->opflash_time
+                                      && apa_bpts.global_oft.size() == apa_bpts.global.size();
+                if (with_oft) {
+                    // Inject the extra per-point opflash_time column into the JSON.
+                    Configuration cj = apa_bpts.global.asJson();
+                    cj["opflash_time"] = Json::arrayValue;
+                    for (double t : apa_bpts.global_oft) cj["opflash_time"].append(t);
+                    RawBeeObject obj(apa_bpts.global.name(), cj);
+                    write_obj(obj);
+                }
+                else {
+                    write_obj(apa_bpts.global);
+                }
                 // Clear after writing
                 int run = 0, evt = 0;
                 if (ident > 0) {
@@ -515,6 +540,7 @@ void MultiAlgBlobClustering::flush(int ident)
                     evt = (ident) & 0xffff;
                 }
                 apa_bpts.global.reset(evt, 0, run);
+                apa_bpts.global_oft.clear();
             }
         }
     }
@@ -755,7 +781,8 @@ void MultiAlgBlobClustering::fill_bee_points(const std::string& name, const Grou
         // std::cout << "Test: " << name << " " << grouping.wpids().size() << " " << grouping.nchildren() << std::endl;
 
         for (const auto* cluster : grouping.children()) {
-            fill_bee_points_from_cluster(apa_bpts.global, *cluster, config.pcname, config.coords, config.filter, config.dQdx_scale, config.dQdx_offset);
+            fill_bee_points_from_cluster(apa_bpts.global, *cluster, config.pcname, config.coords, config.filter, config.dQdx_scale, config.dQdx_offset,
+                                         config.opflash_time ? &apa_bpts.global_oft : nullptr);
         }
     }
 }
@@ -1683,9 +1710,14 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
 void MultiAlgBlobClustering::fill_bee_points_from_cluster(
     Bee::Points& bpts, const Cluster& cluster,
     const std::string& pcname, const std::vector<std::string>& coords, int filter,
-    double dQdx_scale, double dQdx_offset)
+    double dQdx_scale, double dQdx_offset,
+    std::vector<double>* oft_out)
 {
     int clid = cluster.get_cluster_id(); //bpts.back_cluster_id() + 1;
+    // Per-cluster matched opflash time in us (-999999 = no flash match); pushed
+    // once per appended point into oft_out when a set requests the column.
+    double cgt_oft = -999999.0;
+    if (oft_out) { const double t0 = cluster.get_cluster_t0(); if (t0 > -1e11) cgt_oft = t0 / units::us; }
 
     // std::cout << "Test: " << bpts.size() << " " << bpts.back_cluster_id() << " " <<  clid << std::endl;
 
@@ -1817,6 +1849,7 @@ void MultiAlgBlobClustering::fill_bee_points_from_cluster(
                     const double point_charge = (nplanes > 0) ? sum / nplanes : 0.0;
 
                     bpts.append(pt, point_charge, clid, real_clid);
+                    if (oft_out) oft_out->push_back(cgt_oft);
                 }
             }
 
