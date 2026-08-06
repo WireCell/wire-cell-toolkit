@@ -333,9 +333,6 @@ void MultiAlgBlobClustering::configure(const WireCell::Configuration& cfg)
             pfc.pf_shower_parent_precedence = get<bool>(pf, "pf_shower_parent_precedence", false);
             pfc.pf_pi0_node_per_id = get<bool>(pf, "pf_pi0_node_per_id", false);
             pfc.pf_pdg_name_prototype_fallback = get<bool>(pf, "pf_pdg_name_prototype_fallback", false);
-            // doc pr/38 missing-track knobs; absent => legacy, byte-identical.
-            pfc.pf_barrier_segment_vertices = get<bool>(pf, "pf_barrier_segment_vertices", false);
-            pfc.pf_orphan_track_roots = get<bool>(pf, "pf_orphan_track_roots", false);
             m_bee_pf_configs.push_back(pfc);
             m_bee_pf_trees[pfc.name] = Bee::ParticleTree(pfc.name);
             SPDLOG_LOGGER_DEBUG(log, "Configured bee_pf: name={} visitor={}", pfc.name, pfc.visitor);
@@ -1141,27 +1138,19 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
     PR::IndexedVertexSet shower_vtxs;   // F2: every vertex in any shower's view
     for (const auto& shower : showers) {
         PR::IndexedVertexSet sv; PR::IndexedSegmentSet ss;
-        shower->fill_sets(sv, ss, /*flag_exclude_start_segment=*/false);
+        // doc pr/38: with the F2 barrier on, sv excludes the shower's START
+        // vertex -- the prototype's barrier source map_vtx_segs never holds
+        // it (`if (vtx == start_vertex) continue;`, WCShower.cxx:547,
+        // :708-716, :733-745), so a main-track attachment junction stays
+        // traversable and only shower-INTERIOR vertices block.  Blocking the
+        // junction silently dropped every track segment behind it (SBND
+        // 18255-219295 proton seg 15001 behind a conn-2 attachment;
+        // 18255-489330 proton seg 4044 behind a conn-1 attachment).  Barrier
+        // off: sv is unused, legacy path byte-identical.
+        shower->fill_sets(sv, ss, /*flag_exclude_start_segment=*/false,
+                          /*exclude_start_vertex=*/cfg.pf_shower_vertex_barrier);
         for (const auto& seg : ss) { seg_to_shower[seg] = shower; shower_segs.insert(seg); }
-        if (cfg.pf_barrier_segment_vertices) {
-            // doc pr/38 F1: the prototype's barrier seed is map_vtx_segs --
-            // vertices incident to the shower's OWN segments (WCShower::
-            // fill_sets, WCShower.cxx:596-599; every map_vtx_segs insert is
-            // keyed by a member segment's endpoint, WCShower.cxx:547/688/698).
-            // The toolkit view additionally holds the shower's start vertex
-            // (Shower::set_start_vertex -> add_vertex, PRShower.cxx:94); for a
-            // detached conn-2/3 shower that is a main-track junction the
-            // prototype does NOT barrier, and blocking it drops every track
-            // segment behind it (SBND 18255-219295 seg 15001 et al.).
-            for (const auto& seg : ss) {
-                auto [va, vb] = PR::find_vertices(*pr_graph, seg);
-                if (va) shower_vtxs.insert(va);
-                if (vb) shower_vtxs.insert(vb);
-            }
-        }
-        else {
-            shower_vtxs.insert(sv.begin(), sv.end());
-        }
+        shower_vtxs.insert(sv.begin(), sv.end());
 
         auto [_, conn_type] = shower->get_start_vertex_and_type();
         if (conn_type == 4) {
@@ -1815,18 +1804,19 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
         particles.append(root_node);
     }
 
-    // doc pr/38 F2: orphan safety net.  The prototype's flat loop gives EVERY
-    // non-shower main-cluster segment a node with mc_mother=0 before the
-    // mother-assignment BFS runs (NeutrinoID.cxx:1485-1489), so a segment the
-    // BFS never reaches stays in its tree as a root-level node; the BFS-built
-    // tree above silently dropped it.  Emitted as root-level leaves with the
-    // prototype's own node conventions: endpoints from the segment's fit
-    // points oriented by dirsign (fill_reco_tree, NeutrinoID.cxx:1217-1239),
-    // dirsign==0 segments not plotted (:1215), KeepMC floors as for every
-    // other node.  Emission order is sorted by encoded id -- the prototype's
-    // is pointer-map order, which is not reproducible; a stable order is
-    // chosen deliberately.
-    if (cfg.pf_orphan_track_roots) {
+    // doc pr/38: orphan safety net, gated under pf_shower_vertex_barrier as
+    // the no-silent-drop complement of the barrier.  The prototype's flat
+    // loop gives EVERY non-shower main-cluster segment a node with
+    // mc_mother=0 before the mother-assignment BFS runs
+    // (NeutrinoID.cxx:1485-1489), so a segment the BFS never reaches stays in
+    // its tree as a root-level node; the BFS-built tree above silently
+    // dropped it.  Emitted as root-level leaves with the prototype's own node
+    // conventions: endpoints from the segment's fit points oriented by
+    // dirsign (fill_reco_tree, NeutrinoID.cxx:1217-1239), dirsign==0 segments
+    // not plotted (:1215), KeepMC floors as for every other node.  Emission
+    // order is sorted by encoded id -- the prototype's is pointer-map order,
+    // which is not reproducible; a stable order is chosen deliberately.
+    if (cfg.pf_shower_vertex_barrier) {
         std::vector<PR::SegmentPtr> orphans;
         for (auto edesc : mir(boost::edges(*pr_graph))) {
             auto seg = (*pr_graph)[edesc].segment;

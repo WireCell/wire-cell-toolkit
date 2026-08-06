@@ -168,8 +168,17 @@ namespace WireCell::Clus::PR {
         void complete_structure_with_start_segment(IndexedSegmentSet& used_segments, const std::string& cloud_name_fit = "fit", const std::string& cloud_name_associate = "associate_points");
 
 
-        // get the information from the shower
-        void fill_sets(IndexedVertexSet& used_vertices, IndexedSegmentSet& used_segments, bool flag_exclude_start_segment = true);
+        // get the information from the shower.
+        // exclude_start_vertex (doc pr/38): omit m_start_vertex from
+        // used_vertices.  The prototype's WCShower::fill_sets reads
+        // map_vtx_segs, which NEVER holds the start vertex -- every write
+        // path skips it (`if (vtx == start_vertex) continue;`,
+        // WCShower.cxx:547 and complete_structure_with_start_segment
+        // :708-716/:733-745) -- while the toolkit view holds it via
+        // set_start_vertex -> add_vertex.  Default false = legacy view
+        // semantics, byte-identical for all existing callers.
+        void fill_sets(IndexedVertexSet& used_vertices, IndexedSegmentSet& used_segments, bool flag_exclude_start_segment = true,
+                       bool exclude_start_vertex = false);
         void fill_point_vector(std::vector<WireCell::Point>& points, bool flag_main = true);
         TrajectoryView& fill_maps();
 

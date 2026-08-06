@@ -407,11 +407,17 @@ namespace WireCell::Clus::PR {
         }
     }
 
-    void Shower::fill_sets(IndexedVertexSet& used_vertices, IndexedSegmentSet& used_segments, bool flag_exclude_start_segment){
-        // Fill used_vertices with all vertices in this shower's view (index-stable order)
+    void Shower::fill_sets(IndexedVertexSet& used_vertices, IndexedSegmentSet& used_segments, bool flag_exclude_start_segment,
+                           bool exclude_start_vertex){
+        // Fill used_vertices with all vertices in this shower's view (index-stable order).
+        // exclude_start_vertex: prototype map_vtx_segs parity -- the start
+        // vertex (a main-track attachment point, present in the toolkit view
+        // via set_start_vertex) is omitted so consumers' BFS barriers block
+        // only shower-INTERIOR vertices (see header comment, doc pr/38).
         for (auto vdesc : ordered_nodes(*this, m_full_graph)) {
             VertexPtr vtx = m_full_graph[vdesc].vertex;
             if (vtx) {
+                if (exclude_start_vertex && vtx == m_start_vertex) continue;
                 used_vertices.insert(vtx);
             }
         }

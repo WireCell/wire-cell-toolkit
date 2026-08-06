@@ -182,6 +182,14 @@ namespace WireCell::Clus {
             // pf_shower_vertex_barrier: pre-seed visited_vtxs from every
             // shower's vertex set so the BFS does not expand THROUGH a shower
             // (prototype used_vertices seed, NeutrinoID.cxx:1597-1602).
+            // Corrected semantics (doc pr/38): the barrier set excludes each
+            // shower's START vertex -- the prototype's map_vtx_segs never
+            // holds it (WCShower.cxx:547, :708-716, :733-745), so main-track
+            // attachment junctions stay traversable and only shower-INTERIOR
+            // vertices block.  The same knob also enables the orphan safety
+            // net: BFS-unreached non-shower main-cluster segments are emitted
+            // as root-level leaves (prototype flat-loop mc_mother=0 parity,
+            // NeutrinoID.cxx:1485-1489) instead of silently vanishing.
             bool pf_shower_vertex_barrier{false};
             // pf_shower_parent_precedence: record the parent shower for
             // track-attached shower vertices and consult it before the
@@ -198,24 +206,6 @@ namespace WireCell::Clus {
             // name table plus the prototype's numeric fallback
             // (WCReader.cc:529-547) instead of "particle".
             bool pf_pdg_name_prototype_fallback{false};
-            // ---- doc sbnd_xin/docs/pr/38 missing-track knobs ----
-            // pf_barrier_segment_vertices: build the F2 shower-vertex barrier
-            // from vertices incident to each shower's own segments (prototype
-            // WCShower::fill_sets = map_vtx_segs keys, WCShower.cxx:596-599)
-            // instead of the shower's full graph view.  The toolkit view also
-            // holds the shower's START vertex (Shower::set_start_vertex ->
-            // add_vertex, PRShower.cxx:94), which for a detached conn-2/3
-            // shower is a main-track junction the prototype does NOT barrier
-            // -- blocking it silently drops every track segment behind it.
-            bool pf_barrier_segment_vertices{false};
-            // pf_orphan_track_roots: emit non-shower main-cluster segments the
-            // track BFS never reached as root-level leaf nodes.  The prototype
-            // gives EVERY such segment a node with mc_mother=0 up front
-            // (NeutrinoID.cxx:1485-1489), so unreachable ones stay in its tree
-            // at root level; the toolkit's BFS-built tree silently dropped
-            // them.  dirsign==0 segments are not plotted (prototype
-            // fill_reco_tree early return, NeutrinoID.cxx:1215).
-            bool pf_orphan_track_roots{false};
         };
         std::vector<BeePFConfig> m_bee_pf_configs;
 

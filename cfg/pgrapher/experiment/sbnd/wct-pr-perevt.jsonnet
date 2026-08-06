@@ -749,21 +749,14 @@ function(
     pf_shower_parent_precedence = true,
     pf_pi0_node_per_id = true,
     pf_pdg_name_prototype_fallback = true,
-    // ---- doc pr/38: missing-track fixes, SBND PRODUCTION DEFAULTS ON ----
-    // (C++ defaults stay false).  Display-only: moves ONLY mc.json.
-    // pf_barrier_segment_vertices: the F2 shower-vertex barrier uses
-    // member-segment endpoint vertices (prototype WCShower map_vtx_segs
-    // semantics); the toolkit shower view also holds the detached conn-2/3
-    // start vertex, which blocked the track BFS at main-track junctions and
-    // silently dropped every segment behind them (SBND 18255-219295 proton
-    // seg 15001 at the pi+ endpoint, + 6 more events, doc pr/38).
-    // pf_orphan_track_roots: BFS-unreached non-shower main-cluster segments
-    // become root-level leaves (prototype flat-loop mc_mother=0 parity,
-    // NeutrinoID.cxx:1485-1489) instead of vanishing.
-    // Runner env overrides: SBND_PF_BARRIER_SEGMENT_VERTICES /
-    // SBND_PF_ORPHAN_TRACK_ROOTS (tri-state).
-    pf_barrier_segment_vertices = true,
-    pf_orphan_track_roots = true,
+    // doc pr/38: F2's ON-behavior was CORRECTED in place (owner decision
+    // 2026-08-05, no new knobs): the barrier now excludes each shower's
+    // start vertex (prototype map_vtx_segs parity, WCShower.cxx:547) so
+    // main-track junctions stay traversable, and the same knob emits
+    // BFS-unreached non-shower main-cluster segments as root-level leaves
+    // (prototype flat-loop mc_mother=0 parity).  Display-only: moves ONLY
+    // mc.json (SBND 18255-219295/489330/56243 protons + vertex proton stubs
+    // with the 3 MeV np_ke_min floor).
     // How 'unmerge_bundle' (when named in pipeline_names) identifies the main
     // sub-cluster of a flash-merged bundle (C++ default "real").  "real" =
     // per-blob real_cluster_main/real_cluster_id provenance -- exact, needs a
@@ -984,8 +977,6 @@ function(
                              pf_shower_parent_precedence=pf_shower_parent_precedence,
                              pf_pi0_node_per_id=pf_pi0_node_per_id,
                              pf_pdg_name_prototype_fallback=pf_pdg_name_prototype_fallback,
-                             pf_barrier_segment_vertices=pf_barrier_segment_vertices,
-                             pf_orphan_track_roots=pf_orphan_track_roots,
                              unmerge_bundle_mode=unmerge_bundle_mode,
                              restore_demoted_mains=restore_demoted_mains,
                              require_provenance=require_provenance,
