@@ -6,11 +6,25 @@
 #include <Eigen/Dense>
 #include <unordered_map>
 #include <unordered_set>
+#include <cstdlib>
+#include <cstdio>
 
 using namespace WireCell::Clus::PR;
 using namespace WireCell::Clus;
 
 static auto s_log = WireCell::Log::logger("clus.NeutrinoPattern");
+
+// doc sbnd_xin/docs/pr/40: WCT_PID_WRITE_DEBUG (see PRSegment.cxx) logs
+// direct set_pdg() mutations on the pointee, which bypass the
+// Segment::particle_info() setter hook entirely.
+static inline void pr40_probe_setpdg(SegmentPtr sg, int new_pdg, const char* site) {
+    static const bool dbg = std::getenv("WCT_PID_WRITE_DEBUG") != nullptr;
+    if (!dbg || !sg) return;
+    if (std::abs(new_pdg) != 11) return;
+    const int cid = sg->cluster() ? sg->cluster()->get_cluster_id() : -1;
+    std::fprintf(stderr, "PID_WRITE_DEBUG set_pdg id=%d clus=%d gidx=%zu pdg -> %d  at %s\n",
+                 sg->id(), cid, sg->get_graph_index(), new_pdg, site);
+}
 
 namespace {
     struct cluster_point_info {
@@ -226,6 +240,7 @@ void PatternAlgorithms::shower_clustering_with_nv_in_main_cluster(Graph& graph, 
                 if (sg1 == max_sg) sg1->set_flags(SegmentFlags::kAvoidMuonCheck);
                 if (sg1->has_particle_info() && sg1->particle_info()) {
                     sg1->particle_info()->set_pdg(11);
+                    pr40_probe_setpdg(sg1, 11, "NeutrinoShowerClustering.cxx:long_muon_to_EM");
                     sg1->particle_info()->set_mass(particle_data->get_particle_mass(11));
                 }
                 tmp_segments.insert(sg1);
@@ -467,6 +482,7 @@ void PatternAlgorithms::shower_clustering_connecting_to_main_vertex(Graph& graph
                 SPDLOG_LOGGER_TRACE(s_log, "shower_clustering_connecting_to_main_vertex: Convert EM shower {}", shower->start_segment()->id());
                 if (shower->start_segment() && shower->start_segment()->has_particle_info() && shower->start_segment()->particle_info()) {
                     shower->start_segment()->particle_info()->set_pdg(11);
+                    pr40_probe_setpdg(shower->start_segment(), 11, "NeutrinoShowerClustering.cxx:connecting_to_main_vertex");
                 }
 
                 // Set avoid muon check flag on max segment
@@ -796,6 +812,7 @@ void PatternAlgorithms::shower_clustering_with_nv_from_main_cluster(Graph& graph
             it->second->add_segment(seg1, true);
             if (seg1->has_particle_info() && seg1->particle_info()) {
                 seg1->particle_info()->set_pdg(11);
+                pr40_probe_setpdg(seg1, 11, "NeutrinoShowerClustering.cxx:orphan_sibling_adopt");
                 seg1->particle_info()->set_mass(0.511 * units::MeV);
             }
             changed = true;
@@ -2005,6 +2022,7 @@ void PatternAlgorithms::examine_shower_1(Graph& graph, VertexPtr main_vertex, In
                 if (shower1->start_segment() && shower1->start_segment()->has_particle_info() &&
                     shower1->start_segment()->particle_info()) {
                     shower1->start_segment()->particle_info()->set_pdg(11);
+                    pr40_probe_setpdg(shower1->start_segment(), 11, "NeutrinoShowerClustering.cxx:new_shower_accepted");
                     shower1->start_segment()->particle_info()->set_mass(
                         particle_data->get_particle_mass(11));
                 }
@@ -2474,7 +2492,10 @@ void PatternAlgorithms::examine_showers(Graph& graph, VertexPtr main_vertex, Ind
             }
         }
 
-        if (sg->has_particle_info() && sg->particle_info()) sg->particle_info()->set_pdg(11);
+        if (sg->has_particle_info() && sg->particle_info()) {
+            sg->particle_info()->set_pdg(11);
+            pr40_probe_setpdg(sg, 11, "NeutrinoShowerClustering.cxx:merged_shower_start_segment");
+        }
         shower->update_particle_type(particle_data, recomb_model, m_mip_dqdx);
         shower->calculate_kinematics(particle_data, recomb_model, m_shower_endpoint_exclude_start_vertex);
         shower->set_kine_charge(cal_kine_charge(shower, m_charge_2d_u, m_charge_2d_v, m_charge_2d_w, m_map_apa_ch_plane_wires, track_fitter, dv));

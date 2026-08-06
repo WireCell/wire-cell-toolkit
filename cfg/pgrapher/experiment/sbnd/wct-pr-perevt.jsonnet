@@ -938,6 +938,26 @@ function(
     // m_shower_endpoint_exclude_start_vertex{false} is still the library
     // default; only the SBND operating point flips it on.
     shower_endpoint_exclude_start_vertex = true,
+    // doc sbnd_xin/docs/pr/40 sec 17 (2026-08-06): track (proton/pion/muon)
+    // mis-identified as electron.  F1 restores prototype-faithful PID
+    // persistence (segment_determine_dir_track); F2/F3 spare a segment
+    // whose own median dQ/dx is decisively proton- or muon-like from an
+    // unconditional track-to-electron reclassification, at the wholesale-
+    // conversion sites (F2) and the shower-topology test (F3).  C++
+    // defaults all false.  SBND PRODUCTION DEFAULT since 2026-08-06 (owner:
+    // "Flip to SBND ON if gates pass" -- gates G1-G7 all passed): gate
+    // work-pr40-off48 vs work-pr40-base48 (clean-source reference) 48/48
+    // byte-identical; work-pr40-on48 fixes 8 of the 9 owner-reported cases
+    // to a hadron pdg (388->13, 74544/267597/269774/423981/489330->2212/
+    // 211, 433451->13), the 9th (evt 256587) correctly left untouched
+    // because its own median dQ/dx (1.26x MIP) sits in the deliberately
+    // conservative gap between the muon and proton thresholds, not a bug;
+    // population moves 3/48 events beyond the 9, all confined to the
+    // nusel-table stmfit field, zero label (verdict) flips; wcdoctest-clus
+    // 97/97.
+    track_pid_persist_dqdx = true,
+    shower_reclass_dqdx_guard = true,
+    shower_topo_dqdx_guard = true,
 )
     local base = import 'pgrapher/experiment/sbnd/simparams.jsonnet';
     local params = base {
@@ -1093,6 +1113,9 @@ function(
                              shower_flag_pdg_electron=shower_flag_pdg_electron,
                              shower_less_id_tiebreak=shower_less_id_tiebreak,
                              shower_endpoint_exclude_start_vertex=shower_endpoint_exclude_start_vertex,
+                             track_pid_persist_dqdx=track_pid_persist_dqdx,
+                             shower_reclass_dqdx_guard=shower_reclass_dqdx_guard,
+                             shower_topo_dqdx_guard=shower_topo_dqdx_guard,
                              muon_dqdx_curve=muon_dqdx_curve,
                              use_power_recomb=use_power_recomb,
                              sp_dedx_use_recomb_model=sp_dedx_use_recomb_model,

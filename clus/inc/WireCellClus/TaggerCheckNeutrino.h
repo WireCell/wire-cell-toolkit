@@ -274,6 +274,14 @@ public:
         // vertex from the end_point farthest-vertex search.  See
         // PatternAlgorithms::m_shower_endpoint_exclude_start_vertex.
         bool m_shower_endpoint_exclude_start_vertex{false};
+        // doc sbnd_xin/docs/pr/40 -- track (proton/pion/muon) mis-identified
+        // as electron.  F1 restores prototype-faithful PID persistence
+        // (threaded via track_pid_options()); F2/F3 guard the wholesale
+        // track-to-electron conversion sites with the segment's own dQ/dx.
+        // See NeutrinoPatternBase.h for the full rationale of each.
+        bool m_track_pid_persist_dqdx{false};
+        bool m_shower_reclass_dqdx_guard{false};
+        bool m_shower_topo_dqdx_guard{false};
         mutable std::shared_ptr<TrackFitting> m_track_fitter;
 
         void load_trackfitting_config(const std::string& config_file);

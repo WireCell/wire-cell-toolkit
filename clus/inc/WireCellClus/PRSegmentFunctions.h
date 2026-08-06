@@ -69,6 +69,17 @@ namespace WireCell::Clus::PR {
     /// @return Median dQ/dx value (0 if no valid fits)
     double segment_median_dQ_dx(SegmentPtr seg, int n1 = -1, int n2 = -1);
     double segment_rms_dQ_dx(SegmentPtr seg);
+
+    /// doc sbnd_xin/docs/pr/40 -- shared evidence check for the F2/F3 knobs
+    /// (shower_reclass_dqdx_guard, shower_topo_dqdx_guard).  Reuses the SAME
+    /// median-dQ/dx thresholds segment_determine_dir_track's short-track
+    /// fallback already trusts (PRSegmentFunctions.cxx, medium_dQ_dx >
+    /// MIP_dQdx*1.75 => proton, < MIP_dQdx*1.2 => muon) to decide whether a
+    /// segment's OWN charge profile is decisively non-electron-like, i.e. it
+    /// should be spared from an unconditional track-to-electron
+    /// reclassification.  A zero/absent median (no valid dQ/dx samples) never
+    /// spares -- that is "no evidence", not "MIP-like evidence".
+    bool segment_dqdx_spares_electron_reclass(SegmentPtr seg, double MIP_dQdx);
     
     
     /// Create and associate a DynamicPointCloud with a segment from path points
@@ -145,6 +156,23 @@ namespace WireCell::Clus::PR {
     //   scale either way (charge per internal length; see the unit-convention
     //   comment in segment_determine_dir_track).  false = filtered helper =
     //   byte-identical.
+    // - track_pid_persist_dqdx: doc sbnd_xin/docs/pr/40 (F1, = doc pr/7 sec 5 /
+    //   pr/31 P14/F8).  segment_determine_dir_track's final store
+    //   (`if (pdg_code != 0 && ((dirsign==1 && end_n==1) || (dirsign==-1 &&
+    //   start_n==1)))`) gates BOTH the type/mass persistence and the 4-mom
+    //   recompute on the direction pointing at a free end -- so a dQ/dx-only
+    //   recovery (medium_dQ_dx > 1.75x/< 1.2x MIP with dirsign left at 0, or a
+    //   confident template PID whose stop end is not topologically free) is
+    //   computed and then silently discarded; the segment exits with no
+    //   particle_info at all.  The prototype (ProtoSegment.cxx:1637-1639)
+    //   persists type+mass unconditionally and gates ONLY cal_4mom() on
+    //   get_particle_4mom(3)>0 ("an energy was already computed").  true =
+    //   restore that shape: store type+mass whenever pdg_code != 0, gate only
+    //   the 4-momentum recompute on the existing free-end test.  false =
+    //   legacy = byte-identical.  Measured (doc pr/40 Part 0): of 9 owner-
+    //   reported track-to-electron cases, this persistence gate is why 4 of
+    //   them (evt 74544, 174637, 267597, 269774) had NO particle_info at all
+    //   by the time a wholesale shower-reclassification site looked at them.
     struct TrackPidOptions {
         double mip_dqdx{50000/units::cm};
         bool   proton_dir_vote{false};
@@ -155,6 +183,7 @@ namespace WireCell::Clus::PR {
         int    end_n{1};
         bool   track_comp_empty_abstain{false};
         bool   dir_track_median_local{false};
+        bool   track_pid_persist_dqdx{false};
     };
 
     // success, flag_dir, pdg_code, particle_score
@@ -232,8 +261,23 @@ namespace WireCell::Clus::PR {
     // survive) and zero dirsign at entry, mirroring the prototype; the tail
     // re-sets both when the answer is still yes.  false = set-only legacy =
     // byte-identical.
+    // dqdx_guard (doc sbnd_xin/docs/pr/40, F3): the local vec_dQ_dx this
+    // function already builds (fits[i].dQ/dx, normalized by MIP_dQ_dx) is
+    // otherwise DEAD -- read only as .size() (pr/31 GOTCHA 5) -- so the
+    // 5-branch geometric spread test that decides flag_shower_topology never
+    // once consults the segment's own charge.  true = after that test (and
+    // the existing length-based demotions) decide flag_shower_topology=true,
+    // override it back to false when segment_dqdx_spares_electron_reclass
+    // says the segment's median dQ/dx is decisively proton- or muon-like.
+    // This does NOT touch flag_dir or the geometric test itself -- a
+    // genuinely isochronous/EM-like spread pattern with ambiguous charge
+    // still sets the flag.  false = legacy = byte-identical.  Measured (doc
+    // pr/40 Part 0): rescues both owner-reported cases where the topology
+    // test itself, not a pdg-11 write elsewhere, was the mechanism (evt
+    // 256587 seg 11079 at 1.26x MIP, evt 489330 seg 4018 at 2.73x MIP -- both
+    // shorter than the existing shower_topo_demote_len's reach).
     bool segment_is_shower_topology(SegmentPtr seg, bool tmp_val=false, double MIP_dQ_dx = 43000/units::cm,
-                                    double demote_len = 0, bool reset = false);
+                                    double demote_len = 0, bool reset = false, bool dqdx_guard = false);
 }
 
 #endif

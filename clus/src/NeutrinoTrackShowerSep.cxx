@@ -2,6 +2,7 @@
 #include "WireCellClus/PRSegmentFunctions.h"
 #include "WireCellUtil/Logging.h"
 #include <chrono>
+#include <cstdlib>
 
 using namespace WireCell::Clus::PR;
 using namespace WireCell::Clus;
@@ -110,7 +111,7 @@ void PatternAlgorithms::separate_track_shower(Graph&graph, Facade::Cluster& clus
 
         // First check if segment is a shower topology
         auto t0 = Clock::now();
-        segment_is_shower_topology(seg, false, m_mip_dqdx_median, m_shower_topo_demote_len, m_shower_topo_reset);
+        segment_is_shower_topology(seg, false, m_mip_dqdx_median, m_shower_topo_demote_len, m_shower_topo_reset, m_shower_topo_dqdx_guard);
         t_topology += MS(Clock::now() - t0);
 
         // If not shower topology, check if it's a shower trajectory
@@ -169,7 +170,15 @@ void PatternAlgorithms::determine_direction(Graph& graph, Facade::Cluster& clust
             end_n = boost::degree(end_v->get_descriptor(), graph);
         }
 
-        bool flag_print = false;
+        // doc sbnd_xin/docs/pr/40: WCT_PID_TRACE_DEBUG, env-gated (same idiom
+        // as WCT_PID_WRITE_DEBUG/WCT_SHOWER_TOPO_DEBUG), un-gates the
+        // segment_determine_dir_track / segment_determine_shower_direction_trajectory
+        // "Seg ... Track/S_traj dirsign dir_weak pdg mass KE score" TRACE line
+        // (PRSegmentFunctions.cxx flag_print block).  Was hardcoded false
+        // with no config or env path at all before doc pr/40's attribution
+        // work needed it.
+        static const bool s_pr40_pid_trace_debug = std::getenv("WCT_PID_TRACE_DEBUG") != nullptr;
+        bool flag_print = s_pr40_pid_trace_debug;
         // if (seg->cluster() == main_cluster) flag_print = true;
 
         auto t0 = Clock::now();
@@ -848,13 +857,22 @@ void PatternAlgorithms::improve_maps_shower_in_track_out(Graph& graph, Facade::C
                 // Reclassify outgoing tracks as electrons
                 for (auto it1 = out_tracks.begin(); it1 != out_tracks.end(); it1++) {
                     SegmentPtr sg1 = *it1;
-                    
+
+                    // doc sbnd_xin/docs/pr/40 F2: spare a segment whose OWN
+                    // median dQ/dx is decisively proton- or muon-like from
+                    // this wholesale conversion.  false = legacy = every
+                    // out_track (weak-direction or untyped) becomes electron
+                    // unconditionally.
+                    if (m_shower_reclass_dqdx_guard && segment_dqdx_spares_electron_reclass(sg1, m_mip_dqdx)) {
+                        continue;
+                    }
+
                     // Set as electron (PDG 11)
                     int pdg_code = 11;
                     auto pinfo = reclass_pinfo(sg1, pdg_code, particle_data, recomb_model, m_mip_dqdx, m_reclass_preserve_4mom, true);
                     sg1->particle_info(pinfo);
                     sg1->dirsign(0);
-                    
+
                     flag_update = true;
                 }
                 
@@ -867,7 +885,9 @@ void PatternAlgorithms::improve_maps_shower_in_track_out(Graph& graph, Facade::C
                     bool is_shower1 = sg1->flags_any(SegmentFlags::kShowerTrajectory) ||
                                       sg1->flags_any(SegmentFlags::kShowerTopology) ||
                                       (sg1->has_particle_info() && std::abs(sg1->particle_info()->pdg()) == 11);
-                    if (!is_shower1) {
+                    // doc sbnd_xin/docs/pr/40 F2 (same guard as the out_tracks
+                    // loop above).
+                    if (!is_shower1 && !(m_shower_reclass_dqdx_guard && segment_dqdx_spares_electron_reclass(sg1, m_mip_dqdx))) {
                         int pdg_code = 11;
                         auto pinfo = reclass_pinfo(sg1, pdg_code, particle_data, recomb_model, m_mip_dqdx, m_reclass_preserve_4mom, true);
                         sg1->particle_info(pinfo);
@@ -1098,11 +1118,20 @@ void PatternAlgorithms::improve_maps_no_dir_tracks(Graph& graph, Facade::Cluster
                     if ((direct_length < 34*units::cm && direct_length < 0.93 * length) ||
                         (length < 5*units::cm && ((nprotons[0] + nshowers[0] == 0 && nshowers[1] >= 2) ||
                                                    (nprotons[1] + nshowers[1] == 0 && nshowers[0] >= 2)))) {
-                        
-                        int pdg_code = 11;
-                        auto pinfo = reclass_pinfo(sg, pdg_code, particle_data, recomb_model, m_mip_dqdx, m_reclass_preserve_4mom, true);
-                        sg->particle_info(pinfo);
-                        flag_update = true;
+
+                        // doc sbnd_xin/docs/pr/40 F2 (Case E: muon-topology
+                        // demotion; same guard as the other two sites).  Only
+                        // guards the CONVERSION, not entry to this branch, so
+                        // a spared segment falls through to neither the
+                        // conversion NOR the sibling Case F test below (both
+                        // are the SAME if/else-if arm as the prototype's
+                        // mutually-exclusive case selection).
+                        if (!(m_shower_reclass_dqdx_guard && segment_dqdx_spares_electron_reclass(sg, m_mip_dqdx))) {
+                            int pdg_code = 11;
+                            auto pinfo = reclass_pinfo(sg, pdg_code, particle_data, recomb_model, m_mip_dqdx, m_reclass_preserve_4mom, true);
+                            sg->particle_info(pinfo);
+                            flag_update = true;
+                        }
                     }
                     // Case F: Check daughter showers
                     else if ((((nshowers[0]+nshowers[1] >= 2) && (nprotons[0]+nmuons[0]+nshowers[0] == 1 || nprotons[1]+nmuons[1]+nshowers[1] == 1)) ||
@@ -1899,6 +1928,13 @@ void PatternAlgorithms::examine_all_showers(Graph& graph, Facade::Cluster& clust
             bool is_shower = sg->flags_any(SegmentFlags::kShowerTrajectory) ||
                            sg->flags_any(SegmentFlags::kShowerTopology) ||
                            (sg->has_particle_info() && std::abs(sg->particle_info()->pdg()) == 11);
+
+            // doc sbnd_xin/docs/pr/40 F2 (same guard as improve_maps_shower_
+            // in_track_out).  false = legacy = every non-shower segment in a
+            // shower-dominated cluster becomes electron unconditionally.
+            if (!is_shower && m_shower_reclass_dqdx_guard && segment_dqdx_spares_electron_reclass(sg, m_mip_dqdx)) {
+                continue;
+            }
 
             if (!is_shower) {
                 int pdg_code = 11;

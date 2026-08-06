@@ -254,6 +254,10 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_shower_flag_pdg_electron             = get(config, "shower_flag_pdg_electron",             m_shower_flag_pdg_electron);
     m_shower_less_id_tiebreak              = get(config, "shower_less_id_tiebreak",              m_shower_less_id_tiebreak);
     m_shower_endpoint_exclude_start_vertex = get(config, "shower_endpoint_exclude_start_vertex", m_shower_endpoint_exclude_start_vertex);
+    // doc sbnd_xin/docs/pr/40 -- track mis-identified as electron.
+    m_track_pid_persist_dqdx      = get(config, "track_pid_persist_dqdx",      m_track_pid_persist_dqdx);
+    m_shower_reclass_dqdx_guard   = get(config, "shower_reclass_dqdx_guard",   m_shower_reclass_dqdx_guard);
+    m_shower_topo_dqdx_guard      = get(config, "shower_topo_dqdx_guard",      m_shower_topo_dqdx_guard);
 
     if (!m_trackfitting_config_file.empty()) {
         load_trackfitting_config(m_trackfitting_config_file);
@@ -383,6 +387,10 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["shower_flag_pdg_electron"]             = m_shower_flag_pdg_electron;             // false = legacy is_shower without the abs(pdg)==11 term
     cfg["shower_less_id_tiebreak"]              = m_shower_less_id_tiebreak;              // false = legacy pointer-address tie-break (house-rule fix when true)
     cfg["shower_endpoint_exclude_start_vertex"] = m_shower_endpoint_exclude_start_vertex; // false = legacy end_point search includes the start vertex (doc pr/39)
+    // doc sbnd_xin/docs/pr/40 -- track mis-identified as electron.
+    cfg["track_pid_persist_dqdx"]    = m_track_pid_persist_dqdx;    // false = legacy free-end-gated persistence
+    cfg["shower_reclass_dqdx_guard"] = m_shower_reclass_dqdx_guard; // false = legacy unconditional wholesale reclassification
+    cfg["shower_topo_dqdx_guard"]    = m_shower_topo_dqdx_guard;    // false = legacy (dQ/dx never consulted by the topology test)
 
 
     return cfg;
@@ -696,6 +704,10 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
     pattern_algos.m_shower_flag_pdg_electron             = m_shower_flag_pdg_electron;
     pattern_algos.m_shower_less_id_tiebreak              = m_shower_less_id_tiebreak;
     pattern_algos.m_shower_endpoint_exclude_start_vertex = m_shower_endpoint_exclude_start_vertex;
+    // doc sbnd_xin/docs/pr/40 -- track mis-identified as electron.
+    pattern_algos.m_track_pid_persist_dqdx    = m_track_pid_persist_dqdx;    // F1: threaded via track_pid_options()
+    pattern_algos.m_shower_reclass_dqdx_guard = m_shower_reclass_dqdx_guard; // F2
+    pattern_algos.m_shower_topo_dqdx_guard    = m_shower_topo_dqdx_guard;    // F3
     // Muon dQ/dx-vs-length envelope: c0/c1/power dimensionless, pivot cm -> internal.
     pattern_algos.m_muon_dqdx_curve = {m_muon_dqdx_curve[0], m_muon_dqdx_curve[1],
                                        m_muon_dqdx_curve[2] * units::cm, m_muon_dqdx_curve[3]};

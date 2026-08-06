@@ -1,7 +1,36 @@
 #include "WireCellClus/PRSegment.h"
 #include "WireCellClus/PRSegmentFunctions.h"
+#include "WireCellClus/Facade_Cluster.h"
+#include <cstdlib>
+#include <cstdio>
 
 namespace WireCell::Clus::PR {
+
+    // doc sbnd_xin/docs/pr/40: WCT_PID_WRITE_DEBUG, an env-gated object-level
+    // audit of every particle_info() write that sets or clears pdg +-11
+    // (same idiom as WCT_SHOWER_TOPO_DEBUG / WCT_DET_DEBUG elsewhere in this
+    // file's siblings).  Catches the setter here for all ~40 call sites with
+    // zero call-site churn (the __builtin_FILE/LINE default args do the
+    // work); the 6 non-const-ref reseat sites and 12 direct set_pdg()
+    // mutations are instrumented separately at their own call sites
+    // (NeutrinoVertexFinder.cxx, NeutrinoShowerClustering.cxx) since they
+    // bypass this setter entirely.
+    Segment& Segment::particle_info(std::shared_ptr<Aux::ParticleInfo> pinfo,
+                                     const char* _caller_file, int _caller_line) {
+        static const bool dbg = std::getenv("WCT_PID_WRITE_DEBUG") != nullptr;
+        if (dbg) {
+            const int old_pdg = m_particle_info ? m_particle_info->pdg() : 0;
+            const int new_pdg = pinfo ? pinfo->pdg() : 0;
+            if (std::abs(old_pdg) == 11 || std::abs(new_pdg) == 11) {
+                const int cid = cluster() ? cluster()->get_cluster_id() : -1;
+                std::fprintf(stderr,
+                    "PID_WRITE_DEBUG setter id=%d clus=%d gidx=%zu pdg %d -> %d  at %s:%d\n",
+                    m_id, cid, m_graph_index, old_pdg, new_pdg, _caller_file, _caller_line);
+            }
+        }
+        m_particle_info = pinfo;
+        return *this;
+    }
 
     void Segment::reset_fit_prop(){
         for (auto& fit : m_fits) {

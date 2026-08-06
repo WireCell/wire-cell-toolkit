@@ -16,11 +16,25 @@
 #include <chrono>
 #include <cmath>
 #include <unordered_set>
+#include <cstdlib>
+#include <cstdio>
 
 using namespace WireCell::Clus::PR;
 using namespace WireCell::Clus;
 
 static auto s_log = WireCell::Log::logger("clus.NeutrinoPattern");
+
+// doc sbnd_xin/docs/pr/40: WCT_PID_WRITE_DEBUG (see PRSegment.cxx) logs
+// direct set_pdg() mutations on the pointee, which bypass the
+// Segment::particle_info() setter hook entirely.
+static inline void pr40_probe_setpdg(SegmentPtr sg, int new_pdg, const char* site) {
+    static const bool dbg = std::getenv("WCT_PID_WRITE_DEBUG") != nullptr;
+    if (!dbg || !sg) return;
+    if (std::abs(new_pdg) != 11) return;
+    const int cid = sg->cluster() ? sg->cluster()->get_cluster_id() : -1;
+    std::fprintf(stderr, "PID_WRITE_DEBUG set_pdg id=%d clus=%d gidx=%zu pdg -> %d  at %s\n",
+                 sg->id(), cid, sg->get_graph_index(), new_pdg, site);
+}
 
 // doc sbnd_xin/docs/pr/32 §11 F1 -- the prototype's ProtoVertex::get_fit_pt().
 //
@@ -2417,7 +2431,7 @@ void PatternAlgorithms::improve_vertex(Graph& graph, Facade::Cluster& cluster, V
             if (!sg1 || sg1->cluster() != &cluster) continue;
 
             if (!sg1->particle_info()) {
-                segment_is_shower_topology(sg1, false, m_mip_dqdx_median, m_shower_topo_demote_len, m_shower_topo_reset);
+                segment_is_shower_topology(sg1, false, m_mip_dqdx_median, m_shower_topo_demote_len, m_shower_topo_reset, m_shower_topo_dqdx_guard);
 
                 VertexPtr start_v = nullptr, end_v = nullptr;
                 auto source_v = boost::source(ed, graph);
@@ -2468,7 +2482,7 @@ void PatternAlgorithms::improve_vertex(Graph& graph, Facade::Cluster& cluster, V
                     SegmentPtr sg = graph[edesc].segment;
                     if (!sg || sg->cluster() != &cluster) continue;
 
-                    if (!sg->particle_info()) segment_is_shower_topology(sg, false, m_mip_dqdx_median, m_shower_topo_demote_len, m_shower_topo_reset);
+                    if (!sg->particle_info()) segment_is_shower_topology(sg, false, m_mip_dqdx_median, m_shower_topo_demote_len, m_shower_topo_reset, m_shower_topo_dqdx_guard);
 
                     VertexPtr start_v = nullptr, end_v = nullptr;
                     auto source_v = boost::source(edesc, graph);
@@ -2553,7 +2567,7 @@ void PatternAlgorithms::improve_vertex(Graph& graph, Facade::Cluster& cluster, V
                 }
                 
                 // Examine topology case
-                if (pair_result.first == 1 && segment_is_shower_topology(sg, false, m_mip_dqdx_median, m_shower_topo_demote_len, m_shower_topo_reset)) {
+                if (pair_result.first == 1 && segment_is_shower_topology(sg, false, m_mip_dqdx_median, m_shower_topo_demote_len, m_shower_topo_reset, m_shower_topo_dqdx_guard)) {
                     int dir_save = sg->dirsign();
                     
                     VertexPtr start_v = nullptr, end_v = nullptr;
@@ -2586,6 +2600,7 @@ void PatternAlgorithms::improve_vertex(Graph& graph, Facade::Cluster& cluster, V
                                 sg->particle_info() = std::make_shared<Aux::ParticleInfo>();
                             }
                             sg->particle_info()->set_pdg(11);
+                            pr40_probe_setpdg(sg, 11, "NeutrinoVertexFinder.cxx:topo-escape(M5)");
                             sg->particle_score(100);
                             sg->dirsign(dir_save);
                             sg->particle_info()->set_mass(particle_data->get_particle_mass(11));
@@ -2619,6 +2634,7 @@ void PatternAlgorithms::improve_vertex(Graph& graph, Facade::Cluster& cluster, V
                                 sg->particle_info() = std::make_shared<Aux::ParticleInfo>();
                             }
                             sg->particle_info()->set_pdg(11);
+                            pr40_probe_setpdg(sg, 11, "NeutrinoVertexFinder.cxx:flag_skip_two_legs");
                             sg->particle_score(100);
                             sg->particle_info()->set_mass(particle_data->get_particle_mass(11));
                         }
@@ -2922,6 +2938,7 @@ void PatternAlgorithms::change_daughter_type(Graph& graph, VertexPtr vertex, Seg
                         sg1->particle_info() = std::make_shared<Aux::ParticleInfo>();
                     }
                     sg1->particle_info()->set_pdg(particle_type);
+                    pr40_probe_setpdg(sg1, particle_type, "NeutrinoVertexFinder.cxx:change_daughter_type(170deg)");
                     sg1->particle_info()->set_mass(mass);
                     sg1->unset_flags(SegmentFlags::kShowerTopology);
 
@@ -2954,8 +2971,9 @@ void PatternAlgorithms::change_daughter_type(Graph& graph, VertexPtr vertex, Seg
                         sg1->particle_info() = std::make_shared<Aux::ParticleInfo>();
                     }
                     sg1->particle_info()->set_pdg(particle_type);
+                    pr40_probe_setpdg(sg1, particle_type, "NeutrinoVertexFinder.cxx:change_daughter_type(165deg)");
                     sg1->particle_info()->set_mass(mass);
-                    
+
                     // Recursively propagate changes
                     change_daughter_type(graph, other_vtx, sg1, particle_type, mass, particle_data, recomb_model);
                     VertexPtr sg1_other_vtx = find_other_vertex(graph, sg1, other_vtx);

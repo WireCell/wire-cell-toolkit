@@ -102,6 +102,10 @@ TEST_CASE("clus knob defaults: TaggerCheckNeutrino switches are all OFF")
     // stays the legacy gap even though SBND's cfg now flips it on, so every
     // other detector's tagger ntuple keeps a constant-0 photon_flag branch.
     CHECK_KNOB_BOOL(cfg, "sp_photon_flag", false);
+    // doc pr/40: track (proton/pion/muon) mis-identified as electron.
+    CHECK_KNOB_BOOL(cfg, "track_pid_persist_dqdx", false);      // F1
+    CHECK_KNOB_BOOL(cfg, "shower_reclass_dqdx_guard", false);   // F2
+    CHECK_KNOB_BOOL(cfg, "shower_topo_dqdx_guard", false);      // F3
 
     // Numeric knobs whose legacy value is the INERT one: 0 disables the guard,
     // so an absent key leaves the code path untouched.
@@ -300,6 +304,53 @@ TEST_CASE("clus knob defaults: TrackPidOptions in-class initializers")
     CHECK(o.endpoint_trim_retry == false);
     CHECK(o.start_n == 1);
     CHECK(o.end_n == 1);
+    CHECK(o.track_pid_persist_dqdx == false);  // doc pr/40 F1
+}
+
+// ---------------------------------------------------------------------------
+// doc sbnd_xin/docs/pr/40 -- track (proton/pion/muon) mis-identified as
+// electron.  segment_dqdx_spares_electron_reclass is the shared evidence
+// check F2/F3 both use; pin its behavior directly since it has no factory
+// config surface of its own.
+// ---------------------------------------------------------------------------
+
+TEST_CASE("clus knob defaults: segment_dqdx_spares_electron_reclass")
+{
+    using namespace WireCell::Clus::PR;
+    const double MIP = 43000 / units::cm;
+
+    auto make_seg_with_dqdx = [&](double dqdx_per_cm) {
+        auto seg = std::make_shared<Segment>();
+        std::vector<Fit> fits;
+        for (int i = 0; i < 5; ++i) {
+            Fit f;
+            f.point = WireCell::Point(i * units::cm, 0, 0);
+            f.dx = 1 * units::cm;
+            f.dQ = dqdx_per_cm * units::cm;
+            f.index = i;
+            fits.push_back(f);
+        }
+        seg->fits(fits);
+        return seg;
+    };
+
+    // No valid fits at all: "no evidence", never spares -- NOT the same as
+    // MIP-like.  A segment with zero charge information must not be treated
+    // as if it looked like a clean muon.
+    {
+        auto seg = std::make_shared<Segment>();
+        CHECK(segment_dqdx_spares_electron_reclass(seg, MIP) == false);
+    }
+
+    // Proton-like: comfortably above the 1.75x MIP threshold.
+    CHECK(segment_dqdx_spares_electron_reclass(make_seg_with_dqdx(3.0 * MIP), MIP) == true);
+    // Muon/MIP-like: comfortably below the 1.2x MIP threshold.
+    CHECK(segment_dqdx_spares_electron_reclass(make_seg_with_dqdx(0.9 * MIP), MIP) == true);
+    // Ambiguous middle: between 1.2x and 1.75x, spares nothing -- an electron
+    // read is still plausible here.
+    CHECK(segment_dqdx_spares_electron_reclass(make_seg_with_dqdx(1.4 * MIP), MIP) == false);
+    // Degenerate scale: never spares (guards the division).
+    CHECK(segment_dqdx_spares_electron_reclass(make_seg_with_dqdx(3.0 * MIP), 0.0) == false);
 }
 
 TEST_CASE("clus knob defaults: KineChargeOptions in-class initializers")

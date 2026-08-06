@@ -905,7 +905,16 @@ namespace WireCell::Clus::PR {
         
         return vec_dQ_dx[median_index];
     }
-    
+
+    // doc sbnd_xin/docs/pr/40 -- see the header comment.
+    bool segment_dqdx_spares_electron_reclass(SegmentPtr seg, double MIP_dQdx) {
+        if (MIP_dQdx <= 0) return false;
+        const double median = segment_median_dQ_dx(seg);
+        if (median <= 0) return false;  // no evidence, not MIP-like evidence
+        const double ratio = median / MIP_dQdx;
+        return (ratio > 1.75) || (ratio < 1.2);
+    }
+
     double segment_rms_dQ_dx(SegmentPtr seg)
     {
         auto& fits = seg->fits();
@@ -1851,9 +1860,31 @@ namespace WireCell::Clus::PR {
         
         // Set particle mass and calculate 4-momentum
         // Only calculate if direction points toward a free end (matching WCPPID logic)
-        if (pdg_code != 0 && ((segment->dirsign() == 1 && end_n == 1) || (segment->dirsign() == -1 && start_n == 1))) {
-            // Calculate 4-momentum using the identified particle type
-            auto four_momentum = segment_cal_4mom(segment, pdg_code, particle_data, recomb_model, MIP_dQdx);
+        const bool free_end_dir = (segment->dirsign() == 1 && end_n == 1) || (segment->dirsign() == -1 && start_n == 1);
+        // doc sbnd_xin/docs/pr/40 F1 (= doc pr/7 sec 5 / pr/31 P14-F8):
+        // track_pid_persist_dqdx persists type+mass whenever pdg_code != 0,
+        // matching the prototype (ProtoSegment.cxx:1637-1639), and gates only
+        // the 4-momentum/energy recompute on free_end_dir -- the existing
+        // toolkit test, standing in for the prototype's
+        // get_particle_4mom(3)>0 ("an energy was already computed") guard;
+        // not independently re-verified against prototype source this round
+        // (prototype_base symlink unavailable), see doc pr/40 for the
+        // measured consequence either way.  false = legacy = byte-identical.
+        if (pdg_code != 0 && (free_end_dir || pid_opts.track_pid_persist_dqdx)) {
+            // Calculate 4-momentum using the identified particle type.  When
+            // the knob rescues a non-free-end store, the momentum direction
+            // is only as good as segment_cal_dir_3vector's no-argument
+            // overload gives for a dirsign that may be 0 -- acceptable here
+            // because downstream consumers gate on pdg/flag_shower, not on
+            // this vector's orientation, for exactly the segments this knob
+            // targets (see doc pr/40 Part 0).
+            WireCell::D4Vector<double> four_momentum(0.0, 0.0, 0.0, 0.0);
+            if (free_end_dir) {
+                four_momentum = segment_cal_4mom(segment, pdg_code, particle_data, recomb_model, MIP_dQdx);
+            } else {
+                const double mass = particle_data->get_particle_mass(pdg_code);
+                four_momentum[0] = mass;  // at rest: matches the prototype's zero-momentum stub
+            }
 
             // Create ParticleInfo with the identified particle
             auto pinfo = std::make_shared<Aux::ParticleInfo>(
@@ -1862,7 +1893,7 @@ namespace WireCell::Clus::PR {
                 particle_data->pdg_to_name(pdg_code),       // name
                 four_momentum                                // 4-momentum (E, px, py, pz)
             );
-            
+
             // Store particle info in segment
             segment->particle_info(pinfo);
             segment->particle_score(particle_score);
@@ -1880,6 +1911,15 @@ namespace WireCell::Clus::PR {
             SPDLOG_LOGGER_TRACE(s_log, "segment_determine_dir_track: Seg {} cm Track {} {} {} {} MeV {} MeV {}",
                 length/units::cm, segment->dirsign(), (segment->dir_weak() ? 1 : 0),
                 pdg_code, particle_mass/units::MeV, kinetic_energy/units::MeV, particle_score);
+            // doc sbnd_xin/docs/pr/40: the line above has no segment id, so it
+            // cannot be joined to a Bee/calib segment.  Add the encoded id
+            // (cluster_id*1000+graph_index, same scheme as PrDisplayDump.cxx)
+            // on a separate WCT_PID_TRACE_DEBUG-gated tag rather than change
+            // the format above (its comment claims WCPPID-format parity).
+            SPDLOG_LOGGER_TRACE(s_log, "PID_TRACE_DEBUG id={} clus={} gidx={} L={:.1f}cm dir={} weak={} pdg={} score={:.4f}",
+                (segment->cluster() ? segment->cluster()->get_cluster_id() : -1) * 1000 + static_cast<int>(segment->get_graph_index()),
+                segment->cluster() ? segment->cluster()->get_cluster_id() : -1, segment->get_graph_index(),
+                length/units::cm, segment->dirsign(), (segment->dir_weak() ? 1 : 0), pdg_code, particle_score);
         }
     }
 
@@ -2577,7 +2617,7 @@ namespace WireCell::Clus::PR {
         return (flag_dir != 0);
     }
 
-    bool segment_is_shower_topology(SegmentPtr segment, bool tmp_val, double MIP_dQ_dx, double demote_len, bool reset){
+    bool segment_is_shower_topology(SegmentPtr segment, bool tmp_val, double MIP_dQ_dx, double demote_len, bool reset, bool dqdx_guard){
         int flag_dir = 0;
         bool flag_shower_topology = tmp_val;
         // doc sbnd_xin/docs/pr/31 §12 (F3, was P13).  The prototype's first two
@@ -2981,6 +3021,18 @@ namespace WireCell::Clus::PR {
                     total_length2/units::cm, (tmp_total_length > 0 ? total_length2/tmp_total_length : 0),
                     dbg_guard_demoted, flag_shower_topology);
             }
+        }
+
+        // doc sbnd_xin/docs/pr/40 F3: the dQ/dx cross-check the 5-branch
+        // geometric spread test never performs (vec_dQ_dx above is otherwise
+        // dead -- pr/31 GOTCHA 5).  Runs regardless of which length-guard
+        // branch fired above (both existing guards require length > their own
+        // cut; this one does not).  MIP_dQ_dx is this function's own scale
+        // parameter (mip_dqdx_median), consistent with every other threshold
+        // here.  Does not touch flag_dir -- only whether the flag is set.
+        // false = legacy = byte-identical.
+        if (flag_shower_topology && dqdx_guard && segment_dqdx_spares_electron_reclass(segment, MIP_dQ_dx)) {
+            flag_shower_topology = false;
         }
 
         if (flag_shower_topology) segment->set_flags(SegmentFlags::kShowerTopology);

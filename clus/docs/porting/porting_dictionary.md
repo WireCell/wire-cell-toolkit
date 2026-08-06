@@ -613,3 +613,53 @@ excluded — was found and is recorded, not fixed (doc pr/28 §17.5): the
 naive fix (renormalize by informative-plane count) has the WRONG SIGN, since
 it would remove the very term currently masking disagreement on the other
 two planes.
+
+## `NeutrinoTrackShowerSep.cxx`'s wholesale track-to-electron conversion sites and `segment_is_shower_topology` never consult the segment's own dQ/dx — `shower_reclass_dqdx_guard`/`shower_topo_dqdx_guard` are designed divergences, not port corrections
+
+Doc pr/40 (owner report: 9 SBND events where a proton/pion/muon **track**
+displays as an electron). Two mechanisms, both **prototype-faithful in both
+trees**, not port bugs:
+
+1. Three sites in `NeutrinoTrackShowerSep.cxx` —
+   `examine_all_showers`'s `flag_change_showers` loop,
+   `improve_maps_shower_in_track_out`'s two reclassify loops (out_tracks and
+   no-direction segments), and `improve_maps_no_dir_tracks` Case E — convert
+   a direction-weak, untyped, or vertex-topology-flagged segment to electron
+   **unconditionally**, without re-checking the segment's own charge. Doc
+   pr/9 §4 already established this is deliberate prototype design: *"in a
+   shower-dominated cluster, only a strong-direction track survives as a
+   track."* The prototype has the identical unconditional conversion at its
+   own counterpart sites.
+2. `segment_is_shower_topology` builds a per-point `vec_dQ_dx` array
+   (normalized by `MIP_dQ_dx`) that is otherwise **dead** — read only as
+   `.size()` (pr/31 GOTCHA 5, itself citing the prototype's identical
+   dead-array shape). The whole shower/track call is decided by a 5-branch
+   geometric spread test alone; the segment's charge never gets a vote,
+   in either tree.
+
+Measured (doc pr/40 Part 0 / G2): a segment with a genuinely hadron-like
+median dQ/dx (proton ≥ 1.75× MIP, muon ≤ 1.2× MIP — the SAME thresholds
+`segment_determine_dir_track`'s own short-track fallback already trusts) can
+be swept into electron by either mechanism regardless of how confidently
+hadron-like its own charge profile is. 8 of the 9 owner-reported cases
+measured above 1.75× or matched the muon band; the population census found
+129 segments across 42 events in the broader class.
+
+Because both mechanisms are faithful to the prototype's own behaviour, the
+fix is a **designed divergence (owner-approved this round), not a port
+correction**: `shower_reclass_dqdx_guard` (all three sites in mechanism 1)
+and `shower_topo_dqdx_guard` (mechanism 2) share one helper,
+`segment_dqdx_spares_electron_reclass` (`PRSegmentFunctions.h/.cxx`) — spares
+a segment from conversion / from having `kShowerTopology` set only when its
+own median dQ/dx is decisively proton- or muon-like. C++ default `false` for
+both = both trees' unconditional conversion, byte-identical. SBND
+production default `true` since 2026-08-06 (doc pr/40 G1-G3 all pass:
+48/48 byte-identical knob-off, 8/9 owner cases fixed, zero verdict
+regression on the 48-event population).
+
+**Do NOT make either guard unconditional or widen its threshold band.** The
+gap between 1.2× and 1.75× MIP is deliberately left untouched — doc pr/40's
+evt 256587 (median 1.26× MIP, still electron with the guard on) sits in that
+band, and its own charge is genuinely ambiguous, not a guard failure.
+Widening the band to catch it would sweep a much larger, less-certain
+population into an automatic override with no principled stopping point.

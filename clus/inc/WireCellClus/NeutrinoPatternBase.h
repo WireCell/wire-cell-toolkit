@@ -546,6 +546,35 @@ namespace WireCell::Clus::PR {
         // C++ default 0 => no filtering, legacy byte-identical.
         double m_fit_vertex_min_seg_length{0};
 
+        // doc sbnd_xin/docs/pr/40 F1 (= doc pr/7 sec 5 / pr/31 P14-F8).
+        // Travels via TrackPidOptions::track_pid_persist_dqdx -- see its
+        // comment in PRSegmentFunctions.h.  C++ default false = legacy =
+        // byte-identical.
+        bool   m_track_pid_persist_dqdx{false};
+
+        // doc sbnd_xin/docs/pr/40 F2: spare a segment from an unconditional
+        // track-to-electron reclassification when its own median dQ/dx is
+        // decisively proton- or muon-like (segment_dqdx_spares_electron_
+        // reclass, same >1.75x / <1.2x MIP thresholds the short-track
+        // fallback already trusts).  Applied at the three wholesale-
+        // conversion sites Part 0 measured as this investigation's actual
+        // writers when persistence (F1) either did not apply or was not
+        // enough on its own: examine_all_showers' flag_change_showers loop,
+        // both reclassify loops in improve_maps_shower_in_track_out (out_
+        // tracks and no-direction segments), and improve_maps_no_dir_tracks'
+        // Case E (muon-topology demotion).  This is a designed divergence
+        // from the prototype, not a port-fidelity fix -- these sites'
+        // wholesale conversion is deliberate prototype behaviour (doc pr/9
+        // sec 4) -- see porting_dictionary.md.  C++ default false = legacy =
+        // byte-identical.
+        bool   m_shower_reclass_dqdx_guard{false};
+
+        // doc sbnd_xin/docs/pr/40 F3.  Travels via segment_is_shower_
+        // topology's dqdx_guard parameter -- see its comment in
+        // PRSegmentFunctions.h.  Same designed-divergence status as F2.
+        // C++ default false = legacy = byte-identical.
+        bool   m_shower_topo_dqdx_guard{false};
+
         // ---- Detector-extent literals (doc sbnd_xin/docs/pr/2 sec. 2e(iv)) ----
         // The uBooNE active volume the prototype was written against is
         // y in [-116, +117] cm, z in [0, 1037] cm, x in [0, 256] cm
@@ -592,6 +621,7 @@ namespace WireCell::Clus::PR {
             o.endpoint_trim_retry = m_endpoint_trim_retry;
             o.track_comp_empty_abstain = m_track_comp_empty_abstain;   // doc pr/31 §12 F6
             o.dir_track_median_local = m_dir_track_median_local;       // doc pr/31 §12 F4
+            o.track_pid_persist_dqdx = m_track_pid_persist_dqdx;       // doc pr/40 F1
             return o;
         }
 

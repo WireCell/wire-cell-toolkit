@@ -71,11 +71,15 @@ namespace WireCell::Clus::PR {
         double particle_score() const { return m_particle_score; }
         void particle_score(double score) { m_particle_score = score; }
 
-        // Chainable setter
-        Segment& particle_info(std::shared_ptr<Aux::ParticleInfo> pinfo) {
-            m_particle_info = pinfo;
-            return *this; 
-        }
+        // Chainable setter.  doc sbnd_xin/docs/pr/40: body moved to
+        // PRSegment.cxx so it can see the complete Facade::Cluster type for
+        // the WCT_PID_WRITE_DEBUG diagnostic (env-gated, same idiom as
+        // WCT_SHOWER_TOPO_DEBUG / WCT_DET_DEBUG; proven physics-inert by
+        // doc pr/40's G1 byte-identical gate).  __builtin_FILE/LINE capture
+        // the caller with zero call-site churn across the ~40 writers.
+        Segment& particle_info(std::shared_ptr<Aux::ParticleInfo> pinfo,
+                                const char* _caller_file = __builtin_FILE(),
+                                int _caller_line = __builtin_LINE());
         
         // Convenience method to check if particle info is available
         bool has_particle_info() const { return m_particle_info != nullptr; }
