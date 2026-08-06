@@ -709,23 +709,23 @@ instead of electron when `segment_has_proton_daughter`
 unconditional electron default, byte-identical.
 
 **Round 2 found a fourth writer that reverted this end-to-end; round 3
-closed it, still left OFF pending owner request.** The override fires
-correctly at this choke point — traced, `pdg 11 -> 211` at
-`NeutrinoPatternBase.cxx` — but `Shower::update_particle_type`
-(`PRShower.cxx`, called from 8 sites in `NeutrinoShowerClustering.cxx`)
-unconditionally reasserted electron on a shower's start segment whenever
-`shower_length > track_length`, with zero awareness of PID or topology,
-reverting the override in the same pass (evt 256587 seg 11079: traced,
-`pdg 211 -> 11` at `PRShower.cxx:801`; population census showed the override
-surviving end-to-end in only 1/2209 cases). Round 3 (doc pr/40 round 3)
-threads `main_vertex` + `protect_proton_daughter_pion` (both legacy-default)
-into `update_particle_type`, which re-derives `segment_has_proton_daughter`
-on the SAME MIP scale (`m_mip_dqdx_median`, not the function's own
-`mip_dqdx`, a different scale — the two must not be conflated) and skips
-the reassignment when it fires. Gate-clean (48/48 byte-identical off; evt
-256587 now reads pdg 211 end-to-end; population census shows exactly 2/2209
-segments move, no verdict regression) but **still not flipped** — see doc
-pr/40 round 3's Flip section for why.
+closed it. SBND PRODUCTION DEFAULT ON.** The override fires correctly at
+this choke point — traced, `pdg 11 -> 211` at `NeutrinoPatternBase.cxx` —
+but `Shower::update_particle_type` (`PRShower.cxx`, called from 8 sites in
+`NeutrinoShowerClustering.cxx`) unconditionally reasserted electron on a
+shower's start segment whenever `shower_length > track_length`, with zero
+awareness of PID or topology, reverting the override in the same pass (evt
+256587 seg 11079: traced, `pdg 211 -> 11` at `PRShower.cxx:801`; population
+census showed the override surviving end-to-end in only 1/2209 cases).
+Round 3 (doc pr/40 round 3) threads `main_vertex` + `protect_proton_
+daughter_pion` (both legacy-default) into `update_particle_type`, which
+re-derives `segment_has_proton_daughter` on the SAME MIP scale
+(`m_mip_dqdx_median`, not the function's own `mip_dqdx`, a different scale —
+the two must not be conflated) and skips the reassignment when it fires.
+Gate-clean: 48/48 byte-identical off; evt 256587 now reads pdg 211
+end-to-end; population census shows exactly 2/2209 segments move, no
+verdict regression. Flipped SBND ON, verified with a bare single-event
+cfg-only run hash-matching the gated on-arm exactly — see doc pr/40 round 3.
 
 **Do not widen this to "any high-dQ/dx neighbour."** The 348-vs-5 gap above
 is the reason both the neutrino-vertex-emanation requirement and the

@@ -977,13 +977,16 @@ function(
     // set_default_shower_particle_info relabels pion (211) instead of
     // electron when the candidate segment emanates from the neutrino
     // vertex and its far end is a PID'd, charge-confirmed proton (SBND evt
-    // 256587 seg 11079, daughter segment 11080 at 3.72x MIP).  STILL
-    // DEFAULT OFF, NOT flipped: the override fires but is reverted
-    // end-to-end by a downstream writer (Shower::update_particle_type,
-    // PRShower.cxx) for the reported case; see porting_dictionary.md and
-    // doc pr/40 round 2.  Blocked pending a round-3 fix.
+    // 256587 seg 11079, daughter segment 11080 at 3.72x MIP).  Round 2 found
+    // the override was reverted end-to-end by a downstream writer
+    // (Shower::update_particle_type, PRShower.cxx); round 3 closed that with
+    // a matching guard threaded into update_particle_type itself.  SBND
+    // PRODUCTION DEFAULT ON (doc pr/40 round 3): G1 48/48 byte-identical,
+    // evt 256587 seg 11079 now 211 end-to-end, population census 2/2209
+    // segments move, zero nusel-table.tsv verdict diff.  See
+    // porting_dictionary.md and doc pr/40 round 3.
     track_pid_persist_4mom = true,
-    shower_proton_daughter_pion = false,
+    shower_proton_daughter_pion = true,
     reclass_never_computed_ke_floor = true,
 )
     local base = import 'pgrapher/experiment/sbnd/simparams.jsonnet';

@@ -631,9 +631,10 @@ namespace WireCell::Clus::PR {
         // a matching guard into update_particle_type itself (see
         // PRShower.h's docstring on update_particle_type) -- gate-clean
         // (48/48 byte-identical off, evt 256587 now 211 end-to-end,
-        // population census 2/2209, zero nusel verdict regression) but
-        // STILL LEFT OFF pending owner request to flip -- see doc pr/40
-        // round 3's Flip section for why.
+        // population census 2/2209, zero nusel verdict regression).  SBND
+        // PRODUCTION DEFAULT ON (cfg-only flip, doc pr/40 round 3).  C++
+        // default here stays false = legacy = byte-identical; the SBND
+        // operating point sets it true in wct-pr-perevt.jsonnet.
         bool   m_shower_proton_daughter_pion{false};
 
         // ---- Detector-extent literals (doc sbnd_xin/docs/pr/2 sec. 2e(iv)) ----
