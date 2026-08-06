@@ -240,6 +240,17 @@ rule splat_and_drift:
         -A "tpcid={params.tpcid}" \
          spng/depo-to-adc.jsonnet
         """
+
+rule spng-depos-to-adc:
+    input:
+        "drifted-{name}_wct-depos.npz"
+    output:
+        "spng-{name}.npz"
+    shadow: "minimal"
+    shell:
+        """
+        wire-cell -l stdout -L debug -A "input={input}" -A "output={output}" spng/adc-to-spng-simple.jsonnet
+        """
         
 config.setdefault('tpcid', '0')
 config.setdefault('device', 'cpu')
