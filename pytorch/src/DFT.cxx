@@ -79,15 +79,21 @@ void doit(const TorchContext& ctx,
 
 void DFT::fwd1d(const IDFT::complex_t* in, IDFT::complex_t* out, int size) const
 {
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
     doit(m_ctx, in, out, 1, size,
          [](const torch::Tensor& src) { return torch::fft::fft(src); });
+#pragma GCC diagnostic pop
 }
 
 
 void DFT::inv1d(const IDFT::complex_t* in, IDFT::complex_t* out, int size) const
 {
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
     doit(m_ctx, in, out, 1, size, // fixme: check norm
          [](const torch::Tensor& src) { return torch::fft::ifft(src); });
+#pragma GCC diagnostic pop
 }
 
 
