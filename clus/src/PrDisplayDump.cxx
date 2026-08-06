@@ -54,6 +54,18 @@ static int pf_node_id(const WireCell::Clus::PR::SegmentPtr& seg)
     return cl ? cl->get_cluster_id() * 1000 + sid : sid;
 }
 
+// Same encoding as the vertices[].id field below (cluster_id*1000 +
+// graph_index): the id a segment's start/end vertex would carry in the
+// "vertices" array, so the viewer can look a segment's endpoints up there
+// without a second join key.
+static int vertex_display_id(const WireCell::Clus::PR::VertexPtr& vtx)
+{
+    if (!vtx) return -1;
+    const auto* cl = vtx->cluster();
+    const int cluster_id = cl ? cl->get_cluster_id() : 0;
+    return cluster_id * 1000 + static_cast<int>(vtx->get_graph_index());
+}
+
 Clus::PrDisplayDump::PrDisplayDump()
   : Aux::Logger("PrDisplayDump", "clus")
 {
@@ -76,6 +88,11 @@ WireCell::Configuration Clus::PrDisplayDump::default_configuration() const
     cfg["nticks"] = m_nticks;
     cfg["proj_charge_min"] = m_proj_charge_min;
     cfg["pretty"] = m_pretty;
+    cfg["particle_dataset"] = m_particle_dataset_name;
+    cfg["mip_dqdx_median"] = m_mip_dqdx_median;
+    cfg["mip_dqdx_flat"] = m_mip_dqdx_flat;
+    cfg["dqdx_ref_grid_n"] = m_dqdx_ref_grid_n;
+    cfg["dqdx_ref_grid_step"] = m_dqdx_ref_grid_step;
     return cfg;
 }
 
@@ -91,12 +108,30 @@ void Clus::PrDisplayDump::configure(const WireCell::Configuration& cfg)
     m_nticks = get<int>(cfg, "nticks", m_nticks);
     m_proj_charge_min = get<double>(cfg, "proj_charge_min", m_proj_charge_min);
     m_pretty = get<bool>(cfg, "pretty", m_pretty);
+    m_particle_dataset_name = get<std::string>(cfg, "particle_dataset", m_particle_dataset_name);
+    m_mip_dqdx_median = get<double>(cfg, "mip_dqdx_median", m_mip_dqdx_median);
+    m_mip_dqdx_flat = get<double>(cfg, "mip_dqdx_flat", m_mip_dqdx_flat);
+    m_dqdx_ref_grid_n = get<int>(cfg, "dqdx_ref_grid_n", m_dqdx_ref_grid_n);
+    m_dqdx_ref_grid_step = get<double>(cfg, "dqdx_ref_grid_step", m_dqdx_ref_grid_step);
 
     for (auto anode_tn : cfg["anodes"]) {
         m_anodes.push_back(Factory::find_tn<IAnodePlane>(anode_tn.asString()));
     }
     if (cfg.isMember("detector_volumes") && !cfg["detector_volumes"].asString().empty()) {
         m_dv = Factory::find_tn<IDetectorVolumes>(cfg["detector_volumes"].asString());
+    }
+
+    // Best-effort: a pipeline that runs pr_display without tagger_check_neutrino
+    // or tagger_check_stm ahead of it never compiled a ParticleDataSet instance
+    // in (sbnd/clus.jsonnet's tagger_uses gate) -- find_maybe_tn returns nullptr
+    // rather than throwing, and dump_dqdx_ref() omits "dqdx_ref" in that case.
+    if (!m_particle_dataset_name.empty()) {
+        auto configurable = Factory::find_maybe_tn<IConfigurable>(m_particle_dataset_name);
+        m_particle_data = std::dynamic_pointer_cast<Clus::ParticleDataSet>(configurable);
+        if (!m_particle_data) {
+            log->warn("ParticleDataSet '{}' not found -- dqdx_ref will be omitted from the dump",
+                      m_particle_dataset_name);
+        }
     }
 }
 
@@ -160,12 +195,64 @@ void Clus::PrDisplayDump::visit(Facade::Ensemble& ensemble) const
     top["steiner"] = dump_steiner(grouping);
     top["proj"] = dump_proj(grouping);
     top["dead"] = dump_dead(grouping);
+    top["dqdx_ref"] = dump_dqdx_ref();
 
     Persist::dump(m_output_filename, top, m_pretty);
 
     log->debug("wrote {}: {} segment(s), {} vertex(es), {} shower(s), {} steiner cluster(s), {} proj plane(s)",
                m_output_filename, top["segments"].size(), top["vertices"].size(),
                top["showers"].size(), top["steiner"].size(), top["proj"].size());
+}
+
+// Five dQ/dx-vs-residual-range reference curves, sampled on a fixed cm grid
+// from the SAME ParticleDataSet::get_dEdx_function() instances do_track_pid
+// uses.  Emitted per event (even though the tables are static) so an old
+// arm's JSON keeps its own templates rather than acquiring today's.
+//
+// UNIT TRAP -- get this backwards and it is a silent, plausible-looking 10x
+// offset, not a crash.  Measured empirically (not just read off the code):
+// the muon plateau the particle_dataset.jsonnet header documents is 54657.7
+// e/cm at rr=59.5cm; `scalar_function(rr_cm)` ALONE reproduces that number,
+// so the raw table is already e/cm and needs NO further scaling here.
+//
+// do_track_pid divides by units::cm (PRSegmentFunctions.cxx segment_do_track_pid
+// / do_track_comp) for a DIFFERENT reason that does not apply here: its data
+// side is `fits[i].dQ / fits[i].dx` with dx in INTERNAL length units (not
+// pre-divided by cm), i.e. its own comparison scale is e/cm scaled down by
+// units::cm=10 to match that internal-unit dx.  The dump's per-point dQ/dx
+// (points[].dQ / points[].dx) uses dx ALREADY pre-divided by cm (fit_json,
+// above), so it is already plain physical e/cm -- copying do_track_comp's
+// division here would divide the template but not the data it is compared
+// against, and land the template a spurious 10x below the measured points.
+Configuration Clus::PrDisplayDump::dump_dqdx_ref() const
+{
+    if (!m_particle_data) return Json::nullValue;
+
+    static const std::array<std::pair<const char*, const char*>, 5> particles{{
+        {"muon", "muon"}, {"proton", "proton"}, {"pion", "pion"},
+        {"kaon", "kaon"}, {"electron", "electron"},
+    }};
+
+    Configuration out;
+    out["units"] = "e/cm";
+    out["source"] = "ParticleDataSet";
+    Configuration grid;
+    grid["start"] = 0.0;
+    grid["step"] = m_dqdx_ref_grid_step;
+    grid["n"] = m_dqdx_ref_grid_n;
+    out["grid"] = grid;
+
+    for (const auto& [key, name] : particles) {
+        auto fn = m_particle_data->get_dEdx_function(name);
+        if (!fn) continue;
+        Configuration vals = Json::arrayValue;
+        for (int i = 0; i < m_dqdx_ref_grid_n; ++i) {
+            const double rr_cm = i * m_dqdx_ref_grid_step;
+            vals.append(fn->scalar_function(rr_cm));
+        }
+        out[key] = vals;
+    }
+    return out;
 }
 
 Configuration Clus::PrDisplayDump::dump_meta(Facade::Grouping& grouping, const ChanScheme& cs) const
@@ -182,6 +269,11 @@ Configuration Clus::PrDisplayDump::dump_meta(Facade::Grouping& grouping, const C
     // display re-applies it itself so the raw dQ stays available for dQ/dx.
     meta["length_unit"] = "cm";
     meta["charge_transform"] = "none";
+    // Display-only MIP scales for the dQ/dx panel (sbnd_xin/docs/pr/42) -- see
+    // the header comment on m_mip_dqdx_median for why these are NOT read from
+    // the taggers' own members.
+    meta["mip_dqdx_median"] = m_mip_dqdx_median;
+    meta["mip_dqdx_flat"] = m_mip_dqdx_flat;
 
     for (int p = 0; p < 3; ++p) {
         meta["nch"].append(cs.nch[p]);
@@ -325,6 +417,10 @@ Configuration Clus::PrDisplayDump::dump_graph(Facade::Grouping& grouping) const
         j["dirsign"] = segment->dirsign();
         j["is_main_cluster"] = segment->cluster()
             ? segment->cluster()->get_flag(Facade::Flags::main_cluster) : false;
+        // PID/direction quality, already computed by segment_determine_dir_track
+        // -- plain getters, no PID function invoked here (see header comment).
+        j["particle_score"] = segment->particle_score();
+        j["dir_weak"] = segment->dir_weak();
         // The particle-flow join key: -1 for a segment in no shower, otherwise
         // the mc.json node id of the shower this segment belongs to.  Clicking
         // that node in the display highlights every segment carrying this id.
@@ -360,6 +456,15 @@ Configuration Clus::PrDisplayDump::dump_graph(Facade::Grouping& grouping) const
             if (end_vtx && boost::out_degree(end_vtx->get_descriptor(), *pr_graph) > 1) {
                 rr.back() = -1;
             }
+            // Total fitted arc length + the vertices[] ids of this segment's
+            // two ends -- lets the viewer orient a start-mode (shower stem)
+            // plot from the shower's own start vertex without recomputing
+            // find_vertices() itself.  Also fixes the PF table's L (cm)
+            // column, blank for track rows today (only showers[].total_length
+            // populates it).
+            j["length"] = L.back() / cm;
+            j["start_vertex_id"] = vertex_display_id(start_vtx);
+            j["end_vertex_id"] = vertex_display_id(end_vtx);
         }
 
         for (size_t i = 0; i < fits.size(); ++i) {
@@ -428,6 +533,19 @@ Configuration Clus::PrDisplayDump::dump_showers(Facade::Grouping& grouping) cons
         j["num_segments"] = shower->get_num_segments();
         j["num_main_segments"] = shower->get_num_main_segments();
         j["total_length"] = shower->get_total_length() / cm;
+
+        // The literal stem samples (<=20, in MIP units) the nue/single-photon
+        // taggers cut on -- Shower::get_stem_dQ_dx is read-only (walks
+        // m_full_graph/fits()/wcpts(), appends only to a local vector; see
+        // header comment).  m_mip_dqdx_median is a plain e/cm display
+        // constant, so pass its internal-unit form to match the function's
+        // own 43000/units::cm default convention.
+        j["stem_dqdx"] = Json::arrayValue;
+        if (start_vtx) {
+            auto stem = shower->get_stem_dQ_dx(start_vtx, shower->start_segment(), 20,
+                                                m_mip_dqdx_median / units::cm);
+            for (double v : stem) j["stem_dqdx"].append(v);
+        }
 
         auto pit = map_shower_pio_id.find(shower);
         if (pit == map_shower_pio_id.end()) {

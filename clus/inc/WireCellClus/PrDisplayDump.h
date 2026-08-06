@@ -28,6 +28,18 @@
  * (`cluster_id*1000 + start_segment id`) so it is the join key from an mc.json
  * shower node to every segment of that shower.
  *
+ * Stage 3 (sbnd_xin/docs/pr/42) adds what makes a segment's dQ/dx JUDGEABLE
+ * against a PID hypothesis: the five `ParticleDataSet` dQ/dx-vs-residual-range
+ * templates (`dqdx_ref`), the two display MIP scales, per-segment
+ * particle_score/dir_weak/length/{start,end}_vertex_id, and per-shower
+ * `stem_dqdx` (the literal Shower::get_stem_dQ_dx samples the nue/single-photon
+ * taggers cut on).  All read-only: no PID/direction function is invoked, only
+ * plain getters and the already-read-only get_stem_dQ_dx.  particle_dataset
+ * resolution is best-effort -- a pipeline that runs this stage without
+ * tagger_check_neutrino or tagger_check_stm ahead of it (so the
+ * ParticleDataSet instance was never compiled in) gets every other field with
+ * "dqdx_ref" simply omitted, not a hard failure.
+ *
  * DEFAULT OFF.  Like every other entry in the SBND `cm_by_name` table this is
  * only instantiated when named in `pipeline_names`, so with the name absent the
  * compiled configuration -- and hence every production output -- is unchanged.
@@ -41,6 +53,7 @@
 #define WIRECELLCLUS_PRDISPLAYDUMP
 
 #include "WireCellClus/IEnsembleVisitor.h"
+#include "WireCellClus/ParticleDataSet.h"
 #include "WireCellIface/IConfigurable.h"
 #include "WireCellIface/IAnodePlane.h"
 #include "WireCellIface/IDetectorVolumes.h"
@@ -78,6 +91,30 @@ namespace WireCell::Clus {
         std::vector<IAnodePlane::pointer> m_anodes;
         IDetectorVolumes::pointer m_dv{nullptr};
 
+        // dQ/dx panel support (sbnd_xin/docs/pr/42).  Best-effort: resolved
+        // with Factory::find_maybe_tn, never throws when absent (see header
+        // comment).  Display-only scales, deliberately NOT the same storage
+        // as the taggers' m_mip_dqdx_median (NeutrinoPatternBase.h stores
+        // 43000/units::cm, TaggerCheckNeutrino.h stores 43000.0 -- the two are
+        // not the same internal representation, so mirroring either would be
+        // arbitrary; this dump owns its own display constants instead).
+        // "Type:Name", not just the type -- Factory::find_maybe_tn parses this
+        // with String::parse_pair, and a colon-free string resolves to
+        // instname="" (empty), which does NOT match the actual instance name
+        // "ParticleDataSet" the jsonnet sets (wc.tn() always emits Type:Name).
+        // A bare-type default silently fails to resolve (measured: WARN fired
+        // even though the ParticleDataSet instance was present in the same
+        // compiled job) -- see ClusteringFuncsMixins.h's NeedParticleData,
+        // which carries the identical bare-type default but is masked because
+        // every caller overrides it with an explicit wc.tn(...) string.
+        std::string m_particle_dataset_name{"ParticleDataSet:ParticleDataSet"};
+        Clus::ParticleDataSet::pointer m_particle_data{nullptr};
+        double m_mip_dqdx_median{43000.0};  // e/cm, shower-stem normalization
+        double m_mip_dqdx_flat{50000.0};    // e/cm, do_track_comp's flat template
+        // dqdx_ref sampling grid: residual range 0..(grid_n-1)*grid_step cm.
+        int m_dqdx_ref_grid_n{401};
+        double m_dqdx_ref_grid_step{0.25};  // cm
+
         // Per-plane per-TPC channel counts, the same derivation
         // SbndPrMagnifyTrackingVisitor uses.  Recorded in the dump so the
         // viewer can label its wire axes without a geometry file; the dump
@@ -100,6 +137,8 @@ namespace WireCell::Clus {
         Configuration dump_steiner(Facade::Grouping& grouping) const;
         Configuration dump_proj(Facade::Grouping& grouping) const;
         Configuration dump_dead(Facade::Grouping& grouping) const;
+        // Null (Json::nullValue) if m_particle_data could not be resolved.
+        Configuration dump_dqdx_ref() const;
     };
 }  // namespace WireCell::Clus
 
