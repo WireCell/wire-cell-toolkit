@@ -222,7 +222,25 @@ rule save_depos:
         # mv wct-depos.tar.bz2 
         """
 
-
+rule splat_and_drift:
+    input:
+        "{name}_wct-depos.npz",
+    output:
+        "drifted-{name}_wct-depos.npz"
+    params:
+        detname=config.get('detname', 'pdhd'),
+        tpcid=config.get('tpcid', '0')
+    shadow: "minimal"
+    shell:
+        """
+        wire-cell -l stdout -L debug \
+        -A "input={input}" \
+        -A "output={output}" \
+        -A "detname={params.detname}" \
+        -A "tpcid={params.tpcid}" \
+         spng/depo-to-adc.jsonnet
+        """
+        
 config.setdefault('tpcid', '0')
 config.setdefault('device', 'cpu')
 config.setdefault('mpsigproc_training_js', 'dnnroi-training.jsonnet')
@@ -240,7 +258,7 @@ rule spng_mpsigproc:
     shadow: "minimal"
     shell:
         """
-        wire-cell -l stdout -L debug cfg/spng/{params.jsonnet} -A "input={input}" \
+        wire-cell -l stdout -L debug spng/{params.jsonnet} -A "input={input}" \
             -A "tpcid={params.tpcid}" -A "detname={params.detname}" --tla-code "crossed_views=[1,1,1]" \
             -A "device={params.device}"
         # tar the output files
@@ -261,7 +279,7 @@ rule spng_mpsigproc_lines:
     shadow: "minimal"
     shell:
         """
-        wire-cell -l stdout -L debug cfg/spng/{params.jsonnet} -A "input={input}" \
+        wire-cell -l stdout -L debug spng/{params.jsonnet} -A "input={input}" \
             -A "tpcid={params.tpcid}" -A "detname={params.detname}" --tla-code "crossed_views=[1,1,1]" \
             -A "device={params.device}"
         # tar the output files
