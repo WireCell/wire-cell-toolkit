@@ -241,11 +241,11 @@ rule splat_and_drift:
          spng/depo-to-adc.jsonnet
         """
 
-rule spng-depos-to-adc:
+rule spng_depos_to_adc:
     input:
         "drifted-{name}_wct-depos.npz"
     output:
-        "spng-{name}.npz"
+        "spng-sigproc-{name}_wct-depos.npz"
     shadow: "minimal"
     shell:
         """
