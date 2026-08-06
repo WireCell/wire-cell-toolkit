@@ -930,8 +930,14 @@ function(
     // 48/48 -- the counter stays as the doc-53-style tripwire.
     shower_less_id_tiebreak = true,
     // doc pr/39: exclude a shower's own start vertex from the end_point
-    // farthest-vertex search.  Ships OFF pending owner gate review.
-    shower_endpoint_exclude_start_vertex = false,
+    // farthest-vertex search (prototype map_vtx_segs parity).  SBND
+    // production default since 2026-08-06 (owner: "turn it on for SBND"
+    // after reviewing the recovery numbers, 32/83 -> 0/83 reversed showers
+    // across the 9-event NCpi0 gate) -- exactly the v3_extension_guard
+    // idiom (doc pr/24 sec 19.1).  No C++ change --
+    // m_shower_endpoint_exclude_start_vertex{false} is still the library
+    // default; only the SBND operating point flips it on.
+    shower_endpoint_exclude_start_vertex = true,
 )
     local base = import 'pgrapher/experiment/sbnd/simparams.jsonnet';
     local params = base {
