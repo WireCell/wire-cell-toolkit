@@ -198,6 +198,24 @@ namespace WireCell::Clus {
             // name table plus the prototype's numeric fallback
             // (WCReader.cc:529-547) instead of "particle".
             bool pf_pdg_name_prototype_fallback{false};
+            // ---- doc sbnd_xin/docs/pr/38 missing-track knobs ----
+            // pf_barrier_segment_vertices: build the F2 shower-vertex barrier
+            // from vertices incident to each shower's own segments (prototype
+            // WCShower::fill_sets = map_vtx_segs keys, WCShower.cxx:596-599)
+            // instead of the shower's full graph view.  The toolkit view also
+            // holds the shower's START vertex (Shower::set_start_vertex ->
+            // add_vertex, PRShower.cxx:94), which for a detached conn-2/3
+            // shower is a main-track junction the prototype does NOT barrier
+            // -- blocking it silently drops every track segment behind it.
+            bool pf_barrier_segment_vertices{false};
+            // pf_orphan_track_roots: emit non-shower main-cluster segments the
+            // track BFS never reached as root-level leaf nodes.  The prototype
+            // gives EVERY such segment a node with mc_mother=0 up front
+            // (NeutrinoID.cxx:1485-1489), so unreachable ones stay in its tree
+            // at root level; the toolkit's BFS-built tree silently dropped
+            // them.  dirsign==0 segments are not plotted (prototype
+            // fill_reco_tree early return, NeutrinoID.cxx:1215).
+            bool pf_orphan_track_roots{false};
         };
         std::vector<BeePFConfig> m_bee_pf_configs;
 

@@ -718,6 +718,16 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               pf_shower_parent_precedence=false,
               pf_pi0_node_per_id=false,
               pf_pdg_name_prototype_fallback=false,
+              // doc pr/38 missing-track knobs.  C++ defaults false; keys
+              // omitted when off => byte-identical pre-knob config.
+              // pf_barrier_segment_vertices: F2 barrier from member-segment
+              // endpoint vertices (prototype map_vtx_segs), not the view that
+              // also holds the detached conn-2/3 start vertex.
+              // pf_orphan_track_roots: BFS-unreached non-shower main-cluster
+              // segments emitted as root-level leaves (prototype flat-loop
+              // mc_mother=0 parity).
+              pf_barrier_segment_vertices=false,
+              pf_orphan_track_roots=false,
               // restore_demoted_mains (doc pr/20 Part I P2; C++ default false,
               // key omitted when null => byte-identical pre-knob config): tag a
               // split-off part that was ITSELF a matched bundle main before the
@@ -1952,6 +1962,10 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
                     [if pf_shower_parent_precedence then 'pf_shower_parent_precedence']: true,
                     [if pf_pi0_node_per_id then 'pf_pi0_node_per_id']: true,
                     [if pf_pdg_name_prototype_fallback then 'pf_pdg_name_prototype_fallback']: true,
+                    // doc pr/38 missing-track knobs.  C++ defaults false;
+                    // key omitted when off => byte-identical pre-knob config.
+                    [if pf_barrier_segment_vertices then 'pf_barrier_segment_vertices']: true,
+                    [if pf_orphan_track_roots then 'pf_orphan_track_roots']: true,
                 },
             ],
             pipeline: wc.tns(cm_pipeline),
@@ -2051,6 +2065,10 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
        pf_shower_parent_precedence=false,
        pf_pi0_node_per_id=false,
        pf_pdg_name_prototype_fallback=false,
+       // doc pr/38 missing-track knobs; false = C++ default = OFF, key
+       // omitted => byte-identical.  See clus_pr.
+       pf_barrier_segment_vertices=false,
+       pf_orphan_track_roots=false,
        // doc pr/20 Part I P2; null = C++ default false = OFF.  See clus_pr.
        restore_demoted_mains=null,
        // doc pr/23 sec 4.2; null = C++ default false = warn-and-skip.  See clus_pr.
@@ -2265,6 +2283,8 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 pf_shower_parent_precedence=pf_shower_parent_precedence,
                 pf_pi0_node_per_id=pf_pi0_node_per_id,
                 pf_pdg_name_prototype_fallback=pf_pdg_name_prototype_fallback,
+                pf_barrier_segment_vertices=pf_barrier_segment_vertices,
+                pf_orphan_track_roots=pf_orphan_track_roots,
                 unmerge_bundle_mode=unmerge_bundle_mode,
                 restore_demoted_mains=restore_demoted_mains,
                 require_provenance=require_provenance,
