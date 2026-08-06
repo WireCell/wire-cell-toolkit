@@ -111,6 +111,28 @@ TEST_CASE("gen tracksegmentsampler recombination MIP") {
     CHECK(first->extent_tran() == 0.0);
 }
 
+TEST_CASE("gen tracksegmentsampler default ionization is quanta") {
+    // The default takes n_electrons directly from the segment (no
+    // recombination model) so the sampler's electrons stay consistent with
+    // the producer's photon/charge quanta split.
+    Gen::TrackSegmentSampler sampler;
+    auto cfg = sampler.default_configuration();
+    CHECK(cfg["ionization"].asString() == "quanta");
+
+    // A default (quanta) sampler passes the segment's n_electrons through as
+    // negative charge, applying no recombination model.
+    sampler.configure(cfg);
+    const Point start(0, 0, 0), stop(0, 0, 1 * units::mm);
+    const double nele = 3.3e3;
+    ITrackSegment::vector segs{std::make_shared<SimpleTrackSegment>(
+        start, stop, 0.0, 1 * units::ns, 0.1 * units::MeV, 0.0, nele, 1 * units::mm, 5, 13)};
+    ITrackSegmentSampler::output_pointer out;
+    REQUIRE(sampler(std::make_shared<SimpleTrackSegmentSet>(0, segs), out));
+    double tot = 0;
+    for (const auto& d : *out->depos()) tot += d->charge();
+    CHECK(tot == doctest::Approx(-nele));
+}
+
 TEST_CASE("gen tracksegmentsampler recombination models") {
     PluginManager& pm = PluginManager::instance();
     pm.add("WireCellGen");
@@ -217,7 +239,12 @@ TEST_CASE("gen tracksegmentsampler edge cases") {
     pm.add("WireCellGen");
 
     preconfigure("BoxRecombination");
-    auto sampler = make_sampler("edges", Configuration());
+    // These segments carry no n_electrons(), so exercise them in
+    // recombination mode (the default is now "quanta", which would reject
+    // them).
+    Configuration extra;
+    extra["ionization"] = "recombination";
+    auto sampler = make_sampler("edges", extra);
 
     // Zero-length segment: one depo at the (degenerate) midpoint.
     const Point at(1 * units::mm, 2 * units::mm, 3 * units::mm);

@@ -18,7 +18,7 @@ using namespace WireCell::Gen;
 TrackSegmentSampler::TrackSegmentSampler()
   : Aux::Logger("TrackSegmentSampler", "gen")
   , m_step_size(1.0 * units::mm)
-  , m_ionization("recombination")
+  , m_ionization("quanta")
   , m_recombination("BoxRecombination")
 {
 }
@@ -47,13 +47,18 @@ void TrackSegmentSampler::configure(const WireCell::Configuration& cfg)
     if (m_ionization == "quanta") {
         m_ionize = [](const ITrackSegment& seg) -> double {
             const double ne = seg.n_electrons();
-            if (ne < 0) {
+            // ITrackSegment reports a negative n_electrons() to mean "not
+            // provided" (producers set a -1 sentinel).  Treat a clearly
+            // negative value as that error, but clamp small sub-count
+            // negatives (eg floating-point noise around an exact-zero yield)
+            // up to zero so a vanishing ionization count does not abort a job.
+            if (ne < -0.5) {
                 THROW(ValueError() << errmsg{"TrackSegmentSampler: segment lacks n_electrons "
                                              "required by ionization mode 'quanta'"});
             }
-            return -ne;  // electrons are negative charge
+            return -std::max(0.0, ne);  // electrons are negative charge
         };
-        log->debug("ionization mode 'quanta' (producer n_electrons)");
+        log->debug("ionization mode 'quanta' (producer n_electrons, no recombination model)");
         return;
     }
     if (m_ionization == "recombination") {

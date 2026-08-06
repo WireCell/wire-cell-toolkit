@@ -22,18 +22,24 @@ namespace WireCell::Gen {
      *  is selected ONCE at configure() time and held as a function object
      *  (no per-call mode dispatch).  Configuration:
      *
-     *  - ionization: "recombination" (default) or "quanta".
+     *  - ionization: "quanta" (default) or "recombination".
      *
-     *    "recombination" recomputes the electron count from the segment
-     *    energy and dE/dX = energy/track_length via the IRecombinationModel
-     *    component named by the "recombination" parameter (default
-     *    "BoxRecombination"; also "BirksRecombination", "MipRecombination").
-     *    The E-field, density and W-value are configured on that component.
+     *    "quanta" (the default) takes the electron count directly from the
+     *    producer's per-segment n_electrons() and applies NO recombination
+     *    model (eg the edep-sim 19.5 eV quanta split, already fluctuated -- it
+     *    is not re-fluctuated here).  This keeps the emitted electrons
+     *    consistent with the producer's photon/charge partition (quanta
+     *    conservation).  A segment whose n_electrons() is a clearly negative
+     *    "not provided" sentinel is an error in this mode; tiny sub-count
+     *    negatives (floating-point noise) are clamped to zero.
      *
-     *    "quanta" trusts the producer's per-segment n_electrons() (eg the
-     *    edep-sim 19.5 eV quanta split, already fluctuated -- it is not
-     *    re-fluctuated here).  A segment with unknown (negative)
-     *    n_electrons() is an error in this mode.
+     *    "recombination" instead recomputes the electron count from the
+     *    segment energy and dE/dX = energy/track_length via the
+     *    IRecombinationModel component named by the "recombination" parameter
+     *    (default "BoxRecombination"; also "BirksRecombination",
+     *    "MipRecombination").  The E-field, density and W-value are configured
+     *    on that component.  Use this when the producer does not supply a
+     *    trustworthy n_electrons().
      *
      *  - step_size: sample spacing along the segment (default 1 mm).  A
      *    segment of straight-line length L becomes N = max(1, ceil(L/step))
