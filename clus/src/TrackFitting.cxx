@@ -111,6 +111,8 @@ void TrackFitting::set_parameter(const std::string& name, double value) {
         m_params.skip_angle_cut_3 = value;
     } else if (name == "skip_dis_cut") {
         m_params.skip_dis_cut = value;
+    } else if (name == "skip_revert_iso_xext_cut") {
+        m_params.skip_revert_iso_xext_cut = value;
     } else if (name == "default_dQ_dx") {
         m_params.default_dQ_dx = value;
     } else if (name == "end_point_factor") {
@@ -206,6 +208,8 @@ double TrackFitting::get_parameter(const std::string& name) const {
         return m_params.skip_angle_cut_3;
     } else if (name == "skip_dis_cut") {
         return m_params.skip_dis_cut;
+    } else if (name == "skip_revert_iso_xext_cut") {
+        return m_params.skip_revert_iso_xext_cut;
     } else if (name == "default_dQ_dx") {
         return m_params.default_dQ_dx;
     } else if (name == "end_point_factor") {
@@ -5092,12 +5096,40 @@ bool TrackFitting::skip_trajectory_point(WireCell::Point& p, std::pair<int, int>
     // Apply charge-based correction: the fitted point sits on less charge than the
     // point it came from, so revert it.  (prototype trajectory_fit.h:745-750)
     if (ratio / 3.0 < m_params.skip_ratio_cut || ratio_1 < m_params.skip_ratio_1_cut) {
+        // doc pr/28 S17: this revert has no distance-based safety margin (measured:
+        // individual reverts are ~0.4 cm median, not a teleport -- the flank comes
+        // from many small reverts applied consistently along an isochronous
+        // stretch, blocking the fit's own smoothing rather than one bad jump).  On
+        // an isochronous cluster c1/c2 can integrate the same overlapping charge
+        // blob rather than two resolvable samples of a track -- see
+        // porting_dictionary.md.  C++ default of the knob is -1 = off, unconditional
+        // revert, matching the prototype and pre-S17 toolkit behaviour exactly.
+        bool abstain_revert = false;
+        if (m_params.skip_revert_iso_xext_cut >= 0) {
+            double xext;
+            auto cache_it = m_cluster_xext_cache.find(cluster->ident());
+            if (cache_it != m_cluster_xext_cache.end()) {
+                xext = cache_it->second;
+            } else {
+                double xmin = 1e300, xmax = -1e300;
+                for (const Blob* b : cluster->children()) {
+                    const double bx = b->center_pos().x();
+                    xmin = std::min(xmin, bx);
+                    xmax = std::max(xmax, bx);
+                }
+                xext = (xmax > xmin) ? (xmax - xmin) : 0.0;
+                m_cluster_xext_cache[cluster->ident()] = xext;
+            }
+            abstain_revert = (xext < m_params.skip_revert_iso_xext_cut);
+        }
         SPDLOG_LOGGER_TRACE(s_log,
                             "skip_trajectory_point: charge revert at i={} index={} "
-                            "ratio/3={} ratio_1={} moved={} cm",
+                            "ratio/3={} ratio_1={} moved={} cm abstain={}",
                             i, index, ratio / 3.0, ratio_1,
-                            (p - ps_point).magnitude() / units::cm);
-        p = ps_point;
+                            (p - ps_point).magnitude() / units::cm, abstain_revert);
+        if (!abstain_revert) {
+            p = ps_point;
+        }
     }
     
     // Angle constraint checking

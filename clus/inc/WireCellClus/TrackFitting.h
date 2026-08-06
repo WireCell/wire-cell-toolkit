@@ -73,6 +73,20 @@ namespace WireCell::Clus {
             double skip_angle_cut_3 = 45;
             double skip_dis_cut = 0.5*units::cm;
 
+            // doc pr/28 S17: on an isochronous cluster (small blob-center drift-x
+            // extent relative to its y/z footprint, the iso_band_like measure --
+            // clustering_neutrino.cxx) the multi-track charge veto's revert
+            // (skip_trajectory_point's `p = ps_point`) has no distance-based safety
+            // margin -- see porting_dictionary.md.  C++ default -1 = off: the revert
+            // is unconditional, matching the prototype (trajectory_fit.h:745-750)
+            // and the toolkit's own pre-S17 behaviour (23bd6783).  When >= 0, WCT
+            // internal length units (units::cm=10, so 20 cm = 200.0 -- the JSON
+            // loader in TaggerCheckNeutrino/TaggerCheckSTM does no unit conversion,
+            // same as every other skip_* knob here), abstain from the revert (keep
+            // the fitted point) for any point whose segment's cluster has
+            // blob-center drift-x extent below this cut.
+            double skip_revert_iso_xext_cut = -1;
+
             double default_dQ_dx = 5000; 
 
             double end_point_factor=0.6;
@@ -576,6 +590,13 @@ namespace WireCell::Clus {
     private:
          // Core parameters - centralized storage
         Parameters m_params;
+
+        // doc pr/28 S17: memoized cluster ident() -> blob-center drift-x extent
+        // (cm), for skip_revert_iso_xext_cut.  Lookup/insert only, never
+        // iterated -- no ordering hazard (CLAUDE.md only forbids ITERATING
+        // pointer-keyed containers; this is int-keyed regardless).  Lives for
+        // this TrackFitting instance (one multi-track fitting pass).
+        std::unordered_map<int, double> m_cluster_xext_cache;
 
         // Helper method to get parameter value or default
         double get_param_or_default(double param_value, double default_value) const {

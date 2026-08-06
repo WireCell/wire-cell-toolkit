@@ -28,6 +28,8 @@
 
 #include "WireCellClus/NeutrinoPatternBase.h"
 #include "WireCellClus/PRSegmentFunctions.h"
+#include "WireCellClus/TrackFitting.h"
+#include "WireCellClus/TrackFittingPresets.h"
 
 using namespace WireCell;
 
@@ -340,6 +342,37 @@ TEST_CASE("clus knob defaults: muon dQ/dx envelope agrees in both unit conventio
     // The envelope is a falling function of length (a long muon's median dQ/dx
     // sits closer to MIP), which is the property every caller relies on.
     CHECK(algo.muon_dqdx_cut(10 * units::cm) > algo.muon_dqdx_cut(100 * units::cm));
+}
+
+// ---------------------------------------------------------------------------
+// TrackFitting -- NOT an IConfigurable.  Its Parameters struct is reached by
+// TaggerCheckNeutrino/TaggerCheckSTM's own trackfitting_config_file loader
+// (a plain JSON -> set_parameter(name, double) walk, doc pr/28 S17), not
+// through default_configuration(), so it is pinned by direct construction
+// instead of defaults_of().
+// ---------------------------------------------------------------------------
+
+TEST_CASE("clus knob defaults: TrackFitting skip_revert_iso_xext_cut is off")
+{
+    // doc pr/28 S17: abstain guard on the multi-track charge veto's revert
+    // (skip_trajectory_point's `p = ps_point`, revived unconditionally by
+    // 23bd6783 T1/T2).  C++ default -1 = off, i.e. the revert stays
+    // unconditional -- byte-identical to pre-S17 behaviour (gate
+    // work-pr28r10-off48b vs work-pr28r10-cleanref48, 48/48 events, 96/96
+    // archives).  Round-tripped through set_parameter/get_parameter, the same
+    // path the trackfitting_config JSON loader uses.
+    Clus::TrackFitting tf;
+    CHECK(tf.get_parameter("skip_revert_iso_xext_cut") == doctest::Approx(-1.0));
+
+    tf.set_parameter("skip_revert_iso_xext_cut", 20 * units::cm);
+    CHECK(tf.get_parameter("skip_revert_iso_xext_cut") == doctest::Approx(20 * units::cm));
+
+    // TrackFittingPresets::create_with_current_values() (used by the SBND/uBooNE
+    // component wiring) sets every Parameters field explicitly, including this
+    // one -- pin it separately so a preset edit that drops the line, or sets a
+    // non-off value, is caught even if the in-class initializer above stays -1.
+    auto preset = Clus::TrackFittingPresets::create_with_current_values();
+    CHECK(preset.get_parameters().skip_revert_iso_xext_cut == doctest::Approx(-1.0));
 }
 
 // ---------------------------------------------------------------------------

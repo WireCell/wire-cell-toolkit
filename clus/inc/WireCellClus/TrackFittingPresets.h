@@ -55,6 +55,7 @@ namespace WireCell::Clus {
             params.skip_angle_cut_2 = 90;
             params.skip_angle_cut_3 = 45;
             params.skip_dis_cut = 0.5*units::cm;
+            params.skip_revert_iso_xext_cut = -1;  // doc pr/28 S17: off by default
 
             params.default_dQ_dx = 5000; // electrons
 

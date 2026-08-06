@@ -564,3 +564,52 @@ to the segment's far endpoint by more than `v3_extension_min_gain` (default
 -1.0 cm, tolerating the legacy arm's own few-mm retreat from the same bug
 while rejecting the multi-cm amputation). Knob off = both trees' unconditional
 accept, byte-identical.
+
+## `skip_trajectory_point`'s charge-consistency revert has no protection on an isochronous cluster, in BOTH trees — `skip_revert_iso_xext_cut` is a prototype-limitation fix, not a port correction
+
+The multi-track trajectory fit's charge-consistency veto (toolkit
+`clus/src/TrackFitting.cxx skip_trajectory_point`, a faithful port of
+`prototype_base/pid/src/PR3DCluster_trajectory_fit.h:706-750`, called from
+`PR3DCluster_multi_track_fitting.h:429`'s `examine_trajectory`, doc pr/28 §13
+T1/T2) compares charge near a fitted point (`c1`) against charge near its
+pre-fit position (`c2`) on each plane; if the ratio falls below threshold it
+reverts the point (`p = ps_point`) with **no bound on how far that reverts
+it** — the fit's own regularizer term toward the initial trajectory is
+commented out in both trees (`PR3DCluster_trajectory_fit.h:302-304`), so
+nothing else limits the jump either.
+
+Measured (doc pr/28 §17, SBND 18255-271851 vs 18255-388): the individual
+revert is *not* large (median 0.4 cm) — the failure is not one bad jump but
+many small reverts applied consistently along a stretch whose pre-fit
+positions already sit off the eventual smoothed line, which happens when the
+cluster is **isochronous** (its charge sits in one narrow drift slab, same
+geometry `iso_endpoint` above targets): `c1` and `c2` then integrate the same
+overlapping 2-D charge blob rather than resolving two distinct samples of a
+track, so the veto's premise — "the fitted point sits on less charge than a
+resolvable alternative" — does not hold, and it blocks the fit from smoothing
+those points onto the trunk. Two per-point candidate discriminators were
+measured and both come back flat between the pathological cluster and a
+normal one (§17.2): whether the fitted/reference projections share a time
+tick, and the local displacement's angle to the drift axis. The measure that
+DOES discriminate is a **cluster-level** one — blob-center drift-x extent,
+the same measure `iso_band_like` above uses for its own, unrelated veto.
+
+Because the prototype has the identical unbounded revert and the identical
+missing regularizer (this is not a toolkit-introduced bug — `23bd6783`
+correctly revived behavior the prototype has always had), this is a
+**prototype limitation (M15)**, not a port error — do NOT "fix" the revert to
+be bounded or conditional for every cluster; every non-isochronous cluster's
+fit depends on the veto being unconditional (confirmed: SBND 18255-388, doc
+pr/28 §13's own accepted case, is verified bit-identical on its own cluster
+with the knob on — doc pr/28 §17.4 G3). The fix, `skip_revert_iso_xext_cut`
+(`clus/inc/WireCellClus/TrackFitting.h`, reached through
+`TaggerCheckNeutrino`/`TaggerCheckSTM`'s `trackfitting_config_file` JSON, NOT
+an `IConfigurable`), C++ default -1 (off), abstains from the revert (keeps
+the fitted point) only for a point whose segment's cluster has blob-center
+drift-x extent below the cut. Knob off = both trees' unconditional revert,
+byte-identical. A related dilution weakness in the same veto — a
+non-informative plane contributes a free *agreement* vote rather than being
+excluded — was found and is recorded, not fixed (doc pr/28 §17.5): the
+naive fix (renormalize by informative-plane count) has the WRONG SIGN, since
+it would remove the very term currently masking disagreement on the other
+two planes.
