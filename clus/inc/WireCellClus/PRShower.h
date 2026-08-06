@@ -199,8 +199,17 @@ namespace WireCell::Clus::PR {
 
         // calculate the kinematics
         void update_particle_type(const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, double mip_dqdx = 50000/units::cm);
-        void calculate_kinematics(const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model);
-        void calculate_kinematics_long_muon(IndexedSegmentSet& segments_in_muons, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model);
+        // exclude_start_vertex_from_endpoint (doc pr/39): same prototype-parity
+        // rule as fill_sets's exclude_start_vertex above, applied to the
+        // farthest-vertex search that sets data.end_point.  The prototype's
+        // WCShower::calculate_kinematics (WCShower.cxx:377-387) searches
+        // map_vtx_segs, which never holds the start vertex; the toolkit search
+        // here walks the full node set with no such exclusion, so a detached
+        // (conn_type 2/3) shower's end_point can collapse onto its own start
+        // vertex (e.g. the neutrino vertex) instead of growing away from it.
+        // Default false = legacy search over every node, byte-identical.
+        void calculate_kinematics(const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, bool exclude_start_vertex_from_endpoint = false);
+        void calculate_kinematics_long_muon(IndexedSegmentSet& segments_in_muons, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, bool exclude_start_vertex_from_endpoint = false);
 
     private:
 

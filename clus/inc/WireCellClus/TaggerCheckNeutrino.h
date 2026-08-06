@@ -270,6 +270,10 @@ public:
         bool m_pi0_id_shared_allocator{false};
         bool m_shower_flag_pdg_electron{false};
         bool m_shower_less_id_tiebreak{false};
+        // doc pr/39: prototype-parity exclusion of a shower's own start
+        // vertex from the end_point farthest-vertex search.  See
+        // PatternAlgorithms::m_shower_endpoint_exclude_start_vertex.
+        bool m_shower_endpoint_exclude_start_vertex{false};
         mutable std::shared_ptr<TrackFitting> m_track_fitter;
 
         void load_trackfitting_config(const std::string& config_file);

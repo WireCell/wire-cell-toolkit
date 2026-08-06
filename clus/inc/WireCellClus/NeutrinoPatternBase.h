@@ -744,6 +744,18 @@ namespace WireCell::Clus::PR {
         // a CLAUDE.md §2 determinism house-rule fix, shipped with an
         // unconditional fallback-hit counter (g_pr33_audit).
         bool m_shower_less_id_tiebreak{false};
+        // doc pr/39: prototype-parity exclusion of a shower's own start
+        // vertex from the farthest-vertex search that sets data.end_point
+        // (Shower::calculate_kinematics{,_long_muon}).  Same rule as
+        // Shower::fill_sets's exclude_start_vertex (doc pr/38 round 2,
+        // WCShower.cxx:547 map_vtx_segs never holds start_vertex), extended
+        // to the two calculate_kinematics searches and the long-muon search,
+        // which pr/38 round 2 did not touch.  Without it, a detached
+        // (conn_type 2/3) shower's end_point can land exactly on its own
+        // start vertex (e.g. the neutrino vertex) instead of growing away
+        // from it.  Default false = legacy search over every node,
+        // byte-identical.
+        bool m_shower_endpoint_exclude_start_vertex{false};
 
         // 2D charge maps cached for the duration of shower_clustering_with_nv.
         // Populated once by collect_charge_maps(); reused by calculate_shower_kinematics

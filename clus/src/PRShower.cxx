@@ -956,7 +956,7 @@ namespace WireCell::Clus::PR {
         return vec_dQ_dx;
     }
 
-    void Shower::calculate_kinematics(const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model){
+    void Shower::calculate_kinematics(const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, bool exclude_start_vertex_from_endpoint){
         int nsegments = this->edges().size();
         
         if (nsegments == 1) {
@@ -1043,6 +1043,7 @@ namespace WireCell::Clus::PR {
                     for (auto vdesc : ordered_nodes(*this, m_full_graph)) {
                         VertexPtr vtx = view[vdesc].vertex;
                         if (!vtx) continue;
+                        if (exclude_start_vertex_from_endpoint && vtx == m_start_vertex) continue;
                         double dis = (data.start_point - vtx->fit().point).magnitude();
                         if (dis > max_dis) {
                             max_dis = dis;
@@ -1150,6 +1151,7 @@ namespace WireCell::Clus::PR {
             for (auto vdesc : ordered_nodes(*this, m_full_graph)) {
                 VertexPtr vtx = view[vdesc].vertex;
                 if (!vtx) continue;
+                if (exclude_start_vertex_from_endpoint && vtx == m_start_vertex) continue;
                 double dis = (data.start_point - vtx->fit().point).magnitude();
                 if (dis > max_dis) {
                     max_dis = dis;
@@ -1219,7 +1221,7 @@ namespace WireCell::Clus::PR {
         //           << std::endl;
     }
 
-    void Shower::calculate_kinematics_long_muon(IndexedSegmentSet& segments_in_muons, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model){
+    void Shower::calculate_kinematics_long_muon(IndexedSegmentSet& segments_in_muons, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, bool exclude_start_vertex_from_endpoint){
         // Invariant: this function is only called when shower->get_particle_type() == 13
         // (NeutrinoEnergyReco.cxx), which requires shower->set_particle_type(13) to have been
         // called (NeutrinoShowerClustering.cxx:118), which in turn requires m_start_segment to
@@ -1287,6 +1289,7 @@ namespace WireCell::Clus::PR {
         VertexPtr farthest_vertex = nullptr;
         for (auto& [idx, vtx] : muon_vertices_by_index) {
             if (!vtx) continue;
+            if (exclude_start_vertex_from_endpoint && vtx == m_start_vertex) continue;
             double dis = (vtx->fit().point - data.start_point).magnitude();
             if (dis > max_dis) {
                 max_dis = dis;

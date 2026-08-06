@@ -326,9 +326,9 @@ void PatternAlgorithms::calculate_shower_kinematics(IndexedShowerSet& showers, I
         if (!shower || shower->get_flag_kinematics()) continue;
 
         if (std::abs(shower->get_particle_type()) != 13) {
-            shower->calculate_kinematics(particle_data, recomb_model);
+            shower->calculate_kinematics(particle_data, recomb_model, m_shower_endpoint_exclude_start_vertex);
         } else {
-            shower->calculate_kinematics_long_muon(segments_in_long_muon, particle_data, recomb_model);
+            shower->calculate_kinematics_long_muon(segments_in_long_muon, particle_data, recomb_model, m_shower_endpoint_exclude_start_vertex);
         }
 
         double fudge_factor = m_kine_charge.fudge_factor, recom_factor = m_kine_charge.recom_factor;

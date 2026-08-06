@@ -1165,6 +1165,10 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               // F5 (= P12): shower_less same-index tie-break by stable
               // shower id (house-rule determinism fix, prototype n/a).
               shower_less_id_tiebreak=false,
+              // doc pr/39: exclude a shower's own start vertex from the
+              // end_point farthest-vertex search (prototype map_vtx_segs
+              // parity).  Ships OFF pending owner gate review.
+              shower_endpoint_exclude_start_vertex=false,
               // muon_dqdx_curve [c0, c1, pivot_cm, power]: the muon
               // median-dQ/dx-vs-length envelope used by nine tagger cuts, as a
               // multiple of mip_dqdx_median.  DEFAULT = the SBND fit
@@ -1666,6 +1670,7 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
             pi0_id_shared_allocator=pi0_id_shared_allocator,
             shower_flag_pdg_electron=shower_flag_pdg_electron,
             shower_less_id_tiebreak=shower_less_id_tiebreak,
+            shower_endpoint_exclude_start_vertex=shower_endpoint_exclude_start_vertex,
             muon_dqdx_curve=muon_dqdx_curve,
             sp_dedx_use_recomb_model=sp_dedx_use_recomb_model,
             sp_mean_dedx_cut=sp_mean_dedx_cut,
@@ -2245,6 +2250,9 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
        pi0_id_shared_allocator=false,
        shower_flag_pdg_electron=false,
        shower_less_id_tiebreak=false,
+       // doc pr/39: exclude a shower's own start vertex from the end_point
+       // farthest-vertex search.  Ships OFF pending owner gate review.
+       shower_endpoint_exclude_start_vertex=false,
        // Muon dQ/dx-vs-length envelope: DEFAULT = the docs/pr/10 SBND fit
        // (see the clus_pr arg comment; null restores the uBooNE refit).
        // Recombination-model selection + single-photon dE/dx routing:
@@ -2384,6 +2392,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 pi0_id_shared_allocator=pi0_id_shared_allocator,
                 shower_flag_pdg_electron=shower_flag_pdg_electron,
                 shower_less_id_tiebreak=shower_less_id_tiebreak,
+                shower_endpoint_exclude_start_vertex=shower_endpoint_exclude_start_vertex,
                 muon_dqdx_curve=muon_dqdx_curve,
                 use_power_recomb=use_power_recomb,
                 sp_dedx_use_recomb_model=sp_dedx_use_recomb_model,

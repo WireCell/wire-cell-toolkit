@@ -929,6 +929,9 @@ function(
     // the one id_pi0_without_vertex event) but knob-on is byte-identical
     // 48/48 -- the counter stays as the doc-53-style tripwire.
     shower_less_id_tiebreak = true,
+    // doc pr/39: exclude a shower's own start vertex from the end_point
+    // farthest-vertex search.  Ships OFF pending owner gate review.
+    shower_endpoint_exclude_start_vertex = false,
 )
     local base = import 'pgrapher/experiment/sbnd/simparams.jsonnet';
     local params = base {
@@ -1083,6 +1086,7 @@ function(
                              pi0_id_shared_allocator=pi0_id_shared_allocator,
                              shower_flag_pdg_electron=shower_flag_pdg_electron,
                              shower_less_id_tiebreak=shower_less_id_tiebreak,
+                             shower_endpoint_exclude_start_vertex=shower_endpoint_exclude_start_vertex,
                              muon_dqdx_curve=muon_dqdx_curve,
                              use_power_recomb=use_power_recomb,
                              sp_dedx_use_recomb_model=sp_dedx_use_recomb_model,

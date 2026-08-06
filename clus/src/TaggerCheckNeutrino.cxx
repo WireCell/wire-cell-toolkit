@@ -253,6 +253,7 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_pi0_id_shared_allocator              = get(config, "pi0_id_shared_allocator",              m_pi0_id_shared_allocator);
     m_shower_flag_pdg_electron             = get(config, "shower_flag_pdg_electron",             m_shower_flag_pdg_electron);
     m_shower_less_id_tiebreak              = get(config, "shower_less_id_tiebreak",              m_shower_less_id_tiebreak);
+    m_shower_endpoint_exclude_start_vertex = get(config, "shower_endpoint_exclude_start_vertex", m_shower_endpoint_exclude_start_vertex);
 
     if (!m_trackfitting_config_file.empty()) {
         load_trackfitting_config(m_trackfitting_config_file);
@@ -381,6 +382,7 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["pi0_id_shared_allocator"]              = m_pi0_id_shared_allocator;              // false = legacy independent pi0-id seeds (collision possible)
     cfg["shower_flag_pdg_electron"]             = m_shower_flag_pdg_electron;             // false = legacy is_shower without the abs(pdg)==11 term
     cfg["shower_less_id_tiebreak"]              = m_shower_less_id_tiebreak;              // false = legacy pointer-address tie-break (house-rule fix when true)
+    cfg["shower_endpoint_exclude_start_vertex"] = m_shower_endpoint_exclude_start_vertex; // false = legacy end_point search includes the start vertex (doc pr/39)
 
 
     return cfg;
@@ -693,6 +695,7 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
     pattern_algos.m_pi0_id_shared_allocator              = m_pi0_id_shared_allocator;
     pattern_algos.m_shower_flag_pdg_electron             = m_shower_flag_pdg_electron;
     pattern_algos.m_shower_less_id_tiebreak              = m_shower_less_id_tiebreak;
+    pattern_algos.m_shower_endpoint_exclude_start_vertex = m_shower_endpoint_exclude_start_vertex;
     // Muon dQ/dx-vs-length envelope: c0/c1/power dimensionless, pivot cm -> internal.
     pattern_algos.m_muon_dqdx_curve = {m_muon_dqdx_curve[0], m_muon_dqdx_curve[1],
                                        m_muon_dqdx_curve[2] * units::cm, m_muon_dqdx_curve[3]};
