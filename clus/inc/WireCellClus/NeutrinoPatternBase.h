@@ -621,19 +621,19 @@ namespace WireCell::Clus::PR {
         // proton-daughter veto anywhere -- see porting_dictionary.md.  C++
         // default false = legacy = byte-identical.
         //
-        // KNOWN BROKEN END-TO-END (doc pr/40 round 2, not yet fixed): this
-        // override DOES fire correctly here (traced: pdg 11 -> 211 at this
-        // call site) but a THIRD writer, Shower::update_particle_type
-        // (PRShower.cxx ~788-801, called from 9 sites in
-        // NeutrinoShowerClustering.cxx), runs later in the same pass and
-        // unconditionally reasserts electron on the shower's start segment
-        // whenever shower_length > track_length -- with no PID/topology
-        // awareness at all.  For evt 256587 seg 11079 this reverts the fix
-        // (traced: pdg 211 -> 11 at PRShower.cxx:801); the census shows the
-        // override survives in only 1/2209 cases where that third writer
-        // happens not to fire on the same shower.  Turning this knob ON does
-        // NOT reliably deliver the fix yet -- left OFF pending a round-3 guard
-        // in update_particle_type itself.
+        // Round 2 found this override could be silently reverted by
+        // Shower::update_particle_type (PRShower.cxx, called from 8 sites in
+        // NeutrinoShowerClustering.cxx), which reasserts electron on a
+        // shower's start segment whenever shower_length > track_length with
+        // no PID/topology awareness (evt 256587 seg 11079: traced,
+        // pdg 211 -> 11 at PRShower.cxx:801; only 1/2209 survived
+        // end-to-end).  Round 3 (doc pr/40 round 3) closed this by threading
+        // a matching guard into update_particle_type itself (see
+        // PRShower.h's docstring on update_particle_type) -- gate-clean
+        // (48/48 byte-identical off, evt 256587 now 211 end-to-end,
+        // population census 2/2209, zero nusel verdict regression) but
+        // STILL LEFT OFF pending owner request to flip -- see doc pr/40
+        // round 3's Flip section for why.
         bool   m_shower_proton_daughter_pion{false};
 
         // ---- Detector-extent literals (doc sbnd_xin/docs/pr/2 sec. 2e(iv)) ----

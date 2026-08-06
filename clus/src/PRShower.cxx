@@ -744,7 +744,7 @@ namespace WireCell::Clus::PR {
         return total_length;
     }
 
-    void Shower::update_particle_type(const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, double mip_dqdx){
+    void Shower::update_particle_type(const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, double mip_dqdx, VertexPtr main_vertex, bool protect_proton_daughter_pion, double proton_daughter_mip_dqdx){
         double track_length = 0;
         double shower_length = 0;
         
@@ -786,19 +786,34 @@ namespace WireCell::Clus::PR {
         
         // If shower_length dominates, update start_segment to electron
         if (shower_length > track_length && m_start_segment) {
-            // Calculate 4-momentum for electron (PDG = 11)
-            auto four_momentum = segment_cal_4mom(m_start_segment, 11, particle_data, recomb_model, mip_dqdx);
-            
-            // Create ParticleInfo for electron
-            auto pinfo = std::make_shared<Aux::ParticleInfo>(
-                11,                                          // electron PDG
-                particle_data->get_particle_mass(11),       // electron mass
-                particle_data->pdg_to_name(11),             // "electron"
-                four_momentum                                // 4-momentum
-            );
-            
-            // Store particle info in start_segment
-            m_start_segment->particle_info(pinfo);
+            // doc sbnd_xin/docs/pr/40 round 3: an electron cannot father a
+            // proton -- if set_default_shower_particle_info already relabelled
+            // m_start_segment pion via this same topology test, don't
+            // silently revert it back to electron here.  is_not_proton above
+            // only exempts a confirmed PROTON from the shower-length bucket,
+            // so a pion-labelled start_segment still landed in shower_length
+            // and still trips this branch; C++ default false/nullptr = legacy
+            // = byte-identical.
+            const bool protected_pion = protect_proton_daughter_pion && main_vertex &&
+                segment_has_proton_daughter(m_full_graph, m_start_segment, main_vertex, proton_daughter_mip_dqdx);
+            // if-guarded rather than an early return: keeps any code appended
+            // to this function later from being silently skipped for a
+            // protected shower.
+            if (!protected_pion) {
+                // Calculate 4-momentum for electron (PDG = 11)
+                auto four_momentum = segment_cal_4mom(m_start_segment, 11, particle_data, recomb_model, mip_dqdx);
+
+                // Create ParticleInfo for electron
+                auto pinfo = std::make_shared<Aux::ParticleInfo>(
+                    11,                                          // electron PDG
+                    particle_data->get_particle_mass(11),       // electron mass
+                    particle_data->pdg_to_name(11),             // "electron"
+                    four_momentum                                // 4-momentum
+                );
+
+                // Store particle info in start_segment
+                m_start_segment->particle_info(pinfo);
+            }
         }
     }
 

@@ -160,7 +160,7 @@ void PatternAlgorithms::shower_clustering_with_nv_in_main_cluster(Graph& graph, 
         //  - update_particle_type() handles multi-segment showers via majority vote
         //  - explicit PDG=0 guard catches single-segment showers skipped by update_particle_type()
         //    (long-muon start segments retain PDG=13 and are handled by the post-pass below)
-        shower->update_particle_type(particle_data, recomb_model, m_mip_dqdx);
+        shower->update_particle_type(particle_data, recomb_model, m_mip_dqdx, main_vertex, m_shower_proton_daughter_pion, m_mip_dqdx_median);
         // PDG=0 guard: defensive fixup for shower-flagged start segments that
         // arrived without any ParticleInfo set.  Independent of
         // update_particle_type and still needed.
@@ -1203,7 +1203,7 @@ void PatternAlgorithms::shower_clustering_with_nv_from_vertices(Graph& graph, Ve
         }
 
         // Update particle type
-        shower->update_particle_type(particle_data, recomb_model, m_mip_dqdx);
+        shower->update_particle_type(particle_data, recomb_model, m_mip_dqdx, main_vertex, m_shower_proton_daughter_pion, m_mip_dqdx_median);
 
         bool tmp_flag = (shower->start_vertex() == main_vertex);
         SPDLOG_LOGGER_TRACE(s_log, "shower_clustering_with_nv_from_vertices: Separated shower: {} {} {} {} {}",
@@ -1370,7 +1370,7 @@ void PatternAlgorithms::examine_merge_showers(IndexedShowerSet& showers, VertexP
         for (auto& shower2 : to_merge) {
             shower1->add_shower(*shower2);
         }
-        shower1->update_particle_type(particle_data, recomb_model, m_mip_dqdx);
+        shower1->update_particle_type(particle_data, recomb_model, m_mip_dqdx, main_vertex, m_shower_proton_daughter_pion, m_mip_dqdx_median);
         shower1->calculate_kinematics(particle_data, recomb_model, m_shower_endpoint_exclude_start_vertex);
         double kine_charge = cal_kine_charge(shower1, m_charge_2d_u, m_charge_2d_v, m_charge_2d_w, m_map_apa_ch_plane_wires, track_fitter, dv);
         shower1->set_kine_charge(kine_charge);
@@ -1562,7 +1562,7 @@ void PatternAlgorithms::shower_clustering_in_other_clusters(Graph& graph, Vertex
             }
 
             // Update particle type
-            shower->update_particle_type(particle_data, recomb_model, m_mip_dqdx);
+            shower->update_particle_type(particle_data, recomb_model, m_mip_dqdx, main_vertex, m_shower_proton_daughter_pion, m_mip_dqdx_median);
 
             // Check with other showers and merge if needed
             std::vector<ShowerPtr> showers_to_be_removed;
@@ -1588,7 +1588,7 @@ void PatternAlgorithms::shower_clustering_in_other_clusters(Graph& graph, Vertex
             }
 
             // Post-merge majority-vote and kinematics (prototype lines 1555-1556)
-            shower->update_particle_type(particle_data, recomb_model, m_mip_dqdx);
+            shower->update_particle_type(particle_data, recomb_model, m_mip_dqdx, main_vertex, m_shower_proton_daughter_pion, m_mip_dqdx_median);
             shower->calculate_kinematics(particle_data, recomb_model, m_shower_endpoint_exclude_start_vertex);
 
             showers.insert(shower);
@@ -1714,7 +1714,7 @@ void PatternAlgorithms::shower_clustering_in_other_clusters(Graph& graph, Vertex
             shower->complete_structure_with_start_segment(used_segments);
             // Majority-vote correction for multi-segment showers whose start segment
             // has an unexpected PDG not covered by the explicit force-to-11 above.
-            shower->update_particle_type(particle_data, recomb_model, m_mip_dqdx);
+            shower->update_particle_type(particle_data, recomb_model, m_mip_dqdx, main_vertex, m_shower_proton_daughter_pion, m_mip_dqdx_median);
             showers.insert(shower);
         }
     }
@@ -2027,7 +2027,7 @@ void PatternAlgorithms::examine_shower_1(Graph& graph, VertexPtr main_vertex, In
                         particle_data->get_particle_mass(11));
                 }
                 shower1->start_segment()->set_flags(SegmentFlags::kAvoidMuonCheck);
-                shower1->update_particle_type(particle_data, recomb_model, m_mip_dqdx);
+                shower1->update_particle_type(particle_data, recomb_model, m_mip_dqdx, main_vertex, m_shower_proton_daughter_pion, m_mip_dqdx_median);
 
                 // Merge associated showers
                 for (auto shower : associated_showers) {
@@ -2496,7 +2496,7 @@ void PatternAlgorithms::examine_showers(Graph& graph, VertexPtr main_vertex, Ind
             sg->particle_info()->set_pdg(11);
             pr40_probe_setpdg(sg, 11, "NeutrinoShowerClustering.cxx:merged_shower_start_segment");
         }
-        shower->update_particle_type(particle_data, recomb_model, m_mip_dqdx);
+        shower->update_particle_type(particle_data, recomb_model, m_mip_dqdx, main_vertex, m_shower_proton_daughter_pion, m_mip_dqdx_median);
         shower->calculate_kinematics(particle_data, recomb_model, m_shower_endpoint_exclude_start_vertex);
         shower->set_kine_charge(cal_kine_charge(shower, m_charge_2d_u, m_charge_2d_v, m_charge_2d_w, m_map_apa_ch_plane_wires, track_fitter, dv));
         shower->set_flag_kinematics(true);

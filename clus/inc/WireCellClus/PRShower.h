@@ -198,7 +198,21 @@ namespace WireCell::Clus::PR {
         std::vector<double> get_stem_dQ_dx(VertexPtr vertex, SegmentPtr segment, int limit = 20, double mip_dqdx_median = 43000/units::cm);
 
         // calculate the kinematics
-        void update_particle_type(const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, double mip_dqdx = 50000/units::cm);
+        // doc sbnd_xin/docs/pr/40 round 3: main_vertex + protect_proton_daughter_pion
+        // (C++ defaults nullptr/false = legacy = byte-identical) let this
+        // function's own shower/track majority-vote reassignment (see .cxx)
+        // decline to overwrite m_start_segment when set_default_shower_
+        // particle_info (NeutrinoPatternBase.cxx) already relabelled it pion
+        // via the same segment_has_proton_daughter test.  Without this guard,
+        // this function silently reverted that relabel -- traced end-to-end
+        // (SBND evt 256587 seg 11079) in round 2; see porting_dictionary.md.
+        // proton_daughter_mip_dqdx is DELIBERATELY separate from mip_dqdx
+        // (this function's own 4-momentum-calc scale, bound to the caller's
+        // m_mip_dqdx=50000/units::cm): the guard must re-derive
+        // segment_has_proton_daughter's verdict on the SAME scale F5 used
+        // (m_mip_dqdx_median=43000/units::cm) or it can silently disagree
+        // with F5's own decision at a different threshold.
+        void update_particle_type(const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, double mip_dqdx = 50000/units::cm, VertexPtr main_vertex = nullptr, bool protect_proton_daughter_pion = false, double proton_daughter_mip_dqdx = 43000/units::cm);
         // exclude_start_vertex_from_endpoint (doc pr/39): same prototype-parity
         // rule as fill_sets's exclude_start_vertex above, applied to the
         // farthest-vertex search that sets data.end_point.  The prototype's
