@@ -530,3 +530,37 @@ segment — a 0.9 deg "vertex" inside a straight track (SBND mcp1k evt 284794).
 `iso_endpoint_tube_radius` is diagnostic only; a hard tube filter around the
 straight axis line was measured to pull endpoints up to 28.6 cm INWARD on long
 or curved clusters and was rejected.
+
+## `examine_vertices_3` / `get_local_extension`: the "extension" recovery step has no outward check, in BOTH trees — `v3_extension_guard` is a prototype-limitation fix, not a port correction
+
+`examine_vertices_3` (`clus/src/NeutrinoStructureExaminer.cxx`, a faithful
+port of `NeutrinoID_proto_vertex.h:2412-2463`) revisits the main cluster's two
+original `init_first_segment` endpoints and tries to push each one further
+out via `get_local_extension` — a 10 cm-radius Hough-transform direction
+estimate (`clus/src/NeutrinoStructureExaminer.cxx get_local_extension`, port
+of `PR3DCluster_path.h:288-316`). Neither tree's caller ever checks that the
+returned point actually moves the vertex FARTHER from the segment's other
+(far) endpoint; the only checks are "different from both existing points"
+(`wcp1.index == vtx / wcp2.index`, `PR3DCluster_path.h:2443`) and "the
+rebuilt path isn't more than 2x longer" (`:2452`). At the axial extreme of an
+isochronous (drift-perpendicular) sheet — exactly where `iso_endpoint` (round
+2 above) picks its seed — the local 10 cm neighbourhood is dominated by the
+sheet's transverse spread, so the Hough direction estimate is poorly
+conditioned and can point back INTO the cluster. Measured on all three doc
+pr/24 §18 (round 5) events (SBND 18259-42280, 18255-271851, 18255-350186),
+the "extension" landed 7.5-8.9 cm closer to the far endpoint than the
+original vertex, silently amputating the delivered trajectory by that much —
+this is what produced round 4's 8.4-10.9 cm undershoot, NOT the endpoint pick
+itself (round 4 had misattributed it to unidentified shared refinement code;
+see doc pr/24 §17.5, retracted in §18).
+
+Because the prototype has the identical gap (no distance-to-far-endpoint
+check anywhere in `examine_vertices_3`), this is a **prototype limitation
+(M15)**, not a port error — do NOT silently "fix" `get_local_extension` or
+`examine_vertices_3` unconditionally. The fix, `v3_extension_guard`
+(`clus/inc/WireCellClus/NeutrinoPatternBase.h`, `TaggerCheckNeutrino.h`), C++
+default false, rejects a candidate unless it increases the vertex's distance
+to the segment's far endpoint by more than `v3_extension_min_gain` (default
+-1.0 cm, tolerating the legacy arm's own few-mm retreat from the same bug
+while rejecting the multi-cm amputation). Knob off = both trees' unconditional
+accept, byte-identical.

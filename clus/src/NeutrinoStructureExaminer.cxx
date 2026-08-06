@@ -2482,9 +2482,36 @@ void PatternAlgorithms::examine_vertices_3(Graph& graph, Facade::Cluster& main_c
         // Check if extension found a different point
         bool same_as_vtx = (ray_length(Ray{wcp1_point, vtx->wcpt().point}) < 0.01 * units::cm);
         bool same_as_wcp2 = (ray_length(Ray{wcp1_point, wcp2.point}) < 0.01 * units::cm);
-        
+
         if (same_as_vtx || same_as_wcp2) continue;
-        
+
+        // Round 5 (doc sbnd_xin/docs/pr/24 sec. 18).  get_local_extension's
+        // Hough-transform direction estimate is poorly conditioned at the
+        // axial extreme of an isochronous sheet and can return a point that
+        // is actually CLOSER to the segment's far endpoint than the vertex
+        // it started from -- a retraction, not an extension, that neither
+        // this loop nor the prototype's own examine_vertices_3
+        // (NeutrinoID_proto_vertex.h:2412-2463) ever checked for.  When
+        // m_v3_extension_guard is on, reject any candidate that does not
+        // grow the distance to wcp2 by more than m_v3_extension_min_gain
+        // (a small negative default tolerates the legacy arm's few-mm
+        // legitimate retreat while rejecting a multi-cm amputation).
+        // C++ default false => unconditional accept, byte-identical.
+        if (m_v3_extension_guard) {
+            double dis_old = ray_length(Ray{vtx->wcpt().point, wcp2.point});
+            double dis_new = ray_length(Ray{wcp1_point, wcp2.point});
+            if (dis_new - dis_old <= m_v3_extension_min_gain) {
+                SPDLOG_LOGGER_DEBUG(s_log, "examine_vertices_3: reject retracting get_local_extension "
+                    "cluster={} vtx=({:.2f},{:.2f},{:.2f}) candidate=({:.2f},{:.2f},{:.2f}) "
+                    "dis_to_far_old={:.2f}cm dis_to_far_new={:.2f}cm",
+                    main_cluster.get_cluster_id(),
+                    vtx->wcpt().point.x()/units::cm, vtx->wcpt().point.y()/units::cm, vtx->wcpt().point.z()/units::cm,
+                    wcp1_point.x()/units::cm, wcp1_point.y()/units::cm, wcp1_point.z()/units::cm,
+                    dis_old/units::cm, dis_new/units::cm);
+                continue;
+            }
+        }
+
         // Create new path from extended point to other end
         std::vector<Facade::geo_point_t> path_points;
         if (flag_start) {

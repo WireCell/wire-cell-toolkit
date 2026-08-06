@@ -177,6 +177,40 @@ namespace WireCell::Clus::PR {
         double m_iso_endpoint_tube_radius{4 * units::cm};
         double m_iso_endpoint_min_aspect{0.12};
 
+        // Round 5 (doc sbnd_xin/docs/pr/24 sec. 18, SBND 18259-42280 /
+        // 18255-271851 / 18255-350186).  examine_vertices_3
+        // (NeutrinoStructureExaminer.cxx) is the stage that revisits the main
+        // cluster's two ORIGINAL init_first_segment endpoints and tries to
+        // push each one further out via get_local_extension -- a 10 cm-radius
+        // Hough-transform direction estimate (faithful port,
+        // PR3DCluster_path.h:288-316).  Neither the toolkit nor the prototype
+        // (NeutrinoID_proto_vertex.h:2412-2463) ever checks that the
+        // "extension" actually moves the vertex FARTHER from the segment's
+        // far endpoint -- only that it differs from both existing points and
+        // that the rebuilt path isn't more than 2x longer. At the axial
+        // extreme of an isochronous (drift-perpendicular) sheet -- exactly
+        // where m_iso_endpoint picks its seed -- the local 10 cm neighbourhood
+        // is dominated by the sheet's transverse spread, so the Hough
+        // direction estimate is poorly conditioned and can point BACK into
+        // the cluster.  Measured on all three events: the "extension" landed
+        // 7.5-8.9 cm closer to the far endpoint than the original vertex,
+        // amputating the delivered trajectory by exactly that much (round 4's
+        // 8.4-10.9 cm undershoot). Legacy (non-iso) endpoints sit at a
+        // different, better-conditioned point and lose only ~1 cm to the same
+        // bug, which is why the owner's report is iso-only: the bug is
+        // general, but iso_endpoint's picks are where it is worst.
+        // This is a prototype limitation (M15), not a port error: fixed here
+        // behind a knob rather than corrected unconditionally.
+        // m_v3_extension_guard, when true, rejects get_local_extension's
+        // result unless it increases the vertex's distance to the segment's
+        // OTHER (far) endpoint by more than -m_v3_extension_min_gain (a small
+        // negative tolerance permits the legacy arm's ~1 cm legitimate
+        // retreat while rejecting the multi-cm amputation).
+        // C++ default false => examine_vertices_3 keeps today's unconditional
+        // accept => byte-identical.
+        bool   m_v3_extension_guard{false};
+        double m_v3_extension_min_gain{-1.0 * units::cm};
+
         // Cathode kink veto (doc sbnd_xin/docs/pr/20 Part II, B0).  Passed to
         // segment_search_kink from break_segments: a candidate fit point within
         // m_cathode_kink_xcut of the cathode plane at m_cathode_x is skipped, so

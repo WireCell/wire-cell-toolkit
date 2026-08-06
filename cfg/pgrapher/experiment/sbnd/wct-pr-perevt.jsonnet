@@ -397,6 +397,18 @@ function(
     iso_endpoint_xext_quantile = null,
     iso_endpoint_tube_radius = null,
     iso_endpoint_min_aspect = null,
+    // examine_vertices_3 extension-retraction guard (doc pr/24 sec 18, round
+    // 5, SBND 18259-42280 / 18255-271851 / 18255-350186).  get_local_extension's
+    // Hough-based direction estimate can return a point CLOSER to the far
+    // endpoint than the vertex it started from -- worst at the axial extreme
+    // of an isochronous sheet, which is exactly where iso_endpoint (above)
+    // picks its seed, so an iso-picked trunk tip can lose 7.5-8.9 cm of its
+    // delivered trajectory to a stage nominally meant to extend it further.
+    // Ships OFF pending the owner's review of the round-5 gate (this is a
+    // fix candidate for a bug ON iso_endpoint's own production path, not yet
+    // the SBND operating point).
+    v3_extension_guard = false,
+    v3_extension_min_gain = null,
     // protect_bundle stage knobs (doc pr/23): the PR-stage overclustering
     // protection (uboone's second graph examination).  The stage is in
     // pipeline_names by DEFAULT since the sec 9 production flip; the knobs
@@ -1031,6 +1043,8 @@ function(
                              iso_endpoint_xext_quantile=iso_endpoint_xext_quantile,
                              iso_endpoint_tube_radius=iso_endpoint_tube_radius,
                              iso_endpoint_min_aspect=iso_endpoint_min_aspect,
+                             v3_extension_guard=v3_extension_guard,
+                             v3_extension_min_gain=v3_extension_min_gain,
                              protect_graph_name=protect_graph_name,
                              protect_skip_convicted=protect_skip_convicted,
                              protect_cathode_x=protect_cathode_x,

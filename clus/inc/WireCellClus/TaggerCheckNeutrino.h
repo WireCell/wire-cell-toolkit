@@ -132,6 +132,16 @@ public:
         double m_iso_endpoint_xext_quantile{0.02};
         double m_iso_endpoint_tube_radius{4};   // cm
         double m_iso_endpoint_min_aspect{0.12};
+        // Round 5 (doc sbnd_xin/docs/pr/24 sec. 18).  examine_vertices_3's
+        // get_local_extension recovery step can retract a track endpoint
+        // instead of extending it (worst at an isochronous sheet's axial
+        // extreme, where m_iso_endpoint picks its seed).  false => today's
+        // unconditional accept, byte-identical.  m_v3_extension_min_gain (cm)
+        // is the minimum required increase in distance to the segment's far
+        // endpoint; a small negative default tolerates legacy's few-mm
+        // legitimate retreat.
+        bool   m_v3_extension_guard{false};
+        double m_v3_extension_min_gain{-1.0};   // cm
         // Detector-extent literals (docs/pr/2 sec. 2e(iv)), all in cm.
         // Defaults = the uBooNE prototype values (active volume y in
         // [-116,+117], z in [0,1037]) => absent keys are byte-identical.

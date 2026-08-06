@@ -90,6 +90,7 @@ TEST_CASE("clus knob defaults: TaggerCheckNeutrino switches are all OFF")
     CHECK_KNOB_BOOL(cfg, "proton_dir_vote", false);          // doc pr/8
     CHECK_KNOB_BOOL(cfg, "endpoint_trim_retry", false);      // doc pr/9 F1
     CHECK_KNOB_BOOL(cfg, "iso_endpoint", false);             // doc pr/25 isochronous trunk
+    CHECK_KNOB_BOOL(cfg, "v3_extension_guard", false);       // doc pr/24 sec 18 round 5
     CHECK_KNOB_BOOL(cfg, "sp_dedx_use_recomb_model", false); // doc pr/2 2e(i)
     CHECK_KNOB_BOOL(cfg, "nu_skip_cosmic", false);           // doc pr/3 sec 8
     CHECK_KNOB_BOOL(cfg, "nu_skip_cosmic_bundle", false);
@@ -137,6 +138,7 @@ TEST_CASE("clus knob defaults: TaggerCheckNeutrino literals are the uBooNE value
     CHECK_KNOB_NUM(cfg, "iso_endpoint_xext_quantile", 0.02);
     CHECK_KNOB_NUM(cfg, "iso_endpoint_tube_radius", 4.0);
     CHECK_KNOB_NUM(cfg, "iso_endpoint_min_aspect", 0.12);
+    CHECK_KNOB_NUM(cfg, "v3_extension_min_gain", -1.0);      // doc pr/24 sec 18 round 5, cm
 
     // Detector-extent literals (doc pr/2 sec 2e(iv)); uBooNE y=+117 top.
     CHECK_KNOB_NUM(cfg, "cosmic_y_top_main", 100.0);
