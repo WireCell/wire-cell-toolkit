@@ -404,10 +404,12 @@ function(
     // of an isochronous sheet, which is exactly where iso_endpoint (above)
     // picks its seed, so an iso-picked trunk tip can lose 7.5-8.9 cm of its
     // delivered trajectory to a stage nominally meant to extend it further.
-    // Ships OFF pending the owner's review of the round-5 gate (this is a
-    // fix candidate for a bug ON iso_endpoint's own production path, not yet
-    // the SBND operating point).
-    v3_extension_guard = false,
+    // SBND production default since 2026-08-06 (owner: "you can put them on
+    // for SBND running", doc pr/24 sec 19.1, gate work-pr24r6-off48 vs
+    // work-pr24r5-off48 -- legacy restorable via SBND_V3_EXT_GUARD=0).
+    // v3_extension_min_gain stays null = the C++ default (-1 cm); the key is
+    // suppressed in the compiled config either way.
+    v3_extension_guard = true,
     v3_extension_min_gain = null,
     // protect_bundle stage knobs (doc pr/23): the PR-stage overclustering
     // protection (uboone's second graph examination).  The stage is in
