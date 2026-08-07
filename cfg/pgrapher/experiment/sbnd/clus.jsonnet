@@ -1211,28 +1211,6 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               shower_absorb_track_guard=false,
               shower_connect_protected_pion_guard=false,
               michel_stem_muon_rescue=false,
-              // doc sbnd_xin/docs/pr/43 F1 -- multi-hop generalization of
-              // the muon-candidate loop's 1-hop proton veto.  Default false
-              // = legacy = byte-identical.
-              muon_chain_proton_veto=false,
-              // doc sbnd_xin/docs/pr/43 -- keep Shower's cached
-              // particle_type in lock-step with update_particle_type's own
-              // segment relabel.  Default false = legacy = byte-identical.
-              shower_type_cache_refresh=false,
-              // doc sbnd_xin/docs/pr/43 F3 -- trust a confident non-electron
-              // track-PID conclusion inside segment_determine_shower_
-              // direction_trajectory instead of discarding it.  Default
-              // false = legacy = byte-identical.
-              shower_traj_dqdx_guard=false,
-              // doc sbnd_xin/docs/pr/43 F3b -- companion to F3: relabel a
-              // main-vertex proton's short muon-pdg continuation chain to
-              // pion except the deepest (confirmed-muon) segment.  Default
-              // false = legacy = byte-identical.
-              shower_traj_chain_pion=false,
-              // doc sbnd_xin/docs/pr/43 F4 -- kine-tree parity with pr/38's
-              // pf_shower_vertex_barrier.  MOVES kine_reco_Enu when on.
-              // Default false = legacy = byte-identical.
-              kine_shower_vertex_barrier=false,
               // muon_dqdx_curve [c0, c1, pivot_cm, power]: the muon
               // median-dQ/dx-vs-length envelope used by nine tagger cuts, as a
               // multiple of mip_dqdx_median.  DEFAULT = the SBND fit
@@ -1749,11 +1727,6 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
             shower_absorb_track_guard=shower_absorb_track_guard,
             shower_connect_protected_pion_guard=shower_connect_protected_pion_guard,
             michel_stem_muon_rescue=michel_stem_muon_rescue,
-            muon_chain_proton_veto=muon_chain_proton_veto,
-            shower_type_cache_refresh=shower_type_cache_refresh,
-            shower_traj_dqdx_guard=shower_traj_dqdx_guard,
-            shower_traj_chain_pion=shower_traj_chain_pion,
-            kine_shower_vertex_barrier=kine_shower_vertex_barrier,
             muon_dqdx_curve=muon_dqdx_curve,
             sp_dedx_use_recomb_model=sp_dedx_use_recomb_model,
             sp_mean_dedx_cut=sp_mean_dedx_cut,
@@ -2363,21 +2336,6 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
        shower_absorb_track_guard=false,
        shower_connect_protected_pion_guard=false,
        michel_stem_muon_rescue=false,
-       // doc sbnd_xin/docs/pr/43 F1.  Default false = legacy =
-       // byte-identical.  See the clus_pr arg comment.
-       muon_chain_proton_veto=false,
-       // doc sbnd_xin/docs/pr/43.  Default false = legacy = byte-identical.
-       // See the clus_pr arg comment.
-       shower_type_cache_refresh=false,
-       // doc sbnd_xin/docs/pr/43 F3.  Default false = legacy =
-       // byte-identical.  See the clus_pr arg comment.
-       shower_traj_dqdx_guard=false,
-       // doc sbnd_xin/docs/pr/43 F3b.  Default false = legacy =
-       // byte-identical.  See the clus_pr arg comment.
-       shower_traj_chain_pion=false,
-       // doc sbnd_xin/docs/pr/43 F4.  MOVES kine_reco_Enu when on.  Default
-       // false = legacy = byte-identical.  See the clus_pr arg comment.
-       kine_shower_vertex_barrier=false,
        // Muon dQ/dx-vs-length envelope: DEFAULT = the docs/pr/10 SBND fit
        // (see the clus_pr arg comment; null restores the uBooNE refit).
        // Recombination-model selection + single-photon dE/dx routing:
@@ -2532,11 +2490,6 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 shower_absorb_track_guard=shower_absorb_track_guard,
                 shower_connect_protected_pion_guard=shower_connect_protected_pion_guard,
                 michel_stem_muon_rescue=michel_stem_muon_rescue,
-                muon_chain_proton_veto=muon_chain_proton_veto,
-                shower_type_cache_refresh=shower_type_cache_refresh,
-                shower_traj_dqdx_guard=shower_traj_dqdx_guard,
-                shower_traj_chain_pion=shower_traj_chain_pion,
-                kine_shower_vertex_barrier=kine_shower_vertex_barrier,
                 muon_dqdx_curve=muon_dqdx_curve,
                 use_power_recomb=use_power_recomb,
                 sp_dedx_use_recomb_model=sp_dedx_use_recomb_model,

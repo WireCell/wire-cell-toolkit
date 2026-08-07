@@ -305,62 +305,6 @@ void PatternAlgorithms::override_michel_stem_muon(Graph& graph, Facade::Cluster&
     }
 }
 
-void PatternAlgorithms::override_shower_traj_chain_pion(Graph& graph, Facade::Cluster& cluster, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, VertexPtr main_vertex) {
-    // doc sbnd_xin/docs/pr/43 F3b -- see m_shower_traj_chain_pion's docstring
-    // in NeutrinoPatternBase.h.  false = legacy = no-op.
-    if (!m_shower_traj_chain_pion) return;
-    if (!main_vertex || !main_vertex->descriptor_valid()) return;
-
-    static const bool dbg = std::getenv("WCT_SHOWER_TRAJ_CHAIN_DEBUG") != nullptr;
-
-    const auto vd = main_vertex->get_descriptor();
-    if (dbg) std::fprintf(stderr, "SHOWER_TRAJ_CHAIN_DEBUG cluster=%d main_vertex=%p nedges=%zu\n",
-                           cluster.get_cluster_id(), (void*)main_vertex.get(),
-                           sorted_out_edges(vd, graph).size());
-    for (auto e_it : sorted_out_edges(vd, graph)) {
-        SegmentPtr proton_sg = graph[e_it].segment;
-        if (dbg) std::fprintf(stderr, "SHOWER_TRAJ_CHAIN_DEBUG  edge seg=%p pdg=%d\n",
-                               (void*)proton_sg.get(),
-                               (proton_sg && proton_sg->has_particle_info()) ? proton_sg->particle_info()->pdg() : -999);
-        if (!proton_sg || proton_sg->cluster() != &cluster) continue;
-        if (!proton_sg->has_particle_info() || proton_sg->particle_info()->pdg() != 2212) continue;
-
-        auto chain = segment_chain_continuation(graph, proton_sg, main_vertex, /*max_hops=*/3);
-        if (dbg) std::fprintf(stderr, "SHOWER_TRAJ_CHAIN_DEBUG  proton_sg=%p chain.size()=%zu\n",
-                               (void*)proton_sg.get(), chain.size());
-        // Need at least two segments so there is a "transitional" one to
-        // relabel; a lone muon-pdg daughter of the proton is the ordinary
-        // proton -> muon topology and is left untouched.
-        if (chain.size() < 2) continue;
-
-        bool all_short_muon = true;
-        for (auto& csg : chain) {
-            const bool has_pi = csg->has_particle_info();
-            const int cpdg = has_pi ? csg->particle_info()->pdg() : -999;
-            const double clen = segment_track_length(csg);
-            if (dbg) std::fprintf(stderr, "SHOWER_TRAJ_CHAIN_DEBUG    chain seg=%p pdg=%d len=%.2fcm\n",
-                                   (void*)csg.get(), cpdg, clen/units::cm);
-            if (!has_pi || cpdg != 13 || clen > 15 * units::cm) {
-                all_short_muon = false;
-                break;
-            }
-        }
-        if (!all_short_muon) continue;
-
-        // Relabel every segment except the LAST (deepest, farthest from the
-        // proton) to pion; the last one is the confirmed muon.
-        for (size_t i = 0; i + 1 < chain.size(); ++i) {
-            SegmentPtr chain_sg = chain[i];
-            const int pdg_code = 211;
-            auto four_momentum = segment_cal_4mom(chain_sg, pdg_code, particle_data, recomb_model, m_mip_dqdx);
-            auto pinfo = std::make_shared<Aux::ParticleInfo>(
-                pdg_code, particle_data->get_particle_mass(pdg_code),
-                particle_data->pdg_to_name(pdg_code), four_momentum);
-            chain_sg->particle_info(pinfo);
-        }
-    }
-}
-
 std::vector<Facade::geo_point_t> PatternAlgorithms::do_rough_path_reg_pc(const Facade::Cluster& cluster, Facade::geo_point_t& first_point, Facade::geo_point_t& last_point,  std::string graph_name){
     // Find closest indices in the regular point cloud using kd_knn
     auto first_knn_results = cluster.kd_knn(1, first_point);

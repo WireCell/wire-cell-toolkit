@@ -218,28 +218,7 @@ namespace WireCell::Clus::PR {
         // segment_has_proton_daughter's verdict on the SAME scale F5 used
         // (m_mip_dqdx_median=43000/units::cm) or it can silently disagree
         // with F5's own decision at a different threshold.
-        // refresh_type_cache (doc sbnd_xin/docs/pr/43 -- SBND run 18255 evt
-        // 56463): when this function relabels m_start_segment to electron
-        // (the shower_length > track_length branch), it updates the
-        // SEGMENT's own particle_info but leaves this Shower's OWN cached
-        // `data.particle_type` at whatever a PRIOR call last set it to (13,
-        // from the earlier long-muon-chain detection in
-        // NeutrinoShowerClustering.cxx's shower_clustering_with_nv_in_main_
-        // cluster).  fill_bee_pf_tree's shower-leaf renderer
-        // (MultiAlgBlobClustering.cxx make_shower_leaf) reads the CACHED
-        // shower->get_particle_type(), not the segment's live pdg -- same
-        // divergence class doc pr/35 F1 (kine_shower_pdg_live) already fixed
-        // on the kine-tree side, here on the Bee PF-tree side instead. A
-        // later calculate_kinematics() call for the SAME shower would
-        // refresh the cache correctly (it re-reads m_start_segment's live
-        // pdg), but is not guaranteed to run again after every
-        // update_particle_type() call site (4 of the 8 call sites in
-        // NeutrinoShowerClustering.cxx are not immediately followed by
-        // calculate_kinematics for the same shower). C++ default false =
-        // legacy = byte-identical; when true, mirrors the just-written
-        // electron pdg into data.particle_type immediately, removing the
-        // ordering dependency instead of relying on it.
-        void update_particle_type(const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, double mip_dqdx = 50000/units::cm, VertexPtr main_vertex = nullptr, bool protect_proton_daughter_pion = false, double proton_daughter_mip_dqdx = 43000/units::cm, bool refresh_type_cache = false);
+        void update_particle_type(const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, double mip_dqdx = 50000/units::cm, VertexPtr main_vertex = nullptr, bool protect_proton_daughter_pion = false, double proton_daughter_mip_dqdx = 43000/units::cm);
         // exclude_start_vertex_from_endpoint (doc pr/39): same prototype-parity
         // rule as fill_sets's exclude_start_vertex above, applied to the
         // farthest-vertex search that sets data.end_point.  The prototype's

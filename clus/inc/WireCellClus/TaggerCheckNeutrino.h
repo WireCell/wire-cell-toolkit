@@ -308,11 +308,6 @@ public:
         bool m_shower_absorb_track_guard{false};                    // doc pr/40 round 6 F12
         bool m_shower_connect_protected_pion_guard{false};          // doc pr/40 round 6 F13
         bool m_michel_stem_muon_rescue{false};                      // doc pr/40 round 6 F14
-        bool m_muon_chain_proton_veto{false};                       // doc pr/43 F1
-        bool m_shower_type_cache_refresh{false};                    // doc pr/43
-        bool m_shower_traj_dqdx_guard{false};                       // doc pr/43 F3
-        bool m_shower_traj_chain_pion{false};                       // doc pr/43 F3b
-        bool m_kine_shower_vertex_barrier{false};                   // doc pr/43 F4
         mutable std::shared_ptr<TrackFitting> m_track_fitter;
 
         void load_trackfitting_config(const std::string& config_file);

@@ -121,12 +121,6 @@ TEST_CASE("clus knob defaults: TaggerCheckNeutrino switches are all OFF")
     CHECK_KNOB_BOOL(cfg, "shower_absorb_track_guard", false);                 // F12
     CHECK_KNOB_BOOL(cfg, "shower_connect_protected_pion_guard", false);       // F13
     CHECK_KNOB_BOOL(cfg, "michel_stem_muon_rescue", false);                   // F14
-    // doc pr/43: four owner PID cases on run 18255.
-    CHECK_KNOB_BOOL(cfg, "muon_chain_proton_veto", false);        // F1
-    CHECK_KNOB_BOOL(cfg, "shower_type_cache_refresh", false);     // F2
-    CHECK_KNOB_BOOL(cfg, "shower_traj_dqdx_guard", false);        // F3
-    CHECK_KNOB_BOOL(cfg, "shower_traj_chain_pion", false);        // F3b
-    CHECK_KNOB_BOOL(cfg, "kine_shower_vertex_barrier", false);    // F4
 
     // Numeric knobs whose legacy value is the INERT one: 0 disables the guard,
     // so an absent key leaves the code path untouched.
@@ -327,7 +321,6 @@ TEST_CASE("clus knob defaults: TrackPidOptions in-class initializers")
     CHECK(o.end_n == 1);
     CHECK(o.track_pid_persist_dqdx == false);  // doc pr/40 F1
     CHECK(o.track_pid_persist_4mom == false);  // doc pr/40 round 2 F4
-    CHECK(o.shower_traj_dqdx_guard == false);  // doc pr/43 F3
 }
 
 // ---------------------------------------------------------------------------

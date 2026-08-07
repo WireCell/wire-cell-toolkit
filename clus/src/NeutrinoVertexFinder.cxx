@@ -1614,29 +1614,23 @@ bool PatternAlgorithms::examine_direction(Graph& graph, VertexPtr vertex, Vertex
             int pdg = sg->has_particle_info() ? sg->particle_info()->pdg() : 0;
             if (std::abs(pdg) == 13) {
                 if (segments_in_long_muon.find(sg) != segments_in_long_muon.end()) continue;
-
+                
                 VertexPtr other_vertex = find_other_vertex(graph, sg, vertex);
                 if (!other_vertex || !other_vertex->descriptor_valid()) continue;
-
+                
                 int n_proton = 0;
                 auto other_vd = other_vertex->get_descriptor();
                 const auto other_edge_range = sorted_out_edges(other_vd, graph);
                 for (auto oe_it : other_edge_range) {
                     SegmentPtr other_sg = graph[oe_it].segment;
-                    if (other_sg && other_sg->has_particle_info() &&
+                    if (other_sg && other_sg->has_particle_info() && 
                         std::abs(other_sg->particle_info()->pdg()) == 2212) {
                         n_proton++;
                     }
                 }
-                // doc sbnd_xin/docs/pr/43 F1 -- see m_muon_chain_proton_veto's
-                // comment.  A proton beyond the 1-hop n_proton check, reached
-                // through a short non-shower continuation chain, also
-                // disqualifies this candidate.
-                bool chain_proton = m_muon_chain_proton_veto &&
-                    segment_chain_has_proton(graph, sg, vertex, m_mip_dqdx_median, /*max_hops=*/3);
-
+                
                 double sg_length = segment_track_length(sg);
-                if (sg_length > muon_length && n_proton == 0 && !chain_proton) {
+                if (sg_length > muon_length && n_proton == 0) {
                     muon_length = sg_length;
                     muon_sg = sg;
                 }
@@ -1644,27 +1638,18 @@ bool PatternAlgorithms::examine_direction(Graph& graph, VertexPtr vertex, Vertex
             } else if (pdg == 0) {
                 VertexPtr other_vertex = find_other_vertex(graph, sg, vertex);
                 if (!other_vertex || !other_vertex->descriptor_valid()) continue;
-
+                
                 int n_proton = 0;
                 auto other_vd = other_vertex->get_descriptor();
                 const auto other_edge_range = sorted_out_edges(other_vd, graph);
                 for (auto oe_it : other_edge_range) {
                     SegmentPtr other_sg = graph[oe_it].segment;
-                    if (other_sg && other_sg->has_particle_info() &&
+                    if (other_sg && other_sg->has_particle_info() && 
                         std::abs(other_sg->particle_info()->pdg()) == 2212) {
                         n_proton++;
                     }
                 }
-                // doc sbnd_xin/docs/pr/43 F1 -- same chain-aware extension
-                // as the pdg==13 branch above, so an undetermined-direction
-                // segment whose chain terminates in a proton is not left to
-                // fall through to the dqdx_ratio proton/pion split below
-                // (which has no notion of "the proton is two hops away").
-                if (m_muon_chain_proton_veto &&
-                    segment_chain_has_proton(graph, sg, vertex, m_mip_dqdx_median, /*max_hops=*/3)) {
-                    n_proton = std::max(n_proton, 1);
-                }
-
+                
                 if (n_proton > 0) {
                     double dqdx_ratio = segment_median_dQ_dx(sg) / m_mip_dqdx_median;
 
@@ -1692,19 +1677,6 @@ bool PatternAlgorithms::examine_direction(Graph& graph, VertexPtr vertex, Vertex
             auto four_momentum = segment_cal_4mom(pion_sg, 211, particle_data, recomb_model, m_mip_dqdx);
             auto pinfo = std::make_shared<Aux::ParticleInfo>(211, particle_data->get_particle_mass(211), particle_data->pdg_to_name(211), four_momentum);
             pion_sg->particle_info(pinfo);
-
-            // doc sbnd_xin/docs/pr/43 F1 -- a demoted candidate's own short
-            // continuation chain (e.g. the 2.7cm stub between evt 54351's
-            // seg 17007 and the proton that disqualified it) is relabeled
-            // pion too, so the chain reads consistently rather than leaving
-            // an orphaned muon stub between the demoted head and the proton.
-            if (m_muon_chain_proton_veto) {
-                for (auto chain_sg : segment_chain_continuation(graph, pion_sg, vertex, /*max_hops=*/3)) {
-                    auto chain_four_momentum = segment_cal_4mom(chain_sg, 211, particle_data, recomb_model, m_mip_dqdx);
-                    auto chain_pinfo = std::make_shared<Aux::ParticleInfo>(211, particle_data->get_particle_mass(211), particle_data->pdg_to_name(211), chain_four_momentum);
-                    chain_sg->particle_info(chain_pinfo);
-                }
-            }
         }
     }
     
@@ -1851,12 +1823,6 @@ bool PatternAlgorithms::examine_direction(Graph& graph, VertexPtr vertex, Vertex
     // doc sbnd_xin/docs/pr/40 round 6 F14 -- same call-site convention as F8.
     // No-op when m_michel_stem_muon_rescue is false.
     override_michel_stem_muon(graph, cluster, particle_data, recomb_model, main_vertex);
-
-    // doc sbnd_xin/docs/pr/43 F3b -- same call-site convention as F8/F14,
-    // after shower_traj_dqdx_guard (F3) has had its chance to rescue a
-    // segment to a confident non-electron type.  No-op when
-    // m_shower_traj_chain_pion is false.
-    override_shower_traj_chain_pion(graph, cluster, particle_data, recomb_model, main_vertex);
 
     return examine_maps(graph, cluster);
 }

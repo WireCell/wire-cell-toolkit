@@ -1041,37 +1041,6 @@ function(
     // result, NEVER flip.
     shower_connect_protected_pion_guard = false,
     michel_stem_muon_rescue = true,
-    // doc sbnd_xin/docs/pr/43 F1 -- multi-hop generalization of the
-    // muon-candidate loop's 1-hop proton veto (run 18255 evt 54351: the
-    // proton sits two hops from the winning candidate's own far vertex,
-    // through a short muon-pdg continuation stub).  Pending gates -- OFF
-    // for now.
-    muon_chain_proton_veto = false,
-    // doc sbnd_xin/docs/pr/43 -- keep Shower's cached particle_type in
-    // lock-step with update_particle_type's own segment relabel (run 18255
-    // evt 56463: a stale cached 13 displays as a phantom second muon after
-    // the segment itself was already reclassified to 11).  Pending gates --
-    // OFF for now.
-    shower_type_cache_refresh = false,
-    // doc sbnd_xin/docs/pr/43 F3 -- run 18255 evt 57661 seg 18007: an
-    // 8.3cm terminal segment flagged kShowerTrajectory is unconditionally
-    // forced to electron even after its own track-PID call independently
-    // concluded muon; the guard trusts that conclusion when the segment's
-    // charge profile confirms it is not MIP-like. Pending gates -- OFF for
-    // now.
-    shower_traj_dqdx_guard = false,
-    // doc sbnd_xin/docs/pr/43 F3b -- companion to F3: relabels a
-    // main-vertex proton's short (<=15cm/segment) muon-pdg continuation
-    // chain to pion except the deepest, confirmed-muon segment. Pending
-    // gates -- OFF for now.
-    shower_traj_chain_pion = false,
-    // doc sbnd_xin/docs/pr/43 F4 -- kine-tree parity with pr/38's
-    // pf_shower_vertex_barrier (run 18255 evt 142421: seg 7011/7012's
-    // energy is absent from kine_reco_Enu despite the PF-tree side already
-    // being fixed). MOVES kine_reco_Enu and both BDT scores when on --
-    // needs its own score-shift review before any flip. Pending gates --
-    // OFF for now.
-    kine_shower_vertex_barrier = false,
 )
     local base = import 'pgrapher/experiment/sbnd/simparams.jsonnet';
     local params = base {
@@ -1240,11 +1209,6 @@ function(
                              shower_absorb_track_guard=shower_absorb_track_guard,
                              shower_connect_protected_pion_guard=shower_connect_protected_pion_guard,
                              michel_stem_muon_rescue=michel_stem_muon_rescue,
-                             muon_chain_proton_veto=muon_chain_proton_veto,
-                             shower_type_cache_refresh=shower_type_cache_refresh,
-                             shower_traj_dqdx_guard=shower_traj_dqdx_guard,
-                             shower_traj_chain_pion=shower_traj_chain_pion,
-                             kine_shower_vertex_barrier=kine_shower_vertex_barrier,
                              reclass_never_computed_ke_floor=reclass_never_computed_ke_floor,
                              muon_dqdx_curve=muon_dqdx_curve,
                              use_power_recomb=use_power_recomb,
