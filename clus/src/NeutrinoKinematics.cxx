@@ -91,8 +91,12 @@ KineInfo PatternAlgorithms::fill_kine_tree(
     IndexedShowerSet  used_showers;
 
     // Mark all shower-internal vertices and segments as used.
+    // doc sbnd_xin/docs/pr/43 F4 -- see m_kine_shower_vertex_barrier's
+    // docstring.  false = legacy (exclude_start_vertex stays fill_sets's
+    // own default false) = byte-identical.
     for (const ShowerPtr& shower : showers) {
-        shower->fill_sets(used_vertices, used_segments, /*flag_exclude_start_segment=*/false);
+        shower->fill_sets(used_vertices, used_segments, /*flag_exclude_start_segment=*/false,
+                           /*exclude_start_vertex=*/m_kine_shower_vertex_barrier);
     }
 
     // Map from start-segment -> shower, for fast lookup during graph traversal.
@@ -195,10 +199,15 @@ KineInfo PatternAlgorithms::fill_kine_tree(
     // First pass: segments directly connected to main_vertex
     // -------------------------------------------------------------------------
     std::vector<std::pair<VertexPtr, SegmentPtr>> segments_to_be_examined;
+    // doc sbnd_xin/docs/pr/43 F4 -- captured here (main_vertex's own
+    // segments) for the orphan safety net below; VertexPtr has no cluster()
+    // accessor of its own.
+    Facade::Cluster* cluster_ptr = nullptr;
 
     const auto ei_begin_edges = sorted_out_edges(main_vertex->get_descriptor(), graph);
     for (auto ei : ei_begin_edges) {
         SegmentPtr seg = graph[ei].segment;
+        if (!cluster_ptr) cluster_ptr = seg->cluster();
 
         auto it = map_sg_shower.find(seg);
         if (it != map_sg_shower.end()) {
@@ -322,6 +331,43 @@ KineInfo PatternAlgorithms::fill_kine_tree(
         // since push_shower_kine would have already handled them in the BFS phase
 
         used_showers.insert(shower);
+    }
+
+    // -------------------------------------------------------------------------
+    // doc sbnd_xin/docs/pr/43 F4 -- orphan safety net, gated under
+    // m_kine_shower_vertex_barrier as the no-silent-drop complement of the
+    // barrier above, mirroring pr/38's pf_orphan_track_roots on the Bee
+    // PF-tree side.  A segment the BFS never reached (because a detached
+    // shower's start vertex, now excluded above, used to block it, or for
+    // any other topology reason) still has real fitted charge and belongs
+    // in the reconstructed neutrino energy.  Emission order is by encoded
+    // id (cluster_id*1000+graph_index, same scheme as PrDisplayDump.cxx) --
+    // stable, deliberately not pointer-map order.
+    // -------------------------------------------------------------------------
+    if (m_kine_shower_vertex_barrier && cluster_ptr) {
+        std::vector<SegmentPtr> orphans;
+        for (const auto& ed : ordered_edges(graph)) {
+            SegmentPtr seg = graph[ed].segment;
+            if (!seg || seg->cluster() != cluster_ptr) continue;
+            if (used_segments.count(seg)) continue;
+            if (seg->flags_any(SegmentFlags::kShowerTrajectory) ||
+                seg->flags_any(SegmentFlags::kShowerTopology)) continue;
+            if (seg->dirsign() == 0) continue;
+            if (seg->fits().empty()) continue;
+            orphans.push_back(seg);
+        }
+        std::sort(orphans.begin(), orphans.end(),
+                  [](const SegmentPtr& a, const SegmentPtr& b) {
+                      auto id = [](const SegmentPtr& s) {
+                          return (s->cluster() ? s->cluster()->get_cluster_id() : -1) * 1000 +
+                                 static_cast<int>(s->get_graph_index());
+                      };
+                      return id(a) < id(b);
+                  });
+        for (const auto& seg : orphans) {
+            used_segments.insert(seg);
+            push_segment_kine(seg, 1);
+        }
     }
 
     // -------------------------------------------------------------------------

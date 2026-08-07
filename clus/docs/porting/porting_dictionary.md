@@ -881,3 +881,60 @@ single-muon selection, its own honest call being a second muon); 54341 →
 'mu-'` own node, `15006 'proton'` kept (owner-accepted: 15005 reads `proton`,
 its own charge-based call, the baseline `pi+` having been derivative of the
 fixed bug).
+
+## Four owner PID cases on run 18255 close via a multi-hop muon-chain proton
+## veto, a stale Shower-type cache fix, a shower-trajectory dQ/dx guard +
+## chain-pion follow-up, and kine-tree parity with pr/38's PF-tree barrier —
+## `muon_chain_proton_veto` (F1) / `shower_type_cache_refresh` (F2) /
+## `shower_traj_dqdx_guard` + `shower_traj_chain_pion` (F3/F3b) /
+## `kine_shower_vertex_barrier` (F4); doc sbnd_xin/docs/pr/43
+
+Full write-up: [doc pr/43](../../../../wcp-porting-img/sbnd/sbnd_xin/docs/pr/43_owner-pid-cases-round7.md).
+All five default false, **none flipped** — G3/G4 census showed population
+and score movement across most of the 48-event nueCC48 manifest (37/47
+events' PF-tree, 42/48 events' scores/`kine_reco_Enu`), far beyond the four
+reported events; held for owner review rather than exercised against a
+flip pre-authorization scoped to "four events."
+
+- **F1 `muon_chain_proton_veto`** — designed divergence. The always-on,
+  prototype-faithful muon-candidate selection loop
+  (`NeutrinoVertexFinder.cxx examine_direction`) has a 1-hop proton veto in
+  the prototype and toolkit alike; this extends it to a bounded (3-hop),
+  non-shower, degree-2 continuation-chain walk (new helpers
+  `segment_chain_has_proton` / `segment_chain_continuation`,
+  `PRSegmentFunctions.cxx`). The prototype has no multi-hop version of this
+  veto at all — not a port, a toolkit-only extension.
+- **F2 `shower_type_cache_refresh`** — cache-consistency bug fix, not a
+  port-fidelity question. `Shower::update_particle_type` relabels its start
+  segment but left the Shower's OWN cached `data.particle_type` stale;
+  `MultiAlgBlobClustering::make_shower_leaf` reads the cache. Same
+  divergence class as doc pr/35 F1 `kine_shower_pdg_live` (kine-tree side);
+  this is the Bee PF-tree side. The prototype's `WCShower` recomputes
+  particle type on read (`ProtoSegment::get_particle_type()` coerces
+  shower⇒11 live, `ProtoSegment.cxx:10-15`) — it has no cache to go stale,
+  so there is no direct prototype counterpart for this fix either.
+- **F3 `shower_traj_dqdx_guard`** — designed divergence.
+  `segment_determine_shower_direction_trajectory` has three endpoint-degree
+  branches; two are fully unconditional (never call track PID). The
+  prototype's equivalent (`ProtoSegment.cxx`) is likewise unconditional on
+  the analogous branches — this is a toolkit-only extension, not a
+  prototype-parity fix. Also fixes an oversight found while implementing
+  it: the guard now clears `kShowerTrajectory` when it fires, same class as
+  doc pr/40 round 4 F7.
+- **F3b `shower_traj_chain_pion`** — designed divergence, no prototype
+  counterpart. New post-pass `override_shower_traj_chain_pion`
+  (`NeutrinoPatternBase.cxx`): a main-vertex proton's short (<=15cm/segment)
+  muon-pdg continuation chain is relabelled pion except its deepest,
+  confirmed-muon segment. The 15cm gate is a judgment call (avoids
+  misreading a fragmented single long muon track as a decay chain), not a
+  measured threshold — flagged as open in doc pr/43's Scope section.
+- **F4 `kine_shower_vertex_barrier`** — designed **parity with this
+  session's own prior fix** (doc pr/38's `pf_shower_vertex_barrier`), not an
+  independent prototype port. `fill_kine_tree`'s BFS shares the exact same
+  over-wide shower-vertex barrier `fill_bee_pf_tree`'s BFS had before pr/38;
+  pr/38's own "Residual" section named this exact gap and said the vehicle
+  (`fill_sets`'s `exclude_start_vertex` parameter) was simply never threaded
+  here. The prototype's `fill_kine_tree` has no barrier/orphan distinction
+  at all (flat pre-BFS loop gives every main-cluster segment a node
+  regardless), so — like F1/F2/F3/F3b above — this is a toolkit-internal
+  parity fix, not a prototype-fidelity correction.

@@ -271,6 +271,11 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_shower_absorb_track_guard                 = get(config, "shower_absorb_track_guard",                 m_shower_absorb_track_guard);
     m_shower_connect_protected_pion_guard       = get(config, "shower_connect_protected_pion_guard",       m_shower_connect_protected_pion_guard);
     m_michel_stem_muon_rescue                   = get(config, "michel_stem_muon_rescue",                   m_michel_stem_muon_rescue);
+    m_muon_chain_proton_veto                    = get(config, "muon_chain_proton_veto",                    m_muon_chain_proton_veto);
+    m_shower_type_cache_refresh                 = get(config, "shower_type_cache_refresh",                 m_shower_type_cache_refresh);
+    m_shower_traj_dqdx_guard                    = get(config, "shower_traj_dqdx_guard",                    m_shower_traj_dqdx_guard);
+    m_shower_traj_chain_pion                    = get(config, "shower_traj_chain_pion",                    m_shower_traj_chain_pion);
+    m_kine_shower_vertex_barrier                = get(config, "kine_shower_vertex_barrier",                m_kine_shower_vertex_barrier);
 
     if (!m_trackfitting_config_file.empty()) {
         load_trackfitting_config(m_trackfitting_config_file);
@@ -417,6 +422,11 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["shower_absorb_track_guard"]                 = m_shower_absorb_track_guard;                 // false = legacy (flood-fill absorbs every connected segment)
     cfg["shower_connect_protected_pion_guard"]       = m_shower_connect_protected_pion_guard;       // false = legacy (proton-daughter pion selectable as EM candidate)
     cfg["michel_stem_muon_rescue"]                   = m_michel_stem_muon_rescue;                   // false = legacy (Michel rescue limited to weak-dir degree-2 vertices)
+    cfg["muon_chain_proton_veto"]                    = m_muon_chain_proton_veto;                    // false = legacy (proton veto is 1-hop only)
+    cfg["shower_type_cache_refresh"]                 = m_shower_type_cache_refresh;                 // false = legacy (Shower's cached particle_type can go stale)
+    cfg["shower_traj_dqdx_guard"]                    = m_shower_traj_dqdx_guard;                    // false = legacy (shower-trajectory pdg always forced electron)
+    cfg["shower_traj_chain_pion"]                    = m_shower_traj_chain_pion;                    // false = legacy (proton's short muon-chain daughters never revisited)
+    cfg["kine_shower_vertex_barrier"]                = m_kine_shower_vertex_barrier;                // false = legacy (kine BFS uses the over-wide shower barrier)
 
 
     return cfg;
@@ -746,6 +756,11 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
     pattern_algos.m_shower_absorb_track_guard                 = m_shower_absorb_track_guard;                 // F12
     pattern_algos.m_shower_connect_protected_pion_guard       = m_shower_connect_protected_pion_guard;       // F13
     pattern_algos.m_michel_stem_muon_rescue                   = m_michel_stem_muon_rescue;                   // F14
+    pattern_algos.m_muon_chain_proton_veto                    = m_muon_chain_proton_veto;                    // doc pr/43 F1
+    pattern_algos.m_shower_type_cache_refresh                 = m_shower_type_cache_refresh;                 // doc pr/43
+    pattern_algos.m_shower_traj_dqdx_guard                    = m_shower_traj_dqdx_guard;                    // doc pr/43 F3
+    pattern_algos.m_shower_traj_chain_pion                    = m_shower_traj_chain_pion;                    // doc pr/43 F3b
+    pattern_algos.m_kine_shower_vertex_barrier                = m_kine_shower_vertex_barrier;                // doc pr/43 F4
     // Muon dQ/dx-vs-length envelope: c0/c1/power dimensionless, pivot cm -> internal.
     pattern_algos.m_muon_dqdx_curve = {m_muon_dqdx_curve[0], m_muon_dqdx_curve[1],
                                        m_muon_dqdx_curve[2] * units::cm, m_muon_dqdx_curve[3]};

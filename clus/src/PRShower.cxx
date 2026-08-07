@@ -771,7 +771,7 @@ namespace WireCell::Clus::PR {
         return total_length;
     }
 
-    void Shower::update_particle_type(const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, double mip_dqdx, VertexPtr main_vertex, bool protect_proton_daughter_pion, double proton_daughter_mip_dqdx){
+    void Shower::update_particle_type(const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, double mip_dqdx, VertexPtr main_vertex, bool protect_proton_daughter_pion, double proton_daughter_mip_dqdx, bool refresh_type_cache){
         double track_length = 0;
         double shower_length = 0;
         
@@ -840,6 +840,14 @@ namespace WireCell::Clus::PR {
 
                 // Store particle info in start_segment
                 m_start_segment->particle_info(pinfo);
+
+                // doc sbnd_xin/docs/pr/43 -- see the header comment.  Keep
+                // the Shower's own cached type in lock-step with the
+                // segment it was just derived from, rather than leaving it
+                // for a possibly-absent later calculate_kinematics() call.
+                if (refresh_type_cache) {
+                    set_particle_type(11);
+                }
             }
         }
     }

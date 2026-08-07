@@ -681,6 +681,104 @@ namespace WireCell::Clus::PR {
         // byte-identical.
         bool   m_muon_multi_proton_pion{false};
 
+        // doc sbnd_xin/docs/pr/43 F1 -- extend the muon-candidate loop's
+        // 1-hop proton veto (NeutrinoVertexFinder.cxx examine_direction,
+        // `n_proton` at the candidate's immediate far vertex) to a bounded
+        // multi-hop chain walk (segment_chain_has_proton,
+        // PRSegmentFunctions.cxx, max_hops=3).  Run 18255 evt 54351:
+        // muon-candidate seg 17007 (54.2cm) wins the single-muon-per-
+        // cluster selection over seg 17010 (42.6cm) purely by length,
+        // because 17007's own far vertex has no proton -- but two hops
+        // further, through a 2.7cm muon-pdg continuation stub (seg 17005),
+        // sits a charge-confirmed proton (seg 17011, median/MIP > 1.75).
+        // 17007 cannot be the muon in a chain that terminates in a proton;
+        // with this knob on, 17007 is excluded from candidacy (same
+        // n_proton==0-style gate, now chain-aware), so 17010 (with no
+        // proton anywhere in its own chain) wins uncontested; 17007 and the
+        // stub 17005 both go through the existing "convert non-muon
+        // candidates to pion" path unchanged.  Applies identically to the
+        // pdg==0 branch just below (an undetermined-direction segment at
+        // this vertex is also chain-walked before falling to the dqdx_ratio
+        // proton/pion split).  Designed divergence (the prototype's muon
+        // selection has no proton-chain veto at all, 1-hop or multi-hop);
+        // see porting_dictionary.md.  C++ default false = legacy =
+        // byte-identical.
+        bool   m_muon_chain_proton_veto{false};
+
+        // doc sbnd_xin/docs/pr/43 -- Shower::update_particle_type relabels
+        // its start segment to electron (shower_length > track_length) but
+        // leaves the Shower's OWN cached particle_type at a stale prior
+        // value (e.g. 13, set when the segment was first detected as part
+        // of a long-muon chain).  fill_bee_pf_tree's shower-leaf renderer
+        // (MultiAlgBlobClustering.cxx make_shower_leaf) reads the CACHED
+        // shower->get_particle_type(), so run 18255 evt 56463 displays a
+        // Bee PF root node "mu- 903 MeV" for a segment (14005) whose own
+        // particle_info is already pdg 11 -- the toolkit's own logic had
+        // already reclassified it away from muon, but the display never
+        // caught up, reading as a second, phantom muon at the vertex next
+        // to the genuine one (14006).  Same divergence class as doc pr/35
+        // F1 kine_shower_pdg_live, on the Bee side instead of the kine
+        // side.  Threaded to Shower::update_particle_type's
+        // refresh_type_cache parameter (PRShower.h) at every call site in
+        // NeutrinoShowerClustering.cxx.  Designed as a cache-consistency
+        // fix, not a new heuristic -- see porting_dictionary.md.  C++
+        // default false = legacy = byte-identical.
+        bool   m_shower_type_cache_refresh{false};
+
+        // doc sbnd_xin/docs/pr/43 F3 -- see TrackPidOptions::
+        // shower_traj_dqdx_guard's comment in PRSegmentFunctions.h.  Threaded
+        // via track_pid_options() to segment_determine_shower_direction_
+        // trajectory.  C++ default false = legacy = byte-identical.
+        bool   m_shower_traj_dqdx_guard{false};
+
+        // doc sbnd_xin/docs/pr/43 F3b -- run 18255 evt 57661: once
+        // shower_traj_dqdx_guard rescues seg 18007 to a confident muon,
+        // the short (5cm) stub 18005 between it and the main-vertex-
+        // emanating proton (18003) is STILL pdg 13 (it was never itself a
+        // shower-flagged segment, just an ordinary per-segment muon call
+        // that nothing downstream revisited), giving proton -> muon ->
+        // muon.  The owner's reading is proton -> pion -> muon: a
+        // transitional stub between a proton and a confirmed muon reads as
+        // the pion, not a second muon.  Threaded via override_shower_traj_
+        // chain_pion (NeutrinoPatternBase.cxx), same call-site convention
+        // as F8/F14: relabels every pdg-13 segment in a main-vertex
+        // proton's short (<=15cm each) non-shower continuation chain to
+        // pion EXCEPT the last (deepest) one, and only when every segment
+        // in that chain is pdg 13 (so an already-mixed or single-segment
+        // chain -- the ordinary proton -> muon topology -- is untouched).
+        // The <=15cm-per-segment gate (same scale as the isolated_length_
+        // cut convention) exists to avoid misreading a single long muon
+        // track that pattern recognition merely fragmented into two
+        // collinear pieces as a proton-pion-muon chain. Designed divergence
+        // (the prototype has no such chain rule); see porting_dictionary.md.
+        // C++ default false = legacy = byte-identical.
+        bool   m_shower_traj_chain_pion{false};
+
+        // doc sbnd_xin/docs/pr/43 F4 -- run 18255 evt 142421: fill_kine_tree
+        // (NeutrinoKinematics.cxx) runs its OWN BFS with the same over-wide
+        // shower barrier doc pr/38 already corrected on the Bee PF-tree
+        // side (pf_shower_vertex_barrier).  `shower->fill_sets(...,
+        // /*flag_exclude_start_segment=*/false)` at fill_kine_tree's
+        // opening takes fill_sets's DEFAULT `exclude_start_vertex=false`,
+        // so a detached (conn-type 2/3) shower's start vertex still blocks
+        // this BFS even after pr/38 stopped it blocking the PF-tree BFS --
+        // the vehicle (fill_sets's exclude_start_vertex parameter) exists,
+        // was simply never threaded here.  Same fix, same knob shape as
+        // pr/38's pf_shower_vertex_barrier: (a) pass exclude_start_vertex
+        // = true at that fill_sets call, and (b) after the BFS, push every
+        // still-unreached, non-shower, main-cluster segment with a
+        // dirsign into kine_energy_particle via the existing
+        // push_segment_kine lambda (prototype fill_kine_tree gives every
+        // main-cluster segment a node in a flat pass before the BFS;
+        // NeutrinoID_kine.h has no disconnected-fragment exclusion).  This
+        // MOVES kine_reco_Enu and therefore numu_score/nue_score -- unlike
+        // the PF-tree-only pr/38 fix, this is not display-only, so it
+        // carries its own score-shift review (doc pr/43 G4).  Designed
+        // parity with pr/38, not a prototype port; see
+        // porting_dictionary.md.  C++ default false = legacy =
+        // byte-identical.
+        bool   m_kine_shower_vertex_barrier{false};
+
         // doc sbnd_xin/docs/pr/40 round 5 F9 -- narrows F1
         // (m_track_pid_persist_dqdx).  Travels via
         // TrackPidOptions::track_pid_persist_dqdx_electron_guard -- see its
@@ -901,6 +999,7 @@ namespace WireCell::Clus::PR {
             o.track_pid_persist_dqdx = m_track_pid_persist_dqdx;       // doc pr/40 F1
             o.track_pid_persist_4mom = m_track_pid_persist_4mom;       // doc pr/40 round 2 F4
             o.track_pid_persist_dqdx_electron_guard = m_track_pid_persist_dqdx_electron_guard; // doc pr/40 round 5 F9
+            o.shower_traj_dqdx_guard = m_shower_traj_dqdx_guard; // doc pr/43 F3
             return o;
         }
 
@@ -1210,6 +1309,10 @@ namespace WireCell::Clus::PR {
         // shower_clustering_with_nv), same per-cluster main_vertex.  No-op
         // (returns immediately) when m_michel_stem_muon_rescue is false.
         void override_michel_stem_muon(Graph& graph, Facade::Cluster& cluster, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, VertexPtr main_vertex = nullptr);
+
+        // doc sbnd_xin/docs/pr/43 F3b -- see m_shower_traj_chain_pion's
+        // docstring above.  No-op when m_shower_traj_chain_pion is false.
+        void override_shower_traj_chain_pion(Graph& graph, Facade::Cluster& cluster, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, VertexPtr main_vertex = nullptr);
 
         // PCA calculation
         std::pair<Facade::geo_point_t, Facade::geo_vector_t> calc_PCA_main_axis(std::vector<Facade::geo_point_t>& points);

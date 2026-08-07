@@ -97,6 +97,35 @@ namespace WireCell::Clus::PR {
     /// proton-daughter topology.
     bool segment_has_proton_daughter(Graph& graph, SegmentPtr seg, VertexPtr main_vertex, double MIP_dQdx);
 
+    /// doc sbnd_xin/docs/pr/43 F1 -- multi-hop generalization of the
+    /// muon-candidate loop's 1-hop `n_proton` check
+    /// (NeutrinoVertexFinder.cxx examine_direction) and of
+    /// segment_has_proton_daughter above: a charge-confirmed proton (pdg
+    /// 2212, median dQ/dx > 1.75x MIP_dQdx) may sit beyond `seg`'s
+    /// immediate far vertex, reached through a bounded chain of short,
+    /// non-shower, degree-2 continuation segments (pdg 13 / pdg 0 /
+    /// already pdg 211).  `near_vertex` is the vertex `seg` emanates FROM
+    /// (graph identity, same convention as segment_has_proton_daughter);
+    /// the walk starts at seg's other endpoint and stops at the first
+    /// vertex that is not a simple one-segment-in/one-segment-out
+    /// continuation (a real hadronic multi-prong vertex, a shower
+    /// attaching, or a dead end), so it cannot reach an unrelated proton
+    /// past genuine vertex activity. `max_hops` bounds how far the chain
+    /// is followed. Returns false if `near_vertex`/`seg` is null,
+    /// `MIP_dQdx`/`max_hops` is non-positive, or `seg` does not emanate
+    /// from `near_vertex`.
+    bool segment_chain_has_proton(Graph& graph, SegmentPtr seg, VertexPtr near_vertex, double MIP_dQdx, int max_hops = 3);
+
+    /// doc sbnd_xin/docs/pr/43 F1 -- companion to segment_chain_has_proton:
+    /// collects (rather than just detects) the same short, non-shower,
+    /// degree-2 continuation chain, for relabeling every segment in a
+    /// disqualified muon candidate's own chain to pion, so the candidate's
+    /// stub segments do not stay muon once the candidate itself is
+    /// demoted. The proton that ends the chain is never included. Returns
+    /// segments in walk order, nearest first; empty if `seg` does not
+    /// emanate from `near_vertex` or no continuation exists.
+    std::vector<SegmentPtr> segment_chain_continuation(Graph& graph, SegmentPtr seg, VertexPtr near_vertex, int max_hops = 3);
+
     /// doc sbnd_xin/docs/pr/40 round 4 F8 -- a muon cannot terminate in a
     /// multi-proton hadronic vertex.
     ///
@@ -253,6 +282,26 @@ namespace WireCell::Clus::PR {
         // porting_dictionary.md for the designed-divergence status.  false =
         // today's shipped F1 behaviour = byte-identical.
         bool   track_pid_persist_dqdx_electron_guard{false};
+        // doc sbnd_xin/docs/pr/43 F3 -- run 18255 evt 57661 seg 18007: an
+        // 8.3cm terminal segment flagged kShowerTrajectory is unconditionally
+        // forced to pdg 11 by segment_determine_shower_direction_trajectory.
+        // That function has three branches keyed on endpoint degree; only
+        // ONE of the three ("neither end is degree-1") tries track PID
+        // first before discarding a non-electron result, and 18007's own
+        // topology (one degree-1 end, one degree-2 end) takes a DIFFERENT,
+        // fully unconditional branch that never calls track PID at all.
+        // When true, segment_determine_shower_direction_trajectory runs
+        // track PID BEFORE branch selection (uniformly, regardless of which
+        // branch endpoint degree would otherwise pick) and trusts a
+        // confident non-electron conclusion whenever
+        // segment_dqdx_spares_electron_reclass independently confirms the
+        // segment's own charge profile is not MIP-like -- same
+        // reclassification-dQ/dx idiom shower_reclass_dqdx_guard already
+        // gives the analogous kShowerTopology-flagged sites
+        // (NeutrinoTrackShowerSep.cxx) and shower_topo_dqdx_guard gives the
+        // topology test itself. false = legacy = byte-identical (the extra
+        // track-PID call never runs at all when false).
+        bool   shower_traj_dqdx_guard{false};
     };
 
     // success, flag_dir, pdg_code, particle_score
