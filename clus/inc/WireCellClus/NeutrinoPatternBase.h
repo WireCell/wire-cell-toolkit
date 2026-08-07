@@ -927,6 +927,32 @@ namespace WireCell::Clus::PR {
         // pion through the existing conversion loop.  C++ default false.
         bool   m_single_muon_long_muon_claim{false};
 
+        // doc sbnd_xin/docs/pr/46 -- long-muon stub bridge.  The long-muon
+        // chain walk (find_cont_muon_segment) requires the junction angle
+        // between 15 cm FITTED directions to be < 10 deg (15 deg when the
+        // incoming segment is < 6 cm).  A broken long muon whose first piece
+        // is a short vertex stub fails that test on the stub's own noisy
+        // direction: SBND 18255 evt 55595, stub seg 7 (2.2-2.5 cm, seed
+        // dqdx_ratio 0.486) vs the 192.9 cm MIP muon seg 5 (ratio 1.086)
+        // measures 30.5-35.4 deg, so the chain never forms, the muon-slot
+        // competition crowns the 2.7 cm sibling stub "mu- 48 MeV", and the
+        // gateway stub demotes to "pi+ 5 MeV" with the 181.5 cm muon as its
+        // child.  When on, the walk accepts a bridge candidate when ALL
+        // hold: incoming segment < 6 cm, candidate > 35 cm (short downstream
+        // muons keep genuine pi->mu decay kinematics), candidate median
+        // dQ/dx ratio < 1.3 (unchanged MIP test), fitted angle < 45 deg
+        // (Phase-0 separation: 55595 needs >= 35.4, genuine-pion evt 66118
+        // measures 70-82 and must not merge), and the junction has NO other
+        // track-like out-edge > 10 cm (not shower-flagged, pdg != +-11 --
+        // owner criteria: multiple substantial outgoing tracks veto; a
+        // delta-ray electron or tiny fragment does not).  Applied ONLY via
+        // the flag_stub_bridge parameter from the formation walk in
+        // examine_direction; examine_main_vertices_local and the NuMu
+        // tagger keep legacy behavior.  Acceptance (45/35/size>1) and the
+        // seed gate are unchanged.  Sample footprint: 2/206 diagnostic
+        // events (55595, 61461).  C++ default false = legacy.
+        bool   m_long_muon_stub_bridge{false};
+
         // doc sbnd_xin/docs/pr/43 round 2 K3 -- late particle-info/flag
         // reconciliation pass (reconcile_particle_flags), called from
         // TaggerCheckNeutrino AFTER shower_clustering_with_nv and BEFORE the
@@ -1343,7 +1369,7 @@ namespace WireCell::Clus::PR {
         VertexPtr compare_main_vertices_all_showers(Graph& graph, Facade::Cluster& cluster, std::vector<VertexPtr>& vertex_candidates, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model);
         float calc_conflict_maps(Graph& graph, VertexPtr vertex);
         VertexPtr compare_main_vertices(Graph& graph, Facade::Cluster& cluster, std::vector<VertexPtr>& vertex_candidates);
-        std::pair<SegmentPtr, VertexPtr> find_cont_muon_segment(Graph &graph, SegmentPtr sg, VertexPtr vtx, bool flag_ignore_dQ_dx = false);
+        std::pair<SegmentPtr, VertexPtr> find_cont_muon_segment(Graph &graph, SegmentPtr sg, VertexPtr vtx, bool flag_ignore_dQ_dx = false, bool flag_stub_bridge = false);
         bool examine_direction(Graph& graph, VertexPtr vertex, VertexPtr main_vertex, IndexedVertexSet& vertices_in_long_muon, IndexedSegmentSet& segments_in_long_muon, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, bool flag_final = false);
 
         bool fit_vertex(Facade::Cluster& cluster, VertexPtr vertex, VertexPtr main_vertex, std::vector<SegmentPtr>& sg_set, TrackFitting& track_fitter, IDetectorVolumes::pointer dv);

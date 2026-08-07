@@ -1102,6 +1102,27 @@ function(
     // onB48,off19n,m200on,m200onA,m200off}.  Doc pr/45.
     other_seg_empty_2d_guard = true,
     pseudo_shower_track_paint = true,
+    // doc pr/46 (18255-55595).  long_muon_stub_bridge: the long-muon chain
+    // walk's 15 deg junction-angle test fails on a short (< 6 cm) vertex
+    // stub's noisy fitted direction, so a broken long muon behind such a
+    // stub never enters the long-muon category (55595: 2.4 cm stub at
+    // 30.5-35.4 deg vs its 192.9 cm MIP continuation; the muon-slot logic
+    // then crowns a 2.7 cm sibling "mu- 48 MeV" and demotes the gateway
+    // stub to pi+).  When on, a < 6 cm incoming segment bridges to a
+    // > 35 cm MIP (< 1.3) continuation up to 45 deg unless the junction
+    // has another track-like arm > 10 cm (multiple substantial outgoing
+    // tracks = genuine hadronic vertex; delta rays/fragments do not veto).
+    // C++ default false.  SBND PRODUCTION ON (2026-08-07): flipped per the
+    // owner's standing "flip if clean" policy -- G1 off byte-identical
+    // 96/96 + 38/38 vs clean-source base arms; knob-on ARCHIVE-identical on
+    // nueCC48 (96/96) and ncpi0 (38/38); full-1k census 3/1000 movers, all
+    // the designed stub-bridge assembly (55595 2.4cm+181.5cm -> mu- 455;
+    // 73004 4.4cm+88.8cm -> mu- 226; 349945 3.1cm+172.8cm -> mu- 464,
+    // chain traces nsegs=2 all), nusel 0-diff everywhere; must-not-merge
+    // controls hold (66118 angle 70-82 > 45 cap; 61461 multiplicity veto;
+    // 284145 hadronic vertex).  Gate arms work-pr46-{base48,base19n,off48,
+    // off19n,on48,on19n,oncase,m1koffb,m1konb}.  Doc pr/46.
+    long_muon_stub_bridge = true,
 )
     local base = import 'pgrapher/experiment/sbnd/simparams.jsonnet';
     local params = base {
@@ -1276,6 +1297,7 @@ function(
                              single_muon_long_muon_claim=single_muon_long_muon_claim,
                              pid_flag_reconcile=pid_flag_reconcile,
                              other_seg_empty_2d_guard=other_seg_empty_2d_guard,
+                             long_muon_stub_bridge=long_muon_stub_bridge,
                              pseudo_shower_track_paint=pseudo_shower_track_paint,
                              reclass_never_computed_ke_floor=reclass_never_computed_ke_floor,
                              muon_dqdx_curve=muon_dqdx_curve,

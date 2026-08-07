@@ -313,6 +313,7 @@ public:
         bool m_single_muon_proton_chain_veto{false};                // doc pr/43 round 2 K1
         bool m_single_muon_long_muon_claim{false};                  // doc pr/43 round 2 K2
         bool m_pid_flag_reconcile{false};                           // doc pr/43 round 2 K3
+        bool m_long_muon_stub_bridge{false};                        // doc pr/46
         mutable std::shared_ptr<TrackFitting> m_track_fitter;
 
         void load_trackfitting_config(const std::string& config_file);

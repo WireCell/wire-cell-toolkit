@@ -1092,7 +1092,7 @@ VertexPtr PatternAlgorithms::compare_main_vertices(Graph& graph, Facade::Cluster
 }
 
 
-std::pair<SegmentPtr, VertexPtr> PatternAlgorithms::find_cont_muon_segment(Graph &graph, SegmentPtr sg, VertexPtr vtx, bool flag_ignore_dQ_dx){
+std::pair<SegmentPtr, VertexPtr> PatternAlgorithms::find_cont_muon_segment(Graph &graph, SegmentPtr sg, VertexPtr vtx, bool flag_ignore_dQ_dx, bool flag_stub_bridge){
     SegmentPtr sg1 = nullptr;
     VertexPtr vtx1 = nullptr;
     
@@ -1154,10 +1154,39 @@ std::pair<SegmentPtr, VertexPtr> PatternAlgorithms::find_cont_muon_segment(Graph
         }
         
         // Check if this segment qualifies as a continuation
-        bool angle_ok = (angle < 10.0 || angle1 < 10.0 || 
+        bool angle_ok = (angle < 10.0 || angle1 < 10.0 ||
                         (sg_length < 6*units::cm && (angle < 15.0 || angle1 < 15.0)));
         bool ratio_ok = (ratio < 1.3 || flag_ignore_dQ_dx);
-        
+
+        // doc sbnd_xin/docs/pr/46 stub bridge: a short (< 6 cm) incoming
+        // segment carries no reliable direction, so a broken long muon's
+        // first piece fails the 15 deg test against its own continuation
+        // (evt 55595: 30.5-35.4 deg vs the 192.9 cm MIP muon).  Accept a
+        // long (> 35 cm) MIP candidate up to 45 deg, unless the junction
+        // has another substantial track-like arm (> 10 cm, not
+        // shower-flagged, pdg != +-11): multiple substantial outgoing
+        // tracks mean a genuine hadronic vertex (evt 66118 at 70-82 deg is
+        // additionally excluded by the angle cap).  Delta-ray electrons and
+        // tiny fragments do not veto.  See m_long_muon_stub_bridge.
+        if (flag_stub_bridge && !angle_ok && ratio_ok &&
+            sg_length < 6*units::cm && length > 35*units::cm &&
+            (angle < 45.0 || angle1 < 45.0)) {
+            bool has_other_track = false;
+            for (auto e2_it : edge_range) {
+                SegmentPtr sg3 = graph[e2_it].segment;
+                if (!sg3 || sg3 == sg || sg3 == sg2) continue;
+                if (sg3->flags_any(SegmentFlags::kShowerTrajectory) ||
+                    sg3->flags_any(SegmentFlags::kShowerTopology)) continue;
+                if (sg3->has_particle_info() &&
+                    std::abs(sg3->particle_info()->pdg()) == 11) continue;
+                if (segment_track_length(sg3) > 10*units::cm) {
+                    has_other_track = true;
+                    break;
+                }
+            }
+            if (!has_other_track) angle_ok = true;
+        }
+
         if (angle_ok && ratio_ok) {
             flag_cont = true;
             
@@ -1566,11 +1595,11 @@ bool PatternAlgorithms::examine_direction(Graph& graph, VertexPtr vertex, Vertex
             acc_segments.push_back(sg);
             acc_vertices.push_back(vtx);
             
-            auto results = find_cont_muon_segment(graph, sg, vtx);
+            auto results = find_cont_muon_segment(graph, sg, vtx, false, m_long_muon_stub_bridge);
             while (results.first != nullptr) {
                 acc_segments.push_back(results.first);
                 acc_vertices.push_back(results.second);
-                results = find_cont_muon_segment(graph, results.first, results.second);
+                results = find_cont_muon_segment(graph, results.first, results.second, false, m_long_muon_stub_bridge);
             }
             
             double total_length = 0, max_length = 0;

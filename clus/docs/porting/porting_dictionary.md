@@ -973,3 +973,31 @@ fixed bug).
   q=15000 (shower).  Knob-on, segments of a cached-±13 shower paint q=0
   (track), overriding all disjuncts; the start-segment id collapse is kept.
   Display-only: mc.json/tracking/nusel untouched by construction.
+
+## doc pr/46 (2026-08-07) — long-muon stub bridge
+
+- **`long_muon_stub_bridge`** (`find_cont_muon_segment`,
+  clus/src/NeutrinoVertexFinder.cxx) — **deliberate toolkit divergence,
+  owner-directed refinement** of a limitation the toolkit ports faithfully
+  from the prototype (`NeutrinoID_track_shower.h:2304-2369`, byte-same
+  10°/15°/6 cm/1.3 thresholds).  The long-muon chain walk measures the
+  junction angle between 15 cm FITTED directions; a broken long muon whose
+  first piece is a short (< 6 cm) vertex stub fails the 15° tolerance on the
+  stub's own noisy direction (SBND 18255-55595: 2.2-2.5 cm stub at
+  30.5-35.4° vs its 192.9 cm MIP continuation; seed dQ/dx and the 45/35 cm
+  acceptance all pass).  Knob-on, the walk accepts a bridge candidate when
+  the incoming segment is < 6 cm, the candidate is > 35 cm and MIP
+  (ratio < 1.3, unchanged), the fitted angle is < 45° (Phase-0 separation:
+  genuine-pion evt 66118 measures 70-82° and must not merge), and the
+  junction has no other track-like out-edge > 10 cm (owner criteria:
+  multiple substantial outgoing tracks = hadronic vertex vetoes; a delta-ray
+  electron or tiny fragment does not).  Applied ONLY via the
+  `flag_stub_bridge` parameter from the formation walk in
+  `examine_direction`; `examine_main_vertices_local` and the NuMu tagger
+  call sites keep legacy behavior.  The seed dQ/dx gate and the
+  `total>45 && max>35 && size>1` acceptance are unchanged.  NOT ported to
+  the prototype's single-attached-muon exclusion (`size>1`): six of the ten
+  surveyed stub-root events have the muon as a single direct segment at
+  examine time (stub-root topology arises post-formation) — that class is
+  prototype-parity and documented as a follow-up in
+  sbnd_xin/docs/pr/46, not changed here.
