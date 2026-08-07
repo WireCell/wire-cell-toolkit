@@ -207,6 +207,12 @@ rule spng_mpsigproc:
         dnnroi-training-fodder.npz
         """
 
+use rule spng_mpsigproc as spng_mpsigproc_target with:
+    input:
+        "target-{target}_{sample}_wct-depos.npz"
+    output:
+        "sigproc-spng-mp-target-{target}_{sample}.tar"
+
 rule spng_mpsigproc_lines:
     resources:
         gpu = 1 if config['device'] == 'gpu' else 0
@@ -298,6 +304,18 @@ for i in range(3):
             }
         script:
             "scripts/convert_to_h5mpSnake.py"
+    rule:
+        name: f'convert_spng_mp_to_hdf5_target_{i}'
+        input:
+            "sigproc-spng-mp-target-{target}_{sample}.tar"
+        output:
+            **{
+                f'rec{i}':f'target-{{target}}_{{sample}}-g4-rec-{i}.h5',
+                f'tru{i}':f'target-{{target}}_{{sample}}-g4-tru-{i}.h5',
+            }
+        script:
+            "scripts/convert_to_h5mpSnake.py"
+    
 
 # seeds = []
 # import random
