@@ -262,6 +262,9 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     // doc sbnd_xin/docs/pr/40 round 2 -- follow-on fixes to the pr/40 round.
     m_track_pid_persist_4mom      = get(config, "track_pid_persist_4mom",      m_track_pid_persist_4mom);
     m_shower_proton_daughter_pion = get(config, "shower_proton_daughter_pion", m_shower_proton_daughter_pion);
+    // doc sbnd_xin/docs/pr/40 round 4 -- two follow-on fixes to F5.
+    m_shower_proton_daughter_pion_dissolve = get(config, "shower_proton_daughter_pion_dissolve", m_shower_proton_daughter_pion_dissolve);
+    m_muon_multi_proton_pion               = get(config, "muon_multi_proton_pion",               m_muon_multi_proton_pion);
 
     if (!m_trackfitting_config_file.empty()) {
         load_trackfitting_config(m_trackfitting_config_file);
@@ -399,6 +402,9 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     // doc sbnd_xin/docs/pr/40 round 2 -- two follow-on defects from the pr/40 fix round.
     cfg["track_pid_persist_4mom"]      = m_track_pid_persist_4mom;      // false = legacy rest-mass-only 4-mom stub (zero KE)
     cfg["shower_proton_daughter_pion"] = m_shower_proton_daughter_pion; // false = legacy (proton daughter never consulted)
+    // doc sbnd_xin/docs/pr/40 round 4 -- two follow-on fixes to F5.
+    cfg["shower_proton_daughter_pion_dissolve"] = m_shower_proton_daughter_pion_dissolve; // false = legacy (F5 relabel leaves shower flags set)
+    cfg["muon_multi_proton_pion"]               = m_muon_multi_proton_pion;               // false = legacy (multi-proton muon vertex never consulted)
 
 
     return cfg;
@@ -720,6 +726,8 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
     // doc sbnd_xin/docs/pr/40 round 2 -- two follow-on defects from the pr/40 round.
     pattern_algos.m_track_pid_persist_4mom      = m_track_pid_persist_4mom;      // F4: threaded via track_pid_options()
     pattern_algos.m_shower_proton_daughter_pion = m_shower_proton_daughter_pion; // F5
+    pattern_algos.m_shower_proton_daughter_pion_dissolve = m_shower_proton_daughter_pion_dissolve; // F7
+    pattern_algos.m_muon_multi_proton_pion               = m_muon_multi_proton_pion;               // F8
     // Muon dQ/dx-vs-length envelope: c0/c1/power dimensionless, pivot cm -> internal.
     pattern_algos.m_muon_dqdx_curve = {m_muon_dqdx_curve[0], m_muon_dqdx_curve[1],
                                        m_muon_dqdx_curve[2] * units::cm, m_muon_dqdx_curve[3]};

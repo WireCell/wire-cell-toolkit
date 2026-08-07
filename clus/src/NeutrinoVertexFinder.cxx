@@ -1815,6 +1815,11 @@ bool PatternAlgorithms::examine_direction(Graph& graph, VertexPtr vertex, Vertex
     // of whether determine_dir_shower_trajectory was called.
     set_default_shower_particle_info(graph, cluster, particle_data, recomb_model, main_vertex);
 
+    // doc sbnd_xin/docs/pr/40 round 4 F8 -- same call site (last word before
+    // shower_clustering_with_nv), same per-cluster main_vertex.  No-op when
+    // m_muon_multi_proton_pion is false.
+    override_muon_multi_proton_pion(graph, cluster, particle_data, recomb_model, main_vertex);
+
     return examine_maps(graph, cluster);
 }
 

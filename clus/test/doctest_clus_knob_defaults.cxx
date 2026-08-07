@@ -110,6 +110,9 @@ TEST_CASE("clus knob defaults: TaggerCheckNeutrino switches are all OFF")
     CHECK_KNOB_BOOL(cfg, "track_pid_persist_4mom", false);            // F4
     CHECK_KNOB_BOOL(cfg, "shower_proton_daughter_pion", false);       // F5
     CHECK_KNOB_BOOL(cfg, "reclass_never_computed_ke_floor", false);   // F6
+    // doc pr/40 round 4: two follow-on defects from round 2/3's F5 fix.
+    CHECK_KNOB_BOOL(cfg, "shower_proton_daughter_pion_dissolve", false); // F7
+    CHECK_KNOB_BOOL(cfg, "muon_multi_proton_pion", false);               // F8
 
     // Numeric knobs whose legacy value is the INERT one: 0 disables the guard,
     // so an absent key leaves the code path untouched.
@@ -474,6 +477,114 @@ TEST_CASE("clus knob defaults: segment_has_proton_daughter")
         auto proton = make_proton(3.0 * MIP);
         add_segment(g, proton, far_vertex, far2);
         CHECK(segment_has_proton_daughter(g, seg, main_vertex, 0.0) == false);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// doc sbnd_xin/docs/pr/40 round 4 F8 -- a muon cannot terminate in a
+// multi-proton hadronic vertex.  segment_at_multi_proton_vertex is F8's
+// shared topology check, generalizing segment_has_proton_daughter above.
+// ---------------------------------------------------------------------------
+
+TEST_CASE("clus knob defaults: segment_at_multi_proton_vertex")
+{
+    using namespace WireCell::Clus::PR;
+    const double MIP = 43000 / units::cm;
+
+    auto make_seg_with_dqdx = [&](double dqdx_per_cm) {
+        auto seg = std::make_shared<Segment>();
+        std::vector<Fit> fits;
+        for (int i = 0; i < 5; ++i) {
+            Fit f;
+            f.point = WireCell::Point(i * units::cm, 0, 0);
+            f.dx = 1 * units::cm;
+            f.dQ = dqdx_per_cm * units::cm;
+            f.index = i;
+            fits.push_back(f);
+        }
+        seg->fits(fits);
+        return seg;
+    };
+    auto make_proton = [&](double dqdx_per_cm) {
+        auto seg = make_seg_with_dqdx(dqdx_per_cm);
+        auto pinfo = std::make_shared<Aux::ParticleInfo>(
+            2212, 938.272 * units::MeV, "proton",
+            WireCell::D4Vector<double>(938.272 * units::MeV, 0, 0, 0));
+        seg->particle_info(pinfo);
+        return seg;
+    };
+
+    // Muon segment's far end (not main_vertex) has TWO charge-confirmed
+    // protons attached: fires.
+    {
+        Graph g;
+        auto main_vertex = std::make_shared<Vertex>();
+        auto far_vertex  = std::make_shared<Vertex>();
+        auto p1_end = std::make_shared<Vertex>();
+        auto p2_end = std::make_shared<Vertex>();
+        auto muon = std::make_shared<Segment>();
+        add_segment(g, muon, main_vertex, far_vertex);
+        add_segment(g, make_proton(3.0 * MIP), far_vertex, p1_end);
+        add_segment(g, make_proton(3.5 * MIP), far_vertex, p2_end);
+        CHECK(segment_at_multi_proton_vertex(g, muon, main_vertex, MIP) == true);
+    }
+
+    // Only ONE charge-confirmed proton at the far end: does not fire --
+    // the owner's "two protons" wording is read literally (min_protons=2).
+    {
+        Graph g;
+        auto main_vertex = std::make_shared<Vertex>();
+        auto far_vertex  = std::make_shared<Vertex>();
+        auto p1_end = std::make_shared<Vertex>();
+        auto muon = std::make_shared<Segment>();
+        add_segment(g, muon, main_vertex, far_vertex);
+        add_segment(g, make_proton(3.0 * MIP), far_vertex, p1_end);
+        CHECK(segment_at_multi_proton_vertex(g, muon, main_vertex, MIP) == false);
+    }
+
+    // The two-proton vertex IS the neutrino vertex: does not fire -- an
+    // ordinary numuCC muon-plus-two-protons topology at the neutrino vertex
+    // is correct and must be left alone.
+    {
+        Graph g;
+        auto main_vertex = std::make_shared<Vertex>();
+        auto far_vertex  = std::make_shared<Vertex>();
+        auto p1_end = std::make_shared<Vertex>();
+        auto p2_end = std::make_shared<Vertex>();
+        auto muon = std::make_shared<Segment>();
+        add_segment(g, muon, main_vertex, far_vertex);
+        add_segment(g, make_proton(3.0 * MIP), main_vertex, p1_end);
+        add_segment(g, make_proton(3.5 * MIP), main_vertex, p2_end);
+        CHECK(segment_at_multi_proton_vertex(g, muon, main_vertex, MIP) == false);
+    }
+
+    // Two pdg-2212 neighbours but both only ambiguous (below 1.75x MIP):
+    // not independently confirmed, does not fire.
+    {
+        Graph g;
+        auto main_vertex = std::make_shared<Vertex>();
+        auto far_vertex  = std::make_shared<Vertex>();
+        auto p1_end = std::make_shared<Vertex>();
+        auto p2_end = std::make_shared<Vertex>();
+        auto muon = std::make_shared<Segment>();
+        add_segment(g, muon, main_vertex, far_vertex);
+        add_segment(g, make_proton(1.4 * MIP), far_vertex, p1_end);
+        add_segment(g, make_proton(1.3 * MIP), far_vertex, p2_end);
+        CHECK(segment_at_multi_proton_vertex(g, muon, main_vertex, MIP) == false);
+    }
+
+    // No main_vertex yet: never fires, regardless of the far-end topology.
+    {
+        Graph g;
+        auto main_vertex = std::make_shared<Vertex>();
+        auto far_vertex  = std::make_shared<Vertex>();
+        auto p1_end = std::make_shared<Vertex>();
+        auto p2_end = std::make_shared<Vertex>();
+        auto muon = std::make_shared<Segment>();
+        add_segment(g, muon, main_vertex, far_vertex);
+        add_segment(g, make_proton(3.0 * MIP), far_vertex, p1_end);
+        add_segment(g, make_proton(3.5 * MIP), far_vertex, p2_end);
+        CHECK(segment_at_multi_proton_vertex(g, muon, nullptr, MIP) == false);
     }
 }
 

@@ -97,6 +97,20 @@ namespace WireCell::Clus::PR {
     /// proton-daughter topology.
     bool segment_has_proton_daughter(Graph& graph, SegmentPtr seg, VertexPtr main_vertex, double MIP_dQdx);
 
+    /// doc sbnd_xin/docs/pr/40 round 4 F8 -- a muon cannot terminate in a
+    /// multi-proton hadronic vertex.
+    ///
+    /// True iff `seg` has an endpoint vertex OTHER than `main_vertex` (graph
+    /// identity, same convention as segment_has_proton_daughter) whose
+    /// out-edges include at least `min_protons` OTHER segments that are (a)
+    /// already PID'd proton (pdg 2212) and (b) independently charge-
+    /// confirmed by their own median dQ/dx (> 1.75x MIP_dQdx, same threshold
+    /// segment_has_proton_daughter uses).  The main-vertex endpoint is
+    /// excluded deliberately: a muon and two protons meeting AT the
+    /// neutrino vertex is the ordinary, correct numuCC topology.
+    /// `main_vertex` may be null, in which case this always returns false.
+    bool segment_at_multi_proton_vertex(Graph& graph, SegmentPtr seg, VertexPtr main_vertex, double MIP_dQdx, int min_protons = 2);
+
 
     /// Create and associate a DynamicPointCloud with a segment from path points
     ///

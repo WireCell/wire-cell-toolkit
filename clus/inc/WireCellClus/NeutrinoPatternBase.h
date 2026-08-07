@@ -637,6 +637,50 @@ namespace WireCell::Clus::PR {
         // operating point sets it true in wct-pr-perevt.jsonnet.
         bool   m_shower_proton_daughter_pion{false};
 
+        // doc sbnd_xin/docs/pr/40 round 4 F7 -- a pion is a track, not a
+        // shower.  m_shower_proton_daughter_pion (F5, above) relabels a
+        // shower-flagged segment's PDG to 211 but leaves kShowerTrajectory/
+        // kShowerTopology set, so shower_clustering_with_nv still roots a
+        // Shower there (NeutrinoShowerClustering.cxx: is_shower_seg tests
+        // the flags, not the final pdg).  Two visible consequences on SBND
+        // evt 256587 seg 11079: its charge-confirmed proton daughter
+        // (seg 11080) never gets its own particle-flow node -- it is
+        // pre-claimed into the shower's segment set
+        // (MultiAlgBlobClustering.cxx fill_bee_pf_tree, used_segs =
+        // shower_segs) -- and the pi+ Bee node's displayed endpoint is the
+        // SHOWER's end point (a 0.35 cm fragment absorbed from a different,
+        // non-main cluster), not segment 11079's own end.  When this knob
+        // and m_shower_proton_daughter_pion are both on, the override also
+        // clears the shower flags so the segment is treated as an ordinary
+        // track from here on.  Designed divergence (the prototype never
+        // reclassifies a shower as a track after F5-style relabeling); see
+        // porting_dictionary.md.  Population (48-event nueCC48, on
+        // work-pr40r3-on48): 2/2209 electron-labelled segments carry pdg 211
+        // + flag_shower before this fix.  C++ default false = legacy =
+        // byte-identical; requires m_shower_proton_daughter_pion also true
+        // to have any effect.
+        bool   m_shower_proton_daughter_pion_dissolve{false};
+
+        // doc sbnd_xin/docs/pr/40 round 4 F8 -- a muon cannot terminate in a
+        // multi-proton hadronic vertex.  SBND evt 489330: a mu- segment's
+        // FAR end (not the neutrino vertex) has TWO charge-confirmed proton
+        // daughters (same PID + charge-confirmation test as F5's
+        // segment_has_proton_daughter, generalized to segment_at_multi_
+        // proton_vertex with min_protons=2).  On a fire, relabel that one
+        // segment to pion (211); no propagation across a degree-2 kink to
+        // the parent muon segment further from the vertex (owner decision --
+        // the sibling segment stays mu-).  A genuine numuCC muon-plus-two-
+        // protons AT THE NEUTRINO VERTEX is the ordinary correct topology
+        // and must not fire -- same main-vertex exclusion idiom as F5.
+        // Designed divergence (the prototype has no proton-multiplicity
+        // veto); see porting_dictionary.md.  Population (48-event nueCC48):
+        // 1/N muon segments fires this rule (evt 489330 seg 4019); 6 more
+        // muon segments have exactly one qualifying proton at a non-main
+        // vertex and are deliberately NOT touched (owner's "two protons"
+        // wording is read literally).  C++ default false = legacy =
+        // byte-identical.
+        bool   m_muon_multi_proton_pion{false};
+
         // ---- Detector-extent literals (doc sbnd_xin/docs/pr/2 sec. 2e(iv)) ----
         // The uBooNE active volume the prototype was written against is
         // y in [-116, +117] cm, z in [0, 1037] cm, x in [0, 256] cm
@@ -980,6 +1024,13 @@ namespace WireCell::Clus::PR {
         // compatible; segment_has_proton_daughter always returns false for a
         // null vertex, so an omitted argument is byte-identical to F5 off.
         void set_default_shower_particle_info(Graph& graph, Facade::Cluster& cluster, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, VertexPtr main_vertex = nullptr);
+
+        // doc sbnd_xin/docs/pr/40 round 4 F8 -- see m_muon_multi_proton_pion's
+        // docstring above.  Called right after set_default_shower_particle_info
+        // (same call site, same per-cluster main_vertex, still the last word
+        // before shower_clustering_with_nv runs).  No-op (returns immediately)
+        // when m_muon_multi_proton_pion is false.
+        void override_muon_multi_proton_pion(Graph& graph, Facade::Cluster& cluster, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, VertexPtr main_vertex = nullptr);
 
         // PCA calculation
         std::pair<Facade::geo_point_t, Facade::geo_vector_t> calc_PCA_main_axis(std::vector<Facade::geo_point_t>& points);

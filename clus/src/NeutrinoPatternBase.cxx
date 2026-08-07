@@ -163,10 +163,20 @@ void PatternAlgorithms::set_default_shower_particle_info(Graph& graph, Facade::C
 
         if (sg->has_particle_info()) {
             // OVERRIDE path: an earlier stage already assigned a pdg.  Only
-            // touch it if that pdg is electron (11) and the proton-daughter
-            // rule fires -- never override a track PID or an already-pion
-            // segment.
-            if (m_shower_proton_daughter_pion && sg->particle_info()->pdg() == 11 &&
+            // touch it if that pdg is electron (11) -- or, under F7 below,
+            // an already-relabelled pion (211) that still needs its shower
+            // flags cleared -- and the proton-daughter rule fires; never
+            // override a track PID.
+            //
+            // doc pr/40 round 4 F7: examine_direction can run more than
+            // once, and the pdg()==211 re-entry case is exactly that second
+            // pass -- widening the test to 11||211 makes the branch
+            // idempotent (re-deriving the same 4-momentum for an
+            // already-211 segment is a no-op) instead of silently skipping
+            // the flag-clear on re-entry.
+            const int cur_pdg = sg->particle_info()->pdg();
+            const bool reentrant_pion = m_shower_proton_daughter_pion_dissolve && cur_pdg == 211;
+            if (m_shower_proton_daughter_pion && (cur_pdg == 11 || reentrant_pion) &&
                 segment_has_proton_daughter(graph, sg, main_vertex, m_mip_dqdx_median)) {
                 const int pdg_code = 211;
                 auto four_momentum = segment_cal_4mom(sg, pdg_code, particle_data, recomb_model, m_mip_dqdx_median);
@@ -175,6 +185,12 @@ void PatternAlgorithms::set_default_shower_particle_info(Graph& graph, Facade::C
                     particle_data->pdg_to_name(pdg_code), four_momentum);
                 sg->particle_info(pinfo);
                 sg->particle_score(100.0);
+                // F7: a pion is a track, not a shower -- see
+                // m_shower_proton_daughter_pion_dissolve's docstring.
+                if (m_shower_proton_daughter_pion_dissolve) {
+                    sg->unset_flags(SegmentFlags::kShowerTrajectory);
+                    sg->unset_flags(SegmentFlags::kShowerTopology);
+                }
             }
             continue;
         }
@@ -193,6 +209,36 @@ void PatternAlgorithms::set_default_shower_particle_info(Graph& graph, Facade::C
             particle_data->pdg_to_name(pdg_code),
             four_momentum
         );
+        sg->particle_info(pinfo);
+        sg->particle_score(100.0);
+        // F7 (doc pr/40 round 4): same flag-clear on the default-fill path,
+        // in case a fresh segment is relabelled pion on its first pass.
+        if (m_shower_proton_daughter_pion_dissolve && pdg_code == 211) {
+            sg->unset_flags(SegmentFlags::kShowerTrajectory);
+            sg->unset_flags(SegmentFlags::kShowerTopology);
+        }
+    }
+}
+
+void PatternAlgorithms::override_muon_multi_proton_pion(Graph& graph, Facade::Cluster& cluster, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, VertexPtr main_vertex) {
+    // doc sbnd_xin/docs/pr/40 round 4 F8 -- see m_muon_multi_proton_pion's
+    // docstring in NeutrinoPatternBase.h.  false = legacy = no-op.
+    if (!m_muon_multi_proton_pion) return;
+
+    for (const auto& ed : ordered_edges(graph)) {
+        SegmentPtr sg = graph[ed].segment;
+        if (!sg || sg->cluster() != &cluster) continue;
+        if (sg->flags_any(SegmentFlags::kShowerTrajectory) ||
+            sg->flags_any(SegmentFlags::kShowerTopology)) continue;
+        if (!sg->has_particle_info() || std::abs(sg->particle_info()->pdg()) != 13) continue;
+
+        if (!segment_at_multi_proton_vertex(graph, sg, main_vertex, m_mip_dqdx_median, /*min_protons=*/2)) continue;
+
+        const int pdg_code = 211;
+        auto four_momentum = segment_cal_4mom(sg, pdg_code, particle_data, recomb_model, m_mip_dqdx_median);
+        auto pinfo = std::make_shared<Aux::ParticleInfo>(
+            pdg_code, particle_data->get_particle_mass(pdg_code),
+            particle_data->pdg_to_name(pdg_code), four_momentum);
         sg->particle_info(pinfo);
         sg->particle_score(100.0);
     }

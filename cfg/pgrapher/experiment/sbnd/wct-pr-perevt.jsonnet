@@ -988,6 +988,23 @@ function(
     track_pid_persist_4mom = true,
     shower_proton_daughter_pion = true,
     reclass_never_computed_ke_floor = true,
+    // doc sbnd_xin/docs/pr/40 round 4 -- two follow-on defects measured on the
+    // Bee display of round 2/3's F5 fix.  F7 shower_proton_daughter_pion_dissolve:
+    // F5 relabelled the pdg but left the shower flags set, so the pion was
+    // still wrapped as a Shower (its proton daughter was pre-claimed into
+    // the shower's segment set and never got its own particle-flow node;
+    // the pi+ Bee node's displayed endpoint was the shower's, not the
+    // segment's own).  F8 muon_multi_proton_pion: a muon segment whose far
+    // (non-neutrino-vertex) end is a multi-proton (>=2, charge-confirmed)
+    // hadronic vertex is relabelled pion; no propagation across a degree-2
+    // kink to the sibling muon segment further from the vertex.
+    // SBND PRODUCTION DEFAULT ON (doc pr/40 round 4): G1 48/48 events byte-
+    // identical (96/96 archives) vs a git-stash clean-HEAD reference; G2a/G2b
+    // both owner-reported cases fixed exactly as specified; G3 nusel-table.tsv
+    // diff 0 lines across the 48-event manifest; G4 census exactly 5 segments
+    // move, all attributed; G5 wcdoctest-clus 99/99 test cases.
+    shower_proton_daughter_pion_dissolve = true,
+    muon_multi_proton_pion = true,
 )
     local base = import 'pgrapher/experiment/sbnd/simparams.jsonnet';
     local params = base {
@@ -1148,6 +1165,8 @@ function(
                              shower_topo_dqdx_guard=shower_topo_dqdx_guard,
                              track_pid_persist_4mom=track_pid_persist_4mom,
                              shower_proton_daughter_pion=shower_proton_daughter_pion,
+                             shower_proton_daughter_pion_dissolve=shower_proton_daughter_pion_dissolve,
+                             muon_multi_proton_pion=muon_multi_proton_pion,
                              reclass_never_computed_ke_floor=reclass_never_computed_ke_floor,
                              muon_dqdx_curve=muon_dqdx_curve,
                              use_power_recomb=use_power_recomb,

@@ -731,3 +731,65 @@ cfg-only run hash-matching the gated on-arm exactly — see doc pr/40 round 3.
 is the reason both the neutrino-vertex-emanation requirement and the
 independent charge-confirmation requirement exist; dropping either
 reintroduces the false-positive population this knob was designed to avoid.
+
+## Relabelling a shower segment's PDG does not make it stop being a Shower — `shower_proton_daughter_pion_dissolve` (F7) is a designed divergence
+
+Doc pr/40 round 4 (owner: reviewing the round-2/3 `shower_proton_daughter_pion`
+fix's own Bee display, evt 256587: *"the particle flow do show the pion+, but
+we do not see the proton after it in the particle flow... the EM shower were
+modified as pion, but not on the individual tracks"*). F5 changes a segment's
+*pdg* (11 → 211) but never touches `SegmentFlags::kShowerTrajectory` /
+`kShowerTopology`. Those flags are what `shower_clustering_with_nv_in_main_
+cluster` (`NeutrinoShowerClustering.cxx`) actually tests (`is_shower_seg =
+flags_any(kShowerTrajectory) || flags_any(kShowerTopology) ||
+|pdg|==11`) — with the flags still set, a pion-relabelled segment is still
+rooted as a `Shower`. Two measured consequences on evt 256587 seg 11079:
+`fill_bee_pf_tree` (`MultiAlgBlobClustering.cxx`) pre-claims every
+shower-owned segment (`used_segs = shower_segs`), so the segment's own
+charge-confirmed proton daughter (seg 11080, the very evidence F5 used to
+relabel it) never gets its own particle-flow node; and the pi+ Bee node's
+displayed extent is the *shower's* endpoint — a 0.35 cm fragment absorbed
+from a different, non-main cluster (seg 81153) — not segment 11079's own end.
+
+The prototype has **no** mechanism that reclassifies an already-formed shower
+back into a track after a PDG override — designed divergence, not a port
+correction. `shower_proton_daughter_pion_dissolve` (config key, threaded via
+`m_shower_proton_daughter_pion_dissolve`) clears both shower flags in
+`set_default_shower_particle_info` at the same site F5's override fires,
+provided `shower_proton_daughter_pion` is also on. C++ default `false` =
+legacy = byte-identical. Measured (48-event nueCC48 population,
+`work-pr40r3-on48` arm): exactly 2/2209 electron-labelled segments carry
+`pdg 211 && flag_shower` before this fix (evt 256587 seg 11079, evt 342199
+seg 72098 — the latter on a non-main cluster, so it produces no `mc.json`
+delta but is still a real behaviour change).
+
+## A muon segment cannot terminate in a multi-proton hadronic vertex — `muon_multi_proton_pion` (F8) is a designed divergence
+
+Doc pr/40 round 4 (owner, same Bee review round, evt 489330: *"there is one
+muon → two protons. This is not physical, in this case, the muon should be
+changed to pion"*). Measured: segment 4019 (mu-, 65.2 cm) has TWO
+charge-confirmed proton daughters (segs 4018, 4044) at its far (non-neutrino-
+vertex) end. The prototype has no proton-multiplicity veto on a track's PID
+— designed divergence. `muon_multi_proton_pion` (config key, threaded via
+`m_muon_multi_proton_pion`) relabels such a muon segment PION (211) via the
+new pass `PatternAlgorithms::override_muon_multi_proton_pion`, called
+immediately after `set_default_shower_particle_info` in `examine_direction`
+(same per-cluster `main_vertex`, same last-word-before-shower-clustering
+position). The topology test, `segment_at_multi_proton_vertex`
+(`PRSegmentFunctions.h/.cxx`), generalizes F5's `segment_has_proton_daughter`:
+same graph-identity main-vertex exclusion (a muon-plus-two-protons vertex AT
+the neutrino vertex is the ordinary, correct numuCC topology and must not
+fire), same 1.75× MIP independent charge-confirmation threshold, but
+`min_protons=2` instead of F5's implicit 1, and it checks EITHER endpoint
+other than `main_vertex` rather than only the segment's "far" end (a muon
+segment has no owner-assigned direction the way an electron-daughter-of-the-
+neutrino-vertex segment does). C++ default `false` = legacy = byte-identical.
+
+**Owner decision: no propagation across a kink.** Evt 489330's muon segment
+4019 sits behind a degree-2 vertex from a second muon segment (4043, 28.4 cm,
+running to the neutrino vertex); only 4019 is relabelled, 4043 stays `mu-`.
+Population (48-event nueCC48): exactly 1/N muon segments fires this rule
+(evt 489330 seg 4019); 6 more muon segments have exactly one qualifying
+proton at a non-main vertex and are deliberately left untouched — the
+owner's "two protons" wording is read literally, `min_protons=2` is not a
+placeholder.

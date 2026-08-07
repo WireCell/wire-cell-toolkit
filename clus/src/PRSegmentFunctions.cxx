@@ -963,6 +963,30 @@ namespace WireCell::Clus::PR {
         return false;
     }
 
+    // doc sbnd_xin/docs/pr/40 round 4 F8 -- see the header comment.
+    bool segment_at_multi_proton_vertex(Graph& graph, SegmentPtr seg, VertexPtr main_vertex, double MIP_dQdx, int min_protons) {
+        if (!main_vertex || !seg || MIP_dQdx <= 0 || min_protons <= 0) return false;
+
+        auto [v1, v2] = find_vertices(graph, seg);
+        if (!v1 || !v2) return false;
+
+        for (VertexPtr end_v : {v1, v2}) {
+            if (end_v == main_vertex) continue;  // the neutrino vertex is exempt
+            if (!end_v->descriptor_valid()) continue;
+
+            int nprotons = 0;
+            for (auto edesc : sorted_out_edges(end_v->get_descriptor(), graph)) {
+                SegmentPtr nbr = graph[edesc].segment;
+                if (!nbr || nbr == seg) continue;
+                if (!nbr->has_particle_info() || nbr->particle_info()->pdg() != 2212) continue;
+                const double median = segment_median_dQ_dx(nbr);
+                if (median > 0 && median / MIP_dQdx > 1.75) ++nprotons;
+            }
+            if (nprotons >= min_protons) return true;
+        }
+        return false;
+    }
+
     double segment_rms_dQ_dx(SegmentPtr seg)
     {
         auto& fits = seg->fits();

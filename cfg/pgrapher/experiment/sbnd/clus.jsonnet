@@ -1183,6 +1183,14 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               reclass_never_computed_ke_floor=false,
               track_pid_persist_4mom=false,
               shower_proton_daughter_pion=false,
+              // doc sbnd_xin/docs/pr/40 round 4 -- two follow-on defects from
+              // round 2/3's F5: F7 clears the shower flags a relabelled pion
+              // still carried (it was still being wrapped as a Shower); F8
+              // relabels a muon segment at a multi-proton (>=2, charge-
+              // confirmed) non-neutrino-vertex hadronic vertex to pion.  Both
+              // default false = legacy = byte-identical.
+              shower_proton_daughter_pion_dissolve=false,
+              muon_multi_proton_pion=false,
               // muon_dqdx_curve [c0, c1, pivot_cm, power]: the muon
               // median-dQ/dx-vs-length envelope used by nine tagger cuts, as a
               // multiple of mip_dqdx_median.  DEFAULT = the SBND fit
@@ -1691,6 +1699,8 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
             reclass_never_computed_ke_floor=reclass_never_computed_ke_floor,
             track_pid_persist_4mom=track_pid_persist_4mom,
             shower_proton_daughter_pion=shower_proton_daughter_pion,
+            shower_proton_daughter_pion_dissolve=shower_proton_daughter_pion_dissolve,
+            muon_multi_proton_pion=muon_multi_proton_pion,
             muon_dqdx_curve=muon_dqdx_curve,
             sp_dedx_use_recomb_model=sp_dedx_use_recomb_model,
             sp_mean_dedx_cut=sp_mean_dedx_cut,
@@ -2283,6 +2293,11 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
        reclass_never_computed_ke_floor=false,
        track_pid_persist_4mom=false,
        shower_proton_daughter_pion=false,
+       // doc sbnd_xin/docs/pr/40 round 4 -- two follow-on defects from round
+       // 2/3's F5.  All default false = legacy = byte-identical.  See the
+       // clus_pr arg comment.
+       shower_proton_daughter_pion_dissolve=false,
+       muon_multi_proton_pion=false,
        // Muon dQ/dx-vs-length envelope: DEFAULT = the docs/pr/10 SBND fit
        // (see the clus_pr arg comment; null restores the uBooNE refit).
        // Recombination-model selection + single-photon dE/dx routing:
@@ -2429,6 +2444,8 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 reclass_never_computed_ke_floor=reclass_never_computed_ke_floor,
                 track_pid_persist_4mom=track_pid_persist_4mom,
                 shower_proton_daughter_pion=shower_proton_daughter_pion,
+                shower_proton_daughter_pion_dissolve=shower_proton_daughter_pion_dissolve,
+                muon_multi_proton_pion=muon_multi_proton_pion,
                 muon_dqdx_curve=muon_dqdx_curve,
                 use_power_recomb=use_power_recomb,
                 sp_dedx_use_recomb_model=sp_dedx_use_recomb_model,

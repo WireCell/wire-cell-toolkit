@@ -293,6 +293,15 @@ public:
         // reclass_pinfo.  See NeutrinoPatternBase.h for the full rationale.
         bool m_track_pid_persist_4mom{false};
         bool m_shower_proton_daughter_pion{false};
+        // doc sbnd_xin/docs/pr/40 round 4 -- two follow-on defects measured on the
+        // Bee display of pr/40 round 2/3's F5: F7 clears the shower flags when
+        // F5 relabels a segment to pion, so it stops being wrapped as a Shower
+        // (its proton daughter had been swallowed into the shower's segment
+        // set); F8 relabels a muon segment to pion when its far (non-main-
+        // vertex) end is a multi-proton (>=2, charge-confirmed) hadronic
+        // vertex. See NeutrinoPatternBase.h for the full rationale.
+        bool m_shower_proton_daughter_pion_dissolve{false};
+        bool m_muon_multi_proton_pion{false};
         mutable std::shared_ptr<TrackFitting> m_track_fitter;
 
         void load_trackfitting_config(const std::string& config_file);
