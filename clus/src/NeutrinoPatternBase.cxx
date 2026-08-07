@@ -305,6 +305,157 @@ void PatternAlgorithms::override_michel_stem_muon(Graph& graph, Facade::Cluster&
     }
 }
 
+// doc sbnd_xin/docs/pr/43 round 2 K3 -- docstring in NeutrinoPatternBase.h.
+// Late particle-info/flag reconciliation: runs after shower_clustering_with_nv
+// and before the taggers so every downstream consumer (tagger features, kine,
+// Bee PF tree, PR display) sees one consistent labeling.  false = no-op.
+void PatternAlgorithms::reconcile_particle_flags(Graph& graph, VertexPtr main_vertex,
+    IndexedShowerSet& showers, ShowerVertexMap& map_vertex_in_shower,
+    ShowerSegmentMap& map_segment_in_shower, VertexShowerSetMap& map_vertex_to_shower,
+    ShowerIntMap& map_shower_pio_id,
+    const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model)
+{
+    if (!m_pid_flag_reconcile) return;
+    if (!main_vertex || !main_vertex->descriptor_valid()) return;
+
+    const char* dbg_env = std::getenv("WCT_PID_WRITE_DEBUG");
+    const bool dbg = dbg_env && dbg_env[0] && dbg_env[0] != '0';
+
+    Facade::Cluster* main_clu = nullptr;
+    for (auto ed : sorted_out_edges(main_vertex->get_descriptor(), graph)) {
+        SegmentPtr sg = graph[ed].segment;
+        if (sg) { main_clu = sg->cluster(); break; }
+    }
+
+    auto vertex_degree = [&graph](VertexPtr v) -> int {
+        if (!v || !v->descriptor_valid()) return 0;
+        int n = 0;
+        for (auto ed : sorted_out_edges(v->get_descriptor(), graph)) if (graph[ed].segment) ++n;
+        return n;
+    };
+
+    // A single-segment wrapper Shower whose segment is now a confirmed track
+    // renders "shower  X MeV" from its stale cache; dissolve it so the
+    // segment shows as a live track node.  Long-muon pseudo-showers (cached
+    // type +-13) and pi0-paired showers are exempt; multi-segment showers
+    // are structure, not wrappers, and are left alone.
+    auto dissolve_wrapper = [&](SegmentPtr seg) {
+        auto it = map_segment_in_shower.find(seg);
+        if (it == map_segment_in_shower.end()) return;
+        ShowerPtr sh = it->second;
+        if (!sh) { map_segment_in_shower.erase(it); return; }
+        if (std::abs(sh->get_particle_type()) == 13) return;
+        if (sh->edges().size() > 1) return;
+        auto pio_it = map_shower_pio_id.find(sh);
+        if (pio_it != map_shower_pio_id.end() && pio_it->second >= 0) return;
+        map_segment_in_shower.erase(it);
+        showers.erase(sh);
+        for (auto mit = map_vertex_in_shower.begin(); mit != map_vertex_in_shower.end();) {
+            if (mit->second == sh) mit = map_vertex_in_shower.erase(mit);
+            else ++mit;
+        }
+        for (auto& vs : map_vertex_to_shower) vs.second.erase(sh);
+        if (dbg) std::fprintf(stderr, "PID_RECONCILE dissolve wrapper shower of seg (clus=%d idx=%zu)\n",
+                              seg->cluster() ? seg->cluster()->get_cluster_id() : -1, seg->get_graph_index());
+    };
+
+    // ---- Rule 1: forced-electron terminal rescue behind a main-vertex
+    // proton chain (evt 57661: proton 18003 -> stub 18005 -> seg 18007
+    // forced pdg 11 / sentinel score 100 by the unconditional branches of
+    // segment_determine_shower_direction_trajectory, never actually PID'd).
+    for (auto e_it : sorted_out_edges(main_vertex->get_descriptor(), graph)) {
+        SegmentPtr psg = graph[e_it].segment;
+        if (!psg || !psg->has_particle_info() || !psg->particle_info()) continue;
+        if (psg->particle_info()->pdg() != 2212) continue;
+
+        auto pvs = find_vertices(graph, psg);
+        VertexPtr cur_v = (pvs.first == main_vertex) ? pvs.second
+                        : (pvs.second == main_vertex ? pvs.first : nullptr);
+        SegmentPtr prev = psg;
+        std::vector<SegmentPtr> stubs;
+        for (int hop = 0; hop < 3 && cur_v && cur_v->descriptor_valid(); ++hop) {
+            SegmentPtr next = nullptr;
+            int nnbr = 0;
+            for (auto ed : sorted_out_edges(cur_v->get_descriptor(), graph)) {
+                SegmentPtr nbr = graph[ed].segment;
+                if (!nbr || nbr == prev) continue;
+                ++nnbr;
+                next = nbr;
+            }
+            if (nnbr != 1 || !next) break;   // branching vertex or dead end
+            const bool has_pi = next->has_particle_info() && next->particle_info();
+            const int pdg = has_pi ? next->particle_info()->pdg() : 0;
+            if (has_pi && pdg == 11 && next->particle_score() == 100.0) {
+                // Terminal candidate: re-run ordinary track PID and trust a
+                // confident non-electron conclusion.  Fresh ParticleInfo is
+                // written by segment_determine_dir_track itself; on an
+                // electron/no conclusion restore the prior state untouched.
+                auto nvs = find_vertices(graph, next);
+                const int start_n = vertex_degree(nvs.first);
+                const int end_n = vertex_degree(nvs.second);
+                auto saved_info = next->particle_info();
+                const double saved_score = next->particle_score();
+                segment_determine_dir_track(next, start_n, end_n, particle_data, recomb_model, m_mip_dqdx);
+                const int new_pdg = (next->has_particle_info() && next->particle_info())
+                                        ? next->particle_info()->pdg() : 0;
+                if (std::abs(new_pdg) == 13 || std::abs(new_pdg) == 211 || new_pdg == 2212) {
+                    next->unset_flags(SegmentFlags::kShowerTrajectory);
+                    next->unset_flags(SegmentFlags::kShowerTopology);
+                    dissolve_wrapper(next);
+                    for (auto stub : stubs) {
+                        if (!stub->has_particle_info() || !stub->particle_info() ||
+                            std::abs(stub->particle_info()->pdg()) != 13) continue;
+                        if (segment_track_length(stub) > 15*units::cm) continue;
+                        auto fm = segment_cal_4mom(stub, 211, particle_data, recomb_model, m_mip_dqdx);
+                        auto pinfo = std::make_shared<Aux::ParticleInfo>(211,
+                            particle_data->get_particle_mass(211), particle_data->pdg_to_name(211), fm);
+                        stub->particle_info(pinfo);
+                    }
+                    if (dbg) std::fprintf(stderr, "PID_RECONCILE terminal rescue seg (clus=%d idx=%zu) 11 -> %d, %zu stub(s) -> 211\n",
+                                          next->cluster() ? next->cluster()->get_cluster_id() : -1,
+                                          next->get_graph_index(), new_pdg, stubs.size());
+                }
+                else {
+                    next->particle_info(saved_info);
+                    next->particle_score(saved_score);
+                }
+                break;
+            }
+            const bool is_shower_nbr = next->flags_any(SegmentFlags::kShowerTrajectory) ||
+                                       next->flags_any(SegmentFlags::kShowerTopology) ||
+                                       (has_pi && std::abs(pdg) == 11);
+            if (is_shower_nbr || (has_pi && pdg == 2212)) break;
+            stubs.push_back(next);
+            auto nvs = find_vertices(graph, next);
+            VertexPtr nv = (nvs.first == cur_v) ? nvs.second
+                         : (nvs.second == cur_v ? nvs.first : nullptr);
+            prev = next;
+            cur_v = nv;
+        }
+    }
+
+    // ---- Rule 2: consistency guard, main cluster only.  A segment whose
+    // final pdg is a confirmed track type must not keep stale shower flags
+    // (the "track still displayed as Shower" class), nor a stale
+    // single-segment wrapper Shower.
+    for (const auto& ed : ordered_edges(graph)) {
+        SegmentPtr sg = graph[ed].segment;
+        if (!sg || sg->cluster() != main_clu) continue;
+        if (!sg->has_particle_info() || !sg->particle_info()) continue;
+        const int apdg = std::abs(sg->particle_info()->pdg());
+        if (apdg != 13 && apdg != 211 && apdg != 2212) continue;
+        if (sg->flags_any(SegmentFlags::kShowerTrajectory) ||
+            sg->flags_any(SegmentFlags::kShowerTopology)) {
+            sg->unset_flags(SegmentFlags::kShowerTrajectory);
+            sg->unset_flags(SegmentFlags::kShowerTopology);
+            if (dbg) std::fprintf(stderr, "PID_RECONCILE clear stale shower flags (clus=%d idx=%zu pdg=%d)\n",
+                                  sg->cluster() ? sg->cluster()->get_cluster_id() : -1,
+                                  sg->get_graph_index(), sg->particle_info()->pdg());
+        }
+        dissolve_wrapper(sg);
+    }
+}
+
 std::vector<Facade::geo_point_t> PatternAlgorithms::do_rough_path_reg_pc(const Facade::Cluster& cluster, Facade::geo_point_t& first_point, Facade::geo_point_t& last_point,  std::string graph_name){
     // Find closest indices in the regular point cloud using kd_knn
     auto first_knn_results = cluster.kd_knn(1, first_point);

@@ -1221,6 +1221,10 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               // toolkit-only addition).  C++ default false; key omitted when
               // off => byte-identical pre-fix config.
               shower_long_muon_keep_type=false,
+              // doc pr/43 round 2 -- C++ defaults false; keys suppressed when off.
+              single_muon_proton_chain_veto=false,
+              single_muon_long_muon_claim=false,
+              pid_flag_reconcile=false,
               // muon_dqdx_curve [c0, c1, pivot_cm, power]: the muon
               // median-dQ/dx-vs-length envelope used by nine tagger cuts, as a
               // multiple of mip_dqdx_median.  DEFAULT = the SBND fit
@@ -1738,6 +1742,9 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
             shower_connect_protected_pion_guard=shower_connect_protected_pion_guard,
             michel_stem_muon_rescue=michel_stem_muon_rescue,
             shower_long_muon_keep_type=shower_long_muon_keep_type,
+            single_muon_proton_chain_veto=single_muon_proton_chain_veto,
+            single_muon_long_muon_claim=single_muon_long_muon_claim,
+            pid_flag_reconcile=pid_flag_reconcile,
             muon_dqdx_curve=muon_dqdx_curve,
             sp_dedx_use_recomb_model=sp_dedx_use_recomb_model,
             sp_mean_dedx_cut=sp_mean_dedx_cut,
@@ -2355,6 +2362,10 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
        michel_stem_muon_rescue=false,
        // doc pr/44; false = C++ default = OFF, key omitted => byte-identical.
        shower_long_muon_keep_type=false,
+       // doc pr/43 round 2 -- C++ defaults false.
+       single_muon_proton_chain_veto=false,
+       single_muon_long_muon_claim=false,
+       pid_flag_reconcile=false,
        // Muon dQ/dx-vs-length envelope: DEFAULT = the docs/pr/10 SBND fit
        // (see the clus_pr arg comment; null restores the uBooNE refit).
        // Recombination-model selection + single-photon dE/dx routing:
@@ -2511,6 +2522,9 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 shower_connect_protected_pion_guard=shower_connect_protected_pion_guard,
                 michel_stem_muon_rescue=michel_stem_muon_rescue,
                 shower_long_muon_keep_type=shower_long_muon_keep_type,
+                single_muon_proton_chain_veto=single_muon_proton_chain_veto,
+                single_muon_long_muon_claim=single_muon_long_muon_claim,
+                pid_flag_reconcile=pid_flag_reconcile,
                 muon_dqdx_curve=muon_dqdx_curve,
                 use_power_recomb=use_power_recomb,
                 sp_dedx_use_recomb_model=sp_dedx_use_recomb_model,

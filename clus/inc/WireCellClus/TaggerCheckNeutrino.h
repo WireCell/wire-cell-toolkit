@@ -309,6 +309,9 @@ public:
         bool m_shower_connect_protected_pion_guard{false};          // doc pr/40 round 6 F13
         bool m_michel_stem_muon_rescue{false};                      // doc pr/40 round 6 F14
         bool m_shower_long_muon_keep_type{false};                   // doc pr/44
+        bool m_single_muon_proton_chain_veto{false};                // doc pr/43 round 2 K1
+        bool m_single_muon_long_muon_claim{false};                  // doc pr/43 round 2 K2
+        bool m_pid_flag_reconcile{false};                           // doc pr/43 round 2 K3
         mutable std::shared_ptr<TrackFitting> m_track_fitter;
 
         void load_trackfitting_config(const std::string& config_file);

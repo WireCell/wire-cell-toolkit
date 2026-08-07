@@ -873,6 +873,57 @@ namespace WireCell::Clus::PR {
         // byte-identical.
         bool   m_shower_long_muon_keep_type{false};
 
+        // doc sbnd_xin/docs/pr/43 round 2 K1 -- the single-muon selection in
+        // examine_direction vetoes a muon candidate only when a proton sits
+        // at its IMMEDIATE far vertex (1-hop n_proton check); a proton
+        // reached through a short degree-2 continuation stub is invisible.
+        // SBND 18255 evt 54351: candidate 17007 (54.2 cm) wins over 17010
+        // (42.6 cm) by length though its chain 17007 -> 17005 (2.7 cm stub)
+        // terminates in charge-confirmed proton 17011 -- a muon cannot end
+        // in a proton.  When on, the veto walks the bounded non-shower
+        // degree-2 chain (segment_chain_has_proton, <=3 hops); a chain-vetoed
+        // candidate is demoted to pion together with its continuation stubs
+        // (segment_chain_continuation) and the selection re-picks among the
+        // remaining candidates (17010 -> mu-).  Guard: the chain veto only
+        // disqualifies when at least one chain-proton-free candidate exists
+        // at the vertex; otherwise legacy selection stands (no new
+        // demote-all-arms cases).  C++ default false = legacy.
+        bool   m_single_muon_proton_chain_veto{false};
+
+        // doc sbnd_xin/docs/pr/43 round 2 K2 -- the same selection loop
+        // SKIPS out-edges that belong to a long-muon accumulation chain
+        // (`segments_in_long_muon`), so the long muon neither competes for
+        // nor claims the vertex muon slot, and a second, shorter pdg-13 arm
+        // wins as "the" muon.  SBND 18255 evt 56463: the 411 cm chain
+        // 14005+14007 is the muon (owner), yet 14006 (60.2 cm) also stays
+        // mu- because 14005 was invisible to the competition.  When on, a
+        // long-muon out-edge claims the muon slot with the chain's summed
+        // length (deterministic: IndexedSegmentSet order); it is itself
+        // never demoted (not in pion_sgs), and other pdg-13 arms demote to
+        // pion through the existing conversion loop.  C++ default false.
+        bool   m_single_muon_long_muon_claim{false};
+
+        // doc sbnd_xin/docs/pr/43 round 2 K3 -- late particle-info/flag
+        // reconciliation pass (reconcile_particle_flags), called from
+        // TaggerCheckNeutrino AFTER shower_clustering_with_nv and BEFORE the
+        // taggers, so taggers, kine, Bee PF tree and PR display all see one
+        // consistent labeling.  Two rules: (1) forced-electron terminal
+        // rescue -- a main-vertex proton's degree-2 continuation chain ending
+        // in a segment that was FORCED pdg 11 with sentinel score 100 by
+        // segment_determine_shower_direction_trajectory's unconditional
+        // branches (never actually PID'd) gets ordinary track PID re-run and
+        // a confident non-electron conclusion adopted (fresh ParticleInfo,
+        // never in-place set_pdg); intermediate pdg-13 stubs (<=15 cm)
+        // relabel pion (owner chain proton -> pi+ -> mu-, evt 57661).
+        // (2) consistency guard -- a segment whose final pdg is a track type
+        // (13/211/2212) but still carries kShowerTrajectory/kShowerTopology
+        // has the stale flags cleared (pr/40 F7 precedent), and a
+        // single-segment wrapper Shower whose segment is now a confirmed
+        // track is dissolved so it renders as a live track node; long-muon
+        // pseudo-showers (cached type +-13) are exempt from dissolution.
+        // C++ default false = pass never runs = byte-identical.
+        bool   m_pid_flag_reconcile{false};
+
         // ---- Detector-extent literals (doc sbnd_xin/docs/pr/2 sec. 2e(iv)) ----
         // The uBooNE active volume the prototype was written against is
         // y in [-116, +117] cm, z in [0, 1037] cm, x in [0, 256] cm
@@ -1231,6 +1282,11 @@ namespace WireCell::Clus::PR {
         // shower_clustering_with_nv), same per-cluster main_vertex.  No-op
         // (returns immediately) when m_michel_stem_muon_rescue is false.
         void override_michel_stem_muon(Graph& graph, Facade::Cluster& cluster, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, VertexPtr main_vertex = nullptr);
+
+        // doc sbnd_xin/docs/pr/43 round 2 K3 -- late particle-info/flag
+        // reconciliation pass; see m_pid_flag_reconcile above.  Gated
+        // internally on that knob (no-op when false).
+        void reconcile_particle_flags(Graph& graph, VertexPtr main_vertex, IndexedShowerSet& showers, ShowerVertexMap& map_vertex_in_shower, ShowerSegmentMap& map_segment_in_shower, VertexShowerSetMap& map_vertex_to_shower, ShowerIntMap& map_shower_pio_id, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model);
 
         // PCA calculation
         std::pair<Facade::geo_point_t, Facade::geo_vector_t> calc_PCA_main_axis(std::vector<Facade::geo_point_t>& points);

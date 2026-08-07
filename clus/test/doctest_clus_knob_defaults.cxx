@@ -123,6 +123,10 @@ TEST_CASE("clus knob defaults: TaggerCheckNeutrino switches are all OFF")
     CHECK_KNOB_BOOL(cfg, "michel_stem_muon_rescue", false);                   // F14
     // doc pr/44: long-muon pseudo-shower keeps its muon start segment.
     CHECK_KNOB_BOOL(cfg, "shower_long_muon_keep_type", false);
+    // doc pr/43 round 2 -- three PID-consistency knobs (K1/K2/K3).
+    CHECK_KNOB_BOOL(cfg, "single_muon_proton_chain_veto", false);
+    CHECK_KNOB_BOOL(cfg, "single_muon_long_muon_claim", false);
+    CHECK_KNOB_BOOL(cfg, "pid_flag_reconcile", false);
 
     // Numeric knobs whose legacy value is the INERT one: 0 disables the guard,
     // so an absent key leaves the code path untouched.

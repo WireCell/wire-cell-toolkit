@@ -963,6 +963,137 @@ namespace WireCell::Clus::PR {
         return false;
     }
 
+    // doc sbnd_xin/docs/pr/43 F1 -- a muon candidate is disqualified if a
+    // charge-confirmed proton terminates its own decay chain, even when the
+    // proton sits beyond the candidate's immediate far vertex.  The existing
+    // 1-hop `n_proton` check in the muon-candidate loop
+    // (NeutrinoVertexFinder.cxx examine_direction) and
+    // segment_has_proton_daughter above both look only at the segment's own
+    // far vertex; run 18255 evt 54351 has muon(54cm) -> muon-stub(2.7cm) ->
+    // proton(13cm), i.e. the proton is TWO hops from the candidate's far
+    // vertex, through a short collinear continuation segment neither check
+    // reaches.
+    //
+    // `near_vertex` is the vertex `seg` is evaluated FROM (the vertex the
+    // single-muon-per-cluster selection runs at).  The walk starts at seg's
+    // OTHER endpoint and follows through at most `max_hops` further
+    // segments, each of which must itself be a non-shower track
+    // continuation (pdg 13, pdg 0/undetermined, or already pdg 211 -- never
+    // a segment already flagged kShowerTrajectory/kShowerTopology or pdg
+    // 11) at a simple degree-2 vertex (one segment in, one out).  A vertex
+    // with any other branching (a genuine hadronic multi-prong vertex, or a
+    // shower attaching) stops the walk rather than being treated as "the
+    // same chain" -- this keeps the walk from reaching an unrelated proton
+    // sitting past a real vertex activity.  Returns true on the first
+    // charge-confirmed proton found (median dQ/dx > 1.75x MIP_dQdx, the
+    // same threshold segment_has_proton_daughter uses).
+    bool segment_chain_has_proton(Graph& graph, SegmentPtr seg, VertexPtr near_vertex, double MIP_dQdx, int max_hops) {
+        if (!near_vertex || !seg || MIP_dQdx <= 0 || max_hops <= 0) return false;
+
+        auto [v1, v2] = find_vertices(graph, seg);
+        if (!v1 || !v2) return false;
+        VertexPtr far_v = nullptr;
+        if (v1 == near_vertex) far_v = v2;
+        else if (v2 == near_vertex) far_v = v1;
+        else return false;  // seg does not emanate from near_vertex
+
+        SegmentPtr prev_seg = seg;
+        VertexPtr cur_v = far_v;
+        for (int hop = 0; hop < max_hops; ++hop) {
+            if (!cur_v || !cur_v->descriptor_valid()) return false;
+
+            SegmentPtr next_seg = nullptr;
+            int nnbr = 0;
+            for (auto edesc : sorted_out_edges(cur_v->get_descriptor(), graph)) {
+                SegmentPtr nbr = graph[edesc].segment;
+                if (!nbr || nbr == prev_seg) continue;
+                ++nnbr;
+                const bool has_pi = nbr->has_particle_info();
+                const int pdg = has_pi ? nbr->particle_info()->pdg() : 0;
+                if (has_pi && pdg == 2212) {
+                    const double median = segment_median_dQ_dx(nbr);
+                    if (median > 0 && median / MIP_dQdx > 1.75) return true;
+                }
+                const bool is_shower = nbr->flags_any(SegmentFlags::kShowerTrajectory) ||
+                                        nbr->flags_any(SegmentFlags::kShowerTopology) ||
+                                        (has_pi && std::abs(pdg) == 11);
+                if (!is_shower && (!has_pi || pdg == 13 || pdg == 211)) next_seg = nbr;
+            }
+            // Only a simple degree-2 continuation (exactly one other
+            // segment at this vertex, and it looks like more chain) is
+            // followed further; anything else -- a branching vertex, a
+            // dead end, a shower -- stops the walk here.
+            if (nnbr != 1 || !next_seg) return false;
+
+            auto [w1, w2] = find_vertices(graph, next_seg);
+            VertexPtr next_v = nullptr;
+            if (w1 == cur_v) next_v = w2;
+            else if (w2 == cur_v) next_v = w1;
+            else return false;
+
+            prev_seg = next_seg;
+            cur_v = next_v;
+        }
+        return false;
+    }
+
+    // doc sbnd_xin/docs/pr/43 F1 -- collect the same short, non-shower,
+    // degree-2 continuation chain segment_chain_has_proton walks, for
+    // relabeling every segment in a disqualified muon candidate's own chain
+    // to pion.  Without this, demoting only the head segment (e.g. 17007 in
+    // evt 54351) leaves an inconsistent muon stub (17005) between it and
+    // the proton that disqualified it -- the owner's report explicitly
+    // wants the WHOLE chain read as pion, not just its head.  The proton
+    // itself (and anything past it) is never included: `next_seg`
+    // deliberately excludes pdg 2212, so the walk stops one hop short of
+    // relabeling the proton.  Returns segments in walk order (nearest
+    // first); empty if `seg` does not emanate from `near_vertex` or no
+    // continuation exists.
+    std::vector<SegmentPtr> segment_chain_continuation(Graph& graph, SegmentPtr seg, VertexPtr near_vertex, int max_hops) {
+        std::vector<SegmentPtr> out;
+        if (!near_vertex || !seg || max_hops <= 0) return out;
+
+        auto [v1, v2] = find_vertices(graph, seg);
+        if (!v1 || !v2) return out;
+        VertexPtr far_v = nullptr;
+        if (v1 == near_vertex) far_v = v2;
+        else if (v2 == near_vertex) far_v = v1;
+        else return out;
+
+        SegmentPtr prev_seg = seg;
+        VertexPtr cur_v = far_v;
+        for (int hop = 0; hop < max_hops; ++hop) {
+            if (!cur_v || !cur_v->descriptor_valid()) return out;
+
+            SegmentPtr next_seg = nullptr;
+            int nnbr = 0;
+            for (auto edesc : sorted_out_edges(cur_v->get_descriptor(), graph)) {
+                SegmentPtr nbr = graph[edesc].segment;
+                if (!nbr || nbr == prev_seg) continue;
+                ++nnbr;
+                const bool has_pi = nbr->has_particle_info();
+                const int pdg = has_pi ? nbr->particle_info()->pdg() : 0;
+                const bool is_shower = nbr->flags_any(SegmentFlags::kShowerTrajectory) ||
+                                        nbr->flags_any(SegmentFlags::kShowerTopology) ||
+                                        (has_pi && std::abs(pdg) == 11);
+                if (!is_shower && pdg != 2212 && (!has_pi || pdg == 13 || pdg == 211)) next_seg = nbr;
+            }
+            if (nnbr != 1 || !next_seg) return out;
+
+            out.push_back(next_seg);
+
+            auto [w1, w2] = find_vertices(graph, next_seg);
+            VertexPtr next_v = nullptr;
+            if (w1 == cur_v) next_v = w2;
+            else if (w2 == cur_v) next_v = w1;
+            else return out;
+
+            prev_seg = next_seg;
+            cur_v = next_v;
+        }
+        return out;
+    }
+
     // doc sbnd_xin/docs/pr/40 round 4 F8 -- see the header comment.
     bool segment_at_multi_proton_vertex(Graph& graph, SegmentPtr seg, VertexPtr main_vertex, double MIP_dQdx, int min_protons) {
         if (!main_vertex || !seg || MIP_dQdx <= 0 || min_protons <= 0) return false;

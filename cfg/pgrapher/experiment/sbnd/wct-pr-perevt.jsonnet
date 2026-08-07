@@ -1062,6 +1062,27 @@ function(
     // only 142421 where it restores the owner-truth three-prong vertex --
     // doc pr/44).  Runner env: SBND_SHOWER_LONG_MUON_KEEP_TYPE.
     shower_long_muon_keep_type = true,
+
+    // doc pr/43 round 2 -- three PID-consistency knobs for the remaining
+    // owner cases (18255: 54351 / 56463 / 57661).  K1
+    // single_muon_proton_chain_veto: the vertex muon selection's proton veto
+    // walks the bounded degree-2 continuation chain (a muon cannot end in a
+    // proton), demoting the chain to pion and re-picking.  K2
+    // single_muon_long_muon_claim: a long-muon accumulation chain claims the
+    // vertex muon slot so a second pdg-13 arm demotes to pion.  K3
+    // pid_flag_reconcile: late reconciliation pass (post shower clustering,
+    // pre taggers) -- forced-electron terminal rescue behind a main-vertex
+    // proton chain + stale shower-flag/wrapper cleanup on confirmed tracks.
+    // C++ defaults false.  SBND PRODUCTION ON (2026-08-07): flipped per the
+    // owner's "flip if clean" policy after the round-2 gates -- G1 48/48
+    // byte-identical off, G2 3/3 owner shapes, G3 zero movement on all four
+    // nueCC48 on-arms (K1/K2/K3/all 0/48, nusel 0-diff) and a single fully
+    // attributed K2 move on ncpi0-19 (142421 stub 7023 mu- 4 -> pi+ 4 MeV).
+    // Gate arms: work-pr43r2-{off48,onK1-48,onK2-48,onK3-48,onall-48,
+    // cleanref48,off19n,onall19n}.
+    single_muon_proton_chain_veto = true,
+    single_muon_long_muon_claim = true,
+    pid_flag_reconcile = true,
 )
     local base = import 'pgrapher/experiment/sbnd/simparams.jsonnet';
     local params = base {
@@ -1232,6 +1253,9 @@ function(
                              shower_connect_protected_pion_guard=shower_connect_protected_pion_guard,
                              michel_stem_muon_rescue=michel_stem_muon_rescue,
                              shower_long_muon_keep_type=shower_long_muon_keep_type,
+                             single_muon_proton_chain_veto=single_muon_proton_chain_veto,
+                             single_muon_long_muon_claim=single_muon_long_muon_claim,
+                             pid_flag_reconcile=pid_flag_reconcile,
                              reclass_never_computed_ke_floor=reclass_never_computed_ke_floor,
                              muon_dqdx_curve=muon_dqdx_curve,
                              use_power_recomb=use_power_recomb,

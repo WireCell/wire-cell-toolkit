@@ -272,6 +272,9 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_shower_connect_protected_pion_guard       = get(config, "shower_connect_protected_pion_guard",       m_shower_connect_protected_pion_guard);
     m_michel_stem_muon_rescue                   = get(config, "michel_stem_muon_rescue",                   m_michel_stem_muon_rescue);
     m_shower_long_muon_keep_type                = get(config, "shower_long_muon_keep_type",                m_shower_long_muon_keep_type);
+    m_single_muon_proton_chain_veto             = get(config, "single_muon_proton_chain_veto",             m_single_muon_proton_chain_veto);
+    m_single_muon_long_muon_claim               = get(config, "single_muon_long_muon_claim",               m_single_muon_long_muon_claim);
+    m_pid_flag_reconcile                        = get(config, "pid_flag_reconcile",                        m_pid_flag_reconcile);
 
     if (!m_trackfitting_config_file.empty()) {
         load_trackfitting_config(m_trackfitting_config_file);
@@ -419,6 +422,9 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["shower_connect_protected_pion_guard"]       = m_shower_connect_protected_pion_guard;       // false = legacy (proton-daughter pion selectable as EM candidate)
     cfg["michel_stem_muon_rescue"]                   = m_michel_stem_muon_rescue;                   // false = legacy (Michel rescue limited to weak-dir degree-2 vertices)
     cfg["shower_long_muon_keep_type"]                = m_shower_long_muon_keep_type;                // false = legacy (long-muon pseudo-shower start segment majority-voted to e-)
+    cfg["single_muon_proton_chain_veto"]             = m_single_muon_proton_chain_veto;             // false = legacy (1-hop proton veto only)
+    cfg["single_muon_long_muon_claim"]               = m_single_muon_long_muon_claim;               // false = legacy (long-muon chain never claims the vertex muon slot)
+    cfg["pid_flag_reconcile"]                        = m_pid_flag_reconcile;                        // false = legacy (no late reconciliation pass)
 
 
     return cfg;
@@ -749,6 +755,9 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
     pattern_algos.m_shower_connect_protected_pion_guard       = m_shower_connect_protected_pion_guard;       // F13
     pattern_algos.m_michel_stem_muon_rescue                   = m_michel_stem_muon_rescue;                   // F14
     pattern_algos.m_shower_long_muon_keep_type                = m_shower_long_muon_keep_type;                // doc pr/44
+    pattern_algos.m_single_muon_proton_chain_veto             = m_single_muon_proton_chain_veto;             // doc pr/43 round 2 K1
+    pattern_algos.m_single_muon_long_muon_claim               = m_single_muon_long_muon_claim;               // doc pr/43 round 2 K2
+    pattern_algos.m_pid_flag_reconcile                        = m_pid_flag_reconcile;                        // doc pr/43 round 2 K3
     // Muon dQ/dx-vs-length envelope: c0/c1/power dimensionless, pivot cm -> internal.
     pattern_algos.m_muon_dqdx_curve = {m_muon_dqdx_curve[0], m_muon_dqdx_curve[1],
                                        m_muon_dqdx_curve[2] * units::cm, m_muon_dqdx_curve[3]};
@@ -944,6 +953,14 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
         if (m_perf) SPDLOG_LOGGER_DEBUG(log, "TaggerCheckNeutrino timing: shower_clustering_with_nv took {} ms", MS(Clock::now() - t0).count());
         t0 = Clock::now();
 
+        // doc sbnd_xin/docs/pr/43 round 2 K3 -- late particle-info/flag
+        // reconciliation, AFTER shower_clustering_with_nv and BEFORE the
+        // taggers, so tagger features, kine, Bee PF tree and PR display all
+        // see one consistent labeling.  No-op unless pid_flag_reconcile.
+        pattern_algos.reconcile_particle_flags(*pr_graph, final_main_vertex, showers,
+                                               map_vertex_in_shower, map_segment_in_shower,
+                                               map_vertex_to_shower, map_shower_pio_id,
+                                               particle_data(), m_recomb_model);
     }
 
 

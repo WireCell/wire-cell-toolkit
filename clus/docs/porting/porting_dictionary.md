@@ -914,3 +914,34 @@ fixed bug).
   pseudo-showers. (SBND 18255-142421: the ~143 cm collinear MIP chain
   7023→7024→7018, stem dQ/dx median ≈ 1.1× MIP, lost seg 7024 to the vote
   and became "e- 163 MeV" paired into the pi0.)
+
+## doc pr/43 round 2 (2026-08-07) — three PID-consistency knobs, all designed divergences
+
+- **`single_muon_proton_chain_veto`** (`NeutrinoVertexFinder.cxx`
+  `examine_direction` single-muon selection) — **designed divergence**. The
+  prototype's muon-candidate selection has no proton veto beyond the toolkit's
+  own 1-hop `n_proton` check (itself toolkit-only). Knob-on the veto walks the
+  bounded (≤3-hop) non-shower degree-2 continuation chain
+  (`segment_chain_has_proton`, restored from the rolled-back pr/43 F1); a
+  chain-vetoed candidate demotes to pion together with its continuation stubs
+  (`segment_chain_continuation`) and selection re-picks; a demote-all guard
+  falls back to legacy selection when no chain-proton-free candidate exists.
+- **`single_muon_long_muon_claim`** (same loop) — **designed divergence**, no
+  prototype counterpart: the long-muon accumulation set exists only in the
+  toolkit port. Legacy skips `segments_in_long_muon` members entirely, so the
+  long muon never claims the vertex muon slot and a second pdg-13 arm survives
+  as "the" muon; knob-on the chain claims the slot with its summed length
+  (deterministic IndexedSegmentSet order) and other arms demote to pion.
+- **`pid_flag_reconcile`** (`NeutrinoPatternBase.cxx`
+  `reconcile_particle_flags`, called from `TaggerCheckNeutrino` after
+  `shower_clustering_with_nv`, before the taggers) — **toolkit-only
+  consistency pass**, no prototype counterpart. (1) A main-vertex proton's
+  degree-2 continuation chain ending in a segment forced pdg 11 with sentinel
+  score 100 by `segment_determine_shower_direction_trajectory`'s two
+  unconditional branches gets ordinary track PID re-run; a confident
+  non-electron conclusion is adopted, its stale shower flags cleared and its
+  single-segment wrapper Shower dissolved, intermediate ≤15 cm pdg-13 stubs
+  relabel pion. (2) Main-cluster segments with confirmed track pdg
+  (13/211/2212) but stale `kShowerTrajectory`/`kShowerTopology` have the
+  flags cleared (pr/40 F7 precedent generalized); long-muon pseudo-showers
+  (cached ±13) and pi0-paired showers are exempt from dissolution.

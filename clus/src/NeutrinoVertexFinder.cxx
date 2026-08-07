@@ -1603,6 +1603,12 @@ bool PatternAlgorithms::examine_direction(Graph& graph, VertexPtr vertex, Vertex
         SegmentPtr muon_sg = nullptr;
         double muon_length = 0;
         std::vector<SegmentPtr> pion_sgs;
+        // doc pr/43 round 2 K1 bookkeeping: candidates rejected only by the
+        // chain-walk proton veto, and the winner legacy selection would have
+        // picked (the demote-all guard's fallback).
+        std::vector<SegmentPtr> chain_vetoed_sgs;
+        SegmentPtr legacy_muon_sg = nullptr;
+        double legacy_muon_length = 0;
         
         auto vd = vertex->get_descriptor();
         const auto edge_range = sorted_out_edges(vd, graph);
@@ -1613,27 +1619,64 @@ bool PatternAlgorithms::examine_direction(Graph& graph, VertexPtr vertex, Vertex
             
             int pdg = sg->has_particle_info() ? sg->particle_info()->pdg() : 0;
             if (std::abs(pdg) == 13) {
-                if (segments_in_long_muon.find(sg) != segments_in_long_muon.end()) continue;
-                
+                if (segments_in_long_muon.find(sg) != segments_in_long_muon.end()) {
+                    // doc sbnd_xin/docs/pr/43 round 2 K2 -- legacy skips the
+                    // long-muon chain entirely, so it neither competes for
+                    // nor claims the vertex muon slot and a second, shorter
+                    // pdg-13 arm survives as "the" muon (evt 56463: 14006
+                    // stays mu- next to the 411 cm chain 14005+14007).
+                    // Knob on: the chain claims the slot with its summed
+                    // length; it is never pushed to pion_sgs, so it is never
+                    // demoted itself, and other pdg-13 arms demote below.
+                    if (m_single_muon_long_muon_claim) {
+                        double chain_length = 0;
+                        for (auto lm_sg : segments_in_long_muon) {
+                            if (lm_sg && lm_sg->cluster() == &cluster)
+                                chain_length += segment_track_length(lm_sg);
+                        }
+                        if (chain_length > muon_length) {
+                            muon_length = chain_length;
+                            muon_sg = sg;
+                        }
+                    }
+                    continue;
+                }
+
                 VertexPtr other_vertex = find_other_vertex(graph, sg, vertex);
                 if (!other_vertex || !other_vertex->descriptor_valid()) continue;
-                
+
                 int n_proton = 0;
                 auto other_vd = other_vertex->get_descriptor();
                 const auto other_edge_range = sorted_out_edges(other_vd, graph);
                 for (auto oe_it : other_edge_range) {
                     SegmentPtr other_sg = graph[oe_it].segment;
-                    if (other_sg && other_sg->has_particle_info() && 
+                    if (other_sg && other_sg->has_particle_info() &&
                         std::abs(other_sg->particle_info()->pdg()) == 2212) {
                         n_proton++;
                     }
                 }
-                
+
                 double sg_length = segment_track_length(sg);
-                if (sg_length > muon_length && n_proton == 0) {
+                // doc sbnd_xin/docs/pr/43 round 2 K1 -- the 1-hop n_proton
+                // veto misses a proton behind a short degree-2 stub (evt
+                // 54351: 17007 -> 17005 -> proton 17011).  Knob on: extend
+                // the veto through the bounded continuation chain.  The
+                // demote-all guard lives after the loop: a chain-vetoed
+                // winner is only rejected if some chain-proton-free
+                // candidate exists.
+                bool chain_proton = false;
+                if (m_single_muon_proton_chain_veto && n_proton == 0 && vertex->descriptor_valid()) {
+                    chain_proton = segment_chain_has_proton(graph, sg, vertex, m_mip_dqdx_median);
+                }
+                if (sg_length > muon_length && n_proton == 0 && !chain_proton) {
                     muon_length = sg_length;
                     muon_sg = sg;
                 }
+                if (sg_length > legacy_muon_length && n_proton == 0) {
+                    legacy_muon_length = sg_length;
+                    legacy_muon_sg = sg;
+                }
+                if (chain_proton) chain_vetoed_sgs.push_back(sg);
                 pion_sgs.push_back(sg);
             } else if (pdg == 0) {
                 VertexPtr other_vertex = find_other_vertex(graph, sg, vertex);
@@ -1671,12 +1714,38 @@ bool PatternAlgorithms::examine_direction(Graph& graph, VertexPtr vertex, Vertex
         s_log->trace("examine_direction: cluster {} muon/pion selection: muon_length={:.2f}cm n_muon_candidates={} has_muon={}",
             cluster.ident(), muon_length/units::cm, (int)pion_sgs.size(), (muon_sg != nullptr));
 
+        // doc pr/43 round 2 K1 demote-all guard: if the chain veto rejected
+        // every otherwise-qualified candidate, fall back to the legacy
+        // winner rather than demoting all arms (a topology legacy would not
+        // have produced).
+        if (m_single_muon_proton_chain_veto && !muon_sg && legacy_muon_sg) {
+            muon_sg = legacy_muon_sg;
+            muon_length = legacy_muon_length;
+        }
+
         // Convert non-muon candidates to pions
         for (auto pion_sg : pion_sgs) {
             if (pion_sg == muon_sg) continue;
             auto four_momentum = segment_cal_4mom(pion_sg, 211, particle_data, recomb_model, m_mip_dqdx);
             auto pinfo = std::make_shared<Aux::ParticleInfo>(211, particle_data->get_particle_mass(211), particle_data->pdg_to_name(211), four_momentum);
             pion_sg->particle_info(pinfo);
+        }
+
+        // doc pr/43 round 2 K1 -- a chain-vetoed candidate's own
+        // continuation stubs (evt 54351: 17005, 2.7 cm, pdg 13 between the
+        // demoted 17007 and the proton) must read pion with it; demoting
+        // only the head leaves an inconsistent muon stub mid-chain.
+        if (m_single_muon_proton_chain_veto) {
+            for (auto vet_sg : chain_vetoed_sgs) {
+                if (vet_sg == muon_sg) continue;
+                for (auto chain_sg : segment_chain_continuation(graph, vet_sg, vertex)) {
+                    if (!chain_sg->has_particle_info() ||
+                        std::abs(chain_sg->particle_info()->pdg()) != 13) continue;
+                    auto four_momentum = segment_cal_4mom(chain_sg, 211, particle_data, recomb_model, m_mip_dqdx);
+                    auto pinfo = std::make_shared<Aux::ParticleInfo>(211, particle_data->get_particle_mass(211), particle_data->pdg_to_name(211), four_momentum);
+                    chain_sg->particle_info(pinfo);
+                }
+            }
         }
     }
     
