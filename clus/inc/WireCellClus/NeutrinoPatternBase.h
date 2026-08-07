@@ -220,6 +220,19 @@ namespace WireCell::Clus::PR {
         double m_cathode_x{0};
         double m_cathode_kink_xcut{0};
 
+        // Wide-baseline cathode kink accept (doc sbnd_xin/docs/pr/47 sec 8,
+        // O1).  Passed to segment_search_kink from break_segments: at a
+        // cathode-crossing fit index the shipped index-windowed refl_angle
+        // statistic is suppressed by the gap/distortion (52085: wide-baseline
+        // 33-38 deg kink measures only ~23 deg locally), so a fifth accept
+        // path fires when the skirt-excluded PCA turn angle across the
+        // crossing is >= m_cathode_wide_kink_angle degrees.  Skirt/baseline
+        // are internal-unit lengths (config takes cm).  C++ default angle 0
+        // => path never evaluated => byte-identical legacy kink search.
+        double m_cathode_wide_kink_angle{0};                 // deg; 0 = OFF
+        double m_cathode_wide_kink_skirt{3*units::cm};
+        double m_cathode_wide_kink_baseline{15*units::cm};
+
         // ---- doc sbnd_xin/docs/pr/30 §11: four port-fidelity knobs ----------
         //
         // P1 / F1 -- `flag_exclusion` on do_multi_tracking.

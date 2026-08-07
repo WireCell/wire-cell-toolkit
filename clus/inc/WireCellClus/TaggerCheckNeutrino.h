@@ -70,6 +70,14 @@ public:
         // ClusteringCathodeConnect's cathode_x uses).
         double m_cathode_x{0};
         double m_cathode_kink_xcut{0};
+        // Wide-baseline cathode kink accept (doc sbnd_xin/docs/pr/47 sec 8,
+        // O1): fifth segment_search_kink accept path at cathode-crossing fit
+        // indices, keyed on the skirt-excluded PCA turn angle across the
+        // crossing (angle in deg; skirt/baseline in cm).  angle = 0 => path
+        // never evaluated => byte-identical legacy kink search.
+        double m_cathode_wide_kink_angle{0};     // deg
+        double m_cathode_wide_kink_skirt{3};     // cm
+        double m_cathode_wide_kink_baseline{15}; // cm
         // Long shower-topology demote length, cm (doc sbnd_xin/docs/pr/25
         // sec 3).  0 => the guard never fires => byte-identical.  50 is the
         // scan-supported operating point (9/10 owner-scanned events; ~45

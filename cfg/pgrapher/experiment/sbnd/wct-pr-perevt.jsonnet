@@ -127,6 +127,19 @@ function(
     // Pass -A cathode_kink_xcut=null -A cathode_x=null for the legacy search.
     cathode_x         = 0,
     cathode_kink_xcut = 5,
+    // Wide-baseline cathode kink ACCEPT (doc pr/47 sec 8, O1), the converse
+    // of the veto above: a genuine kink AT the crossing never reaches the
+    // legacy accept thresholds (the gap/distortion suppresses every local
+    // refl_angle window -- 52085's 33-38 deg junction reads ~23 deg), so a
+    // fifth accept path fires when the skirt-excluded PCA turn angle across
+    // the crossing is >= this many degrees.  SBND DEFAULT ON (owner
+    // 2026-08-07): 25 deg, mid-gap in the bimodal census distribution (doc
+    // pr/47 sec 6).  NOT bit-identical -- doc pr/47 sec 8.
+    // Pass -A cathode_wide_kink_angle=null for the legacy search.  Skirt /
+    // baseline null = C++ defaults 3 cm / 15 cm.
+    cathode_wide_kink_angle    = 25,
+    cathode_wide_kink_skirt    = null,
+    cathode_wide_kink_baseline = null,
     // shower_topo_demote_len (cm, doc pr/25 sec 3): demote any segment the
     // topology test flags kShowerTopology whose geometric length exceeds this,
     // so it receives real track PID instead of the hard-coded pdg=11/score=100.
@@ -1212,6 +1225,9 @@ function(
                              cosmic_y_small_piece=pr_y_top - 67,
                              cathode_x=cathode_x,
                              cathode_kink_xcut=cathode_kink_xcut,
+                             cathode_wide_kink_angle=cathode_wide_kink_angle,
+                             cathode_wide_kink_skirt=cathode_wide_kink_skirt,
+                             cathode_wide_kink_baseline=cathode_wide_kink_baseline,
                              shower_topo_demote_len=shower_topo_demote_len,
                              fit_exclusion=fit_exclusion,
                              graph_endpoint_strict=graph_endpoint_strict,

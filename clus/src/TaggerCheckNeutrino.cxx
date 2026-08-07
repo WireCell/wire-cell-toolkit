@@ -78,6 +78,9 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_fit_vertex_min_seg_length = get(config, "fit_vertex_min_seg_length", m_fit_vertex_min_seg_length);  // cm
     m_cathode_x          = get(config, "cathode_x",          m_cathode_x);           // cm
     m_cathode_kink_xcut  = get(config, "cathode_kink_xcut",  m_cathode_kink_xcut);   // cm
+    m_cathode_wide_kink_angle    = get(config, "cathode_wide_kink_angle",    m_cathode_wide_kink_angle);    // deg
+    m_cathode_wide_kink_skirt    = get(config, "cathode_wide_kink_skirt",    m_cathode_wide_kink_skirt);    // cm
+    m_cathode_wide_kink_baseline = get(config, "cathode_wide_kink_baseline", m_cathode_wide_kink_baseline); // cm
     m_shower_topo_demote_len = get(config, "shower_topo_demote_len", m_shower_topo_demote_len);  // cm
     // doc sbnd_xin/docs/pr/30 §11 port-fidelity knobs.
     m_fit_exclusion            = get(config, "fit_exclusion",            m_fit_exclusion);
@@ -311,6 +314,9 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["fit_vertex_min_seg_length"] = m_fit_vertex_min_seg_length;  // cm; 0 = legacy (all segments enter the vertex fit)
     cfg["cathode_x"]         = m_cathode_x;          // cm, T0-corrected frame
     cfg["cathode_kink_xcut"] = m_cathode_kink_xcut;  // cm; 0 = legacy (the kink search sees every fit point)
+    cfg["cathode_wide_kink_angle"]    = m_cathode_wide_kink_angle;    // deg; 0 = legacy (no wide-baseline cathode accept)
+    cfg["cathode_wide_kink_skirt"]    = m_cathode_wide_kink_skirt;    // cm excluded around the crossing
+    cfg["cathode_wide_kink_baseline"] = m_cathode_wide_kink_baseline; // cm PCA baseline per arm beyond the skirt
     cfg["shower_topo_demote_len"] = m_shower_topo_demote_len;  // cm; 0 = legacy (long segments stay eligible for kShowerTopology)
     // doc sbnd_xin/docs/pr/30 §11.  Round-tripped so the compiled config
     // records the operating point; each default reproduces the pre-pr/30 tree.
@@ -667,6 +673,9 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
     pattern_algos.m_fit_vertex_min_seg_length = m_fit_vertex_min_seg_length * units::cm;  // cm -> internal
     pattern_algos.m_cathode_x         = m_cathode_x * units::cm;          // cm -> internal
     pattern_algos.m_cathode_kink_xcut = m_cathode_kink_xcut * units::cm;  // cm -> internal
+    pattern_algos.m_cathode_wide_kink_angle    = m_cathode_wide_kink_angle;                // deg, no conversion
+    pattern_algos.m_cathode_wide_kink_skirt    = m_cathode_wide_kink_skirt * units::cm;    // cm -> internal
+    pattern_algos.m_cathode_wide_kink_baseline = m_cathode_wide_kink_baseline * units::cm; // cm -> internal
     pattern_algos.m_shower_topo_demote_len = m_shower_topo_demote_len * units::cm;  // cm -> internal
     // doc sbnd_xin/docs/pr/30 §11 port-fidelity knobs.
     pattern_algos.m_fit_exclusion            = m_fit_exclusion;

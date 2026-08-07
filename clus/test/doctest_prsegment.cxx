@@ -198,3 +198,113 @@ TEST_CASE("clus pr32 F2 refresh clears the flag on a negative answer") {
     CHECK(seg->flags_any(SegmentFlags::kShowerTopology) == true);
     g_shower_traj_refresh_flag = saved;
 }
+
+// ---------------------------------------------------------------------------
+// doc pr/47 sec 8 (O1): segment_cathode_wide_kink_accepts -- the wide-baseline
+// skirt-excluded PCA turn angle across a cathode crossing.  Synthetic fit
+// trajectories with the production-like 0.6 cm point spacing.
+// ---------------------------------------------------------------------------
+namespace {
+
+// Polyline of Fits: arm A travels along dir_a and ends STEP/2 before x=0,
+// arm B starts STEP/2 after x=0 along dir_b.  Both arms arm_len long.
+// offset_b translates the whole B arm (models the transverse cathode
+// mismatch, which shifts but does not rotate the downstream arm).
+std::vector<Fit> two_arm_track(const Vector& dir_a, const Vector& dir_b,
+                               double arm_len_a, double arm_len_b,
+                               const Vector& offset_b = Vector(0, 0, 0))
+{
+    const double STEP = 0.6 * units::cm;
+    std::vector<Fit> fits;
+    auto ua = dir_a * (1.0 / dir_a.magnitude());
+    auto ub = dir_b * (1.0 / dir_b.magnitude());
+    // Arm A: from -arm_len_a (measured along ua) up to the crossing.
+    const int na = static_cast<int>(arm_len_a / STEP);
+    Point junction(0, 0, 0);
+    for (int k = na; k >= 1; k--) {
+        Fit f;
+        f.point = junction - ua * (k * STEP - STEP / 2);
+        fits.push_back(f);
+    }
+    // Arm B: from the crossing outward.
+    const int nb = static_cast<int>(arm_len_b / STEP);
+    for (int k = 1; k <= nb; k++) {
+        Fit f;
+        f.point = junction + ub * (k * STEP - STEP / 2) + offset_b;
+        fits.push_back(f);
+    }
+    return fits;
+}
+
+} // namespace
+
+TEST_CASE("clus pr47 wide kink: straight through-going track never fires") {
+    auto fits = two_arm_track(Vector(1, 0.2, 0.1), Vector(1, 0.2, 0.1),
+                              30 * units::cm, 30 * units::cm);
+    auto acc = segment_cathode_wide_kink_accepts(fits, 0, 25.0,
+                                                 3 * units::cm, 15 * units::cm);
+    CHECK(acc.empty());
+}
+
+TEST_CASE("clus pr47 wide kink: 35 deg kink at the crossing fires at 25, not 40") {
+    const double th = 35.0 * M_PI / 180.0;
+    auto fits = two_arm_track(Vector(1, 0, 0),
+                              Vector(std::cos(th), std::sin(th), 0),
+                              30 * units::cm, 30 * units::cm);
+    auto acc25 = segment_cathode_wide_kink_accepts(fits, 0, 25.0,
+                                                   3 * units::cm, 15 * units::cm);
+    REQUIRE(acc25.size() == 1);
+    // Contract: interior index, stepped clear of the |x| < 0.5 cm slab.
+    CHECK(acc25[0] > 0);
+    CHECK(acc25[0] + 1 < fits.size());
+    CHECK(std::abs(fits[acc25[0]].point.x()) >= 0.5 * units::cm);
+    // Well below the crossing-adjacent band edge (5 cm veto band).
+    CHECK(std::abs(fits[acc25[0]].point.x()) < 2.0 * units::cm);
+
+    auto acc40 = segment_cathode_wide_kink_accepts(fits, 0, 40.0,
+                                                   3 * units::cm, 15 * units::cm);
+    CHECK(acc40.empty());
+}
+
+TEST_CASE("clus pr47 wide kink: pure transverse offset does not fake a kink") {
+    // Straight track, downstream arm shifted 1.5 cm in y across the gap --
+    // the data-scale cathode mismatch.  A translation does not rotate a PCA
+    // axis, so the turn angle stays ~0 and nothing fires.
+    auto fits = two_arm_track(Vector(1, 0.2, 0.1), Vector(1, 0.2, 0.1),
+                              30 * units::cm, 30 * units::cm,
+                              Vector(0, 1.5 * units::cm, 0));
+    auto acc = segment_cathode_wide_kink_accepts(fits, 0, 25.0,
+                                                 3 * units::cm, 15 * units::cm);
+    CHECK(acc.empty());
+}
+
+TEST_CASE("clus pr47 wide kink: bends inside the skirt are excluded") {
+    // Straight arms beyond 3 cm; corrupt every point within the 3 cm skirt
+    // with a large transverse zig.  The windowed PCA never sees them.
+    auto fits = two_arm_track(Vector(1, 0, 0), Vector(1, 0, 0),
+                              30 * units::cm, 30 * units::cm);
+    for (auto& f : fits) {
+        if (std::abs(f.point.x()) < 3 * units::cm) {
+            f.point += Vector(0, 1.0 * units::cm, 0);
+        }
+    }
+    auto acc = segment_cathode_wide_kink_accepts(fits, 0, 25.0,
+                                                 3 * units::cm, 15 * units::cm);
+    CHECK(acc.empty());
+}
+
+TEST_CASE("clus pr47 wide kink: short arm cannot fire; angle 0 disables") {
+    const double th = 35.0 * M_PI / 180.0;
+    // Downstream arm only 4 cm: past the 3 cm skirt there are < 3 points.
+    auto fits_short = two_arm_track(Vector(1, 0, 0),
+                                    Vector(std::cos(th), std::sin(th), 0),
+                                    30 * units::cm, 4 * units::cm);
+    CHECK(segment_cathode_wide_kink_accepts(fits_short, 0, 25.0,
+                                            3 * units::cm, 15 * units::cm).empty());
+    // angle_cut <= 0 is the OFF switch, even for a hard kink.
+    auto fits_kink = two_arm_track(Vector(1, 0, 0),
+                                   Vector(std::cos(th), std::sin(th), 0),
+                                   30 * units::cm, 30 * units::cm);
+    CHECK(segment_cathode_wide_kink_accepts(fits_kink, 0, 0.0,
+                                            3 * units::cm, 15 * units::cm).empty());
+}

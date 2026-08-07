@@ -137,6 +137,11 @@ TEST_CASE("clus knob defaults: TaggerCheckNeutrino switches are all OFF")
     CHECK_KNOB_NUM(cfg, "fit_vertex_min_seg_length", 0.0);   // 0 = all segments enter the fit
     CHECK_KNOB_NUM(cfg, "cathode_x", 0.0);
     CHECK_KNOB_NUM(cfg, "cathode_kink_xcut", 0.0);           // 0 = kink search sees every fit point
+    // doc pr/47: wide-baseline cathode kink accept.  angle 0 = path never
+    // evaluated; skirt/baseline are inert until the angle knob opens it.
+    CHECK_KNOB_NUM(cfg, "cathode_wide_kink_angle", 0.0);
+    CHECK_KNOB_NUM(cfg, "cathode_wide_kink_skirt", 3.0);
+    CHECK_KNOB_NUM(cfg, "cathode_wide_kink_baseline", 15.0);
     CHECK_KNOB_NUM(cfg, "shower_topo_demote_len", 0.0);      // 0 = long segments stay shower-eligible
     CHECK_KNOB_NUM(cfg, "nu_skip_cosmic_bundle_min_length", 0.0);
     CHECK_KNOB_NUM(cfg, "cosmic_companion_min_length", 0.0);

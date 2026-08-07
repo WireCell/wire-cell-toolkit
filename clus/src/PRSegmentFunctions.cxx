@@ -11,6 +11,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <numeric>
+#include <set>
 #include <algorithm>
 
 static auto s_log = WireCell::Log::logger("clus.NeutrinoPattern");
@@ -190,7 +191,83 @@ namespace WireCell::Clus::PR {
         return std::get<0>(dpc->get_closest_2d_point_info(point, plane, face, apa));
     }
 
-    std::tuple<WireCell::Point, WireCell::Vector, WireCell::Vector, bool> segment_search_kink(SegmentPtr seg, WireCell::Point& start_p, const std::string& cloud_name, double dQ_dx_threshold, double cathode_x, double cathode_kink_xcut){
+    std::vector<size_t> segment_cathode_wide_kink_accepts(
+        const std::vector<Fit>& fits, double cathode_x, double angle_cut_deg,
+        double skirt, double baseline)
+    {
+        std::vector<size_t> accepts;
+        if (angle_cut_deg <= 0 || fits.size() < 3) return accepts;
+
+        // Cumulative arclength along the full fit trajectory.
+        std::vector<double> cum(fits.size(), 0);
+        for (size_t k = 1; k < fits.size(); k++) {
+            cum[k] = cum[k-1] + (fits[k].point - fits[k-1].point).magnitude();
+        }
+
+        for (size_t ic = 0; ic + 1 < fits.size(); ic++) {
+            const double xa = fits[ic].point.x() - cathode_x;
+            const double xb = fits[ic+1].point.x() - cathode_x;
+            // Sign change between consecutive fit points = a cathode crossing
+            // (either direction; a point exactly on the plane counts to the
+            // arm it is listed with, matching the census script).
+            if (!((xa <= 0 && xb > 0) || (xa >= 0 && xb < 0))) continue;
+
+            // Collect each arm's points with arclength from fits[ic] inside
+            // [skirt, skirt+baseline], staying on that arm's side of the
+            // plane.  Both lists are in increasing-index (direction-of-
+            // travel) order.
+            std::vector<Facade::geo_point_t> pts_a, pts_b;
+            for (size_t k = 0; k <= ic; k++) {
+                const double d = cum[ic] - cum[k];
+                if (d < skirt || d > skirt + baseline) continue;
+                const double xk = fits[k].point.x() - cathode_x;
+                if ((xa <= 0) ? (xk <= 0) : (xk >= 0)) pts_a.push_back(fits[k].point);
+            }
+            for (size_t k = ic + 1; k < fits.size(); k++) {
+                const double d = cum[k] - cum[ic];
+                if (d < skirt || d > skirt + baseline) continue;
+                const double xk = fits[k].point.x() - cathode_x;
+                if ((xb > 0) ? (xk >= 0) : (xk <= 0)) pts_b.push_back(fits[k].point);
+            }
+            if (pts_a.size() < 3 || pts_b.size() < 3) continue;
+
+            // PCA direction per arm.  calc_pca_dir takes the center as INPUT
+            // (it does not compute a centroid) and returns a normalized axis
+            // with no sign convention -- orient each along its own arm's
+            // chord so both follow the direction of travel; a straight track
+            // then gives ~0 deg.
+            Facade::geo_point_t cen_a(0,0,0), cen_b(0,0,0);
+            for (const auto& p : pts_a) cen_a += p;
+            for (const auto& p : pts_b) cen_b += p;
+            cen_a = cen_a * (1.0 / pts_a.size());
+            cen_b = cen_b * (1.0 / pts_b.size());
+            auto va = Facade::calc_pca_dir(cen_a, pts_a);
+            auto vb = Facade::calc_pca_dir(cen_b, pts_b);
+            if (va.dot(pts_a.back() - pts_a.front()) < 0) va = va * -1.0;
+            if (vb.dot(pts_b.back() - pts_b.front()) < 0) vb = vb * -1.0;
+            const double ang = std::acos(std::max(-1.0, std::min(1.0, va.dot(vb)))) / M_PI * 180.0;
+            if (ang < angle_cut_deg) continue;
+
+            // Accept at the crossing-adjacent index farther from the plane;
+            // step outward while still within 0.5 cm of it -- the
+            // |x| < 0.45 cm active-volume slab hole would reject a vertex
+            // fitted there (doc pr/47 sec 5).
+            const bool lower = std::abs(xa) >= std::abs(xb);
+            size_t acc = lower ? ic : ic + 1;
+            const double slab_clear = 0.5 * units::cm;
+            for (int step = 0; step < 2 && std::abs(fits[acc].point.x() - cathode_x) < slab_clear; step++) {
+                if (lower) { if (acc == 0) break; acc--; }
+                else       { if (acc + 2 >= fits.size()) break; acc++; }
+            }
+            // segment_search_kink's success path requires 0 < save_i < size-1.
+            if (acc == 0) acc = 1;
+            if (acc + 1 >= fits.size()) acc = fits.size() - 2;
+            accepts.push_back(acc);
+        }
+        return accepts;
+    }
+
+    std::tuple<WireCell::Point, WireCell::Vector, WireCell::Vector, bool> segment_search_kink(SegmentPtr seg, WireCell::Point& start_p, const std::string& cloud_name, double dQ_dx_threshold, double cathode_x, double cathode_kink_xcut, double cathode_wide_kink_angle, double cathode_wide_kink_skirt, double cathode_wide_kink_baseline){
         auto tmp_results = segment_get_closest_point(seg, start_p, cloud_name);
         WireCell::Point test_p = tmp_results.second;
 
@@ -206,6 +283,19 @@ namespace WireCell::Clus::PR {
             WireCell::Point p1 = WireCell::Point(0,0,0);
             WireCell::Vector dir(0,0,0);
             return std::make_tuple(p1, dir, dir, false);
+        }
+
+        // Wide-baseline cathode kink accept set (doc pr/47 sec 8, O1).  Empty
+        // and never computed when the knob is off (angle <= 0) -- the legacy
+        // search below is then byte-identical.  Keyed by fit index: ordered,
+        // deterministic (no pointer-keyed iteration).
+        std::set<size_t> wide_accepts;
+        if (cathode_wide_kink_angle > 0) {
+            for (size_t idx : segment_cathode_wide_kink_accepts(
+                     fits, cathode_x, cathode_wide_kink_angle,
+                     cathode_wide_kink_skirt, cathode_wide_kink_baseline)) {
+                wide_accepts.insert(idx);
+            }
         }
 
         std::vector<double> refl_angles(fits.size(), 0);
@@ -296,6 +386,18 @@ namespace WireCell::Clus::PR {
                 dist_to_start < 1*units::cm) continue;
 
             if (flag_check) {
+                // Wide-baseline cathode kink accept (doc pr/47 sec 8, O1).
+                // Evaluated BEFORE the pr/20 veto so it works whether or not
+                // the veto is on; the set only ever holds near-cathode
+                // crossing indices, so nothing changes away from the cathode.
+                // The accepted index then flows through the identical
+                // post-accept machinery (direction averaging, straightness /
+                // flag_switch, local dQ/dx) as the four legacy criteria.
+                if (cathode_wide_kink_angle > 0 && wide_accepts.count(i)) {
+                    save_i = i;
+                    break;
+                }
+
                 // Cathode veto (doc pr/20 Part II, B0).  Gate ONLY the four accept
                 // tests below: refl_angles/para_angles and the windowed sum_angles
                 // are untouched, and the loop breaks at the first qualifying index,

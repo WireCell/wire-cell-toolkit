@@ -30,7 +30,40 @@ namespace WireCell::Clus::PR {
     // protect isochronous imaging artifacts) is wide open because the crossing is
     // drift-x dominated -- see sbnd_xin/docs/pr/20 Part II.  Default 0 = no point
     // is ever skipped = byte-identical to the pre-pr/20 behavior.
-    std::tuple<WireCell::Point, WireCell::Vector, WireCell::Vector, bool> segment_search_kink(SegmentPtr seg, WireCell::Point& start_p, const std::string& cloud_name = "fit", double dQ_dx_threshold = 43000/units::cm, double cathode_x = 0, double cathode_kink_xcut = 0 );
+    //
+    // cathode_wide_kink_angle > 0 adds a fifth accept path at cathode-crossing
+    // fit indices only (doc sbnd_xin/docs/pr/47 sec 8, option O1): the shipped
+    // index-windowed refl_angle statistic (min over 2-12-point lever arms) is
+    // suppressed by the cathode gap/distortion, so a genuine kink AT the
+    // crossing can never reach the legacy thresholds there.  The new test
+    // measures the skirt-excluded wide-baseline PCA turn angle across the
+    // crossing (segment_cathode_wide_kink_accepts below) and accepts when it
+    // is >= cathode_wide_kink_angle degrees.  Default 0 = path fully disabled
+    // = byte-identical legacy search.  New algorithm, no prototype counterpart.
+    std::tuple<WireCell::Point, WireCell::Vector, WireCell::Vector, bool> segment_search_kink(SegmentPtr seg, WireCell::Point& start_p, const std::string& cloud_name = "fit", double dQ_dx_threshold = 43000/units::cm, double cathode_x = 0, double cathode_kink_xcut = 0, double cathode_wide_kink_angle = 0, double cathode_wide_kink_skirt = 3*units::cm, double cathode_wide_kink_baseline = 15*units::cm );
+
+    /// Wide-baseline cathode kink test (doc sbnd_xin/docs/pr/47 sec 8, O1).
+    ///
+    /// For every cathode crossing of the fit trajectory (consecutive fit
+    /// points straddling x = cathode_x), fit a PCA direction to each arm over
+    /// the arclength window [skirt, skirt+baseline] measured from the
+    /// crossing (points within the skirt are EXCLUDED -- that is where the
+    /// transverse cathode distortion lives), orient both directions along the
+    /// direction of travel, and take the angle between them: ~0 deg for a
+    /// straight through-going track, independent of any pure transverse
+    /// offset between the two arms (a translation does not rotate a PCA
+    /// axis).  A crossing with < 3 points in either arm's window never fires.
+    /// Returns the accepted fit indices: per firing crossing, the
+    /// crossing-adjacent index with the larger |x - cathode_x|, stepped
+    /// outward (up to 2 indices) to clear the |x| < 0.45 cm active-volume
+    /// slab hole, clamped to segment_search_kink's accept contract
+    /// 0 < i < fits.size()-1.  Same statistic as the doc pr/47 census script
+    /// (scripts/analysis/pr47/cathode_junction_census.py, skirt_turn_angle).
+    /// All lengths in internal units; angle_cut_deg in degrees; angle_cut_deg
+    /// <= 0 returns empty.
+    std::vector<size_t> segment_cathode_wide_kink_accepts(
+        const std::vector<Fit>& fits, double cathode_x, double angle_cut_deg,
+        double skirt, double baseline);
 
     /// Calculate track length from segment
     ///
