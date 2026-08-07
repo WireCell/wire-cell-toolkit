@@ -792,7 +792,7 @@ TEST_CASE("clus knob defaults: PrDisplayDump is registered and inert by default"
 // MultiAlgBlobClustering BeePFConfig -- the particle-flow (Bee "mc" tree)
 // display knobs.  These are in-class initializers on a nested struct rather
 // than default_configuration() keys, so pin the struct directly.  Closes the
-// gap where none of the pf_* switches were pinned (doc pr/38 Round 3).
+// gap where none of the pf_* switches were pinned (doc pr/38 Round 4).
 // ---------------------------------------------------------------------------
 
 #include "WireCellClus/MultiAlgBlobClustering.h"
@@ -808,5 +808,5 @@ TEST_CASE("clus knob defaults: MultiAlgBlobClustering BeePFConfig pf switches ar
     CHECK(pfc.pf_shower_parent_precedence == false);     // doc pr/34 F3
     CHECK(pfc.pf_pi0_node_per_id == false);              // doc pr/34 F4
     CHECK(pfc.pf_pdg_name_prototype_fallback == false);  // doc pr/34 F5
-    CHECK(pfc.pf_orphan_track_parentage == false);       // doc pr/38 Round 3
+    CHECK(pfc.pf_orphan_track_parentage == false);       // doc pr/38 Round 4
 }

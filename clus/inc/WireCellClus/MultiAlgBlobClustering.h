@@ -208,7 +208,7 @@ namespace WireCell::Clus {
             // name table plus the prototype's numeric fallback
             // (WCReader.cc:529-547) instead of "particle".
             bool pf_pdg_name_prototype_fallback{false};
-            // ---- doc sbnd_xin/docs/pr/38 Round 3 ----
+            // ---- doc sbnd_xin/docs/pr/38 Round 4 ----
             // pf_orphan_track_parentage: upgrade the pf_shower_vertex_barrier
             // orphan safety net from flat root-leaves to graph-faithful
             // parentage.  An orphan whose endpoint vertex carries a claimed

@@ -333,7 +333,7 @@ void MultiAlgBlobClustering::configure(const WireCell::Configuration& cfg)
             pfc.pf_shower_parent_precedence = get<bool>(pf, "pf_shower_parent_precedence", false);
             pfc.pf_pi0_node_per_id = get<bool>(pf, "pf_pi0_node_per_id", false);
             pfc.pf_pdg_name_prototype_fallback = get<bool>(pf, "pf_pdg_name_prototype_fallback", false);
-            // doc pr/38 Round 3; absent => legacy flat orphan roots, byte-identical.
+            // doc pr/38 Round 4; absent => legacy flat orphan roots, byte-identical.
             pfc.pf_orphan_track_parentage = get<bool>(pf, "pf_orphan_track_parentage", false);
             m_bee_pf_configs.push_back(pfc);
             m_bee_pf_trees[pfc.name] = Bee::ParticleTree(pfc.name);
@@ -1327,7 +1327,7 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
     std::vector<std::pair<PR::ShowerPtr,PR::VertexPtr>> root_direct_showers;
     std::vector<std::pair<PR::ShowerPtr,PR::VertexPtr>> root_indirect_showers;
 
-    // doc pr/38 Round 3 (pf_orphan_track_parentage): orphan TRACK segments
+    // doc pr/38 Round 4 (pf_orphan_track_parentage): orphan TRACK segments
     // anchored at a vertex inside a shower's view attach as children of that
     // shower's displayed leaf.  Filled by the anchoring pass below (after the
     // shower-attachment loop), read by make_shower_leaf.  Empty when the knob
@@ -1501,7 +1501,7 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
         return cl ? cl->get_cluster_id() * 1000 + sid : sid;
     };
 
-    // doc pr/38 Round 3 (pf_orphan_track_parentage): graph-faithful parentage
+    // doc pr/38 Round 4 (pf_orphan_track_parentage): graph-faithful parentage
     // for barrier-orphaned track segments.  The flat safety net below emits
     // every BFS-unreached segment as a parentless, childless root -- even when
     // the graph chains it off a claimed track (pi+ -> proton at a shared
@@ -1671,7 +1671,7 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
                        ind_it != shower_indirect_showers.end() ? ind_it->second : empty_showers,
                        svtx);
 
-        // doc pr/38 Round 3 (pf_orphan_track_parentage): orphan TRACK
+        // doc pr/38 Round 4 (pf_orphan_track_parentage): orphan TRACK
         // segments anchored inside this shower's view render as its children
         // (single funnel point -- covers direct leaves, pseudo-gamma wrappers
         // and pi0-grouped leaves alike).  Same KeepMC convention as

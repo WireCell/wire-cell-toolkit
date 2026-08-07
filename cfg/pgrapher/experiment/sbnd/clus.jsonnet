@@ -718,7 +718,7 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               pf_shower_parent_precedence=false,
               pf_pi0_node_per_id=false,
               pf_pdg_name_prototype_fallback=false,
-              // doc pr/38 Round 3: graph-faithful parentage for barrier-orphaned
+              // doc pr/38 Round 4: graph-faithful parentage for barrier-orphaned
               // PF track segments.  C++ default false; key omitted when off =>
               // byte-identical pre-knob config.  Display-only (mc.json).
               pf_orphan_track_parentage=false,
@@ -2036,7 +2036,7 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
                     [if pf_shower_parent_precedence then 'pf_shower_parent_precedence']: true,
                     [if pf_pi0_node_per_id then 'pf_pi0_node_per_id']: true,
                     [if pf_pdg_name_prototype_fallback then 'pf_pdg_name_prototype_fallback']: true,
-                    // doc pr/38 Round 3.  C++ default false; key omitted when
+                    // doc pr/38 Round 4.  C++ default false; key omitted when
                     // off => byte-identical pre-knob config.
                     [if pf_orphan_track_parentage then 'pf_orphan_track_parentage']: true,
                 },
@@ -2138,7 +2138,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
        pf_shower_parent_precedence=false,
        pf_pi0_node_per_id=false,
        pf_pdg_name_prototype_fallback=false,
-       // doc pr/38 Round 3; false = C++ default = OFF, key omitted =>
+       // doc pr/38 Round 4; false = C++ default = OFF, key omitted =>
        // byte-identical.  See clus_pr.
        pf_orphan_track_parentage=false,
        // doc pr/20 Part I P2; null = C++ default false = OFF.  See clus_pr.

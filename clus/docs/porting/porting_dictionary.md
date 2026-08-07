@@ -882,7 +882,7 @@ single-muon selection, its own honest call being a second muon); 54341 →
 its own charge-based call, the baseline `pi+` having been derivative of the
 fixed bug).
 
-## doc pr/38 Round 3 + doc pr/44 (2026-08-07) — PF orphan parentage + long-muon vote skip
+## doc pr/38 Round 4 + doc pr/44 (2026-08-07) — PF orphan parentage + long-muon vote skip
 
 - **`pf_orphan_track_parentage`** (`MultiAlgBlobClustering::fill_bee_pf_tree`,
   bee_pf block; inert without `pf_shower_vertex_barrier`) — the pr/38 orphan

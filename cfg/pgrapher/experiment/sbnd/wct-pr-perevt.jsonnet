@@ -763,14 +763,14 @@ function(
     pf_shower_parent_precedence = true,
     pf_pi0_node_per_id = true,
     pf_pdg_name_prototype_fallback = true,
-    // doc pr/38 Round 3 pf_orphan_track_parentage: graph-faithful parentage
+    // doc pr/38 Round 4 pf_orphan_track_parentage: graph-faithful parentage
     // for barrier-orphaned PF track segments (a guard-excluded muon that
     // continues an EM arm attaches under that shower's leaf; a proton behind
     // an orphaned pi+ chains under the pi+; SBND 18255-142421 segs
     // 7011/7012/7018).  Display-only: moves ONLY mc.json.  C++ default
     // false.  SBND PRODUCTION DEFAULT ON (gate work-pr44-off48 vs
     // pr43_cleanhead_ref48b 48/48 + nusel 0-diff; on-census 1/48 nueCC48 +
-    // 4/19 ncpi0 events, every move an attributed re-parent -- doc pr/38 R3
+    // 4/19 ncpi0 events, every move an attributed re-parent -- doc pr/38 R4
     // + doc pr/44).  Runner env: SBND_PF_ORPHAN_TRACK_PARENTAGE.
     pf_orphan_track_parentage = true,
     // doc pr/38: F2's ON-behavior was CORRECTED in place (owner decision
