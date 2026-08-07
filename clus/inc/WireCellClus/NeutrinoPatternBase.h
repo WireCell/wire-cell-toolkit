@@ -326,6 +326,30 @@ namespace WireCell::Clus::PR {
         // C++ default true => byte-identical.
         bool   m_other_seg_relaxed_accept{true};
 
+        // doc sbnd_xin/docs/pr/45 -- empty-2D-tree sentinel guard in
+        // find_other_segments (SBND 18255-56463 cluster 14, the 30 cm
+        // isochronous tail beyond segment 14006's end).
+        //
+        // DynamicPointCloud::get_closest_2d_point_info returns distance
+        // -1.0 when the per-(plane,face,apa) 2D kd-tree is empty
+        // (DynamicPointCloud.cxx knn empty-result branch), which happens for
+        // any segment with zero fit points on the queried face -- routine in
+        // SBND cathode-crossing clusters.  find_other_segments compares that
+        // sentinel against thresholds as if it were a real distance:
+        // -1 < scaling_2d*search_range "covers" all three planes at once, so
+        // ONE far-TPC segment tags the ENTIRE near face as explained and no
+        // residual component can ever form there (measured: all 194 tail-box
+        // steiner points tagged with u=v=w=-1, 3D distance 3.9-28.9 cm).
+        // The prototype cannot hit this: uBooNE is single-face, so
+        // ProtoSegment::get_closest_2d_dis always has points.  Toolkit-only
+        // port divergence, not a prototype limitation.
+        // When ON, a negative 2D distance in find_other_segments' three
+        // comparison sites (tagging loop, component not_faked census,
+        // re-evaluation loop) is treated as "no projection information"
+        // (1e9) instead of "distance zero".
+        // C++ default false => byte-identical legacy behaviour.
+        bool   m_other_seg_empty_2d_guard{false};
+
         // doc sbnd_xin/docs/pr/31 §11 -- F2 (was P2): the stage-3 shower
         // direction call site that has no prototype counterpart.
         //

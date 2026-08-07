@@ -1083,6 +1083,25 @@ function(
     single_muon_proton_chain_veto = true,
     single_muon_long_muon_claim = true,
     pid_flag_reconcile = true,
+    // doc pr/45 (18255-56463 follow-ups).  other_seg_empty_2d_guard: in
+    // find_other_segments a segment with zero fit points on the queried face
+    // returns the -1.0 empty-2D-tree sentinel, which counts as "distance
+    // zero" and lets ONE far-TPC segment tag the entire near face as
+    // explained -- the 30 cm isochronous tail beyond segment 14006 could
+    // never seed a residual component.  pseudo_shower_track_paint: the Bee
+    // shower_track layer painted the 411 cm cathode-crossing muon red
+    // because paint reads shower MEMBERSHIP while the PF tree reads the
+    // shower's cached type (mu-); muon-typed (+-13) pseudo-showers now paint
+    // as track.  C++ defaults false.  SBND PRODUCTION ON (2026-08-07):
+    // flipped per the owner's standing "flip if clean" policy -- G1 96/96 +
+    // 38/38 byte-identical off; guard: nueCC48 0/48 (archive-level),
+    // mcp1k-200 3/200 all attributed (cathode-crossing clusters, new/
+    // re-formed segments: 276836, 404684, 407280), nusel 0-diff; paint:
+    // display-only, 0 PF movers, 2/48 nueCC48 shower_track q flips
+    // (137238, 400474), nusel 0-diff.  Gate arms work-pr45-{off48,onA48,
+    // onB48,off19n,m200on,m200onA,m200off}.  Doc pr/45.
+    other_seg_empty_2d_guard = true,
+    pseudo_shower_track_paint = true,
 )
     local base = import 'pgrapher/experiment/sbnd/simparams.jsonnet';
     local params = base {
@@ -1256,6 +1275,8 @@ function(
                              single_muon_proton_chain_veto=single_muon_proton_chain_veto,
                              single_muon_long_muon_claim=single_muon_long_muon_claim,
                              pid_flag_reconcile=pid_flag_reconcile,
+                             other_seg_empty_2d_guard=other_seg_empty_2d_guard,
+                             pseudo_shower_track_paint=pseudo_shower_track_paint,
                              reclass_never_computed_ke_floor=reclass_never_computed_ke_floor,
                              muon_dqdx_curve=muon_dqdx_curve,
                              use_power_recomb=use_power_recomb,

@@ -258,6 +258,7 @@ void MultiAlgBlobClustering::configure(const WireCell::Configuration& cfg)
             bpc.require_pr_graph   = get<bool>(bps, "require_pr_graph", false);
             // Prototype-parity options; absent => false => byte-identical legacy output.
             bpc.particle_ids = get<bool>(bps, "particle_ids", false);
+            bpc.pseudo_shower_track_paint = get<bool>(bps, "pseudo_shower_track_paint", false);
             bpc.include_vertex_points = get<bool>(bps, "include_vertex_points", false);
             // Dump this set at the pre-clustering point (like the special "img"
             // set) even if its name isn't "img".  Absent => false => legacy
@@ -861,10 +862,19 @@ void MultiAlgBlobClustering::fill_bee_points_from_pr_graph(const std::string& na
             // by the clustering step. Fall back to per-segment flags only for segments
             // that are not part of any shower (standalone shower-like segments).
             auto shower_it = seg_to_shower.find(segment);
-            const bool is_shower = (shower_it != seg_to_shower.end()) ||
+            bool is_shower = (shower_it != seg_to_shower.end()) ||
                 segment->flags_any(PR::SegmentFlags::kShowerTrajectory) ||
                 segment->flags_any(PR::SegmentFlags::kShowerTopology) ||
                 (segment->has_particle_info() && std::abs(segment->particle_info()->pdg()) == 11);
+            // A long-muon pseudo-shower (Shower::get_particle_type() == +-13)
+            // is displayed as a muon by the PF tree (make_shower_leaf reads
+            // the same cached type); paint its points as track for
+            // consistency.  Overrides all disjuncts: the PF verdict is the
+            // shower's cached type.  Doc sbnd_xin/docs/pr/45.
+            if (config.pseudo_shower_track_paint && shower_it != seg_to_shower.end() &&
+                std::abs(shower_it->second->get_particle_type()) == 13) {
+                is_shower = false;
+            }
             const double charge = is_shower ? 15000.0 : 0.0;
 
             auto dpc = segment->dpcloud("associate_points");

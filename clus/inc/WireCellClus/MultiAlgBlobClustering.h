@@ -100,6 +100,16 @@ namespace WireCell::Clus {
             // every non-shower segment gets cluster_id*1000 + seg id instead of
             // the plain cluster_id collapse.
             bool particle_ids{false};
+            // pseudo_shower_track_paint: with use_associate_points, a segment
+            // belonging to a shower whose cached particle type is +-13 (a
+            // long-muon pseudo-shower, seeded from segments_in_long_muon) is
+            // painted as TRACK (q=0) instead of shower (q=15000).  The PF tree
+            // (make_shower_leaf) displays the same shower as "mu-" from the
+            // same cached field, so the legacy membership-first paint is
+            // provably inconsistent for this class (doc sbnd_xin/docs/pr/45,
+            // SBND 18255-56463: 411 cm cathode-crossing muon painted red).
+            // Default false => legacy paint, byte-identical.
+            bool pseudo_shower_track_paint{false};
             // include_vertex_points: PR-graph edge dumps (track_fit) also append
             // each vertex fit point with real_cluster_id=-1 (prototype
             // fill_skeleton_info_magnify vertex rows).

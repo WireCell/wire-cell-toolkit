@@ -86,6 +86,8 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_oov_prototype_parity     = get(config, "oov_prototype_parity",     m_oov_prototype_parity);
     m_first_seg_local_pca      = get(config, "first_seg_local_pca",      m_first_seg_local_pca);
     m_other_seg_relaxed_accept = get(config, "other_seg_relaxed_accept", m_other_seg_relaxed_accept);
+    // doc sbnd_xin/docs/pr/45 -- find_other_segments empty-2D-tree sentinel guard.
+    m_other_seg_empty_2d_guard = get(config, "other_seg_empty_2d_guard", m_other_seg_empty_2d_guard);
     // doc sbnd_xin/docs/pr/31 §11 port-fidelity knob (F2, was P2).
     m_shower_topo_proto_dir    = get(config, "shower_topo_proto_dir",    m_shower_topo_proto_dir);
     // doc sbnd_xin/docs/pr/32 §11 port-fidelity knobs (F1-F4).
@@ -317,6 +319,7 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["oov_prototype_parity"]     = m_oov_prototype_parity;      // false = legacy (today's three polarities)
     cfg["first_seg_local_pca"]      = m_first_seg_local_pca;       // true  = legacy (the refinement runs)
     cfg["other_seg_relaxed_accept"] = m_other_seg_relaxed_accept;  // true  = legacy (the 0.72/15cm/1.05 clause is live)
+    cfg["other_seg_empty_2d_guard"] = m_other_seg_empty_2d_guard;  // false = legacy (-1 sentinel counts as covered)
     // doc sbnd_xin/docs/pr/31 §11.
     cfg["shower_topo_proto_dir"]    = m_shower_topo_proto_dir;     // false = legacy (the stage-3 PCA direction call runs)
     // doc sbnd_xin/docs/pr/32 §11.
@@ -670,6 +673,8 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
     pattern_algos.m_oov_prototype_parity     = m_oov_prototype_parity;
     pattern_algos.m_first_seg_local_pca      = m_first_seg_local_pca;
     pattern_algos.m_other_seg_relaxed_accept = m_other_seg_relaxed_accept;
+    // doc sbnd_xin/docs/pr/45.
+    pattern_algos.m_other_seg_empty_2d_guard = m_other_seg_empty_2d_guard;
     // doc sbnd_xin/docs/pr/31 §11 (F2).
     pattern_algos.m_shower_topo_proto_dir    = m_shower_topo_proto_dir;
     // doc sbnd_xin/docs/pr/32 §11 (F1-F4).

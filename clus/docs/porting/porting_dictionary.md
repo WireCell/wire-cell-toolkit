@@ -945,3 +945,31 @@ fixed bug).
   (13/211/2212) but stale `kShowerTrajectory`/`kShowerTopology` have the
   flags cleared (pr/40 F7 precedent generalized); long-muon pseudo-showers
   (cached ±13) and pi0-paired showers are exempt from dissolution.
+
+## doc pr/45 (2026-08-07) — empty-2D-tree sentinel guard + pseudo-shower paint
+
+- **`other_seg_empty_2d_guard`** (`NeutrinoOtherSegments.cxx`
+  `find_other_segments`, three 2D-comparison sites) — **toolkit-only bug
+  guard**, not a prototype limitation.
+  `DynamicPointCloud::get_closest_2d_point_info` returns −1.0 when the
+  per-(plane,face,apa) 2D kd-tree is empty — i.e. for any segment with zero
+  fit points on the queried face, a state the single-face uBooNE prototype
+  (`ProtoSegment::get_closest_2d_dis`) cannot reach.  Legacy compares the
+  sentinel as a real distance: −1 < `scaling_2d*search_range` "covers" all
+  three planes at once, so one far-TPC segment of a cathode-crossing cluster
+  tags the entire near face as explained and no residual component can form
+  (SBND 18255-56463: all 194 tail-box points tagged u=v=w=−1 while 3D
+  distances were 3.9–28.9 cm; the 30 cm isochronous tail beyond segment
+  14006 was never fitted).  Knob-on, negative 2D distances are treated as
+  "no projection information" (1e9).  The tagging logic itself is a faithful
+  port (prototype `NeutrinoID_proto_vertex.h:797-1300`, same thresholds).
+- **`pseudo_shower_track_paint`** (MABC bee_points shower_track mode +
+  `PrDisplayDump::dump_track_shower`) — **toolkit-only display-consistency
+  knob**, no prototype counterpart (the layer itself is a toolkit dump).
+  The membership-first paint rule (correct for real EM showers whose
+  absorbed segments never get flags/pdg updated) contradicts the PF tree for
+  muon-typed (cached ±13) long-muon pseudo-showers: `make_shower_leaf`
+  displays "mu-" from `Shower::get_particle_type()` while the points paint
+  q=15000 (shower).  Knob-on, segments of a cached-±13 shower paint q=0
+  (track), overriding all disjuncts; the start-segment id collapse is kept.
+  Display-only: mc.json/tracking/nusel untouched by construction.

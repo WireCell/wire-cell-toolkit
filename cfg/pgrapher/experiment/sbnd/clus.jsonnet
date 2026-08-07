@@ -1225,6 +1225,15 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               single_muon_proton_chain_veto=false,
               single_muon_long_muon_claim=false,
               pid_flag_reconcile=false,
+              // doc pr/45 -- find_other_segments empty-2D-tree sentinel guard
+              // (SBND 18255-56463 isochronous tail).  C++ default false; key
+              // suppressed when off => byte-identical.
+              other_seg_empty_2d_guard=false,
+              // doc pr/45 -- paint muon-typed (+-13) pseudo-showers as track in
+              // the Bee shower_track layer + PrDisplayDump (18255-56463: 411 cm
+              // muon painted red).  C++ default false; key suppressed when off
+              // => byte-identical.
+              pseudo_shower_track_paint=false,
               // muon_dqdx_curve [c0, c1, pivot_cm, power]: the muon
               // median-dQ/dx-vs-length envelope used by nine tagger cuts, as a
               // multiple of mip_dqdx_median.  DEFAULT = the SBND fit
@@ -1745,6 +1754,7 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
             single_muon_proton_chain_veto=single_muon_proton_chain_veto,
             single_muon_long_muon_claim=single_muon_long_muon_claim,
             pid_flag_reconcile=pid_flag_reconcile,
+            other_seg_empty_2d_guard=other_seg_empty_2d_guard,
             muon_dqdx_curve=muon_dqdx_curve,
             sp_dedx_use_recomb_model=sp_dedx_use_recomb_model,
             sp_mean_dedx_cut=sp_mean_dedx_cut,
@@ -1855,6 +1865,10 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
                 dQdx_scale: 0.1,
                 dQdx_offset: -1000.0,
                 nticks: 3427,
+                // doc pr/45.  C++ default false; mirrors the Bee shower_track
+                // layer knob.  Key omitted when off => byte-identical.
+                [if pseudo_shower_track_paint
+                 then 'pseudo_shower_track_paint']: true,
             },
         },
     },
@@ -1965,6 +1979,12 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
                     // the pipeline => default compiled config byte-identical.
                     [if std.member(pipeline_names, 'tagger_check_neutrino')
                      then 'particle_ids']: true,
+                    // doc pr/45.  C++ default false.  Muon-typed (+-13)
+                    // pseudo-showers paint as track (q=0), matching the PF
+                    // tree's "mu-" verdict from the same cached type.  Key
+                    // omitted when off => byte-identical.
+                    [if pseudo_shower_track_paint
+                     then 'pseudo_shower_track_paint']: true,
                     // require_pr_graph: this layer is PR output.  Without it,
                     // an event where TaggerCheckNeutrino selects no candidate
                     // gets the WHOLE clustering dumped here in raw (un-T0-cor)
@@ -2366,6 +2386,9 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
        single_muon_proton_chain_veto=false,
        single_muon_long_muon_claim=false,
        pid_flag_reconcile=false,
+       // doc pr/45 -- C++ defaults false.
+       other_seg_empty_2d_guard=false,
+       pseudo_shower_track_paint=false,
        // Muon dQ/dx-vs-length envelope: DEFAULT = the docs/pr/10 SBND fit
        // (see the clus_pr arg comment; null restores the uBooNE refit).
        // Recombination-model selection + single-photon dE/dx routing:
@@ -2525,6 +2548,8 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 single_muon_proton_chain_veto=single_muon_proton_chain_veto,
                 single_muon_long_muon_claim=single_muon_long_muon_claim,
                 pid_flag_reconcile=pid_flag_reconcile,
+                other_seg_empty_2d_guard=other_seg_empty_2d_guard,
+                pseudo_shower_track_paint=pseudo_shower_track_paint,
                 muon_dqdx_curve=muon_dqdx_curve,
                 use_power_recomb=use_power_recomb,
                 sp_dedx_use_recomb_model=sp_dedx_use_recomb_model,

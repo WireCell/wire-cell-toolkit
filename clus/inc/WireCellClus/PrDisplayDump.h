@@ -114,6 +114,10 @@ namespace WireCell::Clus {
         // dqdx_ref sampling grid: residual range 0..(grid_n-1)*grid_step cm.
         int m_dqdx_ref_grid_n{401};
         double m_dqdx_ref_grid_step{0.25};  // cm
+        // doc sbnd_xin/docs/pr/45 -- paint muon-typed (+-13) pseudo-showers as
+        // track in dump_track_shower, mirroring MABC's bee_points knob.
+        // Default false => legacy membership-first paint, byte-identical.
+        bool m_pseudo_shower_track_paint{false};
 
         // Per-plane per-TPC channel counts, the same derivation
         // SbndPrMagnifyTrackingVisitor uses.  Recorded in the dump so the

@@ -113,6 +113,8 @@ void Clus::PrDisplayDump::configure(const WireCell::Configuration& cfg)
     m_mip_dqdx_flat = get<double>(cfg, "mip_dqdx_flat", m_mip_dqdx_flat);
     m_dqdx_ref_grid_n = get<int>(cfg, "dqdx_ref_grid_n", m_dqdx_ref_grid_n);
     m_dqdx_ref_grid_step = get<double>(cfg, "dqdx_ref_grid_step", m_dqdx_ref_grid_step);
+    // doc sbnd_xin/docs/pr/45 -- mirror of MABC bee_points pseudo_shower_track_paint.
+    m_pseudo_shower_track_paint = get<bool>(cfg, "pseudo_shower_track_paint", m_pseudo_shower_track_paint);
 
     for (auto anode_tn : cfg["anodes"]) {
         m_anodes.push_back(Factory::find_tn<IAnodePlane>(anode_tn.asString()));
@@ -787,10 +789,17 @@ Configuration Clus::PrDisplayDump::dump_track_shower(Facade::Grouping& grouping)
         if (!dpc) continue;
 
         auto shower_it = seg_to_shower.find(segment);
-        const bool is_shower = (shower_it != seg_to_shower.end()) ||
+        bool is_shower = (shower_it != seg_to_shower.end()) ||
             segment->flags_any(PR::SegmentFlags::kShowerTrajectory) ||
             segment->flags_any(PR::SegmentFlags::kShowerTopology) ||
             (segment->has_particle_info() && std::abs(segment->particle_info()->pdg()) == 11);
+        // Long-muon pseudo-shower (cached type +-13): the PF tree shows a
+        // muon; paint as track for consistency (doc sbnd_xin/docs/pr/45,
+        // mirrors MultiAlgBlobClustering's gated override).
+        if (m_pseudo_shower_track_paint && shower_it != seg_to_shower.end() &&
+            std::abs(shower_it->second->get_particle_type()) == 13) {
+            is_shower = false;
+        }
 
         const int cluster_id = segment->cluster() ? segment->cluster()->get_cluster_id() : 0;
         // Per-particle id, the prototype convention MABC's `particle_ids` knob

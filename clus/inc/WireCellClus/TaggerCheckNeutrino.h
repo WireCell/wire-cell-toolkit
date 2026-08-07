@@ -92,6 +92,7 @@ public:
         bool   m_oov_prototype_parity{false};      // F2 (all three sites)
         bool   m_first_seg_local_pca{true};        // P2
         bool   m_other_seg_relaxed_accept{true};   // P4
+        bool   m_other_seg_empty_2d_guard{false};  // doc pr/45 -- -1 empty-2D-tree sentinel guard
         // doc sbnd_xin/docs/pr/31 §11 -- F2 (was P2).  true => skip the
         // stage-3 segment_determine_shower_direction call, so a topology
         // shower keeps the direction segment_is_shower_topology set, which is

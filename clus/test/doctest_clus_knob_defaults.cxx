@@ -127,6 +127,8 @@ TEST_CASE("clus knob defaults: TaggerCheckNeutrino switches are all OFF")
     CHECK_KNOB_BOOL(cfg, "single_muon_proton_chain_veto", false);
     CHECK_KNOB_BOOL(cfg, "single_muon_long_muon_claim", false);
     CHECK_KNOB_BOOL(cfg, "pid_flag_reconcile", false);
+    // doc pr/45: find_other_segments empty-2D-tree (-1) sentinel guard.
+    CHECK_KNOB_BOOL(cfg, "other_seg_empty_2d_guard", false);
 
     // Numeric knobs whose legacy value is the INERT one: 0 disables the guard,
     // so an absent key leaves the code path untouched.

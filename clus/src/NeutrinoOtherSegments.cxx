@@ -81,7 +81,16 @@ void PatternAlgorithms::find_other_segments(Graph& graph, Facade::Cluster& clust
             double dis_u = std::get<0>(closest_2d);
             double dis_v = std::get<1>(closest_2d);
             double dis_w = std::get<2>(closest_2d);
-            
+
+            if (m_other_seg_empty_2d_guard) {
+                // -1.0 = empty per-(plane,face,apa) kd-tree sentinel (segment
+                // has no fit points on this face): no information, not "zero
+                // distance".  See NeutrinoPatternBase.h doc pr/45 knob.
+                if (dis_u < 0) dis_u = 1e9;
+                if (dis_v < 0) dis_v = 1e9;
+                if (dis_w < 0) dis_w = 1e9;
+            }
+
             if (dis_u < min_dis_u) min_dis_u = dis_u;
             if (dis_v < min_dis_v) min_dis_v = dis_v;
             if (dis_w < min_dis_w) min_dis_w = dis_w;
@@ -334,14 +343,21 @@ void PatternAlgorithms::find_other_segments(Graph& graph, Facade::Cluster& clust
                 double dis_u = std::get<0>(closest_2d);
                 double dis_v = std::get<1>(closest_2d);
                 double dis_w = std::get<2>(closest_2d);
-                
+
+                if (m_other_seg_empty_2d_guard) {
+                    // -1.0 empty-tree sentinel: no information (see tagging loop).
+                    if (dis_u < 0) dis_u = 1e9;
+                    if (dis_v < 0) dis_v = 1e9;
+                    if (dis_w < 0) dis_w = 1e9;
+                }
+
                 if (dis_u < min_dis_u) min_dis_u = dis_u;
                 if (dis_v < min_dis_v) min_dis_v = dis_v;
                 if (dis_w < min_dis_w) min_dis_w = dis_w;
             }
-            
+
             auto p_raw = transform->backward(p, cluster_t0, face, apa);
-            
+
             int flag_num = 0;
             if (min_dis_u > scaling_2d * search_range && 
                 !cluster.grouping()->get_closest_dead_chs(p_raw, 1, apa, face, 0)) flag_num++;
@@ -394,7 +410,7 @@ void PatternAlgorithms::find_other_segments(Graph& graph, Facade::Cluster& clust
         temp_segments[i].max_dis_u = max_dis_u;
         temp_segments[i].max_dis_v = max_dis_v;
         temp_segments[i].max_dis_w = max_dis_w;
-        
+
         // Apply quality cuts
         if ((temp_segments[i].number_points == 1) ||
             (number_not_faked == 0 &&
@@ -741,6 +757,13 @@ void PatternAlgorithms::find_other_segments(Graph& graph, Facade::Cluster& clust
                     double dis_u = std::get<0>(closest_2d);
                     double dis_v = std::get<1>(closest_2d);
                     double dis_w = std::get<2>(closest_2d);
+
+                    if (m_other_seg_empty_2d_guard) {
+                        // -1.0 empty-tree sentinel: no information (see tagging loop).
+                        if (dis_u < 0) dis_u = 1e9;
+                        if (dis_v < 0) dis_v = 1e9;
+                        if (dis_w < 0) dis_w = 1e9;
+                    }
 
                     if (dis_u < min_dis_u) min_dis_u = dis_u;
                     if (dis_v < min_dis_v) min_dis_v = dis_v;
