@@ -160,7 +160,28 @@ void PatternAlgorithms::shower_clustering_with_nv_in_main_cluster(Graph& graph, 
         //  - update_particle_type() handles multi-segment showers via majority vote
         //  - explicit PDG=0 guard catches single-segment showers skipped by update_particle_type()
         //    (long-muon start segments retain PDG=13 and are handled by the post-pass below)
-        shower->update_particle_type(particle_data, recomb_model, m_mip_dqdx, main_vertex, m_shower_proton_daughter_pion, m_mip_dqdx_median);
+        //
+        // doc sbnd_xin/docs/pr/44: the parenthetical above is FALSE for a
+        // MULTI-segment long-muon pseudo-shower -- update_particle_type's
+        // majority vote counts every non-proton member (muons included) as
+        // shower_length, so a pure muon chain ALWAYS trips the
+        // `shower_length > track_length` branch and the start segment is
+        // relabelled 13 -> 11 (PRShower.cxx:842).  The whole
+        // update_particle_type call is a toolkit-only addition (18f09178,
+        // 2026-03-31); the prototype completes the structure and goes
+        // straight to the deliberate long-muon -> EM reclass loop below
+        // (NeutrinoID_shower_clustering.h:1709-1717) -- a long-muon shower's
+        // start segment is never re-typed here.  SBND 18255 evt 142421: the
+        // ~143 cm collinear MIP chain 7023->7024->7018 lost seg 7024 (13->11)
+        // to this vote, which then seeded a fake "e- 163 MeV" merged into the
+        // pi0.  When the knob is on, a shower whose cached particle_type was
+        // recorded 13 at the seeding above keeps its muon start segment
+        // (prototype parity); EM showers (cached type 0) vote exactly as
+        // before.  false = legacy = byte-identical.
+        const bool keep_muon_type = m_shower_long_muon_keep_type &&
+                                    std::abs(shower->get_particle_type()) == 13;
+        if (!keep_muon_type)
+            shower->update_particle_type(particle_data, recomb_model, m_mip_dqdx, main_vertex, m_shower_proton_daughter_pion, m_mip_dqdx_median);
         // PDG=0 guard: defensive fixup for shower-flagged start segments that
         // arrived without any ParticleInfo set.  Independent of
         // update_particle_type and still needed.

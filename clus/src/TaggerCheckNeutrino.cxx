@@ -271,6 +271,7 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_shower_absorb_track_guard                 = get(config, "shower_absorb_track_guard",                 m_shower_absorb_track_guard);
     m_shower_connect_protected_pion_guard       = get(config, "shower_connect_protected_pion_guard",       m_shower_connect_protected_pion_guard);
     m_michel_stem_muon_rescue                   = get(config, "michel_stem_muon_rescue",                   m_michel_stem_muon_rescue);
+    m_shower_long_muon_keep_type                = get(config, "shower_long_muon_keep_type",                m_shower_long_muon_keep_type);
 
     if (!m_trackfitting_config_file.empty()) {
         load_trackfitting_config(m_trackfitting_config_file);
@@ -417,6 +418,7 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["shower_absorb_track_guard"]                 = m_shower_absorb_track_guard;                 // false = legacy (flood-fill absorbs every connected segment)
     cfg["shower_connect_protected_pion_guard"]       = m_shower_connect_protected_pion_guard;       // false = legacy (proton-daughter pion selectable as EM candidate)
     cfg["michel_stem_muon_rescue"]                   = m_michel_stem_muon_rescue;                   // false = legacy (Michel rescue limited to weak-dir degree-2 vertices)
+    cfg["shower_long_muon_keep_type"]                = m_shower_long_muon_keep_type;                // false = legacy (long-muon pseudo-shower start segment majority-voted to e-)
 
 
     return cfg;
@@ -746,6 +748,7 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
     pattern_algos.m_shower_absorb_track_guard                 = m_shower_absorb_track_guard;                 // F12
     pattern_algos.m_shower_connect_protected_pion_guard       = m_shower_connect_protected_pion_guard;       // F13
     pattern_algos.m_michel_stem_muon_rescue                   = m_michel_stem_muon_rescue;                   // F14
+    pattern_algos.m_shower_long_muon_keep_type                = m_shower_long_muon_keep_type;                // doc pr/44
     // Muon dQ/dx-vs-length envelope: c0/c1/power dimensionless, pivot cm -> internal.
     pattern_algos.m_muon_dqdx_curve = {m_muon_dqdx_curve[0], m_muon_dqdx_curve[1],
                                        m_muon_dqdx_curve[2] * units::cm, m_muon_dqdx_curve[3]};

@@ -881,3 +881,36 @@ single-muon selection, its own honest call being a second muon); 54341 →
 'mu-'` own node, `15006 'proton'` kept (owner-accepted: 15005 reads `proton`,
 its own charge-based call, the baseline `pi+` having been derivative of the
 fixed bug).
+
+## doc pr/38 Round 3 + doc pr/44 (2026-08-07) — PF orphan parentage + long-muon vote skip
+
+- **`pf_orphan_track_parentage`** (`MultiAlgBlobClustering::fill_bee_pf_tree`,
+  bee_pf block; inert without `pf_shower_vertex_barrier`) — the pr/38 orphan
+  safety net emits BFS-unreached segments as flat `mc_mother=0` roots
+  (prototype parity, `NeutrinoID.cxx:1485-1489`). With F12 in the tree the
+  toolkit reaches a state the prototype cannot: a track guard-excluded from a
+  shower whose view claims the junction vertex, hence barrier-blocked and
+  orphaned WITH a well-defined graph parent. When on, an anchoring pass
+  attaches orphans by topology (claimed-track anchor via `vtx_incoming_seg`
+  first, then shower-leaf anchor via `vtx_to_parent_shower` + a new
+  `shower_child_segs` render in `make_shower_leaf`; orphan-of-orphan chains
+  via fixed point); no-anchor orphans stay flat roots. **Designed
+  divergence** — there is no prototype counterpart behavior to be faithful
+  to; the flat-root emission remains the knob-off/legacy path.
+- **`shower_long_muon_keep_type`** (`shower_clustering_with_nv_in_main_cluster`,
+  `NeutrinoShowerClustering.cxx` completion loop) — the
+  `update_particle_type` + PDG==0-fixup block after
+  `complete_structure_with_start_segment` at THIS site is a **toolkit-only
+  addition** (`18f09178`, 2026-03-31); the prototype
+  (`NeutrinoID_shower_clustering.h:1709-1717`) completes the structure and
+  goes straight to the deliberate long-muon → EM reclass loop, never
+  re-typing a long-muon start segment. The vote counts every non-proton
+  member (muons included) as shower_length, so a MULTI-segment long-muon
+  pseudo-shower always relabels its start segment 13 → 11 (single-segment
+  muons escape via the `edges() <= 1` early-return — which is what the
+  block's comment was written against). When on, showers whose cached
+  `particle_type` is ±13 skip the vote at this one site — **prototype-parity
+  restoration**, scoped to the only site that seeds long-muon
+  pseudo-showers. (SBND 18255-142421: the ~143 cm collinear MIP chain
+  7023→7024→7018, stem dQ/dx median ≈ 1.1× MIP, lost seg 7024 to the vote
+  and became "e- 163 MeV" paired into the pi0.)

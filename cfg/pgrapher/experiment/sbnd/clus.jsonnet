@@ -718,6 +718,10 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               pf_shower_parent_precedence=false,
               pf_pi0_node_per_id=false,
               pf_pdg_name_prototype_fallback=false,
+              // doc pr/38 Round 3: graph-faithful parentage for barrier-orphaned
+              // PF track segments.  C++ default false; key omitted when off =>
+              // byte-identical pre-knob config.  Display-only (mc.json).
+              pf_orphan_track_parentage=false,
               // restore_demoted_mains (doc pr/20 Part I P2; C++ default false,
               // key omitted when null => byte-identical pre-knob config): tag a
               // split-off part that was ITSELF a matched bundle main before the
@@ -1211,6 +1215,12 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               shower_absorb_track_guard=false,
               shower_connect_protected_pion_guard=false,
               michel_stem_muon_rescue=false,
+              // doc pr/44: a multi-segment long-muon pseudo-shower keeps its
+              // muon start segment (prototype parity; the update_particle_type
+              // majority vote at the in_main_cluster seeding site is a
+              // toolkit-only addition).  C++ default false; key omitted when
+              // off => byte-identical pre-fix config.
+              shower_long_muon_keep_type=false,
               // muon_dqdx_curve [c0, c1, pivot_cm, power]: the muon
               // median-dQ/dx-vs-length envelope used by nine tagger cuts, as a
               // multiple of mip_dqdx_median.  DEFAULT = the SBND fit
@@ -1727,6 +1737,7 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
             shower_absorb_track_guard=shower_absorb_track_guard,
             shower_connect_protected_pion_guard=shower_connect_protected_pion_guard,
             michel_stem_muon_rescue=michel_stem_muon_rescue,
+            shower_long_muon_keep_type=shower_long_muon_keep_type,
             muon_dqdx_curve=muon_dqdx_curve,
             sp_dedx_use_recomb_model=sp_dedx_use_recomb_model,
             sp_mean_dedx_cut=sp_mean_dedx_cut,
@@ -2025,6 +2036,9 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
                     [if pf_shower_parent_precedence then 'pf_shower_parent_precedence']: true,
                     [if pf_pi0_node_per_id then 'pf_pi0_node_per_id']: true,
                     [if pf_pdg_name_prototype_fallback then 'pf_pdg_name_prototype_fallback']: true,
+                    // doc pr/38 Round 3.  C++ default false; key omitted when
+                    // off => byte-identical pre-knob config.
+                    [if pf_orphan_track_parentage then 'pf_orphan_track_parentage']: true,
                 },
             ],
             pipeline: wc.tns(cm_pipeline),
@@ -2124,6 +2138,9 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
        pf_shower_parent_precedence=false,
        pf_pi0_node_per_id=false,
        pf_pdg_name_prototype_fallback=false,
+       // doc pr/38 Round 3; false = C++ default = OFF, key omitted =>
+       // byte-identical.  See clus_pr.
+       pf_orphan_track_parentage=false,
        // doc pr/20 Part I P2; null = C++ default false = OFF.  See clus_pr.
        restore_demoted_mains=null,
        // doc pr/23 sec 4.2; null = C++ default false = warn-and-skip.  See clus_pr.
@@ -2336,6 +2353,8 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
        shower_absorb_track_guard=false,
        shower_connect_protected_pion_guard=false,
        michel_stem_muon_rescue=false,
+       // doc pr/44; false = C++ default = OFF, key omitted => byte-identical.
+       shower_long_muon_keep_type=false,
        // Muon dQ/dx-vs-length envelope: DEFAULT = the docs/pr/10 SBND fit
        // (see the clus_pr arg comment; null restores the uBooNE refit).
        // Recombination-model selection + single-photon dE/dx routing:
@@ -2372,6 +2391,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 pf_shower_parent_precedence=pf_shower_parent_precedence,
                 pf_pi0_node_per_id=pf_pi0_node_per_id,
                 pf_pdg_name_prototype_fallback=pf_pdg_name_prototype_fallback,
+                pf_orphan_track_parentage=pf_orphan_track_parentage,
                 unmerge_bundle_mode=unmerge_bundle_mode,
                 restore_demoted_mains=restore_demoted_mains,
                 require_provenance=require_provenance,
@@ -2490,6 +2510,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 shower_absorb_track_guard=shower_absorb_track_guard,
                 shower_connect_protected_pion_guard=shower_connect_protected_pion_guard,
                 michel_stem_muon_rescue=michel_stem_muon_rescue,
+                shower_long_muon_keep_type=shower_long_muon_keep_type,
                 muon_dqdx_curve=muon_dqdx_curve,
                 use_power_recomb=use_power_recomb,
                 sp_dedx_use_recomb_model=sp_dedx_use_recomb_model,

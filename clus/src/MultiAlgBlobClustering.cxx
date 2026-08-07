@@ -333,6 +333,8 @@ void MultiAlgBlobClustering::configure(const WireCell::Configuration& cfg)
             pfc.pf_shower_parent_precedence = get<bool>(pf, "pf_shower_parent_precedence", false);
             pfc.pf_pi0_node_per_id = get<bool>(pf, "pf_pi0_node_per_id", false);
             pfc.pf_pdg_name_prototype_fallback = get<bool>(pf, "pf_pdg_name_prototype_fallback", false);
+            // doc pr/38 Round 3; absent => legacy flat orphan roots, byte-identical.
+            pfc.pf_orphan_track_parentage = get<bool>(pf, "pf_orphan_track_parentage", false);
             m_bee_pf_configs.push_back(pfc);
             m_bee_pf_trees[pfc.name] = Bee::ParticleTree(pfc.name);
             SPDLOG_LOGGER_DEBUG(log, "Configured bee_pf: name={} visitor={}", pfc.name, pfc.visitor);
@@ -1325,6 +1327,13 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
     std::vector<std::pair<PR::ShowerPtr,PR::VertexPtr>> root_direct_showers;
     std::vector<std::pair<PR::ShowerPtr,PR::VertexPtr>> root_indirect_showers;
 
+    // doc pr/38 Round 3 (pf_orphan_track_parentage): orphan TRACK segments
+    // anchored at a vertex inside a shower's view attach as children of that
+    // shower's displayed leaf.  Filled by the anchoring pass below (after the
+    // shower-attachment loop), read by make_shower_leaf.  Empty when the knob
+    // is off => legacy output.
+    std::map<PR::ShowerPtr, std::vector<PR::SegmentPtr>, PR::ShowerIndexCmp> shower_child_segs;
+
     for (const auto& shower : showers) {
         auto [start_vtx, conn_type] = shower->get_start_vertex_and_type();
 
@@ -1492,6 +1501,92 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
         return cl ? cl->get_cluster_id() * 1000 + sid : sid;
     };
 
+    // doc pr/38 Round 3 (pf_orphan_track_parentage): graph-faithful parentage
+    // for barrier-orphaned track segments.  The flat safety net below emits
+    // every BFS-unreached segment as a parentless, childless root -- even when
+    // the graph chains it off a claimed track (pi+ -> proton at a shared
+    // vertex) or off a shower's interior vertex (a guard-excluded muon
+    // continuing an EM arm; SBND 18255 evt 142421 segs 7011/7012/7018).  The
+    // stage-1 fixed point above already computed the correct parent for those
+    // vertices (vtx_incoming_seg / vtx_to_parent_shower) and threw it away.
+    // When on: TRACK anchor first (either endpoint carries a claimed incoming
+    // segment -> insert into seg_parent/seg_children so build_seg_node's
+    // recursion renders it), else SHOWER anchor (endpoint inside a shower's
+    // view -> child of that shower's displayed leaf via shower_child_segs;
+    // deliberately NOT put in seg_parent, whose null entries the root loop
+    // emits).  An anchored orphan extends vtx_incoming_seg at its far vertex
+    // so orphan-of-orphan chains anchor in a later round of the fixed point.
+    // Orphans with no anchor at all fall to the flat net exactly as before.
+    // This state is UNREACHABLE in the prototype (no shower_absorb_track
+    // guard there -- such tracks are absorbed into the shower), so this is a
+    // designed divergence; see porting_dictionary.  Off => pass skipped,
+    // byte-identical legacy output.
+    if (cfg.pf_shower_vertex_barrier && cfg.pf_orphan_track_parentage) {
+        // P1: orphan pool -- IDENTICAL selection to the flat safety net below.
+        std::vector<PR::SegmentPtr> orphan_pool;
+        for (auto edesc : mir(boost::edges(*pr_graph))) {
+            auto seg = (*pr_graph)[edesc].segment;
+            if (!seg || used_segs.count(seg) || conn4_skip_segs.count(seg)) continue;
+            if (!same_cluster(seg)) continue;      // prototype NeutrinoID.cxx:1488
+            if (seg->dirsign() == 0) continue;     // prototype NeutrinoID.cxx:1215
+            if (seg->fits().empty()) continue;
+            orphan_pool.push_back(seg);
+        }
+        // Deterministic order: display id with graph-index tie-break (distinct
+        // segments can compare EQUAL under SegmentIndexCmp, PRGraph.h:315).
+        std::sort(orphan_pool.begin(), orphan_pool.end(),
+                  [&](const PR::SegmentPtr& a, const PR::SegmentPtr& b) {
+                      const int ida = seg_display_id(a), idb = seg_display_id(b);
+                      if (ida != idb) return ida < idb;
+                      return a->get_graph_index() < b->get_graph_index();
+                  });
+        // P2: fixed-point anchoring over the sorted pool.
+        PR::IndexedSegmentSet claimed;
+        auto anchor_common = [&](const PR::SegmentPtr& seg, PR::VertexPtr near_vtx,
+                                 const std::string& parent_text) {
+            auto far_vtx = PR::find_other_vertex(*pr_graph, seg, near_vtx);
+            seg_endpoints[seg] = {near_vtx, far_vtx};
+            used_segs.insert(seg);   // bars the flat net below from re-emitting
+            claimed.insert(seg);
+            if (far_vtx && !vtx_incoming_seg.count(far_vtx)) vtx_incoming_seg[far_vtx] = seg;
+            if (flag_print) {
+                std::cout << "[fill_bee_pf_tree] ANCHOR orphan seg=" << seg_display_id(seg)
+                          << " -> parent=" << parent_text << "\n";
+            }
+        };
+        bool changed = true;
+        while (changed) {
+            changed = false;
+            for (const auto& seg : orphan_pool) {
+                if (claimed.count(seg)) continue;
+                auto [va, vb] = PR::find_vertices(*pr_graph, seg);
+                PR::VertexPtr track_anchor = nullptr;
+                if (va && vtx_incoming_seg.count(va)) track_anchor = va;
+                else if (vb && vtx_incoming_seg.count(vb)) track_anchor = vb;
+                if (track_anchor) {
+                    auto parent = vtx_incoming_seg.at(track_anchor);
+                    seg_parent[seg] = parent;
+                    seg_children[parent].push_back(seg);
+                    anchor_common(seg, track_anchor, std::to_string(seg_display_id(parent)));
+                    changed = true;
+                    continue;
+                }
+                PR::VertexPtr shower_anchor = nullptr;
+                if (va && vtx_to_parent_shower.count(va)) shower_anchor = va;
+                else if (vb && vtx_to_parent_shower.count(vb)) shower_anchor = vb;
+                if (shower_anchor) {
+                    auto psh = vtx_to_parent_shower.at(shower_anchor);
+                    shower_child_segs[psh].push_back(seg);
+                    auto pss = psh->start_segment();
+                    anchor_common(seg, shower_anchor,
+                                  std::string("shower:") + (pss ? std::to_string(seg_display_id(pss)) : "?"));
+                    changed = true;
+                    continue;
+                }
+            }
+        }
+    }
+
     int next_id = 1;  // fallback counter for nodes without a natural ID
 
     auto make_node = [&](int id,
@@ -1538,8 +1633,13 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
     };
 
     // Forward declare as std::function to handle mutual recursion with make_shower_leaf
-    std::function<void(Configuration&, const std::vector<std::pair<PR::ShowerPtr,PR::VertexPtr>>&, 
+    std::function<void(Configuration&, const std::vector<std::pair<PR::ShowerPtr,PR::VertexPtr>>&,
                        const std::vector<std::pair<PR::ShowerPtr,PR::VertexPtr>>&, PR::VertexPtr)> append_showers;
+    // Forward declare (assigned at its original definition site below) so
+    // make_shower_leaf can render shower_child_segs orphan children through
+    // it (pf_orphan_track_parentage).  Declaration mechanics only: the first
+    // call happens at assembly time, well after the assignment.
+    std::function<Configuration(PR::SegmentPtr)> build_seg_node;
 
     auto make_shower_leaf = [&](PR::ShowerPtr shower) -> Configuration {
         const int pdg = shower->get_particle_type();
@@ -1570,7 +1670,26 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
                        di_it  != shower_direct_showers.end()   ? di_it->second  : empty_showers,
                        ind_it != shower_indirect_showers.end() ? ind_it->second : empty_showers,
                        svtx);
-        
+
+        // doc pr/38 Round 3 (pf_orphan_track_parentage): orphan TRACK
+        // segments anchored inside this shower's view render as its children
+        // (single funnel point -- covers direct leaves, pseudo-gamma wrappers
+        // and pi0-grouped leaves alike).  Same KeepMC convention as
+        // build_seg_node's child recursion; each child renders its own
+        // seg_children chain.  Map empty when the knob is off.
+        if (cfg.pf_orphan_track_parentage) {
+            auto cs_it = shower_child_segs.find(shower);
+            if (cs_it != shower_child_segs.end()) {
+                for (const auto& child : cs_it->second) {
+                    auto child_node = build_seg_node(child);
+                    const int    cpdg = child->has_particle_info() ? child->particle_info()->pdg() : 0;
+                    const double cke  = child->has_particle_info() ? child->particle_info()->kinetic_energy() : 0.0;
+                    if (!keep_node(cpdg, cke, child_node)) continue;
+                    node["children"].append(child_node);
+                }
+            }
+        }
+
         if (node["children"].empty()) node["icon"] = "jstree-file";
         return node;
     };
@@ -1706,7 +1825,8 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
     };
 
     // Build the full JSON subtree for a track segment (recursive).
-    std::function<Configuration(PR::SegmentPtr)> build_seg_node =
+    // (declared as std::function above, next to append_showers)
+    build_seg_node =
         [&](PR::SegmentPtr seg) -> Configuration {
 
         // F5 (doc pr/34 §10.6): the prototype's no-PID node text is PDGName(0)

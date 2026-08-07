@@ -160,6 +160,8 @@ namespace WireCell::Clus {
         // Triggered after TaggerCheckNeutrino (or any configured visitor) runs.
         // Produces one file per event named "mc" (bare JSON array), matching the
         // prototype "mc" format read by the Bee viewer.
+        // (public so doctest_clus_knob_defaults can pin the in-class defaults)
+       public:
         struct BeePFConfig {
             std::string name{"mc"};          // Bee file name (default "mc")
             std::string visitor;             // dump after this visitor runs
@@ -206,7 +208,22 @@ namespace WireCell::Clus {
             // name table plus the prototype's numeric fallback
             // (WCReader.cc:529-547) instead of "particle".
             bool pf_pdg_name_prototype_fallback{false};
+            // ---- doc sbnd_xin/docs/pr/38 Round 3 ----
+            // pf_orphan_track_parentage: upgrade the pf_shower_vertex_barrier
+            // orphan safety net from flat root-leaves to graph-faithful
+            // parentage.  An orphan whose endpoint vertex carries a claimed
+            // incoming track segment attaches as that segment's child; else an
+            // endpoint inside a shower's view attaches as a child of that
+            // shower's displayed leaf; orphan-of-orphan chains attach to each
+            // other (pi+ -> proton).  Only orphans with no anchor at all fall
+            // back to the legacy flat root emission.  This state is UNREACHABLE
+            // in the prototype (it has no shower_absorb_track_guard, so such
+            // tracks are absorbed into the shower) -- designed divergence, see
+            // porting_dictionary.  Inert unless pf_shower_vertex_barrier is
+            // also on.  C++ default false => byte-identical legacy output.
+            bool pf_orphan_track_parentage{false};
         };
+       private:
         std::vector<BeePFConfig> m_bee_pf_configs;
 
         // Storage: flushed at end of each event (same lifecycle as m_bee_points)

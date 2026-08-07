@@ -121,6 +121,8 @@ TEST_CASE("clus knob defaults: TaggerCheckNeutrino switches are all OFF")
     CHECK_KNOB_BOOL(cfg, "shower_absorb_track_guard", false);                 // F12
     CHECK_KNOB_BOOL(cfg, "shower_connect_protected_pion_guard", false);       // F13
     CHECK_KNOB_BOOL(cfg, "michel_stem_muon_rescue", false);                   // F14
+    // doc pr/44: long-muon pseudo-shower keeps its muon start segment.
+    CHECK_KNOB_BOOL(cfg, "shower_long_muon_keep_type", false);
 
     // Numeric knobs whose legacy value is the INERT one: 0 disables the guard,
     // so an absent key leaves the code path untouched.
@@ -784,4 +786,27 @@ TEST_CASE("clus knob defaults: PrDisplayDump is registered and inert by default"
     // TrackFitting slot; a typo here would produce a silently empty dump.
     REQUIRE(cfg.isMember("grouping"));
     CHECK(cfg["grouping"].asString() == "live");
+}
+
+// ---------------------------------------------------------------------------
+// MultiAlgBlobClustering BeePFConfig -- the particle-flow (Bee "mc" tree)
+// display knobs.  These are in-class initializers on a nested struct rather
+// than default_configuration() keys, so pin the struct directly.  Closes the
+// gap where none of the pf_* switches were pinned (doc pr/38 Round 3).
+// ---------------------------------------------------------------------------
+
+#include "WireCellClus/MultiAlgBlobClustering.h"
+
+TEST_CASE("clus knob defaults: MultiAlgBlobClustering BeePFConfig pf switches are all OFF")
+{
+    WireCell::Clus::MultiAlgBlobClustering::BeePFConfig pfc;
+    CHECK(pfc.prototype_names == false);
+    CHECK(pfc.em_ke_min == 0.0);
+    CHECK(pfc.np_ke_min == 0.0);
+    CHECK(pfc.pf_track_main_cluster_only == false);      // doc pr/34 F1
+    CHECK(pfc.pf_shower_vertex_barrier == false);        // doc pr/34 F2 (+ pr/38)
+    CHECK(pfc.pf_shower_parent_precedence == false);     // doc pr/34 F3
+    CHECK(pfc.pf_pi0_node_per_id == false);              // doc pr/34 F4
+    CHECK(pfc.pf_pdg_name_prototype_fallback == false);  // doc pr/34 F5
+    CHECK(pfc.pf_orphan_track_parentage == false);       // doc pr/38 Round 3
 }

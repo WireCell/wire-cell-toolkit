@@ -852,6 +852,27 @@ namespace WireCell::Clus::PR {
         // cases (isolation arm F11+F13+F14 unchanged vs F11+F13).
         bool   m_michel_stem_muon_rescue{false};
 
+        // doc sbnd_xin/docs/pr/44 -- a MULTI-segment long-muon pseudo-shower
+        // seeded by shower_clustering_with_nv_in_main_cluster (cached
+        // particle_type recorded 13 at the seed) must not have its start
+        // segment majority-voted to electron by the update_particle_type call
+        // that follows completion: the vote counts every non-proton member
+        // (muons included) as shower_length, so a pure muon chain always trips
+        // `shower_length > track_length` and the start segment is relabelled
+        // 13 -> 11.  That update_particle_type call is a toolkit-only addition
+        // (18f09178); the prototype goes straight to the deliberate
+        // long-muon -> EM reclass loop (NeutrinoID_shower_clustering.h:
+        // 1709-1717) and never re-types a long-muon start segment there.
+        // When on, showers cached type +-13 skip the vote at that ONE site
+        // (in_main_cluster seeding); every other update_particle_type site is
+        // untouched.  SBND 18255 evt 142421: restores the ~143 cm collinear
+        // MIP chain 7023->7024->7018 to muon; the fake "e- 163 MeV" (which
+        // paired into the pi0) is no longer seeded because the 1.2 cm stub
+        // candidate's shower shrinks to {7023, 7082} and fails the
+        // n_multi_vtx acceptance.  C++ default false = legacy =
+        // byte-identical.
+        bool   m_shower_long_muon_keep_type{false};
+
         // ---- Detector-extent literals (doc sbnd_xin/docs/pr/2 sec. 2e(iv)) ----
         // The uBooNE active volume the prototype was written against is
         // y in [-116, +117] cm, z in [0, 1037] cm, x in [0, 256] cm

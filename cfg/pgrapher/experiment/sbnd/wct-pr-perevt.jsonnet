@@ -763,6 +763,16 @@ function(
     pf_shower_parent_precedence = true,
     pf_pi0_node_per_id = true,
     pf_pdg_name_prototype_fallback = true,
+    // doc pr/38 Round 3 pf_orphan_track_parentage: graph-faithful parentage
+    // for barrier-orphaned PF track segments (a guard-excluded muon that
+    // continues an EM arm attaches under that shower's leaf; a proton behind
+    // an orphaned pi+ chains under the pi+; SBND 18255-142421 segs
+    // 7011/7012/7018).  Display-only: moves ONLY mc.json.  C++ default
+    // false.  SBND PRODUCTION DEFAULT ON (gate work-pr44-off48 vs
+    // pr43_cleanhead_ref48b 48/48 + nusel 0-diff; on-census 1/48 nueCC48 +
+    // 4/19 ncpi0 events, every move an attributed re-parent -- doc pr/38 R3
+    // + doc pr/44).  Runner env: SBND_PF_ORPHAN_TRACK_PARENTAGE.
+    pf_orphan_track_parentage = true,
     // doc pr/38: F2's ON-behavior was CORRECTED in place (owner decision
     // 2026-08-05, no new knobs): the barrier now excludes each shower's
     // start vertex (prototype map_vtx_segs parity, WCShower.cxx:547) so
@@ -1041,6 +1051,17 @@ function(
     // result, NEVER flip.
     shower_connect_protected_pion_guard = false,
     michel_stem_muon_rescue = true,
+    // doc pr/44 shower_long_muon_keep_type: a MULTI-segment long-muon
+    // pseudo-shower (cached type 13 at the in_main_cluster seed) keeps its
+    // muon start segment -- the update_particle_type majority vote there is
+    // a toolkit-only addition (18f09178) absent from the prototype, and it
+    // relabels a pure muon chain's start segment 13 -> 11 (SBND
+    // 18255-142421: fake "e- 163 MeV" paired into the pi0).  C++ default
+    // false.  SBND PRODUCTION DEFAULT ON (same gate set as
+    // pf_orphan_track_parentage above; fires on NO nueCC48 event, on ncpi0
+    // only 142421 where it restores the owner-truth three-prong vertex --
+    // doc pr/44).  Runner env: SBND_SHOWER_LONG_MUON_KEEP_TYPE.
+    shower_long_muon_keep_type = true,
 )
     local base = import 'pgrapher/experiment/sbnd/simparams.jsonnet';
     local params = base {
@@ -1103,6 +1124,7 @@ function(
                              pf_shower_parent_precedence=pf_shower_parent_precedence,
                              pf_pi0_node_per_id=pf_pi0_node_per_id,
                              pf_pdg_name_prototype_fallback=pf_pdg_name_prototype_fallback,
+                             pf_orphan_track_parentage=pf_orphan_track_parentage,
                              unmerge_bundle_mode=unmerge_bundle_mode,
                              restore_demoted_mains=restore_demoted_mains,
                              require_provenance=require_provenance,
@@ -1209,6 +1231,7 @@ function(
                              shower_absorb_track_guard=shower_absorb_track_guard,
                              shower_connect_protected_pion_guard=shower_connect_protected_pion_guard,
                              michel_stem_muon_rescue=michel_stem_muon_rescue,
+                             shower_long_muon_keep_type=shower_long_muon_keep_type,
                              reclass_never_computed_ke_floor=reclass_never_computed_ke_floor,
                              muon_dqdx_curve=muon_dqdx_curve,
                              use_power_recomb=use_power_recomb,
