@@ -357,6 +357,19 @@ void PatternAlgorithms::shower_clustering_connecting_to_main_vertex(Graph& graph
                 continue;
             }
 
+            // doc sbnd_xin/docs/pr/40 round 5 F10: also skip a candidate whose
+            // OWN geometry is long and straight (segment_is_straight_long_
+            // track) -- none of the criteria above inspect straightness or
+            // dQ/dx of a not-yet-PID'd sg (particle_type==0 skips every
+            // branch above).  SBND evt 54341 seg 18005 (21.3 cm, 0.99
+            // direct/arc ratio, particle_type still 0 at this point) is
+            // exactly this gap -- see m_shower_connect_main_vertex_straight_
+            // guard's comment in NeutrinoPatternBase.h.  false = legacy =
+            // byte-identical.
+            if (m_shower_connect_main_vertex_straight_guard && segment_is_straight_long_track(sg)) {
+                continue;
+            }
+
             // Create a new shower
             ShowerPtr shower = std::make_shared<Shower>(graph);
             shower->set_start_vertex(main_vertex, 1);

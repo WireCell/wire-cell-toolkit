@@ -265,6 +265,9 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     // doc sbnd_xin/docs/pr/40 round 4 -- two follow-on fixes to F5.
     m_shower_proton_daughter_pion_dissolve = get(config, "shower_proton_daughter_pion_dissolve", m_shower_proton_daughter_pion_dissolve);
     m_muon_multi_proton_pion               = get(config, "muon_multi_proton_pion",               m_muon_multi_proton_pion);
+    m_track_pid_persist_dqdx_electron_guard     = get(config, "track_pid_persist_dqdx_electron_guard",     m_track_pid_persist_dqdx_electron_guard);
+    m_shower_connect_main_vertex_straight_guard = get(config, "shower_connect_main_vertex_straight_guard", m_shower_connect_main_vertex_straight_guard);
+    m_shower_traj_straight_guard                = get(config, "shower_traj_straight_guard",                m_shower_traj_straight_guard);
 
     if (!m_trackfitting_config_file.empty()) {
         load_trackfitting_config(m_trackfitting_config_file);
@@ -405,6 +408,9 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     // doc sbnd_xin/docs/pr/40 round 4 -- two follow-on fixes to F5.
     cfg["shower_proton_daughter_pion_dissolve"] = m_shower_proton_daughter_pion_dissolve; // false = legacy (F5 relabel leaves shower flags set)
     cfg["muon_multi_proton_pion"]               = m_muon_multi_proton_pion;               // false = legacy (multi-proton muon vertex never consulted)
+    cfg["track_pid_persist_dqdx_electron_guard"]     = m_track_pid_persist_dqdx_electron_guard;     // false = legacy (F1 rescues an undirected electron guess too)
+    cfg["shower_connect_main_vertex_straight_guard"] = m_shower_connect_main_vertex_straight_guard; // false = legacy (straightness never consulted)
+    cfg["shower_traj_straight_guard"]                = m_shower_traj_straight_guard;                // false = legacy (straightness never consulted)
 
 
     return cfg;
@@ -728,6 +734,9 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
     pattern_algos.m_shower_proton_daughter_pion = m_shower_proton_daughter_pion; // F5
     pattern_algos.m_shower_proton_daughter_pion_dissolve = m_shower_proton_daughter_pion_dissolve; // F7
     pattern_algos.m_muon_multi_proton_pion               = m_muon_multi_proton_pion;               // F8
+    pattern_algos.m_track_pid_persist_dqdx_electron_guard     = m_track_pid_persist_dqdx_electron_guard;     // F9
+    pattern_algos.m_shower_connect_main_vertex_straight_guard = m_shower_connect_main_vertex_straight_guard; // F10
+    pattern_algos.m_shower_traj_straight_guard                = m_shower_traj_straight_guard;                // F11
     // Muon dQ/dx-vs-length envelope: c0/c1/power dimensionless, pivot cm -> internal.
     pattern_algos.m_muon_dqdx_curve = {m_muon_dqdx_curve[0], m_muon_dqdx_curve[1],
                                        m_muon_dqdx_curve[2] * units::cm, m_muon_dqdx_curve[3]};

@@ -793,3 +793,46 @@ Population (48-event nueCC48): exactly 1/N muon segments fires this rule
 proton at a non-main vertex and are deliberately left untouched — the
 owner's "two protons" wording is read literally, `min_protons=2` is not a
 placeholder.
+
+## Segment-level straightness has no exemption from three shower-seeding tests — `track_pid_persist_dqdx_electron_guard`/`shower_connect_main_vertex_straight_guard`/`shower_traj_straight_guard` (F9/F10/F11) are designed divergences, **segment-level fix only, does not reach the displayed outcome, NOT flipped**
+
+Doc pr/40 round 5 (owner, three new Bee cases: evts 18364-84229/18255-54341,
+"electron → muon?", both read as stopping muon + Michel; evt 18255-55715,
+"not electron → muon", read as an exiting muon behind a wrongly-labelled
+pion). Three independent writer sites, none with a straightness exemption:
+`segment_determine_dir_track`'s F1 persist-on-dQ/dx rescue fires
+unconditionally once `pdg_code != 0` (F9); `shower_clustering_connecting_
+to_main_vertex`'s three-branch skip has no branch for a long straight track
+with no confident PID yet (F10); `segment_is_shower_trajectory` never got
+the straightness exemption pr/40 F3 gave its topology sibling (F11). All
+three key off `segment_is_straight_long_track` (new shared helper,
+`PRSegmentFunctions.{h,cxx}`, `direct_length >= 34cm || direct_length >
+0.93*length`, same threshold shape as the existing `NeutrinoVertexFinder.cxx:
+1432-1447` demotion). None of the three sites has a prototype analog
+(`prototype_base/pid/` checked directly) — designed divergences, not port
+corrections. C++ default `false` on all three = legacy = byte-identical
+(G1: 48/48 events, 96/96 archives, 0 mismatches).
+
+**Measured: fixing the segment's own pdg does not change the Bee/mc.json
+outcome, because the display is decided at the shower seeding/absorption
+boundary, not at the segment.** `Shower::complete_structure_with_start_
+segment` (`PRShower.cxx:337-408`) flood-fills a shower-seeded segment's
+downstream sub-tree with no per-segment test, and a second seeding path,
+`shower_clustering_with_nv_in_main_cluster`'s `is_shower_seg`
+(`NeutrinoShowerClustering.cxx:116-119`), is untouched by F10 (which only
+gates its sibling `shower_clustering_connecting_to_main_vertex`). Result on
+all three owner cases with all three knobs on: evt 84229 seg 19038 becomes
+correctly `pdg=13` but the `mc.json` node is unchanged (`19039 'e- 89 MeV'`,
+still merged); evt 54341 seg 18005 does get excluded from the shower (split
+shape achieved) but, unshielded from the shower path for the first time,
+ordinary track PID calls it `proton` (2212) from its own elevated dQ/dx, not
+`mu-` as intended — an open physics question, not a bug in these three
+guards; evt 55715 seg 15007 becomes correctly `pdg=13`, but the shower
+re-seeds one segment further up at seg 15005 (isolated to F11 alone via a
+clean single-knob A/B: `pdg 211` all-off → `pdg 11` with F11 alone) — a
+confirmed **regression against the owner's explicit round-5 planning answer**
+that seg 15005 must stay untouched. **Not flipped.** All three knobs are
+landed as gate-clean infrastructure (G1/G5/G6 pass) but G2 fails on every
+owner-reported case; the fix implied by the root-cause finding is a change
+to the seeding/absorption boundary itself (comparable in shape to round 4's
+F7 shower-dissolve), scoped larger than this round and not attempted here.

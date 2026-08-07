@@ -1005,6 +1005,20 @@ function(
     // move, all attributed; G5 wcdoctest-clus 99/99 test cases.
     shower_proton_daughter_pion_dissolve = true,
     muon_multi_proton_pion = true,
+    // doc sbnd_xin/docs/pr/40 round 5 -- muon mis-identified as electron,
+    // three owner-reported Bee cases (84229, 54341, 55715), three
+    // independent mechanisms.  F9 track_pid_persist_dqdx_electron_guard:
+    // narrows F1 so it no longer rescues an undirected (no free end)
+    // electron guess that would otherwise poison a NEIGHBORING segment's
+    // flag_shower_in test.  F10 shower_connect_main_vertex_straight_guard:
+    // the main-vertex EM-shower selection heuristic excludes a candidate
+    // whose own start segment is long and straight.  F11
+    // shower_traj_straight_guard: segment_is_shower_trajectory gets the
+    // same straightness veto F3 already gave segment_is_shower_topology's
+    // dQ/dx.  Gated OFF pending G0-G6; see docs/pr/40 round 5.
+    track_pid_persist_dqdx_electron_guard = false,
+    shower_connect_main_vertex_straight_guard = false,
+    shower_traj_straight_guard = false,
 )
     local base = import 'pgrapher/experiment/sbnd/simparams.jsonnet';
     local params = base {
@@ -1167,6 +1181,9 @@ function(
                              shower_proton_daughter_pion=shower_proton_daughter_pion,
                              shower_proton_daughter_pion_dissolve=shower_proton_daughter_pion_dissolve,
                              muon_multi_proton_pion=muon_multi_proton_pion,
+                             track_pid_persist_dqdx_electron_guard=track_pid_persist_dqdx_electron_guard,
+                             shower_connect_main_vertex_straight_guard=shower_connect_main_vertex_straight_guard,
+                             shower_traj_straight_guard=shower_traj_straight_guard,
                              reclass_never_computed_ke_floor=reclass_never_computed_ke_floor,
                              muon_dqdx_curve=muon_dqdx_curve,
                              use_power_recomb=use_power_recomb,

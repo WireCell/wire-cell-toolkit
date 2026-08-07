@@ -111,6 +111,21 @@ namespace WireCell::Clus::PR {
     /// `main_vertex` may be null, in which case this always returns false.
     bool segment_at_multi_proton_vertex(Graph& graph, SegmentPtr seg, VertexPtr main_vertex, double MIP_dQdx, int min_protons = 2);
 
+    /// doc sbnd_xin/docs/pr/40 round 5 F10/F11 -- shared straightness veto.
+    ///
+    /// True iff `seg` is long enough and straight enough that it should
+    /// never be treated as (the seed of) an EM shower, regardless of what
+    /// triggered the shower classification.  Same shape as the toolkit's
+    /// own straightness demotion (NeutrinoVertexFinder.cxx:1432-1447, a
+    /// byte-faithful port of prototype NeutrinoID_track_shower.h:2042-2054):
+    /// length > min_length, and either the direct (straight-line) span is
+    /// itself >= min_direct, or the direct/arc-length ratio exceeds
+    /// straight_ratio (near-perfectly straight over its whole extent).  A
+    /// muon or exiting track satisfies this; a genuine EM shower's bushy
+    /// tail keeps its direct length well below its arc length.
+    bool segment_is_straight_long_track(SegmentPtr seg, double min_length = 10*units::cm,
+                                        double min_direct = 34*units::cm, double straight_ratio = 0.93);
+
 
     /// Create and associate a DynamicPointCloud with a segment from path points
     ///
@@ -229,6 +244,15 @@ namespace WireCell::Clus::PR {
         bool   dir_track_median_local{false};
         bool   track_pid_persist_dqdx{false};
         bool   track_pid_persist_4mom{false};
+        // doc sbnd_xin/docs/pr/40 round 5 F9 -- narrows track_pid_persist_dqdx
+        // (F1).  When true, F1 no longer rescues a pdg_code==11 conclusion
+        // that lacks a free end (segment_determine_dir_track's free_end_dir
+        // false) -- it still rescues every non-electron pdg exactly as
+        // before.  See NeutrinoPatternBase.h's m_track_pid_persist_dqdx_
+        // electron_guard comment for the measured case (SBND evt 84229) and
+        // porting_dictionary.md for the designed-divergence status.  false =
+        // today's shipped F1 behaviour = byte-identical.
+        bool   track_pid_persist_dqdx_electron_guard{false};
     };
 
     // success, flag_dir, pdg_code, particle_score
@@ -277,7 +301,12 @@ namespace WireCell::Clus::PR {
     /// §11 P8).  Read-mostly; never written concurrently with clustering.
     extern bool g_shower_traj_refresh_flag;
 
-    bool segment_is_shower_trajectory(SegmentPtr seg, double step_size = 10*units::cm, double mip_dQ_dx = 50000 / units::cm);
+    // straight_guard (doc sbnd_xin/docs/pr/40 round 5 F11): after the
+    // existing 5-section wiggliness test decides flag_shower_trajectory,
+    // override it back to false if segment_is_straight_long_track(seg) --
+    // see that function's comment and m_shower_traj_straight_guard's
+    // comment in NeutrinoPatternBase.h.  false = legacy = byte-identical.
+    bool segment_is_shower_trajectory(SegmentPtr seg, double step_size = 10*units::cm, double mip_dQ_dx = 50000 / units::cm, bool straight_guard = false);
     void segment_determine_shower_direction_trajectory(SegmentPtr segment, int start_n, int end_n, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, double MIP_dQdx = 43000/units::cm, bool flag_print = false, const TrackPidOptions& pid_opts = {});
     
     // median_local (doc sbnd_xin/docs/pr/31 §12, F4): forwarded to the interior

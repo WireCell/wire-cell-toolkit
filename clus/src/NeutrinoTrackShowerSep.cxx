@@ -139,7 +139,7 @@ void PatternAlgorithms::separate_track_shower(Graph&graph, Facade::Cluster& clus
         // If not shower topology, check if it's a shower trajectory
         if (!seg->flags_any(SegmentFlags::kShowerTopology)) {
             t0 = Clock::now();
-            segment_is_shower_trajectory(seg, 10*units::cm, m_mip_dqdx);
+            segment_is_shower_trajectory(seg, 10*units::cm, m_mip_dqdx, m_shower_traj_straight_guard);
             t_trajectory += MS(Clock::now() - t0);
         }
     }

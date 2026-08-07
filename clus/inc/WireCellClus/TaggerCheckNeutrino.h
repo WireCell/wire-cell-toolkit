@@ -302,6 +302,9 @@ public:
         // vertex. See NeutrinoPatternBase.h for the full rationale.
         bool m_shower_proton_daughter_pion_dissolve{false};
         bool m_muon_multi_proton_pion{false};
+        bool m_track_pid_persist_dqdx_electron_guard{false};        // doc pr/40 round 5 F9
+        bool m_shower_connect_main_vertex_straight_guard{false};    // doc pr/40 round 5 F10
+        bool m_shower_traj_straight_guard{false};                   // doc pr/40 round 5 F11
         mutable std::shared_ptr<TrackFitting> m_track_fitter;
 
         void load_trackfitting_config(const std::string& config_file);

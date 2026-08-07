@@ -1191,6 +1191,16 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               // default false = legacy = byte-identical.
               shower_proton_daughter_pion_dissolve=false,
               muon_multi_proton_pion=false,
+              // doc sbnd_xin/docs/pr/40 round 5 -- muon mis-identified as
+              // electron, three independent mechanisms.  F9 narrows F1 so it
+              // no longer rescues an undirected electron guess; F10 excludes
+              // a long, straight candidate from the main-vertex EM-shower
+              // selection; F11 gives segment_is_shower_trajectory the same
+              // straightness veto F3 gave segment_is_shower_topology's
+              // dQ/dx.  All three default false = legacy = byte-identical.
+              track_pid_persist_dqdx_electron_guard=false,
+              shower_connect_main_vertex_straight_guard=false,
+              shower_traj_straight_guard=false,
               // muon_dqdx_curve [c0, c1, pivot_cm, power]: the muon
               // median-dQ/dx-vs-length envelope used by nine tagger cuts, as a
               // multiple of mip_dqdx_median.  DEFAULT = the SBND fit
@@ -1701,6 +1711,9 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
             shower_proton_daughter_pion=shower_proton_daughter_pion,
             shower_proton_daughter_pion_dissolve=shower_proton_daughter_pion_dissolve,
             muon_multi_proton_pion=muon_multi_proton_pion,
+            track_pid_persist_dqdx_electron_guard=track_pid_persist_dqdx_electron_guard,
+            shower_connect_main_vertex_straight_guard=shower_connect_main_vertex_straight_guard,
+            shower_traj_straight_guard=shower_traj_straight_guard,
             muon_dqdx_curve=muon_dqdx_curve,
             sp_dedx_use_recomb_model=sp_dedx_use_recomb_model,
             sp_mean_dedx_cut=sp_mean_dedx_cut,
@@ -2298,6 +2311,12 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
        // clus_pr arg comment.
        shower_proton_daughter_pion_dissolve=false,
        muon_multi_proton_pion=false,
+       // doc sbnd_xin/docs/pr/40 round 5 -- muon mis-identified as electron,
+       // three independent mechanisms.  All default false = legacy =
+       // byte-identical.  See the clus_pr arg comment.
+       track_pid_persist_dqdx_electron_guard=false,
+       shower_connect_main_vertex_straight_guard=false,
+       shower_traj_straight_guard=false,
        // Muon dQ/dx-vs-length envelope: DEFAULT = the docs/pr/10 SBND fit
        // (see the clus_pr arg comment; null restores the uBooNE refit).
        // Recombination-model selection + single-photon dE/dx routing:
@@ -2446,6 +2465,9 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 shower_proton_daughter_pion=shower_proton_daughter_pion,
                 shower_proton_daughter_pion_dissolve=shower_proton_daughter_pion_dissolve,
                 muon_multi_proton_pion=muon_multi_proton_pion,
+                track_pid_persist_dqdx_electron_guard=track_pid_persist_dqdx_electron_guard,
+                shower_connect_main_vertex_straight_guard=shower_connect_main_vertex_straight_guard,
+                shower_traj_straight_guard=shower_traj_straight_guard,
                 muon_dqdx_curve=muon_dqdx_curve,
                 use_power_recomb=use_power_recomb,
                 sp_dedx_use_recomb_model=sp_dedx_use_recomb_model,

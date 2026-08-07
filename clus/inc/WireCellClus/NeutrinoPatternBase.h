@@ -681,6 +681,98 @@ namespace WireCell::Clus::PR {
         // byte-identical.
         bool   m_muon_multi_proton_pion{false};
 
+        // doc sbnd_xin/docs/pr/40 round 5 F9 -- narrows F1
+        // (m_track_pid_persist_dqdx).  Travels via
+        // TrackPidOptions::track_pid_persist_dqdx_electron_guard -- see its
+        // comment in PRSegmentFunctions.h.  SBND evt 84229 seg 19038: F1
+        // persists a WEAK, UNDIRECTED (dirsign==0) electron guess on a
+        // neighboring 4.9 cm segment that would otherwise have been
+        // discarded (free_end_dir false, no confident direction at all).
+        // That persisted pdg==11 is then read by a DIFFERENT segment's
+        // flag_shower_in test (NeutrinoVertexFinder.cxx:1320: has_particle_
+        // info() && |pdg|==11), which treats it as an established shower
+        // neighbor and unconditionally demotes an independently-confident,
+        // free-ended muon call (pdg 13, score 0.04, dirsign=-1) to electron
+        // at :1370-1376.  F1's own design intent (persisting a computed
+        // proton/muon identity that failed only the free-end topology
+        // check) never needed an UNDIRECTED electron guess to survive -- of
+        // F1's originally-measured rescue population (doc pr/40 Part 0:
+        // 74544, 267597, 269774, 174637, 423981, 433451), none is pdg 11.
+        // When this knob is on, F1 no longer rescues a pdg==11 conclusion
+        // that lacks a free end (dirsign==0 or non-free topology); it still
+        // rescues every non-electron case exactly as before.  Designed
+        // narrowing of an already-shipped default-ON knob, not a port-
+        // fidelity fix (prototype_base/pid/ProtoSegment.cxx:1637-1639 has
+        // no electron-specific carve-out either, since WCPPID's electron
+        // template competition works differently) -- see
+        // porting_dictionary.md.  C++ default false = today's shipped F1
+        // behaviour = byte-identical.
+        // MEASURED (doc pr/40 round 5): fixes seg 19038's own pdg (13,
+        // correct) but the Bee/mc.json node is unchanged -- 19038 is still
+        // flood-filled into neighbor 19039's shower by
+        // Shower::complete_structure_with_start_segment (PRShower.cxx:
+        // 337-408), which has no per-segment test.  NOT flipped; G2 open.
+        bool   m_track_pid_persist_dqdx_electron_guard{false};
+
+        // doc sbnd_xin/docs/pr/40 round 5 F10.  Travels via
+        // PatternAlgorithms::shower_clustering_connecting_to_main_vertex's
+        // straight_guard parameter -- see its comment in
+        // NeutrinoShowerClustering.cxx.  SBND evt 54341 seg 18005: this
+        // function picks the single largest "EM-shower-like" candidate
+        // connected to the main vertex using only geometric/topological
+        // criteria (vertex multiplicity, total length, flag_good_track) --
+        // none of which inspect the candidate's own dQ/dx or straightness --
+        // and force-sets its start segment to pdg 11.  A 21.3 cm, 0.99-
+        // straight stopping-muon stem satisfies every existing criterion.
+        // When this knob is on, a candidate whose start segment is long and
+        // straight (segment_is_straight_long_track, same shape as the
+        // toolkit's own straightness demotion at NeutrinoVertexFinder.cxx:
+        // 1432-1447, itself a byte-faithful port of prototype
+        // NeutrinoID_track_shower.h:2042-2054) is excluded before the
+        // max-length selection, the same way any other disqualified
+        // candidate is skipped.  Designed divergence -- the prototype's
+        // analogous main-vertex EM-shower selection
+        // (NeutrinoID_shower_clustering.h) has no straightness veto either
+        // -- see porting_dictionary.md.  C++ default false = legacy =
+        // byte-identical.
+        // MEASURED (doc pr/40 round 5): the split shape is achieved (seg
+        // 18005 excludes from the shower), but once unshielded, ORDINARY
+        // track PID -- not this guard -- calls it proton (2212) from its own
+        // elevated dQ/dx, not the intended mu-.  Open physics question for
+        // the owner, not a defect in this guard.  NOT flipped; G2 open.
+        bool   m_shower_connect_main_vertex_straight_guard{false};
+
+        // doc sbnd_xin/docs/pr/40 round 5 F11.  Travels via
+        // segment_is_shower_trajectory's straight_guard parameter -- see
+        // its comment in PRSegmentFunctions.h.  SBND evt 55715 seg 15007:
+        // segment_is_shower_trajectory (the fallback shower test run only
+        // when segment_is_shower_topology did not already set the flag,
+        // NeutrinoTrackShowerSep.cxx:136-143) has no dQ/dx or straightness
+        // guard at all -- unlike its sibling segment_is_shower_topology,
+        // which F3 (m_shower_topo_dqdx_guard) already guards.  Once
+        // kShowerTrajectory is set, determine_direction's trajectory branch
+        // unconditionally assigns pdg 11 (segment_determine_shower_
+        // direction_trajectory, PRSegmentFunctions.cxx).  This segment's own
+        // median dQ/dx (1.70x MIP) sits just under the existing 1.75x
+        // proton-like threshold segment_dqdx_spares_electron_reclass uses,
+        // so that helper (reused unchanged by F2/F3) does not discriminate
+        // here -- straightness does: 0.97 direct/arc ratio over 14.7 cm.
+        // Same segment_is_straight_long_track helper and shape as F10.
+        // Designed divergence -- the prototype's is_shower_trajectory
+        // (ProtoSegment.cxx:543-613) has its own >50 cm hard length veto
+        // but no direct/arc straightness veto below that -- see
+        // porting_dictionary.md.  C++ default false = legacy =
+        // byte-identical.
+        // MEASURED (doc pr/40 round 5): fixes seg 15007's own pdg (13,
+        // correct) but is a CONFIRMED REGRESSION -- clearing 15007's flag
+        // makes shower_clustering_with_nv_in_main_cluster's is_shower_seg
+        // (NeutrinoShowerClustering.cxx:116-119, untouched by F10) re-seed
+        // the shower one segment further up, flipping seg 15005 pi+(211) ->
+        // e-(11) against the owner's explicit "leave 15005 alone" decision.
+        // Isolated to this knob alone via a clean single-knob A/B. NOT
+        // flipped; G2 open.
+        bool   m_shower_traj_straight_guard{false};
+
         // ---- Detector-extent literals (doc sbnd_xin/docs/pr/2 sec. 2e(iv)) ----
         // The uBooNE active volume the prototype was written against is
         // y in [-116, +117] cm, z in [0, 1037] cm, x in [0, 256] cm
@@ -729,6 +821,7 @@ namespace WireCell::Clus::PR {
             o.dir_track_median_local = m_dir_track_median_local;       // doc pr/31 §12 F4
             o.track_pid_persist_dqdx = m_track_pid_persist_dqdx;       // doc pr/40 F1
             o.track_pid_persist_4mom = m_track_pid_persist_4mom;       // doc pr/40 round 2 F4
+            o.track_pid_persist_dqdx_electron_guard = m_track_pid_persist_dqdx_electron_guard; // doc pr/40 round 5 F9
             return o;
         }
 

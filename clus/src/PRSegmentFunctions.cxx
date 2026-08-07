@@ -987,6 +987,15 @@ namespace WireCell::Clus::PR {
         return false;
     }
 
+    // doc sbnd_xin/docs/pr/40 round 5 F10/F11 -- see the header comment.
+    bool segment_is_straight_long_track(SegmentPtr seg, double min_length, double min_direct, double straight_ratio) {
+        if (!seg) return false;
+        const double length = segment_track_length(seg);
+        if (length <= min_length) return false;
+        const double direct_length = segment_track_direct_length(seg);
+        return direct_length >= min_direct || direct_length > straight_ratio * length;
+    }
+
     double segment_rms_dQ_dx(SegmentPtr seg)
     {
         auto& fits = seg->fits();
@@ -1065,7 +1074,7 @@ namespace WireCell::Clus::PR {
     /// doc sbnd_xin/docs/pr/32 §11 F2.  false = today's set-only behaviour.
     bool g_shower_traj_refresh_flag = false;
 
-    bool segment_is_shower_trajectory(SegmentPtr seg, double step_size, double mip_dQ_dx){
+    bool segment_is_shower_trajectory(SegmentPtr seg, double step_size, double mip_dQ_dx, bool straight_guard){
         bool flag_shower_trajectory = false;
         // doc pr/32 §11 F2: the prototype opens is_shower_trajectory() with
         // `flag_shower_trajectory = false` (ProtoSegment.cxx:544), BEFORE its
@@ -1174,12 +1183,24 @@ namespace WireCell::Clus::PR {
         if (n_shower_like >= 0.5 * sections.size()) {
             flag_shower_trajectory = true;
         }
-        
+
+        // doc sbnd_xin/docs/pr/40 round 5 F11: the wiggliness test above has
+        // no length/straightness cross-check (unlike segment_is_shower_
+        // topology, which F3 already guards with a dQ/dx check).  A long,
+        // straight track's own dQ/dx can still sit under the section-level
+        // thresholds used above; straightness catches what dQ/dx alone does
+        // not (SBND evt 55715 seg 15007: 1.70x MIP, just under the 1.75x
+        // proton-like cut segment_dqdx_spares_electron_reclass uses).
+        // false = legacy = byte-identical.
+        if (flag_shower_trajectory && straight_guard && segment_is_straight_long_track(seg)) {
+            flag_shower_trajectory = false;
+        }
+
         // Set the flag on the segment if it's identified as shower trajectory
         if (flag_shower_trajectory) {
             seg->set_flags(SegmentFlags::kShowerTrajectory);
         }
-        
+
         return flag_shower_trajectory;
     }
 
@@ -1942,7 +1963,19 @@ namespace WireCell::Clus::PR {
         // not independently re-verified against prototype source this round
         // (prototype_base symlink unavailable), see doc pr/40 for the
         // measured consequence either way.  false = legacy = byte-identical.
-        if (pdg_code != 0 && (free_end_dir || pid_opts.track_pid_persist_dqdx)) {
+        //
+        // doc sbnd_xin/docs/pr/40 round 5 F9: track_pid_persist_dqdx_electron_
+        // guard narrows the rescue above -- it does not widen it.  An
+        // UNDIRECTED (free_end_dir false) pdg_code==11 conclusion is never
+        // F1's target population (proton/muon rescues from the median-dQ/dx
+        // fallback or a confident-but-not-free-ended template match); letting
+        // it persist anyway lets a single weak electron guess poison a
+        // NEIGHBORING segment's flag_shower_in test (NeutrinoVertexFinder.cxx
+        // :1320) into demoting an independently-confident muon/proton call.
+        // false = today's shipped F1 behaviour = byte-identical.
+        const bool f1_rescue = pid_opts.track_pid_persist_dqdx &&
+            !(pid_opts.track_pid_persist_dqdx_electron_guard && pdg_code == 11 && !free_end_dir);
+        if (pdg_code != 0 && (free_end_dir || f1_rescue)) {
             // Calculate 4-momentum using the identified particle type.  When
             // the knob rescues a non-free-end store, the momentum direction
             // is only as good as segment_cal_dir_3vector's no-argument

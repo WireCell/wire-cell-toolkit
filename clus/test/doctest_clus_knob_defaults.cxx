@@ -113,6 +113,10 @@ TEST_CASE("clus knob defaults: TaggerCheckNeutrino switches are all OFF")
     // doc pr/40 round 4: two follow-on defects from round 2/3's F5 fix.
     CHECK_KNOB_BOOL(cfg, "shower_proton_daughter_pion_dissolve", false); // F7
     CHECK_KNOB_BOOL(cfg, "muon_multi_proton_pion", false);               // F8
+    // doc pr/40 round 5: muon mis-identified as electron, three mechanisms.
+    CHECK_KNOB_BOOL(cfg, "track_pid_persist_dqdx_electron_guard", false);     // F9
+    CHECK_KNOB_BOOL(cfg, "shower_connect_main_vertex_straight_guard", false); // F10
+    CHECK_KNOB_BOOL(cfg, "shower_traj_straight_guard", false);                // F11
 
     // Numeric knobs whose legacy value is the INERT one: 0 disables the guard,
     // so an absent key leaves the code path untouched.
@@ -586,6 +590,73 @@ TEST_CASE("clus knob defaults: segment_at_multi_proton_vertex")
         add_segment(g, make_proton(3.5 * MIP), far_vertex, p2_end);
         CHECK(segment_at_multi_proton_vertex(g, muon, nullptr, MIP) == false);
     }
+}
+
+// ---------------------------------------------------------------------------
+// doc sbnd_xin/docs/pr/40 round 5 F10/F11 -- shared straightness veto used by
+// shower_clustering_connecting_to_main_vertex and segment_is_shower_
+// trajectory.  Same shape as the toolkit's own straightness demotion
+// (NeutrinoVertexFinder.cxx:1432-1447): length > 10 cm, and either
+// direct_length >= 34 cm or direct/arc ratio > 0.93.
+// ---------------------------------------------------------------------------
+
+TEST_CASE("clus knob defaults: segment_is_straight_long_track")
+{
+    using namespace WireCell::Clus::PR;
+
+    auto make_straight_seg = [&](double length_cm) {
+        auto seg = std::make_shared<Segment>();
+        std::vector<Fit> fits;
+        const int n = 20;
+        for (int i = 0; i < n; ++i) {
+            Fit f;
+            f.point = WireCell::Point(i * (length_cm / (n - 1)) * units::cm, 0, 0);
+            f.dx = (length_cm / (n - 1)) * units::cm;
+            f.dQ = 1.0;
+            f.index = i;
+            fits.push_back(f);
+        }
+        seg->fits(fits);
+        return seg;
+    };
+    // A zigzag whose arc length is ~1.43x its straight-line span (each leg is
+    // a 45-degree jog forward+sideways of equal size), well under the 0.93
+    // ratio cut regardless of overall length.
+    auto make_wiggly_seg = [&](double length_cm) {
+        auto seg = std::make_shared<Segment>();
+        std::vector<Fit> fits;
+        const int n = 20;
+        const double step = (length_cm / (n - 1)) * units::cm;
+        for (int i = 0; i < n; ++i) {
+            Fit f;
+            f.point = WireCell::Point(i * step * 0.7071, (i % 2 == 0 ? 0.0 : step * 0.7071), 0);
+            f.dx = step;
+            f.dQ = 1.0;
+            f.index = i;
+            fits.push_back(f);
+        }
+        seg->fits(fits);
+        return seg;
+    };
+
+    // Long (>10cm) and straight: fires.
+    CHECK(segment_is_straight_long_track(make_straight_seg(20.0)) == true);
+
+    // Long and wiggly (direct/arc well under 0.93, direct well under 34cm):
+    // does not fire.
+    CHECK(segment_is_straight_long_track(make_wiggly_seg(20.0)) == false);
+
+    // Short (<=10cm) even though perfectly straight: does not fire -- this is
+    // the boundary that leaves SBND evt 55715 seg 15005 (6.1 cm) untouched
+    // per the owner's decision not to extend the relabel across it.
+    CHECK(segment_is_straight_long_track(make_straight_seg(6.0)) == false);
+
+    // direct_length >= 34cm alone is sufficient regardless of the ratio path
+    // (a long straight track well past the ratio-only branch).
+    CHECK(segment_is_straight_long_track(make_straight_seg(40.0)) == true);
+
+    // Null segment: never fires.
+    CHECK(segment_is_straight_long_track(nullptr) == false);
 }
 
 TEST_CASE("clus knob defaults: KineChargeOptions in-class initializers")
