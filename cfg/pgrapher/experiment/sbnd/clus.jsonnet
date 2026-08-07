@@ -1201,6 +1201,16 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               track_pid_persist_dqdx_electron_guard=false,
               shower_connect_main_vertex_straight_guard=false,
               shower_traj_straight_guard=false,
+              // doc sbnd_xin/docs/pr/40 round 6 -- boundary-level fixes the
+              // round-5 measurement demanded.  F12 keeps the shower flood-
+              // fill from absorbing a confident straight non-electron track;
+              // F13 keeps connecting_to_main_vertex from force-setting a
+              // proton-daughter pion to electron; F14 widens the Michel
+              // stopping-muon rescue past its weak-dir degree-2 limits.
+              // All three default false = legacy = byte-identical.
+              shower_absorb_track_guard=false,
+              shower_connect_protected_pion_guard=false,
+              michel_stem_muon_rescue=false,
               // muon_dqdx_curve [c0, c1, pivot_cm, power]: the muon
               // median-dQ/dx-vs-length envelope used by nine tagger cuts, as a
               // multiple of mip_dqdx_median.  DEFAULT = the SBND fit
@@ -1714,6 +1724,9 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
             track_pid_persist_dqdx_electron_guard=track_pid_persist_dqdx_electron_guard,
             shower_connect_main_vertex_straight_guard=shower_connect_main_vertex_straight_guard,
             shower_traj_straight_guard=shower_traj_straight_guard,
+            shower_absorb_track_guard=shower_absorb_track_guard,
+            shower_connect_protected_pion_guard=shower_connect_protected_pion_guard,
+            michel_stem_muon_rescue=michel_stem_muon_rescue,
             muon_dqdx_curve=muon_dqdx_curve,
             sp_dedx_use_recomb_model=sp_dedx_use_recomb_model,
             sp_mean_dedx_cut=sp_mean_dedx_cut,
@@ -2317,6 +2330,12 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
        track_pid_persist_dqdx_electron_guard=false,
        shower_connect_main_vertex_straight_guard=false,
        shower_traj_straight_guard=false,
+       // doc sbnd_xin/docs/pr/40 round 6 -- boundary-level fixes.  All
+       // default false = legacy = byte-identical.  See the clus_pr arg
+       // comment.
+       shower_absorb_track_guard=false,
+       shower_connect_protected_pion_guard=false,
+       michel_stem_muon_rescue=false,
        // Muon dQ/dx-vs-length envelope: DEFAULT = the docs/pr/10 SBND fit
        // (see the clus_pr arg comment; null restores the uBooNE refit).
        // Recombination-model selection + single-photon dE/dx routing:
@@ -2468,6 +2487,9 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 track_pid_persist_dqdx_electron_guard=track_pid_persist_dqdx_electron_guard,
                 shower_connect_main_vertex_straight_guard=shower_connect_main_vertex_straight_guard,
                 shower_traj_straight_guard=shower_traj_straight_guard,
+                shower_absorb_track_guard=shower_absorb_track_guard,
+                shower_connect_protected_pion_guard=shower_connect_protected_pion_guard,
+                michel_stem_muon_rescue=michel_stem_muon_rescue,
                 muon_dqdx_curve=muon_dqdx_curve,
                 use_power_recomb=use_power_recomb,
                 sp_dedx_use_recomb_model=sp_dedx_use_recomb_model,

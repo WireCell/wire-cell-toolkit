@@ -836,3 +836,48 @@ landed as gate-clean infrastructure (G1/G5/G6 pass) but G2 fails on every
 owner-reported case; the fix implied by the root-cause finding is a change
 to the seeding/absorption boundary itself (comparable in shape to round 4's
 F7 shower-dissolve), scoped larger than this round and not attempted here.
+
+## The shower flood-fill gains a per-segment track exclusion; the Michel rescue reaches confident-direction multi-prong stems — `shower_absorb_track_guard` (F12) + `michel_stem_muon_rescue` (F14) are the round-6 boundary-level fixes; `shower_connect_protected_pion_guard` (F13) is a measured-dead negative result, never flipped
+
+doc pr/40 round 6 closes the round-5 negative result above. Three knobs, two
+live, one dead:
+
+- **F12 `shower_absorb_track_guard`** — `Shower::complete_structure_with_
+  start_segment` (`PRShower.cxx`) gains a per-segment exclusion: a
+  confidently PID'd non-electron (`pdg != 0 && |pdg| != 11`) that is long and
+  straight (`segment_is_straight_long_track`) is not absorbed, the walk
+  terminates there, the excluded segment is NOT claimed in `used_segments`,
+  and long-muon pseudo-showers (`Shower::get_particle_type()==13`, set by the
+  in_main_cluster seeder before completion) are exempt so broken-muon
+  reassembly keeps working. One knob threads all 7 call sites in
+  `NeutrinoShowerClustering.cxx`. The excluded segment automatically gets its
+  own PF node: `fill_bee_pf_tree`'s suppression key is the shower's VIEW
+  (`fill_sets()`), and the `pf_shower_vertex_barrier` orphan safety net (doc
+  pr/38) covers the BFS-unreachable case. The prototype's counterpart
+  flood-fill has no per-segment test either — designed divergence.
+- **F14 `michel_stem_muon_rescue`** — new pass `override_michel_stem_muon`
+  (`NeutrinoPatternBase.cxx`, called at F8's `examine_direction` call site).
+  The toolkit's own Michel rescue ("a stopped proton cannot produce a Michel
+  electron", `NeutrinoVertexFinder.cxx` weak-direction branch) is limited to
+  `seg_dir_weak` segments with a degree-2 stopping vertex; the widened pass
+  reaches a `pdg==2212`, straight-long, main-vertex-emanating stem with >=1
+  shower-like sibling (`kShowerTrajectory || |pdg|==11`) at its stopping
+  vertex, relabelling it mu-. The degree-2 restriction and the weak-dir gate
+  are both prototype-faithful in the original — designed divergence.
+- **F13 `shower_connect_protected_pion_guard`** — DEAD as shaped, kept as a
+  documented negative result (doc pr/36 F2 precedent), excluded from the
+  flip. The full-transition trace (`WCT_PID_WRITE_DEBUG=2`, a round-6
+  widening of the round-1 probe) showed the motivating segment (55715/15005)
+  is already `pdg 2212` at candidate-selection time; its baseline `211` was
+  derivative of the very bug F11 fixes (wrong e- on 15007 → Michel rescue
+  2212→13 → single-muon pion demotion 13→211). A `pdg==211` predicate
+  cannot fire there, and F12 alone produces the intended display.
+
+Measured on the three round-5/6 owner cases (all in doc pr/40 round 6's
+Demonstration table): 84229 → `19038 'mu-'` own node + `19040 'e-'` child
+(owner-accepted residual: parent stub 19039 reads `pi+` from the legacy
+single-muon selection, its own honest call being a second muon); 54341 →
+`18005 'mu-'` + children `e-`/`mu-` (exact owner request); 55715 → `15007
+'mu-'` own node, `15006 'proton'` kept (owner-accepted: 15005 reads `proton`,
+its own charge-based call, the baseline `pi+` having been derivative of the
+fixed bug).

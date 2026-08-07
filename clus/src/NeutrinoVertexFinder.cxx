@@ -1820,6 +1820,10 @@ bool PatternAlgorithms::examine_direction(Graph& graph, VertexPtr vertex, Vertex
     // m_muon_multi_proton_pion is false.
     override_muon_multi_proton_pion(graph, cluster, particle_data, recomb_model, main_vertex);
 
+    // doc sbnd_xin/docs/pr/40 round 6 F14 -- same call-site convention as F8.
+    // No-op when m_michel_stem_muon_rescue is false.
+    override_michel_stem_muon(graph, cluster, particle_data, recomb_model, main_vertex);
+
     return examine_maps(graph, cluster);
 }
 

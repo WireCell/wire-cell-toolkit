@@ -244,6 +244,67 @@ void PatternAlgorithms::override_muon_multi_proton_pion(Graph& graph, Facade::Cl
     }
 }
 
+void PatternAlgorithms::override_michel_stem_muon(Graph& graph, Facade::Cluster& cluster, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, VertexPtr main_vertex) {
+    // doc sbnd_xin/docs/pr/40 round 6 F14 -- see m_michel_stem_muon_rescue's
+    // docstring in NeutrinoPatternBase.h.  Widens the toolkit's own Michel
+    // rescue ("a stopped proton cannot produce a Michel electron",
+    // NeutrinoVertexFinder.cxx examine_direction's weak-direction branch):
+    // that rescue only runs for seg_dir_weak segments and only when the
+    // stopping vertex has EXACTLY two segments; a stopping muon whose Bragg
+    // rise wins the proton template with a confident direction, ending at a
+    // vertex that also carries stub fragments (SBND evt 54341 seg 18005,
+    // stopping vertex degree 4), is out of its reach on both counts.
+    // false = legacy = no-op.
+    if (!m_michel_stem_muon_rescue) return;
+    if (!main_vertex || !main_vertex->descriptor_valid()) return;
+
+    for (const auto& ed : ordered_edges(graph)) {
+        SegmentPtr sg = graph[ed].segment;
+        if (!sg || sg->cluster() != &cluster) continue;
+        if (sg->flags_any(SegmentFlags::kShowerTrajectory) ||
+            sg->flags_any(SegmentFlags::kShowerTopology)) continue;
+        if (!sg->has_particle_info() || !sg->particle_info()) continue;
+        if (sg->particle_info()->pdg() != 2212) continue;
+        // A genuine stopping proton is short; the rescue only claims a stem
+        // that is long and straight (same helper as F10/F11/F12).
+        if (!segment_is_straight_long_track(sg)) continue;
+
+        // The stem must emanate from the main vertex; the Michel topology
+        // test runs on the OTHER (stopping) end.
+        auto vpair = find_vertices(graph, sg);
+        VertexPtr far_vtx = nullptr;
+        if (vpair.first == main_vertex) far_vtx = vpair.second;
+        else if (vpair.second == main_vertex) far_vtx = vpair.first;
+        else continue;
+        if (!far_vtx || !far_vtx->descriptor_valid()) continue;
+
+        // Same sibling test as the existing Michel branch (kShowerTrajectory
+        // flag or electron PDG), degree restriction relaxed from ==2 to >=1
+        // shower-like sibling among any number of stub fragments.
+        bool flag_michel = false;
+        for (auto edesc : sorted_out_edges(far_vtx->get_descriptor(), graph)) {
+            SegmentPtr other_sg = graph[edesc].segment;
+            if (!other_sg || other_sg == sg) continue;
+            if (other_sg->flags_any(SegmentFlags::kShowerTrajectory) ||
+                (other_sg->has_particle_info() && other_sg->particle_info() &&
+                 std::abs(other_sg->particle_info()->pdg()) == 11)) {
+                flag_michel = true;
+                break;
+            }
+        }
+        if (!flag_michel) continue;
+
+        // Relabel muon, recompute the 4-momentum -- same conventions as the
+        // existing rescue's recompute (m_mip_dqdx scale, no score write).
+        const int pdg_code = 13;
+        auto four_momentum = segment_cal_4mom(sg, pdg_code, particle_data, recomb_model, m_mip_dqdx);
+        auto pinfo = std::make_shared<Aux::ParticleInfo>(
+            pdg_code, particle_data->get_particle_mass(pdg_code),
+            particle_data->pdg_to_name(pdg_code), four_momentum);
+        sg->particle_info(pinfo);
+    }
+}
+
 std::vector<Facade::geo_point_t> PatternAlgorithms::do_rough_path_reg_pc(const Facade::Cluster& cluster, Facade::geo_point_t& first_point, Facade::geo_point_t& last_point,  std::string graph_name){
     // Find closest indices in the regular point cloud using kd_knn
     auto first_knn_results = cluster.kd_knn(1, first_point);

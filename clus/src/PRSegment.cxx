@@ -17,11 +17,17 @@ namespace WireCell::Clus::PR {
     // bypass this setter entirely.
     Segment& Segment::particle_info(std::shared_ptr<Aux::ParticleInfo> pinfo,
                                      const char* _caller_file, int _caller_line) {
-        static const bool dbg = std::getenv("WCT_PID_WRITE_DEBUG") != nullptr;
+        // doc pr/40 round 6: WCT_PID_WRITE_DEBUG=2 (or any value >= 2) logs
+        // EVERY pdg transition, not only the +-11 ones -- needed to trace
+        // e.g. a 211 -> 2212 flip that the original electron-focused filter
+        // is blind to.  Any other non-empty value keeps the legacy filter.
+        static const char* dbg_env = std::getenv("WCT_PID_WRITE_DEBUG");
+        static const bool dbg = dbg_env != nullptr;
+        static const bool dbg_all = dbg && std::atoi(dbg_env) >= 2;
         if (dbg) {
             const int old_pdg = m_particle_info ? m_particle_info->pdg() : 0;
             const int new_pdg = pinfo ? pinfo->pdg() : 0;
-            if (std::abs(old_pdg) == 11 || std::abs(new_pdg) == 11) {
+            if (dbg_all || std::abs(old_pdg) == 11 || std::abs(new_pdg) == 11) {
                 const int cid = cluster() ? cluster()->get_cluster_id() : -1;
                 std::fprintf(stderr,
                     "PID_WRITE_DEBUG setter id=%d clus=%d gidx=%zu pdg %d -> %d  at %s:%d\n",

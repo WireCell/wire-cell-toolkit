@@ -268,6 +268,9 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_track_pid_persist_dqdx_electron_guard     = get(config, "track_pid_persist_dqdx_electron_guard",     m_track_pid_persist_dqdx_electron_guard);
     m_shower_connect_main_vertex_straight_guard = get(config, "shower_connect_main_vertex_straight_guard", m_shower_connect_main_vertex_straight_guard);
     m_shower_traj_straight_guard                = get(config, "shower_traj_straight_guard",                m_shower_traj_straight_guard);
+    m_shower_absorb_track_guard                 = get(config, "shower_absorb_track_guard",                 m_shower_absorb_track_guard);
+    m_shower_connect_protected_pion_guard       = get(config, "shower_connect_protected_pion_guard",       m_shower_connect_protected_pion_guard);
+    m_michel_stem_muon_rescue                   = get(config, "michel_stem_muon_rescue",                   m_michel_stem_muon_rescue);
 
     if (!m_trackfitting_config_file.empty()) {
         load_trackfitting_config(m_trackfitting_config_file);
@@ -411,6 +414,9 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["track_pid_persist_dqdx_electron_guard"]     = m_track_pid_persist_dqdx_electron_guard;     // false = legacy (F1 rescues an undirected electron guess too)
     cfg["shower_connect_main_vertex_straight_guard"] = m_shower_connect_main_vertex_straight_guard; // false = legacy (straightness never consulted)
     cfg["shower_traj_straight_guard"]                = m_shower_traj_straight_guard;                // false = legacy (straightness never consulted)
+    cfg["shower_absorb_track_guard"]                 = m_shower_absorb_track_guard;                 // false = legacy (flood-fill absorbs every connected segment)
+    cfg["shower_connect_protected_pion_guard"]       = m_shower_connect_protected_pion_guard;       // false = legacy (proton-daughter pion selectable as EM candidate)
+    cfg["michel_stem_muon_rescue"]                   = m_michel_stem_muon_rescue;                   // false = legacy (Michel rescue limited to weak-dir degree-2 vertices)
 
 
     return cfg;
@@ -737,6 +743,9 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
     pattern_algos.m_track_pid_persist_dqdx_electron_guard     = m_track_pid_persist_dqdx_electron_guard;     // F9
     pattern_algos.m_shower_connect_main_vertex_straight_guard = m_shower_connect_main_vertex_straight_guard; // F10
     pattern_algos.m_shower_traj_straight_guard                = m_shower_traj_straight_guard;                // F11
+    pattern_algos.m_shower_absorb_track_guard                 = m_shower_absorb_track_guard;                 // F12
+    pattern_algos.m_shower_connect_protected_pion_guard       = m_shower_connect_protected_pion_guard;       // F13
+    pattern_algos.m_michel_stem_muon_rescue                   = m_michel_stem_muon_rescue;                   // F14
     // Muon dQ/dx-vs-length envelope: c0/c1/power dimensionless, pivot cm -> internal.
     pattern_algos.m_muon_dqdx_curve = {m_muon_dqdx_curve[0], m_muon_dqdx_curve[1],
                                        m_muon_dqdx_curve[2] * units::cm, m_muon_dqdx_curve[3]};

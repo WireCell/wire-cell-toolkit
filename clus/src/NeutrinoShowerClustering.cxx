@@ -155,7 +155,7 @@ void PatternAlgorithms::shower_clustering_with_nv_in_main_cluster(Graph& graph, 
     // Complete shower structure for all newly created showers.
     // used_segments (populated during BFS) prevents overlapping segment claims.
     for (auto shower : new_showers) {
-        shower->complete_structure_with_start_segment(used_segments);
+        shower->complete_structure_with_start_segment(used_segments, "fit", "associate_points", m_shower_absorb_track_guard);
         // Enforce electron type on start segment:
         //  - update_particle_type() handles multi-segment showers via majority vote
         //  - explicit PDG=0 guard catches single-segment showers skipped by update_particle_type()
@@ -370,11 +370,29 @@ void PatternAlgorithms::shower_clustering_connecting_to_main_vertex(Graph& graph
                 continue;
             }
 
+            // doc sbnd_xin/docs/pr/40 round 6 F13: also skip a pion whose far
+            // vertex carries a charge-confirmed proton daughter -- "an
+            // electron cannot father a proton" (round-3 protected_pion, same
+            // predicate as Shower::update_particle_type's guard, PRShower.cxx
+            // and the F5 relabel condition itself, NeutrinoPatternBase.cxx).
+            // SBND evt 55715 seg 15005 (pi+, 6.1 cm -- UNDER the 10 cm floor,
+            // so the F10 branch above cannot save it): once F11 declassifies
+            // its daughter 15007, this function selects 15005 as the EM
+            // candidate and force-sets it to pdg 11 at the accept site below
+            // (probe tag "connecting_to_main_vertex"), reverting the pion
+            // against proton daughter 15006.  The legacy pdg==211 branch two
+            // blocks up only skips on HIGH dQ/dx (>2.0x MIP), which a real
+            // pion fails.  false = legacy = byte-identical.
+            if (m_shower_connect_protected_pion_guard && particle_type == 211 &&
+                segment_has_proton_daughter(graph, sg, main_vertex, m_mip_dqdx_median)) {
+                continue;
+            }
+
             // Create a new shower
             ShowerPtr shower = std::make_shared<Shower>(graph);
             shower->set_start_vertex(main_vertex, 1);
             shower->set_start_segment(sg);
-            shower->complete_structure_with_start_segment(used_segments);
+            shower->complete_structure_with_start_segment(used_segments, "fit", "associate_points", m_shower_absorb_track_guard);
 
             // Single pass over shower edges: accumulate segment stats, vertex counts,
             // and flag_good_track together to avoid iterating edges twice.
@@ -1160,7 +1178,7 @@ void PatternAlgorithms::shower_clustering_with_nv_from_vertices(Graph& graph, Ve
         
         // Complete shower structure
         IndexedSegmentSet used_segments;
-        shower->complete_structure_with_start_segment(used_segments);
+        shower->complete_structure_with_start_segment(used_segments, "fit", "associate_points", m_shower_absorb_track_guard);
         
         // Calculate shower direction
         auto [start_vtx, conn_type] = shower->get_start_vertex_and_type();
@@ -1532,7 +1550,7 @@ void PatternAlgorithms::shower_clustering_in_other_clusters(Graph& graph, Vertex
             
             // Complete shower structure
             IndexedSegmentSet used_segments;
-            shower->complete_structure_with_start_segment(used_segments);
+            shower->complete_structure_with_start_segment(used_segments, "fit", "associate_points", m_shower_absorb_track_guard);
             
             // Calculate shower direction
             WireCell::Vector dir_shower = shower_cal_dir_3vector(*shower, vertex_pt, 15 * units::cm);
@@ -1724,7 +1742,7 @@ void PatternAlgorithms::shower_clustering_in_other_clusters(Graph& graph, Vertex
             
             // Complete shower structure
             IndexedSegmentSet used_segments;
-            shower->complete_structure_with_start_segment(used_segments);
+            shower->complete_structure_with_start_segment(used_segments, "fit", "associate_points", m_shower_absorb_track_guard);
             // Majority-vote correction for multi-segment showers whose start segment
             // has an unexpected PDG not covered by the explicit force-to-11 above.
             shower->update_particle_type(particle_data, recomb_model, m_mip_dqdx, main_vertex, m_shower_proton_daughter_pion, m_mip_dqdx_median);
@@ -1809,7 +1827,7 @@ void PatternAlgorithms::examine_shower_1(Graph& graph, VertexPtr main_vertex, In
                 ShowerPtr shower1 = std::make_shared<Shower>(graph);
                 shower1->set_start_vertex(main_vertex, 1);
                 shower1->set_start_segment(sg);
-                shower1->complete_structure_with_start_segment(used_segments);
+                shower1->complete_structure_with_start_segment(used_segments, "fit", "associate_points", m_shower_absorb_track_guard);
                 
                 WireCell::Vector dir1 = segment_cal_dir_3vector(sg, main_vtx_pt, 15 * units::cm);
 
@@ -2480,7 +2498,7 @@ void PatternAlgorithms::examine_showers(Graph& graph, VertexPtr main_vertex, Ind
         shower->set_start_segment(sg);
         shower->set_start_point(main_vtx_pt);
         IndexedSegmentSet tmp_used_segments;
-        shower->complete_structure_with_start_segment(tmp_used_segments);
+        shower->complete_structure_with_start_segment(tmp_used_segments, "fit", "associate_points", m_shower_absorb_track_guard);
         if (pair_conn_type != 1) {
             if (segment_track_length(sg) > 44 * units::cm || seg_dir_weak(sg))
                 sg->set_flags(SegmentFlags::kAvoidMuonCheck);

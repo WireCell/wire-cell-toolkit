@@ -1015,10 +1015,32 @@ function(
     // whose own start segment is long and straight.  F11
     // shower_traj_straight_guard: segment_is_shower_trajectory gets the
     // same straightness veto F3 already gave segment_is_shower_topology's
-    // dQ/dx.  Gated OFF pending G0-G6; see docs/pr/40 round 5.
-    track_pid_persist_dqdx_electron_guard = false,
-    shower_connect_main_vertex_straight_guard = false,
-    shower_traj_straight_guard = false,
+    // dQ/dx.
+    // SBND PRODUCTION DEFAULT ON (doc pr/40 round 6, together with F12/F14
+    // below): round 5 measured these three alone do NOT reach the displayed
+    // outcome (G2 failed, F11 regressed evt 55715 seg 15005); round 6's
+    // boundary-level F12/F14 close that gap, and the round-6 gates cover the
+    // five as a set -- G1 48/48 events (96/96 archives) byte-identical off,
+    // G2 all three owner cases fixed, G3 nusel-table.tsv 0-line diff, G4
+    // census attributed (26/48 events restructure, 42 pdg moves dominated by
+    // the intended 11->13 recoveries, long-muon reassembly intact 2==2).
+    track_pid_persist_dqdx_electron_guard = true,
+    shower_connect_main_vertex_straight_guard = true,
+    shower_traj_straight_guard = true,
+    // doc sbnd_xin/docs/pr/40 round 6 -- the boundary-level fixes round 5's
+    // G2 measurement demanded.  F12 shower_absorb_track_guard: the shower
+    // flood-fill no longer absorbs a confidently PID'd straight non-electron
+    // track (long-muon pseudo-showers exempt).  F14
+    // michel_stem_muon_rescue: the Michel stopping-muon rescue reaches a
+    // confident-direction proton-called stem at a multi-prong stopping
+    // vertex.  SBND PRODUCTION DEFAULT ON (same gate set as above).
+    shower_absorb_track_guard = true,
+    // F13 shower_connect_protected_pion_guard: MEASURED DEAD as shaped
+    // (its motivating segment is already pdg 2212 by candidate-selection
+    // time -- see NeutrinoPatternBase.h), kept as a documented negative
+    // result, NEVER flip.
+    shower_connect_protected_pion_guard = false,
+    michel_stem_muon_rescue = true,
 )
     local base = import 'pgrapher/experiment/sbnd/simparams.jsonnet';
     local params = base {
@@ -1184,6 +1206,9 @@ function(
                              track_pid_persist_dqdx_electron_guard=track_pid_persist_dqdx_electron_guard,
                              shower_connect_main_vertex_straight_guard=shower_connect_main_vertex_straight_guard,
                              shower_traj_straight_guard=shower_traj_straight_guard,
+                             shower_absorb_track_guard=shower_absorb_track_guard,
+                             shower_connect_protected_pion_guard=shower_connect_protected_pion_guard,
+                             michel_stem_muon_rescue=michel_stem_muon_rescue,
                              reclass_never_computed_ke_floor=reclass_never_computed_ke_floor,
                              muon_dqdx_curve=muon_dqdx_curve,
                              use_power_recomb=use_power_recomb,

@@ -165,7 +165,13 @@ namespace WireCell::Clus::PR {
 
         // Add all segments and vertices from another shower to this one
         void add_shower(Shower& temp_shower, const std::string& cloud_name_fit = "fit", const std::string& cloud_name_associate = "associate_points");
-        void complete_structure_with_start_segment(IndexedSegmentSet& used_segments, const std::string& cloud_name_fit = "fit", const std::string& cloud_name_associate = "associate_points");
+        // absorb_track_guard (doc pr/40 round 6 F12): when true, the
+        // flood-fill skips (and terminates the walk at) a confidently PID'd
+        // non-electron segment that is long and straight
+        // (segment_is_straight_long_track); long-muon pseudo-showers
+        // (get_particle_type()==13) are exempt.  false = legacy flood-fill =
+        // byte-identical.  See the comment in the implementation.
+        void complete_structure_with_start_segment(IndexedSegmentSet& used_segments, const std::string& cloud_name_fit = "fit", const std::string& cloud_name_associate = "associate_points", bool absorb_track_guard = false);
 
 
         // get the information from the shower.

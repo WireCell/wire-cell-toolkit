@@ -117,6 +117,10 @@ TEST_CASE("clus knob defaults: TaggerCheckNeutrino switches are all OFF")
     CHECK_KNOB_BOOL(cfg, "track_pid_persist_dqdx_electron_guard", false);     // F9
     CHECK_KNOB_BOOL(cfg, "shower_connect_main_vertex_straight_guard", false); // F10
     CHECK_KNOB_BOOL(cfg, "shower_traj_straight_guard", false);                // F11
+    // doc pr/40 round 6: boundary-level fixes the round-5 measurement demanded.
+    CHECK_KNOB_BOOL(cfg, "shower_absorb_track_guard", false);                 // F12
+    CHECK_KNOB_BOOL(cfg, "shower_connect_protected_pion_guard", false);       // F13
+    CHECK_KNOB_BOOL(cfg, "michel_stem_muon_rescue", false);                   // F14
 
     // Numeric knobs whose legacy value is the INERT one: 0 disables the guard,
     // so an absent key leaves the code path untouched.

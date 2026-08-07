@@ -334,8 +334,33 @@ namespace WireCell::Clus::PR {
 
     }
 
-    void Shower::complete_structure_with_start_segment(IndexedSegmentSet& used_segments, const std::string& cloud_name_fit, const std::string& cloud_name_associate) {
+    void Shower::complete_structure_with_start_segment(IndexedSegmentSet& used_segments, const std::string& cloud_name_fit, const std::string& cloud_name_associate, bool absorb_track_guard) {
         if (!m_start_segment || !m_start_segment->descriptor_valid()) return;
+
+        // doc sbnd_xin/docs/pr/40 round 6 F12: the flood-fill below has no
+        // per-segment test at all, so one shower-flagged seed swallows every
+        // connected segment regardless of its own PID (round-5 G2a/G2c
+        // failure mechanism).  When absorb_track_guard is on, a confidently
+        // PID'd non-electron that is long and straight is not absorbed and
+        // the walk terminates there (its far vertex is never enqueued, so a
+        // Michel candidate beyond a stopping muon stays unclaimed for the
+        // later seeding passes).  Long-muon pseudo-showers are exempt: the
+        // in_main_cluster seeder records particle_type 13 on the shower
+        // BEFORE calling here (NeutrinoShowerClustering.cxx:132), and broken
+        // muon tracks must keep reassembling through this flood-fill.  The
+        // excluded segment is deliberately NOT inserted into used_segments
+        // (the predicate is a pure segment property -- every other
+        // flood-fill re-excludes it) and its shower flags are deliberately
+        // NOT consulted (a stale flag must not defeat the exclusion).
+        // false = legacy = byte-identical.
+        const bool apply_guard = absorb_track_guard && this->get_particle_type() != 13;
+        auto guard_excludes = [&](const SegmentPtr& seg) -> bool {
+            if (!apply_guard) return false;
+            if (!seg->has_particle_info() || !seg->particle_info()) return false;
+            const int pdg = seg->particle_info()->pdg();
+            if (pdg == 0 || std::abs(pdg) == 11) return false;
+            return segment_is_straight_long_track(seg);
+        };
         
         std::vector<SegmentPtr> new_segments;
         std::vector<VertexPtr> new_vertices;
@@ -367,6 +392,8 @@ namespace WireCell::Clus::PR {
                     for (auto edesc : sorted_out_edges(vtx->get_descriptor(), m_full_graph)) {
                         SegmentPtr seg = m_full_graph[edesc].segment;
                         if (seg && seg->descriptor_valid() && used_segments.find(seg) == used_segments.end()) {
+                            // F12 (doc pr/40 round 6): see guard_excludes above.
+                            if (guard_excludes(seg)) continue;
                             // add_segment() already performs the fit/associate merge
                             // (and merge_wpid_params, which the block that used to sit
                             // here omitted).  It previously ran with the DEFAULT cloud

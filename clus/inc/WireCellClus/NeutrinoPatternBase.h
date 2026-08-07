@@ -773,6 +773,85 @@ namespace WireCell::Clus::PR {
         // flipped; G2 open.
         bool   m_shower_traj_straight_guard{false};
 
+        // doc sbnd_xin/docs/pr/40 round 6 F12 -- the boundary-level fix
+        // round 5's F9/F10/F11 measurement demanded.  Travels via
+        // Shower::complete_structure_with_start_segment's absorb_track_guard
+        // parameter (all 7 call sites in NeutrinoShowerClustering.cxx).  The
+        // flood-fill has NO per-segment test (PRShower.cxx), so one
+        // shower-flagged seed swallows every connected segment regardless of
+        // its own PID; the absorbed muon's length then also biases
+        // Shower::update_particle_type's majority vote toward electron, and
+        // the merged Bee/mc.json node shows one "e-" (SBND evt 84229 seg
+        // 19038, a confident mu- flood-filled into neighbor 19039's 4.9 cm
+        // shower).  When on, a confidently PID'd non-electron (pdg != 0,
+        // |pdg| != 11) that is long and straight (segment_is_straight_long_
+        // track) is not absorbed; the walk terminates there; the segment
+        // then gets its own PF node (view-keyed suppression in
+        // fill_bee_pf_tree; the pf_shower_vertex_barrier orphan safety net
+        // covers the BFS-unreachable case).  Long-muon pseudo-showers
+        // (Shower::get_particle_type()==13) are exempt so broken muon
+        // reassembly keeps working.  Designed divergence -- the prototype's
+        // complete_structure_with_start_segment has no per-segment test
+        // either -- see porting_dictionary.md.  C++ default false = legacy =
+        // byte-identical.
+        // MEASURED (doc pr/40 round 6): fixes BOTH remaining display cases.
+        // 84229: seg 19038 gets its own mu- PF node (owner's split shape)
+        // with 19040 as the separate e- child.  55715: 15006/15007 are no
+        // longer absorbed into the 15005-seeded candidate, which then fails
+        // EM acceptance -- 15007 gets its own mu- node.  Isolated per-case
+        // via single-knob A/B arms.
+        bool   m_shower_absorb_track_guard{false};
+
+        // doc sbnd_xin/docs/pr/40 round 6 F13 -- closes round 5's F11
+        // regression (SBND evt 55715 seg 15005 pi+ -> e-).  Travels into
+        // shower_clustering_connecting_to_main_vertex's candidate skip chain
+        // (NeutrinoShowerClustering.cxx).  Round-6 trace (probe tag
+        // "connecting_to_main_vertex") showed the regression's writer is
+        // THIS function, not the BFS re-seed round 5 hypothesized: once F11
+        // declassifies daughter 15007 (correctly demoted to mu- by the
+        // straightness demotion), the 6.1 cm pi+ parent 15005 -- UNDER
+        // segment_is_straight_long_track's 10 cm floor, so F10's straight
+        // branch cannot save it -- is selected as the EM candidate and
+        // force-set to pdg 11.  When on, a pdg==211 candidate with a
+        // charge-confirmed proton daughter (segment_has_proton_daughter,
+        // the round-3 protected_pion predicate: "an electron cannot father
+        // a proton") is skipped.  C++ default false = legacy =
+        // byte-identical.
+        // MEASURED (doc pr/40 round 6): DEAD as shaped, NEVER FLIP.  The
+        // full-transition trace (WCT_PID_WRITE_DEBUG=2) showed 15005 is
+        // already pdg 2212 by candidate-selection time -- its baseline 211
+        // only ever existed downstream of 15007's WRONG e- label (Michel
+        // rescue 2212->13 at NeutrinoVertexFinder.cxx:1804, then the
+        // single-muon pion demotion 13->211 at :1679), a chain that F11
+        // correctly eliminates.  A pdg==211 predicate therefore cannot fire
+        // on the motivating case (confirmed: F11+F13 arm still shows the
+        // merged e- node), and F12 alone yields the intended display.  Kept
+        // as a documented negative result (doc pr/36 F2 precedent), default
+        // false, excluded from the round-6 flip.
+        bool   m_shower_connect_protected_pion_guard{false};
+
+        // doc sbnd_xin/docs/pr/40 round 6 F14 -- closes round 5's F10
+        // residual (SBND evt 54341 seg 18005: split achieved, stem labelled
+        // proton).  Travels via override_michel_stem_muon (called next to F8
+        // in examine_direction, last word before shower_clustering_with_nv).
+        // The toolkit's own Michel rescue ("a stopped proton cannot produce
+        // a Michel electron", examine_direction's weak-direction branch)
+        // encodes exactly the right physics but only reaches seg_dir_weak
+        // segments whose stopping vertex has EXACTLY 2 segments; 18005's
+        // Bragg rise wins the proton template with a confident direction
+        // (template competition has no absolute quality gate) and its
+        // stopping vertex has degree 4.  When on, a pdg==2212 segment that
+        // is long and straight, emanates from the main vertex, and whose far
+        // (stopping) vertex carries >=1 shower-like sibling (kShowerTrajectory
+        // or |pdg|==11 -- the existing Michel sibling test) is relabelled
+        // mu- with a recomputed 4-momentum.  C++ default false = legacy =
+        // byte-identical.
+        // MEASURED (doc pr/40 round 6): 54341 node 18005 reads mu- 74 MeV
+        // with children e- 19 MeV (18006) + mu- 11 MeV (18007) -- exactly
+        // the owner-requested shape.  Confirmed no effect on the other two
+        // cases (isolation arm F11+F13+F14 unchanged vs F11+F13).
+        bool   m_michel_stem_muon_rescue{false};
+
         // ---- Detector-extent literals (doc sbnd_xin/docs/pr/2 sec. 2e(iv)) ----
         // The uBooNE active volume the prototype was written against is
         // y in [-116, +117] cm, z in [0, 1037] cm, x in [0, 256] cm
@@ -1124,6 +1203,13 @@ namespace WireCell::Clus::PR {
         // before shower_clustering_with_nv runs).  No-op (returns immediately)
         // when m_muon_multi_proton_pion is false.
         void override_muon_multi_proton_pion(Graph& graph, Facade::Cluster& cluster, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, VertexPtr main_vertex = nullptr);
+
+        // doc sbnd_xin/docs/pr/40 round 6 F14 -- see m_michel_stem_muon_
+        // rescue's docstring above.  Same call site as F8 (right after
+        // override_muon_multi_proton_pion, last word before
+        // shower_clustering_with_nv), same per-cluster main_vertex.  No-op
+        // (returns immediately) when m_michel_stem_muon_rescue is false.
+        void override_michel_stem_muon(Graph& graph, Facade::Cluster& cluster, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, VertexPtr main_vertex = nullptr);
 
         // PCA calculation
         std::pair<Facade::geo_point_t, Facade::geo_vector_t> calc_PCA_main_axis(std::vector<Facade::geo_point_t>& points);

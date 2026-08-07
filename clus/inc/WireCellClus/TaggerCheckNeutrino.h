@@ -305,6 +305,9 @@ public:
         bool m_track_pid_persist_dqdx_electron_guard{false};        // doc pr/40 round 5 F9
         bool m_shower_connect_main_vertex_straight_guard{false};    // doc pr/40 round 5 F10
         bool m_shower_traj_straight_guard{false};                   // doc pr/40 round 5 F11
+        bool m_shower_absorb_track_guard{false};                    // doc pr/40 round 6 F12
+        bool m_shower_connect_protected_pion_guard{false};          // doc pr/40 round 6 F13
+        bool m_michel_stem_muon_rescue{false};                      // doc pr/40 round 6 F14
         mutable std::shared_ptr<TrackFitting> m_track_fitter;
 
         void load_trackfitting_config(const std::string& config_file);
