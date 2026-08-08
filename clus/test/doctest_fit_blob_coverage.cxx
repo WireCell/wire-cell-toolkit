@@ -1,9 +1,10 @@
 // Regression pins for the doc pr/49 fit_blob_coverage knob's coverage
-// predicate, TrackFitting::is_cell_covered_by_own_blobs (18255-57441
-// V-plane projection ghost: a physically unrelated cluster's real charge
-// aliases with the fitted track in one projection view only and detours the
-// fit; the knob drops live candidate cells not covered by the fitted
-// cluster's OWN blobs).
+// predicates, TrackFitting::is_cell_covered_by_{own,foreign}_blobs
+// (18255-57441 V-plane projection ghost: a physically unrelated cluster's
+// real charge aliases with the fitted track in one projection view only and
+// detours the fit; the knob deweights live candidate cells not covered by
+// the fitted cluster's OWN blobs but claimed by an OUT-OF-SCOPE cluster --
+// round 3: one owning no segment in the current fit).
 //
 // What these cases pin, and the plausible wrong fixes they catch:
 //
@@ -28,6 +29,7 @@
 
 #include "WireCellUtil/doctest.h"
 #include "WireCellClus/TrackFitting.h"
+#include "WireCellClus/PRSegment.h"
 #include "WireCellClus/Facade_Grouping.h"
 #include "WireCellClus/Facade_Cluster.h"
 #include "WireCellClus/Facade_Blob.h"
@@ -175,19 +177,26 @@ TEST_CASE("pr49 coverage predicate: only the cluster's own (apa,face) blobs coun
     CHECK_FALSE(tf.is_cell_covered_by_own_blobs(&cl, 0, 0, 0, 12, NT, 0, NT));   // cl does not
 }
 
-TEST_CASE("pr49 coverage predicate: foreign coverage decides the deweight, nobody's cells stay")
+TEST_CASE("pr49 coverage predicate: out-of-scope foreign coverage decides the deweight")
 {
-    // The knob's deweight condition is !own && foreign(3D-far).  Cell classes:
+    // Round 3 (scope-aware, owner decision 2026-08-08): the knob's deweight
+    // condition is !own && foreign, where "foreign" = covered by a cluster
+    // OUTSIDE the fitting scope (no segment in the current fit).  Cell
+    // classes:
     //   (a) own territory        -> full weight (own test true, never reaches
     //       foreign);
-    //   (b) 3D-far foreign territory -> DEWEIGHTED (the 57441 ghost cells:
-    //       cluster 13's own tiled footprint, claimant 163 cm away in 3D);
+    //   (b) out-of-scope territory -> DEWEIGHTED regardless of 3D distance
+    //       (the 57441 ghost cells: cluster 13's own tiled footprint, zero
+    //       segments in the pattern; default ghost_dis 0 = scope-only);
     //   (c) covered by NOBODY    -> full weight (own-track charge spilling
     //       just past the tiled envelope, or dead-channel single-view charge
     //       with no 3D image -- deweighting these moved 47/48 nueCC events
     //       in the strict-coverage first cut of this round);
-    //   (d) 3D-NEAR foreign territory -> full weight (a genuinely touching
-    //       or crossing neighbor shares the projection legitimately).
+    //   (d) IN-SCOPE cluster's territory -> full weight (clusters fitted
+    //       together are aware of each other; their shared projections are
+    //       legitimate charge, never a ghost);
+    //   (e) the optional 3D gate (ghost_dis > 0) still applies on top of
+    //       the scope test when explicitly set.
     Points::node_t root;
     Grouping& g = *root.value.facade<Grouping>();
     Cluster& mine = g.make_child();
@@ -197,12 +206,17 @@ TEST_CASE("pr49 coverage predicate: foreign coverage decides the deweight, nobod
 
     Clus::TrackFitting tf;
     const WireCell::Point p0(0, 0, 0);   // fixture points all sit at the origin
-    const double NOGATE = -1;            // ghost_dis <= 0 disables the 3D gate
+    const double NOGATE = 0;             // round-3 default: scope-only
 
-    // (b): the foreign cluster's own cell is foreign-covered from mine's view.
+    // Scope = {mine} (the fitted segment's own cluster; no graph).
+    auto seg_mine = std::make_shared<Clus::PR::Segment>();
+    seg_mine->cluster(&mine);
+    tf.rebuild_cov_fit_scope(seg_mine);
+
+    // (b): the out-of-scope cluster's own cell is foreign-covered from
+    // mine's view, at ANY distance (p0 sits ON the fixture points --
+    // distance 0 -- and still deweights under the scope-only default).
     CHECK(tf.is_cell_covered_by_foreign_blobs(&g, &mine, p0, NOGATE, 0, 0, 0, 14, 0, 0, NT));
-    // ...and symmetric.
-    CHECK(tf.is_cell_covered_by_foreign_blobs(&g, &foreign, p0, NOGATE, 0, 0, 0, 10, 0, 0, NT));
 
     // (a): a cluster is never "foreign" to itself -- mine's own cell is not
     // foreign-covered (only mine covers it, and mine is skipped).
@@ -213,10 +227,18 @@ TEST_CASE("pr49 coverage predicate: foreign coverage decides the deweight, nobod
     CHECK_FALSE(tf.is_cell_covered_by_own_blobs(&mine, 0, 0, 0, 13, 0, 0, NT));
     CHECK_FALSE(tf.is_cell_covered_by_foreign_blobs(&g, &mine, p0, NOGATE, 0, 0, 0, 13, 0, 0, NT));
 
-    // (d) the 3D gate: with the fit point ON the foreign cluster's points
-    // (distance 0 <= ghost_dis) the claim is a nearby neighbor's -- exempt;
-    // with the fit point far away (distance > ghost_dis) it is a genuine
-    // projection ghost -- deweighted.
+    // (d): bring `foreign` INTO the fitting scope (a second segment, as if
+    // both clusters are fitted together in one pattern) -- its claim on the
+    // same cell stops counting as foreign.
+    auto seg_foreign = std::make_shared<Clus::PR::Segment>();
+    seg_foreign->cluster(&foreign);
+    tf.rebuild_cov_fit_scope(seg_foreign);   // scope = {foreign} (no graph)
+    CHECK_FALSE(tf.is_cell_covered_by_foreign_blobs(&g, &mine, p0, NOGATE, 0, 0, 0, 14, 0, 0, NT));
+    // ...and mine, now out of scope, becomes foreign from foreign's view.
+    CHECK(tf.is_cell_covered_by_foreign_blobs(&g, &foreign, p0, NOGATE, 0, 0, 0, 10, 0, 0, NT));
+
+    // (e): the optional 3D gate composes with the scope test when set.
+    tf.rebuild_cov_fit_scope(seg_mine);      // scope back to {mine}
     const double GDIS = 150;  // 15 cm in WCT internal units
     CHECK_FALSE(tf.is_cell_covered_by_foreign_blobs(&g, &mine, p0, GDIS, 0, 0, 0, 14, 0, 0, NT));
     const WireCell::Point pfar(1000, 0, 0);
@@ -224,4 +246,9 @@ TEST_CASE("pr49 coverage predicate: foreign coverage decides the deweight, nobod
 
     // Null grouping: no foreign coverage, never a crash.
     CHECK_FALSE(tf.is_cell_covered_by_foreign_blobs(nullptr, &mine, p0, NOGATE, 0, 0, 0, 14, 0, 0, NT));
+
+    // An empty scope (never rebuilt / cleared) falls back to round-2
+    // behaviour: everything but the fitted cluster is foreign.
+    tf.rebuild_cov_fit_scope(nullptr);       // no graph, no segment -> empty
+    CHECK(tf.is_cell_covered_by_foreign_blobs(&g, &mine, p0, NOGATE, 0, 0, 0, 14, 0, 0, NT));
 }

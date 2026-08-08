@@ -2761,15 +2761,18 @@ bool TrackFitting::is_cell_covered_by_own_blobs(const Facade::Cluster* cluster, 
     return false;
 }
 
-// doc pr/49: foreign-coverage half of the fit_blob_coverage test -- does any
-// OTHER cluster in the grouping claim this cell, while being 3D-far from the
-// point being fit?  The distance gate (ghost_dis, <= 0 disables) is what
-// separates a pure projection ghost (57441: claimant 163 cm away in 3D) from
-// a genuinely touching/crossing neighbor whose shared projection is
-// legitimate.  Existential OR over the grouping's clusters (stable child
-// order, and order cannot affect an OR), each via the same interval-search
-// predicate above; the kd query runs only for a cluster that actually covers
-// the cell, so the common case never pays it.
+// doc pr/49 (round 3, scope-aware): foreign-coverage half of the
+// fit_blob_coverage test -- does any OUT-OF-SCOPE cluster claim this cell?
+// Out-of-scope = not the fitted cluster and not in m_cov_fit_scope (clusters
+// owning a segment in the current fit; rebuild_cov_fit_scope below).
+// Clusters fitted together in the same PR graph are aware of each other --
+// their shared projections are legitimate charge, never a ghost (57441's
+// claimant, cluster 13, owns ZERO segments and stays foreign).  ghost_dis > 0
+// adds an optional 3D distance gate (`other->get_closest_dis(p) > ghost_dis`);
+// the round-3 default is 0 = scope-only.  Existential OR over the grouping's
+// clusters (stable child order, and order cannot affect an OR), each via the
+// same interval-search predicate above; the kd query runs only for a cluster
+// that actually covers the cell, so the common case never pays it.
 bool TrackFitting::is_cell_covered_by_foreign_blobs(const Facade::Grouping* grouping,
                                                     const Facade::Cluster* cluster,
                                                     const WireCell::Point& p, double ghost_dis,
@@ -2780,12 +2783,35 @@ bool TrackFitting::is_cell_covered_by_foreign_blobs(const Facade::Grouping* grou
     if (!grouping) return false;
     for (const auto* other : grouping->children()) {
         if (other == cluster) continue;
+        if (m_cov_fit_scope.count(other)) continue;
         if (!is_cell_covered_by_own_blobs(other, apa, face, plane, wire, time,
                                           tol_cells, nticks_per_slice)) continue;
         if (ghost_dis <= 0) return true;
         if (other->get_closest_dis(p) > ghost_dis) return true;
     }
     return false;
+}
+
+// doc pr/49 round 3: collect the fitting scope -- every cluster owning a
+// segment in the current fit.  Fresh walk of m_graph's edges (same idiom as
+// sync_from_graph; NOT the m_cluster_edges cache, which the single-tracking
+// path never rebuilds and which would be stale there), plus the explicit
+// segment's cluster on the form_map path.  Deliberately NOT filtered by
+// m_cluster_filter: when the fit is filtered to one cluster's segments, the
+// other graph clusters are still fitted together in the same pattern and
+// their shared projections stay legitimate.
+void TrackFitting::rebuild_cov_fit_scope(const std::shared_ptr<PR::Segment>& seg)
+{
+    m_cov_fit_scope.clear();
+    if (m_graph) {
+        for (const auto& ed : PR::ordered_edges(*m_graph)) {
+            auto& edge_bundle = (*m_graph)[ed];
+            if (edge_bundle.segment && edge_bundle.segment->cluster()) {
+                m_cov_fit_scope.insert(edge_bundle.segment->cluster());
+            }
+        }
+    }
+    if (seg && seg->cluster()) m_cov_fit_scope.insert(seg->cluster());
 }
 
  void TrackFitting::examine_point_association(std::shared_ptr<PR::Segment> segment, WireCell::Point &p, PlaneData& temp_2dut, PlaneData& temp_2dvt, PlaneData& temp_2dwt, bool flag_end_point, double charge_cut){
@@ -2824,20 +2850,22 @@ bool TrackFitting::is_cell_covered_by_foreign_blobs(const Facade::Grouping* grou
     
     // doc pr/49 (fit_blob_coverage knob, C++ default -1 = off): when on,
     // classify live candidate cells that are OUTSIDE the fitted cluster's
-    // own blob coverage AND INSIDE a 3D-distant foreign cluster's as
+    // own blob coverage AND INSIDE an OUT-OF-SCOPE cluster's (round 3: one
+    // with no segment in the current fit, per m_cov_fit_scope) as
     // foreign-ghost cells -- the 18255-57441 V-plane projection ghost enters
-    // here as real charge from a cluster 163 cm away whose own tiled
-    // footprint claims those cells.  Such cells STAY in the association but
-    // fit_point down-weights them by fit_blob_coverage_weight (owner: a
-    // dead-channel region can leave good single-view charge with no 3D
-    // image, which the fit must still use -- deweight, don't drop).  Cells
-    // covered by nobody, or claimed by a genuinely nearby (touching or
-    // crossing) cluster, keep full weight, so events with no distant-ghost
-    // overlap are untouched.  Live (flag 1) cells only: dead-derived cells
-    // (flag 0) and the rescue anchors injected below are exempt.  End/vertex
-    // points are exempt via flag_end_point (which also covers
-    // form_map_graph's dummy-segment vertex calls, where segment->cluster()
-    // may not be the vertex's own cluster).
+    // here as real charge from a cluster 163 cm away, with zero segments in
+    // the pattern, whose own tiled footprint claims those cells.  Such cells
+    // STAY in the association but fit_point down-weights them by
+    // fit_blob_coverage_weight (owner: a dead-channel region can leave good
+    // single-view charge with no 3D image, which the fit must still use --
+    // deweight, don't drop).  Cells covered by nobody, or claimed by a
+    // cluster fitted together with this one (in m_cov_fit_scope), keep full
+    // weight, so events with no out-of-scope overlap are untouched.  Live
+    // (flag 1) cells only: dead-derived cells (flag 0) and the rescue
+    // anchors injected below are exempt.  End/vertex points are exempt via
+    // flag_end_point (which also covers form_map_graph's dummy-segment
+    // vertex calls, where segment->cluster() may not be the vertex's own
+    // cluster).
     const bool cov_on = (m_params.fit_blob_coverage >= 0) && !flag_end_point;
     const int cov_tol = cov_on ? static_cast<int>(m_params.fit_blob_coverage) : 0;
     const double cov_gdis = m_params.fit_blob_coverage_ghost_dis;
@@ -3230,6 +3258,11 @@ void TrackFitting::form_map_graph(bool flag_exclusion, double end_point_factor, 
     // Rebuild edge cache (graph structure may have changed since last call)
     build_cluster_edges();
 
+    // doc pr/49 round 3: refresh the fitting scope for the foreign-coverage
+    // test (knob-on only; the legacy path takes no branch).  The graph
+    // supplies every fitted cluster here, so no explicit segment is needed.
+    if (m_params.fit_blob_coverage >= 0) rebuild_cov_fit_scope(nullptr);
+
     // Clear existing mappings
     m_3d_to_2d.clear();
     m_2d_to_3d.clear();
@@ -3478,6 +3511,17 @@ void TrackFitting::form_map(std::vector<std::pair<WireCell::Point, std::shared_p
 
     m_3d_to_2d.clear();
     m_2d_to_3d.clear();
+
+    // doc pr/49 round 3: refresh the fitting scope for the foreign-coverage
+    // test (knob-on only; the legacy path takes no branch).  This is the
+    // single-tracking path: every ptss entry pairs a point with the SAME
+    // segment, so its cluster plus any graph-fitted clusters form the scope
+    // (in the neutrino lifecycle m_graph is the shared per-event pattern
+    // graph and m_cluster_edges is stale here -- rebuild_cov_fit_scope walks
+    // the graph fresh).
+    if (m_params.fit_blob_coverage >= 0) {
+        rebuild_cov_fit_scope(ptss.empty() ? nullptr : ptss.front().second);
+    }
 
     std::vector<std::pair<WireCell::Point, std::shared_ptr<PR::Segment>>> saved_pts;
     int count = 0;

@@ -57,7 +57,7 @@ namespace WireCell::Clus {
             params.skip_dis_cut = 0.5*units::cm;
             params.skip_revert_iso_xext_cut = -1;  // doc pr/28 S17: off by default
             params.fit_blob_coverage = -1;                    // doc pr/49: foreign-ghost deweight off by default
-            params.fit_blob_coverage_ghost_dis = 15 * units::cm;  // doc pr/49: 3D far-gate on the foreign claim
+            params.fit_blob_coverage_ghost_dis = 0;           // doc pr/49 round 3: 0 = scope-only (optional 3D far-gate disabled)
             params.fit_blob_coverage_weight = 0.1;            // doc pr/49: ghost-cell weight when on
 
             params.default_dQ_dx = 5000; // electrons

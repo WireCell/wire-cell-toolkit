@@ -93,29 +93,33 @@ namespace WireCell::Clus {
             // only and detours the fit).  C++ default -1 = off: legacy path,
             // byte-identical.  When >= 0, a candidate 2D cell whose charge is
             // live (flag 1), which is NOT covered by the fitted cluster's OWN
-            // blobs but IS covered by another cluster's (per-plane exact wire
-            // interval x slice interval from Cluster::time_blob_map()) is
-            // dropped in examine_point_association, exactly as if it failed
-            // charge_cut.  Cells covered by nobody (own-track charge just
-            // past the tiled envelope) are kept, so events with no
-            // cross-cluster overlap are untouched.  The value is the
+            // blobs but IS covered by an OUT-OF-SCOPE cluster's (per-plane
+            // exact wire interval x slice interval from
+            // Cluster::time_blob_map()) is down-weighted in the fit.
+            // "Out-of-scope" (round 3, owner decision 2026-08-08): a cluster
+            // with NO segment in the current fit -- clusters fitted together
+            // in the same PR graph are aware of each other and their shared
+            // projections are legitimate, so they never count as foreign
+            // (see m_cov_fit_scope).  Cells covered by nobody (own-track
+            // charge just past the tiled envelope, dead-channel single-view
+            // charge with no 3D image) are kept at full weight, so events
+            // with no out-of-scope overlap are untouched.  The value is the
             // wire/slice tolerance in cells (0 = strict; the 57441
             // contamination sits ONE cell away, so tolerance >= 1 re-admits
             // it).  Dead-derived cells (flag 0), rescue-injected anchors and
             // end/vertex points (flag_end_point) are exempt.
             double fit_blob_coverage = -1;
 
-            // doc pr/49: 3D gate on the foreign test above -- a foreign
-            // cluster's claim only triggers the drop when that cluster is
-            // FARTHER than this from the 3D point being fit ("another
-            // cluster not in the fitting range"): a genuinely touching or
-            // crossing neighbor (min 3D distance ~0-10 cm at the crossing)
-            // shares the projection legitimately and its cells are kept,
-            // while a pure projection ghost (57441: 163 cm away) is dropped.
+            // doc pr/49: OPTIONAL 3D gate on the foreign test above -- when
+            // > 0, an out-of-scope cluster's claim only triggers the
+            // deweight if that cluster is FARTHER than this from the 3D
+            // point being fit.  Round 3 default 0 = DISABLED (scope-only,
+            // owner decision 2026-08-08: any out-of-scope claim deweights
+            // regardless of distance; graph-scope membership replaced the 15
+            // cm far-gate as the "not in the fitting range" criterion).
             // WCT internal length units (units::cm = 10; the JSON loader
-            // does no unit conversion).  <= 0 disables the gate (deweight on
-            // any foreign claim).  Inert while fit_blob_coverage < 0.
-            double fit_blob_coverage_ghost_dis = 15 * units::cm;
+            // does no unit conversion).  Inert while fit_blob_coverage < 0.
+            double fit_blob_coverage_ghost_dis = 0;
 
             // doc pr/49: the least-squares weight multiplier applied in
             // fit_point to foreign-ghost cells (owner: "deweight the foreign
@@ -347,8 +351,9 @@ namespace WireCell::Clus {
             std::set<Coord2D> associated_2d_points;
             // doc pr/49 (fit_blob_coverage knob): subset of
             // associated_2d_points classified as foreign-ghost cells (live,
-            // outside the fitted cluster's own blob coverage, inside a
-            // 3D-distant foreign cluster's).  They stay in the fit -- a
+            // outside the fitted cluster's own blob coverage, inside an
+            // out-of-scope cluster's -- round 3: one with no segment in the
+            // current fit).  They stay in the fit -- a
             // dead-channel region can leave good single-view charge with no
             // 3D image, which the fit must still use -- but fit_point scales
             // their least-squares weight by fit_blob_coverage_weight.
@@ -467,23 +472,33 @@ namespace WireCell::Clus {
                                           int plane, int wire, int time,
                                           int tol_cells, int nticks_per_slice) const;
 
-        /// doc pr/49: true iff some OTHER cluster in the grouping (any child
-        /// but `cluster`) covers the cell per the same test AND that cluster
-        /// is 3D-far from the fit point (`get_closest_dis(p) > ghost_dis`;
-        /// ghost_dis <= 0 disables the distance gate).  The knob drops a
-        /// live candidate cell only when it is BOTH outside the fitted
-        /// cluster's own blob coverage AND inside a 3D-distant foreign
-        /// cluster's -- a cell covered by nobody (own-track charge spilling
-        /// just past the tiled envelope, which the nlevel-hop window exists
-        /// to reach) is kept, and a genuinely touching/crossing neighbor's
-        /// shared projection is kept, so only pure projection ghosts fire.
-        /// Order-invariant OR over clusters and blobs.
+        /// doc pr/49 (round 3, scope-aware): true iff some OUT-OF-SCOPE
+        /// cluster covers the cell per the same test.  Out-of-scope = not
+        /// `cluster` itself AND not in m_cov_fit_scope (clusters owning a
+        /// segment in the current fit -- "fitted together" clusters are
+        /// aware of each other and their shared projections are legitimate,
+        /// so they never count as foreign).  ghost_dis > 0 additionally
+        /// requires `other->get_closest_dis(p) > ghost_dis` (optional extra
+        /// gate; round-3 default 0 = scope-only).  A cell covered by nobody
+        /// (own-track charge spilling just past the tiled envelope, or
+        /// dead-channel single-view charge with no 3D image) is kept at
+        /// full weight.  Order-invariant OR over clusters and blobs.
         bool is_cell_covered_by_foreign_blobs(const Facade::Grouping* grouping,
                                               const Facade::Cluster* cluster,
                                               const WireCell::Point& p, double ghost_dis,
                                               int apa, int face,
                                               int plane, int wire, int time,
                                               int tol_cells, int nticks_per_slice) const;
+
+        /// doc pr/49 round 3: rebuild m_cov_fit_scope = clusters owning a
+        /// segment in the current fit.  Walks m_graph's edges when a graph
+        /// is present (fresh walk, NOT the stale m_cluster_edges -- the
+        /// single-tracking path never rebuilds that map) and adds `seg`'s
+        /// cluster (the one segment being fitted on the form_map path;
+        /// nullptr on the form_map_graph path, where the graph supplies
+        /// everything).  Called once per form_map/form_map_graph invocation,
+        /// only while the fit_blob_coverage knob is on.
+        void rebuild_cov_fit_scope(const std::shared_ptr<PR::Segment>& seg);
         void update_association(std::shared_ptr<PR::Segment> segment,
                                 const std::vector<std::shared_ptr<PR::Segment>>& all_segments,
                                 PlaneData& temp_2dut, PlaneData& temp_2dvt, PlaneData& temp_2dwt);
@@ -696,6 +711,17 @@ namespace WireCell::Clus {
         std::set<Facade::Cluster*, PR::ClusterPtrCmp> m_loaded_clusters;  ///< Clusters whose charge data has been loaded into m_charge_data
         bool m_charge_data_dirty{true};                ///< True when m_clusters has clusters not yet in m_charge_data
         Facade::Cluster* m_cluster_filter{nullptr};    ///< If non-null, restrict fitting to segments of this cluster
+
+        // doc pr/49 round 3 (fit_blob_coverage knob): clusters owning a
+        // segment in the current fit -- the "fitting scope" whose members
+        // never count as foreign in is_cell_covered_by_foreign_blobs.
+        // Rebuilt by rebuild_cov_fit_scope() at the top of each
+        // form_map/form_map_graph call while the knob is on; membership-only
+        // (.count()), never iterated, so pointer keying cannot affect
+        // determinism.  NOT m_clusters: that set is polluted by
+        // preload_clusters() with charge-cache-only clusters that own no
+        // segment.
+        std::set<const Facade::Cluster*> m_cov_fit_scope;
 
         // Option 1: per-cluster edge descriptor cache to avoid full graph traversal
         std::unordered_map<Facade::Cluster*, std::vector<PR::edge_descriptor>> m_cluster_edges;

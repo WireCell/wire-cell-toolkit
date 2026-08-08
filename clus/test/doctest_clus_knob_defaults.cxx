@@ -781,13 +781,15 @@ TEST_CASE("clus knob defaults: TrackFitting fit_blob_coverage is off")
     // the compiled tree is byte-identical.  >= 0 = on, value = wire/slice
     // tolerance in cells.  Same double-sentinel/set_parameter round-trip
     // contract as skip_revert_iso_xext_cut above.  The two companion
-    // numerics (the 3D far-gate separating a genuine touching neighbor from
-    // a projection ghost, and the ghost-cell weight -- deweight, not drop:
-    // dead-channel single-view charge must stay usable) ride the C++
-    // defaults and are inert while the main knob is off.
+    // numerics ride the C++ defaults and are inert while the main knob is
+    // off.  Round 3 (owner decision 2026-08-08): "foreign" is scope-aware
+    // (a cluster with a segment in the current fit never counts), and the
+    // 3D far-gate default is 0 = disabled -- scope membership replaced the
+    // 15 cm distance criterion.  The weight stays 0.1 (deweight, not drop:
+    // dead-channel single-view charge must stay usable).
     Clus::TrackFitting tf;
     CHECK(tf.get_parameter("fit_blob_coverage") == doctest::Approx(-1.0));
-    CHECK(tf.get_parameter("fit_blob_coverage_ghost_dis") == doctest::Approx(15 * units::cm));
+    CHECK(tf.get_parameter("fit_blob_coverage_ghost_dis") == doctest::Approx(0.0));
     CHECK(tf.get_parameter("fit_blob_coverage_weight") == doctest::Approx(0.1));
 
     tf.set_parameter("fit_blob_coverage", 0.0);
@@ -797,7 +799,7 @@ TEST_CASE("clus knob defaults: TrackFitting fit_blob_coverage is off")
 
     auto preset = Clus::TrackFittingPresets::create_with_current_values();
     CHECK(preset.get_parameters().fit_blob_coverage == doctest::Approx(-1.0));
-    CHECK(preset.get_parameters().fit_blob_coverage_ghost_dis == doctest::Approx(15 * units::cm));
+    CHECK(preset.get_parameters().fit_blob_coverage_ghost_dis == doctest::Approx(0.0));
     CHECK(preset.get_parameters().fit_blob_coverage_weight == doctest::Approx(0.1));
 }
 
