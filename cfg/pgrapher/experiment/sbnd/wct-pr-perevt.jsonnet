@@ -1182,11 +1182,13 @@ function(
     // SBND_FIT_BLOB_COVERAGE_DEFER=true runner env).
     fit_blob_coverage_defer = false,
     // doc pr/50 -- main-vertex kink-consistency snap (172230-class
-    // near-vertex robustness).  false/null ride the C++ defaults and omit
-    // the keys => byte-identical.  Validation: -A vertex_kink_snap=true
-    // (or SBND_VERTEX_KINK_SNAP=true runner env); numerics override via
-    // -A vks_*=<value> (cm/deg).
-    vertex_kink_snap = false,
+    // near-vertex robustness).  SBND PRODUCTION ON (owner flip after the
+    // pr/50 Bee hand-scan: 172230 vertex recovered to 2.6 mm, 4/98
+    // sample-wide firings all scanned; the defer knob stays OFF).  Numerics
+    // (vks_* null) ride the C++ defaults.  Pass -A vertex_kink_snap=false
+    // (or the SBND_VERTEX_KINK_SNAP=false runner env) to restore the
+    // legacy path for an A/B.
+    vertex_kink_snap = true,
     vks_radius = null,
     vks_min_dis = null,
     vks_angle = null,
