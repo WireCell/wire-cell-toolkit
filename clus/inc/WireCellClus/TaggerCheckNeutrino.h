@@ -120,6 +120,19 @@ public:
         // ways within one event.
         double m_shower_topo_demote_len{0};
 
+        // doc sbnd_xin/docs/pr/49 -- cross-cluster projection-ghost
+        // deweighting of the trajectory fit's 2D charge association
+        // (18255-57441 V-plane ghost).  A live cell outside the fitted
+        // cluster's own blob coverage that sits inside a 3D-distant foreign
+        // cluster's keeps its measurement at reduced weight (deweight, not
+        // drop -- dead-channel single-view charge must stay usable).
+        // Pushed to TrackFitting::Parameters::fit_blob_coverage per visit;
+        // -1 = off (legacy, byte-identical), >= 0 = on with value =
+        // wire/slice tolerance in cells (0 = strict).  NOTE: this jsonnet
+        // key is the single source of truth -- it overrides any
+        // trackfitting_config_file value at visit time.
+        double m_fit_blob_coverage{-1};
+
         // ---- doc sbnd_xin/docs/pr/30 §11 port-fidelity knobs ----------------
         // Threaded verbatim to PatternAlgorithms / PR::g_graph_endpoint_policy.
         // See PatternAlgorithms::m_fit_exclusion etc. for the full rationale.

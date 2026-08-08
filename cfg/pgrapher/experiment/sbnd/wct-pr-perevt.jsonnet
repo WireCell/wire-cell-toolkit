@@ -1155,6 +1155,21 @@ function(
     two_end_break = true,
     kink_walk_dqdx_stop = true,
     kink_break_protect = true,
+    // doc pr/49 (18255-57441) -- cross-cluster projection-ghost deweighting
+    // in the trajectory fit's 2D charge association (V-plane ghost: an
+    // unrelated cluster's real charge aliases with the fitted track in one
+    // view only and detours the fit; a live candidate cell outside the
+    // fitted cluster's OWN blob coverage that sits INSIDE a 3D-distant
+    // foreign cluster's keeps its measurement at reduced weight -- cells
+    // covered by nobody, or claimed by a genuinely touching neighbor, keep
+    // full weight, so no-ghost events are untouched; dead-channel
+    // single-view charge stays usable by design).  C++ default -1 = off;
+    // null omits the key => byte-identical.  >= 0 = on, value = wire/slice
+    // tolerance in cells (0 = strict).  Companion numerics (ghost_dis 15 cm,
+    // weight 0.1) ride the C++ defaults.  Pass -A fit_blob_coverage=N (or
+    // the SBND_FIT_BLOB_COVERAGE runner env) to opt in; flip to 0 here only
+    // after the pr/49 gate round is clean.
+    fit_blob_coverage = null,
 )
     local base = import 'pgrapher/experiment/sbnd/simparams.jsonnet';
     local params = base {
@@ -1336,6 +1351,7 @@ function(
                              two_end_break=two_end_break,
                              kink_walk_dqdx_stop=kink_walk_dqdx_stop,
                              kink_break_protect=kink_break_protect,
+                             fit_blob_coverage=fit_blob_coverage,
                              pseudo_shower_track_paint=pseudo_shower_track_paint,
                              reclass_never_computed_ke_floor=reclass_never_computed_ke_floor,
                              muon_dqdx_curve=muon_dqdx_curve,

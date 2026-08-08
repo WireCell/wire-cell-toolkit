@@ -1272,6 +1272,19 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               kink_walk_dqdx_stop=false,
               kink_break_protect=false,
               kink_dqdx_hot_ratio=null,
+              // doc pr/49 -- cross-cluster projection-ghost deweighting in
+              // the trajectory fit's 2D charge association (18255-57441
+              // V-plane ghost: an unrelated cluster's charge aliases with
+              // the fitted track in one view and detours the fit; live cells
+              // outside the fitted cluster's own blob coverage that sit
+              // inside a 3D-distant foreign cluster's keep their measurement
+              // at reduced weight -- cells covered by nobody, or claimed by
+              // a genuinely touching neighbor, keep full weight, so
+              // no-ghost events are untouched).  C++ default -1 = off; null
+              // omits the key => byte-identical.  >= 0 = on, value =
+              // wire/slice tolerance in cells (0 = strict; the 57441
+              // contamination is ONE cell away, so >= 1 re-admits it).
+              fit_blob_coverage=null,
               // doc pr/45 -- paint muon-typed (+-13) pseudo-showers as track in
               // the Bee shower_track layer + PrDisplayDump (18255-56463: 411 cm
               // muon painted red).  C++ default false; key suppressed when off
@@ -1820,6 +1833,7 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
             kink_walk_dqdx_stop=kink_walk_dqdx_stop,
             kink_break_protect=kink_break_protect,
             kink_dqdx_hot_ratio=kink_dqdx_hot_ratio,
+            fit_blob_coverage=fit_blob_coverage,
             muon_dqdx_curve=muon_dqdx_curve,
             sp_dedx_use_recomb_model=sp_dedx_use_recomb_model,
             sp_mean_dedx_cut=sp_mean_dedx_cut,
@@ -2489,6 +2503,10 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
        kink_walk_dqdx_stop=false,
        kink_break_protect=false,
        kink_dqdx_hot_ratio=null,
+       // doc pr/49 cross-cluster projection-ghost fit filter: null = C++
+       // default -1 (off, key suppressed => byte-identical); >= 0 = on with
+       // tolerance cells.
+       fit_blob_coverage=null,
        pseudo_shower_track_paint=false,
        // Muon dQ/dx-vs-length envelope: DEFAULT = the docs/pr/10 SBND fit
        // (see the clus_pr arg comment; null restores the uBooNE refit).
@@ -2672,6 +2690,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 kink_walk_dqdx_stop=kink_walk_dqdx_stop,
                 kink_break_protect=kink_break_protect,
                 kink_dqdx_hot_ratio=kink_dqdx_hot_ratio,
+                fit_blob_coverage=fit_blob_coverage,
                 pseudo_shower_track_paint=pseudo_shower_track_paint,
                 muon_dqdx_curve=muon_dqdx_curve,
                 use_power_recomb=use_power_recomb,

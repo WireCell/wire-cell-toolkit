@@ -101,6 +101,15 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_kink_break_protect  = get(config, "kink_break_protect",  m_kink_break_protect);
     m_kink_dqdx_hot_ratio = get(config, "kink_dqdx_hot_ratio", m_kink_dqdx_hot_ratio);
     m_shower_topo_demote_len = get(config, "shower_topo_demote_len", m_shower_topo_demote_len);  // cm
+    // doc sbnd_xin/docs/pr/49 -- cross-cluster projection-ghost deweighting
+    // in the trajectory fit's 2D charge association (18255-57441): live
+    // cells outside the fitted cluster's own blob coverage that sit inside a
+    // 3D-distant foreign cluster's keep their measurement at reduced weight
+    // (deweight, not drop -- dead-channel single-view charge must stay
+    // usable).  < 0 = off (legacy); >= 0 = on with value = wire/slice
+    // tolerance cells.  Companion numerics (ghost_dis 15 cm, weight 0.1)
+    // ride the TrackFitting::Parameters C++ defaults.
+    m_fit_blob_coverage = get(config, "fit_blob_coverage", m_fit_blob_coverage);
     // doc sbnd_xin/docs/pr/30 §11 port-fidelity knobs.
     m_fit_exclusion            = get(config, "fit_exclusion",            m_fit_exclusion);
     m_graph_endpoint_strict    = get(config, "graph_endpoint_strict",    m_graph_endpoint_strict);
@@ -356,6 +365,8 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["kink_break_protect"]  = m_kink_break_protect;  // false = legacy (no protected kink breaks)
     cfg["kink_dqdx_hot_ratio"] = m_kink_dqdx_hot_ratio; // x mip_dqdx_median; inert while both above are false
     cfg["shower_topo_demote_len"] = m_shower_topo_demote_len;  // cm; 0 = legacy (long segments stay eligible for kShowerTopology)
+    // doc sbnd_xin/docs/pr/49.
+    cfg["fit_blob_coverage"] = m_fit_blob_coverage; // -1 = legacy (no foreign-ghost deweighting); >= 0 = tolerance cells
     // doc sbnd_xin/docs/pr/30 §11.  Round-tripped so the compiled config
     // records the operating point; each default reproduces the pre-pr/30 tree.
     cfg["fit_exclusion"]            = m_fit_exclusion;             // false = legacy (all sites pass flag_exclusion=false)
@@ -841,6 +852,10 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
     pattern_algos.m_sp_mean_dedx_cut         = static_cast<float>(m_sp_mean_dedx_cut);
     pattern_algos.m_recomb_model             = m_recomb_model;
     m_track_fitter->set_perf(m_perf);
+    // doc pr/49: thread the own-blob-coverage knob into the fitter (double
+    // sentinel; -1 default matches TrackFitting::Parameters, so this is a
+    // no-op unless the config opts in).
+    m_track_fitter->set_parameter("fit_blob_coverage", m_fit_blob_coverage);
 
     int acc_segment_id = 0;
     IndexedShowerSet pi0_showers;

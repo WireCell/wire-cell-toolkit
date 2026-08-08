@@ -773,6 +773,34 @@ TEST_CASE("clus knob defaults: TrackFitting skip_revert_iso_xext_cut is off")
     CHECK(preset.get_parameters().skip_revert_iso_xext_cut == doctest::Approx(-1.0));
 }
 
+TEST_CASE("clus knob defaults: TrackFitting fit_blob_coverage is off")
+{
+    // doc pr/49: cross-cluster projection-ghost deweighting of the 2D charge
+    // association (18255-57441 V-plane ghost).  C++ default -1 = off --
+    // examine_point_association's charge_cut loops take the legacy path and
+    // the compiled tree is byte-identical.  >= 0 = on, value = wire/slice
+    // tolerance in cells.  Same double-sentinel/set_parameter round-trip
+    // contract as skip_revert_iso_xext_cut above.  The two companion
+    // numerics (the 3D far-gate separating a genuine touching neighbor from
+    // a projection ghost, and the ghost-cell weight -- deweight, not drop:
+    // dead-channel single-view charge must stay usable) ride the C++
+    // defaults and are inert while the main knob is off.
+    Clus::TrackFitting tf;
+    CHECK(tf.get_parameter("fit_blob_coverage") == doctest::Approx(-1.0));
+    CHECK(tf.get_parameter("fit_blob_coverage_ghost_dis") == doctest::Approx(15 * units::cm));
+    CHECK(tf.get_parameter("fit_blob_coverage_weight") == doctest::Approx(0.1));
+
+    tf.set_parameter("fit_blob_coverage", 0.0);
+    CHECK(tf.get_parameter("fit_blob_coverage") == doctest::Approx(0.0));
+    tf.set_parameter("fit_blob_coverage_weight", 0.2);
+    CHECK(tf.get_parameter("fit_blob_coverage_weight") == doctest::Approx(0.2));
+
+    auto preset = Clus::TrackFittingPresets::create_with_current_values();
+    CHECK(preset.get_parameters().fit_blob_coverage == doctest::Approx(-1.0));
+    CHECK(preset.get_parameters().fit_blob_coverage_ghost_dis == doctest::Approx(15 * units::cm));
+    CHECK(preset.get_parameters().fit_blob_coverage_weight == doctest::Approx(0.1));
+}
+
 // ---------------------------------------------------------------------------
 // PrDisplayDump -- the PR event-display calib dump (sbnd_xin/docs/pr/26).
 //

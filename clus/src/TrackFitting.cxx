@@ -113,6 +113,12 @@ void TrackFitting::set_parameter(const std::string& name, double value) {
         m_params.skip_dis_cut = value;
     } else if (name == "skip_revert_iso_xext_cut") {
         m_params.skip_revert_iso_xext_cut = value;
+    } else if (name == "fit_blob_coverage") {
+        m_params.fit_blob_coverage = value;
+    } else if (name == "fit_blob_coverage_ghost_dis") {
+        m_params.fit_blob_coverage_ghost_dis = value;
+    } else if (name == "fit_blob_coverage_weight") {
+        m_params.fit_blob_coverage_weight = value;
     } else if (name == "default_dQ_dx") {
         m_params.default_dQ_dx = value;
     } else if (name == "end_point_factor") {
@@ -210,6 +216,12 @@ double TrackFitting::get_parameter(const std::string& name) const {
         return m_params.skip_dis_cut;
     } else if (name == "skip_revert_iso_xext_cut") {
         return m_params.skip_revert_iso_xext_cut;
+    } else if (name == "fit_blob_coverage") {
+        return m_params.fit_blob_coverage;
+    } else if (name == "fit_blob_coverage_ghost_dis") {
+        return m_params.fit_blob_coverage_ghost_dis;
+    } else if (name == "fit_blob_coverage_weight") {
+        return m_params.fit_blob_coverage_weight;
     } else if (name == "default_dQ_dx") {
         return m_params.default_dQ_dx;
     } else if (name == "end_point_factor") {
@@ -2112,6 +2124,10 @@ void TrackFitting::organize_ps_path(std::shared_ptr<PR::Segment> segment, std::v
     temp_2dut.associated_2d_points.clear();
     temp_2dvt.associated_2d_points.clear();
     temp_2dwt.associated_2d_points.clear();
+    // doc pr/49: fresh foreign-ghost classification per point.
+    temp_2dut.deweighted_2d_points.clear();
+    temp_2dvt.deweighted_2d_points.clear();
+    temp_2dwt.deweighted_2d_points.clear();
     
     // Get cluster from segment
     auto cluster = segment->cluster();
@@ -2706,6 +2722,72 @@ void TrackFitting::update_association(std::shared_ptr<PR::Segment> segment,
 }
 
 
+// doc pr/49: own-blob-coverage predicate for the fit_blob_coverage knob.
+// A blob covers (wire, time) in `plane` iff time (tick) is in
+// [slice_index_min - tol_ticks, slice_index_max + tol_ticks) and wire is in
+// the blob's half-open per-plane interval widened by tol_cells.  The
+// time_blob_map() key is blob->slice_index_min() (unit: tick), so the key
+// window below assumes uniform slice width == nticks_per_slice (true per
+// detector; the per-blob interval check re-verifies inclusion, so a wider
+// blob could only be missed, never wrongly matched).
+bool TrackFitting::is_cell_covered_by_own_blobs(const Facade::Cluster* cluster, int apa, int face,
+                                                int plane, int wire, int time,
+                                                int tol_cells, int nticks_per_slice) const
+{
+    const auto& tbm = cluster->time_blob_map();
+    auto ait = tbm.find(apa);
+    if (ait == tbm.end()) return false;
+    auto fit = ait->second.find(face);
+    if (fit == ait->second.end()) return false;
+    const auto& smap = fit->second;
+
+    const int tol_ticks = tol_cells * nticks_per_slice;
+    // covering keys satisfy time - tol_ticks - width < key <= time + tol_ticks
+    auto it = smap.lower_bound(time - tol_ticks - nticks_per_slice + 1);
+    const auto end = smap.upper_bound(time + tol_ticks);
+    for (; it != end; ++it) {
+        for (const auto* blob : it->second) {
+            if (time < blob->slice_index_min() - tol_ticks) continue;
+            if (time >= blob->slice_index_max() + tol_ticks) continue;
+            int wmin = 0, wmax = 0;
+            switch (plane) {
+                case 0: wmin = blob->u_wire_index_min(); wmax = blob->u_wire_index_max(); break;
+                case 1: wmin = blob->v_wire_index_min(); wmax = blob->v_wire_index_max(); break;
+                default: wmin = blob->w_wire_index_min(); wmax = blob->w_wire_index_max(); break;
+            }
+            if (wire >= wmin - tol_cells && wire < wmax + tol_cells) return true;
+        }
+    }
+    return false;
+}
+
+// doc pr/49: foreign-coverage half of the fit_blob_coverage test -- does any
+// OTHER cluster in the grouping claim this cell, while being 3D-far from the
+// point being fit?  The distance gate (ghost_dis, <= 0 disables) is what
+// separates a pure projection ghost (57441: claimant 163 cm away in 3D) from
+// a genuinely touching/crossing neighbor whose shared projection is
+// legitimate.  Existential OR over the grouping's clusters (stable child
+// order, and order cannot affect an OR), each via the same interval-search
+// predicate above; the kd query runs only for a cluster that actually covers
+// the cell, so the common case never pays it.
+bool TrackFitting::is_cell_covered_by_foreign_blobs(const Facade::Grouping* grouping,
+                                                    const Facade::Cluster* cluster,
+                                                    const WireCell::Point& p, double ghost_dis,
+                                                    int apa, int face,
+                                                    int plane, int wire, int time,
+                                                    int tol_cells, int nticks_per_slice) const
+{
+    if (!grouping) return false;
+    for (const auto* other : grouping->children()) {
+        if (other == cluster) continue;
+        if (!is_cell_covered_by_own_blobs(other, apa, face, plane, wire, time,
+                                          tol_cells, nticks_per_slice)) continue;
+        if (ghost_dis <= 0) return true;
+        if (other->get_closest_dis(p) > ghost_dis) return true;
+    }
+    return false;
+}
+
  void TrackFitting::examine_point_association(std::shared_ptr<PR::Segment> segment, WireCell::Point &p, PlaneData& temp_2dut, PlaneData& temp_2dvt, PlaneData& temp_2dwt, bool flag_end_point, double charge_cut){
 
     // Get cluster from segment
@@ -2740,11 +2822,37 @@ void TrackFitting::update_association(std::shared_ptr<PR::Segment> segment,
     std::vector<float> results;
     results.resize(3,0);
     
+    // doc pr/49 (fit_blob_coverage knob, C++ default -1 = off): when on,
+    // classify live candidate cells that are OUTSIDE the fitted cluster's
+    // own blob coverage AND INSIDE a 3D-distant foreign cluster's as
+    // foreign-ghost cells -- the 18255-57441 V-plane projection ghost enters
+    // here as real charge from a cluster 163 cm away whose own tiled
+    // footprint claims those cells.  Such cells STAY in the association but
+    // fit_point down-weights them by fit_blob_coverage_weight (owner: a
+    // dead-channel region can leave good single-view charge with no 3D
+    // image, which the fit must still use -- deweight, don't drop).  Cells
+    // covered by nobody, or claimed by a genuinely nearby (touching or
+    // crossing) cluster, keep full weight, so events with no distant-ghost
+    // overlap are untouched.  Live (flag 1) cells only: dead-derived cells
+    // (flag 0) and the rescue anchors injected below are exempt.  End/vertex
+    // points are exempt via flag_end_point (which also covers
+    // form_map_graph's dummy-segment vertex calls, where segment->cluster()
+    // may not be the vertex's own cluster).
+    const bool cov_on = (m_params.fit_blob_coverage >= 0) && !flag_end_point;
+    const int cov_tol = cov_on ? static_cast<int>(m_params.fit_blob_coverage) : 0;
+    const double cov_gdis = m_params.fit_blob_coverage_ghost_dis;
+    std::set<Coord2D> dw_2dut, dw_2dvt, dw_2dwt;
+
     // Process U plane
     for (auto it = temp_2dut.associated_2d_points.begin(); it != temp_2dut.associated_2d_points.end(); it++){
         CoordReadout coord_key(it->apa, it->time, it->channel);
         auto charge_it = m_charge_data.find(coord_key);
         if (charge_it != m_charge_data.end() && charge_it->second.charge > charge_cut) {
+            if (cov_on && charge_it->second.flag == 1 &&
+                !is_cell_covered_by_own_blobs(cluster, it->apa, it->face, 0, it->wire, it->time, cov_tol, cur_ntime_ticks) &&
+                is_cell_covered_by_foreign_blobs(m_grouping, cluster, p, cov_gdis, it->apa, it->face, 0, it->wire, it->time, cov_tol, cur_ntime_ticks)) {
+                dw_2dut.insert(*it);
+            }
             temp_types_u.insert(charge_it->second.flag);
             if (charge_it->second.flag == 0) results.at(0)++;
             saved_2dut.insert(*it);
@@ -2759,6 +2867,11 @@ void TrackFitting::update_association(std::shared_ptr<PR::Segment> segment,
         if (charge_it != m_charge_data.end() && charge_it->second.charge > charge_cut) {
         // std::cout << "V: " << it->time/4 << " " << it->channel << " " << charge_it->second.charge << " " << charge_cut << std::endl;
 
+            if (cov_on && charge_it->second.flag == 1 &&
+                !is_cell_covered_by_own_blobs(cluster, it->apa, it->face, 1, it->wire, it->time, cov_tol, cur_ntime_ticks) &&
+                is_cell_covered_by_foreign_blobs(m_grouping, cluster, p, cov_gdis, it->apa, it->face, 1, it->wire, it->time, cov_tol, cur_ntime_ticks)) {
+                dw_2dvt.insert(*it);
+            }
             temp_types_v.insert(charge_it->second.flag);
             if (charge_it->second.flag == 0) results.at(1)++;
             saved_2dvt.insert(*it);
@@ -2770,10 +2883,21 @@ void TrackFitting::update_association(std::shared_ptr<PR::Segment> segment,
         CoordReadout coord_key(it->apa, it->time, it->channel);
         auto charge_it = m_charge_data.find(coord_key);
         if (charge_it != m_charge_data.end() && charge_it->second.charge > charge_cut) {
+            if (cov_on && charge_it->second.flag == 1 &&
+                !is_cell_covered_by_own_blobs(cluster, it->apa, it->face, 2, it->wire, it->time, cov_tol, cur_ntime_ticks) &&
+                is_cell_covered_by_foreign_blobs(m_grouping, cluster, p, cov_gdis, it->apa, it->face, 2, it->wire, it->time, cov_tol, cur_ntime_ticks)) {
+                dw_2dwt.insert(*it);
+            }
             temp_types_w.insert(charge_it->second.flag);
             if (charge_it->second.flag == 0) results.at(2)++;
             saved_2dwt.insert(*it);
         }
+    }
+
+    if (cov_on && (dw_2dut.size() + dw_2dvt.size() + dw_2dwt.size() > 0)) {
+        SPDLOG_LOGGER_DEBUG(s_log, "fit_blob_coverage: deweighted foreign live cells u={} v={} w={} (tol={} w={}) at ({:.2f},{:.2f},{:.2f})",
+                            dw_2dut.size(), dw_2dvt.size(), dw_2dwt.size(), cov_tol, m_params.fit_blob_coverage_weight,
+                            p.x()/units::cm, p.y()/units::cm, p.z()/units::cm);
     }
 
     // Calculate quality ratios
@@ -3086,7 +3210,15 @@ void TrackFitting::update_association(std::shared_ptr<PR::Segment> segment,
     temp_2dut.associated_2d_points = saved_2dut;
     temp_2dvt.associated_2d_points = saved_2dvt;
     temp_2dwt.associated_2d_points = saved_2dwt;
-    
+
+    // doc pr/49: hand the foreign-ghost classification to fit_point (empty
+    // sets on the legacy path).  Cells the rescue logic above cleared out of
+    // the saved sets may linger here; fit_point only consults membership for
+    // cells it iterates, so stale entries are inert.
+    temp_2dut.deweighted_2d_points = dw_2dut;
+    temp_2dvt.deweighted_2d_points = dw_2dvt;
+    temp_2dwt.deweighted_2d_points = dw_2dwt;
+
     // Update quantity fields with calculated results
     temp_2dut.quantity = results.at(0);
     temp_2dvt.quantity = results.at(1);
@@ -3527,9 +3659,14 @@ WireCell::Point TrackFitting::fit_point(WireCell::Point& init_p, int i, std::sha
             } else {
                 scaling *= m_params.scaling_ratio;
             }
-        } 
-       
-        
+        }
+
+        // doc pr/49: foreign-ghost cells keep their measurement at reduced weight.
+        if (!plane_data_u.deweighted_2d_points.empty() && plane_data_u.deweighted_2d_points.count(*it)) {
+            scaling *= m_params.fit_blob_coverage_weight;
+        }
+
+
         if (scaling != 0) {
             data_u_2D(2 * index) = scaling * (it->wire - offset_u);
             data_u_2D(2 * index + 1) = scaling * (it->time - offset_t);
@@ -3580,8 +3717,13 @@ WireCell::Point TrackFitting::fit_point(WireCell::Point& init_p, int i, std::sha
             } else {
                 scaling *= m_params.scaling_ratio;
             }
-        } 
-        
+        }
+
+        // doc pr/49: foreign-ghost cells keep their measurement at reduced weight.
+        if (!plane_data_v.deweighted_2d_points.empty() && plane_data_v.deweighted_2d_points.count(*it)) {
+            scaling *= m_params.fit_blob_coverage_weight;
+        }
+
         if (scaling != 0) {
             data_v_2D(2 * index) = scaling * (it->wire - offset_v);
             data_v_2D(2 * index + 1) = scaling * (it->time - offset_t);
@@ -3631,8 +3773,13 @@ WireCell::Point TrackFitting::fit_point(WireCell::Point& init_p, int i, std::sha
             } else {
                 scaling *= m_params.scaling_ratio;
             }
-        } 
-        
+        }
+
+        // doc pr/49: foreign-ghost cells keep their measurement at reduced weight.
+        if (!plane_data_w.deweighted_2d_points.empty() && plane_data_w.deweighted_2d_points.count(*it)) {
+            scaling *= m_params.fit_blob_coverage_weight;
+        }
+
         if (scaling != 0) {
             data_w_2D(2 * index) = scaling * (it->wire - offset_w);
             data_w_2D(2 * index + 1) = scaling * (it->time - offset_t);
@@ -4289,7 +4436,12 @@ void TrackFitting::trajectory_fit(std::vector<std::pair<WireCell::Point, std::sh
                 } else {
                     scaling *= m_params.scaling_ratio;
                 }
-            } 
+            }
+
+            // doc pr/49: foreign-ghost cells keep their measurement at reduced weight.
+            if (!plane_data_u.deweighted_2d_points.empty() && plane_data_u.deweighted_2d_points.count(*it)) {
+                scaling *= m_params.fit_blob_coverage_weight;
+            }
 
             if (it->apa != u_cached_apa || it->face != u_cached_face) {
                 WirePlaneId wpid(kAllLayers, it->face, it->apa);
@@ -4365,7 +4517,12 @@ void TrackFitting::trajectory_fit(std::vector<std::pair<WireCell::Point, std::sh
                 } else {
                     scaling *= m_params.scaling_ratio;
                 }
-            } 
+            }
+
+            // doc pr/49: foreign-ghost cells keep their measurement at reduced weight.
+            if (!plane_data_v.deweighted_2d_points.empty() && plane_data_v.deweighted_2d_points.count(*it)) {
+                scaling *= m_params.fit_blob_coverage_weight;
+            }
 
             if (it->apa != v_cached_apa || it->face != v_cached_face) {
                 WirePlaneId wpid(kAllLayers, it->face, it->apa);
@@ -4444,7 +4601,12 @@ void TrackFitting::trajectory_fit(std::vector<std::pair<WireCell::Point, std::sh
                 } else {
                     scaling *= m_params.scaling_ratio;
                 }
-            } 
+            }
+
+            // doc pr/49: foreign-ghost cells keep their measurement at reduced weight.
+            if (!plane_data_w.deweighted_2d_points.empty() && plane_data_w.deweighted_2d_points.count(*it)) {
+                scaling *= m_params.fit_blob_coverage_weight;
+            }
 
             if (it->apa != w_cached_apa || it->face != w_cached_face) {
                 WirePlaneId wpid(kAllLayers, it->face, it->apa);

@@ -87,7 +87,46 @@ namespace WireCell::Clus {
             // blob-center drift-x extent below this cut.
             double skip_revert_iso_xext_cut = -1;
 
-            double default_dQ_dx = 5000; 
+            // doc pr/49: cross-cluster projection-ghost filter on the 2D
+            // charge association (18255-57441: a physically unrelated
+            // cluster's charge aliases with the fitted track in the V view
+            // only and detours the fit).  C++ default -1 = off: legacy path,
+            // byte-identical.  When >= 0, a candidate 2D cell whose charge is
+            // live (flag 1), which is NOT covered by the fitted cluster's OWN
+            // blobs but IS covered by another cluster's (per-plane exact wire
+            // interval x slice interval from Cluster::time_blob_map()) is
+            // dropped in examine_point_association, exactly as if it failed
+            // charge_cut.  Cells covered by nobody (own-track charge just
+            // past the tiled envelope) are kept, so events with no
+            // cross-cluster overlap are untouched.  The value is the
+            // wire/slice tolerance in cells (0 = strict; the 57441
+            // contamination sits ONE cell away, so tolerance >= 1 re-admits
+            // it).  Dead-derived cells (flag 0), rescue-injected anchors and
+            // end/vertex points (flag_end_point) are exempt.
+            double fit_blob_coverage = -1;
+
+            // doc pr/49: 3D gate on the foreign test above -- a foreign
+            // cluster's claim only triggers the drop when that cluster is
+            // FARTHER than this from the 3D point being fit ("another
+            // cluster not in the fitting range"): a genuinely touching or
+            // crossing neighbor (min 3D distance ~0-10 cm at the crossing)
+            // shares the projection legitimately and its cells are kept,
+            // while a pure projection ghost (57441: 163 cm away) is dropped.
+            // WCT internal length units (units::cm = 10; the JSON loader
+            // does no unit conversion).  <= 0 disables the gate (deweight on
+            // any foreign claim).  Inert while fit_blob_coverage < 0.
+            double fit_blob_coverage_ghost_dis = 15 * units::cm;
+
+            // doc pr/49: the least-squares weight multiplier applied in
+            // fit_point to foreign-ghost cells (owner: "deweight the foreign
+            // charge in the fitting, but not disable them completely" -- a
+            // dead-channel region can leave good single-view charge with no
+            // 3D image that the fit must still use).  1.0 would keep full
+            // weight (filter becomes a no-op); 0 would be a hard drop.
+            // Inert while fit_blob_coverage < 0.
+            double fit_blob_coverage_weight = 0.1;
+
+            double default_dQ_dx = 5000;
 
             double end_point_factor=0.6;
             double mid_point_factor=0.9;
@@ -306,8 +345,17 @@ namespace WireCell::Clus {
         /// Per-plane data for 3D points (exactly matches prototype)
         struct PlaneData {
             std::set<Coord2D> associated_2d_points;
+            // doc pr/49 (fit_blob_coverage knob): subset of
+            // associated_2d_points classified as foreign-ghost cells (live,
+            // outside the fitted cluster's own blob coverage, inside a
+            // 3D-distant foreign cluster's).  They stay in the fit -- a
+            // dead-channel region can leave good single-view charge with no
+            // 3D image, which the fit must still use -- but fit_point scales
+            // their least-squares weight by fit_blob_coverage_weight.
+            // Empty on the legacy path (knob off).
+            std::set<Coord2D> deweighted_2d_points;
             double quantity;
-            
+
             PlaneData() : quantity(0.0) {}
         };
 
@@ -405,6 +453,37 @@ namespace WireCell::Clus {
         void form_point_association(std::shared_ptr<PR::Segment> segment, WireCell::Point &p, PlaneData& temp_2dut, PlaneData& temp_2dvt, PlaneData& temp_2dwt, double dis_cut, int nlevel, double time_tick_cut );
 
         void examine_point_association(std::shared_ptr<PR::Segment> segment, WireCell::Point &p, PlaneData& temp_2dut, PlaneData& temp_2dvt, PlaneData& temp_2dwt, bool flag_end_point = false, double charge_cut = 2000);
+
+        /// doc pr/49 (fit_blob_coverage knob): true iff any of the cluster's
+        /// OWN blobs covers (wire, time) in the given plane -- wire in the
+        /// blob's half-open per-plane interval [min-tol, max+tol) and time
+        /// (tick) in [slice_index_min-tol_ticks, slice_index_max+tol_ticks).
+        /// Interval search over Cluster::time_blob_map() keys, so it accepts
+        /// both blob-aligned times and the floor-quantized ticks of the
+        /// Steiner/fallback candidate branches without an alignment
+        /// assumption.  Order-invariant existential test (OR over blobs), so
+        /// iterating the pointer-keyed BlobSet cannot affect the result.
+        bool is_cell_covered_by_own_blobs(const Facade::Cluster* cluster, int apa, int face,
+                                          int plane, int wire, int time,
+                                          int tol_cells, int nticks_per_slice) const;
+
+        /// doc pr/49: true iff some OTHER cluster in the grouping (any child
+        /// but `cluster`) covers the cell per the same test AND that cluster
+        /// is 3D-far from the fit point (`get_closest_dis(p) > ghost_dis`;
+        /// ghost_dis <= 0 disables the distance gate).  The knob drops a
+        /// live candidate cell only when it is BOTH outside the fitted
+        /// cluster's own blob coverage AND inside a 3D-distant foreign
+        /// cluster's -- a cell covered by nobody (own-track charge spilling
+        /// just past the tiled envelope, which the nlevel-hop window exists
+        /// to reach) is kept, and a genuinely touching/crossing neighbor's
+        /// shared projection is kept, so only pure projection ghosts fire.
+        /// Order-invariant OR over clusters and blobs.
+        bool is_cell_covered_by_foreign_blobs(const Facade::Grouping* grouping,
+                                              const Facade::Cluster* cluster,
+                                              const WireCell::Point& p, double ghost_dis,
+                                              int apa, int face,
+                                              int plane, int wire, int time,
+                                              int tol_cells, int nticks_per_slice) const;
         void update_association(std::shared_ptr<PR::Segment> segment,
                                 const std::vector<std::shared_ptr<PR::Segment>>& all_segments,
                                 PlaneData& temp_2dut, PlaneData& temp_2dvt, PlaneData& temp_2dwt);
