@@ -1159,17 +1159,20 @@ function(
     // in the trajectory fit's 2D charge association (V-plane ghost: an
     // unrelated cluster's real charge aliases with the fitted track in one
     // view only and detours the fit; a live candidate cell outside the
-    // fitted cluster's OWN blob coverage that sits INSIDE a 3D-distant
-    // foreign cluster's keeps its measurement at reduced weight -- cells
-    // covered by nobody, or claimed by a genuinely touching neighbor, keep
-    // full weight, so no-ghost events are untouched; dead-channel
-    // single-view charge stays usable by design).  C++ default -1 = off;
-    // null omits the key => byte-identical.  >= 0 = on, value = wire/slice
-    // tolerance in cells (0 = strict).  Companion numerics (ghost_dis 15 cm,
-    // weight 0.1) ride the C++ defaults.  Pass -A fit_blob_coverage=N (or
-    // the SBND_FIT_BLOB_COVERAGE runner env) to opt in; flip to 0 here only
-    // after the pr/49 gate round is clean.
-    fit_blob_coverage = null,
+    // fitted cluster's OWN blob coverage that sits INSIDE an OUT-OF-SCOPE
+    // cluster's -- round 3: one with no segment in the current fit -- keeps
+    // its measurement at x0.1 weight; cells covered by nobody keep full
+    // weight, so dead-channel single-view charge stays usable by design).
+    // **SBND PRODUCTION DEFAULT ON since the owner flip 2026-08-08** (doc
+    // pr/49 round 3: off-gates off48d/off50d 48/48+50/50, census 42/48+28/50
+    // all sentinel-gated, nusel-events 0/98; known open item: 172230-class
+    // near-vertex robustness, doc pr/49).  C++ default -1 = off; value =
+    // wire/slice tolerance in cells (0 = strict, the validated operating
+    // point).  Companion numerics (ghost_dis 0 = scope-only, weight 0.1)
+    // ride the C++ defaults.  Pass -A fit_blob_coverage=-1 (or the
+    // SBND_FIT_BLOB_COVERAGE=-1 runner env) to restore the legacy path for
+    // an A/B.
+    fit_blob_coverage = 0,
 )
     local base = import 'pgrapher/experiment/sbnd/simparams.jsonnet';
     local params = base {
