@@ -78,6 +78,39 @@ public:
         double m_cathode_wide_kink_angle{0};     // deg
         double m_cathode_wide_kink_skirt{3};     // cm
         double m_cathode_wide_kink_baseline{15}; // cm
+        // ---- doc sbnd_xin/docs/pr/48: back-to-back track fixes -------------
+        // Two-end residual-range break (18255-51513/56211/57903/57485): a
+        // single-non-stub-segment main cluster, both endpoints in the FV,
+        // with dQ/dx rising at BOTH ends gets broken at the argmin of the
+        // joint two-arm stopping-template score.  false => the pass never
+        // runs => byte-identical.  Full rationale and per-knob meaning:
+        // PatternAlgorithms::m_two_end_break / PR::TwoEndBreakOptions.
+        // Lengths cm, angle deg, ratios/caps dimensionless.
+        bool   m_two_end_break{false};
+        double m_teb_min_len{10};        // cm
+        double m_teb_min_arm{1.8};       // cm
+        int    m_teb_min_arm_pts{4};
+        double m_teb_stub_max{4};        // cm
+        double m_teb_accept_range{15};   // cm
+        double m_teb_rise_r1{1.3};
+        double m_teb_rise_r2{1.15};
+        double m_teb_abs_end_min{1.7};   // x mip_dqdx_median
+        double m_teb_dip_floor{0.6};     // x mip_dqdx_median; dips below = instrumental
+        double m_teb_score_cap_r1{0.6};
+        double m_teb_score_cap_r2{0.9};
+        double m_teb_turn_angle{25};     // deg; <= 0 disables route R2
+        double m_teb_turn_baseline{35};  // cm
+        double m_teb_turn_skirt{3};      // cm
+        // 59335 fix (a): the local-dQ/dx walk gate also stops the C4 /
+        // straightness (flag_search) accepts.  false => byte-identical.
+        bool   m_kink_walk_dqdx_stop{false};
+        // Shared Bragg-hot ratio (x mip_dqdx_median) gating BOTH 59335
+        // fixes to genuinely hot kinks/breaks.  Inert while both are false.
+        double m_kink_dqdx_hot_ratio{1.7};
+        // 59335 fix (b): a break born from a C4/A0 accept gets
+        // VertexFlags::kProtectedBreak so examine_vertices_4's < 2 cm
+        // absorption floor cannot erase it.  false => byte-identical.
+        bool   m_kink_break_protect{false};
         // Long shower-topology demote length, cm (doc sbnd_xin/docs/pr/25
         // sec 3).  0 => the guard never fires => byte-identical.  50 is the
         // scan-supported operating point (9/10 owner-scanned events; ~45

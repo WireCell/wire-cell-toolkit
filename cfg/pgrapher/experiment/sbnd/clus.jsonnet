@@ -1245,6 +1245,33 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               // (18255-55595 broken muon behind a 2.4 cm vertex stub).  C++
               // default false; key suppressed when off => byte-identical.
               long_muon_stub_bridge=false,
+              // doc pr/48 -- back-to-back track fixes
+              // (18255-51513/56211/57903/59335/57485: nu vertex mid-segment
+              // on one unbroken track, dQ/dx rising at BOTH ends, no angular
+              // kink).  two_end_break = the two-end residual-range break
+              // pass; kink_walk_dqdx_stop / kink_break_protect = the 59335
+              // walk-overshoot + EV4-absorption fixes.  C++ defaults false;
+              // keys suppressed when off => byte-identical.  teb_* numerics:
+              // null = C++ defaults (doc pr/48 sec 9 operating point), inert
+              // while two_end_break is off.
+              two_end_break=false,
+              teb_min_len=null,
+              teb_min_arm=null,
+              teb_min_arm_pts=null,
+              teb_stub_max=null,
+              teb_accept_range=null,
+              teb_rise_r1=null,
+              teb_rise_r2=null,
+              teb_abs_end_min=null,
+              teb_dip_floor=null,
+              teb_score_cap_r1=null,
+              teb_score_cap_r2=null,
+              teb_turn_angle=null,
+              teb_turn_baseline=null,
+              teb_turn_skirt=null,
+              kink_walk_dqdx_stop=false,
+              kink_break_protect=false,
+              kink_dqdx_hot_ratio=null,
               // doc pr/45 -- paint muon-typed (+-13) pseudo-showers as track in
               // the Bee shower_track layer + PrDisplayDump (18255-56463: 411 cm
               // muon painted red).  C++ default false; key suppressed when off
@@ -1775,6 +1802,24 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
             pid_flag_reconcile=pid_flag_reconcile,
             other_seg_empty_2d_guard=other_seg_empty_2d_guard,
             long_muon_stub_bridge=long_muon_stub_bridge,
+            two_end_break=two_end_break,
+            teb_min_len=teb_min_len,
+            teb_min_arm=teb_min_arm,
+            teb_min_arm_pts=teb_min_arm_pts,
+            teb_stub_max=teb_stub_max,
+            teb_accept_range=teb_accept_range,
+            teb_rise_r1=teb_rise_r1,
+            teb_rise_r2=teb_rise_r2,
+            teb_abs_end_min=teb_abs_end_min,
+            teb_dip_floor=teb_dip_floor,
+            teb_score_cap_r1=teb_score_cap_r1,
+            teb_score_cap_r2=teb_score_cap_r2,
+            teb_turn_angle=teb_turn_angle,
+            teb_turn_baseline=teb_turn_baseline,
+            teb_turn_skirt=teb_turn_skirt,
+            kink_walk_dqdx_stop=kink_walk_dqdx_stop,
+            kink_break_protect=kink_break_protect,
+            kink_dqdx_hot_ratio=kink_dqdx_hot_ratio,
             muon_dqdx_curve=muon_dqdx_curve,
             sp_dedx_use_recomb_model=sp_dedx_use_recomb_model,
             sp_mean_dedx_cut=sp_mean_dedx_cut,
@@ -2423,6 +2468,27 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
        other_seg_empty_2d_guard=false,
        // doc pr/46 -- C++ default false.
        long_muon_stub_bridge=false,
+       // doc pr/48 -- back-to-back track fixes.  C++ defaults false / null =
+       // C++ operating point; OFF here -- the SBND operating point (ALL THREE
+       // ON, owner round doc pr/48 sec 9) lives in wct-pr-perevt.jsonnet.
+       two_end_break=false,
+       teb_min_len=null,
+       teb_min_arm=null,
+       teb_min_arm_pts=null,
+       teb_stub_max=null,
+       teb_accept_range=null,
+       teb_rise_r1=null,
+       teb_rise_r2=null,
+       teb_abs_end_min=null,
+       teb_dip_floor=null,
+       teb_score_cap_r1=null,
+       teb_score_cap_r2=null,
+       teb_turn_angle=null,
+       teb_turn_baseline=null,
+       teb_turn_skirt=null,
+       kink_walk_dqdx_stop=false,
+       kink_break_protect=false,
+       kink_dqdx_hot_ratio=null,
        pseudo_shower_track_paint=false,
        // Muon dQ/dx-vs-length envelope: DEFAULT = the docs/pr/10 SBND fit
        // (see the clus_pr arg comment; null restores the uBooNE refit).
@@ -2588,6 +2654,24 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 pid_flag_reconcile=pid_flag_reconcile,
                 other_seg_empty_2d_guard=other_seg_empty_2d_guard,
                 long_muon_stub_bridge=long_muon_stub_bridge,
+                two_end_break=two_end_break,
+                teb_min_len=teb_min_len,
+                teb_min_arm=teb_min_arm,
+                teb_min_arm_pts=teb_min_arm_pts,
+                teb_stub_max=teb_stub_max,
+                teb_accept_range=teb_accept_range,
+                teb_rise_r1=teb_rise_r1,
+                teb_rise_r2=teb_rise_r2,
+                teb_abs_end_min=teb_abs_end_min,
+                teb_dip_floor=teb_dip_floor,
+                teb_score_cap_r1=teb_score_cap_r1,
+                teb_score_cap_r2=teb_score_cap_r2,
+                teb_turn_angle=teb_turn_angle,
+                teb_turn_baseline=teb_turn_baseline,
+                teb_turn_skirt=teb_turn_skirt,
+                kink_walk_dqdx_stop=kink_walk_dqdx_stop,
+                kink_break_protect=kink_break_protect,
+                kink_dqdx_hot_ratio=kink_dqdx_hot_ratio,
                 pseudo_shower_track_paint=pseudo_shower_track_paint,
                 muon_dqdx_curve=muon_dqdx_curve,
                 use_power_recomb=use_power_recomb,

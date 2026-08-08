@@ -195,6 +195,12 @@ bool PatternAlgorithms::examine_structure_2(Graph& graph, Facade::Cluster& clust
             auto vd = vtx->get_descriptor();
             if (boost::degree(vd, graph) != 2) continue;
 
+            // doc pr/48: never merge through a protected break vertex (the
+            // two-end dQ/dx break's straight class-A junction is exactly the
+            // geometry this straight-line test re-merges).  No-op when no
+            // vertex carries the flag => byte-identical.
+            if (vtx->flags_any(VertexFlags::kProtectedBreak)) continue;
+
             // Get the two segments connected to this vertex, in stable
             // edge-index order: sg1/sg2 determine the direction (vtx1->vtx2)
             // of the merged replacement segment.
@@ -374,6 +380,10 @@ bool PatternAlgorithms::examine_structure_3(Graph& graph, Facade::Cluster& clust
             // Check if this vertex has exactly 2 connected segments
             auto vd = vtx->get_descriptor();
             if (boost::degree(vd, graph) != 2) continue;
+
+            // doc pr/48: never merge through a protected break vertex.
+            // No-op when no vertex carries the flag => byte-identical.
+            if (vtx->flags_any(VertexFlags::kProtectedBreak)) continue;
 
             // Get the two segments connected to this vertex, in stable
             // edge-index order: sg1/sg2 determine the direction of the
@@ -1416,6 +1426,10 @@ bool PatternAlgorithms::examine_vertices_1(Graph&graph, Facade::Cluster&cluster,
         // Check if vertex has exactly 2 connections (potential candidate)
         if (boost::degree(vd_cur, graph) != 2) continue;
 
+        // doc pr/48: a protected break vertex is never a relocation/merge
+        // candidate.  No-op when no vertex carries the flag.
+        if (vtx->flags_any(VertexFlags::kProtectedBreak)) continue;
+
         // Get the two connected segments and cache their neighbor vertices,
         // avoiding redundant find_other_vertex calls later.  Stable
         // edge-index order: the loop below merges at the FIRST qualifying
@@ -1523,9 +1537,14 @@ bool PatternAlgorithms::examine_vertices_2(Graph&graph, Facade::Cluster&cluster,
         auto vertices = find_vertices(graph, segment);
         VertexPtr vtx1 = vertices.first;
         VertexPtr vtx2 = vertices.second;
-        
+
         if (!vtx1 || !vtx2) continue;
-        
+
+        // doc pr/48: never collapse a segment whose endpoint is a protected
+        // break vertex.  No-op when no vertex carries the flag.
+        if (vtx1->flags_any(VertexFlags::kProtectedBreak) ||
+            vtx2->flags_any(VertexFlags::kProtectedBreak)) continue;
+
         // Get positions (prefer fit point over wcpt)
         Facade::geo_point_t p1 = vtx1->fit().valid() ? vtx1->fit().point : vtx1->wcpt().point;
         Facade::geo_point_t p2 = vtx2->fit().valid() ? vtx2->fit().point : vtx2->wcpt().point;
@@ -1786,7 +1805,11 @@ bool PatternAlgorithms::examine_vertices_4(Graph&graph, Facade::Cluster&cluster,
             auto vd1 = v1->get_descriptor();
             auto vd2 = v2->get_descriptor();
             
-            if (boost::degree(vd1, graph) >= 2 && examine_vertices_4p(graph, v1, v2, track_fitter, dv) && v1 != main_vertex) {
+            // doc pr/48: !flags_any(kProtectedBreak) on the dying vertex --
+            // examine_vertices_4's unconditional < 2 cm floor is exactly the
+            // rule that erased 18255-59335's correctly-found kink break, and
+            // a two-end-break arm may legitimately be shorter than 2 cm.
+            if (boost::degree(vd1, graph) >= 2 && !v1->flags_any(VertexFlags::kProtectedBreak) && examine_vertices_4p(graph, v1, v2, track_fitter, dv) && v1 != main_vertex) {
                 // Merge v1's segments to v2
                 
                 // Get v2 position
@@ -1935,7 +1958,7 @@ bool PatternAlgorithms::examine_vertices_4(Graph&graph, Facade::Cluster&cluster,
                 track_fitter.do_multi_tracking(true, true, false, m_fit_exclusion, false, &cluster);
                 break;
                 
-            } else if (boost::degree(vd2, graph) >= 2 && examine_vertices_4p(graph, v2, v1, track_fitter, dv) && v2 != main_vertex) {
+            } else if (boost::degree(vd2, graph) >= 2 && !v2->flags_any(VertexFlags::kProtectedBreak) && examine_vertices_4p(graph, v2, v1, track_fitter, dv) && v2 != main_vertex) {
                 // Merge v2's segments to v1 (symmetric case)
                 
                 // Get v1 position
@@ -2737,6 +2760,9 @@ bool PatternAlgorithms::examine_structure_final_1(Graph& graph, VertexPtr main_v
             // Skip the main vertex
             if (vtx == main_vertex) continue;
 
+            // doc pr/48: never merge through a protected break vertex.
+            if (vtx->flags_any(VertexFlags::kProtectedBreak)) continue;
+
             // Only consider vertices with exactly 2 connections
             auto vd = vtx->get_descriptor();
             if (boost::degree(vd, graph) != 2) continue;
@@ -3119,6 +3145,10 @@ bool PatternAlgorithms::examine_structure_final_2(Graph& graph, VertexPtr main_v
             // Find the other vertex of this segment
             VertexPtr vtx1 = find_other_vertex(graph, sg, main_vertex);
             if (!vtx1 || !vtx1->descriptor_valid()) continue;
+
+            // doc pr/48: a protected break vertex is never absorbed into the
+            // main vertex.  No-op when no vertex carries the flag.
+            if (vtx1->flags_any(VertexFlags::kProtectedBreak)) continue;
 
             // Skip if either vertex has only 1 connection
             auto vtx1_vd = vtx1->get_descriptor();

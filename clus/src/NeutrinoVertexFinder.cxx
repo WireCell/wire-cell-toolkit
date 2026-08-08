@@ -3982,6 +3982,28 @@ bool PatternAlgorithms::determine_overall_main_vertex_DL(
         MS t_proton_tagging(MS::zero());
         MS t_cleanup_long_muon(MS::zero());
 
+        // doc pr/48: a two-end-break junction vertex carries direct dQ/dx
+        // evidence -- two stopping-template arms, the very signature the
+        // break was accepted on -- that the image-based DL vertex cannot
+        // see; the back-to-back mid-track junction is precisely the
+        // topology DL and angular methods miss (that is why the break pass
+        // exists).  Never let the DL rerank move the main vertex OFF such a
+        // vertex (51513/56211/57485: the traditional chain selects the
+        // junction and the DL snap lands on a Bragg tip).  A DL choice that
+        // AGREES with the protected vertex still passes.  Inert unless
+        // m_two_end_break (the flag is only ever set by that pass).
+        if (flag_pass && m_two_end_break && main_cluster) {
+            auto trad_it = map_cluster_main_vertices.find(main_cluster);
+            if (trad_it != map_cluster_main_vertices.end() && trad_it->second &&
+                trad_it->second->flags_any(VertexFlags::kProtectedBreak) &&
+                min_vertex != trad_it->second) {
+                SPDLOG_LOGGER_TRACE(s_log,
+                    "determine_overall_main_vertex_DL: keeping protected two-end-break "
+                    "vertex over the DL choice (doc pr/48)");
+                flag_pass = false;
+            }
+        }
+
         if (flag_pass) {
             flag_change = true;
             SPDLOG_LOGGER_TRACE(s_log,

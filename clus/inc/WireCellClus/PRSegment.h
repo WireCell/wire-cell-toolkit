@@ -28,6 +28,16 @@ namespace WireCell::Clus::PR {
         kAvoidMuonCheck = 1<<3,
         /// The fits are provided.
         kFit = 1<<4,
+        /// The segment is an arm of a two-end dQ/dx break (doc
+        /// sbnd_xin/docs/pr/48): its travel direction away from the break
+        /// vertex was established by the break's own two-arm
+        /// stopping-template accept.  determine_direction reconstructs that
+        /// outward direction (from this flag plus which endpoint vertex
+        /// carries VertexFlags::kProtectedBreak) and lets it stand over a
+        /// WEAK direction recompute (a strong recompute still wins).  Set
+        /// only by the default-OFF two_end_break pass => byte-identical
+        /// when off.
+        kTwoEndBreakArm = 1<<5,
     };
 
 

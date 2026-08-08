@@ -1136,6 +1136,25 @@ function(
     // 284145 hadronic vertex).  Gate arms work-pr46-{base48,base19n,off48,
     // off19n,on48,on19n,oncase,m1koffb,m1konb}.  Doc pr/46.
     long_muon_stub_bridge = true,
+    // doc pr/48 (18255-51513/56211/57903/59335/57485) -- back-to-back track
+    // fixes.  two_end_break: the two-end residual-range break pass (nu
+    // vertex mid-segment on a single unbroken track, dQ/dx rising at BOTH
+    // ends -- two stopping ends imply a junction at the interior dip; a
+    // simple-topology + both-ends-in-FV gated break at the dip / turn-max
+    // index, template-score accepted).  kink_walk_dqdx_stop +
+    // kink_break_protect: the 59335 fixes (a correct C4 kink accept walks
+    // past its own evidence, then examine_vertices_4's unconditional < 2 cm
+    // floor erases the break).  C++ defaults false.  SBND DEFAULT ON (owner
+    // round, doc pr/48 sec 9): off-gates work-pr48-base48 vs -off48c 48/48 +
+    // -base19n vs -off19nc 19/19 member-identical, nusel byte-identical;
+    // 1k footprint 69/1000 movers, 0/1000 nusel diffs, every mover classified
+    // and every new TEB break examined (sec 9.6).  Pass -A two_end_break=false
+    // etc. (or the SBND_TWO_END_BREAK / SBND_KINK_WALK_DQDX_STOP /
+    // SBND_KINK_BREAK_PROTECT runner envs) to restore the legacy path.
+    // teb_* operating point rides the C++ defaults.
+    two_end_break = true,
+    kink_walk_dqdx_stop = true,
+    kink_break_protect = true,
 )
     local base = import 'pgrapher/experiment/sbnd/simparams.jsonnet';
     local params = base {
@@ -1314,6 +1333,9 @@ function(
                              pid_flag_reconcile=pid_flag_reconcile,
                              other_seg_empty_2d_guard=other_seg_empty_2d_guard,
                              long_muon_stub_bridge=long_muon_stub_bridge,
+                             two_end_break=two_end_break,
+                             kink_walk_dqdx_stop=kink_walk_dqdx_stop,
+                             kink_break_protect=kink_break_protect,
                              pseudo_shower_track_paint=pseudo_shower_track_paint,
                              reclass_never_computed_ke_floor=reclass_never_computed_ke_floor,
                              muon_dqdx_curve=muon_dqdx_curve,

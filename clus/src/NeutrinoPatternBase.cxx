@@ -1,5 +1,6 @@
 #include "WireCellClus/NeutrinoPatternBase.h"
 #include "WireCellClus/PRSegmentFunctions.h"
+#include "WireCellClus/FiducialUtils.h"
 #include "WireCellUtil/Logging.h"
 
 #include <Eigen/Dense>
@@ -1606,6 +1607,17 @@ bool PatternAlgorithms::replace_segment_and_vertex(Graph& graph, SegmentPtr& seg
         bool have_prev_kink_pass = false;
         Facade::geo_point_t prev_pass_test_start_p, prev_pass_break_wcp;
         size_t prev_pass_break_idx = INVALID_STEINER_INDEX;
+        // doc pr/48, 59335 fix (b): which accept criterion produced the
+        // CURRENT break_wcp (-1 none, 0 A0 wide-cathode, 1-4 C1-C4).
+        // accept_crit_cur is written by every segment_search_kink call;
+        // accept_crit_break is copied from it only when that call actually
+        // advanced break_wcp, so a final no-kink pass (dir1==0, crit -1)
+        // cannot erase the criterion of the break that stands.  Only read
+        // when m_kink_break_protect; the nullptr out-param when the knob is
+        // off is byte-identical.
+        int accept_crit_cur = -1;
+        int accept_crit_break = -1;
+        int* accept_crit_ptr = m_kink_break_protect ? &accept_crit_cur : nullptr;
         while(ray_length(Ray{start_v->wcpt().point, break_wcp}) <= 1.0 * units::cm &&
               ray_length(Ray{end_v->wcpt().point, break_wcp}) > 1.0 * units::cm) {
             if (++kink_pass_counter > 1000) {
@@ -1614,7 +1626,7 @@ bool PatternAlgorithms::replace_segment_and_vertex(Graph& graph, SegmentPtr& seg
             }
             
             auto t_op = BS_Clock::now();
-            auto kink_tuple = segment_search_kink(curr_sg, test_start_p, "fit", m_mip_dqdx_median, m_cathode_x, m_cathode_kink_xcut, m_cathode_wide_kink_angle, m_cathode_wide_kink_skirt, m_cathode_wide_kink_baseline);
+            auto kink_tuple = segment_search_kink(curr_sg, test_start_p, "fit", m_mip_dqdx_median, m_cathode_x, m_cathode_kink_xcut, m_cathode_wide_kink_angle, m_cathode_wide_kink_skirt, m_cathode_wide_kink_baseline, m_kink_walk_dqdx_stop, accept_crit_ptr, m_kink_dqdx_hot_ratio);
             t_segment_search_kink += BS_MS(BS_Clock::now() - t_op);
             auto& [kink_point, dir1, dir2, flag_continue] = kink_tuple;
 
@@ -1663,6 +1675,7 @@ bool PatternAlgorithms::replace_segment_and_vertex(Graph& graph, SegmentPtr& seg
                 has_dir1_prev = true;
 
                 break_wcp = break_pt;
+                accept_crit_break = accept_crit_cur;   // this search's accept stands (pr/48 fix b)
 
                 if (m_perf) SPDLOG_LOGGER_TRACE(s_log, "break_segments 1: cluster={} kink=({:.2f},{:.2f},{:.2f}) break_pt=({:.2f},{:.2f},{:.2f}) break_idx={} flag_continue={}",
                     cluster->get_cluster_id(),
@@ -1676,7 +1689,7 @@ bool PatternAlgorithms::replace_segment_and_vertex(Graph& graph, SegmentPtr& seg
                     saved_break_wcp_indices.find(break_idx) != saved_break_wcp_indices.end()) {
                     test_start_p = kink_geo;
                     t_op = BS_Clock::now();
-                    kink_tuple = segment_search_kink(curr_sg, test_start_p, "fit", m_mip_dqdx_median, m_cathode_x, m_cathode_kink_xcut, m_cathode_wide_kink_angle, m_cathode_wide_kink_skirt, m_cathode_wide_kink_baseline);
+                    kink_tuple = segment_search_kink(curr_sg, test_start_p, "fit", m_mip_dqdx_median, m_cathode_x, m_cathode_kink_xcut, m_cathode_wide_kink_angle, m_cathode_wide_kink_skirt, m_cathode_wide_kink_baseline, m_kink_walk_dqdx_stop, accept_crit_ptr, m_kink_dqdx_hot_ratio);
                     t_segment_search_kink += BS_MS(BS_Clock::now() - t_op);
                     auto& [kink_point2, dir1_2, dir2_2, flag_continue2] = kink_tuple;
                     Facade::geo_vector_t dir1_geo2(dir1_2.x(), dir1_2.y(), dir1_2.z());
@@ -1687,6 +1700,7 @@ bool PatternAlgorithms::replace_segment_and_vertex(Graph& graph, SegmentPtr& seg
                     t_proto_extend_point += BS_MS(BS_Clock::now() - t_op);
                     break_wcp = break_pt2;
                     break_idx = break_idx2;
+                    accept_crit_break = accept_crit_cur;   // re-search's accept stands (pr/48 fix b)
                 } else {
                     if (break_idx != INVALID_STEINER_INDEX) {
                         saved_break_wcp_indices.insert(break_idx);
@@ -1850,6 +1864,63 @@ bool PatternAlgorithms::replace_segment_and_vertex(Graph& graph, SegmentPtr& seg
                     t_break_segment_into_two += BS_MS(BS_Clock::now() - t_op_bst);
                     if (bst_ok) {
                         flag_modified = true;
+                        // doc pr/48, 59335 fix (b): a break born from a
+                        // dQ/dx-assisted accept (C4) or the wide-baseline
+                        // cathode accept (A0) whose break point sits on
+                        // BRAGG-HOT charge (5-point mean dQ/dx >
+                        // kink_dqdx_hot_ratio x the median threshold; 59335's
+                        // proton stub reads 2.5-6x) is high-confidence --
+                        // protect its new vertex from examine_vertices_4's
+                        // unconditional < 2 cm stub-absorption floor.
+                        // Without the hot gate the protect fired on ~100/1000
+                        // events (every C4 stub break); with it the footprint
+                        // is the genuinely hot handful (doc pr/48 sec 9.6).
+                        // The new vertex is the out_seg2 endpoint sitting
+                        // exactly at break_wcp (break_segment_into_two sets
+                        // its wcpt to break_point verbatim).
+                        // Scope: only a stub SHORT enough for
+                        // examine_vertices_4's < 2 cm absorption floor needs
+                        // protecting -- a longer arm survives EV4 anyway,
+                        // and flagging it would needlessly shield its vertex
+                        // from every other examiner pass (46/1000 collateral
+                        // movers before this scope, doc pr/48 sec 9.6).
+                        bool protect_hot = false;
+                        if (m_kink_break_protect &&
+                            (accept_crit_break == 0 || accept_crit_break == 4) && out_seg2 &&
+                            ray_length(Ray{break_wcp, end_v->wcpt().point}) < 2.0 * units::cm) {
+                            const auto& pfits = out_seg2->fits().empty() ? curr_sg->fits() : out_seg2->fits();
+                            double sum_dQ = 0, sum_dx = 0;
+                            if (!pfits.empty()) {
+                                size_t kmin = 0;
+                                double dmin = 1e18;
+                                for (size_t i = 0; i < pfits.size(); i++) {
+                                    const double d = ray_length(Ray{pfits[i].point, break_wcp});
+                                    if (d < dmin) { dmin = d; kmin = i; }
+                                }
+                                for (int j = -2; j <= 2; j++) {
+                                    const int idx = static_cast<int>(kmin) + j;
+                                    if (idx >= 0 && idx < static_cast<int>(pfits.size())) {
+                                        sum_dQ += pfits[idx].dQ;
+                                        sum_dx += pfits[idx].dx;
+                                    }
+                                }
+                            }
+                            protect_hot = sum_dx > 0 &&
+                                (sum_dQ / sum_dx) > m_mip_dqdx_median * m_kink_dqdx_hot_ratio;
+                        }
+                        if (protect_hot) {
+                            auto [nv1, nv2] = find_vertices(graph, out_seg2);
+                            for (VertexPtr nv : {nv1, nv2}) {
+                                if (nv && ray_length(Ray{nv->wcpt().point, break_wcp}) < 0.01 * units::cm) {
+                                    nv->set_flags(VertexFlags::kProtectedBreak);
+                                    SPDLOG_LOGGER_DEBUG(s_log,
+                                        "break_segments: protected kink-break vertex at ({:.2f},{:.2f},{:.2f})cm crit={} (cluster {})",
+                                        break_wcp.x()/units::cm, break_wcp.y()/units::cm,
+                                        break_wcp.z()/units::cm, accept_crit_break,
+                                        cluster->get_cluster_id());
+                                }
+                            }
+                        }
                         // Perform tracking
                         // track_fitter.add_graph(&graph); added already
                         auto t_op_mt = BS_Clock::now();
@@ -2300,7 +2371,7 @@ Facade::geo_vector_t PatternAlgorithms::vertex_segment_get_dir(VertexPtr& vertex
     return dir;
 }
 
-bool PatternAlgorithms::find_proto_vertex(Graph& graph, Facade::Cluster& cluster, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, bool flag_break_track, int nrounds_find_other_tracks, bool flag_back_search){
+bool PatternAlgorithms::find_proto_vertex(Graph& graph, Facade::Cluster& cluster, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, bool flag_break_track, int nrounds_find_other_tracks, bool flag_back_search, const Clus::ParticleDataSet::pointer& particle_data){
     using Clock = std::chrono::steady_clock;
     using MS = std::chrono::duration<double, std::milli>;
     auto t_total = Clock::now();
@@ -2425,6 +2496,20 @@ bool PatternAlgorithms::find_proto_vertex(Graph& graph, Facade::Cluster& cluster
     examine_vertices(graph, cluster, track_fitter, dv);
     if (m_perf) SPDLOG_LOGGER_TRACE(s_log, "find_proto_vertex timing: examine_vertices took {} ms", MS(Clock::now() - t0).count());
 
+    // doc pr/48: two-end residual-range back-to-back break.  Placed AFTER
+    // examine_vertices so the new vertex is not visible to ES2/ES3/EV1-4 on
+    // this pass; examine_partial_identical_segments skips degree <= 2 and
+    // examine_vertices_3 only touches the two initial termini, so the break
+    // survives to the final do_multi_tracking below, which re-fits the two
+    // new arms.  Downstream re-runs (improve_vertex, examine_structure_final)
+    // honor VertexFlags::kProtectedBreak.  No-op unless m_two_end_break and
+    // particle_data are both set.
+    if (m_two_end_break && particle_data) {
+        t0 = Clock::now();
+        break_two_end_dqdx(graph, cluster, dv, particle_data);
+        if (m_perf) SPDLOG_LOGGER_TRACE(s_log, "find_proto_vertex timing: break_two_end_dqdx took {} ms", MS(Clock::now() - t0).count());
+    }
+
     // Examine partial identical segments
     t0 = Clock::now();
     examine_partial_identical_segments(graph, cluster, track_fitter, dv);
@@ -2463,6 +2548,114 @@ bool PatternAlgorithms::find_proto_vertex(Graph& graph, Facade::Cluster& cluster
     return true;
 }
 
+
+bool PatternAlgorithms::break_two_end_dqdx(Graph& graph, Facade::Cluster& cluster, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data)
+{
+    // doc sbnd_xin/docs/pr/48 sec 6.  Every gate here is deliberately
+    // conservative: any missing prerequisite silently declines (no throw, no
+    // partial modification).
+    if (!m_two_end_break || !particle_data) return false;
+    if (!cluster.get_flag(Facade::Flags::main_cluster)) return false;
+
+    // Topology gate: exactly one segment of this cluster longer than the stub
+    // floor ("no non-stub prong" -- short attached stubs like 57903's 1.9 cm /
+    // 57485's <= 3.6 cm are common even in genuine back-to-back events, so a
+    // strict single-segment test would wrongly exclude them).
+    SegmentPtr cand = nullptr;
+    int n_long = 0;
+    for (const auto& ed : ordered_edges(graph)) {
+        SegmentPtr sg = graph[ed].segment;
+        if (!sg || sg->cluster() != &cluster) continue;
+        if (segment_track_length(sg, 0) > m_teb_stub_max) {
+            n_long++;
+            cand = sg;
+        }
+    }
+    if (n_long != 1 || !cand) return false;
+    const auto& fits = cand->fits();
+    if (fits.size() < 3) return false;
+
+    // Containment gate, primary: two stopping ends is physically impossible
+    // for a through-going or exiting track, so both fitted endpoints must be
+    // inside the fiducial volume.  A missing FiducialUtils (ill-formed
+    // ensemble) never fires -- conservative.
+    auto grouping = cluster.grouping();
+    if (!grouping) return false;
+    auto fiducial_utils = grouping->get_fiducialutils();
+    if (!fiducial_utils) return false;
+    if (!fiducial_utils->inside_fiducial_volume(fits.front().point) ||
+        !fiducial_utils->inside_fiducial_volume(fits.back().point)) return false;
+
+    TwoEndBreakOptions opt;
+    opt.mip_dqdx        = m_mip_dqdx;
+    opt.mip_dqdx_median = m_mip_dqdx_median;
+    opt.min_len         = m_teb_min_len;
+    opt.min_arm         = m_teb_min_arm;
+    opt.min_arm_pts     = m_teb_min_arm_pts;
+    opt.accept_range    = m_teb_accept_range;
+    opt.rise_r1         = m_teb_rise_r1;
+    opt.rise_r2         = m_teb_rise_r2;
+    opt.abs_end_min     = m_teb_abs_end_min;
+    opt.dip_floor       = m_teb_dip_floor;
+    opt.score_cap_r1    = m_teb_score_cap_r1;
+    opt.score_cap_r2    = m_teb_score_cap_r2;
+    opt.turn_angle      = m_teb_turn_angle;
+    opt.turn_baseline   = m_teb_turn_baseline;
+    opt.turn_skirt      = m_teb_turn_skirt;
+
+    auto res = segment_two_end_break_scan(cand, particle_data, opt);
+    SPDLOG_LOGGER_DEBUG(s_log,
+        "break_two_end_dqdx: cluster {} seg len {:.1f}cm k*={} (dip {} turn {}) arms {:.1f}/{:.1f}cm "
+        "J={:.3f} s15=({:.3f}{},{:.3f}{}) rise=({:.2f},{:.2f}) absmed=({:.2f},{:.2f})xMIP "
+        "turn={:.1f}deg routes=({},{}) found={}",
+        cluster.get_cluster_id(), segment_track_length(cand, 0)/units::cm, res.break_idx,
+        res.idx_dip, res.idx_turn,
+        res.arm_a_len/units::cm, res.arm_b_len/units::cm, res.joint_score,
+        res.sA, res.flagA ? "F" : "f", res.sB, res.flagB ? "F" : "f",
+        res.ratio_lo, res.ratio_hi,
+        res.absmed_lo/m_mip_dqdx_median, res.absmed_hi/m_mip_dqdx_median,
+        res.turn_deg, res.route1, res.route2, res.found);
+    for (const auto& a : res.attempts) {
+        SPDLOG_LOGGER_DEBUG(s_log,
+            "break_two_end_dqdx:   cand idx={} m3={:.2f}xMIP sA={:.3f}{} sB={:.3f}{} accepted={}",
+            a.idx, a.m3/m_mip_dqdx_median, a.sA, a.fA ? "F" : "f", a.sB, a.fB ? "F" : "f", a.accepted);
+    }
+    if (!res.found) return false;
+    if (res.break_idx <= 0 || res.break_idx + 1 >= static_cast<int>(fits.size())) return false;
+
+    const WireCell::Point break_pt = fits[res.break_idx].point;
+    auto [ok, segs, vtx] = break_segment(graph, cand, break_pt, particle_data, m_recomb_model, dv);
+    if (!ok || !vtx) return false;
+    // break_segment does not associate the new vertex with a cluster; a
+    // null-cluster vertex is invisible to determine_main_vertex's candidate
+    // loops (they filter on vtx->cluster() == &cluster), which would defeat
+    // the entire purpose of the break.  (Deliberately set HERE, not inside
+    // break_segment -- its other caller keeps its current behavior.)
+    vtx->cluster(&cluster);
+    // Mark both arms: their travel direction away from the junction is
+    // established by the accept itself (each arm's Bragg is at its outer
+    // end).  determine_direction reconstructs the outward direction from
+    // this flag + the kProtectedBreak endpoint and lets it stand over a
+    // WEAK KS recompute -- the weak coin-flip landing "into the junction"
+    // is exactly what made the scorer keep the old terminus on
+    // 51513/56211/57485 while 57903's lucky flips selected the junction.
+    // (A dirsign stamp cannot carry this: separate_track_shower's
+    // shower_topo_reset zeroes dirsign on every segment.)
+    auto [sg1, sg2] = segs;
+    if (sg1) sg1->set_flags(SegmentFlags::kTwoEndBreakArm);
+    if (sg2) sg2->set_flags(SegmentFlags::kTwoEndBreakArm);
+    // Protect the new vertex from the downstream merge/absorb passes
+    // (improve_vertex's examine_vertices re-run, examine_structure_final) --
+    // a straight class-A junction is exactly the geometry ES2/ESF1 are
+    // designed to re-merge.
+    vtx->set_flags(VertexFlags::kProtectedBreak);
+    SPDLOG_LOGGER_DEBUG(s_log,
+        "break_two_end_dqdx: BROKE cluster {} at fit idx {} ({:.2f},{:.2f},{:.2f})cm route {}",
+        cluster.get_cluster_id(), res.break_idx,
+        break_pt.x()/units::cm, break_pt.y()/units::cm, break_pt.z()/units::cm,
+        res.route1 ? 1 : 2);
+    return true;
+}
 
 void PatternAlgorithms::init_point_segment(Graph& graph, Facade::Cluster& cluster, TrackFitting& track_fitter, IDetectorVolumes::pointer dv) {
     // Get two boundary points from the cluster (using regular point cloud)

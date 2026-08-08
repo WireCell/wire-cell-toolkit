@@ -237,7 +237,41 @@ void PatternAlgorithms::determine_direction(Graph& graph, Facade::Cluster& clust
             t_shower_topo += MS(Clock::now() - t0);
         } else {
             // Track
+            // doc pr/48: an arm of a two-end dQ/dx break travels AWAY from
+            // the break vertex -- the break's own two-arm stopping-template
+            // accept established it (each arm's Bragg is at its outer end).
+            // A dirsign stamp cannot carry this here (separate_track_shower's
+            // segment_is_shower_topology zeroes dirsign on every segment
+            // under shower_topo_reset), so the direction is reconstructed
+            // from the graph: the arm's endpoint carrying
+            // VertexFlags::kProtectedBreak IS the junction.  Let that stand
+            // over a WEAK recompute -- the weak KS decision on a MIP-ish arm
+            // is a coin flip, and landing "into the junction" defeats the
+            // break's vertex at main-vertex scoring (51513/56211/57485 vs
+            // 57903's lucky flips).  A STRONG recompute (!dir_weak) wins.
+            // Inert unless m_two_end_break (the flag is only ever set by the
+            // knob-gated pass).
+            const bool teb_arm = m_two_end_break && seg->flags_any(SegmentFlags::kTwoEndBreakArm);
+            int teb_outward = 0;
+            if (teb_arm) {
+                auto [v_front, v_back] = find_vertices(graph, seg);
+                const bool fp = v_front && v_front->flags_any(VertexFlags::kProtectedBreak);
+                const bool bp = v_back && v_back->flags_any(VertexFlags::kProtectedBreak);
+                if (fp && !bp) teb_outward = 1;        // junction at front: travel front->back
+                else if (bp && !fp) teb_outward = -1;  // junction at back:  travel back->front
+            }
             segment_determine_dir_track(seg, start_n, end_n, particle_data, recomb_model, m_mip_dqdx_median, flag_print, track_pid_options());
+            if (teb_arm) {
+                SPDLOG_LOGGER_DEBUG(s_log,
+                    "determine_direction: teb arm outward={} post_dirsign={} weak={}",
+                    teb_outward, seg->dirsign(), seg_dir_weak(seg) ? 1 : 0);
+            }
+            if (teb_outward != 0 && seg->dirsign() != teb_outward && seg_dir_weak(seg)) {
+                SPDLOG_LOGGER_DEBUG(s_log,
+                    "determine_direction: two-end-break arm weak recompute dirsign {} -> outward {}",
+                    seg->dirsign(), teb_outward);
+                seg->dirsign(teb_outward);
+            }
             t_track += MS(Clock::now() - t0);
         }
 

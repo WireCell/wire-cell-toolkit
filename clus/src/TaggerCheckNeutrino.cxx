@@ -81,6 +81,25 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_cathode_wide_kink_angle    = get(config, "cathode_wide_kink_angle",    m_cathode_wide_kink_angle);    // deg
     m_cathode_wide_kink_skirt    = get(config, "cathode_wide_kink_skirt",    m_cathode_wide_kink_skirt);    // cm
     m_cathode_wide_kink_baseline = get(config, "cathode_wide_kink_baseline", m_cathode_wide_kink_baseline); // cm
+    // doc sbnd_xin/docs/pr/48 -- back-to-back track fixes.
+    m_two_end_break       = get(config, "two_end_break",       m_two_end_break);
+    m_teb_min_len         = get(config, "teb_min_len",         m_teb_min_len);         // cm
+    m_teb_min_arm         = get(config, "teb_min_arm",         m_teb_min_arm);         // cm
+    m_teb_min_arm_pts     = get(config, "teb_min_arm_pts",     m_teb_min_arm_pts);
+    m_teb_stub_max        = get(config, "teb_stub_max",        m_teb_stub_max);        // cm
+    m_teb_accept_range    = get(config, "teb_accept_range",    m_teb_accept_range);    // cm
+    m_teb_rise_r1         = get(config, "teb_rise_r1",         m_teb_rise_r1);
+    m_teb_rise_r2         = get(config, "teb_rise_r2",         m_teb_rise_r2);
+    m_teb_abs_end_min     = get(config, "teb_abs_end_min",     m_teb_abs_end_min);
+    m_teb_dip_floor       = get(config, "teb_dip_floor",       m_teb_dip_floor);
+    m_teb_score_cap_r1    = get(config, "teb_score_cap_r1",    m_teb_score_cap_r1);
+    m_teb_score_cap_r2    = get(config, "teb_score_cap_r2",    m_teb_score_cap_r2);
+    m_teb_turn_angle      = get(config, "teb_turn_angle",      m_teb_turn_angle);      // deg
+    m_teb_turn_baseline   = get(config, "teb_turn_baseline",   m_teb_turn_baseline);   // cm
+    m_teb_turn_skirt      = get(config, "teb_turn_skirt",      m_teb_turn_skirt);      // cm
+    m_kink_walk_dqdx_stop = get(config, "kink_walk_dqdx_stop", m_kink_walk_dqdx_stop);
+    m_kink_break_protect  = get(config, "kink_break_protect",  m_kink_break_protect);
+    m_kink_dqdx_hot_ratio = get(config, "kink_dqdx_hot_ratio", m_kink_dqdx_hot_ratio);
     m_shower_topo_demote_len = get(config, "shower_topo_demote_len", m_shower_topo_demote_len);  // cm
     // doc sbnd_xin/docs/pr/30 §11 port-fidelity knobs.
     m_fit_exclusion            = get(config, "fit_exclusion",            m_fit_exclusion);
@@ -317,6 +336,25 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["cathode_wide_kink_angle"]    = m_cathode_wide_kink_angle;    // deg; 0 = legacy (no wide-baseline cathode accept)
     cfg["cathode_wide_kink_skirt"]    = m_cathode_wide_kink_skirt;    // cm excluded around the crossing
     cfg["cathode_wide_kink_baseline"] = m_cathode_wide_kink_baseline; // cm PCA baseline per arm beyond the skirt
+    // doc sbnd_xin/docs/pr/48 -- back-to-back track fixes.  Defaults OFF/legacy.
+    cfg["two_end_break"]       = m_two_end_break;       // false = legacy (no two-end dQ/dx break pass)
+    cfg["teb_min_len"]         = m_teb_min_len;         // cm
+    cfg["teb_min_arm"]         = m_teb_min_arm;         // cm
+    cfg["teb_min_arm_pts"]     = m_teb_min_arm_pts;
+    cfg["teb_stub_max"]        = m_teb_stub_max;        // cm
+    cfg["teb_accept_range"]    = m_teb_accept_range;    // cm
+    cfg["teb_rise_r1"]         = m_teb_rise_r1;
+    cfg["teb_rise_r2"]         = m_teb_rise_r2;
+    cfg["teb_abs_end_min"]     = m_teb_abs_end_min;     // x mip_dqdx_median
+    cfg["teb_dip_floor"]       = m_teb_dip_floor;       // x mip_dqdx_median
+    cfg["teb_score_cap_r1"]    = m_teb_score_cap_r1;
+    cfg["teb_score_cap_r2"]    = m_teb_score_cap_r2;
+    cfg["teb_turn_angle"]      = m_teb_turn_angle;      // deg; <= 0 disables route R2
+    cfg["teb_turn_baseline"]   = m_teb_turn_baseline;   // cm
+    cfg["teb_turn_skirt"]      = m_teb_turn_skirt;      // cm
+    cfg["kink_walk_dqdx_stop"] = m_kink_walk_dqdx_stop; // false = legacy (flag_search bypasses the walk gate)
+    cfg["kink_break_protect"]  = m_kink_break_protect;  // false = legacy (no protected kink breaks)
+    cfg["kink_dqdx_hot_ratio"] = m_kink_dqdx_hot_ratio; // x mip_dqdx_median; inert while both above are false
     cfg["shower_topo_demote_len"] = m_shower_topo_demote_len;  // cm; 0 = legacy (long segments stay eligible for kShowerTopology)
     // doc sbnd_xin/docs/pr/30 §11.  Round-tripped so the compiled config
     // records the operating point; each default reproduces the pre-pr/30 tree.
@@ -676,6 +714,25 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
     pattern_algos.m_cathode_wide_kink_angle    = m_cathode_wide_kink_angle;                // deg, no conversion
     pattern_algos.m_cathode_wide_kink_skirt    = m_cathode_wide_kink_skirt * units::cm;    // cm -> internal
     pattern_algos.m_cathode_wide_kink_baseline = m_cathode_wide_kink_baseline * units::cm; // cm -> internal
+    // doc sbnd_xin/docs/pr/48 -- back-to-back track fixes.
+    pattern_algos.m_two_end_break       = m_two_end_break;
+    pattern_algos.m_teb_min_len         = m_teb_min_len * units::cm;       // cm -> internal
+    pattern_algos.m_teb_min_arm         = m_teb_min_arm * units::cm;       // cm -> internal
+    pattern_algos.m_teb_min_arm_pts     = m_teb_min_arm_pts;
+    pattern_algos.m_teb_stub_max        = m_teb_stub_max * units::cm;      // cm -> internal
+    pattern_algos.m_teb_accept_range    = m_teb_accept_range * units::cm;  // cm -> internal
+    pattern_algos.m_teb_rise_r1         = m_teb_rise_r1;
+    pattern_algos.m_teb_rise_r2         = m_teb_rise_r2;
+    pattern_algos.m_teb_abs_end_min     = m_teb_abs_end_min;
+    pattern_algos.m_teb_dip_floor       = m_teb_dip_floor;
+    pattern_algos.m_teb_score_cap_r1    = m_teb_score_cap_r1;
+    pattern_algos.m_teb_score_cap_r2    = m_teb_score_cap_r2;
+    pattern_algos.m_teb_turn_angle      = m_teb_turn_angle;                // deg, no conversion
+    pattern_algos.m_teb_turn_baseline   = m_teb_turn_baseline * units::cm; // cm -> internal
+    pattern_algos.m_teb_turn_skirt      = m_teb_turn_skirt * units::cm;    // cm -> internal
+    pattern_algos.m_kink_walk_dqdx_stop = m_kink_walk_dqdx_stop;
+    pattern_algos.m_kink_break_protect  = m_kink_break_protect;
+    pattern_algos.m_kink_dqdx_hot_ratio = m_kink_dqdx_hot_ratio;
     pattern_algos.m_shower_topo_demote_len = m_shower_topo_demote_len * units::cm;  // cm -> internal
     // doc sbnd_xin/docs/pr/30 §11 port-fidelity knobs.
     pattern_algos.m_fit_exclusion            = m_fit_exclusion;
@@ -803,7 +860,9 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
 
     {
         // initial pattern recognitions
-        pattern_algos.find_proto_vertex(*pr_graph, *main_cluster, *m_track_fitter, m_dv, true, 2, true);
+        // particle_data (doc pr/48): stopping templates for the two-end
+        // break pass; inert unless two_end_break is on.
+        pattern_algos.find_proto_vertex(*pr_graph, *main_cluster, *m_track_fitter, m_dv, true, 2, true, particle_data());
         detg_dump("main:find_proto_vertex", *pr_graph);
 
         // shower related operations

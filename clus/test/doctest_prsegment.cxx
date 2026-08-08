@@ -293,6 +293,43 @@ TEST_CASE("clus pr47 wide kink: bends inside the skirt are excluded") {
     CHECK(acc.empty());
 }
 
+// ---------------------------------------------------------------------------
+// doc pr/48 sec 6: segment_wide_turn_angle -- the cathode-free wide-baseline
+// PCA turn angle at one fit index (the R2 statistic of the two-end break).
+// ---------------------------------------------------------------------------
+
+TEST_CASE("clus pr48 wide turn: straight track reads ~0, bent track reads the bend") {
+    auto straight = two_arm_track(Vector(1, 0.2, 0.1), Vector(1, 0.2, 0.1),
+                                  30 * units::cm, 30 * units::cm);
+    const size_t mid_s = straight.size() / 2;
+    CHECK(segment_wide_turn_angle(straight, mid_s, 3 * units::cm, 15 * units::cm) < 3.0);
+
+    const double th = 40.0 * M_PI / 180.0;
+    auto bent = two_arm_track(Vector(1, 0, 0),
+                              Vector(std::cos(th), std::sin(th), 0),
+                              30 * units::cm, 30 * units::cm);
+    // The junction sits at the index where arm A ends.
+    const size_t junc = static_cast<size_t>((30 * units::cm) / (0.6 * units::cm)) - 1;
+    const double ang = segment_wide_turn_angle(bent, junc, 3 * units::cm, 15 * units::cm);
+    CHECK(ang > 35.0);
+    CHECK(ang < 45.0);
+}
+
+TEST_CASE("clus pr48 wide turn: terminus-adjacent index and short arms read 0") {
+    const double th = 40.0 * M_PI / 180.0;
+    auto bent = two_arm_track(Vector(1, 0, 0),
+                              Vector(std::cos(th), std::sin(th), 0),
+                              30 * units::cm, 4 * units::cm);
+    // Downstream arm only 4 cm: < 3 points beyond the 3 cm skirt.
+    const size_t junc = static_cast<size_t>((30 * units::cm) / (0.6 * units::cm)) - 1;
+    CHECK(segment_wide_turn_angle(bent, junc, 3 * units::cm, 15 * units::cm) == 0.0);
+    // Index 0 / last index have no upstream/downstream window at all.
+    CHECK(segment_wide_turn_angle(bent, 0, 3 * units::cm, 15 * units::cm) == 0.0);
+    CHECK(segment_wide_turn_angle(bent, bent.size() - 1, 3 * units::cm, 15 * units::cm) == 0.0);
+    // Out-of-range index declines.
+    CHECK(segment_wide_turn_angle(bent, bent.size(), 3 * units::cm, 15 * units::cm) == 0.0);
+}
+
 TEST_CASE("clus pr47 wide kink: short arm cannot fire; angle 0 disables") {
     const double th = 35.0 * M_PI / 180.0;
     // Downstream arm only 4 cm: past the 3 cm skirt there are < 3 points.

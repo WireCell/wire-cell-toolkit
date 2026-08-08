@@ -267,7 +267,285 @@ namespace WireCell::Clus::PR {
         return accepts;
     }
 
-    std::tuple<WireCell::Point, WireCell::Vector, WireCell::Vector, bool> segment_search_kink(SegmentPtr seg, WireCell::Point& start_p, const std::string& cloud_name, double dQ_dx_threshold, double cathode_x, double cathode_kink_xcut, double cathode_wide_kink_angle, double cathode_wide_kink_skirt, double cathode_wide_kink_baseline){
+    double segment_wide_turn_angle(const std::vector<Fit>& fits, size_t idx,
+                                   double skirt, double baseline)
+    {
+        if (fits.size() < 3 || idx >= fits.size()) return 0;
+
+        // Cumulative arclength along the full fit trajectory.
+        std::vector<double> cum(fits.size(), 0);
+        for (size_t k = 1; k < fits.size(); k++) {
+            cum[k] = cum[k-1] + (fits[k].point - fits[k-1].point).magnitude();
+        }
+
+        // Per-arm points with arclength from fits[idx] inside
+        // [skirt, skirt+baseline], each list in increasing-index order --
+        // same collection as segment_cathode_wide_kink_accepts minus the
+        // cathode side-of-plane requirement.
+        std::vector<Facade::geo_point_t> pts_a, pts_b;
+        for (size_t k = 0; k <= idx; k++) {
+            const double d = cum[idx] - cum[k];
+            if (d < skirt || d > skirt + baseline) continue;
+            pts_a.push_back(fits[k].point);
+        }
+        for (size_t k = idx; k < fits.size(); k++) {
+            const double d = cum[k] - cum[idx];
+            if (d < skirt || d > skirt + baseline) continue;
+            pts_b.push_back(fits[k].point);
+        }
+        if (pts_a.size() < 3 || pts_b.size() < 3) return 0;
+
+        Facade::geo_point_t cen_a(0,0,0), cen_b(0,0,0);
+        for (const auto& p : pts_a) cen_a += p;
+        for (const auto& p : pts_b) cen_b += p;
+        cen_a = cen_a * (1.0 / pts_a.size());
+        cen_b = cen_b * (1.0 / pts_b.size());
+        auto va = Facade::calc_pca_dir(cen_a, pts_a);
+        auto vb = Facade::calc_pca_dir(cen_b, pts_b);
+        if (va.dot(pts_a.back() - pts_a.front()) < 0) va = va * -1.0;
+        if (vb.dot(pts_b.back() - pts_b.front()) < 0) vb = vb * -1.0;
+        return std::acos(std::max(-1.0, std::min(1.0, va.dot(vb)))) / M_PI * 180.0;
+    }
+
+    TwoEndBreakResult segment_two_end_break_scan(
+        SegmentPtr seg, const Clus::ParticleDataSet::pointer& particle_data,
+        const TwoEndBreakOptions& opt)
+    {
+        TwoEndBreakResult res;
+        if (!seg || !particle_data) return res;
+        const auto& fits = seg->fits();
+        const size_t N = fits.size();
+        if (N < 2 * static_cast<size_t>(std::max(opt.min_arm_pts, 1))) return res;
+
+        std::vector<double> cum(N, 0), dqdx(N, 0);
+        dqdx[0] = fits[0].dQ / (fits[0].dx + 1e-9);
+        for (size_t k = 1; k < N; k++) {
+            cum[k] = cum[k-1] + (fits[k].point - fits[k-1].point).magnitude();
+            dqdx[k] = fits[k].dQ / (fits[k].dx + 1e-9);
+        }
+        const double L = cum.back();
+        if (L < opt.min_len) return res;
+
+        auto median_of = [](std::vector<double> v) -> double {
+            if (v.empty()) return 0;
+            const size_t mid = v.size() / 2;
+            std::nth_element(v.begin(), v.begin() + mid, v.end());
+            double m = v[mid];
+            if (v.size() % 2 == 0) {
+                std::nth_element(v.begin(), v.begin() + mid - 1, v.begin() + mid);
+                m = 0.5 * (m + v[mid - 1]);
+            }
+            return m;
+        };
+
+        // Interior reference: median dQ/dx over the middle [0.3L, 0.7L] --
+        // length-adaptive, never empty for L >= min_len (the fixed
+        // 12-cm-from-ends window of the doc pr/48 census is structurally
+        // empty for L < 24 cm, which is exactly how it missed 56211).
+        std::vector<double> vint;
+        for (size_t k = 0; k < N; k++) {
+            if (cum[k] >= 0.3 * L && cum[k] <= 0.7 * L) vint.push_back(dqdx[k]);
+        }
+        const double med_int = median_of(vint);
+        if (med_int <= 0) return res;
+
+        // Per-end rise: max over 2/4/8 cm end windows (clamped to L/4) of
+        // the end-window median.  The short sub-window recovers a Bragg peak
+        // concentrated in the first few cm (51513) or the last arc steps
+        // (56211) that an 8 cm window dilutes.
+        const double wins[3] = {2*units::cm, 4*units::cm, 8*units::cm};
+        double best_lo = 0, best_hi = 0;
+        for (double w0 : wins) {
+            const double w = std::min(w0, 0.25 * L);
+            std::vector<double> vlo, vhi;
+            for (size_t k = 0; k < N; k++) {
+                if (cum[k] <= w) vlo.push_back(dqdx[k]);
+                if (L - cum[k] <= w) vhi.push_back(dqdx[k]);
+            }
+            if (vlo.size() >= 2) best_lo = std::max(best_lo, median_of(vlo));
+            if (vhi.size() >= 2) best_hi = std::max(best_hi, median_of(vhi));
+        }
+        res.absmed_lo = best_lo;
+        res.absmed_hi = best_hi;
+        // Rise reference: min(interior median, 1x the MIP median).  A pure
+        // interior-median reference structurally fails on a short two-proton
+        // event (56211: interior ~3.1x MIP because BOTH arms are proton --
+        // the far-end rise reads 0.91x "interior" while sitting at 2.8x
+        // MIP).  Clamping the reference at 1 MIP measures the rise against
+        // "a MIP-like track" whenever the interior is hotter than one.
+        const double rise_ref = std::min(med_int, opt.mip_dqdx_median);
+        res.ratio_lo = best_lo / rise_ref;
+        res.ratio_hi = best_hi / rise_ref;
+
+        const bool rise_r1 = res.ratio_lo >= opt.rise_r1 && res.ratio_hi >= opt.rise_r1 &&
+                             res.absmed_lo >= opt.abs_end_min * opt.mip_dqdx_median &&
+                             res.absmed_hi >= opt.abs_end_min * opt.mip_dqdx_median;
+        const bool rise_r2 = res.ratio_lo >= opt.rise_r2 && res.ratio_hi >= opt.rise_r2;
+        // Neither route's rise gate open => no accept is possible; skip the
+        // localization work (the overwhelmingly common case).
+        if (!rise_r1 && !rise_r2) return res;
+
+        // Localization.  Physically-anchored candidate indices -- NOT a
+        // blind argmin of the joint stopping score: a stopping-template
+        // score is flat in k whenever the arm on one side is a
+        // template-perfect prefix/suffix (any prefix of a muon Bragg is
+        // itself a muon Bragg), so a score scan cannot localize a
+        // same-species or plateau-dominated junction.  What localizes in
+        // every measured event is:
+        //  - the LOCAL dQ/dx DIP at the junction (57903: 0.81 MIP right at
+        //    truth vs ~2 MIP plateau; 56211: 2.37; 51513: 1.03) -- route R1
+        //    evaluates EVERY eligible interior local minimum of the 3-point
+        //    mean below the interior median (a track can carry spurious
+        //    deeper dips from dead regions; the joint stopping score at the
+        //    acceptance tier then picks the genuine junction among them);
+        //  - the wide-baseline PCA turn maximum (57485: 55.7 deg at truth,
+        //    57903: 32.8 deg) -- route R2's single candidate (a species-step
+        //    junction is a step, not a local dip, so R1's marker can miss it
+        //    while the turn nails it).
+        // 3-point mean smoothing: a genuine junction dip spans >= 2 fit
+        // samples, single-sample noise is damped 3x.  Index-ordered scans,
+        // strict-improvement updates: deterministic.
+        auto arm_ok = [&](size_t k) {
+            if (cum[k] < opt.min_arm || L - cum[k] < opt.min_arm) return false;
+            if (k + 1 < static_cast<size_t>(opt.min_arm_pts)) return false;
+            if (N - k < static_cast<size_t>(opt.min_arm_pts)) return false;
+            return true;
+        };
+        // R1's candidate: the DEEPEST eligible local minimum at or above
+        // dip_floor.  The floor vetoes instrumental dips -- a dead-region /
+        // gap dip reads far below any physical junction dip (57903: 0.50x
+        // MIP at a mid-muon gap vs 0.83x at the genuine junction; both
+        // particles are at maximal residual range at a junction, so its dip
+        // is a geometry/sampling effect that stays near MIP, not a missing-
+        // charge effect).  Measured on all four motivating events the
+        // deepest above-floor dip IS the junction (51513: 0.93@arc7.2 vs
+        // next 0.96; 56211: 2.3@19.8; 57903: 0.83@49.2 once 0.50@64.8 is
+        // vetoed).
+        std::vector<double> m3(N, 1e18);
+        for (size_t k = 1; k + 1 < N; k++) m3[k] = (dqdx[k-1] + dqdx[k] + dqdx[k+1]) / 3.0;
+        // Candidates: RAW local minima below the interior median (the raw
+        // dip is the sharp, refit-stable junction feature; an m3-local-min
+        // test can miss a junction dip sitting flush against the far-end
+        // Bragg rise, 56211), with the smoothed value at or above dip_floor
+        // (instrumental veto -- a single low sample does not veto, a
+        // dead-region stretch does).
+        std::vector<size_t> dip_cands;
+        for (size_t k = 1; k + 1 < N; k++) {
+            if (!arm_ok(k)) continue;
+            if (!(dqdx[k] <= dqdx[k-1] && dqdx[k] <= dqdx[k+1] && dqdx[k] < med_int)) continue;
+            if (m3[k] < opt.dip_floor * opt.mip_dqdx_median) continue;  // instrumental
+            dip_cands.push_back(k);
+        }
+        // Deepest-first candidate order by the SMOOTHED depth (stable:
+        // value, then index) -- raw depth ranks single noise undershoots too
+        // high; m3 ranks the genuinely low neighborhood first.  The deepest
+        // above-floor dip IS the junction on every measured event, but its
+        // accept can fail for reasons unrelated to the physics, so the
+        // next-deepest candidates get their turn.
+        std::sort(dip_cands.begin(), dip_cands.end(),
+                  [&](size_t a, size_t b) {
+                      if (m3[a] != m3[b]) return m3[a] < m3[b];
+                      return a < b;
+                  });
+        const int k_dip = dip_cands.empty() ? -1 : static_cast<int>(dip_cands.front());
+        int k_turn = -1;
+        double turn_max = 0;
+        if (opt.turn_angle > 0 && rise_r2) {
+            for (size_t k = 1; k + 1 < N; k++) {
+                if (!arm_ok(k)) continue;
+                const double t = segment_wide_turn_angle(fits, k, opt.turn_skirt, opt.turn_baseline);
+                if (t > turn_max) {
+                    turn_max = t;
+                    k_turn = static_cast<int>(k);
+                }
+            }
+        }
+        res.idx_dip = k_dip;
+        res.idx_turn = k_turn;
+        res.turn_deg = turn_max;
+        if (k_dip < 0 && k_turn < 0) return res;
+
+        // Acceptance tier at a candidate index: both arms re-scored over
+        // accept_range windows (the tier eval_ks_ratio's constants were
+        // tuned at).  Arm A = fits[0..k] hypothesized stopping at the
+        // segment START (vectors REVERSED -- do_track_comp anchors the stop
+        // at max L); arm B = fits[k..N-1] stopping at the END (as-is).
+        // skip_stop_samples=1 (terminus dx anomaly), empty_abstain=true (new
+        // code path, abstain is the honest filler).  Returns
+        // (flagA, flagB, sA, sB) with s = min(muon, proton) score.
+        auto accept_at = [&](size_t k) {
+            std::vector<double> rLa(k + 1), rQa(k + 1);
+            for (size_t i = 0; i <= k; i++) {
+                rLa[i] = cum[k] - cum[k - i];
+                rQa[i] = dqdx[k - i];
+            }
+            std::vector<double> Lb(N - k), Qb(N - k);
+            for (size_t i = 0; i < N - k; i++) {
+                Lb[i] = cum[k + i] - cum[k];
+                Qb[i] = dqdx[k + i];
+            }
+            auto ra = do_track_comp(rLa, rQa, opt.accept_range, 0, particle_data, opt.mip_dqdx, 1, true);
+            auto rb = do_track_comp(Lb, Qb, opt.accept_range, 0, particle_data, opt.mip_dqdx, 1, true);
+            return std::make_tuple(std::round(ra.at(0)) != 0, std::round(rb.at(0)) != 0,
+                                   std::min(ra.at(1), ra.at(2)), std::min(rb.at(1), rb.at(2)));
+        };
+
+        // Route R1 at the chosen dip.  The strict stopping-vs-flat direction
+        // flag is required per arm, WAIVED for a short (< 6 cm) arm --
+        // eval_ks_ratio is unreliable on <= 10 samples and a genuine short
+        // second arm (56211: ~2-3 cm proton at 2.8x MIP) fails it for lack
+        // of statistics, not lack of physics; the waived arm is still held
+        // to the score cap, and rise_r1's absolute end floor already
+        // guarantees its end is Bragg-hot.
+        const double short_arm = 6 * units::cm;
+        if (rise_r1) {
+            for (size_t k : dip_cands) {
+                auto [fA, fB, sA, sB] = accept_at(k);
+                res.flagA = fA; res.flagB = fB;
+                res.sA = sA; res.sB = sB;
+                res.joint_score = sA + sB;
+                const bool okA = fA || cum[k] < short_arm;
+                const bool okB = fB || (L - cum[k]) < short_arm;
+                const bool acc = okA && okB && std::max(sA, sB) <= opt.score_cap_r1;
+                res.attempts.push_back({static_cast<int>(k), m3[k], sA, sB, fA, fB, acc});
+                if (acc) {
+                    res.route1 = true;
+                    res.break_idx = static_cast<int>(k);
+                    break;   // deepest-first: the first accepted candidate wins
+                }
+            }
+        }
+        // Route R2 at the turn-maximum index, only when R1 did not accept
+        // (measured: the wide-turn maximum sits at an endpoint bend artifact
+        // on 51513/57903, so it must never override a good dip accept; it
+        // exists for the species-step junction, which is a step -- not a
+        // local dip -- with a genuine wide bend, 57485).  R2 requires the
+        // direction flag on at least ONE arm: eval_ks_ratio's margins reject
+        // a genuine but weak Bragg (57485's far-arm ~1.3-1.4x muon rise),
+        // and R2's primary evidence is the turn -- both arms still must beat
+        // the score cap against the stopping templates.
+        if (!res.route1 && rise_r2 && k_turn >= 0 && turn_max >= opt.turn_angle) {
+            auto [fA, fB, sA, sB] = accept_at(static_cast<size_t>(k_turn));
+            res.flagA = fA; res.flagB = fB;
+            res.sA = sA; res.sB = sB;
+            res.joint_score = sA + sB;
+            const bool acc = (fA || fB) && std::max(sA, sB) <= opt.score_cap_r2;
+            res.attempts.push_back({k_turn, m3[static_cast<size_t>(k_turn)], sA, sB, fA, fB, acc});
+            if (acc) {
+                res.route2 = true;
+                res.break_idx = k_turn;
+            }
+        }
+        if (res.break_idx >= 0) {
+            res.arm_a_len = cum[res.break_idx];
+            res.arm_b_len = L - cum[res.break_idx];
+        }
+        res.found = res.route1 || res.route2;
+        return res;
+    }
+
+    std::tuple<WireCell::Point, WireCell::Vector, WireCell::Vector, bool> segment_search_kink(SegmentPtr seg, WireCell::Point& start_p, const std::string& cloud_name, double dQ_dx_threshold, double cathode_x, double cathode_kink_xcut, double cathode_wide_kink_angle, double cathode_wide_kink_skirt, double cathode_wide_kink_baseline, bool kink_walk_dqdx_stop, int* accept_criterion, double kink_hot_ratio){
+        if (accept_criterion) *accept_criterion = -1;
         auto tmp_results = segment_get_closest_point(seg, start_p, cloud_name);
         WireCell::Point test_p = tmp_results.second;
 
@@ -395,6 +673,7 @@ namespace WireCell::Clus::PR {
                 // flag_switch, local dQ/dx) as the four legacy criteria.
                 if (cathode_wide_kink_angle > 0 && wide_accepts.count(i)) {
                     save_i = i;
+                    if (accept_criterion) *accept_criterion = 0;
                     break;
                 }
 
@@ -449,16 +728,20 @@ namespace WireCell::Clus::PR {
                 // Apply kink detection criteria
                 if (para_angles[i] > 10 && refl_angles[i] > 30 && sum_angles > 15) {
                     save_i = i;
+                    if (accept_criterion) *accept_criterion = 1;
                     break;
                 } else if (para_angles[i] > 7.5 && refl_angles[i] > 45 && sum_angles1 > 25) {
                     save_i = i;
+                    if (accept_criterion) *accept_criterion = 2;
                     break;
                 } else if (para_angles[i] > 15 && refl_angles[i] > 27 && sum_angles > 12.5) {
                     save_i = i;
+                    if (accept_criterion) *accept_criterion = 3;
                     break;
                 } else if (para_angles[i] > 15 && refl_angles[i] > 22 && sum_angles > 19 &&
                           max_dQ_dx > dQ_dx_threshold*1.5 && ave_dQ_dx > dQ_dx_threshold) {
                     save_i = i;
+                    if (accept_criterion) *accept_criterion = 4;
                     flag_search = true;
                     break;
                 }
@@ -538,7 +821,25 @@ namespace WireCell::Clus::PR {
             
             double local_dQdx = sum_dQ / (sum_dx + 1e-9);
 
-            if (flag_search) {
+            // doc pr/48 sec 6, 59335 fix (a): with kink_walk_dqdx_stop the
+            // flag_search accepts (C4 / straightness) no longer bypass the
+            // local-dQ/dx walk gate -- a BRAGG-HOT kink (local dQ/dx >
+            // kink_hot_ratio x the median threshold; 59335 reads 2.5x)
+            // NEAR A TERMINUS (within 3 cm of either fits end -- the only
+            // geometry where the overshoot erases the break: the walk runs
+            // to the terminus and the sub-2 cm stub is absorbed) returns
+            // flag_continue=false so proto_extend_point stops AT the kink.
+            // Both scopes are load-bearing for the footprint: at the 25/43
+            // "not too low" scale, un-scoped, nearly every C4 accept
+            // qualifies and the walk change ripples across the whole sample
+            // (doc pr/48 sec 9.6).  Knob off: the condition is exactly
+            // `flag_search` = legacy = byte-identical.
+            const double kink_end_dist =
+                std::min((p - fits.front().point).magnitude(),
+                         (p - fits.back().point).magnitude());
+            if (flag_search &&
+                !(kink_walk_dqdx_stop && local_dQdx > dQ_dx_threshold * kink_hot_ratio &&
+                  kink_end_dist < 3.0 * units::cm)) {
                 if (flag_switch) {
                     return std::make_tuple(p, dir1, dir, true);
                 } else {

@@ -40,7 +40,25 @@ namespace WireCell::Clus::PR {
     // crossing (segment_cathode_wide_kink_accepts below) and accepts when it
     // is >= cathode_wide_kink_angle degrees.  Default 0 = path fully disabled
     // = byte-identical legacy search.  New algorithm, no prototype counterpart.
-    std::tuple<WireCell::Point, WireCell::Vector, WireCell::Vector, bool> segment_search_kink(SegmentPtr seg, WireCell::Point& start_p, const std::string& cloud_name = "fit", double dQ_dx_threshold = 43000/units::cm, double cathode_x = 0, double cathode_kink_xcut = 0, double cathode_wide_kink_angle = 0, double cathode_wide_kink_skirt = 3*units::cm, double cathode_wide_kink_baseline = 15*units::cm );
+    //
+    // kink_walk_dqdx_stop (doc sbnd_xin/docs/pr/48 sec 6, 59335 fix (a)): the
+    // C4 / straightness accepts set flag_search and then return
+    // flag_continue=true UNCONDITIONALLY, bypassing the local-dQ/dx walk gate
+    // that every other accept honors -- so proto_extend_point walks past a
+    // dQ/dx-confident kink toward the terminus (18255-59335: a correct C4
+    // accept 0.28 cm from truth overshoots to 0.47 cm from the far end).
+    // true = a BRAGG-HOT kink (local_dQdx > threshold * kink_hot_ratio)
+    // stops the walk on the flag_search path too.  kink_hot_ratio defaults
+    // to the legacy 25/43 "not too low" scale but callers should pass a
+    // genuinely hot ratio (~1.7): at 25/43 nearly every C4 accept qualifies
+    // and the footprint is sample-wide (doc pr/48 sec 9.6).  false = legacy
+    // = byte-identical.
+    //
+    // accept_criterion (doc pr/48 sec 6, 59335 fix (b) transport): when
+    // non-null, receives which accept fired for the returned kink -- -1 none,
+    // 0 the wide-baseline cathode accept (A0), 1-4 the legacy criteria C1-C4.
+    // Pure out-param, never read: nullptr (the default) is byte-identical.
+    std::tuple<WireCell::Point, WireCell::Vector, WireCell::Vector, bool> segment_search_kink(SegmentPtr seg, WireCell::Point& start_p, const std::string& cloud_name = "fit", double dQ_dx_threshold = 43000/units::cm, double cathode_x = 0, double cathode_kink_xcut = 0, double cathode_wide_kink_angle = 0, double cathode_wide_kink_skirt = 3*units::cm, double cathode_wide_kink_baseline = 15*units::cm, bool kink_walk_dqdx_stop = false, int* accept_criterion = nullptr, double kink_hot_ratio = 25.0/43.0 );
 
     /// Wide-baseline cathode kink test (doc sbnd_xin/docs/pr/47 sec 8, O1).
     ///
@@ -64,6 +82,130 @@ namespace WireCell::Clus::PR {
     std::vector<size_t> segment_cathode_wide_kink_accepts(
         const std::vector<Fit>& fits, double cathode_x, double angle_cut_deg,
         double skirt, double baseline);
+
+    /// Wide-baseline PCA turn angle at one fit index (doc
+    /// sbnd_xin/docs/pr/48 sec 6).  Same statistic as
+    /// segment_cathode_wide_kink_accepts above, stripped of the cathode
+    /// scoping: per-arm PCA direction over the arclength window
+    /// [skirt, skirt+baseline] either side of fits[idx], each axis oriented
+    /// along its own arm's chord, angle between them in degrees.  Returns 0
+    /// when either arm has < 3 points in its window (a terminus-adjacent or
+    /// short-segment index can never fire).  All lengths internal units.
+    double segment_wide_turn_angle(const std::vector<Fit>& fits, size_t idx,
+                                   double skirt, double baseline);
+
+    /// Options for segment_two_end_break_scan (doc sbnd_xin/docs/pr/48 sec 6
+    /// -- the two-end residual-range back-to-back break).  Every value here
+    /// only matters once the owning component's two_end_break knob is ON;
+    /// defaults are the doc pr/48 starting operating point.
+    /// - mip_dqdx: flat-template amplitude handed to do_track_comp (the
+    ///   50e3-e/cm role, same as TrackPidOptions::mip_dqdx).
+    /// - mip_dqdx_median: the 43e3-e/cm median-threshold role; scales
+    ///   abs_end_min.
+    /// - min_len: shortest segment ever scanned.
+    /// - min_arm / min_arm_pts: both arms of a candidate break index must
+    ///   have at least this arclength AND this many fit points (4 points - 1
+    ///   skip_stop_sample = 3 KS samples, the minimum for a meaningful
+    ///   shape comparison).
+    /// - accept_range: do_track_comp window for the ACCEPTANCE tier at the
+    ///   located index (15 cm = the tier eval_ks_ratio's constants were
+    ///   tuned at).  LOCALIZATION does not use the templates at all: a
+    ///   stopping-template score is flat in the break index whenever one
+    ///   arm is a template-perfect prefix/suffix (any prefix of a Bragg is
+    ///   a Bragg), so the junction is located by its measured markers
+    ///   instead -- the 3-point-mean dQ/dx DIP (route R1) and the
+    ///   wide-baseline turn maximum (route R2).
+    /// - rise_r1 / rise_r2: two-end dQ/dx rise floors (end-window median /
+    ///   interior median, max over 2/4/8 cm end windows clamped to L/4) for
+    ///   the dQ/dx-only route R1 and the angle-assisted route R2.
+    /// - abs_end_min: R1's absolute end-median floor in units of
+    ///   mip_dqdx_median (dead-region fake-dip compensator).
+    /// - dip_floor: R1's candidate-dip floor in units of mip_dqdx_median --
+    ///   a 3-point-mean dip BELOW this is instrumental (dead region / gap:
+    ///   missing charge), not a junction (both particles sit at maximal
+    ///   residual range there, so a genuine junction dip stays near MIP),
+    ///   and is never a break candidate.
+    /// - score_cap_r1 / score_cap_r2: acceptance-tier cap on
+    ///   max over arms of min(muon score, proton score).
+    /// - turn_angle (deg) / turn_baseline / turn_skirt: R2's wide-baseline
+    ///   PCA turn requirement at the located index; turn_angle <= 0 disables
+    ///   route R2 entirely.
+    struct TwoEndBreakOptions {
+        double mip_dqdx{50000/units::cm};
+        double mip_dqdx_median{43000/units::cm};
+        double min_len{10*units::cm};
+        double min_arm{1.8*units::cm};
+        int    min_arm_pts{4};
+        double accept_range{15*units::cm};
+        double rise_r1{1.3};
+        double rise_r2{1.15};
+        double abs_end_min{1.7};
+        double dip_floor{0.6};
+        double score_cap_r1{0.6};
+        double score_cap_r2{0.9};
+        double turn_angle{25.0};
+        double turn_baseline{35*units::cm};
+        double turn_skirt{3*units::cm};
+    };
+
+    /// Result of segment_two_end_break_scan.  `found` is the overall accept
+    /// (route1 || route2); `break_idx` is the accepted fit index (route R1's
+    /// dip index, else route R2's turn-maximum index; -1 when nothing
+    /// accepted).  idx_dip / idx_turn are the two candidate indices (-1 when
+    /// ineligible / not computed); turn_deg is the turn at idx_turn.  The
+    /// remaining members expose every intermediate the routes consulted, for
+    /// logging and doctests.
+    struct TwoEndBreakResult {
+        bool   found{false};
+        bool   route1{false};
+        bool   route2{false};
+        int    break_idx{-1};
+        int    idx_dip{-1};
+        int    idx_turn{-1};
+        double joint_score{1e9};
+        double arm_a_len{0}, arm_b_len{0};
+        double sA{1e9}, sB{1e9};
+        bool   flagA{false}, flagB{false};
+        double ratio_lo{0}, ratio_hi{0};
+        double absmed_lo{0}, absmed_hi{0};
+        double turn_deg{0};
+        /// Every candidate accept attempt, in evaluation order (R1's dips
+        /// deepest-first, then R2's turn index if tried): fit index, 3-pt
+        /// mean dQ/dx at it (/mip for the caller), per-arm scores/flags.
+        /// Bounded by the local-minimum count; for the caller's debug log.
+        struct Attempt { int idx; double m3, sA, sB; bool fA, fB, accepted; };
+        std::vector<Attempt> attempts;
+    };
+
+    /// doc sbnd_xin/docs/pr/48 sec 6 -- the two-end residual-range
+    /// back-to-back junction scan.  A single particle has at most one Bragg
+    /// (stopping) end; dQ/dx rising at BOTH ends of one segment implies a
+    /// junction at the interior dip (18255-51513/56211/57903/57485: the
+    /// neutrino vertex mid-segment on a single unbroken fitted track, no
+    /// angular kink).  Pre-gate: the length-adaptive two-end rise.
+    /// Localization: route R1's candidate is the DEEPEST interior local
+    /// minimum of the 3-point-mean dQ/dx at or above dip_floor (the
+    /// junction dip every measured event shows; the floor vetoes
+    /// instrumental dead-region dips); route R2's candidate is the interior
+    /// wide-baseline PCA turn maximum, used only when R1 does not accept
+    /// (the turn maximum can sit at an endpoint bend artifact, so it never
+    /// overrides a dip accept).
+    /// Acceptance at a candidate k: arm A = fits[0..k] hypothesized
+    /// stopping at the segment START (reversed vectors) and arm B =
+    /// fits[k..N-1] stopping at the END, each scored with do_track_comp
+    /// against the muon/proton stopping templates over accept_range with
+    /// min(muon, proton) scores under the route's cap.  Route R1 (two-end
+    /// rise + absolute end floor) requires the stopping-vs-flat direction
+    /// flag on BOTH arms; route R2 (turn threshold + looser rise) requires
+    /// it on at least one arm -- eval_ks_ratio's margins reject a genuine
+    /// but weak Bragg, and R2's primary evidence is the turn.  R1 wins when
+    /// both accept.  Pure measurement: never
+    /// modifies the segment; the caller owns the break (break_segment) and
+    /// the protect flag.  Deterministic: index-ordered scans, first
+    /// minimum/maximum wins.
+    TwoEndBreakResult segment_two_end_break_scan(
+        SegmentPtr seg, const Clus::ParticleDataSet::pointer& particle_data,
+        const TwoEndBreakOptions& opt = {});
 
     /// Calculate track length from segment
     ///

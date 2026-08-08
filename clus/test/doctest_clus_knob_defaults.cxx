@@ -131,6 +131,11 @@ TEST_CASE("clus knob defaults: TaggerCheckNeutrino switches are all OFF")
     CHECK_KNOB_BOOL(cfg, "other_seg_empty_2d_guard", false);
     // doc pr/46: long-muon stub bridge in find_cont_muon_segment.
     CHECK_KNOB_BOOL(cfg, "long_muon_stub_bridge", false);
+    // doc pr/48: back-to-back track fixes.  All three ship OFF; the teb_*
+    // operating point is inert until two_end_break opens the pass.
+    CHECK_KNOB_BOOL(cfg, "two_end_break", false);
+    CHECK_KNOB_BOOL(cfg, "kink_walk_dqdx_stop", false);
+    CHECK_KNOB_BOOL(cfg, "kink_break_protect", false);
 
     // Numeric knobs whose legacy value is the INERT one: 0 disables the guard,
     // so an absent key leaves the code path untouched.
@@ -142,6 +147,23 @@ TEST_CASE("clus knob defaults: TaggerCheckNeutrino switches are all OFF")
     CHECK_KNOB_NUM(cfg, "cathode_wide_kink_angle", 0.0);
     CHECK_KNOB_NUM(cfg, "cathode_wide_kink_skirt", 3.0);
     CHECK_KNOB_NUM(cfg, "cathode_wide_kink_baseline", 15.0);
+    // doc pr/48: the teb_* operating point (cm/deg/dimensionless), all inert
+    // while two_end_break is false.
+    CHECK_KNOB_NUM(cfg, "teb_min_len", 10.0);
+    CHECK_KNOB_NUM(cfg, "teb_min_arm", 1.8);
+    CHECK_KNOB_NUM(cfg, "teb_min_arm_pts", 4.0);
+    CHECK_KNOB_NUM(cfg, "teb_stub_max", 4.0);
+    CHECK_KNOB_NUM(cfg, "teb_accept_range", 15.0);
+    CHECK_KNOB_NUM(cfg, "teb_rise_r1", 1.3);
+    CHECK_KNOB_NUM(cfg, "teb_rise_r2", 1.15);
+    CHECK_KNOB_NUM(cfg, "teb_abs_end_min", 1.7);
+    CHECK_KNOB_NUM(cfg, "teb_dip_floor", 0.6);
+    CHECK_KNOB_NUM(cfg, "kink_dqdx_hot_ratio", 1.7);
+    CHECK_KNOB_NUM(cfg, "teb_score_cap_r1", 0.6);
+    CHECK_KNOB_NUM(cfg, "teb_score_cap_r2", 0.9);
+    CHECK_KNOB_NUM(cfg, "teb_turn_angle", 25.0);
+    CHECK_KNOB_NUM(cfg, "teb_turn_baseline", 35.0);
+    CHECK_KNOB_NUM(cfg, "teb_turn_skirt", 3.0);
     CHECK_KNOB_NUM(cfg, "shower_topo_demote_len", 0.0);      // 0 = long segments stay shower-eligible
     CHECK_KNOB_NUM(cfg, "nu_skip_cosmic_bundle_min_length", 0.0);
     CHECK_KNOB_NUM(cfg, "cosmic_companion_min_length", 0.0);

@@ -233,6 +233,62 @@ namespace WireCell::Clus::PR {
         double m_cathode_wide_kink_skirt{3*units::cm};
         double m_cathode_wide_kink_baseline{15*units::cm};
 
+        // ---- doc sbnd_xin/docs/pr/48: back-to-back track fixes --------------
+        //
+        // m_two_end_break -- the two-end residual-range break pass
+        // (break_two_end_dqdx, run inside find_proto_vertex after
+        // examine_vertices): a main cluster whose topology is a single
+        // non-stub segment, both endpoints in the fiducial volume, with dQ/dx
+        // rising at BOTH ends (two Bragg ends = a junction at the interior
+        // dip: 18255-51513/56211/57903/57485) gets broken at the argmin of
+        // the joint two-arm stopping-template score
+        // (segment_two_end_break_scan) and the new vertex protected
+        // (VertexFlags::kProtectedBreak) from the examiner merge passes.
+        // C++ default false => pass never runs => byte-identical.
+        // The teb_* operating point mirrors TwoEndBreakOptions; lengths are
+        // internal units here (config takes cm), angles degrees.
+        bool   m_two_end_break{false};
+        double m_teb_min_len{10*units::cm};
+        double m_teb_min_arm{1.8*units::cm};
+        int    m_teb_min_arm_pts{4};
+        double m_teb_stub_max{4*units::cm};
+        double m_teb_accept_range{15*units::cm};
+        double m_teb_rise_r1{1.3};
+        double m_teb_rise_r2{1.15};
+        double m_teb_abs_end_min{1.7};
+        double m_teb_dip_floor{0.6};
+        double m_teb_score_cap_r1{0.6};
+        double m_teb_score_cap_r2{0.9};
+        double m_teb_turn_angle{25.0};                       // deg; <= 0 disables route R2
+        double m_teb_turn_baseline{35*units::cm};
+        double m_teb_turn_skirt{3*units::cm};
+
+        // m_kink_walk_dqdx_stop -- 59335 fix (a): forwarded to
+        // segment_search_kink so a dQ/dx-confident C4/straightness accept
+        // stops the proto_extend_point walk AT the kink instead of
+        // overshooting to the terminus (see the PRSegmentFunctions.h knob
+        // comment).  C++ default false => byte-identical.
+        bool   m_kink_walk_dqdx_stop{false};
+        // Shared Bragg-hot ratio (x m_mip_dqdx_median) for BOTH 59335 fixes:
+        // fix (a) stops the walk only at a kink whose 5-point local dQ/dx
+        // exceeds it, fix (b) protects only a break sitting on charge above
+        // it.  At the legacy 25/43 "not too low" scale nearly every C4
+        // accept qualifies and the footprint is sample-wide; 1.7 (the same
+        // scale as teb_abs_end_min) confines both fixes to genuine Bragg
+        // stubs (59335 reads 2.5-6x).  Inert while both bools are false.
+        double m_kink_dqdx_hot_ratio{1.7};
+
+        // m_kink_break_protect -- 59335 fix (b): when break_segments breaks
+        // at a kink accepted by C4 (dQ/dx-assisted) or A0 (wide-baseline
+        // cathode accept), the new vertex gets VertexFlags::kProtectedBreak
+        // so examine_vertices_4's unconditional < 2 cm stub-absorption floor
+        // (NeutrinoStructureExaminer.cxx) cannot silently erase a
+        // high-confidence break that produced a short arm (59335: a correct
+        // C4 accept 0.28 cm from truth leaves a ~1 cm proton stub, absorbed
+        // today).  C++ default false => flag never set => every examiner
+        // check is a no-op => byte-identical.
+        bool   m_kink_break_protect{false};
+
         // ---- doc sbnd_xin/docs/pr/30 §11: four port-fidelity knobs ----------
         //
         // P1 / F1 -- `flag_exclusion` on do_multi_tracking.
@@ -1293,7 +1349,23 @@ namespace WireCell::Clus::PR {
         void examine_vertices_3(Graph& graph, Facade::Cluster& main_cluster, std::pair<VertexPtr, VertexPtr> main_cluster_initial_pair_vertices, TrackFitting& track_fitter, IDetectorVolumes::pointer dv);
 
         // master pattern recognition function
-        bool find_proto_vertex(Graph& graph, Facade::Cluster& cluster, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, bool flag_break_track = true, int nrounds_find_other_tracks = 2, bool flag_back_search = true);
+        // particle_data (doc pr/48): the dE/dx stopping templates for the
+        // two-end break pass (break_two_end_dqdx).  nullptr (the default)
+        // makes that pass a no-op regardless of m_two_end_break.
+        bool find_proto_vertex(Graph& graph, Facade::Cluster& cluster, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, bool flag_break_track = true, int nrounds_find_other_tracks = 2, bool flag_back_search = true, const Clus::ParticleDataSet::pointer& particle_data = nullptr);
+
+        // doc sbnd_xin/docs/pr/48 sec 6 -- the two-end residual-range
+        // back-to-back break pass.  Gated on m_two_end_break; runs inside
+        // find_proto_vertex after examine_vertices on the main cluster only.
+        // Topology gate: exactly one segment of this cluster longer than
+        // m_teb_stub_max, both its endpoints inside the fiducial volume
+        // (grouping's FiducialUtils; a missing FiducialUtils never fires --
+        // conservative).  On a segment_two_end_break_scan accept, breaks the
+        // segment at the located fit point (break_segment), marks the new
+        // vertex VertexFlags::kProtectedBreak, and returns true (the caller
+        // re-fits via its existing final do_multi_tracking).  Single break
+        // per cluster by construction.
+        bool break_two_end_dqdx(Graph& graph, Facade::Cluster& cluster, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data);
         
         void init_point_segment(Graph& graph, Facade::Cluster& cluster, TrackFitting& track_fitter, IDetectorVolumes::pointer dv);
 

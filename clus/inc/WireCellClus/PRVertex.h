@@ -31,6 +31,14 @@ namespace WireCell::Clus::PR {
         /// ONLY: no algorithm reads it, exactly as in the prototype where every
         /// consumer is an app-level output-tree filler.
         kMainCandidate = 1<<2,
+        /// The vertex was created by a high-confidence break (the two-end
+        /// dQ/dx back-to-back break, or a C4/A0 kink accept under
+        /// kink_break_protect) and must not be absorbed or merged away by the
+        /// structure/vertex examiner cleanup passes (examine_structure_2/3,
+        /// examine_vertices_1/2/4, examine_structure_final_1).  Set only by
+        /// default-OFF knob paths (doc sbnd_xin/docs/pr/48); when no vertex
+        /// carries it every examiner check is a no-op => byte-identical.
+        kProtectedBreak = 1<<3,
     };
 
     /** A PR::Vertex instance represents a connection with one or more PR::Segment intances.
