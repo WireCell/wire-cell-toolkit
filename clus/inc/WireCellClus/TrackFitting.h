@@ -483,12 +483,15 @@ namespace WireCell::Clus {
         /// (own-track charge spilling just past the tiled envelope, or
         /// dead-channel single-view charge with no 3D image) is kept at
         /// full weight.  Order-invariant OR over clusters and blobs.
+        /// `claimant` (optional, doc pr/50 diagnostics) receives the first
+        /// covering out-of-scope cluster; the result is unchanged.
         bool is_cell_covered_by_foreign_blobs(const Facade::Grouping* grouping,
                                               const Facade::Cluster* cluster,
                                               const WireCell::Point& p, double ghost_dis,
                                               int apa, int face,
                                               int plane, int wire, int time,
-                                              int tol_cells, int nticks_per_slice) const;
+                                              int tol_cells, int nticks_per_slice,
+                                              const Facade::Cluster** claimant = nullptr) const;
 
         /// doc pr/49 round 3: rebuild m_cov_fit_scope = clusters owning a
         /// segment in the current fit.  Walks m_graph's edges when a graph
@@ -497,7 +500,9 @@ namespace WireCell::Clus {
         /// cluster (the one segment being fitted on the form_map path;
         /// nullptr on the form_map_graph path, where the graph supplies
         /// everything).  Called once per form_map/form_map_graph invocation,
-        /// only while the fit_blob_coverage knob is on.
+        /// only while the fit_blob_coverage knob is on.  doc pr/50: the same
+        /// walk also refreshes m_cov_vtx_info (graph vertex positions +
+        /// degrees) for the deweight sentinel diagnostics.
         void rebuild_cov_fit_scope(const std::shared_ptr<PR::Segment>& seg);
         void update_association(std::shared_ptr<PR::Segment> segment,
                                 const std::vector<std::shared_ptr<PR::Segment>>& all_segments,
@@ -722,6 +727,16 @@ namespace WireCell::Clus {
         // preload_clusters() with charge-cache-only clusters that own no
         // segment.
         std::set<const Facade::Cluster*> m_cov_fit_scope;
+
+        // doc pr/50 (172230-class near-vertex robustness): graph vertex
+        // positions (fit point when valid, else wcpt) and degrees at the
+        // last rebuild_cov_fit_scope() call, in ordered_nodes order.  Used
+        // by the deweight sentinel to report each firing's distance to the
+        // nearest pattern vertex (and that vertex's degree) -- the census
+        // evidence for classifying near-vertex vs far-ghost deweights.
+        // Refreshed only while the fit_blob_coverage knob is on; read-only
+        // positional data, never iterated by pointer.
+        std::vector<std::pair<WireCell::Point, int>> m_cov_vtx_info;
 
         // Option 1: per-cluster edge descriptor cache to avoid full graph traversal
         std::unordered_map<Facade::Cluster*, std::vector<PR::edge_descriptor>> m_cluster_edges;

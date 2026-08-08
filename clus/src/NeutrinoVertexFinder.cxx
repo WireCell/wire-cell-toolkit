@@ -2256,6 +2256,240 @@ bool PatternAlgorithms::fit_vertex(Facade::Cluster& cluster, VertexPtr vertex, V
 }
 
 
+// doc sbnd_xin/docs/pr/50: main-vertex kink-consistency snap.  Design and
+// guards documented at the m_vertex_kink_snap member block
+// (NeutrinoPatternBase.h).  Toolkit-only; no prototype counterpart.
+bool PatternAlgorithms::snap_main_vertex_to_kink(Graph& graph, Facade::Cluster& cluster, VertexPtr& main_vertex, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model)
+{
+    if (!m_vertex_kink_snap) return false;
+    if (!main_vertex || main_vertex->cluster() != &cluster) return false;
+    if (!main_vertex->descriptor_valid()) return false;
+    // G1: never steal a protected junction (pr/48 TEB breaks etc.).
+    if (main_vertex->flags_any(VertexFlags::kProtectedBreak)) return false;
+
+    const WireCell::Point vpt = main_vertex->wcpt().point;
+    const auto vd = main_vertex->get_descriptor();
+
+    // Incident segments in stable edge-index order.
+    std::vector<SegmentPtr> incident;
+    for (auto edesc : sorted_out_edges(vd, graph)) {
+        SegmentPtr sg = graph[edesc].segment;
+        if (sg && sg->cluster() == &cluster) incident.push_back(sg);
+    }
+    if (incident.size() < 2) return false;  // G2: pass-through needs two arms
+
+    // Oriented wcpt path (index 0 at the main vertex) + near-vertex outward
+    // chord per segment.  A segment not touching the main vertex per
+    // find_vertices (shouldn't happen for an incident edge) is skipped.
+    struct Arm {
+        SegmentPtr seg;
+        std::vector<WireCell::Point> pts;
+        WireCell::Vector chord;   // unit, vertex -> ~3 cm out
+        bool reversed{false};
+    };
+    std::vector<Arm> arms;
+    for (auto& sg : incident) {
+        auto [vf, vb] = find_vertices(graph, sg);
+        Arm a; a.seg = sg;
+        const auto& wcpts = sg->wcpts();
+        if (wcpts.size() < 2) continue;
+        if (vf == main_vertex) {
+            for (const auto& w : wcpts) a.pts.push_back(w.point);
+        } else if (vb == main_vertex) {
+            a.reversed = true;
+            for (auto it = wcpts.rbegin(); it != wcpts.rend(); ++it) a.pts.push_back(it->point);
+        } else {
+            continue;
+        }
+        double acc = 0;
+        size_t k = 1;
+        for (; k + 1 < a.pts.size(); k++) {
+            acc += (a.pts[k] - a.pts[k-1]).magnitude();
+            if (acc >= 3*units::cm) break;
+        }
+        a.chord = (a.pts[k] - a.pts[0]).norm();
+        arms.push_back(std::move(a));
+    }
+    if (arms.size() < 2) return false;
+
+    // Trace-level geometry dump for tuning (one line per near-vertex path
+    // point; trace builds only).
+    if (s_log->should_log(spdlog::level::trace)) {
+        for (size_t ia = 0; ia < arms.size(); ia++) {
+            double acc = 0;
+            for (size_t k = 0; k < arms[ia].pts.size() && acc < 8*units::cm; k++) {
+                if (k) acc += (arms[ia].pts[k] - arms[ia].pts[k-1]).magnitude();
+                s_log->trace("snap_path: arm {} k={} arc={:.2f} cm p=({:.2f},{:.2f},{:.2f})",
+                    ia, k, acc/units::cm,
+                    arms[ia].pts[k].x()/units::cm, arms[ia].pts[k].y()/units::cm, arms[ia].pts[k].z()/units::cm);
+            }
+        }
+    }
+
+    // Bragg-hot test per arm (computed lazily, cached): median dQ/dx of the
+    // arm's fits within 3 cm of the vertex end, as a multiple of the MIP
+    // median.  -1 = not enough samples (test abstains).
+    std::vector<double> hot_cache(arms.size(), -2);
+    auto arm_hot_ratio = [&](size_t ib) -> double {
+        if (hot_cache[ib] > -2) return hot_cache[ib];
+        double out = -1;
+        const auto& fits = arms[ib].seg->fits();
+        std::vector<double> dqdx;
+        if (fits.size() >= 2) {
+            double acc = 0;
+            if (!arms[ib].reversed) {
+                for (size_t k = 0; k < fits.size(); k++) {
+                    if (k) acc += (fits[k].point - fits[k-1].point).magnitude();
+                    if (acc > 3*units::cm) break;
+                    if (fits[k].dx > 0) dqdx.push_back(fits[k].dQ / fits[k].dx);
+                }
+            } else {
+                for (size_t k = fits.size(); k-- > 0;) {
+                    if (k + 1 < fits.size()) acc += (fits[k].point - fits[k+1].point).magnitude();
+                    if (acc > 3*units::cm) break;
+                    if (fits[k].dx > 0) dqdx.push_back(fits[k].dQ / fits[k].dx);
+                }
+            }
+        }
+        if (dqdx.size() >= 2 && m_mip_dqdx_median > 0) {
+            std::nth_element(dqdx.begin(), dqdx.begin() + dqdx.size()/2, dqdx.end());
+            out = dqdx[dqdx.size()/2] / m_mip_dqdx_median;
+        }
+        hot_cache[ib] = out;
+        return out;
+    };
+
+    // Scan every arm, every candidate turn (the strongest turn is not
+    // necessarily the right corner -- in 172230 a secondary wiggle at
+    // 4.9 cm out-turned the true corner at 2.4 cm by 3 deg).  Selection
+    // among survivors is by PASS-THROUGH EVIDENCE: smallest bendV, then
+    // larger turn, then smaller arc -- all deterministic scalars.
+    int best_arm = -1;
+    VertexKinkScanResult best;
+    double best_bendV = 181;
+    for (size_t ia = 0; ia < arms.size(); ia++) {
+        const auto cands = path_scan_vertex_kink(arms[ia].pts, m_vks_min_dis, m_vks_radius,
+                                                 m_vks_skirt, m_vks_baseline, m_vks_angle, m_vks_min_arm);
+        for (const auto& res : cands) {
+            // G3 pass-through: the stub V->K must continue another incident
+            // arm straight through V.  bendV = deviation from straight.
+            const auto u = (arms[ia].pts[res.idx] - vpt).norm();
+            double bendV = 181;
+            int opp = -1;
+            for (size_t ib = 0; ib < arms.size(); ib++) {
+                if (ib == ia) continue;
+                const double ang = std::acos(std::max(-1.0, std::min(1.0, u.dot(arms[ib].chord)))) / M_PI * 180.0;
+                const double dev = 180.0 - ang;
+                if (dev < bendV) { bendV = dev; opp = static_cast<int>(ib); }
+            }
+            if (opp < 0 || bendV > m_vks_collinear) {
+                s_log->trace("snap_main_vertex_to_kink: cluster {} arm {} turn={:.1f} deg at {:.2f} cm K=({:.2f},{:.2f},{:.2f}) declined (bendV={:.1f} > collinear {})",
+                    cluster.ident(), ia, res.turn_deg, res.arc/units::cm,
+                    arms[ia].pts[res.idx].x()/units::cm, arms[ia].pts[res.idx].y()/units::cm, arms[ia].pts[res.idx].z()/units::cm,
+                    bendV, m_vks_collinear);
+                continue;
+            }
+            // G4 strength margin: the interior turn must clearly beat the
+            // residual bend at the vertex.
+            if (res.turn_deg < bendV + m_vks_margin) {
+                s_log->trace("snap_main_vertex_to_kink: cluster {} turn={:.1f} deg at {:.2f} cm declined (margin vs bendV={:.1f})",
+                    cluster.ident(), res.turn_deg, res.arc/units::cm, bendV);
+                continue;
+            }
+            // G5 fit-miss: the snap only makes sense when the FITTED
+            // trajectory does not already honor the image corner -- a
+            // genuinely modeled kink (real secondary scatter, real junction)
+            // has fit points passing through it, while the 172230 failure's
+            // fit rounds the corner and misses it.  min distance from K to
+            // any incident arm's fit points; below m_vks_fit_miss => the
+            // fit already goes there => decline.  (A Bragg-hot veto was
+            // tried and MISFIRES on the failure class itself: with the
+            // vertex misplaced onto the muon, the arm near V reads the
+            // proton's charge, 1.91x MIP in 172230 -- local dQ/dx cannot
+            // tell a real hot junction from misassigned charge.
+            // m_vks_hot_ratio survives as an optional extra veto, default
+            // 0 = off.)
+            {
+                const auto& K = arms[ia].pts[res.idx];
+                double fit_miss = 1e9;
+                for (const auto& a2 : arms) {
+                    for (const auto& f : a2.seg->fits()) {
+                        const double d = (f.point - K).magnitude();
+                        if (d < fit_miss) fit_miss = d;
+                    }
+                }
+                s_log->trace("snap_main_vertex_to_kink: cluster {} arm {} cand turn={:.1f} deg at {:.2f} cm K=({:.2f},{:.2f},{:.2f}) bendV={:.1f} fit_miss={:.2f} cm",
+                    cluster.ident(), ia, res.turn_deg, res.arc/units::cm,
+                    K.x()/units::cm, K.y()/units::cm, K.z()/units::cm, bendV, fit_miss/units::cm);
+                if (fit_miss < m_vks_fit_miss) {
+                    continue;
+                }
+            }
+            if (m_vks_hot_ratio > 0) {
+                const double hr = arm_hot_ratio(opp);
+                if (hr > m_vks_hot_ratio) {
+                    s_log->trace("snap_main_vertex_to_kink: cluster {} turn={:.1f} deg declined (opposite arm Bragg-hot, med/mip={:.2f})",
+                        cluster.ident(), res.turn_deg, hr);
+                    continue;
+                }
+            }
+            // G6: an existing vertex of this cluster already sits at the turn.
+            {
+                const auto& K = arms[ia].pts[res.idx];
+                bool taken = false;
+                for (const auto& nd : ordered_nodes(graph)) {
+                    VertexPtr ov = graph[nd].vertex;
+                    if (!ov || ov->cluster() != &cluster || ov == main_vertex) continue;
+                    if ((ov->wcpt().point - K).magnitude() < m_vks_min_dis) { taken = true; break; }
+                }
+                if (taken) {
+                    s_log->trace("snap_main_vertex_to_kink: cluster {} turn={:.1f} deg at {:.2f} cm declined (vertex already there)",
+                        cluster.ident(), res.turn_deg, res.arc/units::cm);
+                    continue;
+                }
+            }
+            const bool better = (best_arm < 0)
+                || (bendV < best_bendV)
+                || (bendV == best_bendV && res.turn_deg > best.turn_deg)
+                || (bendV == best_bendV && res.turn_deg == best.turn_deg && res.arc < best.arc);
+            if (better) {
+                best_arm = static_cast<int>(ia);
+                best = res;
+                best_bendV = bendV;
+            }
+        }
+    }
+    if (best_arm < 0) return false;
+
+    const WireCell::Point K = arms[best_arm].pts[best.idx];
+    auto [ok, segs, vtx_new] = break_segment(graph, arms[best_arm].seg, K, particle_data, recomb_model, dv);
+    if (!ok || !vtx_new) {
+        SPDLOG_LOGGER_DEBUG(s_log, "snap_main_vertex_to_kink: cluster {} break_segment declined at ({:.2f},{:.2f},{:.2f})",
+            cluster.ident(), K.x()/units::cm, K.y()/units::cm, K.z()/units::cm);
+        return false;
+    }
+    // break_segment does not set the cluster: without it the new vertex is
+    // invisible to every candidate loop (same gotcha as break_two_end_dqdx).
+    vtx_new->cluster(&cluster);
+    // Shield against examine_vertices / ES2 / ES3 re-merging the deliberate
+    // break (the pr/48 kProtectedBreak contract).
+    vtx_new->set_flags(VertexFlags::kProtectedBreak);
+    (void)segs;
+
+    SPDLOG_LOGGER_DEBUG(s_log, "snap_main_vertex_to_kink: SNAP cluster {} old=({:.2f},{:.2f},{:.2f}) new=({:.2f},{:.2f},{:.2f}) turn={:.1f} deg arc={:.2f} cm bendV={:.1f} deg",
+        cluster.ident(),
+        vpt.x()/units::cm, vpt.y()/units::cm, vpt.z()/units::cm,
+        K.x()/units::cm, K.y()/units::cm, K.z()/units::cm,
+        best.turn_deg, best.arc/units::cm, best_bendV);
+
+    main_vertex = vtx_new;
+    // One full refit so the trajectory re-anchors on the corner before
+    // improve_vertex polishes (same argument pattern as its refits).
+    track_fitter.do_multi_tracking(true, true, true, m_fit_exclusion, false, &cluster);
+    return true;
+}
+
+
 void PatternAlgorithms::improve_vertex(Graph& graph, Facade::Cluster& cluster, VertexPtr& main_vertex, IndexedVertexSet& vertices_in_long_muon, IndexedSegmentSet& segments_in_long_muon, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, bool flag_search_vertex_activity, bool flag_final_vertex){
     s_log->trace("improve_vertex: cluster {} flag_search_vertex_activity={} flag_final_vertex={}", cluster.ident(), flag_search_vertex_activity, flag_final_vertex);
 

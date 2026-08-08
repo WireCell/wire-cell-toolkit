@@ -100,6 +100,18 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_kink_walk_dqdx_stop = get(config, "kink_walk_dqdx_stop", m_kink_walk_dqdx_stop);
     m_kink_break_protect  = get(config, "kink_break_protect",  m_kink_break_protect);
     m_kink_dqdx_hot_ratio = get(config, "kink_dqdx_hot_ratio", m_kink_dqdx_hot_ratio);
+    // doc sbnd_xin/docs/pr/50 -- main-vertex kink-consistency snap.
+    m_vertex_kink_snap = get(config, "vertex_kink_snap", m_vertex_kink_snap);
+    m_vks_radius       = get(config, "vks_radius",       m_vks_radius);       // cm
+    m_vks_min_dis      = get(config, "vks_min_dis",      m_vks_min_dis);      // cm
+    m_vks_angle        = get(config, "vks_angle",        m_vks_angle);        // deg
+    m_vks_margin       = get(config, "vks_margin",       m_vks_margin);       // deg
+    m_vks_collinear    = get(config, "vks_collinear",    m_vks_collinear);    // deg
+    m_vks_skirt        = get(config, "vks_skirt",        m_vks_skirt);        // cm
+    m_vks_baseline     = get(config, "vks_baseline",     m_vks_baseline);     // cm
+    m_vks_min_arm      = get(config, "vks_min_arm",      m_vks_min_arm);      // cm
+    m_vks_fit_miss     = get(config, "vks_fit_miss",     m_vks_fit_miss);     // cm
+    m_vks_hot_ratio    = get(config, "vks_hot_ratio",    m_vks_hot_ratio);
     m_shower_topo_demote_len = get(config, "shower_topo_demote_len", m_shower_topo_demote_len);  // cm
     // doc sbnd_xin/docs/pr/49 -- cross-cluster projection-ghost deweighting
     // in the trajectory fit's 2D charge association (18255-57441): live
@@ -110,6 +122,9 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     // tolerance cells.  Companion numerics (ghost_dis 15 cm, weight 0.1)
     // ride the TrackFitting::Parameters C++ defaults.
     m_fit_blob_coverage = get(config, "fit_blob_coverage", m_fit_blob_coverage);
+    // doc sbnd_xin/docs/pr/50: suspend the deweighting during the
+    // partition-forming find_proto_vertex stage (false = pr/49 behavior).
+    m_fit_blob_coverage_defer = get(config, "fit_blob_coverage_defer", m_fit_blob_coverage_defer);
     // doc sbnd_xin/docs/pr/30 §11 port-fidelity knobs.
     m_fit_exclusion            = get(config, "fit_exclusion",            m_fit_exclusion);
     m_graph_endpoint_strict    = get(config, "graph_endpoint_strict",    m_graph_endpoint_strict);
@@ -363,10 +378,25 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["teb_turn_skirt"]      = m_teb_turn_skirt;      // cm
     cfg["kink_walk_dqdx_stop"] = m_kink_walk_dqdx_stop; // false = legacy (flag_search bypasses the walk gate)
     cfg["kink_break_protect"]  = m_kink_break_protect;  // false = legacy (no protected kink breaks)
+    // doc sbnd_xin/docs/pr/50 -- main-vertex kink-consistency snap; false =>
+    // the pass never fires => byte-identical.  Numerics cm/deg.
+    cfg["vertex_kink_snap"] = m_vertex_kink_snap;
+    cfg["vks_radius"]       = m_vks_radius;
+    cfg["vks_min_dis"]      = m_vks_min_dis;
+    cfg["vks_angle"]        = m_vks_angle;
+    cfg["vks_margin"]       = m_vks_margin;
+    cfg["vks_collinear"]    = m_vks_collinear;
+    cfg["vks_skirt"]        = m_vks_skirt;
+    cfg["vks_baseline"]     = m_vks_baseline;
+    cfg["vks_min_arm"]      = m_vks_min_arm;
+    cfg["vks_fit_miss"]     = m_vks_fit_miss;
+    cfg["vks_hot_ratio"]    = m_vks_hot_ratio;
     cfg["kink_dqdx_hot_ratio"] = m_kink_dqdx_hot_ratio; // x mip_dqdx_median; inert while both above are false
     cfg["shower_topo_demote_len"] = m_shower_topo_demote_len;  // cm; 0 = legacy (long segments stay eligible for kShowerTopology)
     // doc sbnd_xin/docs/pr/49.
     cfg["fit_blob_coverage"] = m_fit_blob_coverage; // -1 = legacy (no foreign-ghost deweighting); >= 0 = tolerance cells
+    // doc sbnd_xin/docs/pr/50.
+    cfg["fit_blob_coverage_defer"] = m_fit_blob_coverage_defer; // false = pr/49 behavior (deweight active during find_proto_vertex)
     // doc sbnd_xin/docs/pr/30 §11.  Round-tripped so the compiled config
     // records the operating point; each default reproduces the pre-pr/30 tree.
     cfg["fit_exclusion"]            = m_fit_exclusion;             // false = legacy (all sites pass flag_exclusion=false)
@@ -744,6 +774,18 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
     pattern_algos.m_kink_walk_dqdx_stop = m_kink_walk_dqdx_stop;
     pattern_algos.m_kink_break_protect  = m_kink_break_protect;
     pattern_algos.m_kink_dqdx_hot_ratio = m_kink_dqdx_hot_ratio;
+    // doc sbnd_xin/docs/pr/50 -- main-vertex kink-consistency snap.
+    pattern_algos.m_vertex_kink_snap = m_vertex_kink_snap;
+    pattern_algos.m_vks_radius       = m_vks_radius * units::cm;    // cm -> internal
+    pattern_algos.m_vks_min_dis      = m_vks_min_dis * units::cm;   // cm -> internal
+    pattern_algos.m_vks_angle        = m_vks_angle;                 // deg, no conversion
+    pattern_algos.m_vks_margin       = m_vks_margin;                // deg, no conversion
+    pattern_algos.m_vks_collinear    = m_vks_collinear;             // deg, no conversion
+    pattern_algos.m_vks_skirt        = m_vks_skirt * units::cm;     // cm -> internal
+    pattern_algos.m_vks_baseline     = m_vks_baseline * units::cm;  // cm -> internal
+    pattern_algos.m_vks_min_arm      = m_vks_min_arm * units::cm;   // cm -> internal
+    pattern_algos.m_vks_fit_miss     = m_vks_fit_miss * units::cm;  // cm -> internal
+    pattern_algos.m_vks_hot_ratio    = m_vks_hot_ratio;             // x mip median, no conversion
     pattern_algos.m_shower_topo_demote_len = m_shower_topo_demote_len * units::cm;  // cm -> internal
     // doc sbnd_xin/docs/pr/30 §11 port-fidelity knobs.
     pattern_algos.m_fit_exclusion            = m_fit_exclusion;
@@ -856,6 +898,31 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
     // sentinel; -1 default matches TrackFitting::Parameters, so this is a
     // no-op unless the config opts in).
     m_track_fitter->set_parameter("fit_blob_coverage", m_fit_blob_coverage);
+    // doc sbnd_xin/docs/pr/50 (fit_blob_coverage_defer, default false):
+    // wrap the MAIN cluster's find_proto_vertex call so its recursive
+    // break partition forms on legacy (undeweighted) fits -- the partition
+    // is globally sensitive to fit perturbations (172230: 200 deweight
+    // firings ~90 cm away reshuffled 34->33 segments and lost the
+    // true-kink main-vertex candidate; same class measured in 131357 /
+    // 342199 / 360535 / 469665).  Main cluster ONLY: its later stages
+    // (determine_main_vertex, improve_vertex, the final trajectory +
+    // dQ/dx) all refit with the restored deweighting, so ghost protection
+    // survives -- but a non-main cluster's final trajectory is essentially
+    // its find_proto_vertex fit, so deferring there UN-fixes the pr/49
+    // ghosts (57441 cid 20 measured 1.12 -> 1.23 cm under a global defer).
+    // Local fitters spawned inside (inherit_from) copy the suspended
+    // value, so the whole stage is covered.  Both lambdas are no-ops
+    // unless the defer knob AND the base knob are on.
+    const bool cov_defer_active = m_fit_blob_coverage_defer && m_fit_blob_coverage >= 0;
+    auto cov_defer_suspend = [&]() {
+        if (cov_defer_active) m_track_fitter->set_parameter("fit_blob_coverage", -1);
+    };
+    auto cov_defer_restore = [&]() {
+        if (cov_defer_active) m_track_fitter->set_parameter("fit_blob_coverage", m_fit_blob_coverage);
+    };
+    if (cov_defer_active) {
+        SPDLOG_LOGGER_DEBUG(log, "fit_blob_coverage_defer on: partition stage (find_proto_vertex) runs legacy fits, deweight restored for all later stages");
+    }
 
     int acc_segment_id = 0;
     IndexedShowerSet pi0_showers;
@@ -877,7 +944,9 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
         // initial pattern recognitions
         // particle_data (doc pr/48): stopping templates for the two-end
         // break pass; inert unless two_end_break is on.
+        cov_defer_suspend();
         pattern_algos.find_proto_vertex(*pr_graph, *main_cluster, *m_track_fitter, m_dv, true, 2, true, particle_data());
+        cov_defer_restore();
         detg_dump("main:find_proto_vertex", *pr_graph);
 
         // shower related operations
@@ -998,7 +1067,16 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
   
 
     if (final_main_vertex) {
-   
+        // doc sbnd_xin/docs/pr/50: main-vertex kink-consistency snap --
+        // inert unless vertex_kink_snap.  Runs after the overall main
+        // vertex is final (either DL or fallback path) and BEFORE the
+        // final improve_vertex, so the local optimizer polishes a
+        // corner-anchored trajectory.
+        if (pattern_algos.snap_main_vertex_to_kink(*pr_graph, *main_cluster, final_main_vertex,
+                                                   *m_track_fitter, m_dv, particle_data(), m_recomb_model)) {
+            map_cluster_main_vertices[main_cluster] = final_main_vertex;
+            detg_dump("snap_main_vertex_to_kink", *pr_graph);
+        }
 
         pattern_algos.improve_vertex(*pr_graph, *main_cluster, final_main_vertex,
                                      vertices_in_long_muon, segments_in_long_muon,

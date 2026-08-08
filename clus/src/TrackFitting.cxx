@@ -4,6 +4,8 @@
 
 #include "WireCellUtil/Logging.h"
 #include <chrono>
+#include <sstream>
+#include <iomanip>
 
 
 using namespace WireCell;
@@ -2778,7 +2780,8 @@ bool TrackFitting::is_cell_covered_by_foreign_blobs(const Facade::Grouping* grou
                                                     const WireCell::Point& p, double ghost_dis,
                                                     int apa, int face,
                                                     int plane, int wire, int time,
-                                                    int tol_cells, int nticks_per_slice) const
+                                                    int tol_cells, int nticks_per_slice,
+                                                    const Facade::Cluster** claimant) const
 {
     if (!grouping) return false;
     for (const auto* other : grouping->children()) {
@@ -2786,8 +2789,10 @@ bool TrackFitting::is_cell_covered_by_foreign_blobs(const Facade::Grouping* grou
         if (m_cov_fit_scope.count(other)) continue;
         if (!is_cell_covered_by_own_blobs(other, apa, face, plane, wire, time,
                                           tol_cells, nticks_per_slice)) continue;
-        if (ghost_dis <= 0) return true;
-        if (other->get_closest_dis(p) > ghost_dis) return true;
+        if (ghost_dis <= 0 || other->get_closest_dis(p) > ghost_dis) {
+            if (claimant) *claimant = other;
+            return true;
+        }
     }
     return false;
 }
@@ -2803,12 +2808,20 @@ bool TrackFitting::is_cell_covered_by_foreign_blobs(const Facade::Grouping* grou
 void TrackFitting::rebuild_cov_fit_scope(const std::shared_ptr<PR::Segment>& seg)
 {
     m_cov_fit_scope.clear();
+    m_cov_vtx_info.clear();
     if (m_graph) {
         for (const auto& ed : PR::ordered_edges(*m_graph)) {
             auto& edge_bundle = (*m_graph)[ed];
             if (edge_bundle.segment && edge_bundle.segment->cluster()) {
                 m_cov_fit_scope.insert(edge_bundle.segment->cluster());
             }
+        }
+        // doc pr/50: vertex positions + degrees for sentinel diagnostics.
+        for (const auto& nd : PR::ordered_nodes(*m_graph)) {
+            const auto& vtx = (*m_graph)[nd].vertex;
+            if (!vtx) continue;
+            const WireCell::Point vp = vtx->fit().valid() ? vtx->fit().point : vtx->wcpt().point;
+            m_cov_vtx_info.emplace_back(vp, static_cast<int>(boost::out_degree(nd, *m_graph)));
         }
     }
     if (seg && seg->cluster()) m_cov_fit_scope.insert(seg->cluster());
@@ -2870,6 +2883,11 @@ void TrackFitting::rebuild_cov_fit_scope(const std::shared_ptr<PR::Segment>& seg
     const int cov_tol = cov_on ? static_cast<int>(m_params.fit_blob_coverage) : 0;
     const double cov_gdis = m_params.fit_blob_coverage_ghost_dis;
     std::set<Coord2D> dw_2dut, dw_2dvt, dw_2dwt;
+    // doc pr/50 sentinel diagnostics: claimant clusters (keyed by stable
+    // cluster id) and how many deweighted cells the OWN cluster would cover
+    // at tolerance cov_tol+2 (near-vertex tiling-edge indicator).
+    std::map<int, const Facade::Cluster*> cov_claimants;
+    int cov_own_tol2 = 0;
 
     // Process U plane
     for (auto it = temp_2dut.associated_2d_points.begin(); it != temp_2dut.associated_2d_points.end(); it++){
@@ -2877,9 +2895,13 @@ void TrackFitting::rebuild_cov_fit_scope(const std::shared_ptr<PR::Segment>& seg
         auto charge_it = m_charge_data.find(coord_key);
         if (charge_it != m_charge_data.end() && charge_it->second.charge > charge_cut) {
             if (cov_on && charge_it->second.flag == 1 &&
-                !is_cell_covered_by_own_blobs(cluster, it->apa, it->face, 0, it->wire, it->time, cov_tol, cur_ntime_ticks) &&
-                is_cell_covered_by_foreign_blobs(m_grouping, cluster, p, cov_gdis, it->apa, it->face, 0, it->wire, it->time, cov_tol, cur_ntime_ticks)) {
-                dw_2dut.insert(*it);
+                !is_cell_covered_by_own_blobs(cluster, it->apa, it->face, 0, it->wire, it->time, cov_tol, cur_ntime_ticks)) {
+                const Facade::Cluster* clmt = nullptr;
+                if (is_cell_covered_by_foreign_blobs(m_grouping, cluster, p, cov_gdis, it->apa, it->face, 0, it->wire, it->time, cov_tol, cur_ntime_ticks, &clmt)) {
+                    dw_2dut.insert(*it);
+                    if (clmt) cov_claimants.emplace(clmt->get_cluster_id(), clmt);
+                    if (is_cell_covered_by_own_blobs(cluster, it->apa, it->face, 0, it->wire, it->time, cov_tol + 2, cur_ntime_ticks)) ++cov_own_tol2;
+                }
             }
             temp_types_u.insert(charge_it->second.flag);
             if (charge_it->second.flag == 0) results.at(0)++;
@@ -2896,9 +2918,13 @@ void TrackFitting::rebuild_cov_fit_scope(const std::shared_ptr<PR::Segment>& seg
         // std::cout << "V: " << it->time/4 << " " << it->channel << " " << charge_it->second.charge << " " << charge_cut << std::endl;
 
             if (cov_on && charge_it->second.flag == 1 &&
-                !is_cell_covered_by_own_blobs(cluster, it->apa, it->face, 1, it->wire, it->time, cov_tol, cur_ntime_ticks) &&
-                is_cell_covered_by_foreign_blobs(m_grouping, cluster, p, cov_gdis, it->apa, it->face, 1, it->wire, it->time, cov_tol, cur_ntime_ticks)) {
-                dw_2dvt.insert(*it);
+                !is_cell_covered_by_own_blobs(cluster, it->apa, it->face, 1, it->wire, it->time, cov_tol, cur_ntime_ticks)) {
+                const Facade::Cluster* clmt = nullptr;
+                if (is_cell_covered_by_foreign_blobs(m_grouping, cluster, p, cov_gdis, it->apa, it->face, 1, it->wire, it->time, cov_tol, cur_ntime_ticks, &clmt)) {
+                    dw_2dvt.insert(*it);
+                    if (clmt) cov_claimants.emplace(clmt->get_cluster_id(), clmt);
+                    if (is_cell_covered_by_own_blobs(cluster, it->apa, it->face, 1, it->wire, it->time, cov_tol + 2, cur_ntime_ticks)) ++cov_own_tol2;
+                }
             }
             temp_types_v.insert(charge_it->second.flag);
             if (charge_it->second.flag == 0) results.at(1)++;
@@ -2912,9 +2938,13 @@ void TrackFitting::rebuild_cov_fit_scope(const std::shared_ptr<PR::Segment>& seg
         auto charge_it = m_charge_data.find(coord_key);
         if (charge_it != m_charge_data.end() && charge_it->second.charge > charge_cut) {
             if (cov_on && charge_it->second.flag == 1 &&
-                !is_cell_covered_by_own_blobs(cluster, it->apa, it->face, 2, it->wire, it->time, cov_tol, cur_ntime_ticks) &&
-                is_cell_covered_by_foreign_blobs(m_grouping, cluster, p, cov_gdis, it->apa, it->face, 2, it->wire, it->time, cov_tol, cur_ntime_ticks)) {
-                dw_2dwt.insert(*it);
+                !is_cell_covered_by_own_blobs(cluster, it->apa, it->face, 2, it->wire, it->time, cov_tol, cur_ntime_ticks)) {
+                const Facade::Cluster* clmt = nullptr;
+                if (is_cell_covered_by_foreign_blobs(m_grouping, cluster, p, cov_gdis, it->apa, it->face, 2, it->wire, it->time, cov_tol, cur_ntime_ticks, &clmt)) {
+                    dw_2dwt.insert(*it);
+                    if (clmt) cov_claimants.emplace(clmt->get_cluster_id(), clmt);
+                    if (is_cell_covered_by_own_blobs(cluster, it->apa, it->face, 2, it->wire, it->time, cov_tol + 2, cur_ntime_ticks)) ++cov_own_tol2;
+                }
             }
             temp_types_w.insert(charge_it->second.flag);
             if (charge_it->second.flag == 0) results.at(2)++;
@@ -2923,9 +2953,25 @@ void TrackFitting::rebuild_cov_fit_scope(const std::shared_ptr<PR::Segment>& seg
     }
 
     if (cov_on && (dw_2dut.size() + dw_2dvt.size() + dw_2dwt.size() > 0)) {
-        SPDLOG_LOGGER_DEBUG(s_log, "fit_blob_coverage: deweighted foreign live cells u={} v={} w={} (tol={} w={}) at ({:.2f},{:.2f},{:.2f})",
+        // doc pr/50: diagnostic tail -- distance to (and degree of) the
+        // nearest pattern vertex at fire time, per-claimant 3D distances,
+        // and the tol+2 own-coverage count.  Prefix kept byte-stable for
+        // the pr/49 census scripts, which anchor on the leading text.
+        double cov_vdis = -1;
+        int cov_vdeg = -1;
+        for (const auto& [vp, deg] : m_cov_vtx_info) {
+            const double d = (p - vp).magnitude();
+            if (cov_vdis < 0 || d < cov_vdis) { cov_vdis = d; cov_vdeg = deg; }
+        }
+        std::ostringstream cov_cl;
+        for (const auto& [cid, clp] : cov_claimants) {
+            cov_cl << cid << ":" << std::fixed << std::setprecision(1)
+                   << clp->get_closest_dis(p)/units::cm << ":" << clp->npoints() << ",";
+        }
+        SPDLOG_LOGGER_DEBUG(s_log, "fit_blob_coverage: deweighted foreign live cells u={} v={} w={} (tol={} w={}) at ({:.2f},{:.2f},{:.2f}) vtx_dis={:.2f} vtx_deg={} own_tol2={} claimants=[{}]",
                             dw_2dut.size(), dw_2dvt.size(), dw_2dwt.size(), cov_tol, m_params.fit_blob_coverage_weight,
-                            p.x()/units::cm, p.y()/units::cm, p.z()/units::cm);
+                            p.x()/units::cm, p.y()/units::cm, p.z()/units::cm,
+                            cov_vdis/units::cm, cov_vdeg, cov_own_tol2, cov_cl.str());
     }
 
     // Calculate quality ratios

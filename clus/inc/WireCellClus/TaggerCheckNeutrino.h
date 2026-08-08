@@ -111,6 +111,23 @@ public:
         // VertexFlags::kProtectedBreak so examine_vertices_4's < 2 cm
         // absorption floor cannot erase it.  false => byte-identical.
         bool   m_kink_break_protect{false};
+        // doc sbnd_xin/docs/pr/50 -- main-vertex kink-consistency snap
+        // (172230-class near-vertex robustness).  Mirrors of the
+        // PatternAlgorithms::m_vertex_kink_snap / m_vks_* members (see the
+        // design comment there); numerics here in cm/deg, converted at the
+        // visit() copy.  All defaults = the pass never fires =>
+        // byte-identical.
+        bool   m_vertex_kink_snap{false};
+        double m_vks_radius{5.0};     // cm
+        double m_vks_min_dis{0.5};    // cm
+        double m_vks_angle{25.0};     // deg
+        double m_vks_margin{10.0};    // deg
+        double m_vks_collinear{30.0}; // deg
+        double m_vks_skirt{0.3};      // cm
+        double m_vks_baseline{2.0};   // cm
+        double m_vks_min_arm{1.5};    // cm
+        double m_vks_fit_miss{0.35};  // cm; snap only when the fit misses the image corner by >= this
+        double m_vks_hot_ratio{0};    // x mip_dqdx_median; 0 = veto off (default: misfires on misassigned charge)
         // Long shower-topology demote length, cm (doc sbnd_xin/docs/pr/25
         // sec 3).  0 => the guard never fires => byte-identical.  50 is the
         // scan-supported operating point (9/10 owner-scanned events; ~45
@@ -132,6 +149,25 @@ public:
         // key is the single source of truth -- it overrides any
         // trackfitting_config_file value at visit time.
         double m_fit_blob_coverage{-1};
+
+        // doc sbnd_xin/docs/pr/50 (172230-class near-vertex robustness):
+        // when true AND fit_blob_coverage >= 0, the deweighting is
+        // SUSPENDED while find_proto_vertex forms the MAIN cluster's break
+        // partition (the recursive kink walk refits after every break and
+        // re-reads the fits, so any fit perturbation -- however far from
+        // the vertex -- can reshuffle the whole partition and lose the
+        // proto-vertex at the true kink; 18255-172230 lost its main vertex
+        // to a 2.7 cm neighbor this way).  The partition then forms on
+        // legacy fits, byte-identical to knob-off by construction, while
+        // every later fitting stage (clustering_points onward, main-vertex
+        // determination, improve_vertex, the final trajectory + dQ/dx)
+        // keeps the pr/49 ghost protection.  Main cluster ONLY: a
+        // non-main cluster's final trajectory is essentially its
+        // find_proto_vertex fit (no later full refit), so deferring there
+        // un-fixes the pr/49 ghosts (57441 cid 20 measured 1.12 -> 1.23 cm
+        // under a global defer).  Default false = pr/49 behavior,
+        // byte-identical.  Inert while fit_blob_coverage < 0.
+        bool m_fit_blob_coverage_defer{false};
 
         // ---- doc sbnd_xin/docs/pr/30 §11 port-fidelity knobs ----------------
         // Threaded verbatim to PatternAlgorithms / PR::g_graph_endpoint_policy.

@@ -1173,6 +1173,30 @@ function(
     // SBND_FIT_BLOB_COVERAGE=-1 runner env) to restore the legacy path for
     // an A/B.
     fit_blob_coverage = 0,
+    // doc pr/50 -- suspend the deweighting above during find_proto_vertex
+    // (partition stage) so the recursive break partition forms on legacy
+    // fits; all later fitting stages (main-vertex determination,
+    // improve_vertex, final trajectory + dQ/dx) keep the ghost protection.
+    // C++ default false = pr/49 behavior; false omits the key =>
+    // byte-identical.  Validation: -A fit_blob_coverage_defer=true (or the
+    // SBND_FIT_BLOB_COVERAGE_DEFER=true runner env).
+    fit_blob_coverage_defer = false,
+    // doc pr/50 -- main-vertex kink-consistency snap (172230-class
+    // near-vertex robustness).  false/null ride the C++ defaults and omit
+    // the keys => byte-identical.  Validation: -A vertex_kink_snap=true
+    // (or SBND_VERTEX_KINK_SNAP=true runner env); numerics override via
+    // -A vks_*=<value> (cm/deg).
+    vertex_kink_snap = false,
+    vks_radius = null,
+    vks_min_dis = null,
+    vks_angle = null,
+    vks_margin = null,
+    vks_collinear = null,
+    vks_skirt = null,
+    vks_baseline = null,
+    vks_min_arm = null,
+    vks_fit_miss = null,
+    vks_hot_ratio = null,
 )
     local base = import 'pgrapher/experiment/sbnd/simparams.jsonnet';
     local params = base {
@@ -1355,6 +1379,18 @@ function(
                              kink_walk_dqdx_stop=kink_walk_dqdx_stop,
                              kink_break_protect=kink_break_protect,
                              fit_blob_coverage=fit_blob_coverage,
+                             fit_blob_coverage_defer=fit_blob_coverage_defer,
+                             vertex_kink_snap=vertex_kink_snap,
+                             vks_radius=vks_radius,
+                             vks_min_dis=vks_min_dis,
+                             vks_angle=vks_angle,
+                             vks_margin=vks_margin,
+                             vks_collinear=vks_collinear,
+                             vks_skirt=vks_skirt,
+                             vks_baseline=vks_baseline,
+                             vks_min_arm=vks_min_arm,
+                             vks_fit_miss=vks_fit_miss,
+                             vks_hot_ratio=vks_hot_ratio,
                              pseudo_shower_track_paint=pseudo_shower_track_paint,
                              reclass_never_computed_ke_floor=reclass_never_computed_ke_floor,
                              muon_dqdx_curve=muon_dqdx_curve,

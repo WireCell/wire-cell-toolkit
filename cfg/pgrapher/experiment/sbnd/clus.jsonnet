@@ -1285,6 +1285,28 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               // wire/slice tolerance in cells (0 = strict; the 57441
               // contamination is ONE cell away, so >= 1 re-admits it).
               fit_blob_coverage=null,
+              // doc pr/50 -- suspend the pr/49 deweighting during
+              // find_proto_vertex (the partition-forming stage; its recursive
+              // kink walk is globally sensitive to fit perturbations --
+              // 18255-172230 lost its true-kink main vertex to a 2.7 cm
+              // neighbor).  All later fitting stages keep the deweighting.
+              // C++ default false = pr/49 behavior; false omits the key =>
+              // byte-identical.
+              fit_blob_coverage_defer=false,
+              // doc pr/50 -- main-vertex kink-consistency snap (172230-class
+              // near-vertex robustness; C++ defaults in TaggerCheckNeutrino.h).
+              // false/null omit the keys => byte-identical.
+              vertex_kink_snap=false,
+              vks_radius=null,
+              vks_min_dis=null,
+              vks_angle=null,
+              vks_margin=null,
+              vks_collinear=null,
+              vks_skirt=null,
+              vks_baseline=null,
+              vks_min_arm=null,
+              vks_fit_miss=null,
+              vks_hot_ratio=null,
               // doc pr/45 -- paint muon-typed (+-13) pseudo-showers as track in
               // the Bee shower_track layer + PrDisplayDump (18255-56463: 411 cm
               // muon painted red).  C++ default false; key suppressed when off
@@ -1834,6 +1856,18 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
             kink_break_protect=kink_break_protect,
             kink_dqdx_hot_ratio=kink_dqdx_hot_ratio,
             fit_blob_coverage=fit_blob_coverage,
+            fit_blob_coverage_defer=fit_blob_coverage_defer,
+            vertex_kink_snap=vertex_kink_snap,
+            vks_radius=vks_radius,
+            vks_min_dis=vks_min_dis,
+            vks_angle=vks_angle,
+            vks_margin=vks_margin,
+            vks_collinear=vks_collinear,
+            vks_skirt=vks_skirt,
+            vks_baseline=vks_baseline,
+            vks_min_arm=vks_min_arm,
+            vks_fit_miss=vks_fit_miss,
+            vks_hot_ratio=vks_hot_ratio,
             muon_dqdx_curve=muon_dqdx_curve,
             sp_dedx_use_recomb_model=sp_dedx_use_recomb_model,
             sp_mean_dedx_cut=sp_mean_dedx_cut,
@@ -2507,6 +2541,28 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
        // default -1 (off, key suppressed => byte-identical); >= 0 = on with
        // tolerance cells.
        fit_blob_coverage=null,
+              // doc pr/50 -- suspend the pr/49 deweighting during
+              // find_proto_vertex (the partition-forming stage; its recursive
+              // kink walk is globally sensitive to fit perturbations --
+              // 18255-172230 lost its true-kink main vertex to a 2.7 cm
+              // neighbor).  All later fitting stages keep the deweighting.
+              // C++ default false = pr/49 behavior; false omits the key =>
+              // byte-identical.
+              fit_blob_coverage_defer=false,
+              // doc pr/50 -- main-vertex kink-consistency snap (172230-class
+              // near-vertex robustness; C++ defaults in TaggerCheckNeutrino.h).
+              // false/null omit the keys => byte-identical.
+              vertex_kink_snap=false,
+              vks_radius=null,
+              vks_min_dis=null,
+              vks_angle=null,
+              vks_margin=null,
+              vks_collinear=null,
+              vks_skirt=null,
+              vks_baseline=null,
+              vks_min_arm=null,
+              vks_fit_miss=null,
+              vks_hot_ratio=null,
        pseudo_shower_track_paint=false,
        // Muon dQ/dx-vs-length envelope: DEFAULT = the docs/pr/10 SBND fit
        // (see the clus_pr arg comment; null restores the uBooNE refit).
@@ -2691,6 +2747,18 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 kink_break_protect=kink_break_protect,
                 kink_dqdx_hot_ratio=kink_dqdx_hot_ratio,
                 fit_blob_coverage=fit_blob_coverage,
+                fit_blob_coverage_defer=fit_blob_coverage_defer,
+                vertex_kink_snap=vertex_kink_snap,
+                vks_radius=vks_radius,
+                vks_min_dis=vks_min_dis,
+                vks_angle=vks_angle,
+                vks_margin=vks_margin,
+                vks_collinear=vks_collinear,
+                vks_skirt=vks_skirt,
+                vks_baseline=vks_baseline,
+                vks_min_arm=vks_min_arm,
+                vks_fit_miss=vks_fit_miss,
+                vks_hot_ratio=vks_hot_ratio,
                 pseudo_shower_track_paint=pseudo_shower_track_paint,
                 muon_dqdx_curve=muon_dqdx_curve,
                 use_power_recomb=use_power_recomb,

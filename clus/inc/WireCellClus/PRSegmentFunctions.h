@@ -94,6 +94,35 @@ namespace WireCell::Clus::PR {
     double segment_wide_turn_angle(const std::vector<Fit>& fits, size_t idx,
                                    double skirt, double baseline);
 
+    /// doc sbnd_xin/docs/pr/50 (172230-class near-vertex robustness):
+    /// result of path_scan_vertex_kink below.
+    struct VertexKinkScanResult {
+        bool found{false};
+        int idx{-1};         ///< index into the oriented point list (0 = vertex end)
+        double turn_deg{0};  ///< turn angle at that point, degrees (0 = straight)
+        double arc{0};       ///< arclength from pts[0], internal units
+    };
+
+    /// doc sbnd_xin/docs/pr/50: ALL interior turns >= angle_cut of an
+    /// oriented point path (pts[0] at a vertex) inside the arclength window
+    /// [d_min, d_max], in index order.  Per candidate index the turn is
+    /// segment_wide_turn_angle over a synthesized Fit vector (it reads only
+    /// .point); when the vertex-side arm is too short for the symmetric PCA
+    /// windows (< 3 points -- the 2.7 cm stub case) the vertex-side
+    /// direction falls back to the chord pts[0] -> pts[i], against the
+    /// outward arm's windowed PCA (itself falling back to the chord
+    /// pts[i] -> pts.back()).  Candidates keep >= min_arm of outward
+    /// arclength support beyond the turn.  The CALLER picks among the
+    /// candidates with its own topology evidence -- the strongest turn is
+    /// not necessarily the right corner (172230: a secondary wiggle at
+    /// 4.9 cm out-turned the true corner at 2.4 cm by 3 deg).
+    /// Deterministic integer index scan, no pointer-keyed containers.
+    /// All lengths internal units, angles deg.
+    std::vector<VertexKinkScanResult> path_scan_vertex_kink(const std::vector<WireCell::Point>& pts,
+                                                            double d_min, double d_max,
+                                                            double skirt, double baseline,
+                                                            double angle_cut, double min_arm);
+
     /// Options for segment_two_end_break_scan (doc sbnd_xin/docs/pr/48 sec 6
     /// -- the two-end residual-range back-to-back break).  Every value here
     /// only matters once the owning component's two_end_break knob is ON;

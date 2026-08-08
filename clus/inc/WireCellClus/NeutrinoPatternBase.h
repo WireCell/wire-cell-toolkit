@@ -289,6 +289,54 @@ namespace WireCell::Clus::PR {
         // check is a no-op => byte-identical.
         bool   m_kink_break_protect{false};
 
+        // ---- doc sbnd_xin/docs/pr/50: main-vertex kink-consistency snap ----
+        //
+        // 172230-class near-vertex robustness: find_proto_vertex's recursive
+        // break partition is globally sensitive to fit perturbations, so a
+        // small distortion far from the vertex (there: 200 fit_blob_coverage
+        // deweight firings ~90 cm away at a shower tip) can reshuffle the
+        // partition and erase the proto-vertex at the TRUE image kink.
+        // determine_main_vertex can only choose surviving graph vertices
+        // (172230: nearest survivor 2.7 cm off), and improve_vertex/MyFCN is
+        // a local optimizer (0.43 cm soft prior) that can never jump back --
+        // the final trajectory rounds the corner ("jumps over the vertex")
+        // with starved dQ/dx.  This pass runs ONCE, after the overall main
+        // vertex is final and before the final improve_vertex: it scans the
+        // WCPT paths (steiner/image-anchored -- TrackFitting never rewrites
+        // wcpts, so they are immune to exactly the fit distortion that
+        // caused the loss) of the segments incident to the main vertex for
+        // a strong interior turn within m_vks_radius; when the image says
+        // the track passes STRAIGHT THROUGH the vertex (an incident
+        // segment's stub toward the turn is anti-parallel within
+        // m_vks_collinear deg of another incident arm) and turns at the
+        // interior point instead (turn >= m_vks_angle deg and >=
+        // m_vks_margin deg stronger than the residual bend at the vertex),
+        // it re-breaks the segment there (break_segment), protects the new
+        // vertex (kProtectedBreak), re-seats the main vertex on it, and
+        // refits once so improve_vertex polishes a corner-anchored
+        // trajectory.  Guards: never fires on a kProtectedBreak vertex
+        // (pr/48 TEB junctions), needs vertex degree >= 2, declines when
+        // the collinear opposite arm is Bragg-hot at the vertex (median
+        // dQ/dx within 3 cm > m_vks_hot_ratio x m_mip_dqdx_median -- a hot
+        // arm ending at V is evidence V is a real junction), and when a
+        // graph vertex already sits within m_vks_min_dis of the turn.
+        // Single strongest winner, one snap per event, no recursion.
+        // Toolkit-only (no prototype counterpart; nearest prototype
+        // machinery is examine_structure_final_2/_3's 2.0/2.5 cm merges,
+        // which cannot reach 2.7 cm).  C++ default false => the pass
+        // returns immediately => byte-identical.
+        bool   m_vertex_kink_snap{false};
+        double m_vks_radius{5*units::cm};     ///< scan window outer edge (arclength from vertex)
+        double m_vks_min_dis{0.5*units::cm};  ///< scan window inner edge + dedupe radius vs existing vertices
+        double m_vks_angle{25};               ///< accept threshold on the interior turn, deg
+        double m_vks_margin{10};              ///< interior turn must beat the vertex bend by this, deg
+        double m_vks_collinear{30};           ///< pass-through test: stub vs other arm within this of 180 deg (172230 measures 23.5 at the true corner -- near-corner arms curve)
+        double m_vks_skirt{0.3*units::cm};    ///< PCA window inner skirt (path_scan_vertex_kink)
+        double m_vks_baseline{2*units::cm};   ///< PCA window length (path_scan_vertex_kink)
+        double m_vks_min_arm{1.5*units::cm};  ///< outward arclength support required beyond the turn
+        double m_vks_fit_miss{0.35*units::cm}; ///< snap only when the fit misses the image corner by at least this (a modeled kink has fit points on it)
+        double m_vks_hot_ratio{0};            ///< OPTIONAL Bragg-hot veto scale, x m_mip_dqdx_median; default 0 = off (misfires on the failure class: misassigned charge reads hot)
+
         // ---- doc sbnd_xin/docs/pr/30 §11: four port-fidelity knobs ----------
         //
         // P1 / F1 -- `flag_exclusion` on do_multi_tracking.
@@ -1459,6 +1507,13 @@ namespace WireCell::Clus::PR {
 
         bool fit_vertex(Facade::Cluster& cluster, VertexPtr vertex, VertexPtr main_vertex, std::vector<SegmentPtr>& sg_set, TrackFitting& track_fitter, IDetectorVolumes::pointer dv);
         void improve_vertex(Graph& graph, Facade::Cluster& cluster, VertexPtr& main_vertex, IndexedVertexSet& vertices_in_long_muon, IndexedSegmentSet& segments_in_long_muon, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, bool flag_search_vertex_activity = true , bool flag_final_vertex = false);
+        // doc sbnd_xin/docs/pr/50 (see the m_vertex_kink_snap member block):
+        // main-vertex kink-consistency snap.  Returns true iff it re-broke a
+        // segment and re-seated main_vertex (by reference) on the new
+        // kProtectedBreak vertex, followed by one full refit.  Gated on
+        // m_vertex_kink_snap (default false => immediate return, no side
+        // effects).
+        bool snap_main_vertex_to_kink(Graph& graph, Facade::Cluster& cluster, VertexPtr& main_vertex, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model);
         void determine_main_vertex(Graph& graph, Facade::Cluster& cluster, VertexPtr& main_vertex, IndexedVertexSet& vertices_in_long_muon, IndexedSegmentSet& segments_in_long_muon, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model);
         void change_daughter_type(Graph& graph, VertexPtr vertex, SegmentPtr segment, int particle_type, double mass, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model);
         void examine_main_vertices_local(Graph& graph, std::vector<VertexPtr>& vertices, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model);

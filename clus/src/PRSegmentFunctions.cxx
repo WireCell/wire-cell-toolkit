@@ -307,6 +307,71 @@ namespace WireCell::Clus::PR {
         return std::acos(std::max(-1.0, std::min(1.0, va.dot(vb)))) / M_PI * 180.0;
     }
 
+    // doc sbnd_xin/docs/pr/50: every interior turn >= angle_cut near a
+    // vertex.  See the header comment for the contract.
+    std::vector<VertexKinkScanResult> path_scan_vertex_kink(const std::vector<WireCell::Point>& pts,
+                                                            double d_min, double d_max,
+                                                            double skirt, double baseline,
+                                                            double angle_cut, double min_arm)
+    {
+        std::vector<VertexKinkScanResult> cands;
+        if (pts.size() < 4) return cands;
+
+        std::vector<double> cum(pts.size(), 0);
+        for (size_t k = 1; k < pts.size(); k++) {
+            cum[k] = cum[k-1] + (pts[k] - pts[k-1]).magnitude();
+        }
+
+        // segment_wide_turn_angle reads only .point from each Fit.
+        std::vector<Fit> pseudo(pts.size());
+        for (size_t k = 0; k < pts.size(); k++) pseudo[k].point = pts[k];
+
+        // Outward-arm direction anchored at index i: PCA over the arclength
+        // window [skirt, skirt+baseline] beyond i, oriented outward; chord
+        // i -> back() when the window holds < 3 points.
+        auto outward_dir = [&](size_t i) -> WireCell::Vector {
+            std::vector<Facade::geo_point_t> pts_b;
+            for (size_t k = i; k < pts.size(); k++) {
+                const double d = cum[k] - cum[i];
+                if (d < skirt || d > skirt + baseline) continue;
+                pts_b.push_back(pts[k]);
+            }
+            if (pts_b.size() < 3) {
+                return (pts.back() - pts[i]).norm();
+            }
+            Facade::geo_point_t cen_b(0,0,0);
+            for (const auto& p : pts_b) cen_b += p;
+            cen_b = cen_b * (1.0 / pts_b.size());
+            auto vb = Facade::calc_pca_dir(cen_b, pts_b);
+            if (vb.dot(pts_b.back() - pts_b.front()) < 0) vb = vb * -1.0;
+            return vb;
+        };
+
+        for (size_t i = 1; i + 1 < pts.size(); i++) {
+            if (cum[i] < d_min || cum[i] > d_max) continue;
+            if (cum.back() - cum[i] < min_arm) continue;
+            double turn = segment_wide_turn_angle(pseudo, i, skirt, baseline);
+            if (turn == 0) {
+                // Vertex-side arm too short for the symmetric PCA windows
+                // (the short-stub case): chord from the vertex end against
+                // the outward arm.
+                if (cum[i] <= 0) continue;
+                const auto va = (pts[i] - pts[0]).norm();
+                const auto vb = outward_dir(i);
+                turn = std::acos(std::max(-1.0, std::min(1.0, va.dot(vb)))) / M_PI * 180.0;
+            }
+            if (turn >= angle_cut) {
+                VertexKinkScanResult c;
+                c.found = true;
+                c.idx = static_cast<int>(i);
+                c.turn_deg = turn;
+                c.arc = cum[i];
+                cands.push_back(c);
+            }
+        }
+        return cands;
+    }
+
     TwoEndBreakResult segment_two_end_break_scan(
         SegmentPtr seg, const Clus::ParticleDataSet::pointer& particle_data,
         const TwoEndBreakOptions& opt)
