@@ -201,6 +201,12 @@ public:
         bool   m_first_seg_local_pca{true};        // P2
         bool   m_other_seg_relaxed_accept{true};   // P4
         bool   m_other_seg_empty_2d_guard{false};  // doc pr/45 -- -1 empty-2D-tree sentinel guard
+        // doc sbnd_xin/docs/pr/54 -- keep well-supported isolated residual
+        // segments instead of discarding them after the fit (18255-142421
+        // separated EM shower).  All default to the legacy discard.
+        bool   m_other_seg_keep_isolated{false};
+        int    m_other_seg_keep_isolated_min_points{25};
+        double m_other_seg_keep_isolated_min_length{3.0}; // cm; scaled at copy
         // doc sbnd_xin/docs/pr/31 §11 -- F2 (was P2).  true => skip the
         // stage-3 segment_determine_shower_direction call, so a topology
         // shower keeps the direction segment_is_shower_topology set, which is
@@ -330,6 +336,24 @@ public:
         // swap is decided, in both states, so the off-arms self-census how
         // often the traditional path swaps in production today.
         bool   m_main_vertex_swap_apply{false};
+        // doc sbnd_xin/docs/pr/51 round 4: diagnostic-only TRACE probe for the
+        // near-vertex short-cut investigation (owner Bee scan of
+        // 131357/268067/285567/506746 -- rounds 2-3's main_vertex_graph_audit
+        // fixed graph SHAPE; the owner's report is that the rough-path
+        // Dijkstra (do_rough_path on "steiner_graph") or the
+        // examine_structure_1 straight-line replacement produce a
+        // charge-unsupported near-vertex chord -- a path-COST problem, not a
+        // graph-shape one).  Prints per near-vertex segment: (P1) the origin
+        // tag of its current wcpts() -- "rough" (do_rough_path via
+        // create_segment_for_cluster), "straighten" (examine_structure_1),
+        // "splice" (mvga op3 re-seat), or "other"; (P2) a live/dead/
+        // unsupported interior support profile against the fitted dQ/dx;
+        // (P3) a counterfactual Dijkstra re-route on a scratch gap-penalized
+        // copy of the Steiner graph across a scale ladder.  No graph, no
+        // fit, and no segment content is ever changed -- every line is
+        // SPDLOG_LOGGER_TRACE, gated entirely by this knob.  false (default)
+        // => none of the probe code runs => byte-identical.
+        bool   m_rough_path_probe{false};
         double m_beam_window_low{0};   // beam window [low, high) on cluster_t0 (matched flash time, WCT units).
         double m_beam_window_high{0};  // low >= high (default) disables the gate: uBooNE single-main behavior.
         bool m_nu_skip_cosmic{false};  // if true (beam-gate only), skip in-window mains already tagged

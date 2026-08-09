@@ -1334,6 +1334,16 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               // decision instead of discarding it.  C++ default false;
               // false omits the key => byte-identical.
               main_vertex_swap_apply=false,
+              // doc pr/51 round 4 -- diagnostic-only rough-path probe.
+              // C++ default false; false omits the key => byte-identical.
+              rough_path_probe=false,
+              // doc pr/54 -- keep well-supported isolated residual segments
+              // in find_other_segments (18255-142421 separated EM shower with
+              // no fitted trajectory).  C++ defaults: keep false, floors
+              // 25 points / 3 cm.  false/null omit the keys => byte-identical.
+              other_seg_keep_isolated=false,
+              other_seg_keep_isolated_min_points=null,
+              other_seg_keep_isolated_min_length=null,
               // doc pr/45 -- paint muon-typed (+-13) pseudo-showers as track in
               // the Bee shower_track layer + PrDisplayDump (18255-56463: 411 cm
               // muon painted red).  C++ default false; key suppressed when off
@@ -1908,6 +1918,10 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
             mvga_satellite=mvga_satellite,
             dl_vtx_swap_guard=dl_vtx_swap_guard,
             main_vertex_swap_apply=main_vertex_swap_apply,
+            rough_path_probe=rough_path_probe,
+            other_seg_keep_isolated=other_seg_keep_isolated,
+            other_seg_keep_isolated_min_points=other_seg_keep_isolated_min_points,
+            other_seg_keep_isolated_min_length=other_seg_keep_isolated_min_length,
             muon_dqdx_curve=muon_dqdx_curve,
             sp_dedx_use_recomb_model=sp_dedx_use_recomb_model,
             sp_mean_dedx_cut=sp_mean_dedx_cut,
@@ -2619,6 +2633,15 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
               mvga_satellite=null,
               dl_vtx_swap_guard=false,
               main_vertex_swap_apply=false,
+              // doc pr/51 round 4 -- diagnostic-only rough-path probe.
+              // C++ default false; false omits the key => byte-identical.
+              rough_path_probe=false,
+              // doc pr/54 -- keep well-supported isolated residual segments
+              // in find_other_segments.  C++ defaults: keep false, floors
+              // 25 points / 3 cm.  false/null omit the keys => byte-identical.
+              other_seg_keep_isolated=false,
+              other_seg_keep_isolated_min_points=null,
+              other_seg_keep_isolated_min_length=null,
        pseudo_shower_track_paint=false,
        // Muon dQ/dx-vs-length envelope: DEFAULT = the docs/pr/10 SBND fit
        // (see the clus_pr arg comment; null restores the uBooNE refit).
@@ -2828,6 +2851,10 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 mvga_satellite=mvga_satellite,
                 dl_vtx_swap_guard=dl_vtx_swap_guard,
                 main_vertex_swap_apply=main_vertex_swap_apply,
+                rough_path_probe=rough_path_probe,
+                other_seg_keep_isolated=other_seg_keep_isolated,
+                other_seg_keep_isolated_min_points=other_seg_keep_isolated_min_points,
+                other_seg_keep_isolated_min_length=other_seg_keep_isolated_min_length,
                 pseudo_shower_track_paint=pseudo_shower_track_paint,
                 muon_dqdx_curve=muon_dqdx_curve,
                 use_power_recomb=use_power_recomb,

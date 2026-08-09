@@ -1238,6 +1238,23 @@ function(
     // the SBND_MAIN_VERTEX_SWAP_APPLY runner env).  false omits the key =>
     // byte-identical.
     main_vertex_swap_apply = false,
+    // doc pr/51 round 4 -- diagnostic-only rough-path probe for the
+    // near-vertex short-cut investigation (path-COST, not graph-shape).
+    // No graph/fit/segment content is ever changed; every line is TRACE.
+    // Validation: -A rough_path_probe=true (or the SBND_ROUGH_PATH_PROBE
+    // runner env).  false omits the key => byte-identical.
+    rough_path_probe = false,
+    // doc pr/54 -- keep well-supported isolated residual segments in
+    // find_other_segments (18255-142421 "missing gammas": a separated EM
+    // shower of the main cluster is fit and then silently discarded because
+    // neither endpoint touches the existing graph).  DEFAULT OFF pending
+    // owner review of the Bee demo.  Validation: -A
+    // other_seg_keep_isolated=true (or the SBND_OTHER_SEG_KEEP_ISOLATED
+    // runner env).  C++ floors 25 points / 3 cm; false/null omit the keys
+    // => byte-identical.
+    other_seg_keep_isolated = false,
+    other_seg_keep_isolated_min_points = null,
+    other_seg_keep_isolated_min_length = null,
 )
     local base = import 'pgrapher/experiment/sbnd/simparams.jsonnet';
     local params = base {
@@ -1445,6 +1462,10 @@ function(
                              mvga_satellite=mvga_satellite,
                              dl_vtx_swap_guard=dl_vtx_swap_guard,
                              main_vertex_swap_apply=main_vertex_swap_apply,
+                             rough_path_probe=rough_path_probe,
+                             other_seg_keep_isolated=other_seg_keep_isolated,
+                             other_seg_keep_isolated_min_points=other_seg_keep_isolated_min_points,
+                             other_seg_keep_isolated_min_length=other_seg_keep_isolated_min_length,
                              pseudo_shower_track_paint=pseudo_shower_track_paint,
                              reclass_never_computed_ke_floor=reclass_never_computed_ke_floor,
                              muon_dqdx_curve=muon_dqdx_curve,

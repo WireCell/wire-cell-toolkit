@@ -146,6 +146,10 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_other_seg_relaxed_accept = get(config, "other_seg_relaxed_accept", m_other_seg_relaxed_accept);
     // doc sbnd_xin/docs/pr/45 -- find_other_segments empty-2D-tree sentinel guard.
     m_other_seg_empty_2d_guard = get(config, "other_seg_empty_2d_guard", m_other_seg_empty_2d_guard);
+    // doc sbnd_xin/docs/pr/54 -- keep well-supported isolated residual segments.
+    m_other_seg_keep_isolated            = get(config, "other_seg_keep_isolated",            m_other_seg_keep_isolated);
+    m_other_seg_keep_isolated_min_points = get(config, "other_seg_keep_isolated_min_points", m_other_seg_keep_isolated_min_points);
+    m_other_seg_keep_isolated_min_length = get(config, "other_seg_keep_isolated_min_length", m_other_seg_keep_isolated_min_length); // cm
     // doc sbnd_xin/docs/pr/31 §11 port-fidelity knob (F2, was P2).
     m_shower_topo_proto_dir    = get(config, "shower_topo_proto_dir",    m_shower_topo_proto_dir);
     // doc sbnd_xin/docs/pr/32 §11 port-fidelity knobs (F1-F4).
@@ -268,6 +272,8 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_dl_vtx_swap_guard       = get(config, "dl_vtx_swap_guard",       m_dl_vtx_swap_guard);
     // doc sbnd_xin/docs/pr/51 round 3: traditional-path swap propagation.
     m_main_vertex_swap_apply  = get(config, "main_vertex_swap_apply",  m_main_vertex_swap_apply);
+    // doc sbnd_xin/docs/pr/51 round 4: diagnostic-only rough-path probe.
+    m_rough_path_probe        = get(config, "rough_path_probe",        m_rough_path_probe);
     m_beam_window_low         = get(config, "beam_window_low",         m_beam_window_low);
     m_beam_window_high        = get(config, "beam_window_high",        m_beam_window_high);
     m_nu_skip_cosmic          = get(config, "nu_skip_cosmic",          m_nu_skip_cosmic);
@@ -435,6 +441,10 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["first_seg_local_pca"]      = m_first_seg_local_pca;       // true  = legacy (the refinement runs)
     cfg["other_seg_relaxed_accept"] = m_other_seg_relaxed_accept;  // true  = legacy (the 0.72/15cm/1.05 clause is live)
     cfg["other_seg_empty_2d_guard"] = m_other_seg_empty_2d_guard;  // false = legacy (-1 sentinel counts as covered)
+    // doc sbnd_xin/docs/pr/54.
+    cfg["other_seg_keep_isolated"]            = m_other_seg_keep_isolated;            // false = legacy (isolated residual discarded)
+    cfg["other_seg_keep_isolated_min_points"] = m_other_seg_keep_isolated_min_points; // component-point floor when the keep is on
+    cfg["other_seg_keep_isolated_min_length"] = m_other_seg_keep_isolated_min_length; // cm; fitted-length floor when the keep is on
     // doc sbnd_xin/docs/pr/31 §11.
     cfg["shower_topo_proto_dir"]    = m_shower_topo_proto_dir;     // false = legacy (the stage-3 PCA direction call runs)
     // doc sbnd_xin/docs/pr/32 §11.
@@ -498,6 +508,7 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["dl_vtx_score_scale"]      = 1000.0;  // scale factor on raw DL score in composite re-rank (1.0 = unscaled)
     cfg["dl_vtx_swap_guard"]       = m_dl_vtx_swap_guard;  // doc pr/51 (506746): false = legacy (rerank may swap the main cluster)
     cfg["main_vertex_swap_apply"]  = m_main_vertex_swap_apply;  // doc pr/51 round 3: false = legacy (traditional-path swap decision is computed then discarded)
+    cfg["rough_path_probe"]        = m_rough_path_probe;  // doc pr/51 round 4: false = legacy (diagnostic TRACE probe never runs)
     cfg["clus_geom_helper"] = ""; // empty = no SCE vertex correction
     cfg["beam_window_low"] = m_beam_window_low;   // beam window on cluster_t0; low >= high disables the
     cfg["beam_window_high"] = m_beam_window_high; // gate (uBooNE single-main selection).
@@ -829,6 +840,7 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
     pattern_algos.m_mvga_stub_pts     = m_mvga_stub_pts;
     pattern_algos.m_mvga_reseat_angle = m_mvga_reseat_angle;          // deg, no conversion
     pattern_algos.m_mvga_satellite    = m_mvga_satellite * units::cm; // cm -> internal
+    pattern_algos.m_rough_path_probe  = m_rough_path_probe;           // doc pr/51 round 4: diagnostic-only
     pattern_algos.m_shower_topo_demote_len = m_shower_topo_demote_len * units::cm;  // cm -> internal
     // doc sbnd_xin/docs/pr/30 §11 port-fidelity knobs.
     pattern_algos.m_fit_exclusion            = m_fit_exclusion;
@@ -839,6 +851,10 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
     pattern_algos.m_other_seg_relaxed_accept = m_other_seg_relaxed_accept;
     // doc sbnd_xin/docs/pr/45.
     pattern_algos.m_other_seg_empty_2d_guard = m_other_seg_empty_2d_guard;
+    // doc sbnd_xin/docs/pr/54.
+    pattern_algos.m_other_seg_keep_isolated            = m_other_seg_keep_isolated;
+    pattern_algos.m_other_seg_keep_isolated_min_points = m_other_seg_keep_isolated_min_points;
+    pattern_algos.m_other_seg_keep_isolated_min_length = m_other_seg_keep_isolated_min_length * units::cm; // cm -> internal
     // doc sbnd_xin/docs/pr/31 §11 (F2).
     pattern_algos.m_shower_topo_proto_dir    = m_shower_topo_proto_dir;
     // doc sbnd_xin/docs/pr/32 §11 (F1-F4).
@@ -1165,6 +1181,13 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
             detg_dump("main_vertex_graph_audit", *pr_graph);
         }
 
+        // doc sbnd_xin/docs/pr/51 round 4: diagnostic-only rough-path probe
+        // -- inert unless rough_path_probe.  Runs right after the audit
+        // block (on today's production graph when mvga is off; on the
+        // audited graph when it is on) so its measurements match whichever
+        // near-vertex state is actually being Bee-scanned.
+        pattern_algos.rough_path_probe(*pr_graph, *main_cluster, final_main_vertex, *m_track_fitter, m_dv);
+
         pattern_algos.clustering_points(*pr_graph, *main_cluster, m_dv);
 
         std::cout << "After shower clustering :" << std::endl; pattern_algos.print_segs_info(*pr_graph, *main_cluster, 0);
@@ -1429,6 +1452,7 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
             "addseg={} addseg_reentry={} ep_mismatch={} ep_refused={} "
             "pca_calls={} pca_moved={} pca_mean_cm={:.4f} pca_max_cm={:.4f} "
             "oseg_proto={} oseg_relaxed_only={} oseg_reject={} "
+            "oseg_iso_drop={} oseg_iso_keep={} "
             "knobs[fit_exclusion={} endpoint_strict={} oov_parity={} local_pca={} relaxed_accept={}]",
             pa.oov_isochronous.load(), pa.oov_dead_scan.load(), pa.oov_unique_scan.load(),
             pa.add_segment_calls.load(), pa.add_segment_reentry.load(),
@@ -1437,6 +1461,7 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
             moved ? (double(pa.pca_move_um_sum.load()) / moved) * units::um / units::cm : 0.0,
             double(pa.pca_move_um_max.load()) * units::um / units::cm,
             pa.oseg_accept_proto.load(), pa.oseg_accept_relaxed.load(), pa.oseg_reject.load(),
+            pa.oseg_isolated_drop.load(), pa.oseg_isolated_keep.load(),
             m_fit_exclusion, m_graph_endpoint_strict, m_oov_prototype_parity,
             m_first_seg_local_pca, m_other_seg_relaxed_accept);
     }

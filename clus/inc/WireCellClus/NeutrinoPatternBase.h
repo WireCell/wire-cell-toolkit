@@ -406,6 +406,13 @@ namespace WireCell::Clus::PR {
         double m_mvga_reseat_angle{150};      ///< op3 re-seat collinearity threshold vs a sibling prong, deg (131357 measures ~180; 175 would be the final_1p analogue but near-corner arms curve)
         double m_mvga_satellite{0};           ///< op3 satellite-anchor radius around the main vertex (round 3, doc pr/51); 0 = main-vertex-only, byte-identical to round 2
 
+        // ---- doc sbnd_xin/docs/pr/51 round 4: rough-path diagnostic probe --
+        // Diagnostic-only TRACE instrumentation for the near-vertex
+        // short-cut investigation (see TaggerCheckNeutrino.h for the full
+        // rationale).  Never mutates a graph, segment, or fit; every line is
+        // SPDLOG_LOGGER_TRACE.  false (default) => byte-identical.
+        bool   m_rough_path_probe{false};
+
         // ---- doc sbnd_xin/docs/pr/30 §11: four port-fidelity knobs ----------
         //
         // P1 / F1 -- `flag_exclusion` on do_multi_tracking.
@@ -511,6 +518,26 @@ namespace WireCell::Clus::PR {
         // today, so default TRUE, and OFF restores the prototype's clause.
         // C++ default true => byte-identical.
         bool   m_other_seg_relaxed_accept{true};
+
+        // doc sbnd_xin/docs/pr/54 -- keep well-supported isolated residual
+        // segments in find_other_segments (18255-142421 "missing gammas": a
+        // 2930-point separated EM component of the main cluster is fragmented
+        // by the terminal-graph partition, its pieces fit and then discarded
+        // because neither endpoint touches the existing graph and the
+        // isochronous snap does not apply).  The prototype has the same
+        // discard: NeutrinoID_proto_vertex.h:1470-1475 pushes such candidates
+        // into residual_segment_candidates, which is write-only -- never
+        // consumed anywhere -- so this keep path is a toolkit-only extension
+        // of an unfinished prototype feature, not a parity fix.  When ON, an
+        // isolated candidate whose terminal-graph component has at least
+        // min_points points AND whose fitted track is at least min_length
+        // long is added to the graph as its own disconnected piece (own two
+        // endpoint vertices) and refit jointly with the cluster, exactly like
+        // the isochronous-accepted branch.  C++ default false => discard,
+        // byte-identical.
+        bool   m_other_seg_keep_isolated{false};
+        int    m_other_seg_keep_isolated_min_points{25};
+        double m_other_seg_keep_isolated_min_length{3.0 * units::cm}; // internal units
 
         // doc sbnd_xin/docs/pr/45 -- empty-2D-tree sentinel guard in
         // find_other_segments (SBND 18255-56463 cluster 14, the 30 cm
@@ -1590,6 +1617,12 @@ namespace WireCell::Clus::PR {
         // replaces the pointer.  Gated on m_main_vertex_graph_audit (default
         // false => immediate return, no side effects).
         bool main_vertex_graph_audit(Graph& graph, Facade::Cluster& cluster, VertexPtr main_vertex, TrackFitting& track_fitter, IDetectorVolumes::pointer dv);
+        // doc sbnd_xin/docs/pr/51 round 4 (see the m_rough_path_probe member
+        // block): diagnostic-only TRACE probe for the near-vertex short-cut
+        // investigation.  Never edits graph, segment, or fit content; always
+        // returns without side effects.  Gated on m_rough_path_probe
+        // (default false => immediate return).
+        void rough_path_probe(Graph& graph, Facade::Cluster& cluster, VertexPtr main_vertex, TrackFitting& track_fitter, IDetectorVolumes::pointer dv);
         void determine_main_vertex(Graph& graph, Facade::Cluster& cluster, VertexPtr& main_vertex, IndexedVertexSet& vertices_in_long_muon, IndexedSegmentSet& segments_in_long_muon, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model);
         void change_daughter_type(Graph& graph, VertexPtr vertex, SegmentPtr segment, int particle_type, double mass, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model);
         void examine_main_vertices_local(Graph& graph, std::vector<VertexPtr>& vertices, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model);

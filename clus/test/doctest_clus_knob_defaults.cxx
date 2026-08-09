@@ -146,6 +146,8 @@ TEST_CASE("clus knob defaults: TaggerCheckNeutrino switches are all OFF")
     // doc pr/51 round 3: op3 satellite-anchor extension + traditional-path
     // swap-apply -- both OFF.
     CHECK_KNOB_BOOL(cfg, "main_vertex_swap_apply", false);
+    // doc pr/51 round 4: diagnostic-only rough-path probe -- OFF.
+    CHECK_KNOB_BOOL(cfg, "rough_path_probe", false);
 
     // Numeric knobs whose legacy value is the INERT one: 0 disables the guard,
     // so an absent key leaves the code path untouched.
