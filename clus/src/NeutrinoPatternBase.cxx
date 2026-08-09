@@ -107,9 +107,26 @@ std::vector<Facade::geo_point_t> PatternAlgorithms::do_rough_path(const Facade::
         auto last_index = last_knn_results[0].first;   // Get the index from the first result
  
         // 4. Use Steiner graph to find the shortest path
-        const std::vector<size_t>& path_indices = 
+        //
+        // doc pr/55 (2026-08-09): the owner asked, after doc pr/53's
+        // relaxed_strict_img membership-graph fix, whether the PR/fitting
+        // chain actually runs on that tightened graph. It does not: this is
+        // the ONLY graph the trajectory router touches, and it is
+        // "steiner_graph" -- a Steiner reduction of "ctpc_ref_pid"
+        // (CreateSteinerGraph.cxx), which carries the uncapped MST
+        // connect_graph()/connect_graph_with_reference() bridges and has no
+        // relationship to protect_bundle's graph_name knob at all. Sentinel
+        // log only, no behavior change.
+        const auto& steiner_graph = cluster.find_graph("steiner_graph");
+        SPDLOG_LOGGER_DEBUG(s_log,
+            "pr55 do_rough_path: cluster {} flavor=steiner_graph n_vertices={} n_edges={} "
+            "first=({:.1f},{:.1f},{:.1f}) last=({:.1f},{:.1f},{:.1f})",
+            cluster.ident(), boost::num_vertices(steiner_graph), boost::num_edges(steiner_graph),
+            first_point.x(), first_point.y(), first_point.z(),
+            last_point.x(), last_point.y(), last_point.z());
+        const std::vector<size_t>& path_indices =
             cluster.graph_algorithms("steiner_graph").shortest_path(first_index, last_index);
-            
+
         std::vector<Facade::geo_point_t> path_points;
         if (!cluster.has_pc("steiner_pc")) return path_points;
         const auto& steiner_pc = cluster.get_pc("steiner_pc");

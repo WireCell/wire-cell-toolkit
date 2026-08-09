@@ -879,8 +879,23 @@ void MultiAlgBlobClustering::fill_bee_points_from_pr_graph(const std::string& na
 
             auto dpc = segment->dpcloud("associate_points");
             if (!dpc) {
+                // doc pr/55 (2026-08-09): the Family-C "phantom segment" mechanism --
+                // a segment that DOES get a non-empty fits() (so it draws a
+                // trajectory in the track_fit layer) but has no associate_points
+                // cloud at all, so it contributes 0 points to shower_track.
+                // Sentinel log only, no behavior change.
+                SPDLOG_LOGGER_DEBUG(log,
+                    "pr55 shower_track layer: segment {} (cluster {}) has no "
+                    "associate_points dpcloud -- contributes 0 points to '{}'",
+                    encoded_id, cluster_id, name);
                 segment_count++;
                 continue;
+            }
+            if (dpc->npoints() == 0) {
+                SPDLOG_LOGGER_DEBUG(log,
+                    "pr55 shower_track layer: segment {} (cluster {}) has an empty "
+                    "associate_points dpcloud (0 points) -- contributes 0 points to '{}'",
+                    encoded_id, cluster_id, name);
             }
             // Use the shower's start-segment encoded ID as cluster_id when the
             // segment belongs to a shower (mirrors seg_display_id in fill_bee_pf_tree:
@@ -916,6 +931,15 @@ void MultiAlgBlobClustering::fill_bee_points_from_pr_graph(const std::string& na
             const auto& fits = segment->fits();
 
             if (fits.empty()) {
+                // doc pr/55 (2026-08-09): previously silent -- this is the exact
+                // mechanism behind a "phantom segment" (fit-layer contributes
+                // nothing for a segment that DOES have associate points in the
+                // shower_track layer, since that branch runs independently
+                // above). Sentinel log only, no behavior change.
+                SPDLOG_LOGGER_DEBUG(log,
+                    "pr55 track_fit layer: segment {} (cluster {}) reached the Bee dump "
+                    "with an empty fits() -- contributes 0 points to '{}'",
+                    encoded_id, cluster_id, name);
                 segment_count++;
                 continue;
             }
