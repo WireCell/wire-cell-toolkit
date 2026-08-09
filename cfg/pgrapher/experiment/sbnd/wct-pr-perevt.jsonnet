@@ -1247,12 +1247,15 @@ function(
     // doc pr/54 -- keep well-supported isolated residual segments in
     // find_other_segments (18255-142421 "missing gammas": a separated EM
     // shower of the main cluster is fit and then silently discarded because
-    // neither endpoint touches the existing graph).  DEFAULT OFF pending
-    // owner review of the Bee demo.  Validation: -A
-    // other_seg_keep_isolated=true (or the SBND_OTHER_SEG_KEEP_ISOLATED
-    // runner env).  C++ floors 25 points / 3 cm; false/null omit the keys
-    // => byte-identical.
-    other_seg_keep_isolated = false,
+    // neither endpoint touches the existing graph).  SBND PRODUCTION ON --
+    // owner flip 2026-08-09 after the Bee before/after hand-scan of 142421
+    // ("this was a bug"): bare production now IS the validated
+    // work-pr54-on142421 arm config.  Legacy escape for A/B: -A
+    // other_seg_keep_isolated=false (or SBND_OTHER_SEG_KEEP_ISOLATED=false)
+    // restores the pre-flip production bare, byte-exact (doc pr/54 SS12
+    // flip proofs).  C++ floors 25 points / 3 cm ride as defaults (null
+    // omits their keys); C++ knob default itself stays false.
+    other_seg_keep_isolated = true,
     other_seg_keep_isolated_min_points = null,
     other_seg_keep_isolated_min_length = null,
 )
