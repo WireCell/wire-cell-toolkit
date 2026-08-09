@@ -2827,6 +2827,9 @@ Facade::Cluster::graph_type& Facade::Cluster::find_graph(
     if (flavor == "relaxed_strict") {
         return this->give_graph(flavor, make_graph_relaxed_strict(*this, dv, pcts));
     }
+    if (flavor == "relaxed_strict_img") {
+        return this->give_graph(flavor, make_graph_relaxed_strict_img(*this, dv, pcts));
+    }
 
     // Do a hail mary, maybe user made a mistake by passing dv/pcts and really
     // wants a flavor that we can make implicitly.
@@ -2868,6 +2871,9 @@ Facade::Cluster::graph_type& Facade::Cluster::find_graph(
     }
     if (flavor == "relaxed_strict") {
         return this->give_graph(flavor, make_graph_relaxed_strict(*this, dv, pcts));
+    }
+    if (flavor == "relaxed_strict_img") {
+        return this->give_graph(flavor, make_graph_relaxed_strict_img(*this, dv, pcts));
     }
 
     // Do a hail mary, maybe user made a mistake by passing dv/pcts and really
@@ -2984,6 +2990,12 @@ const GraphAlgorithms& Facade::Cluster::graph_algorithms(const std::string& flav
         return got.first->second;
     }
 
+    if (flavor == "relaxed_strict_img") {
+        auto& gr = const_cast<Cluster*>(this)->give_graph(flavor, make_graph_relaxed_strict_img(*this, dv, pcts));
+        auto got = m_galgs.emplace(flavor, GraphAlgorithms(gr));
+        return got.first->second;
+    }
+
     // Do a hail mary, maybe user made a mistake by passing dv/pcts and really
     // wants a flavor that we can make implicitly.
     return graph_algorithms(flavor);
@@ -3027,6 +3039,12 @@ const GraphAlgorithms& Facade::Cluster::graph_algorithms(const std::string& flav
 
     if (flavor == "relaxed_strict") {
         auto& gr = const_cast<Cluster*>(this)->give_graph(flavor, make_graph_relaxed_strict(*this, dv, pcts));
+        auto got = m_galgs.emplace(flavor, GraphAlgorithms(gr));
+        return got.first->second;
+    }
+
+    if (flavor == "relaxed_strict_img") {
+        auto& gr = const_cast<Cluster*>(this)->give_graph(flavor, make_graph_relaxed_strict_img(*this, dv, pcts));
         auto got = m_galgs.emplace(flavor, GraphAlgorithms(gr));
         return got.first->second;
     }

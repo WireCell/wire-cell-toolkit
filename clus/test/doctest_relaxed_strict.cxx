@@ -13,6 +13,7 @@
 #include "WireCellUtil/doctest.h"
 
 using WireCell::Clus::Graphs::relaxed_strict_bad;
+using WireCell::Clus::Graphs::relaxed_img_bad;
 
 // The legacy relaxed test, restated locally as the comparison baseline
 // (connect_graph_relaxed.cxx:268 shape).
@@ -76,4 +77,74 @@ TEST_CASE("relaxed_strict kill predicate: strict is a superset of legacy")
             }
         }
     }
+}
+
+// doc pr/53 round 7 sec 18: relaxed_img_bad (S5, "3D-image support").  The
+// reference cases below are the operating point's own justification --
+// quoted from the round-7 offline threshold scan
+// (sbnd_xin/scripts/analysis/pr53/threshold_scan.py) run against every
+// OC53CENSUS-S closest-pair edge on the 27 round-6 mover events plus the
+// owner's round-7 hand-scan events, NOT guessed:
+//   - every owner-flagged edge measured max-contiguous-ghost-run 5-10 on an
+//     edge under 12cm (269774 j=1,k=3: run=10 dis=11.87cm; 269774
+//     j=13,k=14: run=7 dis=8.40cm; 71372 j=1,k=13: run=5 dis=6.06cm
+//     (the tightest target); 71372 j=2,k=11: run=7 dis=7.54cm; 463565
+//     j=2,k=7: run=7 dis=8.21cm);
+//   - a raw ghost-step COUNT or RATIO does not separate these from the
+//     surviving-edge background at all (background reaches comparable
+//     counts/ratios); the longest CONTIGUOUS run does (background median 0,
+//     p90 2 vs owner-target min 5);
+//   - the one confirmed false-positive class at long run length is a
+//     closest-pair edge whose "nearest points between components" skims the
+//     low-density corona of one large blob rather than crossing a genuine
+//     gap (evt 52672 j=0,k=2: run=19 but dis=45.89cm, spot-checked visually
+//     -- doc pr/53 round 7 sec 18.2) -- excluded by the edge-length cap,
+//     which costs nothing on the targets (longest is 11.87cm).
+TEST_CASE("relaxed_img kill predicate: owner-flagged target edges all kill")
+{
+    CHECK(relaxed_img_bad(10, 11.87));  // 269774 j=1 k=3
+    CHECK(relaxed_img_bad(7, 8.40));    // 269774 j=13 k=14
+    CHECK(relaxed_img_bad(5, 6.06));    // 71372 j=1 k=13 (tightest target)
+    CHECK(relaxed_img_bad(7, 7.54));    // 71372 j=2 k=11
+    CHECK(relaxed_img_bad(7, 8.21));    // 463565 j=2 k=7
+}
+
+TEST_CASE("relaxed_img kill predicate: corona false-positive excluded by the length cap")
+{
+    // evt 52672 j=0 k=2: 19-step contiguous ghost run would fire the
+    // run-floor alone, but the 45.89cm edge is nearly 4x the longest owner
+    // target and the spot-check figure shows the "closest pair" running
+    // along one large blob's boundary, not a gap between two objects.
+    CHECK(!relaxed_img_bad(19, 45.89));
+    // The run alone, ignoring length, would have fired -- confirm the cap
+    // is doing the work, not the floor.
+    CHECK(relaxed_img_bad(19, 14.9));  // same run, under the cap: fires
+}
+
+TEST_CASE("relaxed_img kill predicate: short runs and short edges survive")
+{
+    // Background median run is 0, p90 is 2 -- well under the floor of 4.
+    CHECK(!relaxed_img_bad(0, 5.0));
+    CHECK(!relaxed_img_bad(2, 5.0));
+    CHECK(!relaxed_img_bad(3, 5.0));   // one short of the floor
+    CHECK(relaxed_img_bad(4, 5.0));    // exactly at the floor
+    // At the length cap boundary (dis_cap_cm is an exclusive "<").
+    CHECK(relaxed_img_bad(4, 14.99));
+    CHECK(!relaxed_img_bad(4, 15.0));
+    CHECK(!relaxed_img_bad(4, 15.01));
+}
+
+TEST_CASE("relaxed_img kill predicate: image_check=false is a byte-identical no-op")
+{
+    // connect_graph_relaxed_strict's image_check parameter defaults to
+    // false; when false the S5 block is never entered (max_ghost_run stays
+    // 0, relaxed_img_bad is never called), so "relaxed_strict_img" with
+    // image_check=false and "relaxed_strict" are the same code path. This
+    // is a documentation check, not a call -- relaxed_img_bad(0, dis) never
+    // kills regardless of dis (0 < the floor for any floor >= 1), which is
+    // consistent with "no ghost steps observed" rather than "test skipped";
+    // the actual off-state proof is the C++ if(image_check) guard itself
+    // plus the round-7 off-gate (doc pr/53 round 7 sec 18.4).
+    CHECK(!relaxed_img_bad(0, 1.0));
+    CHECK(!relaxed_img_bad(0, 100.0));
 }

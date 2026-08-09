@@ -432,15 +432,24 @@ function(
     // cathode_kink_xcut above, which is cm), matching clus.jsonnet's pr()
     // defaults so a bare run is production; nulls = prototype-faithful
     // (re-join pass disabled -- would break cathode crossers, doc pr/20).
-    // **SBND PRODUCTION DEFAULT 'relaxed_strict', owner 2026-08-09 (doc pr/53
-    // round 6).**  The strict fork (S1 interior-step denominator + S2 ">= 2"
-    // floor in all three path-check blocks) closes the sub-3cm arithmetic
-    // blind spot that kept the 18255-422851 / 18255-521075 over-clustered
-    // necks alive; protect_bundle is the only consumer, so clustering and the
-    // TGM/STM/FC verdicts are byte-identical (gates work-pr53-base* vs
-    // work-pr53-off* 0/117).  Legacy escape: -A protect_graph_name=relaxed
-    // (SBND_PROTECT_GRAPH=relaxed) restores the pre-flip production graph.
-    protect_graph_name          = 'relaxed_strict',   // null => 'relaxed'
+    // **SBND PRODUCTION DEFAULT 'relaxed_strict_img', owner 2026-08-09 (doc
+    // pr/53 round 7; supersedes round 6's 'relaxed_strict' default below).**
+    // round 6 (S1 interior-step denominator + S2 ">= 2" floor in all three
+    // path-check blocks) closed the sub-3cm arithmetic blind spot that kept
+    // the 18255-422851 / 18255-521075 necks alive.  round 7 adds S5, a
+    // 3D-image-support OR-kill: the existing per-plane test is three
+    // INDEPENDENT 2D projections never intersected in 3D, so three planes can
+    // each see charge from a different nearby track and a straight path can
+    // read "good" with nothing physically there -- closes the 269774 /
+    // 463565 / 71372 owner-flagged cases plus 23 further movers the same
+    // class reaches (round 6 census: 20/117 movers, nusel 0/117; all 27
+    // splits causally validated with a real-void figure, same bar as round
+    // 6).  protect_bundle is the only consumer, so clustering and the
+    // TGM/STM/FC verdicts stay byte-identical (gates work-pr53r7-off* vs
+    // round-6 production 0/117).  Legacy escapes:
+    // -A protect_graph_name=relaxed_strict (SBND_PROTECT_GRAPH=relaxed_strict)
+    // restores round 6's production graph; =relaxed restores pre-round-6.
+    protect_graph_name          = 'relaxed_strict_img',   // null => 'relaxed'
     // C++ default true (doc pr/23 ordering): a TGM/STM/lm-convicted in-window
     // main does not open its bundle for splitting.  null => key omitted.
     protect_skip_convicted      = null,

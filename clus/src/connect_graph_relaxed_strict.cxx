@@ -14,6 +14,22 @@
 //       dir1, dir2), since their edges are tested and MST'd independently.
 // Caps (>7 single-counter, >9 sum) and the num_bad[3] >= 3 dead-W veto are
 // unchanged.
+//
+// doc pr/53 round 7 sec 18: image_check (default false, "relaxed_strict"
+// behavior byte-for-byte unchanged) adds S5, an independent OR-kill next to
+// relaxed_strict_bad in all three path-check blocks: relaxed_img_bad() on
+// the longest contiguous run of "ghost" steps -- 1cm samples with no 3D
+// image point (this cluster's own pt_clouds, any component) within
+// m_img_radius and not dead-channel-excused on any plane.  Root cause:
+// relaxed_strict_bad only ever sees three INDEPENDENT 2D per-plane
+// projections (Facade_Grouping.cxx has_closest_point), never intersected in
+// 3D, so three planes can each see charge from a different nearby track and
+// the whole straight path reads "good" with nothing physically there.  The
+// predicate, its run-length floor and its edge-length cap are justified in
+// WireCellClus/Graphs.h and doc pr/53 round 7 sec 18.2 (offline scan against
+// the owner's flagged edges + all round-6 mover edges) -- see there before
+// changing the operating point.  "relaxed_strict_img"
+// (make_graph_relaxed_strict_img) is the only caller passing image_check=true.
 
 #include "WireCellClus/Graphs.h"
 #include "WireCellClus/IPCTransform.h"
@@ -40,14 +56,27 @@ bool Graphs::relaxed_strict_bad(int nbad, int num_steps, int cap)
     return nbad > cap || (nbad >= 2 && nbad >= 0.75 * interior);
 }
 
+bool Graphs::relaxed_img_bad(int max_ghost_run, double dis_cm, int run_floor, double dis_cap_cm)
+{
+    // doc pr/53 round 7 sec 18.2: operating point chosen from an offline
+    // scan against all 27 round-6 mover events' emitted closest-pair edges,
+    // not guessed -- see WireCellClus/Graphs.h for the full justification.
+    return max_ghost_run >= run_floor && dis_cm < dis_cap_cm;
+}
+
 void Graphs::connect_graph_relaxed_strict(
     const Facade::Cluster& cluster,
-    IDetectorVolumes::pointer dv, 
+    IDetectorVolumes::pointer dv,
     IPCTransformSet::pointer pcts,
-    Weighted::Graph& graph)    
+    Weighted::Graph& graph,
+    bool image_check)
 {
     const bool use_ctpc = true;
     const auto* grouping = cluster.grouping();
+    // doc pr/53 round 7 sec 18: S5 operating point (see Graphs.h for the
+    // radius justification -- matches the OFFLINE oc53_probe.Loader img_dis
+    // radius used in the threshold scan). Only read when image_check.
+    const double m_img_radius = 1.0 * units::cm;
 
     // Get all the wire plane IDs from the grouping
     const auto& wpids = grouping->wpids();
@@ -151,6 +180,49 @@ void Graphs::connect_graph_relaxed_strict(
     const bool needs_transform = (cluster.get_default_scope().hash() != cluster.get_raw_scope().hash());
     const auto ctpc_transform = needs_transform ? pcts->pc_transform(cluster.get_scope_transform()) : nullptr;
     const double cluster_t0 = needs_transform ? cluster.get_cluster_t0() : 0.0;
+
+    // doc pr/53 round 7 sec 18 S5: only evaluated when image_check.  Re-walks
+    // the same 1cm samples as the nb/nb1 loop below (independent pass, kept
+    // separate from the already-shipped, extensively-validated nb/nb1
+    // accumulation so this addition cannot perturb it).  A step is "ghost"
+    // when it has no 3D image point (any of THIS cluster's own closely-
+    // components -- in-family precedent connect_graph_relaxed.cxx:1062-1069,
+    // relaxed_pid's cross-component check) within m_img_radius and is not
+    // dead-channel-excused on any plane.  Returns the longest contiguous run.
+    auto max_ghost_run = [&](const geo_point_t& p1, const geo_point_t& p2, int num_steps,
+                              const WirePlaneId& wpid_p1, const WirePlaneId& wpid_p2) -> int {
+        int run = 0, best = 0;
+        for (int ii = 0; ii != num_steps; ii++) {
+            geo_point_t test_p(
+                p1.x() + (p2.x() - p1.x())/num_steps*(ii + 1),
+                p1.y() + (p2.y() - p1.y())/num_steps*(ii + 1),
+                p1.z() + (p2.z() - p1.z())/num_steps*(ii + 1)
+            );
+            bool ghost;
+            auto test_wpid = get_wireplaneid(test_p, wpid_p1, wpid_p2, dv);
+            if (test_wpid.apa() != -1) {
+                geo_point_t test_p_raw = test_p;
+                if (needs_transform) {
+                    test_p_raw = ctpc_transform->backward(test_p, cluster_t0, test_wpid.face(), test_wpid.apa());
+                }
+                auto scores = grouping->test_good_point(test_p_raw, test_wpid.apa(), test_wpid.face());
+                double img_dis = 1e9;
+                for (size_t q = 0; q != num; ++q) {
+                    img_dis = std::min(img_dis, pt_clouds.at(q)->get_closest_dis(test_p));
+                }
+                const bool dead_excused = (scores[3] + scores[4] + scores[5]) > 0;
+                ghost = (img_dis > m_img_radius) && !dead_excused;
+            } else {
+                // Outside all APA volumes: no dead-channel excuse is
+                // available, same convention as the nb/nb1 loop's apa==-1
+                // branch (unconditionally counted bad there too).
+                ghost = true;
+            }
+            run = ghost ? run + 1 : 0;
+            if (run > best) best = run;
+        }
+        return best;
+    };
 
     // Calculate distances between components
     for (size_t j = 0; j != num; j++) {
@@ -354,6 +426,25 @@ void Graphs::connect_graph_relaxed_strict(
                     }
                 }
 
+                // doc pr/53 round 7 sec 18 S5: independent OR-kill, evaluated
+                // regardless of branch (unlike relaxed_strict_bad above, the
+                // 3D-image test does not depend on wire-direction angles).
+                // No-op, byte-identical to round-6 "relaxed_strict" when
+                // image_check is false (default).
+                int ghost_run = 0;
+                if (image_check) {
+                    ghost_run = max_ghost_run(p1, p2, num_steps, wpid_p1, wpid_p2);
+                    if (relaxed_img_bad(ghost_run, dis / units::cm)) {
+                        invalidate_distance();
+                    }
+                    if (oc53_census) {
+                        oc53_log->debug(
+                            "OC53CENSUS-IMG closest j={} k={} dis={:.2f}cm nsteps={} ghost_run={} killed={}",
+                            j, k, dis / units::cm, num_steps, ghost_run,
+                            std::get<0>(index_index_dis[j][k]) < 0);
+                    }
+                }
+
                 if (oc53_census) {
                     const bool killed = std::get<0>(index_index_dis[j][k]) < 0;
                     oc53_log->debug(
@@ -455,6 +546,21 @@ void Graphs::connect_graph_relaxed_strict(
                     }
                 }
 
+                // doc pr/53 round 7 sec 18 S5 (see the closest-pair block for
+                // the full comment). No-op when image_check is false.
+                int dir1_ghost_run = 0;
+                if (image_check) {
+                    dir1_ghost_run = max_ghost_run(p1, p2, num_steps, wpid_p1, wpid_p2);
+                    if (relaxed_img_bad(dir1_ghost_run, dis / units::cm)) {
+                        index_index_dis_dir1[j][k] = std::make_tuple(-1, -1, 1e9);
+                    }
+                    if (oc53_census) {
+                        oc53_log->debug("OC53CENSUS-IMG dir1 j={} k={} dis={:.2f}cm nsteps={} ghost_run={} killed={}",
+                                        j, k, dis / units::cm, num_steps, dir1_ghost_run,
+                                        std::get<0>(index_index_dis_dir1[j][k]) < 0);
+                    }
+                }
+
                 if (oc53_census) {
                     const bool killed = std::get<0>(index_index_dis_dir1[j][k]) < 0;
                     oc53_log->debug("OC53CENSUS-S dir1 j={} k={} dis={:.2f}cm nsteps={} nb={} nb1={} killed={}",
@@ -550,6 +656,21 @@ void Graphs::connect_graph_relaxed_strict(
                 else {
                     if (relaxed_strict_bad(num_bad1, num_steps)) {
                         index_index_dis_dir2[j][k] = std::make_tuple(-1, -1, 1e9);
+                    }
+                }
+
+                // doc pr/53 round 7 sec 18 S5 (see the closest-pair block for
+                // the full comment). No-op when image_check is false.
+                int dir2_ghost_run = 0;
+                if (image_check) {
+                    dir2_ghost_run = max_ghost_run(p1, p2, num_steps, wpid_p1, wpid_p2);
+                    if (relaxed_img_bad(dir2_ghost_run, dis / units::cm)) {
+                        index_index_dis_dir2[j][k] = std::make_tuple(-1, -1, 1e9);
+                    }
+                    if (oc53_census) {
+                        oc53_log->debug("OC53CENSUS-IMG dir2 j={} k={} dis={:.2f}cm nsteps={} ghost_run={} killed={}",
+                                        j, k, dis / units::cm, num_steps, dir2_ghost_run,
+                                        std::get<0>(index_index_dis_dir2[j][k]) < 0);
                     }
                 }
 

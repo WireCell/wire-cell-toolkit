@@ -54,11 +54,19 @@ namespace WireCell::Clus::Graphs {
     // selected only by ClusteringProtectBundle via graph_name "relaxed_strict".
     // Its kill predicate relaxed_strict_bad() is declared in the public
     // WireCellClus/Graphs.h (doctested there).
+    //
+    // doc pr/53 round 7 sec 18: image_check adds the S5 3D-image-support
+    // OR-kill (relaxed_img_bad(), also in the public header) alongside
+    // relaxed_strict_bad(); default false keeps this function byte-for-byte
+    // identical to graph_name "relaxed_strict"'s behavior (round 6). The
+    // "relaxed_strict_img" flavor (make_graph_relaxed_strict_img) is the
+    // only caller that passes true.
     void connect_graph_relaxed_strict(
         const Facade::Cluster& cluster,
         IDetectorVolumes::pointer dv,
         IPCTransformSet::pointer pcts,
-        Weighted::Graph& graph);
+        Weighted::Graph& graph,
+        bool image_check = false);
 
     bool is_point_good(const Facade::Cluster& cluster, size_t point_index, int ncut = 3);
 

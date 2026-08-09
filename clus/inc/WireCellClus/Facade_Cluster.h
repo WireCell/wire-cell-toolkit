@@ -582,6 +582,9 @@ namespace WireCell::Clus::Facade {
         /// - "relaxed" :: likely used for connected blobs
         /// - "relaxed_strict" :: stricter relaxed fork (doc pr/53 sec 16),
         ///   selected only by ClusteringProtectBundle
+        /// - "relaxed_strict_img" :: relaxed_strict + S5 3D-image-support
+        ///   OR-kill (doc pr/53 round 7 sec 18), selected only by
+        ///   ClusteringProtectBundle
         ///
         /// If the flavor is not in this known set, KeyError is
         /// thrown.

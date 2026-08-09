@@ -212,6 +212,51 @@ namespace WireCell::Clus::Graphs {
     /// Pure; exposed for doctests.
     bool relaxed_strict_bad(int nbad, int num_steps, int cap = 7);
 
+    /// Kill predicate of the "relaxed_strict_img" graph flavor (doc pr/53
+    /// round 7 sec 18: S5, "3D-image support"). True if the sampled path has
+    /// a run of consecutive "ghost" steps -- 1cm samples with no 3D image
+    /// point within the configured radius on ANY of this cluster's own
+    /// closely-components, and not excused by a dead channel on any plane --
+    /// at least run_floor steps long, AND the edge itself is shorter than
+    /// dis_cap_cm.
+    ///
+    /// Root cause this closes: relaxed_strict_bad only ever sees three
+    /// independent 2D per-plane projections (Facade_Grouping.cxx
+    /// has_closest_point, one kd2d radius query per plane); nothing in the
+    /// existing path test intersects them in 3D, so three planes can each
+    /// see charge from a DIFFERENT nearby track and every step reads "good"
+    /// with nothing physically there at that 3D location. This predicate is
+    /// an independent OR-kill alongside relaxed_strict_bad, not a
+    /// replacement -- it keeps every existing kill and can only add new
+    /// ones (relaxed_strict_img superset-of relaxed_strict by construction).
+    ///
+    /// The dis_cap_cm term exists because the closest-pair test's "nearest
+    /// points between two components" can, for long edges, land on the
+    /// low-density corona of one large blob rather than cross a genuine gap
+    /// between two separate objects (doc pr/53 round 7 sec 18.2's offline
+    /// threshold scan: event 52672 j=0 k=2, 45.9cm edge, max contiguous
+    /// ghost run 19/45 steps yet the two "components" are corona and
+    /// interior of the SAME dense shower, not two objects). Every
+    /// owner-flagged target edge measured under 12cm; the cap default
+    /// (15cm) keeps full margin on the targets while excluding that case.
+    /// The run-length floor (not a raw ghost-step count or ratio) is
+    /// likewise chosen from that scan: raw count/ratio did not separate the
+    /// owner-flagged edges from the surviving-edge background at ALL
+    /// (background edges reach comparable ghost counts/ratios), but the
+    /// LONGEST CONTIGUOUS run does (owner targets: 5-10 steps; background
+    /// median: 0, p90: 2). run_floor=4 keeps every owner target with a
+    /// one-step margin against the tightest (5).
+    ///
+    /// The dead-channel exemption is what keeps this rule honest: the
+    /// relaxed flavor exists specifically to bridge regions where 3D
+    /// imaging is known to fail (dead wires); requiring 3D image support is
+    /// in partial tension with that purpose, and a genuine dead-region
+    /// crossing must not be penalized -- only a step with NO excuse at all
+    /// counts as a ghost step.
+    ///
+    /// Pure; exposed for doctests.
+    bool relaxed_img_bad(int max_ghost_run, double dis_cm, int run_floor = 4, double dis_cap_cm = 15.0);
+
 }
 
 #endif

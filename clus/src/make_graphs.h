@@ -59,6 +59,13 @@ namespace WireCell::Clus::Graphs {
         IDetectorVolumes::pointer dv,
         IPCTransformSet::pointer pcts);
 
+    // closely + relaxed_strict with image_check=true (doc pr/53 round 7 sec
+    // 18: protect_bundle-only, adds the S5 3D-image-support OR-kill)
+    Weighted::Graph make_graph_relaxed_strict_img(
+        const Facade::Cluster& cluster,
+        IDetectorVolumes::pointer dv,
+        IPCTransformSet::pointer pcts);
+
 }
 
 #endif
