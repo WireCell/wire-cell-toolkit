@@ -123,6 +123,7 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_mvga_stub         = get(config, "mvga_stub",         m_mvga_stub);         // cm
     m_mvga_stub_pts     = get(config, "mvga_stub_pts",     m_mvga_stub_pts);
     m_mvga_reseat_angle = get(config, "mvga_reseat_angle", m_mvga_reseat_angle); // deg
+    m_mvga_satellite    = get(config, "mvga_satellite",    m_mvga_satellite);    // cm
     m_shower_topo_demote_len = get(config, "shower_topo_demote_len", m_shower_topo_demote_len);  // cm
     // doc sbnd_xin/docs/pr/49 -- cross-cluster projection-ghost deweighting
     // in the trajectory fit's 2D charge association (18255-57441): live
@@ -265,6 +266,8 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_dl_vtx_score_scale      = get(config, "dl_vtx_score_scale",      m_dl_vtx_score_scale);
     // doc sbnd_xin/docs/pr/51 (18255-506746): cross-cluster DL swap guard.
     m_dl_vtx_swap_guard       = get(config, "dl_vtx_swap_guard",       m_dl_vtx_swap_guard);
+    // doc sbnd_xin/docs/pr/51 round 3: traditional-path swap propagation.
+    m_main_vertex_swap_apply  = get(config, "main_vertex_swap_apply",  m_main_vertex_swap_apply);
     m_beam_window_low         = get(config, "beam_window_low",         m_beam_window_low);
     m_beam_window_high        = get(config, "beam_window_high",        m_beam_window_high);
     m_nu_skip_cosmic          = get(config, "nu_skip_cosmic",          m_nu_skip_cosmic);
@@ -416,6 +419,7 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["mvga_stub"]         = m_mvga_stub;
     cfg["mvga_stub_pts"]     = m_mvga_stub_pts;
     cfg["mvga_reseat_angle"] = m_mvga_reseat_angle;
+    cfg["mvga_satellite"]    = m_mvga_satellite;  // 0 = main-vertex-only (round 2), byte-identical
     cfg["kink_dqdx_hot_ratio"] = m_kink_dqdx_hot_ratio; // x mip_dqdx_median; inert while both above are false
     cfg["shower_topo_demote_len"] = m_shower_topo_demote_len;  // cm; 0 = legacy (long segments stay eligible for kShowerTopology)
     // doc sbnd_xin/docs/pr/49.
@@ -493,6 +497,7 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["dl_vtx_min_accept_score"] = 4.0;     // min composite score to accept a re-ranked DL vertex (empirical; correct uncertain-regime picks score 8-12, failure cases 3-5)
     cfg["dl_vtx_score_scale"]      = 1000.0;  // scale factor on raw DL score in composite re-rank (1.0 = unscaled)
     cfg["dl_vtx_swap_guard"]       = m_dl_vtx_swap_guard;  // doc pr/51 (506746): false = legacy (rerank may swap the main cluster)
+    cfg["main_vertex_swap_apply"]  = m_main_vertex_swap_apply;  // doc pr/51 round 3: false = legacy (traditional-path swap decision is computed then discarded)
     cfg["clus_geom_helper"] = ""; // empty = no SCE vertex correction
     cfg["beam_window_low"] = m_beam_window_low;   // beam window on cluster_t0; low >= high disables the
     cfg["beam_window_high"] = m_beam_window_high; // gate (uBooNE single-main selection).
@@ -823,6 +828,7 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
     pattern_algos.m_mvga_stub         = m_mvga_stub * units::cm;      // cm -> internal
     pattern_algos.m_mvga_stub_pts     = m_mvga_stub_pts;
     pattern_algos.m_mvga_reseat_angle = m_mvga_reseat_angle;          // deg, no conversion
+    pattern_algos.m_mvga_satellite    = m_mvga_satellite * units::cm; // cm -> internal
     pattern_algos.m_shower_topo_demote_len = m_shower_topo_demote_len * units::cm;  // cm -> internal
     // doc sbnd_xin/docs/pr/30 §11 port-fidelity knobs.
     pattern_algos.m_fit_exclusion            = m_fit_exclusion;
@@ -1079,10 +1085,32 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
             m_dl_vtx_score_scale, m_dl_vtx_swap_guard);
     }
     if (!flag_dl_changed) {
+        // doc sbnd_xin/docs/pr/51 round 3: determine_overall_main_vertex now
+        // takes the map and main_cluster by reference, so an internal cluster
+        // swap (examine_main_vertices / check_switch_main_cluster[_2] ->
+        // swap_main_cluster) is visible here instead of silently discarded.
+        // Pass throwaway local copies -- map_copy/mc_copy end up holding the
+        // function's true post-swap state, while this scope's own
+        // map_cluster_main_vertices/main_cluster are untouched unless
+        // m_main_vertex_swap_apply says to sync them.  Knob off => mc_copy is
+        // read, compared, then discarded => byte-identical to the pre-round-3
+        // by-value behaviour.
+        ClusterVertexMap map_copy = map_cluster_main_vertices;
+        Cluster* mc_copy = main_cluster;
         final_main_vertex = pattern_algos.determine_overall_main_vertex(
-            *pr_graph, map_cluster_main_vertices, main_cluster, other_clusters,
+            *pr_graph, map_copy, mc_copy, other_clusters,
             vertices_in_long_muon, segments_in_long_muon,
             *m_track_fitter, m_dv, particle_data(), m_recomb_model, true);
+        if (mc_copy != main_cluster) {
+            SPDLOG_LOGGER_DEBUG(log,
+                "mvsa: traditional path swapped main cluster {} -> {} ({})",
+                main_cluster->get_cluster_id(), mc_copy->get_cluster_id(),
+                m_main_vertex_swap_apply ? "applied" : "discarded");
+            if (m_main_vertex_swap_apply) {
+                main_cluster = mc_copy;
+                map_cluster_main_vertices = map_copy;
+            }
+        }
         if (final_main_vertex) {
             map_cluster_main_vertices[main_cluster] = final_main_vertex;
         }

@@ -145,6 +145,7 @@ public:
         double m_mvga_stub{2.0};          // cm
         int    m_mvga_stub_pts{4};        // valid fit points
         double m_mvga_reseat_angle{150.0}; // deg
+        double m_mvga_satellite{0};       // cm; 0 = main-vertex-only op3 scope (round 2), byte-identical (round 3, doc pr/51)
         // Long shower-topology demote length, cm (doc sbnd_xin/docs/pr/25
         // sec 3).  0 => the guard never fires => byte-identical.  50 is the
         // scan-supported operating point (9/10 owner-scanned events; ~45
@@ -311,6 +312,24 @@ public:
         // cluster (a confident wrong voxel's s_dl swamps every structural
         // term).  false = legacy = byte-identical.
         bool   m_dl_vtx_swap_guard{false};
+        // doc sbnd_xin/docs/pr/51 round 3: the traditional (non-DL)
+        // determine_overall_main_vertex takes main_cluster and its vertex
+        // map BY VALUE, yet internally decides cluster swaps via
+        // examine_main_vertices / check_switch_main_cluster[_2], which call
+        // swap_main_cluster -- a function that already mutates persistent
+        // state (the Flags::main_cluster bit on both clusters, and
+        // other_clusters by reference) even though the by-value pointer
+        // return is discarded by the caller.  A firing swap today therefore
+        // leaves the job in a half-applied state: flags/other_clusters say
+        // the new cluster, the caller's main_cluster variable still says the
+        // old one.  false (default) = legacy = the caller passes its own
+        // copies and discards them exactly as before, byte-identical; true =
+        // apply the decision, propagating both the new main_cluster and the
+        // pruned vertex map back to the caller (matching the DL sibling's
+        // by-reference contract).  A "mvsa:" DEBUG sentinel fires whenever a
+        // swap is decided, in both states, so the off-arms self-census how
+        // often the traditional path swaps in production today.
+        bool   m_main_vertex_swap_apply{false};
         double m_beam_window_low{0};   // beam window [low, high) on cluster_t0 (matched flash time, WCT units).
         double m_beam_window_high{0};  // low >= high (default) disables the gate: uBooNE single-main behavior.
         bool m_nu_skip_cosmic{false};  // if true (beam-gate only), skip in-window mains already tagged

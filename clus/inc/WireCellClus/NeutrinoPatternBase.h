@@ -367,22 +367,29 @@ namespace WireCell::Clus::PR {
         //       deleted iff the far side stays connected to the main
         //       vertex or reconnects to a reachable vertex within
         //       m_mvga_reconnect;
-        //   op3 micro-stub absorb + re-seat: terminal stub at the main
-        //       vertex shorter than m_mvga_stub is absorbed when its
-        //       corridor overlap with a sibling prong >= m_mvga_dup_frac
-        //       OR it is point-degenerate (<= m_mvga_stub_pts valid fits);
-        //       when the overlap gate passed and a sibling is the stub's
-        //       collinear continuation (>= m_mvga_reseat_angle deg), the
-        //       sibling is extended through the vertex and the main vertex
-        //       re-seats at the stub far end (131357: 0.9 mm from the true
-        //       image corner);
+        //   op3 micro-stub absorb + re-seat: terminal stub at an anchor
+        //       vertex (the main vertex, or -- when m_mvga_satellite > 0 --
+        //       any other main-cluster vertex within m_mvga_satellite of the
+        //       main vertex, doc pr/51 round 3: 142421's 7082/7023 and
+        //       285567's residual sit on such satellites, 1.2-1.5 cm out,
+        //       outside the main-vertex-only round-2 scope) shorter than
+        //       m_mvga_stub is absorbed when its corridor overlap with a
+        //       sibling prong at the same anchor >= m_mvga_dup_frac OR it is
+        //       point-degenerate (<= m_mvga_stub_pts valid fits); at the
+        //       main vertex only, when the overlap gate passed and a sibling
+        //       is the stub's collinear continuation (>= m_mvga_reseat_angle
+        //       deg), the sibling is extended through the vertex and the
+        //       main vertex re-seats at the stub far end (131357: 0.9 mm
+        //       from the true image corner) -- satellite anchors are
+        //       absorb-only, never re-seated;
         //   op4 one local do_multi_tracking refit (the examiner contract)
         //       so dQ/dx and the display layers reflect the audited graph.
-        // Guards: kProtectedBreak vertices are never removed or re-seated
-        // (pr/48 + pr/50 snap precedent); the main vertex is never removed;
-        // segments created by this pass's own reconnects are exempt from
-        // op1 (no delete/recreate cycling); every op is edit-capped; no
-        // recursion.  Toolkit-only (no prototype counterpart; ancestry:
+        // Guards: kProtectedBreak vertices are never removed, re-seated, or
+        // used as a satellite anchor (pr/48 + pr/50 snap precedent); the
+        // main vertex is never removed; segments created by this pass's own
+        // reconnects are exempt from every op, not just op1 (no
+        // delete/recreate cycling); every op is edit-capped; no recursion.
+        // Toolkit-only (no prototype counterpart; ancestry:
         // prototype NeutrinoID_final_structure.h examine_structure_final_1
         // lines 545-696 / _1p lines 402-544 and NeutrinoID_improve_vertex.h
         // eliminate_short_vertex_activities lines 365-1018).  C++ default
@@ -397,6 +404,7 @@ namespace WireCell::Clus::PR {
         double m_mvga_stub{2*units::cm};      ///< op3 terminal-stub length ceiling
         int    m_mvga_stub_pts{4};            ///< op3 point-degeneracy sub-gate: <= this many valid fits (overlap fractions are meaningless at 3-4 points)
         double m_mvga_reseat_angle{150};      ///< op3 re-seat collinearity threshold vs a sibling prong, deg (131357 measures ~180; 175 would be the final_1p analogue but near-corner arms curve)
+        double m_mvga_satellite{0};           ///< op3 satellite-anchor radius around the main vertex (round 3, doc pr/51); 0 = main-vertex-only, byte-identical to round 2
 
         // ---- doc sbnd_xin/docs/pr/30 §11: four port-fidelity knobs ----------
         //
@@ -1594,7 +1602,15 @@ namespace WireCell::Clus::PR {
         VertexPtr compare_main_vertices_global(Graph& graph, std::vector<VertexPtr>& vertex_candidates, Facade::Cluster& main_cluster, TrackFitting& track_fitter, IDetectorVolumes::pointer dv);
         Facade::Cluster* check_switch_main_cluster(Graph& graph, ClusterVertexMap map_cluster_main_vertices, Facade::Cluster* main_cluster, std::vector<Facade::Cluster*>& other_clusters, TrackFitting& track_fitter, IDetectorVolumes::pointer dv);
         Facade::Cluster* check_switch_main_cluster_2(Graph& graph, VertexPtr temp_main_vertex, Facade::Cluster* max_length_cluster, Facade::Cluster* main_cluster, std::vector<Facade::Cluster*>& other_clusters);
-        VertexPtr determine_overall_main_vertex(Graph& graph, ClusterVertexMap map_cluster_main_vertices, Facade::Cluster* main_cluster, std::vector<Facade::Cluster*>& other_clusters, IndexedVertexSet& vertices_in_long_muon, IndexedSegmentSet& segments_in_long_muon, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, bool flag_dev_chain = true);
+        // doc sbnd_xin/docs/pr/51 round 3: map_cluster_main_vertices and
+        // main_cluster are BY REFERENCE (matching determine_overall_main_vertex_DL
+        // below) so a cluster swap decided internally (examine_main_vertices /
+        // check_switch_main_cluster[_2] -> swap_main_cluster, which already
+        // mutates persistent Flags::main_cluster + the by-ref other_clusters)
+        // is not silently discarded.  Callers that want the pre-round-3
+        // discard behaviour pass throwaway local copies of both arguments --
+        // see TaggerCheckNeutrino.cxx's m_main_vertex_swap_apply gate.
+        VertexPtr determine_overall_main_vertex(Graph& graph, ClusterVertexMap& map_cluster_main_vertices, Facade::Cluster*& main_cluster, std::vector<Facade::Cluster*>& other_clusters, IndexedVertexSet& vertices_in_long_muon, IndexedSegmentSet& segments_in_long_muon, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, bool flag_dev_chain = true);
 
         // Deep-learning vertex refinement.  Returns true if the DL network changed
         // the selected vertex (in which case the traditional determine_overall_main_vertex

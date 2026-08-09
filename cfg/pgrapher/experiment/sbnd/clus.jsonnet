@@ -1322,10 +1322,18 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               mvga_stub=null,
               mvga_stub_pts=null,
               mvga_reseat_angle=null,
+              // doc pr/51 round 3 -- op3 satellite-anchor radius (cm).
+              // C++ default 0 (main-vertex-only, round 2); null omits the
+              // key => byte-identical.
+              mvga_satellite=null,
               // doc pr/51 (18255-506746) -- DL rerank cross-cluster swap
               // guard.  C++ default false; false omits the key =>
               // byte-identical.
               dl_vtx_swap_guard=false,
+              // doc pr/51 round 3 -- apply the traditional-path swap
+              // decision instead of discarding it.  C++ default false;
+              // false omits the key => byte-identical.
+              main_vertex_swap_apply=false,
               // doc pr/45 -- paint muon-typed (+-13) pseudo-showers as track in
               // the Bee shower_track layer + PrDisplayDump (18255-56463: 411 cm
               // muon painted red).  C++ default false; key suppressed when off
@@ -1897,7 +1905,9 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
             mvga_stub=mvga_stub,
             mvga_stub_pts=mvga_stub_pts,
             mvga_reseat_angle=mvga_reseat_angle,
+            mvga_satellite=mvga_satellite,
             dl_vtx_swap_guard=dl_vtx_swap_guard,
+            main_vertex_swap_apply=main_vertex_swap_apply,
             muon_dqdx_curve=muon_dqdx_curve,
             sp_dedx_use_recomb_model=sp_dedx_use_recomb_model,
             sp_mean_dedx_cut=sp_mean_dedx_cut,
@@ -2606,7 +2616,9 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
               mvga_stub=null,
               mvga_stub_pts=null,
               mvga_reseat_angle=null,
+              mvga_satellite=null,
               dl_vtx_swap_guard=false,
+              main_vertex_swap_apply=false,
        pseudo_shower_track_paint=false,
        // Muon dQ/dx-vs-length envelope: DEFAULT = the docs/pr/10 SBND fit
        // (see the clus_pr arg comment; null restores the uBooNE refit).
@@ -2813,7 +2825,9 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 mvga_stub=mvga_stub,
                 mvga_stub_pts=mvga_stub_pts,
                 mvga_reseat_angle=mvga_reseat_angle,
+                mvga_satellite=mvga_satellite,
                 dl_vtx_swap_guard=dl_vtx_swap_guard,
+                main_vertex_swap_apply=main_vertex_swap_apply,
                 pseudo_shower_track_paint=pseudo_shower_track_paint,
                 muon_dqdx_curve=muon_dqdx_curve,
                 use_power_recomb=use_power_recomb,

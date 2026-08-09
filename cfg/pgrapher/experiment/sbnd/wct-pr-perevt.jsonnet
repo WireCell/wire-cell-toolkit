@@ -1216,6 +1216,13 @@ function(
     mvga_stub = null,
     mvga_stub_pts = null,
     mvga_reseat_angle = null,
+    // doc pr/51 round 3 -- op3 satellite-anchor radius (cm): reaches
+    // terminal micro-stubs at satellite vertices near, not just at, the
+    // main vertex (142421's 7082/7023, 285567's residual).  DEFAULT OFF
+    // pending owner review.  Validation: -A mvga_satellite=<cm> (or the
+    // SBND_MVGA_SATELLITE runner env).  null/0 omits the key =>
+    // byte-identical.
+    mvga_satellite = null,
     // doc pr/51 (18255-506746) -- DL rerank cross-cluster swap guard: with
     // the guard on, an accepted DL vertex can never swap the main cluster
     // (506746: one confident uBooNE-net voxel, s_dl = +576, moved the
@@ -1224,6 +1231,13 @@ function(
     // SBND_DL_VTX_SWAP_GUARD runner env).  false omits the key =>
     // byte-identical.
     dl_vtx_swap_guard = false,
+    // doc pr/51 round 3 -- apply the traditional main-vertex path's cluster
+    // swap decision instead of silently discarding it (a latent bug: the
+    // decision fires today but never reaches the caller).  DEFAULT OFF
+    // pending owner review.  Validation: -A main_vertex_swap_apply=true (or
+    // the SBND_MAIN_VERTEX_SWAP_APPLY runner env).  false omits the key =>
+    // byte-identical.
+    main_vertex_swap_apply = false,
 )
     local base = import 'pgrapher/experiment/sbnd/simparams.jsonnet';
     local params = base {
@@ -1428,7 +1442,9 @@ function(
                              mvga_stub=mvga_stub,
                              mvga_stub_pts=mvga_stub_pts,
                              mvga_reseat_angle=mvga_reseat_angle,
+                             mvga_satellite=mvga_satellite,
                              dl_vtx_swap_guard=dl_vtx_swap_guard,
+                             main_vertex_swap_apply=main_vertex_swap_apply,
                              pseudo_shower_track_paint=pseudo_shower_track_paint,
                              reclass_never_computed_ke_floor=reclass_never_computed_ke_floor,
                              muon_dqdx_curve=muon_dqdx_curve,

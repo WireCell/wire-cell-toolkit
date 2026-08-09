@@ -143,6 +143,9 @@ TEST_CASE("clus knob defaults: TaggerCheckNeutrino switches are all OFF")
     // guard (506746) -- both OFF.
     CHECK_KNOB_BOOL(cfg, "main_vertex_graph_audit", false);
     CHECK_KNOB_BOOL(cfg, "dl_vtx_swap_guard", false);
+    // doc pr/51 round 3: op3 satellite-anchor extension + traditional-path
+    // swap-apply -- both OFF.
+    CHECK_KNOB_BOOL(cfg, "main_vertex_swap_apply", false);
 
     // Numeric knobs whose legacy value is the INERT one: 0 disables the guard,
     // so an absent key leaves the code path untouched.
@@ -196,6 +199,7 @@ TEST_CASE("clus knob defaults: TaggerCheckNeutrino switches are all OFF")
     CHECK_KNOB_NUM(cfg, "mvga_stub", 2.0);
     CHECK_KNOB_NUM(cfg, "mvga_stub_pts", 4.0);
     CHECK_KNOB_NUM(cfg, "mvga_reseat_angle", 150.0);
+    CHECK_KNOB_NUM(cfg, "mvga_satellite", 0.0);  // round 3: 0 = main-vertex-only op3 scope
     CHECK_KNOB_NUM(cfg, "shower_topo_demote_len", 0.0);      // 0 = long segments stay shower-eligible
     CHECK_KNOB_NUM(cfg, "nu_skip_cosmic_bundle_min_length", 0.0);
     CHECK_KNOB_NUM(cfg, "cosmic_companion_min_length", 0.0);

@@ -185,9 +185,16 @@ TEST_CASE("tagger_check_neutrino end-to-end")
         main_vertex = nullptr;
     }
 
-    // Determine overall neutrino vertex (traditional path; no DL in test config)
+    // Determine overall neutrino vertex (traditional path; no DL in test config).
+    // doc pr/51 round 3: determine_overall_main_vertex now takes the map and
+    // main_cluster by reference (a swap it decides internally used to be
+    // silently discarded).  This test has no main_vertex_swap_apply knob
+    // layer, so pass throwaway local copies -- exactly the legacy discard
+    // semantics -- and never touch data.main_cluster / map_cluster_main_vertices.
+    ClusterVertexMap map_copy = map_cluster_main_vertices;
+    Cluster* main_cluster_copy = data.main_cluster;
     VertexPtr final_main_vertex = pattern_algos.determine_overall_main_vertex(
-        *pr_graph, map_cluster_main_vertices, data.main_cluster, data.other_clusters,
+        *pr_graph, map_copy, main_cluster_copy, data.other_clusters,
         vertices_in_long_muon, segments_in_long_muon, *tf, dv, pdata, recomb, true);
     if (final_main_vertex) {
         map_cluster_main_vertices[data.main_cluster] = final_main_vertex;

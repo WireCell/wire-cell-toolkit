@@ -292,9 +292,17 @@ static PrStepResult run_through(PrTestEnv& env, PrContext& ctx, Step stop_after)
     if (stop_after == Step::AfterDetermineMainVertex) return r;
 
     {
+        // doc pr/51 round 3: determine_overall_main_vertex now takes the map
+        // and main_cluster by reference (a swap it decides internally used
+        // to be silently discarded).  This harness has no
+        // main_vertex_swap_apply knob layer, so pass throwaway local copies
+        // -- exactly the legacy discard semantics -- and never touch
+        // env.fixture.main_cluster / r.map_cluster_main_vertices directly.
+        ClusterVertexMap map_copy = r.map_cluster_main_vertices;
+        Cluster* main_cluster_copy = env.fixture.main_cluster;
         auto v = ctx.algo.determine_overall_main_vertex(
-            *ctx.graph, r.map_cluster_main_vertices,
-            env.fixture.main_cluster, env.fixture.other_clusters,
+            *ctx.graph, map_copy,
+            main_cluster_copy, env.fixture.other_clusters,
             r.vertices_in_long_muon, r.segments_in_long_muon,
             *ctx.tf, env.dv, env.pdata, env.recomb, true);
         if (v) r.map_cluster_main_vertices[env.fixture.main_cluster] = v;

@@ -347,126 +347,175 @@ bool PatternAlgorithms::main_vertex_graph_audit(Graph& graph, Facade::Cluster& c
         while (flag_continue && n_op3 < kEditCap) {
             flag_continue = false;
             if (!main_vertex->descriptor_valid()) break;
-            auto mv_vd = main_vertex->get_descriptor();
 
-            // Snapshot the incident segments before editing (the
-            // examine_vertices_4 pattern).
-            std::vector<SegmentPtr> incident;
-            for (auto edesc : sorted_out_edges(mv_vd, graph)) {
-                SegmentPtr sg = graph[edesc].segment;
-                if (sg && !created.count(sg)) incident.push_back(sg);
-            }
-            if (incident.size() < 2) break;
-
-            for (SegmentPtr stub : incident) {
-                double len = segment_track_length(stub);
-                if (len >= m_mvga_stub) continue;
-                VertexPtr vf = find_other_vertex(graph, stub, main_vertex);
-                if (!vf || !vf->descriptor_valid()) continue;
-                if (boost::degree(vf->get_descriptor(), graph) != 1) continue;  // terminal only
-                if (vf->flags_any(VertexFlags::kProtectedBreak)) continue;
-
-                // Gates: corridor overlap with a sibling prong, or point
-                // degeneracy (142421's 3-point stubs make overlap
-                // meaningless).
-                auto pts_stub = seg_points(stub);
-                size_t nfit = seg_valid_fits(stub);
-                double best_overlap = 0;
-                for (SegmentPtr sib : incident) {
-                    if (sib == stub) continue;
-                    double frac = path_overlap_fraction(pts_stub, seg_points(sib), m_mvga_dup_tol);
-                    if (frac > best_overlap) best_overlap = frac;
+            // Anchor list: the main vertex first (re-seat eligible), then --
+            // when m_mvga_satellite > 0 (round 3, doc pr/51) -- every other
+            // main-cluster vertex within m_mvga_satellite of the CURRENT
+            // main-vertex position, absorb-only.  Re-derived every
+            // iteration (mv_pt moves on a re-seat, so a hoisted list would
+            // go stale); ordered_nodes keeps satellite order deterministic.
+            // m_mvga_satellite == 0 ⇒ the list is exactly {main_vertex},
+            // byte-identical to round 2.
+            std::vector<std::pair<VertexPtr, bool>> anchors;
+            anchors.emplace_back(main_vertex, true);
+            if (m_mvga_satellite > 0) {
+                for (const auto& vd : ordered_nodes(graph)) {
+                    VertexPtr vtx = graph[vd].vertex;
+                    if (!vtx || vtx->cluster() != &cluster) continue;
+                    if (vtx == main_vertex) continue;
+                    if (vtx->flags_any(VertexFlags::kProtectedBreak)) continue;
+                    if (boost::degree(vd, graph) < 2) continue;  // nothing to shed without disconnecting
+                    WireCell::Point vp = vtx->fit().valid() ? vtx->fit().point : vtx->wcpt().point;
+                    if (point_dis(vp, mv_pt) >= m_mvga_satellite) continue;
+                    anchors.emplace_back(vtx, false);
                 }
-                const bool overlap_gate = (m_mvga_dup_frac > 0) && (best_overlap >= m_mvga_dup_frac);
-                const bool degen_gate = (m_mvga_stub_pts > 0) &&
-                                        (nfit <= static_cast<size_t>(m_mvga_stub_pts));
-                if (!overlap_gate && !degen_gate) continue;
+            }
 
-                // Re-seat sub-case (131357): overlap-gated stub whose
-                // collinear-continuation sibling exists, and the main vertex
-                // itself is not a protected snap/break corner.
-                SegmentPtr cont = nullptr;
-                double cont_angle = 0;
-                if (overlap_gate && m_mvga_reseat_angle > 0 &&
-                    !main_vertex->flags_any(VertexFlags::kProtectedBreak)) {
-                    WireCell::Point mvp = mv_pt;
-                    WireCell::Vector dir_stub = segment_cal_dir_3vector(stub, mvp, 10*units::cm);
+            bool fired_here = false;
+            for (auto& anchor_pair : anchors) {
+                VertexPtr anchor = anchor_pair.first;
+                bool is_main = anchor_pair.second;
+                if (!anchor->descriptor_valid()) continue;
+                auto a_vd = anchor->get_descriptor();
+
+                // Snapshot the incident segments before editing (the
+                // examine_vertices_4 pattern).
+                std::vector<SegmentPtr> incident;
+                for (auto edesc : sorted_out_edges(a_vd, graph)) {
+                    SegmentPtr sg = graph[edesc].segment;
+                    if (sg && !created.count(sg)) incident.push_back(sg);
+                }
+                if (incident.size() < 2) continue;  // nothing to shed at this anchor
+
+                double anchor_dis = is_main ? 0.0
+                    : point_dis(anchor->fit().valid() ? anchor->fit().point : anchor->wcpt().point, mv_pt);
+
+                for (SegmentPtr stub : incident) {
+                    double len = segment_track_length(stub);
+                    if (len >= m_mvga_stub) continue;
+                    VertexPtr vf = find_other_vertex(graph, stub, anchor);
+                    if (!vf || !vf->descriptor_valid()) continue;
+                    if (vf == main_vertex) continue;  // never treat the main-vertex edge as a stub
+                    if (boost::degree(vf->get_descriptor(), graph) != 1) continue;  // terminal only
+                    if (vf->flags_any(VertexFlags::kProtectedBreak)) continue;
+
+                    // Gates: corridor overlap with a sibling prong at the
+                    // same anchor, or point degeneracy (142421's 3-point
+                    // stubs make overlap meaningless).
+                    auto pts_stub = seg_points(stub);
+                    size_t nfit = seg_valid_fits(stub);
+                    double best_overlap = 0;
                     for (SegmentPtr sib : incident) {
                         if (sib == stub) continue;
-                        WireCell::Vector dir_sib = segment_cal_dir_3vector(sib, mvp, 10*units::cm);
-                        if (dir_stub.magnitude() == 0 || dir_sib.magnitude() == 0) continue;
-                        double angle = std::acos(std::clamp(
-                            dir_stub.dot(dir_sib) / (dir_stub.magnitude() * dir_sib.magnitude()),
-                            -1.0, 1.0)) / 3.1415926 * 180.0;
-                        if (angle >= m_mvga_reseat_angle && angle > cont_angle) {
-                            cont_angle = angle;
-                            cont = sib;
+                        double frac = path_overlap_fraction(pts_stub, seg_points(sib), m_mvga_dup_tol);
+                        if (frac > best_overlap) best_overlap = frac;
+                    }
+                    const bool overlap_gate = (m_mvga_dup_frac > 0) && (best_overlap >= m_mvga_dup_frac);
+                    const bool degen_gate = (m_mvga_stub_pts > 0) &&
+                                            (nfit <= static_cast<size_t>(m_mvga_stub_pts));
+
+                    // Probe line for satellite-radius calibration (TRACE,
+                    // cf. op1/op2's eval lines; op3 had none until round 3).
+                    SPDLOG_LOGGER_TRACE(s_log,
+                        "mvga: op3 eval cluster={} anchor={} d={:.2f}cm len={:.2f}cm nfit={} overlap={:.2f}",
+                        cluster.ident(), is_main ? "main" : "sat", anchor_dis/units::cm,
+                        len/units::cm, nfit, best_overlap);
+
+                    if (!overlap_gate && !degen_gate) continue;
+
+                    // Re-seat sub-case (131357): main-vertex anchor only,
+                    // overlap-gated stub whose collinear-continuation
+                    // sibling exists, and the main vertex itself is not a
+                    // protected snap/break corner.  Satellite anchors are
+                    // absorb-only (round 3) -- the endpoint-match / seat
+                    // logic below names main_vertex explicitly.
+                    SegmentPtr cont = nullptr;
+                    double cont_angle = 0;
+                    if (is_main && overlap_gate && m_mvga_reseat_angle > 0 &&
+                        !main_vertex->flags_any(VertexFlags::kProtectedBreak)) {
+                        WireCell::Point mvp = mv_pt;
+                        WireCell::Vector dir_stub = segment_cal_dir_3vector(stub, mvp, 10*units::cm);
+                        for (SegmentPtr sib : incident) {
+                            if (sib == stub) continue;
+                            WireCell::Vector dir_sib = segment_cal_dir_3vector(sib, mvp, 10*units::cm);
+                            if (dir_stub.magnitude() == 0 || dir_sib.magnitude() == 0) continue;
+                            double angle = std::acos(std::clamp(
+                                dir_stub.dot(dir_sib) / (dir_stub.magnitude() * dir_sib.magnitude()),
+                                -1.0, 1.0)) / 3.1415926 * 180.0;
+                            if (angle >= m_mvga_reseat_angle && angle > cont_angle) {
+                                cont_angle = angle;
+                                cont = sib;
+                            }
                         }
                     }
-                }
 
-                if (cont) {
-                    // Extend the continuation sibling through the main
-                    // vertex to the stub far end, then move the main vertex
-                    // there (examine_structure_final_1p mechanics).
-                    const auto& vec_sib = cont->wcpts();
-                    const auto& vec_stub = stub->wcpts();
-                    if (vec_sib.empty() || vec_stub.empty()) continue;
-                    WireCell::Point main_wcpt_point = main_vertex->wcpt().point;
-                    bool sib_front  = (point_dis(vec_sib.front().point,  main_wcpt_point) < 0.01*units::cm);
-                    bool sib_back   = (point_dis(vec_sib.back().point,   main_wcpt_point) < 0.01*units::cm);
-                    bool stub_front = (point_dis(vec_stub.front().point, main_wcpt_point) < 0.01*units::cm);
-                    bool stub_back  = (point_dis(vec_stub.back().point,  main_wcpt_point) < 0.01*units::cm);
-                    if (!(sib_front || sib_back) || !(stub_front || stub_back)) continue;
+                    if (cont) {
+                        // Extend the continuation sibling through the main
+                        // vertex to the stub far end, then move the main
+                        // vertex there (examine_structure_final_1p mechanics).
+                        const auto& vec_sib = cont->wcpts();
+                        const auto& vec_stub = stub->wcpts();
+                        if (vec_sib.empty() || vec_stub.empty()) continue;
+                        WireCell::Point main_wcpt_point = main_vertex->wcpt().point;
+                        bool sib_front  = (point_dis(vec_sib.front().point,  main_wcpt_point) < 0.01*units::cm);
+                        bool sib_back   = (point_dis(vec_sib.back().point,   main_wcpt_point) < 0.01*units::cm);
+                        bool stub_front = (point_dis(vec_stub.front().point, main_wcpt_point) < 0.01*units::cm);
+                        bool stub_back  = (point_dis(vec_stub.back().point,  main_wcpt_point) < 0.01*units::cm);
+                        if (!(sib_front || sib_back) || !(stub_front || stub_back)) continue;
 
-                    std::list<WCPoint> merged(vec_sib.begin(), vec_sib.end());
-                    if (sib_front && stub_front) {
-                        for (auto it = vec_stub.begin(); it != vec_stub.end(); ++it)
-                            if (point_dis(it->point, merged.front().point) > 0.01*units::cm) merged.push_front(*it);
-                    } else if (sib_front && !stub_front) {
-                        for (auto it = vec_stub.rbegin(); it != vec_stub.rend(); ++it)
-                            if (point_dis(it->point, merged.front().point) > 0.01*units::cm) merged.push_front(*it);
-                    } else if (!sib_front && stub_front) {
-                        for (auto it = vec_stub.begin(); it != vec_stub.end(); ++it)
-                            if (point_dis(it->point, merged.back().point) > 0.01*units::cm) merged.push_back(*it);
+                        std::list<WCPoint> merged(vec_sib.begin(), vec_sib.end());
+                        if (sib_front && stub_front) {
+                            for (auto it = vec_stub.begin(); it != vec_stub.end(); ++it)
+                                if (point_dis(it->point, merged.front().point) > 0.01*units::cm) merged.push_front(*it);
+                        } else if (sib_front && !stub_front) {
+                            for (auto it = vec_stub.rbegin(); it != vec_stub.rend(); ++it)
+                                if (point_dis(it->point, merged.front().point) > 0.01*units::cm) merged.push_front(*it);
+                        } else if (!sib_front && stub_front) {
+                            for (auto it = vec_stub.begin(); it != vec_stub.end(); ++it)
+                                if (point_dis(it->point, merged.back().point) > 0.01*units::cm) merged.push_back(*it);
+                        } else {
+                            for (auto it = vec_stub.rbegin(); it != vec_stub.rend(); ++it)
+                                if (point_dis(it->point, merged.back().point) > 0.01*units::cm) merged.push_back(*it);
+                        }
+
+                        std::vector<WCPoint> new_wcpts(merged.begin(), merged.end());
+                        cont->wcpts(new_wcpts);
+                        std::vector<Facade::geo_point_t> cont_pts;
+                        for (const auto& wcp : new_wcpts) cont_pts.push_back(wcp.point);
+                        create_segment_point_cloud(cont, cont_pts, dv, "main");
+
+                        WireCell::Point vf_pt = vf->fit().valid() ? vf->fit().point : vf->wcpt().point;
+                        double reseat_dis = point_dis(vf_pt, mv_pt);
+                        WCPoint vf_wcp = vf->wcpt();
+                        main_vertex->wcpt(vf_wcp);
+                        if (vf->fit().valid()) main_vertex->fit(vf->fit());
+
+                        remove_segment(graph, stub);
+                        cleanup_vertex(vf);
+                        mv_pt = main_vertex->fit().valid() ? main_vertex->fit().point
+                                                           : main_vertex->wcpt().point;
+
+                        SPDLOG_LOGGER_DEBUG(s_log,
+                            "mvga: op3 stub-reseat cluster={} anchor=main len={:.2f}cm nfit={} "
+                            "overlap={:.2f} cont_angle={:.1f}deg reseat_dis={:.2f}cm",
+                            cluster.ident(), len/units::cm, nfit, best_overlap, cont_angle,
+                            reseat_dis/units::cm);
                     } else {
-                        for (auto it = vec_stub.rbegin(); it != vec_stub.rend(); ++it)
-                            if (point_dis(it->point, merged.back().point) > 0.01*units::cm) merged.push_back(*it);
+                        remove_segment(graph, stub);
+                        cleanup_vertex(vf);
+                        SPDLOG_LOGGER_DEBUG(s_log,
+                            "mvga: op3 stub-absorb cluster={} anchor={} d={:.2f}cm len={:.2f}cm "
+                            "nfit={} overlap={:.2f} gate={}",
+                            cluster.ident(), is_main ? "main" : "sat", anchor_dis/units::cm,
+                            len/units::cm, nfit, best_overlap,
+                            overlap_gate ? "overlap" : "degenerate");
                     }
-
-                    std::vector<WCPoint> new_wcpts(merged.begin(), merged.end());
-                    cont->wcpts(new_wcpts);
-                    std::vector<Facade::geo_point_t> cont_pts;
-                    for (const auto& wcp : new_wcpts) cont_pts.push_back(wcp.point);
-                    create_segment_point_cloud(cont, cont_pts, dv, "main");
-
-                    WireCell::Point vf_pt = vf->fit().valid() ? vf->fit().point : vf->wcpt().point;
-                    double reseat_dis = point_dis(vf_pt, mv_pt);
-                    WCPoint vf_wcp = vf->wcpt();
-                    main_vertex->wcpt(vf_wcp);
-                    if (vf->fit().valid()) main_vertex->fit(vf->fit());
-
-                    remove_segment(graph, stub);
-                    cleanup_vertex(vf);
-                    mv_pt = main_vertex->fit().valid() ? main_vertex->fit().point
-                                                       : main_vertex->wcpt().point;
-
-                    SPDLOG_LOGGER_DEBUG(s_log,
-                        "mvga: op3 stub-reseat cluster={} len={:.2f}cm nfit={} overlap={:.2f} "
-                        "cont_angle={:.1f}deg reseat_dis={:.2f}cm",
-                        cluster.ident(), len/units::cm, nfit, best_overlap, cont_angle,
-                        reseat_dis/units::cm);
-                } else {
-                    remove_segment(graph, stub);
-                    cleanup_vertex(vf);
-                    SPDLOG_LOGGER_DEBUG(s_log,
-                        "mvga: op3 stub-absorb cluster={} len={:.2f}cm nfit={} overlap={:.2f} gate={}",
-                        cluster.ident(), len/units::cm, nfit, best_overlap,
-                        overlap_gate ? "overlap" : "degenerate");
+                    ++n_op3;
+                    fired_here = true;
+                    flag_continue = true;
+                    break;
                 }
-                ++n_op3;
-                flag_continue = true;
-                break;
+                if (fired_here) break;
             }
         }
     }
