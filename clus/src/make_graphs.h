@@ -49,7 +49,14 @@ namespace WireCell::Clus::Graphs {
 
     Weighted::Graph make_graph_relaxed_pid(
         const Facade::Cluster& cluster,
-        IDetectorVolumes::pointer dv, 
+        IDetectorVolumes::pointer dv,
+        IPCTransformSet::pointer pcts);
+
+    // closely + relaxed_strict (doc pr/53 sec 16: protect_bundle-only
+    // stricter overclustering protection)
+    Weighted::Graph make_graph_relaxed_strict(
+        const Facade::Cluster& cluster,
+        IDetectorVolumes::pointer dv,
         IPCTransformSet::pointer pcts);
 
 }

@@ -46,7 +46,17 @@ namespace WireCell::Clus::Graphs {
 
     void connect_graph_relaxed_pid(
         const Facade::Cluster& cluster,
-        IDetectorVolumes::pointer dv, 
+        IDetectorVolumes::pointer dv,
+        IPCTransformSet::pointer pcts,
+        Weighted::Graph& graph);
+
+    // doc pr/53 sec 16: stricter fork of connect_graph_relaxed (S1+S2+S3),
+    // selected only by ClusteringProtectBundle via graph_name "relaxed_strict".
+    // Its kill predicate relaxed_strict_bad() is declared in the public
+    // WireCellClus/Graphs.h (doctested there).
+    void connect_graph_relaxed_strict(
+        const Facade::Cluster& cluster,
+        IDetectorVolumes::pointer dv,
         IPCTransformSet::pointer pcts,
         Weighted::Graph& graph);
 

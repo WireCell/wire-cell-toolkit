@@ -432,7 +432,15 @@ function(
     // cathode_kink_xcut above, which is cm), matching clus.jsonnet's pr()
     // defaults so a bare run is production; nulls = prototype-faithful
     // (re-join pass disabled -- would break cathode crossers, doc pr/20).
-    protect_graph_name          = null,   // null => 'relaxed'
+    // **SBND PRODUCTION DEFAULT 'relaxed_strict', owner 2026-08-09 (doc pr/53
+    // round 6).**  The strict fork (S1 interior-step denominator + S2 ">= 2"
+    // floor in all three path-check blocks) closes the sub-3cm arithmetic
+    // blind spot that kept the 18255-422851 / 18255-521075 over-clustered
+    // necks alive; protect_bundle is the only consumer, so clustering and the
+    // TGM/STM/FC verdicts are byte-identical (gates work-pr53-base* vs
+    // work-pr53-off* 0/117).  Legacy escape: -A protect_graph_name=relaxed
+    // (SBND_PROTECT_GRAPH=relaxed) restores the pre-flip production graph.
+    protect_graph_name          = 'relaxed_strict',   // null => 'relaxed'
     // C++ default true (doc pr/23 ordering): a TGM/STM/lm-convicted in-window
     // main does not open its bundle for splitting.  null => key omitted.
     protect_skip_convicted      = null,

@@ -339,6 +339,10 @@ TEST_CASE("clus knob defaults: ClusteringProtectBundle")
     CHECK_KNOB_NUM(cfg, "cathode_rejoin_dir_radius", 15 * units::cm);
     CHECK_KNOB_NUM(cfg, "cathode_rejoin_dir_npts", 20);
     CHECK_KNOB_BOOL(cfg, "skip_convicted", true);
+    // doc pr/53 round 6: the C++ default stays "relaxed"; the SBND operating
+    // point selects "relaxed_strict" in cfg only (doc 68 single-source rule).
+    REQUIRE(cfg.isMember("graph_name"));
+    CHECK(cfg["graph_name"].asString() == "relaxed");
 }
 
 TEST_CASE("clus knob defaults: ClusteringExamineBundles")

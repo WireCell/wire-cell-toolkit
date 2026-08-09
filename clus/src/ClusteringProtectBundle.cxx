@@ -208,6 +208,12 @@ public:
                     && (cluster->get_flag(Flags::TGM) || cluster->get_flag(Flags::STM)
                         || cluster->get_scalar<int>("lm_flag", -1) > 0)) {
                     ++n_convicted;
+                    // doc pr/53 round 6: name the gate per cluster (log-only)
+                    log->debug("OC53SKIP main ident={} nblobs={} gid={} t0={:.2f}us "
+                               "convicted TGM={} STM={} lm={} -- bundle not opened",
+                               cluster->ident(), cluster->nchildren(), gid, t0/units::us,
+                               cluster->get_flag(Flags::TGM), cluster->get_flag(Flags::STM),
+                               cluster->get_scalar<int>("lm_flag", -1));
                     continue;   // this main does not open its bundle
                 }
                 beam_gids.insert(gid);
@@ -231,6 +237,13 @@ public:
                 && (cluster->get_flag(Flags::TGM) || cluster->get_flag(Flags::STM)
                     || cluster->get_scalar<int>("lm_flag", -1) > 0)) {
                 ++n_convicted;
+                // doc pr/53 round 6: name the gate per cluster (log-only)
+                log->debug("OC53SKIP member ident={} nblobs={} main={} "
+                           "convicted TGM={} STM={} lm={} -- never split",
+                           cluster->ident(), cluster->nchildren(),
+                           cluster->get_flag(Flags::main_cluster),
+                           cluster->get_flag(Flags::TGM), cluster->get_flag(Flags::STM),
+                           cluster->get_scalar<int>("lm_flag", -1));
                 continue;
             }
             const size_t before = grouping.nchildren();

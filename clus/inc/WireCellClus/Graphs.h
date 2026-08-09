@@ -202,6 +202,16 @@ namespace WireCell::Clus::Graphs {
 
     }
 
+    /// Kill predicate of the "relaxed_strict" graph flavor (doc pr/53 sec
+    /// 16.3): true if a sampled straight path fails the charge-presence test.
+    /// S1: the 1cm sampling loop's last sample is the far endpoint itself and
+    /// good by construction, so the 0.75 ratio is taken against the interior
+    /// step count (num_steps - 1).  S2: the floor is nbad >= 2 (the legacy
+    /// relaxed test uses > 2, unreachable for necks under ~3cm).  cap is 7
+    /// for single-counter tests and 9 for the sum-of-two-planes tests.
+    /// Pure; exposed for doctests.
+    bool relaxed_strict_bad(int nbad, int num_steps, int cap = 7);
+
 }
 
 #endif

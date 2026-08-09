@@ -580,7 +580,9 @@ namespace WireCell::Clus::Facade {
         /// 
         /// - "ctpc" :: likely used for Djikstra's shortest paths
         /// - "relaxed" :: likely used for connected blobs
-        /// 
+        /// - "relaxed_strict" :: stricter relaxed fork (doc pr/53 sec 16),
+        ///   selected only by ClusteringProtectBundle
+        ///
         /// If the flavor is not in this known set, KeyError is
         /// thrown.
         ///
