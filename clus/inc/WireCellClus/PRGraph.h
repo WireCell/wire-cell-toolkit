@@ -55,6 +55,13 @@ namespace WireCell::Clus::PR {
         std::atomic<uint64_t> oseg_accept_proto{0};   // a prototype clause fired
         std::atomic<uint64_t> oseg_accept_relaxed{0}; // ONLY the toolkit clause fired
         std::atomic<uint64_t> oseg_reject{0};
+        // doc sbnd_xin/docs/pr/54 -- the isolated-residual discard path had no
+        // counter at all (§5a there): a candidate whose endpoints touch no
+        // existing segment gets a real do_single_tracking fit and is then
+        // silently thrown away.  keep fires only under the default-OFF
+        // other_seg_keep_isolated knob; drop is unconditional visibility.
+        std::atomic<uint64_t> oseg_isolated_drop{0};
+        std::atomic<uint64_t> oseg_isolated_keep{0};
         // doc sbnd_xin/docs/pr/31 §10.10 (F9, was P12) -- the two degenerate
         // topologies the prototype's map_vertex_segments can hold and the PR
         // adjacency_list cannot: a self-loop counts 2 in boost::degree where

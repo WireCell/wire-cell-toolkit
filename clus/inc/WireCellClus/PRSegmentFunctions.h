@@ -123,6 +123,22 @@ namespace WireCell::Clus::PR {
                                                             double skirt, double baseline,
                                                             double angle_cut, double min_arm);
 
+    /// doc sbnd_xin/docs/pr/54 (18255-142421 separated EM shower with no
+    /// fitted trajectory): keep decision for an isolated residual candidate
+    /// in find_other_segments -- one whose freshly-fit endpoints touch no
+    /// existing segment and whose isochronous snap failed.  Legacy (and
+    /// prototype: NeutrinoID_proto_vertex.h:1470-1475 pushes such candidates
+    /// into the never-consumed residual_segment_candidates) behaviour is to
+    /// discard; `keep_isolated=false` reproduces that unconditionally.  When
+    /// the knob is on, keep candidates whose terminal-graph component has at
+    /// least min_points points AND whose fitted track length is at least
+    /// min_length -- separating "isolated but well-supported" (a separated
+    /// shower) from "isolated and sparse" (noise fragments).  Pure
+    /// predicate, all lengths internal units.
+    bool other_seg_keep_isolated_ok(bool keep_isolated, int component_points,
+                                    double track_length, int min_points,
+                                    double min_length);
+
     /// doc sbnd_xin/docs/pr/51 (main-vertex graph audit): fraction of pts_a
     /// whose distance to the NEAREST point of pts_b is <= tol.  The
     /// duplicate-corridor test: two segments riding one charge ribbon give a

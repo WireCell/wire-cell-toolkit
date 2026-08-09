@@ -28,6 +28,15 @@ struct Res_proto_segment {
     double max_dis_w;
 };
 
+// doc sbnd_xin/docs/pr/54 -- see the declaration in PRSegmentFunctions.h.
+bool WireCell::Clus::PR::other_seg_keep_isolated_ok(bool keep_isolated, int component_points,
+                                                    double track_length, int min_points,
+                                                    double min_length)
+{
+    if (!keep_isolated) return false;  // legacy discard, byte-identical
+    return component_points >= min_points && track_length >= min_length;
+}
+
 void PatternAlgorithms::find_other_segments(Graph& graph, Facade::Cluster& cluster, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, bool flag_break_track, double search_range, double scaling_2d)
 {
     if (!cluster.has_pc("steiner_pc")) return;
@@ -708,11 +717,59 @@ void PatternAlgorithms::find_other_segments(Graph& graph, Facade::Cluster& clust
                 }
 
                 if (!flag_parallel) {
-                    // Truly isolated residual – remove vertices from graph; segment was never added
-                    SPDLOG_LOGGER_TRACE(s_log, "find_other_segments: Cluster {} Isolated residual segment   # of Vertices: {}; # of Edges: {}", cluster.get_cluster_id(), boost::num_vertices(graph), boost::num_edges(graph));
+                    // doc sbnd_xin/docs/pr/54 (18255-142421 "missing gammas"):
+                    // legacy discards every isolated residual after its fit.
+                    // The prototype does too -- NeutrinoID_proto_vertex.h:
+                    // 1470-1475 pushes these into residual_segment_candidates,
+                    // which is write-only (never consumed anywhere), so the
+                    // keep below is a toolkit-only extension of an unfinished
+                    // prototype feature, not a parity fix.
+                    const double kept_length = segment_track_length(new_seg);
+                    const int    kept_points = temp_segments[max_length_cluster].number_points;
+                    if (other_seg_keep_isolated_ok(m_other_seg_keep_isolated, kept_points,
+                                                   kept_length,
+                                                   m_other_seg_keep_isolated_min_points,
+                                                   m_other_seg_keep_isolated_min_length)) {
+                        // Keep: add as a disconnected piece of this cluster's
+                        // graph and refit jointly, exactly like the
+                        // isochronous-accepted branch below.
+                        g_port_audit.oseg_isolated_keep.fetch_add(1, std::memory_order_relaxed);
+                        add_segment(graph, new_seg, v1, v2);
+                        track_fitter.do_multi_tracking(true, true, false, m_fit_exclusion, false, &cluster);
 
-                    remove_vertex(graph, v1);
-                    remove_vertex(graph, v2);
+                        double direct_length = segment_track_direct_length(new_seg);
+                        double length        = segment_track_length(new_seg);
+                        double medium_dQ_dx  = segment_median_dQ_dx(new_seg);
+
+                        if ((direct_length < 0.78 * length && length > 10 * units::cm &&
+                             medium_dQ_dx / mip_dQdx > 1.6) ||
+                            (direct_length < 0.6 * length && length > 10 * units::cm)) {
+                            if (medium_dQ_dx / mip_dQdx > 1.1) {
+                                new_segments.push_back(new_seg);
+                            } else {
+                                new_segments_1.push_back(new_seg);
+                            }
+                        }
+                        SPDLOG_LOGGER_INFO(s_log,
+                            "pr54 keep-isolated: cluster {} n_points={} length={:.2f} cm "
+                            "v1=({:.1f},{:.1f},{:.1f}) v2=({:.1f},{:.1f},{:.1f}) cm",
+                            cluster.get_cluster_id(), kept_points, length / units::cm,
+                            v1_fit_pt.x() / units::cm, v1_fit_pt.y() / units::cm, v1_fit_pt.z() / units::cm,
+                            v2_fit_pt.x() / units::cm, v2_fit_pt.y() / units::cm, v2_fit_pt.z() / units::cm);
+                    } else {
+                        // Truly isolated residual – remove vertices from graph; segment was never added
+                        g_port_audit.oseg_isolated_drop.fetch_add(1, std::memory_order_relaxed);
+                        SPDLOG_LOGGER_DEBUG(s_log,
+                            "pr54 isolated-residual drop: cluster {} n_points={} length={:.2f} cm dir_mag={:.2f} cm "
+                            "v1=({:.1f},{:.1f},{:.1f}) v2=({:.1f},{:.1f},{:.1f}) cm",
+                            cluster.get_cluster_id(), kept_points, kept_length / units::cm, dir_mag / units::cm,
+                            v1_fit_pt.x() / units::cm, v1_fit_pt.y() / units::cm, v1_fit_pt.z() / units::cm,
+                            v2_fit_pt.x() / units::cm, v2_fit_pt.y() / units::cm, v2_fit_pt.z() / units::cm);
+                        SPDLOG_LOGGER_TRACE(s_log, "find_other_segments: Cluster {} Isolated residual segment   # of Vertices: {}; # of Edges: {}", cluster.get_cluster_id(), boost::num_vertices(graph), boost::num_edges(graph));
+
+                        remove_vertex(graph, v1);
+                        remove_vertex(graph, v2);
+                    }
                 } else {
                     // Isochronous connection found (segment already added by modify_*)
                     track_fitter.do_multi_tracking(true, true, false, m_fit_exclusion, false, &cluster);
