@@ -3862,7 +3862,8 @@ bool PatternAlgorithms::determine_overall_main_vertex_DL(
     bool flag_rerank,
     int dl_vtx_top_k,
     double dl_vtx_min_accept_score,
-    double dl_vtx_score_scale)
+    double dl_vtx_score_scale,
+    bool dl_vtx_swap_guard)
 {
     bool flag_change = false;
 
@@ -4127,6 +4128,25 @@ bool PatternAlgorithms::determine_overall_main_vertex_DL(
             for (const auto& sc : snapped) {
                 VertexPtr vtx = sc.vtx;
                 auto vtx_pt = vtx->fit().valid() ? vtx->fit().point : vtx->wcpt().point;
+
+                // doc sbnd_xin/docs/pr/51 (18255-506746): a confident DL
+                // voxel (s_dl = raw_score x score_scale, here +576) swamps
+                // every +-2 structural term, so the rerank can move the
+                // vertex onto a different, non-flash-matched cluster (28 cm
+                // off the first-round main cluster).  With the guard on,
+                // cross-cluster candidates never enter the acceptance; if
+                // none survive, flag_pass stays false and the traditional
+                // fallback runs.  Default false => byte-identical.
+                if (dl_vtx_swap_guard && vtx->cluster() && main_cluster && vtx->cluster() != main_cluster) {
+                    SPDLOG_LOGGER_DEBUG(s_log,
+                        "dl_swap_guard: skipping cross-cluster DL candidate voxel {} "
+                        "(dl_score={:.4f}) cluster={} != main {} pos=({:.1f},{:.1f},{:.1f})cm snap={:.2f}cm",
+                        sc.voxel_rank, sc.dl_score,
+                        vtx->cluster()->get_cluster_id(), main_cluster->get_cluster_id(),
+                        vtx_pt.x()/units::cm, vtx_pt.y()/units::cm, vtx_pt.z()/units::cm,
+                        sc.snap_dis/units::cm);
+                    continue;
+                }
 
                 // (1) DL confidence — sigmoid-diff in [-1,+1], scaled by dl_vtx_score_scale.
                 double s_dl = sc.dl_score * dl_vtx_score_scale;

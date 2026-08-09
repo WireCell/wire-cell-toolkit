@@ -1199,6 +1199,31 @@ function(
     vks_min_arm = null,
     vks_fit_miss = null,
     vks_hot_ratio = null,
+    // doc pr/51 -- main-vertex graph audit (near-vertex graph-shape repair:
+    // duplicate-corridor merge / charge-less-bridge removal / micro-stub
+    // absorb + re-seat / one refit; 131357 / 268067 / 360535 / 142421 /
+    // 285567).  DEFAULT OFF pending owner review of the pr/51 on-census.
+    // Numerics (mvga_* null) ride the C++ defaults.  Validation:
+    // -A main_vertex_graph_audit=true (or the SBND_MAIN_VERTEX_GRAPH_AUDIT
+    // runner env).  false/null omit the keys => byte-identical.
+    main_vertex_graph_audit = false,
+    mvga_radius = null,
+    mvga_dup_tol = null,
+    mvga_dup_frac = null,
+    mvga_dup_angle = null,
+    mvga_bridge_mip = null,
+    mvga_reconnect = null,
+    mvga_stub = null,
+    mvga_stub_pts = null,
+    mvga_reseat_angle = null,
+    // doc pr/51 (18255-506746) -- DL rerank cross-cluster swap guard: with
+    // the guard on, an accepted DL vertex can never swap the main cluster
+    // (506746: one confident uBooNE-net voxel, s_dl = +576, moved the
+    // vertex 28 cm onto a non-flash-matched cluster).  DEFAULT OFF pending
+    // owner review.  Validation: -A dl_vtx_swap_guard=true (or the
+    // SBND_DL_VTX_SWAP_GUARD runner env).  false omits the key =>
+    // byte-identical.
+    dl_vtx_swap_guard = false,
 )
     local base = import 'pgrapher/experiment/sbnd/simparams.jsonnet';
     local params = base {
@@ -1393,6 +1418,17 @@ function(
                              vks_min_arm=vks_min_arm,
                              vks_fit_miss=vks_fit_miss,
                              vks_hot_ratio=vks_hot_ratio,
+                             main_vertex_graph_audit=main_vertex_graph_audit,
+                             mvga_radius=mvga_radius,
+                             mvga_dup_tol=mvga_dup_tol,
+                             mvga_dup_frac=mvga_dup_frac,
+                             mvga_dup_angle=mvga_dup_angle,
+                             mvga_bridge_mip=mvga_bridge_mip,
+                             mvga_reconnect=mvga_reconnect,
+                             mvga_stub=mvga_stub,
+                             mvga_stub_pts=mvga_stub_pts,
+                             mvga_reseat_angle=mvga_reseat_angle,
+                             dl_vtx_swap_guard=dl_vtx_swap_guard,
                              pseudo_shower_track_paint=pseudo_shower_track_paint,
                              reclass_never_computed_ke_floor=reclass_never_computed_ke_floor,
                              muon_dqdx_curve=muon_dqdx_curve,

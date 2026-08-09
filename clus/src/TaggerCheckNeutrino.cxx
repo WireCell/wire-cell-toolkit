@@ -112,6 +112,17 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_vks_min_arm      = get(config, "vks_min_arm",      m_vks_min_arm);      // cm
     m_vks_fit_miss     = get(config, "vks_fit_miss",     m_vks_fit_miss);     // cm
     m_vks_hot_ratio    = get(config, "vks_hot_ratio",    m_vks_hot_ratio);
+    // doc sbnd_xin/docs/pr/51 -- main-vertex graph audit.
+    m_main_vertex_graph_audit = get(config, "main_vertex_graph_audit", m_main_vertex_graph_audit);
+    m_mvga_radius       = get(config, "mvga_radius",       m_mvga_radius);       // cm
+    m_mvga_dup_tol      = get(config, "mvga_dup_tol",      m_mvga_dup_tol);      // cm
+    m_mvga_dup_frac     = get(config, "mvga_dup_frac",     m_mvga_dup_frac);
+    m_mvga_dup_angle    = get(config, "mvga_dup_angle",    m_mvga_dup_angle);    // deg
+    m_mvga_bridge_mip   = get(config, "mvga_bridge_mip",   m_mvga_bridge_mip);
+    m_mvga_reconnect    = get(config, "mvga_reconnect",    m_mvga_reconnect);    // cm
+    m_mvga_stub         = get(config, "mvga_stub",         m_mvga_stub);         // cm
+    m_mvga_stub_pts     = get(config, "mvga_stub_pts",     m_mvga_stub_pts);
+    m_mvga_reseat_angle = get(config, "mvga_reseat_angle", m_mvga_reseat_angle); // deg
     m_shower_topo_demote_len = get(config, "shower_topo_demote_len", m_shower_topo_demote_len);  // cm
     // doc sbnd_xin/docs/pr/49 -- cross-cluster projection-ghost deweighting
     // in the trajectory fit's 2D charge association (18255-57441): live
@@ -252,6 +263,8 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_dl_vtx_top_k            = get(config, "dl_vtx_top_k",            m_dl_vtx_top_k);
     m_dl_vtx_min_accept_score = get(config, "dl_vtx_min_accept_score", m_dl_vtx_min_accept_score);
     m_dl_vtx_score_scale      = get(config, "dl_vtx_score_scale",      m_dl_vtx_score_scale);
+    // doc sbnd_xin/docs/pr/51 (18255-506746): cross-cluster DL swap guard.
+    m_dl_vtx_swap_guard       = get(config, "dl_vtx_swap_guard",       m_dl_vtx_swap_guard);
     m_beam_window_low         = get(config, "beam_window_low",         m_beam_window_low);
     m_beam_window_high        = get(config, "beam_window_high",        m_beam_window_high);
     m_nu_skip_cosmic          = get(config, "nu_skip_cosmic",          m_nu_skip_cosmic);
@@ -391,6 +404,18 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["vks_min_arm"]      = m_vks_min_arm;
     cfg["vks_fit_miss"]     = m_vks_fit_miss;
     cfg["vks_hot_ratio"]    = m_vks_hot_ratio;
+    // doc sbnd_xin/docs/pr/51 -- main-vertex graph audit; false => the pass
+    // never fires => byte-identical.  Numerics cm/deg.
+    cfg["main_vertex_graph_audit"] = m_main_vertex_graph_audit;
+    cfg["mvga_radius"]       = m_mvga_radius;
+    cfg["mvga_dup_tol"]      = m_mvga_dup_tol;
+    cfg["mvga_dup_frac"]     = m_mvga_dup_frac;
+    cfg["mvga_dup_angle"]    = m_mvga_dup_angle;
+    cfg["mvga_bridge_mip"]   = m_mvga_bridge_mip;
+    cfg["mvga_reconnect"]    = m_mvga_reconnect;
+    cfg["mvga_stub"]         = m_mvga_stub;
+    cfg["mvga_stub_pts"]     = m_mvga_stub_pts;
+    cfg["mvga_reseat_angle"] = m_mvga_reseat_angle;
     cfg["kink_dqdx_hot_ratio"] = m_kink_dqdx_hot_ratio; // x mip_dqdx_median; inert while both above are false
     cfg["shower_topo_demote_len"] = m_shower_topo_demote_len;  // cm; 0 = legacy (long segments stay eligible for kShowerTopology)
     // doc sbnd_xin/docs/pr/49.
@@ -467,6 +492,7 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["dl_vtx_top_k"]            = 5;       // number of top DL voxels to re-rank (only when dl_vtx_rerank==true)
     cfg["dl_vtx_min_accept_score"] = 4.0;     // min composite score to accept a re-ranked DL vertex (empirical; correct uncertain-regime picks score 8-12, failure cases 3-5)
     cfg["dl_vtx_score_scale"]      = 1000.0;  // scale factor on raw DL score in composite re-rank (1.0 = unscaled)
+    cfg["dl_vtx_swap_guard"]       = m_dl_vtx_swap_guard;  // doc pr/51 (506746): false = legacy (rerank may swap the main cluster)
     cfg["clus_geom_helper"] = ""; // empty = no SCE vertex correction
     cfg["beam_window_low"] = m_beam_window_low;   // beam window on cluster_t0; low >= high disables the
     cfg["beam_window_high"] = m_beam_window_high; // gate (uBooNE single-main selection).
@@ -786,6 +812,17 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
     pattern_algos.m_vks_min_arm      = m_vks_min_arm * units::cm;   // cm -> internal
     pattern_algos.m_vks_fit_miss     = m_vks_fit_miss * units::cm;  // cm -> internal
     pattern_algos.m_vks_hot_ratio    = m_vks_hot_ratio;             // x mip median, no conversion
+    // doc sbnd_xin/docs/pr/51 -- main-vertex graph audit.
+    pattern_algos.m_main_vertex_graph_audit = m_main_vertex_graph_audit;
+    pattern_algos.m_mvga_radius       = m_mvga_radius * units::cm;    // cm -> internal
+    pattern_algos.m_mvga_dup_tol      = m_mvga_dup_tol * units::cm;   // cm -> internal
+    pattern_algos.m_mvga_dup_frac     = m_mvga_dup_frac;              // fraction, no conversion
+    pattern_algos.m_mvga_dup_angle    = m_mvga_dup_angle;             // deg, no conversion
+    pattern_algos.m_mvga_bridge_mip   = m_mvga_bridge_mip;            // x mip median, no conversion
+    pattern_algos.m_mvga_reconnect    = m_mvga_reconnect * units::cm; // cm -> internal
+    pattern_algos.m_mvga_stub         = m_mvga_stub * units::cm;      // cm -> internal
+    pattern_algos.m_mvga_stub_pts     = m_mvga_stub_pts;
+    pattern_algos.m_mvga_reseat_angle = m_mvga_reseat_angle;          // deg, no conversion
     pattern_algos.m_shower_topo_demote_len = m_shower_topo_demote_len * units::cm;  // cm -> internal
     // doc sbnd_xin/docs/pr/30 §11 port-fidelity knobs.
     pattern_algos.m_fit_exclusion            = m_fit_exclusion;
@@ -1039,7 +1076,7 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
             *m_track_fitter, m_dv, particle_data(), m_recomb_model,
             m_dl_weights, m_dl_vtx_cut, m_dQdx_scale, m_dQdx_offset,
             m_dl_vtx_rerank, m_dl_vtx_top_k, m_dl_vtx_min_accept_score,
-            m_dl_vtx_score_scale);
+            m_dl_vtx_score_scale, m_dl_vtx_swap_guard);
     }
     if (!flag_dl_changed) {
         final_main_vertex = pattern_algos.determine_overall_main_vertex(
@@ -1086,6 +1123,19 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
         map_cluster_main_vertices[main_cluster] = final_main_vertex;
 
         std::cout << "After improve vertex:" << final_main_vertex->fit().point << std::endl; pattern_algos.print_segs_info(*pr_graph, *main_cluster, 0);
+
+        // doc sbnd_xin/docs/pr/51: main-vertex graph audit -- inert unless
+        // main_vertex_graph_audit.  Runs AFTER the final improve_vertex
+        // (the micro-stubs it must absorb are created there: 142421's
+        // 7081/7082, 285567's 81/82/83) and BEFORE clustering_points /
+        // examine_direction, which then act on the audited graph.  May
+        // re-seat final_main_vertex's position in place (never the
+        // pointer), so no map re-sync is needed.
+        if (pattern_algos.main_vertex_graph_audit(*pr_graph, *main_cluster, final_main_vertex,
+                                                  *m_track_fitter, m_dv)) {
+            std::cout << "After main vertex graph audit:" << final_main_vertex->fit().point << std::endl; pattern_algos.print_segs_info(*pr_graph, *main_cluster, 0);
+            detg_dump("main_vertex_graph_audit", *pr_graph);
+        }
 
         pattern_algos.clustering_points(*pr_graph, *main_cluster, m_dv);
 

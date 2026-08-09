@@ -128,6 +128,23 @@ public:
         double m_vks_min_arm{1.5};    // cm
         double m_vks_fit_miss{0.35};  // cm; snap only when the fit misses the image corner by >= this
         double m_vks_hot_ratio{0};    // x mip_dqdx_median; 0 = veto off (default: misfires on misassigned charge)
+        // doc sbnd_xin/docs/pr/51 -- main-vertex graph audit (near-vertex
+        // graph-shape repair: duplicate-corridor merge / charge-less-bridge
+        // removal / micro-stub absorb + re-seat / one refit).  Mirrors of
+        // the PatternAlgorithms::m_main_vertex_graph_audit / m_mvga_*
+        // members (see the design comment there); numerics here in cm/deg,
+        // converted at the visit() copy.  All defaults = the pass never
+        // fires => byte-identical.
+        bool   m_main_vertex_graph_audit{false};
+        double m_mvga_radius{15.0};       // cm
+        double m_mvga_dup_tol{1.4};       // cm
+        double m_mvga_dup_frac{0.7};      // fraction
+        double m_mvga_dup_angle{20.0};    // deg; <= 0 disables the op1 near-parallel guard
+        double m_mvga_bridge_mip{0.5};    // x mip_dqdx_median (measured: 268067 bridge 0.436, real track 1.29)
+        double m_mvga_reconnect{5.0};     // cm
+        double m_mvga_stub{2.0};          // cm
+        int    m_mvga_stub_pts{4};        // valid fit points
+        double m_mvga_reseat_angle{150.0}; // deg
         // Long shower-topology demote length, cm (doc sbnd_xin/docs/pr/25
         // sec 3).  0 => the guard never fires => byte-identical.  50 is the
         // scan-supported operating point (9/10 owner-scanned events; ~45
@@ -288,6 +305,12 @@ public:
         int    m_dl_vtx_top_k{5};                // number of top voxels from DL inference to re-rank (only when rerank enabled)
         double m_dl_vtx_min_accept_score{4.0};    // minimum composite re-rank score to accept DL vertex (only when rerank enabled; matches the 4.0 advertised in default_configuration -- docs/pr/2 sec 8.4)
         double m_dl_vtx_score_scale{1000.0};      // scale factor applied to the raw DL score term in the composite re-rank score
+        // doc sbnd_xin/docs/pr/51 (18255-506746): rerank-branch guard --
+        // skip DL candidates hosted on a different cluster than the current
+        // main cluster, so an accepted DL vertex can never swap the main
+        // cluster (a confident wrong voxel's s_dl swamps every structural
+        // term).  false = legacy = byte-identical.
+        bool   m_dl_vtx_swap_guard{false};
         double m_beam_window_low{0};   // beam window [low, high) on cluster_t0 (matched flash time, WCT units).
         double m_beam_window_high{0};  // low >= high (default) disables the gate: uBooNE single-main behavior.
         bool m_nu_skip_cosmic{false};  // if true (beam-gate only), skip in-window mains already tagged

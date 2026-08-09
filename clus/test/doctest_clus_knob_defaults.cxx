@@ -139,6 +139,10 @@ TEST_CASE("clus knob defaults: TaggerCheckNeutrino switches are all OFF")
     // doc pr/50: 172230-class near-vertex robustness -- both passes OFF.
     CHECK_KNOB_BOOL(cfg, "fit_blob_coverage_defer", false);
     CHECK_KNOB_BOOL(cfg, "vertex_kink_snap", false);
+    // doc pr/51: main-vertex graph audit + DL rerank cross-cluster swap
+    // guard (506746) -- both OFF.
+    CHECK_KNOB_BOOL(cfg, "main_vertex_graph_audit", false);
+    CHECK_KNOB_BOOL(cfg, "dl_vtx_swap_guard", false);
 
     // Numeric knobs whose legacy value is the INERT one: 0 disables the guard,
     // so an absent key leaves the code path untouched.
@@ -181,6 +185,17 @@ TEST_CASE("clus knob defaults: TaggerCheckNeutrino switches are all OFF")
     CHECK_KNOB_NUM(cfg, "vks_min_arm", 1.5);
     CHECK_KNOB_NUM(cfg, "vks_fit_miss", 0.35);
     CHECK_KNOB_NUM(cfg, "vks_hot_ratio", 0.0);
+    // doc pr/51: the mvga_* operating point (cm/deg/dimensionless), all
+    // inert while main_vertex_graph_audit is false.
+    CHECK_KNOB_NUM(cfg, "mvga_radius", 15.0);
+    CHECK_KNOB_NUM(cfg, "mvga_dup_tol", 1.4);
+    CHECK_KNOB_NUM(cfg, "mvga_dup_frac", 0.7);
+    CHECK_KNOB_NUM(cfg, "mvga_dup_angle", 20.0);
+    CHECK_KNOB_NUM(cfg, "mvga_bridge_mip", 0.5);
+    CHECK_KNOB_NUM(cfg, "mvga_reconnect", 5.0);
+    CHECK_KNOB_NUM(cfg, "mvga_stub", 2.0);
+    CHECK_KNOB_NUM(cfg, "mvga_stub_pts", 4.0);
+    CHECK_KNOB_NUM(cfg, "mvga_reseat_angle", 150.0);
     CHECK_KNOB_NUM(cfg, "shower_topo_demote_len", 0.0);      // 0 = long segments stay shower-eligible
     CHECK_KNOB_NUM(cfg, "nu_skip_cosmic_bundle_min_length", 0.0);
     CHECK_KNOB_NUM(cfg, "cosmic_companion_min_length", 0.0);

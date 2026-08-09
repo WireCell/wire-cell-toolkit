@@ -1375,6 +1375,41 @@ namespace WireCell::Clus::PR {
         return vec_dQ_dx[median_index];
     }
 
+    // doc sbnd_xin/docs/pr/51 -- see the header comment.
+    double path_overlap_fraction(const std::vector<WireCell::Point>& pts_a,
+                                 const std::vector<WireCell::Point>& pts_b,
+                                 double tol)
+    {
+        if (pts_a.empty() || pts_b.empty()) return 0.0;
+        const double tol2 = tol * tol;
+        size_t n_close = 0;
+        for (const auto& pa : pts_a) {
+            for (const auto& pb : pts_b) {
+                const double dx = pa.x() - pb.x();
+                const double dy = pa.y() - pb.y();
+                const double dz = pa.z() - pb.z();
+                if (dx*dx + dy*dy + dz*dz <= tol2) {
+                    ++n_close;
+                    break;
+                }
+            }
+        }
+        return static_cast<double>(n_close) / static_cast<double>(pts_a.size());
+    }
+
+    // doc sbnd_xin/docs/pr/51 -- see the header comment.
+    double segment_integrated_dQ(SegmentPtr seg)
+    {
+        if (!seg) return 0.0;
+        double sum = 0.0;
+        for (const auto& fit : seg->fits()) {
+            if (fit.valid() && fit.dx > 0 && fit.dQ >= 0) {
+                sum += fit.dQ;
+            }
+        }
+        return sum;
+    }
+
     // doc sbnd_xin/docs/pr/40 -- see the header comment.
     bool segment_dqdx_spares_electron_reclass(SegmentPtr seg, double MIP_dQdx) {
         if (MIP_dQdx <= 0) return false;

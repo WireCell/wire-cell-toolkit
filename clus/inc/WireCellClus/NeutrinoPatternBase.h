@@ -337,6 +337,67 @@ namespace WireCell::Clus::PR {
         double m_vks_fit_miss{0.35*units::cm}; ///< snap only when the fit misses the image corner by at least this (a modeled kink has fit points on it)
         double m_vks_hot_ratio{0};            ///< OPTIONAL Bragg-hot veto scale, x m_mip_dqdx_median; default 0 = off (misfires on the failure class: misassigned charge reads hot)
 
+        // ---- doc sbnd_xin/docs/pr/51: main-vertex graph audit --------------
+        //
+        // Near-vertex PR *graph-shape* pathologies that survive every
+        // point-level fit metric (the ribbons DO follow charge -- the graph
+        // is wrong): (a) duplicated corridors -- two segments riding one
+        // charge ribbon (360535's ~1 cm parallel pair splitting one MIP's
+        // charge 934+1219; 268067's 15003 riding the proton at 86% overlap;
+        // 285567's 8010/8032/8033 full-charge double-counting variant);
+        // (b) charge-less bridges -- connectivity-only segments at a small
+        // fraction of MIP median dQ/dx (268067's 15005 at ~0.1 MIP;
+        // 285567's 8031 with 11/13 fit points at zero charge riding a
+        // full-MIP track); (c) micro-stubs at the vertex inflating the
+        // prong count, mostly carved by improve_vertex (131357's 1.56 cm
+        // 9-point "proton"; 142421's 7081/7082; 285567's 81/82/83).
+        // This pass runs ONCE on the main cluster, AFTER the final
+        // improve_vertex (the stubs it must see are created there) and
+        // BEFORE clustering_points/examine_direction, scoped to
+        // m_mvga_radius around the main vertex.  Ordered operations, each
+        // independently disabled by zeroing its knob, each edit printed as
+        // one "mvga:" DEBUG sentinel with the measured quantities:
+        //   op1 duplicate-corridor merge: pair overlap (shorter onto
+        //       longer, path_overlap_fraction at m_mvga_dup_tol) >=
+        //       m_mvga_dup_frac deletes the lower-integrated-charge member
+        //       and reconnects its orphaned endpoint to the survivor's
+        //       nearest endpoint by a direct rough-path edge;
+        //   op2 charge-less-bridge removal: non-terminal segment with
+        //       median dQ/dx < m_mvga_bridge_mip x m_mip_dqdx_median is
+        //       deleted iff the far side stays connected to the main
+        //       vertex or reconnects to a reachable vertex within
+        //       m_mvga_reconnect;
+        //   op3 micro-stub absorb + re-seat: terminal stub at the main
+        //       vertex shorter than m_mvga_stub is absorbed when its
+        //       corridor overlap with a sibling prong >= m_mvga_dup_frac
+        //       OR it is point-degenerate (<= m_mvga_stub_pts valid fits);
+        //       when the overlap gate passed and a sibling is the stub's
+        //       collinear continuation (>= m_mvga_reseat_angle deg), the
+        //       sibling is extended through the vertex and the main vertex
+        //       re-seats at the stub far end (131357: 0.9 mm from the true
+        //       image corner);
+        //   op4 one local do_multi_tracking refit (the examiner contract)
+        //       so dQ/dx and the display layers reflect the audited graph.
+        // Guards: kProtectedBreak vertices are never removed or re-seated
+        // (pr/48 + pr/50 snap precedent); the main vertex is never removed;
+        // segments created by this pass's own reconnects are exempt from
+        // op1 (no delete/recreate cycling); every op is edit-capped; no
+        // recursion.  Toolkit-only (no prototype counterpart; ancestry:
+        // prototype NeutrinoID_final_structure.h examine_structure_final_1
+        // lines 545-696 / _1p lines 402-544 and NeutrinoID_improve_vertex.h
+        // eliminate_short_vertex_activities lines 365-1018).  C++ default
+        // false => the pass returns immediately => byte-identical.
+        bool   m_main_vertex_graph_audit{false};
+        double m_mvga_radius{15*units::cm};   ///< audit scope around the main vertex
+        double m_mvga_dup_tol{1.4*units::cm}; ///< op1/op3 corridor-overlap point tolerance (must clear the fitter's ~1 cm ribbon separation: 360535's pair reads 0% at 0.6 cm, 77-80% at 1.4 cm)
+        double m_mvga_dup_frac{0.7};          ///< op1/op3 overlap-fraction accept threshold
+        double m_mvga_dup_angle{20};          ///< op1 near-parallel guard, deg (chord-vs-chord, folded to [0,90]); duplicates run (anti)parallel (13/7-11 deg measured), a genuine small-opening V must not merge; <= 0 disables
+        double m_mvga_bridge_mip{0.5};        ///< op2 median-dQ/dx ceiling, x m_mip_dqdx_median.  Measured (268067 TRACE probe): the charge-less bridge 15005 reads 0.436 INTERNAL (its Bee display "0.1 MIP" was skewed by the affine q = dQ*0.1-1000 display transform), the genuine middle track 1.290 -- 0.5 separates them; the round-1 guess 0.33 missed the defining case.
+        double m_mvga_reconnect{5*units::cm}; ///< op2 max direct-reconnect distance for a disconnected side (268067: V_B at 4.2 cm)
+        double m_mvga_stub{2*units::cm};      ///< op3 terminal-stub length ceiling
+        int    m_mvga_stub_pts{4};            ///< op3 point-degeneracy sub-gate: <= this many valid fits (overlap fractions are meaningless at 3-4 points)
+        double m_mvga_reseat_angle{150};      ///< op3 re-seat collinearity threshold vs a sibling prong, deg (131357 measures ~180; 175 would be the final_1p analogue but near-corner arms curve)
+
         // ---- doc sbnd_xin/docs/pr/30 §11: four port-fidelity knobs ----------
         //
         // P1 / F1 -- `flag_exclusion` on do_multi_tracking.
@@ -1514,6 +1575,13 @@ namespace WireCell::Clus::PR {
         // m_vertex_kink_snap (default false => immediate return, no side
         // effects).
         bool snap_main_vertex_to_kink(Graph& graph, Facade::Cluster& cluster, VertexPtr& main_vertex, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model);
+        // doc sbnd_xin/docs/pr/51 (see the m_main_vertex_graph_audit member
+        // block): near-vertex graph audit on the main cluster.  Returns true
+        // iff at least one operation edited the graph (followed by one full
+        // refit); may re-seat main_vertex's position in place (op3), never
+        // replaces the pointer.  Gated on m_main_vertex_graph_audit (default
+        // false => immediate return, no side effects).
+        bool main_vertex_graph_audit(Graph& graph, Facade::Cluster& cluster, VertexPtr main_vertex, TrackFitting& track_fitter, IDetectorVolumes::pointer dv);
         void determine_main_vertex(Graph& graph, Facade::Cluster& cluster, VertexPtr& main_vertex, IndexedVertexSet& vertices_in_long_muon, IndexedSegmentSet& segments_in_long_muon, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model);
         void change_daughter_type(Graph& graph, VertexPtr vertex, SegmentPtr segment, int particle_type, double mass, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model);
         void examine_main_vertices_local(Graph& graph, std::vector<VertexPtr>& vertices, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model);
@@ -1532,7 +1600,16 @@ namespace WireCell::Clus::PR {
         // the selected vertex (in which case the traditional determine_overall_main_vertex
         // should NOT be called).  Returns false if the DL network was unavailable, failed,
         // or did not improve on the candidate vertices (fall back to traditional).
-        bool determine_overall_main_vertex_DL(Graph& graph, ClusterVertexMap& map_cluster_main_vertices, Facade::Cluster*& main_cluster, std::vector<Facade::Cluster*>& other_clusters, IndexedVertexSet& vertices_in_long_muon, IndexedSegmentSet& segments_in_long_muon, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, const std::string& dl_weights, double dl_vtx_cut, double dQdx_scale = 0.1, double dQdx_offset = -1000.0, bool flag_rerank = false, int dl_vtx_top_k = 5, double dl_vtx_min_accept_score = 4.0, double dl_vtx_score_scale = 1000.0);
+        // dl_vtx_swap_guard (doc sbnd_xin/docs/pr/51, 18255-506746): when
+        // true, the RERANK branch skips candidates hosted on a different
+        // cluster than the current main cluster (each skip is one
+        // "dl_swap_guard:" DEBUG sentinel), so an accepted DL vertex can
+        // never swap the main cluster; if no candidate survives, the normal
+        // traditional fallback runs.  506746: a single confident uBooNE-net
+        // voxel (raw score 0.576 -> s_dl = +576 at score_scale 1000, which
+        // swamps every +-2 structural term) moved the vertex 28 cm onto a
+        // non-flash-matched cluster.  Default false => byte-identical.
+        bool determine_overall_main_vertex_DL(Graph& graph, ClusterVertexMap& map_cluster_main_vertices, Facade::Cluster*& main_cluster, std::vector<Facade::Cluster*>& other_clusters, IndexedVertexSet& vertices_in_long_muon, IndexedSegmentSet& segments_in_long_muon, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, const std::string& dl_weights, double dl_vtx_cut, double dQdx_scale = 0.1, double dQdx_offset = -1000.0, bool flag_rerank = false, int dl_vtx_top_k = 5, double dl_vtx_min_accept_score = 4.0, double dl_vtx_score_scale = 1000.0, bool dl_vtx_swap_guard = false);
 
         // global information transfer
         void transfer_info_from_segment_to_cluster(Graph& graph, Facade::Cluster& cluster, const std::string& cloud_name = "associated_points");

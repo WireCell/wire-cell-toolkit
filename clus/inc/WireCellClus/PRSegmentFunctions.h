@@ -123,6 +123,25 @@ namespace WireCell::Clus::PR {
                                                             double skirt, double baseline,
                                                             double angle_cut, double min_arm);
 
+    /// doc sbnd_xin/docs/pr/51 (main-vertex graph audit): fraction of pts_a
+    /// whose distance to the NEAREST point of pts_b is <= tol.  The
+    /// duplicate-corridor test: two segments riding one charge ribbon give a
+    /// high fraction for the shorter path against the longer one (360535:
+    /// 0.77-0.80 at 1.4 cm for a ~1 cm-separated parallel pair; 268067:
+    /// 0.86 at 0.6 cm for a corridor rider).  Returns 0 when either input
+    /// is empty.  Brute force O(|a|*|b|) -- callers pass near-vertex fit
+    /// paths (tens of points).  Deterministic, pure geometry.
+    double path_overlap_fraction(const std::vector<WireCell::Point>& pts_a,
+                                 const std::vector<WireCell::Point>& pts_b,
+                                 double tol);
+
+    /// doc sbnd_xin/docs/pr/51: total associated charge of a segment --
+    /// the sum of fit.dQ over valid fit points (fit.valid() && fit.dx > 0
+    /// && fit.dQ >= 0, the same filter as segment_median_dQ_dx).  The
+    /// duplicate-corridor merge keeps the higher-integrated-charge member.
+    /// Returns 0 for a segment with no valid fits.
+    double segment_integrated_dQ(SegmentPtr seg);
+
     /// Options for segment_two_end_break_scan (doc sbnd_xin/docs/pr/48 sec 6
     /// -- the two-end residual-range back-to-back break).  Every value here
     /// only matters once the owning component's two_end_break knob is ON;

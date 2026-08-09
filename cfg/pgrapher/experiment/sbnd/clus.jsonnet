@@ -1307,6 +1307,25 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               vks_min_arm=null,
               vks_fit_miss=null,
               vks_hot_ratio=null,
+              // doc pr/51 -- main-vertex graph audit (near-vertex graph-shape
+              // repair: dup-corridor merge / charge-less-bridge removal /
+              // micro-stub absorb + re-seat / one refit; C++ defaults in
+              // TaggerCheckNeutrino.h).  false/null omit the keys =>
+              // byte-identical.
+              main_vertex_graph_audit=false,
+              mvga_radius=null,
+              mvga_dup_tol=null,
+              mvga_dup_frac=null,
+              mvga_dup_angle=null,
+              mvga_bridge_mip=null,
+              mvga_reconnect=null,
+              mvga_stub=null,
+              mvga_stub_pts=null,
+              mvga_reseat_angle=null,
+              // doc pr/51 (18255-506746) -- DL rerank cross-cluster swap
+              // guard.  C++ default false; false omits the key =>
+              // byte-identical.
+              dl_vtx_swap_guard=false,
               // doc pr/45 -- paint muon-typed (+-13) pseudo-showers as track in
               // the Bee shower_track layer + PrDisplayDump (18255-56463: 411 cm
               // muon painted red).  C++ default false; key suppressed when off
@@ -1868,6 +1887,17 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
             vks_min_arm=vks_min_arm,
             vks_fit_miss=vks_fit_miss,
             vks_hot_ratio=vks_hot_ratio,
+            main_vertex_graph_audit=main_vertex_graph_audit,
+            mvga_radius=mvga_radius,
+            mvga_dup_tol=mvga_dup_tol,
+            mvga_dup_frac=mvga_dup_frac,
+            mvga_dup_angle=mvga_dup_angle,
+            mvga_bridge_mip=mvga_bridge_mip,
+            mvga_reconnect=mvga_reconnect,
+            mvga_stub=mvga_stub,
+            mvga_stub_pts=mvga_stub_pts,
+            mvga_reseat_angle=mvga_reseat_angle,
+            dl_vtx_swap_guard=dl_vtx_swap_guard,
             muon_dqdx_curve=muon_dqdx_curve,
             sp_dedx_use_recomb_model=sp_dedx_use_recomb_model,
             sp_mean_dedx_cut=sp_mean_dedx_cut,
@@ -2563,6 +2593,20 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
               vks_min_arm=null,
               vks_fit_miss=null,
               vks_hot_ratio=null,
+              // doc pr/51 -- main-vertex graph audit + DL rerank
+              // cross-cluster swap guard (506746).  false/null omit the
+              // keys => byte-identical (see the clus_pr arg comments).
+              main_vertex_graph_audit=false,
+              mvga_radius=null,
+              mvga_dup_tol=null,
+              mvga_dup_frac=null,
+              mvga_dup_angle=null,
+              mvga_bridge_mip=null,
+              mvga_reconnect=null,
+              mvga_stub=null,
+              mvga_stub_pts=null,
+              mvga_reseat_angle=null,
+              dl_vtx_swap_guard=false,
        pseudo_shower_track_paint=false,
        // Muon dQ/dx-vs-length envelope: DEFAULT = the docs/pr/10 SBND fit
        // (see the clus_pr arg comment; null restores the uBooNE refit).
@@ -2759,6 +2803,17 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 vks_min_arm=vks_min_arm,
                 vks_fit_miss=vks_fit_miss,
                 vks_hot_ratio=vks_hot_ratio,
+                main_vertex_graph_audit=main_vertex_graph_audit,
+                mvga_radius=mvga_radius,
+                mvga_dup_tol=mvga_dup_tol,
+                mvga_dup_frac=mvga_dup_frac,
+                mvga_dup_angle=mvga_dup_angle,
+                mvga_bridge_mip=mvga_bridge_mip,
+                mvga_reconnect=mvga_reconnect,
+                mvga_stub=mvga_stub,
+                mvga_stub_pts=mvga_stub_pts,
+                mvga_reseat_angle=mvga_reseat_angle,
+                dl_vtx_swap_guard=dl_vtx_swap_guard,
                 pseudo_shower_track_paint=pseudo_shower_track_paint,
                 muon_dqdx_curve=muon_dqdx_curve,
                 use_power_recomb=use_power_recomb,
