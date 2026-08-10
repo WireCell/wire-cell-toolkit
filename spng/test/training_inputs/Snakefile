@@ -241,6 +241,25 @@ rule splat_and_drift:
          spng/depo-to-adc.jsonnet
         """
 
+rule depo_to_splat:
+    input:
+        "{name}_wct-depos.npz"
+    output:
+        "splat-{name}_wct-depos.npz"
+    params:
+        detname=config.get('detname', 'pdhd'),
+        tpcid=config.get('tpcid', '0')
+    shadow: "minimal"
+    shell:
+        """
+        wire-cell -l stdout -L debug \
+        -A "input={input}" \
+        -A "output={output}" \
+        -A "detname={params.detname}" \
+        -A "tpcid={params.tpcid}" \
+        spng/depo-to-splat.jsonnet
+        """
+
 rule spng_depos_to_adc:
     input:
         "drifted-{name}_wct-depos.npz"
@@ -254,7 +273,20 @@ rule spng_depos_to_adc:
         """
         wire-cell -l stdout -L debug -A "input={input}" -A "output={output}" -A "device={params.device}" -A "detname={params.detname}" spng/adc-to-spng-simple.jsonnet
         """
-        
+rule spng_old_depos_to_adc:
+    input:
+        "drifted-{name}_wct-depos.npz"
+    output:
+        "spng-old-sigproc-{name}_wct-depos.npz"
+    params:
+        device=config.get('device', 'cpu'),
+        detname=config.get('detname', 'pdhd')
+    shadow: "minimal"
+    shell:
+        """
+        wire-cell -l stdout -L debug -A "input={input}" -A "output={output}" -A "device={params.device}" -A "detname={params.detname}" spng/adc-to-spng.jsonnet
+        """
+          
 config.setdefault('tpcid', '0')
 config.setdefault('device', 'cpu')
 config.setdefault('mpsigproc_training_js', 'dnnroi-training.jsonnet')
