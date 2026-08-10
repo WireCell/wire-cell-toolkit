@@ -257,6 +257,31 @@ namespace WireCell::Clus::Graphs {
     /// Pure; exposed for doctests.
     bool relaxed_img_bad(int max_ghost_run, double dis_cm, int run_floor = 4, double dis_cap_cm = 15.0);
 
+    /// Kill predicate of the "relaxed_strict_img_2d" graph flavor (doc pr/56
+    /// round 2: S6, "2D wind/tick connectivity"). True if at least one
+    /// non-excused plane shows its two candidate components' real
+    /// fired-pixel footprints (a bounded 2D flood-fill in that plane's
+    /// (wire_index, time_slice) grid, live-or-dead-channel passable) NOT
+    /// connected to each other. W is never excused; U/V are excused
+    /// (gap_u/gap_v ignored) when the candidate path already tests as
+    /// quasi-parallel to that plane's wire direction (the existing
+    /// angle1/angle2 < wire_angle_tol test in connect_graph_relaxed_strict,
+    /// reused here rather than re-detected) -- the physical justification
+    /// being real hit-finding inefficiency from long same-wire induction
+    /// pulse trains on a prolonged/isochronous topology.
+    ///
+    /// Owner's rule: kill on >= 1 non-excused gap (stricter than S1-S5's
+    /// "at least 2 views" convention, by explicit instruction) -- this
+    /// predicate is an independent OR-kill alongside relaxed_strict_bad and
+    /// relaxed_img_bad, not a replacement; it can only add new kills.
+    ///
+    /// Pure; exposed for doctests. The 2D flood-fill itself lives in
+    /// connect_graph_relaxed_strict.cxx (not pure -- it queries live
+    /// Facade::Grouping state) and is verified by end-to-end event replay,
+    /// not a synthetic doctest fixture; see doc pr/56 round 2 sec verification.
+    bool two_d_connectivity_bad(bool gap_u, bool gap_v, bool gap_w,
+                                 bool excuse_u, bool excuse_v);
+
 }
 
 #endif

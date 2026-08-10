@@ -14,6 +14,7 @@
 
 using WireCell::Clus::Graphs::relaxed_strict_bad;
 using WireCell::Clus::Graphs::relaxed_img_bad;
+using WireCell::Clus::Graphs::two_d_connectivity_bad;
 
 // The legacy relaxed test, restated locally as the comparison baseline
 // (connect_graph_relaxed.cxx:268 shape).
@@ -132,6 +133,58 @@ TEST_CASE("relaxed_img kill predicate: short runs and short edges survive")
     CHECK(relaxed_img_bad(4, 14.99));
     CHECK(!relaxed_img_bad(4, 15.0));
     CHECK(!relaxed_img_bad(4, 15.01));
+}
+
+// doc pr/56 round 2: two_d_connectivity_bad (S6, "2D wind/tick
+// connectivity").  Owner's rule: kill on >= 1 non-excused gap plane -- W is
+// never excused, U/V are excused only when the caller's angle test already
+// says the path runs quasi-parallel to that plane's wires (the excuse_u /
+// excuse_v booleans, computed by the caller from angle1/angle2, not by this
+// predicate itself -- kept pure so both are independently doctestable).
+TEST_CASE("two_d_connectivity_bad: no gaps never kills")
+{
+    CHECK(!two_d_connectivity_bad(false, false, false, false, false));
+    CHECK(!two_d_connectivity_bad(false, false, false, true, true));
+}
+
+TEST_CASE("two_d_connectivity_bad: a single non-excused gap on any plane kills")
+{
+    // U alone.
+    CHECK(two_d_connectivity_bad(true, false, false, false, false));
+    // V alone.
+    CHECK(two_d_connectivity_bad(false, true, false, false, false));
+    // W alone -- W can never be excused, so even with excuse flags irrelevant.
+    CHECK(two_d_connectivity_bad(false, false, true, false, false));
+}
+
+TEST_CASE("two_d_connectivity_bad: excusal only relieves U/V, never W")
+{
+    // U gap excused -> survives (if no other gap).
+    CHECK(!two_d_connectivity_bad(true, false, false, true, false));
+    // V gap excused -> survives (if no other gap).
+    CHECK(!two_d_connectivity_bad(false, true, false, false, true));
+    // Both U and V excused, W gap present -> still killed (W has no excuse).
+    CHECK(two_d_connectivity_bad(true, true, true, true, true));
+    // U excused but V gap not excused -> killed via V.
+    CHECK(two_d_connectivity_bad(true, true, false, true, false));
+}
+
+TEST_CASE("two_d_connectivity_bad: monotone -- more gaps or fewer excuses never un-kills")
+{
+    for (int g = 0; g < 8; ++g) {
+        const bool gu = g & 1, gv = g & 2, gw = g & 4;
+        for (int e = 0; e < 4; ++e) {
+            const bool eu = e & 1, ev = e & 2;
+            const bool verdict = two_d_connectivity_bad(gu, gv, gw, eu, ev);
+            // Adding a gap on a currently-clean plane can only add a kill.
+            if (!gu) CHECK(verdict <= two_d_connectivity_bad(true, gv, gw, eu, ev));
+            if (!gv) CHECK(verdict <= two_d_connectivity_bad(gu, true, gw, eu, ev));
+            if (!gw) CHECK(verdict <= two_d_connectivity_bad(gu, gv, true, eu, ev));
+            // Withdrawing an excuse on a currently-excused plane can only add a kill.
+            if (eu) CHECK(verdict <= two_d_connectivity_bad(gu, gv, gw, false, ev));
+            if (ev) CHECK(verdict <= two_d_connectivity_bad(gu, gv, gw, eu, false));
+        }
+    }
 }
 
 TEST_CASE("relaxed_img kill predicate: image_check=false is a byte-identical no-op")

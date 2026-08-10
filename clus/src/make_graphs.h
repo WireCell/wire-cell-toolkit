@@ -66,6 +66,14 @@ namespace WireCell::Clus::Graphs {
         IDetectorVolumes::pointer dv,
         IPCTransformSet::pointer pcts);
 
+    // closely + relaxed_strict with image_check=true AND two_d_check=true
+    // (doc pr/56 round 2: protect_bundle-only, adds S6 the per-plane 2D
+    // wind/tick fired-pixel connectivity OR-kill on top of S1-S5)
+    Weighted::Graph make_graph_relaxed_strict_img_2d(
+        const Facade::Cluster& cluster,
+        IDetectorVolumes::pointer dv,
+        IPCTransformSet::pointer pcts);
+
 }
 
 #endif

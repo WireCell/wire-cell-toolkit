@@ -114,3 +114,13 @@ Weighted::Graph WireCell::Clus::Graphs::make_graph_relaxed_strict_img(
     connect_graph_relaxed_strict(cluster, dv, pcts, graph, /*image_check=*/true);
     return graph;
 }
+
+Weighted::Graph WireCell::Clus::Graphs::make_graph_relaxed_strict_img_2d(
+    const Facade::Cluster& cluster,
+    IDetectorVolumes::pointer dv,
+    IPCTransformSet::pointer pcts)
+{
+    auto graph = make_graph_closely(cluster);
+    connect_graph_relaxed_strict(cluster, dv, pcts, graph, /*image_check=*/true, /*two_d_check=*/true);
+    return graph;
+}

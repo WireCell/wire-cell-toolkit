@@ -61,12 +61,22 @@ namespace WireCell::Clus::Graphs {
     // identical to graph_name "relaxed_strict"'s behavior (round 6). The
     // "relaxed_strict_img" flavor (make_graph_relaxed_strict_img) is the
     // only caller that passes true.
+    //
+    // doc pr/56 round 2: two_d_check adds S6, an additional per-plane 2D
+    // wind/tick fired-pixel connectivity OR-kill (two_d_connectivity_bad(),
+    // public header) alongside relaxed_strict_bad()/relaxed_img_bad();
+    // default false keeps this function byte-for-byte identical to
+    // "relaxed_strict_img"'s behavior. The "relaxed_strict_img_2d" flavor
+    // (make_graph_relaxed_strict_img_2d) is the only caller that passes
+    // true. S6 can only additionally kill an edge S1-S5 already let
+    // through -- it never rescues one they killed.
     void connect_graph_relaxed_strict(
         const Facade::Cluster& cluster,
         IDetectorVolumes::pointer dv,
         IPCTransformSet::pointer pcts,
         Weighted::Graph& graph,
-        bool image_check = false);
+        bool image_check = false,
+        bool two_d_check = false);
 
     bool is_point_good(const Facade::Cluster& cluster, size_t point_index, int ncut = 3);
 
