@@ -70,17 +70,30 @@
 // U-plane-only gap, attributed to prolonged induction signal from a large
 // EM shower) -- see doc pr/56 round 3 before changing any operating-point
 // constant in the two_d_gap_kill lambda below.
+//
+// doc pr/57: adds an env-gated (WCT_OC56_SCAN_DUMP) per-edge JSONL dump,
+// feeding sbnd_xin/overclustering_display -- a hand-scan tool for judging
+// S6 removals as real gaps vs. induction-plane signal inefficiency. Unset
+// (the default) => Oc56DumpWriter::instance().enabled() is false and every
+// dump-only branch below is skipped; two_d_connectivity_bad, every shipped
+// constant, and the verdict path are untouched. See that doc for the
+// record schema.
 
 #include "WireCellClus/Graphs.h"
 #include "WireCellClus/IPCTransform.h"
 #include "WireCellClus/Facade_Cluster.h"
 #include "WireCellClus/Facade_Grouping.h"
 #include "WireCellUtil/Logging.h"
+#include "WireCellUtil/Persist.h"
 
 #include "connect_graphs.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cstdlib>
+#include <fstream>
+#include <mutex>
+#include <set>
 #include <string>
 #include <unordered_set>
 
@@ -185,6 +198,48 @@ namespace {
         return false;
     }
 
+    // doc pr/57: env-gated (WCT_OC56_SCAN_DUMP) singleton JSONL writer for
+    // the overclustering-separation hand-scan display. One compact JSON
+    // object per line, written under a mutex -- ClusteringProtectBundle
+    // processes clusters concurrently, and doc pr/56 round 3 sec 8.3
+    // already learned the hard way that a dump format needing cross-line
+    // correlation by a locally-scoped index (like a per-cluster component
+    // number) breaks silently when lines from different clusters
+    // interleave. Here the correlation key ("graph_call", from
+    // next_graph_call()) is a globally unique atomic counter instead, so a
+    // component record and the edge records that reference it stay
+    // correctly paired no matter how writes interleave across threads.
+    class Oc56DumpWriter {
+       public:
+        static Oc56DumpWriter& instance() {
+            static Oc56DumpWriter w;
+            return w;
+        }
+        bool enabled() const { return m_enabled; }
+        long next_graph_call() { return m_graph_call.fetch_add(1); }
+        void write(const Json::Value& rec) {
+            if (!m_enabled) return;
+            const std::string line = Persist::dumps(rec, 0) + "\n";
+            std::lock_guard<std::mutex> lk(m_mu);
+            m_ofs << line;
+        }
+
+       private:
+        Oc56DumpWriter() {
+            const char* path = std::getenv("WCT_OC56_SCAN_DUMP");
+            if (!path || !*path) {
+                m_enabled = false;
+                return;
+            }
+            m_ofs.open(path, std::ios::out | std::ios::trunc);
+            m_enabled = m_ofs.is_open();
+        }
+        bool m_enabled = false;
+        std::ofstream m_ofs;
+        std::mutex m_mu;
+        std::atomic<long> m_graph_call{0};
+    };
+
 }  // namespace
 
 bool Graphs::relaxed_strict_bad(int nbad, int num_steps, int cap)
@@ -282,6 +337,17 @@ void Graphs::connect_graph_relaxed_strict(
     // change of any kind; the graph construction below is untouched either way.
     static const bool oc53_census = std::getenv("WCT_RELAXED_EDGE_CENSUS") != nullptr;
     static auto oc53_log = WireCell::Log::logger("clus");
+
+    // doc pr/57: per-cluster-call dump state. graph_call is a globally
+    // unique id for THIS call (one per cluster's candidate graph); the
+    // component-index dedup set is local to it, so re-dumping the same
+    // component's full point cloud once per edge that touches it is
+    // avoided without needing any cross-call correlation. No-op (and no
+    // atomic increment) when the dump is disabled.
+    auto& oc56_dump = Oc56DumpWriter::instance();
+    const bool oc56_dump_on = oc56_dump.enabled();
+    const long oc56_graph_call = oc56_dump_on ? oc56_dump.next_graph_call() : -1;
+    std::set<size_t> oc56_dumped_components;
 
     // Allocate exactly num point clouds (one per component)
     std::vector<std::shared_ptr<Simple3DPointCloud>> pt_clouds(num);
@@ -500,7 +566,8 @@ void Graphs::connect_graph_relaxed_strict(
 
         bool gap[3] = {false, false, false};
         bool budget_hit[3] = {false, false, false};
-        std::string matrix[3];  // doc pr/56 round 3 census only, see below
+        std::string matrix[3];  // doc pr/56 round 3 census + doc pr/57 dump, see below
+        Json::Value oc56_dump_planes(Json::arrayValue);  // doc pr/57, dump only
         for (int plane = 0; plane != 3; ++plane) {
             std::vector<S6Cell> seeds_a2d, seeds_b2d;
             int wlo = 1 << 30, whi = -(1 << 30), slo = 1 << 30, shi = -(1 << 30);
@@ -531,20 +598,21 @@ void Graphs::connect_graph_relaxed_strict(
                 slice_step, dw, ds, cell_budget, &budget_hit[plane]);
             gap[plane] = !connected;
 
-            if (oc53_census) {
-                // doc pr/56 round 3: a full dw={1..4} x ds={1..4}
-                // connectivity matrix at the SAME fixed window (s6_reach
-                // above), so any candidate per-plane operating point is
-                // evaluable offline from one run without rerunning
-                // wire-cell.  Diagnostic only -- never affects
-                // gap[]/killed.  matrix[i*4+j] is dw=i+1, ds=j+1 ('1'
-                // connected, '0' gap).  Built into ONE log line per edge
-                // below (not one line per plane): round-3's first attempt
-                // at per-plane lines correlated by (blk,j,k) across
-                // sequential log entries broke silently whenever
-                // ClusteringProtectBundle processes clusters concurrently
-                // and their log lines interleave -- a single self-contained
-                // line per edge has no such correlation to get wrong.
+            // doc pr/56 round 3 / doc pr/57: a full dw={1..4} x ds={1..4}
+            // connectivity matrix at the SAME fixed window (s6_reach
+            // above), so any candidate per-plane operating point is
+            // evaluable offline from one run without rerunning
+            // wire-cell -- either for the census log or for the scan
+            // dump's near-miss badges.  Diagnostic only -- never affects
+            // gap[]/killed.  matrix[i*4+j] is dw=i+1, ds=j+1 ('1'
+            // connected, '0' gap).  Built into ONE log line / dump record
+            // per edge (not one per plane): round-3's first attempt at
+            // per-plane lines correlated by (blk,j,k) across sequential
+            // log entries broke silently whenever ClusteringProtectBundle
+            // processes clusters concurrently and their log lines
+            // interleave -- a single self-contained record per edge has no
+            // such correlation to get wrong.
+            if (oc53_census || oc56_dump_on) {
                 matrix[plane].reserve(16);
                 for (int mdw = 1; mdw <= 4; ++mdw) {
                     for (int mds = 1; mds <= 4; ++mds) {
@@ -555,6 +623,95 @@ void Graphs::connect_graph_relaxed_strict(
                         matrix[plane].push_back(c ? '1' : '0');
                     }
                 }
+            }
+
+            if (oc56_dump_on) {
+                // doc pr/57: enumerate every INTEGER slice in the window,
+                // not just multiples of slice_step from win_slo. The real
+                // BFS above steps by slice_step multiples starting from
+                // EACH SEED'S OWN slice value, so seeds on different
+                // residue classes mod slice_step query different,
+                // interleaved lattices -- the set of cells the BFS can
+                // touch is a union across them, not one win_slo-anchored
+                // lattice. Stepping by 1 sidesteps that: it is a superset
+                // of every cell any BFS invocation (any seed, any dw/ds)
+                // could touch inside this window, so the offline replay in
+                // oc56_dump_check.py can query it exactly as the BFS would
+                // and is guaranteed not to see a spurious "no data" gap
+                // that is really just an unwalked residue in the dump.
+                // Capped to bound pathological (large slice_step) windows;
+                // the fallback stride actually used is recorded per-plane
+                // (native_step) so the checker knows when a native-1 dump
+                // was not attempted rather than silently trusting it.
+                // "fired" and "dead" are reported separately so the viewer
+                // can shade them differently; dead is collapsed to
+                // per-wire slice RANGES, not per-cell, or the payload
+                // explodes.
+                const long win_wires = static_cast<long>(win_whi - win_wlo) + 1;
+                const long win_slices_native = static_cast<long>(win_shi - win_slo) + 1;
+                const long oc56_dump_cap = 300000;
+                const bool oc56_native = (win_wires * win_slices_native) <= oc56_dump_cap;
+                const int dump_step = oc56_native ? 1 : slice_step;
+
+                Json::Value fired(Json::arrayValue);
+                Json::Value dead(Json::arrayValue);
+                for (int wind = win_wlo; wind <= win_whi; ++wind) {
+                    int run_lo = -1;
+                    for (int slice = win_slo; slice <= win_shi; slice += dump_step) {
+                        const auto* row = grouping->wire_charge_row(apa, face, plane, slice);
+                        if (row && row->count(wind)) {
+                            Json::Value c(Json::arrayValue);
+                            c.append(wind);
+                            c.append(slice);
+                            fired.append(c);
+                        }
+                        const bool is_dead = grouping->is_wire_dead(apa, face, plane, wind, slice);
+                        if (is_dead && run_lo < 0) run_lo = slice;
+                        if (!is_dead && run_lo >= 0) {
+                            Json::Value r(Json::arrayValue);
+                            r.append(wind);
+                            r.append(run_lo);
+                            r.append(slice - dump_step);
+                            dead.append(r);
+                            run_lo = -1;
+                        }
+                    }
+                    if (run_lo >= 0) {
+                        Json::Value r(Json::arrayValue);
+                        r.append(wind);
+                        r.append(run_lo);
+                        r.append(win_shi);
+                        dead.append(r);
+                        run_lo = -1;
+                    }
+                }
+                Json::Value seeds_a_j(Json::arrayValue), seeds_b_j(Json::arrayValue);
+                for (const auto& c : seeds_a2d) {
+                    Json::Value v(Json::arrayValue);
+                    v.append(c.wind);
+                    v.append(c.slice);
+                    seeds_a_j.append(v);
+                }
+                for (const auto& c : seeds_b2d) {
+                    Json::Value v(Json::arrayValue);
+                    v.append(c.wind);
+                    v.append(c.slice);
+                    seeds_b_j.append(v);
+                }
+                Json::Value win(Json::arrayValue);
+                win.append(win_wlo);
+                win.append(win_whi);
+                win.append(win_slo);
+                win.append(win_shi);
+                Json::Value prec;
+                prec["plane"] = plane;
+                prec["win"] = win;
+                prec["native_step"] = dump_step;
+                prec["fired"] = fired;
+                prec["dead"] = dead;
+                prec["seeds_a"] = seeds_a_j;
+                prec["seeds_b"] = seeds_b_j;
+                oc56_dump_planes.append(prec);
             }
         }
 
@@ -574,6 +731,73 @@ void Graphs::connect_graph_relaxed_strict(
                 slice_step, gap[0], gap[1], gap[2], excuse_u, excuse_v,
                 budget_hit[0], budget_hit[1], budget_hit[2],
                 matrix[0], matrix[1], matrix[2], killed);
+        }
+
+        if (oc56_dump_on) {
+            // doc pr/57: dump each component's full point cloud once per
+            // cluster-graph call (oc56_graph_call / oc56_dumped_components,
+            // see above), keyed by (graph_call, comp) so repeated
+            // references from other edges in the same call don't re-dump
+            // it -- j/k are cluster-local and get reused across many edges.
+            auto dump_component = [&](size_t comp, const std::shared_ptr<Simple3DPointCloud>& cloud) {
+                if (!oc56_dumped_components.insert(comp).second) return;  // already dumped this call
+                Json::Value rec;
+                rec["type"] = "component";
+                rec["graph_call"] = static_cast<int>(oc56_graph_call);
+                rec["comp"] = static_cast<int>(comp);
+                rec["cluster_id"] = cluster.get_cluster_id();
+                const size_t n = cloud->get_num_points();
+                const size_t cap = 20000;
+                const size_t stride = (n > cap) ? (n + cap - 1) / cap : 1;
+                Json::Value pts(Json::arrayValue);
+                for (size_t i = 0; i < n; i += stride) {
+                    const auto p = cloud->point(i);
+                    Json::Value pt(Json::arrayValue);
+                    pt.append(p.x() / units::cm);
+                    pt.append(p.y() / units::cm);
+                    pt.append(p.z() / units::cm);
+                    pts.append(pt);
+                }
+                rec["points"] = pts;
+                rec["npts"] = static_cast<int>(n);
+                rec["truncated"] = (stride > 1);
+                oc56_dump.write(rec);
+            };
+            dump_component(j, cloud_a);
+            dump_component(k, cloud_b);
+
+            Json::Value rec;
+            rec["type"] = "edge";
+            rec["graph_call"] = static_cast<int>(oc56_graph_call);
+            rec["j"] = static_cast<int>(j);
+            rec["k"] = static_cast<int>(k);
+            rec["blk"] = blk;
+            rec["dis"] = edge_dis / units::cm;
+            rec["apa"] = apa;
+            rec["face"] = face;
+            Json::Value p1j(Json::arrayValue), p2j(Json::arrayValue);
+            p1j.append(q1.x() / units::cm);
+            p1j.append(q1.y() / units::cm);
+            p1j.append(q1.z() / units::cm);
+            p2j.append(q2.x() / units::cm);
+            p2j.append(q2.y() / units::cm);
+            p2j.append(q2.z() / units::cm);
+            rec["p1"] = p1j;
+            rec["p2"] = p2j;
+            rec["slice_step"] = slice_step;
+            Json::Value gapj(Json::arrayValue), excusej(Json::arrayValue),
+                budgetj(Json::arrayValue), matrixj(Json::arrayValue);
+            gapj.append(gap[0]); gapj.append(gap[1]); gapj.append(gap[2]);
+            excusej.append(excuse_u); excusej.append(excuse_v);
+            budgetj.append(budget_hit[0]); budgetj.append(budget_hit[1]); budgetj.append(budget_hit[2]);
+            matrixj.append(matrix[0]); matrixj.append(matrix[1]); matrixj.append(matrix[2]);
+            rec["gap"] = gapj;
+            rec["excuse"] = excusej;
+            rec["budget"] = budgetj;
+            rec["matrix"] = matrixj;
+            rec["killed"] = killed;
+            rec["planes"] = oc56_dump_planes;
+            oc56_dump.write(rec);
         }
         return killed;
     };
