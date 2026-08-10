@@ -322,23 +322,21 @@ namespace WireCell::SPNG {
                     
                     int tbin = trace->tbin();
                     int nbins = trace->charge().size();
-                    
-                    if (group_tirs.empty()) { // first time
-                        tbeg = tbin;
-                        tend = tbin+nbins;
-                        continue;
-                    }
                     group_tirs.emplace_back(TIR{trace, summary_index, row});
 
-                    if (tbeg < tbin) { tbeg = tbin; }
-                    if (tend < tbin+nbins) { tend = tbin+nbins;}
-
-                }
-                int nrows = group.chid2row.size(); // span all channels as traces may be sparse
+                    if (group_tirs.size() == 1) { // first trace - initialize bounds
+                        tbeg = tbin;
+                        tend = tbin+nbins;
+                    }
+                    else {
+                        // Update bounds for subsequent traces
+                        if (tbin < tbeg) { tbeg = tbin; }
+                        if (tbin+nbins > tend) { tend = tbin+nbins; }
+                    }
+                } // end for loop over tagged_traces
+                
+                int nrows = group.chid2row.size();
                 int ncols = tend-tbeg;
-
-                log->debug("ntirs={} ntraces={} nrows={} ncols={} nchid2row={}",
-                           group_tirs.size(), tagged_traces.size(), nrows, ncols, group.chid2row.size());
 
   
                 // Common md for all parts: traces, summaries, chids.
