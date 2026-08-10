@@ -53,6 +53,23 @@
 // already-computed angle1/angle2 wire-parallel test, never re-detected.
 // "relaxed_strict_img_2d" (make_graph_relaxed_strict_img_2d) is the only
 // caller passing two_d_check=true.
+//
+// doc pr/56 round 3: repairs two round-2 defects and adds one relief
+// valve, all still inside this function -- (1) the BFS adjacency is now a
+// true Chebyshev box (dw wires x ds slice-steps), not round 2's
+// accidental 4-connected/Von-Neumann stencil; (2) the slice-adjacency
+// stride is now the minimum of the seed blobs' own
+// slice_index_max()-slice_index_min() (= tick_span by construction), not
+// round 2's inferred gap between sorted slice_index_min values, which
+// measured wrong strides on a real event; (3) s6_dis_floor abstains S6
+// entirely below a tuned 3D gap, where components are close enough that a
+// 2D "gap" is almost certainly a coarse-seeding/BFS artifact rather than a
+// real disconnection. Per-plane stencil half-widths and the floor are
+// tuned from a 117-event scan against both round-2's kill targets and a
+// round-3 rescue target (an isochronous track wrongly split by a
+// U-plane-only gap, attributed to prolonged induction signal from a large
+// EM shower) -- see doc pr/56 round 3 before changing any operating-point
+// constant in the two_d_gap_kill lambda below.
 
 #include "WireCellClus/Graphs.h"
 #include "WireCellClus/IPCTransform.h"
@@ -64,6 +81,7 @@
 
 #include <algorithm>
 #include <cstdlib>
+#include <string>
 #include <unordered_set>
 
 using namespace WireCell;
@@ -103,20 +121,28 @@ namespace {
         return grouping->is_wire_dead(apa, face, plane, wind, slice);
     }
 
-    // doc pr/56 round 2 S6: bounded bidirectional-seeded BFS between seed
+    // doc pr/56 round 3: bounded bidirectional-seeded BFS between seed
     // cell-sets A and B in one plane's (wire_index, time_slice) grid.
     // slice_step is the real slice-adjacency stride (see caller -- NOT
     // assumed to be 1 tick, since wire_charge_row's keys are only populated
-    // every tick_span ticks). Returns true if A and B are connected within
-    // the window and cell budget; false (a gap) otherwise, INCLUDING when
-    // the budget is exhausted before a connection is found -- fails closed,
-    // an inconclusive result must not silently pass.
+    // every tick_span ticks). Adjacency is a Chebyshev box: |d(wind)|<=dw
+    // wires, |d(slice)|<=ds slice-steps, excluding the origin -- dw=ds=1 is
+    // true 8-connectivity. (Round 2 shipped an unintentional 4-connected/
+    // Von-Neumann stencil, {(+-1,0),(0,+-slice_step)} only -- see file
+    // header.) Returns true if A and B are connected within the window and
+    // cell budget; false (a gap) otherwise, INCLUDING when the budget is
+    // exhausted before a connection is found -- fails closed, an
+    // inconclusive result must not silently pass. If budget_hit is
+    // non-null, *budget_hit reports whether the circuit breaker actually
+    // fired, so callers can log "budget-exhausted-gap" distinctly from a
+    // genuine gap rather than let it silently enter tuning data as one.
     bool s6_planes_connected(
         const Facade::Grouping* grouping, int apa, int face, int plane,
         const std::vector<S6Cell>& seeds_a, const std::vector<S6Cell>& seeds_b,
         int wind_lo, int wind_hi, int slice_lo, int slice_hi,
-        int slice_step, size_t cell_budget)
+        int slice_step, int dw, int ds, size_t cell_budget, bool* budget_hit = nullptr)
     {
+        if (budget_hit) *budget_hit = false;
         if (seeds_a.empty() || seeds_b.empty()) return false;
 
         std::unordered_set<S6Cell, S6CellHash> target(seeds_b.begin(), seeds_b.end());
@@ -127,14 +153,24 @@ namespace {
             if (visited.insert(s).second) frontier.push_back(s);
         }
 
-        const int steps[4][2] = {{1, 0}, {-1, 0}, {0, slice_step}, {0, -slice_step}};
+        std::vector<std::pair<int, int>> steps;
+        steps.reserve(static_cast<size_t>(2 * dw + 1) * (2 * ds + 1) - 1);
+        for (int a = -dw; a <= dw; ++a) {
+            for (int b = -ds; b <= ds; ++b) {
+                if (a == 0 && b == 0) continue;
+                steps.emplace_back(a, b * slice_step);
+            }
+        }
 
         while (!frontier.empty()) {
-            if (visited.size() > cell_budget) return false;  // circuit breaker: fails closed
+            if (visited.size() > cell_budget) {
+                if (budget_hit) *budget_hit = true;
+                return false;  // circuit breaker: fails closed
+            }
             std::vector<S6Cell> next;
             for (const auto& c : frontier) {
                 for (const auto& d : steps) {
-                    S6Cell nb{c.wind + d[0], c.slice + d[1]};
+                    S6Cell nb{c.wind + d.first, c.slice + d.second};
                     if (nb.wind < wind_lo || nb.wind > wind_hi) continue;
                     if (nb.slice < slice_lo || nb.slice > slice_hi) continue;
                     if (visited.count(nb)) continue;
@@ -339,13 +375,35 @@ void Graphs::connect_graph_relaxed_strict(
         return best;
     };
 
-    // doc pr/56 round 2 S6: only evaluated when two_d_check (default
-    // false, no-op).  Per-plane 2D wind/tick connectivity between
-    // components A and B's own real fired-pixel footprints near the
-    // candidate closest-approach region -- independent of the
-    // straight-3D-line assumption S1-S5 all share.  See file header and
-    // WireCellClus/Graphs.h (two_d_connectivity_bad) for the design.
-    auto two_d_gap_kill = [&](const std::shared_ptr<Simple3DPointCloud>& cloud_a,
+    // doc pr/56 round 2 S6 (repaired + retuned round 3): only evaluated
+    // when two_d_check (default false, no-op).  Per-plane 2D wind/tick
+    // connectivity between components A and B's own real fired-pixel
+    // footprints near the candidate closest-approach region -- independent
+    // of the straight-3D-line assumption S1-S5 all share.  See file header
+    // and WireCellClus/Graphs.h (two_d_connectivity_bad) for the design.
+    //
+    // doc pr/56 round 3: two defects fixed, one relief valve added, all
+    // inside this lambda + s6_planes_connected above --
+    //   - the BFS adjacency is now a true Chebyshev box (dw wires x ds
+    //     slice-steps), not round 2's accidental 4-connected stencil
+    //     ({(+-1,0),(0,+-slice_step)} only);
+    //   - slice_step is now the MINIMUM of the seed blobs' own
+    //     slice_index_max()-slice_index_min() (= tick_span by
+    //     construction, aux/src/SamplingHelpers.cxx:90-91), not round 2's
+    //     "first gap between sorted distinct slice_index_min values",
+    //     which measured wrong strides (12..204 instead of 4) whenever the
+    //     seed region spanned non-adjacent blobs;
+    //   - s6_dis_floor: below this 3D gap the two components are close
+    //     enough that a 2D "gap" almost certainly reflects a
+    //     coarse-seeding/BFS artifact rather than a real disconnection;
+    //     S6 abstains entirely (same "no evidence, no verdict" posture as
+    //     the APA/face and empty-seed abstentions below).
+    // Per-plane stencil half-widths, the window's fixed excess reach and
+    // the distance floor are all tuned from the round-3 117-event scan
+    // (doc pr/56 round 3 sec 8) against the round-2/round-3 named target
+    // edges -- see that doc before changing any of these constants.
+    auto two_d_gap_kill = [&](size_t j, size_t k, const char* blk,
+                               const std::shared_ptr<Simple3DPointCloud>& cloud_a,
                                const std::vector<size_t>& gidx_a,
                                const std::shared_ptr<Simple3DPointCloud>& cloud_b,
                                const std::vector<size_t>& gidx_b,
@@ -358,6 +416,17 @@ void Graphs::connect_graph_relaxed_strict(
         // already governed by S1-S5.  Not a physics claim, just a budget.
         const double s6_dis_cap = 30.0 * units::cm;
         if (edge_dis >= s6_dis_cap) return false;
+
+        // doc pr/56 round 3: below this 3D gap, abstain outright.  Tuned
+        // from the 117-event scan (doc pr/56 round 3 sec 8): separates the
+        // 71372 j=12/k=13 rescue target (0.76cm) from both 269774 kill
+        // targets (2.00cm, 2.69cm) with margin on both sides, and on the
+        // full sample cuts the 0-1cm S6-evaluated-edge kill rate from 53%
+        // (repaired baseline, no floor) to 0% while leaving every bucket
+        // at >=2cm untouched (a floor only ever REMOVES kills below it; it
+        // cannot change a verdict at or above it).
+        const double s6_dis_floor = 1.0 * units::cm;
+        if (edge_dis < s6_dis_floor) return false;
 
         // Only meaningful within a single APA/face -- a candidate that
         // crosses TPCs cannot be shown connected by a 2D wire/tick check.
@@ -377,35 +446,61 @@ void Graphs::connect_graph_relaxed_strict(
         auto seeds_b_wc = cloud_b->get_closest_wcpoints_radius(q2, seed_radius);
         if (seeds_a_wc.empty() || seeds_b_wc.empty()) return false;  // no data to seed with; abstain
 
-        // Real slice-index stride from the seeded points' own blobs --
-        // wire_charge_row's keys are only populated every tick_span ticks
-        // (SBND: 4), NOT every tick; do not assume stride=1 (doc pr/56
-        // round 2 "unit trap").  Derived, not guessed; falls back to the
-        // SBND MaskSlices default only if no two distinct slice values are
-        // found in the seed region.
-        auto seed_slices = [&](const std::vector<std::pair<size_t, geo_point_t>>& wc,
-                                const std::vector<size_t>& gidx) {
-            std::vector<int> out;
+        // doc pr/56 round 3: slice-adjacency stride, from each seed blob's
+        // OWN span, not round 2's inferred gap across the whole seed set
+        // (see comment above -- the round-2 approach measured 11 of 97
+        // edges with a wrong stride on evt 71372).
+        auto blob_stride = [&](const std::vector<std::pair<size_t, geo_point_t>>& wc,
+                                const std::vector<size_t>& gidx, int& best) {
             for (const auto& p : wc) {
                 const auto* blob = cluster.blob_with_point(gidx.at(p.first));
-                if (blob) out.push_back(blob->slice_index_min());
+                if (!blob) continue;
+                const int span = blob->slice_index_max() - blob->slice_index_min();
+                if (span > 0 && (best <= 0 || span < best)) best = span;
             }
-            return out;
         };
-        std::vector<int> all_slices = seed_slices(seeds_a_wc, gidx_a);
-        {
-            auto more = seed_slices(seeds_b_wc, gidx_b);
-            all_slices.insert(all_slices.end(), more.begin(), more.end());
-        }
-        std::sort(all_slices.begin(), all_slices.end());
-        all_slices.erase(std::unique(all_slices.begin(), all_slices.end()), all_slices.end());
-        int slice_step = 4;  // SBND MaskSlices tick_span default -- fallback only
-        for (size_t i = 1; i < all_slices.size(); ++i) {
-            const int d = all_slices[i] - all_slices[i - 1];
-            if (d > 0) { slice_step = d; break; }
-        }
+        int slice_step = -1;
+        blob_stride(seeds_a_wc, gidx_a, slice_step);
+        blob_stride(seeds_b_wc, gidx_b, slice_step);
+        if (slice_step <= 0) slice_step = 4;  // SBND MaskSlices tick_span default -- fallback only
+
+        // doc pr/56 round 3: per-plane stencil half-widths.  (1,1) is true
+        // 8-connectivity (the repaired round-2 baseline).  U/V carry the
+        // isochronous/prolonged-shower relaxation (owner report: a real
+        // track broken by a U-plane-only gap, attributed to prolonged
+        // induction signal from a large EM shower, not prolonged path
+        // *topology* -- so the existing angle1/angle2 excusal below cannot
+        // fire for it).  W stays at the repaired baseline: it is never
+        // excused, and no case has yet justified relaxing it further.
+        // doc pr/56 round 3 sec 8: adjacency widening (dw,ds > 1) was
+        // tried and REJECTED -- (2,2) on U/V rescues the 71372 j=12/k=13
+        // target (0.76cm) but ALSO rescues 269774 j=10/k=11 (2.69cm, a
+        // MUST-STAY-KILLED control): both are U-plane-only unexcused gaps,
+        // and pure adjacency widening cannot tell them apart by distance,
+        // only by wire/tick proximity, which both happen to share. This is
+        // exactly the owner-approved fallback case ("if widening U
+        // adjacency alone can't separate them, use a 3D-gap floor
+        // instead") -- so adjacency stays at the repaired (1,1) baseline
+        // on every plane, and s6_dis_floor below does the separating
+        // work, since it discriminates by the one axis (3D distance) on
+        // which the two controls actually differ.
+        const int s6_dw_uv = 1;
+        const int s6_ds_uv = 1;
+        const int s6_dw_w = 1;
+        const int s6_ds_w = 1;
+        // Fixed excess window reach beyond any operating-point stencil, so
+        // the window is IDENTICAL for every (dw,ds) up to this reach --
+        // connectivity is then monotone in (dw,ds), and the round-3 scan
+        // matrix's entry at the shipped operating point equals the
+        // verdict actually used, by construction.
+        const int s6_reach = 4;
+        const int margin_w = 3 + s6_reach;    // wires
+        const int margin_s = 2 + s6_reach;    // slice-steps
+        const size_t cell_budget = 20000;     // larger window+stencil than round 2's 4000
 
         bool gap[3] = {false, false, false};
+        bool budget_hit[3] = {false, false, false};
+        std::string matrix[3];  // doc pr/56 round 3 census only, see below
         for (int plane = 0; plane != 3; ++plane) {
             std::vector<S6Cell> seeds_a2d, seeds_b2d;
             int wlo = 1 << 30, whi = -(1 << 30), slo = 1 << 30, shi = -(1 << 30);
@@ -426,14 +521,41 @@ void Graphs::connect_graph_relaxed_strict(
             collect(seeds_b_wc, gidx_b, seeds_b2d);
             if (seeds_a2d.empty() || seeds_b2d.empty()) continue;  // no data this plane; don't vote gap
 
-            const int margin_w = 3;    // wires
-            const int margin_s = 2;    // slice-steps
+            const int win_wlo = wlo - margin_w, win_whi = whi + margin_w;
+            const int win_slo = slo - margin_s * slice_step, win_shi = shi + margin_s * slice_step;
+            const int dw = (plane == 2) ? s6_dw_w : s6_dw_uv;
+            const int ds = (plane == 2) ? s6_ds_w : s6_ds_uv;
             const bool connected = s6_planes_connected(
                 grouping, apa, face, plane, seeds_a2d, seeds_b2d,
-                wlo - margin_w, whi + margin_w,
-                slo - margin_s * slice_step, shi + margin_s * slice_step,
-                slice_step, /*cell_budget=*/4000);
+                win_wlo, win_whi, win_slo, win_shi,
+                slice_step, dw, ds, cell_budget, &budget_hit[plane]);
             gap[plane] = !connected;
+
+            if (oc53_census) {
+                // doc pr/56 round 3: a full dw={1..4} x ds={1..4}
+                // connectivity matrix at the SAME fixed window (s6_reach
+                // above), so any candidate per-plane operating point is
+                // evaluable offline from one run without rerunning
+                // wire-cell.  Diagnostic only -- never affects
+                // gap[]/killed.  matrix[i*4+j] is dw=i+1, ds=j+1 ('1'
+                // connected, '0' gap).  Built into ONE log line per edge
+                // below (not one line per plane): round-3's first attempt
+                // at per-plane lines correlated by (blk,j,k) across
+                // sequential log entries broke silently whenever
+                // ClusteringProtectBundle processes clusters concurrently
+                // and their log lines interleave -- a single self-contained
+                // line per edge has no such correlation to get wrong.
+                matrix[plane].reserve(16);
+                for (int mdw = 1; mdw <= 4; ++mdw) {
+                    for (int mds = 1; mds <= 4; ++mds) {
+                        const bool c = s6_planes_connected(
+                            grouping, apa, face, plane, seeds_a2d, seeds_b2d,
+                            win_wlo, win_whi, win_slo, win_shi,
+                            slice_step, mdw, mds, cell_budget, nullptr);
+                        matrix[plane].push_back(c ? '1' : '0');
+                    }
+                }
+            }
         }
 
         const bool excuse_u = a1 < s6_wire_angle_tol;
@@ -442,9 +564,16 @@ void Graphs::connect_graph_relaxed_strict(
 
         if (oc53_census) {
             oc53_log->debug(
-                "OC56CENSUS-2D apa={} face={} gap_u={} gap_v={} gap_w={} excuse_u={} excuse_v={} "
-                "slice_step={} killed={}",
-                apa, face, gap[0], gap[1], gap[2], excuse_u, excuse_v, slice_step, killed);
+                "OC56CENSUS-2D edge blk={} j={} k={} dis={:.2f}cm apa={} face={} "
+                "p1=({:.2f},{:.2f},{:.2f}) p2=({:.2f},{:.2f},{:.2f}) slice_step={} "
+                "gap_u={} gap_v={} gap_w={} excuse_u={} excuse_v={} "
+                "budget_u={} budget_v={} budget_w={} matrix_u={} matrix_v={} matrix_w={} killed={}",
+                blk, j, k, edge_dis / units::cm, apa, face,
+                q1.x() / units::cm, q1.y() / units::cm, q1.z() / units::cm,
+                q2.x() / units::cm, q2.y() / units::cm, q2.z() / units::cm,
+                slice_step, gap[0], gap[1], gap[2], excuse_u, excuse_v,
+                budget_hit[0], budget_hit[1], budget_hit[2],
+                matrix[0], matrix[1], matrix[2], killed);
         }
         return killed;
     };
@@ -676,7 +805,7 @@ void Graphs::connect_graph_relaxed_strict(
                 // two_d_check is false (default).  Only evaluated on
                 // candidates S1-S5 above have not already killed.
                 if (two_d_check && std::get<0>(index_index_dis[j][k]) >= 0) {
-                    if (two_d_gap_kill(pt_clouds.at(j), pt_clouds_global_indices.at(j),
+                    if (two_d_gap_kill(j, k, "closest", pt_clouds.at(j), pt_clouds_global_indices.at(j),
                                         pt_clouds.at(k), pt_clouds_global_indices.at(k),
                                         p1, wpid_p1, p2, wpid_p2, dis, angle1, angle2)) {
                         invalidate_distance();
@@ -802,7 +931,7 @@ void Graphs::connect_graph_relaxed_strict(
                 // doc pr/56 round 2 S6 (see the closest-pair block for the
                 // full comment). No-op when two_d_check is false (default).
                 if (two_d_check && std::get<0>(index_index_dis_dir1[j][k]) >= 0) {
-                    if (two_d_gap_kill(pt_clouds.at(j), pt_clouds_global_indices.at(j),
+                    if (two_d_gap_kill(j, k, "dir1", pt_clouds.at(j), pt_clouds_global_indices.at(j),
                                         pt_clouds.at(k), pt_clouds_global_indices.at(k),
                                         p1, wpid_p1, p2, wpid_p2, dis, angle1, angle2)) {
                         index_index_dis_dir1[j][k] = std::make_tuple(-1, -1, 1e9);
@@ -925,7 +1054,7 @@ void Graphs::connect_graph_relaxed_strict(
                 // doc pr/56 round 2 S6 (see the closest-pair block for the
                 // full comment). No-op when two_d_check is false (default).
                 if (two_d_check && std::get<0>(index_index_dis_dir2[j][k]) >= 0) {
-                    if (two_d_gap_kill(pt_clouds.at(j), pt_clouds_global_indices.at(j),
+                    if (two_d_gap_kill(j, k, "dir2", pt_clouds.at(j), pt_clouds_global_indices.at(j),
                                         pt_clouds.at(k), pt_clouds_global_indices.at(k),
                                         p1, wpid_p1, p2, wpid_p2, dis, angle1, angle2)) {
                         index_index_dis_dir2[j][k] = std::make_tuple(-1, -1, 1e9);
