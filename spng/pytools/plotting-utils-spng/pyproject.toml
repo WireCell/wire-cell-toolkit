@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "osp-spng-frame-visualizers"
+version = "0.1.0"
+description = "YAML-configured NPZ/HDF5 frame visualization UI for OSP/SPNG comparisons."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "h5py>=3.8",
+    "matplotlib>=3.7",
+    "numpy>=1.24",
+    "PyYAML>=6.0",
+]
+
+[project.scripts]
+frame-visualizers = "frame_visualizers:main"
+
+[tool.setuptools]
+py-modules = [
+    "frame_collection",
+    "frame_config",
+    "frame_data_loaders",
+    "frame_models",
+    "frame_visualizer_ui",
+    "frame_visualizers",
+]
