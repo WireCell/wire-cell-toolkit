@@ -70,13 +70,25 @@ namespace WireCell::Clus::Graphs {
     // (make_graph_relaxed_strict_img_2d) is the only caller that passes
     // true. S6 can only additionally kill an edge S1-S5 already let
     // through -- it never rescues one they killed.
+    //
+    // doc pr/58: floor_w_override (no-op unless two_d_check is also true)
+    // lets an unexcused W-plane-only S6 gap kill an edge even below
+    // s6_dis_floor -- W (collection) is far more robust against the
+    // induction-plane signal-inefficiency false positives the floor exists
+    // to guard against, so a genuine W gap is trusted at any distance.
+    // Default false keeps "relaxed_strict_img_2d" byte-for-byte unchanged;
+    // the "relaxed_strict_img_2d_wfloor" flavor
+    // (make_graph_relaxed_strict_img_2d_wfloor) is the only caller that
+    // passes true. Owner-requested investigation, evt 21073 j=6/k=7
+    // (0.98cm, W-only gap at the neutrino vertex) is the motivating case.
     void connect_graph_relaxed_strict(
         const Facade::Cluster& cluster,
         IDetectorVolumes::pointer dv,
         IPCTransformSet::pointer pcts,
         Weighted::Graph& graph,
         bool image_check = false,
-        bool two_d_check = false);
+        bool two_d_check = false,
+        bool floor_w_override = false);
 
     bool is_point_good(const Facade::Cluster& cluster, size_t point_index, int ncut = 3);
 

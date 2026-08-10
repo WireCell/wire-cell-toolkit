@@ -74,6 +74,16 @@ namespace WireCell::Clus::Graphs {
         IDetectorVolumes::pointer dv,
         IPCTransformSet::pointer pcts);
 
+    // closely + relaxed_strict with image_check=true, two_d_check=true AND
+    // floor_w_override=true (doc pr/58: protect_bundle-only, owner-requested
+    // -- an unexcused W-plane-only S6 gap kills even below s6_dis_floor,
+    // since W is far more robust against the induction-plane false
+    // positives the floor otherwise guards against)
+    Weighted::Graph make_graph_relaxed_strict_img_2d_wfloor(
+        const Facade::Cluster& cluster,
+        IDetectorVolumes::pointer dv,
+        IPCTransformSet::pointer pcts);
+
 }
 
 #endif

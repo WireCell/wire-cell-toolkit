@@ -78,6 +78,29 @@
 // dump-only branch below is skipped; two_d_connectivity_bad, every shipped
 // constant, and the verdict path are untouched. See that doc for the
 // record schema.
+//
+// doc pr/58: when the dump IS on, also evaluate (and dump) candidates below
+// s6_dis_floor instead of abstaining outright -- owner question: is the
+// floor wrongly suppressing a real, unexcused W-plane gap near a vertex
+// (evt 21073). With the dump alone this is diagnostic only: the function's
+// return value (and every already-shipped S6-ON arm's kill set) still
+// forces `false` below the floor exactly as before; see the `below_floor`
+// local and `killed_ignore_floor` dump field below. floor_w_override (new
+// function parameter, default false) is the real production-behavior
+// counterpart -- owner-requested, evt 21073 j=6/k=7 as the validating case:
+// when on, an unexcused W-plane-only gap kills even below the floor. Its
+// own flavor, "relaxed_strict_img_2d_wfloor" (make_graphs.cxx /
+// Facade_Cluster.cxx), is the only caller that passes true; every existing
+// flavor including "relaxed_strict_img_2d" itself is untouched.
+//
+// doc pr/57 round 4: adds a third dump record type, "connectivity" -- one per
+// graph call, written after the emit loop, carrying the final connected-
+// component label of every starting component plus the list of component
+// edges this call emitted (with endpoints).  The per-candidate `killed` bit
+// alone cannot answer the question the hand scan is actually asking ("should
+// these two components be separated"): one pair gets up to three independent
+// candidates and can also stay joined through a third component.  Dump-only,
+// same WCT_OC56_SCAN_DUMP gate; nothing here reads back into the graph.
 
 #include "WireCellClus/Graphs.h"
 #include "WireCellClus/IPCTransform.h"
@@ -275,7 +298,8 @@ void Graphs::connect_graph_relaxed_strict(
     IPCTransformSet::pointer pcts,
     Weighted::Graph& graph,
     bool image_check,
-    bool two_d_check)
+    bool two_d_check,
+    bool floor_w_override)
 {
     const bool use_ctpc = true;
     const auto* grouping = cluster.grouping();
@@ -492,7 +516,14 @@ void Graphs::connect_graph_relaxed_strict(
         // at >=2cm untouched (a floor only ever REMOVES kills below it; it
         // cannot change a verdict at or above it).
         const double s6_dis_floor = 1.0 * units::cm;
-        if (edge_dis < s6_dis_floor) return false;
+        const bool below_floor = edge_dis < s6_dis_floor;
+        // doc pr/58: keep evaluating below the floor whenever the scan dump
+        // is on (diagnostic only -- see the `killed` line below, which
+        // still forces `false` in that case) OR floor_w_override is on
+        // (a real production behavior change, see connect_graphs.h). Every
+        // already-shipped S6-ON arm ("relaxed_strict_img_2d") passes
+        // floor_w_override=false and is byte-for-byte unaffected either way.
+        if (below_floor && !oc56_dump_on && !floor_w_override) return false;
 
         // Only meaningful within a single APA/face -- a candidate that
         // crosses TPCs cannot be shown connected by a 2D wire/tick check.
@@ -717,7 +748,17 @@ void Graphs::connect_graph_relaxed_strict(
 
         const bool excuse_u = a1 < s6_wire_angle_tol;
         const bool excuse_v = a2 < s6_wire_angle_tol;
-        const bool killed = two_d_connectivity_bad(gap[0], gap[1], gap[2], excuse_u, excuse_v);
+        // doc pr/58: the hypothetical verdict from gap/excuse alone, BEFORE
+        // the below_floor override -- dumped as `killed_ignore_floor` for
+        // the scan display regardless of floor_w_override.
+        const bool killed_if_evaluated = two_d_connectivity_bad(gap[0], gap[1], gap[2], excuse_u, excuse_v);
+        // Below the floor: abstain (false) UNLESS floor_w_override is on
+        // AND the gap is on W specifically -- W is never excused by
+        // two_d_connectivity_bad, so gap[2] alone is exactly "unexcused W
+        // gap". A U/V-only gap still can't kill below the floor even with
+        // the knob on: the floor exists to guard against noisy near-floor
+        // induction-plane false positives, and this knob only trusts W.
+        const bool killed = below_floor ? (floor_w_override && gap[2]) : killed_if_evaluated;
 
         if (oc53_census) {
             oc53_log->debug(
@@ -796,6 +837,14 @@ void Graphs::connect_graph_relaxed_strict(
             rec["budget"] = budgetj;
             rec["matrix"] = matrixj;
             rec["killed"] = killed;
+            // doc pr/58: `killed` above already reflects floor_w_override
+            // when this dump was produced by the "relaxed_strict_img_2d_wfloor"
+            // flavor -- these three fields let the scan display show the
+            // floor-ignoring hypothetical either way, and record which mode
+            // produced this record.
+            rec["below_floor"] = below_floor;
+            rec["killed_ignore_floor"] = killed_if_evaluated;
+            rec["floor_w_override"] = floor_w_override;
             rec["planes"] = oc56_dump_planes;
             oc56_dump.write(rec);
         }
@@ -1339,6 +1388,39 @@ void Graphs::connect_graph_relaxed_strict(
 
     std::vector<std::pair<size_t, size_t>> oc53_pairs;  // emitted component pairs (census only)
 
+    // doc pr/57 round 4: dump-only record of the edges this call actually
+    // emits between components.  The hand-scan display shows one CANDIDATE at
+    // a time and its `killed` bit, but the owner's judgement is about the two
+    // components -- and one pair gets up to three independent candidates
+    // (closest/dir1/dir2), while the pair can also stay joined through a third
+    // component.  So "was this pair really separated" is only knowable here,
+    // after every emit decision is made, which is why it is a separate record
+    // rather than a field on the (much earlier) per-candidate edge records.
+    // No-op when the dump is off; nothing below reads or perturbs the graph.
+    Json::Value oc56_emitted(Json::arrayValue);
+    auto oc56_note_emit = [&](size_t j, size_t k, const char* src, int gind1, int gind2,
+                              double dis, bool dup) {
+        if (!oc56_dump_on) return;
+        Json::Value e;
+        e["j"] = static_cast<int>(j);
+        e["k"] = static_cast<int>(k);
+        e["src"] = src;
+        e["dis"] = dis / units::cm;
+        // Endpoints from cluster.points() -- the same frame pt_clouds (and so
+        // the dumped component point clouds) are built from, so the display
+        // can draw this edge directly against them.
+        Json::Value p1j(Json::arrayValue), p2j(Json::arrayValue);
+        for (int d = 0; d != 3; ++d) p1j.append(points[d][gind1] / units::cm);
+        for (int d = 0; d != 3; ++d) p2j.append(points[d][gind2] / units::cm);
+        e["p1"] = p1j;
+        e["p2"] = p2j;
+        // dup: this exact vertex pair already carried an edge, so add_edge was
+        // skipped.  The components are connected either way -- what changes is
+        // only whether THIS emit created the link.
+        e["dup"] = dup;
+        oc56_emitted.append(e);
+    };
+
     for (size_t j = 0; j != num; j++) {
         for (size_t k = j + 1; k != num; k++) {
             if (std::get<2>(index_index_dis[j][k]) < 3 * units::cm) {
@@ -1350,9 +1432,11 @@ void Graphs::connect_graph_relaxed_strict(
                 const int gind1 = pt_clouds_global_indices.at(j).at(std::get<0>(index_index_dis_mst[j][k]));
                 const int gind2 = pt_clouds_global_indices.at(k).at(std::get<1>(index_index_dis_mst[j][k]));
                 const float dis = std::get<2>(index_index_dis_mst[j][k]);
-                if (!boost::edge(gind1, gind2, graph).second) {
+                const bool dup = boost::edge(gind1, gind2, graph).second;
+                if (!dup) {
                     /*auto edge =*/ add_edge(gind1, gind2, dis, graph);
                 }
+                oc56_note_emit(j, k, "mst", gind1, gind2, dis, dup);
             }
 
             if (std::get<0>(index_index_dis_dir_mst[j][k]) >= 0) {
@@ -1366,9 +1450,11 @@ void Graphs::connect_graph_relaxed_strict(
                     else {
                         dis = std::get<2>(index_index_dis_dir1[j][k]);
                     }
-                    if(!boost::edge(gind1, gind2, graph).second) {
+                    const bool dup = boost::edge(gind1, gind2, graph).second;
+                    if(!dup) {
                         /*auto edge =*/ add_edge(gind1, gind2, dis, graph);
                     }
+                    oc56_note_emit(j, k, "dir1", gind1, gind2, dis, dup);
                 }
                 if (std::get<0>(index_index_dis_dir2[j][k]) >= 0) {
                     const int gind1 = pt_clouds_global_indices.at(j).at(std::get<0>(index_index_dis_dir2[j][k]));
@@ -1381,9 +1467,11 @@ void Graphs::connect_graph_relaxed_strict(
                         dis = std::get<2>(index_index_dis_dir2[j][k]);
                     }
                     // }
-                    if (!boost::edge(gind1, gind2, graph).second) {
+                    const bool dup = boost::edge(gind1, gind2, graph).second;
+                    if (!dup) {
                         /*auto edge =*/ add_edge(gind1, gind2, dis, graph);
                     }
+                    oc56_note_emit(j, k, "dir2", gind1, gind2, dis, dup);
                 }
             }
 
@@ -1397,6 +1485,35 @@ void Graphs::connect_graph_relaxed_strict(
 
         }  // k
     }  // j
+
+    // doc pr/57 round 4: one connectivity record per graph call, written after
+    // every emit decision above -- the graph is final here
+    // (make_graph_relaxed_strict_img_2d_wfloor returns it directly).  `final`
+    // is recomputed from the graph itself and `edges` is accumulated
+    // independently at the three emit sites, so the display's reachability
+    // answer can be cross-checked against a second, independent computation
+    // (oc56_dump_check.py).  Keyed by the same globally-unique graph_call as
+    // the component and edge records, so the join survives interleaved writes
+    // from concurrently-processed clusters.
+    if (oc56_dump_on) {
+        std::vector<int> final_component(num_vertices(graph));
+        const size_t final_num = connected_components(graph, &final_component[0]);
+        Json::Value rec;
+        rec["type"] = "connectivity";
+        rec["graph_call"] = static_cast<int>(oc56_graph_call);
+        rec["cluster_id"] = cluster.get_cluster_id();
+        rec["ncomp"] = static_cast<int>(num);
+        rec["nfinal"] = static_cast<int>(final_num);
+        Json::Value finalj(Json::arrayValue);
+        for (size_t c = 0; c != num; ++c) {
+            // Every point of a starting component keeps a common final label,
+            // so its first global index stands for the whole component.
+            finalj.append(final_component.at(pt_clouds_global_indices.at(c).at(0)));
+        }
+        rec["final"] = finalj;
+        rec["edges"] = oc56_emitted;
+        oc56_dump.write(rec);
+    }
 
     if (oc53_census) {
         oc53_log->debug("OC53CENSUS-S summary ncomp={} nedges={}", num, oc53_pairs.size());
