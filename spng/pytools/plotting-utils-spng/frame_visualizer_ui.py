@@ -347,7 +347,6 @@ class FrameVisualizerUI:
 
         self._clamp_selected_bin()
         self._set_channel_box_to_current_channel()
-        self.selection.zoom_limits = None
         self._refresh_all_plots()
         self.status_text.set_text(
             f"Showing {len(self.frames.active_labels)} active file(s): "
@@ -377,7 +376,6 @@ class FrameVisualizerUI:
             self.figure.canvas.draw_idle()
             return
 
-        self.selection.zoom_limits = None
         self._clamp_selected_bin()
         self._set_channel_box_to_current_channel()
         self._refresh_all_plots()
