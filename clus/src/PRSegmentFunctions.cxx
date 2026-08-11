@@ -2744,6 +2744,12 @@ namespace WireCell::Clus::PR {
         // using MS = std::chrono::duration<double, std::milli>;
         // auto t_total = Clock::now();
 
+        // doc sbnd_xin/docs/pr/59: diagnostic-only, env-gated (WCT_PR59_ASSOC_CENSUS
+        // unset => no log lines, no behavior change) sentinels tracing why a
+        // fitted segment can end up with a null/empty "associate_points" cloud
+        // (18255-142421 seg 20: fits() non-empty, associate_points never built).
+        static const bool pr59_census = std::getenv("WCT_PR59_ASSOC_CENSUS") != nullptr;
+
         // Use cluster_id-based comparator so map_cluster_segs is iterated in a
         // deterministic, run-to-run stable order (not pointer-address order).
         struct ClusterIdCmp {
@@ -2910,6 +2916,26 @@ namespace WireCell::Clus::PR {
                 }
             }
 
+            // doc pr/59 sentinel 1: did each segment seed any Voronoi terminals
+            // at all?  A segment with fits().size() < 2 seeds none (skipped by
+            // both branches above); a segment whose 5-nearest-neighbor search
+            // never found an unclaimed point also seeds none.  Either way it
+            // starts Stage B/C with zero chance of winning any point.
+            if (pr59_census) {
+                std::map<SegmentPtr, int, SegmentIndexCmp> seed_counts;
+                for (auto seg : segs) seed_counts[seg] = 0;
+                for (const auto& [pidx, seg_dist] : map_pindex_segment) {
+                    (void)pidx;
+                    seed_counts[seg_dist.first]++;
+                }
+                for (auto seg : segs) {
+                    SPDLOG_LOGGER_DEBUG(s_log,
+                        "pr59 assoc-census stageA: cluster {} segment {} fits_size={} "
+                        "terminals_seeded={}",
+                        clus->get_cluster_id(), seg->get_graph_index(),
+                        seg->fits().size(), seed_counts[seg]);
+                }
+            }
 
             // these are terminals ...
             // auto t_ghost = Clock::now();
@@ -3043,6 +3069,24 @@ namespace WireCell::Clus::PR {
                 const auto& global_indices = map_segment_global_indices[seg];
                 create_segment_point_cloud(seg, geo_points, dv, cloud_name, global_indices);
                 // create_segment_point_cloud(seg, geo_points, dv, cloud_name);
+            }
+
+            // doc pr/59 sentinel 2: every input segment that never won a single
+            // point in Stage B (never a key in map_segment_points) is the DIRECT
+            // cause of the pr/55 "no associate_points dpcloud" sentinel that
+            // later fires, silently, at Bee-dump time in a different function
+            // (MultiAlgBlobClustering.cxx:887) -- named here instead, at the
+            // point of loss.
+            if (pr59_census) {
+                for (auto seg : segs) {
+                    if (map_segment_points.find(seg) == map_segment_points.end()) {
+                        SPDLOG_LOGGER_DEBUG(s_log,
+                            "pr59 assoc-census stageC: cluster {} segment {} fits_size={} "
+                            "won ZERO points in ghost-removal -- cloud '{}' will be null",
+                            clus->get_cluster_id(), seg->get_graph_index(),
+                            seg->fits().size(), cloud_name);
+                    }
+                }
             }
 
             // std::cout << "[clustering_points_segments] build point clouds took " << MS(Clock::now() - t_build).count() << " ms" << std::endl;

@@ -2961,6 +2961,20 @@ Facade::geo_vector_t PatternAlgorithms::calc_dir_cluster(Graph& graph, Facade::C
 
 
    Facade::Cluster* PatternAlgorithms::swap_main_cluster(Facade::Cluster& new_main_cluster, Facade::Cluster& old_main_cluster, std::vector<Facade::Cluster*>& other_clusters){
+       // doc pr/59: this function has no log line at any call site (DL rerank,
+       // check_switch_main_cluster[_2], the two_end_break protected-cluster
+       // path) -- a swap here is otherwise invisible except by cross-
+       // referencing print_segs_info's graph indices against a cluster's
+       // segment set by hand.  Env-gated (WCT_PR59_ASSOC_CENSUS unset => no
+       // log line, no behavior change) to match the clustering_points_segments
+       // sentinels in PRSegmentFunctions.cxx and TaggerCheckNeutrino.cxx.
+       static const bool pr59_assoc_census = std::getenv("WCT_PR59_ASSOC_CENSUS") != nullptr;
+       if (pr59_assoc_census) {
+           SPDLOG_LOGGER_DEBUG(s_log,
+               "pr59 assoc-census: swap_main_cluster {} -> {}",
+               old_main_cluster.get_cluster_id(), new_main_cluster.get_cluster_id());
+       }
+
        // Remove main_cluster flag from old main cluster (set to 0 to unset)
        old_main_cluster.set_flag(Facade::Flags::main_cluster, 0);
        

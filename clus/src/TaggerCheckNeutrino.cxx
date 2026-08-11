@@ -999,6 +999,15 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
     VertexPtr final_main_vertex = nullptr;
     bool flag_dl_changed = false;
 
+    // doc pr/59: diagnostic-only, env-gated (WCT_PR59_ASSOC_CENSUS unset =>
+    // no log lines, no behavior change) sentinel naming which cluster each
+    // clustering_points (associate_points) pass actually ran against.
+    // main_cluster can be silently repointed later (determine_overall_
+    // main_vertex_DL holds it by reference and may call swap_main_cluster),
+    // which would leave whichever cluster the first pass ran on NEVER
+    // re-associated -- see the second call site further below.
+    static const bool pr59_assoc_census = std::getenv("WCT_PR59_ASSOC_CENSUS") != nullptr;
+
     {
         // initial pattern recognitions
         // particle_data (doc pr/48): stopping templates for the two-end
@@ -1010,6 +1019,11 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
 
         // shower related operations
         pattern_algos.clustering_points(*pr_graph, *main_cluster, m_dv);
+        if (pr59_assoc_census) {
+            SPDLOG_LOGGER_DEBUG(log,
+                "pr59 assoc-census: first clustering_points call, main_cluster={}",
+                main_cluster->get_cluster_id());
+        }
         detg_dump("main:clustering_points", *pr_graph);
         pattern_algos.separate_track_shower(*pr_graph, *main_cluster);
         detg_dump("main:separate_track_shower", *pr_graph);
@@ -1189,6 +1203,15 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
         pattern_algos.rough_path_probe(*pr_graph, *main_cluster, final_main_vertex, *m_track_fitter, m_dv);
 
         pattern_algos.clustering_points(*pr_graph, *main_cluster, m_dv);
+        // doc pr/59 sentinel 3 (second call site): if this cluster_id differs
+        // from the first call's, main_cluster was swapped in between and the
+        // ORIGINAL main cluster's segments (any created/modified after the
+        // swap) never got a second association pass.
+        if (pr59_assoc_census) {
+            SPDLOG_LOGGER_DEBUG(log,
+                "pr59 assoc-census: second clustering_points call, main_cluster={}",
+                main_cluster->get_cluster_id());
+        }
 
         std::cout << "After shower clustering :" << std::endl; pattern_algos.print_segs_info(*pr_graph, *main_cluster, 0);
  
