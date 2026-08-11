@@ -2,6 +2,7 @@
 
 #include <cstdio>
 #include <cstdlib>
+#include <deque>
 #include <execinfo.h>
 
 namespace WireCell::Clus::PR {
@@ -325,6 +326,36 @@ namespace WireCell::Clus::PR {
 
         // Return the segment associated with this edge
         return graph[ed].segment;
+    }
+
+    IndexedSegmentSet unreachable_segments(const Graph& graph, VertexPtr root)
+    {
+        // Membership-only BFS over node descriptors: no iteration order can
+        // leak into the result, so raw boost::out_edges is safe here.
+        std::set<Graph::vertex_descriptor> seen;
+        if (root && root->descriptor_valid()) {
+            std::deque<Graph::vertex_descriptor> todo{root->get_descriptor()};
+            seen.insert(root->get_descriptor());
+            while (!todo.empty()) {
+                auto vd = todo.front();
+                todo.pop_front();
+                for (auto [ei, eend] = boost::out_edges(vd, graph); ei != eend; ++ei) {
+                    auto nd = boost::target(*ei, graph);
+                    if (seen.insert(nd).second) todo.push_back(nd);
+                }
+            }
+        }
+
+        IndexedSegmentSet unreachable;
+        for (const auto& ed : ordered_edges(graph)) {
+            // Undirected graph: an edge is reachable iff either endpoint is.
+            if (seen.count(boost::source(ed, graph)) || seen.count(boost::target(ed, graph))) {
+                continue;
+            }
+            SegmentPtr seg = graph[ed].segment;
+            if (seg) unreachable.insert(seg);
+        }
+        return unreachable;
     }
 
 }

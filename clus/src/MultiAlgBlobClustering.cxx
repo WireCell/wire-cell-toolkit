@@ -336,6 +336,8 @@ void MultiAlgBlobClustering::configure(const WireCell::Configuration& cfg)
             pfc.pf_pdg_name_prototype_fallback = get<bool>(pf, "pf_pdg_name_prototype_fallback", false);
             // doc pr/38 Round 4; absent => legacy flat orphan roots, byte-identical.
             pfc.pf_orphan_track_parentage = get<bool>(pf, "pf_orphan_track_parentage", false);
+            // doc pr/65 round 3; absent => legacy fabricated orphan roots, byte-identical.
+            pfc.pf_orphan_audit_only = get<bool>(pf, "pf_orphan_audit_only", false);
             m_bee_pf_configs.push_back(pfc);
             m_bee_pf_trees[pfc.name] = Bee::ParticleTree(pfc.name);
             SPDLOG_LOGGER_DEBUG(log, "Configured bee_pf: name={} visitor={}", pfc.name, pfc.visitor);
@@ -1970,7 +1972,42 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
     // not plotted (:1215), KeepMC floors as for every other node.  Emission
     // order is sorted by encoded id -- the prototype's is pointer-map order,
     // which is not reproducible; a stable order is chosen deliberately.
-    if (cfg.pf_shower_vertex_barrier) {
+    // doc pr/65 round 3 (rung 3): audit-only variant of the safety net below.
+    // Keep the VISIBILITY the net was added for, drop the FABRICATION: name
+    // every still-unclaimed segment in the log -- WITHOUT the display filters,
+    // so dirsign==0 / empty-fit / KeepMC-floored segments (which today vanish
+    // from the tree silently) are named too -- and append no node.  The
+    // owner's requirement: an unclaimed orphan must never become a root-level
+    // PF particle.  Load-bearing only with rung 1 (shower_absorb_unreachable_main)
+    // claiming the fragments first.
+    if (cfg.pf_shower_vertex_barrier && cfg.pf_orphan_audit_only) {
+        std::vector<PR::SegmentPtr> unclaimed;
+        for (auto edesc : mir(boost::edges(*pr_graph))) {
+            auto seg = (*pr_graph)[edesc].segment;
+            if (!seg || used_segs.count(seg) || conn4_skip_segs.count(seg)) continue;
+            if (!same_cluster(seg)) continue;      // prototype NeutrinoID.cxx:1488
+            unclaimed.push_back(seg);
+        }
+        std::sort(unclaimed.begin(), unclaimed.end(),
+                  [&](const PR::SegmentPtr& a, const PR::SegmentPtr& b) {
+                      return seg_display_id(a) < seg_display_id(b);
+                  });
+        for (const auto& seg : unclaimed) {
+            const auto* cl = seg->cluster();
+            const bool haspi = seg->has_particle_info() && seg->particle_info();
+            SPDLOG_LOGGER_INFO(log,
+                "pr65 pf-orphan-audit: unclaimed seg={} cluster={} pdg={} ke_mev={:.2f} nfits={} dirsign={}",
+                seg_display_id(seg),
+                cl ? std::to_string(cl->get_cluster_id()) : "?",
+                haspi ? seg->particle_info()->pdg() : 0,
+                haspi ? seg->particle_info()->kinetic_energy() / units::MeV : 0.0,
+                seg->fits().size(), seg->dirsign());
+        }
+        SPDLOG_LOGGER_INFO(log,
+            "pr65 pf-orphan-audit: {} unclaimed segment(s), no PF node fabricated (pf_orphan_audit_only)",
+            unclaimed.size());
+    }
+    else if (cfg.pf_shower_vertex_barrier) {
         std::vector<PR::SegmentPtr> orphans;
         for (auto edesc : mir(boost::edges(*pr_graph))) {
             auto seg = (*pr_graph)[edesc].segment;

@@ -341,6 +341,8 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_shower_connect_main_vertex_straight_guard = get(config, "shower_connect_main_vertex_straight_guard", m_shower_connect_main_vertex_straight_guard);
     m_shower_traj_straight_guard                = get(config, "shower_traj_straight_guard",                m_shower_traj_straight_guard);
     m_shower_absorb_track_guard                 = get(config, "shower_absorb_track_guard",                 m_shower_absorb_track_guard);
+    // doc sbnd_xin/docs/pr/65 round 3 -- reachability-relaxed absorber guards.
+    m_shower_absorb_unreachable_main            = get(config, "shower_absorb_unreachable_main",            m_shower_absorb_unreachable_main);
     m_shower_connect_protected_pion_guard       = get(config, "shower_connect_protected_pion_guard",       m_shower_connect_protected_pion_guard);
     m_michel_stem_muon_rescue                   = get(config, "michel_stem_muon_rescue",                   m_michel_stem_muon_rescue);
     m_shower_long_muon_keep_type                = get(config, "shower_long_muon_keep_type",                m_shower_long_muon_keep_type);
@@ -554,6 +556,7 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["shower_connect_main_vertex_straight_guard"] = m_shower_connect_main_vertex_straight_guard; // false = legacy (straightness never consulted)
     cfg["shower_traj_straight_guard"]                = m_shower_traj_straight_guard;                // false = legacy (straightness never consulted)
     cfg["shower_absorb_track_guard"]                 = m_shower_absorb_track_guard;                 // false = legacy (flood-fill absorbs every connected segment)
+    cfg["shower_absorb_unreachable_main"]            = m_shower_absorb_unreachable_main;            // false = legacy (absorbers skip ALL main-cluster segments, doc pr/65)
     cfg["shower_connect_protected_pion_guard"]       = m_shower_connect_protected_pion_guard;       // false = legacy (proton-daughter pion selectable as EM candidate)
     cfg["michel_stem_muon_rescue"]                   = m_michel_stem_muon_rescue;                   // false = legacy (Michel rescue limited to weak-dir degree-2 vertices)
     cfg["shower_long_muon_keep_type"]                = m_shower_long_muon_keep_type;                // false = legacy (long-muon pseudo-shower start segment majority-voted to e-)
@@ -943,6 +946,7 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
     pattern_algos.m_shower_connect_main_vertex_straight_guard = m_shower_connect_main_vertex_straight_guard; // F10
     pattern_algos.m_shower_traj_straight_guard                = m_shower_traj_straight_guard;                // F11
     pattern_algos.m_shower_absorb_track_guard                 = m_shower_absorb_track_guard;                 // F12
+    pattern_algos.m_shower_absorb_unreachable_main            = m_shower_absorb_unreachable_main;            // doc pr/65 round 3
     pattern_algos.m_shower_connect_protected_pion_guard       = m_shower_connect_protected_pion_guard;       // F13
     pattern_algos.m_michel_stem_muon_rescue                   = m_michel_stem_muon_rescue;                   // F14
     pattern_algos.m_shower_long_muon_keep_type                = m_shower_long_muon_keep_type;                // doc pr/44

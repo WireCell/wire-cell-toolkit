@@ -471,6 +471,7 @@ public:
         bool m_shower_connect_main_vertex_straight_guard{false};    // doc pr/40 round 5 F10
         bool m_shower_traj_straight_guard{false};                   // doc pr/40 round 5 F11
         bool m_shower_absorb_track_guard{false};                    // doc pr/40 round 6 F12
+        bool m_shower_absorb_unreachable_main{false};               // doc pr/65 round 3
         bool m_shower_connect_protected_pion_guard{false};          // doc pr/40 round 6 F13
         bool m_michel_stem_muon_rescue{false};                      // doc pr/40 round 6 F14
         bool m_shower_long_muon_keep_type{false};                   // doc pr/44

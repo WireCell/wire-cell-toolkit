@@ -232,6 +232,21 @@ namespace WireCell::Clus {
             // porting_dictionary.  Inert unless pf_shower_vertex_barrier is
             // also on.  C++ default false => byte-identical legacy output.
             bool pf_orphan_track_parentage{false};
+            // ---- doc sbnd_xin/docs/pr/65 round 3 ----
+            // pf_orphan_audit_only: rung 3 of the pr/65 ladder.  The flat
+            // orphan safety net fabricates a root-level PF particle for every
+            // BFS-unreached main-cluster segment -- a faithful port of the
+            // prototype's mc_mother=0 default (NeutrinoID.cxx:1485-1489), but
+            // a state the prototype itself can never reach (its residual
+            // segments are attach-or-discard).  When on, keep the net's
+            // VISIBILITY but drop the FABRICATION: emit one log line per
+            // still-unclaimed segment (no display filters -- dirsign==0 and
+            // empty-fit segments are named too, today they vanish silently)
+            // and append no node.  Load-bearing only together with rung 1
+            // (shower_absorb_unreachable_main): alone it would just hide the
+            // charge.  Inert unless pf_shower_vertex_barrier is also on.
+            // C++ default false => byte-identical legacy output.
+            bool pf_orphan_audit_only{false};
         };
        private:
         std::vector<BeePFConfig> m_bee_pf_configs;

@@ -1045,6 +1045,27 @@ namespace WireCell::Clus::PR {
         // via single-knob A/B arms.
         bool   m_shower_absorb_track_guard{false};
 
+        // doc sbnd_xin/docs/pr/65 round 3 -- offer graph-unreachable
+        // main-cluster segments to the proximity/angle shower absorbers.
+        // The prototype's seg1->cluster()==main_cluster guards
+        // (NeutrinoID_shower_clustering.h:1870/:1901 etc) encode "already
+        // claimed by the main_vertex graph walk", an invariant that
+        // other_seg_keep_isolated (doc pr/54) broke by adding kept residual
+        // segments as DISCONNECTED components of the main cluster's graph.
+        // When on, the six absorber guards in NeutrinoShowerClustering.cxx
+        // test reachability instead of raw cluster identity, so those
+        // fragments can be absorbed by the prototype's own already-tuned
+        // 3.5 cm / cone thresholds instead of surfacing as fabricated
+        // PF-root nodes.  On a connected main cluster the predicate is
+        // identical to legacy.  C++ default false = legacy = byte-identical.
+        bool   m_shower_absorb_unreachable_main{false};
+        // Transient companion state for the knob above: the main-cluster
+        // segments NOT reachable from main_vertex, recomputed unconditionally
+        // at every shower_clustering_with_nv entry (empty when the knob is
+        // off, so the guards' predicate is byte-identical to legacy).  Valid
+        // for the span of that call only -- PR-graph topology is frozen there.
+        IndexedSegmentSet m_absorb_unreachable_main_segs;
+
         // doc sbnd_xin/docs/pr/40 round 6 F13 -- closes round 5's F11
         // regression (SBND evt 55715 seg 15005 pi+ -> e-).  Travels into
         // shower_clustering_connecting_to_main_vertex's candidate skip chain

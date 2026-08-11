@@ -837,6 +837,11 @@ function(
     // 4/19 ncpi0 events, every move an attributed re-parent -- doc pr/38 R4
     // + doc pr/44).  Runner env: SBND_PF_ORPHAN_TRACK_PARENTAGE.
     pf_orphan_track_parentage = true,
+    // doc pr/65 round 3 (rung 3) -- audit-only orphan net: a still-unclaimed
+    // segment is named in the log instead of fabricated as a root-level PF
+    // particle.  Display-only: moves ONLY mc.json.  C++ default false.
+    // Runner env: SBND_PF_ORPHAN_AUDIT_ONLY.
+    pf_orphan_audit_only = false,
     // doc pr/38: F2's ON-behavior was CORRECTED in place (owner decision
     // 2026-08-05, no new knobs): the barrier now excludes each shower's
     // start vertex (prototype map_vtx_segs parity, WCShower.cxx:547) so
@@ -1309,6 +1314,12 @@ function(
     other_seg_keep_isolated = true,
     other_seg_keep_isolated_min_points = null,
     other_seg_keep_isolated_min_length = null,
+    // doc pr/65 round 3 -- offer graph-unreachable main-cluster segments
+    // (the disconnected components other_seg_keep_isolated above creates) to
+    // the shower absorbers by relaxing the cluster()==main_cluster guards to
+    // a main_vertex-reachability test.  C++ default false.  Runner env:
+    // SBND_SHOWER_ABSORB_UNREACHABLE_MAIN.
+    shower_absorb_unreachable_main = false,
     // doc pr/59 round 2 -- per-cluster orphaned-associate_points rescue
     // (18255-142421 seg 20; 116944-71372 segs 19052/19053/136199).  SBND
     // PRODUCTION ON -- owner flip 2026-08-10 after the work-pr59r2-on19 gate
@@ -1383,6 +1394,7 @@ function(
                              pf_pi0_node_per_id=pf_pi0_node_per_id,
                              pf_pdg_name_prototype_fallback=pf_pdg_name_prototype_fallback,
                              pf_orphan_track_parentage=pf_orphan_track_parentage,
+                             pf_orphan_audit_only=pf_orphan_audit_only,
                              unmerge_bundle_mode=unmerge_bundle_mode,
                              restore_demoted_mains=restore_demoted_mains,
                              require_provenance=require_provenance,
@@ -1531,6 +1543,7 @@ function(
                              other_seg_keep_isolated=other_seg_keep_isolated,
                              other_seg_keep_isolated_min_points=other_seg_keep_isolated_min_points,
                              other_seg_keep_isolated_min_length=other_seg_keep_isolated_min_length,
+                             shower_absorb_unreachable_main=shower_absorb_unreachable_main,
                              assoc_full_recluster=assoc_full_recluster,
                              pseudo_shower_track_paint=pseudo_shower_track_paint,
                              reclass_never_computed_ke_floor=reclass_never_computed_ke_floor,

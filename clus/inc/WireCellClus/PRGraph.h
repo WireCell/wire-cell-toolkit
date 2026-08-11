@@ -372,5 +372,21 @@ namespace WireCell::Clus::PR {
     using IndexedVertexSet  = std::set<VertexPtr,  VertexIndexCmp>;
     using IndexedSegmentSet = std::set<SegmentPtr, SegmentIndexCmp>;
 
+    /// Return every segment whose edge is NOT reachable from `root` by a
+    /// breadth-first walk of the graph.
+    ///
+    /// Pure topology: no cluster or flag filtering (callers filter).  If
+    /// `root` is null or not in the graph, every segment in the graph is
+    /// returned.  The walk keys on membership only, so iteration order cannot
+    /// leak into the result; the returned set is ordered by stable graph
+    /// index.
+    ///
+    /// doc sbnd_xin/docs/pr/65 round 3: the shower absorbers' cluster()==
+    /// main_cluster guards encode "already claimed by the main_vertex graph
+    /// walk", which other_seg_keep_isolated (doc pr/54) broke by adding
+    /// disconnected components to the main cluster's graph.  This helper is
+    /// what lets those guards test reachability instead of cluster identity.
+    IndexedSegmentSet unreachable_segments(const Graph& graph, VertexPtr root);
+
 };
 #endif

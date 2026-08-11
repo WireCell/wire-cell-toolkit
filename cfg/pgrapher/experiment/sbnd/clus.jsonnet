@@ -722,6 +722,10 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               // PF track segments.  C++ default false; key omitted when off =>
               // byte-identical pre-knob config.  Display-only (mc.json).
               pf_orphan_track_parentage=false,
+              // doc pr/65 round 3: audit-only orphan net -- log unclaimed
+              // segments, fabricate no PF-root node.  C++ default false; key
+              // omitted when off => byte-identical.  Display-only (mc.json).
+              pf_orphan_audit_only=false,
               // restore_demoted_mains (doc pr/20 Part I P2; C++ default false,
               // key omitted when null => byte-identical pre-knob config): tag a
               // split-off part that was ITSELF a matched bundle main before the
@@ -1344,6 +1348,11 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               other_seg_keep_isolated=false,
               other_seg_keep_isolated_min_points=null,
               other_seg_keep_isolated_min_length=null,
+              // doc pr/65 round 3 -- offer graph-unreachable main-cluster
+              // segments (kept-isolated pr/54 residuals) to the shower
+              // absorbers (reachability-relaxed guards).  C++ default false;
+              // false omits the key => byte-identical.
+              shower_absorb_unreachable_main=false,
               // doc pr/59 round 2 -- per-cluster orphaned-associate_points
               // rescue.  C++ default false; false omits the key =>
               // byte-identical.
@@ -1926,6 +1935,7 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
             other_seg_keep_isolated=other_seg_keep_isolated,
             other_seg_keep_isolated_min_points=other_seg_keep_isolated_min_points,
             other_seg_keep_isolated_min_length=other_seg_keep_isolated_min_length,
+            shower_absorb_unreachable_main=shower_absorb_unreachable_main,
             assoc_full_recluster=assoc_full_recluster,
             muon_dqdx_curve=muon_dqdx_curve,
             sp_dedx_use_recomb_model=sp_dedx_use_recomb_model,
@@ -2238,6 +2248,9 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
                     // doc pr/38 Round 4.  C++ default false; key omitted when
                     // off => byte-identical pre-knob config.
                     [if pf_orphan_track_parentage then 'pf_orphan_track_parentage']: true,
+                    // doc pr/65 round 3.  C++ default false; key omitted when
+                    // off => byte-identical pre-knob config.
+                    [if pf_orphan_audit_only then 'pf_orphan_audit_only']: true,
                 },
             ],
             pipeline: wc.tns(cm_pipeline),
@@ -2340,6 +2353,8 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
        // doc pr/38 Round 4; false = C++ default = OFF, key omitted =>
        // byte-identical.  See clus_pr.
        pf_orphan_track_parentage=false,
+       // doc pr/65 round 3; false = C++ default = OFF.  See clus_pr.
+       pf_orphan_audit_only=false,
        // doc pr/20 Part I P2; null = C++ default false = OFF.  See clus_pr.
        restore_demoted_mains=null,
        // doc pr/23 sec 4.2; null = C++ default false = warn-and-skip.  See clus_pr.
@@ -2647,6 +2662,11 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
               other_seg_keep_isolated=false,
               other_seg_keep_isolated_min_points=null,
               other_seg_keep_isolated_min_length=null,
+              // doc pr/65 round 3 -- offer graph-unreachable main-cluster
+              // segments (kept-isolated pr/54 residuals) to the shower
+              // absorbers (reachability-relaxed guards).  C++ default false;
+              // false omits the key => byte-identical.
+              shower_absorb_unreachable_main=false,
               // doc pr/59 round 2 -- per-cluster orphaned-associate_points
               // rescue.  C++ default false; false omits the key =>
               // byte-identical.
@@ -2689,6 +2709,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 pf_pi0_node_per_id=pf_pi0_node_per_id,
                 pf_pdg_name_prototype_fallback=pf_pdg_name_prototype_fallback,
                 pf_orphan_track_parentage=pf_orphan_track_parentage,
+                pf_orphan_audit_only=pf_orphan_audit_only,
                 unmerge_bundle_mode=unmerge_bundle_mode,
                 restore_demoted_mains=restore_demoted_mains,
                 require_provenance=require_provenance,
@@ -2864,6 +2885,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 other_seg_keep_isolated=other_seg_keep_isolated,
                 other_seg_keep_isolated_min_points=other_seg_keep_isolated_min_points,
                 other_seg_keep_isolated_min_length=other_seg_keep_isolated_min_length,
+                shower_absorb_unreachable_main=shower_absorb_unreachable_main,
                 assoc_full_recluster=assoc_full_recluster,
                 pseudo_shower_track_paint=pseudo_shower_track_paint,
                 muon_dqdx_curve=muon_dqdx_curve,

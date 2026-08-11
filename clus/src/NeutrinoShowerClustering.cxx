@@ -720,7 +720,7 @@ void PatternAlgorithms::shower_clustering_with_nv_from_main_cluster(Graph& graph
         while (flag_continue) {
             flag_continue = false;
             for (auto seg1 : seg_order) {
-                if (seg1->cluster() == main_cluster) continue;
+                if (seg1->cluster() == main_cluster && !m_absorb_unreachable_main_segs.count(seg1)) continue;  // doc pr/65 round 3: guard means "claimed by the main_vertex graph walk", so graph-unreachable main-cluster segments stay eligible (set empty when knob off => legacy)
                 if (map_segment_in_shower.find(seg1) != map_segment_in_shower.end()) continue;
 
                 double min_dis = 1e9;
@@ -798,7 +798,7 @@ void PatternAlgorithms::shower_clustering_with_nv_from_main_cluster(Graph& graph
 
     // Examine other segments and add to showers based on angle and distance
     for (auto seg1 : seg_order) {
-        if (seg1->cluster() == main_cluster) continue;
+        if (seg1->cluster() == main_cluster && !m_absorb_unreachable_main_segs.count(seg1)) continue;  // doc pr/65 round 3: guard means "claimed by the main_vertex graph walk", so graph-unreachable main-cluster segments stay eligible (set empty when knob off => legacy)
         if (map_segment_in_shower.find(seg1) != map_segment_in_shower.end()) continue;
 
         double min_dis = 1e9;
@@ -857,7 +857,7 @@ void PatternAlgorithms::shower_clustering_with_nv_from_main_cluster(Graph& graph
         }
         bool changed = false;
         for (auto seg1 : seg_order) {
-            if (seg1->cluster() == main_cluster) continue;
+            if (seg1->cluster() == main_cluster && !m_absorb_unreachable_main_segs.count(seg1)) continue;  // doc pr/65 round 3: guard means "claimed by the main_vertex graph walk", so graph-unreachable main-cluster segments stay eligible (set empty when knob off => legacy)
             if (map_segment_in_shower.count(seg1)) continue;
             auto it = cluster_to_shower.find(seg1->cluster());
             if (it == cluster_to_shower.end()) continue;
@@ -1218,7 +1218,7 @@ void PatternAlgorithms::shower_clustering_with_nv_from_vertices(Graph& graph, Ve
         // Cache the shower start front point to avoid re-evaluating per segment.
         const WireCell::Point shower_start_front = shower->start_segment()->fits().front().point;
         for (auto seg1 : seg_order) {
-            if (seg1->cluster() == main_cluster) continue;
+            if (seg1->cluster() == main_cluster && !m_absorb_unreachable_main_segs.count(seg1)) continue;  // doc pr/65 round 3: guard means "claimed by the main_vertex graph walk", so graph-unreachable main-cluster segments stay eligible (set empty when knob off => legacy)
             if (map_segment_in_shower.find(seg1) != map_segment_in_shower.end()) continue;
             if (seg1->cluster() == shower->start_segment()->cluster()) continue;
 
@@ -1294,7 +1294,7 @@ void PatternAlgorithms::shower_clustering_with_nv_from_vertices(Graph& graph, Ve
             while (flag_continue) {
                 flag_continue = false;
                 for (auto seg1 : seg_order) {
-                    if (seg1->cluster() == main_cluster) continue;
+                    if (seg1->cluster() == main_cluster && !m_absorb_unreachable_main_segs.count(seg1)) continue;  // doc pr/65 round 3: guard means "claimed by the main_vertex graph walk", so graph-unreachable main-cluster segments stay eligible (set empty when knob off => legacy)
                     if (map_segment_in_shower.find(seg1) != map_segment_in_shower.end()) continue;
 
                     double min_dis = 1e9;
@@ -1578,7 +1578,7 @@ void PatternAlgorithms::shower_clustering_in_other_clusters(Graph& graph, Vertex
             
             // Cluster with the rest - add segments based on angle and distance
             for (auto seg1 : seg_order) {
-                if (seg1->cluster() == main_cluster) continue;
+                if (seg1->cluster() == main_cluster && !m_absorb_unreachable_main_segs.count(seg1)) continue;  // doc pr/65 round 3: guard means "claimed by the main_vertex graph walk", so graph-unreachable main-cluster segments stay eligible (set empty when knob off => legacy)
                 if (map_segment_in_shower.find(seg1) != map_segment_in_shower.end()) continue;
                 if (seg1->cluster() == shower->start_segment()->cluster()) continue;
                 
@@ -3384,6 +3384,34 @@ void PatternAlgorithms::shower_clustering_with_nv(int acc_segment_id, IndexedSho
                     seg->flags_any(SegmentFlags::kShowerTrajectory) ? 1 : 0,
                     seg->has_particle_info() ? seg->particle_info()->pdg() : 0);
             }
+        }
+    }
+
+    // doc sbnd_xin/docs/pr/65 round 3: main-cluster segments unreachable from
+    // main_vertex, computed ONCE here -- PR-graph topology is frozen for the
+    // whole span of this function (no graph mutators in this file; the last
+    // mutation, main_vertex_graph_audit, runs before this call).  Recomputed
+    // unconditionally so no state leaks between calls; empty when the knob is
+    // off, which keeps every relaxed guard below byte-identical to legacy.
+    // Such segments exist only when other_seg_keep_isolated (doc pr/54) kept
+    // a residual segment as a disconnected component of the main cluster's
+    // graph; the prototype cannot reach this state (attach-or-discard).
+    m_absorb_unreachable_main_segs.clear();
+    if (m_shower_absorb_unreachable_main && main_vertex && main_cluster) {
+        for (const auto& seg : unreachable_segments(graph, main_vertex)) {
+            if (seg && seg->cluster() == main_cluster) {
+                m_absorb_unreachable_main_segs.insert(seg);
+            }
+        }
+        if (!m_absorb_unreachable_main_segs.empty()) {
+            std::string ids;
+            for (const auto& seg : m_absorb_unreachable_main_segs) {
+                if (!ids.empty()) ids += ",";
+                ids += std::to_string(seg->id());
+            }
+            SPDLOG_LOGGER_DEBUG(s_log,
+                "pr65 absorb_unreachable_main: {} graph-unreachable main-cluster segment(s) offered to shower absorbers: [{}]",
+                m_absorb_unreachable_main_segs.size(), ids);
         }
     }
 
