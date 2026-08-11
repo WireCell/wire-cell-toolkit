@@ -476,14 +476,42 @@ function(
     // good-separation (must stay split) 154/156, the two misses being the
     // owner's own unsatisfiable label triangles.
     //
-    // Legacy escapes: -A protect_graph_name=relaxed_strict_img_2d_rescue
-    // (SBND_PROTECT_GRAPH=relaxed_strict_img_2d_rescue) restores pre-pr/62
+    // **SBND PRODUCTION DEFAULT '..._rescue_long_wtrack', owner 2026-08-11
+    // (doc pr/64 round 4; adds the S6 W-plane long-track exception on top of
+    // pr/62's S7, preserved above).** W (collection) has no excuse channel in
+    // S6 -- `excused[3]={excuse_u,excuse_v,false}` -- so a genuinely straight
+    // long track with a small W-only hole is broken by the one plane that
+    // cannot be excused (18259-174224 plain 6-wire W charge hole,
+    // 18255-276836 drift-parallel all-plane prolongation where only W
+    // convicts, 18255-314507).  `Graphs::two_d_w_track_ok` revives an
+    // S6-killed candidate iff W is the SOLE voting plane and both components
+    // are long/thin/globally-collinear (Lmin>6cm, npmin>=50, Tmax<2cm,
+    // angle<25deg, tightened by Tmax<1.7cm OR angle<6deg -- the owner-chosen
+    // zero-regression point on the 899-label hand scan: protects evt122660's
+    // good pair, forgoes the marginal 64959/172656 recoveries), or a dead-W
+    // band explains the gap (dead_w>=3, npmin>=20, dis<3cm).  Revive-only,
+    // composed after the shipped rescue, whose local-axis W branch is
+    // byte-untouched; the exception uses the GLOBAL per-component PCA axis
+    // (the local break-point axis is noisy exactly at a break -- 174224:
+    // local 20.7deg vs global 4.2deg).  Validation (doc pr/64 round 4):
+    // off-gates 0/66 movers on same-config fresh arms + 1000-event bare
+    // rerun fully attributed to pr/65's flip; on-arm movers on the FULL
+    // 1000-event PR-data sample are EXACTLY the three target events
+    // (174224 fully rejoined, 276836/314507 partially -- their all-plane S7
+    // breaks remain by design) plus evt122660's owner-OK 4/5/6 component
+    // merge on nueCC48; the owner-labelled good pair 122660 13-16 stays
+    // split on-arm; nusel byte-identical in all 1067 gated events.
+    //
+    // Legacy escapes: -A protect_graph_name=relaxed_strict_img_2d_rescue_long
+    // (SBND_PROTECT_GRAPH=relaxed_strict_img_2d_rescue_long) restores
+    // pre-pr/64 production (S7, no W exception);
+    // =relaxed_strict_img_2d_rescue restores pre-pr/62
     // production (round 6, S6+rescue only, no S7);
     // =relaxed_strict_img_2d_rescue_long2 selects the conservative S7
     // min_gapped_planes=2 point; =relaxed_strict_img restores round 7;
     // =relaxed_strict restores round 6's predecessor; =relaxed restores
     // pre-round-6.
-    protect_graph_name          = 'relaxed_strict_img_2d_rescue_long',   // null => 'relaxed'
+    protect_graph_name          = 'relaxed_strict_img_2d_rescue_long_wtrack',   // null => 'relaxed'
     // C++ default true (doc pr/23 ordering): a TGM/STM/lm-convicted in-window
     // main does not open its bundle for splitting.  null => key omitted.
     protect_skip_convicted      = null,
