@@ -282,6 +282,51 @@ namespace WireCell::Clus::Graphs {
     bool two_d_connectivity_bad(bool gap_u, bool gap_v, bool gap_w,
                                  bool excuse_u, bool excuse_v);
 
+    /// doc pr/57 round 6: inputs to the S6 rescue decision, measured at the
+    /// kill site for one S6-KILLED candidate edge.  Everything is in
+    /// "analysis units" (cm, degrees, counts, fractions) so the C++
+    /// predicate is a line-by-line port of the Python rule it was fitted
+    /// with (sbnd_xin/scripts/analysis/pr57/oc56_fit.py rescue()), and a
+    /// doctest can replay real fitted cases.  Sentinels: ab_local_deg < 0
+    /// means "no local axis measurable"; cov[p] < 0 means "no coverage
+    /// measurement" (plane had no seed data); slope/ext are clamped at >= 0
+    /// with 0 meaning "no measurement" (matching the Python `or 0.0`);
+    /// close_mx[p] == 5 means "does not close even at a (4,4) stencil";
+    /// has_plane[p] false means the plane had no seeds from one side and
+    /// never voted.
+    struct S6RescueInput {
+        double dis_cm = 0;        ///< candidate edge 3D length
+        bool gap[3] = {false, false, false};      ///< per-plane (1,1) BFS gap
+        bool excuse_u = false, excuse_v = false;  ///< wire-parallel excuses
+        bool has_plane[3] = {false, false, false};
+        double ab_local_deg = -1; ///< angle between local PCA axes at the two break points
+        int npmin = 0;            ///< smaller component's point count
+        double lmin_cm = 0;       ///< smaller component's principal-axis extent
+        int close_mx[3] = {5, 5, 5};   ///< smallest d with (d,d) stencil connected
+        double cov[3] = {-1, -1, -1};  ///< wire coverage across the seed span
+        double slope[3] = {0, 0, 0};   ///< |dslice/dwire| of the combined seeds
+        double ext_med[3] = {0, 0, 0}; ///< median per-wire fired-slice extent (ticks)
+        double ov[3] = {-1, -1, -1};   ///< seed wire-range overlap fraction
+        int dead_w = 0;           ///< dead W wires across the W seed span
+    };
+
+    /// doc pr/57 round 6: rescue predicate of the "relaxed_strict_img_2d_rescue"
+    /// graph flavor. True => an S6-killed candidate is kept after all. Fitted
+    /// against the owner's full 2026-08-10 hand scan of the S6 separation
+    /// displays (899 labels over 230 events; doc pr/57 sec 14): per-pair
+    /// result bad 124/127 kept-connected, good 154/156 kept-separated, with
+    /// both good misses being label triangles that no relaxation can satisfy
+    /// (the owner's "prefer connectivity" tie-break decides them). Branches
+    /// map one-to-one to the owner's stated bad-separation classes: dead-W
+    /// band, W-robustness with plane-dependent gap allowance, direction
+    /// consistency on substantial pairs, prolonged induction signal, and
+    /// two-view footprint co-location. It can only REMOVE kills S6 made --
+    /// composed as `killed && !two_d_rescue_ok(...)` -- so with the flavor
+    /// unselected nothing changes anywhere.
+    ///
+    /// Pure; exposed for doctests.
+    bool two_d_rescue_ok(const S6RescueInput& in);
+
 }
 
 #endif

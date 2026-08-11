@@ -84,6 +84,16 @@ namespace WireCell::Clus::Graphs {
         IDetectorVolumes::pointer dv,
         IPCTransformSet::pointer pcts);
 
+    // closely + relaxed_strict with image_check, two_d_check,
+    // floor_w_override AND two_d_rescue all true (doc pr/57 round 6:
+    // protect_bundle-only -- S6-killed candidates that
+    // Graphs::two_d_rescue_ok() explains as detector artifacts are
+    // un-killed; fitted against the owner's full separation hand scan)
+    Weighted::Graph make_graph_relaxed_strict_img_2d_rescue(
+        const Facade::Cluster& cluster,
+        IDetectorVolumes::pointer dv,
+        IPCTransformSet::pointer pcts);
+
 }
 
 #endif

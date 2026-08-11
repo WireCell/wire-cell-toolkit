@@ -113,12 +113,19 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cmath>
 #include <cstdlib>
 #include <fstream>
+#include <map>
 #include <mutex>
 #include <set>
 #include <string>
 #include <unordered_set>
+
+// doc pr/57 round 6: 3x3 PCA for the S6 rescue's local-direction and
+// component-extent features.  Eigen is already a WCT-wide dependency
+// (WireCellUtil/Array.h); no new external dependency is introduced.
+#include <Eigen/Dense>
 
 using namespace WireCell;
 using namespace WireCell::Clus;
@@ -292,6 +299,75 @@ bool Graphs::two_d_connectivity_bad(bool gap_u, bool gap_v, bool gap_w,
     return (gap_u && !excuse_u) || (gap_v && !excuse_v) || gap_w;
 }
 
+bool Graphs::two_d_rescue_ok(const S6RescueInput& in)
+{
+    // doc pr/57 round 6: line-by-line port of oc56_fit.py rescue() -- the
+    // rule fitted against the owner's full hand scan.  Keep the two in
+    // lockstep: any constant changed here must be re-fitted there first,
+    // and the pair-level validation table (doc pr/57 sec 14) re-made.
+    const bool gu = in.gap[0], gv = in.gap[1], gw = in.gap[2];
+    if (in.dis_cm > 5.0) return false;
+    if (!(gu || gv || gw)) return false;
+
+    const bool coll = in.ab_local_deg >= 0 && in.ab_local_deg < 20.0;
+    const bool collw = in.ab_local_deg >= 0 && in.ab_local_deg < 15.0;
+    const bool dead_w = in.dead_w >= 3;
+    const bool sub = in.lmin_cm > 4.0 && in.npmin >= 50;
+
+    // Co-location: the two components' local footprints OVERLAP in the
+    // (connected) W view plus at least one more connected plane -- two
+    // views agree these are pieces of one object at the same place, not
+    // end-to-end fragments.  W-anchored on purpose: the same overlap in
+    // U+V alone is common at shower junctions the owner labels good.
+    if (!gw && in.has_plane[2] && in.ov[2] >= 0.6 && in.npmin >= 50) {
+        for (int p = 0; p < 2; ++p) {
+            if (!in.gap[p] && in.has_plane[p] && in.ov[p] >= 0.6) return true;
+        }
+    }
+
+    if (gw) {
+        // W-robustness (owner case c): a W gap is only forgivable when it is
+        // tiny (closes at a (3,3) stencil), well covered and the break is
+        // collinear -- or when a dead-W band explains it (case a).
+        const bool w_tiny = in.close_mx[2] <= 3 && in.cov[2] >= 0.8;
+        const bool w_ok = (dead_w && in.npmin >= 20) || (w_tiny && collw && sub);
+        if (!w_ok) return false;
+    }
+
+    // Every unexcused gapped induction plane must be explained.
+    bool any_unexc = false;
+    for (int p = 0; p < 2; ++p) {
+        const bool g = in.gap[p];
+        const bool e = (p == 0) ? in.excuse_u : in.excuse_v;
+        if (!g || e) continue;
+        any_unexc = true;
+        const double c = in.cov[p];
+        if (c < 0) return false;
+        const double sl = std::max(in.slope[p], 0.0);
+        const double ex = std::max(in.ext_med[p], 0.0);
+        const int cl = in.close_mx[p];
+        bool ok = false;
+        // dead-W band distorts the induction response (owner case a); the
+        // coverage floor is LOW because the distortion itself makes holes
+        if (dead_w && in.npmin >= 20 && c >= 0.65) ok = true;
+        // direction-consistent substantial pair over a covered gap
+        if (sub && coll && c >= 0.90) ok = true;
+        // ...even at moderate coverage when clearly track-like (W clean)
+        if (!gw && in.npmin >= 55 && collw && c >= 0.55) ok = true;
+        // prolonged-signal tiers (owner case b)
+        if (in.lmin_cm > 5.5 && in.npmin >= 50 && (sl >= 5.0 || ex >= 50.0) && c >= 0.82) ok = true;
+        if (in.npmin >= 15 && (sl >= 8.0 || ex >= 50.0) && c >= 0.82) ok = true;
+        if (in.npmin >= 5 && collw && sl >= 15.0 && c >= 0.95) ok = true;
+        // big pair, tight gap, small closure, full coverage (W clean)
+        if (!gw && in.npmin >= 150 && in.dis_cm < 2.0 && cl <= 4 && c >= 0.90) ok = true;
+        if (!ok) return false;
+    }
+    // Either every unexcused induction gap was explained, or there was none
+    // (W side already vouched for, induction gaps all excused).
+    (void)any_unexc;
+    return true;
+}
+
 void Graphs::connect_graph_relaxed_strict(
     const Facade::Cluster& cluster,
     IDetectorVolumes::pointer dv,
@@ -299,7 +375,8 @@ void Graphs::connect_graph_relaxed_strict(
     Weighted::Graph& graph,
     bool image_check,
     bool two_d_check,
-    bool floor_w_override)
+    bool floor_w_override,
+    bool two_d_rescue)
 {
     const bool use_ctpc = true;
     const auto* grouping = cluster.grouping();
@@ -386,6 +463,82 @@ void Graphs::connect_graph_relaxed_strict(
         pt_clouds[c]->add({points[0][i], points[1][i], points[2][i]});
         pt_clouds_global_indices[c].push_back(i);
     }
+
+    // doc pr/57 round 6: per-component (point count, principal-axis extent)
+    // cache for the S6 rescue -- computed at most once per component per
+    // call, only when two_d_rescue is on and a killed candidate touches the
+    // component.  Keyed by component index (never iterated), so fully
+    // deterministic.  npmin is capped at 20000 to match the Python fit,
+    // whose component clouds were the (<=20000-point strided) dump records;
+    // every rescue threshold is far below the cap so the two agree exactly.
+    std::map<size_t, std::pair<int, double>> s6_comp_stats;
+
+    // doc pr/57 round 6: component pairs whose dir1/dir2 candidate the S6
+    // rescue explicitly kept.  Needed at the emit loop: the dir-MST records
+    // the pair's CLOSEST-candidate tuple (process_mst_deterministically), so
+    // a killed closest sets the recorded tuple to -1 and the pair silently
+    // loses every dir emission -- a rescued dir bridge would evaporate
+    // (evt286180 0-1 was the labelled case).  Lookup-only, never iterated.
+    std::set<std::pair<size_t, size_t>> s6_rescued_dir_pairs;
+    auto s6_comp_stat = [&](size_t comp) -> std::pair<int, double> {
+        auto it = s6_comp_stats.find(comp);
+        if (it != s6_comp_stats.end()) return it->second;
+        const auto& cloud = pt_clouds.at(comp);
+        const size_t n = cloud->get_num_points();
+        double extent = 0.0;
+        if (n >= 2) {
+            Eigen::Vector3d mean = Eigen::Vector3d::Zero();
+            for (size_t i = 0; i < n; ++i) {
+                const auto p = cloud->point(i);
+                mean += Eigen::Vector3d(p.x(), p.y(), p.z());
+            }
+            mean /= double(n);
+            Eigen::Matrix3d C = Eigen::Matrix3d::Zero();
+            for (size_t i = 0; i < n; ++i) {
+                const auto p = cloud->point(i);
+                const Eigen::Vector3d d = Eigen::Vector3d(p.x(), p.y(), p.z()) - mean;
+                C += d * d.transpose();
+            }
+            Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> es(C);
+            const Eigen::Vector3d axis = es.eigenvectors().col(2);
+            double pmin = 1e30, pmax = -1e30;
+            for (size_t i = 0; i < n; ++i) {
+                const auto p = cloud->point(i);
+                const double pr = (Eigen::Vector3d(p.x(), p.y(), p.z()) - mean).dot(axis);
+                if (pr < pmin) pmin = pr;
+                if (pr > pmax) pmax = pr;
+            }
+            extent = (pmax - pmin) / units::cm;
+        }
+        std::pair<int, double> st{static_cast<int>(std::min<size_t>(n, 20000)), extent};
+        s6_comp_stats[comp] = st;
+        return st;
+    };
+
+    // doc pr/57 round 6: local principal axis of a component within 6 cm
+    // (widened once to 12 cm when starved) of a break point -- the rescue's
+    // direction-consistency feature.  Mirrors oc56_fit.py local_dir().
+    auto s6_local_axis = [&](const std::shared_ptr<Simple3DPointCloud>& cloud,
+                              const geo_point_t& q) -> std::pair<bool, Eigen::Vector3d> {
+        for (const double rr : {6.0 * units::cm, 12.0 * units::cm}) {
+            const auto pts = cloud->get_closest_wcpoints_radius(q, rr);
+            if (pts.size() < 5) continue;
+            Eigen::Vector3d mean = Eigen::Vector3d::Zero();
+            for (const auto& pr : pts) {
+                mean += Eigen::Vector3d(pr.second.x(), pr.second.y(), pr.second.z());
+            }
+            mean /= double(pts.size());
+            Eigen::Matrix3d C = Eigen::Matrix3d::Zero();
+            for (const auto& pr : pts) {
+                const Eigen::Vector3d d =
+                    Eigen::Vector3d(pr.second.x(), pr.second.y(), pr.second.z()) - mean;
+                C += d * d.transpose();
+            }
+            Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> es(C);
+            return {true, es.eigenvectors().col(2)};
+        }
+        return {false, Eigen::Vector3d::Zero()};
+    };
 
     if (oc53_census) {
         oc53_log->debug("OC53CENSUS-S cluster nblobs={} npoints={} ncomp={}",
@@ -599,6 +752,16 @@ void Graphs::connect_graph_relaxed_strict(
         bool budget_hit[3] = {false, false, false};
         std::string matrix[3];  // doc pr/56 round 3 census + doc pr/57 dump, see below
         Json::Value oc56_dump_planes(Json::arrayValue);  // doc pr/57, dump only
+        // doc pr/57 round 6: per-plane seed/window snapshot kept for the S6
+        // rescue's feature measurements.  Filled only when two_d_rescue is
+        // on; a plane skipped for missing seeds stays has=false and never
+        // votes in the rescue either.
+        struct S6PlaneData {
+            bool has = false;
+            std::vector<S6Cell> sa, sb;
+            int wlo = 0, whi = 0, slo = 0, shi = 0;
+        };
+        S6PlaneData s6_pdata[3];
         for (int plane = 0; plane != 3; ++plane) {
             std::vector<S6Cell> seeds_a2d, seeds_b2d;
             int wlo = 1 << 30, whi = -(1 << 30), slo = 1 << 30, shi = -(1 << 30);
@@ -628,6 +791,11 @@ void Graphs::connect_graph_relaxed_strict(
                 win_wlo, win_whi, win_slo, win_shi,
                 slice_step, dw, ds, cell_budget, &budget_hit[plane]);
             gap[plane] = !connected;
+
+            if (two_d_rescue) {
+                s6_pdata[plane] = {true, seeds_a2d, seeds_b2d,
+                                   win_wlo, win_whi, win_slo, win_shi};
+            }
 
             // doc pr/56 round 3 / doc pr/57: a full dw={1..4} x ds={1..4}
             // connectivity matrix at the SAME fixed window (s6_reach
@@ -758,7 +926,128 @@ void Graphs::connect_graph_relaxed_strict(
         // gap". A U/V-only gap still can't kill below the floor even with
         // the knob on: the floor exists to guard against noisy near-floor
         // induction-plane false positives, and this knob only trusts W.
-        const bool killed = below_floor ? (floor_w_override && gap[2]) : killed_if_evaluated;
+        // (doc pr/57 round 6: non-const because two_d_rescue below may
+        // un-kill; with two_d_rescue false the value never changes.)
+        bool killed = below_floor ? (floor_w_override && gap[2]) : killed_if_evaluated;
+        const bool s6_killed_pre = killed;
+
+        // doc pr/57 round 6: the S6 rescue.  Only ever runs on candidates
+        // S6 (or the floor override) actually killed, and only within the
+        // display population (<= 5 cm), so its cost and its reach are both
+        // bounded.  Features mirror oc56_fit.py edge_features(); the
+        // decision itself is the pure Graphs::two_d_rescue_ok().
+        bool s6_rescued = false;
+        Graphs::S6RescueInput s6_rin;
+        bool s6_rin_valid = false;
+        if (two_d_rescue && killed && edge_dis <= 5.0 * units::cm) {
+            s6_rin.dis_cm = edge_dis / units::cm;
+            for (int p = 0; p < 3; ++p) s6_rin.gap[p] = gap[p];
+            s6_rin.excuse_u = excuse_u;
+            s6_rin.excuse_v = excuse_v;
+            const auto sta = s6_comp_stat(j);
+            const auto stb = s6_comp_stat(k);
+            s6_rin.npmin = std::min(sta.first, stb.first);
+            s6_rin.lmin_cm = std::min(sta.second, stb.second);
+            const auto axa = s6_local_axis(cloud_a, q1);
+            const auto axb = s6_local_axis(cloud_b, q2);
+            if (axa.first && axb.first) {
+                const double c = std::min(1.0, std::abs(axa.second.dot(axb.second)));
+                s6_rin.ab_local_deg = std::acos(c) * 180.0 / s6_pi;
+            }
+            for (int plane = 0; plane != 3; ++plane) {
+                const auto& pd = s6_pdata[plane];
+                s6_rin.has_plane[plane] = pd.has;
+                if (!pd.has) continue;
+                // smallest diagonal stencil that closes the plane; the
+                // fixed-reach window makes connectivity monotone in
+                // (dw,ds), so min over connected of max(dw,ds) is exactly
+                // the smallest d with (d,d) connected -- 3 extra bounded
+                // BFS runs at most, killed candidates only.
+                int close_mx = 1;
+                if (gap[plane]) {
+                    close_mx = 5;
+                    for (int d = 2; d <= 4; ++d) {
+                        if (s6_planes_connected(grouping, apa, face, plane,
+                                                pd.sa, pd.sb, pd.wlo, pd.whi,
+                                                pd.slo, pd.shi, slice_step,
+                                                d, d, cell_budget, nullptr)) {
+                            close_mx = d;
+                            break;
+                        }
+                    }
+                }
+                s6_rin.close_mx[plane] = close_mx;
+
+                // seed spans, overlap and (wire,time)-view slope
+                int alo = 1 << 30, ahi = -(1 << 30), blo2 = 1 << 30, bhi2 = -(1 << 30);
+                int smin = 1 << 30, smax = -(1 << 30);
+                for (const auto& cell : pd.sa) {
+                    alo = std::min(alo, cell.wind); ahi = std::max(ahi, cell.wind);
+                    smin = std::min(smin, cell.slice); smax = std::max(smax, cell.slice);
+                }
+                for (const auto& cell : pd.sb) {
+                    blo2 = std::min(blo2, cell.wind); bhi2 = std::max(bhi2, cell.wind);
+                    smin = std::min(smin, cell.slice); smax = std::max(smax, cell.slice);
+                }
+                const int ovw = std::min(ahi, bhi2) - std::max(alo, blo2) + 1;
+                const int wminspan = std::min(ahi - alo, bhi2 - blo2) + 1;
+                s6_rin.ov[plane] = std::max(0.0, double(ovw) / double(wminspan));
+                if (pd.sa.size() + pd.sb.size() >= 3) {
+                    const int dwspan = std::max(ahi, bhi2) - std::min(alo, blo2);
+                    s6_rin.slope[plane] = (dwspan < 1)
+                                              ? 999.0
+                                              : double(smax - smin) / double(dwspan);
+                }
+
+                // coverage / per-wire fired extent / dead wires across the
+                // combined seed span.  Same stride decision as the dump
+                // (full-window size), so the Python fit and this replay see
+                // identical lattices.
+                const int lo = std::min(alo, blo2), hi = std::max(ahi, bhi2);
+                const long win_wires2 = static_cast<long>(pd.whi - pd.wlo) + 1;
+                const long win_slices2 = static_cast<long>(pd.shi - pd.slo) + 1;
+                const int dstep = (win_wires2 * win_slices2 <= 300000) ? 1 : slice_step;
+                int n_sig = 0, n_dead = 0;
+                std::vector<int> exts;
+                for (int wind = lo; wind <= hi; ++wind) {
+                    int fmin = 1 << 30, fmax = -(1 << 30);
+                    bool dead_any = false;
+                    for (int slice = pd.slo; slice <= pd.shi; slice += dstep) {
+                        const auto* row = grouping->wire_charge_row(apa, face, plane, slice);
+                        if (row && row->count(wind)) {
+                            fmin = std::min(fmin, slice);
+                            fmax = std::max(fmax, slice);
+                        }
+                        if (!dead_any &&
+                            grouping->is_wire_dead(apa, face, plane, wind, slice)) {
+                            dead_any = true;
+                        }
+                    }
+                    if (fmax >= fmin) {
+                        ++n_sig;
+                        exts.push_back(fmax - fmin);
+                    }
+                    if (dead_any) ++n_dead;
+                }
+                s6_rin.cov[plane] = double(n_sig) / double(hi - lo + 1);
+                if (!exts.empty()) {
+                    std::sort(exts.begin(), exts.end());
+                    const size_t m = exts.size();
+                    s6_rin.ext_med[plane] =
+                        (m % 2) ? double(exts[m / 2])
+                                : 0.5 * (exts[m / 2 - 1] + exts[m / 2]);
+                }
+                if (plane == 2) s6_rin.dead_w = n_dead;
+            }
+            s6_rin_valid = true;
+            s6_rescued = Graphs::two_d_rescue_ok(s6_rin);
+            if (s6_rescued) {
+                killed = false;
+                if (std::string(blk) != "closest") {
+                    s6_rescued_dir_pairs.insert({std::min(j, k), std::max(j, k)});
+                }
+            }
+        }
 
         if (oc53_census) {
             oc53_log->debug(
@@ -845,6 +1134,40 @@ void Graphs::connect_graph_relaxed_strict(
             rec["below_floor"] = below_floor;
             rec["killed_ignore_floor"] = killed_if_evaluated;
             rec["floor_w_override"] = floor_w_override;
+            // doc pr/57 round 6: rescue provenance.  `killed` above is the
+            // POST-rescue verdict actually returned; these three fields let
+            // the offline checker verify Python-rule == C++-rule on every
+            // candidate, feature by feature.
+            if (two_d_rescue) {
+                rec["two_d_rescue"] = true;
+                rec["killed_pre_rescue"] = s6_killed_pre;
+                rec["rescued"] = s6_rescued;
+                if (s6_rin_valid) {
+                    Json::Value v2;
+                    v2["ab"] = s6_rin.ab_local_deg;
+                    v2["npmin"] = s6_rin.npmin;
+                    v2["lmin"] = s6_rin.lmin_cm;
+                    v2["dead_w"] = s6_rin.dead_w;
+                    Json::Value cl(Json::arrayValue), cv(Json::arrayValue),
+                        slp(Json::arrayValue), exm(Json::arrayValue),
+                        ovj(Json::arrayValue), hp(Json::arrayValue);
+                    for (int p = 0; p < 3; ++p) {
+                        cl.append(s6_rin.close_mx[p]);
+                        cv.append(s6_rin.cov[p]);
+                        slp.append(s6_rin.slope[p]);
+                        exm.append(s6_rin.ext_med[p]);
+                        ovj.append(s6_rin.ov[p]);
+                        hp.append(s6_rin.has_plane[p]);
+                    }
+                    v2["close"] = cl;
+                    v2["cov"] = cv;
+                    v2["slope"] = slp;
+                    v2["ext_med"] = exm;
+                    v2["ov"] = ovj;
+                    v2["has_plane"] = hp;
+                    rec["v2"] = v2;
+                }
+            }
             rec["planes"] = oc56_dump_planes;
             oc56_dump.write(rec);
         }
@@ -1470,6 +1793,39 @@ void Graphs::connect_graph_relaxed_strict(
                     const bool dup = boost::edge(gind1, gind2, graph).second;
                     if (!dup) {
                         /*auto edge =*/ add_edge(gind1, gind2, dis, graph);
+                    }
+                    oc56_note_emit(j, k, "dir2", gind1, gind2, dis, dup);
+                }
+            }
+            else if (two_d_rescue && s6_rescued_dir_pairs.count({j, k})) {
+                // doc pr/57 round 6: this pair's dir candidate was
+                // explicitly RESCUED by two_d_rescue_ok, but the dir-MST
+                // gate above is closed -- its recorded tuple is the
+                // closest candidate's, which a killed closest sets to -1
+                // (process_mst_deterministically), so every dir emission
+                // for the pair silently evaporates.  A rescued candidate
+                // is a validated artifact bridge; emit it anyway.  Only
+                // pairs the rescue touched can enter here, so the reach
+                // of this branch is exactly the fitted rescue population.
+                if (std::get<0>(index_index_dis_dir1[j][k]) >= 0) {
+                    const int gind1 = pt_clouds_global_indices.at(j).at(std::get<0>(index_index_dis_dir1[j][k]));
+                    const int gind2 = pt_clouds_global_indices.at(k).at(std::get<1>(index_index_dis_dir1[j][k]));
+                    float dis = std::get<2>(index_index_dis_dir1[j][k]);
+                    if (dis > 5 * units::cm) dis *= 1.1;
+                    const bool dup = boost::edge(gind1, gind2, graph).second;
+                    if (!dup) {
+                        add_edge(gind1, gind2, dis, graph);
+                    }
+                    oc56_note_emit(j, k, "dir1", gind1, gind2, dis, dup);
+                }
+                if (std::get<0>(index_index_dis_dir2[j][k]) >= 0) {
+                    const int gind1 = pt_clouds_global_indices.at(j).at(std::get<0>(index_index_dis_dir2[j][k]));
+                    const int gind2 = pt_clouds_global_indices.at(k).at(std::get<1>(index_index_dis_dir2[j][k]));
+                    float dis = std::get<2>(index_index_dis_dir2[j][k]);
+                    if (dis > 5 * units::cm) dis *= 1.1;
+                    const bool dup = boost::edge(gind1, gind2, graph).second;
+                    if (!dup) {
+                        add_edge(gind1, gind2, dis, graph);
                     }
                     oc56_note_emit(j, k, "dir2", gind1, gind2, dis, dup);
                 }

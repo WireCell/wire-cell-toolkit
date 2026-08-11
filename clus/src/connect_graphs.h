@@ -81,6 +81,19 @@ namespace WireCell::Clus::Graphs {
     // (make_graph_relaxed_strict_img_2d_wfloor) is the only caller that
     // passes true. Owner-requested investigation, evt 21073 j=6/k=7
     // (0.98cm, W-only gap at the neutrino vertex) is the motivating case.
+    //
+    // doc pr/57 round 6: two_d_rescue (no-op unless two_d_check is also
+    // true) re-examines every S6-killed candidate with
+    // Graphs::two_d_rescue_ok() -- a rule fitted against the owner's full
+    // hand scan of the S6 separation displays (899 labels; doc pr/57 sec
+    // 14) -- and UN-kills the ones it explains as artifacts (dead-W band,
+    // prolonged induction signal, direction-consistent long-track breaks,
+    // two-view co-location).  It can only remove kills S6 made, never add
+    // one, and only for candidates <= 5 cm.  Default false keeps
+    // "relaxed_strict_img_2d_wfloor" byte-for-byte unchanged; the
+    // "relaxed_strict_img_2d_rescue" flavor
+    // (make_graph_relaxed_strict_img_2d_rescue) is the only caller that
+    // passes true.
     void connect_graph_relaxed_strict(
         const Facade::Cluster& cluster,
         IDetectorVolumes::pointer dv,
@@ -88,7 +101,8 @@ namespace WireCell::Clus::Graphs {
         Weighted::Graph& graph,
         bool image_check = false,
         bool two_d_check = false,
-        bool floor_w_override = false);
+        bool floor_w_override = false,
+        bool two_d_rescue = false);
 
     bool is_point_good(const Facade::Cluster& cluster, size_t point_index, int ncut = 3);
 
