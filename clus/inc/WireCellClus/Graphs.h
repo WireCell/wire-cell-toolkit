@@ -327,6 +327,85 @@ namespace WireCell::Clus::Graphs {
     /// Pure; exposed for doctests.
     bool two_d_rescue_ok(const S6RescueInput& in);
 
+    /// doc pr/62 S7: inputs to the long-edge corridor-connectivity decision,
+    /// measured at the kill site for ONE candidate edge whose 3D length is at
+    /// or above the S6 cut-off. Sentinels: has_plane[p] false means that
+    /// plane produced no seeds on one side and never votes; budget_hit[p]
+    /// true means the bounded search was inconclusive and that plane
+    /// abstains (S7 fails OPEN, unlike S6, which fails closed).
+    struct S7CorridorInput {
+        double dis_cm = 0;                          ///< candidate edge 3D length
+        bool has_plane[3]  = {false, false, false};  ///< plane had seeds on both sides
+        bool gap[3]        = {false, false, false};  ///< corridor search found no path
+        bool budget_hit[3] = {false, false, false};  ///< breaker fired => inconclusive
+        bool excuse_u = false, excuse_v = false;     ///< wire-parallel excuses (reused from S1-S6)
+        double gap_cm[3] = {0, 0, 0};                ///< censused gap length along the corridor
+    };
+
+    /// Kill predicate of the "relaxed_strict_img_2d_rescue_long" (and
+    /// "..._long2") graph flavors (doc pr/62: S7, "long-edge corridor
+    /// connectivity"). True if at least min_gapped_planes non-excused,
+    /// non-abstaining planes show the two candidate components' fired-pixel
+    /// footprints NOT connected by any live-or-dead-channel path that stays
+    /// inside a narrow corridor around the straight q1->q2 line, projected
+    /// into that plane's (wire_index, time_slice) grid via the candidate's
+    /// own two endpoint lattice cells (not an arbitrary-point projection --
+    /// see connect_graph_relaxed_strict.cxx's S7Corridor comment).
+    ///
+    /// Root cause this closes: S6 (two_d_connectivity_bad) is the only test
+    /// that ever verifies real 2D contiguity, and it hard-returns above
+    /// s6_dis_cap = 30cm (connect_graph_relaxed_strict.cxx, two_d_gap_kill)
+    /// because its open-rectangle flood fill costs O(D^2) and its cell
+    /// budget breaker fails closed, so raising that cap would trade missed
+    /// gaps for false kills of large sparse real objects. Every candidate at
+    /// or above 30cm is therefore governed by S1-S3 alone -- and S1-S3's
+    /// test_good_point (Facade_Grouping.cxx) checks U/V/W INDEPENDENTLY via
+    /// three per-plane 2D kd radius queries, never intersected in 3D, so
+    /// three planes can each see charge from a DIFFERENT nearby track and
+    /// every 1cm sample reads "good" with nothing physically there. On evt
+    /// 142421 cluster 7 (21 components, 210 candidate pairs) 26 pairs
+    /// survive S1-S3 and 14 of those are >= 30cm; three of the 14 (30.03,
+    /// 36.87, 37.39cm) are the MST bridges that wrongly reconnect a
+    /// 17-point island.
+    ///
+    /// Restricting the search to a corridor rather than a rectangle is what
+    /// buys O(D): the corridor holds O(D * halfwidth) cells, so the cell
+    /// budget stops being a live constraint and the breaker stops silently
+    /// manufacturing kills (it fails OPEN here -- see S7CorridorInput). It
+    /// adds no assumption S1-S3 does not already make -- S1-S3 samples that
+    /// very straight line -- it merely checks contiguity along it properly
+    /// instead of via three independent per-plane radius queries.
+    ///
+    /// dis_floor_cm is the seam with S6 and MUST equal
+    /// connect_graph_relaxed_strict.cxx's s6_dis_cap / s7_dis_floor_cm: S7 is
+    /// identically false below it, S6 is identically false at or above it,
+    /// so no candidate is ever judged by both and neither test's shipped
+    /// operating point is disturbed. doctest_long_corridor.cxx pins the
+    /// value.
+    ///
+    /// Excusals are S6's, reused verbatim rather than re-derived: W is never
+    /// excused; U/V are excused when the candidate path already tests as
+    /// quasi-parallel to that plane's wire direction.
+    ///
+    /// min_gapped_planes defaults to 1, mirroring two_d_connectivity_bad's
+    /// owner rule; a conservative >= 2 variant is one argument away and is
+    /// the flavor this band's second operating point ships as
+    /// ("relaxed_strict_img_2d_rescue_long2") -- there are no hand-scan
+    /// labels in this distance band yet (unlike S6's), so BOTH operating
+    /// points are run and censused rather than one being guessed as final.
+    /// gap_floor_cm defaults to 0 (INACTIVE) on purpose: every other
+    /// operating point in this header carries a scan justification, and no
+    /// scan yet justifies a gap-length floor here. gap_cm is measured and
+    /// censused so one can be fitted later; do not switch it on before it is.
+    ///
+    /// Pure; exposed for doctests. The corridor search itself lives in
+    /// connect_graph_relaxed_strict.cxx (not pure -- it queries live
+    /// Facade::Grouping state).
+    bool long_corridor_bad(const S7CorridorInput& in,
+                           int min_gapped_planes = 1,
+                           double dis_floor_cm = 30.0,
+                           double gap_floor_cm = 0.0);
+
 }
 
 #endif

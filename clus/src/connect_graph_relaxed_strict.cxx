@@ -228,6 +228,178 @@ namespace {
         return false;
     }
 
+    // doc pr/62 S7 ("long-edge corridor connectivity"): the seam with S6's
+    // s6_dis_cap in the two_d_gap_kill lambda below (currently 30.0cm). MUST
+    // equal that literal -- S6 is defined identically false at or above this
+    // value, S7 (long_gap_kill below) is defined identically false below it,
+    // so no candidate is ever evaluated by neither test or both. Mirrored as
+    // Graphs::long_corridor_bad's dis_floor_cm default (same value, bare cm)
+    // in the public header; doctest_long_corridor.cxx pins it. If this ever
+    // changes, change s6_dis_cap and both defaults together.
+    constexpr double s7_dis_floor_cm = 30.0;  // cm, NOT internal units
+
+    // doc pr/62 S7: corridor geometry for the long-edge connectivity check.
+    // A capsule -- a band of half-width hw around the straight segment from
+    // the candidate's own near-point lattice cell to its far-point lattice
+    // cell, plus an endpoint disk of radius cap at each end -- rather than
+    // S6's open rectangle. Coordinates are normalized so one wire-step and
+    // one slice-step (v = (slice - s_anchor)/slice_step) are both
+    // approximately physical-mm-scale, so an isotropic half-width in these
+    // units is approximately a physical half-width, and it is the same
+    // metric the BFS's own Chebyshev box (dw wires x ds slice-steps)
+    // already uses. Defined in the plane's own lattice, anchored on the
+    // candidate's own two endpoint cells, rather than by projecting an
+    // arbitrary 3D point: Grouping::convert_3Dpoint_time_ch exists but is a
+    // different implementation of the wire/tick map than the one that
+    // produced cluster.wire_index (Facade_Cluster.cxx, ultimately
+    // pimpos->closest), and the two disagree by +-1 wire at tie boundaries
+    // -- not something the kill verdict should depend on.
+    struct S7Corridor {
+        double u1 = 0, v1 = 0, u2 = 0, v2 = 0;  // endpoints, lattice units
+        double hw = 3.0;                          // band half-width, lattice units
+        double cap = 8.0;                         // endpoint disk radius, lattice units
+        int slice_step = 1;
+        int s_anchor = 0;                          // the tick value that maps to v=0
+
+        // Perpendicular distance from (wind,slice) to the segment, and the
+        // segment parameter 'along' in [0,1] (clamped) at the closest point
+        // on the segment -- 'along' is a fraction of the corridor's own
+        // length, not a cm distance; census code turns it into cm via
+        // edge_dis.
+        void geom(int wind, int slice, double& perp, double& along) const
+        {
+            const double u = wind;
+            const double v = (slice - s_anchor) / static_cast<double>(std::max(1, slice_step));
+            const double dx = u2 - u1, dy = v2 - v1;
+            const double len2 = dx * dx + dy * dy;
+            double t = 0.0;
+            if (len2 > 1e-9) t = ((u - u1) * dx + (v - v1) * dy) / len2;
+            const double tc = std::max(0.0, std::min(1.0, t));
+            const double px = u1 + tc * dx, py = v1 + tc * dy;
+            perp = std::sqrt((u - px) * (u - px) + (v - py) * (v - py));
+            along = tc;
+        }
+
+        bool inside(int wind, int slice) const
+        {
+            double perp = 0, along = 0;
+            geom(wind, slice, perp, along);
+            if (perp <= hw) return true;
+            // Endpoint disks catch seeds/cells sitting off-axis near either
+            // terminus, which the band's perpendicular test alone would clip.
+            const double u = wind;
+            const double v = (slice - s_anchor) / static_cast<double>(std::max(1, slice_step));
+            const double d1 = std::hypot(u - u1, v - v1);
+            const double d2 = std::hypot(u - u2, v - v2);
+            return d1 <= cap || d2 <= cap;
+        }
+    };
+
+    // doc pr/62 S7: s6_cell_passable (:159-165) forked, not modified (M10 --
+    // it has a live production consumer). The exact-key wire_charge_row
+    // lookup there is safe at S6's <30cm range because S6's edge_dis-scaled
+    // seed radius pulls in enough blobs that both sides span several
+    // residues mod slice_step. S7 uses a FIXED 2cm seed radius (the change
+    // that keeps the search O(D) instead of S6's O(D^2)), which collapses
+    // each side toward a single blob -- an exact-key lookup would then read
+    // a residue mismatch as "no charge" independent of whether charge is
+    // actually there, on every long candidate. Probing a half-open window of
+    // exactly slice_step ticks centred on the cell tiles the tick axis
+    // without overlap and is residue-blind; it widens acceptance by at most
+    // half a slice (~1.6mm at the SBND default tick_span). Dead-channel
+    // excusal is unchanged (is_wire_dead is an x-range test, tick-exactness
+    // irrelevant).
+    bool s7_cell_passable(const Facade::Grouping* grouping, int apa, int face, int plane,
+                          int wind, int slice, int slice_step)
+    {
+        const int lo = slice - slice_step / 2;
+        for (int t = lo; t < lo + slice_step; ++t) {
+            const auto* row = grouping->wire_charge_row(apa, face, plane, t);
+            if (row && row->count(wind)) return true;
+        }
+        return grouping->is_wire_dead(apa, face, plane, wind, slice);
+    }
+
+    // doc pr/62 S7: s6_planes_connected (:182-229) forked, not modified
+    // (M10). Three differences from it, each existing to make the search
+    // O(D) instead of S6's O(D^2) and to make an inconclusive result
+    // harmless at long range instead of a silent kill:
+    //   (1) a cell must additionally satisfy corr.inside(wind,slice) -- the
+    //       search cannot roam the open rectangle, only the corridor;
+    //   (2) passability is s7_cell_passable (residue-blind, see above), not
+    //       s6_cell_passable;
+    //   (3) the circuit breaker FAILS OPEN. s6_planes_connected's
+    //       fail-closed posture is correct at S6's <30cm range, where the
+    //       window is small and exhaustion is pathological; at S7's
+    //       30cm-and-up range an exhausted budget on a large sparse real
+    //       shower must NOT be laundered into a kill -- the caller abstains
+    //       via *budget_hit instead.
+    // reach_along, if non-null, is set to the largest corridor-fraction
+    // (corr.geom's 'along', in [0,1]) actually reached from seeds_a --
+    // census-only bookkeeping; the verdict never reads it.
+    bool s7_corridor_connected(
+        const Facade::Grouping* grouping, int apa, int face, int plane,
+        const std::vector<S6Cell>& seeds_a, const std::vector<S6Cell>& seeds_b,
+        const S7Corridor& corr,
+        int wind_lo, int wind_hi, int slice_lo, int slice_hi,
+        int slice_step, int dw, int ds, size_t cell_budget,
+        bool* budget_hit = nullptr, double* reach_along = nullptr)
+    {
+        if (budget_hit) *budget_hit = false;
+        if (reach_along) *reach_along = 0.0;
+        if (seeds_a.empty() || seeds_b.empty()) return false;
+
+        std::unordered_set<S6Cell, S6CellHash> target(seeds_b.begin(), seeds_b.end());
+        std::unordered_set<S6Cell, S6CellHash> visited;
+        std::vector<S6Cell> frontier;
+        for (const auto& s : seeds_a) {
+            if (reach_along) {
+                double p = 0, a = 0;
+                corr.geom(s.wind, s.slice, p, a);
+                if (a > *reach_along) *reach_along = a;
+            }
+            if (target.count(s)) return true;
+            if (visited.insert(s).second) frontier.push_back(s);
+        }
+
+        std::vector<std::pair<int, int>> steps;
+        steps.reserve(static_cast<size_t>(2 * dw + 1) * (2 * ds + 1) - 1);
+        for (int a = -dw; a <= dw; ++a) {
+            for (int b = -ds; b <= ds; ++b) {
+                if (a == 0 && b == 0) continue;
+                steps.emplace_back(a, b * slice_step);
+            }
+        }
+
+        while (!frontier.empty()) {
+            if (visited.size() > cell_budget) {
+                if (budget_hit) *budget_hit = true;
+                return true;  // fails OPEN: caller abstains via *budget_hit
+            }
+            std::vector<S6Cell> next;
+            for (const auto& c : frontier) {
+                for (const auto& d : steps) {
+                    S6Cell nb{c.wind + d.first, c.slice + d.second};
+                    if (nb.wind < wind_lo || nb.wind > wind_hi) continue;
+                    if (nb.slice < slice_lo || nb.slice > slice_hi) continue;
+                    if (visited.count(nb)) continue;
+                    if (target.count(nb)) return true;
+                    if (!corr.inside(nb.wind, nb.slice)) continue;
+                    if (!s7_cell_passable(grouping, apa, face, plane, nb.wind, nb.slice, slice_step)) continue;
+                    visited.insert(nb);
+                    if (reach_along) {
+                        double p = 0, a = 0;
+                        corr.geom(nb.wind, nb.slice, p, a);
+                        if (a > *reach_along) *reach_along = a;
+                    }
+                    next.push_back(nb);
+                }
+            }
+            frontier.swap(next);
+        }
+        return false;
+    }
+
     // doc pr/57: env-gated (WCT_OC56_SCAN_DUMP) singleton JSONL writer for
     // the overclustering-separation hand-scan display. One compact JSON
     // object per line, written under a mutex -- ClusteringProtectBundle
@@ -368,6 +540,25 @@ bool Graphs::two_d_rescue_ok(const S6RescueInput& in)
     return true;
 }
 
+bool Graphs::long_corridor_bad(const S7CorridorInput& in, int min_gapped_planes,
+                               double dis_floor_cm, double gap_floor_cm)
+{
+    // doc pr/62 S7: seam with S6 -- identically false below the floor. See
+    // WireCellClus/Graphs.h and s7_dis_floor_cm above.
+    if (in.dis_cm < dis_floor_cm) return false;
+    const bool excused[3] = {in.excuse_u, in.excuse_v, false};  // W never excused
+    int nvote = 0;
+    for (int p = 0; p < 3; ++p) {
+        if (!in.has_plane[p]) continue;    // no evidence, no verdict
+        if (in.budget_hit[p]) continue;    // inconclusive: S7 fails OPEN, so abstain
+        if (!in.gap[p]) continue;
+        if (excused[p]) continue;
+        if (in.gap_cm[p] < gap_floor_cm) continue;   // inactive at the default 0
+        ++nvote;
+    }
+    return nvote >= min_gapped_planes;
+}
+
 void Graphs::connect_graph_relaxed_strict(
     const Facade::Cluster& cluster,
     IDetectorVolumes::pointer dv,
@@ -376,7 +567,9 @@ void Graphs::connect_graph_relaxed_strict(
     bool image_check,
     bool two_d_check,
     bool floor_w_override,
-    bool two_d_rescue)
+    bool two_d_rescue,
+    bool long_check,
+    int long_min_planes)
 {
     const bool use_ctpc = true;
     const auto* grouping = cluster.grouping();
@@ -1174,6 +1367,161 @@ void Graphs::connect_graph_relaxed_strict(
         return killed;
     };
 
+    // doc pr/62 S7 ("long-edge corridor connectivity"): only evaluated when
+    // long_check (default false, no-op). Independent additional OR-kill,
+    // symmetric in structure to two_d_gap_kill above but covering exactly
+    // the band that lambda declines to judge -- candidates at or above
+    // s7_dis_floor_cm (== S6's s6_dis_cap, 30cm). See file header and
+    // WireCellClus/Graphs.h (Graphs::long_corridor_bad) for the design and
+    // root cause. gi1/gi2 are the GLOBAL point indices of q1/q2 themselves
+    // (q1/q2 are cloud members, not arbitrary points), which is what lets
+    // the corridor be anchored on their own native lattice cells
+    // (cluster.wire_index + blob_with_point(...)->slice_index_min()) with
+    // no 3D->lattice projection in the verdict path.
+    auto long_gap_kill = [&](size_t j, size_t k, const char* blk,
+                             const std::shared_ptr<Simple3DPointCloud>& cloud_a,
+                             const std::vector<size_t>& gidx_a,
+                             const std::shared_ptr<Simple3DPointCloud>& cloud_b,
+                             const std::vector<size_t>& gidx_b,
+                             size_t gi1, size_t gi2,
+                             const geo_point_t& q1, const WirePlaneId& wpid_q1,
+                             const geo_point_t& q2, const WirePlaneId& wpid_q2,
+                             double edge_dis, double a1, double a2) -> bool {
+        if (!long_check) return false;
+
+        // No double jeopardy with S6: identically false below the seam.
+        if (edge_dis < s7_dis_floor_cm * units::cm) return false;
+
+        // Only meaningful within a single APA/face, same reasoning as S6.
+        if (wpid_q1.apa() < 0 || wpid_q1.apa() != wpid_q2.apa() || wpid_q1.face() != wpid_q2.face()) {
+            return false;
+        }
+        const int apa = wpid_q1.apa();
+        const int face = wpid_q1.face();
+
+        const auto* blob1 = cluster.blob_with_point(gi1);
+        const auto* blob2 = cluster.blob_with_point(gi2);
+        if (!blob1 || !blob2) return false;  // no blob data; abstain
+
+        constexpr double s7_pi = 3.141592653589793;
+        constexpr double s7_wire_angle_tol = 12.5 / 180.0 * s7_pi;
+        const bool excuse_u = a1 < s7_wire_angle_tol;
+        const bool excuse_v = a2 < s7_wire_angle_tol;
+
+        // Fixed 2cm seed radius (NOT edge_dis-scaled like S6's) -- the
+        // change that keeps the search O(D). q1/q2 are themselves cloud
+        // members so the radius query is never empty.
+        const double s7_seed_radius = 2.0 * units::cm;
+        auto seeds_a_wc = cloud_a->get_closest_wcpoints_radius(q1, s7_seed_radius);
+        auto seeds_b_wc = cloud_b->get_closest_wcpoints_radius(q2, s7_seed_radius);
+        if (seeds_a_wc.empty() || seeds_b_wc.empty()) return false;
+
+        auto blob_stride = [&](const std::vector<std::pair<size_t, geo_point_t>>& wc,
+                                const std::vector<size_t>& gidx, int& best) {
+            for (const auto& p : wc) {
+                const auto* blob = cluster.blob_with_point(gidx.at(p.first));
+                if (!blob) continue;
+                const int span = blob->slice_index_max() - blob->slice_index_min();
+                if (span > 0 && (best <= 0 || span < best)) best = span;
+            }
+        };
+        int slice_step = -1;
+        blob_stride(seeds_a_wc, gidx_a, slice_step);
+        blob_stride(seeds_b_wc, gidx_b, slice_step);
+        if (slice_step <= 0) slice_step = 4;  // SBND MaskSlices tick_span default -- fallback only
+
+        // Corridor half-width/endpoint-disk radius: a starting operating
+        // point, not yet fitted -- doc pr/62, unlike S6, has no hand-scan
+        // labels in this distance band. cap must fully cover the 2cm seed
+        // radius's footprint in lattice units; hw is a conservative interior
+        // value versus S6's own fixed excess reach (7 wires / 6 slice-steps,
+        // :741-748 above). See doc pr/62 for the reasoning and the census
+        // fields that would inform refitting it.
+        const double s7_hw = 3.0;
+        const double s7_cap = 8.0;
+        const int s7_margin = static_cast<int>(std::ceil(s7_cap)) + 2;
+        const size_t s7_cell_budget = 20000;  // backstop only; the O(D) design keeps this slack
+        constexpr int s7_dw = 1, s7_ds = 1;   // S6's repaired (1,1) baseline
+
+        bool has_plane[3] = {false, false, false};
+        bool gap[3] = {false, false, false};
+        bool budget_hit[3] = {false, false, false};
+        double gap_cm[3] = {0, 0, 0};
+        int u1arr[3] = {0, 0, 0}, u2arr[3] = {0, 0, 0};
+        const int s1_anchor = blob1->slice_index_min();
+        const int s2_anchor = blob2->slice_index_min();
+
+        for (int plane = 0; plane != 3; ++plane) {
+            const int u1 = cluster.wire_index(gi1, plane);
+            const int u2 = cluster.wire_index(gi2, plane);
+            u1arr[plane] = u1; u2arr[plane] = u2;
+
+            std::vector<S6Cell> seeds_a2d, seeds_b2d;
+            auto collect = [&](const std::vector<std::pair<size_t, geo_point_t>>& wc,
+                                const std::vector<size_t>& gidx, std::vector<S6Cell>& out) {
+                for (const auto& p : wc) {
+                    const size_t gi = gidx.at(p.first);
+                    const auto* blob = cluster.blob_with_point(gi);
+                    if (!blob) continue;
+                    out.push_back({cluster.wire_index(gi, plane), blob->slice_index_min()});
+                }
+            };
+            collect(seeds_a_wc, gidx_a, seeds_a2d);
+            collect(seeds_b_wc, gidx_b, seeds_b2d);
+            if (seeds_a2d.empty() || seeds_b2d.empty()) continue;  // no data this plane; don't vote
+
+            S7Corridor corr;
+            corr.u1 = u1; corr.v1 = 0.0;
+            corr.u2 = u2; corr.v2 = double(s2_anchor - s1_anchor) / double(slice_step);
+            corr.hw = s7_hw; corr.cap = s7_cap;
+            corr.slice_step = slice_step; corr.s_anchor = s1_anchor;
+
+            const int win_wlo = std::min(u1, u2) - s7_margin;
+            const int win_whi = std::max(u1, u2) + s7_margin;
+            const int win_slo = std::min(s1_anchor, s2_anchor) - s7_margin * slice_step;
+            const int win_shi = std::max(s1_anchor, s2_anchor) + s7_margin * slice_step;
+
+            has_plane[plane] = true;
+            double reach = 0.0;
+            const bool connected = s7_corridor_connected(
+                grouping, apa, face, plane, seeds_a2d, seeds_b2d, corr,
+                win_wlo, win_whi, win_slo, win_shi,
+                slice_step, s7_dw, s7_ds, s7_cell_budget,
+                &budget_hit[plane], &reach);
+            gap[plane] = !connected;
+            gap_cm[plane] = gap[plane] ? (1.0 - reach) * (edge_dis / units::cm) : 0.0;
+        }
+
+        Graphs::S7CorridorInput s7in;
+        s7in.dis_cm = edge_dis / units::cm;
+        for (int p = 0; p < 3; ++p) {
+            s7in.has_plane[p] = has_plane[p];
+            s7in.gap[p] = gap[p];
+            s7in.budget_hit[p] = budget_hit[p];
+            s7in.gap_cm[p] = gap_cm[p];
+        }
+        s7in.excuse_u = excuse_u;
+        s7in.excuse_v = excuse_v;
+        const bool killed = Graphs::long_corridor_bad(s7in, long_min_planes);
+
+        if (oc53_census) {
+            oc53_log->debug(
+                "OC62CENSUS-S7 edge blk={} j={} k={} dis={:.2f}cm apa={} face={} "
+                "cell1=[{},{},{}] cell2=[{},{},{}] s1={} s2={} slice_step={} hw={:.1f} cap={:.1f} "
+                "has=[{},{},{}] gap=[{},{},{}] budget=[{},{},{}] gapcm=[{:.2f},{:.2f},{:.2f}] "
+                "excuse_u={} excuse_v={} min_gapped={} killed={}",
+                blk, j, k, edge_dis / units::cm, apa, face,
+                u1arr[0], u1arr[1], u1arr[2], u2arr[0], u2arr[1], u2arr[2],
+                s1_anchor, s2_anchor, slice_step, s7_hw, s7_cap,
+                has_plane[0], has_plane[1], has_plane[2],
+                gap[0], gap[1], gap[2],
+                budget_hit[0], budget_hit[1], budget_hit[2],
+                gap_cm[0], gap_cm[1], gap_cm[2],
+                excuse_u, excuse_v, long_min_planes, killed);
+        }
+        return killed;
+    };
+
     // Calculate distances between components
     for (size_t j = 0; j != num; j++) {
         for (size_t k = j + 1; k != num; k++) {
@@ -1408,6 +1756,21 @@ void Graphs::connect_graph_relaxed_strict(
                     }
                 }
 
+                // doc pr/62 S7: independent additional OR-kill on the band
+                // S6 declines (edge_dis >= s7_dis_floor_cm). No-op,
+                // byte-identical to two_d_rescue behavior when long_check is
+                // false (default). Only evaluated on candidates S1-S6 above
+                // have not already killed.
+                if (long_check && std::get<0>(index_index_dis[j][k]) >= 0) {
+                    const size_t gi1 = pt_clouds_global_indices.at(j).at(std::get<0>(index_index_dis[j][k]));
+                    const size_t gi2 = pt_clouds_global_indices.at(k).at(std::get<1>(index_index_dis[j][k]));
+                    if (long_gap_kill(j, k, "closest", pt_clouds.at(j), pt_clouds_global_indices.at(j),
+                                      pt_clouds.at(k), pt_clouds_global_indices.at(k), gi1, gi2,
+                                      p1, wpid_p1, p2, wpid_p2, dis, angle1, angle2)) {
+                        invalidate_distance();
+                    }
+                }
+
                 if (oc53_census) {
                     const bool killed = std::get<0>(index_index_dis[j][k]) < 0;
                     oc53_log->debug(
@@ -1534,6 +1897,18 @@ void Graphs::connect_graph_relaxed_strict(
                     }
                 }
 
+                // doc pr/62 S7 (see the closest-pair block for the full
+                // comment). No-op when long_check is false (default).
+                if (long_check && std::get<0>(index_index_dis_dir1[j][k]) >= 0) {
+                    const size_t gi1 = pt_clouds_global_indices.at(j).at(std::get<0>(index_index_dis_dir1[j][k]));
+                    const size_t gi2 = pt_clouds_global_indices.at(k).at(std::get<1>(index_index_dis_dir1[j][k]));
+                    if (long_gap_kill(j, k, "dir1", pt_clouds.at(j), pt_clouds_global_indices.at(j),
+                                      pt_clouds.at(k), pt_clouds_global_indices.at(k), gi1, gi2,
+                                      p1, wpid_p1, p2, wpid_p2, dis, angle1, angle2)) {
+                        index_index_dis_dir1[j][k] = std::make_tuple(-1, -1, 1e9);
+                    }
+                }
+
                 if (oc53_census) {
                     const bool killed = std::get<0>(index_index_dis_dir1[j][k]) < 0;
                     oc53_log->debug("OC53CENSUS-S dir1 j={} k={} dis={:.2f}cm nsteps={} nb={} nb1={} killed={}",
@@ -1653,6 +2028,18 @@ void Graphs::connect_graph_relaxed_strict(
                     if (two_d_gap_kill(j, k, "dir2", pt_clouds.at(j), pt_clouds_global_indices.at(j),
                                         pt_clouds.at(k), pt_clouds_global_indices.at(k),
                                         p1, wpid_p1, p2, wpid_p2, dis, angle1, angle2)) {
+                        index_index_dis_dir2[j][k] = std::make_tuple(-1, -1, 1e9);
+                    }
+                }
+
+                // doc pr/62 S7 (see the closest-pair block for the full
+                // comment). No-op when long_check is false (default).
+                if (long_check && std::get<0>(index_index_dis_dir2[j][k]) >= 0) {
+                    const size_t gi1 = pt_clouds_global_indices.at(j).at(std::get<0>(index_index_dis_dir2[j][k]));
+                    const size_t gi2 = pt_clouds_global_indices.at(k).at(std::get<1>(index_index_dis_dir2[j][k]));
+                    if (long_gap_kill(j, k, "dir2", pt_clouds.at(j), pt_clouds_global_indices.at(j),
+                                      pt_clouds.at(k), pt_clouds_global_indices.at(k), gi1, gi2,
+                                      p1, wpid_p1, p2, wpid_p2, dis, angle1, angle2)) {
                         index_index_dis_dir2[j][k] = std::make_tuple(-1, -1, 1e9);
                     }
                 }

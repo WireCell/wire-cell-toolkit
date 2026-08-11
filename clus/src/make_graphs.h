@@ -94,6 +94,26 @@ namespace WireCell::Clus::Graphs {
         IDetectorVolumes::pointer dv,
         IPCTransformSet::pointer pcts);
 
+    // closely + relaxed_strict with image_check, two_d_check,
+    // floor_w_override, two_d_rescue AND long_check all true, long_min_planes=1
+    // (doc pr/62: protect_bundle-only -- adds S7, corridor connectivity on
+    // candidates at or above the 30cm band S6 skips; owner's S6-style ">= 1
+    // non-excused plane" rule)
+    Weighted::Graph make_graph_relaxed_strict_img_2d_rescue_long(
+        const Facade::Cluster& cluster,
+        IDetectorVolumes::pointer dv,
+        IPCTransformSet::pointer pcts);
+
+    // same as make_graph_relaxed_strict_img_2d_rescue_long but
+    // long_min_planes=2 (doc pr/62: the conservative fallback operating
+    // point -- S1-S5's "at least 2 views" convention -- shipped alongside
+    // the owner-rule variant since this distance band has no hand-scan
+    // labels to fit against yet)
+    Weighted::Graph make_graph_relaxed_strict_img_2d_rescue_long2(
+        const Facade::Cluster& cluster,
+        IDetectorVolumes::pointer dv,
+        IPCTransformSet::pointer pcts);
+
 }
 
 #endif

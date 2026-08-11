@@ -94,6 +94,30 @@ namespace WireCell::Clus::Graphs {
     // "relaxed_strict_img_2d_rescue" flavor
     // (make_graph_relaxed_strict_img_2d_rescue) is the only caller that
     // passes true.
+    //
+    // doc pr/62: long_check adds S7, an independent additional OR-kill in
+    // all three path-check blocks, on exactly the band S6 declines to judge
+    // -- candidates at or above s6_dis_cap (30cm), which today reach the MST
+    // governed by S1-S3 alone. Graphs::long_corridor_bad() (public header)
+    // is the verdict; the evidence is a per-plane bounded flood fill
+    // restricted to a narrow corridor around the candidate's own two
+    // endpoint lattice cells, which is what makes it O(D) where S6's
+    // open-rectangle fill is O(D^2). It can only additionally kill an edge
+    // S1-S6 already let through; it never rescues one they killed, and
+    // there is deliberately no S7 analogue of two_d_rescue's
+    // s6_rescued_dir_pairs emission repair (that repair exists only because
+    // a RESCUE could evaporate a dir emission -- S7 never rescues).
+    // long_min_planes selects the operating point (default 1, mirroring S6's
+    // owner rule; 2 is the conservative fallback -- doc pr/62 has no
+    // hand-scan labels in this band yet, unlike S6's, so both are shipped as
+    // separate flavors rather than one being guessed as final). Default
+    // false/1 keeps this function byte-for-byte identical to
+    // "relaxed_strict_img_2d_rescue"'s behavior; "relaxed_strict_img_2d_rescue_long"
+    // and "relaxed_strict_img_2d_rescue_long2"
+    // (make_graph_relaxed_strict_img_2d_rescue_long{,2}) are the only callers
+    // that pass long_check=true. long_check does not require two_d_check:
+    // the two tests partition the distance axis at 30cm and cannot both fire
+    // on one candidate.
     void connect_graph_relaxed_strict(
         const Facade::Cluster& cluster,
         IDetectorVolumes::pointer dv,
@@ -102,7 +126,9 @@ namespace WireCell::Clus::Graphs {
         bool image_check = false,
         bool two_d_check = false,
         bool floor_w_override = false,
-        bool two_d_rescue = false);
+        bool two_d_rescue = false,
+        bool long_check = false,
+        int long_min_planes = 1);
 
     bool is_point_good(const Facade::Cluster& cluster, size_t point_index, int ncut = 3);
 
