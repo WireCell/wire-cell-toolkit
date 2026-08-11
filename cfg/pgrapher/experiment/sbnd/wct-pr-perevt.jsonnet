@@ -432,38 +432,58 @@ function(
     // cathode_kink_xcut above, which is cm), matching clus.jsonnet's pr()
     // defaults so a bare run is production; nulls = prototype-faithful
     // (re-join pass disabled -- would break cathode crossers, doc pr/20).
-    // **SBND PRODUCTION DEFAULT 'relaxed_strict_img_2d_rescue', owner
-    // 2026-08-10 (doc pr/57 round 6; supersedes round 7's 'relaxed_strict_img'
-    // default below).** Adds S6, a per-plane 2D wire/tick gap-kill that is OFF
-    // in every earlier default, plus a pure post-kill RESCUE
+    // **SBND PRODUCTION DEFAULT 'relaxed_strict_img_2d_rescue_long', owner
+    // 2026-08-11 (doc pr/62; adds S7 on top of doc pr/57 round 6's S6+rescue,
+    // preserved below).** S6's flood-fill kill test is capped at
+    // `s6_dis_cap`=30cm (its cost tracks candidate distance, and its
+    // `cell_budget` breaker fails CLOSED on exhaustion -- raising the cap
+    // trades missed gaps for silent false-kills of large sparse real
+    // objects).  Above 30cm the only surviving test was S1-S3's per-plane
+    // *independent* radius query, which a track can pass with charge from
+    // three unrelated nearby objects.  S7 (`Graphs::long_corridor_bad`,
+    // `connect_graph_relaxed_strict.cxx`) closes exactly that gap: a
+    // corridor-restricted BFS between the candidate's own two endpoint
+    // lattice cells, O(D) not O(D^2) so the budget stays non-live, breaker
+    // inverted to fail OPEN (abstain, not kill, on exhaustion) -- the
+    // opposite of S6's posture, deliberately.  Operating point
+    // min_gapped_planes=1 (mirrors S6's owner-instructed single-plane rule);
+    // the more conservative min_gapped_planes=2 flavor
+    // ('relaxed_strict_img_2d_rescue_long2') ships alongside, not selected
+    // here.  117-event validation (48 nueCC + 19 NCpi0 + 50 PR-data): 17/117
+    // movers, nusel (final neutrino selection) byte-identical in every
+    // event at BOTH operating points (identical mover sets on this sample);
+    // S7 kill rate on evaluated candidates 97.4% (184/189) -- higher than
+    // doc pr/56 sec 8.4's own S6 ceiling (89% at 15-30cm), an aggressive
+    // point, not a conservative one.  min_gapped_planes/gap_floor_cm are
+    // UNFITTED -- no hand-scan labels exist yet in this distance band,
+    // unlike S6's 899-label fit below.  Owner reviewed the 17-event Bee
+    // before/after and flipped.  protect_bundle is the only consumer, so
+    // clustering and TGM/STM/FC verdicts stay byte-identical for every
+    // event S7 does not touch.  See doc pr/62.
+    //
+    // S6+rescue itself (doc pr/57 round 6, owner 2026-08-10, superseding
+    // round 7's 'relaxed_strict_img'): adds S6, a per-plane 2D wire/tick
+    // gap-kill OFF in every earlier default, plus a pure post-kill RESCUE
     // (`Graphs::two_d_rescue_ok`, killed -> kept only, never the reverse)
-    // fitted directly to the owner's full 899-label hand scan across three
-    // event displays (899 labels / 230 events / 847 component pairs).  The
-    // rescue recognizes: dead-W-channel gaps (mid-TPC, U/V distorted in
-    // sympathy -- a known physics artifact, not a real break), long tracks
-    // whose induction-plane signal is prolonged/isochronous despite high
-    // direction consistency, W allowed a much tighter gap than U/V, and
-    // W-anchored two-view footprint co-location for pieces of one object.
-    // Also repairs a dir-MST emission gap: `process_mst_deterministically`
-    // records only the CLOSEST candidate as the pair's dir-MST marker, so a
-    // killed closest silently dropped every dir-bridge emission for that
-    // pair even after S6/rescue judged it should survive -- rescue-flavor
-    // candidates now emit regardless of that marker (5 pairs across the
-    // 512-event validation sample, 0 owner-labelled good).  Final table on
-    // the owner's hand scan: bad-separation (must reconnect) 124/127,
-    // good-separation (must stay split) 154/156 -- the two good misses are
-    // the owner's own unsatisfiable label triangles (394642 0-1, 60669 0-2)
-    // where a bad-labelled edge transitively joins the good pair; owner rule
-    // 4 ("prefer connectivity when hard") decides both toward joining, same
-    // as the code.  Candidate-level python==C++ port check 780/780;
-    // off-gate work-pr57r6-off12{d,e,f} 12/12 byte-identical to round-7
-    // production; on-arms 512/512 rc=0.  protect_bundle is the only
-    // consumer, so clustering and the TGM/STM/FC verdicts stay byte-identical
-    // for every event this flavor does not touch.  Legacy escapes:
-    // -A protect_graph_name=relaxed_strict_img (SBND_PROTECT_GRAPH=relaxed_strict_img)
-    // restores round 7's production graph; =relaxed_strict restores round 6;
-    // =relaxed restores pre-round-6.
-    protect_graph_name          = 'relaxed_strict_img_2d_rescue',   // null => 'relaxed'
+    // fitted to the owner's full 899-label hand scan (230 events / 847
+    // component pairs).  Rescue recognizes dead-W-channel gaps, prolonged/
+    // isochronous induction-plane signal on high-direction-consistency long
+    // tracks, W allowed a tighter gap than U/V, and W-anchored two-view
+    // footprint co-location.  Also repairs a dir-MST emission gap: a killed
+    // closest candidate no longer silently drops a pair's dir-bridge
+    // emissions when S6/rescue judged it should survive.  Final table on the
+    // owner's hand scan: bad-separation (must reconnect) 124/127,
+    // good-separation (must stay split) 154/156, the two misses being the
+    // owner's own unsatisfiable label triangles.
+    //
+    // Legacy escapes: -A protect_graph_name=relaxed_strict_img_2d_rescue
+    // (SBND_PROTECT_GRAPH=relaxed_strict_img_2d_rescue) restores pre-pr/62
+    // production (round 6, S6+rescue only, no S7);
+    // =relaxed_strict_img_2d_rescue_long2 selects the conservative S7
+    // min_gapped_planes=2 point; =relaxed_strict_img restores round 7;
+    // =relaxed_strict restores round 6's predecessor; =relaxed restores
+    // pre-round-6.
+    protect_graph_name          = 'relaxed_strict_img_2d_rescue_long',   // null => 'relaxed'
     // C++ default true (doc pr/23 ordering): a TGM/STM/lm-convicted in-window
     // main does not open its bundle for splitting.  null => key omitted.
     protect_skip_convicted      = null,
