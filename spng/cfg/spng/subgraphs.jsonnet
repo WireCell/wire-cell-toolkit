@@ -54,6 +54,21 @@ function(tpc, control={}, pg=real_pg, context_name="") {
      */
     this_name(extra_name, meth_name="") :: tpc.name+context_name+meth_name+extra_name,
 
+    /**
+     * The TDM datapath element / "tag" metadatum for a trace tag.
+     *
+     * FrameToTdm::configure() folds "null" and "*" into the empty tag and
+     * rules_tensors() then writes the literal "null" into the "tag" metadatum
+     * and into the {tag} slot of a group relpath.  Mirror that here so config
+     * that must match those paths stays in sync.
+     *
+     * @name tdm_tagpath
+     * @param tag A trace tag as given to frame_to_tdm(), possibly empty.
+     * @return The corresponding datapath element.
+     */
+    tdm_tagpath(tag) ::
+        if tag == "" || tag == "*" || tag == "null" then "null" else tag,
+
 
 
     /// Deposet to IFrame of "true signal" aka "depo flux splat".
@@ -509,23 +524,32 @@ function(tpc, control={}, pg=real_pg, context_name="") {
     /// An input tensor set to N-tensor outputs specifically for tpc groups.
     /// Map a tensors in a set by an iteration of a datapath pattern over a set
     /// of a count to a fan out of individual tensors.
+    ///
+    /// The "tag" must be the trace tag given to the upstream frame_to_tdm() as
+    /// that determines the datapath the traces tensors were written to.  It is
+    /// ignored if an explicit datapath_pattern is given.
     tpc_group_unpacker(
                        // How to locate each tensor, %d is interpolated as an index
-                       datapath_pattern="/frames/\\d+/tags/null/rules/0/groups/%d/traces",
+                       datapath_pattern=null,
+                       tag="",
                        extra_name="")::
+        local the_pattern =
+            if std.type(datapath_pattern) == "null"
+            then "/frames/\\d+/tags/" + $.tdm_tagpath(tag) + "/rules/0/groups/%d/traces"
+            else datapath_pattern;
         local ngroups = std.length(tpc.view_groups);
         pg.pnode({
             type: 'SPNGTorchSetUnpacker',
             name: $.this_name(extra_name, "_groups"),
             data: {
-                selections: [{datapath:datapath_pattern % group} for group in wc.iota(ngroups) ],
+                selections: [{datapath:the_pattern % group} for group in wc.iota(ngroups) ],
             } + control
         }, nin=1, nout=ngroups),
 
 
     /// A 1->3 subgraph with TDM frame tensor set input and 3 per-view decon output.
-    frame_decon(extra_name=""):: pg.shuntlines([
-        $.tpc_group_unpacker(extra_name=extra_name),
+    frame_decon(tag="", extra_name=""):: pg.shuntlines([
+        $.tpc_group_unpacker(tag=tag, extra_name=extra_name),
         $.tpc_group_decon_views(extra_name=extra_name)]),
 
 
@@ -839,11 +863,11 @@ function(tpc, control={}, pg=real_pg, context_name="") {
     /// TODO FILL OUT DESC
     /// Input is TDM frame tensor set.  Output is the 3-feature tensors for input to dnnroi training.
     ///
-    dnnroi_dense_training_preface(rebin=4, extra_name="")::
-        local sg1 = $.frame_decon(extra_name=extra_name);
+    dnnroi_dense_training_preface(rebin=4, scale=1.0/4000, tag="", extra_name="")::
+        local sg1 = $.frame_decon(tag=tag, extra_name=extra_name);
         local decon_fan = $.fanout_for_dnnroi_inference_simple(extra_name=extra_name);
         local sg1_connection = pg.shuntline(sg1, decon_fan.sink);
-        local sg4 =  $.dnnroi_dense_views(views=[0,1,2], rebin=rebin, extra_name=extra_name);
+        local sg4 =  $.dnnroi_dense_views(scale=scale, views=[0,1,2], rebin=rebin, extra_name=extra_name);
         local sg4_connection = pg.shuntline(decon_fan.targets.dense, sg4);
 
         // local sg2 = $.transform_views("unsqueeze", dims=[-3], views=[0,1,2], extra_name="decon");
@@ -1477,10 +1501,10 @@ function(tpc, control={}, pg=real_pg, context_name="") {
 
     // / [3]tensor -> tensor[3]
     ///Do decon. If requested also do a specific flavor of Filtering/ROI finding
-    simple_decon(rebin=4, output='decon', extra_name="")::
+    simple_decon(rebin=4, output='decon', tag="", extra_name="")::
 
         (if output == 'decon' then
-            $.frame_decon(extra_name=extra_name)
+            $.frame_decon(tag=tag, extra_name=extra_name)
         else
             local filtering_nodes = {
                 'gauss': $.gauss_dense_views(rebin=rebin, extra_name=extra_name),
@@ -1489,7 +1513,7 @@ function(tpc, control={}, pg=real_pg, context_name="") {
                 'wiener': $.time_filter_views("wiener", views=[0,1,2], extra_name=extra_name),
             };
             pg.shuntline(
-                $.frame_decon(extra_name=extra_name),
+                $.frame_decon(tag=tag, extra_name=extra_name),
                 filtering_nodes[output]
             )
         ),

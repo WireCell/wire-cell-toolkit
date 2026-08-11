@@ -18,6 +18,9 @@ local sg_js = import "spng/subgraphs.jsonnet";
 // @param output The output file name.
 // @param detname The name of a supported detector, default "pdhd".
 // @param tpcid The TPC ID number.
+// @param intag The trace tag carried by the input frame file, default "" for
+//        untagged.  LArSoft ADC dumps typically use "raw2".  Note, tpcid must
+//        also select the APA matching the channels in the file.
 // @param engine The name of the graph execution engine, default Pgrapher or TbbFlow.
 // @param device The name of the device for SPNG nodes, default "cpu" or "gpu", "gpu1", etc. 
 // @param dump List of graph points to dump to files.
@@ -33,6 +36,7 @@ function(input,
          output="spng.npz",
          detname='pdhd',
          tpcid=0,
+         intag="",
          engine='Pgrapher',
          device='cpu',
          dump="",
@@ -84,14 +88,16 @@ function(input,
     // True if care about cross view info for the view.
     local rebin = 4;
 
-    local source = io.frame_array_source(input);
+    local source = io.frame_array_source(input,
+                                         tags=if std.length(intag) == 0 then [] else [intag]);
     local sink = io.frame_array_any_sink(output);
 
-    local head = sg.frame_to_tdm(extra_name="_TOTDM");
+    local head = sg.frame_to_tdm(extra_name="_TOTDM", tag=intag);
     // local traces_tag = (if gauss_filter then 'gauss' else 'dnnroi');
-    local tail = sg.tdm_to_frame(extra_name="_FROMTDM", traces_tag=outstage);//traces_tag);
+    local tail = sg.tdm_to_frame(extra_name="_FROMTDM", traces_tag=outstage,
+                                 chid_tag=sg.tdm_tagpath(intag));//traces_tag);
 
-    local infer = sg.simple_decon(rebin=rebin, output=outstage);
+    local infer = sg.simple_decon(rebin=rebin, output=outstage, tag=intag);
                                       
     local pack = sg.tensor_packer(extra_name="_signals");
     local guts = pg.shuntlines([infer, pack]);

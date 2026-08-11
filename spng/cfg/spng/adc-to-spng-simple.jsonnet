@@ -93,9 +93,9 @@ function(input,
     local w_model_file = "/nfs/data/1/calcuttj/wire-cell-python/test_regres_wplane_2.ts";
     
     local initial_models=[
-        '/nfs/data/1/calcuttj/wire-cell-python/test_dense_uplane_032326.ts',
-        '/nfs/data/1/calcuttj/wire-cell-python/test_dense_vplane_032326.ts',
-        '/nfs/data/1/calcuttj/wire-cell-python/test_dense_wplane_032326.ts'
+        '/nfs/data/1/calcuttj/wcpy_speedtest/072926-uplane-dense.ts',
+        '/nfs/data/1/calcuttj/wcpy_speedtest/072926-vplane-dense.ts',
+        '/nfs/data/1/calcuttj/wcpy_speedtest/072926-wplane-dense.ts'
     ];
 
     local source = io.frame_array_source(input);
