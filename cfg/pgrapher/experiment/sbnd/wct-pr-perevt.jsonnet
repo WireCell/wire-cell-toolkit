@@ -432,24 +432,38 @@ function(
     // cathode_kink_xcut above, which is cm), matching clus.jsonnet's pr()
     // defaults so a bare run is production; nulls = prototype-faithful
     // (re-join pass disabled -- would break cathode crossers, doc pr/20).
-    // **SBND PRODUCTION DEFAULT 'relaxed_strict_img', owner 2026-08-09 (doc
-    // pr/53 round 7; supersedes round 6's 'relaxed_strict' default below).**
-    // round 6 (S1 interior-step denominator + S2 ">= 2" floor in all three
-    // path-check blocks) closed the sub-3cm arithmetic blind spot that kept
-    // the 18255-422851 / 18255-521075 necks alive.  round 7 adds S5, a
-    // 3D-image-support OR-kill: the existing per-plane test is three
-    // INDEPENDENT 2D projections never intersected in 3D, so three planes can
-    // each see charge from a different nearby track and a straight path can
-    // read "good" with nothing physically there -- closes the 269774 /
-    // 463565 / 71372 owner-flagged cases plus 23 further movers the same
-    // class reaches (round 6 census: 20/117 movers, nusel 0/117; all 27
-    // splits causally validated with a real-void figure, same bar as round
-    // 6).  protect_bundle is the only consumer, so clustering and the
-    // TGM/STM/FC verdicts stay byte-identical (gates work-pr53r7-off* vs
-    // round-6 production 0/117).  Legacy escapes:
-    // -A protect_graph_name=relaxed_strict (SBND_PROTECT_GRAPH=relaxed_strict)
-    // restores round 6's production graph; =relaxed restores pre-round-6.
-    protect_graph_name          = 'relaxed_strict_img',   // null => 'relaxed'
+    // **SBND PRODUCTION DEFAULT 'relaxed_strict_img_2d_rescue', owner
+    // 2026-08-10 (doc pr/57 round 6; supersedes round 7's 'relaxed_strict_img'
+    // default below).** Adds S6, a per-plane 2D wire/tick gap-kill that is OFF
+    // in every earlier default, plus a pure post-kill RESCUE
+    // (`Graphs::two_d_rescue_ok`, killed -> kept only, never the reverse)
+    // fitted directly to the owner's full 899-label hand scan across three
+    // event displays (899 labels / 230 events / 847 component pairs).  The
+    // rescue recognizes: dead-W-channel gaps (mid-TPC, U/V distorted in
+    // sympathy -- a known physics artifact, not a real break), long tracks
+    // whose induction-plane signal is prolonged/isochronous despite high
+    // direction consistency, W allowed a much tighter gap than U/V, and
+    // W-anchored two-view footprint co-location for pieces of one object.
+    // Also repairs a dir-MST emission gap: `process_mst_deterministically`
+    // records only the CLOSEST candidate as the pair's dir-MST marker, so a
+    // killed closest silently dropped every dir-bridge emission for that
+    // pair even after S6/rescue judged it should survive -- rescue-flavor
+    // candidates now emit regardless of that marker (5 pairs across the
+    // 512-event validation sample, 0 owner-labelled good).  Final table on
+    // the owner's hand scan: bad-separation (must reconnect) 124/127,
+    // good-separation (must stay split) 154/156 -- the two good misses are
+    // the owner's own unsatisfiable label triangles (394642 0-1, 60669 0-2)
+    // where a bad-labelled edge transitively joins the good pair; owner rule
+    // 4 ("prefer connectivity when hard") decides both toward joining, same
+    // as the code.  Candidate-level python==C++ port check 780/780;
+    // off-gate work-pr57r6-off12{d,e,f} 12/12 byte-identical to round-7
+    // production; on-arms 512/512 rc=0.  protect_bundle is the only
+    // consumer, so clustering and the TGM/STM/FC verdicts stay byte-identical
+    // for every event this flavor does not touch.  Legacy escapes:
+    // -A protect_graph_name=relaxed_strict_img (SBND_PROTECT_GRAPH=relaxed_strict_img)
+    // restores round 7's production graph; =relaxed_strict restores round 6;
+    // =relaxed restores pre-round-6.
+    protect_graph_name          = 'relaxed_strict_img_2d_rescue',   // null => 'relaxed'
     // C++ default true (doc pr/23 ordering): a TGM/STM/lm-convicted in-window
     // main does not open its bundle for splitting.  null => key omitted.
     protect_skip_convicted      = null,
