@@ -118,6 +118,20 @@ namespace WireCell::Clus::Graphs {
     // that pass long_check=true. long_check does not require two_d_check:
     // the two tests partition the distance axis at 30cm and cannot both fire
     // on one candidate.
+    //
+    // doc pr/64 round 4: w_track_excuse (no-op unless two_d_check is also
+    // true) re-examines every candidate STILL killed after two_d_rescue with
+    // Graphs::two_d_w_track_ok() (public header) -- the W-plane long-track
+    // exception, fitted against the same 899-label hand scan at the owner's
+    // tightened operating point -- and UN-kills the ones where W is the sole
+    // voting plane on a long, thin, globally-collinear track pair (or a
+    // dead-W band explains the gap).  Revive-only, like two_d_rescue, but
+    // with NO <= 5 cm cap: the exposed population is every killed S6
+    // candidate (S6 itself caps at 30 cm).  Default false keeps
+    // "relaxed_strict_img_2d_rescue_long" byte-for-byte unchanged; the
+    // "relaxed_strict_img_2d_rescue_long_wtrack" flavor
+    // (make_graph_relaxed_strict_img_2d_rescue_long_wtrack) is the only
+    // caller that passes true.
     void connect_graph_relaxed_strict(
         const Facade::Cluster& cluster,
         IDetectorVolumes::pointer dv,
@@ -128,7 +142,8 @@ namespace WireCell::Clus::Graphs {
         bool floor_w_override = false,
         bool two_d_rescue = false,
         bool long_check = false,
-        int long_min_planes = 1);
+        int long_min_planes = 1,
+        bool w_track_excuse = false);
 
     bool is_point_good(const Facade::Cluster& cluster, size_t point_index, int ncut = 3);
 

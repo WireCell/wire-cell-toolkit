@@ -327,6 +327,62 @@ namespace WireCell::Clus::Graphs {
     /// Pure; exposed for doctests.
     bool two_d_rescue_ok(const S6RescueInput& in);
 
+    /// doc pr/64 round 4: inputs to the S6 W-plane long-track exception,
+    /// measured at the kill site for one S6-KILLED candidate edge (any
+    /// distance S6 judges, unlike the <= 5 cm rescue above).  Analysis units
+    /// (cm, degrees, counts) so the predicate is a line-by-line port of the
+    /// Python rule it was fitted with (sbnd_xin/scripts/analysis/pr64/
+    /// wgate_sweep.py, rule R2w tightened + R2d).  Sentinels:
+    /// ab_global_deg = 90 means "no global axis measurable" (fails the angle
+    /// cuts); tmax_cm = 1e9 means "no transverse RMS measurable" (fails the
+    /// thinness cuts); dead_w = -1 means "dead-W not measured" (the dead-W
+    /// count is only computed for the <= 5 cm rescue population, which
+    /// contains all of R2d's dis < 3 band -- fails the R2d branch).
+    struct S6WTrackInput {
+        double dis_cm = 0;          ///< candidate edge 3D length
+        bool w_gap = false;         ///< gap[2]: W plane (1,1) BFS gap
+        bool w_sole_vote = false;   ///< gap[2] && !(gap[0]&&!excuse_u) && !(gap[1]&&!excuse_v)
+        int npmin = 0;              ///< smaller component's point count (capped 20000)
+        double lmin_cm = 0;         ///< smaller component's principal-axis extent
+        double tmax_cm = 1e9;       ///< larger component transverse RMS (global PCA)
+        double ab_global_deg = 90;  ///< angle between the two GLOBAL principal axes
+        int dead_w = -1;            ///< dead W wires across the W seed span (-1 unmeasured)
+    };
+
+    /// doc pr/64 round 4: W-plane long-track exception of the
+    /// "relaxed_strict_img_2d_rescue_long_wtrack" graph flavor.  True => an
+    /// S6-killed candidate is kept after all.  Composed exactly like the
+    /// rescue above -- `killed && !two_d_w_track_ok(...)` -- so it can only
+    /// REMOVE kills S6 made, and with the flavor unselected nothing changes
+    /// anywhere.  It deliberately does NOT touch two_d_connectivity_bad's
+    /// "W is never excused" rule: W stays a killing plane everywhere else.
+    ///
+    /// Root cause this closes: S6/S7 excuse prolonged-signal gaps on U/V
+    /// only (the excuse channel is an induction-plane physical effect), so
+    /// a genuinely straight long track with a small mysterious W-only hole
+    /// (dead/low-response W column, drift-parallel topology) is broken by
+    /// the ONE plane with no excuse channel -- SBND 18259-174224,
+    /// 18255-276836, 18255-314507 (doc pr/64).  The existing rescue's W
+    /// branch cannot catch these: its collinearity feature is the LOCAL
+    /// break-point PCA axis, noisy exactly at a break, while a long straight
+    /// track's WHOLE-component PCA axis stays tight (174224: local 20.7 deg
+    /// vs global 4.2 deg).  The global axis is what this predicate uses --
+    /// and it is cheaper than the local one: the per-component eigenvector
+    /// is already computed (and was discarded) by the s6_comp_stat cache.
+    ///
+    /// Rule (owner-selected "tightened gate", zero regressions on the
+    /// 899-label hand scan -- doc pr/64 round 4):
+    ///   R2d: w_gap && dead_w >= 3 && npmin >= 20 && dis < 3 cm
+    ///   R2w: w_sole_vote && lmin > 6 cm && npmin >= 50
+    ///        && tmax < 2 cm && ab_global < 25 deg
+    ///        && (tmax < 1.7 cm || ab_global < 6 deg)   [tightening]
+    /// The tightening protects evt122660's owner-labelled good pair
+    /// (tmax 1.73, ab 7.6) at the cost of two marginal recoveries (64959,
+    /// 172656; ab 22/18 deg -- not clean-long-track topology).
+    ///
+    /// Pure; exposed for doctests.
+    bool two_d_w_track_ok(const S6WTrackInput& in);
+
     /// doc pr/62 S7: inputs to the long-edge corridor-connectivity decision,
     /// measured at the kill site for ONE candidate edge whose 3D length is at
     /// or above the S6 cut-off. Sentinels: has_plane[p] false means that

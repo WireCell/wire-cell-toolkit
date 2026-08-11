@@ -540,6 +540,38 @@ bool Graphs::two_d_rescue_ok(const S6RescueInput& in)
     return true;
 }
 
+bool Graphs::two_d_w_track_ok(const S6WTrackInput& in)
+{
+    // doc pr/64 round 4: line-by-line port of wgate_sweep.py r2w_fires()/
+    // r2d_fires() at the owner-selected tightened operating point.  Keep the
+    // two in lockstep: any constant changed here must be re-scored there
+    // against the 899-label truth table (docs/pr/pr57r6-truth.tsv) first.
+    // All thresholds live in this one block on purpose.
+    constexpr double L_cut_cm    = 6.0;   // R2w: min principal-axis extent
+    constexpr int    N_cut       = 50;    // R2w: min component points
+    constexpr double T_cut_cm    = 2.0;   // R2w: max transverse RMS
+    constexpr double A_cut_deg   = 25.0;  // R2w: max global-axis angle
+    constexpr double T_tight_cm  = 1.7;   // tightening (owner choice, evt122660)
+    constexpr double A_tight_deg = 6.0;   // tightening (owner choice, evt122660)
+    constexpr int    Nd_cut      = 20;    // R2d: min component points
+    constexpr int    dead_w_min  = 3;     // R2d: min dead W wires across the gap
+    constexpr double d_dead_cm   = 3.0;   // R2d: max candidate length
+
+    // R2d: dead-W band across a W gap.  NOT sole-vote-gated -- the fitted
+    // population (evt60669) has an induction plane also voting; the dump's
+    // dead-W count is the same s6_rin.dead_w feature the offline fit used.
+    if (in.w_gap && in.dead_w >= dead_w_min && in.npmin >= Nd_cut && in.dis_cm < d_dead_cm) {
+        return true;
+    }
+    // R2w: W is the sole voting plane and both components are long, thin,
+    // substantial and mutually collinear by their GLOBAL principal axes.
+    if (!in.w_sole_vote) return false;
+    if (!(in.lmin_cm > L_cut_cm) || in.npmin < N_cut) return false;
+    if (!(in.tmax_cm < T_cut_cm) || !(in.ab_global_deg < A_cut_deg)) return false;
+    if (!(in.tmax_cm < T_tight_cm || in.ab_global_deg < A_tight_deg)) return false;
+    return true;
+}
+
 bool Graphs::long_corridor_bad(const S7CorridorInput& in, int min_gapped_planes,
                                double dis_floor_cm, double gap_floor_cm)
 {
@@ -569,7 +601,8 @@ void Graphs::connect_graph_relaxed_strict(
     bool floor_w_override,
     bool two_d_rescue,
     bool long_check,
-    int long_min_planes)
+    int long_min_planes,
+    bool w_track_excuse)
 {
     const bool use_ctpc = true;
     const auto* grouping = cluster.grouping();
@@ -664,7 +697,17 @@ void Graphs::connect_graph_relaxed_strict(
     // deterministic.  npmin is capped at 20000 to match the Python fit,
     // whose component clouds were the (<=20000-point strided) dump records;
     // every rescue threshold is far below the cap so the two agree exactly.
-    std::map<size_t, std::pair<int, double>> s6_comp_stats;
+    // doc pr/64 round 4: widened to also keep the top eigenvector and the
+    // transverse RMS -- both already computed by the same eigen-decomposition
+    // and previously discarded.  trms uses the (n-1) normalization to match
+    // the Python fit's np.cov (oc56_autoscan.transverse_rms).
+    struct S6CompStat {
+        int npoints = 0;
+        double extent_cm = 0;
+        Eigen::Vector3d axis = Eigen::Vector3d::Zero();  ///< zero => unmeasured
+        double trms_cm = -1;                             ///< -1 => unmeasured
+    };
+    std::map<size_t, S6CompStat> s6_comp_stats;
 
     // doc pr/57 round 6: component pairs whose dir1/dir2 candidate the S6
     // rescue explicitly kept.  Needed at the emit loop: the dir-MST records
@@ -673,12 +716,13 @@ void Graphs::connect_graph_relaxed_strict(
     // loses every dir emission -- a rescued dir bridge would evaporate
     // (evt286180 0-1 was the labelled case).  Lookup-only, never iterated.
     std::set<std::pair<size_t, size_t>> s6_rescued_dir_pairs;
-    auto s6_comp_stat = [&](size_t comp) -> std::pair<int, double> {
+    auto s6_comp_stat = [&](size_t comp) -> S6CompStat {
         auto it = s6_comp_stats.find(comp);
         if (it != s6_comp_stats.end()) return it->second;
         const auto& cloud = pt_clouds.at(comp);
         const size_t n = cloud->get_num_points();
-        double extent = 0.0;
+        S6CompStat st;
+        st.npoints = static_cast<int>(std::min<size_t>(n, 20000));
         if (n >= 2) {
             Eigen::Vector3d mean = Eigen::Vector3d::Zero();
             for (size_t i = 0; i < n; ++i) {
@@ -701,9 +745,18 @@ void Graphs::connect_graph_relaxed_strict(
                 if (pr < pmin) pmin = pr;
                 if (pr > pmax) pmax = pr;
             }
-            extent = (pmax - pmin) / units::cm;
+            st.extent_cm = (pmax - pmin) / units::cm;
+            st.axis = axis;
+            if (n >= 3) {
+                // eigenvalues ascending: cols 0,1 are the transverse pair.
+                // C is an unnormalized outer-product sum; np.cov divides by
+                // (n-1), so match that here.
+                const double t2 = (std::max(es.eigenvalues()(0), 0.0) +
+                                   std::max(es.eigenvalues()(1), 0.0)) /
+                                  double(n - 1);
+                st.trms_cm = std::sqrt(t2) / units::cm;
+            }
         }
-        std::pair<int, double> st{static_cast<int>(std::min<size_t>(n, 20000)), extent};
         s6_comp_stats[comp] = st;
         return st;
     };
@@ -1139,8 +1192,8 @@ void Graphs::connect_graph_relaxed_strict(
             s6_rin.excuse_v = excuse_v;
             const auto sta = s6_comp_stat(j);
             const auto stb = s6_comp_stat(k);
-            s6_rin.npmin = std::min(sta.first, stb.first);
-            s6_rin.lmin_cm = std::min(sta.second, stb.second);
+            s6_rin.npmin = std::min(sta.npoints, stb.npoints);
+            s6_rin.lmin_cm = std::min(sta.extent_cm, stb.extent_cm);
             const auto axa = s6_local_axis(cloud_a, q1);
             const auto axb = s6_local_axis(cloud_b, q2);
             if (axa.first && axb.first) {
@@ -1237,6 +1290,46 @@ void Graphs::connect_graph_relaxed_strict(
             if (s6_rescued) {
                 killed = false;
                 if (std::string(blk) != "closest") {
+                    s6_rescued_dir_pairs.insert({std::min(j, k), std::max(j, k)});
+                }
+            }
+        }
+
+        // doc pr/64 round 4: the W-plane long-track exception.  Runs on ANY
+        // candidate still killed after the rescue (no <= 5 cm cap -- the
+        // exposed population is every killed S6 candidate whose sole voting
+        // plane is W, e.g. 276836's 5.97 cm pair).  Features come from the
+        // same memoized s6_comp_stat cache; the decision is the pure
+        // Graphs::two_d_w_track_ok().  Revive-only, exactly like the rescue.
+        bool s6_wtrack_revived = false;
+        Graphs::S6WTrackInput s6_win;
+        bool s6_win_valid = false;
+        if (w_track_excuse && killed) {
+            const bool vote_u = gap[0] && !excuse_u;
+            const bool vote_v = gap[1] && !excuse_v;
+            s6_win.w_gap = gap[2];
+            s6_win.w_sole_vote = gap[2] && !vote_u && !vote_v;
+            s6_win.dis_cm = edge_dis / units::cm;
+            const auto sta = s6_comp_stat(j);
+            const auto stb = s6_comp_stat(k);
+            s6_win.npmin = std::min(sta.npoints, stb.npoints);
+            s6_win.lmin_cm = std::min(sta.extent_cm, stb.extent_cm);
+            if (sta.trms_cm >= 0 && stb.trms_cm >= 0) {
+                s6_win.tmax_cm = std::max(sta.trms_cm, stb.trms_cm);
+            }
+            if (sta.npoints >= 2 && stb.npoints >= 2) {
+                const double c = std::min(1.0, std::abs(sta.axis.dot(stb.axis)));
+                s6_win.ab_global_deg = std::acos(c) * 180.0 / s6_pi;
+            }
+            // dead-W is only measured for the <= 5 cm rescue population,
+            // which contains all of R2d's dis < 3 cm band.
+            s6_win.dead_w = s6_rin_valid ? s6_rin.dead_w : -1;
+            s6_win_valid = true;
+            if (Graphs::two_d_w_track_ok(s6_win)) {
+                s6_wtrack_revived = true;
+                killed = false;
+                if (std::string(blk) != "closest") {
+                    // same emission repair as the rescue above (evt286180).
                     s6_rescued_dir_pairs.insert({std::min(j, k), std::max(j, k)});
                 }
             }
@@ -1359,6 +1452,24 @@ void Graphs::connect_graph_relaxed_strict(
                     v2["ov"] = ovj;
                     v2["has_plane"] = hp;
                     rec["v2"] = v2;
+                }
+            }
+            // doc pr/64 round 4: W-track exception provenance -- absent
+            // entirely unless the flavor enables it, so every existing
+            // flavor's dump records are byte-identical.
+            if (w_track_excuse) {
+                rec["w_track"] = true;
+                rec["w_track_revived"] = s6_wtrack_revived;
+                if (s6_win_valid) {
+                    Json::Value v3;
+                    v3["w_gap"] = s6_win.w_gap;
+                    v3["w_sole"] = s6_win.w_sole_vote;
+                    v3["npmin"] = s6_win.npmin;
+                    v3["lmin"] = s6_win.lmin_cm;
+                    v3["tmax"] = s6_win.tmax_cm;
+                    v3["ab_global"] = s6_win.ab_global_deg;
+                    v3["dead_w"] = s6_win.dead_w;
+                    rec["v3"] = v3;
                 }
             }
             rec["planes"] = oc56_dump_planes;
@@ -2184,7 +2295,7 @@ void Graphs::connect_graph_relaxed_strict(
                     oc56_note_emit(j, k, "dir2", gind1, gind2, dis, dup);
                 }
             }
-            else if (two_d_rescue && s6_rescued_dir_pairs.count({j, k})) {
+            else if ((two_d_rescue || w_track_excuse) && s6_rescued_dir_pairs.count({j, k})) {
                 // doc pr/57 round 6: this pair's dir candidate was
                 // explicitly RESCUED by two_d_rescue_ok, but the dir-MST
                 // gate above is closed -- its recorded tuple is the

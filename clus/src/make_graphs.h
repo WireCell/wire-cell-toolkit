@@ -114,6 +114,16 @@ namespace WireCell::Clus::Graphs {
         IDetectorVolumes::pointer dv,
         IPCTransformSet::pointer pcts);
 
+    // same as make_graph_relaxed_strict_img_2d_rescue_long plus
+    // w_track_excuse=true (doc pr/64 round 4: the W-plane long-track
+    // exception -- revives S6 kills where W is the sole voting plane on a
+    // long, thin, globally-collinear track pair, or a dead-W band explains
+    // the gap; Graphs::two_d_w_track_ok is the pure verdict)
+    Weighted::Graph make_graph_relaxed_strict_img_2d_rescue_long_wtrack(
+        const Facade::Cluster& cluster,
+        IDetectorVolumes::pointer dv,
+        IPCTransformSet::pointer pcts);
+
 }
 
 #endif

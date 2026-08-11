@@ -170,3 +170,16 @@ Weighted::Graph WireCell::Clus::Graphs::make_graph_relaxed_strict_img_2d_rescue_
                                   /*long_check=*/true, /*long_min_planes=*/2);
     return graph;
 }
+
+Weighted::Graph WireCell::Clus::Graphs::make_graph_relaxed_strict_img_2d_rescue_long_wtrack(
+    const Facade::Cluster& cluster,
+    IDetectorVolumes::pointer dv,
+    IPCTransformSet::pointer pcts)
+{
+    auto graph = make_graph_closely(cluster);
+    connect_graph_relaxed_strict(cluster, dv, pcts, graph, /*image_check=*/true, /*two_d_check=*/true,
+                                  /*floor_w_override=*/true, /*two_d_rescue=*/true,
+                                  /*long_check=*/true, /*long_min_planes=*/1,
+                                  /*w_track_excuse=*/true);
+    return graph;
+}
