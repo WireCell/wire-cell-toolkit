@@ -1289,6 +1289,12 @@ function(
     other_seg_keep_isolated = true,
     other_seg_keep_isolated_min_points = null,
     other_seg_keep_isolated_min_length = null,
+    // doc pr/59 round 2 -- per-cluster orphaned-associate_points rescue
+    // (18255-142421 seg 20; 116944-71372 segs 19052/19053/136199).  Owner
+    // flip not made this round.  Validation: -A assoc_full_recluster=true
+    // (or the SBND_ASSOC_FULL_RECLUSTER runner env).  false omits the key
+    // => byte-identical.
+    assoc_full_recluster = false,
 )
     local base = import 'pgrapher/experiment/sbnd/simparams.jsonnet';
     local params = base {
@@ -1500,6 +1506,7 @@ function(
                              other_seg_keep_isolated=other_seg_keep_isolated,
                              other_seg_keep_isolated_min_points=other_seg_keep_isolated_min_points,
                              other_seg_keep_isolated_min_length=other_seg_keep_isolated_min_length,
+                             assoc_full_recluster=assoc_full_recluster,
                              pseudo_shower_track_paint=pseudo_shower_track_paint,
                              reclass_never_computed_ke_floor=reclass_never_computed_ke_floor,
                              muon_dqdx_curve=muon_dqdx_curve,

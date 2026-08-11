@@ -207,6 +207,14 @@ public:
         bool   m_other_seg_keep_isolated{false};
         int    m_other_seg_keep_isolated_min_points{25};
         double m_other_seg_keep_isolated_min_length{3.0}; // cm; scaled at copy
+        // doc sbnd_xin/docs/pr/59 round 2 -- when a segment created after its
+        // cluster's association pass would otherwise be left with a null
+        // associate_points cloud (18255-142421 seg 20; 116944-71372 segs
+        // 19052/19053/136199), clear and re-run the WHOLE cluster's
+        // association + re-classify just the rescued segments.  Default false
+        // = legacy (orphan stays null).  See
+        // PatternAlgorithms::reassociate_cluster_orphans.
+        bool   m_assoc_full_recluster{false};
         // doc sbnd_xin/docs/pr/31 §11 -- F2 (was P2).  true => skip the
         // stage-3 segment_determine_shower_direction call, so a topology
         // shower keeps the direction segment_is_shower_topology set, which is

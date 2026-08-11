@@ -150,6 +150,8 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_other_seg_keep_isolated            = get(config, "other_seg_keep_isolated",            m_other_seg_keep_isolated);
     m_other_seg_keep_isolated_min_points = get(config, "other_seg_keep_isolated_min_points", m_other_seg_keep_isolated_min_points);
     m_other_seg_keep_isolated_min_length = get(config, "other_seg_keep_isolated_min_length", m_other_seg_keep_isolated_min_length); // cm
+    // doc sbnd_xin/docs/pr/59 round 2 -- per-cluster orphaned-associate_points rescue.
+    m_assoc_full_recluster = get(config, "assoc_full_recluster", m_assoc_full_recluster);
     // doc sbnd_xin/docs/pr/31 §11 port-fidelity knob (F2, was P2).
     m_shower_topo_proto_dir    = get(config, "shower_topo_proto_dir",    m_shower_topo_proto_dir);
     // doc sbnd_xin/docs/pr/32 §11 port-fidelity knobs (F1-F4).
@@ -445,6 +447,8 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["other_seg_keep_isolated"]            = m_other_seg_keep_isolated;            // false = legacy (isolated residual discarded)
     cfg["other_seg_keep_isolated_min_points"] = m_other_seg_keep_isolated_min_points; // component-point floor when the keep is on
     cfg["other_seg_keep_isolated_min_length"] = m_other_seg_keep_isolated_min_length; // cm; fitted-length floor when the keep is on
+    // doc sbnd_xin/docs/pr/59 round 2.
+    cfg["assoc_full_recluster"] = m_assoc_full_recluster; // false = legacy (orphaned associate_points cloud stays null)
     // doc sbnd_xin/docs/pr/31 §11.
     cfg["shower_topo_proto_dir"]    = m_shower_topo_proto_dir;     // false = legacy (the stage-3 PCA direction call runs)
     // doc sbnd_xin/docs/pr/32 §11.
@@ -855,6 +859,8 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
     pattern_algos.m_other_seg_keep_isolated            = m_other_seg_keep_isolated;
     pattern_algos.m_other_seg_keep_isolated_min_points = m_other_seg_keep_isolated_min_points;
     pattern_algos.m_other_seg_keep_isolated_min_length = m_other_seg_keep_isolated_min_length * units::cm; // cm -> internal
+    // doc sbnd_xin/docs/pr/59 round 2.
+    pattern_algos.m_assoc_full_recluster = m_assoc_full_recluster;
     // doc sbnd_xin/docs/pr/31 §11 (F2).
     pattern_algos.m_shower_topo_proto_dir    = m_shower_topo_proto_dir;
     // doc sbnd_xin/docs/pr/32 §11 (F1-F4).
@@ -1040,6 +1046,16 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
         pattern_algos.determine_main_vertex(*pr_graph, *main_cluster, main_vertex, vertices_in_long_muon, segments_in_long_muon, *m_track_fitter, m_dv, particle_data(), m_recomb_model);
         detg_dump("main:determine_main_vertex", *pr_graph);
 
+        // doc sbnd_xin/docs/pr/59 round 2 (P1): determine_main_vertex's
+        // internal examine_structure_final*/examine_vertices_1 can create a
+        // brand-new segment (18255-142421 seg 20; 116944-71372 segs
+        // 19052/19053/136199, all confirmed via WCT_DET_DEBUG=2 backtraces).
+        // Rescue it here, before determine_direction/shower_determining_in_
+        // main_cluster/deghosting/shower_clustering_with_nv all consume its
+        // (until now, or still, missing) associate_points and shower flags.
+        // No-op unless m_assoc_full_recluster.
+        pattern_algos.reassociate_cluster_orphans(*pr_graph, *main_cluster, m_dv);
+
         if (main_vertex !=nullptr){
             map_cluster_main_vertices[main_cluster] = main_vertex;
             main_vertex = nullptr;
@@ -1062,6 +1078,8 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
                 pattern_algos.determine_direction(*pr_graph, *cluster, particle_data(), m_recomb_model);
                 pattern_algos.shower_determining_in_main_cluster(*pr_graph, *cluster, particle_data(), m_recomb_model, m_dv);
                 pattern_algos.determine_main_vertex(*pr_graph, *cluster, main_vertex, vertices_in_long_muon, segments_in_long_muon, *m_track_fitter, m_dv, particle_data(), m_recomb_model);
+                // doc sbnd_xin/docs/pr/59 round 2 (P1), other-cluster branch.
+                pattern_algos.reassociate_cluster_orphans(*pr_graph, *cluster, m_dv);
                 if (main_vertex != nullptr) {
                     map_cluster_main_vertices[cluster] = main_vertex;
                     main_vertex = nullptr;
@@ -1078,6 +1096,8 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
                 pattern_algos.determine_direction(*pr_graph, *cluster, particle_data(), m_recomb_model);
                 pattern_algos.shower_determining_in_main_cluster(*pr_graph, *cluster, particle_data(), m_recomb_model, m_dv);
                 pattern_algos.determine_main_vertex(*pr_graph, *cluster, main_vertex, vertices_in_long_muon, segments_in_long_muon, *m_track_fitter, m_dv, particle_data(), m_recomb_model);
+                // doc sbnd_xin/docs/pr/59 round 2 (P1), other-cluster branch.
+                pattern_algos.reassociate_cluster_orphans(*pr_graph, *cluster, m_dv);
                 if (main_vertex != nullptr) {
                     map_cluster_main_vertices[cluster] = main_vertex;
                     main_vertex = nullptr;
@@ -1211,6 +1231,25 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
             SPDLOG_LOGGER_DEBUG(log,
                 "pr59 assoc-census: second clustering_points call, main_cluster={}",
                 main_cluster->get_cluster_id());
+        }
+
+        // doc sbnd_xin/docs/pr/59 round 2 (P2): a safety net for two cases P1
+        // does not reach -- (a) a segment created inside improve_vertex or
+        // main_vertex_graph_audit (both ran above, between the first
+        // determine_main_vertex and here), and (b) main_cluster having been
+        // silently repointed by determine_overall_main_vertex[_DL]'s
+        // swap_main_cluster since the first clustering_points call, which
+        // otherwise leaves the ORIGINAL main cluster (now in other_clusters)
+        // permanently on its first-round-only association state.  No-op
+        // unless m_assoc_full_recluster; a no-op per cluster (0 rescued) when
+        // that cluster has no orphan, so this is cheap on the common case
+        // where P1 already caught everything (measured true for both
+        // 18255-142421 and 116944-71372).  Still before shower_clustering_
+        // with_nv, which is the next consumer of associate_points/shower
+        // flags below.
+        pattern_algos.reassociate_cluster_orphans(*pr_graph, *main_cluster, m_dv);
+        for (auto* cluster : other_clusters) {
+            pattern_algos.reassociate_cluster_orphans(*pr_graph, *cluster, m_dv);
         }
 
         std::cout << "After shower clustering :" << std::endl; pattern_algos.print_segs_info(*pr_graph, *main_cluster, 0);

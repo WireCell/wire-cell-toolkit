@@ -539,6 +539,12 @@ namespace WireCell::Clus::PR {
         int    m_other_seg_keep_isolated_min_points{25};
         double m_other_seg_keep_isolated_min_length{3.0 * units::cm}; // internal units
 
+        // doc sbnd_xin/docs/pr/59 round 2 -- gates reassociate_cluster_orphans
+        // (checked inside that function, called unconditionally, matching the
+        // m_main_vertex_graph_audit idiom).  C++ default false => legacy
+        // (orphaned associate_points cloud stays null), byte-identical.
+        bool   m_assoc_full_recluster{false};
+
         // doc sbnd_xin/docs/pr/45 -- empty-2D-tree sentinel guard in
         // find_other_segments (SBND 18255-56463 cluster 14, the 30 cm
         // isochronous tail beyond segment 14006's end).
@@ -1523,6 +1529,26 @@ namespace WireCell::Clus::PR {
         // EM shower related
         void clustering_points(Graph& graph, Facade::Cluster& cluster, const IDetectorVolumes::pointer& dv, const std::string& cloud_name = "associate_points", double search_range = 1.2*units::cm, double scaling_2d = 0.7);
         void separate_track_shower(Graph&graph, Facade::Cluster& cluster);
+        // doc sbnd_xin/docs/pr/59 round 2: inert unless m_assoc_full_recluster.
+        // A segment created after a cluster's association pass (e.g. examine_
+        // structure_final*/examine_vertices_1's replacement polylines inside
+        // determine_main_vertex) can end up with a null/empty associate_points
+        // cloud -- see clustering_points_segments's doc pr/59 sentinels for the
+        // full diagnosis.  If ANY of the cluster's current segments has a null
+        // cloud, clears associate_points on every segment in the cluster and
+        // re-runs clustering_points_segments over the whole cluster (a fresh
+        // Voronoi + ghost-removal competition -- must include every segment,
+        // never just the orphans, or the orphan would win points by default
+        // with no sibling able to contest).  Then re-runs the
+        // separate_track_shower classification (is_shower_topology, then
+        // is_shower_trajectory if not topology-shower) ONLY on the segments
+        // that were null before the clear, since those are the only ones a
+        // classification pass could not previously reach and re-classifying an
+        // already-correct segment is pure blast radius.  No-op (returns 0) if
+        // no segment in the cluster is orphaned -- untouched clusters stay
+        // byte-identical even with the knob on.  Returns the number of
+        // segments rescued.
+        size_t reassociate_cluster_orphans(Graph& graph, Facade::Cluster& cluster, const IDetectorVolumes::pointer& dv);
         // Direction
         void determine_direction(Graph& graph, Facade::Cluster& cluster, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model);
         std::pair<int, double> calculate_num_daughter_showers(Graph& graph, VertexPtr vertex, SegmentPtr segment, bool flag_count_shower = true);

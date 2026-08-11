@@ -503,6 +503,44 @@ TEST_CASE("pattern_recognition clustering_points [A]")
     }
 }
 
+// doc sbnd_xin/docs/pr/59 round 2: reassociate_cluster_orphans.
+TEST_CASE("pattern_recognition reassociate_cluster_orphans [A]")
+{
+    auto& env = env_A();
+    auto ctx  = make_context(env);
+    CHECK_NOTHROW(run_through(env, ctx, Step::AfterClusteringPoints));
+
+    auto segs = ctx.algo.find_cluster_segments(*ctx.graph, *env.fixture.main_cluster);
+    REQUIRE(!segs.empty());
+
+    // Knob off: even with a manufactured orphan present, must be a no-op.
+    auto* victim = segs.front().get();
+    auto orig_dpc = victim->dpcloud("associate_points");
+    victim->dpcloud("associate_points", nullptr);
+    CHECK(ctx.algo.reassociate_cluster_orphans(*ctx.graph, *env.fixture.main_cluster, env.dv) == 0);
+    CHECK(victim->dpcloud("associate_points") == nullptr);
+
+    // Knob on, orphan present: the whole cluster is re-competed and the
+    // orphan should regain points (unless it is genuinely isolated in this
+    // fixture, in which case the helper must still not crash or leave other
+    // segments worse off -- checked below via a strict no-orphan no-op pass).
+    ctx.algo.m_assoc_full_recluster = true;
+    size_t n_rescued = ctx.algo.reassociate_cluster_orphans(*ctx.graph, *env.fixture.main_cluster, env.dv);
+    MESSAGE("reassociate_cluster_orphans rescued ", n_rescued, " segment(s)");
+    CHECK(victim->dpcloud("associate_points") != nullptr);
+
+    // No orphan left: a second call in the same state must be a true no-op
+    // (byte-identical path -- untouched clusters never get re-competed).
+    for (auto& seg : segs) {
+        if (!seg->dpcloud("associate_points")) {
+            // A genuinely unrescuable segment (e.g. truly isolated) would
+            // make the second-call assertion below meaningless; skip it.
+            return;
+        }
+    }
+    CHECK(ctx.algo.reassociate_cluster_orphans(*ctx.graph, *env.fixture.main_cluster, env.dv) == 0);
+}
+
 TEST_CASE("pattern_recognition separate_track_shower [A]")
 {
     auto& env = env_A();

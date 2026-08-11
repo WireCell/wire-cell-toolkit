@@ -116,6 +116,92 @@ void PatternAlgorithms::clustering_points(Graph& graph, Facade::Cluster& cluster
     if (m_perf) SPDLOG_LOGGER_TRACE(s_log, "clustering_points timing: TOTAL took {} ms", MS(Clock::now() - t_total).count());
 }
 
+// doc sbnd_xin/docs/pr/59 round 2: inert unless m_assoc_full_recluster (owner
+// flip pending).  See the declaration in NeutrinoPatternBase.h for the full
+// rationale; summary: clustering_points runs once per cluster, but a segment
+// can be created afterward (examine_structure_final*/examine_vertices_1
+// inside determine_main_vertex, confirmed for 18255-142421 seg 20 and
+// 116944-71372 segs 19052/19053/136199) and never gets a chance to compete for
+// points -- and if the cluster's main-ness is later swapped away
+// (swap_main_cluster), it never gets a second chance either.  This helper is
+// meant to be called wherever such a segment could just have been created.
+size_t PatternAlgorithms::reassociate_cluster_orphans(Graph& graph, Facade::Cluster& cluster, const IDetectorVolumes::pointer& dv) {
+    if (!m_assoc_full_recluster) return 0;
+    static const bool pr59r2_census = std::getenv("WCT_PR59_ASSOC_CENSUS") != nullptr;
+
+    // Collect all segments that belong to this cluster, in stable edge-index
+    // order (never boost::edges/pointer order -- CLAUDE.md determinism rule).
+    std::vector<SegmentPtr> segments;
+    for (auto e : ordered_edges(graph)) {
+        SegmentPtr seg = graph[e].segment;
+        if (seg && seg->cluster() == &cluster) {
+            segments.push_back(seg);
+        }
+    }
+    if (segments.empty()) return 0;
+
+    // Any orphan (null or empty associate_points cloud) in the cluster?  If
+    // not, this is a byte-identical no-op -- do not touch anything.
+    std::map<SegmentPtr, size_t, SegmentIndexCmp> npts_before;
+    bool any_orphan = false;
+    for (auto seg : segments) {
+        auto dpc = seg->dpcloud("associate_points");
+        size_t n = dpc ? dpc->npoints() : 0;
+        npts_before[seg] = n;
+        if (n == 0) any_orphan = true;
+    }
+    if (!any_orphan) return 0;
+
+    // Owner constraint: when this fires, delete the OLD associate_points for
+    // the WHOLE cluster and establish new ones via a fresh full-cluster
+    // competition -- never rescue just the orphan in isolation, which would
+    // let it win points by default with no already-good sibling able to
+    // contest for them (clustering_points_segments is a Voronoi + 2D
+    // ghost-removal competition among exactly the segments handed to it).
+    for (auto seg : segments) {
+        if (seg->dpcloud("associate_points")) {
+            seg->dpcloud("associate_points", nullptr);
+        }
+    }
+    clustering_points_segments(segments, dv);
+
+    // Owner constraint: this must run BEFORE track/shower separation so the
+    // classification pass can actually consume the new cloud -- but only for
+    // the segments that were orphaned; re-running is_shower_topology/
+    // is_shower_trajectory on an already-correctly-classified sibling is pure
+    // blast radius (these are per-segment, non-competing tests, unlike
+    // association).  Same two calls, same arguments, as separate_track_shower's
+    // loop body just below in this file.
+    size_t n_rescued = 0;
+    for (auto seg : segments) {
+        if (npts_before[seg] != 0) continue;  // was not orphaned
+        auto dpc = seg->dpcloud("associate_points");
+        size_t n_after = dpc ? dpc->npoints() : 0;
+        if (n_after == 0) continue;  // still orphaned (e.g. lost the ghost-removal contest again)
+        ++n_rescued;
+        segment_is_shower_topology(seg, false, m_mip_dqdx_median, m_shower_topo_demote_len, m_shower_topo_reset, m_shower_topo_dqdx_guard);
+        if (!seg->flags_any(SegmentFlags::kShowerTopology)) {
+            segment_is_shower_trajectory(seg, 10*units::cm, m_mip_dqdx, m_shower_traj_straight_guard);
+        }
+    }
+
+    if (pr59r2_census) {
+        for (auto seg : segments) {
+            auto dpc = seg->dpcloud("associate_points");
+            size_t n_after = dpc ? dpc->npoints() : 0;
+            size_t n_before = npts_before[seg];
+            if (n_before == n_after) continue;
+            const char* tag = (n_before == 0 && n_after > 0) ? "rescued"
+                             : (n_after == 0) ? "lost"
+                             : "moved";
+            SPDLOG_LOGGER_DEBUG(s_log,
+                "pr59r2 recluster: cluster {} segment {} npts {} -> {} [{}]",
+                cluster.get_cluster_id(), seg->get_graph_index(), n_before, n_after, tag);
+        }
+    }
+    return n_rescued;
+}
+
 void PatternAlgorithms::separate_track_shower(Graph&graph, Facade::Cluster& cluster) {
     using Clock = std::chrono::steady_clock;
     using MS = std::chrono::duration<double, std::milli>;
