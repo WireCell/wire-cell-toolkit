@@ -1290,11 +1290,16 @@ function(
     other_seg_keep_isolated_min_points = null,
     other_seg_keep_isolated_min_length = null,
     // doc pr/59 round 2 -- per-cluster orphaned-associate_points rescue
-    // (18255-142421 seg 20; 116944-71372 segs 19052/19053/136199).  Owner
-    // flip not made this round.  Validation: -A assoc_full_recluster=true
-    // (or the SBND_ASSOC_FULL_RECLUSTER runner env).  false omits the key
-    // => byte-identical.
-    assoc_full_recluster = false,
+    // (18255-142421 seg 20; 116944-71372 segs 19052/19053/136199).  SBND
+    // PRODUCTION ON -- owner flip 2026-08-10 after the work-pr59r2-on19 gate
+    // (12/12 known orphans rescued, zero manufactured-orphan regressions,
+    // nusel-table.tsv byte-identical across the 19-event manifest) and the
+    // Bee before/after hand-scan of 71372/142421: bare production now IS the
+    // validated work-pr59r2-on19 arm config.  Legacy escape for A/B: -A
+    // assoc_full_recluster=false (or SBND_ASSOC_FULL_RECLUSTER=false)
+    // restores the pre-flip production bare, byte-exact (doc pr/59 sec 9
+    // gate proofs).  C++ knob default itself stays false.
+    assoc_full_recluster = true,
 )
     local base = import 'pgrapher/experiment/sbnd/simparams.jsonnet';
     local params = base {
