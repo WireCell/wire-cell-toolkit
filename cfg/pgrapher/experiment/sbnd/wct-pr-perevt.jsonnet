@@ -839,9 +839,13 @@ function(
     pf_orphan_track_parentage = true,
     // doc pr/65 round 3 (rung 3) -- audit-only orphan net: a still-unclaimed
     // segment is named in the log instead of fabricated as a root-level PF
-    // particle.  Display-only: moves ONLY mc.json.  C++ default false.
-    // Runner env: SBND_PF_ORPHAN_AUDIT_ONLY.
-    pf_orphan_audit_only = false,
+    // particle (owner requirement: never add an arbitrary particle to the PF
+    // root).  Display-only: moves ONLY mc.json.  SBND PRODUCTION ON -- owner
+    // flip 2026-08-11 with rung 1 above (which claims the fragments first;
+    // audit fired 0 unclaimed on all 48 nueCC gate events).  Legacy escape:
+    // -A pf_orphan_audit_only=false (or SBND_PF_ORPHAN_AUDIT_ONLY=false).
+    // C++ default stays false.
+    pf_orphan_audit_only = true,
     // doc pr/38: F2's ON-behavior was CORRECTED in place (owner decision
     // 2026-08-05, no new knobs): the barrier now excludes each shower's
     // start vertex (prototype map_vtx_segs parity, WCShower.cxx:547) so
@@ -1317,9 +1321,15 @@ function(
     // doc pr/65 round 3 -- offer graph-unreachable main-cluster segments
     // (the disconnected components other_seg_keep_isolated above creates) to
     // the shower absorbers by relaxing the cluster()==main_cluster guards to
-    // a main_vertex-reachability test.  C++ default false.  Runner env:
-    // SBND_SHOWER_ABSORB_UNREACHABLE_MAIN.
-    shower_absorb_unreachable_main = false,
+    // a main_vertex-reachability test.  SBND PRODUCTION ON -- owner flip
+    // 2026-08-11 (doc pr/65 round 3): bare production IS the validated
+    // work-pr65-on48 arm config.  Gate work-pr65-base48 vs work-pr65-off48
+    // 0/48 archives + 0/48 pctree + nusel 0/48; on-census 21/48 movers, all
+    // sentinel-attributed, 0 unclaimed left for the orphan net (evt 54095:
+    // 12/12 fragments absorbed, shower 2334 -> 2633 MeV, 9 -> 3 root nodes).
+    // Legacy escape for A/B: -A shower_absorb_unreachable_main=false (or
+    // SBND_SHOWER_ABSORB_UNREACHABLE_MAIN=false).  C++ default stays false.
+    shower_absorb_unreachable_main = true,
     // doc pr/59 round 2 -- per-cluster orphaned-associate_points rescue
     // (18255-142421 seg 20; 116944-71372 segs 19052/19053/136199).  SBND
     // PRODUCTION ON -- owner flip 2026-08-10 after the work-pr59r2-on19 gate
