@@ -1454,6 +1454,15 @@ function(
     es3sg_ang3_min = null,
     es3sg_ang_ratio = null,
     es3sg_require_terminal = null,
+    // doc sbnd_xin/docs/pr/72 round 3 -- admit the junction es3_stub_guard
+    // protects into improve_vertex's/MyFCN's two-track vertex position fit,
+    // so the near-vertex trajectory shows a sharp kink instead of the
+    // smooth bend the current gating leaves behind (196649: measured
+    // annulus-PCA deflection 26.8deg vs today's diluted ~18-21deg near-
+    // vertex estimate).  NOT a production flip this round -- default stays
+    // false/legacy; C++ knob default false too.  See doc pr/72 round 3 for
+    // the 117-event validation.
+    es3sg_vertex_fit = false,
 )
     local base = import 'pgrapher/experiment/sbnd/simparams.jsonnet';
     local params = base {
@@ -1678,6 +1687,7 @@ function(
                              es3sg_ang3_min=es3sg_ang3_min,
                              es3sg_ang_ratio=es3sg_ang_ratio,
                              es3sg_require_terminal=es3sg_require_terminal,
+                             es3sg_vertex_fit=es3sg_vertex_fit,
                              pseudo_shower_track_paint=pseudo_shower_track_paint,
                              reclass_never_computed_ke_floor=reclass_never_computed_ke_floor,
                              muon_dqdx_curve=muon_dqdx_curve,

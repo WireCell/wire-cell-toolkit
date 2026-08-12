@@ -681,6 +681,16 @@ bool PatternAlgorithms::examine_structure_3(Graph& graph, Facade::Cluster& clust
 
                         if (es3_stub_suppress(len_short, len_long, angle_3cm, angle_10cm,
                                                deg_short, nfit_short, nfit_long, sg_params)) {
+                            // doc pr/72 round 3: mark the surviving junction
+                            // so improve_vertex/fit_vertex can admit it into
+                            // MyFCN's two-track vertex fit despite being a
+                            // non-main degree-2 junction.  C++ default false
+                            // => never set => byte-identical (M10-style
+                            // guard, no edit to the suppression decision
+                            // above).
+                            if (m_es3sg_vertex_fit) {
+                                vtx->set_flags(VertexFlags::kStubGuardJunction);
+                            }
                             continue;
                         }
                     }

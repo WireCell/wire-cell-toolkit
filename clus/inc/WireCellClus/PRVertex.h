@@ -39,6 +39,19 @@ namespace WireCell::Clus::PR {
         /// default-OFF knob paths (doc sbnd_xin/docs/pr/48); when no vertex
         /// carries it every examiner check is a no-op => byte-identical.
         kProtectedBreak = 1<<3,
+        /// The vertex is the degree-2 junction between a genuine near-vertex
+        /// stub and its neighbouring trunk that examine_structure_3's
+        /// es3_stub_guard declined to merge away (doc sbnd_xin/docs/pr/72
+        /// round 3).  Set only when both es3_stub_guard and its sub-knob
+        /// es3sg_vertex_fit are on; a dedicated bit rather than reusing
+        /// kProtectedBreak, since that flag's existing consumers
+        /// (NeutrinoTrackShowerSep.cxx, NeutrinoVertexFinder.cxx's
+        /// snap/audit passes) have not been characterized against this
+        /// junction class.  Consumed only by improve_vertex/fit_vertex to
+        /// admit an otherwise-gated degree-2, non-main-vertex junction into
+        /// the two-track vertex position fit (MyFCN).  Default OFF path
+        /// never sets it => byte-identical.
+        kStubGuardJunction = 1<<4,
     };
 
     /** A PR::Vertex instance represents a connection with one or more PR::Segment intances.

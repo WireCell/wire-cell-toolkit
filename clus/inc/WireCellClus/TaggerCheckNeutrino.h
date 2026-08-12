@@ -297,6 +297,12 @@ public:
         double m_es3sg_ang3_min{15.0};     // degrees
         double m_es3sg_ang_ratio{1.0};
         bool   m_es3sg_require_terminal{true};
+        // doc sbnd_xin/docs/pr/72 round 3 -- admit the junction
+        // es3_stub_guard protected into improve_vertex's/MyFCN's two-track
+        // vertex position fit (VertexFlags::kStubGuardJunction).  Only acts
+        // when m_es3_stub_guard is also true.  Default false = byte-
+        // identical, independent of m_es3_stub_guard's own state.
+        bool   m_es3sg_vertex_fit{false};
         // Detector-extent literals (docs/pr/2 sec. 2e(iv)), all in cm.
         // Defaults = the uBooNE prototype values (active volume y in
         // [-116,+117], z in [0,1037]) => absent keys are byte-identical.
