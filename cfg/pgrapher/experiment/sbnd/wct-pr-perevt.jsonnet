@@ -1355,10 +1355,15 @@ function(
     // w' = w * (1 + scale * unsupported_fraction), so a gap-spanning chord
     // no longer beats following the charge around a corner.  C++ defaults:
     // scale 0 (OFF), dead_alpha 0.25, min_edge 0.5 cm, sample_step 0.3 cm,
-    // point_radius 0.2 cm.  DEFAULT OFF pending validation.  Validation:
-    // -A steiner_gap_penalty=<scale> (or the SBND_STEINER_GAP_PENALTY
-    // runner env).  null omits the keys => byte-identical.
-    steiner_gap_penalty = null,
+    // point_radius 0.2 cm.  SBND PRODUCTION ON at scale 2.0 (2026-08-12,
+    // owner pre-authorized on clean validation): off-gates 0/117
+    // byte-identical, on-census 101/117 display-level movers with nusel
+    // 0/117, wall/RSS deltas negligible; targets 131357/234638/268067/
+    // 506746 fixed (work-pr51r5-* arms, doc pr/51 round 5).  Legacy escape
+    // for A/B: -A steiner_gap_penalty=0 (or SBND_STEINER_GAP_PENALTY=0)
+    // restores the pre-flip production bare, byte-exact (C++ gate is
+    // scale <= 0; flip/escape gates 0/117 both directions).
+    steiner_gap_penalty = 2.0,
     sgp_dead_alpha = null,
     sgp_min_edge = null,
     sgp_sample_step = null,
