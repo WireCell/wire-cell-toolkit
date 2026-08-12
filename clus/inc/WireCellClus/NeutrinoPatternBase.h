@@ -252,27 +252,6 @@ namespace WireCell::Clus::PR {
         double m_es3sg_ang_ratio{1.0};            // require ang3 > ratio * ang10
         bool   m_es3sg_require_terminal{true};    // short arm's far end must be degree 1
 
-        // doc sbnd_xin/docs/pr/72 round 3 -- es3_stub_guard fixes the
-        // TOPOLOGY (keeps the stub as its own segment) but not the near-
-        // vertex GEOMETRY: with the junction gated out of improve_vertex
-        // (degree 2, not main_vertex, cluster is shower-dominated so
-        // flag_skip_two_legs also fires), neither arm's fitted path is ever
-        // straightened by MyFCN, so the trajectory still curves smoothly
-        // over the first few cm instead of showing a sharp two-track kink
-        // (measured on 196649: 26.8 deg annulus-PCA angle vs 18-21 deg in
-        // today's diluted near-vertex estimate).  m_es3sg_vertex_fit true
-        // marks the junction examine_structure_3 declines to merge
-        // (VertexFlags::kStubGuardJunction, PRVertex.h) and lets
-        // improve_vertex/fit_vertex (NeutrinoVertexFinder.cxx) admit it into
-        // MyFCN's two-track vertex position fit despite being a non-main,
-        // degree-2, shower-adjacent junction -- see fit_vertex's and
-        // improve_vertex's call sites for the exact bypassed gates.  Only
-        // takes effect when m_es3_stub_guard is also true.  C++ default
-        // false => the flag is never set and every consumer is a no-op =>
-        // byte-identical to before this round regardless of
-        // m_es3_stub_guard's own (already SBND-production) state.
-        bool   m_es3sg_vertex_fit{false};
-
         // doc pr/67 -- counterfactual for the owner's own 137238 hypothesis
         // ("is that limited by not sufficient rounds of doing the branch
         // searching?").  find_proto_vertex's nrounds_find_other_tracks is

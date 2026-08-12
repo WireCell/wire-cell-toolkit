@@ -191,7 +191,6 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_es3sg_ang3_min             = get(config, "es3sg_ang3_min",             m_es3sg_ang3_min);              // deg
     m_es3sg_ang_ratio            = get(config, "es3sg_ang_ratio",            m_es3sg_ang_ratio);
     m_es3sg_require_terminal     = get(config, "es3sg_require_terminal",     m_es3sg_require_terminal);
-    m_es3sg_vertex_fit           = get(config, "es3sg_vertex_fit",           m_es3sg_vertex_fit);
     // Detector-extent literals (docs/pr/2 sec. 2e(iv)), all cm.
     m_cosmic_y_top_main    = get(config, "cosmic_y_top_main",    m_cosmic_y_top_main);
     m_cosmic_y_top_strict  = get(config, "cosmic_y_top_strict",  m_cosmic_y_top_strict);
@@ -503,7 +502,6 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["es3sg_ang3_min"]         = m_es3sg_ang3_min;         // degrees
     cfg["es3sg_ang_ratio"]        = m_es3sg_ang_ratio;
     cfg["es3sg_require_terminal"] = m_es3sg_require_terminal;
-    cfg["es3sg_vertex_fit"]       = m_es3sg_vertex_fit;
     // Detector-extent literals (docs/pr/2 sec. 2e(iv)); defaults = uBooNE prototype, cm.
     cfg["cosmic_y_top_main"]    = m_cosmic_y_top_main;     // 100 = 17 cm below the uBooNE y=+117 top
     cfg["cosmic_y_top_strict"]  = m_cosmic_y_top_strict;   // 102 = 15 cm below
@@ -937,7 +935,6 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
     pattern_algos.m_es3sg_ang3_min             = m_es3sg_ang3_min;
     pattern_algos.m_es3sg_ang_ratio            = m_es3sg_ang_ratio;
     pattern_algos.m_es3sg_require_terminal     = m_es3sg_require_terminal;
-    pattern_algos.m_es3sg_vertex_fit           = m_es3sg_vertex_fit;
     // doc pr/67 P6: remove_segment() is a free function, so the knob is mirrored
     // into a file-static in PRGraph.cxx rather than read from pattern_algos.
     PR::set_traj_cover_probe(m_traj_cover_probe);

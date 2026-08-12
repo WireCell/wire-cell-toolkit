@@ -2189,15 +2189,8 @@ bool PatternAlgorithms::fit_vertex(Facade::Cluster& cluster, VertexPtr vertex, V
         fcn.AddSegment(*it);
     }
     
-    // If this is the main vertex, enforce two track fit.  doc pr/72 round 3:
-    // also enforce it at a junction es3_stub_guard protected and
-    // m_es3sg_vertex_fit marked -- MyFCN::FitVertex's own admission test
-    // (ntracks>=2 && enforce_two_track_fit && n_large_angles>=1) needs this
-    // to reach a non-main degree-2 junction, since ntracks==2 there can
-    // never satisfy the >2 branch.  False by default => no-op.
-    if (vertex == main_vertex ||
-        (m_es3sg_vertex_fit && vertex->flags_any(VertexFlags::kStubGuardJunction)))
-        fcn.set_enforce_two_track_fit(true);
+    // If this is the main vertex, enforce two track fit
+    if (vertex == main_vertex) fcn.set_enforce_two_track_fit(true);
     
     // Perform vertex fitting
     std::pair<bool, Facade::geo_point_t> results = fcn.FitVertex();
@@ -2550,20 +2543,8 @@ void PatternAlgorithms::improve_vertex(Graph& graph, Facade::Cluster& cluster, V
             }
         }
 
-        // doc pr/72 round 3: a junction examine_structure_3 declined to
-        // merge (VertexFlags::kStubGuardJunction) is admitted to the
-        // vertex-position fit below despite being non-main/degree-2/
-        // shower-adjacent -- the three gates that would otherwise skip it
-        // are the exact class es3_stub_guard's predicate already narrowed
-        // to a genuine near-vertex stub.  m_es3sg_vertex_fit short-circuits
-        // to false whenever it is off (the shipped default), so
-        // is_sg_junction is always false and every "&& !is_sg_junction"
-        // below is a no-op by construction -- byte-identical regardless of
-        // es3_stub_guard's own (already SBND-production) state.
-        bool is_sg_junction = m_es3sg_vertex_fit && vtx->flags_any(VertexFlags::kStubGuardJunction);
-
-        if (vertex_segments.size() <= 2 && vtx != main_vertex && !is_sg_junction) continue;
-
+        if (vertex_segments.size() <= 2 && vtx != main_vertex) continue;
+        
         int ntracks = 0, nshowers = 0;
         int n_long_muons = 0;
         for (auto sg : vertex_segments) {
@@ -2573,10 +2554,10 @@ void PatternAlgorithms::improve_vertex(Graph& graph, Facade::Cluster& cluster, V
             else ntracks++;
             if (segments_in_long_muon.find(sg) != segments_in_long_muon.end()) n_long_muons++;
         }
-
-        if (ntracks == 0 && vtx != main_vertex && !is_sg_junction) continue;
-        if (flag_skip_two_legs && vertex_segments.size() <= 2 && !is_sg_junction) continue;
-
+        
+        if (ntracks == 0 && vtx != main_vertex) continue;
+        if (flag_skip_two_legs && vertex_segments.size() <= 2) continue;
+        
         auto wcp_save = vtx->wcpt();
 
         s_log->trace("improve_vertex: cluster {} fitting vertex ({:.2f}, {:.2f}, {:.2f}) nsegs={}",

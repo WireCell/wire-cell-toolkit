@@ -163,10 +163,6 @@ TEST_CASE("clus knob defaults: TaggerCheckNeutrino switches are all OFF")
     // read/inert while es3_stub_guard is false).
     CHECK_KNOB_BOOL(cfg, "es3_stub_guard", false);
     CHECK_KNOB_BOOL(cfg, "es3sg_require_terminal", true);
-    // doc pr/72 round 3: admit the junction es3_stub_guard protects into
-    // improve_vertex's/MyFCN's two-track vertex fit -- OFF; inert unless
-    // es3_stub_guard is also true.
-    CHECK_KNOB_BOOL(cfg, "es3sg_vertex_fit", false);
 
     // Numeric knobs whose legacy value is the INERT one: 0 disables the guard,
     // so an absent key leaves the code path untouched.

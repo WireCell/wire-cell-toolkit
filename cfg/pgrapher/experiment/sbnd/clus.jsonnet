@@ -1404,7 +1404,6 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               es3sg_ang3_min=null,
               es3sg_ang_ratio=null,
               es3sg_require_terminal=null,
-              es3sg_vertex_fit=false,
               // doc pr/45 -- paint muon-typed (+-13) pseudo-showers as track in
               // the Bee shower_track layer + PrDisplayDump (18255-56463: 411 cm
               // muon painted red).  C++ default false; key suppressed when off
@@ -1995,7 +1994,6 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
             es3sg_ang3_min=es3sg_ang3_min,
             es3sg_ang_ratio=es3sg_ang_ratio,
             es3sg_require_terminal=es3sg_require_terminal,
-            es3sg_vertex_fit=es3sg_vertex_fit,
             muon_dqdx_curve=muon_dqdx_curve,
             sp_dedx_use_recomb_model=sp_dedx_use_recomb_model,
             sp_mean_dedx_cut=sp_mean_dedx_cut,
@@ -2756,7 +2754,6 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
               es3sg_ang3_min=null,
               es3sg_ang_ratio=null,
               es3sg_require_terminal=null,
-              es3sg_vertex_fit=false,
        pseudo_shower_track_paint=false,
        // Muon dQ/dx-vs-length envelope: DEFAULT = the docs/pr/10 SBND fit
        // (see the clus_pr arg comment; null restores the uBooNE refit).
@@ -2983,7 +2980,6 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 es3sg_ang3_min=es3sg_ang3_min,
                 es3sg_ang_ratio=es3sg_ang_ratio,
                 es3sg_require_terminal=es3sg_require_terminal,
-                es3sg_vertex_fit=es3sg_vertex_fit,
                 pseudo_shower_track_paint=pseudo_shower_track_paint,
                 muon_dqdx_curve=muon_dqdx_curve,
                 use_power_recomb=use_power_recomb,
