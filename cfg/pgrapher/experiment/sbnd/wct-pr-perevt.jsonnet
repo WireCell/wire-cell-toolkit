@@ -1399,13 +1399,19 @@ function(
     // 18259-18625 blob at (142.1,78.3,176.5) is exactly this -- a segment
     // legitimately wins those points, is then absorbed into its main-vertex
     // neighbor by examine_structure_final_1p, and its points are discarded
-    // with no re-derivation.  DEFAULT NOT SELECTED for SBND production this
-    // round -- implemented and validated (48-event nueCC off-gate 0/48,
-    // knob-on nusel byte-identical, doc pr/64 round 8), but not yet flipped;
-    // see the doc for the sample-wide mover census.  Override for A/B: -A
-    // assoc_clear_on_merge=true (or SBND_ASSOC_CLEAR_ON_MERGE=true).  C++
-    // knob default stays false.
-    assoc_clear_on_merge = false,
+    // with no re-derivation.  SBND PRODUCTION ON 2026-08-12, per owner
+    // confirmation of the round 8 validation: nusel-table.tsv byte-identical
+    // 48/48 on the nueCC48 sample (selection untouched); mabc-pr.zip moves
+    // on only 3/48 (54095/174637/389538, a much narrower footprint than
+    // round 7's Stage-C mechanism); every mover's kine_reco_Enu goes UP only
+    // (+4.377/+2.246/+0.602 MeV) -- monotonic, matching the mechanism
+    // (clearing only ever lets pr/59 add points back, never removes any);
+    // the reported evt 18625 blob itself is now resolved (0 -> 8 bbox
+    // points recovered).  wcdoctest-clus 176/176.  Legacy escape for A/B:
+    // -A assoc_clear_on_merge=false (or SBND_ASSOC_CLEAR_ON_MERGE=false)
+    // restores the pre-flip production bare, byte-exact.  C++ knob default
+    // itself stays false.
+    assoc_clear_on_merge = true,
 )
     local base = import 'pgrapher/experiment/sbnd/simparams.jsonnet';
     local params = base {
