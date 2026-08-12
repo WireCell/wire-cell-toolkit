@@ -1433,13 +1433,22 @@ function(
     // merging a genuine near-vertex track stub into an unrelated
     // shower/track trunk (18255-196649: a real 6.28cm stub, terminal at the
     // true neutrino vertex, silently absorbed into a 33cm shower trunk).
-    // NOT a production flip this round -- default stays false/legacy,
-    // threaded here only so -A es3_stub_guard=true (or
-    // SBND_ES3_STUB_GUARD=1) can reach it for validation.  C++ knob default
-    // itself stays false; key suppressed in the compiled config when off
-    // => byte-identical.  Numeric sub-parameters stay null (component's own
-    // C++ default, fitted from a 117-event census -- see doc pr/72 round 2).
-    es3_stub_guard = false,
+    // SBND PRODUCTION ON 2026-08-12, owner flip: a 480-point grid scan over
+    // the 48 nueCC + 19 NC pi0 + 50 PR data blast radius picked stub_max=7cm/
+    // len_ratio=2.0 (ang3_min=15deg/ang_ratio=1.0/require_terminal=true
+    // already correct) as the operating point that suppresses exactly ONE
+    // junction in the whole 117-event population -- 196649's own target --
+    // with an empty residual (misses) list; on-arm full-reconstruction
+    // validation confirmed 1/117 archive-level movers, 0/117 selection
+    // flips, and bundle-level TGM/STM/FC/lm byte-identical for 196649
+    // itself (evidence the main vertex determination is unperturbed).
+    // wcdoctest-clus 180/180.  Legacy escape for A/B: -A
+    // es3_stub_guard=false (or SBND_ES3_STUB_GUARD=0) restores the pre-flip
+    // production bare, byte-exact.  C++ knob default itself stays false;
+    // key suppressed in the compiled config when off => byte-identical.
+    // Numeric sub-parameters stay null (component's own C++ default, fitted
+    // from the same 117-event census -- see doc pr/72 round 2).
+    es3_stub_guard = true,
     es3sg_stub_max = null,
     es3sg_len_ratio = null,
     es3sg_ang3_min = null,
