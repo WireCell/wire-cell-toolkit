@@ -1373,11 +1373,19 @@ function(
     // that are image-supported but charge-poor, invisible to the
     // unsupported-fraction penalty at any scale).  C++ defaults:
     // weak_scale 0 (OFF), weak_qref 2000 (calc_charge_wcp charge units).
-    // null omits the keys => byte-identical round-5 production.  Escape
-    // for A/B: SBND_SGP_WEAK_SCALE=0 (or -A sgp_weak_scale=0); note
-    // steiner_gap_penalty=0 kills BOTH terms (pre-round-5 legacy).
-    sgp_weak_scale = null,
-    sgp_weak_qref = null,
+    // SBND PRODUCTION ON at (5.0, 6000) (2026-08-12): off-gates 0/117
+    // byte-identical; nusel/nusel-table 0/117 at both grid scales; both
+    // round-6 targets fixed (131357 clean 2-track V, MV 0.94 cm from the
+    // true corner; 506746 long track reaches the vertex).  DISCLOSED COST
+    // (doc pr/51 round 6 census): nu-vertex moves >10 cm on 25/115 and
+    // kine_reco_Enu by >100 MeV on ~44/115 -- same footprint class as the
+    // accepted round-5 flip measured identically (17 and 30), majority the
+    // same bistable events; every >10cm mover is in the pr51r6 Bee sets.
+    // Escape for A/B: SBND_SGP_WEAK_SCALE=0 (or -A sgp_weak_scale=0)
+    // restores round-5 production byte-exact; note steiner_gap_penalty=0
+    // kills BOTH terms (pre-round-5 legacy).
+    sgp_weak_scale = 5.0,
+    sgp_weak_qref = 6000.0,
     // doc pr/54 -- keep well-supported isolated residual segments in
     // find_other_segments (18255-142421 "missing gammas": a separated EM
     // shower of the main cluster is fit and then silently discarded because
