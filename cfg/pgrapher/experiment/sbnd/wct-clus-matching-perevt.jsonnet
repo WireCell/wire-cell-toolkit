@@ -222,6 +222,16 @@ function(
     // cosmic band, neutrino re-merged them at 0.31 cm).  false omits the keys
     // => byte-identical pre-knob config (runner: SBND_NU_ISO_GUARD=0).
     nu_iso_band_guard = true,
+    // nu_band_veto (SBND PRODUCTION ON, owner flip 2026-08-12 -- doc pr/66):
+    // nu_iso_band_guard above stops the per-APA chain from merging a band
+    // with a drift-spanning partner, but the SEPARATE all-APA clustering
+    // chain has no iso-band guard of its own and can re-merge the exact pair
+    // per-APA just refused (run 18255 evt 10550: the 1e1p nu candidate and a
+    // TGM cosmic band are correctly split at img-global, then fused again by
+    // the time Q/L runs).  false (legacy escape, runner: SBND_NU_BAND_VETO=0)
+    // omits the key => compiled config byte-identical to before the knob
+    // existed.
+    nu_band_veto = true,
     // iso_cathode_guard (SBND default FALSE -- doc pr/19 campaign, pending
     // validation): per-APA clustering_isolated declines the angle-less 80 cm
     // small->big absorb for a small cluster within 30 cm of the cathode that
@@ -288,7 +298,7 @@ function(
         subRunNo=subrun,
         eventNo=event,
         reality=reality);
-    local clus_pipes = [clus_maker.per_apa(anodes[n], dump=false, trace_bee=trace_bee, save_assoc_id=save_assoc, sep_vertex_veto=sep_vertex_veto, nu_iso_band_guard=nu_iso_band_guard, iso_cathode_guard=iso_cathode_guard)
+    local clus_pipes = [clus_maker.per_apa(anodes[n], dump=false, trace_bee=trace_bee, save_assoc_id=save_assoc, sep_vertex_veto=sep_vertex_veto, nu_iso_band_guard=nu_iso_band_guard, iso_cathode_guard=iso_cathode_guard, nu_band_veto=nu_band_veto)
                         for n in std.range(0, nanodes - 1)];
 
     // --- Q/L matching nodes ---

@@ -3048,6 +3048,35 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
                 }
             }
         }
+        // "nu_band_veto_role" (ClusteringNeutrino's record_band_veto, doc
+        // pr/66) needs the same key-homogeneity fill-in as the block above,
+        // and for the same reason: presence-triggered rather than a knob of
+        // its own, so writer-on/fill-in-off can never happen and leave a
+        // "perblob" PC whose key set differs between clusters (Dataset::append
+        // raises at the next merge).  Fill iff somebody actually wrote it.
+        {
+            bool any_bandveto = false;
+            for (Cluster* cluster : grouping.children()) {
+                if (cluster->has_pcarray<int>("nu_band_veto_role", "perblob")) {
+                    any_bandveto = true;
+                    break;
+                }
+            }
+            if (any_bandveto) {
+                // Gate on "has a perblob PC at all" -- same wide gate as
+                // real_cluster_was_main above, for the same reason.
+                for (Cluster* cluster : grouping.children()) {
+                    const auto& lpcs = cluster->value().local_pcs();
+                    if (lpcs.find("perblob") == lpcs.end()) continue;
+                    if (cluster->has_pcarray<int>("nu_band_veto_role", "perblob")) continue;
+                    // 0 = unmarked, the array's own documented value -- and
+                    // exactly what PointTreeMerging's normalize_pctree_local_pcs
+                    // would zero-fill anyway, so the two agree.
+                    cluster->put_pcarray(std::vector<int>(cluster->nchildren(), 0),
+                                         "nu_band_veto_role", "perblob");
+                }
+            }
+        }
         auto node = ensemble.remove_child(grouping);
         check_perblob_provenance(*node, "save:" + outpath(name, ident));
         auto tens = as_tensors(*node, outpath(name, ident));

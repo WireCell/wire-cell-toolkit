@@ -475,6 +475,17 @@ private:
                     const double xshift = far_xshift(live_grouping, *kf.cluster, kb.t0 - kf.t0);
                     if (!is_cathode_crossing_pair(*kb.cluster, *kf.cluster,
                                                   kb.length, kf.length, xshift, p_)) continue;
+                    // Iso-band veto (doc pr/66): never select a pair the
+                    // per-APA neutrino guard refused.  Applied HERE, at
+                    // candidate SELECTION, rather than via merge_clusters'
+                    // edge filter: this loop commits to one pair per round and
+                    // aborts the whole rescue with a warning if the resulting
+                    // merge doesn't produce exactly one cluster, so a
+                    // post-selection veto would turn a declined merge into a
+                    // rescue-wide stop instead of simply trying the next
+                    // candidate.  Constant-false when the array was never
+                    // written (knob off), so this costs nothing then.
+                    if (band_veto_forbids(kb.cluster, kf.cluster)) continue;
                     best_beam = &kb;
                     best_far = &kf;
                     break;
@@ -651,6 +662,10 @@ private:
                         const double xshift = far_xshift(live_grouping, *ko.cluster, kb.t0);
                         if (!is_cathode_crossing_pair(*kb.cluster, *ko.cluster,
                                                       kb.length, ko.length, xshift, p_)) continue;
+                        // Iso-band veto (doc pr/66): see the crosser-rescue
+                        // selection loop above for why this must be a
+                        // selection-time cut, not a post-selection one.
+                        if (band_veto_forbids(kb.cluster, ko.cluster)) continue;
                         best_beam = &kb;
                         best_orphan = &ko;
                         break;
@@ -794,6 +809,10 @@ private:
                             if (d < gap) gap = d;
                         }
                         if (gap >= p_.adopt_dis) continue;
+                        // Iso-band veto (doc pr/66): see the crosser-rescue
+                        // selection loop above for why this must be a
+                        // selection-time cut, not a post-selection one.
+                        if (band_veto_forbids(kb.cluster, kf.cluster)) continue;
                         best_beam = &kb;
                         best_frag = &kf;
                         best_gap = gap;

@@ -8,6 +8,7 @@
 #include "WireCellAux/Logger.h"
 
 #include <unordered_map>
+#include <unordered_set>
 
 
 class ClusteringExamineBundles;
@@ -151,14 +152,51 @@ static void clustering_examine_bundles(
             map_cluster_index[live] = ilive;
             ilive2desc[ilive] = boost::add_vertex(ilive, g);
         }
+        // Iso-band veto, GROUP level (doc pr/66; see cluster_has_band_veto_role's
+        // header comment for why this stage needs more than the pairwise edge
+        // veto merge_clusters() applies everywhere else).  This stage's edges
+        // are gated ONLY on shared flash time -- no geometric distance check at
+        // all -- so a third, unmarked cluster sharing a flash group can bridge
+        // a marked band and a marked non-band cluster into one connected
+        // component even with the direct edge between them dropped.  Exclude
+        // every non-band-marked cluster from EVERY edge in a flash-time group
+        // that also contains a band-marked cluster: it sits out this round's
+        // collapse (remains its own cluster / associated fragment) rather than
+        // being reachable via any path.  Fail-open: no marked cluster anywhere
+        // (the knob-off, common case) => no group ever qualifies => this costs
+        // one cheap scan and excludes nothing => byte-identical.
+        std::set<int> groups_with_band;
+        for (auto c : pre_clusters) {
+            if (cluster_has_band_veto_role(c, band_veto_band)) {
+                groups_with_band.insert(flash_t0_group.at(c));
+            }
+        }
+        // membership only, never iterated -- ok as pointer-keyed (CLAUDE.md
+        // determinism rule targets iteration order, not lookup).
+        std::unordered_set<const Cluster*> excluded_nonband;
+        if (!groups_with_band.empty()) {
+            for (auto c : pre_clusters) {
+                if (groups_with_band.count(flash_t0_group.at(c)) &&
+                    cluster_has_band_veto_role(c, band_veto_nonband)) {
+                    excluded_nonband.insert(c);
+                }
+            }
+            if (!excluded_nonband.empty()) {
+                log->info("nu_band_veto: group exclusion, {} band-marked flash group(s), "
+                          "{} non-band-marked cluster(s) sat out of the flash-t0 collapse",
+                          groups_with_band.size(), excluded_nonband.size());
+            }
+        }
         // Edge between every pair of in-scope clusters sharing a flash-time group.
         // Unmatched clusters get unique singleton groups, so they are never linked.
         for (size_t i = 0; i < pre_clusters.size(); ++i) {
             auto c1 = pre_clusters[i];
             if (!c1->get_scope_filter(scope)) continue;
+            if (excluded_nonband.count(c1)) continue;
             for (size_t j = i + 1; j < pre_clusters.size(); ++j) {
                 auto c2 = pre_clusters[j];
                 if (!c2->get_scope_filter(scope)) continue;
+                if (excluded_nonband.count(c2)) continue;
                 if (flash_t0_group.at(c1) != flash_t0_group.at(c2)) continue;
                 boost::add_edge(ilive2desc[map_cluster_index[c1]],
                                 ilive2desc[map_cluster_index[c2]], g);

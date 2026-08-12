@@ -203,6 +203,52 @@ namespace WireCell::Clus::Facade {
                                          const std::string& orig_main_aname="",
                                          const std::string& orig_wasmain_aname="");
 
+    // Role values written into the "nu_band_veto_role" per-blob array by
+    // ClusteringNeutrino's protect_iso_band_xext veto (record_band_veto knob,
+    // doc pr/66): 0 = unmarked, band_veto_band = this blob's cluster was
+    // refused as the isochronous-band side of a pair, band_veto_nonband = it
+    // was refused as the drift-spanning non-band side.  iso_band_like() is an
+    // intrinsic property of a cluster, so a cluster's role is fixed for the
+    // whole event -- a second refusal involving the same cluster can only
+    // re-assert the same value, never conflict.
+    enum { band_veto_none = 0, band_veto_band = 1, band_veto_nonband = 2 };
+
+    // Does the "nu_band_veto_role" provenance forbid merging clusters `a` and
+    // `b`?  True iff one carries at least one band_veto_band row and the other
+    // at least one band_veto_nonband row (either orientation).  Returns FALSE
+    // (no opinion) whenever either cluster lacks the array or its length
+    // disagrees with nchildren() -- so a build/config that never writes the
+    // array (the knob-off, non-SBND, or pre-this-change case) can never reach
+    // a veto.  Fail open, the same discipline merge_clusters' carry and
+    // clustering_switch_scope's carve already use for provenance arrays.
+    //
+    // Used by merge_clusters() itself (edges between vetoed pairs are dropped
+    // before connected_components, covering every merge stage in the codebase
+    // -- including ClusteringExtendLoop's inner clustering_extend() calls,
+    // which have no configuration surface of their own) and, separately, by
+    // clustering_cathode_bundle_rescue.cxx's three candidate-selection loops
+    // (which cannot go through merge_clusters' edge filter: each round there
+    // aborts the whole rescue with a warning if its one edge fails to produce
+    // exactly one merged cluster, so the veto must apply before that edge is
+    // ever built).
+    bool band_veto_forbids(const Cluster* a, const Cluster* b,
+                           const std::string& pcname = "perblob");
+
+    // Does cluster `c` carry at least one blob with "nu_band_veto_role" ==
+    // `role`?  Fail-open false on any absent/mismatched array, same contract
+    // as band_veto_forbids().  Exposed for ClusteringExamineBundles' flash-
+    // time pre-merge (doc pr/66): that stage's edges are gated ONLY on shared
+    // flash time, with no geometric distance check at all, so a third,
+    // unmarked cluster sharing the flash group can bridge a band and a
+    // non-band cluster into one connected component even though the direct
+    // edge between them is dropped by band_veto_forbids() inside
+    // merge_clusters().  A pairwise edge veto cannot see or prevent this
+    // transitive bridge; only a GROUP-level exclusion can, which is why this
+    // predicate is exposed rather than kept file-local like band_veto_forbids'
+    // implementation detail.
+    bool cluster_has_band_veto_role(const Cluster* c, int role,
+                                    const std::string& pcname = "perblob");
+
     // Assign each cluster an integer "flash-time group" id.  Clusters whose
     // matched flash time (cluster_t0) differ by less than `window` share a group
     // id.  A cluster without a valid matched flash (scalar "flash" < 0) gets a

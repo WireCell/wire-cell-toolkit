@@ -238,19 +238,20 @@ local bs_dead_face(apa, face) = {
 // shower fragments absorbed by a cosmic 46-76 cm away; the true parent sat
 // 1.9 cm across the cathode, invisible per-APA).  false omits the key =>
 // compiled config byte-identical to before the knob existed.
-// nu_band_veto (SBND default FALSE this round, doc pr/66): nu_iso_band_guard
-// above stops the per-APA chain from merging a band with a drift-spanning
-// partner, but the SEPARATE all-APA clustering chain (clus_all_apa below) has
-// no iso-band guard of its own and can re-merge the exact pair per-APA just
-// refused (run 18255 evt 10550: the 1e1p nu candidate and a TGM cosmic band
-// are correctly split at img-global, then fused again by the time Q/L runs).
-// When true, each per-APA refusal is recorded as a per-blob
-// "nu_band_veto_role" provenance array that merge_clusters() (and the cathode
-// bundle rescue's candidate selection) honor everywhere downstream, including
-// the all-APA chain -- see clus/src/ClusteringFuncs.cxx band_veto_forbids().
-// false omits the key => compiled config byte-identical to before the knob
-// existed; only meaningful with nu_iso_band_guard on.
-local clus_per_face(anode, face, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=null, rse_from_ident=false, pos_offset_on=true, trace_bee=false, save_assoc_id=false, sep_vertex_veto=true, nu_iso_band_guard=true, iso_cathode_guard=false, nu_band_veto=false) = {
+// nu_band_veto (SBND PRODUCTION ON, owner flip 2026-08-12, doc pr/66):
+// nu_iso_band_guard above stops the per-APA chain from merging a band with a
+// drift-spanning partner, but the SEPARATE all-APA clustering chain
+// (clus_all_apa below) has no iso-band guard of its own and can re-merge the
+// exact pair per-APA just refused (run 18255 evt 10550: the 1e1p nu candidate
+// and a TGM cosmic band are correctly split at img-global, then fused again
+// by the time Q/L runs). When true, each per-APA refusal is recorded as a
+// per-blob "nu_band_veto_role" provenance array that merge_clusters() (and
+// the cathode bundle rescue's candidate selection) honor everywhere
+// downstream, including the all-APA chain -- see
+// clus/src/ClusteringFuncs.cxx band_veto_forbids(). false (legacy escape via
+// SBND_NU_BAND_VETO=0) omits the key => compiled config byte-identical to
+// before the knob existed; only meaningful with nu_iso_band_guard on.
+local clus_per_face(anode, face, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=null, rse_from_ident=false, pos_offset_on=true, trace_bee=false, save_assoc_id=false, sep_vertex_veto=true, nu_iso_band_guard=true, iso_cathode_guard=false, nu_band_veto=true) = {
     local dv = detector_volumes([anode], face, pos_offset_on),
     local pcts = pctransforms(dv),
     local bsl = bs_live_face(anode.name, face),
@@ -2320,7 +2321,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                       bee_sink=bee_sink, rse_from_ident=rse_from_ident, pos_offset_on=pos_offset_on),
     // trace_bee (default false): per-step Bee layers for merge attribution; see
     // trace_sets above.  Diagnostic only, off => byte-identical compiled config.
-    per_apa(anode, dump=true, bee_sink=null, trace_bee=false, save_assoc_id=false, sep_vertex_veto=true, nu_iso_band_guard=true, iso_cathode_guard=false, nu_band_veto=false)::
+    per_apa(anode, dump=true, bee_sink=null, trace_bee=false, save_assoc_id=false, sep_vertex_veto=true, nu_iso_band_guard=true, iso_cathode_guard=false, nu_band_veto=true)::
         clus_per_face(anode, face=0, dump=dump,
                       output_dir=output_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo,
                       bee_sink=bee_sink, rse_from_ident=rse_from_ident, pos_offset_on=pos_offset_on,
