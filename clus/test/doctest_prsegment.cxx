@@ -345,3 +345,70 @@ TEST_CASE("clus pr47 wide kink: short arm cannot fire; angle 0 disables") {
     CHECK(segment_cathode_wide_kink_accepts(fits_kink, 0, 0.0,
                                             3 * units::cm, 15 * units::cm).empty());
 }
+
+// doc sbnd_xin/docs/pr/72 round 2 -- es3_stub_suppress, the pure predicate
+// examine_structure_3 (NeutrinoStructureExaminer.cxx) uses, when
+// es3_stub_guard is on, to decline merging a genuine near-vertex track
+// stub into a shower/track trunk.  Numbers below are the real 18255-196649
+// measurements (worktree pinned at efef4535): a 6.28cm stub, terminal
+// (deg_short=1) at the true neutrino vertex, meeting a 33.19cm trunk at
+// ang10=16.450deg / ang3=20.993deg.
+
+TEST_CASE("clus pr72 es3 stub guard: 196649 shape suppresses with default params") {
+    Es3StubGuardParams p;  // shipped defaults (117-evt grid-scan pick): 7cm / 2.0 / 15deg / 1.0 / terminal-required
+    CHECK(es3_stub_suppress(6.28 * units::cm, 33.19 * units::cm, 20.993, 16.450,
+                             /*deg_short=*/1, /*nfit_short=*/11, /*nfit_long=*/56, p));
+}
+
+TEST_CASE("clus pr72 es3 stub guard: non-terminal short arm is NOT suppressed") {
+    // Same shape as 196649, but the short arm's far end has degree 2 (it
+    // chains further into the graph instead of ending at a free vertex
+    // candidate) -- the real near-miss pattern seen at evt235435/423981 in
+    // the 117-event census, which the terminal-degree requirement exists to
+    // spare.
+    Es3StubGuardParams p;
+    CHECK_FALSE(es3_stub_suppress(6.28 * units::cm, 33.19 * units::cm, 20.993, 16.450,
+                                   /*deg_short=*/2, 11, 56, p));
+    // With require_terminal explicitly off, the same non-terminal junction
+    // DOES suppress -- proves the toggle acts in both directions, not just
+    // "off never fires".
+    p.require_terminal = false;
+    CHECK(es3_stub_suppress(6.28 * units::cm, 33.19 * units::cm, 20.993, 16.450,
+                             2, 11, 56, p));
+}
+
+TEST_CASE("clus pr72 es3 stub guard: degenerate arm (nfit<2) never suppresses, either side") {
+    // segment_track_length returns 0.0 for an arm with < 2 fit points
+    // (PRSegmentFunctions.cxx), which would otherwise read as "the short
+    // arm" and divide len_long/len_short by (near-)zero.  The guard must
+    // catch degeneracy on EITHER arm, not just the short one.
+    Es3StubGuardParams p;
+    CHECK_FALSE(es3_stub_suppress(0.0, 33.19 * units::cm, 20.993, 16.450,
+                                   1, /*nfit_short=*/1, 56, p));
+    CHECK_FALSE(es3_stub_suppress(6.28 * units::cm, 33.19 * units::cm, 20.993, 16.450,
+                                   1, 11, /*nfit_long=*/1, p));
+    // Below the absolute length floor (0.5cm), even with nfit>=2 on both
+    // sides: a near-zero-length "stub" is a fit artifact, not a real track.
+    CHECK_FALSE(es3_stub_suppress(0.2 * units::cm, 33.19 * units::cm, 20.993, 16.450,
+                                   1, 3, 56, p));
+}
+
+TEST_CASE("clus pr72 es3 stub guard: threshold boundaries") {
+    Es3StubGuardParams p;  // stub_max=7cm len_ratio=2.0 ang3_min=15deg ang_ratio=1.0
+
+    // stub_max: strictly less-than.
+    CHECK(es3_stub_suppress(6.99 * units::cm, 33.19 * units::cm, 20.993, 16.450, 1, 11, 56, p));
+    CHECK_FALSE(es3_stub_suppress(7.01 * units::cm, 33.19 * units::cm, 20.993, 16.450, 1, 11, 56, p));
+
+    // len_ratio: strictly greater-than (long/short).
+    CHECK(es3_stub_suppress(6.28 * units::cm, 6.28 * 2.01 * units::cm, 20.993, 16.450, 1, 11, 56, p));
+    CHECK_FALSE(es3_stub_suppress(6.28 * units::cm, 6.28 * 1.99 * units::cm, 20.993, 16.450, 1, 11, 56, p));
+
+    // ang3_min: strictly greater-than.
+    CHECK(es3_stub_suppress(6.28 * units::cm, 33.19 * units::cm, 15.01, 10.0, 1, 11, 56, p));
+    CHECK_FALSE(es3_stub_suppress(6.28 * units::cm, 33.19 * units::cm, 14.99, 10.0, 1, 11, 56, p));
+
+    // ang_ratio: ang3 must strictly exceed ang_ratio * ang10.
+    CHECK(es3_stub_suppress(6.28 * units::cm, 33.19 * units::cm, 20.0, 19.9, 1, 11, 56, p));
+    CHECK_FALSE(es3_stub_suppress(6.28 * units::cm, 33.19 * units::cm, 20.0, 20.1, 1, 11, 56, p));
+}

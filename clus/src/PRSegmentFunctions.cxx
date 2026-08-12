@@ -4032,4 +4032,30 @@ namespace WireCell::Clus::PR {
         return flag_shower_topology;
     }
 
+    // doc sbnd_xin/docs/pr/72 round 2 -- see the doc comment on
+    // Es3StubGuardParams (PRSegmentFunctions.h) for the physics and the
+    // 117-event fit that chose these defaults. All five conditions must
+    // hold for suppression; any one failing means "let the merge happen"
+    // (i.e. false = legacy examine_structure_3 behavior for that junction).
+    bool es3_stub_suppress(double len_short, double len_long, double ang3, double ang10,
+                            int deg_short, int nfit_short, int nfit_long,
+                            const Es3StubGuardParams& params) {
+        // Degeneracy guard: segment_track_length returns 0.0 for an arm
+        // with < 2 fit points (PRSegmentFunctions.cxx, segment_track_length
+        // flag==0 branch), which would otherwise always read as "the short
+        // arm" and make len_long/len_short divide by (near-)zero. Never
+        // suppress on a degenerate arm -- production behavior (merge)
+        // stands, exactly as if this guard didn't exist.
+        if (nfit_short < 2 || nfit_long < 2) return false;
+        if (!(len_short > 0.5 * units::cm)) return false;
+
+        if (!(len_short < params.stub_max)) return false;
+        if (!(len_long > params.len_ratio * len_short)) return false;
+        if (!(ang3 > params.ang3_min)) return false;
+        if (!(ang3 > params.ang_ratio * ang10)) return false;
+        if (params.require_terminal && deg_short != 1) return false;
+
+        return true;
+    }
+
 }

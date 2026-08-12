@@ -1429,6 +1429,22 @@ function(
     // restores the pre-flip production bare, byte-exact.  C++ knob default
     // itself stays false.
     assoc_clear_on_merge = true,
+    // doc sbnd_xin/docs/pr/72 round 2 -- guard examine_structure_3 against
+    // merging a genuine near-vertex track stub into an unrelated
+    // shower/track trunk (18255-196649: a real 6.28cm stub, terminal at the
+    // true neutrino vertex, silently absorbed into a 33cm shower trunk).
+    // NOT a production flip this round -- default stays false/legacy,
+    // threaded here only so -A es3_stub_guard=true (or
+    // SBND_ES3_STUB_GUARD=1) can reach it for validation.  C++ knob default
+    // itself stays false; key suppressed in the compiled config when off
+    // => byte-identical.  Numeric sub-parameters stay null (component's own
+    // C++ default, fitted from a 117-event census -- see doc pr/72 round 2).
+    es3_stub_guard = false,
+    es3sg_stub_max = null,
+    es3sg_len_ratio = null,
+    es3sg_ang3_min = null,
+    es3sg_ang_ratio = null,
+    es3sg_require_terminal = null,
 )
     local base = import 'pgrapher/experiment/sbnd/simparams.jsonnet';
     local params = base {
@@ -1647,6 +1663,12 @@ function(
                              assoc_full_recluster=assoc_full_recluster,
                              assoc_reassign_orphans=assoc_reassign_orphans,
                              assoc_clear_on_merge=assoc_clear_on_merge,
+                             es3_stub_guard=es3_stub_guard,
+                             es3sg_stub_max=es3sg_stub_max,
+                             es3sg_len_ratio=es3sg_len_ratio,
+                             es3sg_ang3_min=es3sg_ang3_min,
+                             es3sg_ang_ratio=es3sg_ang_ratio,
+                             es3sg_require_terminal=es3sg_require_terminal,
                              pseudo_shower_track_paint=pseudo_shower_track_paint,
                              reclass_never_computed_ke_floor=reclass_never_computed_ke_floor,
                              muon_dqdx_curve=muon_dqdx_curve,

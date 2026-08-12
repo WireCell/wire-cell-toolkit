@@ -2,13 +2,22 @@
 #include "WireCellClus/PRSegmentFunctions.h"
 
 #include "WireCellAux/Logger.h"
+#include "WireCellUtil/Spdlog.h" // for fmt, used by the pr/72 round 2 census
 
 #include <algorithm>
+#include <array>
+#include <atomic>
+#include <cstdlib>
 
 using namespace WireCell::Clus::PR;
 using namespace WireCell::Clus;
 
 static auto s_log = WireCell::Log::logger("clus.NeutrinoPattern");
+
+// doc sbnd_xin/docs/pr/72 round 2: census call counter for
+// examine_structure_3's WCT_ES3_MERGE_CENSUS diagnostic (see below).
+// Only ever incremented when the census is enabled; otherwise dead.
+static std::atomic<long> s_es3_calls{0};
 
 namespace {
     // doc sbnd_xin/docs/pr/64 round 8: examine_structure_final_1/_1p/_3 merge
@@ -30,6 +39,88 @@ namespace {
         auto dpc = loser->dpcloud("associate_points");
         if (!dpc || dpc->npoints() == 0) return;
         survivor->dpcloud("associate_points", nullptr);
+    }
+
+    // doc sbnd_xin/docs/pr/72 round 2: diagnostic-only helpers for
+    // examine_structure_3's WCT_ES3_MERGE_CENSUS (env-gated; unset => these
+    // are never called, no behavior change of any kind).  They deliberately
+    // DUPLICATE segment_cal_dir_3vector's and segment_median_dQ_dx's
+    // arithmetic bit-for-bit rather than reusing/wrapping those functions,
+    // because the census needs the point count and raw distance behind each
+    // figure -- a bare angle or median can't distinguish "no points in
+    // range" from "centroid exactly on the vertex" / "true zero contrast".
+    // The duplication never replaces a value production computes and never
+    // feeds back into the merge decision (18255-196649: see doc pr/72).
+
+    // Mirrors segment_cal_dir_3vector(seg, p, dis_cut) exactly (see
+    // PRSegmentFunctions.cxx), additionally reporting the point count n and
+    // the raw centroid distance d that a bare direction vector hides.
+    struct Es3DirScan {
+        WireCell::Vector dir{0, 0, 0};
+        int n = 0;
+        double d = -1;  // internal units; |centroid - p|; -1 sentinel when n == 0
+    };
+    Es3DirScan es3_census_dir_scan(WireCell::Clus::PR::SegmentPtr seg, const WireCell::Point& p, double dis_cut) {
+        Es3DirScan r;
+        if (!seg) return r;
+        WireCell::Point sum(0, 0, 0);
+        for (const auto& fit : seg->fits()) {
+            if ((fit.point - p).magnitude() < dis_cut) {
+                sum = sum + fit.point;
+                r.n++;
+            }
+        }
+        if (r.n == 0) return r;
+        WireCell::Point avg = sum * (1.0 / r.n);
+        WireCell::Vector v = avg - p;
+        r.d = v.magnitude();
+        if (r.d > 0) r.dir = v.norm();
+        return r;
+    }
+
+    // (180deg - angle between two unit vectors), the same convention
+    // examine_structure_3 uses for angle_10cm/angle_3cm: small = collinear.
+    // -1 when either scan found zero points in range -- callers must check
+    // n on both scans, not just this return value, before trusting it.
+    double es3_census_angle_deg(const Es3DirScan& a, const Es3DirScan& b) {
+        if (a.dir.magnitude() == 0 || b.dir.magnitude() == 0) return -1.0;
+        double cosv = a.dir.dot(b.dir) / (a.dir.magnitude() * b.dir.magnitude());
+        return (3.1415926 - std::acos(cosv)) / 3.1415926 * 180.0;
+    }
+
+    // Mirrors segment_median_dQ_dx's filter (fit.valid() && fit.dx > 0 &&
+    // fit.dQ >= 0) and formula (dQ / (dx + 1e-9)), median via nth_element --
+    // additionally reporting the surviving count, since 0 is the explicit
+    // "dQ/dx unavailable on this arm" marker (a segment fresh out of the
+    // last find_other_segments round can still carry the Fit{} default
+    // dQ=-1, which fails the filter entirely).  When vtx_point is non-null,
+    // splits by distance from it at cut (near: <cut, far: >=cut) so a short
+    // arm's near-vertex dQ/dx isn't diluted against a long arm's whole-track
+    // median.
+    struct Es3DqdxStat {
+        double median = -1;
+        int n = 0;
+    };
+    Es3DqdxStat es3_census_dqdx(WireCell::Clus::PR::SegmentPtr seg, const WireCell::Point* vtx_point, bool near, double cut) {
+        Es3DqdxStat st;
+        if (!seg) return st;
+        std::vector<double> vals;
+        for (const auto& fit : seg->fits()) {
+            if (!(fit.valid() && fit.dx > 0 && fit.dQ >= 0)) continue;
+            if (vtx_point) {
+                double dis = (fit.point - *vtx_point).magnitude();
+                if (near && !(dis < cut)) continue;
+                if (!near && !(dis >= cut)) continue;
+            }
+            vals.push_back(fit.dQ / (fit.dx + 1e-9));
+        }
+        st.n = static_cast<int>(vals.size());
+        if (!vals.empty()) {
+            size_t mid = vals.size() / 2;
+            std::nth_element(vals.begin(), vals.begin() + mid, vals.end());
+            st.median = vals[mid];
+        }
+        return st;
     }
 }
 
@@ -387,11 +478,26 @@ bool PatternAlgorithms::examine_structure_2(Graph& graph, Facade::Cluster& clust
 }
 
 bool PatternAlgorithms::examine_structure_3(Graph& graph, Facade::Cluster& cluster, TrackFitting& track_fitter, IDetectorVolumes::pointer dv){
+    // doc pr/72 round 2: log-only, env-gated (WCT_ES3_MERGE_CENSUS unset =>
+    // es3_census is false, nothing gated on it below ever runs -- no log
+    // lines, no extra computation, no behavior change of any kind).  See
+    // the ES3PB/ES3CENSUS/ES3MERGE blocks below and the es3_census_* helpers
+    // at the top of this file.  es3_call disambiguates multiple invocations
+    // of this function within one process; es3_sweep disambiguates the
+    // re-scan this function does after every merge (the while loop below --
+    // a declined junction is re-examined once per sweep, and only the
+    // terminal sweep, the one with no merge, enumerates every surviving
+    // junction).
+    static const bool es3_census = std::getenv("WCT_ES3_MERGE_CENSUS") != nullptr;
+    const long es3_call = es3_census ? ++s_es3_calls : -1;
+    int es3_sweep = -1;
+
     bool flag_update = false;
     bool flag_continue = true;
-    
+
     while (flag_continue) {
         flag_continue = false;
+        es3_sweep++;
 
         // Iterate in insertion order for deterministic results
         for (const auto& vd_cur : ordered_nodes(graph)) {
@@ -403,6 +509,19 @@ bool PatternAlgorithms::examine_structure_3(Graph& graph, Facade::Cluster& clust
             // Check if this vertex has exactly 2 connected segments
             auto vd = vtx->get_descriptor();
             if (boost::degree(vd, graph) != 2) continue;
+
+            // doc pr/72 round 2: log-only, env-gated (WCT_ES3_MERGE_CENSUS)
+            // census of every degree-2 junction skipped because it is
+            // already protected, so the population report can account for
+            // every degree-2 vertex ES3 sees -- not just the ones it merges
+            // or declines on angle grounds.  No-op when disabled.
+            if (es3_census && vtx->flags_any(VertexFlags::kProtectedBreak)) {
+                WireCell::Point pb_point = vtx->fit().valid() ? vtx->fit().point : vtx->wcpt().point;
+                SPDLOG_LOGGER_DEBUG(s_log,
+                    "ES3PB call={} sweep={} clus={} vtx=({:.2f},{:.2f},{:.2f})",
+                    es3_call, es3_sweep, cluster.ident(),
+                    pb_point.x()/units::cm, pb_point.y()/units::cm, pb_point.z()/units::cm);
+            }
 
             // doc pr/48: never merge through a protected break vertex.
             // No-op when no vertex carries the flag => byte-identical.
@@ -429,7 +548,91 @@ bool PatternAlgorithms::examine_structure_3(Graph& graph, Facade::Cluster& clust
             // Calculate direction vectors at 10cm
             WireCell::Vector dir1 = segment_cal_dir_3vector(sg1, vtx_point, 10*units::cm);
             WireCell::Vector dir2 = segment_cal_dir_3vector(sg2, vtx_point, 10*units::cm);
-            
+
+            // doc pr/72 round 2: log-only, env-gated (WCT_ES3_MERGE_CENSUS)
+            // census of every degree-2 junction ES3 evaluates -- merged and
+            // declined alike (production's TRACE at the merge site below
+            // only fires on an actual merge, so declined junctions
+            // otherwise leave no trace).  Placed here, before the
+            // zero-magnitude `continue` right below, so degenerate
+            // (direction-undetermined) junctions are captured too.
+            // Deliberately recomputes its own independent multi-radius scan
+            // (es3_census_dir_scan -- bit-identical formula to
+            // segment_cal_dir_3vector, see that helper's comment) rather
+            // than reusing dir1/dir2 above, so this block is fully
+            // self-contained: it only READS graph/segment/vertex state,
+            // never dir1/dir2/angle_10cm, and the unedited lines below are
+            // untouched regardless of whether this block runs.
+            if (es3_census) {
+                static const std::array<double, 6> radii_cm = {2.0, 3.0, 5.0, 10.0, 15.0, 20.0};
+
+                WireCell::Point vtx1_point = vtx1->fit().valid() ? vtx1->fit().point : vtx1->wcpt().point;
+                WireCell::Point vtx2_point = vtx2->fit().valid() ? vtx2->fit().point : vtx2->wcpt().point;
+
+                long deg1 = vtx1->descriptor_valid() ? static_cast<long>(boost::degree(vtx1->get_descriptor(), graph)) : -1;
+                long deg2 = vtx2->descriptor_valid() ? static_cast<long>(boost::degree(vtx2->get_descriptor(), graph)) : -1;
+
+                double len1 = segment_track_length(sg1);
+                double len2 = segment_track_length(sg2);
+                double dlen1 = segment_track_direct_length(sg1);
+                double dlen2 = segment_track_direct_length(sg2);
+                double dev1 = segment_track_max_deviation(sg1);
+                double dev2 = segment_track_max_deviation(sg2);
+
+                Es3DqdxStat q1w = es3_census_dqdx(sg1, nullptr, false, 0);
+                Es3DqdxStat q2w = es3_census_dqdx(sg2, nullptr, false, 0);
+                Es3DqdxStat q1n = es3_census_dqdx(sg1, &vtx_point, true, 5 * units::cm);
+                Es3DqdxStat q2n = es3_census_dqdx(sg2, &vtx_point, true, 5 * units::cm);
+                Es3DqdxStat q1f = es3_census_dqdx(sg1, &vtx_point, false, 5 * units::cm);
+                Es3DqdxStat q2f = es3_census_dqdx(sg2, &vtx_point, false, 5 * units::cm);
+                double mip1 = (q1w.n > 0 && m_mip_dqdx_median != 0) ? q1w.median / m_mip_dqdx_median : -1.0;
+                double mip2 = (q2w.n > 0 && m_mip_dqdx_median != 0) ? q2w.median / m_mip_dqdx_median : -1.0;
+
+                std::string line = fmt::format(
+                    "ES3CENSUS call={} sweep={} clus={} "
+                    "vtx=({:.2f},{:.2f},{:.2f}) v1=({:.2f},{:.2f},{:.2f}) v2=({:.2f},{:.2f},{:.2f}) "
+                    "vfit={} v1fit={} v2fit={} "
+                    "deg1={} deg2={} pb1={} pb2={} ngv={} nge={} "
+                    "len1={:.3f} len2={:.3f} dlen1={:.3f} dlen2={:.3f} dev1={:.3f} dev2={:.3f} "
+                    "nfit1={} nfit2={} nwcp1={} nwcp2={} "
+                    "q1={:.3f} q2={:.3f} nq1={} nq2={} "
+                    "qn1={:.3f} qn2={:.3f} nqn1={} nqn2={} qf1={:.3f} qf2={:.3f} nqf1={} nqf2={}",
+                    es3_call, es3_sweep, cluster.ident(),
+                    vtx_point.x()/units::cm, vtx_point.y()/units::cm, vtx_point.z()/units::cm,
+                    vtx1_point.x()/units::cm, vtx1_point.y()/units::cm, vtx1_point.z()/units::cm,
+                    vtx2_point.x()/units::cm, vtx2_point.y()/units::cm, vtx2_point.z()/units::cm,
+                    vtx->fit().valid() ? 1 : 0, vtx1->fit().valid() ? 1 : 0, vtx2->fit().valid() ? 1 : 0,
+                    deg1, deg2,
+                    vtx1->flags_any(VertexFlags::kProtectedBreak) ? 1 : 0,
+                    vtx2->flags_any(VertexFlags::kProtectedBreak) ? 1 : 0,
+                    static_cast<long>(boost::num_vertices(graph)), static_cast<long>(boost::num_edges(graph)),
+                    len1/units::cm, len2/units::cm, dlen1/units::cm, dlen2/units::cm, dev1/units::cm, dev2/units::cm,
+                    sg1->fits().size(), sg2->fits().size(), sg1->wcpts().size(), sg2->wcpts().size(),
+                    mip1, mip2, q1w.n, q2w.n,
+                    q1n.median, q2n.median, q1n.n, q2n.n, q1f.median, q2f.median, q1f.n, q2f.n);
+
+                double ang3_c = -1.0, ang10_c = -1.0;
+                for (double r_cm : radii_cm) {
+                    Es3DirScan a = es3_census_dir_scan(sg1, vtx_point, r_cm * units::cm);
+                    Es3DirScan b = es3_census_dir_scan(sg2, vtx_point, r_cm * units::cm);
+                    double ang = es3_census_angle_deg(a, b);
+                    double dA1_cm = (a.n > 0) ? a.d / units::cm : -1.0;
+                    double dA2_cm = (b.n > 0) ? b.d / units::cm : -1.0;
+                    line += fmt::format(" R{}: ang={:.3f} nA1={} dA1={:.3f} nA2={} dA2={:.3f}",
+                        static_cast<int>(r_cm), ang, a.n, dA1_cm, b.n, dA2_cm);
+                    if (r_cm == 3.0) ang3_c = ang;
+                    if (r_cm == 10.0) ang10_c = ang;
+                }
+
+                bool pass10_c = (ang10_c >= 0) && (ang10_c < 18);
+                bool pass3_c = (ang3_c >= 0) && (ang3_c < 27);
+                bool predmerge_c = pass10_c && pass3_c;
+                line += fmt::format(" ang10={:.3f} ang3={:.3f} pass10={} pass3={} predmerge={}",
+                    ang10_c, ang3_c, pass10_c ? 1 : 0, pass3_c ? 1 : 0, predmerge_c ? 1 : 0);
+
+                SPDLOG_LOGGER_DEBUG(s_log, "{}", line);
+            }
+
             if (dir1.magnitude() == 0 || dir2.magnitude() == 0) continue;
 
             // Calculate 10cm angle (180 - angle between directions)
@@ -446,8 +649,44 @@ bool PatternAlgorithms::examine_structure_3(Graph& graph, Facade::Cluster& clust
                 
                 // Check if segments are nearly collinear (small 3cm angle)
                 if (angle_3cm < 27) {
+                    // doc pr/72 round 2: guard against merging a genuine
+                    // near-vertex track stub into an unrelated shower/track
+                    // trunk (18255-196649).  Default OFF (m_es3_stub_guard
+                    // false) -- when off, es3_stub_suppress is never called
+                    // and this block is a no-op, so the merge below is
+                    // reached exactly as before by construction (M10-style
+                    // guard, not an edit to the angle arithmetic above).
+                    // See Es3StubGuardParams' doc comment
+                    // (PRSegmentFunctions.h) for the 117-event fit that
+                    // chose the defaults and PatternAlgorithms::m_es3_stub_guard*
+                    // (NeutrinoPatternBase.h) for the byte-identity argument.
+                    if (m_es3_stub_guard) {
+                        double len1_g = segment_track_length(sg1);
+                        double len2_g = segment_track_length(sg2);
+                        bool sg1_is_short = len1_g <= len2_g;
+                        double len_short = sg1_is_short ? len1_g : len2_g;
+                        double len_long  = sg1_is_short ? len2_g : len1_g;
+                        int nfit_short = static_cast<int>((sg1_is_short ? sg1 : sg2)->fits().size());
+                        int nfit_long  = static_cast<int>((sg1_is_short ? sg2 : sg1)->fits().size());
+                        VertexPtr vtx_short = sg1_is_short ? vtx1 : vtx2;
+                        int deg_short = vtx_short->descriptor_valid()
+                            ? static_cast<int>(boost::degree(vtx_short->get_descriptor(), graph)) : -1;
+
+                        Es3StubGuardParams sg_params;
+                        sg_params.stub_max = m_es3sg_stub_max;
+                        sg_params.len_ratio = m_es3sg_len_ratio;
+                        sg_params.ang3_min = m_es3sg_ang3_min;
+                        sg_params.ang_ratio = m_es3sg_ang_ratio;
+                        sg_params.require_terminal = m_es3sg_require_terminal;
+
+                        if (es3_stub_suppress(len_short, len_long, angle_3cm, angle_10cm,
+                                               deg_short, nfit_short, nfit_long, sg_params)) {
+                            continue;
+                        }
+                    }
+
                     SPDLOG_LOGGER_TRACE(s_log, "examine_structure: Cluster: {} Merge two segments into one according to angle {}° (10cm) and {}° (3cm)", cluster.ident(), angle_10cm, angle_3cm);
-                    
+
                     // Merge the two segments by combining their WCPoint lists.
                     // Use graph topology to determine orientation — i.e. which wcpt
                     // endpoint of each segment is at the shared vertex (vtx) — rather
@@ -494,6 +733,28 @@ bool PatternAlgorithms::examine_structure_3(Graph& graph, Facade::Cluster& clust
                     }
 
                     if (merged_wcpts.empty()) continue;  // degenerate: both wcpts lists empty
+
+                    // doc pr/72 round 2: log-only, env-gated
+                    // (WCT_ES3_MERGE_CENSUS) ground truth that production
+                    // actually merged this junction, for cross-checking
+                    // against the ES3CENSUS line above (every ES3MERGE must
+                    // coordinate-match an ES3CENSUS line with
+                    // ang10<18 && ang3<27 && predmerge=1).  Emitted before
+                    // add_segment/remove_segment/remove_vertex below so vtx/
+                    // vtx1/vtx2 are still valid and merged_wcpts is final.
+                    if (es3_census) {
+                        WireCell::Point vtx1_point = vtx1->fit().valid() ? vtx1->fit().point : vtx1->wcpt().point;
+                        WireCell::Point vtx2_point = vtx2->fit().valid() ? vtx2->fit().point : vtx2->wcpt().point;
+                        SPDLOG_LOGGER_DEBUG(s_log,
+                            "ES3MERGE call={} sweep={} clus={} vtx=({:.2f},{:.2f},{:.2f}) "
+                            "v1=({:.2f},{:.2f},{:.2f}) v2=({:.2f},{:.2f},{:.2f}) "
+                            "ang10={:.3f} ang3={:.3f} merged_nwcp={}",
+                            es3_call, es3_sweep, cluster.ident(),
+                            vtx_point.x()/units::cm, vtx_point.y()/units::cm, vtx_point.z()/units::cm,
+                            vtx1_point.x()/units::cm, vtx1_point.y()/units::cm, vtx1_point.z()/units::cm,
+                            vtx2_point.x()/units::cm, vtx2_point.y()/units::cm, vtx2_point.z()/units::cm,
+                            angle_10cm, angle_3cm, merged_wcpts.size());
+                    }
 
                     // Create new segment with merged points
                     auto new_seg = make_segment();

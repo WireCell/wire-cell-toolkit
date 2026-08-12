@@ -157,6 +157,12 @@ TEST_CASE("clus knob defaults: TaggerCheckNeutrino switches are all OFF")
     // examine_structure_final_1/_1p/_3 deletes a segment that had non-empty
     // associate_points -- OFF.
     CHECK_KNOB_BOOL(cfg, "assoc_clear_on_merge", false);
+    // doc pr/72 round 2: guard examine_structure_3 against merging a
+    // genuine near-vertex track stub into an unrelated shower/track trunk
+    // -- OFF; es3sg_require_terminal's own default is true (it is only
+    // read/inert while es3_stub_guard is false).
+    CHECK_KNOB_BOOL(cfg, "es3_stub_guard", false);
+    CHECK_KNOB_BOOL(cfg, "es3sg_require_terminal", true);
 
     // Numeric knobs whose legacy value is the INERT one: 0 disables the guard,
     // so an absent key leaves the code path untouched.
@@ -217,6 +223,13 @@ TEST_CASE("clus knob defaults: TaggerCheckNeutrino switches are all OFF")
     // low >= high disables the beam gate; both 0 is the disabled state.
     CHECK_KNOB_NUM(cfg, "beam_window_low", 0.0);
     CHECK_KNOB_NUM(cfg, "beam_window_high", 0.0);
+    // doc pr/72 round 2: the es3sg_* operating point (cm/deg/dimensionless),
+    // fitted from a 117-event merge census, all inert while es3_stub_guard
+    // is false.
+    CHECK_KNOB_NUM(cfg, "es3sg_stub_max", 7.0);
+    CHECK_KNOB_NUM(cfg, "es3sg_len_ratio", 2.0);
+    CHECK_KNOB_NUM(cfg, "es3sg_ang3_min", 15.0);
+    CHECK_KNOB_NUM(cfg, "es3sg_ang_ratio", 1.0);
 }
 
 TEST_CASE("clus knob defaults: TaggerCheckNeutrino literals are the uBooNE values")

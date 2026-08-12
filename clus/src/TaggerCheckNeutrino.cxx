@@ -184,6 +184,13 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     // doc sbnd_xin/docs/pr/24 §18 (round 5).
     m_v3_extension_guard         = get(config, "v3_extension_guard",         m_v3_extension_guard);
     m_v3_extension_min_gain      = get(config, "v3_extension_min_gain",      m_v3_extension_min_gain);        // cm
+    // doc sbnd_xin/docs/pr/72 round 2 -- examine_structure_3 stub guard.
+    m_es3_stub_guard             = get(config, "es3_stub_guard",             m_es3_stub_guard);
+    m_es3sg_stub_max             = get(config, "es3sg_stub_max",             m_es3sg_stub_max);              // cm
+    m_es3sg_len_ratio            = get(config, "es3sg_len_ratio",            m_es3sg_len_ratio);
+    m_es3sg_ang3_min             = get(config, "es3sg_ang3_min",             m_es3sg_ang3_min);              // deg
+    m_es3sg_ang_ratio            = get(config, "es3sg_ang_ratio",            m_es3sg_ang_ratio);
+    m_es3sg_require_terminal     = get(config, "es3sg_require_terminal",     m_es3sg_require_terminal);
     // Detector-extent literals (docs/pr/2 sec. 2e(iv)), all cm.
     m_cosmic_y_top_main    = get(config, "cosmic_y_top_main",    m_cosmic_y_top_main);
     m_cosmic_y_top_strict  = get(config, "cosmic_y_top_strict",  m_cosmic_y_top_strict);
@@ -488,6 +495,13 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["pr_find_other_rounds"]       = m_pr_find_other_rounds;        // 0 = keep find_proto_vertex's hardcoded budget
     cfg["v3_extension_guard"]         = m_v3_extension_guard;          // false = examine_vertices_3 unconditional accept
     cfg["v3_extension_min_gain"]      = m_v3_extension_min_gain;       // cm
+    // doc sbnd_xin/docs/pr/72 round 2 -- examine_structure_3 stub guard.
+    cfg["es3_stub_guard"]         = m_es3_stub_guard;         // false = examine_structure_3 unconditional merge on angle alone
+    cfg["es3sg_stub_max"]         = m_es3sg_stub_max;         // cm
+    cfg["es3sg_len_ratio"]        = m_es3sg_len_ratio;
+    cfg["es3sg_ang3_min"]         = m_es3sg_ang3_min;         // degrees
+    cfg["es3sg_ang_ratio"]        = m_es3sg_ang_ratio;
+    cfg["es3sg_require_terminal"] = m_es3sg_require_terminal;
     // Detector-extent literals (docs/pr/2 sec. 2e(iv)); defaults = uBooNE prototype, cm.
     cfg["cosmic_y_top_main"]    = m_cosmic_y_top_main;     // 100 = 17 cm below the uBooNE y=+117 top
     cfg["cosmic_y_top_strict"]  = m_cosmic_y_top_strict;   // 102 = 15 cm below
@@ -914,6 +928,13 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
     pattern_algos.m_iso_endpoint_tube_radius   = m_iso_endpoint_tube_radius * units::cm;  // cm -> internal
     pattern_algos.m_iso_endpoint_min_aspect    = m_iso_endpoint_min_aspect;
     pattern_algos.m_traj_cover_probe           = m_traj_cover_probe;
+    // doc sbnd_xin/docs/pr/72 round 2 -- examine_structure_3 stub guard.
+    pattern_algos.m_es3_stub_guard             = m_es3_stub_guard;
+    pattern_algos.m_es3sg_stub_max             = m_es3sg_stub_max * units::cm;  // cm -> internal
+    pattern_algos.m_es3sg_len_ratio            = m_es3sg_len_ratio;
+    pattern_algos.m_es3sg_ang3_min             = m_es3sg_ang3_min;
+    pattern_algos.m_es3sg_ang_ratio            = m_es3sg_ang_ratio;
+    pattern_algos.m_es3sg_require_terminal     = m_es3sg_require_terminal;
     // doc pr/67 P6: remove_segment() is a free function, so the knob is mirrored
     // into a file-static in PRGraph.cxx rather than read from pattern_algos.
     PR::set_traj_cover_probe(m_traj_cover_probe);

@@ -284,6 +284,19 @@ public:
         int    m_pr_find_other_rounds{0};
         bool   m_v3_extension_guard{false};
         double m_v3_extension_min_gain{-1.0};   // cm
+        // doc sbnd_xin/docs/pr/72 round 2 -- guard examine_structure_3
+        // against merging a genuine near-vertex track stub into an
+        // unrelated shower/track trunk (18255-196649).  Default false =
+        // legacy (unconditional merge on angle alone), byte-identical.
+        // Numeric defaults fitted from a 117-event merge census; see
+        // PatternAlgorithms::m_es3_stub_guard / es3_stub_suppress
+        // (PRSegmentFunctions.h) for the predicate and the doc for the fit.
+        bool   m_es3_stub_guard{false};
+        double m_es3sg_stub_max{7.0};      // cm; scaled at copy
+        double m_es3sg_len_ratio{2.0};
+        double m_es3sg_ang3_min{15.0};     // degrees
+        double m_es3sg_ang_ratio{1.0};
+        bool   m_es3sg_require_terminal{true};
         // Detector-extent literals (docs/pr/2 sec. 2e(iv)), all in cm.
         // Defaults = the uBooNE prototype values (active volume y in
         // [-116,+117], z in [0,1037]) => absent keys are byte-identical.

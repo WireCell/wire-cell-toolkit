@@ -231,6 +231,27 @@ namespace WireCell::Clus::PR {
         // C++ default false => no lines, no behavior change, byte-identical.
         bool   m_traj_cover_probe{false};
 
+        // doc sbnd_xin/docs/pr/72 round 2 -- examine_structure_3
+        // (NeutrinoStructureExaminer.cxx) merges any degree-2 junction
+        // whose 10cm/3cm direction-agreement angles both clear lenient
+        // thresholds, with no check for whether it is a genuine near-vertex
+        // track stub meeting a shower trunk rather than one particle's
+        // trajectory the tracker happened to split (18255-196649: a real
+        // 6.28cm stub, terminal at the true neutrino vertex, silently
+        // absorbed into a 33cm shower trunk).  m_es3_stub_guard true
+        // suppresses the merge when es3_stub_suppress (PRSegmentFunctions.h)
+        // says the junction looks like that case; see that function's doc
+        // comment for the predicate and the 117-event census that fit the
+        // five sub-parameters below. C++ default false => the guard in
+        // examine_structure_3 is never evaluated => byte-identical to
+        // before this round.
+        bool   m_es3_stub_guard{false};
+        double m_es3sg_stub_max{7 * units::cm};   // short-arm length ceiling
+        double m_es3sg_len_ratio{2.0};            // long/short length ratio floor
+        double m_es3sg_ang3_min{15.0};            // degrees; local-kink floor
+        double m_es3sg_ang_ratio{1.0};            // require ang3 > ratio * ang10
+        bool   m_es3sg_require_terminal{true};    // short arm's far end must be degree 1
+
         // doc pr/67 -- counterfactual for the owner's own 137238 hypothesis
         // ("is that limited by not sufficient rounds of doing the branch
         // searching?").  find_proto_vertex's nrounds_find_other_tracks is

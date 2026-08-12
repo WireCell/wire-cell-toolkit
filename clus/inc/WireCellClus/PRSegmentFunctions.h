@@ -633,6 +633,45 @@ namespace WireCell::Clus::PR {
     // shorter than the existing shower_topo_demote_len's reach).
     bool segment_is_shower_topology(SegmentPtr seg, bool tmp_val=false, double MIP_dQ_dx = 43000/units::cm,
                                     double demote_len = 0, bool reset = false, bool dqdx_guard = false);
+
+    // doc sbnd_xin/docs/pr/72 round 2 -- examine_structure_3
+    // (NeutrinoStructureExaminer.cxx) merges any degree-2 junction whose
+    // bulk (10cm) and local (3cm) direction agreement both clear lenient
+    // thresholds (18deg/27deg), with no check for whether the junction is a
+    // genuine near-vertex stub meeting a shower trunk rather than one
+    // particle's trajectory the tracker happened to split (18255-196649:
+    // a real 6.28cm track stub, terminal at the true neutrino vertex,
+    // silently absorbed into a 33cm shower trunk).  These parameters and
+    // the pure predicate below are fitted from a 117-event
+    // (48 nueCC + 19 NC-pi0 + 50 PR-data) merge census: at these defaults
+    // exactly one event in that sample (196649 itself) is touched, zero
+    // residual "suspicious but unsuppressed" merges remain -- see
+    // sbnd_xin/docs/pr/72 round 2 for the grid scan and the near-miss
+    // events these thresholds deliberately do NOT catch (evt235435,
+    // evt423981, evt506746: same length/angle regime but a NON-terminal
+    // short-arm far end, i.e. the short arm chains further into the graph
+    // rather than ending at a free vertex candidate).
+    struct Es3StubGuardParams {
+        double stub_max{7 * units::cm};    // internal units; short-arm length ceiling
+        double len_ratio{2.0};             // long/short length ratio floor
+        double ang3_min{15.0};             // degrees; local-kink floor
+        double ang_ratio{1.0};             // require ang3 > ang_ratio * ang10
+        bool   require_terminal{true};     // far end of the short arm must be a free vertex (degree 1)
+    };
+
+    // Pure predicate, no graph/segment access -- every input is a value
+    // already computed by examine_structure_3's merge branch (or its
+    // WCT_ES3_MERGE_CENSUS census), so this is trivially unit-testable and
+    // trivially proven inert when the caller doesn't invoke it.  Caller
+    // determines len_short/len_long/deg_short by comparing len1 vs len2
+    // itself (edge-index order sg1/sg2 has nothing to do with length).
+    // Returns false (never suppresses) whenever either arm has fewer than 2
+    // fit points -- segment_track_length returns 0.0 for such a degenerate
+    // arm, which would otherwise make it "the short arm" by construction
+    // and make len_long/len_short divide by (near-)zero.
+    bool es3_stub_suppress(double len_short, double len_long, double ang3, double ang10,
+                            int deg_short, int nfit_short, int nfit_long,
+                            const Es3StubGuardParams& params = {});
 }
 
 #endif

@@ -1392,6 +1392,18 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               // correctly re-fires.  C++ default false; false omits the key
               // => byte-identical.
               assoc_clear_on_merge=false,
+              // doc pr/72 round 2 -- guard examine_structure_3 against
+              // merging a genuine near-vertex track stub into an unrelated
+              // shower/track trunk (18255-196649).  C++ default false;
+              // false/null omits the key => byte-identical.  Numeric
+              // defaults null = component keeps its own C++ default
+              // (fitted from a 117-event census).
+              es3_stub_guard=false,
+              es3sg_stub_max=null,
+              es3sg_len_ratio=null,
+              es3sg_ang3_min=null,
+              es3sg_ang_ratio=null,
+              es3sg_require_terminal=null,
               // doc pr/45 -- paint muon-typed (+-13) pseudo-showers as track in
               // the Bee shower_track layer + PrDisplayDump (18255-56463: 411 cm
               // muon painted red).  C++ default false; key suppressed when off
@@ -1976,6 +1988,12 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
             assoc_full_recluster=assoc_full_recluster,
             assoc_reassign_orphans=assoc_reassign_orphans,
             assoc_clear_on_merge=assoc_clear_on_merge,
+            es3_stub_guard=es3_stub_guard,
+            es3sg_stub_max=es3sg_stub_max,
+            es3sg_len_ratio=es3sg_len_ratio,
+            es3sg_ang3_min=es3sg_ang3_min,
+            es3sg_ang_ratio=es3sg_ang_ratio,
+            es3sg_require_terminal=es3sg_require_terminal,
             muon_dqdx_curve=muon_dqdx_curve,
             sp_dedx_use_recomb_model=sp_dedx_use_recomb_model,
             sp_mean_dedx_cut=sp_mean_dedx_cut,
@@ -2727,6 +2745,15 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
               // false; false omits the key => byte-identical.  See the
               // clus_pr arg comment.
               assoc_clear_on_merge=false,
+              // doc pr/72 round 2 -- examine_structure_3 stub guard.  C++
+              // default false/null; false/null omits the key =>
+              // byte-identical.  See the clus_pr arg comment.
+              es3_stub_guard=false,
+              es3sg_stub_max=null,
+              es3sg_len_ratio=null,
+              es3sg_ang3_min=null,
+              es3sg_ang_ratio=null,
+              es3sg_require_terminal=null,
        pseudo_shower_track_paint=false,
        // Muon dQ/dx-vs-length envelope: DEFAULT = the docs/pr/10 SBND fit
        // (see the clus_pr arg comment; null restores the uBooNE refit).
@@ -2947,6 +2974,12 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 assoc_full_recluster=assoc_full_recluster,
                 assoc_reassign_orphans=assoc_reassign_orphans,
                 assoc_clear_on_merge=assoc_clear_on_merge,
+                es3_stub_guard=es3_stub_guard,
+                es3sg_stub_max=es3sg_stub_max,
+                es3sg_len_ratio=es3sg_len_ratio,
+                es3sg_ang3_min=es3sg_ang3_min,
+                es3sg_ang_ratio=es3sg_ang_ratio,
+                es3sg_require_terminal=es3sg_require_terminal,
                 pseudo_shower_track_paint=pseudo_shower_track_paint,
                 muon_dqdx_curve=muon_dqdx_curve,
                 use_power_recomb=use_power_recomb,
