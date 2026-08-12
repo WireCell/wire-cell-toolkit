@@ -1363,10 +1363,27 @@ function(
     other_seg_keep_isolated = true,
     other_seg_keep_isolated_min_points = null,
     other_seg_keep_isolated_min_length = null,
-    // doc pr/67 round 3 (S2) -- isochronous-snap size gate in cm.  C++
-    // default 10.0 = legacy (the snap never sees a branch shorter than
-    // 10 cm chord).  null omits the key => byte-identical.
-    iso_snap_min_dir_mag = null,
+    // doc pr/67 round 3 (S2) -- isochronous-snap size gate in cm, the first
+    // clause of the guard at NeutrinoOtherSegments.cxx:721.  The machinery
+    // behind it (modify_vertex/segment_isochronous) is the only thing that
+    // ATTACHES an isochronously displaced branch to its parent, and at the
+    // legacy 10 cm it never saw the doc pr/67 branches (dir_mag 4.70 / 4.38 /
+    // 4.34 cm on 18264-137238, 18259-42280, 18345-21073).
+    //
+    // SBND PRODUCTION ON at 4.0 -- owner flip 2026-08-12 after the Bee
+    // before/after hand-scan of the three targets plus all eight collateral
+    // neutrino-vertex movers ("based on my scan, the overall is positive").
+    // Bare production now IS the validated work-pr67f-on{48,19,50} arm config.
+    // Legacy escape for A/B: -A iso_snap_min_dir_mag=10.0 (or
+    // SBND_ISO_SNAP_MIN_DIR_MAG=10.0) restores the pre-flip production bare,
+    // byte-exact (doc pr/67 sec 11.12 flip proof).  C++ knob default itself
+    // stays 10.0.
+    //
+    // Owner-accepted cost, doc pr/67 sec 11.7: this moves the reconstructed
+    // neutrino vertex on 30 of 117 census events, 9 by more than 10 cm (max
+    // 82.4 cm).  Do NOT read a vertex mover here as a regression without
+    // re-reading that section first.
+    iso_snap_min_dir_mag = 4.0,
     // doc pr/65 round 3 -- offer graph-unreachable main-cluster segments
     // (the disconnected components other_seg_keep_isolated above creates) to
     // the shower absorbers by relaxing the cluster()==main_cluster guards to
