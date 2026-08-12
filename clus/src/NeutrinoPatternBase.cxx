@@ -117,15 +117,24 @@ std::vector<Facade::geo_point_t> PatternAlgorithms::do_rough_path(const Facade::
         // connect_graph()/connect_graph_with_reference() bridges and has no
         // relationship to protect_bundle's graph_name knob at all. Sentinel
         // log only, no behavior change.
-        const auto& steiner_graph = cluster.find_graph("steiner_graph");
+        // doc sbnd_xin/docs/pr/51 round 5 (m_steiner_gap_penalty): when the
+        // knob is on, route on the lazily-built support-penalized
+        // "steiner_graph_gap" flavor (see NeutrinoSteinerGapGraph.cxx).
+        // Knob off => ensure returns false on its first line and the flavor
+        // string below is the same "steiner_graph" literal as before --
+        // including the rendered pr55 sentinel text -- byte-identical.
+        static const std::string kBaseFlavor = "steiner_graph";
+        static const std::string kGapFlavor = "steiner_graph_gap";
+        const std::string& flavor = ensure_steiner_gap_graph(cluster) ? kGapFlavor : kBaseFlavor;
+        const auto& steiner_graph = cluster.find_graph(flavor);
         SPDLOG_LOGGER_DEBUG(s_log,
-            "pr55 do_rough_path: cluster {} flavor=steiner_graph n_vertices={} n_edges={} "
+            "pr55 do_rough_path: cluster {} flavor={} n_vertices={} n_edges={} "
             "first=({:.1f},{:.1f},{:.1f}) last=({:.1f},{:.1f},{:.1f})",
-            cluster.ident(), boost::num_vertices(steiner_graph), boost::num_edges(steiner_graph),
+            cluster.ident(), flavor, boost::num_vertices(steiner_graph), boost::num_edges(steiner_graph),
             first_point.x(), first_point.y(), first_point.z(),
             last_point.x(), last_point.y(), last_point.z());
         const std::vector<size_t>& path_indices =
-            cluster.graph_algorithms("steiner_graph").shortest_path(first_index, last_index);
+            cluster.graph_algorithms(flavor).shortest_path(first_index, last_index);
 
         std::vector<Facade::geo_point_t> path_points;
         if (!cluster.has_pc("steiner_pc")) return path_points;

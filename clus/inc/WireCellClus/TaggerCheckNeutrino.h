@@ -397,6 +397,18 @@ public:
         // SPDLOG_LOGGER_TRACE, gated entirely by this knob.  false (default)
         // => none of the probe code runs => byte-identical.
         bool   m_rough_path_probe{false};
+        // doc sbnd_xin/docs/pr/51 round 5: steiner gap penalty -- the H1 fix
+        // the round-4 probe validated (see the m_steiner_gap_penalty block
+        // in NeutrinoPatternBase.h).  Scale of the per-edge unsupported-
+        // fraction penalty on the lazily-derived "steiner_graph_gap" flavor
+        // that do_rough_path routes on when this is > 0.  0 (default) =>
+        // the flavor is never built => byte-identical.  Sub-knobs ride the
+        // C++ defaults (cm where dimensional).
+        double m_steiner_gap_penalty{0};
+        double m_sgp_dead_alpha{0.25};   // dead-sample weight in bad_fraction
+        double m_sgp_min_edge{0.5};      // cm; shorter edges never scanned
+        double m_sgp_sample_step{0.3};   // cm; edge-interior sampling step
+        double m_sgp_point_radius{0.2};  // cm; test_good_point radius
         double m_beam_window_low{0};   // beam window [low, high) on cluster_t0 (matched flash time, WCT units).
         double m_beam_window_high{0};  // low >= high (default) disables the gate: uBooNE single-main behavior.
         bool m_nu_skip_cosmic{false};  // if true (beam-gate only), skip in-window mains already tagged

@@ -292,6 +292,12 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_main_vertex_swap_apply  = get(config, "main_vertex_swap_apply",  m_main_vertex_swap_apply);
     // doc sbnd_xin/docs/pr/51 round 4: diagnostic-only rough-path probe.
     m_rough_path_probe        = get(config, "rough_path_probe",        m_rough_path_probe);
+    // doc sbnd_xin/docs/pr/51 round 5: steiner gap penalty (0 = legacy).
+    m_steiner_gap_penalty     = get(config, "steiner_gap_penalty",     m_steiner_gap_penalty);
+    m_sgp_dead_alpha          = get(config, "sgp_dead_alpha",          m_sgp_dead_alpha);
+    m_sgp_min_edge            = get(config, "sgp_min_edge",            m_sgp_min_edge);      // cm
+    m_sgp_sample_step         = get(config, "sgp_sample_step",         m_sgp_sample_step);   // cm
+    m_sgp_point_radius        = get(config, "sgp_point_radius",        m_sgp_point_radius);  // cm
     m_beam_window_low         = get(config, "beam_window_low",         m_beam_window_low);
     m_beam_window_high        = get(config, "beam_window_high",        m_beam_window_high);
     m_nu_skip_cosmic          = get(config, "nu_skip_cosmic",          m_nu_skip_cosmic);
@@ -546,6 +552,11 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["dl_vtx_swap_guard"]       = m_dl_vtx_swap_guard;  // doc pr/51 (506746): false = legacy (rerank may swap the main cluster)
     cfg["main_vertex_swap_apply"]  = m_main_vertex_swap_apply;  // doc pr/51 round 3: false = legacy (traditional-path swap decision is computed then discarded)
     cfg["rough_path_probe"]        = m_rough_path_probe;  // doc pr/51 round 4: false = legacy (diagnostic TRACE probe never runs)
+    cfg["steiner_gap_penalty"]     = m_steiner_gap_penalty;  // doc pr/51 round 5: 0 = legacy (do_rough_path stays on the unpenalized "steiner_graph")
+    cfg["sgp_dead_alpha"]          = m_sgp_dead_alpha;       // doc pr/51 round 5: dead-sample weight in bad_fraction (inert at scale 0)
+    cfg["sgp_min_edge"]            = m_sgp_min_edge;         // doc pr/51 round 5: cm; shorter edges never scanned (inert at scale 0)
+    cfg["sgp_sample_step"]         = m_sgp_sample_step;      // doc pr/51 round 5: cm; edge-interior sampling step (inert at scale 0)
+    cfg["sgp_point_radius"]        = m_sgp_point_radius;     // doc pr/51 round 5: cm; test_good_point radius (inert at scale 0)
     cfg["clus_geom_helper"] = ""; // empty = no SCE vertex correction
     cfg["beam_window_low"] = m_beam_window_low;   // beam window on cluster_t0; low >= high disables the
     cfg["beam_window_high"] = m_beam_window_high; // gate (uBooNE single-main selection).
@@ -879,6 +890,15 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
     pattern_algos.m_mvga_reseat_angle = m_mvga_reseat_angle;          // deg, no conversion
     pattern_algos.m_mvga_satellite    = m_mvga_satellite * units::cm; // cm -> internal
     pattern_algos.m_rough_path_probe  = m_rough_path_probe;           // doc pr/51 round 4: diagnostic-only
+    // doc pr/51 round 5: steiner gap penalty.  The two service handles are
+    // unconditional copies (inert while the scale is 0).
+    pattern_algos.m_steiner_gap_penalty = m_steiner_gap_penalty;
+    pattern_algos.m_sgp_dead_alpha      = m_sgp_dead_alpha;                    // fraction, no conversion
+    pattern_algos.m_sgp_min_edge        = m_sgp_min_edge * units::cm;          // cm -> internal
+    pattern_algos.m_sgp_sample_step     = m_sgp_sample_step * units::cm;       // cm -> internal
+    pattern_algos.m_sgp_point_radius    = m_sgp_point_radius * units::cm;      // cm -> internal
+    pattern_algos.m_sgp_dv   = m_dv;
+    pattern_algos.m_sgp_pcts = m_pcts;
     pattern_algos.m_shower_topo_demote_len = m_shower_topo_demote_len * units::cm;  // cm -> internal
     // doc sbnd_xin/docs/pr/30 §11 port-fidelity knobs.
     pattern_algos.m_fit_exclusion            = m_fit_exclusion;

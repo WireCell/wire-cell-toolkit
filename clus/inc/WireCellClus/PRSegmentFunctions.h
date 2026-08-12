@@ -9,6 +9,8 @@
 #include "WireCellIface/IRecombinationModel.h"
 #include "WireCellClus/ParticleDataSet.h"
 
+#include <functional>
+
 namespace WireCell::Clus::PR {
 
     using geo_point_t = WireCell::Point;
@@ -150,6 +152,18 @@ namespace WireCell::Clus::PR {
     double path_overlap_fraction(const std::vector<WireCell::Point>& pts_a,
                                  const std::vector<WireCell::Point>& pts_b,
                                  double tol);
+
+    /// doc sbnd_xin/docs/pr/51 round 5 (steiner_gap_penalty): unsupported
+    /// fraction of the straight span a->b of length `length`, sampled every
+    /// `step` (inclusive endpoints, nsteps = max(1, round(length/step)) --
+    /// the round-4 probe's P3 loop verbatim).  `classify` returns 0=live,
+    /// 1=dead, 2=unsupported for a 3D point; the result is
+    /// (n_unsup + dead_alpha*n_dead) / n in [0, 1].  Pure function -- the
+    /// caller injects the classifier, so doctests need no cluster.
+    /// Implemented in NeutrinoSteinerGapGraph.cxx.
+    double gap_edge_bad_fraction(const WireCell::Point& a, const WireCell::Point& b,
+                                 double length, double step, double dead_alpha,
+                                 const std::function<int(const WireCell::Point&)>& classify);
 
     /// doc sbnd_xin/docs/pr/51: total associated charge of a segment --
     /// the sum of fit.dQ over valid fit points (fit.valid() && fit.dx > 0

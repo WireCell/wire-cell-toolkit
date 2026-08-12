@@ -148,6 +148,14 @@ TEST_CASE("clus knob defaults: TaggerCheckNeutrino switches are all OFF")
     CHECK_KNOB_BOOL(cfg, "main_vertex_swap_apply", false);
     // doc pr/51 round 4: diagnostic-only rough-path probe -- OFF.
     CHECK_KNOB_BOOL(cfg, "rough_path_probe", false);
+    // doc pr/51 round 5: steiner gap penalty -- scale 0 = the flavor is
+    // never built, do_rough_path stays on the unpenalized "steiner_graph";
+    // the four sub-knobs are inert while the scale is 0.
+    CHECK_KNOB_NUM(cfg, "steiner_gap_penalty", 0.0);
+    CHECK_KNOB_NUM(cfg, "sgp_dead_alpha", 0.25);
+    CHECK_KNOB_NUM(cfg, "sgp_min_edge", 0.5);
+    CHECK_KNOB_NUM(cfg, "sgp_sample_step", 0.3);
+    CHECK_KNOB_NUM(cfg, "sgp_point_radius", 0.2);
     // doc pr/64 round 7: reassign, instead of drop, an association point
     // that loses (or never enters) clustering_points_segments' Stage-C ghost
     // removal to a same-cluster segment that actually wins the global 2D

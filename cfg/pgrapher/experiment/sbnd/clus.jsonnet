@@ -1362,6 +1362,17 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               // doc pr/51 round 4 -- diagnostic-only rough-path probe.
               // C++ default false; false omits the key => byte-identical.
               rough_path_probe=false,
+              // doc pr/51 round 5 -- steiner gap penalty (H1 short-cut fix):
+              // do_rough_path routes on the support-penalized
+              // "steiner_graph_gap" flavor when scale > 0.  C++ defaults:
+              // scale 0 (off), dead_alpha 0.25, min_edge 0.5 cm,
+              // sample_step 0.3 cm, point_radius 0.2 cm.  null omits the
+              // keys => byte-identical.
+              steiner_gap_penalty=null,
+              sgp_dead_alpha=null,
+              sgp_min_edge=null,
+              sgp_sample_step=null,
+              sgp_point_radius=null,
               // doc pr/54 -- keep well-supported isolated residual segments
               // in find_other_segments (18255-142421 separated EM shower with
               // no fitted trajectory).  C++ defaults: keep false, floors
@@ -1984,6 +1995,11 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
             dl_vtx_swap_guard=dl_vtx_swap_guard,
             main_vertex_swap_apply=main_vertex_swap_apply,
             rough_path_probe=rough_path_probe,
+            steiner_gap_penalty=steiner_gap_penalty,
+            sgp_dead_alpha=sgp_dead_alpha,
+            sgp_min_edge=sgp_min_edge,
+            sgp_sample_step=sgp_sample_step,
+            sgp_point_radius=sgp_point_radius,
             other_seg_keep_isolated=other_seg_keep_isolated,
             other_seg_keep_isolated_min_points=other_seg_keep_isolated_min_points,
             other_seg_keep_isolated_min_length=other_seg_keep_isolated_min_length,
@@ -2724,6 +2740,15 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
               // doc pr/51 round 4 -- diagnostic-only rough-path probe.
               // C++ default false; false omits the key => byte-identical.
               rough_path_probe=false,
+              // doc pr/51 round 5 -- steiner gap penalty (H1 short-cut fix).
+              // C++ defaults: scale 0 (off), dead_alpha 0.25, min_edge
+              // 0.5 cm, sample_step 0.3 cm, point_radius 0.2 cm.  null omits
+              // the keys => byte-identical.
+              steiner_gap_penalty=null,
+              sgp_dead_alpha=null,
+              sgp_min_edge=null,
+              sgp_sample_step=null,
+              sgp_point_radius=null,
               // doc pr/54 -- keep well-supported isolated residual segments
               // in find_other_segments.  C++ defaults: keep false, floors
               // 25 points / 3 cm.  false/null omit the keys => byte-identical.
@@ -2974,6 +2999,11 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 dl_vtx_swap_guard=dl_vtx_swap_guard,
                 main_vertex_swap_apply=main_vertex_swap_apply,
                 rough_path_probe=rough_path_probe,
+                steiner_gap_penalty=steiner_gap_penalty,
+                sgp_dead_alpha=sgp_dead_alpha,
+                sgp_min_edge=sgp_min_edge,
+                sgp_sample_step=sgp_sample_step,
+                sgp_point_radius=sgp_point_radius,
                 other_seg_keep_isolated=other_seg_keep_isolated,
                 other_seg_keep_isolated_min_points=other_seg_keep_isolated_min_points,
                 other_seg_keep_isolated_min_length=other_seg_keep_isolated_min_length,

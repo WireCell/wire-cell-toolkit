@@ -465,6 +465,33 @@ namespace WireCell::Clus::PR {
         // SPDLOG_LOGGER_TRACE.  false (default) => byte-identical.
         bool   m_rough_path_probe{false};
 
+        // ---- doc sbnd_xin/docs/pr/51 round 5: steiner gap penalty -----------
+        // The H1 fix the round-4 probe validated counterfactually: the
+        // "steiner_graph" edge weight prices charge only at the two edge
+        // endpoints with a hard [0.8, 1.2] dynamic range
+        // (SteinerGrapher.cxx create_enhanced_steiner_graph), so a
+        // gap-spanning chord beats following charge around any turn sharper
+        // than ~150 deg.  When m_steiner_gap_penalty > 0, do_rough_path
+        // lazily derives a per-cluster graph flavor "steiner_graph_gap" --
+        // same topology and vertex indexing as "steiner_graph", every edge
+        // longer than m_sgp_min_edge re-weighted
+        //     w' = w * (1 + scale * bad_fraction)
+        // with bad_fraction = (n_unsup + alpha*n_dead)/n from sampling the
+        // edge interior at m_sgp_sample_step with
+        // Grouping::test_good_point(p_raw, apa, face, m_sgp_point_radius, 0)
+        // -- exactly the round-4 probe's P3 scan -- and routes on that
+        // flavor.  Nothing else moves: TaggerCheckSTM's fork, TrackFitting
+        // and every other "steiner_graph" consumer keep the base graph.
+        // 0 (default) => first-line return => the flavor is never built =>
+        // byte-identical.
+        double m_steiner_gap_penalty{0};        ///< P3-ladder scale; 0 = off
+        double m_sgp_dead_alpha{0.25};          ///< dead-sample weight in bad_fraction
+        double m_sgp_min_edge{0.5*units::cm};   ///< edges shorter are never scanned/penalized
+        double m_sgp_sample_step{0.3*units::cm};///< edge-interior sampling step
+        double m_sgp_point_radius{0.2*units::cm};///< test_good_point radius (ch_range stays 0)
+        IDetectorVolumes::pointer m_sgp_dv{nullptr};   ///< pushed from TaggerCheckNeutrino (NeedDV)
+        IPCTransformSet::pointer  m_sgp_pcts{nullptr}; ///< pushed from TaggerCheckNeutrino (NeedPCTS)
+
         // ---- doc sbnd_xin/docs/pr/30 §11: four port-fidelity knobs ----------
         //
         // P1 / F1 -- `flag_exclusion` on do_multi_tracking.
@@ -1570,6 +1597,13 @@ namespace WireCell::Clus::PR {
 
         // find the shortest path using steiner graph
         std::vector<Facade::geo_point_t> do_rough_path(const Facade::Cluster& cluster,Facade::geo_point_t& first_point, Facade::geo_point_t& last_point);
+        // doc sbnd_xin/docs/pr/51 round 5 (m_steiner_gap_penalty): make sure
+        // the cluster carries the support-penalized "steiner_graph_gap"
+        // flavor, building it lazily (once per cluster) from the installed
+        // "steiner_graph".  Returns true iff the flavor exists (do_rough_path
+        // then routes on it); false => caller stays on "steiner_graph"
+        // unchanged (knob off, missing prerequisites, or empty graph).
+        bool ensure_steiner_gap_graph(const Facade::Cluster& cluster);
         std::vector<Facade::geo_point_t> do_rough_path_reg_pc(const Facade::Cluster& cluster, Facade::geo_point_t& first_point, Facade::geo_point_t& last_point,  std::string graph_name = "relaxed_pid");
         // create a segment given a path
         SegmentPtr create_segment_for_cluster(WireCell::Clus::Facade::Cluster& cluster, IDetectorVolumes::pointer dv, const std::vector<Facade::geo_point_t>& path_points, int dir = 0);
