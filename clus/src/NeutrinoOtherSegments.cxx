@@ -154,6 +154,57 @@ void PatternAlgorithms::find_other_segments(Graph& graph, Facade::Cluster& clust
 
     SPDLOG_LOGGER_TRACE(s_log, "find_other_segments: existing_segments={}, N={}, num_tagged={}, terminals={}", existing_segments.size(), N, std::count(flag_tagged.begin(), flag_tagged.end(), true), terminals.size());
 
+    // doc pr/67 round 2, P5.  The census below answers "was a branch even
+    // PROPOSED at this location, and if not, which filter killed it".  Round 1
+    // could only see the per-round segment count (P4), which cannot distinguish
+    // "no candidate existed" from "a candidate was scored and rejected".
+    // Log-only, gated => byte-identical when off.
+    if (m_traj_cover_probe) {
+        SPDLOG_LOGGER_DEBUG(s_log,
+            "pr67 fos: cluster={} existing_segments={} steiner_N={} tagged={} terminals={}",
+            cluster.get_cluster_id(), existing_segments.size(), N,
+            std::count(flag_tagged.begin(), flag_tagged.end(), true), terminals.size());
+    }
+    // Component reporter shared by the Step-8 filter and the Step-9 re-evaluation:
+    // both apply the SAME quality cut, so both must print the same fields or the
+    // two rejections cannot be told apart in the log.
+    // sep_clusters is filled in Step 7; the lambda is only ever CALLED after that,
+    // so capturing it by reference here is safe.
+    auto probe_component = [&](const char* stage, int grp, const Res_proto_segment& ts,
+                               const std::vector<std::vector<size_t>>& groups,
+                               const char* verdict) {
+        if (!m_traj_cover_probe) return;
+        const bool have_ab = (ts.special_A != SIZE_MAX && ts.special_B != SIZE_MAX);
+        // A and B are two chosen points; a hand-scanned coordinate can only be
+        // matched to a component through the component's full extent.
+        double lo[3] = {1e30, 1e30, 1e30}, hi[3] = {-1e30, -1e30, -1e30};
+        if (grp >= 0 && grp < (int)groups.size()) {
+            for (size_t idx : groups[grp]) {
+                const double c[3] = {x_coords[idx], y_coords[idx], z_coords[idx]};
+                for (int k = 0; k < 3; ++k) {
+                    if (c[k] < lo[k]) lo[k] = c[k];
+                    if (c[k] > hi[k]) hi[k] = c[k];
+                }
+            }
+        }
+        SPDLOG_LOGGER_DEBUG(s_log,
+            "pr67 fos {}: cluster={} group={} npts={} len={:.2f} cm nnf={} "
+            "max_dis=({:.2f},{:.2f},{:.2f}) cm A=({:.2f},{:.2f},{:.2f}) B=({:.2f},{:.2f},{:.2f}) "
+            "bbox=[{:.2f},{:.2f}]x[{:.2f},{:.2f}]x[{:.2f},{:.2f}] -> {}",
+            stage, cluster.get_cluster_id(), grp, ts.number_points, ts.length / units::cm,
+            ts.number_not_faked, ts.max_dis_u / units::cm, ts.max_dis_v / units::cm,
+            ts.max_dis_w / units::cm,
+            have_ab ? x_coords[ts.special_A] / units::cm : 0.0,
+            have_ab ? y_coords[ts.special_A] / units::cm : 0.0,
+            have_ab ? z_coords[ts.special_A] / units::cm : 0.0,
+            have_ab ? x_coords[ts.special_B] / units::cm : 0.0,
+            have_ab ? y_coords[ts.special_B] / units::cm : 0.0,
+            have_ab ? z_coords[ts.special_B] / units::cm : 0.0,
+            lo[0] / units::cm, hi[0] / units::cm, lo[1] / units::cm, hi[1] / units::cm,
+            lo[2] / units::cm, hi[2] / units::cm,
+            verdict);
+    };
+
 
     // Step 3: Compute Voronoi diagram
     const auto& steiner_graph = cluster.get_graph("steiner_graph");
@@ -317,6 +368,18 @@ void PatternAlgorithms::find_other_segments(Graph& graph, Facade::Cluster& clust
         
         // If no boundary connection was found, skip this component entirely
         if (special_A == SIZE_MAX) {
+            if (m_traj_cover_probe) {
+                // doc pr/67 P5: an untagged component with no MST edge crossing
+                // the tagged/untagged boundary has nothing to attach to.
+                Facade::geo_point_t f(x_coords[sep_clusters[i].front()],
+                                      y_coords[sep_clusters[i].front()],
+                                      z_coords[sep_clusters[i].front()]);
+                SPDLOG_LOGGER_DEBUG(s_log,
+                    "pr67 fos step8: cluster={} group={} npts={} front=({:.2f},{:.2f},{:.2f}) "
+                    "-> DROP no_boundary_connection",
+                    cluster.get_cluster_id(), i, ncounts[i],
+                    f.x() / units::cm, f.y() / units::cm, f.z() / units::cm);
+            }
             remaining_segments.erase(i);
             continue;
         }
@@ -428,7 +491,14 @@ void PatternAlgorithms::find_other_segments(Graph& graph, Facade::Cluster& clust
                (number_not_faked < 0.4 * temp_segments[i].number_points && length < 7 * units::cm)) &&
               max_dis_u / units::cm < 3 && max_dis_v / units::cm < 3 && max_dis_w / units::cm < 3 &&
               max_dis_u + max_dis_v + max_dis_w < 6 * units::cm)))) {
+            probe_component("step8", i, temp_segments[i], sep_clusters,
+                            temp_segments[i].number_points == 1
+                                ? "DROP single_point"
+                                : (length < 3.5 * units::cm ? "DROP nnf0_short" : "DROP nnf0_2d_shadowed"));
             remaining_segments.erase(i);
+        }
+        else {
+            probe_component("step8", i, temp_segments[i], sep_clusters, "KEEP");
         }
     }
     
@@ -471,11 +541,20 @@ void PatternAlgorithms::find_other_segments(Graph& graph, Facade::Cluster& clust
         Facade::geo_point_t pt_B(x_coords[special_B], y_coords[special_B], z_coords[special_B]);
         auto path_points = do_rough_path(cluster, pt_A, pt_B);
 
-        if (path_points.size() <= 1) continue;
+        if (path_points.size() <= 1) {
+            probe_component("step9", max_length_cluster, temp_segments[max_length_cluster], sep_clusters,
+                            "DROP rough_path_empty");
+            continue;
+        }
 
         // Create segment (not yet in graph)
         auto new_seg = create_segment_for_cluster(cluster, dv, path_points);
-        if (!new_seg) continue;
+        if (!new_seg) {
+            probe_component("step9", max_length_cluster, temp_segments[max_length_cluster], sep_clusters,
+                            "DROP create_segment_failed");
+            continue;
+        }
+        probe_component("step9", max_length_cluster, temp_segments[max_length_cluster], sep_clusters, "SELECTED");
 
         // Do single tracking to get fine fit path and "fit" point cloud
         track_fitter.add_segment(new_seg);
@@ -791,6 +870,10 @@ void PatternAlgorithms::find_other_segments(Graph& graph, Facade::Cluster& clust
                 }
             }
         } // if fits().size() > 1
+        else {
+            probe_component("step9", max_length_cluster, temp_segments[max_length_cluster], sep_clusters,
+                            "DROP fit_degenerate");
+        }
 
         // Re-evaluate remaining segments using the updated existing_segments set
         std::set<int> tmp_del_set;
@@ -862,6 +945,18 @@ void PatternAlgorithms::find_other_segments(Graph& graph, Facade::Cluster& clust
                   temp_segments[*it].max_dis_w / units::cm < 3 &&
                   temp_segments[*it].max_dis_u + temp_segments[*it].max_dis_v +
                   temp_segments[*it].max_dis_w < 6 * units::cm)))) {
+                // doc pr/67 P5.  This is the re-evaluation drop: a component that
+                // SURVIVED step 8 is re-scored in 2D ONLY against the segment
+                // just added, and dies if >=2 planes now shadow every one of its
+                // points.  In an isochronous topology the new branch's 2D shadow
+                // covers a genuinely separate 3-D object, so this is the one
+                // rejection that can kill real charge without any 3-D evidence.
+                probe_component("reeval", *it, temp_segments[*it], sep_clusters,
+                                temp_segments[*it].number_points == 1
+                                    ? "DROP single_point"
+                                    : (temp_segments[*it].length < 3.5 * units::cm
+                                           ? "DROP nnf0_short"
+                                           : "DROP nnf0_2d_shadowed"));
                 tmp_del_set.insert(*it);
             }
         }

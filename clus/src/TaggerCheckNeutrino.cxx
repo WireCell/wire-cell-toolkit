@@ -914,6 +914,9 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
     pattern_algos.m_iso_endpoint_tube_radius   = m_iso_endpoint_tube_radius * units::cm;  // cm -> internal
     pattern_algos.m_iso_endpoint_min_aspect    = m_iso_endpoint_min_aspect;
     pattern_algos.m_traj_cover_probe           = m_traj_cover_probe;
+    // doc pr/67 P6: remove_segment() is a free function, so the knob is mirrored
+    // into a file-static in PRGraph.cxx rather than read from pattern_algos.
+    PR::set_traj_cover_probe(m_traj_cover_probe);
     pattern_algos.m_pr_find_other_rounds       = m_pr_find_other_rounds;
     pattern_algos.m_v3_extension_guard         = m_v3_extension_guard;
     pattern_algos.m_v3_extension_min_gain      = m_v3_extension_min_gain * units::cm;    // cm -> internal

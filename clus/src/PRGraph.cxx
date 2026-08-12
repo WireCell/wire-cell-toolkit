@@ -238,10 +238,34 @@ namespace WireCell::Clus::PR {
         return changed;
     }
 
+    // doc pr/67 round 2, P6.  See the declaration in PRGraph.h for why this is a
+    // file-static mirror rather than a PatternAlgorithms member.
+    static bool s_traj_cover_probe = false;
+    void set_traj_cover_probe(bool enable) { s_traj_cover_probe = enable; }
+
     bool remove_segment(Graph& graph, SegmentPtr seg)
     {
         if (! seg->descriptor_valid()) { return false; }
         auto desc = seg->get_descriptor();
+        if (s_traj_cover_probe) {
+            // Owner hypothesis (b) at the SEGMENT level.  Round 1 tested only
+            // point-level trimming (examine_end_ps_vec, P3); a whole fitted
+            // segment deleted by one of remove_segment's many callers would not
+            // have shown up there.  Endpoints locate the removal geometrically,
+            // which is enough to match it against a hand-scanned coordinate.
+            static auto s_log = WireCell::Log::logger("clus.PRGraph");
+            const auto& fits = seg->fits();
+            SPDLOG_LOGGER_DEBUG(s_log,
+                "pr67 remove_segment: seg={} nfits={} front=({:.2f},{:.2f},{:.2f}) "
+                "back=({:.2f},{:.2f},{:.2f}) cm",
+                seg->id(), fits.size(),
+                fits.empty() ? 0.0 : fits.front().point.x() / units::cm,
+                fits.empty() ? 0.0 : fits.front().point.y() / units::cm,
+                fits.empty() ? 0.0 : fits.front().point.z() / units::cm,
+                fits.empty() ? 0.0 : fits.back().point.x() / units::cm,
+                fits.empty() ? 0.0 : fits.back().point.y() / units::cm,
+                fits.empty() ? 0.0 : fits.back().point.z() / units::cm);
+        }
         boost::remove_edge(desc, graph);
         seg->invalidate_descriptor();
         return true;

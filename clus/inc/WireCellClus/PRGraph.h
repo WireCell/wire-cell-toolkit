@@ -275,6 +275,13 @@ namespace WireCell::Clus::PR {
     /// The descriptor held by the object is left invalid.
     bool remove_segment(Graph& graph, SegmentPtr seg);
 
+    /// doc pr/67 round 2, P6 -- enable the log-only removal sentinel inside
+    /// remove_segment().  remove_segment is a free function with ~55 call sites
+    /// across six files, so it cannot read PatternAlgorithms::m_traj_cover_probe;
+    /// TaggerCheckNeutrino mirrors the knob here at configure time instead of
+    /// tagging every call site.  Default false => byte-identical when off.
+    void set_traj_cover_probe(bool enable);
+
     
     /// Return the end-point vertices of a segment.
     ///
