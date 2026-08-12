@@ -1379,6 +1379,13 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               // shower_track/associate_points).  C++ default false; false
               // omits the key => byte-identical.
               assoc_reassign_orphans=false,
+              // doc pr/64 round 8 -- clear a merge survivor's
+              // associate_points when examine_structure_final_1/_1p/_3
+              // deletes a segment that had non-empty associate_points, so
+              // pr/59's reassociate_cluster_orphans any_orphan trigger
+              // correctly re-fires.  C++ default false; false omits the key
+              // => byte-identical.
+              assoc_clear_on_merge=false,
               // doc pr/45 -- paint muon-typed (+-13) pseudo-showers as track in
               // the Bee shower_track layer + PrDisplayDump (18255-56463: 411 cm
               // muon painted red).  C++ default false; key suppressed when off
@@ -1960,6 +1967,7 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
             shower_absorb_unreachable_main=shower_absorb_unreachable_main,
             assoc_full_recluster=assoc_full_recluster,
             assoc_reassign_orphans=assoc_reassign_orphans,
+            assoc_clear_on_merge=assoc_clear_on_merge,
             muon_dqdx_curve=muon_dqdx_curve,
             sp_dedx_use_recomb_model=sp_dedx_use_recomb_model,
             sp_mean_dedx_cut=sp_mean_dedx_cut,
@@ -2700,6 +2708,11 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
               // otherwise drop.  C++ default false; false omits the key =>
               // byte-identical.  See the clus_pr arg comment.
               assoc_reassign_orphans=false,
+              // doc pr/64 round 8 -- clear a merge survivor's
+              // associate_points on structural-merge deletion.  C++ default
+              // false; false omits the key => byte-identical.  See the
+              // clus_pr arg comment.
+              assoc_clear_on_merge=false,
        pseudo_shower_track_paint=false,
        // Muon dQ/dx-vs-length envelope: DEFAULT = the docs/pr/10 SBND fit
        // (see the clus_pr arg comment; null restores the uBooNE refit).
@@ -2917,6 +2930,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 shower_absorb_unreachable_main=shower_absorb_unreachable_main,
                 assoc_full_recluster=assoc_full_recluster,
                 assoc_reassign_orphans=assoc_reassign_orphans,
+                assoc_clear_on_merge=assoc_clear_on_merge,
                 pseudo_shower_track_paint=pseudo_shower_track_paint,
                 muon_dqdx_curve=muon_dqdx_curve,
                 use_power_recomb=use_power_recomb,

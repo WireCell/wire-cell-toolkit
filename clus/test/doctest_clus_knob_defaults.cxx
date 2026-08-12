@@ -153,6 +153,10 @@ TEST_CASE("clus knob defaults: TaggerCheckNeutrino switches are all OFF")
     // removal to a same-cluster segment that actually wins the global 2D
     // projection contest -- OFF.
     CHECK_KNOB_BOOL(cfg, "assoc_reassign_orphans", false);
+    // doc pr/64 round 8: clear a merge survivor's associate_points when
+    // examine_structure_final_1/_1p/_3 deletes a segment that had non-empty
+    // associate_points -- OFF.
+    CHECK_KNOB_BOOL(cfg, "assoc_clear_on_merge", false);
 
     // Numeric knobs whose legacy value is the INERT one: 0 disables the guard,
     // so an absent key leaves the code path untouched.

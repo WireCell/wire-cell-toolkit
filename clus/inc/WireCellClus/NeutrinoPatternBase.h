@@ -562,6 +562,34 @@ namespace WireCell::Clus::PR {
         // WCT_PR64_ORPHAN_CENSUS for the log-only diagnostic.
         bool   m_assoc_reassign_orphans{false};
 
+        // doc sbnd_xin/docs/pr/64 round 8 -- checked inside
+        // examine_structure_final_1/_1p/_3 (NeutrinoStructureExaminer.cxx),
+        // called unconditionally from determine_main_vertex.  Those passes
+        // merge a short/duplicate/degenerate segment into a surviving
+        // neighbor: the survivor's wcpts/fits/"main" cloud are rebuilt, but
+        // its "associate_points" cloud (the actual charge/blob association
+        // from clustering_points) is left untouched -- so if the DELETED
+        // segment held associate_points, they are simply discarded with no
+        // replacement (18259-18625: a 33-point, 6-wcpt segment absorbed at
+        // the main vertex by examine_structure_final_1p, its points -- incl.
+        // the reported 12-pt blob at (142.1,78.3,176.5) -- gone from the
+        // final PF/Bee dump).  reassociate_cluster_orphans (pr/59, live in
+        // SBND production) exists exactly to catch a stale/incomplete
+        // association after determine_main_vertex, but its any_orphan
+        // trigger only fires when some CURRENT segment has a completely
+        // EMPTY associate_points cloud -- a survivor that already had SOME
+        // points of its own never trips it, even though those points no
+        // longer cover its newly-extended geometry.  When on: at each of
+        // the four merge/delete sites, if the segment being removed had a
+        // non-empty associate_points cloud, the designated survivor's
+        // associate_points is cleared (set to null) too, so any_orphan
+        // correctly sees a gap and pr/59's existing full-cluster
+        // re-clustering re-derives a geometry-consistent association for
+        // the whole cluster -- no new competition logic, reuses the
+        // already-validated pr/59 machinery.  C++ default false = legacy =
+        // survivor keeps its stale cloud, byte-identical.
+        bool   m_assoc_clear_on_merge{false};
+
         // doc sbnd_xin/docs/pr/45 -- empty-2D-tree sentinel guard in
         // find_other_segments (SBND 18255-56463 cluster 14, the 30 cm
         // isochronous tail beyond segment 14006's end).

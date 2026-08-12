@@ -1390,6 +1390,22 @@ function(
     // SBND_ASSOC_REASSIGN_ORPHANS=false) restores the pre-flip production
     // bare, byte-exact.  C++ knob default itself stays false.
     assoc_reassign_orphans = true,
+    // doc pr/64 round 8 -- clear a merge survivor's associate_points when
+    // examine_structure_final_1/_1p/_3 (called unconditionally inside
+    // determine_main_vertex) deletes a segment that had non-empty
+    // associate_points, so pr/59's reassociate_cluster_orphans any_orphan
+    // trigger correctly re-fires instead of leaving the survivor's stale
+    // cloud in place.  Root-caused the round 7 "still open" item: the
+    // 18259-18625 blob at (142.1,78.3,176.5) is exactly this -- a segment
+    // legitimately wins those points, is then absorbed into its main-vertex
+    // neighbor by examine_structure_final_1p, and its points are discarded
+    // with no re-derivation.  DEFAULT NOT SELECTED for SBND production this
+    // round -- implemented and validated (48-event nueCC off-gate 0/48,
+    // knob-on nusel byte-identical, doc pr/64 round 8), but not yet flipped;
+    // see the doc for the sample-wide mover census.  Override for A/B: -A
+    // assoc_clear_on_merge=true (or SBND_ASSOC_CLEAR_ON_MERGE=true).  C++
+    // knob default stays false.
+    assoc_clear_on_merge = false,
 )
     local base = import 'pgrapher/experiment/sbnd/simparams.jsonnet';
     local params = base {
@@ -1605,6 +1621,7 @@ function(
                              shower_absorb_unreachable_main=shower_absorb_unreachable_main,
                              assoc_full_recluster=assoc_full_recluster,
                              assoc_reassign_orphans=assoc_reassign_orphans,
+                             assoc_clear_on_merge=assoc_clear_on_merge,
                              pseudo_shower_track_paint=pseudo_shower_track_paint,
                              reclass_never_computed_ke_floor=reclass_never_computed_ke_floor,
                              muon_dqdx_curve=muon_dqdx_curve,

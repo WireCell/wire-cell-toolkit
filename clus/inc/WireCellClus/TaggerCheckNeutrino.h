@@ -221,6 +221,13 @@ public:
         // instead of discarding them.  Default false = legacy (drop).  See
         // PatternAlgorithms::m_assoc_reassign_orphans.
         bool   m_assoc_reassign_orphans{false};
+        // doc sbnd_xin/docs/pr/64 round 8 -- clears a merge survivor's
+        // associate_points when examine_structure_final_1/_1p/_3 deletes a
+        // segment that had non-empty associate_points, so pr/59's
+        // reassociate_cluster_orphans any_orphan trigger correctly re-fires.
+        // Default false = legacy (survivor keeps its stale cloud). See
+        // PatternAlgorithms::m_assoc_clear_on_merge.
+        bool   m_assoc_clear_on_merge{false};
         // doc sbnd_xin/docs/pr/31 §11 -- F2 (was P2).  true => skip the
         // stage-3 segment_determine_shower_direction call, so a topology
         // shower keeps the direction segment_is_shower_topology set, which is

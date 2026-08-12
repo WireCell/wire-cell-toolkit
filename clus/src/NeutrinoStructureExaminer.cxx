@@ -10,6 +10,29 @@ using namespace WireCell::Clus;
 
 static auto s_log = WireCell::Log::logger("clus.NeutrinoPattern");
 
+namespace {
+    // doc sbnd_xin/docs/pr/64 round 8: examine_structure_final_1/_1p/_3 merge
+    // a short/duplicate/degenerate segment into a surviving neighbor,
+    // rebuilding the survivor's wcpts/fits/"main" cloud but never its
+    // "associate_points" cloud (the actual charge/blob association from
+    // clustering_points).  If the segment being deleted here had non-empty
+    // associate_points, those points are simply discarded with no
+    // replacement, and reassociate_cluster_orphans' any_orphan trigger
+    // (pr/59) never fires for a survivor that already had SOME points of
+    // its own -- see PatternAlgorithms::m_assoc_clear_on_merge's doc comment
+    // in NeutrinoPatternBase.h for the full mechanism and the 18259-18625
+    // case that found this.  No-op (and no mutation at all) when disabled or
+    // when the deleted segment had no associate_points -- byte-identical to
+    // before by construction.
+    void pr64_clear_survivor_on_merge(bool enabled, WireCell::Clus::PR::SegmentPtr loser,
+                                       WireCell::Clus::PR::SegmentPtr survivor) {
+        if (!enabled || !loser || !survivor) return;
+        auto dpc = loser->dpcloud("associate_points");
+        if (!dpc || dpc->npoints() == 0) return;
+        survivor->dpcloud("associate_points", nullptr);
+    }
+}
+
 void PatternAlgorithms::examine_structure(Graph& graph, Facade::Cluster& cluster, TrackFitting& track_fitter, IDetectorVolumes::pointer dv){
     // Change 2 to 1 (merge two segments into one straight segment)
     if (examine_structure_2(graph, cluster, track_fitter, dv)) {
@@ -2793,6 +2816,7 @@ bool PatternAlgorithms::examine_structure_final_1(Graph& graph, VertexPtr main_v
                 // Segments are identical, delete one
                 s_log->trace("examine_structure_final_1: cluster {} removing duplicate segment at vtx ({:.2f},{:.2f},{:.2f})",
                     cluster.ident(), vtx->wcpt().point.x()/units::cm, vtx->wcpt().point.y()/units::cm, vtx->wcpt().point.z()/units::cm);
+                pr64_clear_survivor_on_merge(m_assoc_clear_on_merge, sg2, sg1);
                 remove_segment(graph, sg2);
                 flag_update = true;
                 flag_continue = true;
@@ -3000,6 +3024,7 @@ bool PatternAlgorithms::examine_structure_final_1p(Graph& graph, VertexPtr main_
             }
             
             // Delete sg1 and vtx
+            pr64_clear_survivor_on_merge(m_assoc_clear_on_merge, sg1, sg2);
             remove_segment(graph, sg1);
             remove_vertex(graph, vtx);
             s_log->trace("examine_structure_final_1p: cluster {} merged short sg1 ({:.2f} cm) into sg2 at main_vtx ({:.2f},{:.2f},{:.2f})",
@@ -3098,6 +3123,7 @@ bool PatternAlgorithms::examine_structure_final_1p(Graph& graph, VertexPtr main_
             }
             
             // Delete sg2 and vtx
+            pr64_clear_survivor_on_merge(m_assoc_clear_on_merge, sg2, sg1);
             remove_segment(graph, sg2);
             remove_vertex(graph, vtx);
             s_log->trace("examine_structure_final_1p: cluster {} merged short sg2 ({:.2f} cm) into sg1 at main_vtx ({:.2f},{:.2f},{:.2f})",
@@ -3568,11 +3594,18 @@ bool PatternAlgorithms::examine_structure_final_3(Graph& graph, VertexPtr main_v
                             remove_segment(graph, sg1);
                             add_segment(graph, sg1, main_vertex, tt_vtx);
                         } else {
-                            // Self-loop case
+                            // Self-loop case: sg1 is discarded with no
+                            // successor.  segments_to_update are the segments
+                            // whose geometry now extends into the collapsed
+                            // main_vertex/vtx1 zone, so they are the closest
+                            // analog to a survivor for sg1's associate_points.
+                            for (auto& upd : segments_to_update) {
+                                pr64_clear_survivor_on_merge(m_assoc_clear_on_merge, sg1, upd);
+                            }
                             remove_segment(graph, sg1);
                         }
                     }
-                    
+
                     // Delete sg first, then vtx1.
                     // IMPORTANT: boost::remove_vertex automatically removes all
                     // incident edges, so removing vtx1 first would silently free
@@ -3580,6 +3613,9 @@ bool PatternAlgorithms::examine_structure_final_3(Graph& graph, VertexPtr main_v
                     // while the underlying edge is gone.  The subsequent
                     // remove_segment(sg) would then call boost::remove_edge on a
                     // freed descriptor → double-free crash.
+                    for (auto& upd : segments_to_update) {
+                        pr64_clear_survivor_on_merge(m_assoc_clear_on_merge, sg, upd);
+                    }
                     remove_segment(graph, sg);
                     remove_vertex(graph, vtx1);
                     

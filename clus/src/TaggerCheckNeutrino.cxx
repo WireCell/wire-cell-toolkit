@@ -154,6 +154,8 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_assoc_full_recluster = get(config, "assoc_full_recluster", m_assoc_full_recluster);
     // doc sbnd_xin/docs/pr/64 round 7 -- reassign same-cluster association orphans.
     m_assoc_reassign_orphans = get(config, "assoc_reassign_orphans", m_assoc_reassign_orphans);
+    // doc sbnd_xin/docs/pr/64 round 8 -- clear a merge survivor's associate_points.
+    m_assoc_clear_on_merge = get(config, "assoc_clear_on_merge", m_assoc_clear_on_merge);
     // doc sbnd_xin/docs/pr/31 §11 port-fidelity knob (F2, was P2).
     m_shower_topo_proto_dir    = get(config, "shower_topo_proto_dir",    m_shower_topo_proto_dir);
     // doc sbnd_xin/docs/pr/32 §11 port-fidelity knobs (F1-F4).
@@ -455,6 +457,8 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["assoc_full_recluster"] = m_assoc_full_recluster; // false = legacy (orphaned associate_points cloud stays null)
     // doc sbnd_xin/docs/pr/64 round 7.
     cfg["assoc_reassign_orphans"] = m_assoc_reassign_orphans; // false = legacy (Stage-C loss is dropped, never reassigned)
+    // doc sbnd_xin/docs/pr/64 round 8.
+    cfg["assoc_clear_on_merge"] = m_assoc_clear_on_merge; // false = legacy (merge survivor keeps its stale associate_points)
     // doc sbnd_xin/docs/pr/31 §11.
     cfg["shower_topo_proto_dir"]    = m_shower_topo_proto_dir;     // false = legacy (the stage-3 PCA direction call runs)
     // doc sbnd_xin/docs/pr/32 §11.
@@ -870,6 +874,8 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
     pattern_algos.m_assoc_full_recluster = m_assoc_full_recluster;
     // doc sbnd_xin/docs/pr/64 round 7.
     pattern_algos.m_assoc_reassign_orphans = m_assoc_reassign_orphans;
+    // doc sbnd_xin/docs/pr/64 round 8.
+    pattern_algos.m_assoc_clear_on_merge = m_assoc_clear_on_merge;
     // doc sbnd_xin/docs/pr/31 §11 (F2).
     pattern_algos.m_shower_topo_proto_dir    = m_shower_topo_proto_dir;
     // doc sbnd_xin/docs/pr/32 §11 (F1-F4).

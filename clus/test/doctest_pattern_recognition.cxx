@@ -597,6 +597,56 @@ TEST_CASE("pattern_recognition clustering_points assoc_reassign_orphans [A]")
     MESSAGE("assoc_reassign_orphans: total associate_points ", total_off, " -> ", total_on);
 }
 
+// doc sbnd_xin/docs/pr/64 round 8: assoc_clear_on_merge.
+//
+// examine_structure_final_1/_1p/_3 (called inside determine_main_vertex) can
+// delete a segment that already holds populated associate_points from the
+// earlier clustering_points pass, without clearing or extending the
+// surviving neighbor's associate_points -- so the deleted segment's points
+// are silently lost with no re-derivation (18259-18625).  Verified against
+// real fixture geometry with two independently-built contexts --
+// determine_main_vertex mutates the graph structurally (merges/deletes
+// segments), so it cannot be safely re-run on the same graph for an A/B
+// comparison the way clustering_points can.
+//
+// Safety property checked: turning the knob on can only ever ADD
+// null-associate_points ("orphaned") segments relative to knob off -- the
+// mechanism only clears a stale cloud, it never fabricates or removes real
+// association data itself (re-deriving it is pr/59's reassociate_cluster_
+// orphans, downstream).
+TEST_CASE("pattern_recognition determine_main_vertex assoc_clear_on_merge [A]")
+{
+    auto& env = env_A();
+
+    auto ctx_off = make_context(env);
+    CHECK_NOTHROW(run_through(env, ctx_off, Step::AfterDetermineMainVertex));
+    auto segs_off = ctx_off.algo.find_cluster_segments(*ctx_off.graph, *env.fixture.main_cluster);
+    REQUIRE(!segs_off.empty());
+    size_t total_off = 0, n_null_off = 0;
+    for (auto& seg : segs_off) {
+        auto dpc = seg->dpcloud("associate_points");
+        if (!dpc) { n_null_off++; continue; }
+        total_off += dpc->npoints();
+    }
+
+    auto ctx_on = make_context(env);
+    ctx_on.algo.m_assoc_clear_on_merge = true;
+    CHECK_NOTHROW(run_through(env, ctx_on, Step::AfterDetermineMainVertex));
+    auto segs_on = ctx_on.algo.find_cluster_segments(*ctx_on.graph, *env.fixture.main_cluster);
+    REQUIRE(!segs_on.empty());
+    size_t total_on = 0, n_null_on = 0;
+    for (auto& seg : segs_on) {
+        auto dpc = seg->dpcloud("associate_points");
+        if (!dpc) { n_null_on++; continue; }
+        total_on += dpc->npoints();
+    }
+
+    MESSAGE("assoc_clear_on_merge: nsegs ", segs_off.size(), " -> ", segs_on.size(),
+            ", null-cloud segments ", n_null_off, " -> ", n_null_on,
+            ", total associate_points ", total_off, " -> ", total_on);
+    CHECK(n_null_on >= n_null_off);
+}
+
 TEST_CASE("pattern_recognition separate_track_shower [A]")
 {
     auto& env = env_A();
