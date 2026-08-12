@@ -1363,6 +1363,10 @@ function(
     other_seg_keep_isolated = true,
     other_seg_keep_isolated_min_points = null,
     other_seg_keep_isolated_min_length = null,
+    // doc pr/67 round 3 (S2) -- isochronous-snap size gate in cm.  C++
+    // default 10.0 = legacy (the snap never sees a branch shorter than
+    // 10 cm chord).  null omits the key => byte-identical.
+    iso_snap_min_dir_mag = null,
     // doc pr/65 round 3 -- offer graph-unreachable main-cluster segments
     // (the disconnected components other_seg_keep_isolated above creates) to
     // the shower absorbers by relaxing the cluster()==main_cluster guards to
@@ -1668,6 +1672,7 @@ function(
                              other_seg_keep_isolated=other_seg_keep_isolated,
                              other_seg_keep_isolated_min_points=other_seg_keep_isolated_min_points,
                              other_seg_keep_isolated_min_length=other_seg_keep_isolated_min_length,
+                             iso_snap_min_dir_mag=iso_snap_min_dir_mag,
                              shower_absorb_unreachable_main=shower_absorb_unreachable_main,
                              assoc_full_recluster=assoc_full_recluster,
                              assoc_reassign_orphans=assoc_reassign_orphans,

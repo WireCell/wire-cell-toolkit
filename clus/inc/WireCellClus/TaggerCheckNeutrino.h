@@ -207,6 +207,10 @@ public:
         bool   m_other_seg_keep_isolated{false};
         int    m_other_seg_keep_isolated_min_points{25};
         double m_other_seg_keep_isolated_min_length{3.0}; // cm; scaled at copy
+        // doc sbnd_xin/docs/pr/67 round 3 (S2) -- size gate on the isochronous
+        // snap in find_other_segments.  Legacy 10 cm; lowering it lets a short
+        // isochronously-displaced branch reach modify_vertex/segment_isochronous.
+        double m_iso_snap_min_dir_mag{10.0}; // cm; scaled at copy
         // doc sbnd_xin/docs/pr/59 round 2 -- when a segment created after its
         // cluster's association pass would otherwise be left with a null
         // associate_points cloud (18255-142421 seg 20; 116944-71372 segs

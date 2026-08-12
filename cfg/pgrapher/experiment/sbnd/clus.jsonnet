@@ -1369,6 +1369,9 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               other_seg_keep_isolated=false,
               other_seg_keep_isolated_min_points=null,
               other_seg_keep_isolated_min_length=null,
+              // doc pr/67 round 3 (S2) -- isochronous-snap size gate, cm.
+              // C++ default 10.0 = legacy.  null omits the key.
+              iso_snap_min_dir_mag=null,
               // doc pr/65 round 3 -- offer graph-unreachable main-cluster
               // segments (kept-isolated pr/54 residuals) to the shower
               // absorbers (reachability-relaxed guards).  C++ default false;
@@ -1984,6 +1987,7 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
             other_seg_keep_isolated=other_seg_keep_isolated,
             other_seg_keep_isolated_min_points=other_seg_keep_isolated_min_points,
             other_seg_keep_isolated_min_length=other_seg_keep_isolated_min_length,
+            iso_snap_min_dir_mag=iso_snap_min_dir_mag,
             shower_absorb_unreachable_main=shower_absorb_unreachable_main,
             assoc_full_recluster=assoc_full_recluster,
             assoc_reassign_orphans=assoc_reassign_orphans,
@@ -2726,6 +2730,9 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
               other_seg_keep_isolated=false,
               other_seg_keep_isolated_min_points=null,
               other_seg_keep_isolated_min_length=null,
+              // doc pr/67 round 3 (S2) -- isochronous-snap size gate, cm.
+              // C++ default 10.0 = legacy.  null omits the key.
+              iso_snap_min_dir_mag=null,
               // doc pr/65 round 3 -- offer graph-unreachable main-cluster
               // segments (kept-isolated pr/54 residuals) to the shower
               // absorbers (reachability-relaxed guards).  C++ default false;
@@ -2970,6 +2977,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 other_seg_keep_isolated=other_seg_keep_isolated,
                 other_seg_keep_isolated_min_points=other_seg_keep_isolated_min_points,
                 other_seg_keep_isolated_min_length=other_seg_keep_isolated_min_length,
+                iso_snap_min_dir_mag=iso_snap_min_dir_mag,
                 shower_absorb_unreachable_main=shower_absorb_unreachable_main,
                 assoc_full_recluster=assoc_full_recluster,
                 assoc_reassign_orphans=assoc_reassign_orphans,

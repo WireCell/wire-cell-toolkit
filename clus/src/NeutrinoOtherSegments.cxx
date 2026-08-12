@@ -710,6 +710,9 @@ void PatternAlgorithms::find_other_segments(Graph& graph, Facade::Cluster& clust
                 // modify_vertex/segment_isochronous will call add_segment internally if successful,
                 // so do NOT call add_segment here.
                 bool flag_parallel = false;
+                // doc pr/67 round 3: which of the snap paths actually fired, so
+                // the knob-on census can attribute every mover.  Static strings.
+                const char* snap_path = "none";
 
                 SPDLOG_LOGGER_TRACE(s_log, "find_other_segments: Cluster {} Middle tracks --- # of Vertices: {}; # of Edges: {}", cluster.get_cluster_id(), boost::num_vertices(graph), boost::num_edges(graph));
 
@@ -718,7 +721,11 @@ void PatternAlgorithms::find_other_segments(Graph& graph, Facade::Cluster& clust
                                         v1_fit_pt.z() - v2_fit_pt.z());
                 double dir_mag = dir.magnitude();
 
-                if (dir_mag > 10 * units::cm ||
+                // doc sbnd_xin/docs/pr/67 round 3 (S2): the first clause's size
+                // gate is m_iso_snap_min_dir_mag (C++ default 10 cm = legacy).
+                // The second clause and the >18/>36 cm widening tiers below are
+                // deliberately NOT derived from it -- see NeutrinoPatternBase.h.
+                if (dir_mag > m_iso_snap_min_dir_mag ||
                     (dir_mag > 8 * units::cm && segment_track_length(new_seg) > 13 * units::cm)) {
 
                     // Try to snap to a nearby isochronous vertex
@@ -740,10 +747,12 @@ void PatternAlgorithms::find_other_segments(Graph& graph, Facade::Cluster& clust
                         if (d1.magnitude() < 6 * units::cm &&
                             std::fabs(drift_dir.angle(d1) / 3.1415926 * 180.0 - 90.0) < 15.0) {
                             flag_parallel = modify_vertex_isochronous(graph, cluster, vtx, v1, new_seg, v2, track_fitter, dv);
+                            if (flag_parallel) snap_path = "vertex_v1";
                         }
                         if (!flag_parallel && d2.magnitude() < 6 * units::cm &&
                             std::fabs(drift_dir.angle(d2) / 3.1415926 * 180.0 - 90.0) < 15.0) {
                             flag_parallel = modify_vertex_isochronous(graph, cluster, vtx, v2, new_seg, v1, track_fitter, dv);
+                            if (flag_parallel) snap_path = "vertex_v2";
                         }
                     }
 
@@ -761,9 +770,11 @@ void PatternAlgorithms::find_other_segments(Graph& graph, Facade::Cluster& clust
 
                             if (!flag_parallel && dis1 < 6 * units::cm) {
                                 flag_parallel = modify_segment_isochronous(graph, cluster, sg1, v1, new_seg, v2, track_fitter, dv);
+                                if (flag_parallel) snap_path = "segment_v1";
                             }
                             if (!flag_parallel && dis2 < 6 * units::cm) {
                                 flag_parallel = modify_segment_isochronous(graph, cluster, sg1, v2, new_seg, v1, track_fitter, dv);
+                                if (flag_parallel) snap_path = "segment_v2";
                             }
                             if (flag_parallel) break;
 
@@ -793,6 +804,21 @@ void PatternAlgorithms::find_other_segments(Graph& graph, Facade::Cluster& clust
                             }
                         }
                     }
+                }
+
+                // doc pr/67 round 3 (S2) sentinel.  Fires ONLY for a snap that
+                // the legacy 10 cm gate would have refused, so the set of events
+                // emitting this line is exactly the set the knob can have moved
+                // ("0 unclaimed" census, pr/65 bar).  Never fires when the knob
+                // is at its 10 cm default.
+                if (flag_parallel && dir_mag <= 10 * units::cm) {
+                    SPDLOG_LOGGER_INFO(s_log,
+                        "pr67 iso-snap below-legacy: cluster {} path={} dir_mag={:.2f} cm "
+                        "seg_len={:.2f} cm v1=({:.1f},{:.1f},{:.1f}) v2=({:.1f},{:.1f},{:.1f}) cm",
+                        cluster.get_cluster_id(), snap_path, dir_mag / units::cm,
+                        segment_track_length(new_seg) / units::cm,
+                        v1_fit_pt.x() / units::cm, v1_fit_pt.y() / units::cm, v1_fit_pt.z() / units::cm,
+                        v2_fit_pt.x() / units::cm, v2_fit_pt.y() / units::cm, v2_fit_pt.z() / units::cm);
                 }
 
                 if (!flag_parallel) {
@@ -1373,6 +1399,25 @@ bool PatternAlgorithms::modify_vertex_isochronous(Graph& graph, Facade::Cluster&
         create_segment_point_cloud(sg, main_pts_sgiso, dv, "main");
     }
 
+    // doc pr/67 round 3: conditioning of the x-plane projection.  test_p is
+    // built by dividing by dir.x(), which is guarded only against exact zero
+    // above; for an isochronously-displaced branch dir.x() is small BY
+    // CONSTRUCTION, so a successful snap can still land on a geometrically
+    // arbitrary steiner point within the 5 cm acceptance.  This path then
+    // RELOCATES the pre-existing vertex vtx (below), so the census reads these
+    // numbers before trusting any knob-on result.  Logged for legacy snaps too,
+    // to give the comparison distribution.
+    SPDLOG_LOGGER_DEBUG(s_log,
+        "pr67 iso-snap cond vertex: cluster {} dir.x={:.4f} dir=({:.3f},{:.3f},{:.3f}) "
+        "test_p=({:.1f},{:.1f},{:.1f}) vtx_new=({:.1f},{:.1f},{:.1f}) "
+        "|vtx_new-v1|={:.2f} cm |vtx_new-test_p|={:.2f} cm vtx_moved={:.2f} cm",
+        cluster.get_cluster_id(), dir.x(), dir.x(), dir.y(), dir.z(),
+        test_p.x() / units::cm, test_p.y() / units::cm, test_p.z() / units::cm,
+        vtx_new_pt.x() / units::cm, vtx_new_pt.y() / units::cm, vtx_new_pt.z() / units::cm,
+        point_distance(vtx_new_pt, v1_fit_pt) / units::cm,
+        point_distance(vtx_new_pt, test_p) / units::cm,
+        point_distance(vtx_new_pt, vtx_fit_pt) / units::cm);
+
     // Remove the old isolated vertex v1 and connect vtx and v2 via sg
     remove_vertex(graph, v1);
     add_segment(graph, sg, vtx, v2);
@@ -1492,6 +1537,18 @@ bool PatternAlgorithms::modify_segment_isochronous(Graph& graph, Facade::Cluster
     }
 
     if (!flag) return flag;
+
+    // doc pr/67 round 3: same conditioning question as the vertex path -- test_p
+    // divides by dir1.x().  This path does NOT move a pre-existing vertex (v1 is
+    // the new candidate's own endpoint), but it does SPLIT the parent segment
+    // sg1 into two and remove it, so it changes parent topology too.
+    SPDLOG_LOGGER_DEBUG(s_log,
+        "pr67 iso-snap cond segment: cluster {} dir1.x={:.4f} dir1=({:.3f},{:.3f},{:.3f}) "
+        "vtx_new=({:.1f},{:.1f},{:.1f}) |vtx_new-v1|={:.2f} cm dis_cut={:.2f} angle_cut={:.1f}",
+        cluster.get_cluster_id(), dir1.x(), dir1.x(), dir1.y(), dir1.z(),
+        vtx_new_pt.x() / units::cm, vtx_new_pt.y() / units::cm, vtx_new_pt.z() / units::cm,
+        point_distance(vtx_new_pt, v1_fit_pt) / units::cm,
+        dis_cut / units::cm, angle_cut);
 
     // Shift v1 to the new steiner position
     v1->wcpt().point = vtx_new_pt;

@@ -591,6 +591,19 @@ namespace WireCell::Clus::PR {
         int    m_other_seg_keep_isolated_min_points{25};
         double m_other_seg_keep_isolated_min_length{3.0 * units::cm}; // internal units
 
+        // doc sbnd_xin/docs/pr/67 round 3 (S2) -- the size gate on the first
+        // clause of the isochronous-snap guard in find_other_segments.  The
+        // machinery behind that guard (modify_vertex_isochronous /
+        // modify_segment_isochronous) is the only thing that ATTACHES an
+        // isochronously-displaced branch to its parent; at the legacy 10 cm it
+        // never runs on the short branches of doc pr/67 (dir_mag 4.3-4.7 cm).
+        // Lowering the SIZE gate does not relax the ISOCHRONOUS requirement:
+        // the vertex path keeps the caller's 15 deg perpendicular test and the
+        // segment path keeps its own angle_cut test.  The second clause
+        // (8 cm + 13 cm track length) and the >18 cm / >36 cm widening tiers
+        // are deliberately untouched.  C++ default 10 cm => byte-identical.
+        double m_iso_snap_min_dir_mag{10 * units::cm}; // internal units
+
         // doc sbnd_xin/docs/pr/59 round 2 -- gates reassociate_cluster_orphans
         // (checked inside that function, called unconditionally, matching the
         // m_main_vertex_graph_audit idiom).  C++ default false => legacy

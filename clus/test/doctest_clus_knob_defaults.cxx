@@ -258,6 +258,15 @@ TEST_CASE("clus knob defaults: TaggerCheckNeutrino literals are the uBooNE value
     CHECK_KNOB_NUM(cfg, "iso_endpoint_min_aspect", 0.12);
     CHECK_KNOB_NUM(cfg, "v3_extension_min_gain", -1.0);      // doc pr/24 sec 18 round 5, cm
 
+    // doc pr/67 round 3 (S2), cm.  10.0 is the legacy literal that used to be
+    // hard-coded in the first clause of the isochronous-snap gate
+    // (NeutrinoOtherSegments.cxx find_other_segments).  If this default ever
+    // drifts, the knob-off arm stops being byte-identical -- and because the
+    // component member is in cm and is scaled by units::cm at the copy into
+    // PatternAlgorithms, a value of 1000 here would mean someone declared the
+    // component member in internal units and double-scaled it.
+    CHECK_KNOB_NUM(cfg, "iso_snap_min_dir_mag", 10.0);
+
     // Detector-extent literals (doc pr/2 sec 2e(iv)); uBooNE y=+117 top.
     CHECK_KNOB_NUM(cfg, "cosmic_y_top_main", 100.0);
     CHECK_KNOB_NUM(cfg, "cosmic_y_top_strict", 102.0);
