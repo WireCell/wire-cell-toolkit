@@ -1052,6 +1052,12 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               // (keys omitted => byte-identical).
               v3_extension_guard=false,
               v3_extension_min_gain=null,
+              // doc pr/67: log-only trajectory-coverage probe + the
+              // counterfactual override for find_proto_vertex's hardcoded
+              // main-cluster branch-search round budget.  false/null =
+              // C++ defaults = OFF (keys omitted => byte-identical).
+              traj_cover_probe=false,
+              pr_find_other_rounds=null,
               // protect_bundle stage knobs (doc pr/23): the PR-stage
               // overclustering protection (uboone's second graph examination,
               // ProtectOverClustering.cxx).  The stage only acts when
@@ -1860,6 +1866,8 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
             iso_endpoint_tube_radius=iso_endpoint_tube_radius,
             iso_endpoint_min_aspect=iso_endpoint_min_aspect,
             v3_extension_guard=v3_extension_guard,
+            traj_cover_probe=traj_cover_probe,
+            pr_find_other_rounds=pr_find_other_rounds,
             v3_extension_min_gain=v3_extension_min_gain,
             cosmic_y_top_main=cosmic_y_top_main,
             cosmic_y_top_strict=cosmic_y_top_strict,
@@ -2507,6 +2515,12 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
        // false/null = C++ defaults = OFF = byte-identical.
        v3_extension_guard=false,
        v3_extension_min_gain=null,
+       // doc pr/67: log-only trajectory-coverage probe + the counterfactual
+       // override for find_proto_vertex's hardcoded main-cluster
+       // branch-search round budget.  false/null = C++ defaults = OFF =
+       // byte-identical.
+       traj_cover_probe=false,
+       pr_find_other_rounds=null,
        // protect_bundle (doc pr/23): PR-stage overclustering protection.
        // Named in the production pipeline_names by DEFAULT since the sec 9
        // flip (owner 2026-08-02); inert when dropped from the list.  The
@@ -2817,6 +2831,8 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 iso_endpoint_tube_radius=iso_endpoint_tube_radius,
                 iso_endpoint_min_aspect=iso_endpoint_min_aspect,
                 v3_extension_guard=v3_extension_guard,
+                traj_cover_probe=traj_cover_probe,
+                pr_find_other_rounds=pr_find_other_rounds,
                 v3_extension_min_gain=v3_extension_min_gain,
                 protect_graph_name=protect_graph_name,
                 protect_skip_convicted=protect_skip_convicted,

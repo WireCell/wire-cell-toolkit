@@ -130,6 +130,19 @@ namespace WireCell::Clus {
             // Inert while fit_blob_coverage < 0.
             double fit_blob_coverage_weight = 0.1;
 
+            // doc sbnd_xin/docs/pr/67 -- LOG-ONLY probe (0 = off = no lines =
+            // byte-identical).  examine_end_ps_vec is the primary END trimmer:
+            // it pops points off the front and back of a trajectory while
+            // Grouping::is_good_point(p_raw, apa, face, 0.2 cm, 0, 0) is false.
+            // That makes it the direct mechanism behind the owner's second
+            // hypothesis for the pr/67 cases -- "it is also possible that we
+            // have the situation covered, but then the track trajectory was
+            // removed somehow".  Today it removes points silently, so a tip
+            // that was fitted and then amputated looks identical to one that
+            // was never reached.  Reported as a double for the existing
+            // set_parameter(name, value) plumbing.
+            double traj_cover_probe = 0;
+
             double default_dQ_dx = 5000;
 
             double end_point_factor=0.6;

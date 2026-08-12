@@ -424,6 +424,23 @@ function(
     // suppressed in the compiled config either way.
     v3_extension_guard = true,
     v3_extension_min_gain = null,
+    // doc sbnd_xin/docs/pr/67 -- LOG-ONLY diagnostic probe for "the fitted
+    // trajectory does not cover the image", worst in isochronous topologies
+    // (owner cases 18264-137238 / 18259-42280 / 18345-21073 / 18255-58717).
+    // Names the find_iso_first_segment_endpoints gate that rejected a cluster
+    // (today only the aspect gate logs), reports get_local_extension's
+    // perpendicular-to-drift no-op, the per-round find_other_segments census,
+    // and what examine_end_ps_vec trims off each end.
+    // C++ default false; key suppressed when off => byte-identical config.
+    // Set SBND_TRAJ_COVER_PROBE=1 on run_pr_chain_batch.sh.
+    traj_cover_probe = false,
+    // doc pr/67 -- counterfactual ONLY, not a production setting.
+    // find_proto_vertex's nrounds_find_other_tracks is hardcoded (2 for the
+    // main cluster) with no config surface; > 0 overrides it so the owner's
+    // "not sufficient rounds of branch searching" hypothesis can be measured.
+    // C++ default 0 = keep the hardcoded 2.  A value > 0 CHANGES OUTPUT.
+    // Set SBND_PR_FIND_OTHER_ROUNDS=<n>.
+    pr_find_other_rounds = null,
     // protect_bundle stage knobs (doc pr/23): the PR-stage overclustering
     // protection (uboone's second graph examination).  The stage is in
     // pipeline_names by DEFAULT since the sec 9 production flip; the knobs
@@ -1534,6 +1551,8 @@ function(
                              iso_endpoint_tube_radius=iso_endpoint_tube_radius,
                              iso_endpoint_min_aspect=iso_endpoint_min_aspect,
                              v3_extension_guard=v3_extension_guard,
+                             traj_cover_probe=traj_cover_probe,
+                             pr_find_other_rounds=pr_find_other_rounds,
                              v3_extension_min_gain=v3_extension_min_gain,
                              protect_graph_name=protect_graph_name,
                              protect_skip_convicted=protect_skip_convicted,

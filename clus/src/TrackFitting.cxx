@@ -57,7 +57,9 @@ TrackFitting::TrackFitting(FittingType fitting_type)
 
 void TrackFitting::set_parameter(const std::string& name, double value) {
     // Map parameter names to struct members
-    if (name == "DL") {
+    if (name == "traj_cover_probe") {          // doc pr/67, log-only
+        m_params.traj_cover_probe = value;
+    } else if (name == "DL") {
         m_params.DL = value;
     } else if (name == "DT") {
         m_params.DT = value;
@@ -1929,6 +1931,16 @@ std::vector<WireCell::Point> TrackFitting::organize_orig_path(std::shared_ptr<PR
 std::vector<WireCell::Point> TrackFitting::examine_end_ps_vec(std::shared_ptr<PR::Segment> segment,const std::vector<WireCell::Point>& pts, bool flag_start, bool flag_end) {
     std::list<WireCell::Point> ps_list(pts.begin(), pts.end());
 
+    // doc pr/67 P3: record what this function AMPUTATES.  This is the primary
+    // END trimmer -- it pops points off the front/back while is_good_point is
+    // false -- and it does so silently today, so a tip that was fitted and
+    // then removed is indistinguishable from one never reached (the owner's
+    // second hypothesis for this round).  Log-only; byte-identical when off.
+    const bool pr67_probe = m_params.traj_cover_probe > 0;
+    const size_t pr67_n_in = pts.size();
+    const WireCell::Point pr67_front_in = pts.empty() ? WireCell::Point() : pts.front();
+    const WireCell::Point pr67_back_in  = pts.empty() ? WireCell::Point() : pts.back();
+
     // get the cluster from the segment
     auto cluster = segment->cluster();
     const auto transform = m_pcts->pc_transform(cluster->get_scope_transform(cluster->get_default_scope()));
@@ -2025,6 +2037,26 @@ std::vector<WireCell::Point> TrackFitting::examine_end_ps_vec(std::shared_ptr<PR
     }
 
     std::vector<WireCell::Point> tmp_pts(ps_list.begin(), ps_list.end());
+
+    // doc pr/67 P3: report only when the ends actually moved, so the line is
+    // a signal rather than per-call noise.
+    if (pr67_probe && !tmp_pts.empty() && pr67_n_in > 0) {
+        const double moved_front = ray_length(Ray{pr67_front_in, tmp_pts.front()});
+        const double moved_back  = ray_length(Ray{pr67_back_in,  tmp_pts.back()});
+        if (moved_front > 0.5*units::cm || moved_back > 0.5*units::cm) {
+            SPDLOG_LOGGER_DEBUG(s_log,
+                "pr67 examine_end_ps_vec: segment={} npts {} -> {}; front moved {:.2f} cm "
+                "({:.2f},{:.2f},{:.2f})->({:.2f},{:.2f},{:.2f}); back moved {:.2f} cm "
+                "({:.2f},{:.2f},{:.2f})->({:.2f},{:.2f},{:.2f})",
+                segment ? segment->id() : -1, pr67_n_in, tmp_pts.size(),
+                moved_front/units::cm,
+                pr67_front_in.x()/units::cm, pr67_front_in.y()/units::cm, pr67_front_in.z()/units::cm,
+                tmp_pts.front().x()/units::cm, tmp_pts.front().y()/units::cm, tmp_pts.front().z()/units::cm,
+                moved_back/units::cm,
+                pr67_back_in.x()/units::cm, pr67_back_in.y()/units::cm, pr67_back_in.z()/units::cm,
+                tmp_pts.back().x()/units::cm, tmp_pts.back().y()/units::cm, tmp_pts.back().z()/units::cm);
+        }
+    }
     return tmp_pts;
 }
 

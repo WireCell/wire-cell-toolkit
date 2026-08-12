@@ -277,6 +277,11 @@ public:
         // is the minimum required increase in distance to the segment's far
         // endpoint; a small negative default tolerates legacy's few-mm
         // legitimate retreat.
+        // doc sbnd_xin/docs/pr/67: log-only trajectory-coverage probe, and the
+        // counterfactual override for find_proto_vertex's hardcoded
+        // branch-search round budget.  false / 0 => byte-identical.
+        bool   m_traj_cover_probe{false};
+        int    m_pr_find_other_rounds{0};
         bool   m_v3_extension_guard{false};
         double m_v3_extension_min_gain{-1.0};   // cm
         // Detector-extent literals (docs/pr/2 sec. 2e(iv)), all in cm.

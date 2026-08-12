@@ -178,6 +178,9 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_iso_endpoint_xext_quantile = get(config, "iso_endpoint_xext_quantile", m_iso_endpoint_xext_quantile);
     m_iso_endpoint_tube_radius   = get(config, "iso_endpoint_tube_radius",   m_iso_endpoint_tube_radius);     // cm
     m_iso_endpoint_min_aspect    = get(config, "iso_endpoint_min_aspect",    m_iso_endpoint_min_aspect);
+    // doc sbnd_xin/docs/pr/67 (log-only probe + round-budget counterfactual).
+    m_traj_cover_probe           = get(config, "traj_cover_probe",           m_traj_cover_probe);
+    m_pr_find_other_rounds       = get(config, "pr_find_other_rounds",       m_pr_find_other_rounds);
     // doc sbnd_xin/docs/pr/24 §18 (round 5).
     m_v3_extension_guard         = get(config, "v3_extension_guard",         m_v3_extension_guard);
     m_v3_extension_min_gain      = get(config, "v3_extension_min_gain",      m_v3_extension_min_gain);        // cm
@@ -481,6 +484,8 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["iso_endpoint_xext_quantile"] = m_iso_endpoint_xext_quantile;
     cfg["iso_endpoint_tube_radius"]   = m_iso_endpoint_tube_radius;    // cm
     cfg["iso_endpoint_min_aspect"]    = m_iso_endpoint_min_aspect;     // trimmed transverse/axial extent ratio
+    cfg["traj_cover_probe"]           = m_traj_cover_probe;            // false = no pr/67 diagnostic lines
+    cfg["pr_find_other_rounds"]       = m_pr_find_other_rounds;        // 0 = keep find_proto_vertex's hardcoded budget
     cfg["v3_extension_guard"]         = m_v3_extension_guard;          // false = examine_vertices_3 unconditional accept
     cfg["v3_extension_min_gain"]      = m_v3_extension_min_gain;       // cm
     // Detector-extent literals (docs/pr/2 sec. 2e(iv)); defaults = uBooNE prototype, cm.
@@ -908,6 +913,8 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
     pattern_algos.m_iso_endpoint_xext_quantile = m_iso_endpoint_xext_quantile;
     pattern_algos.m_iso_endpoint_tube_radius   = m_iso_endpoint_tube_radius * units::cm;  // cm -> internal
     pattern_algos.m_iso_endpoint_min_aspect    = m_iso_endpoint_min_aspect;
+    pattern_algos.m_traj_cover_probe           = m_traj_cover_probe;
+    pattern_algos.m_pr_find_other_rounds       = m_pr_find_other_rounds;
     pattern_algos.m_v3_extension_guard         = m_v3_extension_guard;
     pattern_algos.m_v3_extension_min_gain      = m_v3_extension_min_gain * units::cm;    // cm -> internal
     // Detector-extent literals, cm -> internal (docs/pr/2 sec. 2e(iv)).
@@ -979,6 +986,8 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
     // sentinel; -1 default matches TrackFitting::Parameters, so this is a
     // no-op unless the config opts in).
     m_track_fitter->set_parameter("fit_blob_coverage", m_fit_blob_coverage);
+    // doc pr/67 P3 (log-only end-trim probe); 0 = off = byte-identical.
+    m_track_fitter->set_parameter("traj_cover_probe", m_traj_cover_probe ? 1.0 : 0.0);
     // doc sbnd_xin/docs/pr/50 (fit_blob_coverage_defer, default false):
     // wrap the MAIN cluster's find_proto_vertex call so its recursive
     // break partition forms on legacy (undeweighted) fits -- the partition

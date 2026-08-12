@@ -583,11 +583,32 @@ bool PatternAlgorithms::find_iso_first_segment_endpoints(const Facade::Cluster& 
     // the endpoints are the true untrimmed tube extremes.  The aspect gate
     // keeps 1-D track-like clusters out of this branch altogether.
 
+    // doc pr/67 P1: name the gate that rejected, not just the aspect one.
+    // Until this round only the aspect rejection below logged, so a cluster
+    // dropped by any EARLIER gate produced no line at all and was
+    // indistinguishable from a cluster the branch never saw (18255-58717).
+    // Log-only, gated on m_traj_cover_probe => byte-identical when off.
+    auto probe_reject = [this](const char* gate, double got, double cut,
+                               double length_cm, int npts_seen) {
+        if (!m_traj_cover_probe) return;
+        SPDLOG_LOGGER_DEBUG(s_log,
+            "pr67 iso endpoint: rejected by {} (value={:.3f} cut={:.3f} L={:.1f} cm n={})",
+            gate, got, cut, length_cm, npts_seen);
+    };
+
     const double length = cluster.get_length();
-    if (length < m_iso_endpoint_min_length) return false;
+    const int npts_all = cluster.npoints();
+    if (length < m_iso_endpoint_min_length) {
+        probe_reject("min_length", length/units::cm, m_iso_endpoint_min_length/units::cm,
+                     length/units::cm, npts_all);
+        return false;
+    }
 
     const int npts = cluster.npoints();
-    if (npts < 10) return false;
+    if (npts < 10) {
+        probe_reject("npoints", npts, 10, length/units::cm, npts);
+        return false;
+    }
 
     // Charge-qualified default-scope (T0-corrected) points: same exclusion
     // and blob-charge cut as the legacy boundary search
@@ -606,7 +627,10 @@ bool PatternAlgorithms::find_iso_first_segment_endpoints(const Facade::Cluster& 
         if (bc_it->second < 1500) continue;
         qual.push_back(i);
     }
-    if (qual.size() < 10) return false;
+    if (qual.size() < 10) {
+        probe_reject("charge_qualified", qual.size(), 10, length/units::cm, npts);
+        return false;
+    }
 
     // Quantile-trimmed drift-x extent in the corrected frame.  A raw min-max
     // or blob-centre extent over-reads on this topology (multi-(apa,face)
@@ -619,8 +643,16 @@ bool PatternAlgorithms::find_iso_first_segment_endpoints(const Facade::Cluster& 
     const size_t nq = xs.size();
     const size_t klo = static_cast<size_t>(m_iso_endpoint_xext_quantile * (nq - 1));
     const double xext = xs[nq - 1 - klo] - xs[klo];
-    if (xext >= m_iso_endpoint_max_xext) return false;
-    if (xext >= m_iso_endpoint_xext_frac * length) return false;
+    if (xext >= m_iso_endpoint_max_xext) {
+        probe_reject("max_xext", xext/units::cm, m_iso_endpoint_max_xext/units::cm,
+                     length/units::cm, npts);
+        return false;
+    }
+    if (xext >= m_iso_endpoint_xext_frac * length) {
+        probe_reject("xext_frac", xext/length, m_iso_endpoint_xext_frac,
+                     length/units::cm, npts);
+        return false;
+    }
 
     // Principal axis of the qualified points: covariance + power iteration
     // (same numerical pattern as the local-PCA refinement below), seeded with
@@ -704,7 +736,11 @@ bool PatternAlgorithms::find_iso_first_segment_endpoints(const Facade::Cluster& 
     const double s_lo = ss_sorted[klo];
     const double s_hi = ss_sorted[nq - 1 - klo];
     const double band = 3 * units::cm;
-    if (s_hi - s_lo < 3 * band) return false;  // degenerate axis
+    if (s_hi - s_lo < 3 * band) {              // degenerate axis
+        probe_reject("degenerate_axis", (s_hi - s_lo)/units::cm, 3*band/units::cm,
+                     length/units::cm, npts);
+        return false;
+    }
 
     // Sheet-aspect gate: trimmed transverse extent over trimmed axial extent.
     // A track-like (1-D) cluster is thin in BOTH transverse directions and is
@@ -787,7 +823,10 @@ bool PatternAlgorithms::find_iso_first_segment_endpoints(const Facade::Cluster& 
     double s_rawA = 0, s_rawB = 0, walk_inA = 0, walk_inB = 0, dpA = 0, dpB = 0;
     const int iA = pick_end_point(-1, s_rawA, walk_inA, dpA);
     const int iB = pick_end_point(+1, s_rawB, walk_inB, dpB);
-    if (iA < 0 || iB < 0 || iA == iB) return false;
+    if (iA < 0 || iB < 0 || iA == iB) {
+        probe_reject("endpoint_pick", iA == iB ? 1 : 0, 0, length/units::cm, npts);
+        return false;
+    }
 
     const auto pA = cluster.point3d(iA);
     const auto pB = cluster.point3d(iB);
@@ -824,7 +863,10 @@ bool PatternAlgorithms::find_iso_first_segment_endpoints(const Facade::Cluster& 
 
     const int tA = nearest_terminal(pA);
     const int tB = nearest_terminal(pB);
-    if (tA < 0 || tB < 0 || tA == tB) return false;
+    if (tA < 0 || tB < 0 || tA == tB) {
+        probe_reject("terminal_snap", tA == tB ? 1 : 0, 0, length/units::cm, npts);
+        return false;
+    }
 
     p1 = Facade::geo_point_t(sx[tA], sy[tA], sz[tA]);
     p2 = Facade::geo_point_t(sx[tB], sy[tB], sz[tB]);
@@ -1035,6 +1077,22 @@ SegmentPtr PatternAlgorithms::init_first_segment(Graph& graph, Facade::Cluster& 
         }
     }
     } // !iso_endpoints_used: legacy boundary endpoints + local-PCA refinement
+
+    // doc pr/67 P1: the seed the whole PR pass starts from, with its
+    // provenance.  Without this, an endpoint that lands short is
+    // indistinguishable from one that was correct and later retracted -- the
+    // exact ambiguity doc pr/24 rounds 4 and 5 had to resolve by hand with
+    // throwaway instrumentation.  Log-only; byte-identical when off.
+    if (m_traj_cover_probe) {
+        SPDLOG_LOGGER_DEBUG(s_log,
+            "pr67 init_first_segment: cluster={} branch={} L={:.1f} cm npts={} "
+            "first=({:.2f},{:.2f},{:.2f}) second=({:.2f},{:.2f},{:.2f})",
+            cluster.get_cluster_id(),
+            iso_endpoints_used ? "iso" : (m_first_seg_local_pca ? "legacy+localPCA" : "legacy"),
+            cluster.get_length()/units::cm, cluster.npoints(),
+            first_pt.x()/units::cm, first_pt.y()/units::cm, first_pt.z()/units::cm,
+            second_pt.x()/units::cm, second_pt.y()/units::cm, second_pt.z()/units::cm);
+    }
 
     // Determine the starting point based on whether this is the main cluster or not
     const bool is_main_flag = cluster.get_flag(Facade::Flags::main_cluster);
@@ -2491,9 +2549,42 @@ bool PatternAlgorithms::find_proto_vertex(Graph& graph, Facade::Cluster& cluster
 
 
     // Find other segments
-    for (int i = 0; i < nrounds_find_other_tracks; i++) {
+    //
+    // doc pr/67: nrounds_find_other_tracks arrives HARDCODED from
+    // TaggerCheckNeutrino (2 / 2 / 1 at its three call sites) with no config
+    // surface.  m_pr_find_other_rounds > 0 overrides it so the owner's
+    // hypothesis ("not sufficient rounds of doing the branch searching") can
+    // be measured.  Default 0 => unchanged.
+    //
+    // It applies to every call that arrives with a budget of 2 -- the MAIN
+    // cluster (call site :1038) AND the ASSOCIATED clusters (:1091).  Scoping
+    // it to the main cluster was wrong for this investigation: in 18264-137238
+    // and 18345-21073 the owner's charge lives in an ASSOCIATED cluster (143
+    // and 60; the main clusters are 7 and 11), so a main-only override cannot
+    // reach either case.  The third pass (:1106, budget 1, flag_break_track
+    // false) is deliberately left alone -- it is a different pass, not a
+    // shortened version of this one.
+    int nrounds = nrounds_find_other_tracks;
+    if (m_pr_find_other_rounds > 0 && nrounds_find_other_tracks >= 2) {
+        nrounds = m_pr_find_other_rounds;
+        SPDLOG_LOGGER_DEBUG(s_log,
+            "pr67 find_other_segments: cluster {} (main={}) round budget overridden {} -> {}",
+            cluster.get_cluster_id(), is_main_cluster, nrounds_find_other_tracks, nrounds);
+    }
+    for (int i = 0; i < nrounds; i++) {
         t0 = Clock::now();
+        // doc pr/67 P4: segment count in/out per round.  A round that still
+        // adds segments when the budget runs out is the signature of the
+        // branch search being cut short rather than converging.
+        const size_t nseg_before = m_traj_cover_probe ? boost::num_edges(graph) : 0;
         find_other_segments(graph, cluster, track_fitter, dv, flag_break_track);
+        if (m_traj_cover_probe) {
+            SPDLOG_LOGGER_DEBUG(s_log,
+                "pr67 find_other_segments: cluster={} round {}/{} segments {} -> {} (added {})",
+                cluster.get_cluster_id(), i + 1, nrounds,
+                nseg_before, boost::num_edges(graph),
+                static_cast<long>(boost::num_edges(graph)) - static_cast<long>(nseg_before));
+        }
         if (m_perf) SPDLOG_LOGGER_TRACE(s_log, "find_proto_vertex timing: find_other_segments round {} took {} ms", i, MS(Clock::now() - t0).count());
     }
 

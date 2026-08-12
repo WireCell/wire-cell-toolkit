@@ -2447,6 +2447,21 @@ Facade::geo_point_t PatternAlgorithms::get_local_extension(Facade::Cluster& clus
     
     // If angle is close to perpendicular to drift (90° ± 7.5°), return original point
     if (std::fabs(angle - 90.0) < 7.5) {
+        // doc pr/67 P2.  This early return is the ISOCHRONOUS case by
+        // definition: a track perpendicular to the drift direction is exactly
+        // what "isochronous" means here.  So the one stage that exists to push
+        // a trajectory endpoint further out (examine_vertices_3) is a
+        // structural no-op precisely where the owner reports the trajectory
+        // stopping short.  Faithful to the prototype (PR3DCluster_path.h:288-316,
+        // same 7.5 deg band) -- surfaced, not changed (M15).
+        // Log-only, gated => byte-identical when off.
+        if (m_traj_cover_probe) {
+            SPDLOG_LOGGER_DEBUG(s_log,
+                "pr67 get_local_extension: NO-OP, drift angle {:.1f} deg is within 7.5 deg of "
+                "perpendicular (isochronous) at ({:.2f},{:.2f},{:.2f}) cluster {}",
+                angle, wcp.x()/units::cm, wcp.y()/units::cm, wcp.z()/units::cm,
+                cluster.get_cluster_id());
+        }
         return wcp;
     }
     

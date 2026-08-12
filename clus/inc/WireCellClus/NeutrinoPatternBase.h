@@ -211,6 +211,37 @@ namespace WireCell::Clus::PR {
         bool   m_v3_extension_guard{false};
         double m_v3_extension_min_gain{-1.0 * units::cm};
 
+        // doc sbnd_xin/docs/pr/67 -- LOG-ONLY diagnostic probe for "the fitted
+        // trajectory does not cover the image", worst in isochronous
+        // topologies (owner's four cases: 18264-137238, 18259-42280,
+        // 18345-21073, 18255-58717).  Emits, per main-cluster PR pass:
+        //   P1  which gate of find_iso_first_segment_endpoints rejected a
+        //       cluster.  Today only the ASPECT rejection logs, so a cluster
+        //       thrown out by min_length / max_xext / xext_frac / degenerate
+        //       axis is indistinguishable from one that was never tried --
+        //       and 18255-58717 is exactly such a silent rejection.
+        //   P2  get_local_extension's drift-angle early return.  That function
+        //       returns the vertex UNCHANGED when the local Hough direction is
+        //       within 7.5 deg of perpendicular-to-drift, i.e. precisely in
+        //       the isochronous case, so the one stage meant to push an
+        //       endpoint outward is a structural no-op there.
+        //   P4  per-round find_other_segments census (segment count in/out),
+        //       so "the 2-round branch-search budget was exhausted with work
+        //       still to do" becomes visible rather than inferred.
+        // C++ default false => no lines, no behavior change, byte-identical.
+        bool   m_traj_cover_probe{false};
+
+        // doc pr/67 -- counterfactual for the owner's own 137238 hypothesis
+        // ("is that limited by not sufficient rounds of doing the branch
+        // searching?").  find_proto_vertex's nrounds_find_other_tracks is
+        // HARDCODED at its three TaggerCheckNeutrino call sites (2 for the
+        // main cluster and associated clusters, 1 for the third pass) with no
+        // config surface at all.  When > 0 this overrides the main-cluster
+        // count only, so the hypothesis can be measured instead of argued.
+        // C++ default 0 => the hardcoded value stands => byte-identical.
+        // DIAGNOSTIC: raising it changes reconstruction output by design.
+        int    m_pr_find_other_rounds{0};
+
         // Cathode kink veto (doc sbnd_xin/docs/pr/20 Part II, B0).  Passed to
         // segment_search_kink from break_segments: a candidate fit point within
         // m_cathode_kink_xcut of the cathode plane at m_cathode_x is skipped, so
