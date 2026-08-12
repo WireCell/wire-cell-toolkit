@@ -156,6 +156,9 @@ TEST_CASE("clus knob defaults: TaggerCheckNeutrino switches are all OFF")
     CHECK_KNOB_NUM(cfg, "sgp_min_edge", 0.5);
     CHECK_KNOB_NUM(cfg, "sgp_sample_step", 0.3);
     CHECK_KNOB_NUM(cfg, "sgp_point_radius", 0.2);
+    // doc pr/51 round 6: weak-charge deficit term, OFF by default.
+    CHECK_KNOB_NUM(cfg, "sgp_weak_scale", 0.0);
+    CHECK_KNOB_NUM(cfg, "sgp_weak_qref", 2000.0);
     // doc pr/64 round 7: reassign, instead of drop, an association point
     // that loses (or never enters) clustering_points_segments' Stage-C ghost
     // removal to a same-cluster segment that actually wins the global 2D

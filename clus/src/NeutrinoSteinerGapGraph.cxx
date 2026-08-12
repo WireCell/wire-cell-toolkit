@@ -21,6 +21,22 @@
 // m_steiner_gap_penalty <= 0 (C++ default 0) => first-line return => the
 // flavor is never built => byte-identical production path.
 //
+// doc sbnd_xin/docs/pr/51 round 6 -- sgp_weak_scale / sgp_weak_qref.
+// The unsupported-fraction penalty is blind to chords whose interior is
+// image-SUPPORTED but charge-poor: 18259-131357's trunk chord (point q
+// ~674-1276 vs ~1900-5400 on the true corner route) and 18255-506746's
+// hairpin connector (first points q = 18/238/633) have P3 ladders that are
+// literally scale-invariant 0..10.  When m_sgp_weak_scale > 0 each scanned
+// edge additionally pays a thresholded charge-deficit term:
+//     w' = w * (1 + gap_scale*bad + weak_scale*deficit)
+//     deficit = 0.5*(max(0,1-q_s/qref) + max(0,1-q_t/qref))
+// with endpoint charges recovered once per steiner vertex via
+// calc_charge_wcp(idx, 4000, false) -- the same call/flags the production
+// steiner edge weighting used (CreateSteinerGraph.cxx:262 passes
+// disable_dead_mix_cell=false, forwarded by the pr/29 D2 knob, SBND ON).
+// m_sgp_weak_scale <= 0 (C++ default 0) => the round-5 reweight statements
+// run verbatim => the gap flavor is byte-identical to round-5 production.
+//
 // Toolkit-only; no prototype counterpart (the prototype has the same
 // endpoint-only charge weighting; this is a deliberate, knob-gated
 // divergence, not a port fix).
@@ -31,8 +47,10 @@
 
 #include "WireCellAux/Logger.h"
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <vector>
 
 using namespace WireCell;
 using namespace WireCell::Clus::PR;
@@ -84,6 +102,14 @@ namespace WireCell::Clus::PR {
         return n ? (n_unsup + dead_alpha * n_dead) / n : 0.0;
     }
 
+    double weak_charge_deficit(double qa, double qb, double qref)
+    {
+        if (qref <= 0) return 0.0;
+        const double da = std::max(0.0, 1.0 - qa / qref);
+        const double db = std::max(0.0, 1.0 - qb / qref);
+        return 0.5 * (da + db);
+    }
+
 }  // namespace WireCell::Clus::PR
 
 bool PatternAlgorithms::ensure_steiner_gap_graph(const Facade::Cluster& cluster)
@@ -121,6 +147,27 @@ bool PatternAlgorithms::ensure_steiner_gap_graph(const Facade::Cluster& cluster)
         return classify_point(p, m_sgp_dv, grouping, transform.get(), cluster_t0, m_sgp_point_radius);
     };
 
+    // doc pr/51 round 6: lazy per-vertex charge recovery for the weak-charge
+    // deficit term.  steiner_pc rows are exact copies of default-pc points
+    // (Dataset::subset), so an exact-match 1-NN into the default kd-tree
+    // recovers the original point index; calc_charge_wcp(idx, 4000, false)
+    // then mirrors the charges the production steiner edge weighting used
+    // (CreateSteinerGraph.cxx:262 + pr/29 D2).  Computed at most once per
+    // steiner vertex, only for endpoints of scanned edges, only when the
+    // weak term is on.
+    const bool weak_on = (m_sgp_weak_scale > 0);
+    std::vector<double> qcache;
+    if (weak_on) qcache.assign(steiner_pc.size_major(), -1.0);
+    auto q_of = [&](size_t i) -> double {
+        double& q = qcache[i];
+        if (q < 0) {
+            const WireCell::Point p(xs[i], ys[i], zs[i]);
+            const size_t didx = cluster.get_closest_point_index(p);
+            q = cluster.calc_charge_wcp(didx, 4000.0, false).second;
+        }
+        return q;
+    };
+
     const auto t_start = std::chrono::steady_clock::now();
 
     // Copy-construct: preserves vertex indices, so kd_steiner_knn indices
@@ -129,7 +176,7 @@ bool PatternAlgorithms::ensure_steiner_gap_graph(const Facade::Cluster& cluster)
     // pointer-keyed container anywhere in this scan.
     Graphs::Weighted::Graph gap = base;
     const auto weight_map = boost::get(boost::edge_weight, gap);
-    size_t edges_scanned = 0, edges_penalized = 0;
+    size_t edges_scanned = 0, edges_penalized = 0, edges_weak = 0;
     for (auto [ei, ei_end] = boost::edges(gap); ei != ei_end; ++ei) {
         const double w = boost::get(weight_map, *ei);
         if (w < m_sgp_min_edge) continue;
@@ -142,9 +189,20 @@ bool PatternAlgorithms::ensure_steiner_gap_graph(const Facade::Cluster& cluster)
         // probe's P3 ladder used it for both the min-edge gate and the
         // sample count, and the shipped fix must match what was validated.
         const double bad = gap_edge_bad_fraction(a, b, w, m_sgp_sample_step, m_sgp_dead_alpha, classify);
-        if (bad <= 0) continue;
+        if (!weak_on) {
+            // Round-5 statements, verbatim: weak off => byte-identical flavor.
+            if (bad <= 0) continue;
+            edges_penalized++;
+            boost::put(weight_map, *ei, w * (1.0 + m_steiner_gap_penalty * bad));
+            continue;
+        }
+        // doc pr/51 round 6: combined form.
+        const double deficit = weak_charge_deficit(q_of(sidx), q_of(tidx), m_sgp_weak_qref);
+        if (deficit > 0) edges_weak++;
+        if (bad <= 0 && deficit <= 0) continue;
         edges_penalized++;
-        boost::put(weight_map, *ei, w * (1.0 + m_steiner_gap_penalty * bad));
+        boost::put(weight_map, *ei,
+                   w * (1.0 + m_steiner_gap_penalty * bad + m_sgp_weak_scale * deficit));
     }
 
     const double scan_ms =
@@ -159,9 +217,30 @@ bool PatternAlgorithms::ensure_steiner_gap_graph(const Facade::Cluster& cluster)
     // "steiner_graph_gap" alongside.
     const_cast<Facade::Cluster&>(cluster).give_graph("steiner_graph_gap", std::move(gap));
 
+    if (!weak_on) {
+        SPDLOG_LOGGER_DEBUG(s_log,
+            "sgp build: cluster {} edges={} scanned={} penalized={} scale={:.1f} scan_ms={:.1f}",
+            cluster.ident(), boost::num_edges(base), edges_scanned, edges_penalized,
+            m_steiner_gap_penalty, scan_ms);
+        return true;
+    }
+
+    // doc pr/51 round 6: extended sentinel.  Charge quartiles of the
+    // recovered vertex charges tell the qref operating point where the
+    // event's charge scale actually sits.
+    std::vector<double> qs_seen;
+    qs_seen.reserve(qcache.size());
+    for (double q : qcache)
+        if (q >= 0) qs_seen.push_back(q);
+    std::sort(qs_seen.begin(), qs_seen.end());
+    const auto quart = [&](double f) -> double {
+        return qs_seen.empty() ? 0.0 : qs_seen[static_cast<size_t>(f * (qs_seen.size() - 1))];
+    };
     SPDLOG_LOGGER_DEBUG(s_log,
-        "sgp build: cluster {} edges={} scanned={} penalized={} scale={:.1f} scan_ms={:.1f}",
+        "sgp build: cluster {} edges={} scanned={} penalized={} scale={:.1f} scan_ms={:.1f}"
+        " weak_scale={:.1f} qref={:.0f} weak_edges={} nq={} q25={:.0f} q50={:.0f} q75={:.0f}",
         cluster.ident(), boost::num_edges(base), edges_scanned, edges_penalized,
-        m_steiner_gap_penalty, scan_ms);
+        m_steiner_gap_penalty, scan_ms, m_sgp_weak_scale, m_sgp_weak_qref, edges_weak,
+        qs_seen.size(), quart(0.25), quart(0.50), quart(0.75));
     return true;
 }

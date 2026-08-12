@@ -92,3 +92,44 @@ TEST_CASE("steiner gap penalty: chord-vs-arc arithmetic at the shipped scales")
     // (no infinite-weight edges; the graph stays connected).
     CHECK(detour_over_chord(30.0) > chord_factor_s2);
 }
+
+// doc sbnd_xin/docs/pr/51 round 6 -- weak-charge deficit term.
+
+TEST_CASE("weak charge deficit: thresholded endpoint form")
+{
+    const double QREF = 2000.0;  // m_sgp_weak_qref default
+    // Both endpoints at/above the reference => no deficit.
+    CHECK(weak_charge_deficit(QREF, QREF, QREF) == doctest::Approx(0.0));
+    CHECK(weak_charge_deficit(5000.0, 3000.0, QREF) == doctest::Approx(0.0));
+    // Both chargeless => full deficit.
+    CHECK(weak_charge_deficit(0.0, 0.0, QREF) == doctest::Approx(1.0));
+    // Linear below the threshold, averaged over the two endpoints.
+    CHECK(weak_charge_deficit(1000.0, 1000.0, QREF) == doctest::Approx(0.5));
+    CHECK(weak_charge_deficit(0.0, QREF, QREF) == doctest::Approx(0.5));
+    CHECK(weak_charge_deficit(500.0, 3000.0, QREF) == doctest::Approx(0.375));
+    // Degenerate qref never divides by zero and never penalizes.
+    CHECK(weak_charge_deficit(0.0, 0.0, 0.0) == doctest::Approx(0.0));
+    CHECK(weak_charge_deficit(0.0, 0.0, -1.0) == doctest::Approx(0.0));
+}
+
+TEST_CASE("weak charge deficit: 131357 chord-vs-corner arithmetic")
+{
+    // The round-6 target in numbers (doc pr/51 round 6, work-pr51r5-s2probe
+    // arms): 18259-131357's trunk takes a 3.69 cm fully-SUPPORTED chord
+    // whose interior charge is ~674-1276, cutting a corner whose real route
+    // is ~5.4 cm at charge ~1900-5400.  The round-5 term sees bad = 0 on
+    // both (all points live) -- scale-invariant.  The weak term at qref
+    // 2000 prices the chord (endpoint charges ~1000 => deficit ~0.5) but
+    // not the corner route (>= 2000 => deficit 0), so at weak_scale s the
+    // chord costs ~3.69*(1 + s*0.5) against the corner's ~5.4: the corner
+    // wins for s > ~0.93, comfortably at the grid scales 2-5.
+    const double QREF = 2000.0;
+    const double chord_deficit = weak_charge_deficit(1000.0, 1000.0, QREF);
+    const double corner_deficit = weak_charge_deficit(2400.0, 4000.0, QREF);
+    CHECK(corner_deficit == doctest::Approx(0.0));
+    for (double s : {2.0, 3.0, 5.0}) {
+        CHECK(3.69 * (1.0 + s * chord_deficit) > 5.4 * (1.0 + s * corner_deficit));
+    }
+    // And the round-5 term alone cannot: bad = 0 on both routes.
+    CHECK(3.69 * (1.0 + 5.0 * 0.0) < 5.4);
+}

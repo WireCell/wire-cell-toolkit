@@ -409,6 +409,12 @@ public:
         double m_sgp_min_edge{0.5};      // cm; shorter edges never scanned
         double m_sgp_sample_step{0.3};   // cm; edge-interior sampling step
         double m_sgp_point_radius{0.2};  // cm; test_good_point radius
+        // doc sbnd_xin/docs/pr/51 round 6: weak-charge deficit term on the
+        // same gap flavor (see NeutrinoPatternBase.h).  Active only when
+        // both m_steiner_gap_penalty > 0 and this scale > 0; 0 (default)
+        // => round-5 reweight path verbatim => byte-identical.
+        double m_sgp_weak_scale{0};      // weak-charge penalty scale; 0 = off
+        double m_sgp_weak_qref{2000};    // charge ref (calc_charge_wcp units, no cm conversion)
         double m_beam_window_low{0};   // beam window [low, high) on cluster_t0 (matched flash time, WCT units).
         double m_beam_window_high{0};  // low >= high (default) disables the gate: uBooNE single-main behavior.
         bool m_nu_skip_cosmic{false};  // if true (beam-gate only), skip in-window mains already tagged

@@ -165,6 +165,17 @@ namespace WireCell::Clus::PR {
                                  double length, double step, double dead_alpha,
                                  const std::function<int(const WireCell::Point&)>& classify);
 
+    /// doc sbnd_xin/docs/pr/51 round 6: thresholded weak-charge deficit of
+    /// an edge from its endpoint charges,
+    ///     0.5 * (max(0, 1 - qa/qref) + max(0, 1 - qb/qref)),
+    /// in [0, 1]: 0 when both endpoints are at/above qref, 1 when both are
+    /// chargeless.  The saturating base-weight form (Q0/(q+Q0)) is provably
+    /// too weak to reroute a short weak-charge chord -- multiplicative
+    /// penalty then hurts the longer strong-charge route more -- hence the
+    /// hard threshold.  Pure function; doctested without a cluster.
+    /// Implemented in NeutrinoSteinerGapGraph.cxx.
+    double weak_charge_deficit(double qa, double qb, double qref);
+
     /// doc sbnd_xin/docs/pr/51: total associated charge of a segment --
     /// the sum of fit.dQ over valid fit points (fit.valid() && fit.dx > 0
     /// && fit.dQ >= 0, the same filter as segment_median_dQ_dx).  The

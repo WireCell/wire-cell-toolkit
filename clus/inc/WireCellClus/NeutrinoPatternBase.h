@@ -489,6 +489,23 @@ namespace WireCell::Clus::PR {
         double m_sgp_min_edge{0.5*units::cm};   ///< edges shorter are never scanned/penalized
         double m_sgp_sample_step{0.3*units::cm};///< edge-interior sampling step
         double m_sgp_point_radius{0.2*units::cm};///< test_good_point radius (ch_range stays 0)
+        // doc sbnd_xin/docs/pr/51 round 6: weak-charge deficit term.  The
+        // round-5 unsupported-fraction penalty is blind to chords whose
+        // interior is image-SUPPORTED but charge-poor (18259-131357 trunk
+        // chord, 18255-506746 hairpin connector: probe P3 ladders are
+        // scale-invariant 0..10 on both).  When m_sgp_weak_scale > 0 (and
+        // the gap flavor is enabled, i.e. m_steiner_gap_penalty > 0), each
+        // scanned edge additionally pays
+        //     w' = w * (1 + gap_scale*bad + weak_scale*deficit),
+        //     deficit = 0.5*(max(0,1-q_s/qref) + max(0,1-q_t/qref)),
+        // with q_* the endpoint steiner-vertex charges recovered via
+        // calc_charge_wcp(idx, 4000, false) -- the same call the production
+        // steiner edge weighting used (CreateSteinerGraph.cxx
+        // create_steiner_tree(..., false, ...) + pr/29 D2 forwarding).
+        // 0 (default) => the round-5 reweight path runs verbatim =>
+        // byte-identical gap flavor.
+        double m_sgp_weak_scale{0};             ///< weak-charge penalty scale; 0 = off
+        double m_sgp_weak_qref{2000};           ///< charge ref (calc_charge_wcp RMS units); deficit=0 at/above
         IDetectorVolumes::pointer m_sgp_dv{nullptr};   ///< pushed from TaggerCheckNeutrino (NeedDV)
         IPCTransformSet::pointer  m_sgp_pcts{nullptr}; ///< pushed from TaggerCheckNeutrino (NeedPCTS)
 

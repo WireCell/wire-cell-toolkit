@@ -1373,6 +1373,11 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               sgp_min_edge=null,
               sgp_sample_step=null,
               sgp_point_radius=null,
+              // doc pr/51 round 6 -- weak-charge deficit term on the same
+              // gap flavor.  C++ defaults: weak_scale 0 (off), weak_qref
+              // 2000 (charge units).  null omits the keys => byte-identical.
+              sgp_weak_scale=null,
+              sgp_weak_qref=null,
               // doc pr/54 -- keep well-supported isolated residual segments
               // in find_other_segments (18255-142421 separated EM shower with
               // no fitted trajectory).  C++ defaults: keep false, floors
@@ -2000,6 +2005,8 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
             sgp_min_edge=sgp_min_edge,
             sgp_sample_step=sgp_sample_step,
             sgp_point_radius=sgp_point_radius,
+            sgp_weak_scale=sgp_weak_scale,
+            sgp_weak_qref=sgp_weak_qref,
             other_seg_keep_isolated=other_seg_keep_isolated,
             other_seg_keep_isolated_min_points=other_seg_keep_isolated_min_points,
             other_seg_keep_isolated_min_length=other_seg_keep_isolated_min_length,
@@ -2749,6 +2756,11 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
               sgp_min_edge=null,
               sgp_sample_step=null,
               sgp_point_radius=null,
+              // doc pr/51 round 6 -- weak-charge deficit term on the same
+              // gap flavor.  C++ defaults: weak_scale 0 (off), weak_qref
+              // 2000 (charge units).  null omits the keys => byte-identical.
+              sgp_weak_scale=null,
+              sgp_weak_qref=null,
               // doc pr/54 -- keep well-supported isolated residual segments
               // in find_other_segments.  C++ defaults: keep false, floors
               // 25 points / 3 cm.  false/null omit the keys => byte-identical.
@@ -3004,6 +3016,8 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 sgp_min_edge=sgp_min_edge,
                 sgp_sample_step=sgp_sample_step,
                 sgp_point_radius=sgp_point_radius,
+                sgp_weak_scale=sgp_weak_scale,
+                sgp_weak_qref=sgp_weak_qref,
                 other_seg_keep_isolated=other_seg_keep_isolated,
                 other_seg_keep_isolated_min_points=other_seg_keep_isolated_min_points,
                 other_seg_keep_isolated_min_length=other_seg_keep_isolated_min_length,

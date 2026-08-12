@@ -298,6 +298,9 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_sgp_min_edge            = get(config, "sgp_min_edge",            m_sgp_min_edge);      // cm
     m_sgp_sample_step         = get(config, "sgp_sample_step",         m_sgp_sample_step);   // cm
     m_sgp_point_radius        = get(config, "sgp_point_radius",        m_sgp_point_radius);  // cm
+    // doc sbnd_xin/docs/pr/51 round 6: weak-charge deficit term (0 = legacy round-5 flavor).
+    m_sgp_weak_scale          = get(config, "sgp_weak_scale",          m_sgp_weak_scale);
+    m_sgp_weak_qref           = get(config, "sgp_weak_qref",           m_sgp_weak_qref);     // charge units
     m_beam_window_low         = get(config, "beam_window_low",         m_beam_window_low);
     m_beam_window_high        = get(config, "beam_window_high",        m_beam_window_high);
     m_nu_skip_cosmic          = get(config, "nu_skip_cosmic",          m_nu_skip_cosmic);
@@ -557,6 +560,8 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["sgp_min_edge"]            = m_sgp_min_edge;         // doc pr/51 round 5: cm; shorter edges never scanned (inert at scale 0)
     cfg["sgp_sample_step"]         = m_sgp_sample_step;      // doc pr/51 round 5: cm; edge-interior sampling step (inert at scale 0)
     cfg["sgp_point_radius"]        = m_sgp_point_radius;     // doc pr/51 round 5: cm; test_good_point radius (inert at scale 0)
+    cfg["sgp_weak_scale"]          = m_sgp_weak_scale;       // doc pr/51 round 6: 0 = legacy (round-5 gap flavor verbatim)
+    cfg["sgp_weak_qref"]           = m_sgp_weak_qref;        // doc pr/51 round 6: charge ref, calc_charge_wcp units (inert at weak scale 0)
     cfg["clus_geom_helper"] = ""; // empty = no SCE vertex correction
     cfg["beam_window_low"] = m_beam_window_low;   // beam window on cluster_t0; low >= high disables the
     cfg["beam_window_high"] = m_beam_window_high; // gate (uBooNE single-main selection).
@@ -897,6 +902,9 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
     pattern_algos.m_sgp_min_edge        = m_sgp_min_edge * units::cm;          // cm -> internal
     pattern_algos.m_sgp_sample_step     = m_sgp_sample_step * units::cm;       // cm -> internal
     pattern_algos.m_sgp_point_radius    = m_sgp_point_radius * units::cm;      // cm -> internal
+    // doc pr/51 round 6: weak-charge deficit term (charge units, no conversion).
+    pattern_algos.m_sgp_weak_scale      = m_sgp_weak_scale;
+    pattern_algos.m_sgp_weak_qref       = m_sgp_weak_qref;
     pattern_algos.m_sgp_dv   = m_dv;
     pattern_algos.m_sgp_pcts = m_pcts;
     pattern_algos.m_shower_topo_demote_len = m_shower_topo_demote_len * units::cm;  // cm -> internal

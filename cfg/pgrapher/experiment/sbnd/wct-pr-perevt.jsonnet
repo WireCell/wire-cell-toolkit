@@ -1368,6 +1368,16 @@ function(
     sgp_min_edge = null,
     sgp_sample_step = null,
     sgp_point_radius = null,
+    // doc pr/51 round 6 -- weak-charge deficit term on the same gap flavor
+    // (residuals 18259-131357 3-track V, 18255-506746 branch turn: chords
+    // that are image-supported but charge-poor, invisible to the
+    // unsupported-fraction penalty at any scale).  C++ defaults:
+    // weak_scale 0 (OFF), weak_qref 2000 (calc_charge_wcp charge units).
+    // null omits the keys => byte-identical round-5 production.  Escape
+    // for A/B: SBND_SGP_WEAK_SCALE=0 (or -A sgp_weak_scale=0); note
+    // steiner_gap_penalty=0 kills BOTH terms (pre-round-5 legacy).
+    sgp_weak_scale = null,
+    sgp_weak_qref = null,
     // doc pr/54 -- keep well-supported isolated residual segments in
     // find_other_segments (18255-142421 "missing gammas": a separated EM
     // shower of the main cluster is fit and then silently discarded because
@@ -1710,6 +1720,8 @@ function(
                              sgp_min_edge=sgp_min_edge,
                              sgp_sample_step=sgp_sample_step,
                              sgp_point_radius=sgp_point_radius,
+                             sgp_weak_scale=sgp_weak_scale,
+                             sgp_weak_qref=sgp_weak_qref,
                              other_seg_keep_isolated=other_seg_keep_isolated,
                              other_seg_keep_isolated_min_points=other_seg_keep_isolated_min_points,
                              other_seg_keep_isolated_min_length=other_seg_keep_isolated_min_length,
