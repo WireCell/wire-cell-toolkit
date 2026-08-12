@@ -541,6 +541,62 @@ TEST_CASE("pattern_recognition reassociate_cluster_orphans [A]")
     CHECK(ctx.algo.reassociate_cluster_orphans(*ctx.graph, *env.fixture.main_cluster, env.dv) == 0);
 }
 
+// doc sbnd_xin/docs/pr/64 round 7: assoc_reassign_orphans.
+//
+// Two safety properties the mechanism is designed to guarantee, checked
+// against real fixture geometry rather than a hand-built scenario (no
+// manufactured orphan is needed -- reassign_orphans acts on whatever Stage C
+// of clustering_points_segments already drops on this cluster, if anything):
+//   (1) knob off is a deterministic no-op: re-running clustering_points with
+//       m_assoc_reassign_orphans explicitly false reproduces the exact same
+//       per-segment associate_points counts as the original AfterClusteringPoints
+//       pass (byte-identical path).
+//   (2) knob on is monotonic-only-additive: every segment's count can only
+//       stay the same or grow relative to the knob-off pass -- the rescue
+//       branch only ever hands an unclaimed point to a segment, it never
+//       takes one away from a segment Stage C already accepted.
+TEST_CASE("pattern_recognition clustering_points assoc_reassign_orphans [A]")
+{
+    auto& env = env_A();
+    auto ctx  = make_context(env);
+    CHECK_NOTHROW(run_through(env, ctx, Step::AfterClusteringPoints));
+
+    auto segs = ctx.algo.find_cluster_segments(*ctx.graph, *env.fixture.main_cluster);
+    REQUIRE(!segs.empty());
+
+    std::map<Segment*, size_t> counts_off;
+    size_t total_off = 0;
+    for (auto& seg : segs) {
+        auto dpc = seg->dpcloud("associate_points");
+        size_t n = dpc ? dpc->npoints() : 0;
+        counts_off[seg.get()] = n;
+        total_off += n;
+    }
+
+    // (1) Knob off, explicit re-run: byte-identical to the baseline pass.
+    ctx.algo.m_assoc_reassign_orphans = false;
+    ctx.algo.clustering_points(*ctx.graph, *env.fixture.main_cluster, env.dv);
+    for (auto& seg : segs) {
+        auto dpc = seg->dpcloud("associate_points");
+        size_t n = dpc ? dpc->npoints() : 0;
+        CHECK(n == counts_off[seg.get()]);
+    }
+
+    // (2) Knob on: never fewer points than the knob-off baseline, for any
+    // segment or in total.
+    ctx.algo.m_assoc_reassign_orphans = true;
+    ctx.algo.clustering_points(*ctx.graph, *env.fixture.main_cluster, env.dv);
+    size_t total_on = 0;
+    for (auto& seg : segs) {
+        auto dpc = seg->dpcloud("associate_points");
+        size_t n = dpc ? dpc->npoints() : 0;
+        CHECK(n >= counts_off[seg.get()]);
+        total_on += n;
+    }
+    CHECK(total_on >= total_off);
+    MESSAGE("assoc_reassign_orphans: total associate_points ", total_off, " -> ", total_on);
+}
+
 TEST_CASE("pattern_recognition separate_track_shower [A]")
 {
     auto& env = env_A();

@@ -152,6 +152,8 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_other_seg_keep_isolated_min_length = get(config, "other_seg_keep_isolated_min_length", m_other_seg_keep_isolated_min_length); // cm
     // doc sbnd_xin/docs/pr/59 round 2 -- per-cluster orphaned-associate_points rescue.
     m_assoc_full_recluster = get(config, "assoc_full_recluster", m_assoc_full_recluster);
+    // doc sbnd_xin/docs/pr/64 round 7 -- reassign same-cluster association orphans.
+    m_assoc_reassign_orphans = get(config, "assoc_reassign_orphans", m_assoc_reassign_orphans);
     // doc sbnd_xin/docs/pr/31 §11 port-fidelity knob (F2, was P2).
     m_shower_topo_proto_dir    = get(config, "shower_topo_proto_dir",    m_shower_topo_proto_dir);
     // doc sbnd_xin/docs/pr/32 §11 port-fidelity knobs (F1-F4).
@@ -451,6 +453,8 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["other_seg_keep_isolated_min_length"] = m_other_seg_keep_isolated_min_length; // cm; fitted-length floor when the keep is on
     // doc sbnd_xin/docs/pr/59 round 2.
     cfg["assoc_full_recluster"] = m_assoc_full_recluster; // false = legacy (orphaned associate_points cloud stays null)
+    // doc sbnd_xin/docs/pr/64 round 7.
+    cfg["assoc_reassign_orphans"] = m_assoc_reassign_orphans; // false = legacy (Stage-C loss is dropped, never reassigned)
     // doc sbnd_xin/docs/pr/31 §11.
     cfg["shower_topo_proto_dir"]    = m_shower_topo_proto_dir;     // false = legacy (the stage-3 PCA direction call runs)
     // doc sbnd_xin/docs/pr/32 §11.
@@ -864,6 +868,8 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
     pattern_algos.m_other_seg_keep_isolated_min_length = m_other_seg_keep_isolated_min_length * units::cm; // cm -> internal
     // doc sbnd_xin/docs/pr/59 round 2.
     pattern_algos.m_assoc_full_recluster = m_assoc_full_recluster;
+    // doc sbnd_xin/docs/pr/64 round 7.
+    pattern_algos.m_assoc_reassign_orphans = m_assoc_reassign_orphans;
     // doc sbnd_xin/docs/pr/31 §11 (F2).
     pattern_algos.m_shower_topo_proto_dir    = m_shower_topo_proto_dir;
     // doc sbnd_xin/docs/pr/32 §11 (F1-F4).

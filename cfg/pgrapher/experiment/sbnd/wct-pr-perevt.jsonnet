@@ -1369,6 +1369,27 @@ function(
     // restores the pre-flip production bare, byte-exact (doc pr/59 sec 9
     // gate proofs).  C++ knob default itself stays false.
     assoc_full_recluster = true,
+    // doc pr/64 round 7 -- reassign, instead of drop, an association point
+    // that loses (or never enters) clustering_points_segments' Stage-C ghost
+    // removal to a segment in the SAME cluster that actually wins the global
+    // 2D projection contest.  SBND PRODUCTION ON 2026-08-11, per owner
+    // pre-authorization ("if validation passed, turn this on") conditioned on
+    // the 48-event nueCC off-gate/mover census (doc pr/64 round 7):
+    // nusel-table.tsv byte-identical 48/48 (selection untouched); mabc-pr.zip
+    // moves on 47/48 (the 48th has no PF reconstruction at all); every moved
+    // event's kine_reco_Enu goes UP (mean +10.7 MeV, max +51.9 MeV on this
+    // sample) -- monotonic and one-directional by construction (the rescue
+    // only ever adds a previously-silently-dropped point, never removes one),
+    // consistent with correcting a systematic under-count, not a random
+    // perturbation.  NOTE: this does NOT resolve the owner's originally
+    // reported 18259-18625 blob at (142.1,78.3,176.5) -- round 7 traced that
+    // specific loss to a DIFFERENT, not-yet-fixed mechanism (a segment that
+    // legitimately won those points is later removed from the graph with no
+    // re-association pass); see doc pr/64 round 7 "still open" section.
+    // Legacy escape for A/B: -A assoc_reassign_orphans=false (or
+    // SBND_ASSOC_REASSIGN_ORPHANS=false) restores the pre-flip production
+    // bare, byte-exact.  C++ knob default itself stays false.
+    assoc_reassign_orphans = true,
 )
     local base = import 'pgrapher/experiment/sbnd/simparams.jsonnet';
     local params = base {
@@ -1583,6 +1604,7 @@ function(
                              other_seg_keep_isolated_min_length=other_seg_keep_isolated_min_length,
                              shower_absorb_unreachable_main=shower_absorb_unreachable_main,
                              assoc_full_recluster=assoc_full_recluster,
+                             assoc_reassign_orphans=assoc_reassign_orphans,
                              pseudo_shower_track_paint=pseudo_shower_track_paint,
                              reclass_never_computed_ke_floor=reclass_never_computed_ke_floor,
                              muon_dqdx_curve=muon_dqdx_curve,

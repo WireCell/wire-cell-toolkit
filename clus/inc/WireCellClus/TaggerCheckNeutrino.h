@@ -215,6 +215,12 @@ public:
         // = legacy (orphan stays null).  See
         // PatternAlgorithms::reassociate_cluster_orphans.
         bool   m_assoc_full_recluster{false};
+        // doc sbnd_xin/docs/pr/64 round 7 -- reassign points Stage C of
+        // clustering_points_segments would otherwise drop to the same-cluster
+        // segment that actually wins the global 2D projection contest,
+        // instead of discarding them.  Default false = legacy (drop).  See
+        // PatternAlgorithms::m_assoc_reassign_orphans.
+        bool   m_assoc_reassign_orphans{false};
         // doc sbnd_xin/docs/pr/31 §11 -- F2 (was P2).  true => skip the
         // stage-3 segment_determine_shower_direction call, so a topology
         // shower keeps the direction segment_is_shower_topology set, which is

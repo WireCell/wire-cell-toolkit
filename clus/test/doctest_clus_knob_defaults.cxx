@@ -148,6 +148,11 @@ TEST_CASE("clus knob defaults: TaggerCheckNeutrino switches are all OFF")
     CHECK_KNOB_BOOL(cfg, "main_vertex_swap_apply", false);
     // doc pr/51 round 4: diagnostic-only rough-path probe -- OFF.
     CHECK_KNOB_BOOL(cfg, "rough_path_probe", false);
+    // doc pr/64 round 7: reassign, instead of drop, an association point
+    // that loses (or never enters) clustering_points_segments' Stage-C ghost
+    // removal to a same-cluster segment that actually wins the global 2D
+    // projection contest -- OFF.
+    CHECK_KNOB_BOOL(cfg, "assoc_reassign_orphans", false);
 
     // Numeric knobs whose legacy value is the INERT one: 0 disables the guard,
     // so an absent key leaves the code path untouched.

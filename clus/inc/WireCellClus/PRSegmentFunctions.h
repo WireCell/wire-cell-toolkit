@@ -545,7 +545,20 @@ namespace WireCell::Clus::PR {
     WireCell::D4Vector<double> segment_cal_4mom(SegmentPtr segment, int pdg_code, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, double MIP_dQdx = 50000/units::cm);
 
     // EMshower PID
-    void clustering_points_segments(std::vector<SegmentPtr> segments, const IDetectorVolumes::pointer& dv, const std::string& cloud_name = "associate_points", double search_range = 1.2*units::cm, double scaling_2d = 0.7);
+    //
+    // doc pr/64 round 7: reassign_orphans (no-op unless true) re-examines
+    // every point Stage C would otherwise DROP -- either because no Voronoi
+    // terminal reaches it ("channel a") or because it lost the ghost-removal
+    // 2D-projection contest to a segment that never claims it ("channel b1")
+    // -- and hands it to whichever OTHER segment in the SAME cluster actually
+    // achieves the global 2D minimum, using a duplicated copy of the Stage-C
+    // acceptance rule (M10: the primary rule chain is untouched). A point
+    // whose true 2D winner is in a DIFFERENT cluster is still dropped, so
+    // cross-cluster ghost rejection is unaffected by construction. Default
+    // false keeps this function byte-for-byte identical to today's behavior;
+    // see WCT_PR64_ORPHAN_CENSUS for the log-only (no-op) diagnostic that
+    // motivated this knob, and PRSegmentFunctions.cxx for the full mechanism.
+    void clustering_points_segments(std::vector<SegmentPtr> segments, const IDetectorVolumes::pointer& dv, const std::string& cloud_name = "associate_points", double search_range = 1.2*units::cm, double scaling_2d = 0.7, bool reassign_orphans = false);
 
     /// doc sbnd_xin/docs/pr/32 §11 F2 -- knob transport for
     /// segment_is_shower_trajectory's flag semantics.

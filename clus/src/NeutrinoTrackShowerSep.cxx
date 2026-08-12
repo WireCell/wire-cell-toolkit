@@ -109,7 +109,7 @@ void PatternAlgorithms::clustering_points(Graph& graph, Facade::Cluster& cluster
     // Run clustering on the collected segments
     t0 = Clock::now();
     if (!segments.empty()) {
-        clustering_points_segments(segments, dv, cloud_name, search_range, scaling_2d);
+        clustering_points_segments(segments, dv, cloud_name, search_range, scaling_2d, m_assoc_reassign_orphans);
     }
     // if (m_perf) SPDLOG_LOGGER_TRACE(s_log, "clustering_points timing: clustering_points_segments took {} ms", MS(Clock::now() - t0).count());
 
@@ -163,7 +163,12 @@ size_t PatternAlgorithms::reassociate_cluster_orphans(Graph& graph, Facade::Clus
             seg->dpcloud("associate_points", nullptr);
         }
     }
-    clustering_points_segments(segments, dv);
+    // doc pr/64 round 7: thread m_assoc_reassign_orphans through the pr/59
+    // recluster path too -- this call is LIVE in SBND production
+    // (assoc_full_recluster=true, wct-pr-perevt.jsonnet), so leaving it on
+    // the trailing default would give rescued segments different
+    // association rules than the main clustering_points pass just above.
+    clustering_points_segments(segments, dv, "associate_points", 1.2*units::cm, 0.7, m_assoc_reassign_orphans);
 
     // Owner constraint: this must run BEFORE track/shower separation so the
     // classification pass can actually consume the new cloud -- but only for

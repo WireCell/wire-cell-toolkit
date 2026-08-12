@@ -545,6 +545,23 @@ namespace WireCell::Clus::PR {
         // (orphaned associate_points cloud stays null), byte-identical.
         bool   m_assoc_full_recluster{false};
 
+        // doc sbnd_xin/docs/pr/64 round 7 -- passed as the trailing
+        // reassign_orphans arg of clustering_points_segments (both live call
+        // sites: clustering_points and reassociate_cluster_orphans's recluster
+        // above, so a rescued segment gets the same association rule as the
+        // main pass).  18259-18625: a 12-18 pt blob at PF segment 126042's own
+        // fit endpoint (the photon-conversion vertex) is present in img charge
+        // but absent from shower_track/associate_points -- Stage C's ghost
+        // removal only ever DROPS a losing point, it never hands it to the
+        // segment that actually wins the global 2D projection contest.  When
+        // on, such a point is reassigned to the winning same-cluster segment
+        // (never a different cluster's -- cross-cluster ghost rejection is
+        // unaffected by construction).  C++ default false = legacy = drop,
+        // byte-identical.  See PRSegmentFunctions.cxx's doc comment on
+        // clustering_points_segments for the full mechanism and
+        // WCT_PR64_ORPHAN_CENSUS for the log-only diagnostic.
+        bool   m_assoc_reassign_orphans{false};
+
         // doc sbnd_xin/docs/pr/45 -- empty-2D-tree sentinel guard in
         // find_other_segments (SBND 18255-56463 cluster 14, the 30 cm
         // isochronous tail beyond segment 14006's end).

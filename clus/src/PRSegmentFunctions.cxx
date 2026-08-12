@@ -2739,7 +2739,7 @@ namespace WireCell::Clus::PR {
         }
      }
 
-    void clustering_points_segments(std::vector<SegmentPtr> segments, const IDetectorVolumes::pointer& dv, const std::string& cloud_name, double search_range, double scaling_2d){
+    void clustering_points_segments(std::vector<SegmentPtr> segments, const IDetectorVolumes::pointer& dv, const std::string& cloud_name, double search_range, double scaling_2d, bool reassign_orphans){
         // using Clock = std::chrono::steady_clock;
         // using MS = std::chrono::duration<double, std::milli>;
         // auto t_total = Clock::now();
@@ -2749,6 +2749,13 @@ namespace WireCell::Clus::PR {
         // fitted segment can end up with a null/empty "associate_points" cloud
         // (18255-142421 seg 20: fits() non-empty, associate_points never built).
         static const bool pr59_census = std::getenv("WCT_PR59_ASSOC_CENSUS") != nullptr;
+
+        // doc pr/64 round 7: diagnostic-only, env-gated (WCT_PR64_ORPHAN_CENSUS
+        // unset => no log lines, no behavior change) sentinel classifying every
+        // point Stage C drops (18259-18625: 12-18 pt blob at segment 126042's
+        // own fit endpoint). See reassign_orphans (this function's trailing
+        // bool param) for the knob that acts on this census's finding.
+        static const bool pr64_census = std::getenv("WCT_PR64_ORPHAN_CENSUS") != nullptr;
 
         // Use cluster_id-based comparator so map_cluster_segs is iterated in a
         // deterministic, run-to-run stable order (not pointer-address order).
@@ -2799,6 +2806,14 @@ namespace WireCell::Clus::PR {
         // reducing ghost-removal from O(P×S×F) to O(P×log(total_fits)) overall.
         using nfkd2d_t = NFKDVec::Tree<double, NFKDVec::IndexDynamic>;
         std::map<ApFaceKey, nfkd2d_t> global_kd2d;
+        // doc pr/64 round 7: parallel flat-index -> owning-segment table for the trees
+        // above. knn(1,q) already returns the flat index of the winning point but the
+        // ghost-removal query at the call site only kept the distance; this table lets
+        // the (env-gated census and) reassign_orphans branch recover *which* segment
+        // actually achieves the global 2D minimum, without changing knn()'s return type
+        // or the existing distance-only comparisons. Built unconditionally (cheap: one
+        // pointer per 2D projection point) since the census also needs it.
+        std::map<ApFaceKey, std::vector<SegmentPtr>> global_kd2d_owner;
         for (const auto& [seg, pts2d_map] : seg_pts2d) {
             for (const auto& [apfkey, pts] : pts2d_map) {
                 auto [it, inserted] = global_kd2d.try_emplace(apfkey, 2);
@@ -2808,6 +2823,8 @@ namespace WireCell::Clus::PR {
                 ys.reserve(pts.size());
                 for (const auto& p : pts) { xs.push_back(p.x); ys.push_back(p.y); }
                 it->second.append(nfkd2d_t::points_type{xs, ys});
+                auto& owners = global_kd2d_owner[apfkey];
+                owners.insert(owners.end(), pts.size(), seg);
             }
         }
 
@@ -3055,6 +3072,182 @@ namespace WireCell::Clus::PR {
                     if (!flag_change){
                         map_segment_global_indices[main_sg].push_back(i);
                         map_segment_points[main_sg].push_back(gp);
+                    }
+                }
+
+                // doc pr/64 round 7: second, independent pass over the SAME
+                // graph vertices, run only when the census env var or the
+                // reassign_orphans knob is set. It never modifies the primary
+                // loop above -- it only reads its outcome (which vertex index
+                // ended up in map_segment_global_indices) -- so with both off
+                // this whole block does not execute and the primary loop's
+                // byte-identical behavior is untouched by construction.
+                //
+                // Classifies every unclaimed vertex into one of two channels
+                // (see PRSegmentFunctions.h doc comment and doc pr/64 round 7):
+                //   "no_terminal" -- nearest_terminal[i] never seeded a Voronoi
+                //     terminal (map_pindex_segment has no entry for it), so the
+                //     primary loop's `continue` at the top of the loop above
+                //     skipped it before any 2D/3D comparison ever ran.
+                //   "ghost_drop"  -- it had a main_sg candidate but Stage C's
+                //     acceptance rule (duplicated below as accept_for, not
+                //     shared -- M10) rejected it.
+                // When reassign_orphans is set, an unclaimed point is handed to
+                // whichever OTHER segment in the SAME cluster achieves the
+                // point's true global 2D minimum on at least one plane and
+                // itself passes accept_for -- i.e. exactly the Stage-C rule,
+                // just evaluated for the real winner instead of only for
+                // main_sg. A true winner in a DIFFERENT cluster is not a
+                // candidate, so cross-cluster ghost rejection is unaffected.
+                if (pr64_census || reassign_orphans) {
+                    std::set<int> claimed;
+                    for (const auto& [seg, idxs] : map_segment_global_indices) {
+                        (void)seg;
+                        for (auto gi : idxs) claimed.insert(static_cast<int>(gi));
+                    }
+
+                    std::vector<SegmentPtr> cluster_segs_sorted(segs.begin(), segs.end());
+                    std::sort(cluster_segs_sorted.begin(), cluster_segs_sorted.end(),
+                              [](SegmentPtr a, SegmentPtr b){ return a->get_graph_index() < b->get_graph_index(); });
+                    std::set<SegmentPtr> cluster_seg_set(segs.begin(), segs.end());
+
+                    // duplicated copy of the Stage-C acceptance rule chain
+                    // above (including the dead-channel re-check) -- NOT
+                    // extracted/shared, per M10, so the primary loop can never
+                    // be affected by anything here.
+                    auto accept_for = [&](SegmentPtr cand, const geo_point_t& cgp, double cqx,
+                                           const std::array<double, 3>& cqy, int capa, int cface,
+                                           const std::tuple<double, double, double>& g_min_2d_dis2) -> bool {
+                        std::tuple<double, double, double> c_closest_2d_dis2 = get_2d_dist2_fast(cand, cqx, cqy, capa, cface);
+                        double c_closest_dis3d = get_3d_dist_fast(cand, cgp);
+                        const double c_sq_2d_thr = (scaling_2d * search_range) * (scaling_2d * search_range);
+
+                        bool c_flag_change = true;
+                        if (std::get<0>(g_min_2d_dis2) == std::get<0>(c_closest_2d_dis2) && std::get<1>(g_min_2d_dis2) == std::get<1>(c_closest_2d_dis2) && std::get<2>(g_min_2d_dis2) == std::get<2>(c_closest_2d_dis2))
+                            c_flag_change = false;
+                        else if (std::get<0>(g_min_2d_dis2) == std::get<0>(c_closest_2d_dis2) && std::get<1>(g_min_2d_dis2) == std::get<1>(c_closest_2d_dis2))
+                            c_flag_change = false;
+                        else if (std::get<0>(g_min_2d_dis2) == std::get<0>(c_closest_2d_dis2) && std::get<2>(g_min_2d_dis2) == std::get<2>(c_closest_2d_dis2))
+                            c_flag_change = false;
+                        else if (std::get<1>(g_min_2d_dis2) == std::get<1>(c_closest_2d_dis2) && std::get<2>(g_min_2d_dis2) == std::get<2>(c_closest_2d_dis2))
+                            c_flag_change = false;
+                        else if (std::get<0>(g_min_2d_dis2) == std::get<0>(c_closest_2d_dis2) && (c_closest_dis3d < search_range || (std::get<1>(c_closest_2d_dis2) < c_sq_2d_thr && std::get<2>(c_closest_2d_dis2) < c_sq_2d_thr)))
+                            c_flag_change = false;
+                        else if (std::get<1>(g_min_2d_dis2) == std::get<1>(c_closest_2d_dis2) && (c_closest_dis3d < search_range || (std::get<0>(c_closest_2d_dis2) < c_sq_2d_thr && std::get<2>(c_closest_2d_dis2) < c_sq_2d_thr)))
+                            c_flag_change = false;
+                        else if (std::get<2>(g_min_2d_dis2) == std::get<2>(c_closest_2d_dis2) && (c_closest_dis3d < search_range || (std::get<1>(c_closest_2d_dis2) < c_sq_2d_thr && std::get<0>(c_closest_2d_dis2) < c_sq_2d_thr)))
+                            c_flag_change = false;
+
+                        if (!c_flag_change) {
+                            auto grouping = clus->grouping();
+                            int ch_range = 0;
+                            if (grouping->get_closest_dead_chs(cgp, ch_range, capa, cface, 0) && std::get<0>(c_closest_2d_dis2) > c_sq_2d_thr){
+                                if (std::get<1>(c_closest_2d_dis2) < c_sq_2d_thr || std::get<2>(c_closest_2d_dis2) < c_sq_2d_thr)
+                                    c_flag_change = true;
+                            } else if (grouping->get_closest_dead_chs(cgp, ch_range, capa, cface, 1) && std::get<1>(c_closest_2d_dis2) > c_sq_2d_thr){
+                                if (std::get<0>(c_closest_2d_dis2) < c_sq_2d_thr || std::get<2>(c_closest_2d_dis2) < c_sq_2d_thr)
+                                    c_flag_change = true;
+                            } else if (grouping->get_closest_dead_chs(cgp, ch_range, capa, cface, 2) && std::get<2>(c_closest_2d_dis2) > c_sq_2d_thr){
+                                if (std::get<1>(c_closest_2d_dis2) < c_sq_2d_thr || std::get<0>(c_closest_2d_dis2) < c_sq_2d_thr)
+                                    c_flag_change = true;
+                            }
+                        }
+                        return !c_flag_change;
+                    };
+
+                    int n_no_terminal = 0, n_ghost_drop = 0, n_ghost_drop_same_cluster_winner = 0, n_rescued = 0;
+
+                    for (int i = 0; i < num_graph_vertices; i++) {
+                        if (claimed.count(i)) continue;
+                        const int nt_i = static_cast<int>(nearest_terminal[i]);
+                        auto pi_it = map_pindex_segment.find(nt_i);
+                        const bool has_main = (pi_it != map_pindex_segment.end());
+
+                        geo_point_t gp(points[0][i], points[1][i], points[2][i]);
+                        auto point_wpid = clus->wire_plane_id(i);
+                        auto apa = point_wpid.apa();
+                        auto face = point_wpid.face();
+                        const auto& ang = get_angles_cached(apa, face);
+                        const double qx = gp.x();
+                        const std::array<double, 3> qy = {
+                            std::cos(ang[0]) * gp.z() - std::sin(ang[0]) * gp.y(),
+                            std::cos(ang[1]) * gp.z() - std::sin(ang[1]) * gp.y(),
+                            std::cos(ang[2]) * gp.z() - std::sin(ang[2]) * gp.y()
+                        };
+
+                        // global per-plane minimum + owning segment (mirrors the F17 query above)
+                        std::tuple<double, double, double> min_2d_dis2 = {1e18, 1e18, 1e18};
+                        std::array<SegmentPtr, 3> min_2d_owner = {nullptr, nullptr, nullptr};
+                        {
+                            const std::array<double, 2> query_u = {qx, qy[0]};
+                            const std::array<double, 2> query_v = {qx, qy[1]};
+                            const std::array<double, 2> query_w = {qx, qy[2]};
+                            auto q2 = [&](int pind, const std::array<double, 2>& q) {
+                                auto kit = global_kd2d.find({pind, apa, face});
+                                if (kit == global_kd2d.end()) return;
+                                auto res = kit->second.knn(1, q);
+                                if (!res.empty()) {
+                                    double d2 = res[0].second;
+                                    size_t flat_idx = res[0].first;
+                                    if (pind == 0) std::get<0>(min_2d_dis2) = d2;
+                                    else if (pind == 1) std::get<1>(min_2d_dis2) = d2;
+                                    else               std::get<2>(min_2d_dis2) = d2;
+                                    auto oit = global_kd2d_owner.find({pind, apa, face});
+                                    if (oit != global_kd2d_owner.end() && flat_idx < oit->second.size())
+                                        min_2d_owner[pind] = oit->second[flat_idx];
+                                }
+                            };
+                            q2(0, query_u);
+                            q2(1, query_v);
+                            q2(2, query_w);
+                        }
+
+                        bool same_cluster_winner_exists = false;
+                        for (int pind = 0; pind < 3; ++pind) {
+                            if (min_2d_owner[pind] && cluster_seg_set.count(min_2d_owner[pind])) {
+                                same_cluster_winner_exists = true;
+                                break;
+                            }
+                        }
+
+                        if (has_main) {
+                            n_ghost_drop++;
+                            if (same_cluster_winner_exists) n_ghost_drop_same_cluster_winner++;
+                        } else {
+                            n_no_terminal++;
+                        }
+
+                        if (pr64_census) {
+                            SPDLOG_LOGGER_DEBUG(s_log,
+                                "pr64 orphan-census: cluster {} vertex {} channel={} pos=({:.4f},{:.4f},{:.4f}) "
+                                "main_sg={} same_cluster_winner={}",
+                                clus->get_cluster_id(), i, has_main ? "ghost_drop" : "no_terminal",
+                                gp.x(), gp.y(), gp.z(),
+                                has_main ? pi_it->second.first->get_graph_index() : -1,
+                                same_cluster_winner_exists ? 1 : 0);
+                        }
+
+                        if (!reassign_orphans) continue;
+
+                        for (auto cand : cluster_segs_sorted) {
+                            bool is_a_winner = (cand == min_2d_owner[0] || cand == min_2d_owner[1] || cand == min_2d_owner[2]);
+                            if (!is_a_winner) continue;
+                            if (has_main && cand == pi_it->second.first) continue;  // pass #1 already tried & rejected this one
+                            if (accept_for(cand, gp, qx, qy, apa, face, min_2d_dis2)) {
+                                map_segment_global_indices[cand].push_back(i);
+                                map_segment_points[cand].push_back(gp);
+                                n_rescued++;
+                                break;
+                            }
+                        }
+                    }
+
+                    if (pr64_census) {
+                        SPDLOG_LOGGER_DEBUG(s_log,
+                            "pr64 orphan-census tally: cluster {} no_terminal={} ghost_drop={} "
+                            "ghost_drop_same_cluster_winner={} rescued={}",
+                            clus->get_cluster_id(), n_no_terminal, n_ghost_drop,
+                            n_ghost_drop_same_cluster_winner, n_rescued);
                     }
                 }
             }

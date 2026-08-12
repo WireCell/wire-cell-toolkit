@@ -238,7 +238,19 @@ local bs_dead_face(apa, face) = {
 // shower fragments absorbed by a cosmic 46-76 cm away; the true parent sat
 // 1.9 cm across the cathode, invisible per-APA).  false omits the key =>
 // compiled config byte-identical to before the knob existed.
-local clus_per_face(anode, face, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=null, rse_from_ident=false, pos_offset_on=true, trace_bee=false, save_assoc_id=false, sep_vertex_veto=true, nu_iso_band_guard=true, iso_cathode_guard=false) = {
+// nu_band_veto (SBND default FALSE this round, doc pr/66): nu_iso_band_guard
+// above stops the per-APA chain from merging a band with a drift-spanning
+// partner, but the SEPARATE all-APA clustering chain (clus_all_apa below) has
+// no iso-band guard of its own and can re-merge the exact pair per-APA just
+// refused (run 18255 evt 10550: the 1e1p nu candidate and a TGM cosmic band
+// are correctly split at img-global, then fused again by the time Q/L runs).
+// When true, each per-APA refusal is recorded as a per-blob
+// "nu_band_veto_role" provenance array that merge_clusters() (and the cathode
+// bundle rescue's candidate selection) honor everywhere downstream, including
+// the all-APA chain -- see clus/src/ClusteringFuncs.cxx band_veto_forbids().
+// false omits the key => compiled config byte-identical to before the knob
+// existed; only meaningful with nu_iso_band_guard on.
+local clus_per_face(anode, face, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=null, rse_from_ident=false, pos_offset_on=true, trace_bee=false, save_assoc_id=false, sep_vertex_veto=true, nu_iso_band_guard=true, iso_cathode_guard=false, nu_band_veto=false) = {
     local dv = detector_volumes([anode], face, pos_offset_on),
     local pcts = pctransforms(dv),
     local bsl = bs_live_face(anode.name, face),
@@ -299,8 +311,10 @@ local clus_per_face(anode, face, dump, output_dir, runNo, subRunNo, eventNo, bee
         cm.examine_x_boundary(),
         cm.protect_overclustering(),
         // nu_iso_band_guard: see the clus_per_face header comment (doc pr/18).
+        // nu_band_veto: see the clus_per_face header comment (doc pr/66).
         cm.neutrino(protect_iso_band=nu_iso_band_guard,
-                    protect_iso_band_xext=(if nu_iso_band_guard then 20 * wc.cm else null)),
+                    protect_iso_band_xext=(if nu_iso_band_guard then 20 * wc.cm else null),
+                    record_band_veto=nu_band_veto),
         // SBND: tighten the isolated small/big length_cut from the 20 cm default
         // to 15 cm so a ~16 cm EM (gamma) blob is no longer auto-classified
         // "small" and absorbed into a nearby long cosmic track by the
@@ -1357,6 +1371,13 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               // rescue.  C++ default false; false omits the key =>
               // byte-identical.
               assoc_full_recluster=false,
+              // doc pr/64 round 7 -- reassign same-cluster association
+              // orphans that Stage C of clustering_points_segments would
+              // otherwise drop (18259-18625: 12-18 pt blob at PF segment
+              // 126042's own fit endpoint, in img charge but absent from
+              // shower_track/associate_points).  C++ default false; false
+              // omits the key => byte-identical.
+              assoc_reassign_orphans=false,
               // doc pr/45 -- paint muon-typed (+-13) pseudo-showers as track in
               // the Bee shower_track layer + PrDisplayDump (18255-56463: 411 cm
               // muon painted red).  C++ default false; key suppressed when off
@@ -1937,6 +1958,7 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
             other_seg_keep_isolated_min_length=other_seg_keep_isolated_min_length,
             shower_absorb_unreachable_main=shower_absorb_unreachable_main,
             assoc_full_recluster=assoc_full_recluster,
+            assoc_reassign_orphans=assoc_reassign_orphans,
             muon_dqdx_curve=muon_dqdx_curve,
             sp_dedx_use_recomb_model=sp_dedx_use_recomb_model,
             sp_mean_dedx_cut=sp_mean_dedx_cut,
@@ -2298,12 +2320,13 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                       bee_sink=bee_sink, rse_from_ident=rse_from_ident, pos_offset_on=pos_offset_on),
     // trace_bee (default false): per-step Bee layers for merge attribution; see
     // trace_sets above.  Diagnostic only, off => byte-identical compiled config.
-    per_apa(anode, dump=true, bee_sink=null, trace_bee=false, save_assoc_id=false, sep_vertex_veto=true, nu_iso_band_guard=true, iso_cathode_guard=false)::
+    per_apa(anode, dump=true, bee_sink=null, trace_bee=false, save_assoc_id=false, sep_vertex_veto=true, nu_iso_band_guard=true, iso_cathode_guard=false, nu_band_veto=false)::
         clus_per_face(anode, face=0, dump=dump,
                       output_dir=output_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo,
                       bee_sink=bee_sink, rse_from_ident=rse_from_ident, pos_offset_on=pos_offset_on,
                       trace_bee=trace_bee, save_assoc_id=save_assoc_id, sep_vertex_veto=sep_vertex_veto,
-                      nu_iso_band_guard=nu_iso_band_guard, iso_cathode_guard=iso_cathode_guard),
+                      nu_iso_band_guard=nu_iso_band_guard, iso_cathode_guard=iso_cathode_guard,
+                      nu_band_veto=nu_band_veto),
     // Production (LArSoft) entry point used by wcls-img-clus.jsonnet.
     per_volume(anode, face=0, dump=true, bee_sink=null)::
         clus_per_face(anode, face=face, dump=dump,
@@ -2671,6 +2694,11 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
               // rescue.  C++ default false; false omits the key =>
               // byte-identical.
               assoc_full_recluster=false,
+              // doc pr/64 round 7 -- reassign same-cluster association
+              // orphans that Stage C of clustering_points_segments would
+              // otherwise drop.  C++ default false; false omits the key =>
+              // byte-identical.  See the clus_pr arg comment.
+              assoc_reassign_orphans=false,
        pseudo_shower_track_paint=false,
        // Muon dQ/dx-vs-length envelope: DEFAULT = the docs/pr/10 SBND fit
        // (see the clus_pr arg comment; null restores the uBooNE refit).
@@ -2887,6 +2915,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 other_seg_keep_isolated_min_length=other_seg_keep_isolated_min_length,
                 shower_absorb_unreachable_main=shower_absorb_unreachable_main,
                 assoc_full_recluster=assoc_full_recluster,
+                assoc_reassign_orphans=assoc_reassign_orphans,
                 pseudo_shower_track_paint=pseudo_shower_track_paint,
                 muon_dqdx_curve=muon_dqdx_curve,
                 use_power_recomb=use_power_recomb,
