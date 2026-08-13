@@ -136,6 +136,76 @@ std::vector<Facade::geo_point_t> PatternAlgorithms::do_rough_path(const Facade::
         const std::vector<size_t>& path_indices =
             cluster.graph_algorithms(flavor).shortest_path(first_index, last_index);
 
+        // doc sbnd_xin/docs/pr/73 sec 4.10: path-level sentinel.  The per-edge
+        // probe of sec 4.9 says WHERE the penalized edges are but not why the
+        // re-pricing changes the ROUTE -- a shortest path is decided by whole
+        // edge sequences, not by any average over a region.  When the gap
+        // flavor is in use and m_sgp_edge_probe is on, also route on the BASE
+        // flavor and report the 2x2 cost matrix: each of the two routes priced
+        // under each of the two weightings.  cost(base|base) <= cost(gap|base)
+        // and cost(gap|gap) <= cost(base|gap) hold by optimality, so the two
+        // interesting numbers are the DETOUR the penalty bought (extra base
+        // weight on the gap route) and the TAX it avoided (extra gap weight the
+        // base route would have paid).  Log-only, and off by default.
+        if (m_sgp_edge_probe && &flavor == &kGapFlavor) {
+            const auto& base_graph = cluster.find_graph(kBaseFlavor);
+            const std::vector<size_t>& base_indices =
+                cluster.graph_algorithms(kBaseFlavor).shortest_path(first_index, last_index);
+            auto path_cost = [](const std::vector<size_t>& p, const auto& g) -> double {
+                const auto wmap = boost::get(boost::edge_weight, g);
+                double c = 0;
+                for (size_t k = 0; k + 1 < p.size(); ++k) {
+                    auto [e, ok] = boost::edge(boost::vertex(p[k], g), boost::vertex(p[k + 1], g), g);
+                    if (ok) c += boost::get(wmap, e);
+                }
+                return c;
+            };
+            // where the two routes part company, and how far apart they get
+            const auto& spc = cluster.get_pc("steiner_pc");
+            const auto& cds = cluster.get_default_scope().coords;
+            const auto& px = spc.get(cds.at(0))->elements<double>();
+            const auto& py = spc.get(cds.at(1))->elements<double>();
+            const auto& pz = spc.get(cds.at(2))->elements<double>();
+            size_t div = 0;
+            while (div < path_indices.size() && div < base_indices.size() &&
+                   path_indices[div] == base_indices[div]) ++div;
+            double maxsep = 0;
+            for (size_t i : path_indices) {
+                double best = 1e300;
+                for (size_t j : base_indices) {
+                    const double d2 = (px[i]-px[j])*(px[i]-px[j]) + (py[i]-py[j])*(py[i]-py[j])
+                                    + (pz[i]-pz[j])*(pz[i]-pz[j]);
+                    if (d2 < best) best = d2;
+                }
+                if (best < 1e299) maxsep = std::max(maxsep, std::sqrt(best));
+            }
+            const bool same = (path_indices == base_indices);
+            SPDLOG_LOGGER_DEBUG(s_log,
+                "sgp path: cluster {} first=({:.2f},{:.2f},{:.2f}) last=({:.2f},{:.2f},{:.2f}) "
+                "same={} n_gap={} n_base={} "
+                "gap_on_gap={:.3f} gap_on_base={:.3f} base_on_gap={:.3f} base_on_base={:.3f} "
+                "diverge_at={} maxsep={:.3f}",
+                cluster.ident(),
+                first_point.x()/units::cm, first_point.y()/units::cm, first_point.z()/units::cm,
+                last_point.x()/units::cm, last_point.y()/units::cm, last_point.z()/units::cm,
+                int(same), path_indices.size(), base_indices.size(),
+                path_cost(path_indices, steiner_graph)/units::cm,
+                path_cost(path_indices, base_graph)/units::cm,
+                path_cost(base_indices, steiner_graph)/units::cm,
+                path_cost(base_indices, base_graph)/units::cm,
+                div, maxsep/units::cm);
+            if (!same) {
+                for (size_t k = 0; k < path_indices.size(); ++k)
+                    SPDLOG_LOGGER_DEBUG(s_log, "sgp path pt: cluster {} which=gap k={} idx={} ({:.2f},{:.2f},{:.2f})",
+                        cluster.ident(), k, path_indices[k],
+                        px[path_indices[k]]/units::cm, py[path_indices[k]]/units::cm, pz[path_indices[k]]/units::cm);
+                for (size_t k = 0; k < base_indices.size(); ++k)
+                    SPDLOG_LOGGER_DEBUG(s_log, "sgp path pt: cluster {} which=base k={} idx={} ({:.2f},{:.2f},{:.2f})",
+                        cluster.ident(), k, base_indices[k],
+                        px[base_indices[k]]/units::cm, py[base_indices[k]]/units::cm, pz[base_indices[k]]/units::cm);
+            }
+        }
+
         std::vector<Facade::geo_point_t> path_points;
         if (!cluster.has_pc("steiner_pc")) return path_points;
         const auto& steiner_pc = cluster.get_pc("steiner_pc");
