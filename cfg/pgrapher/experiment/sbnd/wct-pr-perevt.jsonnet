@@ -1177,7 +1177,9 @@ function(
     // (> shower_in_max_len, C++ 40 cm) AND MIP-like (median dQ/dx <
     // shower_in_mip_hi x MIP median, C++ 1.3).  C++ default false.  Key
     // omitted when off => byte-identical pre-pr/74 config.
-    shower_in_cascade_guard = false,
+    // SBND PRODUCTION DEFAULT ON since 2026-08-13 (doc pr/74 round 2:
+    // off-gate 0/117, on-census 7/117 movers all attributed, nusel 0/117).
+    shower_in_cascade_guard = true,
     shower_in_max_len = null,
     shower_in_mip_hi = null,
     // doc sbnd_xin/docs/pr/74 round 2 P2: the F14 Michel rescue accepts ANY
@@ -1187,7 +1189,8 @@ function(
     // graph beyond the far vertex to be Michel-sized (total track length <
     // michel_stem_max_far_len, C++ 40 cm).  C++ default false.  Key omitted
     // when off => byte-identical pre-pr/74 config.
-    michel_stem_michel_check = false,
+    // SBND PRODUCTION DEFAULT ON since 2026-08-13 (same gate set).
+    michel_stem_michel_check = true,
     michel_stem_max_far_len = null,
     // doc sbnd_xin/docs/pr/74 round 2 K4: shower formation walks outward
     // from the main vertex and starts a shower at the first shower-like
@@ -1197,9 +1200,12 @@ function(
     // each substantial EM shower's attach vertex back toward the main
     // vertex while segments are short (< stem_backfill_max_len, C++ 30 cm)
     // and not charge-hot (median dQ/dx < stem_backfill_mip_hi x MIP, C++
-    // 3.5 -- a Bragg proton stops the walk).  C++ defaults false/30/3.5/40.
+    // 3.5 -- a Bragg proton stops the walk).  C++ defaults false/30/3.5/40
+    // (+ stem_backfill_mip_lo 0.75 and a both-endpoint junction guard, the
+    // round-2 iteration that closed the stranded-PF-orphan class).
     // Keys omitted when off/null => byte-identical pre-pr/74 config.
-    shower_stem_backfill = false,
+    // SBND PRODUCTION DEFAULT ON since 2026-08-13 (same gate set).
+    shower_stem_backfill = true,
     stem_backfill_max_len = null,
     stem_backfill_mip_lo = null,
     stem_backfill_mip_hi = null,
@@ -1209,7 +1215,9 @@ function(
     // 7013, 41.9 cm / 266 MeV, PF-invisible today) through the prototype's
     // own connection_type=3 pseudo-gamma path.  C++ defaults false/10 cm.
     // Keys omitted when off/null => byte-identical pre-pr/74 config.
-    shower_conn3_unreachable = false,
+    // SBND PRODUCTION DEFAULT ON since 2026-08-13 (same gate set; closes
+    // pr/65's "0 unclaimed" gap on NC-pi0).
+    shower_conn3_unreachable = true,
     conn3_unreachable_min_len = null,
     // doc pr/44 shower_long_muon_keep_type: a MULTI-segment long-muon
     // pseudo-shower (cached type 13 at the in_main_cluster seed) keeps its
