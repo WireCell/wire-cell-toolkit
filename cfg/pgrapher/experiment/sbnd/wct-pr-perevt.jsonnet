@@ -1473,8 +1473,20 @@ function(
     // from it.  C++ default -1 = off (unbounded, today's behaviour); null
     // omits the key => byte-identical compiled config.
     // NB 0 is a meaningful cap, so the off-test is `< 0`, not `<= 0`.
-    // Validation: -A sgp_max_sep=3 (or SBND_SGP_MAX_SEP=3).
-    sgp_max_sep = null,
+    // SBND PRODUCTION ON at 3 cm -- owner flip 2026-08-13, doc pr/73 sec 9.
+    // Fixes the ISO case 18255-57903: the corridor returns from two segments
+    // (path/chord 1.326 & 1.252, bow 2.52 & 2.94 cm, a 69 deg hairpin) to one
+    // 47.4 cm segment at 1.026 / 1.86 cm / jitter 0.081 -- the pre-round-5
+    // answer to three decimals, charge coverage included.
+    // The owner's stated criterion for this round was "keep the round 5/6
+    // improvements, fix the ISO case", and both halves are PROVEN: 18259-131357
+    // and 18255-506746, the two events round 6 was built to fix, are
+    // byte-identical with the guard on.
+    // Footprint 46/117 events, nusel 0/117 flips; the nu-vertex movers are
+    // under hand scan (docs/pr/pr73f3a-movers.index.txt).  Open item: +2
+    // dangling PF roots on 18255-285567.
+    // Escape for A/B: -A sgp_max_sep=-1 (or SBND_SGP_MAX_SEP=-1).
+    sgp_max_sep = 3.0,
     // doc pr/51 round 7 -- robust vertex fit (dynamic per-leg re-seat-free
     // direction windows for MyFCN, disagreement-gated, relaxed prior on
     // substituted 2-leg vertices).  C++ defaults: robust false, main_only
