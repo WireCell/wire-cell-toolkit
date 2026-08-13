@@ -1386,6 +1386,14 @@ function(
     // kills BOTH terms (pre-round-5 legacy).
     sgp_weak_scale = 5.0,
     sgp_weak_qref = 6000.0,
+
+    // doc pr/73 -- per-edge DEBUG sentinel for the steiner_graph_gap scan
+    // (endpoints, midpoint, w, bad, both recovered vertex charges,
+    // deficit).  Log-only diagnostic; answers "where are the penalized
+    // edges" rather than "how many".  C++ default false = legacy; false
+    // omits the key => byte-identical compiled config.
+    // Validation: -A sgp_edge_probe=true (or SBND_SGP_EDGE_PROBE=true).
+    sgp_edge_probe = false,
     // doc pr/51 round 7 -- robust vertex fit (dynamic per-leg re-seat-free
     // direction windows for MyFCN, disagreement-gated, relaxed prior on
     // substituted 2-leg vertices).  C++ defaults: robust false, main_only
@@ -1756,6 +1764,7 @@ function(
                              sgp_point_radius=sgp_point_radius,
                              sgp_weak_scale=sgp_weak_scale,
                              sgp_weak_qref=sgp_weak_qref,
+                             sgp_edge_probe=sgp_edge_probe,
                              mvfit_robust=mvfit_robust,
                              mvfit_main_only=mvfit_main_only,
                              mvfit_min_len=mvfit_min_len,

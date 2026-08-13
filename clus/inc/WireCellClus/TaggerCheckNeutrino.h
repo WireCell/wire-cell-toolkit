@@ -430,6 +430,9 @@ public:
         // => round-5 reweight path verbatim => byte-identical.
         double m_sgp_weak_scale{0};      // weak-charge penalty scale; 0 = off
         double m_sgp_weak_qref{2000};    // charge ref (calc_charge_wcp units, no cm conversion)
+        // doc sbnd_xin/docs/pr/73: per-edge DEBUG sentinel for the sgp
+        // scan.  Log-only; false = legacy (never emits).
+        bool   m_sgp_edge_probe{false};
         double m_beam_window_low{0};   // beam window [low, high) on cluster_t0 (matched flash time, WCT units).
         double m_beam_window_high{0};  // low >= high (default) disables the gate: uBooNE single-main behavior.
         bool m_nu_skip_cosmic{false};  // if true (beam-gate only), skip in-window mains already tagged

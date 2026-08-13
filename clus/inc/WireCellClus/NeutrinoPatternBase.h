@@ -489,6 +489,15 @@ namespace WireCell::Clus::PR {
         double m_sgp_min_edge{0.5*units::cm};   ///< edges shorter are never scanned/penalized
         double m_sgp_sample_step{0.3*units::cm};///< edge-interior sampling step
         double m_sgp_point_radius{0.2*units::cm};///< test_good_point radius (ch_range stays 0)
+        // doc sbnd_xin/docs/pr/73: per-edge diagnostic sentinel for the scan
+        // above.  When true, ensure_steiner_gap_graph emits one DEBUG line
+        // per SCANNED edge -- endpoints, midpoint, w, bad, the two recovered
+        // vertex charges, deficit -- so the penalized edges can be located in
+        // space rather than counted.  Answers "are the weak-charge edges
+        // inside the isochronous ribbon?", which doc pr/73 sec 4.8 leaves
+        // open.  Log-only: reads nothing it does not already read and writes
+        // no graph.  false (default) => not a single extra statement runs.
+        bool   m_sgp_edge_probe{false};         ///< per-edge DEBUG sentinel; diagnostic only
         // doc sbnd_xin/docs/pr/51 round 6: weak-charge deficit term.  The
         // round-5 unsupported-fraction penalty is blind to chords whose
         // interior is image-SUPPORTED but charge-poor (18259-131357 trunk

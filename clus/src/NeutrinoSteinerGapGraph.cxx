@@ -156,8 +156,12 @@ bool PatternAlgorithms::ensure_steiner_gap_graph(const Facade::Cluster& cluster)
     // steiner vertex, only for endpoints of scanned edges, only when the
     // weak term is on.
     const bool weak_on = (m_sgp_weak_scale > 0);
+    // doc pr/73: the per-edge probe wants the charges too, so it can say
+    // WHERE the weak edges are and not merely how many.  Sizing the cache
+    // for the probe as well is the only effect -- q_of() is a pure query.
+    const bool edge_probe = m_sgp_edge_probe;
     std::vector<double> qcache;
-    if (weak_on) qcache.assign(steiner_pc.size_major(), -1.0);
+    if (weak_on || edge_probe) qcache.assign(steiner_pc.size_major(), -1.0);
     auto q_of = [&](size_t i) -> double {
         double& q = qcache[i];
         if (q < 0) {
@@ -189,6 +193,19 @@ bool PatternAlgorithms::ensure_steiner_gap_graph(const Facade::Cluster& cluster)
         // probe's P3 ladder used it for both the min-edge gate and the
         // sample count, and the shipped fix must match what was validated.
         const double bad = gap_edge_bad_fraction(a, b, w, m_sgp_sample_step, m_sgp_dead_alpha, classify);
+        // doc pr/73: per-edge sentinel, before any early `continue`, so the
+        // NOT-penalized edges are recorded too -- the question is where the
+        // penalized ones sit relative to the rest, which needs both.
+        if (edge_probe) {
+            const double qa = q_of(sidx), qb = q_of(tidx);
+            SPDLOG_LOGGER_DEBUG(s_log,
+                "sgp edge: cluster {} s={} t={} mid=({:.2f},{:.2f},{:.2f}) w={:.3f} "
+                "bad={:.4f} qa={:.0f} qb={:.0f} deficit={:.4f}",
+                cluster.ident(), sidx, tidx,
+                0.5 * (a.x() + b.x()) / units::cm, 0.5 * (a.y() + b.y()) / units::cm,
+                0.5 * (a.z() + b.z()) / units::cm, w / units::cm, bad, qa, qb,
+                weak_charge_deficit(qa, qb, m_sgp_weak_qref));
+        }
         if (!weak_on) {
             // Round-5 statements, verbatim: weak off => byte-identical flavor.
             if (bad <= 0) continue;

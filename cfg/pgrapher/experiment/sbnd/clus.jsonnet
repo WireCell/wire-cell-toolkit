@@ -1373,6 +1373,11 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               sgp_min_edge=null,
               sgp_sample_step=null,
               sgp_point_radius=null,
+              // doc pr/73: per-edge DEBUG sentinel for the steiner_graph_gap
+              // scan (endpoints, midpoint, w, bad, both vertex charges,
+              // deficit).  Log-only diagnostic.  C++ default false; false
+              // omits the key => byte-identical compiled config.
+              sgp_edge_probe=false,
               // doc pr/51 round 6 -- weak-charge deficit term on the same
               // gap flavor.  C++ defaults: weak_scale 0 (off), weak_qref
               // 2000 (charge units).  null omits the keys => byte-identical.
@@ -2022,6 +2027,7 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
             sgp_min_edge=sgp_min_edge,
             sgp_sample_step=sgp_sample_step,
             sgp_point_radius=sgp_point_radius,
+            sgp_edge_probe=sgp_edge_probe,
             sgp_weak_scale=sgp_weak_scale,
             sgp_weak_qref=sgp_weak_qref,
             mvfit_robust=mvfit_robust,
@@ -2784,6 +2790,11 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
               sgp_min_edge=null,
               sgp_sample_step=null,
               sgp_point_radius=null,
+              // doc pr/73: per-edge DEBUG sentinel for the steiner_graph_gap
+              // scan (endpoints, midpoint, w, bad, both vertex charges,
+              // deficit).  Log-only diagnostic.  C++ default false; false
+              // omits the key => byte-identical compiled config.
+              sgp_edge_probe=false,
               // doc pr/51 round 6 -- weak-charge deficit term on the same
               // gap flavor.  C++ defaults: weak_scale 0 (off), weak_qref
               // 2000 (charge units).  null omits the keys => byte-identical.
@@ -3057,6 +3068,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 sgp_min_edge=sgp_min_edge,
                 sgp_sample_step=sgp_sample_step,
                 sgp_point_radius=sgp_point_radius,
+                sgp_edge_probe=sgp_edge_probe,
                 sgp_weak_scale=sgp_weak_scale,
                 sgp_weak_qref=sgp_weak_qref,
                 mvfit_robust=mvfit_robust,
