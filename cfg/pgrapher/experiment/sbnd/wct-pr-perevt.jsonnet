@@ -1391,9 +1391,17 @@ function(
     // substituted 2-leg vertices).  C++ defaults: robust false, main_only
     // true, min_len 10, rin_margin 2, rout_frac 0.5, rout_min 9,
     // rout_max 18, angle 20, min_pts 5, min_aniso 3, prior_range 1
-    // (lengths cm, angle deg).  false/null omit the keys =>
-    // byte-identical pre-round-7 config.
-    mvfit_robust = false,
+    // (lengths cm, angle deg); satellites below ride the C++ defaults.
+    // SBND PRODUCTION ON (2026-08-12), owner instruction "if the validation
+    // pass, turn on the knob for SBND" after the 117-evt validation: off-gate
+    // 0/117 byte-identical, nusel 0/117 at ON, TOTAL knob footprint 3/117
+    // events -- 18255-57903 (self-confirmed hairpin vertex, census legs
+    // 74/44 deg, moves 4.62 cm onto the muon line), 18255-56982 (35 deg leg,
+    // 2.23 cm), 423981 (0.08 cm micro-adjust, >=3-leg tight prior) -- zero
+    // nu-vtx movers >10 cm, zero |dEnu| > 100 MeV, wall/RSS at noise.
+    // Escape for A/B: SBND_MVFIT_ROBUST=false (or -A mvfit_robust=false)
+    // restores round-6 production byte-exact (escape gate 0/117).
+    mvfit_robust = true,
     mvfit_main_only = null,
     mvfit_min_len = null,
     mvfit_rin_margin = null,
