@@ -1365,6 +1365,7 @@ namespace WireCell::Clus::PR {
         // byte-identical.
         bool   m_shower_stem_backfill{false};
         double m_stem_backfill_max_len{30*units::cm};
+        double m_stem_backfill_mip_lo{0.75};
         double m_stem_backfill_mip_hi{3.5};
         double m_stem_backfill_min_shower_len{40*units::cm};
 

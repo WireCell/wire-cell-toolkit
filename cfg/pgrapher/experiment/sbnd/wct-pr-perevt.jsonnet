@@ -1201,6 +1201,7 @@ function(
     // Keys omitted when off/null => byte-identical pre-pr/74 config.
     shower_stem_backfill = false,
     stem_backfill_max_len = null,
+    stem_backfill_mip_lo = null,
     stem_backfill_mip_hi = null,
     stem_backfill_min_shower_len = null,
     // doc sbnd_xin/docs/pr/74 round 2 K5 = pr/65's deferred rung 2: promote
@@ -1769,6 +1770,7 @@ function(
                              michel_stem_max_far_len=michel_stem_max_far_len,
                              shower_stem_backfill=shower_stem_backfill,
                              stem_backfill_max_len=stem_backfill_max_len,
+                             stem_backfill_mip_lo=stem_backfill_mip_lo,
                              stem_backfill_mip_hi=stem_backfill_mip_hi,
                              stem_backfill_min_shower_len=stem_backfill_min_shower_len,
                              shower_conn3_unreachable=shower_conn3_unreachable,

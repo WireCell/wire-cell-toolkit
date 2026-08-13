@@ -552,6 +552,7 @@ public:
         double m_michel_stem_max_far_len{40};                       // cm; pr/74 P2 tunable
         bool m_shower_stem_backfill{false};                         // doc pr/74 round 2 K4
         double m_stem_backfill_max_len{30};                         // cm; pr/74 K4 tunable
+        double m_stem_backfill_mip_lo{0.75};                        // ratio; pr/74 K4 tunable
         double m_stem_backfill_mip_hi{3.5};                         // ratio; pr/74 K4 tunable
         double m_stem_backfill_min_shower_len{40};                  // cm; pr/74 K4 tunable
         bool m_shower_conn3_unreachable{false};                     // doc pr/74 round 2 K5 (pr/65 rung 2)

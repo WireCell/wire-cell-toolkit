@@ -390,6 +390,7 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_michel_stem_max_far_len                   = get(config, "michel_stem_max_far_len",                   m_michel_stem_max_far_len);
     m_shower_stem_backfill                      = get(config, "shower_stem_backfill",                      m_shower_stem_backfill);
     m_stem_backfill_max_len                     = get(config, "stem_backfill_max_len",                     m_stem_backfill_max_len);
+    m_stem_backfill_mip_lo                      = get(config, "stem_backfill_mip_lo",                      m_stem_backfill_mip_lo);
     m_stem_backfill_mip_hi                      = get(config, "stem_backfill_mip_hi",                      m_stem_backfill_mip_hi);
     m_stem_backfill_min_shower_len              = get(config, "stem_backfill_min_shower_len",              m_stem_backfill_min_shower_len);
     m_shower_conn3_unreachable                  = get(config, "shower_conn3_unreachable",                  m_shower_conn3_unreachable);
@@ -651,6 +652,7 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["michel_stem_max_far_len"]                   = m_michel_stem_max_far_len;                   // cm; only read when michel_stem_michel_check
     cfg["shower_stem_backfill"]                      = m_shower_stem_backfill;                      // doc pr/74 round 2 K4; false = legacy (walked-past stems stay out of showers)
     cfg["stem_backfill_max_len"]                     = m_stem_backfill_max_len;                     // cm; only read when shower_stem_backfill
+    cfg["stem_backfill_mip_lo"]                      = m_stem_backfill_mip_lo;                      // ratio; only read when shower_stem_backfill
     cfg["stem_backfill_mip_hi"]                      = m_stem_backfill_mip_hi;                      // ratio; only read when shower_stem_backfill
     cfg["stem_backfill_min_shower_len"]              = m_stem_backfill_min_shower_len;              // cm; only read when shower_stem_backfill
     cfg["shower_conn3_unreachable"]                  = m_shower_conn3_unreachable;                  // doc pr/74 round 2 K5 (pr/65 rung 2); false = legacy (unreachable segments stay PF-invisible)
@@ -1095,6 +1097,7 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
     pattern_algos.m_michel_stem_max_far_len                   = m_michel_stem_max_far_len * units::cm;       // pr/74 P2
     pattern_algos.m_shower_stem_backfill                      = m_shower_stem_backfill;                      // pr/74 K4
     pattern_algos.m_stem_backfill_max_len                     = m_stem_backfill_max_len * units::cm;         // pr/74 K4
+    pattern_algos.m_stem_backfill_mip_lo                      = m_stem_backfill_mip_lo;                      // pr/74 K4
     pattern_algos.m_stem_backfill_mip_hi                      = m_stem_backfill_mip_hi;                      // pr/74 K4
     pattern_algos.m_stem_backfill_min_shower_len              = m_stem_backfill_min_shower_len * units::cm;  // pr/74 K4
     pattern_algos.m_shower_conn3_unreachable                  = m_shower_conn3_unreachable;                  // pr/74 K5

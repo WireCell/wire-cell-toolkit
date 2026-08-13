@@ -129,6 +129,7 @@ TEST_CASE("clus knob defaults: TaggerCheckNeutrino switches are all OFF")
     CHECK_KNOB_NUM(cfg, "michel_stem_max_far_len", 40.0);                     // cm; inert while P2 off
     CHECK_KNOB_BOOL(cfg, "shower_stem_backfill", false);                      // K4
     CHECK_KNOB_NUM(cfg, "stem_backfill_max_len", 30.0);                       // cm; inert while K4 off
+    CHECK_KNOB_NUM(cfg, "stem_backfill_mip_lo", 0.75);                        // ratio; inert while K4 off
     CHECK_KNOB_NUM(cfg, "stem_backfill_mip_hi", 3.5);                         // ratio; inert while K4 off
     CHECK_KNOB_NUM(cfg, "stem_backfill_min_shower_len", 40.0);                // cm; inert while K4 off
     CHECK_KNOB_BOOL(cfg, "shower_conn3_unreachable", false);                  // K5 (pr/65 rung 2)

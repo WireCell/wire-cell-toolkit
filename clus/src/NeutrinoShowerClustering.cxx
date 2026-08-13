@@ -145,10 +145,44 @@ void PatternAlgorithms::stem_backfill(Graph& graph, VertexPtr main_vertex,
             auto [stem, prev] = came_from.at(cur);
             if (!stem || map_segment_in_shower.count(stem)) break;
             if (segments_in_long_muon.count(stem)) break;
+            // Junction guard: a PF orphan anchors via vtx_incoming_seg at a
+            // vertex of its anchor segment; absorbing `stem` removes that
+            // anchor and the orphan vanishes from the tree, audit-only
+            // (measured: 268067 stranded a 595 MeV proton branch, 285567 two
+            // protons totalling 442 MeV, 56982 a track fragment).  Both
+            // endpoints of `stem` must therefore be clean: every incident
+            // segment is shower-claimed, or the stem itself, or the next
+            // chain candidate (which stays a PF track unless its own,
+            // later, guard check passes).  The main vertex is exempt -- its
+            // residents are PF roots and anchor directly.
+            SegmentPtr stem_seg = stem;   // plain locals: structured bindings
+            int conn_type_c = conn_type;  // cannot be lambda-captured pre-C++20
+            SegmentPtr next_stem = (prev && came_from.count(prev)) ? came_from.at(prev).first : nullptr;
+            auto junction_ok = [&](VertexPtr v, SegmentPtr allow2) -> bool {
+                if (!v || !v->descriptor_valid() || v == main_vertex) return true;
+                for (auto e : sorted_out_edges(v->get_descriptor(), graph)) {
+                    SegmentPtr side = graph[e].segment;
+                    if (!side || side == stem_seg || side == allow2) continue;
+                    if (!map_segment_in_shower.count(side)) {
+                        SPDLOG_LOGGER_DEBUG(s_log,
+                            "pr74 stem_backfill: shower(start gidx={} conn={}) chain gidx={} blocked: non-shower sibling gidx={} at junction",
+                            start_seg->get_graph_index(), conn_type_c, stem_seg->get_graph_index(),
+                            side->get_graph_index());
+                        return false;
+                    }
+                }
+                return true;
+            };
+            if (!junction_ok(cur, nullptr) || !junction_ok(prev, next_stem)) break;
             const double len = segment_track_length(stem);
             const double med = segment_median_dQ_dx(stem);
             const double ratio = (m_mip_dqdx_median > 0 && med > 0) ? med / m_mip_dqdx_median : 0.0;
-            const bool ok = len < m_stem_backfill_max_len && ratio > 0 &&
+            // mip_lo: an EM trunk carries at least MIP-level charge.  A
+            // sub-MIP stub is charge-poor debris whose absorption buys
+            // nothing and can strand later-evicted shower fragments that
+            // anchored on it (285567: 0.66x stub, two protons stranded).
+            const bool ok = len < m_stem_backfill_max_len &&
+                            ratio >= m_stem_backfill_mip_lo &&
                             ratio < m_stem_backfill_mip_hi;
             SPDLOG_LOGGER_DEBUG(s_log,
                 "pr74 stem_backfill: shower(start gidx={} conn={}) chain gidx={} len {:.1f}cm dqdx {:.2f}x -> {}",
