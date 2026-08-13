@@ -194,6 +194,15 @@ std::vector<Facade::geo_point_t> PatternAlgorithms::do_rough_path(const Facade::
                 path_cost(base_indices, steiner_graph)/units::cm,
                 path_cost(base_indices, base_graph)/units::cm,
                 div, maxsep/units::cm);
+            // doc pr/73 sec 4.11: the CHOSEN route's geometry is dumped
+            // unconditionally under the probe, not only when the two flavors
+            // disagree -- the question "is the jitter in the seed or added by
+            // fit_point?" needs the seed itself, and on most calls the two
+            // routes agree.
+            for (size_t k = 0; k < path_indices.size(); ++k)
+                SPDLOG_LOGGER_DEBUG(s_log, "sgp path sel: cluster {} k={} idx={} ({:.3f},{:.3f},{:.3f})",
+                    cluster.ident(), k, path_indices[k],
+                    px[path_indices[k]]/units::cm, py[path_indices[k]]/units::cm, pz[path_indices[k]]/units::cm);
             if (!same) {
                 for (size_t k = 0; k < path_indices.size(); ++k)
                     SPDLOG_LOGGER_DEBUG(s_log, "sgp path pt: cluster {} which=gap k={} idx={} ({:.2f},{:.2f},{:.2f})",
