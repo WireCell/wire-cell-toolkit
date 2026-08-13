@@ -17,6 +17,56 @@
 static auto s_log = WireCell::Log::logger("clus.NeutrinoPattern");
 
 namespace WireCell::Clus::PR {
+    // doc sbnd_xin/docs/pr/74 round 2 P1 -- docstring in PRSegmentFunctions.h.
+    bool segment_shower_in_cascade_vetoed(SegmentPtr seg, double mip_dqdx_median,
+                                          double max_len, double mip_hi)
+    {
+        if (!seg) return false;
+        if (segment_track_length(seg) <= max_len) return false;
+        const double med = segment_median_dQ_dx(seg);
+        if (med <= 0 || mip_dqdx_median <= 0) return false;
+        return med < mip_hi * mip_dqdx_median;
+    }
+
+    // doc sbnd_xin/docs/pr/74 round 2 P2 -- docstring in PRSegmentFunctions.h.
+    double segment_far_subtree_track_length(Graph& graph, VertexPtr start_vtx,
+                                            SegmentPtr stem, double cap)
+    {
+        double total = 0;
+        if (!start_vtx || !start_vtx->descriptor_valid()) return total;
+        std::set<SegmentPtr> used_segs{stem};
+        std::set<VertexPtr> used_vtx{start_vtx};
+        std::vector<VertexPtr> stack{start_vtx};
+        while (!stack.empty()) {
+            VertexPtr v = stack.back();
+            stack.pop_back();
+            if (!v || !v->descriptor_valid()) continue;
+            for (auto edesc : sorted_out_edges(v->get_descriptor(), graph)) {
+                SegmentPtr sg = graph[edesc].segment;
+                if (!sg || used_segs.count(sg)) continue;
+                used_segs.insert(sg);
+                total += segment_track_length(sg);
+                if (total > cap) return total;
+                VertexPtr ov = find_other_vertex(graph, sg, v);
+                if (ov && !used_vtx.count(ov)) {
+                    used_vtx.insert(ov);
+                    stack.push_back(ov);
+                }
+            }
+        }
+        return total;
+    }
+
+    // doc sbnd_xin/docs/pr/74 round 2 -- docstring in PRSegmentFunctions.h.
+    void pr74_probe_topo_flag(SegmentPtr seg, const char* what, const char* site)
+    {
+        static const bool dbg = (std::getenv("WCT_SHOWER_TOPO_DEBUG") != nullptr);
+        if (!dbg || !seg) return;
+        const int cid = seg->cluster() ? seg->cluster()->get_cluster_id() : -1;
+        std::fprintf(stderr, "TOPO_FLAG %s gidx=%zu id=%d clus=%d at %s\n",
+                     what, seg->get_graph_index(), seg->id(), cid, site);
+    }
+
     void create_segment_point_cloud(SegmentPtr segment,
                                 const std::vector<geo_point_t>& path_points,
                                 const IDetectorVolumes::pointer& dv,
@@ -3627,7 +3677,10 @@ namespace WireCell::Clus::PR {
         // never clear_flags() here.  reset=false => set-only legacy path =>
         // byte-identical.
         if (reset) {
-            if (!tmp_val) segment->unset_flags(SegmentFlags::kShowerTopology);
+            if (!tmp_val) {
+                pr74_probe_topo_flag(segment, "unset", "PRSegmentFunctions.cxx:reset-reentry");
+                segment->unset_flags(SegmentFlags::kShowerTopology);
+            }
             segment->dirsign(0);
         }
         const auto& fits = segment->fits();
@@ -3860,12 +3913,12 @@ namespace WireCell::Clus::PR {
 
             double dbg_geom_len = segment_track_length(segment, 0);
             SPDLOG_LOGGER_INFO(s_log,
-                "shower_topo dbg: seg {} L {:.1f}cm assoc_npts {} nbuckets {} n_over0.4cm {} "
+                "shower_topo dbg: seg {} gidx {} L {:.1f}cm assoc_npts {} nbuckets {} n_over0.4cm {} "
                 "n_over0.7cm {} n_over0.8cm {} n_over1.0cm {} "
                 "rms_p50 {:.2f}cm rms_p75 {:.2f}cm rms_p90 {:.2f}cm rms_p95 {:.2f}cm "
                 "max_spread {:.2f}cm maxcont {:.1f}cm lsl {:.1f}cm tel {:.1f}cm "
                 "lsl/tel {:.3f} tel/L {:.3f} dir3x {:.4f} branch {}",
-                segment->id(), dbg_geom_len/units::cm, assoc_npts, dbg_rms.size(),
+                segment->id(), segment->get_graph_index(), dbg_geom_len/units::cm, assoc_npts, dbg_rms.size(),
                 n_over_cut(0.4), n_over_cut(0.7), n_over_cut(0.8), n_over_cut(1.0),
                 pct(0.5)/units::cm, pct(0.75)/units::cm, pct(0.9)/units::cm, pct(0.95)/units::cm,
                 max_spread/units::cm, dbg_max_cont/units::cm,
@@ -4006,9 +4059,9 @@ namespace WireCell::Clus::PR {
             }
             if (s_shower_topo_dbg) {
                 SPDLOG_LOGGER_INFO(s_log,
-                    "shower_topo dbg: seg {} guard branch {} L {:.1f}cm total_length1 {:.1f}cm({:.3f}) "
+                    "shower_topo dbg: seg {} gidx {} guard branch {} L {:.1f}cm total_length1 {:.1f}cm({:.3f}) "
                     "total_length2 {:.1f}cm({:.3f}) demoted {} final_shower {}",
-                    segment->id(), dbg_branch, tmp_total_length/units::cm,
+                    segment->id(), segment->get_graph_index(), dbg_branch, tmp_total_length/units::cm,
                     total_length1/units::cm, (tmp_total_length > 0 ? total_length1/tmp_total_length : 0),
                     total_length2/units::cm, (tmp_total_length > 0 ? total_length2/tmp_total_length : 0),
                     dbg_guard_demoted, flag_shower_topology);
@@ -4027,7 +4080,19 @@ namespace WireCell::Clus::PR {
             flag_shower_topology = false;
         }
 
-        if (flag_shower_topology) segment->set_flags(SegmentFlags::kShowerTopology);
+        // doc sbnd_xin/docs/pr/74: the dbg line above prints BEFORE the F3
+        // dQ/dx guard can veto, so it overstates final_shower.  This one is
+        // the post-guard truth.
+        if (s_shower_topo_dbg) {
+            SPDLOG_LOGGER_INFO(s_log,
+                "shower_topo dbg: seg {} gidx {} POST-GUARD final_shower {}",
+                segment->id(), segment->get_graph_index(), flag_shower_topology);
+        }
+
+        if (flag_shower_topology) {
+            pr74_probe_topo_flag(segment, "set", "PRSegmentFunctions.cxx:topo-test");
+            segment->set_flags(SegmentFlags::kShowerTopology);
+        }
         segment->dirsign(flag_dir);
         return flag_shower_topology;
     }

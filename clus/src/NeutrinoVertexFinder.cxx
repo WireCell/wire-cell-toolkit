@@ -36,6 +36,20 @@ static inline void pr40_probe_setpdg(SegmentPtr sg, int new_pdg, const char* sit
                  sg->id(), cid, sg->get_graph_index(), new_pdg, site);
 }
 
+// doc sbnd_xin/docs/pr/74 round 2: improve_vertex's topology re-exam can
+// clear a stage-3 kShowerTopology flag with no PID-trace fingerprint (the
+// low-score branch below writes no pdg), which is why 90055's "second
+// demotion" was unattributable in round 1.  Env-gated, default off.
+static inline void pr74_probe_topo_reexam(SegmentPtr sg, const char* what) {
+    static const bool dbg = std::getenv("WCT_SHOWER_TOPO_DEBUG") != nullptr;
+    if (!dbg || !sg) return;
+    const int cid = sg->cluster() ? sg->cluster()->get_cluster_id() : -1;
+    std::fprintf(stderr, "TOPO_REEXAM id=%d clus=%d gidx=%zu %s pdg=%d score=%.3f\n",
+                 sg->id(), cid, sg->get_graph_index(), what,
+                 (sg->particle_info() ? sg->particle_info()->pdg() : 0),
+                 sg->particle_score());
+}
+
 // doc sbnd_xin/docs/pr/32 §11 F1 -- the prototype's ProtoVertex::get_fit_pt().
 //
 // use_fit == false reproduces today's raw `wcpt()` read exactly, so every call
@@ -1400,9 +1414,20 @@ bool PatternAlgorithms::examine_direction(Graph& graph, VertexPtr vertex, Vertex
                         // no-particle-info means pdg defaults to 0, which also qualifies.
                         int cur_pdg = current_sg->has_particle_info() ? current_sg->particle_info()->pdg() : 0;
                         if (std::abs(cur_pdg) == 13 || cur_pdg == 0) {
-                            auto four_momentum = segment_cal_4mom(current_sg, 11, particle_data, recomb_model, m_mip_dqdx);
-                            auto pinfo = std::make_shared<Aux::ParticleInfo>(11, particle_data->get_particle_mass(11), particle_data->pdg_to_name(11), four_momentum);
-                            current_sg->particle_info(pinfo);
+                            // doc sbnd_xin/docs/pr/74 round 2 P1 -- see
+                            // m_shower_in_cascade_guard's docstring.  Knob off
+                            // => the veto is never evaluated => byte-identical.
+                            if (m_shower_in_cascade_guard &&
+                                segment_shower_in_cascade_vetoed(current_sg, m_mip_dqdx_median,
+                                                                 m_shower_in_max_len, m_shower_in_mip_hi)) {
+                                SPDLOG_LOGGER_DEBUG(s_log,
+                                    "pr74 shower_in_cascade_guard: veto e- relabel gidx={} L={:.1f}cm pdg={}",
+                                    current_sg->get_graph_index(), length/units::cm, cur_pdg);
+                            } else {
+                                auto four_momentum = segment_cal_4mom(current_sg, 11, particle_data, recomb_model, m_mip_dqdx);
+                                auto pinfo = std::make_shared<Aux::ParticleInfo>(11, particle_data->get_particle_mass(11), particle_data->pdg_to_name(11), four_momentum);
+                                current_sg->particle_info(pinfo);
+                            }
                         }
                     } else {
                         auto pair_result = calculate_num_daughter_showers(graph, prev_vtx, current_sg);
@@ -1540,6 +1565,7 @@ bool PatternAlgorithms::examine_direction(Graph& graph, VertexPtr vertex, Vertex
                             in_shower->particle_info(pinfo);
                         }
                         in_shower->unset_flags(SegmentFlags::kShowerTrajectory);
+                        pr74_probe_topo_flag(in_shower, "unset", "NeutrinoVertexFinder.cxx:examine_direction-B");
                         in_shower->unset_flags(SegmentFlags::kShowerTopology);
                     }
                 }
@@ -1617,6 +1643,7 @@ bool PatternAlgorithms::examine_direction(Graph& graph, VertexPtr vertex, Vertex
                     auto pinfo = std::make_shared<Aux::ParticleInfo>(13, particle_data->get_particle_mass(13), particle_data->pdg_to_name(13), four_momentum);
                     acc_seg->particle_info(pinfo);
                     acc_seg->unset_flags(SegmentFlags::kShowerTrajectory);
+                    pr74_probe_topo_flag(acc_seg, "unset", "NeutrinoVertexFinder.cxx:examine_direction-longmu");
                     acc_seg->unset_flags(SegmentFlags::kShowerTopology);
                     segments_in_long_muon.insert(acc_seg);
                 }
@@ -2943,6 +2970,7 @@ void PatternAlgorithms::improve_vertex(Graph& graph, Facade::Cluster& cluster, V
                 
                 // Examine topology case
                 if (pair_result.first == 1 && segment_is_shower_topology(sg, false, m_mip_dqdx_median, m_shower_topo_demote_len, m_shower_topo_reset, m_shower_topo_dqdx_guard)) {
+                    pr74_probe_topo_reexam(sg, "enter");
                     int dir_save = sg->dirsign();
                     
                     VertexPtr start_v = nullptr, end_v = nullptr;
@@ -2965,10 +2993,12 @@ void PatternAlgorithms::improve_vertex(Graph& graph, Facade::Cluster& cluster, V
                         int start_n = boost::out_degree(source_v, graph);
                         int end_n = boost::out_degree(target_v, graph);
                         segment_determine_dir_track(sg, start_n, end_n, particle_data, recomb_model, m_mip_dqdx_median, false, track_pid_options());
-                        
+                        pr74_probe_topo_reexam(sg, "after-pid");
+
                         if ((sg->particle_info() && sg->particle_info()->pdg() == 2212 && sg->particle_score() < 0.09) ||
                             (sg->particle_info() && sg->particle_info()->pdg() == 13 && sg->particle_score() < 0.06)) {
                             sg->unset_flags(SegmentFlags::kShowerTopology);
+                            pr74_probe_topo_reexam(sg, "re-demote(no-pdg-write)");
                         } else {
                             sg->set_flags(SegmentFlags::kShowerTopology);
                             if (!sg->particle_info()) {
@@ -3315,6 +3345,7 @@ void PatternAlgorithms::change_daughter_type(Graph& graph, VertexPtr vertex, Seg
                     sg1->particle_info()->set_pdg(particle_type);
                     pr40_probe_setpdg(sg1, particle_type, "NeutrinoVertexFinder.cxx:change_daughter_type(170deg)");
                     sg1->particle_info()->set_mass(mass);
+                    pr74_probe_topo_flag(sg1, "unset", "NeutrinoVertexFinder.cxx:change_daughter_type");
                     sg1->unset_flags(SegmentFlags::kShowerTopology);
 
                     // Recursively propagate changes
@@ -3520,6 +3551,7 @@ void PatternAlgorithms::examine_main_vertices_local(Graph& graph, std::vector<Ve
                                 }
                                 sg1->particle_info()->set_pdg(13);
                                 sg1->particle_info()->set_mass(muon_mass);
+                                pr74_probe_topo_flag(sg1, "unset", "NeutrinoVertexFinder.cxx:examine_main_vertices_local");
                                 sg1->unset_flags(SegmentFlags::kShowerTopology);
                                 
                                 change_daughter_type(graph, vtx, sg1, 13, muon_mass, particle_data, recomb_model);

@@ -1169,6 +1169,47 @@ function(
     // result, NEVER flip.
     shower_connect_protected_pion_guard = false,
     michel_stem_muon_rescue = true,
+    // doc sbnd_xin/docs/pr/74 round 2 P1: examine_direction's
+    // flag_shower_in cascade relabels a downstream |pdg|==13/pdg==0 segment
+    // electron with no length ceiling and no charge test (prototype has the
+    // identical unconditional branch, NeutrinoID_track_shower.h:2004).
+    // When on, refuse the relabel for a segment BOTH long
+    // (> shower_in_max_len, C++ 40 cm) AND MIP-like (median dQ/dx <
+    // shower_in_mip_hi x MIP median, C++ 1.3).  C++ default false.  Key
+    // omitted when off => byte-identical pre-pr/74 config.
+    shower_in_cascade_guard = false,
+    shower_in_max_len = null,
+    shower_in_mip_hi = null,
+    // doc sbnd_xin/docs/pr/74 round 2 P2: the F14 Michel rescue accepts ANY
+    // shower-like sibling at the stem's far vertex; on a nueCC event that
+    // sibling is the EM shower trunk and the rescue paints a muon at the
+    // neutrino vertex (18255-90055).  When on, additionally require the
+    // graph beyond the far vertex to be Michel-sized (total track length <
+    // michel_stem_max_far_len, C++ 40 cm).  C++ default false.  Key omitted
+    // when off => byte-identical pre-pr/74 config.
+    michel_stem_michel_check = false,
+    michel_stem_max_far_len = null,
+    // doc sbnd_xin/docs/pr/74 round 2 K4: shower formation walks outward
+    // from the main vertex and starts a shower at the first shower-like
+    // segment; the track stem it walked PAST is structurally excluded
+    // (18255-90055 trunk 11045; 18255-469665 chain 15003/15001; both
+    // prototype-shared gaps).  When on, a post-pass absorbs the chain from
+    // each substantial EM shower's attach vertex back toward the main
+    // vertex while segments are short (< stem_backfill_max_len, C++ 30 cm)
+    // and not charge-hot (median dQ/dx < stem_backfill_mip_hi x MIP, C++
+    // 3.5 -- a Bragg proton stops the walk).  C++ defaults false/30/3.5/40.
+    // Keys omitted when off/null => byte-identical pre-pr/74 config.
+    shower_stem_backfill = false,
+    stem_backfill_max_len = null,
+    stem_backfill_mip_hi = null,
+    stem_backfill_min_shower_len = null,
+    // doc sbnd_xin/docs/pr/74 round 2 K5 = pr/65's deferred rung 2: promote
+    // a graph-unreachable, unclaimed main-cluster segment (18306-142421 seg
+    // 7013, 41.9 cm / 266 MeV, PF-invisible today) through the prototype's
+    // own connection_type=3 pseudo-gamma path.  C++ defaults false/10 cm.
+    // Keys omitted when off/null => byte-identical pre-pr/74 config.
+    shower_conn3_unreachable = false,
+    conn3_unreachable_min_len = null,
     // doc pr/44 shower_long_muon_keep_type: a MULTI-segment long-muon
     // pseudo-shower (cached type 13 at the in_main_cluster seed) keeps its
     // muon start segment -- the update_particle_type majority vote there is
@@ -1721,6 +1762,17 @@ function(
                              shower_absorb_track_guard=shower_absorb_track_guard,
                              shower_connect_protected_pion_guard=shower_connect_protected_pion_guard,
                              michel_stem_muon_rescue=michel_stem_muon_rescue,
+                             shower_in_cascade_guard=shower_in_cascade_guard,
+                             shower_in_max_len=shower_in_max_len,
+                             shower_in_mip_hi=shower_in_mip_hi,
+                             michel_stem_michel_check=michel_stem_michel_check,
+                             michel_stem_max_far_len=michel_stem_max_far_len,
+                             shower_stem_backfill=shower_stem_backfill,
+                             stem_backfill_max_len=stem_backfill_max_len,
+                             stem_backfill_mip_hi=stem_backfill_mip_hi,
+                             stem_backfill_min_shower_len=stem_backfill_min_shower_len,
+                             shower_conn3_unreachable=shower_conn3_unreachable,
+                             conn3_unreachable_min_len=conn3_unreachable_min_len,
                              shower_long_muon_keep_type=shower_long_muon_keep_type,
                              single_muon_proton_chain_veto=single_muon_proton_chain_veto,
                              single_muon_long_muon_claim=single_muon_long_muon_claim,

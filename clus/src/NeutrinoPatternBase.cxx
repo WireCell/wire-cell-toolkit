@@ -295,6 +295,7 @@ void PatternAlgorithms::set_default_shower_particle_info(Graph& graph, Facade::C
                 // m_shower_proton_daughter_pion_dissolve's docstring.
                 if (m_shower_proton_daughter_pion_dissolve) {
                     sg->unset_flags(SegmentFlags::kShowerTrajectory);
+                    pr74_probe_topo_flag(sg, "unset", "NeutrinoPatternBase.cxx:pion-dissolve");
                     sg->unset_flags(SegmentFlags::kShowerTopology);
                 }
             }
@@ -321,6 +322,7 @@ void PatternAlgorithms::set_default_shower_particle_info(Graph& graph, Facade::C
         // in case a fresh segment is relabelled pion on its first pass.
         if (m_shower_proton_daughter_pion_dissolve && pdg_code == 211) {
             sg->unset_flags(SegmentFlags::kShowerTrajectory);
+            pr74_probe_topo_flag(sg, "unset", "NeutrinoPatternBase.cxx:pion-dissolve-fresh");
             sg->unset_flags(SegmentFlags::kShowerTopology);
         }
     }
@@ -399,6 +401,23 @@ void PatternAlgorithms::override_michel_stem_muon(Graph& graph, Facade::Cluster&
             }
         }
         if (!flag_michel) continue;
+
+        // doc sbnd_xin/docs/pr/74 round 2 P2 -- see
+        // m_michel_stem_michel_check's docstring.  A genuine Michel electron
+        // is terminal; a sibling heading a large downstream tree is a shower
+        // trunk, and relabelling its stem mu- puts a muon at the neutrino
+        // vertex of a nueCC event.  Knob off => never evaluated =>
+        // byte-identical.
+        if (m_michel_stem_michel_check) {
+            const double far_len = segment_far_subtree_track_length(graph, far_vtx, sg,
+                                                                    m_michel_stem_max_far_len);
+            if (far_len > m_michel_stem_max_far_len) {
+                SPDLOG_LOGGER_DEBUG(s_log,
+                    "pr74 michel_stem_michel_check: veto mu- rescue gidx={} far_len {:.1f}cm > {:.0f}cm",
+                    sg->get_graph_index(), far_len/units::cm, m_michel_stem_max_far_len/units::cm);
+                continue;
+            }
+        }
 
         // Relabel muon, recompute the 4-momentum -- same conventions as the
         // existing rescue's recompute (m_mip_dqdx scale, no score write).
@@ -506,6 +525,7 @@ void PatternAlgorithms::reconcile_particle_flags(Graph& graph, VertexPtr main_ve
                                         ? next->particle_info()->pdg() : 0;
                 if (std::abs(new_pdg) == 13 || std::abs(new_pdg) == 211 || new_pdg == 2212) {
                     next->unset_flags(SegmentFlags::kShowerTrajectory);
+                    pr74_probe_topo_flag(next, "unset", "NeutrinoPatternBase.cxx:multi-proton-dissolve");
                     next->unset_flags(SegmentFlags::kShowerTopology);
                     dissolve_wrapper(next);
                     for (auto stub : stubs) {
@@ -553,6 +573,7 @@ void PatternAlgorithms::reconcile_particle_flags(Graph& graph, VertexPtr main_ve
         if (sg->flags_any(SegmentFlags::kShowerTrajectory) ||
             sg->flags_any(SegmentFlags::kShowerTopology)) {
             sg->unset_flags(SegmentFlags::kShowerTrajectory);
+            pr74_probe_topo_flag(sg, "unset", "NeutrinoPatternBase.cxx:reconcile_particle_flags");
             sg->unset_flags(SegmentFlags::kShowerTopology);
             if (dbg) std::fprintf(stderr, "PID_RECONCILE clear stale shower flags (clus=%d idx=%zu pdg=%d)\n",
                                   sg->cluster() ? sg->cluster()->get_cluster_id() : -1,

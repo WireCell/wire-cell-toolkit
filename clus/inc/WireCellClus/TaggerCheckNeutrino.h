@@ -545,6 +545,17 @@ public:
         bool m_shower_absorb_unreachable_main{false};               // doc pr/65 round 3
         bool m_shower_connect_protected_pion_guard{false};          // doc pr/40 round 6 F13
         bool m_michel_stem_muon_rescue{false};                      // doc pr/40 round 6 F14
+        bool m_shower_in_cascade_guard{false};                      // doc pr/74 round 2 P1
+        double m_shower_in_max_len{40};                             // cm; pr/74 P1 tunable
+        double m_shower_in_mip_hi{1.3};                             // ratio; pr/74 P1 tunable
+        bool m_michel_stem_michel_check{false};                     // doc pr/74 round 2 P2
+        double m_michel_stem_max_far_len{40};                       // cm; pr/74 P2 tunable
+        bool m_shower_stem_backfill{false};                         // doc pr/74 round 2 K4
+        double m_stem_backfill_max_len{30};                         // cm; pr/74 K4 tunable
+        double m_stem_backfill_mip_hi{3.5};                         // ratio; pr/74 K4 tunable
+        double m_stem_backfill_min_shower_len{40};                  // cm; pr/74 K4 tunable
+        bool m_shower_conn3_unreachable{false};                     // doc pr/74 round 2 K5 (pr/65 rung 2)
+        double m_conn3_unreachable_min_len{10};                     // cm; pr/74 K5 tunable
         bool m_shower_long_muon_keep_type{false};                   // doc pr/44
         bool m_single_muon_proton_chain_veto{false};                // doc pr/43 round 2 K1
         bool m_single_muon_long_muon_claim{false};                  // doc pr/43 round 2 K2

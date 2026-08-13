@@ -381,6 +381,33 @@ namespace WireCell::Clus::PR {
     /// spares -- that is "no evidence", not "MIP-like evidence".
     bool segment_dqdx_spares_electron_reclass(SegmentPtr seg, double MIP_dQdx);
 
+    /// doc sbnd_xin/docs/pr/74 round 2 P1 -- veto for examine_direction's
+    /// flag_shower_in cascade (the |pdg|==13/pdg==0 electron relabel).
+    /// True iff `seg` is BOTH long (track length > max_len) AND MIP-like
+    /// (median dQ/dx < mip_hi * mip_dqdx_median).  A zero/absent median (no
+    /// valid dQ/dx samples) never vetoes -- "no evidence" is not "MIP-like
+    /// evidence", same convention as segment_dqdx_spares_electron_reclass.
+    bool segment_shower_in_cascade_vetoed(SegmentPtr seg, double mip_dqdx_median,
+                                          double max_len, double mip_hi);
+
+    /// doc sbnd_xin/docs/pr/74 round 2 P2 -- total track length reachable
+    /// from `start_vtx` without traversing `stem`.  Used by the F14 Michel
+    /// rescue's Michel-terminal check: a genuine Michel electron is a few cm
+    /// of terminal track, a shower trunk heads a large downstream tree.
+    /// The sum is traversal-order independent (visited sets are only
+    /// tested/inserted, never iterated) and early-exits once `cap` is
+    /// exceeded -- callers only need "over cap".
+    double segment_far_subtree_track_length(Graph& graph, VertexPtr start_vtx,
+                                            SegmentPtr stem, double cap);
+
+    /// doc sbnd_xin/docs/pr/74 round 2 -- env-gated (WCT_SHOWER_TOPO_DEBUG)
+    /// transition record for kShowerTopology.  Round 1 could not attribute
+    /// 90055's "second demotion" because the flag can be cleared on paths
+    /// that write no pdg (invisible to WCT_PID_WRITE_DEBUG); this probe is
+    /// called at EVERY set/unset site.  Default off => no output, no
+    /// behavior change.
+    void pr74_probe_topo_flag(SegmentPtr seg, const char* what, const char* site);
+
     /// doc sbnd_xin/docs/pr/40 round 2 F5 -- an electron cannot father a proton.
     ///
     /// True iff `seg` emanates from `main_vertex` (graph identity at either

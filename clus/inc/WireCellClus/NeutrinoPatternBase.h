@@ -1314,6 +1314,77 @@ namespace WireCell::Clus::PR {
         // cases (isolation arm F11+F13+F14 unchanged vs F11+F13).
         bool   m_michel_stem_muon_rescue{false};
 
+        // doc sbnd_xin/docs/pr/74 round 2 P1 (SBND 18345 evt 53361 seg
+        // 27004).  examine_direction's flag_shower_in cascade relabels any
+        // downstream |pdg|==13/pdg==0 segment electron with no length
+        // ceiling and no charge test (prototype-faithful:
+        // NeutrinoID_track_shower.h:2004 has the same unconditional branch).
+        // A 113.9 cm segment at 1.02x MIP -- as MIP-like as a track can be
+        // -- was relabelled e- this way.  When on, the relabel is refused
+        // for a segment that is BOTH long (> m_shower_in_max_len) AND
+        // MIP-like (median dQ/dx < m_shower_in_mip_hi x mip_dqdx_median);
+        // 90055's genuine shower bodies (0.75-0.90x MIP but 7-20 cm) are
+        // spared by the length conjunct.  A zero/absent median never vetoes
+        // (no evidence != MIP-like evidence, same convention as
+        // segment_dqdx_spares_electron_reclass).  C++ default false =
+        // legacy = byte-identical.
+        bool   m_shower_in_cascade_guard{false};
+        double m_shower_in_max_len{40*units::cm};
+        double m_shower_in_mip_hi{1.3};
+
+        // doc sbnd_xin/docs/pr/74 round 2 P2 (SBND 18255 evt 90055 seg
+        // 11045).  override_michel_stem_muon (F14 above) accepts ANY
+        // shower-like sibling at the stem's far vertex as "the Michel
+        // electron"; on a nueCC event the sibling is the 2020 MeV EM
+        // shower's start segment and the rescue paints a muon at the
+        // neutrino vertex.  A genuine Michel electron is TERMINAL: the
+        // graph beyond the far vertex is a few cm of electron and nothing
+        // else.  When on, the rescue additionally requires the total track
+        // length reachable beyond the far vertex (excluding the stem) to be
+        // below m_michel_stem_max_far_len; a shower trunk heading a
+        // 155 cm+ downstream tree fails.  C++ default false = legacy =
+        // byte-identical.
+        bool   m_michel_stem_michel_check{false};
+        double m_michel_stem_max_far_len{40*units::cm};
+
+        // doc sbnd_xin/docs/pr/74 round 2 K4 (SBND 18255 evts 90055 +
+        // 469665).  Shower formation walks outward from the main vertex and
+        // starts a shower at the first shower-like segment; the track-typed
+        // stem it walked PAST is structurally excluded, and no later step
+        // pulls a vertex-attached stem into the shower beyond it (the
+        // prototype has the same gap -- NeutrinoID_shower_clustering.h:
+        // 1654-1706 has no backfill either, so this is a WCT improvement,
+        // not a parity fix).  When on, a post-pass walks from each
+        // substantial EM shower's attach vertex back toward the main vertex
+        // and absorbs the chain while each segment is short
+        // (< m_stem_backfill_max_len), not charge-hot (median dQ/dx <
+        // m_stem_backfill_mip_hi x MIP median -- a Bragg proton at ~9x MIP
+        // stops the walk, 469665's vertex proton survives), not in a long
+        // muon, and not already claimed by a shower.  Membership then drives
+        // the paint and the PF tree.  C++ default false = legacy =
+        // byte-identical.
+        bool   m_shower_stem_backfill{false};
+        double m_stem_backfill_max_len{30*units::cm};
+        double m_stem_backfill_mip_hi{3.5};
+        double m_stem_backfill_min_shower_len{40*units::cm};
+
+        // doc sbnd_xin/docs/pr/74 round 2 K5 = doc pr/65's deferred rung 2
+        // (SBND 18255 evt 142421 seg 7013: 41.9 cm, 266 MeV, in a
+        // disconnected main-cluster graph component, PF-invisible; the
+        // pr/65 rung-3 audit prints it and by design fabricates nothing;
+        // rung 1's absorbers are geometry-gated and never reach it).  When
+        // on, shower_clustering_in_other_clusters's own leftover-cluster
+        // branch -- the prototype's connection_type=3 pseudo-gamma path --
+        // is extended to graph-unreachable, unclaimed main-cluster segments
+        // above m_conn3_unreachable_min_len: same nearest-candidate-vertex
+        // anchor, same <80 cm conn-3/conn-4 split, same
+        // complete_structure_with_start_segment component claim.  Honors
+        // pr/65 round 2's two hard requirements: no fabricated PF-root
+        // particle, and arrival via the existing clustering algorithm.
+        // C++ default false = legacy = byte-identical.
+        bool   m_shower_conn3_unreachable{false};
+        double m_conn3_unreachable_min_len{10*units::cm};
+
         // doc sbnd_xin/docs/pr/44 -- a MULTI-segment long-muon pseudo-shower
         // seeded by shower_clustering_with_nv_in_main_cluster (cached
         // particle_type recorded 13 at the seed) must not have its start
@@ -1920,6 +1991,8 @@ namespace WireCell::Clus::PR {
 
         // shower related functions
         void update_shower_maps(IndexedShowerSet& showers, ShowerVertexMap& map_vertex_in_shower, ShowerSegmentMap& map_segment_in_shower, VertexShowerSetMap& map_vertex_to_shower, ClusterPtrSet& used_shower_clusters);
+        // doc sbnd_xin/docs/pr/74 round 2 K4 -- see m_shower_stem_backfill.
+        void stem_backfill(Graph& graph, VertexPtr main_vertex, IndexedShowerSet& showers, ShowerVertexMap& map_vertex_in_shower, ShowerSegmentMap& map_segment_in_shower, VertexShowerSetMap& map_vertex_to_shower, ClusterPtrSet& used_shower_clusters, IndexedSegmentSet& segments_in_long_muon);
         void shower_clustering_with_nv_in_main_cluster(Graph& graph, VertexPtr main_vertex, IndexedShowerSet& showers, ShowerVertexMap& map_vertex_in_shower, ShowerSegmentMap& map_segment_in_shower, VertexShowerSetMap& map_vertex_to_shower, ClusterPtrSet& used_shower_clusters, IndexedVertexSet& vertices_in_long_muon, IndexedSegmentSet& segments_in_long_muon, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model);
         void shower_clustering_connecting_to_main_vertex(Graph& graph, VertexPtr main_vertex, IndexedShowerSet& showers, ShowerVertexMap& map_vertex_in_shower, ShowerSegmentMap& map_segment_in_shower, VertexShowerSetMap& map_vertex_to_shower, ClusterPtrSet& used_shower_clusters);
         void shower_clustering_with_nv_from_main_cluster(Graph& graph, VertexPtr main_vertex, Facade::Cluster* main_cluster, IndexedShowerSet& showers, ShowerVertexMap& map_vertex_in_shower, ShowerSegmentMap& map_segment_in_shower, VertexShowerSetMap& map_vertex_to_shower, ClusterPtrSet& used_shower_clusters);

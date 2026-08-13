@@ -121,6 +121,18 @@ TEST_CASE("clus knob defaults: TaggerCheckNeutrino switches are all OFF")
     CHECK_KNOB_BOOL(cfg, "shower_absorb_track_guard", false);                 // F12
     CHECK_KNOB_BOOL(cfg, "shower_connect_protected_pion_guard", false);       // F13
     CHECK_KNOB_BOOL(cfg, "michel_stem_muon_rescue", false);                   // F14
+    // doc pr/74 round 2 -- P1 cascade guard + P2 Michel-terminal check.
+    CHECK_KNOB_BOOL(cfg, "shower_in_cascade_guard", false);                   // P1
+    CHECK_KNOB_NUM(cfg, "shower_in_max_len", 40.0);                           // cm; inert while P1 off
+    CHECK_KNOB_NUM(cfg, "shower_in_mip_hi", 1.3);                             // ratio; inert while P1 off
+    CHECK_KNOB_BOOL(cfg, "michel_stem_michel_check", false);                  // P2
+    CHECK_KNOB_NUM(cfg, "michel_stem_max_far_len", 40.0);                     // cm; inert while P2 off
+    CHECK_KNOB_BOOL(cfg, "shower_stem_backfill", false);                      // K4
+    CHECK_KNOB_NUM(cfg, "stem_backfill_max_len", 30.0);                       // cm; inert while K4 off
+    CHECK_KNOB_NUM(cfg, "stem_backfill_mip_hi", 3.5);                         // ratio; inert while K4 off
+    CHECK_KNOB_NUM(cfg, "stem_backfill_min_shower_len", 40.0);                // cm; inert while K4 off
+    CHECK_KNOB_BOOL(cfg, "shower_conn3_unreachable", false);                  // K5 (pr/65 rung 2)
+    CHECK_KNOB_NUM(cfg, "conn3_unreachable_min_len", 10.0);                   // cm; inert while K5 off
     // doc pr/44: long-muon pseudo-shower keeps its muon start segment.
     CHECK_KNOB_BOOL(cfg, "shower_long_muon_keep_type", false);
     // doc pr/43 round 2 -- three PID-consistency knobs (K1/K2/K3).

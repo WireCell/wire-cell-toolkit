@@ -383,6 +383,17 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_shower_absorb_unreachable_main            = get(config, "shower_absorb_unreachable_main",            m_shower_absorb_unreachable_main);
     m_shower_connect_protected_pion_guard       = get(config, "shower_connect_protected_pion_guard",       m_shower_connect_protected_pion_guard);
     m_michel_stem_muon_rescue                   = get(config, "michel_stem_muon_rescue",                   m_michel_stem_muon_rescue);
+    m_shower_in_cascade_guard                   = get(config, "shower_in_cascade_guard",                   m_shower_in_cascade_guard);
+    m_shower_in_max_len                         = get(config, "shower_in_max_len",                         m_shower_in_max_len);
+    m_shower_in_mip_hi                          = get(config, "shower_in_mip_hi",                          m_shower_in_mip_hi);
+    m_michel_stem_michel_check                  = get(config, "michel_stem_michel_check",                  m_michel_stem_michel_check);
+    m_michel_stem_max_far_len                   = get(config, "michel_stem_max_far_len",                   m_michel_stem_max_far_len);
+    m_shower_stem_backfill                      = get(config, "shower_stem_backfill",                      m_shower_stem_backfill);
+    m_stem_backfill_max_len                     = get(config, "stem_backfill_max_len",                     m_stem_backfill_max_len);
+    m_stem_backfill_mip_hi                      = get(config, "stem_backfill_mip_hi",                      m_stem_backfill_mip_hi);
+    m_stem_backfill_min_shower_len              = get(config, "stem_backfill_min_shower_len",              m_stem_backfill_min_shower_len);
+    m_shower_conn3_unreachable                  = get(config, "shower_conn3_unreachable",                  m_shower_conn3_unreachable);
+    m_conn3_unreachable_min_len                 = get(config, "conn3_unreachable_min_len",                 m_conn3_unreachable_min_len);
     m_shower_long_muon_keep_type                = get(config, "shower_long_muon_keep_type",                m_shower_long_muon_keep_type);
     m_single_muon_proton_chain_veto             = get(config, "single_muon_proton_chain_veto",             m_single_muon_proton_chain_veto);
     m_single_muon_long_muon_claim               = get(config, "single_muon_long_muon_claim",               m_single_muon_long_muon_claim);
@@ -633,6 +644,17 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["shower_absorb_unreachable_main"]            = m_shower_absorb_unreachable_main;            // false = legacy (absorbers skip ALL main-cluster segments, doc pr/65)
     cfg["shower_connect_protected_pion_guard"]       = m_shower_connect_protected_pion_guard;       // false = legacy (proton-daughter pion selectable as EM candidate)
     cfg["michel_stem_muon_rescue"]                   = m_michel_stem_muon_rescue;                   // false = legacy (Michel rescue limited to weak-dir degree-2 vertices)
+    cfg["shower_in_cascade_guard"]                   = m_shower_in_cascade_guard;                   // doc pr/74 round 2 P1; false = legacy (cascade relabels unconditionally)
+    cfg["shower_in_max_len"]                         = m_shower_in_max_len;                         // cm; only read when shower_in_cascade_guard
+    cfg["shower_in_mip_hi"]                          = m_shower_in_mip_hi;                          // ratio; only read when shower_in_cascade_guard
+    cfg["michel_stem_michel_check"]                  = m_michel_stem_michel_check;                  // doc pr/74 round 2 P2; false = legacy (any shower-like sibling passes)
+    cfg["michel_stem_max_far_len"]                   = m_michel_stem_max_far_len;                   // cm; only read when michel_stem_michel_check
+    cfg["shower_stem_backfill"]                      = m_shower_stem_backfill;                      // doc pr/74 round 2 K4; false = legacy (walked-past stems stay out of showers)
+    cfg["stem_backfill_max_len"]                     = m_stem_backfill_max_len;                     // cm; only read when shower_stem_backfill
+    cfg["stem_backfill_mip_hi"]                      = m_stem_backfill_mip_hi;                      // ratio; only read when shower_stem_backfill
+    cfg["stem_backfill_min_shower_len"]              = m_stem_backfill_min_shower_len;              // cm; only read when shower_stem_backfill
+    cfg["shower_conn3_unreachable"]                  = m_shower_conn3_unreachable;                  // doc pr/74 round 2 K5 (pr/65 rung 2); false = legacy (unreachable segments stay PF-invisible)
+    cfg["conn3_unreachable_min_len"]                 = m_conn3_unreachable_min_len;                 // cm; only read when shower_conn3_unreachable
     cfg["shower_long_muon_keep_type"]                = m_shower_long_muon_keep_type;                // false = legacy (long-muon pseudo-shower start segment majority-voted to e-)
     cfg["single_muon_proton_chain_veto"]             = m_single_muon_proton_chain_veto;             // false = legacy (1-hop proton veto only)
     cfg["single_muon_long_muon_claim"]               = m_single_muon_long_muon_claim;               // false = legacy (long-muon chain never claims the vertex muon slot)
@@ -1066,6 +1088,17 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
     pattern_algos.m_shower_absorb_unreachable_main            = m_shower_absorb_unreachable_main;            // doc pr/65 round 3
     pattern_algos.m_shower_connect_protected_pion_guard       = m_shower_connect_protected_pion_guard;       // F13
     pattern_algos.m_michel_stem_muon_rescue                   = m_michel_stem_muon_rescue;                   // F14
+    pattern_algos.m_shower_in_cascade_guard                   = m_shower_in_cascade_guard;                   // pr/74 P1
+    pattern_algos.m_shower_in_max_len                         = m_shower_in_max_len * units::cm;             // pr/74 P1
+    pattern_algos.m_shower_in_mip_hi                          = m_shower_in_mip_hi;                          // pr/74 P1
+    pattern_algos.m_michel_stem_michel_check                  = m_michel_stem_michel_check;                  // pr/74 P2
+    pattern_algos.m_michel_stem_max_far_len                   = m_michel_stem_max_far_len * units::cm;       // pr/74 P2
+    pattern_algos.m_shower_stem_backfill                      = m_shower_stem_backfill;                      // pr/74 K4
+    pattern_algos.m_stem_backfill_max_len                     = m_stem_backfill_max_len * units::cm;         // pr/74 K4
+    pattern_algos.m_stem_backfill_mip_hi                      = m_stem_backfill_mip_hi;                      // pr/74 K4
+    pattern_algos.m_stem_backfill_min_shower_len              = m_stem_backfill_min_shower_len * units::cm;  // pr/74 K4
+    pattern_algos.m_shower_conn3_unreachable                  = m_shower_conn3_unreachable;                  // pr/74 K5
+    pattern_algos.m_conn3_unreachable_min_len                 = m_conn3_unreachable_min_len * units::cm;     // pr/74 K5
     pattern_algos.m_shower_long_muon_keep_type                = m_shower_long_muon_keep_type;                // doc pr/44
     pattern_algos.m_single_muon_proton_chain_veto             = m_single_muon_proton_chain_veto;             // doc pr/43 round 2 K1
     pattern_algos.m_single_muon_long_muon_claim               = m_single_muon_long_muon_claim;               // doc pr/43 round 2 K2
