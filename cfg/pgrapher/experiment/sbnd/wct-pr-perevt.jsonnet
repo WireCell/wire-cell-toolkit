@@ -1230,7 +1230,12 @@ function(
     // muon so the Michel becomes its own shower.  C++ defaults
     // false/15cm/45cm/1.3x/40cm/40deg.  Keys omitted when off/null =>
     // byte-identical pre-round-4 config.
-    shower_traj_michel_stem = false,
+    // SBND PRODUCTION DEFAULT ON since 2026-08-13 (doc pr/74 round 4 gates:
+    // off-gate 0/117 archives + 0/117 pctree member hashes; knob footprint
+    // 1/117 events, 506746 only, 0-mc.json + the paint layer; nusel 0/117;
+    // dangling PF roots gained 0/117; nu-vertex 0/117; flip and escape gates
+    // byte-exact both ways).
+    shower_traj_michel_stem = true,
     michel_stem_traj_min_len = null,
     michel_stem_traj_max_len = null,
     michel_stem_traj_mip_lo = null,
