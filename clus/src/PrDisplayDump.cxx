@@ -198,6 +198,7 @@ void Clus::PrDisplayDump::visit(Facade::Ensemble& ensemble) const
     top["proj"] = dump_proj(grouping);
     top["dead"] = dump_dead(grouping);
     top["dqdx_ref"] = dump_dqdx_ref();
+    top["vertex_scoreboard"] = dump_vertex_scoreboard(grouping);
 
     Persist::dump(m_output_filename, top, m_pretty);
 
@@ -624,6 +625,101 @@ Configuration Clus::PrDisplayDump::dump_kine(Facade::Grouping& grouping) const
 // (flag_bdt == 1) and only those are ported here.  A dumped field that no code
 // ever assigns reads as a physics answer of 0 on the display, which is worse
 // than its absence -- so the dead slots are left out and named in doc pr/26.
+// doc sbnd_xin/docs/pr/75 -- HOW the neutrino vertex was chosen, not just
+// where it landed.  The two selectors (doc pr/52 sec 1) compare numbers that
+// exist nowhere in any artifact today: compare_main_vertices' additive score
+// per candidate, and the DL rerank's top-K voxel scores + seven composite
+// terms + accept decision.  A hand scan without them can only say
+// correct/incorrect; with them it says WHICH TERM was wrong, which is what
+// re-tuning the acceptance layer needs.
+//
+// An EMPTY object means the `vertex_scoreboard` knob was off -- read it as
+// "no scoreboard was taken", NEVER as "no candidates existed".  Same
+// discipline as vertices[].main_candidate above.
+//
+// Rows are emitted sorted by vertex_id: the sources they were collected from
+// (map_vertex_num, snap_map) are both VertexPtr-keyed, i.e. ADDRESS-ordered,
+// so an unsorted dump would reshuffle run to run (CLAUDE.md determinism rule).
+Configuration Clus::PrDisplayDump::dump_vertex_scoreboard(Facade::Grouping& grouping) const
+{
+    Configuration out;
+
+    auto tf = grouping.get_track_fitting();
+    if (!tf) return out;
+    const auto& b = tf->get_vertex_scoreboard();
+    if (!b.filled) return out;
+
+    out["filled"] = true;
+    out["route"] = b.route;
+    out["weights_missing"] = b.weights_missing;
+    out["dl_ran"] = b.dl_ran;
+    out["dl_rerank"] = b.dl_rerank;
+    out["dl_accepted"] = b.dl_accepted;
+    out["dl_best_score"] = b.dl_best_score;
+    out["dl_min_accept_score"] = b.dl_min_accept_score;
+    out["dl_score_scale"] = b.dl_score_scale;
+    out["dl_top_k"] = b.dl_top_k;
+    out["final_vertex_id"] = b.final_vertex_id;
+    out["final_x"] = b.final_x;
+    out["final_y"] = b.final_y;
+    out["final_z"] = b.final_z;
+
+    out["voxels"] = Json::arrayValue;
+    for (const auto& v : b.voxels) {
+        Configuration j;
+        j["rank"] = v.rank;
+        j["x"] = v.x;
+        j["y"] = v.y;
+        j["z"] = v.z;
+        j["dl_score"] = v.dl_score;
+        out["voxels"].append(j);
+    }
+
+    std::vector<const PR::VertexScoreRow*> rows;
+    rows.reserve(b.rows.size());
+    for (const auto& r : b.rows) rows.push_back(&r);
+    std::sort(rows.begin(), rows.end(),
+              [](const PR::VertexScoreRow* a, const PR::VertexScoreRow* c) {
+                  return a->vertex_id < c->vertex_id;
+              });
+
+    out["rows"] = Json::arrayValue;
+    for (const auto* r : rows) {
+        Configuration j;
+        // Joins to vertices[].id -- same cluster_id*1000 + graph_index encoding.
+        j["vertex_id"] = r->vertex_id;
+        j["cluster_id"] = r->cluster_id;
+        j["x"] = r->x;
+        j["y"] = r->y;
+        j["z"] = r->z;
+        j["trad_scored"] = r->trad_scored;
+        j["trad_score"] = r->trad_score;
+        j["trad_winner"] = r->trad_winner;
+        // dl_snapped false means the DL had NO OPINION on this vertex (no
+        // voxel snapped to it), which is not a zero score.
+        j["dl_snapped"] = r->dl_snapped;
+        j["voxel_rank"] = r->voxel_rank;
+        j["dl_score"] = r->dl_score;
+        j["snap_dis"] = r->snap_dis;
+        j["host_length"] = r->host_length;
+        j["s_dl"] = r->s_dl;
+        j["s_snap"] = r->s_snap;
+        j["s_fwd_z"] = r->s_fwd_z;
+        j["s_clen"] = r->s_clen;
+        j["s_isol"] = r->s_isol;
+        j["s_main"] = r->s_main;
+        j["s_fv"] = r->s_fv;
+        j["total"] = r->total;
+        j["dl_winner"] = r->dl_winner;
+        // All-zero terms with this set mean "removed before scoring", not
+        // "scored zero".
+        j["skipped_by_swap_guard"] = r->skipped_by_swap_guard;
+        out["rows"].append(j);
+    }
+
+    return out;
+}
+
 Configuration Clus::PrDisplayDump::dump_tagger(Facade::Grouping& grouping) const
 {
     Configuration out;

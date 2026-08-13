@@ -3,6 +3,7 @@
 #include "WireCellClus/TrackFitting.h"
 #include "WireCellClus/PRShower.h"
 #include "WireCellClus/NeutrinoTaggerInfo.h"
+#include "WireCellClus/PRVertexScoreboard.h"
 #include "WireCellClus/IClusGeomHelper.h"
 #include "WireCellClus/PRSegmentFunctions.h"
 
@@ -858,6 +859,19 @@ namespace WireCell::Clus::PR {
         // so it needs no plumbing and travels with the vertex; PrDisplayDump
         // emits it as "main_candidate".
         bool   m_main_vertex_candidate_flag{false};
+
+        // ---- doc sbnd_xin/docs/pr/75 -- the vertex scoreboard doc pr/52 §5.1
+        // asked for.  Records, per event, the numbers the two vertex selectors
+        // actually compared: compare_main_vertices' additive score per
+        // candidate, and the DL rerank's top-K voxels + seven composite terms
+        // + accept/reject decision.  Pure recording -- no decision reads it,
+        // and every read inside the guarded blocks must be const (see
+        // compare_main_vertices: map_vertex_num is a std::map, so an
+        // operator[] read on an unscored candidate would INSERT and mutate a
+        // container the legacy path then walks).  C++ default false => the
+        // board stays empty => byte-identical.
+        bool   m_vertex_scoreboard{false};
+        VertexScoreboard m_vtx_board;
 
         // ---- doc sbnd_xin/docs/pr/31 §12 -- the §10.12 port-fidelity round:
         // the five surviving bug-class findings of the topology/PID/direction

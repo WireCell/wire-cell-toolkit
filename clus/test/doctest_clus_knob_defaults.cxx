@@ -162,6 +162,7 @@ TEST_CASE("clus knob defaults: TaggerCheckNeutrino switches are all OFF")
     // doc pr/51 round 4: diagnostic-only rough-path probe -- OFF.
     CHECK_KNOB_BOOL(cfg, "rough_path_probe", false);
     CHECK_KNOB_BOOL(cfg, "sgp_edge_probe", false);   // doc pr/73: per-edge sentinel, log-only
+    CHECK_KNOB_BOOL(cfg, "vertex_scoreboard", false); // doc pr/75: vertex scoreboard, recording-only
     // doc pr/51 round 5: steiner gap penalty -- scale 0 = the flavor is
     // never built, do_rough_path stays on the unpenalized "steiner_graph";
     // the four sub-knobs are inert while the scale is 0.

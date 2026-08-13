@@ -363,6 +363,11 @@ public:
         bool   m_sp_dedx_use_recomb_model{false};
         double m_sp_mean_dedx_cut{2.3};
         std::string m_dl_weights;              // path to SCN vertex .pth weights file (empty = DL disabled)
+        // doc sbnd_xin/docs/pr/75: true iff dl_weights was configured non-empty
+        // but Persist::resolve failed.  A failed resolve empties m_dl_weights,
+        // so without this the scoreboard cannot tell doc pr/52 route 3
+        // ("weights path not found") from route 1 ("DL never configured").
+        bool m_dl_weights_missing{false};
         double m_dl_vtx_cut{25.0};             // max distance (mm) from DL prediction to accept candidate vertex (default 2.5 cm)
         double m_dQdx_scale{0.1};              // scale factor applied to dQ before passing to SCN network
         double m_dQdx_offset{-1000.0};         // offset applied after scaling: q_in = dQ * scale + offset
@@ -433,6 +438,12 @@ public:
         // doc sbnd_xin/docs/pr/73: per-edge DEBUG sentinel for the sgp
         // scan.  Log-only; false = legacy (never emits).
         bool   m_sgp_edge_probe{false};
+        // doc sbnd_xin/docs/pr/75: record, per event, the numbers the two
+        // vertex selectors compared (compare_main_vertices scores; DL top-K
+        // voxels + the seven rerank terms + the accept decision) so a hand
+        // scan can become tuning input.  Pure recording; false = legacy =>
+        // the board stays empty and the compiled config omits the key.
+        bool   m_vertex_scoreboard{false};
         double m_beam_window_low{0};   // beam window [low, high) on cluster_t0 (matched flash time, WCT units).
         double m_beam_window_high{0};  // low >= high (default) disables the gate: uBooNE single-main behavior.
         bool m_nu_skip_cosmic{false};  // if true (beam-gate only), skip in-window mains already tagged
