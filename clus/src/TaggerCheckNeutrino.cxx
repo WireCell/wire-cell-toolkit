@@ -314,6 +314,8 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     // doc sbnd_xin/docs/pr/51 round 6: weak-charge deficit term (0 = legacy round-5 flavor).
     m_sgp_weak_scale          = get(config, "sgp_weak_scale",          m_sgp_weak_scale);
     m_sgp_weak_qref           = get(config, "sgp_weak_qref",           m_sgp_weak_qref);     // charge units
+    // doc sbnd_xin/docs/pr/73 round 2 F3a: route excursion cap (cm); < 0 = off.
+    m_sgp_max_sep             = get(config, "sgp_max_sep",             m_sgp_max_sep);       // cm
     m_beam_window_low         = get(config, "beam_window_low",         m_beam_window_low);
     m_beam_window_high        = get(config, "beam_window_high",        m_beam_window_high);
     m_nu_skip_cosmic          = get(config, "nu_skip_cosmic",          m_nu_skip_cosmic);
@@ -607,6 +609,7 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["sgp_edge_probe"]          = m_sgp_edge_probe;       // doc pr/73: false = legacy (per-edge DEBUG sentinel never emits)
     cfg["sgp_weak_scale"]          = m_sgp_weak_scale;       // doc pr/51 round 6: 0 = legacy (round-5 gap flavor verbatim)
     cfg["sgp_weak_qref"]           = m_sgp_weak_qref;        // doc pr/51 round 6: charge ref, calc_charge_wcp units (inert at weak scale 0)
+    cfg["sgp_max_sep"]             = m_sgp_max_sep;          // doc pr/73 round 2 F3a: cm; NEGATIVE = legacy (no cap). 0 is a real cap, so the off-test is < 0, not <= 0
     cfg["clus_geom_helper"] = ""; // empty = no SCE vertex correction
     cfg["beam_window_low"] = m_beam_window_low;   // beam window on cluster_t0; low >= high disables the
     cfg["beam_window_high"] = m_beam_window_high; // gate (uBooNE single-main selection).
@@ -981,6 +984,9 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
     // doc pr/51 round 6: weak-charge deficit term (charge units, no conversion).
     pattern_algos.m_sgp_weak_scale      = m_sgp_weak_scale;
     pattern_algos.m_sgp_weak_qref       = m_sgp_weak_qref;
+    // doc pr/73 round 2 F3a: a LENGTH, so it takes the cm->internal conversion.
+    // -1 * units::cm stays negative, so the `< 0` off-test survives it.
+    pattern_algos.m_sgp_max_sep         = m_sgp_max_sep * units::cm;           // cm -> internal
     pattern_algos.m_sgp_dv   = m_dv;
     pattern_algos.m_sgp_pcts = m_pcts;
     pattern_algos.m_shower_topo_demote_len = m_shower_topo_demote_len * units::cm;  // cm -> internal

@@ -433,6 +433,11 @@ public:
         // doc sbnd_xin/docs/pr/73: per-edge DEBUG sentinel for the sgp
         // scan.  Log-only; false = legacy (never emits).
         bool   m_sgp_edge_probe{false};
+        // doc sbnd_xin/docs/pr/73 round 2, F3a: cap (cm) on how far the
+        // penalized route may stray from the unpenalized one in do_rough_path;
+        // over the cap, the base route is kept.  OFF-TEST IS `< 0`, not the
+        // `<= 0` the scale knobs above use -- 0 is a meaningful cap here.
+        double m_sgp_max_sep{-1};        // cm; < 0 = off (unbounded, legacy)
         double m_beam_window_low{0};   // beam window [low, high) on cluster_t0 (matched flash time, WCT units).
         double m_beam_window_high{0};  // low >= high (default) disables the gate: uBooNE single-main behavior.
         bool m_nu_skip_cosmic{false};  // if true (beam-gate only), skip in-window mains already tagged

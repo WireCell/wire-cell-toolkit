@@ -1466,6 +1466,15 @@ function(
     // omits the key => byte-identical compiled config.
     // Validation: -A sgp_edge_probe=true (or SBND_SGP_EDGE_PROBE=true).
     sgp_edge_probe = false,
+    // doc sbnd_xin/docs/pr/73 round 2, fix F3a -- bound what the round-6
+    // penalty may do to the ROUTE.  When >= 0 and the gap flavor is in use,
+    // do_rough_path also routes on the untouched base flavor and keeps the
+    // BASE route whenever the penalized one strays further than this many cm
+    // from it.  C++ default -1 = off (unbounded, today's behaviour); null
+    // omits the key => byte-identical compiled config.
+    // NB 0 is a meaningful cap, so the off-test is `< 0`, not `<= 0`.
+    // Validation: -A sgp_max_sep=3 (or SBND_SGP_MAX_SEP=3).
+    sgp_max_sep = null,
     // doc pr/51 round 7 -- robust vertex fit (dynamic per-leg re-seat-free
     // direction windows for MyFCN, disagreement-gated, relaxed prior on
     // substituted 2-leg vertices).  C++ defaults: robust false, main_only
@@ -1855,6 +1864,7 @@ function(
                              sgp_weak_scale=sgp_weak_scale,
                              sgp_weak_qref=sgp_weak_qref,
                              sgp_edge_probe=sgp_edge_probe,
+                             sgp_max_sep=sgp_max_sep,
                              mvfit_robust=mvfit_robust,
                              mvfit_main_only=mvfit_main_only,
                              mvfit_min_len=mvfit_min_len,

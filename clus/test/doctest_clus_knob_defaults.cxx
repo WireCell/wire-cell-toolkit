@@ -179,6 +179,11 @@ TEST_CASE("clus knob defaults: TaggerCheckNeutrino switches are all OFF")
     // doc pr/51 round 6: weak-charge deficit term, OFF by default.
     CHECK_KNOB_NUM(cfg, "sgp_weak_scale", 0.0);
     CHECK_KNOB_NUM(cfg, "sgp_weak_qref", 2000.0);
+    // doc pr/73 round 2 F3a: do_rough_path route excursion cap, cm.  NEGATIVE
+    // is the off value, deliberately -- 0 is a meaningful cap (reject any
+    // excursion), so unlike the sgp scale knobs above this one cannot use 0 to
+    // mean "off" and its off-test is `< 0`, not `<= 0`.
+    CHECK_KNOB_NUM(cfg, "sgp_max_sep", -1.0);
     // doc pr/51 round 7: robust vertex fit -- master OFF (AddSegment
     // epilogue never runs); the ten satellites are inert while it is off.
     CHECK_KNOB_BOOL(cfg, "mvfit_robust", false);

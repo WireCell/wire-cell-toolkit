@@ -136,6 +136,22 @@ std::vector<Facade::geo_point_t> PatternAlgorithms::do_rough_path(const Facade::
         const std::vector<size_t>& path_indices =
             cluster.graph_algorithms(flavor).shortest_path(first_index, last_index);
 
+        // doc sbnd_xin/docs/pr/73 round 2, fix F3a: the route we will actually
+        // return.  A rebindable POINTER, not a reference and not a copy -- the
+        // excursion guard below may swap it to the base-flavor route.
+        //
+        // Lifetime: both vectors are owned by per-flavor GraphAlgorithms LRU
+        // caches held in cluster.m_galgs (Facade_Cluster.h, a std::map => node
+        // based => inserting the base-flavor entry cannot invalidate the
+        // gap-flavor GraphAlgorithms& already handed out), and the two flavors
+        // have INDEPENDENT LRUs, so routing on base cannot evict the entry
+        // backing path_indices.
+        // FOOTGUN for whoever edits this next: do NOT issue a second
+        // shortest_path() on the GAP flavor while path_indices is live.
+        // Graphs.cxx evict_oldest_if_needed() erases before it inserts, at
+        // m_max_cache_size = 50, and would dangle it.
+        const std::vector<size_t>* route = &path_indices;
+
         // doc sbnd_xin/docs/pr/73 sec 4.10: path-level sentinel.  The per-edge
         // probe of sec 4.9 says WHERE the penalized edges are but not why the
         // re-pricing changes the ROUTE -- a shortest path is decided by whole
@@ -147,7 +163,22 @@ std::vector<Facade::geo_point_t> PatternAlgorithms::do_rough_path(const Facade::
         // interesting numbers are the DETOUR the penalty bought (extra base
         // weight on the gap route) and the TAX it avoided (extra gap weight the
         // base route would have paid).  Log-only, and off by default.
-        if (m_sgp_edge_probe && &flavor == &kGapFlavor) {
+        // doc pr/73 round 2: TWO consumers, ONE computation.  The sec-4.10
+        // probe (log-only, unchanged) and the F3a excursion guard (behavioural)
+        // both need the base route and the separation between the two routes,
+        // so they share this block.  Same gap-flavor gate the probe has always
+        // had, so an unpenalized run is untouched either way.
+        //
+        // The has_graph() term is new and deliberate: guard-on promotes
+        // find_graph(kBaseFlavor) from a diagnostic call to a production one,
+        // and ensure_steiner_gap_graph() returns true on its memoized
+        // has_graph("steiner_graph_gap") without re-checking that the base
+        // graph still exists.  On every arm where find_graph would have
+        // succeeded -- which is all six committed pr/73 probe arms -- the term
+        // is true and the block is entered exactly as before.
+        const bool sgp_guard_on = (m_sgp_max_sep >= 0);   // NB: < 0 is off, 0 is a real cap
+        if ((m_sgp_edge_probe || sgp_guard_on) && &flavor == &kGapFlavor &&
+            cluster.has_graph(kBaseFlavor)) {
             const auto& base_graph = cluster.find_graph(kBaseFlavor);
             const std::vector<size_t>& base_indices =
                 cluster.graph_algorithms(kBaseFlavor).shortest_path(first_index, last_index);
@@ -169,7 +200,18 @@ std::vector<Facade::geo_point_t> PatternAlgorithms::do_rough_path(const Facade::
             size_t div = 0;
             while (div < path_indices.size() && div < base_indices.size() &&
                    path_indices[div] == base_indices[div]) ++div;
+            // doc pr/73 round 2: `same` moved ABOVE the loop (it was below) so
+            // it can short-circuit it -- most calls agree on both flavors and
+            // then every term is provably 0, since each gap vertex is compared
+            // against itself and sqrt(0) cannot raise a max initialised to 0.
+            // The loop body is otherwise verbatim: maxsep is the ONE-SIDED
+            // (gap->base) Hausdorff distance sampled at route VERTICES, and it
+            // is the expression that produced the 2.57 / 4.85 cm calibration in
+            // sec 4.10.  Do not "improve" it to a symmetric or point-to-segment
+            // metric without re-taking that calibration.
+            const bool same = (path_indices == base_indices);
             double maxsep = 0;
+            if (!same) {
             for (size_t i : path_indices) {
                 double best = 1e300;
                 for (size_t j : base_indices) {
@@ -179,7 +221,12 @@ std::vector<Facade::geo_point_t> PatternAlgorithms::do_rough_path(const Facade::
                 }
                 if (best < 1e299) maxsep = std::max(maxsep, std::sqrt(best));
             }
-            const bool same = (path_indices == base_indices);
+            }
+            // doc pr/73 round 2: the three sec-4.9/4.10/4.11 log families are
+            // wrapped, not edited -- indentation is the only change, so their
+            // rendered bytes are diff-visibly identical and the six committed
+            // analysis scripts that regex them keep working.
+            if (m_sgp_edge_probe) {
             SPDLOG_LOGGER_DEBUG(s_log,
                 "sgp path: cluster {} first=({:.2f},{:.2f},{:.2f}) last=({:.2f},{:.2f},{:.2f}) "
                 "same={} n_gap={} n_base={} "
@@ -213,6 +260,45 @@ std::vector<Facade::geo_point_t> PatternAlgorithms::do_rough_path(const Facade::
                         cluster.ident(), k, base_indices[k],
                         px[base_indices[k]]/units::cm, py[base_indices[k]]/units::cm, pz[base_indices[k]]/units::cm);
             }
+            }
+
+            // ---- doc pr/73 round 2, F3a: the excursion guard. ---------------
+            // The ONLY behavioural statement in this block.  The penalty may
+            // re-route, but never by more than m_sgp_max_sep centimetres.
+            //
+            // Fail-safe.  Graphs.cxx ShortestPaths::path() never returns fewer
+            // than 2 entries -- an unreachable destination yields [src,dst,dst]
+            // and src==dst yields [dst,src] -- so every `size() < 2` verdict a
+            // caller can observe comes from the two EARLY returns above, which
+            // are evaluated before the flavor is even chosen.  The guard
+            // therefore cannot turn a non-empty route into an empty one and
+            // cannot flip the feasibility tests in NeutrinoGraphAudit.cxx.  The
+            // size check below is that proof made mechanical rather than a
+            // condition expected to fire.  Degenerate inputs are all inert:
+            // src==dst and unreachable both give same==true; a NaN coordinate
+            // leaves maxsep at 0 (fail open, keep the penalized route).
+            if (sgp_guard_on && !same && maxsep > m_sgp_max_sep &&
+                base_indices.size() >= 2) {
+                route = &base_indices;
+                SPDLOG_LOGGER_DEBUG(s_log,
+                    "sgp guard: cluster {} VETO maxsep={:.3f} cap={:.3f} n_gap={} n_base={} "
+                    "detour={:.3f} base_cm={:.3f} first=({:.2f},{:.2f},{:.2f}) "
+                    "last=({:.2f},{:.2f},{:.2f})",
+                    cluster.ident(), maxsep/units::cm, m_sgp_max_sep/units::cm,
+                    path_indices.size(), base_indices.size(),
+                    (path_cost(path_indices, base_graph)
+                     - path_cost(base_indices, base_graph))/units::cm,
+                    path_cost(base_indices, base_graph)/units::cm,
+                    first_point.x()/units::cm, first_point.y()/units::cm, first_point.z()/units::cm,
+                    last_point.x()/units::cm, last_point.y()/units::cm, last_point.z()/units::cm);
+            }
+            // Note for anyone reading a probe+guard log together: "sgp path
+            // sel:" dumps the GAP route, which after a veto is not what the
+            // function returns.  Nothing is lost -- a veto implies !same, so
+            // the "sgp path pt: ... which=base" block above already dumped the
+            // returned route verbatim.  Likewise the pr55 line prints
+            // flavor=steiner_graph_gap because it describes the graph queried,
+            // not the route chosen.
         }
 
         std::vector<Facade::geo_point_t> path_points;
@@ -223,7 +309,10 @@ std::vector<Facade::geo_point_t> PatternAlgorithms::do_rough_path(const Facade::
         const auto& y_coords = steiner_pc.get(coords.at(1))->elements<double>();
         const auto& z_coords = steiner_pc.get(coords.at(2))->elements<double>();
 
-        for (size_t idx : path_indices) {
+        // doc pr/73 round 2 F3a: *route, not path_indices.  With the cap off
+        // (the default) route still aliases path_indices and this is the same
+        // loop it always was.
+        for (size_t idx : *route) {
             path_points.emplace_back(x_coords[idx], y_coords[idx], z_coords[idx]);
         }
         return path_points;

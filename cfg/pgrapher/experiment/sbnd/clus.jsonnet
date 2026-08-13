@@ -1404,6 +1404,9 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               // 2000 (charge units).  null omits the keys => byte-identical.
               sgp_weak_scale=null,
               sgp_weak_qref=null,
+              // doc pr/73 round 2 F3a -- do_rough_path route excursion cap,
+              // cm.  C++ default -1 = off; null omits the key.
+              sgp_max_sep=null,
               // doc pr/51 round 7 -- robust vertex fit (dynamic per-leg
               // direction windows for MyFCN).  C++ defaults: robust false,
               // main_only true, min_len 10, rin_margin 2, rout_frac 0.5,
@@ -2069,6 +2072,7 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
             sgp_edge_probe=sgp_edge_probe,
             sgp_weak_scale=sgp_weak_scale,
             sgp_weak_qref=sgp_weak_qref,
+            sgp_max_sep=sgp_max_sep,
             mvfit_robust=mvfit_robust,
             mvfit_main_only=mvfit_main_only,
             mvfit_min_len=mvfit_min_len,
@@ -2858,6 +2862,9 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
               // 2000 (charge units).  null omits the keys => byte-identical.
               sgp_weak_scale=null,
               sgp_weak_qref=null,
+              // doc pr/73 round 2 F3a -- do_rough_path route excursion cap,
+              // cm.  C++ default -1 = off; null omits the key.
+              sgp_max_sep=null,
               // doc pr/51 round 7 -- robust vertex fit.  C++ defaults as in
               // clus_pr above.  false/null omit the keys => byte-identical.
               mvfit_robust=false,
@@ -3147,6 +3154,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 sgp_edge_probe=sgp_edge_probe,
                 sgp_weak_scale=sgp_weak_scale,
                 sgp_weak_qref=sgp_weak_qref,
+                sgp_max_sep=sgp_max_sep,
                 mvfit_robust=mvfit_robust,
                 mvfit_main_only=mvfit_main_only,
                 mvfit_min_len=mvfit_min_len,

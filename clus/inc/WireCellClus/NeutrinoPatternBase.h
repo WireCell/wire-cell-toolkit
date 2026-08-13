@@ -515,6 +515,29 @@ namespace WireCell::Clus::PR {
         // byte-identical gap flavor.
         double m_sgp_weak_scale{0};             ///< weak-charge penalty scale; 0 = off
         double m_sgp_weak_qref{2000};           ///< charge ref (calc_charge_wcp RMS units); deficit=0 at/above
+        // doc sbnd_xin/docs/pr/73 round 2, fix F3a: bound what the penalty may
+        // do to the ROUTE.  On 18255-57903 the round-6 weighting talks
+        // do_rough_path into a +4.87 cm excursion through an isochronous ghost
+        // ribbon, relocating the main vertex and forcing a 5.9 cm bow that
+        // nothing downstream can remove (multi_trajectory_fit PINS both segment
+        // endpoints to the vertex fit points, TrackFitting.cxx:4246-4259).  The
+        // two events round 6 was built to fix need 98 route-moving calls whose
+        // largest excursion is 2.57 cm, so a cap separates them from the damage
+        // (4.85 cm on the causal call) where capping the DETOUR does not:
+        // in percent the detour criterion is inverted (the fixes routinely need
+        // 30-40 % on short paths) and in cm its margin is only 1.17x.
+        //
+        // When the cap is >= 0 and the gap flavor is in use, do_rough_path also
+        // routes on the untouched base flavor and, if the penalized route ever
+        // gets further than the cap from it, KEEPS THE BASE ROUTE.
+        //
+        // NOTE the off-test is `< 0`, NOT the `<= 0` used by the sgp scale
+        // knobs above: 0 is a meaningful cap here (reject any excursion at
+        // all), so it cannot double as the off value.  -1*units::cm stays
+        // negative through the cm->internal conversion in TaggerCheckNeutrino.
+        // Default -1 => the base flavor is never routed and not one extra
+        // statement runs => byte-identical.
+        double m_sgp_max_sep{-1*units::cm};     ///< route excursion cap; < 0 = off (unbounded)
         IDetectorVolumes::pointer m_sgp_dv{nullptr};   ///< pushed from TaggerCheckNeutrino (NeedDV)
         IPCTransformSet::pointer  m_sgp_pcts{nullptr}; ///< pushed from TaggerCheckNeutrino (NeedPCTS)
 
