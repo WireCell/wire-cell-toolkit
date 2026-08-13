@@ -58,6 +58,30 @@ function(params, tools, override = {}) {
       ADC_mV: ADC_mV_ratio, // 4096 / (1400.0 * wc.mV), 
       troi_col_th_factor: 5.0,  // default 5
       troi_ind_th_factor: 3.0,  // default 3
+
+      // Prolonged-W-signal fix, part 1: MAD-based cal_RMS in ROI finding
+      // (C++ default false).  A long track-along-drift W signal occupying
+      // >~16% of the readout corrupts ROI_formation::cal_RMS's legacy
+      // (16,50,84)-percentile noise estimate, pushing the tight-ROI
+      // threshold (5*rms+1) above the signal's own median so only the
+      // tallest dE/dx peaks form ROIs.  Measured on SBND MC run 270/6/46
+      // ch 10038: decon RMS 2036 vs 62-95 on a normal W channel, i.e.
+      // signal/RMS 3.6 vs ~82, and the ROI collapsed to 9 ticks.  MAD stays
+      // robust to 50% occupancy.  Generic estimator, all planes/anodes.
+      // See pdhd/docs/sp-w-collection-roi-break.md.
+      roi_mad_rms: true,
+
+      // Prolonged-W-signal fix, part 2: disable BreakROI on the collection
+      // plane.  With part 1 in place the long multi-peak W ROI survives to
+      // refinement, where BreakROI would subtract a valley-to-valley linear
+      // "baseline" that is actually real track charge (collection decon has
+      // no LF filter, so its baseline needs no such fix), re-fragmenting the
+      // signal into per-peak islands.  SBND uses the standard [U, V, W] slot
+      // order on both anodes (no filter_responses_tn remap), so W is slot 2;
+      // U and V keep the production 2 break loops.  Override with
+      // [2, 2, 2] to recover the pre-tune behaviour.
+      r_break_roi_loop_planes: [2, 2, 0],
+
       lroi_rebin: 6, // default 6
       lroi_th_factor: 3.5, // default 3.5
       lroi_th_factor1: 0.7, // default 0.7

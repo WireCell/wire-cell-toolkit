@@ -17,6 +17,17 @@ function(params, anode, chndbobj, n, name='', dft=default_dft)
         anode: wc.tn(anode),
         dft: wc.tn(dft),
         resmp: [],
+
+        // IS_RC / "partial waveform" detection is a MicroBooNE pathology test
+        // (large, monotonically falling power in the lowest non-DC FFT bins).
+        // SBND has no genuine partial-RC channels, so every trigger is a false
+        // positive on a long ionisation pulse, and the branch then skips the
+        // RC-RC deconvolution and applies RawAdapativeBaselineAlg's 20-tick
+        // sliding baseline, deleting most of the signal.  Measured on MC run
+        // 270/6/46: 5 collection channels flagged, up to 90 % of the true
+        // charge lost.  Disabling keeps the RC-RC deconvolution -- which IS
+        // needed -- on every channel.
+        partial_enable: false,
       },
     },
     local grouped = {
