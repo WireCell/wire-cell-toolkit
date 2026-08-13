@@ -50,14 +50,31 @@ function(params, tools, override = {}) {
       dft: wc.tn(tools.dft),
       field_response: wc.tn(tools.field),
       elecresponse: wc.tn(tools.elec_resp),
+      // Rebaselining is done in NF with a more sophisticated method.  This key
+      // MUST be present: OmnibusSigProc only reads it `if (config.isMember(...))`
+      // and its C++ default is {0, 1, 2}, so omitting it rebaselines ALL planes
+      // rather than none.
+      rebase_planes: [],
       ftoffset: 0.0, // default 0.0
       ctoffset: 1.0*wc.microsecond, // default -8.0
       per_chan_resp: pc.name,
       fft_flag: 0,  // 1 is faster but higher memory, 0 is slightly slower but lower memory
       postgain: 1.0,  // default 1.2
-      ADC_mV: ADC_mV_ratio, // 4096 / (1400.0 * wc.mV), 
-      troi_col_th_factor: 5.0,  // default 5
-      troi_ind_th_factor: 3.0,  // default 3
+      ADC_mV: ADC_mV_ratio, // 4096 / (1400.0 * wc.mV),
+
+      // Tight-ROI thresholds.  These used to be selected here from the
+      // 'enableLowROIThresholds' extVar, which made this file unusable outside
+      // art/wcls (standalone toolkit jobs define no extVars) and, worse, failed
+      // silently: jsonnet ignores an extVar nobody reads, so a copy of this file
+      // with the switch dropped ran at the high thresholds while the fcl asked
+      // for the low ones.  The switch now lives in the wcls jsonnets, which pass
+      // the high values through `override`; see wcls-nf-sp.jsonnet.
+      //
+      // The defaults below are the LOW values, i.e. what every production fcl
+      // asks for, so a caller that forgets the override lands on production
+      // behaviour instead of silently coarser ROIs.  C++ defaults are 5 and 3.
+      troi_col_th_factor: 3.0,
+      troi_ind_th_factor: 1.8,
 
       // Prolonged-W-signal fix, part 1: MAD-based cal_RMS in ROI finding
       // (C++ default false).  A long track-along-drift W signal occupying
@@ -68,7 +85,7 @@ function(params, tools, override = {}) {
       // ch 10038: decon RMS 2036 vs 62-95 on a normal W channel, i.e.
       // signal/RMS 3.6 vs ~82, and the ROI collapsed to 9 ticks.  MAD stays
       // robust to 50% occupancy.  Generic estimator, all planes/anodes.
-      // See pdhd/docs/sp-w-collection-roi-break.md.
+      // See ai-helper issue #10.
       roi_mad_rms: true,
 
       // Prolonged-W-signal fix, part 2: disable BreakROI on the collection
@@ -99,10 +116,10 @@ function(params, tools, override = {}) {
 
       // frame tags
       wiener_tag: 'wiener%d' % anode.data.ident,
-      // The threshold trace tag is obsolete (issue 220): OmnibusSigProc ignores
-      // it and carries thresholds in the summary of the 'wiener' tagged traces.
+      // 'wiener_threshold_tag' dropped: OmnibusSigProc logs it as obsolete and
+      // carries thresholds in the summary of the 'wiener' tagged traces, which
+      // is what magnify-sinks.jsonnet's threshold sink already reads.
       decon_charge_tag: 'decon_charge%d' % anode.data.ident,
-      //gauss_tag: '', // <- commented Ewerton: empty that won't use wiener tag!! need fix? (already talked to Haiwang on Mar 4, 2024)
       gauss_tag: 'gauss%d' % anode.data.ident,
 
       use_roi_debug_mode: false,
