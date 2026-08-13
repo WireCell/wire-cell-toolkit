@@ -159,6 +159,19 @@ TEST_CASE("clus knob defaults: TaggerCheckNeutrino switches are all OFF")
     // doc pr/51 round 6: weak-charge deficit term, OFF by default.
     CHECK_KNOB_NUM(cfg, "sgp_weak_scale", 0.0);
     CHECK_KNOB_NUM(cfg, "sgp_weak_qref", 2000.0);
+    // doc pr/51 round 7: robust vertex fit -- master OFF (AddSegment
+    // epilogue never runs); the ten satellites are inert while it is off.
+    CHECK_KNOB_BOOL(cfg, "mvfit_robust", false);
+    CHECK_KNOB_BOOL(cfg, "mvfit_main_only", true);
+    CHECK_KNOB_NUM(cfg, "mvfit_min_len", 10.0);
+    CHECK_KNOB_NUM(cfg, "mvfit_rin_margin", 2.0);
+    CHECK_KNOB_NUM(cfg, "mvfit_rout_frac", 0.5);
+    CHECK_KNOB_NUM(cfg, "mvfit_rout_min", 9.0);
+    CHECK_KNOB_NUM(cfg, "mvfit_rout_max", 18.0);
+    CHECK_KNOB_NUM(cfg, "mvfit_angle", 20.0);
+    CHECK_KNOB_NUM(cfg, "mvfit_min_pts", 5);
+    CHECK_KNOB_NUM(cfg, "mvfit_min_aniso", 3.0);
+    CHECK_KNOB_NUM(cfg, "mvfit_prior_range", 1.0);
     // doc pr/64 round 7: reassign, instead of drop, an association point
     // that loses (or never enters) clustering_points_segments' Stage-C ghost
     // removal to a same-cluster segment that actually wins the global 2D

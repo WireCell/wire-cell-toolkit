@@ -1378,6 +1378,23 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               // 2000 (charge units).  null omits the keys => byte-identical.
               sgp_weak_scale=null,
               sgp_weak_qref=null,
+              // doc pr/51 round 7 -- robust vertex fit (dynamic per-leg
+              // direction windows for MyFCN).  C++ defaults: robust false,
+              // main_only true, min_len 10, rin_margin 2, rout_frac 0.5,
+              // rout_min 9, rout_max 18, angle 20, min_pts 5, min_aniso 3,
+              // prior_range 1 (lengths cm, angle deg).  false/null omit the
+              // keys => byte-identical.
+              mvfit_robust=false,
+              mvfit_main_only=null,
+              mvfit_min_len=null,
+              mvfit_rin_margin=null,
+              mvfit_rout_frac=null,
+              mvfit_rout_min=null,
+              mvfit_rout_max=null,
+              mvfit_angle=null,
+              mvfit_min_pts=null,
+              mvfit_min_aniso=null,
+              mvfit_prior_range=null,
               // doc pr/54 -- keep well-supported isolated residual segments
               // in find_other_segments (18255-142421 separated EM shower with
               // no fitted trajectory).  C++ defaults: keep false, floors
@@ -2007,6 +2024,17 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
             sgp_point_radius=sgp_point_radius,
             sgp_weak_scale=sgp_weak_scale,
             sgp_weak_qref=sgp_weak_qref,
+            mvfit_robust=mvfit_robust,
+            mvfit_main_only=mvfit_main_only,
+            mvfit_min_len=mvfit_min_len,
+            mvfit_rin_margin=mvfit_rin_margin,
+            mvfit_rout_frac=mvfit_rout_frac,
+            mvfit_rout_min=mvfit_rout_min,
+            mvfit_rout_max=mvfit_rout_max,
+            mvfit_angle=mvfit_angle,
+            mvfit_min_pts=mvfit_min_pts,
+            mvfit_min_aniso=mvfit_min_aniso,
+            mvfit_prior_range=mvfit_prior_range,
             other_seg_keep_isolated=other_seg_keep_isolated,
             other_seg_keep_isolated_min_points=other_seg_keep_isolated_min_points,
             other_seg_keep_isolated_min_length=other_seg_keep_isolated_min_length,
@@ -2761,6 +2789,19 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
               // 2000 (charge units).  null omits the keys => byte-identical.
               sgp_weak_scale=null,
               sgp_weak_qref=null,
+              // doc pr/51 round 7 -- robust vertex fit.  C++ defaults as in
+              // clus_pr above.  false/null omit the keys => byte-identical.
+              mvfit_robust=false,
+              mvfit_main_only=null,
+              mvfit_min_len=null,
+              mvfit_rin_margin=null,
+              mvfit_rout_frac=null,
+              mvfit_rout_min=null,
+              mvfit_rout_max=null,
+              mvfit_angle=null,
+              mvfit_min_pts=null,
+              mvfit_min_aniso=null,
+              mvfit_prior_range=null,
               // doc pr/54 -- keep well-supported isolated residual segments
               // in find_other_segments.  C++ defaults: keep false, floors
               // 25 points / 3 cm.  false/null omit the keys => byte-identical.
@@ -3018,6 +3059,17 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 sgp_point_radius=sgp_point_radius,
                 sgp_weak_scale=sgp_weak_scale,
                 sgp_weak_qref=sgp_weak_qref,
+                mvfit_robust=mvfit_robust,
+                mvfit_main_only=mvfit_main_only,
+                mvfit_min_len=mvfit_min_len,
+                mvfit_rin_margin=mvfit_rin_margin,
+                mvfit_rout_frac=mvfit_rout_frac,
+                mvfit_rout_min=mvfit_rout_min,
+                mvfit_rout_max=mvfit_rout_max,
+                mvfit_angle=mvfit_angle,
+                mvfit_min_pts=mvfit_min_pts,
+                mvfit_min_aniso=mvfit_min_aniso,
+                mvfit_prior_range=mvfit_prior_range,
                 other_seg_keep_isolated=other_seg_keep_isolated,
                 other_seg_keep_isolated_min_points=other_seg_keep_isolated_min_points,
                 other_seg_keep_isolated_min_length=other_seg_keep_isolated_min_length,

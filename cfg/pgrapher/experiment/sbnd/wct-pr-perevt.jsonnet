@@ -1386,6 +1386,24 @@ function(
     // kills BOTH terms (pre-round-5 legacy).
     sgp_weak_scale = 5.0,
     sgp_weak_qref = 6000.0,
+    // doc pr/51 round 7 -- robust vertex fit (dynamic per-leg re-seat-free
+    // direction windows for MyFCN, disagreement-gated, relaxed prior on
+    // substituted 2-leg vertices).  C++ defaults: robust false, main_only
+    // true, min_len 10, rin_margin 2, rout_frac 0.5, rout_min 9,
+    // rout_max 18, angle 20, min_pts 5, min_aniso 3, prior_range 1
+    // (lengths cm, angle deg).  false/null omit the keys =>
+    // byte-identical pre-round-7 config.
+    mvfit_robust = false,
+    mvfit_main_only = null,
+    mvfit_min_len = null,
+    mvfit_rin_margin = null,
+    mvfit_rout_frac = null,
+    mvfit_rout_min = null,
+    mvfit_rout_max = null,
+    mvfit_angle = null,
+    mvfit_min_pts = null,
+    mvfit_min_aniso = null,
+    mvfit_prior_range = null,
     // doc pr/54 -- keep well-supported isolated residual segments in
     // find_other_segments (18255-142421 "missing gammas": a separated EM
     // shower of the main cluster is fit and then silently discarded because
@@ -1730,6 +1748,17 @@ function(
                              sgp_point_radius=sgp_point_radius,
                              sgp_weak_scale=sgp_weak_scale,
                              sgp_weak_qref=sgp_weak_qref,
+                             mvfit_robust=mvfit_robust,
+                             mvfit_main_only=mvfit_main_only,
+                             mvfit_min_len=mvfit_min_len,
+                             mvfit_rin_margin=mvfit_rin_margin,
+                             mvfit_rout_frac=mvfit_rout_frac,
+                             mvfit_rout_min=mvfit_rout_min,
+                             mvfit_rout_max=mvfit_rout_max,
+                             mvfit_angle=mvfit_angle,
+                             mvfit_min_pts=mvfit_min_pts,
+                             mvfit_min_aniso=mvfit_min_aniso,
+                             mvfit_prior_range=mvfit_prior_range,
                              other_seg_keep_isolated=other_seg_keep_isolated,
                              other_seg_keep_isolated_min_points=other_seg_keep_isolated_min_points,
                              other_seg_keep_isolated_min_length=other_seg_keep_isolated_min_length,

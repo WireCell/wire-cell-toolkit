@@ -956,6 +956,41 @@ namespace WireCell::Clus::PR {
         // C++ default 0 => no filtering, legacy byte-identical.
         double m_fit_vertex_min_seg_length{0};
 
+        // doc sbnd_xin/docs/pr/51 round 7 (follow-ups 1-5): robust vertex
+        // fit.  MyFCN::UpdateInfo rewrites each long leg's first 4 cm as a
+        // straight line to the current vertex, and the next AddSegment reads
+        // that leg's direction from the (1.5, 6] cm window -- mostly that
+        // same rewrite -- so the fit self-confirms wherever the vertex is
+        // (117-evt census: 5-8 % of main vertices carry a leg whose
+        // re-seat-free outer axis disagrees > 20 deg; worst 74 deg with a
+        // 5 cm outer impact parameter).  When on, fit_vertex hands MyFCN a
+        // RobustParams block (see MyFCN.h for the algorithm): per-leg
+        // DYNAMIC outer annulus (rin past the re-seat radius, rout scaling
+        // with leg length -- a long track earns a longer lever), folded
+        // disagreement gate, anisotropy + shower vetoes, substitution of
+        // the leg's PCA/center only, and a relaxed prior iff a substituted
+        // vertex has exactly 2 fittable legs (distorted 2-track vertices
+        // need more corrective authority; >= 3 diverse tracks are already
+        // precise and keep the 0.43 cm polish prior).  m_mvfit_main_only
+        // restricts to the main (neutrino) vertex.  Offline prototype
+        // (mvfit_proto.py, docs/pr/51_mvfit_census.tsv): 4/78 fittable main
+        // vertices fire at these defaults, unfired vertices numerically
+        // untouched; calibration case 18255-234638 (round-5 arm) lands
+        // 0.32 cm from the round-6-confirmed charge tip.
+        // C++ default false => AddSegment epilogue never runs, FitVertex
+        // prior untouched: legacy byte-identical.
+        bool m_mvfit_robust{false};
+        bool m_mvfit_main_only{true};
+        double m_mvfit_min_len{10 * units::cm};
+        double m_mvfit_rin_margin{2 * units::cm};
+        double m_mvfit_rout_frac{0.5};
+        double m_mvfit_rout_min{9 * units::cm};
+        double m_mvfit_rout_max{18 * units::cm};
+        double m_mvfit_angle{20};       // deg, folded inner-vs-outer
+        int m_mvfit_min_pts{5};
+        double m_mvfit_min_aniso{3.0};
+        double m_mvfit_prior_range{1.0 * units::cm};
+
         // doc sbnd_xin/docs/pr/40 F1 (= doc pr/7 sec 5 / pr/31 P14-F8).
         // Travels via TrackPidOptions::track_pid_persist_dqdx -- see its
         // comment in PRSegmentFunctions.h.  C++ default false = legacy =

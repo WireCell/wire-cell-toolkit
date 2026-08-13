@@ -9,6 +9,7 @@
 #include "WireCellIface/IRecombinationModel.h"
 #include "WireCellClus/ParticleDataSet.h"
 
+#include <array>
 #include <functional>
 
 namespace WireCell::Clus::PR {
@@ -175,6 +176,41 @@ namespace WireCell::Clus::PR {
     /// hard threshold.  Pure function; doctested without a cluster.
     /// Implemented in NeutrinoSteinerGapGraph.cxx.
     double weak_charge_deficit(double qa, double qb, double qref);
+
+    /// doc sbnd_xin/docs/pr/51 round 7 (robust vertex fit): annulus PCA of a
+    /// point path around a vertex, replicating MyFCN::AddSegment's math on an
+    /// arbitrary (rin, rout] shell: kept points are those with
+    /// rin <= |p - vtx| <= rout, center = kept point closest to vtx,
+    /// covariance about center divided by the kept count, eigenvalues
+    /// descending with the (0.15 cm)^2 floor added, axes normalized.
+    /// npts < 2 marks an unusable window (axes/vals zero).
+    struct MvfitAnnulusPca {
+        int npts{0};
+        WireCell::Point center{0, 0, 0};
+        std::array<WireCell::Point, 3> axes{WireCell::Point(0, 0, 0),
+                                            WireCell::Point(0, 0, 0),
+                                            WireCell::Point(0, 0, 0)};
+        std::array<double, 3> vals{0, 0, 0};
+    };
+    MvfitAnnulusPca mvfit_annulus_pca(const std::vector<WireCell::Point>& pts,
+                                      const WireCell::Point& vtx,
+                                      double rin, double rout);
+
+    /// doc sbnd_xin/docs/pr/51 round 7: dynamic outer direction-window radius
+    /// for a leg of the given endpoint chord -- clamp(frac*chord, rmin, rmax).
+    /// A longer track earns a longer direction lever arm.
+    double mvfit_rout_dyn(double chord, double frac, double rmin, double rmax);
+
+    /// doc sbnd_xin/docs/pr/51 round 7: per-leg disagreement gate.  True iff
+    /// the folded angle (acos|dot|, eigenvector signs are arbitrary) between
+    /// the production inner axis and the outer window's leading axis exceeds
+    /// angle_deg, the outer window holds >= min_pts points, and its
+    /// anisotropy sqrt(vals[0]/vals[1]) >= min_aniso (a fanning shower's
+    /// outer window fails this intrinsically).  Pure function; doctested
+    /// without a cluster.  Implemented in MyFCN.cxx.
+    bool mvfit_leg_disagrees(const WireCell::Point& inner_axis,
+                             const MvfitAnnulusPca& outer,
+                             double angle_deg, int min_pts, double min_aniso);
 
     /// doc sbnd_xin/docs/pr/51: total associated charge of a segment --
     /// the sum of fit.dQ over valid fit points (fit.valid() && fit.dx > 0

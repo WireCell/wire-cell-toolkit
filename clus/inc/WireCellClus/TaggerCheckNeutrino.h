@@ -63,6 +63,21 @@ public:
         // stubs from dragging the vertex: >=3 surviving legs => fit on the
         // survivors; <=2 => skip the fit (two-leg position already fit).
         double m_fit_vertex_min_seg_length{0};
+        // Robust vertex fit (doc sbnd_xin/docs/pr/51 round 7; design at
+        // NeutrinoPatternBase.h m_mvfit_robust and MyFCN.h RobustParams).
+        // Lengths in cm here (cm -> internal at the push block); angle deg,
+        // frac/aniso/pts unitless.  Default false = legacy byte-identical.
+        bool   m_mvfit_robust{false};
+        bool   m_mvfit_main_only{true};
+        double m_mvfit_min_len{10.0};      // cm
+        double m_mvfit_rin_margin{2.0};    // cm
+        double m_mvfit_rout_frac{0.5};
+        double m_mvfit_rout_min{9.0};      // cm
+        double m_mvfit_rout_max{18.0};     // cm
+        double m_mvfit_angle{20.0};        // deg
+        int    m_mvfit_min_pts{5};
+        double m_mvfit_min_aniso{3.0};
+        double m_mvfit_prior_range{1.0};   // cm
         // Cathode kink veto (doc sbnd_xin/docs/pr/20 Part II B0), both in cm.
         // cathode_kink_xcut = 0 => segment_search_kink sees every fit point =>
         // byte-identical to the pre-pr/20 behavior.  cathode_x is the cathode

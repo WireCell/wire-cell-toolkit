@@ -88,11 +88,60 @@ namespace WireCell::Clus::PR {
         
         /// Set enforce two track fit flag
         void set_enforce_two_track_fit(bool val) { enforce_two_track_fit = val; }
-        
+
         /// Get enforce two track fit flag
         bool get_enforce_two_track_fit() { return enforce_two_track_fit; }
-        
+
+        /// doc sbnd_xin/docs/pr/51 round 7 (robust vertex fit): parameters of
+        /// the per-leg dynamic direction-window substitution.  With on=false
+        /// (the default) AddSegment's epilogue never runs and every code path
+        /// is byte-identical to the legacy fit.  When on, a non-shower leg
+        /// whose fits-chord is >= min_len gets a second, re-seat-free
+        /// direction estimate over the annulus (rin, rout] with
+        ///   rin  = max(vertex_protect_dis, reseat + rin_margin)
+        ///          (reseat mirrors UpdateInfo: default_dis_cut iff the leg's
+        ///           far wcpt end is > 2*default_dis_cut from the vertex)
+        ///   rout = clamp(rout_frac * chord, rout_min, rout_max)
+        /// and its PCA/center are SUBSTITUTED (vec_PCA_dirs / vec_PCA_vals /
+        /// vec_centers only -- vec_points, hence ntracks and the npoints
+        /// prior weight, stay production) iff the folded inner-vs-outer axis
+        /// angle exceeds angle_deg, the outer window holds >= min_pts points
+        /// and its anisotropy sqrt(l0/l1) >= min_aniso.  Substituted axes are
+        /// hemisphere-oriented toward their production counterparts (the
+        /// FitVertex pair-angle census is sign-sensitive).  prior_range
+        /// replaces vtx_constraint_range in FitVertex iff >= 1 leg was
+        /// substituted AND exactly 2 legs are fittable (a distorted 2-track
+        /// vertex needs more corrective authority; >= 3-track vertices are
+        /// already well braced).  All lengths internal units, angle deg.
+        struct RobustParams {
+            bool on{false};
+            double min_len{10 * units::cm};
+            double rin_margin{2 * units::cm};
+            double rout_frac{0.5};
+            double rout_min{9 * units::cm};
+            double rout_max{18 * units::cm};
+            double angle{20};
+            int min_pts{5};
+            double min_aniso{3.0};
+            double prior_range{1.0 * units::cm};
+        };
+
+        /// Enable the robust per-leg substitution (call BEFORE AddSegment).
+        void set_robust(const RobustParams& p) { m_robust = p; }
+
+        /// Number of legs whose direction estimate was substituted.
+        int robust_substituted() const { return m_n_substituted; }
+
+        /// Undo every substitution (production PCA/centers restored).  Called
+        /// by the fit_vertex charge-veto path so a rejected robust fit
+        /// re-seats exactly as the production fit would have.
+        void restore_production_pca();
+
     private:
+        /// AddSegment epilogue: compute the outer-window estimate for the leg
+        /// just pushed and substitute if the disagreement gate fires.
+        void robust_maybe_substitute_leg(SegmentPtr sg);
+
         VertexPtr vtx;
         bool enforce_two_track_fit;
         bool flag_vtx_constraint;
@@ -113,6 +162,17 @@ namespace WireCell::Clus::PR {
         
         // Centers for each segment
         std::vector<Facade::geo_point_t> vec_centers;
+
+        // doc sbnd_xin/docs/pr/51 round 7: robust-substitution state.  Backups
+        // are index-aligned tuples (leg index, dirs, vals, center) so
+        // restore_production_pca() is exact; std::vector only (determinism:
+        // no pointer-keyed containers).
+        RobustParams m_robust;
+        int m_n_substituted{0};
+        std::vector<std::tuple<size_t,
+                               std::tuple<Facade::geo_point_t, Facade::geo_point_t, Facade::geo_point_t>,
+                               std::tuple<double, double, double>,
+                               Facade::geo_point_t>> m_robust_backup;
     };
 
 } // namespace WireCell::Clus::PR

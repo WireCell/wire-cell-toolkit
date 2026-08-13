@@ -76,6 +76,18 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_proton_dir_asym_min  = get(config, "proton_dir_asym_min",  m_proton_dir_asym_min);
     m_endpoint_trim_retry  = get(config, "endpoint_trim_retry",  m_endpoint_trim_retry);
     m_fit_vertex_min_seg_length = get(config, "fit_vertex_min_seg_length", m_fit_vertex_min_seg_length);  // cm
+    // doc sbnd_xin/docs/pr/51 round 7: robust vertex fit
+    m_mvfit_robust      = get(config, "mvfit_robust",      m_mvfit_robust);
+    m_mvfit_main_only   = get(config, "mvfit_main_only",   m_mvfit_main_only);
+    m_mvfit_min_len     = get(config, "mvfit_min_len",     m_mvfit_min_len);      // cm
+    m_mvfit_rin_margin  = get(config, "mvfit_rin_margin",  m_mvfit_rin_margin);   // cm
+    m_mvfit_rout_frac   = get(config, "mvfit_rout_frac",   m_mvfit_rout_frac);
+    m_mvfit_rout_min    = get(config, "mvfit_rout_min",    m_mvfit_rout_min);     // cm
+    m_mvfit_rout_max    = get(config, "mvfit_rout_max",    m_mvfit_rout_max);     // cm
+    m_mvfit_angle       = get(config, "mvfit_angle",       m_mvfit_angle);        // deg
+    m_mvfit_min_pts     = get(config, "mvfit_min_pts",     m_mvfit_min_pts);
+    m_mvfit_min_aniso   = get(config, "mvfit_min_aniso",   m_mvfit_min_aniso);
+    m_mvfit_prior_range = get(config, "mvfit_prior_range", m_mvfit_prior_range);  // cm
     m_cathode_x          = get(config, "cathode_x",          m_cathode_x);           // cm
     m_cathode_kink_xcut  = get(config, "cathode_kink_xcut",  m_cathode_kink_xcut);   // cm
     m_cathode_wide_kink_angle    = get(config, "cathode_wide_kink_angle",    m_cathode_wide_kink_angle);    // deg
@@ -406,6 +418,19 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["proton_dir_asym_min"]  = m_proton_dir_asym_min;
     cfg["endpoint_trim_retry"]  = m_endpoint_trim_retry;  // false = legacy (no endpoint-trim retry on abstention)
     cfg["fit_vertex_min_seg_length"] = m_fit_vertex_min_seg_length;  // cm; 0 = legacy (all segments enter the vertex fit)
+    // doc sbnd_xin/docs/pr/51 round 7: robust vertex fit; false = legacy
+    // (AddSegment epilogue never runs, byte-identical)
+    cfg["mvfit_robust"]      = m_mvfit_robust;
+    cfg["mvfit_main_only"]   = m_mvfit_main_only;    // true = main (neutrino) vertex only
+    cfg["mvfit_min_len"]     = m_mvfit_min_len;      // cm, fits-chord gate
+    cfg["mvfit_rin_margin"]  = m_mvfit_rin_margin;   // cm past the re-seat radius
+    cfg["mvfit_rout_frac"]   = m_mvfit_rout_frac;    // rout = clamp(frac*chord, min, max)
+    cfg["mvfit_rout_min"]    = m_mvfit_rout_min;     // cm
+    cfg["mvfit_rout_max"]    = m_mvfit_rout_max;     // cm
+    cfg["mvfit_angle"]       = m_mvfit_angle;        // deg, folded inner-vs-outer disagreement
+    cfg["mvfit_min_pts"]     = m_mvfit_min_pts;      // outer-window point floor
+    cfg["mvfit_min_aniso"]   = m_mvfit_min_aniso;    // sqrt(l0/l1) floor (shower guard)
+    cfg["mvfit_prior_range"] = m_mvfit_prior_range;  // cm, 2-leg substituted prior
     cfg["cathode_x"]         = m_cathode_x;          // cm, T0-corrected frame
     cfg["cathode_kink_xcut"] = m_cathode_kink_xcut;  // cm; 0 = legacy (the kink search sees every fit point)
     cfg["cathode_wide_kink_angle"]    = m_cathode_wide_kink_angle;    // deg; 0 = legacy (no wide-baseline cathode accept)
@@ -846,6 +871,18 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
     pattern_algos.m_proton_dir_asym_min  = m_proton_dir_asym_min;
     pattern_algos.m_endpoint_trim_retry  = m_endpoint_trim_retry;
     pattern_algos.m_fit_vertex_min_seg_length = m_fit_vertex_min_seg_length * units::cm;  // cm -> internal
+    // doc sbnd_xin/docs/pr/51 round 7: robust vertex fit
+    pattern_algos.m_mvfit_robust      = m_mvfit_robust;
+    pattern_algos.m_mvfit_main_only   = m_mvfit_main_only;
+    pattern_algos.m_mvfit_min_len     = m_mvfit_min_len * units::cm;      // cm -> internal
+    pattern_algos.m_mvfit_rin_margin  = m_mvfit_rin_margin * units::cm;   // cm -> internal
+    pattern_algos.m_mvfit_rout_frac   = m_mvfit_rout_frac;                // unitless
+    pattern_algos.m_mvfit_rout_min    = m_mvfit_rout_min * units::cm;     // cm -> internal
+    pattern_algos.m_mvfit_rout_max    = m_mvfit_rout_max * units::cm;     // cm -> internal
+    pattern_algos.m_mvfit_angle       = m_mvfit_angle;                    // deg, no conversion
+    pattern_algos.m_mvfit_min_pts     = m_mvfit_min_pts;                  // count
+    pattern_algos.m_mvfit_min_aniso   = m_mvfit_min_aniso;                // unitless
+    pattern_algos.m_mvfit_prior_range = m_mvfit_prior_range * units::cm;  // cm -> internal
     pattern_algos.m_cathode_x         = m_cathode_x * units::cm;          // cm -> internal
     pattern_algos.m_cathode_kink_xcut = m_cathode_kink_xcut * units::cm;  // cm -> internal
     pattern_algos.m_cathode_wide_kink_angle    = m_cathode_wide_kink_angle;                // deg, no conversion

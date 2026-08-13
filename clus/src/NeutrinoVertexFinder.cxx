@@ -2185,10 +2185,30 @@ bool PatternAlgorithms::fit_vertex(Facade::Cluster& cluster, VertexPtr vertex, V
             fit_segments = long_segments;
         }
     }
+    // doc sbnd_xin/docs/pr/51 round 7: robust per-leg direction windows
+    // (design at MyFCN.h RobustParams; knob block at NeutrinoPatternBase.h
+    // m_mvfit_robust).  Gate on vertex == main_vertex directly --
+    // enforce_two_track_fit is only set AFTER the AddSegment loop below, so
+    // it cannot be consulted for this.
+    const bool robust_here = m_mvfit_robust && (!m_mvfit_main_only || vertex == main_vertex);
+    if (robust_here) {
+        MyFCN::RobustParams rp;
+        rp.on = true;
+        rp.min_len = m_mvfit_min_len;
+        rp.rin_margin = m_mvfit_rin_margin;
+        rp.rout_frac = m_mvfit_rout_frac;
+        rp.rout_min = m_mvfit_rout_min;
+        rp.rout_max = m_mvfit_rout_max;
+        rp.angle = m_mvfit_angle;
+        rp.min_pts = m_mvfit_min_pts;
+        rp.min_aniso = m_mvfit_min_aniso;
+        rp.prior_range = m_mvfit_prior_range;
+        fcn.set_robust(rp);
+    }
     for (auto it = fit_segments.begin(); it != fit_segments.end(); it++) {
         fcn.AddSegment(*it);
     }
-    
+
     // If this is the main vertex, enforce two track fit
     if (vertex == main_vertex) fcn.set_enforce_two_track_fit(true);
     
@@ -2248,7 +2268,21 @@ bool PatternAlgorithms::fit_vertex(Facade::Cluster& cluster, VertexPtr vertex, V
         results.second = old_pos;
         new_charge = old_charge;
     }
-    
+
+    // doc sbnd_xin/docs/pr/51 round 7: a charge-vetoed robust fit must
+    // re-seat exactly as production would -- otherwise UpdateInfo below would
+    // straighten the path out to the substituted outer centers (~6 cm) around
+    // an unmoved vertex, a larger graph rewrite than production's for a fit
+    // that was rejected.  Exact FP equality detects the veto: both veto
+    // branches assign old_pos by copy (an unvetoed fit landing exactly on
+    // old_pos restores too, which then IS production behavior).
+    if (fcn.robust_substituted() > 0 &&
+        results.second.x() == old_pos.x() &&
+        results.second.y() == old_pos.y() &&
+        results.second.z() == old_pos.z()) {
+        fcn.restore_production_pca();
+    }
+
     // Update vertex and segment information with fitted position.  The && is
     // the former `if (results.first)` guard; UpdateInfo's return propagates so
     // that a guard-aborted no-op is not reported as a fit (docs/pr/28 sec 3.3).

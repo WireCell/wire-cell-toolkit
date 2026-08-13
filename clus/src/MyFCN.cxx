@@ -1,4 +1,5 @@
 #include "WireCellClus/MyFCN.h"
+#include "WireCellClus/PRSegmentFunctions.h"
 #include "WireCellUtil/Units.h"
 #include "WireCellUtil/Logging.h"
 
@@ -10,6 +11,90 @@ static auto s_log = WireCell::Log::logger("clus.NeutrinoPattern");
 
 using namespace WireCell;
 using namespace WireCell::Clus::PR;
+
+// doc sbnd_xin/docs/pr/51 round 7 (robust vertex fit): pure geometry helpers
+// for the per-leg dynamic direction-window substitution.  Declared in
+// PRSegmentFunctions.h so they are doctestable without a cluster; implemented
+// here next to the production math they replicate.
+namespace WireCell::Clus::PR {
+
+MvfitAnnulusPca mvfit_annulus_pca(const std::vector<WireCell::Point>& pts,
+                                  const WireCell::Point& vtx,
+                                  double rin, double rout)
+{
+    MvfitAnnulusPca out;
+    double min_dis = 1e9;
+    std::vector<size_t> kept;   // index order -- deterministic
+    for (size_t i = 0; i != pts.size(); i++) {
+        const double d = (pts[i] - vtx).magnitude();
+        if (d < rin || d > rout) continue;
+        kept.push_back(i);
+        if (d < min_dis) {
+            out.center = pts[i];
+            min_dis = d;
+        }
+    }
+    out.npts = (int)kept.size();
+    if (kept.size() < 2) return out;
+
+    // covariance about the near-vertex kept point, exactly as
+    // MyFCN::AddSegment (NOT the window mean -- see docs/pr/28 sec. 3.1).
+    Eigen::Matrix3d cov = Eigen::Matrix3d::Zero();
+    for (size_t k : kept) {
+        const double dx = pts[k].x() - out.center.x();
+        const double dy = pts[k].y() - out.center.y();
+        const double dz = pts[k].z() - out.center.z();
+        cov(0, 0) += dx * dx;
+        cov(0, 1) += dx * dy;
+        cov(0, 2) += dx * dz;
+        cov(1, 1) += dy * dy;
+        cov(1, 2) += dy * dz;
+        cov(2, 2) += dz * dz;
+    }
+    cov(1, 0) = cov(0, 1);
+    cov(2, 0) = cov(0, 2);
+    cov(2, 1) = cov(1, 2);
+    cov /= (double)kept.size();
+
+    Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> es(cov);
+    const Eigen::Vector3d ev = es.eigenvalues();     // ascending
+    const Eigen::Matrix3d evec = es.eigenvectors();
+    for (int i = 0; i != 3; i++) {
+        const int col = 2 - i;                       // descending
+        out.vals[i] = ev(col) + std::pow(0.15 * units::cm, 2);
+        const double norm = std::sqrt(evec(0, col) * evec(0, col) +
+                                      evec(1, col) * evec(1, col) +
+                                      evec(2, col) * evec(2, col));
+        out.axes[i] = WireCell::Point(evec(0, col) / norm,
+                                      evec(1, col) / norm,
+                                      evec(2, col) / norm);
+    }
+    return out;
+}
+
+double mvfit_rout_dyn(double chord, double frac, double rmin, double rmax)
+{
+    return std::min(std::max(frac * chord, rmin), rmax);
+}
+
+bool mvfit_leg_disagrees(const WireCell::Point& inner_axis,
+                         const MvfitAnnulusPca& outer,
+                         double angle_deg, int min_pts, double min_aniso)
+{
+    if (outer.npts < min_pts) return false;
+    if (outer.vals[1] <= 0) return false;
+    if (std::sqrt(outer.vals[0] / outer.vals[1]) < min_aniso) return false;
+    const double mi = inner_axis.magnitude();
+    const double mo = outer.axes[0].magnitude();
+    if (mi <= 0 || mo <= 0) return false;
+    // folded angle: eigenvector signs are arbitrary
+    double c = std::abs(inner_axis.dot(outer.axes[0])) / (mi * mo);
+    if (c > 1.0) c = 1.0;
+    const double angle = std::acos(c) * 180.0 / M_PI;
+    return angle > angle_deg;
+}
+
+}  // namespace WireCell::Clus::PR
 
 MyFCN::MyFCN(VertexPtr vtx, bool flag_vtx_constraint, double vtx_constraint_range, 
              double vertex_protect_dis, double vertex_protect_dis_short_track, double fit_dis)
@@ -168,6 +253,125 @@ void MyFCN::AddSegment(SegmentPtr sg)
             vec_centers.push_back(a);
         }
     }
+
+    // doc sbnd_xin/docs/pr/51 round 7: robust per-leg direction substitution.
+    // Epilogue only -- every statement above is untouched production code, and
+    // with the knob off (m_robust.on == false, the C++ default) it never runs.
+    if (!m_robust.on) return;
+    robust_maybe_substitute_leg(sg);
+}
+
+// doc sbnd_xin/docs/pr/51 round 7 (follow-ups 1-5 of the same doc): the
+// production (1.5, 6] cm window reads back, for a long leg, mostly the
+// straight 4 cm stretch the previous UpdateInfo wrote toward the current
+// vertex -- the fit self-confirms wherever the vertex is.  This epilogue
+// re-estimates the leg's direction over a re-seat-free dynamic annulus and
+// substitutes it when it disagrees with the fit-visible one.  Design and
+// gate rationale at MyFCN.h RobustParams.
+void MyFCN::robust_maybe_substitute_leg(SegmentPtr sg)
+{
+    // only legs the production fit counts (valid inner PCA)
+    if (vec_points.back().size() <= 1) return;
+
+    // shower veto: the same three-clause recipe improve_vertex uses for its
+    // ntracks census (NeutrinoVertexFinder.cxx flag_skip_two_legs block).  An
+    // EM trunk's direction is not improved by a longer lever (it fans out);
+    // the anisotropy gate below is the intrinsic guard when flags are unset.
+    if (sg->flags_any(SegmentFlags::kShowerTrajectory) ||
+        sg->flags_any(SegmentFlags::kShowerTopology) ||
+        (sg->particle_info() && std::abs(sg->particle_info()->pdg()) == 11)) {
+        return;
+    }
+
+    const auto& fits = sg->fits();
+    if (fits.size() < 2) return;
+    std::vector<Facade::geo_point_t> pts;
+    pts.reserve(fits.size());
+    for (const auto& f : fits) {
+        pts.push_back(f.point);
+    }
+    const double chord = (pts.front() - pts.back()).magnitude();
+    if (chord < m_robust.min_len) return;
+
+    const Facade::geo_point_t vtx_pt = vtx->fit().point;
+
+    // re-seat radius mirror of UpdateInfo (wcpt space, default_dis_cut =
+    // 4 cm as at both UpdateInfo call sites): only a leg whose far wcpt end
+    // is > 8 cm from the vertex carries a 4 cm straight re-seat to clear.
+    double reseat = 0;
+    const auto& seg_wcpts = sg->wcpts();
+    if (!seg_wcpts.empty()) {
+        const double default_dis_cut = 4.0 * units::cm;
+        const double dis_front = (seg_wcpts.front().point - vtx_pt).magnitude();
+        const double dis_back = (seg_wcpts.back().point - vtx_pt).magnitude();
+        if (std::max(dis_front, dis_back) > 2 * default_dis_cut) {
+            reseat = default_dis_cut;
+        }
+    }
+    const double rin = std::max(vertex_protect_dis, reseat + m_robust.rin_margin);
+    const double rout = mvfit_rout_dyn(chord, m_robust.rout_frac,
+                                       m_robust.rout_min, m_robust.rout_max);
+
+    const auto outer = mvfit_annulus_pca(pts, vtx_pt, rin, rout);
+    const auto& inner_axis = std::get<0>(vec_PCA_dirs.back());
+    if (!mvfit_leg_disagrees(inner_axis, outer, m_robust.angle,
+                             m_robust.min_pts, m_robust.min_aniso)) {
+        return;
+    }
+
+    // folded angle recomputed for the sentinel only
+    double cang = std::abs(inner_axis.dot(outer.axes[0]));
+    if (cang > 1.0) cang = 1.0;
+    const double angle = std::acos(cang) * 180.0 / M_PI;
+
+    // save the production tuple (exact restore for the charge-veto path),
+    // then substitute PCA dirs/vals + center.  vec_points stays production:
+    // ntracks, the fit gate's ntracks side and the npoints prior weight are
+    // unchanged by construction.
+    const size_t idx = vec_PCA_dirs.size() - 1;
+    m_robust_backup.emplace_back(idx, vec_PCA_dirs.back(), vec_PCA_vals.back(),
+                                 vec_centers.back());
+
+    std::array<Facade::geo_point_t, 3> ax = outer.axes;
+    const Facade::geo_point_t prod_ax[3] = {std::get<0>(vec_PCA_dirs.back()),
+                                            std::get<1>(vec_PCA_dirs.back()),
+                                            std::get<2>(vec_PCA_dirs.back())};
+    for (int k = 0; k != 3; k++) {
+        // hemisphere-orient toward the production counterpart: the FitVertex
+        // pair-angle census is sign-sensitive, the 3x3 data term is not
+        if (ax[k].dot(prod_ax[k]) < 0) {
+            ax[k] = ax[k] * (-1.0);
+        }
+    }
+    vec_PCA_dirs.back() = std::make_tuple(ax[0], ax[1], ax[2]);
+    vec_PCA_vals.back() = std::make_tuple(outer.vals[0], outer.vals[1], outer.vals[2]);
+    vec_centers.back() = outer.center;
+    m_n_substituted++;
+
+    SPDLOG_LOGGER_DEBUG(s_log,
+        "mvfit: cluster {} leg {} substituted: chord={:.1f} cm window=({:.1f},{:.1f}] "
+        "npts={} aniso={:.1f} angle={:.1f} deg",
+        vtx->cluster() ? std::to_string(vtx->cluster()->get_cluster_id()) : std::string("unknown"),
+        idx, chord / units::cm, rin / units::cm, rout / units::cm,
+        outer.npts, std::sqrt(outer.vals[0] / outer.vals[1]), angle);
+}
+
+void MyFCN::restore_production_pca()
+{
+    if (!m_robust_backup.empty()) {
+        SPDLOG_LOGGER_DEBUG(s_log,
+            "mvfit: cluster {} charge-veto restore: {} leg(s) reverted to production PCA",
+            vtx->cluster() ? std::to_string(vtx->cluster()->get_cluster_id()) : std::string("unknown"),
+            m_robust_backup.size());
+    }
+    for (const auto& bk : m_robust_backup) {
+        const size_t idx = std::get<0>(bk);
+        vec_PCA_dirs.at(idx) = std::get<1>(bk);
+        vec_PCA_vals.at(idx) = std::get<2>(bk);
+        vec_centers.at(idx) = std::get<3>(bk);
+    }
+    m_robust_backup.clear();
+    m_n_substituted = 0;
 }
 
 void MyFCN::update_fit_range(double tmp_vertex_protect_dis, double tmp_vertex_protect_dis_short_track, double tmp_fit_dis)
@@ -239,6 +443,21 @@ std::pair<bool, WireCell::Clus::Facade::geo_point_t> MyFCN::FitVertex()
     }
 
     if ((ntracks > 2 && n_large_angles > 1) || (ntracks >= 2 && enforce_two_track_fit && n_large_angles >= 1)) {
+
+        // doc sbnd_xin/docs/pr/51 round 7: a distorted 2-leg vertex needs
+        // more corrective authority than the 0.43 cm polish prior allows --
+        // relax it iff a leg was actually substituted.  >= 3-leg vertices
+        // keep the production prior (already well braced).  Mutating the
+        // member leaves the constraint block below verbatim; MyFCN is
+        // per-call disposable so the mutation has no afterlife.
+        if (m_robust.on && m_n_substituted > 0 && ntracks == 2) {
+            SPDLOG_LOGGER_DEBUG(s_log,
+                "mvfit: cluster {} 2-leg vertex with {} substituted leg(s): prior {:.2f} -> {:.2f} cm",
+                vtx->cluster() ? std::to_string(vtx->cluster()->get_cluster_id()) : std::string("unknown"),
+                m_n_substituted, vtx_constraint_range / units::cm,
+                m_robust.prior_range / units::cm);
+            vtx_constraint_range = m_robust.prior_range;
+        }
 
         // start the fit ...
         Eigen::VectorXd temp_pos_3D_init(3), temp_pos_3D(3); // to be fitted
