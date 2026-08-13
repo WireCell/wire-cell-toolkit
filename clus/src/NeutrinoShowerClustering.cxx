@@ -148,6 +148,17 @@ void PatternAlgorithms::stem_backfill(Graph& graph, VertexPtr main_vertex,
             auto [stem, prev] = came_from.at(cur);
             if (!stem || map_segment_in_shower.count(stem)) break;
             if (segments_in_long_muon.count(stem)) break;
+            // doc pr/74 round 4: a stem the Michel-stem guard just separated
+            // OUT of this very shower must not be absorbed straight back in.
+            // Gated on that knob, so this is byte-identical whenever round 4
+            // is off, whatever stem_backfill is doing.
+            if (m_shower_traj_michel_stem &&
+                stem->flags_any(SegmentFlags::kMuonStemGuard)) {
+                SPDLOG_LOGGER_DEBUG(s_log,
+                    "pr74r4 stem_backfill: shower(start gidx={}) chain gidx={} blocked: michel-stem guard muon",
+                    start_seg->get_graph_index(), stem->get_graph_index());
+                break;
+            }
             // Junction guard: a PF orphan anchors via vtx_incoming_seg at a
             // vertex of its anchor segment; absorbing `stem` removes that
             // anchor and the orphan vanishes from the tree, audit-only

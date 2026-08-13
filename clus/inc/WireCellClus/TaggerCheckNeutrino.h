@@ -557,6 +557,12 @@ public:
         double m_stem_backfill_min_shower_len{40};                  // cm; pr/74 K4 tunable
         bool m_shower_conn3_unreachable{false};                     // doc pr/74 round 2 K5 (pr/65 rung 2)
         double m_conn3_unreachable_min_len{10};                     // cm; pr/74 K5 tunable
+        bool m_shower_traj_michel_stem{false};                      // doc pr/74 round 4 K6 (18255-506746 muon+Michel)
+        double m_michel_stem_traj_min_len{15};                      // cm; pr/74 K6 tunable
+        double m_michel_stem_traj_max_len{45};                      // cm; pr/74 K6 tunable
+        double m_michel_stem_traj_mip_lo{1.3};                      // x MIP median; pr/74 K6 tunable
+        double m_michel_stem_traj_max_far_len{40};                  // cm; pr/74 K6 tunable (own ceiling, not P2's)
+        double m_michel_stem_traj_min_kink_deg{40.0};               // deg; pr/74 K6 tunable
         bool m_shower_long_muon_keep_type{false};                   // doc pr/44
         bool m_single_muon_proton_chain_veto{false};                // doc pr/43 round 2 K1
         bool m_single_muon_long_muon_claim{false};                  // doc pr/43 round 2 K2

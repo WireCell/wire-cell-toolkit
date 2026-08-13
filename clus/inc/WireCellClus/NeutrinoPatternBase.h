@@ -1386,6 +1386,49 @@ namespace WireCell::Clus::PR {
         bool   m_shower_conn3_unreachable{false};
         double m_conn3_unreachable_min_len{10*units::cm};
 
+        // doc sbnd_xin/docs/pr/74 round 4 K6 (SBND 18255 evt 506746 seg
+        // 21048).  A stopping muon that emits a Michel electron at the
+        // neutrino vertex is reconstructed as ONE EM shower: track/shower
+        // SEPARATION flags the muon kShowerTrajectory on its wiggliness
+        // (segment_is_shower_trajectory), then
+        // segment_determine_shower_direction_trajectory forces pdg 11 with
+        // the sentinel score 100, and shower clustering absorbs the muon,
+        // the Michel and its blob into a single "107 MeV electron" starting
+        // at the neutrino vertex -- an electron where the charge says muon.
+        //
+        // The ordinary track PID cannot arbitrate: separate_track_shower
+        // never runs it on a shower-flagged segment
+        // (NeutrinoTrackShowerSep.cxx:298-317), and when it IS run (measured,
+        // doc pr/74 round 4 Phase A) it ABSTAINS on 21048 -- pdg_code 0, no
+        // store.  The discriminating evidence is topological, not template:
+        // a Michel is emitted at a RANDOM angle off the stopping point and is
+        // TERMINAL, whereas an electron trunk continues near-forward into its
+        // own cascade.
+        //
+        // When on, a pass at the tail of the FINAL examine_direction (the
+        // TaggerCheckNeutrino.cxx:1418 call, flag_final -- once, on the
+        // neutrino main cluster, immediately before shower clustering)
+        // demotes a main-vertex kShowerTrajectory segment to a stopping muon
+        // when ALL of: length in [min_len, max_len]; median dQ/dx >=
+        // mip_lo x MIP median (a stopping muon's last ~20 cm averages ~1.6x,
+        // a single-electron trunk sits at ~1x); its far vertex has degree
+        // exactly 2 (one stop, one Michel -- a real cascade branches); the
+        // track length beyond that vertex is below max_far_len (terminal);
+        // the one sibling there is shower-like; and the kink between them is
+        // at least min_kink_deg.  The muon keeps kMuonStemGuard so
+        // stem_backfill cannot absorb it straight back.  C++ default false =
+        // legacy = byte-identical.
+        bool   m_shower_traj_michel_stem{false};
+        double m_michel_stem_traj_min_len{15*units::cm};
+        double m_michel_stem_traj_max_len{45*units::cm};
+        double m_michel_stem_traj_mip_lo{1.3};
+        // Deliberately NOT m_michel_stem_max_far_len (P2 above): that member
+        // is a VETO ceiling for the F14 rescue and this one is an ACCEPT
+        // ceiling here.  Same number today, opposite roles -- sharing it
+        // would move one pass silently when the owner tunes the other.
+        double m_michel_stem_traj_max_far_len{40*units::cm};
+        double m_michel_stem_traj_min_kink_deg{40.0};
+
         // doc sbnd_xin/docs/pr/44 -- a MULTI-segment long-muon pseudo-shower
         // seeded by shower_clustering_with_nv_in_main_cluster (cached
         // particle_type recorded 13 at the seed) must not have its start
@@ -1885,6 +1928,15 @@ namespace WireCell::Clus::PR {
         // shower_clustering_with_nv), same per-cluster main_vertex.  No-op
         // (returns immediately) when m_michel_stem_muon_rescue is false.
         void override_michel_stem_muon(Graph& graph, Facade::Cluster& cluster, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, VertexPtr main_vertex = nullptr);
+
+        // doc sbnd_xin/docs/pr/74 round 4 K6 -- see m_shower_traj_michel_stem's
+        // docstring above.  A SEPARATE pass, not a branch inside
+        // override_michel_stem_muon: F14 is SBND production ON and its body
+        // stays byte-for-byte untouched (fork by duplication).  Called only
+        // from the flag_final examine_direction, i.e. once, on the neutrino
+        // main cluster, immediately before shower_clustering_with_nv.  No-op
+        // (returns immediately) when m_shower_traj_michel_stem is false.
+        void override_shower_traj_michel_stem(Graph& graph, Facade::Cluster& cluster, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, VertexPtr main_vertex);
 
         // doc sbnd_xin/docs/pr/43 round 2 K3 -- late particle-info/flag
         // reconciliation pass; see m_pid_flag_reconcile above.  Gated

@@ -400,6 +400,20 @@ namespace WireCell::Clus::PR {
     double segment_far_subtree_track_length(Graph& graph, VertexPtr start_vtx,
                                             SegmentPtr stem, double cap);
 
+    /// doc sbnd_xin/docs/pr/74 round 4 -- the opening angle, in DEGREES,
+    /// between two segments that meet at `shared_pt`, measured over the
+    /// leading `dis_cut` of each with segment_cal_dir_3vector (the same 15 cm
+    /// tangent idiom the daughter-shower angle tests use,
+    /// NeutrinoVertexFinder.cxx:1449/1457).
+    ///
+    /// Both tangents point AWAY from the shared point, so a straight
+    /// continuation gives ~180 deg between them; this function returns the
+    /// KINK, `180 - angle`, so straight = 0 and a hard turn-back = 180.
+    /// Returns -1 when either tangent is undefined (no fits, degenerate
+    /// geometry) -- "unmeasurable", which callers must not read as "straight".
+    double segment_pair_kink_deg(SegmentPtr a, SegmentPtr b,
+                                 const WireCell::Point& shared_pt, double dis_cut);
+
     /// doc sbnd_xin/docs/pr/74 round 2 -- env-gated (WCT_SHOWER_TOPO_DEBUG)
     /// transition record for kShowerTopology.  Round 1 could not attribute
     /// 90055's "second demotion" because the flag can be cleared on paths

@@ -430,6 +430,113 @@ void PatternAlgorithms::override_michel_stem_muon(Graph& graph, Facade::Cluster&
     }
 }
 
+// doc sbnd_xin/docs/pr/74 round 4 K6 -- docstring at m_shower_traj_michel_stem
+// (NeutrinoPatternBase.h).  Deliberately a full duplicate of F14's structure
+// rather than a shared helper: override_michel_stem_muon is SBND production ON
+// and must stay byte-for-byte untouched.
+void PatternAlgorithms::override_shower_traj_michel_stem(Graph& graph, Facade::Cluster& cluster, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, VertexPtr main_vertex) {
+    if (!m_shower_traj_michel_stem) return;
+    if (!main_vertex || !main_vertex->descriptor_valid()) return;
+    // The neutrino main cluster only.  examine_direction is also called with
+    // other clusters' own main vertices (NVF:3374, :4471); those pass
+    // flag_final == false and never reach here, but a cluster mismatch would
+    // still be wrong, so make it explicit.
+    if (main_vertex->cluster() != &cluster) return;
+
+    auto degree_of = [&graph](VertexPtr v) -> int {
+        if (!v || !v->descriptor_valid()) return 0;
+        int n = 0;
+        for (auto e : sorted_out_edges(v->get_descriptor(), graph)) if (graph[e].segment) ++n;
+        return n;
+    };
+
+    // sorted_out_edges: stable edge-index order.  No pointer-keyed container
+    // is iterated anywhere in this pass.
+    for (auto e_main : sorted_out_edges(main_vertex->get_descriptor(), graph)) {
+        SegmentPtr sg = graph[e_main].segment;
+        if (!sg || sg->cluster() != &cluster) continue;
+
+        // (1) the shower-TRAJECTORY branch only.  kShowerTopology is set by a
+        // different test (segment_is_shower_topology) on genuinely branchy
+        // objects; this class is a straight track mislabelled on wiggliness.
+        if (!sg->flags_any(SegmentFlags::kShowerTrajectory)) continue;
+        if (sg->flags_any(SegmentFlags::kShowerTopology)) continue;
+        if (!sg->has_particle_info() || !sg->particle_info()) continue;
+        if (sg->particle_info()->pdg() != 11) continue;
+
+        // (2) length window.  Below min_len there is no muon range to speak
+        // of and the stub classes already have their own passes; above
+        // max_len a real EM trunk is the likelier reading.
+        const double len = segment_track_length(sg);
+        if (len < m_michel_stem_traj_min_len || len > m_michel_stem_traj_max_len) continue;
+
+        // (3) charge.  A muon's last ~20 cm averages well above MIP (18255
+        // evt 506746 seg 21048: 1.57x); a single-electron trunk sits at ~1x.
+        const double med = segment_median_dQ_dx(sg);
+        if (med <= 0 || m_mip_dqdx_median <= 0) continue;
+        if (med / m_mip_dqdx_median < m_michel_stem_traj_mip_lo) continue;
+
+        // (4) the far end is a clean stopping point: exactly one thing
+        // continues.  A real cascade branches.
+        VertexPtr far_vtx = find_other_vertex(graph, sg, main_vertex);
+        if (!far_vtx || !far_vtx->descriptor_valid()) continue;
+        if (degree_of(far_vtx) != 2) continue;
+
+        // (5) what continues is TERMINAL -- a Michel, not a shower trunk.
+        // Same helper as F14's P2 check, its own ceiling (see the header).
+        const double far_len = segment_far_subtree_track_length(
+            graph, far_vtx, sg, m_michel_stem_traj_max_far_len);
+        if (far_len >= m_michel_stem_traj_max_far_len) continue;
+
+        // (6) the single sibling is shower-like ...
+        SegmentPtr sib = nullptr;
+        for (auto e_sib : sorted_out_edges(far_vtx->get_descriptor(), graph)) {
+            SegmentPtr other = graph[e_sib].segment;
+            if (!other || other == sg) continue;
+            sib = other;
+            break;
+        }
+        if (!sib) continue;
+        const bool sib_shower = sib->flags_any(SegmentFlags::kShowerTrajectory) ||
+                                (sib->has_particle_info() && sib->particle_info() &&
+                                 std::abs(sib->particle_info()->pdg()) == 11);
+        if (!sib_shower) continue;
+
+        // (7) ... and leaves at a large angle.  This is the discriminant that
+        // separates a Michel (random emission angle off the stopping point)
+        // from an electron trunk continuing into its own cascade
+        // (near-forward).  -1 means unmeasurable, which is not "large".
+        WireCell::Point far_pt = far_vtx->wcpt().point;
+        const double kink = segment_pair_kink_deg(sg, sib, far_pt, 15*units::cm);
+        if (kink < m_michel_stem_traj_min_kink_deg) continue;
+
+        // Accept: this is the muon half of a muon+Michel pair.  Force pdg 13
+        // -- the same reasoning F14 encodes when it relabels a Bragg-fitted
+        // proton stem muon, because a proton cannot produce a Michel either.
+        // The 4-momentum recompute uses m_mip_dqdx, matching F14.
+        const int pdg_code = 13;
+        auto four_momentum = segment_cal_4mom(sg, pdg_code, particle_data, recomb_model, m_mip_dqdx);
+        auto pinfo = std::make_shared<Aux::ParticleInfo>(
+            pdg_code, particle_data->get_particle_mass(pdg_code),
+            particle_data->pdg_to_name(pdg_code), four_momentum);
+        sg->particle_info(pinfo);
+        // 100.0 is this codebase's "asserted, not fitted" sentinel (same as
+        // override_muon_multi_proton_pion writes); the tracker abstained here,
+        // so there is no fitted score to keep.
+        sg->particle_score(100.0);
+        sg->unset_flags(SegmentFlags::kShowerTrajectory);
+        pr74_probe_topo_flag(sg, "unset", "NeutrinoPatternBase.cxx:shower-traj-michel-stem");
+        sg->unset_flags(SegmentFlags::kShowerTopology);
+        sg->set_flags(SegmentFlags::kMuonStemGuard);
+
+        SPDLOG_LOGGER_DEBUG(s_log,
+            "pr74r4 shower_traj_michel_stem: demote gidx={} to mu- L={:.1f}cm dqdx={:.2f}x"
+            " far_deg=2 far_len={:.1f}cm kink={:.1f}deg sib_gidx={}",
+            sg->get_graph_index(), len/units::cm, med/m_mip_dqdx_median,
+            far_len/units::cm, kink, sib->get_graph_index());
+    }
+}
+
 // doc sbnd_xin/docs/pr/43 round 2 K3 -- docstring in NeutrinoPatternBase.h.
 // Late particle-info/flag reconciliation: runs after shower_clustering_with_nv
 // and before the taggers so every downstream consumer (tagger features, kine,

@@ -57,6 +57,20 @@ namespace WireCell::Clus::PR {
         return total;
     }
 
+    // doc sbnd_xin/docs/pr/74 round 4 -- docstring in PRSegmentFunctions.h.
+    double segment_pair_kink_deg(SegmentPtr a, SegmentPtr b,
+                                 const WireCell::Point& shared_pt, double dis_cut)
+    {
+        if (!a || !b) return -1;
+        WireCell::Point p = shared_pt;   // the overload takes a mutable ref
+        const auto d1 = segment_cal_dir_3vector(a, p, dis_cut);
+        const auto d2 = segment_cal_dir_3vector(b, p, dis_cut);
+        const double m1 = d1.magnitude(), m2 = d2.magnitude();
+        if (m1 <= 0 || m2 <= 0) return -1;
+        const double cosang = std::max(-1.0, std::min(1.0, d1.dot(d2) / (m1 * m2)));
+        return 180.0 - std::acos(cosang) / M_PI * 180.0;
+    }
+
     // doc sbnd_xin/docs/pr/74 round 2 -- docstring in PRSegmentFunctions.h.
     void pr74_probe_topo_flag(SegmentPtr seg, const char* what, const char* site)
     {

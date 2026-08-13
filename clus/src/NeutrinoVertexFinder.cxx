@@ -50,6 +50,138 @@ static inline void pr74_probe_topo_reexam(SegmentPtr sg, const char* what) {
                  sg->particle_score());
 }
 
+// doc sbnd_xin/docs/pr/74 round 4, Phase A -- MEASUREMENT ONLY.
+//
+// The round-4 predicate for the 18255-506746 muon+Michel class wants to accept
+// on the ordinary track PID's verdict, but `segment_determine_dir_track` is
+// never run on a kShowerTrajectory segment (separate_track_shower sends those
+// to segment_determine_shower_direction_trajectory instead,
+// NeutrinoTrackShowerSep.cxx:298-317), so what it *would* say is unknown.
+// This probe runs it on every main-vertex shower-trajectory segment and prints
+// the verdict together with every other candidate discriminant, then restores
+// each of the four fields that call mutates (dirsign, dir_weak, particle_info,
+// particle_score -- PRSegmentFunctions.cxx:2471/2540/2681/2783/2812).
+//
+// Gated on WCT_MICHEL_STEM_PROBE; off it returns before touching anything, so
+// the production path is byte-identical by construction.
+static void pr74r4_probe_michel_stem(Graph& graph, Facade::Cluster& cluster,
+                                     VertexPtr main_vertex,
+                                     const WireCell::Clus::ParticleDataSet::pointer& particle_data,
+                                     const WireCell::IRecombinationModel::pointer& recomb_model,
+                                     double mip_dqdx_median, double mip_dqdx,
+                                     const TrackPidOptions& pid_opts, bool flag_final)
+{
+    static const bool dbg = std::getenv("WCT_MICHEL_STEM_PROBE") != nullptr;
+    if (!dbg) return;
+    // Only the TaggerCheckNeutrino.cxx:1418 call passes flag_final -- the two
+    // internal ones (NVF:3374, :4471) pass false.  Gating here makes the probe
+    // count exactly what the round-4 knob would act on: one pass, neutrino
+    // main cluster, final graph.
+    if (!flag_final) return;
+    if (!main_vertex || !main_vertex->descriptor_valid()) return;
+    if (main_vertex->cluster() != &cluster) return;
+
+    auto degree_of = [&graph](VertexPtr v) -> int {
+        if (!v || !v->descriptor_valid()) return 0;
+        int n = 0;
+        for (auto e : sorted_out_edges(v->get_descriptor(), graph)) if (graph[e].segment) ++n;
+        return n;
+    };
+
+    for (auto e_main : sorted_out_edges(main_vertex->get_descriptor(), graph)) {
+        SegmentPtr sg = graph[e_main].segment;
+        if (!sg || sg->cluster() != &cluster) continue;
+        if (!sg->flags_any(SegmentFlags::kShowerTrajectory)) continue;
+
+        VertexPtr far_vtx = find_other_vertex(graph, sg, main_vertex);
+        const double len = segment_track_length(sg);
+        const double med = segment_median_dQ_dx(sg);
+        const double ratio = (mip_dqdx_median > 0 && med > 0) ? med / mip_dqdx_median : 0.0;
+        const int far_deg = degree_of(far_vtx);
+        const double far_len = far_vtx
+            ? segment_far_subtree_track_length(graph, far_vtx, sg, 1e9) : 0.0;
+
+        // Largest tangent kink between this stem and any sibling at the far
+        // vertex, measured with the same 15 cm tangent idiom the daughter-shower
+        // angle tests use (:1449/:1457 below), plus which sibling wins.
+        double best_kink = -1;
+        size_t best_sib = 0;
+        bool sib_shower = false;
+        if (far_vtx && far_vtx->descriptor_valid()) {
+            WireCell::Point far_pt = far_vtx->wcpt().point;
+            Facade::geo_vector_t d1 = segment_cal_dir_3vector(sg, far_pt, 15*WireCell::units::cm);
+            for (auto e_sib : sorted_out_edges(far_vtx->get_descriptor(), graph)) {
+                SegmentPtr other = graph[e_sib].segment;
+                if (!other || other == sg) continue;
+                Facade::geo_vector_t d2 = segment_cal_dir_3vector(other, far_pt, 15*WireCell::units::cm);
+                if (d1.magnitude() <= 0 || d2.magnitude() <= 0) continue;
+                // d1 and d2 both point AWAY from far_pt, so the kink between
+                // the incoming stem and the outgoing sibling is 180 - angle.
+                const double cosang = std::max(-1.0, std::min(1.0, d1.dot(d2)/(d1.magnitude()*d2.magnitude())));
+                const double kink = 180.0 - std::acos(cosang)/M_PI*180.0;
+                if (kink > best_kink) {
+                    best_kink = kink;
+                    best_sib = other->get_graph_index();
+                    sib_shower = other->flags_any(SegmentFlags::kShowerTrajectory) ||
+                                 (other->has_particle_info() && other->particle_info() &&
+                                  std::abs(other->particle_info()->pdg()) == 11);
+                }
+            }
+        }
+
+        // --- the load-bearing question: what does the track PID say?
+        auto vpair = find_vertices(graph, sg);
+        const int start_n = degree_of(vpair.first);
+        const int end_n   = degree_of(vpair.second);
+        auto saved_info  = sg->particle_info();
+        const double saved_score = sg->particle_score();
+        const int    saved_dir   = sg->dirsign();
+        const bool   saved_weak  = sg->dir_weak();
+        const int old_pdg = (saved_info ? saved_info->pdg() : 0);
+
+        // The verdict is only STORED when free_end_dir or the F1 rescue holds
+        // (PRSegmentFunctions.cxx:2662).  Both ends of a mid-chain stem have
+        // degree > 1, so free_end_dir is always false there and the plain call
+        // silently leaves the stale electron pinfo in place -- reading the
+        // segment back after the call measures nothing.  Force the store for
+        // the probe only, so the printed pdg/score is the tracker's own
+        // conclusion.
+        TrackPidOptions probe_opts = pid_opts;
+        probe_opts.track_pid_persist_dqdx = true;
+        probe_opts.track_pid_persist_dqdx_electron_guard = false;
+        probe_opts.track_pid_persist_4mom = true;
+        segment_determine_dir_track(sg, start_n, end_n, particle_data, recomb_model,
+                                    mip_dqdx, false, probe_opts);
+        const int new_pdg = (sg->has_particle_info() && sg->particle_info())
+                                ? sg->particle_info()->pdg() : 0;
+        const double new_score = sg->particle_score();
+        const int new_dir = sg->dirsign();
+        const double new_ke = (sg->has_particle_info() && sg->particle_info())
+                                ? sg->particle_info()->kinetic_energy() : 0.0;
+
+        // Pointer identity is the only way to tell "the tracker concluded
+        // electron" from "the tracker abstained (pdg_code == 0) and never
+        // stored anything, so what you are reading is the stale trajectory
+        // sentinel".
+        const bool stored = (sg->particle_info() != saved_info);
+
+        sg->particle_info(saved_info);
+        sg->particle_score(saved_score);
+        sg->dirsign(saved_dir);
+        sg->dir_weak(saved_weak);
+
+        std::fprintf(stderr,
+            "MICHEL_STEM_PROBE clus=%d gidx=%zu L=%.2fcm dqdx=%.2fx pdg=%d score=%.2f dir=%d"
+            " | far_deg=%d far_len=%.2fcm kink=%.1fdeg sib_gidx=%zu sib_shower=%d"
+            " | TRACKPID stored=%d pdg=%d score=%.3f KE=%.1fMeV dir=%d | restored dir=%d pdg=%d\n",
+            cluster.get_cluster_id(), sg->get_graph_index(), len/WireCell::units::cm, ratio,
+            old_pdg, saved_score, saved_dir,
+            far_deg, far_len/WireCell::units::cm, best_kink, best_sib, (int)sib_shower,
+            (int)stored, new_pdg, new_score, new_ke, new_dir,
+            sg->dirsign(), (sg->particle_info() ? sg->particle_info()->pdg() : 0));
+    }
+}
+
 // doc sbnd_xin/docs/pr/32 §11 F1 -- the prototype's ProtoVertex::get_fit_pt().
 //
 // use_fit == false reproduces today's raw `wcpt()` read exactly, so every call
@@ -1948,6 +2080,23 @@ bool PatternAlgorithms::examine_direction(Graph& graph, VertexPtr vertex, Vertex
     // doc sbnd_xin/docs/pr/40 round 6 F14 -- same call-site convention as F8.
     // No-op when m_michel_stem_muon_rescue is false.
     override_michel_stem_muon(graph, cluster, particle_data, recomb_model, main_vertex);
+
+    // doc sbnd_xin/docs/pr/74 round 4 K6 -- same call-site convention as F8
+    // and F14, but ONLY on the final pass: flag_final is true exactly for the
+    // TaggerCheckNeutrino.cxx:1418 call, so the demotion happens once, on the
+    // neutrino main cluster, on the final graph, immediately before
+    // shower_clustering_with_nv consumes the shower flags.  The two internal
+    // callers (NVF:3374, :4471) pass false and are unaffected.  No-op when
+    // m_shower_traj_michel_stem is false.
+    if (flag_final) {
+        override_shower_traj_michel_stem(graph, cluster, particle_data, recomb_model, main_vertex);
+    }
+
+    // doc sbnd_xin/docs/pr/74 round 4 Phase A -- measurement only, gated on
+    // WCT_MICHEL_STEM_PROBE, restores every field it perturbs.  Never on in
+    // production => byte-identical.
+    pr74r4_probe_michel_stem(graph, cluster, main_vertex, particle_data, recomb_model,
+                             m_mip_dqdx_median, m_mip_dqdx, track_pid_options(), flag_final);
 
     return examine_maps(graph, cluster);
 }

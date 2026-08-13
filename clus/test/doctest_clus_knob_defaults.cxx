@@ -134,6 +134,12 @@ TEST_CASE("clus knob defaults: TaggerCheckNeutrino switches are all OFF")
     CHECK_KNOB_NUM(cfg, "stem_backfill_min_shower_len", 40.0);                // cm; inert while K4 off
     CHECK_KNOB_BOOL(cfg, "shower_conn3_unreachable", false);                  // K5 (pr/65 rung 2)
     CHECK_KNOB_NUM(cfg, "conn3_unreachable_min_len", 10.0);                   // cm; inert while K5 off
+    CHECK_KNOB_BOOL(cfg, "shower_traj_michel_stem", false);                   // doc pr/74 round 4 K6
+    CHECK_KNOB_NUM(cfg, "michel_stem_traj_min_len", 15.0);                    // cm; inert while K6 off
+    CHECK_KNOB_NUM(cfg, "michel_stem_traj_max_len", 45.0);                    // cm; inert while K6 off
+    CHECK_KNOB_NUM(cfg, "michel_stem_traj_mip_lo", 1.3);                      // x MIP median; inert while K6 off
+    CHECK_KNOB_NUM(cfg, "michel_stem_traj_max_far_len", 40.0);                // cm; inert while K6 off
+    CHECK_KNOB_NUM(cfg, "michel_stem_traj_min_kink_deg", 40.0);               // deg; inert while K6 off
     // doc pr/44: long-muon pseudo-shower keeps its muon start segment.
     CHECK_KNOB_BOOL(cfg, "shower_long_muon_keep_type", false);
     // doc pr/43 round 2 -- three PID-consistency knobs (K1/K2/K3).

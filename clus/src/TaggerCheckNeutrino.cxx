@@ -395,6 +395,12 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_stem_backfill_min_shower_len              = get(config, "stem_backfill_min_shower_len",              m_stem_backfill_min_shower_len);
     m_shower_conn3_unreachable                  = get(config, "shower_conn3_unreachable",                  m_shower_conn3_unreachable);
     m_conn3_unreachable_min_len                 = get(config, "conn3_unreachable_min_len",                 m_conn3_unreachable_min_len);
+    m_shower_traj_michel_stem                   = get(config, "shower_traj_michel_stem",                   m_shower_traj_michel_stem);
+    m_michel_stem_traj_min_len                  = get(config, "michel_stem_traj_min_len",                  m_michel_stem_traj_min_len);
+    m_michel_stem_traj_max_len                  = get(config, "michel_stem_traj_max_len",                  m_michel_stem_traj_max_len);
+    m_michel_stem_traj_mip_lo                   = get(config, "michel_stem_traj_mip_lo",                   m_michel_stem_traj_mip_lo);
+    m_michel_stem_traj_max_far_len              = get(config, "michel_stem_traj_max_far_len",              m_michel_stem_traj_max_far_len);
+    m_michel_stem_traj_min_kink_deg             = get(config, "michel_stem_traj_min_kink_deg",             m_michel_stem_traj_min_kink_deg);
     m_shower_long_muon_keep_type                = get(config, "shower_long_muon_keep_type",                m_shower_long_muon_keep_type);
     m_single_muon_proton_chain_veto             = get(config, "single_muon_proton_chain_veto",             m_single_muon_proton_chain_veto);
     m_single_muon_long_muon_claim               = get(config, "single_muon_long_muon_claim",               m_single_muon_long_muon_claim);
@@ -657,6 +663,12 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["stem_backfill_min_shower_len"]              = m_stem_backfill_min_shower_len;              // cm; only read when shower_stem_backfill
     cfg["shower_conn3_unreachable"]                  = m_shower_conn3_unreachable;                  // doc pr/74 round 2 K5 (pr/65 rung 2); false = legacy (unreachable segments stay PF-invisible)
     cfg["conn3_unreachable_min_len"]                 = m_conn3_unreachable_min_len;                 // cm; only read when shower_conn3_unreachable
+    cfg["shower_traj_michel_stem"]                   = m_shower_traj_michel_stem;                   // doc pr/74 round 4 K6; false = legacy (a stopping muon + Michel stays one EM shower)
+    cfg["michel_stem_traj_min_len"]                  = m_michel_stem_traj_min_len;                  // cm; only read when shower_traj_michel_stem
+    cfg["michel_stem_traj_max_len"]                  = m_michel_stem_traj_max_len;                  // cm; only read when shower_traj_michel_stem
+    cfg["michel_stem_traj_mip_lo"]                   = m_michel_stem_traj_mip_lo;                   // x MIP median; only read when shower_traj_michel_stem
+    cfg["michel_stem_traj_max_far_len"]              = m_michel_stem_traj_max_far_len;              // cm; only read when shower_traj_michel_stem
+    cfg["michel_stem_traj_min_kink_deg"]             = m_michel_stem_traj_min_kink_deg;             // deg; only read when shower_traj_michel_stem
     cfg["shower_long_muon_keep_type"]                = m_shower_long_muon_keep_type;                // false = legacy (long-muon pseudo-shower start segment majority-voted to e-)
     cfg["single_muon_proton_chain_veto"]             = m_single_muon_proton_chain_veto;             // false = legacy (1-hop proton veto only)
     cfg["single_muon_long_muon_claim"]               = m_single_muon_long_muon_claim;               // false = legacy (long-muon chain never claims the vertex muon slot)
@@ -1102,6 +1114,12 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
     pattern_algos.m_stem_backfill_min_shower_len              = m_stem_backfill_min_shower_len * units::cm;  // pr/74 K4
     pattern_algos.m_shower_conn3_unreachable                  = m_shower_conn3_unreachable;                  // pr/74 K5
     pattern_algos.m_conn3_unreachable_min_len                 = m_conn3_unreachable_min_len * units::cm;     // pr/74 K5
+    pattern_algos.m_shower_traj_michel_stem                   = m_shower_traj_michel_stem;                   // pr/74 K6
+    pattern_algos.m_michel_stem_traj_min_len                  = m_michel_stem_traj_min_len * units::cm;      // pr/74 K6
+    pattern_algos.m_michel_stem_traj_max_len                  = m_michel_stem_traj_max_len * units::cm;      // pr/74 K6
+    pattern_algos.m_michel_stem_traj_mip_lo                   = m_michel_stem_traj_mip_lo;                   // pr/74 K6 (dimensionless ratio)
+    pattern_algos.m_michel_stem_traj_max_far_len              = m_michel_stem_traj_max_far_len * units::cm;  // pr/74 K6
+    pattern_algos.m_michel_stem_traj_min_kink_deg             = m_michel_stem_traj_min_kink_deg;             // pr/74 K6 (degrees)
     pattern_algos.m_shower_long_muon_keep_type                = m_shower_long_muon_keep_type;                // doc pr/44
     pattern_algos.m_single_muon_proton_chain_veto             = m_single_muon_proton_chain_veto;             // doc pr/43 round 2 K1
     pattern_algos.m_single_muon_long_muon_claim               = m_single_muon_long_muon_claim;               // doc pr/43 round 2 K2

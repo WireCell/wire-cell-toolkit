@@ -1322,6 +1322,48 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
                     if (at_main || at_root) {
                         // hangs from root → add to root_reachable_vtxs
                         if (!root_reachable_vtxs.count(vtx)) {
+                            // A root-anchored shower's vertex SET is a loose
+                            // association; the track BFS above reached its
+                            // vertices by walking real track segments out of
+                            // the neutrino vertex.  Where the two disagree
+                            // this branch silently wins, and F3's
+                            // parent-shower precedence (:1419) then hangs
+                            // everything anchored there under the shower
+                            // instead of under the track.
+                            //
+                            // doc sbnd_xin/docs/pr/74 round 4: that is exactly
+                            // wrong for a Michel.  18255-506746 -- once K6
+                            // demotes seg 21048 to a stopping muon, the track
+                            // BFS reaches its far vertex 21037, but the
+                            // neighbouring 102 MeV shower's set also contains
+                            // 21037 and claimed it, so the 64 MeV Michel
+                            // rendered as a daughter of that shower rather
+                            // than of the muon that produced it (measured:
+                            // "PROPAGATE-OVER-TRACK vtx_gidx=37
+                            // claimed_by_shower_ke=102.128
+                            // over_incoming_seg_gidx=48").
+                            //
+                            // Keyed on kMuonStemGuard, which ONLY the
+                            // default-OFF K6 pass ever sets -- so with K6 off
+                            // no vertex is ever protected and this is
+                            // byte-identical.  Narrow on purpose: the general
+                            // "track BFS beats shower set" rule would
+                            // restructure the tree at every vertex where the
+                            // two disagree, which is a separate change with
+                            // its own census.
+                            auto vis = vtx_incoming_seg.find(vtx);
+                            const bool track_owns_via_michel_stem =
+                                vis != vtx_incoming_seg.end() && vis->second &&
+                                vis->second->flags_any(PR::SegmentFlags::kMuonStemGuard);
+                            if (flag_print && vis != vtx_incoming_seg.end()) {
+                                std::cout << "[fill_bee_pf_tree] PROPAGATE-OVER-TRACK"
+                                          << "  vtx_gidx=" << vtx->get_graph_index()
+                                          << "  claimed_by_shower_ke=" << shower->get_kine_best()/units::MeV
+                                          << "  over_incoming_seg_gidx=" << vis->second->get_graph_index()
+                                          << "  michel_stem_protected=" << (track_owns_via_michel_stem ? 1 : 0)
+                                          << "\n";
+                            }
+                            if (track_owns_via_michel_stem) continue;
                             root_reachable_vtxs.insert(vtx);
                             vtx_to_parent_shower[vtx] = parent_shower;
                             any_added = true;

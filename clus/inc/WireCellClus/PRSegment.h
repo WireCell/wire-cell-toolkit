@@ -38,6 +38,15 @@ namespace WireCell::Clus::PR {
         /// only by the default-OFF two_end_break pass => byte-identical
         /// when off.
         kTwoEndBreakArm = 1<<5,
+        /// The segment was demoted from EM shower to stopping muon by the
+        /// Michel-stem guard (doc sbnd_xin/docs/pr/74 round 4): it is the
+        /// muon half of a muon+Michel pair at the neutrino vertex.  Read
+        /// only by stem_backfill, which must not absorb such a segment back
+        /// into the Michel shower it was just separated from.  Set only by
+        /// the default-OFF shower_traj_michel_stem pass => byte-identical
+        /// when off.  Nothing serialises the raw flags word (only named bits
+        /// are ever tested), so a new bit is inert in every output.
+        kMuonStemGuard = 1<<6,
     };
 
 

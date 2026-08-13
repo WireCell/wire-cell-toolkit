@@ -1219,6 +1219,23 @@ function(
     // pr/65's "0 unclaimed" gap on NC-pi0).
     shower_conn3_unreachable = true,
     conn3_unreachable_min_len = null,
+    // doc sbnd_xin/docs/pr/74 round 4 K6 shower_traj_michel_stem: a stopping
+    // muon that emits a Michel electron at the neutrino vertex is
+    // reconstructed as ONE EM shower, because track/shower separation flags
+    // the muon kShowerTrajectory on its wiggliness and the ordinary track PID
+    // is never consulted (and, measured, ABSTAINS when it is).  18255-506746
+    // seg 21048: 20.4 cm at 1.57x MIP, far vertex degree 2, 17.5 cm terminal
+    // downstream, 93 deg kink -> reported by the owner as "107 MeV electron
+    // is muon + Michel".  When on, that one segment is demoted to a stopping
+    // muon so the Michel becomes its own shower.  C++ defaults
+    // false/15cm/45cm/1.3x/40cm/40deg.  Keys omitted when off/null =>
+    // byte-identical pre-round-4 config.
+    shower_traj_michel_stem = false,
+    michel_stem_traj_min_len = null,
+    michel_stem_traj_max_len = null,
+    michel_stem_traj_mip_lo = null,
+    michel_stem_traj_max_far_len = null,
+    michel_stem_traj_min_kink_deg = null,
     // doc pr/44 shower_long_muon_keep_type: a MULTI-segment long-muon
     // pseudo-shower (cached type 13 at the in_main_cluster seed) keeps its
     // muon start segment -- the update_particle_type majority vote there is
@@ -1783,6 +1800,12 @@ function(
                              stem_backfill_min_shower_len=stem_backfill_min_shower_len,
                              shower_conn3_unreachable=shower_conn3_unreachable,
                              conn3_unreachable_min_len=conn3_unreachable_min_len,
+                             shower_traj_michel_stem=shower_traj_michel_stem,
+                             michel_stem_traj_min_len=michel_stem_traj_min_len,
+                             michel_stem_traj_max_len=michel_stem_traj_max_len,
+                             michel_stem_traj_mip_lo=michel_stem_traj_mip_lo,
+                             michel_stem_traj_max_far_len=michel_stem_traj_max_far_len,
+                             michel_stem_traj_min_kink_deg=michel_stem_traj_min_kink_deg,
                              shower_long_muon_keep_type=shower_long_muon_keep_type,
                              single_muon_proton_chain_veto=single_muon_proton_chain_veto,
                              single_muon_long_muon_claim=single_muon_long_muon_claim,

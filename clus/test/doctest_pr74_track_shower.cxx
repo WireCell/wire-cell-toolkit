@@ -212,3 +212,71 @@ TEST_CASE("pr74r3 reachable_vertices: null root reaches nothing")
     pr74r3_make_chain(g, 4);
     CHECK(WireCell::Clus::PR::reachable_vertices(g, nullptr).empty());
 }
+
+// ---------------------------------------------------------------------------
+// doc sbnd_xin/docs/pr/74 round 4 K6 -- segment_pair_kink_deg.
+//
+// Contract: the tangents of both segments are taken AWAY from the shared
+// point, so a straight continuation puts them ~180 deg apart and the function
+// reports the KINK (180 - angle): straight = 0, hard turn-back = 180.  This
+// sign convention is the whole point of the helper -- reading the raw tangent
+// angle would invert the Michel test (18255-506746 seg 21048 vs 21056 sit at
+// 93 deg of kink, a Michel emitted sideways off a stopping muon; an electron
+// trunk continuing into its own cascade is near 0).  -1 means unmeasurable and
+// callers must not read that as "straight".
+
+TEST_CASE("pr74r4 segment_pair_kink_deg: straight continuation reads ~0")
+{
+    Graph g;
+    auto v0 = make_vtx(g, 0, 0, 0);
+    auto v1 = make_vtx(g, 30*units::cm, 0, 0);          // the shared point
+    auto v2 = make_vtx(g, 60*units::cm, 0, 0);
+    auto a = make_flat_track(g, v0, v1, 1.0);
+    auto b = make_flat_track(g, v1, v2, 1.0);
+
+    const double kink = segment_pair_kink_deg(a, b, v1->wcpt().point, 15*units::cm);
+    CHECK(kink >= 0.0);
+    CHECK(kink < 1.0);
+}
+
+TEST_CASE("pr74r4 segment_pair_kink_deg: a right-angle Michel reads ~90")
+{
+    Graph g;
+    auto v0 = make_vtx(g, 0, 0, 0);
+    auto v1 = make_vtx(g, 30*units::cm, 0, 0);
+    auto v2 = make_vtx(g, 30*units::cm, 30*units::cm, 0);
+    auto stem = make_flat_track(g, v0, v1, 1.6);        // the stopping muon
+    auto michel = make_flat_track(g, v1, v2, 1.0);      // emitted sideways
+
+    const double kink = segment_pair_kink_deg(stem, michel, v1->wcpt().point, 15*units::cm);
+    CHECK(kink == doctest::Approx(90.0).epsilon(0.02));
+    // ... and it is symmetric in its two segment arguments.
+    CHECK(segment_pair_kink_deg(michel, stem, v1->wcpt().point, 15*units::cm)
+          == doctest::Approx(kink).epsilon(1e-6));
+}
+
+TEST_CASE("pr74r4 segment_pair_kink_deg: a fold-back reads near 180")
+{
+    Graph g;
+    auto v0 = make_vtx(g, 0, 0, 0);
+    auto v1 = make_vtx(g, 30*units::cm, 0, 0);
+    auto v2 = make_vtx(g, 10*units::cm, 0, 0);          // doubles back along the stem
+    auto a = make_flat_track(g, v0, v1, 1.0);
+    auto b = make_flat_track(g, v1, v2, 1.0);
+
+    CHECK(segment_pair_kink_deg(a, b, v1->wcpt().point, 15*units::cm) > 179.0);
+}
+
+TEST_CASE("pr74r4 segment_pair_kink_deg: unmeasurable is -1, never 0")
+{
+    Graph g;
+    auto v0 = make_vtx(g, 0, 0, 0);
+    auto v1 = make_vtx(g, 30*units::cm, 0, 0);
+    auto a = make_flat_track(g, v0, v1, 1.0);
+    auto fitless = make_segment(g, v1, make_vtx(g, 60*units::cm, 0, 0));
+
+    // A segment with no fits has no tangent.  0 would mean "straight", which
+    // would let a fitless sibling silently pass a kink FLOOR; -1 fails it.
+    CHECK(segment_pair_kink_deg(a, fitless, v1->wcpt().point, 15*units::cm) == -1);
+    CHECK(segment_pair_kink_deg(nullptr, a, v1->wcpt().point, 15*units::cm) == -1);
+}
