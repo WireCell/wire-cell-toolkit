@@ -95,7 +95,9 @@ void PatternAlgorithms::update_shower_maps(IndexedShowerSet& showers, ShowerVert
 void PatternAlgorithms::stem_backfill(Graph& graph, VertexPtr main_vertex,
     IndexedShowerSet& showers, ShowerVertexMap& map_vertex_in_shower,
     ShowerSegmentMap& map_segment_in_shower, VertexShowerSetMap& map_vertex_to_shower,
-    ClusterPtrSet& used_shower_clusters, IndexedSegmentSet& segments_in_long_muon)
+    ClusterPtrSet& used_shower_clusters, IndexedSegmentSet& segments_in_long_muon,
+    const Clus::ParticleDataSet::pointer& particle_data,
+    const IRecombinationModel::pointer& recomb_model)
 {
     if (!main_vertex || !main_vertex->descriptor_valid()) return;
 
@@ -141,6 +143,7 @@ void PatternAlgorithms::stem_backfill(Graph& graph, VertexPtr main_vertex,
         if (shower->get_total_length() < m_stem_backfill_min_shower_len) continue;
         auto [attach_vtx, conn_type] = shower->get_start_vertex_and_type();
         VertexPtr cur = attach_vtx;
+        SegmentPtr outer_stem = nullptr;   // round 3 Q1: outermost stem absorbed for THIS shower
         while (cur && cur != main_vertex && came_from.count(cur)) {
             auto [stem, prev] = came_from.at(cur);
             if (!stem || map_segment_in_shower.count(stem)) break;
@@ -192,7 +195,83 @@ void PatternAlgorithms::stem_backfill(Graph& graph, VertexPtr main_vertex,
             shower->add_segment(stem, true);
             map_segment_in_shower[stem] = shower;   // claim immediately; full rebuild below
             any_absorbed = true;
+            outer_stem = stem_seg;
             cur = prev;
+        }
+
+        // doc pr/74 round 3 Q1 -- RE-SEAT THE SHOWER ONTO THE ABSORBED STEM.
+        //
+        // Round 2 added the stem to the shower's MEMBERSHIP only and left
+        // start_segment/start_vertex where they were.  Membership alone fixes
+        // the paint layer but breaks the particle-flow tree: fill_bee_pf_tree
+        // walks track-only segments from the main vertex
+        // (MultiAlgBlobClustering.cxx:1204-1254) and an absorbed stem is no
+        // longer a track, so the vertex it used to reach drops out of
+        // vtx_incoming_seg.  Every object anchored there -- the shower itself
+        // and every sibling shower / pseudo-gamma hanging off that vertex --
+        // lost its parent and rendered as a top-level PF root far from the
+        // neutrino vertex (measured on the round-2 production arm: 90055
+        // 0 -> 7 dangling roots incl. the 2020 MeV shower itself, 469665
+        // 0 -> 3, 138009 0 -> 1).  That is precisely the complaint doc pr/74
+        // opened with for 18255-142421 -- "painted EM shower, missing from the
+        // particle flow" -- re-created by the fix for it.
+        //
+        // Re-seating restores the anchor at the OTHER end of the stem chain
+        // (`cur`, the main-vertex side of the last absorbed stem) using the
+        // same (start_vertex, conn_type=1) + start_segment pair the BFS shower
+        // builder itself uses (:240-241).  The shower then renders from the
+        // stem base -- where the owner's hand scan says the shower starts --
+        // and the vertex-set propagation at MultiAlgBlobClustering.cxx:1287
+        // re-parents the stranded siblings underneath it.
+        //
+        // The start segment's own PDG stays whatever the tracker said; the
+        // shower's type comes from update_particle_type()'s majority vote in
+        // the kinematics pass that follows (doc pr/44; PRShower.cxx:842), which
+        // relabels a track-typed start segment 13 -> 11 whenever shower length
+        // dominates -- always true for a substantial shower with a <30 cm stem.
+        if (outer_stem) {
+            // conn_type 1 takes the shower's start_point from the start
+            // segment's own fit endpoints, selected by dirsign
+            // (PRShower.cxx:1141-1147) -- and a stem the tracker never
+            // directioned has dirsign()==0, which assigns NEITHER endpoint and
+            // silently leaves start_point at its previous value (measured:
+            // 90055 kept (127,24,216), 469665 kept the EM blob at
+            // (30,124,356), i.e. the very stale anchors this re-seat exists to
+            // move).  Point the stem away from `cur` so start_point lands on
+            // the stem base.  This is also the physically right sign: the
+            // vertex nearer the neutrino is where the particle started.
+            const WireCell::Point cur_pt =
+                cur->fit().valid() ? cur->fit().point : cur->wcpt().point;
+            const auto& stem_fits = outer_stem->fits();
+            if (!stem_fits.empty()) {
+                const double d_front = (stem_fits.front().point - cur_pt).magnitude();
+                const double d_back  = (stem_fits.back().point  - cur_pt).magnitude();
+                outer_stem->dirsign(d_front <= d_back ? 1 : -1);
+            }
+            SPDLOG_LOGGER_DEBUG(s_log,
+                "pr74 stem_backfill: re-seat shower(start gidx={} conn={}) -> start gidx={} conn=1 dirsign={}",
+                start_seg->get_graph_index(), conn_type, outer_stem->get_graph_index(),
+                outer_stem->dirsign());
+            shower->set_start_vertex(cur, 1);
+            shower->set_start_segment(outer_stem);
+            // The majority vote relabels a track-typed start segment 13 -> 11
+            // whenever shower length dominates (PRShower.cxx:842) -- it must
+            // run BEFORE the kinematics recompute below, which copies the
+            // start segment's PDG onto the shower verbatim
+            // (PRShower.cxx:1121) and would otherwise turn a 2 GeV electron
+            // shower into a muon.
+            shower->update_particle_type(particle_data, recomb_model, m_mip_dqdx,
+                                         main_vertex, m_shower_proton_daughter_pion,
+                                         m_mip_dqdx_median);
+            // calc_kine_2 skips any shower whose kinematics flag is already
+            // set (NeutrinoEnergyReco.cxx:327), which calc_kine_1 set for
+            // every shower that existed then.  Round 2 therefore recomputed
+            // NOTHING after absorbing: start_point/end_point/init_dir kept
+            // their pre-absorption values and the absorbed stem's charge was
+            // never counted (90055 stayed 2020 MeV, 469665 stayed 322 MeV
+            // across the round-2 knob flip).  Clearing the flag is what makes
+            // the re-seat and the charge accounting actually happen.
+            shower->set_flag_kinematics(false);
         }
     }
     if (any_absorbed) {
@@ -1894,6 +1973,16 @@ void PatternAlgorithms::shower_clustering_in_other_clusters(Graph& graph, Vertex
     // no pass = byte-identical.
     if (m_shower_conn3_unreachable && flag_save && main_vertex->descriptor_valid()) {
         const auto unreachable = unreachable_segments(graph, main_vertex);
+        // doc pr/74 round 3 Q2 (18255-142421 seg 7013): the anchor search below
+        // must only consider vertices the main vertex can actually reach.  The
+        // promoted segment's OWN endpoints are in `vertices` too, and they sit
+        // at distance 0 from it, so the unrestricted search always picked one
+        // of them: the pseudo-gamma collapsed to zero length at the component's
+        // far end and, because conn-3 derives start_point from the anchor
+        // (PRShower.cxx:1140) and end_point from the farthest vertex, the
+        // reconstructed e- ran BACKWARDS -- from the far end toward the
+        // neutrino vertex instead of outward from it.
+        const auto reachable_vtxs = reachable_vertices(graph, main_vertex);
         IndexedSegmentSet claimed_k5;
         for (auto seg : seg_order) {
             if (!seg || seg->cluster() != main_cluster) continue;
@@ -1906,6 +1995,7 @@ void PatternAlgorithms::shower_clustering_in_other_clusters(Graph& graph, Vertex
             VertexPtr min_vertex = nullptr;
             double main_dis = 1e9;
             for (auto vtx : vertices) {
+                if (!reachable_vtxs.count(vtx)) continue;   // round 3 Q2: never anchor to your own component
                 WireCell::Point vtx_pt = vtx->fit().valid() ? vtx->fit().point : vtx->wcpt().point;
                 double dis = segment_get_closest_point(seg, vtx_pt).first;
                 if (dis < min_dis) {
@@ -3697,7 +3787,8 @@ void PatternAlgorithms::shower_clustering_with_nv(int acc_segment_id, IndexedSho
     if (m_shower_stem_backfill) {
         stem_backfill(graph, main_vertex, showers, map_vertex_in_shower,
                       map_segment_in_shower, map_vertex_to_shower,
-                      used_shower_clusters, segments_in_long_muon);
+                      used_shower_clusters, segments_in_long_muon,
+                      particle_data, recomb_model);
         t0 = Clock::now();
     }
 

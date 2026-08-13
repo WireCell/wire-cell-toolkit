@@ -141,3 +141,74 @@ TEST_CASE("pr74 far subtree: never walks back through the stem")
     const double far_len = segment_far_subtree_track_length(g, vf, stem, 40 * units::cm);
     CHECK(far_len == 0.0);
 }
+
+// ---------------------------------------------------------------------------
+// doc sbnd_xin/docs/pr/74 round 3 Q2 -- PR::reachable_vertices.
+//
+// The vertex-level complement of pr/65's unreachable_segments.  K5 anchors a
+// graph-unreachable component onto "the nearest vertex", and without this
+// filter the nearest vertex is the component's OWN endpoint at distance 0:
+// 18255-142421 anchored seg 7013 to its far end, collapsing the pseudo-gamma
+// to zero length and reversing the reconstructed electron.
+//
+// Deleting the `if (!reachable_vtxs.count(vtx)) continue;` guard in
+// NeutrinoShowerClustering.cxx makes the second case below meaningless --
+// which is exactly the round-2 bug.
+// ---------------------------------------------------------------------------
+
+#include "WireCellClus/PRGraph.h"
+
+namespace {
+
+// Chain component: nvtx vertices joined by nvtx-1 segments.
+std::vector<WireCell::Clus::PR::VertexPtr>
+pr74r3_make_chain(WireCell::Clus::PR::Graph& g, size_t nvtx)
+{
+    namespace PR = WireCell::Clus::PR;
+    std::vector<PR::VertexPtr> vtxs;
+    for (size_t i = 0; i < nvtx; ++i) vtxs.push_back(std::make_shared<PR::Vertex>());
+    for (size_t i = 0; i + 1 < nvtx; ++i) {
+        PR::add_segment(g, std::make_shared<PR::Segment>(), vtxs[i], vtxs[i + 1]);
+    }
+    return vtxs;
+}
+
+}  // namespace
+
+TEST_CASE("pr74r3 reachable_vertices: connected graph yields every vertex")
+{
+    WireCell::Clus::PR::Graph g;
+    auto chain = pr74r3_make_chain(g, 6);
+
+    for (auto root : {chain.front(), chain[3], chain.back()}) {
+        auto r = WireCell::Clus::PR::reachable_vertices(g, root);
+        CHECK(r.size() == chain.size());
+        for (const auto& v : chain) CHECK(r.count(v) == 1);
+    }
+}
+
+TEST_CASE("pr74r3 reachable_vertices: a disconnected component is excluded")
+{
+    WireCell::Clus::PR::Graph g;
+    auto main_comp = pr74r3_make_chain(g, 4);   // holds the root
+    auto orphan    = pr74r3_make_chain(g, 3);   // the K5 promotion candidate
+
+    auto r = WireCell::Clus::PR::reachable_vertices(g, main_comp.front());
+
+    // The root's own component is reachable ...
+    CHECK(r.size() == main_comp.size());
+    for (const auto& v : main_comp) CHECK(r.count(v) == 1);
+    // ... and NONE of the orphan component's endpoints is -- the guard that
+    // stops K5 anchoring the promoted shower to its own far end.
+    for (const auto& v : orphan) CHECK(r.count(v) == 0);
+
+    // Symmetry with pr/65: the same split, seen segment-wise.
+    CHECK(WireCell::Clus::PR::unreachable_segments(g, main_comp.front()).size() == 2);
+}
+
+TEST_CASE("pr74r3 reachable_vertices: null root reaches nothing")
+{
+    WireCell::Clus::PR::Graph g;
+    pr74r3_make_chain(g, 4);
+    CHECK(WireCell::Clus::PR::reachable_vertices(g, nullptr).empty());
+}

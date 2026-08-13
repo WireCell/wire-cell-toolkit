@@ -382,6 +382,33 @@ namespace WireCell::Clus::PR {
         return unreachable;
     }
 
+    IndexedVertexSet reachable_vertices(const Graph& graph, VertexPtr root)
+    {
+        // Membership-only BFS over node descriptors -- same construction as
+        // unreachable_segments() above, which is deliberately duplicated
+        // rather than factored out (production path stays byte-for-byte).
+        std::set<Graph::vertex_descriptor> seen;
+        if (root && root->descriptor_valid()) {
+            std::deque<Graph::vertex_descriptor> todo{root->get_descriptor()};
+            seen.insert(root->get_descriptor());
+            while (!todo.empty()) {
+                auto vd = todo.front();
+                todo.pop_front();
+                for (auto [ei, eend] = boost::out_edges(vd, graph); ei != eend; ++ei) {
+                    auto nd = boost::target(*ei, graph);
+                    if (seen.insert(nd).second) todo.push_back(nd);
+                }
+            }
+        }
+
+        IndexedVertexSet reachable;
+        for (auto nd : ordered_nodes(graph)) {
+            if (!seen.count(nd)) continue;
+            if (VertexPtr vtx = graph[nd].vertex) reachable.insert(vtx);
+        }
+        return reachable;
+    }
+
 }
 
     

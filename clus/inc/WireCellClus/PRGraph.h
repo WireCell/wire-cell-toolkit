@@ -395,5 +395,17 @@ namespace WireCell::Clus::PR {
     /// what lets those guards test reachability instead of cluster identity.
     IndexedSegmentSet unreachable_segments(const Graph& graph, VertexPtr root);
 
+    /// The vertices reachable from `root` by walking graph edges, `root`
+    /// included.  Membership-only BFS (same as unreachable_segments), so no
+    /// iteration order can leak into the result.
+    ///
+    /// doc sbnd_xin/docs/pr/74 round 3: the complement of unreachable_segments
+    /// at the VERTEX level.  A pass that anchors a disconnected component onto
+    /// "the nearest vertex" must exclude that component's own endpoints, or the
+    /// nearest vertex is trivially its own at distance 0 -- which anchors the
+    /// object to its far end and reverses the reconstructed direction
+    /// (18255-142421 seg 7013, doc pr/74 round 3 Q2).
+    IndexedVertexSet reachable_vertices(const Graph& graph, VertexPtr root);
+
 };
 #endif
