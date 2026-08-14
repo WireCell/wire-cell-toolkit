@@ -193,6 +193,46 @@ static void pr74r4_probe_michel_stem(Graph& graph, Facade::Cluster& cluster,
 // The counter block is unconditional -- it runs in the knob-off arm too, which
 // is what measures how often the divergence is reachable at all.  Incrementing
 // an atomic cannot change reconstruction output.
+// doc sbnd_xin/docs/pr/75 -- the vertex scoreboard's join key.  Identical
+// encoding to PrDisplayDump::vertex_display_id and the Bee particle-flow tree
+// (cluster_id*1000 + graph_index), so a consumer joins the board's rows to
+// vertices[] on this and nothing else.  Diagnostic only.
+static inline int pr75_vertex_id(const VertexPtr& v)
+{
+    if (!v) return -1;
+    const auto* cl = v->cluster();
+    return (cl ? cl->get_cluster_id() : 0) * 1000 + static_cast<int>(v->get_graph_index());
+}
+
+// The position both selectors score on: the fitted point when it is valid,
+// else the Steiner seed point.
+static inline WireCell::Point pr75_vtx_pt(const VertexPtr& v)
+{
+    return v->fit().valid() ? v->fit().point : v->wcpt().point;
+}
+
+// Find-or-create the board row for a vertex.  compare_main_vertices (stage 1,
+// per cluster) and the DL rerank (stage 2, global) score DIFFERENT, overlapping
+// vertex sets, and a consumer wants one row per vertex carrying both, so the
+// second writer merges into the first writer's row instead of appending a
+// duplicate.  Linear scan: rows number in the tens.
+static PR::VertexScoreRow& pr75_row(PR::VertexScoreboard& board, const VertexPtr& v)
+{
+    const int id = pr75_vertex_id(v);
+    for (auto& r : board.rows) {
+        if (r.vertex_id == id) return r;
+    }
+    const auto pt = pr75_vtx_pt(v);
+    PR::VertexScoreRow row;
+    row.vertex_id  = id;
+    row.cluster_id = v->cluster() ? v->cluster()->get_cluster_id() : -1;
+    row.x = pt.x() / WireCell::units::cm;
+    row.y = pt.y() / WireCell::units::cm;
+    row.z = pt.z() / WireCell::units::cm;
+    board.rows.push_back(row);
+    return board.rows.back();
+}
+
 static inline WireCell::Point pr32_vtx_pt(const VertexPtr& v, bool use_fit)
 {
     g_pr32_audit.f1_reads.fetch_add(1, std::memory_order_relaxed);
@@ -1224,6 +1264,22 @@ VertexPtr PatternAlgorithms::compare_main_vertices(Graph& graph, Facade::Cluster
         if (map_vertex_num[vtx] > max_val) {
             max_val = map_vertex_num[vtx];
             max_vertex = vtx;
+        }
+    }
+
+    // doc sbnd_xin/docs/pr/75 -- record what this scorer compared.  Iterates
+    // `scored` (a vector, deterministic), NOT map_vertex_num (VertexPtr-keyed,
+    // i.e. address-ordered), and reads it with find() -- an operator[] read on
+    // an unscored candidate would INSERT and mutate a container the code above
+    // already walked.  Pure recording: nothing below changes any decision.
+    if (m_vertex_scoreboard) {
+        for (auto vtx : scored) {
+            auto it = map_vertex_num.find(vtx);
+            if (it == map_vertex_num.end()) continue;
+            auto& row = pr75_row(m_vtx_board, vtx);
+            row.trad_scored = true;
+            row.trad_score  = it->second;
+            row.trad_winner = (vtx == max_vertex);
         }
     }
 
@@ -4123,7 +4179,12 @@ bool PatternAlgorithms::determine_overall_main_vertex_DL(
     }
     MS t_collect_pc(Clock::now() - t0); t0 = Clock::now();
 
-    if (vec_xyzq[0].empty()) return false;
+    if (vec_xyzq[0].empty()) {
+        // doc pr/75: no point cloud to feed the net -- the DL never ran, which
+        // is NOT the same as running and declining.
+        if (m_vertex_scoreboard) m_vtx_board.route = "dl-no-points";
+        return false;
+    }
 
     try {
         // Request top_k voxels from Python: legacy mode (flag_rerank==false) uses top_k=1
@@ -4139,6 +4200,18 @@ bool PatternAlgorithms::determine_overall_main_vertex_DL(
         double min_dis = 1e9;
         VertexPtr min_vertex = nullptr;
         bool flag_pass = false;
+
+        // doc sbnd_xin/docs/pr/75 -- the operating point in force this event.
+        // Recorded even when the run below bails, so a label can always be
+        // read back against the thresholds it was produced under.
+        if (m_vertex_scoreboard) {
+            m_vtx_board.dl_ran   = true;
+            m_vtx_board.dl_rerank = flag_rerank;
+            m_vtx_board.dl_top_k  = dl_vtx_top_k;
+            m_vtx_board.dl_min_accept_score = dl_vtx_min_accept_score;
+            m_vtx_board.dl_score_scale      = dl_vtx_score_scale;
+            m_vtx_board.route = "dl-failed";   // overwritten at every real exit
+        }
 
         if (!flag_rerank) {
             // ===================================================================
@@ -4198,6 +4271,20 @@ bool PatternAlgorithms::determine_overall_main_vertex_DL(
             // Distance cut
             if (min_dis > dl_vtx_cut) flag_pass = false;
 
+            // doc pr/75: the legacy (rerank=false) branch produces no
+            // composite score at all -- only a distance gate -- so its rows
+            // carry dl_score/snap_dis and nothing else.  SBND production pins
+            // dl_vtx_rerank=true, so this branch is not the one a scan sees.
+            if (m_vertex_scoreboard) {
+                m_vtx_board.route = flag_pass ? "dl-legacy-accept" : "dl-legacy-reject";
+                if (min_vertex) {
+                    auto& row = pr75_row(m_vtx_board, min_vertex);
+                    row.dl_snapped = true;
+                    row.snap_dis   = min_dis / units::cm;
+                    row.dl_winner  = flag_pass;
+                }
+            }
+
         } else {
             // ===================================================================
             // RERANK PATH: top-K voxels, snap each to nearest ProtoVertex,
@@ -4232,6 +4319,21 @@ bool PatternAlgorithms::determine_overall_main_vertex_DL(
             SPDLOG_LOGGER_TRACE(s_log,
                 "  DL top-{} scores in [{:.4f}, {:.4f}] (scale: [-1,+1]; near 0 = model uncertain)",
                 K, dl_score_min, dl_score_max);
+            // doc sbnd_xin/docs/pr/75 -- the raw net output, before any snap
+            // or geometry.  These are the only numbers in the chain that come
+            // from the model itself; everything else in a row is toolkit
+            // arithmetic on top of them.
+            if (m_vertex_scoreboard) {
+                for (int i = 0; i < K; ++i) {
+                    DLVoxelRow vr;
+                    vr.rank = i;
+                    vr.x = dl_voxels[i].pred_pt.x() / units::cm;
+                    vr.y = dl_voxels[i].pred_pt.y() / units::cm;
+                    vr.z = dl_voxels[i].pred_pt.z() / units::cm;
+                    vr.dl_score = dl_voxels[i].dl_score;
+                    m_vtx_board.voxels.push_back(vr);
+                }
+            }
             {
                 double dl_mean = 0;
                 for (const auto& v : dl_voxels) dl_mean += v.dl_score;
@@ -4263,7 +4365,10 @@ bool PatternAlgorithms::determine_overall_main_vertex_DL(
                 if (it == snap_map.end() || vox.dl_score > it->second.dl_score)
                     snap_map[best_vtx] = {best_vtx, best_dis, vox.dl_score, vi};
             }
-            if (snap_map.empty()) return false;
+            if (snap_map.empty()) {
+                if (m_vertex_scoreboard) m_vtx_board.route = "dl-no-candidates";
+                return false;
+            }
 
             std::vector<SnappedCand> snapped;
             snapped.reserve(snap_map.size());
@@ -4360,6 +4465,17 @@ bool PatternAlgorithms::determine_overall_main_vertex_DL(
                         vtx->cluster()->get_cluster_id(), main_cluster->get_cluster_id(),
                         vtx_pt.x()/units::cm, vtx_pt.y()/units::cm, vtx_pt.z()/units::cm,
                         sc.snap_dis/units::cm);
+                    // doc pr/75: record the skip.  A guard-skipped candidate
+                    // has all-zero terms BY OMISSION, not by measurement --
+                    // the flag is what tells the two apart downstream.
+                    if (m_vertex_scoreboard) {
+                        auto& row = pr75_row(m_vtx_board, vtx);
+                        row.dl_snapped = true;
+                        row.voxel_rank = sc.voxel_rank;
+                        row.dl_score   = sc.dl_score;
+                        row.snap_dis   = sc.snap_dis / units::cm;
+                        row.skipped_by_swap_guard = true;
+                    }
                     continue;
                 }
 
@@ -4414,6 +4530,26 @@ bool PatternAlgorithms::determine_overall_main_vertex_DL(
                     L_host/units::cm, sc.snap_dis/units::cm,
                     s_dl, s_snap, s_fwd_z, s_clen, s_isol, s_main, s_fv, score);
 
+                // doc sbnd_xin/docs/pr/75 -- the same seven terms the TRACE
+                // line above prints, in a form a scan can join and a tuning
+                // fit can re-weight.  dl_winner is set after the loop.
+                if (m_vertex_scoreboard) {
+                    auto& row = pr75_row(m_vtx_board, vtx);
+                    row.dl_snapped  = true;
+                    row.voxel_rank  = sc.voxel_rank;
+                    row.dl_score    = sc.dl_score;
+                    row.snap_dis    = sc.snap_dis / units::cm;
+                    row.host_length = L_host / units::cm;
+                    row.s_dl    = s_dl;
+                    row.s_snap  = s_snap;
+                    row.s_fwd_z = s_fwd_z;
+                    row.s_clen  = s_clen;
+                    row.s_isol  = s_isol;
+                    row.s_main  = s_main;
+                    row.s_fv    = s_fv;
+                    row.total   = score;
+                }
+
                 if (score > best_score) {
                     best_score      = score;
                     best_vtx_rerank = vtx;
@@ -4430,6 +4566,16 @@ bool PatternAlgorithms::determine_overall_main_vertex_DL(
             // on long main-cluster candidates at 5-8 cm snap distance).
             flag_pass = (min_vertex != nullptr)
                      && (best_score >= dl_vtx_min_accept_score);
+
+            // doc pr/75: the rerank verdict and the winner it produced.  Note
+            // a later two-end-break veto can still overturn flag_pass -- that
+            // rewrites `route` below, which is why route is the field to read,
+            // not this one.
+            if (m_vertex_scoreboard) {
+                m_vtx_board.dl_best_score = best_score;
+                m_vtx_board.route = flag_pass ? "dl-rerank-accept" : "dl-rerank-reject";
+                if (best_vtx_rerank) pr75_row(m_vtx_board, best_vtx_rerank).dl_winner = true;
+            }
 
             if (flag_pass) {
                 SPDLOG_LOGGER_TRACE(s_log,
@@ -4470,8 +4616,15 @@ bool PatternAlgorithms::determine_overall_main_vertex_DL(
                     "determine_overall_main_vertex_DL: keeping protected two-end-break "
                     "vertex over the DL choice (doc pr/48)");
                 flag_pass = false;
+                // doc pr/75: doc pr/52 §1 route 6.  Overwrites the rerank
+                // verdict recorded above -- the DL won its own stage and was
+                // then overruled, which is a distinct failure class from a
+                // rerank reject and must not be conflated with it in a scan.
+                if (m_vertex_scoreboard) m_vtx_board.route = "dl-veto-protected";
             }
         }
+
+        if (m_vertex_scoreboard) m_vtx_board.dl_accepted = flag_pass;
 
         if (flag_pass) {
             flag_change = true;

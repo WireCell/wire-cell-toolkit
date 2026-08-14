@@ -137,6 +137,9 @@ namespace WireCell::Clus {
         // verdict and its ten per-test flags).  See the definition for why the
         // legacy-TMVA slots are left out.
         Configuration dump_tagger(Facade::Grouping& grouping) const;
+        /// doc sbnd_xin/docs/pr/75 -- how the neutrino vertex was chosen.
+        /// Empty object when the `vertex_scoreboard` knob was off.
+        Configuration dump_vertex_scoreboard(Facade::Grouping& grouping) const;
         Configuration dump_track_shower(Facade::Grouping& grouping) const;
         Configuration dump_steiner(Facade::Grouping& grouping) const;
         Configuration dump_proj(Facade::Grouping& grouping) const;

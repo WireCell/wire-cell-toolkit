@@ -289,6 +289,11 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
         m_dl_weights = Persist::resolve(dl_weights_raw);
         if (m_dl_weights.empty()) {
             SPDLOG_LOGGER_WARN(log, "TaggerCheckNeutrino: dl_weights path not found: {}", dl_weights_raw);
+            // doc sbnd_xin/docs/pr/75: a failed resolve leaves m_dl_weights
+            // EMPTY, so at the call site doc pr/52 route 3 is indistinguishable
+            // from route 1 ("DL never configured").  Remember which it was --
+            // it is the only way the scoreboard can tell them apart.
+            m_dl_weights_missing = true;
         }
     }
     m_dl_vtx_cut              = get(config, "dl_vtx_cut",              m_dl_vtx_cut);
@@ -311,6 +316,7 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_sgp_sample_step         = get(config, "sgp_sample_step",         m_sgp_sample_step);   // cm
     m_sgp_point_radius        = get(config, "sgp_point_radius",        m_sgp_point_radius);  // cm
     m_sgp_edge_probe          = get(config, "sgp_edge_probe",          m_sgp_edge_probe);
+    m_vertex_scoreboard       = get(config, "vertex_scoreboard",       m_vertex_scoreboard);
     // doc sbnd_xin/docs/pr/51 round 6: weak-charge deficit term (0 = legacy round-5 flavor).
     m_sgp_weak_scale          = get(config, "sgp_weak_scale",          m_sgp_weak_scale);
     m_sgp_weak_qref           = get(config, "sgp_weak_qref",           m_sgp_weak_qref);     // charge units
@@ -607,6 +613,7 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["sgp_sample_step"]         = m_sgp_sample_step;      // doc pr/51 round 5: cm; edge-interior sampling step (inert at scale 0)
     cfg["sgp_point_radius"]        = m_sgp_point_radius;     // doc pr/51 round 5: cm; test_good_point radius (inert at scale 0)
     cfg["sgp_edge_probe"]          = m_sgp_edge_probe;       // doc pr/73: false = legacy (per-edge DEBUG sentinel never emits)
+    cfg["vertex_scoreboard"]       = m_vertex_scoreboard;    // doc pr/75: false = legacy (no vertex scoreboard recorded)
     cfg["sgp_weak_scale"]          = m_sgp_weak_scale;       // doc pr/51 round 6: 0 = legacy (round-5 gap flavor verbatim)
     cfg["sgp_weak_qref"]           = m_sgp_weak_qref;        // doc pr/51 round 6: charge ref, calc_charge_wcp units (inert at weak scale 0)
     cfg["sgp_max_sep"]             = m_sgp_max_sep;          // doc pr/73 round 2 F3a: cm; NEGATIVE = legacy (no cap). 0 is a real cap, so the off-test is < 0, not <= 0
@@ -981,6 +988,7 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
     pattern_algos.m_sgp_sample_step     = m_sgp_sample_step * units::cm;       // cm -> internal
     pattern_algos.m_sgp_point_radius    = m_sgp_point_radius * units::cm;      // cm -> internal
     pattern_algos.m_sgp_edge_probe      = m_sgp_edge_probe;                    // doc pr/73: diagnostic-only
+    pattern_algos.m_vertex_scoreboard   = m_vertex_scoreboard;                 // doc pr/75: diagnostic-only
     // doc pr/51 round 6: weak-charge deficit term (charge units, no conversion).
     pattern_algos.m_sgp_weak_scale      = m_sgp_weak_scale;
     pattern_algos.m_sgp_weak_qref       = m_sgp_weak_qref;
@@ -1672,6 +1680,29 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
     m_track_fitter->set_showers(showers);
     m_track_fitter->set_kine_info(kine_info);
     m_track_fitter->set_tagger_info(tagger_info);
+
+    // doc sbnd_xin/docs/pr/75 -- stash the vertex scoreboard for PrDisplayDump.
+    // Here and not earlier on purpose: this point is AFTER pr/50's
+    // snap_main_vertex_to_kink and the final improve_vertex, so final_vertex_id
+    // is the vertex the display actually draws, and a mismatch against
+    // main_vertex in the dump means the stash moved.
+    if (m_vertex_scoreboard) {
+        auto& board = pattern_algos.m_vtx_board;
+        board.filled = true;
+        board.weights_missing = m_dl_weights_missing;
+        if (!board.dl_ran) board.route = "dl-not-run";
+        if (final_main_vertex) {
+            const auto pt = final_main_vertex->fit().valid()
+                          ? final_main_vertex->fit().point : final_main_vertex->wcpt().point;
+            const auto* cl = final_main_vertex->cluster();
+            board.final_vertex_id = (cl ? cl->get_cluster_id() : 0) * 1000
+                                  + static_cast<int>(final_main_vertex->get_graph_index());
+            board.final_x = pt.x() / units::cm;
+            board.final_y = pt.y() / units::cm;
+            board.final_z = pt.z() / units::cm;
+        }
+        m_track_fitter->set_vertex_scoreboard(board);
+    }
 
     // Merge every per-cluster fill_fitted_charge_2d snapshot into the flat
     // map that UbooneMagnifyTrackingVisitor::write_proj_data reads, so that

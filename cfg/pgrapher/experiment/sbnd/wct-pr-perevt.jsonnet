@@ -1487,6 +1487,16 @@ function(
     // dangling PF roots on 18255-285567.
     // Escape for A/B: -A sgp_max_sep=-1 (or SBND_SGP_MAX_SEP=-1).
     sgp_max_sep = 3.0,
+    // doc sbnd_xin/docs/pr/75 -- record, per event, HOW the neutrino vertex
+    // was chosen: compare_main_vertices' additive score per candidate, the DL
+    // top-K voxels, the seven rerank composite terms, and the accept route
+    // (doc pr/52 sec 1).  PrDisplayDump emits it as "vertex_scoreboard" so a
+    // hand scan can rank candidates and become acceptance-tuning input.
+    // Pure recording -- no decision reads it.  C++ default false = legacy;
+    // false omits the key => byte-identical compiled config.
+    // Validation: -A vertex_scoreboard=true (or SBND_VERTEX_SCOREBOARD=true;
+    // the driver turns it on automatically for PR_EXTRA_STAGES=pr_display).
+    vertex_scoreboard = false,
     // doc pr/51 round 7 -- robust vertex fit (dynamic per-leg re-seat-free
     // direction windows for MyFCN, disagreement-gated, relaxed prior on
     // substituted 2-leg vertices).  C++ defaults: robust false, main_only
@@ -1877,6 +1887,7 @@ function(
                              sgp_weak_qref=sgp_weak_qref,
                              sgp_edge_probe=sgp_edge_probe,
                              sgp_max_sep=sgp_max_sep,
+                             vertex_scoreboard=vertex_scoreboard,
                              mvfit_robust=mvfit_robust,
                              mvfit_main_only=mvfit_main_only,
                              mvfit_min_len=mvfit_min_len,

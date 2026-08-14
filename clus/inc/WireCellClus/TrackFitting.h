@@ -6,6 +6,7 @@
 #include "WireCellClus/PRGraph.h"
 #include "WireCellClus/PRShower.h"
 #include "WireCellClus/NeutrinoTaggerInfo.h"
+#include "WireCellClus/PRVertexScoreboard.h"
 
 #include <Eigen/IterativeLinearSolvers>
 #include <unordered_map>
@@ -262,6 +263,15 @@ namespace WireCell::Clus {
         void set_tagger_info(PR::TaggerInfo ti) { m_tagger_info = std::move(ti); }
         const PR::TaggerInfo& get_tagger_info() const { return m_tagger_info; }
         PR::TaggerInfo& get_tagger_info_mutable() { return m_tagger_info; }
+
+        /// Store / retrieve the per-event vertex scoreboard (doc
+        /// sbnd_xin/docs/pr/75).  Stashed by TaggerCheckNeutrino beside
+        /// set_tagger_info, i.e. AFTER snap_main_vertex_to_kink and the final
+        /// improve_vertex, and read by PrDisplayDump.  Empty (filled==false)
+        /// unless the `vertex_scoreboard` knob was on -- read that as "no
+        /// scoreboard taken", never as "no candidates".
+        void set_vertex_scoreboard(PR::VertexScoreboard vsb) { m_vertex_scoreboard = std::move(vsb); }
+        const PR::VertexScoreboard& get_vertex_scoreboard() const { return m_vertex_scoreboard; }
 
         void clear_graph();
 
@@ -782,6 +792,9 @@ namespace WireCell::Clus {
         // Kinematics and tagger features (set by TaggerCheckNeutrino)
         PR::KineInfo   m_kine_info{};
         PR::TaggerInfo m_tagger_info{};
+        // doc sbnd_xin/docs/pr/75 -- diagnostic only, empty unless the
+        // vertex_scoreboard knob was on.
+        PR::VertexScoreboard m_vertex_scoreboard{};
 
         // =====================================================================
         // HYBRID CACHE IMPLEMENTATION
