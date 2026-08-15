@@ -60,12 +60,44 @@ namespace WireCell::Clus::PR {
         /// Host cluster total track length in cm (the s_clen input), kept
         /// because it is the strongest geometric signal in the composite.
         double host_length{0};
+
+        // ---- doc sbnd_xin/docs/pr/79 §10 -- dl_vtx_harvest (knob, C++
+        // default false; effective only with vertex_scoreboard).  Stage-1
+        // features compare_main_vertices computes and then discards, recorded
+        // for future learned-component training on the LIVE distribution.
+        // hv_filled false => this row never passed through the harvest block
+        // (all-showers branch, single-candidate branch, never a candidate),
+        // NOT "the features were zero".
+        bool   hv_filled{false};
+        int    hv_n_proton_in{-1};   ///< protons entering via weak/undirected neighbour
+        int    hv_n_proton_out{-1};  ///< protons leaving
+        double hv_z_prior{0};        ///< the subtracted (z - min_z)/scale term
+        int    hv_n_tracks{-1};      ///< non-shower segments at the vertex
+        int    hv_n_showers{-1};     ///< shower segments; degree = tracks + showers
+        bool   hv_in_fv{false};      ///< the +0.5 fiducial test result
+        double hv_conflicts{-1};     ///< calc_conflict_maps scalar (-1 = not computed)
+        double hv_reduced_chi2{-1};  ///< vertex fit reduced chi2 (-1 = fit invalid)
     };
 
     struct DLVoxelRow {
         int rank{-1};
         double x{0}, y{0}, z{0};   ///< cm
         double dl_score{0};
+    };
+
+    /// doc pr/79 §10 -- one candidate of compare_main_vertices_global (the
+    /// scorer that decides cluster swaps on the reject route).  Kept separate
+    /// from rows[]: global candidates may sit on clusters with no stage-1 or
+    /// DL row, and the global score is a different stage with different
+    /// semantics than trad_score.  Filled only under dl_vtx_harvest.
+    struct GlobalVertexScoreRow {
+        int vertex_id{-1};
+        int cluster_id{-1};
+        double x{0}, y{0}, z{0};   ///< cm, fit-else-wcpt (pr75 convention)
+        double score{0};
+        bool is_main_cluster{false};
+        bool in_fv{false};
+        bool winner{false};
     };
 
     struct VertexScoreboard {
@@ -107,6 +139,38 @@ namespace WireCell::Clus::PR {
         /// improve_vertex, so this is the position the display draws.
         int    final_vertex_id{-1};
         double final_x{0}, final_y{0}, final_z{0};
+
+        // ---- doc pr/79 §10 -- dl_vtx_harvest.  All below filled only when
+        // the harvest knob (AND vertex_scoreboard) is on; emitted by
+        // PrDisplayDump only when `harvest` is true, so harvest-off calib
+        // JSON is byte-identical to pre-knob output.
+        bool harvest{false};
+        /// The EXACT live SCN input cloud (pre-voxelization; voxelization at
+        /// 0.5 cm happens in pyutil SCN_Vertex.py from these floats), cm and
+        /// scaled charge, in build order.  The leading cloud_n_vertex_rows
+        /// entries align 1:1 with cloud_vertex_ids (joins rows[].vertex_id);
+        /// the rest are segment-interior fit points.  ORDER IS LOAD-BEARING
+        /// -- never sort.  float, not double: float(x) round-trips exactly
+        /// through the JSON double, reproducing the live network input.
+        std::vector<float> cloud_x, cloud_y, cloud_z, cloud_q;
+        int cloud_n_vertex_rows{0};
+        std::vector<int> cloud_vertex_ids;
+        double cloud_q_scale{0}, cloud_q_offset{0};  ///< dQdx scale/offset used for q
+        /// map_cluster_main_vertices[main_cluster] at DL entry -- the
+        /// traditional answer the reject route would inherit, before any
+        /// global cluster swap.
+        int hv_trad_main_vertex_id{-1};
+        bool global_ran{false};     ///< compare_main_vertices_global executed
+        int  global_winner_id{-1};
+        std::vector<GlobalVertexScoreRow> global_rows;
+        /// Vertices chosen by determine_main_vertex's single-candidate
+        /// branch (compare_main_vertices never ran on their cluster) and
+        /// winners of the non-additive compare_main_vertices_all_showers.
+        /// Board-level ID LISTS, not rows: harvest must not add rows[]
+        /// entries the pr/75 baseline board would not have, or rows-based
+        /// candidate-set identity across arms breaks.
+        std::vector<int> hv_single_candidate_ids;
+        std::vector<int> hv_all_showers_winner_ids;
 
         void clear() { *this = VertexScoreboard{}; }
     };

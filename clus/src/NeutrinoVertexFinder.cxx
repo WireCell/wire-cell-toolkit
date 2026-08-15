@@ -1182,6 +1182,14 @@ VertexPtr PatternAlgorithms::compare_main_vertices(Graph& graph, Facade::Cluster
         } else {
             map_vertex_num[vtx] -= (n_proton_in - n_proton_out) / 4.0 - (n_proton_in + n_proton_out) / 8.0;
         }
+
+        // doc pr/79 §10 -- record the counts the block above just consumed.
+        if (m_vtx_harvest) {
+            auto& row = pr75_row(m_vtx_board, vtx);
+            row.hv_filled       = true;
+            row.hv_n_proton_in  = n_proton_in;
+            row.hv_n_proton_out = n_proton_out;
+        }
     }
     
     // Score based on z position (prefer forward/upstream vertices)
@@ -1254,6 +1262,10 @@ VertexPtr PatternAlgorithms::compare_main_vertices(Graph& graph, Facade::Cluster
     for (auto vtx : scored) {
         double num_conflicts = calc_conflict_maps(graph, vtx);
         map_vertex_num[vtx] -= num_conflicts / 4.0;
+        // doc pr/79 §10 -- the scalar only; the sub-features live in locals
+        // of calc_conflict_maps and exposing them would refactor production
+        // code (M10).
+        if (m_vtx_harvest) pr75_row(m_vtx_board, vtx).hv_conflicts = num_conflicts;
     }
     
     // Find the vertex with maximum score
@@ -1280,6 +1292,36 @@ VertexPtr PatternAlgorithms::compare_main_vertices(Graph& graph, Facade::Cluster
             row.trad_scored = true;
             row.trad_score  = it->second;
             row.trad_winner = (vtx == max_vertex);
+        }
+    }
+
+    // doc pr/79 §10 -- harvest the remaining per-candidate stage-1 features.
+    // Same discipline as the pr/75 block above: iterate `scored` (vector,
+    // deterministic), RE-derive the quantities so the legacy loops stay
+    // textually untouched, mutate nothing the selectors read.  The
+    // descriptor-gated features keep their -1/-0 sentinels on
+    // descriptor-invalid candidates, mirroring which legacy blocks skipped
+    // them.
+    if (m_vtx_harvest) {
+        for (auto vtx : scored) {
+            auto& row = pr75_row(m_vtx_board, vtx);
+            row.hv_in_fv = fiducial_utils &&
+                fiducial_utils->inside_fiducial_volume(vtx_pt(vtx));
+            row.hv_reduced_chi2 = vtx->fit().valid() ? vtx->fit().reduced_chi2 : -1;
+            if (!vtx->descriptor_valid()) continue;
+            row.hv_z_prior = (vtx_pt(vtx).z() - min_z) / m_vertex_z_prior_scale;
+            int n_tracks = 0, n_showers = 0;
+            auto vd = vtx->get_descriptor();
+            for (auto e_it : sorted_out_edges(vd, graph)) {
+                SegmentPtr sg = graph[e_it].segment;
+                if (!sg) continue;
+                bool is_shower = sg->flags_any(SegmentFlags::kShowerTrajectory) ||
+                                 sg->flags_any(SegmentFlags::kShowerTopology) ||
+                                 (sg->has_particle_info() && std::abs(sg->particle_info()->pdg()) == 11);
+                (is_shower ? n_showers : n_tracks)++;
+            }
+            row.hv_n_tracks  = n_tracks;
+            row.hv_n_showers = n_showers;
         }
     }
 
@@ -3387,6 +3429,12 @@ void PatternAlgorithms::determine_main_vertex(Graph& graph, Facade::Cluster& clu
             SPDLOG_LOGGER_TRACE(s_log, "determine_main_vertex: cluster {} all-showers, {} candidates",
                 cluster.get_cluster_id(), main_vertex_candidates.size());
             main_vertex = compare_main_vertices_all_showers(graph, cluster, main_vertex_candidates, track_fitter, dv, particle_data, recomb_model);
+            // doc pr/79 §10 -- winner ID only, board-level: this scorer is
+            // non-additive (no comparable trad_score), and harvest must not
+            // create rows[] the pr/75 baseline would not have.
+            if (m_vtx_harvest && main_vertex) {
+                m_vtx_board.hv_all_showers_winner_ids.push_back(pr75_vertex_id(main_vertex));
+            }
         } else {
             s_log->trace("determine_main_vertex: cluster {} all-showers but no candidates, early return", cluster.ident());
             if (m_perf) {
@@ -3424,6 +3472,13 @@ void PatternAlgorithms::determine_main_vertex(Graph& graph, Facade::Cluster& clu
         if (main_vertex_candidates.size() == 1) {
             s_log->trace("determine_main_vertex: cluster {} single candidate, selecting directly", cluster.ident());
             main_vertex = main_vertex_candidates.front();
+            // doc pr/79 §10 -- compare_main_vertices never ran on this
+            // cluster; without the record the vertex would read as "never a
+            // candidate" when it was the unopposed winner.  Board-level ID,
+            // not a row (see PRVertexScoreboard.h).
+            if (m_vtx_harvest) {
+                m_vtx_board.hv_single_candidate_ids.push_back(pr75_vertex_id(main_vertex));
+            }
         } else if (main_vertex_candidates.size() > 1) {
             s_log->trace("determine_main_vertex: cluster {} multiple candidates, calling compare_main_vertices", cluster.ident());
             main_vertex = compare_main_vertices(graph, cluster, main_vertex_candidates);
@@ -3979,6 +4034,33 @@ VertexPtr PatternAlgorithms::compare_main_vertices_global(Graph& graph, std::vec
         }
     }
     
+    // doc pr/79 §10 -- record what the GLOBAL scorer compared (the scorer
+    // that decides cluster swaps on the reject route; it previously wrote
+    // nothing to the board).  vertex_candidates is already cluster-id sorted
+    // by the caller; read map_vertex_num with find() only (pr/75 rule).
+    // clear() first: last invocation per event wins, defensively.
+    if (m_vtx_harvest) {
+        m_vtx_board.global_ran = true;
+        m_vtx_board.global_winner_id = max_vertex ? pr75_vertex_id(max_vertex) : -1;
+        m_vtx_board.global_rows.clear();
+        for (auto vtx : vertex_candidates) {
+            auto it = map_vertex_num.find(vtx);
+            if (it == map_vertex_num.end()) continue;
+            PR::GlobalVertexScoreRow gr;
+            gr.vertex_id  = pr75_vertex_id(vtx);
+            gr.cluster_id = vtx->cluster() ? vtx->cluster()->get_cluster_id() : -1;
+            const auto pt = vtx->fit().valid() ? vtx->fit().point : vtx->wcpt().point;
+            gr.x = pt.x() / units::cm;
+            gr.y = pt.y() / units::cm;
+            gr.z = pt.z() / units::cm;
+            gr.score = it->second;
+            gr.is_main_cluster = (vtx->cluster() == &main_cluster);
+            gr.in_fv = fiducial_utils && fiducial_utils->inside_fiducial_volume(pt);
+            gr.winner = (vtx == max_vertex);
+            m_vtx_board.global_rows.push_back(gr);
+        }
+    }
+
     return max_vertex;
 }
 
@@ -4178,6 +4260,32 @@ bool PatternAlgorithms::determine_overall_main_vertex_DL(
         }
     }
     MS t_collect_pc(Clock::now() - t0); t0 = Clock::now();
+
+    // doc pr/79 §10 -- harvest the EXACT live SCN input (COPY, never move:
+    // SCN_Vertex consumes vec_xyzq below).  Build order preserved -- the
+    // leading cand_vertices.size() entries are the vertex block, the rest
+    // segment-interior points; offline voxelization from these floats
+    // reproduces the live network input bit-exactly.  Also the traditional
+    // answer the reject route would inherit, read by lookup (not iteration).
+    if (m_vtx_harvest) {
+        m_vtx_board.cloud_x = vec_xyzq[0];
+        m_vtx_board.cloud_y = vec_xyzq[1];
+        m_vtx_board.cloud_z = vec_xyzq[2];
+        m_vtx_board.cloud_q = vec_xyzq[3];
+        m_vtx_board.cloud_n_vertex_rows = static_cast<int>(cand_vertices.size());
+        m_vtx_board.cloud_vertex_ids.clear();
+        for (const auto& v : cand_vertices) {
+            m_vtx_board.cloud_vertex_ids.push_back(pr75_vertex_id(v));
+        }
+        m_vtx_board.cloud_q_scale  = dQdx_scale;
+        m_vtx_board.cloud_q_offset = dQdx_offset;
+        auto trad_it = map_cluster_main_vertices.find(main_cluster);
+        m_vtx_board.hv_trad_main_vertex_id =
+            (trad_it != map_cluster_main_vertices.end() && trad_it->second)
+                ? pr75_vertex_id(trad_it->second) : -1;
+        SPDLOG_LOGGER_DEBUG(s_log, "dl_vtx_harvest on: cloud {} pts ({} vertex rows)",
+                            vec_xyzq[0].size(), cand_vertices.size());
+    }
 
     if (vec_xyzq[0].empty()) {
         // doc pr/75: no point cloud to feed the net -- the DL never ran, which

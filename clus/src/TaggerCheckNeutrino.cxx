@@ -317,6 +317,11 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_sgp_point_radius        = get(config, "sgp_point_radius",        m_sgp_point_radius);  // cm
     m_sgp_edge_probe          = get(config, "sgp_edge_probe",          m_sgp_edge_probe);
     m_vertex_scoreboard       = get(config, "vertex_scoreboard",       m_vertex_scoreboard);
+    // doc sbnd_xin/docs/pr/79 §10: live-feature harvest (requires the board).
+    m_dl_vtx_harvest          = get(config, "dl_vtx_harvest",          m_dl_vtx_harvest);
+    if (m_dl_vtx_harvest && !m_vertex_scoreboard) {
+        SPDLOG_LOGGER_WARN(log, "TaggerCheckNeutrino: dl_vtx_harvest requires vertex_scoreboard; harvest inert");
+    }
     // doc sbnd_xin/docs/pr/51 round 6: weak-charge deficit term (0 = legacy round-5 flavor).
     m_sgp_weak_scale          = get(config, "sgp_weak_scale",          m_sgp_weak_scale);
     m_sgp_weak_qref           = get(config, "sgp_weak_qref",           m_sgp_weak_qref);     // charge units
@@ -614,6 +619,7 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["sgp_point_radius"]        = m_sgp_point_radius;     // doc pr/51 round 5: cm; test_good_point radius (inert at scale 0)
     cfg["sgp_edge_probe"]          = m_sgp_edge_probe;       // doc pr/73: false = legacy (per-edge DEBUG sentinel never emits)
     cfg["vertex_scoreboard"]       = m_vertex_scoreboard;    // doc pr/75: false = legacy (no vertex scoreboard recorded)
+    cfg["dl_vtx_harvest"]          = m_dl_vtx_harvest;       // doc pr/79 §10: false = legacy (no live-feature harvest; requires vertex_scoreboard)
     cfg["sgp_weak_scale"]          = m_sgp_weak_scale;       // doc pr/51 round 6: 0 = legacy (round-5 gap flavor verbatim)
     cfg["sgp_weak_qref"]           = m_sgp_weak_qref;        // doc pr/51 round 6: charge ref, calc_charge_wcp units (inert at weak scale 0)
     cfg["sgp_max_sep"]             = m_sgp_max_sep;          // doc pr/73 round 2 F3a: cm; NEGATIVE = legacy (no cap). 0 is a real cap, so the off-test is < 0, not <= 0
@@ -989,6 +995,8 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
     pattern_algos.m_sgp_point_radius    = m_sgp_point_radius * units::cm;      // cm -> internal
     pattern_algos.m_sgp_edge_probe      = m_sgp_edge_probe;                    // doc pr/73: diagnostic-only
     pattern_algos.m_vertex_scoreboard   = m_vertex_scoreboard;                 // doc pr/75: diagnostic-only
+    // doc pr/79 §10: the conjunction, so fill sites may assume the board is active.
+    pattern_algos.m_vtx_harvest         = m_vertex_scoreboard && m_dl_vtx_harvest;
     // doc pr/51 round 6: weak-charge deficit term (charge units, no conversion).
     pattern_algos.m_sgp_weak_scale      = m_sgp_weak_scale;
     pattern_algos.m_sgp_weak_qref       = m_sgp_weak_qref;
@@ -1689,6 +1697,7 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
     if (m_vertex_scoreboard) {
         auto& board = pattern_algos.m_vtx_board;
         board.filled = true;
+        board.harvest = pattern_algos.m_vtx_harvest;  // doc pr/79 §10: serializer's emission gate
         board.weights_missing = m_dl_weights_missing;
         if (!board.dl_ran) board.route = "dl-not-run";
         if (final_main_vertex) {

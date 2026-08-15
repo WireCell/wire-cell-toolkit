@@ -896,6 +896,14 @@ namespace WireCell::Clus::PR {
         bool   m_vertex_scoreboard{false};
         VertexScoreboard m_vtx_board;
 
+        // ---- doc sbnd_xin/docs/pr/79 §10 -- dl_vtx_harvest.  ALWAYS the AND
+        // vertex_scoreboard && dl_vtx_harvest (TaggerCheckNeutrino pushes the
+        // conjunction), so every m_vtx_harvest fill site may assume the board
+        // is active.  Recording only -- no decision reads it, and the same
+        // const-read discipline as m_vertex_scoreboard applies (never
+        // operator[] on map_vertex_num, never iterate pointer-keyed maps).
+        bool   m_vtx_harvest{false};
+
         // ---- doc sbnd_xin/docs/pr/31 §12 -- the §10.12 port-fidelity round:
         // the five surviving bug-class findings of the topology/PID/direction
         // audit (F5, F6, F3, F1, F4) plus the deliberately-dormant F7.  All

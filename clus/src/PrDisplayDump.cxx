@@ -714,7 +714,77 @@ Configuration Clus::PrDisplayDump::dump_vertex_scoreboard(Facade::Grouping& grou
         // All-zero terms with this set mean "removed before scoring", not
         // "scored zero".
         j["skipped_by_swap_guard"] = r->skipped_by_swap_guard;
+        // doc pr/79 §10 -- harvest-only keys.  Gated so harvest-off calib
+        // JSON (including scoreboard-on arms) stays byte-identical to
+        // pre-knob output.
+        if (b.harvest) {
+            j["hv_filled"] = r->hv_filled;
+            j["hv_n_proton_in"] = r->hv_n_proton_in;
+            j["hv_n_proton_out"] = r->hv_n_proton_out;
+            j["hv_z_prior"] = r->hv_z_prior;
+            j["hv_n_tracks"] = r->hv_n_tracks;
+            j["hv_n_showers"] = r->hv_n_showers;
+            j["hv_in_fv"] = r->hv_in_fv;
+            j["hv_conflicts"] = r->hv_conflicts;
+            j["hv_reduced_chi2"] = r->hv_reduced_chi2;
+        }
         out["rows"].append(j);
+    }
+
+    // doc pr/79 §10 -- board-level harvest payload: the exact live SCN input
+    // cloud (order load-bearing -- NEVER sort these arrays) plus the global
+    // scorer's rows (sorted by vertex_id, the stable-id rule).
+    if (b.harvest) {
+        out["harvest"] = true;
+        out["hv_trad_main_vertex_id"] = b.hv_trad_main_vertex_id;
+        // Sorted: fill order is per-cluster processing order; emit by the
+        // stable-id rule so re-runs and consumers see one canonical order.
+        auto ids_sorted = [](std::vector<int> v) { std::sort(v.begin(), v.end()); return v; };
+        out["hv_single_candidate_ids"] = Json::arrayValue;
+        for (int id : ids_sorted(b.hv_single_candidate_ids)) out["hv_single_candidate_ids"].append(id);
+        out["hv_all_showers_winner_ids"] = Json::arrayValue;
+        for (int id : ids_sorted(b.hv_all_showers_winner_ids)) out["hv_all_showers_winner_ids"].append(id);
+        Configuration cloud;
+        cloud["n_vertex_rows"] = b.cloud_n_vertex_rows;
+        cloud["q_scale"] = b.cloud_q_scale;
+        cloud["q_offset"] = b.cloud_q_offset;
+        cloud["vertex_ids"] = Json::arrayValue;
+        for (int id : b.cloud_vertex_ids) cloud["vertex_ids"].append(id);
+        cloud["x"] = Json::arrayValue;
+        cloud["y"] = Json::arrayValue;
+        cloud["z"] = Json::arrayValue;
+        cloud["q"] = Json::arrayValue;
+        for (float v : b.cloud_x) cloud["x"].append(v);
+        for (float v : b.cloud_y) cloud["y"].append(v);
+        for (float v : b.cloud_z) cloud["z"].append(v);
+        for (float v : b.cloud_q) cloud["q"].append(v);
+        out["hv_cloud"] = cloud;
+
+        Configuration g;
+        g["ran"] = b.global_ran;
+        g["winner_id"] = b.global_winner_id;
+        g["rows"] = Json::arrayValue;
+        std::vector<const PR::GlobalVertexScoreRow*> grows;
+        grows.reserve(b.global_rows.size());
+        for (const auto& r : b.global_rows) grows.push_back(&r);
+        std::sort(grows.begin(), grows.end(),
+                  [](const PR::GlobalVertexScoreRow* a, const PR::GlobalVertexScoreRow* c) {
+                      return a->vertex_id < c->vertex_id;
+                  });
+        for (const auto* r : grows) {
+            Configuration j;
+            j["vertex_id"] = r->vertex_id;
+            j["cluster_id"] = r->cluster_id;
+            j["x"] = r->x;
+            j["y"] = r->y;
+            j["z"] = r->z;
+            j["score"] = r->score;
+            j["is_main_cluster"] = r->is_main_cluster;
+            j["in_fv"] = r->in_fv;
+            j["winner"] = r->winner;
+            g["rows"].append(j);
+        }
+        out["hv_global"] = g;
     }
 
     return out;

@@ -449,6 +449,13 @@ public:
         // scan can become tuning input.  Pure recording; false = legacy =>
         // the board stays empty and the compiled config omits the key.
         bool   m_vertex_scoreboard{false};
+        // doc sbnd_xin/docs/pr/79 §10: live-feature harvest for DL-vertex
+        // training -- the exact SCN input cloud plus the traditional-path
+        // per-candidate features the scorers compute and discard.  Pure
+        // recording (no decision reads it); REQUIRES vertex_scoreboard
+        // (warned and inert otherwise).  false = legacy => key omitted from
+        // compiled config, calib JSON schema unchanged.
+        bool   m_dl_vtx_harvest{false};
         double m_beam_window_low{0};   // beam window [low, high) on cluster_t0 (matched flash time, WCT units).
         double m_beam_window_high{0};  // low >= high (default) disables the gate: uBooNE single-main behavior.
         bool m_nu_skip_cosmic{false};  // if true (beam-gate only), skip in-window mains already tagged
