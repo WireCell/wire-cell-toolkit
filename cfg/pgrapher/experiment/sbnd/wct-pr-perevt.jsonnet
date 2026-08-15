@@ -1495,6 +1495,23 @@ function(
     // dangling PF roots on 18255-285567.
     // Escape for A/B: -A sgp_max_sep=-1 (or SBND_SGP_MAX_SEP=-1).
     sgp_max_sep = 3.0,
+    // doc sbnd_xin/docs/pr/83 -- orient break_segment() splits to the wcpt
+    // path (find_vertices) instead of boost source/target.  On a reversed
+    // graph edge (routinely produced by the examine_vertices re-routes) the
+    // legacy slice hands each child the WRONG half of the parent's
+    // wcpts/fits: vertex fit points land 67-118 cm from their wcpts, both
+    // children's fitted trajectories stack onto one arm, and the fit-vs-wcpt
+    // divergence seeds runaway vertex-activity bridges (mcp1k
+    // 283040/59899/72586 -- "many overlapping tracks on one long track").
+    // Prototype parity: WCP resolves start/end by wcpt-index equality tested
+    // in both orientations (NeutrinoID_proto_vertex.h:595-601) and cannot
+    // cross.  C++ default false.
+    // Escape for A/B: -A break_seg_orient=false (or SBND_BREAK_SEG_ORIENT=false).
+    // SBND PRODUCTION ON 2026-08-15 (doc pr/83 gates: knob-off 1022/1022
+    // byte-identical; on-arm footprint 25->12 findings, 0 new; both >1cm
+    // vertex movers land on the owner's hand labels).  Owner pre-authorized
+    // the flip conditional on those gates.
+    break_seg_orient = true,
     // doc sbnd_xin/docs/pr/75 -- record, per event, HOW the neutrino vertex
     // was chosen: compare_main_vertices' additive score per candidate, the DL
     // top-K voxels, the seven rerank composite terms, and the accept route
@@ -1905,6 +1922,7 @@ function(
                              sgp_weak_qref=sgp_weak_qref,
                              sgp_edge_probe=sgp_edge_probe,
                              sgp_max_sep=sgp_max_sep,
+                             break_seg_orient=break_seg_orient,
                              vertex_scoreboard=vertex_scoreboard,
                              dl_vtx_harvest=dl_vtx_harvest,
                              mvfit_robust=mvfit_robust,
