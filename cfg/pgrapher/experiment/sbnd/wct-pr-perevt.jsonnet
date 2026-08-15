@@ -732,8 +732,10 @@ function(
     dl_weights     = 'uboone/scn_vtx/t48k-m16-l5-lr5d-res0.5-CP24.pth',
     // DL re-rank operating point (TaggerCheckNeutrino), threaded as TLAs for
     // A/B runs (doc pr/79).  min_accept 4.0 -> 10.0 adopted 2026-08-15
-    // (owner, doc pr/79: +36/473 on the hand-scan live A/B); top_k=5
-    // unchanged pending the pr/79 step-3 arm.  Pass 4.0 for the pre-flip arm.
+    // (owner, doc pr/79: +36/473 on the hand-scan live A/B); top_k=5 kept —
+    // the pr/79 step-3 k=20 arm measured exactly zero realized gain (0
+    // fixed / 0 regressed; admitted candidates all lose the rerank).
+    // Pass 4.0 for the pre-flip arm.
     dl_vtx_min_accept_score = 10.0,
     dl_vtx_top_k   = 5,
     // Beam window [low, high) in us on cluster_t0 (= matched flash time) selecting
