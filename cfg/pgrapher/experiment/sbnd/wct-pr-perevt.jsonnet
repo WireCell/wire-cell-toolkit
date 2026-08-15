@@ -1505,6 +1505,14 @@ function(
     // Validation: -A vertex_scoreboard=true (or SBND_VERTEX_SCOREBOARD=true;
     // the driver turns it on automatically for PR_EXTRA_STAGES=pr_display).
     vertex_scoreboard = false,
+    // doc sbnd_xin/docs/pr/79 sec 10 -- live-feature harvest for DL-vertex
+    // training: the exact live SCN input cloud (pre-voxelization) + the
+    // traditional-path per-candidate features (proton topology, z prior,
+    // degree, FV, conflicts, fit chi2, global-scorer rows).  Recording only;
+    // REQUIRES vertex_scoreboard (the runner auto-enables it).  C++ default
+    // false = legacy; false omits the key => byte-identical compiled config.
+    // Validation: -A dl_vtx_harvest=true (or SBND_DL_VTX_HARVEST=true).
+    dl_vtx_harvest = false,
     // doc pr/51 round 7 -- robust vertex fit (dynamic per-leg re-seat-free
     // direction windows for MyFCN, disagreement-gated, relaxed prior on
     // substituted 2-leg vertices).  C++ defaults: robust false, main_only
@@ -1898,6 +1906,7 @@ function(
                              sgp_edge_probe=sgp_edge_probe,
                              sgp_max_sep=sgp_max_sep,
                              vertex_scoreboard=vertex_scoreboard,
+                             dl_vtx_harvest=dl_vtx_harvest,
                              mvfit_robust=mvfit_robust,
                              mvfit_main_only=mvfit_main_only,
                              mvfit_min_len=mvfit_min_len,
