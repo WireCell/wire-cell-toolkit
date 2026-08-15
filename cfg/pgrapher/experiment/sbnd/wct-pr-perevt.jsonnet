@@ -731,10 +731,10 @@ function(
     //     grep -c "DL vertex failed" <log>   # expect 0
     dl_weights     = 'uboone/scn_vtx/t48k-m16-l5-lr5d-res0.5-CP24.pth',
     // DL re-rank operating point (TaggerCheckNeutrino), threaded as TLAs for
-    // A/B runs (doc pr/79).  Defaults = the values pinned in clus.jsonnet's
-    // tagger_check_neutrino since 2026-07-30, so leaving them unset compiles
-    // byte-identical pre-threading config.
-    dl_vtx_min_accept_score = 4.0,
+    // A/B runs (doc pr/79).  min_accept 4.0 -> 10.0 adopted 2026-08-15
+    // (owner, doc pr/79: +36/473 on the hand-scan live A/B); top_k=5
+    // unchanged pending the pr/79 step-3 arm.  Pass 4.0 for the pre-flip arm.
+    dl_vtx_min_accept_score = 10.0,
     dl_vtx_top_k   = 5,
     // Beam window [low, high) in us on cluster_t0 (= matched flash time) selecting
     // the bundle that gets neutrino PR.  [0,0] disables the gate (then

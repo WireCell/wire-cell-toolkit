@@ -698,12 +698,14 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               // "DL vertex failed" (expect none).
               dl_weights='uboone/scn_vtx/t48k-m16-l5-lr5d-res0.5-CP24.pth',
               // DL re-rank operating point, threaded for A/B runs (doc pr/79).
-              // Defaults = the pinned values below as of 2026-07-30, so leaving
-              // them unset compiles byte-identical pre-threading config.
               // min_accept: rerank-total acceptance threshold for the DL route
               // (TaggerCheckNeutrino); top_k: DL voxel candidates admitted to
               // the reranker.
-              dl_vtx_min_accept_score=4.0,
+              // min_accept 4.0 -> 10.0 adopted 2026-08-15 (owner, doc pr/79):
+              // live A/B on the 473-label hand-scan measured +36/473 correct
+              // (322 -> 358; 51 fixed / 15 regressed, every regression's
+              // baseline DL total in [4,10)).  Pass 4.0 for the pre-flip arm.
+              dl_vtx_min_accept_score=10.0,
               dl_vtx_top_k=5,
               // beam_window: internal-unit [low, high] on the matched flash time
               // (cluster_t0).  DEFAULT = the SBND BNB gate after the
@@ -2508,7 +2510,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
        // DL (SCN) vertex ON by default -- see the clus_pr arg comment.
        dl_weights='uboone/scn_vtx/t48k-m16-l5-lr5d-res0.5-CP24.pth',
        // DL re-rank operating point -- see the clus_pr arg comment (doc pr/79).
-       dl_vtx_min_accept_score=4.0,
+       dl_vtx_min_accept_score=10.0,
        dl_vtx_top_k=5,
        beam_window=[0.2 * wc.us, 2.2 * wc.us],
        tgm_neutrino_candidate=true,
