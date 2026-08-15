@@ -2770,7 +2770,8 @@ bool PatternAlgorithms::snap_main_vertex_to_kink(Graph& graph, Facade::Cluster& 
     if (best_arm < 0) return false;
 
     const WireCell::Point K = arms[best_arm].pts[best.idx];
-    auto [ok, segs, vtx_new] = break_segment(graph, arms[best_arm].seg, K, particle_data, recomb_model, dv);
+    auto [ok, segs, vtx_new] = break_segment(graph, arms[best_arm].seg, K, particle_data, recomb_model, dv,
+                                             1e9*units::cm, m_break_seg_orient);
     if (!ok || !vtx_new) {
         SPDLOG_LOGGER_DEBUG(s_log, "snap_main_vertex_to_kink: cluster {} break_segment declined at ({:.2f},{:.2f},{:.2f})",
             cluster.ident(), K.x()/units::cm, K.y()/units::cm, K.z()/units::cm);

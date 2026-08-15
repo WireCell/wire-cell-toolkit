@@ -286,6 +286,26 @@ namespace WireCell::Clus::PR {
         double m_cathode_wide_kink_skirt{3*units::cm};
         double m_cathode_wide_kink_baseline{15*units::cm};
 
+        // ---- doc sbnd_xin/docs/pr/83: oriented break_segment splits ---------
+        //
+        // m_break_seg_orient -- passed as break_segment()'s orient_split at
+        // every PatternAlgorithms call site (break_two_end_dqdx,
+        // shower start-segment break, snap_main_vertex_to_kink).
+        // break_segment slices the parent's wcpts/fits into a front half and
+        // a back half but hands them to (boost source, boost target), which
+        // do NOT track path orientation; a reversed edge -- legal, and
+        // routinely produced by the examine_vertices re-routes -- yields
+        // crossed children: each carries the half that terminates at the
+        // OTHER vertex, the vertex fit points land on the wrong track ends
+        // (67-118 cm off on mcp1k 283040/59899/72586), the fitted
+        // trajectories of both children stack on one arm, and the
+        // fit-vs-wcpt divergence seeds runaway vertex-activity bridges.
+        // The prototype cannot cross: it resolves (start_v, end_v) by
+        // wcpt-index equality tested in both orientations
+        // (NeutrinoID_proto_vertex.h:595-601), so true = prototype parity
+        // via find_vertices().  C++ default false => byte-identical legacy.
+        bool   m_break_seg_orient{false};
+
         // ---- doc sbnd_xin/docs/pr/48: back-to-back track fixes --------------
         //
         // m_two_end_break -- the two-end residual-range break pass

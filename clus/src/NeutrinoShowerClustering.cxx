@@ -1338,7 +1338,8 @@ void PatternAlgorithms::shower_clustering_with_nv_from_vertices(Graph& graph, Ve
                 shower->set_start_segment(sg1, true);
             } else {
                 // Break segment at point
-                auto [success, seg_pair, new_vtx] = break_segment(graph, sg1, point, particle_data, recomb_model, dv);
+                auto [success, seg_pair, new_vtx] = break_segment(graph, sg1, point, particle_data, recomb_model, dv,
+                                                                  1e9*units::cm, m_break_seg_orient);
                 
                 if (!success || !new_vtx) {
                     shower->set_start_segment(sg1, true);

@@ -443,6 +443,13 @@ public:
         // over the cap, the base route is kept.  OFF-TEST IS `< 0`, not the
         // `<= 0` the scale knobs above use -- 0 is a meaningful cap here.
         double m_sgp_max_sep{-1};        // cm; < 0 = off (unbounded, legacy)
+        // doc sbnd_xin/docs/pr/83: orient break_segment() splits to the wcpt
+        // path (find_vertices) instead of boost source/target, which do not
+        // track orientation -- a reversed edge otherwise yields crossed
+        // children with vertex fits on the wrong track ends and stacked
+        // duplicate trajectories (mcp1k 283040/59899/72586).  Prototype
+        // parity (NeutrinoID_proto_vertex.h:595-601).  false = legacy.
+        bool   m_break_seg_orient{false};
         // doc sbnd_xin/docs/pr/75: record, per event, the numbers the two
         // vertex selectors compared (compare_main_vertices scores; DL top-K
         // voxels + the seven rerank terms + the accept decision) so a hand

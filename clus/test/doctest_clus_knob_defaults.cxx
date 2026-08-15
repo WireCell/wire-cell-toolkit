@@ -186,6 +186,9 @@ TEST_CASE("clus knob defaults: TaggerCheckNeutrino switches are all OFF")
     // excursion), so unlike the sgp scale knobs above this one cannot use 0 to
     // mean "off" and its off-test is `< 0`, not `<= 0`.
     CHECK_KNOB_NUM(cfg, "sgp_max_sep", -1.0);
+    // doc pr/83: oriented break_segment splits -- OFF (legacy slice by boost
+    // source/target; on a reversed edge each child gets the wrong half).
+    CHECK_KNOB_BOOL(cfg, "break_seg_orient", false);
     // doc pr/51 round 7: robust vertex fit -- master OFF (AddSegment
     // epilogue never runs); the ten satellites are inert while it is off.
     CHECK_KNOB_BOOL(cfg, "mvfit_robust", false);

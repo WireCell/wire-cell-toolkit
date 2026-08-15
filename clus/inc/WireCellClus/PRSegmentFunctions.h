@@ -23,9 +23,16 @@ namespace WireCell::Clus::PR {
     ///
     /// The point must be withing max_dist of the segment.
     ///
+    /// orient_split=true resolves the parent's (front, back) vertices with
+    /// find_vertices() before slicing, so each child carries the wcpt/fit
+    /// half that actually terminates at its vertices.  false = legacy:
+    /// slice by boost source/target, which do NOT track path orientation --
+    /// on a reversed edge each child gets the WRONG half (doc
+    /// sbnd_xin/docs/pr/83; C++ default false => byte-identical).
+    ///
     /// Returns true if the graph was modified.
     std::tuple<bool, std::pair<SegmentPtr, SegmentPtr>, VertexPtr> break_segment(Graph& graph, SegmentPtr seg, Point point, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, const IDetectorVolumes::pointer& dv,
-                       double max_dist=1e9*units::cm);
+                       double max_dist=1e9*units::cm, bool orient_split=false);
     // patter recognition
     // cathode_kink_xcut > 0 makes the kink search skip candidate fit points within
     // that distance of the cathode plane at cathode_x, where the transverse

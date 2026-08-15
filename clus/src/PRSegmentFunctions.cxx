@@ -1002,7 +1002,7 @@ namespace WireCell::Clus::PR {
 
 
 
-    std::tuple<bool, std::pair<SegmentPtr, SegmentPtr>, VertexPtr> break_segment(Graph& graph, SegmentPtr seg, Point point, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, const IDetectorVolumes::pointer& dv, double max_dist/*=1e9*/)
+    std::tuple<bool, std::pair<SegmentPtr, SegmentPtr>, VertexPtr> break_segment(Graph& graph, SegmentPtr seg, Point point, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, const IDetectorVolumes::pointer& dv, double max_dist/*=1e9*/, bool orient_split/*=false*/)
     {
         /// sanity checks
         if (! seg->descriptor_valid()) {
@@ -1052,11 +1052,24 @@ namespace WireCell::Clus::PR {
         SPDLOG_LOGGER_TRACE(s_log, "break_segment: Closest point found: {} / {} {} / {} points in fits", itfits - fits.begin(), fits.size(), itwcpts - wcpts.begin(), wcpts.size());
 
         
+        // doc sbnd_xin/docs/pr/83: with orient_split, resolve (front, back)
+        // vertices against the wcpt path BEFORE the edge is removed, so the
+        // front-half slice below goes to the vertex the path actually starts
+        // at.  Must run while seg's descriptor is still valid.
+        VertexPtr ov_front, ov_back;
+        if (orient_split) {
+            std::tie(ov_front, ov_back) = find_vertices(graph, seg);
+        }
+
         // update graph
         remove_segment(graph, seg);
 
         auto vtx1 = graph[vd1].vertex;
         auto vtx2 = graph[vd2].vertex;
+        if (orient_split && ov_front && ov_back) {
+            vtx1 = ov_front;
+            vtx2 = ov_back;
+        }
         auto vtx = make_vertex(graph);
 
         // WARNING: Boost graph edges have no inherent orientation — source(e)/target(e)
@@ -1064,6 +1077,8 @@ namespace WireCell::Clus::PR {
         // an oriented (start-vertex, end-vertex) pair should use find_vertices() in
         // PRGraph.cxx, which disambiguates by comparing the wcpts.front() distance to each
         // candidate vertex and returns (vertex nearest front, vertex nearest back).
+        // Legacy (orient_split=false) slices by source/target anyway: on a
+        // reversed edge each child gets the wrong half -- doc pr/83.
         auto seg1 = make_segment(graph, vtx1, vtx);
         auto seg2 = make_segment(graph, vtx, vtx2);
 

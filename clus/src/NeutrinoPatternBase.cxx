@@ -3037,7 +3037,8 @@ bool PatternAlgorithms::break_two_end_dqdx(Graph& graph, Facade::Cluster& cluste
     if (res.break_idx <= 0 || res.break_idx + 1 >= static_cast<int>(fits.size())) return false;
 
     const WireCell::Point break_pt = fits[res.break_idx].point;
-    auto [ok, segs, vtx] = break_segment(graph, cand, break_pt, particle_data, m_recomb_model, dv);
+    auto [ok, segs, vtx] = break_segment(graph, cand, break_pt, particle_data, m_recomb_model, dv,
+                                         1e9*units::cm, m_break_seg_orient);
     if (!ok || !vtx) return false;
     // break_segment does not associate the new vertex with a cluster; a
     // null-cluster vertex is invisible to determine_main_vertex's candidate

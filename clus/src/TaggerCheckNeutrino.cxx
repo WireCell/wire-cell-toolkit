@@ -327,6 +327,8 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_sgp_weak_qref           = get(config, "sgp_weak_qref",           m_sgp_weak_qref);     // charge units
     // doc sbnd_xin/docs/pr/73 round 2 F3a: route excursion cap (cm); < 0 = off.
     m_sgp_max_sep             = get(config, "sgp_max_sep",             m_sgp_max_sep);       // cm
+    // doc sbnd_xin/docs/pr/83: oriented break_segment splits; false = legacy.
+    m_break_seg_orient        = get(config, "break_seg_orient",        m_break_seg_orient);
     m_beam_window_low         = get(config, "beam_window_low",         m_beam_window_low);
     m_beam_window_high        = get(config, "beam_window_high",        m_beam_window_high);
     m_nu_skip_cosmic          = get(config, "nu_skip_cosmic",          m_nu_skip_cosmic);
@@ -623,6 +625,7 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["sgp_weak_scale"]          = m_sgp_weak_scale;       // doc pr/51 round 6: 0 = legacy (round-5 gap flavor verbatim)
     cfg["sgp_weak_qref"]           = m_sgp_weak_qref;        // doc pr/51 round 6: charge ref, calc_charge_wcp units (inert at weak scale 0)
     cfg["sgp_max_sep"]             = m_sgp_max_sep;          // doc pr/73 round 2 F3a: cm; NEGATIVE = legacy (no cap). 0 is a real cap, so the off-test is < 0, not <= 0
+    cfg["break_seg_orient"]        = m_break_seg_orient;     // doc pr/83: false = legacy (break_segment slices by boost source/target)
     cfg["clus_geom_helper"] = ""; // empty = no SCE vertex correction
     cfg["beam_window_low"] = m_beam_window_low;   // beam window on cluster_t0; low >= high disables the
     cfg["beam_window_high"] = m_beam_window_high; // gate (uBooNE single-main selection).
@@ -1003,6 +1006,8 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
     // doc pr/73 round 2 F3a: a LENGTH, so it takes the cm->internal conversion.
     // -1 * units::cm stays negative, so the `< 0` off-test survives it.
     pattern_algos.m_sgp_max_sep         = m_sgp_max_sep * units::cm;           // cm -> internal
+    // doc pr/83: oriented break_segment splits (bool, no conversion).
+    pattern_algos.m_break_seg_orient    = m_break_seg_orient;
     pattern_algos.m_sgp_dv   = m_dv;
     pattern_algos.m_sgp_pcts = m_pcts;
     pattern_algos.m_shower_topo_demote_len = m_shower_topo_demote_len * units::cm;  // cm -> internal
