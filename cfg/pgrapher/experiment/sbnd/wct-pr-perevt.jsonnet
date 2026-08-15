@@ -730,6 +730,12 @@ function(
     // falls back to the geometric vertex after one WARN line -- always
     //     grep -c "DL vertex failed" <log>   # expect 0
     dl_weights     = 'uboone/scn_vtx/t48k-m16-l5-lr5d-res0.5-CP24.pth',
+    // DL re-rank operating point (TaggerCheckNeutrino), threaded as TLAs for
+    // A/B runs (doc pr/79).  Defaults = the values pinned in clus.jsonnet's
+    // tagger_check_neutrino since 2026-07-30, so leaving them unset compiles
+    // byte-identical pre-threading config.
+    dl_vtx_min_accept_score = 4.0,
+    dl_vtx_top_k   = 5,
     // Beam window [low, high) in us on cluster_t0 (= matched flash time) selecting
     // the bundle that gets neutrino PR.  [0,0] disables the gate (then
     // tagger_check_neutrino falls back to uBooNE single-main selection, which on
@@ -1689,6 +1695,8 @@ function(
                              particle_dataset=pds.particle_dataset,
                              extra_uses=pds.all,
                              dl_weights=dl_weights,
+                             dl_vtx_min_accept_score=dl_vtx_min_accept_score,
+                             dl_vtx_top_k=dl_vtx_top_k,
                              beam_window=[t * wc.us for t in beam_window_us],
                              beam_window_only=beam_window_only,
                              nu_skip_cosmic=nu_skip_cosmic,

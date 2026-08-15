@@ -697,6 +697,14 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               // geometric vertex with a single WARN line -- grep the log for
               // "DL vertex failed" (expect none).
               dl_weights='uboone/scn_vtx/t48k-m16-l5-lr5d-res0.5-CP24.pth',
+              // DL re-rank operating point, threaded for A/B runs (doc pr/79).
+              // Defaults = the pinned values below as of 2026-07-30, so leaving
+              // them unset compiles byte-identical pre-threading config.
+              // min_accept: rerank-total acceptance threshold for the DL route
+              // (TaggerCheckNeutrino); top_k: DL voxel candidates admitted to
+              // the reranker.
+              dl_vtx_min_accept_score=4.0,
+              dl_vtx_top_k=5,
               // beam_window: internal-unit [low, high] on the matched flash time
               // (cluster_t0).  DEFAULT = the SBND BNB gate after the
               // frame_apply_at_caf correction, which is what production passes
@@ -1893,10 +1901,12 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
             // were inert while dl_weights was '' and went LIVE with the doc-pr/4
             // adoption, so SBND records the operating point it was validated at
             // (= the common/clus.jsonnet defaults as of 2026-07-30, hence the
-            // compiled JSON is unchanged by this pinning).
+            // compiled JSON is unchanged by this pinning).  min_accept and top_k
+            // are threaded from the clus_pr args (defaults identical to the old
+            // pinned literals => byte-identical when unset; doc pr/79).
             dl_vtx_rerank=true,
-            dl_vtx_top_k=5,
-            dl_vtx_min_accept_score=4.0,
+            dl_vtx_top_k=dl_vtx_top_k,
+            dl_vtx_min_accept_score=dl_vtx_min_accept_score,
             dl_vtx_score_scale=1000.0,
             beam_window_low=beam_window[0],
             beam_window_high=beam_window[1],
@@ -2497,6 +2507,9 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
        particle_dataset=null, extra_uses=[],
        // DL (SCN) vertex ON by default -- see the clus_pr arg comment.
        dl_weights='uboone/scn_vtx/t48k-m16-l5-lr5d-res0.5-CP24.pth',
+       // DL re-rank operating point -- see the clus_pr arg comment (doc pr/79).
+       dl_vtx_min_accept_score=4.0,
+       dl_vtx_top_k=5,
        beam_window=[0.2 * wc.us, 2.2 * wc.us],
        tgm_neutrino_candidate=true,
        tgm_chord_charge=true, tgm_chord_mode='path',
@@ -2933,7 +2946,10 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 pipeline_names=pipeline_names, tensor_outname=tensor_outname,
                 trackfitting_config_file=trackfitting_config_file,
                 particle_dataset=particle_dataset, extra_uses=extra_uses,
-                dl_weights=dl_weights, beam_window=beam_window,
+                dl_weights=dl_weights,
+                dl_vtx_min_accept_score=dl_vtx_min_accept_score,
+                dl_vtx_top_k=dl_vtx_top_k,
+                beam_window=beam_window,
                 tgm_neutrino_candidate=tgm_neutrino_candidate,
                 tgm_chord_charge=tgm_chord_charge,
                 tgm_chord_mode=tgm_chord_mode,
