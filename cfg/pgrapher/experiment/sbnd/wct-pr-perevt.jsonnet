@@ -1467,6 +1467,32 @@ function(
     // Class-B cases sit there; fixes 349945 and 168432).  The terminal
     // absorb still requires degree >= 2.
     mvga_interposed_deg1 = true,
+    // doc pr/86 sec 15 (round 2) -- the round-1 splice repaired the graph
+    // but not the picture: carry_prong_execute concatenates wcpt chains and
+    // the op4 refit seeds from wcpts, so the rendered trajectory never
+    // moved (owner: 349945's direct track still missing, 38856's turn
+    // still there).  Round 2 makes the repair visible: R1 re-derives the
+    // spliced near-anchor stretch straight (es2 recipe: 0.6 cm samples,
+    // is_good_point charge veto, Steiner snap), R2 late-collapses degree-2
+    // zigzag junctions near the main vertex, with op3<->op3.5 interleave +
+    // created-stub charge-gated splice (the 349945 chain: collapse, then
+    // splice the op1-created elbow, then straighten).  SBND PRODUCTION ON
+    // 2026-08-16 (sec 15 gates: knobs-off 2134/2134 byte-identical on the
+    // shipping binary; kink>=60 near-vertex band 60->43 full-sample
+    // [pre-round-1 was 39]; zigzag ratio>=1.5 12->6; 349945 approach 3
+    // hops/ratio 2.42 -> 1 hop/1.16; ZERO adverse movers 3 samples; zero
+    // nue-score sign changes; pr/85 four adverse events untouched;
+    // runtime/RSS neutral).  Escapes: SBND_MVGA_SPLICE_STRAIGHTEN,
+    // SBND_MVGA_APPROACH_COLLAPSE, SBND_MVGA_STRAIGHTEN_RADIUS (or -A).
+    // R1 -- straighten reach (cm) past the dissolved junction.
+    mvga_splice_straighten = 5,
+    // R2 -- op3.5 junction-collapse radius (cm) around the main vertex.
+    mvga_approach_collapse = 15,
+    // R1/R2 charge-veto radius (cm; C++ default 0 = prototype 0.2, which
+    // vetoes every long-stub straighten -- the charge ridge deviates
+    // ~1.6 cm from the straight chord; 1.0 is grid-validated, uniquely
+    // required by 349945 + 122660, zero adverse anywhere).
+    mvga_straighten_radius = 1.0,
     // doc pr/51 (18255-506746) -- DL rerank cross-cluster swap guard: with
     // the guard on, an accepted DL vertex can never swap the main cluster
     // (506746: one confident uBooNE-net voxel, s_dl = +576, moved the
@@ -1975,6 +2001,9 @@ function(
                              mvga_interposed_len=mvga_interposed_len,
                              mvga_sat_dup_frac=mvga_sat_dup_frac,
                              mvga_interposed_deg1=mvga_interposed_deg1,
+                             mvga_splice_straighten=mvga_splice_straighten,
+                             mvga_approach_collapse=mvga_approach_collapse,
+                             mvga_straighten_radius=mvga_straighten_radius,
                              dl_vtx_swap_guard=dl_vtx_swap_guard,
                              main_vertex_swap_apply=main_vertex_swap_apply,
                              rough_path_probe=rough_path_probe,
