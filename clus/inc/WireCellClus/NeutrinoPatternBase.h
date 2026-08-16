@@ -522,6 +522,36 @@ namespace WireCell::Clus::PR {
         // as before => byte-identical.
         bool   m_mvga_interposed{false};      ///< op3 interposed-stub absorb at the main-vertex anchor (doc pr/85)
         double m_mvga_interposed_angle{150};  ///< far-end collinearity gate, deg (mirrors m_mvga_reseat_angle's 150)
+        // doc sbnd_xin/docs/pr/86 P1: a separate candidate ceiling for the
+        // interposed SPLICE only.  The pr/86 sec 10.3 merged-prong census
+        // measures two thirds of the straight-track-misses-vertex defect as
+        // an interposed segment of 2.5-10 cm -- above m_mvga_stub -- while
+        // the interposed-segment length distribution of reachable orphans
+        // stops at 5 cm (sec 4).  m_mvga_stub itself must NOT be raised: it
+        // also gates the terminal absorb, which is where the pr/85 sec 10.6
+        // adverse movers live.  > m_mvga_stub => interposed candidates are
+        // admitted up to this length at the main-vertex anchor (the terminal
+        // branch re-applies m_mvga_stub); 0 (default) => ceiling ==
+        // m_mvga_stub => byte-identical.
+        double m_mvga_interposed_len{0};      ///< interposed-splice candidate ceiling, internal length units (doc pr/86); 0 = use m_mvga_stub
+        // doc pr/86 P4: pr/85 sec 10.6 raised m_mvga_dup_frac to 0.8 to stop
+        // four adverse absorbs -- every one at the MAIN anchor with d=0.00.
+        // The same guard blocks the wanted evt30504 absorb, which is at a
+        // SATELLITE anchor (d=1.26 cm): a satellite absorb deletes a stub
+        // away from the main vertex and cannot move it directly.  This knob
+        // restores a separate (typically pre-pr/85 0.7) overlap threshold at
+        // satellite anchors only.  0 (default) => m_mvga_dup_frac applies
+        // everywhere => byte-identical.
+        double m_mvga_sat_dup_frac{0};        ///< satellite-anchor op3 overlap threshold (doc pr/86); 0 = use m_mvga_dup_frac
+        // doc pr/86 P1b: admit degree-1 MAIN anchors into op3 for the
+        // interposed splice only.  The incident>=2 anchor gate is a
+        // terminal-absorb argument (shedding the only edge disconnects the
+        // anchor); the splice re-attaches all far prongs, and 26 of the 86
+        // sec 10.2 Class-B cases -- including b1<=1 cm events where the
+        // vertex is exactly right -- sit at a degree-1 anchor.  The
+        // terminal branch re-imposes >= 2.  false (default) => the old
+        // anchor gate verbatim => byte-identical.
+        bool   m_mvga_interposed_deg1{false}; ///< op3 interposed splice at degree-1 main anchors (doc pr/86)
 
         // ---- doc sbnd_xin/docs/pr/51 round 4: rough-path diagnostic probe --
         // Diagnostic-only TRACE instrumentation for the near-vertex

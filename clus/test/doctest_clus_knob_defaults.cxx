@@ -274,6 +274,9 @@ TEST_CASE("clus knob defaults: TaggerCheckNeutrino switches are all OFF")
     CHECK_KNOB_NUM(cfg, "mvga_satellite", 0.0);  // round 3: 0 = main-vertex-only op3 scope
     CHECK_KNOB_BOOL(cfg, "mvga_interposed", false);  // doc pr/85: terminal-only op3, byte-identical
     CHECK_KNOB_NUM(cfg, "mvga_interposed_angle", 150.0);
+    CHECK_KNOB_NUM(cfg, "mvga_interposed_len", 0.0);  // doc pr/86: 0 = use mvga_stub, byte-identical
+    CHECK_KNOB_NUM(cfg, "mvga_sat_dup_frac", 0.0);  // doc pr/86 P4: 0 = use mvga_dup_frac, byte-identical
+    CHECK_KNOB_BOOL(cfg, "mvga_interposed_deg1", false);  // doc pr/86 P1b: deg-1 anchors out of reach, byte-identical
     CHECK_KNOB_NUM(cfg, "shower_topo_demote_len", 0.0);      // 0 = long segments stay shower-eligible
     CHECK_KNOB_NUM(cfg, "nu_skip_cosmic_bundle_min_length", 0.0);
     CHECK_KNOB_NUM(cfg, "cosmic_companion_min_length", 0.0);

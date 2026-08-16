@@ -1391,6 +1391,17 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               // the keys => byte-identical.
               mvga_interposed=false,
               mvga_interposed_angle=null,
+              // doc pr/86: interposed-splice candidate ceiling, cm (C++
+              // default 0 = use mvga_stub).  null omits the key =>
+              // byte-identical.
+              mvga_interposed_len=null,
+              // doc pr/86 P4: satellite-anchor op3 overlap threshold (C++
+              // default 0 = use mvga_dup_frac).  null omits the key =>
+              // byte-identical.
+              mvga_sat_dup_frac=null,
+              // doc pr/86 P1b: interposed splice at degree-1 main anchors
+              // (C++ default false).  false omits the key => byte-identical.
+              mvga_interposed_deg1=false,
               // doc pr/51 (18255-506746) -- DL rerank cross-cluster swap
               // guard.  C++ default false; false omits the key =>
               // byte-identical.
@@ -2089,6 +2100,9 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
             mvga_satellite=mvga_satellite,
             mvga_interposed=mvga_interposed,
             mvga_interposed_angle=mvga_interposed_angle,
+            mvga_interposed_len=mvga_interposed_len,
+            mvga_sat_dup_frac=mvga_sat_dup_frac,
+            mvga_interposed_deg1=mvga_interposed_deg1,
             dl_vtx_swap_guard=dl_vtx_swap_guard,
             main_vertex_swap_apply=main_vertex_swap_apply,
             rough_path_probe=rough_path_probe,
@@ -2879,6 +2893,17 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
               // the keys => byte-identical.
               mvga_interposed=false,
               mvga_interposed_angle=null,
+              // doc pr/86: interposed-splice candidate ceiling, cm (C++
+              // default 0 = use mvga_stub).  null omits the key =>
+              // byte-identical.
+              mvga_interposed_len=null,
+              // doc pr/86 P4: satellite-anchor op3 overlap threshold (C++
+              // default 0 = use mvga_dup_frac).  null omits the key =>
+              // byte-identical.
+              mvga_sat_dup_frac=null,
+              // doc pr/86 P1b: interposed splice at degree-1 main anchors
+              // (C++ default false).  false omits the key => byte-identical.
+              mvga_interposed_deg1=false,
               dl_vtx_swap_guard=false,
               main_vertex_swap_apply=false,
               // doc pr/51 round 4 -- diagnostic-only rough-path probe.
@@ -3194,6 +3219,9 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 mvga_satellite=mvga_satellite,
                 mvga_interposed=mvga_interposed,
                 mvga_interposed_angle=mvga_interposed_angle,
+                mvga_interposed_len=mvga_interposed_len,
+            mvga_sat_dup_frac=mvga_sat_dup_frac,
+            mvga_interposed_deg1=mvga_interposed_deg1,
                 dl_vtx_swap_guard=dl_vtx_swap_guard,
                 main_vertex_swap_apply=main_vertex_swap_apply,
                 rough_path_probe=rough_path_probe,

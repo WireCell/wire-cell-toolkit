@@ -164,6 +164,9 @@ public:
         double m_mvga_satellite{0};       // cm; 0 = main-vertex-only op3 scope (round 2), byte-identical (round 3, doc pr/51)
         bool   m_mvga_interposed{false};  // op3 interposed-stub absorb at the main-vertex anchor (doc pr/85); false = terminal-only, byte-identical
         double m_mvga_interposed_angle{150.0}; // deg; far-end collinearity gate for the interposed absorb
+        double m_mvga_interposed_len{0.0};  // cm; interposed-splice candidate ceiling (doc pr/86); 0 = use mvga_stub, byte-identical
+        double m_mvga_sat_dup_frac{0.0};    // fraction; satellite-anchor op3 overlap threshold (doc pr/86); 0 = use mvga_dup_frac, byte-identical
+        bool   m_mvga_interposed_deg1{false}; // op3 interposed splice at degree-1 main anchors (doc pr/86); false = byte-identical
         // Long shower-topology demote length, cm (doc sbnd_xin/docs/pr/25
         // sec 3).  0 => the guard never fires => byte-identical.  50 is the
         // scan-supported operating point (9/10 owner-scanned events; ~45

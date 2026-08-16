@@ -385,17 +385,56 @@ bool PatternAlgorithms::main_vertex_graph_audit(Graph& graph, Facade::Cluster& c
                     SegmentPtr sg = graph[edesc].segment;
                     if (sg && !created.count(sg)) incident.push_back(sg);
                 }
-                if (incident.size() < 2) continue;  // nothing to shed at this anchor
+                // doc pr/86 P1b: "nothing to shed" is a terminal-absorb
+                // argument -- the interposed SPLICE re-attaches every far
+                // prong to the anchor, so a degree-1 main anchor whose
+                // single edge is an interposed stub (evt67394's click shape;
+                // 26 of the 86 sec 10.2 Class-B cases) is exactly its
+                // target, not a disconnection risk.  The terminal branch
+                // below re-imposes >= 2 (reason=deg1-terminal).  Knob off
+                // (default) => the old gate verbatim.
+                const bool deg1_splice = m_mvga_interposed_deg1 && is_main &&
+                                         m_mvga_interposed && incident.size() == 1;
+                if (incident.size() < 2 && !deg1_splice) continue;  // nothing to shed at this anchor
 
                 double anchor_dis = is_main ? 0.0
                     : point_dis(anchor->fit().valid() ? anchor->fit().point : anchor->wcpt().point, mv_pt);
 
+                // doc pr/86 P1: the interposed-splice branch may use a wider
+                // candidate ceiling than the terminal absorb -- two thirds of
+                // the merged-prong defect sits above m_mvga_stub (pr/86
+                // sec 10.3) while the absorb, where the pr/85 sec 10.6
+                // adverse movers live, keeps m_mvga_stub untouched.  Default
+                // m_mvga_interposed_len = 0 keeps cand_ceiling == m_mvga_stub
+                // so the knob-off control flow is byte-identical.
+                const double cand_ceiling =
+                    (is_main && m_mvga_interposed && m_mvga_interposed_len > m_mvga_stub)
+                    ? m_mvga_interposed_len : m_mvga_stub;
+
                 for (SegmentPtr stub : incident) {
                     double len = segment_track_length(stub);
-                    if (len >= m_mvga_stub) continue;
+                    if (len >= cand_ceiling) {
+                        // doc pr/86 P3: op3's early gates used to decline
+                        // silently; 3 of the pr/86 sec 3 top ten were
+                        // unexplained purely for that reason.
+                        SPDLOG_LOGGER_TRACE(s_log,
+                            "mvga: op3 decline cluster={} anchor={} len={:.2f}cm reason=ceiling",
+                            cluster.ident(), is_main ? "main" : "sat", len/units::cm);
+                        continue;
+                    }
                     VertexPtr vf = find_other_vertex(graph, stub, anchor);
-                    if (!vf || !vf->descriptor_valid()) continue;
-                    if (vf == main_vertex) continue;  // never treat the main-vertex edge as a stub
+                    if (!vf || !vf->descriptor_valid()) {
+                        SPDLOG_LOGGER_TRACE(s_log,
+                            "mvga: op3 decline cluster={} anchor={} len={:.2f}cm reason=far-invalid",
+                            cluster.ident(), is_main ? "main" : "sat", len/units::cm);
+                        continue;
+                    }
+                    if (vf == main_vertex) {  // never treat the main-vertex edge as a stub
+                        SPDLOG_LOGGER_TRACE(s_log,
+                            "mvga: op3 decline cluster={} anchor={} len={:.2f}cm reason=far-is-main",
+                            cluster.ident(), is_main ? "main" : "sat", len/units::cm);
+                        continue;
+                    }
                     // doc pr/85: an INTERPOSED stub's far vertex carries the
                     // real prong(s), so its degree is >= 2 -- the terminal
                     // absorb below can never reach it.  m_mvga_interposed
@@ -403,8 +442,41 @@ bool PatternAlgorithms::main_vertex_graph_audit(Graph& graph, Facade::Cluster& c
                     // (default) this line is exactly the old terminal-only
                     // rejection.
                     const bool interposed = (boost::degree(vf->get_descriptor(), graph) != 1);
-                    if (interposed && !(m_mvga_interposed && is_main)) continue;
-                    if (vf->flags_any(VertexFlags::kProtectedBreak)) continue;
+                    if (interposed && !(m_mvga_interposed && is_main)) {
+                        SPDLOG_LOGGER_TRACE(s_log,
+                            "mvga: op3 decline cluster={} anchor={} len={:.2f}cm reason=interposed-not-main",
+                            cluster.ident(), is_main ? "main" : "sat", len/units::cm);
+                        continue;
+                    }
+                    if (vf->flags_any(VertexFlags::kProtectedBreak)) {
+                        SPDLOG_LOGGER_TRACE(s_log,
+                            "mvga: op3 decline cluster={} anchor={} len={:.2f}cm reason=protected",
+                            cluster.ident(), is_main ? "main" : "sat", len/units::cm);
+                        continue;
+                    }
+                    // doc pr/86 P1: the wider ceiling admits candidates only
+                    // into the interposed splice; the terminal absorb keeps
+                    // the production m_mvga_stub ceiling.  Knob off this can
+                    // never be the rejecting gate (every survivor of the
+                    // cand_ceiling test already has len < m_mvga_stub).
+                    if (!interposed && len >= m_mvga_stub) {
+                        SPDLOG_LOGGER_TRACE(s_log,
+                            "mvga: op3 decline cluster={} anchor={} len={:.2f}cm reason=ceiling-terminal",
+                            cluster.ident(), is_main ? "main" : "sat", len/units::cm);
+                        continue;
+                    }
+                    // doc pr/86 P1b: a deg1_splice-admitted anchor may only
+                    // take the interposed branch -- a terminal absorb of the
+                    // anchor's single edge would disconnect it (and with no
+                    // siblings best_overlap=0, the degeneracy gate alone
+                    // could accept).  Knob off this is unreachable (the
+                    // anchor gate already required incident >= 2).
+                    if (!interposed && incident.size() < 2) {
+                        SPDLOG_LOGGER_TRACE(s_log,
+                            "mvga: op3 decline cluster={} anchor={} len={:.2f}cm reason=deg1-terminal",
+                            cluster.ident(), is_main ? "main" : "sat", len/units::cm);
+                        continue;
+                    }
 
                     if (interposed) {
                         // ---- op3 interposed-stub absorb (doc pr/85) ------
@@ -476,7 +548,15 @@ bool PatternAlgorithms::main_vertex_graph_audit(Graph& graph, Facade::Cluster& c
                         double frac = path_overlap_fraction(pts_stub, seg_points(sib), m_mvga_dup_tol);
                         if (frac > best_overlap) best_overlap = frac;
                     }
-                    const bool overlap_gate = (m_mvga_dup_frac > 0) && (best_overlap >= m_mvga_dup_frac);
+                    // doc pr/86 P4: all four pr/85 sec 10.6 adverse absorbs
+                    // sat at the MAIN anchor (d=0.00) while the wanted absorb
+                    // the same guard blocked (evt30504) is at a SATELLITE
+                    // anchor 1.26 cm away.  m_mvga_sat_dup_frac > 0 gives
+                    // satellite anchors their own overlap threshold; 0
+                    // (default) => m_mvga_dup_frac everywhere => byte-identical.
+                    const double dup_frac_eff = (!is_main && m_mvga_sat_dup_frac > 0)
+                        ? m_mvga_sat_dup_frac : m_mvga_dup_frac;
+                    const bool overlap_gate = (dup_frac_eff > 0) && (best_overlap >= dup_frac_eff);
                     const bool degen_gate = (m_mvga_stub_pts > 0) &&
                                             (nfit <= static_cast<size_t>(m_mvga_stub_pts));
 
