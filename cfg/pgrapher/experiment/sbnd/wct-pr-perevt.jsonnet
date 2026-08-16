@@ -1435,7 +1435,38 @@ function(
     // one <= 0.46 cm vertex motion).  Escape: -A mvga_interposed=false (or
     // SBND_MVGA_INTERPOSED); angle rides the C++ default 150 deg.
     mvga_interposed = true,
-    mvga_interposed_angle = null,
+    // doc pr/86 -- the straight track that misses the vertex (the owner's
+    // named priority): an interposed segment of 2.5-10 cm carries two
+    // thirds of the Class-B defect, above the mvga_stub=2.5 splice ceiling.
+    // SBND PRODUCTION ON 2026-08-15 (doc pr/86 implementation round gates:
+    // knob-off 2134/2134 archives byte-identical vs the pr/85 flip arms;
+    // full-sample Class-B cases 90->48 and orphans 118->82 with ZERO events
+    // worse; every mover <= 0.28 cm, zero adverse vs the hand labels; the
+    // four pr/85 sec 10.6 adverse-mover events at exactly 0.00; nueCC48 +4
+    // nue recoveries (163543, 268784, 400474, 423981) vs 1 named loss
+    // (122660 -- a Class-B repair at a vertex 4.95 cm off the owner's
+    // click, i.e. a pre-existing mis-pick the splice entrenched; owner
+    // hand-check); runtime/RSS neutral).  Owner pre-authorized the flip
+    // conditional on validation.  Escapes: SBND_MVGA_INTERPOSED_LEN,
+    // SBND_MVGA_INTERPOSED_ANGLE, SBND_MVGA_INTERPOSED_DEG1,
+    // SBND_MVGA_SAT_DUP_FRAC (or the -A TLAs).
+    // P1 -- interposed-splice candidate ceiling, cm.  Widens ONLY the
+    // splice; the terminal absorb keeps mvga_stub=2.5.  10 = the measured
+    // edge of the interposed-segment length distribution (sec 10.3).
+    mvga_interposed_len = 10,
+    // P2 -- far-end collinearity gate, deg (C++ default 150).  The Class-A
+    // pile-up sits at 120-150 deg and both live declines were 139.8/130.1;
+    // 130 fitted by the corner sweep (l10a130: orphans 102->68 vs 92 at
+    // 150, zero adverse movers).
+    mvga_interposed_angle = 130,
+    // P4 -- satellite-anchor op3 overlap threshold.  All four pr/85
+    // sec 10.6 adverse absorbs were main-anchor d=0.00; 0.7 restores the
+    // pre-pr/85 threshold at satellites only (evt30504's wanted absorb).
+    mvga_sat_dup_frac = 0.7,
+    // P1b -- interposed splice at degree-1 main anchors (26 of the 86
+    // Class-B cases sit there; fixes 349945 and 168432).  The terminal
+    // absorb still requires degree >= 2.
+    mvga_interposed_deg1 = true,
     // doc pr/51 (18255-506746) -- DL rerank cross-cluster swap guard: with
     // the guard on, an accepted DL vertex can never swap the main cluster
     // (506746: one confident uBooNE-net voxel, s_dl = +576, moved the
@@ -1941,6 +1972,9 @@ function(
                              mvga_satellite=mvga_satellite,
                              mvga_interposed=mvga_interposed,
                              mvga_interposed_angle=mvga_interposed_angle,
+                             mvga_interposed_len=mvga_interposed_len,
+                             mvga_sat_dup_frac=mvga_sat_dup_frac,
+                             mvga_interposed_deg1=mvga_interposed_deg1,
                              dl_vtx_swap_guard=dl_vtx_swap_guard,
                              main_vertex_swap_apply=main_vertex_swap_apply,
                              rough_path_probe=rough_path_probe,
