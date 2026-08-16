@@ -1395,38 +1395,46 @@ function(
     // doc pr/51 -- main-vertex graph audit (near-vertex graph-shape repair:
     // duplicate-corridor merge / charge-less-bridge removal / micro-stub
     // absorb + re-seat / one refit; 131357 / 268067 / 360535 / 142421 /
-    // 285567).  DEFAULT OFF pending owner review of the pr/51 on-census.
-    // Numerics (mvga_* null) ride the C++ defaults.  Validation:
-    // -A main_vertex_graph_audit=true (or the SBND_MAIN_VERTEX_GRAPH_AUDIT
-    // runner env).  false/null omit the keys => byte-identical.
-    main_vertex_graph_audit = false,
+    // 285567).  SBND PRODUCTION ON 2026-08-15 (doc pr/85 sec 10 gates:
+    // knob-off 1022/1022 byte-identical; 57-label census stubs 95->42,
+    // interposed prongs 26->17, zero new; every >1 cm mover adjudicated
+    // against the owner's hand labels lands toward-or-on the click; nueCC48
+    // recovers 2 nue events, loses none; runtime/RSS neutral).  Owner
+    // pre-authorized the flip conditional on those gates.  Escape for A/B:
+    // -A main_vertex_graph_audit=false (or SBND_MAIN_VERTEX_GRAPH_AUDIT).
+    // Operating point (doc pr/85 sec 10.4-10.6):
+    //   mvga_reseat_angle = 0  -- re-seat DISABLED: both label-set re-seat
+    //     firings moved the vertex OFF the owner's click (280017 1.64 cm,
+    //     314838 0.60 cm);
+    //   mvga_stub = 2.5        -- fitted by the sec 10.5 sweep;
+    //   mvga_dup_frac = 0.8, mvga_stub_pts = 3 -- close the marginal-overlap
+    //     absorb class (nfit=4 overlap=0.75), the whole of the adverse-mover
+    //     population in sec 10.6.
+    main_vertex_graph_audit = true,
     mvga_radius = null,
     mvga_dup_tol = null,
-    mvga_dup_frac = null,
+    mvga_dup_frac = 0.8,
     mvga_dup_angle = null,
     mvga_bridge_mip = null,
     mvga_reconnect = null,
-    mvga_stub = null,
-    mvga_stub_pts = null,
-    mvga_reseat_angle = null,
+    mvga_stub = 2.5,
+    mvga_stub_pts = 3,
+    mvga_reseat_angle = 0,
     // doc pr/51 round 3 -- op3 satellite-anchor radius (cm): reaches
     // terminal micro-stubs at satellite vertices near, not just at, the
-    // main vertex (142421's 7082/7023, 285567's residual).  DEFAULT OFF
-    // pending owner review.  Validation: -A mvga_satellite=<cm> (or the
-    // SBND_MVGA_SATELLITE runner env).  null/0 omits the key =>
-    // byte-identical.
-    mvga_satellite = null,
+    // main vertex (142421's 7082/7023, 285567's residual).  SBND PRODUCTION
+    // ON 2026-08-15 with the audit flip above (doc pr/85 sec 10).
+    mvga_satellite = 3.0,
     // doc pr/85 -- op3 interposed-stub absorb at the main-vertex anchor:
     // opens op3's terminal-only degree(far)==1 line to INTERPOSED stubs
     // (far vertex carries the real prongs, degree >= 2 -- the whole of the
     // pr/85 mode-1a-VIA class, 21/462 events), splicing the far prongs
     // through the stub onto the main vertex.  Inert unless
-    // main_vertex_graph_audit.  DEFAULT OFF pending the pr/85
-    // implementation-round gates.  Validation: -A mvga_interposed=true (or
-    // the SBND_MVGA_INTERPOSED runner env); angle (deg, C++ default 150)
-    // via -A mvga_interposed_angle=<deg> (SBND_MVGA_INTERPOSED_ANGLE).
-    // false/null omit the keys => byte-identical.
-    mvga_interposed = false,
+    // main_vertex_graph_audit.  SBND PRODUCTION ON 2026-08-15 (doc pr/85
+    // sec 10 gates; 15 firings across the three samples, every adjudicated
+    // one <= 0.46 cm vertex motion).  Escape: -A mvga_interposed=false (or
+    // SBND_MVGA_INTERPOSED); angle rides the C++ default 150 deg.
+    mvga_interposed = true,
     mvga_interposed_angle = null,
     // doc pr/51 (18255-506746) -- DL rerank cross-cluster swap guard: with
     // the guard on, an accepted DL vertex can never swap the main cluster
