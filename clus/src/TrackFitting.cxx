@@ -1929,6 +1929,14 @@ std::vector<WireCell::Point> TrackFitting::organize_orig_path(std::shared_ptr<PR
 }
 
 std::vector<WireCell::Point> TrackFitting::examine_end_ps_vec(std::shared_ptr<PR::Segment> segment,const std::vector<WireCell::Point>& pts, bool flag_start, bool flag_end) {
+    // doc pr/82 sec 12.7 companion guard.  `ps_list.front()` / `.back()` below
+    // (:1949, :1998) are unguarded, so an empty `pts` is undefined behaviour
+    // here too -- it happens to survive in practice (the observed crash landed
+    // in the caller instead), which is exactly why it is worth closing rather
+    // than relying on.  An empty input already yields an empty result, so this
+    // only makes the existing outcome well-defined.
+    if (pts.empty()) return {};
+
     std::list<WireCell::Point> ps_list(pts.begin(), pts.end());
 
     // doc pr/67 P3: record what this function AMPUTATES.  This is the primary
@@ -2062,9 +2070,31 @@ std::vector<WireCell::Point> TrackFitting::examine_end_ps_vec(std::shared_ptr<PR
 
 
 void TrackFitting::organize_ps_path(std::shared_ptr<PR::Segment> segment, std::vector<WireCell::Point>& pts, double low_dis_limit, double end_point_limit) {
+    // doc pr/82 sec 12.7: there is nothing to organize in an empty path, and
+    // every ps_vec.front()/back() below is undefined behaviour if we proceed.
+    //
+    // The trap is two-step and neither step is wrong on its own.
+    // examine_end_ps_vec DELIBERATELY returns an empty list when the whole path
+    // was drained as face-invalid (:1985-1993: "returning an empty list lets the
+    // caller (organize_ps_path) fall back to the original pts"), and the
+    // `size() <= 1` fallback below implements exactly that -- but it silently
+    // assumes `pts` is itself non-empty.  The second call site (:8870) rebuilds
+    // `pts` from `ptss` immediately beforehand, and `ptss` can come back empty,
+    // so both are empty and `ps_vec.front()` reads unmapped memory.
+    //
+    // Observed as a hard, deterministic SIGSEGV on SBND data evt 54629
+    // (work-mcp2k-cb0816), 1 event in 2000: organize_ps_path -> D3Vector copy
+    // ctor -> D3Vector::x().  Leaving `pts` untouched and returning is what the
+    // existing fallback already intends for a path with nothing in it.
+    //
+    // Byte-identical on every defined path: the early-out fires only where the
+    // current code has no defined behaviour at all.
+    if (pts.empty()) return;
+
     std::vector<WireCell::Point> ps_vec = examine_end_ps_vec(segment, pts, true, true);
     if (ps_vec.size() <= 1) ps_vec = pts;
- 
+    if (ps_vec.empty()) return;
+
     pts.clear();
     // fill in the beginning part
     {
