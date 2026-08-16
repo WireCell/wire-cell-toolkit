@@ -1363,6 +1363,10 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               vks_min_arm=null,
               vks_fit_miss=null,
               vks_hot_ratio=null,
+              // doc pr/85 -- carry the old vertex's arms through the snap
+              // residual below this arc (cm).  C++ default 0 = off; null
+              // omits the key => byte-identical.
+              vks_carry_prong=null,
               // doc pr/51 -- main-vertex graph audit (near-vertex graph-shape
               // repair: dup-corridor merge / charge-less-bridge removal /
               // micro-stub absorb + re-seat / one refit; C++ defaults in
@@ -1382,6 +1386,11 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               // C++ default 0 (main-vertex-only, round 2); null omits the
               // key => byte-identical.
               mvga_satellite=null,
+              // doc pr/85 -- op3 interposed-stub absorb at the main-vertex
+              // anchor (angle in deg, C++ default 150).  false/null omit
+              // the keys => byte-identical.
+              mvga_interposed=false,
+              mvga_interposed_angle=null,
               // doc pr/51 (18255-506746) -- DL rerank cross-cluster swap
               // guard.  C++ default false; false omits the key =>
               // byte-identical.
@@ -2066,6 +2075,7 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
             vks_min_arm=vks_min_arm,
             vks_fit_miss=vks_fit_miss,
             vks_hot_ratio=vks_hot_ratio,
+            vks_carry_prong=vks_carry_prong,
             main_vertex_graph_audit=main_vertex_graph_audit,
             mvga_radius=mvga_radius,
             mvga_dup_tol=mvga_dup_tol,
@@ -2077,6 +2087,8 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
             mvga_stub_pts=mvga_stub_pts,
             mvga_reseat_angle=mvga_reseat_angle,
             mvga_satellite=mvga_satellite,
+            mvga_interposed=mvga_interposed,
+            mvga_interposed_angle=mvga_interposed_angle,
             dl_vtx_swap_guard=dl_vtx_swap_guard,
             main_vertex_swap_apply=main_vertex_swap_apply,
             rough_path_probe=rough_path_probe,
@@ -2844,6 +2856,10 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
               vks_min_arm=null,
               vks_fit_miss=null,
               vks_hot_ratio=null,
+              // doc pr/85 -- carry the old vertex's arms through the snap
+              // residual below this arc (cm).  C++ default 0 = off; null
+              // omits the key => byte-identical.
+              vks_carry_prong=null,
               // doc pr/51 -- main-vertex graph audit + DL rerank
               // cross-cluster swap guard (506746).  false/null omit the
               // keys => byte-identical (see the clus_pr arg comments).
@@ -2858,6 +2874,11 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
               mvga_stub_pts=null,
               mvga_reseat_angle=null,
               mvga_satellite=null,
+              // doc pr/85 -- op3 interposed-stub absorb at the main-vertex
+              // anchor (angle in deg, C++ default 150).  false/null omit
+              // the keys => byte-identical.
+              mvga_interposed=false,
+              mvga_interposed_angle=null,
               dl_vtx_swap_guard=false,
               main_vertex_swap_apply=false,
               // doc pr/51 round 4 -- diagnostic-only rough-path probe.
@@ -3159,6 +3180,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 vks_min_arm=vks_min_arm,
                 vks_fit_miss=vks_fit_miss,
                 vks_hot_ratio=vks_hot_ratio,
+                vks_carry_prong=vks_carry_prong,
                 main_vertex_graph_audit=main_vertex_graph_audit,
                 mvga_radius=mvga_radius,
                 mvga_dup_tol=mvga_dup_tol,
@@ -3170,6 +3192,8 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 mvga_stub_pts=mvga_stub_pts,
                 mvga_reseat_angle=mvga_reseat_angle,
                 mvga_satellite=mvga_satellite,
+                mvga_interposed=mvga_interposed,
+                mvga_interposed_angle=mvga_interposed_angle,
                 dl_vtx_swap_guard=dl_vtx_swap_guard,
                 main_vertex_swap_apply=main_vertex_swap_apply,
                 rough_path_probe=rough_path_probe,

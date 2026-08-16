@@ -2791,7 +2791,64 @@ bool PatternAlgorithms::snap_main_vertex_to_kink(Graph& graph, Facade::Cluster& 
         K.x()/units::cm, K.y()/units::cm, K.z()/units::cm,
         best.turn_deg, best.arc/units::cm, best_bendV);
 
+    VertexPtr vtx_old = main_vertex;
     main_vertex = vtx_new;
+
+    // doc sbnd_xin/docs/pr/85: carry the prongs through the snap stub.  The
+    // old vertex keeps every other arm plus the new residual edge to K --
+    // that residual is the pr/85 "interposed stub" (mode 1a-VIA).  Below the
+    // m_vks_carry_prong arc threshold, splice every remaining arm through
+    // the residual's wcpts onto the new main vertex (all-or-nothing;
+    // carry_prong_verify/execute, PRSegmentFunctions.h), then drop the
+    // residual and the now-bare old vertex.  Rides the trailing refit.
+    // Default 0 => unreachable => byte-identical (this pass is production-ON).
+    if (m_vks_carry_prong > 0 && best.arc < m_vks_carry_prong &&
+        vtx_old && vtx_old->descriptor_valid() &&
+        !vtx_old->flags_any(VertexFlags::kProtectedBreak)) {  // G1 re-assert
+        SegmentPtr res = find_segment(graph, vtx_old, vtx_new);  // orientation-agnostic; never trust segs order
+        std::vector<SegmentPtr> arms_old;
+        if (res) {
+            for (auto edesc : sorted_out_edges(vtx_old->get_descriptor(), graph)) {
+                SegmentPtr sg = graph[edesc].segment;
+                if (sg && sg != res) arms_old.push_back(sg);
+            }
+        }
+        bool ok_carry = res && !arms_old.empty();
+        for (auto& a : arms_old) {
+            if (!ok_carry) break;
+            ok_carry = carry_prong_verify(graph, a, res, vtx_old, vtx_new);
+        }
+        if (ok_carry) {
+            bool all_moved = true;
+            for (auto& a : arms_old) {
+                if (!carry_prong_execute(graph, a, res, vtx_old, vtx_new, dv)) all_moved = false;
+            }
+            if (all_moved) {
+                remove_segment(graph, res);
+                if (vtx_old->descriptor_valid() &&
+                    boost::degree(vtx_old->get_descriptor(), graph) == 0) {
+                    remove_vertex(graph, vtx_old);
+                }
+                SPDLOG_LOGGER_DEBUG(s_log,
+                    "snap_main_vertex_to_kink: CARRY cluster {} arc={:.2f} cm arms={} old=({:.2f},{:.2f},{:.2f})",
+                    cluster.ident(), best.arc/units::cm, arms_old.size(),
+                    vpt.x()/units::cm, vpt.y()/units::cm, vpt.z()/units::cm);
+            }
+            else {
+                // Unreachable when verify passed (execute re-checks the same
+                // predicates), kept as a loud tripwire: some arms moved.
+                s_log->warn(
+                    "snap_main_vertex_to_kink: CARRY partial cluster {} arc={:.2f} cm (execute failed after verify)",
+                    cluster.ident(), best.arc/units::cm);
+            }
+        }
+        else {
+            s_log->trace(
+                "snap_main_vertex_to_kink: CARRY declined cluster {} arc={:.2f} cm (res={} arms={})",
+                cluster.ident(), best.arc/units::cm, res ? 1 : 0, arms_old.size());
+        }
+    }
+
     // One full refit so the trajectory re-anchors on the corner before
     // improve_vertex polishes (same argument pattern as its refits).
     track_fitter.do_multi_tracking(true, true, true, m_fit_exclusion, false, &cluster);

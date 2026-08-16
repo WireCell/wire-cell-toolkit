@@ -409,6 +409,25 @@ namespace WireCell::Clus::PR {
         double m_vks_min_arm{1.5*units::cm};  ///< outward arclength support required beyond the turn
         double m_vks_fit_miss{0.35*units::cm}; ///< snap only when the fit misses the image corner by at least this (a modeled kink has fit points on it)
         double m_vks_hot_ratio{0};            ///< OPTIONAL Bragg-hot veto scale, x m_mip_dqdx_median; default 0 = off (misfires on the failure class: misassigned charge reads hot)
+        // doc sbnd_xin/docs/pr/85: carry the prongs through the snap stub.
+        // The snap re-breaks the arm at the image corner K and re-seats the
+        // main vertex there, but the OLD vertex keeps every other arm plus
+        // the new residual edge to K -- that residual IS the "interposed
+        // stub" of the pr/85 census (mode 1a-VIA: a >= 10 cm prong reaching
+        // the neutrino vertex only through a sub-3 cm segment; SNAP arcs
+        // 0.93 / 1.07 cm measured on evt59685 / evt280972 against interposed
+        // stubs of 1.18 / 0.29 cm).  When best.arc (wcpt-space arclength old
+        // vertex -> K, the same space break_segment cuts in) is below this
+        // threshold, every arm at the old vertex is spliced through the
+        // residual's wcpts onto the new main vertex (carry_prong_verify /
+        // carry_prong_execute, PRSegmentFunctions.h: SegmentPtr identity
+        // preserved, all-or-nothing -- any arm failing pre-verification
+        // leaves the graph exactly as today), the residual is removed and
+        // the old vertex, now degree 0, is dropped.  The carried arms ride
+        // the snap's existing trailing do_multi_tracking refit.  0 (default)
+        // => the block is unreachable => byte-identical inside the
+        // production-ON snap pass.
+        double m_vks_carry_prong{0};          ///< carry threshold on the snap arc, internal units; 0 = off
 
         // ---- doc sbnd_xin/docs/pr/51: main-vertex graph audit --------------
         //
@@ -478,6 +497,31 @@ namespace WireCell::Clus::PR {
         int    m_mvga_stub_pts{4};            ///< op3 point-degeneracy sub-gate: <= this many valid fits (overlap fractions are meaningless at 3-4 points)
         double m_mvga_reseat_angle{150};      ///< op3 re-seat collinearity threshold vs a sibling prong, deg (131357 measures ~180; 175 would be the final_1p analogue but near-corner arms curve)
         double m_mvga_satellite{0};           ///< op3 satellite-anchor radius around the main vertex (round 3, doc pr/51); 0 = main-vertex-only, byte-identical to round 2
+        // doc sbnd_xin/docs/pr/85: op3 interposed-stub absorb.  op3 above is
+        // TERMINAL-only -- its degree(far)==1 line can never reach an
+        // INTERPOSED stub, whose far vertex carries the real prong(s) and so
+        // has degree >= 2.  The pr/85 census over 462 hand-scanned events
+        // measures that class at 11 of 78 near-vertex stubs (= the whole of
+        // mode 1a-VIA, 21 events: a >= 10 cm prong connected to the clicked
+        // neutrino vertex only through a sub-3 cm segment, created after
+        // every examine_* pass by snap_main_vertex_to_kink and the final
+        // improve_vertex).  With m_mvga_interposed, a main-vertex-anchored
+        // stub under m_mvga_stub whose far vertex is degree >= 2, not
+        // kProtectedBreak, and collinear within m_mvga_interposed_angle of a
+        // prong at the far end (the stub is the missing last piece of a
+        // through-going prong, not one arm of a genuine V) has ALL far
+        // prongs spliced through the stub's wcpts onto the main vertex
+        // (carry_prong_verify / carry_prong_execute, PRSegmentFunctions.h:
+        // SegmentPtr identity preserved, all-or-nothing pre-verification),
+        // the stub removed and the far vertex, now degree 0, dropped.  The
+        // main vertex never moves; no new segment is created (the `created`
+        // exemption set is untouched); one edit per restart under the same
+        // kEditCap.  Deliberately out of reach: degree-1 main-vertex anchors
+        // (evt360535's shape -- incident.size() < 2 gates the anchor loop).
+        // false (default) => the degree(far)==1 line short-circuits exactly
+        // as before => byte-identical.
+        bool   m_mvga_interposed{false};      ///< op3 interposed-stub absorb at the main-vertex anchor (doc pr/85)
+        double m_mvga_interposed_angle{150};  ///< far-end collinearity gate, deg (mirrors m_mvga_reseat_angle's 150)
 
         // ---- doc sbnd_xin/docs/pr/51 round 4: rough-path diagnostic probe --
         // Diagnostic-only TRACE instrumentation for the near-vertex

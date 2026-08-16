@@ -396,8 +396,74 @@ bool PatternAlgorithms::main_vertex_graph_audit(Graph& graph, Facade::Cluster& c
                     VertexPtr vf = find_other_vertex(graph, stub, anchor);
                     if (!vf || !vf->descriptor_valid()) continue;
                     if (vf == main_vertex) continue;  // never treat the main-vertex edge as a stub
-                    if (boost::degree(vf->get_descriptor(), graph) != 1) continue;  // terminal only
+                    // doc pr/85: an INTERPOSED stub's far vertex carries the
+                    // real prong(s), so its degree is >= 2 -- the terminal
+                    // absorb below can never reach it.  m_mvga_interposed
+                    // opens that class at the main-vertex anchor only; off
+                    // (default) this line is exactly the old terminal-only
+                    // rejection.
+                    const bool interposed = (boost::degree(vf->get_descriptor(), graph) != 1);
+                    if (interposed && !(m_mvga_interposed && is_main)) continue;
                     if (vf->flags_any(VertexFlags::kProtectedBreak)) continue;
+
+                    if (interposed) {
+                        // ---- op3 interposed-stub absorb (doc pr/85) ------
+                        // Never falls through to the terminal overlap /
+                        // degeneracy gates (an interposed stub is collinear
+                        // with its continuation, not with a sibling at the
+                        // anchor).  All far prongs are carried through the
+                        // stub onto the main vertex; the far vertex dies.
+                        std::vector<SegmentPtr> prongs;
+                        for (auto edesc : sorted_out_edges(vf->get_descriptor(), graph)) {
+                            SegmentPtr p = graph[edesc].segment;
+                            if (p && p != stub) prongs.push_back(p);
+                        }
+                        if (prongs.empty()) continue;
+
+                        // Far-end collinearity gate: the stub must continue
+                        // a prong straight through vf (both directions taken
+                        // FROM vf, so a continuation reads ~180 deg).
+                        WireCell::Point vf_pt = vf->fit().valid() ? vf->fit().point : vf->wcpt().point;
+                        WireCell::Vector dir_stub = segment_cal_dir_3vector(stub, vf_pt, 10*units::cm);
+                        double best_angle = 0;
+                        for (SegmentPtr p : prongs) {
+                            WireCell::Vector dir_p = segment_cal_dir_3vector(p, vf_pt, 10*units::cm);
+                            if (dir_stub.magnitude() == 0 || dir_p.magnitude() == 0) continue;
+                            double angle = std::acos(std::clamp(
+                                dir_stub.dot(dir_p) / (dir_stub.magnitude() * dir_p.magnitude()),
+                                -1.0, 1.0)) / 3.1415926 * 180.0;
+                            if (angle > best_angle) best_angle = angle;
+                        }
+                        SPDLOG_LOGGER_TRACE(s_log,
+                            "mvga: op3 eval-interposed cluster={} len={:.2f}cm vf_deg={} far_angle={:.1f}deg",
+                            cluster.ident(), len/units::cm,
+                            boost::degree(vf->get_descriptor(), graph), best_angle);
+                        if (best_angle < m_mvga_interposed_angle) continue;
+
+                        // All-or-nothing: every prong must pre-verify
+                        // (endpoint wcpt matches, far-slot free -- B.7)
+                        // before any is moved.
+                        bool ok_all = true;
+                        for (SegmentPtr p : prongs) {
+                            if (!carry_prong_verify(graph, p, stub, vf, anchor)) { ok_all = false; break; }
+                        }
+                        if (!ok_all) continue;
+
+                        const size_t vf_deg = boost::degree(vf->get_descriptor(), graph);
+                        for (SegmentPtr p : prongs) {
+                            carry_prong_execute(graph, p, stub, vf, anchor, dv);
+                        }
+                        remove_segment(graph, stub);
+                        cleanup_vertex(vf);  // degree 0 now; not protected (gated above)
+
+                        SPDLOG_LOGGER_DEBUG(s_log,
+                            "mvga: op3 stub-interposed cluster={} len={:.2f}cm vf_deg={} carried={} far_angle={:.1f}deg",
+                            cluster.ident(), len/units::cm, vf_deg, prongs.size(), best_angle);
+                        ++n_op3;
+                        fired_here = true;
+                        flag_continue = true;
+                        break;
+                    }
 
                     // Gates: corridor overlap with a sibling prong at the
                     // same anchor, or point degeneracy (142421's 3-point

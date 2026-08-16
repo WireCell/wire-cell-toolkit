@@ -259,6 +259,7 @@ TEST_CASE("clus knob defaults: TaggerCheckNeutrino switches are all OFF")
     CHECK_KNOB_NUM(cfg, "vks_min_arm", 1.5);
     CHECK_KNOB_NUM(cfg, "vks_fit_miss", 0.35);
     CHECK_KNOB_NUM(cfg, "vks_hot_ratio", 0.0);
+    CHECK_KNOB_NUM(cfg, "vks_carry_prong", 0.0);  // doc pr/85: 0 = no carry, byte-identical
     // doc pr/51: the mvga_* operating point (cm/deg/dimensionless), all
     // inert while main_vertex_graph_audit is false.
     CHECK_KNOB_NUM(cfg, "mvga_radius", 15.0);
@@ -271,6 +272,8 @@ TEST_CASE("clus knob defaults: TaggerCheckNeutrino switches are all OFF")
     CHECK_KNOB_NUM(cfg, "mvga_stub_pts", 4.0);
     CHECK_KNOB_NUM(cfg, "mvga_reseat_angle", 150.0);
     CHECK_KNOB_NUM(cfg, "mvga_satellite", 0.0);  // round 3: 0 = main-vertex-only op3 scope
+    CHECK_KNOB_BOOL(cfg, "mvga_interposed", false);  // doc pr/85: terminal-only op3, byte-identical
+    CHECK_KNOB_NUM(cfg, "mvga_interposed_angle", 150.0);
     CHECK_KNOB_NUM(cfg, "shower_topo_demote_len", 0.0);      // 0 = long segments stay shower-eligible
     CHECK_KNOB_NUM(cfg, "nu_skip_cosmic_bundle_min_length", 0.0);
     CHECK_KNOB_NUM(cfg, "cosmic_companion_min_length", 0.0);

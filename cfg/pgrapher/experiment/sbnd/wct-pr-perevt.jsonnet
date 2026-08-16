@@ -1384,6 +1384,14 @@ function(
     vks_min_arm = null,
     vks_fit_miss = null,
     vks_hot_ratio = null,
+    // doc pr/85 -- carry the old vertex's arms through the snap residual
+    // when the snap arc is below this (cm): the residual edge old-vertex ->
+    // corner IS the pr/85 "interposed stub" (mode 1a-VIA), left behind by
+    // the snap above.  C++ default 0 = off.  DEFAULT OFF pending the pr/85
+    // implementation-round gates.  Validation: -A vks_carry_prong=<cm> (or
+    // the SBND_VKS_CARRY_PRONG runner env).  null/0 omits the key =>
+    // byte-identical.
+    vks_carry_prong = null,
     // doc pr/51 -- main-vertex graph audit (near-vertex graph-shape repair:
     // duplicate-corridor merge / charge-less-bridge removal / micro-stub
     // absorb + re-seat / one refit; 131357 / 268067 / 360535 / 142421 /
@@ -1408,6 +1416,18 @@ function(
     // SBND_MVGA_SATELLITE runner env).  null/0 omits the key =>
     // byte-identical.
     mvga_satellite = null,
+    // doc pr/85 -- op3 interposed-stub absorb at the main-vertex anchor:
+    // opens op3's terminal-only degree(far)==1 line to INTERPOSED stubs
+    // (far vertex carries the real prongs, degree >= 2 -- the whole of the
+    // pr/85 mode-1a-VIA class, 21/462 events), splicing the far prongs
+    // through the stub onto the main vertex.  Inert unless
+    // main_vertex_graph_audit.  DEFAULT OFF pending the pr/85
+    // implementation-round gates.  Validation: -A mvga_interposed=true (or
+    // the SBND_MVGA_INTERPOSED runner env); angle (deg, C++ default 150)
+    // via -A mvga_interposed_angle=<deg> (SBND_MVGA_INTERPOSED_ANGLE).
+    // false/null omit the keys => byte-identical.
+    mvga_interposed = false,
+    mvga_interposed_angle = null,
     // doc pr/51 (18255-506746) -- DL rerank cross-cluster swap guard: with
     // the guard on, an accepted DL vertex can never swap the main cluster
     // (506746: one confident uBooNE-net voxel, s_dl = +576, moved the
@@ -1899,6 +1919,7 @@ function(
                              vks_min_arm=vks_min_arm,
                              vks_fit_miss=vks_fit_miss,
                              vks_hot_ratio=vks_hot_ratio,
+                             vks_carry_prong=vks_carry_prong,
                              main_vertex_graph_audit=main_vertex_graph_audit,
                              mvga_radius=mvga_radius,
                              mvga_dup_tol=mvga_dup_tol,
@@ -1910,6 +1931,8 @@ function(
                              mvga_stub_pts=mvga_stub_pts,
                              mvga_reseat_angle=mvga_reseat_angle,
                              mvga_satellite=mvga_satellite,
+                             mvga_interposed=mvga_interposed,
+                             mvga_interposed_angle=mvga_interposed_angle,
                              dl_vtx_swap_guard=dl_vtx_swap_guard,
                              main_vertex_swap_apply=main_vertex_swap_apply,
                              rough_path_probe=rough_path_probe,

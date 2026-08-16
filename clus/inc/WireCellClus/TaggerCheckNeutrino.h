@@ -143,6 +143,7 @@ public:
         double m_vks_min_arm{1.5};    // cm
         double m_vks_fit_miss{0.35};  // cm; snap only when the fit misses the image corner by >= this
         double m_vks_hot_ratio{0};    // x mip_dqdx_median; 0 = veto off (default: misfires on misassigned charge)
+        double m_vks_carry_prong{0};  // cm; carry the old vertex's arms through the snap residual below this arc (doc pr/85); 0 = off, byte-identical
         // doc sbnd_xin/docs/pr/51 -- main-vertex graph audit (near-vertex
         // graph-shape repair: duplicate-corridor merge / charge-less-bridge
         // removal / micro-stub absorb + re-seat / one refit).  Mirrors of
@@ -161,6 +162,8 @@ public:
         int    m_mvga_stub_pts{4};        // valid fit points
         double m_mvga_reseat_angle{150.0}; // deg
         double m_mvga_satellite{0};       // cm; 0 = main-vertex-only op3 scope (round 2), byte-identical (round 3, doc pr/51)
+        bool   m_mvga_interposed{false};  // op3 interposed-stub absorb at the main-vertex anchor (doc pr/85); false = terminal-only, byte-identical
+        double m_mvga_interposed_angle{150.0}; // deg; far-end collinearity gate for the interposed absorb
         // Long shower-topology demote length, cm (doc sbnd_xin/docs/pr/25
         // sec 3).  0 => the guard never fires => byte-identical.  50 is the
         // scan-supported operating point (9/10 owner-scanned events; ~45

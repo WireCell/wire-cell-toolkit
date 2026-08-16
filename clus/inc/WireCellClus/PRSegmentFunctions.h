@@ -520,6 +520,26 @@ namespace WireCell::Clus::PR {
                                     const IDetectorVolumes::pointer& dv,
                                     const std::string& cloud_name = "fit");
 
+    /// doc sbnd_xin/docs/pr/85 -- carry a prong through a short connector.
+    ///
+    /// `stub` connects `at` <-> `anchor`; `prong` is another segment incident
+    /// on `at`.  carry_prong_verify checks (read-only) that the prong can be
+    /// re-anchored on `anchor` by splicing the stub's wcpts onto its `at`
+    /// end: both segments' wcpt chains terminate on the vertices they claim
+    /// (0.01 cm), the prong's far vertex is valid and distinct from `anchor`,
+    /// and the (far, anchor) edge slot is free (setS edge aliasing --
+    /// examine_structure_review.md B.7).  carry_prong_execute performs the
+    /// splice (the mvga op3 re-seat mechanics), rebuilds the "main" point
+    /// cloud, and rewires the prong to (anchor, far).  The SegmentPtr
+    /// survives: fits/flags/particle_info are preserved (fits stale until
+    /// the caller's refit).  Callers must verify ALL prongs at `at` before
+    /// executing ANY (all-or-nothing: never half-mutate a vertex's arms).
+    bool carry_prong_verify(Graph& graph, SegmentPtr prong, SegmentPtr stub,
+                            VertexPtr at, VertexPtr anchor);
+    bool carry_prong_execute(Graph& graph, SegmentPtr prong, SegmentPtr stub,
+                             VertexPtr at, VertexPtr anchor,
+                             const IDetectorVolumes::pointer& dv);
+
     std::pair<double, WireCell::Point> segment_get_closest_point(SegmentPtr seg, const WireCell::Point& point, const std::string& cloud_name = "fit", const std::string& base_cloud_name = "main");
     std::tuple<double, double, double> segment_get_closest_2d_distances(SegmentPtr seg, const WireCell::Point& point, int apa, int face, const std::string& cloud_name = "fit");
     double segment_get_closest_2d_distance(SegmentPtr seg, const WireCell::Point& point, int apa, int face, int plane, const std::string& cloud_name = "fit");

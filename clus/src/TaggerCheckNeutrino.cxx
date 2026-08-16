@@ -124,6 +124,7 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_vks_min_arm      = get(config, "vks_min_arm",      m_vks_min_arm);      // cm
     m_vks_fit_miss     = get(config, "vks_fit_miss",     m_vks_fit_miss);     // cm
     m_vks_hot_ratio    = get(config, "vks_hot_ratio",    m_vks_hot_ratio);
+    m_vks_carry_prong  = get(config, "vks_carry_prong",  m_vks_carry_prong);  // cm (doc pr/85)
     // doc sbnd_xin/docs/pr/51 -- main-vertex graph audit.
     m_main_vertex_graph_audit = get(config, "main_vertex_graph_audit", m_main_vertex_graph_audit);
     m_mvga_radius       = get(config, "mvga_radius",       m_mvga_radius);       // cm
@@ -136,6 +137,8 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_mvga_stub_pts     = get(config, "mvga_stub_pts",     m_mvga_stub_pts);
     m_mvga_reseat_angle = get(config, "mvga_reseat_angle", m_mvga_reseat_angle); // deg
     m_mvga_satellite    = get(config, "mvga_satellite",    m_mvga_satellite);    // cm
+    m_mvga_interposed   = get(config, "mvga_interposed",   m_mvga_interposed);   // doc pr/85
+    m_mvga_interposed_angle = get(config, "mvga_interposed_angle", m_mvga_interposed_angle); // deg
     m_shower_topo_demote_len = get(config, "shower_topo_demote_len", m_shower_topo_demote_len);  // cm
     // doc sbnd_xin/docs/pr/49 -- cross-cluster projection-ghost deweighting
     // in the trajectory fit's 2D charge association (18255-57441): live
@@ -501,6 +504,7 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["vks_min_arm"]      = m_vks_min_arm;
     cfg["vks_fit_miss"]     = m_vks_fit_miss;
     cfg["vks_hot_ratio"]    = m_vks_hot_ratio;
+    cfg["vks_carry_prong"]  = m_vks_carry_prong;  // cm; 0 = off, byte-identical (doc pr/85)
     // doc sbnd_xin/docs/pr/51 -- main-vertex graph audit; false => the pass
     // never fires => byte-identical.  Numerics cm/deg.
     cfg["main_vertex_graph_audit"] = m_main_vertex_graph_audit;
@@ -514,6 +518,8 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["mvga_stub_pts"]     = m_mvga_stub_pts;
     cfg["mvga_reseat_angle"] = m_mvga_reseat_angle;
     cfg["mvga_satellite"]    = m_mvga_satellite;  // 0 = main-vertex-only (round 2), byte-identical
+    cfg["mvga_interposed"]   = m_mvga_interposed; // false = terminal-only op3, byte-identical (doc pr/85)
+    cfg["mvga_interposed_angle"] = m_mvga_interposed_angle;  // deg; inert while mvga_interposed is false
     cfg["kink_dqdx_hot_ratio"] = m_kink_dqdx_hot_ratio; // x mip_dqdx_median; inert while both above are false
     cfg["shower_topo_demote_len"] = m_shower_topo_demote_len;  // cm; 0 = legacy (long segments stay eligible for kShowerTopology)
     // doc sbnd_xin/docs/pr/49.
@@ -976,6 +982,7 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
     pattern_algos.m_vks_min_arm      = m_vks_min_arm * units::cm;   // cm -> internal
     pattern_algos.m_vks_fit_miss     = m_vks_fit_miss * units::cm;  // cm -> internal
     pattern_algos.m_vks_hot_ratio    = m_vks_hot_ratio;             // x mip median, no conversion
+    pattern_algos.m_vks_carry_prong  = m_vks_carry_prong * units::cm; // cm -> internal (doc pr/85)
     // doc sbnd_xin/docs/pr/51 -- main-vertex graph audit.
     pattern_algos.m_main_vertex_graph_audit = m_main_vertex_graph_audit;
     pattern_algos.m_mvga_radius       = m_mvga_radius * units::cm;    // cm -> internal
@@ -988,6 +995,8 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
     pattern_algos.m_mvga_stub_pts     = m_mvga_stub_pts;
     pattern_algos.m_mvga_reseat_angle = m_mvga_reseat_angle;          // deg, no conversion
     pattern_algos.m_mvga_satellite    = m_mvga_satellite * units::cm; // cm -> internal
+    pattern_algos.m_mvga_interposed   = m_mvga_interposed;            // doc pr/85
+    pattern_algos.m_mvga_interposed_angle = m_mvga_interposed_angle;  // deg, no conversion
     pattern_algos.m_rough_path_probe  = m_rough_path_probe;           // doc pr/51 round 4: diagnostic-only
     // doc pr/51 round 5: steiner gap penalty.  The two service handles are
     // unconditional copies (inert while the scale is 0).

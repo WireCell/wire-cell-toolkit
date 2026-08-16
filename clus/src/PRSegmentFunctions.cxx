@@ -10,6 +10,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
+#include <list>
 #include <numeric>
 #include <set>
 #include <algorithm>
@@ -4149,6 +4150,91 @@ namespace WireCell::Clus::PR {
         if (!(ang3 > params.ang_ratio * ang10)) return false;
         if (params.require_terminal && deg_short != 1) return false;
 
+        return true;
+    }
+
+    // doc sbnd_xin/docs/pr/85 -- carry a prong through a short connector.
+    // See the header comment on carry_prong_verify for the contract.
+    bool carry_prong_verify(Graph& graph, SegmentPtr prong, SegmentPtr stub,
+                            VertexPtr at, VertexPtr anchor)
+    {
+        if (!prong || !stub || !at || !anchor) return false;
+        if (prong == stub || at == anchor) return false;
+        const auto& vec_p = prong->wcpts();
+        const auto& vec_s = stub->wcpts();
+        if (vec_p.size() < 2 || vec_s.size() < 2) return false;
+        const double tol = 0.01*units::cm;
+        const auto at_pt = at->wcpt().point;
+        const auto an_pt = anchor->wcpt().point;
+        const bool p_front = (vec_p.front().point - at_pt).magnitude() < tol;
+        const bool p_back  = (vec_p.back().point  - at_pt).magnitude() < tol;
+        if (!p_front && !p_back) return false;
+        // The stub's wcpt chain must terminate on BOTH vertices it claims:
+        // one end at `at`, the other at `anchor`.
+        const bool s_front_at = (vec_s.front().point - at_pt).magnitude() < tol;
+        const bool s_back_at  = (vec_s.back().point  - at_pt).magnitude() < tol;
+        if (s_front_at) {
+            if ((vec_s.back().point - an_pt).magnitude() >= tol) return false;
+        }
+        else if (s_back_at) {
+            if ((vec_s.front().point - an_pt).magnitude() >= tol) return false;
+        }
+        else {
+            return false;
+        }
+        VertexPtr vfar = find_other_vertex(graph, prong, at);
+        if (!vfar || !vfar->descriptor_valid()) return false;
+        if (vfar == anchor || vfar == at) return false;
+        // setS edge aliasing (examine_structure_review.md B.7): the
+        // (far, anchor) slot must be free or the rewire corrupts the graph.
+        if (find_segment(graph, vfar, anchor)) return false;
+        return true;
+    }
+
+    bool carry_prong_execute(Graph& graph, SegmentPtr prong, SegmentPtr stub,
+                             VertexPtr at, VertexPtr anchor,
+                             const IDetectorVolumes::pointer& dv)
+    {
+        if (!carry_prong_verify(graph, prong, stub, at, anchor)) return false;
+        VertexPtr vfar = find_other_vertex(graph, prong, at);
+        const auto& vec_p = prong->wcpts();
+        const auto& vec_s = stub->wcpts();
+        const double tol = 0.01*units::cm;
+        const auto at_pt = at->wcpt().point;
+        const bool p_front = (vec_p.front().point - at_pt).magnitude() < tol;
+        const bool s_front = (vec_s.front().point - at_pt).magnitude() < tol;
+
+        // Splice the stub's wcpts onto the prong's `at` end so the merged
+        // chain terminates on `anchor`'s wcpt (the mvga op3 re-seat splice
+        // mechanics: std::list + 0.01 cm consecutive dedup).
+        std::list<WCPoint> merged(vec_p.begin(), vec_p.end());
+        if (p_front && s_front) {
+            for (auto it = vec_s.begin(); it != vec_s.end(); ++it)
+                if ((it->point - merged.front().point).magnitude() > tol) merged.push_front(*it);
+        }
+        else if (p_front && !s_front) {
+            for (auto it = vec_s.rbegin(); it != vec_s.rend(); ++it)
+                if ((it->point - merged.front().point).magnitude() > tol) merged.push_front(*it);
+        }
+        else if (!p_front && s_front) {
+            for (auto it = vec_s.begin(); it != vec_s.end(); ++it)
+                if ((it->point - merged.back().point).magnitude() > tol) merged.push_back(*it);
+        }
+        else {
+            for (auto it = vec_s.rbegin(); it != vec_s.rend(); ++it)
+                if ((it->point - merged.back().point).magnitude() > tol) merged.push_back(*it);
+        }
+
+        std::vector<WCPoint> new_wcpts(merged.begin(), merged.end());
+        prong->wcpts(new_wcpts);
+        std::vector<geo_point_t> pts;
+        for (const auto& wcp : new_wcpts) pts.push_back(wcp.point);
+        create_segment_point_cloud(prong, pts, dv, "main");
+
+        // Rewire: the SegmentPtr survives (fits/flags/particle_info kept;
+        // fits are stale until the caller's refit).
+        remove_segment(graph, prong);
+        add_segment(graph, prong, anchor, vfar);
         return true;
     }
 
