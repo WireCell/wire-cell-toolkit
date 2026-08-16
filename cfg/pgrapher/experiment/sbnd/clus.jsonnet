@@ -1402,6 +1402,12 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               // doc pr/86 P1b: interposed splice at degree-1 main anchors
               // (C++ default false).  false omits the key => byte-identical.
               mvga_interposed_deg1=false,
+              // doc pr/86 round 2: op3 post-carry straighten reach (cm) and
+              // op3.5 junction-collapse radius (cm).  C++ defaults 0 (off).
+              // Keys omitted when null => byte-identical.
+              mvga_splice_straighten=null,
+              mvga_approach_collapse=null,
+              mvga_straighten_radius=null,
               // doc pr/51 (18255-506746) -- DL rerank cross-cluster swap
               // guard.  C++ default false; false omits the key =>
               // byte-identical.
@@ -2103,6 +2109,9 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
             mvga_interposed_len=mvga_interposed_len,
             mvga_sat_dup_frac=mvga_sat_dup_frac,
             mvga_interposed_deg1=mvga_interposed_deg1,
+            mvga_splice_straighten=mvga_splice_straighten,
+            mvga_approach_collapse=mvga_approach_collapse,
+            mvga_straighten_radius=mvga_straighten_radius,
             dl_vtx_swap_guard=dl_vtx_swap_guard,
             main_vertex_swap_apply=main_vertex_swap_apply,
             rough_path_probe=rough_path_probe,
@@ -2904,6 +2913,12 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
               // doc pr/86 P1b: interposed splice at degree-1 main anchors
               // (C++ default false).  false omits the key => byte-identical.
               mvga_interposed_deg1=false,
+              // doc pr/86 round 2: op3 post-carry straighten reach (cm) and
+              // op3.5 junction-collapse radius (cm).  C++ defaults 0 (off).
+              // Keys omitted when null => byte-identical.
+              mvga_splice_straighten=null,
+              mvga_approach_collapse=null,
+              mvga_straighten_radius=null,
               dl_vtx_swap_guard=false,
               main_vertex_swap_apply=false,
               // doc pr/51 round 4 -- diagnostic-only rough-path probe.
@@ -3222,6 +3237,9 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 mvga_interposed_len=mvga_interposed_len,
             mvga_sat_dup_frac=mvga_sat_dup_frac,
             mvga_interposed_deg1=mvga_interposed_deg1,
+            mvga_splice_straighten=mvga_splice_straighten,
+            mvga_approach_collapse=mvga_approach_collapse,
+            mvga_straighten_radius=mvga_straighten_radius,
                 dl_vtx_swap_guard=dl_vtx_swap_guard,
                 main_vertex_swap_apply=main_vertex_swap_apply,
                 rough_path_probe=rough_path_probe,

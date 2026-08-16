@@ -142,6 +142,9 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_mvga_interposed_len = get(config, "mvga_interposed_len", m_mvga_interposed_len); // cm; doc pr/86
     m_mvga_sat_dup_frac = get(config, "mvga_sat_dup_frac", m_mvga_sat_dup_frac); // fraction; doc pr/86
     m_mvga_interposed_deg1 = get(config, "mvga_interposed_deg1", m_mvga_interposed_deg1); // doc pr/86
+    m_mvga_splice_straighten = get(config, "mvga_splice_straighten", m_mvga_splice_straighten); // cm; doc pr/86 round 2
+    m_mvga_approach_collapse = get(config, "mvga_approach_collapse", m_mvga_approach_collapse); // cm; doc pr/86 round 2
+    m_mvga_straighten_radius = get(config, "mvga_straighten_radius", m_mvga_straighten_radius); // cm; doc pr/86 round 2
     m_shower_topo_demote_len = get(config, "shower_topo_demote_len", m_shower_topo_demote_len);  // cm
     // doc sbnd_xin/docs/pr/49 -- cross-cluster projection-ghost deweighting
     // in the trajectory fit's 2D charge association (18255-57441): live
@@ -526,6 +529,9 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["mvga_interposed_len"] = m_mvga_interposed_len;  // cm; 0 = use mvga_stub, byte-identical (doc pr/86)
     cfg["mvga_sat_dup_frac"] = m_mvga_sat_dup_frac;  // fraction; 0 = use mvga_dup_frac, byte-identical (doc pr/86)
     cfg["mvga_interposed_deg1"] = m_mvga_interposed_deg1;  // false = degree-1 anchors stay out of reach, byte-identical (doc pr/86)
+    cfg["mvga_splice_straighten"] = m_mvga_splice_straighten;  // cm; 0 = concatenation verbatim, byte-identical (doc pr/86 round 2)
+    cfg["mvga_approach_collapse"] = m_mvga_approach_collapse;  // cm; 0 = op3.5 skipped, byte-identical (doc pr/86 round 2)
+    cfg["mvga_straighten_radius"] = m_mvga_straighten_radius;  // cm; 0 = prototype 0.2, inert unless straighten/collapse on (doc pr/86 round 2)
     cfg["kink_dqdx_hot_ratio"] = m_kink_dqdx_hot_ratio; // x mip_dqdx_median; inert while both above are false
     cfg["shower_topo_demote_len"] = m_shower_topo_demote_len;  // cm; 0 = legacy (long segments stay eligible for kShowerTopology)
     // doc sbnd_xin/docs/pr/49.
@@ -1006,6 +1012,9 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
     pattern_algos.m_mvga_interposed_len = m_mvga_interposed_len * units::cm; // cm -> internal (doc pr/86)
     pattern_algos.m_mvga_sat_dup_frac = m_mvga_sat_dup_frac;          // fraction, no conversion (doc pr/86)
     pattern_algos.m_mvga_interposed_deg1 = m_mvga_interposed_deg1;    // doc pr/86
+    pattern_algos.m_mvga_splice_straighten = m_mvga_splice_straighten * units::cm; // cm -> internal (doc pr/86 round 2)
+    pattern_algos.m_mvga_approach_collapse = m_mvga_approach_collapse * units::cm; // cm -> internal (doc pr/86 round 2)
+    pattern_algos.m_mvga_straighten_radius = m_mvga_straighten_radius * units::cm; // cm -> internal (doc pr/86 round 2)
     pattern_algos.m_rough_path_probe  = m_rough_path_probe;           // doc pr/51 round 4: diagnostic-only
     // doc pr/51 round 5: steiner gap penalty.  The two service handles are
     // unconditional copies (inert while the scale is 0).

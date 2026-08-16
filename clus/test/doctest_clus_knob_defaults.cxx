@@ -277,6 +277,9 @@ TEST_CASE("clus knob defaults: TaggerCheckNeutrino switches are all OFF")
     CHECK_KNOB_NUM(cfg, "mvga_interposed_len", 0.0);  // doc pr/86: 0 = use mvga_stub, byte-identical
     CHECK_KNOB_NUM(cfg, "mvga_sat_dup_frac", 0.0);  // doc pr/86 P4: 0 = use mvga_dup_frac, byte-identical
     CHECK_KNOB_BOOL(cfg, "mvga_interposed_deg1", false);  // doc pr/86 P1b: deg-1 anchors out of reach, byte-identical
+    CHECK_KNOB_NUM(cfg, "mvga_splice_straighten", 0.0);  // doc pr/86 round 2 R1: 0 = concatenation verbatim, byte-identical
+    CHECK_KNOB_NUM(cfg, "mvga_approach_collapse", 0.0);  // doc pr/86 round 2 R2: 0 = op3.5 skipped, byte-identical
+    CHECK_KNOB_NUM(cfg, "mvga_straighten_radius", 0.0);  // doc pr/86 round 2: 0 = prototype 0.2 cm veto radius
     CHECK_KNOB_NUM(cfg, "shower_topo_demote_len", 0.0);      // 0 = long segments stay shower-eligible
     CHECK_KNOB_NUM(cfg, "nu_skip_cosmic_bundle_min_length", 0.0);
     CHECK_KNOB_NUM(cfg, "cosmic_companion_min_length", 0.0);

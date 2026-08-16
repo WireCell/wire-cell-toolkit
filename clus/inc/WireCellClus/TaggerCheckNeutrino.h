@@ -167,6 +167,9 @@ public:
         double m_mvga_interposed_len{0.0};  // cm; interposed-splice candidate ceiling (doc pr/86); 0 = use mvga_stub, byte-identical
         double m_mvga_sat_dup_frac{0.0};    // fraction; satellite-anchor op3 overlap threshold (doc pr/86); 0 = use mvga_dup_frac, byte-identical
         bool   m_mvga_interposed_deg1{false}; // op3 interposed splice at degree-1 main anchors (doc pr/86); false = byte-identical
+        double m_mvga_splice_straighten{0.0}; // cm; op3 post-carry straighten reach past the junction (doc pr/86 round 2); 0 = concatenation verbatim, byte-identical
+        double m_mvga_approach_collapse{0.0}; // cm; op3.5 junction-collapse radius around the main vertex (doc pr/86 round 2); 0 = pass skipped, byte-identical
+        double m_mvga_straighten_radius{0.0}; // cm; R1/R2 straight-chain charge-veto radius (doc pr/86 round 2); 0 = prototype 0.2 cm; inert unless straighten/collapse on
         // Long shower-topology demote length, cm (doc sbnd_xin/docs/pr/25
         // sec 3).  0 => the guard never fires => byte-identical.  50 is the
         // scan-supported operating point (9/10 owner-scanned events; ~45

@@ -79,6 +79,136 @@ namespace {
         return seen;
     }
 
+    // doc sbnd_xin/docs/pr/86 sec 15 (round 2): straight, charge-vetoed,
+    // Steiner-snapped chain from start_wcp to end_wcp.  Forked BY
+    // DUPLICATION from examine_structure_2's inner recipe
+    // (NeutrinoStructureExaminer.cxx lines 344-439; prototype
+    // NeutrinoID_examine_structure.h lines 96-160) -- the production
+    // examiner file stays byte-untouched.  Recipe: sample the straight
+    // line every 0.6 cm; a sample outside every TPC or failing
+    // is_good_point (0.2 cm) is bad; n_bad > 1 => return false (charge
+    // genuinely bends -- caller keeps its old chain).  Survivors are
+    // snapped to the steiner_pc with 0.01 cm consecutive dedup, endpoints
+    // kept verbatim (graph-consistency: chains must terminate on vertex
+    // wcpts).
+    bool straight_steiner_chain(Facade::Cluster& cluster, TrackFitting& track_fitter,
+                                const WireCell::IDetectorVolumes::pointer& dv,
+                                const WCPoint& start_wcp, const WCPoint& end_wcp,
+                                std::vector<WCPoint>& out,
+                                double good_radius)
+    {
+        if (!cluster.has_pc("steiner_pc")) return false;
+        const auto transform = track_fitter.get_pc_transforms()->pc_transform(
+            cluster.get_scope_transform(cluster.get_default_scope()));
+        auto grouping = cluster.grouping();
+        if (!transform || !grouping) return false;
+        const double cluster_t0 = cluster.get_cluster_t0();
+
+        const auto start_p = start_wcp.point;
+        const auto end_p = end_wcp.point;
+        const double step_size = 0.6 * WireCell::units::cm;
+        const double distance = point_dis(start_p, end_p);
+        const int ncount = std::round(distance / step_size);
+
+        std::vector<WireCell::Point> line_pts;
+        int n_bad = 0;
+        for (int i = 1; i < ncount; i++) {
+            WireCell::Point test_p(
+                start_p.x() + (end_p.x() - start_p.x()) / ncount * i,
+                start_p.y() + (end_p.y() - start_p.y()) / ncount * i,
+                start_p.z() + (end_p.z() - start_p.z()) / ncount * i);
+            line_pts.push_back(test_p);
+            auto test_wpid = dv->contained_by(test_p);
+            if (test_wpid.face() != -1 && test_wpid.apa() != -1) {
+                auto temp_p_raw = transform->backward(test_p, cluster_t0,
+                                                      test_wpid.face(), test_wpid.apa());
+                if (!grouping->is_good_point(temp_p_raw, test_wpid.apa(), test_wpid.face(),
+                                             good_radius, 0, 0)) {
+                    n_bad++;
+                }
+            }
+            else {
+                n_bad++;  // outside all TPCs => bad sample (es2 B.3)
+            }
+            if (n_bad > 1) return false;
+        }
+
+        const auto& steiner_pc = cluster.get_pc("steiner_pc");
+        const auto& coords = cluster.get_default_scope().coords;
+        const auto& x_coords = steiner_pc.get(coords.at(0))->elements<double>();
+        const auto& y_coords = steiner_pc.get(coords.at(1))->elements<double>();
+        const auto& z_coords = steiner_pc.get(coords.at(2))->elements<double>();
+
+        const double tol = 0.01 * WireCell::units::cm;
+        std::vector<WCPoint> chain;
+        chain.push_back(start_wcp);
+        for (const auto& p : line_pts) {
+            auto knn = cluster.kd_steiner_knn(1, p, "steiner_pc");
+            if (knn.empty()) continue;
+            size_t idx = knn[0].first;
+            WCPoint wcp;
+            wcp.point = Facade::geo_point_t(x_coords[idx], y_coords[idx], z_coords[idx]);
+            if (point_dis(wcp.point, chain.back().point) > tol) chain.push_back(wcp);
+        }
+        if (point_dis(chain.back().point, end_wcp.point) > tol) chain.push_back(end_wcp);
+        if (chain.size() < 2) return false;
+        out = std::move(chain);
+        return true;
+    }
+
+    // doc pr/86 sec 15 R1: re-derive the near-anchor stretch of a
+    // just-carried prong.  The merged chain terminates on the anchor wcpt
+    // at one end (carry_prong_execute contract); walk from that end to the
+    // first point at arc length >= reach (the old stub length + the knob,
+    // so the straightened span always crosses the dissolved junction), and
+    // replace chain[anchor..P*] with the straight recipe.  Charge veto or
+    // any precondition failure => chain untouched (concatenation stands).
+    bool straighten_spliced_prong(SegmentPtr prong, const WCPoint& anchor_wcp,
+                                  double reach, Facade::Cluster& cluster,
+                                  TrackFitting& track_fitter,
+                                  const WireCell::IDetectorVolumes::pointer& dv,
+                                  double good_radius)
+    {
+        if (!prong) return false;
+        const auto& chain = prong->wcpts();
+        if (chain.size() < 3) return false;
+        const double tol = 0.01 * WireCell::units::cm;
+        const bool at_front = point_dis(chain.front().point, anchor_wcp.point) < tol;
+        const bool at_back = point_dis(chain.back().point, anchor_wcp.point) < tol;
+        if (!at_front && !at_back) return false;
+
+        std::vector<WCPoint> fwd(chain.begin(), chain.end());
+        if (!at_front) std::reverse(fwd.begin(), fwd.end());
+
+        size_t istar = fwd.size() - 1;
+        double arc = 0;
+        for (size_t i = 1; i < fwd.size(); ++i) {
+            arc += point_dis(fwd[i].point, fwd[i - 1].point);
+            if (arc >= reach) {
+                istar = i;
+                break;
+            }
+        }
+        if (istar < 1) return false;
+
+        std::vector<WCPoint> straight;
+        if (!straight_steiner_chain(cluster, track_fitter, dv, fwd.front(), fwd[istar],
+                                    straight, good_radius)) {
+            return false;
+        }
+        for (size_t i = istar + 1; i < fwd.size(); ++i) {
+            if (point_dis(fwd[i].point, straight.back().point) > tol) straight.push_back(fwd[i]);
+        }
+        if (straight.size() < 2) return false;
+        if (!at_front) std::reverse(straight.begin(), straight.end());
+
+        prong->wcpts(straight);
+        std::vector<Facade::geo_point_t> pts;
+        for (const auto& wcp : straight) pts.push_back(wcp.point);
+        create_segment_point_cloud(prong, pts, dv, "main");
+        return true;
+    }
+
 }  // namespace
 
 bool PatternAlgorithms::main_vertex_graph_audit(Graph& graph, Facade::Cluster& cluster,
@@ -341,6 +471,17 @@ bool PatternAlgorithms::main_vertex_graph_audit(Graph& graph, Facade::Cluster& c
         }
     }
 
+    // doc pr/86 sec 15 R2: op3 and op3.5 interleave.  An op3.5 collapse can
+    // turn the next junction up the approach chain into an exact
+    // interposed-splice case (349945: merging the outer zigzag pair leaves
+    // an elbow vertex whose main-incident stub + far prongs are op3's
+    // shape), but op3 has already finished by then -- so re-run op3 after
+    // any pass in which op3.5 fired.  Knob off => op3.5 never fires => a
+    // single pass, op3 exactly once => byte-identical.  Caps: the shared
+    // n_op3/n_op3b kEditCap counters persist across passes; the pass count
+    // itself is bounded as belt-and-braces.
+    int n_op3b = 0;
+    for (int audit_pass = 0; audit_pass < 4; ++audit_pass) {
     // ---- op3: micro-stub absorb + vertex re-seat -------------------------
     if (m_mvga_stub > 0) {
         bool flag_continue = true;
@@ -383,7 +524,19 @@ bool PatternAlgorithms::main_vertex_graph_audit(Graph& graph, Facade::Cluster& c
                 std::vector<SegmentPtr> incident;
                 for (auto edesc : sorted_out_edges(a_vd, graph)) {
                     SegmentPtr sg = graph[edesc].segment;
-                    if (sg && !created.count(sg)) incident.push_back(sg);
+                    if (!sg) continue;
+                    // doc pr/86 sec 15: op1/op2 reconnect products stay
+                    // exempt in pass 0 (the delete/recreate cycling guard),
+                    // but on an op3.5 re-entry pass they are legitimate
+                    // SPLICE stubs (349945: the op1-created 3.06 cm elbow
+                    // stub is the last hop of the owner's direct track and
+                    // was starved forever).  op1/op2 never re-run in later
+                    // passes, so no cycle; the terminal branch below still
+                    // declines created stubs (reason=created-terminal).
+                    // audit_pass > 0 requires an op3.5 fire => knob on =>
+                    // pass 0 alone is byte-identical.
+                    if (created.count(sg) && audit_pass == 0) continue;
+                    incident.push_back(sg);
                 }
                 // doc pr/86 P1b: "nothing to shed" is a terminal-absorb
                 // argument -- the interposed SPLICE re-attaches every far
@@ -477,6 +630,16 @@ bool PatternAlgorithms::main_vertex_graph_audit(Graph& graph, Facade::Cluster& c
                             cluster.ident(), is_main ? "main" : "sat", len/units::cm);
                         continue;
                     }
+                    // doc pr/86 sec 15: a created reconnect admitted on a
+                    // re-entry pass may only be SPLICED -- terminal-absorbing
+                    // it would delete what op1/op2 just built.  Unreachable
+                    // in pass 0 (created segs are filtered there).
+                    if (!interposed && created.count(stub)) {
+                        SPDLOG_LOGGER_TRACE(s_log,
+                            "mvga: op3 decline cluster={} anchor={} len={:.2f}cm reason=created-terminal",
+                            cluster.ident(), is_main ? "main" : "sat", len/units::cm);
+                        continue;
+                    }
 
                     if (interposed) {
                         // ---- op3 interposed-stub absorb (doc pr/85) ------
@@ -496,10 +659,39 @@ bool PatternAlgorithms::main_vertex_graph_audit(Graph& graph, Facade::Cluster& c
                         // a prong straight through vf (both directions taken
                         // FROM vf, so a continuation reads ~180 deg).
                         WireCell::Point vf_pt = vf->fit().valid() ? vf->fit().point : vf->wcpt().point;
+                        // doc pr/86 sec 15: created reconnects carry no fits,
+                        // so the fit-based direction is (0,0,0) and the angle
+                        // gate silently declines the very stub the re-entry
+                        // pass admitted (349945's elbow).  Mirror the
+                        // centroid-direction arithmetic of
+                        // segment_cal_dir_3vector(seg, p, cut) over
+                        // seg_points() (wcpt fallback), for CREATED segments
+                        // only -- production segments keep the round-1
+                        // zero-dir decline semantics (284145).
+                        auto dir_from_points = [&](SegmentPtr sg) {
+                            WireCell::Point acc(0, 0, 0);
+                            int nc = 0;
+                            for (const auto& q : seg_points(sg)) {
+                                if (point_dis(q, vf_pt) < 10*units::cm) { acc = acc + q; ++nc; }
+                            }
+                            if (!nc) return WireCell::Vector(0, 0, 0);
+                            WireCell::Vector v = acc*(1.0/nc) - vf_pt;
+                            if (v.magnitude() > 0) v = v.norm();
+                            return v;
+                        };
+                        // Fallback is additionally gated on a round-2 knob:
+                        // created PRONGS reach this loop even in pass 0
+                        // (prongs are collected without the created filter),
+                        // and an ungated fallback changed knob-off behavior
+                        // on 284145/319611 (the round-1 zero-dir declines).
+                        const bool r2_dir_fallback =
+                            (m_mvga_splice_straighten > 0 || m_mvga_approach_collapse > 0);
                         WireCell::Vector dir_stub = segment_cal_dir_3vector(stub, vf_pt, 10*units::cm);
+                        if (dir_stub.magnitude() == 0 && r2_dir_fallback && created.count(stub)) dir_stub = dir_from_points(stub);
                         double best_angle = 0;
                         for (SegmentPtr p : prongs) {
                             WireCell::Vector dir_p = segment_cal_dir_3vector(p, vf_pt, 10*units::cm);
+                            if (dir_p.magnitude() == 0 && r2_dir_fallback && created.count(p)) dir_p = dir_from_points(p);
                             if (dir_stub.magnitude() == 0 || dir_p.magnitude() == 0) continue;
                             double angle = std::acos(std::clamp(
                                 dir_stub.dot(dir_p) / (dir_stub.magnitude() * dir_p.magnitude()),
@@ -510,6 +702,72 @@ bool PatternAlgorithms::main_vertex_graph_audit(Graph& graph, Facade::Cluster& c
                             "mvga: op3 eval-interposed cluster={} len={:.2f}cm vf_deg={} far_angle={:.1f}deg",
                             cluster.ident(), len/units::cm,
                             boost::degree(vf->get_descriptor(), graph), best_angle);
+
+                        // doc pr/86 sec 15: created-stub splice (re-entry
+                        // passes only -- created stubs are filtered from
+                        // `incident` in pass 0, so knob-off never reaches
+                        // this).  The far-angle gate asks "is the stub a
+                        // collinear continuation", the wrong question for a
+                        // connection op1 itself built: 349945's elbow reads
+                        // 52.6 deg while the straight chord from the anchor
+                        // past the junction is charge-covered.  Replace the
+                        // angle gate with a PER-PRONG charge-verified
+                        // straighten gate: carry exactly those prongs whose
+                        // straightened approach passes the es2 charge veto;
+                        // the junction and stub survive for the rest.
+                        if (created.count(stub)) {
+                            if (m_mvga_splice_straighten <= 0) continue;  // no charge gate available
+                            double stub_arc = 0;
+                            const auto& swc0 = stub->wcpts();
+                            for (size_t i = 1; i < swc0.size(); ++i)
+                                stub_arc += point_dis(swc0[i].point, swc0[i-1].point);
+                            const double good_r = (m_mvga_straighten_radius > 0)
+                                ? m_mvga_straighten_radius : 0.2*units::cm;
+                            const WCPoint anchor_wcp = anchor->wcpt();
+                            int carried = 0;
+                            for (SegmentPtr p : prongs) {
+                                if (!carry_prong_verify(graph, p, stub, vf, anchor)) continue;
+                                const auto& pw = p->wcpts();
+                                if (pw.size() < 2) continue;
+                                std::vector<WCPoint> fwd(pw.begin(), pw.end());
+                                if (point_dis(pw.front().point, vf->wcpt().point) >= 0.01*units::cm)
+                                    std::reverse(fwd.begin(), fwd.end());
+                                size_t istar = fwd.size() - 1;
+                                double arc = 0;
+                                for (size_t i = 1; i < fwd.size(); ++i) {
+                                    arc += point_dis(fwd[i].point, fwd[i-1].point);
+                                    if (arc >= m_mvga_splice_straighten) { istar = i; break; }
+                                }
+                                std::vector<WCPoint> chk;
+                                if (!straight_steiner_chain(cluster, track_fitter, dv,
+                                                            anchor_wcp, fwd[istar], chk, good_r)) {
+                                    SPDLOG_LOGGER_TRACE(s_log,
+                                        "mvga: op3 created-splice decline cluster={} reason=charge-veto",
+                                        cluster.ident());
+                                    continue;
+                                }
+                                carry_prong_execute(graph, p, stub, vf, anchor, dv);
+                                straighten_spliced_prong(p, anchor_wcp,
+                                                         stub_arc + m_mvga_splice_straighten,
+                                                         cluster, track_fitter, dv, good_r);
+                                ++carried;
+                            }
+                            if (!carried) continue;
+                            if (vf->descriptor_valid() &&
+                                boost::degree(vf->get_descriptor(), graph) == 1) {
+                                remove_segment(graph, stub);
+                                cleanup_vertex(vf);
+                            }
+                            SPDLOG_LOGGER_DEBUG(s_log,
+                                "mvga: op3 created-splice cluster={} stub_arc={:.2f}cm carried={} vf_kept={}",
+                                cluster.ident(), stub_arc/units::cm, carried,
+                                vf->descriptor_valid() ? 1 : 0);
+                            ++n_op3;
+                            fired_here = true;
+                            flag_continue = true;
+                            break;
+                        }
+
                         if (best_angle < m_mvga_interposed_angle) continue;
 
                         // All-or-nothing: every prong must pre-verify
@@ -527,6 +785,38 @@ bool PatternAlgorithms::main_vertex_graph_audit(Graph& graph, Facade::Cluster& c
                         }
                         remove_segment(graph, stub);
                         cleanup_vertex(vf);  // degree 0 now; not protected (gated above)
+
+                        // doc pr/86 sec 15 R1: straighten each carried
+                        // prong's near-anchor stretch (stub length + reach,
+                        // so the span crosses the dissolved junction) so the
+                        // op4 refit seeds straight instead of around the
+                        // concatenation kink.  Charge veto keeps genuinely
+                        // bending prongs untouched.  Knob 0 (default) =>
+                        // this block never runs => byte-identical.
+                        if (m_mvga_splice_straighten > 0) {
+                            const WCPoint anchor_wcp = anchor->wcpt();
+                            // Fit-based len is 0 for a created (fitless)
+                            // stub; the wcpt arc is the real junction
+                            // distance the straighten span must cross.
+                            double stub_arc = 0;
+                            const auto& swc = stub->wcpts();
+                            for (size_t i = 1; i < swc.size(); ++i)
+                                stub_arc += point_dis(swc[i].point, swc[i-1].point);
+                            const double reach = std::max(len, stub_arc) + m_mvga_splice_straighten;
+                            const double good_r = (m_mvga_straighten_radius > 0)
+                                ? m_mvga_straighten_radius : 0.2*units::cm;
+                            int n_straight = 0;
+                            for (SegmentPtr p : prongs) {
+                                if (straighten_spliced_prong(p, anchor_wcp, reach,
+                                                             cluster, track_fitter, dv,
+                                                             good_r)) {
+                                    ++n_straight;
+                                }
+                            }
+                            SPDLOG_LOGGER_DEBUG(s_log,
+                                "mvga: op3 splice-straighten cluster={} carried={} straightened={} reach={:.2f}cm",
+                                cluster.ident(), prongs.size(), n_straight, reach/units::cm);
+                        }
 
                         SPDLOG_LOGGER_DEBUG(s_log,
                             "mvga: op3 stub-interposed cluster={} len={:.2f}cm vf_deg={} carried={} far_angle={:.1f}deg",
@@ -666,13 +956,100 @@ bool PatternAlgorithms::main_vertex_graph_audit(Graph& graph, Facade::Cluster& c
         }
     }
 
+    // ---- op3.5: near-vertex approach collapse (doc pr/86 sec 15 R2) ------
+    // Late re-run of the examine_structure_2 merge restricted to degree-2
+    // junction vertices within m_mvga_approach_collapse of the main vertex:
+    // improve_vertex builds the multi-segment zigzag approaches (349945's
+    // 14 cm polyline over 5.8 cm) AFTER examine_structure_2 last ran, and
+    // mvga is the last pass that edits this graph.  Iterated to a fixed
+    // point; each fire replaces two chain segments with one straight,
+    // charge-vetoed, Steiner-snapped segment (co-located-endpoint case
+    // skipped -- divergence from es2's B.7 vertex merge, stated in the
+    // doc).  Knob 0 (default) => the whole block is skipped =>
+    // byte-identical.
+    const int op3b_before = n_op3b;
+    if (m_mvga_approach_collapse > 0) {
+        bool go = true;
+        while (go && n_op3b < kEditCap) {
+            go = false;
+            for (const auto& vd : ordered_nodes(graph)) {
+                VertexPtr vtx = graph[vd].vertex;
+                if (!vtx || vtx->cluster() != &cluster) continue;
+                if (vtx == main_vertex) continue;
+                if (boost::degree(vd, graph) != 2) continue;
+                if (vtx->flags_any(VertexFlags::kProtectedBreak)) continue;
+                WireCell::Point vp = vtx->fit().valid() ? vtx->fit().point : vtx->wcpt().point;
+                if (point_dis(vp, mv_pt) >= m_mvga_approach_collapse) continue;
+
+                auto edges2 = sorted_out_edges(vd, graph);
+                SegmentPtr sg1 = graph[edges2[0]].segment;
+                SegmentPtr sg2 = graph[edges2[1]].segment;
+                if (!sg1 || !sg2) continue;
+                VertexPtr vtx1 = find_other_vertex(graph, sg1, vtx);
+                VertexPtr vtx2 = find_other_vertex(graph, sg2, vtx);
+                if (!vtx1 || !vtx2 || vtx1 == vtx2) continue;
+                // co-located endpoints: es2 merges the vertices (B.7); a
+                // near-vertex zigzag junction is never co-located -- skip.
+                if (point_dis(vtx1->wcpt().point, vtx2->wcpt().point) < 0.01*units::cm) continue;
+                // setS edge aliasing (examine_structure_review.md B.7): the
+                // (vtx1, vtx2) slot must be free.
+                if (find_segment(graph, vtx1, vtx2)) continue;
+
+                std::vector<WCPoint> straight;
+                const double good_r = (m_mvga_straighten_radius > 0)
+                    ? m_mvga_straighten_radius : 0.2*units::cm;
+                if (!straight_steiner_chain(cluster, track_fitter, dv,
+                                            vtx1->wcpt(), vtx2->wcpt(), straight, good_r)) {
+                    SPDLOG_LOGGER_TRACE(s_log,
+                        "mvga: op3.5 decline cluster={} d={:.2f}cm reason=charge-veto",
+                        cluster.ident(), point_dis(vp, mv_pt)/units::cm);
+                    continue;
+                }
+
+                auto new_seg = make_segment();
+                new_seg->wcpts(straight).cluster(&cluster).dirsign(0);
+                std::vector<Facade::geo_point_t> mpts;
+                for (const auto& wcp : straight) mpts.push_back(wcp.point);
+                create_segment_point_cloud(new_seg, mpts, dv, "main");
+
+                remove_segment(graph, sg1);
+                remove_segment(graph, sg2);
+                remove_vertex(graph, vtx);
+                add_segment(graph, new_seg, vtx1, vtx2);
+                // doc pr/86 sec 15: collapse products join `created` so the
+                // op3 re-entry pass may SPLICE but never terminal-absorb
+                // them (67394: the absorb deleted a fresh 0.56 cm collapse
+                // product at the main anchor -- nfit=0, overlap=1.00 -- and
+                // moved the vertex 1.02 cm off the click).
+                created.insert(new_seg);
+
+                SPDLOG_LOGGER_DEBUG(s_log,
+                    "mvga: op3.5 approach-collapse cluster={} d={:.2f}cm chord={:.2f}cm npts={}",
+                    cluster.ident(), point_dis(vp, mv_pt)/units::cm,
+                    point_dis(vtx1->wcpt().point, vtx2->wcpt().point)/units::cm,
+                    straight.size());
+                ++n_op3b;
+                go = true;
+                break;
+            }
+        }
+    }
+
+    // No op3.5 fire this pass => nothing new for op3 => stop.
+    if (n_op3b == op3b_before) break;
+    }  // audit_pass (op3 <-> op3.5 interleave)
+
     // ---- op4: one local refit --------------------------------------------
-    const bool fired = (n_op1 + n_op2 + n_op3) > 0;
+    const bool fired = (n_op1 + n_op2 + n_op3 + n_op3b) > 0;
     if (fired) {
         track_fitter.do_multi_tracking(true, true, false, m_fit_exclusion, false, &cluster);
         SPDLOG_LOGGER_DEBUG(s_log,
             "mvga: fired cluster={} op1={} op2={} op3={} (refit done)",
             cluster.ident(), n_op1, n_op2, n_op3);
+        if (n_op3b > 0) {
+            SPDLOG_LOGGER_DEBUG(s_log,
+                "mvga: op3.5 fired cluster={} collapses={}", cluster.ident(), n_op3b);
+        }
     }
     return fired;
 }

@@ -552,6 +552,44 @@ namespace WireCell::Clus::PR {
         // terminal branch re-imposes >= 2.  false (default) => the old
         // anchor gate verbatim => byte-identical.
         bool   m_mvga_interposed_deg1{false}; ///< op3 interposed splice at degree-1 main anchors (doc pr/86)
+        // doc sbnd_xin/docs/pr/86 sec 15 (round 2): the interposed splice is
+        // a graph relabel -- carry_prong_execute CONCATENATES the stub's and
+        // prong's wcpt chains, and the op4 refit seeds from wcpts
+        // (TrackFitting organize_segments_path), so the kink at the old far
+        // vertex survives the fit and the rendered trajectory never changes
+        // (owner: 38856's large-angle turn still there).  The prototype
+        // straightens when it merges through a vertex
+        // (NeutrinoID_examine_structure.h examine_structure_2 lines 76-165:
+        // straight line, 0.6 cm steps, is_good_point charge veto, Steiner
+        // snap) and only concatenates already-collinear merges.  > 0 =>
+        // after each op3 carry, the merged chain from the anchor to the
+        // first point >= (stub length + this reach) along the chain is
+        // re-derived with that recipe; charge veto fails => keep the
+        // concatenated chain.  0 (default) => concatenation verbatim =>
+        // byte-identical.
+        double m_mvga_splice_straighten{0};   ///< op3 post-carry straighten reach past the junction, internal length units (doc pr/86 round 2); 0 = off
+        // doc sbnd_xin/docs/pr/86 sec 15 (round 2): near-vertex approach
+        // collapse (op3.5).  The 349945 shape: a long prong reaches the main
+        // vertex only via a multi-segment zigzag (14 cm of polyline over a
+        // 5.8 cm straight line) built by improve_vertex AFTER
+        // examine_structure_2 last ran, and nothing after mvga refits.  > 0
+        // => degree-2, non-protected junction vertices within this radius of
+        // the main vertex are re-tested with the examine_structure_2 merge
+        // (straight, charge-vetoed, Steiner-snapped replacement segment;
+        // co-located-endpoint case skipped -- divergence from es2's B.7
+        // vertex merge, stated in doc), iterated to a fixed point; fires
+        // count into the op4 refit trigger.  0 (default) => pass skipped
+        // entirely => byte-identical.
+        double m_mvga_approach_collapse{0};   ///< op3.5 junction-collapse radius around the main vertex, internal length units (doc pr/86 round 2); 0 = off
+        // doc pr/86 sec 15: is_good_point radius for the R1/R2 straight-chain
+        // charge veto.  The prototype es2 recipe uses 0.2 cm, which can
+        // never approve cutting a corner whose charge ridge deviates ~1.6 cm
+        // from the straight chord (the 349945 zigzag, the owner's "direct
+        // track") -- Stage A measured every long-stub straighten and both
+        // 349945 collapse junctions charge-veto'd at 0.2.  0 (default) =>
+        // the prototype 0.2 cm => recipe-faithful; > 0 => that radius.
+        // Inert unless splice_straighten/approach_collapse is on.
+        double m_mvga_straighten_radius{0};   ///< straight-chain veto radius, internal length units (doc pr/86 round 2); 0 = prototype 0.2 cm
 
         // ---- doc sbnd_xin/docs/pr/51 round 4: rough-path diagnostic probe --
         // Diagnostic-only TRACE instrumentation for the near-vertex
