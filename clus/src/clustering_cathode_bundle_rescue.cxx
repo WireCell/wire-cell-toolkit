@@ -182,6 +182,28 @@ struct CbrParams {
     // byte-identical, so the pr/14 hand scan (4 moves in, 4 out) is not
     // re-opened.
     bool rescue_dest_beam_for_new{false};
+    // Containment veto for round-2 pairs (docs/73 sec 5.5).  The geometric test
+    // above only ever looks at the two TIP points, but the merge re-materializes
+    // the WHOLE far half under the destination T0.  A pair can pass every tip
+    // test and still be absurd: on evt486907 the far half (matched 990 us away)
+    // is APA0 charge that lands at x = +33 cm under the beam T0 -- 33 cm inside
+    // TPC1, where charge on APA0 wires cannot be.  Its RAW x already runs past
+    // the cathode, which only happens when the true t0 is genuinely hundreds of
+    // us positive, i.e. it is a cosmic and not the missing half at all.
+    //
+    // 1 cm, and it is NOT a resolution tolerance -- it is a direct bound on how
+    // wrong the destination-T0 hypothesis may be.  Measured over 3463 per-APA
+    // cluster parts in 300 production events, legitimate charge NEVER crosses
+    // the cathode at all (max overshoot 0.00 cm): x is derived from drift time
+    // inside the cluster's own wire volume, so it is hard-clipped at the plane.
+    // Anything past it is therefore v_drift * (T0 error), and the tolerance
+    // converts directly: 1 cm admits a 6.4 us error, 3 cm would admit 19 us.
+    // Since rescue_geom_first exists precisely to admit large-|dt0| pairs, this
+    // is the main thing bounding how wrong that hypothesis may be, so tight is
+    // better -- 3 cm would pass any false merge whose T0 error is under 19 us.
+    // Against the measured populations: the 11 good round-2 merges overshoot by
+    // <= 0.55 cm, the two false ones by 33.5 cm.
+    double far_contain_tol{1*units::cm};
 };
 
 // Fold an angle (deg, 0..180) about 180 -> collinearity (0 = parallel or anti-parallel).
@@ -592,6 +614,7 @@ public:
         p_.conn_drift_frac          = get(config, "conn_drift_frac", p_.conn_drift_frac);
         p_.conn_min_dis             = get(config, "conn_min_dis", p_.conn_min_dis);
         p_.rescue_dest_beam_for_new = get(config, "rescue_dest_beam_for_new", p_.rescue_dest_beam_for_new);
+        p_.far_contain_tol          = get(config, "far_contain_tol", p_.far_contain_tol);
     }
 
     virtual Configuration default_configuration() const {
@@ -637,6 +660,42 @@ private:
         if (fit == ait->second.end()) return 0.0;
         const double dirx = m_dv->face_dirx(WirePlaneId(kAllLayers, wpid.face(), wpid.apa()));
         return -dirx * dt0_dest * fit->second;
+    }
+
+    // Would the far half still lie inside its OWN drift volume once
+    // re-materialized under the destination T0?  (docs/73 sec 5.5)
+    //
+    // Sign convention is taken from far_xshift above, not re-derived: that
+    // returns -dirx * dt0 * speed, and the doc-72 measurement is
+    // dx = SIGN(apa) * v * t0 with SIGN = -1 for the x<0 volume.  Hence
+    // SIGN = -dirx, so the volume a face belongs to is the side of the cathode
+    // on which (x - cathode_x) * dirx < 0.  Any point that ends up more than
+    // `tol` on the WRONG side has been pushed through the cathode.
+    //
+    // Only the cathode side is tested.  An over-shift the other way would push
+    // charge behind the anode, equally unphysical, but the anode plane position
+    // is not available here; the cathode test is the one the observed failures
+    // trip, by 33 cm.
+    bool far_stays_in_tpc(const Cluster& far, double xshift) const {
+        const int N = far.npoints();
+        if (N == 0) return true;
+        auto wpid = far.wpid(far.point3d(0));
+        const double dirx = m_dv->face_dirx(WirePlaneId(kAllLayers, wpid.face(), wpid.apa()));
+        if (dirx == 0) return true;
+        double worst = -1e9;
+        for (int i = 0; i != N; ++i) {
+            const double d = (far.point3d(i).x() + xshift - p_.cathode_x) * dirx;
+            if (d > worst) worst = d;
+        }
+        if (worst <= p_.far_contain_tol) return true;
+        static const bool dbg = std::getenv("CATHODE_RESCUE_DEBUG") != nullptr;
+        if (dbg) {
+            std::fprintf(stderr,
+                "[cbrsel] c%d far half leaves its own TPC by %.1f cm under the "
+                "destination T0 (tol %.1f) -> reject\n",
+                (int)far.ident(), worst/units::cm, p_.far_contain_tol/units::cm);
+        }
+        return false;
     }
 
     void rescue(Grouping& live_grouping) const {
@@ -729,6 +788,13 @@ private:
                     // candidate.  Constant-false when the array was never
                     // written (knob off), so this costs nothing then.
                     if (band_veto_forbids(kb.cluster, kf.cluster)) continue;
+                    const bool new_path = via_new || !dt0_ok ||
+                                          (p_.rescue_allow_in_beam_far && in_beam(kf.t0));
+                    // Containment veto (docs/73 sec 5.5): the tip tests above say
+                    // nothing about where the REST of the far half lands under
+                    // the destination T0.  Round-2 pairs only -- legacy shifts are
+                    // <= 2 cm and cannot move a half through the cathode.
+                    if (new_path && !far_stays_in_tpc(*kf.cluster, xshift)) continue;
                     best_beam = &kb;
                     best_far = &kf;
                     // Admitted only by a round-2 path?  Either the dt0 window
@@ -736,8 +802,7 @@ private:
                     // or the geometry was accepted on the piercing test the
                     // legacy conn-angle cut would have refused (F3).  Consumed
                     // by the F4 destination override below.
-                    best_new_path = via_new || !dt0_ok ||
-                                    (p_.rescue_allow_in_beam_far && in_beam(kf.t0));
+                    best_new_path = new_path;
                     break;
                 }
             }
