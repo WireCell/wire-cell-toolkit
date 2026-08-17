@@ -1380,10 +1380,22 @@ function(
     // false/null = keys suppressed => byte-identical pre-fix config.
     // Escapes: SBND_TEB_CHAIN_TOPOLOGY / SBND_TEB_R3_TURN / SBND_TEB_R3_HOT
     // / SBND_TEB_BRAGG_VETO_TURN runner envs (or -A).
+    //
+    // teb_chain_topology / teb_r3_* STAY OFF: the D1+D3 live A/B was net
+    // NEGATIVE (pr/90 sec 10.6: 19 ADVERSE vs 6 toward on harv3 labels,
+    // two cosmict flips) -- no local scalar separates a true interior
+    // junction from an energetic delta ray.
+    //
+    // teb_bragg_veto_turn SBND PRODUCTION ON 2026-08-17 (owner request,
+    // pr/90 sec 10.8-10.9 gates: knobs-off 1000/1000 byte-identical vs
+    // production work-mcp1k-pr90on2, nueCC48/NCpi0 48/48+19/19; D4-only
+    // A/B movers EXACTLY the five vetoed near-end breaks; labels: 291064
+    // 159.36 -> 0.00 toward, 64503 sanctioned sec 9.0; 349461/278420
+    // mid-track breaks byte-identical under the 15 cm near-end scope).
     teb_chain_topology = false,
     teb_r3_turn = null,
     teb_r3_hot = null,
-    teb_bragg_veto_turn = null,
+    teb_bragg_veto_turn = 30.0,
     kink_walk_dqdx_stop = true,
     kink_break_protect = true,
     // doc pr/49 (18255-57441) -- cross-cluster projection-ghost deweighting
