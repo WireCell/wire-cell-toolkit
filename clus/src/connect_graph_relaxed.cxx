@@ -3,8 +3,11 @@
 #include "WireCellClus/IPCTransform.h"
 #include "WireCellClus/Facade_Cluster.h"
 #include "WireCellClus/Facade_Grouping.h"
+#include "WireCellUtil/Logging.h"
 
 #include "connect_graphs.h"
+
+#include <cstdlib>
 
 using namespace WireCell;
 using namespace WireCell::Clus;
@@ -59,14 +62,20 @@ void Graphs::connect_graph_relaxed(
     }
 
     // this drift direction is only used to calculate isochronous case, so this is OK ...
-    const geo_vector_t drift_dir_abs(1, 0, 0); 
+    const geo_vector_t drift_dir_abs(1, 0, 0);
 
 
     // Form connected components
     std::vector<int> component(num_vertices(graph));
     const size_t num = connected_components(graph, &component[0]);
-    
+
     if (num <= 1) return;
+
+    // doc pr/53 round 6 F0 (relaxed_edge_census): log-only diagnostic, default
+    // OFF.  Env WCT_RELAXED_EDGE_CENSUS unset => no log lines and no behavior
+    // change of any kind; the graph construction below is untouched either way.
+    static const bool oc53_census = std::getenv("WCT_RELAXED_EDGE_CENSUS") != nullptr;
+    static auto oc53_log = WireCell::Log::logger("clus");
 
     // Allocate exactly num point clouds (one per component)
     std::vector<std::shared_ptr<Simple3DPointCloud>> pt_clouds(num);
@@ -80,6 +89,26 @@ void Graphs::connect_graph_relaxed(
         size_t c = component[i];
         pt_clouds[c]->add({points[0][i], points[1][i], points[2][i]});
         pt_clouds_global_indices[c].push_back(i);
+    }
+
+    if (oc53_census) {
+        oc53_log->debug("OC53CENSUS cluster nblobs={} npoints={} ncomp={}",
+                        cluster.nchildren(), cluster.npoints(), num);
+        for (size_t c = 0; c < num; ++c) {
+            double lo[3] = {1e12, 1e12, 1e12}, hi[3] = {-1e12, -1e12, -1e12};
+            const size_t np = pt_clouds[c]->get_num_points();
+            for (size_t i = 0; i < np; ++i) {
+                const auto p = pt_clouds[c]->point(i);
+                const double v[3] = {p.x(), p.y(), p.z()};
+                for (int d = 0; d < 3; ++d) {
+                    if (v[d] < lo[d]) lo[d] = v[d];
+                    if (v[d] > hi[d]) hi[d] = v[d];
+                }
+            }
+            oc53_log->debug("OC53CENSUS comp c={} npts={} bbox=({:.1f},{:.1f},{:.1f})-({:.1f},{:.1f},{:.1f})cm",
+                            c, np, lo[0]/units::cm, lo[1]/units::cm, lo[2]/units::cm,
+                            hi[0]/units::cm, hi[1]/units::cm, hi[2]/units::cm);
+        }
     }
 
     // Initialize distance metrics — all sentinels (-1,-1,1e9) mean "no valid connection".
@@ -301,9 +330,21 @@ void Graphs::connect_graph_relaxed(
                         invalidate_distance();
                     }
                 }
+
+                if (oc53_census) {
+                    const bool killed = std::get<0>(index_index_dis[j][k]) < 0;
+                    oc53_log->debug(
+                        "OC53CENSUS closest j={} k={} p1=({:.2f},{:.2f},{:.2f}) p2=({:.2f},{:.2f},{:.2f}) "
+                        "dis={:.2f}cm nsteps={} strong={} nb=[{},{},{},{}] nb1=[{},{},{},{}] killed={}",
+                        j, k, p1.x()/units::cm, p1.y()/units::cm, p1.z()/units::cm,
+                        p2.x()/units::cm, p2.y()/units::cm, p2.z()/units::cm,
+                        dis/units::cm, num_steps, flag_strong_check,
+                        num_bad[0], num_bad[1], num_bad[2], num_bad[3],
+                        num_bad1[0], num_bad1[1], num_bad1[2], num_bad1[3], killed);
+                }
             }
 
-            // Now check path again ... 
+            // Now check path again ...
             if (std::get<0>(index_index_dis_dir1[j][k]) >= 0) {
                 geo_point_t p1 = pt_clouds.at(j)->point(std::get<0>(index_index_dis_dir1[j][k])); 
                 auto wpid_p1 = cluster.wire_plane_id(pt_clouds_global_indices.at(j).at(std::get<0>(index_index_dis_dir1[j][k])));
@@ -389,6 +430,12 @@ void Graphs::connect_graph_relaxed(
                     if (num_bad1 > 7 || (num_bad1 > 2 && num_bad1 >= 0.75*num_steps)) {
                         index_index_dis_dir1[j][k] = std::make_tuple(-1, -1, 1e9);
                     }
+                }
+
+                if (oc53_census) {
+                    const bool killed = std::get<0>(index_index_dis_dir1[j][k]) < 0;
+                    oc53_log->debug("OC53CENSUS dir1 j={} k={} dis={:.2f}cm nsteps={} nb={} nb1={} killed={}",
+                                    j, k, dis/units::cm, num_steps, num_bad, num_bad1, killed);
                 }
             }
 
@@ -482,6 +529,12 @@ void Graphs::connect_graph_relaxed(
                         index_index_dis_dir2[j][k] = std::make_tuple(-1, -1, 1e9);
                     }
                 }
+
+                if (oc53_census) {
+                    const bool killed = std::get<0>(index_index_dis_dir2[j][k]) < 0;
+                    oc53_log->debug("OC53CENSUS dir2 j={} k={} dis={:.2f}cm nsteps={} nb={} nb1={} killed={}",
+                                    j, k, dis/units::cm, num_steps, num_bad, num_bad1, killed);
+                }
             }
         }
     }
@@ -528,6 +581,8 @@ void Graphs::connect_graph_relaxed(
         process_mst_deterministically(temp_graph, index_index_dis, index_index_dis_dir_mst);
 
     }
+
+    std::vector<std::pair<size_t, size_t>> oc53_pairs;  // emitted component pairs (census only)
 
     for (size_t j = 0; j != num; j++) {
         for (size_t k = j + 1; k != num; k++) {
@@ -577,9 +632,49 @@ void Graphs::connect_graph_relaxed(
                 }
             }
 
+            if (oc53_census) {
+                const bool e_mst = std::get<0>(index_index_dis_mst[j][k]) >= 0;
+                const bool e_dir = std::get<0>(index_index_dis_dir_mst[j][k]) >= 0 &&
+                                   (std::get<0>(index_index_dis_dir1[j][k]) >= 0 ||
+                                    std::get<0>(index_index_dis_dir2[j][k]) >= 0);
+                if (e_mst || e_dir) oc53_pairs.emplace_back(j, k);
+            }
+
         }  // k
     }  // j
-    
+
+    if (oc53_census) {
+        oc53_log->debug("OC53CENSUS summary ncomp={} nedges={}", num, oc53_pairs.size());
+        // Bridge status of each emitted component-pair edge: DFS reachability
+        // over the remaining emitted pairs.  A bridge=true edge is the sole
+        // link between its two components' sides.
+        for (size_t e = 0; e < oc53_pairs.size(); ++e) {
+            const size_t ja = oc53_pairs[e].first;
+            const size_t ka = oc53_pairs[e].second;
+            std::vector<std::vector<size_t>> adj(num);
+            for (size_t f = 0; f < oc53_pairs.size(); ++f) {
+                if (f == e) continue;
+                adj[oc53_pairs[f].first].push_back(oc53_pairs[f].second);
+                adj[oc53_pairs[f].second].push_back(oc53_pairs[f].first);
+            }
+            std::vector<char> seen(num, 0);
+            std::vector<size_t> stack{ja};
+            seen[ja] = 1;
+            while (!stack.empty()) {
+                const size_t v = stack.back();
+                stack.pop_back();
+                for (const size_t w : adj[v]) {
+                    if (!seen[w]) { seen[w] = 1; stack.push_back(w); }
+                }
+            }
+            const bool e_mst = std::get<0>(index_index_dis_mst[ja][ka]) >= 0;
+            const bool e_dir1 = std::get<0>(index_index_dis_dir1[ja][ka]) >= 0;
+            const bool e_dir2 = std::get<0>(index_index_dis_dir2[ja][ka]) >= 0;
+            oc53_log->debug("OC53CENSUS edge j={} k={} dis={:.2f}cm mst={} dir1={} dir2={} bridge={}",
+                            ja, ka, std::get<2>(index_index_dis[ja][ka])/units::cm,
+                            e_mst, e_dir1, e_dir2, !seen[ka]);
+        }
+    }
 }
 
  bool Graphs::check_connectivity(const Facade::Cluster& cluster,  IDetectorVolumes::pointer dv, IPCTransformSet::pointer pcts, std::tuple<int, int, double>& index_index_dis, std::shared_ptr<Facade::Simple3DPointCloud> pc1, std::vector<size_t> pc1_global_index, std::shared_ptr<Facade::Simple3DPointCloud> pc2, std::vector<size_t> pc2_global_index,

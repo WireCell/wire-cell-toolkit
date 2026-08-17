@@ -165,11 +165,26 @@ namespace WireCell::Clus::PR {
 
         // Add all segments and vertices from another shower to this one
         void add_shower(Shower& temp_shower, const std::string& cloud_name_fit = "fit", const std::string& cloud_name_associate = "associate_points");
-        void complete_structure_with_start_segment(IndexedSegmentSet& used_segments, const std::string& cloud_name_fit = "fit", const std::string& cloud_name_associate = "associate_points");
+        // absorb_track_guard (doc pr/40 round 6 F12): when true, the
+        // flood-fill skips (and terminates the walk at) a confidently PID'd
+        // non-electron segment that is long and straight
+        // (segment_is_straight_long_track); long-muon pseudo-showers
+        // (get_particle_type()==13) are exempt.  false = legacy flood-fill =
+        // byte-identical.  See the comment in the implementation.
+        void complete_structure_with_start_segment(IndexedSegmentSet& used_segments, const std::string& cloud_name_fit = "fit", const std::string& cloud_name_associate = "associate_points", bool absorb_track_guard = false);
 
 
-        // get the information from the shower
-        void fill_sets(IndexedVertexSet& used_vertices, IndexedSegmentSet& used_segments, bool flag_exclude_start_segment = true);
+        // get the information from the shower.
+        // exclude_start_vertex (doc pr/38): omit m_start_vertex from
+        // used_vertices.  The prototype's WCShower::fill_sets reads
+        // map_vtx_segs, which NEVER holds the start vertex -- every write
+        // path skips it (`if (vtx == start_vertex) continue;`,
+        // WCShower.cxx:547 and complete_structure_with_start_segment
+        // :708-716/:733-745) -- while the toolkit view holds it via
+        // set_start_vertex -> add_vertex.  Default false = legacy view
+        // semantics, byte-identical for all existing callers.
+        void fill_sets(IndexedVertexSet& used_vertices, IndexedSegmentSet& used_segments, bool flag_exclude_start_segment = true,
+                       bool exclude_start_vertex = false);
         void fill_point_vector(std::vector<WireCell::Point>& points, bool flag_main = true);
         TrajectoryView& fill_maps();
 
@@ -189,9 +204,32 @@ namespace WireCell::Clus::PR {
         std::vector<double> get_stem_dQ_dx(VertexPtr vertex, SegmentPtr segment, int limit = 20, double mip_dqdx_median = 43000/units::cm);
 
         // calculate the kinematics
-        void update_particle_type(const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, double mip_dqdx = 50000/units::cm);
-        void calculate_kinematics(const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model);
-        void calculate_kinematics_long_muon(IndexedSegmentSet& segments_in_muons, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model);
+        // doc sbnd_xin/docs/pr/40 round 3: main_vertex + protect_proton_daughter_pion
+        // (C++ defaults nullptr/false = legacy = byte-identical) let this
+        // function's own shower/track majority-vote reassignment (see .cxx)
+        // decline to overwrite m_start_segment when set_default_shower_
+        // particle_info (NeutrinoPatternBase.cxx) already relabelled it pion
+        // via the same segment_has_proton_daughter test.  Without this guard,
+        // this function silently reverted that relabel -- traced end-to-end
+        // (SBND evt 256587 seg 11079) in round 2; see porting_dictionary.md.
+        // proton_daughter_mip_dqdx is DELIBERATELY separate from mip_dqdx
+        // (this function's own 4-momentum-calc scale, bound to the caller's
+        // m_mip_dqdx=50000/units::cm): the guard must re-derive
+        // segment_has_proton_daughter's verdict on the SAME scale F5 used
+        // (m_mip_dqdx_median=43000/units::cm) or it can silently disagree
+        // with F5's own decision at a different threshold.
+        void update_particle_type(const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, double mip_dqdx = 50000/units::cm, VertexPtr main_vertex = nullptr, bool protect_proton_daughter_pion = false, double proton_daughter_mip_dqdx = 43000/units::cm);
+        // exclude_start_vertex_from_endpoint (doc pr/39): same prototype-parity
+        // rule as fill_sets's exclude_start_vertex above, applied to the
+        // farthest-vertex search that sets data.end_point.  The prototype's
+        // WCShower::calculate_kinematics (WCShower.cxx:377-387) searches
+        // map_vtx_segs, which never holds the start vertex; the toolkit search
+        // here walks the full node set with no such exclusion, so a detached
+        // (conn_type 2/3) shower's end_point can collapse onto its own start
+        // vertex (e.g. the neutrino vertex) instead of growing away from it.
+        // Default false = legacy search over every node, byte-identical.
+        void calculate_kinematics(const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, bool exclude_start_vertex_from_endpoint = false);
+        void calculate_kinematics_long_muon(IndexedSegmentSet& segments_in_muons, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, bool exclude_start_vertex_from_endpoint = false);
 
     private:
 
@@ -213,9 +251,20 @@ namespace WireCell::Clus::PR {
 
     using ShowerPtr = std::shared_ptr<Shower>;
 
+    /// Shower::m_shower_id before set_shower_id() has been called.  Same hazard
+    /// as PR::kUnindexed but a DIFFERENT sentinel (-1, not SIZE_MAX): showers
+    /// are numbered by the clustering pass, not by graph insertion.
+    constexpr int kUnassignedShowerId = -1;
+
     struct ShowerIndexCmp {
         bool operator()(const ShowerPtr& a, const ShowerPtr& b) const {
-            return a->get_shower_id() < b->get_shower_id();
+            const int ia = a->get_shower_id();
+            const int ib = b->get_shower_id();
+            if (ia == kUnassignedShowerId || ib == kUnassignedShowerId) [[unlikely]] {
+                static std::atomic<bool> warned{false};
+                if (!warned.exchange(true)) warn_unindexed("PR::Shower");
+            }
+            return ia < ib;
         }
     };
     using IndexedShowerSet   = std::set<ShowerPtr, ShowerIndexCmp>;

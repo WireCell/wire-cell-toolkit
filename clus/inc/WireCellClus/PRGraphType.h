@@ -172,7 +172,13 @@ namespace WireCell::Clus::PR {
 
     /// Return a vector of node descriptors in native graph order.
     ///
-    /// This order is based on pointer values.
+    /// WARNING: this order is based on pointer values and therefore VARIES
+    /// BETWEEN RUNS of an identical program.  Despite the name, this is NOT a
+    /// determinism helper -- it is the raw `boost::vertices()` order packaged
+    /// as a vector.  Use it only where the loop body is provably
+    /// order-insensitive (e.g. an unconditional search for one unique node).
+    /// For anything that accumulates, pushes into an output vector, breaks on
+    /// first match, or takes a tie-broken min/max, use ordered_nodes().
     ///
     /// The vector may be conveniently used to iterate over nodes:
     ///
@@ -181,7 +187,7 @@ namespace WireCell::Clus::PR {
     ///     std::cout << "Node index: " << my_graph[vd].index << std::endl;
     /// }
     /// @endcode
-    node_vector graph_nodes(Graph& g);
+    node_vector graph_nodes(const Graph& g);
 
     /// Return a vector of node descriptors ordered by index.
     ///
@@ -192,7 +198,7 @@ namespace WireCell::Clus::PR {
     ///     std::cout << "Node index: " << my_graph[vd].index << std::endl;
     /// }
     /// @endcode
-    node_vector ordered_nodes(Graph& g);
+    node_vector ordered_nodes(const Graph& g);
 
     /// Return a vector of edge descriptors ordered by EdgeBundle::index.
     ///
@@ -204,7 +210,7 @@ namespace WireCell::Clus::PR {
     ///     std::cout << "Edge index: " << my_graph[ed].index << std::endl;
     /// }
     /// @endcode
-    std::vector<edge_descriptor> ordered_edges(Graph& g);
+    std::vector<edge_descriptor> ordered_edges(const Graph& g);
 
     
 

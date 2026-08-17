@@ -258,7 +258,14 @@ namespace WireCell::Clus::PR {
 
         invalidate_segment_caches();
 
-        for (auto vdesc : shower.nodes()) {
+        // ordered_nodes/ordered_edges rather than the raw view sets: those are
+        // unordered_sets keyed on heap addresses (see get_total_length()).  The
+        // node loop is set-insertion and so order-blind, but the edge loop
+        // below appends points into batch_fit/batch_associate, and THAT order
+        // becomes the shower point cloud's row order -- which decides kNN ties
+        // in shower_get_closest_point().  Ordered for the same reason both
+        // loops are here (doc pr/28 sec 15).
+        for (auto vdesc : ordered_nodes(shower, m_full_graph)) {
             VertexPtr vtx = m_full_graph[vdesc].vertex;
             if (vtx && vtx->descriptor_valid()) this->add_vertex(vtx);
         }
@@ -269,7 +276,7 @@ namespace WireCell::Clus::PR {
         Facade::DPCBatch batch_fit;
         Facade::DPCBatch batch_associate;
 
-        for (auto edesc : shower.edges()) {
+        for (auto edesc : ordered_edges(shower, m_full_graph)) {
             SegmentPtr seg = m_full_graph[edesc].segment;
             if (!seg || !seg->descriptor_valid()) continue;
             // Membership gate -- same rationale as add_segment(): a segment
@@ -327,8 +334,33 @@ namespace WireCell::Clus::PR {
 
     }
 
-    void Shower::complete_structure_with_start_segment(IndexedSegmentSet& used_segments, const std::string& cloud_name_fit, const std::string& cloud_name_associate) {
+    void Shower::complete_structure_with_start_segment(IndexedSegmentSet& used_segments, const std::string& cloud_name_fit, const std::string& cloud_name_associate, bool absorb_track_guard) {
         if (!m_start_segment || !m_start_segment->descriptor_valid()) return;
+
+        // doc sbnd_xin/docs/pr/40 round 6 F12: the flood-fill below has no
+        // per-segment test at all, so one shower-flagged seed swallows every
+        // connected segment regardless of its own PID (round-5 G2a/G2c
+        // failure mechanism).  When absorb_track_guard is on, a confidently
+        // PID'd non-electron that is long and straight is not absorbed and
+        // the walk terminates there (its far vertex is never enqueued, so a
+        // Michel candidate beyond a stopping muon stays unclaimed for the
+        // later seeding passes).  Long-muon pseudo-showers are exempt: the
+        // in_main_cluster seeder records particle_type 13 on the shower
+        // BEFORE calling here (NeutrinoShowerClustering.cxx:132), and broken
+        // muon tracks must keep reassembling through this flood-fill.  The
+        // excluded segment is deliberately NOT inserted into used_segments
+        // (the predicate is a pure segment property -- every other
+        // flood-fill re-excludes it) and its shower flags are deliberately
+        // NOT consulted (a stale flag must not defeat the exclusion).
+        // false = legacy = byte-identical.
+        const bool apply_guard = absorb_track_guard && this->get_particle_type() != 13;
+        auto guard_excludes = [&](const SegmentPtr& seg) -> bool {
+            if (!apply_guard) return false;
+            if (!seg->has_particle_info() || !seg->particle_info()) return false;
+            const int pdg = seg->particle_info()->pdg();
+            if (pdg == 0 || std::abs(pdg) == 11) return false;
+            return segment_is_straight_long_track(seg);
+        };
         
         std::vector<SegmentPtr> new_segments;
         std::vector<VertexPtr> new_vertices;
@@ -360,6 +392,8 @@ namespace WireCell::Clus::PR {
                     for (auto edesc : sorted_out_edges(vtx->get_descriptor(), m_full_graph)) {
                         SegmentPtr seg = m_full_graph[edesc].segment;
                         if (seg && seg->descriptor_valid() && used_segments.find(seg) == used_segments.end()) {
+                            // F12 (doc pr/40 round 6): see guard_excludes above.
+                            if (guard_excludes(seg)) continue;
                             // add_segment() already performs the fit/associate merge
                             // (and merge_wpid_params, which the block that used to sit
                             // here omitted).  It previously ran with the DEFAULT cloud
@@ -400,11 +434,17 @@ namespace WireCell::Clus::PR {
         }
     }
 
-    void Shower::fill_sets(IndexedVertexSet& used_vertices, IndexedSegmentSet& used_segments, bool flag_exclude_start_segment){
-        // Fill used_vertices with all vertices in this shower's view (index-stable order)
+    void Shower::fill_sets(IndexedVertexSet& used_vertices, IndexedSegmentSet& used_segments, bool flag_exclude_start_segment,
+                           bool exclude_start_vertex){
+        // Fill used_vertices with all vertices in this shower's view (index-stable order).
+        // exclude_start_vertex: prototype map_vtx_segs parity -- the start
+        // vertex (a main-track attachment point, present in the toolkit view
+        // via set_start_vertex) is omitted so consumers' BFS barriers block
+        // only shower-INTERIOR vertices (see header comment, doc pr/38).
         for (auto vdesc : ordered_nodes(*this, m_full_graph)) {
             VertexPtr vtx = m_full_graph[vdesc].vertex;
             if (vtx) {
+                if (exclude_start_vertex && vtx == m_start_vertex) continue;
                 used_vertices.insert(vtx);
             }
         }
@@ -648,6 +688,10 @@ namespace WireCell::Clus::PR {
             return 0;
         }
         const auto& view = this->view_graph();
+        // Left on the raw (address-hashed) edge set deliberately: this body is
+        // an unconditional integer count, so no walk order is observable and
+        // ordered_edges() would only buy a vector allocation.  Every loop in
+        // this file that ACCUMULATES or picks does use ordered_edges.
         for (auto edesc : this->edges()) {
             SegmentPtr seg = view[edesc].segment;
             if (seg && seg->cluster() == start_cluster) ++num;
@@ -665,7 +709,13 @@ namespace WireCell::Clus::PR {
 
         double total_length = 0;
         const auto& view = this->view_graph();
-        for (auto edesc : this->edges()) {
+        // ordered_edges, not this->edges(): edges() is an unordered_set whose
+        // hash is over two node_descriptors, and with boost::setS vertices a
+        // node_descriptor is a HEAP ADDRESS -- so the bucket walk differs
+        // between runs of the identical binary.  This += is an FP accumulation,
+        // so that walk order is observable at the ULP: one leaf of SBND evt 388
+        // (doc pr/28 sec 15).
+        for (auto edesc : ordered_edges(*this, m_full_graph)) {
             SegmentPtr seg = view[edesc].segment;
             if (seg) total_length += segment_track_length(seg);
         }
@@ -682,11 +732,12 @@ namespace WireCell::Clus::PR {
         // Get the view graph to access segments
         const auto& view = this->view_graph();
         
-        // Iterate through all segments in the shower
-        for (auto edesc : this->edges()) {
+        // Iterate through all segments in the shower (ordered_edges: FP
+        // accumulation, see get_total_length() above)
+        for (auto edesc : ordered_edges(*this, m_full_graph)) {
             SegmentPtr seg = view[edesc].segment;
             if (!seg) continue;
-            
+
             // Check if segment's cluster matches the input cluster
             if (seg->cluster() == cluster) {
                 total_length += segment_track_length(seg);
@@ -701,11 +752,12 @@ namespace WireCell::Clus::PR {
         // Get the view graph to access segments
         const auto& view = this->view_graph();
         
-        // Iterate through all segments in the shower
-        for (auto edesc : this->edges()) {
+        // Iterate through all segments in the shower (ordered_edges: FP
+        // accumulation, see get_total_length() above)
+        for (auto edesc : ordered_edges(*this, m_full_graph)) {
             SegmentPtr seg = view[edesc].segment;
             if (!seg) continue;
-            
+
             // Mirrors prototype: only count if !get_flag_shower()
             // = !(trajectory || topology || |pdg|==11)
             bool is_shower_seg = seg->flags_any(SegmentFlags::kShowerTrajectory) ||
@@ -719,7 +771,7 @@ namespace WireCell::Clus::PR {
         return total_length;
     }
 
-    void Shower::update_particle_type(const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, double mip_dqdx){
+    void Shower::update_particle_type(const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, double mip_dqdx, VertexPtr main_vertex, bool protect_proton_daughter_pion, double proton_daughter_mip_dqdx){
         double track_length = 0;
         double shower_length = 0;
         
@@ -731,11 +783,15 @@ namespace WireCell::Clus::PR {
         // Get the view graph to access segments
         const auto& view = this->view_graph();
         
-        // Iterate through all segments in the shower
-        for (auto edesc : this->edges()) {
+        // Iterate through all segments in the shower.  ordered_edges, NOT
+        // this->edges(): the two accumulators below feed the
+        // `shower_length > track_length` branch, so an ULP move here can flip
+        // the branch and retype the start segment to an electron.  This is the
+        // one converted site whose effect is not confined to output rounding.
+        for (auto edesc : ordered_edges(*this, m_full_graph)) {
             SegmentPtr seg = view[edesc].segment;
             if (!seg) continue;
-            
+
             double length = segment_track_length(seg);
             
             // Check if segment is a shower segment OR not a proton (PDG 2212)
@@ -757,19 +813,34 @@ namespace WireCell::Clus::PR {
         
         // If shower_length dominates, update start_segment to electron
         if (shower_length > track_length && m_start_segment) {
-            // Calculate 4-momentum for electron (PDG = 11)
-            auto four_momentum = segment_cal_4mom(m_start_segment, 11, particle_data, recomb_model, mip_dqdx);
-            
-            // Create ParticleInfo for electron
-            auto pinfo = std::make_shared<Aux::ParticleInfo>(
-                11,                                          // electron PDG
-                particle_data->get_particle_mass(11),       // electron mass
-                particle_data->pdg_to_name(11),             // "electron"
-                four_momentum                                // 4-momentum
-            );
-            
-            // Store particle info in start_segment
-            m_start_segment->particle_info(pinfo);
+            // doc sbnd_xin/docs/pr/40 round 3: an electron cannot father a
+            // proton -- if set_default_shower_particle_info already relabelled
+            // m_start_segment pion via this same topology test, don't
+            // silently revert it back to electron here.  is_not_proton above
+            // only exempts a confirmed PROTON from the shower-length bucket,
+            // so a pion-labelled start_segment still landed in shower_length
+            // and still trips this branch; C++ default false/nullptr = legacy
+            // = byte-identical.
+            const bool protected_pion = protect_proton_daughter_pion && main_vertex &&
+                segment_has_proton_daughter(m_full_graph, m_start_segment, main_vertex, proton_daughter_mip_dqdx);
+            // if-guarded rather than an early return: keeps any code appended
+            // to this function later from being silently skipped for a
+            // protected shower.
+            if (!protected_pion) {
+                // Calculate 4-momentum for electron (PDG = 11)
+                auto four_momentum = segment_cal_4mom(m_start_segment, 11, particle_data, recomb_model, mip_dqdx);
+
+                // Create ParticleInfo for electron
+                auto pinfo = std::make_shared<Aux::ParticleInfo>(
+                    11,                                          // electron PDG
+                    particle_data->get_particle_mass(11),       // electron mass
+                    particle_data->pdg_to_name(11),             // "electron"
+                    four_momentum                                // 4-momentum
+                );
+
+                // Store particle info in start_segment
+                m_start_segment->particle_info(pinfo);
+            }
         }
     }
 
@@ -927,7 +998,7 @@ namespace WireCell::Clus::PR {
         return vec_dQ_dx;
     }
 
-    void Shower::calculate_kinematics(const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model){
+    void Shower::calculate_kinematics(const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, bool exclude_start_vertex_from_endpoint){
         int nsegments = this->edges().size();
         
         if (nsegments == 1) {
@@ -1014,6 +1085,7 @@ namespace WireCell::Clus::PR {
                     for (auto vdesc : ordered_nodes(*this, m_full_graph)) {
                         VertexPtr vtx = view[vdesc].vertex;
                         if (!vtx) continue;
+                        if (exclude_start_vertex_from_endpoint && vtx == m_start_vertex) continue;
                         double dis = (data.start_point - vtx->fit().point).magnitude();
                         if (dis > max_dis) {
                             max_dis = dis;
@@ -1121,6 +1193,7 @@ namespace WireCell::Clus::PR {
             for (auto vdesc : ordered_nodes(*this, m_full_graph)) {
                 VertexPtr vtx = view[vdesc].vertex;
                 if (!vtx) continue;
+                if (exclude_start_vertex_from_endpoint && vtx == m_start_vertex) continue;
                 double dis = (data.start_point - vtx->fit().point).magnitude();
                 if (dis > max_dis) {
                     max_dis = dis;
@@ -1131,7 +1204,14 @@ namespace WireCell::Clus::PR {
             // Collect dQ and dx from all segments; accumulate total_length for range-based energy
             double total_length = 0;
             std::vector<double> vec_dQ, vec_dx;
-            for (auto edesc : this->edges()) {
+            // ordered_edges: this is the site that was actually caught.  Both
+            // the `total_length +=` and the push order of vec_dQ/vec_dx are
+            // observable -- cal_kine_dQdx() is a plain `kine_energy += dE` over
+            // the vector (PRSegmentFunctions.cxx:1281), so the summation order
+            // sets the last bit.  showers[1]/kine_dQdx moved 1314.124434586102
+            // -> ...103 (rel 6.9e-16) between two `setarch -R` runs of the same
+            // binary on SBND evt 388 (doc pr/28 sec 15).
+            for (auto edesc : ordered_edges(*this, m_full_graph)) {
                 SegmentPtr seg = view[edesc].segment;
                 if (!seg) continue;
                 total_length += segment_track_length(seg);
@@ -1183,7 +1263,7 @@ namespace WireCell::Clus::PR {
         //           << std::endl;
     }
 
-    void Shower::calculate_kinematics_long_muon(IndexedSegmentSet& segments_in_muons, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model){
+    void Shower::calculate_kinematics_long_muon(IndexedSegmentSet& segments_in_muons, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, bool exclude_start_vertex_from_endpoint){
         // Invariant: this function is only called when shower->get_particle_type() == 13
         // (NeutrinoEnergyReco.cxx), which requires shower->set_particle_type(13) to have been
         // called (NeutrinoShowerClustering.cxx:118), which in turn requires m_start_segment to
@@ -1251,6 +1331,7 @@ namespace WireCell::Clus::PR {
         VertexPtr farthest_vertex = nullptr;
         for (auto& [idx, vtx] : muon_vertices_by_index) {
             if (!vtx) continue;
+            if (exclude_start_vertex_from_endpoint && vtx == m_start_vertex) continue;
             double dis = (vtx->fit().point - data.start_point).magnitude();
             if (dis > max_dis) {
                 max_dis = dis;

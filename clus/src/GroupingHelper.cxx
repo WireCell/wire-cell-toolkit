@@ -1,6 +1,6 @@
 #include "WireCellClus/GroupingHelper.h"
 
-std::map<WireCell::Clus::Facade::Cluster*, std::tuple<WireCell::Clus::Facade::Cluster*, int, WireCell::Clus::Facade::Cluster*>> 
+std::map<WireCell::Clus::Facade::Cluster*, std::tuple<WireCell::Clus::Facade::Cluster*, int, WireCell::Clus::Facade::Cluster*>, WireCell::Clus::Facade::ClusterIdentLess>
 WireCell::Clus::Facade::process_groupings_helper(
     WireCell::Clus::Facade::Grouping& original,
     WireCell::Clus::Facade::Grouping& shadow,
@@ -8,10 +8,24 @@ WireCell::Clus::Facade::process_groupings_helper(
     const std::string& pname)  // Removed const here
 {
     // current cluster,  corresponding shadow_cluster, its id, the main cluster of this cluster ...
-    std::map<Cluster*, std::tuple<Cluster*, int, Cluster*>> result;
+    // Ident-ordered like orig_to_shadow below -- this is the RETURN VALUE, and a
+    // caller iterating an address-ordered map would just relocate the defect.
+    std::map<Cluster*, std::tuple<Cluster*, int, Cluster*>, ClusterIdentLess> result;
     
-    // Step 1: Map original clusters to shadow clusters
-    std::map<Cluster*, Cluster*> orig_to_shadow;
+    // Step 1: Map original clusters to shadow clusters.
+    //
+    // Ordered by ident(), not by address.  The step-2 loop below walks this map
+    // and calls Grouping::separate() on each entry, and separate() MINTS NEW
+    // CLUSTERS -- so the walk order sets the idents the split products receive,
+    // and an address-ordered walk made those idents depend on heap layout.
+    // ident() is unique among a grouping's children, so this is a total order.
+    //
+    // NOTE: as of this writing this whole function is UNREACHABLE -- its only
+    // call site is commented out (clustering_retile.cxx:162) and no other
+    // translation unit references it.  The fix is therefore inert by
+    // construction and no A/B gate applies to it; it is made here so the defect
+    // does not come back to life with the call site (doc pr/28 sec 15).
+    std::map<Cluster*, Cluster*, ClusterIdentLess> orig_to_shadow;
     for (auto* orig_cluster : original.children()) {
         for (auto* shad_cluster : shadow.children()) {
             if (orig_cluster->ident() == shad_cluster->ident()) {

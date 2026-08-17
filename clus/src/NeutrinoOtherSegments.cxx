@@ -28,6 +28,15 @@ struct Res_proto_segment {
     double max_dis_w;
 };
 
+// doc sbnd_xin/docs/pr/54 -- see the declaration in PRSegmentFunctions.h.
+bool WireCell::Clus::PR::other_seg_keep_isolated_ok(bool keep_isolated, int component_points,
+                                                    double track_length, int min_points,
+                                                    double min_length)
+{
+    if (!keep_isolated) return false;  // legacy discard, byte-identical
+    return component_points >= min_points && track_length >= min_length;
+}
+
 void PatternAlgorithms::find_other_segments(Graph& graph, Facade::Cluster& cluster, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, bool flag_break_track, double search_range, double scaling_2d)
 {
     if (!cluster.has_pc("steiner_pc")) return;
@@ -81,7 +90,16 @@ void PatternAlgorithms::find_other_segments(Graph& graph, Facade::Cluster& clust
             double dis_u = std::get<0>(closest_2d);
             double dis_v = std::get<1>(closest_2d);
             double dis_w = std::get<2>(closest_2d);
-            
+
+            if (m_other_seg_empty_2d_guard) {
+                // -1.0 = empty per-(plane,face,apa) kd-tree sentinel (segment
+                // has no fit points on this face): no information, not "zero
+                // distance".  See NeutrinoPatternBase.h doc pr/45 knob.
+                if (dis_u < 0) dis_u = 1e9;
+                if (dis_v < 0) dis_v = 1e9;
+                if (dis_w < 0) dis_w = 1e9;
+            }
+
             if (dis_u < min_dis_u) min_dis_u = dis_u;
             if (dis_v < min_dis_v) min_dis_v = dis_v;
             if (dis_w < min_dis_w) min_dis_w = dis_w;
@@ -135,6 +153,57 @@ void PatternAlgorithms::find_other_segments(Graph& graph, Facade::Cluster& clust
     if (terminals.empty()) return;
 
     SPDLOG_LOGGER_TRACE(s_log, "find_other_segments: existing_segments={}, N={}, num_tagged={}, terminals={}", existing_segments.size(), N, std::count(flag_tagged.begin(), flag_tagged.end(), true), terminals.size());
+
+    // doc pr/67 round 2, P5.  The census below answers "was a branch even
+    // PROPOSED at this location, and if not, which filter killed it".  Round 1
+    // could only see the per-round segment count (P4), which cannot distinguish
+    // "no candidate existed" from "a candidate was scored and rejected".
+    // Log-only, gated => byte-identical when off.
+    if (m_traj_cover_probe) {
+        SPDLOG_LOGGER_DEBUG(s_log,
+            "pr67 fos: cluster={} existing_segments={} steiner_N={} tagged={} terminals={}",
+            cluster.get_cluster_id(), existing_segments.size(), N,
+            std::count(flag_tagged.begin(), flag_tagged.end(), true), terminals.size());
+    }
+    // Component reporter shared by the Step-8 filter and the Step-9 re-evaluation:
+    // both apply the SAME quality cut, so both must print the same fields or the
+    // two rejections cannot be told apart in the log.
+    // sep_clusters is filled in Step 7; the lambda is only ever CALLED after that,
+    // so capturing it by reference here is safe.
+    auto probe_component = [&](const char* stage, int grp, const Res_proto_segment& ts,
+                               const std::vector<std::vector<size_t>>& groups,
+                               const char* verdict) {
+        if (!m_traj_cover_probe) return;
+        const bool have_ab = (ts.special_A != SIZE_MAX && ts.special_B != SIZE_MAX);
+        // A and B are two chosen points; a hand-scanned coordinate can only be
+        // matched to a component through the component's full extent.
+        double lo[3] = {1e30, 1e30, 1e30}, hi[3] = {-1e30, -1e30, -1e30};
+        if (grp >= 0 && grp < (int)groups.size()) {
+            for (size_t idx : groups[grp]) {
+                const double c[3] = {x_coords[idx], y_coords[idx], z_coords[idx]};
+                for (int k = 0; k < 3; ++k) {
+                    if (c[k] < lo[k]) lo[k] = c[k];
+                    if (c[k] > hi[k]) hi[k] = c[k];
+                }
+            }
+        }
+        SPDLOG_LOGGER_DEBUG(s_log,
+            "pr67 fos {}: cluster={} group={} npts={} len={:.2f} cm nnf={} "
+            "max_dis=({:.2f},{:.2f},{:.2f}) cm A=({:.2f},{:.2f},{:.2f}) B=({:.2f},{:.2f},{:.2f}) "
+            "bbox=[{:.2f},{:.2f}]x[{:.2f},{:.2f}]x[{:.2f},{:.2f}] -> {}",
+            stage, cluster.get_cluster_id(), grp, ts.number_points, ts.length / units::cm,
+            ts.number_not_faked, ts.max_dis_u / units::cm, ts.max_dis_v / units::cm,
+            ts.max_dis_w / units::cm,
+            have_ab ? x_coords[ts.special_A] / units::cm : 0.0,
+            have_ab ? y_coords[ts.special_A] / units::cm : 0.0,
+            have_ab ? z_coords[ts.special_A] / units::cm : 0.0,
+            have_ab ? x_coords[ts.special_B] / units::cm : 0.0,
+            have_ab ? y_coords[ts.special_B] / units::cm : 0.0,
+            have_ab ? z_coords[ts.special_B] / units::cm : 0.0,
+            lo[0] / units::cm, hi[0] / units::cm, lo[1] / units::cm, hi[1] / units::cm,
+            lo[2] / units::cm, hi[2] / units::cm,
+            verdict);
+    };
 
 
     // Step 3: Compute Voronoi diagram
@@ -299,6 +368,18 @@ void PatternAlgorithms::find_other_segments(Graph& graph, Facade::Cluster& clust
         
         // If no boundary connection was found, skip this component entirely
         if (special_A == SIZE_MAX) {
+            if (m_traj_cover_probe) {
+                // doc pr/67 P5: an untagged component with no MST edge crossing
+                // the tagged/untagged boundary has nothing to attach to.
+                Facade::geo_point_t f(x_coords[sep_clusters[i].front()],
+                                      y_coords[sep_clusters[i].front()],
+                                      z_coords[sep_clusters[i].front()]);
+                SPDLOG_LOGGER_DEBUG(s_log,
+                    "pr67 fos step8: cluster={} group={} npts={} front=({:.2f},{:.2f},{:.2f}) "
+                    "-> DROP no_boundary_connection",
+                    cluster.get_cluster_id(), i, ncounts[i],
+                    f.x() / units::cm, f.y() / units::cm, f.z() / units::cm);
+            }
             remaining_segments.erase(i);
             continue;
         }
@@ -334,14 +415,21 @@ void PatternAlgorithms::find_other_segments(Graph& graph, Facade::Cluster& clust
                 double dis_u = std::get<0>(closest_2d);
                 double dis_v = std::get<1>(closest_2d);
                 double dis_w = std::get<2>(closest_2d);
-                
+
+                if (m_other_seg_empty_2d_guard) {
+                    // -1.0 empty-tree sentinel: no information (see tagging loop).
+                    if (dis_u < 0) dis_u = 1e9;
+                    if (dis_v < 0) dis_v = 1e9;
+                    if (dis_w < 0) dis_w = 1e9;
+                }
+
                 if (dis_u < min_dis_u) min_dis_u = dis_u;
                 if (dis_v < min_dis_v) min_dis_v = dis_v;
                 if (dis_w < min_dis_w) min_dis_w = dis_w;
             }
-            
+
             auto p_raw = transform->backward(p, cluster_t0, face, apa);
-            
+
             int flag_num = 0;
             if (min_dis_u > scaling_2d * search_range && 
                 !cluster.grouping()->get_closest_dead_chs(p_raw, 1, apa, face, 0)) flag_num++;
@@ -394,7 +482,7 @@ void PatternAlgorithms::find_other_segments(Graph& graph, Facade::Cluster& clust
         temp_segments[i].max_dis_u = max_dis_u;
         temp_segments[i].max_dis_v = max_dis_v;
         temp_segments[i].max_dis_w = max_dis_w;
-        
+
         // Apply quality cuts
         if ((temp_segments[i].number_points == 1) ||
             (number_not_faked == 0 &&
@@ -403,7 +491,14 @@ void PatternAlgorithms::find_other_segments(Graph& graph, Facade::Cluster& clust
                (number_not_faked < 0.4 * temp_segments[i].number_points && length < 7 * units::cm)) &&
               max_dis_u / units::cm < 3 && max_dis_v / units::cm < 3 && max_dis_w / units::cm < 3 &&
               max_dis_u + max_dis_v + max_dis_w < 6 * units::cm)))) {
+            probe_component("step8", i, temp_segments[i], sep_clusters,
+                            temp_segments[i].number_points == 1
+                                ? "DROP single_point"
+                                : (length < 3.5 * units::cm ? "DROP nnf0_short" : "DROP nnf0_2d_shadowed"));
             remaining_segments.erase(i);
+        }
+        else {
+            probe_component("step8", i, temp_segments[i], sep_clusters, "KEEP");
         }
     }
     
@@ -446,11 +541,20 @@ void PatternAlgorithms::find_other_segments(Graph& graph, Facade::Cluster& clust
         Facade::geo_point_t pt_B(x_coords[special_B], y_coords[special_B], z_coords[special_B]);
         auto path_points = do_rough_path(cluster, pt_A, pt_B);
 
-        if (path_points.size() <= 1) continue;
+        if (path_points.size() <= 1) {
+            probe_component("step9", max_length_cluster, temp_segments[max_length_cluster], sep_clusters,
+                            "DROP rough_path_empty");
+            continue;
+        }
 
         // Create segment (not yet in graph)
         auto new_seg = create_segment_for_cluster(cluster, dv, path_points);
-        if (!new_seg) continue;
+        if (!new_seg) {
+            probe_component("step9", max_length_cluster, temp_segments[max_length_cluster], sep_clusters,
+                            "DROP create_segment_failed");
+            continue;
+        }
+        probe_component("step9", max_length_cluster, temp_segments[max_length_cluster], sep_clusters, "SELECTED");
 
         // Do single tracking to get fine fit path and "fit" point cloud
         track_fitter.add_segment(new_seg);
@@ -547,7 +651,7 @@ void PatternAlgorithms::find_other_segments(Graph& graph, Facade::Cluster& clust
                 // At least one endpoint connects to the existing graph
                 if (v1v2_dist > 0.1 * units::cm) {
                     add_segment(graph, new_seg, v1, v2);
-                    track_fitter.do_multi_tracking(true, true, false, false, false, &cluster);
+                    track_fitter.do_multi_tracking(true, true, false, m_fit_exclusion, false, &cluster);
 
                     double length        = segment_track_length(new_seg);
                     double direct_length = segment_track_direct_length(new_seg);
@@ -555,9 +659,41 @@ void PatternAlgorithms::find_other_segments(Graph& graph, Facade::Cluster& clust
 
                     
 
-                    if (length > 30 * units::cm ||
+                    // doc pr/30 §11, P4.  The first two clauses are the
+                    // prototype's (NeutrinoID_proto_vertex.h:1368); the third
+                    // is toolkit-only and a strict WIDENING -- less curved
+                    // (0.72 vs 0.78 direct/total), longer (15 vs 10 cm), less
+                    // ionising (1.05 vs 1.6 x MIP) -- so it can only ADD
+                    // segments, never reject one the prototype accepted.
+                    // m_other_seg_relaxed_accept defaults TRUE because this is
+                    // already production; OFF restores the prototype's clause.
+                    // The attribution below is unconditional and log-only: it
+                    // is what answers "is the extra clause admitting garbage",
+                    // which is the whole reason the knob exists.
+                    const bool accept_proto =
+                        length > 30 * units::cm ||
                         (direct_length < 0.78 * length && length > 10 * units::cm &&
-                         medium_dQ_dx / mip_dQdx > 1.6) || (direct_length< 0.72 * length && length > 15 * units::cm && medium_dQ_dx / mip_dQdx > 1.05)) {
+                         medium_dQ_dx / mip_dQdx > 1.6);
+                    const bool accept_relaxed =
+                        direct_length < 0.72 * length && length > 15 * units::cm &&
+                        medium_dQ_dx / mip_dQdx > 1.05;
+                    if (accept_proto) {
+                        g_port_audit.oseg_accept_proto.fetch_add(1, std::memory_order_relaxed);
+                    }
+                    else if (accept_relaxed) {
+                        g_port_audit.oseg_accept_relaxed.fetch_add(1, std::memory_order_relaxed);
+                        SPDLOG_LOGGER_DEBUG(s_log,
+                            "pr30 P4 relaxed-only accept: cluster {} length={:.2f} cm "
+                            "direct={:.2f} cm ratio={:.3f} medQdx/MIP={:.3f}",
+                            cluster.get_cluster_id(), length/units::cm,
+                            direct_length/units::cm,
+                            length > 0 ? direct_length/length : -1.0,
+                            medium_dQ_dx / mip_dQdx);
+                    }
+                    else {
+                        g_port_audit.oseg_reject.fetch_add(1, std::memory_order_relaxed);
+                    }
+                    if (accept_proto || (m_other_seg_relaxed_accept && accept_relaxed)) {
                         new_segments.push_back(new_seg);
                         // std::cout << "Cluster " << cluster.get_cluster_id() << " New segment: length = " << length / units::cm << " cm, direct_length = " << direct_length / units::cm 
                             //   << " cm, medium_dQ_dx = " << medium_dQ_dx / (units::MeV / units::cm) << " MeV/cm" << " " << v1_fit_pt << " " << v2_fit_pt << std::endl;
@@ -574,6 +710,9 @@ void PatternAlgorithms::find_other_segments(Graph& graph, Facade::Cluster& clust
                 // modify_vertex/segment_isochronous will call add_segment internally if successful,
                 // so do NOT call add_segment here.
                 bool flag_parallel = false;
+                // doc pr/67 round 3: which of the snap paths actually fired, so
+                // the knob-on census can attribute every mover.  Static strings.
+                const char* snap_path = "none";
 
                 SPDLOG_LOGGER_TRACE(s_log, "find_other_segments: Cluster {} Middle tracks --- # of Vertices: {}; # of Edges: {}", cluster.get_cluster_id(), boost::num_vertices(graph), boost::num_edges(graph));
 
@@ -582,7 +721,11 @@ void PatternAlgorithms::find_other_segments(Graph& graph, Facade::Cluster& clust
                                         v1_fit_pt.z() - v2_fit_pt.z());
                 double dir_mag = dir.magnitude();
 
-                if (dir_mag > 10 * units::cm ||
+                // doc sbnd_xin/docs/pr/67 round 3 (S2): the first clause's size
+                // gate is m_iso_snap_min_dir_mag (C++ default 10 cm = legacy).
+                // The second clause and the >18/>36 cm widening tiers below are
+                // deliberately NOT derived from it -- see NeutrinoPatternBase.h.
+                if (dir_mag > m_iso_snap_min_dir_mag ||
                     (dir_mag > 8 * units::cm && segment_track_length(new_seg) > 13 * units::cm)) {
 
                     // Try to snap to a nearby isochronous vertex
@@ -604,10 +747,12 @@ void PatternAlgorithms::find_other_segments(Graph& graph, Facade::Cluster& clust
                         if (d1.magnitude() < 6 * units::cm &&
                             std::fabs(drift_dir.angle(d1) / 3.1415926 * 180.0 - 90.0) < 15.0) {
                             flag_parallel = modify_vertex_isochronous(graph, cluster, vtx, v1, new_seg, v2, track_fitter, dv);
+                            if (flag_parallel) snap_path = "vertex_v1";
                         }
                         if (!flag_parallel && d2.magnitude() < 6 * units::cm &&
                             std::fabs(drift_dir.angle(d2) / 3.1415926 * 180.0 - 90.0) < 15.0) {
                             flag_parallel = modify_vertex_isochronous(graph, cluster, vtx, v2, new_seg, v1, track_fitter, dv);
+                            if (flag_parallel) snap_path = "vertex_v2";
                         }
                     }
 
@@ -625,9 +770,11 @@ void PatternAlgorithms::find_other_segments(Graph& graph, Facade::Cluster& clust
 
                             if (!flag_parallel && dis1 < 6 * units::cm) {
                                 flag_parallel = modify_segment_isochronous(graph, cluster, sg1, v1, new_seg, v2, track_fitter, dv);
+                                if (flag_parallel) snap_path = "segment_v1";
                             }
                             if (!flag_parallel && dis2 < 6 * units::cm) {
                                 flag_parallel = modify_segment_isochronous(graph, cluster, sg1, v2, new_seg, v1, track_fitter, dv);
+                                if (flag_parallel) snap_path = "segment_v2";
                             }
                             if (flag_parallel) break;
 
@@ -659,15 +806,78 @@ void PatternAlgorithms::find_other_segments(Graph& graph, Facade::Cluster& clust
                     }
                 }
 
-                if (!flag_parallel) {
-                    // Truly isolated residual – remove vertices from graph; segment was never added
-                    SPDLOG_LOGGER_TRACE(s_log, "find_other_segments: Cluster {} Isolated residual segment   # of Vertices: {}; # of Edges: {}", cluster.get_cluster_id(), boost::num_vertices(graph), boost::num_edges(graph));
+                // doc pr/67 round 3 (S2) sentinel.  Fires ONLY for a snap that
+                // the legacy 10 cm gate would have refused, so the set of events
+                // emitting this line is exactly the set the knob can have moved
+                // ("0 unclaimed" census, pr/65 bar).  Never fires when the knob
+                // is at its 10 cm default.
+                if (flag_parallel && dir_mag <= 10 * units::cm) {
+                    SPDLOG_LOGGER_INFO(s_log,
+                        "pr67 iso-snap below-legacy: cluster {} path={} dir_mag={:.2f} cm "
+                        "seg_len={:.2f} cm v1=({:.1f},{:.1f},{:.1f}) v2=({:.1f},{:.1f},{:.1f}) cm",
+                        cluster.get_cluster_id(), snap_path, dir_mag / units::cm,
+                        segment_track_length(new_seg) / units::cm,
+                        v1_fit_pt.x() / units::cm, v1_fit_pt.y() / units::cm, v1_fit_pt.z() / units::cm,
+                        v2_fit_pt.x() / units::cm, v2_fit_pt.y() / units::cm, v2_fit_pt.z() / units::cm);
+                }
 
-                    remove_vertex(graph, v1);
-                    remove_vertex(graph, v2);
+                if (!flag_parallel) {
+                    // doc sbnd_xin/docs/pr/54 (18255-142421 "missing gammas"):
+                    // legacy discards every isolated residual after its fit.
+                    // The prototype does too -- NeutrinoID_proto_vertex.h:
+                    // 1470-1475 pushes these into residual_segment_candidates,
+                    // which is write-only (never consumed anywhere), so the
+                    // keep below is a toolkit-only extension of an unfinished
+                    // prototype feature, not a parity fix.
+                    const double kept_length = segment_track_length(new_seg);
+                    const int    kept_points = temp_segments[max_length_cluster].number_points;
+                    if (other_seg_keep_isolated_ok(m_other_seg_keep_isolated, kept_points,
+                                                   kept_length,
+                                                   m_other_seg_keep_isolated_min_points,
+                                                   m_other_seg_keep_isolated_min_length)) {
+                        // Keep: add as a disconnected piece of this cluster's
+                        // graph and refit jointly, exactly like the
+                        // isochronous-accepted branch below.
+                        g_port_audit.oseg_isolated_keep.fetch_add(1, std::memory_order_relaxed);
+                        add_segment(graph, new_seg, v1, v2);
+                        track_fitter.do_multi_tracking(true, true, false, m_fit_exclusion, false, &cluster);
+
+                        double direct_length = segment_track_direct_length(new_seg);
+                        double length        = segment_track_length(new_seg);
+                        double medium_dQ_dx  = segment_median_dQ_dx(new_seg);
+
+                        if ((direct_length < 0.78 * length && length > 10 * units::cm &&
+                             medium_dQ_dx / mip_dQdx > 1.6) ||
+                            (direct_length < 0.6 * length && length > 10 * units::cm)) {
+                            if (medium_dQ_dx / mip_dQdx > 1.1) {
+                                new_segments.push_back(new_seg);
+                            } else {
+                                new_segments_1.push_back(new_seg);
+                            }
+                        }
+                        SPDLOG_LOGGER_INFO(s_log,
+                            "pr54 keep-isolated: cluster {} n_points={} length={:.2f} cm "
+                            "v1=({:.1f},{:.1f},{:.1f}) v2=({:.1f},{:.1f},{:.1f}) cm",
+                            cluster.get_cluster_id(), kept_points, length / units::cm,
+                            v1_fit_pt.x() / units::cm, v1_fit_pt.y() / units::cm, v1_fit_pt.z() / units::cm,
+                            v2_fit_pt.x() / units::cm, v2_fit_pt.y() / units::cm, v2_fit_pt.z() / units::cm);
+                    } else {
+                        // Truly isolated residual – remove vertices from graph; segment was never added
+                        g_port_audit.oseg_isolated_drop.fetch_add(1, std::memory_order_relaxed);
+                        SPDLOG_LOGGER_DEBUG(s_log,
+                            "pr54 isolated-residual drop: cluster {} n_points={} length={:.2f} cm dir_mag={:.2f} cm "
+                            "v1=({:.1f},{:.1f},{:.1f}) v2=({:.1f},{:.1f},{:.1f}) cm",
+                            cluster.get_cluster_id(), kept_points, kept_length / units::cm, dir_mag / units::cm,
+                            v1_fit_pt.x() / units::cm, v1_fit_pt.y() / units::cm, v1_fit_pt.z() / units::cm,
+                            v2_fit_pt.x() / units::cm, v2_fit_pt.y() / units::cm, v2_fit_pt.z() / units::cm);
+                        SPDLOG_LOGGER_TRACE(s_log, "find_other_segments: Cluster {} Isolated residual segment   # of Vertices: {}; # of Edges: {}", cluster.get_cluster_id(), boost::num_vertices(graph), boost::num_edges(graph));
+
+                        remove_vertex(graph, v1);
+                        remove_vertex(graph, v2);
+                    }
                 } else {
                     // Isochronous connection found (segment already added by modify_*)
-                    track_fitter.do_multi_tracking(true, true, false, false, false, &cluster);
+                    track_fitter.do_multi_tracking(true, true, false, m_fit_exclusion, false, &cluster);
 
                     double direct_length = segment_track_direct_length(new_seg);
                     double length        = segment_track_length(new_seg);
@@ -686,6 +896,10 @@ void PatternAlgorithms::find_other_segments(Graph& graph, Facade::Cluster& clust
                 }
             }
         } // if fits().size() > 1
+        else {
+            probe_component("step9", max_length_cluster, temp_segments[max_length_cluster], sep_clusters,
+                            "DROP fit_degenerate");
+        }
 
         // Re-evaluate remaining segments using the updated existing_segments set
         std::set<int> tmp_del_set;
@@ -709,6 +923,13 @@ void PatternAlgorithms::find_other_segments(Graph& graph, Facade::Cluster& clust
                     double dis_u = std::get<0>(closest_2d);
                     double dis_v = std::get<1>(closest_2d);
                     double dis_w = std::get<2>(closest_2d);
+
+                    if (m_other_seg_empty_2d_guard) {
+                        // -1.0 empty-tree sentinel: no information (see tagging loop).
+                        if (dis_u < 0) dis_u = 1e9;
+                        if (dis_v < 0) dis_v = 1e9;
+                        if (dis_w < 0) dis_w = 1e9;
+                    }
 
                     if (dis_u < min_dis_u) min_dis_u = dis_u;
                     if (dis_v < min_dis_v) min_dis_v = dis_v;
@@ -750,6 +971,18 @@ void PatternAlgorithms::find_other_segments(Graph& graph, Facade::Cluster& clust
                   temp_segments[*it].max_dis_w / units::cm < 3 &&
                   temp_segments[*it].max_dis_u + temp_segments[*it].max_dis_v +
                   temp_segments[*it].max_dis_w < 6 * units::cm)))) {
+                // doc pr/67 P5.  This is the re-evaluation drop: a component that
+                // SURVIVED step 8 is re-scored in 2D ONLY against the segment
+                // just added, and dies if >=2 planes now shadow every one of its
+                // points.  In an isochronous topology the new branch's 2D shadow
+                // covers a genuinely separate 3-D object, so this is the one
+                // rejection that can kill real charge without any 3-D evidence.
+                probe_component("reeval", *it, temp_segments[*it], sep_clusters,
+                                temp_segments[*it].number_points == 1
+                                    ? "DROP single_point"
+                                    : (temp_segments[*it].length < 3.5 * units::cm
+                                           ? "DROP nnf0_short"
+                                           : "DROP nnf0_2d_shadowed"));
                 tmp_del_set.insert(*it);
             }
         }
@@ -1116,9 +1349,9 @@ bool PatternAlgorithms::modify_vertex_isochronous(Graph& graph, Facade::Cluster&
     auto vd = vtx->get_descriptor();
     std::vector<SegmentPtr> vtx_segs;
     {
-        auto edge_range = boost::out_edges(vd, graph);
-        for (auto eit = edge_range.first; eit != edge_range.second; ++eit) {
-            SegmentPtr sg1 = graph[*eit].segment;
+        const auto edge_range = sorted_out_edges(vd, graph);
+        for (auto eit : edge_range) {
+            SegmentPtr sg1 = graph[eit].segment;
             if (sg1) vtx_segs.push_back(sg1);
         }
     }
@@ -1165,6 +1398,25 @@ bool PatternAlgorithms::modify_vertex_isochronous(Graph& graph, Facade::Cluster&
         for (const auto& wcp : sg_new_wcpts) main_pts_sgiso.push_back(wcp.point);
         create_segment_point_cloud(sg, main_pts_sgiso, dv, "main");
     }
+
+    // doc pr/67 round 3: conditioning of the x-plane projection.  test_p is
+    // built by dividing by dir.x(), which is guarded only against exact zero
+    // above; for an isochronously-displaced branch dir.x() is small BY
+    // CONSTRUCTION, so a successful snap can still land on a geometrically
+    // arbitrary steiner point within the 5 cm acceptance.  This path then
+    // RELOCATES the pre-existing vertex vtx (below), so the census reads these
+    // numbers before trusting any knob-on result.  Logged for legacy snaps too,
+    // to give the comparison distribution.
+    SPDLOG_LOGGER_DEBUG(s_log,
+        "pr67 iso-snap cond vertex: cluster {} dir.x={:.4f} dir=({:.3f},{:.3f},{:.3f}) "
+        "test_p=({:.1f},{:.1f},{:.1f}) vtx_new=({:.1f},{:.1f},{:.1f}) "
+        "|vtx_new-v1|={:.2f} cm |vtx_new-test_p|={:.2f} cm vtx_moved={:.2f} cm",
+        cluster.get_cluster_id(), dir.x(), dir.x(), dir.y(), dir.z(),
+        test_p.x() / units::cm, test_p.y() / units::cm, test_p.z() / units::cm,
+        vtx_new_pt.x() / units::cm, vtx_new_pt.y() / units::cm, vtx_new_pt.z() / units::cm,
+        point_distance(vtx_new_pt, v1_fit_pt) / units::cm,
+        point_distance(vtx_new_pt, test_p) / units::cm,
+        point_distance(vtx_new_pt, vtx_fit_pt) / units::cm);
 
     // Remove the old isolated vertex v1 and connect vtx and v2 via sg
     remove_vertex(graph, v1);
@@ -1249,7 +1501,27 @@ bool PatternAlgorithms::modify_segment_isochronous(Graph& graph, Facade::Cluster
                 pt.z() + (new_pt.z() - pt.z()) / ncount * j
             );
             auto test_wpid = dv->contained_by(step_p);
-            if (test_wpid.face() != -1 && test_wpid.apa() != -1) {
+            if (test_wpid.face() == -1 || test_wpid.apa() == -1) {
+                // doc pr/30 §11, F2 site 1 (was P9).  The guard is REQUIRED:
+                // transform->backward() would do m_trigger_offsets.at(-1) and
+                // throw (class-C crash, doc pr/11 §6.3).  What was never
+                // chosen is what the skipped point MEANS.  This test is
+                // `n_bad == 0`, so a point that cannot increment n_bad votes
+                // "the bridge is connected" -- the permissive answer.
+                //
+                // The prototype's answer is the opposite, and it is not a
+                // judgement call: it calls is_good_point(test_p, 0.2 cm, 0, 0)
+                // (NeutrinoID_proto_vertex.h:1645), and for a point outside
+                // the detector get_closest_points() comes back empty on all
+                // three planes AND get_closest_dead_chs() finds no dead
+                // channel, so num_planes == 0 and is_good_point returns FALSE
+                // (ToyCTPointCloud.cxx:399-431) -- i.e. n_bad++.
+                // EXACT parity restoration when the knob is on.
+                g_port_audit.oov_isochronous.fetch_add(1, std::memory_order_relaxed);
+                if (m_oov_prototype_parity) { n_bad++; }
+                continue;
+            }
+            {
                 auto temp_p_raw = transform->backward(step_p, cluster_t0, test_wpid.face(), test_wpid.apa());
                 if (!grouping->is_good_point(temp_p_raw, test_wpid.apa(), test_wpid.face(), 0.2 * units::cm, 0, 0)) {
                     n_bad++;
@@ -1265,6 +1537,18 @@ bool PatternAlgorithms::modify_segment_isochronous(Graph& graph, Facade::Cluster
     }
 
     if (!flag) return flag;
+
+    // doc pr/67 round 3: same conditioning question as the vertex path -- test_p
+    // divides by dir1.x().  This path does NOT move a pre-existing vertex (v1 is
+    // the new candidate's own endpoint), but it does SPLIT the parent segment
+    // sg1 into two and remove it, so it changes parent topology too.
+    SPDLOG_LOGGER_DEBUG(s_log,
+        "pr67 iso-snap cond segment: cluster {} dir1.x={:.4f} dir1=({:.3f},{:.3f},{:.3f}) "
+        "vtx_new=({:.1f},{:.1f},{:.1f}) |vtx_new-v1|={:.2f} cm dis_cut={:.2f} angle_cut={:.1f}",
+        cluster.get_cluster_id(), dir1.x(), dir1.x(), dir1.y(), dir1.z(),
+        vtx_new_pt.x() / units::cm, vtx_new_pt.y() / units::cm, vtx_new_pt.z() / units::cm,
+        point_distance(vtx_new_pt, v1_fit_pt) / units::cm,
+        dis_cut / units::cm, angle_cut);
 
     // Shift v1 to the new steiner position
     v1->wcpt().point = vtx_new_pt;

@@ -96,6 +96,7 @@ static void clustering_switch_scope(
             "real_cluster_id", "real_cluster_main",      // flash merge (doc 38)
             "assoc_cluster_id", "assoc_cluster_main",    // isolated grouping (doc 52)
             "real_cluster_was_main",                     // pre-merge main (doc pr/20 I)
+            "nu_band_veto_role",                         // iso-band refusal (doc pr/66)
         };
         constexpr size_t n_carry = sizeof(carry_anames) / sizeof(carry_anames[0]);
         std::vector<std::vector<int>> src_carry(n_carry);

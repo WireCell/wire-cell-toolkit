@@ -26,7 +26,8 @@ static void clustering_neutrino(
     bool use_flash_t0 = false,
     double flash_t0_window = 80*units::ns,
     bool protect_iso_band = false,
-    double protect_iso_band_xext = 0
+    double protect_iso_band_xext = 0,
+    bool record_band_veto = false
     );
 
 class ClusteringNeutrino :  public IConfigurable, public Clus::IEnsembleVisitor, private NeedDV, private NeedScope {
@@ -53,13 +54,24 @@ public:
         // the 6 cm touch rule alone cannot discriminate).  0 (default) =>
         // off => byte-identical; only read when protect_iso_band is on.
         protect_iso_band_xext_ = get(config, "protect_iso_band_xext", protect_iso_band_xext_);
+        // Record each iso-band refusal as a per-blob "nu_band_veto_role"
+        // provenance array (doc pr/66) so the ALL-APA clustering chain -- a
+        // SEPARATE MultiAlgBlobClustering pnode with no iso-band guard of its
+        // own -- can honor a refusal THIS pass made, instead of re-merging the
+        // pair.  C++ default false => the array is never created => no
+        // "perblob" key-set change and merge_clusters()'s veto (gated purely
+        // on the array's presence) is structurally unreachable =>
+        // byte-identical.  Only meaningful with protect_iso_band on; has no
+        // effect on this visitor's own output either way (it only stamps
+        // provenance at the point a merge is already being declined).
+        record_band_veto_ = get(config, "record_band_veto", false);
     }
 
     void visit(Ensemble& ensemble) const {
         auto& live = *ensemble.with_name("live").at(0);
         for (int i = 0; i != num_try_; i++) {
             clustering_neutrino(live, i, m_dv, m_scope, use_flash_t0_, flash_t0_window_, protect_iso_band_,
-                                protect_iso_band_xext_);
+                                protect_iso_band_xext_, record_band_veto_);
         }
     }
 
@@ -69,6 +81,7 @@ private:
     double flash_t0_window_{80*units::ns};
     bool protect_iso_band_{false};
     double protect_iso_band_xext_{0};
+    bool record_band_veto_{false};
 };
 
 // The original developers do not care.
@@ -106,6 +119,28 @@ static double blob_center_xext(const Cluster* c)
     return xmax - xmin;
 }
 
+// Stamp every blob of `c` with `role` in the "nu_band_veto_role" per-blob
+// array (record_band_veto knob, doc pr/66), preserving any earlier stamp.
+// iso_band_like() is an intrinsic property of a cluster, so a second refusal
+// involving the same cluster can only re-assert the same value -- the
+// preserve-existing-stamp behavior is defensive, not policy.  Read back by
+// band_veto_forbids() (ClusteringFuncs.cxx), which every all-APA merge stage
+// consults through merge_clusters().
+static void stamp_band_veto(Cluster* c, int role)
+{
+    const size_t nb = (size_t) c->nchildren();
+    if (!nb) return;
+    std::vector<int> roles(nb, band_veto_none);
+    if (c->has_pcarray<int>("nu_band_veto_role", "perblob")) {
+        auto sp = c->get_pcarray<int>("nu_band_veto_role", "perblob");
+        if (sp.size() == nb) roles.assign(sp.begin(), sp.end());
+    }
+    for (size_t i = 0; i < nb; ++i) {
+        if (roles[i] == band_veto_none) roles[i] = role;
+    }
+    c->put_pcarray(roles, "nu_band_veto_role", "perblob");
+}
+
 // handle all APA/Face
 static void clustering_neutrino(
     Grouping &live_grouping,
@@ -115,7 +150,8 @@ static void clustering_neutrino(
     bool use_flash_t0,
     double flash_t0_window,
     bool protect_iso_band,
-    double protect_iso_band_xext)
+    double protect_iso_band_xext,
+    bool record_band_veto)
 {
     // Get all the wire plane IDs from the grouping
     const auto& wpids = live_grouping.wpids();
@@ -1052,13 +1088,28 @@ static void clustering_neutrino(
             // drift-spanning partner (doc pr/18, SBND evt 10550: nu candidate
             // tip touches the cosmic band at 0.31 cm).
             if (protect_iso_band_xext > 0) {
-                const Cluster* nonband = iso_band_like(cluster1) ? cluster2 : cluster1;
+                Cluster* band = iso_band_like(cluster1) ? cluster1 : cluster2;
+                Cluster* nonband = iso_band_like(cluster1) ? cluster2 : cluster1;
                 const double xext = blob_center_xext(nonband);
                 if (xext > protect_iso_band_xext) {
                     std::cout << "Neutrino iso_band_guard: refused band/non-band merge, nonband xext "
                               << xext / units::cm << " cm, lens " << cluster1->get_length() / units::cm << "/"
                               << cluster2->get_length() / units::cm << " cm, touch "
                               << std::get<2>(res) / units::cm << " cm" << std::endl;
+                    // Record the refusal as per-blob provenance (doc pr/66) so
+                    // the SEPARATE all-APA clustering chain -- which has no
+                    // iso-band guard of its own -- can honor it instead of
+                    // re-merging this exact pair.  Default OFF; the array is
+                    // never created when off, so this costs nothing and does
+                    // not touch this visitor's own output either way.
+                    if (record_band_veto) {
+                        stamp_band_veto(band, band_veto_band);
+                        stamp_band_veto(nonband, band_veto_nonband);
+                        std::cout << "nu_band_veto: record band len " << band->get_length() / units::cm
+                                  << " cm, nonband len " << nonband->get_length() / units::cm
+                                  << " cm, nonband xext " << xext / units::cm
+                                  << " cm, touch " << std::get<2>(res) / units::cm << " cm" << std::endl;
+                    }
                     continue;
                 }
             }

@@ -5,6 +5,8 @@
 #include "WireCellUtil/Point.h"
 #include "WireCellClus/Graphs.h"
 #include "WireCellClus/DynamicPointCloud.h"
+// for Grouping::get_nticks_per_slice() -- the adjacent-slice step (doc pr/29 D12)
+#include "WireCellClus/Facade_Grouping.h"
 #include <algorithm>
 #include <set>
 #include <unordered_set>
@@ -25,8 +27,12 @@ void Steiner::Grapher::create_steiner_tree(
     bool disable_dead_mix_cell,
     const std::string& steiner_pc_name)
 {
-    SPDLOG_LOGGER_TRACE(log, "create_steiner_tree: starting with reference_cluster={}, path_size={}",
-               (reference_cluster ? "provided" : "null"), path_point_indices.size());
+    // edge_charge_forward_dead_mix is echoed so a log alone identifies which
+    // arm produced an edge-weight set (doc pr/29 D2).
+    SPDLOG_LOGGER_TRACE(log, "create_steiner_tree: starting with reference_cluster={}, path_size={}"
+               " (disable_dead_mix_cell={} forward={})",
+               (reference_cluster ? "provided" : "null"), path_point_indices.size(),
+               disable_dead_mix_cell, m_config.edge_charge_forward_dead_mix);
 
     // Phase 1: Find initial steiner terminals
     vertex_set steiner_terminals = find_steiner_terminals(graph_name, disable_dead_mix_cell);
@@ -44,8 +50,12 @@ void Steiner::Grapher::create_steiner_tree(
     if (reference_cluster) {
         vertex_set original_size = steiner_terminals;
         steiner_terminals = filter_by_reference_cluster(steiner_terminals, reference_cluster);
-        SPDLOG_LOGGER_TRACE(log, "create_steiner_tree: reference cluster filtering: {} -> {} terminals",
-                   original_size.size(), steiner_terminals.size());
+        // wire_tol / adjacent_slice are echoed so a log alone identifies which
+        // arm produced a terminal count (doc pr/29 D1, D12).
+        SPDLOG_LOGGER_TRACE(log, "create_steiner_tree: reference cluster filtering: {} -> {} terminals"
+                   " (wire_tol={} adjacent_slice={})",
+                   original_size.size(), steiner_terminals.size(),
+                   m_config.terminal_wire_tol, m_config.terminal_adjacent_slice);
     }
 
     // std::cout << "Test2: " << steiner_terminals.size() << std::endl;
@@ -88,9 +98,19 @@ void Steiner::Grapher::create_steiner_tree(
     charge_config.factor2 = 0.4;          // From prototype
     charge_config.enable_weighting = true; // Enable charge weighting
     
+    // doc pr/29 D2.  The prototype weights steiner edges with charges computed
+    // under the SAME disable_dead_mix_cell this function was called with; the
+    // toolkit historically dropped the argument here and inherited
+    // create_enhanced_steiner_graph's `= true` default.  Honouring the caller
+    // is a behaviour change on every point whose dead-plane and zero-charge
+    // predicates disagree, so it is opt-in and OFF reproduces the old call.
+    const bool edge_dead_mix =
+        m_config.edge_charge_forward_dead_mix ? disable_dead_mix_cell : true;
+
     // Use the enhanced approach with cluster reference for charge calculation
     auto steiner_result = Graphs::Weighted::create_enhanced_steiner_graph(
-        base_graph, steiner_terminals, original_pc, m_cluster, charge_config);
+        base_graph, steiner_terminals, original_pc, m_cluster, charge_config,
+        edge_dead_mix);
 
     // std::cout << "Test5: " <<  " Graph vertices: " << boost::num_vertices(steiner_result.graph) << ", edges: " << boost::num_edges(steiner_result.graph) << std::endl;
 
@@ -144,15 +164,67 @@ Steiner::Grapher::vertex_set Steiner::Grapher::filter_by_reference_cluster(
         return terminals;
     }
 
+    // doc pr/29 D1 + D12.  Both knobs default to the historical behaviour --
+    // wire_tol 0, and a slice step of 1 that (the map being tick-keyed) never
+    // resolves.  Neither is derived here unless asked for, so with the default
+    // Config this loop is bit-for-bit what it was.
+    const int wire_tol = m_config.terminal_wire_tol;
+
+    // Ticks-per-slice is per (apa, face), so it is resolved per terminal rather
+    // than once -- but through a small memo, since the accessor returns the
+    // whole map by value and this runs once per terminal.
+    std::map<std::pair<int,int>, int> stride_memo;
+
     // Filter terminals based on spatial relationship with reference cluster
     for (auto terminal_idx : terminals) {
         //std::cout << "Test: " << terminal_idx << " " << ref_time_blob_map.size() << std::endl;
-        if (is_point_spatially_related_to_reference(terminal_idx, ref_time_blob_map)) {
+        int slice_stride = 1;
+        if (m_config.terminal_adjacent_slice) {
+            // The point belongs to m_cluster (retiled); the map belongs to the
+            // reference cluster.  Both are blobs of the same detector, so the
+            // tick span for a given (apa, face) is the same -- and the key we
+            // step is one of the reference map's own keys.
+            const auto* blob = m_cluster.blob_with_point(terminal_idx);
+            if (blob) {
+                const auto wpid = blob->wpid();
+                const auto key = std::make_pair(wpid.apa(), wpid.face());
+                auto memo_it = stride_memo.find(key);
+                if (memo_it == stride_memo.end()) {
+                    memo_it = stride_memo.emplace(
+                        key, nticks_per_slice_or_1(key.first, key.second)).first;
+                }
+                slice_stride = memo_it->second;
+            }
+        }
+        if (is_point_spatially_related_to_reference(terminal_idx, ref_time_blob_map,
+                                                    wire_tol, slice_stride)) {
             filtered_terminals.insert(terminal_idx);
         }
     }
 
     return filtered_terminals;
+}
+
+int Steiner::Grapher::nticks_per_slice_or_1(int apa, int face) const
+{
+    const auto* grouping = m_cluster.grouping();
+    if (!grouping) return 1;
+    const auto nticks = grouping->get_nticks_per_slice();
+    auto apa_it = nticks.find(apa);
+    if (apa_it == nticks.end()) {
+        SPDLOG_LOGGER_WARN(log, "nticks_per_slice_or_1: apa {} unknown to the grouping,"
+                                " adjacent-slice step falls back to 1 (never matches)", apa);
+        return 1;
+    }
+    auto face_it = apa_it->second.find(face);
+    if (face_it == apa_it->second.end()) {
+        SPDLOG_LOGGER_WARN(log, "nticks_per_slice_or_1: apa {} face {} unknown to the grouping,"
+                                " adjacent-slice step falls back to 1 (never matches)", apa, face);
+        return 1;
+    }
+    // A degenerate 0 or negative span would make the +-offset loop test the
+    // point's own slice twice; 1 is the historical no-op.
+    return face_it->second > 0 ? face_it->second : 1;
 }
 
 Steiner::Grapher::vertex_set Steiner::Grapher::filter_by_path_constraints(
@@ -284,11 +356,18 @@ Steiner::Grapher::vertex_set Steiner::Grapher::get_extreme_points_for_reference(
 
 bool Steiner::Grapher::is_point_spatially_related_to_reference(
     size_t point_idx,
-    const Facade::Cluster::time_blob_map_t& ref_time_blob_map) const
+    const Facade::Cluster::time_blob_map_t& ref_time_blob_map,
+    int wire_tol,
+    int slice_stride) const
 {
     // Delegate to the cluster's existing method which implements the proper logic
-    // for checking spatial relationships with the complex time_blob_map structure
-    return m_cluster.is_point_spatially_related_to_time_blobs(point_idx, ref_time_blob_map, true);
+    // for checking spatial relationships with the complex time_blob_map structure.
+    //
+    // This is the ONLY site that passes flag_nearby_timeslice = true;
+    // get_extreme_wcps (Facade_Cluster.cxx:3106) passes false and takes the
+    // defaults, so doc pr/29's D1 and D12 both begin and end here.
+    return m_cluster.is_point_spatially_related_to_time_blobs(
+        point_idx, ref_time_blob_map, true, wire_tol, slice_stride);
 }
 
 
@@ -852,6 +931,14 @@ void establish_same_blob_steiner_edges_steiner_graph(EnhancedSteinerResult& resu
     const auto& majs = skd.major_indices();
 
     for (const auto& [old_index, new_index] : result.old_to_new_index) {
+        // Guard the INDEX, not only the result.  Unlike form_cell_points_map,
+        // which walks point_idx < npoints() and so cannot go out of range, the
+        // keys here are base-graph vertex descriptors carried through
+        // old_to_new_index.  They should all be points of this cluster's sv3d
+        // by construction, but an out-of-range read of major_indices() would be
+        // silent rather than fatal, so it is checked the same way
+        // get_blob_for_vertex checks it (doc pr/29 §13.3).
+        if (old_index >= majs.size()) continue;
         size_t blob_node_idx = majs[old_index];
         if (blob_node_idx >= nodes.size()) continue;
         // Null guard: skip if blob facade is invalid

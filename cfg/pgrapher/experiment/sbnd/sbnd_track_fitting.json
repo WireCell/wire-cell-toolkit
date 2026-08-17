@@ -27,6 +27,8 @@
     "skip_angle_cut_2": 90,
     "skip_angle_cut_3": 45,
     "skip_dis_cut": 5.0,
+    "_comment_skip_revert_iso_xext_cut": "doc pr/28 sec 17 round 10 (toolkit 6b219d14). C++ default -1 (off, unconditional revert). 200.0 = 20 cm (units::cm=10) -- SBND production default since 2026-08-06 (owner: 'overall better, please turn it on for these for SBND', gate work-pr28r10-flip vs -on48b single-event byte-identical; population gate work-pr28r10-on48b vs -off48b already on record, doc pr/28 sec 17.4 G4/G5). Abstains from skip_trajectory_point's charge-consistency revert when the point's cluster has blob-center drift-x extent below this cut -- i.e. isochronous clusters only; non-isochronous clusters (including doc pr/28 sec 13's evt 388) are unconditionally unaffected.",
+    "skip_revert_iso_xext_cut": 200.0,
     "default_dQ_dx": 5000,
     "end_point_factor": 0.6,
     "mid_point_factor": 0.9,

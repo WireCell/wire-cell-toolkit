@@ -85,6 +85,7 @@ static Json::Value params_to_json(const TrackFitting::Parameters& p)
     j["skip_angle_cut_2"] = p.skip_angle_cut_2;
     j["skip_angle_cut_3"] = p.skip_angle_cut_3;
     j["skip_dis_cut"] = p.skip_dis_cut;
+    j["skip_revert_iso_xext_cut"] = p.skip_revert_iso_xext_cut;
     j["default_dQ_dx"] = p.default_dQ_dx;
     j["end_point_factor"] = p.end_point_factor;
     j["mid_point_factor"] = p.mid_point_factor;
@@ -136,6 +137,7 @@ static TrackFitting::Parameters params_from_json(const Json::Value& j)
     if (j.isMember("skip_angle_cut_2")) p.skip_angle_cut_2 = j["skip_angle_cut_2"].asDouble();
     if (j.isMember("skip_angle_cut_3")) p.skip_angle_cut_3 = j["skip_angle_cut_3"].asDouble();
     if (j.isMember("skip_dis_cut")) p.skip_dis_cut = j["skip_dis_cut"].asDouble();
+    if (j.isMember("skip_revert_iso_xext_cut")) p.skip_revert_iso_xext_cut = j["skip_revert_iso_xext_cut"].asDouble();
     if (j.isMember("default_dQ_dx")) p.default_dQ_dx = j["default_dQ_dx"].asDouble();
     if (j.isMember("end_point_factor")) p.end_point_factor = j["end_point_factor"].asDouble();
     if (j.isMember("mid_point_factor")) p.mid_point_factor = j["mid_point_factor"].asDouble();

@@ -1,5 +1,6 @@
 #include <WireCellClus/ClusteringFuncs.h>
 #include "WireCellUtil/Array.h"
+#include "WireCellUtil/Logging.h"
 
 #include <unordered_map>
 
@@ -7,6 +8,63 @@
 #include <iostream>              // temp debug
 
 using namespace WireCell::Clus::Facade;
+
+namespace {
+    // Named logger for the iso-band veto (doc pr/66).  Emitted from a hot,
+    // generic function (merge_clusters), so it goes on its own sink rather
+    // than std::cout -- unlike ClusteringNeutrino's own refusal marker, which
+    // stays on std::cout to leave today's SBND stdout untouched.
+    WireCell::Log::logptr_t band_veto_log() {
+        static WireCell::Log::logptr_t l = WireCell::Log::logger("clus.bandveto");
+        return l;
+    }
+
+    // Blob-center drift-x extent, the same measure ClusteringNeutrino's
+    // iso_band_like()/blob_center_xext() use (clustering_neutrino.cxx).  Kept
+    // as a separate copy here (M10) so the veto's log line can report the same
+    // quantity ClusteringNeutrino's own marker line reports, without adding a
+    // cross-file dependency for one helper.
+    double band_veto_xext(const WireCell::Clus::Facade::Cluster* c) {
+        double xmin = 1e300, xmax = -1e300;
+        for (const auto* b : c->children()) {
+            const double x = b->center_pos().x();
+            xmin = std::min(xmin, x);
+            xmax = std::max(xmax, x);
+        }
+        return xmax - xmin;
+    }
+
+    // True if cluster `c` carries at least one blob whose "nu_band_veto_role"
+    // value equals `role`.  Fail-open (false) on any absent/mismatched array,
+    // per band_veto_forbids()'s contract in the header.
+    bool band_veto_has_role(const WireCell::Clus::Facade::Cluster* c, int role,
+                            const std::string& pcname) {
+        if (!c->has_pcarray<int>("nu_band_veto_role", pcname)) return false;
+        auto sr = c->get_pcarray<int>("nu_band_veto_role", pcname);
+        if (sr.size() != (size_t) c->nchildren()) return false;
+        for (size_t i = 0; i < sr.size(); ++i) {
+            if (sr[i] == role) return true;
+        }
+        return false;
+    }
+}
+
+bool WireCell::Clus::Facade::band_veto_forbids(const Cluster* a, const Cluster* b,
+                                               const std::string& pcname)
+{
+    if (!a || !b) return false;
+    return (band_veto_has_role(a, band_veto_band, pcname) &&
+            band_veto_has_role(b, band_veto_nonband, pcname))
+        || (band_veto_has_role(a, band_veto_nonband, pcname) &&
+            band_veto_has_role(b, band_veto_band, pcname));
+}
+
+bool WireCell::Clus::Facade::cluster_has_band_veto_role(const Cluster* c, int role,
+                                                        const std::string& pcname)
+{
+    if (!c) return false;
+    return band_veto_has_role(c, role, pcname);
+}
 
 
 // Add this to your clustering_util.cxx file
@@ -85,15 +143,6 @@ std::vector<Cluster*> WireCell::Clus::Facade::merge_clusters(
     const std::string& orig_main_aname,
     const std::string& orig_wasmain_aname)
 {
-    std::unordered_map<int, int> desc2id;
-    std::map<int, std::set<int> > id2desc;
-    /*int num_components =*/ boost::connected_components(g, boost::make_assoc_property_map(desc2id));
-    for (const auto& [desc, id] : desc2id) {
-        id2desc[id].insert(desc);
-    }
-
-    std::vector<Cluster*> fresh;
-
     // Note, here we do an unusual thing and COPY the vector of children
     // facades.  In most simple access we would get the reference to the child
     // vector to save a little copy time.  We explicitly copy here as we must
@@ -104,7 +153,64 @@ std::vector<Cluster*> WireCell::Clus::Facade::merge_clusters(
     // that was just holding the pointer to the doomed facade now holding
     // invalid memory.  But, it is okay as we never revisit the same cluster in
     // the grouping.  All that to explain a missing "&"! :)
+    //
+    // Hoisted above connected_components (was below, unchanged after that):
+    // the iso-band veto below needs the vertex-index -> Cluster* mapping
+    // BEFORE components are computed, to filter edges first.  Reading it here
+    // is still safe -- nothing has destroyed a child yet at this point in the
+    // function.
     auto orig_clusters = grouping.children();
+
+    // Iso-band veto (ClusteringNeutrino's record_band_veto, doc pr/66).  A
+    // per-APA clustering_neutrino pass may have REFUSED to merge an
+    // isochronous band with a drift-spanning partner and recorded that
+    // refusal as per-blob "nu_band_veto_role" provenance; the all-APA chain is
+    // a SEPARATE MultiAlgBlobClustering pnode with no iso-band guard of its
+    // own and would otherwise re-merge them.  Honor the refusal here, once,
+    // for every merge stage in the codebase -- ClusteringExtendLoop's inner
+    // clustering_extend() calls have no configuration surface of their own,
+    // so a per-stage veto could not reach them at all.
+    //
+    // Purely PRESENCE gated: with the writer knob off "nu_band_veto_role" is
+    // never created, so band_veto_forbids() is constant-false and not one
+    // edge is ever removed => byte-identical.  Drops the EDGE only (not the
+    // whole component): a third, unmarked cluster may still bridge the two,
+    // exactly as at the per-APA refusal site (ClusteringNeutrino only skips
+    // add_edge for the one pair it tested).
+    {
+        std::vector<std::pair<cluster_connectivity_graph_t::vertex_descriptor,
+                              cluster_connectivity_graph_t::vertex_descriptor>> drop;
+        for (auto er = boost::edges(g); er.first != er.second; ++er.first) {
+            const auto u = boost::source(*er.first, g);
+            const auto v = boost::target(*er.first, g);
+            const int i1 = g[u], i2 = g[v];
+            if (i1 < 0 || i2 < 0) continue;
+            if ((size_t) i1 >= orig_clusters.size() || (size_t) i2 >= orig_clusters.size()) continue;
+            const Cluster* c1 = orig_clusters[i1];
+            const Cluster* c2 = orig_clusters[i2];
+            if (!band_veto_forbids(c1, c2, pcname)) continue;
+            band_veto_log()->info(
+                "nu_band_veto: dropped edge, lens {:.1f}/{:.1f} cm, xext {:.1f}/{:.1f} cm",
+                c1->get_length() / units::cm, c2->get_length() / units::cm,
+                band_veto_xext(c1) / units::cm, band_veto_xext(c2) / units::cm);
+            drop.emplace_back(u, v);
+        }
+        // Remove by (u,v) pair after the scan completes: edge descriptors of a
+        // vecS/vecS adjacency_list are invalidated by remove_edge, so a second
+        // pass over descriptors collected during the scan would be UB.
+        for (const auto& [u, v] : drop) {
+            boost::remove_edge(u, v, g);
+        }
+    }
+
+    std::unordered_map<int, int> desc2id;
+    std::map<int, std::set<int> > id2desc;
+    /*int num_components =*/ boost::connected_components(g, boost::make_assoc_property_map(desc2id));
+    for (const auto& [desc, id] : desc2id) {
+        id2desc[id].insert(desc);
+    }
+
+    std::vector<Cluster*> fresh;
 
     const bool savecc = aname.size() > 0 && pcname.size() > 0;
     const bool save_origid = orig_id_aname.size() > 0 && pcname.size() > 0;
@@ -149,6 +255,18 @@ std::vector<Cluster*> WireCell::Clus::Facade::merge_clusters(
     // writer knob off is byte-identical.
     static const std::vector<std::pair<std::string, std::string>> carry_pairs = {
         {"assoc_cluster_id", "assoc_cluster_main"},
+    };
+
+    // SINGLE per-blob arrays carried VERBATIM across this merge (doc pr/66).
+    // Distinct from carry_pairs above: those hold ids that are only unique
+    // within the scope that wrote them and so must be REBASED per member
+    // (see the long comment above); these hold a value that is meaningful
+    // across the whole event -- e.g. "nu_band_veto_role" is an intrinsic
+    // per-cluster classification (band vs non-band), so rebasing it would
+    // destroy the very fact being carried.  A member with no array
+    // contributes zeros -- the documented "unmarked" value, not a sentinel.
+    static const std::vector<std::string> carry_singles = {
+        "nu_band_veto_role",   // ClusteringNeutrino record_band_veto
     };
     const bool do_carry = pcname.size() > 0;
 
@@ -200,6 +318,14 @@ std::vector<Cluster*> WireCell::Clus::Facade::merge_clusters(
             bool any{false};     // did at least one member actually carry it?
         };
         std::vector<CarryAcc> carried(do_carry ? carry_pairs.size() : 0);
+
+        // Same blob-pointer keying as CarryAcc above, and for the same
+        // reason, for the single-array registry (carry_singles).
+        struct CarrySingleAcc {
+            std::vector<std::pair<Blob*, int>> rows;
+            bool any{false};
+        };
+        std::vector<CarrySingleAcc> carried1(do_carry ? carry_singles.size() : 0);
 
         // Flash bookkeeping: Cluster::from() copies the first-encountered
         // member's cluster_t0/flash/matched_flash_gid (arbitrary std::set order).
@@ -282,10 +408,18 @@ std::vector<Cluster*> WireCell::Clus::Facade::merge_clusters(
                 snap[ip].first.assign(sid.begin(), sid.end());
                 snap[ip].second.assign(smain.begin(), smain.end());
             }
+            // Same snapshot, for the single-array (carry_singles) registry.
+            std::vector<std::vector<int>> snap1(carried1.size());
+            for (size_t is = 0; is < carried1.size(); ++is) {
+                if (!live->has_pcarray<int>(carry_singles[is], pcname)) continue;
+                auto sv = live->get_pcarray<int>(carry_singles[is], pcname);
+                if (sv.size() != (size_t) live->nchildren()) continue;
+                snap1[is].assign(sv.begin(), sv.end());
+            }
             // The member's children in the SAME order as its per-blob array
             // rows (both are "children order" while the member is still intact).
             std::vector<Blob*> member_kids;
-            if (!carried.empty()) member_kids = live->children();
+            if (!carried.empty() || !carried1.empty()) member_kids = live->children();
             const size_t nb_before = fresh_cluster.nchildren();
 
             fresh_cluster.from(*live);
@@ -316,6 +450,20 @@ std::vector<Cluster*> WireCell::Clus::Facade::merge_clusters(
                     for (Blob* b : member_kids) {
                         acc.rows.emplace_back(b, std::make_pair(fresh_id, 1));
                     }
+                }
+            }
+            for (size_t is = 0; is < carried1.size(); ++is) {
+                auto& acc = carried1[is];
+                const auto& sv = snap1[is];
+                if (sv.size() == member_kids.size() && sv.size() == nb_added && nb_added > 0) {
+                    for (size_t k = 0; k < sv.size(); ++k) acc.rows.emplace_back(member_kids[k], sv[k]);
+                    acc.any = true;
+                }
+                else {
+                    // No usable array on this member: every blob is unmarked
+                    // (0), the array's own documented default -- unlike
+                    // carry_pairs, there is no "one fresh id" concept here.
+                    for (Blob* b : member_kids) acc.rows.emplace_back(b, 0);
                 }
             }
 
@@ -351,11 +499,13 @@ std::vector<Cluster*> WireCell::Clus::Facade::merge_clusters(
         if (save_wasmain) {
             fresh_cluster.put_pcarray(orig_wasmain, orig_wasmain_aname, pcname);
         }
-        // Re-attach the carried provenance pairs, placing every row at the
-        // position its own blob ended up in.  Only when some member really had
-        // the arrays (else this is a no-op and output is unchanged); fail open on
-        // any blob we cannot place or any row left unfilled.
-        if (!carried.empty()) {
+        // Re-attach the carried provenance, placing every row at the position
+        // its own blob ended up in.  Only when some member really had the
+        // array (else this is a no-op and output is unchanged); fail open on
+        // any blob we cannot place or any row left unfilled.  Shared between
+        // carry_pairs and carry_singles below -- both need the same
+        // blob-pointer -> merged-row-index map.
+        if (!carried.empty() || !carried1.empty()) {
             const auto merged_kids = fresh_cluster.children();
             std::unordered_map<const Blob*, size_t> where;
             where.reserve(merged_kids.size());
@@ -377,6 +527,23 @@ std::vector<Cluster*> WireCell::Clus::Facade::merge_clusters(
                 if (!ok) continue;
                 fresh_cluster.put_pcarray(ids, carry_pairs[ip].first, pcname);
                 fresh_cluster.put_pcarray(mains, carry_pairs[ip].second, pcname);
+            }
+            for (size_t is = 0; is < carried1.size(); ++is) {
+                const auto& acc = carried1[is];
+                if (!acc.any) continue;                                // nobody carried => no key written
+                if (acc.rows.size() != merged_kids.size()) continue;   // fail open
+                std::vector<int> vals(merged_kids.size(), -1);         // -1 = unfilled sentinel;
+                                                                        // every legal value is >= 0
+                bool ok = true;
+                for (const auto& [blob, v] : acc.rows) {
+                    auto it = where.find(blob);
+                    if (it == where.end()) { ok = false; break; }
+                    vals[it->second] = v;
+                }
+                if (!ok) continue;
+                for (int v : vals) if (v < 0) { ok = false; break; }
+                if (!ok) continue;
+                fresh_cluster.put_pcarray(vals, carry_singles[is], pcname);
             }
         }
         if (save_origmain && save_origid) {

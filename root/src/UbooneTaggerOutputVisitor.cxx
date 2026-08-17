@@ -25,6 +25,8 @@ void Root::UbooneTaggerOutputVisitor::configure(const WireCell::Configuration& c
 {
     m_output_filename = get<std::string>(cfg, "output_filename", "tracking_proj.root");
     m_grouping_name = get<std::string>(cfg, "grouping", "live");
+    // doc pr/36 §10.8 (F7): see the member comment in the header.
+    m_neutrino_type_bitmask = get<bool>(cfg, "neutrino_type_bitmask", m_neutrino_type_bitmask);
 }
 
 WireCell::Configuration Root::UbooneTaggerOutputVisitor::default_configuration() const
@@ -32,6 +34,7 @@ WireCell::Configuration Root::UbooneTaggerOutputVisitor::default_configuration()
     Configuration cfg;
     cfg["output_filename"] = "tracking_proj.root";
     cfg["grouping"] = "live";
+    cfg["neutrino_type_bitmask"] = m_neutrino_type_bitmask;  // false = branch not booked, schema-identical
     return cfg;
 }
 
@@ -71,6 +74,12 @@ void Root::UbooneTaggerOutputVisitor::visit(Clus::Facade::Ensemble& ensemble) co
     t_tagger->Branch("nu_x", &ki.kine_nu_x_corr, "nu_x/F");
     t_tagger->Branch("nu_y", &ki.kine_nu_y_corr, "nu_y/F");
     t_tagger->Branch("nu_z", &ki.kine_nu_z_corr, "nu_z/F");
+
+    // doc pr/36 §10.8 (F7 = P4): the prototype's per-tagger verdict bitmask,
+    // an /I branch (wire-cell-prod-nue-port.cxx:1485-1486).  Booked only when
+    // the knob is on so the knob-off T_tagger schema is byte-identical.
+    if (m_neutrino_type_bitmask)
+        t_tagger->Branch("neutrino_type", &ti.neutrino_type, "neutrino_type/I");
 
     // ---- cosmic tagger (top-level flag) ----
     t_tagger->Branch("cosmic_flag", &ti.cosmic_flag, "cosmic_flag/F");

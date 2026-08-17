@@ -471,7 +471,7 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
                  } else {}),
         },
 
-        tagger_check_neutrino(name="", trackfitting_config_file="", particle_dataset="", recombination_model="", perf=false, dl_weights="", dQdx_scale=0.1, dQdx_offset=-1000.0, clus_geom_helper="", dl_vtx_rerank=true, dl_vtx_top_k=5, dl_vtx_min_accept_score=4.0, dl_vtx_score_scale=1000.0, beam_window_low=0, beam_window_high=0, nu_skip_cosmic=false, nu_skip_cosmic_bundle=false, nu_skip_cosmic_bundle_min_length=0, dir_weak_use_score=false, mip_dqdx=null, mip_dqdx_median=null, proton_dir_vote=false, proton_dir_score_max=null, proton_dir_asym_min=null, endpoint_trim_retry=false, fit_vertex_min_seg_length=null, cathode_x=null, cathode_kink_xcut=null, shower_topo_demote_len=null, iso_endpoint=false, iso_endpoint_min_length=null, iso_endpoint_max_xext=null, iso_endpoint_xext_frac=null, iso_endpoint_xext_quantile=null, iso_endpoint_tube_radius=null, iso_endpoint_min_aspect=null, cosmic_y_top_main=null, cosmic_y_top_strict=null, cosmic_y_top_loose=null, cosmic_y_small_piece=null, vertex_z_prior_scale=null, ssm_target_dir=null, ssm_absorber_dir=null, kine_fudge_factor=null, kine_recom_factor=null, kine_shower_fudge_factor=null, kine_shower_recom_factor=null, kine_proton_recom_factor=null, kine_plane_weights=null, kine_plane_asym_switch=null, kine_w_value=null, muon_dqdx_curve=null, sp_dedx_use_recomb_model=false, sp_mean_dedx_cut=null, dl_vtx_cut=null, skip_cosmic_companions=false, cosmic_companion_min_length=null) :: {
+        tagger_check_neutrino(name="", trackfitting_config_file="", particle_dataset="", recombination_model="", perf=false, dl_weights="", dQdx_scale=0.1, dQdx_offset=-1000.0, clus_geom_helper="", dl_vtx_rerank=true, dl_vtx_top_k=5, dl_vtx_min_accept_score=4.0, dl_vtx_score_scale=1000.0, beam_window_low=0, beam_window_high=0, nu_skip_cosmic=false, nu_skip_cosmic_bundle=false, nu_skip_cosmic_bundle_min_length=0, dir_weak_use_score=false, mip_dqdx=null, mip_dqdx_median=null, proton_dir_vote=false, proton_dir_score_max=null, proton_dir_asym_min=null, endpoint_trim_retry=false, fit_vertex_min_seg_length=null, cathode_x=null, cathode_kink_xcut=null, cathode_wide_kink_angle=null, cathode_wide_kink_skirt=null, cathode_wide_kink_baseline=null, shower_topo_demote_len=null, iso_endpoint=false, iso_endpoint_min_length=null, iso_endpoint_max_xext=null, iso_endpoint_xext_frac=null, iso_endpoint_xext_quantile=null, iso_endpoint_tube_radius=null, iso_endpoint_min_aspect=null, v3_extension_guard=false, v3_extension_min_gain=null, cosmic_y_top_main=null, cosmic_y_top_strict=null, cosmic_y_top_loose=null, cosmic_y_small_piece=null, vertex_z_prior_scale=null, ssm_target_dir=null, ssm_absorber_dir=null, kine_fudge_factor=null, kine_recom_factor=null, kine_shower_fudge_factor=null, kine_shower_recom_factor=null, kine_proton_recom_factor=null, kine_plane_weights=null, kine_plane_asym_switch=null, kine_w_value=null, kine_shower_pdg_live=false, muon_dqdx_curve=null, sp_dedx_use_recomb_model=false, sp_mean_dedx_cut=null, dl_vtx_cut=null, skip_cosmic_companions=false, cosmic_companion_min_length=null, nu_fallback_demoted_mains=false, sp_photon_flag=false, fit_exclusion=false, graph_endpoint_strict=false, graph_endpoint_tol=null, oov_prototype_parity=false, first_seg_local_pca=null, other_seg_relaxed_accept=null, shower_topo_proto_dir=false, vertex_dir_use_fit_point=false, shower_traj_recheck_parity=false, main_vertex_require_descriptor=false, main_vertex_candidate_flag=false, cont_muon_dir3_30cm=false, track_comp_empty_abstain=false, shower_topo_reset=false, reclass_preserve_4mom=false, dir_track_median_local=false, examine_showers_vertex_by_index=false, fiducial=null, fv_tolerance=[], sp_sce_correction=false, tagger_ordered_segment_sets=false, stem_endpoint_wcpt_parity=false, broken_muon_cluster_id_count=false, neutrino_type_bitmask=false, daughter_count_proto_main_vertex=false, daughter_count_proto_examine_showers=false, shower_pdg_from_start_segment=false, shower_pdg_from_shower_type=false, shower_pdg_exact_muon_test=false, pi0_id_shared_allocator=false, shower_flag_pdg_electron=false, shower_less_id_tiebreak=false, shower_endpoint_exclude_start_vertex=false, track_pid_persist_dqdx=false, shower_reclass_dqdx_guard=false, shower_topo_dqdx_guard=false, reclass_never_computed_ke_floor=false, track_pid_persist_4mom=false, shower_proton_daughter_pion=false, shower_proton_daughter_pion_dissolve=false, muon_multi_proton_pion=false, track_pid_persist_dqdx_electron_guard=false, shower_connect_main_vertex_straight_guard=false, shower_traj_straight_guard=false, shower_absorb_track_guard=false, shower_connect_protected_pion_guard=false, michel_stem_muon_rescue=false, shower_in_cascade_guard=false, shower_in_max_len=null, shower_in_mip_hi=null, michel_stem_michel_check=false, michel_stem_max_far_len=null, shower_stem_backfill=false, stem_backfill_max_len=null, stem_backfill_mip_lo=null, stem_backfill_mip_hi=null, stem_backfill_min_shower_len=null, shower_conn3_unreachable=false, conn3_unreachable_min_len=null, shower_traj_michel_stem=false, michel_stem_traj_min_len=null, michel_stem_traj_max_len=null, michel_stem_traj_mip_lo=null, michel_stem_traj_max_far_len=null, michel_stem_traj_min_kink_deg=null, shower_long_muon_keep_type=false, single_muon_proton_chain_veto=false, single_muon_long_muon_claim=false, pid_flag_reconcile=false, other_seg_empty_2d_guard=false, long_muon_stub_bridge=false, two_end_break=false, teb_min_len=null, teb_min_arm=null, teb_min_arm_pts=null, teb_stub_max=null, teb_accept_range=null, teb_rise_r1=null, teb_rise_r2=null, teb_abs_end_min=null, teb_dip_floor=null, teb_score_cap_r1=null, teb_score_cap_r2=null, teb_turn_angle=null, teb_turn_baseline=null, teb_turn_skirt=null, teb_turn_min_arm_frac=null, teb_second_max=null, teb_chain_topology=false, teb_r3_turn=null, teb_r3_hot=null, teb_bragg_veto_turn=null, kink_walk_dqdx_stop=false, kink_break_protect=false, kink_dqdx_hot_ratio=null, fit_blob_coverage=null, fit_blob_coverage_defer=false, vertex_kink_snap=false, vks_radius=null, vks_min_dis=null, vks_angle=null, vks_margin=null, vks_collinear=null, vks_skirt=null, vks_baseline=null, vks_min_arm=null, vks_fit_miss=null, vks_hot_ratio=null, vks_carry_prong=null, esva_ignore_empty_2d=false, main_vertex_graph_audit=false, mvga_radius=null, mvga_dup_tol=null, mvga_dup_frac=null, mvga_dup_angle=null, mvga_bridge_mip=null, mvga_reconnect=null, mvga_stub=null, mvga_stub_pts=null, mvga_reseat_angle=null, mvga_satellite=null, mvga_interposed=false, mvga_interposed_angle=null, mvga_interposed_len=null, mvga_sat_dup_frac=null, mvga_interposed_deg1=false, mvga_splice_straighten=null, mvga_approach_collapse=null, mvga_straighten_radius=null, dl_vtx_swap_guard=false, dl_vtx_topo_weight=null, dl_vtx_topo_center=null, main_vertex_swap_apply=false, rough_path_probe=false, steiner_gap_penalty=null, sgp_dead_alpha=null, sgp_min_edge=null, sgp_sample_step=null, sgp_point_radius=null, sgp_weak_scale=null, sgp_weak_qref=null, sgp_edge_probe=false, sgp_max_sep=null, break_seg_orient=false, vertex_scoreboard=false, dl_vtx_harvest=false, traj_cover_probe=false, pr_find_other_rounds=null, other_seg_keep_isolated=false, other_seg_keep_isolated_min_points=null, other_seg_keep_isolated_min_length=null, iso_snap_min_dir_mag=null, assoc_full_recluster=false, assoc_reassign_orphans=false, assoc_clear_on_merge=false, shower_absorb_unreachable_main=false, es3_stub_guard=false, es3sg_stub_max=null, es3sg_len_ratio=null, es3sg_ang3_min=null, es3sg_ang_ratio=null, es3sg_require_terminal=null, mvfit_robust=false, mvfit_main_only=null, mvfit_min_len=null, mvfit_rin_margin=null, mvfit_rout_frac=null, mvfit_rout_min=null, mvfit_rout_max=null, mvfit_angle=null, mvfit_min_pts=null, mvfit_min_aniso=null, mvfit_prior_range=null) :: {
             type: "TaggerCheckNeutrino",
             name: prefix + name,
             data: {
@@ -515,6 +515,25 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
               // defaults false / 0; keys omitted when off => byte-identical.
               + (if skip_cosmic_companions then { skip_cosmic_companions: true } else {})
               + (if cosmic_companion_min_length != null then { cosmic_companion_min_length: cosmic_companion_min_length } else {})
+              // nu_fallback_demoted_mains (sbnd_xin/docs/73 sec 12, round 3):
+              // when the primary loop selects NO candidate (every in-window
+              // main convicted or vetoed), a second pass considers DEMOTED
+              // mains (Flags::demoted_main -- restore_demoted_mains upstream,
+              // scored by the taggers under evaluate_demoted_mains) with the
+              // same window / cosmic / bundle-veto gates.  Never runs when a
+              // main-cluster candidate exists.  C++ default false; key omitted
+              // when off => byte-identical pre-round-3 config.
+              + (if nu_fallback_demoted_mains then { nu_fallback_demoted_mains: true } else {})
+              // sp_photon_flag: store singlephoton_tagger()'s verdict in
+              // TaggerInfo::photon_flag, the way prototype NeutrinoID.cxx:271
+              // does.  The port already runs that tagger and fills its ~90
+              // shw_sp_* BDT features; only the verdict was dropped, leaving
+              // the uBooNE tagger ntuple's photon_flag branch a constant 0
+              // (sbnd_xin/docs/pr/26 sec. 8.2).  Nothing in the chain reads
+              // the field, so this changes one output branch and no
+              // reconstruction.  C++ default false; key omitted when off =>
+              // byte-identical pre-knob config.
+              + (if sp_photon_flag then { sp_photon_flag: true } else {})
               // C++ default false.  Key omitted when off => byte-identical pre-knob config (uBooNE).
               // When on: direction-weakness reads use segment_is_dir_weak() (score thresholds),
               // the faithful port of prototype ProtoSegment::is_dir_weak() -- see sbnd_xin/docs/pr/6.
@@ -547,6 +566,23 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
               // reproduces the drag).  SBND: 1.0 cm (owner 2026-07-30, deliberate
               // prototype divergence).
               + (if fit_vertex_min_seg_length != null then { fit_vertex_min_seg_length: fit_vertex_min_seg_length } else {})
+              // Robust vertex fit (doc sbnd_xin/docs/pr/51 round 7): per-leg
+              // dynamic re-seat-free direction windows for MyFCN, disagreement-
+              // gated, with a relaxed prior for substituted 2-leg vertices.
+              // C++ default false.  Master key omitted when off and satellite
+              // keys omitted when null => byte-identical pre-round-7 config.
+              // Lengths cm, angle deg (cm -> internal in TaggerCheckNeutrino).
+              + (if mvfit_robust then { mvfit_robust: mvfit_robust } else {})
+              + (if mvfit_main_only != null then { mvfit_main_only: mvfit_main_only } else {})
+              + (if mvfit_min_len != null then { mvfit_min_len: mvfit_min_len } else {})
+              + (if mvfit_rin_margin != null then { mvfit_rin_margin: mvfit_rin_margin } else {})
+              + (if mvfit_rout_frac != null then { mvfit_rout_frac: mvfit_rout_frac } else {})
+              + (if mvfit_rout_min != null then { mvfit_rout_min: mvfit_rout_min } else {})
+              + (if mvfit_rout_max != null then { mvfit_rout_max: mvfit_rout_max } else {})
+              + (if mvfit_angle != null then { mvfit_angle: mvfit_angle } else {})
+              + (if mvfit_min_pts != null then { mvfit_min_pts: mvfit_min_pts } else {})
+              + (if mvfit_min_aniso != null then { mvfit_min_aniso: mvfit_min_aniso } else {})
+              + (if mvfit_prior_range != null then { mvfit_prior_range: mvfit_prior_range } else {})
               // Cathode kink veto (doc sbnd_xin/docs/pr/20 Part II B0), both in cm.
               // segment_search_kink skips candidate fit points within
               // cathode_kink_xcut of the cathode plane, where the ~2 cm transverse
@@ -555,6 +591,15 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
               // point is ever skipped => keys omitted when null are byte-identical.
               + (if cathode_x != null then { cathode_x: cathode_x } else {})
               + (if cathode_kink_xcut != null then { cathode_kink_xcut: cathode_kink_xcut } else {})
+              // Wide-baseline cathode kink accept (doc sbnd_xin/docs/pr/47
+              // sec 8, O1): fifth segment_search_kink accept path at
+              // cathode-crossing fit indices, keyed on the skirt-excluded PCA
+              // turn angle across the crossing (angle deg, skirt/baseline cm).
+              // C++ default angle 0 => path never evaluated => keys omitted
+              // when null are byte-identical.
+              + (if cathode_wide_kink_angle != null then { cathode_wide_kink_angle: cathode_wide_kink_angle } else {})
+              + (if cathode_wide_kink_skirt != null then { cathode_wide_kink_skirt: cathode_wide_kink_skirt } else {})
+              + (if cathode_wide_kink_baseline != null then { cathode_wide_kink_baseline: cathode_wide_kink_baseline } else {})
               // shower_topo_demote_len (cm, doc pr/25 sec 3): a segment the
               // topology test would flag kShowerTopology whose geometric
               // length exceeds this is demoted to a track, so it gets real
@@ -564,6 +609,116 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
               // against a 0.4 cm cut.  C++ default 0 => the guard never fires
               // => key omitted when null is byte-identical.
               + (if shower_topo_demote_len != null then { shower_topo_demote_len: shower_topo_demote_len } else {})
+              // ---- doc sbnd_xin/docs/pr/30 §11 port-fidelity knobs -------------
+              // fit_exclusion (P1): pass flag_exclusion=true to the 27 knobbed
+              // do_multi_tracking call sites, as 28 of the 30 live prototype
+              // sites do.  With it on, form_map_graph calls update_association
+              // and strips from each segment's 2-D associations the (wire,tick)
+              // cells belonging to OTHER segments.  break_segments' two sites
+              // and the single-segment local fitter are never knobbed -- they
+              // already match the prototype.  C++ default false.
+              + (if fit_exclusion then { fit_exclusion: true } else {})
+              // graph_endpoint_strict (P8): REFUSE a PR::add_segment whose
+              // vertices do not sit within graph_endpoint_tol of the segment's
+              // two wcpt ends, as the prototype's add_proto_connection does.
+              // The WARN and the counter are unconditional in C++; only the
+              // refusal is gated.  C++ defaults false / 0.3 cm.
+              + (if graph_endpoint_strict then { graph_endpoint_strict: true } else {})
+              + (if graph_endpoint_tol != null then { graph_endpoint_tol: graph_endpoint_tol } else {})
+              // oov_prototype_parity (F2, was P9): make a point outside every
+              // TPC vote the way the prototype's own helper answers for it, at
+              // all three sites -- bad (not connected) in
+              // modify_segment_isochronous, not-dead in examine_vertices_1p,
+              // unique (segment kept) in examine_vertices_3.  Today all three
+              // vote the opposite way.  C++ default false.
+              + (if oov_prototype_parity then { oov_prototype_parity: true } else {})
+              // shower_topo_proto_dir (doc pr/31 sec 11, F2 was P2): skip the
+              // stage-3 segment_determine_shower_direction call so a topology
+              // shower keeps the direction segment_is_shower_topology set --
+              // the prototype's state, since its determine_dir_shower_topology
+              // does not touch flag_dir and its determine_shower_direction()
+              // runs only in stage 4.  C++ default false.  Key omitted when
+              // off => byte-identical pre-pr/31 config.
+              + (if shower_topo_proto_dir then { shower_topo_proto_dir: true } else {})
+              // doc sbnd_xin/docs/pr/32 sec 11 -- the four kept findings of the
+              // stage-4 (neutrino vertex identification) port audit.  Every
+              // C++ default is false = today's path, and every key is omitted
+              // when off => byte-identical pre-pr/32 config.
+              //
+              // vertex_dir_use_fit_point (F1, was P1): measure the
+              // calc_conflict_maps direction vectors and the all-showers PCA
+              // projection / z tie-breaks / Steiner path endpoints from the
+              // CONTINUOUS fit, as the prototype's get_fit_pt() does, instead
+              // of from the fit snapped to the nearest Steiner node.  Eleven
+              // expressions; NOT byte-identical when on.
+              + (if vertex_dir_use_fit_point then { vertex_dir_use_fit_point: true } else {})
+              // shower_traj_recheck_parity (F2, was P3): restore the
+              // prototype's improve_vertex shower-trajectory recheck -- outer
+              // gates read the STORED kShowerTrajectory flag, inner test
+              // recomputes at 10 cm with the mip_dqdx scale, and
+              // segment_is_shower_trajectory re-caches the flag (clearing it
+              // when the test says no) the way the prototype does.  The three
+              // move together: fixing only the inner parameters makes the
+              // block dead code.
+              + (if shower_traj_recheck_parity then { shower_traj_recheck_parity: true } else {})
+              // main_vertex_require_descriptor (F3, was P7): drop
+              // invalid-descriptor candidates before compare_main_vertices
+              // scores, so the min_z scan, the fiducial term, the conflict
+              // penalty and the argmax see the same candidate set as the two
+              // blocks that already guard.  Expected byte-identical (the path
+              // looks unreachable) -- the drop is counted, not assumed.
+              + (if main_vertex_require_descriptor then { main_vertex_require_descriptor: true } else {})
+              // main_vertex_candidate_flag (F4, was P12): set
+              // VertexFlags::kMainCandidate on each per-cluster main-vertex
+              // candidate, the prototype's map_cluster_main_candidate_vertices.
+              // DIAGNOSTIC ONLY -- only PrDisplayDump reads it.
+              + (if main_vertex_candidate_flag then { main_vertex_candidate_flag: true } else {})
+              // doc sbnd_xin/docs/pr/31 sec 12 -- the sec 10.12 port-fidelity
+              // round (topology/PID/direction audit survivors).  Every C++
+              // default is false = today's path, and every key is omitted when
+              // off => byte-identical pre-pr/31-sec-12 config.
+              //
+              // cont_muon_dir3_30cm (F5, was P6): find_cont_muon_segment_nue's
+              // hoisted dir3 always at 30 cm, as the prototype computes it,
+              // instead of falling back to the 15 cm dir1 for a short
+              // reference segment.
+              + (if cont_muon_dir3_30cm then { cont_muon_dir3_30cm: true } else {})
+              // track_comp_empty_abstain (F6, was P7): an empty dQ/dx
+              // comparison window ABSTAINS from the direction gate (the
+              // prototype's degenerate answer, verified by execution) instead
+              // of declaring the orientation confirmed.
+              + (if track_comp_empty_abstain then { track_comp_empty_abstain: true } else {})
+              // shower_topo_reset (F3, was P13): segment_is_shower_topology
+              // clears kShowerTopology and dirsign at entry, before its early
+              // returns, as the prototype does -- no stale flag survives a
+              // re-test, no stale direction survives an empty-cloud return.
+              + (if shower_topo_reset then { shower_topo_reset: true } else {})
+              // reclass_preserve_4mom (F1, was P1+P3a+P4): the 15
+              // reclassification sites preserve the existing 4-momentum and
+              // recompute only where the prototype's get_particle_4mom(3)>0
+              // guard passes.  Moves kine_reco_Enu directly.
+              + (if reclass_preserve_4mom then { reclass_preserve_4mom: true } else {})
+              // reclass_never_computed_ke_floor (doc pr/40 round 2 F6): a never-
+              // computed reclass_pinfo carries KE==0 forward instead of the
+              // legacy set_four_momentum(0,0,0,0), which read as KE==-mass.
+              + (if reclass_never_computed_ke_floor then { reclass_never_computed_ke_floor: true } else {})
+              // dir_track_median_local (F4, was P8): determine_dir_track's
+              // median dQ/dx over the SAME local vector the PID receives,
+              // as the prototype's nth_element does, instead of the filtered
+              // helper rebuild.
+              + (if dir_track_median_local then { dir_track_median_local: true } else {})
+              // examine_showers_vertex_by_index (F7, was P5): order
+              // examine_all_showers' vertex pair by graph index before the
+              // asymmetric 165/150-degree branches.  DELIBERATELY DORMANT --
+              // stays off pending pr/30 F4's find_vertices adjudication.
+              + (if examine_showers_vertex_by_index then { examine_showers_vertex_by_index: true } else {})
+              // first_seg_local_pca (P2) and other_seg_relaxed_accept (P4) are
+              // the two knobs whose C++ default is TRUE, because the behaviour
+              // they gate is already production.  null => key omitted => the
+              // C++ default => byte-identical; pass false to restore the
+              // prototype's narrower behaviour for measurement.
+              + (if first_seg_local_pca != null then { first_seg_local_pca: first_seg_local_pca } else {})
+              + (if other_seg_relaxed_accept != null then { other_seg_relaxed_accept: other_seg_relaxed_accept } else {})
               // Isochronous first-segment endpoint finding (doc pr/24 round 2,
               // SBND evt 271851): for a long cluster whose quantile-trimmed
               // drift-x extent is small (a filled 2-D sheet), pick the first
@@ -581,6 +736,21 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
               // null => byte-identical compiled config.
               + (if iso_endpoint_tube_radius != null then { iso_endpoint_tube_radius: iso_endpoint_tube_radius } else {})
               + (if iso_endpoint_min_aspect != null then { iso_endpoint_min_aspect: iso_endpoint_min_aspect } else {})
+              // doc pr/24 round 5.  examine_vertices_3's get_local_extension
+              // recovery step can retract a track endpoint instead of
+              // extending it; C++ default false / -1.0 cm => unconditional
+              // accept, byte-identical when off.
+              + (if v3_extension_guard then { v3_extension_guard: true } else {})
+              // doc sbnd_xin/docs/pr/67: log-only trajectory-coverage probe.
+              // C++ default false.  Key omitted when off => byte-identical config.
+              + (if traj_cover_probe then { traj_cover_probe: true } else {})
+              // doc pr/67: override find_proto_vertex's HARDCODED main-cluster
+              // branch-search round budget (TaggerCheckNeutrino.cxx passes 2).
+              // C++ default 0 = keep the hardcoded value.  DIAGNOSTIC: a value
+              // > 0 changes reconstruction output by design.  Key omitted when
+              // null => byte-identical config.
+              + (if pr_find_other_rounds != null then { pr_find_other_rounds: pr_find_other_rounds } else {})
+              + (if v3_extension_min_gain != null then { v3_extension_min_gain: v3_extension_min_gain } else {})
               // Detector-extent literals (docs/pr/2 sec 2e(iv)), all in cm.  C++
               // defaults = the uBooNE prototype values, so keys omitted when null =>
               // byte-identical pre-knob config.
@@ -650,6 +820,12 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
               + (if kine_plane_weights != null then { kine_plane_weights: kine_plane_weights } else {})
               + (if kine_plane_asym_switch != null then { kine_plane_asym_switch: kine_plane_asym_switch } else {})
               + (if kine_w_value != null then { kine_w_value: kine_w_value } else {})
+              // doc pr/35 sec 10.2 (F1 = P1+P8): read the shower PDG live from
+              // the start segment at the four fill_kine_tree sites (prototype
+              // kine.h:53 :67 :175 :187) instead of Shower's cached field,
+              // whose refresh path is incomplete.  C++ default false.  Key
+              // omitted when off => byte-identical pre-knob config.
+              + (if kine_shower_pdg_live then { kine_shower_pdg_live: true } else {})
               // Muon median-dQ/dx-vs-length envelope [c0, c1, pivot_cm, power]:
               // cut = c0 + c1*(pivot/L)^power, a multiple of mip_dqdx_median,
               // used at NINE tagger sites (numu x2, vertex-finder, nue x4, ssm,
@@ -669,7 +845,379 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
               // the legacy literal (compared as float => bit-identical); key
               // omitted when null.  Tuned against the INLINE (uBooNE-field)
               // dE/dx scale -- retune together with the knob above.
-              + (if sp_mean_dedx_cut != null then { sp_mean_dedx_cut: sp_mean_dedx_cut } else {}),
+              + (if sp_mean_dedx_cut != null then { sp_mean_dedx_cut: sp_mean_dedx_cut } else {})
+              // ---- doc sbnd_xin/docs/pr/36 sec 10 tagger-stage knobs -------
+              // F1 (= P1): fiducial + margins for the match_isFC recompute --
+              // the SAME objects tagger_check_{stm,tgm,fc} receive, restoring
+              // one containment definition across the stage.  C++: an absent
+              // "fiducial" key keeps the historical FiducialUtils fallback
+              // (cluster_fc_check's nullptr path, documented bit-for-bit) =>
+              // byte-identical pre-knob config.  Same key pair as
+              // tagger_check_stm above.
+              + (if fiducial != null then { fiducial: fiducial } else {})
+              + (if std.length(fv_tolerance) > 0 then { fv_tolerance: fv_tolerance } else {})
+              // F3 (= P2): single-photon SCE correction gate.  A SEPARATE
+              // bool from clus_geom_helper so the two consumers of that key
+              // (kine + single-photon) stay independently gateable.  C++
+              // default false.  Key omitted when off => byte-identical.
+              + (if sp_sce_correction then { sp_sce_correction: true } else {})
+              // F4 (= P3+P5): iterate the three tagger accumulation sets in
+              // graph-index order (M4 house-rule determinism fix; prototype
+              // n/a -- it is address-ordered too).  C++ default false.
+              + (if tagger_ordered_segment_sets then { tagger_ordered_segment_sets: true } else {})
+              // F5 (= P6): prototype wcpt-identity stem-endpoint rule at the
+              // 18 seg_endpoint_near sites.  C++ default false.
+              + (if stem_endpoint_wcpt_parity then { stem_endpoint_wcpt_parity: true } else {})
+              // F6 (= P8): broken_muon_id counts distinct cluster IDS
+              // (prototype) instead of pointers.  C++ default false.
+              + (if broken_muon_cluster_id_count then { broken_muon_cluster_id_count: true } else {})
+              // F7 (= P4): compute the prototype's neutrino_type verdict
+              // bitmask.  The matching T_tagger branch is booked by
+              // tagger_output under the same key.  C++ default false.
+              + (if neutrino_type_bitmask then { neutrino_type_bitmask: true } else {})
+              // ---- doc sbnd_xin/docs/pr/33 §10 EM-shower-clustering knobs.
+              // All C++ default false.  Key omitted when off => byte-identical
+              // pre-knob config.
+              // F1 (= P1): restore the prototype's calculate_num_daughter_tracks
+              // callee at the two sites that call _showers.  Two knobs: the
+              // sites err in opposite directions.
+              + (if daughter_count_proto_main_vertex then { daughter_count_proto_main_vertex: true } else {})
+              + (if daughter_count_proto_examine_showers then { daughter_count_proto_examine_showers: true } else {})
+              // F2 (= P2): read the PDG off the object the prototype reads.
+              // NOTE: prototype parity at the :170 site needs BOTH
+              // shower_pdg_from_start_segment AND shower_pdg_exact_muon_test
+              // on; from_start_segment alone is neither tree's behavior there.
+              + (if shower_pdg_from_start_segment then { shower_pdg_from_start_segment: true } else {})
+              + (if shower_pdg_from_shower_type then { shower_pdg_from_shower_type: true } else {})
+              + (if shower_pdg_exact_muon_test then { shower_pdg_exact_muon_test: true } else {})
+              // F3 (= P3): the two pi0 finders share one id allocation
+              // stream (prototype member semantics), preventing pio_id
+              // collisions in the tagger pi0 block and the Bee mc.json
+              // grouping.  Scoped to the finders only.
+              + (if pi0_id_shared_allocator then { pi0_id_shared_allocator: true } else {})
+              // F4 (= P6): is_shower at the center-point site gains the
+              // prototype's missing abs(pdg)==11 disjunct.
+              + (if shower_flag_pdg_electron then { shower_flag_pdg_electron: true } else {})
+              // F5 (= P12): shower_less same-index tie-break by stable
+              // shower id instead of pointer address (house-rule determinism
+              // fix; prototype n/a -- it is address-ordered everywhere).
+              + (if shower_less_id_tiebreak then { shower_less_id_tiebreak: true } else {})
+              // doc pr/39: exclude a shower's own start vertex from the
+              // end_point farthest-vertex search (prototype map_vtx_segs
+              // parity, same rule as fill_sets's exclude_start_vertex).
+              + (if shower_endpoint_exclude_start_vertex then { shower_endpoint_exclude_start_vertex: true } else {})
+              // doc sbnd_xin/docs/pr/40 -- track (proton/pion/muon)
+              // mis-identified as electron.  F1 restores prototype-faithful
+              // PID persistence; F2/F3 guard the wholesale track-to-electron
+              // conversion sites with the segment's own median dQ/dx.
+              + (if track_pid_persist_dqdx then { track_pid_persist_dqdx: true } else {})
+              + (if shower_reclass_dqdx_guard then { shower_reclass_dqdx_guard: true } else {})
+              + (if shower_topo_dqdx_guard then { shower_topo_dqdx_guard: true } else {})
+              // doc sbnd_xin/docs/pr/40 round 2 -- two follow-on defects from the
+              // pr/40 fix round, measured off the Bee display of its
+              // shipped fix.  F1: the non-free-end persistence branch called
+              // segment_cal_4mom unconditionally instead of storing a rest-
+              // mass-only stub (zero KE).  F2: an electron-labelled segment
+              // that emanates from the neutrino vertex and fathers a PID'd,
+              // charge-confirmed proton is relabelled pion, not electron
+              // (an electron cannot produce a proton daughter).
+              + (if track_pid_persist_4mom then { track_pid_persist_4mom: true } else {})
+              + (if shower_proton_daughter_pion then { shower_proton_daughter_pion: true } else {})
+              // doc sbnd_xin/docs/pr/40 round 4 -- two follow-on defects from
+              // round 2/3's F5 fix, measured off the Bee display of its
+              // shipped fix.  F7: F5 relabelled the pdg but left the shower
+              // flags set, so the pion was still wrapped as a Shower (its
+              // proton daughter never got its own particle-flow node). F8: a
+              // muon segment whose far (non-neutrino-vertex) end is a
+              // multi-proton (>=2, charge-confirmed) hadronic vertex is
+              // relabelled pion (a muon cannot terminate there).
+              + (if shower_proton_daughter_pion_dissolve then { shower_proton_daughter_pion_dissolve: true } else {})
+              + (if muon_multi_proton_pion then { muon_multi_proton_pion: true } else {})
+              // doc sbnd_xin/docs/pr/40 round 5 -- muon mis-identified as
+              // electron, three independent mechanisms measured off three
+              // owner-reported Bee cases.  F9: track_pid_persist_dqdx (F1)
+              // no longer rescues an undirected (no free end) electron
+              // guess, which otherwise poisons a NEIGHBORING segment's
+              // flag_shower_in test.  F10: the main-vertex EM-shower
+              // selection heuristic excludes a candidate whose own start
+              // segment is long and straight.  F11: segment_is_shower_
+              // trajectory gets the same straightness veto F3 already gave
+              // segment_is_shower_topology's dQ/dx.
+              + (if track_pid_persist_dqdx_electron_guard then { track_pid_persist_dqdx_electron_guard: true } else {})
+              + (if shower_connect_main_vertex_straight_guard then { shower_connect_main_vertex_straight_guard: true } else {})
+              + (if shower_traj_straight_guard then { shower_traj_straight_guard: true } else {})
+              // doc pr/40 round 6 F12/F13/F14.  C++ defaults false.  Keys
+              // omitted when off => byte-identical pre-round-6 config.
+              + (if shower_absorb_track_guard then { shower_absorb_track_guard: true } else {})
+              // doc pr/65 round 3 -- offer graph-unreachable main-cluster
+              // segments (kept-isolated pr/54 residuals) to the shower
+              // absorbers by relaxing the cluster()==main_cluster guards to
+              // a main_vertex-reachability test.  C++ default false.  Key
+              // omitted when off => byte-identical pre-pr/65 config.
+              + (if shower_absorb_unreachable_main then { shower_absorb_unreachable_main: true } else {})
+              + (if shower_connect_protected_pion_guard then { shower_connect_protected_pion_guard: true } else {})
+              + (if michel_stem_muon_rescue then { michel_stem_muon_rescue: true } else {})
+              // doc sbnd_xin/docs/pr/74 round 2 -- P1 flag_shower_in cascade
+              // guard + P2 Michel-terminal check.  C++ defaults false; keys
+              // omitted when off => byte-identical pre-pr/74 config.  Scalar
+              // tunables (cm / ratio) follow shower_topo_demote_len's
+              // convention: C++ holds the active default, key omitted when
+              // null.
+              + (if shower_in_cascade_guard then { shower_in_cascade_guard: true } else {})
+              + (if shower_in_max_len != null then { shower_in_max_len: shower_in_max_len } else {})
+              + (if shower_in_mip_hi != null then { shower_in_mip_hi: shower_in_mip_hi } else {})
+              + (if michel_stem_michel_check then { michel_stem_michel_check: true } else {})
+              + (if michel_stem_max_far_len != null then { michel_stem_max_far_len: michel_stem_max_far_len } else {})
+              // pr/74 K4 stem backfill + K5 conn-3 promotion of unreachable
+              // main-cluster segments (pr/65 rung 2).  Same conventions.
+              + (if shower_stem_backfill then { shower_stem_backfill: true } else {})
+              + (if stem_backfill_max_len != null then { stem_backfill_max_len: stem_backfill_max_len } else {})
+              + (if stem_backfill_mip_lo != null then { stem_backfill_mip_lo: stem_backfill_mip_lo } else {})
+              + (if stem_backfill_mip_hi != null then { stem_backfill_mip_hi: stem_backfill_mip_hi } else {})
+              + (if stem_backfill_min_shower_len != null then { stem_backfill_min_shower_len: stem_backfill_min_shower_len } else {})
+              + (if shower_conn3_unreachable then { shower_conn3_unreachable: true } else {})
+              + (if conn3_unreachable_min_len != null then { conn3_unreachable_min_len: conn3_unreachable_min_len } else {})
+              // doc pr/74 round 4 K6.  C++ default false.  Key omitted when
+              // off => byte-identical pre-round-4 config.
+              + (if shower_traj_michel_stem then { shower_traj_michel_stem: true } else {})
+              + (if michel_stem_traj_min_len != null then { michel_stem_traj_min_len: michel_stem_traj_min_len } else {})
+              + (if michel_stem_traj_max_len != null then { michel_stem_traj_max_len: michel_stem_traj_max_len } else {})
+              + (if michel_stem_traj_mip_lo != null then { michel_stem_traj_mip_lo: michel_stem_traj_mip_lo } else {})
+              + (if michel_stem_traj_max_far_len != null then { michel_stem_traj_max_far_len: michel_stem_traj_max_far_len } else {})
+              + (if michel_stem_traj_min_kink_deg != null then { michel_stem_traj_min_kink_deg: michel_stem_traj_min_kink_deg } else {})
+              // doc pr/44.  C++ default false; key omitted when off =>
+              // byte-identical pre-fix config.
+              + (if shower_long_muon_keep_type then { shower_long_muon_keep_type: true } else {})
+              // doc pr/43 round 2 -- C++ defaults false. Key omitted when off => byte-identical pre-fix config.
+              + (if single_muon_proton_chain_veto then { single_muon_proton_chain_veto: true } else {})
+              + (if single_muon_long_muon_claim then { single_muon_long_muon_claim: true } else {})
+              + (if pid_flag_reconcile then { pid_flag_reconcile: true } else {})
+              // doc pr/45 -- find_other_segments empty-2D-tree sentinel guard.
+              // C++ default false. Key omitted when off => byte-identical pre-fix config.
+              + (if other_seg_empty_2d_guard then { other_seg_empty_2d_guard: true } else {})
+              + (if long_muon_stub_bridge then { long_muon_stub_bridge: true } else {})
+              // doc pr/48 -- back-to-back track fixes.  Bools: C++ default
+              // false, key omitted when off => byte-identical.  teb_*
+              // numerics: null = C++ defaults (10/1.8/4/4/15 cm-ish floors,
+              // rise 1.3/1.15, abs 1.7x median, caps 0.6/0.9, turn 25 deg /
+              // 35 cm / 3 cm), inert while two_end_break is off.
+              + (if two_end_break then { two_end_break: true } else {})
+              + (if teb_min_len != null then { teb_min_len: teb_min_len } else {})
+              + (if teb_min_arm != null then { teb_min_arm: teb_min_arm } else {})
+              + (if teb_min_arm_pts != null then { teb_min_arm_pts: teb_min_arm_pts } else {})
+              + (if teb_stub_max != null then { teb_stub_max: teb_stub_max } else {})
+              + (if teb_accept_range != null then { teb_accept_range: teb_accept_range } else {})
+              + (if teb_rise_r1 != null then { teb_rise_r1: teb_rise_r1 } else {})
+              + (if teb_rise_r2 != null then { teb_rise_r2: teb_rise_r2 } else {})
+              + (if teb_abs_end_min != null then { teb_abs_end_min: teb_abs_end_min } else {})
+              + (if teb_dip_floor != null then { teb_dip_floor: teb_dip_floor } else {})
+              + (if teb_score_cap_r1 != null then { teb_score_cap_r1: teb_score_cap_r1 } else {})
+              + (if teb_score_cap_r2 != null then { teb_score_cap_r2: teb_score_cap_r2 } else {})
+              + (if teb_turn_angle != null then { teb_turn_angle: teb_turn_angle } else {})
+              + (if teb_turn_baseline != null then { teb_turn_baseline: teb_turn_baseline } else {})
+              + (if teb_turn_skirt != null then { teb_turn_skirt: teb_turn_skirt } else {})
+              // doc pr/90 round 2 -- R2 argmax arm-fill guard + second-prong
+              // gate cap.  C++ defaults 0 = legacy; null = key omitted =>
+              // byte-identical pre-fix config.
+              + (if teb_turn_min_arm_frac != null then { teb_turn_min_arm_frac: teb_turn_min_arm_frac } else {})
+              + (if teb_second_max != null then { teb_second_max: teb_second_max } else {})
+              // doc pr/90 round 4 -- chain-topology gate admission (D1),
+              // route R3 turn/activity thresholds (deg / x mip median, D3),
+              // R2 bragg veto turn (deg, D4).  C++ defaults false/0 =
+              // legacy; false/null = key omitted => byte-identical pre-fix
+              // config.
+              + (if teb_chain_topology then { teb_chain_topology: true } else {})
+              + (if teb_r3_turn != null then { teb_r3_turn: teb_r3_turn } else {})
+              + (if teb_r3_hot != null then { teb_r3_hot: teb_r3_hot } else {})
+              + (if teb_bragg_veto_turn != null then { teb_bragg_veto_turn: teb_bragg_veto_turn } else {})
+              + (if kink_walk_dqdx_stop then { kink_walk_dqdx_stop: true } else {})
+              + (if kink_break_protect then { kink_break_protect: true } else {})
+              + (if kink_dqdx_hot_ratio != null then { kink_dqdx_hot_ratio: kink_dqdx_hot_ratio } else {})
+              // doc pr/49 -- cross-cluster projection-ghost deweighting in
+              // the trajectory fit's 2D charge association (18255-57441
+              // V-plane ghost: live cells outside the fitted cluster's own
+              // blob coverage that sit inside a 3D-distant foreign cluster's
+              // keep their measurement at reduced weight).  C++ default -1
+              // = off; null here omits the key => byte-identical.  >= 0 =
+              // on, value = wire/slice tolerance in cells (0 = strict).
+              + (if fit_blob_coverage != null then { fit_blob_coverage: fit_blob_coverage } else {})
+              // doc pr/50: suspend deweighting during find_proto_vertex (partition
+              // stage).  C++ default false = pr/49 behavior.  Key omitted when
+              // false => byte-identical pre-pr/50 config.
+              + (if fit_blob_coverage_defer then { fit_blob_coverage_defer: true } else {})
+              // doc pr/50: main-vertex kink-consistency snap (172230-class
+              // near-vertex robustness).  C++ defaults: snap false, numerics
+              // 5/0.5 cm, 25/10/20 deg, 0.3/2/1.5 cm, hot 1.6.  Keys omitted
+              // when off/null => byte-identical pre-pr/50 config.
+              + (if vertex_kink_snap then { vertex_kink_snap: true } else {})
+              + (if vks_radius != null then { vks_radius: vks_radius } else {})
+              + (if vks_min_dis != null then { vks_min_dis: vks_min_dis } else {})
+              + (if vks_angle != null then { vks_angle: vks_angle } else {})
+              + (if vks_margin != null then { vks_margin: vks_margin } else {})
+              + (if vks_collinear != null then { vks_collinear: vks_collinear } else {})
+              + (if vks_skirt != null then { vks_skirt: vks_skirt } else {})
+              + (if vks_baseline != null then { vks_baseline: vks_baseline } else {})
+              + (if vks_min_arm != null then { vks_min_arm: vks_min_arm } else {})
+              + (if vks_fit_miss != null then { vks_fit_miss: vks_fit_miss } else {})
+              + (if vks_hot_ratio != null then { vks_hot_ratio: vks_hot_ratio } else {})
+              // doc pr/85: carry the old vertex's arms through the snap
+              // residual below this arc (cm).  C++ default 0 = off, so
+              // null => key omitted => byte-identical.
+              + (if vks_carry_prong != null then { vks_carry_prong: vks_carry_prong } else {})
+              // sbnd_xin/docs/73 sec 12 (round 3, evt 78242): in
+              // eliminate_short_vertex_activities case 5, treat the empty-2D-
+              // index sentinel (-1: the pre-existing segment has no points in
+              // the query point's APA -- cathode-crossing clusters only) as
+              // "no information" instead of "covered", so the cross-cathode
+              // junction segment is not vacuously deleted.  C++ default
+              // false; key omitted when off => byte-identical.
+              + (if esva_ignore_empty_2d then { esva_ignore_empty_2d: true } else {})
+              // doc pr/51: main-vertex graph audit (near-vertex graph-shape
+              // repair).  C++ defaults: audit false, numerics 15/1.4 cm,
+              // 0.7, 20 deg, 0.5, 5/2 cm, 4 pts, 150 deg.  Keys omitted
+              // when off/null => byte-identical pre-pr/51 config.
+              + (if main_vertex_graph_audit then { main_vertex_graph_audit: true } else {})
+              + (if mvga_radius != null then { mvga_radius: mvga_radius } else {})
+              + (if mvga_dup_tol != null then { mvga_dup_tol: mvga_dup_tol } else {})
+              + (if mvga_dup_frac != null then { mvga_dup_frac: mvga_dup_frac } else {})
+              + (if mvga_dup_angle != null then { mvga_dup_angle: mvga_dup_angle } else {})
+              + (if mvga_bridge_mip != null then { mvga_bridge_mip: mvga_bridge_mip } else {})
+              + (if mvga_reconnect != null then { mvga_reconnect: mvga_reconnect } else {})
+              + (if mvga_stub != null then { mvga_stub: mvga_stub } else {})
+              + (if mvga_stub_pts != null then { mvga_stub_pts: mvga_stub_pts } else {})
+              + (if mvga_reseat_angle != null then { mvga_reseat_angle: mvga_reseat_angle } else {})
+              // doc pr/51 round 3: op3 satellite-anchor radius (cm).
+              // C++ default 0 = main-vertex-only op3 scope (round 2), so
+              // null/0 => key omitted => byte-identical.
+              + (if mvga_satellite != null then { mvga_satellite: mvga_satellite } else {})
+              // doc pr/85: op3 interposed-stub absorb at the main-vertex
+              // anchor.  C++ defaults: interposed false, angle 150 deg.
+              // Keys omitted when off/null => byte-identical.
+              + (if mvga_interposed then { mvga_interposed: true } else {})
+              + (if mvga_interposed_angle != null then { mvga_interposed_angle: mvga_interposed_angle } else {})
+              // C++ default 0 = use mvga_stub.  Key omitted when null => byte-identical pre-pr/86 config.
+              + (if mvga_interposed_len != null then { mvga_interposed_len: mvga_interposed_len } else {})
+              // C++ default 0 = use mvga_dup_frac at satellite anchors too.  Key omitted when null => byte-identical.
+              + (if mvga_sat_dup_frac != null then { mvga_sat_dup_frac: mvga_sat_dup_frac } else {})
+              // C++ default false.  Key omitted when off => byte-identical.
+              + (if mvga_interposed_deg1 then { mvga_interposed_deg1: true } else {})
+              // doc pr/86 round 2: op3 post-carry straighten reach (cm).
+              // C++ default 0 = concatenation verbatim.  Key omitted when
+              // null => byte-identical.
+              + (if mvga_splice_straighten != null then { mvga_splice_straighten: mvga_splice_straighten } else {})
+              // doc pr/86 round 2: op3.5 junction-collapse radius (cm).
+              // C++ default 0 = pass skipped.  Key omitted when null =>
+              // byte-identical.
+              + (if mvga_approach_collapse != null then { mvga_approach_collapse: mvga_approach_collapse } else {})
+              // doc pr/86 round 2: R1/R2 charge-veto radius (cm).  C++
+              // default 0 = the prototype 0.2 cm; inert unless
+              // straighten/collapse on.  Key omitted when null =>
+              // byte-identical.
+              + (if mvga_straighten_radius != null then { mvga_straighten_radius: mvga_straighten_radius } else {})
+              // doc pr/51 (506746): rerank-branch cross-cluster DL swap
+              // guard.  C++ default false.  Key omitted when false =>
+              // byte-identical pre-pr/51 config.
+              + (if dl_vtx_swap_guard then { dl_vtx_swap_guard: true } else {})
+              // doc pr/89 Arm C (C2): rule-1 outgoing-prong topology term in
+              // the DL rerank composite.  C++ defaults 0/0 = term never
+              // computed.  Keys omitted when null => byte-identical.
+              + (if dl_vtx_topo_weight != null then { dl_vtx_topo_weight: dl_vtx_topo_weight } else {})
+              + (if dl_vtx_topo_center != null then { dl_vtx_topo_center: dl_vtx_topo_center } else {})
+              // doc pr/51 round 3: apply the traditional-path swap decision
+              // instead of discarding it.  C++ default false.  Key omitted
+              // when false => byte-identical.
+              + (if main_vertex_swap_apply then { main_vertex_swap_apply: true } else {})
+              // doc pr/51 round 4: diagnostic-only rough-path probe.  C++
+              // default false.  Key omitted when false => byte-identical.
+              + (if rough_path_probe then { rough_path_probe: true } else {})
+              // doc pr/51 round 5: steiner gap penalty -- do_rough_path
+              // routes on a support-penalized "steiner_graph_gap" flavor
+              // when the scale is > 0.  C++ defaults: scale 0 (off),
+              // dead_alpha 0.25, min_edge 0.5 cm, sample_step 0.3 cm,
+              // point_radius 0.2 cm.  Keys omitted when null =>
+              // byte-identical pre-round-5 config.
+              + (if steiner_gap_penalty != null then { steiner_gap_penalty: steiner_gap_penalty } else {})
+              + (if sgp_dead_alpha != null then { sgp_dead_alpha: sgp_dead_alpha } else {})
+              + (if sgp_min_edge != null then { sgp_min_edge: sgp_min_edge } else {})
+              + (if sgp_sample_step != null then { sgp_sample_step: sgp_sample_step } else {})
+              + (if sgp_point_radius != null then { sgp_point_radius: sgp_point_radius } else {})
+              + (if sgp_edge_probe then { sgp_edge_probe: true } else {})
+              // doc sbnd_xin/docs/pr/75 -- per-event vertex scoreboard for the
+              // neutrino-vertex hand scan (compare_main_vertices scores, DL
+              // top-K voxels, the seven rerank terms, the accept route).
+              // Recording only, read by PrDisplayDump.  C++ default false;
+              // key omitted when off => byte-identical compiled config.
+              + (if vertex_scoreboard then { vertex_scoreboard: true } else {})
+              // doc sbnd_xin/docs/pr/79 sec 10 -- live-feature harvest for
+              // DL-vertex training: the exact SCN input cloud + the
+              // traditional-path per-candidate features the scorers discard.
+              // Recording only; REQUIRES vertex_scoreboard (C++ warns and
+              // stays inert otherwise).  C++ default false; key omitted when
+              // off => byte-identical compiled config.
+              + (if dl_vtx_harvest then { dl_vtx_harvest: true } else {})
+              // doc pr/51 round 6.  C++ defaults 0 / 2000; keys omitted when
+              // null => byte-identical pre-round-6 config.
+              + (if sgp_weak_scale != null then { sgp_weak_scale: sgp_weak_scale } else {})
+              + (if sgp_weak_qref != null then { sgp_weak_qref: sgp_weak_qref } else {})
+              // doc pr/73 round 2 F3a: route excursion cap, cm.  C++ default
+              // -1 (off).  `!= null` and never a truthiness test -- 0 is a
+              // MEANINGFUL cap here (reject any excursion), so `if sgp_max_sep`
+              // would silently delete that setting.  null omits the key =>
+              // byte-identical pre-round-2 config.
+              + (if sgp_max_sep != null then { sgp_max_sep: sgp_max_sep } else {})
+              // doc pr/83: oriented break_segment splits (find_vertices
+              // instead of boost source/target).  C++ default false.  Key
+              // omitted when off => byte-identical pre-fix config.
+              + (if break_seg_orient then { break_seg_orient: true } else {})
+              // doc pr/54: keep well-supported isolated residual segments in
+              // find_other_segments (18255-142421 separated EM shower).  C++
+              // defaults: keep false, floors 25 points / 3 cm.  Keys omitted
+              // when off/null => byte-identical pre-pr/54 config.
+              + (if other_seg_keep_isolated then { other_seg_keep_isolated: true } else {})
+              + (if other_seg_keep_isolated_min_points != null then { other_seg_keep_isolated_min_points: other_seg_keep_isolated_min_points } else {})
+              + (if other_seg_keep_isolated_min_length != null then { other_seg_keep_isolated_min_length: other_seg_keep_isolated_min_length } else {})
+              // doc pr/67 round 3 (S2): size gate on the isochronous snap in
+              // find_other_segments, in cm.  C++ default 10.0 = legacy; the
+              // machinery it guards is the only thing that ATTACHES a short
+              // isochronously-displaced branch to its parent.  null omits the
+              // key => byte-identical pre-pr/67 config.
+              + (if iso_snap_min_dir_mag != null then { iso_snap_min_dir_mag: iso_snap_min_dir_mag } else {})
+              // doc pr/59 round 2: per-cluster orphaned-associate_points
+              // rescue (18255-142421 seg 20; 116944-71372 segs
+              // 19052/19053/136199 -- fitted segments created after their
+              // cluster's association pass, left with a null shower_track
+              // point cloud).  C++ default false.  Key omitted when false
+              // => byte-identical.
+              + (if assoc_full_recluster then { assoc_full_recluster: true } else {})
+              // doc pr/64 round 7: reassign same-cluster association orphans
+              // that Stage C of clustering_points_segments would otherwise
+              // drop, instead of discarding them (18259-18625: 12-18 pt blob
+              // at PF segment 126042's own fit endpoint, present in img charge
+              // but absent from shower_track/associate_points).  C++ default
+              // false.  Key omitted when false => byte-identical.
+              + (if assoc_reassign_orphans then { assoc_reassign_orphans: true } else {})
+              // doc pr/64 round 8: clear a merge survivor's associate_points
+              // when examine_structure_final_1/_1p/_3 deletes a segment that
+              // had non-empty associate_points, so pr/59's
+              // reassociate_cluster_orphans any_orphan trigger correctly
+              // re-fires instead of leaving the survivor's stale cloud in
+              // place.  C++ default false.  Key omitted when false =>
+              // byte-identical.
+              + (if assoc_clear_on_merge then { assoc_clear_on_merge: true } else {})
+              // doc pr/72 round 2: guard examine_structure_3 against merging
+              // a genuine near-vertex track stub into an unrelated
+              // shower/track trunk (18255-196649).  C++ default false =
+              // examine_structure_3's unconditional angle-only merge, key
+              // omitted when false => byte-identical.  The five numeric
+              // sub-parameters default null (component keeps its own C++
+              // default, fitted from a 117-event census -- see doc pr/72
+              // round 2); only an explicit non-null value overrides.
+              + (if es3_stub_guard then { es3_stub_guard: true } else {})
+              + (if es3sg_stub_max != null then { es3sg_stub_max: es3sg_stub_max } else {})
+              + (if es3sg_len_ratio != null then { es3sg_len_ratio: es3sg_len_ratio } else {})
+              + (if es3sg_ang3_min != null then { es3sg_ang3_min: es3sg_ang3_min } else {})
+              + (if es3sg_ang_ratio != null then { es3sg_ang_ratio: es3sg_ang_ratio } else {})
+              + (if es3sg_require_terminal != null then { es3sg_require_terminal: es3sg_require_terminal } else {}),
         },
 
         // Run pattern recognition (find_proto_vertex) on the main cluster.
@@ -775,13 +1323,20 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
         // Write T_tagger and T_kine trees into the existing tracking output ROOT file.
         // Must run AFTER numu_bdt_scorer and nue_bdt_scorer (BDT scores must be filled).
         // Must run AFTER UbooneMagnifyTrackingVisitor (file must already exist to UPDATE).
-        tagger_output(name="", output_filename="tracking_proj.root") :: {
+        tagger_output(name="", output_filename="tracking_proj.root", neutrino_type_bitmask=false) :: {
             type: "UbooneTaggerOutputVisitor",
             name: prefix + name,
             data: {
                 grouping: "live",
                 output_filename: output_filename,
             }
+              // doc sbnd_xin/docs/pr/36 sec 10.8 (F7 = P4): book the
+              // neutrino_type/I branch (prototype
+              // wire-cell-prod-nue-port.cxx:1486).  Same key as
+              // tagger_check_neutrino's computing knob.  C++ default false =
+              // branch not booked; key omitted when off => byte-identical
+              // pre-knob config AND schema.
+              + (if neutrino_type_bitmask then { neutrino_type_bitmask: true } else {}),
         },
 
         pointed(name="", groupings=["live"]) :: {
@@ -951,7 +1506,14 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
                               unmatched_min_length=null, unmatched_min_npts=null,
                               adopt_nu_fragments=false, adopt_dis=null,
                               adopt_xcut=null, adopt_frag_max_length=null,
-                              adopt_min_npts=null, adopt_beam_min_length=null) :: {
+                              adopt_min_npts=null, adopt_beam_min_length=null,
+                              rescue_allow_in_beam_far=false,
+                              rescue_geom_first=false, geom_first_dis=null,
+                              rescue_pierce_test=false, pierce_cut=null,
+                              conn_drift_frac=null, conn_min_dis=null,
+                              rescue_dest_beam_for_new=false,
+                              far_contain_tol=null,
+                              rescue_beam_main_only=false) :: {
             type: "ClusteringCathodeBundleRescue",
             name: prefix+name,
             data: dv_cfg + pcts_cfg + scope_cfg + {
@@ -1003,6 +1565,58 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
                 [if adopt_frag_max_length != null then "adopt_frag_max_length"]: adopt_frag_max_length,
                 [if adopt_min_npts != null then "adopt_min_npts"]: adopt_min_npts,
                 [if adopt_beam_min_length != null then "adopt_beam_min_length"]: adopt_beam_min_length,
+                // ---- round 2 (sbnd_xin/docs/73) -------------------------------
+                // Four independent openings of a measured blocker, each C++
+                // default false / inert.  Keys omitted when off => compiled
+                // config byte-identical to pre-round-2.
+                //
+                // rescue_allow_in_beam_far: K_far may itself be in the beam
+                // window provided it is in a different flash bundle (both halves
+                // matched, each to its own side's in-beam flash; the T0
+                // hypothesis then moves by <= 0.31 cm, sub-blob).
+                [if rescue_allow_in_beam_far then "rescue_allow_in_beam_far"]: true,
+                // rescue_geom_first: test a pair the [-rescue_t0_early,
+                // +rescue_t0_late] window rejected, but demand a TIGHTENED
+                // geometry (geom_first_dis + pierce_cut + collinearity) -- the
+                // wrong flash is measured up to 855 us away, beyond any time
+                // prior.  Purely additive to the legacy accept path.
+                [if rescue_geom_first then "rescue_geom_first"]: true,
+                // null => C++ default 8 cm (a genuine one-sided crosser's
+                // tip-to-tip separation runs to 6.7 cm, evt65053).
+                [if geom_first_dis != null then "geom_first_dis"]: geom_first_dis,
+                // rescue_pierce_test: where the tip-to-tip vector is dominated
+                // by drift (it is then the cathode dead gap, and the conn angle
+                // silently becomes a cut on |dir_x| > cos(conn_far_cut)) or too
+                // short to define a direction, substitute the cathode-PIERCING
+                // agreement -- a fixed transverse bound, not one that scales
+                // with the tip separation.
+                [if rescue_pierce_test then "rescue_pierce_test"]: true,
+                // nulls => C++ defaults (8 cm / 0.8 / 8 cm).
+                [if pierce_cut != null then "pierce_cut"]: pierce_cut,
+                [if conn_drift_frac != null then "conn_drift_frac"]: conn_drift_frac,
+                [if conn_min_dis != null then "conn_min_dis"]: conn_min_dis,
+                // rescue_dest_beam_for_new: a pair admitted ONLY by one of the
+                // three knobs above adopts the beam bundle, instead of the
+                // length-based a/b/c/d rule which can send it to the cosmic one
+                // when the beam-side donor is still a pre-collapse stub.  Legacy
+                // pairs keep a/b/c/d unchanged.
+                [if rescue_dest_beam_for_new then "rescue_dest_beam_for_new"]: true,
+                // far_contain_tol: how far a round-2 pair's FAR half may end up
+                // on the wrong side of the cathode once re-materialized under the
+                // destination T0.  The tip tests say nothing about the rest of
+                // the cluster, and a cosmic matched hundreds of us away lands
+                // tens of cm inside the other TPC.  null => C++ default 1 cm
+                // (a direct bound on the T0-hypothesis error: 1 cm = 6.4 us;
+                // good merges overshoot <= 0.55 cm, false ones by 33.5).
+                // Inert unless a round-2 knob is on.
+                [if far_contain_tol != null then "far_contain_tol"]: far_contain_tol,
+                // Round 3 (sbnd_xin/docs/73 sec 12): the beam-side donor must
+                // BE its bundle's matched main (Flags::main_cluster).  On SBND
+                // data evt 51128 a 3.8 cm associated fragment donated the beam
+                // T0 to a 283.9 cm cosmic and the merge displaced the bundle's
+                // real 57.7 cm main.  C++ default false.  Key omitted when
+                // off => byte-identical pre-round-3 config.
+                [if rescue_beam_main_only then "rescue_beam_main_only"]: true,
             },
             uses: [detector_volumes, pc_transforms],
         },
@@ -1239,7 +1853,7 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
         // an isochronous band (narrow drift slab, large y-z footprint) with a
         // non-band cluster unless the two genuinely touch — the extended-cloud
         // prolongations otherwise bridge tens of cm.
-        neutrino(name="", num_try=1, use_flash_t0=false, flash_t0_window=80*wc.ns, protect_iso_band=false, protect_iso_band_xext=null) :: {
+        neutrino(name="", num_try=1, use_flash_t0=false, flash_t0_window=80*wc.ns, protect_iso_band=false, protect_iso_band_xext=null, record_band_veto=false) :: {
             type: "ClusteringNeutrino",
             name: prefix+name,
             data: {
@@ -1253,6 +1867,13 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
                 // non-band partner spans more than this in drift x (doc pr/18,
                 // SBND evt 10550).
                 [if protect_iso_band_xext != null then 'protect_iso_band_xext']: protect_iso_band_xext,
+                // Record each iso-band refusal as a per-blob "nu_band_veto_role"
+                // provenance array so the SEPARATE all-APA clustering chain --
+                // which has no iso-band guard of its own -- declines to
+                // re-merge the pair (doc pr/66).  C++ default false; key
+                // omitted when off => byte-identical compiled config.  Only
+                // meaningful with protect_iso_band on.
+                [if record_band_veto then 'record_band_veto']: record_band_veto,
             } + dv_cfg + scope_cfg,
             uses: [detector_volumes],
         },
@@ -1356,8 +1977,15 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
         // companions sharing their matched_flash_gid.  Pass the same window the
         // taggers get: with tagger_check_{tgm,stm,fc} gated the same way, the
         // clusters that lose their graph are exactly the ones no tagger reads.
+        // terminal_wire_tol / terminal_adjacent_slice (doc pr/29 D1, D12) fix
+        // the Steiner TERMINAL filter only -- get_extreme_wcps shares the same
+        // C++ helper and keeps the exact, no-slack, no-fallback behaviour the
+        // prototype gives it.  Both default to the historical toolkit values
+        // and their keys are omitted when off => byte-identical pre-knob config.
         steiner(name="", retiler={}, grouping="live", graph="steiner", perf=true, require_beam_flash=true,
-                beam_window_only=false, beam_window_low=0, beam_window_high=0, replace=null) :: {
+                beam_window_only=false, beam_window_low=0, beam_window_high=0, replace=null,
+                terminal_wire_tol=0, terminal_adjacent_slice=false,
+                edge_charge_forward_dead_mix=false) :: {
             type: "CreateSteinerGraph",
             name: prefix+name,
             data: {
@@ -1373,6 +2001,24 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
                 // GraphAlgorithms made in the tagger stage).  Key omitted
                 // when null => byte-identical pre-knob config.
                 [if replace != null then 'replace']: replace,
+                // C++ default 0.  1 = the prototype's one wire of slack on
+                // both sides of all three planes in the terminal filter
+                // (PR3DCluster_steiner.h:285-290); get_extreme_wcps is
+                // unaffected.  Key omitted when 0 => byte-identical pre-knob
+                // config.
+                [if terminal_wire_tol != 0 then 'terminal_wire_tol']: terminal_wire_tol,
+                // C++ default false.  true = the adjacent-slice fallback steps
+                // by the face's ticks-per-slice, which is what makes it resolve
+                // at all (the time_blob_map key is in ticks).  Key omitted when
+                // false => byte-identical pre-knob config.
+                [if terminal_adjacent_slice then 'terminal_adjacent_slice']: true,
+                // C++ default false.  true = the edge-weight charges honour
+                // the disable_dead_mix_cell create_steiner_tree was called
+                // with (false in this chain), as the prototype does
+                // (PR3DCluster_steiner.h:514,:521); false keeps the dropped
+                // argument and its always-true downstream default.  Key
+                // omitted when false => byte-identical pre-knob config.
+                [if edge_charge_forward_dead_mix then 'edge_charge_forward_dead_mix']: true,
             } + dv_cfg + pcts_cfg
               + (if beam_window_only then {
                      beam_window_only: true,

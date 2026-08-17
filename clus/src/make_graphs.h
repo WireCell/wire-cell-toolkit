@@ -49,7 +49,79 @@ namespace WireCell::Clus::Graphs {
 
     Weighted::Graph make_graph_relaxed_pid(
         const Facade::Cluster& cluster,
-        IDetectorVolumes::pointer dv, 
+        IDetectorVolumes::pointer dv,
+        IPCTransformSet::pointer pcts);
+
+    // closely + relaxed_strict (doc pr/53 sec 16: protect_bundle-only
+    // stricter overclustering protection)
+    Weighted::Graph make_graph_relaxed_strict(
+        const Facade::Cluster& cluster,
+        IDetectorVolumes::pointer dv,
+        IPCTransformSet::pointer pcts);
+
+    // closely + relaxed_strict with image_check=true (doc pr/53 round 7 sec
+    // 18: protect_bundle-only, adds the S5 3D-image-support OR-kill)
+    Weighted::Graph make_graph_relaxed_strict_img(
+        const Facade::Cluster& cluster,
+        IDetectorVolumes::pointer dv,
+        IPCTransformSet::pointer pcts);
+
+    // closely + relaxed_strict with image_check=true AND two_d_check=true
+    // (doc pr/56 round 2: protect_bundle-only, adds S6 the per-plane 2D
+    // wind/tick fired-pixel connectivity OR-kill on top of S1-S5)
+    Weighted::Graph make_graph_relaxed_strict_img_2d(
+        const Facade::Cluster& cluster,
+        IDetectorVolumes::pointer dv,
+        IPCTransformSet::pointer pcts);
+
+    // closely + relaxed_strict with image_check=true, two_d_check=true AND
+    // floor_w_override=true (doc pr/58: protect_bundle-only, owner-requested
+    // -- an unexcused W-plane-only S6 gap kills even below s6_dis_floor,
+    // since W is far more robust against the induction-plane false
+    // positives the floor otherwise guards against)
+    Weighted::Graph make_graph_relaxed_strict_img_2d_wfloor(
+        const Facade::Cluster& cluster,
+        IDetectorVolumes::pointer dv,
+        IPCTransformSet::pointer pcts);
+
+    // closely + relaxed_strict with image_check, two_d_check,
+    // floor_w_override AND two_d_rescue all true (doc pr/57 round 6:
+    // protect_bundle-only -- S6-killed candidates that
+    // Graphs::two_d_rescue_ok() explains as detector artifacts are
+    // un-killed; fitted against the owner's full separation hand scan)
+    Weighted::Graph make_graph_relaxed_strict_img_2d_rescue(
+        const Facade::Cluster& cluster,
+        IDetectorVolumes::pointer dv,
+        IPCTransformSet::pointer pcts);
+
+    // closely + relaxed_strict with image_check, two_d_check,
+    // floor_w_override, two_d_rescue AND long_check all true, long_min_planes=1
+    // (doc pr/62: protect_bundle-only -- adds S7, corridor connectivity on
+    // candidates at or above the 30cm band S6 skips; owner's S6-style ">= 1
+    // non-excused plane" rule)
+    Weighted::Graph make_graph_relaxed_strict_img_2d_rescue_long(
+        const Facade::Cluster& cluster,
+        IDetectorVolumes::pointer dv,
+        IPCTransformSet::pointer pcts);
+
+    // same as make_graph_relaxed_strict_img_2d_rescue_long but
+    // long_min_planes=2 (doc pr/62: the conservative fallback operating
+    // point -- S1-S5's "at least 2 views" convention -- shipped alongside
+    // the owner-rule variant since this distance band has no hand-scan
+    // labels to fit against yet)
+    Weighted::Graph make_graph_relaxed_strict_img_2d_rescue_long2(
+        const Facade::Cluster& cluster,
+        IDetectorVolumes::pointer dv,
+        IPCTransformSet::pointer pcts);
+
+    // same as make_graph_relaxed_strict_img_2d_rescue_long plus
+    // w_track_excuse=true (doc pr/64 round 4: the W-plane long-track
+    // exception -- revives S6 kills where W is the sole voting plane on a
+    // long, thin, globally-collinear track pair, or a dead-W band explains
+    // the gap; Graphs::two_d_w_track_ok is the pure verdict)
+    Weighted::Graph make_graph_relaxed_strict_img_2d_rescue_long_wtrack(
+        const Facade::Cluster& cluster,
+        IDetectorVolumes::pointer dv,
         IPCTransformSet::pointer pcts);
 
 }

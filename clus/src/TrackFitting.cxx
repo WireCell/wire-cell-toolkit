@@ -4,6 +4,8 @@
 
 #include "WireCellUtil/Logging.h"
 #include <chrono>
+#include <sstream>
+#include <iomanip>
 
 
 using namespace WireCell;
@@ -55,7 +57,9 @@ TrackFitting::TrackFitting(FittingType fitting_type)
 
 void TrackFitting::set_parameter(const std::string& name, double value) {
     // Map parameter names to struct members
-    if (name == "DL") {
+    if (name == "traj_cover_probe") {          // doc pr/67, log-only
+        m_params.traj_cover_probe = value;
+    } else if (name == "DL") {
         m_params.DL = value;
     } else if (name == "DT") {
         m_params.DT = value;
@@ -111,6 +115,14 @@ void TrackFitting::set_parameter(const std::string& name, double value) {
         m_params.skip_angle_cut_3 = value;
     } else if (name == "skip_dis_cut") {
         m_params.skip_dis_cut = value;
+    } else if (name == "skip_revert_iso_xext_cut") {
+        m_params.skip_revert_iso_xext_cut = value;
+    } else if (name == "fit_blob_coverage") {
+        m_params.fit_blob_coverage = value;
+    } else if (name == "fit_blob_coverage_ghost_dis") {
+        m_params.fit_blob_coverage_ghost_dis = value;
+    } else if (name == "fit_blob_coverage_weight") {
+        m_params.fit_blob_coverage_weight = value;
     } else if (name == "default_dQ_dx") {
         m_params.default_dQ_dx = value;
     } else if (name == "end_point_factor") {
@@ -206,6 +218,14 @@ double TrackFitting::get_parameter(const std::string& name) const {
         return m_params.skip_angle_cut_3;
     } else if (name == "skip_dis_cut") {
         return m_params.skip_dis_cut;
+    } else if (name == "skip_revert_iso_xext_cut") {
+        return m_params.skip_revert_iso_xext_cut;
+    } else if (name == "fit_blob_coverage") {
+        return m_params.fit_blob_coverage;
+    } else if (name == "fit_blob_coverage_ghost_dis") {
+        return m_params.fit_blob_coverage_ghost_dis;
+    } else if (name == "fit_blob_coverage_weight") {
+        return m_params.fit_blob_coverage_weight;
     } else if (name == "default_dQ_dx") {
         return m_params.default_dQ_dx;
     } else if (name == "end_point_factor") {
@@ -275,17 +295,22 @@ void TrackFitting::clear_segments(){
 void TrackFitting::sync_from_graph(){
     if (!m_graph) return;
 
-    std::set<std::shared_ptr<PR::Segment>> segments_set;
-    for (auto e_it = boost::edges(*m_graph).first; e_it != boost::edges(*m_graph).second; ++e_it) {
-        auto& edge_bundle = (*m_graph)[*e_it];
+    // ordered_edges, not boost::edges: segments_first below is the first
+    // segment in a *stable* order, where (*segments_set.begin()) used to be
+    // the lowest shared_ptr address, i.e. pointer order.
+    std::shared_ptr<PR::Segment> segments_first;
+    size_t nsegments = 0;
+    for (const auto& ed : PR::ordered_edges(*m_graph)) {
+        auto& edge_bundle = (*m_graph)[ed];
         if (edge_bundle.segment) {
-            segments_set.insert(edge_bundle.segment);
+            if (!segments_first) segments_first = edge_bundle.segment;
+            ++nsegments;
             m_clusters.insert(edge_bundle.segment->cluster());
         }
     }
 
-    if (m_grouping == nullptr && !segments_set.empty()) {
-        m_grouping = (*segments_set.begin())->cluster()->grouping();
+    if (m_grouping == nullptr && segments_first) {
+        m_grouping = segments_first->cluster()->grouping();
         BuildGeometry();
     }
 
@@ -295,7 +320,7 @@ void TrackFitting::sync_from_graph(){
         }
     }
 
-    SPDLOG_LOGGER_TRACE(s_log, "sync_from_graph: segments={} clusters={} blobs={}", segments_set.size(), m_clusters.size(), m_blobs.size());
+    SPDLOG_LOGGER_TRACE(s_log, "sync_from_graph: segments={} clusters={} blobs={}", nsegments, m_clusters.size(), m_blobs.size());
 }
 
 void TrackFitting::inherit_from(const TrackFitting& src, Facade::Cluster* cluster)
@@ -1097,7 +1122,7 @@ void TrackFitting::fill_fitted_charge_2d(
             }
 
             // Get cluster associations from global_rb_map
-            std::set<Facade::Cluster*> clusters;
+            std::set<Facade::Cluster*, PR::ClusterPtrCmp> clusters;
             auto rb_it = global_rb_map.find(coord_key);
             if (rb_it != global_rb_map.end()) {
                 for (auto* blob : rb_it->second) {
@@ -1129,6 +1154,19 @@ void TrackFitting::fill_fitted_charge_2d(
     // Persist this cluster's cells so they survive when the next
     // do_multi_tracking(..., &other_cluster) clears m_fitted_charge_2d.
     if (m_cluster_filter) {
+        // The key is ordered by ident (PR::ClusterPtrCmp), so two live clusters
+        // sharing an ident would silently collapse -- the second would discard
+        // the first's whole snapshot rather than merely reorder it.  Idents are
+        // dense and unique within a grouping at the instant enumerate_idents()
+        // runs, and it runs only between visitors, so this cannot fire; say so
+        // out loud rather than assume it.
+        auto held = m_cluster_fitted_charge_2d.find(m_cluster_filter);
+        if (held != m_cluster_fitted_charge_2d.end() && held->first != m_cluster_filter) {
+            SPDLOG_LOGGER_WARN(s_log,
+                "fill_fitted_charge_2d: cluster ident {} is shared by two live clusters; "
+                "the earlier snapshot ({} plane group(s)) is being discarded",
+                m_cluster_filter->get_cluster_id(), held->second.size());
+        }
         m_cluster_fitted_charge_2d[m_cluster_filter] = m_fitted_charge_2d;
     }
 }
@@ -1220,13 +1258,19 @@ void TrackFitting::check_and_reset_close_vertices() {
                 end_fit.point = end_v->wcpt().point;
                 end_v->fit(end_fit);
             }
-            // Also rebuild the segment's fits so the first and last fit points are
-            // consistent with the (now corrected) vertex fit positions.
-            if (segment->cluster()) {
-                segment->fits(generate_fits_with_projections(
-                    segment,
-                    {start_v->fit().point, end_v->fit().point}));
-            }
+            // doc pr/28 T6: do NOT rebuild the segment's fits here.  The prototype
+            // (multi_track_fitting.h:1383-1392, and again at :1158) resets only the
+            // two vertex fit points and leaves the fitted trajectory alone.
+            // Replacing fits() with the two endpoints discarded every interior
+            // point, and since organize_segments_path_{2nd,3rd} rebuild curr_pts
+            // from segment->fits() (:1358-1361), the segment came back as a
+            // straight line between its vertices.  Both organisers already take
+            // their endpoints from the vertex fits (:1384-1401), so the
+            // consistency this was reaching for is provided downstream anyway.
+            SPDLOG_LOGGER_TRACE(s_log,
+                                "check_and_reset_close_vertices: vertices {} cm apart on a "
+                                "segment with {} fit point(s); vertex points reset, trajectory kept",
+                                vertex_distance / units::cm, segment->fits().size());
         }
     }
 }
@@ -1885,7 +1929,25 @@ std::vector<WireCell::Point> TrackFitting::organize_orig_path(std::shared_ptr<PR
 }
 
 std::vector<WireCell::Point> TrackFitting::examine_end_ps_vec(std::shared_ptr<PR::Segment> segment,const std::vector<WireCell::Point>& pts, bool flag_start, bool flag_end) {
+    // doc pr/82 sec 12.7 companion guard.  `ps_list.front()` / `.back()` below
+    // (:1949, :1998) are unguarded, so an empty `pts` is undefined behaviour
+    // here too -- it happens to survive in practice (the observed crash landed
+    // in the caller instead), which is exactly why it is worth closing rather
+    // than relying on.  An empty input already yields an empty result, so this
+    // only makes the existing outcome well-defined.
+    if (pts.empty()) return {};
+
     std::list<WireCell::Point> ps_list(pts.begin(), pts.end());
+
+    // doc pr/67 P3: record what this function AMPUTATES.  This is the primary
+    // END trimmer -- it pops points off the front/back while is_good_point is
+    // false -- and it does so silently today, so a tip that was fitted and
+    // then removed is indistinguishable from one never reached (the owner's
+    // second hypothesis for this round).  Log-only; byte-identical when off.
+    const bool pr67_probe = m_params.traj_cover_probe > 0;
+    const size_t pr67_n_in = pts.size();
+    const WireCell::Point pr67_front_in = pts.empty() ? WireCell::Point() : pts.front();
+    const WireCell::Point pr67_back_in  = pts.empty() ? WireCell::Point() : pts.back();
 
     // get the cluster from the segment
     auto cluster = segment->cluster();
@@ -1983,14 +2045,56 @@ std::vector<WireCell::Point> TrackFitting::examine_end_ps_vec(std::shared_ptr<PR
     }
 
     std::vector<WireCell::Point> tmp_pts(ps_list.begin(), ps_list.end());
+
+    // doc pr/67 P3: report only when the ends actually moved, so the line is
+    // a signal rather than per-call noise.
+    if (pr67_probe && !tmp_pts.empty() && pr67_n_in > 0) {
+        const double moved_front = ray_length(Ray{pr67_front_in, tmp_pts.front()});
+        const double moved_back  = ray_length(Ray{pr67_back_in,  tmp_pts.back()});
+        if (moved_front > 0.5*units::cm || moved_back > 0.5*units::cm) {
+            SPDLOG_LOGGER_DEBUG(s_log,
+                "pr67 examine_end_ps_vec: segment={} npts {} -> {}; front moved {:.2f} cm "
+                "({:.2f},{:.2f},{:.2f})->({:.2f},{:.2f},{:.2f}); back moved {:.2f} cm "
+                "({:.2f},{:.2f},{:.2f})->({:.2f},{:.2f},{:.2f})",
+                segment ? segment->id() : -1, pr67_n_in, tmp_pts.size(),
+                moved_front/units::cm,
+                pr67_front_in.x()/units::cm, pr67_front_in.y()/units::cm, pr67_front_in.z()/units::cm,
+                tmp_pts.front().x()/units::cm, tmp_pts.front().y()/units::cm, tmp_pts.front().z()/units::cm,
+                moved_back/units::cm,
+                pr67_back_in.x()/units::cm, pr67_back_in.y()/units::cm, pr67_back_in.z()/units::cm,
+                tmp_pts.back().x()/units::cm, tmp_pts.back().y()/units::cm, tmp_pts.back().z()/units::cm);
+        }
+    }
     return tmp_pts;
 }
 
 
 void TrackFitting::organize_ps_path(std::shared_ptr<PR::Segment> segment, std::vector<WireCell::Point>& pts, double low_dis_limit, double end_point_limit) {
+    // doc pr/82 sec 12.7: there is nothing to organize in an empty path, and
+    // every ps_vec.front()/back() below is undefined behaviour if we proceed.
+    //
+    // The trap is two-step and neither step is wrong on its own.
+    // examine_end_ps_vec DELIBERATELY returns an empty list when the whole path
+    // was drained as face-invalid (:1985-1993: "returning an empty list lets the
+    // caller (organize_ps_path) fall back to the original pts"), and the
+    // `size() <= 1` fallback below implements exactly that -- but it silently
+    // assumes `pts` is itself non-empty.  The second call site (:8870) rebuilds
+    // `pts` from `ptss` immediately beforehand, and `ptss` can come back empty,
+    // so both are empty and `ps_vec.front()` reads unmapped memory.
+    //
+    // Observed as a hard, deterministic SIGSEGV on SBND data evt 54629
+    // (work-mcp2k-cb0816), 1 event in 2000: organize_ps_path -> D3Vector copy
+    // ctor -> D3Vector::x().  Leaving `pts` untouched and returning is what the
+    // existing fallback already intends for a path with nothing in it.
+    //
+    // Byte-identical on every defined path: the early-out fires only where the
+    // current code has no defined behaviour at all.
+    if (pts.empty()) return;
+
     std::vector<WireCell::Point> ps_vec = examine_end_ps_vec(segment, pts, true, true);
     if (ps_vec.size() <= 1) ps_vec = pts;
- 
+    if (ps_vec.empty()) return;
+
     pts.clear();
     // fill in the beginning part
     {
@@ -2084,6 +2188,10 @@ void TrackFitting::organize_ps_path(std::shared_ptr<PR::Segment> segment, std::v
     temp_2dut.associated_2d_points.clear();
     temp_2dvt.associated_2d_points.clear();
     temp_2dwt.associated_2d_points.clear();
+    // doc pr/49: fresh foreign-ghost classification per point.
+    temp_2dut.deweighted_2d_points.clear();
+    temp_2dvt.deweighted_2d_points.clear();
+    temp_2dwt.deweighted_2d_points.clear();
     
     // Get cluster from segment
     auto cluster = segment->cluster();
@@ -2678,6 +2786,109 @@ void TrackFitting::update_association(std::shared_ptr<PR::Segment> segment,
 }
 
 
+// doc pr/49: own-blob-coverage predicate for the fit_blob_coverage knob.
+// A blob covers (wire, time) in `plane` iff time (tick) is in
+// [slice_index_min - tol_ticks, slice_index_max + tol_ticks) and wire is in
+// the blob's half-open per-plane interval widened by tol_cells.  The
+// time_blob_map() key is blob->slice_index_min() (unit: tick), so the key
+// window below assumes uniform slice width == nticks_per_slice (true per
+// detector; the per-blob interval check re-verifies inclusion, so a wider
+// blob could only be missed, never wrongly matched).
+bool TrackFitting::is_cell_covered_by_own_blobs(const Facade::Cluster* cluster, int apa, int face,
+                                                int plane, int wire, int time,
+                                                int tol_cells, int nticks_per_slice) const
+{
+    const auto& tbm = cluster->time_blob_map();
+    auto ait = tbm.find(apa);
+    if (ait == tbm.end()) return false;
+    auto fit = ait->second.find(face);
+    if (fit == ait->second.end()) return false;
+    const auto& smap = fit->second;
+
+    const int tol_ticks = tol_cells * nticks_per_slice;
+    // covering keys satisfy time - tol_ticks - width < key <= time + tol_ticks
+    auto it = smap.lower_bound(time - tol_ticks - nticks_per_slice + 1);
+    const auto end = smap.upper_bound(time + tol_ticks);
+    for (; it != end; ++it) {
+        for (const auto* blob : it->second) {
+            if (time < blob->slice_index_min() - tol_ticks) continue;
+            if (time >= blob->slice_index_max() + tol_ticks) continue;
+            int wmin = 0, wmax = 0;
+            switch (plane) {
+                case 0: wmin = blob->u_wire_index_min(); wmax = blob->u_wire_index_max(); break;
+                case 1: wmin = blob->v_wire_index_min(); wmax = blob->v_wire_index_max(); break;
+                default: wmin = blob->w_wire_index_min(); wmax = blob->w_wire_index_max(); break;
+            }
+            if (wire >= wmin - tol_cells && wire < wmax + tol_cells) return true;
+        }
+    }
+    return false;
+}
+
+// doc pr/49 (round 3, scope-aware): foreign-coverage half of the
+// fit_blob_coverage test -- does any OUT-OF-SCOPE cluster claim this cell?
+// Out-of-scope = not the fitted cluster and not in m_cov_fit_scope (clusters
+// owning a segment in the current fit; rebuild_cov_fit_scope below).
+// Clusters fitted together in the same PR graph are aware of each other --
+// their shared projections are legitimate charge, never a ghost (57441's
+// claimant, cluster 13, owns ZERO segments and stays foreign).  ghost_dis > 0
+// adds an optional 3D distance gate (`other->get_closest_dis(p) > ghost_dis`);
+// the round-3 default is 0 = scope-only.  Existential OR over the grouping's
+// clusters (stable child order, and order cannot affect an OR), each via the
+// same interval-search predicate above; the kd query runs only for a cluster
+// that actually covers the cell, so the common case never pays it.
+bool TrackFitting::is_cell_covered_by_foreign_blobs(const Facade::Grouping* grouping,
+                                                    const Facade::Cluster* cluster,
+                                                    const WireCell::Point& p, double ghost_dis,
+                                                    int apa, int face,
+                                                    int plane, int wire, int time,
+                                                    int tol_cells, int nticks_per_slice,
+                                                    const Facade::Cluster** claimant) const
+{
+    if (!grouping) return false;
+    for (const auto* other : grouping->children()) {
+        if (other == cluster) continue;
+        if (m_cov_fit_scope.count(other)) continue;
+        if (!is_cell_covered_by_own_blobs(other, apa, face, plane, wire, time,
+                                          tol_cells, nticks_per_slice)) continue;
+        if (ghost_dis <= 0 || other->get_closest_dis(p) > ghost_dis) {
+            if (claimant) *claimant = other;
+            return true;
+        }
+    }
+    return false;
+}
+
+// doc pr/49 round 3: collect the fitting scope -- every cluster owning a
+// segment in the current fit.  Fresh walk of m_graph's edges (same idiom as
+// sync_from_graph; NOT the m_cluster_edges cache, which the single-tracking
+// path never rebuilds and which would be stale there), plus the explicit
+// segment's cluster on the form_map path.  Deliberately NOT filtered by
+// m_cluster_filter: when the fit is filtered to one cluster's segments, the
+// other graph clusters are still fitted together in the same pattern and
+// their shared projections stay legitimate.
+void TrackFitting::rebuild_cov_fit_scope(const std::shared_ptr<PR::Segment>& seg)
+{
+    m_cov_fit_scope.clear();
+    m_cov_vtx_info.clear();
+    if (m_graph) {
+        for (const auto& ed : PR::ordered_edges(*m_graph)) {
+            auto& edge_bundle = (*m_graph)[ed];
+            if (edge_bundle.segment && edge_bundle.segment->cluster()) {
+                m_cov_fit_scope.insert(edge_bundle.segment->cluster());
+            }
+        }
+        // doc pr/50: vertex positions + degrees for sentinel diagnostics.
+        for (const auto& nd : PR::ordered_nodes(*m_graph)) {
+            const auto& vtx = (*m_graph)[nd].vertex;
+            if (!vtx) continue;
+            const WireCell::Point vp = vtx->fit().valid() ? vtx->fit().point : vtx->wcpt().point;
+            m_cov_vtx_info.emplace_back(vp, static_cast<int>(boost::out_degree(nd, *m_graph)));
+        }
+    }
+    if (seg && seg->cluster()) m_cov_fit_scope.insert(seg->cluster());
+}
+
  void TrackFitting::examine_point_association(std::shared_ptr<PR::Segment> segment, WireCell::Point &p, PlaneData& temp_2dut, PlaneData& temp_2dvt, PlaneData& temp_2dwt, bool flag_end_point, double charge_cut){
 
     // Get cluster from segment
@@ -2712,11 +2923,48 @@ void TrackFitting::update_association(std::shared_ptr<PR::Segment> segment,
     std::vector<float> results;
     results.resize(3,0);
     
+    // doc pr/49 (fit_blob_coverage knob, C++ default -1 = off): when on,
+    // classify live candidate cells that are OUTSIDE the fitted cluster's
+    // own blob coverage AND INSIDE an OUT-OF-SCOPE cluster's (round 3: one
+    // with no segment in the current fit, per m_cov_fit_scope) as
+    // foreign-ghost cells -- the 18255-57441 V-plane projection ghost enters
+    // here as real charge from a cluster 163 cm away, with zero segments in
+    // the pattern, whose own tiled footprint claims those cells.  Such cells
+    // STAY in the association but fit_point down-weights them by
+    // fit_blob_coverage_weight (owner: a dead-channel region can leave good
+    // single-view charge with no 3D image, which the fit must still use --
+    // deweight, don't drop).  Cells covered by nobody, or claimed by a
+    // cluster fitted together with this one (in m_cov_fit_scope), keep full
+    // weight, so events with no out-of-scope overlap are untouched.  Live
+    // (flag 1) cells only: dead-derived cells (flag 0) and the rescue
+    // anchors injected below are exempt.  End/vertex points are exempt via
+    // flag_end_point (which also covers form_map_graph's dummy-segment
+    // vertex calls, where segment->cluster() may not be the vertex's own
+    // cluster).
+    const bool cov_on = (m_params.fit_blob_coverage >= 0) && !flag_end_point;
+    const int cov_tol = cov_on ? static_cast<int>(m_params.fit_blob_coverage) : 0;
+    const double cov_gdis = m_params.fit_blob_coverage_ghost_dis;
+    std::set<Coord2D> dw_2dut, dw_2dvt, dw_2dwt;
+    // doc pr/50 sentinel diagnostics: claimant clusters (keyed by stable
+    // cluster id) and how many deweighted cells the OWN cluster would cover
+    // at tolerance cov_tol+2 (near-vertex tiling-edge indicator).
+    std::map<int, const Facade::Cluster*> cov_claimants;
+    int cov_own_tol2 = 0;
+
     // Process U plane
     for (auto it = temp_2dut.associated_2d_points.begin(); it != temp_2dut.associated_2d_points.end(); it++){
         CoordReadout coord_key(it->apa, it->time, it->channel);
         auto charge_it = m_charge_data.find(coord_key);
         if (charge_it != m_charge_data.end() && charge_it->second.charge > charge_cut) {
+            if (cov_on && charge_it->second.flag == 1 &&
+                !is_cell_covered_by_own_blobs(cluster, it->apa, it->face, 0, it->wire, it->time, cov_tol, cur_ntime_ticks)) {
+                const Facade::Cluster* clmt = nullptr;
+                if (is_cell_covered_by_foreign_blobs(m_grouping, cluster, p, cov_gdis, it->apa, it->face, 0, it->wire, it->time, cov_tol, cur_ntime_ticks, &clmt)) {
+                    dw_2dut.insert(*it);
+                    if (clmt) cov_claimants.emplace(clmt->get_cluster_id(), clmt);
+                    if (is_cell_covered_by_own_blobs(cluster, it->apa, it->face, 0, it->wire, it->time, cov_tol + 2, cur_ntime_ticks)) ++cov_own_tol2;
+                }
+            }
             temp_types_u.insert(charge_it->second.flag);
             if (charge_it->second.flag == 0) results.at(0)++;
             saved_2dut.insert(*it);
@@ -2731,6 +2979,15 @@ void TrackFitting::update_association(std::shared_ptr<PR::Segment> segment,
         if (charge_it != m_charge_data.end() && charge_it->second.charge > charge_cut) {
         // std::cout << "V: " << it->time/4 << " " << it->channel << " " << charge_it->second.charge << " " << charge_cut << std::endl;
 
+            if (cov_on && charge_it->second.flag == 1 &&
+                !is_cell_covered_by_own_blobs(cluster, it->apa, it->face, 1, it->wire, it->time, cov_tol, cur_ntime_ticks)) {
+                const Facade::Cluster* clmt = nullptr;
+                if (is_cell_covered_by_foreign_blobs(m_grouping, cluster, p, cov_gdis, it->apa, it->face, 1, it->wire, it->time, cov_tol, cur_ntime_ticks, &clmt)) {
+                    dw_2dvt.insert(*it);
+                    if (clmt) cov_claimants.emplace(clmt->get_cluster_id(), clmt);
+                    if (is_cell_covered_by_own_blobs(cluster, it->apa, it->face, 1, it->wire, it->time, cov_tol + 2, cur_ntime_ticks)) ++cov_own_tol2;
+                }
+            }
             temp_types_v.insert(charge_it->second.flag);
             if (charge_it->second.flag == 0) results.at(1)++;
             saved_2dvt.insert(*it);
@@ -2742,10 +2999,41 @@ void TrackFitting::update_association(std::shared_ptr<PR::Segment> segment,
         CoordReadout coord_key(it->apa, it->time, it->channel);
         auto charge_it = m_charge_data.find(coord_key);
         if (charge_it != m_charge_data.end() && charge_it->second.charge > charge_cut) {
+            if (cov_on && charge_it->second.flag == 1 &&
+                !is_cell_covered_by_own_blobs(cluster, it->apa, it->face, 2, it->wire, it->time, cov_tol, cur_ntime_ticks)) {
+                const Facade::Cluster* clmt = nullptr;
+                if (is_cell_covered_by_foreign_blobs(m_grouping, cluster, p, cov_gdis, it->apa, it->face, 2, it->wire, it->time, cov_tol, cur_ntime_ticks, &clmt)) {
+                    dw_2dwt.insert(*it);
+                    if (clmt) cov_claimants.emplace(clmt->get_cluster_id(), clmt);
+                    if (is_cell_covered_by_own_blobs(cluster, it->apa, it->face, 2, it->wire, it->time, cov_tol + 2, cur_ntime_ticks)) ++cov_own_tol2;
+                }
+            }
             temp_types_w.insert(charge_it->second.flag);
             if (charge_it->second.flag == 0) results.at(2)++;
             saved_2dwt.insert(*it);
         }
+    }
+
+    if (cov_on && (dw_2dut.size() + dw_2dvt.size() + dw_2dwt.size() > 0)) {
+        // doc pr/50: diagnostic tail -- distance to (and degree of) the
+        // nearest pattern vertex at fire time, per-claimant 3D distances,
+        // and the tol+2 own-coverage count.  Prefix kept byte-stable for
+        // the pr/49 census scripts, which anchor on the leading text.
+        double cov_vdis = -1;
+        int cov_vdeg = -1;
+        for (const auto& [vp, deg] : m_cov_vtx_info) {
+            const double d = (p - vp).magnitude();
+            if (cov_vdis < 0 || d < cov_vdis) { cov_vdis = d; cov_vdeg = deg; }
+        }
+        std::ostringstream cov_cl;
+        for (const auto& [cid, clp] : cov_claimants) {
+            cov_cl << cid << ":" << std::fixed << std::setprecision(1)
+                   << clp->get_closest_dis(p)/units::cm << ":" << clp->npoints() << ",";
+        }
+        SPDLOG_LOGGER_DEBUG(s_log, "fit_blob_coverage: deweighted foreign live cells u={} v={} w={} (tol={} w={}) at ({:.2f},{:.2f},{:.2f}) vtx_dis={:.2f} vtx_deg={} own_tol2={} claimants=[{}]",
+                            dw_2dut.size(), dw_2dvt.size(), dw_2dwt.size(), cov_tol, m_params.fit_blob_coverage_weight,
+                            p.x()/units::cm, p.y()/units::cm, p.z()/units::cm,
+                            cov_vdis/units::cm, cov_vdeg, cov_own_tol2, cov_cl.str());
     }
 
     // Calculate quality ratios
@@ -3058,7 +3346,15 @@ void TrackFitting::update_association(std::shared_ptr<PR::Segment> segment,
     temp_2dut.associated_2d_points = saved_2dut;
     temp_2dvt.associated_2d_points = saved_2dvt;
     temp_2dwt.associated_2d_points = saved_2dwt;
-    
+
+    // doc pr/49: hand the foreign-ghost classification to fit_point (empty
+    // sets on the legacy path).  Cells the rescue logic above cleared out of
+    // the saved sets may linger here; fit_point only consults membership for
+    // cells it iterates, so stale entries are inert.
+    temp_2dut.deweighted_2d_points = dw_2dut;
+    temp_2dvt.deweighted_2d_points = dw_2dvt;
+    temp_2dwt.deweighted_2d_points = dw_2dwt;
+
     // Update quantity fields with calculated results
     temp_2dut.quantity = results.at(0);
     temp_2dvt.quantity = results.at(1);
@@ -3070,6 +3366,11 @@ void TrackFitting::form_map_graph(bool flag_exclusion, double end_point_factor, 
     // Rebuild edge cache (graph structure may have changed since last call)
     build_cluster_edges();
 
+    // doc pr/49 round 3: refresh the fitting scope for the foreign-coverage
+    // test (knob-on only; the legacy path takes no branch).  The graph
+    // supplies every fitted cluster here, so no explicit segment is needed.
+    if (m_params.fit_blob_coverage >= 0) rebuild_cov_fit_scope(nullptr);
+
     // Clear existing mappings
     m_3d_to_2d.clear();
     m_2d_to_3d.clear();
@@ -3078,8 +3379,8 @@ void TrackFitting::form_map_graph(bool flag_exclusion, double end_point_factor, 
     for (auto vd : m_ordered_nodes_vec) {
         if (m_cluster_filter) {
             bool has_cluster_seg = false;
-            for (auto oe = boost::out_edges(vd, *m_graph); oe.first != oe.second; ++oe.first) {
-                auto& eb = (*m_graph)[*oe.first];
+            for (auto oe_e : sorted_out_edges(vd, *m_graph)) {
+                auto& eb = (*m_graph)[oe_e];
                 if (eb.segment && eb.segment->cluster() == m_cluster_filter) { has_cluster_seg = true; break; }
             }
             if (!has_cluster_seg) continue;
@@ -3261,8 +3562,8 @@ void TrackFitting::form_map_graph(bool flag_exclusion, double end_point_factor, 
         // and wrong charge associations, producing ghost fit points.
         if (m_cluster_filter) {
             bool has_cluster_seg = false;
-            for (auto oe = boost::out_edges(vd, *m_graph); oe.first != oe.second; ++oe.first) {
-                auto& eb = (*m_graph)[*oe.first];
+            for (auto oe_e : sorted_out_edges(vd, *m_graph)) {
+                auto& eb = (*m_graph)[oe_e];
                 if (eb.segment && eb.segment->cluster() == m_cluster_filter) { has_cluster_seg = true; break; }
             }
             if (!has_cluster_seg) continue;
@@ -3318,6 +3619,17 @@ void TrackFitting::form_map(std::vector<std::pair<WireCell::Point, std::shared_p
 
     m_3d_to_2d.clear();
     m_2d_to_3d.clear();
+
+    // doc pr/49 round 3: refresh the fitting scope for the foreign-coverage
+    // test (knob-on only; the legacy path takes no branch).  This is the
+    // single-tracking path: every ptss entry pairs a point with the SAME
+    // segment, so its cluster plus any graph-fitted clusters form the scope
+    // (in the neutrino lifecycle m_graph is the shared per-event pattern
+    // graph and m_cluster_edges is stale here -- rebuild_cov_fit_scope walks
+    // the graph fresh).
+    if (m_params.fit_blob_coverage >= 0) {
+        rebuild_cov_fit_scope(ptss.empty() ? nullptr : ptss.front().second);
+    }
 
     std::vector<std::pair<WireCell::Point, std::shared_ptr<PR::Segment>>> saved_pts;
     int count = 0;
@@ -3499,9 +3811,14 @@ WireCell::Point TrackFitting::fit_point(WireCell::Point& init_p, int i, std::sha
             } else {
                 scaling *= m_params.scaling_ratio;
             }
-        } 
-       
-        
+        }
+
+        // doc pr/49: foreign-ghost cells keep their measurement at reduced weight.
+        if (!plane_data_u.deweighted_2d_points.empty() && plane_data_u.deweighted_2d_points.count(*it)) {
+            scaling *= m_params.fit_blob_coverage_weight;
+        }
+
+
         if (scaling != 0) {
             data_u_2D(2 * index) = scaling * (it->wire - offset_u);
             data_u_2D(2 * index + 1) = scaling * (it->time - offset_t);
@@ -3552,8 +3869,13 @@ WireCell::Point TrackFitting::fit_point(WireCell::Point& init_p, int i, std::sha
             } else {
                 scaling *= m_params.scaling_ratio;
             }
-        } 
-        
+        }
+
+        // doc pr/49: foreign-ghost cells keep their measurement at reduced weight.
+        if (!plane_data_v.deweighted_2d_points.empty() && plane_data_v.deweighted_2d_points.count(*it)) {
+            scaling *= m_params.fit_blob_coverage_weight;
+        }
+
         if (scaling != 0) {
             data_v_2D(2 * index) = scaling * (it->wire - offset_v);
             data_v_2D(2 * index + 1) = scaling * (it->time - offset_t);
@@ -3603,8 +3925,13 @@ WireCell::Point TrackFitting::fit_point(WireCell::Point& init_p, int i, std::sha
             } else {
                 scaling *= m_params.scaling_ratio;
             }
-        } 
-        
+        }
+
+        // doc pr/49: foreign-ghost cells keep their measurement at reduced weight.
+        if (!plane_data_w.deweighted_2d_points.empty() && plane_data_w.deweighted_2d_points.count(*it)) {
+            scaling *= m_params.fit_blob_coverage_weight;
+        }
+
         if (scaling != 0) {
             data_w_2D(2 * index) = scaling * (it->wire - offset_w);
             data_w_2D(2 * index + 1) = scaling * (it->time - offset_t);
@@ -3827,8 +4154,8 @@ void TrackFitting::multi_trajectory_fit(int charge_div_method, double div_sigma)
         // those clusters' vertex fit positions with data from the current cluster's charge map.
         if (m_cluster_filter) {
             bool has_cluster_seg = false;
-            for (auto oe = boost::out_edges(vd, *m_graph); oe.first != oe.second; ++oe.first) {
-                auto& eb = (*m_graph)[*oe.first];
+            for (auto oe_e : sorted_out_edges(vd, *m_graph)) {
+                auto& eb = (*m_graph)[oe_e];
                 if (eb.segment && eb.segment->cluster() == m_cluster_filter) { has_cluster_seg = true; break; }
             }
             if (!has_cluster_seg) continue;
@@ -3986,7 +4313,7 @@ void TrackFitting::multi_trajectory_fit(int charge_div_method, double div_sigma)
         }
         
         // Apply trajectory examination/smoothing
-        std::vector<WireCell::Point> examined_ps = examine_segment_trajectory(segment, final_ps, init_ps);
+        std::vector<WireCell::Point> examined_ps = examine_segment_trajectory(segment, final_ps, init_ps, init_indices);
         
         // std::cout  << " fitted with " << examined_ps.size() << " " << init_ps.size() << " " << final_ps.size() << " points." << std::endl;
 
@@ -4261,7 +4588,12 @@ void TrackFitting::trajectory_fit(std::vector<std::pair<WireCell::Point, std::sh
                 } else {
                     scaling *= m_params.scaling_ratio;
                 }
-            } 
+            }
+
+            // doc pr/49: foreign-ghost cells keep their measurement at reduced weight.
+            if (!plane_data_u.deweighted_2d_points.empty() && plane_data_u.deweighted_2d_points.count(*it)) {
+                scaling *= m_params.fit_blob_coverage_weight;
+            }
 
             if (it->apa != u_cached_apa || it->face != u_cached_face) {
                 WirePlaneId wpid(kAllLayers, it->face, it->apa);
@@ -4337,7 +4669,12 @@ void TrackFitting::trajectory_fit(std::vector<std::pair<WireCell::Point, std::sh
                 } else {
                     scaling *= m_params.scaling_ratio;
                 }
-            } 
+            }
+
+            // doc pr/49: foreign-ghost cells keep their measurement at reduced weight.
+            if (!plane_data_v.deweighted_2d_points.empty() && plane_data_v.deweighted_2d_points.count(*it)) {
+                scaling *= m_params.fit_blob_coverage_weight;
+            }
 
             if (it->apa != v_cached_apa || it->face != v_cached_face) {
                 WirePlaneId wpid(kAllLayers, it->face, it->apa);
@@ -4416,7 +4753,12 @@ void TrackFitting::trajectory_fit(std::vector<std::pair<WireCell::Point, std::sh
                 } else {
                     scaling *= m_params.scaling_ratio;
                 }
-            } 
+            }
+
+            // doc pr/49: foreign-ghost cells keep their measurement at reduced weight.
+            if (!plane_data_w.deweighted_2d_points.empty() && plane_data_w.deweighted_2d_points.count(*it)) {
+                scaling *= m_params.fit_blob_coverage_weight;
+            }
 
             if (it->apa != w_cached_apa || it->face != w_cached_face) {
                 WirePlaneId wpid(kAllLayers, it->face, it->apa);
@@ -4513,7 +4855,10 @@ void TrackFitting::trajectory_fit(std::vector<std::pair<WireCell::Point, std::sh
         auto p = transform->forward(p_raw, cluster_t0, test_wpid.face(), test_wpid.apa());
         auto apa_face = std::make_pair(test_wpid.apa(), test_wpid.face());
         // all corrected points ...
-        bool flag_skip =  skip_trajectory_point(p, apa_face, i, pss_vec, fine_tracking_path);
+        // Single-track path: form_map compacted ptss to the surviving points
+        // (`ptss = saved_pts`, :3397), so the loop position IS the m_3d_to_2d key
+        // and index == i here -- unchanged by the T3 fix.
+        bool flag_skip =  skip_trajectory_point(p, apa_face, i, i, pss_vec, fine_tracking_path);
 
         // std::cout << "Skip: " << i << " " << flag_skip << std::endl;
         // Protection against too many consecutive skips
@@ -4686,7 +5031,7 @@ void TrackFitting::trajectory_fit(std::vector<std::pair<WireCell::Point, std::sh
     pss_vec = fine_tracking_path;
 }
 
-std::vector<WireCell::Point> TrackFitting::examine_segment_trajectory(std::shared_ptr<PR::Segment> segment, std::vector<WireCell::Point>& final_ps_vec, std::vector<WireCell::Point>& init_ps_vec){
+std::vector<WireCell::Point> TrackFitting::examine_segment_trajectory(std::shared_ptr<PR::Segment> segment, std::vector<WireCell::Point>& final_ps_vec, std::vector<WireCell::Point>& init_ps_vec, const std::vector<int>& init_indices){
     // Create local trajectory data structures
     std::vector<std::pair<WireCell::Point, std::shared_ptr<PR::Segment>>> pss_vec;
     std::vector<std::pair<WireCell::Point, std::shared_ptr<PR::Segment>>> fine_tracking_path;
@@ -4698,23 +5043,38 @@ std::vector<WireCell::Point> TrackFitting::examine_segment_trajectory(std::share
         return std::vector<WireCell::Point>(); // Return empty if sizes don't match
     }
     
+    // doc pr/28 T1/T2: pss_vec is skip_trajectory_point's COMPARISON path and must
+    // hold the PRE-fit points -- the prototype passes init_ps_vec here
+    // (multi_track_fitting.h:429) while p carries the fitted point.  Filling it
+    // from final_ps_vec made p and pss_vec[i] the same point, so the charge ratio
+    // was identically 3/3 with ratio_1 == 1 and the whole charge veto (and its
+    // `p = ps_point` revert) was unreachable; the fold-back comparison angle1 was
+    // likewise measured on the fitted rather than the initial path.  The
+    // do_single_tracking caller (:4521) always passed pre-fit points and was right.
     for (size_t i = 0; i < final_ps_vec.size(); i++) {
         // std::cout << i << " " << final_ps_vec[i].x() << " " << final_ps_vec[i].y() << " " << final_ps_vec[i].z() << " : " << init_ps_vec[i].x() << " " << init_ps_vec[i].y() << " " << init_ps_vec[i].z() << std::endl;
 
-        pss_vec.push_back(std::make_pair(final_ps_vec[i], segment));
+        pss_vec.push_back(std::make_pair(init_ps_vec[i], segment));
     }
-    
+
     // First pass: apply skip_trajectory_point logic
     int skip_count = 0;
+    size_t n_reverted = 0, n_index_mismatch = 0;   // liveness (doc pr/28 T1/T3)
     for (size_t i = 0; i < pss_vec.size(); i++) {
         WireCell::Point p = final_ps_vec[i];
-        
-        // Get APA and face information
-        auto test_wpid = m_dv->contained_by(p);
+
+        // Get APA and face information from the COMPARISON point, mirroring the
+        // single-track caller (:4510).  This is also what makes the face-crossing
+        // guard at the top of skip_trajectory_point meaningful: it exists to catch
+        // the fit having moved p out of the reference point's face.
+        auto test_wpid = m_dv->contained_by(pss_vec[i].first);
         auto apa_face = std::make_pair(test_wpid.apa(), test_wpid.face());
-        
-        // Apply skip trajectory point check
-        bool flag_skip = skip_trajectory_point(p, apa_face, i, pss_vec, fine_tracking_path);
+
+        // Apply skip trajectory point check.  init_indices[i] is the GLOBAL
+        // m_3d_to_2d key (T3); the loop position i is not.
+        bool flag_skip = skip_trajectory_point(p, apa_face, i,
+                                               i < init_indices.size() ? init_indices[i] : -1,
+                                               pss_vec, fine_tracking_path);
         
         // std::cout << "Skip Check: " << i << " " << flag_skip << std::endl;
 
@@ -4733,12 +5093,22 @@ std::vector<WireCell::Point> TrackFitting::examine_segment_trajectory(std::share
             }
         }
         
+        if (i < init_indices.size() && init_indices[i] != static_cast<int>(i)) ++n_index_mismatch;
+        if ((p - final_ps_vec[i]).magnitude() > 0) ++n_reverted;
+
         // Store points for trajectory smoothing
         temp_fine_tracking_path.push_back(std::make_pair(init_ps_vec[i], segment));
         fine_tracking_path.push_back(std::make_pair(p, segment));
         saved_paf.push_back(std::make_pair(test_wpid.apa(), test_wpid.face()));
     }
-    
+
+    SPDLOG_LOGGER_TRACE(s_log,
+                        "examine_segment_trajectory: segment {} -- {} point(s) in, {} kept, "
+                        "{} charge-reverted, {} with a global index != loop position",
+                        segment->get_graph_index(), final_ps_vec.size(),
+                        fine_tracking_path.size(), n_reverted, n_index_mismatch);
+
+
     // Second pass: Apply trajectory smoothing (area-based correction)
     for (size_t i = 0; i < fine_tracking_path.size(); i++) {
         bool flag_replace = false;
@@ -4846,7 +5216,7 @@ std::vector<WireCell::Point> TrackFitting::examine_segment_trajectory(std::share
 }
 
 
-bool TrackFitting::skip_trajectory_point(WireCell::Point& p, std::pair<int, int>& apa_face, int i, std::vector<std::pair<WireCell::Point, std::shared_ptr<PR::Segment>>>& pss_vec,  std::vector<std::pair<WireCell::Point, std::shared_ptr<PR::Segment>>>& fine_tracking_path){
+bool TrackFitting::skip_trajectory_point(WireCell::Point& p, std::pair<int, int>& apa_face, int i, int index, std::vector<std::pair<WireCell::Point, std::shared_ptr<PR::Segment>>>& pss_vec,  std::vector<std::pair<WireCell::Point, std::shared_ptr<PR::Segment>>>& fine_tracking_path){
     // Extract APA and face information from the reference (comparison) point
     int apa = apa_face.first;
     int face = apa_face.second;
@@ -5037,9 +5407,43 @@ bool TrackFitting::skip_trajectory_point(WireCell::Point& p, std::pair<int, int>
 
     // std::cout << "Inside: " << ratio << " " << ratio_1 << std::endl;
     
-    // Apply charge-based correction
+    // Apply charge-based correction: the fitted point sits on less charge than the
+    // point it came from, so revert it.  (prototype trajectory_fit.h:745-750)
     if (ratio / 3.0 < m_params.skip_ratio_cut || ratio_1 < m_params.skip_ratio_1_cut) {
-        p = ps_point;
+        // doc pr/28 S17: this revert has no distance-based safety margin (measured:
+        // individual reverts are ~0.4 cm median, not a teleport -- the flank comes
+        // from many small reverts applied consistently along an isochronous
+        // stretch, blocking the fit's own smoothing rather than one bad jump).  On
+        // an isochronous cluster c1/c2 can integrate the same overlapping charge
+        // blob rather than two resolvable samples of a track -- see
+        // porting_dictionary.md.  C++ default of the knob is -1 = off, unconditional
+        // revert, matching the prototype and pre-S17 toolkit behaviour exactly.
+        bool abstain_revert = false;
+        if (m_params.skip_revert_iso_xext_cut >= 0) {
+            double xext;
+            auto cache_it = m_cluster_xext_cache.find(cluster->ident());
+            if (cache_it != m_cluster_xext_cache.end()) {
+                xext = cache_it->second;
+            } else {
+                double xmin = 1e300, xmax = -1e300;
+                for (const Blob* b : cluster->children()) {
+                    const double bx = b->center_pos().x();
+                    xmin = std::min(xmin, bx);
+                    xmax = std::max(xmax, bx);
+                }
+                xext = (xmax > xmin) ? (xmax - xmin) : 0.0;
+                m_cluster_xext_cache[cluster->ident()] = xext;
+            }
+            abstain_revert = (xext < m_params.skip_revert_iso_xext_cut);
+        }
+        SPDLOG_LOGGER_TRACE(s_log,
+                            "skip_trajectory_point: charge revert at i={} index={} "
+                            "ratio/3={} ratio_1={} moved={} cm abstain={}",
+                            i, index, ratio / 3.0, ratio_1,
+                            (p - ps_point).magnitude() / units::cm, abstain_revert);
+        if (!abstain_revert) {
+            p = ps_point;
+        }
     }
     
     // Angle constraint checking
@@ -5094,16 +5498,20 @@ bool TrackFitting::skip_trajectory_point(WireCell::Point& p, std::pair<int, int>
             }
         }
         
-        // Get hit information for dead channel detection.
-        // Invariant: pss_vec here equals the cleaned ptss produced by form_map (which
-        // does ptss = saved_pts after filtering zero-charge points), so the loop index
-        // i corresponds exactly to the m_3d_to_2d key 'count' assigned in form_map.
-        // A find() miss means this point legitimately had no 2D associations (e.g. it
-        // is a vertex point whose slot was shared with another segment).
+        // Get hit information for dead channel detection, keyed by the caller's
+        // `index` (T3).  In the single-track path form_map compacted ptss so that
+        // index == i; in the multi-track path the key is the GLOBAL count assigned
+        // by form_map_graph across every segment plus the vertices, which the
+        // per-segment loop position does not track.  Reading m_3d_to_2d at `i`
+        // there returned another point's plane quantities, or missed entirely and
+        // left all three planes "dead" -- opening the angle>45 skip below on any
+        // point past 45 degrees.  A genuine miss (index<0, or a vertex slot shared
+        // with another segment) still lands here; the prototype's operator[] on an
+        // absent key gives quantity 0 the same way (trajectory_fit.h:780-782).
         bool has_u_hits = false, has_v_hits = false, has_w_hits = false;
         // float n_u_hits = 0, n_v_hits = 0, n_w_hits = 0;
-        if (m_3d_to_2d.find(i) != m_3d_to_2d.end()) {
-            const auto& point_info = m_3d_to_2d.at(i);
+        if (m_3d_to_2d.find(index) != m_3d_to_2d.end()) {
+            const auto& point_info = m_3d_to_2d.at(index);
             has_u_hits = point_info.get_plane_data(kUlayer).quantity > 0;
             has_v_hits = point_info.get_plane_data(kVlayer).quantity > 0;
             has_w_hits = point_info.get_plane_data(kWlayer).quantity > 0;
@@ -6735,12 +7143,24 @@ void TrackFitting::dQ_dx_multi_fit(double dis_end_point_ext, bool flag_dQ_dx_fit
     // Build regularization matrix using triplet accumulation (avoids repeated binary-search inserts)
     const double dead_ind_weight = m_params.dead_ind_weight;
     const double dead_col_weight = m_params.dead_col_weight;
-    const double close_ind_weight = m_params.close_ind_weight;
-    const double close_col_weight = m_params.close_col_weight;
+    // The multi-track fit uses STRONGER close-wire (overlap) regularisation than
+    // the single-track fit, exactly as it uses a stronger lambda below.  The
+    // prototype hardcodes both pairs separately:
+    //   single: close_ind 0.15 / close_col 0.45   (PR3DCluster_dQ_dx_fit.h:873-874)
+    //   multi:  close_ind 0.25 / close_col 0.75   (PR3DCluster_multi_dQ_dx_fit.h:762-763)
+    // i.e. x5/3 going single -> multi, alongside lambda's x8/5 (:933 -> :793).
+    // m_params carries the single-track values (the config sets 0.15/0.45), so
+    // scale here rather than adding a second knob -- same shape as the lambda
+    // line below.  Written left-to-right so the arithmetic is FP-exact:
+    // (0.15*5)/3 == 0.25 and (0.45*5)/3 == 0.75 to the last bit.
+    const double close_ind_weight = m_params.close_ind_weight * 5.0 / 3.0;
+    const double close_col_weight = m_params.close_col_weight * 5.0 / 3.0;
 
     std::vector<Eigen::Triplet<double>> F_triplets;
     F_triplets.reserve(n_3D_pos * 4);
     const size_t n3d = static_cast<size_t>(n_3D_pos);
+    size_t n_close_terms = 0;   // how many overlap terms actually fire (liveness)
+    size_t n_pairs = 0;
     for (size_t i = 0; i < n3d; i++) {
         if (i >= connected_vec.size()) continue;
 
@@ -6761,16 +7181,22 @@ void TrackFitting::dQ_dx_multi_fit(double dis_end_point_ext, bool flag_dQ_dx_fit
             int col = connected_vec[i][j];
 
             double ou = overlap_u[i][j], ov = overlap_v[i][j], ow = overlap_w[i][j];
-            if (ou > m_params.overlap_th) weight1 += close_ind_weight * (ou - 0.5) * (ou - 0.5);
-            if (ov > m_params.overlap_th) weight1 += close_ind_weight * (ov - 0.5) * (ov - 0.5);
-            if (ow > m_params.overlap_th) weight1 += close_col_weight * (ow - 0.5) * (ow - 0.5);
+            if (ou > m_params.overlap_th) { weight1 += close_ind_weight * (ou - 0.5) * (ou - 0.5); ++n_close_terms; }
+            if (ov > m_params.overlap_th) { weight1 += close_ind_weight * (ov - 0.5) * (ov - 0.5); ++n_close_terms; }
+            if (ow > m_params.overlap_th) { weight1 += close_col_weight * (ow - 0.5) * (ow - 0.5); ++n_close_terms; }
 
             double dx_norm_row = (local_dx[row] + 0.001 * units::cm) / m_params.dx_norm_length;
             double dx_norm_col = (local_dx[col] + 0.001 * units::cm) / m_params.dx_norm_length;
             F_triplets.emplace_back(row, row, -weight1 * scaling / dx_norm_row);
             F_triplets.emplace_back(row, col,  weight1 * scaling / dx_norm_col);
+            ++n_pairs;
         }
     }
+
+    SPDLOG_LOGGER_TRACE(s_log,
+                        "dQ_dx_multi_fit: close-wire regulariser fired on {} of {} plane-pair terms "
+                        "({} 3D positions); close_ind={} close_col={}",
+                        n_close_terms, 3 * n_pairs, n_3D_pos, close_ind_weight, close_col_weight);
 
     Eigen::SparseMatrix<double> FMatrix(n_3D_pos, n_3D_pos);
     FMatrix.setFromTriplets(F_triplets.begin(), F_triplets.end());
@@ -7767,8 +8193,8 @@ void TrackFitting::do_multi_tracking(bool flag_dQ_dx_fit_reg, bool flag_dQ_dx_fi
     for (auto vd : m_ordered_nodes_vec) {
         if (m_cluster_filter) {
             bool has_cluster_seg = false;
-            for (auto oe = boost::out_edges(vd, *m_graph); oe.first != oe.second; ++oe.first) {
-                auto& eb = (*m_graph)[*oe.first];
+            for (auto oe_e : sorted_out_edges(vd, *m_graph)) {
+                auto& eb = (*m_graph)[oe_e];
                 if (eb.segment && eb.segment->cluster() == m_cluster_filter) { has_cluster_seg = true; break; }
             }
             if (!has_cluster_seg) continue;
@@ -8235,8 +8661,8 @@ void TrackFitting::do_multi_tracking(bool flag_dQ_dx_fit_reg, bool flag_dQ_dx_fi
         for (auto vd : m_ordered_nodes_vec) {
             if (m_cluster_filter) {
                 bool has_cluster_seg = false;
-                for (auto oe = boost::out_edges(vd, *m_graph); oe.first != oe.second; ++oe.first) {
-                    auto& eb = (*m_graph)[*oe.first];
+                for (auto oe_e : sorted_out_edges(vd, *m_graph)) {
+                    auto& eb = (*m_graph)[oe_e];
                     if (eb.segment && eb.segment->cluster() == m_cluster_filter) { has_cluster_seg = true; break; }
                 }
                 if (!has_cluster_seg) continue;
@@ -8254,7 +8680,31 @@ void TrackFitting::do_multi_tracking(bool flag_dQ_dx_fit_reg, bool flag_dQ_dx_fi
             auto& edge_bundle = (*m_graph)[ed];
             if (edge_bundle.segment) edge_bundle.segment->reset_fit_prop();
         }
+        // doc pr/28 T4: this third form_map_graph has no prototype counterpart --
+        // the prototype's ProtoSegment::reset_fit_prop() is a resize(), so the fit
+        // indices survive the reset above and dQ_dx_multi_fit can reuse them, while
+        // PR::Fit::reset() clears index outright and they must be rebuilt here.
+        // Re-deriving the associations for the final post-_3rd positions is the
+        // more defensible of the two, but it also re-runs form_map_graph's
+        // zero-quantity point drop (:3201) on the final trajectory, which the
+        // prototype never does.  Count the drop so it is never silent.
+        size_t n_fits_before = 0;
+        for (const auto& ed : get_segment_edges()) {
+            auto& eb = (*m_graph)[ed];
+            if (eb.segment) n_fits_before += eb.segment->fits().size();
+        }
         form_map_graph(flag_exclusion, m_params.end_point_factor, m_params.mid_point_factor, m_params.nlevel, m_params.time_tick_cut, m_params.charge_cut);
+        size_t n_fits_after = 0;
+        for (const auto& ed : get_segment_edges()) {
+            auto& eb = (*m_graph)[ed];
+            if (eb.segment) n_fits_after += eb.segment->fits().size();
+        }
+        if (n_fits_after != n_fits_before) {
+            SPDLOG_LOGGER_DEBUG(s_log,
+                                "do_multi_tracking: pre-dQ/dx form_map_graph dropped {} of {} "
+                                "trajectory point(s) with zero plane quantity",
+                                n_fits_before - n_fits_after, n_fits_before);
+        }
         // if (m_perf) std::cout << "do_multiple_tracking timing: form_map_graph took " << DST_MS(DST_Clock::now() - t_dst).count() << " ms" << std::endl; t_dst = DST_Clock::now();
 
 

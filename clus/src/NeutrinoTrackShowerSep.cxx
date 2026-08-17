@@ -2,11 +2,93 @@
 #include "WireCellClus/PRSegmentFunctions.h"
 #include "WireCellUtil/Logging.h"
 #include <chrono>
+#include <cstdlib>
 
 using namespace WireCell::Clus::PR;
 using namespace WireCell::Clus;
 
 static auto s_log = WireCell::Log::logger("clus.NeutrinoPattern");
+
+// doc sbnd_xin/docs/pr/31 §12 (F1, was P1 + P3's 4-momentum half + P4).
+//
+// The prototype's reclassification idiom mutates two members and GUARDS the
+// third (NeutrinoID_track_shower.h:372-374 and identically at 10 more sites):
+//     sg->set_particle_type(11);
+//     sg->set_particle_mass(mp.get_mass_electron());
+//     if (sg->get_particle_4mom(3)>0) sg->cal_4mom();
+// particle_4mom[3] = kine_energy + particle_mass (ProtoSegment.cxx:1437-1444),
+// so ">0" means "previously computed": a segment that never had an energy
+// keeps zeros.  The toolkit has no independent members -- reclassification
+// constructs a whole new Aux::ParticleInfo -- which forces a 4-momentum
+// decision the prototype never makes.  Fifteen sites made it three ways
+// (11x unconditional recompute, 1x topology-branch recompute, 3x rest-mass
+// (m,0,0,0) overwrite) and only the two guarded sites (improve_maps_one_in,
+// improve_maps_shower_in_track_out's shower re-calc, which comments the
+// guard) made it the prototype's way.
+//
+// preserve=false reproduces today's recompute-and-construct byte-for-byte
+// (the shape-C sites keep their legacy rest-mass expression on their own
+// else-branch).  preserve=true is the prototype's single rule at every
+// site: recompute only where the prototype's guard passes
+// (proto_recomputes && previously-had-energy), otherwise carry the
+// existing 4-momentum forward verbatim, or zeros if there never was one.
+// energy() reads m_four_momentum.e(), the exact analog of the prototype's
+// get_particle_4mom(3).
+//
+// Why the preserve path cannot use the validating constructor: the carried
+// states are exactly the ones Aux::ParticleInfo::validate_inputs forbids --
+// all-zero (E < m) for never-computed, and an old on-shell 4-momentum
+// carried across a mass change (energy-momentum relation violated).  The
+// prototype holds both states as a matter of course (type and mass move,
+// particle_4mom does not), and validate_inputs itself carries a
+// commented-out "Allow zero 4-momentum as a placeholder" block for the
+// first.  Rather than relax the shared aux validator, the preserve path
+// constructs a legal placeholder and then writes the carried value through
+// set_four_momentum() -- the class's own non-validating setter -- so KE
+// lands at E - m (i.e. -m for never-computed), which is what any
+// prototype consumer subtracting mass sees.
+// doc sbnd_xin/docs/pr/40 round 2 F6: the !had branch below used to finish with
+// pinfo->set_four_momentum(D4Vector(0,0,0,0)) -- an explicit, deliberate
+// choice (see the block comment above) to make energy()==0 read exactly
+// like the prototype's never-computed particle_4mom[3]==0.  But
+// ParticleInfo::kinetic_energy() is e() - mass, so that same zero 4-vector
+// makes kinetic_energy() == -mass: a NEGATIVE kinetic energy, wherever a
+// caller (e.g. the Bee PF-tree writer, MultiAlgBlobClustering.cxx
+// fill_bee_pf_tree) reads kinetic_energy() rather than energy() directly.
+// Found while chasing pr/40 round 2 F4's zero-KE display defect; same failure
+// shape, sharper (a negative MeV is worse than a zero one on a display no
+// prototype consumer or Bee viewer ever actually reads as a raw
+// particle_4mom[3] subtraction).  reclass_never_computed_ke_floor=true
+// leaves the just-constructed (mass,0,0,0) placeholder in place instead
+// of overwriting it to all-zero, i.e. never-computed reads KE==0, matching
+// the had==true branch's own "keep it sane" spirit.  false = legacy
+// set_four_momentum(0,0,0,0) = byte-identical.  Independent of `preserve`
+// (this only touches the !preserve-recompute, !had sub-case) and of F4/F5.
+static std::shared_ptr<WireCell::Aux::ParticleInfo> reclass_pinfo(
+    const SegmentPtr& sg, int pdg_code,
+    const WireCell::Clus::ParticleDataSet::pointer& particle_data,
+    const WireCell::IRecombinationModel::pointer& recomb_model,
+    double mip_scale, bool preserve, bool proto_recomputes,
+    bool never_computed_ke_floor = false)
+{
+    const double mass = particle_data->get_particle_mass(pdg_code);
+    const bool had = sg->has_particle_info() && sg->particle_info()->energy() > 0;
+    if (!preserve || (proto_recomputes && had)) {
+        auto four_momentum = segment_cal_4mom(sg, pdg_code, particle_data, recomb_model, mip_scale);
+        return std::make_shared<WireCell::Aux::ParticleInfo>(
+            pdg_code, mass, particle_data->pdg_to_name(pdg_code), four_momentum);
+    }
+    auto pinfo = std::make_shared<WireCell::Aux::ParticleInfo>(
+        pdg_code, mass, particle_data->pdg_to_name(pdg_code),
+        WireCell::D4Vector<double>(mass, 0, 0, 0));
+    if (had) {
+        pinfo->set_four_momentum(sg->particle_info()->four_momentum());
+    } else if (!never_computed_ke_floor) {
+        pinfo->set_four_momentum(WireCell::D4Vector<double>(0, 0, 0, 0));  // legacy: KE = -mass
+    }
+    // else: leave the (mass,0,0,0) placeholder constructed above -- KE == 0.
+    return pinfo;
+}
 
 void PatternAlgorithms::clustering_points(Graph& graph, Facade::Cluster& cluster, const IDetectorVolumes::pointer& dv, const std::string& cloud_name, double search_range, double scaling_2d){
     using Clock = std::chrono::steady_clock;
@@ -27,11 +109,102 @@ void PatternAlgorithms::clustering_points(Graph& graph, Facade::Cluster& cluster
     // Run clustering on the collected segments
     t0 = Clock::now();
     if (!segments.empty()) {
-        clustering_points_segments(segments, dv, cloud_name, search_range, scaling_2d);
+        clustering_points_segments(segments, dv, cloud_name, search_range, scaling_2d, m_assoc_reassign_orphans);
     }
     // if (m_perf) SPDLOG_LOGGER_TRACE(s_log, "clustering_points timing: clustering_points_segments took {} ms", MS(Clock::now() - t0).count());
 
     if (m_perf) SPDLOG_LOGGER_TRACE(s_log, "clustering_points timing: TOTAL took {} ms", MS(Clock::now() - t_total).count());
+}
+
+// doc sbnd_xin/docs/pr/59 round 2: inert unless m_assoc_full_recluster (owner
+// flip pending).  See the declaration in NeutrinoPatternBase.h for the full
+// rationale; summary: clustering_points runs once per cluster, but a segment
+// can be created afterward (examine_structure_final*/examine_vertices_1
+// inside determine_main_vertex, confirmed for 18255-142421 seg 20 and
+// 116944-71372 segs 19052/19053/136199) and never gets a chance to compete for
+// points -- and if the cluster's main-ness is later swapped away
+// (swap_main_cluster), it never gets a second chance either.  This helper is
+// meant to be called wherever such a segment could just have been created.
+size_t PatternAlgorithms::reassociate_cluster_orphans(Graph& graph, Facade::Cluster& cluster, const IDetectorVolumes::pointer& dv) {
+    if (!m_assoc_full_recluster) return 0;
+    static const bool pr59r2_census = std::getenv("WCT_PR59_ASSOC_CENSUS") != nullptr;
+
+    // Collect all segments that belong to this cluster, in stable edge-index
+    // order (never boost::edges/pointer order -- CLAUDE.md determinism rule).
+    std::vector<SegmentPtr> segments;
+    for (auto e : ordered_edges(graph)) {
+        SegmentPtr seg = graph[e].segment;
+        if (seg && seg->cluster() == &cluster) {
+            segments.push_back(seg);
+        }
+    }
+    if (segments.empty()) return 0;
+
+    // Any orphan (null or empty associate_points cloud) in the cluster?  If
+    // not, this is a byte-identical no-op -- do not touch anything.
+    std::map<SegmentPtr, size_t, SegmentIndexCmp> npts_before;
+    bool any_orphan = false;
+    for (auto seg : segments) {
+        auto dpc = seg->dpcloud("associate_points");
+        size_t n = dpc ? dpc->npoints() : 0;
+        npts_before[seg] = n;
+        if (n == 0) any_orphan = true;
+    }
+    if (!any_orphan) return 0;
+
+    // Owner constraint: when this fires, delete the OLD associate_points for
+    // the WHOLE cluster and establish new ones via a fresh full-cluster
+    // competition -- never rescue just the orphan in isolation, which would
+    // let it win points by default with no already-good sibling able to
+    // contest for them (clustering_points_segments is a Voronoi + 2D
+    // ghost-removal competition among exactly the segments handed to it).
+    for (auto seg : segments) {
+        if (seg->dpcloud("associate_points")) {
+            seg->dpcloud("associate_points", nullptr);
+        }
+    }
+    // doc pr/64 round 7: thread m_assoc_reassign_orphans through the pr/59
+    // recluster path too -- this call is LIVE in SBND production
+    // (assoc_full_recluster=true, wct-pr-perevt.jsonnet), so leaving it on
+    // the trailing default would give rescued segments different
+    // association rules than the main clustering_points pass just above.
+    clustering_points_segments(segments, dv, "associate_points", 1.2*units::cm, 0.7, m_assoc_reassign_orphans);
+
+    // Owner constraint: this must run BEFORE track/shower separation so the
+    // classification pass can actually consume the new cloud -- but only for
+    // the segments that were orphaned; re-running is_shower_topology/
+    // is_shower_trajectory on an already-correctly-classified sibling is pure
+    // blast radius (these are per-segment, non-competing tests, unlike
+    // association).  Same two calls, same arguments, as separate_track_shower's
+    // loop body just below in this file.
+    size_t n_rescued = 0;
+    for (auto seg : segments) {
+        if (npts_before[seg] != 0) continue;  // was not orphaned
+        auto dpc = seg->dpcloud("associate_points");
+        size_t n_after = dpc ? dpc->npoints() : 0;
+        if (n_after == 0) continue;  // still orphaned (e.g. lost the ghost-removal contest again)
+        ++n_rescued;
+        segment_is_shower_topology(seg, false, m_mip_dqdx_median, m_shower_topo_demote_len, m_shower_topo_reset, m_shower_topo_dqdx_guard);
+        if (!seg->flags_any(SegmentFlags::kShowerTopology)) {
+            segment_is_shower_trajectory(seg, 10*units::cm, m_mip_dqdx, m_shower_traj_straight_guard);
+        }
+    }
+
+    if (pr59r2_census) {
+        for (auto seg : segments) {
+            auto dpc = seg->dpcloud("associate_points");
+            size_t n_after = dpc ? dpc->npoints() : 0;
+            size_t n_before = npts_before[seg];
+            if (n_before == n_after) continue;
+            const char* tag = (n_before == 0 && n_after > 0) ? "rescued"
+                             : (n_after == 0) ? "lost"
+                             : "moved";
+            SPDLOG_LOGGER_DEBUG(s_log,
+                "pr59r2 recluster: cluster {} segment {} npts {} -> {} [{}]",
+                cluster.get_cluster_id(), seg->get_graph_index(), n_before, n_after, tag);
+        }
+    }
+    return n_rescued;
 }
 
 void PatternAlgorithms::separate_track_shower(Graph&graph, Facade::Cluster& cluster) {
@@ -40,23 +213,24 @@ void PatternAlgorithms::separate_track_shower(Graph&graph, Facade::Cluster& clus
     auto t_total = Clock::now();
     MS t_topology{0}, t_trajectory{0};
 
-    // Iterate through all edges (segments) in the graph
-    auto [ebegin, eend] = boost::edges(graph);
-    for (auto eit = ebegin; eit != eend; ++eit) {
-        SegmentPtr seg = graph[*eit].segment;
+    // Iterate through all edges (segments) in the graph, in stable edge-index
+    // order (boost::edges on a setS graph is pointer order, which varies run
+    // to run).
+    for (const auto& ed : ordered_edges(graph)) {
+        SegmentPtr seg = graph[ed].segment;
 
         // Skip if segment is null or doesn't belong to this cluster
         if (!seg || seg->cluster() != &cluster) continue;
 
         // First check if segment is a shower topology
         auto t0 = Clock::now();
-        segment_is_shower_topology(seg, false, m_mip_dqdx_median, m_shower_topo_demote_len);
+        segment_is_shower_topology(seg, false, m_mip_dqdx_median, m_shower_topo_demote_len, m_shower_topo_reset, m_shower_topo_dqdx_guard);
         t_topology += MS(Clock::now() - t0);
 
         // If not shower topology, check if it's a shower trajectory
         if (!seg->flags_any(SegmentFlags::kShowerTopology)) {
             t0 = Clock::now();
-            segment_is_shower_trajectory(seg, 10*units::cm, m_mip_dqdx);
+            segment_is_shower_trajectory(seg, 10*units::cm, m_mip_dqdx, m_shower_traj_straight_guard);
             t_trajectory += MS(Clock::now() - t0);
         }
     }
@@ -71,10 +245,9 @@ void PatternAlgorithms::determine_direction(Graph& graph, Facade::Cluster& clust
     auto t_total = Clock::now();
     MS t_shower_traj{0}, t_shower_topo{0}, t_track{0};
 
-    // Iterate through all edges (segments) in the graph
-    auto [ebegin, eend] = boost::edges(graph);
-    for (auto eit = ebegin; eit != eend; ++eit) {
-        SegmentPtr seg = graph[*eit].segment;
+    // Iterate through all edges (segments) in the graph, in stable edge-index order.
+    for (const auto& ed : ordered_edges(graph)) {
+        SegmentPtr seg = graph[ed].segment;
 
         // Skip if segment is null or doesn't belong to this cluster
         if (!seg || seg->cluster() != &cluster) continue;
@@ -110,7 +283,15 @@ void PatternAlgorithms::determine_direction(Graph& graph, Facade::Cluster& clust
             end_n = boost::degree(end_v->get_descriptor(), graph);
         }
 
-        bool flag_print = false;
+        // doc sbnd_xin/docs/pr/40: WCT_PID_TRACE_DEBUG, env-gated (same idiom
+        // as WCT_PID_WRITE_DEBUG/WCT_SHOWER_TOPO_DEBUG), un-gates the
+        // segment_determine_dir_track / segment_determine_shower_direction_trajectory
+        // "Seg ... Track/S_traj dirsign dir_weak pdg mass KE score" TRACE line
+        // (PRSegmentFunctions.cxx flag_print block).  Was hardcoded false
+        // with no config or env path at all before doc pr/40's attribution
+        // work needed it.
+        static const bool s_pr40_pid_trace_debug = std::getenv("WCT_PID_TRACE_DEBUG") != nullptr;
+        bool flag_print = s_pr40_pid_trace_debug;
         // if (seg->cluster() == main_cluster) flag_print = true;
 
         auto t0 = Clock::now();
@@ -120,23 +301,68 @@ void PatternAlgorithms::determine_direction(Graph& graph, Facade::Cluster& clust
             t_shower_traj += MS(Clock::now() - t0);
         } else if (seg->flags_any(SegmentFlags::kShowerTopology)) {
             // Topology shower: determine direction, then set electron particle info
-            segment_determine_shower_direction(seg, particle_data, recomb_model, "associate_points", m_mip_dqdx_median, 0.4*units::cm, m_mip_dqdx);
+            //
+            // doc sbnd_xin/docs/pr/31 §11 (F2, was P2).  The prototype runs
+            // determine_dir_shower_topology here (ProtoSegment.cxx:1677-1710),
+            // which sets particle_type/particle_mass and does NOT touch
+            // flag_dir; its determine_shower_direction() is called from one
+            // place in the whole tree and that place is stage 4
+            // (NeutrinoID_track_shower.h:1532,
+            // compare_main_vertices_all_showers).  This call mutates only
+            // dirsign -- dirsign(0) on entry, dirsign(flag_dir) at the end --
+            // and its return is discarded, so skipping it leaves the direction
+            // segment_is_shower_topology set, which is the prototype's state.
+            // Default false => the call runs => byte-identical.
+            if (!m_shower_topo_proto_dir) {
+                segment_determine_shower_direction(seg, particle_data, recomb_model, "associate_points", m_mip_dqdx_median, 0.4*units::cm, m_mip_dqdx, m_dir_track_median_local);
+            }
             {
                 const int pdg_code = 11; // electron
-                auto four_momentum = segment_cal_4mom(seg, pdg_code, particle_data, recomb_model, m_mip_dqdx_median);
-                auto pinfo = std::make_shared<Aux::ParticleInfo>(
-                    pdg_code,
-                    particle_data->get_particle_mass(pdg_code),
-                    particle_data->pdg_to_name(pdg_code),
-                    four_momentum
-                );
+                // doc pr/31 §12 F1 shape B: the prototype's
+                // determine_dir_shower_topology writes type and mass only --
+                // NO 4-momentum recompute here (proto_recomputes=false).
+                auto pinfo = reclass_pinfo(seg, pdg_code, particle_data, recomb_model, m_mip_dqdx_median, m_reclass_preserve_4mom, false, m_reclass_never_computed_ke_floor);
                 seg->particle_info(pinfo);
                 seg->particle_score(100.0);
             }
             t_shower_topo += MS(Clock::now() - t0);
         } else {
             // Track
+            // doc pr/48: an arm of a two-end dQ/dx break travels AWAY from
+            // the break vertex -- the break's own two-arm stopping-template
+            // accept established it (each arm's Bragg is at its outer end).
+            // A dirsign stamp cannot carry this here (separate_track_shower's
+            // segment_is_shower_topology zeroes dirsign on every segment
+            // under shower_topo_reset), so the direction is reconstructed
+            // from the graph: the arm's endpoint carrying
+            // VertexFlags::kProtectedBreak IS the junction.  Let that stand
+            // over a WEAK recompute -- the weak KS decision on a MIP-ish arm
+            // is a coin flip, and landing "into the junction" defeats the
+            // break's vertex at main-vertex scoring (51513/56211/57485 vs
+            // 57903's lucky flips).  A STRONG recompute (!dir_weak) wins.
+            // Inert unless m_two_end_break (the flag is only ever set by the
+            // knob-gated pass).
+            const bool teb_arm = m_two_end_break && seg->flags_any(SegmentFlags::kTwoEndBreakArm);
+            int teb_outward = 0;
+            if (teb_arm) {
+                auto [v_front, v_back] = find_vertices(graph, seg);
+                const bool fp = v_front && v_front->flags_any(VertexFlags::kProtectedBreak);
+                const bool bp = v_back && v_back->flags_any(VertexFlags::kProtectedBreak);
+                if (fp && !bp) teb_outward = 1;        // junction at front: travel front->back
+                else if (bp && !fp) teb_outward = -1;  // junction at back:  travel back->front
+            }
             segment_determine_dir_track(seg, start_n, end_n, particle_data, recomb_model, m_mip_dqdx_median, flag_print, track_pid_options());
+            if (teb_arm) {
+                SPDLOG_LOGGER_DEBUG(s_log,
+                    "determine_direction: teb arm outward={} post_dirsign={} weak={}",
+                    teb_outward, seg->dirsign(), seg_dir_weak(seg) ? 1 : 0);
+            }
+            if (teb_outward != 0 && seg->dirsign() != teb_outward && seg_dir_weak(seg)) {
+                SPDLOG_LOGGER_DEBUG(s_log,
+                    "determine_direction: two-end-break arm weak recompute dirsign {} -> outward {}",
+                    seg->dirsign(), teb_outward);
+                seg->dirsign(teb_outward);
+            }
             t_track += MS(Clock::now() - t0);
         }
 
@@ -283,7 +509,16 @@ std::pair<SegmentPtr, VertexPtr> PatternAlgorithms::find_cont_muon_segment_nue(
     WireCell::Point vtx_pt = vtx->fit().valid() ? vtx->fit().point : vtx->wcpt().point;
 
     WireCell::Vector dir1 = segment_cal_dir_3vector(sg, vtx_pt, 15 * units::cm);
-    WireCell::Vector dir3 = (sg_length > 30 * units::cm)
+    // doc sbnd_xin/docs/pr/31 §12 (F5, was P6).  The prototype computes dir3
+    // INSIDE the per-neighbour loop, always at 30 cm, whenever either length
+    // qualifies (NeutrinoID_track_shower.h:2402-2408).  The toolkit's hoist is
+    // correct -- dir3 does not depend on the loop variable -- but its fallback
+    // to dir1 silently turns the reachable case "short reference segment, long
+    // neighbour" (sg_length <= 30 cm < length) into a 15cm-vs-30cm comparison
+    // where the prototype compares two 30 cm directions; angle1 feeds the
+    // <12.5 deg muon-continuation test.  ON = unconditional 30 cm (still
+    // hoisted).  OFF = today's conditional = byte-identical.
+    WireCell::Vector dir3 = (m_cont_muon_dir3_30cm || sg_length > 30 * units::cm)
                                 ? segment_cal_dir_3vector(sg, vtx_pt, 30 * units::cm)
                                 : dir1;
 
@@ -328,14 +563,13 @@ std::pair<SegmentPtr, VertexPtr> PatternAlgorithms::find_cont_muon_segment_nue(
 }
 
 void PatternAlgorithms::examine_good_tracks(Graph& graph, Facade::Cluster& cluster, const Clus::ParticleDataSet::pointer& particle_data) {
-    // Iterate through all edges (segments) in the graph
-    auto [ebegin, eend] = boost::edges(graph);
-    for (auto eit = ebegin; eit != eend; ++eit) {
-        SegmentPtr sg = graph[*eit].segment;
-        
+    // Iterate through all edges (segments) in the graph, in stable edge-index order.
+    for (const auto& ed : ordered_edges(graph)) {
+        SegmentPtr sg = graph[ed].segment;
+
         // Skip if segment is null or doesn't belong to this cluster
         if (!sg || sg->cluster() != &cluster) continue;
-        
+
         // Skip if segment is a shower (trajectory, topology, or electron by dQ/dx)
         // matches prototype get_flag_shower() = flag_shower_trajectory || flag_shower_topology || (particle_type==11)
         if (sg->flags_any(SegmentFlags::kShowerTrajectory) || sg->flags_any(SegmentFlags::kShowerTopology) ||
@@ -397,9 +631,9 @@ void PatternAlgorithms::examine_good_tracks(Graph& graph, Facade::Cluster& clust
         // Get all segments connected to end_vertex
         if (end_vertex->descriptor_valid()) {
             auto vd = end_vertex->get_descriptor();
-            auto edge_range = boost::out_edges(vd, graph);
-            for (auto eit2 = edge_range.first; eit2 != edge_range.second; ++eit2) {
-                SegmentPtr sg1 = graph[*eit2].segment;
+            const auto edge_range = sorted_out_edges(vd, graph);
+            for (auto eit2 : edge_range) {
+                SegmentPtr sg1 = graph[eit2].segment;
                 if (!sg1 || sg1 == sg) continue;
                 
                 WireCell::Vector dir2 = segment_cal_dir_3vector(sg1, end_pt, 15*units::cm);
@@ -420,14 +654,22 @@ void PatternAlgorithms::examine_good_tracks(Graph& graph, Facade::Cluster& clust
             length < 15*units::cm) {
             
             // Reclassify as electron (PDG 11)
-            double em_mass = particle_data->get_particle_mass(11);
-            auto pinfo = std::make_shared<Aux::ParticleInfo>(
-                11,                                              // electron PDG
-                em_mass,                                         // electron mass
-                particle_data->pdg_to_name(11),                 // "e-"
-                WireCell::D4Vector<double>(em_mass, 0, 0, 0)    // at-rest 4-momentum
-            );
-            sg->particle_info(pinfo);
+            // doc pr/31 §12 F1 shape C: the prototype writes type and mass only
+            // (NeutrinoID_track_shower.h:257-261) -- the 4-momentum is untouched,
+            // not zeroed to rest mass.
+            if (m_reclass_preserve_4mom) {
+                sg->particle_info(reclass_pinfo(sg, 11, particle_data, m_recomb_model, m_mip_dqdx, true, false, m_reclass_never_computed_ke_floor));
+            }
+            else {
+                double em_mass = particle_data->get_particle_mass(11);
+                auto pinfo = std::make_shared<Aux::ParticleInfo>(
+                    11,                                              // electron PDG
+                    em_mass,                                         // electron mass
+                    particle_data->pdg_to_name(11),                 // "e-"
+                    WireCell::D4Vector<double>(em_mass, 0, 0, 0)    // at-rest 4-momentum
+                );
+                sg->particle_info(pinfo);
+            }
             
             // Reset direction and mark as weak
             sg->dirsign(0);
@@ -441,10 +683,10 @@ void PatternAlgorithms::examine_good_tracks(Graph& graph, Facade::Cluster& clust
 }
 
 void PatternAlgorithms::fix_maps_multiple_tracks_in(Graph& graph, Facade::Cluster& cluster){
-    // Iterate through all vertices in the graph
-    auto [vbegin, vend] = boost::vertices(graph);
-    for (auto vit = vbegin; vit != vend; ++vit) {
-        VertexPtr vtx = graph[*vit].vertex;
+    // Iterate through all vertices in the graph, in stable node-index order
+    // (boost::vertices on a setS graph is pointer order).
+    for (const auto& vd_it : ordered_nodes(graph)) {
+        VertexPtr vtx = graph[vd_it].vertex;
         
         // Skip if vertex is null or doesn't belong to this cluster
         if (!vtx || !vtx->cluster() || vtx->cluster() != &cluster) continue;
@@ -462,9 +704,9 @@ void PatternAlgorithms::fix_maps_multiple_tracks_in(Graph& graph, Facade::Cluste
         WireCell::Point vtx_point = vtx->wcpt().point;
         
         // Iterate through all segments connected to this vertex
-        auto edge_range = boost::out_edges(vd, graph);
-        for (auto eit = edge_range.first; eit != edge_range.second; ++eit) {
-            SegmentPtr sg = graph[*eit].segment;
+        const auto edge_range = sorted_out_edges(vd, graph);
+        for (auto eit : edge_range) {
+            SegmentPtr sg = graph[eit].segment;
             if (!sg) continue;
             
             // Determine if this vertex is at the front or back of the segment
@@ -527,9 +769,9 @@ void PatternAlgorithms::fix_maps_shower_in_track_out(Graph& graph, Facade::Clust
         WireCell::Point vtx_point = vtx->wcpt().point;
         
         // Iterate through all segments connected to this vertex
-        auto edge_range = boost::out_edges(vd, graph);
-        for (auto eit = edge_range.first; eit != edge_range.second; ++eit) {
-            SegmentPtr sg = graph[*eit].segment;
+        const auto edge_range = sorted_out_edges(vd, graph);
+        for (auto eit : edge_range) {
+            SegmentPtr sg = graph[eit].segment;
             if (!sg) continue;
             
             // Determine if this vertex is at the front or back of the segment
@@ -604,9 +846,9 @@ void PatternAlgorithms::improve_maps_one_in(Graph& graph, Facade::Cluster& clust
             WireCell::Point vtx_point = vtx->wcpt().point;
             
             // Iterate through all segments connected to this vertex
-            auto edge_range = boost::out_edges(vd, graph);
-            for (auto eit = edge_range.first; eit != edge_range.second; ++eit) {
-                SegmentPtr sg = graph[*eit].segment;
+            const auto edge_range = sorted_out_edges(vd, graph);
+            for (auto eit : edge_range) {
+                SegmentPtr sg = graph[eit].segment;
                 if (!sg) continue;
                 
                 // Skip if segment already processed
@@ -713,9 +955,9 @@ void PatternAlgorithms::improve_maps_shower_in_track_out(Graph& graph, Facade::C
             WireCell::Point vtx_point = vtx->wcpt().point;
             
             // Iterate through all segments connected to this vertex
-            auto edge_range = boost::out_edges(vd, graph);
-            for (auto eit = edge_range.first; eit != edge_range.second; ++eit) {
-                SegmentPtr sg = graph[*eit].segment;
+            const auto edge_range = sorted_out_edges(vd, graph);
+            for (auto eit : edge_range) {
+                SegmentPtr sg = graph[eit].segment;
                 if (!sg) continue;
                 
                 // Determine if this vertex is at the front or back of the segment
@@ -762,20 +1004,22 @@ void PatternAlgorithms::improve_maps_shower_in_track_out(Graph& graph, Facade::C
                 // Reclassify outgoing tracks as electrons
                 for (auto it1 = out_tracks.begin(); it1 != out_tracks.end(); it1++) {
                     SegmentPtr sg1 = *it1;
-                    
+
+                    // doc sbnd_xin/docs/pr/40 F2: spare a segment whose OWN
+                    // median dQ/dx is decisively proton- or muon-like from
+                    // this wholesale conversion.  false = legacy = every
+                    // out_track (weak-direction or untyped) becomes electron
+                    // unconditionally.
+                    if (m_shower_reclass_dqdx_guard && segment_dqdx_spares_electron_reclass(sg1, m_mip_dqdx)) {
+                        continue;
+                    }
+
                     // Set as electron (PDG 11)
                     int pdg_code = 11;
-                    auto four_momentum = segment_cal_4mom(sg1, pdg_code, particle_data, recomb_model, m_mip_dqdx);
-
-                    auto pinfo = std::make_shared<Aux::ParticleInfo>(
-                        pdg_code,
-                        particle_data->get_particle_mass(pdg_code),
-                        particle_data->pdg_to_name(pdg_code),
-                        four_momentum
-                    );
+                    auto pinfo = reclass_pinfo(sg1, pdg_code, particle_data, recomb_model, m_mip_dqdx, m_reclass_preserve_4mom, true, m_reclass_never_computed_ke_floor);
                     sg1->particle_info(pinfo);
                     sg1->dirsign(0);
-                    
+
                     flag_update = true;
                 }
                 
@@ -788,15 +1032,11 @@ void PatternAlgorithms::improve_maps_shower_in_track_out(Graph& graph, Facade::C
                     bool is_shower1 = sg1->flags_any(SegmentFlags::kShowerTrajectory) ||
                                       sg1->flags_any(SegmentFlags::kShowerTopology) ||
                                       (sg1->has_particle_info() && std::abs(sg1->particle_info()->pdg()) == 11);
-                    if (!is_shower1) {
+                    // doc sbnd_xin/docs/pr/40 F2 (same guard as the out_tracks
+                    // loop above).
+                    if (!is_shower1 && !(m_shower_reclass_dqdx_guard && segment_dqdx_spares_electron_reclass(sg1, m_mip_dqdx))) {
                         int pdg_code = 11;
-                        auto four_momentum = segment_cal_4mom(sg1, pdg_code, particle_data, recomb_model, m_mip_dqdx);
-                        auto pinfo = std::make_shared<Aux::ParticleInfo>(
-                            pdg_code,
-                            particle_data->get_particle_mass(pdg_code),
-                            particle_data->pdg_to_name(pdg_code),
-                            four_momentum
-                        );
+                        auto pinfo = reclass_pinfo(sg1, pdg_code, particle_data, recomb_model, m_mip_dqdx, m_reclass_preserve_4mom, true, m_reclass_never_computed_ke_floor);
                         sg1->particle_info(pinfo);
                     }
 
@@ -869,9 +1109,9 @@ void PatternAlgorithms::improve_maps_no_dir_tracks(Graph& graph, Facade::Cluster
                 WireCell::Point vtx2_pt = two_vertices.second->wcpt().point;
                 
                 // Count segments at first vertex
-                auto edge_range1 = boost::out_edges(vd1, graph);
-                for (auto e_it = edge_range1.first; e_it != edge_range1.second; ++e_it) {
-                    SegmentPtr sg1 = graph[*e_it].segment;
+                const auto edge_range1 = sorted_out_edges(vd1, graph);
+                for (auto e_it : edge_range1) {
+                    SegmentPtr sg1 = graph[e_it].segment;
                     if (!sg1) continue;
                     
                     const auto& wcpts = sg1->wcpts();
@@ -898,9 +1138,9 @@ void PatternAlgorithms::improve_maps_no_dir_tracks(Graph& graph, Facade::Cluster
                 }
                 
                 // Count segments at second vertex
-                auto edge_range2 = boost::out_edges(vd2, graph);
-                for (auto e_it = edge_range2.first; e_it != edge_range2.second; ++e_it) {
-                    SegmentPtr sg1 = graph[*e_it].segment;
+                const auto edge_range2 = sorted_out_edges(vd2, graph);
+                for (auto e_it : edge_range2) {
+                    SegmentPtr sg1 = graph[e_it].segment;
                     if (!sg1) continue;
                     
                     const auto& wcpts = sg1->wcpts();
@@ -935,13 +1175,7 @@ void PatternAlgorithms::improve_maps_no_dir_tracks(Graph& graph, Facade::Cluster
                      nshowers[0] > 0 && nshowers[1] > 0 && length < 5*units::cm)) {
 
                     int pdg_code = 11;
-                    auto four_momentum = segment_cal_4mom(sg, pdg_code, particle_data, recomb_model, m_mip_dqdx);
-                    auto pinfo = std::make_shared<Aux::ParticleInfo>(
-                        pdg_code,
-                        particle_data->get_particle_mass(pdg_code),
-                        particle_data->pdg_to_name(pdg_code),
-                        four_momentum
-                    );
+                    auto pinfo = reclass_pinfo(sg, pdg_code, particle_data, recomb_model, m_mip_dqdx, m_reclass_preserve_4mom, true, m_reclass_never_computed_ke_floor);
                     sg->particle_info(pinfo);
                     flag_update = true;
                 }
@@ -950,8 +1184,8 @@ void PatternAlgorithms::improve_maps_no_dir_tracks(Graph& graph, Facade::Cluster
                     WireCell::Vector v1 = segment_cal_dir_3vector(sg, vtx1_pt, 5*units::cm);
                     double min_angle = 180;
                     
-                    for (auto e_it = edge_range1.first; e_it != edge_range1.second; ++e_it) {
-                        SegmentPtr sg2 = graph[*e_it].segment;
+                    for (auto e_it : edge_range1) {
+                        SegmentPtr sg2 = graph[e_it].segment;
                         if (!sg2 || sg2 == sg) continue;
                         WireCell::Vector v2 = segment_cal_dir_3vector(sg2, vtx1_pt, 5*units::cm);
                         double angle = std::abs(v1.angle(v2) / 3.14159265 * 180.0 - 180.0);
@@ -977,13 +1211,7 @@ void PatternAlgorithms::improve_maps_no_dir_tracks(Graph& graph, Facade::Cluster
                             sg->dirsign(1);
 
                         int pdg_code = 11;
-                        auto four_momentum = segment_cal_4mom(sg, pdg_code, particle_data, recomb_model, m_mip_dqdx);
-                        auto pinfo = std::make_shared<Aux::ParticleInfo>(
-                            pdg_code,
-                            particle_data->get_particle_mass(pdg_code),
-                            particle_data->pdg_to_name(pdg_code),
-                            four_momentum
-                        );
+                        auto pinfo = reclass_pinfo(sg, pdg_code, particle_data, recomb_model, m_mip_dqdx, m_reclass_preserve_4mom, true, m_reclass_never_computed_ke_floor);
                         sg->particle_info(pinfo);
                         flag_update = true;
                     }
@@ -992,8 +1220,8 @@ void PatternAlgorithms::improve_maps_no_dir_tracks(Graph& graph, Facade::Cluster
                     WireCell::Vector v1 = segment_cal_dir_3vector(sg, vtx2_pt, 5*units::cm);
                     double min_angle = 180;
                     
-                    for (auto e_it = edge_range2.first; e_it != edge_range2.second; ++e_it) {
-                        SegmentPtr sg2 = graph[*e_it].segment;
+                    for (auto e_it : edge_range2) {
+                        SegmentPtr sg2 = graph[e_it].segment;
                         if (!sg2 || sg2 == sg) continue;
                         WireCell::Vector v2 = segment_cal_dir_3vector(sg2, vtx2_pt, 5*units::cm);
                         double angle = std::abs(v1.angle(v2) / 3.14159265 * 180.0 - 180.0);
@@ -1019,13 +1247,7 @@ void PatternAlgorithms::improve_maps_no_dir_tracks(Graph& graph, Facade::Cluster
                             sg->dirsign(1);
 
                         int pdg_code = 11;
-                        auto four_momentum = segment_cal_4mom(sg, pdg_code, particle_data, recomb_model, m_mip_dqdx);
-                        auto pinfo = std::make_shared<Aux::ParticleInfo>(
-                            pdg_code,
-                            particle_data->get_particle_mass(pdg_code),
-                            particle_data->pdg_to_name(pdg_code),
-                            four_momentum
-                        );
+                        auto pinfo = reclass_pinfo(sg, pdg_code, particle_data, recomb_model, m_mip_dqdx, m_reclass_preserve_4mom, true, m_reclass_never_computed_ke_floor);
                         sg->particle_info(pinfo);
                         flag_update = true;
                     }
@@ -1043,17 +1265,20 @@ void PatternAlgorithms::improve_maps_no_dir_tracks(Graph& graph, Facade::Cluster
                     if ((direct_length < 34*units::cm && direct_length < 0.93 * length) ||
                         (length < 5*units::cm && ((nprotons[0] + nshowers[0] == 0 && nshowers[1] >= 2) ||
                                                    (nprotons[1] + nshowers[1] == 0 && nshowers[0] >= 2)))) {
-                        
-                        int pdg_code = 11;
-                        auto four_momentum = segment_cal_4mom(sg, pdg_code, particle_data, recomb_model, m_mip_dqdx);
-                        auto pinfo = std::make_shared<Aux::ParticleInfo>(
-                            pdg_code,
-                            particle_data->get_particle_mass(pdg_code),
-                            particle_data->pdg_to_name(pdg_code),
-                            four_momentum
-                        );
-                        sg->particle_info(pinfo);
-                        flag_update = true;
+
+                        // doc sbnd_xin/docs/pr/40 F2 (Case E: muon-topology
+                        // demotion; same guard as the other two sites).  Only
+                        // guards the CONVERSION, not entry to this branch, so
+                        // a spared segment falls through to neither the
+                        // conversion NOR the sibling Case F test below (both
+                        // are the SAME if/else-if arm as the prototype's
+                        // mutually-exclusive case selection).
+                        if (!(m_shower_reclass_dqdx_guard && segment_dqdx_spares_electron_reclass(sg, m_mip_dqdx))) {
+                            int pdg_code = 11;
+                            auto pinfo = reclass_pinfo(sg, pdg_code, particle_data, recomb_model, m_mip_dqdx, m_reclass_preserve_4mom, true, m_reclass_never_computed_ke_floor);
+                            sg->particle_info(pinfo);
+                            flag_update = true;
+                        }
                     }
                     // Case F: Check daughter showers
                     else if ((((nshowers[0]+nshowers[1] >= 2) && (nprotons[0]+nmuons[0]+nshowers[0] == 1 || nprotons[1]+nmuons[1]+nshowers[1] == 1)) ||
@@ -1065,8 +1290,8 @@ void PatternAlgorithms::improve_maps_no_dir_tracks(Graph& graph, Facade::Cluster
                         double max_angle1 = 0, max_angle2 = 0;
                         
                         WireCell::Vector dir1 = segment_cal_dir_3vector(sg, vtx1_pt, 15*units::cm);
-                        for (auto e_it = edge_range1.first; e_it != edge_range1.second; ++e_it) {
-                            SegmentPtr sg1 = graph[*e_it].segment;
+                        for (auto e_it : edge_range1) {
+                            SegmentPtr sg1 = graph[e_it].segment;
                             if (!sg1 || sg1 == sg) continue;
                             
                             WireCell::Vector dir2 = segment_cal_dir_3vector(sg1, vtx1_pt, 15*units::cm);
@@ -1084,8 +1309,8 @@ void PatternAlgorithms::improve_maps_no_dir_tracks(Graph& graph, Facade::Cluster
                         }
                         
                         dir1 = segment_cal_dir_3vector(sg, vtx2_pt, 10*units::cm);
-                        for (auto e_it = edge_range2.first; e_it != edge_range2.second; ++e_it) {
-                            SegmentPtr sg1 = graph[*e_it].segment;
+                        for (auto e_it : edge_range2) {
+                            SegmentPtr sg1 = graph[e_it].segment;
                             if (!sg1 || sg1 == sg) continue;
                             
                             WireCell::Vector dir2 = segment_cal_dir_3vector(sg1, vtx2_pt, 15*units::cm);
@@ -1108,13 +1333,7 @@ void PatternAlgorithms::improve_maps_no_dir_tracks(Graph& graph, Facade::Cluster
                                                       (num_s2 >= 4 && length_s2 > 20*units::cm)))) {
                             
                             int pdg_code = 11;
-                            auto four_momentum = segment_cal_4mom(sg, pdg_code, particle_data, recomb_model, m_mip_dqdx);
-                            auto pinfo = std::make_shared<Aux::ParticleInfo>(
-                                pdg_code,
-                                particle_data->get_particle_mass(pdg_code),
-                                particle_data->pdg_to_name(pdg_code),
-                                four_momentum
-                            );
+                            auto pinfo = reclass_pinfo(sg, pdg_code, particle_data, recomb_model, m_mip_dqdx, m_reclass_preserve_4mom, true, m_reclass_never_computed_ke_floor);
                             sg->particle_info(pinfo);
                             flag_update = true;
                         }
@@ -1129,8 +1348,8 @@ void PatternAlgorithms::improve_maps_no_dir_tracks(Graph& graph, Facade::Cluster
                     
                     if (nvtx1_segs == 2) {
                         SegmentPtr tmp_sg = nullptr;
-                        for (auto e_it = edge_range1.first; e_it != edge_range1.second; ++e_it) {
-                            SegmentPtr candidate = graph[*e_it].segment;
+                        for (auto e_it : edge_range1) {
+                            SegmentPtr candidate = graph[e_it].segment;
                             if (candidate && candidate != sg) {
                                 tmp_sg = candidate;
                                 break;
@@ -1144,8 +1363,8 @@ void PatternAlgorithms::improve_maps_no_dir_tracks(Graph& graph, Facade::Cluster
                         }
                     } else if (nvtx2_segs == 2) {
                         SegmentPtr tmp_sg = nullptr;
-                        for (auto e_it = edge_range2.first; e_it != edge_range2.second; ++e_it) {
-                            SegmentPtr candidate = graph[*e_it].segment;
+                        for (auto e_it : edge_range2) {
+                            SegmentPtr candidate = graph[e_it].segment;
                             if (candidate && candidate != sg) {
                                 tmp_sg = candidate;
                                 break;
@@ -1161,13 +1380,7 @@ void PatternAlgorithms::improve_maps_no_dir_tracks(Graph& graph, Facade::Cluster
                     
                     if (flag_change) {
                         int pdg_code = 11;
-                        auto four_momentum = segment_cal_4mom(sg, pdg_code, particle_data, recomb_model, m_mip_dqdx);
-                        auto pinfo = std::make_shared<Aux::ParticleInfo>(
-                            pdg_code,
-                            particle_data->get_particle_mass(pdg_code),
-                            particle_data->pdg_to_name(pdg_code),
-                            four_momentum
-                        );
+                        auto pinfo = reclass_pinfo(sg, pdg_code, particle_data, recomb_model, m_mip_dqdx, m_reclass_preserve_4mom, true, m_reclass_never_computed_ke_floor);
                         sg->particle_info(pinfo);
                         flag_update = true;
                     }
@@ -1204,13 +1417,7 @@ void PatternAlgorithms::improve_maps_no_dir_tracks(Graph& graph, Facade::Cluster
                         sg->dir_weak(true);
 
                         int pdg_code = 11;
-                        auto four_momentum = segment_cal_4mom(sg, pdg_code, particle_data, recomb_model, m_mip_dqdx);
-                        auto pinfo = std::make_shared<Aux::ParticleInfo>(
-                            pdg_code,
-                            particle_data->get_particle_mass(pdg_code),
-                            particle_data->pdg_to_name(pdg_code),
-                            four_momentum
-                        );
+                        auto pinfo = reclass_pinfo(sg, pdg_code, particle_data, recomb_model, m_mip_dqdx, m_reclass_preserve_4mom, true, m_reclass_never_computed_ke_floor);
                         sg->particle_info(pinfo);
                         flag_update = true;
                     }
@@ -1230,8 +1437,8 @@ void PatternAlgorithms::improve_maps_no_dir_tracks(Graph& graph, Facade::Cluster
                         double min_angle = 180;
                         double para_angle = 90;
                         
-                        for (auto e_it = edge_range1.first; e_it != edge_range1.second; ++e_it) {
-                            SegmentPtr sg2 = graph[*e_it].segment;
+                        for (auto e_it : edge_range1) {
+                            SegmentPtr sg2 = graph[e_it].segment;
                             if (!sg2 || sg2 == sg) continue;
                             bool is_shower2 = sg2->flags_any(SegmentFlags::kShowerTrajectory) ||
                                              sg2->flags_any(SegmentFlags::kShowerTopology) ||
@@ -1258,8 +1465,8 @@ void PatternAlgorithms::improve_maps_no_dir_tracks(Graph& graph, Facade::Cluster
                         double min_angle = 180;
                         double para_angle = 90;
                         
-                        for (auto e_it = edge_range2.first; e_it != edge_range2.second; ++e_it) {
-                            SegmentPtr sg2 = graph[*e_it].segment;
+                        for (auto e_it : edge_range2) {
+                            SegmentPtr sg2 = graph[e_it].segment;
                             if (!sg2 || sg2 == sg) continue;
                             bool is_shower2 = sg2->flags_any(SegmentFlags::kShowerTrajectory) ||
                                              sg2->flags_any(SegmentFlags::kShowerTopology) ||
@@ -1283,13 +1490,7 @@ void PatternAlgorithms::improve_maps_no_dir_tracks(Graph& graph, Facade::Cluster
                     
                     if (flag_change) {
                         int pdg_code = 11;
-                        auto four_momentum = segment_cal_4mom(sg, pdg_code, particle_data, recomb_model, m_mip_dqdx);
-                        auto pinfo = std::make_shared<Aux::ParticleInfo>(
-                            pdg_code,
-                            particle_data->get_particle_mass(pdg_code),
-                            particle_data->pdg_to_name(pdg_code),
-                            four_momentum
-                        );
+                        auto pinfo = reclass_pinfo(sg, pdg_code, particle_data, recomb_model, m_mip_dqdx, m_reclass_preserve_4mom, true, m_reclass_never_computed_ke_floor);
                         sg->particle_info(pinfo);
                         flag_update = true;
                     }
@@ -1331,9 +1532,9 @@ void PatternAlgorithms::improve_maps_multiple_tracks_in(Graph& graph, Facade::Cl
             WireCell::Point vtx_point = vtx->wcpt().point;
             
             // Iterate through all segments connected to this vertex
-            auto edge_range = boost::out_edges(vd, graph);
-            for (auto eit = edge_range.first; eit != edge_range.second; ++eit) {
-                SegmentPtr sg = graph[*eit].segment;
+            const auto edge_range = sorted_out_edges(vd, graph);
+            for (auto eit : edge_range) {
+                SegmentPtr sg = graph[eit].segment;
                 if (!sg) continue;
                 
                 // Determine if this vertex is at the front or back of the segment
@@ -1371,14 +1572,7 @@ void PatternAlgorithms::improve_maps_multiple_tracks_in(Graph& graph, Facade::Cl
                     SegmentPtr sg1 = *it1;
                     
                     int pdg_code = 11;
-                    auto four_momentum = segment_cal_4mom(sg1, pdg_code, particle_data, recomb_model, m_mip_dqdx);
-
-                    auto pinfo = std::make_shared<Aux::ParticleInfo>(
-                        pdg_code,
-                        particle_data->get_particle_mass(pdg_code),
-                        particle_data->pdg_to_name(pdg_code),
-                        four_momentum
-                    );
+                    auto pinfo = reclass_pinfo(sg1, pdg_code, particle_data, recomb_model, m_mip_dqdx, m_reclass_preserve_4mom, true, m_reclass_never_computed_ke_floor);
                     sg1->particle_info(pinfo);
                     flag_update = true;
                 }
@@ -1455,14 +1649,21 @@ void PatternAlgorithms::judge_no_dir_tracks_close_to_showers(Graph& graph, Facad
         // Reclassify segment as electron if all points are close to showers
         if (flag_change) {
             int pdg_code = 11;
-            double em_mass = particle_data->get_particle_mass(pdg_code);
-            auto pinfo = std::make_shared<Aux::ParticleInfo>(
-                pdg_code,
-                em_mass,
-                particle_data->pdg_to_name(pdg_code),
-                WireCell::D4Vector<double>(em_mass, 0, 0, 0)
-            );
-            sg->particle_info(pinfo);
+            // doc pr/31 §12 F1 shape C: prototype writes type and mass only
+            // (NeutrinoID_track_shower.h:1238-1239), 4-momentum untouched.
+            if (m_reclass_preserve_4mom) {
+                sg->particle_info(reclass_pinfo(sg, pdg_code, particle_data, m_recomb_model, m_mip_dqdx, true, false, m_reclass_never_computed_ke_floor));
+            }
+            else {
+                double em_mass = particle_data->get_particle_mass(pdg_code);
+                auto pinfo = std::make_shared<Aux::ParticleInfo>(
+                    pdg_code,
+                    em_mass,
+                    particle_data->pdg_to_name(pdg_code),
+                    WireCell::D4Vector<double>(em_mass, 0, 0, 0)
+                );
+                sg->particle_info(pinfo);
+            }
         }
     }
 }
@@ -1470,14 +1671,13 @@ void PatternAlgorithms::judge_no_dir_tracks_close_to_showers(Graph& graph, Facad
 bool PatternAlgorithms::examine_maps(Graph&graph, Facade::Cluster& cluster){
     bool flag_return = true;
     
-    // Iterate through all vertices in the graph
-    auto [vbegin, vend] = boost::vertices(graph);
-    for (auto vit = vbegin; vit != vend; ++vit) {
-        VertexPtr vtx = graph[*vit].vertex;
-        
+    // Iterate through all vertices in the graph, in stable node-index order.
+    for (const auto& vd_it : ordered_nodes(graph)) {
+        VertexPtr vtx = graph[vd_it].vertex;
+
         // Skip if vertex is null or doesn't belong to this cluster
         if (!vtx || vtx->cluster() != &cluster) continue;
-        
+
         // Skip vertices with only 1 segment
         if (!vtx->descriptor_valid()) continue;
         auto vd = vtx->get_descriptor();
@@ -1491,9 +1691,9 @@ bool PatternAlgorithms::examine_maps(Graph&graph, Facade::Cluster& cluster){
         WireCell::Point vtx_point = vtx->wcpt().point;
         
         // Iterate through all segments connected to this vertex
-        auto edge_range = boost::out_edges(vd, graph);
-        for (auto eit = edge_range.first; eit != edge_range.second; ++eit) {
-            SegmentPtr sg = graph[*eit].segment;
+        const auto edge_range = sorted_out_edges(vd, graph);
+        for (auto eit : edge_range) {
+            SegmentPtr sg = graph[eit].segment;
             if (!sg) continue;
             
             // Determine if this vertex is at the front or back of the segment
@@ -1593,7 +1793,26 @@ void PatternAlgorithms::examine_all_showers(Graph& graph, Facade::Cluster& clust
     // If there is only one good track
     if (n_good_tracks == 1 && (length_good_tracks < 0.15 * (length_showers + length_tracks)) && length_good_tracks < 10*units::cm) {
         auto pair_vertices = find_vertices(graph, good_track);
-        
+        // doc sbnd_xin/docs/pr/31 §12 (F7, was P5; pr/30 F4's sibling).  The
+        // two acceptance branches below are ASYMMETRIC -- the .second-side
+        // branch has a relaxed 150-degree clause the .first-side branch lacks,
+        // faithfully ported from the prototype -- but which physical vertex
+        // lands in .first differs: prototype orders by vertex id
+        // (NeutrinoID_proto_vertex.h:3227-3243), the toolkit by proximity to
+        // the segment's first fit point (PRGraph.cxx find_vertices).  The
+        // owner's positional clearance covers .first meaning "an end"; it does
+        // not cover .first selecting a branch.  ON: order the pair by
+        // get_graph_index() -- a creation-order counter, the SHAPE of the
+        // prototype's get_id(), but the two trees create vertices in different
+        // orders, so this restores A deterministic topological convention, not
+        // provably the prototype's.  Site-local on purpose: reordering
+        // find_vertices itself is pr/30 F4's decision and hits every caller.
+        // OFF = today's proximity order = byte-identical.
+        if (m_examine_showers_vertex_by_index && pair_vertices.first && pair_vertices.second
+            && pair_vertices.first->get_graph_index() > pair_vertices.second->get_graph_index()) {
+            std::swap(pair_vertices.first, pair_vertices.second);
+        }
+
         int num_s1 = 0, num_s2 = 0;
         double length_s1 = 0, length_s2 = 0;
         
@@ -1611,9 +1830,9 @@ void PatternAlgorithms::examine_all_showers(Graph& graph, Facade::Cluster& clust
             
             if (pair_vertices.second->descriptor_valid()) {
                 auto vd2 = pair_vertices.second->get_descriptor();
-                auto edge_range = boost::out_edges(vd2, graph);
-                for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
-                    SegmentPtr sg1 = graph[*e_it].segment;
+                const auto edge_range = sorted_out_edges(vd2, graph);
+                for (auto e_it : edge_range) {
+                    SegmentPtr sg1 = graph[e_it].segment;
                     if (!sg1 || sg1 == good_track) continue;
                     
                     WireCell::Vector dir2 = segment_cal_dir_3vector(sg1, vtx2_pt, 15*units::cm);
@@ -1635,9 +1854,9 @@ void PatternAlgorithms::examine_all_showers(Graph& graph, Facade::Cluster& clust
             
             if (pair_vertices.first->descriptor_valid()) {
                 auto vd1 = pair_vertices.first->get_descriptor();
-                auto edge_range = boost::out_edges(vd1, graph);
-                for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
-                    SegmentPtr sg1 = graph[*e_it].segment;
+                const auto edge_range = sorted_out_edges(vd1, graph);
+                for (auto e_it : edge_range) {
+                    SegmentPtr sg1 = graph[e_it].segment;
                     if (!sg1 || sg1 == good_track) continue;
                     
                     WireCell::Vector dir2 = segment_cal_dir_3vector(sg1, vtx1_pt, 15*units::cm);
@@ -1813,9 +2032,9 @@ void PatternAlgorithms::examine_all_showers(Graph& graph, Facade::Cluster& clust
 
                     if (pair_vertices.first && pair_vertices.first->descriptor_valid()) {
                         auto vd1 = pair_vertices.first->get_descriptor();
-                        auto edge_range = boost::out_edges(vd1, graph);
-                        for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
-                            SegmentPtr sg1 = graph[*e_it].segment;
+                        const auto edge_range = sorted_out_edges(vd1, graph);
+                        for (auto e_it : edge_range) {
+                            SegmentPtr sg1 = graph[e_it].segment;
                             if (sg1 && (sg1->flags_any(SegmentFlags::kShowerTrajectory) ||
                                        sg1->flags_any(SegmentFlags::kShowerTopology) ||
                                        (sg1->has_particle_info() && std::abs(sg1->particle_info()->pdg()) == 11))) {
@@ -1827,9 +2046,9 @@ void PatternAlgorithms::examine_all_showers(Graph& graph, Facade::Cluster& clust
 
                     if (!flag_shower && pair_vertices.second && pair_vertices.second->descriptor_valid()) {
                         auto vd2 = pair_vertices.second->get_descriptor();
-                        auto edge_range = boost::out_edges(vd2, graph);
-                        for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
-                            SegmentPtr sg1 = graph[*e_it].segment;
+                        const auto edge_range = sorted_out_edges(vd2, graph);
+                        for (auto e_it : edge_range) {
+                            SegmentPtr sg1 = graph[e_it].segment;
                             if (sg1 && (sg1->flags_any(SegmentFlags::kShowerTrajectory) ||
                                        sg1->flags_any(SegmentFlags::kShowerTopology) ||
                                        (sg1->has_particle_info() && std::abs(sg1->particle_info()->pdg()) == 11))) {
@@ -1857,16 +2076,30 @@ void PatternAlgorithms::examine_all_showers(Graph& graph, Facade::Cluster& clust
                            sg->flags_any(SegmentFlags::kShowerTopology) ||
                            (sg->has_particle_info() && std::abs(sg->particle_info()->pdg()) == 11);
 
+            // doc sbnd_xin/docs/pr/40 F2 (same guard as improve_maps_shower_
+            // in_track_out).  false = legacy = every non-shower segment in a
+            // shower-dominated cluster becomes electron unconditionally.
+            if (!is_shower && m_shower_reclass_dqdx_guard && segment_dqdx_spares_electron_reclass(sg, m_mip_dqdx)) {
+                continue;
+            }
+
             if (!is_shower) {
                 int pdg_code = 11;
-                double electron_mass = particle_data->get_particle_mass(pdg_code);
-                auto pinfo = std::make_shared<Aux::ParticleInfo>(
-                    pdg_code,
-                    electron_mass,
-                    particle_data->pdg_to_name(pdg_code),
-                    WireCell::D4Vector<double>(electron_mass, 0, 0, 0)
-                );
-                sg->particle_info(pinfo);
+                // doc pr/31 §12 F1 shape C: prototype writes type and mass only
+                // (NeutrinoID_track_shower.h:313-315), 4-momentum untouched.
+                if (m_reclass_preserve_4mom) {
+                    sg->particle_info(reclass_pinfo(sg, pdg_code, particle_data, m_recomb_model, m_mip_dqdx, true, false, m_reclass_never_computed_ke_floor));
+                }
+                else {
+                    double electron_mass = particle_data->get_particle_mass(pdg_code);
+                    auto pinfo = std::make_shared<Aux::ParticleInfo>(
+                        pdg_code,
+                        electron_mass,
+                        particle_data->pdg_to_name(pdg_code),
+                        WireCell::D4Vector<double>(electron_mass, 0, 0, 0)
+                    );
+                    sg->particle_info(pinfo);
+                }
             }
         }
     }

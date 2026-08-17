@@ -101,6 +101,16 @@ namespace WireCell::Clus {
             // every non-shower segment gets cluster_id*1000 + seg id instead of
             // the plain cluster_id collapse.
             bool particle_ids{false};
+            // pseudo_shower_track_paint: with use_associate_points, a segment
+            // belonging to a shower whose cached particle type is +-13 (a
+            // long-muon pseudo-shower, seeded from segments_in_long_muon) is
+            // painted as TRACK (q=0) instead of shower (q=15000).  The PF tree
+            // (make_shower_leaf) displays the same shower as "mu-" from the
+            // same cached field, so the legacy membership-first paint is
+            // provably inconsistent for this class (doc sbnd_xin/docs/pr/45,
+            // SBND 18255-56463: 411 cm cathode-crossing muon painted red).
+            // Default false => legacy paint, byte-identical.
+            bool pseudo_shower_track_paint{false};
             // include_vertex_points: PR-graph edge dumps (track_fit) also append
             // each vertex fit point with real_cluster_id=-1 (prototype
             // fill_skeleton_info_magnify vertex rows).
@@ -165,6 +175,8 @@ namespace WireCell::Clus {
         // Triggered after TaggerCheckNeutrino (or any configured visitor) runs.
         // Produces one file per event named "mc" (bare JSON array), matching the
         // prototype "mc" format read by the Bee viewer.
+        // (public so doctest_clus_knob_defaults can pin the in-class defaults)
+       public:
         struct BeePFConfig {
             std::string name{"mc"};          // Bee file name (default "mc")
             std::string visitor;             // dump after this visitor runs
@@ -178,7 +190,70 @@ namespace WireCell::Clus {
             // (prototype WCReader::KeepMC: 5 MeV / 10 MeV).
             double em_ke_min{0.0};
             double np_ke_min{0.0};
+            // ---- doc sbnd_xin/docs/pr/34 §10 port-fidelity knobs ----
+            // pf_track_main_cluster_only: the track BFS skips segments whose
+            // cluster ident differs from the main vertex's, restoring the
+            // prototype's dropped guard (NeutrinoID.cxx:1488).  Ident, not
+            // pointer: split products inherit the parent's ident.
+            bool pf_track_main_cluster_only{false};
+            // pf_shower_vertex_barrier: pre-seed visited_vtxs from every
+            // shower's vertex set so the BFS does not expand THROUGH a shower
+            // (prototype used_vertices seed, NeutrinoID.cxx:1597-1602).
+            // Corrected semantics (doc pr/38): the barrier set excludes each
+            // shower's START vertex -- the prototype's map_vtx_segs never
+            // holds it (WCShower.cxx:547, :708-716, :733-745), so main-track
+            // attachment junctions stay traversable and only shower-INTERIOR
+            // vertices block.  The same knob also enables the orphan safety
+            // net: BFS-unreached non-shower main-cluster segments are emitted
+            // as root-level leaves (prototype flat-loop mc_mother=0 parity,
+            // NeutrinoID.cxx:1485-1489) instead of silently vanishing.
+            bool pf_shower_vertex_barrier{false};
+            // pf_shower_parent_precedence: record the parent shower for
+            // track-attached shower vertices and consult it before the
+            // incoming track segment when a shower picks its parent
+            // (prototype map_vertex_in_shower-first order, :1655/:1680/:1720).
+            bool pf_shower_parent_precedence{false};
+            // pf_pi0_node_per_id: one pi0 node per pi0 id instead of one per
+            // parent (prototype map_pio_id_saved_pair, :1326/:1361).  The
+            // merged node's home is the HIGHEST-ENERGY daughter's parent --
+            // owner decision 2026-08-04, deliberately NOT the prototype's
+            // first-writer-wins (a jsTree node has exactly one parent).
+            bool pf_pi0_node_per_id{false};
+            // pf_pdg_name_prototype_fallback: pi0/nuclei entries in the PDG
+            // name table plus the prototype's numeric fallback
+            // (WCReader.cc:529-547) instead of "particle".
+            bool pf_pdg_name_prototype_fallback{false};
+            // ---- doc sbnd_xin/docs/pr/38 Round 4 ----
+            // pf_orphan_track_parentage: upgrade the pf_shower_vertex_barrier
+            // orphan safety net from flat root-leaves to graph-faithful
+            // parentage.  An orphan whose endpoint vertex carries a claimed
+            // incoming track segment attaches as that segment's child; else an
+            // endpoint inside a shower's view attaches as a child of that
+            // shower's displayed leaf; orphan-of-orphan chains attach to each
+            // other (pi+ -> proton).  Only orphans with no anchor at all fall
+            // back to the legacy flat root emission.  This state is UNREACHABLE
+            // in the prototype (it has no shower_absorb_track_guard, so such
+            // tracks are absorbed into the shower) -- designed divergence, see
+            // porting_dictionary.  Inert unless pf_shower_vertex_barrier is
+            // also on.  C++ default false => byte-identical legacy output.
+            bool pf_orphan_track_parentage{false};
+            // ---- doc sbnd_xin/docs/pr/65 round 3 ----
+            // pf_orphan_audit_only: rung 3 of the pr/65 ladder.  The flat
+            // orphan safety net fabricates a root-level PF particle for every
+            // BFS-unreached main-cluster segment -- a faithful port of the
+            // prototype's mc_mother=0 default (NeutrinoID.cxx:1485-1489), but
+            // a state the prototype itself can never reach (its residual
+            // segments are attach-or-discard).  When on, keep the net's
+            // VISIBILITY but drop the FABRICATION: emit one log line per
+            // still-unclaimed segment (no display filters -- dirsign==0 and
+            // empty-fit segments are named too, today they vanish silently)
+            // and append no node.  Load-bearing only together with rung 1
+            // (shower_absorb_unreachable_main): alone it would just hide the
+            // charge.  Inert unless pf_shower_vertex_barrier is also on.
+            // C++ default false => byte-identical legacy output.
+            bool pf_orphan_audit_only{false};
         };
+       private:
         std::vector<BeePFConfig> m_bee_pf_configs;
 
         // Storage: flushed at end of each event (same lifecycle as m_bee_points)

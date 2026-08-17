@@ -6,11 +6,25 @@
 #include <Eigen/Dense>
 #include <unordered_map>
 #include <unordered_set>
+#include <cstdlib>
+#include <cstdio>
 
 using namespace WireCell::Clus::PR;
 using namespace WireCell::Clus;
 
 static auto s_log = WireCell::Log::logger("clus.NeutrinoPattern");
+
+// doc sbnd_xin/docs/pr/40: WCT_PID_WRITE_DEBUG (see PRSegment.cxx) logs
+// direct set_pdg() mutations on the pointee, which bypass the
+// Segment::particle_info() setter hook entirely.
+static inline void pr40_probe_setpdg(SegmentPtr sg, int new_pdg, const char* site) {
+    static const bool dbg = std::getenv("WCT_PID_WRITE_DEBUG") != nullptr;
+    if (!dbg || !sg) return;
+    if (std::abs(new_pdg) != 11) return;
+    const int cid = sg->cluster() ? sg->cluster()->get_cluster_id() : -1;
+    std::fprintf(stderr, "PID_WRITE_DEBUG set_pdg id=%d clus=%d gidx=%zu pdg -> %d  at %s\n",
+                 sg->id(), cid, sg->get_graph_index(), new_pdg, site);
+}
 
 namespace {
     struct cluster_point_info {
@@ -70,6 +84,210 @@ void PatternAlgorithms::update_shower_maps(IndexedShowerSet& showers, ShowerVert
         if (seg && seg->cluster()) {
             used_shower_clusters.insert(seg->cluster());
         }
+    }
+}
+
+// doc sbnd_xin/docs/pr/74 round 2 K4 -- docstring at m_shower_stem_backfill
+// (NeutrinoPatternBase.h).  Runs between shower_clustering_in_other_clusters
+// and the second kinematics pass, so both BFS-created main-cluster showers
+// (90055's) and conn-3/4 attached showers (469665's) exist and absorbed stem
+// charge is counted.  Only called when the knob is on => byte-identical off.
+void PatternAlgorithms::stem_backfill(Graph& graph, VertexPtr main_vertex,
+    IndexedShowerSet& showers, ShowerVertexMap& map_vertex_in_shower,
+    ShowerSegmentMap& map_segment_in_shower, VertexShowerSetMap& map_vertex_to_shower,
+    ClusterPtrSet& used_shower_clusters, IndexedSegmentSet& segments_in_long_muon,
+    const Clus::ParticleDataSet::pointer& particle_data,
+    const IRecombinationModel::pointer& recomb_model)
+{
+    if (!main_vertex || !main_vertex->descriptor_valid()) return;
+
+    // BFS parent map over the graph from main_vertex.  sorted_out_edges +
+    // first-visit-wins makes the parent choice deterministic; the
+    // pointer-keyed containers are only tested/inserted, never iterated.
+    std::map<VertexPtr, std::pair<SegmentPtr, VertexPtr>> came_from;
+    std::set<VertexPtr> visited{main_vertex};
+    std::vector<VertexPtr> frontier{main_vertex};
+    while (!frontier.empty()) {
+        std::vector<VertexPtr> next_frontier;
+        for (auto v : frontier) {
+            if (!v || !v->descriptor_valid()) continue;
+            for (auto e : sorted_out_edges(v->get_descriptor(), graph)) {
+                SegmentPtr sg = graph[e].segment;
+                if (!sg) continue;
+                VertexPtr ov = find_other_vertex(graph, sg, v);
+                if (!ov || visited.count(ov)) continue;
+                visited.insert(ov);
+                came_from.emplace(ov, std::make_pair(sg, v));
+                next_frontier.push_back(ov);
+            }
+        }
+        frontier = std::move(next_frontier);
+    }
+
+    // Deterministic shower order by start-segment graph index.
+    std::vector<ShowerPtr> sorted_showers(showers.begin(), showers.end());
+    std::sort(sorted_showers.begin(), sorted_showers.end(),
+              [&](const ShowerPtr& a, const ShowerPtr& b) {
+                  auto sa = a->start_segment(), sb = b->start_segment();
+                  if (!sa && !sb) return false;
+                  if (!sa) return true;
+                  if (!sb) return false;
+                  return graph[sa->get_descriptor()].index < graph[sb->get_descriptor()].index;
+              });
+
+    bool any_absorbed = false;
+    for (auto shower : sorted_showers) {
+        auto start_seg = shower->start_segment();
+        if (!start_seg || !start_seg->has_particle_info() || !start_seg->particle_info() ||
+            start_seg->particle_info()->pdg() != 11) continue;   // EM showers only
+        if (shower->get_total_length() < m_stem_backfill_min_shower_len) continue;
+        auto [attach_vtx, conn_type] = shower->get_start_vertex_and_type();
+        VertexPtr cur = attach_vtx;
+        SegmentPtr outer_stem = nullptr;   // round 3 Q1: outermost stem absorbed for THIS shower
+        while (cur && cur != main_vertex && came_from.count(cur)) {
+            auto [stem, prev] = came_from.at(cur);
+            if (!stem || map_segment_in_shower.count(stem)) break;
+            if (segments_in_long_muon.count(stem)) break;
+            // doc pr/74 round 4: a stem the Michel-stem guard just separated
+            // OUT of this very shower must not be absorbed straight back in.
+            // Gated on that knob, so this is byte-identical whenever round 4
+            // is off, whatever stem_backfill is doing.
+            if (m_shower_traj_michel_stem &&
+                stem->flags_any(SegmentFlags::kMuonStemGuard)) {
+                SPDLOG_LOGGER_DEBUG(s_log,
+                    "pr74r4 stem_backfill: shower(start gidx={}) chain gidx={} blocked: michel-stem guard muon",
+                    start_seg->get_graph_index(), stem->get_graph_index());
+                break;
+            }
+            // Junction guard: a PF orphan anchors via vtx_incoming_seg at a
+            // vertex of its anchor segment; absorbing `stem` removes that
+            // anchor and the orphan vanishes from the tree, audit-only
+            // (measured: 268067 stranded a 595 MeV proton branch, 285567 two
+            // protons totalling 442 MeV, 56982 a track fragment).  Both
+            // endpoints of `stem` must therefore be clean: every incident
+            // segment is shower-claimed, or the stem itself, or the next
+            // chain candidate (which stays a PF track unless its own,
+            // later, guard check passes).  The main vertex is exempt -- its
+            // residents are PF roots and anchor directly.
+            SegmentPtr stem_seg = stem;   // plain locals: structured bindings
+            int conn_type_c = conn_type;  // cannot be lambda-captured pre-C++20
+            SegmentPtr next_stem = (prev && came_from.count(prev)) ? came_from.at(prev).first : nullptr;
+            auto junction_ok = [&](VertexPtr v, SegmentPtr allow2) -> bool {
+                if (!v || !v->descriptor_valid() || v == main_vertex) return true;
+                for (auto e : sorted_out_edges(v->get_descriptor(), graph)) {
+                    SegmentPtr side = graph[e].segment;
+                    if (!side || side == stem_seg || side == allow2) continue;
+                    if (!map_segment_in_shower.count(side)) {
+                        SPDLOG_LOGGER_DEBUG(s_log,
+                            "pr74 stem_backfill: shower(start gidx={} conn={}) chain gidx={} blocked: non-shower sibling gidx={} at junction",
+                            start_seg->get_graph_index(), conn_type_c, stem_seg->get_graph_index(),
+                            side->get_graph_index());
+                        return false;
+                    }
+                }
+                return true;
+            };
+            if (!junction_ok(cur, nullptr) || !junction_ok(prev, next_stem)) break;
+            const double len = segment_track_length(stem);
+            const double med = segment_median_dQ_dx(stem);
+            const double ratio = (m_mip_dqdx_median > 0 && med > 0) ? med / m_mip_dqdx_median : 0.0;
+            // mip_lo: an EM trunk carries at least MIP-level charge.  A
+            // sub-MIP stub is charge-poor debris whose absorption buys
+            // nothing and can strand later-evicted shower fragments that
+            // anchored on it (285567: 0.66x stub, two protons stranded).
+            const bool ok = len < m_stem_backfill_max_len &&
+                            ratio >= m_stem_backfill_mip_lo &&
+                            ratio < m_stem_backfill_mip_hi;
+            SPDLOG_LOGGER_DEBUG(s_log,
+                "pr74 stem_backfill: shower(start gidx={} conn={}) chain gidx={} len {:.1f}cm dqdx {:.2f}x -> {}",
+                start_seg->get_graph_index(), conn_type, stem->get_graph_index(),
+                len/units::cm, ratio, ok ? "absorb" : "stop");
+            if (!ok) break;
+            shower->add_segment(stem, true);
+            map_segment_in_shower[stem] = shower;   // claim immediately; full rebuild below
+            any_absorbed = true;
+            outer_stem = stem_seg;
+            cur = prev;
+        }
+
+        // doc pr/74 round 3 Q1 -- RE-SEAT THE SHOWER ONTO THE ABSORBED STEM.
+        //
+        // Round 2 added the stem to the shower's MEMBERSHIP only and left
+        // start_segment/start_vertex where they were.  Membership alone fixes
+        // the paint layer but breaks the particle-flow tree: fill_bee_pf_tree
+        // walks track-only segments from the main vertex
+        // (MultiAlgBlobClustering.cxx:1204-1254) and an absorbed stem is no
+        // longer a track, so the vertex it used to reach drops out of
+        // vtx_incoming_seg.  Every object anchored there -- the shower itself
+        // and every sibling shower / pseudo-gamma hanging off that vertex --
+        // lost its parent and rendered as a top-level PF root far from the
+        // neutrino vertex (measured on the round-2 production arm: 90055
+        // 0 -> 7 dangling roots incl. the 2020 MeV shower itself, 469665
+        // 0 -> 3, 138009 0 -> 1).  That is precisely the complaint doc pr/74
+        // opened with for 18255-142421 -- "painted EM shower, missing from the
+        // particle flow" -- re-created by the fix for it.
+        //
+        // Re-seating restores the anchor at the OTHER end of the stem chain
+        // (`cur`, the main-vertex side of the last absorbed stem) using the
+        // same (start_vertex, conn_type=1) + start_segment pair the BFS shower
+        // builder itself uses (:240-241).  The shower then renders from the
+        // stem base -- where the owner's hand scan says the shower starts --
+        // and the vertex-set propagation at MultiAlgBlobClustering.cxx:1287
+        // re-parents the stranded siblings underneath it.
+        //
+        // The start segment's own PDG stays whatever the tracker said; the
+        // shower's type comes from update_particle_type()'s majority vote in
+        // the kinematics pass that follows (doc pr/44; PRShower.cxx:842), which
+        // relabels a track-typed start segment 13 -> 11 whenever shower length
+        // dominates -- always true for a substantial shower with a <30 cm stem.
+        if (outer_stem) {
+            // conn_type 1 takes the shower's start_point from the start
+            // segment's own fit endpoints, selected by dirsign
+            // (PRShower.cxx:1141-1147) -- and a stem the tracker never
+            // directioned has dirsign()==0, which assigns NEITHER endpoint and
+            // silently leaves start_point at its previous value (measured:
+            // 90055 kept (127,24,216), 469665 kept the EM blob at
+            // (30,124,356), i.e. the very stale anchors this re-seat exists to
+            // move).  Point the stem away from `cur` so start_point lands on
+            // the stem base.  This is also the physically right sign: the
+            // vertex nearer the neutrino is where the particle started.
+            const WireCell::Point cur_pt =
+                cur->fit().valid() ? cur->fit().point : cur->wcpt().point;
+            const auto& stem_fits = outer_stem->fits();
+            if (!stem_fits.empty()) {
+                const double d_front = (stem_fits.front().point - cur_pt).magnitude();
+                const double d_back  = (stem_fits.back().point  - cur_pt).magnitude();
+                outer_stem->dirsign(d_front <= d_back ? 1 : -1);
+            }
+            SPDLOG_LOGGER_DEBUG(s_log,
+                "pr74 stem_backfill: re-seat shower(start gidx={} conn={}) -> start gidx={} conn=1 dirsign={}",
+                start_seg->get_graph_index(), conn_type, outer_stem->get_graph_index(),
+                outer_stem->dirsign());
+            shower->set_start_vertex(cur, 1);
+            shower->set_start_segment(outer_stem);
+            // The majority vote relabels a track-typed start segment 13 -> 11
+            // whenever shower length dominates (PRShower.cxx:842) -- it must
+            // run BEFORE the kinematics recompute below, which copies the
+            // start segment's PDG onto the shower verbatim
+            // (PRShower.cxx:1121) and would otherwise turn a 2 GeV electron
+            // shower into a muon.
+            shower->update_particle_type(particle_data, recomb_model, m_mip_dqdx,
+                                         main_vertex, m_shower_proton_daughter_pion,
+                                         m_mip_dqdx_median);
+            // calc_kine_2 skips any shower whose kinematics flag is already
+            // set (NeutrinoEnergyReco.cxx:327), which calc_kine_1 set for
+            // every shower that existed then.  Round 2 therefore recomputed
+            // NOTHING after absorbing: start_point/end_point/init_dir kept
+            // their pre-absorption values and the absorbed stem's charge was
+            // never counted (90055 stayed 2020 MeV, 469665 stayed 322 MeV
+            // across the round-2 knob flip).  Clearing the flag is what makes
+            // the re-seat and the charge accounting actually happen.
+            shower->set_flag_kinematics(false);
+        }
+    }
+    if (any_absorbed) {
+        update_shower_maps(showers, map_vertex_in_shower, map_segment_in_shower,
+                           map_vertex_to_shower, used_shower_clusters);
     }
 }
 
@@ -141,12 +359,33 @@ void PatternAlgorithms::shower_clustering_with_nv_in_main_cluster(Graph& graph, 
     // Complete shower structure for all newly created showers.
     // used_segments (populated during BFS) prevents overlapping segment claims.
     for (auto shower : new_showers) {
-        shower->complete_structure_with_start_segment(used_segments);
+        shower->complete_structure_with_start_segment(used_segments, "fit", "associate_points", m_shower_absorb_track_guard);
         // Enforce electron type on start segment:
         //  - update_particle_type() handles multi-segment showers via majority vote
         //  - explicit PDG=0 guard catches single-segment showers skipped by update_particle_type()
         //    (long-muon start segments retain PDG=13 and are handled by the post-pass below)
-        shower->update_particle_type(particle_data, recomb_model, m_mip_dqdx);
+        //
+        // doc sbnd_xin/docs/pr/44: the parenthetical above is FALSE for a
+        // MULTI-segment long-muon pseudo-shower -- update_particle_type's
+        // majority vote counts every non-proton member (muons included) as
+        // shower_length, so a pure muon chain ALWAYS trips the
+        // `shower_length > track_length` branch and the start segment is
+        // relabelled 13 -> 11 (PRShower.cxx:842).  The whole
+        // update_particle_type call is a toolkit-only addition (18f09178,
+        // 2026-03-31); the prototype completes the structure and goes
+        // straight to the deliberate long-muon -> EM reclass loop below
+        // (NeutrinoID_shower_clustering.h:1709-1717) -- a long-muon shower's
+        // start segment is never re-typed here.  SBND 18255 evt 142421: the
+        // ~143 cm collinear MIP chain 7023->7024->7018 lost seg 7024 (13->11)
+        // to this vote, which then seeded a fake "e- 163 MeV" merged into the
+        // pi0.  When the knob is on, a shower whose cached particle_type was
+        // recorded 13 at the seeding above keeps its muon start segment
+        // (prototype parity); EM showers (cached type 0) vote exactly as
+        // before.  false = legacy = byte-identical.
+        const bool keep_muon_type = m_shower_long_muon_keep_type &&
+                                    std::abs(shower->get_particle_type()) == 13;
+        if (!keep_muon_type)
+            shower->update_particle_type(particle_data, recomb_model, m_mip_dqdx, main_vertex, m_shower_proton_daughter_pion, m_mip_dqdx_median);
         // PDG=0 guard: defensive fixup for shower-flagged start segments that
         // arrived without any ParticleInfo set.  Independent of
         // update_particle_type and still needed.
@@ -167,7 +406,23 @@ void PatternAlgorithms::shower_clustering_with_nv_in_main_cluster(Graph& graph, 
     IndexedSegmentSet tmp_segments;
     IndexedVertexSet  tmp_vertices;
     for (auto shower : showers) {
-        if (std::abs(shower->get_particle_type()) != 13) continue;
+        // doc pr/33 F2: the prototype reads the START SEGMENT's PDG with an
+        // EXACT muon test here (NeutrinoID_shower_clustering.h:1716,
+        // get_start_segment()->get_particle_type()!=13); the port reads the
+        // shower's cached type through std::abs.  Both readings feed the
+        // audit counter; prototype parity needs BOTH knobs on (either alone
+        // is neither tree's behavior).
+        {
+            const int type_shower = shower->get_particle_type();
+            int type_startseg = 0;
+            if (shower->start_segment() && shower->start_segment()->has_particle_info() && shower->start_segment()->particle_info()) {
+                type_startseg = shower->start_segment()->particle_info()->pdg();
+            }
+            g_pr33_audit.f2_calls[0]++;
+            if ((std::abs(type_shower) != 13) != (type_startseg != 13)) g_pr33_audit.f2_disagree[0]++;
+            const int type_used = m_shower_pdg_from_start_segment ? type_startseg : type_shower;
+            if (m_shower_pdg_exact_muon_test ? (type_used != 13) : (std::abs(type_used) != 13)) continue;
+        }
         if (!shower->start_segment()) continue;
 
         double n_muons = 0, length_muons = 0;
@@ -178,7 +433,13 @@ void PatternAlgorithms::shower_clustering_with_nv_in_main_cluster(Graph& graph, 
         // Single pass: collect segments and gather statistics simultaneously
         // to avoid iterating shower->edges() twice.
         std::vector<SegmentPtr> shower_segs;
-        for (auto edesc : shower->edges()) {
+        // ordered_edges, not shower->edges(): edges() is an unordered_set hashed
+        // on heap addresses (doc pr/28 §15.2).  length_muons/length_others are FP
+        // accumulations and they feed a BRANCH --
+        // `length_others > 0.33 * length_muons` below -- so the walk order is not
+        // confined to rounding: it can decide whether this muon is retyped to an
+        // EM shower.
+        for (auto edesc : ordered_edges(*shower, graph)) {
             auto sg1 = shower->view_graph()[edesc].segment;
             if (!sg1) continue;
             shower_segs.push_back(sg1);
@@ -204,6 +465,7 @@ void PatternAlgorithms::shower_clustering_with_nv_in_main_cluster(Graph& graph, 
                 if (sg1 == max_sg) sg1->set_flags(SegmentFlags::kAvoidMuonCheck);
                 if (sg1->has_particle_info() && sg1->particle_info()) {
                     sg1->particle_info()->set_pdg(11);
+                    pr40_probe_setpdg(sg1, 11, "NeutrinoShowerClustering.cxx:long_muon_to_EM");
                     sg1->particle_info()->set_mass(particle_data->get_particle_mass(11));
                 }
                 tmp_segments.insert(sg1);
@@ -279,8 +541,17 @@ void PatternAlgorithms::shower_clustering_connecting_to_main_vertex(Graph& graph
             // Skip segments already claimed by a shower before the expensive BFS traversal.
             if (map_segment_in_shower.find(sg) != map_segment_in_shower.end()) continue;
 
-            // Calculate total number of daughter segments for this segment
-            auto pair_result = calculate_num_daughter_showers(graph, main_vertex, sg);
+            // Calculate total number of daughter segments for this segment.
+            // doc pr/33 F1: the prototype calls calculate_num_daughter_tracks
+            // here (NeutrinoID_shower_clustering.h:140, flag=true => count
+            // everything with length > 0); the port calls _showers
+            // (shower-flagged only).  Both computed unconditionally so the
+            // audit counter bounds the reach of the restored callee.
+            auto pair_result_legacy = calculate_num_daughter_showers(graph, main_vertex, sg);
+            auto pair_result_proto  = calculate_num_daughter_tracks(graph, main_vertex, sg, true, 0);
+            g_pr33_audit.f1_mv_calls++;
+            if (pair_result_legacy.first != pair_result_proto.first) g_pr33_audit.f1_mv_differ++;
+            auto pair_result = m_daughter_count_proto_main_vertex ? pair_result_proto : pair_result_legacy;
 
             // Get segment properties
             double medium_dQ_dx = segment_median_dQ_dx(sg);
@@ -292,6 +563,18 @@ void PatternAlgorithms::shower_clustering_connecting_to_main_vertex(Graph& graph
                 particle_type = sg->particle_info()->pdg();
             }
 
+            // F1 audit: would the skip verdict below change with the other
+            // callee's count?
+            {
+                auto skip_with = [&](int nd) {
+                    return (particle_type == 11) ||
+                           (particle_type == 2212 && ((medium_dQ_dx_1 > 1.45 && nd <= 3) || medium_dQ_dx_1 > 2.7)) ||
+                           (particle_type == 211 && medium_dQ_dx_1 > 2.0);
+                };
+                if (skip_with(pair_result_legacy.first) != skip_with(pair_result_proto.first))
+                    g_pr33_audit.f1_mv_gate_flip++;
+            }
+
             // Skip segments with certain particle types and high dQ/dx
             if ((particle_type == 11) ||
                 (particle_type == 2212 && ((medium_dQ_dx_1 > 1.45 && pair_result.first <= 3) || medium_dQ_dx_1 > 2.7)) ||
@@ -299,11 +582,42 @@ void PatternAlgorithms::shower_clustering_connecting_to_main_vertex(Graph& graph
                 continue;
             }
 
+            // doc sbnd_xin/docs/pr/40 round 5 F10: also skip a candidate whose
+            // OWN geometry is long and straight (segment_is_straight_long_
+            // track) -- none of the criteria above inspect straightness or
+            // dQ/dx of a not-yet-PID'd sg (particle_type==0 skips every
+            // branch above).  SBND evt 54341 seg 18005 (21.3 cm, 0.99
+            // direct/arc ratio, particle_type still 0 at this point) is
+            // exactly this gap -- see m_shower_connect_main_vertex_straight_
+            // guard's comment in NeutrinoPatternBase.h.  false = legacy =
+            // byte-identical.
+            if (m_shower_connect_main_vertex_straight_guard && segment_is_straight_long_track(sg)) {
+                continue;
+            }
+
+            // doc sbnd_xin/docs/pr/40 round 6 F13: also skip a pion whose far
+            // vertex carries a charge-confirmed proton daughter -- "an
+            // electron cannot father a proton" (round-3 protected_pion, same
+            // predicate as Shower::update_particle_type's guard, PRShower.cxx
+            // and the F5 relabel condition itself, NeutrinoPatternBase.cxx).
+            // SBND evt 55715 seg 15005 (pi+, 6.1 cm -- UNDER the 10 cm floor,
+            // so the F10 branch above cannot save it): once F11 declassifies
+            // its daughter 15007, this function selects 15005 as the EM
+            // candidate and force-sets it to pdg 11 at the accept site below
+            // (probe tag "connecting_to_main_vertex"), reverting the pion
+            // against proton daughter 15006.  The legacy pdg==211 branch two
+            // blocks up only skips on HIGH dQ/dx (>2.0x MIP), which a real
+            // pion fails.  false = legacy = byte-identical.
+            if (m_shower_connect_protected_pion_guard && particle_type == 211 &&
+                segment_has_proton_daughter(graph, sg, main_vertex, m_mip_dqdx_median)) {
+                continue;
+            }
+
             // Create a new shower
             ShowerPtr shower = std::make_shared<Shower>(graph);
             shower->set_start_vertex(main_vertex, 1);
             shower->set_start_segment(sg);
-            shower->complete_structure_with_start_segment(used_segments);
+            shower->complete_structure_with_start_segment(used_segments, "fit", "associate_points", m_shower_absorb_track_guard);
 
             // Single pass over shower edges: accumulate segment stats, vertex counts,
             // and flag_good_track together to avoid iterating edges twice.
@@ -314,7 +628,10 @@ void PatternAlgorithms::shower_clustering_connecting_to_main_vertex(Graph& graph
             bool flag_good_track = false;
             std::map<VertexPtr, int> vtx_segment_count;
 
-            for (auto edesc : shower->edges()) {
+            // ordered_edges: total_length is an FP accumulation feeding the
+            // length/track cuts below, so the walk order can move a cut
+            // (doc pr/28 §15.2).
+            for (auto edesc : ordered_edges(*shower, graph)) {
                 auto sg1 = shower->view_graph()[edesc].segment;
                 if (!sg1) continue;
 
@@ -421,6 +738,7 @@ void PatternAlgorithms::shower_clustering_connecting_to_main_vertex(Graph& graph
                 SPDLOG_LOGGER_TRACE(s_log, "shower_clustering_connecting_to_main_vertex: Convert EM shower {}", shower->start_segment()->id());
                 if (shower->start_segment() && shower->start_segment()->has_particle_info() && shower->start_segment()->particle_info()) {
                     shower->start_segment()->particle_info()->set_pdg(11);
+                    pr40_probe_setpdg(shower->start_segment(), 11, "NeutrinoShowerClustering.cxx:connecting_to_main_vertex");
                 }
 
                 // Set avoid muon check flag on max segment
@@ -508,12 +826,22 @@ void PatternAlgorithms::shower_clustering_with_nv_from_main_cluster(Graph& graph
         
         ShowerPtr shower = map_segment_in_shower[seg];
         
-        // Skip long muons
+        // Skip long muons.  doc pr/33 F2 (the inverted site): the prototype
+        // reads the SHOWER's cached type here
+        // (NeutrinoID_shower_clustering.h:1800,
+        // fabs(shower->get_particle_type())==13); the port reads the start
+        // segment's PDG.  Both readings feed the audit counter.
         int particle_type = 0;
         if (shower->start_segment() && shower->start_segment()->has_particle_info() && shower->start_segment()->particle_info()) {
             particle_type = shower->start_segment()->particle_info()->pdg();
         }
-        if (std::abs(particle_type) == 13) continue;
+        {
+            const bool skip_legacy = std::abs(particle_type) == 13;
+            const bool skip_proto  = std::abs(shower->get_particle_type()) == 13;
+            g_pr33_audit.f2_calls[1]++;
+            if (skip_legacy != skip_proto) g_pr33_audit.f2_disagree[1]++;
+            if (m_shower_pdg_from_shower_type ? skip_proto : skip_legacy) continue;
+        }
         
         double total_length = shower->get_total_length();
         
@@ -596,7 +924,7 @@ void PatternAlgorithms::shower_clustering_with_nv_from_main_cluster(Graph& graph
         while (flag_continue) {
             flag_continue = false;
             for (auto seg1 : seg_order) {
-                if (seg1->cluster() == main_cluster) continue;
+                if (seg1->cluster() == main_cluster && !m_absorb_unreachable_main_segs.count(seg1)) continue;  // doc pr/65 round 3: guard means "claimed by the main_vertex graph walk", so graph-unreachable main-cluster segments stay eligible (set empty when knob off => legacy)
                 if (map_segment_in_shower.find(seg1) != map_segment_in_shower.end()) continue;
 
                 double min_dis = 1e9;
@@ -674,7 +1002,7 @@ void PatternAlgorithms::shower_clustering_with_nv_from_main_cluster(Graph& graph
 
     // Examine other segments and add to showers based on angle and distance
     for (auto seg1 : seg_order) {
-        if (seg1->cluster() == main_cluster) continue;
+        if (seg1->cluster() == main_cluster && !m_absorb_unreachable_main_segs.count(seg1)) continue;  // doc pr/65 round 3: guard means "claimed by the main_vertex graph walk", so graph-unreachable main-cluster segments stay eligible (set empty when knob off => legacy)
         if (map_segment_in_shower.find(seg1) != map_segment_in_shower.end()) continue;
 
         double min_dis = 1e9;
@@ -733,13 +1061,14 @@ void PatternAlgorithms::shower_clustering_with_nv_from_main_cluster(Graph& graph
         }
         bool changed = false;
         for (auto seg1 : seg_order) {
-            if (seg1->cluster() == main_cluster) continue;
+            if (seg1->cluster() == main_cluster && !m_absorb_unreachable_main_segs.count(seg1)) continue;  // doc pr/65 round 3: guard means "claimed by the main_vertex graph walk", so graph-unreachable main-cluster segments stay eligible (set empty when knob off => legacy)
             if (map_segment_in_shower.count(seg1)) continue;
             auto it = cluster_to_shower.find(seg1->cluster());
             if (it == cluster_to_shower.end()) continue;
             it->second->add_segment(seg1, true);
             if (seg1->has_particle_info() && seg1->particle_info()) {
                 seg1->particle_info()->set_pdg(11);
+                pr40_probe_setpdg(seg1, 11, "NeutrinoShowerClustering.cxx:orphan_sibling_adopt");
                 seg1->particle_info()->set_mass(0.511 * units::MeV);
             }
             changed = true;
@@ -790,8 +1119,17 @@ void PatternAlgorithms::shower_clustering_with_nv_from_vertices(Graph& graph, Ve
             if (seg->has_particle_info() && seg->particle_info()) {
                 particle_type = seg->particle_info()->pdg();
             }
-            
-            if (is_shower || particle_type == 0 || 
+            // doc pr/33 F4: the prototype's get_flag_shower() carries a third
+            // disjunct this mirror dropped (ProtoSegment.cxx:1305-1312,
+            // fabs(particle_type)==11).  It feeds the acc_length read below
+            // AND the acc_length1 read (a pdg -11 segment lands in
+            // acc_length1 without it), i.e. one gate at the center-point cut.
+            if (!is_shower && std::abs(particle_type) == 11) {
+                g_pr33_audit.f4_flip++;
+                if (m_shower_flag_pdg_electron) is_shower = true;
+            }
+
+            if (is_shower || particle_type == 0 ||
                 ((std::abs(particle_type) == 13 || std::abs(particle_type) == 211) && seg_dir_weak(seg))) {
                 double length = segment_track_length(seg);
                 acc_length += length;
@@ -1000,7 +1338,8 @@ void PatternAlgorithms::shower_clustering_with_nv_from_vertices(Graph& graph, Ve
                 shower->set_start_segment(sg1, true);
             } else {
                 // Break segment at point
-                auto [success, seg_pair, new_vtx] = break_segment(graph, sg1, point, particle_data, recomb_model, dv);
+                auto [success, seg_pair, new_vtx] = break_segment(graph, sg1, point, particle_data, recomb_model, dv,
+                                                                  1e9*units::cm, m_break_seg_orient);
                 
                 if (!success || !new_vtx) {
                     shower->set_start_segment(sg1, true);
@@ -1065,7 +1404,7 @@ void PatternAlgorithms::shower_clustering_with_nv_from_vertices(Graph& graph, Ve
         
         // Complete shower structure
         IndexedSegmentSet used_segments;
-        shower->complete_structure_with_start_segment(used_segments);
+        shower->complete_structure_with_start_segment(used_segments, "fit", "associate_points", m_shower_absorb_track_guard);
         
         // Calculate shower direction
         auto [start_vtx, conn_type] = shower->get_start_vertex_and_type();
@@ -1084,7 +1423,7 @@ void PatternAlgorithms::shower_clustering_with_nv_from_vertices(Graph& graph, Ve
         // Cache the shower start front point to avoid re-evaluating per segment.
         const WireCell::Point shower_start_front = shower->start_segment()->fits().front().point;
         for (auto seg1 : seg_order) {
-            if (seg1->cluster() == main_cluster) continue;
+            if (seg1->cluster() == main_cluster && !m_absorb_unreachable_main_segs.count(seg1)) continue;  // doc pr/65 round 3: guard means "claimed by the main_vertex graph walk", so graph-unreachable main-cluster segments stay eligible (set empty when knob off => legacy)
             if (map_segment_in_shower.find(seg1) != map_segment_in_shower.end()) continue;
             if (seg1->cluster() == shower->start_segment()->cluster()) continue;
 
@@ -1121,7 +1460,7 @@ void PatternAlgorithms::shower_clustering_with_nv_from_vertices(Graph& graph, Ve
         }
 
         // Update particle type
-        shower->update_particle_type(particle_data, recomb_model, m_mip_dqdx);
+        shower->update_particle_type(particle_data, recomb_model, m_mip_dqdx, main_vertex, m_shower_proton_daughter_pion, m_mip_dqdx_median);
 
         bool tmp_flag = (shower->start_vertex() == main_vertex);
         SPDLOG_LOGGER_TRACE(s_log, "shower_clustering_with_nv_from_vertices: Separated shower: {} {} {} {} {}",
@@ -1160,7 +1499,7 @@ void PatternAlgorithms::shower_clustering_with_nv_from_vertices(Graph& graph, Ve
             while (flag_continue) {
                 flag_continue = false;
                 for (auto seg1 : seg_order) {
-                    if (seg1->cluster() == main_cluster) continue;
+                    if (seg1->cluster() == main_cluster && !m_absorb_unreachable_main_segs.count(seg1)) continue;  // doc pr/65 round 3: guard means "claimed by the main_vertex graph walk", so graph-unreachable main-cluster segments stay eligible (set empty when knob off => legacy)
                     if (map_segment_in_shower.find(seg1) != map_segment_in_shower.end()) continue;
 
                     double min_dis = 1e9;
@@ -1235,7 +1574,20 @@ void PatternAlgorithms::examine_merge_showers(IndexedShowerSet& showers, VertexP
     std::vector<ShowerPtr> type1_showers, type2_showers;
     std::unordered_map<Shower*, WireCell::Vector> type2_dirs;
     for (auto& shower : sorted_showers) {
-        if (shower->get_particle_type() == 13) continue;
+        // doc pr/33 F2: the prototype reads the start segment's PDG here
+        // (NeutrinoID_shower_clustering.h:387/:394, exact ==13); the port
+        // reads the shower's cached type.  Both feed the audit counter.
+        {
+            int type_startseg = 0;
+            if (shower->start_segment() && shower->start_segment()->has_particle_info() && shower->start_segment()->particle_info()) {
+                type_startseg = shower->start_segment()->particle_info()->pdg();
+            }
+            const bool skip_legacy = shower->get_particle_type() == 13;
+            const bool skip_proto  = type_startseg == 13;
+            g_pr33_audit.f2_calls[2]++;
+            if (skip_legacy != skip_proto) g_pr33_audit.f2_disagree[2]++;
+            if (m_shower_pdg_from_start_segment ? skip_proto : skip_legacy) continue;
+        }
         auto [sv, stype] = shower->get_start_vertex_and_type();
         if (stype == 1) {
             type1_showers.push_back(shower);
@@ -1275,8 +1627,8 @@ void PatternAlgorithms::examine_merge_showers(IndexedShowerSet& showers, VertexP
         for (auto& shower2 : to_merge) {
             shower1->add_shower(*shower2);
         }
-        shower1->update_particle_type(particle_data, recomb_model, m_mip_dqdx);
-        shower1->calculate_kinematics(particle_data, recomb_model);
+        shower1->update_particle_type(particle_data, recomb_model, m_mip_dqdx, main_vertex, m_shower_proton_daughter_pion, m_mip_dqdx_median);
+        shower1->calculate_kinematics(particle_data, recomb_model, m_shower_endpoint_exclude_start_vertex);
         double kine_charge = cal_kine_charge(shower1, m_charge_2d_u, m_charge_2d_v, m_charge_2d_w, m_map_apa_ch_plane_wires, track_fitter, dv);
         shower1->set_kine_charge(kine_charge);
         shower1->set_flag_kinematics(true);
@@ -1424,14 +1776,14 @@ void PatternAlgorithms::shower_clustering_in_other_clusters(Graph& graph, Vertex
             
             // Complete shower structure
             IndexedSegmentSet used_segments;
-            shower->complete_structure_with_start_segment(used_segments);
+            shower->complete_structure_with_start_segment(used_segments, "fit", "associate_points", m_shower_absorb_track_guard);
             
             // Calculate shower direction
             WireCell::Vector dir_shower = shower_cal_dir_3vector(*shower, vertex_pt, 15 * units::cm);
             
             // Cluster with the rest - add segments based on angle and distance
             for (auto seg1 : seg_order) {
-                if (seg1->cluster() == main_cluster) continue;
+                if (seg1->cluster() == main_cluster && !m_absorb_unreachable_main_segs.count(seg1)) continue;  // doc pr/65 round 3: guard means "claimed by the main_vertex graph walk", so graph-unreachable main-cluster segments stay eligible (set empty when knob off => legacy)
                 if (map_segment_in_shower.find(seg1) != map_segment_in_shower.end()) continue;
                 if (seg1->cluster() == shower->start_segment()->cluster()) continue;
                 
@@ -1467,7 +1819,7 @@ void PatternAlgorithms::shower_clustering_in_other_clusters(Graph& graph, Vertex
             }
 
             // Update particle type
-            shower->update_particle_type(particle_data, recomb_model, m_mip_dqdx);
+            shower->update_particle_type(particle_data, recomb_model, m_mip_dqdx, main_vertex, m_shower_proton_daughter_pion, m_mip_dqdx_median);
 
             // Check with other showers and merge if needed
             std::vector<ShowerPtr> showers_to_be_removed;
@@ -1493,8 +1845,8 @@ void PatternAlgorithms::shower_clustering_in_other_clusters(Graph& graph, Vertex
             }
 
             // Post-merge majority-vote and kinematics (prototype lines 1555-1556)
-            shower->update_particle_type(particle_data, recomb_model, m_mip_dqdx);
-            shower->calculate_kinematics(particle_data, recomb_model);
+            shower->update_particle_type(particle_data, recomb_model, m_mip_dqdx, main_vertex, m_shower_proton_daughter_pion, m_mip_dqdx_median);
+            shower->calculate_kinematics(particle_data, recomb_model, m_shower_endpoint_exclude_start_vertex);
 
             showers.insert(shower);
         }
@@ -1616,10 +1968,92 @@ void PatternAlgorithms::shower_clustering_in_other_clusters(Graph& graph, Vertex
             
             // Complete shower structure
             IndexedSegmentSet used_segments;
-            shower->complete_structure_with_start_segment(used_segments);
+            shower->complete_structure_with_start_segment(used_segments, "fit", "associate_points", m_shower_absorb_track_guard);
             // Majority-vote correction for multi-segment showers whose start segment
             // has an unexpected PDG not covered by the explicit force-to-11 above.
-            shower->update_particle_type(particle_data, recomb_model, m_mip_dqdx);
+            shower->update_particle_type(particle_data, recomb_model, m_mip_dqdx, main_vertex, m_shower_proton_daughter_pion, m_mip_dqdx_median);
+            showers.insert(shower);
+        }
+    }
+
+    // doc sbnd_xin/docs/pr/74 round 2 K5 = doc pr/65's deferred rung 2 --
+    // docstring at m_shower_conn3_unreachable (NeutrinoPatternBase.h).
+    // Extend the leftover-cluster branch just above to graph-unreachable,
+    // unclaimed main-cluster segments (18255-142421 seg 7013): same
+    // nearest-candidate-vertex anchor, same <80 cm conn-3/conn-4 split, same
+    // component claim via complete_structure_with_start_segment.  false =
+    // no pass = byte-identical.
+    if (m_shower_conn3_unreachable && flag_save && main_vertex->descriptor_valid()) {
+        const auto unreachable = unreachable_segments(graph, main_vertex);
+        // doc pr/74 round 3 Q2 (18255-142421 seg 7013): the anchor search below
+        // must only consider vertices the main vertex can actually reach.  The
+        // promoted segment's OWN endpoints are in `vertices` too, and they sit
+        // at distance 0 from it, so the unrestricted search always picked one
+        // of them: the pseudo-gamma collapsed to zero length at the component's
+        // far end and, because conn-3 derives start_point from the anchor
+        // (PRShower.cxx:1140) and end_point from the farthest vertex, the
+        // reconstructed e- ran BACKWARDS -- from the far end toward the
+        // neutrino vertex instead of outward from it.
+        const auto reachable_vtxs = reachable_vertices(graph, main_vertex);
+        IndexedSegmentSet claimed_k5;
+        for (auto seg : seg_order) {
+            if (!seg || seg->cluster() != main_cluster) continue;
+            if (!unreachable.count(seg)) continue;
+            if (map_segment_in_shower.count(seg) || claimed_k5.count(seg)) continue;
+            if (segment_track_length(seg) < m_conn3_unreachable_min_len) continue;
+
+            // Nearest candidate vertex -- same preference rule as above.
+            double min_dis = 1e9;
+            VertexPtr min_vertex = nullptr;
+            double main_dis = 1e9;
+            for (auto vtx : vertices) {
+                if (!reachable_vtxs.count(vtx)) continue;   // round 3 Q2: never anchor to your own component
+                WireCell::Point vtx_pt = vtx->fit().valid() ? vtx->fit().point : vtx->wcpt().point;
+                double dis = segment_get_closest_point(seg, vtx_pt).first;
+                if (dis < min_dis) {
+                    min_dis = dis;
+                    min_vertex = vtx;
+                }
+                if (vtx == main_vertex) main_dis = dis;
+            }
+            if (!min_vertex) continue;
+            if (min_dis > 0.8 * main_dis) {
+                min_dis = main_dis;
+                min_vertex = main_vertex;
+            }
+            int connection_type = (min_dis > 80 * units::cm) ? 4 : 3;
+
+            if (!seg->dpcloud("fit") && !seg->fits().empty()) {
+                create_segment_fit_point_cloud(seg, dv, "fit");
+            }
+
+            ShowerPtr shower = std::make_shared<Shower>(graph);
+            shower->set_start_vertex(min_vertex, connection_type);
+            shower->set_start_segment(seg);
+
+            // Force-to-electron rule of the leftover-cluster branch, plus the
+            // low-confidence proton case this class exhibits (7013: pdg 2212
+            // at particle_score 0.27 on a 2.32x-MIP EM chunk).  A confident
+            // PID keeps its label but still becomes PF-visible.
+            int particle_type = 0;
+            if (seg->has_particle_info() && seg->particle_info()) {
+                particle_type = seg->particle_info()->pdg();
+            }
+            if (particle_type == 0 ||
+                (std::abs(particle_type) == 13 && segment_track_length(seg) < 40 * units::cm && seg_dir_weak(seg)) ||
+                (particle_type == 2212 && seg->particle_score() < 0.3)) {
+                auto four_momentum = segment_cal_4mom(seg, 11, particle_data, recomb_model, m_mip_dqdx);
+                seg->particle_info(std::make_shared<Aux::ParticleInfo>(
+                    11, particle_data->get_particle_mass(11), particle_data->pdg_to_name(11),
+                    four_momentum));
+            }
+
+            shower->complete_structure_with_start_segment(claimed_k5, "fit", "associate_points", m_shower_absorb_track_guard);
+            shower->update_particle_type(particle_data, recomb_model, m_mip_dqdx, main_vertex, m_shower_proton_daughter_pion, m_mip_dqdx_median);
+            SPDLOG_LOGGER_DEBUG(s_log,
+                "pr74 conn3_unreachable: promote gidx={} len {:.1f}cm conn={} anchor_dis {:.1f}cm",
+                seg->get_graph_index(), segment_track_length(seg)/units::cm,
+                connection_type, min_dis/units::cm);
             showers.insert(shower);
         }
     }
@@ -1701,7 +2135,7 @@ void PatternAlgorithms::examine_shower_1(Graph& graph, VertexPtr main_vertex, In
                 ShowerPtr shower1 = std::make_shared<Shower>(graph);
                 shower1->set_start_vertex(main_vertex, 1);
                 shower1->set_start_segment(sg);
-                shower1->complete_structure_with_start_segment(used_segments);
+                shower1->complete_structure_with_start_segment(used_segments, "fit", "associate_points", m_shower_absorb_track_guard);
                 
                 WireCell::Vector dir1 = segment_cal_dir_3vector(sg, main_vtx_pt, 15 * units::cm);
 
@@ -1826,10 +2260,13 @@ void PatternAlgorithms::examine_shower_1(Graph& graph, VertexPtr main_vertex, In
             double total_length = 0;
             bool flag_good_track = false;
             
-            for (auto edesc : traj.edges()) {
+            // ordered_edges: total_length is an FP accumulation and it feeds the
+            // hard cuts below (`total_length < 70cm`, `< n_tracks * 36cm`, ...),
+            // so the walk order can move a cut (doc pr/28 §15.2).
+            for (auto edesc : ordered_edges(traj, graph)) {
                 auto sg1 = traj.view_graph()[edesc].segment;
                 if (!sg1) continue;
-                
+
                 double length = segment_track_length(sg1);
                 double medium_dQ_dx = segment_median_dQ_dx(sg1) / m_mip_dqdx_median;
                 
@@ -1885,7 +2322,12 @@ void PatternAlgorithms::examine_shower_1(Graph& graph, VertexPtr main_vertex, In
                 
                 n_tracks++;
                 total_length += length;
-                if (max_length < length) {
+                // Tie-broken on id(), matching the same max-segment idiom at
+                // :188 and :327 in this file.  This one was the odd site out:
+                // with a bare `<`, two equal-length segments were separated by
+                // the walk order alone (doc pr/28 §15.8).
+                if (max_length < length ||
+                    (max_length == length && max_sg && sg1->id() < max_sg->id())) {
                     max_length = length;
                     max_sg = sg1;
                 }
@@ -1919,11 +2361,12 @@ void PatternAlgorithms::examine_shower_1(Graph& graph, VertexPtr main_vertex, In
                 if (shower1->start_segment() && shower1->start_segment()->has_particle_info() &&
                     shower1->start_segment()->particle_info()) {
                     shower1->start_segment()->particle_info()->set_pdg(11);
+                    pr40_probe_setpdg(shower1->start_segment(), 11, "NeutrinoShowerClustering.cxx:new_shower_accepted");
                     shower1->start_segment()->particle_info()->set_mass(
                         particle_data->get_particle_mass(11));
                 }
                 shower1->start_segment()->set_flags(SegmentFlags::kAvoidMuonCheck);
-                shower1->update_particle_type(particle_data, recomb_model, m_mip_dqdx);
+                shower1->update_particle_type(particle_data, recomb_model, m_mip_dqdx, main_vertex, m_shower_proton_daughter_pion, m_mip_dqdx_median);
 
                 // Merge associated showers
                 for (auto shower : associated_showers) {
@@ -1931,7 +2374,7 @@ void PatternAlgorithms::examine_shower_1(Graph& graph, VertexPtr main_vertex, In
                     shower1->add_shower(*shower);
                 }
 
-                shower1->calculate_kinematics(particle_data, recomb_model);
+                shower1->calculate_kinematics(particle_data, recomb_model, m_shower_endpoint_exclude_start_vertex);
                 double kine_charge = cal_kine_charge(shower1, m_charge_2d_u, m_charge_2d_v, m_charge_2d_w, m_map_apa_ch_plane_wires, track_fitter, dv);
                 shower1->set_kine_charge(kine_charge);
                 shower1->set_flag_kinematics(true);
@@ -2061,7 +2504,7 @@ void PatternAlgorithms::examine_shower_1(Graph& graph, VertexPtr main_vertex, In
                 del_showers.insert(shower1);
             }
             
-            max_shower->calculate_kinematics(particle_data, recomb_model);
+            max_shower->calculate_kinematics(particle_data, recomb_model, m_shower_endpoint_exclude_start_vertex);
             max_shower->start_segment()->set_flags(SegmentFlags::kAvoidMuonCheck);
             double kine_charge = cal_kine_charge(max_shower, m_charge_2d_u, m_charge_2d_v, m_charge_2d_w, m_map_apa_ch_plane_wires, track_fitter, dv);
             max_shower->set_kine_charge(kine_charge);
@@ -2141,7 +2584,9 @@ void PatternAlgorithms::examine_showers(Graph& graph, VertexPtr main_vertex, Ind
             // Composition check: track-fraction within shower's start cluster
             TrajectoryView& traj = sh->fill_maps();
             double ttl = 0, ttrk = 0;
-            for (auto edesc : traj.edges()) {
+            // ordered_edges: ttl/ttrk are FP accumulations feeding the
+            // `ttrk > 0.25 * ttl` composition test just below (doc pr/28 §15.2).
+            for (auto edesc : ordered_edges(traj, graph)) {
                 auto sg1 = traj.view_graph()[edesc].segment;
                 if (!sg1 || sg1->cluster() != sh->start_segment()->cluster()) continue;
                 double len = segment_track_length(sg1);
@@ -2171,7 +2616,16 @@ void PatternAlgorithms::examine_showers(Graph& graph, VertexPtr main_vertex, Ind
     if (map_vertex_segments.count(main_vertex)) {
         for (auto sg : map_vertex_segments[main_vertex]) {
             if (map_segment_in_shower.count(sg)) {
-                if (!sg->has_particle_info() || std::abs(sg->particle_info()->pdg()) != 13) continue;
+                // doc pr/33 F2: the prototype's muon test is EXACT here
+                // (NeutrinoID_em_shower.h:10, get_particle_type()!=13), so a
+                // pdg -13 segment is skipped there and processed by the abs()
+                // port.  The !has_particle_info() term is NOT a divergence
+                // (no info => type 0 => continue in both trees).
+                const bool skip_legacy = !sg->has_particle_info() || std::abs(sg->particle_info()->pdg()) != 13;
+                const bool skip_proto  = !sg->has_particle_info() || sg->particle_info()->pdg() != 13;
+                g_pr33_audit.f2_calls[3]++;
+                if (skip_legacy != skip_proto) g_pr33_audit.f2_disagree[3]++;
+                if (m_shower_pdg_exact_muon_test ? skip_proto : skip_legacy) continue;
             }
 
             double sg_length = segment_track_length(sg);
@@ -2183,8 +2637,16 @@ void PatternAlgorithms::examine_showers(Graph& graph, VertexPtr main_vertex, Ind
             VertexPtr vtx  = (v1 == main_vertex) ? v2 : v1;
             if (!vtx) continue;
 
-            auto daughter_result = calculate_num_daughter_showers(graph, main_vertex, sg, false);
-            double daughter_length = daughter_result.second;
+            // doc pr/33 F1: the prototype calls calculate_num_daughter_tracks
+            // here (NeutrinoID_em_shower.h:17, flag=false => track-only
+            // lengths, length > 0); the port's _showers(...,false) sums every
+            // daughter segment.  Both computed unconditionally for the counter.
+            auto daughter_legacy = calculate_num_daughter_showers(graph, main_vertex, sg, false);
+            auto daughter_proto  = calculate_num_daughter_tracks(graph, main_vertex, sg, false, 0);
+            g_pr33_audit.f1_ex_calls++;
+            if (daughter_legacy.second != daughter_proto.second) g_pr33_audit.f1_ex_differ++;
+            double daughter_length = m_daughter_count_proto_examine_showers ? daughter_proto.second
+                                                                            : daughter_legacy.second;
 
             // Pre-compute segment directions shared across Cases I, II, III
             WireCell::Point  vtx_pt           = vtx->fit().valid() ? vtx->fit().point : vtx->wcpt().point;
@@ -2344,7 +2806,7 @@ void PatternAlgorithms::examine_showers(Graph& graph, VertexPtr main_vertex, Ind
         shower->set_start_segment(sg);
         shower->set_start_point(main_vtx_pt);
         IndexedSegmentSet tmp_used_segments;
-        shower->complete_structure_with_start_segment(tmp_used_segments);
+        shower->complete_structure_with_start_segment(tmp_used_segments, "fit", "associate_points", m_shower_absorb_track_guard);
         if (pair_conn_type != 1) {
             if (segment_track_length(sg) > 44 * units::cm || seg_dir_weak(sg))
                 sg->set_flags(SegmentFlags::kAvoidMuonCheck);
@@ -2369,9 +2831,12 @@ void PatternAlgorithms::examine_showers(Graph& graph, VertexPtr main_vertex, Ind
             }
         }
 
-        if (sg->has_particle_info() && sg->particle_info()) sg->particle_info()->set_pdg(11);
-        shower->update_particle_type(particle_data, recomb_model, m_mip_dqdx);
-        shower->calculate_kinematics(particle_data, recomb_model);
+        if (sg->has_particle_info() && sg->particle_info()) {
+            sg->particle_info()->set_pdg(11);
+            pr40_probe_setpdg(sg, 11, "NeutrinoShowerClustering.cxx:merged_shower_start_segment");
+        }
+        shower->update_particle_type(particle_data, recomb_model, m_mip_dqdx, main_vertex, m_shower_proton_daughter_pion, m_mip_dqdx_median);
+        shower->calculate_kinematics(particle_data, recomb_model, m_shower_endpoint_exclude_start_vertex);
         shower->set_kine_charge(cal_kine_charge(shower, m_charge_2d_u, m_charge_2d_v, m_charge_2d_w, m_map_apa_ch_plane_wires, track_fitter, dv));
         shower->set_flag_kinematics(true);
     }
@@ -2414,7 +2879,7 @@ void PatternAlgorithms::examine_showers(Graph& graph, VertexPtr main_vertex, Ind
 
             if (angle_dir2 < 10 && angle_dir3 < 20) {
                 shower->add_shower(*shower1);
-                shower->calculate_kinematics(particle_data, recomb_model);
+                shower->calculate_kinematics(particle_data, recomb_model, m_shower_endpoint_exclude_start_vertex);
                 shower->set_kine_charge(cal_kine_charge(shower, m_charge_2d_u, m_charge_2d_v, m_charge_2d_w, m_map_apa_ch_plane_wires, track_fitter, dv));
                 shower->set_flag_kinematics(true);
                 del_showers.insert(shower1);
@@ -2436,7 +2901,7 @@ void PatternAlgorithms::examine_showers(Graph& graph, VertexPtr main_vertex, Ind
 }
 
 
-void PatternAlgorithms::id_pi0_with_vertex(int acc_segment_id, IndexedShowerSet& pi0_showers, ShowerIntMap& map_shower_pio_id, std::map<int, std::vector<ShowerPtr > >& map_pio_id_showers, std::map<int, std::pair<double, int> >& map_pio_id_mass, std::map<int, std::pair<int, int> >& map_pio_id_saved_pair, Pi0KineFeatures& pio_kine, Graph& graph, VertexPtr main_vertex, IndexedShowerSet& showers, Facade::Cluster* main_cluster, std::vector<Facade::Cluster*>& other_clusters, ClusterVertexMap map_cluster_main_vertices, ShowerVertexMap& map_vertex_in_shower, ShowerSegmentMap& map_segment_in_shower, VertexShowerSetMap& map_vertex_to_shower, ClusterPtrSet& used_shower_clusters, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model){
+void PatternAlgorithms::id_pi0_with_vertex(int& acc_segment_id, IndexedShowerSet& pi0_showers, ShowerIntMap& map_shower_pio_id, std::map<int, std::vector<ShowerPtr > >& map_pio_id_showers, std::map<int, std::pair<double, int> >& map_pio_id_mass, std::map<int, std::pair<int, int> >& map_pio_id_saved_pair, Pi0KineFeatures& pio_kine, Graph& graph, VertexPtr main_vertex, IndexedShowerSet& showers, Facade::Cluster* main_cluster, std::vector<Facade::Cluster*>& other_clusters, ClusterVertexMap map_cluster_main_vertices, ShowerVertexMap& map_vertex_in_shower, ShowerSegmentMap& map_segment_in_shower, VertexShowerSetMap& map_vertex_to_shower, ClusterPtrSet& used_shower_clusters, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model){
 
     if (!main_vertex) return;
 
@@ -2710,6 +3175,7 @@ void PatternAlgorithms::id_pi0_with_vertex(int acc_segment_id, IndexedShowerSet&
         pi0_showers.insert(shower_2);
 
         int pio_id = acc_segment_id++;
+        g_pr33_audit.f3_pi0_with_vertex++;
         map_shower_pio_id[shower_1]  = pio_id;
         map_shower_pio_id[shower_2]  = pio_id;
         map_pio_id_mass[pio_id]      = {mass_save, 1};
@@ -2719,13 +3185,13 @@ void PatternAlgorithms::id_pi0_with_vertex(int acc_segment_id, IndexedShowerSet&
         auto [sv1, ct1] = get_svc(shower_1);
         if (sv1 != vtx) {
             shower_1->set_start_vertex(vtx, 2);
-            shower_1->calculate_kinematics(particle_data, recomb_model);
+            shower_1->calculate_kinematics(particle_data, recomb_model, m_shower_endpoint_exclude_start_vertex);
             svc[shower_1] = {vtx, 2};  // keep cache consistent
         }
         auto [sv2, ct2] = get_svc(shower_2);
         if (sv2 != vtx) {
             shower_2->set_start_vertex(vtx, 2);
-            shower_2->calculate_kinematics(particle_data, recomb_model);
+            shower_2->calculate_kinematics(particle_data, recomb_model, m_shower_endpoint_exclude_start_vertex);
             svc[shower_2] = {vtx, 2};
         }
 
@@ -2780,7 +3246,7 @@ void PatternAlgorithms::id_pi0_with_vertex(int acc_segment_id, IndexedShowerSet&
 }
 
 
-void PatternAlgorithms::id_pi0_without_vertex(int acc_segment_id, IndexedShowerSet& pi0_showers, ShowerIntMap& map_shower_pio_id, std::map<int, std::vector<ShowerPtr > >& map_pio_id_showers, std::map<int, std::pair<double, int> >& map_pio_id_mass, std::map<int, std::pair<int, int> >& map_pio_id_saved_pair, Pi0KineFeatures& pio_kine, Graph& graph, VertexPtr main_vertex, IndexedShowerSet& showers, Facade::Cluster* main_cluster, std::vector<Facade::Cluster*>& other_clusters, ClusterVertexMap map_cluster_main_vertices, ShowerVertexMap& map_vertex_in_shower, ShowerSegmentMap& map_segment_in_shower, VertexShowerSetMap& map_vertex_to_shower, ClusterPtrSet& used_shower_clusters, IndexedSegmentSet& segments_in_long_muon, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model){
+void PatternAlgorithms::id_pi0_without_vertex(int& acc_segment_id, IndexedShowerSet& pi0_showers, ShowerIntMap& map_shower_pio_id, std::map<int, std::vector<ShowerPtr > >& map_pio_id_showers, std::map<int, std::pair<double, int> >& map_pio_id_mass, std::map<int, std::pair<int, int> >& map_pio_id_saved_pair, Pi0KineFeatures& pio_kine, Graph& graph, VertexPtr main_vertex, IndexedShowerSet& showers, Facade::Cluster* main_cluster, std::vector<Facade::Cluster*>& other_clusters, ClusterVertexMap map_cluster_main_vertices, ShowerVertexMap& map_vertex_in_shower, ShowerSegmentMap& map_segment_in_shower, VertexShowerSetMap& map_vertex_to_shower, ClusterPtrSet& used_shower_clusters, IndexedSegmentSet& segments_in_long_muon, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model){
 
     if (!main_vertex) return;
 
@@ -2790,8 +3256,8 @@ void PatternAlgorithms::id_pi0_without_vertex(int acc_segment_id, IndexedShowerS
     std::vector<SegmentPtr> main_vertex_segs;
     {
         auto vd = main_vertex->get_descriptor();
-        for (auto [eit, eend] = boost::out_edges(vd, graph); eit != eend; ++eit) {
-            SegmentPtr seg = graph[*eit].segment;
+        for (auto eit : sorted_out_edges(vd, graph)) {
+            SegmentPtr seg = graph[eit].segment;
             if (seg) main_vertex_segs.push_back(seg);
         }
         std::sort(main_vertex_segs.begin(), main_vertex_segs.end(), [&graph](const SegmentPtr& a, const SegmentPtr& b) {
@@ -2816,7 +3282,7 @@ void PatternAlgorithms::id_pi0_without_vertex(int acc_segment_id, IndexedShowerS
     
     // Stable shower comparator: order by start_segment graph index to eliminate
     // pointer-address-based non-determinism in all shower containers below.
-    auto shower_less = [&graph](const ShowerPtr& a, const ShowerPtr& b) {
+    auto shower_less = [this, &graph](const ShowerPtr& a, const ShowerPtr& b) {
         auto sa = a->start_segment();
         auto sb = b->start_segment();
         if (sa && sb) {
@@ -2826,6 +3292,12 @@ void PatternAlgorithms::id_pi0_without_vertex(int acc_segment_id, IndexedShowerS
         }
         else if (!sa &&  sb) return true;
         else if ( sa && !sb) return false;
+        // doc pr/33 F5: unconditional reachability counter for the
+        // same-index fallback (0 on a manifest = never reached there);
+        // knob-on orders by the stable per-run shower id (PRShower.cxx:45)
+        // instead of heap addresses.  House-rule fix, prototype n/a.
+        g_pr33_audit.f5_fallback_hits++;
+        if (m_shower_less_id_tiebreak) return a->get_shower_id() < b->get_shower_id();
         return a.get() < b.get(); // same-index fallback: stable within a run
     };
 
@@ -2889,10 +3361,22 @@ void PatternAlgorithms::id_pi0_without_vertex(int acc_segment_id, IndexedShowerS
     auto it_main = map_vertex_to_shower.find(main_vertex);
     if (it_main != map_vertex_to_shower.end()) {
         for (auto shower : it_main->second) {
-            if (shower->get_particle_type() == 13) continue;
+            // doc pr/33 F2: prototype reads the start segment's PDG here
+            // (NeutrinoID_shower_clustering.h:497, exact ==13).
+            {
+                int type_startseg = 0;
+                if (shower->start_segment() && shower->start_segment()->has_particle_info() && shower->start_segment()->particle_info()) {
+                    type_startseg = shower->start_segment()->particle_info()->pdg();
+                }
+                const bool skip_legacy = shower->get_particle_type() == 13;
+                const bool skip_proto  = type_startseg == 13;
+                g_pr33_audit.f2_calls[4]++;
+                if (skip_legacy != skip_proto) g_pr33_audit.f2_disagree[4]++;
+                if (m_shower_pdg_from_start_segment ? skip_proto : skip_legacy) continue;
+            }
             if (shower->get_total_length() < 3 * units::cm) continue;
             if (pi0_showers.find(shower) != pi0_showers.end()) continue;
-            
+
             WireCell::Point test_p = shower->get_start_point();
             WireCell::Vector dir = shower_cal_dir_3vector(*shower, test_p, 15 * units::cm);
             WireCell::Point p2(test_p.x() + dir.x(), test_p.y() + dir.y(), test_p.z() + dir.z());
@@ -2905,10 +3389,22 @@ void PatternAlgorithms::id_pi0_without_vertex(int acc_segment_id, IndexedShowerS
         if (vtx == main_vertex) continue;
         
         for (auto shower : shower_set) {
-            if (shower->get_particle_type() == 13) continue;
+            // doc pr/33 F2: prototype reads the start segment's PDG here
+            // (NeutrinoID_shower_clustering.h:511, exact ==13).
+            {
+                int type_startseg = 0;
+                if (shower->start_segment() && shower->start_segment()->has_particle_info() && shower->start_segment()->particle_info()) {
+                    type_startseg = shower->start_segment()->particle_info()->pdg();
+                }
+                const bool skip_legacy = shower->get_particle_type() == 13;
+                const bool skip_proto  = type_startseg == 13;
+                g_pr33_audit.f2_calls[5]++;
+                if (skip_legacy != skip_proto) g_pr33_audit.f2_disagree[5]++;
+                if (m_shower_pdg_from_start_segment ? skip_proto : skip_legacy) continue;
+            }
             if (shower->get_total_length() < 3 * units::cm) continue;
             if (pi0_showers.find(shower) != pi0_showers.end()) continue;
-            
+
             auto [start_vtx, conn_type] = shower->get_start_vertex_and_type();
             if (conn_type != 3) continue;
             
@@ -3113,7 +3609,8 @@ void PatternAlgorithms::id_pi0_without_vertex(int acc_segment_id, IndexedShowerS
             
             int pio_id = acc_segment_id;
             acc_segment_id++;
-            
+            g_pr33_audit.f3_pi0_without_vertex++;
+
             map_shower_pio_id[shower_1] = pio_id;
             map_shower_pio_id[shower_2] = pio_id;
             map_pio_id_mass[pio_id] = std::make_pair(mass_save, 2);
@@ -3142,10 +3639,10 @@ void PatternAlgorithms::id_pi0_without_vertex(int acc_segment_id, IndexedShowerS
             }
             
             shower_1->set_start_vertex(main_vertex, 2);
-            shower_1->calculate_kinematics(particle_data, recomb_model);
+            shower_1->calculate_kinematics(particle_data, recomb_model, m_shower_endpoint_exclude_start_vertex);
             
             shower_2->set_start_vertex(main_vertex, 2);
-            shower_2->calculate_kinematics(particle_data, recomb_model);
+            shower_2->calculate_kinematics(particle_data, recomb_model, m_shower_endpoint_exclude_start_vertex);
             
             update_shower_maps(showers, map_vertex_in_shower, map_segment_in_shower,
                               map_vertex_to_shower, used_shower_clusters);
@@ -3174,6 +3671,34 @@ void PatternAlgorithms::shower_clustering_with_nv(int acc_segment_id, IndexedSho
                     seg->flags_any(SegmentFlags::kShowerTrajectory) ? 1 : 0,
                     seg->has_particle_info() ? seg->particle_info()->pdg() : 0);
             }
+        }
+    }
+
+    // doc sbnd_xin/docs/pr/65 round 3: main-cluster segments unreachable from
+    // main_vertex, computed ONCE here -- PR-graph topology is frozen for the
+    // whole span of this function (no graph mutators in this file; the last
+    // mutation, main_vertex_graph_audit, runs before this call).  Recomputed
+    // unconditionally so no state leaks between calls; empty when the knob is
+    // off, which keeps every relaxed guard below byte-identical to legacy.
+    // Such segments exist only when other_seg_keep_isolated (doc pr/54) kept
+    // a residual segment as a disconnected component of the main cluster's
+    // graph; the prototype cannot reach this state (attach-or-discard).
+    m_absorb_unreachable_main_segs.clear();
+    if (m_shower_absorb_unreachable_main && main_vertex && main_cluster) {
+        for (const auto& seg : unreachable_segments(graph, main_vertex)) {
+            if (seg && seg->cluster() == main_cluster) {
+                m_absorb_unreachable_main_segs.insert(seg);
+            }
+        }
+        if (!m_absorb_unreachable_main_segs.empty()) {
+            std::string ids;
+            for (const auto& seg : m_absorb_unreachable_main_segs) {
+                if (!ids.empty()) ids += ",";
+                ids += std::to_string(seg->id());
+            }
+            SPDLOG_LOGGER_DEBUG(s_log,
+                "pr65 absorb_unreachable_main: {} graph-unreachable main-cluster segment(s) offered to shower absorbers: [{}]",
+                m_absorb_unreachable_main_segs.size(), ids);
         }
     }
 
@@ -3265,7 +3790,20 @@ void PatternAlgorithms::shower_clustering_with_nv(int acc_segment_id, IndexedSho
                                        particle_data, recomb_model, true);
     t_in_other_clusters = MS(Clock::now() - t0); t0 = Clock::now();
     // check_used_shower_cluster_933("shower_clustering_in_other_clusters");
-    
+
+    // doc sbnd_xin/docs/pr/74 round 2 K4 -- absorb the walked-past track stem
+    // between the main vertex and each substantial EM shower's attach vertex.
+    // After in_other_clusters (so conn-3/4 showers exist) and before the
+    // second kinematics pass (so absorbed charge is counted).  false = no
+    // call = byte-identical.
+    if (m_shower_stem_backfill) {
+        stem_backfill(graph, main_vertex, showers, map_vertex_in_shower,
+                      map_segment_in_shower, map_vertex_to_shower,
+                      used_shower_clusters, segments_in_long_muon,
+                      particle_data, recomb_model);
+        t0 = Clock::now();
+    }
+
     // Calculate shower kinematics again
     SPDLOG_LOGGER_TRACE(s_log,
         "shower_clustering_with_nv: {} shower(s) before calc_kine_2", showers.size());
@@ -3281,8 +3819,14 @@ void PatternAlgorithms::shower_clustering_with_nv(int acc_segment_id, IndexedSho
     t_examine_showers = MS(Clock::now() - t0); t0 = Clock::now();
     // check_used_shower_cluster_933("examine_showers");
     
-    // Identify pi0 with vertex
-    id_pi0_with_vertex(acc_segment_id, pi0_showers, map_shower_pio_id, map_pio_id_showers, map_pio_id_mass,
+    // Identify pi0 with vertex.
+    // doc pr/33 F3: both finders get a reference to the same local copy, so
+    // nothing propagates past this function either way (the caller's
+    // variable is separately seeded by reference into ssm_tagger -- §10.10
+    // amendment 1).  Knob-off restores the copy between the two finders, so
+    // each seeds from the same base = the legacy by-value behavior.
+    int pi0_acc = acc_segment_id;
+    id_pi0_with_vertex(pi0_acc, pi0_showers, map_shower_pio_id, map_pio_id_showers, map_pio_id_mass,
                       map_pio_id_saved_pair, pio_kine, graph, main_vertex, showers, main_cluster,
                       other_clusters, map_cluster_main_vertices, map_vertex_in_shower,
                       map_segment_in_shower, map_vertex_to_shower, used_shower_clusters,
@@ -3291,7 +3835,8 @@ void PatternAlgorithms::shower_clustering_with_nv(int acc_segment_id, IndexedSho
     // check_used_shower_cluster_933("id_pi0_with_vertex");
 
     // Identify pi0 without vertex (displaced vertex)
-    id_pi0_without_vertex(acc_segment_id, pi0_showers, map_shower_pio_id, map_pio_id_showers,
+    if (!m_pi0_id_shared_allocator) pi0_acc = acc_segment_id;
+    id_pi0_without_vertex(pi0_acc, pi0_showers, map_shower_pio_id, map_pio_id_showers,
                          map_pio_id_mass, map_pio_id_saved_pair, pio_kine, graph, main_vertex, showers,
                          main_cluster, other_clusters, map_cluster_main_vertices,
                          map_vertex_in_shower, map_segment_in_shower, map_vertex_to_shower,

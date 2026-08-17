@@ -2,6 +2,7 @@
 #include "WireCellClus/Facade_Cluster.h"
 #include "WireCellClus/DynamicPointCloud.h"
 #include "WireCellClus/ClusteringFuncs.h"
+#include "WireCellClus/PRTrajectoryView.h"
 #include "WireCellUtil/Units.h"
 #include "WireCellUtil/KSTest.h"
 #include "WireCellUtil/Logging.h"
@@ -9,12 +10,78 @@
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
+#include <list>
 #include <numeric>
+#include <set>
 #include <algorithm>
 
 static auto s_log = WireCell::Log::logger("clus.NeutrinoPattern");
 
 namespace WireCell::Clus::PR {
+    // doc sbnd_xin/docs/pr/74 round 2 P1 -- docstring in PRSegmentFunctions.h.
+    bool segment_shower_in_cascade_vetoed(SegmentPtr seg, double mip_dqdx_median,
+                                          double max_len, double mip_hi)
+    {
+        if (!seg) return false;
+        if (segment_track_length(seg) <= max_len) return false;
+        const double med = segment_median_dQ_dx(seg);
+        if (med <= 0 || mip_dqdx_median <= 0) return false;
+        return med < mip_hi * mip_dqdx_median;
+    }
+
+    // doc sbnd_xin/docs/pr/74 round 2 P2 -- docstring in PRSegmentFunctions.h.
+    double segment_far_subtree_track_length(Graph& graph, VertexPtr start_vtx,
+                                            SegmentPtr stem, double cap)
+    {
+        double total = 0;
+        if (!start_vtx || !start_vtx->descriptor_valid()) return total;
+        std::set<SegmentPtr> used_segs{stem};
+        std::set<VertexPtr> used_vtx{start_vtx};
+        std::vector<VertexPtr> stack{start_vtx};
+        while (!stack.empty()) {
+            VertexPtr v = stack.back();
+            stack.pop_back();
+            if (!v || !v->descriptor_valid()) continue;
+            for (auto edesc : sorted_out_edges(v->get_descriptor(), graph)) {
+                SegmentPtr sg = graph[edesc].segment;
+                if (!sg || used_segs.count(sg)) continue;
+                used_segs.insert(sg);
+                total += segment_track_length(sg);
+                if (total > cap) return total;
+                VertexPtr ov = find_other_vertex(graph, sg, v);
+                if (ov && !used_vtx.count(ov)) {
+                    used_vtx.insert(ov);
+                    stack.push_back(ov);
+                }
+            }
+        }
+        return total;
+    }
+
+    // doc sbnd_xin/docs/pr/74 round 4 -- docstring in PRSegmentFunctions.h.
+    double segment_pair_kink_deg(SegmentPtr a, SegmentPtr b,
+                                 const WireCell::Point& shared_pt, double dis_cut)
+    {
+        if (!a || !b) return -1;
+        WireCell::Point p = shared_pt;   // the overload takes a mutable ref
+        const auto d1 = segment_cal_dir_3vector(a, p, dis_cut);
+        const auto d2 = segment_cal_dir_3vector(b, p, dis_cut);
+        const double m1 = d1.magnitude(), m2 = d2.magnitude();
+        if (m1 <= 0 || m2 <= 0) return -1;
+        const double cosang = std::max(-1.0, std::min(1.0, d1.dot(d2) / (m1 * m2)));
+        return 180.0 - std::acos(cosang) / M_PI * 180.0;
+    }
+
+    // doc sbnd_xin/docs/pr/74 round 2 -- docstring in PRSegmentFunctions.h.
+    void pr74_probe_topo_flag(SegmentPtr seg, const char* what, const char* site)
+    {
+        static const bool dbg = (std::getenv("WCT_SHOWER_TOPO_DEBUG") != nullptr);
+        if (!dbg || !seg) return;
+        const int cid = seg->cluster() ? seg->cluster()->get_cluster_id() : -1;
+        std::fprintf(stderr, "TOPO_FLAG %s gidx=%zu id=%d clus=%d at %s\n",
+                     what, seg->get_graph_index(), seg->id(), cid, site);
+    }
+
     void create_segment_point_cloud(SegmentPtr segment,
                                 const std::vector<geo_point_t>& path_points,
                                 const IDetectorVolumes::pointer& dv,
@@ -189,7 +256,620 @@ namespace WireCell::Clus::PR {
         return std::get<0>(dpc->get_closest_2d_point_info(point, plane, face, apa));
     }
 
-    std::tuple<WireCell::Point, WireCell::Vector, WireCell::Vector, bool> segment_search_kink(SegmentPtr seg, WireCell::Point& start_p, const std::string& cloud_name, double dQ_dx_threshold, double cathode_x, double cathode_kink_xcut){
+    std::vector<size_t> segment_cathode_wide_kink_accepts(
+        const std::vector<Fit>& fits, double cathode_x, double angle_cut_deg,
+        double skirt, double baseline)
+    {
+        std::vector<size_t> accepts;
+        if (angle_cut_deg <= 0 || fits.size() < 3) return accepts;
+
+        // Cumulative arclength along the full fit trajectory.
+        std::vector<double> cum(fits.size(), 0);
+        for (size_t k = 1; k < fits.size(); k++) {
+            cum[k] = cum[k-1] + (fits[k].point - fits[k-1].point).magnitude();
+        }
+
+        for (size_t ic = 0; ic + 1 < fits.size(); ic++) {
+            const double xa = fits[ic].point.x() - cathode_x;
+            const double xb = fits[ic+1].point.x() - cathode_x;
+            // Sign change between consecutive fit points = a cathode crossing
+            // (either direction; a point exactly on the plane counts to the
+            // arm it is listed with, matching the census script).
+            if (!((xa <= 0 && xb > 0) || (xa >= 0 && xb < 0))) continue;
+
+            // Collect each arm's points with arclength from fits[ic] inside
+            // [skirt, skirt+baseline], staying on that arm's side of the
+            // plane.  Both lists are in increasing-index (direction-of-
+            // travel) order.
+            std::vector<Facade::geo_point_t> pts_a, pts_b;
+            for (size_t k = 0; k <= ic; k++) {
+                const double d = cum[ic] - cum[k];
+                if (d < skirt || d > skirt + baseline) continue;
+                const double xk = fits[k].point.x() - cathode_x;
+                if ((xa <= 0) ? (xk <= 0) : (xk >= 0)) pts_a.push_back(fits[k].point);
+            }
+            for (size_t k = ic + 1; k < fits.size(); k++) {
+                const double d = cum[k] - cum[ic];
+                if (d < skirt || d > skirt + baseline) continue;
+                const double xk = fits[k].point.x() - cathode_x;
+                if ((xb > 0) ? (xk >= 0) : (xk <= 0)) pts_b.push_back(fits[k].point);
+            }
+            if (pts_a.size() < 3 || pts_b.size() < 3) continue;
+
+            // PCA direction per arm.  calc_pca_dir takes the center as INPUT
+            // (it does not compute a centroid) and returns a normalized axis
+            // with no sign convention -- orient each along its own arm's
+            // chord so both follow the direction of travel; a straight track
+            // then gives ~0 deg.
+            Facade::geo_point_t cen_a(0,0,0), cen_b(0,0,0);
+            for (const auto& p : pts_a) cen_a += p;
+            for (const auto& p : pts_b) cen_b += p;
+            cen_a = cen_a * (1.0 / pts_a.size());
+            cen_b = cen_b * (1.0 / pts_b.size());
+            auto va = Facade::calc_pca_dir(cen_a, pts_a);
+            auto vb = Facade::calc_pca_dir(cen_b, pts_b);
+            if (va.dot(pts_a.back() - pts_a.front()) < 0) va = va * -1.0;
+            if (vb.dot(pts_b.back() - pts_b.front()) < 0) vb = vb * -1.0;
+            const double ang = std::acos(std::max(-1.0, std::min(1.0, va.dot(vb)))) / M_PI * 180.0;
+            if (ang < angle_cut_deg) continue;
+
+            // Accept at the crossing-adjacent index farther from the plane;
+            // step outward while still within 0.5 cm of it -- the
+            // |x| < 0.45 cm active-volume slab hole would reject a vertex
+            // fitted there (doc pr/47 sec 5).
+            const bool lower = std::abs(xa) >= std::abs(xb);
+            size_t acc = lower ? ic : ic + 1;
+            const double slab_clear = 0.5 * units::cm;
+            for (int step = 0; step < 2 && std::abs(fits[acc].point.x() - cathode_x) < slab_clear; step++) {
+                if (lower) { if (acc == 0) break; acc--; }
+                else       { if (acc + 2 >= fits.size()) break; acc++; }
+            }
+            // segment_search_kink's success path requires 0 < save_i < size-1.
+            if (acc == 0) acc = 1;
+            if (acc + 1 >= fits.size()) acc = fits.size() - 2;
+            accepts.push_back(acc);
+        }
+        return accepts;
+    }
+
+    double segment_wide_turn_angle(const std::vector<Fit>& fits, size_t idx,
+                                   double skirt, double baseline)
+    {
+        if (fits.size() < 3 || idx >= fits.size()) return 0;
+
+        // Cumulative arclength along the full fit trajectory.
+        std::vector<double> cum(fits.size(), 0);
+        for (size_t k = 1; k < fits.size(); k++) {
+            cum[k] = cum[k-1] + (fits[k].point - fits[k-1].point).magnitude();
+        }
+
+        // Per-arm points with arclength from fits[idx] inside
+        // [skirt, skirt+baseline], each list in increasing-index order --
+        // same collection as segment_cathode_wide_kink_accepts minus the
+        // cathode side-of-plane requirement.
+        std::vector<Facade::geo_point_t> pts_a, pts_b;
+        for (size_t k = 0; k <= idx; k++) {
+            const double d = cum[idx] - cum[k];
+            if (d < skirt || d > skirt + baseline) continue;
+            pts_a.push_back(fits[k].point);
+        }
+        for (size_t k = idx; k < fits.size(); k++) {
+            const double d = cum[k] - cum[idx];
+            if (d < skirt || d > skirt + baseline) continue;
+            pts_b.push_back(fits[k].point);
+        }
+        if (pts_a.size() < 3 || pts_b.size() < 3) return 0;
+
+        Facade::geo_point_t cen_a(0,0,0), cen_b(0,0,0);
+        for (const auto& p : pts_a) cen_a += p;
+        for (const auto& p : pts_b) cen_b += p;
+        cen_a = cen_a * (1.0 / pts_a.size());
+        cen_b = cen_b * (1.0 / pts_b.size());
+        auto va = Facade::calc_pca_dir(cen_a, pts_a);
+        auto vb = Facade::calc_pca_dir(cen_b, pts_b);
+        if (va.dot(pts_a.back() - pts_a.front()) < 0) va = va * -1.0;
+        if (vb.dot(pts_b.back() - pts_b.front()) < 0) vb = vb * -1.0;
+        return std::acos(std::max(-1.0, std::min(1.0, va.dot(vb)))) / M_PI * 180.0;
+    }
+
+    // doc sbnd_xin/docs/pr/50: every interior turn >= angle_cut near a
+    // vertex.  See the header comment for the contract.
+    std::vector<VertexKinkScanResult> path_scan_vertex_kink(const std::vector<WireCell::Point>& pts,
+                                                            double d_min, double d_max,
+                                                            double skirt, double baseline,
+                                                            double angle_cut, double min_arm)
+    {
+        std::vector<VertexKinkScanResult> cands;
+        if (pts.size() < 4) return cands;
+
+        std::vector<double> cum(pts.size(), 0);
+        for (size_t k = 1; k < pts.size(); k++) {
+            cum[k] = cum[k-1] + (pts[k] - pts[k-1]).magnitude();
+        }
+
+        // segment_wide_turn_angle reads only .point from each Fit.
+        std::vector<Fit> pseudo(pts.size());
+        for (size_t k = 0; k < pts.size(); k++) pseudo[k].point = pts[k];
+
+        // Outward-arm direction anchored at index i: PCA over the arclength
+        // window [skirt, skirt+baseline] beyond i, oriented outward; chord
+        // i -> back() when the window holds < 3 points.
+        auto outward_dir = [&](size_t i) -> WireCell::Vector {
+            std::vector<Facade::geo_point_t> pts_b;
+            for (size_t k = i; k < pts.size(); k++) {
+                const double d = cum[k] - cum[i];
+                if (d < skirt || d > skirt + baseline) continue;
+                pts_b.push_back(pts[k]);
+            }
+            if (pts_b.size() < 3) {
+                return (pts.back() - pts[i]).norm();
+            }
+            Facade::geo_point_t cen_b(0,0,0);
+            for (const auto& p : pts_b) cen_b += p;
+            cen_b = cen_b * (1.0 / pts_b.size());
+            auto vb = Facade::calc_pca_dir(cen_b, pts_b);
+            if (vb.dot(pts_b.back() - pts_b.front()) < 0) vb = vb * -1.0;
+            return vb;
+        };
+
+        for (size_t i = 1; i + 1 < pts.size(); i++) {
+            if (cum[i] < d_min || cum[i] > d_max) continue;
+            if (cum.back() - cum[i] < min_arm) continue;
+            double turn = segment_wide_turn_angle(pseudo, i, skirt, baseline);
+            if (turn == 0) {
+                // Vertex-side arm too short for the symmetric PCA windows
+                // (the short-stub case): chord from the vertex end against
+                // the outward arm.
+                if (cum[i] <= 0) continue;
+                const auto va = (pts[i] - pts[0]).norm();
+                const auto vb = outward_dir(i);
+                turn = std::acos(std::max(-1.0, std::min(1.0, va.dot(vb)))) / M_PI * 180.0;
+            }
+            if (turn >= angle_cut) {
+                VertexKinkScanResult c;
+                c.found = true;
+                c.idx = static_cast<int>(i);
+                c.turn_deg = turn;
+                c.arc = cum[i];
+                cands.push_back(c);
+            }
+        }
+        return cands;
+    }
+
+    TwoEndBreakResult segment_two_end_break_scan(
+        SegmentPtr seg, const Clus::ParticleDataSet::pointer& particle_data,
+        const TwoEndBreakOptions& opt)
+    {
+        TwoEndBreakResult res;
+        if (!seg || !particle_data) return res;
+        const auto& fits = seg->fits();
+        const size_t N = fits.size();
+        if (N < 2 * static_cast<size_t>(std::max(opt.min_arm_pts, 1))) return res;
+
+        std::vector<double> cum(N, 0), dqdx(N, 0);
+        dqdx[0] = fits[0].dQ / (fits[0].dx + 1e-9);
+        for (size_t k = 1; k < N; k++) {
+            cum[k] = cum[k-1] + (fits[k].point - fits[k-1].point).magnitude();
+            dqdx[k] = fits[k].dQ / (fits[k].dx + 1e-9);
+        }
+        const double L = cum.back();
+        if (L < opt.min_len) return res;
+
+        auto median_of = [](std::vector<double> v) -> double {
+            if (v.empty()) return 0;
+            const size_t mid = v.size() / 2;
+            std::nth_element(v.begin(), v.begin() + mid, v.end());
+            double m = v[mid];
+            if (v.size() % 2 == 0) {
+                std::nth_element(v.begin(), v.begin() + mid - 1, v.begin() + mid);
+                m = 0.5 * (m + v[mid - 1]);
+            }
+            return m;
+        };
+
+        // Interior reference: median dQ/dx over the middle [0.3L, 0.7L] --
+        // length-adaptive, never empty for L >= min_len (the fixed
+        // 12-cm-from-ends window of the doc pr/48 census is structurally
+        // empty for L < 24 cm, which is exactly how it missed 56211).
+        std::vector<double> vint;
+        for (size_t k = 0; k < N; k++) {
+            if (cum[k] >= 0.3 * L && cum[k] <= 0.7 * L) vint.push_back(dqdx[k]);
+        }
+        const double med_int = median_of(vint);
+        if (med_int <= 0) return res;
+
+        // Per-end rise: max over 2/4/8 cm end windows (clamped to L/4) of
+        // the end-window median.  The short sub-window recovers a Bragg peak
+        // concentrated in the first few cm (51513) or the last arc steps
+        // (56211) that an 8 cm window dilutes.
+        const double wins[3] = {2*units::cm, 4*units::cm, 8*units::cm};
+        double best_lo = 0, best_hi = 0;
+        for (double w0 : wins) {
+            const double w = std::min(w0, 0.25 * L);
+            std::vector<double> vlo, vhi;
+            for (size_t k = 0; k < N; k++) {
+                if (cum[k] <= w) vlo.push_back(dqdx[k]);
+                if (L - cum[k] <= w) vhi.push_back(dqdx[k]);
+            }
+            if (vlo.size() >= 2) best_lo = std::max(best_lo, median_of(vlo));
+            if (vhi.size() >= 2) best_hi = std::max(best_hi, median_of(vhi));
+        }
+        res.absmed_lo = best_lo;
+        res.absmed_hi = best_hi;
+        // Rise reference: min(interior median, 1x the MIP median).  A pure
+        // interior-median reference structurally fails on a short two-proton
+        // event (56211: interior ~3.1x MIP because BOTH arms are proton --
+        // the far-end rise reads 0.91x "interior" while sitting at 2.8x
+        // MIP).  Clamping the reference at 1 MIP measures the rise against
+        // "a MIP-like track" whenever the interior is hotter than one.
+        const double rise_ref = std::min(med_int, opt.mip_dqdx_median);
+        res.ratio_lo = best_lo / rise_ref;
+        res.ratio_hi = best_hi / rise_ref;
+
+        const bool rise_r1 = res.ratio_lo >= opt.rise_r1 && res.ratio_hi >= opt.rise_r1 &&
+                             res.absmed_lo >= opt.abs_end_min * opt.mip_dqdx_median &&
+                             res.absmed_hi >= opt.abs_end_min * opt.mip_dqdx_median;
+        const bool rise_r2 = res.ratio_lo >= opt.rise_r2 && res.ratio_hi >= opt.rise_r2;
+        // Neither route's rise gate open => no accept is possible; skip the
+        // localization work (the overwhelmingly common case).
+        if (!rise_r1 && !rise_r2) return res;
+
+        // Localization.  Physically-anchored candidate indices -- NOT a
+        // blind argmin of the joint stopping score: a stopping-template
+        // score is flat in k whenever the arm on one side is a
+        // template-perfect prefix/suffix (any prefix of a muon Bragg is
+        // itself a muon Bragg), so a score scan cannot localize a
+        // same-species or plateau-dominated junction.  What localizes in
+        // every measured event is:
+        //  - the LOCAL dQ/dx DIP at the junction (57903: 0.81 MIP right at
+        //    truth vs ~2 MIP plateau; 56211: 2.37; 51513: 1.03) -- route R1
+        //    evaluates EVERY eligible interior local minimum of the 3-point
+        //    mean below the interior median (a track can carry spurious
+        //    deeper dips from dead regions; the joint stopping score at the
+        //    acceptance tier then picks the genuine junction among them);
+        //  - the wide-baseline PCA turn maximum (57485: 55.7 deg at truth,
+        //    57903: 32.8 deg) -- route R2's single candidate (a species-step
+        //    junction is a step, not a local dip, so R1's marker can miss it
+        //    while the turn nails it).
+        // 3-point mean smoothing: a genuine junction dip spans >= 2 fit
+        // samples, single-sample noise is damped 3x.  Index-ordered scans,
+        // strict-improvement updates: deterministic.
+        auto arm_ok = [&](size_t k) {
+            if (cum[k] < opt.min_arm || L - cum[k] < opt.min_arm) return false;
+            if (k + 1 < static_cast<size_t>(opt.min_arm_pts)) return false;
+            if (N - k < static_cast<size_t>(opt.min_arm_pts)) return false;
+            return true;
+        };
+        // R1's candidate: the DEEPEST eligible local minimum at or above
+        // dip_floor.  The floor vetoes instrumental dips -- a dead-region /
+        // gap dip reads far below any physical junction dip (57903: 0.50x
+        // MIP at a mid-muon gap vs 0.83x at the genuine junction; both
+        // particles are at maximal residual range at a junction, so its dip
+        // is a geometry/sampling effect that stays near MIP, not a missing-
+        // charge effect).  Measured on all four motivating events the
+        // deepest above-floor dip IS the junction (51513: 0.93@arc7.2 vs
+        // next 0.96; 56211: 2.3@19.8; 57903: 0.83@49.2 once 0.50@64.8 is
+        // vetoed).
+        std::vector<double> m3(N, 1e18);
+        for (size_t k = 1; k + 1 < N; k++) m3[k] = (dqdx[k-1] + dqdx[k] + dqdx[k+1]) / 3.0;
+        // Candidates: RAW local minima below the interior median (the raw
+        // dip is the sharp, refit-stable junction feature; an m3-local-min
+        // test can miss a junction dip sitting flush against the far-end
+        // Bragg rise, 56211), with the smoothed value at or above dip_floor
+        // (instrumental veto -- a single low sample does not veto, a
+        // dead-region stretch does).
+        std::vector<size_t> dip_cands;
+        for (size_t k = 1; k + 1 < N; k++) {
+            if (!arm_ok(k)) continue;
+            if (!(dqdx[k] <= dqdx[k-1] && dqdx[k] <= dqdx[k+1] && dqdx[k] < med_int)) continue;
+            if (m3[k] < opt.dip_floor * opt.mip_dqdx_median) continue;  // instrumental
+            dip_cands.push_back(k);
+        }
+        // Deepest-first candidate order by the SMOOTHED depth (stable:
+        // value, then index) -- raw depth ranks single noise undershoots too
+        // high; m3 ranks the genuinely low neighborhood first.  The deepest
+        // above-floor dip IS the junction on every measured event, but its
+        // accept can fail for reasons unrelated to the physics, so the
+        // next-deepest candidates get their turn.
+        std::sort(dip_cands.begin(), dip_cands.end(),
+                  [&](size_t a, size_t b) {
+                      if (m3[a] != m3[b]) return m3[a] < m3[b];
+                      return a < b;
+                  });
+        const int k_dip = dip_cands.empty() ? -1 : static_cast<int>(dip_cands.front());
+        int k_turn = -1;
+        double turn_max = 0;
+        if (opt.turn_angle > 0 && rise_r2) {
+            // doc sbnd_xin/docs/pr/90 sec 3b + sec 8.6: near a segment end the
+            // PCA window is starved (320865: 4 pts / 1.94 cm of the 35 cm
+            // baseline) and reads fit jitter, not heading, yet can outscore a
+            // well-formed true corner in this argmax.  When turn_min_arm_frac
+            // > 0, a PREFERENCE pass runs first over indices where BOTH arms'
+            // achievable arclength (bounded by the segment end, beyond the
+            // skirt) reaches that fraction of turn_baseline; its winner is
+            // kept only if it clears opt.turn_angle on its own.  Otherwise
+            // the legacy unrestricted argmax stands -- the round-1 live A/B
+            // (sec 8.6) proved a hard eligibility filter kills genuine
+            // near-end corners (owner-approved b1=0 vertices at 4-5.5 cm
+            // from a segment end); span cannot discriminate those from the
+            // spurious peaks, but "prefer a well-formed corner when one
+            // exists above threshold" changes exactly the shadowed-corner
+            // class and nothing else.  0 = legacy argmax, byte-identical.
+            if (opt.turn_min_arm_frac > 0) {
+                const double need = opt.turn_min_arm_frac * opt.turn_baseline;
+                for (size_t k = 1; k + 1 < N; k++) {
+                    if (!arm_ok(k)) continue;
+                    if (cum[k] - opt.turn_skirt < need || (L - cum[k]) - opt.turn_skirt < need) continue;
+                    const double t = segment_wide_turn_angle(fits, k, opt.turn_skirt, opt.turn_baseline);
+                    if (t > turn_max) {
+                        turn_max = t;
+                        k_turn = static_cast<int>(k);
+                    }
+                }
+                if (turn_max < opt.turn_angle) {
+                    k_turn = -1;
+                    turn_max = 0;
+                }
+            }
+            if (k_turn < 0) {
+                for (size_t k = 1; k + 1 < N; k++) {
+                    if (!arm_ok(k)) continue;
+                    const double t = segment_wide_turn_angle(fits, k, opt.turn_skirt, opt.turn_baseline);
+                    if (t > turn_max) {
+                        turn_max = t;
+                        k_turn = static_cast<int>(k);
+                    }
+                }
+            }
+        }
+        res.idx_dip = k_dip;
+        res.idx_turn = k_turn;
+        res.turn_deg = turn_max;
+        if (k_dip < 0 && k_turn < 0) return res;
+
+        // Acceptance tier at a candidate index: both arms re-scored over
+        // accept_range windows (the tier eval_ks_ratio's constants were
+        // tuned at).  Arm A = fits[0..k] hypothesized stopping at the
+        // segment START (vectors REVERSED -- do_track_comp anchors the stop
+        // at max L); arm B = fits[k..N-1] stopping at the END (as-is).
+        // skip_stop_samples=1 (terminus dx anomaly), empty_abstain=true (new
+        // code path, abstain is the honest filler).  Returns
+        // (flagA, flagB, sA, sB) with s = min(muon, proton) score.
+        auto accept_at = [&](size_t k) {
+            std::vector<double> rLa(k + 1), rQa(k + 1);
+            for (size_t i = 0; i <= k; i++) {
+                rLa[i] = cum[k] - cum[k - i];
+                rQa[i] = dqdx[k - i];
+            }
+            std::vector<double> Lb(N - k), Qb(N - k);
+            for (size_t i = 0; i < N - k; i++) {
+                Lb[i] = cum[k + i] - cum[k];
+                Qb[i] = dqdx[k + i];
+            }
+            auto ra = do_track_comp(rLa, rQa, opt.accept_range, 0, particle_data, opt.mip_dqdx, 1, true);
+            auto rb = do_track_comp(Lb, Qb, opt.accept_range, 0, particle_data, opt.mip_dqdx, 1, true);
+            return std::make_tuple(std::round(ra.at(0)) != 0, std::round(rb.at(0)) != 0,
+                                   std::min(ra.at(1), ra.at(2)), std::min(rb.at(1), rb.at(2)));
+        };
+
+        // Route R1 at the chosen dip.  The strict stopping-vs-flat direction
+        // flag is required per arm, WAIVED for a short (< 6 cm) arm --
+        // eval_ks_ratio is unreliable on <= 10 samples and a genuine short
+        // second arm (56211: ~2-3 cm proton at 2.8x MIP) fails it for lack
+        // of statistics, not lack of physics; the waived arm is still held
+        // to the score cap, and rise_r1's absolute end floor already
+        // guarantees its end is Bragg-hot.
+        const double short_arm = 6 * units::cm;
+        if (rise_r1) {
+            for (size_t k : dip_cands) {
+                auto [fA, fB, sA, sB] = accept_at(k);
+                res.flagA = fA; res.flagB = fB;
+                res.sA = sA; res.sB = sB;
+                res.joint_score = sA + sB;
+                const bool okA = fA || cum[k] < short_arm;
+                const bool okB = fB || (L - cum[k]) < short_arm;
+                const bool acc = okA && okB && std::max(sA, sB) <= opt.score_cap_r1;
+                res.attempts.push_back({static_cast<int>(k), m3[k], sA, sB, fA, fB, acc});
+                if (acc) {
+                    res.route1 = true;
+                    res.break_idx = static_cast<int>(k);
+                    break;   // deepest-first: the first accepted candidate wins
+                }
+            }
+        }
+        // Route R2 at the turn-maximum index, only when R1 did not accept
+        // (measured: the wide-turn maximum sits at an endpoint bend artifact
+        // on 51513/57903, so it must never override a good dip accept; it
+        // exists for the species-step junction, which is a step -- not a
+        // local dip -- with a genuine wide bend, 57485).  R2 requires the
+        // direction flag on at least ONE arm: eval_ks_ratio's margins reject
+        // a genuine but weak Bragg (57485's far-arm ~1.3-1.4x muon rise),
+        // and R2's primary evidence is the turn -- both arms still must beat
+        // the score cap against the stopping templates.
+        if (!res.route1 && rise_r2 && k_turn >= 0 && turn_max >= opt.turn_angle) {
+            auto [fA, fB, sA, sB] = accept_at(static_cast<size_t>(k_turn));
+            res.flagA = fA; res.flagB = fB;
+            res.sA = sA; res.sB = sB;
+            res.joint_score = sA + sB;
+            bool acc = (fA || fB) && std::max(sA, sB) <= opt.score_cap_r2;
+            // doc sbnd_xin/docs/pr/90 sec 9.4b (knob bragg_veto_turn): the
+            // owner-calibrated keep/kill rule for accepted R2 breaks.  All 4
+            // owner-KILL events hug the 25 deg accept (26.5-27.4 deg) with a
+            // dim-extended end profile (vertex activity / overlap: hot extent
+            // in cm exceeds the peak in MIP units), while all 5 owner-KEEP
+            // junctions turn >= 32.5 deg -- a genuine back-to-back junction
+            // turns hard, and a genuine Bragg concentrates its charge
+            // (bright relative to its length).  Veto an accept below the
+            // turn threshold unless the SHORT-arm end is Bragg-consistent:
+            // peak >= 2.0x mip median AND contiguous >1.5x hot extent from
+            // that end (capped at the 8 cm window) <= peak x 1 cm/MIP.
+            // <= 0 = off, byte-identical.  R1 accepts are never touched.
+            // NEAR-END SCOPE (pr/90 sec 10.6): the veto's calibration set is
+            // exclusively near-end breaks (the sec 8.3 starved-arm class,
+            // short arms 4.3-6.1 cm) -- there the question "is the short
+            // piece a real second particle with its own Bragg to its tip?"
+            // is what the end profile answers.  A well-formed mid-track
+            // break has a well-measured turn and its distant end profile
+            // says nothing about the junction: unscoped, the veto killed
+            // 349461's healthy 69 cm-arm break (turn 29.2) and moved its
+            // owner-anchored vertex 122 cm.  15 cm = 2.5x above the largest
+            // calibration kill arm, below the smallest genuine mid-track
+            // break arm (172942: 18.4 cm, turn-protected anyway).
+            const double veto_near_end = 15*units::cm;
+            if (acc && opt.bragg_veto_turn > 0 && turn_max < opt.bragg_veto_turn &&
+                std::min(cum[static_cast<size_t>(k_turn)], L - cum[static_cast<size_t>(k_turn)]) < veto_near_end) {
+                const size_t kb = static_cast<size_t>(k_turn);
+                const bool front = cum[kb] <= L - cum[kb];
+                const double win = 8*units::cm;
+                const double hot = 1.5 * opt.mip_dqdx_median;
+                double peak = 0, extent = 0;
+                bool contiguous = true;
+                if (front) {
+                    for (size_t j = 0; j < N && cum[j] <= win; j++) {
+                        peak = std::max(peak, dqdx[j]);
+                        if (contiguous && dqdx[j] > hot) extent = cum[j];
+                        else contiguous = false;
+                    }
+                }
+                else {
+                    for (size_t jj = 0; jj < N; jj++) {
+                        const size_t j = N - 1 - jj;
+                        const double d = L - cum[j];
+                        if (d > win) break;
+                        peak = std::max(peak, dqdx[j]);
+                        if (contiguous && dqdx[j] > hot) extent = d;
+                        else contiguous = false;
+                    }
+                }
+                res.veto_peak = peak / opt.mip_dqdx_median;
+                res.veto_extent = extent;
+                // extent <= peak - 1 (not the doc sec 9.4b sketch's
+                // extent <= peak): recalibrated against the IN-CODE profile
+                // definition (pr/90 sec 10.3) -- under it the owner-KILL
+                // 64503 reads peak 3.44 / extent 3.3 cm and would escape the
+                // sketch rule by 4%; with the -1 cm offset all five sub-30
+                // owner verdicts veto (64503 margin 16%) while every
+                // bright-compact Bragg keeps >= 10% slack (320865 3.14/1.94,
+                // 59247 3.09/0.60, 72586 6.62/1.35).
+                const bool bragg_consistent = res.veto_peak >= 2.0 &&
+                    extent / units::cm <= res.veto_peak - 1.0;
+                if (!bragg_consistent) {
+                    res.bragg_vetoed = true;
+                    acc = false;
+                }
+            }
+            res.attempts.push_back({k_turn, m3[static_cast<size_t>(k_turn)], sA, sB, fA, fB, acc});
+            if (acc) {
+                res.route2 = true;
+                res.break_idx = k_turn;
+            }
+        }
+        if (res.break_idx >= 0) {
+            res.arm_a_len = cum[res.break_idx];
+            res.arm_b_len = L - cum[res.break_idx];
+        }
+        res.found = res.route1 || res.route2;
+        return res;
+    }
+
+    // doc sbnd_xin/docs/pr/90 sec 9.5 D3 -- route R3 for chain-admitted
+    // candidates.  Contract and measured signatures in the header comment.
+    TwoEndBreakResult segment_chain_turn_break_scan(
+        SegmentPtr seg, const TwoEndBreakOptions& opt)
+    {
+        TwoEndBreakResult res;
+        if (!seg) return res;
+        if (opt.r3_turn <= 0 || opt.r3_hot <= 0) return res;
+        const auto& fits = seg->fits();
+        const size_t N = fits.size();
+        if (N < 2 * static_cast<size_t>(std::max(opt.min_arm_pts, 1))) return res;
+
+        std::vector<double> cum(N, 0), dqdx(N, 0);
+        dqdx[0] = fits[0].dQ / (fits[0].dx + 1e-9);
+        for (size_t k = 1; k < N; k++) {
+            cum[k] = cum[k-1] + (fits[k].point - fits[k-1].point).magnitude();
+            dqdx[k] = fits[k].dQ / (fits[k].dx + 1e-9);
+        }
+        const double L = cum.back();
+        if (L < opt.min_len) return res;
+
+        auto arm_ok = [&](size_t k) {
+            if (cum[k] < opt.min_arm || L - cum[k] < opt.min_arm) return false;
+            if (k + 1 < static_cast<size_t>(opt.min_arm_pts)) return false;
+            if (N - k < static_cast<size_t>(opt.min_arm_pts)) return false;
+            return true;
+        };
+        // t10 of the pr/90 sec 9.1 instrumentation: the production skirt with
+        // a 10 cm baseline.  35 cm arms average a Michel-scale corner away
+        // (172832: t35 tops out at 18.3 deg where t10 plateaus at 19-23.5).
+        const double r3_baseline = 10*units::cm;
+        // Activity corroboration window, sec 9.5 D3: +-2 cm of arclength.
+        const double hot_win = 2*units::cm;
+        auto hot_max = [&](size_t k) {
+            double q = 0;
+            for (size_t j = 0; j < N; j++) {
+                if (std::abs(cum[j] - cum[k]) > hot_win) continue;
+                q = std::max(q, dqdx[j]);
+            }
+            return q;
+        };
+        // Winner: largest t10 among corroborated indices, with a WELL-FORMED
+        // PREFERENCE tier (the same two-tier idiom as the shipped
+        // turn_min_arm_frac): tier 1 restricts to indices whose t10 windows
+        // are fully achievable on both sides (>= skirt + baseline from each
+        // end); only if tier 1 is empty does the unrestricted tier run.
+        // Measured necessity (pr/90 sec 10.3): on 172832 the starved
+        // near-Michel t10 spike (27.4 deg at 3.5-4.1 cm from the end)
+        // outbids the true 19-23.5 deg junction plateau AND carries the
+        // Michel's own EM brightness (2.3-2.4x MIP), so the activity
+        // corroboration alone cannot veto it -- but the plateau is
+        // well-formed, so tier 1 picks it.  61681's genuine 54 deg corner
+        // sits 4.9 cm from the junction end (tier 1 empty there: mid-track
+        // t10 is 5-7 deg), and correctly falls through to tier 2.
+        int k_best = -1;
+        double t_best = 0;
+        for (int tier = 0; tier < 2 && k_best < 0; tier++) {
+            for (size_t k = 1; k + 1 < N; k++) {
+                if (!arm_ok(k)) continue;
+                if (tier == 0 &&
+                    (cum[k] < opt.turn_skirt + r3_baseline ||
+                     L - cum[k] < opt.turn_skirt + r3_baseline)) continue;
+                const double t = segment_wide_turn_angle(fits, k, opt.turn_skirt, r3_baseline);
+                if (t < opt.r3_turn) continue;
+                if (hot_max(k) < opt.r3_hot * opt.mip_dqdx_median) continue;
+                if (t > t_best) {
+                    t_best = t;
+                    k_best = static_cast<int>(k);
+                }
+            }
+        }
+        if (k_best < 0) return res;
+        // Refine to the activity argmax inside the window: the junction IS
+        // the activity spot (172832: idx 178 = 2.50x MIP, 0.19 cm from the
+        // owner click).  Strict > keeps the smaller index on ties.
+        size_t k_ref = static_cast<size_t>(k_best);
+        double q_ref = dqdx[k_ref];
+        for (size_t j = 0; j < N; j++) {
+            if (std::abs(cum[j] - cum[static_cast<size_t>(k_best)]) > hot_win) continue;
+            if (!arm_ok(j)) continue;
+            if (dqdx[j] > q_ref) {
+                q_ref = dqdx[j];
+                k_ref = j;
+            }
+        }
+        res.found = true;
+        res.route3 = true;
+        res.break_idx = static_cast<int>(k_ref);
+        res.idx_turn = k_best;
+        res.turn_deg = t_best;
+        res.arm_a_len = cum[k_ref];
+        res.arm_b_len = L - cum[k_ref];
+        return res;
+    }
+
+    std::tuple<WireCell::Point, WireCell::Vector, WireCell::Vector, bool> segment_search_kink(SegmentPtr seg, WireCell::Point& start_p, const std::string& cloud_name, double dQ_dx_threshold, double cathode_x, double cathode_kink_xcut, double cathode_wide_kink_angle, double cathode_wide_kink_skirt, double cathode_wide_kink_baseline, bool kink_walk_dqdx_stop, int* accept_criterion, double kink_hot_ratio){
+        if (accept_criterion) *accept_criterion = -1;
         auto tmp_results = segment_get_closest_point(seg, start_p, cloud_name);
         WireCell::Point test_p = tmp_results.second;
 
@@ -205,6 +885,19 @@ namespace WireCell::Clus::PR {
             WireCell::Point p1 = WireCell::Point(0,0,0);
             WireCell::Vector dir(0,0,0);
             return std::make_tuple(p1, dir, dir, false);
+        }
+
+        // Wide-baseline cathode kink accept set (doc pr/47 sec 8, O1).  Empty
+        // and never computed when the knob is off (angle <= 0) -- the legacy
+        // search below is then byte-identical.  Keyed by fit index: ordered,
+        // deterministic (no pointer-keyed iteration).
+        std::set<size_t> wide_accepts;
+        if (cathode_wide_kink_angle > 0) {
+            for (size_t idx : segment_cathode_wide_kink_accepts(
+                     fits, cathode_x, cathode_wide_kink_angle,
+                     cathode_wide_kink_skirt, cathode_wide_kink_baseline)) {
+                wide_accepts.insert(idx);
+            }
         }
 
         std::vector<double> refl_angles(fits.size(), 0);
@@ -295,6 +988,19 @@ namespace WireCell::Clus::PR {
                 dist_to_start < 1*units::cm) continue;
 
             if (flag_check) {
+                // Wide-baseline cathode kink accept (doc pr/47 sec 8, O1).
+                // Evaluated BEFORE the pr/20 veto so it works whether or not
+                // the veto is on; the set only ever holds near-cathode
+                // crossing indices, so nothing changes away from the cathode.
+                // The accepted index then flows through the identical
+                // post-accept machinery (direction averaging, straightness /
+                // flag_switch, local dQ/dx) as the four legacy criteria.
+                if (cathode_wide_kink_angle > 0 && wide_accepts.count(i)) {
+                    save_i = i;
+                    if (accept_criterion) *accept_criterion = 0;
+                    break;
+                }
+
                 // Cathode veto (doc pr/20 Part II, B0).  Gate ONLY the four accept
                 // tests below: refl_angles/para_angles and the windowed sum_angles
                 // are untouched, and the loop breaks at the first qualifying index,
@@ -346,16 +1052,20 @@ namespace WireCell::Clus::PR {
                 // Apply kink detection criteria
                 if (para_angles[i] > 10 && refl_angles[i] > 30 && sum_angles > 15) {
                     save_i = i;
+                    if (accept_criterion) *accept_criterion = 1;
                     break;
                 } else if (para_angles[i] > 7.5 && refl_angles[i] > 45 && sum_angles1 > 25) {
                     save_i = i;
+                    if (accept_criterion) *accept_criterion = 2;
                     break;
                 } else if (para_angles[i] > 15 && refl_angles[i] > 27 && sum_angles > 12.5) {
                     save_i = i;
+                    if (accept_criterion) *accept_criterion = 3;
                     break;
                 } else if (para_angles[i] > 15 && refl_angles[i] > 22 && sum_angles > 19 &&
                           max_dQ_dx > dQ_dx_threshold*1.5 && ave_dQ_dx > dQ_dx_threshold) {
                     save_i = i;
+                    if (accept_criterion) *accept_criterion = 4;
                     flag_search = true;
                     break;
                 }
@@ -435,7 +1145,25 @@ namespace WireCell::Clus::PR {
             
             double local_dQdx = sum_dQ / (sum_dx + 1e-9);
 
-            if (flag_search) {
+            // doc pr/48 sec 6, 59335 fix (a): with kink_walk_dqdx_stop the
+            // flag_search accepts (C4 / straightness) no longer bypass the
+            // local-dQ/dx walk gate -- a BRAGG-HOT kink (local dQ/dx >
+            // kink_hot_ratio x the median threshold; 59335 reads 2.5x)
+            // NEAR A TERMINUS (within 3 cm of either fits end -- the only
+            // geometry where the overshoot erases the break: the walk runs
+            // to the terminus and the sub-2 cm stub is absorbed) returns
+            // flag_continue=false so proto_extend_point stops AT the kink.
+            // Both scopes are load-bearing for the footprint: at the 25/43
+            // "not too low" scale, un-scoped, nearly every C4 accept
+            // qualifies and the walk change ripples across the whole sample
+            // (doc pr/48 sec 9.6).  Knob off: the condition is exactly
+            // `flag_search` = legacy = byte-identical.
+            const double kink_end_dist =
+                std::min((p - fits.front().point).magnitude(),
+                         (p - fits.back().point).magnitude());
+            if (flag_search &&
+                !(kink_walk_dqdx_stop && local_dQdx > dQ_dx_threshold * kink_hot_ratio &&
+                  kink_end_dist < 3.0 * units::cm)) {
                 if (flag_switch) {
                     return std::make_tuple(p, dir1, dir, true);
                 } else {
@@ -469,7 +1197,7 @@ namespace WireCell::Clus::PR {
 
 
 
-    std::tuple<bool, std::pair<SegmentPtr, SegmentPtr>, VertexPtr> break_segment(Graph& graph, SegmentPtr seg, Point point, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, const IDetectorVolumes::pointer& dv, double max_dist/*=1e9*/)
+    std::tuple<bool, std::pair<SegmentPtr, SegmentPtr>, VertexPtr> break_segment(Graph& graph, SegmentPtr seg, Point point, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, const IDetectorVolumes::pointer& dv, double max_dist/*=1e9*/, bool orient_split/*=false*/)
     {
         /// sanity checks
         if (! seg->descriptor_valid()) {
@@ -519,11 +1247,24 @@ namespace WireCell::Clus::PR {
         SPDLOG_LOGGER_TRACE(s_log, "break_segment: Closest point found: {} / {} {} / {} points in fits", itfits - fits.begin(), fits.size(), itwcpts - wcpts.begin(), wcpts.size());
 
         
+        // doc sbnd_xin/docs/pr/83: with orient_split, resolve (front, back)
+        // vertices against the wcpt path BEFORE the edge is removed, so the
+        // front-half slice below goes to the vertex the path actually starts
+        // at.  Must run while seg's descriptor is still valid.
+        VertexPtr ov_front, ov_back;
+        if (orient_split) {
+            std::tie(ov_front, ov_back) = find_vertices(graph, seg);
+        }
+
         // update graph
         remove_segment(graph, seg);
 
         auto vtx1 = graph[vd1].vertex;
         auto vtx2 = graph[vd2].vertex;
+        if (orient_split && ov_front && ov_back) {
+            vtx1 = ov_front;
+            vtx2 = ov_back;
+        }
         auto vtx = make_vertex(graph);
 
         // WARNING: Boost graph edges have no inherent orientation — source(e)/target(e)
@@ -531,6 +1272,8 @@ namespace WireCell::Clus::PR {
         // an oriented (start-vertex, end-vertex) pair should use find_vertices() in
         // PRGraph.cxx, which disambiguates by comparing the wcpts.front() distance to each
         // candidate vertex and returns (vertex nearest front, vertex nearest back).
+        // Legacy (orient_split=false) slices by source/target anyway: on a
+        // reversed edge each child gets the wrong half -- doc pr/83.
         auto seg1 = make_segment(graph, vtx1, vtx);
         auto seg2 = make_segment(graph, vtx, vtx2);
 
@@ -905,7 +1648,262 @@ namespace WireCell::Clus::PR {
         
         return vec_dQ_dx[median_index];
     }
-    
+
+    // doc sbnd_xin/docs/pr/51 -- see the header comment.
+    double path_overlap_fraction(const std::vector<WireCell::Point>& pts_a,
+                                 const std::vector<WireCell::Point>& pts_b,
+                                 double tol)
+    {
+        if (pts_a.empty() || pts_b.empty()) return 0.0;
+        const double tol2 = tol * tol;
+        size_t n_close = 0;
+        for (const auto& pa : pts_a) {
+            for (const auto& pb : pts_b) {
+                const double dx = pa.x() - pb.x();
+                const double dy = pa.y() - pb.y();
+                const double dz = pa.z() - pb.z();
+                if (dx*dx + dy*dy + dz*dz <= tol2) {
+                    ++n_close;
+                    break;
+                }
+            }
+        }
+        return static_cast<double>(n_close) / static_cast<double>(pts_a.size());
+    }
+
+    // doc sbnd_xin/docs/pr/51 -- see the header comment.
+    double segment_integrated_dQ(SegmentPtr seg)
+    {
+        if (!seg) return 0.0;
+        double sum = 0.0;
+        for (const auto& fit : seg->fits()) {
+            if (fit.valid() && fit.dx > 0 && fit.dQ >= 0) {
+                sum += fit.dQ;
+            }
+        }
+        return sum;
+    }
+
+    // doc sbnd_xin/docs/pr/40 -- see the header comment.
+    bool segment_dqdx_spares_electron_reclass(SegmentPtr seg, double MIP_dQdx) {
+        if (MIP_dQdx <= 0) return false;
+        const double median = segment_median_dQ_dx(seg);
+        if (median <= 0) return false;  // no evidence, not MIP-like evidence
+        const double ratio = median / MIP_dQdx;
+        return (ratio > 1.75) || (ratio < 1.2);
+    }
+
+    // doc sbnd_xin/docs/pr/40 round 2 F5 -- see the header comment.
+    bool segment_has_proton_daughter(Graph& graph, SegmentPtr seg, VertexPtr main_vertex, double MIP_dQdx) {
+        static const bool dbg = std::getenv("WCT_PROTON_DAUGHTER_DEBUG") != nullptr;
+        if (!main_vertex || !seg || MIP_dQdx <= 0) {
+            if (dbg) std::fprintf(stderr, "PROTON_DAUGHTER_DEBUG seg=%p: early false (main_vertex=%p seg=%p MIP=%g)\n",
+                                   (void*)seg.get(), (void*)main_vertex.get(), (void*)seg.get(), MIP_dQdx);
+            return false;
+        }
+
+        auto [v1, v2] = find_vertices(graph, seg);
+        if (dbg) std::fprintf(stderr, "PROTON_DAUGHTER_DEBUG seg=%p (clus=%d idx=%zu): v1=%p v2=%p main_vertex=%p\n",
+                               (void*)seg.get(), seg->cluster() ? seg->cluster()->get_cluster_id() : -1,
+                               seg->get_graph_index(), (void*)v1.get(), (void*)v2.get(), (void*)main_vertex.get());
+        if (!v1 || !v2) return false;
+
+        VertexPtr far_v = nullptr;
+        if (v1 == main_vertex) far_v = v2;
+        else if (v2 == main_vertex) far_v = v1;
+        else {
+            if (dbg) std::fprintf(stderr, "PROTON_DAUGHTER_DEBUG seg=%p: neither endpoint IS main_vertex\n", (void*)seg.get());
+            return false;  // does not emanate from the neutrino vertex
+        }
+
+        if (!far_v->descriptor_valid()) {
+            if (dbg) std::fprintf(stderr, "PROTON_DAUGHTER_DEBUG seg=%p: far_v descriptor invalid\n", (void*)seg.get());
+            return false;
+        }
+
+        int nnbr = 0;
+        for (auto edesc : sorted_out_edges(far_v->get_descriptor(), graph)) {
+            SegmentPtr nbr = graph[edesc].segment;
+            if (!nbr || nbr == seg) continue;
+            ++nnbr;
+            const bool has_pi = nbr->has_particle_info();
+            const int pdg = has_pi ? nbr->particle_info()->pdg() : 0;
+            const double median = segment_median_dQ_dx(nbr);
+            if (dbg) std::fprintf(stderr, "PROTON_DAUGHTER_DEBUG seg=%p: nbr=%p (clus=%d idx=%zu) has_pi=%d pdg=%d median/MIP=%g\n",
+                                   (void*)seg.get(), (void*)nbr.get(),
+                                   nbr->cluster() ? nbr->cluster()->get_cluster_id() : -1, nbr->get_graph_index(),
+                                   has_pi, pdg, median / MIP_dQdx);
+            if (!has_pi || pdg != 2212) continue;
+            if (median > 0 && median / MIP_dQdx > 1.75) return true;
+        }
+        if (dbg) std::fprintf(stderr, "PROTON_DAUGHTER_DEBUG seg=%p: %d neighbour(s), none qualified\n", (void*)seg.get(), nnbr);
+        return false;
+    }
+
+    // doc sbnd_xin/docs/pr/43 F1 -- a muon candidate is disqualified if a
+    // charge-confirmed proton terminates its own decay chain, even when the
+    // proton sits beyond the candidate's immediate far vertex.  The existing
+    // 1-hop `n_proton` check in the muon-candidate loop
+    // (NeutrinoVertexFinder.cxx examine_direction) and
+    // segment_has_proton_daughter above both look only at the segment's own
+    // far vertex; run 18255 evt 54351 has muon(54cm) -> muon-stub(2.7cm) ->
+    // proton(13cm), i.e. the proton is TWO hops from the candidate's far
+    // vertex, through a short collinear continuation segment neither check
+    // reaches.
+    //
+    // `near_vertex` is the vertex `seg` is evaluated FROM (the vertex the
+    // single-muon-per-cluster selection runs at).  The walk starts at seg's
+    // OTHER endpoint and follows through at most `max_hops` further
+    // segments, each of which must itself be a non-shower track
+    // continuation (pdg 13, pdg 0/undetermined, or already pdg 211 -- never
+    // a segment already flagged kShowerTrajectory/kShowerTopology or pdg
+    // 11) at a simple degree-2 vertex (one segment in, one out).  A vertex
+    // with any other branching (a genuine hadronic multi-prong vertex, or a
+    // shower attaching) stops the walk rather than being treated as "the
+    // same chain" -- this keeps the walk from reaching an unrelated proton
+    // sitting past a real vertex activity.  Returns true on the first
+    // charge-confirmed proton found (median dQ/dx > 1.75x MIP_dQdx, the
+    // same threshold segment_has_proton_daughter uses).
+    bool segment_chain_has_proton(Graph& graph, SegmentPtr seg, VertexPtr near_vertex, double MIP_dQdx, int max_hops) {
+        if (!near_vertex || !seg || MIP_dQdx <= 0 || max_hops <= 0) return false;
+
+        auto [v1, v2] = find_vertices(graph, seg);
+        if (!v1 || !v2) return false;
+        VertexPtr far_v = nullptr;
+        if (v1 == near_vertex) far_v = v2;
+        else if (v2 == near_vertex) far_v = v1;
+        else return false;  // seg does not emanate from near_vertex
+
+        SegmentPtr prev_seg = seg;
+        VertexPtr cur_v = far_v;
+        for (int hop = 0; hop < max_hops; ++hop) {
+            if (!cur_v || !cur_v->descriptor_valid()) return false;
+
+            SegmentPtr next_seg = nullptr;
+            int nnbr = 0;
+            for (auto edesc : sorted_out_edges(cur_v->get_descriptor(), graph)) {
+                SegmentPtr nbr = graph[edesc].segment;
+                if (!nbr || nbr == prev_seg) continue;
+                ++nnbr;
+                const bool has_pi = nbr->has_particle_info();
+                const int pdg = has_pi ? nbr->particle_info()->pdg() : 0;
+                if (has_pi && pdg == 2212) {
+                    const double median = segment_median_dQ_dx(nbr);
+                    if (median > 0 && median / MIP_dQdx > 1.75) return true;
+                }
+                const bool is_shower = nbr->flags_any(SegmentFlags::kShowerTrajectory) ||
+                                        nbr->flags_any(SegmentFlags::kShowerTopology) ||
+                                        (has_pi && std::abs(pdg) == 11);
+                if (!is_shower && (!has_pi || pdg == 13 || pdg == 211)) next_seg = nbr;
+            }
+            // Only a simple degree-2 continuation (exactly one other
+            // segment at this vertex, and it looks like more chain) is
+            // followed further; anything else -- a branching vertex, a
+            // dead end, a shower -- stops the walk here.
+            if (nnbr != 1 || !next_seg) return false;
+
+            auto [w1, w2] = find_vertices(graph, next_seg);
+            VertexPtr next_v = nullptr;
+            if (w1 == cur_v) next_v = w2;
+            else if (w2 == cur_v) next_v = w1;
+            else return false;
+
+            prev_seg = next_seg;
+            cur_v = next_v;
+        }
+        return false;
+    }
+
+    // doc sbnd_xin/docs/pr/43 F1 -- collect the same short, non-shower,
+    // degree-2 continuation chain segment_chain_has_proton walks, for
+    // relabeling every segment in a disqualified muon candidate's own chain
+    // to pion.  Without this, demoting only the head segment (e.g. 17007 in
+    // evt 54351) leaves an inconsistent muon stub (17005) between it and
+    // the proton that disqualified it -- the owner's report explicitly
+    // wants the WHOLE chain read as pion, not just its head.  The proton
+    // itself (and anything past it) is never included: `next_seg`
+    // deliberately excludes pdg 2212, so the walk stops one hop short of
+    // relabeling the proton.  Returns segments in walk order (nearest
+    // first); empty if `seg` does not emanate from `near_vertex` or no
+    // continuation exists.
+    std::vector<SegmentPtr> segment_chain_continuation(Graph& graph, SegmentPtr seg, VertexPtr near_vertex, int max_hops) {
+        std::vector<SegmentPtr> out;
+        if (!near_vertex || !seg || max_hops <= 0) return out;
+
+        auto [v1, v2] = find_vertices(graph, seg);
+        if (!v1 || !v2) return out;
+        VertexPtr far_v = nullptr;
+        if (v1 == near_vertex) far_v = v2;
+        else if (v2 == near_vertex) far_v = v1;
+        else return out;
+
+        SegmentPtr prev_seg = seg;
+        VertexPtr cur_v = far_v;
+        for (int hop = 0; hop < max_hops; ++hop) {
+            if (!cur_v || !cur_v->descriptor_valid()) return out;
+
+            SegmentPtr next_seg = nullptr;
+            int nnbr = 0;
+            for (auto edesc : sorted_out_edges(cur_v->get_descriptor(), graph)) {
+                SegmentPtr nbr = graph[edesc].segment;
+                if (!nbr || nbr == prev_seg) continue;
+                ++nnbr;
+                const bool has_pi = nbr->has_particle_info();
+                const int pdg = has_pi ? nbr->particle_info()->pdg() : 0;
+                const bool is_shower = nbr->flags_any(SegmentFlags::kShowerTrajectory) ||
+                                        nbr->flags_any(SegmentFlags::kShowerTopology) ||
+                                        (has_pi && std::abs(pdg) == 11);
+                if (!is_shower && pdg != 2212 && (!has_pi || pdg == 13 || pdg == 211)) next_seg = nbr;
+            }
+            if (nnbr != 1 || !next_seg) return out;
+
+            out.push_back(next_seg);
+
+            auto [w1, w2] = find_vertices(graph, next_seg);
+            VertexPtr next_v = nullptr;
+            if (w1 == cur_v) next_v = w2;
+            else if (w2 == cur_v) next_v = w1;
+            else return out;
+
+            prev_seg = next_seg;
+            cur_v = next_v;
+        }
+        return out;
+    }
+
+    // doc sbnd_xin/docs/pr/40 round 4 F8 -- see the header comment.
+    bool segment_at_multi_proton_vertex(Graph& graph, SegmentPtr seg, VertexPtr main_vertex, double MIP_dQdx, int min_protons) {
+        if (!main_vertex || !seg || MIP_dQdx <= 0 || min_protons <= 0) return false;
+
+        auto [v1, v2] = find_vertices(graph, seg);
+        if (!v1 || !v2) return false;
+
+        for (VertexPtr end_v : {v1, v2}) {
+            if (end_v == main_vertex) continue;  // the neutrino vertex is exempt
+            if (!end_v->descriptor_valid()) continue;
+
+            int nprotons = 0;
+            for (auto edesc : sorted_out_edges(end_v->get_descriptor(), graph)) {
+                SegmentPtr nbr = graph[edesc].segment;
+                if (!nbr || nbr == seg) continue;
+                if (!nbr->has_particle_info() || nbr->particle_info()->pdg() != 2212) continue;
+                const double median = segment_median_dQ_dx(nbr);
+                if (median > 0 && median / MIP_dQdx > 1.75) ++nprotons;
+            }
+            if (nprotons >= min_protons) return true;
+        }
+        return false;
+    }
+
+    // doc sbnd_xin/docs/pr/40 round 5 F10/F11 -- see the header comment.
+    bool segment_is_straight_long_track(SegmentPtr seg, double min_length, double min_direct, double straight_ratio) {
+        if (!seg) return false;
+        const double length = segment_track_length(seg);
+        if (length <= min_length) return false;
+        const double direct_length = segment_track_direct_length(seg);
+        return direct_length >= min_direct || direct_length > straight_ratio * length;
+    }
+
     double segment_rms_dQ_dx(SegmentPtr seg)
     {
         auto& fits = seg->fits();
@@ -981,8 +1979,33 @@ namespace WireCell::Clus::PR {
         return false;
     }
 
-    bool segment_is_shower_trajectory(SegmentPtr seg, double step_size, double mip_dQ_dx){
+    /// doc sbnd_xin/docs/pr/32 §11 F2.  false = today's set-only behaviour.
+    bool g_shower_traj_refresh_flag = false;
+
+    bool segment_is_shower_trajectory(SegmentPtr seg, double step_size, double mip_dQ_dx, bool straight_guard){
         bool flag_shower_trajectory = false;
+        // doc pr/32 §11 F2: the prototype opens is_shower_trajectory() with
+        // `flag_shower_trajectory = false` (ProtoSegment.cxx:544), BEFORE its
+        // own `length > 50 cm` early return, so even the early-out path clears
+        // the label.  Mirror that placement exactly.
+        // f2_flag_cleared counts NET demotions -- the bit was set on entry and
+        // this call did not put it back -- not every clear, because the common
+        // case is clear-then-set-again and that is not a behaviour change.
+        // Cheap enough to evaluate unconditionally; used only under the knob.
+        const bool traj_was_set = seg->flags_any(SegmentFlags::kShowerTrajectory);
+        if (g_shower_traj_refresh_flag) {
+            seg->unset_flags(SegmentFlags::kShowerTrajectory);
+        }
+        // Count a net demotion at every exit that returns false.
+        struct DemotionCounter {
+            bool armed;
+            const bool* result;
+            ~DemotionCounter() {
+                if (armed && !*result) {
+                    g_pr32_audit.f2_flag_cleared.fetch_add(1, std::memory_order_relaxed);
+                }
+            }
+        } demotion_counter{g_shower_traj_refresh_flag && traj_was_set, &flag_shower_trajectory};
         double length = segment_track_length(seg, 0);
 
         // Too long
@@ -1068,12 +2091,24 @@ namespace WireCell::Clus::PR {
         if (n_shower_like >= 0.5 * sections.size()) {
             flag_shower_trajectory = true;
         }
-        
+
+        // doc sbnd_xin/docs/pr/40 round 5 F11: the wiggliness test above has
+        // no length/straightness cross-check (unlike segment_is_shower_
+        // topology, which F3 already guards with a dQ/dx check).  A long,
+        // straight track's own dQ/dx can still sit under the section-level
+        // thresholds used above; straightness catches what dQ/dx alone does
+        // not (SBND evt 55715 seg 15007: 1.70x MIP, just under the 1.75x
+        // proton-like cut segment_dqdx_spares_electron_reclass uses).
+        // false = legacy = byte-identical.
+        if (flag_shower_trajectory && straight_guard && segment_is_straight_long_track(seg)) {
+            flag_shower_trajectory = false;
+        }
+
         // Set the flag on the segment if it's identified as shower trajectory
         if (flag_shower_trajectory) {
             seg->set_flags(SegmentFlags::kShowerTrajectory);
         }
-        
+
         return flag_shower_trajectory;
     }
 
@@ -1304,7 +2339,7 @@ namespace WireCell::Clus::PR {
         return kine_energy;
     }
 
-    std::vector<double> do_track_comp(std::vector<double>& L , std::vector<double>& dQ_dx, double compare_range, double offset_length, const Clus::ParticleDataSet::pointer& particle_data,  double MIP_dQdx, int skip_stop_samples){
+    std::vector<double> do_track_comp(std::vector<double>& L , std::vector<double>& dQ_dx, double compare_range, double offset_length, const Clus::ParticleDataSet::pointer& particle_data,  double MIP_dQdx, int skip_stop_samples, bool empty_abstain){
 
         double end_L = L.back() + 0.15*units::cm - offset_length;
 
@@ -1331,15 +2366,26 @@ namespace WireCell::Clus::PR {
         }
 
         // If no points fall inside the comparison window, return "no direction signal" defaults.
+        // doc sbnd_xin/docs/pr/31 §12 (F6, was P7): element 0 is read as
+        // flag_forward = round(result.at(0)), so the legacy 1.0 means "this
+        // orientation PASSED the direction gate" -- a segment about which
+        // nothing is known becomes a directed muon on the both-pass branch.
+        // empty_abstain returns 0.0 instead, the prototype's degenerate
+        // answer (executed, not inferred: zero-bin TH1F KolmogorovTest gives
+        // ks1 == ks2 == 0, so eval_ks_ratio's first gate returns false).
+        // Elements 1-3 keep the 1e9 filler either way -- the finding is the
+        // direction flag, not the particle scores.  The same literal is
+        // applied at the missing-dEdx-function return below: it is the same
+        // copy-pasted filler with the same consumer.
         if (ncount == 0) {
-            return {1.0, 1e9, 1e9, 1e9};
+            return {empty_abstain ? 0.0 : 1.0, 1e9, 1e9, 1e9};
         }
 
         auto muon_fn     = particle_data->get_dEdx_function("muon");
         auto proton_fn   = particle_data->get_dEdx_function("proton");
         auto electron_fn = particle_data->get_dEdx_function("electron");
         if (!muon_fn || !proton_fn || !electron_fn) {
-            return {1.0, 1e9, 1e9, 1e9};
+            return {empty_abstain ? 0.0 : 1.0, 1e9, 1e9, 1e9};
         }
 
         // Create reference vectors for different particles
@@ -1431,8 +2477,8 @@ namespace WireCell::Clus::PR {
             rdQ_dx.at(i) = dQ_dx.at(L.size() - 1 - i);
         }
         
-        std::vector<double> result_forward = do_track_comp(L, dQ_dx, compare_range, offset_length, particle_data, MIP_dQdx);
-        std::vector<double> result_backward = do_track_comp(rL, rdQ_dx, compare_range, offset_length, particle_data, MIP_dQdx);
+        std::vector<double> result_forward = do_track_comp(L, dQ_dx, compare_range, offset_length, particle_data, MIP_dQdx, 0, pid_opts.track_comp_empty_abstain);
+        std::vector<double> result_backward = do_track_comp(rL, rdQ_dx, compare_range, offset_length, particle_data, MIP_dQdx, 0, pid_opts.track_comp_empty_abstain);
         
         // Direction determination
         bool flag_forward = static_cast<bool>(std::round(result_forward.at(0)));
@@ -1529,8 +2575,8 @@ namespace WireCell::Clus::PR {
         // exactly 1 sample, per-orientation at that orientation's hypothesized
         // stop end, template anchor unchanged, value-agnostic.
         if (pid_opts.endpoint_trim_retry && !flag_force) {
-            std::vector<double> retry_forward  = do_track_comp(L,  dQ_dx,  compare_range, offset_length, particle_data, MIP_dQdx, 1);
-            std::vector<double> retry_backward = do_track_comp(rL, rdQ_dx, compare_range, offset_length, particle_data, MIP_dQdx, 1);
+            std::vector<double> retry_forward  = do_track_comp(L,  dQ_dx,  compare_range, offset_length, particle_data, MIP_dQdx, 1, pid_opts.track_comp_empty_abstain);
+            std::vector<double> retry_backward = do_track_comp(rL, rdQ_dx, compare_range, offset_length, particle_data, MIP_dQdx, 1, pid_opts.track_comp_empty_abstain);
 
             const bool rf = static_cast<bool>(std::round(retry_forward.at(0)));
             const bool rb = static_cast<bool>(std::round(retry_backward.at(0)));
@@ -1740,7 +2786,28 @@ namespace WireCell::Clus::PR {
         double length = segment_track_length(segment, 0);
 
         // Compute median dQ/dx once over the trimmed range — reused in three branches below.
-        double medium_dQ_dx = segment_median_dQ_dx(segment, start_n1, end_n1);
+        // doc sbnd_xin/docs/pr/31 §12 (F4, was P8).  The prototype takes this
+        // median over the SAME dQ_dx vector it hands to do_track_pid, at all
+        // three of its sites (ProtoSegment.cxx:1574-1576 pdg==0 branch,
+        // :1602-1611 both vertex-activity branches: nth_element over a copy of
+        // dQ_dx, element size()/2).  segment_median_dQ_dx instead rebuilds a
+        // FILTERED sample from fits() (drops !valid()/dx<=0/dQ<0), so one bad
+        // fit is "a zero" to the PID and "not there" to the median, and the
+        // filter changes the vector length so nth_element selects a different
+        // order statistic.  dir_track_median_local restores the prototype's
+        // self-consistency; the filtered helper itself is kept (its exclusion
+        // of the dQ/1e-9 sentinel is judged an improvement) for every other
+        // caller.  Same internal-unit scale on both paths.  false =>
+        // filtered helper => byte-identical.
+        double medium_dQ_dx = 0;
+        if (opts.dir_track_median_local) {
+            std::vector<double> tmp = dQ_dx;
+            std::nth_element(tmp.begin(), tmp.begin() + tmp.size()/2, tmp.end());
+            medium_dQ_dx = *std::next(tmp.begin(), tmp.size()/2);
+        }
+        else {
+            medium_dQ_dx = segment_median_dQ_dx(segment, start_n1, end_n1);
+        }
 
         // Short track what to do???
         if (pdg_code == 0) {
@@ -1794,9 +2861,59 @@ namespace WireCell::Clus::PR {
         
         // Set particle mass and calculate 4-momentum
         // Only calculate if direction points toward a free end (matching WCPPID logic)
-        if (pdg_code != 0 && ((segment->dirsign() == 1 && end_n == 1) || (segment->dirsign() == -1 && start_n == 1))) {
-            // Calculate 4-momentum using the identified particle type
-            auto four_momentum = segment_cal_4mom(segment, pdg_code, particle_data, recomb_model, MIP_dQdx);
+        const bool free_end_dir = (segment->dirsign() == 1 && end_n == 1) || (segment->dirsign() == -1 && start_n == 1);
+        // doc sbnd_xin/docs/pr/40 F1 (= doc pr/7 sec 5 / pr/31 P14-F8):
+        // track_pid_persist_dqdx persists type+mass whenever pdg_code != 0,
+        // matching the prototype (ProtoSegment.cxx:1637-1639), and gates only
+        // the 4-momentum/energy recompute on free_end_dir -- the existing
+        // toolkit test, standing in for the prototype's
+        // get_particle_4mom(3)>0 ("an energy was already computed") guard;
+        // not independently re-verified against prototype source this round
+        // (prototype_base symlink unavailable), see doc pr/40 for the
+        // measured consequence either way.  false = legacy = byte-identical.
+        //
+        // doc sbnd_xin/docs/pr/40 round 5 F9: track_pid_persist_dqdx_electron_
+        // guard narrows the rescue above -- it does not widen it.  An
+        // UNDIRECTED (free_end_dir false) pdg_code==11 conclusion is never
+        // F1's target population (proton/muon rescues from the median-dQ/dx
+        // fallback or a confident-but-not-free-ended template match); letting
+        // it persist anyway lets a single weak electron guess poison a
+        // NEIGHBORING segment's flag_shower_in test (NeutrinoVertexFinder.cxx
+        // :1320) into demoting an independently-confident muon/proton call.
+        // false = today's shipped F1 behaviour = byte-identical.
+        const bool f1_rescue = pid_opts.track_pid_persist_dqdx &&
+            !(pid_opts.track_pid_persist_dqdx_electron_guard && pdg_code == 11 && !free_end_dir);
+        if (pdg_code != 0 && (free_end_dir || f1_rescue)) {
+            // Calculate 4-momentum using the identified particle type.  When
+            // the knob rescues a non-free-end store, the momentum direction
+            // is only as good as segment_cal_dir_3vector's no-argument
+            // overload gives for a dirsign that may be 0 -- acceptable here
+            // because downstream consumers gate on pdg/flag_shower, not on
+            // this vector's orientation, for exactly the segments this knob
+            // targets (see doc pr/40 Part 0).
+            //
+            // doc sbnd_xin/docs/pr/40 round 2 F4: the non-free-end branch below used
+            // to store a rest-mass-only 4-vector (E = m, zero momentum) as a
+            // literal stand-in for "the prototype's zero-momentum stub".
+            // That makes Aux::ParticleInfo's kinetic_energy() (= E - mass)
+            // exactly ZERO for every segment F1 rescues this way -- measured
+            // as a real defect (SBND evt 174637 seg 9050, Bee PF node
+            // "mu- 0 MeV") once track_pid_persist_dqdx went SBND-default-ON.
+            // segment_cal_4mom itself has NO free-end dependence (its only
+            // direction coupling is segment_cal_dir_3vector, which already
+            // degrades gracefully to a zero 3-vector when dirsign()==0) --
+            // the free-end gate here was purely external and stricter than
+            // it needed to be.  track_pid_persist_4mom calls it
+            // unconditionally instead, giving a correct KE with (at worst) a
+            // zero-direction momentum.  Independent of
+            // track_pid_persist_dqdx: false = legacy stub, byte-identical.
+            WireCell::D4Vector<double> four_momentum(0.0, 0.0, 0.0, 0.0);
+            if (free_end_dir || pid_opts.track_pid_persist_4mom) {
+                four_momentum = segment_cal_4mom(segment, pdg_code, particle_data, recomb_model, MIP_dQdx);
+            } else {
+                const double mass = particle_data->get_particle_mass(pdg_code);
+                four_momentum[0] = mass;  // at rest: matches the prototype's zero-momentum stub
+            }
 
             // Create ParticleInfo with the identified particle
             auto pinfo = std::make_shared<Aux::ParticleInfo>(
@@ -1805,7 +2922,7 @@ namespace WireCell::Clus::PR {
                 particle_data->pdg_to_name(pdg_code),       // name
                 four_momentum                                // 4-momentum (E, px, py, pz)
             );
-            
+
             // Store particle info in segment
             segment->particle_info(pinfo);
             segment->particle_score(particle_score);
@@ -1823,6 +2940,15 @@ namespace WireCell::Clus::PR {
             SPDLOG_LOGGER_TRACE(s_log, "segment_determine_dir_track: Seg {} cm Track {} {} {} {} MeV {} MeV {}",
                 length/units::cm, segment->dirsign(), (segment->dir_weak() ? 1 : 0),
                 pdg_code, particle_mass/units::MeV, kinetic_energy/units::MeV, particle_score);
+            // doc sbnd_xin/docs/pr/40: the line above has no segment id, so it
+            // cannot be joined to a Bee/calib segment.  Add the encoded id
+            // (cluster_id*1000+graph_index, same scheme as PrDisplayDump.cxx)
+            // on a separate WCT_PID_TRACE_DEBUG-gated tag rather than change
+            // the format above (its comment claims WCPPID-format parity).
+            SPDLOG_LOGGER_TRACE(s_log, "PID_TRACE_DEBUG id={} clus={} gidx={} L={:.1f}cm dir={} weak={} pdg={} score={:.4f}",
+                (segment->cluster() ? segment->cluster()->get_cluster_id() : -1) * 1000 + static_cast<int>(segment->get_graph_index()),
+                segment->cluster() ? segment->cluster()->get_cluster_id() : -1, segment->get_graph_index(),
+                length/units::cm, segment->dirsign(), (segment->dir_weak() ? 1 : 0), pdg_code, particle_score);
         }
     }
 
@@ -1887,10 +3013,23 @@ namespace WireCell::Clus::PR {
         }
      }
 
-    void clustering_points_segments(std::vector<SegmentPtr> segments, const IDetectorVolumes::pointer& dv, const std::string& cloud_name, double search_range, double scaling_2d){
+    void clustering_points_segments(std::vector<SegmentPtr> segments, const IDetectorVolumes::pointer& dv, const std::string& cloud_name, double search_range, double scaling_2d, bool reassign_orphans){
         // using Clock = std::chrono::steady_clock;
         // using MS = std::chrono::duration<double, std::milli>;
         // auto t_total = Clock::now();
+
+        // doc sbnd_xin/docs/pr/59: diagnostic-only, env-gated (WCT_PR59_ASSOC_CENSUS
+        // unset => no log lines, no behavior change) sentinels tracing why a
+        // fitted segment can end up with a null/empty "associate_points" cloud
+        // (18255-142421 seg 20: fits() non-empty, associate_points never built).
+        static const bool pr59_census = std::getenv("WCT_PR59_ASSOC_CENSUS") != nullptr;
+
+        // doc pr/64 round 7: diagnostic-only, env-gated (WCT_PR64_ORPHAN_CENSUS
+        // unset => no log lines, no behavior change) sentinel classifying every
+        // point Stage C drops (18259-18625: 12-18 pt blob at segment 126042's
+        // own fit endpoint). See reassign_orphans (this function's trailing
+        // bool param) for the knob that acts on this census's finding.
+        static const bool pr64_census = std::getenv("WCT_PR64_ORPHAN_CENSUS") != nullptr;
 
         // Use cluster_id-based comparator so map_cluster_segs is iterated in a
         // deterministic, run-to-run stable order (not pointer-address order).
@@ -1941,6 +3080,14 @@ namespace WireCell::Clus::PR {
         // reducing ghost-removal from O(P×S×F) to O(P×log(total_fits)) overall.
         using nfkd2d_t = NFKDVec::Tree<double, NFKDVec::IndexDynamic>;
         std::map<ApFaceKey, nfkd2d_t> global_kd2d;
+        // doc pr/64 round 7: parallel flat-index -> owning-segment table for the trees
+        // above. knn(1,q) already returns the flat index of the winning point but the
+        // ghost-removal query at the call site only kept the distance; this table lets
+        // the (env-gated census and) reassign_orphans branch recover *which* segment
+        // actually achieves the global 2D minimum, without changing knn()'s return type
+        // or the existing distance-only comparisons. Built unconditionally (cheap: one
+        // pointer per 2D projection point) since the census also needs it.
+        std::map<ApFaceKey, std::vector<SegmentPtr>> global_kd2d_owner;
         for (const auto& [seg, pts2d_map] : seg_pts2d) {
             for (const auto& [apfkey, pts] : pts2d_map) {
                 auto [it, inserted] = global_kd2d.try_emplace(apfkey, 2);
@@ -1950,6 +3097,8 @@ namespace WireCell::Clus::PR {
                 ys.reserve(pts.size());
                 for (const auto& p : pts) { xs.push_back(p.x); ys.push_back(p.y); }
                 it->second.append(nfkd2d_t::points_type{xs, ys});
+                auto& owners = global_kd2d_owner[apfkey];
+                owners.insert(owners.end(), pts.size(), seg);
             }
         }
 
@@ -2058,6 +3207,26 @@ namespace WireCell::Clus::PR {
                 }
             }
 
+            // doc pr/59 sentinel 1: did each segment seed any Voronoi terminals
+            // at all?  A segment with fits().size() < 2 seeds none (skipped by
+            // both branches above); a segment whose 5-nearest-neighbor search
+            // never found an unclaimed point also seeds none.  Either way it
+            // starts Stage B/C with zero chance of winning any point.
+            if (pr59_census) {
+                std::map<SegmentPtr, int, SegmentIndexCmp> seed_counts;
+                for (auto seg : segs) seed_counts[seg] = 0;
+                for (const auto& [pidx, seg_dist] : map_pindex_segment) {
+                    (void)pidx;
+                    seed_counts[seg_dist.first]++;
+                }
+                for (auto seg : segs) {
+                    SPDLOG_LOGGER_DEBUG(s_log,
+                        "pr59 assoc-census stageA: cluster {} segment {} fits_size={} "
+                        "terminals_seeded={}",
+                        clus->get_cluster_id(), seg->get_graph_index(),
+                        seg->fits().size(), seed_counts[seg]);
+                }
+            }
 
             // these are terminals ...
             // auto t_ghost = Clock::now();
@@ -2179,6 +3348,182 @@ namespace WireCell::Clus::PR {
                         map_segment_points[main_sg].push_back(gp);
                     }
                 }
+
+                // doc pr/64 round 7: second, independent pass over the SAME
+                // graph vertices, run only when the census env var or the
+                // reassign_orphans knob is set. It never modifies the primary
+                // loop above -- it only reads its outcome (which vertex index
+                // ended up in map_segment_global_indices) -- so with both off
+                // this whole block does not execute and the primary loop's
+                // byte-identical behavior is untouched by construction.
+                //
+                // Classifies every unclaimed vertex into one of two channels
+                // (see PRSegmentFunctions.h doc comment and doc pr/64 round 7):
+                //   "no_terminal" -- nearest_terminal[i] never seeded a Voronoi
+                //     terminal (map_pindex_segment has no entry for it), so the
+                //     primary loop's `continue` at the top of the loop above
+                //     skipped it before any 2D/3D comparison ever ran.
+                //   "ghost_drop"  -- it had a main_sg candidate but Stage C's
+                //     acceptance rule (duplicated below as accept_for, not
+                //     shared -- M10) rejected it.
+                // When reassign_orphans is set, an unclaimed point is handed to
+                // whichever OTHER segment in the SAME cluster achieves the
+                // point's true global 2D minimum on at least one plane and
+                // itself passes accept_for -- i.e. exactly the Stage-C rule,
+                // just evaluated for the real winner instead of only for
+                // main_sg. A true winner in a DIFFERENT cluster is not a
+                // candidate, so cross-cluster ghost rejection is unaffected.
+                if (pr64_census || reassign_orphans) {
+                    std::set<int> claimed;
+                    for (const auto& [seg, idxs] : map_segment_global_indices) {
+                        (void)seg;
+                        for (auto gi : idxs) claimed.insert(static_cast<int>(gi));
+                    }
+
+                    std::vector<SegmentPtr> cluster_segs_sorted(segs.begin(), segs.end());
+                    std::sort(cluster_segs_sorted.begin(), cluster_segs_sorted.end(),
+                              [](SegmentPtr a, SegmentPtr b){ return a->get_graph_index() < b->get_graph_index(); });
+                    std::set<SegmentPtr> cluster_seg_set(segs.begin(), segs.end());
+
+                    // duplicated copy of the Stage-C acceptance rule chain
+                    // above (including the dead-channel re-check) -- NOT
+                    // extracted/shared, per M10, so the primary loop can never
+                    // be affected by anything here.
+                    auto accept_for = [&](SegmentPtr cand, const geo_point_t& cgp, double cqx,
+                                           const std::array<double, 3>& cqy, int capa, int cface,
+                                           const std::tuple<double, double, double>& g_min_2d_dis2) -> bool {
+                        std::tuple<double, double, double> c_closest_2d_dis2 = get_2d_dist2_fast(cand, cqx, cqy, capa, cface);
+                        double c_closest_dis3d = get_3d_dist_fast(cand, cgp);
+                        const double c_sq_2d_thr = (scaling_2d * search_range) * (scaling_2d * search_range);
+
+                        bool c_flag_change = true;
+                        if (std::get<0>(g_min_2d_dis2) == std::get<0>(c_closest_2d_dis2) && std::get<1>(g_min_2d_dis2) == std::get<1>(c_closest_2d_dis2) && std::get<2>(g_min_2d_dis2) == std::get<2>(c_closest_2d_dis2))
+                            c_flag_change = false;
+                        else if (std::get<0>(g_min_2d_dis2) == std::get<0>(c_closest_2d_dis2) && std::get<1>(g_min_2d_dis2) == std::get<1>(c_closest_2d_dis2))
+                            c_flag_change = false;
+                        else if (std::get<0>(g_min_2d_dis2) == std::get<0>(c_closest_2d_dis2) && std::get<2>(g_min_2d_dis2) == std::get<2>(c_closest_2d_dis2))
+                            c_flag_change = false;
+                        else if (std::get<1>(g_min_2d_dis2) == std::get<1>(c_closest_2d_dis2) && std::get<2>(g_min_2d_dis2) == std::get<2>(c_closest_2d_dis2))
+                            c_flag_change = false;
+                        else if (std::get<0>(g_min_2d_dis2) == std::get<0>(c_closest_2d_dis2) && (c_closest_dis3d < search_range || (std::get<1>(c_closest_2d_dis2) < c_sq_2d_thr && std::get<2>(c_closest_2d_dis2) < c_sq_2d_thr)))
+                            c_flag_change = false;
+                        else if (std::get<1>(g_min_2d_dis2) == std::get<1>(c_closest_2d_dis2) && (c_closest_dis3d < search_range || (std::get<0>(c_closest_2d_dis2) < c_sq_2d_thr && std::get<2>(c_closest_2d_dis2) < c_sq_2d_thr)))
+                            c_flag_change = false;
+                        else if (std::get<2>(g_min_2d_dis2) == std::get<2>(c_closest_2d_dis2) && (c_closest_dis3d < search_range || (std::get<1>(c_closest_2d_dis2) < c_sq_2d_thr && std::get<0>(c_closest_2d_dis2) < c_sq_2d_thr)))
+                            c_flag_change = false;
+
+                        if (!c_flag_change) {
+                            auto grouping = clus->grouping();
+                            int ch_range = 0;
+                            if (grouping->get_closest_dead_chs(cgp, ch_range, capa, cface, 0) && std::get<0>(c_closest_2d_dis2) > c_sq_2d_thr){
+                                if (std::get<1>(c_closest_2d_dis2) < c_sq_2d_thr || std::get<2>(c_closest_2d_dis2) < c_sq_2d_thr)
+                                    c_flag_change = true;
+                            } else if (grouping->get_closest_dead_chs(cgp, ch_range, capa, cface, 1) && std::get<1>(c_closest_2d_dis2) > c_sq_2d_thr){
+                                if (std::get<0>(c_closest_2d_dis2) < c_sq_2d_thr || std::get<2>(c_closest_2d_dis2) < c_sq_2d_thr)
+                                    c_flag_change = true;
+                            } else if (grouping->get_closest_dead_chs(cgp, ch_range, capa, cface, 2) && std::get<2>(c_closest_2d_dis2) > c_sq_2d_thr){
+                                if (std::get<1>(c_closest_2d_dis2) < c_sq_2d_thr || std::get<0>(c_closest_2d_dis2) < c_sq_2d_thr)
+                                    c_flag_change = true;
+                            }
+                        }
+                        return !c_flag_change;
+                    };
+
+                    int n_no_terminal = 0, n_ghost_drop = 0, n_ghost_drop_same_cluster_winner = 0, n_rescued = 0;
+
+                    for (int i = 0; i < num_graph_vertices; i++) {
+                        if (claimed.count(i)) continue;
+                        const int nt_i = static_cast<int>(nearest_terminal[i]);
+                        auto pi_it = map_pindex_segment.find(nt_i);
+                        const bool has_main = (pi_it != map_pindex_segment.end());
+
+                        geo_point_t gp(points[0][i], points[1][i], points[2][i]);
+                        auto point_wpid = clus->wire_plane_id(i);
+                        auto apa = point_wpid.apa();
+                        auto face = point_wpid.face();
+                        const auto& ang = get_angles_cached(apa, face);
+                        const double qx = gp.x();
+                        const std::array<double, 3> qy = {
+                            std::cos(ang[0]) * gp.z() - std::sin(ang[0]) * gp.y(),
+                            std::cos(ang[1]) * gp.z() - std::sin(ang[1]) * gp.y(),
+                            std::cos(ang[2]) * gp.z() - std::sin(ang[2]) * gp.y()
+                        };
+
+                        // global per-plane minimum + owning segment (mirrors the F17 query above)
+                        std::tuple<double, double, double> min_2d_dis2 = {1e18, 1e18, 1e18};
+                        std::array<SegmentPtr, 3> min_2d_owner = {nullptr, nullptr, nullptr};
+                        {
+                            const std::array<double, 2> query_u = {qx, qy[0]};
+                            const std::array<double, 2> query_v = {qx, qy[1]};
+                            const std::array<double, 2> query_w = {qx, qy[2]};
+                            auto q2 = [&](int pind, const std::array<double, 2>& q) {
+                                auto kit = global_kd2d.find({pind, apa, face});
+                                if (kit == global_kd2d.end()) return;
+                                auto res = kit->second.knn(1, q);
+                                if (!res.empty()) {
+                                    double d2 = res[0].second;
+                                    size_t flat_idx = res[0].first;
+                                    if (pind == 0) std::get<0>(min_2d_dis2) = d2;
+                                    else if (pind == 1) std::get<1>(min_2d_dis2) = d2;
+                                    else               std::get<2>(min_2d_dis2) = d2;
+                                    auto oit = global_kd2d_owner.find({pind, apa, face});
+                                    if (oit != global_kd2d_owner.end() && flat_idx < oit->second.size())
+                                        min_2d_owner[pind] = oit->second[flat_idx];
+                                }
+                            };
+                            q2(0, query_u);
+                            q2(1, query_v);
+                            q2(2, query_w);
+                        }
+
+                        bool same_cluster_winner_exists = false;
+                        for (int pind = 0; pind < 3; ++pind) {
+                            if (min_2d_owner[pind] && cluster_seg_set.count(min_2d_owner[pind])) {
+                                same_cluster_winner_exists = true;
+                                break;
+                            }
+                        }
+
+                        if (has_main) {
+                            n_ghost_drop++;
+                            if (same_cluster_winner_exists) n_ghost_drop_same_cluster_winner++;
+                        } else {
+                            n_no_terminal++;
+                        }
+
+                        if (pr64_census) {
+                            SPDLOG_LOGGER_DEBUG(s_log,
+                                "pr64 orphan-census: cluster {} vertex {} channel={} pos=({:.4f},{:.4f},{:.4f}) "
+                                "main_sg={} same_cluster_winner={}",
+                                clus->get_cluster_id(), i, has_main ? "ghost_drop" : "no_terminal",
+                                gp.x(), gp.y(), gp.z(),
+                                has_main ? pi_it->second.first->get_graph_index() : -1,
+                                same_cluster_winner_exists ? 1 : 0);
+                        }
+
+                        if (!reassign_orphans) continue;
+
+                        for (auto cand : cluster_segs_sorted) {
+                            bool is_a_winner = (cand == min_2d_owner[0] || cand == min_2d_owner[1] || cand == min_2d_owner[2]);
+                            if (!is_a_winner) continue;
+                            if (has_main && cand == pi_it->second.first) continue;  // pass #1 already tried & rejected this one
+                            if (accept_for(cand, gp, qx, qy, apa, face, min_2d_dis2)) {
+                                map_segment_global_indices[cand].push_back(i);
+                                map_segment_points[cand].push_back(gp);
+                                n_rescued++;
+                                break;
+                            }
+                        }
+                    }
+
+                    if (pr64_census) {
+                        SPDLOG_LOGGER_DEBUG(s_log,
+                            "pr64 orphan-census tally: cluster {} no_terminal={} ghost_drop={} "
+                            "ghost_drop_same_cluster_winner={} rescued={}",
+                            clus->get_cluster_id(), n_no_terminal, n_ghost_drop,
+                            n_ghost_drop_same_cluster_winner, n_rescued);
+                    }
+                }
             }
 
 
@@ -2193,6 +3538,24 @@ namespace WireCell::Clus::PR {
                 // create_segment_point_cloud(seg, geo_points, dv, cloud_name);
             }
 
+            // doc pr/59 sentinel 2: every input segment that never won a single
+            // point in Stage B (never a key in map_segment_points) is the DIRECT
+            // cause of the pr/55 "no associate_points dpcloud" sentinel that
+            // later fires, silently, at Bee-dump time in a different function
+            // (MultiAlgBlobClustering.cxx:887) -- named here instead, at the
+            // point of loss.
+            if (pr59_census) {
+                for (auto seg : segs) {
+                    if (map_segment_points.find(seg) == map_segment_points.end()) {
+                        SPDLOG_LOGGER_DEBUG(s_log,
+                            "pr59 assoc-census stageC: cluster {} segment {} fits_size={} "
+                            "won ZERO points in ghost-removal -- cloud '{}' will be null",
+                            clus->get_cluster_id(), seg->get_graph_index(),
+                            seg->fits().size(), cloud_name);
+                    }
+                }
+            }
+
             // std::cout << "[clustering_points_segments] build point clouds took " << MS(Clock::now() - t_build).count() << " ms" << std::endl;
 
             // debug: print number of points assigned to each segment
@@ -2205,7 +3568,7 @@ namespace WireCell::Clus::PR {
         // std::cout << "[clustering_points_segments] TOTAL took " << MS(Clock::now() - t_total).count() << " ms" << std::endl;
     }
 
-    bool segment_determine_shower_direction(SegmentPtr segment, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, const std::string& cloud_name, double MIP_dQdx, double rms_cut, double mip_dqdx){
+    bool segment_determine_shower_direction(SegmentPtr segment, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, const std::string& cloud_name, double MIP_dQdx, double rms_cut, double mip_dqdx, bool median_local){
         segment->dirsign(0);
         const auto& fits = segment->fits();
         
@@ -2478,7 +3841,17 @@ namespace WireCell::Clus::PR {
                 // docs/pr/2 sec 8.1a: forward the configured MIP scales instead of the
                 // uBooNE header defaults (50000/43000 e/cm).  uBooNE byte-identical:
                 // the forwarded values equal the old defaults there.
-                if (!segment_is_shower_trajectory(segment, 10*units::cm, mip_dqdx)) segment_determine_dir_track(segment, 0, fits.size(), particle_data, recomb_model, MIP_dQdx);
+                // doc pr/31 §12 (F4): this interior call passes a
+                // default-constructed TrackPidOptions (NOT the caller's full
+                // option set -- forwarding that here would unconditionally
+                // switch proton_dir_vote et al. at this site), carrying ONLY
+                // the median-source choice.  median_local=false => defaults
+                // all the way => byte-identical.
+                if (!segment_is_shower_trajectory(segment, 10*units::cm, mip_dqdx)) {
+                    TrackPidOptions med_opts{};
+                    med_opts.dir_track_median_local = median_local;
+                    segment_determine_dir_track(segment, 0, fits.size(), particle_data, recomb_model, MIP_dQdx, false, med_opts);
+                }
                 // For short segments, could call determine_dir_track here if needed
             } else {
                 // Count consistent directions at each end
@@ -2510,9 +3883,30 @@ namespace WireCell::Clus::PR {
         return (flag_dir != 0);
     }
 
-    bool segment_is_shower_topology(SegmentPtr segment, bool tmp_val, double MIP_dQ_dx, double demote_len){
+    bool segment_is_shower_topology(SegmentPtr segment, bool tmp_val, double MIP_dQ_dx, double demote_len, bool reset, bool dqdx_guard){
         int flag_dir = 0;
-        bool flag_shower_topology = tmp_val; 
+        bool flag_shower_topology = tmp_val;
+        // doc sbnd_xin/docs/pr/31 §12 (F3, was P13).  The prototype's first two
+        // statements are segment-state assignments made BEFORE any early return
+        // (ProtoSegment.cxx:319-321): flag_shower_topology = tmp_val (every
+        // caller passes false, so the flag is cleared on entry and re-set only
+        // if the test still passes) and flag_dir = 0.  The toolkit port assigns
+        // a LOCAL and the tail only ever set_flags, so a segment that qualified
+        // on an earlier pass keeps a stale kShowerTopology flag -- which is what
+        // routes determine_direction into the topology branch -- and a segment
+        // whose clouds hit the four early returns below keeps a stale direction.
+        // Re-entry is the normal path: this function runs in stage 3
+        // (separate_track_shower) and at three stage-4 sites.  unset_flags
+        // clears exactly the named bit (Flagged.h: other flags survive);
+        // never clear_flags() here.  reset=false => set-only legacy path =>
+        // byte-identical.
+        if (reset) {
+            if (!tmp_val) {
+                pr74_probe_topo_flag(segment, "unset", "PRSegmentFunctions.cxx:reset-reentry");
+                segment->unset_flags(SegmentFlags::kShowerTopology);
+            }
+            segment->dirsign(0);
+        }
         const auto& fits = segment->fits();
 
         if (fits.empty()) return false;
@@ -2743,12 +4137,12 @@ namespace WireCell::Clus::PR {
 
             double dbg_geom_len = segment_track_length(segment, 0);
             SPDLOG_LOGGER_INFO(s_log,
-                "shower_topo dbg: seg {} L {:.1f}cm assoc_npts {} nbuckets {} n_over0.4cm {} "
+                "shower_topo dbg: seg {} gidx {} L {:.1f}cm assoc_npts {} nbuckets {} n_over0.4cm {} "
                 "n_over0.7cm {} n_over0.8cm {} n_over1.0cm {} "
                 "rms_p50 {:.2f}cm rms_p75 {:.2f}cm rms_p90 {:.2f}cm rms_p95 {:.2f}cm "
                 "max_spread {:.2f}cm maxcont {:.1f}cm lsl {:.1f}cm tel {:.1f}cm "
                 "lsl/tel {:.3f} tel/L {:.3f} dir3x {:.4f} branch {}",
-                segment->id(), dbg_geom_len/units::cm, assoc_npts, dbg_rms.size(),
+                segment->id(), segment->get_graph_index(), dbg_geom_len/units::cm, assoc_npts, dbg_rms.size(),
                 n_over_cut(0.4), n_over_cut(0.7), n_over_cut(0.8), n_over_cut(1.0),
                 pct(0.5)/units::cm, pct(0.75)/units::cm, pct(0.9)/units::cm, pct(0.95)/units::cm,
                 max_spread/units::cm, dbg_max_cont/units::cm,
@@ -2889,18 +4283,153 @@ namespace WireCell::Clus::PR {
             }
             if (s_shower_topo_dbg) {
                 SPDLOG_LOGGER_INFO(s_log,
-                    "shower_topo dbg: seg {} guard branch {} L {:.1f}cm total_length1 {:.1f}cm({:.3f}) "
+                    "shower_topo dbg: seg {} gidx {} guard branch {} L {:.1f}cm total_length1 {:.1f}cm({:.3f}) "
                     "total_length2 {:.1f}cm({:.3f}) demoted {} final_shower {}",
-                    segment->id(), dbg_branch, tmp_total_length/units::cm,
+                    segment->id(), segment->get_graph_index(), dbg_branch, tmp_total_length/units::cm,
                     total_length1/units::cm, (tmp_total_length > 0 ? total_length1/tmp_total_length : 0),
                     total_length2/units::cm, (tmp_total_length > 0 ? total_length2/tmp_total_length : 0),
                     dbg_guard_demoted, flag_shower_topology);
             }
         }
 
-        if (flag_shower_topology) segment->set_flags(SegmentFlags::kShowerTopology);
+        // doc sbnd_xin/docs/pr/40 F3: the dQ/dx cross-check the 5-branch
+        // geometric spread test never performs (vec_dQ_dx above is otherwise
+        // dead -- pr/31 GOTCHA 5).  Runs regardless of which length-guard
+        // branch fired above (both existing guards require length > their own
+        // cut; this one does not).  MIP_dQ_dx is this function's own scale
+        // parameter (mip_dqdx_median), consistent with every other threshold
+        // here.  Does not touch flag_dir -- only whether the flag is set.
+        // false = legacy = byte-identical.
+        if (flag_shower_topology && dqdx_guard && segment_dqdx_spares_electron_reclass(segment, MIP_dQ_dx)) {
+            flag_shower_topology = false;
+        }
+
+        // doc sbnd_xin/docs/pr/74: the dbg line above prints BEFORE the F3
+        // dQ/dx guard can veto, so it overstates final_shower.  This one is
+        // the post-guard truth.
+        if (s_shower_topo_dbg) {
+            SPDLOG_LOGGER_INFO(s_log,
+                "shower_topo dbg: seg {} gidx {} POST-GUARD final_shower {}",
+                segment->id(), segment->get_graph_index(), flag_shower_topology);
+        }
+
+        if (flag_shower_topology) {
+            pr74_probe_topo_flag(segment, "set", "PRSegmentFunctions.cxx:topo-test");
+            segment->set_flags(SegmentFlags::kShowerTopology);
+        }
         segment->dirsign(flag_dir);
         return flag_shower_topology;
+    }
+
+    // doc sbnd_xin/docs/pr/72 round 2 -- see the doc comment on
+    // Es3StubGuardParams (PRSegmentFunctions.h) for the physics and the
+    // 117-event fit that chose these defaults. All five conditions must
+    // hold for suppression; any one failing means "let the merge happen"
+    // (i.e. false = legacy examine_structure_3 behavior for that junction).
+    bool es3_stub_suppress(double len_short, double len_long, double ang3, double ang10,
+                            int deg_short, int nfit_short, int nfit_long,
+                            const Es3StubGuardParams& params) {
+        // Degeneracy guard: segment_track_length returns 0.0 for an arm
+        // with < 2 fit points (PRSegmentFunctions.cxx, segment_track_length
+        // flag==0 branch), which would otherwise always read as "the short
+        // arm" and make len_long/len_short divide by (near-)zero. Never
+        // suppress on a degenerate arm -- production behavior (merge)
+        // stands, exactly as if this guard didn't exist.
+        if (nfit_short < 2 || nfit_long < 2) return false;
+        if (!(len_short > 0.5 * units::cm)) return false;
+
+        if (!(len_short < params.stub_max)) return false;
+        if (!(len_long > params.len_ratio * len_short)) return false;
+        if (!(ang3 > params.ang3_min)) return false;
+        if (!(ang3 > params.ang_ratio * ang10)) return false;
+        if (params.require_terminal && deg_short != 1) return false;
+
+        return true;
+    }
+
+    // doc sbnd_xin/docs/pr/85 -- carry a prong through a short connector.
+    // See the header comment on carry_prong_verify for the contract.
+    bool carry_prong_verify(Graph& graph, SegmentPtr prong, SegmentPtr stub,
+                            VertexPtr at, VertexPtr anchor)
+    {
+        if (!prong || !stub || !at || !anchor) return false;
+        if (prong == stub || at == anchor) return false;
+        const auto& vec_p = prong->wcpts();
+        const auto& vec_s = stub->wcpts();
+        if (vec_p.size() < 2 || vec_s.size() < 2) return false;
+        const double tol = 0.01*units::cm;
+        const auto at_pt = at->wcpt().point;
+        const auto an_pt = anchor->wcpt().point;
+        const bool p_front = (vec_p.front().point - at_pt).magnitude() < tol;
+        const bool p_back  = (vec_p.back().point  - at_pt).magnitude() < tol;
+        if (!p_front && !p_back) return false;
+        // The stub's wcpt chain must terminate on BOTH vertices it claims:
+        // one end at `at`, the other at `anchor`.
+        const bool s_front_at = (vec_s.front().point - at_pt).magnitude() < tol;
+        const bool s_back_at  = (vec_s.back().point  - at_pt).magnitude() < tol;
+        if (s_front_at) {
+            if ((vec_s.back().point - an_pt).magnitude() >= tol) return false;
+        }
+        else if (s_back_at) {
+            if ((vec_s.front().point - an_pt).magnitude() >= tol) return false;
+        }
+        else {
+            return false;
+        }
+        VertexPtr vfar = find_other_vertex(graph, prong, at);
+        if (!vfar || !vfar->descriptor_valid()) return false;
+        if (vfar == anchor || vfar == at) return false;
+        // setS edge aliasing (examine_structure_review.md B.7): the
+        // (far, anchor) slot must be free or the rewire corrupts the graph.
+        if (find_segment(graph, vfar, anchor)) return false;
+        return true;
+    }
+
+    bool carry_prong_execute(Graph& graph, SegmentPtr prong, SegmentPtr stub,
+                             VertexPtr at, VertexPtr anchor,
+                             const IDetectorVolumes::pointer& dv)
+    {
+        if (!carry_prong_verify(graph, prong, stub, at, anchor)) return false;
+        VertexPtr vfar = find_other_vertex(graph, prong, at);
+        const auto& vec_p = prong->wcpts();
+        const auto& vec_s = stub->wcpts();
+        const double tol = 0.01*units::cm;
+        const auto at_pt = at->wcpt().point;
+        const bool p_front = (vec_p.front().point - at_pt).magnitude() < tol;
+        const bool s_front = (vec_s.front().point - at_pt).magnitude() < tol;
+
+        // Splice the stub's wcpts onto the prong's `at` end so the merged
+        // chain terminates on `anchor`'s wcpt (the mvga op3 re-seat splice
+        // mechanics: std::list + 0.01 cm consecutive dedup).
+        std::list<WCPoint> merged(vec_p.begin(), vec_p.end());
+        if (p_front && s_front) {
+            for (auto it = vec_s.begin(); it != vec_s.end(); ++it)
+                if ((it->point - merged.front().point).magnitude() > tol) merged.push_front(*it);
+        }
+        else if (p_front && !s_front) {
+            for (auto it = vec_s.rbegin(); it != vec_s.rend(); ++it)
+                if ((it->point - merged.front().point).magnitude() > tol) merged.push_front(*it);
+        }
+        else if (!p_front && s_front) {
+            for (auto it = vec_s.begin(); it != vec_s.end(); ++it)
+                if ((it->point - merged.back().point).magnitude() > tol) merged.push_back(*it);
+        }
+        else {
+            for (auto it = vec_s.rbegin(); it != vec_s.rend(); ++it)
+                if ((it->point - merged.back().point).magnitude() > tol) merged.push_back(*it);
+        }
+
+        std::vector<WCPoint> new_wcpts(merged.begin(), merged.end());
+        prong->wcpts(new_wcpts);
+        std::vector<geo_point_t> pts;
+        for (const auto& wcp : new_wcpts) pts.push_back(wcp.point);
+        create_segment_point_cloud(prong, pts, dv, "main");
+
+        // Rewire: the SegmentPtr survives (fits/flags/particle_info kept;
+        // fits are stale until the caller's refit).
+        remove_segment(graph, prong);
+        add_segment(graph, prong, anchor, vfar);
+        return true;
     }
 
 }

@@ -292,9 +292,17 @@ static PrStepResult run_through(PrTestEnv& env, PrContext& ctx, Step stop_after)
     if (stop_after == Step::AfterDetermineMainVertex) return r;
 
     {
+        // doc pr/51 round 3: determine_overall_main_vertex now takes the map
+        // and main_cluster by reference (a swap it decides internally used
+        // to be silently discarded).  This harness has no
+        // main_vertex_swap_apply knob layer, so pass throwaway local copies
+        // -- exactly the legacy discard semantics -- and never touch
+        // env.fixture.main_cluster / r.map_cluster_main_vertices directly.
+        ClusterVertexMap map_copy = r.map_cluster_main_vertices;
+        Cluster* main_cluster_copy = env.fixture.main_cluster;
         auto v = ctx.algo.determine_overall_main_vertex(
-            *ctx.graph, r.map_cluster_main_vertices,
-            env.fixture.main_cluster, env.fixture.other_clusters,
+            *ctx.graph, map_copy,
+            main_cluster_copy, env.fixture.other_clusters,
             r.vertices_in_long_muon, r.segments_in_long_muon,
             *ctx.tf, env.dv, env.pdata, env.recomb, true);
         if (v) r.map_cluster_main_vertices[env.fixture.main_cluster] = v;
@@ -493,6 +501,150 @@ TEST_CASE("pattern_recognition clustering_points [A]")
     for (auto& seg : segs) {
         CHECK(seg->global_indices("associate_points").size() >= 0);
     }
+}
+
+// doc sbnd_xin/docs/pr/59 round 2: reassociate_cluster_orphans.
+TEST_CASE("pattern_recognition reassociate_cluster_orphans [A]")
+{
+    auto& env = env_A();
+    auto ctx  = make_context(env);
+    CHECK_NOTHROW(run_through(env, ctx, Step::AfterClusteringPoints));
+
+    auto segs = ctx.algo.find_cluster_segments(*ctx.graph, *env.fixture.main_cluster);
+    REQUIRE(!segs.empty());
+
+    // Knob off: even with a manufactured orphan present, must be a no-op.
+    auto* victim = segs.front().get();
+    auto orig_dpc = victim->dpcloud("associate_points");
+    victim->dpcloud("associate_points", nullptr);
+    CHECK(ctx.algo.reassociate_cluster_orphans(*ctx.graph, *env.fixture.main_cluster, env.dv) == 0);
+    CHECK(victim->dpcloud("associate_points") == nullptr);
+
+    // Knob on, orphan present: the whole cluster is re-competed and the
+    // orphan should regain points (unless it is genuinely isolated in this
+    // fixture, in which case the helper must still not crash or leave other
+    // segments worse off -- checked below via a strict no-orphan no-op pass).
+    ctx.algo.m_assoc_full_recluster = true;
+    size_t n_rescued = ctx.algo.reassociate_cluster_orphans(*ctx.graph, *env.fixture.main_cluster, env.dv);
+    MESSAGE("reassociate_cluster_orphans rescued ", n_rescued, " segment(s)");
+    CHECK(victim->dpcloud("associate_points") != nullptr);
+
+    // No orphan left: a second call in the same state must be a true no-op
+    // (byte-identical path -- untouched clusters never get re-competed).
+    for (auto& seg : segs) {
+        if (!seg->dpcloud("associate_points")) {
+            // A genuinely unrescuable segment (e.g. truly isolated) would
+            // make the second-call assertion below meaningless; skip it.
+            return;
+        }
+    }
+    CHECK(ctx.algo.reassociate_cluster_orphans(*ctx.graph, *env.fixture.main_cluster, env.dv) == 0);
+}
+
+// doc sbnd_xin/docs/pr/64 round 7: assoc_reassign_orphans.
+//
+// Two safety properties the mechanism is designed to guarantee, checked
+// against real fixture geometry rather than a hand-built scenario (no
+// manufactured orphan is needed -- reassign_orphans acts on whatever Stage C
+// of clustering_points_segments already drops on this cluster, if anything):
+//   (1) knob off is a deterministic no-op: re-running clustering_points with
+//       m_assoc_reassign_orphans explicitly false reproduces the exact same
+//       per-segment associate_points counts as the original AfterClusteringPoints
+//       pass (byte-identical path).
+//   (2) knob on is monotonic-only-additive: every segment's count can only
+//       stay the same or grow relative to the knob-off pass -- the rescue
+//       branch only ever hands an unclaimed point to a segment, it never
+//       takes one away from a segment Stage C already accepted.
+TEST_CASE("pattern_recognition clustering_points assoc_reassign_orphans [A]")
+{
+    auto& env = env_A();
+    auto ctx  = make_context(env);
+    CHECK_NOTHROW(run_through(env, ctx, Step::AfterClusteringPoints));
+
+    auto segs = ctx.algo.find_cluster_segments(*ctx.graph, *env.fixture.main_cluster);
+    REQUIRE(!segs.empty());
+
+    std::map<Segment*, size_t> counts_off;
+    size_t total_off = 0;
+    for (auto& seg : segs) {
+        auto dpc = seg->dpcloud("associate_points");
+        size_t n = dpc ? dpc->npoints() : 0;
+        counts_off[seg.get()] = n;
+        total_off += n;
+    }
+
+    // (1) Knob off, explicit re-run: byte-identical to the baseline pass.
+    ctx.algo.m_assoc_reassign_orphans = false;
+    ctx.algo.clustering_points(*ctx.graph, *env.fixture.main_cluster, env.dv);
+    for (auto& seg : segs) {
+        auto dpc = seg->dpcloud("associate_points");
+        size_t n = dpc ? dpc->npoints() : 0;
+        CHECK(n == counts_off[seg.get()]);
+    }
+
+    // (2) Knob on: never fewer points than the knob-off baseline, for any
+    // segment or in total.
+    ctx.algo.m_assoc_reassign_orphans = true;
+    ctx.algo.clustering_points(*ctx.graph, *env.fixture.main_cluster, env.dv);
+    size_t total_on = 0;
+    for (auto& seg : segs) {
+        auto dpc = seg->dpcloud("associate_points");
+        size_t n = dpc ? dpc->npoints() : 0;
+        CHECK(n >= counts_off[seg.get()]);
+        total_on += n;
+    }
+    CHECK(total_on >= total_off);
+    MESSAGE("assoc_reassign_orphans: total associate_points ", total_off, " -> ", total_on);
+}
+
+// doc sbnd_xin/docs/pr/64 round 8: assoc_clear_on_merge.
+//
+// examine_structure_final_1/_1p/_3 (called inside determine_main_vertex) can
+// delete a segment that already holds populated associate_points from the
+// earlier clustering_points pass, without clearing or extending the
+// surviving neighbor's associate_points -- so the deleted segment's points
+// are silently lost with no re-derivation (18259-18625).  Verified against
+// real fixture geometry with two independently-built contexts --
+// determine_main_vertex mutates the graph structurally (merges/deletes
+// segments), so it cannot be safely re-run on the same graph for an A/B
+// comparison the way clustering_points can.
+//
+// Safety property checked: turning the knob on can only ever ADD
+// null-associate_points ("orphaned") segments relative to knob off -- the
+// mechanism only clears a stale cloud, it never fabricates or removes real
+// association data itself (re-deriving it is pr/59's reassociate_cluster_
+// orphans, downstream).
+TEST_CASE("pattern_recognition determine_main_vertex assoc_clear_on_merge [A]")
+{
+    auto& env = env_A();
+
+    auto ctx_off = make_context(env);
+    CHECK_NOTHROW(run_through(env, ctx_off, Step::AfterDetermineMainVertex));
+    auto segs_off = ctx_off.algo.find_cluster_segments(*ctx_off.graph, *env.fixture.main_cluster);
+    REQUIRE(!segs_off.empty());
+    size_t total_off = 0, n_null_off = 0;
+    for (auto& seg : segs_off) {
+        auto dpc = seg->dpcloud("associate_points");
+        if (!dpc) { n_null_off++; continue; }
+        total_off += dpc->npoints();
+    }
+
+    auto ctx_on = make_context(env);
+    ctx_on.algo.m_assoc_clear_on_merge = true;
+    CHECK_NOTHROW(run_through(env, ctx_on, Step::AfterDetermineMainVertex));
+    auto segs_on = ctx_on.algo.find_cluster_segments(*ctx_on.graph, *env.fixture.main_cluster);
+    REQUIRE(!segs_on.empty());
+    size_t total_on = 0, n_null_on = 0;
+    for (auto& seg : segs_on) {
+        auto dpc = seg->dpcloud("associate_points");
+        if (!dpc) { n_null_on++; continue; }
+        total_on += dpc->npoints();
+    }
+
+    MESSAGE("assoc_clear_on_merge: nsegs ", segs_off.size(), " -> ", segs_on.size(),
+            ", null-cloud segments ", n_null_off, " -> ", n_null_on,
+            ", total associate_points ", total_off, " -> ", total_on);
+    CHECK(n_null_on >= n_null_off);
 }
 
 TEST_CASE("pattern_recognition separate_track_shower [A]")

@@ -6,6 +6,7 @@
 #include "WireCellClus/PRGraph.h"
 #include "WireCellClus/PRShower.h"
 #include "WireCellClus/NeutrinoTaggerInfo.h"
+#include "WireCellClus/PRVertexScoreboard.h"
 
 #include <Eigen/IterativeLinearSolvers>
 #include <unordered_map>
@@ -73,7 +74,77 @@ namespace WireCell::Clus {
             double skip_angle_cut_3 = 45;
             double skip_dis_cut = 0.5*units::cm;
 
-            double default_dQ_dx = 5000; 
+            // doc pr/28 S17: on an isochronous cluster (small blob-center drift-x
+            // extent relative to its y/z footprint, the iso_band_like measure --
+            // clustering_neutrino.cxx) the multi-track charge veto's revert
+            // (skip_trajectory_point's `p = ps_point`) has no distance-based safety
+            // margin -- see porting_dictionary.md.  C++ default -1 = off: the revert
+            // is unconditional, matching the prototype (trajectory_fit.h:745-750)
+            // and the toolkit's own pre-S17 behaviour (23bd6783).  When >= 0, WCT
+            // internal length units (units::cm=10, so 20 cm = 200.0 -- the JSON
+            // loader in TaggerCheckNeutrino/TaggerCheckSTM does no unit conversion,
+            // same as every other skip_* knob here), abstain from the revert (keep
+            // the fitted point) for any point whose segment's cluster has
+            // blob-center drift-x extent below this cut.
+            double skip_revert_iso_xext_cut = -1;
+
+            // doc pr/49: cross-cluster projection-ghost filter on the 2D
+            // charge association (18255-57441: a physically unrelated
+            // cluster's charge aliases with the fitted track in the V view
+            // only and detours the fit).  C++ default -1 = off: legacy path,
+            // byte-identical.  When >= 0, a candidate 2D cell whose charge is
+            // live (flag 1), which is NOT covered by the fitted cluster's OWN
+            // blobs but IS covered by an OUT-OF-SCOPE cluster's (per-plane
+            // exact wire interval x slice interval from
+            // Cluster::time_blob_map()) is down-weighted in the fit.
+            // "Out-of-scope" (round 3, owner decision 2026-08-08): a cluster
+            // with NO segment in the current fit -- clusters fitted together
+            // in the same PR graph are aware of each other and their shared
+            // projections are legitimate, so they never count as foreign
+            // (see m_cov_fit_scope).  Cells covered by nobody (own-track
+            // charge just past the tiled envelope, dead-channel single-view
+            // charge with no 3D image) are kept at full weight, so events
+            // with no out-of-scope overlap are untouched.  The value is the
+            // wire/slice tolerance in cells (0 = strict; the 57441
+            // contamination sits ONE cell away, so tolerance >= 1 re-admits
+            // it).  Dead-derived cells (flag 0), rescue-injected anchors and
+            // end/vertex points (flag_end_point) are exempt.
+            double fit_blob_coverage = -1;
+
+            // doc pr/49: OPTIONAL 3D gate on the foreign test above -- when
+            // > 0, an out-of-scope cluster's claim only triggers the
+            // deweight if that cluster is FARTHER than this from the 3D
+            // point being fit.  Round 3 default 0 = DISABLED (scope-only,
+            // owner decision 2026-08-08: any out-of-scope claim deweights
+            // regardless of distance; graph-scope membership replaced the 15
+            // cm far-gate as the "not in the fitting range" criterion).
+            // WCT internal length units (units::cm = 10; the JSON loader
+            // does no unit conversion).  Inert while fit_blob_coverage < 0.
+            double fit_blob_coverage_ghost_dis = 0;
+
+            // doc pr/49: the least-squares weight multiplier applied in
+            // fit_point to foreign-ghost cells (owner: "deweight the foreign
+            // charge in the fitting, but not disable them completely" -- a
+            // dead-channel region can leave good single-view charge with no
+            // 3D image that the fit must still use).  1.0 would keep full
+            // weight (filter becomes a no-op); 0 would be a hard drop.
+            // Inert while fit_blob_coverage < 0.
+            double fit_blob_coverage_weight = 0.1;
+
+            // doc sbnd_xin/docs/pr/67 -- LOG-ONLY probe (0 = off = no lines =
+            // byte-identical).  examine_end_ps_vec is the primary END trimmer:
+            // it pops points off the front and back of a trajectory while
+            // Grouping::is_good_point(p_raw, apa, face, 0.2 cm, 0, 0) is false.
+            // That makes it the direct mechanism behind the owner's second
+            // hypothesis for the pr/67 cases -- "it is also possible that we
+            // have the situation covered, but then the track trajectory was
+            // removed somehow".  Today it removes points silently, so a tip
+            // that was fitted and then amputated looks identical to one that
+            // was never reached.  Reported as a double for the existing
+            // set_parameter(name, value) plumbing.
+            double traj_cover_probe = 0;
+
+            double default_dQ_dx = 5000;
 
             double end_point_factor=0.6;
             double mid_point_factor=0.9;
@@ -193,6 +264,15 @@ namespace WireCell::Clus {
         const PR::TaggerInfo& get_tagger_info() const { return m_tagger_info; }
         PR::TaggerInfo& get_tagger_info_mutable() { return m_tagger_info; }
 
+        /// Store / retrieve the per-event vertex scoreboard (doc
+        /// sbnd_xin/docs/pr/75).  Stashed by TaggerCheckNeutrino beside
+        /// set_tagger_info, i.e. AFTER snap_main_vertex_to_kink and the final
+        /// improve_vertex, and read by PrDisplayDump.  Empty (filled==false)
+        /// unless the `vertex_scoreboard` knob was on -- read that as "no
+        /// scoreboard taken", never as "no candidates".
+        void set_vertex_scoreboard(PR::VertexScoreboard vsb) { m_vertex_scoreboard = std::move(vsb); }
+        const PR::VertexScoreboard& get_vertex_scoreboard() const { return m_vertex_scoreboard; }
+
         void clear_graph();
 
         void add_cluster(std::shared_ptr<Facade::Cluster> cluster);
@@ -292,8 +372,18 @@ namespace WireCell::Clus {
         /// Per-plane data for 3D points (exactly matches prototype)
         struct PlaneData {
             std::set<Coord2D> associated_2d_points;
+            // doc pr/49 (fit_blob_coverage knob): subset of
+            // associated_2d_points classified as foreign-ghost cells (live,
+            // outside the fitted cluster's own blob coverage, inside an
+            // out-of-scope cluster's -- round 3: one with no segment in the
+            // current fit).  They stay in the fit -- a
+            // dead-channel region can leave good single-view charge with no
+            // 3D image, which the fit must still use -- but fit_point scales
+            // their least-squares weight by fit_blob_coverage_weight.
+            // Empty on the legacy path (knob off).
+            std::set<Coord2D> deweighted_2d_points;
             double quantity;
-            
+
             PlaneData() : quantity(0.0) {}
         };
 
@@ -354,7 +444,11 @@ namespace WireCell::Clus {
             double charge_err;    // original measurement uncertainty
             double pred_charge;   // predicted charge (un-whitened, same units as charge)
             int flag;             // 0=dead, 1=live, 2=bad
-            std::set<Facade::Cluster*> clusters;
+            /// Clusters owning this cell.  Ident-ordered, not pointer-ordered:
+            /// the only current consumer (PrDisplayDump::dump_proj) sorts the
+            /// ids itself, so this changes no output today -- it removes the
+            /// trap for the next consumer that iterates it directly.
+            std::set<Facade::Cluster*, PR::ClusterPtrCmp> clusters;
         };
 
         using WireTime = std::pair<int, int>;            // (wire_index, time_slice)
@@ -387,6 +481,52 @@ namespace WireCell::Clus {
         void form_point_association(std::shared_ptr<PR::Segment> segment, WireCell::Point &p, PlaneData& temp_2dut, PlaneData& temp_2dvt, PlaneData& temp_2dwt, double dis_cut, int nlevel, double time_tick_cut );
 
         void examine_point_association(std::shared_ptr<PR::Segment> segment, WireCell::Point &p, PlaneData& temp_2dut, PlaneData& temp_2dvt, PlaneData& temp_2dwt, bool flag_end_point = false, double charge_cut = 2000);
+
+        /// doc pr/49 (fit_blob_coverage knob): true iff any of the cluster's
+        /// OWN blobs covers (wire, time) in the given plane -- wire in the
+        /// blob's half-open per-plane interval [min-tol, max+tol) and time
+        /// (tick) in [slice_index_min-tol_ticks, slice_index_max+tol_ticks).
+        /// Interval search over Cluster::time_blob_map() keys, so it accepts
+        /// both blob-aligned times and the floor-quantized ticks of the
+        /// Steiner/fallback candidate branches without an alignment
+        /// assumption.  Order-invariant existential test (OR over blobs), so
+        /// iterating the pointer-keyed BlobSet cannot affect the result.
+        bool is_cell_covered_by_own_blobs(const Facade::Cluster* cluster, int apa, int face,
+                                          int plane, int wire, int time,
+                                          int tol_cells, int nticks_per_slice) const;
+
+        /// doc pr/49 (round 3, scope-aware): true iff some OUT-OF-SCOPE
+        /// cluster covers the cell per the same test.  Out-of-scope = not
+        /// `cluster` itself AND not in m_cov_fit_scope (clusters owning a
+        /// segment in the current fit -- "fitted together" clusters are
+        /// aware of each other and their shared projections are legitimate,
+        /// so they never count as foreign).  ghost_dis > 0 additionally
+        /// requires `other->get_closest_dis(p) > ghost_dis` (optional extra
+        /// gate; round-3 default 0 = scope-only).  A cell covered by nobody
+        /// (own-track charge spilling just past the tiled envelope, or
+        /// dead-channel single-view charge with no 3D image) is kept at
+        /// full weight.  Order-invariant OR over clusters and blobs.
+        /// `claimant` (optional, doc pr/50 diagnostics) receives the first
+        /// covering out-of-scope cluster; the result is unchanged.
+        bool is_cell_covered_by_foreign_blobs(const Facade::Grouping* grouping,
+                                              const Facade::Cluster* cluster,
+                                              const WireCell::Point& p, double ghost_dis,
+                                              int apa, int face,
+                                              int plane, int wire, int time,
+                                              int tol_cells, int nticks_per_slice,
+                                              const Facade::Cluster** claimant = nullptr) const;
+
+        /// doc pr/49 round 3: rebuild m_cov_fit_scope = clusters owning a
+        /// segment in the current fit.  Walks m_graph's edges when a graph
+        /// is present (fresh walk, NOT the stale m_cluster_edges -- the
+        /// single-tracking path never rebuilds that map) and adds `seg`'s
+        /// cluster (the one segment being fitted on the form_map path;
+        /// nullptr on the form_map_graph path, where the graph supplies
+        /// everything).  Called once per form_map/form_map_graph invocation,
+        /// only while the fit_blob_coverage knob is on.  doc pr/50: the same
+        /// walk also refreshes m_cov_vtx_info (graph vertex positions +
+        /// degrees) for the deweight sentinel diagnostics.
+        void rebuild_cov_fit_scope(const std::shared_ptr<PR::Segment>& seg);
         void update_association(std::shared_ptr<PR::Segment> segment,
                                 const std::vector<std::shared_ptr<PR::Segment>>& all_segments,
                                 PlaneData& temp_2dut, PlaneData& temp_2dvt, PlaneData& temp_2dwt);
@@ -400,8 +540,11 @@ namespace WireCell::Clus {
         void multi_trajectory_fit(int charge_div_method = 1, double div_sigma = 0.6*units::cm);
 
         // examine trajectory ...
-        std::vector<WireCell::Point> examine_segment_trajectory(std::shared_ptr<PR::Segment> segment, std::vector<WireCell::Point>& final_ps_vec, std::vector<WireCell::Point>& init_ps_vec);
-        bool skip_trajectory_point(WireCell::Point& p, std::pair<int,int>& apa_face, int i, std::vector<std::pair<WireCell::Point, std::shared_ptr<PR::Segment>>>& pss_vec,  std::vector<std::pair<WireCell::Point, std::shared_ptr<PR::Segment>>>& fine_tracking_path); 
+        // doc pr/28 T3: init_indices carries the GLOBAL m_3d_to_2d key of each
+        // point (prototype's init_indices, multi_track_fitting.h:429).  The
+        // per-segment loop position is NOT that key in the multi-track path.
+        std::vector<WireCell::Point> examine_segment_trajectory(std::shared_ptr<PR::Segment> segment, std::vector<WireCell::Point>& final_ps_vec, std::vector<WireCell::Point>& init_ps_vec, const std::vector<int>& init_indices);
+        bool skip_trajectory_point(WireCell::Point& p, std::pair<int,int>& apa_face, int i, int index, std::vector<std::pair<WireCell::Point, std::shared_ptr<PR::Segment>>>& pss_vec,  std::vector<std::pair<WireCell::Point, std::shared_ptr<PR::Segment>>>& fine_tracking_path);
 
         // prepare for dQ/dx fitting
         double cal_gaus_integral(int tbin, int wbin, double t_center, double t_sigma, 
@@ -570,6 +713,13 @@ namespace WireCell::Clus {
          // Core parameters - centralized storage
         Parameters m_params;
 
+        // doc pr/28 S17: memoized cluster ident() -> blob-center drift-x extent
+        // (cm), for skip_revert_iso_xext_cut.  Lookup/insert only, never
+        // iterated -- no ordering hazard (CLAUDE.md only forbids ITERATING
+        // pointer-keyed containers; this is int-keyed regardless).  Lives for
+        // this TrackFitting instance (one multi-track fitting pass).
+        std::unordered_map<int, double> m_cluster_xext_cache;
+
         // Helper method to get parameter value or default
         double get_param_or_default(double param_value, double default_value) const {
             return (param_value < 0) ? default_value : param_value;
@@ -589,6 +739,27 @@ namespace WireCell::Clus {
         std::set<Facade::Cluster*, PR::ClusterPtrCmp> m_loaded_clusters;  ///< Clusters whose charge data has been loaded into m_charge_data
         bool m_charge_data_dirty{true};                ///< True when m_clusters has clusters not yet in m_charge_data
         Facade::Cluster* m_cluster_filter{nullptr};    ///< If non-null, restrict fitting to segments of this cluster
+
+        // doc pr/49 round 3 (fit_blob_coverage knob): clusters owning a
+        // segment in the current fit -- the "fitting scope" whose members
+        // never count as foreign in is_cell_covered_by_foreign_blobs.
+        // Rebuilt by rebuild_cov_fit_scope() at the top of each
+        // form_map/form_map_graph call while the knob is on; membership-only
+        // (.count()), never iterated, so pointer keying cannot affect
+        // determinism.  NOT m_clusters: that set is polluted by
+        // preload_clusters() with charge-cache-only clusters that own no
+        // segment.
+        std::set<const Facade::Cluster*> m_cov_fit_scope;
+
+        // doc pr/50 (172230-class near-vertex robustness): graph vertex
+        // positions (fit point when valid, else wcpt) and degrees at the
+        // last rebuild_cov_fit_scope() call, in ordered_nodes order.  Used
+        // by the deweight sentinel to report each firing's distance to the
+        // nearest pattern vertex (and that vertex's degree) -- the census
+        // evidence for classifying near-vertex vs far-ghost deweights.
+        // Refreshed only while the fit_blob_coverage knob is on; read-only
+        // positional data, never iterated by pointer.
+        std::vector<std::pair<WireCell::Point, int>> m_cov_vtx_info;
 
         // Option 1: per-cluster edge descriptor cache to avoid full graph traversal
         std::unordered_map<Facade::Cluster*, std::vector<PR::edge_descriptor>> m_cluster_edges;
@@ -621,6 +792,9 @@ namespace WireCell::Clus {
         // Kinematics and tagger features (set by TaggerCheckNeutrino)
         PR::KineInfo   m_kine_info{};
         PR::TaggerInfo m_tagger_info{};
+        // doc sbnd_xin/docs/pr/75 -- diagnostic only, empty unless the
+        // vertex_scoreboard knob was on.
+        PR::VertexScoreboard m_vertex_scoreboard{};
 
         // =====================================================================
         // HYBRID CACHE IMPLEMENTATION
@@ -670,8 +844,20 @@ namespace WireCell::Clus {
         /// Overwriting the same key on each refill gives "latest fit wins per
         /// cluster", correctly handling re-fits during pattern recognition.
         /// Merged into m_fitted_charge_2d by assemble_fitted_charge_2d().
+        ///
+        /// Ordered by PR::ClusterPtrCmp (cluster ident), NOT by pointer: the
+        /// merge in assemble_fitted_charge_2d() is last-writer-wins on cells
+        /// claimed by more than one cluster, so a pointer-ordered walk made
+        /// pred_charge run-dependent -- 10.2% of cells moved between two
+        /// `setarch -R` runs of SBND evt 388 (doc pr/28 §4.3, §14).  Same
+        /// comparator as m_clusters above.  Safe here because the map lives
+        /// entirely inside one visitor's visit(): idents are re-enumerated
+        /// only between visitors (MultiAlgBlobClustering.cxx:2445), never
+        /// while entries are held.  fill_fitted_charge_2d() warns if two
+        /// distinct clusters ever reach it with the same ident.
         std::map<Facade::Cluster*,
-                 std::map<APAFacePlane, std::map<WireTime, FittedCharge2D>>>
+                 std::map<APAFacePlane, std::map<WireTime, FittedCharge2D>>,
+                 PR::ClusterPtrCmp>
             m_cluster_fitted_charge_2d;
 
         // global geometry

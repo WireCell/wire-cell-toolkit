@@ -219,7 +219,8 @@ The final portion of porting covers the transformation from clusters of blobs an
 | `get_point_vec()` | `seg->fits()` | |
 | `set_fit_associate_vec(pts, skip, idx)` | `seg->set_fit_associate_vec(fits, dv, cloud_name)` | Now takes by value + `IDetectorVolumes` |
 | `get_closest_wcpt(point)` | `segment_get_closest_point(seg, point, cloud_name)` | In `PRSegmentFunctions.cxx` |
-| `get_flag_shower()` | `seg->flags_any(SegmentFlags::kShowerTrajectory \| kShowerTopology)` | Split into two flags |
+| `get_flag_shower()` | `seg->flags_any(SegmentFlags::kShowerTrajectory \| kShowerTopology) \|\| std::abs(pdg) == 11` | **THREE disjuncts, not two.** `ProtoSegment.cxx:1305` is `flag_shower_trajectory \|\| flag_shower_topology \|\| get_flag_shower_dQdx()`, and `get_flag_shower_dQdx()` (`:1309`) is *only* `fabs(particle_type)==11` — despite the name it tests nothing about dQ/dx. An earlier revision of this row omitted the third term, and doc pr/33 P6 traces two live toolkit sites to that omission |
+| `get_flag_shower_dQdx()` | `std::abs(seg->particle_info()->pdg()) == 11` | Name is misleading in the prototype too; carries no dQ/dx test |
 | `get_direct_length()` | `segment_track_direct_length(seg)` | In `PRSegmentFunctions.cxx` |
 | `get_length()` | `segment_track_length(seg)` | |
 | `search_kink(start, cloud, threshold)` | `segment_search_kink(seg, start, cloud, threshold)` | |
@@ -263,7 +264,125 @@ PID / direction-finding / kinematics algorithms (`do_track_comp`, `eval_ks_ratio
 
 Full function-by-function table: `clus/docs/patternrecognition/prvertex_prsegment_prshower_review.md §1`.
 
-### [Steiner Tree](https://github.com/BNLIF/wire-cell-pid/blob/537a3fd17f8a7b3cf5412594267c14c4cc1775cb/docs/PR3DCluster_steiner.md) (WCP) vvs. **xxx** :warning: (WCT)
+### [Steiner Tree](https://github.com/BNLIF/wire-cell-pid/blob/537a3fd17f8a7b3cf5412594267c14c4cc1775cb/docs/PR3DCluster_steiner.md) (WCP) vs. **`WireCell::Clus::Steiner::Grapher`** (WCT)
+
+`Steiner::Grapher` (`clus/src/SteinerGrapher.{h,cxx}`) plus the free functions in
+`WireCell::Clus::Graphs::Weighted` are the WCT equivalent of
+`WCPPID::PR3DCluster`'s Steiner half; the orchestration that WCP does inline in
+`create_steiner_graph` lives in the `CreateSteinerGraph` visitor.
+
+| WCP (`PR3DCluster_steiner.h` / `_graph.h`) | WCT | Notes |
+|---|---|---|
+| `create_steiner_graph(ct_point_cloud, gds, …)` | `Steiner::CreateSteinerGraph::visit` → `process_cluster_steiner` lambda | Component, not a member |
+| `Improve_PR3DCluster_2(...)` + `calc_sampling_points` + `Create_point_cloud` | `m_grapher_config.retile->mutate(*src->node())` (`RetileCluster`) | The retiled cluster is a real grouping child, **not** deleted mid-algorithm |
+| `Create_steiner_tree(pc_steiner, flags, gds, old_mcells, flag_path, disable_dead_mix_cell)` | `Grapher::create_steiner_tree(ref_cluster, path_indices, graph, steiner_graph, disable_dead_mix_cell, steiner_pc)` | Reference cluster passed explicitly instead of `old_mcells` |
+| `find_steiner_terminals(gds, disable_dead_mix_cell)` | `Grapher::find_steiner_terminals(graph, disable_dead_mix_cell[, cell_points_map])` | Map may be passed in to avoid recomputing |
+| `find_peak_point_indices(...)` | `Grapher::find_peak_point_indices(...)` (blob + live overloads) | |
+| `calc_charge_wcp(wcp, gds, disable_dead_mix_cell)` | `Facade::Cluster::calc_charge_wcp(point_index, charge_cut, disable_dead_mix_cell)` | |
+| `establish_same_mcell_steiner_edges(gds, ddmc)` — **flag=1** | `Grapher::establish_same_blob_steiner_edges(graph, ddmc)` + `form_cell_points_map()` | Both group by the **retiled** blob |
+| `establish_same_mcell_steiner_edges(gds, true, 2)` — **flag=2** | `Graphs::Weighted::establish_same_blob_steiner_edges_steiner_graph(result, cluster)` | Grouping key differs — see K5 |
+| `remove_same_mcell_steiner_edges()` | `Grapher::remove_same_blob_steiner_edges(graph)` | |
+| `WCP::ToyPointCloud* point_cloud_steiner` (owns `WCPoint::mcell`) | a `"steiner_pc"` `PointCloud::Dataset` on the cluster | **No blob pointer per point** — see K5 |
+| `std::vector<bool> flag_steiner_terminal` | `flag_steiner_terminal` column on `steiner_pc` | |
+| `get_two_boundary_wcps(2)` / `get_extreme_wcps(2)` | `Facade::Cluster::get_two_boundary_steiner_graph_idx(...)` | Different construction — see K6 |
+| `WCPPaal/steiner_tree_greedy.h` | `clus/src/PAAL.h` + `Graphs::Weighted::voronoi` | Character-for-character port |
+| `MCUGraph` (`listS`/`setS`, `float` weights) | `Graphs::Weighted::graph_type` (`vecS`, `double` weights) | See K1, K2 |
+
+Full audit, with per-line anchors on both sides:
+`sbnd_xin/docs/pr/29_steiner-graph-build-port-audit.md` (wcp-porting-validation).
+
+#### Known divergences — do NOT "correct" these back
+
+**K1. Edge weights are `double` in WCT, `float` in WCP.** Deliberate. It blocks
+bit-identicality with WCP output and is not a bug. (pr/29 D4)
+
+**K2. Tree-edge dedup is by vertex pair, not by edge descriptor.** WCP sorts
+edge descriptors whose `operator<` compares the edge-property **pointer**
+(`PR3DCluster_steiner.h:505-506`), so its dedup result is allocation-order
+dependent. WCT keys on `(source, target)`. **WCT is the deterministic side; keep
+it.** The same applies to WCP's `std::map<SlimMergeGeomCell*, …>` in both
+same-blob passes (`PR3DCluster_graph.h:60`, `:99`), which is *iterated* — the
+edge set is order-independent but the insertion order is not. WCT's
+`form_cell_points_map` keys on a `size_t` blob node index for exactly this
+reason. (pr/29 D6, §6)
+
+**K3. The Steiner terminal filter takes ±1 wire of slack; `get_extreme_wcps`
+takes none.** WCP uses two different tolerances at two call sites
+(`PR3DCluster_steiner.h:285-290` vs `PR3DCluster_path.h:111-119`); WCT serves
+both from one helper, `Cluster::check_wire_ranges_match`, so the slack is a
+**per-call-site parameter** (`terminal_wire_tol`, default 0), never an edit to
+the shared body. **The arithmetic is the trap:** WCT blob wire ranges are
+half-open `[min, max)` while WCP's are inclusive `[low, high]` with
+`high == max - 1`, so WCP's `index <= high + 1` translates to `index < max + 1`,
+**not** `<= max + 1` — the literal transcription is two wires loose on the high
+side and one on the low. (pr/29 D1, and CLAUDE.md M7)
+
+**K4. The adjacent-time-slice fallback must step by ticks-per-slice, not by 1.**
+`time_blob_map` is keyed on `Blob::slice_index_min()`, which is in **ticks**
+(`Facade_Blob.h:33`), so consecutive slice starts are `nticks_per_slice` apart
+(SBND: 4). A literal `±1` names no real slice and the whole fallback is dead
+code. WCT reads the stride from
+`Grouping::get_nticks_per_slice().at(apa).at(face)` — never a hard-coded 4,
+which would work on SBND and break elsewhere. (pr/29 D12)
+
+**K5. The flag=2 same-blob pass groups by the RETILED blob in WCT and by the
+ORIGINAL mcell in WCP — and WCT is correct.** WCP resolves each selected point
+back to an original-cluster mcell by strict wire containment
+(`PR3DCluster_steiner.h:542-563`) and skips points that match none
+(`PR3DCluster_graph.h:90-91`). That is **not** a physics choice: `point_cloud_steiner`
+is a member of the *original* cluster while the retiled cluster and its mcell
+holder are `delete`d immediately after the tree is built (`:53-56`), so a
+retiled `SlimMergeGeomCell*` stored on it would dangle, and a WCP `WCPoint` has
+exactly one `mcell` field. WCP itself groups by the **retiled** blob one step
+earlier, at flag=1. WCT's `steiner_pc` is a `Dataset` with no blob pointer, so
+the constraint does not exist; the "skip points with no mcell" branch is that
+lookup's failure path, not a rule. **Do not reintroduce it.** (pr/29 D3,
+§10.2.9)
+
+**K6. `get_two_boundary_wcps(2)`'s `mcell == 0` and
+`Estimate_total_charge() < 1500` cuts are replaced, not dropped.** They depend
+on the per-point original-mcell association K5 removes. WCT's
+`get_two_boundary_steiner_graph_idx` scores boundaries on the **regular** point
+cloud, where blob charge and dead-wire counts exist, then snaps each to the
+nearest Steiner **terminal** (`Facade_Cluster.cxx:3423-3435`).
+
+**K7. The path skeleton is resampled finer in WCT.** WCP uses
+`num_steps = floor(dis/step)` and so *undershoots* its own 0.6 cm target by up
+to a factor two; WCT uses `floor(dis/step) + 1` and never exceeds it
+(`DynamicPointCloud.cxx:744`). A denser sample of the same curve is a more
+accurate nearest-distance. WCP's duplicated endpoint is inert. **Keep WCT's.**
+Note `make_points_cluster_skeleton` has a single body shared with
+`clustering_deghost`, so any change there is not local. (pr/29 D7, §10.2.8)
+
+**K8. `disable_dead_mix_cell` must reach the edge-weight charges.** WCP computes
+the `Qs`/`Qt` in the edge weight with the same value `Create_steiner_tree` was
+called with (`PR3DCluster_steiner.h:514`, `:521`; the chain passes `false`).
+WCT's `create_enhanced_steiner_graph` defaults the parameter to `true`, so
+dropping it at the call silently selects the other branch of `calc_charge_wcp`:
+`true` sums all three planes then subtracts **dead** ones
+(`charge_uncertainty > 1e10`), `false` sums only planes with a **nonzero**
+charge value — independent predicates. Behind
+`edge_charge_forward_dead_mix`. (pr/29 D2, §12)
+
+**K9. Containment additionally requires the same APA and face in WCT.** Forced:
+`time_blob_map` is `apa → face → tick → blobs`, and WCP is single-APA so it has
+no counterpart. Correct as written. (pr/29 D8)
+
+**K10. `recover_steiner_graph` is not ported.** It is WCP's only MST
+(`PR3DCluster_steiner.h:77-180`) and no `wire-cell-pid` app calls it — verified
+by an exhaustive `prototype_base/pid/apps/` grep. A gap on paper only. (pr/29
+D11)
+
+#### Config knobs that select WCP-faithful behaviour
+
+All three default **OFF** in C++ (so no detector moves without opting in) and
+are **ON in the SBND operating point** (`cfg/pgrapher/experiment/sbnd/wct-pr-perevt.jsonnet`):
+
+| key on `CreateSteinerGraph` | restores | dictionary entry |
+|---|---|---|
+| `terminal_wire_tol` (int, 0) | WCP's ±1 wire slack in the terminal filter only | K3 |
+| `terminal_adjacent_slice` (bool, false) | makes WCP's t±1 slice fallback actually resolve | K4 |
+| `edge_charge_forward_dead_mix` (bool, false) | honours the caller's `disable_dead_mix_cell` in edge weights | K8 |
 
 ## WCP Algorithms
 
@@ -411,3 +530,474 @@ segment — a 0.9 deg "vertex" inside a straight track (SBND mcp1k evt 284794).
 `iso_endpoint_tube_radius` is diagnostic only; a hard tube filter around the
 straight axis line was measured to pull endpoints up to 28.6 cm INWARD on long
 or curved clusters and was rejected.
+
+## `examine_vertices_3` / `get_local_extension`: the "extension" recovery step has no outward check, in BOTH trees — `v3_extension_guard` is a prototype-limitation fix, not a port correction
+
+`examine_vertices_3` (`clus/src/NeutrinoStructureExaminer.cxx`, a faithful
+port of `NeutrinoID_proto_vertex.h:2412-2463`) revisits the main cluster's two
+original `init_first_segment` endpoints and tries to push each one further
+out via `get_local_extension` — a 10 cm-radius Hough-transform direction
+estimate (`clus/src/NeutrinoStructureExaminer.cxx get_local_extension`, port
+of `PR3DCluster_path.h:288-316`). Neither tree's caller ever checks that the
+returned point actually moves the vertex FARTHER from the segment's other
+(far) endpoint; the only checks are "different from both existing points"
+(`wcp1.index == vtx / wcp2.index`, `PR3DCluster_path.h:2443`) and "the
+rebuilt path isn't more than 2x longer" (`:2452`). At the axial extreme of an
+isochronous (drift-perpendicular) sheet — exactly where `iso_endpoint` (round
+2 above) picks its seed — the local 10 cm neighbourhood is dominated by the
+sheet's transverse spread, so the Hough direction estimate is poorly
+conditioned and can point back INTO the cluster. Measured on all three doc
+pr/24 §18 (round 5) events (SBND 18259-42280, 18255-271851, 18255-350186),
+the "extension" landed 7.5-8.9 cm closer to the far endpoint than the
+original vertex, silently amputating the delivered trajectory by that much —
+this is what produced round 4's 8.4-10.9 cm undershoot, NOT the endpoint pick
+itself (round 4 had misattributed it to unidentified shared refinement code;
+see doc pr/24 §17.5, retracted in §18).
+
+Because the prototype has the identical gap (no distance-to-far-endpoint
+check anywhere in `examine_vertices_3`), this is a **prototype limitation
+(M15)**, not a port error — do NOT silently "fix" `get_local_extension` or
+`examine_vertices_3` unconditionally. The fix, `v3_extension_guard`
+(`clus/inc/WireCellClus/NeutrinoPatternBase.h`, `TaggerCheckNeutrino.h`), C++
+default false, rejects a candidate unless it increases the vertex's distance
+to the segment's far endpoint by more than `v3_extension_min_gain` (default
+-1.0 cm, tolerating the legacy arm's own few-mm retreat from the same bug
+while rejecting the multi-cm amputation). Knob off = both trees' unconditional
+accept, byte-identical.
+
+## `skip_trajectory_point`'s charge-consistency revert has no protection on an isochronous cluster, in BOTH trees — `skip_revert_iso_xext_cut` is a prototype-limitation fix, not a port correction
+
+The multi-track trajectory fit's charge-consistency veto (toolkit
+`clus/src/TrackFitting.cxx skip_trajectory_point`, a faithful port of
+`prototype_base/pid/src/PR3DCluster_trajectory_fit.h:706-750`, called from
+`PR3DCluster_multi_track_fitting.h:429`'s `examine_trajectory`, doc pr/28 §13
+T1/T2) compares charge near a fitted point (`c1`) against charge near its
+pre-fit position (`c2`) on each plane; if the ratio falls below threshold it
+reverts the point (`p = ps_point`) with **no bound on how far that reverts
+it** — the fit's own regularizer term toward the initial trajectory is
+commented out in both trees (`PR3DCluster_trajectory_fit.h:302-304`), so
+nothing else limits the jump either.
+
+Measured (doc pr/28 §17, SBND 18255-271851 vs 18255-388): the individual
+revert is *not* large (median 0.4 cm) — the failure is not one bad jump but
+many small reverts applied consistently along a stretch whose pre-fit
+positions already sit off the eventual smoothed line, which happens when the
+cluster is **isochronous** (its charge sits in one narrow drift slab, same
+geometry `iso_endpoint` above targets): `c1` and `c2` then integrate the same
+overlapping 2-D charge blob rather than resolving two distinct samples of a
+track, so the veto's premise — "the fitted point sits on less charge than a
+resolvable alternative" — does not hold, and it blocks the fit from smoothing
+those points onto the trunk. Two per-point candidate discriminators were
+measured and both come back flat between the pathological cluster and a
+normal one (§17.2): whether the fitted/reference projections share a time
+tick, and the local displacement's angle to the drift axis. The measure that
+DOES discriminate is a **cluster-level** one — blob-center drift-x extent,
+the same measure `iso_band_like` above uses for its own, unrelated veto.
+
+Because the prototype has the identical unbounded revert and the identical
+missing regularizer (this is not a toolkit-introduced bug — `23bd6783`
+correctly revived behavior the prototype has always had), this is a
+**prototype limitation (M15)**, not a port error — do NOT "fix" the revert to
+be bounded or conditional for every cluster; every non-isochronous cluster's
+fit depends on the veto being unconditional (confirmed: SBND 18255-388, doc
+pr/28 §13's own accepted case, is verified bit-identical on its own cluster
+with the knob on — doc pr/28 §17.4 G3). The fix, `skip_revert_iso_xext_cut`
+(`clus/inc/WireCellClus/TrackFitting.h`, reached through
+`TaggerCheckNeutrino`/`TaggerCheckSTM`'s `trackfitting_config_file` JSON, NOT
+an `IConfigurable`), C++ default -1 (off), abstains from the revert (keeps
+the fitted point) only for a point whose segment's cluster has blob-center
+drift-x extent below the cut. Knob off = both trees' unconditional revert,
+byte-identical. A related dilution weakness in the same veto — a
+non-informative plane contributes a free *agreement* vote rather than being
+excluded — was found and is recorded, not fixed (doc pr/28 §17.5): the
+naive fix (renormalize by informative-plane count) has the WRONG SIGN, since
+it would remove the very term currently masking disagreement on the other
+two planes.
+
+## `NeutrinoTrackShowerSep.cxx`'s wholesale track-to-electron conversion sites and `segment_is_shower_topology` never consult the segment's own dQ/dx — `shower_reclass_dqdx_guard`/`shower_topo_dqdx_guard` are designed divergences, not port corrections
+
+Doc pr/40 (owner report: 9 SBND events where a proton/pion/muon **track**
+displays as an electron). Two mechanisms, both **prototype-faithful in both
+trees**, not port bugs:
+
+1. Three sites in `NeutrinoTrackShowerSep.cxx` —
+   `examine_all_showers`'s `flag_change_showers` loop,
+   `improve_maps_shower_in_track_out`'s two reclassify loops (out_tracks and
+   no-direction segments), and `improve_maps_no_dir_tracks` Case E — convert
+   a direction-weak, untyped, or vertex-topology-flagged segment to electron
+   **unconditionally**, without re-checking the segment's own charge. Doc
+   pr/9 §4 already established this is deliberate prototype design: *"in a
+   shower-dominated cluster, only a strong-direction track survives as a
+   track."* The prototype has the identical unconditional conversion at its
+   own counterpart sites.
+2. `segment_is_shower_topology` builds a per-point `vec_dQ_dx` array
+   (normalized by `MIP_dQ_dx`) that is otherwise **dead** — read only as
+   `.size()` (pr/31 GOTCHA 5, itself citing the prototype's identical
+   dead-array shape). The whole shower/track call is decided by a 5-branch
+   geometric spread test alone; the segment's charge never gets a vote,
+   in either tree.
+
+Measured (doc pr/40 Part 0 / G2): a segment with a genuinely hadron-like
+median dQ/dx (proton ≥ 1.75× MIP, muon ≤ 1.2× MIP — the SAME thresholds
+`segment_determine_dir_track`'s own short-track fallback already trusts) can
+be swept into electron by either mechanism regardless of how confidently
+hadron-like its own charge profile is. 8 of the 9 owner-reported cases
+measured above 1.75× or matched the muon band; the population census found
+129 segments across 42 events in the broader class.
+
+Because both mechanisms are faithful to the prototype's own behaviour, the
+fix is a **designed divergence (owner-approved this round), not a port
+correction**: `shower_reclass_dqdx_guard` (all three sites in mechanism 1)
+and `shower_topo_dqdx_guard` (mechanism 2) share one helper,
+`segment_dqdx_spares_electron_reclass` (`PRSegmentFunctions.h/.cxx`) — spares
+a segment from conversion / from having `kShowerTopology` set only when its
+own median dQ/dx is decisively proton- or muon-like. C++ default `false` for
+both = both trees' unconditional conversion, byte-identical. SBND
+production default `true` since 2026-08-06 (doc pr/40 G1-G3 all pass:
+48/48 byte-identical knob-off, 8/9 owner cases fixed, zero verdict
+regression on the 48-event population).
+
+**Do NOT make either guard unconditional or widen its threshold band.** The
+gap between 1.2× and 1.75× MIP is deliberately left untouched — doc pr/40's
+evt 256587 (median 1.26× MIP, still electron with the guard on) sits in that
+band, and its own *intra-segment* charge is genuinely ambiguous, not a guard
+failure. Widening the band to catch it would sweep a much larger,
+less-certain population into an automatic override with no principled
+stopping point.
+
+**Superseded in part, doc pr/40 round 2**: evt 256587's own median dQ/dx really
+is ambiguous, but its *topology* is not — segment 11079 starts exactly at
+the neutrino vertex and its far end abuts a PID'd, charge-confirmed proton
+(segment 11080, 3.72× MIP). An electron cannot father a proton. This is a
+different evidence axis (topology, not the segment's own charge profile) and
+does not widen the band above — see the new entry below for the
+`shower_proton_daughter_pion` knob that resolves it.
+
+## `set_default_shower_particle_info`'s electron default never consults graph topology — `shower_proton_daughter_pion` is a designed divergence, not a port correction
+
+Doc pr/40 round 2 (owner: reviewing the pr/40 fix's own Bee display, "for
+256587... in the end of the particle, there is a proton, which is high
+dQ/dx... an electron cannot change to proton. So the fact that we identified
+a proton should change it to pion instead of electron"). A third mechanism,
+distinct from the two above: `set_default_shower_particle_info`
+(`NeutrinoPatternBase.cxx`) is the single stage-4 choke point where any
+`flag_shower` segment still missing `particle_info` gets defaulted to
+electron (mirrors prototype `ProtoSegment::get_particle_type()`, which
+**always** returns 11 for any shower segment, unconditionally — this default
+itself is prototype-faithful and stays). Neither this function nor the
+prototype it mirrors ever looks at the *graph* around the segment: not the
+neutrino vertex, not the segment's neighbours' own PID. The prototype has
+**no** proton-daughter veto anywhere — a designed divergence, not a port
+correction.
+
+Measured (48-event nueCC48 population, `work-pr40-on48` arm): of 2209
+electron-labelled segments, a naive "has a >1.75× MIP neighbour anywhere"
+rule fires on 348 — far too broad, since most electrons in a shower
+legitimately sit next to a high-dQ/dx track. Requiring the segment (a) to
+emanate from the neutrino vertex by graph identity (not a distance cut —
+every measured case sits at exactly d=0.00 cm) **and** (b) its far end to be
+a vertex whose out-edges include a segment already PID'd proton (2212) that
+is *independently* charge-confirmed (its own median dQ/dx > 1.75× MIP)
+narrows this to 5/2209. The neutrino-vertex requirement is what does the
+work: it excludes the ordinary, correct nueCC topology where an electron and
+a proton merely *share* the neutrino vertex as siblings, not parent/daughter.
+
+`shower_proton_daughter_pion` (config key, threaded via
+`m_shower_proton_daughter_pion`) relabels the candidate segment PION (211)
+instead of electron when `segment_has_proton_daughter`
+(`PRSegmentFunctions.h/.cxx`) fires. C++ default `false` = legacy
+unconditional electron default, byte-identical.
+
+**Round 2 found a fourth writer that reverted this end-to-end; round 3
+closed it. SBND PRODUCTION DEFAULT ON.** The override fires correctly at
+this choke point — traced, `pdg 11 -> 211` at `NeutrinoPatternBase.cxx` —
+but `Shower::update_particle_type` (`PRShower.cxx`, called from 8 sites in
+`NeutrinoShowerClustering.cxx`) unconditionally reasserted electron on a
+shower's start segment whenever `shower_length > track_length`, with zero
+awareness of PID or topology, reverting the override in the same pass (evt
+256587 seg 11079: traced, `pdg 211 -> 11` at `PRShower.cxx:801`; population
+census showed the override surviving end-to-end in only 1/2209 cases).
+Round 3 (doc pr/40 round 3) threads `main_vertex` + `protect_proton_
+daughter_pion` (both legacy-default) into `update_particle_type`, which
+re-derives `segment_has_proton_daughter` on the SAME MIP scale
+(`m_mip_dqdx_median`, not the function's own `mip_dqdx`, a different scale —
+the two must not be conflated) and skips the reassignment when it fires.
+Gate-clean: 48/48 byte-identical off; evt 256587 now reads pdg 211
+end-to-end; population census shows exactly 2/2209 segments move, no
+verdict regression. Flipped SBND ON, verified with a bare single-event
+cfg-only run hash-matching the gated on-arm exactly — see doc pr/40 round 3.
+
+**Do not widen this to "any high-dQ/dx neighbour."** The 348-vs-5 gap above
+is the reason both the neutrino-vertex-emanation requirement and the
+independent charge-confirmation requirement exist; dropping either
+reintroduces the false-positive population this knob was designed to avoid.
+
+## Relabelling a shower segment's PDG does not make it stop being a Shower — `shower_proton_daughter_pion_dissolve` (F7) is a designed divergence
+
+Doc pr/40 round 4 (owner: reviewing the round-2/3 `shower_proton_daughter_pion`
+fix's own Bee display, evt 256587: *"the particle flow do show the pion+, but
+we do not see the proton after it in the particle flow... the EM shower were
+modified as pion, but not on the individual tracks"*). F5 changes a segment's
+*pdg* (11 → 211) but never touches `SegmentFlags::kShowerTrajectory` /
+`kShowerTopology`. Those flags are what `shower_clustering_with_nv_in_main_
+cluster` (`NeutrinoShowerClustering.cxx`) actually tests (`is_shower_seg =
+flags_any(kShowerTrajectory) || flags_any(kShowerTopology) ||
+|pdg|==11`) — with the flags still set, a pion-relabelled segment is still
+rooted as a `Shower`. Two measured consequences on evt 256587 seg 11079:
+`fill_bee_pf_tree` (`MultiAlgBlobClustering.cxx`) pre-claims every
+shower-owned segment (`used_segs = shower_segs`), so the segment's own
+charge-confirmed proton daughter (seg 11080, the very evidence F5 used to
+relabel it) never gets its own particle-flow node; and the pi+ Bee node's
+displayed extent is the *shower's* endpoint — a 0.35 cm fragment absorbed
+from a different, non-main cluster (seg 81153) — not segment 11079's own end.
+
+The prototype has **no** mechanism that reclassifies an already-formed shower
+back into a track after a PDG override — designed divergence, not a port
+correction. `shower_proton_daughter_pion_dissolve` (config key, threaded via
+`m_shower_proton_daughter_pion_dissolve`) clears both shower flags in
+`set_default_shower_particle_info` at the same site F5's override fires,
+provided `shower_proton_daughter_pion` is also on. C++ default `false` =
+legacy = byte-identical. Measured (48-event nueCC48 population,
+`work-pr40r3-on48` arm): exactly 2/2209 electron-labelled segments carry
+`pdg 211 && flag_shower` before this fix (evt 256587 seg 11079, evt 342199
+seg 72098 — the latter on a non-main cluster, so it produces no `mc.json`
+delta but is still a real behaviour change).
+
+## A muon segment cannot terminate in a multi-proton hadronic vertex — `muon_multi_proton_pion` (F8) is a designed divergence
+
+Doc pr/40 round 4 (owner, same Bee review round, evt 489330: *"there is one
+muon → two protons. This is not physical, in this case, the muon should be
+changed to pion"*). Measured: segment 4019 (mu-, 65.2 cm) has TWO
+charge-confirmed proton daughters (segs 4018, 4044) at its far (non-neutrino-
+vertex) end. The prototype has no proton-multiplicity veto on a track's PID
+— designed divergence. `muon_multi_proton_pion` (config key, threaded via
+`m_muon_multi_proton_pion`) relabels such a muon segment PION (211) via the
+new pass `PatternAlgorithms::override_muon_multi_proton_pion`, called
+immediately after `set_default_shower_particle_info` in `examine_direction`
+(same per-cluster `main_vertex`, same last-word-before-shower-clustering
+position). The topology test, `segment_at_multi_proton_vertex`
+(`PRSegmentFunctions.h/.cxx`), generalizes F5's `segment_has_proton_daughter`:
+same graph-identity main-vertex exclusion (a muon-plus-two-protons vertex AT
+the neutrino vertex is the ordinary, correct numuCC topology and must not
+fire), same 1.75× MIP independent charge-confirmation threshold, but
+`min_protons=2` instead of F5's implicit 1, and it checks EITHER endpoint
+other than `main_vertex` rather than only the segment's "far" end (a muon
+segment has no owner-assigned direction the way an electron-daughter-of-the-
+neutrino-vertex segment does). C++ default `false` = legacy = byte-identical.
+
+**Owner decision: no propagation across a kink.** Evt 489330's muon segment
+4019 sits behind a degree-2 vertex from a second muon segment (4043, 28.4 cm,
+running to the neutrino vertex); only 4019 is relabelled, 4043 stays `mu-`.
+Population (48-event nueCC48): exactly 1/N muon segments fires this rule
+(evt 489330 seg 4019); 6 more muon segments have exactly one qualifying
+proton at a non-main vertex and are deliberately left untouched — the
+owner's "two protons" wording is read literally, `min_protons=2` is not a
+placeholder.
+
+## Segment-level straightness has no exemption from three shower-seeding tests — `track_pid_persist_dqdx_electron_guard`/`shower_connect_main_vertex_straight_guard`/`shower_traj_straight_guard` (F9/F10/F11) are designed divergences, **segment-level fix only, does not reach the displayed outcome, NOT flipped**
+
+Doc pr/40 round 5 (owner, three new Bee cases: evts 18364-84229/18255-54341,
+"electron → muon?", both read as stopping muon + Michel; evt 18255-55715,
+"not electron → muon", read as an exiting muon behind a wrongly-labelled
+pion). Three independent writer sites, none with a straightness exemption:
+`segment_determine_dir_track`'s F1 persist-on-dQ/dx rescue fires
+unconditionally once `pdg_code != 0` (F9); `shower_clustering_connecting_
+to_main_vertex`'s three-branch skip has no branch for a long straight track
+with no confident PID yet (F10); `segment_is_shower_trajectory` never got
+the straightness exemption pr/40 F3 gave its topology sibling (F11). All
+three key off `segment_is_straight_long_track` (new shared helper,
+`PRSegmentFunctions.{h,cxx}`, `direct_length >= 34cm || direct_length >
+0.93*length`, same threshold shape as the existing `NeutrinoVertexFinder.cxx:
+1432-1447` demotion). None of the three sites has a prototype analog
+(`prototype_base/pid/` checked directly) — designed divergences, not port
+corrections. C++ default `false` on all three = legacy = byte-identical
+(G1: 48/48 events, 96/96 archives, 0 mismatches).
+
+**Measured: fixing the segment's own pdg does not change the Bee/mc.json
+outcome, because the display is decided at the shower seeding/absorption
+boundary, not at the segment.** `Shower::complete_structure_with_start_
+segment` (`PRShower.cxx:337-408`) flood-fills a shower-seeded segment's
+downstream sub-tree with no per-segment test, and a second seeding path,
+`shower_clustering_with_nv_in_main_cluster`'s `is_shower_seg`
+(`NeutrinoShowerClustering.cxx:116-119`), is untouched by F10 (which only
+gates its sibling `shower_clustering_connecting_to_main_vertex`). Result on
+all three owner cases with all three knobs on: evt 84229 seg 19038 becomes
+correctly `pdg=13` but the `mc.json` node is unchanged (`19039 'e- 89 MeV'`,
+still merged); evt 54341 seg 18005 does get excluded from the shower (split
+shape achieved) but, unshielded from the shower path for the first time,
+ordinary track PID calls it `proton` (2212) from its own elevated dQ/dx, not
+`mu-` as intended — an open physics question, not a bug in these three
+guards; evt 55715 seg 15007 becomes correctly `pdg=13`, but the shower
+re-seeds one segment further up at seg 15005 (isolated to F11 alone via a
+clean single-knob A/B: `pdg 211` all-off → `pdg 11` with F11 alone) — a
+confirmed **regression against the owner's explicit round-5 planning answer**
+that seg 15005 must stay untouched. **Not flipped.** All three knobs are
+landed as gate-clean infrastructure (G1/G5/G6 pass) but G2 fails on every
+owner-reported case; the fix implied by the root-cause finding is a change
+to the seeding/absorption boundary itself (comparable in shape to round 4's
+F7 shower-dissolve), scoped larger than this round and not attempted here.
+
+## The shower flood-fill gains a per-segment track exclusion; the Michel rescue reaches confident-direction multi-prong stems — `shower_absorb_track_guard` (F12) + `michel_stem_muon_rescue` (F14) are the round-6 boundary-level fixes; `shower_connect_protected_pion_guard` (F13) is a measured-dead negative result, never flipped
+
+doc pr/40 round 6 closes the round-5 negative result above. Three knobs, two
+live, one dead:
+
+- **F12 `shower_absorb_track_guard`** — `Shower::complete_structure_with_
+  start_segment` (`PRShower.cxx`) gains a per-segment exclusion: a
+  confidently PID'd non-electron (`pdg != 0 && |pdg| != 11`) that is long and
+  straight (`segment_is_straight_long_track`) is not absorbed, the walk
+  terminates there, the excluded segment is NOT claimed in `used_segments`,
+  and long-muon pseudo-showers (`Shower::get_particle_type()==13`, set by the
+  in_main_cluster seeder before completion) are exempt so broken-muon
+  reassembly keeps working. One knob threads all 7 call sites in
+  `NeutrinoShowerClustering.cxx`. The excluded segment automatically gets its
+  own PF node: `fill_bee_pf_tree`'s suppression key is the shower's VIEW
+  (`fill_sets()`), and the `pf_shower_vertex_barrier` orphan safety net (doc
+  pr/38) covers the BFS-unreachable case. The prototype's counterpart
+  flood-fill has no per-segment test either — designed divergence.
+- **F14 `michel_stem_muon_rescue`** — new pass `override_michel_stem_muon`
+  (`NeutrinoPatternBase.cxx`, called at F8's `examine_direction` call site).
+  The toolkit's own Michel rescue ("a stopped proton cannot produce a Michel
+  electron", `NeutrinoVertexFinder.cxx` weak-direction branch) is limited to
+  `seg_dir_weak` segments with a degree-2 stopping vertex; the widened pass
+  reaches a `pdg==2212`, straight-long, main-vertex-emanating stem with >=1
+  shower-like sibling (`kShowerTrajectory || |pdg|==11`) at its stopping
+  vertex, relabelling it mu-. The degree-2 restriction and the weak-dir gate
+  are both prototype-faithful in the original — designed divergence.
+- **F13 `shower_connect_protected_pion_guard`** — DEAD as shaped, kept as a
+  documented negative result (doc pr/36 F2 precedent), excluded from the
+  flip. The full-transition trace (`WCT_PID_WRITE_DEBUG=2`, a round-6
+  widening of the round-1 probe) showed the motivating segment (55715/15005)
+  is already `pdg 2212` at candidate-selection time; its baseline `211` was
+  derivative of the very bug F11 fixes (wrong e- on 15007 → Michel rescue
+  2212→13 → single-muon pion demotion 13→211). A `pdg==211` predicate
+  cannot fire there, and F12 alone produces the intended display.
+
+Measured on the three round-5/6 owner cases (all in doc pr/40 round 6's
+Demonstration table): 84229 → `19038 'mu-'` own node + `19040 'e-'` child
+(owner-accepted residual: parent stub 19039 reads `pi+` from the legacy
+single-muon selection, its own honest call being a second muon); 54341 →
+`18005 'mu-'` + children `e-`/`mu-` (exact owner request); 55715 → `15007
+'mu-'` own node, `15006 'proton'` kept (owner-accepted: 15005 reads `proton`,
+its own charge-based call, the baseline `pi+` having been derivative of the
+fixed bug).
+
+## doc pr/38 Round 4 + doc pr/44 (2026-08-07) — PF orphan parentage + long-muon vote skip
+
+- **`pf_orphan_track_parentage`** (`MultiAlgBlobClustering::fill_bee_pf_tree`,
+  bee_pf block; inert without `pf_shower_vertex_barrier`) — the pr/38 orphan
+  safety net emits BFS-unreached segments as flat `mc_mother=0` roots
+  (prototype parity, `NeutrinoID.cxx:1485-1489`). With F12 in the tree the
+  toolkit reaches a state the prototype cannot: a track guard-excluded from a
+  shower whose view claims the junction vertex, hence barrier-blocked and
+  orphaned WITH a well-defined graph parent. When on, an anchoring pass
+  attaches orphans by topology (claimed-track anchor via `vtx_incoming_seg`
+  first, then shower-leaf anchor via `vtx_to_parent_shower` + a new
+  `shower_child_segs` render in `make_shower_leaf`; orphan-of-orphan chains
+  via fixed point); no-anchor orphans stay flat roots. **Designed
+  divergence** — there is no prototype counterpart behavior to be faithful
+  to; the flat-root emission remains the knob-off/legacy path.
+- **`shower_long_muon_keep_type`** (`shower_clustering_with_nv_in_main_cluster`,
+  `NeutrinoShowerClustering.cxx` completion loop) — the
+  `update_particle_type` + PDG==0-fixup block after
+  `complete_structure_with_start_segment` at THIS site is a **toolkit-only
+  addition** (`18f09178`, 2026-03-31); the prototype
+  (`NeutrinoID_shower_clustering.h:1709-1717`) completes the structure and
+  goes straight to the deliberate long-muon → EM reclass loop, never
+  re-typing a long-muon start segment. The vote counts every non-proton
+  member (muons included) as shower_length, so a MULTI-segment long-muon
+  pseudo-shower always relabels its start segment 13 → 11 (single-segment
+  muons escape via the `edges() <= 1` early-return — which is what the
+  block's comment was written against). When on, showers whose cached
+  `particle_type` is ±13 skip the vote at this one site — **prototype-parity
+  restoration**, scoped to the only site that seeds long-muon
+  pseudo-showers. (SBND 18255-142421: the ~143 cm collinear MIP chain
+  7023→7024→7018, stem dQ/dx median ≈ 1.1× MIP, lost seg 7024 to the vote
+  and became "e- 163 MeV" paired into the pi0.)
+
+## doc pr/43 round 2 (2026-08-07) — three PID-consistency knobs, all designed divergences
+
+- **`single_muon_proton_chain_veto`** (`NeutrinoVertexFinder.cxx`
+  `examine_direction` single-muon selection) — **designed divergence**. The
+  prototype's muon-candidate selection has no proton veto beyond the toolkit's
+  own 1-hop `n_proton` check (itself toolkit-only). Knob-on the veto walks the
+  bounded (≤3-hop) non-shower degree-2 continuation chain
+  (`segment_chain_has_proton`, restored from the rolled-back pr/43 F1); a
+  chain-vetoed candidate demotes to pion together with its continuation stubs
+  (`segment_chain_continuation`) and selection re-picks; a demote-all guard
+  falls back to legacy selection when no chain-proton-free candidate exists.
+- **`single_muon_long_muon_claim`** (same loop) — **designed divergence**, no
+  prototype counterpart: the long-muon accumulation set exists only in the
+  toolkit port. Legacy skips `segments_in_long_muon` members entirely, so the
+  long muon never claims the vertex muon slot and a second pdg-13 arm survives
+  as "the" muon; knob-on the chain claims the slot with its summed length
+  (deterministic IndexedSegmentSet order) and other arms demote to pion.
+- **`pid_flag_reconcile`** (`NeutrinoPatternBase.cxx`
+  `reconcile_particle_flags`, called from `TaggerCheckNeutrino` after
+  `shower_clustering_with_nv`, before the taggers) — **toolkit-only
+  consistency pass**, no prototype counterpart. (1) A main-vertex proton's
+  degree-2 continuation chain ending in a segment forced pdg 11 with sentinel
+  score 100 by `segment_determine_shower_direction_trajectory`'s two
+  unconditional branches gets ordinary track PID re-run; a confident
+  non-electron conclusion is adopted, its stale shower flags cleared and its
+  single-segment wrapper Shower dissolved, intermediate ≤15 cm pdg-13 stubs
+  relabel pion. (2) Main-cluster segments with confirmed track pdg
+  (13/211/2212) but stale `kShowerTrajectory`/`kShowerTopology` have the
+  flags cleared (pr/40 F7 precedent generalized); long-muon pseudo-showers
+  (cached ±13) and pi0-paired showers are exempt from dissolution.
+
+## doc pr/45 (2026-08-07) — empty-2D-tree sentinel guard + pseudo-shower paint
+
+- **`other_seg_empty_2d_guard`** (`NeutrinoOtherSegments.cxx`
+  `find_other_segments`, three 2D-comparison sites) — **toolkit-only bug
+  guard**, not a prototype limitation.
+  `DynamicPointCloud::get_closest_2d_point_info` returns −1.0 when the
+  per-(plane,face,apa) 2D kd-tree is empty — i.e. for any segment with zero
+  fit points on the queried face, a state the single-face uBooNE prototype
+  (`ProtoSegment::get_closest_2d_dis`) cannot reach.  Legacy compares the
+  sentinel as a real distance: −1 < `scaling_2d*search_range` "covers" all
+  three planes at once, so one far-TPC segment of a cathode-crossing cluster
+  tags the entire near face as explained and no residual component can form
+  (SBND 18255-56463: all 194 tail-box points tagged u=v=w=−1 while 3D
+  distances were 3.9–28.9 cm; the 30 cm isochronous tail beyond segment
+  14006 was never fitted).  Knob-on, negative 2D distances are treated as
+  "no projection information" (1e9).  The tagging logic itself is a faithful
+  port (prototype `NeutrinoID_proto_vertex.h:797-1300`, same thresholds).
+- **`pseudo_shower_track_paint`** (MABC bee_points shower_track mode +
+  `PrDisplayDump::dump_track_shower`) — **toolkit-only display-consistency
+  knob**, no prototype counterpart (the layer itself is a toolkit dump).
+  The membership-first paint rule (correct for real EM showers whose
+  absorbed segments never get flags/pdg updated) contradicts the PF tree for
+  muon-typed (cached ±13) long-muon pseudo-showers: `make_shower_leaf`
+  displays "mu-" from `Shower::get_particle_type()` while the points paint
+  q=15000 (shower).  Knob-on, segments of a cached-±13 shower paint q=0
+  (track), overriding all disjuncts; the start-segment id collapse is kept.
+  Display-only: mc.json/tracking/nusel untouched by construction.
+
+## doc pr/46 (2026-08-07) — long-muon stub bridge
+
+- **`long_muon_stub_bridge`** (`find_cont_muon_segment`,
+  clus/src/NeutrinoVertexFinder.cxx) — **deliberate toolkit divergence,
+  owner-directed refinement** of a limitation the toolkit ports faithfully
+  from the prototype (`NeutrinoID_track_shower.h:2304-2369`, byte-same
+  10°/15°/6 cm/1.3 thresholds).  The long-muon chain walk measures the
+  junction angle between 15 cm FITTED directions; a broken long muon whose
+  first piece is a short (< 6 cm) vertex stub fails the 15° tolerance on the
+  stub's own noisy direction (SBND 18255-55595: 2.2-2.5 cm stub at
+  30.5-35.4° vs its 192.9 cm MIP continuation; seed dQ/dx and the 45/35 cm
+  acceptance all pass).  Knob-on, the walk accepts a bridge candidate when
+  the incoming segment is < 6 cm, the candidate is > 35 cm and MIP
+  (ratio < 1.3, unchanged), the fitted angle is < 45° (Phase-0 separation:
+  genuine-pion evt 66118 measures 70-82° and must not merge), and the
+  junction has no other track-like out-edge > 10 cm (owner criteria:
+  multiple substantial outgoing tracks = hadronic vertex vetoes; a delta-ray
+  electron or tiny fragment does not).  Applied ONLY via the
+  `flag_stub_bridge` parameter from the formation walk in
+  `examine_direction`; `examine_main_vertices_local` and the NuMu tagger
+  call sites keep legacy behavior.  The seed dQ/dx gate and the
+  `total>45 && max>35 && size>1` acceptance are unchanged.  NOT ported to
+  the prototype's single-attached-muon exclusion (`size>1`): six of the ten
+  surveyed stub-root events have the muon as a single direct segment at
+  examine time (stub-root topology arises post-formation) — that class is
+  prototype-parity and documented as a follow-up in
+  sbnd_xin/docs/pr/46, not changed here.

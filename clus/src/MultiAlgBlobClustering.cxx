@@ -271,6 +271,7 @@ void MultiAlgBlobClustering::configure(const WireCell::Configuration& cfg)
             bpc.require_pr_graph   = get<bool>(bps, "require_pr_graph", false);
             // Prototype-parity options; absent => false => byte-identical legacy output.
             bpc.particle_ids = get<bool>(bps, "particle_ids", false);
+            bpc.pseudo_shower_track_paint = get<bool>(bps, "pseudo_shower_track_paint", false);
             bpc.include_vertex_points = get<bool>(bps, "include_vertex_points", false);
             // Dump this set at the pre-clustering point (like the special "img"
             // set) even if its name isn't "img".  Absent => false => legacy
@@ -340,6 +341,16 @@ void MultiAlgBlobClustering::configure(const WireCell::Configuration& cfg)
             pfc.prototype_names = get<bool>(pf, "prototype_names", false);
             pfc.em_ke_min = get<double>(pf, "em_ke_min", 0.0);
             pfc.np_ke_min = get<double>(pf, "np_ke_min", 0.0);
+            // doc pr/34 §10 port-fidelity knobs; absent => legacy, byte-identical.
+            pfc.pf_track_main_cluster_only = get<bool>(pf, "pf_track_main_cluster_only", false);
+            pfc.pf_shower_vertex_barrier = get<bool>(pf, "pf_shower_vertex_barrier", false);
+            pfc.pf_shower_parent_precedence = get<bool>(pf, "pf_shower_parent_precedence", false);
+            pfc.pf_pi0_node_per_id = get<bool>(pf, "pf_pi0_node_per_id", false);
+            pfc.pf_pdg_name_prototype_fallback = get<bool>(pf, "pf_pdg_name_prototype_fallback", false);
+            // doc pr/38 Round 4; absent => legacy flat orphan roots, byte-identical.
+            pfc.pf_orphan_track_parentage = get<bool>(pf, "pf_orphan_track_parentage", false);
+            // doc pr/65 round 3; absent => legacy fabricated orphan roots, byte-identical.
+            pfc.pf_orphan_audit_only = get<bool>(pf, "pf_orphan_audit_only", false);
             m_bee_pf_configs.push_back(pfc);
             m_bee_pf_trees[pfc.name] = Bee::ParticleTree(pfc.name);
             SPDLOG_LOGGER_DEBUG(log, "Configured bee_pf: name={} visitor={}", pfc.name, pfc.visitor);
@@ -880,16 +891,40 @@ void MultiAlgBlobClustering::fill_bee_points_from_pr_graph(const std::string& na
             // by the clustering step. Fall back to per-segment flags only for segments
             // that are not part of any shower (standalone shower-like segments).
             auto shower_it = seg_to_shower.find(segment);
-            const bool is_shower = (shower_it != seg_to_shower.end()) ||
+            bool is_shower = (shower_it != seg_to_shower.end()) ||
                 segment->flags_any(PR::SegmentFlags::kShowerTrajectory) ||
                 segment->flags_any(PR::SegmentFlags::kShowerTopology) ||
                 (segment->has_particle_info() && std::abs(segment->particle_info()->pdg()) == 11);
+            // A long-muon pseudo-shower (Shower::get_particle_type() == +-13)
+            // is displayed as a muon by the PF tree (make_shower_leaf reads
+            // the same cached type); paint its points as track for
+            // consistency.  Overrides all disjuncts: the PF verdict is the
+            // shower's cached type.  Doc sbnd_xin/docs/pr/45.
+            if (config.pseudo_shower_track_paint && shower_it != seg_to_shower.end() &&
+                std::abs(shower_it->second->get_particle_type()) == 13) {
+                is_shower = false;
+            }
             const double charge = is_shower ? 15000.0 : 0.0;
 
             auto dpc = segment->dpcloud("associate_points");
             if (!dpc) {
+                // doc pr/55 (2026-08-09): the Family-C "phantom segment" mechanism --
+                // a segment that DOES get a non-empty fits() (so it draws a
+                // trajectory in the track_fit layer) but has no associate_points
+                // cloud at all, so it contributes 0 points to shower_track.
+                // Sentinel log only, no behavior change.
+                SPDLOG_LOGGER_DEBUG(log,
+                    "pr55 shower_track layer: segment {} (cluster {}) has no "
+                    "associate_points dpcloud -- contributes 0 points to '{}'",
+                    encoded_id, cluster_id, name);
                 segment_count++;
                 continue;
+            }
+            if (dpc->npoints() == 0) {
+                SPDLOG_LOGGER_DEBUG(log,
+                    "pr55 shower_track layer: segment {} (cluster {}) has an empty "
+                    "associate_points dpcloud (0 points) -- contributes 0 points to '{}'",
+                    encoded_id, cluster_id, name);
             }
             // Use the shower's start-segment encoded ID as cluster_id when the
             // segment belongs to a shower (mirrors seg_display_id in fill_bee_pf_tree:
@@ -925,6 +960,15 @@ void MultiAlgBlobClustering::fill_bee_points_from_pr_graph(const std::string& na
             const auto& fits = segment->fits();
 
             if (fits.empty()) {
+                // doc pr/55 (2026-08-09): previously silent -- this is the exact
+                // mechanism behind a "phantom segment" (fit-layer contributes
+                // nothing for a segment that DOES have associate points in the
+                // shower_track layer, since that branch runs independently
+                // above). Sentinel log only, no behavior change.
+                SPDLOG_LOGGER_DEBUG(log,
+                    "pr55 track_fit layer: segment {} (cluster {}) reached the Bee dump "
+                    "with an empty fits() -- contributes 0 points to '{}'",
+                    encoded_id, cluster_id, name);
                 segment_count++;
                 continue;
             }
@@ -1048,7 +1092,11 @@ void MultiAlgBlobClustering::fill_bee_vertices_from_pr_graph(const std::string& 
 // Helper: map PDG code to a short display name for the Bee particle tree.
 // prototype=true follows the prototype's TDatabasePDG naming
 // (bee/WCReader.cc PDGName: "proton"/"neutron", not "p"/"n").
-static std::string pf_pdg_to_name(int pdg, bool prototype = false)
+// proto_fallback=true (doc pr/34 F5) fills the table's gaps the way the
+// prototype does: pi0 by name, nuclei decoded from the 10LZZZAAAI code
+// (bee/WCReader.cc:529-547), everything else as the PDG number -- instead of
+// collapsing to "particle".
+static std::string pf_pdg_to_name(int pdg, bool prototype = false, bool proto_fallback = false)
 {
     switch (pdg) {
         case  11: return "e-";
@@ -1062,8 +1110,20 @@ static std::string pf_pdg_to_name(int pdg, bool prototype = false)
         case 2112: return prototype ? "neutron" : "n";
         case  321: return "K+";
         case -321: return "K-";
-        default:   return "particle";
+        default:   break;
     }
+    if (!proto_fallback) return "particle";
+    if (pdg == 111) return "pi0";   // TDatabasePDG knows it; the table above did not
+    if (pdg > 1000000000) {          // nuclei: 10LZZZAAAI (WCReader.cc:533-535)
+        const int z = (pdg - 1000000000) / 10000;
+        const int a = (pdg - 1000000000 - z * 10000) / 10;
+        const char* elem = z == 18 ? "Ar" : z == 17 ? "Cl" : z == 19 ? "Ca"
+                         : z == 16 ? "S"  : z == 15 ? "P"  : z == 14 ? "Si"
+                         : z == 1  ? "H"  : z == 2  ? "He" : nullptr;
+        if (elem) return std::string(elem) + "-" + std::to_string(a);
+        return std::to_string(pdg);  // WCReader returns the bare code for unknown Z
+    }
+    return std::to_string(pdg);
 }
 
 
@@ -1115,6 +1175,14 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
         return;
     }
     const auto* main_cluster = main_vertex->cluster();
+    // F1 (doc pr/34 §10.2): the prototype's track loop keeps only segments in
+    // the main vertex's cluster, compared by cluster ID (NeutrinoID.cxx:1488).
+    // Ident, not pointer: split products inherit the parent's ident
+    // (Facade_Grouping.cxx:182), so ident-equality is the weaker, correct test.
+    auto same_cluster = [&](const PR::SegmentPtr& s) {
+        const auto* c = s->cluster();
+        return main_cluster && c && c->get_cluster_id() == main_cluster->get_cluster_id();
+    };
 
     const auto& showers            = tf->get_showers();
     const auto& pi0_showers        = tf->get_pi0_showers();
@@ -1132,10 +1200,22 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
     // --- Segment → shower map; collect all shower segments ---
     std::map<PR::SegmentPtr, PR::ShowerPtr, PR::SegmentIndexCmp> seg_to_shower;
     PR::IndexedSegmentSet shower_segs;
+    PR::IndexedVertexSet shower_vtxs;   // F2: every vertex in any shower's view
     for (const auto& shower : showers) {
         PR::IndexedVertexSet sv; PR::IndexedSegmentSet ss;
-        shower->fill_sets(sv, ss, /*flag_exclude_start_segment=*/false);
+        // doc pr/38: with the F2 barrier on, sv excludes the shower's START
+        // vertex -- the prototype's barrier source map_vtx_segs never holds
+        // it (`if (vtx == start_vertex) continue;`, WCShower.cxx:547,
+        // :708-716, :733-745), so a main-track attachment junction stays
+        // traversable and only shower-INTERIOR vertices block.  Blocking the
+        // junction silently dropped every track segment behind it (SBND
+        // 18255-219295 proton seg 15001 behind a conn-2 attachment;
+        // 18255-489330 proton seg 4044 behind a conn-1 attachment).  Barrier
+        // off: sv is unused, legacy path byte-identical.
+        shower->fill_sets(sv, ss, /*flag_exclude_start_segment=*/false,
+                          /*exclude_start_vertex=*/cfg.pf_shower_vertex_barrier);
         for (const auto& seg : ss) { seg_to_shower[seg] = shower; shower_segs.insert(seg); }
+        shower_vtxs.insert(sv.begin(), sv.end());
 
         auto [_, conn_type] = shower->get_start_vertex_and_type();
         if (conn_type == 4) {
@@ -1156,6 +1236,12 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
 
     PR::IndexedVertexSet visited_vtxs;
     PR::IndexedSegmentSet used_segs = shower_segs;   // pre-mark showers as visited
+    // F2 (doc pr/34 §10.3): the prototype also pre-seeds used_vertices from
+    // every shower (NeutrinoID.cxx:1597-1602), so the track BFS never expands
+    // THROUGH a shower vertex.  Pop-time barrier only: the segment that
+    // reaches such a vertex is still claimed, matching the prototype's
+    // curr_vtx check.  No extra filter at the seed/expansion guards.
+    if (cfg.pf_shower_vertex_barrier) visited_vtxs.insert(shower_vtxs.begin(), shower_vtxs.end());
 
     visited_vtxs.insert(main_vertex);
     std::vector<std::pair<PR::VertexPtr, PR::SegmentPtr>> bfs_cur;
@@ -1164,7 +1250,8 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
     // edge-index order so the PF-tree child order is run-reproducible.
     for (auto edesc : PR::sorted_out_edges(vtx_to_nd.at(main_vertex), *pr_graph)) {
         auto seg = (*pr_graph)[edesc].segment;
-        if (!seg || used_segs.count(seg) || conn4_skip_segs.count(seg)) continue;
+        if (!seg || used_segs.count(seg) || conn4_skip_segs.count(seg) ||
+            (cfg.pf_track_main_cluster_only && !same_cluster(seg))) continue;
         auto far = PR::find_other_vertex(*pr_graph, seg, main_vertex);
         if (!far) continue;
         used_segs.insert(seg);
@@ -1183,7 +1270,8 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
             if (nd_it == vtx_to_nd.end()) continue;
             for (auto edesc : PR::sorted_out_edges(nd_it->second, *pr_graph)) {
                 auto seg = (*pr_graph)[edesc].segment;
-                if (!seg || used_segs.count(seg) || conn4_skip_segs.count(seg)) continue;
+                if (!seg || used_segs.count(seg) || conn4_skip_segs.count(seg) ||
+                    (cfg.pf_track_main_cluster_only && !same_cluster(seg))) continue;
                 auto far = PR::find_other_vertex(*pr_graph, seg, cur_vtx);
                 if (!far) continue;
                 used_segs.insert(seg);
@@ -1261,6 +1349,48 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
                     if (at_main || at_root) {
                         // hangs from root → add to root_reachable_vtxs
                         if (!root_reachable_vtxs.count(vtx)) {
+                            // A root-anchored shower's vertex SET is a loose
+                            // association; the track BFS above reached its
+                            // vertices by walking real track segments out of
+                            // the neutrino vertex.  Where the two disagree
+                            // this branch silently wins, and F3's
+                            // parent-shower precedence (:1419) then hangs
+                            // everything anchored there under the shower
+                            // instead of under the track.
+                            //
+                            // doc sbnd_xin/docs/pr/74 round 4: that is exactly
+                            // wrong for a Michel.  18255-506746 -- once K6
+                            // demotes seg 21048 to a stopping muon, the track
+                            // BFS reaches its far vertex 21037, but the
+                            // neighbouring 102 MeV shower's set also contains
+                            // 21037 and claimed it, so the 64 MeV Michel
+                            // rendered as a daughter of that shower rather
+                            // than of the muon that produced it (measured:
+                            // "PROPAGATE-OVER-TRACK vtx_gidx=37
+                            // claimed_by_shower_ke=102.128
+                            // over_incoming_seg_gidx=48").
+                            //
+                            // Keyed on kMuonStemGuard, which ONLY the
+                            // default-OFF K6 pass ever sets -- so with K6 off
+                            // no vertex is ever protected and this is
+                            // byte-identical.  Narrow on purpose: the general
+                            // "track BFS beats shower set" rule would
+                            // restructure the tree at every vertex where the
+                            // two disagree, which is a separate change with
+                            // its own census.
+                            auto vis = vtx_incoming_seg.find(vtx);
+                            const bool track_owns_via_michel_stem =
+                                vis != vtx_incoming_seg.end() && vis->second &&
+                                vis->second->flags_any(PR::SegmentFlags::kMuonStemGuard);
+                            if (flag_print && vis != vtx_incoming_seg.end()) {
+                                std::cout << "[fill_bee_pf_tree] PROPAGATE-OVER-TRACK"
+                                          << "  vtx_gidx=" << vtx->get_graph_index()
+                                          << "  claimed_by_shower_ke=" << shower->get_kine_best()/units::MeV
+                                          << "  over_incoming_seg_gidx=" << vis->second->get_graph_index()
+                                          << "  michel_stem_protected=" << (track_owns_via_michel_stem ? 1 : 0)
+                                          << "\n";
+                            }
+                            if (track_owns_via_michel_stem) continue;
                             root_reachable_vtxs.insert(vtx);
                             vtx_to_parent_shower[vtx] = parent_shower;
                             any_added = true;
@@ -1269,6 +1399,14 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
                         // hangs from a track segment → extend vtx_incoming_seg
                         if (!vtx_incoming_seg.count(vtx) && !root_reachable_vtxs.count(vtx)) {
                             vtx_incoming_seg[vtx] = parent_seg;
+                            // F3 (doc pr/34 §10.4): also record the parent
+                            // SHOWER, exactly as the root branch does -- the
+                            // half-populated map is what hangs a nested shower
+                            // under the track segment instead of its shower.
+                            // Inside the guard: the shower's own start vertex
+                            // is already in vtx_incoming_seg, so no
+                            // self-parenting.
+                            if (cfg.pf_shower_parent_precedence) vtx_to_parent_shower[vtx] = shower;
                             any_added = true;
                         }
                     }
@@ -1293,6 +1431,13 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
     ShowerShowerMap shower_indirect_showers;  // shower → [(child_shower, conn_vtx)]
     std::vector<std::pair<PR::ShowerPtr,PR::VertexPtr>> root_direct_showers;
     std::vector<std::pair<PR::ShowerPtr,PR::VertexPtr>> root_indirect_showers;
+
+    // doc pr/38 Round 4 (pf_orphan_track_parentage): orphan TRACK segments
+    // anchored at a vertex inside a shower's view attach as children of that
+    // shower's displayed leaf.  Filled by the anchoring pass below (after the
+    // shower-attachment loop), read by make_shower_leaf.  Empty when the knob
+    // is off => legacy output.
+    std::map<PR::ShowerPtr, std::vector<PR::SegmentPtr>, PR::ShowerIndexCmp> shower_child_segs;
 
     for (const auto& shower : showers) {
         auto [start_vtx, conn_type] = shower->get_start_vertex_and_type();
@@ -1334,6 +1479,28 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
             auto& vec = direct ? root_direct_showers : root_indirect_showers;
             vec.push_back({shower, main_vertex});
         } else {
+            // F3 (doc pr/34 §10.4b): the prototype resolves a shower's parent
+            // via map_vertex_in_shower FIRST (NeutrinoID.cxx:1655/1680/1720);
+            // with the map fully populated by F3a, test the parent shower
+            // before the incoming track segment.  The self test is defensive
+            // only -- the F3a/root-branch write guards already exclude a
+            // shower's own start vertex.
+            auto ps_it = cfg.pf_shower_parent_precedence
+                       ? vtx_to_parent_shower.find(start_vtx) : vtx_to_parent_shower.end();
+            if (ps_it != vtx_to_parent_shower.end() && ps_it->second && ps_it->second != shower) {
+                PR::ShowerPtr parent_shower = ps_it->second;
+                if (flag_print) {
+                    std::cout << "[fill_bee_pf_tree] SHOWER-attached shower (parent-shower precedence)"
+                              << "  conn_type=" << conn_type
+                              << "  parent_shower_pdg=" << parent_shower->get_particle_type()
+                              << "  pdg=" << shower->get_particle_type()
+                              << "  ke=" << shower->get_kine_best() / units::MeV << " MeV"
+                              << "\n";
+                }
+                auto& mp = direct ? shower_direct_showers : shower_indirect_showers;
+                mp[parent_shower].push_back({shower, start_vtx});
+                continue;   // resolved; skip the legacy incoming-segment path
+            }
             auto it = vtx_incoming_seg.find(start_vtx);
             if (it != vtx_incoming_seg.end()) {
                 if (flag_print) {
@@ -1439,6 +1606,92 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
         return cl ? cl->get_cluster_id() * 1000 + sid : sid;
     };
 
+    // doc pr/38 Round 4 (pf_orphan_track_parentage): graph-faithful parentage
+    // for barrier-orphaned track segments.  The flat safety net below emits
+    // every BFS-unreached segment as a parentless, childless root -- even when
+    // the graph chains it off a claimed track (pi+ -> proton at a shared
+    // vertex) or off a shower's interior vertex (a guard-excluded muon
+    // continuing an EM arm; SBND 18255 evt 142421 segs 7011/7012/7018).  The
+    // stage-1 fixed point above already computed the correct parent for those
+    // vertices (vtx_incoming_seg / vtx_to_parent_shower) and threw it away.
+    // When on: TRACK anchor first (either endpoint carries a claimed incoming
+    // segment -> insert into seg_parent/seg_children so build_seg_node's
+    // recursion renders it), else SHOWER anchor (endpoint inside a shower's
+    // view -> child of that shower's displayed leaf via shower_child_segs;
+    // deliberately NOT put in seg_parent, whose null entries the root loop
+    // emits).  An anchored orphan extends vtx_incoming_seg at its far vertex
+    // so orphan-of-orphan chains anchor in a later round of the fixed point.
+    // Orphans with no anchor at all fall to the flat net exactly as before.
+    // This state is UNREACHABLE in the prototype (no shower_absorb_track
+    // guard there -- such tracks are absorbed into the shower), so this is a
+    // designed divergence; see porting_dictionary.  Off => pass skipped,
+    // byte-identical legacy output.
+    if (cfg.pf_shower_vertex_barrier && cfg.pf_orphan_track_parentage) {
+        // P1: orphan pool -- IDENTICAL selection to the flat safety net below.
+        std::vector<PR::SegmentPtr> orphan_pool;
+        for (auto edesc : mir(boost::edges(*pr_graph))) {
+            auto seg = (*pr_graph)[edesc].segment;
+            if (!seg || used_segs.count(seg) || conn4_skip_segs.count(seg)) continue;
+            if (!same_cluster(seg)) continue;      // prototype NeutrinoID.cxx:1488
+            if (seg->dirsign() == 0) continue;     // prototype NeutrinoID.cxx:1215
+            if (seg->fits().empty()) continue;
+            orphan_pool.push_back(seg);
+        }
+        // Deterministic order: display id with graph-index tie-break (distinct
+        // segments can compare EQUAL under SegmentIndexCmp, PRGraph.h:315).
+        std::sort(orphan_pool.begin(), orphan_pool.end(),
+                  [&](const PR::SegmentPtr& a, const PR::SegmentPtr& b) {
+                      const int ida = seg_display_id(a), idb = seg_display_id(b);
+                      if (ida != idb) return ida < idb;
+                      return a->get_graph_index() < b->get_graph_index();
+                  });
+        // P2: fixed-point anchoring over the sorted pool.
+        PR::IndexedSegmentSet claimed;
+        auto anchor_common = [&](const PR::SegmentPtr& seg, PR::VertexPtr near_vtx,
+                                 const std::string& parent_text) {
+            auto far_vtx = PR::find_other_vertex(*pr_graph, seg, near_vtx);
+            seg_endpoints[seg] = {near_vtx, far_vtx};
+            used_segs.insert(seg);   // bars the flat net below from re-emitting
+            claimed.insert(seg);
+            if (far_vtx && !vtx_incoming_seg.count(far_vtx)) vtx_incoming_seg[far_vtx] = seg;
+            if (flag_print) {
+                std::cout << "[fill_bee_pf_tree] ANCHOR orphan seg=" << seg_display_id(seg)
+                          << " -> parent=" << parent_text << "\n";
+            }
+        };
+        bool changed = true;
+        while (changed) {
+            changed = false;
+            for (const auto& seg : orphan_pool) {
+                if (claimed.count(seg)) continue;
+                auto [va, vb] = PR::find_vertices(*pr_graph, seg);
+                PR::VertexPtr track_anchor = nullptr;
+                if (va && vtx_incoming_seg.count(va)) track_anchor = va;
+                else if (vb && vtx_incoming_seg.count(vb)) track_anchor = vb;
+                if (track_anchor) {
+                    auto parent = vtx_incoming_seg.at(track_anchor);
+                    seg_parent[seg] = parent;
+                    seg_children[parent].push_back(seg);
+                    anchor_common(seg, track_anchor, std::to_string(seg_display_id(parent)));
+                    changed = true;
+                    continue;
+                }
+                PR::VertexPtr shower_anchor = nullptr;
+                if (va && vtx_to_parent_shower.count(va)) shower_anchor = va;
+                else if (vb && vtx_to_parent_shower.count(vb)) shower_anchor = vb;
+                if (shower_anchor) {
+                    auto psh = vtx_to_parent_shower.at(shower_anchor);
+                    shower_child_segs[psh].push_back(seg);
+                    auto pss = psh->start_segment();
+                    anchor_common(seg, shower_anchor,
+                                  std::string("shower:") + (pss ? std::to_string(seg_display_id(pss)) : "?"));
+                    changed = true;
+                    continue;
+                }
+            }
+        }
+    }
+
     int next_id = 1;  // fallback counter for nodes without a natural ID
 
     auto make_node = [&](int id,
@@ -1485,8 +1738,13 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
     };
 
     // Forward declare as std::function to handle mutual recursion with make_shower_leaf
-    std::function<void(Configuration&, const std::vector<std::pair<PR::ShowerPtr,PR::VertexPtr>>&, 
+    std::function<void(Configuration&, const std::vector<std::pair<PR::ShowerPtr,PR::VertexPtr>>&,
                        const std::vector<std::pair<PR::ShowerPtr,PR::VertexPtr>>&, PR::VertexPtr)> append_showers;
+    // Forward declare (assigned at its original definition site below) so
+    // make_shower_leaf can render shower_child_segs orphan children through
+    // it (pf_orphan_track_parentage).  Declaration mechanics only: the first
+    // call happens at assembly time, well after the assignment.
+    std::function<Configuration(PR::SegmentPtr)> build_seg_node;
 
     auto make_shower_leaf = [&](PR::ShowerPtr shower) -> Configuration {
         const int pdg = shower->get_particle_type();
@@ -1495,7 +1753,7 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
         auto start_seg = shower->start_segment();
         int id = start_seg ? seg_display_id(start_seg) : (next_id++);
         auto node = make_node(id,
-                              pf_pdg_to_name(pdg, cfg.prototype_names) + "  " + ke + " MeV",
+                              pf_pdg_to_name(pdg, cfg.prototype_names, cfg.pf_pdg_name_prototype_fallback) + "  " + ke + " MeV",
                               shower->get_start_point(), shower->get_end_point());
         if (flag_print) {
             const auto* cl = start_seg ? start_seg->cluster() : nullptr;
@@ -1517,7 +1775,26 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
                        di_it  != shower_direct_showers.end()   ? di_it->second  : empty_showers,
                        ind_it != shower_indirect_showers.end() ? ind_it->second : empty_showers,
                        svtx);
-        
+
+        // doc pr/38 Round 4 (pf_orphan_track_parentage): orphan TRACK
+        // segments anchored inside this shower's view render as its children
+        // (single funnel point -- covers direct leaves, pseudo-gamma wrappers
+        // and pi0-grouped leaves alike).  Same KeepMC convention as
+        // build_seg_node's child recursion; each child renders its own
+        // seg_children chain.  Map empty when the knob is off.
+        if (cfg.pf_orphan_track_parentage) {
+            auto cs_it = shower_child_segs.find(shower);
+            if (cs_it != shower_child_segs.end()) {
+                for (const auto& child : cs_it->second) {
+                    auto child_node = build_seg_node(child);
+                    const int    cpdg = child->has_particle_info() ? child->particle_info()->pdg() : 0;
+                    const double cke  = child->has_particle_info() ? child->particle_info()->kinetic_energy() : 0.0;
+                    if (!keep_node(cpdg, cke, child_node)) continue;
+                    node["children"].append(child_node);
+                }
+            }
+        }
+
         if (node["children"].empty()) node["icon"] = "jstree-file";
         return node;
     };
@@ -1529,7 +1806,7 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
     auto append_pseudo_shower = [&](Configuration& parent_children, PR::ShowerPtr sh, PR::VertexPtr conn_vtx) {
         const int pdg = (std::abs(sh->get_particle_type()) == 11 ||
                          std::abs(sh->get_particle_type()) == 22) ? 22 : 2112;
-        const std::string pname = pf_pdg_to_name(pdg, cfg.prototype_names);
+        const std::string pname = pf_pdg_to_name(pdg, cfg.prototype_names, cfg.pf_pdg_name_prototype_fallback);
         PR::VertexPtr cv = conn_vtx;
         WireCell::Point gstart = cv ? get_vtx_pt(cv) : sh->get_start_point();
         WireCell::Point gend   = sh->get_start_point();
@@ -1554,6 +1831,35 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
 
     // Append all showers (direct + indirect via pseudo-gamma) into a children array,
     // given the connection vertex for the indirect case.
+    // F4 (doc pr/34 §10.5): one pi0 node per pi0 id.  The prototype memoizes
+    // the pi0 node on a member (map_pio_id_saved_pair, NeutrinoID.cxx:1326/
+    // :1361), so a pi0 whose daughters hang under two parents still renders
+    // once; the toolkit's invocation-local grouping renders it once PER
+    // PARENT.  A jsTree node has exactly one parent, so the merged node needs
+    // a single home: the HIGHEST-ENERGY daughter's parent (owner decision
+    // 2026-08-04 -- deliberately NOT the prototype's first-writer-wins).
+    std::map<int, std::vector<std::pair<PR::ShowerPtr, PR::VertexPtr>>> pi0_all_groups;
+    std::map<int, PR::ShowerPtr> pi0_home_daughter;
+    if (cfg.pf_pi0_node_per_id) {
+        auto collect = [&](const std::vector<std::pair<PR::ShowerPtr, PR::VertexPtr>>& vec) {
+            for (const auto& pr : vec)
+                if (pi0_showers.count(pr.first))
+                    pi0_all_groups[map_shower_pio_id.at(pr.first)].push_back(pr);
+        };
+        collect(root_direct_showers);
+        collect(root_indirect_showers);
+        for (const auto& [seg, vec] : seg_direct_showers) collect(vec);
+        for (const auto& [seg, vec] : seg_indirect_showers) collect(vec);
+        for (const auto& [sh, vec] : shower_direct_showers) collect(vec);
+        for (const auto& [sh, vec] : shower_indirect_showers) collect(vec);
+        for (const auto& [pi0_id, group] : pi0_all_groups) {
+            PR::ShowerPtr best = nullptr;
+            for (const auto& [sh, cv] : group)
+                if (!best || sh->get_kine_best() > best->get_kine_best()) best = sh;
+            pi0_home_daughter[pi0_id] = best;   // ties: first in collection order
+        }
+    }
+
     // Pi0 showers are grouped by pi0_id and rendered as: pi0 node → gamma → shower_leaf.
     append_showers = [&](Configuration& children,
                                const std::vector<std::pair<PR::ShowerPtr,PR::VertexPtr>>& direct,
@@ -1579,11 +1885,27 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
         for (auto& [sh, cv] : direct)   if (pi0_showers.count(sh)) pi0_groups[map_shower_pio_id.at(sh)].push_back({sh, cv});
         for (auto& [sh, cv] : indirect) if (pi0_showers.count(sh)) pi0_groups[map_shower_pio_id.at(sh)].push_back({sh, cv});
 
-        for (auto& [pi0_id, group] : pi0_groups) {
+        for (auto& [pi0_id, local_group] : pi0_groups) {
+            // F4: only the invocation at the home parent (the highest-energy
+            // daughter's) emits the pi0 node, and it carries ALL daughters;
+            // other parents skip theirs.
+            const bool merged = cfg.pf_pi0_node_per_id && pi0_all_groups.count(pi0_id);
+            if (merged) {
+                const auto& home = pi0_home_daughter.at(pi0_id);
+                bool has_home = false;
+                for (auto& [sh, cv] : local_group) if (sh == home) { has_home = true; break; }
+                if (!has_home) continue;
+            }
+            const auto& group = merged ? pi0_all_groups.at(pi0_id) : local_group;
             auto mass_it = map_pio_id_mass.find(pi0_id);
             const double pi0_ke = (mass_it != map_pio_id_mass.end()) ? mass_it->second.first : 0.0;
             // Pi0 sits at the connection vertex (point particle: start == end)
             PR::VertexPtr conn_vtx = group[0].second ? group[0].second : fallback_conn_vtx;
+            if (merged) {
+                // seat the merged node at its home daughter's connection vertex
+                for (const auto& [sh, cv] : group)
+                    if (sh == pi0_home_daughter.at(pi0_id)) { conn_vtx = cv ? cv : fallback_conn_vtx; break; }
+            }
             WireCell::Point pi0_pt = conn_vtx ? get_vtx_pt(conn_vtx) : WireCell::Point(0,0,0);
             const int pi0_node_id = next_id++;
             auto pi0_node = make_node(pi0_node_id, "pi0  " + format_mev(pi0_ke) + " MeV", pi0_pt, pi0_pt);
@@ -1608,17 +1930,21 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
     };
 
     // Build the full JSON subtree for a track segment (recursive).
-    std::function<Configuration(PR::SegmentPtr)> build_seg_node =
+    // (declared as std::function above, next to append_showers)
+    build_seg_node =
         [&](PR::SegmentPtr seg) -> Configuration {
 
-        std::string pname = "particle";
+        // F5 (doc pr/34 §10.6): the prototype's no-PID node text is PDGName(0)
+        // -- TDatabasePDG does not know 0, so the literal "0" -- with the KE of
+        // an all-zero 4-vector: "0  0 MeV", not "particle  0 MeV".
+        std::string pname = cfg.pf_pdg_name_prototype_fallback ? "0" : "particle";
         std::string ke_str = cfg.prototype_names ? "0" : "0.00";
         if (seg->has_particle_info()) {
             auto pi = seg->particle_info();
             // prototype_names: TDatabasePDG-style short names ("mu-",
             // "proton") like the prototype mc.json; legacy: the
             // ParticleDataSet long name ("muon", "proton").
-            pname  = cfg.prototype_names ? pf_pdg_to_name(pi->pdg(), true) : pi->name();
+            pname  = cfg.prototype_names ? pf_pdg_to_name(pi->pdg(), true, cfg.pf_pdg_name_prototype_fallback) : pi->name();
             ke_str = format_mev(pi->kinetic_energy());
         }
 
@@ -1633,7 +1959,10 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
 
         if (flag_print) {
             const auto* seg_cluster = seg->cluster();
-            const bool in_main_cluster = (main_cluster && seg_cluster == main_cluster);
+            // Ident comparison, matching F1's guard (§10.2): the old pointer
+            // test was stricter and over-reported out-of-main-cluster segments.
+            const bool in_main_cluster = (main_cluster && seg_cluster &&
+                seg_cluster->get_cluster_id() == main_cluster->get_cluster_id());
             const bool is_shower_seg = (seg_to_shower.count(seg) > 0);
             auto pit = seg_parent.find(seg);
             auto parent_seg_dbg = (pit != seg_parent.end()) ? pit->second : nullptr;
@@ -1698,6 +2027,104 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
         const double rke = seg->has_particle_info() ? seg->particle_info()->kinetic_energy() : 0.0;
         if (!keep_node(rpdg, rke, root_node)) continue;
         particles.append(root_node);
+    }
+
+    // doc pr/38: orphan safety net, gated under pf_shower_vertex_barrier as
+    // the no-silent-drop complement of the barrier.  The prototype's flat
+    // loop gives EVERY non-shower main-cluster segment a node with
+    // mc_mother=0 before the mother-assignment BFS runs
+    // (NeutrinoID.cxx:1485-1489), so a segment the BFS never reaches stays in
+    // its tree as a root-level node; the BFS-built tree above silently
+    // dropped it.  Emitted as root-level leaves with the prototype's own node
+    // conventions: endpoints from the segment's fit points oriented by
+    // dirsign (fill_reco_tree, NeutrinoID.cxx:1217-1239), dirsign==0 segments
+    // not plotted (:1215), KeepMC floors as for every other node.  Emission
+    // order is sorted by encoded id -- the prototype's is pointer-map order,
+    // which is not reproducible; a stable order is chosen deliberately.
+    // doc pr/65 round 3 (rung 3): audit-only variant of the safety net below.
+    // Keep the VISIBILITY the net was added for, drop the FABRICATION: name
+    // every still-unclaimed segment in the log -- WITHOUT the display filters,
+    // so dirsign==0 / empty-fit / KeepMC-floored segments (which today vanish
+    // from the tree silently) are named too -- and append no node.  The
+    // owner's requirement: an unclaimed orphan must never become a root-level
+    // PF particle.  Load-bearing only with rung 1 (shower_absorb_unreachable_main)
+    // claiming the fragments first.
+    if (cfg.pf_shower_vertex_barrier && cfg.pf_orphan_audit_only) {
+        std::vector<PR::SegmentPtr> unclaimed;
+        for (auto edesc : mir(boost::edges(*pr_graph))) {
+            auto seg = (*pr_graph)[edesc].segment;
+            if (!seg || used_segs.count(seg) || conn4_skip_segs.count(seg)) continue;
+            if (!same_cluster(seg)) continue;      // prototype NeutrinoID.cxx:1488
+            unclaimed.push_back(seg);
+        }
+        std::sort(unclaimed.begin(), unclaimed.end(),
+                  [&](const PR::SegmentPtr& a, const PR::SegmentPtr& b) {
+                      return seg_display_id(a) < seg_display_id(b);
+                  });
+        for (const auto& seg : unclaimed) {
+            const auto* cl = seg->cluster();
+            const bool haspi = seg->has_particle_info() && seg->particle_info();
+            SPDLOG_LOGGER_INFO(log,
+                "pr65 pf-orphan-audit: unclaimed seg={} cluster={} pdg={} ke_mev={:.2f} nfits={} dirsign={}",
+                seg_display_id(seg),
+                cl ? std::to_string(cl->get_cluster_id()) : "?",
+                haspi ? seg->particle_info()->pdg() : 0,
+                haspi ? seg->particle_info()->kinetic_energy() / units::MeV : 0.0,
+                seg->fits().size(), seg->dirsign());
+        }
+        SPDLOG_LOGGER_INFO(log,
+            "pr65 pf-orphan-audit: {} unclaimed segment(s), no PF node fabricated (pf_orphan_audit_only)",
+            unclaimed.size());
+    }
+    else if (cfg.pf_shower_vertex_barrier) {
+        std::vector<PR::SegmentPtr> orphans;
+        for (auto edesc : mir(boost::edges(*pr_graph))) {
+            auto seg = (*pr_graph)[edesc].segment;
+            if (!seg || used_segs.count(seg) || conn4_skip_segs.count(seg)) continue;
+            if (!same_cluster(seg)) continue;      // prototype NeutrinoID.cxx:1488
+            if (seg->dirsign() == 0) continue;     // prototype NeutrinoID.cxx:1215
+            if (seg->fits().empty()) continue;
+            orphans.push_back(seg);
+        }
+        std::sort(orphans.begin(), orphans.end(),
+                  [&](const PR::SegmentPtr& a, const PR::SegmentPtr& b) {
+                      return seg_display_id(a) < seg_display_id(b);
+                  });
+        for (const auto& seg : orphans) {
+            std::string pname = cfg.pf_pdg_name_prototype_fallback ? "0" : "particle";
+            std::string ke_str = cfg.prototype_names ? "0" : "0.00";
+            int opdg = 0;
+            double oke = 0.0;
+            if (seg->has_particle_info()) {
+                auto pi = seg->particle_info();
+                pname  = cfg.prototype_names
+                       ? pf_pdg_to_name(pi->pdg(), true, cfg.pf_pdg_name_prototype_fallback)
+                       : pi->name();
+                ke_str = format_mev(pi->kinetic_energy());
+                opdg = pi->pdg();
+                oke  = pi->kinetic_energy();
+            }
+            const auto& fits = seg->fits();
+            const WireCell::Point& p_front = fits.front().point;
+            const WireCell::Point& p_back  = fits.back().point;
+            const bool fwd = (seg->dirsign() == 1);
+            auto node = make_node(seg_display_id(seg),
+                                  pname + "  " + ke_str + " MeV",
+                                  fwd ? p_front : p_back,
+                                  fwd ? p_back : p_front);
+            node["icon"] = "jstree-file";
+            if (!keep_node(opdg, oke, node)) continue;
+            if (flag_print) {
+                const auto* cl = seg->cluster();
+                std::cout << "[fill_bee_pf_tree] ADD orphan-track-root"
+                          << "  seg=" << seg_display_id(seg)
+                          << "  name=" << pname
+                          << "  ke=" << ke_str << " MeV"
+                          << "  cluster=" << (cl ? std::to_string(cl->get_cluster_id()) : "?")
+                          << "\n";
+            }
+            particles.append(node);
+        }
     }
 
     tree.set_particles(particles);
@@ -2693,6 +3120,35 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
                     // sentinel real_cluster_main uses.
                     cluster->put_pcarray(std::vector<int>(cluster->nchildren(), 1),
                                          "real_cluster_was_main", "perblob");
+                }
+            }
+        }
+        // "nu_band_veto_role" (ClusteringNeutrino's record_band_veto, doc
+        // pr/66) needs the same key-homogeneity fill-in as the block above,
+        // and for the same reason: presence-triggered rather than a knob of
+        // its own, so writer-on/fill-in-off can never happen and leave a
+        // "perblob" PC whose key set differs between clusters (Dataset::append
+        // raises at the next merge).  Fill iff somebody actually wrote it.
+        {
+            bool any_bandveto = false;
+            for (Cluster* cluster : grouping.children()) {
+                if (cluster->has_pcarray<int>("nu_band_veto_role", "perblob")) {
+                    any_bandveto = true;
+                    break;
+                }
+            }
+            if (any_bandveto) {
+                // Gate on "has a perblob PC at all" -- same wide gate as
+                // real_cluster_was_main above, for the same reason.
+                for (Cluster* cluster : grouping.children()) {
+                    const auto& lpcs = cluster->value().local_pcs();
+                    if (lpcs.find("perblob") == lpcs.end()) continue;
+                    if (cluster->has_pcarray<int>("nu_band_veto_role", "perblob")) continue;
+                    // 0 = unmarked, the array's own documented value -- and
+                    // exactly what PointTreeMerging's normalize_pctree_local_pcs
+                    // would zero-fill anyway, so the two agree.
+                    cluster->put_pcarray(std::vector<int>(cluster->nchildren(), 0),
+                                         "nu_band_veto_role", "perblob");
                 }
             }
         }
