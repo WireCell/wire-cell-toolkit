@@ -441,7 +441,7 @@ local clus_per_face(anode, face, dump, output_dir, runNo, subRunNo, eventNo, bee
 // all-APA clustering + Bee in SCE true space (x_sce) instead of the T0-corrected
 // reco scope (x_t0cor).  Both SBND realities currently set use_sce=false (see
 // the reco table in the tail function), so this is a no-op for our chain.
-local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=null, premerged=false, rse_from_ident=false, pos_offset_on=true, tensor_outname='', save_real_cluster_id=false, trace_bee=false, save_assoc_cluster_id=false, real_cluster_id_global=null, cathode_rescue_on=true, cathode_rescue_unmatched=true, adopt_nu_fragments=false, save_bundle_main_provenance=false, rescue_allow_in_beam_far=false, rescue_geom_first=false, rescue_pierce_test=false, rescue_pierce_cut=null, rescue_dest_beam_for_new=false, use_sce=false, reality='data') = {
+local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=null, premerged=false, rse_from_ident=false, pos_offset_on=true, tensor_outname='', save_real_cluster_id=false, trace_bee=false, save_assoc_cluster_id=false, real_cluster_id_global=null, cathode_rescue_on=true, cathode_rescue_unmatched=true, adopt_nu_fragments=false, save_bundle_main_provenance=false, rescue_allow_in_beam_far=true, rescue_geom_first=true, rescue_pierce_test=true, rescue_pierce_cut=null, rescue_dest_beam_for_new=true, use_sce=false, reality='data') = {
     local nanodes = std.length(anodes),
     local pcmerging = g.pnode({
         type: 'PointTreeMerging',
@@ -528,10 +528,13 @@ local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=
         // (adopt_xcut 30 cm, frag_max_length 60 cm, min 5 pts, beam >= 10 cm).
         adopt_nu_fragments=adopt_nu_fragments,
         adopt_dis=(if adopt_nu_fragments then 13*wc.cm else null),
-        // Round 2 (sbnd_xin/docs/73).  All four SBND defaults FALSE this round:
-        // doc 72 sec A's 10 residual events are real, but the knobs ship OFF
-        // until the firing census over the full sample is scanned.  false =>
-        // keys suppressed => compiled config byte-identical to pre-round-2.
+        // Round 2 (sbnd_xin/docs/73).  ALL FOUR SBND PRODUCTION ON since
+        // 2026-08-17 (owner decision on the sec 5-6 validation: 9 of 12
+        // one-sided crossers rejoined, every one into the beam bundle; mcp1k
+        // census 8 -> 12 firings per 1000, 0 legacy firings lost, all 988
+        // non-firing events byte-identical).  NOT bit-identical -- a behaviour
+        // change delivered as config; false on all four omits every key and
+        // restores the byte-identical pre-round-2 compiled config.
         // C++ defaults for the companion cuts are 5 cm / 8 cm / 0.8 / 8 cm;
         // only pierce_cut is exposed here, because it is the one the docs/73
         // sec 6 sweep tunes.
@@ -2562,9 +2565,9 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
     all_apa(anodes, dump=true, bee_sink=null, premerged=false, tensor_outname='', save_real_cluster_id=false, save_assoc_cluster_id=false,
             trace_bee=false, real_cluster_id_global=null, cathode_rescue_on=true, cathode_rescue_unmatched=true, adopt_nu_fragments=false,
             save_bundle_main_provenance=false,
-            rescue_allow_in_beam_far=false, rescue_geom_first=false,
-            rescue_pierce_test=false, rescue_pierce_cut=null,
-            rescue_dest_beam_for_new=false)::
+            rescue_allow_in_beam_far=true, rescue_geom_first=true,
+            rescue_pierce_test=true, rescue_pierce_cut=null,
+            rescue_dest_beam_for_new=true)::
         // Clustering + matching ONLY (all-APA MABC).  The follow-up PR tagger
         // pass (pr() below) and the wclsTensorSetLabeler are wired by the entry
         // configuration, not here -- see the note in clus_all_apa.

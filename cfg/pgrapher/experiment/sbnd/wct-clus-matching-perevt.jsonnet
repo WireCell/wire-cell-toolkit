@@ -250,34 +250,49 @@ function(
     adopt_nu_fragments = false,
     // --- cathode bundle rescue, round 2 (sbnd_xin/docs/73) -------------------
     // doc 72 sec A found 10 in-beam events in 3000 whose bundle main is still
-    // cut at the cathode.  Four independent openings of a measured blocker,
-    // ALL SBND default FALSE this round (each false omits its key => compiled
-    // config byte-identical to pre-round-2).  Each needs cathode_rescue.
+    // cut at the cathode.  Four independent openings of a measured blocker.
+    //
+    // ALL FOUR SBND PRODUCTION ON since 2026-08-17 (owner decision on the
+    // docs/73 sec 5-6 validation).  **NOT bit-identical** -- this is a
+    // behaviour change delivered as config; the escape for the pre-round-2
+    // baseline is SBND_RESCUE_{IN_BEAM,GEOM_FIRST,PIERCE,DEST_BEAM}=0, which
+    // omits every key and restores a byte-identical compiled config.
+    //
+    // Measured on mcp1k+mcp2k data (docs/73 sec 5.1, 5.6, 6.4):
+    //   9 of 12 one-sided crossers rejoined, EVERY one into the beam bundle;
+    //   mcp1k firing census 8 -> 12 events per 1000, 0 legacy firings lost,
+    //   all 988 non-firing events byte-identical.
+    // The far-half containment veto (C++ far_contain_tol, 1 cm) rides with
+    // these and is what keeps a cosmic matched hundreds of us away from being
+    // dragged through the cathode -- see docs/73 sec 5.5/6.3.  Each needs
+    // cathode_rescue.
     //
     // rescue_in_beam_far (class A, 2 events): both halves matched, each to its
     // own side's in-beam flash, and require_far_out_of_beam refuses the pair
     // outright.  Runner: SBND_RESCUE_IN_BEAM=1.
-    rescue_in_beam_far = false,
+    rescue_in_beam_far = true,
     // rescue_geom_first (class B, 6 events): the wrong flash is +589/+855/+581/
     // +108/+28/-43 us away, so the [-8, +13] us window can never reach it.
     // Tests such a pair behind a tightened geometry instead of a time prior.
     // The widest-reaching of the four -- it takes the candidate pool from the
     // 1-2 clusters inside the window to every matched cluster in the event.
     // Runner: SBND_RESCUE_GEOM_FIRST=1.
-    rescue_geom_first = false,
+    rescue_geom_first = true,
     // rescue_pierce_test (class C, 2 events): conn_far_cut=30 deg on a
     // drift-dominated tip-to-tip vector is really a cut on |dir_x| > 0.866 (10
     // of the 12 candidate rows have |dir_x| < 0.866, median 0.71), and on a
     // 2.8 cm baseline the same angle is noise.  Substitutes the cathode-piercing
     // agreement.  Runner: SBND_RESCUE_PIERCE=1, SBND_RESCUE_PIERCE_CUT=<cm>.
-    rescue_pierce_test = false,
-    // null => C++ default 8 cm.
+    rescue_pierce_test = true,
+    // null => C++ default 8 cm, which is the validated operating point (set
+    // just above the largest piercing distance measured on a genuine signal
+    // event, 5.46 cm; flat over a 6-8 cm sweep -- docs/73 sec 8).
     rescue_pierce_cut = null,
     // rescue_dest_beam_for_new: a pair admitted only by one of the three above
     // adopts the beam bundle rather than the length-based a/b/c/d rule, which
     // can hand the joined crosser to the cosmic bundle when the beam-side donor
     // is still a pre-examine_bundles stub.  Runner: SBND_RESCUE_DEST_BEAM=1.
-    rescue_dest_beam_for_new = false,
+    rescue_dest_beam_for_new = true,
     // save_bundle_main_provenance (doc pr/20 Part I P1; C++ default false):
     // on the all-APA flash-time merge, also write the per-blob
     // "real_cluster_was_main" array -- 1 on every member that was a matched
