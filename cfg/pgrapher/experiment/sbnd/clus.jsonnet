@@ -1325,6 +1325,10 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               teb_turn_angle=null,
               teb_turn_baseline=null,
               teb_turn_skirt=null,
+              // doc pr/90 round 2: R2 argmax arm-fill guard + second-prong
+              // gate cap.  null = C++ default 0 = legacy, key suppressed.
+              teb_turn_min_arm_frac=null,
+              teb_second_max=null,
               kink_walk_dqdx_stop=false,
               kink_break_protect=false,
               kink_dqdx_hot_ratio=null,
@@ -2081,6 +2085,8 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
             teb_turn_angle=teb_turn_angle,
             teb_turn_baseline=teb_turn_baseline,
             teb_turn_skirt=teb_turn_skirt,
+            teb_turn_min_arm_frac=teb_turn_min_arm_frac,
+            teb_second_max=teb_second_max,
             kink_walk_dqdx_stop=kink_walk_dqdx_stop,
             kink_break_protect=kink_break_protect,
             kink_dqdx_hot_ratio=kink_dqdx_hot_ratio,
@@ -2857,6 +2863,10 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
        teb_turn_angle=null,
        teb_turn_baseline=null,
        teb_turn_skirt=null,
+       // doc pr/90 round 2: R2 argmax arm-fill guard + second-prong gate
+       // cap.  null = C++ default 0 = legacy, key suppressed.
+       teb_turn_min_arm_frac=null,
+       teb_second_max=null,
        kink_walk_dqdx_stop=false,
        kink_break_protect=false,
        kink_dqdx_hot_ratio=null,
@@ -3216,6 +3226,8 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 teb_turn_angle=teb_turn_angle,
                 teb_turn_baseline=teb_turn_baseline,
                 teb_turn_skirt=teb_turn_skirt,
+                teb_turn_min_arm_frac=teb_turn_min_arm_frac,
+                teb_second_max=teb_second_max,
                 kink_walk_dqdx_stop=kink_walk_dqdx_stop,
                 kink_break_protect=kink_break_protect,
                 kink_dqdx_hot_ratio=kink_dqdx_hot_ratio,

@@ -262,6 +262,17 @@ namespace WireCell::Clus::PR {
     /// - turn_angle (deg) / turn_baseline / turn_skirt: R2's wide-baseline
     ///   PCA turn requirement at the located index; turn_angle <= 0 disables
     ///   route R2 entirely.
+    /// - turn_min_arm_frac: when > 0, R2's turn argmax runs a PREFERENCE
+    ///   pass first over indices where each PCA arm's achievable arclength
+    ///   (bounded by the segment end beyond the skirt) reaches this fraction
+    ///   of turn_baseline; that winner is kept only if it clears turn_angle
+    ///   on its own, else the legacy unrestricted argmax stands.  A starved
+    ///   near-end window reads PCA jitter, not heading (doc
+    ///   sbnd_xin/docs/pr/90 sec 3b: 4 pts / 1.94 cm of a 35 cm baseline
+    ///   outscored the true 33 deg corner), but a hard filter is wrong too --
+    ///   genuine corners do sit 4-5 cm from an end (pr/90 sec 8.6), so the
+    ///   starved candidate stays as the fallback.  0 = legacy argmax,
+    ///   byte-identical.
     struct TwoEndBreakOptions {
         double mip_dqdx{50000/units::cm};
         double mip_dqdx_median{43000/units::cm};
@@ -278,6 +289,7 @@ namespace WireCell::Clus::PR {
         double turn_angle{25.0};
         double turn_baseline{35*units::cm};
         double turn_skirt{3*units::cm};
+        double turn_min_arm_frac{0.0};
     };
 
     /// Result of segment_two_end_break_scan.  `found` is the overall accept

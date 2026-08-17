@@ -581,12 +581,45 @@ namespace WireCell::Clus::PR {
         int k_turn = -1;
         double turn_max = 0;
         if (opt.turn_angle > 0 && rise_r2) {
-            for (size_t k = 1; k + 1 < N; k++) {
-                if (!arm_ok(k)) continue;
-                const double t = segment_wide_turn_angle(fits, k, opt.turn_skirt, opt.turn_baseline);
-                if (t > turn_max) {
-                    turn_max = t;
-                    k_turn = static_cast<int>(k);
+            // doc sbnd_xin/docs/pr/90 sec 3b + sec 8.6: near a segment end the
+            // PCA window is starved (320865: 4 pts / 1.94 cm of the 35 cm
+            // baseline) and reads fit jitter, not heading, yet can outscore a
+            // well-formed true corner in this argmax.  When turn_min_arm_frac
+            // > 0, a PREFERENCE pass runs first over indices where BOTH arms'
+            // achievable arclength (bounded by the segment end, beyond the
+            // skirt) reaches that fraction of turn_baseline; its winner is
+            // kept only if it clears opt.turn_angle on its own.  Otherwise
+            // the legacy unrestricted argmax stands -- the round-1 live A/B
+            // (sec 8.6) proved a hard eligibility filter kills genuine
+            // near-end corners (owner-approved b1=0 vertices at 4-5.5 cm
+            // from a segment end); span cannot discriminate those from the
+            // spurious peaks, but "prefer a well-formed corner when one
+            // exists above threshold" changes exactly the shadowed-corner
+            // class and nothing else.  0 = legacy argmax, byte-identical.
+            if (opt.turn_min_arm_frac > 0) {
+                const double need = opt.turn_min_arm_frac * opt.turn_baseline;
+                for (size_t k = 1; k + 1 < N; k++) {
+                    if (!arm_ok(k)) continue;
+                    if (cum[k] - opt.turn_skirt < need || (L - cum[k]) - opt.turn_skirt < need) continue;
+                    const double t = segment_wide_turn_angle(fits, k, opt.turn_skirt, opt.turn_baseline);
+                    if (t > turn_max) {
+                        turn_max = t;
+                        k_turn = static_cast<int>(k);
+                    }
+                }
+                if (turn_max < opt.turn_angle) {
+                    k_turn = -1;
+                    turn_max = 0;
+                }
+            }
+            if (k_turn < 0) {
+                for (size_t k = 1; k + 1 < N; k++) {
+                    if (!arm_ok(k)) continue;
+                    const double t = segment_wide_turn_angle(fits, k, opt.turn_skirt, opt.turn_baseline);
+                    if (t > turn_max) {
+                        turn_max = t;
+                        k_turn = static_cast<int>(k);
+                    }
                 }
             }
         }

@@ -335,6 +335,19 @@ namespace WireCell::Clus::PR {
         double m_teb_turn_angle{25.0};                       // deg; <= 0 disables route R2
         double m_teb_turn_baseline{35*units::cm};
         double m_teb_turn_skirt{3*units::cm};
+        // doc sbnd_xin/docs/pr/90 round 2 -- two default-OFF refinements:
+        // m_teb_turn_min_arm_frac: route R2's turn argmax PREFERS an index
+        // whose PCA arms can each span this fraction of teb_turn_baseline,
+        // when one clears teb_turn_angle on its own; legacy argmax is the
+        // fallback (mirrors TwoEndBreakOptions::turn_min_arm_frac); 0 =
+        // legacy argmax, byte-identical.
+        // m_teb_second_max: tolerate additional long (> teb_stub_max)
+        // segments in the entry gate as long as exactly one segment exceeds
+        // this cap (that one is the candidate); 0 = legacy strict
+        // single-long-segment gate, byte-identical.  Internal length units
+        // (config takes cm).
+        double m_teb_turn_min_arm_frac{0.0};
+        double m_teb_second_max{0};
 
         // m_kink_walk_dqdx_stop -- 59335 fix (a): forwarded to
         // segment_search_kink so a dQ/dx-confident C4/straightness accept

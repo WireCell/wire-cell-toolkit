@@ -2976,15 +2976,33 @@ bool PatternAlgorithms::break_two_end_dqdx(Graph& graph, Facade::Cluster& cluste
     // strict single-segment test would wrongly exclude them).
     SegmentPtr cand = nullptr;
     int n_long = 0;
+    // doc sbnd_xin/docs/pr/90 round 2 (knob teb_second_max): a second
+    // 11-13 cm prong (172832/61681) pushes n_long to 2 and the strict gate
+    // silently declines, so the turn inside the 100+ cm main prong is never
+    // examined.  When m_teb_second_max > 0, tolerate additional long
+    // segments as long as exactly ONE segment exceeds that cap -- it becomes
+    // the candidate.  0 = legacy strict single-long-segment gate,
+    // byte-identical.
+    SegmentPtr cand_dominant = nullptr;
+    int n_dominant = 0;
     for (const auto& ed : ordered_edges(graph)) {
         SegmentPtr sg = graph[ed].segment;
         if (!sg || sg->cluster() != &cluster) continue;
-        if (segment_track_length(sg, 0) > m_teb_stub_max) {
+        const double len = segment_track_length(sg, 0);
+        if (len > m_teb_stub_max) {
             n_long++;
             cand = sg;
         }
+        if (m_teb_second_max > 0 && len > m_teb_second_max) {
+            n_dominant++;
+            cand_dominant = sg;
+        }
     }
-    if (n_long != 1 || !cand) return false;
+    if (n_long != 1) {
+        if (!(m_teb_second_max > 0 && n_long > 1 && n_dominant == 1 && cand_dominant)) return false;
+        cand = cand_dominant;
+    }
+    if (!cand) return false;
     const auto& fits = cand->fits();
     if (fits.size() < 3) return false;
 
@@ -3015,19 +3033,21 @@ bool PatternAlgorithms::break_two_end_dqdx(Graph& graph, Facade::Cluster& cluste
     opt.turn_angle      = m_teb_turn_angle;
     opt.turn_baseline   = m_teb_turn_baseline;
     opt.turn_skirt      = m_teb_turn_skirt;
+    opt.turn_min_arm_frac = m_teb_turn_min_arm_frac;
 
     auto res = segment_two_end_break_scan(cand, particle_data, opt);
     SPDLOG_LOGGER_DEBUG(s_log,
         "break_two_end_dqdx: cluster {} seg len {:.1f}cm k*={} (dip {} turn {}) arms {:.1f}/{:.1f}cm "
         "J={:.3f} s15=({:.3f}{},{:.3f}{}) rise=({:.2f},{:.2f}) absmed=({:.2f},{:.2f})xMIP "
-        "turn={:.1f}deg routes=({},{}) found={}",
+        "turn={:.1f}deg routes=({},{}) found={} nlong={} armfrac={:.2f} secmax={:.1f}cm",
         cluster.get_cluster_id(), segment_track_length(cand, 0)/units::cm, res.break_idx,
         res.idx_dip, res.idx_turn,
         res.arm_a_len/units::cm, res.arm_b_len/units::cm, res.joint_score,
         res.sA, res.flagA ? "F" : "f", res.sB, res.flagB ? "F" : "f",
         res.ratio_lo, res.ratio_hi,
         res.absmed_lo/m_mip_dqdx_median, res.absmed_hi/m_mip_dqdx_median,
-        res.turn_deg, res.route1, res.route2, res.found);
+        res.turn_deg, res.route1, res.route2, res.found,
+        n_long, m_teb_turn_min_arm_frac, m_teb_second_max/units::cm);
     for (const auto& a : res.attempts) {
         SPDLOG_LOGGER_DEBUG(s_log,
             "break_two_end_dqdx:   cand idx={} m3={:.2f}xMIP sA={:.3f}{} sB={:.3f}{} accepted={}",

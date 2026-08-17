@@ -1338,6 +1338,22 @@ function(
     // SBND_KINK_BREAK_PROTECT runner envs) to restore the legacy path.
     // teb_* operating point rides the C++ defaults.
     two_end_break = true,
+    // doc pr/90 round 2 -- two refinements of the two_end_break pass, both
+    // C++ default 0 = legacy.  teb_turn_min_arm_frac: route R2's turn argmax
+    // PREFERS an index whose PCA arms can each span this fraction of
+    // teb_turn_baseline when one clears teb_turn_angle on its own; the
+    // legacy argmax (starved near-end candidates included) is the fallback
+    // (320865: a starved 4-pt/1.9 cm near-end arm outscored the true 33 deg
+    // corner by 5 deg of PCA jitter; genuine corners at 4-5 cm from an end
+    // keep their legacy break -- pr/90 sec 8.6).  teb_second_max (cm): the
+    // entry gate tolerates extra >stub prongs when exactly one segment
+    // exceeds this cap (172832/61681: a second 11-13 cm prong made n_long=2
+    // and the strict gate declined; measured NEGATIVE on its own motivating
+    // events, pr/90 sec 8.5 -- stays OFF).  null = keys suppressed =>
+    // byte-identical pre-fix config.  Escapes: SBND_TEB_TURN_MIN_ARM_FRAC /
+    // SBND_TEB_SECOND_MAX runner envs (or -A).
+    teb_turn_min_arm_frac = null,
+    teb_second_max = null,
     kink_walk_dqdx_stop = true,
     kink_break_protect = true,
     // doc pr/49 (18255-57441) -- cross-cluster projection-ghost deweighting
@@ -1978,6 +1994,8 @@ function(
                              other_seg_empty_2d_guard=other_seg_empty_2d_guard,
                              long_muon_stub_bridge=long_muon_stub_bridge,
                              two_end_break=two_end_break,
+                             teb_turn_min_arm_frac=teb_turn_min_arm_frac,
+                             teb_second_max=teb_second_max,
                              kink_walk_dqdx_stop=kink_walk_dqdx_stop,
                              kink_break_protect=kink_break_protect,
                              fit_blob_coverage=fit_blob_coverage,

@@ -109,6 +109,8 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_teb_turn_angle      = get(config, "teb_turn_angle",      m_teb_turn_angle);      // deg
     m_teb_turn_baseline   = get(config, "teb_turn_baseline",   m_teb_turn_baseline);   // cm
     m_teb_turn_skirt      = get(config, "teb_turn_skirt",      m_teb_turn_skirt);      // cm
+    m_teb_turn_min_arm_frac = get(config, "teb_turn_min_arm_frac", m_teb_turn_min_arm_frac); // frac of baseline; doc pr/90 round 2
+    m_teb_second_max      = get(config, "teb_second_max",      m_teb_second_max);      // cm; doc pr/90 round 2
     m_kink_walk_dqdx_stop = get(config, "kink_walk_dqdx_stop", m_kink_walk_dqdx_stop);
     m_kink_break_protect  = get(config, "kink_break_protect",  m_kink_break_protect);
     m_kink_dqdx_hot_ratio = get(config, "kink_dqdx_hot_ratio", m_kink_dqdx_hot_ratio);
@@ -498,6 +500,8 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["teb_turn_angle"]      = m_teb_turn_angle;      // deg; <= 0 disables route R2
     cfg["teb_turn_baseline"]   = m_teb_turn_baseline;   // cm
     cfg["teb_turn_skirt"]      = m_teb_turn_skirt;      // cm
+    cfg["teb_turn_min_arm_frac"] = m_teb_turn_min_arm_frac; // frac of teb_turn_baseline; 0 = legacy argmax (doc pr/90 round 2)
+    cfg["teb_second_max"]      = m_teb_second_max;      // cm; 0 = legacy strict gate (doc pr/90 round 2)
     cfg["kink_walk_dqdx_stop"] = m_kink_walk_dqdx_stop; // false = legacy (flag_search bypasses the walk gate)
     cfg["kink_break_protect"]  = m_kink_break_protect;  // false = legacy (no protected kink breaks)
     // doc sbnd_xin/docs/pr/50 -- main-vertex kink-consistency snap; false =>
@@ -984,6 +988,8 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
     pattern_algos.m_teb_turn_angle      = m_teb_turn_angle;                // deg, no conversion
     pattern_algos.m_teb_turn_baseline   = m_teb_turn_baseline * units::cm; // cm -> internal
     pattern_algos.m_teb_turn_skirt      = m_teb_turn_skirt * units::cm;    // cm -> internal
+    pattern_algos.m_teb_turn_min_arm_frac = m_teb_turn_min_arm_frac;       // dimensionless, no conversion
+    pattern_algos.m_teb_second_max      = m_teb_second_max * units::cm;    // cm -> internal
     pattern_algos.m_kink_walk_dqdx_stop = m_kink_walk_dqdx_stop;
     pattern_algos.m_kink_break_protect  = m_kink_break_protect;
     pattern_algos.m_kink_dqdx_hot_ratio = m_kink_dqdx_hot_ratio;

@@ -116,6 +116,15 @@ public:
         double m_teb_turn_angle{25};     // deg; <= 0 disables route R2
         double m_teb_turn_baseline{35};  // cm
         double m_teb_turn_skirt{3};      // cm
+        // doc sbnd_xin/docs/pr/90 round 2.  turn_min_arm_frac: route R2's
+        // turn argmax PREFERS an index whose PCA arms can each span this
+        // fraction of teb_turn_baseline, when such an index clears
+        // teb_turn_angle on its own; otherwise the legacy argmax (starved
+        // near-end candidates included) stands.  0 = legacy.
+        // second_max (cm): entry gate tolerates extra long prongs when
+        // exactly one segment exceeds this cap; 0 = legacy strict gate.
+        double m_teb_turn_min_arm_frac{0.0};
+        double m_teb_second_max{0};      // cm
         // 59335 fix (a): the local-dQ/dx walk gate also stops the C4 /
         // straightness (flag_search) accepts.  false => byte-identical.
         bool   m_kink_walk_dqdx_stop{false};
