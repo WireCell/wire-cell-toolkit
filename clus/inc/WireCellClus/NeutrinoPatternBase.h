@@ -348,6 +348,26 @@ namespace WireCell::Clus::PR {
         // (config takes cm).
         double m_teb_turn_min_arm_frac{0.0};
         double m_teb_second_max{0};
+        // doc sbnd_xin/docs/pr/90 round 4 (sec 9.5) -- three default-OFF
+        // knobs for the round-3 residual classes:
+        // m_teb_chain_topology (D1): when n_long > 1, admit iff the
+        // cluster's segment graph is a simple path (the owner's "still a
+        // line, no 3-track vertex") and the candidate is the unique longest
+        // segment; chain-admitted candidates are scanned by route R3 only,
+        // so admission also requires both R3 knobs.  false = legacy gate,
+        // byte-identical.
+        // m_teb_r3_turn (deg) / m_teb_r3_hot (x m_mip_dqdx_median) (D3):
+        // route R3's local-turn threshold on the 10 cm-baseline turn and the
+        // +-2 cm vertex-activity corroboration floor
+        // (TwoEndBreakOptions::r3_turn / r3_hot).  <= 0 = R3 off.
+        // m_teb_bragg_veto_turn (deg) (D4): veto an accepted R2 break whose
+        // turn is below this when its short-arm end is not Bragg-consistent
+        // (TwoEndBreakOptions::bragg_veto_turn; owner-calibrated keep/kill
+        // rule, sec 9.4b).  <= 0 = off, byte-identical.
+        bool   m_teb_chain_topology{false};
+        double m_teb_r3_turn{0.0};
+        double m_teb_r3_hot{0.0};
+        double m_teb_bragg_veto_turn{0.0};
 
         // m_kink_walk_dqdx_stop -- 59335 fix (a): forwarded to
         // segment_search_kink so a dQ/dx-confident C4/straightness accept

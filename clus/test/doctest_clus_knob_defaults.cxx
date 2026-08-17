@@ -249,6 +249,13 @@ TEST_CASE("clus knob defaults: TaggerCheckNeutrino switches are all OFF")
     // both 0 = legacy even with two_end_break on.
     CHECK_KNOB_NUM(cfg, "teb_turn_min_arm_frac", 0.0);
     CHECK_KNOB_NUM(cfg, "teb_second_max", 0.0);
+    // doc pr/90 round 4: chain-topology gate admission (D1) + route R3
+    // turn/activity thresholds (D3) + the R2 bragg veto (D4); all OFF =>
+    // legacy even with two_end_break on.
+    CHECK_KNOB_BOOL(cfg, "teb_chain_topology", false);
+    CHECK_KNOB_NUM(cfg, "teb_r3_turn", 0.0);
+    CHECK_KNOB_NUM(cfg, "teb_r3_hot", 0.0);
+    CHECK_KNOB_NUM(cfg, "teb_bragg_veto_turn", 0.0);
     // doc pr/50: the vks_* operating point (cm/deg/dimensionless), all inert
     // while vertex_kink_snap is false.  vks_hot_ratio 0 = the optional
     // Bragg-hot veto is OFF (it misfires on the failure class itself:

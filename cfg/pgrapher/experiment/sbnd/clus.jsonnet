@@ -1341,6 +1341,13 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               // gate cap.  null = C++ default 0 = legacy, key suppressed.
               teb_turn_min_arm_frac=null,
               teb_second_max=null,
+              // doc pr/90 round 4: chain-topology admission (D1), route R3
+              // turn/activity (D3), R2 bragg veto (D4).  false/null = C++
+              // default = legacy, key suppressed.
+              teb_chain_topology=false,
+              teb_r3_turn=null,
+              teb_r3_hot=null,
+              teb_bragg_veto_turn=null,
               kink_walk_dqdx_stop=false,
               kink_break_protect=false,
               kink_dqdx_hot_ratio=null,
@@ -2099,6 +2106,10 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
             teb_turn_skirt=teb_turn_skirt,
             teb_turn_min_arm_frac=teb_turn_min_arm_frac,
             teb_second_max=teb_second_max,
+            teb_chain_topology=teb_chain_topology,
+            teb_r3_turn=teb_r3_turn,
+            teb_r3_hot=teb_r3_hot,
+            teb_bragg_veto_turn=teb_bragg_veto_turn,
             kink_walk_dqdx_stop=kink_walk_dqdx_stop,
             kink_break_protect=kink_break_protect,
             kink_dqdx_hot_ratio=kink_dqdx_hot_ratio,
@@ -2887,6 +2898,13 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
        // cap.  null = C++ default 0 = legacy, key suppressed.
        teb_turn_min_arm_frac=null,
        teb_second_max=null,
+       // doc pr/90 round 4: chain-topology admission (D1), route R3
+       // turn/activity (D3), R2 bragg veto (D4).  false/null = C++ default
+       // = legacy, key suppressed.
+       teb_chain_topology=false,
+       teb_r3_turn=null,
+       teb_r3_hot=null,
+       teb_bragg_veto_turn=null,
        kink_walk_dqdx_stop=false,
        kink_break_protect=false,
        kink_dqdx_hot_ratio=null,
@@ -3248,6 +3266,10 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 teb_turn_skirt=teb_turn_skirt,
                 teb_turn_min_arm_frac=teb_turn_min_arm_frac,
                 teb_second_max=teb_second_max,
+                teb_chain_topology=teb_chain_topology,
+                teb_r3_turn=teb_r3_turn,
+                teb_r3_hot=teb_r3_hot,
+                teb_bragg_veto_turn=teb_bragg_veto_turn,
                 kink_walk_dqdx_stop=kink_walk_dqdx_stop,
                 kink_break_protect=kink_break_protect,
                 kink_dqdx_hot_ratio=kink_dqdx_hot_ratio,

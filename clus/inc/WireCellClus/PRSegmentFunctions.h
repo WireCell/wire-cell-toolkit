@@ -273,6 +273,23 @@ namespace WireCell::Clus::PR {
     ///   genuine corners do sit 4-5 cm from an end (pr/90 sec 8.6), so the
     ///   starved candidate stays as the fallback.  0 = legacy argmax,
     ///   byte-identical.
+    /// - bragg_veto_turn (deg): doc sbnd_xin/docs/pr/90 sec 9.4b -- the
+    ///   owner-calibrated keep/kill rule for accepted R2 breaks.  A genuine
+    ///   back-to-back junction turns hard (all 5 owner-KEEP events >= 32.5
+    ///   deg) while spurious accepts hug the 25 deg threshold (all 4
+    ///   owner-KILL events 26.5-27.4 deg), and their end brightness is
+    ///   vertex activity / track overlap, not a Bragg (dim-extended; a
+    ///   genuine Bragg concentrates its charge).  An accepted R2 break with
+    ///   turn < bragg_veto_turn whose SHORT-arm end is not Bragg-consistent
+    ///   (peak >= 2.0 x mip_dqdx_median AND contiguous > 1.5x hot extent
+    ///   from that end <= (peak - 1) x 1 cm/MIP, over an 8 cm end window)
+    ///   is vetoed.  Route R1 (dip) accepts are untouched.  <= 0 = off,
+    ///   byte-identical.  Calibrated operating point 30.0 (margins -8.7% /
+    ///   +8.3% against the 11 owner verdicts; the -1 cm extent offset is the
+    ///   sec 10.3 in-code recalibration that keeps 64503 vetoed).
+    /// - r3_turn (deg) / r3_hot (x mip_dqdx_median): options for
+    ///   segment_chain_turn_break_scan (route R3, doc pr/90 sec 9.5 D3);
+    ///   unused by segment_two_end_break_scan itself.  Both > 0 enables R3.
     struct TwoEndBreakOptions {
         double mip_dqdx{50000/units::cm};
         double mip_dqdx_median{43000/units::cm};
@@ -290,6 +307,9 @@ namespace WireCell::Clus::PR {
         double turn_baseline{35*units::cm};
         double turn_skirt{3*units::cm};
         double turn_min_arm_frac{0.0};
+        double bragg_veto_turn{0.0};
+        double r3_turn{0.0};
+        double r3_hot{0.0};
     };
 
     /// Result of segment_two_end_break_scan.  `found` is the overall accept
@@ -303,6 +323,9 @@ namespace WireCell::Clus::PR {
         bool   found{false};
         bool   route1{false};
         bool   route2{false};
+        /// Route R3 (segment_chain_turn_break_scan) accept; exclusive with
+        /// route1/route2 (a scan call runs either R1/R2 or R3, never both).
+        bool   route3{false};
         int    break_idx{-1};
         int    idx_dip{-1};
         int    idx_turn{-1};
@@ -313,6 +336,12 @@ namespace WireCell::Clus::PR {
         double ratio_lo{0}, ratio_hi{0};
         double absmed_lo{0}, absmed_hi{0};
         double turn_deg{0};
+        /// R2 bragg-veto diagnostics (doc pr/90 sec 9.4b): set when the veto
+        /// evaluated an accepted R2 candidate.  veto_peak / veto_extent are
+        /// the short-arm end peak (x mip_dqdx_median) and contiguous hot
+        /// extent; bragg_vetoed means the accept was suppressed.
+        bool   bragg_vetoed{false};
+        double veto_peak{0}, veto_extent{0};
         /// Every candidate accept attempt, in evaluation order (R1's dips
         /// deepest-first, then R2's turn index if tried): fit index, 3-pt
         /// mean dQ/dx at it (/mip for the caller), per-arm scores/flags.
@@ -350,6 +379,30 @@ namespace WireCell::Clus::PR {
     TwoEndBreakResult segment_two_end_break_scan(
         SegmentPtr seg, const Clus::ParticleDataSet::pointer& particle_data,
         const TwoEndBreakOptions& opt = {});
+
+    /// doc sbnd_xin/docs/pr/90 sec 9.5 D3 -- route R3: the turn+activity
+    /// junction scan for CHAIN-admitted candidates (the owner's "still a
+    /// line, no 3-track vertex" class: muon->Michel 172832, 2-track 61681).
+    /// Their junction signature is the opposite of the two-Bragg valley R1/R2
+    /// look for: a BRIGHT vertex-activity spot (measured 2.50x / 3.1x MIP at
+    /// the clicks) coincident with a LOCAL 10 cm-baseline turn (t10 plateau
+    /// 19-23.5 deg / climb to 54 deg, vs a 5-7 deg mid-track baseline), while
+    /// the production 35 cm turn averages the corner away (18.3 deg < 25) and
+    /// the deepest dip is an ordinary MIP fluctuation (0.77x).  Candidate
+    /// indices: arm_ok (min_arm/min_arm_pts) AND
+    /// t10 = segment_wide_turn_angle(fits, k, turn_skirt, 10 cm) >= r3_turn
+    /// AND max dQ/dx within +-2 cm arclength >= r3_hot x mip_dqdx_median.
+    /// Winner: largest t10 (ties: smaller index) with a WELL-FORMED
+    /// preference tier (both t10 windows fully achievable) ahead of the
+    /// unrestricted tier -- a starved near-end t10 window reads jitter AND
+    /// can sit on genuinely bright EM charge (172832's Michel end), so the
+    /// activity corroboration alone cannot guard it; refined to the +-2 cm
+    /// activity argmax (ties: smaller index) subject to arm_ok.
+    /// Returns route3/found/break_idx/turn_deg (t10 at the winning index)
+    /// and arm lengths; every other member stays at its default.  Pure
+    /// measurement, deterministic.  Never call with r3_turn or r3_hot <= 0.
+    TwoEndBreakResult segment_chain_turn_break_scan(
+        SegmentPtr seg, const TwoEndBreakOptions& opt);
 
     /// Calculate track length from segment
     ///

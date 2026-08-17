@@ -692,7 +692,73 @@ namespace WireCell::Clus::PR {
             res.flagA = fA; res.flagB = fB;
             res.sA = sA; res.sB = sB;
             res.joint_score = sA + sB;
-            const bool acc = (fA || fB) && std::max(sA, sB) <= opt.score_cap_r2;
+            bool acc = (fA || fB) && std::max(sA, sB) <= opt.score_cap_r2;
+            // doc sbnd_xin/docs/pr/90 sec 9.4b (knob bragg_veto_turn): the
+            // owner-calibrated keep/kill rule for accepted R2 breaks.  All 4
+            // owner-KILL events hug the 25 deg accept (26.5-27.4 deg) with a
+            // dim-extended end profile (vertex activity / overlap: hot extent
+            // in cm exceeds the peak in MIP units), while all 5 owner-KEEP
+            // junctions turn >= 32.5 deg -- a genuine back-to-back junction
+            // turns hard, and a genuine Bragg concentrates its charge
+            // (bright relative to its length).  Veto an accept below the
+            // turn threshold unless the SHORT-arm end is Bragg-consistent:
+            // peak >= 2.0x mip median AND contiguous >1.5x hot extent from
+            // that end (capped at the 8 cm window) <= peak x 1 cm/MIP.
+            // <= 0 = off, byte-identical.  R1 accepts are never touched.
+            // NEAR-END SCOPE (pr/90 sec 10.6): the veto's calibration set is
+            // exclusively near-end breaks (the sec 8.3 starved-arm class,
+            // short arms 4.3-6.1 cm) -- there the question "is the short
+            // piece a real second particle with its own Bragg to its tip?"
+            // is what the end profile answers.  A well-formed mid-track
+            // break has a well-measured turn and its distant end profile
+            // says nothing about the junction: unscoped, the veto killed
+            // 349461's healthy 69 cm-arm break (turn 29.2) and moved its
+            // owner-anchored vertex 122 cm.  15 cm = 2.5x above the largest
+            // calibration kill arm, below the smallest genuine mid-track
+            // break arm (172942: 18.4 cm, turn-protected anyway).
+            const double veto_near_end = 15*units::cm;
+            if (acc && opt.bragg_veto_turn > 0 && turn_max < opt.bragg_veto_turn &&
+                std::min(cum[static_cast<size_t>(k_turn)], L - cum[static_cast<size_t>(k_turn)]) < veto_near_end) {
+                const size_t kb = static_cast<size_t>(k_turn);
+                const bool front = cum[kb] <= L - cum[kb];
+                const double win = 8*units::cm;
+                const double hot = 1.5 * opt.mip_dqdx_median;
+                double peak = 0, extent = 0;
+                bool contiguous = true;
+                if (front) {
+                    for (size_t j = 0; j < N && cum[j] <= win; j++) {
+                        peak = std::max(peak, dqdx[j]);
+                        if (contiguous && dqdx[j] > hot) extent = cum[j];
+                        else contiguous = false;
+                    }
+                }
+                else {
+                    for (size_t jj = 0; jj < N; jj++) {
+                        const size_t j = N - 1 - jj;
+                        const double d = L - cum[j];
+                        if (d > win) break;
+                        peak = std::max(peak, dqdx[j]);
+                        if (contiguous && dqdx[j] > hot) extent = d;
+                        else contiguous = false;
+                    }
+                }
+                res.veto_peak = peak / opt.mip_dqdx_median;
+                res.veto_extent = extent;
+                // extent <= peak - 1 (not the doc sec 9.4b sketch's
+                // extent <= peak): recalibrated against the IN-CODE profile
+                // definition (pr/90 sec 10.3) -- under it the owner-KILL
+                // 64503 reads peak 3.44 / extent 3.3 cm and would escape the
+                // sketch rule by 4%; with the -1 cm offset all five sub-30
+                // owner verdicts veto (64503 margin 16%) while every
+                // bright-compact Bragg keeps >= 10% slack (320865 3.14/1.94,
+                // 59247 3.09/0.60, 72586 6.62/1.35).
+                const bool bragg_consistent = res.veto_peak >= 2.0 &&
+                    extent / units::cm <= res.veto_peak - 1.0;
+                if (!bragg_consistent) {
+                    res.bragg_vetoed = true;
+                    acc = false;
+                }
+            }
             res.attempts.push_back({k_turn, m3[static_cast<size_t>(k_turn)], sA, sB, fA, fB, acc});
             if (acc) {
                 res.route2 = true;
@@ -704,6 +770,101 @@ namespace WireCell::Clus::PR {
             res.arm_b_len = L - cum[res.break_idx];
         }
         res.found = res.route1 || res.route2;
+        return res;
+    }
+
+    // doc sbnd_xin/docs/pr/90 sec 9.5 D3 -- route R3 for chain-admitted
+    // candidates.  Contract and measured signatures in the header comment.
+    TwoEndBreakResult segment_chain_turn_break_scan(
+        SegmentPtr seg, const TwoEndBreakOptions& opt)
+    {
+        TwoEndBreakResult res;
+        if (!seg) return res;
+        if (opt.r3_turn <= 0 || opt.r3_hot <= 0) return res;
+        const auto& fits = seg->fits();
+        const size_t N = fits.size();
+        if (N < 2 * static_cast<size_t>(std::max(opt.min_arm_pts, 1))) return res;
+
+        std::vector<double> cum(N, 0), dqdx(N, 0);
+        dqdx[0] = fits[0].dQ / (fits[0].dx + 1e-9);
+        for (size_t k = 1; k < N; k++) {
+            cum[k] = cum[k-1] + (fits[k].point - fits[k-1].point).magnitude();
+            dqdx[k] = fits[k].dQ / (fits[k].dx + 1e-9);
+        }
+        const double L = cum.back();
+        if (L < opt.min_len) return res;
+
+        auto arm_ok = [&](size_t k) {
+            if (cum[k] < opt.min_arm || L - cum[k] < opt.min_arm) return false;
+            if (k + 1 < static_cast<size_t>(opt.min_arm_pts)) return false;
+            if (N - k < static_cast<size_t>(opt.min_arm_pts)) return false;
+            return true;
+        };
+        // t10 of the pr/90 sec 9.1 instrumentation: the production skirt with
+        // a 10 cm baseline.  35 cm arms average a Michel-scale corner away
+        // (172832: t35 tops out at 18.3 deg where t10 plateaus at 19-23.5).
+        const double r3_baseline = 10*units::cm;
+        // Activity corroboration window, sec 9.5 D3: +-2 cm of arclength.
+        const double hot_win = 2*units::cm;
+        auto hot_max = [&](size_t k) {
+            double q = 0;
+            for (size_t j = 0; j < N; j++) {
+                if (std::abs(cum[j] - cum[k]) > hot_win) continue;
+                q = std::max(q, dqdx[j]);
+            }
+            return q;
+        };
+        // Winner: largest t10 among corroborated indices, with a WELL-FORMED
+        // PREFERENCE tier (the same two-tier idiom as the shipped
+        // turn_min_arm_frac): tier 1 restricts to indices whose t10 windows
+        // are fully achievable on both sides (>= skirt + baseline from each
+        // end); only if tier 1 is empty does the unrestricted tier run.
+        // Measured necessity (pr/90 sec 10.3): on 172832 the starved
+        // near-Michel t10 spike (27.4 deg at 3.5-4.1 cm from the end)
+        // outbids the true 19-23.5 deg junction plateau AND carries the
+        // Michel's own EM brightness (2.3-2.4x MIP), so the activity
+        // corroboration alone cannot veto it -- but the plateau is
+        // well-formed, so tier 1 picks it.  61681's genuine 54 deg corner
+        // sits 4.9 cm from the junction end (tier 1 empty there: mid-track
+        // t10 is 5-7 deg), and correctly falls through to tier 2.
+        int k_best = -1;
+        double t_best = 0;
+        for (int tier = 0; tier < 2 && k_best < 0; tier++) {
+            for (size_t k = 1; k + 1 < N; k++) {
+                if (!arm_ok(k)) continue;
+                if (tier == 0 &&
+                    (cum[k] < opt.turn_skirt + r3_baseline ||
+                     L - cum[k] < opt.turn_skirt + r3_baseline)) continue;
+                const double t = segment_wide_turn_angle(fits, k, opt.turn_skirt, r3_baseline);
+                if (t < opt.r3_turn) continue;
+                if (hot_max(k) < opt.r3_hot * opt.mip_dqdx_median) continue;
+                if (t > t_best) {
+                    t_best = t;
+                    k_best = static_cast<int>(k);
+                }
+            }
+        }
+        if (k_best < 0) return res;
+        // Refine to the activity argmax inside the window: the junction IS
+        // the activity spot (172832: idx 178 = 2.50x MIP, 0.19 cm from the
+        // owner click).  Strict > keeps the smaller index on ties.
+        size_t k_ref = static_cast<size_t>(k_best);
+        double q_ref = dqdx[k_ref];
+        for (size_t j = 0; j < N; j++) {
+            if (std::abs(cum[j] - cum[static_cast<size_t>(k_best)]) > hot_win) continue;
+            if (!arm_ok(j)) continue;
+            if (dqdx[j] > q_ref) {
+                q_ref = dqdx[j];
+                k_ref = j;
+            }
+        }
+        res.found = true;
+        res.route3 = true;
+        res.break_idx = static_cast<int>(k_ref);
+        res.idx_turn = k_best;
+        res.turn_deg = t_best;
+        res.arm_a_len = cum[k_ref];
+        res.arm_b_len = L - cum[k_ref];
         return res;
     }
 

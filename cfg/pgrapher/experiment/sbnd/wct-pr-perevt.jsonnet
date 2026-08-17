@@ -1364,6 +1364,26 @@ function(
     // keeping the genuine 18.4 cm-arm break of evt 172942.
     teb_turn_min_arm_frac = 0.4,
     teb_second_max = null,
+    // doc pr/90 round 4 (sec 9.5 D1/D3/D4) -- three knobs for the round-3
+    // residual classes, C++ defaults false/0 = legacy.
+    // teb_chain_topology: when n_long > 1, admit iff the cluster's segment
+    // graph is a simple path ("still a line, no 3-track vertex") and the
+    // candidate is the unique longest segment; chain-admitted candidates go
+    // to route R3 only.  teb_r3_turn (deg) / teb_r3_hot (x mip median):
+    // R3 breaks at the largest 10 cm-baseline local turn that carries a
+    // vertex-activity spot within +-2 cm, refined to the activity maximum
+    // (172832: t10 plateau 19-23.5 deg + 2.50x MIP at the click vs t35
+    // 18.3 < 25; 61681: t10 54 deg + 3.1x MIP).  teb_bragg_veto_turn (deg):
+    // veto an accepted R2 break below this turn when its short-arm end is
+    // not Bragg-consistent (peak >= 2x MIP AND hot extent <= peak cm/MIP;
+    // sec 9.4b owner calibration: kills 26.5-27.4 deg vs keeps >= 32.5).
+    // false/null = keys suppressed => byte-identical pre-fix config.
+    // Escapes: SBND_TEB_CHAIN_TOPOLOGY / SBND_TEB_R3_TURN / SBND_TEB_R3_HOT
+    // / SBND_TEB_BRAGG_VETO_TURN runner envs (or -A).
+    teb_chain_topology = false,
+    teb_r3_turn = null,
+    teb_r3_hot = null,
+    teb_bragg_veto_turn = null,
     kink_walk_dqdx_stop = true,
     kink_break_protect = true,
     // doc pr/49 (18255-57441) -- cross-cluster projection-ghost deweighting
@@ -2006,6 +2026,10 @@ function(
                              two_end_break=two_end_break,
                              teb_turn_min_arm_frac=teb_turn_min_arm_frac,
                              teb_second_max=teb_second_max,
+                             teb_chain_topology=teb_chain_topology,
+                             teb_r3_turn=teb_r3_turn,
+                             teb_r3_hot=teb_r3_hot,
+                             teb_bragg_veto_turn=teb_bragg_veto_turn,
                              kink_walk_dqdx_stop=kink_walk_dqdx_stop,
                              kink_break_protect=kink_break_protect,
                              fit_blob_coverage=fit_blob_coverage,

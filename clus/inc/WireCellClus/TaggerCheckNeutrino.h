@@ -125,6 +125,12 @@ public:
         // exactly one segment exceeds this cap; 0 = legacy strict gate.
         double m_teb_turn_min_arm_frac{0.0};
         double m_teb_second_max{0};      // cm
+        // doc pr/90 round 4 (sec 9.5 D1/D3/D4); all default OFF =>
+        // byte-identical.  See the PatternAlgorithms member block.
+        bool   m_teb_chain_topology{false};
+        double m_teb_r3_turn{0.0};       // deg; <= 0 disables route R3
+        double m_teb_r3_hot{0.0};        // x mip_dqdx_median; <= 0 disables route R3
+        double m_teb_bragg_veto_turn{0.0}; // deg; <= 0 disables the R2 bragg veto
         // 59335 fix (a): the local-dQ/dx walk gate also stops the C4 /
         // straightness (flag_search) accepts.  false => byte-identical.
         bool   m_kink_walk_dqdx_stop{false};
