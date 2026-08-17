@@ -1352,7 +1352,17 @@ function(
     // events, pr/90 sec 8.5 -- stays OFF).  null = keys suppressed =>
     // byte-identical pre-fix config.  Escapes: SBND_TEB_TURN_MIN_ARM_FRAC /
     // SBND_TEB_SECOND_MAX runner envs (or -A).
-    teb_turn_min_arm_frac = null,
+    //
+    // teb_turn_min_arm_frac SBND PRODUCTION ON 2026-08-17 (owner request,
+    // pr/90 sec 8.8-8.9 gates: knobs-off 1067/1067 byte-identical vs the
+    // harv3 production arms on the shipping binary (work-*-pr90off2);
+    // knob-on live A/B 1066/1067 identical, the single mover IS the target
+    // event 320865, toward, 37.29 -> 1.22 cm from the hand-scan click, zero
+    // ADVERSE (pr90_movers.py vs TAGS_HARV3); nueCC48 48/48 + NCpi0 19/19
+    // untouched.  0.4 (not the sec-6 illustrative 0.7) per the sec-8.3
+    // census: excludes every starved arm (<= 6.1 cm) with >2x margin while
+    // keeping the genuine 18.4 cm-arm break of evt 172942.
+    teb_turn_min_arm_frac = 0.4,
     teb_second_max = null,
     kink_walk_dqdx_stop = true,
     kink_break_protect = true,
