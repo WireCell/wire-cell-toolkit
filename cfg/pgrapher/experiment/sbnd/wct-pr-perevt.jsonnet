@@ -975,6 +975,18 @@ function(
     // SBND_SKIP_COSMIC_COMPANIONS=0).
     skip_cosmic_companions = true,
     cosmic_companion_min_length = 15,
+    // nu_fallback_demoted_mains (sbnd_xin/docs/73 sec 12, round 3; C++
+    // default false = OFF): when the primary loop selects NO candidate
+    // (every in-window main convicted or vetoed), consider DEMOTED mains
+    // (flag_demoted_main) under the same window / cosmic / bundle-veto
+    // gates.  Never runs when a main-cluster candidate exists.  Motivated
+    // by SBND data evt 65289: the cathode-rescue join legitimately became
+    // an STM and the examined, untagged 88.9 cm former main was never a
+    // candidate.  Inert unless restore_demoted_mains is on; pairs with
+    // evaluate_demoted_mains so candidates carry tagger verdicts.
+    // DEFAULT OFF pending the docs/73 sec 12 validation.  Runner:
+    // SBND_NU_FALLBACK_DEMOTED=1.
+    nu_fallback_demoted_mains = false,
     // sp_photon_flag (doc pr/26 sec. 8.2; C++ default false = OFF): store the
     // single-photon tagger's verdict in TaggerInfo::photon_flag, the way
     // prototype NeutrinoID.cxx:271 does.  The port already runs
@@ -1450,6 +1462,18 @@ function(
     // the SBND_VKS_CARRY_PRONG runner env).  null/0 omits the key =>
     // byte-identical.
     vks_carry_prong = null,
+    // esva_ignore_empty_2d (sbnd_xin/docs/73 sec 12, round 3; C++ default
+    // false = legacy): eliminate_short_vertex_activities case 5 treats the
+    // empty-2D-index sentinel (-1: the pre-existing segment has no points in
+    // the query point's APA -- possible only on a cathode-crossing cluster)
+    // as "no information" instead of "covered within 0.45 cm".  Legacy
+    // vacuously deletes the cross-cathode junction segment the rescue
+    // creates (SBND data evt 78242: 132.5 cm fitted muon segment removed,
+    // 71 cm track_fit hole, far half then absorbed into an EM shower via
+    // absorb_unreachable_main).  Single-APA clusters are unreachable by this
+    // knob.  DEFAULT OFF pending the docs/73 sec 12 validation.  Runner:
+    // SBND_ESVA_IGNORE_EMPTY_2D=1.
+    esva_ignore_empty_2d = false,
     // doc pr/51 -- main-vertex graph audit (near-vertex graph-shape repair:
     // duplicate-corridor merge / charge-less-bridge removal / micro-stub
     // absorb + re-seat / one refit; 131357 / 268067 / 360535 / 142421 /
@@ -1907,6 +1931,7 @@ function(
                              tgm_exempt_demoted_main=tgm_exempt_demoted_main,
                              skip_cosmic_companions=skip_cosmic_companions,
                              cosmic_companion_min_length=cosmic_companion_min_length,
+                             nu_fallback_demoted_mains=nu_fallback_demoted_mains,
                              sp_photon_flag=sp_photon_flag,
                              mip_dqdx=mip_dqdx,
                              stm_consistent_fv=stm_consistent_fv,
@@ -2058,6 +2083,7 @@ function(
                              vks_fit_miss=vks_fit_miss,
                              vks_hot_ratio=vks_hot_ratio,
                              vks_carry_prong=vks_carry_prong,
+                             esva_ignore_empty_2d=esva_ignore_empty_2d,
                              main_vertex_graph_audit=main_vertex_graph_audit,
                              mvga_radius=mvga_radius,
                              mvga_dup_tol=mvga_dup_tol,

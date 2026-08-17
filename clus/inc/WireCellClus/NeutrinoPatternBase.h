@@ -519,6 +519,28 @@ namespace WireCell::Clus::PR {
         // lines 545-696 / _1p lines 402-544 and NeutrinoID_improve_vertex.h
         // eliminate_short_vertex_activities lines 365-1018).  C++ default
         // false => the pass returns immediately => byte-identical.
+        // sbnd_xin/docs/73 sec 12 (round 3, SBND data evt 78242).
+        // eliminate_short_vertex_activities case 5 deletes a non-pre-existing
+        // segment when EVERY wcpt is within 0.45 cm of some pre-existing
+        // segment in ALL THREE 2D views.  The per-view distance comes from
+        // DynamicPointCloud::get_closest_2d_point_info, which returns the
+        // SENTINEL -1 when the queried (plane,face,apa) 2D index is EMPTY --
+        // i.e. when the pre-existing segment has no points in the query
+        // point's APA.  -1 passes every "< 0.45 cm" test, so on a
+        // CATHODE-CROSSING cluster (the only place a cluster's segments span
+        // two APAs) one other-APA segment vacuously "covers" every point in
+        // all views, n_good stays 0, and the junction segment the cathode
+        // rescue exists to create is unconditionally deleted -- 78242's 71 cm
+        // track_fit hole, and (downstream) its muon far half absorbed into an
+        // EM shower via absorb_unreachable_main once the junction was gone.
+        // The exemption for pre-existing segments does not save it because
+        // examine_vertices_1's merge_two_segments_into_one creates a NEW
+        // segment object.  When true, a -1 view distance is treated as "no
+        // information" (1e9) instead of "covered".  Single-APA clusters have
+        // no empty per-APA index, so uBooNE/prototype behavior (single TPC,
+        // NeutrinoID_improve_vertex.h:365-1018) is unreachable by this knob.
+        // C++ default false => byte-identical legacy.
+        bool   m_esva_ignore_empty_2d{false};
         bool   m_main_vertex_graph_audit{false};
         double m_mvga_radius{15*units::cm};   ///< audit scope around the main vertex
         double m_mvga_dup_tol{1.4*units::cm}; ///< op1/op3 corridor-overlap point tolerance (must clear the fitter's ~1 cm ribbon separation: 360535's pair reads 0% at 0.6 cm, 77-80% at 1.4 cm)

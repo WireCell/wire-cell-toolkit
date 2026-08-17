@@ -309,6 +309,13 @@ function(
     // can hand the joined crosser to the cosmic bundle when the beam-side donor
     // is still a pre-examine_bundles stub.  Runner: SBND_RESCUE_DEST_BEAM=1.
     rescue_dest_beam_for_new = false,
+    // rescue_beam_main_only (round 3, docs/73 sec 12): the beam-side donor
+    // must BE its bundle's matched main.  On evt 51128 a 3.8 cm associated
+    // fragment donated the beam T0 to a 283.9 cm cosmic and the F4 merge
+    // displaced the bundle's real 57.7 cm main out of candidate status --
+    // the direct cause of the sec-11 "neutrino gone" losses.  C++ default
+    // false => key omitted => byte-identical.  Runner: SBND_RESCUE_BEAM_MAIN=1.
+    rescue_beam_main_only = false,
     // save_bundle_main_provenance (doc pr/20 Part I P1; C++ default false):
     // on the all-APA flash-time merge, also write the per-blob
     // "real_cluster_was_main" array -- 1 on every member that was a matched
@@ -416,7 +423,7 @@ function(
                                                beam_pref_rescue=(if beam_pref then beam_pref_rescue else null),
                                                main_flag=main_flag, lm=lm, realign_perblob=realign);
             // MABC takes the single pre-merged tree directly (no PointTreeMerging).
-            local clus_all = clus_maker.all_apa(anodes, dump=true, premerged=true, tensor_outname=save_tensors, save_real_cluster_id=save_rcid, save_assoc_cluster_id=save_assoc, trace_bee=trace_bee, real_cluster_id_global=rcid_global, cathode_rescue_on=cathode_rescue, cathode_rescue_unmatched=cathode_rescue_unmatched, adopt_nu_fragments=adopt_nu_fragments, save_bundle_main_provenance=save_bundle_main_provenance, rescue_allow_in_beam_far=rescue_in_beam_far, rescue_geom_first=rescue_geom_first, rescue_pierce_test=rescue_pierce_test, rescue_pierce_cut=rescue_pierce_cut, rescue_dest_beam_for_new=rescue_dest_beam_for_new);
+            local clus_all = clus_maker.all_apa(anodes, dump=true, premerged=true, tensor_outname=save_tensors, save_real_cluster_id=save_rcid, save_assoc_cluster_id=save_assoc, trace_bee=trace_bee, real_cluster_id_global=rcid_global, cathode_rescue_on=cathode_rescue, cathode_rescue_unmatched=cathode_rescue_unmatched, adopt_nu_fragments=adopt_nu_fragments, save_bundle_main_provenance=save_bundle_main_provenance, rescue_allow_in_beam_far=rescue_in_beam_far, rescue_geom_first=rescue_geom_first, rescue_pierce_test=rescue_pierce_test, rescue_pierce_cut=rescue_pierce_cut, rescue_dest_beam_for_new=rescue_dest_beam_for_new, rescue_beam_main_only=rescue_beam_main_only);
             local per_apa_pre = [g.intern(
                 innodes=[active_clusters[n], masked_clusters[n], opflash_sources[n]],
                 centernodes=[clus_pipes[n]],
@@ -451,7 +458,7 @@ function(
                     g.edge(flash_attach[n], matching_pipes[n], 0, 0),
                 ]
             ) for n in std.range(0, nanodes - 1)];
-            local clus_all = clus_maker.all_apa(anodes, dump=true, tensor_outname=save_tensors, save_real_cluster_id=save_rcid, save_assoc_cluster_id=save_assoc, trace_bee=trace_bee, real_cluster_id_global=rcid_global, cathode_rescue_on=cathode_rescue, cathode_rescue_unmatched=cathode_rescue_unmatched, adopt_nu_fragments=adopt_nu_fragments, save_bundle_main_provenance=save_bundle_main_provenance, rescue_allow_in_beam_far=rescue_in_beam_far, rescue_geom_first=rescue_geom_first, rescue_pierce_test=rescue_pierce_test, rescue_pierce_cut=rescue_pierce_cut, rescue_dest_beam_for_new=rescue_dest_beam_for_new);
+            local clus_all = clus_maker.all_apa(anodes, dump=true, tensor_outname=save_tensors, save_real_cluster_id=save_rcid, save_assoc_cluster_id=save_assoc, trace_bee=trace_bee, real_cluster_id_global=rcid_global, cathode_rescue_on=cathode_rescue, cathode_rescue_unmatched=cathode_rescue_unmatched, adopt_nu_fragments=adopt_nu_fragments, save_bundle_main_provenance=save_bundle_main_provenance, rescue_allow_in_beam_far=rescue_in_beam_far, rescue_geom_first=rescue_geom_first, rescue_pierce_test=rescue_pierce_test, rescue_pierce_cut=rescue_pierce_cut, rescue_dest_beam_for_new=rescue_dest_beam_for_new, rescue_beam_main_only=rescue_beam_main_only);
             g.intern(
                 innodes=per_apa,
                 outnodes=[clus_all],

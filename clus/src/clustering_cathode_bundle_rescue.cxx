@@ -204,6 +204,24 @@ struct CbrParams {
     // Against the measured populations: the 11 good round-2 merges overshoot by
     // <= 0.55 cm, the two false ones by 33.5 cm.
     double far_contain_tol{1*units::cm};
+    // Round 3 (sbnd_xin/docs/73 sec 12).  Require the beam-side donor to be
+    // its bundle's DOMINANT matched main: it must carry Flags::main_cluster
+    // (flag_matched_mains, SBND production ON) AND be at least as long as
+    // every other member of its flash bundle (same ">=" convention as the
+    // a/b/c/d rule's beam_dom).  The rescue exists to reattach the missing
+    // half of the BEAM bundle's cathode crosser; the object cut at the
+    // cathode is the bundle's dominant track, so a subordinate fragment is
+    // never a legitimate donor.  The flag alone is NOT enough: an SBND flash
+    // bundle can hold more than one main (18255/52195 precedent), and on
+    // evt51128 the 3.8 cm donor c11 carries the flag (measured, [cbrsel]
+    // "main 1") while its bundle also holds the real 57.7 cm neutrino main
+    // -- the F3-admitted, F4-redirected merge was force-flagged main and
+    // demoted that neutrino out of candidate status before
+    // TaggerCheckNeutrino's pr/16 15 cm guard could see it.  With the
+    // dominance requirement a rescued join can no longer displace a longer
+    // bundle-mate: if the donor already dominates its bundle, promoting the
+    // merged object to main is the legitimate update.
+    bool rescue_beam_main_only{false};
 };
 
 // Fold an angle (deg, 0..180) about 180 -> collinearity (0 = parallel or anti-parallel).
@@ -615,6 +633,10 @@ public:
         p_.conn_min_dis             = get(config, "conn_min_dis", p_.conn_min_dis);
         p_.rescue_dest_beam_for_new = get(config, "rescue_dest_beam_for_new", p_.rescue_dest_beam_for_new);
         p_.far_contain_tol          = get(config, "far_contain_tol", p_.far_contain_tol);
+
+        // Round 3 (sbnd_xin/docs/73 sec 12).  C++ default false => absent key
+        // leaves every round-1/round-2 accept path byte-identical.
+        p_.rescue_beam_main_only    = get(config, "rescue_beam_main_only", p_.rescue_beam_main_only);
     }
 
     virtual Configuration default_configuration() const {
@@ -742,6 +764,34 @@ private:
                 if (!in_beam(kb.t0)) continue;
                 if (!kb.cluster->get_scope_filter(m_scope)) continue;
                 if (kb.length < p_.min_length_short) continue;
+                // Round 3: the donor must be the beam bundle's DOMINANT
+                // matched main (see CbrParams::rescue_beam_main_only).
+                // Beam-side prune, so it is printed once per donor, not once
+                // per pair.  The sibling scan mirrors the a/b/c/d rule's
+                // b_len (max length over same-gid members, donor excluded).
+                if (p_.rescue_beam_main_only) {
+                    const char* bprune = nullptr;
+                    if (!kb.cluster->get_flag(Flags::main_cluster)) {
+                        bprune = "not_main";
+                    }
+                    else {
+                        double sib_len = 0;
+                        for (const auto& m : members) {
+                            if (m.cluster == kb.cluster) continue;
+                            if (m.gid == kb.gid) sib_len = std::max(sib_len, m.length);
+                        }
+                        if (kb.length < sib_len) bprune = "not_dominant";
+                    }
+                    if (bprune) {
+                        if (cbr_sel_dbg) {
+                            std::fprintf(stderr,
+                                "[cbrsel] c%d(gid %d t0 %.3f us beam 1 %.1f cm) -> %s\n",
+                                kb.ident, kb.gid, kb.t0/units::us, kb.length/units::cm,
+                                bprune);
+                        }
+                        continue;
+                    }
+                }
                 for (const auto& kf : members) {
                     if (kf.gid == kb.gid) continue;
                     const double dt0 = kf.t0 - kb.t0;
@@ -763,9 +813,10 @@ private:
                     else if (std::max(kb.length, kf.length) < p_.min_length) prune = "len_max";
                     if (cbr_sel_dbg) {
                         std::fprintf(stderr,
-                            "[cbrsel] c%d(gid %d t0 %.3f us beam %d %.1f cm) <-> "
+                            "[cbrsel] c%d(gid %d t0 %.3f us beam %d main %d %.1f cm) <-> "
                             "c%d(gid %d t0 %.3f us beam %d %.1f cm) dt0=%.3f us -> %s\n",
                             kb.ident, kb.gid, kb.t0/units::us, (int)in_beam(kb.t0),
+                            (int)kb.cluster->get_flag(Flags::main_cluster),
                             kb.length/units::cm,
                             kf.ident, kf.gid, kf.t0/units::us, (int)in_beam(kf.t0),
                             kf.length/units::cm, dt0/units::us,

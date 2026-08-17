@@ -97,6 +97,7 @@ TEST_CASE("clus knob defaults: TaggerCheckNeutrino switches are all OFF")
     CHECK_KNOB_BOOL(cfg, "nu_skip_cosmic", false);           // doc pr/3 sec 8
     CHECK_KNOB_BOOL(cfg, "nu_skip_cosmic_bundle", false);
     CHECK_KNOB_BOOL(cfg, "skip_cosmic_companions", false);   // doc pr/20 I P4
+    CHECK_KNOB_BOOL(cfg, "nu_fallback_demoted_mains", false); // docs/73 sec 12 round 3
     // doc pr/26 sec 9: store singlephoton_tagger()'s verdict in
     // TaggerInfo::photon_flag (prototype NeutrinoID.cxx:271).  The C++ default
     // stays the legacy gap even though SBND's cfg now flips it on, so every
@@ -162,6 +163,9 @@ TEST_CASE("clus knob defaults: TaggerCheckNeutrino switches are all OFF")
     // guard (506746) -- both OFF.
     CHECK_KNOB_BOOL(cfg, "main_vertex_graph_audit", false);
     CHECK_KNOB_BOOL(cfg, "dl_vtx_swap_guard", false);
+    // docs/73 sec 12 round 3: empty-2D-index sentinel guard in
+    // eliminate_short_vertex_activities case 5 -- OFF.
+    CHECK_KNOB_BOOL(cfg, "esva_ignore_empty_2d", false);
     // doc pr/51 round 3: op3 satellite-anchor extension + traditional-path
     // swap-apply -- both OFF.
     CHECK_KNOB_BOOL(cfg, "main_vertex_swap_apply", false);

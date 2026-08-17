@@ -2365,6 +2365,18 @@ bool PatternAlgorithms::eliminate_short_vertex_activities(Graph& graph, Facade::
                         if (!segs_in_graph.count(existing_sg)) continue;
 
                         auto [dist_u, dist_v, dist_w] = segment_get_closest_2d_distances(existing_sg, pt, wpid.apa(), wpid.face(), "fit");
+                        // Round 3 (docs/73 sec 12): -1 is the empty-2D-index
+                        // sentinel (existing_sg has no points in this point's
+                        // APA -- possible only on a cathode-crossing cluster).
+                        // Legacy lets it pass every "< 0.45 cm" test below and
+                        // vacuously delete the cross-cathode junction segment;
+                        // the knob treats it as "no information".  See
+                        // m_esva_ignore_empty_2d in NeutrinoPatternBase.h.
+                        if (m_esva_ignore_empty_2d) {
+                            if (dist_u < 0) dist_u = 1e9;
+                            if (dist_v < 0) dist_v = 1e9;
+                            if (dist_w < 0) dist_w = 1e9;
+                        }
                         if (dist_u < dis_u) dis_u = dist_u;
                         if (dist_v < dis_v) dis_v = dist_v;
                         if (dist_w < dis_w) dis_w = dist_w;

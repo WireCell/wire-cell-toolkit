@@ -132,6 +132,7 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_vks_hot_ratio    = get(config, "vks_hot_ratio",    m_vks_hot_ratio);
     m_vks_carry_prong  = get(config, "vks_carry_prong",  m_vks_carry_prong);  // cm (doc pr/85)
     // doc sbnd_xin/docs/pr/51 -- main-vertex graph audit.
+    m_esva_ignore_empty_2d = get(config, "esva_ignore_empty_2d", m_esva_ignore_empty_2d);  // docs/73 sec 12 round 3
     m_main_vertex_graph_audit = get(config, "main_vertex_graph_audit", m_main_vertex_graph_audit);
     m_mvga_radius       = get(config, "mvga_radius",       m_mvga_radius);       // cm
     m_mvga_dup_tol      = get(config, "mvga_dup_tol",      m_mvga_dup_tol);      // cm
@@ -354,6 +355,7 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_nu_skip_cosmic_bundle_min_length = get(config, "nu_skip_cosmic_bundle_min_length", m_nu_skip_cosmic_bundle_min_length);  // cm
     m_skip_cosmic_companions  = get(config, "skip_cosmic_companions",  m_skip_cosmic_companions);
     m_cosmic_companion_min_length = get(config, "cosmic_companion_min_length", m_cosmic_companion_min_length);  // cm
+    m_nu_fallback_demoted_mains = get(config, "nu_fallback_demoted_mains", m_nu_fallback_demoted_mains);
     m_sp_photon_flag          = get(config, "sp_photon_flag",          m_sp_photon_flag);
 
     // ---- doc sbnd_xin/docs/pr/36 §10 tagger-stage knobs ---------------------
@@ -528,6 +530,7 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["vks_carry_prong"]  = m_vks_carry_prong;  // cm; 0 = off, byte-identical (doc pr/85)
     // doc sbnd_xin/docs/pr/51 -- main-vertex graph audit; false => the pass
     // never fires => byte-identical.  Numerics cm/deg.
+    cfg["esva_ignore_empty_2d"] = m_esva_ignore_empty_2d;  // docs/73 sec 12 round 3; case-5 empty-2D-index sentinel = no info, not coverage; false = legacy
     cfg["main_vertex_graph_audit"] = m_main_vertex_graph_audit;
     cfg["mvga_radius"]       = m_mvga_radius;
     cfg["mvga_dup_tol"]      = m_mvga_dup_tol;
@@ -669,6 +672,7 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["nu_skip_cosmic_bundle_min_length"] = m_nu_skip_cosmic_bundle_min_length;  // cm; > 0 spares untagged bundle-mates at least this long (docs/pr/16 design A); 0 = veto all
     cfg["skip_cosmic_companions"] = m_skip_cosmic_companions;          // doc pr/20 I P4; drop a TGM/STM-tagged companion from other_clusters
     cfg["cosmic_companion_min_length"] = m_cosmic_companion_min_length;  // cm; a tagged companion shorter than this stays in regardless
+    cfg["nu_fallback_demoted_mains"] = m_nu_fallback_demoted_mains;    // docs/73 sec 12 round 3; when NO candidate survives, consider demoted mains (same gates); false = legacy
     cfg["sp_photon_flag"] = m_sp_photon_flag;     // doc pr/26 sec. 8.2; store singlephoton_tagger()'s verdict in TaggerInfo::photon_flag (prototype NeutrinoID.cxx:271)
     // doc sbnd_xin/docs/pr/36 §10.
     cfg["fiducial"] = Json::Value();                 // null = the historical FiducialUtils containment fallback
@@ -864,6 +868,66 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
                                    loser->get_cluster_id(), loser->get_cluster_t0()/units::us, loser->get_length()/units::cm);
             }
         }
+        // Round 3 (sbnd_xin/docs/73 sec 12): demoted-main fallback.  The
+        // taggers can see demoted mains (evaluate_demoted_mains, doc pr/20
+        // Part I P3) but this selector could not, so an event whose ONLY
+        // in-window main was convicted -- e.g. a cathode-rescue join that
+        // legitimately became a TGM/STM -- ended with no candidate even when
+        // its bundle still held an examined, untagged former main (SBND evt
+        // 65289: merged main 13 is an STM; demoted main 18 scored TGM=false
+        // STM=0 by the taggers and was never a candidate).  Runs ONLY when
+        // the loop above selected nothing, so any event with a surviving
+        // main-cluster candidate is byte-identical.  Same gates as the
+        // primary loop: beam window, nu_skip_cosmic verdicts, the bundle
+        // veto with the pr/16 design-A min-length guard, longest-wins.  The
+        // winner keeps its flags (still associated_cluster + demoted_main):
+        // downstream PR works off this local pointer, and re-flagging would
+        // change what the bundle-veto set of a later visit sees.
+        if (!main_cluster && m_nu_fallback_demoted_mains) {
+            int n_demoted = 0;
+            for (auto* cluster : grouping.children()) {
+                if (cluster->get_flag(Flags::main_cluster)) continue;
+                if (!cluster->get_flag(Flags::demoted_main)) continue;
+                n_demoted++;
+                const double t0 = cluster->get_cluster_t0();
+                if (t0 < m_beam_window_low || t0 >= m_beam_window_high) continue;
+                if (m_nu_skip_cosmic) {
+                    const bool tgm = cluster->get_flag(Flags::TGM);
+                    const bool stm = cluster->get_flag(Flags::STM);
+                    const int lm = cluster->get_scalar<int>("lm_flag", -1);
+                    if (tgm || stm || lm > 0) {
+                        SPDLOG_LOGGER_INFO(log, "TaggerCheckNeutrino: in-window demoted main {} (t0 {:.3f} us, L {:.1f} cm) cosmic-tagged (TGM={} STM={} lm_flag={}); skipping (nu_fallback_demoted_mains)",
+                                           cluster->get_cluster_id(), t0/units::us, cluster->get_length()/units::cm,
+                                           tgm, stm, lm);
+                        continue;
+                    }
+                    if (!cosmic_gids.empty()) {
+                        const int gid = cluster->get_scalar<int>("matched_flash_gid", -1);
+                        if (gid >= 0 && cosmic_gids.count(gid)) {
+                            // Same guard, same reason: an examined, untagged,
+                            // long demoted main survives its convicted
+                            // bundle-mate; an unexamined shard does not.
+                            const double min_len = m_nu_skip_cosmic_bundle_min_length * units::cm;
+                            if (!(min_len > 0 && cluster->get_length() >= min_len)) {
+                                SPDLOG_LOGGER_INFO(log, "TaggerCheckNeutrino: in-window demoted main {} (t0 {:.3f} us, L {:.1f} cm) shares flash bundle gid {} with a cosmic-tagged main and is under the {:.1f} cm guard; skipping (nu_fallback_demoted_mains)",
+                                                   cluster->get_cluster_id(), t0/units::us,
+                                                   cluster->get_length()/units::cm, gid,
+                                                   m_nu_skip_cosmic_bundle_min_length);
+                                continue;
+                            }
+                        }
+                    }
+                }
+                if (!main_cluster || cluster->get_length() > main_cluster->get_length()) {
+                    main_cluster = cluster;
+                }
+            }
+            if (main_cluster) {
+                SPDLOG_LOGGER_INFO(log, "TaggerCheckNeutrino: no main-cluster candidate; selected demoted main {} (t0 {:.3f} us, L {:.1f} cm) of {} demoted (nu_fallback_demoted_mains)",
+                                   main_cluster->get_cluster_id(), main_cluster->get_cluster_t0()/units::us,
+                                   main_cluster->get_length()/units::cm, n_demoted);
+            }
+        }
         if (main_cluster) {
             const int gid = main_cluster->get_scalar<int>("matched_flash_gid", -1);
             for (auto* cluster : grouping.children()) {
@@ -1018,6 +1082,8 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
     pattern_algos.m_vks_fit_miss     = m_vks_fit_miss * units::cm;  // cm -> internal
     pattern_algos.m_vks_hot_ratio    = m_vks_hot_ratio;             // x mip median, no conversion
     pattern_algos.m_vks_carry_prong  = m_vks_carry_prong * units::cm; // cm -> internal (doc pr/85)
+    // sbnd_xin/docs/73 sec 12 (round 3).
+    pattern_algos.m_esva_ignore_empty_2d = m_esva_ignore_empty_2d;
     // doc sbnd_xin/docs/pr/51 -- main-vertex graph audit.
     pattern_algos.m_main_vertex_graph_audit = m_main_vertex_graph_audit;
     pattern_algos.m_mvga_radius       = m_mvga_radius * units::cm;    // cm -> internal

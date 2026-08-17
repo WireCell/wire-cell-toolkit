@@ -166,6 +166,12 @@ public:
         // members (see the design comment there); numerics here in cm/deg,
         // converted at the visit() copy.  All defaults = the pass never
         // fires => byte-identical.
+        // sbnd_xin/docs/73 sec 12 (round 3): mirror of
+        // PatternAlgorithms::m_esva_ignore_empty_2d (see the design comment
+        // there -- the empty-2D-index sentinel in
+        // eliminate_short_vertex_activities case 5 must not read as
+        // "covered" on cathode-crossing clusters).  false = legacy.
+        bool   m_esva_ignore_empty_2d{false};
         bool   m_main_vertex_graph_audit{false};
         double m_mvga_radius{15.0};       // cm
         double m_mvga_dup_tol{1.4};       // cm
@@ -517,6 +523,16 @@ public:
                                                // tags a companion today unless the taggers run
                                                // with evaluate_demoted_mains (P3), so this is
                                                // inert without it.
+        bool m_nu_fallback_demoted_mains{false};  // sbnd_xin/docs/73 sec 12 (round 3).  If true and
+                                                  // the primary loop selected NO candidate, a second
+                                                  // pass considers DEMOTED mains (Flags::demoted_main,
+                                                  // set by ClusteringUnmergeBundle's
+                                                  // restore_demoted_mains and scored by the taggers
+                                                  // under evaluate_demoted_mains) with the same
+                                                  // window / cosmic / bundle-veto gates.  Never runs
+                                                  // when a main-cluster candidate exists, so such
+                                                  // events are byte-identical.  false = legacy: a
+                                                  // demoted main is never a candidate.
         bool m_sp_photon_flag{false};  // doc pr/26 sec. 8.2 port gap.  If true, the single-photon
                                        // tagger's verdict is stored in TaggerInfo::photon_flag,
                                        // as prototype NeutrinoID.cxx:271 does
