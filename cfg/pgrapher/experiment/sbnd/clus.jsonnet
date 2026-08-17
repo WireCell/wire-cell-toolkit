@@ -441,7 +441,7 @@ local clus_per_face(anode, face, dump, output_dir, runNo, subRunNo, eventNo, bee
 // all-APA clustering + Bee in SCE true space (x_sce) instead of the T0-corrected
 // reco scope (x_t0cor).  Both SBND realities currently set use_sce=false (see
 // the reco table in the tail function), so this is a no-op for our chain.
-local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=null, premerged=false, rse_from_ident=false, pos_offset_on=true, tensor_outname='', save_real_cluster_id=false, trace_bee=false, save_assoc_cluster_id=false, real_cluster_id_global=null, cathode_rescue_on=true, cathode_rescue_unmatched=true, adopt_nu_fragments=false, save_bundle_main_provenance=false, rescue_allow_in_beam_far=false, rescue_geom_first=false, rescue_pierce_test=false, rescue_pierce_cut=null, rescue_dest_beam_for_new=false, rescue_beam_main_only=false, use_sce=false, reality='data') = {
+local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=null, premerged=false, rse_from_ident=false, pos_offset_on=true, tensor_outname='', save_real_cluster_id=false, trace_bee=false, save_assoc_cluster_id=false, real_cluster_id_global=null, cathode_rescue_on=true, cathode_rescue_unmatched=true, adopt_nu_fragments=false, save_bundle_main_provenance=false, rescue_allow_in_beam_far=true, rescue_geom_first=true, rescue_pierce_test=true, rescue_pierce_cut=null, rescue_dest_beam_for_new=true, rescue_beam_main_only=true, use_sce=false, reality='data') = {
     local nanodes = std.length(anodes),
     local pcmerging = g.pnode({
         type: 'PointTreeMerging',
@@ -528,16 +528,17 @@ local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=
         // (adopt_xcut 30 cm, frag_max_length 60 cm, min 5 pts, beam >= 10 cm).
         adopt_nu_fragments=adopt_nu_fragments,
         adopt_dis=(if adopt_nu_fragments then 13*wc.cm else null),
-        // Round 2 (sbnd_xin/docs/73).  Briefly SBND PRODUCTION ON 2026-08-17,
-        // then TURNED BACK OFF the same day (docs/73 sec 11: the PR round on
-        // the 9 fixed events removed the neutrino candidate from 5).  Round 3
-        // (sec 12) adds rescue_beam_main_only + the PR-side fixes; the flip is
-        // re-decided on the round-3 validation.  false on all knobs omits
-        // every key and restores the byte-identical pre-round-2 compiled
-        // config.  C++ defaults for the companion cuts are 8 cm
-        // (geom_first_dis) / 8 cm (pierce_cut) / 0.8 / 8 cm; only pierce_cut
-        // is exposed here, because it is the one the docs/73 sec 6 sweep
-        // tunes.
+        // Rounds 2+3 (sbnd_xin/docs/73).  ALL FIVE SBND PRODUCTION ON since
+        // 2026-08-17 (owner flip on the sec-12 round-3 validation: 3-sample
+        // valfast clean, 3000-event census PR-examined, hand scan "clearly
+        // improvements"; the round-2 knobs alone were adverse -- sec 11 --
+        // and ship only together with rescue_beam_main_only + the PR-side
+        // round-3 fixes).  NOT bit-identical -- a behaviour change delivered
+        // as config; false on all knobs omits every key and restores the
+        // byte-identical pre-round-2 compiled config.  C++ defaults for the
+        // companion cuts are 8 cm (geom_first_dis) / 8 cm (pierce_cut) / 0.8
+        // / 8 cm; only pierce_cut is exposed here, because it is the one the
+        // docs/73 sec 6 sweep tunes.
         rescue_allow_in_beam_far=rescue_allow_in_beam_far,
         rescue_geom_first=rescue_geom_first,
         rescue_pierce_test=rescue_pierce_test,
@@ -812,8 +813,9 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               // candidate survives the primary loop, consider demoted mains
               // (same gates).  Inert without restore_demoted_mains upstream;
               // pairs with evaluate_demoted_mains (P3) so the candidates carry
-              // tagger verdicts.  false = C++ default = OFF.
-              nu_fallback_demoted_mains=false,
+              // tagger verdicts.  SBND PRODUCTION ON since 2026-08-17
+              // (docs/73 sec 12 owner flip).
+              nu_fallback_demoted_mains=true,
               // sp_photon_flag: store the single-photon tagger's verdict in
               // TaggerInfo::photon_flag, as prototype NeutrinoID.cxx:271 does.
               // The port ran singlephoton_tagger() and filled its shw_sp_*
@@ -1411,8 +1413,9 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               // esva_ignore_empty_2d (docs/73 sec 12, round 3, evt 78242):
               // eliminate_short_vertex_activities case 5 must not read the
               // empty-2D-index sentinel (-1) as "covered" on cathode-crossing
-              // clusters.  false = C++ default = legacy.
-              esva_ignore_empty_2d=false,
+              // clusters.  SBND PRODUCTION ON since 2026-08-17 (docs/73
+              // sec 12 owner flip).
+              esva_ignore_empty_2d=true,
               main_vertex_graph_audit=false,
               mvga_radius=null,
               mvga_dup_tol=null,
@@ -2582,9 +2585,9 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
     all_apa(anodes, dump=true, bee_sink=null, premerged=false, tensor_outname='', save_real_cluster_id=false, save_assoc_cluster_id=false,
             trace_bee=false, real_cluster_id_global=null, cathode_rescue_on=true, cathode_rescue_unmatched=true, adopt_nu_fragments=false,
             save_bundle_main_provenance=false,
-            rescue_allow_in_beam_far=false, rescue_geom_first=false,
-            rescue_pierce_test=false, rescue_pierce_cut=null,
-            rescue_dest_beam_for_new=false, rescue_beam_main_only=false)::
+            rescue_allow_in_beam_far=true, rescue_geom_first=true,
+            rescue_pierce_test=true, rescue_pierce_cut=null,
+            rescue_dest_beam_for_new=true, rescue_beam_main_only=true)::
         // Clustering + matching ONLY (all-APA MABC).  The follow-up PR tagger
         // pass (pr() below) and the wclsTensorSetLabeler are wired by the entry
         // configuration, not here -- see the note in clus_all_apa.
@@ -2647,8 +2650,8 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
        tgm_exempt_demoted_main=false,
        // doc pr/20 Part I P4; false / null = C++ defaults = OFF.  See clus_pr.
        skip_cosmic_companions=false, cosmic_companion_min_length=null,
-       // docs/73 sec 12 round 3; false = C++ default = OFF.  See clus_pr.
-       nu_fallback_demoted_mains=false,
+       // docs/73 sec 12 round 3; SBND PRODUCTION ON 2026-08-17.  See clus_pr.
+       nu_fallback_demoted_mains=true,
        // sp_photon_flag: store the single-photon tagger's verdict in
        // TaggerInfo::photon_flag, as prototype NeutrinoID.cxx:271 does.
        // The port ran singlephoton_tagger() and filled its shw_sp_*
@@ -2964,8 +2967,9 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
               // doc pr/51 -- main-vertex graph audit + DL rerank
               // cross-cluster swap guard (506746).  false/null omit the
               // keys => byte-identical (see the clus_pr arg comments).
-              // docs/73 sec 12 round 3; false = C++ default.  See clus_pr.
-              esva_ignore_empty_2d=false,
+              // docs/73 sec 12 round 3; SBND PRODUCTION ON 2026-08-17.
+              // See clus_pr.
+              esva_ignore_empty_2d=true,
               main_vertex_graph_audit=false,
               mvga_radius=null,
               mvga_dup_tol=null,

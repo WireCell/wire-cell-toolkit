@@ -984,9 +984,11 @@ function(
     // an STM and the examined, untagged 88.9 cm former main was never a
     // candidate.  Inert unless restore_demoted_mains is on; pairs with
     // evaluate_demoted_mains so candidates carry tagger verdicts.
-    // DEFAULT OFF pending the docs/73 sec 12 validation.  Runner:
-    // SBND_NU_FALLBACK_DEMOTED=1.
-    nu_fallback_demoted_mains = false,
+    // SBND PRODUCTION ON since 2026-08-17 (owner flip on the docs/73
+    // sec 12 validation: recovers 65289 and four census events, one
+    // accepted re-admission 398690 -- sec 12.8).  Escape:
+    // SBND_NU_FALLBACK_DEMOTED=0 omits the key (pre-round-3 baseline).
+    nu_fallback_demoted_mains = true,
     // sp_photon_flag (doc pr/26 sec. 8.2; C++ default false = OFF): store the
     // single-photon tagger's verdict in TaggerInfo::photon_flag, the way
     // prototype NeutrinoID.cxx:271 does.  The port already runs
@@ -1471,9 +1473,10 @@ function(
     // creates (SBND data evt 78242: 132.5 cm fitted muon segment removed,
     // 71 cm track_fit hole, far half then absorbed into an EM shower via
     // absorb_unreachable_main).  Single-APA clusters are unreachable by this
-    // knob.  DEFAULT OFF pending the docs/73 sec 12 validation.  Runner:
-    // SBND_ESVA_IGNORE_EMPTY_2D=1.
-    esva_ignore_empty_2d = false,
+    // knob.  SBND PRODUCTION ON since 2026-08-17 (owner flip on the
+    // docs/73 sec 12 validation).  Escape: SBND_ESVA_IGNORE_EMPTY_2D=0
+    // omits the key (pre-round-3 baseline).
+    esva_ignore_empty_2d = true,
     // doc pr/51 -- main-vertex graph audit (near-vertex graph-shape repair:
     // duplicate-corridor merge / charge-less-bridge removal / micro-stub
     // absorb + re-seat / one refit; 131357 / 268067 / 360535 / 142421 /

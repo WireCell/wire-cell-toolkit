@@ -248,36 +248,33 @@ function(
     // designed to run WITH iso_cathode_guard.  false omits the keys =>
     // compiled config byte-identical (runner: SBND_ADOPT_NU_FRAG=1).
     adopt_nu_fragments = false,
-    // --- cathode bundle rescue, round 2 (sbnd_xin/docs/73) -------------------
+    // --- cathode bundle rescue, rounds 2+3 (sbnd_xin/docs/73) ----------------
     // doc 72 sec A found 10 in-beam events in 3000 whose bundle main is still
-    // cut at the cathode.  Four independent openings of a measured blocker.
+    // cut at the cathode.  Four independent openings of a measured blocker
+    // (round 2), plus the round-3 dominance gate that made them safe.
     //
-    // ALL FOUR TURNED BACK OFF 2026-08-17 (owner decision, same day as the
-    // flip, on the docs/73 sec 11 PR round).  They were briefly SBND
-    // PRODUCTION ON; the PR chain then showed the join is harmful downstream:
-    // TaggerCheckNeutrino selects NO main cluster at all in 5 of the 9 events
-    // the knobs "fix" (398115, 237798, 65289, 51128, 317427).  One mechanism --
-    // the join makes the in-beam main longer, at 248-429 cm it is TGM/STM size,
-    // the cosmic taggers fire CORRECTLY for the object they are shown, and
-    // nu_skip_cosmic then discards the only in-window main.  Worst case 51128:
-    // the beam-side donor is a 3.8 cm FRAGMENT and the merge demotes a genuine
-    // 57.7 cm neutrino out of main status, stepping around the pr/16 design-A
-    // guard (nu_skip_cosmic_bundle_min_length=15 cm) that exists to prevent
-    // exactly that.  Fix the knobs before re-flipping -- docs/73 sec 11.7.
+    // ALL FIVE SBND PRODUCTION ON since 2026-08-17 (owner flip on the docs/73
+    // sec 12 round-3 validation).  History: the four round-2 knobs were ON for
+    // hours on 2026-08-17, turned OFF the same day when the PR round (sec 11)
+    // showed the join removed the neutrino candidate in 5 of 9 events, and
+    // re-flipped together with rescue_beam_main_only + the two PR-side round-3
+    // fixes once sec 12's full-census PR examination passed the owner's hand
+    // scan (40 ON-firing + 1 gate-blocked event over mcp1k+mcp2k 3000, all
+    // "clearly improvements" except the single accepted regression 398690 --
+    // sec 12.8).
     //
-    // false here is the PRE-ROUND-2 BASELINE and is byte-identical to it:
-    // every key is omitted from the compiled config (verified by cmp).
-    // Runner escape to turn one back on: SBND_RESCUE_{IN_BEAM,GEOM_FIRST,
-    // PIERCE,DEST_BEAM}=1.
+    // **NOT bit-identical** -- a behaviour change delivered as config.  The
+    // escape to the pre-round-2 baseline is SBND_RESCUE_{IN_BEAM,GEOM_FIRST,
+    // PIERCE,DEST_BEAM,BEAM_MAIN}=0, which omits every key and restores a
+    // byte-identical compiled config.
     //
-    // What they DO buy, kept on the record (docs/73 sec 5.1, 5.6, 6.4):
+    // What production gains (docs/73 sec 5.1, 6.4, 12.5-12.7):
     //   9 of 12 one-sided crossers rejoined, EVERY one into the beam bundle;
-    //   mcp1k firing census 8 -> 12 events per 1000, 0 legacy firings lost,
-    //   all 988 non-firing events byte-identical.
-    // Two of those rejoins (398115, 237798) are genuine purifications -- the
-    // far half is itself in the beam window and the 415/417 cm result really is
-    // a through-going muon.  The Q/L-stage join is not the problem; what it
-    // does to bundle organisation and to the neutrino selector is.
+    //   65289 recovers its true neutrino (via the PR-side demoted-main
+    //   fallback), 51128's neutrino is protected (dominance gate), 78242's
+    //   junction fit survives (esva fix); the sec 12.6 census over 3000
+    //   events shows the remaining movers are cosmic purifications
+    //   (owner hand scan 2026-08-17).
     // The far-half containment veto (C++ far_contain_tol, 1 cm) rides with
     // these and is what keeps a cosmic matched hundreds of us away from being
     // dragged through the cathode -- see docs/73 sec 5.5/6.3.  Each needs
@@ -286,20 +283,20 @@ function(
     // rescue_in_beam_far (class A, 2 events): both halves matched, each to its
     // own side's in-beam flash, and require_far_out_of_beam refuses the pair
     // outright.  Runner: SBND_RESCUE_IN_BEAM=1.
-    rescue_in_beam_far = false,
+    rescue_in_beam_far = true,
     // rescue_geom_first (class B, 6 events): the wrong flash is +589/+855/+581/
     // +108/+28/-43 us away, so the [-8, +13] us window can never reach it.
     // Tests such a pair behind a tightened geometry instead of a time prior.
     // The widest-reaching of the four -- it takes the candidate pool from the
     // 1-2 clusters inside the window to every matched cluster in the event.
     // Runner: SBND_RESCUE_GEOM_FIRST=1.
-    rescue_geom_first = false,
+    rescue_geom_first = true,
     // rescue_pierce_test (class C, 2 events): conn_far_cut=30 deg on a
     // drift-dominated tip-to-tip vector is really a cut on |dir_x| > 0.866 (10
     // of the 12 candidate rows have |dir_x| < 0.866, median 0.71), and on a
     // 2.8 cm baseline the same angle is noise.  Substitutes the cathode-piercing
     // agreement.  Runner: SBND_RESCUE_PIERCE=1, SBND_RESCUE_PIERCE_CUT=<cm>.
-    rescue_pierce_test = false,
+    rescue_pierce_test = true,
     // null => C++ default 8 cm, which is the validated operating point (set
     // just above the largest piercing distance measured on a genuine signal
     // event, 5.46 cm; flat over a 6-8 cm sweep -- docs/73 sec 8).
@@ -308,14 +305,14 @@ function(
     // adopts the beam bundle rather than the length-based a/b/c/d rule, which
     // can hand the joined crosser to the cosmic bundle when the beam-side donor
     // is still a pre-examine_bundles stub.  Runner: SBND_RESCUE_DEST_BEAM=1.
-    rescue_dest_beam_for_new = false,
+    rescue_dest_beam_for_new = true,
     // rescue_beam_main_only (round 3, docs/73 sec 12): the beam-side donor
     // must BE its bundle's matched main.  On evt 51128 a 3.8 cm associated
     // fragment donated the beam T0 to a 283.9 cm cosmic and the F4 merge
     // displaced the bundle's real 57.7 cm main out of candidate status --
     // the direct cause of the sec-11 "neutrino gone" losses.  C++ default
     // false => key omitted => byte-identical.  Runner: SBND_RESCUE_BEAM_MAIN=1.
-    rescue_beam_main_only = false,
+    rescue_beam_main_only = true,
     // save_bundle_main_provenance (doc pr/20 Part I P1; C++ default false):
     // on the all-APA flash-time merge, also write the per-blob
     // "real_cluster_was_main" array -- 1 on every member that was a matched
