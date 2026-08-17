@@ -248,6 +248,36 @@ function(
     // designed to run WITH iso_cathode_guard.  false omits the keys =>
     // compiled config byte-identical (runner: SBND_ADOPT_NU_FRAG=1).
     adopt_nu_fragments = false,
+    // --- cathode bundle rescue, round 2 (sbnd_xin/docs/73) -------------------
+    // doc 72 sec A found 10 in-beam events in 3000 whose bundle main is still
+    // cut at the cathode.  Four independent openings of a measured blocker,
+    // ALL SBND default FALSE this round (each false omits its key => compiled
+    // config byte-identical to pre-round-2).  Each needs cathode_rescue.
+    //
+    // rescue_in_beam_far (class A, 2 events): both halves matched, each to its
+    // own side's in-beam flash, and require_far_out_of_beam refuses the pair
+    // outright.  Runner: SBND_RESCUE_IN_BEAM=1.
+    rescue_in_beam_far = false,
+    // rescue_geom_first (class B, 6 events): the wrong flash is +589/+855/+581/
+    // +108/+28/-43 us away, so the [-8, +13] us window can never reach it.
+    // Tests such a pair behind a tightened geometry instead of a time prior.
+    // The widest-reaching of the four -- it takes the candidate pool from the
+    // 1-2 clusters inside the window to every matched cluster in the event.
+    // Runner: SBND_RESCUE_GEOM_FIRST=1.
+    rescue_geom_first = false,
+    // rescue_pierce_test (class C, 2 events): conn_far_cut=30 deg on a
+    // drift-dominated tip-to-tip vector is really a cut on |dir_x| > 0.866 (10
+    // of the 12 candidate rows have |dir_x| < 0.866, median 0.71), and on a
+    // 2.8 cm baseline the same angle is noise.  Substitutes the cathode-piercing
+    // agreement.  Runner: SBND_RESCUE_PIERCE=1, SBND_RESCUE_PIERCE_CUT=<cm>.
+    rescue_pierce_test = false,
+    // null => C++ default 8 cm.
+    rescue_pierce_cut = null,
+    // rescue_dest_beam_for_new: a pair admitted only by one of the three above
+    // adopts the beam bundle rather than the length-based a/b/c/d rule, which
+    // can hand the joined crosser to the cosmic bundle when the beam-side donor
+    // is still a pre-examine_bundles stub.  Runner: SBND_RESCUE_DEST_BEAM=1.
+    rescue_dest_beam_for_new = false,
     // save_bundle_main_provenance (doc pr/20 Part I P1; C++ default false):
     // on the all-APA flash-time merge, also write the per-blob
     // "real_cluster_was_main" array -- 1 on every member that was a matched
@@ -355,7 +385,7 @@ function(
                                                beam_pref_rescue=(if beam_pref then beam_pref_rescue else null),
                                                main_flag=main_flag, lm=lm, realign_perblob=realign);
             // MABC takes the single pre-merged tree directly (no PointTreeMerging).
-            local clus_all = clus_maker.all_apa(anodes, dump=true, premerged=true, tensor_outname=save_tensors, save_real_cluster_id=save_rcid, save_assoc_cluster_id=save_assoc, trace_bee=trace_bee, real_cluster_id_global=rcid_global, cathode_rescue_on=cathode_rescue, cathode_rescue_unmatched=cathode_rescue_unmatched, adopt_nu_fragments=adopt_nu_fragments, save_bundle_main_provenance=save_bundle_main_provenance);
+            local clus_all = clus_maker.all_apa(anodes, dump=true, premerged=true, tensor_outname=save_tensors, save_real_cluster_id=save_rcid, save_assoc_cluster_id=save_assoc, trace_bee=trace_bee, real_cluster_id_global=rcid_global, cathode_rescue_on=cathode_rescue, cathode_rescue_unmatched=cathode_rescue_unmatched, adopt_nu_fragments=adopt_nu_fragments, save_bundle_main_provenance=save_bundle_main_provenance, rescue_allow_in_beam_far=rescue_in_beam_far, rescue_geom_first=rescue_geom_first, rescue_pierce_test=rescue_pierce_test, rescue_pierce_cut=rescue_pierce_cut, rescue_dest_beam_for_new=rescue_dest_beam_for_new);
             local per_apa_pre = [g.intern(
                 innodes=[active_clusters[n], masked_clusters[n], opflash_sources[n]],
                 centernodes=[clus_pipes[n]],
@@ -390,7 +420,7 @@ function(
                     g.edge(flash_attach[n], matching_pipes[n], 0, 0),
                 ]
             ) for n in std.range(0, nanodes - 1)];
-            local clus_all = clus_maker.all_apa(anodes, dump=true, tensor_outname=save_tensors, save_real_cluster_id=save_rcid, save_assoc_cluster_id=save_assoc, trace_bee=trace_bee, real_cluster_id_global=rcid_global, cathode_rescue_on=cathode_rescue, cathode_rescue_unmatched=cathode_rescue_unmatched, adopt_nu_fragments=adopt_nu_fragments, save_bundle_main_provenance=save_bundle_main_provenance);
+            local clus_all = clus_maker.all_apa(anodes, dump=true, tensor_outname=save_tensors, save_real_cluster_id=save_rcid, save_assoc_cluster_id=save_assoc, trace_bee=trace_bee, real_cluster_id_global=rcid_global, cathode_rescue_on=cathode_rescue, cathode_rescue_unmatched=cathode_rescue_unmatched, adopt_nu_fragments=adopt_nu_fragments, save_bundle_main_provenance=save_bundle_main_provenance, rescue_allow_in_beam_far=rescue_in_beam_far, rescue_geom_first=rescue_geom_first, rescue_pierce_test=rescue_pierce_test, rescue_pierce_cut=rescue_pierce_cut, rescue_dest_beam_for_new=rescue_dest_beam_for_new);
             g.intern(
                 innodes=per_apa,
                 outnodes=[clus_all],

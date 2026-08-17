@@ -40,6 +40,13 @@
 //      its own).  Its geometry is evaluated in the RAW scope (its x_t0cor
 //      carries the sentinel T0).
 //
+// Round 2 (sbnd_xin/docs/73): doc 72 sec A found 10 in-beam events in 3000 that
+// this pass still leaves cut at the cathode.  Four knobs, ALL default OFF and
+// each opening one measured blocker, are added: rescue_allow_in_beam_far,
+// rescue_geom_first, rescue_pierce_test and rescue_dest_beam_for_new.  With all
+// four false the accept path and the direction rule are the pr/14 ones exactly.
+// See the CbrParams comments for what each measures.
+//
 // Isolation: this file is self-contained (all helpers file-static); the
 // geometric pair test is DUPLICATED from clustering_cathode_connect.cxx
 // (M10 fork-by-duplication -- the production connector stays byte-identical).
@@ -125,6 +132,56 @@ struct CbrParams {
     double adopt_frag_max_length{60*units::cm};
     int adopt_min_npts{5};
     double adopt_beam_min_length{10*units::cm};
+    // ---- round 2 (sbnd_xin/docs/73), ALL default OFF -----------------------
+    // doc 72 sec A found 10 in-beam events in 3000 where the bundle main is cut
+    // at the cathode and the raw image plainly continues into the other TPC.
+    // Every one is a pair this pass declined; the three knobs below each open
+    // one measured blocker.  With all three false the accept path is exactly
+    // the pr/14 one.
+    //
+    // F1: let K_far be IN the beam window provided it is in a different flash
+    // bundle (2 events: both halves matched, each to its own side's in-beam
+    // flash, and clustering never joined them).  Both halves in-beam => the T0
+    // hypothesis moves by <= (2.2-0.2) us * 0.1563 cm/us = 0.31 cm, sub-blob,
+    // so the existing direction rule needs no new tie-break.
+    bool rescue_allow_in_beam_far{false};
+    // F2: the [-rescue_t0_early, +rescue_t0_late] window encodes the absorbing
+    // window (a wrong flash 2-13 us away).  Measured, the wrong flash can be
+    // +589/+855/+581/+108/+28/-43 us away -- no time prior reaches that.  When
+    // true, a pair the window rejected is still tested, but must pass a
+    // TIGHTENED geometry (geom_first_dis + pierce_cut + collinearity) on top of
+    // every existing gate.  Purely additive: no pair the legacy path takes can
+    // change.
+    bool rescue_geom_first{false};
+    // 8 cm, not the 5 cm docs/73 sec 5 proposed: measured on the signal set, the
+    // tip-to-tip separation of a genuine one-sided crosser runs to 6.7 cm
+    // (evt65053, dis 6.68 with a 2.68 cm piercing agreement), so 5 cm cut a real
+    // event on a quantity the piercing test measures far better.  Still 3x
+    // tighter than max_dis.
+    double geom_first_dis{8*units::cm};
+    // F3: `conn` (the tip-to-tip vector) is not a usable direction estimate
+    // when it is dominated by drift -- it is then the cathode dead gap plus the
+    // near-cathode imaging loss, not a track segment, and angle(conn, dir)
+    // degenerates to acos(|dir_x|), i.e. conn_far_cut=30 deg silently becomes a
+    // cut on |dir_x| > 0.866 (evt65289: dis 5.28 of which dX 5.14, cc 45.2 deg
+    // AFTER tt_pca=9.0 had passed angle_cut=10) -- nor when the baseline is too
+    // short to define a direction at all (evt51128: dis 2.78, cc 41.0 deg over
+    // a 2.8 cm lever arm).  In either regime substitute the CATHODE-PIERCING
+    // agreement, a fixed transverse tolerance independent of dis.
+    bool rescue_pierce_test{false};
+    double pierce_cut{8*units::cm};
+    double conn_drift_frac{0.8};   // dX/dis above this => conn is pure drift
+    double conn_min_dis{8*units::cm};  // dis below this => conn has no lever arm
+    // F4: acceptance is not a fix.  The a/b/c/d rule decides which bundle keeps
+    // the merged crosser, and it is length-based: on evt51128 the beam-side
+    // donor is a 4 cm stub (the rescue runs BEFORE examine_bundles, so the
+    // flash-collapse has not yet glued it to the rest of the beam bundle), so
+    // the rule can send the joined crosser OUT of the beam bundle -- accepted,
+    // but worse for PR.  When true, a pair admitted ONLY by an F1/F2/F3 path
+    // adopts the beam bundle unconditionally.  Legacy-path pairs keep a/b/c/d
+    // byte-identical, so the pr/14 hand scan (4 moves in, 4 out) is not
+    // re-opened.
+    bool rescue_dest_beam_for_new{false};
 };
 
 // Fold an angle (deg, 0..180) about 180 -> collinearity (0 = parallel or anti-parallel).
@@ -164,6 +221,77 @@ double cathode_band_closest(const Cluster& c1, const Cluster& c2,
     return best;
 }
 
+// Where a tip's local direction crosses the cathode plane (sbnd_xin/docs/73 F3).
+// Returns the transverse (y, z) piercing point.  A half whose direction is
+// unusable -- nearly isochronous (no lever arm), degenerate, or too short to
+// define one -- contributes its OWN tip (y, z) instead, which is already within
+// cathode_x_cut of the plane and is the better estimate there.  `min_len` is
+// short_dir_len, so the guard is inert when that branch is off (0).
+void pierce_point(const geo_point_t& p, const geo_point_t& dir, double len,
+                  double cathode_x, double min_len, double& y, double& z)
+{
+    y = p.y();
+    z = p.z();
+    const double m = dir.magnitude();
+    if (m <= 0) return;
+    const double ux = dir.x() / m;
+    if (std::fabs(ux) < 0.1) return;              // isochronous
+    if (min_len > 0 && len < min_len) return;     // too short to define a direction
+    const double t = (cathode_x - p.x()) / ux;
+    y = p.y() + t * dir.y() / m;
+    z = p.z() + t * dir.z() / m;
+}
+
+// Transverse distance between the two halves' cathode piercings.  Sharper than
+// the conn angle it replaces: conn_far_cut = 30 deg is a tolerance that SCALES
+// with dis (~2.5 cm at dis = 5 cm, ~12 cm at dis = 25 cm) and collapses to a
+// |dir_x| cut on a drift-dominated conn; this is a fixed transverse bound.
+double pierce_dist(const geo_point_t& p1, const geo_point_t& d1, double len1,
+                   const geo_point_t& p2, const geo_point_t& d2, double len2,
+                   const CbrParams& P)
+{
+    double y1, z1, y2, z2;
+    pierce_point(p1, d1, len1, P.cathode_x, P.short_dir_len, y1, z1);
+    pierce_point(p2, d2, len2, P.cathode_x, P.short_dir_len, y2, z2);
+    return std::sqrt((y1 - y2)*(y1 - y2) + (z1 - z2)*(z1 - z2));
+}
+
+// Re-seat the closest-point pair in the DESTINATION-T0 frame (F2 only).
+//
+// The pair test's header argues that running Find_Closest_Points on unshifted
+// coordinates is harmless because "a <= 2 cm rigid x-shift does not change which
+// tips face each other at the cathode".  That holds for the legacy population
+// (the far half is within 13 us of the beam half), but rescue_geom_first drops
+// the time window, and then xshift2 is v_drift * dt0 -- measured at -92 cm on
+// evt493439 and -134 cm on evt78242.  At that size the unshifted selection picks
+// a tip pair in the wrong frame and the whole geometric test evaluates the wrong
+// two points.  Re-run the same alternating nearest-neighbour convergence
+// Find_Closest_Points uses, but with each query point translated into the other
+// cluster's own frame.  Seeded from the unshifted pair, so it can only improve it.
+void reseat_closest_shifted(const Cluster& c1, const Cluster& c2, double xshift2,
+                            geo_point_t& p1, geo_point_t& p2)
+{
+    auto same = [](const geo_point_t& a, const geo_point_t& b) {
+        return std::fabs(a.x()-b.x()) < 1e-6 && std::fabs(a.y()-b.y()) < 1e-6 &&
+               std::fabs(a.z()-b.z()) < 1e-6;
+    };
+    geo_point_t a = p1, b = p2;
+    for (int it = 0; it < 20; ++it) {
+        // c2's nearest point to a, asked in c2's own (unshifted) frame.
+        const geo_point_t aq(a.x() - xshift2, a.y(), a.z());
+        const geo_point_t nb = c2.get_closest_point_blob(aq).first;
+        // c1's nearest point to that, asked in c1's frame.
+        const geo_point_t bq(nb.x() + xshift2, nb.y(), nb.z());
+        const geo_point_t na = c1.get_closest_point_blob(bq).first;
+        const bool done = same(na, a) && same(nb, b);
+        a = na;
+        b = nb;
+        if (done) break;
+    }
+    p1 = a;
+    p2 = b;
+}
+
 // Cathode-crossing pair test, duplicated from clustering_cathode_connect.cxx
 // is_cathode_crossing_pair (see that file's long header comment for the full cut
 // rationale) with ONE addition: `xshift2` translates cluster2's coordinates in x
@@ -176,14 +304,27 @@ double cathode_band_closest(const Cluster& c1, const Cluster& c2,
 // on unshifted coordinates; a <= 2 cm rigid x-shift does not change which tips
 // face each other at the cathode.  Local Hough / PCA directions are translation
 // invariant and are evaluated at the ORIGINAL points.
+//
+// Round 2 (sbnd_xin/docs/73) adds two out-of-band arguments, both inert with the
+// round-2 knobs off:
+//   `strict`    the caller admitted this pair only because rescue_geom_first
+//               waived the dt0 window, so every accept must additionally pass
+//               the tightened geometry (geom_first_dis + pierce_cut +
+//               collinearity).
+//   `via_new`   set when the acceptance came from an F3 piercing branch, i.e.
+//               the legacy geometry would have refused this pair.  The caller
+//               needs it for the F4 destination override.
 bool is_cathode_crossing_pair(
     const Cluster& cluster1,
     const Cluster& cluster2,
     double length_1,
     double length_2,
     double xshift2,
-    const CbrParams& P)
+    const CbrParams& P,
+    bool strict = false,
+    bool* via_new = nullptr)
 {
+    if (via_new) *via_new = false;
     geo_point_t p1;
     geo_point_t p2;
     // Find_Closest_Points ignores its length_cut argument (it returns the global
@@ -191,6 +332,11 @@ bool is_cathode_crossing_pair(
     double dis = WireCell::Clus::Facade::Find_Closest_Points(cluster1, cluster2,
                                                              length_1, length_2,
                                                              P.max_dis, p1, p2);
+
+    // F2 admitted this pair, so xshift2 may be O(100 cm) and the pair just
+    // selected sits in the wrong frame -- re-seat it.  Legacy and F1 pairs keep
+    // the unshifted selection (their shift is <= 2 cm and 0.31 cm respectively).
+    if (strict) reseat_closest_shifted(cluster1, cluster2, xshift2, p1, p2);
 
     // the two closest points must sit in DIFFERENT TPCs (this is what makes the
     // pass incapable of acting within a single TPC).
@@ -224,18 +370,38 @@ bool is_cathode_crossing_pair(
 
     // --- CATHODE_RESCUE_DEBUG per-return tracer (removable; env-gated) ---
     static const bool cbr_dbg = std::getenv("CATHODE_RESCUE_DEBUG") != nullptr;
-    double _ttH = -1, _ttP = -1, _ccb = -1;
+    double _ttH = -1, _ttP = -1, _ccb = -1, _pdis = -1;
+    bool _pierce_ok = false;
     auto DBG = [&](const char* why, bool acc) -> bool {
+        // rescue_geom_first admits a pair the dt0 window rejected; it may only
+        // be accepted on the tightened geometry.  Applied here, once, so every
+        // accept path in this function is covered.
+        bool strict_veto = false;
+        if (acc && strict) {
+            // Direction evidence: either the two halves' own directions agree,
+            // OR the piercing test fired -- which it only does where at least
+            // one direction is unusable and is therefore the BETTER evidence
+            // (evt319913: a 10 cm stub gives tt_hough = 11.2 deg against
+            // angle_cut = 10, while its piercing agrees to 1.20 cm).
+            const bool tt_ok = (_ttH >= 0 && _ttH < P.angle_cut) ||
+                               (_ttP >= 0 && _ttP < P.angle_cut);
+            if (!(dis < P.geom_first_dis && _pdis >= 0 && _pdis < P.pierce_cut &&
+                  (tt_ok || _pierce_ok))) {
+                acc = false;
+                strict_veto = true;
+            }
+        }
         if (cbr_dbg && dis < P.max_dis) {
             std::fprintf(stderr,
-                "[cbrx] c%d<->c%d %-16s dis=%.2f dX=%.2f tip=%.2f/%.2f xsh=%.2f ttH=%.1f ttP=%.1f cc=%.1f len=%.0f/%.0f -> %s\n",
+                "[cbrx] c%d<->c%d %-16s dis=%.2f dX=%.2f tip=%.2f/%.2f xsh=%.2f ttH=%.1f ttP=%.1f cc=%.1f pierce=%.2f len=%.0f/%.0f -> %s%s\n",
                 (int)cluster1.ident(), (int)cluster2.ident(), why, dis/units::cm,
                 std::fabs(p1.x()-p2s.x())/units::cm,
                 std::fabs(p1.x()-P.cathode_x)/units::cm, std::fabs(p2s.x()-P.cathode_x)/units::cm,
-                xshift2/units::cm, _ttH, _ttP, _ccb,
+                xshift2/units::cm, _ttH, _ttP, _ccb, _pdis/units::cm,
                 length_1/units::cm, length_2/units::cm,
-                acc ? "ACCEPT" : "reject");
+                acc ? "ACCEPT" : "reject", strict_veto ? " (strict)" : "");
         }
+        if (!acc && via_new) *via_new = false;
         return acc;
     };
 
@@ -267,6 +433,17 @@ bool is_cathode_crossing_pair(
             have_pca = true;
         }
     }
+
+    // Round 2 (docs/73): the piercing agreement, and the two regimes in which
+    // `conn` is not a usable direction estimate and it substitutes for the
+    // conn-angle cut.  Both are pure measurements here; nothing acts on them
+    // unless rescue_pierce_test / rescue_geom_first is on.
+    const double dX_tip = std::fabs(p1.x() - p2s.x());
+    _pdis = pierce_dist(p1, dir1, length_1, p2s, dir2, length_2, P);
+    const bool conn_unusable = (dis > 0 && dX_tip > P.conn_drift_frac * dis) ||
+                               (dis < P.conn_min_dis);
+    _pierce_ok = P.rescue_pierce_test && conn_unusable && _pdis < P.pierce_cut;
+    const bool pierce_ok = _pierce_ok;
 
     if (dis < P.dis_cut) {
         // CLOSE regime: accept on local half-track collinearity alone.
@@ -304,7 +481,22 @@ bool is_cathode_crossing_pair(
             double cc_hough = collinear_deg(conn.angle(anchor_hough));
             double cc_pca = have_pca ? collinear_deg(conn.angle(anchor_pca)) : 999.0;
             _ccb = std::min(cc_hough, cc_pca);
-            return DBG("close_shortstub", std::min(cc_hough, cc_pca) < P.conn_short_cut);
+            if (std::min(cc_hough, cc_pca) < P.conn_short_cut) {
+                return DBG("close_shortstub", true);
+            }
+            // F3 (docs/73): at evt51128's dis = 2.78 cm the conn angle is noise
+            // (2.7 cm of it is transverse), so accept on the piercing agreement
+            // ALONE.  Deliberately no collinearity companion: the stub is 4 cm
+            // and has no usable direction of its own (its tt_hough is 11.6 deg
+            // against angle_cut = 10, and the both-long PCA branch never ran),
+            // so pierce_point falls back to its tip (y, z) and the test is
+            // "does the LONG half's extrapolation pass within pierce_cut of the
+            // stub".
+            if (pierce_ok) {
+                if (via_new) *via_new = true;
+                return DBG("short_pierce", true);
+            }
+            return DBG("close_shortstub", false);
         }
         return DBG("close_fallthrough", false);
     }
@@ -319,7 +511,16 @@ bool is_cathode_crossing_pair(
     double cc_pca = have_pca ? std::min(collinear_deg(conn.angle(pca1)),
                                         collinear_deg(conn.angle(pca2))) : 999.0;
     _ccb = std::min(cc_hough, cc_pca);
-    if (cc_hough >= P.conn_far_cut && cc_pca >= P.conn_far_cut) return DBG("far_conn", false);
+    if (cc_hough >= P.conn_far_cut && cc_pca >= P.conn_far_cut) {
+        // F3 (docs/73): on evt65289 conn is 97 % drift (dis 5.28, dX 5.14) --
+        // the cathode dead gap plus the near-cathode imaging loss, not a track
+        // segment -- so cc = 45.2 deg measures acos(|dir_x|), not collinearity,
+        // and tt_pca = 9.0 deg had ALREADY passed angle_cut = 10.  Substitute
+        // the piercing agreement; the collinearity gate above still stands.
+        if (!pierce_ok) return DBG("far_conn", false);
+        if (via_new) *via_new = true;
+        return DBG("far_pierce", true);
+    }
 
     return DBG("far_accept", true);
 }
@@ -380,6 +581,17 @@ public:
         p_.adopt_frag_max_length  = get(config, "adopt_frag_max_length", p_.adopt_frag_max_length);
         p_.adopt_min_npts         = get(config, "adopt_min_npts", p_.adopt_min_npts);
         p_.adopt_beam_min_length  = get(config, "adopt_beam_min_length", p_.adopt_beam_min_length);
+
+        // Round 2 (sbnd_xin/docs/73).  Every C++ default is false / inert, so an
+        // absent key leaves the pr/14 accept path byte-identical.
+        p_.rescue_allow_in_beam_far = get(config, "rescue_allow_in_beam_far", p_.rescue_allow_in_beam_far);
+        p_.rescue_geom_first        = get(config, "rescue_geom_first", p_.rescue_geom_first);
+        p_.geom_first_dis           = get(config, "geom_first_dis", p_.geom_first_dis);
+        p_.rescue_pierce_test       = get(config, "rescue_pierce_test", p_.rescue_pierce_test);
+        p_.pierce_cut               = get(config, "pierce_cut", p_.pierce_cut);
+        p_.conn_drift_frac          = get(config, "conn_drift_frac", p_.conn_drift_frac);
+        p_.conn_min_dis             = get(config, "conn_min_dis", p_.conn_min_dis);
+        p_.rescue_dest_beam_for_new = get(config, "rescue_dest_beam_for_new", p_.rescue_dest_beam_for_new);
     }
 
     virtual Configuration default_configuration() const {
@@ -430,6 +642,12 @@ private:
     void rescue(Grouping& live_grouping) const {
         if (!(p_.beam_window_high > p_.beam_window_low)) return;
 
+        // Selection-loop tracer (removable; env-gated, same switch as [cbrx]).
+        // Prints EVERY candidate pair with both t0 / gid / in-beam flags and the
+        // gate that pruned it -- the window gates below run before the geometric
+        // test, so [cbrx] alone cannot attribute them.
+        static const bool cbr_sel_dbg = std::getenv("CATHODE_RESCUE_DEBUG") != nullptr;
+
         // One accepted move per round, then FULL re-enumeration: merge_clusters
         // destroys both inputs and appends a fresh cluster, so every pointer,
         // index and bundle tally is stale after it.  Progress is guaranteed
@@ -459,6 +677,7 @@ private:
             // First qualifying pair in (ident_beam, ident_far) order.
             const Member* best_beam = nullptr;
             const Member* best_far = nullptr;
+            bool best_new_path = false;
             for (const auto& kb : members) {
                 if (best_beam) break;
                 if (!in_beam(kb.t0)) continue;
@@ -467,14 +686,38 @@ private:
                 for (const auto& kf : members) {
                     if (kf.gid == kb.gid) continue;
                     const double dt0 = kf.t0 - kb.t0;
-                    if (dt0 < -p_.rescue_t0_early || dt0 > p_.rescue_t0_late) continue;
-                    if (p_.require_far_out_of_beam && in_beam(kf.t0)) continue;
-                    if (!kf.cluster->get_scope_filter(m_scope)) continue;
-                    if (kf.length < p_.min_length_short) continue;
-                    if (std::max(kb.length, kf.length) < p_.min_length) continue;
+                    // The two window gates, evaluated rather than applied, so
+                    // the selection tracer below can name the one that pruned
+                    // the pair.  Classes A and B of docs/73 sec 4 die HERE,
+                    // before the geometric test runs at all -- which is why
+                    // the [cbrx] tracer inside it printed nothing for 10 of the
+                    // 12 events and that attribution had to be inferred.
+                    const bool dt0_ok = !(dt0 < -p_.rescue_t0_early || dt0 > p_.rescue_t0_late);
+                    const bool beam_far_ok = !(p_.require_far_out_of_beam &&
+                                               !p_.rescue_allow_in_beam_far &&
+                                               in_beam(kf.t0));
+                    const char* prune = nullptr;
+                    if (!dt0_ok && !p_.rescue_geom_first)             prune = "dt0";
+                    else if (!beam_far_ok)                            prune = "in_beam_far";
+                    else if (!kf.cluster->get_scope_filter(m_scope))  prune = "scope";
+                    else if (kf.length < p_.min_length_short)         prune = "len_far";
+                    else if (std::max(kb.length, kf.length) < p_.min_length) prune = "len_max";
+                    if (cbr_sel_dbg) {
+                        std::fprintf(stderr,
+                            "[cbrsel] c%d(gid %d t0 %.3f us beam %d %.1f cm) <-> "
+                            "c%d(gid %d t0 %.3f us beam %d %.1f cm) dt0=%.3f us -> %s\n",
+                            kb.ident, kb.gid, kb.t0/units::us, (int)in_beam(kb.t0),
+                            kb.length/units::cm,
+                            kf.ident, kf.gid, kf.t0/units::us, (int)in_beam(kf.t0),
+                            kf.length/units::cm, dt0/units::us,
+                            prune ? prune : "geometry");
+                    }
+                    if (prune) continue;
                     const double xshift = far_xshift(live_grouping, *kf.cluster, kb.t0 - kf.t0);
+                    bool via_new = false;
                     if (!is_cathode_crossing_pair(*kb.cluster, *kf.cluster,
-                                                  kb.length, kf.length, xshift, p_)) continue;
+                                                  kb.length, kf.length, xshift, p_,
+                                                  /*strict=*/!dt0_ok, &via_new)) continue;
                     // Iso-band veto (doc pr/66): never select a pair the
                     // per-APA neutrino guard refused.  Applied HERE, at
                     // candidate SELECTION, rather than via merge_clusters'
@@ -488,6 +731,13 @@ private:
                     if (band_veto_forbids(kb.cluster, kf.cluster)) continue;
                     best_beam = &kb;
                     best_far = &kf;
+                    // Admitted only by a round-2 path?  Either the dt0 window
+                    // refused it (F2), or the far half is itself in-beam (F1),
+                    // or the geometry was accepted on the piercing test the
+                    // legacy conn-angle cut would have refused (F3).  Consumed
+                    // by the F4 destination override below.
+                    best_new_path = via_new || !dt0_ok ||
+                                    (p_.rescue_allow_in_beam_far && in_beam(kf.t0));
                     break;
                 }
             }
@@ -508,7 +758,17 @@ private:
             // by its crosser half keeps it; ties go to the longer half.
             bool dest_is_beam;
             const char* rule;
-            if (beam_dom && !far_dom)      { dest_is_beam = true;  rule = "beam-dominant"; }
+            // F4 (docs/73): a/b/c/d is length-based, and this pass runs BEFORE
+            // examine_bundles, so the beam-side donor can still be a stub the
+            // flash-collapse has not yet glued to the rest of its bundle
+            // (evt51128: a_len = 4 cm against a ~290 cm sibling).  The rule then
+            // sends the joined crosser out of the beam bundle -- accepted, but
+            // worse for PR.  Round-2 pairs are in-beam-anchored by construction,
+            // so force the beam destination for them; legacy pairs are
+            // untouched, so the pr/14 hand scan is not re-opened.
+            if (p_.rescue_dest_beam_for_new && best_new_path) {
+                                             dest_is_beam = true;  rule = "new-path-beam"; }
+            else if (beam_dom && !far_dom) { dest_is_beam = true;  rule = "beam-dominant"; }
             else if (far_dom && !beam_dom) { dest_is_beam = false; rule = "far-dominant"; }
             else                           { dest_is_beam = (a_len >= c_len); rule = "longer-half"; }
 

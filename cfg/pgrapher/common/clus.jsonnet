@@ -1480,7 +1480,12 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
                               unmatched_min_length=null, unmatched_min_npts=null,
                               adopt_nu_fragments=false, adopt_dis=null,
                               adopt_xcut=null, adopt_frag_max_length=null,
-                              adopt_min_npts=null, adopt_beam_min_length=null) :: {
+                              adopt_min_npts=null, adopt_beam_min_length=null,
+                              rescue_allow_in_beam_far=false,
+                              rescue_geom_first=false, geom_first_dis=null,
+                              rescue_pierce_test=false, pierce_cut=null,
+                              conn_drift_frac=null, conn_min_dis=null,
+                              rescue_dest_beam_for_new=false) :: {
             type: "ClusteringCathodeBundleRescue",
             name: prefix+name,
             data: dv_cfg + pcts_cfg + scope_cfg + {
@@ -1532,6 +1537,41 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
                 [if adopt_frag_max_length != null then "adopt_frag_max_length"]: adopt_frag_max_length,
                 [if adopt_min_npts != null then "adopt_min_npts"]: adopt_min_npts,
                 [if adopt_beam_min_length != null then "adopt_beam_min_length"]: adopt_beam_min_length,
+                // ---- round 2 (sbnd_xin/docs/73) -------------------------------
+                // Four independent openings of a measured blocker, each C++
+                // default false / inert.  Keys omitted when off => compiled
+                // config byte-identical to pre-round-2.
+                //
+                // rescue_allow_in_beam_far: K_far may itself be in the beam
+                // window provided it is in a different flash bundle (both halves
+                // matched, each to its own side's in-beam flash; the T0
+                // hypothesis then moves by <= 0.31 cm, sub-blob).
+                [if rescue_allow_in_beam_far then "rescue_allow_in_beam_far"]: true,
+                // rescue_geom_first: test a pair the [-rescue_t0_early,
+                // +rescue_t0_late] window rejected, but demand a TIGHTENED
+                // geometry (geom_first_dis + pierce_cut + collinearity) -- the
+                // wrong flash is measured up to 855 us away, beyond any time
+                // prior.  Purely additive to the legacy accept path.
+                [if rescue_geom_first then "rescue_geom_first"]: true,
+                // null => C++ default 5 cm.
+                [if geom_first_dis != null then "geom_first_dis"]: geom_first_dis,
+                // rescue_pierce_test: where the tip-to-tip vector is dominated
+                // by drift (it is then the cathode dead gap, and the conn angle
+                // silently becomes a cut on |dir_x| > cos(conn_far_cut)) or too
+                // short to define a direction, substitute the cathode-PIERCING
+                // agreement -- a fixed transverse bound, not one that scales
+                // with the tip separation.
+                [if rescue_pierce_test then "rescue_pierce_test"]: true,
+                // nulls => C++ defaults (8 cm / 0.8 / 8 cm).
+                [if pierce_cut != null then "pierce_cut"]: pierce_cut,
+                [if conn_drift_frac != null then "conn_drift_frac"]: conn_drift_frac,
+                [if conn_min_dis != null then "conn_min_dis"]: conn_min_dis,
+                // rescue_dest_beam_for_new: a pair admitted ONLY by one of the
+                // three knobs above adopts the beam bundle, instead of the
+                // length-based a/b/c/d rule which can send it to the cosmic one
+                // when the beam-side donor is still a pre-collapse stub.  Legacy
+                // pairs keep a/b/c/d unchanged.
+                [if rescue_dest_beam_for_new then "rescue_dest_beam_for_new"]: true,
             },
             uses: [detector_volumes, pc_transforms],
         },
