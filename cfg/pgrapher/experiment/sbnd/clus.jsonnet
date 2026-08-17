@@ -1412,6 +1412,11 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               // guard.  C++ default false; false omits the key =>
               // byte-identical.
               dl_vtx_swap_guard=false,
+              // doc pr/89 Arm C (C2) -- rule-1 topology term in the DL
+              // rerank composite (weight, frac center).  C++ defaults 0/0;
+              // null omits the keys => byte-identical.
+              dl_vtx_topo_weight=null,
+              dl_vtx_topo_center=null,
               // doc pr/51 round 3 -- apply the traditional-path swap
               // decision instead of discarding it.  C++ default false;
               // false omits the key => byte-identical.
@@ -2113,6 +2118,8 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
             mvga_approach_collapse=mvga_approach_collapse,
             mvga_straighten_radius=mvga_straighten_radius,
             dl_vtx_swap_guard=dl_vtx_swap_guard,
+            dl_vtx_topo_weight=dl_vtx_topo_weight,
+            dl_vtx_topo_center=dl_vtx_topo_center,
             main_vertex_swap_apply=main_vertex_swap_apply,
             rough_path_probe=rough_path_probe,
             steiner_gap_penalty=steiner_gap_penalty,
@@ -2920,6 +2927,11 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
               mvga_approach_collapse=null,
               mvga_straighten_radius=null,
               dl_vtx_swap_guard=false,
+              // doc pr/89 Arm C (C2) -- rule-1 topology term in the DL
+              // rerank composite (weight, frac center).  C++ defaults 0/0;
+              // null omits the keys => byte-identical.
+              dl_vtx_topo_weight=null,
+              dl_vtx_topo_center=null,
               main_vertex_swap_apply=false,
               // doc pr/51 round 4 -- diagnostic-only rough-path probe.
               // C++ default false; false omits the key => byte-identical.
@@ -3241,6 +3253,8 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
             mvga_approach_collapse=mvga_approach_collapse,
             mvga_straighten_radius=mvga_straighten_radius,
                 dl_vtx_swap_guard=dl_vtx_swap_guard,
+                dl_vtx_topo_weight=dl_vtx_topo_weight,
+                dl_vtx_topo_center=dl_vtx_topo_center,
                 main_vertex_swap_apply=main_vertex_swap_apply,
                 rough_path_probe=rough_path_probe,
                 steiner_gap_penalty=steiner_gap_penalty,

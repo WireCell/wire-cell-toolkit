@@ -390,6 +390,13 @@ public:
         // cluster (a confident wrong voxel's s_dl swamps every structural
         // term).  false = legacy = byte-identical.
         bool   m_dl_vtx_swap_guard{false};
+        // doc sbnd_xin/docs/pr/89 Arm C (C2): rule-1 outgoing-prong topology
+        // term in the DL rerank composite, s_topo = w * (frac - center) for
+        // candidates with >= 1 decisive attached Bragg vote.  0 = legacy =
+        // byte-identical (the term is never computed).  The offline C1
+        // replay selected w = 3.0, center 0 (pr/89 sec 11.5).
+        double m_dl_vtx_topo_weight{0.0};
+        double m_dl_vtx_topo_center{0.0};
         // doc sbnd_xin/docs/pr/51 round 3: the traditional (non-DL)
         // determine_overall_main_vertex takes main_cluster and its vertex
         // map BY VALUE, yet internally decides cluster swaps via

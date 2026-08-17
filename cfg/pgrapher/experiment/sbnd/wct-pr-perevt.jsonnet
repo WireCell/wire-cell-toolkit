@@ -1501,6 +1501,15 @@ function(
     // SBND_DL_VTX_SWAP_GUARD runner env).  false omits the key =>
     // byte-identical.
     dl_vtx_swap_guard = false,
+    // doc pr/89 Arm C (C2) -- rule-1 outgoing-prong topology term in the DL
+    // rerank composite: s_topo = w * (frac - center), vote-gated.  C++
+    // defaults 0/0 = term never computed; null omits the keys =>
+    // byte-identical.  The offline C1 replay selected weight 3.0, center 0
+    // (+12/924, pr/89 sec 11.5).  Validation: --tla-code dl_vtx_topo_weight=3.0
+    // (or the SBND_DL_VTX_TOPO_WEIGHT runner env).  DEFAULT OFF pending the
+    // live A/B.
+    dl_vtx_topo_weight = null,
+    dl_vtx_topo_center = null,
     // doc pr/51 round 3 -- apply the traditional main-vertex path's cluster
     // swap decision instead of silently discarding it (a latent bug: the
     // decision fires today but never reaches the caller).  DEFAULT OFF
@@ -2005,6 +2014,8 @@ function(
                              mvga_approach_collapse=mvga_approach_collapse,
                              mvga_straighten_radius=mvga_straighten_radius,
                              dl_vtx_swap_guard=dl_vtx_swap_guard,
+                             dl_vtx_topo_weight=dl_vtx_topo_weight,
+                             dl_vtx_topo_center=dl_vtx_topo_center,
                              main_vertex_swap_apply=main_vertex_swap_apply,
                              rough_path_probe=rough_path_probe,
                              steiner_gap_penalty=steiner_gap_penalty,

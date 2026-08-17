@@ -659,6 +659,12 @@ Configuration Clus::PrDisplayDump::dump_vertex_scoreboard(Facade::Grouping& grou
     out["dl_min_accept_score"] = b.dl_min_accept_score;
     out["dl_score_scale"] = b.dl_score_scale;
     out["dl_top_k"] = b.dl_top_k;
+    // doc pr/89 C2 -- topo operating point, emitted only when the term ran
+    // (dl_vtx_topo_weight != 0), so knob-off dumps are byte-identical.
+    if (b.topo_used) {
+        out["dl_topo_weight"] = b.topo_weight;
+        out["dl_topo_center"] = b.topo_center;
+    }
     out["final_vertex_id"] = b.final_vertex_id;
     out["final_x"] = b.final_x;
     out["final_y"] = b.final_y;
@@ -709,6 +715,14 @@ Configuration Clus::PrDisplayDump::dump_vertex_scoreboard(Facade::Grouping& grou
         j["s_isol"] = r->s_isol;
         j["s_main"] = r->s_main;
         j["s_fv"] = r->s_fv;
+        // doc pr/89 C2 -- topo-term keys, gated like the hv_* block below so
+        // dl_vtx_topo_weight == 0 (the default) leaves calib JSON
+        // byte-identical.  topo_frac -1 = no decisive attached track.
+        if (b.topo_used) {
+            j["s_topo"] = r->s_topo;
+            j["topo_frac"] = r->topo_frac;
+            j["topo_votes"] = r->topo_votes;
+        }
         j["total"] = r->total;
         j["dl_winner"] = r->dl_winner;
         // All-zero terms with this set mean "removed before scoring", not

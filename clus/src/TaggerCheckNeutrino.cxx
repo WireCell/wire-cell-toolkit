@@ -314,6 +314,9 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_dl_vtx_score_scale      = get(config, "dl_vtx_score_scale",      m_dl_vtx_score_scale);
     // doc sbnd_xin/docs/pr/51 (18255-506746): cross-cluster DL swap guard.
     m_dl_vtx_swap_guard       = get(config, "dl_vtx_swap_guard",       m_dl_vtx_swap_guard);
+    // doc sbnd_xin/docs/pr/89 Arm C (C2): rule-1 topology term weight/center.
+    m_dl_vtx_topo_weight      = get(config, "dl_vtx_topo_weight",      m_dl_vtx_topo_weight);
+    m_dl_vtx_topo_center      = get(config, "dl_vtx_topo_center",      m_dl_vtx_topo_center);
     // doc sbnd_xin/docs/pr/51 round 3: traditional-path swap propagation.
     m_main_vertex_swap_apply  = get(config, "main_vertex_swap_apply",  m_main_vertex_swap_apply);
     // doc sbnd_xin/docs/pr/51 round 4: diagnostic-only rough-path probe.
@@ -630,6 +633,8 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["dl_vtx_min_accept_score"] = 4.0;     // min composite score to accept a re-ranked DL vertex (empirical; correct uncertain-regime picks score 8-12, failure cases 3-5)
     cfg["dl_vtx_score_scale"]      = 1000.0;  // scale factor on raw DL score in composite re-rank (1.0 = unscaled)
     cfg["dl_vtx_swap_guard"]       = m_dl_vtx_swap_guard;  // doc pr/51 (506746): false = legacy (rerank may swap the main cluster)
+    cfg["dl_vtx_topo_weight"]      = m_dl_vtx_topo_weight; // doc pr/89 C2: 0 = legacy (rule-1 topology term never computed); offline C1 selected 3.0
+    cfg["dl_vtx_topo_center"]      = m_dl_vtx_topo_center; // doc pr/89 C2: frac offset; frozen choice is 0.0 (the center-0.5 variant lost)
     cfg["main_vertex_swap_apply"]  = m_main_vertex_swap_apply;  // doc pr/51 round 3: false = legacy (traditional-path swap decision is computed then discarded)
     cfg["rough_path_probe"]        = m_rough_path_probe;  // doc pr/51 round 4: false = legacy (diagnostic TRACE probe never runs)
     cfg["steiner_gap_penalty"]     = m_steiner_gap_penalty;  // doc pr/51 round 5: 0 = legacy (do_rough_path stays on the unpenalized "steiner_graph")
@@ -1363,7 +1368,8 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
             *m_track_fitter, m_dv, particle_data(), m_recomb_model,
             m_dl_weights, m_dl_vtx_cut, m_dQdx_scale, m_dQdx_offset,
             m_dl_vtx_rerank, m_dl_vtx_top_k, m_dl_vtx_min_accept_score,
-            m_dl_vtx_score_scale, m_dl_vtx_swap_guard);
+            m_dl_vtx_score_scale, m_dl_vtx_swap_guard,
+            m_dl_vtx_topo_weight, m_dl_vtx_topo_center);
     }
     if (!flag_dl_changed) {
         // doc sbnd_xin/docs/pr/51 round 3: determine_overall_main_vertex now
