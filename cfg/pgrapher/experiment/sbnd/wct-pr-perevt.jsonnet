@@ -1147,6 +1147,33 @@ function(
     // dedup's.  1/20 non-hand-picked events moved; that is a footprint signal,
     // not a rate.  A standard-manifest gate is still owed.
     shower_endpoint_skip_orphan_vtx = true,
+    // doc sbnd_xin/docs/pr/91 round 3: Shower::complete_structure_with_
+    // start_segment's flood-fill frontier test switches from view MEMBERSHIP
+    // (!has_node) to VISITED (Shower::m_walked_nodes, the prototype's
+    // map_vtx_segs equivalent).  Fixes the mechanism behind SBND nueCC
+    // 168596's spurious pi0: the 2039 MeV electron's former start vertex
+    // 14027 walls off a 4.74 cm proton stub and, past it, a 7.7 cm electron
+    // stub 96% inside this shower's own point cloud, left as a separate
+    // shower that pairs into a fake pi0.  C++ default false.
+    //
+    // SBND PRODUCTION ON since 2026-08-18 -- owner-authorized round-3 flip
+    // after the validation gate: 67-event manifest (nueCC48 + NCpi0 19),
+    // fresh binary, knob-off vs knob-on.  V1 (knob off vs a genuine
+    // pre-change build, git-stashed and rebuilt) PASS on evt 168596 +
+    // 2 spot events, 6/6 archives byte-identical.  V2 (knob-on vs knob-off,
+    // all 67 events): nuecc48 PASS=95/96 -- the ONE mover is 168596's
+    // mabc-pr.zip, nothing else; ncpi0 (the pi0-veto sample) PASS=38/38,
+    // zero movers -- no genuine two-gamma pi0 was disturbed. Both samples'
+    // merged nusel-table.tsv are byte-identical (zero score/label movers,
+    // zero nu-candidate status changes) and every pctree tarball matches.
+    // 168596 mechanism, confirmed by probe (SHOWER_WALK_DEBUG): the ONLY
+    // re-expansion across all 67 events is shower_id=2 re-walking vertex
+    // 14027 via segment 14093 -- exactly the round-2 diagnosis.  Shower
+    // count 17->16 (the 7.7cm electron stub is absorbed, not orphaned);
+    // pio_mass 114.06 -> no pi0 pairs (all -1.0 sentinel); kine_reco_Enu
+    // 2331.29 -> 2324.26 MeV (-0.3%, the borrowed-charge correction).
+    // See sbnd_xin/docs/pr/91_em-shower-clustering-round1.md sec 11.
+    shower_walk_visited_parity = true,
     // doc sbnd_xin/docs/pr/40 sec 17 (2026-08-06): track (proton/pion/muon)
     // mis-identified as electron.  F1 restores prototype-faithful PID
     // persistence (segment_determine_dir_track); F2/F3 spare a segment
@@ -2168,6 +2195,7 @@ function(
                              shower_less_id_tiebreak=shower_less_id_tiebreak,
                              shower_endpoint_exclude_start_vertex=shower_endpoint_exclude_start_vertex,
                              shower_endpoint_skip_orphan_vtx=shower_endpoint_skip_orphan_vtx,
+                             shower_walk_visited_parity=shower_walk_visited_parity,
                              track_pid_persist_dqdx=track_pid_persist_dqdx,
                              shower_reclass_dqdx_guard=shower_reclass_dqdx_guard,
                              shower_topo_dqdx_guard=shower_topo_dqdx_guard,
