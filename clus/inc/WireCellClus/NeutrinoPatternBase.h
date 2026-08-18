@@ -1691,6 +1691,21 @@ namespace WireCell::Clus::PR {
         bool   m_shower_conn3_unreachable{false};
         double m_conn3_unreachable_min_len{10*units::cm};
 
+        // doc sbnd_xin/docs/pr/84 round 2 (F3 = pr/84 P2 "conn3_stitch").
+        // The main cluster's segment graph can end up disconnected (pr/54
+        // keep-isolated residuals, snap-stranded vertices) even though the
+        // cluster is one contiguous lump of charge; the unreachable pieces
+        // are then promoted to conn-3 "association" showers at anchor
+        // distances the log itself shows to be millimetres (pr/74
+        // conn3_unreachable anchor_dis 0.3 cm).  When a component's closest
+        // approach to a main-vertex-reachable vertex is within this radius,
+        // bridge it with a real rough-path segment BEFORE clustering_points,
+        // so the BFS reaches it and it is classified conn-1 naturally.
+        // shower_conn3_unreachable stays on as the backstop for wider gaps.
+        // Internal units (config surface takes cm).  C++ default 0 = off =
+        // legacy = byte-identical.
+        double m_conn3_stitch_max{0};
+
         // doc sbnd_xin/docs/pr/74 round 4 K6 (SBND 18255 evt 506746 seg
         // 21048).  A stopping muon that emits a Michel electron at the
         // neutrino vertex is reconstructed as ONE EM shower: track/shower
@@ -2305,6 +2320,13 @@ namespace WireCell::Clus::PR {
         // ABANDONED main cluster when m_swap_orphan_dup_audit is set; that
         // gate lives in the caller so this function itself is knob-free.
         bool orphan_dup_audit(Graph& graph, Facade::Cluster& cluster, TrackFitting& track_fitter, IDetectorVolumes::pointer dv);
+        // doc sbnd_xin/docs/pr/84 round 2 (F3, see the m_conn3_stitch_max
+        // member block): bridge disconnected main-cluster components whose
+        // closest approach to the reachable side is within
+        // m_conn3_stitch_max, then one full refit.  Returns true iff at
+        // least one bridge was created.  Gated on m_conn3_stitch_max > 0
+        // (default 0 => immediate return, no side effects).
+        bool stitch_disconnected_main_cluster(Graph& graph, Facade::Cluster& cluster, VertexPtr main_vertex, TrackFitting& track_fitter, IDetectorVolumes::pointer dv);
         // doc sbnd_xin/docs/pr/51 round 4 (see the m_rough_path_probe member
         // block): diagnostic-only TRACE probe for the near-vertex short-cut
         // investigation.  Never edits graph, segment, or fit content; always

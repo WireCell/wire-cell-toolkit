@@ -771,6 +771,15 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               // segments, fabricate no PF-root node.  C++ default false; key
               // omitted when off => byte-identical.  Display-only (mc.json).
               pf_orphan_audit_only=false,
+              // doc pr/84 round 2 (F1/F2): vertex-touching pseudo-parent
+              // suppression + remote-gap anchor.  C++ defaults false/3cm/8cm;
+              // keys omitted when off/null => byte-identical pre-knob config.
+              // Display-only (mc.json).  Scalar params are in cm.
+              pf_direct_when_touching=false,
+              pf_touch_max=null,
+              pf_touch_cross_main=false,
+              pf_touch_cross_max=null,
+              pf_pseudo_gap_from_main=false,
               // restore_demoted_mains (doc pr/20 Part I P2; C++ default false,
               // key omitted when null => byte-identical pre-knob config): tag a
               // split-off part that was ITSELF a matched bundle main before the
@@ -1304,6 +1313,9 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               stem_backfill_min_shower_len=null,
               shower_conn3_unreachable=false,
               conn3_unreachable_min_len=null,
+              // doc pr/84 round 2 (F3): stitch radius in cm; null = C++
+              // default 0 = OFF, key omitted => byte-identical.
+              conn3_stitch_max=null,
               shower_traj_michel_stem=false,
               michel_stem_traj_min_len=null,
               michel_stem_traj_max_len=null,
@@ -2113,6 +2125,7 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
             stem_backfill_min_shower_len=stem_backfill_min_shower_len,
             shower_conn3_unreachable=shower_conn3_unreachable,
             conn3_unreachable_min_len=conn3_unreachable_min_len,
+            conn3_stitch_max=conn3_stitch_max,
             shower_traj_michel_stem=shower_traj_michel_stem,
             michel_stem_traj_min_len=michel_stem_traj_min_len,
             michel_stem_traj_max_len=michel_stem_traj_max_len,
@@ -2545,6 +2558,14 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
                     // doc pr/65 round 3.  C++ default false; key omitted when
                     // off => byte-identical pre-knob config.
                     [if pf_orphan_audit_only then 'pf_orphan_audit_only']: true,
+                    // doc pr/84 round 2 (F1/F2).  C++ defaults false (scalars
+                    // 3 cm / 8 cm); keys omitted when off/null =>
+                    // byte-identical pre-knob config.  Params in cm.
+                    [if pf_direct_when_touching then 'pf_direct_when_touching']: true,
+                    [if pf_touch_max != null then 'pf_touch_max']: pf_touch_max * wc.cm,
+                    [if pf_touch_cross_main then 'pf_touch_cross_main']: true,
+                    [if pf_touch_cross_max != null then 'pf_touch_cross_max']: pf_touch_cross_max * wc.cm,
+                    [if pf_pseudo_gap_from_main then 'pf_pseudo_gap_from_main']: true,
                 },
             ],
             pipeline: wc.tns(cm_pipeline),
@@ -2662,6 +2683,13 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
        pf_orphan_track_parentage=false,
        // doc pr/65 round 3; false = C++ default = OFF.  See clus_pr.
        pf_orphan_audit_only=false,
+       // doc pr/84 round 2 (F1/F2); false/null = C++ defaults = OFF, keys
+       // omitted => byte-identical.  Params in cm.  See clus_pr.
+       pf_direct_when_touching=false,
+       pf_touch_max=null,
+       pf_touch_cross_main=false,
+       pf_touch_cross_max=null,
+       pf_pseudo_gap_from_main=false,
        // doc pr/20 Part I P2; null = C++ default false = OFF.  See clus_pr.
        restore_demoted_mains=null,
        // doc pr/23 sec 4.2; null = C++ default false = warn-and-skip.  See clus_pr.
@@ -2908,6 +2936,8 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
        stem_backfill_min_shower_len=null,
        shower_conn3_unreachable=false,
        conn3_unreachable_min_len=null,
+       // doc pr/84 round 2 (F3); null = C++ default 0 = OFF.  See clus_pr.
+       conn3_stitch_max=null,
        shower_traj_michel_stem=false,
        michel_stem_traj_min_len=null,
        michel_stem_traj_max_len=null,
@@ -3167,6 +3197,11 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 pf_pdg_name_prototype_fallback=pf_pdg_name_prototype_fallback,
                 pf_orphan_track_parentage=pf_orphan_track_parentage,
                 pf_orphan_audit_only=pf_orphan_audit_only,
+                pf_direct_when_touching=pf_direct_when_touching,
+                pf_touch_max=pf_touch_max,
+                pf_touch_cross_main=pf_touch_cross_main,
+                pf_touch_cross_max=pf_touch_cross_max,
+                pf_pseudo_gap_from_main=pf_pseudo_gap_from_main,
                 unmerge_bundle_mode=unmerge_bundle_mode,
                 restore_demoted_mains=restore_demoted_mains,
                 require_provenance=require_provenance,
@@ -3303,6 +3338,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 stem_backfill_min_shower_len=stem_backfill_min_shower_len,
                 shower_conn3_unreachable=shower_conn3_unreachable,
                 conn3_unreachable_min_len=conn3_unreachable_min_len,
+                conn3_stitch_max=conn3_stitch_max,
                 shower_traj_michel_stem=shower_traj_michel_stem,
                 michel_stem_traj_min_len=michel_stem_traj_min_len,
                 michel_stem_traj_max_len=michel_stem_traj_max_len,

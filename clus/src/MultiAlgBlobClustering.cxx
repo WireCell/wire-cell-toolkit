@@ -3,6 +3,7 @@
 #include "WireCellClus/PRSegment.h"
 #include "WireCellClus/PRVertex.h"
 #include "WireCellClus/PRShower.h"
+#include "WireCellClus/PRShowerFunctions.h"  // doc pr/84 r2: shower_get_closest_point
 #include "WireCellClus/TrackFitting.h"
 
 
@@ -338,6 +339,12 @@ void MultiAlgBlobClustering::configure(const WireCell::Configuration& cfg)
             pfc.pf_orphan_track_parentage = get<bool>(pf, "pf_orphan_track_parentage", false);
             // doc pr/65 round 3; absent => legacy fabricated orphan roots, byte-identical.
             pfc.pf_orphan_audit_only = get<bool>(pf, "pf_orphan_audit_only", false);
+            // doc pr/84 round 2; absent => legacy pseudo-parent rendering, byte-identical.
+            pfc.pf_direct_when_touching = get<bool>(pf, "pf_direct_when_touching", false);
+            pfc.pf_touch_max = get<double>(pf, "pf_touch_max", pfc.pf_touch_max);
+            pfc.pf_touch_cross_main = get<bool>(pf, "pf_touch_cross_main", false);
+            pfc.pf_touch_cross_max = get<double>(pf, "pf_touch_cross_max", pfc.pf_touch_cross_max);
+            pfc.pf_pseudo_gap_from_main = get<bool>(pf, "pf_pseudo_gap_from_main", false);
             m_bee_pf_configs.push_back(pfc);
             m_bee_pf_trees[pfc.name] = Bee::ParticleTree(pfc.name);
             SPDLOG_LOGGER_DEBUG(log, "Configured bee_pf: name={} visitor={}", pfc.name, pfc.visitor);
@@ -1560,7 +1567,13 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
                                   << "\n";
                     }
                     auto& vec = direct ? root_direct_showers : root_indirect_showers;
-                    vec.push_back({shower, start_vtx});
+                    // doc pr/84 r2 F2 (= pr/84 P3): with the knob on, anchor the
+                    // pseudo carrier at the MAIN vertex so a remote association
+                    // draws its real gap.  Legacy passes the shower's own start
+                    // vertex, which collapses the carrier to zero length
+                    // (gstart==gend in append_pseudo_shower) no matter how far
+                    // away the shower is.
+                    vec.push_back({shower, cfg.pf_pseudo_gap_from_main ? main_vertex : start_vtx});
                 }
             }
         }
@@ -1802,6 +1815,32 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
         parent_children.append(pseudo);
     };
 
+    // doc pr/84 r2 F1 (pf_direct_when_touching): a conn-2/3 shower whose
+    // fitted charge comes within pf_touch_max of the main vertex is a graph
+    // artifact ("the BFS could not walk there"), not a neutral daughter --
+    // render it as a direct leaf.  Rung 2 (pf_touch_cross_main) extends to a
+    // conn-2 shower in a DIFFERENT cluster than the vertex when that cluster
+    // carries Flags::main_cluster: the vertex was seated in a small fragment
+    // of the bundle while the event body is elsewhere (evt 64921).  Distance
+    // deliberately excludes the pr/84 sec 4 remote-association population
+    // (min 4.91 cm > 3 cm default), which must KEEP its carrier (see F2).
+    // pi0 daughters never reach this test -- their carrier is correct.
+    auto effectively_touching = [&](PR::ShowerPtr sh) -> bool {
+        if (!cfg.pf_direct_when_touching || !main_vertex) return false;
+        const int conn = sh->get_start_vertex_and_type().second;
+        if (conn != 2 && conn != 3) return false;
+        const double d_fit = shower_get_closest_point(*sh, get_vtx_pt(main_vertex), "fit").first;
+        if (d_fit < 0) return false;  // no fit cloud: fail safe, keep the carrier
+        if (d_fit <= cfg.pf_touch_max) return true;
+        if (cfg.pf_touch_cross_main && conn == 2) {
+            const auto* scl = sh->start_segment() ? sh->start_segment()->cluster() : nullptr;
+            if (scl && main_cluster && scl != main_cluster &&
+                scl->get_flag(Flags::main_cluster) &&
+                d_fit <= cfg.pf_touch_cross_max) return true;
+        }
+        return false;
+    };
+
     // Append all showers (direct + indirect via pseudo-gamma) into a children array,
     // given the connection vertex for the indirect case.
     // F4 (doc pr/34 §10.5): one pi0 node per pi0 id.  The prototype memoizes
@@ -1848,6 +1887,22 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
         // --- Non-pi0 indirect showers (pseudo-gamma) ---
         for (auto& [sh, conn_vtx] : indirect) {
             if (pi0_showers.count(sh)) continue;
+            // doc pr/84 r2 F1: vertex-touching shower renders directly, in the
+            // same children array the pseudo carrier would have landed in --
+            // parent linkage and sibling order otherwise unchanged.
+            if (effectively_touching(sh)) {
+                auto leaf = make_shower_leaf(sh);
+                if (!keep_node(sh->get_particle_type(), sh->get_kine_best(), leaf)) continue;
+                if (flag_print) {
+                    std::cout << "[fill_bee_pf_tree] SUPPRESS pseudo (pr84 touching)"
+                              << "  pdg=" << sh->get_particle_type()
+                              << "  ke=" << sh->get_kine_best() / units::MeV << " MeV"
+                              << "  conn_type=" << sh->get_start_vertex_and_type().second
+                              << "\n";
+                }
+                children.append(leaf);
+                continue;
+            }
             PR::VertexPtr cv = conn_vtx ? conn_vtx : fallback_conn_vtx;
             append_pseudo_shower(children, sh, cv);
         }

@@ -512,6 +512,7 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_stem_backfill_min_shower_len              = get(config, "stem_backfill_min_shower_len",              m_stem_backfill_min_shower_len);
     m_shower_conn3_unreachable                  = get(config, "shower_conn3_unreachable",                  m_shower_conn3_unreachable);
     m_conn3_unreachable_min_len                 = get(config, "conn3_unreachable_min_len",                 m_conn3_unreachable_min_len);
+    m_conn3_stitch_max                          = get(config, "conn3_stitch_max",                          m_conn3_stitch_max);
     m_shower_traj_michel_stem                   = get(config, "shower_traj_michel_stem",                   m_shower_traj_michel_stem);
     m_michel_stem_traj_min_len                  = get(config, "michel_stem_traj_min_len",                  m_michel_stem_traj_min_len);
     m_michel_stem_traj_max_len                  = get(config, "michel_stem_traj_max_len",                  m_michel_stem_traj_max_len);
@@ -811,6 +812,7 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["stem_backfill_min_shower_len"]              = m_stem_backfill_min_shower_len;              // cm; only read when shower_stem_backfill
     cfg["shower_conn3_unreachable"]                  = m_shower_conn3_unreachable;                  // doc pr/74 round 2 K5 (pr/65 rung 2); false = legacy (unreachable segments stay PF-invisible)
     cfg["conn3_unreachable_min_len"]                 = m_conn3_unreachable_min_len;                 // cm; only read when shower_conn3_unreachable
+    cfg["conn3_stitch_max"]                          = m_conn3_stitch_max;                          // cm; doc pr/84 r2 F3; 0 = off = legacy = byte-identical
     cfg["shower_traj_michel_stem"]                   = m_shower_traj_michel_stem;                   // doc pr/74 round 4 K6; false = legacy (a stopping muon + Michel stays one EM shower)
     cfg["michel_stem_traj_min_len"]                  = m_michel_stem_traj_min_len;                  // cm; only read when shower_traj_michel_stem
     cfg["michel_stem_traj_max_len"]                  = m_michel_stem_traj_max_len;                  // cm; only read when shower_traj_michel_stem
@@ -1355,6 +1357,7 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
     pattern_algos.m_stem_backfill_min_shower_len              = m_stem_backfill_min_shower_len * units::cm;  // pr/74 K4
     pattern_algos.m_shower_conn3_unreachable                  = m_shower_conn3_unreachable;                  // pr/74 K5
     pattern_algos.m_conn3_unreachable_min_len                 = m_conn3_unreachable_min_len * units::cm;     // pr/74 K5
+    pattern_algos.m_conn3_stitch_max                          = m_conn3_stitch_max * units::cm;              // pr/84 r2 F3
     pattern_algos.m_shower_traj_michel_stem                   = m_shower_traj_michel_stem;                   // pr/74 K6
     pattern_algos.m_michel_stem_traj_min_len                  = m_michel_stem_traj_min_len * units::cm;      // pr/74 K6
     pattern_algos.m_michel_stem_traj_max_len                  = m_michel_stem_traj_max_len * units::cm;      // pr/74 K6
@@ -1637,6 +1640,19 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
             std::cout << "After main vertex graph audit:" << final_main_vertex->fit().point << std::endl; pattern_algos.print_segs_info(*pr_graph, *main_cluster, 0);
             detg_dump("main_vertex_graph_audit", *pr_graph);
             dup_stage_census("main_vertex_graph_audit", *pr_graph, *main_cluster);
+        }
+
+        // doc sbnd_xin/docs/pr/84 round 2 (F3) -- inert unless
+        // conn3_stitch_max > 0.  Bridges disconnected main-cluster
+        // components whose closest approach to the reachable side is within
+        // the radius, BEFORE clustering_points, so the piece is classified
+        // conn-1 naturally instead of being promoted to a conn-3
+        // "association" by shower_conn3_unreachable (which stays on as the
+        // backstop for wider gaps).
+        if (pattern_algos.stitch_disconnected_main_cluster(*pr_graph, *main_cluster, final_main_vertex,
+                                                           *m_track_fitter, m_dv)) {
+            detg_dump("conn3_stitch", *pr_graph);
+            dup_stage_census("conn3_stitch", *pr_graph, *main_cluster);
         }
 
         // doc sbnd_xin/docs/pr/51 round 4: diagnostic-only rough-path probe

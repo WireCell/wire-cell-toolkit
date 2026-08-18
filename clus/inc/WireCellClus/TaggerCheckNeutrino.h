@@ -642,6 +642,7 @@ public:
         double m_stem_backfill_min_shower_len{40};                  // cm; pr/74 K4 tunable
         bool m_shower_conn3_unreachable{false};                     // doc pr/74 round 2 K5 (pr/65 rung 2)
         double m_conn3_unreachable_min_len{10};                     // cm; pr/74 K5 tunable
+        double m_conn3_stitch_max{0};                               // cm; doc pr/84 r2 F3; 0 = off = byte-identical
         bool m_shower_traj_michel_stem{false};                      // doc pr/74 round 4 K6 (18255-506746 muon+Michel)
         double m_michel_stem_traj_min_len{15};                      // cm; pr/74 K6 tunable
         double m_michel_stem_traj_max_len{45};                      // cm; pr/74 K6 tunable

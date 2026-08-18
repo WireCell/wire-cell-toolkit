@@ -899,6 +899,18 @@ function(
     // -A pf_orphan_audit_only=false (or SBND_PF_ORPHAN_AUDIT_ONLY=false).
     // C++ default stays false.
     pf_orphan_audit_only = true,
+    // doc pr/84 round 2 (F1/F2) -- vertex-touching pseudo-parent suppression
+    // (rung 1 + cross-cluster rung 2) and the remote-gap anchor.  Display-only:
+    // moves ONLY mc.json.  C++ defaults false (scalars 3 cm / 8 cm); params in
+    // cm.  OFF here until the pr/84 r2 gates pass; flip records will land in
+    // sbnd_xin/docs/pr/84.  Runner env: SBND_PF_DIRECT_WHEN_TOUCHING,
+    // SBND_PF_TOUCH_MAX, SBND_PF_TOUCH_CROSS_MAIN, SBND_PF_TOUCH_CROSS_MAX,
+    // SBND_PF_PSEUDO_GAP_FROM_MAIN.
+    pf_direct_when_touching = false,
+    pf_touch_max = null,
+    pf_touch_cross_main = false,
+    pf_touch_cross_max = null,
+    pf_pseudo_gap_from_main = false,
     // doc pr/38: F2's ON-behavior was CORRECTED in place (owner decision
     // 2026-08-05, no new knobs): the barrier now excludes each shower's
     // start vertex (prototype map_vtx_segs parity, WCShower.cxx:547) so
@@ -1241,6 +1253,13 @@ function(
     // pr/65's "0 unclaimed" gap on NC-pi0).
     shower_conn3_unreachable = true,
     conn3_unreachable_min_len = null,
+    // doc pr/84 round 2 (F3) -- bridge disconnected main-cluster components
+    // whose closest approach to the reachable side is within this radius (cm)
+    // BEFORE clustering_points, so they classify conn-1 naturally;
+    // shower_conn3_unreachable above stays the backstop for wider gaps.
+    // Moves fits and PF (full A/B gated).  null = C++ default 0 = OFF until
+    // the pr/84 r2 gates pass.  Runner env: SBND_CONN3_STITCH_MAX.
+    conn3_stitch_max = null,
     // doc sbnd_xin/docs/pr/74 round 4 K6 shower_traj_michel_stem: a stopping
     // muon that emits a Michel electron at the neutrino vertex is
     // reconstructed as ONE EM shower, because track/shower separation flags
@@ -1964,6 +1983,11 @@ function(
                              pf_pdg_name_prototype_fallback=pf_pdg_name_prototype_fallback,
                              pf_orphan_track_parentage=pf_orphan_track_parentage,
                              pf_orphan_audit_only=pf_orphan_audit_only,
+                             pf_direct_when_touching=pf_direct_when_touching,
+                             pf_touch_max=pf_touch_max,
+                             pf_touch_cross_main=pf_touch_cross_main,
+                             pf_touch_cross_max=pf_touch_cross_max,
+                             pf_pseudo_gap_from_main=pf_pseudo_gap_from_main,
                              unmerge_bundle_mode=unmerge_bundle_mode,
                              restore_demoted_mains=restore_demoted_mains,
                              require_provenance=require_provenance,
@@ -2088,6 +2112,7 @@ function(
                              stem_backfill_min_shower_len=stem_backfill_min_shower_len,
                              shower_conn3_unreachable=shower_conn3_unreachable,
                              conn3_unreachable_min_len=conn3_unreachable_min_len,
+                             conn3_stitch_max=conn3_stitch_max,
                              shower_traj_michel_stem=shower_traj_michel_stem,
                              michel_stem_traj_min_len=michel_stem_traj_min_len,
                              michel_stem_traj_max_len=michel_stem_traj_max_len,

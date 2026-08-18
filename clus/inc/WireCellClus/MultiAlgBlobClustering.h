@@ -247,6 +247,34 @@ namespace WireCell::Clus {
             // charge.  Inert unless pf_shower_vertex_barrier is also on.
             // C++ default false => byte-identical legacy output.
             bool pf_orphan_audit_only{false};
+            // ---- doc sbnd_xin/docs/pr/84 round 2 (display-only family) ----
+            // pf_direct_when_touching: a conn-2/3 shower whose fitted charge
+            // comes within pf_touch_max of the main vertex is rendered as a
+            // direct leaf instead of under a synthetic gamma/neutron carrier.
+            // The carrier means "the PR graph could not walk there"; when the
+            // charge demonstrably touches the vertex the neutral parent is a
+            // graph artifact, not physics (evts 283713/316025/407280).
+            // start_connection_type is NOT modified -- kinematics,
+            // mc_included and every tagger are untouched; only the rendered
+            // tree (mabc zip 0-mc.json) can change.  pi0 daughter gammas are
+            // exempt (their carrier is correct by construction).
+            // C++ default false => byte-identical legacy output.
+            bool pf_direct_when_touching{false};
+            double pf_touch_max{3.0 * units::cm};   // read only when F1 on
+            // pf_touch_cross_main: second rung for a conn-2 shower living in
+            // a DIFFERENT cluster than the vertex, when that cluster carries
+            // Flags::main_cluster (the vertex was seated in a small fragment
+            // of the bundle while the event body is elsewhere -- evt 64921).
+            // Wider reach, separately gated and separately flippable.
+            bool pf_touch_cross_main{false};
+            double pf_touch_cross_max{8.0 * units::cm};
+            // pf_pseudo_gap_from_main (= pr/84 P3): in the "start_vtx not in
+            // BFS tree" fallback, anchor the synthetic carrier at the MAIN
+            // vertex instead of the shower's own start vertex, so a genuinely
+            // remote association draws its real gap instead of collapsing to
+            // a zero-length node (pr/84 sec 4: 15 such, median 38.8 cm).
+            // C++ default false => byte-identical legacy output.
+            bool pf_pseudo_gap_from_main{false};
         };
        private:
         std::vector<BeePFConfig> m_bee_pf_configs;

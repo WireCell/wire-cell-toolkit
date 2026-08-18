@@ -1640,3 +1640,136 @@ bool PatternAlgorithms::orphan_dup_audit(Graph& graph, Facade::Cluster& cluster,
     }
     return n_merged > 0;
 }
+
+// doc sbnd_xin/docs/pr/84 round 2 (F3 = pr/84 P2 "conn3_stitch").  A main
+// cluster is one contiguous lump of charge, yet its segment graph can be
+// disconnected (pr/54 keep-isolated residuals arrive as -- the source
+// comment's own words -- "a disconnected piece of this cluster's graph";
+// snap_main_vertex_to_kink can strand the main vertex on a tiny component,
+// SBND evt 283713).  Downstream, shower_conn3_unreachable promotes the
+// unreachable pieces to conn-3 "association" showers while logging anchor
+// distances of millimetres, and the Bee PF writer then hangs them under
+// synthetic gamma/neutron carriers.  This pass runs AFTER mvga and BEFORE
+// clustering_points: bridge each component whose closest approach to the
+// reachable side is within m_conn3_stitch_max with a real rough-path
+// segment, then refit once, so every later pass sees a connected graph and
+// the piece is classified conn-1 naturally.  Wider gaps still fall through
+// to the conn3_unreachable backstop.
+bool PatternAlgorithms::stitch_disconnected_main_cluster(Graph& graph, Facade::Cluster& cluster,
+                                                         VertexPtr main_vertex,
+                                                         TrackFitting& track_fitter,
+                                                         IDetectorVolumes::pointer dv)
+{
+    if (m_conn3_stitch_max <= 0) return false;
+    if (!main_vertex || !main_vertex->descriptor_valid()) return false;
+
+    constexpr int kEditCap = 8;  // same paranoia cap as mvga / orphan_dup_audit
+
+    // All in-cluster segments in stable index order (orphan_dup_audit recipe).
+    auto cluster_segments = [&]() {
+        std::vector<SegmentPtr> segs;
+        for (const auto& vd : ordered_nodes(graph)) {
+            VertexPtr vtx = graph[vd].vertex;
+            if (!vtx || vtx->cluster() != &cluster) continue;
+            for (auto edesc : sorted_out_edges(vd, graph)) {
+                SegmentPtr sg = graph[edesc].segment;
+                if (!sg) continue;
+                if (std::find(segs.begin(), segs.end(), sg) != segs.end()) continue;
+                segs.push_back(sg);
+            }
+        }
+        std::sort(segs.begin(), segs.end(), SegmentIndexCmp{});
+        return segs;
+    };
+
+    // Rough-path edge v1 -> v2 unless one already exists (orphan_dup_audit's
+    // connect_direct; no `created` bookkeeping -- nothing later reads it).
+    auto connect_direct = [&](VertexPtr v1, VertexPtr v2) -> SegmentPtr {
+        if (!v1 || !v2 || v1 == v2) return nullptr;
+        if (SegmentPtr ex = find_segment(graph, v1, v2)) return ex;
+        Facade::geo_point_t p1 = v1->wcpt().point;
+        Facade::geo_point_t p2 = v2->wcpt().point;
+        auto path_points = do_rough_path(cluster, p1, p2);
+        if (path_points.size() < 2) return nullptr;
+        auto sg = create_segment_for_cluster(cluster, dv, path_points, 0);
+        if (!sg) return nullptr;
+        add_segment(graph, sg, v1, v2);
+        return sg;
+    };
+
+    int n_stitched = 0;
+    bool flag_continue = true;
+    while (flag_continue && n_stitched < kEditCap) {
+        flag_continue = false;
+
+        const auto reachable = reachable_without(graph, cluster, main_vertex, nullptr);
+
+        // Global argmin over (unreachable segment, reachable vertex) of the
+        // segment's closest fitted approach to the vertex -- the same metric
+        // shower_conn3_unreachable logs as anchor_dis.  Stable iteration
+        // (segments by index, vertices by node order) + strict < keeps the
+        // argmin deterministic.
+        double best_dis = 1e9;
+        SegmentPtr best_seg = nullptr;
+        VertexPtr best_vtx = nullptr;
+        for (const auto& sg : cluster_segments()) {
+            auto [sv1, sv2] = find_vertices(graph, sg);
+            if (!sv1 || !sv2) continue;
+            // An edge's two endpoints share a component: testing one suffices.
+            if (!sv1->descriptor_valid() || reachable.count(sv1->get_descriptor())) continue;
+            for (const auto& vd : ordered_nodes(graph)) {
+                if (!reachable.count(vd)) continue;
+                VertexPtr vtx = graph[vd].vertex;
+                if (!vtx || vtx->cluster() != &cluster) continue;
+                WireCell::Point vp = vtx->fit().valid() ? vtx->fit().point : vtx->wcpt().point;
+                const double dis = segment_get_closest_point(sg, vp).first;
+                if (dis >= 0 && dis < best_dis) {
+                    best_dis = dis;
+                    best_seg = sg;
+                    best_vtx = vtx;
+                }
+            }
+        }
+
+        if (!best_seg || best_dis > m_conn3_stitch_max) break;
+
+        // Component-side anchor: the bridged segment's endpoint vertex nearer
+        // the chosen reachable vertex.  (The closest approach may be
+        // mid-segment; vertex-to-vertex bridging is the accepted
+        // approximation at these <~3 cm gaps -- breaking the segment is out
+        // of scope, recorded in the round doc.)
+        auto [cv1, cv2] = find_vertices(graph, best_seg);
+        if (!cv1 || !cv2) break;
+        WireCell::Point rp = best_vtx->fit().valid() ? best_vtx->fit().point : best_vtx->wcpt().point;
+        auto vtx_pt = [](const VertexPtr& v) {
+            return v->fit().valid() ? v->fit().point : v->wcpt().point;
+        };
+        VertexPtr comp_vtx = (point_dis(vtx_pt(cv1), rp) <= point_dis(vtx_pt(cv2), rp)) ? cv1 : cv2;
+
+        SegmentPtr bridge = connect_direct(best_vtx, comp_vtx);
+        if (!bridge) {
+            // do_rough_path could not cross the gap (genuinely disconnected
+            // charge): leave the component to the conn3_unreachable backstop.
+            SPDLOG_LOGGER_DEBUG(s_log,
+                "pr84 conn3_stitch: decline cluster={} gap={:.2f}cm (no rough path)",
+                cluster.ident(), best_dis/units::cm);
+            break;
+        }
+
+        SPDLOG_LOGGER_DEBUG(s_log,
+            "pr84 conn3_stitch: bridge cluster={} gap={:.2f}cm seg_len={:.2f}cm comp_seg_len={:.2f}cm",
+            cluster.ident(), best_dis/units::cm,
+            segment_track_length(bridge)/units::cm,
+            segment_track_length(best_seg)/units::cm);
+        ++n_stitched;
+        flag_continue = true;
+    }
+
+    if (n_stitched > 0) {
+        track_fitter.do_multi_tracking(true, true, false, m_fit_exclusion, false, &cluster);
+        SPDLOG_LOGGER_DEBUG(s_log,
+            "pr84 conn3_stitch: fired cluster={} bridges={} (refit done)",
+            cluster.ident(), n_stitched);
+    }
+    return n_stitched > 0;
+}
