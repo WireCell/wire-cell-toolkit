@@ -350,6 +350,7 @@ void MultiAlgBlobClustering::configure(const WireCell::Configuration& cfg)
             pfc.merge_metadata_key = get<std::string>(pf, "merge_metadata_key", "");
             pfc.merge_node_text = get<std::string>(pf, "merge_node_text", "");
             pfc.merge_id_offset = get<int>(pf, "merge_id_offset", pfc.merge_id_offset);
+            pfc.emit_empty = get<bool>(pf, "emit_empty", false);
             pfc.pf_track_main_cluster_only = get<bool>(pf, "pf_track_main_cluster_only", false);
             pfc.pf_shower_vertex_barrier = get<bool>(pf, "pf_shower_vertex_barrier", false);
             pfc.pf_shower_parent_precedence = get<bool>(pf, "pf_shower_parent_precedence", false);
@@ -361,6 +362,7 @@ void MultiAlgBlobClustering::configure(const WireCell::Configuration& cfg)
             pfc.pf_orphan_audit_only = get<bool>(pf, "pf_orphan_audit_only", false);
             m_bee_pf_configs.push_back(pfc);
             m_bee_pf_trees[pfc.name] = Bee::ParticleTree(pfc.name);
+            if (pfc.emit_empty) { m_bee_pf_emit_empty.insert(pfc.name); }
             SPDLOG_LOGGER_DEBUG(log, "Configured bee_pf: name={} visitor={}", pfc.name, pfc.visitor);
         }
     }
@@ -609,7 +611,9 @@ void MultiAlgBlobClustering::flush(int ident)
 
     // Flush particle-flow mc trees
     for (auto& [name, tree] : m_bee_pf_trees) {
-        if (!tree.empty()) {
+        // emit_empty: write the layer even with no nodes, so a consumer can rely
+        // on it existing for every event.  Otherwise keep the historical skip.
+        if (!tree.empty() || m_bee_pf_emit_empty.count(name)) {
             write_obj(tree);
             tree.reset();
         }
@@ -1172,17 +1176,38 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
     }
     auto& tree = map_it->second;
 
+    // Upstream (truth) tree, if a producer published one -- fetched BEFORE the
+    // reco availability checks below.  The reco half is absent on any event the
+    // neutrino tagger declines, which is most of them, and the truth half must
+    // survive that: priority is truth+reco > truth alone > empty.
+    const bool have_upstream = !cfg.merge_metadata_key.empty()
+        && m_in_metadata.isMember(cfg.merge_metadata_key);
+    // Bail-out shared by every "no reco" path: emit whatever we do have.
+    auto emit_without_reco = [&](const char* why) {
+        if (have_upstream) {
+            tree.set_particles(m_in_metadata[cfg.merge_metadata_key]);
+            SPDLOG_LOGGER_DEBUG(log, "fill_bee_pf_tree '{}': {} -- emitting {} upstream "
+                                "node(s), no reco", cfg.name, why,
+                                m_in_metadata[cfg.merge_metadata_key].size());
+        }
+        else if (cfg.emit_empty) {
+            tree.set_particles(Json::arrayValue);
+            SPDLOG_LOGGER_DEBUG(log, "fill_bee_pf_tree '{}': {} and no upstream tree -- "
+                                "emitting an empty layer", cfg.name, why);
+        }
+        else {
+            SPDLOG_LOGGER_DEBUG(log, "fill_bee_pf_tree '{}': {}, skipping", cfg.name, why);
+        }
+    };
+
     auto pr_graph = grouping.get_pr_graph();
-    if (!pr_graph) return;
+    if (!pr_graph) { emit_without_reco("no PR graph"); return; }
 
     auto tf = grouping.get_track_fitting();
-    if (!tf) return;
+    if (!tf) { emit_without_reco("no TrackFitting"); return; }
 
     auto main_vertex = tf->get_main_vertex();
-    if (!main_vertex) {
-        SPDLOG_LOGGER_DEBUG(log, "fill_bee_pf_tree '{}': no main vertex, skipping", cfg.name);
-        return;
-    }
+    if (!main_vertex) { emit_without_reco("no main vertex"); return; }
     const auto* main_cluster = main_vertex->cluster();
     // F1 (doc pr/34 §10.2): the prototype's track loop keeps only segments in
     // the main vertex's cluster, compared by cluster ID (NeutrinoID.cxx:1488).
@@ -2141,8 +2166,7 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
     // tree can only both be seen if they are grafted into a single array: the
     // upstream nodes stay at top level and everything built above is hung under
     // one node whose text carries the reconstructed neutrino summary.
-    if (!cfg.merge_metadata_key.empty()
-        && m_in_metadata.isMember(cfg.merge_metadata_key)) {
+    if (have_upstream) {
         const Configuration& upstream = m_in_metadata[cfg.merge_metadata_key];
 
         // Renumber the reco subtree out of the upstream id space.  jsTree needs
@@ -3076,8 +3100,10 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
             auto pf_gs = ensemble.with_name(pf_cfg.grouping);
             if (pf_gs.empty()) continue;
             const auto& pf_grouping = *pf_gs[0];
-            auto tf = pf_grouping.get_track_fitting();
-            if (!tf) continue;
+            // No `if (!tf) continue` here: fill_bee_pf_tree must still run when
+            // there is no TrackFitting so it can emit the truth-only (or empty)
+            // tree.  Skipping it here silently dropped mc.json for every event
+            // without a neutrino candidate -- 6 of 10 on the run-925-23 pilot.
             fill_bee_pf_tree(pf_cfg, pf_grouping);
         }
     }

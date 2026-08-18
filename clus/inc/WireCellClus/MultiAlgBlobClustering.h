@@ -197,6 +197,11 @@ namespace WireCell::Clus {
             // the reco side uses cluster*1000+seg, so they do not collide today
             // -- this makes that structural rather than lucky.
             int merge_id_offset{20000000};
+            // Emit this tree even when it ends up with no nodes at all, so the
+            // Bee layer is always present for the event.  Default false keeps
+            // the historical behaviour (the flush skips empty trees), so a
+            // config that does not set it is unchanged.
+            bool emit_empty{false};
             std::string visitor;             // dump after this visitor runs
             std::string grouping{"live"};    // grouping to read PR graph from
             // Prototype-parity options (defaults => legacy output, byte-identical):
@@ -276,6 +281,8 @@ namespace WireCell::Clus {
 
         // Storage: flushed at end of each event (same lifecycle as m_bee_points)
         std::map<std::string, WireCell::Bee::ParticleTree> m_bee_pf_trees;
+        // Names from m_bee_pf_configs whose emit_empty is set.
+        std::set<std::string> m_bee_pf_emit_empty;
 
         void fill_bee_pf_tree(const BeePFConfig& cfg, const Facade::Grouping& grouping, bool flag_print = false);
 

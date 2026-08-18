@@ -2557,6 +2557,12 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=null,
                     name: 'mc',
                     [if bee_sink != null then 'merge_metadata_key']: 'bee_pf_truth',
                     [if bee_sink != null then 'merge_node_text']: 'reco nu',
+                    // Always emit the layer.  The reco half is absent on every
+                    // event the neutrino tagger declines -- most of them -- and
+                    // without this the whole mc.json vanished for those events,
+                    // taking the TRUTH tree with it (6 of 10 on the run-925-23
+                    // pilot).  Priority is truth+reco > truth alone > empty.
+                    emit_empty: true,
                     // Trigger the dump on the LAST stage that touches what the
                     // node text reports.  The pf dump fires inside the pipeline
                     // loop right after its trigger visitor, so keying it on
