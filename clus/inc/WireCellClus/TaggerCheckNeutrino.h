@@ -596,6 +596,9 @@ public:
         // vertex from the end_point farthest-vertex search.  See
         // PatternAlgorithms::m_shower_endpoint_exclude_start_vertex.
         bool m_shower_endpoint_exclude_start_vertex{false};
+        // doc pr/91 round 1 F1: also skip a node no member segment touches.
+        // See PatternAlgorithms::m_shower_endpoint_skip_orphan_vtx.
+        bool m_shower_endpoint_skip_orphan_vtx{false};
         // doc sbnd_xin/docs/pr/40 -- track (proton/pion/muon) mis-identified
         // as electron.  F1 restores prototype-faithful PID persistence
         // (threaded via track_pid_options()); F2/F3 guard the wholesale

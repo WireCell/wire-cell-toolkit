@@ -137,6 +137,7 @@ TEST_CASE("clus knob defaults: TaggerCheckNeutrino switches are all OFF")
     CHECK_KNOB_NUM(cfg, "conn3_unreachable_min_len", 10.0);                   // cm; inert while K5 off
     CHECK_KNOB_NUM(cfg, "conn3_stitch_max", 0.0);                             // cm; doc pr/84 r2 F3; 0 = off
     CHECK_KNOB_BOOL(cfg, "shower_dedup_start_seg", false);                    // doc pr/84 r3 S1; off = legacy
+    CHECK_KNOB_BOOL(cfg, "shower_endpoint_skip_orphan_vtx", false);           // doc pr/91 r1 F1; off = legacy end_point search
     CHECK_KNOB_BOOL(cfg, "shower_traj_michel_stem", false);                   // doc pr/74 round 4 K6
     CHECK_KNOB_NUM(cfg, "michel_stem_traj_min_len", 15.0);                    // cm; inert while K6 off
     CHECK_KNOB_NUM(cfg, "michel_stem_traj_max_len", 45.0);                    // cm; inert while K6 off

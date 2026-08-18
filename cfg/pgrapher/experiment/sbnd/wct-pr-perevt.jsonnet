@@ -1118,6 +1118,17 @@ function(
     // m_shower_endpoint_exclude_start_vertex{false} is still the library
     // default; only the SBND operating point flips it on.
     shower_endpoint_exclude_start_vertex = true,
+    // doc pr/91 round 1 F1: the same end_point search must also skip a
+    // node NO member segment of the shower touches.  set_start_vertex()
+    // calls add_vertex(), so a conn-2/3 shower's view carries a foreign
+    // cluster's vertex; the exclusion above hides it only while that
+    // shower owns it, and Shower::add_shower imports it into an absorber
+    // where it then wins the farthest-vertex search.  Measured on
+    // 169626/174752/347129/394532 with shower_dedup_start_seg ON: 6 orphan
+    // imports, 5 wrong end points (394532's 30 MeV and 66 MeV showers end
+    // on each other).  C++ default false.  DEFAULT OFF pending the gate;
+    // flip only on the owner's word.
+    shower_endpoint_skip_orphan_vtx = false,
     // doc sbnd_xin/docs/pr/40 sec 17 (2026-08-06): track (proton/pion/muon)
     // mis-identified as electron.  F1 restores prototype-faithful PID
     // persistence (segment_determine_dir_track); F2/F3 spare a segment
@@ -2138,6 +2149,7 @@ function(
                              shower_flag_pdg_electron=shower_flag_pdg_electron,
                              shower_less_id_tiebreak=shower_less_id_tiebreak,
                              shower_endpoint_exclude_start_vertex=shower_endpoint_exclude_start_vertex,
+                             shower_endpoint_skip_orphan_vtx=shower_endpoint_skip_orphan_vtx,
                              track_pid_persist_dqdx=track_pid_persist_dqdx,
                              shower_reclass_dqdx_guard=shower_reclass_dqdx_guard,
                              shower_topo_dqdx_guard=shower_topo_dqdx_guard,

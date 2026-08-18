@@ -2086,6 +2086,31 @@ namespace WireCell::Clus::PR {
         // byte-identical.
         bool m_shower_endpoint_exclude_start_vertex{false};
 
+        // doc sbnd_xin/docs/pr/91 round 1 F1 -- the same farthest-vertex search
+        // must also skip a node that NO member segment of the shower touches.
+        //
+        // Such orphan nodes are a toolkit-only artefact: set_start_vertex()
+        // calls add_vertex() (PRShower.h fill_sets docstring, doc pr/38), so a
+        // conn-2/3 shower's view carries a vertex from somebody else's cluster
+        // -- routinely the nearest main-cluster or in-shower vertex chosen by
+        // shower_clustering_in_other_clusters.  While that shower owns it,
+        // m_shower_endpoint_exclude_start_vertex above hides it.  Then
+        // Shower::add_shower's node loop imports it wholesale into an absorber,
+        // where it is no longer the start vertex, the exclusion stops applying,
+        // and it wins the search.  shower_dedup_start_seg (doc pr/84 round 3,
+        // SBND ON) is what makes that routine: on SBND 169626/174752/347129/
+        // 394532 it produced 6 orphan imports and 5 wrong end points -- 394532's
+        // 30 MeV and 66 MeV showers report each other's charge as their end,
+        // and a single-13.6cm-segment shower in 347129 reports an end 67.8 cm
+        // away in another cluster.  Forcing the knob off reproduces 0 orphans /
+        // 0 bad end points / 0 add_shower calls on the same four events.
+        //
+        // end_point feeds the Bee PF node's `data.end` and every
+        // cal_dir_3vector / angle consumer; kine_charge, kine_energy_particle
+        // and kine_reco_Enu sum over member segments and do NOT move.
+        // Default false = legacy search, byte-identical.
+        bool m_shower_endpoint_skip_orphan_vtx{false};
+
         // 2D charge maps cached for the duration of shower_clustering_with_nv.
         // Populated once by collect_charge_maps(); reused by calculate_shower_kinematics
         // and all cal_kine_charge call sites to avoid O(N_hits) re-collection per shower.

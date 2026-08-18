@@ -71,7 +71,8 @@ namespace WireCell::Clus::PR {
             return c ? c->get_cluster_id() * 1000 + sid : sid;
         }
         void probe_endpoint(Shower& sh, Graph& g, const WireCell::Point& sp,
-                            const VertexPtr& start_vtx, int conn, bool excl, const char* tag)
+                            const VertexPtr& start_vtx, int conn, bool excl,
+                            bool skip_orphans, const char* tag)
         {
             if (!endpoint_dbg()) return;
             std::set<node_descriptor> touched;
@@ -84,9 +85,10 @@ namespace WireCell::Clus::PR {
             }
             std::fprintf(stderr,
                          "SHOWER_ENDPOINT tag=%s shower_id=%d start_seg=%d conn=%d nseg=%d "
-                         "excl_start_vtx=%d start=(%.3f,%.3f,%.3f) member_clusters=%zu\n",
+                         "excl_start_vtx=%d skip_orphans=%d start=(%.3f,%.3f,%.3f) "
+                         "member_clusters=%zu\n",
                          tag, sh.get_shower_id(), seg_display_id(sh.start_segment()),
-                         conn, sh.get_num_segments(), excl ? 1 : 0,
+                         conn, sh.get_num_segments(), excl ? 1 : 0, skip_orphans ? 1 : 0,
                          sp.x() / WireCell::units::cm, sp.y() / WireCell::units::cm,
                          sp.z() / WireCell::units::cm, member_clusters.size());
             double best = -1;
@@ -94,9 +96,11 @@ namespace WireCell::Clus::PR {
             for (auto vdesc : ordered_nodes(sh, g)) {
                 VertexPtr v = g[vdesc].vertex;
                 if (!v) continue;
-                const bool skipped = excl && v == start_vtx;
+                const int touch0 = touched.count(vdesc) ? 1 : 0;
+                const bool skipped = (excl && v == start_vtx) ||
+                                     (skip_orphans && !touch0);
                 const double dis = (sp - v->fit().point).magnitude();
-                const int touch = touched.count(vdesc) ? 1 : 0;
+                const int touch = touch0;
                 std::fprintf(stderr,
                              "SHOWER_ENDPOINT   shower_id=%d cand_vtx=%d cluster=%d "
                              "(%.3f,%.3f,%.3f) dis=%.3f touched_by_member=%d skipped=%d\n",
@@ -1099,7 +1103,20 @@ namespace WireCell::Clus::PR {
         return vec_dQ_dx;
     }
 
-    void Shower::calculate_kinematics(const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, bool exclude_start_vertex_from_endpoint){
+    void Shower::calculate_kinematics(const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, bool exclude_start_vertex_from_endpoint, bool endpoint_skip_orphan_vertices){
+        // doc pr/91 round 1 -- the set of view nodes an actual member segment
+        // touches.  Built once here and consulted by both farthest-vertex
+        // searches below.  Empty (and never consulted) when the knob is off, so
+        // the legacy path does not even pay for the walk.
+        std::set<node_descriptor> pr91_touched;
+        if (endpoint_skip_orphan_vertices) {
+            for (auto edesc : ordered_edges(*this, m_full_graph)) {
+                SegmentPtr seg = m_full_graph[edesc].segment;
+                if (!seg || !seg->descriptor_valid()) continue;
+                pr91_touched.insert(boost::source(edesc, m_full_graph));
+                pr91_touched.insert(boost::target(edesc, m_full_graph));
+            }
+        }
         int nsegments = this->edges().size();
         
         if (nsegments == 1) {
@@ -1183,13 +1200,16 @@ namespace WireCell::Clus::PR {
                     // Find farthest vertex — ordered_nodes gives index-stable tie-breaking
                     probe_endpoint(*this, m_full_graph, data.start_point, m_start_vertex,
                                    data.start_connection_type,
-                                   exclude_start_vertex_from_endpoint, "single_seg");
+                                   exclude_start_vertex_from_endpoint,
+                                   endpoint_skip_orphan_vertices, "single_seg");
                     double max_dis = 0;
                     const auto& view = this->view_graph();
                     for (auto vdesc : ordered_nodes(*this, m_full_graph)) {
                         VertexPtr vtx = view[vdesc].vertex;
                         if (!vtx) continue;
                         if (exclude_start_vertex_from_endpoint && vtx == m_start_vertex) continue;
+                        // doc pr/91 F1: never end on a vertex no member segment reaches.
+                        if (endpoint_skip_orphan_vertices && !pr91_touched.count(vdesc)) continue;
                         double dis = (data.start_point - vtx->fit().point).magnitude();
                         if (dis > max_dis) {
                             max_dis = dis;
@@ -1295,12 +1315,15 @@ namespace WireCell::Clus::PR {
             // Find farthest vertex for end_point — ordered_nodes gives index-stable tie-breaking
             probe_endpoint(*this, m_full_graph, data.start_point, m_start_vertex,
                            data.start_connection_type,
-                           exclude_start_vertex_from_endpoint, "multi_seg");
+                           exclude_start_vertex_from_endpoint,
+                           endpoint_skip_orphan_vertices, "multi_seg");
             double max_dis = 0;
             for (auto vdesc : ordered_nodes(*this, m_full_graph)) {
                 VertexPtr vtx = view[vdesc].vertex;
                 if (!vtx) continue;
                 if (exclude_start_vertex_from_endpoint && vtx == m_start_vertex) continue;
+                // doc pr/91 F1: never end on a vertex no member segment reaches.
+                if (endpoint_skip_orphan_vertices && !pr91_touched.count(vdesc)) continue;
                 double dis = (data.start_point - vtx->fit().point).magnitude();
                 if (dis > max_dis) {
                     max_dis = dis;

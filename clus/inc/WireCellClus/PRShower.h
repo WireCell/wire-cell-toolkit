@@ -228,7 +228,23 @@ namespace WireCell::Clus::PR {
         // (conn_type 2/3) shower's end_point can collapse onto its own start
         // vertex (e.g. the neutrino vertex) instead of growing away from it.
         // Default false = legacy search over every node, byte-identical.
-        void calculate_kinematics(const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, bool exclude_start_vertex_from_endpoint = false);
+        //
+        // endpoint_skip_orphan_vertices (doc pr/91 round 1): the same search
+        // must also skip a node that NO member segment of this shower touches.
+        // Such "orphan" nodes exist because set_start_vertex() calls
+        // add_vertex() (the toolkit-only divergence recorded at fill_sets
+        // above), so a conn-2/3 shower's view holds a vertex belonging to
+        // somebody else's cluster.  exclude_start_vertex_from_endpoint hides it
+        // only while THIS shower still calls it its start vertex; add_shower()
+        // then imports it wholesale into an absorber where that exclusion no
+        // longer applies, and it wins the farthest-vertex search.  Measured on
+        // SBND 169626/174752/347129/394532: 6 absorbs import a foreign vertex
+        // and 5 become the reported end_point -- 394532's 30 MeV and 66 MeV
+        // showers end on each other's charge.  end_point feeds the Bee PF node
+        // and the cal_dir_3vector/angle consumers; kine_* sum over member
+        // segments and are untouched either way.
+        // Default false = legacy search, byte-identical.
+        void calculate_kinematics(const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, bool exclude_start_vertex_from_endpoint = false, bool endpoint_skip_orphan_vertices = false);
         void calculate_kinematics_long_muon(IndexedSegmentSet& segments_in_muons, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, bool exclude_start_vertex_from_endpoint = false);
 
     private:
