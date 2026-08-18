@@ -1593,6 +1593,20 @@ function(
     mvga_op1_post = true,
     mvga_carry_max = null,
     swap_orphan_dup_audit = true,
+    // doc pr/83 r4 -- projective duplicate collapse at the main vertex,
+    // SBND PRODUCTION ON (owner flip 2026-08-18, 4-event Bee scan
+    // approved): a 1-track-1-shower stem split into two 3D tracks that
+    // overlap in >= 2 of 3 wire views; the charge-starved member reads
+    // stem dQ/dx ratio 0.08-0.28 final, 0.33-0.48 at mvga time -- hence
+    // ratio 0.55, margin over the measured 0.47/0.48 and far from
+    // MIP-parity two-prongs (geometry gates alone: zero false pairs in
+    // 559 events).  Gates: knob-off 1024/1024 byte-identical; projective
+    // census 4->0 (511) + 2->0 (mcp2k), zero new; r3 census stays 0;
+    // pr/86 census identical; movers = exactly the census events.
+    // Escapes: SBND_MVGA_PROJ_DUP_FRAC, SBND_MVGA_PROJ_DQDX_RATIO
+    // (or -A).  null omits the keys => byte-identical legacy.
+    mvga_proj_dup_frac = 0.7,
+    mvga_proj_dqdx_ratio = 0.55,
     // doc pr/51 (18255-506746) -- DL rerank cross-cluster swap guard: with
     // the guard on, an accepted DL vertex can never swap the main cluster
     // (506746: one confident uBooNE-net voxel, s_dl = +576, moved the
@@ -2126,6 +2140,8 @@ function(
                              mvga_op1_post=mvga_op1_post,
                              mvga_carry_max=mvga_carry_max,
                              swap_orphan_dup_audit=swap_orphan_dup_audit,
+                             mvga_proj_dup_frac=mvga_proj_dup_frac,
+                             mvga_proj_dqdx_ratio=mvga_proj_dqdx_ratio,
                              dl_vtx_swap_guard=dl_vtx_swap_guard,
                              dl_vtx_topo_weight=dl_vtx_topo_weight,
                              dl_vtx_topo_center=dl_vtx_topo_center,
