@@ -917,6 +917,18 @@ function(
     pf_touch_cross_main = false,
     pf_touch_cross_max = null,
     pf_pseudo_gap_from_main = true,
+    // doc pr/84 round 3 (G1) -- guarantee unique jsTree node ids in mc.json.
+    // Bee keys its PF tree model by node id, so a repeated id is invalid
+    // input: on SBND 394532 a node and its own descendant both carried id
+    // 8033 and selecting it blanked the whole PF panel (owner report
+    // 2026-08-18).  Display-only: moves ONLY mc.json, and only when a
+    // collision exists.  Kept as the standing invariant even with
+    // shower_dedup_start_seg on (which removes the known source).  Runner
+    // env: SBND_PF_UNIQUE_NODE_IDS.  C++ default stays false.
+    // SBND PRODUCTION ON 2026-08-18 (owner flip): with S1 also on it fired 0
+    // times on the 24-event gate manifest -- it is carried as the standing
+    // invariant, not as a fix.  Legacy escape: -A pf_unique_node_ids=false.
+    pf_unique_node_ids = true,
     // doc pr/38: F2's ON-behavior was CORRECTED in place (owner decision
     // 2026-08-05, no new knobs): the barrier now excludes each shower's
     // start vertex (prototype map_vtx_segs parity, WCShower.cxx:547) so
@@ -1274,6 +1286,30 @@ function(
     // pr/84 sec 13 as the tuning evidence).  Runner env:
     // SBND_CONN3_STITCH_MAX.
     conn3_stitch_max = 1,
+    // doc pr/84 round 3 (S1) -- one shower per start segment.  Two
+    // PR::Showers can be built on the SAME start segment (attributed with
+    // WCT_SHOWER_CREATE_DEBUG: shower_clustering_in_other_clusters picks a
+    // start segment with no claim check at all, and the K5 conn3_unreachable
+    // branch reads a map_segment_in_shower that update_shower_maps only
+    // refreshes at the end of the function).  The twin renders a duplicate PF
+    // node AND is counted twice in kine_energy_particle -- SBND 394532
+    // kine_reco_Enu 352.2 MeV vs 255.5 de-duplicated.  Changes physics
+    // output, so it is a knob: the group collapses onto its most directly
+    // connected member, which absorbs the others' segments, and only that
+    // shower's kinematics are recomputed.  Runner env:
+    // SBND_SHOWER_DEDUP_START_SEG.  C++ default stays false.
+    // SBND PRODUCTION ON 2026-08-18 (owner flip: "this is a clear bug ...
+    // aim to fix the underlying issue").  Gate manifest = the 24 round-2 Bee
+    // events: knob-off byte-identical to production (pr83r3_hash_gate
+    // PASS=48/48), knob-on moves EXACTLY the 4 twin events and inside them
+    // only mabc-pr.zip::data/0/0-mc.json plus the kine/tagger blocks -- every
+    // pctree tarball, every other event and every nusel label byte-identical.
+    // 6 absorptions: 169626 (Enu 825.4->737.3), 174752 (188.7->176.0),
+    // 347129 (700.8->571.9), 394532 (352.2->248.2); no nu-candidate flips.
+    // The 492-event round-2 census is what bounds the population: exactly
+    // these 4 events carry twins.  Legacy escape:
+    // -A shower_dedup_start_seg=false.
+    shower_dedup_start_seg = true,
     // doc sbnd_xin/docs/pr/74 round 4 K6 shower_traj_michel_stem: a stopping
     // muon that emits a Michel electron at the neutrino vertex is
     // reconstructed as ONE EM shower, because track/shower separation flags
@@ -2002,6 +2038,7 @@ function(
                              pf_touch_cross_main=pf_touch_cross_main,
                              pf_touch_cross_max=pf_touch_cross_max,
                              pf_pseudo_gap_from_main=pf_pseudo_gap_from_main,
+                             pf_unique_node_ids=pf_unique_node_ids,
                              unmerge_bundle_mode=unmerge_bundle_mode,
                              restore_demoted_mains=restore_demoted_mains,
                              require_provenance=require_provenance,
@@ -2127,6 +2164,7 @@ function(
                              shower_conn3_unreachable=shower_conn3_unreachable,
                              conn3_unreachable_min_len=conn3_unreachable_min_len,
                              conn3_stitch_max=conn3_stitch_max,
+                             shower_dedup_start_seg=shower_dedup_start_seg,
                              shower_traj_michel_stem=shower_traj_michel_stem,
                              michel_stem_traj_min_len=michel_stem_traj_min_len,
                              michel_stem_traj_max_len=michel_stem_traj_max_len,
