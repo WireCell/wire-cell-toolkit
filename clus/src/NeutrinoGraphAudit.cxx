@@ -1268,7 +1268,213 @@ bool PatternAlgorithms::main_vertex_graph_audit(Graph& graph, Facade::Cluster& c
             "mvga: op1-post fired cluster={} merges={}",
             cluster.ident(), n_op1_post);
     }
-    return fired_ops || n_op1_post > 0;
+
+    // ---- op1-proj: projective duplicate collapse at the main vertex ------
+    // doc pr/83 r4: a 1-track-1-shower stem reported as TWO main-vertex
+    // tracks that overlap in the 2D wire views while separating in 3D --
+    // the fitter split one projective charge corridor across two 3D
+    // interpretations, starving one of charge (stem dQ/dx ratios measured
+    // 0.08-0.28 vs >= 0.7 for genuine two-prong vertices).  3D corridor
+    // overlap reads 0.14-0.58, below every op1/op1-post gate, so rounds 1-3
+    // never fire (138009 12094/12095 o3D=0.58, 168596 14168/14172 o3D=0.14,
+    // 74544 12105/12107 o3D=0.46; each overlaps >= 0.75 in 2 of 3 views).
+    // Candidates are ONLY segment pairs incident on the main vertex (the
+    // shower-stem beginning; 390842-class near-vertex riders are NOT
+    // incident and cannot enter).  Runs post-refit for the same reason as
+    // op1-post: the dQ/dx starvation is a fit product.  Merge recipe is
+    // op1's (keep higher integrated charge, pre-verified reconnects), in
+    // its own fixed-point merge->refit loop.  m_mvga_proj_dup_frac == 0
+    // (default) => skipped => byte-identical.
+    int n_op1_proj = 0;
+    if (m_mvga_proj_dup_frac > 0 && m_mvga_dup_tol > 0
+        && main_vertex->descriptor_valid()) {
+        auto grouping = cluster.grouping();
+        // Per-view 2D overlap: fraction of A's fit points within
+        // m_mvga_dup_tol of B's in view coords (x, cos(a)z - sin(a)y),
+        // wire angles from the pair's (apa,face).  Returns the per-plane
+        // fractions sorted descending, or empty on any inconsistency.
+        auto view_overlaps = [&](const std::vector<Fit>& fa,
+                                 const std::vector<Fit>& fb,
+                                 const std::pair<int,int>& paf) {
+            std::vector<double> out;
+            if (!grouping) return out;
+            const auto [au, av, aw] = grouping->wire_angles(paf.first, paf.second);
+            for (double ang : {au, av, aw}) {
+                const double c = std::cos(ang), s = std::sin(ang);
+                int nin = 0, ntot = 0;
+                for (const auto& pa : fa) {
+                    if (!pa.valid()) continue;
+                    ++ntot;
+                    const double xa = pa.point.x();
+                    const double wa = c*pa.point.z() - s*pa.point.y();
+                    double best = 1e30;
+                    for (const auto& pb : fb) {
+                        if (!pb.valid()) continue;
+                        const double dx = pb.point.x() - xa;
+                        const double dw = c*pb.point.z() - s*pb.point.y() - wa;
+                        best = std::min(best, dx*dx + dw*dw);
+                    }
+                    if (best < m_mvga_dup_tol*m_mvga_dup_tol) ++nin;
+                }
+                if (ntot == 0) return std::vector<double>{};
+                out.push_back(static_cast<double>(nin)/ntot);
+            }
+            std::sort(out.rbegin(), out.rend());
+            return out;
+        };
+        // dQ/dx over the first 8 cm of fitted path from the main vertex.
+        auto stem_dqdx = [&](const SegmentPtr& sg, const WireCell::Point& mvp) {
+            std::vector<const Fit*> fits;
+            for (const auto& f : sg->fits())
+                if (f.valid() && f.dx > 0 && f.dQ >= 0) fits.push_back(&f);
+            if (fits.size() < 2) return -1.0;
+            if (point_dis(fits.back()->point, mvp) < point_dis(fits.front()->point, mvp))
+                std::reverse(fits.begin(), fits.end());
+            double sq = 0, sx = 0;
+            for (const Fit* f : fits) {
+                sq += f->dQ;
+                sx += f->dx;
+                if (sx >= 8*units::cm) break;
+            }
+            return (sx > 0.5*units::cm) ? sq/sx : -1.0;
+        };
+        int proj_rounds = 0;
+        while (proj_rounds < kEditCap && n_op1_proj < kEditCap) {
+        const int proj_before = n_op1_proj;
+        bool flag_continue = true;
+        while (flag_continue && n_op1_proj < kEditCap) {
+            flag_continue = false;
+            if (!main_vertex->descriptor_valid()) break;
+            const WireCell::Point mvp = main_vertex->fit().valid()
+                ? main_vertex->fit().point : main_vertex->wcpt().point;
+            std::vector<SegmentPtr> segs;
+            for (auto edesc : sorted_out_edges(main_vertex->get_descriptor(), graph)) {
+                SegmentPtr sg = graph[edesc].segment;
+                if (!sg) continue;
+                if (std::find(segs.begin(), segs.end(), sg) != segs.end()) continue;
+                segs.push_back(sg);
+            }
+            std::sort(segs.begin(), segs.end(), SegmentIndexCmp{});
+            for (size_t i = 0; i + 1 < segs.size() && !flag_continue; ++i) {
+                for (size_t j = i + 1; j < segs.size() && !flag_continue; ++j) {
+                    SegmentPtr sa = segs[i];
+                    SegmentPtr sb = segs[j];
+                    double la = segment_track_length(sa);
+                    double lb = segment_track_length(sb);
+                    SegmentPtr shorter = (la <= lb) ? sa : sb;
+                    SegmentPtr longer  = (la <= lb) ? sb : sa;
+                    auto pts_s = seg_points(shorter);
+                    auto pts_l = seg_points(longer);
+                    if (pts_s.size() <= static_cast<size_t>(m_mvga_stub_pts)) continue;
+                    // dQ/dx needs fits on both members.
+                    if (seg_valid_fits(shorter) < 2 || seg_valid_fits(longer) < 2) continue;
+                    // Near-parallel gate first (cheap): op1's chord test.
+                    if (m_mvga_dup_angle > 0 && pts_s.size() >= 2 && pts_l.size() >= 2) {
+                        auto ca = pts_s.back() - pts_s.front();
+                        auto cb = pts_l.back() - pts_l.front();
+                        double den = ca.magnitude() * cb.magnitude();
+                        if (den > 0) {
+                            double cosang = std::abs(ca.dot(cb)) / den;
+                            double ang = std::acos(std::clamp(cosang, 0.0, 1.0)) / 3.1415926 * 180.0;
+                            if (ang > m_mvga_dup_angle) continue;
+                        }
+                    }
+                    // Same (apa,face) required -- a cross-face pair has no
+                    // single view frame to compare in.
+                    std::pair<int,int> paf{-1,-1};
+                    for (const auto& f : longer->fits())
+                        if (f.valid() && f.paf.first >= 0) { paf = f.paf; break; }
+                    bool same_paf = (paf.first >= 0);
+                    for (const auto& f : shorter->fits())
+                        if (f.valid() && f.paf.first >= 0 && f.paf != paf) { same_paf = false; break; }
+                    if (!same_paf) continue;
+                    auto ov = view_overlaps(shorter->fits(), longer->fits(), paf);
+                    if (ov.size() < 3) continue;
+                    if (ov[1] > 0.25) {
+                        SPDLOG_LOGGER_TRACE(s_log,
+                            "mvga: op1-proj eval cluster={} pair len {:.2f}/{:.2f}cm views={:.2f}/{:.2f}/{:.2f}",
+                            cluster.ident(), la/units::cm, lb/units::cm, ov[0], ov[1], ov[2]);
+                    }
+                    // 2-of-3 views must read duplicate.
+                    if (ov[1] < m_mvga_proj_dup_frac) continue;
+                    // Stem dQ/dx asymmetry: the projective ghost is charge-
+                    // starved; a genuine collinear two-prong is not.
+                    const double da = stem_dqdx(sa, mvp);
+                    const double db = stem_dqdx(sb, mvp);
+                    if (da <= 0 || db <= 0) continue;
+                    const double ratio = std::min(da, db) / std::max(da, db);
+                    SPDLOG_LOGGER_TRACE(s_log,
+                        "mvga: op1-proj dqdx cluster={} stem {:.3g}/{:.3g} ratio={:.2f} gate={}",
+                        cluster.ident(), da, db, ratio,
+                        (ratio < m_mvga_proj_dqdx_ratio) ? "pass" : "decline");
+                    if (ratio >= m_mvga_proj_dqdx_ratio) continue;
+
+                    // Keep the higher-integrated-charge member (op1 rule).
+                    double qa = segment_integrated_dQ(sa);
+                    double qb = segment_integrated_dQ(sb);
+                    SegmentPtr loser;
+                    if (qa == qb) loser = shorter;
+                    else loser = (qa < qb) ? sa : sb;
+                    SegmentPtr survivor = (loser == sa) ? sb : sa;
+
+                    auto [lv1, lv2] = find_vertices(graph, loser);
+                    auto [sv1, sv2] = find_vertices(graph, survivor);
+                    if (!lv1 || !lv2 || !sv1 || !sv2) continue;
+
+                    std::vector<std::pair<VertexPtr, VertexPtr>> plans;
+                    bool feasible = true;
+                    for (VertexPtr le : {lv1, lv2}) {
+                        if (le == sv1 || le == sv2) continue;
+                        WireCell::Point lp = le->fit().valid() ? le->fit().point : le->wcpt().point;
+                        WireCell::Point p1 = sv1->fit().valid() ? sv1->fit().point : sv1->wcpt().point;
+                        WireCell::Point p2 = sv2->fit().valid() ? sv2->fit().point : sv2->wcpt().point;
+                        VertexPtr target = (point_dis(lp, p1) <= point_dis(lp, p2)) ? sv1 : sv2;
+                        if (find_segment(graph, le, target)) continue;  // already linked
+                        Facade::geo_point_t a = le->wcpt().point;
+                        Facade::geo_point_t b = target->wcpt().point;
+                        if (do_rough_path(cluster, a, b).size() < 2) { feasible = false; break; }
+                        plans.emplace_back(le, target);
+                    }
+                    if (!feasible) {
+                        SPDLOG_LOGGER_TRACE(s_log,
+                            "mvga: op1-proj reconnect-infeasible cluster={} loser_len={:.2f}cm",
+                            cluster.ident(), segment_track_length(loser)/units::cm);
+                        continue;
+                    }
+
+                    remove_segment(graph, loser);
+                    for (auto& [le, target] : plans) connect_direct(le, target);
+                    cleanup_vertex(lv1);
+                    cleanup_vertex(lv2);
+
+                    SPDLOG_LOGGER_DEBUG(s_log,
+                        "mvga: op1-proj dup-merge cluster={} removed seg len={:.2f}cm sumdQ={:.3g} "
+                        "views={:.2f}/{:.2f}/{:.2f}@{:.1f}mm dqdx_ratio={:.2f} "
+                        "vs survivor len={:.2f}cm sumdQ={:.3g} reconnects={}",
+                        cluster.ident(), segment_track_length(loser)/units::cm,
+                        (loser == sa) ? qa : qb, ov[0], ov[1], ov[2],
+                        m_mvga_dup_tol/units::mm, ratio,
+                        segment_track_length(survivor)/units::cm,
+                        (loser == sa) ? qb : qa, plans.size());
+                    ++n_op1_proj;
+                    flag_continue = true;
+                }
+            }
+        }
+        if (n_op1_proj == proj_before) break;  // fixed point
+        track_fitter.do_multi_tracking(true, true, false, m_fit_exclusion, false, &cluster);
+        SPDLOG_LOGGER_DEBUG(s_log,
+            "mvga: op1-proj round={} cluster={} merges={} (refit done)",
+            proj_rounds, cluster.ident(), n_op1_proj - proj_before);
+        ++proj_rounds;
+        }  // proj_rounds fixed-point loop
+    }
+    if (n_op1_proj > 0) {
+        SPDLOG_LOGGER_DEBUG(s_log,
+            "mvga: op1-proj fired cluster={} merges={}",
+            cluster.ident(), n_op1_proj);
+    }
+    return fired_ops || n_op1_post > 0 || n_op1_proj > 0;
 }
 
 // doc pr/83 r3 (sec 9.5, Mechanism C): one unscoped duplicate-corridor pass

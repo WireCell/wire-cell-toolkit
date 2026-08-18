@@ -1462,6 +1462,9 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               mvga_op1_post=false,
               mvga_carry_max=null,
               swap_orphan_dup_audit=false,
+              // doc pr/83 r4 -- projective dup collapse; null omits => byte-identical.
+              mvga_proj_dup_frac=null,
+              mvga_proj_dqdx_ratio=null,
               // doc pr/51 (18255-506746) -- DL rerank cross-cluster swap
               // guard.  C++ default false; false omits the key =>
               // byte-identical.
@@ -2184,6 +2187,8 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
             mvga_op1_post=mvga_op1_post,
             mvga_carry_max=mvga_carry_max,
             swap_orphan_dup_audit=swap_orphan_dup_audit,
+            mvga_proj_dup_frac=mvga_proj_dup_frac,
+            mvga_proj_dqdx_ratio=mvga_proj_dqdx_ratio,
             dl_vtx_swap_guard=dl_vtx_swap_guard,
             dl_vtx_topo_weight=dl_vtx_topo_weight,
             dl_vtx_topo_center=dl_vtx_topo_center,
@@ -3028,6 +3033,9 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
               mvga_op1_post=false,
               mvga_carry_max=null,
               swap_orphan_dup_audit=false,
+              // doc pr/83 r4 -- projective dup collapse; null omits => byte-identical.
+              mvga_proj_dup_frac=null,
+              mvga_proj_dqdx_ratio=null,
               dl_vtx_swap_guard=false,
               // doc pr/89 Arm C (C2) -- rule-1 topology term in the DL
               // rerank composite (weight, frac center).  C++ defaults 0/0;
@@ -3367,6 +3375,8 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
             mvga_op1_post=mvga_op1_post,
             mvga_carry_max=mvga_carry_max,
             swap_orphan_dup_audit=swap_orphan_dup_audit,
+            mvga_proj_dup_frac=mvga_proj_dup_frac,
+            mvga_proj_dqdx_ratio=mvga_proj_dqdx_ratio,
                 dl_vtx_swap_guard=dl_vtx_swap_guard,
                 dl_vtx_topo_weight=dl_vtx_topo_weight,
                 dl_vtx_topo_center=dl_vtx_topo_center,

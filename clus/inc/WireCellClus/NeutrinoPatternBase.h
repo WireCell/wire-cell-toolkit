@@ -697,6 +697,24 @@ namespace WireCell::Clus::PR {
         // them (TaggerCheckNeutrino.cxx).  false (default) => byte-identical.
         bool   m_swap_orphan_dup_audit{false}; ///< dup-audit non-main clusters: at swap + pre-shower sweep (doc pr/83 r3)
 
+        // ---- doc sbnd_xin/docs/pr/83 round 4: projective duplicate collapse --
+        // A 1-track-1-shower stem can be reported as TWO main-vertex tracks
+        // that overlap in >=2 of the 3 wire views while separating in 3D
+        // (the fitter places the same 2D charge on two 3D interpretations;
+        // the starved one reads far-below-MIP stem dQ/dx).  3D corridor
+        // overlap reads 0.14-0.58 (below every op1 gate), so round 3 never
+        // fires (138009 12094/12095, 168596 14168/14172, 74544 12105/12107).
+        // 0 = pass disabled = byte-identical legacy.  When > 0: minimum
+        // 2nd-best per-view overlap fraction (views at wire_angles, coord
+        // (x, cos(a)z - sin(a)y), tol = m_mvga_dup_tol).
+        double m_mvga_proj_dup_frac{0};
+        // Stem dQ/dx asymmetry gate: merge only when min/max of the two
+        // members' dQ/dx over the first 8 cm from the main vertex is below
+        // this ratio (measured: ghosts 0.08-0.28; real two-prong vertices
+        // carry MIP-level charge on both prongs).  Only consulted when
+        // m_mvga_proj_dup_frac > 0, so the default is inert.
+        double m_mvga_proj_dqdx_ratio{0.4};
+
         // ---- doc sbnd_xin/docs/pr/51 round 4: rough-path diagnostic probe --
         // Diagnostic-only TRACE instrumentation for the near-vertex
         // short-cut investigation (see TaggerCheckNeutrino.h for the full
