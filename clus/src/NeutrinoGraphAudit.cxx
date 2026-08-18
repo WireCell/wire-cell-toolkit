@@ -230,7 +230,12 @@ bool PatternAlgorithms::main_vertex_graph_audit(Graph& graph, Facade::Cluster& c
     constexpr int kEditCap = 8;  // per-op paranoia cap; every real case needs <= 3
 
     // In-scope segments of the main cluster, in stable graph-index order.
-    auto in_scope_segments = [&]() {
+    // doc pr/83 r3: radius is now a parameter so op1 can consult its own
+    // m_mvga_op1_radius (op2 keeps m_mvga_radius); radius < 0 => unscoped
+    // (whole main cluster).  include_created lifts the `created` exemption
+    // for the m_mvga_op1_post pass only -- op1/op2 pass false and see the
+    // exact legacy set.
+    auto in_scope_segments = [&](double radius, bool include_created = false) {
         std::vector<SegmentPtr> segs;
         for (const auto& vd : ordered_nodes(graph)) {
             VertexPtr vtx = graph[vd].vertex;
@@ -239,10 +244,12 @@ bool PatternAlgorithms::main_vertex_graph_audit(Graph& graph, Facade::Cluster& c
                 SegmentPtr sg = graph[edesc].segment;
                 if (!sg) continue;
                 if (std::find(segs.begin(), segs.end(), sg) != segs.end()) continue;
-                if (created.count(sg)) continue;
-                bool near = false;
-                for (const auto& p : seg_points(sg)) {
-                    if (point_dis(p, mv_pt) < m_mvga_radius) { near = true; break; }
+                if (!include_created && created.count(sg)) continue;
+                bool near = (radius < 0);
+                if (!near) {
+                    for (const auto& p : seg_points(sg)) {
+                        if (point_dis(p, mv_pt) < radius) { near = true; break; }
+                    }
                 }
                 if (near) segs.push_back(sg);
             }
@@ -303,11 +310,16 @@ bool PatternAlgorithms::main_vertex_graph_audit(Graph& graph, Facade::Cluster& c
     };
 
     // ---- op1: duplicate-corridor merge -----------------------------------
+    // doc pr/83 r3 sec 9.2/9.3: op1's scope and threshold decouple from
+    // op2/op3's via m_mvga_op1_radius / m_mvga_op1_dup_frac.  Both default
+    // 0 => the shared members apply => byte-identical legacy.
+    const double op1_radius = (m_mvga_op1_radius != 0) ? m_mvga_op1_radius : m_mvga_radius;
+    const double op1_dup_frac = (m_mvga_op1_dup_frac > 0) ? m_mvga_op1_dup_frac : m_mvga_dup_frac;
     if (m_mvga_dup_frac > 0 && m_mvga_dup_tol > 0) {
         bool flag_continue = true;
         while (flag_continue && n_op1 < kEditCap) {
             flag_continue = false;
-            auto segs = in_scope_segments();
+            auto segs = in_scope_segments(op1_radius);
             // pr/83 round 2 diagnostic: which segments op1 even considered,
             // and the main-vertex point the mvga_radius scope is centered on
             // -- a duplicate pair outside scope never reaches the eval TRACE
@@ -343,7 +355,24 @@ bool PatternAlgorithms::main_vertex_graph_audit(Graph& graph, Facade::Cluster& c
                             segment_track_length(longer)/units::cm,
                             pts_s.size(), pts_l.size(), frac);
                     }
-                    if (frac < m_mvga_dup_frac) continue;
+                    // doc pr/83 r3: the relaxed m_mvga_op1_dup_frac applies
+                    // only when BOTH members are >= 10 cm -- the census's
+                    // own min-length for a duplicate finding (pr83_dup_metric
+                    // / pr83r2_census.py), i.e. exactly the class the knob
+                    // exists to recover (404684: 15.8/61.5 cm at 0.74).
+                    // Measured adversity is all short riders: 390842's
+                    // 1.91 cm rider merges at 0.75 under a flat 0.7 and the
+                    // kine walk then loses the whole 1.03 GeV muon chain
+                    // (Enu 1148 -> 10 MeV); 285567 (1.98 cm @ 0.75) and
+                    // 268067 (1.66 cm @ 0.75) flip nue_score the same way.
+                    // A sub-10 cm rider's overlap fraction rides on a
+                    // handful of points and stays gated at m_mvga_dup_frac
+                    // (production 0.8).  Knob off => both gates equal =>
+                    // byte-identical at any length.
+                    const double frac_gate =
+                        (std::min(la, lb) >= 10*units::cm) ? op1_dup_frac
+                                                           : m_mvga_dup_frac;
+                    if (frac < frac_gate) continue;
                     // Near-parallel guard: a corridor duplicate runs
                     // (anti)parallel to its ribbon (268067 rider 13 deg,
                     // 360535 pair ~parallel, 285567 shorts 7-11 deg); a
@@ -444,7 +473,7 @@ bool PatternAlgorithms::main_vertex_graph_audit(Graph& graph, Facade::Cluster& c
         bool flag_continue = true;
         while (flag_continue && n_op2 < kEditCap) {
             flag_continue = false;
-            for (SegmentPtr sg : in_scope_segments()) {
+            for (SegmentPtr sg : in_scope_segments(m_mvga_radius)) {
                 if (seg_valid_fits(sg) == 0) continue;  // unfitted: no charge verdict possible
                 auto [v1, v2] = find_vertices(graph, sg);
                 if (!v1 || !v2 || !v1->descriptor_valid() || !v2->descriptor_valid()) continue;
@@ -753,6 +782,17 @@ bool PatternAlgorithms::main_vertex_graph_audit(Graph& graph, Facade::Cluster& c
                         // the junction and stub survive for the rest.
                         if (created.count(stub)) {
                             if (m_mvga_splice_straighten <= 0) continue;  // no charge gate available
+                            // doc pr/83 r3 (sec 8.5 fallback): decline a
+                            // multi-prong carry outright above the cap --
+                            // the stub stays as the shared trunk.  0
+                            // (default) => unlimited => byte-identical.
+                            if (m_mvga_carry_max > 0 &&
+                                static_cast<int>(prongs.size()) > m_mvga_carry_max) {
+                                SPDLOG_LOGGER_TRACE(s_log,
+                                    "mvga: op3 created-splice decline cluster={} reason=carry-max prongs={} cap={}",
+                                    cluster.ident(), prongs.size(), m_mvga_carry_max);
+                                continue;
+                            }
                             double stub_arc = 0;
                             const auto& swc0 = stub->wcpts();
                             for (size_t i = 1; i < swc0.size(); ++i)
@@ -805,6 +845,17 @@ bool PatternAlgorithms::main_vertex_graph_audit(Graph& graph, Facade::Cluster& c
                         }
 
                         if (best_angle < m_mvga_interposed_angle) continue;
+
+                        // doc pr/83 r3 (sec 8.5 fallback): decline a
+                        // multi-prong carry outright above the cap.  0
+                        // (default) => unlimited => byte-identical.
+                        if (m_mvga_carry_max > 0 &&
+                            static_cast<int>(prongs.size()) > m_mvga_carry_max) {
+                            SPDLOG_LOGGER_TRACE(s_log,
+                                "mvga: op3 stub-interposed decline cluster={} reason=carry-max prongs={} cap={}",
+                                cluster.ident(), prongs.size(), m_mvga_carry_max);
+                            continue;
+                        }
 
                         // All-or-nothing: every prong must pre-verify
                         // (endpoint wcpt matches, far-slot free -- B.7)
@@ -1076,8 +1127,8 @@ bool PatternAlgorithms::main_vertex_graph_audit(Graph& graph, Facade::Cluster& c
     }  // audit_pass (op3 <-> op3.5 interleave)
 
     // ---- op4: one local refit --------------------------------------------
-    const bool fired = (n_op1 + n_op2 + n_op3 + n_op3b) > 0;
-    if (fired) {
+    const bool fired_ops = (n_op1 + n_op2 + n_op3 + n_op3b) > 0;
+    if (fired_ops) {
         track_fitter.do_multi_tracking(true, true, false, m_fit_exclusion, false, &cluster);
         SPDLOG_LOGGER_DEBUG(s_log,
             "mvga: fired cluster={} op1={} op2={} op3={} (refit done)",
@@ -1087,5 +1138,294 @@ bool PatternAlgorithms::main_vertex_graph_audit(Graph& graph, Facade::Cluster& c
                 "mvga: op3.5 fired cluster={} collapses={}", cluster.ident(), n_op3b);
         }
     }
-    return fired;
+
+    // ---- op1-post: duplicate-corridor pass over the REFITTED op3 products --
+    // doc pr/83 r3 (sec 8, class A): the pr/85 carry + pr/86 straighten give
+    // N carried prongs the SAME near-anchor trunk geometry, and op1 -- which
+    // runs BEFORE op3 and skips the `created` set -- can never see it
+    // (138009: six stacked prongs, 12 dup pairs, op1=0).  This pass re-runs
+    // op1's exact metric and merge recipe AFTER the op4 refit, with the
+    // `created` exemption lifted; benign carries overlap nothing and are
+    // untouched.  Position is load-bearing: measured pre-refit (74544 /
+    // 138009 TRACE), the carried prongs read overlap 0.30-0.50 -- it is the
+    // refit that routes them onto the shared charge ridge (>= 0.7, the
+    // census geometry) -- so this pass must see REFITTED points, and a
+    // second refit (below) re-derives the survivor set.  Duplicated from
+    // op1 above rather than shared (op1 stays byte-untouched); false
+    // (default) => skipped => byte-identical.
+    int n_op1_post = 0;
+    if (m_mvga_op1_post && m_mvga_dup_frac > 0 && m_mvga_dup_tol > 0) {
+        // Iterate to a FIXED POINT, refitting between rounds: the refit that
+        // follows a merge round can itself pull the remaining prongs onto
+        // the newly-consolidated charge ridge (138009 TRACE: the last pair
+        // reads 0.50 before the first round's 5 merges + refit, 0.71 after
+        // -- above threshold, invisible to a single pass).  kEditCap bounds
+        // total merges, so the outer loop terminates.
+        int post_rounds = 0;
+        while (post_rounds < kEditCap && n_op1_post < kEditCap) {
+        const int post_before = n_op1_post;
+        bool flag_continue = true;
+        while (flag_continue && n_op1_post < kEditCap) {
+            flag_continue = false;
+            auto segs = in_scope_segments(op1_radius, /*include_created=*/true);
+            for (size_t i = 0; i + 1 < segs.size() && !flag_continue; ++i) {
+                for (size_t j = i + 1; j < segs.size() && !flag_continue; ++j) {
+                    SegmentPtr sa = segs[i];
+                    SegmentPtr sb = segs[j];
+                    double la = segment_track_length(sa);
+                    double lb = segment_track_length(sb);
+                    SegmentPtr shorter = (la <= lb) ? sa : sb;
+                    SegmentPtr longer  = (la <= lb) ? sb : sa;
+                    auto pts_s = seg_points(shorter);
+                    auto pts_l = seg_points(longer);
+                    if (pts_s.size() <= static_cast<size_t>(m_mvga_stub_pts)) continue;
+                    double frac = path_overlap_fraction(pts_s, pts_l, m_mvga_dup_tol);
+                    if (frac > 0.25) {
+                        SPDLOG_LOGGER_TRACE(s_log,
+                            "mvga: op1-post eval cluster={} pair len {:.2f}/{:.2f}cm npts {}/{} overlap={:.2f}",
+                            cluster.ident(), segment_track_length(shorter)/units::cm,
+                            segment_track_length(longer)/units::cm,
+                            pts_s.size(), pts_l.size(), frac);
+                    }
+                    if (frac < op1_dup_frac) continue;
+                    if (m_mvga_dup_angle > 0 && pts_s.size() >= 2 && pts_l.size() >= 2) {
+                        auto chord = [](const std::vector<WireCell::Point>& pts) {
+                            return pts.back() - pts.front();
+                        };
+                        auto ca = chord(pts_s);
+                        auto cb = chord(pts_l);
+                        double den = ca.magnitude() * cb.magnitude();
+                        if (den > 0) {
+                            double cosang = std::abs(ca.dot(cb)) / den;
+                            double ang = std::acos(std::clamp(cosang, 0.0, 1.0)) / 3.1415926 * 180.0;
+                            if (ang > m_mvga_dup_angle) continue;
+                        }
+                    }
+
+                    // Keep the higher-integrated-charge member (tie: keep
+                    // longer).  A created (fitless) member integrates 0 and
+                    // loses to any fitted one -- the wanted outcome: the
+                    // carried duplicate dies, the original survives.
+                    double qa = segment_integrated_dQ(sa);
+                    double qb = segment_integrated_dQ(sb);
+                    SegmentPtr loser;
+                    if (qa == qb) loser = shorter;
+                    else loser = (qa < qb) ? sa : sb;
+                    SegmentPtr survivor = (loser == sa) ? sb : sa;
+
+                    auto [lv1, lv2] = find_vertices(graph, loser);
+                    auto [sv1, sv2] = find_vertices(graph, survivor);
+                    if (!lv1 || !lv2 || !sv1 || !sv2) continue;
+
+                    std::vector<std::pair<VertexPtr, VertexPtr>> plans;
+                    bool feasible = true;
+                    for (VertexPtr le : {lv1, lv2}) {
+                        if (le == sv1 || le == sv2) continue;
+                        WireCell::Point lp = le->fit().valid() ? le->fit().point : le->wcpt().point;
+                        WireCell::Point p1 = sv1->fit().valid() ? sv1->fit().point : sv1->wcpt().point;
+                        WireCell::Point p2 = sv2->fit().valid() ? sv2->fit().point : sv2->wcpt().point;
+                        VertexPtr target = (point_dis(lp, p1) <= point_dis(lp, p2)) ? sv1 : sv2;
+                        if (find_segment(graph, le, target)) continue;  // already linked
+                        Facade::geo_point_t a = le->wcpt().point;
+                        Facade::geo_point_t b = target->wcpt().point;
+                        if (do_rough_path(cluster, a, b).size() < 2) { feasible = false; break; }
+                        plans.emplace_back(le, target);
+                    }
+                    if (!feasible) {
+                        SPDLOG_LOGGER_TRACE(s_log,
+                            "mvga: op1-post reconnect-infeasible cluster={} loser_len={:.2f}cm",
+                            cluster.ident(), segment_track_length(loser)/units::cm);
+                        continue;
+                    }
+
+                    remove_segment(graph, loser);
+                    for (auto& [le, target] : plans) connect_direct(le, target);
+                    cleanup_vertex(lv1);
+                    cleanup_vertex(lv2);
+
+                    SPDLOG_LOGGER_DEBUG(s_log,
+                        "mvga: op1-post dup-merge cluster={} removed seg len={:.2f}cm sumdQ={:.3g} "
+                        "overlap={:.2f}@{:.1f}mm vs survivor len={:.2f}cm sumdQ={:.3g} reconnects={}",
+                        cluster.ident(), segment_track_length(loser)/units::cm,
+                        (loser == sa) ? qa : qb, frac, m_mvga_dup_tol/units::mm,
+                        segment_track_length(survivor)/units::cm,
+                        (loser == sa) ? qb : qa, plans.size());
+                    ++n_op1_post;
+                    flag_continue = true;
+                }
+            }
+        }
+        if (n_op1_post == post_before) break;  // fixed point: nothing merged this round
+        track_fitter.do_multi_tracking(true, true, false, m_fit_exclusion, false, &cluster);
+        SPDLOG_LOGGER_DEBUG(s_log,
+            "mvga: op1-post round={} cluster={} merges={} (refit done)",
+            post_rounds, cluster.ident(), n_op1_post - post_before);
+        ++post_rounds;
+        }  // post_rounds fixed-point loop
+    }
+    if (n_op1_post > 0) {
+        SPDLOG_LOGGER_DEBUG(s_log,
+            "mvga: op1-post fired cluster={} merges={}",
+            cluster.ident(), n_op1_post);
+    }
+    return fired_ops || n_op1_post > 0;
+}
+
+// doc pr/83 r3 (sec 9.5, Mechanism C): one unscoped duplicate-corridor pass
+// over a cluster being ABANDONED by swap_main_cluster.  Fork-by-duplication
+// of op1's metric and merge recipe (main_vertex_graph_audit above stays
+// byte-untouched): no radius (the cluster has no main vertex to center one
+// on -- that absence is the entire defect), no `created` exemption (nothing
+// here is mid-pass state), same overlap/angle gates via the op1-effective
+// members, same keep-the-higher-charge merge, same pre-verified reconnects,
+// one per-cluster refit if anything merged so the survivor geometry is what
+// the bundle/nusel layer ultimately reports.  Caller gates on
+// m_swap_orphan_dup_audit; this function itself is knob-free.
+bool PatternAlgorithms::orphan_dup_audit(Graph& graph, Facade::Cluster& cluster,
+                                         TrackFitting& track_fitter,
+                                         IDetectorVolumes::pointer dv)
+{
+    if (!(m_mvga_dup_frac > 0 && m_mvga_dup_tol > 0)) return false;
+    const double dup_frac = (m_mvga_op1_dup_frac > 0) ? m_mvga_op1_dup_frac : m_mvga_dup_frac;
+    constexpr int kEditCap = 8;  // same paranoia cap as mvga
+
+    auto cluster_segments = [&]() {
+        std::vector<SegmentPtr> segs;
+        for (const auto& vd : ordered_nodes(graph)) {
+            VertexPtr vtx = graph[vd].vertex;
+            if (!vtx || vtx->cluster() != &cluster) continue;
+            for (auto edesc : sorted_out_edges(vd, graph)) {
+                SegmentPtr sg = graph[edesc].segment;
+                if (!sg) continue;
+                if (std::find(segs.begin(), segs.end(), sg) != segs.end()) continue;
+                segs.push_back(sg);
+            }
+        }
+        std::sort(segs.begin(), segs.end(), SegmentIndexCmp{});
+        return segs;
+    };
+
+    // Rough-path edge v1 -> v2 unless one already exists (op1's
+    // connect_direct without the `created` bookkeeping -- no later op reads
+    // it here).
+    auto connect_direct = [&](VertexPtr v1, VertexPtr v2) -> SegmentPtr {
+        if (!v1 || !v2 || v1 == v2) return nullptr;
+        if (SegmentPtr ex = find_segment(graph, v1, v2)) return ex;
+        Facade::geo_point_t p1 = v1->wcpt().point;
+        Facade::geo_point_t p2 = v2->wcpt().point;
+        auto path_points = do_rough_path(cluster, p1, p2);
+        if (path_points.size() < 2) return nullptr;
+        auto sg = create_segment_for_cluster(cluster, dv, path_points, 0);
+        if (!sg) return nullptr;
+        add_segment(graph, sg, v1, v2);
+        return sg;
+    };
+
+    // Drop a now-degree-0 vertex (no main vertex exists on an abandoned
+    // cluster; protected breaks still survive -- pr/48 / pr/50 precedent).
+    auto cleanup_vertex = [&](VertexPtr vtx) {
+        if (!vtx) return;
+        if (vtx->flags_any(VertexFlags::kProtectedBreak)) return;
+        if (!vtx->descriptor_valid()) return;
+        if (boost::degree(vtx->get_descriptor(), graph) == 0) {
+            remove_vertex(graph, vtx);
+        }
+    };
+
+    int n_merged = 0;
+    bool flag_continue = true;
+    while (flag_continue && n_merged < kEditCap) {
+        flag_continue = false;
+        auto segs = cluster_segments();
+        for (size_t i = 0; i + 1 < segs.size() && !flag_continue; ++i) {
+            for (size_t j = i + 1; j < segs.size() && !flag_continue; ++j) {
+                SegmentPtr sa = segs[i];
+                SegmentPtr sb = segs[j];
+                double la = segment_track_length(sa);
+                double lb = segment_track_length(sb);
+                SegmentPtr shorter = (la <= lb) ? sa : sb;
+                SegmentPtr longer  = (la <= lb) ? sb : sa;
+                auto pts_s = seg_points(shorter);
+                auto pts_l = seg_points(longer);
+                if (pts_s.size() <= static_cast<size_t>(m_mvga_stub_pts)) continue;
+                double frac = path_overlap_fraction(pts_s, pts_l, m_mvga_dup_tol);
+                if (frac > 0.25) {
+                    SPDLOG_LOGGER_TRACE(s_log,
+                        "mvga: orphan-dup eval cluster={} pair len {:.2f}/{:.2f}cm npts {}/{} overlap={:.2f}",
+                        cluster.ident(), segment_track_length(shorter)/units::cm,
+                        segment_track_length(longer)/units::cm,
+                        pts_s.size(), pts_l.size(), frac);
+                }
+                if (frac < dup_frac) continue;
+                if (m_mvga_dup_angle > 0 && pts_s.size() >= 2 && pts_l.size() >= 2) {
+                    auto chord = [](const std::vector<WireCell::Point>& pts) {
+                        return pts.back() - pts.front();
+                    };
+                    auto ca = chord(pts_s);
+                    auto cb = chord(pts_l);
+                    double den = ca.magnitude() * cb.magnitude();
+                    if (den > 0) {
+                        double cosang = std::abs(ca.dot(cb)) / den;
+                        double ang = std::acos(std::clamp(cosang, 0.0, 1.0)) / 3.1415926 * 180.0;
+                        if (ang > m_mvga_dup_angle) continue;
+                    }
+                }
+
+                double qa = segment_integrated_dQ(sa);
+                double qb = segment_integrated_dQ(sb);
+                SegmentPtr loser;
+                if (qa == qb) loser = shorter;
+                else loser = (qa < qb) ? sa : sb;
+                SegmentPtr survivor = (loser == sa) ? sb : sa;
+
+                auto [lv1, lv2] = find_vertices(graph, loser);
+                auto [sv1, sv2] = find_vertices(graph, survivor);
+                if (!lv1 || !lv2 || !sv1 || !sv2) continue;
+
+                std::vector<std::pair<VertexPtr, VertexPtr>> plans;
+                bool feasible = true;
+                for (VertexPtr le : {lv1, lv2}) {
+                    if (le == sv1 || le == sv2) continue;
+                    WireCell::Point lp = le->fit().valid() ? le->fit().point : le->wcpt().point;
+                    WireCell::Point p1 = sv1->fit().valid() ? sv1->fit().point : sv1->wcpt().point;
+                    WireCell::Point p2 = sv2->fit().valid() ? sv2->fit().point : sv2->wcpt().point;
+                    VertexPtr target = (point_dis(lp, p1) <= point_dis(lp, p2)) ? sv1 : sv2;
+                    if (find_segment(graph, le, target)) continue;  // already linked
+                    Facade::geo_point_t a = le->wcpt().point;
+                    Facade::geo_point_t b = target->wcpt().point;
+                    if (do_rough_path(cluster, a, b).size() < 2) { feasible = false; break; }
+                    plans.emplace_back(le, target);
+                }
+                if (!feasible) {
+                    SPDLOG_LOGGER_TRACE(s_log,
+                        "mvga: orphan-dup reconnect-infeasible cluster={} loser_len={:.2f}cm",
+                        cluster.ident(), segment_track_length(loser)/units::cm);
+                    continue;
+                }
+
+                remove_segment(graph, loser);
+                for (auto& [le, target] : plans) connect_direct(le, target);
+                cleanup_vertex(lv1);
+                cleanup_vertex(lv2);
+
+                SPDLOG_LOGGER_DEBUG(s_log,
+                    "mvga: orphan-dup merge cluster={} removed seg len={:.2f}cm sumdQ={:.3g} "
+                    "overlap={:.2f}@{:.1f}mm vs survivor len={:.2f}cm sumdQ={:.3g} reconnects={}",
+                    cluster.ident(), segment_track_length(loser)/units::cm,
+                    (loser == sa) ? qa : qb, frac, m_mvga_dup_tol/units::mm,
+                    segment_track_length(survivor)/units::cm,
+                    (loser == sa) ? qb : qa, plans.size());
+                ++n_merged;
+                flag_continue = true;
+            }
+        }
+    }
+
+    if (n_merged > 0) {
+        track_fitter.do_multi_tracking(true, true, false, m_fit_exclusion, false, &cluster);
+        SPDLOG_LOGGER_DEBUG(s_log,
+            "mvga: orphan-dup fired cluster={} merges={} (refit done)",
+            cluster.ident(), n_merged);
+    }
+    return n_merged > 0;
 }

@@ -4218,7 +4218,8 @@ Facade::Cluster* PatternAlgorithms::check_switch_main_cluster(Graph& graph, Clus
             // Find which cluster this vertex belongs to and swap
             for (auto& [cluster, vertex] : map_cluster_main_vertices) {
                 if (vertex == temp_main_vertex_1 && cluster != main_cluster) {
-                    main_cluster = swap_main_cluster(*cluster, *main_cluster, other_clusters);
+                    main_cluster = swap_main_cluster(*cluster, *main_cluster, other_clusters,
+                                                     &graph, &track_fitter, dv);
                     break;
                 }
             }
@@ -4228,7 +4229,7 @@ Facade::Cluster* PatternAlgorithms::check_switch_main_cluster(Graph& graph, Clus
     return main_cluster;
 }
 
-Facade::Cluster* PatternAlgorithms::check_switch_main_cluster_2(Graph& graph, VertexPtr temp_main_vertex, Facade::Cluster* max_length_cluster, Facade::Cluster* main_cluster, std::vector<Facade::Cluster*>& other_clusters){
+Facade::Cluster* PatternAlgorithms::check_switch_main_cluster_2(Graph& graph, VertexPtr temp_main_vertex, Facade::Cluster* max_length_cluster, Facade::Cluster* main_cluster, std::vector<Facade::Cluster*>& other_clusters, TrackFitting* track_fitter, IDetectorVolumes::pointer dv){
     if (!temp_main_vertex || !max_length_cluster || !main_cluster) return main_cluster;
     
     bool flag_switch = false;
@@ -4261,7 +4262,8 @@ Facade::Cluster* PatternAlgorithms::check_switch_main_cluster_2(Graph& graph, Ve
     if (flag_switch) {
         SPDLOG_LOGGER_TRACE(s_log, "check_switch_main_cluster_2: switch main cluster {} -> {}",
             main_cluster->get_cluster_id(), max_length_cluster->get_cluster_id());
-        main_cluster = swap_main_cluster(*max_length_cluster, *main_cluster, other_clusters);
+        main_cluster = swap_main_cluster(*max_length_cluster, *main_cluster, other_clusters,
+                                         &graph, track_fitter, dv);
     }
     
     return main_cluster;
@@ -4925,7 +4927,8 @@ bool PatternAlgorithms::determine_overall_main_vertex_DL(
 
             // Switch main_cluster if DL vertex belongs to a different cluster
             if (main_cluster && min_vertex->cluster() && min_vertex->cluster() != main_cluster) {
-                main_cluster = swap_main_cluster(*min_vertex->cluster(), *main_cluster, other_clusters);
+                main_cluster = swap_main_cluster(*min_vertex->cluster(), *main_cluster, other_clusters,
+                                                 &graph, &track_fitter, dv);
             }
 
             // Record DL-chosen vertex as the neutrino vertex for the main cluster
@@ -5037,7 +5040,8 @@ VertexPtr PatternAlgorithms::determine_overall_main_vertex(Graph& graph, Cluster
     MS t_find_max_length(Clock::now() - t0); t0 = Clock::now();
 
     // Examine main vertices first
-    examine_main_vertices(graph, map_cluster_main_vertices, main_cluster, other_clusters);
+    examine_main_vertices(graph, map_cluster_main_vertices, main_cluster, other_clusters,
+                          &track_fitter, dv);
     MS t_examine_main_vertices(Clock::now() - t0); t0 = Clock::now();
 
     // Check for main cluster switch
@@ -5054,7 +5058,7 @@ VertexPtr PatternAlgorithms::determine_overall_main_vertex(Graph& graph, Cluster
                                              ? map_cluster_main_vertices[main_cluster] : nullptr;
                 if (temp_main_vertex) {
                     main_cluster = check_switch_main_cluster_2(graph, temp_main_vertex, max_length_cluster, main_cluster,
-                                                               other_clusters);
+                                                               other_clusters, &track_fitter, dv);
                 }
             }
         }

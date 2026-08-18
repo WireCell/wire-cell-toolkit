@@ -3437,7 +3437,7 @@ Facade::geo_vector_t PatternAlgorithms::calc_dir_cluster(Graph& graph, Facade::C
 }
 
 
-   Facade::Cluster* PatternAlgorithms::swap_main_cluster(Facade::Cluster& new_main_cluster, Facade::Cluster& old_main_cluster, std::vector<Facade::Cluster*>& other_clusters){
+   Facade::Cluster* PatternAlgorithms::swap_main_cluster(Facade::Cluster& new_main_cluster, Facade::Cluster& old_main_cluster, std::vector<Facade::Cluster*>& other_clusters, Graph* graph, TrackFitting* track_fitter, IDetectorVolumes::pointer dv){
        // doc pr/59: this function has no log line at any call site (DL rerank,
        // check_switch_main_cluster[_2], the two_end_break protected-cluster
        // path) -- a swap here is otherwise invisible except by cross-
@@ -3452,9 +3452,29 @@ Facade::geo_vector_t PatternAlgorithms::calc_dir_cluster(Graph& graph, Facade::C
                old_main_cluster.get_cluster_id(), new_main_cluster.get_cluster_id());
        }
 
+       // doc pr/83 r3 (sec 9.5, Mechanism C): the abandoned cluster is
+       // still what the bundle/nusel layer reports (its cluster id was
+       // fixed before pattern recognition started), yet after this swap no
+       // duplicate-corridor pass ever touches it again -- 350935's
+       // overlap-1.00 duplicate, born in find_proto_vertex, survives to Bee
+       // untouched.  Give it the one dup audit it would otherwise never
+       // receive, BEFORE it is set aside.  Knob off (default) => skipped =>
+       // byte-identical; knob on with a caller that could not thread
+       // graph/track_fitter/dv logs the gap rather than silently auditing
+       // nothing.
+       if (m_swap_orphan_dup_audit) {
+           if (graph && track_fitter && dv) {
+               orphan_dup_audit(*graph, old_main_cluster, *track_fitter, dv);
+           } else {
+               SPDLOG_LOGGER_TRACE(s_log,
+                   "swap_main_cluster: orphan-dup-audit skipped for cluster {} (caller lacks graph/fitter/dv)",
+                   old_main_cluster.get_cluster_id());
+           }
+       }
+
        // Remove main_cluster flag from old main cluster (set to 0 to unset)
        old_main_cluster.set_flag(Facade::Flags::main_cluster, 0);
-       
+
        // Add old main cluster to other_clusters
        other_clusters.push_back(&old_main_cluster);
        
@@ -3474,7 +3494,7 @@ Facade::geo_vector_t PatternAlgorithms::calc_dir_cluster(Graph& graph, Facade::C
        return &new_main_cluster;
     }
 
-    void PatternAlgorithms::examine_main_vertices(Graph& graph, ClusterVertexMap& map_cluster_main_vertices, Facade::Cluster*& main_cluster, std::vector<Facade::Cluster*>& other_clusters){
+    void PatternAlgorithms::examine_main_vertices(Graph& graph, ClusterVertexMap& map_cluster_main_vertices, Facade::Cluster*& main_cluster, std::vector<Facade::Cluster*>& other_clusters, TrackFitting* track_fitter, IDetectorVolumes::pointer dv){
         if (!main_cluster) return;
         
         // Calculate cluster length cut
@@ -3654,7 +3674,8 @@ Facade::geo_vector_t PatternAlgorithms::calc_dir_cluster(Graph& graph, Facade::C
                             
                             if (closest_dis_pc < 10 * units::cm && angle2 < 25) {
                                 // Swap main cluster
-                                main_cluster = swap_main_cluster(*cluster, *main_cluster, other_clusters);
+                                main_cluster = swap_main_cluster(*cluster, *main_cluster, other_clusters,
+                                                                 &graph, track_fitter, dv);
                             }
                         }
                     }

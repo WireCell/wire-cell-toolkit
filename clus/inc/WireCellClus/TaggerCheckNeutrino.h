@@ -191,6 +191,11 @@ public:
         double m_mvga_splice_straighten{0.0}; // cm; op3 post-carry straighten reach past the junction (doc pr/86 round 2); 0 = concatenation verbatim, byte-identical
         double m_mvga_approach_collapse{0.0}; // cm; op3.5 junction-collapse radius around the main vertex (doc pr/86 round 2); 0 = pass skipped, byte-identical
         double m_mvga_straighten_radius{0.0}; // cm; R1/R2 straight-chain charge-veto radius (doc pr/86 round 2); 0 = prototype 0.2 cm; inert unless straighten/collapse on
+        double m_mvga_op1_radius{0.0};    // cm; op1-only scope radius (doc pr/83 r3); 0 = use mvga_radius, -1 = unscoped, byte-identical at 0
+        double m_mvga_op1_dup_frac{0.0};  // fraction; op1-only overlap threshold (doc pr/83 r3); 0 = use mvga_dup_frac, byte-identical
+        bool   m_mvga_op1_post{false};    // post-op3 duplicate-corridor pass incl. created segments (doc pr/83 r3 class A); false = byte-identical
+        int    m_mvga_carry_max{0};       // op3 interposed-carry prong-count ceiling (doc pr/83 r3); 0 = unlimited, byte-identical
+        bool   m_swap_orphan_dup_audit{false}; // dup-audit the abandoned main cluster inside swap_main_cluster (doc pr/83 r3 Mechanism C); false = byte-identical
         // Long shower-topology demote length, cm (doc sbnd_xin/docs/pr/25
         // sec 3).  0 => the guard never fires => byte-identical.  50 is the
         // scan-supported operating point (9/10 owner-scanned events; ~45

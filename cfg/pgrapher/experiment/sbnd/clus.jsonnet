@@ -1452,6 +1452,16 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               mvga_splice_straighten=null,
               mvga_approach_collapse=null,
               mvga_straighten_radius=null,
+              // doc pr/83 r3: op1 scope/threshold decouple (cm / fraction;
+              // radius -1 = unscoped), post-op3 dup pass, carry cap,
+              // abandoned-cluster dup audit.  C++ defaults 0/0/false/0/false
+              // (all legacy).  Keys omitted when null/false =>
+              // byte-identical.
+              mvga_op1_radius=null,
+              mvga_op1_dup_frac=null,
+              mvga_op1_post=false,
+              mvga_carry_max=null,
+              swap_orphan_dup_audit=false,
               // doc pr/51 (18255-506746) -- DL rerank cross-cluster swap
               // guard.  C++ default false; false omits the key =>
               // byte-identical.
@@ -2169,6 +2179,11 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
             mvga_splice_straighten=mvga_splice_straighten,
             mvga_approach_collapse=mvga_approach_collapse,
             mvga_straighten_radius=mvga_straighten_radius,
+            mvga_op1_radius=mvga_op1_radius,
+            mvga_op1_dup_frac=mvga_op1_dup_frac,
+            mvga_op1_post=mvga_op1_post,
+            mvga_carry_max=mvga_carry_max,
+            swap_orphan_dup_audit=swap_orphan_dup_audit,
             dl_vtx_swap_guard=dl_vtx_swap_guard,
             dl_vtx_topo_weight=dl_vtx_topo_weight,
             dl_vtx_topo_center=dl_vtx_topo_center,
@@ -3003,6 +3018,16 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
               mvga_splice_straighten=null,
               mvga_approach_collapse=null,
               mvga_straighten_radius=null,
+              // doc pr/83 r3: op1 scope/threshold decouple (cm / fraction;
+              // radius -1 = unscoped), post-op3 dup pass, carry cap,
+              // abandoned-cluster dup audit.  C++ defaults 0/0/false/0/false
+              // (all legacy).  Keys omitted when null/false =>
+              // byte-identical.
+              mvga_op1_radius=null,
+              mvga_op1_dup_frac=null,
+              mvga_op1_post=false,
+              mvga_carry_max=null,
+              swap_orphan_dup_audit=false,
               dl_vtx_swap_guard=false,
               // doc pr/89 Arm C (C2) -- rule-1 topology term in the DL
               // rerank composite (weight, frac center).  C++ defaults 0/0;
@@ -3337,6 +3362,11 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
             mvga_splice_straighten=mvga_splice_straighten,
             mvga_approach_collapse=mvga_approach_collapse,
             mvga_straighten_radius=mvga_straighten_radius,
+            mvga_op1_radius=mvga_op1_radius,
+            mvga_op1_dup_frac=mvga_op1_dup_frac,
+            mvga_op1_post=mvga_op1_post,
+            mvga_carry_max=mvga_carry_max,
+            swap_orphan_dup_audit=swap_orphan_dup_audit,
                 dl_vtx_swap_guard=dl_vtx_swap_guard,
                 dl_vtx_topo_weight=dl_vtx_topo_weight,
                 dl_vtx_topo_center=dl_vtx_topo_center,

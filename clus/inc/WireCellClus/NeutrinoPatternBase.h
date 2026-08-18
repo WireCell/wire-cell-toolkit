@@ -645,6 +645,57 @@ namespace WireCell::Clus::PR {
         // the prototype 0.2 cm => recipe-faithful; > 0 => that radius.
         // Inert unless splice_straighten/approach_collapse is on.
         double m_mvga_straighten_radius{0};   ///< straight-chain veto radius, internal length units (doc pr/86 round 2); 0 = prototype 0.2 cm
+        // doc sbnd_xin/docs/pr/83 round 3 (sec 9.6/sec 8.5): the duplicate-
+        // corridor family.  op1 is a global graph-correctness check ("no two
+        // segments double-book the same charge"), not inherently a
+        // near-vertex one like op2/op3 -- but it inherits m_mvga_radius and
+        // m_mvga_dup_frac, both tuned for other purposes (the radius bounds
+        // the expensive near-vertex audit; 0.8 closed a pr/86 marginal-
+        // overlap gap at the MAIN anchor).  Sec 9.2 measured 6 of 9 class-B
+        // duplicates 5-7 cm OUTSIDE the 15 cm scope; sec 9.3 measured 1
+        // declined at 0.74 by the raised 0.8.  These knobs decouple op1's
+        // scope and threshold from op2/op3's without re-litigating either
+        // tuning.  0 (default) => the shared member applies => byte-identical.
+        double m_mvga_op1_radius{0};          ///< op1-only scope radius (doc pr/83 r3); 0 = use m_mvga_radius, -1 = unscoped (whole main cluster)
+        double m_mvga_op1_dup_frac{0};        ///< op1-only overlap threshold (doc pr/83 r3); 0 = use m_mvga_dup_frac
+        // doc pr/83 r3 (sec 8, class A): the pr/85 interposed carry re-
+        // attaches N far prongs directly to the anchor and the pr/86
+        // splice-straighten re-derives each carried prong's near-anchor
+        // stretch over the same 26-35 cm reach -- N prongs acquire the SAME
+        // trunk geometry (138009: six stacked electrons, 204 cm of fitted
+        // length on a 43 cm trunk, kine_reco_Enu double-counted 1973 vs 1441
+        // MeV).  op1 runs BEFORE op3 and its `created` exemption makes the
+        // carried products structurally invisible (sec 8.3).  true => one
+        // additional op1-style duplicate-corridor pass AFTER the op3/op3.5
+        // interleave concludes (before the op4 refit), with the `created`
+        // exemption lifted, at op1's effective radius/threshold.  Benign
+        // carries overlap nothing and are untouched -- no pr/86 giveback at
+        // the 33 non-stacking multi-carry sites (sec 8.5's cost analysis of
+        // the blanket cap).  false (default) => pass skipped => byte-identical.
+        bool   m_mvga_op1_post{false};        ///< post-op3 duplicate-corridor pass incl. created segments (doc pr/83 r3, class A)
+        // doc pr/83 r3 (sec 8.5): the blanket fallback -- decline the
+        // interposed absorb/splice outright when it would carry more than
+        // this many far prongs (all 8 class-A events had carried >= 2; a cap
+        // of 1 keeps the stub as the shared trunk, the physically correct
+        // topology).  Costs pr/86 benefit at every benign multi-carry site,
+        // so m_mvga_op1_post is the primary fix; this ships only if that
+        // proves insufficient.  0 (default) => unlimited => byte-identical.
+        int    m_mvga_carry_max{0};           ///< op3 interposed-carry prong-count ceiling (doc pr/83 r3); 0 = unlimited
+        // doc pr/83 r3 (sec 9.5, Mechanism C + the 359980 follow-up): a
+        // cluster that went through find_proto_vertex but is not the final
+        // main cluster keeps its segments in the output yet never receives
+        // a duplicate-corridor pass.  Two ways in: swap_main_cluster
+        // re-points pattern recognition away from it (350935: an
+        // overlap-1.00 dup born in find_proto_vertex survives to Bee
+        // untouched), or it was a candidate that lost the main-cluster
+        // contest with no swap at all (359980: dup on cluster 75, main is
+        // 21).  true => one unscoped op1-style duplicate-corridor pass (no
+        // vertex to center a radius on -- these clusters have no main
+        // vertex), with a refit if anything merged: inside
+        // swap_main_cluster on the abandoned cluster, and once more over
+        // every non-main cluster before shower_clustering_with_nv consumes
+        // them (TaggerCheckNeutrino.cxx).  false (default) => byte-identical.
+        bool   m_swap_orphan_dup_audit{false}; ///< dup-audit non-main clusters: at swap + pre-shower sweep (doc pr/83 r3)
 
         // ---- doc sbnd_xin/docs/pr/51 round 4: rough-path diagnostic probe --
         // Diagnostic-only TRACE instrumentation for the near-vertex
@@ -2225,6 +2276,13 @@ namespace WireCell::Clus::PR {
         // replaces the pointer.  Gated on m_main_vertex_graph_audit (default
         // false => immediate return, no side effects).
         bool main_vertex_graph_audit(Graph& graph, Facade::Cluster& cluster, VertexPtr main_vertex, TrackFitting& track_fitter, IDetectorVolumes::pointer dv);
+        // doc pr/83 r3 (sec 9.5, Mechanism C): one unscoped duplicate-
+        // corridor pass over `cluster` (op1's metric and merge recipe,
+        // fork-by-duplication -- op1 itself is untouched), refitting the
+        // cluster if anything merged.  Called from swap_main_cluster on the
+        // ABANDONED main cluster when m_swap_orphan_dup_audit is set; that
+        // gate lives in the caller so this function itself is knob-free.
+        bool orphan_dup_audit(Graph& graph, Facade::Cluster& cluster, TrackFitting& track_fitter, IDetectorVolumes::pointer dv);
         // doc sbnd_xin/docs/pr/51 round 4 (see the m_rough_path_probe member
         // block): diagnostic-only TRACE probe for the near-vertex short-cut
         // investigation.  Never edits graph, segment, or fit content; always
@@ -2237,12 +2295,17 @@ namespace WireCell::Clus::PR {
 
         // cluster functions ...
         Facade::geo_vector_t calc_dir_cluster(Graph& graph, Facade::Cluster& cluster, const Facade::geo_point_t& orig_p, double dis_cut);
-        Facade::Cluster* swap_main_cluster(Facade::Cluster& new_main_cluster, Facade::Cluster& old_main_cluster, std::vector<Facade::Cluster*>& other_clusters);
-        void examine_main_vertices(Graph& graph, ClusterVertexMap& map_cluster_main_vertices, Facade::Cluster*& main_cluster, std::vector<Facade::Cluster*>& other_clusters);
+        // doc pr/83 r3: the three trailing params exist only for
+        // m_swap_orphan_dup_audit (the abandoned-cluster duplicate audit,
+        // sec 9.5).  Defaulted null => every legacy call compiles and, knob
+        // off, behaves byte-identically; knob on with any of them missing
+        // logs a "skipped" TRACE rather than silently auditing nothing.
+        Facade::Cluster* swap_main_cluster(Facade::Cluster& new_main_cluster, Facade::Cluster& old_main_cluster, std::vector<Facade::Cluster*>& other_clusters, Graph* graph = nullptr, TrackFitting* track_fitter = nullptr, IDetectorVolumes::pointer dv = nullptr);
+        void examine_main_vertices(Graph& graph, ClusterVertexMap& map_cluster_main_vertices, Facade::Cluster*& main_cluster, std::vector<Facade::Cluster*>& other_clusters, TrackFitting* track_fitter = nullptr, IDetectorVolumes::pointer dv = nullptr);
 
         VertexPtr compare_main_vertices_global(Graph& graph, std::vector<VertexPtr>& vertex_candidates, Facade::Cluster& main_cluster, TrackFitting& track_fitter, IDetectorVolumes::pointer dv);
         Facade::Cluster* check_switch_main_cluster(Graph& graph, ClusterVertexMap map_cluster_main_vertices, Facade::Cluster* main_cluster, std::vector<Facade::Cluster*>& other_clusters, TrackFitting& track_fitter, IDetectorVolumes::pointer dv);
-        Facade::Cluster* check_switch_main_cluster_2(Graph& graph, VertexPtr temp_main_vertex, Facade::Cluster* max_length_cluster, Facade::Cluster* main_cluster, std::vector<Facade::Cluster*>& other_clusters);
+        Facade::Cluster* check_switch_main_cluster_2(Graph& graph, VertexPtr temp_main_vertex, Facade::Cluster* max_length_cluster, Facade::Cluster* main_cluster, std::vector<Facade::Cluster*>& other_clusters, TrackFitting* track_fitter = nullptr, IDetectorVolumes::pointer dv = nullptr);
         // doc sbnd_xin/docs/pr/51 round 3: map_cluster_main_vertices and
         // main_cluster are BY REFERENCE (matching determine_overall_main_vertex_DL
         // below) so a cluster swap decided internally (examine_main_vertices /

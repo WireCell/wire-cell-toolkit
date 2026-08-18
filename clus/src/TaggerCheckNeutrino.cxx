@@ -226,6 +226,11 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_mvga_splice_straighten = get(config, "mvga_splice_straighten", m_mvga_splice_straighten); // cm; doc pr/86 round 2
     m_mvga_approach_collapse = get(config, "mvga_approach_collapse", m_mvga_approach_collapse); // cm; doc pr/86 round 2
     m_mvga_straighten_radius = get(config, "mvga_straighten_radius", m_mvga_straighten_radius); // cm; doc pr/86 round 2
+    m_mvga_op1_radius   = get(config, "mvga_op1_radius",   m_mvga_op1_radius);   // cm; doc pr/83 r3; 0 = use mvga_radius, -1 = unscoped
+    m_mvga_op1_dup_frac = get(config, "mvga_op1_dup_frac", m_mvga_op1_dup_frac); // doc pr/83 r3; 0 = use mvga_dup_frac
+    m_mvga_op1_post     = get(config, "mvga_op1_post",     m_mvga_op1_post);     // doc pr/83 r3 (class A)
+    m_mvga_carry_max    = get(config, "mvga_carry_max",    m_mvga_carry_max);    // doc pr/83 r3; 0 = unlimited
+    m_swap_orphan_dup_audit = get(config, "swap_orphan_dup_audit", m_swap_orphan_dup_audit); // doc pr/83 r3 (Mechanism C)
     m_shower_topo_demote_len = get(config, "shower_topo_demote_len", m_shower_topo_demote_len);  // cm
     // doc sbnd_xin/docs/pr/49 -- cross-cluster projection-ghost deweighting
     // in the trajectory fit's 2D charge association (18255-57441): live
@@ -624,6 +629,11 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["mvga_splice_straighten"] = m_mvga_splice_straighten;  // cm; 0 = concatenation verbatim, byte-identical (doc pr/86 round 2)
     cfg["mvga_approach_collapse"] = m_mvga_approach_collapse;  // cm; 0 = op3.5 skipped, byte-identical (doc pr/86 round 2)
     cfg["mvga_straighten_radius"] = m_mvga_straighten_radius;  // cm; 0 = prototype 0.2, inert unless straighten/collapse on (doc pr/86 round 2)
+    cfg["mvga_op1_radius"]   = m_mvga_op1_radius;   // cm; 0 = use mvga_radius, -1 = unscoped, byte-identical at 0 (doc pr/83 r3)
+    cfg["mvga_op1_dup_frac"] = m_mvga_op1_dup_frac; // fraction; 0 = use mvga_dup_frac, byte-identical (doc pr/83 r3)
+    cfg["mvga_op1_post"]     = m_mvga_op1_post;     // false = post-op3 dup pass skipped, byte-identical (doc pr/83 r3)
+    cfg["mvga_carry_max"]    = m_mvga_carry_max;    // 0 = unlimited carry, byte-identical (doc pr/83 r3)
+    cfg["swap_orphan_dup_audit"] = m_swap_orphan_dup_audit; // false = abandoned main cluster never audited, byte-identical (doc pr/83 r3)
     cfg["kink_dqdx_hot_ratio"] = m_kink_dqdx_hot_ratio; // x mip_dqdx_median; inert while both above are false
     cfg["shower_topo_demote_len"] = m_shower_topo_demote_len;  // cm; 0 = legacy (long segments stay eligible for kShowerTopology)
     // doc sbnd_xin/docs/pr/49.
@@ -1178,6 +1188,11 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
     pattern_algos.m_mvga_splice_straighten = m_mvga_splice_straighten * units::cm; // cm -> internal (doc pr/86 round 2)
     pattern_algos.m_mvga_approach_collapse = m_mvga_approach_collapse * units::cm; // cm -> internal (doc pr/86 round 2)
     pattern_algos.m_mvga_straighten_radius = m_mvga_straighten_radius * units::cm; // cm -> internal (doc pr/86 round 2)
+    pattern_algos.m_mvga_op1_radius   = m_mvga_op1_radius * units::cm; // cm -> internal; 0 and the -1 sentinel both survive the scale (doc pr/83 r3)
+    pattern_algos.m_mvga_op1_dup_frac = m_mvga_op1_dup_frac;           // fraction, no conversion (doc pr/83 r3)
+    pattern_algos.m_mvga_op1_post     = m_mvga_op1_post;               // doc pr/83 r3 (class A)
+    pattern_algos.m_mvga_carry_max    = m_mvga_carry_max;              // count (doc pr/83 r3)
+    pattern_algos.m_swap_orphan_dup_audit = m_swap_orphan_dup_audit;   // doc pr/83 r3 (Mechanism C)
     pattern_algos.m_rough_path_probe  = m_rough_path_probe;           // doc pr/51 round 4: diagnostic-only
     // doc pr/51 round 5: steiner gap penalty.  The two service handles are
     // unconditional copies (inert while the scale is 0).
@@ -1667,6 +1682,29 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
         dup_stage_census("improve_vertex", *pr_graph, *main_cluster);
         if (m_perf) SPDLOG_LOGGER_DEBUG(log, "TaggerCheckNeutrino timing: improve_vertex + examine_direction took {} ms", MS(Clock::now() - t0).count());
         t0 = Clock::now();
+
+        // doc pr/83 r3 (sec 9.5 + the 359980 follow-up): non-main clusters
+        // that went through find_proto_vertex -- as a swapped-out old main
+        // (Mechanism C, 350935) or as a candidate that lost the main-cluster
+        // contest without any swap (359980: dup on cluster 75, main is 21)
+        // -- keep their segments in the final output but never receive a
+        // duplicate-corridor pass.  One unscoped audit each, BEFORE
+        // shower_clustering_with_nv consumes them, so the shower maps never
+        // hold a segment this pass removes.  Sorted by cluster id for
+        // determinism.  Knob off (default) => loop skipped => byte-identical.
+        if (m_swap_orphan_dup_audit) {
+            std::vector<Cluster*> audit_clusters(other_clusters.begin(), other_clusters.end());
+            std::sort(audit_clusters.begin(), audit_clusters.end(),
+                      [](Cluster* a, Cluster* b) { return a->get_cluster_id() < b->get_cluster_id(); });
+            audit_clusters.erase(std::unique(audit_clusters.begin(), audit_clusters.end()),
+                                 audit_clusters.end());
+            for (Cluster* oc : audit_clusters) {
+                if (!oc || oc == main_cluster) continue;
+                pattern_algos.orphan_dup_audit(*pr_graph, *oc, *m_track_fitter, m_dv);
+            }
+            if (m_perf) SPDLOG_LOGGER_DEBUG(log, "TaggerCheckNeutrino timing: orphan_dup_audit sweep took {} ms", MS(Clock::now() - t0).count());
+            t0 = Clock::now();
+        }
 
         pattern_algos.shower_clustering_with_nv(acc_segment_id, pi0_showers,
                                                 map_shower_pio_id, map_pio_id_showers,
