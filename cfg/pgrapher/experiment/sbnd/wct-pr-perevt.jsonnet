@@ -1607,6 +1607,14 @@ function(
     // (or -A).  null omits the keys => byte-identical legacy.
     mvga_proj_dup_frac = 0.7,
     mvga_proj_dqdx_ratio = 0.55,
+    // doc pr/83 r4b (284206): op1-proj's own angle ceiling, SBND
+    // PRODUCTION ON (owner request 2026-08-18): the residual stem pair
+    // reads 22 deg -- just over op1's shared 20 -- and its ratio 0.52
+    // already passes 0.55, so the angle was the only blocker.  Small-set
+    // check: 284206 stem 3 -> 1 track (duplicate 161 MeV electron gone);
+    // all 7 other knob-affected events byte-identical at 25.
+    // Escape: SBND_MVGA_PROJ_ANGLE (or -A).  null omits => byte-identical.
+    mvga_proj_angle = 25,
     // doc pr/51 (18255-506746) -- DL rerank cross-cluster swap guard: with
     // the guard on, an accepted DL vertex can never swap the main cluster
     // (506746: one confident uBooNE-net voxel, s_dl = +576, moved the
@@ -2142,6 +2150,7 @@ function(
                              swap_orphan_dup_audit=swap_orphan_dup_audit,
                              mvga_proj_dup_frac=mvga_proj_dup_frac,
                              mvga_proj_dqdx_ratio=mvga_proj_dqdx_ratio,
+                             mvga_proj_angle=mvga_proj_angle,
                              dl_vtx_swap_guard=dl_vtx_swap_guard,
                              dl_vtx_topo_weight=dl_vtx_topo_weight,
                              dl_vtx_topo_center=dl_vtx_topo_center,
