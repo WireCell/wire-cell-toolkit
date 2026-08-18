@@ -876,6 +876,10 @@ function(
     // parent (owner decision 2026-08-04, deliberately not prototype
     // first-writer-wins).  Runner env overrides: SBND_PF_* (tri-state).
     pf_track_main_cluster_only = true,
+    // doc pr/40 round 9 B2: let the PF track BFS traverse nv-bridged
+    // clusters.  C++ default false; key omitted when off => byte-identical.
+    // SBND PRODUCTION DEFAULT ON since 2026-08-18 (with the bridge above).
+    pf_track_bridged_clusters = true,
     pf_shower_vertex_barrier = true,
     pf_shower_parent_precedence = true,
     pf_pi0_node_per_id = true,
@@ -1290,6 +1294,30 @@ function(
     shower_in_cascade_guard = true,
     shower_in_max_len = null,
     shower_in_mip_hi = null,
+    // doc sbnd_xin/docs/pr/40 round 9 -- the rounds-7+8 straight-track PID
+    // guard family + the B2 cross-cluster bridge (SBND 286906/409546 +
+    // 54629/320865 classes; must-not-touch 521075).  Five guards decline an
+    // unconditional pdg-11 write on a straight long track
+    // (segment_is_straight_long_track, continuation-aware at the two
+    // shower-connect sites); the bridge replaces the cross-cluster conn-2
+    // electron fabrication with a real 2-point graph bridge when the
+    // steiner-cloud gap is < shower_nv_bridge_max_gap (C++ 1.8 cm).
+    // C++ defaults ALL false (scalars 25 deg / 1.8 cm live in C++).  Keys
+    // omitted when off/null => byte-identical pre-round-9 config.
+    // SBND PRODUCTION DEFAULT ON since 2026-08-18 (doc pr/40 round 9:
+    // V1 pre-change-binary gate PASS 6/6 archives; V2 OFF-vs-ON over
+    // 45-Bee + nueCC48 + NCpi0-19 (100 events): 30 mabc-only movers, 0
+    // pctree movers, nusel tables byte-identical 3/3 samples; census
+    // straight-long e- 63 -> 42; bridges fired on 286906/409546/407280
+    // only, 521075 untouched; V3 bare-run composition gate PASS).
+    shower_connect_from_vertices_straight_guard = true,
+    shower_connect_start_seg_straight_guard = true,
+    examine_direction_dirsign_shower_in_guard = true,
+    daughter_shower_angle_reclass_straight_guard = true,
+    shower_topo_reexam_straight_guard = true,
+    sfv_kink_max = null,
+    shower_nv_bridge_track = true,
+    shower_nv_bridge_max_gap = null,
     // doc sbnd_xin/docs/pr/74 round 2 P2: the F14 Michel rescue accepts ANY
     // shower-like sibling at the stem's far vertex; on a nueCC event that
     // sibling is the EM shower trunk and the rescue paints a muon at the
@@ -2083,6 +2111,7 @@ function(
                              tgm_fv_y_margin=tgm_fv_y_margin,
                              save_stm_fit=save_stm_fit,
                              pf_track_main_cluster_only=pf_track_main_cluster_only,
+                             pf_track_bridged_clusters=pf_track_bridged_clusters,
                              pf_shower_vertex_barrier=pf_shower_vertex_barrier,
                              pf_shower_parent_precedence=pf_shower_parent_precedence,
                              pf_pi0_node_per_id=pf_pi0_node_per_id,
@@ -2212,6 +2241,14 @@ function(
                              shower_in_cascade_guard=shower_in_cascade_guard,
                              shower_in_max_len=shower_in_max_len,
                              shower_in_mip_hi=shower_in_mip_hi,
+                             shower_connect_from_vertices_straight_guard=shower_connect_from_vertices_straight_guard,
+                             shower_connect_start_seg_straight_guard=shower_connect_start_seg_straight_guard,
+                             examine_direction_dirsign_shower_in_guard=examine_direction_dirsign_shower_in_guard,
+                             daughter_shower_angle_reclass_straight_guard=daughter_shower_angle_reclass_straight_guard,
+                             shower_topo_reexam_straight_guard=shower_topo_reexam_straight_guard,
+                             sfv_kink_max=sfv_kink_max,
+                             shower_nv_bridge_track=shower_nv_bridge_track,
+                             shower_nv_bridge_max_gap=shower_nv_bridge_max_gap,
                              michel_stem_michel_check=michel_stem_michel_check,
                              michel_stem_max_far_len=michel_stem_max_far_len,
                              shower_stem_backfill=shower_stem_backfill,
