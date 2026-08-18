@@ -35,6 +35,84 @@ namespace WireCell::Clus::PR {
             out->add_points(src);
             return out;
         }
+
+        // doc sbnd_xin/docs/pr/91 round 1 -- WCT_SHOWER_ENDPOINT_DEBUG.
+        //
+        // get_end_point() is not a point on the shower's charge: it is the
+        // farthest *vertex* of the shower's TrajectoryView from start_point
+        // (the two loops below).  The view's node set can therefore decide the
+        // end point even when no member segment reaches that vertex, which is
+        // how SBND 169626's `e- 107` (cluster 22, members spanning z 396-410)
+        // ends up reporting an end at z=461 on a cluster-13 vertex owned by the
+        // 567 MeV shower, and how 394532's 30 MeV and 66 MeV showers end up
+        // reporting each other's vertices.  Both appeared only after
+        // shower_dedup_start_seg (doc pr/84 round 3) started calling
+        // add_shower(), which unions the absorbed shower's nodes wholesale.
+        // This probe prints every candidate vertex and whether a member segment
+        // of this shower actually touches it.  Log/stderr only: no effect on
+        // emitted bytes.
+        bool endpoint_dbg()
+        {
+            static const bool dbg = std::getenv("WCT_SHOWER_ENDPOINT_DEBUG") != nullptr;
+            return dbg;
+        }
+        int vtx_display_id(const VertexPtr& v)
+        {
+            if (!v) return -1;
+            const auto* c = v->cluster();
+            return (c ? c->get_cluster_id() : 0) * 1000 + static_cast<int>(v->get_graph_index());
+        }
+        int seg_display_id(const SegmentPtr& s)
+        {
+            if (!s) return -1;
+            int sid = s->id();
+            if (sid < 0) sid = static_cast<int>(s->get_graph_index());
+            const auto* c = s->cluster();
+            return c ? c->get_cluster_id() * 1000 + sid : sid;
+        }
+        void probe_endpoint(Shower& sh, Graph& g, const WireCell::Point& sp,
+                            const VertexPtr& start_vtx, int conn, bool excl, const char* tag)
+        {
+            if (!endpoint_dbg()) return;
+            std::set<node_descriptor> touched;
+            std::set<int> member_clusters;
+            for (auto edesc : ordered_edges(sh, g)) {
+                touched.insert(boost::source(edesc, g));
+                touched.insert(boost::target(edesc, g));
+                SegmentPtr seg = g[edesc].segment;
+                if (seg && seg->cluster()) member_clusters.insert(seg->cluster()->get_cluster_id());
+            }
+            std::fprintf(stderr,
+                         "SHOWER_ENDPOINT tag=%s shower_id=%d start_seg=%d conn=%d nseg=%d "
+                         "excl_start_vtx=%d start=(%.3f,%.3f,%.3f) member_clusters=%zu\n",
+                         tag, sh.get_shower_id(), seg_display_id(sh.start_segment()),
+                         conn, sh.get_num_segments(), excl ? 1 : 0,
+                         sp.x() / WireCell::units::cm, sp.y() / WireCell::units::cm,
+                         sp.z() / WireCell::units::cm, member_clusters.size());
+            double best = -1;
+            int best_id = -1, best_touch = -1;
+            for (auto vdesc : ordered_nodes(sh, g)) {
+                VertexPtr v = g[vdesc].vertex;
+                if (!v) continue;
+                const bool skipped = excl && v == start_vtx;
+                const double dis = (sp - v->fit().point).magnitude();
+                const int touch = touched.count(vdesc) ? 1 : 0;
+                std::fprintf(stderr,
+                             "SHOWER_ENDPOINT   shower_id=%d cand_vtx=%d cluster=%d "
+                             "(%.3f,%.3f,%.3f) dis=%.3f touched_by_member=%d skipped=%d\n",
+                             sh.get_shower_id(), vtx_display_id(v),
+                             v->cluster() ? v->cluster()->get_cluster_id() : -1,
+                             v->fit().point.x() / WireCell::units::cm,
+                             v->fit().point.y() / WireCell::units::cm,
+                             v->fit().point.z() / WireCell::units::cm,
+                             dis / WireCell::units::cm, touch, skipped ? 1 : 0);
+                if (!skipped && dis > best) { best = dis; best_id = vtx_display_id(v); best_touch = touch; }
+            }
+            std::fprintf(stderr,
+                         "SHOWER_ENDPOINT   shower_id=%d WINNER vtx=%d dis=%.3f "
+                         "touched_by_member=%d\n",
+                         sh.get_shower_id(), best_id, best / WireCell::units::cm, best_touch);
+        }
     }
 
  
@@ -274,9 +352,23 @@ namespace WireCell::Clus::PR {
         // becomes the shower point cloud's row order -- which decides kNN ties
         // in shower_get_closest_point().  Ordered for the same reason both
         // loops are here (doc pr/28 sec 15).
+        // doc pr/91 round 1: the node loop is unconditional -- every vertex of
+        // the absorbed shower joins this one's view, including vertices no
+        // surviving member segment touches.  get_end_point() is a farthest-
+        // VERTEX search over exactly this set, so this is candidate mechanism
+        // (a) for the cross-shower end points on SBND 169626 / 394532.
+        const size_t pr91_nodes_before = this->nodes().size();
         for (auto vdesc : ordered_nodes(shower, m_full_graph)) {
             VertexPtr vtx = m_full_graph[vdesc].vertex;
             if (vtx && vtx->descriptor_valid()) this->add_vertex(vtx);
+        }
+        if (endpoint_dbg()) {
+            std::fprintf(stderr,
+                         "SHOWER_ENDPOINT tag=add_shower into_sid=%d into_seg=%d from_sid=%d "
+                         "from_seg=%d nodes %zu -> %zu (from had %zu)\n",
+                         this->get_shower_id(), seg_display_id(this->start_segment()),
+                         shower.get_shower_id(), seg_display_id(shower.start_segment()),
+                         pr91_nodes_before, this->nodes().size(), shower.nodes().size());
         }
 
         // Batch-collect all points before adding to avoid repeated vector reallocations.
@@ -1089,6 +1181,9 @@ namespace WireCell::Clus::PR {
                     }
 
                     // Find farthest vertex — ordered_nodes gives index-stable tie-breaking
+                    probe_endpoint(*this, m_full_graph, data.start_point, m_start_vertex,
+                                   data.start_connection_type,
+                                   exclude_start_vertex_from_endpoint, "single_seg");
                     double max_dis = 0;
                     const auto& view = this->view_graph();
                     for (auto vdesc : ordered_nodes(*this, m_full_graph)) {
@@ -1198,6 +1293,9 @@ namespace WireCell::Clus::PR {
             }
 
             // Find farthest vertex for end_point — ordered_nodes gives index-stable tie-breaking
+            probe_endpoint(*this, m_full_graph, data.start_point, m_start_vertex,
+                           data.start_connection_type,
+                           exclude_start_vertex_from_endpoint, "multi_seg");
             double max_dis = 0;
             for (auto vdesc : ordered_nodes(*this, m_full_graph)) {
                 VertexPtr vtx = view[vdesc].vertex;
