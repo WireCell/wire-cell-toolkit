@@ -191,6 +191,12 @@ namespace WireCell::Clus {
             // prototype's dropped guard (NeutrinoID.cxx:1488).  Ident, not
             // pointer: split products inherit the parent's ident.
             bool pf_track_main_cluster_only{false};
+            // doc sbnd_xin/docs/pr/40 round 9 B2: let the track BFS traverse
+            // clusters recorded by TrackFitting::get_bridged_cluster_ids()
+            // (connected to the main cluster by an nv_bridge_track bridge
+            // segment) despite pf_track_main_cluster_only.  Off, or an
+            // empty bridged set => byte-identical to legacy.
+            bool pf_track_bridged_clusters{false};
             // pf_shower_vertex_barrier: pre-seed visited_vtxs from every
             // shower's vertex set so the BFS does not expand THROUGH a shower
             // (prototype used_vertices seed, NeutrinoID.cxx:1597-1602).

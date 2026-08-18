@@ -759,6 +759,7 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               // C++ defaults false; keys omitted when off => byte-identical
               // pre-knob config.  Display-only stage: mc.json is the artifact.
               pf_track_main_cluster_only=false,
+              pf_track_bridged_clusters=false,   // doc pr/40 round 9 B2; C++ default false. Key omitted when off => byte-identical.
               pf_shower_vertex_barrier=false,
               pf_shower_parent_precedence=false,
               pf_pi0_node_per_id=false,
@@ -1312,6 +1313,18 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               shower_in_cascade_guard=false,
               shower_in_max_len=null,
               shower_in_mip_hi=null,
+              // doc sbnd_xin/docs/pr/40 round 9 -- straight-track PID guard
+              // family + B2 cross-cluster bridge.  C++ defaults false
+              // (scalars 25 deg / 1.8 cm live in C++).  Keys omitted when
+              // off/null => byte-identical pre-round-9 config.
+              shower_connect_from_vertices_straight_guard=false,
+              shower_connect_start_seg_straight_guard=false,
+              examine_direction_dirsign_shower_in_guard=false,
+              daughter_shower_angle_reclass_straight_guard=false,
+              shower_topo_reexam_straight_guard=false,
+              sfv_kink_max=null,
+              shower_nv_bridge_track=false,
+              shower_nv_bridge_max_gap=null,
               michel_stem_michel_check=false,
               michel_stem_max_far_len=null,
               shower_stem_backfill=false,
@@ -2130,6 +2143,14 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
             shower_in_cascade_guard=shower_in_cascade_guard,
             shower_in_max_len=shower_in_max_len,
             shower_in_mip_hi=shower_in_mip_hi,
+            shower_connect_from_vertices_straight_guard=shower_connect_from_vertices_straight_guard,
+            shower_connect_start_seg_straight_guard=shower_connect_start_seg_straight_guard,
+            examine_direction_dirsign_shower_in_guard=examine_direction_dirsign_shower_in_guard,
+            daughter_shower_angle_reclass_straight_guard=daughter_shower_angle_reclass_straight_guard,
+            shower_topo_reexam_straight_guard=shower_topo_reexam_straight_guard,
+            sfv_kink_max=sfv_kink_max,
+            shower_nv_bridge_track=shower_nv_bridge_track,
+            shower_nv_bridge_max_gap=shower_nv_bridge_max_gap,
             michel_stem_michel_check=michel_stem_michel_check,
             michel_stem_max_far_len=michel_stem_max_far_len,
             shower_stem_backfill=shower_stem_backfill,
@@ -2563,6 +2584,7 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
                     // doc pr/34 §10 port-fidelity knobs.  C++ defaults false;
                     // key omitted when off => byte-identical pre-knob config.
                     [if pf_track_main_cluster_only then 'pf_track_main_cluster_only']: true,
+                    [if pf_track_bridged_clusters then 'pf_track_bridged_clusters']: true,   // doc pr/40 round 9 B2
                     [if pf_shower_vertex_barrier then 'pf_shower_vertex_barrier']: true,
                     [if pf_shower_parent_precedence then 'pf_shower_parent_precedence']: true,
                     [if pf_pi0_node_per_id then 'pf_pi0_node_per_id']: true,
@@ -2690,6 +2712,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
        // doc pr/34 §10 particle-flow port-fidelity knobs; false = C++ default
        // = OFF, key omitted => byte-identical.  See clus_pr.
        pf_track_main_cluster_only=false,
+       pf_track_bridged_clusters=false,   // doc pr/40 round 9 B2
        pf_shower_vertex_barrier=false,
        pf_shower_parent_precedence=false,
        pf_pi0_node_per_id=false,
@@ -2949,6 +2972,15 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
        shower_in_cascade_guard=false,
        shower_in_max_len=null,
        shower_in_mip_hi=null,
+       // doc sbnd_xin/docs/pr/40 round 9 -- see clus_pr above.
+       shower_connect_from_vertices_straight_guard=false,
+       shower_connect_start_seg_straight_guard=false,
+       examine_direction_dirsign_shower_in_guard=false,
+       daughter_shower_angle_reclass_straight_guard=false,
+       shower_topo_reexam_straight_guard=false,
+       sfv_kink_max=null,
+       shower_nv_bridge_track=false,
+       shower_nv_bridge_max_gap=null,
        michel_stem_michel_check=false,
        michel_stem_max_far_len=null,
        shower_stem_backfill=false,
@@ -3215,6 +3247,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 tgm_fv_y_margin=tgm_fv_y_margin,
                 save_stm_fit=save_stm_fit,
                 pf_track_main_cluster_only=pf_track_main_cluster_only,
+                pf_track_bridged_clusters=pf_track_bridged_clusters,
                 pf_shower_vertex_barrier=pf_shower_vertex_barrier,
                 pf_shower_parent_precedence=pf_shower_parent_precedence,
                 pf_pi0_node_per_id=pf_pi0_node_per_id,
@@ -3356,6 +3389,14 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 shower_in_cascade_guard=shower_in_cascade_guard,
                 shower_in_max_len=shower_in_max_len,
                 shower_in_mip_hi=shower_in_mip_hi,
+                shower_connect_from_vertices_straight_guard=shower_connect_from_vertices_straight_guard,
+                shower_connect_start_seg_straight_guard=shower_connect_start_seg_straight_guard,
+                examine_direction_dirsign_shower_in_guard=examine_direction_dirsign_shower_in_guard,
+                daughter_shower_angle_reclass_straight_guard=daughter_shower_angle_reclass_straight_guard,
+                shower_topo_reexam_straight_guard=shower_topo_reexam_straight_guard,
+                sfv_kink_max=sfv_kink_max,
+                shower_nv_bridge_track=shower_nv_bridge_track,
+                shower_nv_bridge_max_gap=shower_nv_bridge_max_gap,
                 michel_stem_michel_check=michel_stem_michel_check,
                 michel_stem_max_far_len=michel_stem_max_far_len,
                 shower_stem_backfill=shower_stem_backfill,

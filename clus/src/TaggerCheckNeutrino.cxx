@@ -505,6 +505,15 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_shower_in_cascade_guard                   = get(config, "shower_in_cascade_guard",                   m_shower_in_cascade_guard);
     m_shower_in_max_len                         = get(config, "shower_in_max_len",                         m_shower_in_max_len);
     m_shower_in_mip_hi                          = get(config, "shower_in_mip_hi",                          m_shower_in_mip_hi);
+    // doc sbnd_xin/docs/pr/40 round 9 -- straight-track PID guard family + B2 bridge.
+    m_shower_connect_from_vertices_straight_guard  = get(config, "shower_connect_from_vertices_straight_guard",  m_shower_connect_from_vertices_straight_guard);
+    m_shower_connect_start_seg_straight_guard      = get(config, "shower_connect_start_seg_straight_guard",      m_shower_connect_start_seg_straight_guard);
+    m_examine_direction_dirsign_shower_in_guard    = get(config, "examine_direction_dirsign_shower_in_guard",    m_examine_direction_dirsign_shower_in_guard);
+    m_daughter_shower_angle_reclass_straight_guard = get(config, "daughter_shower_angle_reclass_straight_guard", m_daughter_shower_angle_reclass_straight_guard);
+    m_shower_topo_reexam_straight_guard            = get(config, "shower_topo_reexam_straight_guard",            m_shower_topo_reexam_straight_guard);
+    m_sfv_kink_max                                 = get(config, "sfv_kink_max",                                 m_sfv_kink_max);
+    m_shower_nv_bridge_track                       = get(config, "shower_nv_bridge_track",                       m_shower_nv_bridge_track);
+    m_shower_nv_bridge_max_gap                     = get(config, "shower_nv_bridge_max_gap",                     m_shower_nv_bridge_max_gap);
     m_michel_stem_michel_check                  = get(config, "michel_stem_michel_check",                  m_michel_stem_michel_check);
     m_michel_stem_max_far_len                   = get(config, "michel_stem_max_far_len",                   m_michel_stem_max_far_len);
     m_shower_stem_backfill                      = get(config, "shower_stem_backfill",                      m_shower_stem_backfill);
@@ -808,6 +817,14 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["shower_in_cascade_guard"]                   = m_shower_in_cascade_guard;                   // doc pr/74 round 2 P1; false = legacy (cascade relabels unconditionally)
     cfg["shower_in_max_len"]                         = m_shower_in_max_len;                         // cm; only read when shower_in_cascade_guard
     cfg["shower_in_mip_hi"]                          = m_shower_in_mip_hi;                          // ratio; only read when shower_in_cascade_guard
+    cfg["shower_connect_from_vertices_straight_guard"]  = m_shower_connect_from_vertices_straight_guard;  // doc pr/40 round 9; false = legacy (cross-cluster anchor forced e-)
+    cfg["shower_connect_start_seg_straight_guard"]      = m_shower_connect_start_seg_straight_guard;      // doc pr/40 round 9; false = legacy (accept-time set_pdg(11) unconditional)
+    cfg["examine_direction_dirsign_shower_in_guard"]    = m_examine_direction_dirsign_shower_in_guard;    // doc pr/40 round 9; false = legacy (no geometry arm beside pr/74 P1)
+    cfg["daughter_shower_angle_reclass_straight_guard"] = m_daughter_shower_angle_reclass_straight_guard; // doc pr/40 round 9; false = legacy (angle reclass writes e- unconditionally)
+    cfg["shower_topo_reexam_straight_guard"]            = m_shower_topo_reexam_straight_guard;            // doc pr/40 round 9; false = legacy (topo re-exam escape unguarded)
+    cfg["sfv_kink_max"]                                 = m_sfv_kink_max;                                 // degrees; continuation-arm tunable
+    cfg["shower_nv_bridge_track"]                       = m_shower_nv_bridge_track;                       // doc pr/40 round 9 B2; false = legacy (conn-2 shower, no bridge)
+    cfg["shower_nv_bridge_max_gap"]                     = m_shower_nv_bridge_max_gap;                     // cm; only read when shower_nv_bridge_track
     cfg["michel_stem_michel_check"]                  = m_michel_stem_michel_check;                  // doc pr/74 round 2 P2; false = legacy (any shower-like sibling passes)
     cfg["michel_stem_max_far_len"]                   = m_michel_stem_max_far_len;                   // cm; only read when michel_stem_michel_check
     cfg["shower_stem_backfill"]                      = m_shower_stem_backfill;                      // doc pr/74 round 2 K4; false = legacy (walked-past stems stay out of showers)
@@ -1356,6 +1373,14 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
     pattern_algos.m_shower_in_cascade_guard                   = m_shower_in_cascade_guard;                   // pr/74 P1
     pattern_algos.m_shower_in_max_len                         = m_shower_in_max_len * units::cm;             // pr/74 P1
     pattern_algos.m_shower_in_mip_hi                          = m_shower_in_mip_hi;                          // pr/74 P1
+    pattern_algos.m_shower_connect_from_vertices_straight_guard  = m_shower_connect_from_vertices_straight_guard;  // pr/40 r9 (r8 Part A)
+    pattern_algos.m_shower_connect_start_seg_straight_guard      = m_shower_connect_start_seg_straight_guard;      // pr/40 r9 (r7 c2c)
+    pattern_algos.m_examine_direction_dirsign_shower_in_guard    = m_examine_direction_dirsign_shower_in_guard;    // pr/40 r9 (r7 c2a)
+    pattern_algos.m_daughter_shower_angle_reclass_straight_guard = m_daughter_shower_angle_reclass_straight_guard; // pr/40 r9 (r7 c2b)
+    pattern_algos.m_shower_topo_reexam_straight_guard            = m_shower_topo_reexam_straight_guard;            // pr/40 r9 (r7 c1)
+    pattern_algos.m_sfv_kink_max                                 = m_sfv_kink_max;                                 // pr/40 r9 (degrees)
+    pattern_algos.m_shower_nv_bridge_track                       = m_shower_nv_bridge_track;                       // pr/40 r9 B2
+    pattern_algos.m_shower_nv_bridge_max_gap                     = m_shower_nv_bridge_max_gap * units::cm;         // pr/40 r9 B2
     pattern_algos.m_michel_stem_michel_check                  = m_michel_stem_michel_check;                  // pr/74 P2
     pattern_algos.m_michel_stem_max_far_len                   = m_michel_stem_max_far_len * units::cm;       // pr/74 P2
     pattern_algos.m_shower_stem_backfill                      = m_shower_stem_backfill;                      // pr/74 K4

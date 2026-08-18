@@ -331,6 +331,7 @@ void MultiAlgBlobClustering::configure(const WireCell::Configuration& cfg)
             pfc.np_ke_min = get<double>(pf, "np_ke_min", 0.0);
             // doc pr/34 §10 port-fidelity knobs; absent => legacy, byte-identical.
             pfc.pf_track_main_cluster_only = get<bool>(pf, "pf_track_main_cluster_only", false);
+            pfc.pf_track_bridged_clusters = get<bool>(pf, "pf_track_bridged_clusters", false);  // doc pr/40 round 9 B2
             pfc.pf_shower_vertex_barrier = get<bool>(pf, "pf_shower_vertex_barrier", false);
             pfc.pf_shower_parent_precedence = get<bool>(pf, "pf_shower_parent_precedence", false);
             pfc.pf_pi0_node_per_id = get<bool>(pf, "pf_pi0_node_per_id", false);
@@ -1164,6 +1165,16 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
         const auto* c = s->cluster();
         return main_cluster && c && c->get_cluster_id() == main_cluster->get_cluster_id();
     };
+    // doc sbnd_xin/docs/pr/40 round 9 B2: clusters graph-connected to the
+    // main cluster by an nv_bridge_track bridge segment.  Widens ONLY the
+    // two BFS gates below (the orphan pools stay main-cluster-only); knob
+    // off, or no bridge fired => the set is empty => byte-identical.
+    const auto& bridged_ids = tf->get_bridged_cluster_ids();
+    auto bridged_cluster = [&](const PR::SegmentPtr& s) {
+        if (!cfg.pf_track_bridged_clusters || bridged_ids.empty()) return false;
+        const auto* c = s->cluster();
+        return c && bridged_ids.count(c->get_cluster_id()) > 0;
+    };
 
     const auto& showers            = tf->get_showers();
     const auto& pi0_showers        = tf->get_pi0_showers();
@@ -1232,7 +1243,7 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
     for (auto edesc : PR::sorted_out_edges(vtx_to_nd.at(main_vertex), *pr_graph)) {
         auto seg = (*pr_graph)[edesc].segment;
         if (!seg || used_segs.count(seg) || conn4_skip_segs.count(seg) ||
-            (cfg.pf_track_main_cluster_only && !same_cluster(seg))) continue;
+            (cfg.pf_track_main_cluster_only && !same_cluster(seg) && !bridged_cluster(seg))) continue;  // doc pr/40 round 9 B2
         auto far = PR::find_other_vertex(*pr_graph, seg, main_vertex);
         if (!far) continue;
         used_segs.insert(seg);
@@ -1252,7 +1263,7 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
             for (auto edesc : PR::sorted_out_edges(nd_it->second, *pr_graph)) {
                 auto seg = (*pr_graph)[edesc].segment;
                 if (!seg || used_segs.count(seg) || conn4_skip_segs.count(seg) ||
-                    (cfg.pf_track_main_cluster_only && !same_cluster(seg))) continue;
+                    (cfg.pf_track_main_cluster_only && !same_cluster(seg) && !bridged_cluster(seg))) continue;  // doc pr/40 round 9 B2
                 auto far = PR::find_other_vertex(*pr_graph, seg, cur_vtx);
                 if (!far) continue;
                 used_segs.insert(seg);

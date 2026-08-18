@@ -1637,6 +1637,119 @@ namespace WireCell::Clus::PR {
         double m_shower_in_max_len{40*units::cm};
         double m_shower_in_mip_hi{1.3};
 
+        // ------------------------------------------------------------------
+        // doc sbnd_xin/docs/pr/40 round 9 -- the round-7/round-8 named guard
+        // family: five sites that force pdg 11 onto a straight long track
+        // with no geometry test, each declined (write skipped, structure
+        // untouched) when segment_is_straight_long_track(_or_continuation)
+        // fires.  All C++ default false = legacy = byte-identical.
+        //
+        // Site corrections found implementing (round-9 doc "D" findings):
+        // D1 -- round 7's "candidate 2c at NeutrinoShowerClustering.cxx:1401"
+        //   is the SAME write as round 8 Part A (line drift since the trace
+        //   commits); the start_seg knob below is re-targeted at the
+        //   accept-time set_pdg(11) in shower_clustering_connecting_to_main_
+        //   vertex, the real same-cluster analogue.
+        // D2 -- round 7's "dirsign()==0 branch at NeutrinoVertexFinder.cxx
+        //   :1659" is dead code (dirsign is assigned 6 lines above); the
+        //   real coverage gap is the pr/74 cascade veto's 40cm/1.3xMIP
+        //   thresholds, so the examine_direction knob adds a GEOMETRY arm
+        //   beside that veto in all three flag_shower_in branches.
+        // ------------------------------------------------------------------
+
+        // Round 8 Part A: shower_clustering_with_nv_from_vertices's pdg
+        // block (the ONLY creator of a conn-2 shower from a fresh track,
+        // SBND 286906 seg 9002 / 409546 seg 9000).  Uses the continuation-
+        // aware predicate because PATH C hands the guard a broken sub-10cm
+        // HALF of the track (286906: 8.68cm anchor at 4.9deg kink to the
+        // 126.89cm body).  Also co-guards the update_particle_type call for
+        // the same shower, which would otherwise redo the declined 13->11
+        // via the majority vote (PRShower.cxx:981-1009).
+        bool   m_shower_connect_from_vertices_straight_guard{false};
+
+        // D1 re-target: the accept-time set_pdg(11) on the winning
+        // main-vertex EM candidate's start segment (F10 vetoes only at seed
+        // time on the seed's own geometry; a short anchor collinear with a
+        // long straight sibling passes F10 and reaches this write).
+        bool   m_shower_connect_start_seg_straight_guard{false};
+
+        // D2: geometry arm beside the pr/74 P1 cascade veto in examine_
+        // direction's flag_shower_in branches (54629 seg 15007: 31cm,
+        // 1.42xMIP -- fails BOTH of the P1 veto's conjuncts, but 0.97
+        // direct/arc straightness catches it).
+        bool   m_examine_direction_dirsign_shower_in_guard{false};
+
+        // Round 7 candidate 2b: the num_daughter_showers>=4 / angle-
+        // collinearity wholesale reclass write (NeutrinoVertexFinder.cxx,
+        // 54629 seg 15011: 94.6cm, 0.980 straight).  Guards the write only,
+        // NOT the outer condition (falsifying that would re-route control
+        // into the pdg==11 else-if chain).
+        bool   m_daughter_shower_angle_reclass_straight_guard{false};
+
+        // Round 7 candidate 1 (320865 seg 13001: 48.1cm, 0.94 straight):
+        // third arm in improve_vertex's topology re-exam decline condition
+        // -- re-demote (unset kShowerTopology, keep the track PID) instead
+        // of the set_flags+pdg-11 escape.  Framed as a defensible safety
+        // net, NOT "the fix for 320865" (that segment only exists via a
+        // pr/90 side effect; a pr/90-side fix remains the open alternative).
+        // F11-displacement risk is highest here -- see the round-9 census.
+        bool   m_shower_topo_reexam_straight_guard{false};
+
+        // Max kink (DEGREES) for the collinear-continuation arm of
+        // segment_is_straight_long_track_or_continuation (286906 measures
+        // 4.9 deg; 25 matches the daughter-shower reclass's own >155-deg
+        // opening-angle idiom, i.e. kink < 25).
+        double m_sfv_kink_max{25.0};
+        // Transient record of the anchors whose electron write the
+        // from_vertices guard declined (same per-call lifecycle as
+        // m_absorb_unreachable_main_segs below; empty when the knob is
+        // off).  Kept as the marker for any later pass that would re-flip
+        // the anchor -- and as the hook the B2 bridge consumes.
+        IndexedSegmentSet m_sfv_declined_anchors;
+
+        // ------------------------------------------------------------------
+        // doc sbnd_xin/docs/pr/40 round 9 B2 -- cross-cluster track bridge.
+        // When shower_clustering_with_nv_from_vertices's directional match
+        // accepts a candidate in ANOTHER cluster, the candidate (or its
+        // collinear continuation) is a straight long track, and the exact
+        // steiner-cloud closest approach between the two clusters is below
+        // m_shower_nv_bridge_max_gap: do NOT fabricate the conn-2 electron;
+        // add a straight 2-point zero-charge bridge segment vertex->track
+        // to the PR graph (stamped main_cluster) so PF/kinematics see one
+        // continuous track (owner directive, 286906: gap 1.39cm bridges;
+        // 521075: 2.92cm must not).  The gap is a signal-processing hole
+        // with no charge -- no do_rough_path routing, no refit.  All
+        // bookkeeping below is empty when the knob is off => byte-identical.
+        // ------------------------------------------------------------------
+        bool   m_shower_nv_bridge_track{false};
+        double m_shower_nv_bridge_max_gap{1.8*units::cm};
+        // Transient per-call state (same lifecycle as
+        // m_absorb_unreachable_main_segs above): the bridge segment plus the
+        // bridged cluster's own segments, shielded from every shower
+        // flood-fill/absorber so the rescued track is not re-swallowed
+        // (the pr/54 lesson: cross-boundary graph edits break the
+        // cluster()==main_cluster absorber invariant unless shielded).
+        IndexedSegmentSet m_nv_bridge_shield_segs;
+        std::set<int>     m_nv_bridge_cluster_ids;
+        // Pre-seed a shower flood-fill's used_segments with the shield set
+        // so complete_structure_with_start_segment never traverses the
+        // bridge or absorbs the rescued cluster (a no-op when the set is
+        // empty, i.e. whenever the bridge knob is off or never fired).
+        IndexedSegmentSet& nv_bridge_seed(IndexedSegmentSet& used) {
+            used.insert(m_nv_bridge_shield_segs.begin(), m_nv_bridge_shield_segs.end());
+            return used;
+        }
+
+        // B2 helpers (NeutrinoPatternBase.cxx / NeutrinoShowerClustering.cxx)
+        double cluster_steiner_gap(const Facade::Cluster& a, const Facade::Cluster& b) const;
+        bool   nv_bridge_track(Graph& graph, Facade::Cluster* main_cluster,
+                               Facade::Cluster* cluster, SegmentPtr sg1, VertexPtr vertex,
+                               const WireCell::Point& point,
+                               const std::vector<SegmentPtr>& cluster_segs,
+                               TrackFitting& track_fitter, IDetectorVolumes::pointer dv,
+                               const Clus::ParticleDataSet::pointer& particle_data,
+                               const IRecombinationModel::pointer& recomb_model);
+
         // doc sbnd_xin/docs/pr/74 round 2 P2 (SBND 18255 evt 90055 seg
         // 11045).  override_michel_stem_muon (F14 above) accepts ANY
         // shower-like sibling at the stem's far vertex as "the Michel

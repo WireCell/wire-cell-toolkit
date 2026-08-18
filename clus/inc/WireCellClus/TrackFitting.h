@@ -239,6 +239,16 @@ namespace WireCell::Clus {
         void set_showers(PR::IndexedShowerSet showers) { m_showers = std::move(showers); }
         const PR::IndexedShowerSet& get_showers() const { return m_showers; }
 
+        /// doc sbnd_xin/docs/pr/40 round 9 B2 -- clusters connected to the
+        /// main cluster by an nv_bridge_track bridge segment.  Written by
+        /// PatternAlgorithms::nv_bridge_track (cleared at each
+        /// shower_clustering_with_nv entry); read by fill_bee_pf_tree's
+        /// pf_track_bridged_clusters gate.  Empty when the bridge knob is
+        /// off => downstream predicates are byte-identical to legacy.
+        void clear_bridged_cluster_ids() { m_bridged_cluster_ids.clear(); }
+        void add_bridged_cluster_id(int id) { m_bridged_cluster_ids.insert(id); }
+        const std::set<int>& get_bridged_cluster_ids() const { return m_bridged_cluster_ids; }
+
         /// Store / retrieve pi0 identification results from TaggerCheckNeutrino.
         void set_pi0_data(PR::IndexedShowerSet pi0_showers,
                           PR::ShowerIntMap map_shower_pio_id,
@@ -782,6 +792,8 @@ namespace WireCell::Clus {
         // Neutrino pattern-recognition results (set by TaggerCheckNeutrino)
         PR::VertexPtr        m_main_vertex{nullptr};
         PR::IndexedShowerSet m_showers;
+        // doc sbnd_xin/docs/pr/40 round 9 B2 -- see the accessor comment.
+        std::set<int>        m_bridged_cluster_ids;
 
         // Pi0 identification results (set by TaggerCheckNeutrino via set_pi0_data)
         PR::IndexedShowerSet                      m_pi0_showers;

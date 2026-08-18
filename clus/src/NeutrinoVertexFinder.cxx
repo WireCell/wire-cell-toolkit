@@ -1631,14 +1631,31 @@ bool PatternAlgorithms::examine_direction(Graph& graph, VertexPtr vertex, Vertex
                     s_log->trace("examine_direction:   → dirsign set to {}", current_sg->dirsign());
                     
                     // Determine particle type
+                    // doc sbnd_xin/docs/pr/40 round 9 (round 7 candidate 2a,
+                    // D2 re-scope): a GEOMETRY arm beside the pr/74 P1
+                    // cascade veto -- 54629 seg 15007 (31cm, 1.42xMIP)
+                    // fails BOTH P1 conjuncts (needs >40cm AND <1.3xMIP)
+                    // but its 0.97 direct/arc straightness is decisive.
+                    // Wired into all three flag_shower_in branches for
+                    // uniformity; the first is dead (dirsign was just
+                    // assigned +-1 above) and the second cannot hold a
+                    // >10cm track -- the effective bite is the third.
+                    // Knob off => predicate never evaluated => byte-identical.
+                    const bool straight_veto = m_examine_direction_dirsign_shower_in_guard &&
+                                               flag_shower_in &&
+                                               segment_is_straight_long_track(current_sg);
                     if (flag_shower_in && current_sg->dirsign() == 0 && !is_shower) {
+                        if (!straight_veto) {
                         auto four_momentum = segment_cal_4mom(current_sg, 11, particle_data, recomb_model, m_mip_dqdx);
                         auto pinfo = std::make_shared<Aux::ParticleInfo>(11, particle_data->get_particle_mass(11), particle_data->pdg_to_name(11), four_momentum);
                         current_sg->particle_info(pinfo);
+                        }
                     } else if (flag_shower_in && length < 2.0*units::cm && !is_shower) {
+                        if (!straight_veto) {
                         auto four_momentum = segment_cal_4mom(current_sg, 11, particle_data, recomb_model, m_mip_dqdx);
                         auto pinfo = std::make_shared<Aux::ParticleInfo>(11, particle_data->get_particle_mass(11), particle_data->pdg_to_name(11), four_momentum);
                         current_sg->particle_info(pinfo);
+                        }
                     } else if (flag_shower_in) {
                         // Matches prototype: flag_shower_in && (|pdg|==13 || pdg==0).
                         // no-particle-info means pdg defaults to 0, which also qualifies.
@@ -1647,12 +1664,13 @@ bool PatternAlgorithms::examine_direction(Graph& graph, VertexPtr vertex, Vertex
                             // doc sbnd_xin/docs/pr/74 round 2 P1 -- see
                             // m_shower_in_cascade_guard's docstring.  Knob off
                             // => the veto is never evaluated => byte-identical.
-                            if (m_shower_in_cascade_guard &&
+                            if ((m_shower_in_cascade_guard &&
                                 segment_shower_in_cascade_vetoed(current_sg, m_mip_dqdx_median,
-                                                                 m_shower_in_max_len, m_shower_in_mip_hi)) {
+                                                                 m_shower_in_max_len, m_shower_in_mip_hi)) ||
+                                straight_veto) {   // doc pr/40 round 9: geometry arm, see above
                                 SPDLOG_LOGGER_DEBUG(s_log,
-                                    "pr74 shower_in_cascade_guard: veto e- relabel gidx={} L={:.1f}cm pdg={}",
-                                    current_sg->get_graph_index(), length/units::cm, cur_pdg);
+                                    "pr74 shower_in_cascade_guard: veto e- relabel gidx={} L={:.1f}cm pdg={} straight_veto={}",
+                                    current_sg->get_graph_index(), length/units::cm, cur_pdg, straight_veto ? 1 : 0);
                             } else {
                                 auto four_momentum = segment_cal_4mom(current_sg, 11, particle_data, recomb_model, m_mip_dqdx);
                                 auto pinfo = std::make_shared<Aux::ParticleInfo>(11, particle_data->get_particle_mass(11), particle_data->pdg_to_name(11), four_momentum);
@@ -1709,9 +1727,25 @@ bool PatternAlgorithms::examine_direction(Graph& graph, VertexPtr vertex, Vertex
                             }
                             
                             if (flag_change) {
+                                // doc sbnd_xin/docs/pr/40 round 9 (round 7
+                                // candidate 2b): guard the WRITE only, not
+                                // the outer condition -- falsifying that
+                                // would re-route control into the pdg==11
+                                // else-if chain below.  54629 seg 15011
+                                // (94.6cm, 0.980 direct/arc) qualifies.
+                                // Knob off => predicate never evaluated =>
+                                // byte-identical.
+                                if (m_daughter_shower_angle_reclass_straight_guard &&
+                                    segment_is_straight_long_track(current_sg)) {
+                                    SPDLOG_LOGGER_DEBUG(s_log,
+                                        "pr40r9 daughter_reclass_straight_guard: keep pdg={} gidx={} L={:.1f}cm",
+                                        current_pdg, current_sg->get_graph_index(), length/units::cm);
+                                }
+                                else {
                                 auto four_momentum = segment_cal_4mom(current_sg, 11, particle_data, recomb_model, m_mip_dqdx);
                                 auto pinfo = std::make_shared<Aux::ParticleInfo>(11, particle_data->get_particle_mass(11), particle_data->pdg_to_name(11), four_momentum);
                                 current_sg->particle_info(pinfo);
+                                }
                             }
                         } else if (current_pdg == 11 && num_daughter_showers <= 2 && !flag_shower_in &&
                                   !current_sg->flags_any(SegmentFlags::kShowerTopology) &&
@@ -3312,8 +3346,20 @@ void PatternAlgorithms::improve_vertex(Graph& graph, Facade::Cluster& cluster, V
                         segment_determine_dir_track(sg, start_n, end_n, particle_data, recomb_model, m_mip_dqdx_median, false, track_pid_options());
                         pr74_probe_topo_reexam(sg, "after-pid");
 
+                        // doc sbnd_xin/docs/pr/40 round 9 (round 7 candidate
+                        // 1, 320865 seg 13001: 48.1cm, 0.94 direct/arc):
+                        // third arm in the re-demote condition -- a straight
+                        // long track keeps the track PID segment_determine_
+                        // dir_track just assigned instead of taking the
+                        // set_flags+pdg-11+score-100 escape.  Framed as a
+                        // defensible SAFETY NET, not "the fix for 320865"
+                        // (that segment only exists via a pr/90 side effect;
+                        // a pr/90-side fix remains the open alternative).
+                        // Knob off => predicate never evaluated => byte-
+                        // identical.
                         if ((sg->particle_info() && sg->particle_info()->pdg() == 2212 && sg->particle_score() < 0.09) ||
-                            (sg->particle_info() && sg->particle_info()->pdg() == 13 && sg->particle_score() < 0.06)) {
+                            (sg->particle_info() && sg->particle_info()->pdg() == 13 && sg->particle_score() < 0.06) ||
+                            (m_shower_topo_reexam_straight_guard && segment_is_straight_long_track(sg))) {
                             sg->unset_flags(SegmentFlags::kShowerTopology);
                             pr74_probe_topo_reexam(sg, "re-demote(no-pdg-write)");
                         } else {

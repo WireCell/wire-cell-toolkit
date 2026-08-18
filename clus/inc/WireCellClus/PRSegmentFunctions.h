@@ -568,6 +568,26 @@ namespace WireCell::Clus::PR {
     bool segment_is_straight_long_track(SegmentPtr seg, double min_length = 10*units::cm,
                                         double min_direct = 34*units::cm, double straight_ratio = 0.93);
 
+    /// doc sbnd_xin/docs/pr/40 round 9 -- continuation-aware extension of
+    /// segment_is_straight_long_track.
+    ///
+    /// The break-at-point paths in shower clustering (e.g.
+    /// shower_clustering_with_nv_from_vertices PATH C) can hand a guard a
+    /// sub-10 cm HALF of a straight track that individually fails the
+    /// length floor even though the whole object is one straight muon
+    /// (SBND 286906: 8.68 cm anchor seg 9002 at a 4.9 deg kink to the
+    /// 126.89 cm body seg 9001).  True iff `seg` itself passes
+    /// segment_is_straight_long_track, OR a SAME-cluster sibling across
+    /// either endpoint vertex is collinear with it (segment_pair_kink_deg
+    /// < max_kink_deg over the 15 cm tangent; -1 = unmeasurable is never
+    /// collinear) and either (a) the sibling itself passes
+    /// segment_is_straight_long_track or (b) the combined two-segment
+    /// chain does (summed arc length > 10 cm and far-endpoint-to-far-
+    /// endpoint direct span >= 34 cm or > 0.93x the summed arc length --
+    /// the same three constants).  Iteration uses sorted_out_edges only
+    /// (deterministic).  Pure predicate: no graph or segment mutation.
+    bool segment_is_straight_long_track_or_continuation(Graph& graph, SegmentPtr seg,
+                                                        double max_kink_deg = 25.0);
 
     /// Create and associate a DynamicPointCloud with a segment from path points
     ///

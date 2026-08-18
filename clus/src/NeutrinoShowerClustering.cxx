@@ -578,7 +578,7 @@ void PatternAlgorithms::shower_clustering_with_nv_in_main_cluster(Graph& graph, 
     // Complete shower structure for all newly created showers.
     // used_segments (populated during BFS) prevents overlapping segment claims.
     for (auto shower : new_showers) {
-        shower->complete_structure_with_start_segment(used_segments, "fit", "associate_points", m_shower_absorb_track_guard, m_shower_walk_visited_parity);
+        shower->complete_structure_with_start_segment(nv_bridge_seed(used_segments), "fit", "associate_points", m_shower_absorb_track_guard, m_shower_walk_visited_parity);  // doc pr/40 round 9 B2: shield pre-seed, no-op when bridge off
         // Enforce electron type on start segment:
         //  - update_particle_type() handles multi-segment showers via majority vote
         //  - explicit PDG=0 guard catches single-segment showers skipped by update_particle_type()
@@ -836,7 +836,7 @@ void PatternAlgorithms::shower_clustering_connecting_to_main_vertex(Graph& graph
             ShowerPtr shower = std::make_shared<Shower>(graph);
             shower->set_start_vertex(main_vertex, 1);
             shower->set_start_segment(sg);
-            shower->complete_structure_with_start_segment(used_segments, "fit", "associate_points", m_shower_absorb_track_guard, m_shower_walk_visited_parity);
+            shower->complete_structure_with_start_segment(nv_bridge_seed(used_segments), "fit", "associate_points", m_shower_absorb_track_guard, m_shower_walk_visited_parity);  // doc pr/40 round 9 B2: shield pre-seed, no-op when bridge off
             pr84_probe_shower(shower, "connecting_to_main_vertex");
 
             // Single pass over shower edges: accumulate segment stats, vertex counts,
@@ -957,8 +957,24 @@ void PatternAlgorithms::shower_clustering_connecting_to_main_vertex(Graph& graph
                 // Convert to EM shower (particle type 11 = electron)
                 SPDLOG_LOGGER_TRACE(s_log, "shower_clustering_connecting_to_main_vertex: Convert EM shower {}", shower->start_segment()->id());
                 if (shower->start_segment() && shower->start_segment()->has_particle_info() && shower->start_segment()->particle_info()) {
-                    shower->start_segment()->particle_info()->set_pdg(11);
-                    pr40_probe_setpdg(shower->start_segment(), 11, "NeutrinoShowerClustering.cxx:connecting_to_main_vertex");
+                    // doc sbnd_xin/docs/pr/40 round 9 (round 7 candidate 2c,
+                    // D1 re-target): F10 vetoes only at seed time on the
+                    // seed's OWN geometry; a short anchor collinear with a
+                    // long straight sibling passes F10 and reaches this
+                    // accept-time write.  Decline the pdg write only --
+                    // kAvoidMuonCheck, shower insertion and conflict
+                    // deletion below are structure, not PID, and stay
+                    // untouched.  Knob off => byte-identical.
+                    if (m_shower_connect_start_seg_straight_guard &&
+                        segment_is_straight_long_track_or_continuation(graph, shower->start_segment(), m_sfv_kink_max)) {
+                        SPDLOG_LOGGER_DEBUG(s_log,
+                            "pr40r9 start_seg_straight_guard: decline e- write seg={}",
+                            shower->start_segment()->id());
+                    }
+                    else {
+                        shower->start_segment()->particle_info()->set_pdg(11);
+                        pr40_probe_setpdg(shower->start_segment(), 11, "NeutrinoShowerClustering.cxx:connecting_to_main_vertex");
+                    }
                 }
 
                 // Set avoid muon check flag on max segment
@@ -1144,7 +1160,7 @@ void PatternAlgorithms::shower_clustering_with_nv_from_main_cluster(Graph& graph
         while (flag_continue) {
             flag_continue = false;
             for (auto seg1 : seg_order) {
-                if (seg1->cluster() == main_cluster && !m_absorb_unreachable_main_segs.count(seg1)) continue;  // doc pr/65 round 3: guard means "claimed by the main_vertex graph walk", so graph-unreachable main-cluster segments stay eligible (set empty when knob off => legacy)
+                if ((seg1->cluster() == main_cluster && !m_absorb_unreachable_main_segs.count(seg1)) || m_nv_bridge_shield_segs.count(seg1)) continue;  // doc pr/65 round 3: guard means "claimed by the main_vertex graph walk", so graph-unreachable main-cluster segments stay eligible (set empty when knob off => legacy); doc pr/40 round 9 B2: bridged-cluster segments stay un-absorbable (shield set empty when bridge off)
                 if (map_segment_in_shower.find(seg1) != map_segment_in_shower.end()) continue;
 
                 double min_dis = 1e9;
@@ -1222,7 +1238,7 @@ void PatternAlgorithms::shower_clustering_with_nv_from_main_cluster(Graph& graph
 
     // Examine other segments and add to showers based on angle and distance
     for (auto seg1 : seg_order) {
-        if (seg1->cluster() == main_cluster && !m_absorb_unreachable_main_segs.count(seg1)) continue;  // doc pr/65 round 3: guard means "claimed by the main_vertex graph walk", so graph-unreachable main-cluster segments stay eligible (set empty when knob off => legacy)
+        if ((seg1->cluster() == main_cluster && !m_absorb_unreachable_main_segs.count(seg1)) || m_nv_bridge_shield_segs.count(seg1)) continue;  // doc pr/65 round 3: guard means "claimed by the main_vertex graph walk", so graph-unreachable main-cluster segments stay eligible (set empty when knob off => legacy); doc pr/40 round 9 B2: bridged-cluster segments stay un-absorbable (shield set empty when bridge off)
         if (map_segment_in_shower.find(seg1) != map_segment_in_shower.end()) continue;
 
         double min_dis = 1e9;
@@ -1281,7 +1297,7 @@ void PatternAlgorithms::shower_clustering_with_nv_from_main_cluster(Graph& graph
         }
         bool changed = false;
         for (auto seg1 : seg_order) {
-            if (seg1->cluster() == main_cluster && !m_absorb_unreachable_main_segs.count(seg1)) continue;  // doc pr/65 round 3: guard means "claimed by the main_vertex graph walk", so graph-unreachable main-cluster segments stay eligible (set empty when knob off => legacy)
+            if ((seg1->cluster() == main_cluster && !m_absorb_unreachable_main_segs.count(seg1)) || m_nv_bridge_shield_segs.count(seg1)) continue;  // doc pr/65 round 3: guard means "claimed by the main_vertex graph walk", so graph-unreachable main-cluster segments stay eligible (set empty when knob off => legacy); doc pr/40 round 9 B2: bridged-cluster segments stay un-absorbable (shield set empty when bridge off)
             if (map_segment_in_shower.count(seg1)) continue;
             auto it = cluster_to_shower.find(seg1->cluster());
             if (it == cluster_to_shower.end()) continue;
@@ -1297,6 +1313,107 @@ void PatternAlgorithms::shower_clustering_with_nv_from_main_cluster(Graph& graph
             update_shower_maps(showers, map_vertex_in_shower, map_segment_in_shower, map_vertex_to_shower, used_shower_clusters);
         }
     }
+}
+
+// doc sbnd_xin/docs/pr/40 round 9 B2 -- attempt the cross-cluster track
+// bridge for one accepted Step-5 candidate of
+// shower_clustering_with_nv_from_vertices.  Returns true iff the bridge was
+// built (or already existed), in which case the caller must NOT create the
+// conn-2 shower for this cluster.  Preconditions: the directional match has
+// already accepted (angle gates), sg1 sits in `cluster` != main_cluster,
+// `vertex` is a main-cluster vertex, `point` is on sg1.
+//
+// Owner directive (round 8): a long straight track pointing at the
+// determined vertex across a small SP gap is one muon -- modify the GRAPH,
+// after the neutrino vertex is determined.  The gap has no charge, so the
+// bridge is a straight 2-point zero-charge segment (no do_rough_path
+// routing -- that Dijkstra is single-cluster and would silently return an
+// in-cluster detour; no refit -- do_multi_tracking is nonlocal and has no
+// charge to fit).  sg1 keeps its own pdg: the F10 G2 lesson says ordinary
+// track PID owns that decision once the electron overwrite is out of the
+// way.
+bool PatternAlgorithms::nv_bridge_track(Graph& graph, Facade::Cluster* main_cluster,
+                                        Facade::Cluster* cluster, SegmentPtr sg1, VertexPtr vertex,
+                                        const WireCell::Point& point,
+                                        const std::vector<SegmentPtr>& cluster_segs,
+                                        TrackFitting& track_fitter, IDetectorVolumes::pointer dv,
+                                        const Clus::ParticleDataSet::pointer& particle_data,
+                                        const IRecombinationModel::pointer& recomb_model)
+{
+    // Straightness on the PRE-break candidate (or its collinear
+    // continuation -- 286906's 8.7 cm anchor + 127 cm body).
+    if (!segment_is_straight_long_track_or_continuation(graph, sg1, m_sfv_kink_max)) return false;
+
+    // Exact steiner-cloud closest approach; -1 = unmeasurable = no bridge.
+    const double gap = cluster_steiner_gap(*cluster, *main_cluster);
+    if (gap < 0 || gap >= m_shower_nv_bridge_max_gap) return false;
+
+    // Far-side vertex: break at an interior point (the same break the
+    // legacy shower path performs), else the nearest endpoint vertex.
+    VertexPtr far_vtx = nullptr;
+    SegmentPtr half1 = nullptr, half2 = nullptr;
+    const auto& fits = sg1->fits();
+    const bool at_end = !fits.empty() &&
+        ((fits.front().point - point).magnitude() < 0.01 * units::cm ||
+         (fits.back().point - point).magnitude() < 0.01 * units::cm);
+    if (!fits.empty() && !at_end) {
+        auto [success, seg_pair, new_vtx] = break_segment(graph, sg1, point, particle_data,
+                                                          recomb_model, dv, 1e9 * units::cm,
+                                                          m_break_seg_orient);
+        if (success && new_vtx) {
+            far_vtx = new_vtx;
+            half1 = seg_pair.first;
+            half2 = seg_pair.second;
+        }
+    }
+    if (!far_vtx) {
+        auto [v1, v2] = find_vertices(graph, sg1);
+        auto vpt = [](VertexPtr v) { return v->fit().valid() ? v->fit().point : v->wcpt().point; };
+        if (v1 && v2) {
+            far_vtx = ((vpt(v1) - point).magnitude() <= (vpt(v2) - point).magnitude()) ? v1 : v2;
+        }
+        else {
+            far_vtx = v1 ? v1 : v2;
+        }
+    }
+    if (!far_vtx || far_vtx == vertex) return false;
+
+    SegmentPtr bridge = find_segment(graph, vertex, far_vtx);
+    if (!bridge) {
+        // Stamped main_cluster: same_cluster(bridge) holds in
+        // fill_bee_pf_tree and the absorber guards treat it as claimed.
+        std::vector<Facade::geo_point_t> pp{vertex->wcpt().point, far_vtx->wcpt().point};
+        bridge = create_segment_for_cluster(*main_cluster, dv, pp, 0);
+        if (!bridge) return false;
+        // Two synthetic zero-charge fits: downstream consumers (nusel
+        // taggers) call fits().front()/back() unguarded, and an empty-fits
+        // segment adjacent to the main vertex would be a novel state.
+        WireCell::Point p0 = vertex->fit().valid() ? vertex->fit().point : vertex->wcpt().point;
+        WireCell::Point p1 = far_vtx->fit().valid() ? far_vtx->fit().point : far_vtx->wcpt().point;
+        const double glen = (p1 - p0).magnitude();
+        PR::Fit f0, f1;
+        f0.point = p0; f0.index = 0; f0.dQ = 0; f0.dx = glen / 2;
+        f1.point = p1; f1.index = 1; f1.dQ = 0; f1.dx = glen / 2;
+        bridge->fits({f0, f1});
+        add_segment(graph, bridge, vertex, far_vtx);
+    }
+
+    // Shield the bridge and the rescued cluster's own segments from every
+    // shower flood-fill/absorber (the pr/54 lesson), and record the cluster
+    // id both for shower_clustering_in_other_clusters and for the PF-side
+    // pf_track_bridged_clusters gate (transported via TrackFitting).
+    m_nv_bridge_shield_segs.insert(bridge);
+    for (const auto& s : cluster_segs) m_nv_bridge_shield_segs.insert(s);
+    if (half1) m_nv_bridge_shield_segs.insert(half1);
+    if (half2) m_nv_bridge_shield_segs.insert(half2);
+    m_nv_bridge_cluster_ids.insert(cluster->get_cluster_id());
+    track_fitter.add_bridged_cluster_id(cluster->get_cluster_id());
+
+    SPDLOG_LOGGER_DEBUG(s_log,
+        "pr40r9 nv_bridge: cluster {} -> main {} gap={:.2f}cm sg1={} len={:.2f}cm broke={}",
+        cluster->get_cluster_id(), main_cluster->get_cluster_id(), gap / units::cm,
+        sg1->id(), segment_track_length(sg1) / units::cm, half1 != nullptr);
+    return true;
 }
 
 void PatternAlgorithms::shower_clustering_with_nv_from_vertices(Graph& graph, VertexPtr main_vertex, Facade::Cluster* main_cluster, std::vector<Facade::Cluster*>& other_clusters, IndexedShowerSet& showers, ShowerVertexMap& map_vertex_in_shower, ShowerSegmentMap& map_segment_in_shower, VertexShowerSetMap& map_vertex_to_shower, ClusterPtrSet& used_shower_clusters, IndexedVertexSet& vertices_in_long_muon, IndexedSegmentSet& segments_in_long_muon, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model){
@@ -1542,7 +1659,20 @@ void PatternAlgorithms::shower_clustering_with_nv_from_vertices(Graph& graph, Ve
         }
         
         if (!sg1) continue;
-        
+
+        // doc sbnd_xin/docs/pr/40 round 9 B2: a straight long track in
+        // another cluster whose steiner-cloud gap to the main cluster is
+        // below m_shower_nv_bridge_max_gap is a broken-off track (an SP
+        // hole), not a shower.  Bridge the graph instead of fabricating a
+        // conn-2 electron.  Knob off => predicate never evaluated =>
+        // byte-identical legacy path below.
+        if (m_shower_nv_bridge_track && sg1->cluster() != main_cluster &&
+            nv_bridge_track(graph, main_cluster, cluster, sg1, vertex, point,
+                            map_cluster_segments[cluster], track_fitter, dv,
+                            particle_data, recomb_model)) {
+            continue;
+        }
+
         // Create new shower
         ShowerPtr shower = std::make_shared<Shower>(graph);
         shower->set_start_vertex(vertex, 2);
@@ -1587,6 +1717,12 @@ void PatternAlgorithms::shower_clustering_with_nv_from_vertices(Graph& graph, Ve
         
         pr84_probe_shower(shower, "nv_from_vertices_break");
 
+        // doc pr/40 round 9: set when the Part-A guard below declines the
+        // electron overwrite; consulted at the update_particle_type call
+        // for this shower (which would otherwise redo the 13->11 via the
+        // majority vote, PRShower.cxx:981-1009).
+        bool sfv_guard_fired = false;
+
         // Set direction based on vertex proximity
         auto start_seg = shower->start_segment();
         if (start_seg) {
@@ -1609,8 +1745,29 @@ void PatternAlgorithms::shower_clustering_with_nv_from_vertices(Graph& graph, Ve
                 pdg = start_seg->particle_info()->pdg();
             }
             if (pdg == 0 || std::abs(pdg) == 13) {
+                // doc sbnd_xin/docs/pr/40 round 9 (round 8 Part A): decline
+                // the unconditional track->e- overwrite when the anchor (or
+                // its collinear continuation across the shared vertex --
+                // PATH C hands this block a broken sub-10cm half; 286906:
+                // 8.68cm anchor at 4.9deg to the 126.89cm body) is a
+                // straight long track.  Knob off => predicate never
+                // evaluated => byte-identical.  The shower itself is kept:
+                // with a track-typed start segment append_pseudo_shower
+                // renders the 2112 neutron carrier, the owner-desired
+                // "hadron -> neutron" display for a non-EM conn-2 object.
+                if (m_shower_connect_from_vertices_straight_guard &&
+                    segment_is_straight_long_track_or_continuation(graph, start_seg, m_sfv_kink_max)) {
+                    sfv_guard_fired = true;
+                    m_sfv_declined_anchors.insert(start_seg);
+                    SPDLOG_LOGGER_DEBUG(s_log,
+                        "pr40r9 sfv_straight_guard: decline e- write seg={} clus={} pdg={}",
+                        start_seg->id(),
+                        start_seg->cluster() ? start_seg->cluster()->get_cluster_id() : -1,
+                        pdg);
+                }
+                else {
                 auto four_momentum = segment_cal_4mom(start_seg, 11, particle_data, recomb_model, m_mip_dqdx);
-                
+
                 // Create ParticleInfo for electron
                 auto pinfo = std::make_shared<Aux::ParticleInfo>(
                     11,                                          // electron PDG
@@ -1618,15 +1775,16 @@ void PatternAlgorithms::shower_clustering_with_nv_from_vertices(Graph& graph, Ve
                     particle_data->pdg_to_name(11),             // "electron"
                     four_momentum                                // 4-momentum
                 );
-                
+
                 // Store particle info in start_segment
                 start_seg->particle_info(pinfo);
+                }
             }
         }
         
         // Complete shower structure
         IndexedSegmentSet used_segments;
-        shower->complete_structure_with_start_segment(used_segments, "fit", "associate_points", m_shower_absorb_track_guard, m_shower_walk_visited_parity);
+        shower->complete_structure_with_start_segment(nv_bridge_seed(used_segments), "fit", "associate_points", m_shower_absorb_track_guard, m_shower_walk_visited_parity);  // doc pr/40 round 9 B2: shield pre-seed, no-op when bridge off
         
         // Calculate shower direction
         auto [start_vtx, conn_type] = shower->get_start_vertex_and_type();
@@ -1645,7 +1803,7 @@ void PatternAlgorithms::shower_clustering_with_nv_from_vertices(Graph& graph, Ve
         // Cache the shower start front point to avoid re-evaluating per segment.
         const WireCell::Point shower_start_front = shower->start_segment()->fits().front().point;
         for (auto seg1 : seg_order) {
-            if (seg1->cluster() == main_cluster && !m_absorb_unreachable_main_segs.count(seg1)) continue;  // doc pr/65 round 3: guard means "claimed by the main_vertex graph walk", so graph-unreachable main-cluster segments stay eligible (set empty when knob off => legacy)
+            if ((seg1->cluster() == main_cluster && !m_absorb_unreachable_main_segs.count(seg1)) || m_nv_bridge_shield_segs.count(seg1)) continue;  // doc pr/65 round 3: guard means "claimed by the main_vertex graph walk", so graph-unreachable main-cluster segments stay eligible (set empty when knob off => legacy); doc pr/40 round 9 B2: bridged-cluster segments stay un-absorbable (shield set empty when bridge off)
             if (map_segment_in_shower.find(seg1) != map_segment_in_shower.end()) continue;
             if (seg1->cluster() == shower->start_segment()->cluster()) continue;
 
@@ -1682,7 +1840,12 @@ void PatternAlgorithms::shower_clustering_with_nv_from_vertices(Graph& graph, Ve
         }
 
         // Update particle type
-        shower->update_particle_type(particle_data, recomb_model, m_mip_dqdx, main_vertex, m_shower_proton_daughter_pion, m_mip_dqdx_median);
+        // doc pr/40 round 9 (D3): skipped when the Part-A guard declined the
+        // electron write above -- the vote counts a pdg-13 start segment
+        // toward shower_length and would silently redo the 13->11.
+        if (!sfv_guard_fired) {
+            shower->update_particle_type(particle_data, recomb_model, m_mip_dqdx, main_vertex, m_shower_proton_daughter_pion, m_mip_dqdx_median);
+        }
 
         bool tmp_flag = (shower->start_vertex() == main_vertex);
         SPDLOG_LOGGER_TRACE(s_log, "shower_clustering_with_nv_from_vertices: Separated shower: {} {} {} {} {}",
@@ -1721,7 +1884,7 @@ void PatternAlgorithms::shower_clustering_with_nv_from_vertices(Graph& graph, Ve
             while (flag_continue) {
                 flag_continue = false;
                 for (auto seg1 : seg_order) {
-                    if (seg1->cluster() == main_cluster && !m_absorb_unreachable_main_segs.count(seg1)) continue;  // doc pr/65 round 3: guard means "claimed by the main_vertex graph walk", so graph-unreachable main-cluster segments stay eligible (set empty when knob off => legacy)
+                    if ((seg1->cluster() == main_cluster && !m_absorb_unreachable_main_segs.count(seg1)) || m_nv_bridge_shield_segs.count(seg1)) continue;  // doc pr/65 round 3: guard means "claimed by the main_vertex graph walk", so graph-unreachable main-cluster segments stay eligible (set empty when knob off => legacy); doc pr/40 round 9 B2: bridged-cluster segments stay un-absorbable (shield set empty when bridge off)
                     if (map_segment_in_shower.find(seg1) != map_segment_in_shower.end()) continue;
 
                     double min_dis = 1e9;
@@ -1934,6 +2097,7 @@ void PatternAlgorithms::shower_clustering_in_other_clusters(Graph& graph, Vertex
     // Process clusters in map_cluster_main_vertices
     for (auto& [cluster, vertex] : map_cluster_main_vertices) {
         if (used_shower_clusters.find(cluster) != used_shower_clusters.end()) continue;
+        if (m_nv_bridge_cluster_ids.count(cluster->get_cluster_id())) continue;  // doc pr/40 round 9 B2: a bridged cluster is main-track material, not shower material (set empty when bridge off)
         if (map_cluster_length[cluster] < 4 * units::cm) continue;
         
         double min_dis = 1e9;
@@ -2014,7 +2178,7 @@ void PatternAlgorithms::shower_clustering_in_other_clusters(Graph& graph, Vertex
             
             // Complete shower structure
             IndexedSegmentSet used_segments;
-            shower->complete_structure_with_start_segment(used_segments, "fit", "associate_points", m_shower_absorb_track_guard, m_shower_walk_visited_parity);
+            shower->complete_structure_with_start_segment(nv_bridge_seed(used_segments), "fit", "associate_points", m_shower_absorb_track_guard, m_shower_walk_visited_parity);  // doc pr/40 round 9 B2: shield pre-seed, no-op when bridge off
             pr84_probe_shower(shower, "in_other_clusters_A");
 
             // Calculate shower direction
@@ -2022,7 +2186,7 @@ void PatternAlgorithms::shower_clustering_in_other_clusters(Graph& graph, Vertex
             
             // Cluster with the rest - add segments based on angle and distance
             for (auto seg1 : seg_order) {
-                if (seg1->cluster() == main_cluster && !m_absorb_unreachable_main_segs.count(seg1)) continue;  // doc pr/65 round 3: guard means "claimed by the main_vertex graph walk", so graph-unreachable main-cluster segments stay eligible (set empty when knob off => legacy)
+                if ((seg1->cluster() == main_cluster && !m_absorb_unreachable_main_segs.count(seg1)) || m_nv_bridge_shield_segs.count(seg1)) continue;  // doc pr/65 round 3: guard means "claimed by the main_vertex graph walk", so graph-unreachable main-cluster segments stay eligible (set empty when knob off => legacy); doc pr/40 round 9 B2: bridged-cluster segments stay un-absorbable (shield set empty when bridge off)
                 if (map_segment_in_shower.find(seg1) != map_segment_in_shower.end()) continue;
                 if (seg1->cluster() == shower->start_segment()->cluster()) continue;
                 
@@ -2121,6 +2285,7 @@ void PatternAlgorithms::shower_clustering_in_other_clusters(Graph& graph, Vertex
     // Process remaining other_clusters not in map_cluster_main_vertices
     for (auto cluster : other_clusters) {
         if (used_shower_clusters.find(cluster) != used_shower_clusters.end()) continue;
+        if (m_nv_bridge_cluster_ids.count(cluster->get_cluster_id())) continue;  // doc pr/40 round 9 B2: a bridged cluster is main-track material, not shower material (set empty when bridge off)
         
         // std::cout << "shower_clustering_in_other_clusters: Processing cluster " << cluster->get_cluster_id() << std::endl;
 
@@ -2231,7 +2396,7 @@ void PatternAlgorithms::shower_clustering_in_other_clusters(Graph& graph, Vertex
             
             // Complete shower structure
             IndexedSegmentSet used_segments;
-            shower->complete_structure_with_start_segment(used_segments, "fit", "associate_points", m_shower_absorb_track_guard, m_shower_walk_visited_parity);
+            shower->complete_structure_with_start_segment(nv_bridge_seed(used_segments), "fit", "associate_points", m_shower_absorb_track_guard, m_shower_walk_visited_parity);  // doc pr/40 round 9 B2: shield pre-seed, no-op when bridge off
             // Majority-vote correction for multi-segment showers whose start segment
             // has an unexpected PDG not covered by the explicit force-to-11 above.
             shower->update_particle_type(particle_data, recomb_model, m_mip_dqdx, main_vertex, m_shower_proton_daughter_pion, m_mip_dqdx_median);
@@ -2312,7 +2477,7 @@ void PatternAlgorithms::shower_clustering_in_other_clusters(Graph& graph, Vertex
                     four_momentum));
             }
 
-            shower->complete_structure_with_start_segment(claimed_k5, "fit", "associate_points", m_shower_absorb_track_guard, m_shower_walk_visited_parity);
+            shower->complete_structure_with_start_segment(nv_bridge_seed(claimed_k5), "fit", "associate_points", m_shower_absorb_track_guard, m_shower_walk_visited_parity);  // doc pr/40 round 9 B2: shield pre-seed, no-op when bridge off
             shower->update_particle_type(particle_data, recomb_model, m_mip_dqdx, main_vertex, m_shower_proton_daughter_pion, m_mip_dqdx_median);
             SPDLOG_LOGGER_DEBUG(s_log,
                 "pr74 conn3_unreachable: promote gidx={} len {:.1f}cm conn={} anchor_dis {:.1f}cm",
@@ -2406,7 +2571,7 @@ void PatternAlgorithms::examine_shower_1(Graph& graph, VertexPtr main_vertex, In
                 ShowerPtr shower1 = std::make_shared<Shower>(graph);
                 shower1->set_start_vertex(main_vertex, 1);
                 shower1->set_start_segment(sg);
-                shower1->complete_structure_with_start_segment(used_segments, "fit", "associate_points", m_shower_absorb_track_guard, m_shower_walk_visited_parity);
+                shower1->complete_structure_with_start_segment(nv_bridge_seed(used_segments), "fit", "associate_points", m_shower_absorb_track_guard, m_shower_walk_visited_parity);  // doc pr/40 round 9 B2: shield pre-seed, no-op when bridge off
                 pr84_probe_shower(shower1, "examine_shower_1_tmp");
 
 
@@ -3116,7 +3281,7 @@ void PatternAlgorithms::examine_showers(Graph& graph, VertexPtr main_vertex, Ind
         shower->set_start_segment(sg);
         shower->set_start_point(main_vtx_pt);
         IndexedSegmentSet tmp_used_segments;
-        shower->complete_structure_with_start_segment(tmp_used_segments, "fit", "associate_points", m_shower_absorb_track_guard, m_shower_walk_visited_parity);
+        shower->complete_structure_with_start_segment(nv_bridge_seed(tmp_used_segments), "fit", "associate_points", m_shower_absorb_track_guard, m_shower_walk_visited_parity);  // doc pr/40 round 9 B2: shield pre-seed, no-op when bridge off
         if (pair_conn_type != 1) {
             if (segment_track_length(sg) > 44 * units::cm || seg_dir_weak(sg))
                 sg->set_flags(SegmentFlags::kAvoidMuonCheck);
@@ -3993,7 +4158,15 @@ void PatternAlgorithms::shower_clustering_with_nv(int acc_segment_id, IndexedSho
     // Such segments exist only when other_seg_keep_isolated (doc pr/54) kept
     // a residual segment as a disconnected component of the main cluster's
     // graph; the prototype cannot reach this state (attach-or-discard).
+    // doc pr/40 round 9: the B2 bridge (nv_bridge_track, from_vertices) DOES
+    // add graph edges after this point, but only main-cluster-vertex ->
+    // other-cluster edges -- it cannot un-island a main-cluster segment, so
+    // the unreachable set computed below stays valid for the whole call.
     m_absorb_unreachable_main_segs.clear();
+    m_sfv_declined_anchors.clear();
+    m_nv_bridge_shield_segs.clear();
+    m_nv_bridge_cluster_ids.clear();
+    track_fitter.clear_bridged_cluster_ids();
     if (m_shower_absorb_unreachable_main && main_vertex && main_cluster) {
         for (const auto& seg : unreachable_segments(graph, main_vertex)) {
             if (seg && seg->cluster() == main_cluster) {

@@ -139,6 +139,15 @@ TEST_CASE("clus knob defaults: TaggerCheckNeutrino switches are all OFF")
     CHECK_KNOB_BOOL(cfg, "shower_dedup_start_seg", false);                    // doc pr/84 r3 S1; off = legacy
     CHECK_KNOB_BOOL(cfg, "shower_endpoint_skip_orphan_vtx", false);           // doc pr/91 r1 F1; off = legacy end_point search
     CHECK_KNOB_BOOL(cfg, "shower_walk_visited_parity", false);               // doc pr/91 round 3; off = legacy has_node()-gated frontier
+    // doc pr/40 round 9 -- straight-track PID guard family + B2 bridge.
+    CHECK_KNOB_BOOL(cfg, "shower_connect_from_vertices_straight_guard", false);  // r8 Part A
+    CHECK_KNOB_BOOL(cfg, "shower_connect_start_seg_straight_guard", false);      // r7 c2c (D1 re-target)
+    CHECK_KNOB_BOOL(cfg, "examine_direction_dirsign_shower_in_guard", false);    // r7 c2a (D2 re-scope)
+    CHECK_KNOB_BOOL(cfg, "daughter_shower_angle_reclass_straight_guard", false); // r7 c2b
+    CHECK_KNOB_BOOL(cfg, "shower_topo_reexam_straight_guard", false);            // r7 c1 safety net
+    CHECK_KNOB_NUM(cfg, "sfv_kink_max", 25.0);                                   // deg; inert while guards off
+    CHECK_KNOB_BOOL(cfg, "shower_nv_bridge_track", false);                       // B2
+    CHECK_KNOB_NUM(cfg, "shower_nv_bridge_max_gap", 1.8);                        // cm; inert while B2 off
     CHECK_KNOB_BOOL(cfg, "shower_traj_michel_stem", false);                   // doc pr/74 round 4 K6
     CHECK_KNOB_NUM(cfg, "michel_stem_traj_min_len", 15.0);                    // cm; inert while K6 off
     CHECK_KNOB_NUM(cfg, "michel_stem_traj_max_len", 45.0);                    // cm; inert while K6 off

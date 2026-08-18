@@ -318,6 +318,36 @@ std::vector<Facade::geo_point_t> PatternAlgorithms::do_rough_path(const Facade::
         return path_points;
 }
 
+// doc sbnd_xin/docs/pr/40 round 9 B2 -- exact steiner-cloud closest approach
+// between two clusters, the round-8 gap metric (286906: 1.39 cm must-bridge
+// vs 521075: 2.92 cm must-not; fitted-vertex distance sits on the pr/84
+// adverse band and is NOT used).  Cluster::get_closest_points() is a
+// stride-20 probe heuristic on the full blob cloud -- wrong cloud, not
+// exact -- hence this dedicated helper.  Deterministic: iterates a's
+// steiner_pc in index order, kNN into b's kd tree (distances are SQUARED,
+// see kd_steiner_radius's radius*radius convention), strict '<'.
+// Returns -1 when either cloud is absent/empty ("unmeasurable"): callers
+// must treat that as "do not bridge", never as gap 0.
+double PatternAlgorithms::cluster_steiner_gap(const Facade::Cluster& a, const Facade::Cluster& b) const
+{
+    if (!a.has_pc("steiner_pc") || a.get_pc("steiner_pc").size_major() == 0) return -1;
+    if (!b.has_pc("steiner_pc") || b.get_pc("steiner_pc").size_major() == 0) return -1;
+
+    const auto& spc = a.get_pc("steiner_pc");
+    const auto& coords = a.get_default_scope().coords;
+    const auto& xs = spc.get(coords.at(0))->elements<double>();
+    const auto& ys = spc.get(coords.at(1))->elements<double>();
+    const auto& zs = spc.get(coords.at(2))->elements<double>();
+
+    double best2 = std::numeric_limits<double>::max();
+    for (size_t i = 0; i < xs.size(); ++i) {
+        auto res = b.kd_steiner_knn(1, Facade::geo_point_t(xs[i], ys[i], zs[i]), "steiner_pc");
+        if (res.empty()) return -1;
+        if (res[0].second < best2) best2 = res[0].second;
+    }
+    return std::sqrt(best2);
+}
+
 void PatternAlgorithms::set_default_shower_particle_info(Graph& graph, Facade::Cluster& cluster, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, VertexPtr main_vertex) {
     // Mirrors prototype ProtoSegment::get_particle_type() which always returns 11 for
     // any shower segment (flag_shower_trajectory || flag_shower_topology).
