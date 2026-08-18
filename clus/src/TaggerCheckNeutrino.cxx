@@ -31,6 +31,80 @@ namespace {
         for (size_t i = 0; i < n; ++i) { h ^= b[i]; h *= 1099511628211ULL; }
         return h;
     }
+    // pr/83 round 2 diagnostic: where in the pipeline does a class-B
+    // duplicate/near-parallel pair FIRST appear?  main_vertex_graph_audit's
+    // op1 (NeutrinoGraphAudit.cxx) runs ONCE, scoped to mvga_radius of the
+    // main vertex; several stages (clustering_points, examine_direction,
+    // shower_clustering_with_nv, the final do_multi_tracking refit) run
+    // AFTER it with no second duplicate-corridor check.  This walks every
+    // pair of segments on `cluster` (main cluster, unscoped -- unlike op1
+    // -- since class-B pairs are not always near-vertex), using op1's own
+    // metric (point-fraction within 1.4 cm, chord angle < 20 deg), and logs
+    // a TRACE line per pair clearing overlap 0.5 (looser than op1's 0.7-0.8
+    // production threshold, to see a pair APPROACHING duplication, not only
+    // one that already cleared it) at each `detg_dump` checkpoint. Opt-in,
+    // separate from WCT_DET_DEBUG (whose checksum is unaffected either way).
+    void dup_stage_census(const char* tag, WireCell::Clus::PR::Graph& g,
+                          WireCell::Clus::Facade::Cluster& cluster) {
+        static const bool on = (std::getenv("WCT_DUP_STAGE_DEBUG") != nullptr);
+        if (!on) return;
+        static auto s_log = WireCell::Log::logger("clus.NeutrinoPattern");
+        std::vector<SegmentPtr> segs;
+        for (auto vd : ordered_nodes(g)) {
+            auto vtx = g[vd].vertex;
+            if (!vtx || vtx->cluster() != &cluster) continue;
+            for (auto edesc : sorted_out_edges(vd, g)) {
+                SegmentPtr sg = g[edesc].segment;
+                if (!sg) continue;
+                if (std::find(segs.begin(), segs.end(), sg) != segs.end()) continue;
+                segs.push_back(sg);
+            }
+        }
+        SPDLOG_LOGGER_TRACE(s_log, "dupstage: {} cluster={} nseg={}",
+            tag, cluster.ident(), segs.size());
+        auto points_of = [](SegmentPtr sg) {
+            std::vector<WireCell::Point> pts;
+            if (!sg->fits().empty()) {
+                for (const auto& f : sg->fits()) pts.push_back(f.point);
+            } else {
+                for (const auto& w : sg->wcpts()) pts.push_back(w.point);
+            }
+            return pts;
+        };
+        auto frac_within = [](const std::vector<WireCell::Point>& A,
+                              const std::vector<WireCell::Point>& B, double tol) {
+            if (A.empty() || B.empty()) return 0.0;
+            size_t n = 0;
+            for (const auto& a : A) {
+                double best = 1e18;
+                for (const auto& b : B) best = std::min(best, (a - b).magnitude());
+                if (best < tol) ++n;
+            }
+            return double(n) / A.size();
+        };
+        for (size_t i = 0; i + 1 < segs.size(); ++i) {
+            for (size_t j = i + 1; j < segs.size(); ++j) {
+                double la = segment_track_length(segs[i]);
+                double lb = segment_track_length(segs[j]);
+                if (std::min(la, lb) < 10*units::cm) continue;
+                auto sPts = points_of(la <= lb ? segs[i] : segs[j]);
+                auto lPts = points_of(la <= lb ? segs[j] : segs[i]);
+                if (sPts.size() < 2 || lPts.size() < 2) continue;
+                double f = frac_within(sPts, lPts, 1.4*units::cm);
+                if (f < 0.5) continue;
+                auto u = sPts.back() - sPts.front();
+                auto v = lPts.back() - lPts.front();
+                double den = u.magnitude() * v.magnitude();
+                double ang = den > 0
+                    ? std::acos(std::clamp(std::abs(u.dot(v)) / den, 0.0, 1.0)) / 3.1415926 * 180.0
+                    : -1.0;
+                SPDLOG_LOGGER_TRACE(s_log,
+                    "dupstage: {} cluster={} pair len {:.1f}/{:.1f}cm overlap={:.2f} angle={:.1f}deg",
+                    tag, cluster.ident(), std::min(la,lb)/units::cm, std::max(la,lb)/units::cm, f, ang);
+            }
+        }
+    }
+
     void detg_dump(const char* tag, WireCell::Clus::PR::Graph& g) {
         static const bool on = (std::getenv("WCT_DET_DEBUG") != nullptr);
         if (!on) return;
@@ -1495,6 +1569,7 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
         }
     }
     detg_dump("overall_main_vertex", *pr_graph);
+    dup_stage_census("overall_main_vertex", *pr_graph, *main_cluster);
     if (m_perf) SPDLOG_LOGGER_DEBUG(log, "TaggerCheckNeutrino timing: overall main vertex took {} ms", MS(Clock::now() - t0).count());
     t0 = Clock::now();
 
@@ -1512,6 +1587,7 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
                                                    *m_track_fitter, m_dv, particle_data(), m_recomb_model)) {
             map_cluster_main_vertices[main_cluster] = final_main_vertex;
             detg_dump("snap_main_vertex_to_kink", *pr_graph);
+            dup_stage_census("snap_main_vertex_to_kink", *pr_graph, *main_cluster);
         }
 
         pattern_algos.improve_vertex(*pr_graph, *main_cluster, final_main_vertex,
@@ -1534,6 +1610,7 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
                                                   *m_track_fitter, m_dv)) {
             std::cout << "After main vertex graph audit:" << final_main_vertex->fit().point << std::endl; pattern_algos.print_segs_info(*pr_graph, *main_cluster, 0);
             detg_dump("main_vertex_graph_audit", *pr_graph);
+            dup_stage_census("main_vertex_graph_audit", *pr_graph, *main_cluster);
         }
 
         // doc sbnd_xin/docs/pr/51 round 4: diagnostic-only rough-path probe
@@ -1585,6 +1662,7 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
         
         std::cout << "After examine direction: " << std::endl;pattern_algos.print_segs_info(*pr_graph, *main_cluster, 0);
         detg_dump("improve_vertex", *pr_graph);
+        dup_stage_census("improve_vertex", *pr_graph, *main_cluster);
         if (m_perf) SPDLOG_LOGGER_DEBUG(log, "TaggerCheckNeutrino timing: improve_vertex + examine_direction took {} ms", MS(Clock::now() - t0).count());
         t0 = Clock::now();
 
@@ -1603,6 +1681,7 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
 
         std::cout << "After shower clustering with NV: " << std::endl; pattern_algos.print_segs_info(*pr_graph, *main_cluster, 0);
         detg_dump("shower_clustering_with_nv", *pr_graph);
+        dup_stage_census("shower_clustering_with_nv", *pr_graph, *main_cluster);
         if (m_perf) SPDLOG_LOGGER_DEBUG(log, "TaggerCheckNeutrino timing: shower_clustering_with_nv took {} ms", MS(Clock::now() - t0).count());
         t0 = Clock::now();
 

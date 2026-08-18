@@ -308,6 +308,19 @@ bool PatternAlgorithms::main_vertex_graph_audit(Graph& graph, Facade::Cluster& c
         while (flag_continue && n_op1 < kEditCap) {
             flag_continue = false;
             auto segs = in_scope_segments();
+            // pr/83 round 2 diagnostic: which segments op1 even considered,
+            // and the main-vertex point the mvga_radius scope is centered on
+            // -- a duplicate pair outside scope never reaches the eval TRACE
+            // above and looks identical, in the log, to one that was in
+            // scope but below the overlap/angle threshold.
+            if (n_op1 == 0) {
+                SPDLOG_LOGGER_TRACE(s_log, "mvga: op1 scope cluster={} mv=({:.2f},{:.2f},{:.2f})cm n_in_scope={}",
+                    cluster.ident(), mv_pt.x()/units::cm, mv_pt.y()/units::cm, mv_pt.z()/units::cm, segs.size());
+                for (SegmentPtr sg : segs) {
+                    SPDLOG_LOGGER_TRACE(s_log, "mvga: op1 scope-member cluster={} len={:.2f}cm",
+                        cluster.ident(), segment_track_length(sg)/units::cm);
+                }
+            }
             for (size_t i = 0; i + 1 < segs.size() && !flag_continue; ++i) {
                 for (size_t j = i + 1; j < segs.size() && !flag_continue; ++j) {
                     SegmentPtr sa = segs[i];
@@ -347,7 +360,20 @@ bool PatternAlgorithms::main_vertex_graph_audit(Graph& graph, Facade::Cluster& c
                         if (den > 0) {
                             double cosang = std::abs(ca.dot(cb)) / den;
                             double ang = std::acos(std::clamp(cosang, 0.0, 1.0)) / 3.1415926 * 180.0;
+                            // pr/83 round 2 diagnostic: an overlap-gate pass
+                            // that still declines needs its angle on record --
+                            // op1's own eval TRACE (above) never reaches this
+                            // far when frac < dup_frac, so a post-overlap
+                            // decline was otherwise silent.
+                            SPDLOG_LOGGER_TRACE(s_log,
+                                "mvga: op1 angle cluster={} overlap={:.2f} angle={:.1f}deg gate={}",
+                                cluster.ident(), frac, ang,
+                                (ang > m_mvga_dup_angle) ? "decline" : "pass");
                             if (ang > m_mvga_dup_angle) continue;
+                        } else {
+                            SPDLOG_LOGGER_TRACE(s_log,
+                                "mvga: op1 angle cluster={} overlap={:.2f} angle=zero-chord gate=pass",
+                                cluster.ident(), frac);
                         }
                     }
 
@@ -361,7 +387,12 @@ bool PatternAlgorithms::main_vertex_graph_audit(Graph& graph, Facade::Cluster& c
 
                     auto [lv1, lv2] = find_vertices(graph, loser);
                     auto [sv1, sv2] = find_vertices(graph, survivor);
-                    if (!lv1 || !lv2 || !sv1 || !sv2) continue;
+                    if (!lv1 || !lv2 || !sv1 || !sv2) {
+                        SPDLOG_LOGGER_TRACE(s_log,
+                            "mvga: op1 find-vertices-failed cluster={} overlap={:.2f} lv1={} lv2={} sv1={} sv2={}",
+                            cluster.ident(), frac, (bool)lv1, (bool)lv2, (bool)sv1, (bool)sv2);
+                        continue;
+                    }
 
                     // Reconnect plan: each loser endpoint that is not a
                     // survivor endpoint gets a direct edge to the nearest
@@ -382,7 +413,12 @@ bool PatternAlgorithms::main_vertex_graph_audit(Graph& graph, Facade::Cluster& c
                         if (do_rough_path(cluster, a, b).size() < 2) { feasible = false; break; }
                         plans.emplace_back(le, target);
                     }
-                    if (!feasible) continue;
+                    if (!feasible) {
+                        SPDLOG_LOGGER_TRACE(s_log,
+                            "mvga: op1 reconnect-infeasible cluster={} loser_len={:.2f}cm",
+                            cluster.ident(), segment_track_length(loser)/units::cm);
+                        continue;
+                    }
 
                     remove_segment(graph, loser);
                     for (auto& [le, target] : plans) connect_direct(le, target);
