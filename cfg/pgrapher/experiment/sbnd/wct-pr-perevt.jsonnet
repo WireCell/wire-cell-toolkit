@@ -1578,6 +1578,21 @@ function(
     // ~1.6 cm from the straight chord; 1.0 is grid-validated, uniquely
     // required by 349945 + 122660, zero adverse anywhere).
     mvga_straighten_radius = 1.0,
+    // doc pr/83 r3 -- the duplicate-corridor round, SBND PRODUCTION ON
+    // (owner flip 2026-08-17): op1 unscoped (-1), op1 threshold 0.7 for
+    // >=10cm pairs (C++ length gate; 390842 guard), post-op3 dup pass
+    // (class A), abandoned-cluster dup audit (Mechanism C + losing-candidate
+    // orphans, 350935/359980).  Gates: knob-off 1022/1022 byte-identical;
+    // census 17->0 (511-evt) and 14->0 (mcp2k), zero new findings.
+    // mvga_carry_max stays null (not needed; class A cleared without it).
+    // Escapes: SBND_MVGA_OP1_RADIUS, SBND_MVGA_OP1_DUP_FRAC,
+    // SBND_MVGA_OP1_POST, SBND_MVGA_CARRY_MAX, SBND_SWAP_ORPHAN_DUP_AUDIT
+    // (or -A).  null/false omit the keys => byte-identical legacy path.
+    mvga_op1_radius = -1,
+    mvga_op1_dup_frac = 0.7,
+    mvga_op1_post = true,
+    mvga_carry_max = null,
+    swap_orphan_dup_audit = true,
     // doc pr/51 (18255-506746) -- DL rerank cross-cluster swap guard: with
     // the guard on, an accepted DL vertex can never swap the main cluster
     // (506746: one confident uBooNE-net voxel, s_dl = +576, moved the
@@ -2106,6 +2121,11 @@ function(
                              mvga_splice_straighten=mvga_splice_straighten,
                              mvga_approach_collapse=mvga_approach_collapse,
                              mvga_straighten_radius=mvga_straighten_radius,
+                             mvga_op1_radius=mvga_op1_radius,
+                             mvga_op1_dup_frac=mvga_op1_dup_frac,
+                             mvga_op1_post=mvga_op1_post,
+                             mvga_carry_max=mvga_carry_max,
+                             swap_orphan_dup_audit=swap_orphan_dup_audit,
                              dl_vtx_swap_guard=dl_vtx_swap_guard,
                              dl_vtx_topo_weight=dl_vtx_topo_weight,
                              dl_vtx_topo_center=dl_vtx_topo_center,
