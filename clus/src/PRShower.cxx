@@ -56,6 +56,20 @@ namespace WireCell::Clus::PR {
             static const bool dbg = std::getenv("WCT_SHOWER_ENDPOINT_DEBUG") != nullptr;
             return dbg;
         }
+
+        // doc pr/91 round 3 -- WCT_SHOWER_WALK_DEBUG.  Fires only when
+        // walk_visited_parity re-enqueues a vertex the legacy !has_node()
+        // test would have pruned (i.e. it was already present in the view but
+        // never walked).  Census only -- no attempt to classify how the node
+        // first entered the view (former start vertex vs add_shower import);
+        // that can be read off by comparing against the WCT_SHOWER_CONTENT_
+        // DEBUG / WCT_SHOWER_ENDPOINT_DEBUG dumps for the same event.
+        // Log/stderr only, no effect on emitted bytes.
+        bool walk_dbg()
+        {
+            static const bool dbg = std::getenv("WCT_SHOWER_WALK_DEBUG") != nullptr;
+            return dbg;
+        }
         int vtx_display_id(const VertexPtr& v)
         {
             if (!v) return -1;
@@ -217,13 +231,15 @@ namespace WireCell::Clus::PR {
         if (flag_include_vertices) {
             // Get the two vertices connected to this segment from the full graph
             auto vertices = find_vertices(m_full_graph, seg);
-            
+
             // Add each vertex to the view (skip the start_vertex)
             if (vertices.first && vertices.first != m_start_vertex) {
                 this->add_vertex(vertices.first);
+                m_walked_nodes.insert(vertices.first->get_descriptor());  // doc pr/91 r3
             }
             if (vertices.second && vertices.second != m_start_vertex) {
                 this->add_vertex(vertices.second);
+                m_walked_nodes.insert(vertices.second->get_descriptor());  // doc pr/91 r3
             }
         }
         
@@ -286,13 +302,24 @@ namespace WireCell::Clus::PR {
         if (flag_include_vertices) {
             // Get the two vertices connected to this segment from the full graph
             auto vertices = find_vertices(m_full_graph, seg);
-            
-            // Add each vertex to the view (skip the start_vertex)
-            if (vertices.first ) {
+
+            // Unlike set_start_segment() above, this branch has no
+            // `!= m_start_vertex` guard on add_vertex() itself -- untouched,
+            // byte-neutral.  The m_walked_nodes bookkeeping DOES guard on it
+            // (doc pr/91 r3): if vertices.first/second is the CURRENT start
+            // vertex, recording it here would wrongly mark it "walked" while
+            // it is still exempt from the frontier test by the unconditional
+            // `!= m_start_vertex` checks in complete_structure_with_start_
+            // segment -- and that mark would incorrectly survive a later
+            // re-seat, when this vertex becomes a FORMER start vertex that
+            // the fix is specifically meant to re-expand.
+            if (vertices.first) {
                 this->add_vertex(vertices.first);
+                if (vertices.first != m_start_vertex) m_walked_nodes.insert(vertices.first->get_descriptor());
             }
-            if (vertices.second ) {
+            if (vertices.second) {
                 this->add_vertex(vertices.second);
+                if (vertices.second != m_start_vertex) m_walked_nodes.insert(vertices.second->get_descriptor());
             }
         }
 
@@ -366,6 +393,14 @@ namespace WireCell::Clus::PR {
             VertexPtr vtx = m_full_graph[vdesc].vertex;
             if (vtx && vtx->descriptor_valid()) this->add_vertex(vtx);
         }
+        // doc pr/91 round 3: mirror the prototype's add_shower (WCShower.cxx:
+        // 681-692), which merges the absorbed shower's own map_vtx_segs keys
+        // -- so a vertex the absorbed shower never walked (e.g. its own
+        // former start vertex) stays unwalked here too, and remains eligible
+        // for re-expansion under walk_visited_parity.  Same graph
+        // (m_full_graph is shared across all showers in one clustering pass),
+        // so descriptors carry over directly.  Membership-tested only.
+        m_walked_nodes.insert(shower.m_walked_nodes.begin(), shower.m_walked_nodes.end());
         if (endpoint_dbg()) {
             std::fprintf(stderr,
                          "SHOWER_ENDPOINT tag=add_shower into_sid=%d into_seg=%d from_sid=%d "
@@ -439,7 +474,7 @@ namespace WireCell::Clus::PR {
 
     }
 
-    void Shower::complete_structure_with_start_segment(IndexedSegmentSet& used_segments, const std::string& cloud_name_fit, const std::string& cloud_name_associate, bool absorb_track_guard) {
+    void Shower::complete_structure_with_start_segment(IndexedSegmentSet& used_segments, const std::string& cloud_name_fit, const std::string& cloud_name_associate, bool absorb_track_guard, bool walk_visited_parity) {
         if (!m_start_segment || !m_start_segment->descriptor_valid()) return;
 
         // doc sbnd_xin/docs/pr/40 round 6 F12: the flood-fill below has no
@@ -479,10 +514,12 @@ namespace WireCell::Clus::PR {
         if (vertices.first && vertices.first != m_start_vertex) {
             this->add_vertex(vertices.first);
             new_vertices.push_back(vertices.first);
+            m_walked_nodes.insert(vertices.first->get_descriptor());  // doc pr/91 r3: about to be walked below
         }
         if (vertices.second && vertices.second != m_start_vertex) {
             this->add_vertex(vertices.second);
             new_vertices.push_back(vertices.second);
+            m_walked_nodes.insert(vertices.second->get_descriptor());  // doc pr/91 r3
         }
         
         // Worklist algorithm: explore connected segments and vertices
@@ -523,16 +560,40 @@ namespace WireCell::Clus::PR {
                 
                 // Find vertices connected to this segment (excluding start_vertex)
                 auto vertices = find_vertices(m_full_graph, seg);
+                // doc pr/91 round 3: legacy frontier test is pure view
+                // MEMBERSHIP (!has_node) -- a vertex added by
+                // set_start_vertex()/set_start_segment()/add_segment()/
+                // add_shower() but never actually scanned by this worklist is
+                // permanently skipped.  walk_visited_parity switches the test
+                // to m_walked_nodes, the prototype's map_vtx_segs equivalent
+                // (WCShower.cxx:735-742): a present-but-unwalked vertex is
+                // re-enqueued.  See PRShower.h for the full mechanism.
                 if (vertices.first && vertices.first != m_start_vertex) {
-                    if (!this->has_node(vertices.first->get_descriptor())) {
+                    const auto vd = vertices.first->get_descriptor();
+                    const bool unseen = walk_visited_parity ? !m_walked_nodes.count(vd) : !this->has_node(vd);
+                    if (unseen) {
+                        if (walk_dbg() && this->has_node(vd)) {
+                            std::fprintf(stderr,
+                                         "SHOWER_WALK rewalk shower_id=%d via_seg=%d vtx=%d\n",
+                                         m_shower_id, seg_display_id(seg), vtx_display_id(vertices.first));
+                        }
                         this->add_vertex(vertices.first);
                         new_vertices.push_back(vertices.first);
+                        m_walked_nodes.insert(vd);  // about to be walked
                     }
                 }
                 if (vertices.second && vertices.second != m_start_vertex) {
-                    if (!this->has_node(vertices.second->get_descriptor())) {
+                    const auto vd = vertices.second->get_descriptor();
+                    const bool unseen = walk_visited_parity ? !m_walked_nodes.count(vd) : !this->has_node(vd);
+                    if (unseen) {
+                        if (walk_dbg() && this->has_node(vd)) {
+                            std::fprintf(stderr,
+                                         "SHOWER_WALK rewalk shower_id=%d via_seg=%d vtx=%d\n",
+                                         m_shower_id, seg_display_id(seg), vtx_display_id(vertices.second));
+                        }
                         this->add_vertex(vertices.second);
                         new_vertices.push_back(vertices.second);
+                        m_walked_nodes.insert(vd);  // about to be walked
                     }
                 }
             }

@@ -2111,6 +2111,26 @@ namespace WireCell::Clus::PR {
         // Default false = legacy search, byte-identical.
         bool m_shower_endpoint_skip_orphan_vtx{false};
 
+        // doc pr/91 round 3: Shower::complete_structure_with_start_segment's
+        // frontier test is view MEMBERSHIP (!has_node), not visitation -- a
+        // vertex added by set_start_vertex()/set_start_segment()/
+        // add_segment()/add_shower() but never actually scanned by a
+        // flood-fill worklist is permanently unreachable.  When true, the
+        // frontier test switches to Shower::m_walked_nodes, the prototype's
+        // map_vtx_segs equivalent (WCPPID::WCShower::set_start_vertex,
+        // WCShower.cxx:529-532, never touches map_vtx_segs -- only the
+        // pointer and connection type).  Instrumented on SBND nueCC evt
+        // 168596: the 2039 MeV electron's original start vertex 14027 (seeded
+        // by set_start_vertex, later superseded when examine_showers
+        // re-seats the shower onto the main vertex) walls off a 4.74 cm
+        // proton stub and, past it, a 7.7 cm electron stub 96% inside this
+        // shower's own point cloud -- left as a separate shower that later
+        // pairs into a spurious pi0 via the ownership-free kine_charge sum.
+        // See PRShower.h complete_structure_with_start_segment for the full
+        // mechanism.  Default false = legacy has_node()-gated frontier,
+        // byte-identical.
+        bool m_shower_walk_visited_parity{false};
+
         // 2D charge maps cached for the duration of shower_clustering_with_nv.
         // Populated once by collect_charge_maps(); reused by calculate_shower_kinematics
         // and all cal_kine_charge call sites to avoid O(N_hits) re-collection per shower.

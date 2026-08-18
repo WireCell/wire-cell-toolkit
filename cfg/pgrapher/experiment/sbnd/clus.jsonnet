@@ -1261,6 +1261,9 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               // parity).  Ships OFF pending owner gate review.
               shower_endpoint_exclude_start_vertex=false,
               shower_endpoint_skip_orphan_vtx=false,
+              // doc pr/91 round 3: flood-fill frontier = visited, not merely
+              // present in the view.  Ships OFF pending owner gate review.
+              shower_walk_visited_parity=false,
               // doc sbnd_xin/docs/pr/40 -- track (proton/pion/muon)
               // mis-identified as electron.  F1 (persistence), F2/F3 (dQ/dx
               // guards on wholesale track-to-electron conversion).  All
@@ -2109,6 +2112,7 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
             shower_less_id_tiebreak=shower_less_id_tiebreak,
             shower_endpoint_exclude_start_vertex=shower_endpoint_exclude_start_vertex,
             shower_endpoint_skip_orphan_vtx=shower_endpoint_skip_orphan_vtx,
+            shower_walk_visited_parity=shower_walk_visited_parity,
             track_pid_persist_dqdx=track_pid_persist_dqdx,
             shower_reclass_dqdx_guard=shower_reclass_dqdx_guard,
             shower_topo_dqdx_guard=shower_topo_dqdx_guard,
@@ -2911,6 +2915,9 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
        // farthest-vertex search.  Ships OFF pending owner gate review.
        shower_endpoint_exclude_start_vertex=false,
        shower_endpoint_skip_orphan_vtx=false,
+       // doc pr/91 round 3: flood-fill frontier = visited, not merely
+       // present in the view.  Ships OFF pending owner gate review.
+       shower_walk_visited_parity=false,
        // doc sbnd_xin/docs/pr/40 -- track (proton/pion/muon) mis-identified
        // as electron.  All default false = legacy = byte-identical.
        track_pid_persist_dqdx=false,
@@ -3331,6 +3338,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 shower_less_id_tiebreak=shower_less_id_tiebreak,
                 shower_endpoint_exclude_start_vertex=shower_endpoint_exclude_start_vertex,
                 shower_endpoint_skip_orphan_vtx=shower_endpoint_skip_orphan_vtx,
+                shower_walk_visited_parity=shower_walk_visited_parity,
                 track_pid_persist_dqdx=track_pid_persist_dqdx,
                 shower_reclass_dqdx_guard=shower_reclass_dqdx_guard,
                 shower_topo_dqdx_guard=shower_topo_dqdx_guard,

@@ -483,6 +483,7 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_shower_less_id_tiebreak              = get(config, "shower_less_id_tiebreak",              m_shower_less_id_tiebreak);
     m_shower_endpoint_exclude_start_vertex = get(config, "shower_endpoint_exclude_start_vertex", m_shower_endpoint_exclude_start_vertex);
     m_shower_endpoint_skip_orphan_vtx = get(config, "shower_endpoint_skip_orphan_vtx", m_shower_endpoint_skip_orphan_vtx);
+    m_shower_walk_visited_parity = get(config, "shower_walk_visited_parity", m_shower_walk_visited_parity);
     // doc sbnd_xin/docs/pr/40 -- track mis-identified as electron.
     m_track_pid_persist_dqdx      = get(config, "track_pid_persist_dqdx",      m_track_pid_persist_dqdx);
     m_shower_reclass_dqdx_guard   = get(config, "shower_reclass_dqdx_guard",   m_shower_reclass_dqdx_guard);
@@ -786,6 +787,7 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["shower_less_id_tiebreak"]              = m_shower_less_id_tiebreak;              // false = legacy pointer-address tie-break (house-rule fix when true)
     cfg["shower_endpoint_exclude_start_vertex"] = m_shower_endpoint_exclude_start_vertex; // false = legacy end_point search includes the start vertex (doc pr/39)
     cfg["shower_endpoint_skip_orphan_vtx"] = m_shower_endpoint_skip_orphan_vtx; // false = legacy end_point search includes vertices no member segment touches (doc pr/91 F1)
+    cfg["shower_walk_visited_parity"] = m_shower_walk_visited_parity; // false = legacy has_node()-gated flood-fill frontier (doc pr/91 round 3)
     // doc sbnd_xin/docs/pr/40 -- track mis-identified as electron.
     cfg["track_pid_persist_dqdx"]    = m_track_pid_persist_dqdx;    // false = legacy free-end-gated persistence
     cfg["shower_reclass_dqdx_guard"] = m_shower_reclass_dqdx_guard; // false = legacy unconditional wholesale reclassification
@@ -1334,6 +1336,7 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
     pattern_algos.m_shower_less_id_tiebreak              = m_shower_less_id_tiebreak;
     pattern_algos.m_shower_endpoint_exclude_start_vertex = m_shower_endpoint_exclude_start_vertex;
     pattern_algos.m_shower_endpoint_skip_orphan_vtx = m_shower_endpoint_skip_orphan_vtx;
+    pattern_algos.m_shower_walk_visited_parity = m_shower_walk_visited_parity;
     // doc sbnd_xin/docs/pr/40 -- track mis-identified as electron.
     pattern_algos.m_track_pid_persist_dqdx    = m_track_pid_persist_dqdx;    // F1: threaded via track_pid_options()
     pattern_algos.m_shower_reclass_dqdx_guard = m_shower_reclass_dqdx_guard; // F2

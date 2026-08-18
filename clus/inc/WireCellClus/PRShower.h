@@ -171,7 +171,33 @@ namespace WireCell::Clus::PR {
         // (segment_is_straight_long_track); long-muon pseudo-showers
         // (get_particle_type()==13) are exempt.  false = legacy flood-fill =
         // byte-identical.  See the comment in the implementation.
-        void complete_structure_with_start_segment(IndexedSegmentSet& used_segments, const std::string& cloud_name_fit = "fit", const std::string& cloud_name_associate = "associate_points", bool absorb_track_guard = false);
+        // walk_visited_parity (doc pr/91 round 3): the flood-fill's frontier
+        // test is `!has_node(v)` -- a vertex already present in the view is
+        // never enqueued, even if it was added by set_start_vertex() and its
+        // neighborhood was never scanned.  The prototype's
+        // WCPPID::WCShower::set_start_vertex (WCShower.cxx:529-532) assigns
+        // start_vertex and start_connection_type ONLY -- map_vtx_segs (the
+        // toolkit's has_node() equivalent for this purpose) is untouched --
+        // so a former start vertex is invisible to the prototype's own
+        // frontier test (map_vtx_segs.find(vtx) != end(), WCShower.cxx:735)
+        // and gets enqueued fresh on the very next complete_structure call.
+        // Instrumented on SBND nueCC evt 168596: shower 2 (the 2039 MeV
+        // electron) was seeded on vertex 14027 via set_start_vertex, then
+        // re-seated onto the main vertex by examine_showers
+        // (NeutrinoShowerClustering.cxx:3114-3119), which re-floods with a
+        // FRESH used_segments set -- but 14027 is already a view node, so the
+        // re-flood never crosses it, the 4.74 cm proton stub hanging off it
+        // is never examined, and a 7.7 cm electron stub 96% inside this
+        // shower's own point cloud is left as a separate shower that later
+        // pairs into a spurious pi0.  When true, m_walked_nodes (populated
+        // unconditionally below, see .cxx) replaces has_node() as the
+        // frontier test: any node added to the view but never actually
+        // scanned by a flood-fill worklist is re-enqueued.  The CURRENT
+        // start vertex is still never walked (the `!= m_start_vertex` guards
+        // are unchanged) -- only FORMER start vertices and other view-only
+        // insertions become reachable.  Default false = legacy
+        // has_node()-gated frontier, byte-identical.
+        void complete_structure_with_start_segment(IndexedSegmentSet& used_segments, const std::string& cloud_name_fit = "fit", const std::string& cloud_name_associate = "associate_points", bool absorb_track_guard = false, bool walk_visited_parity = false);
 
 
         // get the information from the shower.
@@ -253,6 +279,17 @@ namespace WireCell::Clus::PR {
         VertexPtr m_start_vertex;
         SegmentPtr m_start_segment;
         int m_shower_id{-1};
+
+        // doc pr/91 round 3: the prototype's map_vtx_segs key set, restated
+        // as "has this vertex's neighborhood actually been scanned by a
+        // flood-fill worklist" -- distinct from view MEMBERSHIP (has_node()),
+        // which set_start_vertex()/set_start_segment()/add_segment()/
+        // add_shower() can grow without ever visiting a vertex's edges.
+        // Populated unconditionally wherever those methods already add a
+        // vertex (pure bookkeeping, membership-tested only, never iterated --
+        // no pointer-order dependence); read only by
+        // complete_structure_with_start_segment's walk_visited_parity branch.
+        std::set<node_descriptor> m_walked_nodes;
 
         // Lazy caches — invalidated whenever segments are added.
         mutable double m_total_length_cache{-1.0};

@@ -578,7 +578,7 @@ void PatternAlgorithms::shower_clustering_with_nv_in_main_cluster(Graph& graph, 
     // Complete shower structure for all newly created showers.
     // used_segments (populated during BFS) prevents overlapping segment claims.
     for (auto shower : new_showers) {
-        shower->complete_structure_with_start_segment(used_segments, "fit", "associate_points", m_shower_absorb_track_guard);
+        shower->complete_structure_with_start_segment(used_segments, "fit", "associate_points", m_shower_absorb_track_guard, m_shower_walk_visited_parity);
         // Enforce electron type on start segment:
         //  - update_particle_type() handles multi-segment showers via majority vote
         //  - explicit PDG=0 guard catches single-segment showers skipped by update_particle_type()
@@ -836,7 +836,7 @@ void PatternAlgorithms::shower_clustering_connecting_to_main_vertex(Graph& graph
             ShowerPtr shower = std::make_shared<Shower>(graph);
             shower->set_start_vertex(main_vertex, 1);
             shower->set_start_segment(sg);
-            shower->complete_structure_with_start_segment(used_segments, "fit", "associate_points", m_shower_absorb_track_guard);
+            shower->complete_structure_with_start_segment(used_segments, "fit", "associate_points", m_shower_absorb_track_guard, m_shower_walk_visited_parity);
             pr84_probe_shower(shower, "connecting_to_main_vertex");
 
             // Single pass over shower edges: accumulate segment stats, vertex counts,
@@ -1626,7 +1626,7 @@ void PatternAlgorithms::shower_clustering_with_nv_from_vertices(Graph& graph, Ve
         
         // Complete shower structure
         IndexedSegmentSet used_segments;
-        shower->complete_structure_with_start_segment(used_segments, "fit", "associate_points", m_shower_absorb_track_guard);
+        shower->complete_structure_with_start_segment(used_segments, "fit", "associate_points", m_shower_absorb_track_guard, m_shower_walk_visited_parity);
         
         // Calculate shower direction
         auto [start_vtx, conn_type] = shower->get_start_vertex_and_type();
@@ -2014,7 +2014,7 @@ void PatternAlgorithms::shower_clustering_in_other_clusters(Graph& graph, Vertex
             
             // Complete shower structure
             IndexedSegmentSet used_segments;
-            shower->complete_structure_with_start_segment(used_segments, "fit", "associate_points", m_shower_absorb_track_guard);
+            shower->complete_structure_with_start_segment(used_segments, "fit", "associate_points", m_shower_absorb_track_guard, m_shower_walk_visited_parity);
             pr84_probe_shower(shower, "in_other_clusters_A");
 
             // Calculate shower direction
@@ -2231,7 +2231,7 @@ void PatternAlgorithms::shower_clustering_in_other_clusters(Graph& graph, Vertex
             
             // Complete shower structure
             IndexedSegmentSet used_segments;
-            shower->complete_structure_with_start_segment(used_segments, "fit", "associate_points", m_shower_absorb_track_guard);
+            shower->complete_structure_with_start_segment(used_segments, "fit", "associate_points", m_shower_absorb_track_guard, m_shower_walk_visited_parity);
             // Majority-vote correction for multi-segment showers whose start segment
             // has an unexpected PDG not covered by the explicit force-to-11 above.
             shower->update_particle_type(particle_data, recomb_model, m_mip_dqdx, main_vertex, m_shower_proton_daughter_pion, m_mip_dqdx_median);
@@ -2312,7 +2312,7 @@ void PatternAlgorithms::shower_clustering_in_other_clusters(Graph& graph, Vertex
                     four_momentum));
             }
 
-            shower->complete_structure_with_start_segment(claimed_k5, "fit", "associate_points", m_shower_absorb_track_guard);
+            shower->complete_structure_with_start_segment(claimed_k5, "fit", "associate_points", m_shower_absorb_track_guard, m_shower_walk_visited_parity);
             shower->update_particle_type(particle_data, recomb_model, m_mip_dqdx, main_vertex, m_shower_proton_daughter_pion, m_mip_dqdx_median);
             SPDLOG_LOGGER_DEBUG(s_log,
                 "pr74 conn3_unreachable: promote gidx={} len {:.1f}cm conn={} anchor_dis {:.1f}cm",
@@ -2406,7 +2406,7 @@ void PatternAlgorithms::examine_shower_1(Graph& graph, VertexPtr main_vertex, In
                 ShowerPtr shower1 = std::make_shared<Shower>(graph);
                 shower1->set_start_vertex(main_vertex, 1);
                 shower1->set_start_segment(sg);
-                shower1->complete_structure_with_start_segment(used_segments, "fit", "associate_points", m_shower_absorb_track_guard);
+                shower1->complete_structure_with_start_segment(used_segments, "fit", "associate_points", m_shower_absorb_track_guard, m_shower_walk_visited_parity);
                 pr84_probe_shower(shower1, "examine_shower_1_tmp");
 
 
@@ -3116,7 +3116,7 @@ void PatternAlgorithms::examine_showers(Graph& graph, VertexPtr main_vertex, Ind
         shower->set_start_segment(sg);
         shower->set_start_point(main_vtx_pt);
         IndexedSegmentSet tmp_used_segments;
-        shower->complete_structure_with_start_segment(tmp_used_segments, "fit", "associate_points", m_shower_absorb_track_guard);
+        shower->complete_structure_with_start_segment(tmp_used_segments, "fit", "associate_points", m_shower_absorb_track_guard, m_shower_walk_visited_parity);
         if (pair_conn_type != 1) {
             if (segment_track_length(sg) > 44 * units::cm || seg_dir_weak(sg))
                 sg->set_flags(SegmentFlags::kAvoidMuonCheck);
