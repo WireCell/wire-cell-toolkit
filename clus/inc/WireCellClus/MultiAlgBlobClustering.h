@@ -275,6 +275,22 @@ namespace WireCell::Clus {
             // a zero-length node (pr/84 sec 4: 15 such, median 38.8 cm).
             // C++ default false => byte-identical legacy output.
             bool pf_pseudo_gap_from_main{false};
+            // pf_unique_node_ids (doc pr/84 round 3, G1): mc.json is jsTree
+            // input and jsTree keys its model by node id, so a repeated id is
+            // invalid output -- observed on SBND 394532, where a node and its
+            // own descendant carried id 8033 and selecting it blanked the
+            // whole PF panel.  Natural ids follow the prototype convention
+            // (`cluster_id*1000 + seg_id`, NeutrinoID.cxx:1268) and are NOT
+            // unique: two showers can share a start segment (see
+            // m_shower_dedup_start_seg, which fixes that at the source), a
+            // shower leaf can collide with the track node of the same
+            // segment, and the pseudo/pi0 counter starts at 1 inside the same
+            // number space.  When on, a colliding node is re-issued a fresh
+            // unused id and the collision is logged -- the id is used for
+            // nothing but jsTree identity (bee3 events/static/js/bee/physics/
+            // mc.js draws from data.start/data.end only).  C++ default false
+            // => byte-identical legacy output.
+            bool pf_unique_node_ids{false};
         };
        private:
         std::vector<BeePFConfig> m_bee_pf_configs;

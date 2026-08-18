@@ -780,6 +780,10 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               pf_touch_cross_main=false,
               pf_touch_cross_max=null,
               pf_pseudo_gap_from_main=false,
+              // doc pr/84 round 3 (G1): guarantee unique jsTree node ids in
+              // mc.json.  C++ default false; key omitted when off =>
+              // byte-identical pre-fix config.
+              pf_unique_node_ids=false,
               // restore_demoted_mains (doc pr/20 Part I P2; C++ default false,
               // key omitted when null => byte-identical pre-knob config): tag a
               // split-off part that was ITSELF a matched bundle main before the
@@ -1316,6 +1320,10 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               // doc pr/84 round 2 (F3): stitch radius in cm; null = C++
               // default 0 = OFF, key omitted => byte-identical.
               conn3_stitch_max=null,
+              // doc pr/84 round 3 (S1): collapse showers that share a start
+              // segment.  C++ default false = OFF, key omitted when off =>
+              // byte-identical pre-fix config.
+              shower_dedup_start_seg=false,
               shower_traj_michel_stem=false,
               michel_stem_traj_min_len=null,
               michel_stem_traj_max_len=null,
@@ -2126,6 +2134,7 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
             shower_conn3_unreachable=shower_conn3_unreachable,
             conn3_unreachable_min_len=conn3_unreachable_min_len,
             conn3_stitch_max=conn3_stitch_max,
+            shower_dedup_start_seg=shower_dedup_start_seg,
             shower_traj_michel_stem=shower_traj_michel_stem,
             michel_stem_traj_min_len=michel_stem_traj_min_len,
             michel_stem_traj_max_len=michel_stem_traj_max_len,
@@ -2566,6 +2575,7 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
                     [if pf_touch_cross_main then 'pf_touch_cross_main']: true,
                     [if pf_touch_cross_max != null then 'pf_touch_cross_max']: pf_touch_cross_max * wc.cm,
                     [if pf_pseudo_gap_from_main then 'pf_pseudo_gap_from_main']: true,
+                    [if pf_unique_node_ids then 'pf_unique_node_ids']: true,
                 },
             ],
             pipeline: wc.tns(cm_pipeline),
@@ -2690,6 +2700,8 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
        pf_touch_cross_main=false,
        pf_touch_cross_max=null,
        pf_pseudo_gap_from_main=false,
+       // doc pr/84 round 3 (G1); false = C++ default = OFF.  See clus_pr.
+       pf_unique_node_ids=false,
        // doc pr/20 Part I P2; null = C++ default false = OFF.  See clus_pr.
        restore_demoted_mains=null,
        // doc pr/23 sec 4.2; null = C++ default false = warn-and-skip.  See clus_pr.
@@ -2938,6 +2950,8 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
        conn3_unreachable_min_len=null,
        // doc pr/84 round 2 (F3); null = C++ default 0 = OFF.  See clus_pr.
        conn3_stitch_max=null,
+       // doc pr/84 round 3 (S1); false = C++ default = OFF.  See clus_pr.
+       shower_dedup_start_seg=false,
        shower_traj_michel_stem=false,
        michel_stem_traj_min_len=null,
        michel_stem_traj_max_len=null,
@@ -3202,6 +3216,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 pf_touch_cross_main=pf_touch_cross_main,
                 pf_touch_cross_max=pf_touch_cross_max,
                 pf_pseudo_gap_from_main=pf_pseudo_gap_from_main,
+                pf_unique_node_ids=pf_unique_node_ids,
                 unmerge_bundle_mode=unmerge_bundle_mode,
                 restore_demoted_mains=restore_demoted_mains,
                 require_provenance=require_provenance,
@@ -3339,6 +3354,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 shower_conn3_unreachable=shower_conn3_unreachable,
                 conn3_unreachable_min_len=conn3_unreachable_min_len,
                 conn3_stitch_max=conn3_stitch_max,
+                shower_dedup_start_seg=shower_dedup_start_seg,
                 shower_traj_michel_stem=shower_traj_michel_stem,
                 michel_stem_traj_min_len=michel_stem_traj_min_len,
                 michel_stem_traj_max_len=michel_stem_traj_max_len,

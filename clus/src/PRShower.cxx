@@ -5,6 +5,8 @@
 #include "WireCellClus/DynamicPointCloud.h"
 #include "WireCellUtil/Logging.h"
 #include <atomic>
+#include <cstdio>
+#include <cstdlib>
 #include <unordered_set>
 
 static auto s_log = WireCell::Log::logger("clus.NeutrinoPattern");
@@ -118,6 +120,13 @@ namespace WireCell::Clus::PR {
         // 11 / 140 through add_segment().  Graph membership was always
         // idempotent (std::set); the cloud merge now is too.
         const bool was_member = this->has_edge(seg->get_descriptor());
+        // doc pr/84 round 3: a RETARGET (start segment replaced by a different
+        // one after construction) is one of the two ways two showers end up
+        // sharing a start segment.  Env-gated stderr only, byte-neutral.
+        if (std::getenv("WCT_SHOWER_CREATE_DEBUG") && m_start_segment && m_start_segment != seg) {
+            std::fprintf(stderr, "SHOWER_CREATE_DEBUG retarget shower_id=%d seg %d -> %d\n",
+                         m_shower_id, m_start_segment->id(), seg->id());
+        }
         TrajectoryView::add_segment(seg);
         m_start_segment = seg;
         invalidate_segment_caches();

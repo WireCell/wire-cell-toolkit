@@ -1691,6 +1691,31 @@ namespace WireCell::Clus::PR {
         bool   m_shower_conn3_unreachable{false};
         double m_conn3_unreachable_min_len{10*units::cm};
 
+        // doc sbnd_xin/docs/pr/84 round 3.  Two PR::Showers can be built on
+        // the SAME start segment, because the start-segment choice in
+        // shower_clustering_in_other_clusters consults no claim at all (its
+        // guards are cluster-level, and the segment it picks off the
+        // cluster's vertex can belong to another cluster entirely -- the
+        // prototype has the identical hole, NeutrinoID_shower_clustering.h
+        // :1481-1495), and because the K5 conn3_unreachable branch checks
+        // map_segment_in_shower, which update_shower_maps only refreshes at
+        // the END of the function.  Measured on SBND 169626/174752/347129/
+        // 394532: the twin renders a SECOND PF node carrying the same jsTree
+        // id (`cluster_id*1000 + seg_id`), which breaks the Bee tree, and it
+        // is counted a second time in kine_energy_particle -- 394532's
+        // kine_reco_Enu 352.2 MeV against 255.5 de-duplicated.  When on, a
+        // merge pass runs after examine_showers and before the pi0 finders:
+        // each group of showers sharing a start segment collapses onto its
+        // most-directly-connected member, which ABSORBS the others' segments
+        // (Shower::add_shower, whose membership gate makes the overlap
+        // idempotent), and the survivor's kinematics are recomputed by the
+        // production calculate_shower_kinematics (flag_kinematics cleared;
+        // every other shower keeps its flag and is untouched).  conn_type==4
+        // members never participate: they are skipped by both the PF tree and
+        // the kine tree, so folding their charge in would be a change with no
+        // reported defect behind it.  false = no pass = byte-identical.
+        bool   m_shower_dedup_start_seg{false};
+
         // doc sbnd_xin/docs/pr/84 round 2 (F3 = pr/84 P2 "conn3_stitch").
         // The main cluster's segment graph can end up disconnected (pr/54
         // keep-isolated residuals, snap-stranded vertices) even though the
@@ -2383,6 +2408,9 @@ namespace WireCell::Clus::PR {
 
         // shower related functions
         void update_shower_maps(IndexedShowerSet& showers, ShowerVertexMap& map_vertex_in_shower, ShowerSegmentMap& map_segment_in_shower, VertexShowerSetMap& map_vertex_to_shower, ClusterPtrSet& used_shower_clusters);
+        // doc pr/84 round 3 -- see m_shower_dedup_start_seg.  Returns the
+        // number of showers absorbed (0 => nothing changed).
+        int merge_showers_sharing_start_segment(IndexedShowerSet& showers);
         // doc sbnd_xin/docs/pr/74 round 2 K4 -- see m_shower_stem_backfill.
         void stem_backfill(Graph& graph, VertexPtr main_vertex, IndexedShowerSet& showers, ShowerVertexMap& map_vertex_in_shower, ShowerSegmentMap& map_segment_in_shower, VertexShowerSetMap& map_vertex_to_shower, ClusterPtrSet& used_shower_clusters, IndexedSegmentSet& segments_in_long_muon, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model);
         void shower_clustering_with_nv_in_main_cluster(Graph& graph, VertexPtr main_vertex, IndexedShowerSet& showers, ShowerVertexMap& map_vertex_in_shower, ShowerSegmentMap& map_segment_in_shower, VertexShowerSetMap& map_vertex_to_shower, ClusterPtrSet& used_shower_clusters, IndexedVertexSet& vertices_in_long_muon, IndexedSegmentSet& segments_in_long_muon, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model);

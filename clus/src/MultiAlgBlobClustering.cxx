@@ -345,6 +345,7 @@ void MultiAlgBlobClustering::configure(const WireCell::Configuration& cfg)
             pfc.pf_touch_cross_main = get<bool>(pf, "pf_touch_cross_main", false);
             pfc.pf_touch_cross_max = get<double>(pf, "pf_touch_cross_max", pfc.pf_touch_cross_max);
             pfc.pf_pseudo_gap_from_main = get<bool>(pf, "pf_pseudo_gap_from_main", false);
+            pfc.pf_unique_node_ids = get<bool>(pf, "pf_unique_node_ids", false);
             m_bee_pf_configs.push_back(pfc);
             m_bee_pf_trees[pfc.name] = Bee::ParticleTree(pfc.name);
             SPDLOG_LOGGER_DEBUG(log, "Configured bee_pf: name={} visitor={}", pfc.name, pfc.visitor);
@@ -1680,10 +1681,25 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
 
     int next_id = 1;  // fallback counter for nodes without a natural ID
 
+    // doc pr/84 round 3 G1 (pf_unique_node_ids): jsTree keys its model by node
+    // id, so a repeated id is invalid input -- see the knob's docstring.  The
+    // id addresses nothing outside the tree (bee3 mc.js draws from
+    // data.start/data.end), so a collision is resolved by re-issuing from a
+    // range above the natural `cluster_id*1000 + seg_id` space.  Every firing
+    // is logged: with shower_dedup_start_seg on there should be none.
+    std::set<int> used_node_ids;
+
     auto make_node = [&](int id,
                          const std::string& text,
                          const WireCell::Point& start,
                          const WireCell::Point& end) -> Configuration {
+        if (cfg.pf_unique_node_ids && !used_node_ids.insert(id).second) {
+            int fresh = 1000000;
+            while (!used_node_ids.insert(fresh).second) ++fresh;
+            SPDLOG_LOGGER_DEBUG(log, "pr84 pf_id_collision: id={} reissued={} text='{}'",
+                                id, fresh, text);
+            id = fresh;
+        }
         Configuration node;
         node["id"]   = id;
         node["text"] = text;
@@ -1745,6 +1761,7 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
             const auto* cl = start_seg ? start_seg->cluster() : nullptr;
             std::cout << "[fill_bee_pf_tree] ADD shower-leaf"
                       << "  id=" << id
+                      << "  shower_id=" << shower->get_shower_id()
                       << "  pdg=" << pdg
                       << "  conn_type=" << sconn
                       << "  ke=" << ke << " MeV"

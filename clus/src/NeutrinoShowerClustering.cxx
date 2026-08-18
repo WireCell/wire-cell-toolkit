@@ -26,6 +26,28 @@ static inline void pr40_probe_setpdg(SegmentPtr sg, int new_pdg, const char* sit
                  sg->id(), cid, sg->get_graph_index(), new_pdg, site);
 }
 
+// doc sbnd_xin/docs/pr/84 round 3: WCT_SHOWER_CREATE_DEBUG attributes every
+// Shower to the pass that built it.  Two PR::Showers can be built on the SAME
+// start segment (SBND 169626/174752/347129/394532), which makes the PF tree
+// emit two nodes with one jsTree id and double-counts the shower in
+// kine_reco_Enu -- neither is visible in map_segment_in_shower, whose writes
+// are last-writer-wins.  Log/stderr only: no effect on emitted bytes.
+static inline void pr84_probe_shower(const ShowerPtr& sh, const char* site) {
+    static const bool dbg = std::getenv("WCT_SHOWER_CREATE_DEBUG") != nullptr;
+    if (!dbg || !sh) return;
+    auto seg = sh->start_segment();
+    const int sid = seg ? (seg->id() >= 0 ? seg->id() : (int) seg->get_graph_index()) : -1;
+    const auto* cl = seg ? seg->cluster() : nullptr;
+    auto [svtx, conn] = sh->get_start_vertex_and_type();
+    std::fprintf(stderr,
+                 "SHOWER_CREATE_DEBUG site=%s shower_id=%d start_seg=%d conn=%d "
+                 "start_vtx_gidx=%zu nseg=%d\n",
+                 site, sh->get_shower_id(),
+                 cl ? cl->get_cluster_id() * 1000 + sid : sid, conn,
+                 svtx ? svtx->get_graph_index() : (size_t) -1,
+                 sh->get_num_segments());
+}
+
 namespace {
     struct cluster_point_info {
         Facade::Cluster* cluster;
@@ -85,6 +107,67 @@ void PatternAlgorithms::update_shower_maps(IndexedShowerSet& showers, ShowerVert
             used_shower_clusters.insert(seg->cluster());
         }
     }
+}
+
+// doc sbnd_xin/docs/pr/84 round 3 -- docstring at m_shower_dedup_start_seg
+// (NeutrinoPatternBase.h).  One shower per start segment: the group collapses
+// onto its most-directly-connected member, which absorbs the others.
+//
+// Grouping is keyed by the start segment's GRAPH INDEX -- the segment's true
+// identity -- not by the display id `cluster_id*1000 + seg_id`, which is what
+// the PF tree emits and is only the *symptom* (two distinct segments could in
+// principle share a display id; pf_unique_node_ids covers that residue).
+// Iteration order is the key order of a std::map<size_t,...> plus shower_id
+// within a group, so no pointer is ever iterated (pr/34 sec 6).
+int PatternAlgorithms::merge_showers_sharing_start_segment(IndexedShowerSet& showers)
+{
+    std::map<size_t, std::vector<ShowerPtr>> by_start_seg;
+    for (const auto& sh : showers) {
+        if (!sh) continue;
+        auto seg = sh->start_segment();
+        if (!seg || !seg->descriptor_valid()) continue;
+        // conn 4 ("not clearly connected") is skipped by both the PF tree
+        // (MultiAlgBlobClustering.cxx) and the kine tree, so it neither
+        // duplicates a node nor double-counts energy: leave it alone.
+        if (sh->get_start_vertex_and_type().second == 4) continue;
+        by_start_seg[seg->get_graph_index()].push_back(sh);
+    }
+
+    int n_absorbed = 0;
+    for (auto& [gidx, group] : by_start_seg) {
+        if (group.size() < 2) continue;
+        std::sort(group.begin(), group.end(),
+                  [](const ShowerPtr& a, const ShowerPtr& b) {
+                      const int ca = a->get_start_vertex_and_type().second;
+                      const int cb = b->get_start_vertex_and_type().second;
+                      if (ca != cb) return ca < cb;                 // most direct wins
+                      const int na = a->get_num_segments(), nb = b->get_num_segments();
+                      if (na != nb) return na > nb;                 // then the fuller view
+                      const double ka = a->get_kine_best(), kb = b->get_kine_best();
+                      if (ka != kb) return ka > kb;
+                      return a->get_shower_id() < b->get_shower_id();  // stable
+                  });
+        auto keep = group.front();
+        const int keep_conn = keep->get_start_vertex_and_type().second;
+        for (size_t i = 1; i < group.size(); ++i) {
+            auto drop = group[i];
+            SPDLOG_LOGGER_DEBUG(s_log,
+                "pr84 shower_dedup: start_seg_gidx={} keep sid={} conn={} nseg={} ke={:.1f}MeV "
+                "<- drop sid={} conn={} nseg={} ke={:.1f}MeV",
+                gidx, keep->get_shower_id(), keep_conn, keep->get_num_segments(),
+                keep->get_kine_best()/units::MeV,
+                drop->get_shower_id(), drop->get_start_vertex_and_type().second,
+                drop->get_num_segments(), drop->get_kine_best()/units::MeV);
+            keep->add_shower(*drop);
+            showers.erase(drop);
+            ++n_absorbed;
+        }
+        // Force the production kinematics pass to recompute this shower --
+        // and ONLY this shower: every other member of `showers` still carries
+        // flag_kinematics and is skipped there.
+        keep->set_flag_kinematics(false);
+    }
+    return n_absorbed;
 }
 
 // doc sbnd_xin/docs/pr/74 round 2 K4 -- docstring at m_shower_stem_backfill
@@ -338,6 +421,7 @@ void PatternAlgorithms::shower_clustering_with_nv_in_main_cluster(Graph& graph, 
                 } else {
                     SPDLOG_LOGGER_TRACE(s_log, "shower_clustering_with_nv_in_main_cluster: Main-cluster shower {}", new_showers.size());
                 }
+                pr84_probe_shower(shower, "nv_in_main_cluster");
                 new_showers.push_back(shower);
                 // BFS does not descend into shower sub-tree
             } else {
@@ -618,6 +702,7 @@ void PatternAlgorithms::shower_clustering_connecting_to_main_vertex(Graph& graph
             shower->set_start_vertex(main_vertex, 1);
             shower->set_start_segment(sg);
             shower->complete_structure_with_start_segment(used_segments, "fit", "associate_points", m_shower_absorb_track_guard);
+            pr84_probe_shower(shower, "connecting_to_main_vertex");
 
             // Single pass over shower edges: accumulate segment stats, vertex counts,
             // and flag_good_track together to avoid iterating edges twice.
@@ -1365,6 +1450,8 @@ void PatternAlgorithms::shower_clustering_with_nv_from_vertices(Graph& graph, Ve
             shower->set_start_segment(sg1);
         }
         
+        pr84_probe_shower(shower, "nv_from_vertices_break");
+
         // Set direction based on vertex proximity
         auto start_seg = shower->start_segment();
         if (start_seg) {
@@ -1777,7 +1864,8 @@ void PatternAlgorithms::shower_clustering_in_other_clusters(Graph& graph, Vertex
             // Complete shower structure
             IndexedSegmentSet used_segments;
             shower->complete_structure_with_start_segment(used_segments, "fit", "associate_points", m_shower_absorb_track_guard);
-            
+            pr84_probe_shower(shower, "in_other_clusters_A");
+
             // Calculate shower direction
             WireCell::Vector dir_shower = shower_cal_dir_3vector(*shower, vertex_pt, 15 * units::cm);
             
@@ -1972,6 +2060,7 @@ void PatternAlgorithms::shower_clustering_in_other_clusters(Graph& graph, Vertex
             // Majority-vote correction for multi-segment showers whose start segment
             // has an unexpected PDG not covered by the explicit force-to-11 above.
             shower->update_particle_type(particle_data, recomb_model, m_mip_dqdx, main_vertex, m_shower_proton_daughter_pion, m_mip_dqdx_median);
+            pr84_probe_shower(shower, "in_other_clusters_B");
             showers.insert(shower);
         }
     }
@@ -2054,6 +2143,7 @@ void PatternAlgorithms::shower_clustering_in_other_clusters(Graph& graph, Vertex
                 "pr74 conn3_unreachable: promote gidx={} len {:.1f}cm conn={} anchor_dis {:.1f}cm",
                 seg->get_graph_index(), segment_track_length(seg)/units::cm,
                 connection_type, min_dis/units::cm);
+            pr84_probe_shower(shower, "conn3_unreachable");
             showers.insert(shower);
         }
     }
@@ -2136,7 +2226,9 @@ void PatternAlgorithms::examine_shower_1(Graph& graph, VertexPtr main_vertex, In
                 shower1->set_start_vertex(main_vertex, 1);
                 shower1->set_start_segment(sg);
                 shower1->complete_structure_with_start_segment(used_segments, "fit", "associate_points", m_shower_absorb_track_guard);
-                
+                pr84_probe_shower(shower1, "examine_shower_1_tmp");
+
+
                 WireCell::Vector dir1 = segment_cal_dir_3vector(sg, main_vtx_pt, 15 * units::cm);
 
                 // Build shower1_vertices once — shower1 does not change in the inner loop.
@@ -3819,6 +3911,23 @@ void PatternAlgorithms::shower_clustering_with_nv(int acc_segment_id, IndexedSho
     t_examine_showers = MS(Clock::now() - t0); t0 = Clock::now();
     // check_used_shower_cluster_933("examine_showers");
     
+    // doc sbnd_xin/docs/pr/84 round 3: collapse showers that share a start
+    // segment.  Here and not earlier on purpose -- this is after EVERY pass
+    // that can create or retarget a shower (examine_showers is the last), and
+    // before the pi0 finders, so the pi0 pairing, fill_kine_tree and the Bee
+    // PF writer all see the same de-duplicated set.  Knob off => no pass.
+    if (m_shower_dedup_start_seg) {
+        const int n_absorbed = merge_showers_sharing_start_segment(showers);
+        if (n_absorbed > 0) {
+            update_shower_maps(showers, map_vertex_in_shower, map_segment_in_shower,
+                               map_vertex_to_shower, used_shower_clusters);
+            calculate_shower_kinematics(showers, vertices_in_long_muon, segments_in_long_muon,
+                                        graph, track_fitter, dv, particle_data, recomb_model);
+            SPDLOG_LOGGER_DEBUG(s_log,
+                "pr84 shower_dedup: absorbed {} shower(s); {} remain", n_absorbed, showers.size());
+        }
+    }
+
     // Identify pi0 with vertex.
     // doc pr/33 F3: both finders get a reference to the same local copy, so
     // nothing propagates past this function either way (the caller's

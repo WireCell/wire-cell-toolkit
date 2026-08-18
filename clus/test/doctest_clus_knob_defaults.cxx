@@ -136,6 +136,7 @@ TEST_CASE("clus knob defaults: TaggerCheckNeutrino switches are all OFF")
     CHECK_KNOB_BOOL(cfg, "shower_conn3_unreachable", false);                  // K5 (pr/65 rung 2)
     CHECK_KNOB_NUM(cfg, "conn3_unreachable_min_len", 10.0);                   // cm; inert while K5 off
     CHECK_KNOB_NUM(cfg, "conn3_stitch_max", 0.0);                             // cm; doc pr/84 r2 F3; 0 = off
+    CHECK_KNOB_BOOL(cfg, "shower_dedup_start_seg", false);                    // doc pr/84 r3 S1; off = legacy
     CHECK_KNOB_BOOL(cfg, "shower_traj_michel_stem", false);                   // doc pr/74 round 4 K6
     CHECK_KNOB_NUM(cfg, "michel_stem_traj_min_len", 15.0);                    // cm; inert while K6 off
     CHECK_KNOB_NUM(cfg, "michel_stem_traj_max_len", 45.0);                    // cm; inert while K6 off
@@ -1040,4 +1041,5 @@ TEST_CASE("clus knob defaults: MultiAlgBlobClustering BeePFConfig pf switches ar
     CHECK(pfc.pf_touch_cross_main == false);             // doc pr/84 r2 F1 rung 2
     CHECK(pfc.pf_touch_cross_max == 8.0 * WireCell::units::cm);  // read only when rung 2 on
     CHECK(pfc.pf_pseudo_gap_from_main == false);         // doc pr/84 r2 F2
+    CHECK(pfc.pf_unique_node_ids == false);              // doc pr/84 r3 G1
 }
