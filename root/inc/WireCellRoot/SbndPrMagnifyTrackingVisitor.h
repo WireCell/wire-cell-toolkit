@@ -54,9 +54,17 @@ namespace WireCell {
             Log::logptr_t log;
             std::string m_output_filename;
             std::string m_grouping_name{"live"};
-            int m_runNo{0};
-            int m_subRunNo{0};
-            int m_eventNo{0};
+            // MUTABLE because visit() is const and resolves these per event
+            // from the Ensemble's scalar PC, which MultiAlgBlobClustering
+            // stamps with the RSE it resolved (metadata > ident > config).
+            // The configured values remain the fallback when the ensemble
+            // carries nothing, so a graph without an upstream
+            // wclsTensorSetMetadataAttacher behaves exactly as before.
+            // IEnsembleVisitor::visit() gets ONLY the Ensemble -- there is no
+            // other channel by which this component can learn its event.
+            mutable int m_runNo{0};
+            mutable int m_subRunNo{0};
+            mutable int m_eventNo{0};
             std::vector<IAnodePlane::pointer> m_anodes;
             IDetectorVolumes::pointer m_dv;
             double m_dQdx_scale{0.1};

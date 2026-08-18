@@ -82,6 +82,15 @@ Root::SbndMagnifyTrackingVisitor::ChanScheme Root::SbndMagnifyTrackingVisitor::c
 
 void Root::SbndMagnifyTrackingVisitor::visit(Clus::Facade::Ensemble& ensemble) const
 {
+    // Resolve this event's RSE from the ensemble, falling back to the
+    // configured values.  MultiAlgBlobClustering stamps these scalars with
+    // the RSE it resolved for the event (metadata > ident > config); a graph
+    // with no upstream wclsTensorSetMetadataAttacher leaves them absent and
+    // get_scalar returns the default, i.e. the historical behavior.
+    m_runNo    = ensemble.get_scalar<int>("runNo", m_runNo);
+    m_subRunNo = ensemble.get_scalar<int>("subRunNo", m_subRunNo);
+    m_eventNo  = ensemble.get_scalar<int>("eventNo", m_eventNo);
+
     auto groupings = ensemble.with_name(m_grouping_name);
     if (groupings.empty()) {
         log->debug("SbndMagnifyTrackingVisitor: no grouping '{}'", m_grouping_name);

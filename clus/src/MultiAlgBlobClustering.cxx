@@ -1,4 +1,6 @@
 #include "WireCellClus/MultiAlgBlobClustering.h"
+
+#include <functional>
 #include "WireCellClus/Facade_Summary.h"
 #include "WireCellClus/PRSegment.h"
 #include "WireCellClus/PRVertex.h"
@@ -202,6 +204,9 @@ void MultiAlgBlobClustering::configure(const WireCell::Configuration& cfg)
     }
     // Take the event number from the per-event tensor ident (raw; run/subrun = 0).
     m_rse_from_ident = get(cfg, "rse_from_ident", m_rse_from_ident);
+    // Take the full RSE from the input tensor-set metadata; see the header for
+    // the precedence rule.  Default false => compiled config byte-identical.
+    m_rse_from_metadata = get(cfg, "rse_from_metadata", m_rse_from_metadata);
 
     m_grouping2file_prefix = get(cfg, "grouping2file_prefix", m_grouping2file_prefix);
 
@@ -342,6 +347,9 @@ void MultiAlgBlobClustering::configure(const WireCell::Configuration& cfg)
             pfc.em_ke_min = get<double>(pf, "em_ke_min", 0.0);
             pfc.np_ke_min = get<double>(pf, "np_ke_min", 0.0);
             // doc pr/34 §10 port-fidelity knobs; absent => legacy, byte-identical.
+            pfc.merge_metadata_key = get<std::string>(pf, "merge_metadata_key", "");
+            pfc.merge_node_text = get<std::string>(pf, "merge_node_text", "");
+            pfc.merge_id_offset = get<int>(pf, "merge_id_offset", pfc.merge_id_offset);
             pfc.pf_track_main_cluster_only = get<bool>(pf, "pf_track_main_cluster_only", false);
             pfc.pf_shower_vertex_barrier = get<bool>(pf, "pf_shower_vertex_barrier", false);
             pfc.pf_shower_parent_precedence = get<bool>(pf, "pf_shower_parent_precedence", false);
@@ -439,6 +447,7 @@ WireCell::Configuration MultiAlgBlobClustering::default_configuration() const
     cfg["subRunNo"] = m_subRunNo;
     cfg["eventNo"] = m_eventNo;
     cfg["rse_from_ident"] = m_rse_from_ident;
+    cfg["rse_from_metadata"] = m_rse_from_metadata;
 
     return cfg;
 }
@@ -2127,6 +2136,71 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
         }
     }
 
+    // ---- optional merge with an upstream (truth) particle tree ----
+    // Bee renders ONE particle tree per event, so a truth tree and this reco
+    // tree can only both be seen if they are grafted into a single array: the
+    // upstream nodes stay at top level and everything built above is hung under
+    // one node whose text carries the reconstructed neutrino summary.
+    if (!cfg.merge_metadata_key.empty()
+        && m_in_metadata.isMember(cfg.merge_metadata_key)) {
+        const Configuration& upstream = m_in_metadata[cfg.merge_metadata_key];
+
+        // Renumber the reco subtree out of the upstream id space.  jsTree needs
+        // unique ids; a duplicate silently drops a branch from the display.
+        std::function<void(Configuration&)> shift_ids = [&](Configuration& nodes) {
+            for (auto& n : nodes) {
+                if (n.isMember("id")) { n["id"] = n["id"].asInt() + cfg.merge_id_offset; }
+                if (n.isMember("children")) { shift_ids(n["children"]); }
+            }
+        };
+        shift_ids(particles);
+
+        // Summary text: reconstructed Enu and the two BDT scores, from the same
+        // TrackFitting this function already holds.  The BDT scorers run before
+        // the Bee fill, so by here the scores are set (they are 0 if the
+        // scorers are absent from pipeline_names -- say so rather than print a
+        // misleading zero).
+        const auto& ti = tf->get_tagger_info();
+        const auto& ki = tf->get_kine_info();
+        std::string text = cfg.merge_node_text.empty() ? std::string("reco nu")
+                                                       : cfg.merge_node_text;
+        {
+            // The BDT scores are only meaningful if the scorers are in the
+            // pipeline; TaggerInfo initialises them to 0, which would otherwise
+            // read as a real score.  Say "n/a" instead of printing a fake 0.
+            bool have_scores = false;
+            for (const auto& cm : m_pipeline) {
+                if (cm.name.find("BDTScorer") != std::string::npos) { have_scores = true; break; }
+            }
+            char buf[256];
+            if (have_scores) {
+                snprintf(buf, sizeof(buf), "  %.1f MeV   numu %.3f   nue %.3f",
+                         ki.kine_reco_Enu, ti.numu_score, ti.nue_score);
+            }
+            else {
+                snprintf(buf, sizeof(buf), "  %.1f MeV   (no BDT scores)",
+                         ki.kine_reco_Enu);
+            }
+            text += buf;
+        }
+
+        Configuration wrapper;
+        wrapper["id"] = cfg.merge_id_offset - 1;   // outside both id spaces
+        wrapper["text"] = text;
+        Configuration dj;
+        for (int i = 0; i < 3; ++i) { dj["start"][i] = 0.0; dj["end"][i] = 0.0; }
+        wrapper["data"] = dj;
+        wrapper["children"] = particles.isNull() ? Json::arrayValue : particles;
+
+        Configuration merged = upstream;           // truth nodes at top level
+        merged.append(wrapper);
+        tree.set_particles(merged);
+        SPDLOG_LOGGER_DEBUG(log, "fill_bee_pf_tree '{}': merged {} upstream + {} reco "
+                            "top-level nodes under '{}'",
+                            cfg.name, upstream.size(), particles.size(), text);
+        return;
+    }
+
     tree.set_particles(particles);
     SPDLOG_LOGGER_TRACE(log, "fill_bee_pf_tree '{}': {} top-level particles",
                         cfg.name, particles.size());
@@ -2809,7 +2883,44 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
 
     const int ident = ints->ident();
     SPDLOG_LOGGER_DEBUG(log, "loading tensor set ident={} (last={})", ident, m_last_ident);
-    if (m_last_ident < 0) {     // first time.
+
+    // Keep the input set metadata for forwarding, and resolve the RSE from it
+    // when asked.  This runs BEFORE the ident/config branches below and, when
+    // it fires, suppresses them for this event -- the precedence rule in the
+    // header (metadata > ident > config).  Absent keys => md_rse stays false
+    // => the historical behavior is untouched.
+    m_in_metadata = ints->metadata();
+    // Read into LOCALS first.  m_runNo/... must not move until after flush(),
+    // which writes the PREVIOUS event and needs that event's still-current RSE.
+    bool md_rse = false;
+    int md_run = 0, md_sub = 0, md_evt = 0;
+    if (m_rse_from_metadata
+        && m_in_metadata.isMember("runNo")
+        && m_in_metadata.isMember("subRunNo")
+        && m_in_metadata.isMember("eventNo")) {
+        md_run = m_in_metadata["runNo"].asInt();
+        md_sub = m_in_metadata["subRunNo"].asInt();
+        md_evt = m_in_metadata["eventNo"].asInt();
+        md_rse = true;
+    }
+    else if (m_rse_from_metadata) {
+        // Asked for, but nothing upstream supplied it.  Say so rather than
+        // silently falling back to 0/0/ident.
+        SPDLOG_LOGGER_DEBUG(log, "rse_from_metadata set but input metadata has no "
+                            "runNo/subRunNo/eventNo; falling back");
+    }
+    if (md_rse) {
+        // Flush the previous event FIRST, while m_runNo/... still describe it.
+        if (m_last_ident >= 0 && m_last_ident != ident) { flush(ident); }
+        m_runNo = md_run; m_subRunNo = md_sub; m_eventNo = md_evt;
+        if (!m_use_shared_sink) {
+            m_sink.set_rse(m_runNo, m_subRunNo, m_eventNo);
+        }
+        m_last_ident = ident;
+        SPDLOG_LOGGER_DEBUG(log, "rse_from_metadata: ({},{},{})",
+                            m_runNo, m_subRunNo, m_eventNo);
+    }
+    else if (m_last_ident < 0) {     // first time.
         if (m_rse_from_ident) {
             // The tensor ident already carries the real event id (raw, unmasked);
             // run/subrun are not available in this chain.
@@ -2845,6 +2956,16 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
 
     Points::node_t root;
     Ensemble& ensemble = *root.value.facade<Ensemble>();
+
+    // Publish the event's RSE on the ensemble scalar PC so pipeline visitors
+    // can identify their event.  IEnsembleVisitor::visit() receives ONLY the
+    // Ensemble -- no ITensorSet, no ident -- so this is the sole channel by
+    // which e.g. SbndPrMagnifyTrackingVisitor can stamp a correct Trun.
+    // Whatever m_runNo/... hold at this point is the resolved answer for this
+    // event (metadata > ident > config), so consumers need not know the source.
+    ensemble.set_scalar<int>("runNo", m_runNo);
+    ensemble.set_scalar<int>("subRunNo", m_subRunNo);
+    ensemble.set_scalar<int>("eventNo", m_eventNo);
 
     for (const auto& gname : m_groupings) {
         const auto datapath = inpath(gname, ident);
@@ -3164,7 +3285,10 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
         outtens.insert(outtens.end(), tens.begin(), tens.end());
         SPDLOG_LOGGER_DEBUG(log, "Produce {} tensors for grouping {}", tens.size(), name);
     }
-    outts = as_tensorset(outtens, ident);
+    // Forward the input set metadata (RSE from an upstream attacher/labeler,
+    // and anything else a producer put there).  Without this the chain only
+    // works when an art-aware node sits IMMEDIATELY upstream of each consumer.
+    outts = as_tensorset(outtens, ident, m_in_metadata);
 
     perf("done");
 

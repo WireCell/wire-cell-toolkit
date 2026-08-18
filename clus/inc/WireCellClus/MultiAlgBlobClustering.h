@@ -179,6 +179,24 @@ namespace WireCell::Clus {
        public:
         struct BeePFConfig {
             std::string name{"mc"};          // Bee file name (default "mc")
+            // Merge an upstream particle tree (published into the input
+            // TensorSet metadata under this key by wclsTensorSetLabeler's
+            // pf_metadata_key) with this one, and emit a SINGLE tree.  Bee
+            // renders exactly one particle tree per event -- bee.js fetches a
+            // hardcoded base_url + "mc/" into one <div id="mc"> -- so a truth
+            // tree and a reco tree can only both be seen if they are grafted
+            // together here.  Empty (default) = no merge, unchanged output.
+            std::string merge_metadata_key{""};
+            // Text of the node the merged reco flow is hung under.  The
+            // reconstructed neutrino energy and the numu/nue scores are
+            // appended when available (they live in the same TrackFitting this
+            // function already reads).  Empty = "reco nu".
+            std::string merge_node_text{""};
+            // Added to every grafted reco node id.  jsTree ids must be unique
+            // across the merged tree; the labeler uses 9000000+ / 10000000+ and
+            // the reco side uses cluster*1000+seg, so they do not collide today
+            // -- this makes that structural rather than lucky.
+            int merge_id_offset{20000000};
             std::string visitor;             // dump after this visitor runs
             std::string grouping{"live"};    // grouping to read PR graph from
             // Prototype-parity options (defaults => legacy output, byte-identical):
@@ -311,6 +329,21 @@ namespace WireCell::Clus {
         // chain whose ident already carries the real event id.  Default off keeps
         // the existing use_config_rse / auto-increment behavior unchanged.
         bool m_rse_from_ident{false};
+        // Take RSE from the INPUT tensor-set metadata ("runNo"/"subRunNo"/
+        // "eventNo"), which is the only route by which the true art run and
+        // subrun can reach a WCT component -- the tensor ident carries the
+        // event number alone.  Filled upstream by larwirecell's
+        // wclsTensorSetMetadataAttacher (or by wclsTensorSetLabeler, which
+        // stamps the same three keys).  PRECEDENCE, highest first:
+        //   1. this, when enabled AND the keys are actually present
+        //   2. m_rse_from_ident  (0 / 0 / ident)
+        //   3. m_use_config_rse  (the configured constants)
+        // so enabling it cannot silently degrade a chain whose upstream has no
+        // attacher: absent keys fall through to the historical behavior.
+        bool m_rse_from_metadata{false};
+        // Input set metadata of the event being processed, kept so operator()
+        // can forward it to the output (see as_tensorset below).
+        WireCell::Configuration m_in_metadata{Json::objectValue};
 
         void flush(int ident = -1);
         void flush(WireCell::Bee::Points& bpts, int ident);
