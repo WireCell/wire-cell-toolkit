@@ -1416,6 +1416,7 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
         pattern_algos.find_proto_vertex(*pr_graph, *main_cluster, *m_track_fitter, m_dv, true, 2, true, particle_data());
         cov_defer_restore();
         detg_dump("main:find_proto_vertex", *pr_graph);
+        dup_stage_census("main:find_proto_vertex", *pr_graph, *main_cluster);
 
         // shower related operations
         pattern_algos.clustering_points(*pr_graph, *main_cluster, m_dv);
@@ -1439,6 +1440,7 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
         // main vertex determination
         pattern_algos.determine_main_vertex(*pr_graph, *main_cluster, main_vertex, vertices_in_long_muon, segments_in_long_muon, *m_track_fitter, m_dv, particle_data(), m_recomb_model);
         detg_dump("main:determine_main_vertex", *pr_graph);
+        dup_stage_census("main:determine_main_vertex", *pr_graph, *main_cluster);
 
         // doc sbnd_xin/docs/pr/59 round 2 (P1): determine_main_vertex's
         // internal examine_structure_final*/examine_vertices_1 can create a
