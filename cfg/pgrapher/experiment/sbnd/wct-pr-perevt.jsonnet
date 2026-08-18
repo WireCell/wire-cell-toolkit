@@ -1126,9 +1126,27 @@ function(
     // where it then wins the farthest-vertex search.  Measured on
     // 169626/174752/347129/394532 with shower_dedup_start_seg ON: 6 orphan
     // imports, 5 wrong end points (394532's 30 MeV and 66 MeV showers end
-    // on each other).  C++ default false.  DEFAULT OFF pending the gate;
-    // flip only on the owner's word.
-    shower_endpoint_skip_orphan_vtx = false,
+    // on each other).  C++ default false.
+    //
+    // SBND PRODUCTION ON since 2026-08-18 -- owner flip after scanning the
+    // pr/91 sec 2b Bee pair ("This is good, you can flip is on this for SBND
+    // production for now").  before e81dfbf9-3801-46a4-ad61-31b5511127f1 /
+    // after 04107fda-6306-44e0-aa8c-12a352e32235.  Gates on the 24-event
+    // pr/84 r3 manifest: knob-off vs shipped production PASS=48/48; knob-on
+    // moves 5 events and ONLY their mabc-pr.zip member data/0/0-mc.json --
+    // every pctree tarball byte-identical, nusel tsv byte-identical (zero
+    // score/label movers), kine_reco_Enu and kine_energy_particle unchanged.
+    // Six showers move and `end` is the only field that changes on any of
+    // them.  No C++ change -- m_shower_endpoint_skip_orphan_vtx{false} is
+    // still the library default; only the SBND operating point flips it on.
+    //
+    // Footprint caveat kept on the record: the 24 events were chosen for this
+    // defect, and nueCC 168596 -- the ONE mover we did not hand-pick, with
+    // zero shower_dedup_start_seg firings, its orphan left behind by
+    // id_pi0_with_vertex's pi0 re-seat -- shows the population is not the
+    // dedup's.  1/20 non-hand-picked events moved; that is a footprint signal,
+    // not a rate.  A standard-manifest gate is still owed.
+    shower_endpoint_skip_orphan_vtx = true,
     // doc sbnd_xin/docs/pr/40 sec 17 (2026-08-06): track (proton/pion/muon)
     // mis-identified as electron.  F1 restores prototype-faithful PID
     // persistence (segment_determine_dir_track); F2/F3 spare a segment
