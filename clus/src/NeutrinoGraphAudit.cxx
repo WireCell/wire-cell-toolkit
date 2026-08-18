@@ -1368,15 +1368,20 @@ bool PatternAlgorithms::main_vertex_graph_audit(Graph& graph, Facade::Cluster& c
                     if (pts_s.size() <= static_cast<size_t>(m_mvga_stub_pts)) continue;
                     // dQ/dx needs fits on both members.
                     if (seg_valid_fits(shorter) < 2 || seg_valid_fits(longer) < 2) continue;
-                    // Near-parallel gate first (cheap): op1's chord test.
-                    if (m_mvga_dup_angle > 0 && pts_s.size() >= 2 && pts_l.size() >= 2) {
+                    // Near-parallel gate first (cheap): op1's chord test,
+                    // with op1-proj's own ceiling when set (doc pr/83 r4b,
+                    // 284206: residual pair at 22 deg; 0 = op1's shared
+                    // m_mvga_dup_angle => byte-identical).
+                    const double proj_angle =
+                        (m_mvga_proj_angle > 0) ? m_mvga_proj_angle : m_mvga_dup_angle;
+                    if (proj_angle > 0 && pts_s.size() >= 2 && pts_l.size() >= 2) {
                         auto ca = pts_s.back() - pts_s.front();
                         auto cb = pts_l.back() - pts_l.front();
                         double den = ca.magnitude() * cb.magnitude();
                         if (den > 0) {
                             double cosang = std::abs(ca.dot(cb)) / den;
                             double ang = std::acos(std::clamp(cosang, 0.0, 1.0)) / 3.1415926 * 180.0;
-                            if (ang > m_mvga_dup_angle) continue;
+                            if (ang > proj_angle) continue;
                         }
                     }
                     // Same (apa,face) required -- a cross-face pair has no

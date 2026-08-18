@@ -233,6 +233,7 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_swap_orphan_dup_audit = get(config, "swap_orphan_dup_audit", m_swap_orphan_dup_audit); // doc pr/83 r3 (Mechanism C)
     m_mvga_proj_dup_frac  = get(config, "mvga_proj_dup_frac",  m_mvga_proj_dup_frac);  // doc pr/83 r4; 0 = pass disabled
     m_mvga_proj_dqdx_ratio = get(config, "mvga_proj_dqdx_ratio", m_mvga_proj_dqdx_ratio); // doc pr/83 r4; inert while frac == 0
+    m_mvga_proj_angle = get(config, "mvga_proj_angle", m_mvga_proj_angle); // deg; doc pr/83 r4b; 0 = use mvga_dup_angle
     m_shower_topo_demote_len = get(config, "shower_topo_demote_len", m_shower_topo_demote_len);  // cm
     // doc sbnd_xin/docs/pr/49 -- cross-cluster projection-ghost deweighting
     // in the trajectory fit's 2D charge association (18255-57441): live
@@ -638,6 +639,7 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["swap_orphan_dup_audit"] = m_swap_orphan_dup_audit; // false = abandoned main cluster never audited, byte-identical (doc pr/83 r3)
     cfg["mvga_proj_dup_frac"]  = m_mvga_proj_dup_frac;  // 0 = projective dup collapse disabled, byte-identical (doc pr/83 r4)
     cfg["mvga_proj_dqdx_ratio"] = m_mvga_proj_dqdx_ratio; // stem dQ/dx asymmetry gate; inert while frac == 0 (doc pr/83 r4)
+    cfg["mvga_proj_angle"] = m_mvga_proj_angle; // deg; 0 = use mvga_dup_angle, byte-identical (doc pr/83 r4b)
     cfg["kink_dqdx_hot_ratio"] = m_kink_dqdx_hot_ratio; // x mip_dqdx_median; inert while both above are false
     cfg["shower_topo_demote_len"] = m_shower_topo_demote_len;  // cm; 0 = legacy (long segments stay eligible for kShowerTopology)
     // doc sbnd_xin/docs/pr/49.
@@ -1199,6 +1201,7 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
     pattern_algos.m_swap_orphan_dup_audit = m_swap_orphan_dup_audit;   // doc pr/83 r3 (Mechanism C)
     pattern_algos.m_mvga_proj_dup_frac  = m_mvga_proj_dup_frac;        // fraction, no conversion (doc pr/83 r4)
     pattern_algos.m_mvga_proj_dqdx_ratio = m_mvga_proj_dqdx_ratio;     // ratio, no conversion (doc pr/83 r4)
+    pattern_algos.m_mvga_proj_angle = m_mvga_proj_angle;               // deg, no conversion (doc pr/83 r4b)
     pattern_algos.m_rough_path_probe  = m_rough_path_probe;           // doc pr/51 round 4: diagnostic-only
     // doc pr/51 round 5: steiner gap penalty.  The two service handles are
     // unconditional copies (inert while the scale is 0).

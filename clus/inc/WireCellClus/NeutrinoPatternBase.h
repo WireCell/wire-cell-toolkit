@@ -714,6 +714,10 @@ namespace WireCell::Clus::PR {
         // carry MIP-level charge on both prongs).  Only consulted when
         // m_mvga_proj_dup_frac > 0, so the default is inert.
         double m_mvga_proj_dqdx_ratio{0.4};
+        // op1-proj's own chord-angle gate, degrees (doc pr/83 r4b, 284206:
+        // the residual stem pair reads 22 deg -- just over op1's shared
+        // 20 deg).  0 = use m_mvga_dup_angle (byte-identical legacy).
+        double m_mvga_proj_angle{0};
 
         // ---- doc sbnd_xin/docs/pr/51 round 4: rough-path diagnostic probe --
         // Diagnostic-only TRACE instrumentation for the near-vertex
