@@ -900,17 +900,23 @@ function(
     // C++ default stays false.
     pf_orphan_audit_only = true,
     // doc pr/84 round 2 (F1/F2) -- vertex-touching pseudo-parent suppression
-    // (rung 1 + cross-cluster rung 2) and the remote-gap anchor.  Display-only:
-    // moves ONLY mc.json.  C++ defaults false (scalars 3 cm / 8 cm); params in
-    // cm.  OFF here until the pr/84 r2 gates pass; flip records will land in
-    // sbnd_xin/docs/pr/84.  Runner env: SBND_PF_DIRECT_WHEN_TOUCHING,
+    // and the remote-gap anchor.  Display-only: moves ONLY mc.json (gate
+    // pr84r2_disp_gate PASS=512 FAIL=0; nusel scores 0 movers; no label
+    // flips).  SBND PRODUCTION ON 2026-08-17: F1 suppressed 32 spurious
+    // gamma/neutron carriers in 512 events (owner evts 283713 x2, 316025,
+    // 407280 + round-1's 65289/347129/169626/174752); F2 re-anchored 106
+    // remote carriers to draw their real gaps.  pf_touch_max stays null =
+    // C++ 3 cm.  Rung 2 (pf_touch_cross_main) stays OFF: the F1.0 probe
+    // showed Flags::main_cluster is NOT set on the event-body cluster at PF
+    // writer time (evt 64921 deferred -- root cause is vertex determination,
+    // doc pr/52 territory).  Runner env: SBND_PF_DIRECT_WHEN_TOUCHING,
     // SBND_PF_TOUCH_MAX, SBND_PF_TOUCH_CROSS_MAIN, SBND_PF_TOUCH_CROSS_MAX,
     // SBND_PF_PSEUDO_GAP_FROM_MAIN.
-    pf_direct_when_touching = false,
+    pf_direct_when_touching = true,
     pf_touch_max = null,
     pf_touch_cross_main = false,
     pf_touch_cross_max = null,
-    pf_pseudo_gap_from_main = false,
+    pf_pseudo_gap_from_main = true,
     // doc pr/38: F2's ON-behavior was CORRECTED in place (owner decision
     // 2026-08-05, no new knobs): the barrier now excludes each shower's
     // start vertex (prototype map_vtx_segs parity, WCShower.cxx:547) so
@@ -1257,9 +1263,17 @@ function(
     // whose closest approach to the reachable side is within this radius (cm)
     // BEFORE clustering_points, so they classify conn-1 naturally;
     // shower_conn3_unreachable above stays the backstop for wider gaps.
-    // Moves fits and PF (full A/B gated).  null = C++ default 0 = OFF until
-    // the pr/84 r2 gates pass.  Runner env: SBND_CONN3_STITCH_MAX.
-    conn3_stitch_max = null,
+    // SBND PRODUCTION ON at 1 (cm) 2026-08-17: 10 fires / 512 events, all
+    // sub-cm-family, 9 score movers all target-family (283713 enu 1513->2034
+    // = the stranded 567 MeV muon rejoins; 66272 rescues an invisible
+    // pi+ -> proton branch; nueCC 168596 consolidates its 1929 MeV primary,
+    // 30->17 nodes), ZERO nu-candidate label flips, ncpi0 untouched.
+    // Deliberately NOT the swept 3 cm: at 1-3 cm the bridges turn
+    // speculative -- nueCC 38856's two 2.5-2.9 cm bridges fragmented its
+    // 1244 MeV electron and flipped nue 3.25 -> -3.45 (recorded in doc
+    // pr/84 sec 13 as the tuning evidence).  Runner env:
+    // SBND_CONN3_STITCH_MAX.
+    conn3_stitch_max = 1,
     // doc sbnd_xin/docs/pr/74 round 4 K6 shower_traj_michel_stem: a stopping
     // muon that emits a Michel electron at the neutrino vertex is
     // reconstructed as ONE EM shower, because track/shower separation flags
