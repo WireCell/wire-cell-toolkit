@@ -613,7 +613,14 @@ void MultiAlgBlobClustering::flush(int ident)
     for (auto& [name, tree] : m_bee_pf_trees) {
         // emit_empty: write the layer even with no nodes, so a consumer can rely
         // on it existing for every event.  Otherwise keep the historical skip.
-        if (!tree.empty() || m_bee_pf_emit_empty.count(name)) {
+        //
+        // NOT on the terminal flush (ident < 0, from finalize()).  That one runs
+        // after the last event, so emitting there appends a phantom event -- one
+        // extra Bee index carrying nothing but an empty mc.json.  Seen as a
+        // spurious "event 3" on a 3-event run, and an "event 1" in every
+        // single-event zip.
+        const bool terminal = ident < 0;
+        if (!tree.empty() || (m_bee_pf_emit_empty.count(name) && !terminal)) {
             write_obj(tree);
             tree.reset();
         }
