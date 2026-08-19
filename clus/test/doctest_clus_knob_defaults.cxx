@@ -148,6 +148,15 @@ TEST_CASE("clus knob defaults: TaggerCheckNeutrino switches are all OFF")
     CHECK_KNOB_NUM(cfg, "sfv_kink_max", 25.0);                                   // deg; inert while guards off
     CHECK_KNOB_BOOL(cfg, "shower_nv_bridge_track", false);                       // B2
     CHECK_KNOB_NUM(cfg, "shower_nv_bridge_max_gap", 1.8);                        // cm; inert while B2 off
+    // doc pr/92 -- stray-satellite drop from kine/PF.
+    CHECK_KNOB_BOOL(cfg, "kine_drop_stray_satellites", false);                   // off = legacy Enu sum
+    CHECK_KNOB_NUM(cfg, "kine_sat_min_energy", 20.0);                            // MeV; inert while pr/92 off
+    CHECK_KNOB_NUM(cfg, "kine_sat_prox_max", 8.0);                               // cm; inert while pr/92 off
+    CHECK_KNOB_NUM(cfg, "kine_sat_angle_bad", 60.0);                             // deg; inert while pr/92 off
+    CHECK_KNOB_NUM(cfg, "kine_sat_angle_main", 45.0);                            // deg; inert while pr/92 off
+    CHECK_KNOB_NUM(cfg, "kine_sat_far_dis", 90.0);                               // cm; inert while pr/92 off
+    CHECK_KNOB_NUM(cfg, "kine_sat_axis_dis_cut", 30.0);                          // cm; inert while pr/92 off
+    CHECK_KNOB_NUM(cfg, "kine_sat_cont_kink", 25.0);                             // deg; inert while pr/92 off
     CHECK_KNOB_BOOL(cfg, "shower_traj_michel_stem", false);                   // doc pr/74 round 4 K6
     CHECK_KNOB_NUM(cfg, "michel_stem_traj_min_len", 15.0);                    // cm; inert while K6 off
     CHECK_KNOB_NUM(cfg, "michel_stem_traj_max_len", 45.0);                    // cm; inert while K6 off
@@ -1053,4 +1062,5 @@ TEST_CASE("clus knob defaults: MultiAlgBlobClustering BeePFConfig pf switches ar
     CHECK(pfc.pf_touch_cross_max == 8.0 * WireCell::units::cm);  // read only when rung 2 on
     CHECK(pfc.pf_pseudo_gap_from_main == false);         // doc pr/84 r2 F2
     CHECK(pfc.pf_unique_node_ids == false);              // doc pr/84 r3 G1
+    CHECK(pfc.pf_drop_stray_satellites == false);        // doc pr/92
 }

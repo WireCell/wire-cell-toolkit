@@ -1750,6 +1750,41 @@ namespace WireCell::Clus::PR {
                                const Clus::ParticleDataSet::pointer& particle_data,
                                const IRecombinationModel::pointer& recomb_model);
 
+        // ------------------------------------------------------------------
+        // doc sbnd_xin/docs/pr/92 -- drop stray satellite showers from the
+        // kinematics tree (and, via TrackFitting transport, the Bee PF
+        // tree).  fill_kine_tree's leftover pass admits every conn-2/3
+        // shower with no direction or distance check (the prototype has the
+        // identical hole, NeutrinoID_kine.h:209-255): overclustered cosmics
+        // (SBND 350935 shower 11001, 449 MeV at 93 deg off its attachment
+        // vertex; 321371 shower 18004, 98 MeV collinear tail of a 256 cm
+        // dropped cosmic) and second neutrinos (389538 shower 19040,
+        // 997 MeV attached 144.5 cm away, 69 deg off the main vertex) are
+        // summed into kine_reco_Enu.  Candidates: BFS-unreached, conn 2/3,
+        // start segment in a NON-main cluster, kine_best above the floor,
+        // not pi0-paired, not within the proximity exemption of a
+        // main-cluster attachment.  Drop arms (axis = fresh
+        // shower_cal_dir_3vector from the start point -- the STORED
+        // init_dir for conn 2/3 is exactly the vertex->start chord and
+        // would always read 0 deg):
+        //   A: angle(axis, start - attach_vtx) > m_kine_sat_angle_bad
+        //   B: (attach farther than m_kine_sat_far_dis OR attach vertex not
+        //      in the main cluster) AND angle(axis, start - main_vtx) >=
+        //      m_kine_sat_angle_main
+        //   C: shower_start_is_track_continuation (collinear straight-long
+        //      sibling OUTSIDE the shower; see PRShowerFunctions.h)
+        // All state empty / arms unreachable when the master bool is off =>
+        // byte-identical.  Angles in DEGREES (sfv_kink_max precedent).
+        // ------------------------------------------------------------------
+        bool   m_kine_drop_stray_satellites{false};
+        double m_kine_sat_min_energy{20*units::MeV};
+        double m_kine_sat_prox_max{8*units::cm};
+        double m_kine_sat_angle_bad{60.0};
+        double m_kine_sat_angle_main{45.0};
+        double m_kine_sat_far_dis{90*units::cm};
+        double m_kine_sat_axis_dis_cut{30*units::cm};
+        double m_kine_sat_cont_kink{25.0};
+
         // doc sbnd_xin/docs/pr/74 round 2 P2 (SBND 18255 evt 90055 seg
         // 11045).  override_michel_stem_muon (F14 above) accepts ANY
         // shower-like sibling at the stem's far vertex as "the Michel
@@ -2690,7 +2725,13 @@ namespace WireCell::Clus::PR {
                                 IDetectorVolumes::pointer dv,
                                 WireCell::IClusGeomHelper::pointer geom_helper,
                                 const Clus::ParticleDataSet::pointer& particle_data,
-                                const IRecombinationModel::pointer& recomb_model);
+                                const IRecombinationModel::pointer& recomb_model,
+                                // doc pr/92: pi0-paired showers (protected from the
+                                // stray-satellite drop; the TrackFitting copy is stale
+                                // at call time) and the out-param collecting dropped
+                                // shower ids for the Bee PF tree's matching gate.
+                                const IndexedShowerSet& pi0_showers = IndexedShowerSet{},
+                                std::set<int>* dropped_satellites = nullptr);
         // Convenience overloads: collect 2D charge maps internally (safe for isolated calls).
         double cal_kine_charge(ShowerPtr Shower, Graph& graph, TrackFitting& track_fitter, IDetectorVolumes::pointer dv);
         double cal_kine_charge(SegmentPtr segment, Graph& graph, TrackFitting& track_fitter, IDetectorVolumes::pointer dv);

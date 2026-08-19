@@ -297,6 +297,14 @@ namespace WireCell::Clus {
             // mc.js draws from data.start/data.end only).  C++ default false
             // => byte-identical legacy output.
             bool pf_unique_node_ids{false};
+            // pf_drop_stray_satellites (doc pr/92): skip showers whose id is
+            // in TrackFitting::get_dropped_satellite_shower_ids() -- the
+            // conn-2/3 satellites fill_kine_tree's kine_drop_stray_satellites
+            // gate removed from kine_reco_Enu (overclustered cosmics, second
+            // neutrinos).  Effective only when that kine knob is also on;
+            // otherwise the id set is empty and this knob is inert.  C++
+            // default false => byte-identical legacy output.
+            bool pf_drop_stray_satellites{false};
         };
        private:
         std::vector<BeePFConfig> m_bee_pf_configs;

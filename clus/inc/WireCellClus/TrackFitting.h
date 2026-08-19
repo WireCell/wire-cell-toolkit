@@ -249,6 +249,15 @@ namespace WireCell::Clus {
         void add_bridged_cluster_id(int id) { m_bridged_cluster_ids.insert(id); }
         const std::set<int>& get_bridged_cluster_ids() const { return m_bridged_cluster_ids; }
 
+        /// doc sbnd_xin/docs/pr/92 -- stray satellite showers dropped from the
+        /// kinematics tree by fill_kine_tree's kine_drop_stray_satellites gate
+        /// (shower ids, PR::Shower::get_shower_id()).  Stashed unconditionally
+        /// per event by TaggerCheckNeutrino (replace semantics: empty when the
+        /// knob is off or no vertex was found, so no cross-event carryover);
+        /// read by fill_bee_pf_tree's pf_drop_stray_satellites gate.
+        void set_dropped_satellite_shower_ids(std::set<int> ids) { m_dropped_satellite_shower_ids = std::move(ids); }
+        const std::set<int>& get_dropped_satellite_shower_ids() const { return m_dropped_satellite_shower_ids; }
+
         /// Store / retrieve pi0 identification results from TaggerCheckNeutrino.
         void set_pi0_data(PR::IndexedShowerSet pi0_showers,
                           PR::ShowerIntMap map_shower_pio_id,
@@ -794,6 +803,8 @@ namespace WireCell::Clus {
         PR::IndexedShowerSet m_showers;
         // doc sbnd_xin/docs/pr/40 round 9 B2 -- see the accessor comment.
         std::set<int>        m_bridged_cluster_ids;
+        // doc sbnd_xin/docs/pr/92 -- see the accessor comment.
+        std::set<int>        m_dropped_satellite_shower_ids;
 
         // Pi0 identification results (set by TaggerCheckNeutrino via set_pi0_data)
         PR::IndexedShowerSet                      m_pi0_showers;

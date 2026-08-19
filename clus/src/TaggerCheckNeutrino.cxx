@@ -514,6 +514,15 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_sfv_kink_max                                 = get(config, "sfv_kink_max",                                 m_sfv_kink_max);
     m_shower_nv_bridge_track                       = get(config, "shower_nv_bridge_track",                       m_shower_nv_bridge_track);
     m_shower_nv_bridge_max_gap                     = get(config, "shower_nv_bridge_max_gap",                     m_shower_nv_bridge_max_gap);
+    // doc sbnd_xin/docs/pr/92 -- stray-satellite drop from kine/PF.
+    m_kine_drop_stray_satellites                   = get(config, "kine_drop_stray_satellites",                   m_kine_drop_stray_satellites);
+    m_kine_sat_min_energy                          = get(config, "kine_sat_min_energy",                          m_kine_sat_min_energy);
+    m_kine_sat_prox_max                            = get(config, "kine_sat_prox_max",                            m_kine_sat_prox_max);
+    m_kine_sat_angle_bad                           = get(config, "kine_sat_angle_bad",                           m_kine_sat_angle_bad);
+    m_kine_sat_angle_main                          = get(config, "kine_sat_angle_main",                          m_kine_sat_angle_main);
+    m_kine_sat_far_dis                             = get(config, "kine_sat_far_dis",                             m_kine_sat_far_dis);
+    m_kine_sat_axis_dis_cut                        = get(config, "kine_sat_axis_dis_cut",                        m_kine_sat_axis_dis_cut);
+    m_kine_sat_cont_kink                           = get(config, "kine_sat_cont_kink",                           m_kine_sat_cont_kink);
     m_michel_stem_michel_check                  = get(config, "michel_stem_michel_check",                  m_michel_stem_michel_check);
     m_michel_stem_max_far_len                   = get(config, "michel_stem_max_far_len",                   m_michel_stem_max_far_len);
     m_shower_stem_backfill                      = get(config, "shower_stem_backfill",                      m_shower_stem_backfill);
@@ -825,6 +834,14 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["sfv_kink_max"]                                 = m_sfv_kink_max;                                 // degrees; continuation-arm tunable
     cfg["shower_nv_bridge_track"]                       = m_shower_nv_bridge_track;                       // doc pr/40 round 9 B2; false = legacy (conn-2 shower, no bridge)
     cfg["shower_nv_bridge_max_gap"]                     = m_shower_nv_bridge_max_gap;                     // cm; only read when shower_nv_bridge_track
+    cfg["kine_drop_stray_satellites"]                   = m_kine_drop_stray_satellites;                   // doc pr/92; false = legacy (every conn-2/3 satellite summed into Enu)
+    cfg["kine_sat_min_energy"]                          = m_kine_sat_min_energy;                          // MeV; only read when kine_drop_stray_satellites
+    cfg["kine_sat_prox_max"]                            = m_kine_sat_prox_max;                            // cm; only read when kine_drop_stray_satellites
+    cfg["kine_sat_angle_bad"]                           = m_kine_sat_angle_bad;                           // degrees; only read when kine_drop_stray_satellites
+    cfg["kine_sat_angle_main"]                          = m_kine_sat_angle_main;                          // degrees; only read when kine_drop_stray_satellites
+    cfg["kine_sat_far_dis"]                             = m_kine_sat_far_dis;                             // cm; only read when kine_drop_stray_satellites
+    cfg["kine_sat_axis_dis_cut"]                        = m_kine_sat_axis_dis_cut;                        // cm; only read when kine_drop_stray_satellites
+    cfg["kine_sat_cont_kink"]                           = m_kine_sat_cont_kink;                           // degrees; only read when kine_drop_stray_satellites
     cfg["michel_stem_michel_check"]                  = m_michel_stem_michel_check;                  // doc pr/74 round 2 P2; false = legacy (any shower-like sibling passes)
     cfg["michel_stem_max_far_len"]                   = m_michel_stem_max_far_len;                   // cm; only read when michel_stem_michel_check
     cfg["shower_stem_backfill"]                      = m_shower_stem_backfill;                      // doc pr/74 round 2 K4; false = legacy (walked-past stems stay out of showers)
@@ -1381,6 +1398,14 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
     pattern_algos.m_sfv_kink_max                                 = m_sfv_kink_max;                                 // pr/40 r9 (degrees)
     pattern_algos.m_shower_nv_bridge_track                       = m_shower_nv_bridge_track;                       // pr/40 r9 B2
     pattern_algos.m_shower_nv_bridge_max_gap                     = m_shower_nv_bridge_max_gap * units::cm;         // pr/40 r9 B2
+    pattern_algos.m_kine_drop_stray_satellites                   = m_kine_drop_stray_satellites;                   // pr/92
+    pattern_algos.m_kine_sat_min_energy                          = m_kine_sat_min_energy * units::MeV;             // pr/92
+    pattern_algos.m_kine_sat_prox_max                            = m_kine_sat_prox_max * units::cm;                // pr/92
+    pattern_algos.m_kine_sat_angle_bad                           = m_kine_sat_angle_bad;                           // pr/92 (degrees)
+    pattern_algos.m_kine_sat_angle_main                          = m_kine_sat_angle_main;                          // pr/92 (degrees)
+    pattern_algos.m_kine_sat_far_dis                             = m_kine_sat_far_dis * units::cm;                 // pr/92
+    pattern_algos.m_kine_sat_axis_dis_cut                        = m_kine_sat_axis_dis_cut * units::cm;            // pr/92
+    pattern_algos.m_kine_sat_cont_kink                           = m_kine_sat_cont_kink;                           // pr/92 (degrees)
     pattern_algos.m_michel_stem_michel_check                  = m_michel_stem_michel_check;                  // pr/74 P2
     pattern_algos.m_michel_stem_max_far_len                   = m_michel_stem_max_far_len * units::cm;       // pr/74 P2
     pattern_algos.m_shower_stem_backfill                      = m_shower_stem_backfill;                      // pr/74 K4
@@ -1967,12 +1992,18 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
 
     // Fill reconstructed neutrino kinematics if a vertex was found.
     KineInfo kine_info{};
+    // doc pr/92 -- ids of stray satellite showers dropped from the kine
+    // tree; stashed into TrackFitting below UNCONDITIONALLY (replace
+    // semantics) so no-vertex or knob-off events reset it to empty.
+    std::set<int> dropped_sat_ids;
     if (final_main_vertex) {
         kine_info = pattern_algos.fill_kine_tree(
             final_main_vertex, showers, pio_kine,
             *pr_graph, *m_track_fitter, m_dv,
             m_geom_helper,          // nullptr when clus_geom_helper is not configured
-            particle_data(), m_recomb_model);
+            particle_data(), m_recomb_model,
+            pi0_showers,        // pr/92: pi0-paired showers are drop-protected
+            &dropped_sat_ids);
     }
     if (m_perf) SPDLOG_LOGGER_DEBUG(log, "TaggerCheckNeutrino timing: fill_kine_tree took {} ms", MS(Clock::now() - t0).count());
     t0 = Clock::now(); // finalize block
@@ -1984,6 +2015,8 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
         final_main_vertex->set_flags(PR::VertexFlags::kNeutrinoVertex);
     }
     m_track_fitter->set_pi0_data(pi0_showers, map_shower_pio_id, map_pio_id_showers, map_pio_id_mass);
+    // doc pr/92 -- unconditional stash (empty when knob off / no vertex).
+    m_track_fitter->set_dropped_satellite_shower_ids(std::move(dropped_sat_ids));
     m_track_fitter->set_main_vertex(final_main_vertex);
     m_track_fitter->set_showers(showers);
     m_track_fitter->set_kine_info(kine_info);

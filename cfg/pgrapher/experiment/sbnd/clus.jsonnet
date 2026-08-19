@@ -785,6 +785,12 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               // mc.json.  C++ default false; key omitted when off =>
               // byte-identical pre-fix config.
               pf_unique_node_ids=false,
+              // pf_drop_stray_satellites (doc pr/92): skip showers the kine
+              // side's kine_drop_stray_satellites gate dropped from Enu, so
+              // the PF tree and Enu describe the same particle set.  Inert
+              // unless that kine knob is also on.  C++ default false; key
+              // omitted when off => byte-identical pre-pr/92 config.
+              pf_drop_stray_satellites=false,
               // restore_demoted_mains (doc pr/20 Part I P2; C++ default false,
               // key omitted when null => byte-identical pre-knob config): tag a
               // split-off part that was ITSELF a matched bundle main before the
@@ -1325,6 +1331,17 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               sfv_kink_max=null,
               shower_nv_bridge_track=false,
               shower_nv_bridge_max_gap=null,
+              // doc pr/92 -- stray-satellite drop from kine/PF.  false/null =
+              // C++ defaults = OFF (20 MeV / 8 cm / 60 deg / 45 deg / 90 cm /
+              // 30 cm / 25 deg); keys omitted => byte-identical pre-pr/92.
+              kine_drop_stray_satellites=false,
+              kine_sat_min_energy=null,
+              kine_sat_prox_max=null,
+              kine_sat_angle_bad=null,
+              kine_sat_angle_main=null,
+              kine_sat_far_dis=null,
+              kine_sat_axis_dis_cut=null,
+              kine_sat_cont_kink=null,
               michel_stem_michel_check=false,
               michel_stem_max_far_len=null,
               shower_stem_backfill=false,
@@ -2151,6 +2168,14 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
             sfv_kink_max=sfv_kink_max,
             shower_nv_bridge_track=shower_nv_bridge_track,
             shower_nv_bridge_max_gap=shower_nv_bridge_max_gap,
+            kine_drop_stray_satellites=kine_drop_stray_satellites,
+            kine_sat_min_energy=kine_sat_min_energy,
+            kine_sat_prox_max=kine_sat_prox_max,
+            kine_sat_angle_bad=kine_sat_angle_bad,
+            kine_sat_angle_main=kine_sat_angle_main,
+            kine_sat_far_dis=kine_sat_far_dis,
+            kine_sat_axis_dis_cut=kine_sat_axis_dis_cut,
+            kine_sat_cont_kink=kine_sat_cont_kink,
             michel_stem_michel_check=michel_stem_michel_check,
             michel_stem_max_far_len=michel_stem_max_far_len,
             shower_stem_backfill=shower_stem_backfill,
@@ -2604,6 +2629,7 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
                     [if pf_touch_cross_max != null then 'pf_touch_cross_max']: pf_touch_cross_max * wc.cm,
                     [if pf_pseudo_gap_from_main then 'pf_pseudo_gap_from_main']: true,
                     [if pf_unique_node_ids then 'pf_unique_node_ids']: true,
+                    [if pf_drop_stray_satellites then 'pf_drop_stray_satellites']: true,
                 },
             ],
             pipeline: wc.tns(cm_pipeline),
@@ -2731,6 +2757,8 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
        pf_pseudo_gap_from_main=false,
        // doc pr/84 round 3 (G1); false = C++ default = OFF.  See clus_pr.
        pf_unique_node_ids=false,
+       // doc pr/92; false = C++ default = OFF.  See clus_pr.
+       pf_drop_stray_satellites=false,
        // doc pr/20 Part I P2; null = C++ default false = OFF.  See clus_pr.
        restore_demoted_mains=null,
        // doc pr/23 sec 4.2; null = C++ default false = warn-and-skip.  See clus_pr.
@@ -2981,6 +3009,15 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
        sfv_kink_max=null,
        shower_nv_bridge_track=false,
        shower_nv_bridge_max_gap=null,
+       // doc pr/92; false/null = C++ defaults = OFF.  See clus_pr.
+       kine_drop_stray_satellites=false,
+       kine_sat_min_energy=null,
+       kine_sat_prox_max=null,
+       kine_sat_angle_bad=null,
+       kine_sat_angle_main=null,
+       kine_sat_far_dis=null,
+       kine_sat_axis_dis_cut=null,
+       kine_sat_cont_kink=null,
        michel_stem_michel_check=false,
        michel_stem_max_far_len=null,
        shower_stem_backfill=false,
@@ -3260,6 +3297,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 pf_touch_cross_max=pf_touch_cross_max,
                 pf_pseudo_gap_from_main=pf_pseudo_gap_from_main,
                 pf_unique_node_ids=pf_unique_node_ids,
+                pf_drop_stray_satellites=pf_drop_stray_satellites,
                 unmerge_bundle_mode=unmerge_bundle_mode,
                 restore_demoted_mains=restore_demoted_mains,
                 require_provenance=require_provenance,
@@ -3397,6 +3435,14 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 sfv_kink_max=sfv_kink_max,
                 shower_nv_bridge_track=shower_nv_bridge_track,
                 shower_nv_bridge_max_gap=shower_nv_bridge_max_gap,
+                kine_drop_stray_satellites=kine_drop_stray_satellites,
+                kine_sat_min_energy=kine_sat_min_energy,
+                kine_sat_prox_max=kine_sat_prox_max,
+                kine_sat_angle_bad=kine_sat_angle_bad,
+                kine_sat_angle_main=kine_sat_angle_main,
+                kine_sat_far_dis=kine_sat_far_dis,
+                kine_sat_axis_dis_cut=kine_sat_axis_dis_cut,
+                kine_sat_cont_kink=kine_sat_cont_kink,
                 michel_stem_michel_check=michel_stem_michel_check,
                 michel_stem_max_far_len=michel_stem_max_far_len,
                 shower_stem_backfill=shower_stem_backfill,

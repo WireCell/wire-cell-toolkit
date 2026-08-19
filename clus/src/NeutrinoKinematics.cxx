@@ -1,9 +1,13 @@
 #include "WireCellClus/NeutrinoPatternBase.h"
 #include "WireCellClus/PRSegmentFunctions.h"
+#include "WireCellClus/PRShowerFunctions.h"
 #include "WireCellClus/PRGraph.h"
 #include "WireCellUtil/Units.h"
 #include "WireCellUtil/Logging.h"
 #include <cmath>
+#include <cstdlib>
+#include <iostream>
+#include <sstream>
 
 static auto s_log = WireCell::Log::logger("clus.NeutrinoPattern");
 
@@ -49,7 +53,9 @@ KineInfo PatternAlgorithms::fill_kine_tree(
     IDetectorVolumes::pointer dv,
     WireCell::IClusGeomHelper::pointer geom_helper,
     const Clus::ParticleDataSet::pointer& particle_data,
-    const IRecombinationModel::pointer& recomb_model)
+    const IRecombinationModel::pointer& recomb_model,
+    const IndexedShowerSet& pi0_showers,
+    std::set<int>* dropped_satellites)
 {
     KineInfo ktree{};
 
@@ -285,11 +291,119 @@ KineInfo PatternAlgorithms::fill_kine_tree(
     }
 
     // -------------------------------------------------------------------------
+    // doc sbnd_xin/docs/pr/92 -- stray-satellite drop decision.
+    //
+    // The leftover pass below admits every BFS-unreached conn-2/3 shower
+    // with no direction/distance check (the prototype has the identical
+    // hole, NeutrinoID_kine.h:209-255), so overclustered cosmics and
+    // second neutrinos are summed into kine_reco_Enu.  Decide here, on the
+    // BFS-unreached candidates only: anything the BFS consumed is
+    // genuinely graph-connected to the main vertex and never a candidate.
+    // See NeutrinoPatternBase.h (pr/92 block) for the arms and the target
+    // events.  WCT_KINE_SAT_PROBE prints per-candidate metrics for the
+    // full population and NEVER drops (threshold tuning on
+    // at-decision-time numbers; the probe line reports the would-verdict).
+    // -------------------------------------------------------------------------
+    const bool sat_probe = (std::getenv("WCT_KINE_SAT_PROBE") != nullptr);
+    IndexedShowerSet sat_drop_set;
+    if (m_kine_drop_stray_satellites || sat_probe) {
+        const auto* main_cluster = main_vertex->cluster();
+        const Point mv_pt = main_vertex->fit().point;
+        auto angle_deg = [](const Vector& a, const Vector& b) -> double {
+            const double ma = a.magnitude(), mb = b.magnitude();
+            if (ma <= 0 || mb <= 0) return 0.0;
+            double c = a.dot(b) / (ma * mb);
+            c = std::max(-1.0, std::min(1.0, c));
+            return std::acos(c) / M_PI * 180.0;
+        };
+        int n_sat_cand = 0;
+        for (const ShowerPtr& shower : showers) {
+            if (used_showers.count(shower)) continue;
+            auto [svtx, conn] = shower->get_start_vertex_and_type();
+            if (conn != 2 && conn != 3) continue;
+            SegmentPtr start_sg = shower->start_segment();
+            const auto* start_cl = start_sg ? start_sg->cluster() : nullptr;
+            if (!start_cl || !main_cluster ||
+                start_cl->get_cluster_id() == main_cluster->get_cluster_id()) continue;
+            ++n_sat_cand;
+
+            const Point sp = shower->get_start_point();
+            const Point sv_pt = svtx ? (svtx->fit().valid() ? svtx->fit().point
+                                                            : svtx->wcpt().point)
+                                     : mv_pt;
+            // Fresh axis from the start point into the shower body: the
+            // STORED init_dir for conn 2/3 is exactly the vertex->start
+            // chord (PRShower.cxx) and would always read 0 deg here.
+            const Vector axis = shower_cal_dir_3vector(*shower, sp, m_kine_sat_axis_dis_cut);
+            const bool in_main = svtx && (svtx == main_vertex ||
+                (svtx->cluster() && svtx->cluster()->get_cluster_id() ==
+                                        main_cluster->get_cluster_id()));
+            const double d_sv   = (sp - sv_pt).magnitude();
+            const double ang_sv = (d_sv > 0) ? angle_deg(axis, sp - sv_pt) : 0.0;
+            const double d_mv   = (sp - mv_pt).magnitude();
+            const double ang_mv = (d_mv > 0) ? angle_deg(axis, sp - mv_pt) : 0.0;
+            const bool is_pi0   = pi0_showers.count(shower);
+            const bool straight_cont =
+                shower_start_is_track_continuation(graph, *shower, m_kine_sat_cont_kink);
+
+            const char* verdict = "keep";
+            do {
+                if (is_pi0) break;
+                if (shower->get_kine_best() <= m_kine_sat_min_energy) break;
+                if (axis.magnitude() == 0) break;   // no axis: fail-safe keep
+                if (d_sv < m_kine_sat_prox_max && in_main) break;
+                if (ang_sv > m_kine_sat_angle_bad)          { verdict = "drop:A"; break; }
+                if ((d_sv > m_kine_sat_far_dis || !in_main) &&
+                    ang_mv >= m_kine_sat_angle_main)        { verdict = "drop:B"; break; }
+                if (straight_cont)                          { verdict = "drop:C"; break; }
+            } while (false);
+
+            if (sat_probe) {
+                // One pre-built line per candidate (log lines tear mid-word
+                // when interleaved -- write the TSV row atomically).
+                std::ostringstream os;
+                os << "KINE_SAT_PROBE\t" << shower->get_shower_id()
+                   << '\t' << shower->get_kine_best() / units::MeV
+                   << '\t' << conn
+                   << '\t' << shower->get_particle_type()
+                   << '\t' << shower->get_num_segments()
+                   << '\t' << d_sv / units::cm
+                   << '\t' << ang_sv
+                   << '\t' << (in_main ? 1 : 0)
+                   << '\t' << d_mv / units::cm
+                   << '\t' << ang_mv
+                   << '\t' << (straight_cont ? 1 : 0)
+                   << '\t' << (is_pi0 ? 1 : 0)
+                   << '\t' << verdict << '\n';
+                std::cout << os.str() << std::flush;
+            }
+            else if (verdict[0] == 'd') {
+                sat_drop_set.insert(shower);
+                if (dropped_satellites) dropped_satellites->insert(shower->get_shower_id());
+                SPDLOG_LOGGER_DEBUG(s_log,
+                    "kine_sat DROP id={} arm={} E={:.1f} conn={} d_sv={:.1f} ang_sv={:.1f} in_main={} d_mv={:.1f} ang_mv={:.1f} cont={}",
+                    shower->get_shower_id(), verdict,
+                    shower->get_kine_best() / units::MeV, conn,
+                    d_sv / units::cm, ang_sv, in_main, d_mv / units::cm, ang_mv,
+                    straight_cont);
+            }
+        }
+        if (m_kine_drop_stray_satellites && !sat_probe) {
+            SPDLOG_LOGGER_INFO(s_log, "kine_sat census: candidates={} dropped={}",
+                               n_sat_cand, sat_drop_set.size());
+        }
+    }
+
+    // -------------------------------------------------------------------------
     // Remaining showers not yet attached to the traversal above
     // (e.g. secondary showers with start vertex type <= 3)
     // -------------------------------------------------------------------------
     for (const ShowerPtr& shower : showers) {
         if (used_showers.count(shower)) continue;
+        // doc pr/92: skip the whole iteration -- all four parallel kine
+        // vectors and the proton binding-energy add stay consistent, and
+        // the Enu sum below shrinks automatically.
+        if (sat_drop_set.count(shower)) continue;
 
         auto [start_vtx, vtx_type] = shower->get_start_vertex_and_type();
         if (vtx_type > 3) continue;

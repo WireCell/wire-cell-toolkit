@@ -650,6 +650,16 @@ public:
         double m_sfv_kink_max{25.0};                                // degrees; continuation-arm tunable
         bool m_shower_nv_bridge_track{false};                       // doc pr/40 round 9 B2
         double m_shower_nv_bridge_max_gap{1.8};                     // cm; B2 gap cut (steiner-cloud closest approach)
+        // doc pr/92 -- stray-satellite drop from kine/PF.  Rationale
+        // comments in NeutrinoPatternBase.h (pr/92 block).
+        bool m_kine_drop_stray_satellites{false};                   // doc pr/92 master
+        double m_kine_sat_min_energy{20.0};                         // MeV; drop-candidate floor
+        double m_kine_sat_prox_max{8.0};                            // cm; main-cluster proximity exemption
+        double m_kine_sat_angle_bad{60.0};                          // degrees; Arm A attachment-angle cut
+        double m_kine_sat_angle_main{45.0};                         // degrees; Arm B main-vertex-angle cut
+        double m_kine_sat_far_dis{90.0};                            // cm; Arm B far-attachment trigger
+        double m_kine_sat_axis_dis_cut{30.0};                       // cm; shower axis integration radius
+        double m_kine_sat_cont_kink{25.0};                          // degrees; Arm C continuation kink
         bool m_michel_stem_michel_check{false};                     // doc pr/74 round 2 P2
         double m_michel_stem_max_far_len{40};                       // cm; pr/74 P2 tunable
         bool m_shower_stem_backfill{false};                         // doc pr/74 round 2 K4

@@ -347,6 +347,8 @@ void MultiAlgBlobClustering::configure(const WireCell::Configuration& cfg)
             pfc.pf_touch_cross_max = get<double>(pf, "pf_touch_cross_max", pfc.pf_touch_cross_max);
             pfc.pf_pseudo_gap_from_main = get<bool>(pf, "pf_pseudo_gap_from_main", false);
             pfc.pf_unique_node_ids = get<bool>(pf, "pf_unique_node_ids", false);
+            // doc pr/92; absent => legacy (dropped-satellite set unread), byte-identical.
+            pfc.pf_drop_stray_satellites = get<bool>(pf, "pf_drop_stray_satellites", false);
             m_bee_pf_configs.push_back(pfc);
             m_bee_pf_trees[pfc.name] = Bee::ParticleTree(pfc.name);
             SPDLOG_LOGGER_DEBUG(log, "Configured bee_pf: name={} visitor={}", pfc.name, pfc.visitor);
@@ -1180,6 +1182,15 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
     const auto& pi0_showers        = tf->get_pi0_showers();
     const auto& map_shower_pio_id  = tf->get_map_shower_pio_id();
     const auto& map_pio_id_mass    = tf->get_map_pio_id_mass();
+    // doc pr/92: satellites dropped from the kine tree; mirror the drop
+    // here so PF and Enu describe the same particle set.  pi0 conjunct is
+    // pure defense -- the kine side never drops pi0-paired showers.
+    const auto& dropped_sat_ids = tf->get_dropped_satellite_shower_ids();
+    auto sat_dropped = [&](const PR::ShowerPtr& sh) {
+        return cfg.pf_drop_stray_satellites && !dropped_sat_ids.empty() &&
+               !pi0_showers.count(sh) &&
+               dropped_sat_ids.count(sh->get_shower_id()) > 0;
+    };
     PR::IndexedSegmentSet conn4_skip_segs;
 
     // --- Vertex → node-descriptor map ---
@@ -1449,6 +1460,25 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
             continue;
         }
 
+        // doc pr/92: satellite dropped from the kine tree -- skip here too so
+        // the PF tree and kine_reco_Enu describe the same particle set.  The
+        // shower never enters any root/seg/shower pool, so neither
+        // append_showers nor the pseudo-carrier path can resurrect it.
+        if (sat_dropped(shower)) {
+            if (flag_print) {
+                auto start_seg = shower->start_segment();
+                const auto* cl = start_seg ? start_seg->cluster() : nullptr;
+                std::cout << "[fill_bee_pf_tree] SKIP shower (stray satellite, pr/92)"
+                          << "  conn_type=" << conn_type
+                          << "  pdg=" << shower->get_particle_type()
+                          << "  ke=" << shower->get_kine_best() / units::MeV << " MeV"
+                          << "  cluster=" << (cl ? std::to_string(cl->get_cluster_id()) : "?")
+                          << " nsegments=" << shower->get_num_segments()
+                          << "\n";
+            }
+            continue;
+        }
+
         bool direct = (conn_type == 1);
 
         if (!start_vtx || start_vtx == main_vertex) {
@@ -1479,7 +1509,8 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
             // shower's own start vertex.
             auto ps_it = cfg.pf_shower_parent_precedence
                        ? vtx_to_parent_shower.find(start_vtx) : vtx_to_parent_shower.end();
-            if (ps_it != vtx_to_parent_shower.end() && ps_it->second && ps_it->second != shower) {
+            if (ps_it != vtx_to_parent_shower.end() && ps_it->second && ps_it->second != shower &&
+                !sat_dropped(ps_it->second)) {   // pr/92: a dropped parent never renders; fall through
                 PR::ShowerPtr parent_shower = ps_it->second;
                 if (flag_print) {
                     std::cout << "[fill_bee_pf_tree] SHOWER-attached shower (parent-shower precedence)"
@@ -1521,7 +1552,8 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
                 if (root_reachable_vtxs.count(start_vtx)) {
                     // start_vtx is inside a root-level shower → attach to that parent shower
                     auto parent_shower_it = vtx_to_parent_shower.find(start_vtx);
-                    if (parent_shower_it != vtx_to_parent_shower.end()) {
+                    if (parent_shower_it != vtx_to_parent_shower.end() &&
+                        !sat_dropped(parent_shower_it->second)) {   // pr/92: dropped parent -> root fallback
                         PR::ShowerPtr parent_shower = parent_shower_it->second;
                         if (flag_print) {
                             auto start_seg = shower->start_segment();
