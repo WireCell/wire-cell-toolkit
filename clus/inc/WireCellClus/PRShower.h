@@ -244,7 +244,17 @@ namespace WireCell::Clus::PR {
         // segment_has_proton_daughter's verdict on the SAME scale F5 used
         // (m_mip_dqdx_median=43000/units::cm) or it can silently disagree
         // with F5's own decision at a different threshold.
-        void update_particle_type(const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, double mip_dqdx = 50000/units::cm, VertexPtr main_vertex = nullptr, bool protect_proton_daughter_pion = false, double proton_daughter_mip_dqdx = 43000/units::cm);
+        // vote_track_pid_counts: doc sbnd_xin/docs/pr/93 Cause C knob
+        // (shower_vote_track_pid_counts).  C++ default false = legacy vote
+        // (only confirmed protons count as track).
+        // accept_pid_guard: doc sbnd_xin/docs/pr/93 Cause B knob
+        // (shower_accept_pid_guard) -- the same knob that declines the forced
+        // set_pdg(11) at the two acceptance sites also declines THIS vote's
+        // final overwrite when the start segment carries a confident
+        // non-electron template PID (segment_confident_nonelectron_pid);
+        // without it the vote re-flips the segment one line after the
+        // acceptance-site guard spared it.  C++ defaults false = legacy.
+        void update_particle_type(const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, double mip_dqdx = 50000/units::cm, VertexPtr main_vertex = nullptr, bool protect_proton_daughter_pion = false, double proton_daughter_mip_dqdx = 43000/units::cm, bool vote_track_pid_counts = false, bool accept_pid_guard = false, double accept_pid_min_len = 50*units::cm);
         // exclude_start_vertex_from_endpoint (doc pr/39): same prototype-parity
         // rule as fill_sets's exclude_start_vertex above, applied to the
         // farthest-vertex search that sets data.end_point.  The prototype's

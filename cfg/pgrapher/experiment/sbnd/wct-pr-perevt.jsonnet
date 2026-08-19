@@ -1496,6 +1496,34 @@ function(
     // SBND_SHOWER_BRAGG_PROTECT_START_SEGMENT.
     shower_bragg_protect_start_segment = true,
 
+    // doc pr/93 round 3 -- four knobs for the "electron is really tracks /
+    // hadronic-pi0 shower" family (SBND 18255-55595/348471/69314/292643/
+    // 315167).  C++ defaults false; key-suppressed when off => compiled
+    // config byte-identical.  SBND PRODUCTION ON (owner round 2026-08-18):
+    // rescues 4/5 owner events (55595 fake 458 MeV e- gone; 348471 ->
+    // p 719 MeV; 292643 -> pi 162 MeV; 315167 1046.7 -> 164.3 MeV EM stub
+    // with the 150.7cm score-0.10 proton kept separate and kept proton;
+    // 69314 named residual -- its pion stamp carries the unscored-100
+    // sentinel at 38.4cm, below any floor that does not regress real
+    // electrons).  100-event validation (mcp1k-33 + nueCC48 + NCpi0):
+    // nueCC48 movers 2/48, BOTH documented-defect/adjudicated (137238
+    // pr/74 shape-B pencil excluded; 46363 13.5cm conn-2 satellite);
+    // NCpi0 movers 1/19 (285567, pr/74 shape-A fake e- -> proton, fix
+    // direction); mcp1k movers 8/33, ALL in the pr/40 mis-ID census, all
+    // rescue-direction.  Manifest straight-long pdg-11 census rows
+    // 41 -> 35.  The shared 50cm floor (shower_pid_guard_min_len, C++
+    // default) is REQUIRED: un-floored attribution arms regressed 9+17/48
+    // nueCC48 events (real 22-47cm electron stems carry confident
+    // 0.11-0.64 proton/muon template scores).  Runner envs
+    // SBND_SHOWER_RECLASS_CASE_B_DQDX_GUARD / SBND_SHOWER_ACCEPT_PID_GUARD
+    // / SBND_SHOWER_VOTE_TRACK_PID_COUNTS / SBND_SHOWER_CONE_ABSORB_GUARD
+    // / SBND_SHOWER_PID_GUARD_MIN_LEN.
+    shower_reclass_case_b_dqdx_guard = false,
+    shower_accept_pid_guard = false,
+    shower_pid_guard_min_len = null,  // null => C++ default 50cm
+    shower_vote_track_pid_counts = false,
+    shower_cone_absorb_guard = false,
+
     // doc pr/43 round 2 -- three PID-consistency knobs for the remaining
     // owner cases (18255: 54351 / 56463 / 57661).  K1
     // single_muon_proton_chain_veto: the vertex muon selection's proton veto
@@ -2347,6 +2375,11 @@ function(
                              michel_stem_traj_min_kink_deg=michel_stem_traj_min_kink_deg,
                              shower_long_muon_keep_type=shower_long_muon_keep_type,
                              shower_bragg_protect_start_segment=shower_bragg_protect_start_segment,
+                             shower_reclass_case_b_dqdx_guard=shower_reclass_case_b_dqdx_guard,
+                             shower_accept_pid_guard=shower_accept_pid_guard,
+                             shower_pid_guard_min_len=shower_pid_guard_min_len,
+                             shower_vote_track_pid_counts=shower_vote_track_pid_counts,
+                             shower_cone_absorb_guard=shower_cone_absorb_guard,
                              single_muon_proton_chain_veto=single_muon_proton_chain_veto,
                              single_muon_long_muon_claim=single_muon_long_muon_claim,
                              pid_flag_reconcile=pid_flag_reconcile,

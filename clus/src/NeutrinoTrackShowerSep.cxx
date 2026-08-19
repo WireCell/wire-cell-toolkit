@@ -1416,10 +1416,30 @@ void PatternAlgorithms::improve_maps_no_dir_tracks(Graph& graph, Facade::Cluster
                         }
                         sg->dir_weak(true);
 
-                        int pdg_code = 11;
-                        auto pinfo = reclass_pinfo(sg, pdg_code, particle_data, recomb_model, m_mip_dqdx, m_reclass_preserve_4mom, true, m_reclass_never_computed_ke_floor);
-                        sg->particle_info(pinfo);
-                        flag_update = true;
+                        // doc sbnd_xin/docs/pr/93 Cause A (Case B: unguarded
+                        // sibling of Case E's F2 guard; SBND 18255-55595's
+                        // 193.8cm MIP muon reclassed e- here).  Same guard
+                        // shape as Case E above: only the CONVERSION is
+                        // guarded -- the dirsign/dir_weak direction
+                        // bookkeeping (this case's nominal purpose) is
+                        // untouched.  Unlike Case E (whose entry requires
+                        // |pdg|==13), Case B fires on ANY between-shower
+                        // segment, so short genuine EM fragments (2-34cm on
+                        // the nueCC48 attribution arm) reach this decline --
+                        // the m_shower_pid_guard_min_len floor (50cm, the
+                        // scale of SBND's own shower_topo_demote_len rule
+                        // "a >50cm segment is not EM-flaggable") restricts
+                        // the spare to segments that cannot be EM anyway.
+                        // C++ default false => byte-identical.
+                        if (!(m_shower_reclass_case_b_dqdx_guard && length > m_shower_pid_guard_min_len && segment_dqdx_spares_electron_reclass(sg, m_mip_dqdx))) {
+                            int pdg_code = 11;
+                            auto pinfo = reclass_pinfo(sg, pdg_code, particle_data, recomb_model, m_mip_dqdx, m_reclass_preserve_4mom, true, m_reclass_never_computed_ke_floor);
+                            sg->particle_info(pinfo);
+                            flag_update = true;
+                        }
+                        else {
+                            SPDLOG_LOGGER_DEBUG(s_log, "pr93 case_b_dqdx_guard: decline e- reclass seg={} len={:.1f}cm", sg->id(), length/units::cm);
+                        }
                     }
                 }
                 // Case H: No particle type, short length, high dQ/dx, has showers

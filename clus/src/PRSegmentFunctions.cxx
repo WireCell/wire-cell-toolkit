@@ -1700,6 +1700,14 @@ namespace WireCell::Clus::PR {
         return seg->particle_score() < 1.0;
     }
 
+    // doc sbnd_xin/docs/pr/93 Cause B -- see the header comment.
+    bool segment_confident_nonelectron_pid(SegmentPtr seg) {
+        if (!seg || !seg->has_particle_info() || !seg->particle_info()) return false;
+        const int pdg = seg->particle_info()->pdg();
+        if (pdg == 0 || std::abs(pdg) == 11) return false;
+        return seg->particle_score() < 1.0;
+    }
+
     // doc sbnd_xin/docs/pr/40 round 2 F5 -- see the header comment.
     bool segment_has_proton_daughter(Graph& graph, SegmentPtr seg, VertexPtr main_vertex, double MIP_dQdx) {
         static const bool dbg = std::getenv("WCT_PROTON_DAUGHTER_DEBUG") != nullptr;

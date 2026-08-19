@@ -1375,6 +1375,12 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               // doc pr/40 round 10; false = C++ default = OFF, key omitted =>
               // byte-identical.
               shower_bragg_protect_start_segment=false,
+              // doc pr/93 round 3 -- C++ defaults false; key-suppressed when off.
+              shower_reclass_case_b_dqdx_guard=false,
+              shower_accept_pid_guard=false,
+              shower_pid_guard_min_len=null,
+              shower_vote_track_pid_counts=false,
+              shower_cone_absorb_guard=false,
               // doc pr/43 round 2 -- C++ defaults false; keys suppressed when off.
               single_muon_proton_chain_veto=false,
               single_muon_long_muon_claim=false,
@@ -2202,6 +2208,11 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
             michel_stem_traj_min_kink_deg=michel_stem_traj_min_kink_deg,
             shower_long_muon_keep_type=shower_long_muon_keep_type,
             shower_bragg_protect_start_segment=shower_bragg_protect_start_segment,
+            shower_reclass_case_b_dqdx_guard=shower_reclass_case_b_dqdx_guard,
+            shower_accept_pid_guard=shower_accept_pid_guard,
+            shower_pid_guard_min_len=shower_pid_guard_min_len,
+            shower_vote_track_pid_counts=shower_vote_track_pid_counts,
+            shower_cone_absorb_guard=shower_cone_absorb_guard,
             single_muon_proton_chain_veto=single_muon_proton_chain_veto,
             single_muon_long_muon_claim=single_muon_long_muon_claim,
             pid_flag_reconcile=pid_flag_reconcile,
@@ -3051,6 +3062,12 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
        shower_long_muon_keep_type=false,
        // doc pr/40 round 10; false = C++ default = OFF, key omitted => byte-identical.
        shower_bragg_protect_start_segment=false,
+       // doc pr/93 round 3 -- C++ defaults false; key-suppressed when off.
+       shower_reclass_case_b_dqdx_guard=false,
+       shower_accept_pid_guard=false,
+       shower_pid_guard_min_len=null,
+       shower_vote_track_pid_counts=false,
+       shower_cone_absorb_guard=false,
        // doc pr/43 round 2 -- C++ defaults false.
        single_muon_proton_chain_veto=false,
        single_muon_long_muon_claim=false,
@@ -3476,6 +3493,11 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 michel_stem_traj_min_kink_deg=michel_stem_traj_min_kink_deg,
                 shower_long_muon_keep_type=shower_long_muon_keep_type,
                 shower_bragg_protect_start_segment=shower_bragg_protect_start_segment,
+                shower_reclass_case_b_dqdx_guard=shower_reclass_case_b_dqdx_guard,
+                shower_accept_pid_guard=shower_accept_pid_guard,
+                shower_pid_guard_min_len=shower_pid_guard_min_len,
+                shower_vote_track_pid_counts=shower_vote_track_pid_counts,
+                shower_cone_absorb_guard=shower_cone_absorb_guard,
                 single_muon_proton_chain_veto=single_muon_proton_chain_veto,
                 single_muon_long_muon_claim=single_muon_long_muon_claim,
                 pid_flag_reconcile=pid_flag_reconcile,

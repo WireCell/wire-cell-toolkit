@@ -681,6 +681,13 @@ public:
         double m_michel_stem_traj_min_kink_deg{40.0};               // deg; pr/74 K6 tunable
         bool m_shower_long_muon_keep_type{false};                   // doc pr/44
         bool m_shower_bragg_protect_start_segment{false};           // doc pr/40 round 10
+        // doc pr/93 round 3 -- rationale comments in NeutrinoPatternBase.h
+        // (pr/93 block).
+        bool m_shower_reclass_case_b_dqdx_guard{false};             // doc pr/93 Cause A (55595)
+        bool m_shower_accept_pid_guard{false};                      // doc pr/93 Cause B (348471, 69314)
+        double m_shower_pid_guard_min_len{50};                      // cm; shared Cause A/B floor, inert while both off
+        bool m_shower_vote_track_pid_counts{false};                 // doc pr/93 Cause C (292643)
+        bool m_shower_cone_absorb_guard{false};                  // doc pr/93 Cause D (315167)
         bool m_single_muon_proton_chain_veto{false};                // doc pr/43 round 2 K1
         bool m_single_muon_long_muon_claim{false};                  // doc pr/43 round 2 K2
         bool m_pid_flag_reconcile{false};                           // doc pr/43 round 2 K3

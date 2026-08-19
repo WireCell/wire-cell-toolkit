@@ -70,6 +70,18 @@ namespace WireCell::Clus::PR {
             static const bool dbg = std::getenv("WCT_SHOWER_WALK_DEBUG") != nullptr;
             return dbg;
         }
+        // doc sbnd_xin/docs/pr/93 round 3 -- WCT_SHOWER_ABSORB_DEBUG.
+        // Instruments every membership-growth path (flood-fill ADD/EXCLUDE
+        // in complete_structure_with_start_segment, plus the call-site tags
+        // and direct add_segment/add_shower probes in
+        // NeutrinoShowerClustering.cxx) so the absorbing site of any one
+        // segment can be read off a single grep.  stderr only, no effect on
+        // emitted bytes.
+        bool absorb_dbg()
+        {
+            static const bool dbg = std::getenv("WCT_SHOWER_ABSORB_DEBUG") != nullptr;
+            return dbg;
+        }
         int vtx_display_id(const VertexPtr& v)
         {
             if (!v) return -1;
@@ -501,6 +513,11 @@ namespace WireCell::Clus::PR {
             if (pdg == 0 || std::abs(pdg) == 11) return false;
             return segment_is_straight_long_track(seg);
         };
+        if (absorb_dbg()) {
+            std::fprintf(stderr, "SHOWER_ABSORB walk_begin shower_start_seg=%d start_vtx=%d cached_type=%d guard_arg=%d apply_guard=%d\n",
+                         seg_display_id(m_start_segment), vtx_display_id(m_start_vertex),
+                         this->get_particle_type(), (int)absorb_track_guard, (int)apply_guard);
+        }
         
         std::vector<SegmentPtr> new_segments;
         std::vector<VertexPtr> new_vertices;
@@ -535,7 +552,21 @@ namespace WireCell::Clus::PR {
                         SegmentPtr seg = m_full_graph[edesc].segment;
                         if (seg && seg->descriptor_valid() && used_segments.find(seg) == used_segments.end()) {
                             // F12 (doc pr/40 round 6): see guard_excludes above.
-                            if (guard_excludes(seg)) continue;
+                            if (guard_excludes(seg)) {
+                                if (absorb_dbg()) {
+                                    std::fprintf(stderr, "SHOWER_ABSORB EXCLUDE shower_start_seg=%d seg=%d pdg=%d\n",
+                                                 seg_display_id(m_start_segment), seg_display_id(seg),
+                                                 seg->has_particle_info() && seg->particle_info() ? seg->particle_info()->pdg() : 0);
+                                }
+                                continue;
+                            }
+                            if (absorb_dbg()) {
+                                std::fprintf(stderr, "SHOWER_ABSORB ADD shower_start_seg=%d seg=%d pdg=%d len_cm=%.2f straight=%d\n",
+                                             seg_display_id(m_start_segment), seg_display_id(seg),
+                                             seg->has_particle_info() && seg->particle_info() ? seg->particle_info()->pdg() : 0,
+                                             segment_track_length(seg)/units::cm,
+                                             (int)segment_is_straight_long_track(seg));
+                            }
                             // add_segment() already performs the fit/associate merge
                             // (and merge_wpid_params, which the block that used to sit
                             // here omitted).  It previously ran with the DEFAULT cloud
@@ -937,7 +968,7 @@ namespace WireCell::Clus::PR {
         return total_length;
     }
 
-    void Shower::update_particle_type(const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, double mip_dqdx, VertexPtr main_vertex, bool protect_proton_daughter_pion, double proton_daughter_mip_dqdx){
+    void Shower::update_particle_type(const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, double mip_dqdx, VertexPtr main_vertex, bool protect_proton_daughter_pion, double proton_daughter_mip_dqdx, bool vote_track_pid_counts, bool accept_pid_guard, double accept_pid_min_len){
         double track_length = 0;
         double shower_length = 0;
         
@@ -961,16 +992,29 @@ namespace WireCell::Clus::PR {
             double length = segment_track_length(seg);
             
             // Check if segment is a shower segment OR not a proton (PDG 2212)
-            bool is_shower = seg->flags_any(SegmentFlags::kShowerTrajectory) || 
+            bool is_shower = seg->flags_any(SegmentFlags::kShowerTrajectory) ||
                            seg->flags_any(SegmentFlags::kShowerTopology);
-            
+
             bool is_not_proton = true;
             if (seg->has_particle_info()) {
                 int pdg = seg->particle_info()->pdg();
                 is_not_proton = (std::abs(pdg) != 2212);
             }
-            
-            if (is_shower || is_not_proton) {
+
+            // doc sbnd_xin/docs/pr/93 Cause C (SBND 18255-292643): legacy
+            // vote counts ONLY confirmed protons as track, so an unflagged
+            // muon/pion chain always votes electron.  When enabled, any
+            // unflagged member carrying a track pdg {13,211,2212} counts as
+            // track.  No score conjunct: score 100 is the median-fallback
+            // population itself, not a confidence signal.
+            // C++ default false => byte-identical legacy vote.
+            bool counts_as_track = !is_not_proton;
+            if (vote_track_pid_counts && seg->has_particle_info() && seg->particle_info()) {
+                const int apdg = std::abs(seg->particle_info()->pdg());
+                counts_as_track = (apdg == 13 || apdg == 211 || apdg == 2212);
+            }
+
+            if (is_shower || !counts_as_track) {
                 shower_length += length;
             } else {
                 track_length += length;
@@ -989,10 +1033,19 @@ namespace WireCell::Clus::PR {
             // = byte-identical.
             const bool protected_pion = protect_proton_daughter_pion && main_vertex &&
                 segment_has_proton_daughter(m_full_graph, m_start_segment, main_vertex, proton_daughter_mip_dqdx);
+            // doc sbnd_xin/docs/pr/93 Cause B: shower_accept_pid_guard also
+            // guards THIS overwrite -- otherwise the vote re-flips a
+            // confidently-PID'd non-electron start segment one call after
+            // the acceptance-site guard spared it (348471's 0.23-score
+            // proton).  Same predicate as the acceptance sites, incl. the
+            // min-length floor.  C++ default false = legacy = byte-identical.
+            const bool protected_confident_pid = accept_pid_guard &&
+                segment_track_length(m_start_segment) > accept_pid_min_len &&
+                segment_confident_nonelectron_pid(m_start_segment);
             // if-guarded rather than an early return: keeps any code appended
             // to this function later from being silently skipped for a
             // protected shower.
-            if (!protected_pion) {
+            if (!protected_pion && !protected_confident_pid) {
                 // Calculate 4-momentum for electron (PDG = 11)
                 auto four_momentum = segment_cal_4mom(m_start_segment, 11, particle_data, recomb_model, mip_dqdx);
 

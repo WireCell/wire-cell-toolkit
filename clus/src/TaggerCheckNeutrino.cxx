@@ -544,6 +544,12 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_michel_stem_traj_min_kink_deg             = get(config, "michel_stem_traj_min_kink_deg",             m_michel_stem_traj_min_kink_deg);
     m_shower_long_muon_keep_type                = get(config, "shower_long_muon_keep_type",                m_shower_long_muon_keep_type);
     m_shower_bragg_protect_start_segment        = get(config, "shower_bragg_protect_start_segment",        m_shower_bragg_protect_start_segment);
+    // doc pr/93 round 3
+    m_shower_reclass_case_b_dqdx_guard          = get(config, "shower_reclass_case_b_dqdx_guard",          m_shower_reclass_case_b_dqdx_guard);
+    m_shower_accept_pid_guard                   = get(config, "shower_accept_pid_guard",                   m_shower_accept_pid_guard);
+    m_shower_pid_guard_min_len                  = get(config, "shower_pid_guard_min_len",                  m_shower_pid_guard_min_len);
+    m_shower_vote_track_pid_counts              = get(config, "shower_vote_track_pid_counts",              m_shower_vote_track_pid_counts);
+    m_shower_cone_absorb_guard               = get(config, "shower_cone_absorb_guard",               m_shower_cone_absorb_guard);
     m_single_muon_proton_chain_veto             = get(config, "single_muon_proton_chain_veto",             m_single_muon_proton_chain_veto);
     m_single_muon_long_muon_claim               = get(config, "single_muon_long_muon_claim",               m_single_muon_long_muon_claim);
     m_pid_flag_reconcile                        = get(config, "pid_flag_reconcile",                        m_pid_flag_reconcile);
@@ -866,6 +872,11 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["michel_stem_traj_min_kink_deg"]             = m_michel_stem_traj_min_kink_deg;             // deg; only read when shower_traj_michel_stem
     cfg["shower_long_muon_keep_type"]                = m_shower_long_muon_keep_type;                // false = legacy (long-muon pseudo-shower start segment majority-voted to e-)
     cfg["shower_bragg_protect_start_segment"]        = m_shower_bragg_protect_start_segment;        // false = legacy (Bragg-PID-confident muon/proton start segment majority-voted to e-)
+    cfg["shower_reclass_case_b_dqdx_guard"]          = m_shower_reclass_case_b_dqdx_guard;          // doc pr/93 Cause A; false = legacy (Case B pdg-11 write unconditional)
+    cfg["shower_accept_pid_guard"]                   = m_shower_accept_pid_guard;                   // doc pr/93 Cause B; false = legacy (acceptance-site set_pdg(11) unconditional)
+    cfg["shower_pid_guard_min_len"]                  = m_shower_pid_guard_min_len;                  // cm; shared Cause A/B floor, inert while both off
+    cfg["shower_vote_track_pid_counts"]              = m_shower_vote_track_pid_counts;              // doc pr/93 Cause C; false = legacy (only confirmed protons count as track)
+    cfg["shower_cone_absorb_guard"]               = m_shower_cone_absorb_guard;               // doc pr/93 Cause D; false = legacy (pass-3 direction-cone absorber unguarded)
     cfg["single_muon_proton_chain_veto"]             = m_single_muon_proton_chain_veto;             // false = legacy (1-hop proton veto only)
     cfg["single_muon_long_muon_claim"]               = m_single_muon_long_muon_claim;               // false = legacy (long-muon chain never claims the vertex muon slot)
     cfg["pid_flag_reconcile"]                        = m_pid_flag_reconcile;                        // false = legacy (no late reconciliation pass)
@@ -1433,6 +1444,11 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
     pattern_algos.m_michel_stem_traj_min_kink_deg             = m_michel_stem_traj_min_kink_deg;             // pr/74 K6 (degrees)
     pattern_algos.m_shower_long_muon_keep_type                = m_shower_long_muon_keep_type;                // doc pr/44
     pattern_algos.m_shower_bragg_protect_start_segment        = m_shower_bragg_protect_start_segment;        // doc pr/40 round 10
+    pattern_algos.m_shower_reclass_case_b_dqdx_guard          = m_shower_reclass_case_b_dqdx_guard;          // doc pr/93 Cause A
+    pattern_algos.m_shower_accept_pid_guard                   = m_shower_accept_pid_guard;                   // doc pr/93 Cause B
+    pattern_algos.m_shower_pid_guard_min_len                  = m_shower_pid_guard_min_len * units::cm;      // doc pr/93 shared floor
+    pattern_algos.m_shower_vote_track_pid_counts              = m_shower_vote_track_pid_counts;              // doc pr/93 Cause C
+    pattern_algos.m_shower_cone_absorb_guard               = m_shower_cone_absorb_guard;               // doc pr/93 Cause D
     pattern_algos.m_single_muon_proton_chain_veto             = m_single_muon_proton_chain_veto;             // doc pr/43 round 2 K1
     pattern_algos.m_single_muon_long_muon_claim               = m_single_muon_long_muon_claim;               // doc pr/43 round 2 K2
     pattern_algos.m_pid_flag_reconcile                        = m_pid_flag_reconcile;                        // doc pr/43 round 2 K3

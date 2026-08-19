@@ -475,6 +475,21 @@ namespace WireCell::Clus::PR {
     /// prior verdict instead of the PID's.
     bool segment_bragg_spares_electron_reclass(SegmentPtr seg);
 
+    /// doc sbnd_xin/docs/pr/93 Cause B -- spare-test for the two
+    /// shower-acceptance sites in NeutrinoShowerClustering.cxx
+    /// (new_shower_accepted, merged_shower_start_segment) that force
+    /// set_pdg(11) on a shower's start segment with no PID check of any
+    /// kind.  True iff `seg` already carries a CONFIDENT non-electron
+    /// verdict: a real particle_info with pdg not in {0, +-11} AND a real
+    /// template-PID particle_score (<1.0, not the 100 "unscored"
+    /// sentinel).  Motivating tape: SBND 18255-348471's start segment was
+    /// a pdg=2212 score=0.23 proton (confirmed 3x immediately before the
+    /// overwrite); 18255-69314's was a template-PID'd pdg=211 pion.
+    /// Deliberately narrower than "any non-11 pdg": a median-fallback
+    /// pdg-13 stamp carries score 100 and is NOT spared -- only the
+    /// dQ/dx-template PID's own confident verdicts block the overwrite.
+    bool segment_confident_nonelectron_pid(SegmentPtr seg);
+
     /// doc sbnd_xin/docs/pr/74 round 2 P1 -- veto for examine_direction's
     /// flag_shower_in cascade (the |pdg|==13/pdg==0 electron relabel).
     /// True iff `seg` is BOTH long (track length > max_len) AND MIP-like

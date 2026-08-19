@@ -1673,6 +1673,53 @@ namespace WireCell::Clus::PR {
         // long straight sibling passes F10 and reaches this write).
         bool   m_shower_connect_start_seg_straight_guard{false};
 
+        // doc sbnd_xin/docs/pr/93 round 3 -- four knobs for the five owner
+        // events where an "electron" is really tracks or a hadronic-pi0
+        // shower (SBND 18255-55595/348471/69314/292643/315167).  All C++
+        // default false = legacy = byte-identical.
+        //
+        // Cause A (55595): improve_maps_no_dir_tracks Case B writes pdg 11
+        // unconditionally when dirsign()==0, regardless of length (193.8cm
+        // MIP muon here).  Same F2 dQ/dx spare-test its sibling Case E
+        // already carries.
+        bool   m_shower_reclass_case_b_dqdx_guard{false};
+        // Cause B (348471, 69314): the new_shower_accepted and
+        // merged_shower_start_segment sites force set_pdg(11) on a shower's
+        // start segment with NO PID check -- decline the write when the
+        // segment already carries a confident non-electron template PID
+        // (segment_confident_nonelectron_pid).
+        bool   m_shower_accept_pid_guard{false};
+        // Shared minimum-length floor (internal units; 50cm default = the
+        // scale of SBND's shower_topo_demote_len "a >50cm segment is not
+        // EM-flaggable" rule) for the Cause A, Cause B, AND Cause D
+        // declines of this family.
+        // Below it, a confident non-electron template score is NOT reliable
+        // evidence against electron: real nueCC48 electron stems of 22-47cm
+        // carry 0.11-0.64 proton/muon scores (the template competition
+        // never considers electron), and the un-floored guards regressed
+        // 9+17 of 48 nueCC48 events on the attribution arms.  Inert while
+        // both guards are off.
+        double m_shower_pid_guard_min_len{50*units::cm};
+        // Cause C (292643): update_particle_type's vote counts only
+        // confirmed protons as track, so a muon/pion chain always votes
+        // electron -- when on, any unflagged member with |pdg| in
+        // {13,211,2212} counts as track (threaded as a trailing param to
+        // Shower::update_particle_type).
+        bool   m_shower_vote_track_pid_counts{false};
+        // Cause D (315167): pass 3's direction-cone absorber
+        // (shower_clustering_with_nv_from_main_cluster's angle/distance
+        // sweep) has no PID or straightness check, and with
+        // shower_absorb_unreachable_main ON (pr/65, SBND production) a
+        // graph-unreachable MAIN-cluster segment is eligible there --
+        // 315167's 150.7cm score-0.10 proton was cone-absorbed into a
+        // 15.7cm EM stub's shower, whose energy is then computed from
+        // total_length under the electron hypothesis (1046.7 MeV).  When
+        // on, that absorber declines a confidently-PID'd non-electron
+        // straight-long track (the flood-fill guard_excludes predicate,
+        // pr/40 F12); the declined segment stays unclaimed.  Confirmed by
+        // the WCT_SHOWER_ABSORB_DEBUG tape (site=pass3_cone seg=8001).
+        bool   m_shower_cone_absorb_guard{false};
+
         // D2: geometry arm beside the pr/74 P1 cascade veto in examine_
         // direction's flag_shower_in branches (54629 seg 15007: 31cm,
         // 1.42xMIP -- fails BOTH of the P1 veto's conjuncts, but 0.97

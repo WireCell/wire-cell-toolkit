@@ -169,6 +169,12 @@ TEST_CASE("clus knob defaults: TaggerCheckNeutrino switches are all OFF")
     CHECK_KNOB_BOOL(cfg, "shower_long_muon_keep_type", false);
     // doc pr/40 round 10: Bragg-PID-confident muon/proton start segment kept.
     CHECK_KNOB_BOOL(cfg, "shower_bragg_protect_start_segment", false);
+    // doc pr/93 round 3 -- "electron" is really tracks / hadronic-pi0 shower.
+    CHECK_KNOB_BOOL(cfg, "shower_reclass_case_b_dqdx_guard", false);          // Cause A (55595)
+    CHECK_KNOB_BOOL(cfg, "shower_accept_pid_guard", false);                   // Cause B (348471, 69314)
+    CHECK_KNOB_NUM(cfg, "shower_pid_guard_min_len", 50.0);                    // cm; inert while Cause A/B off
+    CHECK_KNOB_BOOL(cfg, "shower_vote_track_pid_counts", false);              // Cause C (292643)
+    CHECK_KNOB_BOOL(cfg, "shower_cone_absorb_guard", false);               // Cause D (315167)
     // doc pr/43 round 2 -- three PID-consistency knobs (K1/K2/K3).
     CHECK_KNOB_BOOL(cfg, "single_muon_proton_chain_veto", false);
     CHECK_KNOB_BOOL(cfg, "single_muon_long_muon_claim", false);
@@ -589,6 +595,49 @@ TEST_CASE("clus knob defaults: segment_dqdx_spares_electron_reclass")
     CHECK(segment_dqdx_spares_electron_reclass(make_seg_with_dqdx(1.4 * MIP), MIP) == false);
     // Degenerate scale: never spares (guards the division).
     CHECK(segment_dqdx_spares_electron_reclass(make_seg_with_dqdx(3.0 * MIP), 0.0) == false);
+}
+
+// ---------------------------------------------------------------------------
+// doc sbnd_xin/docs/pr/93 Cause B -- segment_confident_nonelectron_pid is the
+// spare-test for the two forced set_pdg(11) shower-acceptance sites.  Pin the
+// predicate: real particle_info, pdg not in {0, +-11}, AND a real (<1.0)
+// template-PID score.  The 100 "unscored" sentinel (median-fallback pdg-13
+// stamps) must NOT spare.
+// ---------------------------------------------------------------------------
+
+TEST_CASE("clus knob defaults: segment_confident_nonelectron_pid")
+{
+    using namespace WireCell::Clus::PR;
+
+    auto make_seg_with_pid = [&](int pdg, double score) {
+        auto seg = std::make_shared<Segment>();
+        auto pinfo = std::make_shared<Aux::ParticleInfo>(
+            pdg, 100.0 * units::MeV, "test",
+            WireCell::D4Vector<double>(100.0 * units::MeV, 0, 0, 0));
+        seg->particle_info(pinfo);
+        seg->particle_score(score);
+        return seg;
+    };
+
+    // Null / no-particle-info: never spares.
+    CHECK(segment_confident_nonelectron_pid(nullptr) == false);
+    CHECK(segment_confident_nonelectron_pid(std::make_shared<Segment>()) == false);
+
+    // The two motivating tapes: confident proton (348471, score 0.23) and
+    // confident pion (69314) both spare.
+    CHECK(segment_confident_nonelectron_pid(make_seg_with_pid(2212, 0.23)) == true);
+    CHECK(segment_confident_nonelectron_pid(make_seg_with_pid(211, 0.5)) == true);
+    CHECK(segment_confident_nonelectron_pid(make_seg_with_pid(-13, 0.9)) == true);
+
+    // Median-fallback muon: pdg 13 but score 100 sentinel -- NOT confident,
+    // does not spare (this population is exactly what the vote/acceptance
+    // sites legitimately relabel).
+    CHECK(segment_confident_nonelectron_pid(make_seg_with_pid(13, 100.0)) == false);
+
+    // Already-electron or unset pdg: never spares regardless of score.
+    CHECK(segment_confident_nonelectron_pid(make_seg_with_pid(11, 0.1)) == false);
+    CHECK(segment_confident_nonelectron_pid(make_seg_with_pid(-11, 0.1)) == false);
+    CHECK(segment_confident_nonelectron_pid(make_seg_with_pid(0, 0.1)) == false);
 }
 
 // ---------------------------------------------------------------------------
