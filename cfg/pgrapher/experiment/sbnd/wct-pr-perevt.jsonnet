@@ -1473,19 +1473,26 @@ function(
     // doc pr/40 round 10 shower_bragg_protect_start_segment: spares a
     // segment from examine_all_showers' cluster-wide "every non-shower
     // segment here becomes electron" reclassification
-    // (NeutrinoTrackShowerSep.cxx) when it is longer than 20 cm and
-    // carries a confident (<1.0) Bragg/dE-dx-template PID score -- the
-    // population segment_dqdx_spares_electron_reclass's flat median-dQ/dx
-    // ratio test (F2, doc pr/40) cannot reach (ratio in [1.2,1.75], the
-    // gap between its "clean MIP" and "proton-like" spares).  C++ default
-    // false.  SBND PRODUCTION DEFAULT ON (2026-08-18): SBND 18255-314507
-    // seg 17002 (32.3 cm, xMIP 1.57x) restored to muon (was mislabelled
-    // e- 151 MeV); population census (nueCC48 48/48 + ncpi0 19/19 +
-    // 31-event mcp1k electron-misID subset) -- ZERO nueCC48 movers, ONE
-    // ncpi0 mover (259542: an unrelated >20cm track-scored segment
-    // purified out of a pi0 photon's energy sum, same photon pairing/
-    // geometry, kine_pio_energy_1 189->72 MeV), ONE mcp1k mover (314507,
-    // the motivating case).  Runner env:
+    // (NeutrinoTrackShowerSep.cxx) when it is longer than 20 cm, carries a
+    // confident (<1.0) Bragg/dE-dx-template PID score -- the population
+    // segment_dqdx_spares_electron_reclass's flat median-dQ/dx ratio test
+    // (F2, doc pr/40) cannot reach (ratio in [1.2,1.75], the gap between
+    // its "clean MIP" and "proton-like" spares) -- AND sits in the MAIN
+    // interaction cluster.  C++ default false.  SBND PRODUCTION DEFAULT ON
+    // (2026-08-18): SBND 18255-314507 seg 17002 (32.3 cm, xMIP 1.57x)
+    // restored to muon (was mislabelled e- 151 MeV).  The is_main_cluster
+    // restriction was added same-day after owner Bee review of the
+    // initial fix's second mover (18255-259542) identified it as a
+    // genuine photon by topology -- its spared segment sat in a separate
+    // SATELLITE cluster (124, disjoint from the main interaction), where a
+    // good Bragg score is not reliable evidence (a photon's early
+    // conversion stem can score well against the muon template before the
+    // cascade visibly multiplies); satellite clusters already have their
+    // own dedicated classifier (kine_drop_stray_satellites, doc pr/92)
+    // that correctly kept 259542 as EM.  Population census (nueCC48 48/48
+    // + ncpi0 19/19 + 31-event mcp1k electron-misID subset), post-
+    // restriction: ZERO nueCC48 movers, ZERO ncpi0 movers, ONE mcp1k mover
+    // (314507, the motivating case).  Runner env:
     // SBND_SHOWER_BRAGG_PROTECT_START_SEGMENT.
     shower_bragg_protect_start_segment = true,
 

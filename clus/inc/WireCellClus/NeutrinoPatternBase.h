@@ -1980,8 +1980,20 @@ namespace WireCell::Clus::PR {
         // ratio-confirmed proton or clean MIP already is.  Purely
         // protective -- can only add a spare, never remove one the flat
         // guard already grants -- so it is additive to
-        // shower_reclass_dqdx_guard, not a replacement.  C++ default false
-        // = legacy = byte-identical.
+        // shower_reclass_dqdx_guard, not a replacement.
+        //
+        // Restricted to is_main_cluster (examine_all_showers' own local
+        // variable, no new plumbing).  Owner Bee review found a good Bragg
+        // score is not reliable evidence inside a SATELLITE cluster (SBND
+        // 18255-259542, cluster 124, disjoint from the main interaction):
+        // a photon's early conversion stem can score well against the
+        // muon template over the same 20-35 cm comparison window before
+        // the cascade visibly multiplies, and satellite clusters already
+        // have their own dedicated EM-vs-track classifier
+        // (kine_drop_stray_satellites, NeutrinoKinematics.cxx, doc pr/92)
+        // that correctly kept 259542 as EM.  314507 (the motivating case)
+        // sits in the main cluster and is unaffected by this restriction.
+        // C++ default false = legacy = byte-identical.
         bool   m_shower_bragg_protect_start_segment{false};
 
         // doc sbnd_xin/docs/pr/43 round 2 K1 -- the single-muon selection in

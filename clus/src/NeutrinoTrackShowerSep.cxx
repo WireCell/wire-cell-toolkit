@@ -2082,11 +2082,27 @@ void PatternAlgorithms::examine_all_showers(Graph& graph, Facade::Cluster& clust
             //
             // doc sbnd_xin/docs/pr/40 round 10: shower_bragg_protect_start_
             // segment is an additive sibling spare -- see
-            // segment_bragg_spares_electron_reclass's header comment.  false
-            // = legacy = byte-identical.
+            // segment_bragg_spares_electron_reclass's header comment.
+            // Restricted to the MAIN interaction cluster (is_main_cluster):
+            // owner review of the two round-10 movers (SBND 18255-314507
+            // vs 259542) found the topology, not the dQ/dx shape, is what
+            // tells them apart -- 314507's segment is a genuine
+            // disconnected muon fragment sitting IN the main cluster, while
+            // 259542's is embedded in a separate SATELLITE cluster (cluster
+            // 124, disjoint from the main interaction) that pr/92's
+            // dedicated satellite EM-vs-track classifier
+            // (kine_drop_stray_satellites, NeutrinoKinematics.cxx) already
+            // examined and correctly kept as EM.  A locally-good Bragg/
+            // dE-dx-template fit is not reliable evidence inside a
+            // satellite blob -- a photon's early conversion stem can score
+            // well against the muon template over the ~20-35cm comparison
+            // window before the cascade visibly multiplies -- so this spare
+            // is scoped to where the fix was actually motivated and proven:
+            // segments genuinely disconnected within the main cluster.
+            // false/is_main_cluster=false = legacy = byte-identical.
             if (!is_shower &&
                 ((m_shower_reclass_dqdx_guard && segment_dqdx_spares_electron_reclass(sg, m_mip_dqdx)) ||
-                 (m_shower_bragg_protect_start_segment && segment_bragg_spares_electron_reclass(sg)))) {
+                 (m_shower_bragg_protect_start_segment && is_main_cluster && segment_bragg_spares_electron_reclass(sg)))) {
                 continue;
             }
 
