@@ -1139,7 +1139,10 @@ static std::string pf_pdg_to_name(int pdg, bool prototype = false, bool proto_fa
 //   4. Node IDs follow the prototype convention: cluster_id*1000 + seg_id.
 void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
                                                const Facade::Grouping& grouping,
-                                               bool flag_print)
+                                               bool flag_print,
+                                               std::shared_ptr<WireCell::Clus::TrackFitting> tf_in,
+                                               std::set<int>* shared_used_ids,
+                                               Configuration* out_particles)
 {
     // Debug dump of the PF-tree assembly.  Previously forced on (unconditional
     // stdout spam); now opt-in via env var.  Log/stdout only -- no effect on
@@ -1153,11 +1156,21 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
     }
     auto& tree = map_it->second;
 
-    auto pr_graph = grouping.get_pr_graph();
-    if (!pr_graph) return;
-
-    auto tf = grouping.get_track_fitting();
+    // doc pr/94 Phase 4: render the caller's fitter when given one.  Resolving
+    // the unnamed slot implicitly is correct only while there is exactly one
+    // candidate; with per-bundle fitters the unnamed slot is always bundle 0,
+    // so every later bundle's flow would silently render as a repeat of it.
+    auto tf = tf_in ? tf_in : grouping.get_track_fitting();
     if (!tf) return;
+
+    // ...and take the GRAPH from that same fitter.  Grouping::get_pr_graph()
+    // is defined as m_track_fitting->get_graph() (Facade_Grouping.cxx:76-79),
+    // i.e. the unnamed slot again -- so reading it here would have walked
+    // bundle 0's graph from bundle i's vertex.  Caught by the doc pr/94 §10.1
+    // sync check on NCpi0 evt 18625, whose second bundle reconstructed a real
+    // 1498 MeV candidate and emitted no Bee node at all.
+    auto pr_graph = tf->get_graph();
+    if (!pr_graph) return;
 
     auto main_vertex = tf->get_main_vertex();
     if (!main_vertex) {
@@ -1799,7 +1812,11 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
     // data.start/data.end), so a collision is resolved by re-issuing from a
     // range above the natural `cluster_id*1000 + seg_id` space.  Every firing
     // is logged: with shower_dedup_start_seg on there should be none.
-    std::set<int> used_node_ids;
+    // doc pr/94 Phase 4: when the caller supplies the set, ids stay unique
+    // ACROSS bundles -- a per-call set would restart the reissue range at
+    // 1000000 for every bundle and collide by construction.
+    std::set<int> local_used_node_ids;
+    std::set<int>& used_node_ids = shared_used_ids ? *shared_used_ids : local_used_node_ids;
 
     auto make_node = [&](int id,
                          const std::string& text,
@@ -2327,9 +2344,34 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
         }
     }
 
-    tree.set_particles(particles);
-    SPDLOG_LOGGER_TRACE(log, "fill_bee_pf_tree '{}': {} top-level particles",
-                        cfg.name, particles.size());
+    if (out_particles) {
+        // doc pr/94 Phase 4: accumulate.  set_particles() REPLACES the array
+        // (Bee.cxx:549-551), so a second call would erase the first bundle.
+        // Wrap this bundle's roots under one synthetic node -- the Bee "mc"
+        // layer is already a bare JSON forest, so an extra root needs no
+        // format change -- and let the caller set the concatenation once.
+        const auto& mvp = main_vertex->fit().valid() ? main_vertex->fit().point
+                                                     : main_vertex->wcpt().point;
+        std::string label = "nu";
+        {
+            const auto& ti = tf->get_tagger_info();
+            if (ti.nu_index >= 0) {
+                label = "nu " + std::to_string(ti.nu_index)
+                      + " (gid " + std::to_string(ti.matched_flash_gid)
+                      + ", cluster " + std::to_string(ti.cluster_id) + ")";
+            }
+        }
+        auto root = make_node(1000000 + static_cast<int>(out_particles->size()), label, mvp, mvp);
+        root["children"] = particles;
+        out_particles->append(root);
+        SPDLOG_LOGGER_TRACE(log, "fill_bee_pf_tree '{}': bundle root '{}' with {} top-level particles",
+                            cfg.name, label, particles.size());
+    }
+    else {
+        tree.set_particles(particles);
+        SPDLOG_LOGGER_TRACE(log, "fill_bee_pf_tree '{}': {} top-level particles",
+                            cfg.name, particles.size());
+    }
 }
 
 
@@ -3151,7 +3193,29 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
             const auto& pf_grouping = *pf_gs[0];
             auto tf = pf_grouping.get_track_fitting();
             if (!tf) continue;
-            fill_bee_pf_tree(pf_cfg, pf_grouping);
+            // doc pr/94 Phase 4: render every per-bundle candidate.  The
+            // "nu<i>" named slots exist only in per-bundle mode, so with none
+            // present this is exactly the single legacy call, byte-identical.
+            std::vector<std::shared_ptr<WireCell::Clus::TrackFitting>> nu_tfs;
+            for (int i = 0;; ++i) {
+                auto tfi = pf_grouping.get_track_fitting("nu" + std::to_string(i));
+                if (!tfi) break;
+                nu_tfs.push_back(tfi);
+            }
+            if (nu_tfs.empty()) {
+                fill_bee_pf_tree(pf_cfg, pf_grouping);
+            }
+            else {
+                Configuration all = Json::arrayValue;
+                std::set<int> used_ids;
+                for (const auto& tfi : nu_tfs) {
+                    fill_bee_pf_tree(pf_cfg, pf_grouping, false, tfi, &used_ids, &all);
+                }
+                auto pf_it = m_bee_pf_trees.find(pf_cfg.name);
+                if (pf_it != m_bee_pf_trees.end()) pf_it->second.set_particles(all);
+                SPDLOG_LOGGER_DEBUG(log, "fill_bee_pf_tree '{}': nu_per_bundle wrote {} bundle root(s)",
+                                    pf_cfg.name, all.size());
+            }
         }
     }
 

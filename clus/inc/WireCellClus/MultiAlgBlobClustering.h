@@ -348,7 +348,26 @@ namespace WireCell::Clus {
         // Storage: flushed at end of each event (same lifecycle as m_bee_points)
         std::map<std::string, WireCell::Bee::ParticleTree> m_bee_pf_trees;
 
-        void fill_bee_pf_tree(const BeePFConfig& cfg, const Facade::Grouping& grouping, bool flag_print = false);
+        /// Render one neutrino candidate's particle flow into the named Bee
+        /// tree.  The three trailing arguments are doc pr/94 Phase 4 and all
+        /// default to the pre-pr/94 single-candidate behaviour:
+        ///   tf_in            - render THIS TrackFitting instead of resolving
+        ///                      the grouping's single unnamed slot implicitly
+        ///                      (with N per-bundle fitters the unnamed slot is
+        ///                      only ever bundle 0).
+        ///   shared_used_ids  - the pf_unique_node_ids reissue set, hoisted to
+        ///                      the caller's scope so reissued ids cannot
+        ///                      collide BETWEEN bundles (each call otherwise
+        ///                      restarts its own set at 1000000).
+        ///   out_particles    - when non-null, this bundle's roots are wrapped
+        ///                      in one synthetic node and APPENDED here instead
+        ///                      of being handed to set_particles(), which is a
+        ///                      plain overwrite (Bee.cxx:549-551) and would
+        ///                      otherwise make bundle i erase bundle i-1.
+        void fill_bee_pf_tree(const BeePFConfig& cfg, const Facade::Grouping& grouping, bool flag_print = false,
+                              std::shared_ptr<WireCell::Clus::TrackFitting> tf_in = nullptr,
+                              std::set<int>* shared_used_ids = nullptr,
+                              Configuration* out_particles = nullptr);
 
         std::map<int, std::map<int, Bee::Patches>> m_bee_dead_patches;
         // Bee::Patches m_bee_dead; // dead region ...
