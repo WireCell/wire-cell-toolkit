@@ -1518,11 +1518,11 @@ function(
     // SBND_SHOWER_RECLASS_CASE_B_DQDX_GUARD / SBND_SHOWER_ACCEPT_PID_GUARD
     // / SBND_SHOWER_VOTE_TRACK_PID_COUNTS / SBND_SHOWER_CONE_ABSORB_GUARD
     // / SBND_SHOWER_PID_GUARD_MIN_LEN.
-    shower_reclass_case_b_dqdx_guard = false,
-    shower_accept_pid_guard = false,
+    shower_reclass_case_b_dqdx_guard = true,
+    shower_accept_pid_guard = true,
     shower_pid_guard_min_len = null,  // null => C++ default 50cm
-    shower_vote_track_pid_counts = false,
-    shower_cone_absorb_guard = false,
+    shower_vote_track_pid_counts = true,
+    shower_cone_absorb_guard = true,
 
     // doc pr/43 round 2 -- three PID-consistency knobs for the remaining
     // owner cases (18255: 54351 / 56463 / 57661).  K1
