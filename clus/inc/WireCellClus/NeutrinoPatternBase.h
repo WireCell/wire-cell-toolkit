@@ -1720,6 +1720,41 @@ namespace WireCell::Clus::PR {
         // the WCT_SHOWER_ABSORB_DEBUG tape (site=pass3_cone seg=8001).
         bool   m_shower_cone_absorb_guard{false};
 
+        // ------------------------------------------------------------------
+        // doc sbnd_xin/docs/pr/93 round 4 -- PF-hierarchy fine-tunes.
+        // ------------------------------------------------------------------
+        // shower_detach_track_stem (348471 + 292643): a TRACK-HEADED shower
+        // -- final start segment is a non-shower-flagged, non-zero,
+        // non-+-11-pdg track -- is really "track + daughter EM shower" glued
+        // into one object (348471: 53.5cm score-0.232 proton stem + 15 EM
+        // satellites; 292643: 22.9cm pi+ stem [score-100 sentinel] + 13.9cm
+        // mu continuation + 9 EM satellites).  When on, a post-pass after
+        // shower dedup peels the main-cluster track prefix back into the
+        // track pool and re-roots the shower at the prefix's far vertex
+        // (conn 2), so PF renders "track -> pseudo-gamma -> EM shower", kine
+        // costs the track by range (not shower charge + rest mass -- 348471
+        // gained 938 MeV of proton mass on a charge-based 719 MeV aggregate
+        // in round 3), and the pi0 pairing sees a real EM shower.
+        // STRUCTURE-keyed on purpose (not the round-3 confident-score/50cm
+        // family: 21 of the 50 non-trivial track-headed stems in the census
+        // carry the score-100 sentinel, and 292643's stem is under the
+        // floor).  Long-muon pseudo-showers (cached type +-13) are exempt;
+        // pure track chains and single-blob protons self-exclude (the
+        // detach refuses to empty a shower).
+        bool   m_shower_detach_track_stem{false};
+        // kine_count_orphan_tracks (315167): fill_kine_tree counterpart of
+        // the PF-side pf_orphan_confident_track knob (BeePFConfig).  A
+        // confident straight-long main-cluster track that is graph-
+        // disconnected from the main vertex (freed from shower membership by
+        // shower_cone_absorb_guard) is reached by NEITHER the kine BFS nor
+        // any shower: 315167's 150.7cm score-0.101 proton (~595 MeV KE)
+        // silently vanished from kine_reco_Enu.  When on, a post-pass
+        // pushes such segments via push_segment_kine (range KE + binding).
+        // Shares segment_orphan_confident_track with the PF side so the two
+        // outputs describe the same particle set.
+        bool   m_kine_count_orphan_tracks{false};
+        double m_kine_orphan_track_min{50*units::cm};
+
         // D2: geometry arm beside the pr/74 P1 cascade veto in examine_
         // direction's flag_shower_in branches (54629 seg 15007: 31cm,
         // 1.42xMIP -- fails BOTH of the P1 veto's conjuncts, but 0.97
@@ -1796,6 +1831,78 @@ namespace WireCell::Clus::PR {
                                TrackFitting& track_fitter, IDetectorVolumes::pointer dv,
                                const Clus::ParticleDataSet::pointer& particle_data,
                                const IRecombinationModel::pointer& recomb_model);
+        // doc pr/93 round 4: the connect/register tail of nv_bridge_track,
+        // factored out (byte-identical) so the sccc bridge replay below can
+        // reuse it.  Returns the bridge segment or nullptr.
+        SegmentPtr nv_bridge_connect(Graph& graph, Facade::Cluster* main_cluster,
+                                     Facade::Cluster* cluster, VertexPtr vertex,
+                                     VertexPtr far_vtx,
+                                     const std::vector<SegmentPtr>& cluster_segs,
+                                     TrackFitting& track_fitter,
+                                     IDetectorVolumes::pointer dv);
+
+        // ------------------------------------------------------------------
+        // doc sbnd_xin/docs/pr/93 round 4 (straight_cont_cross_cluster,
+        // SBND 18264-137238) -- a main-vertex kShowerTrajectory stem that is
+        // the CROSS-CLUSTER continuation of a straight long track (a pr/57
+        // W-plane-gap over-clustering split: 14.6cm flagged stem, degree-1
+        // tip, 81cm straight muon body 3-4cm away in another cluster) seeds
+        // a fake electron over the whole chain.  demote_cross_cluster_
+        // straight_stems (called between examine_direction and
+        // shower_clustering_with_nv) clears the flag + re-PIDs the stem as a
+        // track when the cross-cluster arm of segment_is_straight_long_
+        // track_or_continuation matches under the two-tier geometric gate:
+        // base (max_gap, kink_max) OR aligned (gap_aligned, kink_tight) --
+        // the owner-requested "very aligned buys a larger gap" tier;
+        // pr/57:1336 records a 53-deg LOCAL kink at this break class, so
+        // the tight-angle long-lever arm is the robust one.  The pr/57
+        // owner-good W-gap pairs (21073 6-7, 122660 14-17, 61579 3-4) are
+        // mandatory negative controls for any retune.
+        // sccc_bridge_body (second rung): additionally RECORD a bridge
+        // request {stem tip, continuation cluster, continuation vertex};
+        // shower_clustering_with_nv replays it through nv_bridge_connect
+        // AFTER its entry clears (building it earlier would be wiped), so
+        // the muon body joins the PF/kine track chain through a real graph
+        // edge.  All state empty when the master bool is off =>
+        // byte-identical.  Gap params internal units; kinks DEGREES.
+        // ------------------------------------------------------------------
+        bool   m_straight_cont_cross_cluster{false};
+        bool   m_sccc_bridge_body{false};
+        double m_sccc_max_gap{5*units::cm};
+        double m_sccc_kink_max{15.0};
+        double m_sccc_gap_aligned{12*units::cm};
+        double m_sccc_kink_tight{7.5};
+        struct SCCCBridgeRequest {
+            VertexPtr main_vtx;          // the demoted stem's degree-1 tip
+            Facade::Cluster* cluster;    // the continuation's cluster
+            VertexPtr far_vtx;           // the continuation's near endpoint vertex
+        };
+        // Insertion order = sorted_out_edges(main_vertex) order; a plain
+        // vector, never iterated as a pointer-keyed container.
+        std::vector<SCCCBridgeRequest> m_sccc_bridge_requests;
+        // Demoted stems (per-event lifecycle: cleared at the demotion pass's
+        // entry).  Consulted by examine_showers' retarget selection: a stem
+        // this knob demoted to a muon head must not be re-adopted as a
+        // shower start segment -- the retarget's merged_shower_start_segment
+        // stamp writes pdg 11 with the score-100 sentinel, which
+        // shower_accept_pid_guard cannot decline (measured on 18264-137238:
+        // the demoted stem was re-captured as "e- 71 MeV").  Membership-
+        // tested only; empty when the knob is off => byte-identical.
+        IndexedSegmentSet m_sccc_shield_segs;
+        // Clusters bridged by the sccc REPLAY (not by nv_bridge_track's own
+        // Step-5 firing -- that population keeps its legacy behavior).
+        // Consulted by from_vertices' Step-3 candidate analysis: a cluster
+        // the replay already claimed as a muon-body chain must not be
+        // re-analyzed as an EM-shower candidate (measured on 18264-137238:
+        // Path C broke the bridged cluster's 3.2cm entry stub off as a
+        // conn-2 electron that examine_shower_1 then spliced back onto the
+        // demoted stem).  Cleared at shower_clustering_with_nv entry with
+        // the rest of the bridge state; empty when the knob is off =>
+        // byte-identical.
+        std::set<int> m_sccc_bridged_cluster_ids;
+        void demote_cross_cluster_straight_stems(Graph& graph, VertexPtr main_vertex,
+                                                 const Clus::ParticleDataSet::pointer& particle_data,
+                                                 const IRecombinationModel::pointer& recomb_model);
 
         // ------------------------------------------------------------------
         // doc sbnd_xin/docs/pr/92 -- drop stray satellite showers from the

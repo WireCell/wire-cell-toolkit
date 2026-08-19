@@ -791,6 +791,20 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               // unless that kine knob is also on.  C++ default false; key
               // omitted when off => byte-identical pre-pr/92 config.
               pf_drop_stray_satellites=false,
+              // pf_orphan_confident_track (doc pr/93 round 4): emit a root PF
+              // node for an unclaimed main-cluster segment with a confident
+              // non-electron template PID, length > pf_orphan_track_min_cm
+              // (null => C++ 50cm), and straight-long (SBND 18255-315167's
+              // freed 150.7cm proton).  C++ default false; keys omitted when
+              // off => byte-identical.
+              pf_orphan_confident_track=false,
+              pf_orphan_track_min_cm=null,
+              // pf_track_owns_loose_vertex (doc pr/93 round 4): a vertex the
+              // track BFS reached via a real segment is not claimable by a
+              // root shower whose only tie to it is the loose fill_sets view
+              // (SBND 18264-69314's 67 MeV daughter stolen from its muon).
+              // C++ default false; key omitted when off => byte-identical.
+              pf_track_owns_loose_vertex=false,
               // restore_demoted_mains (doc pr/20 Part I P2; C++ default false,
               // key omitted when null => byte-identical pre-knob config): tag a
               // split-off part that was ITSELF a matched bundle main before the
@@ -1381,6 +1395,18 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               shower_pid_guard_min_len=null,
               shower_vote_track_pid_counts=false,
               shower_cone_absorb_guard=false,
+              // doc pr/93 round 4 -- C++ defaults false / null = C++ defaults
+              // (orphan floor 50cm; sccc 5cm/15deg base + 12cm/7.5deg aligned).
+              // Keys suppressed when off => byte-identical.
+              shower_detach_track_stem=false,
+              kine_count_orphan_tracks=false,
+              kine_orphan_track_min=null,
+              straight_cont_cross_cluster=false,
+              sccc_bridge_body=false,
+              sccc_max_gap=null,
+              sccc_kink_max=null,
+              sccc_gap_aligned=null,
+              sccc_kink_tight=null,
               // doc pr/43 round 2 -- C++ defaults false; keys suppressed when off.
               single_muon_proton_chain_veto=false,
               single_muon_long_muon_claim=false,
@@ -2213,6 +2239,15 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
             shower_pid_guard_min_len=shower_pid_guard_min_len,
             shower_vote_track_pid_counts=shower_vote_track_pid_counts,
             shower_cone_absorb_guard=shower_cone_absorb_guard,
+            shower_detach_track_stem=shower_detach_track_stem,
+            kine_count_orphan_tracks=kine_count_orphan_tracks,
+            kine_orphan_track_min=kine_orphan_track_min,
+            straight_cont_cross_cluster=straight_cont_cross_cluster,
+            sccc_bridge_body=sccc_bridge_body,
+            sccc_max_gap=sccc_max_gap,
+            sccc_kink_max=sccc_kink_max,
+            sccc_gap_aligned=sccc_gap_aligned,
+            sccc_kink_tight=sccc_kink_tight,
             single_muon_proton_chain_veto=single_muon_proton_chain_veto,
             single_muon_long_muon_claim=single_muon_long_muon_claim,
             pid_flag_reconcile=pid_flag_reconcile,
@@ -2649,6 +2684,10 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
                     [if pf_pseudo_gap_from_main then 'pf_pseudo_gap_from_main']: true,
                     [if pf_unique_node_ids then 'pf_unique_node_ids']: true,
                     [if pf_drop_stray_satellites then 'pf_drop_stray_satellites']: true,
+                    // doc pr/93 round 4; params in cm.
+                    [if pf_orphan_confident_track then 'pf_orphan_confident_track']: true,
+                    [if pf_orphan_track_min_cm != null then 'pf_orphan_track_min']: pf_orphan_track_min_cm * wc.cm,
+                    [if pf_track_owns_loose_vertex then 'pf_track_owns_loose_vertex']: true,
                 },
             ],
             pipeline: wc.tns(cm_pipeline),
@@ -2778,6 +2817,10 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
        pf_unique_node_ids=false,
        // doc pr/92; false = C++ default = OFF.  See clus_pr.
        pf_drop_stray_satellites=false,
+       // doc pr/93 round 4; C++ defaults; keys suppressed when off.
+       pf_orphan_confident_track=false,
+       pf_orphan_track_min_cm=null,
+       pf_track_owns_loose_vertex=false,
        // doc pr/20 Part I P2; null = C++ default false = OFF.  See clus_pr.
        restore_demoted_mains=null,
        // doc pr/23 sec 4.2; null = C++ default false = warn-and-skip.  See clus_pr.
@@ -3068,6 +3111,16 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
        shower_pid_guard_min_len=null,
        shower_vote_track_pid_counts=false,
        shower_cone_absorb_guard=false,
+       // doc pr/93 round 4; C++ defaults; keys suppressed when off.
+       shower_detach_track_stem=false,
+       kine_count_orphan_tracks=false,
+       kine_orphan_track_min=null,
+       straight_cont_cross_cluster=false,
+       sccc_bridge_body=false,
+       sccc_max_gap=null,
+       sccc_kink_max=null,
+       sccc_gap_aligned=null,
+       sccc_kink_tight=null,
        // doc pr/43 round 2 -- C++ defaults false.
        single_muon_proton_chain_veto=false,
        single_muon_long_muon_claim=false,
@@ -3327,6 +3380,9 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 pf_pseudo_gap_from_main=pf_pseudo_gap_from_main,
                 pf_unique_node_ids=pf_unique_node_ids,
                 pf_drop_stray_satellites=pf_drop_stray_satellites,
+                pf_orphan_confident_track=pf_orphan_confident_track,
+                pf_orphan_track_min_cm=pf_orphan_track_min_cm,
+                pf_track_owns_loose_vertex=pf_track_owns_loose_vertex,
                 unmerge_bundle_mode=unmerge_bundle_mode,
                 restore_demoted_mains=restore_demoted_mains,
                 require_provenance=require_provenance,
@@ -3498,6 +3554,15 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 shower_pid_guard_min_len=shower_pid_guard_min_len,
                 shower_vote_track_pid_counts=shower_vote_track_pid_counts,
                 shower_cone_absorb_guard=shower_cone_absorb_guard,
+                shower_detach_track_stem=shower_detach_track_stem,
+                kine_count_orphan_tracks=kine_count_orphan_tracks,
+                kine_orphan_track_min=kine_orphan_track_min,
+                straight_cont_cross_cluster=straight_cont_cross_cluster,
+                sccc_bridge_body=sccc_bridge_body,
+                sccc_max_gap=sccc_max_gap,
+                sccc_kink_max=sccc_kink_max,
+                sccc_gap_aligned=sccc_gap_aligned,
+                sccc_kink_tight=sccc_kink_tight,
                 single_muon_proton_chain_veto=single_muon_proton_chain_veto,
                 single_muon_long_muon_claim=single_muon_long_muon_claim,
                 pid_flag_reconcile=pid_flag_reconcile,

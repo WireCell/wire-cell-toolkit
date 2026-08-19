@@ -940,6 +940,11 @@ function(
     // SBND PRODUCTION DEFAULT ON since 2026-08-18 (doc pr/92, with
     // kine_drop_stray_satellites above).
     pf_drop_stray_satellites = true,
+    // doc pr/93 round 4 -- see the round-4 block below.  OFF pending
+    // validation; flip after gates.
+    pf_orphan_confident_track = false,
+    pf_orphan_track_min_cm = null,  // null => C++ default 50cm
+    pf_track_owns_loose_vertex = false,
     // doc pr/38: F2's ON-behavior was CORRECTED in place (owner decision
     // 2026-08-05, no new knobs): the barrier now excludes each shower's
     // start vertex (prototype map_vtx_segs parity, WCShower.cxx:547) so
@@ -1523,6 +1528,35 @@ function(
     shower_pid_guard_min_len = null,  // null => C++ default 50cm
     shower_vote_track_pid_counts = true,
     shower_cone_absorb_guard = true,
+
+    // doc pr/93 round 4 -- PF-hierarchy fine-tunes + 137238 cross-cluster
+    // muon (owner round 2026-08-18).  C++ defaults false/null;
+    // key-suppressed when off => compiled config byte-identical.
+    // OFF pending round-4 validation; flip after gates.
+    //   shower_detach_track_stem: peel the main-cluster track prefix off a
+    //     track-headed shower and re-root the EM remainder at the prefix's
+    //     far vertex (348471 proton->gamma/pi0; 292643 pi+->gamma/pi0).
+    //   kine_count_orphan_tracks (+ pf_orphan_confident_track below): count/
+    //     emit confident straight-long main-cluster orphan tracks freed by
+    //     shower_cone_absorb_guard (315167's 150.7cm 595 MeV proton).
+    //   straight_cont_cross_cluster (+ sccc_*): demote a main-vertex
+    //     shower-trajectory stem that is the cross-cluster continuation of a
+    //     straight long track across a pr/57 W-gap split (137238), with the
+    //     owner's angle-conditioned gap tier; sccc_bridge_body replays an
+    //     nv_bridge so the body joins the PF/kine chain.
+    // Runner envs SBND_SHOWER_DETACH_TRACK_STEM /
+    // SBND_KINE_COUNT_ORPHAN_TRACKS / SBND_STRAIGHT_CONT_CROSS_CLUSTER /
+    // SBND_SCCC_BRIDGE_BODY / SBND_PF_ORPHAN_CONFIDENT_TRACK /
+    // SBND_PF_TRACK_OWNS_LOOSE_VERTEX (+ SBND_SCCC_* numerics).
+    shower_detach_track_stem = false,
+    kine_count_orphan_tracks = false,
+    kine_orphan_track_min = null,  // null => C++ default 50cm
+    straight_cont_cross_cluster = false,
+    sccc_bridge_body = false,
+    sccc_max_gap = null,       // null => C++ default 5cm (base tier)
+    sccc_kink_max = null,      // null => C++ default 15deg (base tier)
+    sccc_gap_aligned = null,   // null => C++ default 12cm (aligned tier)
+    sccc_kink_tight = null,    // null => C++ default 7.5deg (aligned tier)
 
     // doc pr/43 round 2 -- three PID-consistency knobs for the remaining
     // owner cases (18255: 54351 / 56463 / 57661).  K1
@@ -2221,6 +2255,9 @@ function(
                              pf_pseudo_gap_from_main=pf_pseudo_gap_from_main,
                              pf_unique_node_ids=pf_unique_node_ids,
                              pf_drop_stray_satellites=pf_drop_stray_satellites,
+                             pf_orphan_confident_track=pf_orphan_confident_track,
+                             pf_orphan_track_min_cm=pf_orphan_track_min_cm,
+                             pf_track_owns_loose_vertex=pf_track_owns_loose_vertex,
                              unmerge_bundle_mode=unmerge_bundle_mode,
                              restore_demoted_mains=restore_demoted_mains,
                              require_provenance=require_provenance,
@@ -2380,6 +2417,15 @@ function(
                              shower_pid_guard_min_len=shower_pid_guard_min_len,
                              shower_vote_track_pid_counts=shower_vote_track_pid_counts,
                              shower_cone_absorb_guard=shower_cone_absorb_guard,
+                             shower_detach_track_stem=shower_detach_track_stem,
+                             kine_count_orphan_tracks=kine_count_orphan_tracks,
+                             kine_orphan_track_min=kine_orphan_track_min,
+                             straight_cont_cross_cluster=straight_cont_cross_cluster,
+                             sccc_bridge_body=sccc_bridge_body,
+                             sccc_max_gap=sccc_max_gap,
+                             sccc_kink_max=sccc_kink_max,
+                             sccc_gap_aligned=sccc_gap_aligned,
+                             sccc_kink_tight=sccc_kink_tight,
                              single_muon_proton_chain_veto=single_muon_proton_chain_veto,
                              single_muon_long_muon_claim=single_muon_long_muon_claim,
                              pid_flag_reconcile=pid_flag_reconcile,

@@ -4,6 +4,7 @@
 #include "WireCellClus/PRVertex.h"
 #include "WireCellClus/PRShower.h"
 #include "WireCellClus/PRShowerFunctions.h"  // doc pr/84 r2: shower_get_closest_point
+#include "WireCellClus/PRSegmentFunctions.h" // doc pr/93 r4: segment_orphan_confident_track
 #include "WireCellClus/TrackFitting.h"
 
 
@@ -349,6 +350,11 @@ void MultiAlgBlobClustering::configure(const WireCell::Configuration& cfg)
             pfc.pf_unique_node_ids = get<bool>(pf, "pf_unique_node_ids", false);
             // doc pr/92; absent => legacy (dropped-satellite set unread), byte-identical.
             pfc.pf_drop_stray_satellites = get<bool>(pf, "pf_drop_stray_satellites", false);
+            // doc pr/93 round 4; absent => legacy audit-only orphans / legacy
+            // shower-view vertex precedence, byte-identical.
+            pfc.pf_orphan_confident_track = get<bool>(pf, "pf_orphan_confident_track", false);
+            pfc.pf_orphan_track_min = get<double>(pf, "pf_orphan_track_min", pfc.pf_orphan_track_min);
+            pfc.pf_track_owns_loose_vertex = get<bool>(pf, "pf_track_owns_loose_vertex", false);
             m_bee_pf_configs.push_back(pfc);
             m_bee_pf_trees[pfc.name] = Bee::ParticleTree(pfc.name);
             SPDLOG_LOGGER_DEBUG(log, "Configured bee_pf: name={} visitor={}", pfc.name, pfc.visitor);
@@ -1288,6 +1294,16 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
         bfs_cur = std::move(bfs_next);
     }
 
+    // doc pr/93 round 4 (pf_track_owns_loose_vertex): condition (a) of the
+    // guard below must mean "a REAL track segment was walked here from the
+    // main vertex".  vtx_incoming_seg is extended DURING the fixed point
+    // below (non-root branch) with shower-derived parents, so snapshot the
+    // BFS-only key set here.  Knob off => empty, no allocation.
+    PR::IndexedVertexSet track_bfs_vtxs;
+    if (cfg.pf_track_owns_loose_vertex) {
+        for (const auto& [v, s] : vtx_incoming_seg) track_bfs_vtxs.insert(v);
+    }
+
     // // Log disconnected non-shower track segments (not added to particle flow).
     // for (auto edge_desc : mir(boost::edges(*pr_graph))) {
     //     auto seg = (*pr_graph)[edge_desc].segment;
@@ -1347,6 +1363,25 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
 
                 PR::IndexedVertexSet sv; PR::IndexedSegmentSet ss;
                 shower->fill_sets(sv, ss, /*flag_exclude_start_segment=*/false);
+                // doc pr/93 round 4 (pf_track_owns_loose_vertex): vertices
+                // that are STRUCTURE (an endpoint of a member segment) as
+                // opposed to loose point-cloud association.  A shower's view
+                // can hold a vertex none of whose incident segments it owns
+                // -- the F12 absorb guard (shower_absorb_track_guard)
+                // add_vertex()es the frontier BEFORE refusing the segment
+                // beyond it, and add_shower()/add_segment(seg,true) can do
+                // the same.  Deliberately EXCLUDES start_vtx: the root
+                // branch's own guards already prevent self-stamping, and
+                // adding it would make the attachment loop's defensive
+                // self-test load-bearing.
+                PR::IndexedVertexSet struct_vtxs;
+                if (cfg.pf_track_owns_loose_vertex) {
+                    for (const auto& mseg : ss) {
+                        auto [ma, mb] = PR::find_vertices(*pr_graph, mseg);
+                        if (ma && ma->descriptor_valid()) struct_vtxs.insert(ma);
+                        if (mb && mb->descriptor_valid()) struct_vtxs.insert(mb);
+                    }
+                }
                 for (const auto& vtx : sv) {
                     if (vtx == main_vertex) continue;
                     if (at_main || at_root) {
@@ -1385,15 +1420,49 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
                             const bool track_owns_via_michel_stem =
                                 vis != vtx_incoming_seg.end() && vis->second &&
                                 vis->second->flags_any(PR::SegmentFlags::kMuonStemGuard);
+                            // doc pr/93 round 4 (pf_track_owns_loose_vertex):
+                            // the general "track BFS beats shower set" rule
+                            // the comment above deferred, restricted to the
+                            // LOOSE-association case: skip the claim when
+                            // BOTH (a) the real track BFS walked a segment to
+                            // this vertex (snapshot set -- the live map gains
+                            // shower-derived entries during this fixed
+                            // point), and (b) the vertex is not an endpoint
+                            // of ANY member segment of this shower.  SBND
+                            // 18264-69314: the 151.9cm muon's far endpoint
+                            // (deg 2) claimed by the 595 MeV root shower
+                            // whose nearest member is 35cm away, stealing the
+                            // muon's own 67 MeV conn-1 daughter.  NOT a
+                            // superset of the michel term (that one also
+                            // protects structural vertices); both kept.
+                            // C++ default false => byte-identical.
+                            const bool track_owns_loose =
+                                cfg.pf_track_owns_loose_vertex &&
+                                track_bfs_vtxs.count(vtx) > 0 &&
+                                struct_vtxs.count(vtx) == 0;
                             if (flag_print && vis != vtx_incoming_seg.end()) {
                                 std::cout << "[fill_bee_pf_tree] PROPAGATE-OVER-TRACK"
                                           << "  vtx_gidx=" << vtx->get_graph_index()
                                           << "  claimed_by_shower_ke=" << shower->get_kine_best()/units::MeV
                                           << "  over_incoming_seg_gidx=" << vis->second->get_graph_index()
                                           << "  michel_stem_protected=" << (track_owns_via_michel_stem ? 1 : 0)
+                                          << "  loose_protected=" << (track_owns_loose ? 1 : 0)
                                           << "\n";
                             }
-                            if (track_owns_via_michel_stem) continue;
+                            if (track_owns_via_michel_stem || track_owns_loose) {
+                                if (track_owns_loose && !track_owns_via_michel_stem) {
+                                    SPDLOG_LOGGER_DEBUG(log,
+                                        "pf_track_owns_loose_vertex: vtx_gidx={} kept by track "
+                                        "seg_gidx={} (shower_id={} ke_mev={:.1f} nseg={} claim=loose)",
+                                        vtx->get_graph_index(),
+                                        (vis != vtx_incoming_seg.end() && vis->second)
+                                            ? static_cast<long>(vis->second->get_graph_index()) : -1L,
+                                        shower->get_shower_id(),
+                                        shower->get_kine_best() / units::MeV,
+                                        shower->get_num_segments());
+                                }
+                                continue;
+                            }
                             root_reachable_vtxs.insert(vtx);
                             vtx_to_parent_shower[vtx] = parent_shower;
                             any_added = true;
@@ -2149,6 +2218,7 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
                   [&](const PR::SegmentPtr& a, const PR::SegmentPtr& b) {
                       return seg_display_id(a) < seg_display_id(b);
                   });
+        int n_emitted = 0;
         for (const auto& seg : unclaimed) {
             const auto* cl = seg->cluster();
             const bool haspi = seg->has_particle_info() && seg->particle_info();
@@ -2159,10 +2229,52 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
                 haspi ? seg->particle_info()->pdg() : 0,
                 haspi ? seg->particle_info()->kinetic_energy() / units::MeV : 0.0,
                 seg->fits().size(), seg->dirsign());
+            // doc pr/93 round 4 (pf_orphan_confident_track, pr/65 rung 4):
+            // emit a root node for the narrow confident-long-straight-track
+            // class only -- e.g. SBND 18255-315167's 150.7cm proton, freed
+            // from shower membership by shower_cone_absorb_guard but graph-
+            // disconnected from the main vertex.  Node construction mirrors
+            // the (production-disabled) flat net below, including its
+            // dirsign/fit display filters and the KeepMC floors.  Audit
+            // lines above stay untouched for every segment.  Knob off =>
+            // this block never runs => byte-identical.
+            if (cfg.pf_orphan_confident_track &&
+                seg->dirsign() != 0 && !seg->fits().empty() &&
+                PR::segment_orphan_confident_track(seg, cfg.pf_orphan_track_min)) {
+                auto pi = seg->particle_info();
+                const std::string pname = cfg.prototype_names
+                    ? pf_pdg_to_name(pi->pdg(), true, cfg.pf_pdg_name_prototype_fallback)
+                    : pi->name();
+                const std::string ke_str = format_mev(pi->kinetic_energy());
+                const auto& fits = seg->fits();
+                const WireCell::Point& p_front = fits.front().point;
+                const WireCell::Point& p_back  = fits.back().point;
+                const bool fwd = (seg->dirsign() == 1);
+                auto node = make_node(seg_display_id(seg),
+                                      pname + "  " + ke_str + " MeV",
+                                      fwd ? p_front : p_back,
+                                      fwd ? p_back : p_front);
+                node["icon"] = "jstree-file";
+                if (keep_node(pi->pdg(), pi->kinetic_energy(), node)) {
+                    particles.append(node);
+                    ++n_emitted;
+                    SPDLOG_LOGGER_INFO(log,
+                        "pr93 pf-orphan-confident-track: EMIT root seg={} cluster={} pdg={} "
+                        "ke_mev={:.2f} len_cm={:.1f} dirsign={}",
+                        seg_display_id(seg),
+                        cl ? std::to_string(cl->get_cluster_id()) : "?",
+                        pi->pdg(), pi->kinetic_energy() / units::MeV,
+                        PR::segment_track_length(seg) / units::cm, seg->dirsign());
+                }
+            }
         }
         SPDLOG_LOGGER_INFO(log,
             "pr65 pf-orphan-audit: {} unclaimed segment(s), no PF node fabricated (pf_orphan_audit_only)",
             unclaimed.size());
+        if (cfg.pf_orphan_confident_track && n_emitted) {
+            SPDLOG_LOGGER_INFO(log,
+                "pr93 pf-orphan-confident-track: {} of them emitted as root track node(s)", n_emitted);
+        }
     }
     else if (cfg.pf_shower_vertex_barrier) {
         std::vector<PR::SegmentPtr> orphans;

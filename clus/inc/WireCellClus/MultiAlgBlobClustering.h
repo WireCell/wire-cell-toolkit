@@ -305,6 +305,42 @@ namespace WireCell::Clus {
             // otherwise the id set is empty and this knob is inert.  C++
             // default false => byte-identical legacy output.
             bool pf_drop_stray_satellites{false};
+            // pf_orphan_confident_track (doc pr/93 round 4): in the
+            // pf_orphan_audit_only branch, EMIT a root PF node for an
+            // unclaimed main-cluster segment that passes
+            // segment_orphan_confident_track (confident non-electron
+            // template PID + length > pf_orphan_track_min + straight-long).
+            // pr/65 rung 4: the audit chose visibility-without-fabrication
+            // for the general population; this narrow class (e.g. SBND
+            // 18255-315167's 150.7cm score-0.101 proton, freed from shower
+            // membership by shower_cone_absorb_guard but graph-disconnected
+            // from the main vertex) is a real particle the owner wants in
+            // the PF.  Audit log lines are unchanged for every segment.
+            // C++ default false => byte-identical legacy output.
+            bool pf_orphan_confident_track{false};
+            double pf_orphan_track_min{50.0 * units::cm};  // read only when the bool is on
+            // pf_track_owns_loose_vertex (doc pr/93 round 4): in the F3a
+            // root branch, a root-anchored shower's fill_sets() vertex VIEW
+            // overrides the track BFS wherever the two disagree, and
+            // pf_shower_parent_precedence then hangs everything anchored
+            // there under the shower.  The view can hold a vertex none of
+            // whose incident segments the shower owns -- the F12 absorb
+            // guard add_vertex()es the frontier BEFORE refusing the segment
+            // beyond it (PRShower.cxx guard_excludes walk termination), and
+            // add_shower()/add_segment(seg,true) can do the same.  When on,
+            // skip the claim when BOTH (a) the REAL track BFS walked a
+            // segment to the vertex, and (b) the vertex is not an endpoint
+            // of any MEMBER segment of the claiming shower (pure loose
+            // association).  This is the general "track BFS beats shower
+            // set" fix the pr/74-r4 comment deferred; superset of the
+            // kMuonStemGuard protection for the loose-association case only
+            // (both are kept).  SBND 18264-69314: the 151.9cm muon's far
+            // endpoint (deg 2) is claimed by the 595 MeV root shower whose
+            // nearest member is 35cm away, stealing the muon's own 67 MeV
+            // conn-1 daughter shower.  Render-only (mc.json): parentage
+            // changes only, never membership; kine reads none of these
+            // maps.  C++ default false => byte-identical legacy output.
+            bool pf_track_owns_loose_vertex{false};
         };
        private:
         std::vector<BeePFConfig> m_bee_pf_configs;

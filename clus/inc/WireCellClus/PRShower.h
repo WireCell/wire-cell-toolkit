@@ -283,6 +283,31 @@ namespace WireCell::Clus::PR {
         void calculate_kinematics(const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, bool exclude_start_vertex_from_endpoint = false, bool endpoint_skip_orphan_vertices = false);
         void calculate_kinematics_long_muon(IndexedSegmentSet& segments_in_muons, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, bool exclude_start_vertex_from_endpoint = false);
 
+        // doc sbnd_xin/docs/pr/93 round 4 (shower_detach_track_stem).
+        // Remove `prefix` -- a connected chain of track segments beginning at
+        // the CURRENT start segment -- from this shower's view, re-root the
+        // shower at `new_start_vertex` with connection type 2 (the
+        // pseudo-gamma / disconnected-shower rendering class), re-seat the
+        // start segment on the remaining member closest to the new start
+        // vertex (graph-index tie-break), and REBUILD the named point clouds
+        // from the remaining members only.  The rebuild is required because
+        // the shower clouds are add-only merges of member clouds and both
+        // kine_charge (kine_charge_from_maps over shower pclouds) and the
+        // conn-2 start_point derivation (closest "fit"-cloud point to the
+        // start vertex) read them -- naive edge removal would leave the
+        // detached track's charge inside the daughter's energy.
+        // Prefix-only vertices (including the old root) are removed from the
+        // view so they cannot win the farthest-vertex end_point search; any
+        // vertex still touched by a remaining member is kept.
+        // Refuses (returns 0) when the prefix is empty, would empty the
+        // shower, or new_start_vertex is invalid.  Caller must re-run
+        // update_particle_type / calculate_kinematics / set_kine_charge.
+        // Returns the number of segments peeled.  m_shower_id is untouched.
+        int detach_track_prefix(const std::vector<SegmentPtr>& prefix,
+                                VertexPtr new_start_vertex,
+                                const std::string& cloud_name_fit = "fit",
+                                const std::string& cloud_name_associate = "associate_points");
+
     private:
 
         Graph& m_full_graph;

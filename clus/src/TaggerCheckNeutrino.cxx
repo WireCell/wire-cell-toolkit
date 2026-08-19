@@ -550,6 +550,16 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_shower_pid_guard_min_len                  = get(config, "shower_pid_guard_min_len",                  m_shower_pid_guard_min_len);
     m_shower_vote_track_pid_counts              = get(config, "shower_vote_track_pid_counts",              m_shower_vote_track_pid_counts);
     m_shower_cone_absorb_guard               = get(config, "shower_cone_absorb_guard",               m_shower_cone_absorb_guard);
+    // doc pr/93 round 4
+    m_shower_detach_track_stem                  = get(config, "shower_detach_track_stem",                  m_shower_detach_track_stem);
+    m_kine_count_orphan_tracks                  = get(config, "kine_count_orphan_tracks",                  m_kine_count_orphan_tracks);
+    m_kine_orphan_track_min                     = get(config, "kine_orphan_track_min",                     m_kine_orphan_track_min);
+    m_straight_cont_cross_cluster               = get(config, "straight_cont_cross_cluster",               m_straight_cont_cross_cluster);
+    m_sccc_bridge_body                          = get(config, "sccc_bridge_body",                          m_sccc_bridge_body);
+    m_sccc_max_gap                              = get(config, "sccc_max_gap",                              m_sccc_max_gap);
+    m_sccc_kink_max                             = get(config, "sccc_kink_max",                             m_sccc_kink_max);
+    m_sccc_gap_aligned                          = get(config, "sccc_gap_aligned",                          m_sccc_gap_aligned);
+    m_sccc_kink_tight                           = get(config, "sccc_kink_tight",                           m_sccc_kink_tight);
     m_single_muon_proton_chain_veto             = get(config, "single_muon_proton_chain_veto",             m_single_muon_proton_chain_veto);
     m_single_muon_long_muon_claim               = get(config, "single_muon_long_muon_claim",               m_single_muon_long_muon_claim);
     m_pid_flag_reconcile                        = get(config, "pid_flag_reconcile",                        m_pid_flag_reconcile);
@@ -877,6 +887,15 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["shower_pid_guard_min_len"]                  = m_shower_pid_guard_min_len;                  // cm; shared Cause A/B floor, inert while both off
     cfg["shower_vote_track_pid_counts"]              = m_shower_vote_track_pid_counts;              // doc pr/93 Cause C; false = legacy (only confirmed protons count as track)
     cfg["shower_cone_absorb_guard"]               = m_shower_cone_absorb_guard;               // doc pr/93 Cause D; false = legacy (pass-3 direction-cone absorber unguarded)
+    cfg["shower_detach_track_stem"]                  = m_shower_detach_track_stem;                  // doc pr/93 r4; false = legacy (track-headed shower keeps its stem)
+    cfg["kine_count_orphan_tracks"]                  = m_kine_count_orphan_tracks;                  // doc pr/93 r4; false = legacy (graph-disconnected confident tracks absent from kine)
+    cfg["kine_orphan_track_min"]                     = m_kine_orphan_track_min;                     // cm; only read when kine_count_orphan_tracks
+    cfg["straight_cont_cross_cluster"]               = m_straight_cont_cross_cluster;               // doc pr/93 r4; false = legacy (no cross-cluster continuation demotion)
+    cfg["sccc_bridge_body"]                          = m_sccc_bridge_body;                          // doc pr/93 r4; false = demote-only (no bridge replay)
+    cfg["sccc_max_gap"]                              = m_sccc_max_gap;                              // cm; base tier, only read when straight_cont_cross_cluster
+    cfg["sccc_kink_max"]                             = m_sccc_kink_max;                             // degrees; base tier
+    cfg["sccc_gap_aligned"]                          = m_sccc_gap_aligned;                          // cm; aligned tier (tight collinearity buys reach)
+    cfg["sccc_kink_tight"]                           = m_sccc_kink_tight;                           // degrees; aligned tier
     cfg["single_muon_proton_chain_veto"]             = m_single_muon_proton_chain_veto;             // false = legacy (1-hop proton veto only)
     cfg["single_muon_long_muon_claim"]               = m_single_muon_long_muon_claim;               // false = legacy (long-muon chain never claims the vertex muon slot)
     cfg["pid_flag_reconcile"]                        = m_pid_flag_reconcile;                        // false = legacy (no late reconciliation pass)
@@ -1449,6 +1468,15 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
     pattern_algos.m_shower_pid_guard_min_len                  = m_shower_pid_guard_min_len * units::cm;      // doc pr/93 shared floor
     pattern_algos.m_shower_vote_track_pid_counts              = m_shower_vote_track_pid_counts;              // doc pr/93 Cause C
     pattern_algos.m_shower_cone_absorb_guard               = m_shower_cone_absorb_guard;               // doc pr/93 Cause D
+    pattern_algos.m_shower_detach_track_stem                  = m_shower_detach_track_stem;                  // doc pr/93 r4
+    pattern_algos.m_kine_count_orphan_tracks                  = m_kine_count_orphan_tracks;                  // doc pr/93 r4
+    pattern_algos.m_kine_orphan_track_min                     = m_kine_orphan_track_min * units::cm;         // doc pr/93 r4
+    pattern_algos.m_straight_cont_cross_cluster               = m_straight_cont_cross_cluster;               // doc pr/93 r4
+    pattern_algos.m_sccc_bridge_body                          = m_sccc_bridge_body;                          // doc pr/93 r4
+    pattern_algos.m_sccc_max_gap                              = m_sccc_max_gap * units::cm;                  // doc pr/93 r4
+    pattern_algos.m_sccc_kink_max                             = m_sccc_kink_max;                             // deg
+    pattern_algos.m_sccc_gap_aligned                          = m_sccc_gap_aligned * units::cm;              // doc pr/93 r4
+    pattern_algos.m_sccc_kink_tight                           = m_sccc_kink_tight;                           // deg
     pattern_algos.m_single_muon_proton_chain_veto             = m_single_muon_proton_chain_veto;             // doc pr/43 round 2 K1
     pattern_algos.m_single_muon_long_muon_claim               = m_single_muon_long_muon_claim;               // doc pr/43 round 2 K2
     pattern_algos.m_pid_flag_reconcile                        = m_pid_flag_reconcile;                        // doc pr/43 round 2 K3
@@ -1791,6 +1819,18 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
         dup_stage_census("improve_vertex", *pr_graph, *main_cluster);
         if (m_perf) SPDLOG_LOGGER_DEBUG(log, "TaggerCheckNeutrino timing: improve_vertex + examine_direction took {} ms", MS(Clock::now() - t0).count());
         t0 = Clock::now();
+
+        // doc pr/93 round 4 (straight_cont_cross_cluster): demote main-vertex
+        // shower-trajectory stems that are cross-cluster continuations of
+        // straight long tracks (pr/57 W-gap splits).  Here on purpose: after
+        // examine_direction (all clusters' segments exist in the graph, the
+        // trajectory pdg-11 stamp is written, orientations are final -- the
+        // pass preserves dirsign) and before shower_clustering_with_nv (the
+        // seeder consumes flags/pdg; any bridge request recorded here is
+        // replayed inside it, after its entry clears).  Knob off => early
+        // return => byte-identical.
+        pattern_algos.demote_cross_cluster_straight_stems(*pr_graph, final_main_vertex,
+                                                          particle_data(), m_recomb_model);
 
         // doc pr/83 r3 (sec 9.5 + the 359980 follow-up): non-main clusters
         // that went through find_proto_vertex -- as a swapped-out old main

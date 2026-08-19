@@ -2254,3 +2254,118 @@ void PatternAlgorithms::shower_determining_in_main_cluster(Graph& graph, Facade:
         // }
     }
 }
+
+// doc sbnd_xin/docs/pr/93 round 4 (straight_cont_cross_cluster) -- demote a
+// main-vertex kShowerTrajectory stem that is the CROSS-CLUSTER continuation
+// of a straight long track (SBND 18264-137238: a 14.6cm trajectory-flagged
+// stem in the main cluster, a pr/57 W-plane-gap over-clustering split at its
+// degree-1 tip, and the 81cm straight muon body 3-4cm away in another
+// cluster -- the whole chain became a fake "e- 152 MeV").  Runs between
+// examine_direction and shower_clustering_with_nv: all clusters' segments
+// exist in the graph, the pdg-11-with-score-100 trajectory stamp is already
+// written, and the shower seeder has not yet consumed flags/pdg.  Demotion =
+// clear the flag + re-PID via segment_determine_dir_track (the
+// NeutrinoVertexFinder re-examination precedent) with dirsign preserved --
+// examine_direction has already had the final word on orientation.  When
+// m_sccc_bridge_body is also on, records a bridge request that
+// shower_clustering_with_nv replays through nv_bridge_connect after its
+// entry clears (building the bridge here would be wiped by those clears).
+// Knob off => early return => byte-identical.
+void PatternAlgorithms::demote_cross_cluster_straight_stems(Graph& graph, VertexPtr main_vertex,
+                                                            const Clus::ParticleDataSet::pointer& particle_data,
+                                                            const IRecombinationModel::pointer& recomb_model)
+{
+    m_sccc_bridge_requests.clear();
+    m_sccc_shield_segs.clear();
+    if (!m_straight_cont_cross_cluster || !main_vertex || !main_vertex->descriptor_valid()) return;
+    // WCT_SCCC_DEBUG: stderr-only pass tape (byte-neutral).
+    static const bool sccc_dbg = std::getenv("WCT_SCCC_DEBUG") != nullptr;
+    if (sccc_dbg) {
+        std::fprintf(stderr, "SCCC pass: main_vtx_gidx=%zu gap=%.1f/%.1fcm kink=%.1f/%.1fdeg bridge=%d\n",
+                     main_vertex->get_graph_index(), m_sccc_max_gap / units::cm,
+                     m_sccc_gap_aligned / units::cm, m_sccc_kink_max, m_sccc_kink_tight,
+                     m_sccc_bridge_body ? 1 : 0);
+    }
+
+    StraightContCrossClusterParams cc;
+    cc.enable = true;
+    cc.max_gap = m_sccc_max_gap;
+    cc.max_kink_deg = m_sccc_kink_max;
+    cc.max_gap_aligned = m_sccc_gap_aligned;
+    cc.kink_tight_deg = m_sccc_kink_tight;
+
+    int n_demoted = 0;
+    for (auto edesc : sorted_out_edges(main_vertex->get_descriptor(), graph)) {
+        SegmentPtr sg = graph[edesc].segment;
+        if (!sg || !sg->descriptor_valid()) continue;
+        if (sccc_dbg) {
+            std::fprintf(stderr, "SCCC stem-cand: seg=%d len=%.1fcm traj=%d topo=%d\n",
+                         sg->id(), segment_track_length(sg) / units::cm,
+                         sg->flags_any(SegmentFlags::kShowerTrajectory) ? 1 : 0,
+                         sg->flags_any(SegmentFlags::kShowerTopology) ? 1 : 0);
+        }
+        // Trajectory-flagged stems only; topology has its own guarded family.
+        if (!sg->flags_any(SegmentFlags::kShowerTrajectory)) continue;
+        if (sg->flags_any(SegmentFlags::kShowerTopology)) continue;
+
+        SegmentPtr matched_sib = nullptr;
+        VertexPtr matched_vtx = nullptr;
+        if (!segment_is_straight_long_track_or_continuation(graph, sg, m_sccc_kink_max, cc,
+                                                            &matched_sib, &matched_vtx)) continue;
+        // The 3-arg same-cluster arms alone must NOT demote here -- that is
+        // pr/40 F11's (shower_traj_straight_guard's) jurisdiction at flag-set
+        // time.  Only a cross-cluster match (matched_sib filled) qualifies.
+        if (!matched_sib || !matched_vtx) continue;
+
+        const int old_pdg = (sg->has_particle_info() && sg->particle_info())
+                          ? sg->particle_info()->pdg() : 0;
+        const int dir_save = sg->dirsign();
+        sg->unset_flags(SegmentFlags::kShowerTrajectory);
+        // Re-PID as a track (replaces the trajectory branch's unconditional
+        // pdg-11/score-100 stamp); NeutrinoVertexFinder re-exam precedent.
+        const auto sdesc = sg->get_descriptor();
+        const auto source_v = boost::source(sdesc, graph);
+        const auto target_v = boost::target(sdesc, graph);
+        int start_n = boost::out_degree(source_v, graph);
+        int end_n = boost::out_degree(target_v, graph);
+        const auto& wcpts = sg->wcpts();
+        if (!wcpts.empty() &&
+            (graph[target_v].vertex->wcpt().point - wcpts.front().point).magnitude() < 0.01 * units::cm) {
+            std::swap(start_n, end_n);
+        }
+        segment_determine_dir_track(sg, start_n, end_n, particle_data, recomb_model,
+                                    m_mip_dqdx_median, false, track_pid_options());
+        if (sg->dirsign() != dir_save) {
+            SPDLOG_LOGGER_DEBUG(s_log,
+                "sccc demote: re-PID tried to flip dirsign {} -> {} on seg {}; restoring",
+                dir_save, sg->dirsign(), sg->id());
+            sg->dirsign(dir_save);
+        }
+        const int new_pdg = (sg->has_particle_info() && sg->particle_info())
+                          ? sg->particle_info()->pdg() : 0;
+        const auto* scl = sg->cluster();
+        Facade::Cluster* bcl = matched_sib->cluster();
+        SPDLOG_LOGGER_DEBUG(s_log,
+            "sccc demote: seg id={} cluster={} len_cm={:.1f} pdg {} -> {} sib id={} sib_cluster={} "
+            "sib_len_cm={:.1f}",
+            sg->id(), scl ? scl->get_cluster_id() : -1,
+            segment_track_length(sg) / units::cm, old_pdg, new_pdg,
+            matched_sib->id(), bcl ? bcl->get_cluster_id() : -1,
+            segment_track_length(matched_sib) / units::cm);
+        ++n_demoted;
+        m_sccc_shield_segs.insert(sg);   // keep the retarget off the demoted stem
+
+        if (m_sccc_bridge_body && bcl) {
+            // Main-side anchor = the stem's degree-1 tip = the far vertex
+            // (relative to the main vertex) of sg.
+            VertexPtr tip = find_other_vertex(graph, sg, main_vertex);
+            if (tip && tip->descriptor_valid()) {
+                m_sccc_bridge_requests.push_back({tip, bcl, matched_vtx});
+            }
+        }
+    }
+    if (n_demoted) {
+        SPDLOG_LOGGER_DEBUG(s_log, "sccc: {} stem(s) demoted, {} bridge request(s)",
+                            n_demoted, m_sccc_bridge_requests.size());
+    }
+}

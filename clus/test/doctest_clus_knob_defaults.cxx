@@ -175,6 +175,16 @@ TEST_CASE("clus knob defaults: TaggerCheckNeutrino switches are all OFF")
     CHECK_KNOB_NUM(cfg, "shower_pid_guard_min_len", 50.0);                    // cm; inert while Cause A/B off
     CHECK_KNOB_BOOL(cfg, "shower_vote_track_pid_counts", false);              // Cause C (292643)
     CHECK_KNOB_BOOL(cfg, "shower_cone_absorb_guard", false);               // Cause D (315167)
+    // doc pr/93 round 4 -- PF-hierarchy fine-tunes + 137238 cross-cluster muon.
+    CHECK_KNOB_BOOL(cfg, "shower_detach_track_stem", false);                  // r4 (348471, 292643)
+    CHECK_KNOB_BOOL(cfg, "kine_count_orphan_tracks", false);                  // r4 (315167)
+    CHECK_KNOB_NUM(cfg, "kine_orphan_track_min", 50.0);                       // cm; read only when on
+    CHECK_KNOB_BOOL(cfg, "straight_cont_cross_cluster", false);               // r4 (137238)
+    CHECK_KNOB_BOOL(cfg, "sccc_bridge_body", false);                          // r4 second rung
+    CHECK_KNOB_NUM(cfg, "sccc_max_gap", 5.0);                                 // cm; base tier
+    CHECK_KNOB_NUM(cfg, "sccc_kink_max", 15.0);                               // deg; base tier
+    CHECK_KNOB_NUM(cfg, "sccc_gap_aligned", 12.0);                            // cm; aligned tier
+    CHECK_KNOB_NUM(cfg, "sccc_kink_tight", 7.5);                              // deg; aligned tier
     // doc pr/43 round 2 -- three PID-consistency knobs (K1/K2/K3).
     CHECK_KNOB_BOOL(cfg, "single_muon_proton_chain_veto", false);
     CHECK_KNOB_BOOL(cfg, "single_muon_long_muon_claim", false);
@@ -1116,4 +1126,7 @@ TEST_CASE("clus knob defaults: MultiAlgBlobClustering BeePFConfig pf switches ar
     CHECK(pfc.pf_pseudo_gap_from_main == false);         // doc pr/84 r2 F2
     CHECK(pfc.pf_unique_node_ids == false);              // doc pr/84 r3 G1
     CHECK(pfc.pf_drop_stray_satellites == false);        // doc pr/92
+    CHECK(pfc.pf_orphan_confident_track == false);       // doc pr/93 r4 (315167)
+    CHECK(pfc.pf_orphan_track_min == 50.0 * WireCell::units::cm);  // read only when on
+    CHECK(pfc.pf_track_owns_loose_vertex == false);      // doc pr/93 r4 (69314)
 }

@@ -4,6 +4,7 @@
 #include "WireCellClus/PRGraph.h"
 #include "WireCellUtil/Units.h"
 #include "WireCellUtil/Logging.h"
+#include "WireCellUtil/GraphTools.h"  // doc pr/93 r4: mir() for the orphan-track pass
 #include <cmath>
 #include <cstdlib>
 #include <iostream>
@@ -14,6 +15,7 @@ static auto s_log = WireCell::Log::logger("clus.NeutrinoPattern");
 using namespace WireCell::Clus::PR;
 using namespace WireCell::Clus;
 using namespace WireCell;
+using WireCell::GraphTools::mir;  // doc pr/93 r4
 
 // init_tagger_info: reset a TaggerInfo struct to its default values.
 // In the toolkit we rely on C++ default-member-initializers on the struct
@@ -457,6 +459,50 @@ KineInfo PatternAlgorithms::fill_kine_tree(
         // since push_shower_kine would have already handled them in the BFS phase
 
         used_showers.insert(shower);
+    }
+
+    // -------------------------------------------------------------------------
+    // doc sbnd_xin/docs/pr/93 round 4 (kine_count_orphan_tracks): count
+    // confident straight-long main-cluster track segments that neither the
+    // main-vertex BFS nor any shower claimed.  Such segments exist because
+    // shower_cone_absorb_guard frees a graph-disconnected track from shower
+    // membership (SBND 18255-315167: a 150.7cm pdg-2212 score-0.101 proton,
+    // ~595 MeV KE, silently absent from kine_reco_Enu).  Shares
+    // segment_orphan_confident_track with the PF-side pf_orphan_confident_
+    // track knob so the two outputs describe the same particle set.
+    // C++ default false => no pass => byte-identical.
+    // -------------------------------------------------------------------------
+    if (m_kine_count_orphan_tracks) {
+        const auto* main_cl = main_vertex->cluster();
+        // Deterministic candidate order: collect then sort by graph edge
+        // index -- never pointer order.
+        std::vector<std::pair<size_t, SegmentPtr>> orphan_cands;
+        for (auto edesc : mir(boost::edges(graph))) {
+            SegmentPtr seg = graph[edesc].segment;
+            if (!seg || !seg->descriptor_valid()) continue;
+            if (used_segments.count(seg)) continue;
+            if (map_sg_shower.count(seg)) continue;   // shower starts stay shower-owned
+            const auto* cl = seg->cluster();
+            if (!main_cl || !cl || cl->get_cluster_id() != main_cl->get_cluster_id()) continue;
+            if (!segment_orphan_confident_track(seg, m_kine_orphan_track_min)) continue;
+            orphan_cands.emplace_back(graph[edesc].index, seg);
+        }
+        std::sort(orphan_cands.begin(), orphan_cands.end(),
+                  [](const auto& a, const auto& b) { return a.first < b.first; });
+        size_t n_orphan = 0;
+        for (const auto& [eidx, seg] : orphan_cands) {
+            used_segments.insert(seg);
+            const int pdg = push_segment_kine(seg, 1);
+            ++n_orphan;
+            SPDLOG_LOGGER_INFO(s_log,
+                "kine_count_orphan_tracks: COUNT seg idx={} cluster={} pdg={} ke_mev={:.2f} len_cm={:.1f}",
+                eidx, seg->cluster()->get_cluster_id(), pdg,
+                (seg->particle_info() ? seg->particle_info()->kinetic_energy() / units::MeV : 0.0),
+                segment_track_length(seg) / units::cm);
+        }
+        if (n_orphan) {
+            SPDLOG_LOGGER_INFO(s_log, "kine_count_orphan_tracks: {} orphan track(s) added", n_orphan);
+        }
     }
 
     // -------------------------------------------------------------------------

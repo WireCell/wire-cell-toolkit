@@ -490,6 +490,20 @@ namespace WireCell::Clus::PR {
     /// dQ/dx-template PID's own confident verdicts block the overwrite.
     bool segment_confident_nonelectron_pid(SegmentPtr seg);
 
+    /// doc sbnd_xin/docs/pr/93 round 4 -- orphan-track rescue predicate
+    /// SHARED by fill_bee_pf_tree (pf_orphan_confident_track) and
+    /// fill_kine_tree (kine_count_orphan_tracks) so the two sides cannot
+    /// drift.  True iff `seg` carries a confident non-electron template PID
+    /// (segment_confident_nonelectron_pid), is longer than `min_len`, and is
+    /// straight-long (segment_is_straight_long_track defaults).  Motivating
+    /// tape: SBND 18255-315167's 150.7cm pdg-2212 score-0.101 proton, freed
+    /// from shower membership by shower_cone_absorb_guard but graph-
+    /// disconnected from the main vertex, so neither the PF main-vertex BFS
+    /// nor the kine BFS ever reaches it and its ~595 MeV KE vanishes from
+    /// both outputs.  Cluster membership (main-cluster test) stays a
+    /// CALLER-side conjunct: the "main cluster" notion differs per context.
+    bool segment_orphan_confident_track(SegmentPtr seg, double min_len);
+
     /// doc sbnd_xin/docs/pr/74 round 2 P1 -- veto for examine_direction's
     /// flag_shower_in cascade (the |pdg|==13/pdg==0 electron relabel).
     /// True iff `seg` is BOTH long (track length > max_len) AND MIP-like
@@ -625,6 +639,52 @@ namespace WireCell::Clus::PR {
     /// (deterministic).  Pure predicate: no graph or segment mutation.
     bool segment_is_straight_long_track_or_continuation(Graph& graph, SegmentPtr seg,
                                                         double max_kink_deg = 25.0);
+
+    /// doc sbnd_xin/docs/pr/93 round 4 (straight_cont_cross_cluster) --
+    /// parameters for the CROSS-CLUSTER arm of the continuation predicate
+    /// below.  A pr/57-class W-plane-gap over-clustering split leaves one
+    /// physical straight muon as two graph components: a short stem in the
+    /// main cluster ending at a degree-1 vertex, and the body a few cm away
+    /// in another cluster (SBND 18264-137238: 14.6cm kShowerTrajectory stem,
+    /// 3-4cm gap, 81cm straight body).  The same-cluster-only continuation
+    /// cannot see across the split, so shower_traj_straight_guard never
+    /// demotes the stem and the whole chain becomes a fake electron.
+    /// Two-tier geometric gate (owner-requested): a base tier
+    /// (max_gap, max_kink_deg) and an ALIGNED tier that buys a larger gap
+    /// with a much tighter collinearity (max_gap_aligned, kink_tight_deg) --
+    /// pr/57:1336 records a 53-deg LOCAL kink at this break class, so the
+    /// short-stub tangents can be noisy and the tight-angle long-lever arm
+    /// is the robust one.  enable=false => the overload below degrades to
+    /// the 3-arg function exactly.
+    struct StraightContCrossClusterParams {
+        bool   enable{false};
+        double max_gap{5 * units::cm};          // base-tier gap ceiling
+        double max_kink_deg{15.0};              // base-tier collinearity ceiling (deg)
+        double max_gap_aligned{12 * units::cm}; // aligned-tier gap ceiling
+        double kink_tight_deg{7.5};             // aligned-tier collinearity ceiling (deg)
+    };
+
+    /// Cross-cluster-aware overload of the continuation predicate.  Runs the
+    /// same-cluster 3-arg logic first (all existing call sites keep using
+    /// the 3-arg function and are byte-identical); if that fails and
+    /// cc.enable, searches for a continuation segment in ANOTHER cluster
+    /// across a degree-1 endpoint vertex: near endpoint within the two-tier
+    /// gap/collinearity gate (K = max of tangent kink and both
+    /// chord-alignment kinks, all via the 15cm tangent idiom; chord terms
+    /// skipped for sub-1cm gaps), candidate sane (not EM-flagged unless
+    /// segment_confident_nonelectron_pid), and the far side reaching
+    /// straight-long (itself, via its own same-cluster continuation, or as
+    /// the combined two-arm chain over the gap with the shared
+    /// 10cm/34cm/0.93 constants).  Candidate enumeration is by stable graph
+    /// edge index -- never pointer order; first qualifying candidate wins.
+    /// On success fills matched_sib / matched_vtx (the continuation segment
+    /// and its endpoint vertex nearest the gap) for the caller's bridge
+    /// bookkeeping.  Pure predicate: no graph or segment mutation.
+    bool segment_is_straight_long_track_or_continuation(Graph& graph, SegmentPtr seg,
+                                                        double max_kink_deg,
+                                                        const StraightContCrossClusterParams& cc,
+                                                        SegmentPtr* matched_sib = nullptr,
+                                                        VertexPtr* matched_vtx = nullptr);
 
     /// Create and associate a DynamicPointCloud with a segment from path points
     ///

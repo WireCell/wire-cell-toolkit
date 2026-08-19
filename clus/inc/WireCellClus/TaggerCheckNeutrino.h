@@ -688,6 +688,17 @@ public:
         double m_shower_pid_guard_min_len{50};                      // cm; shared Cause A/B floor, inert while both off
         bool m_shower_vote_track_pid_counts{false};                 // doc pr/93 Cause C (292643)
         bool m_shower_cone_absorb_guard{false};                  // doc pr/93 Cause D (315167)
+        // doc pr/93 round 4 -- rationale comments in NeutrinoPatternBase.h
+        // (pr/93 round-4 blocks).
+        bool m_shower_detach_track_stem{false};                     // doc pr/93 r4 (348471, 292643)
+        bool m_kine_count_orphan_tracks{false};                     // doc pr/93 r4 (315167)
+        double m_kine_orphan_track_min{50};                         // cm; scaled at copy
+        bool m_straight_cont_cross_cluster{false};                  // doc pr/93 r4 (137238)
+        bool m_sccc_bridge_body{false};                             // doc pr/93 r4 second rung
+        double m_sccc_max_gap{5};                                   // cm; base tier
+        double m_sccc_kink_max{15.0};                               // deg; base tier
+        double m_sccc_gap_aligned{12};                              // cm; aligned tier
+        double m_sccc_kink_tight{7.5};                              // deg; aligned tier
         bool m_single_muon_proton_chain_veto{false};                // doc pr/43 round 2 K1
         bool m_single_muon_long_muon_claim{false};                  // doc pr/43 round 2 K2
         bool m_pid_flag_reconcile{false};                           // doc pr/43 round 2 K3

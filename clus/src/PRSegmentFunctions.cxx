@@ -1708,6 +1708,13 @@ namespace WireCell::Clus::PR {
         return seg->particle_score() < 1.0;
     }
 
+    // doc sbnd_xin/docs/pr/93 round 4 -- see the header comment.
+    bool segment_orphan_confident_track(SegmentPtr seg, double min_len) {
+        if (!segment_confident_nonelectron_pid(seg)) return false;
+        if (segment_track_length(seg) <= min_len) return false;
+        return segment_is_straight_long_track(seg);
+    }
+
     // doc sbnd_xin/docs/pr/40 round 2 F5 -- see the header comment.
     bool segment_has_proton_daughter(Graph& graph, SegmentPtr seg, VertexPtr main_vertex, double MIP_dQdx) {
         static const bool dbg = std::getenv("WCT_PROTON_DAUGHTER_DEBUG") != nullptr;
@@ -1951,6 +1958,134 @@ namespace WireCell::Clus::PR {
                     (direct >= 34 * units::cm || direct > 0.93 * len)) {
                     return true;
                 }
+            }
+        }
+        return false;
+    }
+
+    // doc sbnd_xin/docs/pr/93 round 4 -- see the header comment.
+    bool segment_is_straight_long_track_or_continuation(Graph& graph, SegmentPtr seg,
+                                                        double max_kink_deg,
+                                                        const StraightContCrossClusterParams& cc,
+                                                        SegmentPtr* matched_sib,
+                                                        VertexPtr* matched_vtx)
+    {
+        if (segment_is_straight_long_track_or_continuation(graph, seg, max_kink_deg)) return true;
+        if (!cc.enable) return false;
+        if (!seg || seg->fits().empty()) return false;
+        // WCT_SCCC_DEBUG: stderr-only candidate tape (byte-neutral).
+        static const bool sccc_dbg = std::getenv("WCT_SCCC_DEBUG") != nullptr;
+
+        // angle between two vectors, degrees; -1 = unmeasurable
+        auto vec_angle_deg = [](const WireCell::Vector& a, const WireCell::Vector& b) -> double {
+            const double ma = a.magnitude(), mb = b.magnitude();
+            if (ma <= 0 || mb <= 0) return -1;
+            const double cosang = std::max(-1.0, std::min(1.0, a.dot(b) / (ma * mb)));
+            return std::acos(cosang) / M_PI * 180.0;
+        };
+        const double gap_ceiling = std::max(cc.max_gap, cc.max_gap_aligned);
+
+        auto [va, vb] = find_vertices(graph, seg);
+        for (VertexPtr vtx : {va, vb}) {
+            if (!vtx || !vtx->descriptor_valid()) continue;
+            if (sccc_dbg) {
+                std::fprintf(stderr, "SCCC seg=%d vtx_gidx=%zu deg=%zu\n",
+                             seg->id(), vtx->get_graph_index(),
+                             (size_t)boost::out_degree(vtx->get_descriptor(), graph));
+            }
+            // degree-1 tip: no same-cluster sibling exists -- the pr/57
+            // over-clustering split signature.
+            if (boost::out_degree(vtx->get_descriptor(), graph) != 1) continue;
+            WireCell::Point vtx_pt = vtx->fit().valid() ? vtx->fit().point
+                                                        : vtx->wcpt().point;
+            const WireCell::Vector dir_seg = segment_cal_dir_3vector(seg, vtx_pt, 15 * units::cm);
+            if (dir_seg.magnitude() <= 0) continue;   // unmeasurable tangent
+
+            // Candidates in stable graph-edge-index order (never pointer order).
+            std::vector<std::pair<size_t, SegmentPtr>> cands;
+            for (auto [eit, eend] = boost::edges(graph); eit != eend; ++eit) {
+                SegmentPtr sib = graph[*eit].segment;
+                if (!sib || sib == seg || sib->fits().empty()) continue;
+                if (sib->cluster() == seg->cluster()) continue;   // cross-cluster only
+                cands.emplace_back(graph[*eit].index, sib);
+            }
+            std::sort(cands.begin(), cands.end(),
+                      [](const auto& a, const auto& b) { return a.first < b.first; });
+
+            for (const auto& [eidx, sib] : cands) {
+                const auto& sfits = sib->fits();
+                const bool front_near = (sfits.front().point - vtx_pt).magnitude() <=
+                                        (sfits.back().point - vtx_pt).magnitude();
+                WireCell::Point near_pt = front_near ? sfits.front().point : sfits.back().point;
+                const WireCell::Vector chord = near_pt - vtx_pt;
+                const double g = chord.magnitude();
+                if (g <= 0 || g > gap_ceiling) continue;
+
+                const WireCell::Vector dir_sib = segment_cal_dir_3vector(sib, near_pt, 15 * units::cm);
+                if (dir_sib.magnitude() <= 0) continue;
+                // Both tangents point AWAY from the junction: straight = 180
+                // deg apart.  Chord points from the stem tip toward the
+                // continuation: straight means anti-parallel to dir_seg and
+                // parallel to dir_sib.  K = worst of the applicable kinks.
+                const double a_tan = vec_angle_deg(dir_seg, dir_sib);
+                if (a_tan < 0) continue;
+                double K = 180.0 - a_tan;
+                if (g >= 1 * units::cm) {   // skip chord terms for degenerate gaps
+                    const double a_ch1 = vec_angle_deg(dir_seg, chord);
+                    const double a_ch2 = vec_angle_deg(dir_sib, chord);
+                    if (a_ch1 < 0 || a_ch2 < 0) continue;
+                    K = std::max(K, 180.0 - a_ch1);
+                    K = std::max(K, a_ch2);
+                }
+                // Two-tier gate: base OR aligned (tight collinearity buys reach).
+                const bool tier_ok = (g <= cc.max_gap && K <= cc.max_kink_deg) ||
+                                     (g <= cc.max_gap_aligned && K <= cc.kink_tight_deg);
+                if (sccc_dbg && g <= cc.max_gap_aligned) {
+                    std::fprintf(stderr,
+                        "SCCC seg=%d cand=%d g=%.2fcm K=%.1f k_tan=%.1f tier_ok=%d\n",
+                        seg->id(), sib->id(), g / units::cm, K, 180.0 - a_tan, tier_ok ? 1 : 0);
+                }
+                if (!tier_ok) continue;
+                // pr/57 leakage bound: a genuinely EM-shaped candidate must
+                // not carry the demotion across the gap.
+                if ((sib->flags_any(SegmentFlags::kShowerTopology) ||
+                     sib->flags_any(SegmentFlags::kShowerTrajectory)) &&
+                    !segment_confident_nonelectron_pid(sib)) continue;
+
+                // The far side must reach straight-long: itself / its own
+                // same-cluster continuation (3-arg overload -- no recursion
+                // into this cross-cluster arm) / combined two-arm chain.
+                bool far_ok = segment_is_straight_long_track_or_continuation(graph, sib, max_kink_deg);
+                if (!far_ok) {
+                    auto seg_far_pt = [](SegmentPtr s, const WireCell::Point& ref) {
+                        const auto& f = s->fits();
+                        return ((f.front().point - ref).magnitude() >
+                                (f.back().point - ref).magnitude()) ? f.front().point
+                                                                    : f.back().point;
+                    };
+                    const double len = segment_track_length(seg) + g + segment_track_length(sib);
+                    const double direct = (seg_far_pt(seg, vtx_pt) - seg_far_pt(sib, near_pt)).magnitude();
+                    far_ok = len > 10 * units::cm &&
+                             (direct >= 34 * units::cm || direct > 0.93 * len);
+                }
+                if (!far_ok) continue;
+
+                if (matched_sib) *matched_sib = sib;
+                if (matched_vtx) {
+                    auto [sa, sb] = find_vertices(graph, sib);
+                    auto vpt = [](VertexPtr v) {
+                        return v->fit().valid() ? v->fit().point : v->wcpt().point;
+                    };
+                    VertexPtr nearest = nullptr;
+                    if (sa && sb) {
+                        nearest = ((vpt(sa) - vtx_pt).magnitude() <=
+                                   (vpt(sb) - vtx_pt).magnitude()) ? sa : sb;
+                    } else {
+                        nearest = sa ? sa : sb;
+                    }
+                    *matched_vtx = nearest;
+                }
+                return true;
             }
         }
         return false;

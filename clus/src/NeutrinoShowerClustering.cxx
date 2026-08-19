@@ -868,6 +868,15 @@ void PatternAlgorithms::shower_clustering_connecting_to_main_vertex(Graph& graph
                 continue;
             }
 
+            // doc pr/93 round 4 (straight_cont_cross_cluster): a stem the
+            // demotion pass claimed as the head of a cross-cluster muon
+            // chain must not seed a conn-1 shower here (measured on
+            // 18264-137238: this pass re-captured the demoted 14.6cm stem).
+            // Empty set when the knob is off => byte-identical.
+            if (m_straight_cont_cross_cluster && m_sccc_shield_segs.count(sg)) {
+                continue;
+            }
+
             // Create a new shower
             ShowerPtr shower = std::make_shared<Shower>(graph);
             shower->set_start_vertex(main_vertex, 1);
@@ -1416,6 +1425,59 @@ void PatternAlgorithms::shower_clustering_with_nv_from_main_cluster(Graph& graph
 // charge to fit).  sg1 keeps its own pdg: the F10 G2 lesson says ordinary
 // track PID owns that decision once the electron overwrite is out of the
 // way.
+// doc sbnd_xin/docs/pr/93 round 4 -- the connect/register tail of
+// nv_bridge_track (pr/40 round 9 B2), factored out verbatim so the sccc
+// bridge replay (straight_cont_cross_cluster + sccc_bridge_body) can reuse
+// it: find-or-create the synthetic main-cluster zero-charge bridge segment
+// (a REAL graph edge -- the load-bearing piece for BOTH the PF and kine
+// BFSes), shield the bridge + the rescued cluster's own segments from every
+// shower flood-fill/absorber (the pr/54 lesson), and record the cluster id
+// for shower_clustering_in_other_clusters and the PF-side
+// pf_track_bridged_clusters gate (transported via TrackFitting).  Returns
+// the bridge segment, or nullptr on failure.  Byte-identical refactor: the
+// only caller-visible difference from the inlined original is that
+// half1/half2 shielding stays at the nv_bridge_track call site.
+SegmentPtr PatternAlgorithms::nv_bridge_connect(Graph& graph, Facade::Cluster* main_cluster,
+                                                Facade::Cluster* cluster, VertexPtr vertex,
+                                                VertexPtr far_vtx,
+                                                const std::vector<SegmentPtr>& cluster_segs,
+                                                TrackFitting& track_fitter,
+                                                IDetectorVolumes::pointer dv)
+{
+    if (!far_vtx || far_vtx == vertex) return nullptr;
+
+    SegmentPtr bridge = find_segment(graph, vertex, far_vtx);
+    if (!bridge) {
+        // Stamped main_cluster: same_cluster(bridge) holds in
+        // fill_bee_pf_tree and the absorber guards treat it as claimed.
+        std::vector<Facade::geo_point_t> pp{vertex->wcpt().point, far_vtx->wcpt().point};
+        bridge = create_segment_for_cluster(*main_cluster, dv, pp, 0);
+        if (!bridge) return nullptr;
+        // Two synthetic zero-charge fits: downstream consumers (nusel
+        // taggers) call fits().front()/back() unguarded, and an empty-fits
+        // segment adjacent to the main vertex would be a novel state.
+        WireCell::Point p0 = vertex->fit().valid() ? vertex->fit().point : vertex->wcpt().point;
+        WireCell::Point p1 = far_vtx->fit().valid() ? far_vtx->fit().point : far_vtx->wcpt().point;
+        const double glen = (p1 - p0).magnitude();
+        PR::Fit f0, f1;
+        f0.point = p0; f0.index = 0; f0.dQ = 0; f0.dx = glen / 2;
+        f1.point = p1; f1.index = 1; f1.dQ = 0; f1.dx = glen / 2;
+        bridge->fits({f0, f1});
+        add_segment(graph, bridge, vertex, far_vtx);
+    }
+
+    // Shield the bridge and the rescued cluster's own segments from every
+    // shower flood-fill/absorber (the pr/54 lesson), and record the cluster
+    // id both for shower_clustering_in_other_clusters and for the PF-side
+    // pf_track_bridged_clusters gate (transported via TrackFitting).
+    m_nv_bridge_shield_segs.insert(bridge);
+    for (const auto& s : cluster_segs) m_nv_bridge_shield_segs.insert(s);
+    m_nv_bridge_cluster_ids.insert(cluster->get_cluster_id());
+    track_fitter.add_bridged_cluster_id(cluster->get_cluster_id());
+
+    return bridge;
+}
+
 bool PatternAlgorithms::nv_bridge_track(Graph& graph, Facade::Cluster* main_cluster,
                                         Facade::Cluster* cluster, SegmentPtr sg1, VertexPtr vertex,
                                         const WireCell::Point& point,
@@ -1460,38 +1522,11 @@ bool PatternAlgorithms::nv_bridge_track(Graph& graph, Facade::Cluster* main_clus
             far_vtx = v1 ? v1 : v2;
         }
     }
-    if (!far_vtx || far_vtx == vertex) return false;
-
-    SegmentPtr bridge = find_segment(graph, vertex, far_vtx);
-    if (!bridge) {
-        // Stamped main_cluster: same_cluster(bridge) holds in
-        // fill_bee_pf_tree and the absorber guards treat it as claimed.
-        std::vector<Facade::geo_point_t> pp{vertex->wcpt().point, far_vtx->wcpt().point};
-        bridge = create_segment_for_cluster(*main_cluster, dv, pp, 0);
-        if (!bridge) return false;
-        // Two synthetic zero-charge fits: downstream consumers (nusel
-        // taggers) call fits().front()/back() unguarded, and an empty-fits
-        // segment adjacent to the main vertex would be a novel state.
-        WireCell::Point p0 = vertex->fit().valid() ? vertex->fit().point : vertex->wcpt().point;
-        WireCell::Point p1 = far_vtx->fit().valid() ? far_vtx->fit().point : far_vtx->wcpt().point;
-        const double glen = (p1 - p0).magnitude();
-        PR::Fit f0, f1;
-        f0.point = p0; f0.index = 0; f0.dQ = 0; f0.dx = glen / 2;
-        f1.point = p1; f1.index = 1; f1.dQ = 0; f1.dx = glen / 2;
-        bridge->fits({f0, f1});
-        add_segment(graph, bridge, vertex, far_vtx);
-    }
-
-    // Shield the bridge and the rescued cluster's own segments from every
-    // shower flood-fill/absorber (the pr/54 lesson), and record the cluster
-    // id both for shower_clustering_in_other_clusters and for the PF-side
-    // pf_track_bridged_clusters gate (transported via TrackFitting).
-    m_nv_bridge_shield_segs.insert(bridge);
-    for (const auto& s : cluster_segs) m_nv_bridge_shield_segs.insert(s);
+    SegmentPtr bridge = nv_bridge_connect(graph, main_cluster, cluster, vertex, far_vtx,
+                                          cluster_segs, track_fitter, dv);
+    if (!bridge) return false;
     if (half1) m_nv_bridge_shield_segs.insert(half1);
     if (half2) m_nv_bridge_shield_segs.insert(half2);
-    m_nv_bridge_cluster_ids.insert(cluster->get_cluster_id());
-    track_fitter.add_bridged_cluster_id(cluster->get_cluster_id());
 
     SPDLOG_LOGGER_DEBUG(s_log,
         "pr40r9 nv_bridge: cluster {} -> main {} gap={:.2f}cm sg1={} len={:.2f}cm broke={}",
@@ -1601,6 +1636,15 @@ void PatternAlgorithms::shower_clustering_with_nv_from_vertices(Graph& graph, Ve
     Facade::compute_wireplane_params(wpids, dv, wpid_params, wpid_U_dir, wpid_V_dir, wpid_W_dir, apas);
     
     for (auto cluster : other_clusters) {
+        // doc pr/93 round 4 (straight_cont_cross_cluster): a cluster the
+        // sccc replay already bridged as a muon-body chain is a TRACK
+        // continuation, not an EM-shower candidate -- without this skip,
+        // Path C broke the bridged cluster's entry stub off as a conn-2
+        // electron (18264-137238).  Scoped to replay-bridged ids only:
+        // nv_bridge_track's own Step-5 population keeps legacy behavior.
+        // Empty set when the knob is off => byte-identical.
+        if (m_straight_cont_cross_cluster &&
+            m_sccc_bridged_cluster_ids.count(cluster->get_cluster_id())) continue;
         auto cpi = map_cluster_center_point.find(cluster);
         if (cpi == map_cluster_center_point.end()) continue;
         auto& center_pair = cpi->second;
@@ -3239,6 +3283,14 @@ void PatternAlgorithms::examine_showers(Graph& graph, VertexPtr main_vertex, Ind
             double sg_length = segment_track_length(sg);
             if ((sg_length > 45 * units::cm && !seg_dir_weak(sg)) || sg_length > 55 * units::cm) continue;
 
+            // doc pr/93 round 4 (straight_cont_cross_cluster): a stem the
+            // demotion pass claimed as the head of a cross-cluster muon
+            // chain must not be re-adopted (and re-stamped pdg 11 with the
+            // score-100 sentinel, which shower_accept_pid_guard cannot
+            // decline) by this retarget.  Empty set when the knob is off =>
+            // byte-identical.
+            if (m_straight_cont_cross_cluster && m_sccc_shield_segs.count(sg)) continue;
+
             auto seg_edesc = sg->get_descriptor();
             VertexPtr v1   = graph[boost::source(seg_edesc, graph)].vertex;
             VertexPtr v2   = graph[boost::target(seg_edesc, graph)].vertex;
@@ -4320,6 +4372,7 @@ void PatternAlgorithms::shower_clustering_with_nv(int acc_segment_id, IndexedSho
     m_nv_bridge_shield_segs.clear();
     m_nv_bridge_cluster_ids.clear();
     track_fitter.clear_bridged_cluster_ids();
+    m_sccc_bridged_cluster_ids.clear();
     if (m_shower_absorb_unreachable_main && main_vertex && main_cluster) {
         for (const auto& seg : unreachable_segments(graph, main_vertex)) {
             if (seg && seg->cluster() == main_cluster) {
@@ -4388,6 +4441,52 @@ void PatternAlgorithms::shower_clustering_with_nv(int acc_segment_id, IndexedSho
     t_from_main_cluster = MS(Clock::now() - t0); t0 = Clock::now();
     // check_used_shower_cluster_933("shower_clustering_with_nv_from_main_cluster");
     
+    // doc sbnd_xin/docs/pr/93 round 4 (sccc_bridge_body): replay the bridge
+    // requests recorded by demote_cross_cluster_straight_stems.  The pass
+    // itself runs BEFORE this function (between examine_direction and the
+    // shower seeding), but the three bridge-state containers are cleared at
+    // this function's entry -- so the pre-pass only RECORDS
+    // {stem tip vertex, continuation cluster, continuation vertex} and the
+    // actual nv_bridge_connect (real graph edge + shields + bridged-cluster
+    // ids) happens HERE, at the same point in the pass sequence where
+    // nv_bridge_track itself fires (inside from_vertices): passes 1-3
+    // (in_main_cluster / connecting_to_main_vertex / from_main_cluster) see
+    // the PRE-bridge graph exactly as legacy.  Replaying any earlier
+    // exposes the bridged cluster to pass 2, which re-forms a conn-1
+    // shower on the demoted stem (measured on 18264-137238: stem + entry
+    // stubs re-labelled "e- 116 MeV" and the 81cm muon body orphaned).
+    // The pr/65 unreachable-set invariant also holds (a bridge edge cannot
+    // un-island a main-cluster segment).  Knob off => empty vector =>
+    // byte-identical.
+    if (!m_sccc_bridge_requests.empty() && main_cluster) {
+        for (const auto& req : m_sccc_bridge_requests) {   // recorded order (deterministic)
+            if (!req.cluster || !req.main_vtx || !req.far_vtx) continue;
+            // Deterministic cluster_segs: the continuation cluster's own
+            // segments in stable graph-edge-index order.
+            std::vector<std::pair<size_t, SegmentPtr>> csegs;
+            for (auto [eit, eend] = boost::edges(graph); eit != eend; ++eit) {
+                SegmentPtr s = graph[*eit].segment;
+                if (!s || s->cluster() != req.cluster) continue;
+                csegs.emplace_back(graph[*eit].index, s);
+            }
+            std::sort(csegs.begin(), csegs.end(),
+                      [](const auto& a, const auto& b) { return a.first < b.first; });
+            std::vector<SegmentPtr> cluster_segs;
+            cluster_segs.reserve(csegs.size());
+            for (const auto& [i, s] : csegs) cluster_segs.push_back(s);
+            SegmentPtr bridge = nv_bridge_connect(graph, main_cluster, req.cluster,
+                                                  req.main_vtx, req.far_vtx,
+                                                  cluster_segs, track_fitter, dv);
+            if (bridge) m_sccc_bridged_cluster_ids.insert(req.cluster->get_cluster_id());
+            SPDLOG_LOGGER_DEBUG(s_log,
+                "sccc bridge: cluster {} -> main {} main_vtx_idx={} far_vtx_idx={} bridge={}",
+                req.cluster->get_cluster_id(), main_cluster->get_cluster_id(),
+                req.main_vtx->get_graph_index(), req.far_vtx->get_graph_index(),
+                bridge ? "OK" : "FAILED");
+        }
+        m_sccc_bridge_requests.clear();
+    }
+
     // Shower clustering from vertices
     shower_clustering_with_nv_from_vertices(graph, main_vertex, main_cluster, other_clusters, showers,
                                            map_vertex_in_shower, map_segment_in_shower,
@@ -4469,6 +4568,119 @@ void PatternAlgorithms::shower_clustering_with_nv(int acc_segment_id, IndexedSho
                                         graph, track_fitter, dv, particle_data, recomb_model);
             SPDLOG_LOGGER_DEBUG(s_log,
                 "pr84 shower_dedup: absorbed {} shower(s); {} remain", n_absorbed, showers.size());
+        }
+    }
+
+    // doc sbnd_xin/docs/pr/93 round 4 (shower_detach_track_stem, SBND
+    // 18255-348471 + 18255-292643): a TRACK-HEADED shower -- one whose final
+    // start segment is a non-shower-flagged, non-zero, non-+-11-pdg track --
+    // is really "track + daughter EM shower" glued into one object.  Peel the
+    // main-cluster track prefix back into the track pool and re-root the
+    // shower at the prefix's far vertex (conn 2), so the PF tree renders
+    // "proton/pi+ track -> pseudo-gamma -> EM shower", kine costs the track
+    // by range (not shower charge + rest mass), and the pi0 pairing sees a
+    // real EM shower.  Placed after EVERY pass that creates/retargets/absorbs
+    // showers and before the pi0 finders / kinematics consumers, so
+    // everything downstream recomputes naturally.  This is a STRUCTURE fix
+    // on the final shower set, deliberately NOT keyed on the pr/93 round-3
+    // confident-score/50cm family: 292643's 22.9cm pi+ stem carries the
+    // score-100 sentinel and sits under the floor.  Long-muon pseudo-showers
+    // (cached type +-13, the discriminant every consumer already routes on)
+    // are exempt.  C++ default false => no pass => byte-identical.
+    if (m_shower_detach_track_stem) {
+        int n_detached = 0;
+        for (auto& shower : showers) {                       // IndexedShowerSet order
+            VertexPtr sv = shower->start_vertex();
+            SegmentPtr ss = shower->start_segment();
+            if (!sv || !ss || !ss->descriptor_valid()) continue;
+            if (std::abs(shower->get_particle_type()) == 13) continue;   // long-muon pseudo-shower
+            if (segments_in_long_muon.count(ss)) continue;               // belt and braces
+            if (!ss->has_particle_info() || !ss->particle_info()) continue;
+            const int head_pdg = ss->particle_info()->pdg();
+            if (head_pdg == 0 || std::abs(head_pdg) == 11) continue;
+            if (ss->flags_any(SegmentFlags::kShowerTrajectory) ||
+                ss->flags_any(SegmentFlags::kShowerTopology)) continue;
+
+            // Walk the main-cluster track prefix from the start vertex:
+            // follow the unique un-shower-flagged non-+-11 same-cluster
+            // member continuation; stop where an EM member attaches or the
+            // chain branches/ends.
+            auto track_like = [&](SegmentPtr sg) -> bool {
+                return sg && sg->descriptor_valid() && shower->has_edge(sg->get_descriptor())
+                    && !sg->flags_any(SegmentFlags::kShowerTrajectory)
+                    && !sg->flags_any(SegmentFlags::kShowerTopology)
+                    && sg->has_particle_info() && sg->particle_info()
+                    && sg->particle_info()->pdg() != 0
+                    && std::abs(sg->particle_info()->pdg()) != 11
+                    && sg->cluster() == ss->cluster();
+            };
+            std::vector<SegmentPtr> prefix;
+            VertexPtr reroot = nullptr;
+            VertexPtr cur_vtx = sv;
+            SegmentPtr cur_seg = ss;
+            bool walk_ok = true;
+            for (int hop = 0; hop < 8; ++hop) {              // cycle guard
+                if (!track_like(cur_seg)) break;
+                prefix.push_back(cur_seg);
+                VertexPtr far = find_other_vertex(graph, cur_seg, cur_vtx);
+                if (!far || !far->descriptor_valid()) { walk_ok = false; break; }
+                std::vector<SegmentPtr> cont;
+                bool em_here = false;
+                for (auto e : sorted_out_edges(far->get_descriptor(), graph)) {
+                    SegmentPtr nx = graph[e].segment;
+                    if (!nx || nx == cur_seg) continue;
+                    if (!shower->has_edge(nx->get_descriptor())) continue;  // members only
+                    if (track_like(nx)) cont.push_back(nx);
+                    else em_here = true;
+                }
+                reroot = far;
+                if (em_here || cont.size() != 1) break;
+                cur_vtx = far;
+                cur_seg = cont.front();
+            }
+            if (!walk_ok || prefix.empty() || !reroot) {
+                SPDLOG_LOGGER_DEBUG(s_log,
+                    "pr93 detach_track_stem: skip shower_id={} head_pdg={} (walk_ok={} prefix={})",
+                    shower->get_shower_id(), head_pdg, walk_ok, prefix.size());
+                continue;
+            }
+            const int peeled = shower->detach_track_prefix(prefix, reroot);
+            if (!peeled) {
+                SPDLOG_LOGGER_DEBUG(s_log,
+                    "pr93 detach_track_stem: refuse shower_id={} head_pdg={} prefix={} nseg={}",
+                    shower->get_shower_id(), head_pdg, prefix.size(), shower->get_num_segments());
+                continue;
+            }
+            std::string peeled_ids;
+            for (const auto& sg : prefix) {
+                if (!peeled_ids.empty()) peeled_ids += ",";
+                peeled_ids += std::to_string(sg->id());
+            }
+            SPDLOG_LOGGER_DEBUG(s_log,
+                "pr93 detach_track_stem: shower_id={} peel {} track seg(s) [{}] head_pdg={} "
+                "reroot_vtx_idx={} conn=2 n_remain={}",
+                shower->get_shower_id(), peeled, peeled_ids, head_pdg,
+                graph[reroot->get_descriptor()].index, shower->get_num_segments());
+            // Mirror the examine_showers merge-loop refresh: vote + kinematics
+            // + charge over the REMAINING (EM) members only.
+            shower->update_particle_type(particle_data, recomb_model, m_mip_dqdx, main_vertex,
+                                         m_shower_proton_daughter_pion, m_mip_dqdx_median,
+                                         m_shower_vote_track_pid_counts, m_shower_accept_pid_guard,
+                                         m_shower_pid_guard_min_len);
+            shower->calculate_kinematics(particle_data, recomb_model,
+                                         m_shower_endpoint_exclude_start_vertex,
+                                         m_shower_endpoint_skip_orphan_vtx);
+            shower->set_kine_charge(cal_kine_charge(shower, m_charge_2d_u, m_charge_2d_v,
+                                                    m_charge_2d_w, m_map_apa_ch_plane_wires,
+                                                    track_fitter, dv));
+            shower->set_flag_kinematics(true);
+            ++n_detached;
+        }
+        if (n_detached) {
+            update_shower_maps(showers, map_vertex_in_shower, map_segment_in_shower,
+                               map_vertex_to_shower, used_shower_clusters);
+            SPDLOG_LOGGER_DEBUG(s_log,
+                "pr93 detach_track_stem: {} shower(s) split; maps rebuilt", n_detached);
         }
     }
 

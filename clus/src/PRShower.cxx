@@ -486,6 +486,121 @@ namespace WireCell::Clus::PR {
 
     }
 
+    // doc sbnd_xin/docs/pr/93 round 4 (shower_detach_track_stem) -- see the
+    // header comment for the contract.  In-place mutation: m_shower_id and
+    // the Shower object identity are preserved (pr/92's
+    // dropped_satellite_shower_ids and IndexedShowerSet keying depend on it).
+    int Shower::detach_track_prefix(const std::vector<SegmentPtr>& prefix,
+                                    VertexPtr new_start_vertex,
+                                    const std::string& cloud_name_fit,
+                                    const std::string& cloud_name_associate)
+    {
+        if (prefix.empty()) return 0;
+        if (!new_start_vertex || !new_start_vertex->descriptor_valid()) return 0;
+        // Refuse to empty the shower: at least one member must remain.
+        if (this->edges().size() <= prefix.size()) return 0;
+        for (const auto& sg : prefix) {
+            if (!sg || !sg->descriptor_valid() || !this->has_edge(sg->get_descriptor())) return 0;
+        }
+
+        // Collect the prefix chain's vertices (candidates for view removal).
+        // Vector + membership-set of descriptors; never iterated by pointer.
+        std::vector<VertexPtr> prefix_vtxs;
+        std::unordered_set<size_t> seen_vtx_idx;
+        for (const auto& sg : prefix) {
+            auto [va, vb] = find_vertices(m_full_graph, sg);
+            for (VertexPtr v : {va, vb}) {
+                if (!v || !v->descriptor_valid() || v == new_start_vertex) continue;
+                const size_t idx = m_full_graph[v->get_descriptor()].index;
+                if (seen_vtx_idx.insert(idx).second) prefix_vtxs.push_back(v);
+            }
+        }
+
+        // Remove the prefix edges from the view.
+        int peeled = 0;
+        for (const auto& sg : prefix) {
+            if (TrajectoryView::remove_segment(sg)) ++peeled;
+        }
+
+        // A prefix vertex leaves the view only if NO remaining member still
+        // touches it -- otherwise (e.g. a branch point shared with an EM
+        // member) it must stay.  Membership set of graph indices, order-free.
+        std::unordered_set<size_t> keep_vtx_idx;
+        for (auto edesc : ordered_edges(*this, m_full_graph)) {
+            SegmentPtr seg = m_full_graph[edesc].segment;
+            if (!seg || !seg->descriptor_valid()) continue;
+            auto [ka, kb] = find_vertices(m_full_graph, seg);
+            if (ka && ka->descriptor_valid()) keep_vtx_idx.insert(m_full_graph[ka->get_descriptor()].index);
+            if (kb && kb->descriptor_valid()) keep_vtx_idx.insert(m_full_graph[kb->get_descriptor()].index);
+        }
+        for (const auto& v : prefix_vtxs) {
+            const size_t idx = m_full_graph[v->get_descriptor()].index;
+            if (keep_vtx_idx.count(idx)) continue;
+            TrajectoryView::remove_vertex(v);
+            // Without this, the old root (e.g. the MAIN vertex) stays a view
+            // node and wins calculate_kinematics' farthest-vertex end_point
+            // search.  Also forget its walked mark: if some later pass
+            // re-adds it, it is genuinely un-walked again.
+            m_walked_nodes.erase(v->get_descriptor());
+        }
+
+        // Re-root: conn type 2 on purpose -- the pseudo-gamma rendering
+        // class (append_pseudo_shower), the pi0 disconnected_showers class,
+        // and kine_energy_included stays 1 (only type 3 is penalized).
+        set_start_vertex(new_start_vertex, 2);
+
+        // Re-seat the start segment: remaining member closest to the new
+        // start vertex; graph-index tie-break.  ordered_edges = stable order.
+        const WireCell::Point nv_pt = new_start_vertex->fit().valid()
+            ? new_start_vertex->fit().point : new_start_vertex->wcpt().point;
+        SegmentPtr new_start = nullptr;
+        double best_dis = -1;
+        for (auto edesc : ordered_edges(*this, m_full_graph)) {
+            SegmentPtr seg = m_full_graph[edesc].segment;
+            if (!seg || !seg->descriptor_valid()) continue;
+            const double dis = segment_get_closest_point(seg, nv_pt).first;
+            if (!new_start || dis < best_dis) {
+                new_start = seg;
+                best_dis = dis;
+            }
+        }
+        if (new_start) {
+            // Already a member => the cloud-merge branch in
+            // set_start_segment is a no-op (was_member gate): no duplication.
+            set_start_segment(new_start);
+        }
+
+        // Rebuild the shower point clouds from the REMAINING members only.
+        // The clouds are add-only merges, and both kine_charge and the
+        // conn-2 start_point derivation read them -- without the rebuild the
+        // detached track's charge stays inside the daughter's energy.
+        // Same code shape as add_shower's batch merge; ordered_edges order.
+        for (const std::string& cname : {cloud_name_fit, cloud_name_associate}) {
+            if (cname.empty()) continue;
+            this->dpcloud(cname, nullptr);
+            Facade::DPCBatch batch;
+            for (auto edesc : ordered_edges(*this, m_full_graph)) {
+                SegmentPtr seg = m_full_graph[edesc].segment;
+                if (!seg || !seg->descriptor_valid()) continue;
+                auto seg_dpc = seg->dpcloud(cname);
+                if (!seg_dpc) continue;
+                if (!this->dpcloud(cname)) {
+                    this->dpcloud(cname, clone_dpc(*seg_dpc));
+                } else if (this->dpcloud(cname) != seg_dpc) {
+                    this->dpcloud(cname)->merge_wpid_params(*seg_dpc);
+                    batch.append(seg_dpc->points());
+                }
+            }
+            if (!batch.empty()) {
+                if (auto dpc = this->dpcloud(cname)) dpc->add_points(std::move(batch));
+            }
+        }
+
+        invalidate_segment_caches();
+        set_flag_kinematics(false);
+        return peeled;
+    }
+
     void Shower::complete_structure_with_start_segment(IndexedSegmentSet& used_segments, const std::string& cloud_name_fit, const std::string& cloud_name_associate, bool absorb_track_guard, bool walk_visited_parity) {
         if (!m_start_segment || !m_start_segment->descriptor_valid()) return;
 
