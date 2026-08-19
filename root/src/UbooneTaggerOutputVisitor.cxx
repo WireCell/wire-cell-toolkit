@@ -60,6 +60,18 @@ void Root::UbooneTaggerOutputVisitor::visit(Clus::Facade::Ensemble& ensemble) co
     PR::TaggerInfo ti = tf->get_tagger_info();
     PR::KineInfo ki = tf->get_kine_info();
 
+    // doc pr/94 Phase 2: the per-bundle candidates TaggerCheckNeutrino
+    // published as "nu<i>" named slots.  Empty in legacy mode (the chain
+    // publishes none), and then everything below fills exactly one row from
+    // the unnamed slot, byte-identical.  Walking the slots rather than reading
+    // a count keeps this component free of a second knob.
+    std::vector<std::shared_ptr<Clus::TrackFitting>> nu_fitters;
+    for (int i = 0;; ++i) {
+        auto tfi = grouping.get_track_fitting("nu" + std::to_string(i));
+        if (!tfi) break;
+        nu_fitters.push_back(tfi);
+    }
+
     // Open existing ROOT file in UPDATE mode to add trees.
     TFile* output_tf = TFile::Open(m_output_filename.c_str(), "UPDATE");
     if (!output_tf || output_tf->IsZombie()) {
@@ -1113,7 +1125,11 @@ void Root::UbooneTaggerOutputVisitor::visit(Clus::Facade::Ensemble& ensemble) co
 #undef SCALAR_BR
 #undef VECTOR_BR
 
-    t_tagger->Fill();
+    // doc pr/94 Phase 2: legacy fills exactly here, exactly as before.  In
+    // per-bundle mode both trees are instead filled together in the loop below
+    // T_kine's booking, so T_tagger[i] and T_kine[i] are written in the same
+    // iteration and therefore refer to the same bundle by construction.
+    if (nu_fitters.empty()) t_tagger->Fill();
     log->debug("UbooneTaggerOutputVisitor: wrote T_tagger with {} branches", t_tagger->GetNbranches());
 
     // ================================================================
@@ -1144,8 +1160,39 @@ void Root::UbooneTaggerOutputVisitor::visit(Clus::Facade::Ensemble& ensemble) co
     t_kine->Branch("kine_pio_dis_2", &ki.kine_pio_dis_2, "kine_pio_dis_2/F");
     t_kine->Branch("kine_pio_angle", &ki.kine_pio_angle, "kine_pio_angle/F");
 
-    t_kine->Fill();
-    log->debug("UbooneTaggerOutputVisitor: wrote T_kine");
+    // doc pr/94 Phase 2: the same identity triple T_tagger carries, so a row
+    // pairing can be VERIFIED rather than assumed from position.  Booked under
+    // the same knob, so the knob-off T_kine schema is byte-identical.
+    if (m_nu_per_bundle) {
+        t_kine->Branch("cluster_id", &ki.cluster_id, "cluster_id/I");
+        t_kine->Branch("matched_flash_gid", &ki.matched_flash_gid, "matched_flash_gid/I");
+        t_kine->Branch("nu_index", &ki.nu_index, "nu_index/I");
+    }
+
+    if (nu_fitters.empty()) {
+        t_kine->Fill();
+        log->debug("UbooneTaggerOutputVisitor: wrote T_kine");
+    }
+    else {
+        // doc pr/94 Phase 2 -- one row per in-beam-window bundle.  Assigning
+        // through `ti`/`ki` is safe: the branches hold the ADDRESS of these
+        // objects (and of their vector members), and struct assignment copies
+        // into them rather than rebinding, so no re-Branch() is needed.
+        //
+        // The whole loop stays inside this ONE visit() call on purpose:
+        // Write() below carries no kOverwrite, so invoking the visitor per
+        // bundle would leave invisible T_tagger;2 / T_kine;2 cycles that both
+        // uproot and every existing gate silently resolve to the last cycle
+        // of -- a duplicate-fill bug that would never show up.
+        for (const auto& tfi : nu_fitters) {
+            ti = tfi->get_tagger_info();
+            ki = tfi->get_kine_info();
+            t_tagger->Fill();
+            t_kine->Fill();
+        }
+        log->debug("UbooneTaggerOutputVisitor: nu_per_bundle wrote {} T_tagger/T_kine row(s)",
+                   nu_fitters.size());
+    }
 
     output_tf->Write();
     output_tf->Close();

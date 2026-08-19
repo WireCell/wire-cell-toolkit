@@ -541,6 +541,33 @@ public:
                                                   // when a main-cluster candidate exists, so such
                                                   // events are byte-identical.  false = legacy: a
                                                   // demoted main is never a candidate.
+        // ---- doc pr/94 Phase 2: per-bundle neutrino candidates --------- //
+        // false = legacy: ONE event-wide winner, selected by the beam-gate
+        // block in visit(), which stays textually untouched.  true = one
+        // candidate per in-beam-window flash bundle, each running the full PR
+        // chain on its own TrackFitting and publishing into a "nu<i>" named
+        // slot, so a cosmic-convicted activity can no longer take its
+        // co-bundled neutrino candidate down with it (SBND 18255/395148).
+        //
+        // Within a bundle the selection rule is unchanged (longest untagged
+        // main, then the untagged demoted-main fallback) and the PER-MAIN
+        // cosmic veto is deliberately KEPT -- a TGM/STM/LM-convicted activity
+        // is not a neutrino candidate, which is what leaves an all-cosmic
+        // bundle with no row at all.  What per-bundle mode drops is the
+        // event-level `cosmic_gids` BUNDLE veto (m_nu_skip_cosmic_bundle):
+        // that veto exists only to keep a convicted bundle from supplying the
+        // single event-wide winner, and it is precisely what would discard a
+        // clean sibling.  Every evaluated activity's verdict is reported in
+        // its own TaggerInfo::act_* slot instead of vetoing anything.
+        bool m_nu_per_bundle{false};
+        // Mirrors the cosmic taggers' evaluate_demoted_mains admission gate so
+        // TaggerInfo::act_evaluated can be exact.  The taggers set a flag only
+        // on a POSITIVE verdict, so a missing TGM/STM/FC flag cannot by itself
+        // distinguish "evaluated and exonerated" from "never looked at";
+        // reproducing their admission gate can.  Wire this from the SAME
+        // jsonnet variable that feeds TaggerCheck{TGM,STM,FC} or the two will
+        // drift.  Inert unless m_nu_per_bundle.
+        bool m_nu_per_bundle_demoted_acts{false};
         bool m_sp_photon_flag{false};  // doc pr/26 sec. 8.2 port gap.  If true, the single-photon
                                        // tagger's verdict is stored in TaggerInfo::photon_flag,
                                        // as prototype NeutrinoID.cxx:271 does

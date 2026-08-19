@@ -54,6 +54,17 @@ namespace WireCell::Clus::PR {
         float kine_pio_dis_2{0};
 
         float kine_pio_angle{0};
+
+        // ---- doc pr/94 Phase 2: per-bundle identity ------------------- //
+        // The same three identity fields TaggerInfo carries, so that
+        // T_kine[i] can be *verified* to refer to the same bundle as
+        // T_tagger[i] rather than merely assumed to by position (doc pr/94
+        // §10.1's sync check would otherwise be vacuous).  Booked as T_kine
+        // branches only when UbooneTaggerOutputVisitor's nu_per_bundle knob
+        // is on.  -1 = not populated (single-candidate legacy path).
+        int cluster_id{-1};
+        int matched_flash_gid{-1};
+        int nu_index{-1};
     };
 
 

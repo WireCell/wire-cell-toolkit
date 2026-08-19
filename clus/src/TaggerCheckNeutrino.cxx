@@ -438,6 +438,9 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_skip_cosmic_companions  = get(config, "skip_cosmic_companions",  m_skip_cosmic_companions);
     m_cosmic_companion_min_length = get(config, "cosmic_companion_min_length", m_cosmic_companion_min_length);  // cm
     m_nu_fallback_demoted_mains = get(config, "nu_fallback_demoted_mains", m_nu_fallback_demoted_mains);
+    // doc pr/94 Phase 2: see the member comments in the header.
+    m_nu_per_bundle = get(config, "nu_per_bundle", m_nu_per_bundle);
+    m_nu_per_bundle_demoted_acts = get(config, "nu_per_bundle_demoted_acts", m_nu_per_bundle_demoted_acts);
     m_sp_photon_flag          = get(config, "sp_photon_flag",          m_sp_photon_flag);
 
     // ---- doc sbnd_xin/docs/pr/36 §10 tagger-stage knobs ---------------------
@@ -804,6 +807,8 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["skip_cosmic_companions"] = m_skip_cosmic_companions;          // doc pr/20 I P4; drop a TGM/STM-tagged companion from other_clusters
     cfg["cosmic_companion_min_length"] = m_cosmic_companion_min_length;  // cm; a tagged companion shorter than this stays in regardless
     cfg["nu_fallback_demoted_mains"] = m_nu_fallback_demoted_mains;    // docs/73 sec 12 round 3; when NO candidate survives, consider demoted mains (same gates); false = legacy
+    cfg["nu_per_bundle"]             = m_nu_per_bundle;                // doc pr/94; false = legacy single event-wide candidate
+    cfg["nu_per_bundle_demoted_acts"] = m_nu_per_bundle_demoted_acts;  // doc pr/94; mirror of the taggers' evaluate_demoted_mains; inert unless nu_per_bundle
     cfg["sp_photon_flag"] = m_sp_photon_flag;     // doc pr/26 sec. 8.2; store singlephoton_tagger()'s verdict in TaggerInfo::photon_flag (prototype NeutrinoID.cxx:271)
     // doc sbnd_xin/docs/pr/36 §10.
     cfg["fiducial"] = Json::Value();                 // null = the historical FiducialUtils containment fallback
@@ -924,6 +929,33 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
     
     auto& grouping = *groupings.at(0);
     
+    // ---- doc pr/94: neutrino-PR candidates -------------------------- //
+    // A candidate is one main activity to reconstruct, the companion
+    // (associated) clusters that share its flash bundle, and -- for the
+    // per-bundle mode -- a record of EVERY main activity the cosmic taggers
+    // evaluated inside that bundle together with their verdicts.  Legacy mode
+    // builds at most one candidate from the single event-wide winner selected
+    // by the untouched block below; per-bundle mode builds one per in-beam
+    // -window bundle.  Both then run the identical PR chain, once each.
+    struct ActivityRec {
+        int   cluster_id{-1};
+        float length_cm{0.f};
+        int   is_selected{0};
+        int   is_demoted{0};
+        int   tgm{0};
+        int   stm{0};
+        int   fc{0};
+        int   lm{-1};
+        int   evaluated{0};
+    };
+    struct NuCandidate {
+        Cluster* main{nullptr};
+        std::vector<Cluster*> others;
+        int gid{-1};
+        std::vector<ActivityRec> acts;
+    };
+    std::vector<NuCandidate> candidates;
+
     // Find clusters that have the main_cluster flag (set by clustering_recovering_bundle)
     Cluster* main_cluster = nullptr;
     std::vector<Cluster*> other_clusters;  // beam_flash clusters that are not the main cluster
@@ -946,7 +978,7 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
             }
         }
     }
-    else {
+    else if (!m_nu_per_bundle) {
         // Beam-bundle selection: among the (possibly many) matched main
         // clusters, neutrino PR runs on the one whose matched flash time
         // (cluster_t0) falls inside the beam window; ties broken by length.
@@ -1126,1000 +1158,1212 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
             }
         }
     }
+    else {
+        // ---- doc pr/94: per-bundle candidate selection --------------- //
+        // One candidate per in-beam-window flash bundle instead of one winner
+        // per event.  Inside a bundle the rule is today's rule -- longest
+        // untagged main, then the untagged demoted-main fallback -- and the
+        // PER-MAIN cosmic veto is deliberately KEPT: a TGM/STM/LM-convicted
+        // activity is not a neutrino candidate, which is what leaves an
+        // all-cosmic bundle with no row at all.  What is deliberately NOT
+        // applied is the event-level `cosmic_gids` BUNDLE veto: it exists only
+        // to stop a convicted bundle supplying the single event-wide winner,
+        // and it is exactly what would discard the clean 198.9 cm demoted main
+        // 21 of SBND 18255/395148 because its bundle-mate, the 533 cm STM muon
+        // 10, was convicted.  Sibling conviction no longer vetoes anything;
+        // every evaluated activity reports its own verdict in its act_* slot.
+        //
+        // Determinism: gids are int-keyed and visited in sorted order, and
+        // within a gid clusters are visited in grouping.children() order with a
+        // length tie-break.  No pointer-keyed container is iterated.
+        std::map<int, std::vector<Cluster*>> gid_mains;    // in-window mains
+        std::map<int, std::vector<Cluster*>> gid_demoted;  // in-window demoted mains
+        for (auto* cluster : grouping.children()) {
+            const bool is_main = cluster->get_flag(Flags::main_cluster);
+            const bool is_dem  = !is_main && cluster->get_flag(Flags::demoted_main);
+            if (!is_main && !is_dem) continue;
+            if (is_main) n_main_clusters++;
+            const double t0c = cluster->get_cluster_t0();
+            if (t0c < m_beam_window_low || t0c >= m_beam_window_high) continue;
+            if (is_main) n_in_beam_clusters++;
+            const int gid = cluster->get_scalar<int>("matched_flash_gid", -1);
+            if (gid < 0) continue;
+            if (is_main) gid_mains[gid].push_back(cluster);
+            else if (m_nu_per_bundle_demoted_acts) gid_demoted[gid].push_back(cluster);
+        }
+        std::set<int> gids;
+        for (const auto& kv : gid_mains) gids.insert(kv.first);
+        for (const auto& kv : gid_demoted) gids.insert(kv.first);
 
-    if (!main_cluster) {
+        for (int gid : gids) {
+            NuCandidate cand;
+            cand.gid = gid;
+
+            // Every main activity the taggers evaluated in this bundle.  The
+            // taggers set a flag only on a POSITIVE verdict, so a missing
+            // TGM/STM/FC flag cannot distinguish "evaluated and exonerated"
+            // from "never looked at"; membership of these two lists is the
+            // reproduction of their admission gate, hence evaluated = 1.
+            auto add_acts = [&](const std::vector<Cluster*>& v, int is_demoted) {
+                for (auto* c : v) {
+                    ActivityRec a;
+                    a.cluster_id = c->get_cluster_id();
+                    a.length_cm  = c->get_length() / units::cm;
+                    a.is_demoted = is_demoted;
+                    a.tgm = c->get_flag(Flags::TGM) ? 1 : 0;
+                    a.stm = c->get_flag(Flags::STM) ? 1 : 0;
+                    a.fc  = c->get_flag(Flags::FC)  ? 1 : 0;
+                    a.lm  = c->get_scalar<int>("lm_flag", -1);
+                    a.evaluated = 1;
+                    cand.acts.push_back(a);
+                }
+            };
+            auto mit = gid_mains.find(gid);
+            auto dit = gid_demoted.find(gid);
+            if (mit != gid_mains.end()) add_acts(mit->second, 0);
+            if (dit != gid_demoted.end()) add_acts(dit->second, 1);
+
+            auto pick = [&](const std::vector<Cluster*>& v) -> Cluster* {
+                Cluster* best = nullptr;
+                for (auto* c : v) {
+                    if (m_nu_skip_cosmic) {
+                        const bool tgm = c->get_flag(Flags::TGM);
+                        const bool stm = c->get_flag(Flags::STM);
+                        const int  lm  = c->get_scalar<int>("lm_flag", -1);
+                        if (tgm || stm || lm > 0) {
+                            SPDLOG_LOGGER_INFO(log, "TaggerCheckNeutrino: [nu_per_bundle] gid {} activity {} (L {:.1f} cm) cosmic-tagged (TGM={} STM={} lm_flag={}); not a candidate",
+                                               gid, c->get_cluster_id(), c->get_length()/units::cm, tgm, stm, lm);
+                            continue;
+                        }
+                    }
+                    if (!best || c->get_length() > best->get_length()) best = c;
+                }
+                return best;
+            };
+            if (mit != gid_mains.end()) cand.main = pick(mit->second);
+            if (!cand.main && m_nu_fallback_demoted_mains && dit != gid_demoted.end()) {
+                cand.main = pick(dit->second);
+            }
+            if (!cand.main) {
+                SPDLOG_LOGGER_INFO(log, "TaggerCheckNeutrino: [nu_per_bundle] gid {}: no neutrino candidate among {} evaluated activit(ies)",
+                                   gid, cand.acts.size());
+                continue;
+            }
+            for (auto& a : cand.acts) {
+                if (a.cluster_id == cand.main->get_cluster_id()) a.is_selected = 1;
+            }
+
+            // Companions: the same rule and the same knob as the legacy path.
+            for (auto* cluster : grouping.children()) {
+                if (cluster == cand.main) continue;
+                if (!cluster->get_flag(Flags::associated_cluster)) continue;
+                if (cluster->get_scalar<int>("matched_flash_gid", -1) != gid) continue;
+                if (m_skip_cosmic_companions
+                    && (cluster->get_flag(Flags::TGM) || cluster->get_flag(Flags::STM))
+                    && cluster->get_length() >= m_cosmic_companion_min_length * units::cm) {
+                    SPDLOG_LOGGER_INFO(log, "TaggerCheckNeutrino: [nu_per_bundle] gid {} companion cluster {} (L {:.1f} cm, TGM={} STM={}) dropped (skip_cosmic_companions, floor {:.1f} cm)",
+                                       gid, cluster->get_cluster_id(), cluster->get_length()/units::cm,
+                                       cluster->get_flag(Flags::TGM), cluster->get_flag(Flags::STM),
+                                       m_cosmic_companion_min_length);
+                    continue;
+                }
+                cand.others.push_back(cluster);
+            }
+            SPDLOG_LOGGER_INFO(log, "TaggerCheckNeutrino: [nu_per_bundle] gid {}: candidate main cluster {} (t0 {:.3f} us, L {:.1f} cm, {} associated) of {} evaluated activit(ies)",
+                               gid, cand.main->get_cluster_id(), cand.main->get_cluster_t0()/units::us,
+                               cand.main->get_length()/units::cm, cand.others.size(), cand.acts.size());
+            candidates.push_back(std::move(cand));
+        }
+    }
+
+    // doc pr/94 -- unify the two shapes.  The two legacy branches above select
+    // at most one event-wide winner into main_cluster/other_clusters (this is
+    // also the path taken with no beam gate, whatever nu_per_bundle says);
+    // per-bundle mode filled `candidates` directly and left main_cluster null.
+    if (candidates.empty() && main_cluster) {
+        NuCandidate cand;
+        cand.main   = main_cluster;
+        cand.others = other_clusters;
+        cand.gid    = main_cluster->get_scalar<int>("matched_flash_gid", -1);
+        candidates.push_back(std::move(cand));
+    }
+
+    if (candidates.empty()) {
         SPDLOG_LOGGER_DEBUG(log, "TaggerCheckNeutrino: no main cluster selected ({} mains, {} in-window); skipping.",
                             n_main_clusters, n_in_beam_clusters);
         return;
     }
 
-    if (beam_gate) {
-        SPDLOG_LOGGER_INFO(log, "TaggerCheckNeutrino: selected main cluster {} (t0 {:.3f} us, L {:.1f} cm, {} associated)",
-                           main_cluster->get_cluster_id(), main_cluster->get_cluster_t0()/units::us,
-                           main_cluster->get_length()/units::cm, other_clusters.size());
-    }
-
-    SPDLOG_LOGGER_TRACE(log, "Found {} clusters, {} main clusters, {} in-beam clusters, {} of blobs in main cluster id {}", nclusters, n_main_clusters, n_in_beam_clusters, main_cluster->nchildren(), main_cluster->get_cluster_id());
-
-
-    // Debug dump (only when env var is set)
-    if (main_cluster) {
-        if (const char* dump_path = std::getenv("WCT_DUMP_INIT_FIRST_SEGMENT")) {
-            DebugIO::dump_init_first_segment_inputs(
-                dump_path, *main_cluster, main_cluster, true, *m_track_fitter);
-        }
-    }
-
-    SPDLOG_LOGGER_TRACE(log, "Number of Main Clusters: {}", n_main_clusters);
-
-    IndexedVertexSet vertices_in_long_muon;
-    IndexedSegmentSet segments_in_long_muon;
-    VertexPtr main_vertex = nullptr;
-    ClusterVertexMap map_cluster_main_vertices;
-
-    // Pre-load charge data for all beam-flash clusters once so that
-    // do_multi_tracking calls throughout pattern recognition can use
-    // flag_force_load_data=false and avoid redundant prepare_data() calls.
-    {
-        std::vector<WireCell::Clus::Facade::Cluster*> clusters_to_preload;
-        clusters_to_preload.push_back(main_cluster);
-        for (auto* c : other_clusters) clusters_to_preload.push_back(c);
-        m_track_fitter->preload_clusters(clusters_to_preload);
-    }
-    if (m_perf) SPDLOG_LOGGER_DEBUG(log, "TaggerCheckNeutrino timing: preload_clusters took {} ms", MS(Clock::now() - t0).count());
-    t0 = Clock::now();
-
-    // Debug dump for unit-test fixture generation (only when env var is set).
-    // Generate with:
-    //   WCT_DUMP_TAGGER_INPUTS=./tmp/tagger_check_neutrino_input.json wire-cell ...
-    // Then replay with doctest_tagger_check_neutrino end-to-end test.
-    if (main_cluster) {
-        if (const char* dump_path = std::getenv("WCT_DUMP_TAGGER_INPUTS")) {
-            DebugIO::dump_tagger_inputs(
-                dump_path, *main_cluster, other_clusters,
-                /*flag_back_search=*/true, *m_track_fitter);
-        }
-    }
-
-    // Create PRGraph and first segment
-    auto pr_graph = std::make_shared<WireCell::Clus::PR::Graph>();
-    m_track_fitter->add_graph(pr_graph);
-
-    WireCell::Clus::PR::PatternAlgorithms pattern_algos;
-    pattern_algos.m_perf = m_perf;
-    pattern_algos.m_dir_weak_use_score = m_dir_weak_use_score;
-    pattern_algos.m_mip_dqdx        = m_mip_dqdx / units::cm;         // e/cm -> internal
-    pattern_algos.m_mip_dqdx_median = m_mip_dqdx_median / units::cm;  // e/cm -> internal
-    pattern_algos.m_proton_dir_vote      = m_proton_dir_vote;
-    pattern_algos.m_proton_dir_score_max = m_proton_dir_score_max;
-    pattern_algos.m_proton_dir_asym_min  = m_proton_dir_asym_min;
-    pattern_algos.m_endpoint_trim_retry  = m_endpoint_trim_retry;
-    pattern_algos.m_fit_vertex_min_seg_length = m_fit_vertex_min_seg_length * units::cm;  // cm -> internal
-    // doc sbnd_xin/docs/pr/51 round 7: robust vertex fit
-    pattern_algos.m_mvfit_robust      = m_mvfit_robust;
-    pattern_algos.m_mvfit_main_only   = m_mvfit_main_only;
-    pattern_algos.m_mvfit_min_len     = m_mvfit_min_len * units::cm;      // cm -> internal
-    pattern_algos.m_mvfit_rin_margin  = m_mvfit_rin_margin * units::cm;   // cm -> internal
-    pattern_algos.m_mvfit_rout_frac   = m_mvfit_rout_frac;                // unitless
-    pattern_algos.m_mvfit_rout_min    = m_mvfit_rout_min * units::cm;     // cm -> internal
-    pattern_algos.m_mvfit_rout_max    = m_mvfit_rout_max * units::cm;     // cm -> internal
-    pattern_algos.m_mvfit_angle       = m_mvfit_angle;                    // deg, no conversion
-    pattern_algos.m_mvfit_min_pts     = m_mvfit_min_pts;                  // count
-    pattern_algos.m_mvfit_min_aniso   = m_mvfit_min_aniso;                // unitless
-    pattern_algos.m_mvfit_prior_range = m_mvfit_prior_range * units::cm;  // cm -> internal
-    pattern_algos.m_cathode_x         = m_cathode_x * units::cm;          // cm -> internal
-    pattern_algos.m_cathode_kink_xcut = m_cathode_kink_xcut * units::cm;  // cm -> internal
-    pattern_algos.m_cathode_wide_kink_angle    = m_cathode_wide_kink_angle;                // deg, no conversion
-    pattern_algos.m_cathode_wide_kink_skirt    = m_cathode_wide_kink_skirt * units::cm;    // cm -> internal
-    pattern_algos.m_cathode_wide_kink_baseline = m_cathode_wide_kink_baseline * units::cm; // cm -> internal
-    // doc sbnd_xin/docs/pr/48 -- back-to-back track fixes.
-    pattern_algos.m_two_end_break       = m_two_end_break;
-    pattern_algos.m_teb_min_len         = m_teb_min_len * units::cm;       // cm -> internal
-    pattern_algos.m_teb_min_arm         = m_teb_min_arm * units::cm;       // cm -> internal
-    pattern_algos.m_teb_min_arm_pts     = m_teb_min_arm_pts;
-    pattern_algos.m_teb_stub_max        = m_teb_stub_max * units::cm;      // cm -> internal
-    pattern_algos.m_teb_accept_range    = m_teb_accept_range * units::cm;  // cm -> internal
-    pattern_algos.m_teb_rise_r1         = m_teb_rise_r1;
-    pattern_algos.m_teb_rise_r2         = m_teb_rise_r2;
-    pattern_algos.m_teb_abs_end_min     = m_teb_abs_end_min;
-    pattern_algos.m_teb_dip_floor       = m_teb_dip_floor;
-    pattern_algos.m_teb_score_cap_r1    = m_teb_score_cap_r1;
-    pattern_algos.m_teb_score_cap_r2    = m_teb_score_cap_r2;
-    pattern_algos.m_teb_turn_angle      = m_teb_turn_angle;                // deg, no conversion
-    pattern_algos.m_teb_turn_baseline   = m_teb_turn_baseline * units::cm; // cm -> internal
-    pattern_algos.m_teb_turn_skirt      = m_teb_turn_skirt * units::cm;    // cm -> internal
-    pattern_algos.m_teb_turn_min_arm_frac = m_teb_turn_min_arm_frac;       // dimensionless, no conversion
-    pattern_algos.m_teb_second_max      = m_teb_second_max * units::cm;    // cm -> internal
-    pattern_algos.m_teb_chain_topology  = m_teb_chain_topology;
-    pattern_algos.m_teb_r3_turn         = m_teb_r3_turn;                   // deg, no conversion
-    pattern_algos.m_teb_r3_hot          = m_teb_r3_hot;                    // x mip median, no conversion
-    pattern_algos.m_teb_bragg_veto_turn = m_teb_bragg_veto_turn;           // deg, no conversion
-    pattern_algos.m_kink_walk_dqdx_stop = m_kink_walk_dqdx_stop;
-    pattern_algos.m_kink_break_protect  = m_kink_break_protect;
-    pattern_algos.m_kink_dqdx_hot_ratio = m_kink_dqdx_hot_ratio;
-    // doc sbnd_xin/docs/pr/50 -- main-vertex kink-consistency snap.
-    pattern_algos.m_vertex_kink_snap = m_vertex_kink_snap;
-    pattern_algos.m_vks_radius       = m_vks_radius * units::cm;    // cm -> internal
-    pattern_algos.m_vks_min_dis      = m_vks_min_dis * units::cm;   // cm -> internal
-    pattern_algos.m_vks_angle        = m_vks_angle;                 // deg, no conversion
-    pattern_algos.m_vks_margin       = m_vks_margin;                // deg, no conversion
-    pattern_algos.m_vks_collinear    = m_vks_collinear;             // deg, no conversion
-    pattern_algos.m_vks_skirt        = m_vks_skirt * units::cm;     // cm -> internal
-    pattern_algos.m_vks_baseline     = m_vks_baseline * units::cm;  // cm -> internal
-    pattern_algos.m_vks_min_arm      = m_vks_min_arm * units::cm;   // cm -> internal
-    pattern_algos.m_vks_fit_miss     = m_vks_fit_miss * units::cm;  // cm -> internal
-    pattern_algos.m_vks_hot_ratio    = m_vks_hot_ratio;             // x mip median, no conversion
-    pattern_algos.m_vks_carry_prong  = m_vks_carry_prong * units::cm; // cm -> internal (doc pr/85)
-    // sbnd_xin/docs/73 sec 12 (round 3).
-    pattern_algos.m_esva_ignore_empty_2d = m_esva_ignore_empty_2d;
-    // doc sbnd_xin/docs/pr/51 -- main-vertex graph audit.
-    pattern_algos.m_main_vertex_graph_audit = m_main_vertex_graph_audit;
-    pattern_algos.m_mvga_radius       = m_mvga_radius * units::cm;    // cm -> internal
-    pattern_algos.m_mvga_dup_tol      = m_mvga_dup_tol * units::cm;   // cm -> internal
-    pattern_algos.m_mvga_dup_frac     = m_mvga_dup_frac;              // fraction, no conversion
-    pattern_algos.m_mvga_dup_angle    = m_mvga_dup_angle;             // deg, no conversion
-    pattern_algos.m_mvga_bridge_mip   = m_mvga_bridge_mip;            // x mip median, no conversion
-    pattern_algos.m_mvga_reconnect    = m_mvga_reconnect * units::cm; // cm -> internal
-    pattern_algos.m_mvga_stub         = m_mvga_stub * units::cm;      // cm -> internal
-    pattern_algos.m_mvga_stub_pts     = m_mvga_stub_pts;
-    pattern_algos.m_mvga_reseat_angle = m_mvga_reseat_angle;          // deg, no conversion
-    pattern_algos.m_mvga_satellite    = m_mvga_satellite * units::cm; // cm -> internal
-    pattern_algos.m_mvga_interposed   = m_mvga_interposed;            // doc pr/85
-    pattern_algos.m_mvga_interposed_angle = m_mvga_interposed_angle;  // deg, no conversion
-    pattern_algos.m_mvga_interposed_len = m_mvga_interposed_len * units::cm; // cm -> internal (doc pr/86)
-    pattern_algos.m_mvga_sat_dup_frac = m_mvga_sat_dup_frac;          // fraction, no conversion (doc pr/86)
-    pattern_algos.m_mvga_interposed_deg1 = m_mvga_interposed_deg1;    // doc pr/86
-    pattern_algos.m_mvga_splice_straighten = m_mvga_splice_straighten * units::cm; // cm -> internal (doc pr/86 round 2)
-    pattern_algos.m_mvga_approach_collapse = m_mvga_approach_collapse * units::cm; // cm -> internal (doc pr/86 round 2)
-    pattern_algos.m_mvga_straighten_radius = m_mvga_straighten_radius * units::cm; // cm -> internal (doc pr/86 round 2)
-    pattern_algos.m_mvga_op1_radius   = m_mvga_op1_radius * units::cm; // cm -> internal; 0 and the -1 sentinel both survive the scale (doc pr/83 r3)
-    pattern_algos.m_mvga_op1_dup_frac = m_mvga_op1_dup_frac;           // fraction, no conversion (doc pr/83 r3)
-    pattern_algos.m_mvga_op1_post     = m_mvga_op1_post;               // doc pr/83 r3 (class A)
-    pattern_algos.m_mvga_carry_max    = m_mvga_carry_max;              // count (doc pr/83 r3)
-    pattern_algos.m_swap_orphan_dup_audit = m_swap_orphan_dup_audit;   // doc pr/83 r3 (Mechanism C)
-    pattern_algos.m_mvga_proj_dup_frac  = m_mvga_proj_dup_frac;        // fraction, no conversion (doc pr/83 r4)
-    pattern_algos.m_mvga_proj_dqdx_ratio = m_mvga_proj_dqdx_ratio;     // ratio, no conversion (doc pr/83 r4)
-    pattern_algos.m_mvga_proj_angle = m_mvga_proj_angle;               // deg, no conversion (doc pr/83 r4b)
-    pattern_algos.m_rough_path_probe  = m_rough_path_probe;           // doc pr/51 round 4: diagnostic-only
-    // doc pr/51 round 5: steiner gap penalty.  The two service handles are
-    // unconditional copies (inert while the scale is 0).
-    pattern_algos.m_steiner_gap_penalty = m_steiner_gap_penalty;
-    pattern_algos.m_sgp_dead_alpha      = m_sgp_dead_alpha;                    // fraction, no conversion
-    pattern_algos.m_sgp_min_edge        = m_sgp_min_edge * units::cm;          // cm -> internal
-    pattern_algos.m_sgp_sample_step     = m_sgp_sample_step * units::cm;       // cm -> internal
-    pattern_algos.m_sgp_point_radius    = m_sgp_point_radius * units::cm;      // cm -> internal
-    pattern_algos.m_sgp_edge_probe      = m_sgp_edge_probe;                    // doc pr/73: diagnostic-only
-    pattern_algos.m_vertex_scoreboard   = m_vertex_scoreboard;                 // doc pr/75: diagnostic-only
-    // doc pr/79 §10: the conjunction, so fill sites may assume the board is active.
-    pattern_algos.m_vtx_harvest         = m_vertex_scoreboard && m_dl_vtx_harvest;
-    // doc pr/51 round 6: weak-charge deficit term (charge units, no conversion).
-    pattern_algos.m_sgp_weak_scale      = m_sgp_weak_scale;
-    pattern_algos.m_sgp_weak_qref       = m_sgp_weak_qref;
-    // doc pr/73 round 2 F3a: a LENGTH, so it takes the cm->internal conversion.
-    // -1 * units::cm stays negative, so the `< 0` off-test survives it.
-    pattern_algos.m_sgp_max_sep         = m_sgp_max_sep * units::cm;           // cm -> internal
-    // doc pr/83: oriented break_segment splits (bool, no conversion).
-    pattern_algos.m_break_seg_orient    = m_break_seg_orient;
-    pattern_algos.m_sgp_dv   = m_dv;
-    pattern_algos.m_sgp_pcts = m_pcts;
-    pattern_algos.m_shower_topo_demote_len = m_shower_topo_demote_len * units::cm;  // cm -> internal
-    // doc sbnd_xin/docs/pr/30 §11 port-fidelity knobs.
-    pattern_algos.m_fit_exclusion            = m_fit_exclusion;
-    pattern_algos.m_graph_endpoint_strict    = m_graph_endpoint_strict;
-    pattern_algos.m_graph_endpoint_tol       = m_graph_endpoint_tol * units::cm;   // cm -> internal
-    pattern_algos.m_oov_prototype_parity     = m_oov_prototype_parity;
-    pattern_algos.m_first_seg_local_pca      = m_first_seg_local_pca;
-    pattern_algos.m_other_seg_relaxed_accept = m_other_seg_relaxed_accept;
-    // doc sbnd_xin/docs/pr/45.
-    pattern_algos.m_other_seg_empty_2d_guard = m_other_seg_empty_2d_guard;
-    // doc sbnd_xin/docs/pr/54.
-    pattern_algos.m_other_seg_keep_isolated            = m_other_seg_keep_isolated;
-    pattern_algos.m_other_seg_keep_isolated_min_points = m_other_seg_keep_isolated_min_points;
-    pattern_algos.m_other_seg_keep_isolated_min_length = m_other_seg_keep_isolated_min_length * units::cm; // cm -> internal
-    // doc sbnd_xin/docs/pr/67 round 3.
-    pattern_algos.m_iso_snap_min_dir_mag = m_iso_snap_min_dir_mag * units::cm; // cm -> internal
-    // doc sbnd_xin/docs/pr/59 round 2.
-    pattern_algos.m_assoc_full_recluster = m_assoc_full_recluster;
-    // doc sbnd_xin/docs/pr/64 round 7.
-    pattern_algos.m_assoc_reassign_orphans = m_assoc_reassign_orphans;
-    // doc sbnd_xin/docs/pr/64 round 8.
-    pattern_algos.m_assoc_clear_on_merge = m_assoc_clear_on_merge;
-    // doc sbnd_xin/docs/pr/31 §11 (F2).
-    pattern_algos.m_shower_topo_proto_dir    = m_shower_topo_proto_dir;
-    // doc sbnd_xin/docs/pr/32 §11 (F1-F4).
-    pattern_algos.m_vertex_dir_use_fit_point       = m_vertex_dir_use_fit_point;
-    pattern_algos.m_shower_traj_recheck_parity     = m_shower_traj_recheck_parity;
-    pattern_algos.m_main_vertex_require_descriptor = m_main_vertex_require_descriptor;
-    pattern_algos.m_main_vertex_candidate_flag     = m_main_vertex_candidate_flag;
-    // doc sbnd_xin/docs/pr/31 §12 (the §10.12 round: F5, F6, F3, F1, F4, F7).
-    pattern_algos.m_cont_muon_dir3_30cm             = m_cont_muon_dir3_30cm;
-    pattern_algos.m_track_comp_empty_abstain        = m_track_comp_empty_abstain;
-    pattern_algos.m_shower_topo_reset               = m_shower_topo_reset;
-    pattern_algos.m_reclass_preserve_4mom           = m_reclass_preserve_4mom;
-    pattern_algos.m_reclass_never_computed_ke_floor = m_reclass_never_computed_ke_floor; // doc pr/40 round 2 F6
-    pattern_algos.m_dir_track_median_local          = m_dir_track_median_local;
-    pattern_algos.m_examine_showers_vertex_by_index = m_examine_showers_vertex_by_index;
-    // segment_is_shower_trajectory is a free function reached from three files
-    // with no component config in scope, so F2's flag-refresh half travels
-    // through a process-wide flag written here, once, before any graph is
-    // built -- same transport as PR::g_graph_endpoint_policy below.
-    PR::g_shower_traj_refresh_flag = m_shower_traj_recheck_parity;
-    // add_segment() is a free function with no component config in reach, so
-    // the P8 policy travels through a process-wide struct written here, once,
-    // before any graph is built (doc pr/30 §11 P8).
-    WireCell::Clus::PR::g_graph_endpoint_policy.strict = m_graph_endpoint_strict;
-    WireCell::Clus::PR::g_graph_endpoint_policy.tol    = m_graph_endpoint_tol * units::cm;
-    pattern_algos.m_iso_endpoint               = m_iso_endpoint;
-    pattern_algos.m_iso_endpoint_min_length    = m_iso_endpoint_min_length * units::cm;  // cm -> internal
-    pattern_algos.m_iso_endpoint_max_xext      = m_iso_endpoint_max_xext * units::cm;    // cm -> internal
-    pattern_algos.m_iso_endpoint_xext_frac     = m_iso_endpoint_xext_frac;
-    pattern_algos.m_iso_endpoint_xext_quantile = m_iso_endpoint_xext_quantile;
-    pattern_algos.m_iso_endpoint_tube_radius   = m_iso_endpoint_tube_radius * units::cm;  // cm -> internal
-    pattern_algos.m_iso_endpoint_min_aspect    = m_iso_endpoint_min_aspect;
-    pattern_algos.m_traj_cover_probe           = m_traj_cover_probe;
-    // doc sbnd_xin/docs/pr/72 round 2 -- examine_structure_3 stub guard.
-    pattern_algos.m_es3_stub_guard             = m_es3_stub_guard;
-    pattern_algos.m_es3sg_stub_max             = m_es3sg_stub_max * units::cm;  // cm -> internal
-    pattern_algos.m_es3sg_len_ratio            = m_es3sg_len_ratio;
-    pattern_algos.m_es3sg_ang3_min             = m_es3sg_ang3_min;
-    pattern_algos.m_es3sg_ang_ratio            = m_es3sg_ang_ratio;
-    pattern_algos.m_es3sg_require_terminal     = m_es3sg_require_terminal;
-    // doc pr/67 P6: remove_segment() is a free function, so the knob is mirrored
-    // into a file-static in PRGraph.cxx rather than read from pattern_algos.
-    PR::set_traj_cover_probe(m_traj_cover_probe);
-    pattern_algos.m_pr_find_other_rounds       = m_pr_find_other_rounds;
-    pattern_algos.m_v3_extension_guard         = m_v3_extension_guard;
-    pattern_algos.m_v3_extension_min_gain      = m_v3_extension_min_gain * units::cm;    // cm -> internal
-    // Detector-extent literals, cm -> internal (docs/pr/2 sec. 2e(iv)).
-    pattern_algos.m_cosmic_y_top_main    = m_cosmic_y_top_main    * units::cm;
-    pattern_algos.m_cosmic_y_top_strict  = m_cosmic_y_top_strict  * units::cm;
-    pattern_algos.m_cosmic_y_top_loose   = m_cosmic_y_top_loose   * units::cm;
-    pattern_algos.m_cosmic_y_small_piece = m_cosmic_y_small_piece * units::cm;
-    pattern_algos.m_vertex_z_prior_scale = m_vertex_z_prior_scale * units::cm;
-    // Dimensionless directions -- no unit conversion (unlike the dQ/dx scales).
-    pattern_algos.m_ssm_target_dir   = WireCell::Vector(m_ssm_target_dir[0],   m_ssm_target_dir[1],   m_ssm_target_dir[2]);
-    pattern_algos.m_ssm_absorber_dir = WireCell::Vector(m_ssm_absorber_dir[0], m_ssm_absorber_dir[1], m_ssm_absorber_dir[2]);
-    // Charge -> energy calibration.  All dimensionless except w_value, which is
-    // consumed as eV inside kine_charge_from_maps -- no unit conversion here.
-    pattern_algos.m_kine_charge.fudge_factor        = m_kine_fudge_factor;
-    pattern_algos.m_kine_charge.recom_factor        = m_kine_recom_factor;
-    pattern_algos.m_kine_charge.shower_fudge_factor = m_kine_shower_fudge_factor;
-    pattern_algos.m_kine_charge.shower_recom_factor = m_kine_shower_recom_factor;
-    pattern_algos.m_kine_charge.proton_recom_factor = m_kine_proton_recom_factor;
-    pattern_algos.m_kine_charge.plane_weights       = {m_kine_plane_weights[0], m_kine_plane_weights[1], m_kine_plane_weights[2]};
-    pattern_algos.m_kine_charge.plane_asym_switch   = m_kine_plane_asym_switch;
-    pattern_algos.m_kine_charge.shower_pdg_live     = m_kine_shower_pdg_live;
-    pattern_algos.m_kine_charge.w_value             = m_kine_w_value;
-    // doc sbnd_xin/docs/pr/36 §10 tagger-stage knobs (F4/F5/F6/F7).
-    pattern_algos.m_tagger_ordered_segment_sets  = m_tagger_ordered_segment_sets;
-    pattern_algos.m_stem_endpoint_wcpt_parity    = m_stem_endpoint_wcpt_parity;
-    pattern_algos.m_broken_muon_cluster_id_count = m_broken_muon_cluster_id_count;
-    pattern_algos.m_neutrino_type_bitmask        = m_neutrino_type_bitmask;
-    // doc sbnd_xin/docs/pr/33 §10 EM-shower-clustering knobs.
-    pattern_algos.m_daughter_count_proto_main_vertex     = m_daughter_count_proto_main_vertex;
-    pattern_algos.m_daughter_count_proto_examine_showers = m_daughter_count_proto_examine_showers;
-    pattern_algos.m_shower_pdg_from_start_segment        = m_shower_pdg_from_start_segment;
-    pattern_algos.m_shower_pdg_from_shower_type          = m_shower_pdg_from_shower_type;
-    pattern_algos.m_shower_pdg_exact_muon_test           = m_shower_pdg_exact_muon_test;
-    pattern_algos.m_pi0_id_shared_allocator              = m_pi0_id_shared_allocator;
-    pattern_algos.m_shower_flag_pdg_electron             = m_shower_flag_pdg_electron;
-    pattern_algos.m_shower_less_id_tiebreak              = m_shower_less_id_tiebreak;
-    pattern_algos.m_shower_endpoint_exclude_start_vertex = m_shower_endpoint_exclude_start_vertex;
-    pattern_algos.m_shower_endpoint_skip_orphan_vtx = m_shower_endpoint_skip_orphan_vtx;
-    pattern_algos.m_shower_walk_visited_parity = m_shower_walk_visited_parity;
-    // doc sbnd_xin/docs/pr/40 -- track mis-identified as electron.
-    pattern_algos.m_track_pid_persist_dqdx    = m_track_pid_persist_dqdx;    // F1: threaded via track_pid_options()
-    pattern_algos.m_shower_reclass_dqdx_guard = m_shower_reclass_dqdx_guard; // F2
-    pattern_algos.m_shower_topo_dqdx_guard    = m_shower_topo_dqdx_guard;    // F3
-    // doc sbnd_xin/docs/pr/40 round 2 -- two follow-on defects from the pr/40 round.
-    pattern_algos.m_track_pid_persist_4mom      = m_track_pid_persist_4mom;      // F4: threaded via track_pid_options()
-    pattern_algos.m_shower_proton_daughter_pion = m_shower_proton_daughter_pion; // F5
-    pattern_algos.m_shower_proton_daughter_pion_dissolve = m_shower_proton_daughter_pion_dissolve; // F7
-    pattern_algos.m_muon_multi_proton_pion               = m_muon_multi_proton_pion;               // F8
-    pattern_algos.m_track_pid_persist_dqdx_electron_guard     = m_track_pid_persist_dqdx_electron_guard;     // F9
-    pattern_algos.m_shower_connect_main_vertex_straight_guard = m_shower_connect_main_vertex_straight_guard; // F10
-    pattern_algos.m_shower_traj_straight_guard                = m_shower_traj_straight_guard;                // F11
-    pattern_algos.m_shower_absorb_track_guard                 = m_shower_absorb_track_guard;                 // F12
-    pattern_algos.m_shower_absorb_unreachable_main            = m_shower_absorb_unreachable_main;            // doc pr/65 round 3
-    pattern_algos.m_shower_connect_protected_pion_guard       = m_shower_connect_protected_pion_guard;       // F13
-    pattern_algos.m_michel_stem_muon_rescue                   = m_michel_stem_muon_rescue;                   // F14
-    pattern_algos.m_shower_in_cascade_guard                   = m_shower_in_cascade_guard;                   // pr/74 P1
-    pattern_algos.m_shower_in_max_len                         = m_shower_in_max_len * units::cm;             // pr/74 P1
-    pattern_algos.m_shower_in_mip_hi                          = m_shower_in_mip_hi;                          // pr/74 P1
-    pattern_algos.m_shower_connect_from_vertices_straight_guard  = m_shower_connect_from_vertices_straight_guard;  // pr/40 r9 (r8 Part A)
-    pattern_algos.m_shower_connect_start_seg_straight_guard      = m_shower_connect_start_seg_straight_guard;      // pr/40 r9 (r7 c2c)
-    pattern_algos.m_examine_direction_dirsign_shower_in_guard    = m_examine_direction_dirsign_shower_in_guard;    // pr/40 r9 (r7 c2a)
-    pattern_algos.m_daughter_shower_angle_reclass_straight_guard = m_daughter_shower_angle_reclass_straight_guard; // pr/40 r9 (r7 c2b)
-    pattern_algos.m_shower_topo_reexam_straight_guard            = m_shower_topo_reexam_straight_guard;            // pr/40 r9 (r7 c1)
-    pattern_algos.m_sfv_kink_max                                 = m_sfv_kink_max;                                 // pr/40 r9 (degrees)
-    pattern_algos.m_shower_nv_bridge_track                       = m_shower_nv_bridge_track;                       // pr/40 r9 B2
-    pattern_algos.m_shower_nv_bridge_max_gap                     = m_shower_nv_bridge_max_gap * units::cm;         // pr/40 r9 B2
-    pattern_algos.m_kine_drop_stray_satellites                   = m_kine_drop_stray_satellites;                   // pr/92
-    pattern_algos.m_kine_sat_min_energy                          = m_kine_sat_min_energy * units::MeV;             // pr/92
-    pattern_algos.m_kine_sat_prox_max                            = m_kine_sat_prox_max * units::cm;                // pr/92
-    pattern_algos.m_kine_sat_angle_bad                           = m_kine_sat_angle_bad;                           // pr/92 (degrees)
-    pattern_algos.m_kine_sat_angle_main                          = m_kine_sat_angle_main;                          // pr/92 (degrees)
-    pattern_algos.m_kine_sat_far_dis                             = m_kine_sat_far_dis * units::cm;                 // pr/92
-    pattern_algos.m_kine_sat_axis_dis_cut                        = m_kine_sat_axis_dis_cut * units::cm;            // pr/92
-    pattern_algos.m_kine_sat_cont_kink                           = m_kine_sat_cont_kink;                           // pr/92 (degrees)
-    pattern_algos.m_kine_sat_track_max_nseg                      = static_cast<int>(m_kine_sat_track_max_nseg);   // pr/92 r2 (count)
-    pattern_algos.m_kine_sat_em_far_dis                          = m_kine_sat_em_far_dis * units::cm;             // pr/92 r2
-    pattern_algos.m_michel_stem_michel_check                  = m_michel_stem_michel_check;                  // pr/74 P2
-    pattern_algos.m_michel_stem_max_far_len                   = m_michel_stem_max_far_len * units::cm;       // pr/74 P2
-    pattern_algos.m_shower_stem_backfill                      = m_shower_stem_backfill;                      // pr/74 K4
-    pattern_algos.m_stem_backfill_max_len                     = m_stem_backfill_max_len * units::cm;         // pr/74 K4
-    pattern_algos.m_stem_backfill_mip_lo                      = m_stem_backfill_mip_lo;                      // pr/74 K4
-    pattern_algos.m_stem_backfill_mip_hi                      = m_stem_backfill_mip_hi;                      // pr/74 K4
-    pattern_algos.m_stem_backfill_min_shower_len              = m_stem_backfill_min_shower_len * units::cm;  // pr/74 K4
-    pattern_algos.m_shower_conn3_unreachable                  = m_shower_conn3_unreachable;                  // pr/74 K5
-    pattern_algos.m_conn3_unreachable_min_len                 = m_conn3_unreachable_min_len * units::cm;     // pr/74 K5
-    pattern_algos.m_conn3_stitch_max                          = m_conn3_stitch_max * units::cm;              // pr/84 r2 F3
-    pattern_algos.m_shower_dedup_start_seg                    = m_shower_dedup_start_seg;                    // pr/84 r3 S1
-    pattern_algos.m_shower_traj_michel_stem                   = m_shower_traj_michel_stem;                   // pr/74 K6
-    pattern_algos.m_michel_stem_traj_min_len                  = m_michel_stem_traj_min_len * units::cm;      // pr/74 K6
-    pattern_algos.m_michel_stem_traj_max_len                  = m_michel_stem_traj_max_len * units::cm;      // pr/74 K6
-    pattern_algos.m_michel_stem_traj_mip_lo                   = m_michel_stem_traj_mip_lo;                   // pr/74 K6 (dimensionless ratio)
-    pattern_algos.m_michel_stem_traj_max_far_len              = m_michel_stem_traj_max_far_len * units::cm;  // pr/74 K6
-    pattern_algos.m_michel_stem_traj_min_kink_deg             = m_michel_stem_traj_min_kink_deg;             // pr/74 K6 (degrees)
-    pattern_algos.m_shower_long_muon_keep_type                = m_shower_long_muon_keep_type;                // doc pr/44
-    pattern_algos.m_shower_bragg_protect_start_segment        = m_shower_bragg_protect_start_segment;        // doc pr/40 round 10
-    pattern_algos.m_shower_reclass_case_b_dqdx_guard          = m_shower_reclass_case_b_dqdx_guard;          // doc pr/93 Cause A
-    pattern_algos.m_shower_accept_pid_guard                   = m_shower_accept_pid_guard;                   // doc pr/93 Cause B
-    pattern_algos.m_shower_pid_guard_min_len                  = m_shower_pid_guard_min_len * units::cm;      // doc pr/93 shared floor
-    pattern_algos.m_shower_vote_track_pid_counts              = m_shower_vote_track_pid_counts;              // doc pr/93 Cause C
-    pattern_algos.m_shower_cone_absorb_guard               = m_shower_cone_absorb_guard;               // doc pr/93 Cause D
-    pattern_algos.m_shower_detach_track_stem                  = m_shower_detach_track_stem;                  // doc pr/93 r4
-    pattern_algos.m_kine_count_orphan_tracks                  = m_kine_count_orphan_tracks;                  // doc pr/93 r4
-    pattern_algos.m_kine_orphan_track_min                     = m_kine_orphan_track_min * units::cm;         // doc pr/93 r4
-    pattern_algos.m_straight_cont_cross_cluster               = m_straight_cont_cross_cluster;               // doc pr/93 r4
-    pattern_algos.m_sccc_bridge_body                          = m_sccc_bridge_body;                          // doc pr/93 r4
-    pattern_algos.m_sccc_max_gap                              = m_sccc_max_gap * units::cm;                  // doc pr/93 r4
-    pattern_algos.m_sccc_kink_max                             = m_sccc_kink_max;                             // deg
-    pattern_algos.m_sccc_gap_aligned                          = m_sccc_gap_aligned * units::cm;              // doc pr/93 r4
-    pattern_algos.m_sccc_kink_tight                           = m_sccc_kink_tight;                           // deg
-    pattern_algos.m_single_muon_proton_chain_veto             = m_single_muon_proton_chain_veto;             // doc pr/43 round 2 K1
-    pattern_algos.m_single_muon_long_muon_claim               = m_single_muon_long_muon_claim;               // doc pr/43 round 2 K2
-    pattern_algos.m_pid_flag_reconcile                        = m_pid_flag_reconcile;                        // doc pr/43 round 2 K3
-    pattern_algos.m_long_muon_stub_bridge                     = m_long_muon_stub_bridge;                     // doc pr/46
-    // Muon dQ/dx-vs-length envelope: c0/c1/power dimensionless, pivot cm -> internal.
-    pattern_algos.m_muon_dqdx_curve = {m_muon_dqdx_curve[0], m_muon_dqdx_curve[1],
-                                       m_muon_dqdx_curve[2] * units::cm, m_muon_dqdx_curve[3]};
-    // Single-photon stem dE/dx conversion; the cut narrows to float so the
-    // default compares bit-identically to the legacy 2.3f literal.
-    pattern_algos.m_sp_dedx_use_recomb_model = m_sp_dedx_use_recomb_model;
-    pattern_algos.m_sp_mean_dedx_cut         = static_cast<float>(m_sp_mean_dedx_cut);
-    pattern_algos.m_recomb_model             = m_recomb_model;
-    m_track_fitter->set_perf(m_perf);
-    // doc pr/49: thread the own-blob-coverage knob into the fitter (double
-    // sentinel; -1 default matches TrackFitting::Parameters, so this is a
-    // no-op unless the config opts in).
-    m_track_fitter->set_parameter("fit_blob_coverage", m_fit_blob_coverage);
-    // doc pr/67 P3 (log-only end-trim probe); 0 = off = byte-identical.
-    m_track_fitter->set_parameter("traj_cover_probe", m_traj_cover_probe ? 1.0 : 0.0);
-    // doc sbnd_xin/docs/pr/50 (fit_blob_coverage_defer, default false):
-    // wrap the MAIN cluster's find_proto_vertex call so its recursive
-    // break partition forms on legacy (undeweighted) fits -- the partition
-    // is globally sensitive to fit perturbations (172230: 200 deweight
-    // firings ~90 cm away reshuffled 34->33 segments and lost the
-    // true-kink main-vertex candidate; same class measured in 131357 /
-    // 342199 / 360535 / 469665).  Main cluster ONLY: its later stages
-    // (determine_main_vertex, improve_vertex, the final trajectory +
-    // dQ/dx) all refit with the restored deweighting, so ghost protection
-    // survives -- but a non-main cluster's final trajectory is essentially
-    // its find_proto_vertex fit, so deferring there UN-fixes the pr/49
-    // ghosts (57441 cid 20 measured 1.12 -> 1.23 cm under a global defer).
-    // Local fitters spawned inside (inherit_from) copy the suspended
-    // value, so the whole stage is covered.  Both lambdas are no-ops
-    // unless the defer knob AND the base knob are on.
-    const bool cov_defer_active = m_fit_blob_coverage_defer && m_fit_blob_coverage >= 0;
-    auto cov_defer_suspend = [&]() {
-        if (cov_defer_active) m_track_fitter->set_parameter("fit_blob_coverage", -1);
-    };
-    auto cov_defer_restore = [&]() {
-        if (cov_defer_active) m_track_fitter->set_parameter("fit_blob_coverage", m_fit_blob_coverage);
-    };
-    if (cov_defer_active) {
-        SPDLOG_LOGGER_DEBUG(log, "fit_blob_coverage_defer on: partition stage (find_proto_vertex) runs legacy fits, deweight restored for all later stages");
-    }
-
+    // ---- doc pr/94: one full PR pass per candidate ------------------- //
+    // Legacy mode runs exactly ONE iteration, on the member fitter, with
+    // main_cluster / other_clusters holding exactly what the untouched
+    // selection above put there -- so the body below is byte-identical to the
+    // pre-pr/94 single-candidate chain.  acc_segment_id is hoisted out of the
+    // loop on purpose: it restarts at 0 per candidate otherwise, and shower
+    // ids would then collide between bundles.
     int acc_segment_id = 0;
-    IndexedShowerSet pi0_showers;
-    ShowerIntMap map_shower_pio_id;
-    std::map<int, std::vector<ShowerPtr>> map_pio_id_showers;
-    std::map<int, std::pair<double, int>> map_pio_id_mass;
-    std::map<int, std::pair<int, int>> map_pio_id_saved_pair;
-    Pi0KineFeatures pio_kine{};
-    ShowerVertexMap map_vertex_in_shower;
-    ShowerSegmentMap map_segment_in_shower;
-    VertexShowerSetMap map_vertex_to_shower;
-    ClusterPtrSet used_shower_clusters;
-    IndexedShowerSet showers;
+    for (size_t nu_index = 0; nu_index < candidates.size(); ++nu_index) {
+        main_cluster   = candidates[nu_index].main;
+        other_clusters = candidates[nu_index].others;
 
-    VertexPtr final_main_vertex = nullptr;
-    bool flag_dl_changed = false;
-
-    // doc pr/59: diagnostic-only, env-gated (WCT_PR59_ASSOC_CENSUS unset =>
-    // no log lines, no behavior change) sentinel naming which cluster each
-    // clustering_points (associate_points) pass actually ran against.
-    // main_cluster can be silently repointed later (determine_overall_
-    // main_vertex_DL holds it by reference and may call swap_main_cluster),
-    // which would leave whichever cluster the first pass ran on NEVER
-    // re-associated -- see the second call site further below.
-    static const bool pr59_assoc_census = std::getenv("WCT_PR59_ASSOC_CENSUS") != nullptr;
-
-    {
-        // initial pattern recognitions
-        // particle_data (doc pr/48): stopping templates for the two-end
-        // break pass; inert unless two_end_break is on.
-        cov_defer_suspend();
-        pattern_algos.find_proto_vertex(*pr_graph, *main_cluster, *m_track_fitter, m_dv, true, 2, true, particle_data());
-        cov_defer_restore();
-        detg_dump("main:find_proto_vertex", *pr_graph);
-        dup_stage_census("main:find_proto_vertex", *pr_graph, *main_cluster);
-
-        // shower related operations
-        pattern_algos.clustering_points(*pr_graph, *main_cluster, m_dv);
-        if (pr59_assoc_census) {
-            SPDLOG_LOGGER_DEBUG(log,
-                "pr59 assoc-census: first clustering_points call, main_cluster={}",
-                main_cluster->get_cluster_id());
-        }
-        detg_dump("main:clustering_points", *pr_graph);
-        pattern_algos.separate_track_shower(*pr_graph, *main_cluster);
-        detg_dump("main:separate_track_shower", *pr_graph);
-
-        // direction determination
-        pattern_algos.determine_direction(*pr_graph, *main_cluster, particle_data(), m_recomb_model);
-        detg_dump("main:determine_direction", *pr_graph);
-
-        // shower clustering
-        pattern_algos.shower_determining_in_main_cluster(*pr_graph, *main_cluster, particle_data(), m_recomb_model, m_dv);
-        detg_dump("main:shower_determining", *pr_graph);
-
-        // main vertex determination
-        pattern_algos.determine_main_vertex(*pr_graph, *main_cluster, main_vertex, vertices_in_long_muon, segments_in_long_muon, *m_track_fitter, m_dv, particle_data(), m_recomb_model);
-        detg_dump("main:determine_main_vertex", *pr_graph);
-        dup_stage_census("main:determine_main_vertex", *pr_graph, *main_cluster);
-
-        // doc sbnd_xin/docs/pr/59 round 2 (P1): determine_main_vertex's
-        // internal examine_structure_final*/examine_vertices_1 can create a
-        // brand-new segment (18255-142421 seg 20; 116944-71372 segs
-        // 19052/19053/136199, all confirmed via WCT_DET_DEBUG=2 backtraces).
-        // Rescue it here, before determine_direction/shower_determining_in_
-        // main_cluster/deghosting/shower_clustering_with_nv all consume its
-        // (until now, or still, missing) associate_points and shower flags.
-        // No-op unless m_assoc_full_recluster.
-        pattern_algos.reassociate_cluster_orphans(*pr_graph, *main_cluster, m_dv);
-
-        if (main_vertex !=nullptr){
-            map_cluster_main_vertices[main_cluster] = main_vertex;
-            main_vertex = nullptr;
+        // The first candidate reuses the configured member fitter (legacy,
+        // byte-identical).  Later candidates need their OWN fitter: add_graph()
+        // replaces the graph but sync_from_graph() ACCUMULATES clusters and
+        // blobs, so reusing one fitter would leak bundle i-1's charge data into
+        // bundle i.  Seeded from the member fitter's own parameters, which is
+        // where load_trackfitting_config()'s set_parameter() calls landed -- a
+        // freshly-preset fitter would silently drop the whole config file.
+        auto track_fitter = m_track_fitter;
+        if (nu_index > 0) {
+            track_fitter = std::make_shared<TrackFitting>(TrackFittingPresets::create_with_current_values());
+            track_fitter->set_parameters(m_track_fitter->get_parameters());
+            track_fitter->set_perf(m_track_fitter->get_perf());
+            track_fitter->set_detector_volume(m_dv);
+            track_fitter->set_pc_transforms(m_pcts);
         }
 
-        std::cout << "After first round of main cluster PR" << std::endl;        pattern_algos.print_segs_info(*pr_graph, *main_cluster, 0);
-    }
-    if (m_perf) SPDLOG_LOGGER_DEBUG(log, "TaggerCheckNeutrino timing: main_cluster initial PR took {} ms", MS(Clock::now() - t0).count());
-    t0 = Clock::now();
+        if (beam_gate) {
+            SPDLOG_LOGGER_INFO(log, "TaggerCheckNeutrino: selected main cluster {} (t0 {:.3f} us, L {:.1f} cm, {} associated)",
+                               main_cluster->get_cluster_id(), main_cluster->get_cluster_t0()/units::us,
+                               main_cluster->get_length()/units::cm, other_clusters.size());
+        }
 
-    // Loop over other (non-main) beam-flash clusters
-    if (!other_clusters.empty()) {
-        for (auto* cluster : other_clusters) {
-            if (cluster->get_length() > 6 * units::cm) {
-                // std::cout << "Long Cluster " << cluster->get_cluster_id() << " " << cluster->nchildren() << std::endl;
-                // Long cluster: break tracks and do 2 rounds of other-track finding
-                pattern_algos.find_proto_vertex(*pr_graph, *cluster, *m_track_fitter, m_dv, true, 2, false);
-                pattern_algos.clustering_points(*pr_graph, *cluster, m_dv);
-                pattern_algos.separate_track_shower(*pr_graph, *cluster);
-                pattern_algos.determine_direction(*pr_graph, *cluster, particle_data(), m_recomb_model);
-                pattern_algos.shower_determining_in_main_cluster(*pr_graph, *cluster, particle_data(), m_recomb_model, m_dv);
-                pattern_algos.determine_main_vertex(*pr_graph, *cluster, main_vertex, vertices_in_long_muon, segments_in_long_muon, *m_track_fitter, m_dv, particle_data(), m_recomb_model);
-                // doc sbnd_xin/docs/pr/59 round 2 (P1), other-cluster branch.
-                pattern_algos.reassociate_cluster_orphans(*pr_graph, *cluster, m_dv);
-                if (main_vertex != nullptr) {
-                    map_cluster_main_vertices[cluster] = main_vertex;
-                    main_vertex = nullptr;
-                }
-                detg_dump("other:long_cluster", *pr_graph);
-            } else {
-                // Short cluster: no track breaking, 1 round; fall back to init_point_segment if needed
-                if (!pattern_algos.find_proto_vertex(*pr_graph, *cluster, *m_track_fitter, m_dv, false, 1, false)) {
-                    // std::cout << "Point Cluster " << cluster->get_cluster_id() << " " << cluster->nchildren() <<std::endl;
-                    pattern_algos.init_point_segment(*pr_graph, *cluster, *m_track_fitter, m_dv);
-                }
-                pattern_algos.clustering_points(*pr_graph, *cluster, m_dv);
-                pattern_algos.separate_track_shower(*pr_graph, *cluster);
-                pattern_algos.determine_direction(*pr_graph, *cluster, particle_data(), m_recomb_model);
-                pattern_algos.shower_determining_in_main_cluster(*pr_graph, *cluster, particle_data(), m_recomb_model, m_dv);
-                pattern_algos.determine_main_vertex(*pr_graph, *cluster, main_vertex, vertices_in_long_muon, segments_in_long_muon, *m_track_fitter, m_dv, particle_data(), m_recomb_model);
-                // doc sbnd_xin/docs/pr/59 round 2 (P1), other-cluster branch.
-                pattern_algos.reassociate_cluster_orphans(*pr_graph, *cluster, m_dv);
-                if (main_vertex != nullptr) {
-                    map_cluster_main_vertices[cluster] = main_vertex;
-                    main_vertex = nullptr;
-                }
-                detg_dump("other:short_cluster", *pr_graph);
+        SPDLOG_LOGGER_TRACE(log, "Found {} clusters, {} main clusters, {} in-beam clusters, {} of blobs in main cluster id {}", nclusters, n_main_clusters, n_in_beam_clusters, main_cluster->nchildren(), main_cluster->get_cluster_id());
+
+
+        // Debug dump (only when env var is set)
+        if (main_cluster) {
+            if (const char* dump_path = std::getenv("WCT_DUMP_INIT_FIRST_SEGMENT")) {
+                DebugIO::dump_init_first_segment_inputs(
+                    dump_path, *main_cluster, main_cluster, true, *track_fitter);
             }
         }
-        if (m_perf) SPDLOG_LOGGER_DEBUG(log, "TaggerCheckNeutrino timing: other_clusters PR took {} ms", MS(Clock::now() - t0).count());
+
+        SPDLOG_LOGGER_TRACE(log, "Number of Main Clusters: {}", n_main_clusters);
+
+        IndexedVertexSet vertices_in_long_muon;
+        IndexedSegmentSet segments_in_long_muon;
+        VertexPtr main_vertex = nullptr;
+        ClusterVertexMap map_cluster_main_vertices;
+
+        // Pre-load charge data for all beam-flash clusters once so that
+        // do_multi_tracking calls throughout pattern recognition can use
+        // flag_force_load_data=false and avoid redundant prepare_data() calls.
+        {
+            std::vector<WireCell::Clus::Facade::Cluster*> clusters_to_preload;
+            clusters_to_preload.push_back(main_cluster);
+            for (auto* c : other_clusters) clusters_to_preload.push_back(c);
+            track_fitter->preload_clusters(clusters_to_preload);
+        }
+        if (m_perf) SPDLOG_LOGGER_DEBUG(log, "TaggerCheckNeutrino timing: preload_clusters took {} ms", MS(Clock::now() - t0).count());
         t0 = Clock::now();
 
-        // Deghost across all beam-flash clusters (main + others)
-        std::vector<Cluster*> all_clusters;
-        all_clusters.push_back(main_cluster);
-        all_clusters.insert(all_clusters.end(), other_clusters.begin(), other_clusters.end());
+        // Debug dump for unit-test fixture generation (only when env var is set).
+        // Generate with:
+        //   WCT_DUMP_TAGGER_INPUTS=./tmp/tagger_check_neutrino_input.json wire-cell ...
+        // Then replay with doctest_tagger_check_neutrino end-to-end test.
+        if (main_cluster) {
+            if (const char* dump_path = std::getenv("WCT_DUMP_TAGGER_INPUTS")) {
+                DebugIO::dump_tagger_inputs(
+                    dump_path, *main_cluster, other_clusters,
+                    /*flag_back_search=*/true, *track_fitter);
+            }
+        }
 
-        pattern_algos.deghosting(*pr_graph, map_cluster_main_vertices, all_clusters, *m_track_fitter, m_dv);
-        detg_dump("deghosting", *pr_graph);
-        if (m_perf) SPDLOG_LOGGER_DEBUG(log, "TaggerCheckNeutrino timing: deghosting took {} ms", MS(Clock::now() - t0).count());
+        // Create PRGraph and first segment
+        auto pr_graph = std::make_shared<WireCell::Clus::PR::Graph>();
+        track_fitter->add_graph(pr_graph);
+
+        WireCell::Clus::PR::PatternAlgorithms pattern_algos;
+        pattern_algos.m_perf = m_perf;
+        pattern_algos.m_dir_weak_use_score = m_dir_weak_use_score;
+        pattern_algos.m_mip_dqdx        = m_mip_dqdx / units::cm;         // e/cm -> internal
+        pattern_algos.m_mip_dqdx_median = m_mip_dqdx_median / units::cm;  // e/cm -> internal
+        pattern_algos.m_proton_dir_vote      = m_proton_dir_vote;
+        pattern_algos.m_proton_dir_score_max = m_proton_dir_score_max;
+        pattern_algos.m_proton_dir_asym_min  = m_proton_dir_asym_min;
+        pattern_algos.m_endpoint_trim_retry  = m_endpoint_trim_retry;
+        pattern_algos.m_fit_vertex_min_seg_length = m_fit_vertex_min_seg_length * units::cm;  // cm -> internal
+        // doc sbnd_xin/docs/pr/51 round 7: robust vertex fit
+        pattern_algos.m_mvfit_robust      = m_mvfit_robust;
+        pattern_algos.m_mvfit_main_only   = m_mvfit_main_only;
+        pattern_algos.m_mvfit_min_len     = m_mvfit_min_len * units::cm;      // cm -> internal
+        pattern_algos.m_mvfit_rin_margin  = m_mvfit_rin_margin * units::cm;   // cm -> internal
+        pattern_algos.m_mvfit_rout_frac   = m_mvfit_rout_frac;                // unitless
+        pattern_algos.m_mvfit_rout_min    = m_mvfit_rout_min * units::cm;     // cm -> internal
+        pattern_algos.m_mvfit_rout_max    = m_mvfit_rout_max * units::cm;     // cm -> internal
+        pattern_algos.m_mvfit_angle       = m_mvfit_angle;                    // deg, no conversion
+        pattern_algos.m_mvfit_min_pts     = m_mvfit_min_pts;                  // count
+        pattern_algos.m_mvfit_min_aniso   = m_mvfit_min_aniso;                // unitless
+        pattern_algos.m_mvfit_prior_range = m_mvfit_prior_range * units::cm;  // cm -> internal
+        pattern_algos.m_cathode_x         = m_cathode_x * units::cm;          // cm -> internal
+        pattern_algos.m_cathode_kink_xcut = m_cathode_kink_xcut * units::cm;  // cm -> internal
+        pattern_algos.m_cathode_wide_kink_angle    = m_cathode_wide_kink_angle;                // deg, no conversion
+        pattern_algos.m_cathode_wide_kink_skirt    = m_cathode_wide_kink_skirt * units::cm;    // cm -> internal
+        pattern_algos.m_cathode_wide_kink_baseline = m_cathode_wide_kink_baseline * units::cm; // cm -> internal
+        // doc sbnd_xin/docs/pr/48 -- back-to-back track fixes.
+        pattern_algos.m_two_end_break       = m_two_end_break;
+        pattern_algos.m_teb_min_len         = m_teb_min_len * units::cm;       // cm -> internal
+        pattern_algos.m_teb_min_arm         = m_teb_min_arm * units::cm;       // cm -> internal
+        pattern_algos.m_teb_min_arm_pts     = m_teb_min_arm_pts;
+        pattern_algos.m_teb_stub_max        = m_teb_stub_max * units::cm;      // cm -> internal
+        pattern_algos.m_teb_accept_range    = m_teb_accept_range * units::cm;  // cm -> internal
+        pattern_algos.m_teb_rise_r1         = m_teb_rise_r1;
+        pattern_algos.m_teb_rise_r2         = m_teb_rise_r2;
+        pattern_algos.m_teb_abs_end_min     = m_teb_abs_end_min;
+        pattern_algos.m_teb_dip_floor       = m_teb_dip_floor;
+        pattern_algos.m_teb_score_cap_r1    = m_teb_score_cap_r1;
+        pattern_algos.m_teb_score_cap_r2    = m_teb_score_cap_r2;
+        pattern_algos.m_teb_turn_angle      = m_teb_turn_angle;                // deg, no conversion
+        pattern_algos.m_teb_turn_baseline   = m_teb_turn_baseline * units::cm; // cm -> internal
+        pattern_algos.m_teb_turn_skirt      = m_teb_turn_skirt * units::cm;    // cm -> internal
+        pattern_algos.m_teb_turn_min_arm_frac = m_teb_turn_min_arm_frac;       // dimensionless, no conversion
+        pattern_algos.m_teb_second_max      = m_teb_second_max * units::cm;    // cm -> internal
+        pattern_algos.m_teb_chain_topology  = m_teb_chain_topology;
+        pattern_algos.m_teb_r3_turn         = m_teb_r3_turn;                   // deg, no conversion
+        pattern_algos.m_teb_r3_hot          = m_teb_r3_hot;                    // x mip median, no conversion
+        pattern_algos.m_teb_bragg_veto_turn = m_teb_bragg_veto_turn;           // deg, no conversion
+        pattern_algos.m_kink_walk_dqdx_stop = m_kink_walk_dqdx_stop;
+        pattern_algos.m_kink_break_protect  = m_kink_break_protect;
+        pattern_algos.m_kink_dqdx_hot_ratio = m_kink_dqdx_hot_ratio;
+        // doc sbnd_xin/docs/pr/50 -- main-vertex kink-consistency snap.
+        pattern_algos.m_vertex_kink_snap = m_vertex_kink_snap;
+        pattern_algos.m_vks_radius       = m_vks_radius * units::cm;    // cm -> internal
+        pattern_algos.m_vks_min_dis      = m_vks_min_dis * units::cm;   // cm -> internal
+        pattern_algos.m_vks_angle        = m_vks_angle;                 // deg, no conversion
+        pattern_algos.m_vks_margin       = m_vks_margin;                // deg, no conversion
+        pattern_algos.m_vks_collinear    = m_vks_collinear;             // deg, no conversion
+        pattern_algos.m_vks_skirt        = m_vks_skirt * units::cm;     // cm -> internal
+        pattern_algos.m_vks_baseline     = m_vks_baseline * units::cm;  // cm -> internal
+        pattern_algos.m_vks_min_arm      = m_vks_min_arm * units::cm;   // cm -> internal
+        pattern_algos.m_vks_fit_miss     = m_vks_fit_miss * units::cm;  // cm -> internal
+        pattern_algos.m_vks_hot_ratio    = m_vks_hot_ratio;             // x mip median, no conversion
+        pattern_algos.m_vks_carry_prong  = m_vks_carry_prong * units::cm; // cm -> internal (doc pr/85)
+        // sbnd_xin/docs/73 sec 12 (round 3).
+        pattern_algos.m_esva_ignore_empty_2d = m_esva_ignore_empty_2d;
+        // doc sbnd_xin/docs/pr/51 -- main-vertex graph audit.
+        pattern_algos.m_main_vertex_graph_audit = m_main_vertex_graph_audit;
+        pattern_algos.m_mvga_radius       = m_mvga_radius * units::cm;    // cm -> internal
+        pattern_algos.m_mvga_dup_tol      = m_mvga_dup_tol * units::cm;   // cm -> internal
+        pattern_algos.m_mvga_dup_frac     = m_mvga_dup_frac;              // fraction, no conversion
+        pattern_algos.m_mvga_dup_angle    = m_mvga_dup_angle;             // deg, no conversion
+        pattern_algos.m_mvga_bridge_mip   = m_mvga_bridge_mip;            // x mip median, no conversion
+        pattern_algos.m_mvga_reconnect    = m_mvga_reconnect * units::cm; // cm -> internal
+        pattern_algos.m_mvga_stub         = m_mvga_stub * units::cm;      // cm -> internal
+        pattern_algos.m_mvga_stub_pts     = m_mvga_stub_pts;
+        pattern_algos.m_mvga_reseat_angle = m_mvga_reseat_angle;          // deg, no conversion
+        pattern_algos.m_mvga_satellite    = m_mvga_satellite * units::cm; // cm -> internal
+        pattern_algos.m_mvga_interposed   = m_mvga_interposed;            // doc pr/85
+        pattern_algos.m_mvga_interposed_angle = m_mvga_interposed_angle;  // deg, no conversion
+        pattern_algos.m_mvga_interposed_len = m_mvga_interposed_len * units::cm; // cm -> internal (doc pr/86)
+        pattern_algos.m_mvga_sat_dup_frac = m_mvga_sat_dup_frac;          // fraction, no conversion (doc pr/86)
+        pattern_algos.m_mvga_interposed_deg1 = m_mvga_interposed_deg1;    // doc pr/86
+        pattern_algos.m_mvga_splice_straighten = m_mvga_splice_straighten * units::cm; // cm -> internal (doc pr/86 round 2)
+        pattern_algos.m_mvga_approach_collapse = m_mvga_approach_collapse * units::cm; // cm -> internal (doc pr/86 round 2)
+        pattern_algos.m_mvga_straighten_radius = m_mvga_straighten_radius * units::cm; // cm -> internal (doc pr/86 round 2)
+        pattern_algos.m_mvga_op1_radius   = m_mvga_op1_radius * units::cm; // cm -> internal; 0 and the -1 sentinel both survive the scale (doc pr/83 r3)
+        pattern_algos.m_mvga_op1_dup_frac = m_mvga_op1_dup_frac;           // fraction, no conversion (doc pr/83 r3)
+        pattern_algos.m_mvga_op1_post     = m_mvga_op1_post;               // doc pr/83 r3 (class A)
+        pattern_algos.m_mvga_carry_max    = m_mvga_carry_max;              // count (doc pr/83 r3)
+        pattern_algos.m_swap_orphan_dup_audit = m_swap_orphan_dup_audit;   // doc pr/83 r3 (Mechanism C)
+        pattern_algos.m_mvga_proj_dup_frac  = m_mvga_proj_dup_frac;        // fraction, no conversion (doc pr/83 r4)
+        pattern_algos.m_mvga_proj_dqdx_ratio = m_mvga_proj_dqdx_ratio;     // ratio, no conversion (doc pr/83 r4)
+        pattern_algos.m_mvga_proj_angle = m_mvga_proj_angle;               // deg, no conversion (doc pr/83 r4b)
+        pattern_algos.m_rough_path_probe  = m_rough_path_probe;           // doc pr/51 round 4: diagnostic-only
+        // doc pr/51 round 5: steiner gap penalty.  The two service handles are
+        // unconditional copies (inert while the scale is 0).
+        pattern_algos.m_steiner_gap_penalty = m_steiner_gap_penalty;
+        pattern_algos.m_sgp_dead_alpha      = m_sgp_dead_alpha;                    // fraction, no conversion
+        pattern_algos.m_sgp_min_edge        = m_sgp_min_edge * units::cm;          // cm -> internal
+        pattern_algos.m_sgp_sample_step     = m_sgp_sample_step * units::cm;       // cm -> internal
+        pattern_algos.m_sgp_point_radius    = m_sgp_point_radius * units::cm;      // cm -> internal
+        pattern_algos.m_sgp_edge_probe      = m_sgp_edge_probe;                    // doc pr/73: diagnostic-only
+        pattern_algos.m_vertex_scoreboard   = m_vertex_scoreboard;                 // doc pr/75: diagnostic-only
+        // doc pr/79 §10: the conjunction, so fill sites may assume the board is active.
+        pattern_algos.m_vtx_harvest         = m_vertex_scoreboard && m_dl_vtx_harvest;
+        // doc pr/51 round 6: weak-charge deficit term (charge units, no conversion).
+        pattern_algos.m_sgp_weak_scale      = m_sgp_weak_scale;
+        pattern_algos.m_sgp_weak_qref       = m_sgp_weak_qref;
+        // doc pr/73 round 2 F3a: a LENGTH, so it takes the cm->internal conversion.
+        // -1 * units::cm stays negative, so the `< 0` off-test survives it.
+        pattern_algos.m_sgp_max_sep         = m_sgp_max_sep * units::cm;           // cm -> internal
+        // doc pr/83: oriented break_segment splits (bool, no conversion).
+        pattern_algos.m_break_seg_orient    = m_break_seg_orient;
+        pattern_algos.m_sgp_dv   = m_dv;
+        pattern_algos.m_sgp_pcts = m_pcts;
+        pattern_algos.m_shower_topo_demote_len = m_shower_topo_demote_len * units::cm;  // cm -> internal
+        // doc sbnd_xin/docs/pr/30 §11 port-fidelity knobs.
+        pattern_algos.m_fit_exclusion            = m_fit_exclusion;
+        pattern_algos.m_graph_endpoint_strict    = m_graph_endpoint_strict;
+        pattern_algos.m_graph_endpoint_tol       = m_graph_endpoint_tol * units::cm;   // cm -> internal
+        pattern_algos.m_oov_prototype_parity     = m_oov_prototype_parity;
+        pattern_algos.m_first_seg_local_pca      = m_first_seg_local_pca;
+        pattern_algos.m_other_seg_relaxed_accept = m_other_seg_relaxed_accept;
+        // doc sbnd_xin/docs/pr/45.
+        pattern_algos.m_other_seg_empty_2d_guard = m_other_seg_empty_2d_guard;
+        // doc sbnd_xin/docs/pr/54.
+        pattern_algos.m_other_seg_keep_isolated            = m_other_seg_keep_isolated;
+        pattern_algos.m_other_seg_keep_isolated_min_points = m_other_seg_keep_isolated_min_points;
+        pattern_algos.m_other_seg_keep_isolated_min_length = m_other_seg_keep_isolated_min_length * units::cm; // cm -> internal
+        // doc sbnd_xin/docs/pr/67 round 3.
+        pattern_algos.m_iso_snap_min_dir_mag = m_iso_snap_min_dir_mag * units::cm; // cm -> internal
+        // doc sbnd_xin/docs/pr/59 round 2.
+        pattern_algos.m_assoc_full_recluster = m_assoc_full_recluster;
+        // doc sbnd_xin/docs/pr/64 round 7.
+        pattern_algos.m_assoc_reassign_orphans = m_assoc_reassign_orphans;
+        // doc sbnd_xin/docs/pr/64 round 8.
+        pattern_algos.m_assoc_clear_on_merge = m_assoc_clear_on_merge;
+        // doc sbnd_xin/docs/pr/31 §11 (F2).
+        pattern_algos.m_shower_topo_proto_dir    = m_shower_topo_proto_dir;
+        // doc sbnd_xin/docs/pr/32 §11 (F1-F4).
+        pattern_algos.m_vertex_dir_use_fit_point       = m_vertex_dir_use_fit_point;
+        pattern_algos.m_shower_traj_recheck_parity     = m_shower_traj_recheck_parity;
+        pattern_algos.m_main_vertex_require_descriptor = m_main_vertex_require_descriptor;
+        pattern_algos.m_main_vertex_candidate_flag     = m_main_vertex_candidate_flag;
+        // doc sbnd_xin/docs/pr/31 §12 (the §10.12 round: F5, F6, F3, F1, F4, F7).
+        pattern_algos.m_cont_muon_dir3_30cm             = m_cont_muon_dir3_30cm;
+        pattern_algos.m_track_comp_empty_abstain        = m_track_comp_empty_abstain;
+        pattern_algos.m_shower_topo_reset               = m_shower_topo_reset;
+        pattern_algos.m_reclass_preserve_4mom           = m_reclass_preserve_4mom;
+        pattern_algos.m_reclass_never_computed_ke_floor = m_reclass_never_computed_ke_floor; // doc pr/40 round 2 F6
+        pattern_algos.m_dir_track_median_local          = m_dir_track_median_local;
+        pattern_algos.m_examine_showers_vertex_by_index = m_examine_showers_vertex_by_index;
+        // segment_is_shower_trajectory is a free function reached from three files
+        // with no component config in scope, so F2's flag-refresh half travels
+        // through a process-wide flag written here, once, before any graph is
+        // built -- same transport as PR::g_graph_endpoint_policy below.
+        PR::g_shower_traj_refresh_flag = m_shower_traj_recheck_parity;
+        // add_segment() is a free function with no component config in reach, so
+        // the P8 policy travels through a process-wide struct written here, once,
+        // before any graph is built (doc pr/30 §11 P8).
+        WireCell::Clus::PR::g_graph_endpoint_policy.strict = m_graph_endpoint_strict;
+        WireCell::Clus::PR::g_graph_endpoint_policy.tol    = m_graph_endpoint_tol * units::cm;
+        pattern_algos.m_iso_endpoint               = m_iso_endpoint;
+        pattern_algos.m_iso_endpoint_min_length    = m_iso_endpoint_min_length * units::cm;  // cm -> internal
+        pattern_algos.m_iso_endpoint_max_xext      = m_iso_endpoint_max_xext * units::cm;    // cm -> internal
+        pattern_algos.m_iso_endpoint_xext_frac     = m_iso_endpoint_xext_frac;
+        pattern_algos.m_iso_endpoint_xext_quantile = m_iso_endpoint_xext_quantile;
+        pattern_algos.m_iso_endpoint_tube_radius   = m_iso_endpoint_tube_radius * units::cm;  // cm -> internal
+        pattern_algos.m_iso_endpoint_min_aspect    = m_iso_endpoint_min_aspect;
+        pattern_algos.m_traj_cover_probe           = m_traj_cover_probe;
+        // doc sbnd_xin/docs/pr/72 round 2 -- examine_structure_3 stub guard.
+        pattern_algos.m_es3_stub_guard             = m_es3_stub_guard;
+        pattern_algos.m_es3sg_stub_max             = m_es3sg_stub_max * units::cm;  // cm -> internal
+        pattern_algos.m_es3sg_len_ratio            = m_es3sg_len_ratio;
+        pattern_algos.m_es3sg_ang3_min             = m_es3sg_ang3_min;
+        pattern_algos.m_es3sg_ang_ratio            = m_es3sg_ang_ratio;
+        pattern_algos.m_es3sg_require_terminal     = m_es3sg_require_terminal;
+        // doc pr/67 P6: remove_segment() is a free function, so the knob is mirrored
+        // into a file-static in PRGraph.cxx rather than read from pattern_algos.
+        PR::set_traj_cover_probe(m_traj_cover_probe);
+        pattern_algos.m_pr_find_other_rounds       = m_pr_find_other_rounds;
+        pattern_algos.m_v3_extension_guard         = m_v3_extension_guard;
+        pattern_algos.m_v3_extension_min_gain      = m_v3_extension_min_gain * units::cm;    // cm -> internal
+        // Detector-extent literals, cm -> internal (docs/pr/2 sec. 2e(iv)).
+        pattern_algos.m_cosmic_y_top_main    = m_cosmic_y_top_main    * units::cm;
+        pattern_algos.m_cosmic_y_top_strict  = m_cosmic_y_top_strict  * units::cm;
+        pattern_algos.m_cosmic_y_top_loose   = m_cosmic_y_top_loose   * units::cm;
+        pattern_algos.m_cosmic_y_small_piece = m_cosmic_y_small_piece * units::cm;
+        pattern_algos.m_vertex_z_prior_scale = m_vertex_z_prior_scale * units::cm;
+        // Dimensionless directions -- no unit conversion (unlike the dQ/dx scales).
+        pattern_algos.m_ssm_target_dir   = WireCell::Vector(m_ssm_target_dir[0],   m_ssm_target_dir[1],   m_ssm_target_dir[2]);
+        pattern_algos.m_ssm_absorber_dir = WireCell::Vector(m_ssm_absorber_dir[0], m_ssm_absorber_dir[1], m_ssm_absorber_dir[2]);
+        // Charge -> energy calibration.  All dimensionless except w_value, which is
+        // consumed as eV inside kine_charge_from_maps -- no unit conversion here.
+        pattern_algos.m_kine_charge.fudge_factor        = m_kine_fudge_factor;
+        pattern_algos.m_kine_charge.recom_factor        = m_kine_recom_factor;
+        pattern_algos.m_kine_charge.shower_fudge_factor = m_kine_shower_fudge_factor;
+        pattern_algos.m_kine_charge.shower_recom_factor = m_kine_shower_recom_factor;
+        pattern_algos.m_kine_charge.proton_recom_factor = m_kine_proton_recom_factor;
+        pattern_algos.m_kine_charge.plane_weights       = {m_kine_plane_weights[0], m_kine_plane_weights[1], m_kine_plane_weights[2]};
+        pattern_algos.m_kine_charge.plane_asym_switch   = m_kine_plane_asym_switch;
+        pattern_algos.m_kine_charge.shower_pdg_live     = m_kine_shower_pdg_live;
+        pattern_algos.m_kine_charge.w_value             = m_kine_w_value;
+        // doc sbnd_xin/docs/pr/36 §10 tagger-stage knobs (F4/F5/F6/F7).
+        pattern_algos.m_tagger_ordered_segment_sets  = m_tagger_ordered_segment_sets;
+        pattern_algos.m_stem_endpoint_wcpt_parity    = m_stem_endpoint_wcpt_parity;
+        pattern_algos.m_broken_muon_cluster_id_count = m_broken_muon_cluster_id_count;
+        pattern_algos.m_neutrino_type_bitmask        = m_neutrino_type_bitmask;
+        // doc sbnd_xin/docs/pr/33 §10 EM-shower-clustering knobs.
+        pattern_algos.m_daughter_count_proto_main_vertex     = m_daughter_count_proto_main_vertex;
+        pattern_algos.m_daughter_count_proto_examine_showers = m_daughter_count_proto_examine_showers;
+        pattern_algos.m_shower_pdg_from_start_segment        = m_shower_pdg_from_start_segment;
+        pattern_algos.m_shower_pdg_from_shower_type          = m_shower_pdg_from_shower_type;
+        pattern_algos.m_shower_pdg_exact_muon_test           = m_shower_pdg_exact_muon_test;
+        pattern_algos.m_pi0_id_shared_allocator              = m_pi0_id_shared_allocator;
+        pattern_algos.m_shower_flag_pdg_electron             = m_shower_flag_pdg_electron;
+        pattern_algos.m_shower_less_id_tiebreak              = m_shower_less_id_tiebreak;
+        pattern_algos.m_shower_endpoint_exclude_start_vertex = m_shower_endpoint_exclude_start_vertex;
+        pattern_algos.m_shower_endpoint_skip_orphan_vtx = m_shower_endpoint_skip_orphan_vtx;
+        pattern_algos.m_shower_walk_visited_parity = m_shower_walk_visited_parity;
+        // doc sbnd_xin/docs/pr/40 -- track mis-identified as electron.
+        pattern_algos.m_track_pid_persist_dqdx    = m_track_pid_persist_dqdx;    // F1: threaded via track_pid_options()
+        pattern_algos.m_shower_reclass_dqdx_guard = m_shower_reclass_dqdx_guard; // F2
+        pattern_algos.m_shower_topo_dqdx_guard    = m_shower_topo_dqdx_guard;    // F3
+        // doc sbnd_xin/docs/pr/40 round 2 -- two follow-on defects from the pr/40 round.
+        pattern_algos.m_track_pid_persist_4mom      = m_track_pid_persist_4mom;      // F4: threaded via track_pid_options()
+        pattern_algos.m_shower_proton_daughter_pion = m_shower_proton_daughter_pion; // F5
+        pattern_algos.m_shower_proton_daughter_pion_dissolve = m_shower_proton_daughter_pion_dissolve; // F7
+        pattern_algos.m_muon_multi_proton_pion               = m_muon_multi_proton_pion;               // F8
+        pattern_algos.m_track_pid_persist_dqdx_electron_guard     = m_track_pid_persist_dqdx_electron_guard;     // F9
+        pattern_algos.m_shower_connect_main_vertex_straight_guard = m_shower_connect_main_vertex_straight_guard; // F10
+        pattern_algos.m_shower_traj_straight_guard                = m_shower_traj_straight_guard;                // F11
+        pattern_algos.m_shower_absorb_track_guard                 = m_shower_absorb_track_guard;                 // F12
+        pattern_algos.m_shower_absorb_unreachable_main            = m_shower_absorb_unreachable_main;            // doc pr/65 round 3
+        pattern_algos.m_shower_connect_protected_pion_guard       = m_shower_connect_protected_pion_guard;       // F13
+        pattern_algos.m_michel_stem_muon_rescue                   = m_michel_stem_muon_rescue;                   // F14
+        pattern_algos.m_shower_in_cascade_guard                   = m_shower_in_cascade_guard;                   // pr/74 P1
+        pattern_algos.m_shower_in_max_len                         = m_shower_in_max_len * units::cm;             // pr/74 P1
+        pattern_algos.m_shower_in_mip_hi                          = m_shower_in_mip_hi;                          // pr/74 P1
+        pattern_algos.m_shower_connect_from_vertices_straight_guard  = m_shower_connect_from_vertices_straight_guard;  // pr/40 r9 (r8 Part A)
+        pattern_algos.m_shower_connect_start_seg_straight_guard      = m_shower_connect_start_seg_straight_guard;      // pr/40 r9 (r7 c2c)
+        pattern_algos.m_examine_direction_dirsign_shower_in_guard    = m_examine_direction_dirsign_shower_in_guard;    // pr/40 r9 (r7 c2a)
+        pattern_algos.m_daughter_shower_angle_reclass_straight_guard = m_daughter_shower_angle_reclass_straight_guard; // pr/40 r9 (r7 c2b)
+        pattern_algos.m_shower_topo_reexam_straight_guard            = m_shower_topo_reexam_straight_guard;            // pr/40 r9 (r7 c1)
+        pattern_algos.m_sfv_kink_max                                 = m_sfv_kink_max;                                 // pr/40 r9 (degrees)
+        pattern_algos.m_shower_nv_bridge_track                       = m_shower_nv_bridge_track;                       // pr/40 r9 B2
+        pattern_algos.m_shower_nv_bridge_max_gap                     = m_shower_nv_bridge_max_gap * units::cm;         // pr/40 r9 B2
+        pattern_algos.m_kine_drop_stray_satellites                   = m_kine_drop_stray_satellites;                   // pr/92
+        pattern_algos.m_kine_sat_min_energy                          = m_kine_sat_min_energy * units::MeV;             // pr/92
+        pattern_algos.m_kine_sat_prox_max                            = m_kine_sat_prox_max * units::cm;                // pr/92
+        pattern_algos.m_kine_sat_angle_bad                           = m_kine_sat_angle_bad;                           // pr/92 (degrees)
+        pattern_algos.m_kine_sat_angle_main                          = m_kine_sat_angle_main;                          // pr/92 (degrees)
+        pattern_algos.m_kine_sat_far_dis                             = m_kine_sat_far_dis * units::cm;                 // pr/92
+        pattern_algos.m_kine_sat_axis_dis_cut                        = m_kine_sat_axis_dis_cut * units::cm;            // pr/92
+        pattern_algos.m_kine_sat_cont_kink                           = m_kine_sat_cont_kink;                           // pr/92 (degrees)
+        pattern_algos.m_kine_sat_track_max_nseg                      = static_cast<int>(m_kine_sat_track_max_nseg);   // pr/92 r2 (count)
+        pattern_algos.m_kine_sat_em_far_dis                          = m_kine_sat_em_far_dis * units::cm;             // pr/92 r2
+        pattern_algos.m_michel_stem_michel_check                  = m_michel_stem_michel_check;                  // pr/74 P2
+        pattern_algos.m_michel_stem_max_far_len                   = m_michel_stem_max_far_len * units::cm;       // pr/74 P2
+        pattern_algos.m_shower_stem_backfill                      = m_shower_stem_backfill;                      // pr/74 K4
+        pattern_algos.m_stem_backfill_max_len                     = m_stem_backfill_max_len * units::cm;         // pr/74 K4
+        pattern_algos.m_stem_backfill_mip_lo                      = m_stem_backfill_mip_lo;                      // pr/74 K4
+        pattern_algos.m_stem_backfill_mip_hi                      = m_stem_backfill_mip_hi;                      // pr/74 K4
+        pattern_algos.m_stem_backfill_min_shower_len              = m_stem_backfill_min_shower_len * units::cm;  // pr/74 K4
+        pattern_algos.m_shower_conn3_unreachable                  = m_shower_conn3_unreachable;                  // pr/74 K5
+        pattern_algos.m_conn3_unreachable_min_len                 = m_conn3_unreachable_min_len * units::cm;     // pr/74 K5
+        pattern_algos.m_conn3_stitch_max                          = m_conn3_stitch_max * units::cm;              // pr/84 r2 F3
+        pattern_algos.m_shower_dedup_start_seg                    = m_shower_dedup_start_seg;                    // pr/84 r3 S1
+        pattern_algos.m_shower_traj_michel_stem                   = m_shower_traj_michel_stem;                   // pr/74 K6
+        pattern_algos.m_michel_stem_traj_min_len                  = m_michel_stem_traj_min_len * units::cm;      // pr/74 K6
+        pattern_algos.m_michel_stem_traj_max_len                  = m_michel_stem_traj_max_len * units::cm;      // pr/74 K6
+        pattern_algos.m_michel_stem_traj_mip_lo                   = m_michel_stem_traj_mip_lo;                   // pr/74 K6 (dimensionless ratio)
+        pattern_algos.m_michel_stem_traj_max_far_len              = m_michel_stem_traj_max_far_len * units::cm;  // pr/74 K6
+        pattern_algos.m_michel_stem_traj_min_kink_deg             = m_michel_stem_traj_min_kink_deg;             // pr/74 K6 (degrees)
+        pattern_algos.m_shower_long_muon_keep_type                = m_shower_long_muon_keep_type;                // doc pr/44
+        pattern_algos.m_shower_bragg_protect_start_segment        = m_shower_bragg_protect_start_segment;        // doc pr/40 round 10
+        pattern_algos.m_shower_reclass_case_b_dqdx_guard          = m_shower_reclass_case_b_dqdx_guard;          // doc pr/93 Cause A
+        pattern_algos.m_shower_accept_pid_guard                   = m_shower_accept_pid_guard;                   // doc pr/93 Cause B
+        pattern_algos.m_shower_pid_guard_min_len                  = m_shower_pid_guard_min_len * units::cm;      // doc pr/93 shared floor
+        pattern_algos.m_shower_vote_track_pid_counts              = m_shower_vote_track_pid_counts;              // doc pr/93 Cause C
+        pattern_algos.m_shower_cone_absorb_guard               = m_shower_cone_absorb_guard;               // doc pr/93 Cause D
+        pattern_algos.m_shower_detach_track_stem                  = m_shower_detach_track_stem;                  // doc pr/93 r4
+        pattern_algos.m_kine_count_orphan_tracks                  = m_kine_count_orphan_tracks;                  // doc pr/93 r4
+        pattern_algos.m_kine_orphan_track_min                     = m_kine_orphan_track_min * units::cm;         // doc pr/93 r4
+        pattern_algos.m_straight_cont_cross_cluster               = m_straight_cont_cross_cluster;               // doc pr/93 r4
+        pattern_algos.m_sccc_bridge_body                          = m_sccc_bridge_body;                          // doc pr/93 r4
+        pattern_algos.m_sccc_max_gap                              = m_sccc_max_gap * units::cm;                  // doc pr/93 r4
+        pattern_algos.m_sccc_kink_max                             = m_sccc_kink_max;                             // deg
+        pattern_algos.m_sccc_gap_aligned                          = m_sccc_gap_aligned * units::cm;              // doc pr/93 r4
+        pattern_algos.m_sccc_kink_tight                           = m_sccc_kink_tight;                           // deg
+        pattern_algos.m_single_muon_proton_chain_veto             = m_single_muon_proton_chain_veto;             // doc pr/43 round 2 K1
+        pattern_algos.m_single_muon_long_muon_claim               = m_single_muon_long_muon_claim;               // doc pr/43 round 2 K2
+        pattern_algos.m_pid_flag_reconcile                        = m_pid_flag_reconcile;                        // doc pr/43 round 2 K3
+        pattern_algos.m_long_muon_stub_bridge                     = m_long_muon_stub_bridge;                     // doc pr/46
+        // Muon dQ/dx-vs-length envelope: c0/c1/power dimensionless, pivot cm -> internal.
+        pattern_algos.m_muon_dqdx_curve = {m_muon_dqdx_curve[0], m_muon_dqdx_curve[1],
+                                           m_muon_dqdx_curve[2] * units::cm, m_muon_dqdx_curve[3]};
+        // Single-photon stem dE/dx conversion; the cut narrows to float so the
+        // default compares bit-identically to the legacy 2.3f literal.
+        pattern_algos.m_sp_dedx_use_recomb_model = m_sp_dedx_use_recomb_model;
+        pattern_algos.m_sp_mean_dedx_cut         = static_cast<float>(m_sp_mean_dedx_cut);
+        pattern_algos.m_recomb_model             = m_recomb_model;
+        track_fitter->set_perf(m_perf);
+        // doc pr/49: thread the own-blob-coverage knob into the fitter (double
+        // sentinel; -1 default matches TrackFitting::Parameters, so this is a
+        // no-op unless the config opts in).
+        track_fitter->set_parameter("fit_blob_coverage", m_fit_blob_coverage);
+        // doc pr/67 P3 (log-only end-trim probe); 0 = off = byte-identical.
+        track_fitter->set_parameter("traj_cover_probe", m_traj_cover_probe ? 1.0 : 0.0);
+        // doc sbnd_xin/docs/pr/50 (fit_blob_coverage_defer, default false):
+        // wrap the MAIN cluster's find_proto_vertex call so its recursive
+        // break partition forms on legacy (undeweighted) fits -- the partition
+        // is globally sensitive to fit perturbations (172230: 200 deweight
+        // firings ~90 cm away reshuffled 34->33 segments and lost the
+        // true-kink main-vertex candidate; same class measured in 131357 /
+        // 342199 / 360535 / 469665).  Main cluster ONLY: its later stages
+        // (determine_main_vertex, improve_vertex, the final trajectory +
+        // dQ/dx) all refit with the restored deweighting, so ghost protection
+        // survives -- but a non-main cluster's final trajectory is essentially
+        // its find_proto_vertex fit, so deferring there UN-fixes the pr/49
+        // ghosts (57441 cid 20 measured 1.12 -> 1.23 cm under a global defer).
+        // Local fitters spawned inside (inherit_from) copy the suspended
+        // value, so the whole stage is covered.  Both lambdas are no-ops
+        // unless the defer knob AND the base knob are on.
+        const bool cov_defer_active = m_fit_blob_coverage_defer && m_fit_blob_coverage >= 0;
+        auto cov_defer_suspend = [&]() {
+            if (cov_defer_active) track_fitter->set_parameter("fit_blob_coverage", -1);
+        };
+        auto cov_defer_restore = [&]() {
+            if (cov_defer_active) track_fitter->set_parameter("fit_blob_coverage", m_fit_blob_coverage);
+        };
+        if (cov_defer_active) {
+            SPDLOG_LOGGER_DEBUG(log, "fit_blob_coverage_defer on: partition stage (find_proto_vertex) runs legacy fits, deweight restored for all later stages");
+        }
+
+        // acc_segment_id hoisted above the candidate loop (doc pr/94).
+        IndexedShowerSet pi0_showers;
+        ShowerIntMap map_shower_pio_id;
+        std::map<int, std::vector<ShowerPtr>> map_pio_id_showers;
+        std::map<int, std::pair<double, int>> map_pio_id_mass;
+        std::map<int, std::pair<int, int>> map_pio_id_saved_pair;
+        Pi0KineFeatures pio_kine{};
+        ShowerVertexMap map_vertex_in_shower;
+        ShowerSegmentMap map_segment_in_shower;
+        VertexShowerSetMap map_vertex_to_shower;
+        ClusterPtrSet used_shower_clusters;
+        IndexedShowerSet showers;
+
+        VertexPtr final_main_vertex = nullptr;
+        bool flag_dl_changed = false;
+
+        // doc pr/59: diagnostic-only, env-gated (WCT_PR59_ASSOC_CENSUS unset =>
+        // no log lines, no behavior change) sentinel naming which cluster each
+        // clustering_points (associate_points) pass actually ran against.
+        // main_cluster can be silently repointed later (determine_overall_
+        // main_vertex_DL holds it by reference and may call swap_main_cluster),
+        // which would leave whichever cluster the first pass ran on NEVER
+        // re-associated -- see the second call site further below.
+        static const bool pr59_assoc_census = std::getenv("WCT_PR59_ASSOC_CENSUS") != nullptr;
+
+        {
+            // initial pattern recognitions
+            // particle_data (doc pr/48): stopping templates for the two-end
+            // break pass; inert unless two_end_break is on.
+            cov_defer_suspend();
+            pattern_algos.find_proto_vertex(*pr_graph, *main_cluster, *track_fitter, m_dv, true, 2, true, particle_data());
+            cov_defer_restore();
+            detg_dump("main:find_proto_vertex", *pr_graph);
+            dup_stage_census("main:find_proto_vertex", *pr_graph, *main_cluster);
+
+            // shower related operations
+            pattern_algos.clustering_points(*pr_graph, *main_cluster, m_dv);
+            if (pr59_assoc_census) {
+                SPDLOG_LOGGER_DEBUG(log,
+                    "pr59 assoc-census: first clustering_points call, main_cluster={}",
+                    main_cluster->get_cluster_id());
+            }
+            detg_dump("main:clustering_points", *pr_graph);
+            pattern_algos.separate_track_shower(*pr_graph, *main_cluster);
+            detg_dump("main:separate_track_shower", *pr_graph);
+
+            // direction determination
+            pattern_algos.determine_direction(*pr_graph, *main_cluster, particle_data(), m_recomb_model);
+            detg_dump("main:determine_direction", *pr_graph);
+
+            // shower clustering
+            pattern_algos.shower_determining_in_main_cluster(*pr_graph, *main_cluster, particle_data(), m_recomb_model, m_dv);
+            detg_dump("main:shower_determining", *pr_graph);
+
+            // main vertex determination
+            pattern_algos.determine_main_vertex(*pr_graph, *main_cluster, main_vertex, vertices_in_long_muon, segments_in_long_muon, *track_fitter, m_dv, particle_data(), m_recomb_model);
+            detg_dump("main:determine_main_vertex", *pr_graph);
+            dup_stage_census("main:determine_main_vertex", *pr_graph, *main_cluster);
+
+            // doc sbnd_xin/docs/pr/59 round 2 (P1): determine_main_vertex's
+            // internal examine_structure_final*/examine_vertices_1 can create a
+            // brand-new segment (18255-142421 seg 20; 116944-71372 segs
+            // 19052/19053/136199, all confirmed via WCT_DET_DEBUG=2 backtraces).
+            // Rescue it here, before determine_direction/shower_determining_in_
+            // main_cluster/deghosting/shower_clustering_with_nv all consume its
+            // (until now, or still, missing) associate_points and shower flags.
+            // No-op unless m_assoc_full_recluster.
+            pattern_algos.reassociate_cluster_orphans(*pr_graph, *main_cluster, m_dv);
+
+            if (main_vertex !=nullptr){
+                map_cluster_main_vertices[main_cluster] = main_vertex;
+                main_vertex = nullptr;
+            }
+
+            std::cout << "After first round of main cluster PR" << std::endl;        pattern_algos.print_segs_info(*pr_graph, *main_cluster, 0);
+        }
+        if (m_perf) SPDLOG_LOGGER_DEBUG(log, "TaggerCheckNeutrino timing: main_cluster initial PR took {} ms", MS(Clock::now() - t0).count());
         t0 = Clock::now();
-    }
 
-    // Determine the overall neutrino vertex.
-    // If DL weights are configured, try DL first (matches prototype flag_dl_vtx logic).
-    // Fall back to traditional algorithm if DL is disabled or does not change the vertex.
-    // DL path updates map_cluster_main_vertices[main_cluster] directly (by-ref parameter).
-    // Traditional path returns the chosen vertex; capture it and sync to the map.
+        // Loop over other (non-main) beam-flash clusters
+        if (!other_clusters.empty()) {
+            for (auto* cluster : other_clusters) {
+                if (cluster->get_length() > 6 * units::cm) {
+                    // std::cout << "Long Cluster " << cluster->get_cluster_id() << " " << cluster->nchildren() << std::endl;
+                    // Long cluster: break tracks and do 2 rounds of other-track finding
+                    pattern_algos.find_proto_vertex(*pr_graph, *cluster, *track_fitter, m_dv, true, 2, false);
+                    pattern_algos.clustering_points(*pr_graph, *cluster, m_dv);
+                    pattern_algos.separate_track_shower(*pr_graph, *cluster);
+                    pattern_algos.determine_direction(*pr_graph, *cluster, particle_data(), m_recomb_model);
+                    pattern_algos.shower_determining_in_main_cluster(*pr_graph, *cluster, particle_data(), m_recomb_model, m_dv);
+                    pattern_algos.determine_main_vertex(*pr_graph, *cluster, main_vertex, vertices_in_long_muon, segments_in_long_muon, *track_fitter, m_dv, particle_data(), m_recomb_model);
+                    // doc sbnd_xin/docs/pr/59 round 2 (P1), other-cluster branch.
+                    pattern_algos.reassociate_cluster_orphans(*pr_graph, *cluster, m_dv);
+                    if (main_vertex != nullptr) {
+                        map_cluster_main_vertices[cluster] = main_vertex;
+                        main_vertex = nullptr;
+                    }
+                    detg_dump("other:long_cluster", *pr_graph);
+                } else {
+                    // Short cluster: no track breaking, 1 round; fall back to init_point_segment if needed
+                    if (!pattern_algos.find_proto_vertex(*pr_graph, *cluster, *track_fitter, m_dv, false, 1, false)) {
+                        // std::cout << "Point Cluster " << cluster->get_cluster_id() << " " << cluster->nchildren() <<std::endl;
+                        pattern_algos.init_point_segment(*pr_graph, *cluster, *track_fitter, m_dv);
+                    }
+                    pattern_algos.clustering_points(*pr_graph, *cluster, m_dv);
+                    pattern_algos.separate_track_shower(*pr_graph, *cluster);
+                    pattern_algos.determine_direction(*pr_graph, *cluster, particle_data(), m_recomb_model);
+                    pattern_algos.shower_determining_in_main_cluster(*pr_graph, *cluster, particle_data(), m_recomb_model, m_dv);
+                    pattern_algos.determine_main_vertex(*pr_graph, *cluster, main_vertex, vertices_in_long_muon, segments_in_long_muon, *track_fitter, m_dv, particle_data(), m_recomb_model);
+                    // doc sbnd_xin/docs/pr/59 round 2 (P1), other-cluster branch.
+                    pattern_algos.reassociate_cluster_orphans(*pr_graph, *cluster, m_dv);
+                    if (main_vertex != nullptr) {
+                        map_cluster_main_vertices[cluster] = main_vertex;
+                        main_vertex = nullptr;
+                    }
+                    detg_dump("other:short_cluster", *pr_graph);
+                }
+            }
+            if (m_perf) SPDLOG_LOGGER_DEBUG(log, "TaggerCheckNeutrino timing: other_clusters PR took {} ms", MS(Clock::now() - t0).count());
+            t0 = Clock::now();
+
+            // Deghost across all beam-flash clusters (main + others)
+            std::vector<Cluster*> all_clusters;
+            all_clusters.push_back(main_cluster);
+            all_clusters.insert(all_clusters.end(), other_clusters.begin(), other_clusters.end());
+
+            pattern_algos.deghosting(*pr_graph, map_cluster_main_vertices, all_clusters, *track_fitter, m_dv);
+            detg_dump("deghosting", *pr_graph);
+            if (m_perf) SPDLOG_LOGGER_DEBUG(log, "TaggerCheckNeutrino timing: deghosting took {} ms", MS(Clock::now() - t0).count());
+            t0 = Clock::now();
+        }
+
+        // Determine the overall neutrino vertex.
+        // If DL weights are configured, try DL first (matches prototype flag_dl_vtx logic).
+        // Fall back to traditional algorithm if DL is disabled or does not change the vertex.
+        // DL path updates map_cluster_main_vertices[main_cluster] directly (by-ref parameter).
+        // Traditional path returns the chosen vertex; capture it and sync to the map.
  
-    if (!m_dl_weights.empty()) {
-        flag_dl_changed = pattern_algos.determine_overall_main_vertex_DL(
-            *pr_graph, map_cluster_main_vertices, main_cluster, other_clusters,
-            vertices_in_long_muon, segments_in_long_muon,
-            *m_track_fitter, m_dv, particle_data(), m_recomb_model,
-            m_dl_weights, m_dl_vtx_cut, m_dQdx_scale, m_dQdx_offset,
-            m_dl_vtx_rerank, m_dl_vtx_top_k, m_dl_vtx_min_accept_score,
-            m_dl_vtx_score_scale, m_dl_vtx_swap_guard,
-            m_dl_vtx_topo_weight, m_dl_vtx_topo_center);
-    }
-    if (!flag_dl_changed) {
-        // doc sbnd_xin/docs/pr/51 round 3: determine_overall_main_vertex now
-        // takes the map and main_cluster by reference, so an internal cluster
-        // swap (examine_main_vertices / check_switch_main_cluster[_2] ->
-        // swap_main_cluster) is visible here instead of silently discarded.
-        // Pass throwaway local copies -- map_copy/mc_copy end up holding the
-        // function's true post-swap state, while this scope's own
-        // map_cluster_main_vertices/main_cluster are untouched unless
-        // m_main_vertex_swap_apply says to sync them.  Knob off => mc_copy is
-        // read, compared, then discarded => byte-identical to the pre-round-3
-        // by-value behaviour.
-        ClusterVertexMap map_copy = map_cluster_main_vertices;
-        Cluster* mc_copy = main_cluster;
-        final_main_vertex = pattern_algos.determine_overall_main_vertex(
-            *pr_graph, map_copy, mc_copy, other_clusters,
-            vertices_in_long_muon, segments_in_long_muon,
-            *m_track_fitter, m_dv, particle_data(), m_recomb_model, true);
-        if (mc_copy != main_cluster) {
-            SPDLOG_LOGGER_DEBUG(log,
-                "mvsa: traditional path swapped main cluster {} -> {} ({})",
-                main_cluster->get_cluster_id(), mc_copy->get_cluster_id(),
-                m_main_vertex_swap_apply ? "applied" : "discarded");
-            if (m_main_vertex_swap_apply) {
-                main_cluster = mc_copy;
-                map_cluster_main_vertices = map_copy;
+        if (!m_dl_weights.empty()) {
+            flag_dl_changed = pattern_algos.determine_overall_main_vertex_DL(
+                *pr_graph, map_cluster_main_vertices, main_cluster, other_clusters,
+                vertices_in_long_muon, segments_in_long_muon,
+                *track_fitter, m_dv, particle_data(), m_recomb_model,
+                m_dl_weights, m_dl_vtx_cut, m_dQdx_scale, m_dQdx_offset,
+                m_dl_vtx_rerank, m_dl_vtx_top_k, m_dl_vtx_min_accept_score,
+                m_dl_vtx_score_scale, m_dl_vtx_swap_guard,
+                m_dl_vtx_topo_weight, m_dl_vtx_topo_center);
+        }
+        if (!flag_dl_changed) {
+            // doc sbnd_xin/docs/pr/51 round 3: determine_overall_main_vertex now
+            // takes the map and main_cluster by reference, so an internal cluster
+            // swap (examine_main_vertices / check_switch_main_cluster[_2] ->
+            // swap_main_cluster) is visible here instead of silently discarded.
+            // Pass throwaway local copies -- map_copy/mc_copy end up holding the
+            // function's true post-swap state, while this scope's own
+            // map_cluster_main_vertices/main_cluster are untouched unless
+            // m_main_vertex_swap_apply says to sync them.  Knob off => mc_copy is
+            // read, compared, then discarded => byte-identical to the pre-round-3
+            // by-value behaviour.
+            ClusterVertexMap map_copy = map_cluster_main_vertices;
+            Cluster* mc_copy = main_cluster;
+            final_main_vertex = pattern_algos.determine_overall_main_vertex(
+                *pr_graph, map_copy, mc_copy, other_clusters,
+                vertices_in_long_muon, segments_in_long_muon,
+                *track_fitter, m_dv, particle_data(), m_recomb_model, true);
+            if (mc_copy != main_cluster) {
+                SPDLOG_LOGGER_DEBUG(log,
+                    "mvsa: traditional path swapped main cluster {} -> {} ({})",
+                    main_cluster->get_cluster_id(), mc_copy->get_cluster_id(),
+                    m_main_vertex_swap_apply ? "applied" : "discarded");
+                if (m_main_vertex_swap_apply) {
+                    main_cluster = mc_copy;
+                    map_cluster_main_vertices = map_copy;
+                }
+            }
+            if (final_main_vertex) {
+                map_cluster_main_vertices[main_cluster] = final_main_vertex;
             }
         }
-        if (final_main_vertex) {
-            map_cluster_main_vertices[main_cluster] = final_main_vertex;
-        }
-    }
 
-    // Retrieve the chosen neutrino vertex regardless of which path ran
-    {
-        auto it = map_cluster_main_vertices.find(main_cluster);
-        if (it != map_cluster_main_vertices.end()) {
-            final_main_vertex = it->second;
+        // Retrieve the chosen neutrino vertex regardless of which path ran
+        {
+            auto it = map_cluster_main_vertices.find(main_cluster);
+            if (it != map_cluster_main_vertices.end()) {
+                final_main_vertex = it->second;
+            }
         }
-    }
-    detg_dump("overall_main_vertex", *pr_graph);
-    dup_stage_census("overall_main_vertex", *pr_graph, *main_cluster);
-    if (m_perf) SPDLOG_LOGGER_DEBUG(log, "TaggerCheckNeutrino timing: overall main vertex took {} ms", MS(Clock::now() - t0).count());
-    t0 = Clock::now();
+        detg_dump("overall_main_vertex", *pr_graph);
+        dup_stage_census("overall_main_vertex", *pr_graph, *main_cluster);
+        if (m_perf) SPDLOG_LOGGER_DEBUG(log, "TaggerCheckNeutrino timing: overall main vertex took {} ms", MS(Clock::now() - t0).count());
+        t0 = Clock::now();
 
     
 
   
 
-    if (final_main_vertex) {
-        // doc sbnd_xin/docs/pr/50: main-vertex kink-consistency snap --
-        // inert unless vertex_kink_snap.  Runs after the overall main
-        // vertex is final (either DL or fallback path) and BEFORE the
-        // final improve_vertex, so the local optimizer polishes a
-        // corner-anchored trajectory.
-        if (pattern_algos.snap_main_vertex_to_kink(*pr_graph, *main_cluster, final_main_vertex,
-                                                   *m_track_fitter, m_dv, particle_data(), m_recomb_model)) {
-            map_cluster_main_vertices[main_cluster] = final_main_vertex;
-            detg_dump("snap_main_vertex_to_kink", *pr_graph);
-            dup_stage_census("snap_main_vertex_to_kink", *pr_graph, *main_cluster);
-        }
-
-        pattern_algos.improve_vertex(*pr_graph, *main_cluster, final_main_vertex,
-                                     vertices_in_long_muon, segments_in_long_muon,
-                                     *m_track_fitter, m_dv, particle_data(), m_recomb_model,
-                                     true, true);
-        // improve_vertex may update final_main_vertex pointer; sync back to map
-        map_cluster_main_vertices[main_cluster] = final_main_vertex;
-
-        std::cout << "After improve vertex:" << final_main_vertex->fit().point << std::endl; pattern_algos.print_segs_info(*pr_graph, *main_cluster, 0);
-
-        // doc sbnd_xin/docs/pr/51: main-vertex graph audit -- inert unless
-        // main_vertex_graph_audit.  Runs AFTER the final improve_vertex
-        // (the micro-stubs it must absorb are created there: 142421's
-        // 7081/7082, 285567's 81/82/83) and BEFORE clustering_points /
-        // examine_direction, which then act on the audited graph.  May
-        // re-seat final_main_vertex's position in place (never the
-        // pointer), so no map re-sync is needed.
-        if (pattern_algos.main_vertex_graph_audit(*pr_graph, *main_cluster, final_main_vertex,
-                                                  *m_track_fitter, m_dv)) {
-            std::cout << "After main vertex graph audit:" << final_main_vertex->fit().point << std::endl; pattern_algos.print_segs_info(*pr_graph, *main_cluster, 0);
-            detg_dump("main_vertex_graph_audit", *pr_graph);
-            dup_stage_census("main_vertex_graph_audit", *pr_graph, *main_cluster);
-        }
-
-        // doc sbnd_xin/docs/pr/84 round 2 (F3) -- inert unless
-        // conn3_stitch_max > 0.  Bridges disconnected main-cluster
-        // components whose closest approach to the reachable side is within
-        // the radius, BEFORE clustering_points, so the piece is classified
-        // conn-1 naturally instead of being promoted to a conn-3
-        // "association" by shower_conn3_unreachable (which stays on as the
-        // backstop for wider gaps).
-        if (pattern_algos.stitch_disconnected_main_cluster(*pr_graph, *main_cluster, final_main_vertex,
-                                                           *m_track_fitter, m_dv)) {
-            detg_dump("conn3_stitch", *pr_graph);
-            dup_stage_census("conn3_stitch", *pr_graph, *main_cluster);
-        }
-
-        // doc sbnd_xin/docs/pr/51 round 4: diagnostic-only rough-path probe
-        // -- inert unless rough_path_probe.  Runs right after the audit
-        // block (on today's production graph when mvga is off; on the
-        // audited graph when it is on) so its measurements match whichever
-        // near-vertex state is actually being Bee-scanned.
-        pattern_algos.rough_path_probe(*pr_graph, *main_cluster, final_main_vertex, *m_track_fitter, m_dv);
-
-        pattern_algos.clustering_points(*pr_graph, *main_cluster, m_dv);
-        // doc pr/59 sentinel 3 (second call site): if this cluster_id differs
-        // from the first call's, main_cluster was swapped in between and the
-        // ORIGINAL main cluster's segments (any created/modified after the
-        // swap) never got a second association pass.
-        if (pr59_assoc_census) {
-            SPDLOG_LOGGER_DEBUG(log,
-                "pr59 assoc-census: second clustering_points call, main_cluster={}",
-                main_cluster->get_cluster_id());
-        }
-
-        // doc sbnd_xin/docs/pr/59 round 2 (P2): a safety net for two cases P1
-        // does not reach -- (a) a segment created inside improve_vertex or
-        // main_vertex_graph_audit (both ran above, between the first
-        // determine_main_vertex and here), and (b) main_cluster having been
-        // silently repointed by determine_overall_main_vertex[_DL]'s
-        // swap_main_cluster since the first clustering_points call, which
-        // otherwise leaves the ORIGINAL main cluster (now in other_clusters)
-        // permanently on its first-round-only association state.  No-op
-        // unless m_assoc_full_recluster; a no-op per cluster (0 rescued) when
-        // that cluster has no orphan, so this is cheap on the common case
-        // where P1 already caught everything (measured true for both
-        // 18255-142421 and 116944-71372).  Still before shower_clustering_
-        // with_nv, which is the next consumer of associate_points/shower
-        // flags below.
-        pattern_algos.reassociate_cluster_orphans(*pr_graph, *main_cluster, m_dv);
-        for (auto* cluster : other_clusters) {
-            pattern_algos.reassociate_cluster_orphans(*pr_graph, *cluster, m_dv);
-        }
-
-        std::cout << "After shower clustering :" << std::endl; pattern_algos.print_segs_info(*pr_graph, *main_cluster, 0);
- 
-        // examine_direction runs last and has the final word on segment orientations
-        // relative to the main vertex.
-        pattern_algos.examine_direction(*pr_graph, final_main_vertex, final_main_vertex,
-                                        vertices_in_long_muon, segments_in_long_muon,
-                                        particle_data(), m_recomb_model, true);
-
-        SPDLOG_LOGGER_TRACE(log, "Overall main vertex cluster={}", main_cluster->get_cluster_id());
-        
-        std::cout << "After examine direction: " << std::endl;pattern_algos.print_segs_info(*pr_graph, *main_cluster, 0);
-        detg_dump("improve_vertex", *pr_graph);
-        dup_stage_census("improve_vertex", *pr_graph, *main_cluster);
-        if (m_perf) SPDLOG_LOGGER_DEBUG(log, "TaggerCheckNeutrino timing: improve_vertex + examine_direction took {} ms", MS(Clock::now() - t0).count());
-        t0 = Clock::now();
-
-        // doc pr/93 round 4 (straight_cont_cross_cluster): demote main-vertex
-        // shower-trajectory stems that are cross-cluster continuations of
-        // straight long tracks (pr/57 W-gap splits).  Here on purpose: after
-        // examine_direction (all clusters' segments exist in the graph, the
-        // trajectory pdg-11 stamp is written, orientations are final -- the
-        // pass preserves dirsign) and before shower_clustering_with_nv (the
-        // seeder consumes flags/pdg; any bridge request recorded here is
-        // replayed inside it, after its entry clears).  Knob off => early
-        // return => byte-identical.
-        pattern_algos.demote_cross_cluster_straight_stems(*pr_graph, final_main_vertex,
-                                                          particle_data(), m_recomb_model);
-
-        // doc pr/83 r3 (sec 9.5 + the 359980 follow-up): non-main clusters
-        // that went through find_proto_vertex -- as a swapped-out old main
-        // (Mechanism C, 350935) or as a candidate that lost the main-cluster
-        // contest without any swap (359980: dup on cluster 75, main is 21)
-        // -- keep their segments in the final output but never receive a
-        // duplicate-corridor pass.  One unscoped audit each, BEFORE
-        // shower_clustering_with_nv consumes them, so the shower maps never
-        // hold a segment this pass removes.  Sorted by cluster id for
-        // determinism.  Knob off (default) => loop skipped => byte-identical.
-        if (m_swap_orphan_dup_audit) {
-            std::vector<Cluster*> audit_clusters(other_clusters.begin(), other_clusters.end());
-            std::sort(audit_clusters.begin(), audit_clusters.end(),
-                      [](Cluster* a, Cluster* b) { return a->get_cluster_id() < b->get_cluster_id(); });
-            audit_clusters.erase(std::unique(audit_clusters.begin(), audit_clusters.end()),
-                                 audit_clusters.end());
-            for (Cluster* oc : audit_clusters) {
-                if (!oc || oc == main_cluster) continue;
-                pattern_algos.orphan_dup_audit(*pr_graph, *oc, *m_track_fitter, m_dv);
-            }
-            if (m_perf) SPDLOG_LOGGER_DEBUG(log, "TaggerCheckNeutrino timing: orphan_dup_audit sweep took {} ms", MS(Clock::now() - t0).count());
-            t0 = Clock::now();
-        }
-
-        pattern_algos.shower_clustering_with_nv(acc_segment_id, pi0_showers,
-                                                map_shower_pio_id, map_pio_id_showers,
-                                                map_pio_id_mass, map_pio_id_saved_pair,
-                                                pio_kine,
-                                                vertices_in_long_muon, segments_in_long_muon,
-                                                *pr_graph, final_main_vertex, showers,
-                                                main_cluster, other_clusters,
-                                                map_cluster_main_vertices,
-                                                map_vertex_in_shower, map_segment_in_shower,
-                                                map_vertex_to_shower, used_shower_clusters,
-                                                *m_track_fitter, m_dv, particle_data(),
-                                                m_recomb_model);
-
-        std::cout << "After shower clustering with NV: " << std::endl; pattern_algos.print_segs_info(*pr_graph, *main_cluster, 0);
-        detg_dump("shower_clustering_with_nv", *pr_graph);
-        dup_stage_census("shower_clustering_with_nv", *pr_graph, *main_cluster);
-        if (m_perf) SPDLOG_LOGGER_DEBUG(log, "TaggerCheckNeutrino timing: shower_clustering_with_nv took {} ms", MS(Clock::now() - t0).count());
-        t0 = Clock::now();
-
-        // doc sbnd_xin/docs/pr/43 round 2 K3 -- late particle-info/flag
-        // reconciliation, AFTER shower_clustering_with_nv and BEFORE the
-        // taggers, so tagger features, kine, Bee PF tree and PR display all
-        // see one consistent labeling.  No-op unless pid_flag_reconcile.
-        pattern_algos.reconcile_particle_flags(*pr_graph, final_main_vertex, showers,
-                                               map_vertex_in_shower, map_segment_in_shower,
-                                               map_vertex_to_shower, map_shower_pio_id,
-                                               particle_data(), m_recomb_model);
-    }
-
-
-    // Initialize tagger features to their default values unconditionally —
-    // even if no vertex was found the struct must be value-initialized.
-    t0 = Clock::now();
-    TaggerInfo tagger_info;
-    pattern_algos.init_tagger_info(tagger_info);
-
-    // Build the full list of beam-flash clusters (main + others) once;
-    // used by cosmic_tagger and potentially other taggers.
-    std::vector<Cluster*> all_clusters;
-    all_clusters.push_back(main_cluster);
-    all_clusters.insert(all_clusters.end(), other_clusters.begin(), other_clusters.end());
-
-    // doc pr/36 §10.3 / §10.15a (F2 = P12): the population sweep, run FIRST.
-    // The prototype's get_particle_type() coerces any shower-flagged segment
-    // to PDG 11 on read (ProtoSegment.cxx:10-15); the toolkit's
-    // has_particle_info() gates skip such a segment.  This one pass over the
-    // graph decides whether that population EXISTS on this event; the
-    // per-gate counters (f2_gate_skip, incremented inside the taggers)
-    // attribute it.  Zero across the manifest => F2 is dead by construction.
-    {
-        auto& audit = WireCell::Clus::PR::g_pr36_audit;
-        for (auto ed : WireCell::Clus::PR::ordered_edges(*pr_graph)) {
-            SegmentPtr sg = (*pr_graph)[ed].segment;
-            if (!sg) continue;
-            audit.f2_sweep_segments.fetch_add(1, std::memory_order_relaxed);
-            if (!sg->has_particle_info() &&
-                (sg->flags_any(PR::SegmentFlags::kShowerTrajectory) ||
-                 sg->flags_any(PR::SegmentFlags::kShowerTopology)))
-                audit.f2_sweep_hits.fetch_add(1, std::memory_order_relaxed);
-        }
-    }
-
-    // Run cosmic and numu taggers to fill BDT input features in tagger_info.
-    // Both require a valid neutrino vertex to have been found.
-    if (final_main_vertex) {
-        pattern_algos.cosmic_tagger(*pr_graph, final_main_vertex,
-                                    showers,
-                                    map_segment_in_shower,
-                                    map_vertex_to_shower,
-                                    segments_in_long_muon,
-                                    main_cluster,
-                                    all_clusters,
-                                    m_dv,
-                                    tagger_info);
-
-        auto [flag_long_muon, muon_length] =
-            pattern_algos.numu_tagger(*pr_graph, final_main_vertex,
-                                      showers,
-                                      segments_in_long_muon,
-                                      main_cluster,
-                                      tagger_info);
-        (void)flag_long_muon;  // result stored in tagger_info.numu_cc_flag
-
-        pattern_algos.ssm_tagger(*pr_graph, final_main_vertex,
-                                 showers,
-                                 map_vertex_in_shower,
-                                 map_segment_in_shower,
-                                 pio_kine,
-                                 /*flag_ssmsp=*/-1,
-                                 acc_segment_id,
-                                 particle_data(),
-                                 m_recomb_model,
-                                 tagger_info);
-
-        // Derive apa/face from the main-vertex position instead of assuming the
-        // single-drift-volume (0,0) geometry.  nue_tagger uses these for
-        // gap_identification's check_direction flags (wire_angles + drift sign
-        // => flag_prolong_u/v/w, flag_parallel; NeutrinoTaggerNuE.cxx:2725-2726)
-        // and for mip_quality's 2-D closest-distance queries (:1638).  In a
-        // multi-drift-volume detector such as SBND a vertex in APA 1 would
-        // otherwise be evaluated against APA 0's mirrored wire angles and
-        // opposite drift direction.  Same derivation as
-        // PatternAlgorithms::singlephoton_tagger (NeutrinoTaggerSinglePhoton.cxx).
-        int nue_apa = 0, nue_face = 0;
-        if (m_dv) {
-            const Point nue_vtx_pt = final_main_vertex->fit().valid()
-                                     ? final_main_vertex->fit().point
-                                     : final_main_vertex->wcpt().point;
-            const auto nue_wpid = m_dv->contained_by(nue_vtx_pt);
-            // Uncontained points give apa()==-1 (and face()==1); keep the legacy
-            // (0,0) rather than letting Grouping::wire_angles().at(-1) throw.
-            // Same guard idiom as NeutrinoTaggerNuE.cxx:2764.
-            if (nue_wpid.apa() >= 0) {
-                nue_apa  = nue_wpid.apa();
-                nue_face = nue_wpid.face();
-            }
-        }
-        SPDLOG_LOGGER_DEBUG(log, "TaggerCheckNeutrino nue_tagger volume: apa={} face={}",
-                            nue_apa, nue_face);
-
-        pattern_algos.nue_tagger(*pr_graph, main_cluster, final_main_vertex,
-                                 nue_apa, nue_face,
-                                 showers, map_vertex_to_shower,
-                                 pi0_showers, map_shower_pio_id,
-                                 map_pio_id_showers, map_pio_id_mass,
-                                 m_dv, particle_data(),
-                                 muon_length, tagger_info);
-
-        // prototype (NeutrinoID.cxx lines 269-271):
-        //     bool flag_sp = singlephoton_tagger(results.second);
-        //     if (flag_sp){tagger_info.photon_flag = true;}
-        // The port ran the tagger -- filling its ~90 shw_sp_* BDT features --
-        // but dropped the verdict on the floor, leaving photon_flag at the 0
-        // init_tagger_info() gives it (doc sbnd_xin/docs/pr/26 sec. 8.2).
-        // C++ default false = that legacy behaviour, so the uBooNE tagger
-        // ntuple's photon_flag branch is byte-identical when the knob is off.
-        const bool flag_sp =
-            pattern_algos.singlephoton_tagger(*pr_graph, main_cluster,
-                                              final_main_vertex,
-                                              showers,
-                                              map_vertex_to_shower,
-                                              map_shower_pio_id,
-                                              map_pio_id_showers,
-                                              map_pio_id_mass,
-                                              m_dv,
-                                              // doc pr/36 §10.4 (F3): SCE helper,
-                                              // gated separately from kine's use of
-                                              // clus_geom_helper.  Off (or helper
-                                              // unconfigured) => nullptr => raw
-                                              // positions, byte-identical legacy.
-                                              m_sp_sce_correction ? m_geom_helper : nullptr,
-                                              tagger_info);
-        if (m_sp_photon_flag) {
-            // Logged unconditionally so a knob-on run proves the branch
-            // executed even on a sample where nothing is tagged.
-            SPDLOG_LOGGER_DEBUG(log, "TaggerCheckNeutrino sp_photon_flag: singlephoton_tagger returned {}",
-                                flag_sp);
-            if (flag_sp) tagger_info.photon_flag = 1.0f;
-        }
-        else {
-            (void)flag_sp;  // legacy: verdict computed and discarded
-        }
-    }
-
-    if (m_perf) SPDLOG_LOGGER_DEBUG(log, "TaggerCheckNeutrino timing: taggers took {} ms", MS(Clock::now() - t0).count());
-    t0 = Clock::now();
-
-    // Compute match_isFC: 1 if the main cluster is fully contained inside the
-    // fiducial volume, 0 otherwise.  Uses the same two-round boundary check as
-    // TaggerCheckSTM so the definition is consistent across both users.
-    // doc pr/36 §10.2 (F1 = P1): when a "fiducial" is configured the direct
-    // containment tests run against it (the TGM/FC/STM volume) instead of the
-    // historical FiducialUtils fallback -- cluster_fc_check's nullptr path is
-    // documented bit-for-bit (Clustering_Util.cxx:108-116), so an absent key
-    // is byte-identical.  The prototype reads this verdict from the upstream
-    // light-matching stage (NeutrinoID.cxx:62, branch T_eval), computed on
-    // the ONE ToyFiducial volume -- so a consistent volume here is the parity
-    // reading that is implementable as a knob (reading (ii), threading the
-    // upstream verdict itself, is a data-flow change out of this round's
-    // scope).  Both verdicts are computed when the knob is on; disagreement
-    // is the §7.1 diagnostic, logged and counted.
-    if (main_cluster) {
-        auto fc_result = Facade::cluster_fc_check(*main_cluster, m_dv,
-                                                  m_use_fiducial ? m_fiducial : nullptr,
-                                                  m_fv_tolerance);
-        if (m_use_fiducial) {
-            auto& audit = WireCell::Clus::PR::g_pr36_audit;
-            audit.f1_fc_checks.fetch_add(1, std::memory_order_relaxed);
-            auto legacy = Facade::cluster_fc_check(*main_cluster, m_dv);
-            if (legacy.is_fc != fc_result.is_fc) {
-                audit.f1_fc_disagree.fetch_add(1, std::memory_order_relaxed);
-                SPDLOG_LOGGER_INFO(log, "PR36AUDIT match_isFC disagree: legacy={} fiducial={}",
-                                   legacy.is_fc, fc_result.is_fc);
-            }
-        }
-        tagger_info.match_isFC = fc_result.is_fc ? 1.0f : 0.0f;
-    }
-    if (m_perf) SPDLOG_LOGGER_DEBUG(log, "TaggerCheckNeutrino timing: fc_check took {} ms", MS(Clock::now() - t0).count());
-    t0 = Clock::now();
-
-    // Fill reconstructed neutrino kinematics if a vertex was found.
-    KineInfo kine_info{};
-    // doc pr/92 -- ids of stray satellite showers dropped from the kine
-    // tree; stashed into TrackFitting below UNCONDITIONALLY (replace
-    // semantics) so no-vertex or knob-off events reset it to empty.
-    std::set<int> dropped_sat_ids;
-    if (final_main_vertex) {
-        kine_info = pattern_algos.fill_kine_tree(
-            final_main_vertex, showers, pio_kine,
-            *pr_graph, *m_track_fitter, m_dv,
-            m_geom_helper,          // nullptr when clus_geom_helper is not configured
-            particle_data(), m_recomb_model,
-            pi0_showers,        // pr/92: pi0-paired showers are drop-protected
-            &dropped_sat_ids);
-    }
-    if (m_perf) SPDLOG_LOGGER_DEBUG(log, "TaggerCheckNeutrino timing: fill_kine_tree took {} ms", MS(Clock::now() - t0).count());
-    t0 = Clock::now(); // finalize block
-
-    // Mark the main neutrino vertex and store neutrino results in TrackFitting
-    // so that downstream consumers (e.g., Bee particle-flow output in MultiAlgBlobClustering)
-    // can access them without re-running pattern recognition.
-    if (final_main_vertex) {
-        final_main_vertex->set_flags(PR::VertexFlags::kNeutrinoVertex);
-    }
-    m_track_fitter->set_pi0_data(pi0_showers, map_shower_pio_id, map_pio_id_showers, map_pio_id_mass);
-    // doc pr/92 -- unconditional stash (empty when knob off / no vertex).
-    m_track_fitter->set_dropped_satellite_shower_ids(std::move(dropped_sat_ids));
-    m_track_fitter->set_main_vertex(final_main_vertex);
-    m_track_fitter->set_showers(showers);
-    m_track_fitter->set_kine_info(kine_info);
-    m_track_fitter->set_tagger_info(tagger_info);
-
-    // doc sbnd_xin/docs/pr/75 -- stash the vertex scoreboard for PrDisplayDump.
-    // Here and not earlier on purpose: this point is AFTER pr/50's
-    // snap_main_vertex_to_kink and the final improve_vertex, so final_vertex_id
-    // is the vertex the display actually draws, and a mismatch against
-    // main_vertex in the dump means the stash moved.
-    if (m_vertex_scoreboard) {
-        auto& board = pattern_algos.m_vtx_board;
-        board.filled = true;
-        board.harvest = pattern_algos.m_vtx_harvest;  // doc pr/79 §10: serializer's emission gate
-        board.weights_missing = m_dl_weights_missing;
-        if (!board.dl_ran) board.route = "dl-not-run";
         if (final_main_vertex) {
-            const auto pt = final_main_vertex->fit().valid()
-                          ? final_main_vertex->fit().point : final_main_vertex->wcpt().point;
-            const auto* cl = final_main_vertex->cluster();
-            board.final_vertex_id = (cl ? cl->get_cluster_id() : 0) * 1000
-                                  + static_cast<int>(final_main_vertex->get_graph_index());
-            board.final_x = pt.x() / units::cm;
-            board.final_y = pt.y() / units::cm;
-            board.final_z = pt.z() / units::cm;
+            // doc sbnd_xin/docs/pr/50: main-vertex kink-consistency snap --
+            // inert unless vertex_kink_snap.  Runs after the overall main
+            // vertex is final (either DL or fallback path) and BEFORE the
+            // final improve_vertex, so the local optimizer polishes a
+            // corner-anchored trajectory.
+            if (pattern_algos.snap_main_vertex_to_kink(*pr_graph, *main_cluster, final_main_vertex,
+                                                       *track_fitter, m_dv, particle_data(), m_recomb_model)) {
+                map_cluster_main_vertices[main_cluster] = final_main_vertex;
+                detg_dump("snap_main_vertex_to_kink", *pr_graph);
+                dup_stage_census("snap_main_vertex_to_kink", *pr_graph, *main_cluster);
+            }
+
+            pattern_algos.improve_vertex(*pr_graph, *main_cluster, final_main_vertex,
+                                         vertices_in_long_muon, segments_in_long_muon,
+                                         *track_fitter, m_dv, particle_data(), m_recomb_model,
+                                         true, true);
+            // improve_vertex may update final_main_vertex pointer; sync back to map
+            map_cluster_main_vertices[main_cluster] = final_main_vertex;
+
+            std::cout << "After improve vertex:" << final_main_vertex->fit().point << std::endl; pattern_algos.print_segs_info(*pr_graph, *main_cluster, 0);
+
+            // doc sbnd_xin/docs/pr/51: main-vertex graph audit -- inert unless
+            // main_vertex_graph_audit.  Runs AFTER the final improve_vertex
+            // (the micro-stubs it must absorb are created there: 142421's
+            // 7081/7082, 285567's 81/82/83) and BEFORE clustering_points /
+            // examine_direction, which then act on the audited graph.  May
+            // re-seat final_main_vertex's position in place (never the
+            // pointer), so no map re-sync is needed.
+            if (pattern_algos.main_vertex_graph_audit(*pr_graph, *main_cluster, final_main_vertex,
+                                                      *track_fitter, m_dv)) {
+                std::cout << "After main vertex graph audit:" << final_main_vertex->fit().point << std::endl; pattern_algos.print_segs_info(*pr_graph, *main_cluster, 0);
+                detg_dump("main_vertex_graph_audit", *pr_graph);
+                dup_stage_census("main_vertex_graph_audit", *pr_graph, *main_cluster);
+            }
+
+            // doc sbnd_xin/docs/pr/84 round 2 (F3) -- inert unless
+            // conn3_stitch_max > 0.  Bridges disconnected main-cluster
+            // components whose closest approach to the reachable side is within
+            // the radius, BEFORE clustering_points, so the piece is classified
+            // conn-1 naturally instead of being promoted to a conn-3
+            // "association" by shower_conn3_unreachable (which stays on as the
+            // backstop for wider gaps).
+            if (pattern_algos.stitch_disconnected_main_cluster(*pr_graph, *main_cluster, final_main_vertex,
+                                                               *track_fitter, m_dv)) {
+                detg_dump("conn3_stitch", *pr_graph);
+                dup_stage_census("conn3_stitch", *pr_graph, *main_cluster);
+            }
+
+            // doc sbnd_xin/docs/pr/51 round 4: diagnostic-only rough-path probe
+            // -- inert unless rough_path_probe.  Runs right after the audit
+            // block (on today's production graph when mvga is off; on the
+            // audited graph when it is on) so its measurements match whichever
+            // near-vertex state is actually being Bee-scanned.
+            pattern_algos.rough_path_probe(*pr_graph, *main_cluster, final_main_vertex, *track_fitter, m_dv);
+
+            pattern_algos.clustering_points(*pr_graph, *main_cluster, m_dv);
+            // doc pr/59 sentinel 3 (second call site): if this cluster_id differs
+            // from the first call's, main_cluster was swapped in between and the
+            // ORIGINAL main cluster's segments (any created/modified after the
+            // swap) never got a second association pass.
+            if (pr59_assoc_census) {
+                SPDLOG_LOGGER_DEBUG(log,
+                    "pr59 assoc-census: second clustering_points call, main_cluster={}",
+                    main_cluster->get_cluster_id());
+            }
+
+            // doc sbnd_xin/docs/pr/59 round 2 (P2): a safety net for two cases P1
+            // does not reach -- (a) a segment created inside improve_vertex or
+            // main_vertex_graph_audit (both ran above, between the first
+            // determine_main_vertex and here), and (b) main_cluster having been
+            // silently repointed by determine_overall_main_vertex[_DL]'s
+            // swap_main_cluster since the first clustering_points call, which
+            // otherwise leaves the ORIGINAL main cluster (now in other_clusters)
+            // permanently on its first-round-only association state.  No-op
+            // unless m_assoc_full_recluster; a no-op per cluster (0 rescued) when
+            // that cluster has no orphan, so this is cheap on the common case
+            // where P1 already caught everything (measured true for both
+            // 18255-142421 and 116944-71372).  Still before shower_clustering_
+            // with_nv, which is the next consumer of associate_points/shower
+            // flags below.
+            pattern_algos.reassociate_cluster_orphans(*pr_graph, *main_cluster, m_dv);
+            for (auto* cluster : other_clusters) {
+                pattern_algos.reassociate_cluster_orphans(*pr_graph, *cluster, m_dv);
+            }
+
+            std::cout << "After shower clustering :" << std::endl; pattern_algos.print_segs_info(*pr_graph, *main_cluster, 0);
+ 
+            // examine_direction runs last and has the final word on segment orientations
+            // relative to the main vertex.
+            pattern_algos.examine_direction(*pr_graph, final_main_vertex, final_main_vertex,
+                                            vertices_in_long_muon, segments_in_long_muon,
+                                            particle_data(), m_recomb_model, true);
+
+            SPDLOG_LOGGER_TRACE(log, "Overall main vertex cluster={}", main_cluster->get_cluster_id());
+        
+            std::cout << "After examine direction: " << std::endl;pattern_algos.print_segs_info(*pr_graph, *main_cluster, 0);
+            detg_dump("improve_vertex", *pr_graph);
+            dup_stage_census("improve_vertex", *pr_graph, *main_cluster);
+            if (m_perf) SPDLOG_LOGGER_DEBUG(log, "TaggerCheckNeutrino timing: improve_vertex + examine_direction took {} ms", MS(Clock::now() - t0).count());
+            t0 = Clock::now();
+
+            // doc pr/93 round 4 (straight_cont_cross_cluster): demote main-vertex
+            // shower-trajectory stems that are cross-cluster continuations of
+            // straight long tracks (pr/57 W-gap splits).  Here on purpose: after
+            // examine_direction (all clusters' segments exist in the graph, the
+            // trajectory pdg-11 stamp is written, orientations are final -- the
+            // pass preserves dirsign) and before shower_clustering_with_nv (the
+            // seeder consumes flags/pdg; any bridge request recorded here is
+            // replayed inside it, after its entry clears).  Knob off => early
+            // return => byte-identical.
+            pattern_algos.demote_cross_cluster_straight_stems(*pr_graph, final_main_vertex,
+                                                              particle_data(), m_recomb_model);
+
+            // doc pr/83 r3 (sec 9.5 + the 359980 follow-up): non-main clusters
+            // that went through find_proto_vertex -- as a swapped-out old main
+            // (Mechanism C, 350935) or as a candidate that lost the main-cluster
+            // contest without any swap (359980: dup on cluster 75, main is 21)
+            // -- keep their segments in the final output but never receive a
+            // duplicate-corridor pass.  One unscoped audit each, BEFORE
+            // shower_clustering_with_nv consumes them, so the shower maps never
+            // hold a segment this pass removes.  Sorted by cluster id for
+            // determinism.  Knob off (default) => loop skipped => byte-identical.
+            if (m_swap_orphan_dup_audit) {
+                std::vector<Cluster*> audit_clusters(other_clusters.begin(), other_clusters.end());
+                std::sort(audit_clusters.begin(), audit_clusters.end(),
+                          [](Cluster* a, Cluster* b) { return a->get_cluster_id() < b->get_cluster_id(); });
+                audit_clusters.erase(std::unique(audit_clusters.begin(), audit_clusters.end()),
+                                     audit_clusters.end());
+                for (Cluster* oc : audit_clusters) {
+                    if (!oc || oc == main_cluster) continue;
+                    pattern_algos.orphan_dup_audit(*pr_graph, *oc, *track_fitter, m_dv);
+                }
+                if (m_perf) SPDLOG_LOGGER_DEBUG(log, "TaggerCheckNeutrino timing: orphan_dup_audit sweep took {} ms", MS(Clock::now() - t0).count());
+                t0 = Clock::now();
+            }
+
+            pattern_algos.shower_clustering_with_nv(acc_segment_id, pi0_showers,
+                                                    map_shower_pio_id, map_pio_id_showers,
+                                                    map_pio_id_mass, map_pio_id_saved_pair,
+                                                    pio_kine,
+                                                    vertices_in_long_muon, segments_in_long_muon,
+                                                    *pr_graph, final_main_vertex, showers,
+                                                    main_cluster, other_clusters,
+                                                    map_cluster_main_vertices,
+                                                    map_vertex_in_shower, map_segment_in_shower,
+                                                    map_vertex_to_shower, used_shower_clusters,
+                                                    *track_fitter, m_dv, particle_data(),
+                                                    m_recomb_model);
+
+            std::cout << "After shower clustering with NV: " << std::endl; pattern_algos.print_segs_info(*pr_graph, *main_cluster, 0);
+            detg_dump("shower_clustering_with_nv", *pr_graph);
+            dup_stage_census("shower_clustering_with_nv", *pr_graph, *main_cluster);
+            if (m_perf) SPDLOG_LOGGER_DEBUG(log, "TaggerCheckNeutrino timing: shower_clustering_with_nv took {} ms", MS(Clock::now() - t0).count());
+            t0 = Clock::now();
+
+            // doc sbnd_xin/docs/pr/43 round 2 K3 -- late particle-info/flag
+            // reconciliation, AFTER shower_clustering_with_nv and BEFORE the
+            // taggers, so tagger features, kine, Bee PF tree and PR display all
+            // see one consistent labeling.  No-op unless pid_flag_reconcile.
+            pattern_algos.reconcile_particle_flags(*pr_graph, final_main_vertex, showers,
+                                                   map_vertex_in_shower, map_segment_in_shower,
+                                                   map_vertex_to_shower, map_shower_pio_id,
+                                                   particle_data(), m_recomb_model);
         }
-        m_track_fitter->set_vertex_scoreboard(board);
+
+
+        // Initialize tagger features to their default values unconditionally —
+        // even if no vertex was found the struct must be value-initialized.
+        t0 = Clock::now();
+        TaggerInfo tagger_info;
+        pattern_algos.init_tagger_info(tagger_info);
+
+        // doc pr/94 -- per-bundle identity + per-activity cosmic block.
+        // Guarded so the legacy path leaves every field at its struct default
+        // (-1 / empty): the branches that expose them are booked only when
+        // tagger_output's own nu_per_bundle knob is on, but TaggerInfo also
+        // travels to PrDisplayDump and the Bee producer, so leaving it
+        // untouched keeps those byte-identical too.
+        if (m_nu_per_bundle) {
+            tagger_info.cluster_id        = main_cluster->get_cluster_id();
+            tagger_info.matched_flash_gid = candidates[nu_index].gid;
+            tagger_info.nu_index          = static_cast<int>(nu_index);
+            for (const auto& a : candidates[nu_index].acts) {
+                tagger_info.act_cluster_id.push_back(a.cluster_id);
+                tagger_info.act_length_cm.push_back(a.length_cm);
+                tagger_info.act_is_selected.push_back(a.is_selected);
+                tagger_info.act_is_demoted.push_back(a.is_demoted);
+                tagger_info.act_tgm.push_back(a.tgm);
+                tagger_info.act_stm.push_back(a.stm);
+                tagger_info.act_fc.push_back(a.fc);
+                tagger_info.act_lm.push_back(a.lm);
+                tagger_info.act_evaluated.push_back(a.evaluated);
+            }
+        }
+
+        // Build the full list of beam-flash clusters (main + others) once;
+        // used by cosmic_tagger and potentially other taggers.
+        std::vector<Cluster*> all_clusters;
+        all_clusters.push_back(main_cluster);
+        all_clusters.insert(all_clusters.end(), other_clusters.begin(), other_clusters.end());
+
+        // doc pr/36 §10.3 / §10.15a (F2 = P12): the population sweep, run FIRST.
+        // The prototype's get_particle_type() coerces any shower-flagged segment
+        // to PDG 11 on read (ProtoSegment.cxx:10-15); the toolkit's
+        // has_particle_info() gates skip such a segment.  This one pass over the
+        // graph decides whether that population EXISTS on this event; the
+        // per-gate counters (f2_gate_skip, incremented inside the taggers)
+        // attribute it.  Zero across the manifest => F2 is dead by construction.
+        {
+            auto& audit = WireCell::Clus::PR::g_pr36_audit;
+            for (auto ed : WireCell::Clus::PR::ordered_edges(*pr_graph)) {
+                SegmentPtr sg = (*pr_graph)[ed].segment;
+                if (!sg) continue;
+                audit.f2_sweep_segments.fetch_add(1, std::memory_order_relaxed);
+                if (!sg->has_particle_info() &&
+                    (sg->flags_any(PR::SegmentFlags::kShowerTrajectory) ||
+                     sg->flags_any(PR::SegmentFlags::kShowerTopology)))
+                    audit.f2_sweep_hits.fetch_add(1, std::memory_order_relaxed);
+            }
+        }
+
+        // Run cosmic and numu taggers to fill BDT input features in tagger_info.
+        // Both require a valid neutrino vertex to have been found.
+        if (final_main_vertex) {
+            pattern_algos.cosmic_tagger(*pr_graph, final_main_vertex,
+                                        showers,
+                                        map_segment_in_shower,
+                                        map_vertex_to_shower,
+                                        segments_in_long_muon,
+                                        main_cluster,
+                                        all_clusters,
+                                        m_dv,
+                                        tagger_info);
+
+            auto [flag_long_muon, muon_length] =
+                pattern_algos.numu_tagger(*pr_graph, final_main_vertex,
+                                          showers,
+                                          segments_in_long_muon,
+                                          main_cluster,
+                                          tagger_info);
+            (void)flag_long_muon;  // result stored in tagger_info.numu_cc_flag
+
+            pattern_algos.ssm_tagger(*pr_graph, final_main_vertex,
+                                     showers,
+                                     map_vertex_in_shower,
+                                     map_segment_in_shower,
+                                     pio_kine,
+                                     /*flag_ssmsp=*/-1,
+                                     acc_segment_id,
+                                     particle_data(),
+                                     m_recomb_model,
+                                     tagger_info);
+
+            // Derive apa/face from the main-vertex position instead of assuming the
+            // single-drift-volume (0,0) geometry.  nue_tagger uses these for
+            // gap_identification's check_direction flags (wire_angles + drift sign
+            // => flag_prolong_u/v/w, flag_parallel; NeutrinoTaggerNuE.cxx:2725-2726)
+            // and for mip_quality's 2-D closest-distance queries (:1638).  In a
+            // multi-drift-volume detector such as SBND a vertex in APA 1 would
+            // otherwise be evaluated against APA 0's mirrored wire angles and
+            // opposite drift direction.  Same derivation as
+            // PatternAlgorithms::singlephoton_tagger (NeutrinoTaggerSinglePhoton.cxx).
+            int nue_apa = 0, nue_face = 0;
+            if (m_dv) {
+                const Point nue_vtx_pt = final_main_vertex->fit().valid()
+                                         ? final_main_vertex->fit().point
+                                         : final_main_vertex->wcpt().point;
+                const auto nue_wpid = m_dv->contained_by(nue_vtx_pt);
+                // Uncontained points give apa()==-1 (and face()==1); keep the legacy
+                // (0,0) rather than letting Grouping::wire_angles().at(-1) throw.
+                // Same guard idiom as NeutrinoTaggerNuE.cxx:2764.
+                if (nue_wpid.apa() >= 0) {
+                    nue_apa  = nue_wpid.apa();
+                    nue_face = nue_wpid.face();
+                }
+            }
+            SPDLOG_LOGGER_DEBUG(log, "TaggerCheckNeutrino nue_tagger volume: apa={} face={}",
+                                nue_apa, nue_face);
+
+            pattern_algos.nue_tagger(*pr_graph, main_cluster, final_main_vertex,
+                                     nue_apa, nue_face,
+                                     showers, map_vertex_to_shower,
+                                     pi0_showers, map_shower_pio_id,
+                                     map_pio_id_showers, map_pio_id_mass,
+                                     m_dv, particle_data(),
+                                     muon_length, tagger_info);
+
+            // prototype (NeutrinoID.cxx lines 269-271):
+            //     bool flag_sp = singlephoton_tagger(results.second);
+            //     if (flag_sp){tagger_info.photon_flag = true;}
+            // The port ran the tagger -- filling its ~90 shw_sp_* BDT features --
+            // but dropped the verdict on the floor, leaving photon_flag at the 0
+            // init_tagger_info() gives it (doc sbnd_xin/docs/pr/26 sec. 8.2).
+            // C++ default false = that legacy behaviour, so the uBooNE tagger
+            // ntuple's photon_flag branch is byte-identical when the knob is off.
+            const bool flag_sp =
+                pattern_algos.singlephoton_tagger(*pr_graph, main_cluster,
+                                                  final_main_vertex,
+                                                  showers,
+                                                  map_vertex_to_shower,
+                                                  map_shower_pio_id,
+                                                  map_pio_id_showers,
+                                                  map_pio_id_mass,
+                                                  m_dv,
+                                                  // doc pr/36 §10.4 (F3): SCE helper,
+                                                  // gated separately from kine's use of
+                                                  // clus_geom_helper.  Off (or helper
+                                                  // unconfigured) => nullptr => raw
+                                                  // positions, byte-identical legacy.
+                                                  m_sp_sce_correction ? m_geom_helper : nullptr,
+                                                  tagger_info);
+            if (m_sp_photon_flag) {
+                // Logged unconditionally so a knob-on run proves the branch
+                // executed even on a sample where nothing is tagged.
+                SPDLOG_LOGGER_DEBUG(log, "TaggerCheckNeutrino sp_photon_flag: singlephoton_tagger returned {}",
+                                    flag_sp);
+                if (flag_sp) tagger_info.photon_flag = 1.0f;
+            }
+            else {
+                (void)flag_sp;  // legacy: verdict computed and discarded
+            }
+        }
+
+        if (m_perf) SPDLOG_LOGGER_DEBUG(log, "TaggerCheckNeutrino timing: taggers took {} ms", MS(Clock::now() - t0).count());
+        t0 = Clock::now();
+
+        // Compute match_isFC: 1 if the main cluster is fully contained inside the
+        // fiducial volume, 0 otherwise.  Uses the same two-round boundary check as
+        // TaggerCheckSTM so the definition is consistent across both users.
+        // doc pr/36 §10.2 (F1 = P1): when a "fiducial" is configured the direct
+        // containment tests run against it (the TGM/FC/STM volume) instead of the
+        // historical FiducialUtils fallback -- cluster_fc_check's nullptr path is
+        // documented bit-for-bit (Clustering_Util.cxx:108-116), so an absent key
+        // is byte-identical.  The prototype reads this verdict from the upstream
+        // light-matching stage (NeutrinoID.cxx:62, branch T_eval), computed on
+        // the ONE ToyFiducial volume -- so a consistent volume here is the parity
+        // reading that is implementable as a knob (reading (ii), threading the
+        // upstream verdict itself, is a data-flow change out of this round's
+        // scope).  Both verdicts are computed when the knob is on; disagreement
+        // is the §7.1 diagnostic, logged and counted.
+        if (main_cluster) {
+            auto fc_result = Facade::cluster_fc_check(*main_cluster, m_dv,
+                                                      m_use_fiducial ? m_fiducial : nullptr,
+                                                      m_fv_tolerance);
+            if (m_use_fiducial) {
+                auto& audit = WireCell::Clus::PR::g_pr36_audit;
+                audit.f1_fc_checks.fetch_add(1, std::memory_order_relaxed);
+                auto legacy = Facade::cluster_fc_check(*main_cluster, m_dv);
+                if (legacy.is_fc != fc_result.is_fc) {
+                    audit.f1_fc_disagree.fetch_add(1, std::memory_order_relaxed);
+                    SPDLOG_LOGGER_INFO(log, "PR36AUDIT match_isFC disagree: legacy={} fiducial={}",
+                                       legacy.is_fc, fc_result.is_fc);
+                }
+            }
+            tagger_info.match_isFC = fc_result.is_fc ? 1.0f : 0.0f;
+        }
+        if (m_perf) SPDLOG_LOGGER_DEBUG(log, "TaggerCheckNeutrino timing: fc_check took {} ms", MS(Clock::now() - t0).count());
+        t0 = Clock::now();
+
+        // Fill reconstructed neutrino kinematics if a vertex was found.
+        KineInfo kine_info{};
+        // doc pr/92 -- ids of stray satellite showers dropped from the kine
+        // tree; stashed into TrackFitting below UNCONDITIONALLY (replace
+        // semantics) so no-vertex or knob-off events reset it to empty.
+        std::set<int> dropped_sat_ids;
+        if (final_main_vertex) {
+            kine_info = pattern_algos.fill_kine_tree(
+                final_main_vertex, showers, pio_kine,
+                *pr_graph, *track_fitter, m_dv,
+                m_geom_helper,          // nullptr when clus_geom_helper is not configured
+                particle_data(), m_recomb_model,
+                pi0_showers,        // pr/92: pi0-paired showers are drop-protected
+                &dropped_sat_ids);
+        }
+        if (m_perf) SPDLOG_LOGGER_DEBUG(log, "TaggerCheckNeutrino timing: fill_kine_tree took {} ms", MS(Clock::now() - t0).count());
+        t0 = Clock::now(); // finalize block
+
+        // Mark the main neutrino vertex and store neutrino results in TrackFitting
+        // so that downstream consumers (e.g., Bee particle-flow output in MultiAlgBlobClustering)
+        // can access them without re-running pattern recognition.
+        if (final_main_vertex) {
+            final_main_vertex->set_flags(PR::VertexFlags::kNeutrinoVertex);
+        }
+        track_fitter->set_pi0_data(pi0_showers, map_shower_pio_id, map_pio_id_showers, map_pio_id_mass);
+        // doc pr/92 -- unconditional stash (empty when knob off / no vertex).
+        track_fitter->set_dropped_satellite_shower_ids(std::move(dropped_sat_ids));
+        track_fitter->set_main_vertex(final_main_vertex);
+        track_fitter->set_showers(showers);
+        // doc pr/94 -- T_kine[i] carries the same identity as T_tagger[i], so
+        // the sync check can VERIFY the pairing instead of assuming position.
+        if (m_nu_per_bundle) {
+            kine_info.cluster_id        = main_cluster->get_cluster_id();
+            kine_info.matched_flash_gid = candidates[nu_index].gid;
+            kine_info.nu_index          = static_cast<int>(nu_index);
+        }
+        track_fitter->set_kine_info(kine_info);
+        track_fitter->set_tagger_info(tagger_info);
+
+        // doc pr/94 §10.1 -- the machine-readable "what was actually written"
+        // sentinel, one line per emitted T_tagger/T_kine row.  It is emitted
+        // HERE, not at selection time, because main_cluster can be repointed
+        // between the two by swap_main_cluster (the DL and traditional overall
+        // -vertex paths both may), so the selection line's cluster id is not
+        // necessarily the id the row carries.  The sync check joins on this.
+        if (m_nu_per_bundle) {
+            SPDLOG_LOGGER_INFO(log, "TaggerCheckNeutrino: [nu_per_bundle] ROW {} gid {} cluster {} vertex ({:.4f}, {:.4f}, {:.4f}) cm Enu {:.4f} acts {}",
+                               nu_index, candidates[nu_index].gid,
+                               main_cluster->get_cluster_id(),
+                               kine_info.kine_nu_x_corr, kine_info.kine_nu_y_corr,
+                               kine_info.kine_nu_z_corr, kine_info.kine_reco_Enu,
+                               tagger_info.act_cluster_id.size());
+        }
+
+        // doc sbnd_xin/docs/pr/75 -- stash the vertex scoreboard for PrDisplayDump.
+        // Here and not earlier on purpose: this point is AFTER pr/50's
+        // snap_main_vertex_to_kink and the final improve_vertex, so final_vertex_id
+        // is the vertex the display actually draws, and a mismatch against
+        // main_vertex in the dump means the stash moved.
+        if (m_vertex_scoreboard) {
+            auto& board = pattern_algos.m_vtx_board;
+            board.filled = true;
+            board.harvest = pattern_algos.m_vtx_harvest;  // doc pr/79 §10: serializer's emission gate
+            board.weights_missing = m_dl_weights_missing;
+            if (!board.dl_ran) board.route = "dl-not-run";
+            if (final_main_vertex) {
+                const auto pt = final_main_vertex->fit().valid()
+                              ? final_main_vertex->fit().point : final_main_vertex->wcpt().point;
+                const auto* cl = final_main_vertex->cluster();
+                board.final_vertex_id = (cl ? cl->get_cluster_id() : 0) * 1000
+                                      + static_cast<int>(final_main_vertex->get_graph_index());
+                board.final_x = pt.x() / units::cm;
+                board.final_y = pt.y() / units::cm;
+                board.final_z = pt.z() / units::cm;
+            }
+            track_fitter->set_vertex_scoreboard(board);
+        }
+
+        // Merge every per-cluster fill_fitted_charge_2d snapshot into the flat
+        // map that UbooneMagnifyTrackingVisitor::write_proj_data reads, so that
+        // T_proj_data contains cells for all beam-flash clusters, not just the
+        // last cluster fit by pattern recognition.
+        track_fitter->assemble_fitted_charge_2d();
+
+        // Store TrackFitting in the grouping for later access by bee output and tracking sink
+        // doc pr/94 -- publish.  The UNNAMED slot keeps pointing at the first
+        // candidate so every existing consumer (Bee PF, the magnify tracking
+        // sink, the BDT scorers, tagger_output) is byte-identical in legacy
+        // mode, where there is exactly one.  Per-bundle consumers walk the
+        // "nu<i>" named slots until one comes back null.
+        if (nu_index == 0) grouping.set_track_fitting(track_fitter);
+        if (m_nu_per_bundle) {
+            grouping.set_track_fitting("nu" + std::to_string(nu_index), track_fitter);
+        }
+        if (m_perf) SPDLOG_LOGGER_DEBUG(log, "TaggerCheckNeutrino timing: finalize took {} ms", MS(Clock::now() - t0).count());
     }
 
-    // Merge every per-cluster fill_fitted_charge_2d snapshot into the flat
-    // map that UbooneMagnifyTrackingVisitor::write_proj_data reads, so that
-    // T_proj_data contains cells for all beam-flash clusters, not just the
-    // last cluster fit by pattern recognition.
-    m_track_fitter->assemble_fitted_charge_2d();
-
-    // Store TrackFitting in the grouping for later access by bee output and tracking sink
-    grouping.set_track_fitting(m_track_fitter);
-    if (m_perf) SPDLOG_LOGGER_DEBUG(log, "TaggerCheckNeutrino timing: finalize took {} ms", MS(Clock::now() - t0).count());
     if (m_perf) SPDLOG_LOGGER_DEBUG(log, "TaggerCheckNeutrino timing: visit() TOTAL took {} ms", MS(Clock::now() - t_total).count());
 
     // doc sbnd_xin/docs/pr/30 §11 -- one machine-readable line per event.

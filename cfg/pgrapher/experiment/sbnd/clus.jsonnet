@@ -2106,6 +2106,16 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
             skip_cosmic_companions=skip_cosmic_companions,
             cosmic_companion_min_length=cosmic_companion_min_length,
             nu_fallback_demoted_mains=nu_fallback_demoted_mains,
+            // doc pr/94 Phase 2: the SAME switch that books the per-bundle
+            // T_tagger/T_kine branches on tagger_output below also turns on the
+            // per-bundle candidate loop here -- one row per in-beam-window
+            // bundle needs both halves or the extra rows have nothing to carry.
+            // nu_per_bundle_demoted_acts is wired straight from
+            // evaluate_demoted_mains (not from its own TLA) so the
+            // act_evaluated column can never drift from the admission gate the
+            // cosmic taggers actually used.
+            nu_per_bundle=nu_per_bundle,
+            nu_per_bundle_demoted_acts=evaluate_demoted_mains,
             sp_photon_flag=sp_photon_flag,
             dir_weak_use_score=dir_weak_use_score,
             mip_dqdx=mip_dqdx,
