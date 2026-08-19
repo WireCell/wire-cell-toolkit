@@ -60,10 +60,16 @@
 #include "WireCellAux/Logger.h"
 
 #include <array>
+#include <memory>
 #include <string>
 #include <vector>
 
 namespace WireCell::Clus {
+
+    // doc pr/94 Phase 4b: only a shared_ptr to it is named here (the per-bundle
+    // candidate selector), so a forward declaration keeps TrackFitting.h out of
+    // this header.
+    class TrackFitting;
 
     class PrDisplayDump : public Aux::Logger, public IConfigurable, public Clus::IEnsembleVisitor {
        public:
@@ -129,20 +135,28 @@ namespace WireCell::Clus {
         };
         ChanScheme chan_scheme() const;
 
+        // doc pr/94 Phase 4b: the seven dumps below are PER NEUTRINO CANDIDATE.
+        // `tf_in` picks which candidate's TrackFitting to read; null keeps the
+        // legacy resolution (the unnamed slot = candidate 0), so the top-level
+        // JSON keys are unchanged and every existing reader keeps working.
+        // The remaining dumps (meta, steiner, dead, dqdx_ref) are event-level
+        // and take no fitter.
+        using TFPtr = std::shared_ptr<WireCell::Clus::TrackFitting>;
+
         Configuration dump_meta(Facade::Grouping& grouping, const ChanScheme& cs) const;
-        Configuration dump_graph(Facade::Grouping& grouping) const;      // segments + vertices
-        Configuration dump_showers(Facade::Grouping& grouping) const;    // PR::Shower rows
-        Configuration dump_kine(Facade::Grouping& grouping) const;       // KineInfo
+        Configuration dump_graph(Facade::Grouping& grouping, TFPtr tf_in = nullptr) const;   // segments + vertices
+        Configuration dump_showers(Facade::Grouping& grouping, TFPtr tf_in = nullptr) const; // PR::Shower rows
+        Configuration dump_kine(Facade::Grouping& grouping, TFPtr tf_in = nullptr) const;    // KineInfo
         // TaggerInfo -- the COMPUTED subset only (scores + the cosmic tagger's
         // verdict and its ten per-test flags).  See the definition for why the
         // legacy-TMVA slots are left out.
-        Configuration dump_tagger(Facade::Grouping& grouping) const;
+        Configuration dump_tagger(Facade::Grouping& grouping, TFPtr tf_in = nullptr) const;
         /// doc sbnd_xin/docs/pr/75 -- how the neutrino vertex was chosen.
         /// Empty object when the `vertex_scoreboard` knob was off.
-        Configuration dump_vertex_scoreboard(Facade::Grouping& grouping) const;
-        Configuration dump_track_shower(Facade::Grouping& grouping) const;
+        Configuration dump_vertex_scoreboard(Facade::Grouping& grouping, TFPtr tf_in = nullptr) const;
+        Configuration dump_track_shower(Facade::Grouping& grouping, TFPtr tf_in = nullptr) const;
         Configuration dump_steiner(Facade::Grouping& grouping) const;
-        Configuration dump_proj(Facade::Grouping& grouping) const;
+        Configuration dump_proj(Facade::Grouping& grouping, TFPtr tf_in = nullptr) const;
         Configuration dump_dead(Facade::Grouping& grouping) const;
         // Null (Json::nullValue) if m_particle_data could not be resolved.
         Configuration dump_dqdx_ref() const;

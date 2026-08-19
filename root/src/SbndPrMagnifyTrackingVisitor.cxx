@@ -27,6 +27,24 @@ WIRECELL_FACTORY(SbndPrMagnifyTrackingVisitor, WireCell::Root::SbndPrMagnifyTrac
 using namespace WireCell;
 using namespace WireCell::Clus;
 
+// doc pr/94 Phase 4b: the per-bundle neutrino candidates, in row order, or the
+// single unnamed slot when the nu_per_bundle knob is off.  Never empty: the
+// legacy resolution is returned as a one-element vector (possibly holding
+// nullptr, which the callers already test for), so the knob-off path is
+// textually the same sequence of operations it was before.
+static std::vector<std::shared_ptr<Clus::TrackFitting>>
+collect_nu_fitters(Clus::Facade::Grouping& grouping)
+{
+    std::vector<std::shared_ptr<Clus::TrackFitting>> out;
+    for (int i = 0;; ++i) {
+        auto tfi = grouping.get_track_fitting("nu" + std::to_string(i));
+        if (!tfi) break;
+        out.push_back(tfi);
+    }
+    if (out.empty()) out.push_back(grouping.get_track_fitting());
+    return out;
+}
+
 Root::SbndPrMagnifyTrackingVisitor::SbndPrMagnifyTrackingVisitor()
   : log(Log::logger("tracking"))
 {
@@ -215,14 +233,24 @@ void Root::SbndPrMagnifyTrackingVisitor::write_trun(TFile* output_tf) const
 void Root::SbndPrMagnifyTrackingVisitor::write_proj_data(TFile* output_tf, Clus::Facade::Grouping& grouping,
                                                          const ChanScheme& cs) const
 {
-    auto tf = grouping.get_track_fitting();
-    if (!tf) {
+    // doc pr/94 Phase 4b: accumulate over every per-bundle candidate.  T_proj_data
+    // is ONE row of vector-of-vector branches keyed by cluster_id, so the merge
+    // has to happen in these maps BEFORE the single Fill() -- calling this
+    // function per candidate would instead leave ROOT cycles T_proj_data;1, ;2,
+    // ... that uproot silently resolves to the last of.
+    auto nu_fitters = collect_nu_fitters(grouping);
+    if (!nu_fitters.front()) {
         log->warn("SbndPrMagnifyTrackingVisitor: no TrackFitting in grouping");
         return;
     }
-
-    const auto& fitted = tf->get_fitted_charge_2d();
-    if (fitted.empty()) {
+    // Empty only if EVERY candidate is empty: bailing on candidate 0 alone
+    // would drop the whole tree and with it a later candidate's projection.
+    // One element when the knob is off, so this is the legacy test verbatim.
+    bool any_fitted = false;
+    for (const auto& t : nu_fitters) {
+        if (t && !t->get_fitted_charge_2d().empty()) { any_fitted = true; break; }
+    }
+    if (!any_fitted) {
         log->warn("SbndPrMagnifyTrackingVisitor: fitted_charge_2d is empty");
         return;
     }
@@ -237,6 +265,9 @@ void Root::SbndPrMagnifyTrackingVisitor::write_proj_data(TFile* output_tf, Clus:
     std::map<int, std::vector<int>> cluster_charge_errs;
     std::map<int, std::vector<int>> cluster_charge_preds;
 
+    for (const auto& tf : nu_fitters) {
+    if (!tf) continue;
+    const auto& fitted = tf->get_fitted_charge_2d();
     for (const auto& [afp, wt_map] : fitted) {
         int apa = std::get<0>(afp);
         int face = std::get<1>(afp);
@@ -266,6 +297,7 @@ void Root::SbndPrMagnifyTrackingVisitor::write_proj_data(TFile* output_tf, Clus:
             }
         }
     }
+    }  // per-candidate
 
     // Build vectors in cluster_id order
     std::vector<int> v_cluster_id;
@@ -294,7 +326,8 @@ void Root::SbndPrMagnifyTrackingVisitor::write_proj_data(TFile* output_tf, Clus:
     tree->Branch("charge_pred", &v_charge_pred);
     tree->Fill();
 
-    log->debug("SbndPrMagnifyTrackingVisitor: wrote T_proj_data with {} clusters", v_cluster_id.size());
+    log->debug("SbndPrMagnifyTrackingVisitor: wrote T_proj_data with {} clusters from {} candidate(s)",
+               v_cluster_id.size(), nu_fitters.size());
 }
 
 void Root::SbndPrMagnifyTrackingVisitor::write_t_rec_data(TFile* output_tf, Clus::Facade::Grouping& grouping,
@@ -302,7 +335,17 @@ void Root::SbndPrMagnifyTrackingVisitor::write_t_rec_data(TFile* output_tf, Clus
 {
     using namespace WireCell::Clus;
 
-    auto tf = grouping.get_track_fitting();
+    // doc pr/94 Phase 4b: T_rec_charge covers EVERY per-bundle candidate, not
+    // just the one in the unnamed slot.  The tree is already multi-row and
+    // already joins back through cluster_id, so this needs no schema change --
+    // the rows simply continue across candidates.  The loop is INSIDE this
+    // function on purpose: calling the function per candidate would call
+    // `new TTree("T_rec_charge")` per candidate and leave ROOT cycles
+    // T_rec_charge;1, ;2, ... which uproot and every gate here silently
+    // resolve to the last of, hiding the duplication (same hazard as
+    // UbooneTaggerOutputVisitor's Write() without kOverwrite).
+    auto nu_fitters = collect_nu_fitters(grouping);
+    auto tf = nu_fitters.front();
     if (!tf) {
         log->warn("SbndPrMagnifyTrackingVisitor: no TrackFitting in grouping");
         return;
@@ -387,9 +430,21 @@ void Root::SbndPrMagnifyTrackingVisitor::write_t_rec_data(TFile* output_tf, Clus
     // Set default values
     point_tree.reco_chi2 = 1;
 
-    // Build per-cluster edge/vertex maps in a single pass (O(E+V) instead of O(C*(E+V)))
     using edge_desc = typename boost::graph_traits<PR::Graph>::edge_descriptor;
     using vertex_desc = typename boost::graph_traits<PR::Graph>::vertex_descriptor;
+
+    // Which candidate each cluster id came from, so an id claimed by two
+    // candidates is reported rather than silently merged: cluster_id is the
+    // join key the convert app and the GUI use, and a collision would make one
+    // candidate's fit points appear inside the other's track block.  Activity
+    // ids are disjoint across bundles by construction (a cluster belongs to one
+    // flash bundle), so this is a guard, not an expected path.
+    std::map<int, size_t> cid_owner;
+
+    // One candidate's worth of rows.  Body is verbatim the pre-pr/94 code with
+    // `graph` rebound to this candidate's own graph.
+    auto fill_one = [&](const std::shared_ptr<PR::Graph>& graph, size_t cand) {
+    // Build per-cluster edge/vertex maps in a single pass (O(E+V) instead of O(C*(E+V)))
     // Cluster-id ordered, NOT pointer ordered (CLAUDE.md determinism rule): these
     // maps and the set below decide the order of the T_rec_charge rows, which is
     // the order the convert app turns into track blocks and the GUI indexes as
@@ -470,6 +525,15 @@ void Root::SbndPrMagnifyTrackingVisitor::write_t_rec_data(TFile* output_tf, Clus
     // Process each cluster
     for (auto* cluster : all_clusters) {
         if (!cluster) continue;
+
+        {
+            auto [it, fresh] = cid_owner.emplace(cluster->get_cluster_id(), cand);
+            if (!fresh && it->second != cand) {
+                log->warn("SbndPrMagnifyTrackingVisitor: cluster {} appears in both candidate {} and {}"
+                          " -- T_rec_charge rows for it are no longer separable by cluster_id",
+                          cluster->get_cluster_id(), it->second, cand);
+            }
+        }
 
         point_tree.reco_mother_cluster_id = mother_cluster_id;
 
@@ -590,9 +654,21 @@ void Root::SbndPrMagnifyTrackingVisitor::write_t_rec_data(TFile* output_tf, Clus
             }
         }
     }
+    };  // fill_one
 
-    log->debug("SbndPrMagnifyTrackingVisitor: wrote {} entries to T_rec_charge ({} with no recorded (apa,face))",
-               t_rec_charge->GetEntries(), n_paf_fallback);
+    fill_one(graph, 0);
+    for (size_t ci = 1; ci < nu_fitters.size(); ++ci) {
+        auto g = nu_fitters[ci] ? nu_fitters[ci]->get_graph() : nullptr;
+        if (!g) {
+            log->warn("SbndPrMagnifyTrackingVisitor: candidate {} has no Graph; no T_rec_charge rows for it", ci);
+            continue;
+        }
+        fill_one(g, ci);
+    }
+
+    log->debug("SbndPrMagnifyTrackingVisitor: wrote {} entries to T_rec_charge from {} candidate(s)"
+               " ({} with no recorded (apa,face))",
+               t_rec_charge->GetEntries(), nu_fitters.size(), n_paf_fallback);
 }
 
 // Local Variables:

@@ -200,6 +200,46 @@ void Clus::PrDisplayDump::visit(Facade::Ensemble& ensemble) const
     top["dqdx_ref"] = dump_dqdx_ref();
     top["vertex_scoreboard"] = dump_vertex_scoreboard(grouping);
 
+    // doc pr/94 Phase 4b: the per-bundle candidates, ADDITIVELY.  Every
+    // top-level key above keeps its exact pre-pr/94 meaning (candidate 0), so
+    // pr_display_viewer.py and every other reader of this JSON are unaffected;
+    // the extra candidates arrive under a new "candidates" array that only
+    // appears when the nu_per_bundle knob actually produced more than one.
+    // Making the seven per-candidate keys into arrays instead -- as the doc
+    // pr/94 plan's D5 proposed -- would have broken those readers
+    // unconditionally, knob on or off.
+    //
+    // Note the event-level blocks (meta, steiner, dead, dqdx_ref) are
+    // deliberately NOT repeated per candidate: they describe the event.
+    {
+        std::vector<std::shared_ptr<TrackFitting>> nu_tfs;
+        for (int i = 0;; ++i) {
+            auto tfi = grouping.get_track_fitting("nu" + std::to_string(i));
+            if (!tfi) break;
+            nu_tfs.push_back(tfi);
+        }
+        if (nu_tfs.size() > 1) {
+            Configuration cands = Json::arrayValue;
+            for (size_t i = 0; i < nu_tfs.size(); ++i) {
+                Configuration c;
+                c["nu_index"] = (int) i;
+                Configuration g = dump_graph(grouping, nu_tfs[i]);
+                c["segments"] = g["segments"];
+                c["vertices"] = g["vertices"];
+                c["main_vertex"] = g["main_vertex"];
+                c["showers"] = dump_showers(grouping, nu_tfs[i]);
+                c["kine"] = dump_kine(grouping, nu_tfs[i]);
+                c["tagger"] = dump_tagger(grouping, nu_tfs[i]);
+                c["track_shower"] = dump_track_shower(grouping, nu_tfs[i]);
+                c["proj"] = dump_proj(grouping, nu_tfs[i]);
+                c["vertex_scoreboard"] = dump_vertex_scoreboard(grouping, nu_tfs[i]);
+                cands.append(c);
+            }
+            top["candidates"] = cands;
+            log->debug("pr/94: emitted {} per-bundle candidate block(s)", cands.size());
+        }
+    }
+
     Persist::dump(m_output_filename, top, m_pretty);
 
     log->debug("wrote {}: {} segment(s), {} vertex(es), {} shower(s), {} steiner cluster(s), {} proj plane(s)",
@@ -313,14 +353,19 @@ Configuration Clus::PrDisplayDump::dump_meta(Facade::Grouping& grouping, const C
 // the display needs to draw a line.  Here each segment keeps its own ordered
 // point list.  Residual range is computed exactly as
 // SbndPrMagnifyTrackingVisitor::write_t_rec_data does.
-Configuration Clus::PrDisplayDump::dump_graph(Facade::Grouping& grouping) const
+Configuration Clus::PrDisplayDump::dump_graph(Facade::Grouping& grouping, TFPtr tf_in) const
 {
     Configuration out;
     out["segments"] = Json::arrayValue;
     out["vertices"] = Json::arrayValue;
     out["main_vertex"] = Json::nullValue;
 
-    auto pr_graph = grouping.get_pr_graph();
+    // doc pr/94 Phase 4b: this candidate's own graph.  grouping.get_pr_graph()
+    // is m_track_fitting->get_graph() = the unnamed slot = candidate 0, so
+    // reading it here would draw candidate 0's segments under candidate i's
+    // kinematics.
+    auto tf_sel = tf_in ? tf_in : grouping.get_track_fitting();
+    auto pr_graph = tf_sel ? tf_sel->get_graph() : nullptr;
     if (!pr_graph) {
         log->debug("no PR graph: TaggerCheckNeutrino selected no candidate this event");
         return out;
@@ -333,7 +378,7 @@ Configuration Clus::PrDisplayDump::dump_graph(Facade::Grouping& grouping) const
     // per-segment shower flags, so the shower's own segment set is the only
     // authoritative answer.
     std::map<PR::SegmentPtr, PR::ShowerPtr, PR::SegmentIndexCmp> seg_to_shower;
-    if (auto tf = grouping.get_track_fitting()) {
+    if (auto tf = tf_in ? tf_in : grouping.get_track_fitting()) {
         for (const auto& shower : tf->get_showers()) {
             PR::IndexedVertexSet sv;
             PR::IndexedSegmentSet ss;
@@ -488,11 +533,11 @@ Configuration Clus::PrDisplayDump::dump_graph(Facade::Grouping& grouping) const
 // STRING ("e-  1148 MeV") and drops everything else.  The display needs the
 // numbers, so they are emitted here and the tree itself is left to mc.json --
 // there is exactly one particle-flow producer and this is not it.
-Configuration Clus::PrDisplayDump::dump_showers(Facade::Grouping& grouping) const
+Configuration Clus::PrDisplayDump::dump_showers(Facade::Grouping& grouping, TFPtr tf_in) const
 {
     Configuration out = Json::arrayValue;
 
-    auto tf = grouping.get_track_fitting();
+    auto tf = tf_in ? tf_in : grouping.get_track_fitting();
     if (!tf) return out;
 
     const double cm = units::cm;
@@ -571,11 +616,11 @@ Configuration Clus::PrDisplayDump::dump_showers(Facade::Grouping& grouping) cons
 // KineInfo verbatim.  Already in MeV and cm at the source
 // (NeutrinoKinematics.cxx divides by units::MeV / units::cm before storing), so
 // nothing is rescaled here.
-Configuration Clus::PrDisplayDump::dump_kine(Facade::Grouping& grouping) const
+Configuration Clus::PrDisplayDump::dump_kine(Facade::Grouping& grouping, TFPtr tf_in) const
 {
     Configuration out;
 
-    auto tf = grouping.get_track_fitting();
+    auto tf = tf_in ? tf_in : grouping.get_track_fitting();
     if (!tf) return out;
     const auto& k = tf->get_kine_info();
 
@@ -640,11 +685,11 @@ Configuration Clus::PrDisplayDump::dump_kine(Facade::Grouping& grouping) const
 // Rows are emitted sorted by vertex_id: the sources they were collected from
 // (map_vertex_num, snap_map) are both VertexPtr-keyed, i.e. ADDRESS-ordered,
 // so an unsorted dump would reshuffle run to run (CLAUDE.md determinism rule).
-Configuration Clus::PrDisplayDump::dump_vertex_scoreboard(Facade::Grouping& grouping) const
+Configuration Clus::PrDisplayDump::dump_vertex_scoreboard(Facade::Grouping& grouping, TFPtr tf_in) const
 {
     Configuration out;
 
-    auto tf = grouping.get_track_fitting();
+    auto tf = tf_in ? tf_in : grouping.get_track_fitting();
     if (!tf) return out;
     const auto& b = tf->get_vertex_scoreboard();
     if (!b.filled) return out;
@@ -804,11 +849,11 @@ Configuration Clus::PrDisplayDump::dump_vertex_scoreboard(Facade::Grouping& grou
     return out;
 }
 
-Configuration Clus::PrDisplayDump::dump_tagger(Facade::Grouping& grouping) const
+Configuration Clus::PrDisplayDump::dump_tagger(Facade::Grouping& grouping, TFPtr tf_in) const
 {
     Configuration out;
 
-    auto tf = grouping.get_track_fitting();
+    auto tf = tf_in ? tf_in : grouping.get_track_fitting();
     if (!tf) return out;
     const auto& t = tf->get_tagger_info();
 
@@ -937,7 +982,7 @@ Configuration Clus::PrDisplayDump::dump_tagger(Facade::Grouping& grouping) const
 // Shower membership (not the per-segment flags) is authoritative: a segment
 // absorbed into a shower from another cluster may never have had
 // kShowerTrajectory/kShowerTopology or pdg=11 set on it.
-Configuration Clus::PrDisplayDump::dump_track_shower(Facade::Grouping& grouping) const
+Configuration Clus::PrDisplayDump::dump_track_shower(Facade::Grouping& grouping, TFPtr tf_in) const
 {
     Configuration out;
     out["x"] = Json::arrayValue;
@@ -947,8 +992,8 @@ Configuration Clus::PrDisplayDump::dump_track_shower(Facade::Grouping& grouping)
     out["cluster_id"] = Json::arrayValue;
     out["particle_id"] = Json::arrayValue;
 
-    auto pr_graph = grouping.get_pr_graph();
-    auto tf = grouping.get_track_fitting();
+    auto tf = tf_in ? tf_in : grouping.get_track_fitting();
+    auto pr_graph = tf ? tf->get_graph() : nullptr;   // doc pr/94: this candidate's graph
     if (!pr_graph || !tf) return out;
 
     std::map<PR::SegmentPtr, PR::ShowerPtr, PR::SegmentIndexCmp> seg_to_shower;
@@ -1102,11 +1147,11 @@ Configuration Clus::PrDisplayDump::dump_steiner(Facade::Grouping& grouping) cons
 // here (fixing it belongs in TrackFitting, with its own gate).  Until then,
 // do not read the display's per-cell measured-vs-predicted comparison as a
 // stable number.
-Configuration Clus::PrDisplayDump::dump_proj(Facade::Grouping& grouping) const
+Configuration Clus::PrDisplayDump::dump_proj(Facade::Grouping& grouping, TFPtr tf_in) const
 {
     Configuration out = Json::arrayValue;
 
-    auto tf = grouping.get_track_fitting();
+    auto tf = tf_in ? tf_in : grouping.get_track_fitting();
     if (!tf) return out;
 
     const auto& fitted = tf->get_fitted_charge_2d();

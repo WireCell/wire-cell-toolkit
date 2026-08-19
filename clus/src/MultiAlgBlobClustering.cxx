@@ -789,7 +789,9 @@ void MultiAlgBlobClustering::fill_bee_points(const std::string& name, const Grou
 }
 
 // Fill bee points from PRGraph track trajectories
-void MultiAlgBlobClustering::fill_bee_points_from_pr_graph(const std::string& name, const Grouping& grouping)
+void MultiAlgBlobClustering::fill_bee_points_from_pr_graph(const std::string& name, const Grouping& grouping,
+                                                           std::shared_ptr<WireCell::Clus::TrackFitting> tf_in,
+                                                           bool do_reset)
 {
     if (m_bee_points.find(name) == m_bee_points.end()) {
         SPDLOG_LOGGER_WARN(log, "Bee points set '{}' not found for PR graph, skipping", name);
@@ -809,31 +811,46 @@ void MultiAlgBlobClustering::fill_bee_points_from_pr_graph(const std::string& na
 
     const auto& config = *it;
 
-    // Reset RSE values for all points objects
-    if (m_use_config_rse) {
-        apa_bpts.global.rse(m_runNo, m_subRunNo, m_eventNo);
-        for (auto& [apa, face_map] : apa_bpts.by_apa_face) {
-            for (auto& [face, bpts] : face_map) {
-                bpts.rse(m_runNo, m_subRunNo, m_eventNo);
+    // Reset RSE values for all points objects.  Skipped for the 2nd..Nth
+    // bundle of a per-bundle sequence -- reset() clears the accumulated points.
+    if (do_reset) {
+        if (m_use_config_rse) {
+            apa_bpts.global.rse(m_runNo, m_subRunNo, m_eventNo);
+            for (auto& [apa, face_map] : apa_bpts.by_apa_face) {
+                for (auto& [face, bpts] : face_map) {
+                    bpts.rse(m_runNo, m_subRunNo, m_eventNo);
+                }
             }
-        }
-    } else {
-        // Use the default approach with ident
-        int run = 0, evt = 0;
-        if (m_last_ident > 0) {
-            run = (m_last_ident >> 16) & 0x7fff;
-            evt = (m_last_ident) & 0xffff;
-        }
-        apa_bpts.global.reset(evt, 0, run);
-        for (auto& [anode_id, face_map] : apa_bpts.by_apa_face) {
-            for (auto& [face, bpts] : face_map) {
-                bpts.reset(evt, 0, run);
+        } else {
+            // Use the default approach with ident
+            int run = 0, evt = 0;
+            if (m_last_ident > 0) {
+                run = (m_last_ident >> 16) & 0x7fff;
+                evt = (m_last_ident) & 0xffff;
+            }
+            apa_bpts.global.reset(evt, 0, run);
+            for (auto& [anode_id, face_map] : apa_bpts.by_apa_face) {
+                for (auto& [face, bpts] : face_map) {
+                    bpts.reset(evt, 0, run);
+                }
             }
         }
     }
 
-    // Get the PRGraph from the grouping
-    auto pr_graph = grouping.get_pr_graph();
+    // doc pr/94 Phase 4b: render the caller's fitter when given one, and take
+    // the graph from THAT fitter.  grouping.get_pr_graph() is by definition
+    // m_track_fitting->get_graph() (Facade_Grouping.cxx:76-79) = the unnamed
+    // slot = bundle 0, so reading it here emitted bundle 0's trajectories once
+    // per bundle instead of each bundle's own -- i.e. every candidate after
+    // the first contributed no track_fit/shower_track points at all (SBND
+    // 18255/18625, owner Bee scan 2026-08-19).  Null tf_in reproduces the
+    // legacy single-candidate resolution exactly.
+    auto tf_sel = tf_in ? tf_in : grouping.get_track_fitting();
+    if (!tf_sel) {
+        SPDLOG_LOGGER_WARN(log, "No TrackFitting in grouping for bee points set '{}'", name);
+        return;
+    }
+    auto pr_graph = tf_sel->get_graph();
     if (!pr_graph) {
         SPDLOG_LOGGER_WARN(log, "No PR graph found in grouping for bee points set '{}'", name);
         return;
@@ -847,7 +864,9 @@ void MultiAlgBlobClustering::fill_bee_points_from_pr_graph(const std::string& na
     // the same color in Bee).
     std::map<PR::SegmentPtr, PR::ShowerPtr, PR::SegmentIndexCmp> seg_to_shower;
     if (config.use_associate_points) {
-        auto tf = grouping.get_track_fitting();
+        // Same fitter the graph came from: a shower list from bundle 0 would
+        // classify bundle i's segments as tracks (charge 0) at random.
+        auto tf = tf_sel;
         if (tf) {
             for (const auto& shower : tf->get_showers()) {
                 PR::IndexedVertexSet sv; PR::IndexedSegmentSet ss;
@@ -1032,7 +1051,9 @@ void MultiAlgBlobClustering::fill_bee_points_from_pr_graph(const std::string& na
 }
 
 
-void MultiAlgBlobClustering::fill_bee_vertices_from_pr_graph(const std::string& name, const Facade::Grouping& grouping)
+void MultiAlgBlobClustering::fill_bee_vertices_from_pr_graph(const std::string& name, const Facade::Grouping& grouping,
+                                                             std::shared_ptr<WireCell::Clus::TrackFitting> tf_in,
+                                                             bool do_reset)
 {
     if (m_bee_points.find(name) == m_bee_points.end()) {
         SPDLOG_LOGGER_WARN(log, "Bee points set '{}' not found for graph vertices, skipping", name);
@@ -1041,19 +1062,28 @@ void MultiAlgBlobClustering::fill_bee_vertices_from_pr_graph(const std::string& 
 
     auto& apa_bpts = m_bee_points[name];
 
-    // Reset RSE
-    if (m_use_config_rse) {
-        apa_bpts.global.rse(m_runNo, m_subRunNo, m_eventNo);
-    } else {
-        int run = 0, evt = 0;
-        if (m_last_ident > 0) {
-            run = (m_last_ident >> 16) & 0x7fff;
-            evt = (m_last_ident) & 0xffff;
+    // Reset RSE.  See fill_bee_points_from_pr_graph for why do_reset exists.
+    if (do_reset) {
+        if (m_use_config_rse) {
+            apa_bpts.global.rse(m_runNo, m_subRunNo, m_eventNo);
+        } else {
+            int run = 0, evt = 0;
+            if (m_last_ident > 0) {
+                run = (m_last_ident >> 16) & 0x7fff;
+                evt = (m_last_ident) & 0xffff;
+            }
+            apa_bpts.global.reset(evt, 0, run);
         }
-        apa_bpts.global.reset(evt, 0, run);
     }
 
-    auto pr_graph = grouping.get_pr_graph();
+    // doc pr/94 Phase 4b: the caller's fitter and ITS graph, not the unnamed
+    // slot -- otherwise every bundle re-emits bundle 0's vertices.
+    auto tf_sel = tf_in ? tf_in : grouping.get_track_fitting();
+    if (!tf_sel) {
+        SPDLOG_LOGGER_WARN(log, "No TrackFitting in grouping for vertices bee set '{}'", name);
+        return;
+    }
+    auto pr_graph = tf_sel->get_graph();
     if (!pr_graph) {
         SPDLOG_LOGGER_WARN(log, "No PR graph found in grouping for vertices bee set '{}'", name);
         return;
@@ -3161,11 +3191,29 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
             // std::cout << "Test: Visitor: " << cmeth.name << " Grouping: " << config.grouping << " " << pr_graph << std::endl;
 
             if (pr_graph) {
-                if (config.use_graph_vertices) {
-                    fill_bee_vertices_from_pr_graph(config.name, *gs[0]);
-                } else {
-                    // Fill bee points from PRGraph (for track trajectories)
-                    fill_bee_points_from_pr_graph(config.name, *gs[0]);
+                // doc pr/94 Phase 4b: the point layers (track_fit,
+                // shower_track, vertices) render every per-bundle candidate,
+                // the way the "mc" particle-flow layer already does.  The
+                // "nu<i>" slots exist only in per-bundle mode; with none
+                // present this is exactly the single legacy call, and the
+                // pr_graph test above still gates it correctly because
+                // candidate 0 always also publishes to the unnamed slot.
+                std::vector<std::shared_ptr<WireCell::Clus::TrackFitting>> nu_tfs;
+                for (int i = 0;; ++i) {
+                    auto tfi = gs[0]->get_track_fitting("nu" + std::to_string(i));
+                    if (!tfi) break;
+                    nu_tfs.push_back(tfi);
+                }
+                if (nu_tfs.empty()) nu_tfs.push_back(nullptr);   // legacy: unnamed slot
+                for (size_t i = 0; i < nu_tfs.size(); ++i) {
+                    // reset ONLY on the first pass, else bundle i wipes i-1.
+                    const bool first = (i == 0);
+                    if (config.use_graph_vertices) {
+                        fill_bee_vertices_from_pr_graph(config.name, *gs[0], nu_tfs[i], first);
+                    } else {
+                        // Fill bee points from PRGraph (for track trajectories)
+                        fill_bee_points_from_pr_graph(config.name, *gs[0], nu_tfs[i], first);
+                    }
                 }
                 // std::cout << "Filled bee points from PR graph for visitor: " << cmeth.name << " grouping: " << config.grouping << std::endl;
             } else if (config.require_pr_graph) {

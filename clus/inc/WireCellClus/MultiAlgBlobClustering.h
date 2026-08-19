@@ -160,8 +160,19 @@ namespace WireCell::Clus {
             Bee::Points& bpts, const Facade::Cluster& cluster,
             const std::string& pcname, const std::vector<std::string>& coords,
             int filter, double dQdx_scale = 1.0, double dQdx_offset = 0.0);
-        void fill_bee_points_from_pr_graph(const std::string& name, const Facade::Grouping& grouping);
-        void fill_bee_vertices_from_pr_graph(const std::string& name, const Facade::Grouping& grouping);
+        // doc pr/94 Phase 4b: `tf_in` selects WHICH per-bundle TrackFitting to
+        // render (null = the unnamed slot, i.e. the legacy single-candidate
+        // behavior).  `do_reset` must be false on every call after the first of
+        // a multi-bundle sequence: both functions reset the Bee::Points object
+        // at entry, so resetting per bundle would leave only the LAST bundle's
+        // points -- a bug that hides itself, since the symptom being fixed
+        // ("the second candidate has no points") would still look cured.
+        void fill_bee_points_from_pr_graph(const std::string& name, const Facade::Grouping& grouping,
+                                           std::shared_ptr<WireCell::Clus::TrackFitting> tf_in = nullptr,
+                                           bool do_reset = true);
+        void fill_bee_vertices_from_pr_graph(const std::string& name, const Facade::Grouping& grouping,
+                                             std::shared_ptr<WireCell::Clus::TrackFitting> tf_in = nullptr,
+                                             bool do_reset = true);
 
         void fill_bee_patches_from_grouping(const Facade::Grouping& grouping);
         void fill_bee_patches_from_cluster(const Facade::Cluster& cluster);
