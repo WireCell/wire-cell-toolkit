@@ -3,6 +3,7 @@
 #include "WireCellClus/PatternDebugIO.h"      // debug dump/load
 
 #include "WireCellUtil/Persist.h"
+#include <algorithm>  // doc pr/94: stable_sort of the per-bundle candidate list
 #include <chrono>
 #include <set>
 
@@ -1274,6 +1275,29 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
                                cand.main->get_length()/units::cm, cand.others.size(), cand.acts.size());
             candidates.push_back(std::move(cand));
         }
+
+        // Order by the selected activity's length, longest first (ties by gid,
+        // so this is deterministic).  This is NOT cosmetic: candidate 0 keeps
+        // the unnamed TrackFitting slot, and every consumer not yet converted
+        // to walk the "nu<i>" slots -- the three Bee PR point layers,
+        // SbndPrMagnifyTrackingVisitor's T_rec_charge/T_proj_data,
+        // PrDisplayDump -- still reads exactly that slot.  Enumerating by gid
+        // instead put a 1.7 cm shard from the low-gid drift side in slot 0 on
+        // nueCC48 evt 10550/234638/267597, which silently emptied those layers
+        // (the shard reconstructs no vertex).  Longest-first is also the legacy
+        // selector's own rule, so slot 0 now holds the same candidate the
+        // pre-pr/94 chain would have chosen, and nu_index 0 means "primary".
+        std::stable_sort(candidates.begin(), candidates.end(),
+                         [](const NuCandidate& a, const NuCandidate& b) {
+                             auto sel_len = [](const NuCandidate& c) {
+                                 for (const auto& x : c.acts)
+                                     if (x.is_selected) return x.length_cm;
+                                 return 0.0f;
+                             };
+                             const float la = sel_len(a), lb = sel_len(b);
+                             if (la != lb) return la > lb;
+                             return a.gid < b.gid;
+                         });
     }
 
     // doc pr/94 -- unify the two shapes.  The two legacy branches above select
