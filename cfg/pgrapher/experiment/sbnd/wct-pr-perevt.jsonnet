@@ -933,6 +933,13 @@ function(
     // times on the 24-event gate manifest -- it is carried as the standing
     // invariant, not as a fix.  Legacy escape: -A pf_unique_node_ids=false.
     pf_unique_node_ids = true,
+    // doc sbnd_xin/docs/pr/92: mirror the kine-side stray-satellite drop in
+    // the Bee PF tree (inert while kine_drop_stray_satellites is off -- the
+    // dropped-id set is then empty).  C++ default false.  Runner env:
+    // SBND_PF_DROP_STRAY_SATELLITES.
+    // SBND PRODUCTION DEFAULT ON since 2026-08-18 (doc pr/92, with
+    // kine_drop_stray_satellites above).
+    pf_drop_stray_satellites = true,
     // doc pr/38: F2's ON-behavior was CORRECTED in place (owner decision
     // 2026-08-05, no new knobs): the barrier now excludes each shower's
     // start vertex (prototype map_vtx_segs parity, WCShower.cxx:547) so
@@ -1318,6 +1325,35 @@ function(
     sfv_kink_max = null,
     shower_nv_bridge_track = true,
     shower_nv_bridge_max_gap = null,
+    // doc sbnd_xin/docs/pr/92 -- drop stray satellite showers (overclustered
+    // cosmics / second neutrinos) from kine_reco_Enu and (via
+    // pf_drop_stray_satellites below) the Bee PF tree.  Candidates: conn-2/3
+    // showers in NON-main clusters above 20 MeV, not pi0-paired, not within
+    // 8 cm of a main-cluster attachment; dropped when the fresh shower axis
+    // is > 60 deg off the attachment vertex (Arm A), the attachment is
+    // > 90 cm away or outside the main cluster AND the axis is >= 45 deg
+    // off the main vertex (Arm B), or the start segment is the collinear
+    // continuation of an out-of-shower straight long track (Arm C).
+    // C++ defaults false (scalars 20 MeV / 8 cm / 60 deg / 45 deg / 90 cm /
+    // 30 cm / 25 deg live in C++).  Keys omitted when off/null =>
+    // byte-identical pre-pr/92 config.  Runner env:
+    // SBND_KINE_DROP_STRAY_SATELLITES + SBND_KINE_SAT_* scalars.
+    // SBND PRODUCTION DEFAULT ON since 2026-08-18 (doc pr/92: V1 pre/post
+    // binary gate PASS 8/8 archives; probe round over mcp1k-33 + nueCC48 +
+    // NCpi0-19 (100 events, 1202 satellite candidates): 51 drops in 30
+    // events, all 8 target offenders dropped, every must-keep sentinel
+    // retained; V2 OFF-vs-ON: movers = exactly those 30 events, mabc-only,
+    // nusel selections byte-identical 3/3 samples; 350935 -449 MeV cosmic
+    // gamma gone, 321371 -98 MeV cosmic neutron/mu gone, 389538 -1362 MeV
+    // second neutrino incl. the 955 MeV neutron->proton gone).
+    kine_drop_stray_satellites = true,
+    kine_sat_min_energy = null,
+    kine_sat_prox_max = null,
+    kine_sat_angle_bad = null,
+    kine_sat_angle_main = null,
+    kine_sat_far_dis = null,
+    kine_sat_axis_dis_cut = null,
+    kine_sat_cont_kink = null,
     // doc sbnd_xin/docs/pr/74 round 2 P2: the F14 Michel rescue accepts ANY
     // shower-like sibling at the stem's far vertex; on a nueCC event that
     // sibling is the EM shower trunk and the rescue paints a muon at the
@@ -2124,6 +2160,7 @@ function(
                              pf_touch_cross_max=pf_touch_cross_max,
                              pf_pseudo_gap_from_main=pf_pseudo_gap_from_main,
                              pf_unique_node_ids=pf_unique_node_ids,
+                             pf_drop_stray_satellites=pf_drop_stray_satellites,
                              unmerge_bundle_mode=unmerge_bundle_mode,
                              restore_demoted_mains=restore_demoted_mains,
                              require_provenance=require_provenance,
@@ -2249,6 +2286,14 @@ function(
                              sfv_kink_max=sfv_kink_max,
                              shower_nv_bridge_track=shower_nv_bridge_track,
                              shower_nv_bridge_max_gap=shower_nv_bridge_max_gap,
+                             kine_drop_stray_satellites=kine_drop_stray_satellites,
+                             kine_sat_min_energy=kine_sat_min_energy,
+                             kine_sat_prox_max=kine_sat_prox_max,
+                             kine_sat_angle_bad=kine_sat_angle_bad,
+                             kine_sat_angle_main=kine_sat_angle_main,
+                             kine_sat_far_dis=kine_sat_far_dis,
+                             kine_sat_axis_dis_cut=kine_sat_axis_dis_cut,
+                             kine_sat_cont_kink=kine_sat_cont_kink,
                              michel_stem_michel_check=michel_stem_michel_check,
                              michel_stem_max_far_len=michel_stem_max_far_len,
                              shower_stem_backfill=shower_stem_backfill,
