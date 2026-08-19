@@ -1252,6 +1252,10 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               // branch (threaded to BOTH tagger_check_neutrino and
               // tagger_output).  C++ default false.
               neutrino_type_bitmask=false,
+              // doc pr/94 Phase 1: per-bundle identity + per-activity
+              // cosmic-flag T_tagger branches (tagger_output only, plumbing
+              // only -- nothing populates them yet).  C++ default false.
+              nu_per_bundle=false,
               // ---- doc sbnd_xin/docs/pr/33 §10 EM-shower-clustering knobs.
               // All C++ default false = keys omitted = byte-identical
               // pre-knob config.
@@ -2439,8 +2443,12 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
         // tracking_visitor (and after both BDT scorers so the scores are set).
         // doc pr/36 sec 10.8 (F7): neutrino_type_bitmask books the
         // neutrino_type/I branch; key omitted when off => schema-identical.
+        // doc pr/94 Phase 1: nu_per_bundle books the per-bundle identity +
+        // per-activity cosmic-flag branches; key omitted when off =>
+        // schema-identical.  Plumbing only -- nothing populates them yet.
         tagger_output: cm.tagger_output(output_filename=tracking_pr_root,
-                                        neutrino_type_bitmask=neutrino_type_bitmask),
+                                        neutrino_type_bitmask=neutrino_type_bitmask,
+                                        nu_per_bundle=nu_per_bundle),
         // PR event-display calib dump (docs/pr/26): ONE self-contained JSON per
         // event carrying the PR-graph segments as polylines, the associated
         // track/shower points, the Steiner skeleton with its terminal flag, the
@@ -3013,6 +3021,10 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
        stem_endpoint_wcpt_parity=false,
        broken_muon_cluster_id_count=false,
        neutrino_type_bitmask=false,
+       // doc pr/94 Phase 1: per-bundle identity + per-activity cosmic-flag
+       // T_tagger branches (tagger_output only, plumbing only).  C++
+       // default false; key omitted when off => byte-identical.
+       nu_per_bundle=false,
        // doc pr/33 sec 10 EM-shower-clustering knobs -- see the clus_pr arg
        // comments.  All false = keys omitted = byte-identical pre-knob
        // config.
@@ -3484,6 +3496,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 stem_endpoint_wcpt_parity=stem_endpoint_wcpt_parity,
                 broken_muon_cluster_id_count=broken_muon_cluster_id_count,
                 neutrino_type_bitmask=neutrino_type_bitmask,
+                nu_per_bundle=nu_per_bundle,
                 daughter_count_proto_main_vertex=daughter_count_proto_main_vertex,
                 daughter_count_proto_examine_showers=daughter_count_proto_examine_showers,
                 shower_pdg_from_start_segment=shower_pdg_from_start_segment,

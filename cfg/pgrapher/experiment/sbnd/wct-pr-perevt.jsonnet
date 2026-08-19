@@ -1088,6 +1088,14 @@ function(
     // F7 ON: neutrino_type verdict bitmask + its T_tagger branch (/I).
     // Knob-on diff = exactly the one new branch on 47/47 PR events.
     neutrino_type_bitmask = true,
+    // doc pr/94 Phase 1 (2026-08-19): per-bundle identity + per-activity
+    // cosmic-flag T_tagger branches (tagger_output only).  STILL OFF --
+    // schema plumbing only, nothing populates the fields yet, no validation
+    // has run.  Flip only after the phased-execution plan's later phases
+    // (TaggerCheckNeutrino per-bundle loop, byte-identical + population-arm
+    // gates) are reported and accepted -- see
+    // sbnd_xin/docs/pr/94_per-bundle-neutrino-cosmic-flags.md.
+    nu_per_bundle = false,
     // ---- doc sbnd_xin/docs/pr/33 sec 11 EM-shower-clustering knobs, ALL ON
     // (owner 2026-08-05; see the sbnd clus.jsonnet clus_pr arg comments).
     // Gate labels: work-pr33-base48 (clean-HEAD binary) vs work-pr33-off48
@@ -2367,6 +2375,7 @@ function(
                              stem_endpoint_wcpt_parity=stem_endpoint_wcpt_parity,
                              broken_muon_cluster_id_count=broken_muon_cluster_id_count,
                              neutrino_type_bitmask=neutrino_type_bitmask,
+                             nu_per_bundle=nu_per_bundle,
                              daughter_count_proto_main_vertex=daughter_count_proto_main_vertex,
                              daughter_count_proto_examine_showers=daughter_count_proto_examine_showers,
                              shower_pdg_from_start_segment=shower_pdg_from_start_segment,

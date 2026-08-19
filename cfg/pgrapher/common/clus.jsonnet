@@ -1404,7 +1404,7 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
         // Write T_tagger and T_kine trees into the existing tracking output ROOT file.
         // Must run AFTER numu_bdt_scorer and nue_bdt_scorer (BDT scores must be filled).
         // Must run AFTER UbooneMagnifyTrackingVisitor (file must already exist to UPDATE).
-        tagger_output(name="", output_filename="tracking_proj.root", neutrino_type_bitmask=false) :: {
+        tagger_output(name="", output_filename="tracking_proj.root", neutrino_type_bitmask=false, nu_per_bundle=false) :: {
             type: "UbooneTaggerOutputVisitor",
             name: prefix + name,
             data: {
@@ -1417,7 +1417,14 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
               // tagger_check_neutrino's computing knob.  C++ default false =
               // branch not booked; key omitted when off => byte-identical
               // pre-knob config AND schema.
-              + (if neutrino_type_bitmask then { neutrino_type_bitmask: true } else {}),
+              + (if neutrino_type_bitmask then { neutrino_type_bitmask: true } else {})
+              // doc sbnd_xin/docs/pr/94 Phase 1: book the per-bundle identity
+              // + per-activity cosmic-flag branches (cluster_id,
+              // matched_flash_gid, nu_index, act_*).  Plumbing only -- nothing
+              // populates them yet.  C++ default false = branches not booked;
+              // key omitted when off => byte-identical pre-knob config AND
+              // schema.
+              + (if nu_per_bundle then { nu_per_bundle: true } else {}),
         },
 
         pointed(name="", groupings=["live"]) :: {

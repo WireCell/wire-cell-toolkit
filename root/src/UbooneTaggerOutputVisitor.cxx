@@ -27,6 +27,8 @@ void Root::UbooneTaggerOutputVisitor::configure(const WireCell::Configuration& c
     m_grouping_name = get<std::string>(cfg, "grouping", "live");
     // doc pr/36 §10.8 (F7): see the member comment in the header.
     m_neutrino_type_bitmask = get<bool>(cfg, "neutrino_type_bitmask", m_neutrino_type_bitmask);
+    // doc pr/94 Phase 1: see the member comment in the header.
+    m_nu_per_bundle = get<bool>(cfg, "nu_per_bundle", m_nu_per_bundle);
 }
 
 WireCell::Configuration Root::UbooneTaggerOutputVisitor::default_configuration() const
@@ -35,6 +37,7 @@ WireCell::Configuration Root::UbooneTaggerOutputVisitor::default_configuration()
     cfg["output_filename"] = "tracking_proj.root";
     cfg["grouping"] = "live";
     cfg["neutrino_type_bitmask"] = m_neutrino_type_bitmask;  // false = branch not booked, schema-identical
+    cfg["nu_per_bundle"] = m_nu_per_bundle;  // false = branches not booked, schema-identical
     return cfg;
 }
 
@@ -80,6 +83,27 @@ void Root::UbooneTaggerOutputVisitor::visit(Clus::Facade::Ensemble& ensemble) co
     // the knob is on so the knob-off T_tagger schema is byte-identical.
     if (m_neutrino_type_bitmask)
         t_tagger->Branch("neutrino_type", &ti.neutrino_type, "neutrino_type/I");
+
+    // doc pr/94 Phase 1: per-bundle identity + per-activity cosmic-flag
+    // branches.  Booked only when the knob is on so the knob-off T_tagger
+    // schema is byte-identical.  Nothing populates ti.cluster_id / act_* yet
+    // (see NeutrinoTaggerInfo.h) -- every row reads its struct default
+    // (-1 / empty) until a later phase's TaggerCheckNeutrino change fills
+    // them per bundle.
+    if (m_nu_per_bundle) {
+        t_tagger->Branch("cluster_id", &ti.cluster_id, "cluster_id/I");
+        t_tagger->Branch("matched_flash_gid", &ti.matched_flash_gid, "matched_flash_gid/I");
+        t_tagger->Branch("nu_index", &ti.nu_index, "nu_index/I");
+        t_tagger->Branch("act_cluster_id", &ti.act_cluster_id);
+        t_tagger->Branch("act_length_cm", &ti.act_length_cm);
+        t_tagger->Branch("act_is_selected", &ti.act_is_selected);
+        t_tagger->Branch("act_is_demoted", &ti.act_is_demoted);
+        t_tagger->Branch("act_tgm", &ti.act_tgm);
+        t_tagger->Branch("act_stm", &ti.act_stm);
+        t_tagger->Branch("act_fc", &ti.act_fc);
+        t_tagger->Branch("act_lm", &ti.act_lm);
+        t_tagger->Branch("act_evaluated", &ti.act_evaluated);
+    }
 
     // ---- cosmic tagger (top-level flag) ----
     t_tagger->Branch("cosmic_flag", &ti.cosmic_flag, "cosmic_flag/F");

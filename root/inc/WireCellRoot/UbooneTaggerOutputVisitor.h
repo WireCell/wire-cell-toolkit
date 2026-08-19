@@ -44,6 +44,13 @@ namespace WireCell {
             // default false => branch not booked => the T_tagger schema is
             // byte-identical to the pre-knob tree.
             bool m_neutrino_type_bitmask{false};
+            // doc pr/94 Phase 1: book the per-bundle identity + per-activity
+            // cosmic-flag branches (cluster_id/matched_flash_gid/nu_index,
+            // act_*).  C++ default false => branches not booked => T_tagger
+            // schema byte-identical to the pre-knob tree.  Nothing populates
+            // these fields yet (see NeutrinoTaggerInfo.h) -- this only wires
+            // the schema; TaggerCheckNeutrino filling them is a later phase.
+            bool m_nu_per_bundle{false};
         };
 
     }  // namespace Root
