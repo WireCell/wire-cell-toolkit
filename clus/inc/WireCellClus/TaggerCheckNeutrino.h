@@ -660,6 +660,8 @@ public:
         double m_kine_sat_far_dis{90.0};                            // cm; Arm B far-attachment trigger
         double m_kine_sat_axis_dis_cut{30.0};                       // cm; shower axis integration radius
         double m_kine_sat_cont_kink{25.0};                          // degrees; Arm C continuation kink
+        double m_kine_sat_track_max_nseg{3.0};                      // count; round-2 track-like max segments
+        double m_kine_sat_em_far_dis{150.0};                        // cm; round-2 EM-satellite far-drop distance
         bool m_michel_stem_michel_check{false};                     // doc pr/74 round 2 P2
         double m_michel_stem_max_far_len{40};                       // cm; pr/74 P2 tunable
         bool m_shower_stem_backfill{false};                         // doc pr/74 round 2 K4

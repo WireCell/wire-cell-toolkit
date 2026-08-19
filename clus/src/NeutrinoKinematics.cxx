@@ -345,6 +345,22 @@ KineInfo PatternAlgorithms::fill_kine_tree(
             const bool is_pi0   = pi0_showers.count(shower);
             const bool straight_cont =
                 shower_start_is_track_continuation(graph, *shower, m_kine_sat_cont_kink);
+            // pr/92 round 2 (owner retune): topology split.  A TRACK-like
+            // satellite (straight-long start segment with little branching,
+            // or a collinear continuation of an out-of-shower track) with a
+            // bad direction is very likely overclustering; an EM-shower-like
+            // satellite (branched, stubby trunk) is usually a genuinely
+            // detached legit shower (NCpi0-like), so it is dropped only when
+            // it is FAR from the main vertex AND direction-inconsistent --
+            // the second-neutrino signature (389538: 169-250 cm), never the
+            // nearby-fragment one (259542: 18-75 cm).  The EM angle is
+            // folded (sign-insensitive): EM axis signs flip easily, and an
+            // anti-aligned axis is still collinear with the vertex line
+            // (52672's 453 MeV at 171 deg is a KEEP).
+            const bool track_like = straight_cont ||
+                (shower->get_num_segments() <= m_kine_sat_track_max_nseg &&
+                 segment_is_straight_long_track(start_sg));
+            const double ang_mv_fold = std::min(ang_mv, 180.0 - ang_mv);
 
             const char* verdict = "keep";
             do {
@@ -352,10 +368,14 @@ KineInfo PatternAlgorithms::fill_kine_tree(
                 if (shower->get_kine_best() <= m_kine_sat_min_energy) break;
                 if (axis.magnitude() == 0) break;   // no axis: fail-safe keep
                 if (d_sv < m_kine_sat_prox_max && in_main) break;
-                if (ang_sv > m_kine_sat_angle_bad)          { verdict = "drop:A"; break; }
-                if ((d_sv > m_kine_sat_far_dis || !in_main) &&
-                    ang_mv >= m_kine_sat_angle_main)        { verdict = "drop:B"; break; }
-                if (straight_cont)                          { verdict = "drop:C"; break; }
+                if (track_like) {
+                    if (ang_sv > m_kine_sat_angle_bad)          { verdict = "drop:A"; break; }
+                    if ((d_sv > m_kine_sat_far_dis || !in_main) &&
+                        ang_mv >= m_kine_sat_angle_main)        { verdict = "drop:B"; break; }
+                    if (straight_cont)                          { verdict = "drop:C"; break; }
+                }
+                else if (d_mv > m_kine_sat_em_far_dis &&
+                         ang_mv_fold >= m_kine_sat_angle_main)  { verdict = "drop:E"; break; }
             } while (false);
 
             if (sat_probe) {
@@ -374,6 +394,7 @@ KineInfo PatternAlgorithms::fill_kine_tree(
                    << '\t' << ang_mv
                    << '\t' << (straight_cont ? 1 : 0)
                    << '\t' << (is_pi0 ? 1 : 0)
+                   << '\t' << (track_like ? 1 : 0)
                    << '\t' << verdict << '\n';
                 std::cout << os.str() << std::flush;
             }
@@ -381,11 +402,11 @@ KineInfo PatternAlgorithms::fill_kine_tree(
                 sat_drop_set.insert(shower);
                 if (dropped_satellites) dropped_satellites->insert(shower->get_shower_id());
                 SPDLOG_LOGGER_DEBUG(s_log,
-                    "kine_sat DROP id={} arm={} E={:.1f} conn={} d_sv={:.1f} ang_sv={:.1f} in_main={} d_mv={:.1f} ang_mv={:.1f} cont={}",
+                    "kine_sat DROP id={} arm={} E={:.1f} conn={} d_sv={:.1f} ang_sv={:.1f} in_main={} d_mv={:.1f} ang_mv={:.1f} cont={} track={}",
                     shower->get_shower_id(), verdict,
                     shower->get_kine_best() / units::MeV, conn,
                     d_sv / units::cm, ang_sv, in_main, d_mv / units::cm, ang_mv,
-                    straight_cont);
+                    straight_cont, track_like);
             }
         }
         if (m_kine_drop_stray_satellites && !sat_probe) {

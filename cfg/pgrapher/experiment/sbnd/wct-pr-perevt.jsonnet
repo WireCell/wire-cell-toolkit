@@ -1354,6 +1354,12 @@ function(
     kine_sat_far_dis = null,
     kine_sat_axis_dis_cut = null,
     kine_sat_cont_kink = null,
+    // pr/92 round 2 (owner retune): direction arms restricted to TRACK-like
+    // satellites; EM-shower-like satellites drop only when > em_far_dis
+    // from the main vertex with a folded main-vertex angle failure.
+    // C++ defaults 3 / 150 cm.
+    kine_sat_track_max_nseg = null,
+    kine_sat_em_far_dis = null,
     // doc sbnd_xin/docs/pr/74 round 2 P2: the F14 Michel rescue accepts ANY
     // shower-like sibling at the stem's far vertex; on a nueCC event that
     // sibling is the EM shower trunk and the rescue paints a muon at the
@@ -2294,6 +2300,8 @@ function(
                              kine_sat_far_dis=kine_sat_far_dis,
                              kine_sat_axis_dis_cut=kine_sat_axis_dis_cut,
                              kine_sat_cont_kink=kine_sat_cont_kink,
+                             kine_sat_track_max_nseg=kine_sat_track_max_nseg,
+                             kine_sat_em_far_dis=kine_sat_em_far_dis,
                              michel_stem_michel_check=michel_stem_michel_check,
                              michel_stem_max_far_len=michel_stem_max_far_len,
                              shower_stem_backfill=shower_stem_backfill,

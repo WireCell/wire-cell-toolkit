@@ -523,6 +523,8 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_kine_sat_far_dis                             = get(config, "kine_sat_far_dis",                             m_kine_sat_far_dis);
     m_kine_sat_axis_dis_cut                        = get(config, "kine_sat_axis_dis_cut",                        m_kine_sat_axis_dis_cut);
     m_kine_sat_cont_kink                           = get(config, "kine_sat_cont_kink",                           m_kine_sat_cont_kink);
+    m_kine_sat_track_max_nseg                      = get(config, "kine_sat_track_max_nseg",                      m_kine_sat_track_max_nseg);
+    m_kine_sat_em_far_dis                          = get(config, "kine_sat_em_far_dis",                          m_kine_sat_em_far_dis);
     m_michel_stem_michel_check                  = get(config, "michel_stem_michel_check",                  m_michel_stem_michel_check);
     m_michel_stem_max_far_len                   = get(config, "michel_stem_max_far_len",                   m_michel_stem_max_far_len);
     m_shower_stem_backfill                      = get(config, "shower_stem_backfill",                      m_shower_stem_backfill);
@@ -842,6 +844,8 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["kine_sat_far_dis"]                             = m_kine_sat_far_dis;                             // cm; only read when kine_drop_stray_satellites
     cfg["kine_sat_axis_dis_cut"]                        = m_kine_sat_axis_dis_cut;                        // cm; only read when kine_drop_stray_satellites
     cfg["kine_sat_cont_kink"]                           = m_kine_sat_cont_kink;                           // degrees; only read when kine_drop_stray_satellites
+    cfg["kine_sat_track_max_nseg"]                      = m_kine_sat_track_max_nseg;                      // count; round 2 topology split
+    cfg["kine_sat_em_far_dis"]                          = m_kine_sat_em_far_dis;                          // cm; round 2 EM far-drop distance
     cfg["michel_stem_michel_check"]                  = m_michel_stem_michel_check;                  // doc pr/74 round 2 P2; false = legacy (any shower-like sibling passes)
     cfg["michel_stem_max_far_len"]                   = m_michel_stem_max_far_len;                   // cm; only read when michel_stem_michel_check
     cfg["shower_stem_backfill"]                      = m_shower_stem_backfill;                      // doc pr/74 round 2 K4; false = legacy (walked-past stems stay out of showers)
@@ -1406,6 +1410,8 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
     pattern_algos.m_kine_sat_far_dis                             = m_kine_sat_far_dis * units::cm;                 // pr/92
     pattern_algos.m_kine_sat_axis_dis_cut                        = m_kine_sat_axis_dis_cut * units::cm;            // pr/92
     pattern_algos.m_kine_sat_cont_kink                           = m_kine_sat_cont_kink;                           // pr/92 (degrees)
+    pattern_algos.m_kine_sat_track_max_nseg                      = static_cast<int>(m_kine_sat_track_max_nseg);   // pr/92 r2 (count)
+    pattern_algos.m_kine_sat_em_far_dis                          = m_kine_sat_em_far_dis * units::cm;             // pr/92 r2
     pattern_algos.m_michel_stem_michel_check                  = m_michel_stem_michel_check;                  // pr/74 P2
     pattern_algos.m_michel_stem_max_far_len                   = m_michel_stem_max_far_len * units::cm;       // pr/74 P2
     pattern_algos.m_shower_stem_backfill                      = m_shower_stem_backfill;                      // pr/74 K4

@@ -157,6 +157,8 @@ TEST_CASE("clus knob defaults: TaggerCheckNeutrino switches are all OFF")
     CHECK_KNOB_NUM(cfg, "kine_sat_far_dis", 90.0);                               // cm; inert while pr/92 off
     CHECK_KNOB_NUM(cfg, "kine_sat_axis_dis_cut", 30.0);                          // cm; inert while pr/92 off
     CHECK_KNOB_NUM(cfg, "kine_sat_cont_kink", 25.0);                             // deg; inert while pr/92 off
+    CHECK_KNOB_NUM(cfg, "kine_sat_track_max_nseg", 3.0);                         // count; pr/92 r2 topology split
+    CHECK_KNOB_NUM(cfg, "kine_sat_em_far_dis", 150.0);                           // cm; pr/92 r2 EM far-drop
     CHECK_KNOB_BOOL(cfg, "shower_traj_michel_stem", false);                   // doc pr/74 round 4 K6
     CHECK_KNOB_NUM(cfg, "michel_stem_traj_min_len", 15.0);                    // cm; inert while K6 off
     CHECK_KNOB_NUM(cfg, "michel_stem_traj_max_len", 45.0);                    // cm; inert while K6 off

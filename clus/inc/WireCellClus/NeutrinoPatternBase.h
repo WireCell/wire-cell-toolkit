@@ -1784,6 +1784,17 @@ namespace WireCell::Clus::PR {
         double m_kine_sat_far_dis{90*units::cm};
         double m_kine_sat_axis_dis_cut{30*units::cm};
         double m_kine_sat_cont_kink{25.0};
+        // pr/92 round 2 (owner retune, 2026-08-18): the direction arms
+        // A/B/C apply only to TRACK-like satellites (straight-long start
+        // segment with <= max_nseg segments, or an out-of-shower track
+        // continuation) -- for those, direction inconsistency means
+        // overclustering.  EM-shower-like satellites are usually genuinely
+        // detached (NCpi0-like) and are dropped only when FAR from the main
+        // vertex (> em_far_dis; second neutrinos sit 169-250 cm, legit
+        // detached fragments 18-119 cm on the survey samples) AND the
+        // folded (sign-insensitive) main-vertex angle fails.
+        int    m_kine_sat_track_max_nseg{3};
+        double m_kine_sat_em_far_dis{150*units::cm};
 
         // doc sbnd_xin/docs/pr/74 round 2 P2 (SBND 18255 evt 90055 seg
         // 11045).  override_michel_stem_muon (F14 above) accepts ANY
