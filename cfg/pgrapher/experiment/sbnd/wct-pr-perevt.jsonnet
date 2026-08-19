@@ -940,11 +940,11 @@ function(
     // SBND PRODUCTION DEFAULT ON since 2026-08-18 (doc pr/92, with
     // kine_drop_stray_satellites above).
     pf_drop_stray_satellites = true,
-    // doc pr/93 round 4 -- see the round-4 block below.  OFF pending
-    // validation; flip after gates.
-    pf_orphan_confident_track = false,
+    // doc pr/93 round 4 -- see the round-4 block below.  SBND PRODUCTION ON
+    // (owner round 2026-08-18; validation in that block).
+    pf_orphan_confident_track = true,
     pf_orphan_track_min_cm = null,  // null => C++ default 50cm
-    pf_track_owns_loose_vertex = false,
+    pf_track_owns_loose_vertex = true,
     // doc pr/38: F2's ON-behavior was CORRECTED in place (owner decision
     // 2026-08-05, no new knobs): the barrier now excludes each shower's
     // start vertex (prototype map_vtx_segs parity, WCShower.cxx:547) so
@@ -1530,31 +1530,50 @@ function(
     shower_cone_absorb_guard = true,
 
     // doc pr/93 round 4 -- PF-hierarchy fine-tunes + 137238 cross-cluster
-    // muon (owner round 2026-08-18).  C++ defaults false/null;
-    // key-suppressed when off => compiled config byte-identical.
-    // OFF pending round-4 validation; flip after gates.
+    // muon.  C++ defaults false/null; key-suppressed when off => compiled
+    // config byte-identical.  SBND PRODUCTION ON (owner round 2026-08-18):
     //   shower_detach_track_stem: peel the main-cluster track prefix off a
     //     track-headed shower and re-root the EM remainder at the prefix's
-    //     far vertex (348471 proton->gamma/pi0; 292643 pi+->gamma/pi0).
-    //   kine_count_orphan_tracks (+ pf_orphan_confident_track below): count/
-    //     emit confident straight-long main-cluster orphan tracks freed by
-    //     shower_cone_absorb_guard (315167's 150.7cm 595 MeV proton).
-    //   straight_cont_cross_cluster (+ sccc_*): demote a main-vertex
+    //     far vertex, conn 2 (348471: "proton 308 -> pi0 113 (g355+g20) +
+    //     g74 + g11", Enu 2075.7 -> 1090.8 = the round-3 proton-mass-on-
+    //     charge-aggregate regression repaired; 292643: "pi+ 88 -> mu- 58 ->
+    //     4 gammas", Enu 950.4 -> 1073.6).
+    //   kine_count_orphan_tracks + pf_orphan_confident_track (below):
+    //     count/emit confident straight-long main-cluster orphan tracks
+    //     freed by shower_cone_absorb_guard (315167: PF gains root
+    //     "proton 595 MeV", Enu 722.1 -> 1326.0 = +595.3 KE +8.6 binding).
+    //   straight_cont_cross_cluster + sccc_bridge_body: demote a main-vertex
     //     shower-trajectory stem that is the cross-cluster continuation of a
-    //     straight long track across a pr/57 W-gap split (137238), with the
-    //     owner's angle-conditioned gap tier; sccc_bridge_body replays an
-    //     nv_bridge so the body joins the PF/kine chain.
-    // Runner envs SBND_SHOWER_DETACH_TRACK_STEM /
+    //     straight long track across a pr/57 W-gap split, and bridge the
+    //     body into the PF/kine chain (137238: "e- 152 MeV" -> "mu- 60 ->
+    //     bridge -> mu- 211 + mu- 65" with delta rays as small EM leaves,
+    //     Enu 1087.1 -> 1101.4).  Owner's angle-conditioned tiers; base
+    //     retuned 5->6cm / 15->18deg (137238's body measures g=5.68cm
+    //     K=17.0deg in the fitted tangents); aligned tier 12cm/7.5deg at
+    //     C++ defaults.  The demoted stem + bridged cluster are shielded
+    //     from pass-2 seeding, from_vertices Step-3 analysis, and the
+    //     examine_showers retarget (all sccc-scoped sets).
+    //   pf_track_owns_loose_vertex: a vertex the track BFS walked a real
+    //     segment to is not claimable by a root shower whose only tie is
+    //     the loose fill_sets view (69314: the muon's 67 MeV e- + 18 MeV
+    //     gamma chain re-parent from the 595 MeV shower to the muon;
+    //     render-only, Enu byte-unchanged).
+    // Validation 2026-08-18 (work-pr93r4-{off2,on2}-{mcp1k,nuecc48,ncpi0} +
+    // ctrl pair): OFF gate PASS 200/200 vs round-3 production; movers
+    // exactly the 4 targets + 447477 (carrier renumber, nil) + 137238;
+    // NCpi0 0/19 touched; pr/57 negative controls (61579/55715 byte-
+    // identical; 21073/84229/122660 untouched) clean; runtime/RSS
+    // unchanged.  Runner envs SBND_SHOWER_DETACH_TRACK_STEM /
     // SBND_KINE_COUNT_ORPHAN_TRACKS / SBND_STRAIGHT_CONT_CROSS_CLUSTER /
     // SBND_SCCC_BRIDGE_BODY / SBND_PF_ORPHAN_CONFIDENT_TRACK /
     // SBND_PF_TRACK_OWNS_LOOSE_VERTEX (+ SBND_SCCC_* numerics).
-    shower_detach_track_stem = false,
-    kine_count_orphan_tracks = false,
+    shower_detach_track_stem = true,
+    kine_count_orphan_tracks = true,
     kine_orphan_track_min = null,  // null => C++ default 50cm
-    straight_cont_cross_cluster = false,
-    sccc_bridge_body = false,
-    sccc_max_gap = null,       // null => C++ default 5cm (base tier)
-    sccc_kink_max = null,      // null => C++ default 15deg (base tier)
+    straight_cont_cross_cluster = true,
+    sccc_bridge_body = true,
+    sccc_max_gap = 6,          // cm; base tier (C++ default 5; 137238 g=5.68)
+    sccc_kink_max = 18,        // deg; base tier (C++ default 15; 137238 K=17.0)
     sccc_gap_aligned = null,   // null => C++ default 12cm (aligned tier)
     sccc_kink_tight = null,    // null => C++ default 7.5deg (aligned tier)
 
