@@ -1693,6 +1693,13 @@ namespace WireCell::Clus::PR {
         return (ratio > 1.75) || (ratio < 1.2);
     }
 
+    // doc sbnd_xin/docs/pr/40 round 10 -- see the header comment.
+    bool segment_bragg_spares_electron_reclass(SegmentPtr seg) {
+        if (!seg) return false;
+        if (segment_track_length(seg) <= 20 * units::cm) return false;
+        return seg->particle_score() < 1.0;
+    }
+
     // doc sbnd_xin/docs/pr/40 round 2 F5 -- see the header comment.
     bool segment_has_proton_daughter(Graph& graph, SegmentPtr seg, VertexPtr main_vertex, double MIP_dQdx) {
         static const bool dbg = std::getenv("WCT_PROTON_DAUGHTER_DEBUG") != nullptr;

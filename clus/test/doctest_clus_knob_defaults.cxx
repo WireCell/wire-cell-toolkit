@@ -167,6 +167,8 @@ TEST_CASE("clus knob defaults: TaggerCheckNeutrino switches are all OFF")
     CHECK_KNOB_NUM(cfg, "michel_stem_traj_min_kink_deg", 40.0);               // deg; inert while K6 off
     // doc pr/44: long-muon pseudo-shower keeps its muon start segment.
     CHECK_KNOB_BOOL(cfg, "shower_long_muon_keep_type", false);
+    // doc pr/40 round 10: Bragg-PID-confident muon/proton start segment kept.
+    CHECK_KNOB_BOOL(cfg, "shower_bragg_protect_start_segment", false);
     // doc pr/43 round 2 -- three PID-consistency knobs (K1/K2/K3).
     CHECK_KNOB_BOOL(cfg, "single_muon_proton_chain_veto", false);
     CHECK_KNOB_BOOL(cfg, "single_muon_long_muon_claim", false);

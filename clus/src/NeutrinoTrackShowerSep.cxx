@@ -2079,7 +2079,14 @@ void PatternAlgorithms::examine_all_showers(Graph& graph, Facade::Cluster& clust
             // doc sbnd_xin/docs/pr/40 F2 (same guard as improve_maps_shower_
             // in_track_out).  false = legacy = every non-shower segment in a
             // shower-dominated cluster becomes electron unconditionally.
-            if (!is_shower && m_shower_reclass_dqdx_guard && segment_dqdx_spares_electron_reclass(sg, m_mip_dqdx)) {
+            //
+            // doc sbnd_xin/docs/pr/40 round 10: shower_bragg_protect_start_
+            // segment is an additive sibling spare -- see
+            // segment_bragg_spares_electron_reclass's header comment.  false
+            // = legacy = byte-identical.
+            if (!is_shower &&
+                ((m_shower_reclass_dqdx_guard && segment_dqdx_spares_electron_reclass(sg, m_mip_dqdx)) ||
+                 (m_shower_bragg_protect_start_segment && segment_bragg_spares_electron_reclass(sg)))) {
                 continue;
             }
 

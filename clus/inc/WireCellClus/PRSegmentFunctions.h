@@ -453,6 +453,28 @@ namespace WireCell::Clus::PR {
     /// spares -- that is "no evidence", not "MIP-like evidence".
     bool segment_dqdx_spares_electron_reclass(SegmentPtr seg, double MIP_dQdx);
 
+    /// doc sbnd_xin/docs/pr/40 round 10 -- sibling spare-test for
+    /// examine_all_showers' cluster-wide reclassification
+    /// (NeutrinoTrackShowerSep.cxx ~2070-2105), complementing
+    /// segment_dqdx_spares_electron_reclass's flat median-dQ/dx ratio test
+    /// (which only spares ratio>1.75 or ratio<1.2, leaving a gap at
+    /// [1.2,1.75] where a real disconnected muon fragment near
+    /// end-of-range can sit -- SBND 18255-314507 seg 17002, xMIP 1.57x,
+    /// median-dQ/dx-impure but confidently muon by shape).  True iff `seg`
+    /// is longer than 20 cm AND carries a real (<1.0, not the 100
+    /// "unscored" sentinel) particle_score from the Bragg/dE-dx-template
+    /// PID (segment_determine_dir_track / segment_do_track_pid,
+    /// PRSegmentFunctions.cxx).  Above 20 cm that PID's own template
+    /// competition never considers electron (~2540), so a real good score
+    /// there is unambiguous muon-or-proton evidence.  Deliberately does
+    /// NOT read particle_info()->pdg(): particle_score is left untouched
+    /// by examine_all_showers' own reclassification (which only rewrites
+    /// particle_info), so a stale-but-still-valid Bragg score survives
+    /// independent of whatever pdg a caller may already have overwritten
+    /// -- checking pdg here would make the test see its own target's
+    /// prior verdict instead of the PID's.
+    bool segment_bragg_spares_electron_reclass(SegmentPtr seg);
+
     /// doc sbnd_xin/docs/pr/74 round 2 P1 -- veto for examine_direction's
     /// flag_shower_in cascade (the |pdg|==13/pdg==0 electron relabel).
     /// True iff `seg` is BOTH long (track length > max_len) AND MIP-like

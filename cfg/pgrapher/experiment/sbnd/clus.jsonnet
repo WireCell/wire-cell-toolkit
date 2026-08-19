@@ -1372,6 +1372,9 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               // toolkit-only addition).  C++ default false; key omitted when
               // off => byte-identical pre-fix config.
               shower_long_muon_keep_type=false,
+              // doc pr/40 round 10; false = C++ default = OFF, key omitted =>
+              // byte-identical.
+              shower_bragg_protect_start_segment=false,
               // doc pr/43 round 2 -- C++ defaults false; keys suppressed when off.
               single_muon_proton_chain_veto=false,
               single_muon_long_muon_claim=false,
@@ -2198,6 +2201,7 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
             michel_stem_traj_max_far_len=michel_stem_traj_max_far_len,
             michel_stem_traj_min_kink_deg=michel_stem_traj_min_kink_deg,
             shower_long_muon_keep_type=shower_long_muon_keep_type,
+            shower_bragg_protect_start_segment=shower_bragg_protect_start_segment,
             single_muon_proton_chain_veto=single_muon_proton_chain_veto,
             single_muon_long_muon_claim=single_muon_long_muon_claim,
             pid_flag_reconcile=pid_flag_reconcile,
@@ -3045,6 +3049,8 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
        michel_stem_traj_min_kink_deg=null,
        // doc pr/44; false = C++ default = OFF, key omitted => byte-identical.
        shower_long_muon_keep_type=false,
+       // doc pr/40 round 10; false = C++ default = OFF, key omitted => byte-identical.
+       shower_bragg_protect_start_segment=false,
        // doc pr/43 round 2 -- C++ defaults false.
        single_muon_proton_chain_veto=false,
        single_muon_long_muon_claim=false,
@@ -3469,6 +3475,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 michel_stem_traj_max_far_len=michel_stem_traj_max_far_len,
                 michel_stem_traj_min_kink_deg=michel_stem_traj_min_kink_deg,
                 shower_long_muon_keep_type=shower_long_muon_keep_type,
+                shower_bragg_protect_start_segment=shower_bragg_protect_start_segment,
                 single_muon_proton_chain_veto=single_muon_proton_chain_veto,
                 single_muon_long_muon_claim=single_muon_long_muon_claim,
                 pid_flag_reconcile=pid_flag_reconcile,

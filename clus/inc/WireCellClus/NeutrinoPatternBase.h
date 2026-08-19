@@ -1954,6 +1954,36 @@ namespace WireCell::Clus::PR {
         // byte-identical.
         bool   m_shower_long_muon_keep_type{false};
 
+        // doc sbnd_xin/docs/pr/40 round 10 -- segment_dqdx_spares_electron_
+        // reclass (PRSegmentFunctions.cxx, doc pr/40 F2) already guards
+        // examine_all_showers' cluster-wide "every non-shower segment here
+        // becomes electron" reclassification (NeutrinoTrackShowerSep.cxx
+        // ~2070-2105) with a flat median-dQ/dx test: ratio>1.75 (proton) or
+        // ratio<1.2 (clean MIP) spares the segment.  A segment whose ratio
+        // falls in [1.2, 1.75] gets no protection there -- and that gap is
+        // exactly where a real, disconnected muon fragment can sit near
+        // end-of-range.  SBND 18255 evt 314507 seg 17002 (32.3 cm, xMIP
+        // 1.57x -- inside the gap): the flat guard doesn't fire,
+        // examine_all_showers force-relabels it 13->11 (traced with
+        // WCT_PID_WRITE_DEBUG=2 to NeutrinoTrackShowerSep.cxx:2091), even
+        // though its own Bragg/dE-dx-template PID (segment_do_track_pid,
+        // PRSegmentFunctions.cxx) already scored it 0.082 -- a confident
+        // fit -- moments earlier.  Above 20 cm the electron template is
+        // never in that PID's competition (PRSegmentFunctions.cxx ~2540),
+        // so a real (<1.0, i.e. not the 100 "unscored" sentinel) score
+        // there is unambiguous muon-or-proton evidence regardless of what
+        // particle_info ended up attached.  When on, threaded into
+        // examine_all_showers' reclassification test as an OR alongside
+        // segment_reclass_dqdx_guard's own check (new helper
+        // segment_bragg_spares_electron_reclass): a segment longer than
+        // 20 cm with particle_score < 1.0 is spared the same way a
+        // ratio-confirmed proton or clean MIP already is.  Purely
+        // protective -- can only add a spare, never remove one the flat
+        // guard already grants -- so it is additive to
+        // shower_reclass_dqdx_guard, not a replacement.  C++ default false
+        // = legacy = byte-identical.
+        bool   m_shower_bragg_protect_start_segment{false};
+
         // doc sbnd_xin/docs/pr/43 round 2 K1 -- the single-muon selection in
         // examine_direction vetoes a muon candidate only when a proton sits
         // at its IMMEDIATE far vertex (1-hop n_proton check); a proton
