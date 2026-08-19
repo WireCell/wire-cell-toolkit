@@ -1470,6 +1470,25 @@ function(
     // doc pr/44).  Runner env: SBND_SHOWER_LONG_MUON_KEEP_TYPE.
     shower_long_muon_keep_type = true,
 
+    // doc pr/40 round 10 shower_bragg_protect_start_segment: spares a
+    // segment from examine_all_showers' cluster-wide "every non-shower
+    // segment here becomes electron" reclassification
+    // (NeutrinoTrackShowerSep.cxx) when it is longer than 20 cm and
+    // carries a confident (<1.0) Bragg/dE-dx-template PID score -- the
+    // population segment_dqdx_spares_electron_reclass's flat median-dQ/dx
+    // ratio test (F2, doc pr/40) cannot reach (ratio in [1.2,1.75], the
+    // gap between its "clean MIP" and "proton-like" spares).  C++ default
+    // false.  SBND PRODUCTION DEFAULT ON (2026-08-18): SBND 18255-314507
+    // seg 17002 (32.3 cm, xMIP 1.57x) restored to muon (was mislabelled
+    // e- 151 MeV); population census (nueCC48 48/48 + ncpi0 19/19 +
+    // 31-event mcp1k electron-misID subset) -- ZERO nueCC48 movers, ONE
+    // ncpi0 mover (259542: an unrelated >20cm track-scored segment
+    // purified out of a pi0 photon's energy sum, same photon pairing/
+    // geometry, kine_pio_energy_1 189->72 MeV), ONE mcp1k mover (314507,
+    // the motivating case).  Runner env:
+    // SBND_SHOWER_BRAGG_PROTECT_START_SEGMENT.
+    shower_bragg_protect_start_segment = true,
+
     // doc pr/43 round 2 -- three PID-consistency knobs for the remaining
     // owner cases (18255: 54351 / 56463 / 57661).  K1
     // single_muon_proton_chain_veto: the vertex muon selection's proton veto
@@ -2320,6 +2339,7 @@ function(
                              michel_stem_traj_max_far_len=michel_stem_traj_max_far_len,
                              michel_stem_traj_min_kink_deg=michel_stem_traj_min_kink_deg,
                              shower_long_muon_keep_type=shower_long_muon_keep_type,
+                             shower_bragg_protect_start_segment=shower_bragg_protect_start_segment,
                              single_muon_proton_chain_veto=single_muon_proton_chain_veto,
                              single_muon_long_muon_claim=single_muon_long_muon_claim,
                              pid_flag_reconcile=pid_flag_reconcile,
