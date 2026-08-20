@@ -206,6 +206,7 @@ void MultiAlgBlobClustering::configure(const WireCell::Configuration& cfg)
         m_bee_flash = Bee::Flashes(get<std::string>(cfg, "bee_detector", "uboone"), "op");
     }
     m_bee_flash_per_flash = get(cfg, "bee_flash_per_flash", m_bee_flash_per_flash);
+    m_bee_flash_pred_min = get(cfg, "bee_flash_pred_min", m_bee_flash_pred_min);
     m_flash_group_window = get(cfg, "flash_group_window", m_flash_group_window);
     m_flash_group_greedy = get(cfg, "flash_group_greedy", m_flash_group_greedy);
 
@@ -432,6 +433,7 @@ WireCell::Configuration MultiAlgBlobClustering::default_configuration() const
     cfg["save_real_cluster_id"] = m_save_real_cluster_id;
     cfg["save_assoc_cluster_id"] = m_save_assoc_cluster_id;
     cfg["real_cluster_id_global"] = m_real_cluster_id_global;
+    cfg["bee_flash_pred_min"] = m_bee_flash_pred_min;
 
     // Add the new parameter to default configuration
     cfg["initial_index"] = m_initial_index;
@@ -2880,7 +2882,10 @@ void MultiAlgBlobClustering::fill_bee_flashes(const WireCell::Clus::Facade::Grou
                      [&](int a, int b) { return flash_time[a] < flash_time[b]; });
 
     // Matched clusters: predicted per-channel PE keyed by global flash id, with
-    // the same total-predicted-light >= 100 filter as the legacy dump_light.
+    // the same total-predicted-light >= m_bee_flash_pred_min filter as the
+    // legacy dump_light (default 100 PE; doc pr/94 sec 9.9 -- a genuine match
+    // under the cut is drawn as "no flash match", which is a display artifact
+    // and not a statement about the matching).
     // cluster_id is the cluster's own id, identical to the "img" charge dump
     // enumeration (this runs at the same pre-pipeline point), so the Bee viewer
     // associates each flash to the same physical charge cluster.
@@ -2893,7 +2898,22 @@ void MultiAlgBlobClustering::fill_bee_flashes(const WireCell::Clus::Facade::Grou
         std::vector<double> pred(pred_span.begin(), pred_span.end());
         double pred_tot = 0;
         for (double v : pred) pred_tot += v;
-        if (pred_tot < 100) continue;
+        // doc pr/94 round 3 (owner: "why is this piece shown as non-matched in
+        // Bee?").  Dump every genuinely matched cluster together with the
+        // predicted light that decides whether the display keeps it, at THIS
+        // stage so the ids printed are exactly the ones the "img"/"op" JSON
+        // carries (enumerate_idents re-issues ids after every visitor, so the
+        // QLMatching log's per-run idents are a different epoch and cannot be
+        // bridged after the fact).  Diagnostic only; gated so it costs nothing
+        // and changes nothing when unset.
+        if (std::getenv("WCT_OPDUMP_DEBUG")) {
+            log->info("op-dump debug: cluster {} matched_flash_gid={} pred_tot={:.3f} PE "
+                      "L={:.2f} cm nblobs={} kept_by_display={}",
+                      cluster->get_cluster_id(), mgid, pred_tot,
+                      cluster->get_length() / units::cm, cluster->nchildren(),
+                      pred_tot >= 100);
+        }
+        if (pred_tot < m_bee_flash_pred_min) continue;
         matched[mgid].push_back({cluster->get_cluster_id(), std::move(pred)});
     }
 

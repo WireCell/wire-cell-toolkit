@@ -532,6 +532,16 @@ function(
     // C++ default true (doc pr/23 ordering): a TGM/STM/lm-convicted in-window
     // main does not open its bundle for splitting.  null => key omitted.
     protect_skip_convicted      = null,
+    // doc pr/94 round 3.  When true a convicted main still OPENS its bundle,
+    // so the bundle's unconvicted members -- the secondary activity the
+    // demoted-main fallback goes on to call the neutrino -- get the second
+    // graph examination every member of an unconvicted bundle gets.  The
+    // convicted cluster itself is still never split.  SBND 18255/395148: the
+    // 198.9 cm secondary keeps a graph bridge that fits 17 cm of trajectory
+    // through empty space because ClusteringProtectBundle logged
+    // "OC53SKIP main ident=10 ... convicted STM=1 -- bundle not opened".
+    // OFF pending the round-3 validation; null => C++ default false.
+    protect_open_convicted_bundles = null,
     protect_cathode_x           = 0,
     protect_cathode_rejoin_xcut = 5 * wc.cm,
     protect_cathode_rejoin_dyz  = 4 * wc.cm,
@@ -1110,6 +1120,18 @@ function(
     // evt 73038, not yet fixed; nu_per_bundle stays false in production
     // until it is.  null => C++ default 0 = no floor.
     nu_per_bundle_min_length = 15,
+    // doc pr/94 round 3.  Give the SELECTED neutrino candidate the
+    // main-cluster PR treatment for the duration of its own pass, even when it
+    // is a demoted main.  The PR chain reads main-ness from Flags::main_cluster
+    // (NeutrinoPatternBase.cxx:2797, NeutrinoVertexFinder.cxx:3450,
+    // NeutrinoTrackShowerSep.cxx:2013), which ClusteringUnmergeBundle clears on
+    // a demoted main -- so today a fallback-selected or per-bundle candidate
+    // silently loses examine_vertices_3, improve_vertex +
+    // fix_maps_shower_in_track_out, main_cluster_initial_pair_vertices,
+    // break_two_end_dqdx and the main-branch endpoint ordering.  NOT gated on
+    // nu_per_bundle -- the legacy fallback path has the same defect.  OFF
+    // pending the round-3 validation; C++ default false.
+    nu_selected_as_main = false,
     // ---- doc sbnd_xin/docs/pr/33 sec 11 EM-shower-clustering knobs, ALL ON
     // (owner 2026-08-05; see the sbnd clus.jsonnet clus_pr arg comments).
     // Gate labels: work-pr33-base48 (clean-HEAD binary) vs work-pr33-off48
@@ -2363,6 +2385,7 @@ function(
                              v3_extension_min_gain=v3_extension_min_gain,
                              protect_graph_name=protect_graph_name,
                              protect_skip_convicted=protect_skip_convicted,
+                             protect_open_convicted_bundles=protect_open_convicted_bundles,
                              protect_cathode_x=protect_cathode_x,
                              protect_cathode_rejoin_xcut=protect_cathode_rejoin_xcut,
                              protect_cathode_rejoin_dyz=protect_cathode_rejoin_dyz,
@@ -2391,6 +2414,7 @@ function(
                              neutrino_type_bitmask=neutrino_type_bitmask,
                              nu_per_bundle=nu_per_bundle,
                              nu_per_bundle_min_length=nu_per_bundle_min_length,
+                             nu_selected_as_main=nu_selected_as_main,
                              daughter_count_proto_main_vertex=daughter_count_proto_main_vertex,
                              daughter_count_proto_examine_showers=daughter_count_proto_examine_showers,
                              shower_pdg_from_start_segment=shower_pdg_from_start_segment,

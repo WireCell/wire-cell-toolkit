@@ -135,6 +135,7 @@ public:
         // in-window main sharing the gid (the doc pr/16 spared-mate case)
         // still opens the bundle.
         m_skip_convicted = get<bool>(config, "skip_convicted", m_skip_convicted);
+        m_open_convicted_bundles = get<bool>(config, "open_convicted_bundles", m_open_convicted_bundles);
         // Cathode re-join (SBND).  cathode_rejoin_xcut <= 0 (default) disables
         // the pass entirely => prototype-faithful behavior.  Internal units.
         m_cathode_x = get<double>(config, "cathode_x", m_cathode_x);
@@ -163,6 +164,7 @@ public:
         cfg["beam_window_low"] = m_beam_window_low;
         cfg["beam_window_high"] = m_beam_window_high;
         cfg["skip_convicted"] = m_skip_convicted;
+        cfg["open_convicted_bundles"] = m_open_convicted_bundles;   // doc pr/94 round 3; false = a convicted main does not open its bundle (legacy)
         cfg["cathode_x"] = m_cathode_x;
         cfg["cathode_rejoin_xcut"] = m_cathode_rejoin_xcut;
         cfg["cathode_rejoin_dyz"] = m_cathode_rejoin_dyz;
@@ -208,6 +210,27 @@ public:
                     && (cluster->get_flag(Flags::TGM) || cluster->get_flag(Flags::STM)
                         || cluster->get_scalar<int>("lm_flag", -1) > 0)) {
                     ++n_convicted;
+                    // doc pr/94 round 3 -- open_convicted_bundles.  A convicted
+                    // main suppresses the second graph examination for its WHOLE
+                    // bundle, so a co-bundled secondary activity -- the one the
+                    // demoted-main fallback / per-bundle mode will go on to call
+                    // the neutrino -- never gets the split that every cluster in
+                    // an unconvicted bundle gets (SBND 18255/395148: the 198.9 cm
+                    // secondary keeps a graph bridge that fits 17 cm of
+                    // trajectory through empty space).  When on, the convicted
+                    // main still OPENS its bundle; it is still never SPLIT
+                    // itself -- the per-member guard below is untouched, so the
+                    // cosmic-tagged tree is left exactly as it is.
+                    if (m_open_convicted_bundles) {
+                        log->debug("OC94OPEN main ident={} nblobs={} gid={} t0={:.2f}us "
+                                   "convicted TGM={} STM={} lm={} -- bundle OPENED for its "
+                                   "unconvicted members (open_convicted_bundles)",
+                                   cluster->ident(), cluster->nchildren(), gid, t0/units::us,
+                                   cluster->get_flag(Flags::TGM), cluster->get_flag(Flags::STM),
+                                   cluster->get_scalar<int>("lm_flag", -1));
+                        beam_gids.insert(gid);
+                        continue;
+                    }
                     // doc pr/53 round 6: name the gate per cluster (log-only)
                     log->debug("OC53SKIP main ident={} nblobs={} gid={} t0={:.2f}us "
                                "convicted TGM={} STM={} lm={} -- bundle not opened",
@@ -264,6 +287,12 @@ private:
     bool m_require_in_scope{true};
     bool m_beam_window_only{false};
     bool m_skip_convicted{true};
+    // doc pr/94 round 3.  When true, a cosmic-convicted main still contributes
+    // its gid to beam_gids -- i.e. it opens its bundle so the bundle's OTHER,
+    // unconvicted members are graph-examined and split -- while the per-member
+    // skip_convicted guard keeps the convicted cluster itself from ever being
+    // split.  Default false = the pre-pr/94 behaviour, byte-identical.
+    bool m_open_convicted_bundles{false};
     double m_beam_window_low{0};
     double m_beam_window_high{0};
     double m_cathode_x{0};

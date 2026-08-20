@@ -441,7 +441,7 @@ local clus_per_face(anode, face, dump, output_dir, runNo, subRunNo, eventNo, bee
 // all-APA clustering + Bee in SCE true space (x_sce) instead of the T0-corrected
 // reco scope (x_t0cor).  Both SBND realities currently set use_sce=false (see
 // the reco table in the tail function), so this is a no-op for our chain.
-local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=null, premerged=false, rse_from_ident=false, pos_offset_on=true, tensor_outname='', save_real_cluster_id=false, trace_bee=false, save_assoc_cluster_id=false, real_cluster_id_global=null, cathode_rescue_on=true, cathode_rescue_unmatched=true, adopt_nu_fragments=false, save_bundle_main_provenance=false, rescue_allow_in_beam_far=true, rescue_geom_first=true, rescue_pierce_test=true, rescue_pierce_cut=null, rescue_dest_beam_for_new=true, rescue_beam_main_only=true, use_sce=false, reality='data') = {
+local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=null, premerged=false, rse_from_ident=false, pos_offset_on=true, tensor_outname='', save_real_cluster_id=false, trace_bee=false, save_assoc_cluster_id=false, real_cluster_id_global=null, cathode_rescue_on=true, cathode_rescue_unmatched=true, adopt_nu_fragments=false, save_bundle_main_provenance=false, rescue_allow_in_beam_far=true, rescue_geom_first=true, rescue_pierce_test=true, rescue_pierce_cut=null, rescue_dest_beam_for_new=true, rescue_beam_main_only=true, bee_flash_pred_min=null, use_sce=false, reality='data') = {
     local nanodes = std.length(anodes),
     local pcmerging = g.pnode({
         type: 'PointTreeMerging',
@@ -623,6 +623,15 @@ local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=
             // (op_cluster_ids array) with summed predicted PE, so a flash matched
             // to several clusters shows them together (MicroBooNE-style).
             bee_flash_per_flash: true,
+            // doc pr/94 round 3.  Minimum total predicted light (PE) for a
+            // matched cluster to appear in op_cluster_ids.  C++ default 100
+            // (the legacy dump_light filter): a genuine match below it is drawn
+            // as "matched to no flash", which is what made SBND 18255/73038's
+            // 26.5 cm beam-flash-matched activity (3.6 PE predicted of the
+            // flash's 602.6 PE) look unmatched while the PR chain reconstructed
+            // it.  null => key omitted => byte-identical display; 0 shows every
+            // genuine match.
+            [if bee_flash_pred_min != null then 'bee_flash_pred_min']: bee_flash_pred_min,
             // Group flashes from the two TPC sides by this ±time window and stash
             // a per-flash "group" array on the root opflash PC (pre-pipeline, so
             // the op dump and every later step can read it).  0 = off.
@@ -1144,6 +1153,10 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               // mains (TGM/STM/lm) do not open their bundle.  null => key
               // omitted => C++ default.
               protect_skip_convicted=null,
+              // doc pr/94 round 3: let a convicted main open its bundle so the
+              // bundle's unconvicted members are graph-examined.  C++ default
+              // false; key omitted when null.
+              protect_open_convicted_bundles=null,
               protect_cathode_x=null,
               protect_cathode_rejoin_xcut=null,
               protect_cathode_rejoin_dyz=null,
@@ -1257,6 +1270,11 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               // only -- nothing populates them yet).  C++ default false.
               nu_per_bundle=false,
               nu_per_bundle_min_length=null,   // doc pr/94 Phase 5b; cm; null => C++ default 0 (no floor)
+              // doc pr/94 round 3: the selected candidate gets the main-cluster
+              // PR treatment for its own pass even when it is a demoted main.
+              // C++ default false; key omitted when off.  NOT gated on
+              // nu_per_bundle -- the legacy demoted-main fallback needs it too.
+              nu_selected_as_main=false,
               // ---- doc sbnd_xin/docs/pr/33 §10 EM-shower-clustering knobs.
               // All C++ default false = keys omitted = byte-identical
               // pre-knob config.
@@ -1862,6 +1880,7 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
             beam_window_low=beam_window[0],
             beam_window_high=beam_window[1],
             skip_convicted=protect_skip_convicted,
+            open_convicted_bundles=protect_open_convicted_bundles,
             cathode_x=protect_cathode_x,
             cathode_rejoin_xcut=protect_cathode_rejoin_xcut,
             cathode_rejoin_dyz=protect_cathode_rejoin_dyz,
@@ -2118,6 +2137,7 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
             nu_per_bundle=nu_per_bundle,
             nu_per_bundle_demoted_acts=evaluate_demoted_mains,
             nu_per_bundle_min_length=nu_per_bundle_min_length,
+            nu_selected_as_main=nu_selected_as_main,
             sp_photon_flag=sp_photon_flag,
             dir_weak_use_score=dir_weak_use_score,
             mip_dqdx=mip_dqdx,
@@ -2772,7 +2792,8 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
             save_bundle_main_provenance=false,
             rescue_allow_in_beam_far=true, rescue_geom_first=true,
             rescue_pierce_test=true, rescue_pierce_cut=null,
-            rescue_dest_beam_for_new=true, rescue_beam_main_only=true)::
+            rescue_dest_beam_for_new=true, rescue_beam_main_only=true,
+            bee_flash_pred_min=null)::
         // Clustering + matching ONLY (all-APA MABC).  The follow-up PR tagger
         // pass (pr() below) and the wclsTensorSetLabeler are wired by the entry
         // configuration, not here -- see the note in clus_all_apa.
@@ -2792,6 +2813,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                      rescue_pierce_cut=rescue_pierce_cut,
                      rescue_dest_beam_for_new=rescue_dest_beam_for_new,
                      rescue_beam_main_only=rescue_beam_main_only,
+                     bee_flash_pred_min=bee_flash_pred_min,
                      use_sce=use_sce, reality=reality),
     // PR job: input is the reloaded post-QL tarball (see clus_pr above).
     // The TGM/FC and beam-window defaults here mirror clus_pr's -- i.e. the SBND
@@ -2980,6 +3002,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
        // prototype-faithful (re-join pass disabled).
        protect_graph_name=null,
        protect_skip_convicted=null,
+       protect_open_convicted_bundles=null,   // doc pr/94 round 3; null => C++ default false
        protect_cathode_x=0,
        protect_cathode_rejoin_xcut=5 * wc.cm,
        protect_cathode_rejoin_dyz=4 * wc.cm,
@@ -3038,6 +3061,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
        // default false; key omitted when off => byte-identical.
        nu_per_bundle=false,
        nu_per_bundle_min_length=null,   // doc pr/94 Phase 5b; cm; null => C++ default 0 (no floor)
+       nu_selected_as_main=false,       // doc pr/94 round 3; C++ default false; key omitted when off
        // doc pr/33 sec 10 EM-shower-clustering knobs -- see the clus_pr arg
        // comments.  All false = keys omitted = byte-identical pre-knob
        // config.
@@ -3479,6 +3503,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 v3_extension_min_gain=v3_extension_min_gain,
                 protect_graph_name=protect_graph_name,
                 protect_skip_convicted=protect_skip_convicted,
+                protect_open_convicted_bundles=protect_open_convicted_bundles,
                 protect_cathode_x=protect_cathode_x,
                 protect_cathode_rejoin_xcut=protect_cathode_rejoin_xcut,
                 protect_cathode_rejoin_dyz=protect_cathode_rejoin_dyz,
@@ -3511,6 +3536,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 neutrino_type_bitmask=neutrino_type_bitmask,
                 nu_per_bundle=nu_per_bundle,
                 nu_per_bundle_min_length=nu_per_bundle_min_length,
+                nu_selected_as_main=nu_selected_as_main,
                 daughter_count_proto_main_vertex=daughter_count_proto_main_vertex,
                 daughter_count_proto_examine_showers=daughter_count_proto_examine_showers,
                 shower_pdg_from_start_segment=shower_pdg_from_start_segment,

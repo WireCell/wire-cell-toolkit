@@ -443,6 +443,7 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_nu_per_bundle = get(config, "nu_per_bundle", m_nu_per_bundle);
     m_nu_per_bundle_demoted_acts = get(config, "nu_per_bundle_demoted_acts", m_nu_per_bundle_demoted_acts);
     m_nu_per_bundle_min_length = get(config, "nu_per_bundle_min_length", m_nu_per_bundle_min_length);  // cm
+    m_nu_selected_as_main = get(config, "nu_selected_as_main", m_nu_selected_as_main);
     m_sp_photon_flag          = get(config, "sp_photon_flag",          m_sp_photon_flag);
 
     // ---- doc sbnd_xin/docs/pr/36 §10 tagger-stage knobs ---------------------
@@ -812,6 +813,7 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["nu_per_bundle"]             = m_nu_per_bundle;                // doc pr/94; false = legacy single event-wide candidate
     cfg["nu_per_bundle_demoted_acts"] = m_nu_per_bundle_demoted_acts;  // doc pr/94; mirror of the taggers' evaluate_demoted_mains; inert unless nu_per_bundle
     cfg["nu_per_bundle_min_length"] = m_nu_per_bundle_min_length;      // doc pr/94 Phase 5b round 2; cm; length floor for a per-bundle candidate, exempting the legacy event-wide winner; 0 = none
+    cfg["nu_selected_as_main"]      = m_nu_selected_as_main;           // doc pr/94 round 3; give a demoted-main candidate the main-cluster PR treatment for the duration of its own pass; false = legacy
     cfg["sp_photon_flag"] = m_sp_photon_flag;     // doc pr/26 sec. 8.2; store singlephoton_tagger()'s verdict in TaggerInfo::photon_flag (prototype NeutrinoID.cxx:271)
     // doc sbnd_xin/docs/pr/36 §10.
     cfg["fiducial"] = Json::Value();                 // null = the historical FiducialUtils containment fallback
@@ -1412,9 +1414,48 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
     // loop on purpose: it restarts at 0 per candidate otherwise, and shower
     // ids would then collide between bundles.
     int acc_segment_id = 0;
+
+    // doc pr/94 round 3 -- nu_selected_as_main.  Scoped, exception-safe
+    // set/restore of Flags::main_cluster on the selected candidate.  The PR
+    // chain reads main-ness from that flag in three different files, so
+    // threading a parameter into find_proto_vertex would only reach one of
+    // them; setting the flag for exactly the candidate's own PR pass is what
+    // "give it the same treatment as a main" means.  Nothing outside the loop
+    // body observes the change: the destructor restores the original value
+    // before the next visitor, the bundle-veto set, normalize_cluster_flags or
+    // any Bee/ROOT dump can read it.  Disarmed (arm=false, the default knob
+    // state) or already-a-main => no write at all => byte-identical.
+    struct SelectedMainFlagGuard {
+        Cluster* cluster{nullptr};
+        bool armed{false};
+        SelectedMainFlagGuard(Cluster* c, bool arm)
+        {
+            if (!arm || !c) return;
+            if (c->get_flag(Flags::main_cluster)) return;   // already a main
+            cluster = c;
+            armed = true;
+            cluster->set_flag(Flags::main_cluster, 1);
+        }
+        ~SelectedMainFlagGuard()
+        {
+            if (armed && cluster) cluster->set_flag(Flags::main_cluster, 0);
+        }
+        SelectedMainFlagGuard(const SelectedMainFlagGuard&) = delete;
+        SelectedMainFlagGuard& operator=(const SelectedMainFlagGuard&) = delete;
+    };
+
     for (size_t nu_index = 0; nu_index < candidates.size(); ++nu_index) {
         main_cluster   = candidates[nu_index].main;
         other_clusters = candidates[nu_index].others;
+
+        // doc pr/94 round 3: the selected candidate is treated as the main
+        // cluster for the duration of this pass (knob nu_selected_as_main).
+        SelectedMainFlagGuard selected_main_guard(main_cluster, m_nu_selected_as_main);
+        if (selected_main_guard.armed) {
+            SPDLOG_LOGGER_INFO(log, "TaggerCheckNeutrino: [nu_selected_as_main] candidate cluster {} "
+                               "(L {:.1f} cm) is a demoted main; flagged main_cluster for its own PR pass",
+                               main_cluster->get_cluster_id(), main_cluster->get_length()/units::cm);
+        }
 
         // The first candidate reuses the configured member fitter (legacy,
         // byte-identical).  Later candidates need their OWN fitter: add_graph()

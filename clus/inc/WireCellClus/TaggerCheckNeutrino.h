@@ -601,6 +601,26 @@ public:
         // jsonnet variable that feeds TaggerCheck{TGM,STM,FC} or the two will
         // drift.  Inert unless m_nu_per_bundle.
         bool m_nu_per_bundle_demoted_acts{false};
+
+        // doc pr/94 round 3 -- nu_selected_as_main.
+        // The PR chain re-derives "am I the main cluster?" from the persisted
+        // Flags::main_cluster (NeutrinoPatternBase.cxx:2797,
+        // NeutrinoVertexFinder.cxx:3450, NeutrinoTrackShowerSep.cxx:2013), but
+        // ClusteringUnmergeBundle deliberately CLEARS that flag on a demoted
+        // main.  So when the selected neutrino candidate is a demoted main --
+        // the nu_fallback_demoted_mains path, and every per-bundle candidate --
+        // it silently loses the main-only correctives: the main-branch endpoint
+        // ordering that honours flag_back_search, main_cluster_initial_pair_
+        // vertices, examine_vertices_3, break_two_end_dqdx, improve_vertex +
+        // fix_maps_shower_in_track_out, and the main-cluster track/shower
+        // reclassification cut set.  SBND 18255/395148's secondary neutrino
+        // (cluster 21) is the owner-reported case.
+        // When on, the selected candidate carries Flags::main_cluster for the
+        // duration of its own PR pass and only that -- the flag is restored
+        // immediately afterwards, so no later visitor, no bundle-veto set and
+        // no output dump sees a changed flag.  C++ default false => the guard
+        // never engages => byte-identical.
+        bool m_nu_selected_as_main{false};
         bool m_sp_photon_flag{false};  // doc pr/26 sec. 8.2 port gap.  If true, the single-photon
                                        // tagger's verdict is stored in TaggerInfo::photon_flag,
                                        // as prototype NeutrinoID.cxx:271 does

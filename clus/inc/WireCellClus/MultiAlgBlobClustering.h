@@ -405,6 +405,16 @@ namespace WireCell::Clus {
         // predicted PE, instead of one row per (flash, cluster).  Default OFF so
         // existing output is bit-identical; enabled for the SBND all-APA match.
         bool m_bee_flash_per_flash{false};
+        // doc pr/94 round 3.  Minimum total predicted light (PE) a matched
+        // cluster must carry to appear in the "op" display's op_cluster_ids.
+        // The legacy dump_light used a hard-coded 100 PE, which is why SBND
+        // 18255/73038's 26.5 cm cathode activity -- genuinely matched to the
+        // beam flash gid 14, but predicting only 3.6 PE of that flash's 602.6
+        // PE -- was drawn as matched to NO flash while the PR chain happily
+        // reconstructed it (owner Bee scan, doc pr/94 sec 9.9).  Default 100 =
+        // the legacy filter, byte-identical output; 0 shows every genuine
+        // match.
+        double m_bee_flash_pred_min{100.0};
         // When > 0, group the root opflash flashes across both TPC sides by this
         // ±time window (stored as a per-flash "group" array on the root opflash
         // PC, pre-pipeline) so the Bee viewer can show a TPC0/TPC1 coincidence
