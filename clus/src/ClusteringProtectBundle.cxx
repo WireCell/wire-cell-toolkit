@@ -209,7 +209,6 @@ public:
                 if (m_skip_convicted
                     && (cluster->get_flag(Flags::TGM) || cluster->get_flag(Flags::STM)
                         || cluster->get_scalar<int>("lm_flag", -1) > 0)) {
-                    ++n_convicted;
                     // doc pr/94 round 3 -- open_convicted_bundles.  A convicted
                     // main suppresses the second graph examination for its WHOLE
                     // bundle, so a co-bundled secondary activity -- the one the
@@ -229,8 +228,9 @@ public:
                                    cluster->get_flag(Flags::TGM), cluster->get_flag(Flags::STM),
                                    cluster->get_scalar<int>("lm_flag", -1));
                         beam_gids.insert(gid);
-                        continue;
+                        continue;   // counted as opened, not as skipped
                     }
+                    ++n_convicted;
                     // doc pr/53 round 6: name the gate per cluster (log-only)
                     log->debug("OC53SKIP main ident={} nblobs={} gid={} t0={:.2f}us "
                                "convicted TGM={} STM={} lm={} -- bundle not opened",
