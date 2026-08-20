@@ -335,9 +335,14 @@ function(
     // 18255/73038's 26.5 cm cathode activity is matched to beam flash gid 14
     // and predicts 3.6 PE of that flash's 602.6 PE, so the display showed it
     // unmatched while the PR chain reconstructed it (owner Bee scan; doc pr/94
-    // sec 9.9).  Set 0 to show every genuine match.  null => key omitted =>
-    // byte-identical pre-round-3 display.
-    bee_flash_pred_min = null,
+    // sec 9.9).  **SBND PRODUCTION VALUE 0 since 2026-08-19 (owner flip, doc
+    // sec 9.13)**: the op layer lists every genuine match, so the display can
+    // no longer say "no flash" about a matched cluster.  Display-only -- the op
+    // rows, times, PE and apa are unchanged and each row's cluster-id list is a
+    // strict superset of the pre-flip one.  null => key omitted => the C++
+    // default 100 = the pre-flip display; pre-flip arm:
+    // SBND_QL_BEE_FLASH_PRED_MIN=100.
+    bee_flash_pred_min = 0,
 )
     // Build params inside the function so all physics values are TLAs.  These
     // are the documented Q/L drift/diffusion values (matching run_clust_QL_evt.sh),

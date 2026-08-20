@@ -540,8 +540,12 @@ function(
     // 198.9 cm secondary keeps a graph bridge that fits 17 cm of trajectory
     // through empty space because ClusteringProtectBundle logged
     // "OC53SKIP main ident=10 ... convicted STM=1 -- bundle not opened".
-    // OFF pending the round-3 validation; null => C++ default false.
-    protect_open_convicted_bundles = null,
+    // **SBND PRODUCTION DEFAULT ON since 2026-08-19 (owner flip, doc sec
+    // 9.13).**  This is the knob that removes SBND 395148's 17 cm trajectory
+    // excursion through empty space (fit points > 3 cm from any charge
+    // 15 -> 0, worst 8.40 -> 0.83 cm).  null => C++ default false; pre-flip
+    // arm: SBND_OPEN_CONVICTED_BUNDLES=0.
+    protect_open_convicted_bundles = true,
     protect_cathode_x           = 0,
     protect_cathode_rejoin_xcut = 5 * wc.cm,
     protect_cathode_rejoin_dyz  = 4 * wc.cm,
@@ -1098,14 +1102,21 @@ function(
     // F7 ON: neutrino_type verdict bitmask + its T_tagger branch (/I).
     // Knob-on diff = exactly the one new branch on 47/47 PR events.
     neutrino_type_bitmask = true,
-    // doc pr/94 Phase 1 (2026-08-19): per-bundle identity + per-activity
-    // cosmic-flag T_tagger branches (tagger_output only).  STILL OFF --
-    // schema plumbing only, nothing populates the fields yet, no validation
-    // has run.  Flip only after the phased-execution plan's later phases
-    // (TaggerCheckNeutrino per-bundle loop, byte-identical + population-arm
-    // gates) are reported and accepted -- see
-    // sbnd_xin/docs/pr/94_per-bundle-neutrino-cosmic-flags.md.
-    nu_per_bundle = false,
+    // doc pr/94 Phase 6 -- per-bundle identity + per-activity cosmic-flag
+    // T_tagger/T_kine rows: ONE ROW PER IN-BEAM-WINDOW FLASH BUNDLE instead of
+    // one per event, so a cosmic-convicted activity can no longer take a
+    // co-bundled neutrino candidate down with it (SBND 18255/395148).
+    // **SBND PRODUCTION DEFAULT ON since 2026-08-19 (owner flip after the
+    // round-3 Bee scan, bee/pr94r3 -- doc sec 9.13).**  Consumers that read
+    // one number per event must go through scripts/pr94_rows.py
+    // primary_index(); row 0 is the longest selected activity, i.e. the
+    // candidate the pre-pr/94 chain would itself have chosen.  Known open
+    // issue carried into production, owner-accepted: an activity can be
+    // REPORTED under a bundle it was not matched to, because
+    // ClusteringExamineBundles' 80 ns flash-t0 merge overwrites its
+    // matched_flash_gid (doc sec 9.8/9.9, mcp2k evt 73038).  Pre-flip arm:
+    // SBND_NU_PER_BUNDLE=0.
+    nu_per_bundle = true,
     // doc pr/94 Phase 5b round 2 -- the dot guard.  Length floor (cm) for a
     // per-bundle candidate, exempting the legacy event-wide winner (so the
     // row the legacy chain reports can never be floored away).  Without it,
@@ -1117,8 +1128,10 @@ function(
     // a bright cosmic-mate's flash gid via ClusteringExamineBundles' flash-t0
     // merge (80 ns window, no spatial check) despite being independently
     // matched to a DIFFERENT, weaker flash of its own -- confirmed on mcp2k
-    // evt 73038, not yet fixed; nu_per_bundle stays false in production
-    // until it is.  null => C++ default 0 = no floor.
+    // evt 73038.  STILL NOT FIXED, and knowingly carried into production by
+    // the 2026-08-19 flip (owner decision after the round-3 Bee scan: the
+    // display half was fixed, the bookkeeping half was declined -- doc sec
+    // 9.9/9.13).  null => C++ default 0 = no floor.
     nu_per_bundle_min_length = 15,
     // doc pr/94 round 3.  Give the SELECTED neutrino candidate the
     // main-cluster PR treatment for the duration of its own pass, even when it
@@ -1129,9 +1142,10 @@ function(
     // silently loses examine_vertices_3, improve_vertex +
     // fix_maps_shower_in_track_out, main_cluster_initial_pair_vertices,
     // break_two_end_dqdx and the main-branch endpoint ordering.  NOT gated on
-    // nu_per_bundle -- the legacy fallback path has the same defect.  OFF
-    // pending the round-3 validation; C++ default false.
-    nu_selected_as_main = false,
+    // nu_per_bundle -- the legacy fallback path has the same defect.
+    // **SBND PRODUCTION DEFAULT ON since 2026-08-19 (owner flip, doc sec
+    // 9.13).**  C++ default false.  Pre-flip arm: SBND_NU_SELECTED_AS_MAIN=0.
+    nu_selected_as_main = true,
     // ---- doc sbnd_xin/docs/pr/33 sec 11 EM-shower-clustering knobs, ALL ON
     // (owner 2026-08-05; see the sbnd clus.jsonnet clus_pr arg comments).
     // Gate labels: work-pr33-base48 (clean-HEAD binary) vs work-pr33-off48
