@@ -601,6 +601,81 @@ namespace WireCell::Clus::PR {
         return peeled;
     }
 
+    // doc sbnd_xin/docs/pr/99 round 2 (shower_ghost_member_drop).  Contract
+    // and rationale in PRShower.h; bookkeeping forked BY DUPLICATION from
+    // detach_track_prefix above -- that production method stays untouched.
+    int Shower::drop_ghost_member(SegmentPtr ghost,
+                                  const std::string& cloud_name_fit,
+                                  const std::string& cloud_name_associate)
+    {
+        if (!ghost || !ghost->descriptor_valid() || !this->has_edge(ghost->get_descriptor())) return 0;
+        if (ghost == m_start_segment) return 0;
+        // Refuse to empty the shower: at least one member must remain.
+        if (this->edges().size() <= 1) return 0;
+        if (!m_start_segment || !m_start_segment->descriptor_valid()
+            || !this->has_edge(m_start_segment->get_descriptor())) return 0;
+
+        // Leaf-only guard: with the ghost edge filtered out, every remaining
+        // member must stay reachable from the start segment.  Test-remove is
+        // safe -- TrajectoryView::remove/add_segment are pure filter-set
+        // edits (no cloud merge, unlike Shower::add_segment).
+        TrajectoryView::remove_segment(ghost);
+        const int n_reach = count_connected_segments(m_start_segment);
+        if (n_reach != static_cast<int>(this->edges().size())) {
+            TrajectoryView::add_segment(ghost);  // restore: removal would strand a member
+            return 0;
+        }
+
+        // Ghost-only vertices leave the view (same rule as
+        // detach_track_prefix: a vertex still touched by a remaining member
+        // must stay; a departed one must not win the farthest-vertex
+        // end_point search, and its walked mark must be forgotten).
+        std::unordered_set<size_t> keep_vtx_idx;
+        for (auto edesc : ordered_edges(*this, m_full_graph)) {
+            SegmentPtr seg = m_full_graph[edesc].segment;
+            if (!seg || !seg->descriptor_valid()) continue;
+            auto [ka, kb] = find_vertices(m_full_graph, seg);
+            if (ka && ka->descriptor_valid()) keep_vtx_idx.insert(m_full_graph[ka->get_descriptor()].index);
+            if (kb && kb->descriptor_valid()) keep_vtx_idx.insert(m_full_graph[kb->get_descriptor()].index);
+        }
+        auto [gva, gvb] = find_vertices(m_full_graph, ghost);
+        for (VertexPtr v : {gva, gvb}) {
+            if (!v || !v->descriptor_valid()) continue;
+            const size_t idx = m_full_graph[v->get_descriptor()].index;
+            if (keep_vtx_idx.count(idx)) continue;
+            TrajectoryView::remove_vertex(v);
+            m_walked_nodes.erase(v->get_descriptor());
+        }
+
+        // Rebuild the shower point clouds from the REMAINING members only
+        // (detach_track_prefix rationale: the clouds are add-only merges and
+        // kine_charge reads them -- the ghost's charge must leave).
+        for (const std::string& cname : {cloud_name_fit, cloud_name_associate}) {
+            if (cname.empty()) continue;
+            this->dpcloud(cname, nullptr);
+            Facade::DPCBatch batch;
+            for (auto edesc : ordered_edges(*this, m_full_graph)) {
+                SegmentPtr seg = m_full_graph[edesc].segment;
+                if (!seg || !seg->descriptor_valid()) continue;
+                auto seg_dpc = seg->dpcloud(cname);
+                if (!seg_dpc) continue;
+                if (!this->dpcloud(cname)) {
+                    this->dpcloud(cname, clone_dpc(*seg_dpc));
+                } else if (this->dpcloud(cname) != seg_dpc) {
+                    this->dpcloud(cname)->merge_wpid_params(*seg_dpc);
+                    batch.append(seg_dpc->points());
+                }
+            }
+            if (!batch.empty()) {
+                if (auto dpc = this->dpcloud(cname)) dpc->add_points(std::move(batch));
+            }
+        }
+
+        invalidate_segment_caches();
+        set_flag_kinematics(false);
+        return 1;
+    }
+
     void Shower::complete_structure_with_start_segment(IndexedSegmentSet& used_segments, const std::string& cloud_name_fit, const std::string& cloud_name_associate, bool absorb_track_guard, bool walk_visited_parity) {
         if (!m_start_segment || !m_start_segment->descriptor_valid()) return;
 

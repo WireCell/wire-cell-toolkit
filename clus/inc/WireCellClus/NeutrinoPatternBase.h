@@ -645,6 +645,48 @@ namespace WireCell::Clus::PR {
         // the prototype 0.2 cm => recipe-faithful; > 0 => that radius.
         // Inert unless splice_straighten/approach_collapse is on.
         double m_mvga_straighten_radius{0};   ///< straight-chain veto radius, internal length units (doc pr/86 round 2); 0 = prototype 0.2 cm
+        // doc sbnd_xin/docs/pr/99 round 2 -- op3.5 approach-collapse guards.
+        // The pr/99 firing census (mcp2k production: 46 fires, median chord
+        // 15.7 cm, max 338.5 cm vs the 5.8 cm design case) showed op3.5
+        // off-envelope: it replaced a true 51 cm V with straight chords on
+        // 285567 (the flip regression) and built 315167's 146 cm fake EM
+        // trunk.  Three independent guards, each 0/false = legacy:
+        // - ac_veto_radius: dedicated is_good_point radius for the COLLAPSE
+        //   chord's charge veto.  Production m_mvga_straighten_radius=1.0cm
+        //   (relaxed for the pr/86 R1 splice-straighten purpose) leaked into
+        //   the collapse veto; the prototype ancestor examine_structure_2
+        //   (NeutrinoID_examine_structure.h line ~131) checks
+        //   is_good_point(test_p, 0.2*units::cm, 0, 0).  > 0 => that radius
+        //   for op3.5 only (R1 splice-straighten keeps m_mvga_straighten_radius).
+        // - ac_chord_max: decline a collapse whose replacement chord
+        //   |vtx1-vtx2| exceeds this; the prototype capped the removed
+        //   segment lengths at 5 cm (commented out in the ancestor, but the
+        //   design envelope is few-cm zigzags, not half-meter trunks).
+        // - ac_no_cascade: never collapse a candidate whose sg1/sg2 is
+        //   itself a `created` product (285567's second fire consumed its
+        //   own nfits=0 chord, 53.6 -> 58.3 cm).
+        double m_mvga_ac_veto_radius{0};      ///< op3.5-only charge-veto radius, internal length units (doc pr/99 round 2); 0 = legacy (straighten_radius rule)
+        double m_mvga_ac_chord_max{0};        ///< op3.5 replacement-chord length cap, internal length units (doc pr/99 round 2); 0 = no cap
+        bool   m_mvga_ac_no_cascade{false};   ///< op3.5: skip candidates touching `created` products (doc pr/99 round 2); false = legacy
+        // doc sbnd_xin/docs/pr/99 round 2 -- op1-post charge second-opinion.
+        // 70084: a 15.7 cm charge-starved chord rode a real prong at
+        // overlap 0.87 but the pair's ~30 deg chord opening angle declined
+        // the merge -- the angle guard exists so a genuine small-opening V
+        // never merges, and here it protected a ghost.  The refit SPLITS
+        // the shared corridor's charge across the pair (70084 measured
+        // median-dQ/dx ratios 1.16/0.62 vs m_mip_dqdx_median), so the
+        // discriminator is the op1-proj-style pair ASYMMETRY
+        // (min/max <= starved_asym; 70084 reads 0.53, op1-proj production
+        // gate 0.55) AND an absolute cap on the loser
+        // (min <= starved_mip; a genuine proton+MIP V's muon reads ~1.0
+        // and is never mistaken for a starved chord).  Both knobs > 0
+        // required; the LOWER-charge member is deleted (never the healthy
+        // one -- the pr/96 F3 safe direction).  Members without valid fits
+        // are skipped (no charge verdict possible, the op2 rule).  Either
+        // knob 0 (default) => the decline stands => byte-identical.
+        double m_mvga_dup_starved_asym{0};    ///< op1-post starved-member override: pair min/max dQ/dx asymmetry gate (doc pr/99 round 2); 0 = off
+        double m_mvga_dup_starved_mip{0};     ///< op1-post starved-member override: absolute cap on the loser, ratio vs m_mip_dqdx_median (doc pr/99 round 2); 0 = off
+        double m_mvga_dup_starved_span{0};    ///< op1-post starved-member override: pair min/max LENGTH comparability floor (doc pr/99 round 2); 0 = no span test
         // doc sbnd_xin/docs/pr/83 round 3 (sec 9.6/sec 8.5): the duplicate-
         // corridor family.  op1 is a global graph-correctness check ("no two
         // segments double-book the same charge"), not inherently a
@@ -1742,6 +1784,32 @@ namespace WireCell::Clus::PR {
         // pure track chains and single-blob protons self-exclude (the
         // detach refuses to empty a shower).
         bool   m_shower_detach_track_stem{false};
+        // ------------------------------------------------------------------
+        // doc sbnd_xin/docs/pr/99 round 2 -- shower_ghost_member_drop.
+        // 395148: the 295 MeV "electron" held a 23.4 cm projective-ghost
+        // member (median per-point charge -678, 93% of points dQ<=0, 2D
+        // view overlap vs a sibling member 1.00/1.00/0.25 -- the pr/83
+        // op1-proj class) 95 cm from the main vertex, outside every mvga
+        // scope.  When on, a post-pass after shower dedup (and BEFORE the
+        // pi0 finders, so pairing never sees the ghost) scans member PAIRS
+        // of each shower with the op1-proj discriminator restated for
+        // membership: same (apa,face), 2nd-best per-view 2D overlap >=
+        // ghost_overlap_frac, candidate starved (median dQ/dx ratio <=
+        // ghost_dqdx_ratio OR frac(dQ<=0) > 0.5) while the partner is
+        // healthy (ratio >= 2x ghost_dqdx_ratio), candidate length >=
+        // ghost_min_len.  The conjunction is mandatory -- the pr/99 census
+        // measured 51/185 real multi-member showers with SOME charge-
+        // starved fragment; overlap-with-a-healthy-sibling is what makes it
+        // a ghost.  The ghost is dropped from the shower view (leaf-only,
+        // Shower::drop_ghost_member contract) and DELETED from the graph so
+        // it leaves the PF/Bee display; vote/kinematics/charge recomputed.
+        // No refit at this seat -- acceptable for a charge-starved ghost.
+        // false (default) => no pass => byte-identical; the numeric knobs
+        // are inert while the bool is off.
+        bool   m_shower_ghost_member_drop{false};   ///< doc pr/99 round 2; false = off
+        double m_shower_ghost_overlap_frac{0.7};    ///< 2nd-best per-view overlap gate; inert while drop off
+        double m_shower_ghost_dqdx_ratio{0.25};     ///< starved gate, ratio vs m_mip_dqdx_median; inert while drop off
+        double m_shower_ghost_min_len{10*units::cm}; ///< candidate min length, internal units; inert while drop off
         // kine_count_orphan_tracks (315167): fill_kine_tree counterpart of
         // the PF-side pf_orphan_confident_track knob (BeePFConfig).  A
         // confident straight-long main-cluster track that is graph-

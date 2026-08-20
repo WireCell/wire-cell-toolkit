@@ -177,6 +177,11 @@ TEST_CASE("clus knob defaults: TaggerCheckNeutrino switches are all OFF")
     CHECK_KNOB_BOOL(cfg, "shower_cone_absorb_guard", false);               // Cause D (315167)
     // doc pr/93 round 4 -- PF-hierarchy fine-tunes + 137238 cross-cluster muon.
     CHECK_KNOB_BOOL(cfg, "shower_detach_track_stem", false);                  // r4 (348471, 292643)
+    // doc pr/99 round 2 -- shower_ghost_member_drop family.
+    CHECK_KNOB_BOOL(cfg, "shower_ghost_member_drop", false);                  // pr/99 r2 (395148); false = byte-identical
+    CHECK_KNOB_NUM(cfg, "shower_ghost_overlap_frac", 0.7);                    // inert while drop off
+    CHECK_KNOB_NUM(cfg, "shower_ghost_dqdx_ratio", 0.25);                     // inert while drop off
+    CHECK_KNOB_NUM(cfg, "shower_ghost_min_len", 10.0);                        // cm; inert while drop off
     CHECK_KNOB_BOOL(cfg, "kine_count_orphan_tracks", false);                  // r4 (315167)
     CHECK_KNOB_NUM(cfg, "kine_orphan_track_min", 50.0);                       // cm; read only when on
     CHECK_KNOB_BOOL(cfg, "straight_cont_cross_cluster", false);               // r4 (137238)
@@ -345,6 +350,12 @@ TEST_CASE("clus knob defaults: TaggerCheckNeutrino switches are all OFF")
     CHECK_KNOB_NUM(cfg, "mvga_proj_dup_frac", 0.0);  // doc pr/83 r4: projective dup collapse disabled, byte-identical
     CHECK_KNOB_NUM(cfg, "mvga_proj_dqdx_ratio", 0.4);  // doc pr/83 r4: stem dQ/dx gate default; inert while frac == 0
     CHECK_KNOB_NUM(cfg, "mvga_proj_angle", 0.0);  // doc pr/83 r4b: 0 = use mvga_dup_angle, byte-identical
+    CHECK_KNOB_NUM(cfg, "mvga_ac_veto_radius", 0.0);  // doc pr/99 r2: 0 = legacy straighten_radius rule, byte-identical
+    CHECK_KNOB_NUM(cfg, "mvga_ac_chord_max", 0.0);    // doc pr/99 r2: 0 = no chord cap, byte-identical
+    CHECK_KNOB_BOOL(cfg, "mvga_ac_no_cascade", false); // doc pr/99 r2: created products stay collapsible, byte-identical
+    CHECK_KNOB_NUM(cfg, "mvga_dup_starved_asym", 0.0); // doc pr/99 r2: 0 = op1-post angle decline stands, byte-identical
+    CHECK_KNOB_NUM(cfg, "mvga_dup_starved_mip", 0.0); // doc pr/99 r2: 0 = op1-post angle decline stands, byte-identical
+    CHECK_KNOB_NUM(cfg, "mvga_dup_starved_span", 0.0); // doc pr/99 r2: 0 = no span-comparability test, byte-identical
     CHECK_KNOB_NUM(cfg, "shower_topo_demote_len", 0.0);      // 0 = long segments stay shower-eligible
     CHECK_KNOB_NUM(cfg, "nu_skip_cosmic_bundle_min_length", 0.0);
     CHECK_KNOB_NUM(cfg, "cosmic_companion_min_length", 0.0);

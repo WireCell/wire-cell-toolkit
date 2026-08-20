@@ -308,6 +308,30 @@ namespace WireCell::Clus::PR {
                                 const std::string& cloud_name_fit = "fit",
                                 const std::string& cloud_name_associate = "associate_points");
 
+        // doc sbnd_xin/docs/pr/99 round 2 (shower_ghost_member_drop).
+        // Remove one interior/peripheral member -- a projective-ghost
+        // segment (charge-starved 2D duplicate of a sibling member, the
+        // pr/83 op1-proj class found INSIDE shower membership) -- from this
+        // shower's view.  Leaf-only contract: refuses (returns 0) when the
+        // ghost is the start segment, when removal would empty the shower,
+        // or when any remaining member would be stranded (view-restricted
+        // connectivity from the start segment must still reach every
+        // remaining member -- the PRShower.cxx:1586 nsegments==nconnected
+        // branch and the stranded-member kine sums are the hazards this
+        // guard exists for).  On success: ghost-only vertices leave the
+        // view (walked marks erased), the named point clouds are REBUILT
+        // from the remaining members (same reason as detach_track_prefix:
+        // kine_charge reads the clouds, and a ghost's negative charge must
+        // leave the energy), caches invalidated, flag_kinematics cleared.
+        // Caller owns any full-graph edit (the ghost segment itself) and
+        // must re-run update_particle_type / calculate_kinematics /
+        // set_kine_charge / update_shower_maps.  Bookkeeping forked BY
+        // DUPLICATION from detach_track_prefix (production method stays
+        // byte-untouched).  Returns 1 on removal, 0 on refusal.
+        int drop_ghost_member(SegmentPtr ghost,
+                              const std::string& cloud_name_fit = "fit",
+                              const std::string& cloud_name_associate = "associate_points");
+
     private:
 
         Graph& m_full_graph;

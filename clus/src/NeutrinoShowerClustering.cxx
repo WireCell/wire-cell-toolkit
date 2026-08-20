@@ -4695,6 +4695,202 @@ void PatternAlgorithms::shower_clustering_with_nv(int acc_segment_id, IndexedSho
         }
     }
 
+    // doc sbnd_xin/docs/pr/99 round 2 -- shower_ghost_member_drop.  Design
+    // block at the m_shower_ghost_* members (NeutrinoPatternBase.h).  The
+    // op1-proj discriminator (NeutrinoGraphAudit.cxx op1-proj pass, doc
+    // pr/83 r4) restated for shower MEMBERSHIP: a charge-starved shower
+    // member whose fit points are 2D-shadowed in >= 2 of 3 wire views by a
+    // healthy partner segment ANYWHERE in the graph (395148: the 23.4 cm
+    // ghost member's shadow partner is the 65.7 cm track 2D-coincident
+    // with it -- NOT a fellow member; measured 1.00/1.00/0.25).  Same
+    // (apa,face) required.  Placed after shower dedup/detach and BEFORE
+    // the pi0 finders so pairing never sees the ghost.  The overlap/charge
+    // recipe is duplicated from op1-proj rather than shared (that
+    // production pass stays byte-untouched).  C++ default false =>
+    // no pass => byte-identical.
+    if (m_shower_ghost_member_drop && m_mvga_dup_tol > 0) {
+        auto grouping = main_cluster ? main_cluster->grouping() : nullptr;
+        // Per-view 2D overlap of `fa` in `fb` (fraction of A's valid fit
+        // points within m_mvga_dup_tol of B's in view coords
+        // (x, cos(a)z - sin(a)y)); returns the 3 fractions sorted
+        // descending, or empty on any inconsistency.  op1-proj recipe.
+        auto view_overlaps = [&](const std::vector<Fit>& fa,
+                                 const std::vector<Fit>& fb,
+                                 const std::pair<int,int>& paf) {
+            std::vector<double> out;
+            if (!grouping) return out;
+            const auto [au, av, aw] = grouping->wire_angles(paf.first, paf.second);
+            for (double ang : {au, av, aw}) {
+                const double c = std::cos(ang), s = std::sin(ang);
+                int nin = 0, ntot = 0;
+                for (const auto& pa : fa) {
+                    if (!pa.valid()) continue;
+                    ++ntot;
+                    const double xa = pa.point.x();
+                    const double wa = c*pa.point.z() - s*pa.point.y();
+                    double best = 1e30;
+                    for (const auto& pb : fb) {
+                        if (!pb.valid()) continue;
+                        const double dx = pb.point.x() - xa;
+                        const double dw = c*pb.point.z() - s*pb.point.y() - wa;
+                        best = std::min(best, dx*dx + dw*dw);
+                    }
+                    if (best < m_mvga_dup_tol*m_mvga_dup_tol) ++nin;
+                }
+                if (ntot == 0) return std::vector<double>{};
+                out.push_back(static_cast<double>(nin)/ntot);
+            }
+            std::sort(out.rbegin(), out.rend());
+            return out;
+        };
+        // Median per-point dQ/dx (full segment, NOT the op1-proj stem form
+        // -- these members sit far from any vertex) + fraction of
+        // non-positive charge points.  dQ <= 0 points stay IN the median --
+        // a projective ghost's defining signature is negative fitted charge.
+        struct GhostStats { double med_dqdx{0}; double frac_nonpos{0}; int n{0}; };
+        auto member_stats = [](const SegmentPtr& sg) {
+            GhostStats st;
+            std::vector<double> dqdx;
+            int nneg = 0;
+            for (const auto& f : sg->fits()) {
+                if (!f.valid() || f.dx <= 0) continue;
+                dqdx.push_back(f.dQ / f.dx);
+                if (f.dQ <= 0) ++nneg;
+            }
+            st.n = static_cast<int>(dqdx.size());
+            if (st.n == 0) return st;
+            std::sort(dqdx.begin(), dqdx.end());
+            st.med_dqdx = dqdx[dqdx.size()/2];
+            st.frac_nonpos = static_cast<double>(nneg) / st.n;
+            return st;
+        };
+
+        int n_ghost_dropped = 0;
+        for (auto& shower : showers) {                       // IndexedShowerSet order
+            if (std::abs(shower->get_particle_type()) == 13) continue;  // long-muon pseudo-shower
+            bool fired = true;
+            for (int round = 0; round < 4 && fired; ++round) {  // >1 ghost per shower is rare; cap
+                fired = false;
+                std::vector<SegmentPtr> members;
+                for (auto edesc : ordered_edges(*shower, graph)) {
+                    SegmentPtr sg = graph[edesc].segment;
+                    if (sg && sg->descriptor_valid()) members.push_back(sg);
+                }
+                if (members.size() < 2) break;
+                // Partner pool: every segment in the graph, stable index
+                // order (the shadow partner is usually NOT a member).
+                std::vector<SegmentPtr> partners;
+                for (const auto& vd : ordered_nodes(graph)) {
+                    for (auto edesc : sorted_out_edges(vd, graph)) {
+                        SegmentPtr sg = graph[edesc].segment;
+                        if (!sg || !sg->descriptor_valid()) continue;
+                        if (std::find(partners.begin(), partners.end(), sg) != partners.end()) continue;
+                        partners.push_back(sg);
+                    }
+                }
+                std::sort(partners.begin(), partners.end(), SegmentIndexCmp{});
+                for (size_t i = 0; i < members.size() && !fired; ++i) {
+                    SegmentPtr cand = members[i];
+                    if (cand == shower->start_segment()) continue;
+                    if (segments_in_long_muon.count(cand)) continue;
+                    if (segment_track_length(cand) < m_shower_ghost_min_len) continue;
+                    const auto cst = member_stats(cand);
+                    if (cst.n < 2) continue;
+                    const double cratio = cst.med_dqdx / m_mip_dqdx_median;
+                    const bool starved = (cratio <= m_shower_ghost_dqdx_ratio)
+                                         || (cst.frac_nonpos > 0.5);
+                    if (!starved) continue;
+                    // Same-(apa,face) fit points only (op1-proj rule).
+                    std::pair<int,int> paf{-1,-1};
+                    bool paf_ok = true;
+                    for (const auto& f : cand->fits()) {
+                        if (!f.valid() || f.paf.first < 0) continue;
+                        if (paf.first < 0) paf = f.paf;
+                        else if (f.paf != paf) { paf_ok = false; break; }
+                    }
+                    if (!paf_ok || paf.first < 0) continue;
+                    for (size_t j = 0; j < partners.size() && !fired; ++j) {
+                        SegmentPtr part = partners[j];
+                        if (part == cand) continue;
+                        const auto pst = member_stats(part);
+                        if (pst.n < 2) continue;
+                        const double pratio = pst.med_dqdx / m_mip_dqdx_median;
+                        if (pratio < 2*m_shower_ghost_dqdx_ratio) continue;  // partner must be healthy
+                        if (pst.frac_nonpos > 0.5) continue;
+                        bool part_paf_ok = true;
+                        for (const auto& f : part->fits()) {
+                            if (f.valid() && f.paf.first >= 0 && f.paf != paf) { part_paf_ok = false; break; }
+                        }
+                        if (!part_paf_ok) continue;
+                        auto ov = view_overlaps(cand->fits(), part->fits(), paf);
+                        if (ov.size() < 3) continue;
+                        if (ov[1] > 0.25) {
+                            SPDLOG_LOGGER_TRACE(s_log,
+                                "pr99 ghost_member eval shower_id={} cand seg={} len={:.2f}cm "
+                                "ratio={:.2f} fneg={:.2f} vs seg={} views={:.2f}/{:.2f}/{:.2f}",
+                                shower->get_shower_id(), cand->id(),
+                                segment_track_length(cand)/units::cm, cratio, cst.frac_nonpos,
+                                part->id(), ov[0], ov[1], ov[2]);
+                        }
+                        if (ov[1] < m_shower_ghost_overlap_frac) continue;
+
+                        // Verdict: ghost.  View removal first (leaf-only
+                        // contract; refusal leaves everything untouched)...
+                        auto [gv1, gv2] = find_vertices(graph, cand);
+                        if (!shower->drop_ghost_member(cand)) {
+                            SPDLOG_LOGGER_DEBUG(s_log,
+                                "pr99 ghost_member refuse shower_id={} seg={} (leaf-only guard)",
+                                shower->get_shower_id(), cand->id());
+                            continue;
+                        }
+                        // ...then the graph deletion so the ghost leaves the
+                        // PF/Bee display; degree-0 endpoints leave with it
+                        // (never the main vertex, never a protected break --
+                        // the mvga cleanup_vertex rule).
+                        SPDLOG_LOGGER_DEBUG(s_log,
+                            "pr99 ghost_member drop shower_id={} seg={} len={:.2f}cm "
+                            "med_ratio={:.2f} fneg={:.2f} views={:.2f}/{:.2f}/{:.2f} "
+                            "partner seg={} ratio={:.2f}",
+                            shower->get_shower_id(), cand->id(),
+                            segment_track_length(cand)/units::cm, cratio, cst.frac_nonpos,
+                            ov[0], ov[1], ov[2], part->id(), pratio);
+                        remove_segment(graph, cand);
+                        for (VertexPtr gv : {gv1, gv2}) {
+                            if (!gv || gv == main_vertex) continue;
+                            if (gv->flags_any(VertexFlags::kProtectedBreak)) continue;
+                            if (!gv->descriptor_valid()) continue;
+                            if (boost::degree(gv->get_descriptor(), graph) == 0) {
+                                remove_vertex(graph, gv);
+                            }
+                        }
+                        // Mirror the detach refresh: vote + kinematics +
+                        // charge over the remaining members.
+                        shower->update_particle_type(particle_data, recomb_model, m_mip_dqdx,
+                                                     main_vertex, m_shower_proton_daughter_pion,
+                                                     m_mip_dqdx_median, m_shower_vote_track_pid_counts,
+                                                     m_shower_accept_pid_guard,
+                                                     m_shower_pid_guard_min_len);
+                        shower->calculate_kinematics(particle_data, recomb_model,
+                                                     m_shower_endpoint_exclude_start_vertex,
+                                                     m_shower_endpoint_skip_orphan_vtx);
+                        shower->set_kine_charge(cal_kine_charge(shower, m_charge_2d_u, m_charge_2d_v,
+                                                                m_charge_2d_w, m_map_apa_ch_plane_wires,
+                                                                track_fitter, dv));
+                        shower->set_flag_kinematics(true);
+                        ++n_ghost_dropped;
+                        fired = true;
+                    }
+                }
+            }
+        }
+        if (n_ghost_dropped) {
+            update_shower_maps(showers, map_vertex_in_shower, map_segment_in_shower,
+                               map_vertex_to_shower, used_shower_clusters);
+            SPDLOG_LOGGER_DEBUG(s_log,
+                "pr99 ghost_member: {} member(s) dropped; maps rebuilt", n_ghost_dropped);
+        }
+    }
+
     // Identify pi0 with vertex.
     // doc pr/33 F3: both finders get a reference to the same local copy, so
     // nothing propagates past this function either way (the caller's

@@ -1082,9 +1082,33 @@ bool PatternAlgorithms::main_vertex_graph_audit(Graph& graph, Facade::Cluster& c
                 // (vtx1, vtx2) slot must be free.
                 if (find_segment(graph, vtx1, vtx2)) continue;
 
+                // doc pr/99 round 2 guards (design block in
+                // NeutrinoPatternBase.h at the m_mvga_ac_* members).  Each
+                // knob 0/false => its test is skipped => byte-identical.
+                if (m_mvga_ac_no_cascade && (created.count(sg1) || created.count(sg2))) {
+                    SPDLOG_LOGGER_DEBUG(s_log,
+                        "mvga: op3.5 decline cluster={} d={:.2f}cm reason=no-cascade",
+                        cluster.ident(), point_dis(vp, mv_pt)/units::cm);
+                    continue;
+                }
+                const double ac_chord =
+                    point_dis(vtx1->wcpt().point, vtx2->wcpt().point);
+                if (m_mvga_ac_chord_max > 0 && ac_chord > m_mvga_ac_chord_max) {
+                    SPDLOG_LOGGER_DEBUG(s_log,
+                        "mvga: op3.5 decline cluster={} d={:.2f}cm chord={:.2f}cm reason=chord-cap",
+                        cluster.ident(), point_dis(vp, mv_pt)/units::cm,
+                        ac_chord/units::cm);
+                    continue;
+                }
+
                 std::vector<WCPoint> straight;
-                const double good_r = (m_mvga_straighten_radius > 0)
-                    ? m_mvga_straighten_radius : 0.2*units::cm;
+                // pr/99 round 2: the collapse chord gets its own veto radius
+                // (prototype es2: 0.2 cm) when m_mvga_ac_veto_radius > 0;
+                // legacy falls back to the R1 straighten radius rule.
+                const double good_r = (m_mvga_ac_veto_radius > 0)
+                    ? m_mvga_ac_veto_radius
+                    : ((m_mvga_straighten_radius > 0)
+                       ? m_mvga_straighten_radius : 0.2*units::cm);
                 if (!straight_steiner_chain(cluster, track_fitter, dv,
                                             vtx1->wcpt(), vtx2->wcpt(), straight, good_r)) {
                     SPDLOG_LOGGER_TRACE(s_log,
@@ -1188,6 +1212,12 @@ bool PatternAlgorithms::main_vertex_graph_audit(Graph& graph, Facade::Cluster& c
                             pts_s.size(), pts_l.size(), frac);
                     }
                     if (frac < op1_dup_frac) continue;
+                    // doc pr/99 round 2 (m_mvga_dup_starved_mip design block
+                    // in NeutrinoPatternBase.h): a non-null forced loser
+                    // overrides the integrated-charge rule below -- set only
+                    // on the angle-decline branch when exactly one member is
+                    // charge-starved and the other healthy.
+                    SegmentPtr forced_loser = nullptr;
                     if (m_mvga_dup_angle > 0 && pts_s.size() >= 2 && pts_l.size() >= 2) {
                         auto chord = [](const std::vector<WireCell::Point>& pts) {
                             return pts.back() - pts.front();
@@ -1198,7 +1228,71 @@ bool PatternAlgorithms::main_vertex_graph_audit(Graph& graph, Facade::Cluster& c
                         if (den > 0) {
                             double cosang = std::abs(ca.dot(cb)) / den;
                             double ang = std::acos(std::clamp(cosang, 0.0, 1.0)) / 3.1415926 * 180.0;
-                            if (ang > m_mvga_dup_angle) continue;
+                            if (ang > m_mvga_dup_angle) {
+                                // Knobs 0 (default) => the decline stands
+                                // exactly as before => byte-identical.
+                                // Both tests required: the fitter SPLITS
+                                // the shared corridor's charge across the
+                                // pair (70084 measured 1.16/0.62 -- an
+                                // absolute MIP floor can never separate
+                                // them post-refit), so the discriminator
+                                // is the op1-proj-style pair ASYMMETRY,
+                                // plus an absolute cap on the loser so a
+                                // genuine proton+MIP V (muon ~1.0) is
+                                // never mistaken for a starved chord.
+                                if (!(m_mvga_dup_starved_asym > 0) ||
+                                    !(m_mvga_dup_starved_mip > 0)) continue;
+                                if (seg_valid_fits(sa) == 0 || seg_valid_fits(sb) == 0) continue;
+                                // Span comparability: a projective duplicate
+                                // shares the corridor over its WHOLE span
+                                // (70084: 15.7 vs 13.0 cm, ratio 0.83); a
+                                // track paired with its own Bragg-peak stub
+                                // or a short spur is NOT a duplicate (138009:
+                                // 21.0 vs 3.2 cm, ratio 0.15 -- the first
+                                // knob-on campaign deleted the 21 cm electron
+                                // stem there and lost the nue selection).
+                                if (m_mvga_dup_starved_span > 0 &&
+                                    std::min(la, lb) / std::max(la, lb) < m_mvga_dup_starved_span) {
+                                    SPDLOG_LOGGER_TRACE(s_log,
+                                        "mvga: op1-post starved-decline cluster={} overlap={:.2f} "
+                                        "span {:.2f}/{:.2f}cm (not comparable)",
+                                        cluster.ident(), frac, std::min(la, lb)/units::cm,
+                                        std::max(la, lb)/units::cm);
+                                    continue;
+                                }
+                                const double ra = segment_median_dQ_dx(sa) / m_mip_dqdx_median;
+                                const double rb = segment_median_dQ_dx(sb) / m_mip_dqdx_median;
+                                if (ra <= 0 || rb <= 0) continue;
+                                const double asym = std::min(ra, rb) / std::max(ra, rb);
+                                const double lo = std::min(ra, rb);
+                                const double hi = std::max(ra, rb);
+                                // The single m_mvga_dup_starved_mip threshold
+                                // separates the pair BOTH ways: loser at or
+                                // below it, survivor at or above it (doc
+                                // pr/99 sec 8: the survivor must carry the
+                                // charge it claims -- 46363's 0.61-ratio
+                                // "survivor" is itself starved, no verdict).
+                                if (asym <= m_mvga_dup_starved_asym &&
+                                    lo <= m_mvga_dup_starved_mip &&
+                                    hi >= m_mvga_dup_starved_mip) {
+                                    forced_loser = (ra <= rb) ? sa : sb;
+                                }
+                                if (!forced_loser) {
+                                    SPDLOG_LOGGER_TRACE(s_log,
+                                        "mvga: op1-post starved-decline cluster={} overlap={:.2f} "
+                                        "angle={:.1f}deg ratios {:.2f}/{:.2f} asym={:.2f}",
+                                        cluster.ident(), frac, ang, ra, rb, asym);
+                                    continue;
+                                }
+                                SPDLOG_LOGGER_DEBUG(s_log,
+                                    "mvga: op1-post starved-override cluster={} overlap={:.2f} "
+                                    "angle={:.1f}deg starved_ratio={:.2f} healthy_ratio={:.2f} "
+                                    "starved_len={:.2f}cm",
+                                    cluster.ident(), frac, ang,
+                                    (forced_loser == sa) ? ra : rb,
+                                    (forced_loser == sa) ? rb : ra,
+                                    segment_track_length(forced_loser)/units::cm);
+                            }
                         }
                     }
 
@@ -1206,10 +1300,13 @@ bool PatternAlgorithms::main_vertex_graph_audit(Graph& graph, Facade::Cluster& c
                     // longer).  A created (fitless) member integrates 0 and
                     // loses to any fitted one -- the wanted outcome: the
                     // carried duplicate dies, the original survives.
+                    // pr/99 round 2: a starved-override pair skips this rule
+                    // -- the starved member dies regardless of totals.
                     double qa = segment_integrated_dQ(sa);
                     double qb = segment_integrated_dQ(sb);
                     SegmentPtr loser;
-                    if (qa == qb) loser = shorter;
+                    if (forced_loser) loser = forced_loser;
+                    else if (qa == qb) loser = shorter;
                     else loser = (qa < qb) ? sa : sb;
                     SegmentPtr survivor = (loser == sa) ? sb : sa;
 

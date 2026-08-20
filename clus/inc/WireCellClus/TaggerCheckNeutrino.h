@@ -199,6 +199,12 @@ public:
         double m_mvga_proj_dup_frac{0.0};  // 2nd-best per-view overlap threshold for the projective dup collapse (doc pr/83 r4); 0 = disabled, byte-identical
         double m_mvga_proj_dqdx_ratio{0.4}; // stem dQ/dx asymmetry gate for the same pass (doc pr/83 r4); inert while frac == 0
         double m_mvga_proj_angle{0.0};    // deg; op1-proj chord-angle ceiling (doc pr/83 r4b); 0 = use mvga_dup_angle, byte-identical
+        double m_mvga_ac_veto_radius{0.0};  // cm; op3.5-only collapse-chord charge-veto radius (doc pr/99 round 2); 0 = legacy straighten_radius rule, byte-identical
+        double m_mvga_ac_chord_max{0.0};    // cm; op3.5 replacement-chord length cap (doc pr/99 round 2); 0 = no cap, byte-identical
+        bool   m_mvga_ac_no_cascade{false}; // op3.5: skip candidates touching `created` products (doc pr/99 round 2); false = byte-identical
+        double m_mvga_dup_starved_asym{0.0}; // pair min/max dQ/dx asymmetry gate; op1-post angle-decline starved-member override (doc pr/99 round 2); 0 = off, byte-identical
+        double m_mvga_dup_starved_mip{0.0}; // absolute cap on the loser, ratio vs mip median; same override (doc pr/99 round 2); 0 = off, byte-identical
+        double m_mvga_dup_starved_span{0.0}; // pair min/max length comparability floor; same override (doc pr/99 round 2); 0 = no span test
         // Long shower-topology demote length, cm (doc sbnd_xin/docs/pr/25
         // sec 3).  0 => the guard never fires => byte-identical.  50 is the
         // scan-supported operating point (9/10 owner-scanned events; ~45
@@ -772,6 +778,12 @@ public:
         // doc pr/93 round 4 -- rationale comments in NeutrinoPatternBase.h
         // (pr/93 round-4 blocks).
         bool m_shower_detach_track_stem{false};                     // doc pr/93 r4 (348471, 292643)
+        // doc pr/99 round 2 -- rationale comments in NeutrinoPatternBase.h
+        // (m_shower_ghost_* block).
+        bool m_shower_ghost_member_drop{false};                     // doc pr/99 r2 (395148 projective ghost)
+        double m_shower_ghost_overlap_frac{0.7};                    // 2nd-best per-view overlap gate; inert while drop off
+        double m_shower_ghost_dqdx_ratio{0.25};                     // starved gate, ratio vs mip median; inert while drop off
+        double m_shower_ghost_min_len{10.0};                        // cm; scaled at copy; inert while drop off
         bool m_kine_count_orphan_tracks{false};                     // doc pr/93 r4 (315167)
         double m_kine_orphan_track_min{50};                         // cm; scaled at copy
         bool m_straight_cont_cross_cluster{false};                  // doc pr/93 r4 (137238)

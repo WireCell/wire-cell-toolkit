@@ -1635,6 +1635,12 @@ function(
     // SBND_SCCC_BRIDGE_BODY / SBND_PF_ORPHAN_CONFIDENT_TRACK /
     // SBND_PF_TRACK_OWNS_LOOSE_VERTEX (+ SBND_SCCC_* numerics).
     shower_detach_track_stem = true,
+    // doc pr/99 round 2 -- projective-ghost member drop inside shower
+    // membership (395148).  C++ defaults false/0.7/0.25/10cm = legacy.
+    shower_ghost_member_drop = true,  // SBND PRODUCTION ON 2026-08-20 (doc pr/99 round 2)
+    shower_ghost_overlap_frac = null,
+    shower_ghost_dqdx_ratio = null,
+    shower_ghost_min_len = null,
     kine_count_orphan_tracks = true,
     kine_orphan_track_min = null,  // null => C++ default 50cm
     straight_cont_cross_cluster = true,
@@ -1984,6 +1990,20 @@ function(
     // all 7 other knob-affected events byte-identical at 25.
     // Escape: SBND_MVGA_PROJ_ANGLE (or -A).  null omits => byte-identical.
     mvga_proj_angle = 25,
+    // doc pr/99 round 2 -- op3.5 approach-collapse guards + op1-post charge
+    // second-opinion.  C++ defaults 0/false = legacy.  null/false => key
+    // omitted => byte-identical pre-fix config.
+    // SBND PRODUCTION ON 2026-08-20 (doc pr/99 round 2; owner pre-authorized
+    // flip on validation PASS).  ac_veto_radius stays OFF: 0.2 cm measured
+    // ADVERSE (kills the 349945 design case -- re-confirms pr/86 Stage A's
+    // deliberate 1.0 cm relax).  Ghost thresholds ride the C++ defaults
+    // (overlap 0.7 / dqdx 0.25 / min_len 10 cm).
+    mvga_ac_veto_radius = null,
+    mvga_ac_chord_max = 30,
+    mvga_ac_no_cascade = true,
+    mvga_dup_starved_asym = 0.55,
+    mvga_dup_starved_mip = 0.8,
+    mvga_dup_starved_span = 0.5,
     // doc pr/51 (18255-506746) -- DL rerank cross-cluster swap guard: with
     // the guard on, an accepted DL vertex can never swap the main cluster
     // (506746: one confident uBooNE-net voxel, s_dl = +576, moved the
@@ -2509,6 +2529,10 @@ function(
                              shower_vote_track_pid_counts=shower_vote_track_pid_counts,
                              shower_cone_absorb_guard=shower_cone_absorb_guard,
                              shower_detach_track_stem=shower_detach_track_stem,
+                             shower_ghost_member_drop=shower_ghost_member_drop,
+                             shower_ghost_overlap_frac=shower_ghost_overlap_frac,
+                             shower_ghost_dqdx_ratio=shower_ghost_dqdx_ratio,
+                             shower_ghost_min_len=shower_ghost_min_len,
                              kine_count_orphan_tracks=kine_count_orphan_tracks,
                              kine_orphan_track_min=kine_orphan_track_min,
                              straight_cont_cross_cluster=straight_cont_cross_cluster,
@@ -2573,6 +2597,12 @@ function(
                              mvga_proj_dup_frac=mvga_proj_dup_frac,
                              mvga_proj_dqdx_ratio=mvga_proj_dqdx_ratio,
                              mvga_proj_angle=mvga_proj_angle,
+                             mvga_ac_veto_radius=mvga_ac_veto_radius,
+                             mvga_ac_chord_max=mvga_ac_chord_max,
+                             mvga_ac_no_cascade=mvga_ac_no_cascade,
+                             mvga_dup_starved_asym=mvga_dup_starved_asym,
+                             mvga_dup_starved_mip=mvga_dup_starved_mip,
+                             mvga_dup_starved_span=mvga_dup_starved_span,
                              dl_vtx_swap_guard=dl_vtx_swap_guard,
                              dl_vtx_topo_weight=dl_vtx_topo_weight,
                              dl_vtx_topo_center=dl_vtx_topo_center,

@@ -235,6 +235,12 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_mvga_proj_dup_frac  = get(config, "mvga_proj_dup_frac",  m_mvga_proj_dup_frac);  // doc pr/83 r4; 0 = pass disabled
     m_mvga_proj_dqdx_ratio = get(config, "mvga_proj_dqdx_ratio", m_mvga_proj_dqdx_ratio); // doc pr/83 r4; inert while frac == 0
     m_mvga_proj_angle = get(config, "mvga_proj_angle", m_mvga_proj_angle); // deg; doc pr/83 r4b; 0 = use mvga_dup_angle
+    m_mvga_ac_veto_radius = get(config, "mvga_ac_veto_radius", m_mvga_ac_veto_radius); // cm; doc pr/99 round 2; 0 = legacy
+    m_mvga_ac_chord_max   = get(config, "mvga_ac_chord_max",   m_mvga_ac_chord_max);   // cm; doc pr/99 round 2; 0 = no cap
+    m_mvga_ac_no_cascade  = get(config, "mvga_ac_no_cascade",  m_mvga_ac_no_cascade);  // doc pr/99 round 2
+    m_mvga_dup_starved_asym = get(config, "mvga_dup_starved_asym", m_mvga_dup_starved_asym); // pair asymmetry; doc pr/99 round 2; 0 = off
+    m_mvga_dup_starved_mip = get(config, "mvga_dup_starved_mip", m_mvga_dup_starved_mip); // absolute cap on loser; doc pr/99 round 2; 0 = off
+    m_mvga_dup_starved_span = get(config, "mvga_dup_starved_span", m_mvga_dup_starved_span); // pair length comparability; doc pr/99 round 2; 0 = off
     m_shower_topo_demote_len = get(config, "shower_topo_demote_len", m_shower_topo_demote_len);  // cm
     // doc sbnd_xin/docs/pr/49 -- cross-cluster projection-ghost deweighting
     // in the trajectory fit's 2D charge association (18255-57441): live
@@ -559,6 +565,11 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_shower_cone_absorb_guard               = get(config, "shower_cone_absorb_guard",               m_shower_cone_absorb_guard);
     // doc pr/93 round 4
     m_shower_detach_track_stem                  = get(config, "shower_detach_track_stem",                  m_shower_detach_track_stem);
+    // doc pr/99 round 2
+    m_shower_ghost_member_drop                  = get(config, "shower_ghost_member_drop",                  m_shower_ghost_member_drop);
+    m_shower_ghost_overlap_frac                 = get(config, "shower_ghost_overlap_frac",                 m_shower_ghost_overlap_frac);
+    m_shower_ghost_dqdx_ratio                   = get(config, "shower_ghost_dqdx_ratio",                   m_shower_ghost_dqdx_ratio);
+    m_shower_ghost_min_len                      = get(config, "shower_ghost_min_len",                      m_shower_ghost_min_len);
     m_kine_count_orphan_tracks                  = get(config, "kine_count_orphan_tracks",                  m_kine_count_orphan_tracks);
     m_kine_orphan_track_min                     = get(config, "kine_orphan_track_min",                     m_kine_orphan_track_min);
     m_straight_cont_cross_cluster               = get(config, "straight_cont_cross_cluster",               m_straight_cont_cross_cluster);
@@ -688,6 +699,12 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["mvga_proj_dup_frac"]  = m_mvga_proj_dup_frac;  // 0 = projective dup collapse disabled, byte-identical (doc pr/83 r4)
     cfg["mvga_proj_dqdx_ratio"] = m_mvga_proj_dqdx_ratio; // stem dQ/dx asymmetry gate; inert while frac == 0 (doc pr/83 r4)
     cfg["mvga_proj_angle"] = m_mvga_proj_angle; // deg; 0 = use mvga_dup_angle, byte-identical (doc pr/83 r4b)
+    cfg["mvga_ac_veto_radius"] = m_mvga_ac_veto_radius; // cm; 0 = legacy straighten_radius rule, byte-identical (doc pr/99 round 2)
+    cfg["mvga_ac_chord_max"]   = m_mvga_ac_chord_max;   // cm; 0 = no cap, byte-identical (doc pr/99 round 2)
+    cfg["mvga_ac_no_cascade"]  = m_mvga_ac_no_cascade;  // false = created products collapsible, byte-identical (doc pr/99 round 2)
+    cfg["mvga_dup_starved_asym"] = m_mvga_dup_starved_asym; // pair asymmetry; 0 = angle decline stands, byte-identical (doc pr/99 round 2)
+    cfg["mvga_dup_starved_mip"] = m_mvga_dup_starved_mip; // absolute cap on loser; 0 = angle decline stands, byte-identical (doc pr/99 round 2)
+    cfg["mvga_dup_starved_span"] = m_mvga_dup_starved_span; // pair length comparability floor; 0 = no span test (doc pr/99 round 2)
     cfg["kink_dqdx_hot_ratio"] = m_kink_dqdx_hot_ratio; // x mip_dqdx_median; inert while both above are false
     cfg["shower_topo_demote_len"] = m_shower_topo_demote_len;  // cm; 0 = legacy (long segments stay eligible for kShowerTopology)
     // doc sbnd_xin/docs/pr/49.
@@ -900,6 +917,10 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["shower_vote_track_pid_counts"]              = m_shower_vote_track_pid_counts;              // doc pr/93 Cause C; false = legacy (only confirmed protons count as track)
     cfg["shower_cone_absorb_guard"]               = m_shower_cone_absorb_guard;               // doc pr/93 Cause D; false = legacy (pass-3 direction-cone absorber unguarded)
     cfg["shower_detach_track_stem"]                  = m_shower_detach_track_stem;                  // doc pr/93 r4; false = legacy (track-headed shower keeps its stem)
+    cfg["shower_ghost_member_drop"]                  = m_shower_ghost_member_drop;                  // doc pr/99 r2; false = legacy (ghost members stay), byte-identical
+    cfg["shower_ghost_overlap_frac"]                 = m_shower_ghost_overlap_frac;                 // 2nd-best per-view overlap gate; inert while drop off (doc pr/99 r2)
+    cfg["shower_ghost_dqdx_ratio"]                   = m_shower_ghost_dqdx_ratio;                   // starved gate vs mip median; inert while drop off (doc pr/99 r2)
+    cfg["shower_ghost_min_len"]                      = m_shower_ghost_min_len;                      // cm; inert while drop off (doc pr/99 r2)
     cfg["kine_count_orphan_tracks"]                  = m_kine_count_orphan_tracks;                  // doc pr/93 r4; false = legacy (graph-disconnected confident tracks absent from kine)
     cfg["kine_orphan_track_min"]                     = m_kine_orphan_track_min;                     // cm; only read when kine_count_orphan_tracks
     cfg["straight_cont_cross_cluster"]               = m_straight_cont_cross_cluster;               // doc pr/93 r4; false = legacy (no cross-cluster continuation demotion)
@@ -1622,6 +1643,12 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
         pattern_algos.m_mvga_proj_dup_frac  = m_mvga_proj_dup_frac;        // fraction, no conversion (doc pr/83 r4)
         pattern_algos.m_mvga_proj_dqdx_ratio = m_mvga_proj_dqdx_ratio;     // ratio, no conversion (doc pr/83 r4)
         pattern_algos.m_mvga_proj_angle = m_mvga_proj_angle;               // deg, no conversion (doc pr/83 r4b)
+        pattern_algos.m_mvga_ac_veto_radius = m_mvga_ac_veto_radius * units::cm; // cm -> internal (doc pr/99 round 2)
+        pattern_algos.m_mvga_ac_chord_max   = m_mvga_ac_chord_max * units::cm;   // cm -> internal (doc pr/99 round 2)
+        pattern_algos.m_mvga_ac_no_cascade  = m_mvga_ac_no_cascade;               // doc pr/99 round 2
+        pattern_algos.m_mvga_dup_starved_asym = m_mvga_dup_starved_asym;          // ratio, no conversion (doc pr/99 round 2)
+        pattern_algos.m_mvga_dup_starved_mip = m_mvga_dup_starved_mip;            // ratio, no conversion (doc pr/99 round 2)
+        pattern_algos.m_mvga_dup_starved_span = m_mvga_dup_starved_span;          // ratio, no conversion (doc pr/99 round 2)
         pattern_algos.m_rough_path_probe  = m_rough_path_probe;           // doc pr/51 round 4: diagnostic-only
         // doc pr/51 round 5: steiner gap penalty.  The two service handles are
         // unconditional copies (inert while the scale is 0).
@@ -1812,6 +1839,10 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
         pattern_algos.m_shower_vote_track_pid_counts              = m_shower_vote_track_pid_counts;              // doc pr/93 Cause C
         pattern_algos.m_shower_cone_absorb_guard               = m_shower_cone_absorb_guard;               // doc pr/93 Cause D
         pattern_algos.m_shower_detach_track_stem                  = m_shower_detach_track_stem;                  // doc pr/93 r4
+        pattern_algos.m_shower_ghost_member_drop                  = m_shower_ghost_member_drop;                  // doc pr/99 r2
+        pattern_algos.m_shower_ghost_overlap_frac                 = m_shower_ghost_overlap_frac;                 // fraction, no conversion (doc pr/99 r2)
+        pattern_algos.m_shower_ghost_dqdx_ratio                   = m_shower_ghost_dqdx_ratio;                   // ratio, no conversion (doc pr/99 r2)
+        pattern_algos.m_shower_ghost_min_len                      = m_shower_ghost_min_len * units::cm;          // cm -> internal (doc pr/99 r2)
         pattern_algos.m_kine_count_orphan_tracks                  = m_kine_count_orphan_tracks;                  // doc pr/93 r4
         pattern_algos.m_kine_orphan_track_min                     = m_kine_orphan_track_min * units::cm;         // doc pr/93 r4
         pattern_algos.m_straight_cont_cross_cluster               = m_straight_cont_cross_cluster;               // doc pr/93 r4
