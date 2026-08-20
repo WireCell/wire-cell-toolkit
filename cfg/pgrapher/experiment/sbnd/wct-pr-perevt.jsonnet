@@ -168,12 +168,11 @@ function(
     // Set null for the legacy behavior (long segments stay shower-eligible).
     shower_topo_demote_len = 50,
     // ---- doc sbnd_xin/docs/pr/30 §11 port-fidelity knobs -----------------
-    // SBND operating point for the four pr/30 findings.  ALL FIVE ARE AT THE
-    // LEGACY VALUE: this file is the single source of the SBND operating point
-    // (doc 68), so a bare run reproduces production exactly, and the knob-on
-    // arms are produced by editing a COPY of cfg/ (WIRECELL_PATH override),
-    // never by flipping a default here.
-    //   fit_exclusion (P1)            true  => the 27 knobbed do_multi_tracking
+    // SBND operating point for the four pr/30 findings.  This file is the
+    // single source of the SBND operating point (doc 68), so a bare run
+    // reproduces production exactly; diagnostic arms are produced by editing
+    // a COPY of cfg/ (WIRECELL_PATH override) or the runner's env hooks.
+    //   fit_exclusion (P1)            true  => the knobbed do_multi_tracking
     //                                          sites pass flag_exclusion, as 28
     //                                          of 30 live prototype sites do.
     //   graph_endpoint_strict (P8)    true  => PR::add_segment REFUSES a
@@ -189,7 +188,12 @@ function(
     //   other_seg_relaxed_accept (P4) false => drop the toolkit-only
     //                                          0.72/15cm/1.05 acceptance clause
     //                                          (null/true = production).
-    fit_exclusion = false,
+    // **SBND PRODUCTION DEFAULT ON, owner 2026-08-20** (doc pr/98 §7: fits
+    // equal-or-better in 11/12 top movers after the -1.0 sentinel fix; perf
+    // rounds put the cost at ~1.15x median / 1.85x worst on nueCC48).  C++
+    // default stays false; -A fit_exclusion=false (or SBND_FIT_EXCLUSION=false)
+    // restores the pre-flip production path byte-exactly (doc pr/98 §10).
+    fit_exclusion = true,
     graph_endpoint_strict = false,
     graph_endpoint_tol = null,
     // **SBND PRODUCTION DEFAULT ON, owner 2026-08-04** (doc pr/30 §12.10).
