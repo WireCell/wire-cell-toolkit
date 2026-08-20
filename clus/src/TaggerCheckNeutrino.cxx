@@ -442,6 +442,7 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     // doc pr/94 Phase 2: see the member comments in the header.
     m_nu_per_bundle = get(config, "nu_per_bundle", m_nu_per_bundle);
     m_nu_per_bundle_demoted_acts = get(config, "nu_per_bundle_demoted_acts", m_nu_per_bundle_demoted_acts);
+    m_nu_per_bundle_min_length = get(config, "nu_per_bundle_min_length", m_nu_per_bundle_min_length);  // cm
     m_sp_photon_flag          = get(config, "sp_photon_flag",          m_sp_photon_flag);
 
     // ---- doc sbnd_xin/docs/pr/36 §10 tagger-stage knobs ---------------------
@@ -810,6 +811,7 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["nu_fallback_demoted_mains"] = m_nu_fallback_demoted_mains;    // docs/73 sec 12 round 3; when NO candidate survives, consider demoted mains (same gates); false = legacy
     cfg["nu_per_bundle"]             = m_nu_per_bundle;                // doc pr/94; false = legacy single event-wide candidate
     cfg["nu_per_bundle_demoted_acts"] = m_nu_per_bundle_demoted_acts;  // doc pr/94; mirror of the taggers' evaluate_demoted_mains; inert unless nu_per_bundle
+    cfg["nu_per_bundle_min_length"] = m_nu_per_bundle_min_length;      // doc pr/94 Phase 5b round 2; cm; length floor for a per-bundle candidate, exempting the legacy event-wide winner; 0 = none
     cfg["sp_photon_flag"] = m_sp_photon_flag;     // doc pr/26 sec. 8.2; store singlephoton_tagger()'s verdict in TaggerInfo::photon_flag (prototype NeutrinoID.cxx:271)
     // doc sbnd_xin/docs/pr/36 §10.
     cfg["fiducial"] = Json::Value();                 // null = the historical FiducialUtils containment fallback
@@ -1177,6 +1179,73 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
         // Determinism: gids are int-keyed and visited in sorted order, and
         // within a gid clusters are visited in grouping.children() order with a
         // length tie-break.  No pointer-keyed container is iterated.
+        // doc pr/94 Phase 5b round 2: the legacy event-wide winner, recomputed
+        // here purely so the length floor below can EXEMPT it.  This is a
+        // deliberate full duplication of the legacy selector at :999-1135 (M10:
+        // the production branch stays textually untouched) with the logging and
+        // the accumulator side effects stripped -- it must stay in step with
+        // that code, and the primary-row gate is what proves it has.
+        //
+        // Why the exemption cannot be replaced by any length rule: mcp1k evt
+        // 62583 keeps a 1.6 cm row and evt 391854 must lose a 1.7 cm row.  The
+        // only thing separating them is that 62583's IS the legacy selection
+        // and 391854's is not.  Exempting it makes additivity structural: the
+        // row the legacy chain reports can never be floored away.
+        Cluster* legacy_main = nullptr;
+        {
+            std::set<int> cg;   // int-keyed => stable iteration
+            if (m_nu_skip_cosmic && m_nu_skip_cosmic_bundle) {
+                for (auto* c : grouping.children()) {
+                    if (!c->get_flag(Flags::main_cluster)) continue;
+                    const double t0c = c->get_cluster_t0();
+                    if (t0c < m_beam_window_low || t0c >= m_beam_window_high) continue;
+                    const int gid = c->get_scalar<int>("matched_flash_gid", -1);
+                    if (gid < 0) continue;
+                    if (c->get_flag(Flags::TGM) || c->get_flag(Flags::STM)
+                        || c->get_scalar<int>("lm_flag", -1) > 0) {
+                        cg.insert(gid);
+                    }
+                }
+            }
+            const double bundle_min_len = m_nu_skip_cosmic_bundle_min_length * units::cm;
+            auto survives = [&](Cluster* c) {
+                if (!m_nu_skip_cosmic) return true;
+                if (c->get_flag(Flags::TGM) || c->get_flag(Flags::STM)
+                    || c->get_scalar<int>("lm_flag", -1) > 0) return false;
+                if (!cg.empty()) {
+                    const int gid = c->get_scalar<int>("matched_flash_gid", -1);
+                    if (gid >= 0 && cg.count(gid)
+                        && !(bundle_min_len > 0 && c->get_length() >= bundle_min_len)) {
+                        return false;
+                    }
+                }
+                return true;
+            };
+            for (auto* c : grouping.children()) {
+                if (!c->get_flag(Flags::main_cluster)) continue;
+                const double t0c = c->get_cluster_t0();
+                if (t0c < m_beam_window_low || t0c >= m_beam_window_high) continue;
+                if (!survives(c)) continue;
+                if (!legacy_main || c->get_length() > legacy_main->get_length()) legacy_main = c;
+            }
+            if (!legacy_main && m_nu_fallback_demoted_mains) {
+                for (auto* c : grouping.children()) {
+                    if (c->get_flag(Flags::main_cluster)) continue;
+                    if (!c->get_flag(Flags::demoted_main)) continue;
+                    const double t0c = c->get_cluster_t0();
+                    if (t0c < m_beam_window_low || t0c >= m_beam_window_high) continue;
+                    if (!survives(c)) continue;
+                    if (!legacy_main || c->get_length() > legacy_main->get_length()) legacy_main = c;
+                }
+            }
+            if (legacy_main && m_nu_per_bundle_min_length > 0) {
+                SPDLOG_LOGGER_INFO(log, "TaggerCheckNeutrino: [nu_per_bundle] legacy winner is cluster {} (L {:.1f} cm); it is exempt from the {:.1f} cm floor",
+                                   legacy_main->get_cluster_id(),
+                                   legacy_main->get_length()/units::cm,
+                                   m_nu_per_bundle_min_length);
+            }
+        }
+
         std::map<int, std::vector<Cluster*>> gid_mains;    // in-window mains
         std::map<int, std::vector<Cluster*>> gid_demoted;  // in-window demoted mains
         for (auto* cluster : grouping.children()) {
@@ -1224,6 +1293,8 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
             if (mit != gid_mains.end()) add_acts(mit->second, 0);
             if (dit != gid_demoted.end()) add_acts(dit->second, 1);
 
+            const double per_bundle_min_len = m_nu_per_bundle_min_length * units::cm;
+
             auto pick = [&](const std::vector<Cluster*>& v) -> Cluster* {
                 Cluster* best = nullptr;
                 for (auto* c : v) {
@@ -1236,6 +1307,21 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
                                                gid, c->get_cluster_id(), c->get_length()/units::cm, tgm, stm, lm);
                             continue;
                         }
+                    }
+                    // The dot guard.  Without it, dropping the bundle veto
+                    // promotes sub-cm blobs to "the neutrino" of their bundle
+                    // -- they fit as a muon at rest (~107 MeV) and place the
+                    // vertex on a dot (mcp1k evt 391854: 1.7 cm -> 108.9 MeV).
+                    // The legacy winner is exempt, so this can only ever remove
+                    // rows per-bundle mode ADDS, never a row the legacy chain
+                    // reports; the two cannot be told apart by length alone
+                    // (see the legacy_main derivation above).
+                    if (c != legacy_main && per_bundle_min_len > 0
+                        && c->get_length() < per_bundle_min_len) {
+                        SPDLOG_LOGGER_INFO(log, "TaggerCheckNeutrino: [nu_per_bundle] gid {} activity {} (L {:.1f} cm) is under the {:.1f} cm floor and is not the legacy winner; not a candidate (nu_per_bundle_min_length)",
+                                           gid, c->get_cluster_id(), c->get_length()/units::cm,
+                                           m_nu_per_bundle_min_length);
+                        continue;
                     }
                     if (!best || c->get_length() > best->get_length()) best = c;
                 }

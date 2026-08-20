@@ -1256,6 +1256,7 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               // cosmic-flag T_tagger branches (tagger_output only, plumbing
               // only -- nothing populates them yet).  C++ default false.
               nu_per_bundle=false,
+              nu_per_bundle_min_length=null,   // doc pr/94 Phase 5b; cm; null => C++ default 0 (no floor)
               // ---- doc sbnd_xin/docs/pr/33 §10 EM-shower-clustering knobs.
               // All C++ default false = keys omitted = byte-identical
               // pre-knob config.
@@ -2116,6 +2117,7 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
             // cosmic taggers actually used.
             nu_per_bundle=nu_per_bundle,
             nu_per_bundle_demoted_acts=evaluate_demoted_mains,
+            nu_per_bundle_min_length=nu_per_bundle_min_length,
             sp_photon_flag=sp_photon_flag,
             dir_weak_use_score=dir_weak_use_score,
             mip_dqdx=mip_dqdx,
@@ -3035,6 +3037,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
        // T_tagger branches (tagger_output only, plumbing only).  C++
        // default false; key omitted when off => byte-identical.
        nu_per_bundle=false,
+       nu_per_bundle_min_length=null,   // doc pr/94 Phase 5b; cm; null => C++ default 0 (no floor)
        // doc pr/33 sec 10 EM-shower-clustering knobs -- see the clus_pr arg
        // comments.  All false = keys omitted = byte-identical pre-knob
        // config.
@@ -3507,6 +3510,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 broken_muon_cluster_id_count=broken_muon_cluster_id_count,
                 neutrino_type_bitmask=neutrino_type_bitmask,
                 nu_per_bundle=nu_per_bundle,
+                nu_per_bundle_min_length=nu_per_bundle_min_length,
                 daughter_count_proto_main_vertex=daughter_count_proto_main_vertex,
                 daughter_count_proto_examine_showers=daughter_count_proto_examine_showers,
                 shower_pdg_from_start_segment=shower_pdg_from_start_segment,

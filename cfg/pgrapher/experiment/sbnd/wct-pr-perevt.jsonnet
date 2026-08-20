@@ -1096,6 +1096,20 @@ function(
     // gates) are reported and accepted -- see
     // sbnd_xin/docs/pr/94_per-bundle-neutrino-cosmic-flags.md.
     nu_per_bundle = false,
+    // doc pr/94 Phase 5b round 2 -- the dot guard.  Length floor (cm) for a
+    // per-bundle candidate, exempting the legacy event-wide winner (so the
+    // row the legacy chain reports can never be floored away).  Without it,
+    // per-bundle mode promoted sub-cm blobs: on 1000 mcp1k events round 1
+    // added 143 candidates, ALL with a seed under 5 cm and 87 reconstructing
+    // to 100-149 MeV -- a dot fitted as a muon at rest; round 2 (this
+    // exemption) took that to 0.  KNOWN OPEN ISSUE at this value (doc pr/94
+    // sec 9.8, unrelated to the floor): a per-bundle candidate can inherit
+    // a bright cosmic-mate's flash gid via ClusteringExamineBundles' flash-t0
+    // merge (80 ns window, no spatial check) despite being independently
+    // matched to a DIFFERENT, weaker flash of its own -- confirmed on mcp2k
+    // evt 73038, not yet fixed; nu_per_bundle stays false in production
+    // until it is.  null => C++ default 0 = no floor.
+    nu_per_bundle_min_length = 15,
     // ---- doc sbnd_xin/docs/pr/33 sec 11 EM-shower-clustering knobs, ALL ON
     // (owner 2026-08-05; see the sbnd clus.jsonnet clus_pr arg comments).
     // Gate labels: work-pr33-base48 (clean-HEAD binary) vs work-pr33-off48
@@ -2376,6 +2390,7 @@ function(
                              broken_muon_cluster_id_count=broken_muon_cluster_id_count,
                              neutrino_type_bitmask=neutrino_type_bitmask,
                              nu_per_bundle=nu_per_bundle,
+                             nu_per_bundle_min_length=nu_per_bundle_min_length,
                              daughter_count_proto_main_vertex=daughter_count_proto_main_vertex,
                              daughter_count_proto_examine_showers=daughter_count_proto_examine_showers,
                              shower_pdg_from_start_segment=shower_pdg_from_start_segment,

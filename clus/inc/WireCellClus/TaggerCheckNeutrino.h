@@ -560,6 +560,39 @@ public:
         // clean sibling.  Every evaluated activity's verdict is reported in
         // its own TaggerInfo::act_* slot instead of vetoing anything.
         bool m_nu_per_bundle{false};
+        // ---- doc pr/94 Phase 5b round 2: the dot guard ------------------ //
+        // cm.  Minimum length for a per-bundle candidate to be selectable,
+        // UNLESS it is the same activity the legacy event-wide selector would
+        // have picked (see `legacy_main` in the .cxx).  0 = no floor.
+        //
+        // Why this is needed.  Dropping the event-level bundle veto (see
+        // m_nu_per_bundle above) drops the ONLY thing that kept a sub-cm blob
+        // inside a cosmic bundle from being promoted to "the neutrino": SBND
+        // leaves nu_skip_cosmic_bundle_min_length at 0, i.e. the legacy veto
+        // removes EVERY bundle-mate of a convicted main regardless of length,
+        // and the chain then reaches the real interaction through the
+        // demoted-main fallback.  Measured on 1000 mcp1k events, per-bundle
+        // mode without this floor added 143 candidates of which 143 had a
+        // seed under 5 cm and 87 reconstructed to 100-149 MeV -- the muon
+        // rest mass plus a few MeV, i.e. a dot fitted as a muon at rest.
+        // Only 1 of the 97 non-cosmic-flagged ones scored numu_score > 0.
+        //
+        // Why "exempt the legacy winner" and not "exempt convicted bundles":
+        // round 1 scoped the floor to bundles holding a cosmic-tagged MAIN
+        // (not demoted), which is provably additive when
+        // nu_skip_cosmic_bundle_min_length=0 (legacy emits nothing from such
+        // a bundle).  But mcp1k evt 114446 disproved that as sufficient: its
+        // legacy-selected 10.9 cm candidate shares a bundle with a cosmic
+        // sibling that is DEMOTED, not main, so round 1 wrongly floored it
+        // away -- an additivity violation, not a dot removal (8 events lost a
+        // vertex on mcp1k).  Round 2 exempts the legacy winner directly
+        // (recomputed as a side-effect-free duplicate of the legacy selector,
+        // M10): mcp1k evt 62583 keeps a 1.6 cm row (it IS the legacy row)
+        // while evt 391854 loses a 1.7 cm row (it is NOT) -- no length or
+        // bundle-conviction rule can tell those apart, only "is this the
+        // legacy selection" can.  This makes additivity structural: the row
+        // the legacy chain reports can never be floored away.
+        double m_nu_per_bundle_min_length{0};
         // Mirrors the cosmic taggers' evaluate_demoted_mains admission gate so
         // TaggerInfo::act_evaluated can be exact.  The taggers set a flag only
         // on a POSITIVE verdict, so a missing TGM/STM/FC flag cannot by itself
