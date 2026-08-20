@@ -546,9 +546,22 @@ namespace WireCell::Clus {
         /// walk also refreshes m_cov_vtx_info (graph vertex positions +
         /// degrees) for the deweight sentinel diagnostics.
         void rebuild_cov_fit_scope(const std::shared_ptr<PR::Segment>& seg);
+        /// doc pr/98 perf: the keep/strip decision depends only on (cell,
+        /// segment) -- never on the fit point -- and every segment cloud is
+        /// static while ONE segment's fit points are processed (its own
+        /// set_fit_associate_vec runs after its loop; other segments' ran
+        /// before or run after).  Consecutive fit points re-claim the same
+        /// cells, so form_map_graph passes a per-segment decision cache.
+        /// nullptr disables caching (identical decisions either way).
+        /// Keyed by the packed (apa,face,plane,wire,time) identity of a
+        /// Coord2D (see exclusion_cache_key in TrackFitting.cxx) -- an
+        /// unordered_map on one integer beats std::map's Coord2D
+        /// operator< chain in the pr/98 profile.
+        using ExclusionDecisionCache = std::unordered_map<uint64_t, bool>;
         void update_association(std::shared_ptr<PR::Segment> segment,
                                 const std::vector<std::shared_ptr<PR::Segment>>& all_segments,
-                                PlaneData& temp_2dut, PlaneData& temp_2dvt, PlaneData& temp_2dwt);
+                                PlaneData& temp_2dut, PlaneData& temp_2dvt, PlaneData& temp_2dwt,
+                                ExclusionDecisionCache* decision_cache = nullptr);
 
         void form_map(std::vector<std::pair<WireCell::Point, std::shared_ptr<PR::Segment>>>& ptss, double end_point_factor=0.6, double mid_point_factor=0.9, int nlevel=3, double time_tick_cut=20, double charge_cut=2000);
         void form_map_graph(bool flag_exclusion, double end_point_factor=0.6, double mid_point_factor=0.9, int nlevel=3, double time_tick_cut=20, double charge_cut=2000);
