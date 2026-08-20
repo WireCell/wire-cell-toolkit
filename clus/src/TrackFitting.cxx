@@ -2654,18 +2654,48 @@ void TrackFitting::organize_ps_path(std::shared_ptr<PR::Segment> segment, std::v
 
  }
 
+// doc pr/98 perf: one kd query for the ONE plane the calling loop consumes,
+// instead of segment_get_closest_2d_distances' three (the prototype also
+// queries a single plane, ProtoSegment::get_closest_2d_dis(x,y,plane)).
+// Same cloud fallback as the tuple helper, plus the pr/98 sentinel guard:
+// absent/empty cloud OR empty per-plane tree (the -1.0 return) => 1e9 = "no
+// measurement", the prototype's empty-tree answer (ToyPointCloud.cxx:415-437).
+static double exclusion_closest_2d_dis(const std::shared_ptr<PR::Segment>& seg,
+                                       const WireCell::Point& p, int apa, int face, int plane)
+{
+    auto dpc = seg->dpcloud("fit");
+    if (!dpc || dpc->npoints() == 0) dpc = seg->dpcloud("main");
+    if (!dpc || dpc->npoints() == 0) return 1e9;
+    const double d = std::get<0>(dpc->get_closest_2d_point_info(p, plane, face, apa));
+    return d < 0 ? 1e9 : d;
+}
+
 void TrackFitting::update_association(std::shared_ptr<PR::Segment> segment,
                                       const std::vector<std::shared_ptr<PR::Segment>>& all_segments,
                                       PlaneData& temp_2dut, PlaneData& temp_2dvt, PlaneData& temp_2dwt){
     if (!m_graph || !segment) return;
 
-    // Get cluster and transformation info
-    auto cluster = segment->cluster();
-    const auto transform = m_pcts->pc_transform(cluster->get_scope_transform(cluster->get_default_scope()));
-    // double cluster_t0 = cluster->get_cluster_t0();
+    // doc pr/98: the former `cluster`/`transform` locals here were dead (never
+    // read below; the prototype's update_association takes no transform either,
+    // PR3DCluster_multi_track_fitting.h:970) and their m_pcts dereference was
+    // the only obstacle to a fixture-level doctest.  Removed.
 
     // all_segments is pre-built by the caller (form_map_graph) and shared across all points
     // of a segment, avoiding a redundant O(S) rebuild per fit point (S3.4.1).
+    // It comes from get_segment_edges(), which m_cluster_filter restricts to the
+    // fitted cluster's own segments -- the same-cluster arbitration the prototype
+    // enforces via its get_cluster_id() filter (PR3DCluster_multi_track_fitting.h:739-748).
+    // Every m_fit_exclusion call site passes a cluster filter; an exclusion call with a
+    // nullptr filter would arbitrate against the whole graph and diverge from the prototype.
+
+    // doc pr/98: DynamicPointCloud::get_closest_2d_point_info returns a -1.0
+    // sentinel when a segment has no points at the queried (plane,face,apa) --
+    // e.g. a competitor segment on the other drift face.  The prototype's
+    // ToyPointCloud::get_closest_2d_dis returns 1e9 there (empty kd-tree,
+    // prototype data/src/ToyPointCloud.cxx:415-437), i.e. "no measurement".
+    // Unguarded, the -1.0 poisons min_dis1_track (one cross-face competitor
+    // strips every cell beyond the 0.3 cm floor) and inverts min_dis_track
+    // (always-keep).  Map negatives to 1e9 for prototype parity.
 
     // Process U plane (plane 0)
     std::set<Coord2D> save_2dut;
@@ -2691,14 +2721,12 @@ void TrackFitting::update_association(std::shared_ptr<PR::Segment> segment,
 
         WireCell::Point test_point(raw_x, raw_y, 0);
 
-        auto main_distances = segment_get_closest_2d_distances(segment, test_point, apa, face, "fit");
-        double min_dis_track = std::get<0>(main_distances);
+        double min_dis_track = exclusion_closest_2d_dis(segment, test_point, apa, face, 0);
 
         double min_dis1_track = 1e9;
         for (const auto& other_seg : all_segments) {
             if (other_seg == segment) continue;
-            auto other_distances = segment_get_closest_2d_distances(other_seg, test_point, apa, face, "fit");
-            double temp_dis = std::get<0>(other_distances);
+            double temp_dis = exclusion_closest_2d_dis(other_seg, test_point, apa, face, 0);
             if (temp_dis < min_dis1_track) {
                 min_dis1_track = temp_dis;
             }
@@ -2732,14 +2760,12 @@ void TrackFitting::update_association(std::shared_ptr<PR::Segment> segment,
         double raw_y = (coord.wire - offset_v)/slope_yv;
         WireCell::Point test_point(raw_x, raw_y, 0);
 
-        auto main_distances = segment_get_closest_2d_distances(segment, test_point, apa, face, "fit");
-        double min_dis_track = std::get<1>(main_distances);
+        double min_dis_track = exclusion_closest_2d_dis(segment, test_point, apa, face, 1);
 
         double min_dis1_track = 1e9;
         for (const auto& other_seg : all_segments) {
             if (other_seg == segment) continue;
-            auto other_distances = segment_get_closest_2d_distances(other_seg, test_point, apa, face, "fit");
-            double temp_dis = std::get<1>(other_distances);
+            double temp_dis = exclusion_closest_2d_dis(other_seg, test_point, apa, face, 1);
             if (temp_dis < min_dis1_track) {
                 min_dis1_track = temp_dis;
             }
@@ -2775,14 +2801,12 @@ void TrackFitting::update_association(std::shared_ptr<PR::Segment> segment,
         double raw_z = (coord.wire - offset_w) / slope_zw;
         WireCell::Point test_point(raw_x, 0, raw_z);
 
-        auto main_distances = segment_get_closest_2d_distances(segment, test_point, apa, face, "fit");
-        double min_dis_track = std::get<2>(main_distances);
+        double min_dis_track = exclusion_closest_2d_dis(segment, test_point, apa, face, 2);
 
         double min_dis1_track = 1e9;
         for (const auto& other_seg : all_segments) {
             if (other_seg == segment) continue;
-            auto other_distances = segment_get_closest_2d_distances(other_seg, test_point, apa, face, "fit");
-            double temp_dis = std::get<2>(other_distances);
+            double temp_dis = exclusion_closest_2d_dis(other_seg, test_point, apa, face, 2);
             if (temp_dis < min_dis1_track) {
                 min_dis1_track = temp_dis;
             }

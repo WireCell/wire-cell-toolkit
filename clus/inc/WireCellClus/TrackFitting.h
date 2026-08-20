@@ -729,6 +729,12 @@ namespace WireCell::Clus {
         const std::map<WirePlaneId, std::tuple<double, std::pair<double, double>, std::pair<double, double>, std::pair<double, double>>>& get_wpid_slopes() const { return wpid_slopes; }
 
     private:
+        // doc pr/98: test seam.  Lets the update_association doctest inject
+        // synthetic wpid_offsets/wpid_slopes without a detector-volumes
+        // fixture (BuildGeometry needs live IDetectorVolumes).  Declared
+        // here only; defined in clus/test/doctest_update_association.cxx.
+        friend struct TrackFittingTestHarness;
+
          // Core parameters - centralized storage
         Parameters m_params;
 
