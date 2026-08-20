@@ -3681,6 +3681,9 @@ void PatternAlgorithms::id_pi0_with_vertex(int& acc_segment_id, IndexedShowerSet
                                               map_vertex_to_shower.at(vtx).end());
         std::sort(sorted_showers.begin(), sorted_showers.end(), shower_cmp);
         for (auto shower : sorted_showers) {
+            // doc pr/99 round 3 (A5): re-typed hadronic showers never enter
+            // pi0 pairing; empty set (tag off) => no-op, byte-identical.
+            if (m_hadronic_retyped_shower_ids.count(shower->get_shower_id())) continue;
             auto [start_vtx, conn_type] = get_svc(shower);
             if (conn_type == 2 && std::abs(shower->get_particle_type()) != 13) {
                 disconnected_showers.insert(shower);
@@ -3716,6 +3719,9 @@ void PatternAlgorithms::id_pi0_with_vertex(int& acc_segment_id, IndexedShowerSet
             std::vector<ShowerPtr> sv(it2->second.begin(), it2->second.end());
             std::sort(sv.begin(), sv.end(), shower_cmp);
             for (auto shower : sv) {
+                // doc pr/99 round 3 (A5): re-typed hadronic showers never enter
+                // pi0 pairing; empty set (tag off) => no-op, byte-identical.
+                if (m_hadronic_retyped_shower_ids.count(shower->get_shower_id())) continue;
                 auto [start_vtx, conn_type] = get_svc(shower);
                 if (conn_type == 1 && std::abs(shower->get_particle_type()) != 13) {
                     tmp_showers.push_back(shower);
@@ -3998,6 +4004,9 @@ void PatternAlgorithms::id_pi0_without_vertex(int& acc_segment_id, IndexedShower
             for (auto shower : it->second) {
                 if (pi0_showers.find(shower) != pi0_showers.end()) return;
 
+                // doc pr/99 round 3 (A5): re-typed hadronic showers never enter
+                // pi0 pairing; empty set (tag off) => no-op, byte-identical.
+                if (m_hadronic_retyped_shower_ids.count(shower->get_shower_id())) continue;
                 auto [start_vtx, conn_type] = shower->get_start_vertex_and_type();
                 if (conn_type == 1) {
                     good_showers.insert(shower);
@@ -4078,6 +4087,9 @@ void PatternAlgorithms::id_pi0_without_vertex(int& acc_segment_id, IndexedShower
         if (vtx == main_vertex) continue;
         
         for (auto shower : shower_set) {
+            // doc pr/99 round 3 (A5): re-typed hadronic showers never enter
+            // pi0 pairing; empty set (tag off) => no-op, byte-identical.
+            if (m_hadronic_retyped_shower_ids.count(shower->get_shower_id())) continue;
             // doc pr/33 F2: prototype reads the start segment's PDG here
             // (NeutrinoID_shower_clustering.h:511, exact ==13).
             {
@@ -4346,6 +4358,11 @@ void PatternAlgorithms::id_pi0_without_vertex(int& acc_segment_id, IndexedShower
 
 
 void PatternAlgorithms::shower_clustering_with_nv(int acc_segment_id, IndexedShowerSet& pi0_showers, ShowerIntMap& map_shower_pio_id, std::map<int, std::vector<ShowerPtr > >& map_pio_id_showers, std::map<int, std::pair<double, int> >& map_pio_id_mass, std::map<int, std::pair<int, int> >& map_pio_id_saved_pair, Pi0KineFeatures& pio_kine, IndexedVertexSet& vertices_in_long_muon, IndexedSegmentSet& segments_in_long_muon, Graph& graph, VertexPtr main_vertex, IndexedShowerSet& showers, Facade::Cluster* main_cluster, std::vector<Facade::Cluster*>& other_clusters, ClusterVertexMap map_cluster_main_vertices, ShowerVertexMap& map_vertex_in_shower, ShowerSegmentMap& map_segment_in_shower, VertexShowerSetMap& map_vertex_to_shower, ClusterPtrSet& used_shower_clusters, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model){
+    // doc pr/99 round 3 (A5): per-event state; nonempty only while
+    // m_shower_hadronic_tag fired this event, so the clear is a no-op on the
+    // legacy path (byte-identical).
+    m_hadronic_retyped_shower_ids.clear();
+
     // Diagnostic: print dirsign for all main-cluster segments at entry,
     // to verify examine_direction() ran correctly before this call.
     if (main_cluster) {
@@ -4890,6 +4907,236 @@ void PatternAlgorithms::shower_clustering_with_nv(int acc_segment_id, IndexedSho
                 "pr99 ghost_member: {} member(s) dropped; maps rebuilt", n_ghost_dropped);
         }
     }
+
+    // doc pr/99 round 3 (A5, shower_hadronic_tag).  Design block at the
+    // m_shower_hadronic_* members (NeutrinoPatternBase.h).  For every
+    // claimed-EM conn-1 shower, walk the trajectory (fit-cloud points, arc
+    // proxy s = |p - start_vtx|, the recipe of the validated python scan
+    // sbnd_xin/scripts/analysis/pr99/pr99_transition_scan.py) and measure
+    // (i) in-cylinder 3D imaged-point population growth over the first
+    // scan_len (union of Cluster::kd_radius hits over {main, other}
+    // clusters, per-cluster point-index dedup) and (ii) the terminal Bragg
+    // rise of the member fits' median dQ/dx.  Hadronic verdict stamps the
+    // START segment pdg 211 (the pi0 incoming-track stamp recipe) plus the
+    // shower's cached type, and registers the shower id for the pi0-finder
+    // guards.  Placed BEFORE the kine recompute and the pi0 finders.  A
+    // DEBUG census line is emitted for every evaluated shower.  C++ default
+    // false => no pass => byte-identical.
+    if (m_shower_hadronic_tag && m_shower_hadronic_bin > 0) {
+        std::vector<Facade::Cluster*> cluster_pool;
+        if (main_cluster) cluster_pool.push_back(main_cluster);
+        for (auto* oc : other_clusters) if (oc) cluster_pool.push_back(oc);
+
+        // Event-level cloud of EVERY graph segment's fit points, with a
+        // parallel row -> segment-graph-index map (append order preserved
+        // by add_points), for the ownership test below.
+        std::shared_ptr<Facade::DynamicPointCloud> all_fit;
+        std::vector<size_t> row2segidx;
+        for (auto e : ordered_edges(graph)) {
+            SegmentPtr sg = graph[e].segment;
+            if (!sg || !sg->descriptor_valid()) continue;
+            auto dpc = sg->dpcloud("fit");
+            if (!dpc || !dpc->npoints()) continue;
+            if (!all_fit) {
+                all_fit = std::make_shared<Facade::DynamicPointCloud>(dpc->get_wpid_params());
+            } else {
+                all_fit->merge_wpid_params(*dpc);
+            }
+            all_fit->add_points(*dpc);
+            row2segidx.resize(all_fit->npoints(), graph[sg->get_descriptor()].index);
+        }
+
+        int n_retyped = 0;
+        for (auto& shower : showers) {                       // IndexedShowerSet order
+            if (!shower) continue;
+            if (std::abs(shower->get_particle_type()) != 11) continue;
+            auto [start_vtx, conn_type] = shower->get_start_vertex_and_type();
+            if (conn_type != 1 || !start_vtx) continue;
+            SegmentPtr ss = shower->start_segment();
+            if (!ss || !ss->descriptor_valid()) continue;
+            if (segments_in_long_muon.count(ss)) continue;
+            if (!ss->has_particle_info() || !ss->particle_info()) continue;
+
+            auto fit_pc = shower->get_pcloud("fit");
+            if (!fit_pc || fit_pc->npoints() < 2) continue;
+
+            const WireCell::Point vp = start_vtx->fit().valid()
+                ? start_vtx->fit().point : start_vtx->wcpt().point;
+
+            const size_t npts = fit_pc->npoints();
+            std::vector<double> s_arc(npts);
+            double smax = 0;
+            for (size_t i = 0; i < npts; ++i) {
+                const WireCell::Point p = fit_pc->point3d(i);
+                s_arc[i] = (p - vp).magnitude();
+                if (s_arc[i] > smax) smax = s_arc[i];
+            }
+            if (smax < m_shower_hadronic_min_len) continue;  // too short to judge
+
+            // Member set for the ownership test: this shower's segment
+            // graph indices.
+            std::set<size_t> member_idx;
+            for (auto edesc : ordered_edges(*shower, graph)) {
+                SegmentPtr sg = graph[edesc].segment;
+                if (sg && sg->descriptor_valid()) member_idx.insert(graph[sg->get_descriptor()].index);
+            }
+
+            // (i) growth: per-bin union population within r_cyl of the
+            // bin's axis points, over the scan window only -- OWNERSHIP-
+            // filtered: an imaged point counts only if its nearest fit
+            // point (over ALL graph segments, all_fit cloud above) belongs
+            // to a member segment.  Calibration (doc pr/99 r3): without the
+            // filter, vertex-region activity from OTHER prongs inflates a
+            // real electron's early bins and fakes a shrinking profile
+            // (46363: 2365->335 raw but member-owned growth 3.1); with it,
+            // all 36 nue-selected primaries read >= 2.3 while the misID'd
+            // hadrons read <= 0.7.
+            const double scan_len = std::min(smax, m_shower_hadronic_scan_len);
+            const int nbins = std::max(1, static_cast<int>(std::ceil(scan_len / m_shower_hadronic_bin)));
+            std::vector<double> bin_n(nbins, 0.0);
+            for (size_t ci = 0; ci < cluster_pool.size(); ++ci) {
+                const Facade::Cluster* cl = cluster_pool[ci];
+                std::vector<std::set<size_t>> uniq(nbins);
+                for (size_t i = 0; i < npts; ++i) {
+                    if (s_arc[i] >= scan_len) continue;
+                    const int b = std::min(nbins - 1, static_cast<int>(s_arc[i] / m_shower_hadronic_bin));
+                    const WireCell::Point p = fit_pc->point3d(i);
+                    for (const auto& [pidx, dist2] : cl->kd_radius(m_shower_hadronic_r_cyl, p)) {
+                        uniq[b].insert(pidx);
+                    }
+                }
+                const auto& cpts = cl->points();
+                for (int b = 0; b < nbins; ++b) {
+                    for (size_t pidx : uniq[b]) {
+                        if (all_fit && !row2segidx.empty()) {
+                            const WireCell::Point q(cpts[0][pidx], cpts[1][pidx], cpts[2][pidx]);
+                            auto rr = all_fit->kd3d().knn(1, q);
+                            if (rr.empty()) continue;
+                            const size_t row = rr[0].first;
+                            if (row >= row2segidx.size() || !member_idx.count(row2segidx[row])) continue;
+                        }
+                        bin_n[b] += 1.0;
+                    }
+                }
+            }
+            double n_early = 0, n_late = 0;
+            for (int b = 0; b < nbins; ++b) {
+                if ((b + 0.5) * m_shower_hadronic_bin < 0.5 * scan_len) n_early += bin_n[b];
+                else n_late += bin_n[b];
+            }
+            // ends-ratio (the round-1/calibration definition): mean of the
+            // last two populated bins over mean of the first two.
+            double g_first = 0, g_last = 0;
+            {
+                int nf = 0, nl = 0;
+                for (int b = 0; b < std::min(2, nbins); ++b)
+                    if (bin_n[b] > 0) { g_first += bin_n[b]; ++nf; }
+                for (int b = std::max(0, nbins - 2); b < nbins; ++b)
+                    if (bin_n[b] > 0) { g_last += bin_n[b]; ++nl; }
+                if (nf) g_first /= nf;
+                if (nl) g_last /= nl;
+            }
+            const bool has_growth = (g_first > 0 && g_last > 0);
+            const double growth = has_growth ? g_last / g_first : -1.0;
+
+            // (ii) terminal Bragg: per-bin median member-fit dQ/dx over the
+            // FULL trajectory; trunk = median of bins excluding the last
+            // two, term = max of the last two.
+            const int nbins_full = std::max(1, static_cast<int>(std::ceil(smax / m_shower_hadronic_bin)));
+            std::vector<std::vector<double>> bin_dqdx(nbins_full);
+            for (auto edesc : ordered_edges(*shower, graph)) {
+                SegmentPtr sg = graph[edesc].segment;
+                if (!sg || !sg->descriptor_valid()) continue;
+                for (const auto& f : sg->fits()) {
+                    if (!f.valid() || f.dx <= 0) continue;
+                    const double sv = (f.point - vp).magnitude();
+                    if (sv >= smax) continue;
+                    const int b = std::min(nbins_full - 1, static_cast<int>(sv / m_shower_hadronic_bin));
+                    bin_dqdx[b].push_back(f.dQ / f.dx);
+                }
+            }
+            auto bin_med = [&](int b) -> double {
+                auto& v = bin_dqdx[b];
+                if (v.empty()) return -1.0;
+                std::sort(v.begin(), v.end());
+                return v[v.size() / 2];
+            };
+            std::vector<double> trunk_meds;
+            double dqdx_term = -1.0;
+            for (int b = 0; b < nbins_full; ++b) {
+                const double m = bin_med(b);
+                if (m < 0) continue;
+                if (b < nbins_full - 2) trunk_meds.push_back(m);
+                else if (m > dqdx_term) dqdx_term = m;
+            }
+            double dqdx_trunk = -1.0;
+            if (!trunk_meds.empty()) {
+                std::sort(trunk_meds.begin(), trunk_meds.end());
+                dqdx_trunk = trunk_meds[trunk_meds.size() / 2];
+            }
+            const double bragg = (dqdx_trunk > 0 && dqdx_term > 0) ? dqdx_term / dqdx_trunk : -1.0;
+
+            // Proton-like stem branch (395148: stem 3.2 x MIP, growth 0.87
+            // -- above the main cut but hadronic).  Pair-conversion gamma
+            // stems read ~2 x MIP, so the production value 3.0 keeps 1.5x
+            // margin on gammas; high-stem REAL primaries are protected by
+            // the growth ceiling (their measured growth >= 2.78).
+            double stem_med = -1.0;
+            if (m_shower_hadronic_stem_ratio > 0) {
+                auto stem = shower->get_stem_dQ_dx(start_vtx, ss, 20, m_mip_dqdx_median);
+                if (stem.size() >= 2) {
+                    std::vector<double> head(stem.begin(),
+                                             stem.begin() + std::min<size_t>(6, stem.size()));
+                    std::sort(head.begin(), head.end());
+                    stem_med = head[head.size() / 2];
+                }
+            }
+
+            const bool verdict = has_growth
+                && (growth < m_shower_hadronic_growth_max
+                    || (bragg >= m_shower_hadronic_bragg_ratio
+                        && growth < m_shower_hadronic_growth_bragg)
+                    || (m_shower_hadronic_stem_ratio > 0
+                        && stem_med >= m_shower_hadronic_stem_ratio
+                        && growth < m_shower_hadronic_growth_bragg));
+
+            SPDLOG_LOGGER_DEBUG(s_log,
+                "A5 hadronic census: shower id={} pdg={} conn={} nseg={} smax={:.1f}cm "
+                "growth={:.2f} n_early={:.0f} n_late={:.0f} dqdx_trunk={:.0f} dqdx_term={:.0f} "
+                "bragg={:.2f} stem={:.2f} verdict={}",
+                shower->get_shower_id(), shower->get_particle_type(), conn_type,
+                shower->get_num_segments(), smax / units::cm,
+                growth, n_early, n_late, dqdx_trunk, dqdx_term, bragg, stem_med, verdict ? 1 : 0);
+
+            if (!verdict) continue;
+
+            // Stamp: the pi0 incoming-track recipe (this file, id_pi0 stamp).
+            ss->particle_info()->set_pdg(211);
+            ss->particle_info()->set_mass(139.57 * units::MeV);
+            if (ss->particle_info()->kinetic_energy() > 0) {
+                auto four_momentum = segment_cal_4mom(ss, 211, particle_data, recomb_model, m_mip_dqdx);
+                ss->particle_info()->set_four_momentum(four_momentum);
+            }
+            shower->set_particle_type(211);
+            m_hadronic_retyped_shower_ids.insert(shower->get_shower_id());
+            ++n_retyped;
+            SPDLOG_LOGGER_DEBUG(s_log,
+                "A5 hadronic retype: shower id={} start_seg len={:.1f}cm -> pdg 211 "
+                "(growth={:.2f} bragg={:.2f})",
+                shower->get_shower_id(), segment_track_length(ss) / units::cm, growth, bragg);
+        }
+        if (n_retyped) {
+            SPDLOG_LOGGER_DEBUG(s_log, "A5 hadronic tag: {} shower(s) re-typed 211", n_retyped);
+        }
+    }
+
+    // doc pr/99 round 3 (C1/C1b, kine_charge_dedup / kine_charge_rebuild).
+    // Final knob-gated recompute of every shower's kine_charge with
+    // cross-shower 2D-cell ownership and/or member-true clouds -- placed
+    // after ALL shower-structure passes (so every mid-pipeline gate saw
+    // legacy values) and BEFORE the pi0 finders (which cache
+    // get_kine_charge() at entry).  No-op when both knobs are off.
+    recompute_shower_kine_charge_final(showers, track_fitter, dv);
 
     // Identify pi0 with vertex.
     // doc pr/33 F3: both finders get a reference to the same local copy, so

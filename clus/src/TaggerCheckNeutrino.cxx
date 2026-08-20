@@ -570,6 +570,19 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_shower_ghost_overlap_frac                 = get(config, "shower_ghost_overlap_frac",                 m_shower_ghost_overlap_frac);
     m_shower_ghost_dqdx_ratio                   = get(config, "shower_ghost_dqdx_ratio",                   m_shower_ghost_dqdx_ratio);
     m_shower_ghost_min_len                      = get(config, "shower_ghost_min_len",                      m_shower_ghost_min_len);
+    // doc pr/99 round 3 (C1/C1b/A5)
+    m_kine_charge_dedup                         = get(config, "kine_charge_dedup",                         m_kine_charge_dedup);
+    m_kine_charge_rebuild                       = get(config, "kine_charge_rebuild",                       m_kine_charge_rebuild);
+    m_shower_hadronic_tag                       = get(config, "shower_hadronic_tag",                       m_shower_hadronic_tag);
+    m_shower_hadronic_min_len                   = get(config, "shower_hadronic_min_len",                   m_shower_hadronic_min_len);
+    m_shower_hadronic_scan_len                  = get(config, "shower_hadronic_scan_len",                  m_shower_hadronic_scan_len);
+    m_shower_hadronic_bin                       = get(config, "shower_hadronic_bin",                       m_shower_hadronic_bin);
+    m_shower_hadronic_r_cyl                     = get(config, "shower_hadronic_r_cyl",                     m_shower_hadronic_r_cyl);
+    m_shower_hadronic_r_core                    = get(config, "shower_hadronic_r_core",                    m_shower_hadronic_r_core);
+    m_shower_hadronic_growth_max                = get(config, "shower_hadronic_growth_max",                m_shower_hadronic_growth_max);
+    m_shower_hadronic_growth_bragg              = get(config, "shower_hadronic_growth_bragg",              m_shower_hadronic_growth_bragg);
+    m_shower_hadronic_bragg_ratio               = get(config, "shower_hadronic_bragg_ratio",               m_shower_hadronic_bragg_ratio);
+    m_shower_hadronic_stem_ratio                = get(config, "shower_hadronic_stem_ratio",                m_shower_hadronic_stem_ratio);
     m_kine_count_orphan_tracks                  = get(config, "kine_count_orphan_tracks",                  m_kine_count_orphan_tracks);
     m_kine_orphan_track_min                     = get(config, "kine_orphan_track_min",                     m_kine_orphan_track_min);
     m_straight_cont_cross_cluster               = get(config, "straight_cont_cross_cluster",               m_straight_cont_cross_cluster);
@@ -921,6 +934,18 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["shower_ghost_overlap_frac"]                 = m_shower_ghost_overlap_frac;                 // 2nd-best per-view overlap gate; inert while drop off (doc pr/99 r2)
     cfg["shower_ghost_dqdx_ratio"]                   = m_shower_ghost_dqdx_ratio;                   // starved gate vs mip median; inert while drop off (doc pr/99 r2)
     cfg["shower_ghost_min_len"]                      = m_shower_ghost_min_len;                      // cm; inert while drop off (doc pr/99 r2)
+    cfg["kine_charge_dedup"]                         = m_kine_charge_dedup;                         // doc pr/99 r3 C1; false = legacy ownership-free sum, byte-identical
+    cfg["kine_charge_rebuild"]                       = m_kine_charge_rebuild;                       // doc pr/99 r3 C1b; false = legacy add-only clouds, byte-identical
+    cfg["shower_hadronic_tag"]                       = m_shower_hadronic_tag;                       // doc pr/99 r3 A5; false = legacy (label 11 stays), byte-identical
+    cfg["shower_hadronic_min_len"]                   = m_shower_hadronic_min_len;                   // cm; inert while tag off (doc pr/99 r3)
+    cfg["shower_hadronic_scan_len"]                  = m_shower_hadronic_scan_len;                  // cm; inert while tag off (doc pr/99 r3)
+    cfg["shower_hadronic_bin"]                       = m_shower_hadronic_bin;                       // cm; inert while tag off (doc pr/99 r3)
+    cfg["shower_hadronic_r_cyl"]                     = m_shower_hadronic_r_cyl;                     // cm; inert while tag off (doc pr/99 r3)
+    cfg["shower_hadronic_r_core"]                    = m_shower_hadronic_r_core;                    // cm; inert while tag off (doc pr/99 r3)
+    cfg["shower_hadronic_growth_max"]                = m_shower_hadronic_growth_max;                // ratio; inert while tag off (doc pr/99 r3)
+    cfg["shower_hadronic_growth_bragg"]              = m_shower_hadronic_growth_bragg;              // ratio; inert while tag off (doc pr/99 r3)
+    cfg["shower_hadronic_bragg_ratio"]               = m_shower_hadronic_bragg_ratio;               // ratio; inert while tag off (doc pr/99 r3)
+    cfg["shower_hadronic_stem_ratio"]                = m_shower_hadronic_stem_ratio;                // MIP units; 0 = branch off (doc pr/99 r3)
     cfg["kine_count_orphan_tracks"]                  = m_kine_count_orphan_tracks;                  // doc pr/93 r4; false = legacy (graph-disconnected confident tracks absent from kine)
     cfg["kine_orphan_track_min"]                     = m_kine_orphan_track_min;                     // cm; only read when kine_count_orphan_tracks
     cfg["straight_cont_cross_cluster"]               = m_straight_cont_cross_cluster;               // doc pr/93 r4; false = legacy (no cross-cluster continuation demotion)
@@ -1759,6 +1784,8 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
         pattern_algos.m_kine_charge.plane_asym_switch   = m_kine_plane_asym_switch;
         pattern_algos.m_kine_charge.shower_pdg_live     = m_kine_shower_pdg_live;
         pattern_algos.m_kine_charge.w_value             = m_kine_w_value;
+        pattern_algos.m_kine_charge.dedup               = m_kine_charge_dedup;                          // doc pr/99 r3 C1
+        pattern_algos.m_kine_charge.rebuild             = m_kine_charge_rebuild;                        // doc pr/99 r3 C1b
         // doc sbnd_xin/docs/pr/36 §10 tagger-stage knobs (F4/F5/F6/F7).
         pattern_algos.m_tagger_ordered_segment_sets  = m_tagger_ordered_segment_sets;
         pattern_algos.m_stem_endpoint_wcpt_parity    = m_stem_endpoint_wcpt_parity;
@@ -1843,6 +1870,16 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
         pattern_algos.m_shower_ghost_overlap_frac                 = m_shower_ghost_overlap_frac;                 // fraction, no conversion (doc pr/99 r2)
         pattern_algos.m_shower_ghost_dqdx_ratio                   = m_shower_ghost_dqdx_ratio;                   // ratio, no conversion (doc pr/99 r2)
         pattern_algos.m_shower_ghost_min_len                      = m_shower_ghost_min_len * units::cm;          // cm -> internal (doc pr/99 r2)
+        pattern_algos.m_shower_hadronic_tag                       = m_shower_hadronic_tag;                       // doc pr/99 r3 A5
+        pattern_algos.m_shower_hadronic_min_len                   = m_shower_hadronic_min_len * units::cm;       // cm -> internal (doc pr/99 r3)
+        pattern_algos.m_shower_hadronic_scan_len                  = m_shower_hadronic_scan_len * units::cm;      // cm -> internal (doc pr/99 r3)
+        pattern_algos.m_shower_hadronic_bin                       = m_shower_hadronic_bin * units::cm;           // cm -> internal (doc pr/99 r3)
+        pattern_algos.m_shower_hadronic_r_cyl                     = m_shower_hadronic_r_cyl * units::cm;         // cm -> internal (doc pr/99 r3)
+        pattern_algos.m_shower_hadronic_r_core                    = m_shower_hadronic_r_core * units::cm;        // cm -> internal (doc pr/99 r3)
+        pattern_algos.m_shower_hadronic_growth_max                = m_shower_hadronic_growth_max;                // ratio, no conversion (doc pr/99 r3)
+        pattern_algos.m_shower_hadronic_growth_bragg              = m_shower_hadronic_growth_bragg;              // ratio, no conversion (doc pr/99 r3)
+        pattern_algos.m_shower_hadronic_bragg_ratio               = m_shower_hadronic_bragg_ratio;               // ratio, no conversion (doc pr/99 r3)
+        pattern_algos.m_shower_hadronic_stem_ratio                = m_shower_hadronic_stem_ratio;                // MIP units, no conversion (doc pr/99 r3)
         pattern_algos.m_kine_count_orphan_tracks                  = m_kine_count_orphan_tracks;                  // doc pr/93 r4
         pattern_algos.m_kine_orphan_track_min                     = m_kine_orphan_track_min * units::cm;         // doc pr/93 r4
         pattern_algos.m_straight_cont_cross_cluster               = m_straight_cont_cross_cluster;               // doc pr/93 r4

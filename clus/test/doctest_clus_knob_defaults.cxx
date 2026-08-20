@@ -182,6 +182,20 @@ TEST_CASE("clus knob defaults: TaggerCheckNeutrino switches are all OFF")
     CHECK_KNOB_NUM(cfg, "shower_ghost_overlap_frac", 0.7);                    // inert while drop off
     CHECK_KNOB_NUM(cfg, "shower_ghost_dqdx_ratio", 0.25);                     // inert while drop off
     CHECK_KNOB_NUM(cfg, "shower_ghost_min_len", 10.0);                        // cm; inert while drop off
+
+    // doc pr/99 round 3 -- kine-charge ownership + A5 hadronic tag.
+    CHECK_KNOB_BOOL(cfg, "kine_charge_dedup", false);                         // pr/99 r3 C1 (168596); false = byte-identical
+    CHECK_KNOB_BOOL(cfg, "kine_charge_rebuild", false);                       // pr/99 r3 C1b; false = byte-identical
+    CHECK_KNOB_BOOL(cfg, "shower_hadronic_tag", false);                       // pr/99 r3 A5 (315167/395148); false = byte-identical
+    CHECK_KNOB_NUM(cfg, "shower_hadronic_min_len", 10.0);                     // cm; inert while tag off
+    CHECK_KNOB_NUM(cfg, "shower_hadronic_scan_len", 30.0);                    // cm; inert while tag off
+    CHECK_KNOB_NUM(cfg, "shower_hadronic_bin", 3.0);                          // cm; inert while tag off
+    CHECK_KNOB_NUM(cfg, "shower_hadronic_r_cyl", 8.0);                        // cm; inert while tag off
+    CHECK_KNOB_NUM(cfg, "shower_hadronic_r_core", 1.2);                       // cm; inert while tag off
+    CHECK_KNOB_NUM(cfg, "shower_hadronic_growth_max", 0.8);                   // ratio; inert while tag off
+    CHECK_KNOB_NUM(cfg, "shower_hadronic_growth_bragg", 1.2);                 // ratio; inert while tag off
+    CHECK_KNOB_NUM(cfg, "shower_hadronic_bragg_ratio", 3.0);                  // ratio; inert while tag off
+    CHECK_KNOB_NUM(cfg, "shower_hadronic_stem_ratio", 0.0);                  // MIP units; 0 = branch off
     CHECK_KNOB_BOOL(cfg, "kine_count_orphan_tracks", false);                  // r4 (315167)
     CHECK_KNOB_NUM(cfg, "kine_orphan_track_min", 50.0);                       // cm; read only when on
     CHECK_KNOB_BOOL(cfg, "straight_cont_cross_cluster", false);               // r4 (137238)

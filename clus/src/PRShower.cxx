@@ -604,6 +604,29 @@ namespace WireCell::Clus::PR {
     // doc sbnd_xin/docs/pr/99 round 2 (shower_ghost_member_drop).  Contract
     // and rationale in PRShower.h; bookkeeping forked BY DUPLICATION from
     // detach_track_prefix above -- that production method stays untouched.
+    std::shared_ptr<Facade::DynamicPointCloud> Shower::rebuild_pcloud(const std::string& cloud_name)
+    {
+        // doc pr/99 round 3 (C1b).  Contract in PRShower.h.  Same code shape
+        // as the detach_track_prefix rebuild loop (ordered_edges order), but
+        // writing into a fresh cloud instead of this->dpcloud.
+        std::shared_ptr<Facade::DynamicPointCloud> out = nullptr;
+        Facade::DPCBatch batch;
+        for (auto edesc : ordered_edges(*this, m_full_graph)) {
+            SegmentPtr seg = m_full_graph[edesc].segment;
+            if (!seg || !seg->descriptor_valid()) continue;
+            auto seg_dpc = seg->dpcloud(cloud_name);
+            if (!seg_dpc) continue;
+            if (!out) {
+                out = clone_dpc(*seg_dpc);
+            } else {
+                out->merge_wpid_params(*seg_dpc);
+                batch.append(seg_dpc->points());
+            }
+        }
+        if (out && !batch.empty()) out->add_points(std::move(batch));
+        return out;
+    }
+
     int Shower::drop_ghost_member(SegmentPtr ghost,
                                   const std::string& cloud_name_fit,
                                   const std::string& cloud_name_associate)

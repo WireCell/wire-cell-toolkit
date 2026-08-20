@@ -784,6 +784,22 @@ public:
         double m_shower_ghost_overlap_frac{0.7};                    // 2nd-best per-view overlap gate; inert while drop off
         double m_shower_ghost_dqdx_ratio{0.25};                     // starved gate, ratio vs mip median; inert while drop off
         double m_shower_ghost_min_len{10.0};                        // cm; scaled at copy; inert while drop off
+        // doc pr/99 round 3: C1 kine-charge cell ownership + C1b prototype
+        // rebuild parity + A5 hadronic-shower tag.  Design blocks at the
+        // KineChargeOptions::dedup/rebuild and m_shower_hadronic_* members
+        // in NeutrinoPatternBase.h.
+        bool   m_kine_charge_dedup{false};                          // doc pr/99 r3 C1 (168596 Enu double count)
+        bool   m_kine_charge_rebuild{false};                        // doc pr/99 r3 C1b (prototype cloud-rebuild parity)
+        bool   m_shower_hadronic_tag{false};                        // doc pr/99 r3 A5 (hadronic shower labeled e-)
+        double m_shower_hadronic_min_len{10.0};                     // cm; scaled at copy; inert while tag off
+        double m_shower_hadronic_scan_len{30.0};                    // cm; scaled at copy; inert while tag off
+        double m_shower_hadronic_bin{3.0};                          // cm; scaled at copy; inert while tag off
+        double m_shower_hadronic_r_cyl{8.0};                        // cm; scaled at copy; inert while tag off
+        double m_shower_hadronic_r_core{1.2};                       // cm; scaled at copy; inert while tag off
+        double m_shower_hadronic_growth_max{0.8};                   // ratio; inert while tag off
+        double m_shower_hadronic_growth_bragg{1.2};                 // ratio; inert while tag off
+        double m_shower_hadronic_bragg_ratio{3.0};                  // ratio; inert while tag off
+        double m_shower_hadronic_stem_ratio{0.0};                   // MIP units; 0 = branch off; inert while tag off
         bool m_kine_count_orphan_tracks{false};                     // doc pr/93 r4 (315167)
         double m_kine_orphan_track_min{50};                         // cm; scaled at copy
         bool m_straight_cont_cross_cluster{false};                  // doc pr/93 r4 (137238)

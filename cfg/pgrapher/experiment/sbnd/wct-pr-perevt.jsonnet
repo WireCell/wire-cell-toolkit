@@ -1641,6 +1641,23 @@ function(
     shower_ghost_overlap_frac = null,
     shower_ghost_dqdx_ratio = null,
     shower_ghost_min_len = null,
+    // doc pr/99 round 3 -- C1 kine-charge cell-ownership dedup + C1b
+    // prototype cloud-rebuild parity (168596 Enu double count) + A5
+    // hadronic-shower re-type (315167/395148 labels).  C++ defaults
+    // false/null = legacy.  Key omitted when off => byte-identical
+    // pre-round-3 config.
+    kine_charge_dedup = true,    // SBND PRODUCTION ON 2026-08-20 (doc pr/99 round 3; owner-adjudicated full winner-take-all)
+    kine_charge_rebuild = true,  // SBND PRODUCTION ON 2026-08-20 (doc pr/99 round 3; prototype cloud-rebuild parity)
+    shower_hadronic_tag = true,  // SBND PRODUCTION ON 2026-08-20 (doc pr/99 round 3, A5)
+    shower_hadronic_min_len = null,   // cm; C++ default 10
+    shower_hadronic_scan_len = null,  // cm; C++ default 30
+    shower_hadronic_bin = null,       // cm; C++ default 3
+    shower_hadronic_r_cyl = null,     // cm; C++ default 8
+    shower_hadronic_r_core = null,    // cm; C++ default 1.2
+    shower_hadronic_growth_max = 0.7,    // calibrated (109-shower roster; protected primaries min 2.32)
+    shower_hadronic_growth_bragg = null, // C++ default 1.2
+    shower_hadronic_bragg_ratio = null,  // C++ default 3.0
+    shower_hadronic_stem_ratio = 2.8,    // calibrated (reaches 395148 at C++ stem 2.98; gammas ~2)
     kine_count_orphan_tracks = true,
     kine_orphan_track_min = null,  // null => C++ default 50cm
     straight_cont_cross_cluster = true,
@@ -2533,6 +2550,18 @@ function(
                              shower_ghost_overlap_frac=shower_ghost_overlap_frac,
                              shower_ghost_dqdx_ratio=shower_ghost_dqdx_ratio,
                              shower_ghost_min_len=shower_ghost_min_len,
+                             kine_charge_dedup=if kine_charge_dedup == null then false else kine_charge_dedup,
+                             kine_charge_rebuild=if kine_charge_rebuild == null then false else kine_charge_rebuild,
+                             shower_hadronic_tag=if shower_hadronic_tag == null then false else shower_hadronic_tag,
+                             shower_hadronic_min_len=shower_hadronic_min_len,
+                             shower_hadronic_scan_len=shower_hadronic_scan_len,
+                             shower_hadronic_bin=shower_hadronic_bin,
+                             shower_hadronic_r_cyl=shower_hadronic_r_cyl,
+                             shower_hadronic_r_core=shower_hadronic_r_core,
+                             shower_hadronic_growth_max=shower_hadronic_growth_max,
+                             shower_hadronic_growth_bragg=shower_hadronic_growth_bragg,
+                             shower_hadronic_bragg_ratio=shower_hadronic_bragg_ratio,
+                             shower_hadronic_stem_ratio=shower_hadronic_stem_ratio,
                              kine_count_orphan_tracks=kine_count_orphan_tracks,
                              kine_orphan_track_min=kine_orphan_track_min,
                              straight_cont_cross_cluster=straight_cont_cross_cluster,

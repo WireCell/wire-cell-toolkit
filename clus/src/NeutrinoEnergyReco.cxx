@@ -369,3 +369,210 @@ void PatternAlgorithms::calculate_shower_kinematics(IndexedShowerSet& showers, I
         shower->set_flag_kinematics(true);
     }
 }
+
+
+// ---------------------------------------------------------------------------
+// doc pr/99 round 3 (C1/C1b) -- cross-shower charge-ownership dedup.
+// Design block at KineChargeOptions::dedup/rebuild (NeutrinoPatternBase.h).
+// The scan/finalize pair below is forked BY DUPLICATION from
+// kine_charge_from_maps (which stays byte-untouched, it is the production
+// path): the scan walks the three plane maps ONCE over all showers' contexts
+// and credits each 2D cell's full charge to the single context whose cloud
+// accepts it at the smallest distance (tie -> lowest context index = lowest
+// shower creation id, since contexts are built in IndexedShowerSet order).
+// A single-context input reproduces the legacy acceptance exactly.
+// ---------------------------------------------------------------------------
+namespace {
+
+struct KineOwnedCtx {
+    std::shared_ptr<Facade::DynamicPointCloud> pcloud1, pcloud2;
+    double fudge{1.0}, recom{1.0};
+    double sums[3] = {0, 0, 0};
+};
+
+template<typename CorrFn>
+static void kine_charge_owned_scan(
+    std::vector<KineOwnedCtx>& ctxs,
+    const ChargeMap& charge_2d_u,
+    const ChargeMap& charge_2d_v,
+    const ChargeMap& charge_2d_w,
+    const WireMap& map_apa_ch_plane_wires,
+    Facade::Grouping* grouping,
+    CorrFn&& corr_fn,
+    double dis_cut)
+{
+    const ChargeMap* maps[3] = {&charge_2d_u, &charge_2d_v, &charge_2d_w};
+
+    for (int plane_id = 0; plane_id < 3; ++plane_id) {
+        for (const auto& [coord_key, charge_data] : *maps[plane_id]) {
+            int time_slice = coord_key.time;
+            int channel    = coord_key.channel;
+            int apa        = coord_key.apa;
+
+            auto wire_it = map_apa_ch_plane_wires.find({apa, channel});
+            if (wire_it == map_apa_ch_plane_wires.end()) continue;
+
+            int face = -1, local_wire = -1;
+            for (const auto& [f, plane, wire] : wire_it->second) {
+                if (plane == plane_id) { face = f; local_wire = wire; break; }
+            }
+            if (face < 0 || local_wire < 0) continue;
+
+            auto p2d = grouping->convert_time_wire_2Dpoint(time_slice, local_wire, apa, face, plane_id);
+
+            // Per-context legacy acceptance (pcloud1 first, pcloud2 as the
+            // fallback -- the exact kine_charge_from_maps try_add order),
+            // then the min-distance context wins the whole cell.  Strict `<`
+            // with in-order iteration = tie goes to the lowest index.
+            int win = -1;
+            double win_dis = 1e9;
+            size_t win_idx = 0;
+            const Facade::DynamicPointCloud* win_pc = nullptr;
+            for (size_t k = 0; k < ctxs.size(); ++k) {
+                auto& c = ctxs[k];
+                double dis = 1e9;
+                size_t point_index = 0;
+                const Facade::Cluster* closest_cluster = nullptr;
+                const Facade::DynamicPointCloud* pc = nullptr;
+                if (c.pcloud1) {
+                    auto res        = c.pcloud1->get_closest_2d_point_info_direct(p2d.first, p2d.second, plane_id, face, apa);
+                    dis             = std::get<0>(res);
+                    closest_cluster = std::get<1>(res);
+                    point_index     = std::get<2>(res);
+                    pc              = c.pcloud1.get();
+                }
+                bool accepted = (pc && dis < dis_cut && closest_cluster && point_index < pc->npoints());
+                if (!accepted && c.pcloud2) {
+                    auto res        = c.pcloud2->get_closest_2d_point_info_direct(p2d.first, p2d.second, plane_id, face, apa);
+                    dis             = std::get<0>(res);
+                    closest_cluster = std::get<1>(res);
+                    point_index     = std::get<2>(res);
+                    pc              = c.pcloud2.get();
+                    accepted = (dis < dis_cut && closest_cluster && point_index < pc->npoints());
+                }
+                if (accepted && dis < win_dis) {
+                    win = static_cast<int>(k);
+                    win_dis = dis;
+                    win_idx = point_index;
+                    win_pc  = pc;
+                }
+            }
+            if (win >= 0) {
+                WireCell::Point tp = win_pc->point3d(win_idx);
+                ctxs[win].sums[plane_id] += charge_data.charge * corr_fn(tp);
+            }
+        }
+    }
+}
+
+// Duplicate of the kine_charge_from_maps finalization tail (min/med/max,
+// asymmetry switch, per-plane weights, W-value) -- byte-for-byte arithmetic.
+static double kine_charge_finalize(const double sums[3], double fudge_factor, double recom_factor,
+                                   const KineChargeOptions& kopts)
+{
+    int min_idx = 0, max_idx = 0, med_idx = 0;
+    double min_q = 1e9, max_q = -1e9;
+    for (int i = 0; i < 3; ++i) {
+        if (sums[i] < min_q) { min_q = sums[i]; min_idx = i; }
+        if (sums[i] > max_q) { max_q = sums[i]; max_idx = i; }
+    }
+    if (min_idx != max_idx) {
+        for (int i = 0; i < 3; ++i) {
+            if (i != min_idx && i != max_idx) { med_idx = i; break; }
+        }
+    } else {
+        min_idx = 0; med_idx = 1; max_idx = 2;
+    }
+
+    const double weight[3] = {kopts.plane_weights[0], kopts.plane_weights[1], kopts.plane_weights[2]};
+    const double weight_sum = weight[0] + weight[1] + weight[2];
+
+    double max_asy = 0;
+    if (sums[med_idx] + sums[max_idx] > 0)
+        max_asy = std::abs(sums[med_idx] - sums[max_idx]) / (sums[med_idx] + sums[max_idx]);
+
+    double overall = 0;
+    if (weight_sum > 0)
+        overall = (weight[0]*sums[0] + weight[1]*sums[1] + weight[2]*sums[2]) / weight_sum;
+    if (max_asy > kopts.plane_asym_switch) {
+        const double pair_sum = weight[med_idx] + weight[min_idx];
+        if (pair_sum > 0)
+            overall = (weight[med_idx]*sums[med_idx] + weight[min_idx]*sums[min_idx]) / pair_sum;
+    }
+
+    return overall / recom_factor / fudge_factor * kopts.w_value / 1e6 * units::MeV;
+}
+
+} // anonymous namespace
+
+
+void PatternAlgorithms::recompute_shower_kine_charge_final(IndexedShowerSet& showers, TrackFitting& track_fitter, IDetectorVolumes::pointer dv)
+{
+    if (!m_kine_charge.dedup && !m_kine_charge.rebuild) return;  // both knobs off => byte-identical
+    auto grouping = track_fitter.grouping();
+    if (!grouping) return;
+    if (m_charge_2d_u.empty()) collect_charge_maps(track_fitter);
+
+    auto corr_fn = [&](WireCell::Point& pt) { return cal_corr_factor(pt, track_fitter, dv); };
+    const double dis_cut = 0.6 * units::cm;
+
+    // Contexts in IndexedShowerSet order = stable shower creation-id order.
+    std::vector<ShowerPtr> shs;
+    std::vector<KineOwnedCtx> ctxs;
+    for (auto& shower : showers) {
+        if (!shower) continue;
+        std::shared_ptr<Facade::DynamicPointCloud> pcloud1, pcloud2;
+        if (m_kine_charge.rebuild) {
+            pcloud1 = shower->rebuild_pcloud("associate_points");
+            pcloud2 = shower->rebuild_pcloud("fit");
+        } else {
+            pcloud1 = shower->get_pcloud("associate_points");
+            pcloud2 = shower->get_pcloud("fit");
+        }
+        // Cloudless showers were left at kine_charge=0 by the production
+        // pass; leave them alone here too.
+        if (!pcloud1 && !pcloud2) continue;
+        if (!pcloud1) pcloud1 = pcloud2;
+        if (!pcloud2) pcloud2 = pcloud1;
+
+        KineOwnedCtx c;
+        c.pcloud1 = pcloud1;
+        c.pcloud2 = pcloud2;
+        c.fudge = m_kine_charge.fudge_factor;
+        c.recom = m_kine_charge.recom_factor;
+        if (shower->get_flag_shower()) {
+            c.recom = m_kine_charge.shower_recom_factor;
+            c.fudge = m_kine_charge.shower_fudge_factor;
+        } else if (std::abs(shower->get_particle_type()) == 2212) {
+            c.recom = m_kine_charge.proton_recom_factor;
+        }
+        shs.push_back(shower);
+        ctxs.push_back(std::move(c));
+    }
+    if (shs.empty()) return;
+
+    if (m_kine_charge.dedup) {
+        kine_charge_owned_scan(ctxs, m_charge_2d_u, m_charge_2d_v, m_charge_2d_w,
+                               m_map_apa_ch_plane_wires, grouping, corr_fn, dis_cut);
+    }
+
+    for (size_t k = 0; k < shs.size(); ++k) {
+        double e_new;
+        if (m_kine_charge.dedup) {
+            e_new = kine_charge_finalize(ctxs[k].sums, ctxs[k].fudge, ctxs[k].recom, m_kine_charge);
+        } else {
+            // rebuild-only: legacy independent scan, member-true clouds.
+            e_new = kine_charge_from_maps(
+                ctxs[k].pcloud1, ctxs[k].pcloud2, ctxs[k].fudge, ctxs[k].recom,
+                m_charge_2d_u, m_charge_2d_v, m_charge_2d_w, m_map_apa_ch_plane_wires,
+                grouping, corr_fn, dis_cut, m_kine_charge);
+        }
+        const double e_old = shs[k]->get_kine_charge();
+        SPDLOG_LOGGER_DEBUG(s_log,
+            "kine final recompute: shower id={} pdg={} nseg={} kine_charge {:.1f} -> {:.1f} MeV (dedup={} rebuild={})",
+            shs[k]->get_shower_id(), shs[k]->get_particle_type(), shs[k]->get_num_segments(),
+            e_old / units::MeV, e_new / units::MeV,
+            m_kine_charge.dedup, m_kine_charge.rebuild);
+        shs[k]->set_kine_charge(e_new);
+    }
+}

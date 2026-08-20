@@ -69,6 +69,29 @@ namespace WireCell::Clus::PR {
         /// :187), correct independently of the cache's refresh schedule.
         /// Config key kine_shower_pdg_live; absent => legacy, byte-identical.
         bool shower_pdg_live{false};
+        /// doc pr/99 round 3 (C1).  false = legacy: every shower's
+        /// cal_kine_charge independently rescans the whole event's 2D charge
+        /// maps, so two spatially interleaved showers each collect the SAME
+        /// cells' full charge and the event Enu double-counts (SBND
+        /// 18255-168596: one 2016 MeV cascade split into 1843+1265 MeV,
+        /// Enu 2619->3533).  true = after all shower-structure passes,
+        /// recompute every shower's kine_charge in ONE scan of the charge
+        /// maps where each 2D cell is credited to exactly one shower (the
+        /// nearest accepting cloud; tie -> lowest shower creation id).  The
+        /// prototype is also ownership-free (NeutrinoID_energy_reco.h) --
+        /// this is a deliberate divergence in both trees, not a port fix.
+        /// Config key kine_charge_dedup; absent => legacy, byte-identical.
+        bool dedup{false};
+        /// doc pr/99 round 3 (C1b).  Prototype parity: WCP rebuilds a
+        /// shower's point clouds from CURRENT members before every
+        /// cal_kine_charge read (NeutrinoID_energy_reco.h:99); the toolkit
+        /// clouds are add-only merges, so stale points from departed members
+        /// keep pulling charge in.  true = the final recompute pass reads
+        /// EPHEMERAL member-true rebuilt clouds (stored clouds untouched --
+        /// taggers and the pi0 start_point derivation query them later, and
+        /// a rebuild changes row order hence kNN tie-breaks).  Config key
+        /// kine_charge_rebuild; absent => legacy, byte-identical.
+        bool rebuild{false};
     };
 
     struct Pi0KineFeatures {
@@ -1810,6 +1833,41 @@ namespace WireCell::Clus::PR {
         double m_shower_ghost_overlap_frac{0.7};    ///< 2nd-best per-view overlap gate; inert while drop off
         double m_shower_ghost_dqdx_ratio{0.25};     ///< starved gate, ratio vs m_mip_dqdx_median; inert while drop off
         double m_shower_ghost_min_len{10*units::cm}; ///< candidate min length, internal units; inert while drop off
+        // doc pr/99 round 3 (A5 hadronic-shower tag; owner: "many hadronic
+        // showers / particle flow still labeled as electrons").  A claimed
+        // EM shower (|particle_type|==11, conn type 1) whose surrounding
+        // charge population SHRINKS downstream is a hadron, not an electron:
+        // real EM cascades grow 3-6x in in-cylinder point population over
+        // the first 30 cm (measured round 1: 168596/14153 5.7x, 360535/7060
+        // 3.1x, adverse gamma control 506114 2.3x) while the pr/99 fakes
+        // read 0.2x (315167, terminal Bragg rise 2930->10801) and 0.5x
+        // (395148).  Verdict = smax >= min_len && (growth < growth_max ||
+        // (bragg >= bragg_ratio && growth < growth_bragg)).  On verdict the
+        // START SEGMENT's pdg is stamped 211 (pi+-) with mass + 4-momentum
+        // refresh (the pi0 incoming-track stamp recipe) plus
+        // shower->set_particle_type(211) -- the durable route, since
+        // Shower::calculate_kinematics re-copies the start segment's pdg on
+        // every recompute.  NOT 13: long-muon consumers route on |13| and
+        // would misroute a shower absent from segments_in_long_muon.  The
+        // re-typed shower is excluded from pi0 pairing via
+        // m_hadronic_retyped_shower_ids.  A DEBUG census line is emitted for
+        // EVERY evaluated shower (the offline calibration channel).  false
+        // (default) => no pass => byte-identical; numerics inert while off.
+        bool   m_shower_hadronic_tag{false};              ///< doc pr/99 round 3; false = off
+        double m_shower_hadronic_min_len{10*units::cm};   ///< min trajectory extent to judge; inert while tag off
+        double m_shower_hadronic_scan_len{30*units::cm};  ///< growth window along the trajectory; inert while tag off
+        double m_shower_hadronic_bin{3*units::cm};        ///< arc-length bin; inert while tag off
+        double m_shower_hadronic_r_cyl{8*units::cm};      ///< in-cylinder population radius; inert while tag off
+        double m_shower_hadronic_r_core{1.2*units::cm};   ///< core radius, off-axis census only; inert while tag off
+        double m_shower_hadronic_growth_max{0.8};         ///< growth below => hadronic; inert while tag off
+        double m_shower_hadronic_growth_bragg{1.2};       ///< growth ceiling for Bragg-confirmed branch; inert while tag off
+        double m_shower_hadronic_bragg_ratio{3.0};        ///< terminal/trunk median dQ/dx rise; inert while tag off
+        double m_shower_hadronic_stem_ratio{0};           ///< proton-stem branch: stem median (MIP units) at/above this + growth < growth_bragg => hadronic; 0 = branch off
+        /// Shower ids (stable per-run Shower::get_shower_id) re-typed by the
+        /// A5 pass this event; guards the pi0 finders' candidate collection.
+        /// Cleared at shower_clustering_with_nv pass entry.  Empty (tag off)
+        /// => the guards are no-ops => byte-identical.
+        std::set<int> m_hadronic_retyped_shower_ids;
         // kine_count_orphan_tracks (315167): fill_kine_tree counterpart of
         // the PF-side pf_orphan_confident_track knob (BeePFConfig).  A
         // confident straight-long main-cluster track that is graph-
@@ -3027,6 +3085,16 @@ namespace WireCell::Clus::PR {
                                 std::set<int>* dropped_satellites = nullptr);
         // Convenience overloads: collect 2D charge maps internally (safe for isolated calls).
         double cal_kine_charge(ShowerPtr Shower, Graph& graph, TrackFitting& track_fitter, IDetectorVolumes::pointer dv);
+
+        /// doc pr/99 round 3 (C1/C1b): final knob-gated recompute of every
+        /// shower's kine_charge -- cross-shower 2D-cell ownership
+        /// (m_kine_charge.dedup) and/or ephemeral member-true clouds
+        /// (m_kine_charge.rebuild).  No-op unless one of the two flags is
+        /// set.  Called from shower_clustering_with_nv after all shower-
+        /// structure passes and BEFORE the pi0 finders, so pairing, taggers,
+        /// fill_kine_tree and the PF/Bee display all read one consistent
+        /// energy set while every mid-pipeline gate saw legacy values.
+        void recompute_shower_kine_charge_final(IndexedShowerSet& showers, TrackFitting& track_fitter, IDetectorVolumes::pointer dv);
         double cal_kine_charge(SegmentPtr segment, Graph& graph, TrackFitting& track_fitter, IDetectorVolumes::pointer dv);
         // Fast overload: reuse pre-collected 2D charge maps (avoids O(N_hits) collection per call).
         // Collect maps once with track_fitter.collect_2D_charge() and pass here when calling in a loop.

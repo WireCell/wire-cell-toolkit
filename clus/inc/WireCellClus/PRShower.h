@@ -332,6 +332,21 @@ namespace WireCell::Clus::PR {
                               const std::string& cloud_name_fit = "fit",
                               const std::string& cloud_name_associate = "associate_points");
 
+        // doc pr/99 round 3 (C1b, kine_charge_rebuild).  Build and return an
+        // EPHEMERAL point cloud of the named kind ("fit" or
+        // "associate_points") from the shower's CURRENT members only --
+        // prototype parity with WCShower::rebuild_point_clouds(), which WCP
+        // calls before every cal_kine_charge cloud read
+        // (NeutrinoID_energy_reco.h:99).  The stored add-only clouds are
+        // deliberately NOT touched: taggers and the pi0 start_point
+        // derivation query them after the energy recompute, and a rebuild
+        // changes row order hence kNN tie-breaks.  Loop forked BY
+        // DUPLICATION from the detach_track_prefix rebuild (production
+        // method stays byte-untouched).  Returns nullptr when no member
+        // carries such a cloud.
+        std::shared_ptr<Facade::DynamicPointCloud>
+        rebuild_pcloud(const std::string& cloud_name);
+
     private:
 
         Graph& m_full_graph;
