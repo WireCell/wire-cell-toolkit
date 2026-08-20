@@ -1368,6 +1368,8 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               sfv_kink_max=null,
               shower_nv_bridge_track=false,
               shower_nv_bridge_max_gap=null,
+              // doc pr/97 D1; C++ default false => legacy indeterminate main_pi read.
+              shower_nv_main_pi_init=false,
               // doc pr/92 -- stray-satellite drop from kine/PF.  false/null =
               // C++ defaults = OFF (20 MeV / 8 cm / 60 deg / 45 deg / 90 cm /
               // 30 cm / 25 deg); keys omitted => byte-identical pre-pr/92.
@@ -2241,6 +2243,7 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
             sfv_kink_max=sfv_kink_max,
             shower_nv_bridge_track=shower_nv_bridge_track,
             shower_nv_bridge_max_gap=shower_nv_bridge_max_gap,
+            shower_nv_main_pi_init=shower_nv_main_pi_init,
             kine_drop_stray_satellites=kine_drop_stray_satellites,
             kine_sat_min_energy=kine_sat_min_energy,
             kine_sat_prox_max=kine_sat_prox_max,
@@ -3120,6 +3123,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
        sfv_kink_max=null,
        shower_nv_bridge_track=false,
        shower_nv_bridge_max_gap=null,
+       shower_nv_main_pi_init=false,   // doc pr/97 D1; false => legacy indeterminate main_pi read
        // doc pr/92; false/null = C++ defaults = OFF.  See clus_pr.
        kine_drop_stray_satellites=false,
        kine_sat_min_energy=null,
@@ -3573,6 +3577,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 sfv_kink_max=sfv_kink_max,
                 shower_nv_bridge_track=shower_nv_bridge_track,
                 shower_nv_bridge_max_gap=shower_nv_bridge_max_gap,
+                shower_nv_main_pi_init=shower_nv_main_pi_init,
                 kine_drop_stray_satellites=kine_drop_stray_satellites,
                 kine_sat_min_energy=kine_sat_min_energy,
                 kine_sat_prox_max=kine_sat_prox_max,

@@ -520,6 +520,7 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_sfv_kink_max                                 = get(config, "sfv_kink_max",                                 m_sfv_kink_max);
     m_shower_nv_bridge_track                       = get(config, "shower_nv_bridge_track",                       m_shower_nv_bridge_track);
     m_shower_nv_bridge_max_gap                     = get(config, "shower_nv_bridge_max_gap",                     m_shower_nv_bridge_max_gap);
+    m_shower_nv_main_pi_init                       = get(config, "shower_nv_main_pi_init",                       m_shower_nv_main_pi_init);
     // doc sbnd_xin/docs/pr/92 -- stray-satellite drop from kine/PF.
     m_kine_drop_stray_satellites                   = get(config, "kine_drop_stray_satellites",                   m_kine_drop_stray_satellites);
     m_kine_sat_min_energy                          = get(config, "kine_sat_min_energy",                          m_kine_sat_min_energy);
@@ -863,6 +864,7 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["sfv_kink_max"]                                 = m_sfv_kink_max;                                 // degrees; continuation-arm tunable
     cfg["shower_nv_bridge_track"]                       = m_shower_nv_bridge_track;                       // doc pr/40 round 9 B2; false = legacy (conn-2 shower, no bridge)
     cfg["shower_nv_bridge_max_gap"]                     = m_shower_nv_bridge_max_gap;                     // cm; only read when shower_nv_bridge_track
+    cfg["shower_nv_main_pi_init"]                       = m_shower_nv_main_pi_init;                       // doc pr/97 D1; false = legacy indeterminate main_pi read
     cfg["kine_drop_stray_satellites"]                   = m_kine_drop_stray_satellites;                   // doc pr/92; false = legacy (every conn-2/3 satellite summed into Enu)
     cfg["kine_sat_min_energy"]                          = m_kine_sat_min_energy;                          // MeV; only read when kine_drop_stray_satellites
     cfg["kine_sat_prox_max"]                            = m_kine_sat_prox_max;                            // cm; only read when kine_drop_stray_satellites
@@ -1774,6 +1776,7 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
         pattern_algos.m_sfv_kink_max                                 = m_sfv_kink_max;                                 // pr/40 r9 (degrees)
         pattern_algos.m_shower_nv_bridge_track                       = m_shower_nv_bridge_track;                       // pr/40 r9 B2
         pattern_algos.m_shower_nv_bridge_max_gap                     = m_shower_nv_bridge_max_gap * units::cm;         // pr/40 r9 B2
+        pattern_algos.m_shower_nv_main_pi_init                       = m_shower_nv_main_pi_init;                       // pr/97 D1
         pattern_algos.m_kine_drop_stray_satellites                   = m_kine_drop_stray_satellites;                   // pr/92
         pattern_algos.m_kine_sat_min_energy                          = m_kine_sat_min_energy * units::MeV;             // pr/92
         pattern_algos.m_kine_sat_prox_max                            = m_kine_sat_prox_max * units::cm;                // pr/92

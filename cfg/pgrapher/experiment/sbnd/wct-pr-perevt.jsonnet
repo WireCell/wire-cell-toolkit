@@ -1388,6 +1388,11 @@ function(
     sfv_kink_max = null,
     shower_nv_bridge_track = true,
     shower_nv_bridge_max_gap = null,
+    // doc sbnd_xin/docs/pr/97 D1 -- deterministic main_pi sentinel.  OFF
+    // pending an owner flip: turning it on changes which vertex an
+    // other-cluster shower attaches to on every event where the overall main
+    // vertex lives outside main_cluster.  SBND_MAIN_PI_INIT=true flips it.
+    shower_nv_main_pi_init = false,
     // doc sbnd_xin/docs/pr/92 -- drop stray satellite showers (overclustered
     // cosmics / second neutrinos) from kine_reco_Enu and (via
     // pf_drop_stray_satellites below) the Bee PF tree.  Candidates: conn-2/3
@@ -2463,6 +2468,7 @@ function(
                              shower_topo_reexam_straight_guard=shower_topo_reexam_straight_guard,
                              sfv_kink_max=sfv_kink_max,
                              shower_nv_bridge_track=shower_nv_bridge_track,
+                             shower_nv_main_pi_init=shower_nv_main_pi_init,
                              shower_nv_bridge_max_gap=shower_nv_bridge_max_gap,
                              kine_drop_stray_satellites=kine_drop_stray_satellites,
                              kine_sat_min_energy=kine_sat_min_energy,

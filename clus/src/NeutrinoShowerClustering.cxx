@@ -1671,6 +1671,17 @@ void PatternAlgorithms::shower_clustering_with_nv_from_vertices(Graph& graph, Ve
         cluster_point_info main_pi;
         main_pi.cluster = cluster;
         main_pi.min_vertex = main_vertex;
+        // doc pr/97 D1: min_angle/min_dis/min_point are left INDETERMINATE by
+        // the legacy path (and by the prototype) and are only written below if
+        // main_vertex happens to be one of main_cluster_vertices.  When it is
+        // not, the branch after the loop reads stale stack bytes.  Sentinels
+        // make that case deterministically prefer min_pi.  Statement never
+        // runs when the knob is off => legacy path bit-for-bit.
+        if (m_shower_nv_main_pi_init) {
+            main_pi.min_angle = 1e9;
+            main_pi.min_dis = 1e9;
+            main_pi.min_point.set(0, 0, 0);
+        }
         
         std::vector<double> query(3);
         for (auto vtx : main_cluster_vertices) {

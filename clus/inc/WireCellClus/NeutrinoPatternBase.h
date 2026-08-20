@@ -1805,6 +1805,24 @@ namespace WireCell::Clus::PR {
         // ------------------------------------------------------------------
         bool   m_shower_nv_bridge_track{false};
         double m_shower_nv_bridge_max_gap{1.8*units::cm};
+        // ------------------------------------------------------------------
+        // doc sbnd_xin/docs/pr/97 D1 -- shower_clustering_with_nv_from_vertices
+        // builds `cluster_point_info main_pi` and sets ONLY .cluster and
+        // .min_vertex; .min_angle/.min_dis/.min_point stay INDETERMINATE and
+        // are filled in the vertex loop only if main_vertex is itself one of
+        // main_cluster_vertices.  When the overall main vertex lives in a
+        // different cluster (reachable, and the state of the [B] doctest
+        // fixture) nothing fills them, and the "prefer main_pi over min_pi"
+        // comparison a few lines later reads stale stack bytes -- a leftover
+        // pointer, so the branch is decided by the address-space layout
+        // (ASLR, or just the size of the environment).  The prototype has the
+        // same hole (NeutrinoID_shower_clustering.h:1071-1073), so this is an
+        // inherited defect, not a porting slip.
+        // ON: sentinel-initialise so the "main vertex was never evaluated
+        // against this cluster" case deterministically prefers min_pi.
+        // OFF (default) = legacy indeterminate read, bit-for-bit.
+        // ------------------------------------------------------------------
+        bool   m_shower_nv_main_pi_init{false};
         // Transient per-call state (same lifecycle as
         // m_absorb_unreachable_main_segs above): the bridge segment plus the
         // bridged cluster's own segments, shielded from every shower

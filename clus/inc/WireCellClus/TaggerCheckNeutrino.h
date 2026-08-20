@@ -729,6 +729,7 @@ public:
         bool m_shower_topo_reexam_straight_guard{false};            // doc pr/40 round 9 (round 7 c1 safety net)
         double m_sfv_kink_max{25.0};                                // degrees; continuation-arm tunable
         bool m_shower_nv_bridge_track{false};                       // doc pr/40 round 9 B2
+        bool m_shower_nv_main_pi_init{false};                       // doc pr/97 D1; false = legacy indeterminate main_pi read
         double m_shower_nv_bridge_max_gap{1.8};                     // cm; B2 gap cut (steiner-cloud closest approach)
         // doc pr/92 -- stray-satellite drop from kine/PF.  Rationale
         // comments in NeutrinoPatternBase.h (pr/92 block).
