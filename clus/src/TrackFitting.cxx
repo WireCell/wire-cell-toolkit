@@ -633,16 +633,30 @@ int TrackFitting::get_channel_for_wire(int apa, int face, int plane, int wire) c
     auto cold_it = m_cold_cache.find(wire_key);
     if (cold_it != m_cold_cache.end()) {
         m_cache_stats.cold_hits++;
-        
+
+        // doc sbnd_xin/docs/pr/97 D2 -- read the channel BEFORE the promotion.
+        // cache_entire_plane() erases every wire of this plane from
+        // m_cold_cache (see its "Remove individual wire entries" loop), which
+        // frees the std::map node `cold_it` points at.  The legacy
+        // `return cold_it->second` after that call is a read of freed memory
+        // (valgrind: "Invalid read of size 4 ... 48 bytes inside a block of
+        // size 56 free'd", 3 contexts in wcdoctest-clus).  It is benign only
+        // while the allocator has not handed the 56-byte node to someone else;
+        // when it has, this returns a garbage channel number.  Not a knob: the
+        // legacy read is undefined behaviour and the intended value is
+        // unambiguous, so the fix is gated by an A/B instead (CLAUDE.md M13
+        // precedent: unknobbed fix OK only if undefined AND gated).
+        const int cached_channel = cold_it->second;
+
         // Update access count for this plane
         m_access_count[plane_key]++;
-        
+
         // Promote to hot cache if threshold reached
         if (m_access_count[plane_key] >= HOT_THRESHOLD) {
             cache_entire_plane(apa, face, plane);
         }
-        
-        return cold_it->second;
+
+        return cached_channel;
     }
     
     // Cache miss - fetch from anode and cache result
