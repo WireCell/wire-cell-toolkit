@@ -1095,14 +1095,17 @@ function(
     // 12 events, nue_score never.  =false restores the FiducialUtils
     // fallback.
     cosmic_consistent_fv = true,
-    // sbnd_xin/docs/75 OFF (this round: knob built + gated, NOT flipped --
-    // owner review of the census pending, same shape as doc 74 before its
-    // flip).  When on, routes the SAME sbnd_pr_fv + margins into the
+    // sbnd_xin/docs/75 ON (owner 2026-08-20, "things are good, turn them on
+    // for SBND production"): routes the SAME sbnd_pr_fv + margins into the
     // nue/single-photon taggers' containment tests (angular_cut,
     // shower_to_wall, bad_reconstruction_2/_2_sp) -- the identical
     // zero-margin FiducialUtils inconsistency doc 74 fixed for cosmic_tagger,
-    // found in the nue/SP tagger family by the doc 75 FV audit.
-    nue_sp_consistent_fv = false,
+    // found in the nue/SP tagger family by the doc 75 FV audit.  OFF gate
+    // 286/286 archives + 143/143 events byte-identical; ON census 2/48 flag
+    // flips (one inert, one fix-direction) + 2/48 small nue_score moves on
+    // nueCC48, 1/19 on NCpi0 (a known F1-margin event), 0/50 on numu-50, no
+    // ADVERSE (doc 75 sec 6).  =false restores the FiducialUtils fallback.
+    nue_sp_consistent_fv = true,
     // F3 OFF (owner 2026-08-04): single-photon SCE gate.  Vacuous today (no
     // SBND SCE helper; clus_geom_helper is ''), proven zero-movement with
     // the knob forced; OFF keeps kine and single-photon independently
@@ -1169,13 +1172,21 @@ function(
     // **SBND PRODUCTION DEFAULT ON since 2026-08-19 (owner flip, doc sec
     // 9.13).**  C++ default false.  Pre-flip arm: SBND_NU_SELECTED_AS_MAIN=0.
     nu_selected_as_main = true,
-    // sbnd_xin/docs/75 OFF (this round: knob built + gated, NOT flipped).
-    // Closes a gap in nu_selected_as_main's own guard: the DL/SCN vertex
-    // path can move Flags::main_cluster onto a DIFFERENT cluster in the
-    // candidate's bundle mid-pass, which the narrow guard's restore does
-    // not undo.  Snapshots/restores the whole {main_cluster} u
-    // other_clusters set instead.  Pending owner review of the census.
-    nu_selected_as_main_snapshot_all = false,
+    // sbnd_xin/docs/75 ON (owner 2026-08-20, "things are good, turn them on
+    // for SBND production"): closes a gap in nu_selected_as_main's own
+    // guard -- the DL/SCN vertex path can move Flags::main_cluster onto a
+    // DIFFERENT cluster in the candidate's bundle mid-pass, which the
+    // narrow guard's restore does not undo.  Snapshots/restores the whole
+    // {main_cluster} u other_clusters set instead.  OFF gate byte-identical.
+    // A flip-equivalence check (doc sec 9) found this fires much more often
+    // than the original per-round census sampled: 16/143 standard-sample
+    // events + 2/26 enriched-manifest events, NOT confined to promoted
+    // candidates as first assumed.  Of those 16, 15 correct only the
+    // persisted main-cluster flag (zero vertex/score change); one (evt
+    // 37112) moves nue_score by 0.03 on an already-nonselecting score, a
+    // known chronically boundary-sensitive event.  No ADVERSE (doc 75 sec
+    // 9.3).  =false restores the narrow-guard-only path.
+    nu_selected_as_main_snapshot_all = true,
     // ---- doc sbnd_xin/docs/pr/33 sec 11 EM-shower-clustering knobs, ALL ON
     // (owner 2026-08-05; see the sbnd clus.jsonnet clus_pr arg comments).
     // Gate labels: work-pr33-base48 (clean-HEAD binary) vs work-pr33-off48
