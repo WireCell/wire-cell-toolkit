@@ -2074,17 +2074,20 @@ function(
     // so op1 no longer deletes the connector as a "duplicate" and op3 can
     // re-anchor J's other prong onto the vertex).  C++ default 0 = off;
     // passthru_tol C++ default 1.0 cm.  null => key omitted => byte-identical.
-    mvga_passthru = null,
+    // SBND PRODUCTION ON 2026-08-21 (doc pr/103 sec 7; owner pre-authorized the
+    // flip on validation PASS: OFF gate 2000/2000+96/96+38/38+30/30, zero ADVERSE
+    // movers, no nueCC48 nue change).  passthru_tol rides the C++ default 1.0 cm.
+    mvga_passthru = 4,
     mvga_passthru_tol = null,
     // doc pr/103 -- op3 interposed splice: when the far-angle gate declines at
     // the main anchor (the 3-track vertex split in two by a 0.6-4 cm stub:
     // 65289/345633/400856/287517), try the per-prong charge-verified straighten
     // splice instead.  C++ default false; false => key omitted => byte-identical.
-    mvga_interposed_fallback = false,
+    mvga_interposed_fallback = true,   // SBND PRODUCTION ON 2026-08-21 (doc pr/103 sec 7)
     // doc pr/103 sec 6: measured-far_angle floor for the fallback (deg).  C++
     // default 0 = only "measured"; validated production value 45 (hairpins /
     // back-folds below it only shorten tracks).  null => key omitted.
-    mvga_interposed_fallback_min_angle = null,
+    mvga_interposed_fallback_min_angle = 45,   // SBND PRODUCTION ON 2026-08-21 (doc pr/103 sec 6 ledger)
     mvga_dup_starved_asym = 0.55,
     mvga_dup_starved_mip = 0.8,
     mvga_dup_starved_span = 0.5,
