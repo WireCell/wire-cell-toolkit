@@ -4887,12 +4887,32 @@ void PatternAlgorithms::shower_clustering_with_nv(int acc_segment_id, IndexedSho
                             shower->get_shower_id(), cand->id(),
                             segment_track_length(cand)/units::cm, cratio, cst.frac_nonpos,
                             ov[0], ov[1], ov[2], part->id(), pratio);
+                        // doc pr/102 round 2 crash fix (SBND 18255-399998,
+                        // rc=135 with other_seg_uncover_3d on): the graph
+                        // removals below invalidate cand's/gv's descriptors,
+                        // but drop_ghost_member cleaned only THIS shower's
+                        // view -- any OTHER shower whose filter sets still
+                        // hold those descriptors is left iterating freed
+                        // storage (Shower::fill_sets UAF via ordered_nodes).
+                        // Purge them from every view first, while the
+                        // descriptors are still valid; TrajectoryView
+                        // removal is a pure filter-set erase (no-op when the
+                        // view never held the item), so a shower untouched
+                        // by the ghost is byte-identically untouched here.
+                        for (auto& other : showers) {
+                            if (!other || other == shower) continue;
+                            other->TrajectoryView::remove_segment(cand);
+                        }
                         remove_segment(graph, cand);
                         for (VertexPtr gv : {gv1, gv2}) {
                             if (!gv || gv == main_vertex) continue;
                             if (gv->flags_any(VertexFlags::kProtectedBreak)) continue;
                             if (!gv->descriptor_valid()) continue;
                             if (boost::degree(gv->get_descriptor(), graph) == 0) {
+                                for (auto& other : showers) {
+                                    if (!other) continue;
+                                    other->TrajectoryView::remove_vertex(gv);
+                                }
                                 remove_vertex(graph, gv);
                             }
                         }

@@ -432,6 +432,14 @@ TEST_CASE("clus knob defaults: TaggerCheckNeutrino literals are the uBooNE value
     // component member in internal units and double-scaled it.
     CHECK_KNOB_NUM(cfg, "iso_snap_min_dir_mag", 10.0);
 
+    // doc pr/102 P1+P2 -- all 0 = off; any drift here silently changes the
+    // find_other_segments admission/tagging behaviour on every detector.
+    // len_admit and uncover_3d are in cm at the component and scaled by
+    // units::cm at the copy into PatternAlgorithms.
+    CHECK_KNOB_NUM(cfg, "other_seg_keep_isolated_min_nnf", 0.0);
+    CHECK_KNOB_NUM(cfg, "other_seg_keep_isolated_len_admit", 0.0);
+    CHECK_KNOB_NUM(cfg, "other_seg_uncover_3d", 0.0);
+
     // Detector-extent literals (doc pr/2 sec 2e(iv)); uBooNE y=+117 top.
     CHECK_KNOB_NUM(cfg, "cosmic_y_top_main", 100.0);
     CHECK_KNOB_NUM(cfg, "cosmic_y_top_strict", 102.0);

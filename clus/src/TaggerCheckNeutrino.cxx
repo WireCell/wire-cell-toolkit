@@ -267,6 +267,10 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_other_seg_keep_isolated            = get(config, "other_seg_keep_isolated",            m_other_seg_keep_isolated);
     m_other_seg_keep_isolated_min_points = get(config, "other_seg_keep_isolated_min_points", m_other_seg_keep_isolated_min_points);
     m_other_seg_keep_isolated_min_length = get(config, "other_seg_keep_isolated_min_length", m_other_seg_keep_isolated_min_length); // cm
+    // doc sbnd_xin/docs/pr/102 P1+P2 -- keep-isolated disjuncts + 3-D uncovered radius.
+    m_other_seg_keep_isolated_min_nnf    = get(config, "other_seg_keep_isolated_min_nnf",    m_other_seg_keep_isolated_min_nnf);
+    m_other_seg_keep_isolated_len_admit  = get(config, "other_seg_keep_isolated_len_admit",  m_other_seg_keep_isolated_len_admit); // cm
+    m_other_seg_uncover_3d               = get(config, "other_seg_uncover_3d",               m_other_seg_uncover_3d); // cm
     // doc sbnd_xin/docs/pr/67 round 3 -- isochronous-snap size gate.
     m_iso_snap_min_dir_mag = get(config, "iso_snap_min_dir_mag", m_iso_snap_min_dir_mag); // cm
     // doc sbnd_xin/docs/pr/59 round 2 -- per-cluster orphaned-associate_points rescue.
@@ -765,6 +769,10 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["other_seg_keep_isolated"]            = m_other_seg_keep_isolated;            // false = legacy (isolated residual discarded)
     cfg["other_seg_keep_isolated_min_points"] = m_other_seg_keep_isolated_min_points; // component-point floor when the keep is on
     cfg["other_seg_keep_isolated_min_length"] = m_other_seg_keep_isolated_min_length; // cm; fitted-length floor when the keep is on
+    // doc sbnd_xin/docs/pr/102 P1+P2.
+    cfg["other_seg_keep_isolated_min_nnf"]    = m_other_seg_keep_isolated_min_nnf;    // 0 = off; nnf disjunct on the keep
+    cfg["other_seg_keep_isolated_len_admit"]  = m_other_seg_keep_isolated_len_admit;  // cm; 0 = off; length disjunct on the keep
+    cfg["other_seg_uncover_3d"]               = m_other_seg_uncover_3d;               // cm; 0 = off; 3-D uncovered radius (tag veto + nnf escape)
     // doc sbnd_xin/docs/pr/67 round 3.
     cfg["iso_snap_min_dir_mag"] = m_iso_snap_min_dir_mag; // cm; 10.0 = legacy isochronous-snap size gate
     // doc sbnd_xin/docs/pr/59 round 2.
@@ -1804,6 +1812,10 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
         pattern_algos.m_other_seg_keep_isolated            = m_other_seg_keep_isolated;
         pattern_algos.m_other_seg_keep_isolated_min_points = m_other_seg_keep_isolated_min_points;
         pattern_algos.m_other_seg_keep_isolated_min_length = m_other_seg_keep_isolated_min_length * units::cm; // cm -> internal
+        // doc sbnd_xin/docs/pr/102 P1+P2.
+        pattern_algos.m_other_seg_keep_isolated_min_nnf    = m_other_seg_keep_isolated_min_nnf;
+        pattern_algos.m_other_seg_keep_isolated_len_admit  = m_other_seg_keep_isolated_len_admit * units::cm; // cm -> internal
+        pattern_algos.m_other_seg_uncover_3d               = m_other_seg_uncover_3d * units::cm; // cm -> internal
         // doc sbnd_xin/docs/pr/67 round 3.
         pattern_algos.m_iso_snap_min_dir_mag = m_iso_snap_min_dir_mag * units::cm; // cm -> internal
         // doc sbnd_xin/docs/pr/59 round 2.

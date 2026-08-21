@@ -29,12 +29,19 @@ struct Res_proto_segment {
 };
 
 // doc sbnd_xin/docs/pr/54 -- see the declaration in PRSegmentFunctions.h.
+// doc sbnd_xin/docs/pr/102 P1: nnf and length disjuncts, both inert at 0.
 bool WireCell::Clus::PR::other_seg_keep_isolated_ok(bool keep_isolated, int component_points,
                                                     double track_length, int min_points,
-                                                    double min_length)
+                                                    double min_length,
+                                                    int nnf, int min_nnf, double len_admit)
 {
     if (!keep_isolated) return false;  // legacy discard, byte-identical
-    return component_points >= min_points && track_length >= min_length;
+    if (component_points >= min_points && track_length >= min_length) return true;
+    // pr/102 P1a (pr/67 S1): well-measured below the terminal floor.
+    if (min_nnf > 0 && nnf >= min_nnf && track_length >= min_length) return true;
+    // pr/102 P1b: a long fitted candidate is not noise at any terminal count.
+    if (len_admit > 0 && track_length >= len_admit) return true;
+    return false;
 }
 
 void PatternAlgorithms::find_other_segments(Graph& graph, Facade::Cluster& cluster, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, bool flag_break_track, double search_range, double scaling_2d)
@@ -55,6 +62,11 @@ void PatternAlgorithms::find_other_segments(Graph& graph, Facade::Cluster& clust
     // Step 1: Tag points near existing segments
     std::vector<bool> flag_tagged(N, false);
     // int num_tagged = 0;
+
+    // doc sbnd_xin/docs/pr/102 P2 (other_seg_uncover_3d, 0 = legacy/off):
+    // sentinel counters for the one-line-per-cluster log below.
+    int uncover3d_tag_veto = 0;   // points saved from the 2-D tag by 3-D distance
+    int uncover3d_nnf = 0;        // step-8/re-eval points counted not-faked by 3-D distance
     
     const auto transform = track_fitter.get_pc_transforms()->pc_transform(cluster.get_scope_transform(cluster.get_default_scope()));
     double cluster_t0 = cluster.get_cluster_t0();
@@ -109,17 +121,28 @@ void PatternAlgorithms::find_other_segments(Graph& graph, Facade::Cluster& clust
 
         // Additional tagging based on 2D projections and dead channels
         if (!flag_tagged[i]) {
+            // doc pr/102 P2: a point farther than other_seg_uncover_3d from
+            // EVERY existing fitted trajectory in 3-D is real uncovered
+            // charge, not projection shadow -- it must stay untagged so its
+            // terminals can form one component instead of the 1-3-terminal
+            // fragments of pr/102 sec 4 B2.  Knob 0 => branch never taken =>
+            // byte-identical legacy tagging.
+            if (m_other_seg_uncover_3d > 0 && min_3d_dis > m_other_seg_uncover_3d) {
+                ++uncover3d_tag_veto;
+            }
+            else {
             auto p_raw = transform->backward(p, cluster_t0, face, apa);
-            
-            bool u_ok = (min_dis_u < scaling_2d * search_range || 
+
+            bool u_ok = (min_dis_u < scaling_2d * search_range ||
                         cluster.grouping()->get_closest_dead_chs(p_raw, 1, apa, face, 0));
-            bool v_ok = (min_dis_v < scaling_2d * search_range || 
+            bool v_ok = (min_dis_v < scaling_2d * search_range ||
                         cluster.grouping()->get_closest_dead_chs(p_raw, 1, apa, face, 1));
-            bool w_ok = (min_dis_w < scaling_2d * search_range || 
+            bool w_ok = (min_dis_w < scaling_2d * search_range ||
                         cluster.grouping()->get_closest_dead_chs(p_raw, 1, apa, face, 2));
-            
+
             if (u_ok && v_ok && w_ok) {
                 flag_tagged[i] = true;
+            }
             }
         
 
@@ -405,11 +428,12 @@ void PatternAlgorithms::find_other_segments(Graph& graph, Facade::Cluster& clust
             // Check if point is fake (too close to existing segments)
             Facade::geo_point_t p(x_coords[idx], y_coords[idx], z_coords[idx]);
             double min_dis_u = 1e9, min_dis_v = 1e9, min_dis_w = 1e9;
-            
+            double min_dis_3d = 1e9;  // doc pr/102 P2; only read when the knob is on
+
             WirePlaneId wpid = wpid_array[idx];
             int apa = wpid.apa();
             int face = wpid.face();
-            
+
             for (auto seg : existing_segments) {
                 auto closest_2d = segment_get_closest_2d_distances(seg, p, apa, face, "fit");
                 double dis_u = std::get<0>(closest_2d);
@@ -426,17 +450,31 @@ void PatternAlgorithms::find_other_segments(Graph& graph, Facade::Cluster& clust
                 if (dis_u < min_dis_u) min_dis_u = dis_u;
                 if (dis_v < min_dis_v) min_dis_v = dis_v;
                 if (dis_w < min_dis_w) min_dis_w = dis_w;
+
+                if (m_other_seg_uncover_3d > 0) {
+                    double dis_3d = segment_get_closest_point(seg, p, "fit").first;
+                    if (dis_3d < min_dis_3d) min_dis_3d = dis_3d;
+                }
             }
 
             auto p_raw = transform->backward(p, cluster_t0, face, apa);
 
             int flag_num = 0;
-            if (min_dis_u > scaling_2d * search_range && 
+            if (min_dis_u > scaling_2d * search_range &&
                 !cluster.grouping()->get_closest_dead_chs(p_raw, 1, apa, face, 0)) flag_num++;
-            if (min_dis_v > scaling_2d * search_range && 
+            if (min_dis_v > scaling_2d * search_range &&
                 !cluster.grouping()->get_closest_dead_chs(p_raw, 1, apa, face, 1)) flag_num++;
-            if (min_dis_w > scaling_2d * search_range && 
+            if (min_dis_w > scaling_2d * search_range &&
                 !cluster.grouping()->get_closest_dead_chs(p_raw, 1, apa, face, 2)) flag_num++;
+
+            // doc pr/102 P2: 3-D-far charge is measured, whatever the 2-D
+            // projections say.  Promotes flag_num past the >=2 test below so
+            // the point counts toward number_not_faked.  Knob 0 => never taken.
+            if (m_other_seg_uncover_3d > 0 && flag_num < 2 &&
+                min_dis_3d > m_other_seg_uncover_3d) {
+                flag_num = 2;
+                ++uncover3d_nnf;
+            }
             
             if (min_dis_u > max_dis_u && 
                 !cluster.grouping()->get_closest_dead_chs(p_raw, 1, apa, face, 0)) max_dis_u = min_dis_u;
@@ -831,10 +869,28 @@ void PatternAlgorithms::find_other_segments(Graph& graph, Facade::Cluster& clust
                     // prototype feature, not a parity fix.
                     const double kept_length = segment_track_length(new_seg);
                     const int    kept_points = temp_segments[max_length_cluster].number_points;
+                    const int    kept_nnf    = temp_segments[max_length_cluster].number_not_faked;
                     if (other_seg_keep_isolated_ok(m_other_seg_keep_isolated, kept_points,
                                                    kept_length,
                                                    m_other_seg_keep_isolated_min_points,
-                                                   m_other_seg_keep_isolated_min_length)) {
+                                                   m_other_seg_keep_isolated_min_length,
+                                                   kept_nnf,
+                                                   m_other_seg_keep_isolated_min_nnf,
+                                                   m_other_seg_keep_isolated_len_admit)) {
+                        // doc pr/102 P1 sentinel: fires ONLY for an admission
+                        // the legacy floors would have refused, so the events
+                        // emitting it are exactly the set the knobs can move.
+                        if (kept_points < m_other_seg_keep_isolated_min_points) {
+                            SPDLOG_LOGGER_DEBUG(s_log,
+                                "pr102 keep-isolated-admit: cluster {} n_points={} nnf={} "
+                                "length={:.2f} cm reason={}",
+                                cluster.get_cluster_id(), kept_points, kept_nnf,
+                                kept_length / units::cm,
+                                (m_other_seg_keep_isolated_min_nnf > 0 &&
+                                 kept_nnf >= m_other_seg_keep_isolated_min_nnf &&
+                                 kept_length >= m_other_seg_keep_isolated_min_length)
+                                    ? "nnf" : "len");
+                        }
                         // Keep: add as a disconnected piece of this cluster's
                         // graph and refit jointly, exactly like the
                         // isochronous-accepted branch below.
@@ -913,6 +969,7 @@ void PatternAlgorithms::find_other_segments(Graph& graph, Facade::Cluster& clust
                 size_t idx = sep_clusters[*it][j];
                 Facade::geo_point_t p(x_coords[idx], y_coords[idx], z_coords[idx]);
                 double min_dis_u = 1e9, min_dis_v = 1e9, min_dis_w = 1e9;
+                double min_dis_3d = 1e9;  // doc pr/102 P2; only read when the knob is on
 
                 WirePlaneId wpid = wpid_array[idx];
                 int apa = wpid.apa();
@@ -934,6 +991,11 @@ void PatternAlgorithms::find_other_segments(Graph& graph, Facade::Cluster& clust
                     if (dis_u < min_dis_u) min_dis_u = dis_u;
                     if (dis_v < min_dis_v) min_dis_v = dis_v;
                     if (dis_w < min_dis_w) min_dis_w = dis_w;
+
+                    if (m_other_seg_uncover_3d > 0) {
+                        double dis_3d = segment_get_closest_point(seg, p, "fit").first;
+                        if (dis_3d < min_dis_3d) min_dis_3d = dis_3d;
+                    }
                 }
 
                 auto p_raw = transform->backward(p, cluster_t0, face, apa);
@@ -945,6 +1007,15 @@ void PatternAlgorithms::find_other_segments(Graph& graph, Facade::Cluster& clust
                     !cluster.grouping()->get_closest_dead_chs(p_raw, 1, apa, face, 1)) flag_num++;
                 if (min_dis_w > scaling_2d * search_range &&
                     !cluster.grouping()->get_closest_dead_chs(p_raw, 1, apa, face, 2)) flag_num++;
+
+                // doc pr/102 P2: same 3-D escape as step 8.  This is the seat
+                // the pr/67 P5 comment below names as "the one rejection that
+                // can kill real charge without any 3-D evidence".
+                if (m_other_seg_uncover_3d > 0 && flag_num < 2 &&
+                    min_dis_3d > m_other_seg_uncover_3d) {
+                    flag_num = 2;
+                    ++uncover3d_nnf;
+                }
 
                 if (flag_num >= 2) temp_segments[*it].number_not_faked++;
 
@@ -990,6 +1061,16 @@ void PatternAlgorithms::find_other_segments(Graph& graph, Facade::Cluster& clust
         for (auto it = tmp_del_set.begin(); it != tmp_del_set.end(); it++) {
             remaining_segments.erase(*it);
         }
+    }
+
+    // doc pr/102 P2 sentinel: one line per cluster where the 3-D escape did
+    // anything, so a knob-on census can attribute every change.  Never fires
+    // at the 0 default (both counters stay 0 and the knob gate is false).
+    if (m_other_seg_uncover_3d > 0 && (uncover3d_tag_veto > 0 || uncover3d_nnf > 0)) {
+        SPDLOG_LOGGER_DEBUG(s_log,
+            "pr102 uncover3d: cluster={} radius={:.2f} cm tag_veto={} nnf_3d={}",
+            cluster.get_cluster_id(), m_other_seg_uncover_3d / units::cm,
+            uncover3d_tag_veto, uncover3d_nnf);
     }
 
     // Step 10: Break curvy/high-dQdx segments if requested

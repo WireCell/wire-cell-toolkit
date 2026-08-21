@@ -2242,6 +2242,34 @@ function(
     other_seg_keep_isolated = true,
     other_seg_keep_isolated_min_points = null,
     other_seg_keep_isolated_min_length = null,
+    // doc pr/102 P1 -- OR-disjuncts on the pr/54 keep above: min_nnf admits
+    // a candidate below the 25-terminal floor when its number_not_faked is
+    // at least this (pr/67 sec 10.3 S1; 18255-70084 read nnf 10/12 vs pr/54
+    // noise at 0); len_admit (cm) admits any candidate at least this long
+    // (pr/102 sec 4 B1: 67-145 cm candidates dropped at 16-23 terminals).
+    // C++ defaults 0 = off; null omits the keys => byte-identical.
+    //
+    // len_admit: SBND PRODUCTION ON at 30 -- owner authorization 2026-08-20
+    // ("implement P1 ... if validation pass, turn them on by default"),
+    // validation doc pr/102 sec 8: nuecc48 sweep 2/48 changed ZERO nue
+    // flips, mcp1k 6/1000 changed zero ADVERSE movers, census fixes the
+    // 145.5/67.1 cm dropped tracks (18255-292384/387850).  Named
+    // hand-check item: 18255-284794 numu 2.12 -> -1.28 (its real 71.4 cm
+    // second track is recovered; vertex unmoved).  Legacy escape:
+    // -A other_seg_keep_isolated_len_admit=0 (or SBND_OSEG_LEN_ADMIT=0...
+    // any empty env leaves this default) -- C++ knob default stays 0.
+    //
+    // min_nnf: STAYS OFF -- validation FAILED at 4 (nueCC48 nue ledger
+    // -4/+1) and carries one named nue loss at 8 (389538 4.3 -> -15 vs
+    // 30504 gain); doc pr/102 sec 8.3.  Owner hand-scan before any flip.
+    other_seg_keep_isolated_min_nnf = null,
+    other_seg_keep_isolated_len_admit = null,
+    // doc pr/102 P2 -- 3-D uncovered-charge radius (cm): imaged charge
+    // farther than this from EVERY existing fitted trajectory cannot be
+    // 2-D-tagged in find_other_segments step 1 and counts toward
+    // number_not_faked at step 8 / re-eval (the B2 nnf=0 fragmentation
+    // family).  C++ default 0 = off; null omits the key => byte-identical.
+    other_seg_uncover_3d = null,
     // doc pr/67 round 3 (S2) -- isochronous-snap size gate in cm, the first
     // clause of the guard at NeutrinoOtherSegments.cxx:721.  The machinery
     // behind it (modify_vertex/segment_isochronous) is the only thing that
@@ -2723,6 +2751,9 @@ function(
                              other_seg_keep_isolated=other_seg_keep_isolated,
                              other_seg_keep_isolated_min_points=other_seg_keep_isolated_min_points,
                              other_seg_keep_isolated_min_length=other_seg_keep_isolated_min_length,
+                             other_seg_keep_isolated_min_nnf=other_seg_keep_isolated_min_nnf,
+                             other_seg_keep_isolated_len_admit=other_seg_keep_isolated_len_admit,
+                             other_seg_uncover_3d=other_seg_uncover_3d,
                              iso_snap_min_dir_mag=iso_snap_min_dir_mag,
                              shower_absorb_unreachable_main=shower_absorb_unreachable_main,
                              assoc_full_recluster=assoc_full_recluster,

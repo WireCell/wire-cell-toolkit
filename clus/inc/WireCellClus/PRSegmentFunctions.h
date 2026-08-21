@@ -145,9 +145,26 @@ namespace WireCell::Clus::PR {
     /// min_length -- separating "isolated but well-supported" (a separated
     /// shower) from "isolated and sparse" (noise fragments).  Pure
     /// predicate, all lengths internal units.
+    ///
+    /// doc sbnd_xin/docs/pr/102 P1 (pr/67 sec 10.3 S1 / pr/96 sec 7 F1):
+    /// two additional OR-disjuncts, each inert at its 0 default so every
+    /// pre-pr/102 call site stays byte-identical:
+    ///  - min_nnf > 0: admit a candidate below the min_points floor when its
+    ///    number_not_faked (terminals with >=2 planes clear of every
+    ///    existing segment, computed at the step-8 call site and previously
+    ///    thrown away) is at least min_nnf AND track_length >= min_length.
+    ///    Sized against the pr/54 sec 13 noise components (nnf = 0 at both
+    ///    pr/102 nnf0_short drops) vs 18255-70084's candidate (nnf 10/12).
+    ///  - len_admit > 0: admit any candidate whose fitted track_length is at
+    ///    least len_admit regardless of terminal count.  min_points counts
+    ///    STEINER TERMINALS, not size: pr/102 sec 4 B1 measured 67-145 cm
+    ///    candidates dropped at 16-23 terminals against the 25 floor, while
+    ///    the noise population the floor was sized on is <= 10 cm.
     bool other_seg_keep_isolated_ok(bool keep_isolated, int component_points,
                                     double track_length, int min_points,
-                                    double min_length);
+                                    double min_length,
+                                    int nnf = -1, int min_nnf = 0,
+                                    double len_admit = 0.0);
 
     /// doc sbnd_xin/docs/pr/51 (main-vertex graph audit): fraction of pts_a
     /// whose distance to the NEAREST point of pts_b is <= tol.  The

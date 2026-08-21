@@ -1045,6 +1045,31 @@ namespace WireCell::Clus::PR {
         int    m_other_seg_keep_isolated_min_points{25};
         double m_other_seg_keep_isolated_min_length{3.0 * units::cm}; // internal units
 
+        // doc sbnd_xin/docs/pr/102 P1 -- two OR-disjuncts on the keep above,
+        // each inert at its 0 default (see other_seg_keep_isolated_ok in
+        // PRSegmentFunctions.h).  min_nnf admits a candidate below the
+        // 25-terminal floor when its number_not_faked is at least min_nnf
+        // (pr/67 sec 10.3 S1: 18255-70084's candidate read nnf 10/12 against
+        // pr/54 sec 13 noise at nnf 0); len_admit admits any candidate whose
+        // fitted track is at least that long (pr/102 sec 4 B1: 67-145 cm
+        // candidates dropped at 16-23 terminals -- the floor counts STEINER
+        // TERMINALS, not size, and the noise it was sized on is <= 10 cm).
+        int    m_other_seg_keep_isolated_min_nnf{0};                    // 0 = off
+        double m_other_seg_keep_isolated_len_admit{0.0 * units::cm};    // 0 = off; internal units
+
+        // doc sbnd_xin/docs/pr/102 P2 -- the B2 family (Steiner
+        // fragmentation / nnf=0 shadowing): imaged charge farther than this
+        // radius in 3-D from EVERY existing fitted trajectory is real
+        // evidence, not projection shadow.  Applied at three seats in
+        // find_other_segments, all gated on > 0: (i) step-1 tagging -- such a
+        // point cannot be tagged by the 2-D branch, so B2 components stop
+        // fragmenting into 1-3-terminal crumbs; (ii) step-8 and (iii) the
+        // step-9 re-evaluation -- such a point counts toward
+        // number_not_faked whatever its 2-D projections say (the re-eval is
+        // the seat the pr/67 P5 comment names as able to kill real charge
+        // with no 3-D evidence).  0 = off, byte-identical legacy.
+        double m_other_seg_uncover_3d{0.0 * units::cm};                 // 0 = off; internal units
+
         // doc sbnd_xin/docs/pr/67 round 3 (S2) -- the size gate on the first
         // clause of the isochronous-snap guard in find_other_segments.  The
         // machinery behind that guard (modify_vertex_isochronous /

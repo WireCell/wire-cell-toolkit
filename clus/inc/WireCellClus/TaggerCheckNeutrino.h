@@ -266,6 +266,14 @@ public:
         bool   m_other_seg_keep_isolated{false};
         int    m_other_seg_keep_isolated_min_points{25};
         double m_other_seg_keep_isolated_min_length{3.0}; // cm; scaled at copy
+        // doc sbnd_xin/docs/pr/102 P1 -- OR-disjuncts on the keep above
+        // (design block at NeutrinoPatternBase.h).  0 = off, byte-identical.
+        int    m_other_seg_keep_isolated_min_nnf{0};
+        double m_other_seg_keep_isolated_len_admit{0.0}; // cm; scaled at copy
+        // doc sbnd_xin/docs/pr/102 P2 -- 3-D uncovered-charge radius for the
+        // find_other_segments tagging/nnf seats (design block at
+        // NeutrinoPatternBase.h).  0 = off, byte-identical.
+        double m_other_seg_uncover_3d{0.0}; // cm; scaled at copy
         // doc sbnd_xin/docs/pr/67 round 3 (S2) -- size gate on the isochronous
         // snap in find_other_segments.  Legacy 10 cm; lowering it lets a short
         // isochronously-displaced branch reach modify_vertex/segment_isochronous.

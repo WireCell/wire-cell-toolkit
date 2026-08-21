@@ -1699,6 +1699,15 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               other_seg_keep_isolated=false,
               other_seg_keep_isolated_min_points=null,
               other_seg_keep_isolated_min_length=null,
+              // doc pr/102 P1 -- OR-disjuncts on the pr/54 keep: min_nnf
+              // (terminal not-faked floor) and len_admit (cm).  C++ defaults
+              // 0 = off.  null omits the keys => byte-identical.
+              other_seg_keep_isolated_min_nnf=null,
+              other_seg_keep_isolated_len_admit=null,
+              // doc pr/102 P2 -- 3-D uncovered-charge radius (cm) for the
+              // find_other_segments tagging/nnf seats.  C++ default 0 = off.
+              // null omits the key => byte-identical.
+              other_seg_uncover_3d=null,
               // doc pr/67 round 3 (S2) -- isochronous-snap size gate, cm.
               // C++ default 10.0 = legacy.  null omits the key.
               iso_snap_min_dir_mag=null,
@@ -2473,6 +2482,9 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
             other_seg_keep_isolated=other_seg_keep_isolated,
             other_seg_keep_isolated_min_points=other_seg_keep_isolated_min_points,
             other_seg_keep_isolated_min_length=other_seg_keep_isolated_min_length,
+            other_seg_keep_isolated_min_nnf=other_seg_keep_isolated_min_nnf,
+            other_seg_keep_isolated_len_admit=other_seg_keep_isolated_len_admit,
+            other_seg_uncover_3d=other_seg_uncover_3d,
             iso_snap_min_dir_mag=iso_snap_min_dir_mag,
             shower_absorb_unreachable_main=shower_absorb_unreachable_main,
             assoc_full_recluster=assoc_full_recluster,
@@ -3472,6 +3484,15 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
               other_seg_keep_isolated=false,
               other_seg_keep_isolated_min_points=null,
               other_seg_keep_isolated_min_length=null,
+              // doc pr/102 P1 -- OR-disjuncts on the pr/54 keep: min_nnf
+              // (terminal not-faked floor) and len_admit (cm).  C++ defaults
+              // 0 = off.  null omits the keys => byte-identical.
+              other_seg_keep_isolated_min_nnf=null,
+              other_seg_keep_isolated_len_admit=null,
+              // doc pr/102 P2 -- 3-D uncovered-charge radius (cm) for the
+              // find_other_segments tagging/nnf seats.  C++ default 0 = off.
+              // null omits the key => byte-identical.
+              other_seg_uncover_3d=null,
               // doc pr/67 round 3 (S2) -- isochronous-snap size gate, cm.
               // C++ default 10.0 = legacy.  null omits the key.
               iso_snap_min_dir_mag=null,
@@ -3873,6 +3894,9 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 other_seg_keep_isolated=other_seg_keep_isolated,
                 other_seg_keep_isolated_min_points=other_seg_keep_isolated_min_points,
                 other_seg_keep_isolated_min_length=other_seg_keep_isolated_min_length,
+                other_seg_keep_isolated_min_nnf=other_seg_keep_isolated_min_nnf,
+                other_seg_keep_isolated_len_admit=other_seg_keep_isolated_len_admit,
+                other_seg_uncover_3d=other_seg_uncover_3d,
                 iso_snap_min_dir_mag=iso_snap_min_dir_mag,
                 shower_absorb_unreachable_main=shower_absorb_unreachable_main,
                 assoc_full_recluster=assoc_full_recluster,
