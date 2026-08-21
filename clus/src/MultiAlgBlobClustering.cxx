@@ -5,6 +5,8 @@
 #include "WireCellClus/PRSegment.h"
 #include "WireCellClus/PRVertex.h"
 #include "WireCellClus/PRShower.h"
+#include "WireCellClus/PRShowerFunctions.h"  // doc pr/84 r2: shower_get_closest_point
+#include "WireCellClus/PRSegmentFunctions.h" // doc pr/93 r4: segment_orphan_confident_track
 #include "WireCellClus/TrackFitting.h"
 
 
@@ -221,6 +223,7 @@ void MultiAlgBlobClustering::configure(const WireCell::Configuration& cfg)
         m_bee_flash = Bee::Flashes(get<std::string>(cfg, "bee_detector", "uboone"), "op");
     }
     m_bee_flash_per_flash = get(cfg, "bee_flash_per_flash", m_bee_flash_per_flash);
+    m_bee_flash_pred_min = get(cfg, "bee_flash_pred_min", m_bee_flash_pred_min);
     m_flash_group_window = get(cfg, "flash_group_window", m_flash_group_window);
     m_flash_group_greedy = get(cfg, "flash_group_greedy", m_flash_group_greedy);
 
@@ -352,6 +355,7 @@ void MultiAlgBlobClustering::configure(const WireCell::Configuration& cfg)
             pfc.merge_id_offset = get<int>(pf, "merge_id_offset", pfc.merge_id_offset);
             pfc.emit_empty = get<bool>(pf, "emit_empty", false);
             pfc.pf_track_main_cluster_only = get<bool>(pf, "pf_track_main_cluster_only", false);
+            pfc.pf_track_bridged_clusters = get<bool>(pf, "pf_track_bridged_clusters", false);  // doc pr/40 round 9 B2
             pfc.pf_shower_vertex_barrier = get<bool>(pf, "pf_shower_vertex_barrier", false);
             pfc.pf_shower_parent_precedence = get<bool>(pf, "pf_shower_parent_precedence", false);
             pfc.pf_pi0_node_per_id = get<bool>(pf, "pf_pi0_node_per_id", false);
@@ -360,6 +364,20 @@ void MultiAlgBlobClustering::configure(const WireCell::Configuration& cfg)
             pfc.pf_orphan_track_parentage = get<bool>(pf, "pf_orphan_track_parentage", false);
             // doc pr/65 round 3; absent => legacy fabricated orphan roots, byte-identical.
             pfc.pf_orphan_audit_only = get<bool>(pf, "pf_orphan_audit_only", false);
+            // doc pr/84 round 2; absent => legacy pseudo-parent rendering, byte-identical.
+            pfc.pf_direct_when_touching = get<bool>(pf, "pf_direct_when_touching", false);
+            pfc.pf_touch_max = get<double>(pf, "pf_touch_max", pfc.pf_touch_max);
+            pfc.pf_touch_cross_main = get<bool>(pf, "pf_touch_cross_main", false);
+            pfc.pf_touch_cross_max = get<double>(pf, "pf_touch_cross_max", pfc.pf_touch_cross_max);
+            pfc.pf_pseudo_gap_from_main = get<bool>(pf, "pf_pseudo_gap_from_main", false);
+            pfc.pf_unique_node_ids = get<bool>(pf, "pf_unique_node_ids", false);
+            // doc pr/92; absent => legacy (dropped-satellite set unread), byte-identical.
+            pfc.pf_drop_stray_satellites = get<bool>(pf, "pf_drop_stray_satellites", false);
+            // doc pr/93 round 4; absent => legacy audit-only orphans / legacy
+            // shower-view vertex precedence, byte-identical.
+            pfc.pf_orphan_confident_track = get<bool>(pf, "pf_orphan_confident_track", false);
+            pfc.pf_orphan_track_min = get<double>(pf, "pf_orphan_track_min", pfc.pf_orphan_track_min);
+            pfc.pf_track_owns_loose_vertex = get<bool>(pf, "pf_track_owns_loose_vertex", false);
             m_bee_pf_configs.push_back(pfc);
             m_bee_pf_trees[pfc.name] = Bee::ParticleTree(pfc.name);
             if (pfc.emit_empty) { m_bee_pf_emit_empty.insert(pfc.name); }
@@ -438,6 +456,7 @@ WireCell::Configuration MultiAlgBlobClustering::default_configuration() const
     cfg["save_real_cluster_id"] = m_save_real_cluster_id;
     cfg["save_assoc_cluster_id"] = m_save_assoc_cluster_id;
     cfg["real_cluster_id_global"] = m_real_cluster_id_global;
+    cfg["bee_flash_pred_min"] = m_bee_flash_pred_min;
 
     // Add the new parameter to default configuration
     cfg["initial_index"] = m_initial_index;
@@ -819,7 +838,9 @@ void MultiAlgBlobClustering::fill_bee_points(const std::string& name, const Grou
 }
 
 // Fill bee points from PRGraph track trajectories
-void MultiAlgBlobClustering::fill_bee_points_from_pr_graph(const std::string& name, const Grouping& grouping)
+void MultiAlgBlobClustering::fill_bee_points_from_pr_graph(const std::string& name, const Grouping& grouping,
+                                                           std::shared_ptr<WireCell::Clus::TrackFitting> tf_in,
+                                                           bool do_reset)
 {
     if (m_bee_points.find(name) == m_bee_points.end()) {
         SPDLOG_LOGGER_WARN(log, "Bee points set '{}' not found for PR graph, skipping", name);
@@ -839,31 +860,46 @@ void MultiAlgBlobClustering::fill_bee_points_from_pr_graph(const std::string& na
 
     const auto& config = *it;
 
-    // Reset RSE values for all points objects
-    if (m_use_config_rse) {
-        apa_bpts.global.rse(m_runNo, m_subRunNo, m_eventNo);
-        for (auto& [apa, face_map] : apa_bpts.by_apa_face) {
-            for (auto& [face, bpts] : face_map) {
-                bpts.rse(m_runNo, m_subRunNo, m_eventNo);
+    // Reset RSE values for all points objects.  Skipped for the 2nd..Nth
+    // bundle of a per-bundle sequence -- reset() clears the accumulated points.
+    if (do_reset) {
+        if (m_use_config_rse) {
+            apa_bpts.global.rse(m_runNo, m_subRunNo, m_eventNo);
+            for (auto& [apa, face_map] : apa_bpts.by_apa_face) {
+                for (auto& [face, bpts] : face_map) {
+                    bpts.rse(m_runNo, m_subRunNo, m_eventNo);
+                }
             }
-        }
-    } else {
-        // Use the default approach with ident
-        int run = 0, evt = 0;
-        if (m_last_ident > 0) {
-            run = (m_last_ident >> 16) & 0x7fff;
-            evt = (m_last_ident) & 0xffff;
-        }
-        apa_bpts.global.reset(evt, 0, run);
-        for (auto& [anode_id, face_map] : apa_bpts.by_apa_face) {
-            for (auto& [face, bpts] : face_map) {
-                bpts.reset(evt, 0, run);
+        } else {
+            // Use the default approach with ident
+            int run = 0, evt = 0;
+            if (m_last_ident > 0) {
+                run = (m_last_ident >> 16) & 0x7fff;
+                evt = (m_last_ident) & 0xffff;
+            }
+            apa_bpts.global.reset(evt, 0, run);
+            for (auto& [anode_id, face_map] : apa_bpts.by_apa_face) {
+                for (auto& [face, bpts] : face_map) {
+                    bpts.reset(evt, 0, run);
+                }
             }
         }
     }
 
-    // Get the PRGraph from the grouping
-    auto pr_graph = grouping.get_pr_graph();
+    // doc pr/94 Phase 4b: render the caller's fitter when given one, and take
+    // the graph from THAT fitter.  grouping.get_pr_graph() is by definition
+    // m_track_fitting->get_graph() (Facade_Grouping.cxx:76-79) = the unnamed
+    // slot = bundle 0, so reading it here emitted bundle 0's trajectories once
+    // per bundle instead of each bundle's own -- i.e. every candidate after
+    // the first contributed no track_fit/shower_track points at all (SBND
+    // 18255/18625, owner Bee scan 2026-08-19).  Null tf_in reproduces the
+    // legacy single-candidate resolution exactly.
+    auto tf_sel = tf_in ? tf_in : grouping.get_track_fitting();
+    if (!tf_sel) {
+        SPDLOG_LOGGER_WARN(log, "No TrackFitting in grouping for bee points set '{}'", name);
+        return;
+    }
+    auto pr_graph = tf_sel->get_graph();
     if (!pr_graph) {
         SPDLOG_LOGGER_WARN(log, "No PR graph found in grouping for bee points set '{}'", name);
         return;
@@ -877,7 +913,9 @@ void MultiAlgBlobClustering::fill_bee_points_from_pr_graph(const std::string& na
     // the same color in Bee).
     std::map<PR::SegmentPtr, PR::ShowerPtr, PR::SegmentIndexCmp> seg_to_shower;
     if (config.use_associate_points) {
-        auto tf = grouping.get_track_fitting();
+        // Same fitter the graph came from: a shower list from bundle 0 would
+        // classify bundle i's segments as tracks (charge 0) at random.
+        auto tf = tf_sel;
         if (tf) {
             for (const auto& shower : tf->get_showers()) {
                 PR::IndexedVertexSet sv; PR::IndexedSegmentSet ss;
@@ -1062,7 +1100,9 @@ void MultiAlgBlobClustering::fill_bee_points_from_pr_graph(const std::string& na
 }
 
 
-void MultiAlgBlobClustering::fill_bee_vertices_from_pr_graph(const std::string& name, const Facade::Grouping& grouping)
+void MultiAlgBlobClustering::fill_bee_vertices_from_pr_graph(const std::string& name, const Facade::Grouping& grouping,
+                                                             std::shared_ptr<WireCell::Clus::TrackFitting> tf_in,
+                                                             bool do_reset)
 {
     if (m_bee_points.find(name) == m_bee_points.end()) {
         SPDLOG_LOGGER_WARN(log, "Bee points set '{}' not found for graph vertices, skipping", name);
@@ -1071,19 +1111,28 @@ void MultiAlgBlobClustering::fill_bee_vertices_from_pr_graph(const std::string& 
 
     auto& apa_bpts = m_bee_points[name];
 
-    // Reset RSE
-    if (m_use_config_rse) {
-        apa_bpts.global.rse(m_runNo, m_subRunNo, m_eventNo);
-    } else {
-        int run = 0, evt = 0;
-        if (m_last_ident > 0) {
-            run = (m_last_ident >> 16) & 0x7fff;
-            evt = (m_last_ident) & 0xffff;
+    // Reset RSE.  See fill_bee_points_from_pr_graph for why do_reset exists.
+    if (do_reset) {
+        if (m_use_config_rse) {
+            apa_bpts.global.rse(m_runNo, m_subRunNo, m_eventNo);
+        } else {
+            int run = 0, evt = 0;
+            if (m_last_ident > 0) {
+                run = (m_last_ident >> 16) & 0x7fff;
+                evt = (m_last_ident) & 0xffff;
+            }
+            apa_bpts.global.reset(evt, 0, run);
         }
-        apa_bpts.global.reset(evt, 0, run);
     }
 
-    auto pr_graph = grouping.get_pr_graph();
+    // doc pr/94 Phase 4b: the caller's fitter and ITS graph, not the unnamed
+    // slot -- otherwise every bundle re-emits bundle 0's vertices.
+    auto tf_sel = tf_in ? tf_in : grouping.get_track_fitting();
+    if (!tf_sel) {
+        SPDLOG_LOGGER_WARN(log, "No TrackFitting in grouping for vertices bee set '{}'", name);
+        return;
+    }
+    auto pr_graph = tf_sel->get_graph();
     if (!pr_graph) {
         SPDLOG_LOGGER_WARN(log, "No PR graph found in grouping for vertices bee set '{}'", name);
         return;
@@ -1169,7 +1218,10 @@ static std::string pf_pdg_to_name(int pdg, bool prototype = false, bool proto_fa
 //   4. Node IDs follow the prototype convention: cluster_id*1000 + seg_id.
 void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
                                                const Facade::Grouping& grouping,
-                                               bool flag_print)
+                                               bool flag_print,
+                                               std::shared_ptr<WireCell::Clus::TrackFitting> tf_in,
+                                               std::set<int>* shared_used_ids,
+                                               Configuration* out_particles)
 {
     // Debug dump of the PF-tree assembly.  Previously forced on (unconditional
     // stdout spam); now opt-in via env var.  Log/stdout only -- no effect on
@@ -1207,11 +1259,21 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
         }
     };
 
-    auto pr_graph = grouping.get_pr_graph();
-    if (!pr_graph) { emit_without_reco("no PR graph"); return; }
-
-    auto tf = grouping.get_track_fitting();
+    // doc pr/94 Phase 4: render the caller's fitter when given one.  Resolving
+    // the unnamed slot implicitly is correct only while there is exactly one
+    // candidate; with per-bundle fitters the unnamed slot is always bundle 0,
+    // so every later bundle's flow would silently render as a repeat of it.
+    auto tf = tf_in ? tf_in : grouping.get_track_fitting();
     if (!tf) { emit_without_reco("no TrackFitting"); return; }
+
+    // ...and take the GRAPH from that same fitter.  Grouping::get_pr_graph()
+    // is defined as m_track_fitting->get_graph() (Facade_Grouping.cxx:76-79),
+    // i.e. the unnamed slot again -- so reading it here would have walked
+    // bundle 0's graph from bundle i's vertex.  Caught by the doc pr/94 §10.1
+    // sync check on NCpi0 evt 18625, whose second bundle reconstructed a real
+    // 1498 MeV candidate and emitted no Bee node at all.
+    auto pr_graph = tf->get_graph();
+    if (!pr_graph) { emit_without_reco("no PR graph"); return; }
 
     auto main_vertex = tf->get_main_vertex();
     if (!main_vertex) { emit_without_reco("no main vertex"); return; }
@@ -1224,11 +1286,30 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
         const auto* c = s->cluster();
         return main_cluster && c && c->get_cluster_id() == main_cluster->get_cluster_id();
     };
+    // doc sbnd_xin/docs/pr/40 round 9 B2: clusters graph-connected to the
+    // main cluster by an nv_bridge_track bridge segment.  Widens ONLY the
+    // two BFS gates below (the orphan pools stay main-cluster-only); knob
+    // off, or no bridge fired => the set is empty => byte-identical.
+    const auto& bridged_ids = tf->get_bridged_cluster_ids();
+    auto bridged_cluster = [&](const PR::SegmentPtr& s) {
+        if (!cfg.pf_track_bridged_clusters || bridged_ids.empty()) return false;
+        const auto* c = s->cluster();
+        return c && bridged_ids.count(c->get_cluster_id()) > 0;
+    };
 
     const auto& showers            = tf->get_showers();
     const auto& pi0_showers        = tf->get_pi0_showers();
     const auto& map_shower_pio_id  = tf->get_map_shower_pio_id();
     const auto& map_pio_id_mass    = tf->get_map_pio_id_mass();
+    // doc pr/92: satellites dropped from the kine tree; mirror the drop
+    // here so PF and Enu describe the same particle set.  pi0 conjunct is
+    // pure defense -- the kine side never drops pi0-paired showers.
+    const auto& dropped_sat_ids = tf->get_dropped_satellite_shower_ids();
+    auto sat_dropped = [&](const PR::ShowerPtr& sh) {
+        return cfg.pf_drop_stray_satellites && !dropped_sat_ids.empty() &&
+               !pi0_showers.count(sh) &&
+               dropped_sat_ids.count(sh->get_shower_id()) > 0;
+    };
     PR::IndexedSegmentSet conn4_skip_segs;
 
     // --- Vertex → node-descriptor map ---
@@ -1292,7 +1373,7 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
     for (auto edesc : PR::sorted_out_edges(vtx_to_nd.at(main_vertex), *pr_graph)) {
         auto seg = (*pr_graph)[edesc].segment;
         if (!seg || used_segs.count(seg) || conn4_skip_segs.count(seg) ||
-            (cfg.pf_track_main_cluster_only && !same_cluster(seg))) continue;
+            (cfg.pf_track_main_cluster_only && !same_cluster(seg) && !bridged_cluster(seg))) continue;  // doc pr/40 round 9 B2
         auto far = PR::find_other_vertex(*pr_graph, seg, main_vertex);
         if (!far) continue;
         used_segs.insert(seg);
@@ -1312,7 +1393,7 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
             for (auto edesc : PR::sorted_out_edges(nd_it->second, *pr_graph)) {
                 auto seg = (*pr_graph)[edesc].segment;
                 if (!seg || used_segs.count(seg) || conn4_skip_segs.count(seg) ||
-                    (cfg.pf_track_main_cluster_only && !same_cluster(seg))) continue;
+                    (cfg.pf_track_main_cluster_only && !same_cluster(seg) && !bridged_cluster(seg))) continue;  // doc pr/40 round 9 B2
                 auto far = PR::find_other_vertex(*pr_graph, seg, cur_vtx);
                 if (!far) continue;
                 used_segs.insert(seg);
@@ -1324,6 +1405,16 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
             }
         }
         bfs_cur = std::move(bfs_next);
+    }
+
+    // doc pr/93 round 4 (pf_track_owns_loose_vertex): condition (a) of the
+    // guard below must mean "a REAL track segment was walked here from the
+    // main vertex".  vtx_incoming_seg is extended DURING the fixed point
+    // below (non-root branch) with shower-derived parents, so snapshot the
+    // BFS-only key set here.  Knob off => empty, no allocation.
+    PR::IndexedVertexSet track_bfs_vtxs;
+    if (cfg.pf_track_owns_loose_vertex) {
+        for (const auto& [v, s] : vtx_incoming_seg) track_bfs_vtxs.insert(v);
     }
 
     // // Log disconnected non-shower track segments (not added to particle flow).
@@ -1385,6 +1476,25 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
 
                 PR::IndexedVertexSet sv; PR::IndexedSegmentSet ss;
                 shower->fill_sets(sv, ss, /*flag_exclude_start_segment=*/false);
+                // doc pr/93 round 4 (pf_track_owns_loose_vertex): vertices
+                // that are STRUCTURE (an endpoint of a member segment) as
+                // opposed to loose point-cloud association.  A shower's view
+                // can hold a vertex none of whose incident segments it owns
+                // -- the F12 absorb guard (shower_absorb_track_guard)
+                // add_vertex()es the frontier BEFORE refusing the segment
+                // beyond it, and add_shower()/add_segment(seg,true) can do
+                // the same.  Deliberately EXCLUDES start_vtx: the root
+                // branch's own guards already prevent self-stamping, and
+                // adding it would make the attachment loop's defensive
+                // self-test load-bearing.
+                PR::IndexedVertexSet struct_vtxs;
+                if (cfg.pf_track_owns_loose_vertex) {
+                    for (const auto& mseg : ss) {
+                        auto [ma, mb] = PR::find_vertices(*pr_graph, mseg);
+                        if (ma && ma->descriptor_valid()) struct_vtxs.insert(ma);
+                        if (mb && mb->descriptor_valid()) struct_vtxs.insert(mb);
+                    }
+                }
                 for (const auto& vtx : sv) {
                     if (vtx == main_vertex) continue;
                     if (at_main || at_root) {
@@ -1423,15 +1533,49 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
                             const bool track_owns_via_michel_stem =
                                 vis != vtx_incoming_seg.end() && vis->second &&
                                 vis->second->flags_any(PR::SegmentFlags::kMuonStemGuard);
+                            // doc pr/93 round 4 (pf_track_owns_loose_vertex):
+                            // the general "track BFS beats shower set" rule
+                            // the comment above deferred, restricted to the
+                            // LOOSE-association case: skip the claim when
+                            // BOTH (a) the real track BFS walked a segment to
+                            // this vertex (snapshot set -- the live map gains
+                            // shower-derived entries during this fixed
+                            // point), and (b) the vertex is not an endpoint
+                            // of ANY member segment of this shower.  SBND
+                            // 18264-69314: the 151.9cm muon's far endpoint
+                            // (deg 2) claimed by the 595 MeV root shower
+                            // whose nearest member is 35cm away, stealing the
+                            // muon's own 67 MeV conn-1 daughter.  NOT a
+                            // superset of the michel term (that one also
+                            // protects structural vertices); both kept.
+                            // C++ default false => byte-identical.
+                            const bool track_owns_loose =
+                                cfg.pf_track_owns_loose_vertex &&
+                                track_bfs_vtxs.count(vtx) > 0 &&
+                                struct_vtxs.count(vtx) == 0;
                             if (flag_print && vis != vtx_incoming_seg.end()) {
                                 std::cout << "[fill_bee_pf_tree] PROPAGATE-OVER-TRACK"
                                           << "  vtx_gidx=" << vtx->get_graph_index()
                                           << "  claimed_by_shower_ke=" << shower->get_kine_best()/units::MeV
                                           << "  over_incoming_seg_gidx=" << vis->second->get_graph_index()
                                           << "  michel_stem_protected=" << (track_owns_via_michel_stem ? 1 : 0)
+                                          << "  loose_protected=" << (track_owns_loose ? 1 : 0)
                                           << "\n";
                             }
-                            if (track_owns_via_michel_stem) continue;
+                            if (track_owns_via_michel_stem || track_owns_loose) {
+                                if (track_owns_loose && !track_owns_via_michel_stem) {
+                                    SPDLOG_LOGGER_DEBUG(log,
+                                        "pf_track_owns_loose_vertex: vtx_gidx={} kept by track "
+                                        "seg_gidx={} (shower_id={} ke_mev={:.1f} nseg={} claim=loose)",
+                                        vtx->get_graph_index(),
+                                        (vis != vtx_incoming_seg.end() && vis->second)
+                                            ? static_cast<long>(vis->second->get_graph_index()) : -1L,
+                                        shower->get_shower_id(),
+                                        shower->get_kine_best() / units::MeV,
+                                        shower->get_num_segments());
+                                }
+                                continue;
+                            }
                             root_reachable_vtxs.insert(vtx);
                             vtx_to_parent_shower[vtx] = parent_shower;
                             any_added = true;
@@ -1498,6 +1642,25 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
             continue;
         }
 
+        // doc pr/92: satellite dropped from the kine tree -- skip here too so
+        // the PF tree and kine_reco_Enu describe the same particle set.  The
+        // shower never enters any root/seg/shower pool, so neither
+        // append_showers nor the pseudo-carrier path can resurrect it.
+        if (sat_dropped(shower)) {
+            if (flag_print) {
+                auto start_seg = shower->start_segment();
+                const auto* cl = start_seg ? start_seg->cluster() : nullptr;
+                std::cout << "[fill_bee_pf_tree] SKIP shower (stray satellite, pr/92)"
+                          << "  conn_type=" << conn_type
+                          << "  pdg=" << shower->get_particle_type()
+                          << "  ke=" << shower->get_kine_best() / units::MeV << " MeV"
+                          << "  cluster=" << (cl ? std::to_string(cl->get_cluster_id()) : "?")
+                          << " nsegments=" << shower->get_num_segments()
+                          << "\n";
+            }
+            continue;
+        }
+
         bool direct = (conn_type == 1);
 
         if (!start_vtx || start_vtx == main_vertex) {
@@ -1528,7 +1691,8 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
             // shower's own start vertex.
             auto ps_it = cfg.pf_shower_parent_precedence
                        ? vtx_to_parent_shower.find(start_vtx) : vtx_to_parent_shower.end();
-            if (ps_it != vtx_to_parent_shower.end() && ps_it->second && ps_it->second != shower) {
+            if (ps_it != vtx_to_parent_shower.end() && ps_it->second && ps_it->second != shower &&
+                !sat_dropped(ps_it->second)) {   // pr/92: a dropped parent never renders; fall through
                 PR::ShowerPtr parent_shower = ps_it->second;
                 if (flag_print) {
                     std::cout << "[fill_bee_pf_tree] SHOWER-attached shower (parent-shower precedence)"
@@ -1570,7 +1734,8 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
                 if (root_reachable_vtxs.count(start_vtx)) {
                     // start_vtx is inside a root-level shower → attach to that parent shower
                     auto parent_shower_it = vtx_to_parent_shower.find(start_vtx);
-                    if (parent_shower_it != vtx_to_parent_shower.end()) {
+                    if (parent_shower_it != vtx_to_parent_shower.end() &&
+                        !sat_dropped(parent_shower_it->second)) {   // pr/92: dropped parent -> root fallback
                         PR::ShowerPtr parent_shower = parent_shower_it->second;
                         if (flag_print) {
                             auto start_seg = shower->start_segment();
@@ -1628,7 +1793,13 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
                                   << "\n";
                     }
                     auto& vec = direct ? root_direct_showers : root_indirect_showers;
-                    vec.push_back({shower, start_vtx});
+                    // doc pr/84 r2 F2 (= pr/84 P3): with the knob on, anchor the
+                    // pseudo carrier at the MAIN vertex so a remote association
+                    // draws its real gap.  Legacy passes the shower's own start
+                    // vertex, which collapses the carrier to zero length
+                    // (gstart==gend in append_pseudo_shower) no matter how far
+                    // away the shower is.
+                    vec.push_back({shower, cfg.pf_pseudo_gap_from_main ? main_vertex : start_vtx});
                 }
             }
         }
@@ -1735,10 +1906,29 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
 
     int next_id = 1;  // fallback counter for nodes without a natural ID
 
+    // doc pr/84 round 3 G1 (pf_unique_node_ids): jsTree keys its model by node
+    // id, so a repeated id is invalid input -- see the knob's docstring.  The
+    // id addresses nothing outside the tree (bee3 mc.js draws from
+    // data.start/data.end), so a collision is resolved by re-issuing from a
+    // range above the natural `cluster_id*1000 + seg_id` space.  Every firing
+    // is logged: with shower_dedup_start_seg on there should be none.
+    // doc pr/94 Phase 4: when the caller supplies the set, ids stay unique
+    // ACROSS bundles -- a per-call set would restart the reissue range at
+    // 1000000 for every bundle and collide by construction.
+    std::set<int> local_used_node_ids;
+    std::set<int>& used_node_ids = shared_used_ids ? *shared_used_ids : local_used_node_ids;
+
     auto make_node = [&](int id,
                          const std::string& text,
                          const WireCell::Point& start,
                          const WireCell::Point& end) -> Configuration {
+        if (cfg.pf_unique_node_ids && !used_node_ids.insert(id).second) {
+            int fresh = 1000000;
+            while (!used_node_ids.insert(fresh).second) ++fresh;
+            SPDLOG_LOGGER_DEBUG(log, "pr84 pf_id_collision: id={} reissued={} text='{}'",
+                                id, fresh, text);
+            id = fresh;
+        }
         Configuration node;
         node["id"]   = id;
         node["text"] = text;
@@ -1800,6 +1990,7 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
             const auto* cl = start_seg ? start_seg->cluster() : nullptr;
             std::cout << "[fill_bee_pf_tree] ADD shower-leaf"
                       << "  id=" << id
+                      << "  shower_id=" << shower->get_shower_id()
                       << "  pdg=" << pdg
                       << "  conn_type=" << sconn
                       << "  ke=" << ke << " MeV"
@@ -1870,6 +2061,32 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
         parent_children.append(pseudo);
     };
 
+    // doc pr/84 r2 F1 (pf_direct_when_touching): a conn-2/3 shower whose
+    // fitted charge comes within pf_touch_max of the main vertex is a graph
+    // artifact ("the BFS could not walk there"), not a neutral daughter --
+    // render it as a direct leaf.  Rung 2 (pf_touch_cross_main) extends to a
+    // conn-2 shower in a DIFFERENT cluster than the vertex when that cluster
+    // carries Flags::main_cluster: the vertex was seated in a small fragment
+    // of the bundle while the event body is elsewhere (evt 64921).  Distance
+    // deliberately excludes the pr/84 sec 4 remote-association population
+    // (min 4.91 cm > 3 cm default), which must KEEP its carrier (see F2).
+    // pi0 daughters never reach this test -- their carrier is correct.
+    auto effectively_touching = [&](PR::ShowerPtr sh) -> bool {
+        if (!cfg.pf_direct_when_touching || !main_vertex) return false;
+        const int conn = sh->get_start_vertex_and_type().second;
+        if (conn != 2 && conn != 3) return false;
+        const double d_fit = shower_get_closest_point(*sh, get_vtx_pt(main_vertex), "fit").first;
+        if (d_fit < 0) return false;  // no fit cloud: fail safe, keep the carrier
+        if (d_fit <= cfg.pf_touch_max) return true;
+        if (cfg.pf_touch_cross_main && conn == 2) {
+            const auto* scl = sh->start_segment() ? sh->start_segment()->cluster() : nullptr;
+            if (scl && main_cluster && scl != main_cluster &&
+                scl->get_flag(Flags::main_cluster) &&
+                d_fit <= cfg.pf_touch_cross_max) return true;
+        }
+        return false;
+    };
+
     // Append all showers (direct + indirect via pseudo-gamma) into a children array,
     // given the connection vertex for the indirect case.
     // F4 (doc pr/34 §10.5): one pi0 node per pi0 id.  The prototype memoizes
@@ -1916,6 +2133,22 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
         // --- Non-pi0 indirect showers (pseudo-gamma) ---
         for (auto& [sh, conn_vtx] : indirect) {
             if (pi0_showers.count(sh)) continue;
+            // doc pr/84 r2 F1: vertex-touching shower renders directly, in the
+            // same children array the pseudo carrier would have landed in --
+            // parent linkage and sibling order otherwise unchanged.
+            if (effectively_touching(sh)) {
+                auto leaf = make_shower_leaf(sh);
+                if (!keep_node(sh->get_particle_type(), sh->get_kine_best(), leaf)) continue;
+                if (flag_print) {
+                    std::cout << "[fill_bee_pf_tree] SUPPRESS pseudo (pr84 touching)"
+                              << "  pdg=" << sh->get_particle_type()
+                              << "  ke=" << sh->get_kine_best() / units::MeV << " MeV"
+                              << "  conn_type=" << sh->get_start_vertex_and_type().second
+                              << "\n";
+                }
+                children.append(leaf);
+                continue;
+            }
             PR::VertexPtr cv = conn_vtx ? conn_vtx : fallback_conn_vtx;
             append_pseudo_shower(children, sh, cv);
         }
@@ -2102,6 +2335,7 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
                   [&](const PR::SegmentPtr& a, const PR::SegmentPtr& b) {
                       return seg_display_id(a) < seg_display_id(b);
                   });
+        int n_emitted = 0;
         for (const auto& seg : unclaimed) {
             const auto* cl = seg->cluster();
             const bool haspi = seg->has_particle_info() && seg->particle_info();
@@ -2112,10 +2346,52 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
                 haspi ? seg->particle_info()->pdg() : 0,
                 haspi ? seg->particle_info()->kinetic_energy() / units::MeV : 0.0,
                 seg->fits().size(), seg->dirsign());
+            // doc pr/93 round 4 (pf_orphan_confident_track, pr/65 rung 4):
+            // emit a root node for the narrow confident-long-straight-track
+            // class only -- e.g. SBND 18255-315167's 150.7cm proton, freed
+            // from shower membership by shower_cone_absorb_guard but graph-
+            // disconnected from the main vertex.  Node construction mirrors
+            // the (production-disabled) flat net below, including its
+            // dirsign/fit display filters and the KeepMC floors.  Audit
+            // lines above stay untouched for every segment.  Knob off =>
+            // this block never runs => byte-identical.
+            if (cfg.pf_orphan_confident_track &&
+                seg->dirsign() != 0 && !seg->fits().empty() &&
+                PR::segment_orphan_confident_track(seg, cfg.pf_orphan_track_min)) {
+                auto pi = seg->particle_info();
+                const std::string pname = cfg.prototype_names
+                    ? pf_pdg_to_name(pi->pdg(), true, cfg.pf_pdg_name_prototype_fallback)
+                    : pi->name();
+                const std::string ke_str = format_mev(pi->kinetic_energy());
+                const auto& fits = seg->fits();
+                const WireCell::Point& p_front = fits.front().point;
+                const WireCell::Point& p_back  = fits.back().point;
+                const bool fwd = (seg->dirsign() == 1);
+                auto node = make_node(seg_display_id(seg),
+                                      pname + "  " + ke_str + " MeV",
+                                      fwd ? p_front : p_back,
+                                      fwd ? p_back : p_front);
+                node["icon"] = "jstree-file";
+                if (keep_node(pi->pdg(), pi->kinetic_energy(), node)) {
+                    particles.append(node);
+                    ++n_emitted;
+                    SPDLOG_LOGGER_INFO(log,
+                        "pr93 pf-orphan-confident-track: EMIT root seg={} cluster={} pdg={} "
+                        "ke_mev={:.2f} len_cm={:.1f} dirsign={}",
+                        seg_display_id(seg),
+                        cl ? std::to_string(cl->get_cluster_id()) : "?",
+                        pi->pdg(), pi->kinetic_energy() / units::MeV,
+                        PR::segment_track_length(seg) / units::cm, seg->dirsign());
+                }
+            }
         }
         SPDLOG_LOGGER_INFO(log,
             "pr65 pf-orphan-audit: {} unclaimed segment(s), no PF node fabricated (pf_orphan_audit_only)",
             unclaimed.size());
+        if (cfg.pf_orphan_confident_track && n_emitted) {
+            SPDLOG_LOGGER_INFO(log,
+                "pr93 pf-orphan-confident-track: {} of them emitted as root track node(s)", n_emitted);
+        }
     }
     else if (cfg.pf_shower_vertex_barrier) {
         std::vector<PR::SegmentPtr> orphans;
@@ -2168,73 +2444,107 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
         }
     }
 
-    // ---- optional merge with an upstream (truth) particle tree ----
-    // Bee renders ONE particle tree per event, so a truth tree and this reco
-    // tree can only both be seen if they are grafted into a single array: the
-    // upstream nodes stay at top level and everything built above is hung under
-    // one node whose text carries the reconstructed neutrino summary.
-    if (have_upstream) {
-        const Configuration& upstream = m_in_metadata[cfg.merge_metadata_key];
-
-        // Renumber the reco subtree out of the upstream id space.  jsTree needs
-        // unique ids; a duplicate silently drops a branch from the display.
-        std::function<void(Configuration&)> shift_ids = [&](Configuration& nodes) {
-            for (auto& n : nodes) {
-                if (n.isMember("id")) { n["id"] = n["id"].asInt() + cfg.merge_id_offset; }
-                if (n.isMember("children")) { shift_ids(n["children"]); }
-            }
-        };
-        shift_ids(particles);
-
-        // Summary text: reconstructed Enu and the two BDT scores, from the same
-        // TrackFitting this function already holds.  The BDT scorers run before
-        // the Bee fill, so by here the scores are set (they are 0 if the
-        // scorers are absent from pipeline_names -- say so rather than print a
-        // misleading zero).
-        const auto& ti = tf->get_tagger_info();
-        const auto& ki = tf->get_kine_info();
-        std::string text = cfg.merge_node_text.empty() ? std::string("reco nu")
-                                                       : cfg.merge_node_text;
+    if (out_particles) {
+        // doc pr/94 Phase 4: accumulate.  set_particles() REPLACES the array
+        // (Bee.cxx:549-551), so a second call would erase the first bundle.
+        // Wrap this bundle's roots under one synthetic node -- the Bee "mc"
+        // layer is already a bare JSON forest, so an extra root needs no
+        // format change -- and let the caller set the concatenation once.
+        const auto& mvp = main_vertex->fit().valid() ? main_vertex->fit().point
+                                                     : main_vertex->wcpt().point;
+        std::string label = "nu";
         {
-            // The BDT scores are only meaningful if the scorers are in the
-            // pipeline; TaggerInfo initialises them to 0, which would otherwise
-            // read as a real score.  Say "n/a" instead of printing a fake 0.
-            bool have_scores = false;
-            for (const auto& cm : m_pipeline) {
-                if (cm.name.find("BDTScorer") != std::string::npos) { have_scores = true; break; }
+            const auto& ti = tf->get_tagger_info();
+            if (ti.nu_index >= 0) {
+                label = "nu " + std::to_string(ti.nu_index)
+                      + " (gid " + std::to_string(ti.matched_flash_gid)
+                      + ", cluster " + std::to_string(ti.cluster_id) + ")";
             }
-            char buf[256];
-            if (have_scores) {
-                snprintf(buf, sizeof(buf), "  %.1f MeV   numu %.3f   nue %.3f",
-                         ki.kine_reco_Enu, ti.numu_score, ti.nue_score);
-            }
-            else {
-                snprintf(buf, sizeof(buf), "  %.1f MeV   (no BDT scores)",
-                         ki.kine_reco_Enu);
-            }
-            text += buf;
         }
+        auto root = make_node(1000000 + static_cast<int>(out_particles->size()), label, mvp, mvp);
+        root["children"] = particles;
+        out_particles->append(root);
+        SPDLOG_LOGGER_TRACE(log, "fill_bee_pf_tree '{}': bundle root '{}' with {} top-level particles",
+                            cfg.name, label, particles.size());
+    }
+    else {
+        pf_set_particles(cfg, particles, tf);
+    }
+}
 
-        Configuration wrapper;
-        wrapper["id"] = cfg.merge_id_offset - 1;   // outside both id spaces
-        wrapper["text"] = text;
-        Configuration dj;
-        for (int i = 0; i < 3; ++i) { dj["start"][i] = 0.0; dj["end"][i] = 0.0; }
-        wrapper["data"] = dj;
-        wrapper["children"] = particles.isNull() ? Json::arrayValue : particles;
 
-        Configuration merged = upstream;           // truth nodes at top level
-        merged.append(wrapper);
-        tree.set_particles(merged);
-        SPDLOG_LOGGER_DEBUG(log, "fill_bee_pf_tree '{}': merged {} upstream + {} reco "
-                            "top-level nodes under '{}'",
-                            cfg.name, upstream.size(), particles.size(), text);
+// See the header: publish `particles` into the cfg.name Bee particle tree,
+// grafting the upstream (truth) forest on top when one was published.
+void MultiAlgBlobClustering::pf_set_particles(const BeePFConfig& cfg,
+                                              Configuration particles,
+                                              std::shared_ptr<WireCell::Clus::TrackFitting> tf)
+{
+    auto map_it = m_bee_pf_trees.find(cfg.name);
+    if (map_it == m_bee_pf_trees.end()) {
+        SPDLOG_LOGGER_WARN(log, "bee_pf tree storage '{}' not found", cfg.name);
+        return;
+    }
+    auto& tree = map_it->second;
+
+    const bool have_upstream = !cfg.merge_metadata_key.empty()
+        && m_in_metadata.isMember(cfg.merge_metadata_key);
+    if (!have_upstream) {
+        tree.set_particles(particles);
+        SPDLOG_LOGGER_TRACE(log, "fill_bee_pf_tree '{}': {} top-level particles",
+                            cfg.name, particles.size());
         return;
     }
 
-    tree.set_particles(particles);
-    SPDLOG_LOGGER_TRACE(log, "fill_bee_pf_tree '{}': {} top-level particles",
-                        cfg.name, particles.size());
+    const Configuration& upstream = m_in_metadata[cfg.merge_metadata_key];
+
+    // Renumber the reco subtree out of the upstream id space.  jsTree needs
+    // unique ids; a duplicate silently drops a branch from the display.
+    std::function<void(Configuration&)> shift_ids = [&](Configuration& nodes) {
+        for (auto& n : nodes) {
+            if (n.isMember("id")) { n["id"] = n["id"].asInt() + cfg.merge_id_offset; }
+            if (n.isMember("children")) { shift_ids(n["children"]); }
+        }
+    };
+    shift_ids(particles);
+
+    // Summary text: reconstructed Enu and the two BDT scores.  The BDT scorers
+    // run before the Bee fill, so by here the scores are set -- but TaggerInfo
+    // initialises them to 0, which would read as a real score if the scorers
+    // are absent from pipeline_names.  Say "n/a" rather than print a fake 0.
+    std::string text = cfg.merge_node_text.empty() ? std::string("reco nu")
+                                                   : cfg.merge_node_text;
+    if (tf) {
+        const auto& ti = tf->get_tagger_info();
+        const auto& ki = tf->get_kine_info();
+        bool have_scores = false;
+        for (const auto& cm : m_pipeline) {
+            if (cm.name.find("BDTScorer") != std::string::npos) { have_scores = true; break; }
+        }
+        char buf[256];
+        if (have_scores) {
+            snprintf(buf, sizeof(buf), "  %.1f MeV   numu %.3f   nue %.3f",
+                     ki.kine_reco_Enu, ti.numu_score, ti.nue_score);
+        }
+        else {
+            snprintf(buf, sizeof(buf), "  %.1f MeV   (no BDT scores)", ki.kine_reco_Enu);
+        }
+        text += buf;
+    }
+
+    Configuration wrapper;
+    wrapper["id"] = cfg.merge_id_offset - 1;   // outside both id spaces
+    wrapper["text"] = text;
+    Configuration dj;
+    for (int i = 0; i < 3; ++i) { dj["start"][i] = 0.0; dj["end"][i] = 0.0; }
+    wrapper["data"] = dj;
+    wrapper["children"] = particles.isNull() ? Json::arrayValue : particles;
+
+    Configuration out = upstream;              // truth nodes at top level
+    out.append(wrapper);
+    tree.set_particles(out);
+    SPDLOG_LOGGER_DEBUG(log, "fill_bee_pf_tree '{}': merged {} upstream + {} reco "
+                        "top-level nodes under '{}'",
+                        cfg.name, upstream.size(), particles.size(), text);
 }
 
 
@@ -2719,7 +3029,10 @@ void MultiAlgBlobClustering::fill_bee_flashes(const WireCell::Clus::Facade::Grou
                      [&](int a, int b) { return flash_time[a] < flash_time[b]; });
 
     // Matched clusters: predicted per-channel PE keyed by global flash id, with
-    // the same total-predicted-light >= 100 filter as the legacy dump_light.
+    // the same total-predicted-light >= m_bee_flash_pred_min filter as the
+    // legacy dump_light (default 100 PE; doc pr/94 sec 9.9 -- a genuine match
+    // under the cut is drawn as "no flash match", which is a display artifact
+    // and not a statement about the matching).
     // cluster_id is the cluster's own id, identical to the "img" charge dump
     // enumeration (this runs at the same pre-pipeline point), so the Bee viewer
     // associates each flash to the same physical charge cluster.
@@ -2732,7 +3045,22 @@ void MultiAlgBlobClustering::fill_bee_flashes(const WireCell::Clus::Facade::Grou
         std::vector<double> pred(pred_span.begin(), pred_span.end());
         double pred_tot = 0;
         for (double v : pred) pred_tot += v;
-        if (pred_tot < 100) continue;
+        // doc pr/94 round 3 (owner: "why is this piece shown as non-matched in
+        // Bee?").  Dump every genuinely matched cluster together with the
+        // predicted light that decides whether the display keeps it, at THIS
+        // stage so the ids printed are exactly the ones the "img"/"op" JSON
+        // carries (enumerate_idents re-issues ids after every visitor, so the
+        // QLMatching log's per-run idents are a different epoch and cannot be
+        // bridged after the fact).  Diagnostic only; gated so it costs nothing
+        // and changes nothing when unset.
+        if (std::getenv("WCT_OPDUMP_DEBUG")) {
+            log->info("op-dump debug: cluster {} matched_flash_gid={} pred_tot={:.3f} PE "
+                      "L={:.2f} cm nblobs={} kept_by_display={}",
+                      cluster->get_cluster_id(), mgid, pred_tot,
+                      cluster->get_length() / units::cm, cluster->nchildren(),
+                      pred_tot >= 100);
+        }
+        if (pred_tot < m_bee_flash_pred_min) continue;
         matched[mgid].push_back({cluster->get_cluster_id(), std::move(pred)});
     }
 
@@ -3077,11 +3405,29 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
             // std::cout << "Test: Visitor: " << cmeth.name << " Grouping: " << config.grouping << " " << pr_graph << std::endl;
 
             if (pr_graph) {
-                if (config.use_graph_vertices) {
-                    fill_bee_vertices_from_pr_graph(config.name, *gs[0]);
-                } else {
-                    // Fill bee points from PRGraph (for track trajectories)
-                    fill_bee_points_from_pr_graph(config.name, *gs[0]);
+                // doc pr/94 Phase 4b: the point layers (track_fit,
+                // shower_track, vertices) render every per-bundle candidate,
+                // the way the "mc" particle-flow layer already does.  The
+                // "nu<i>" slots exist only in per-bundle mode; with none
+                // present this is exactly the single legacy call, and the
+                // pr_graph test above still gates it correctly because
+                // candidate 0 always also publishes to the unnamed slot.
+                std::vector<std::shared_ptr<WireCell::Clus::TrackFitting>> nu_tfs;
+                for (int i = 0;; ++i) {
+                    auto tfi = gs[0]->get_track_fitting("nu" + std::to_string(i));
+                    if (!tfi) break;
+                    nu_tfs.push_back(tfi);
+                }
+                if (nu_tfs.empty()) nu_tfs.push_back(nullptr);   // legacy: unnamed slot
+                for (size_t i = 0; i < nu_tfs.size(); ++i) {
+                    // reset ONLY on the first pass, else bundle i wipes i-1.
+                    const bool first = (i == 0);
+                    if (config.use_graph_vertices) {
+                        fill_bee_vertices_from_pr_graph(config.name, *gs[0], nu_tfs[i], first);
+                    } else {
+                        // Fill bee points from PRGraph (for track trajectories)
+                        fill_bee_points_from_pr_graph(config.name, *gs[0], nu_tfs[i], first);
+                    }
                 }
                 // std::cout << "Filled bee points from PR graph for visitor: " << cmeth.name << " grouping: " << config.grouping << std::endl;
             } else if (config.require_pr_graph) {
@@ -3107,11 +3453,34 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
             auto pf_gs = ensemble.with_name(pf_cfg.grouping);
             if (pf_gs.empty()) continue;
             const auto& pf_grouping = *pf_gs[0];
-            // No `if (!tf) continue` here: fill_bee_pf_tree must still run when
+            // NO `if (!tf) continue` here: fill_bee_pf_tree must still run when
             // there is no TrackFitting so it can emit the truth-only (or empty)
-            // tree.  Skipping it here silently dropped mc.json for every event
+            // tree.  Skipping it silently dropped mc.json for every event
             // without a neutrino candidate -- 6 of 10 on the run-925-23 pilot.
-            fill_bee_pf_tree(pf_cfg, pf_grouping);
+            // doc pr/94 Phase 4: render every per-bundle candidate.  The
+            // "nu<i>" named slots exist only in per-bundle mode, so with none
+            // present this is exactly the single legacy call, byte-identical.
+            std::vector<std::shared_ptr<WireCell::Clus::TrackFitting>> nu_tfs;
+            for (int i = 0;; ++i) {
+                auto tfi = pf_grouping.get_track_fitting("nu" + std::to_string(i));
+                if (!tfi) break;
+                nu_tfs.push_back(tfi);
+            }
+            if (nu_tfs.empty()) {
+                fill_bee_pf_tree(pf_cfg, pf_grouping);
+            }
+            else {
+                Configuration all = Json::arrayValue;
+                std::set<int> used_ids;
+                for (const auto& tfi : nu_tfs) {
+                    fill_bee_pf_tree(pf_cfg, pf_grouping, false, tfi, &used_ids, &all);
+                }
+                // via the shared helper, so the truth graft applies here too;
+                // a direct set_particles() would bypass it.
+                pf_set_particles(pf_cfg, all, nu_tfs.front());
+                SPDLOG_LOGGER_DEBUG(log, "fill_bee_pf_tree '{}': nu_per_bundle wrote {} bundle root(s)",
+                                    pf_cfg.name, all.size());
+            }
         }
     }
 

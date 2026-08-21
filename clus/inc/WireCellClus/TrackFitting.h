@@ -239,6 +239,25 @@ namespace WireCell::Clus {
         void set_showers(PR::IndexedShowerSet showers) { m_showers = std::move(showers); }
         const PR::IndexedShowerSet& get_showers() const { return m_showers; }
 
+        /// doc sbnd_xin/docs/pr/40 round 9 B2 -- clusters connected to the
+        /// main cluster by an nv_bridge_track bridge segment.  Written by
+        /// PatternAlgorithms::nv_bridge_track (cleared at each
+        /// shower_clustering_with_nv entry); read by fill_bee_pf_tree's
+        /// pf_track_bridged_clusters gate.  Empty when the bridge knob is
+        /// off => downstream predicates are byte-identical to legacy.
+        void clear_bridged_cluster_ids() { m_bridged_cluster_ids.clear(); }
+        void add_bridged_cluster_id(int id) { m_bridged_cluster_ids.insert(id); }
+        const std::set<int>& get_bridged_cluster_ids() const { return m_bridged_cluster_ids; }
+
+        /// doc sbnd_xin/docs/pr/92 -- stray satellite showers dropped from the
+        /// kinematics tree by fill_kine_tree's kine_drop_stray_satellites gate
+        /// (shower ids, PR::Shower::get_shower_id()).  Stashed unconditionally
+        /// per event by TaggerCheckNeutrino (replace semantics: empty when the
+        /// knob is off or no vertex was found, so no cross-event carryover);
+        /// read by fill_bee_pf_tree's pf_drop_stray_satellites gate.
+        void set_dropped_satellite_shower_ids(std::set<int> ids) { m_dropped_satellite_shower_ids = std::move(ids); }
+        const std::set<int>& get_dropped_satellite_shower_ids() const { return m_dropped_satellite_shower_ids; }
+
         /// Store / retrieve pi0 identification results from TaggerCheckNeutrino.
         void set_pi0_data(PR::IndexedShowerSet pi0_showers,
                           PR::ShowerIntMap map_shower_pio_id,
@@ -527,9 +546,22 @@ namespace WireCell::Clus {
         /// walk also refreshes m_cov_vtx_info (graph vertex positions +
         /// degrees) for the deweight sentinel diagnostics.
         void rebuild_cov_fit_scope(const std::shared_ptr<PR::Segment>& seg);
+        /// doc pr/98 perf: the keep/strip decision depends only on (cell,
+        /// segment) -- never on the fit point -- and every segment cloud is
+        /// static while ONE segment's fit points are processed (its own
+        /// set_fit_associate_vec runs after its loop; other segments' ran
+        /// before or run after).  Consecutive fit points re-claim the same
+        /// cells, so form_map_graph passes a per-segment decision cache.
+        /// nullptr disables caching (identical decisions either way).
+        /// Keyed by the packed (apa,face,plane,wire,time) identity of a
+        /// Coord2D (see exclusion_cache_key in TrackFitting.cxx) -- an
+        /// unordered_map on one integer beats std::map's Coord2D
+        /// operator< chain in the pr/98 profile.
+        using ExclusionDecisionCache = std::unordered_map<uint64_t, bool>;
         void update_association(std::shared_ptr<PR::Segment> segment,
                                 const std::vector<std::shared_ptr<PR::Segment>>& all_segments,
-                                PlaneData& temp_2dut, PlaneData& temp_2dvt, PlaneData& temp_2dwt);
+                                PlaneData& temp_2dut, PlaneData& temp_2dvt, PlaneData& temp_2dwt,
+                                ExclusionDecisionCache* decision_cache = nullptr);
 
         void form_map(std::vector<std::pair<WireCell::Point, std::shared_ptr<PR::Segment>>>& ptss, double end_point_factor=0.6, double mid_point_factor=0.9, int nlevel=3, double time_tick_cut=20, double charge_cut=2000);
         void form_map_graph(bool flag_exclusion, double end_point_factor=0.6, double mid_point_factor=0.9, int nlevel=3, double time_tick_cut=20, double charge_cut=2000);
@@ -710,6 +742,12 @@ namespace WireCell::Clus {
         const std::map<WirePlaneId, std::tuple<double, std::pair<double, double>, std::pair<double, double>, std::pair<double, double>>>& get_wpid_slopes() const { return wpid_slopes; }
 
     private:
+        // doc pr/98: test seam.  Lets the update_association doctest inject
+        // synthetic wpid_offsets/wpid_slopes without a detector-volumes
+        // fixture (BuildGeometry needs live IDetectorVolumes).  Declared
+        // here only; defined in clus/test/doctest_update_association.cxx.
+        friend struct TrackFittingTestHarness;
+
          // Core parameters - centralized storage
         Parameters m_params;
 
@@ -782,6 +820,10 @@ namespace WireCell::Clus {
         // Neutrino pattern-recognition results (set by TaggerCheckNeutrino)
         PR::VertexPtr        m_main_vertex{nullptr};
         PR::IndexedShowerSet m_showers;
+        // doc sbnd_xin/docs/pr/40 round 9 B2 -- see the accessor comment.
+        std::set<int>        m_bridged_cluster_ids;
+        // doc sbnd_xin/docs/pr/92 -- see the accessor comment.
+        std::set<int>        m_dropped_satellite_shower_ids;
 
         // Pi0 identification results (set by TaggerCheckNeutrino via set_pi0_data)
         PR::IndexedShowerSet                      m_pi0_showers;

@@ -27,6 +27,8 @@ void Root::UbooneTaggerOutputVisitor::configure(const WireCell::Configuration& c
     m_grouping_name = get<std::string>(cfg, "grouping", "live");
     // doc pr/36 §10.8 (F7): see the member comment in the header.
     m_neutrino_type_bitmask = get<bool>(cfg, "neutrino_type_bitmask", m_neutrino_type_bitmask);
+    // doc pr/94 Phase 1: see the member comment in the header.
+    m_nu_per_bundle = get<bool>(cfg, "nu_per_bundle", m_nu_per_bundle);
 }
 
 WireCell::Configuration Root::UbooneTaggerOutputVisitor::default_configuration() const
@@ -35,6 +37,7 @@ WireCell::Configuration Root::UbooneTaggerOutputVisitor::default_configuration()
     cfg["output_filename"] = "tracking_proj.root";
     cfg["grouping"] = "live";
     cfg["neutrino_type_bitmask"] = m_neutrino_type_bitmask;  // false = branch not booked, schema-identical
+    cfg["nu_per_bundle"] = m_nu_per_bundle;  // false = branches not booked, schema-identical
     return cfg;
 }
 
@@ -56,6 +59,18 @@ void Root::UbooneTaggerOutputVisitor::visit(Clus::Facade::Ensemble& ensemble) co
     // Make mutable copies for branch addresses (visit is const).
     PR::TaggerInfo ti = tf->get_tagger_info();
     PR::KineInfo ki = tf->get_kine_info();
+
+    // doc pr/94 Phase 2: the per-bundle candidates TaggerCheckNeutrino
+    // published as "nu<i>" named slots.  Empty in legacy mode (the chain
+    // publishes none), and then everything below fills exactly one row from
+    // the unnamed slot, byte-identical.  Walking the slots rather than reading
+    // a count keeps this component free of a second knob.
+    std::vector<std::shared_ptr<Clus::TrackFitting>> nu_fitters;
+    for (int i = 0;; ++i) {
+        auto tfi = grouping.get_track_fitting("nu" + std::to_string(i));
+        if (!tfi) break;
+        nu_fitters.push_back(tfi);
+    }
 
     // Open existing ROOT file in UPDATE mode to add trees.
     TFile* output_tf = TFile::Open(m_output_filename.c_str(), "UPDATE");
@@ -80,6 +95,27 @@ void Root::UbooneTaggerOutputVisitor::visit(Clus::Facade::Ensemble& ensemble) co
     // the knob is on so the knob-off T_tagger schema is byte-identical.
     if (m_neutrino_type_bitmask)
         t_tagger->Branch("neutrino_type", &ti.neutrino_type, "neutrino_type/I");
+
+    // doc pr/94 Phase 1: per-bundle identity + per-activity cosmic-flag
+    // branches.  Booked only when the knob is on so the knob-off T_tagger
+    // schema is byte-identical.  Nothing populates ti.cluster_id / act_* yet
+    // (see NeutrinoTaggerInfo.h) -- every row reads its struct default
+    // (-1 / empty) until a later phase's TaggerCheckNeutrino change fills
+    // them per bundle.
+    if (m_nu_per_bundle) {
+        t_tagger->Branch("cluster_id", &ti.cluster_id, "cluster_id/I");
+        t_tagger->Branch("matched_flash_gid", &ti.matched_flash_gid, "matched_flash_gid/I");
+        t_tagger->Branch("nu_index", &ti.nu_index, "nu_index/I");
+        t_tagger->Branch("act_cluster_id", &ti.act_cluster_id);
+        t_tagger->Branch("act_length_cm", &ti.act_length_cm);
+        t_tagger->Branch("act_is_selected", &ti.act_is_selected);
+        t_tagger->Branch("act_is_demoted", &ti.act_is_demoted);
+        t_tagger->Branch("act_tgm", &ti.act_tgm);
+        t_tagger->Branch("act_stm", &ti.act_stm);
+        t_tagger->Branch("act_fc", &ti.act_fc);
+        t_tagger->Branch("act_lm", &ti.act_lm);
+        t_tagger->Branch("act_evaluated", &ti.act_evaluated);
+    }
 
     // ---- cosmic tagger (top-level flag) ----
     t_tagger->Branch("cosmic_flag", &ti.cosmic_flag, "cosmic_flag/F");
@@ -1089,7 +1125,11 @@ void Root::UbooneTaggerOutputVisitor::visit(Clus::Facade::Ensemble& ensemble) co
 #undef SCALAR_BR
 #undef VECTOR_BR
 
-    t_tagger->Fill();
+    // doc pr/94 Phase 2: legacy fills exactly here, exactly as before.  In
+    // per-bundle mode both trees are instead filled together in the loop below
+    // T_kine's booking, so T_tagger[i] and T_kine[i] are written in the same
+    // iteration and therefore refer to the same bundle by construction.
+    if (nu_fitters.empty()) t_tagger->Fill();
     log->debug("UbooneTaggerOutputVisitor: wrote T_tagger with {} branches", t_tagger->GetNbranches());
 
     // ================================================================
@@ -1120,8 +1160,39 @@ void Root::UbooneTaggerOutputVisitor::visit(Clus::Facade::Ensemble& ensemble) co
     t_kine->Branch("kine_pio_dis_2", &ki.kine_pio_dis_2, "kine_pio_dis_2/F");
     t_kine->Branch("kine_pio_angle", &ki.kine_pio_angle, "kine_pio_angle/F");
 
-    t_kine->Fill();
-    log->debug("UbooneTaggerOutputVisitor: wrote T_kine");
+    // doc pr/94 Phase 2: the same identity triple T_tagger carries, so a row
+    // pairing can be VERIFIED rather than assumed from position.  Booked under
+    // the same knob, so the knob-off T_kine schema is byte-identical.
+    if (m_nu_per_bundle) {
+        t_kine->Branch("cluster_id", &ki.cluster_id, "cluster_id/I");
+        t_kine->Branch("matched_flash_gid", &ki.matched_flash_gid, "matched_flash_gid/I");
+        t_kine->Branch("nu_index", &ki.nu_index, "nu_index/I");
+    }
+
+    if (nu_fitters.empty()) {
+        t_kine->Fill();
+        log->debug("UbooneTaggerOutputVisitor: wrote T_kine");
+    }
+    else {
+        // doc pr/94 Phase 2 -- one row per in-beam-window bundle.  Assigning
+        // through `ti`/`ki` is safe: the branches hold the ADDRESS of these
+        // objects (and of their vector members), and struct assignment copies
+        // into them rather than rebinding, so no re-Branch() is needed.
+        //
+        // The whole loop stays inside this ONE visit() call on purpose:
+        // Write() below carries no kOverwrite, so invoking the visitor per
+        // bundle would leave invisible T_tagger;2 / T_kine;2 cycles that both
+        // uproot and every existing gate silently resolve to the last cycle
+        // of -- a duplicate-fill bug that would never show up.
+        for (const auto& tfi : nu_fitters) {
+            ti = tfi->get_tagger_info();
+            ki = tfi->get_kine_info();
+            t_tagger->Fill();
+            t_kine->Fill();
+        }
+        log->debug("UbooneTaggerOutputVisitor: nu_per_bundle wrote {} T_tagger/T_kine row(s)",
+                   nu_fitters.size());
+    }
 
     output_tf->Write();
     output_tf->Close();

@@ -1,15 +1,21 @@
 #include "WireCellClus/NeutrinoPatternBase.h"
 #include "WireCellClus/PRSegmentFunctions.h"
+#include "WireCellClus/PRShowerFunctions.h"
 #include "WireCellClus/PRGraph.h"
 #include "WireCellUtil/Units.h"
 #include "WireCellUtil/Logging.h"
+#include "WireCellUtil/GraphTools.h"  // doc pr/93 r4: mir() for the orphan-track pass
 #include <cmath>
+#include <cstdlib>
+#include <iostream>
+#include <sstream>
 
 static auto s_log = WireCell::Log::logger("clus.NeutrinoPattern");
 
 using namespace WireCell::Clus::PR;
 using namespace WireCell::Clus;
 using namespace WireCell;
+using WireCell::GraphTools::mir;  // doc pr/93 r4
 
 // init_tagger_info: reset a TaggerInfo struct to its default values.
 // In the toolkit we rely on C++ default-member-initializers on the struct
@@ -49,7 +55,9 @@ KineInfo PatternAlgorithms::fill_kine_tree(
     IDetectorVolumes::pointer dv,
     WireCell::IClusGeomHelper::pointer geom_helper,
     const Clus::ParticleDataSet::pointer& particle_data,
-    const IRecombinationModel::pointer& recomb_model)
+    const IRecombinationModel::pointer& recomb_model,
+    const IndexedShowerSet& pi0_showers,
+    std::set<int>* dropped_satellites)
 {
     KineInfo ktree{};
 
@@ -85,6 +93,25 @@ KineInfo PatternAlgorithms::fill_kine_tree(
     // collect all vertices/segments already owned by showers.
     // -------------------------------------------------------------------------
     const double ave_binding_energy = 8.6 * units::MeV;
+
+    // doc pr/101 (K2, kine_mass_rules): the paper's rest term.  mu/pi (and
+    // any other non-nucleon, non-electron type) add the rest mass, nucleons
+    // add the binding energy, electrons add nothing.  Returned in MeV.
+    // Off => every add site keeps its legacy branch verbatim.
+    auto rest_term_rules = [&](int pdg, double mass) -> double {
+        const int a = std::abs(pdg);
+        if (a == 11) return 0.0;
+        if (a == 2212 || a == 2112) return ave_binding_energy / units::MeV;
+        if (a == 13 || a == 211 || a == 321) return mass / units::MeV;
+        if (a == 0 || a == 22 || a == 111) {
+            SPDLOG_LOGGER_INFO(s_log, "kine_mass_rules: unhandled pdg={} -> no rest term", pdg);
+            return 0.0;
+        }
+        return mass / units::MeV;
+    };
+    // Legacy value computed in parallel when the rules are on (census only).
+    float add_energy_legacy = 0;
+    int   n_2212_shower_graph = 0, n_leftover_nonem = 0, n_mainvtx_guard_skip = 0;
 
     IndexedVertexSet  used_vertices;
     IndexedSegmentSet used_segments;
@@ -144,7 +171,15 @@ KineInfo PatternAlgorithms::fill_kine_tree(
             ktree.kine_energy_info.push_back(0); // dQdx
 
         // Add rest-mass correction for non-electrons/positrons
-        if (pdg != 11) {
+        if (m_kine_charge.mass_rules) {
+            SegmentPtr start_sg = shower->start_segment();
+            const double mass = (start_sg && start_sg->particle_info()) ? start_sg->particle_info()->mass() : 0.0;
+            if (pdg != 11 && start_sg && start_sg->particle_info())
+                add_energy_legacy += static_cast<float>(mass / units::MeV);
+            if (std::abs(pdg) == 2212) ++n_2212_shower_graph;
+            ktree.kine_reco_add_energy += static_cast<float>(rest_term_rules(pdg, mass));
+        }
+        else if (pdg != 11) {
             SegmentPtr start_sg = shower->start_segment();
             if (start_sg && start_sg->particle_info()) {
                 ktree.kine_reco_add_energy += static_cast<float>(
@@ -182,7 +217,12 @@ KineInfo PatternAlgorithms::fill_kine_tree(
 
         ktree.kine_energy_included.push_back(include_flag);
 
-        if (pdg == 2212) { // proton: add binding energy
+        if (m_kine_charge.mass_rules) {
+            if (pdg == 2212) add_energy_legacy += static_cast<float>(ave_binding_energy / units::MeV);
+            else if (pdg != 11) add_energy_legacy += static_cast<float>(mass / units::MeV);
+            ktree.kine_reco_add_energy += static_cast<float>(rest_term_rules(pdg, mass));
+        }
+        else if (pdg == 2212) { // proton: add binding energy
             ktree.kine_reco_add_energy += static_cast<float>(ave_binding_energy / units::MeV);
         }
         else if (pdg != 11) { // not electron: add rest mass
@@ -209,6 +249,17 @@ KineInfo PatternAlgorithms::fill_kine_tree(
         }
         else {
             // Track segment.
+            // doc pr/101 (K5): a shower MEMBER attached to the main vertex
+            // is already inside its shower's energy -- skip it the way the
+            // BFS below does.  Off => legacy double count (prototype parity).
+            if (m_kine_charge.mainvtx_used_guard && used_segments.count(seg)) {
+                ++n_mainvtx_guard_skip;
+                SPDLOG_LOGGER_INFO(s_log, "kine_mainvtx_guard: skipped shower-member seg idx={} pdg={} ke_mev={:.1f}",
+                                   seg->get_graph_index(),
+                                   (seg->particle_info() ? seg->particle_info()->pdg() : 0),
+                                   (seg->particle_info() ? seg->particle_info()->kinetic_energy() / units::MeV : 0.0));
+                continue;
+            }
             used_segments.insert(seg);
             VertexPtr other_vtx = find_other_vertex(graph, seg, main_vertex);
             segments_to_be_examined.emplace_back(other_vtx, seg);
@@ -271,7 +322,13 @@ KineInfo PatternAlgorithms::fill_kine_tree(
             // If we detected a particle continuation, undo the rest-mass/binding-energy
             // added for prev_sg (it was already counted earlier in the chain).
             if (flag_reduce && prev_sg->particle_info()) {
-                if (prev_pdg == 2212) {
+                if (m_kine_charge.mass_rules) {
+                    const double mass = prev_sg->particle_info()->mass();
+                    if (prev_pdg == 2212) add_energy_legacy -= static_cast<float>(ave_binding_energy / units::MeV);
+                    else if (prev_pdg != 11) add_energy_legacy -= static_cast<float>(mass / units::MeV);
+                    ktree.kine_reco_add_energy -= static_cast<float>(rest_term_rules(prev_pdg, mass));
+                }
+                else if (prev_pdg == 2212) {
                     ktree.kine_reco_add_energy -= static_cast<float>(ave_binding_energy / units::MeV);
                 }
                 else if (prev_pdg != 11) {
@@ -285,11 +342,140 @@ KineInfo PatternAlgorithms::fill_kine_tree(
     }
 
     // -------------------------------------------------------------------------
+    // doc sbnd_xin/docs/pr/92 -- stray-satellite drop decision.
+    //
+    // The leftover pass below admits every BFS-unreached conn-2/3 shower
+    // with no direction/distance check (the prototype has the identical
+    // hole, NeutrinoID_kine.h:209-255), so overclustered cosmics and
+    // second neutrinos are summed into kine_reco_Enu.  Decide here, on the
+    // BFS-unreached candidates only: anything the BFS consumed is
+    // genuinely graph-connected to the main vertex and never a candidate.
+    // See NeutrinoPatternBase.h (pr/92 block) for the arms and the target
+    // events.  WCT_KINE_SAT_PROBE prints per-candidate metrics for the
+    // full population and NEVER drops (threshold tuning on
+    // at-decision-time numbers; the probe line reports the would-verdict).
+    // -------------------------------------------------------------------------
+    const bool sat_probe = (std::getenv("WCT_KINE_SAT_PROBE") != nullptr);
+    IndexedShowerSet sat_drop_set;
+    if (m_kine_drop_stray_satellites || sat_probe) {
+        const auto* main_cluster = main_vertex->cluster();
+        const Point mv_pt = main_vertex->fit().point;
+        auto angle_deg = [](const Vector& a, const Vector& b) -> double {
+            const double ma = a.magnitude(), mb = b.magnitude();
+            if (ma <= 0 || mb <= 0) return 0.0;
+            double c = a.dot(b) / (ma * mb);
+            c = std::max(-1.0, std::min(1.0, c));
+            return std::acos(c) / M_PI * 180.0;
+        };
+        int n_sat_cand = 0;
+        for (const ShowerPtr& shower : showers) {
+            if (used_showers.count(shower)) continue;
+            auto [svtx, conn] = shower->get_start_vertex_and_type();
+            if (conn != 2 && conn != 3) continue;
+            SegmentPtr start_sg = shower->start_segment();
+            const auto* start_cl = start_sg ? start_sg->cluster() : nullptr;
+            if (!start_cl || !main_cluster ||
+                start_cl->get_cluster_id() == main_cluster->get_cluster_id()) continue;
+            ++n_sat_cand;
+
+            const Point sp = shower->get_start_point();
+            const Point sv_pt = svtx ? (svtx->fit().valid() ? svtx->fit().point
+                                                            : svtx->wcpt().point)
+                                     : mv_pt;
+            // Fresh axis from the start point into the shower body: the
+            // STORED init_dir for conn 2/3 is exactly the vertex->start
+            // chord (PRShower.cxx) and would always read 0 deg here.
+            const Vector axis = shower_cal_dir_3vector(*shower, sp, m_kine_sat_axis_dis_cut);
+            const bool in_main = svtx && (svtx == main_vertex ||
+                (svtx->cluster() && svtx->cluster()->get_cluster_id() ==
+                                        main_cluster->get_cluster_id()));
+            const double d_sv   = (sp - sv_pt).magnitude();
+            const double ang_sv = (d_sv > 0) ? angle_deg(axis, sp - sv_pt) : 0.0;
+            const double d_mv   = (sp - mv_pt).magnitude();
+            const double ang_mv = (d_mv > 0) ? angle_deg(axis, sp - mv_pt) : 0.0;
+            const bool is_pi0   = pi0_showers.count(shower);
+            const bool straight_cont =
+                shower_start_is_track_continuation(graph, *shower, m_kine_sat_cont_kink);
+            // pr/92 round 2 (owner retune): topology split.  A TRACK-like
+            // satellite (straight-long start segment with little branching,
+            // or a collinear continuation of an out-of-shower track) with a
+            // bad direction is very likely overclustering; an EM-shower-like
+            // satellite (branched, stubby trunk) is usually a genuinely
+            // detached legit shower (NCpi0-like), so it is dropped only when
+            // it is FAR from the main vertex AND direction-inconsistent --
+            // the second-neutrino signature (389538: 169-250 cm), never the
+            // nearby-fragment one (259542: 18-75 cm).  The EM angle is
+            // folded (sign-insensitive): EM axis signs flip easily, and an
+            // anti-aligned axis is still collinear with the vertex line
+            // (52672's 453 MeV at 171 deg is a KEEP).
+            const bool track_like = straight_cont ||
+                (shower->get_num_segments() <= m_kine_sat_track_max_nseg &&
+                 segment_is_straight_long_track(start_sg));
+            const double ang_mv_fold = std::min(ang_mv, 180.0 - ang_mv);
+
+            const char* verdict = "keep";
+            do {
+                if (is_pi0) break;
+                if (shower->get_kine_best() <= m_kine_sat_min_energy) break;
+                if (axis.magnitude() == 0) break;   // no axis: fail-safe keep
+                if (d_sv < m_kine_sat_prox_max && in_main) break;
+                if (track_like) {
+                    if (ang_sv > m_kine_sat_angle_bad)          { verdict = "drop:A"; break; }
+                    if ((d_sv > m_kine_sat_far_dis || !in_main) &&
+                        ang_mv >= m_kine_sat_angle_main)        { verdict = "drop:B"; break; }
+                    if (straight_cont)                          { verdict = "drop:C"; break; }
+                }
+                else if (d_mv > m_kine_sat_em_far_dis &&
+                         ang_mv_fold >= m_kine_sat_angle_main)  { verdict = "drop:E"; break; }
+            } while (false);
+
+            if (sat_probe) {
+                // One pre-built line per candidate (log lines tear mid-word
+                // when interleaved -- write the TSV row atomically).
+                std::ostringstream os;
+                os << "KINE_SAT_PROBE\t" << shower->get_shower_id()
+                   << '\t' << shower->get_kine_best() / units::MeV
+                   << '\t' << conn
+                   << '\t' << shower->get_particle_type()
+                   << '\t' << shower->get_num_segments()
+                   << '\t' << d_sv / units::cm
+                   << '\t' << ang_sv
+                   << '\t' << (in_main ? 1 : 0)
+                   << '\t' << d_mv / units::cm
+                   << '\t' << ang_mv
+                   << '\t' << (straight_cont ? 1 : 0)
+                   << '\t' << (is_pi0 ? 1 : 0)
+                   << '\t' << (track_like ? 1 : 0)
+                   << '\t' << verdict << '\n';
+                std::cout << os.str() << std::flush;
+            }
+            else if (verdict[0] == 'd') {
+                sat_drop_set.insert(shower);
+                if (dropped_satellites) dropped_satellites->insert(shower->get_shower_id());
+                SPDLOG_LOGGER_DEBUG(s_log,
+                    "kine_sat DROP id={} arm={} E={:.1f} conn={} d_sv={:.1f} ang_sv={:.1f} in_main={} d_mv={:.1f} ang_mv={:.1f} cont={} track={}",
+                    shower->get_shower_id(), verdict,
+                    shower->get_kine_best() / units::MeV, conn,
+                    d_sv / units::cm, ang_sv, in_main, d_mv / units::cm, ang_mv,
+                    straight_cont, track_like);
+            }
+        }
+        if (m_kine_drop_stray_satellites && !sat_probe) {
+            SPDLOG_LOGGER_INFO(s_log, "kine_sat census: candidates={} dropped={}",
+                               n_sat_cand, sat_drop_set.size());
+        }
+    }
+
+    // -------------------------------------------------------------------------
     // Remaining showers not yet attached to the traversal above
     // (e.g. secondary showers with start vertex type <= 3)
     // -------------------------------------------------------------------------
     for (const ShowerPtr& shower : showers) {
         if (used_showers.count(shower)) continue;
+        // doc pr/92: skip the whole iteration -- all four parallel kine
+        // vectors and the proton binding-energy add stay consistent, and
+        // the Enu sum below shrinks automatically.
+        if (sat_drop_set.count(shower)) continue;
 
         auto [start_vtx, vtx_type] = shower->get_start_vertex_and_type();
         if (vtx_type > 3) continue;
@@ -312,7 +498,24 @@ KineInfo PatternAlgorithms::fill_kine_tree(
         ktree.kine_energy_included.push_back(vtx_type != 3 ? 1 : vtx_type);
 
         // Binding energy correction for proton showers with length > 5 cm
-        if (pdg == 2212) {
+        if (m_kine_charge.mass_rules) {
+            // doc pr/101 (K2): leftover showers are detached (conn-2/3)
+            // objects.  Nucleon-typed ones get the binding energy behind the
+            // legacy 5 cm start-segment gate (2212 as before, 2112 added);
+            // mu/pi-typed ones stay MASSLESS as in legacy: the numu50 census
+            // showed every such object (12 events, 30-119 cm conn-2 pieces
+            // typed 13) sitting in an event whose muon mass is already
+            // counted on the attached track -- a second piece of the same
+            // muon, so a second mass would be the P4 double count.
+            SegmentPtr start_sg = shower->start_segment();
+            const bool pass_gate = start_sg && segment_track_length(start_sg) > 5.0 * units::cm;
+            if (pdg == 2212 && pass_gate)
+                add_energy_legacy += static_cast<float>(ave_binding_energy / units::MeV);
+            if (pdg != 11) ++n_leftover_nonem;
+            if (pass_gate && (std::abs(pdg) == 2212 || std::abs(pdg) == 2112))
+                ktree.kine_reco_add_energy += static_cast<float>(ave_binding_energy / units::MeV);
+        }
+        else if (pdg == 2212) {
             SegmentPtr start_sg = shower->start_segment();
             if (start_sg && segment_track_length(start_sg) > 5.0 * units::cm) {
                 ktree.kine_reco_add_energy += static_cast<float>(ave_binding_energy / units::MeV);
@@ -322,6 +525,56 @@ KineInfo PatternAlgorithms::fill_kine_tree(
         // since push_shower_kine would have already handled them in the BFS phase
 
         used_showers.insert(shower);
+    }
+
+    // -------------------------------------------------------------------------
+    // doc sbnd_xin/docs/pr/93 round 4 (kine_count_orphan_tracks): count
+    // confident straight-long main-cluster track segments that neither the
+    // main-vertex BFS nor any shower claimed.  Such segments exist because
+    // shower_cone_absorb_guard frees a graph-disconnected track from shower
+    // membership (SBND 18255-315167: a 150.7cm pdg-2212 score-0.101 proton,
+    // ~595 MeV KE, silently absent from kine_reco_Enu).  Shares
+    // segment_orphan_confident_track with the PF-side pf_orphan_confident_
+    // track knob so the two outputs describe the same particle set.
+    // C++ default false => no pass => byte-identical.
+    // -------------------------------------------------------------------------
+    if (m_kine_count_orphan_tracks) {
+        const auto* main_cl = main_vertex->cluster();
+        // Deterministic candidate order: collect then sort by graph edge
+        // index -- never pointer order.
+        std::vector<std::pair<size_t, SegmentPtr>> orphan_cands;
+        for (auto edesc : mir(boost::edges(graph))) {
+            SegmentPtr seg = graph[edesc].segment;
+            if (!seg || !seg->descriptor_valid()) continue;
+            if (used_segments.count(seg)) continue;
+            if (map_sg_shower.count(seg)) continue;   // shower starts stay shower-owned
+            const auto* cl = seg->cluster();
+            if (!main_cl || !cl || cl->get_cluster_id() != main_cl->get_cluster_id()) continue;
+            if (!segment_orphan_confident_track(seg, m_kine_orphan_track_min)) continue;
+            orphan_cands.emplace_back(graph[edesc].index, seg);
+        }
+        std::sort(orphan_cands.begin(), orphan_cands.end(),
+                  [](const auto& a, const auto& b) { return a.first < b.first; });
+        size_t n_orphan = 0;
+        for (const auto& [eidx, seg] : orphan_cands) {
+            used_segments.insert(seg);
+            const int pdg = push_segment_kine(seg, 1);
+            ++n_orphan;
+            SPDLOG_LOGGER_INFO(s_log,
+                "kine_count_orphan_tracks: COUNT seg idx={} cluster={} pdg={} ke_mev={:.2f} len_cm={:.1f}",
+                eidx, seg->cluster()->get_cluster_id(), pdg,
+                (seg->particle_info() ? seg->particle_info()->kinetic_energy() / units::MeV : 0.0),
+                segment_track_length(seg) / units::cm);
+        }
+        if (n_orphan) {
+            SPDLOG_LOGGER_INFO(s_log, "kine_count_orphan_tracks: {} orphan track(s) added", n_orphan);
+        }
+    }
+
+    if (m_kine_charge.mass_rules || m_kine_charge.mainvtx_used_guard) {
+        SPDLOG_LOGGER_INFO(s_log,
+            "kine_mass_census: add_legacy={:.1f} add_rules={:.1f} n_2212_showers_graph={} n_leftover_nonEM={} n_mainvtx_guard_skip={}",
+            add_energy_legacy, ktree.kine_reco_add_energy, n_2212_shower_graph, n_leftover_nonem, n_mainvtx_guard_skip);
     }
 
     // -------------------------------------------------------------------------

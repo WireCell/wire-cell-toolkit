@@ -610,10 +610,24 @@ void UbooneNueBDTScorer::visit(Clus::Facade::Ensemble& ensemble) const
         return;
     }
 
-    Clus::PR::TaggerInfo& ti  = tf->get_tagger_info_mutable();
-    const Clus::PR::KineInfo& ki = tf->get_kine_info();
+    // doc pr/94 Phase 2: score EVERY per-bundle candidate.  TaggerCheckNeutrino
+    // publishes "nu<i>" named slots only in per-bundle mode; with none present
+    // this collapses to exactly the single unnamed fitter it always scored, so
+    // the legacy path is byte-identical and needs no knob here.
+    std::vector<std::shared_ptr<Clus::TrackFitting>> fitters;
+    for (int i = 0;; ++i) {
+        auto tfi = grouping.get_track_fitting("nu" + std::to_string(i));
+        if (!tfi) break;
+        fitters.push_back(tfi);
+    }
+    if (fitters.empty()) fitters.push_back(tf);
 
-    cal_bdts_xgboost(ti, ki);
+    for (const auto& tfi : fitters) {
+        Clus::PR::TaggerInfo& ti  = tfi->get_tagger_info_mutable();
+        const Clus::PR::KineInfo& ki = tfi->get_kine_info();
+
+        cal_bdts_xgboost(ti, ki);
+    }
 }
 
 // ===========================================================================

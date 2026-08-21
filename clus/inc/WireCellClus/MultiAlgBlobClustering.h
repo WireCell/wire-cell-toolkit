@@ -165,8 +165,19 @@ namespace WireCell::Clus {
             const std::string& pcname, const std::vector<std::string>& coords,
             int filter, double dQdx_scale = 1.0, double dQdx_offset = 0.0,
             std::vector<double>* oft_out = nullptr);
-        void fill_bee_points_from_pr_graph(const std::string& name, const Facade::Grouping& grouping);
-        void fill_bee_vertices_from_pr_graph(const std::string& name, const Facade::Grouping& grouping);
+        // doc pr/94 Phase 4b: `tf_in` selects WHICH per-bundle TrackFitting to
+        // render (null = the unnamed slot, i.e. the legacy single-candidate
+        // behavior).  `do_reset` must be false on every call after the first of
+        // a multi-bundle sequence: both functions reset the Bee::Points object
+        // at entry, so resetting per bundle would leave only the LAST bundle's
+        // points -- a bug that hides itself, since the symptom being fixed
+        // ("the second candidate has no points") would still look cured.
+        void fill_bee_points_from_pr_graph(const std::string& name, const Facade::Grouping& grouping,
+                                           std::shared_ptr<WireCell::Clus::TrackFitting> tf_in = nullptr,
+                                           bool do_reset = true);
+        void fill_bee_vertices_from_pr_graph(const std::string& name, const Facade::Grouping& grouping,
+                                             std::shared_ptr<WireCell::Clus::TrackFitting> tf_in = nullptr,
+                                             bool do_reset = true);
 
         void fill_bee_patches_from_grouping(const Facade::Grouping& grouping);
         void fill_bee_patches_from_cluster(const Facade::Cluster& cluster);
@@ -219,6 +230,12 @@ namespace WireCell::Clus {
             // prototype's dropped guard (NeutrinoID.cxx:1488).  Ident, not
             // pointer: split products inherit the parent's ident.
             bool pf_track_main_cluster_only{false};
+            // doc sbnd_xin/docs/pr/40 round 9 B2: let the track BFS traverse
+            // clusters recorded by TrackFitting::get_bridged_cluster_ids()
+            // (connected to the main cluster by an nv_bridge_track bridge
+            // segment) despite pf_track_main_cluster_only.  Off, or an
+            // empty bridged set => byte-identical to legacy.
+            bool pf_track_bridged_clusters{false};
             // pf_shower_vertex_barrier: pre-seed visited_vtxs from every
             // shower's vertex set so the BFS does not expand THROUGH a shower
             // (prototype used_vertices seed, NeutrinoID.cxx:1597-1602).
@@ -275,6 +292,94 @@ namespace WireCell::Clus {
             // charge.  Inert unless pf_shower_vertex_barrier is also on.
             // C++ default false => byte-identical legacy output.
             bool pf_orphan_audit_only{false};
+            // ---- doc sbnd_xin/docs/pr/84 round 2 (display-only family) ----
+            // pf_direct_when_touching: a conn-2/3 shower whose fitted charge
+            // comes within pf_touch_max of the main vertex is rendered as a
+            // direct leaf instead of under a synthetic gamma/neutron carrier.
+            // The carrier means "the PR graph could not walk there"; when the
+            // charge demonstrably touches the vertex the neutral parent is a
+            // graph artifact, not physics (evts 283713/316025/407280).
+            // start_connection_type is NOT modified -- kinematics,
+            // mc_included and every tagger are untouched; only the rendered
+            // tree (mabc zip 0-mc.json) can change.  pi0 daughter gammas are
+            // exempt (their carrier is correct by construction).
+            // C++ default false => byte-identical legacy output.
+            bool pf_direct_when_touching{false};
+            double pf_touch_max{3.0 * units::cm};   // read only when F1 on
+            // pf_touch_cross_main: second rung for a conn-2 shower living in
+            // a DIFFERENT cluster than the vertex, when that cluster carries
+            // Flags::main_cluster (the vertex was seated in a small fragment
+            // of the bundle while the event body is elsewhere -- evt 64921).
+            // Wider reach, separately gated and separately flippable.
+            bool pf_touch_cross_main{false};
+            double pf_touch_cross_max{8.0 * units::cm};
+            // pf_pseudo_gap_from_main (= pr/84 P3): in the "start_vtx not in
+            // BFS tree" fallback, anchor the synthetic carrier at the MAIN
+            // vertex instead of the shower's own start vertex, so a genuinely
+            // remote association draws its real gap instead of collapsing to
+            // a zero-length node (pr/84 sec 4: 15 such, median 38.8 cm).
+            // C++ default false => byte-identical legacy output.
+            bool pf_pseudo_gap_from_main{false};
+            // pf_unique_node_ids (doc pr/84 round 3, G1): mc.json is jsTree
+            // input and jsTree keys its model by node id, so a repeated id is
+            // invalid output -- observed on SBND 394532, where a node and its
+            // own descendant carried id 8033 and selecting it blanked the
+            // whole PF panel.  Natural ids follow the prototype convention
+            // (`cluster_id*1000 + seg_id`, NeutrinoID.cxx:1268) and are NOT
+            // unique: two showers can share a start segment (see
+            // m_shower_dedup_start_seg, which fixes that at the source), a
+            // shower leaf can collide with the track node of the same
+            // segment, and the pseudo/pi0 counter starts at 1 inside the same
+            // number space.  When on, a colliding node is re-issued a fresh
+            // unused id and the collision is logged -- the id is used for
+            // nothing but jsTree identity (bee3 events/static/js/bee/physics/
+            // mc.js draws from data.start/data.end only).  C++ default false
+            // => byte-identical legacy output.
+            bool pf_unique_node_ids{false};
+            // pf_drop_stray_satellites (doc pr/92): skip showers whose id is
+            // in TrackFitting::get_dropped_satellite_shower_ids() -- the
+            // conn-2/3 satellites fill_kine_tree's kine_drop_stray_satellites
+            // gate removed from kine_reco_Enu (overclustered cosmics, second
+            // neutrinos).  Effective only when that kine knob is also on;
+            // otherwise the id set is empty and this knob is inert.  C++
+            // default false => byte-identical legacy output.
+            bool pf_drop_stray_satellites{false};
+            // pf_orphan_confident_track (doc pr/93 round 4): in the
+            // pf_orphan_audit_only branch, EMIT a root PF node for an
+            // unclaimed main-cluster segment that passes
+            // segment_orphan_confident_track (confident non-electron
+            // template PID + length > pf_orphan_track_min + straight-long).
+            // pr/65 rung 4: the audit chose visibility-without-fabrication
+            // for the general population; this narrow class (e.g. SBND
+            // 18255-315167's 150.7cm score-0.101 proton, freed from shower
+            // membership by shower_cone_absorb_guard but graph-disconnected
+            // from the main vertex) is a real particle the owner wants in
+            // the PF.  Audit log lines are unchanged for every segment.
+            // C++ default false => byte-identical legacy output.
+            bool pf_orphan_confident_track{false};
+            double pf_orphan_track_min{50.0 * units::cm};  // read only when the bool is on
+            // pf_track_owns_loose_vertex (doc pr/93 round 4): in the F3a
+            // root branch, a root-anchored shower's fill_sets() vertex VIEW
+            // overrides the track BFS wherever the two disagree, and
+            // pf_shower_parent_precedence then hangs everything anchored
+            // there under the shower.  The view can hold a vertex none of
+            // whose incident segments the shower owns -- the F12 absorb
+            // guard add_vertex()es the frontier BEFORE refusing the segment
+            // beyond it (PRShower.cxx guard_excludes walk termination), and
+            // add_shower()/add_segment(seg,true) can do the same.  When on,
+            // skip the claim when BOTH (a) the REAL track BFS walked a
+            // segment to the vertex, and (b) the vertex is not an endpoint
+            // of any MEMBER segment of the claiming shower (pure loose
+            // association).  This is the general "track BFS beats shower
+            // set" fix the pr/74-r4 comment deferred; superset of the
+            // kMuonStemGuard protection for the loose-association case only
+            // (both are kept).  SBND 18264-69314: the 151.9cm muon's far
+            // endpoint (deg 2) is claimed by the 595 MeV root shower whose
+            // nearest member is 35cm away, stealing the muon's own 67 MeV
+            // conn-1 daughter shower.  Render-only (mc.json): parentage
+            // changes only, never membership; kine reads none of these
+            // maps.  C++ default false => byte-identical legacy output.
+            bool pf_track_owns_loose_vertex{false};
         };
        private:
         std::vector<BeePFConfig> m_bee_pf_configs;
@@ -284,7 +389,36 @@ namespace WireCell::Clus {
         // Names from m_bee_pf_configs whose emit_empty is set.
         std::set<std::string> m_bee_pf_emit_empty;
 
-        void fill_bee_pf_tree(const BeePFConfig& cfg, const Facade::Grouping& grouping, bool flag_print = false);
+        /// Render one neutrino candidate's particle flow into the named Bee
+        /// tree.  The three trailing arguments are doc pr/94 Phase 4 and all
+        /// default to the pre-pr/94 single-candidate behaviour:
+        ///   tf_in            - render THIS TrackFitting instead of resolving
+        ///                      the grouping's single unnamed slot implicitly
+        ///                      (with N per-bundle fitters the unnamed slot is
+        ///                      only ever bundle 0).
+        ///   shared_used_ids  - the pf_unique_node_ids reissue set, hoisted to
+        ///                      the caller's scope so reissued ids cannot
+        ///                      collide BETWEEN bundles (each call otherwise
+        ///                      restarts its own set at 1000000).
+        ///   out_particles    - when non-null, this bundle's roots are wrapped
+        ///                      in one synthetic node and APPENDED here instead
+        ///                      of being handed to set_particles(), which is a
+        ///                      plain overwrite (Bee.cxx:549-551) and would
+        ///                      otherwise make bundle i erase bundle i-1.
+        void fill_bee_pf_tree(const BeePFConfig& cfg, const Facade::Grouping& grouping, bool flag_print = false,
+                              std::shared_ptr<WireCell::Clus::TrackFitting> tf_in = nullptr,
+                              std::set<int>* shared_used_ids = nullptr,
+                              Configuration* out_particles = nullptr);
+
+        /// Publish a reco PF forest into the named Bee particle tree, grafting
+        /// an upstream (truth) forest on top when cfg.merge_metadata_key names
+        /// one that the input tensor-set metadata carries.  Bee renders ONE
+        /// particle tree per event, so truth and reco can only both be seen as
+        /// a single array.  Shared by the legacy single-candidate tail of
+        /// fill_bee_pf_tree and by the doc pr/94 per-bundle caller, which
+        /// concatenates bundles itself and would otherwise bypass the graft.
+        void pf_set_particles(const BeePFConfig& cfg, Configuration particles,
+                              std::shared_ptr<WireCell::Clus::TrackFitting> tf);
 
         std::map<int, std::map<int, Bee::Patches>> m_bee_dead_patches;
         // Bee::Patches m_bee_dead; // dead region ...
@@ -311,6 +445,16 @@ namespace WireCell::Clus {
         // predicted PE, instead of one row per (flash, cluster).  Default OFF so
         // existing output is bit-identical; enabled for the SBND all-APA match.
         bool m_bee_flash_per_flash{false};
+        // doc pr/94 round 3.  Minimum total predicted light (PE) a matched
+        // cluster must carry to appear in the "op" display's op_cluster_ids.
+        // The legacy dump_light used a hard-coded 100 PE, which is why SBND
+        // 18255/73038's 26.5 cm cathode activity -- genuinely matched to the
+        // beam flash gid 14, but predicting only 3.6 PE of that flash's 602.6
+        // PE -- was drawn as matched to NO flash while the PR chain happily
+        // reconstructed it (owner Bee scan, doc pr/94 sec 9.9).  Default 100 =
+        // the legacy filter, byte-identical output; 0 shows every genuine
+        // match.
+        double m_bee_flash_pred_min{100.0};
         // When > 0, group the root opflash flashes across both TPC sides by this
         // ±time window (stored as a per-flash "group" array on the root opflash
         // PC, pre-pipeline) so the Bee viewer can show a TPC0/TPC1 coincidence

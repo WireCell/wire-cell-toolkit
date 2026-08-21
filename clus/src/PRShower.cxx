@@ -5,6 +5,8 @@
 #include "WireCellClus/DynamicPointCloud.h"
 #include "WireCellUtil/Logging.h"
 #include <atomic>
+#include <cstdio>
+#include <cstdlib>
 #include <unordered_set>
 
 static auto s_log = WireCell::Log::logger("clus.NeutrinoPattern");
@@ -32,6 +34,114 @@ namespace WireCell::Clus::PR {
             auto out = std::make_shared<Facade::DynamicPointCloud>(src.get_wpid_params());
             out->add_points(src);
             return out;
+        }
+
+        // doc sbnd_xin/docs/pr/91 round 1 -- WCT_SHOWER_ENDPOINT_DEBUG.
+        //
+        // get_end_point() is not a point on the shower's charge: it is the
+        // farthest *vertex* of the shower's TrajectoryView from start_point
+        // (the two loops below).  The view's node set can therefore decide the
+        // end point even when no member segment reaches that vertex, which is
+        // how SBND 169626's `e- 107` (cluster 22, members spanning z 396-410)
+        // ends up reporting an end at z=461 on a cluster-13 vertex owned by the
+        // 567 MeV shower, and how 394532's 30 MeV and 66 MeV showers end up
+        // reporting each other's vertices.  Both appeared only after
+        // shower_dedup_start_seg (doc pr/84 round 3) started calling
+        // add_shower(), which unions the absorbed shower's nodes wholesale.
+        // This probe prints every candidate vertex and whether a member segment
+        // of this shower actually touches it.  Log/stderr only: no effect on
+        // emitted bytes.
+        bool endpoint_dbg()
+        {
+            static const bool dbg = std::getenv("WCT_SHOWER_ENDPOINT_DEBUG") != nullptr;
+            return dbg;
+        }
+
+        // doc pr/91 round 3 -- WCT_SHOWER_WALK_DEBUG.  Fires only when
+        // walk_visited_parity re-enqueues a vertex the legacy !has_node()
+        // test would have pruned (i.e. it was already present in the view but
+        // never walked).  Census only -- no attempt to classify how the node
+        // first entered the view (former start vertex vs add_shower import);
+        // that can be read off by comparing against the WCT_SHOWER_CONTENT_
+        // DEBUG / WCT_SHOWER_ENDPOINT_DEBUG dumps for the same event.
+        // Log/stderr only, no effect on emitted bytes.
+        bool walk_dbg()
+        {
+            static const bool dbg = std::getenv("WCT_SHOWER_WALK_DEBUG") != nullptr;
+            return dbg;
+        }
+        // doc sbnd_xin/docs/pr/93 round 3 -- WCT_SHOWER_ABSORB_DEBUG.
+        // Instruments every membership-growth path (flood-fill ADD/EXCLUDE
+        // in complete_structure_with_start_segment, plus the call-site tags
+        // and direct add_segment/add_shower probes in
+        // NeutrinoShowerClustering.cxx) so the absorbing site of any one
+        // segment can be read off a single grep.  stderr only, no effect on
+        // emitted bytes.
+        bool absorb_dbg()
+        {
+            static const bool dbg = std::getenv("WCT_SHOWER_ABSORB_DEBUG") != nullptr;
+            return dbg;
+        }
+        int vtx_display_id(const VertexPtr& v)
+        {
+            if (!v) return -1;
+            const auto* c = v->cluster();
+            return (c ? c->get_cluster_id() : 0) * 1000 + static_cast<int>(v->get_graph_index());
+        }
+        int seg_display_id(const SegmentPtr& s)
+        {
+            if (!s) return -1;
+            int sid = s->id();
+            if (sid < 0) sid = static_cast<int>(s->get_graph_index());
+            const auto* c = s->cluster();
+            return c ? c->get_cluster_id() * 1000 + sid : sid;
+        }
+        void probe_endpoint(Shower& sh, Graph& g, const WireCell::Point& sp,
+                            const VertexPtr& start_vtx, int conn, bool excl,
+                            bool skip_orphans, const char* tag)
+        {
+            if (!endpoint_dbg()) return;
+            std::set<node_descriptor> touched;
+            std::set<int> member_clusters;
+            for (auto edesc : ordered_edges(sh, g)) {
+                touched.insert(boost::source(edesc, g));
+                touched.insert(boost::target(edesc, g));
+                SegmentPtr seg = g[edesc].segment;
+                if (seg && seg->cluster()) member_clusters.insert(seg->cluster()->get_cluster_id());
+            }
+            std::fprintf(stderr,
+                         "SHOWER_ENDPOINT tag=%s shower_id=%d start_seg=%d conn=%d nseg=%d "
+                         "excl_start_vtx=%d skip_orphans=%d start=(%.3f,%.3f,%.3f) "
+                         "member_clusters=%zu\n",
+                         tag, sh.get_shower_id(), seg_display_id(sh.start_segment()),
+                         conn, sh.get_num_segments(), excl ? 1 : 0, skip_orphans ? 1 : 0,
+                         sp.x() / WireCell::units::cm, sp.y() / WireCell::units::cm,
+                         sp.z() / WireCell::units::cm, member_clusters.size());
+            double best = -1;
+            int best_id = -1, best_touch = -1;
+            for (auto vdesc : ordered_nodes(sh, g)) {
+                VertexPtr v = g[vdesc].vertex;
+                if (!v) continue;
+                const int touch0 = touched.count(vdesc) ? 1 : 0;
+                const bool skipped = (excl && v == start_vtx) ||
+                                     (skip_orphans && !touch0);
+                const double dis = (sp - v->fit().point).magnitude();
+                const int touch = touch0;
+                std::fprintf(stderr,
+                             "SHOWER_ENDPOINT   shower_id=%d cand_vtx=%d cluster=%d "
+                             "(%.3f,%.3f,%.3f) dis=%.3f touched_by_member=%d skipped=%d\n",
+                             sh.get_shower_id(), vtx_display_id(v),
+                             v->cluster() ? v->cluster()->get_cluster_id() : -1,
+                             v->fit().point.x() / WireCell::units::cm,
+                             v->fit().point.y() / WireCell::units::cm,
+                             v->fit().point.z() / WireCell::units::cm,
+                             dis / WireCell::units::cm, touch, skipped ? 1 : 0);
+                if (!skipped && dis > best) { best = dis; best_id = vtx_display_id(v); best_touch = touch; }
+            }
+            std::fprintf(stderr,
+                         "SHOWER_ENDPOINT   shower_id=%d WINNER vtx=%d dis=%.3f "
+                         "touched_by_member=%d\n",
+                         sh.get_shower_id(), best_id, best / WireCell::units::cm, best_touch);
         }
     }
 
@@ -118,6 +228,13 @@ namespace WireCell::Clus::PR {
         // 11 / 140 through add_segment().  Graph membership was always
         // idempotent (std::set); the cloud merge now is too.
         const bool was_member = this->has_edge(seg->get_descriptor());
+        // doc pr/84 round 3: a RETARGET (start segment replaced by a different
+        // one after construction) is one of the two ways two showers end up
+        // sharing a start segment.  Env-gated stderr only, byte-neutral.
+        if (std::getenv("WCT_SHOWER_CREATE_DEBUG") && m_start_segment && m_start_segment != seg) {
+            std::fprintf(stderr, "SHOWER_CREATE_DEBUG retarget shower_id=%d seg %d -> %d\n",
+                         m_shower_id, m_start_segment->id(), seg->id());
+        }
         TrajectoryView::add_segment(seg);
         m_start_segment = seg;
         invalidate_segment_caches();
@@ -126,13 +243,15 @@ namespace WireCell::Clus::PR {
         if (flag_include_vertices) {
             // Get the two vertices connected to this segment from the full graph
             auto vertices = find_vertices(m_full_graph, seg);
-            
+
             // Add each vertex to the view (skip the start_vertex)
             if (vertices.first && vertices.first != m_start_vertex) {
                 this->add_vertex(vertices.first);
+                m_walked_nodes.insert(vertices.first->get_descriptor());  // doc pr/91 r3
             }
             if (vertices.second && vertices.second != m_start_vertex) {
                 this->add_vertex(vertices.second);
+                m_walked_nodes.insert(vertices.second->get_descriptor());  // doc pr/91 r3
             }
         }
         
@@ -195,13 +314,24 @@ namespace WireCell::Clus::PR {
         if (flag_include_vertices) {
             // Get the two vertices connected to this segment from the full graph
             auto vertices = find_vertices(m_full_graph, seg);
-            
-            // Add each vertex to the view (skip the start_vertex)
-            if (vertices.first ) {
+
+            // Unlike set_start_segment() above, this branch has no
+            // `!= m_start_vertex` guard on add_vertex() itself -- untouched,
+            // byte-neutral.  The m_walked_nodes bookkeeping DOES guard on it
+            // (doc pr/91 r3): if vertices.first/second is the CURRENT start
+            // vertex, recording it here would wrongly mark it "walked" while
+            // it is still exempt from the frontier test by the unconditional
+            // `!= m_start_vertex` checks in complete_structure_with_start_
+            // segment -- and that mark would incorrectly survive a later
+            // re-seat, when this vertex becomes a FORMER start vertex that
+            // the fix is specifically meant to re-expand.
+            if (vertices.first) {
                 this->add_vertex(vertices.first);
+                if (vertices.first != m_start_vertex) m_walked_nodes.insert(vertices.first->get_descriptor());
             }
-            if (vertices.second ) {
+            if (vertices.second) {
                 this->add_vertex(vertices.second);
+                if (vertices.second != m_start_vertex) m_walked_nodes.insert(vertices.second->get_descriptor());
             }
         }
 
@@ -265,9 +395,31 @@ namespace WireCell::Clus::PR {
         // becomes the shower point cloud's row order -- which decides kNN ties
         // in shower_get_closest_point().  Ordered for the same reason both
         // loops are here (doc pr/28 sec 15).
+        // doc pr/91 round 1: the node loop is unconditional -- every vertex of
+        // the absorbed shower joins this one's view, including vertices no
+        // surviving member segment touches.  get_end_point() is a farthest-
+        // VERTEX search over exactly this set, so this is candidate mechanism
+        // (a) for the cross-shower end points on SBND 169626 / 394532.
+        const size_t pr91_nodes_before = this->nodes().size();
         for (auto vdesc : ordered_nodes(shower, m_full_graph)) {
             VertexPtr vtx = m_full_graph[vdesc].vertex;
             if (vtx && vtx->descriptor_valid()) this->add_vertex(vtx);
+        }
+        // doc pr/91 round 3: mirror the prototype's add_shower (WCShower.cxx:
+        // 681-692), which merges the absorbed shower's own map_vtx_segs keys
+        // -- so a vertex the absorbed shower never walked (e.g. its own
+        // former start vertex) stays unwalked here too, and remains eligible
+        // for re-expansion under walk_visited_parity.  Same graph
+        // (m_full_graph is shared across all showers in one clustering pass),
+        // so descriptors carry over directly.  Membership-tested only.
+        m_walked_nodes.insert(shower.m_walked_nodes.begin(), shower.m_walked_nodes.end());
+        if (endpoint_dbg()) {
+            std::fprintf(stderr,
+                         "SHOWER_ENDPOINT tag=add_shower into_sid=%d into_seg=%d from_sid=%d "
+                         "from_seg=%d nodes %zu -> %zu (from had %zu)\n",
+                         this->get_shower_id(), seg_display_id(this->start_segment()),
+                         shower.get_shower_id(), seg_display_id(shower.start_segment()),
+                         pr91_nodes_before, this->nodes().size(), shower.nodes().size());
         }
 
         // Batch-collect all points before adding to avoid repeated vector reallocations.
@@ -334,7 +486,220 @@ namespace WireCell::Clus::PR {
 
     }
 
-    void Shower::complete_structure_with_start_segment(IndexedSegmentSet& used_segments, const std::string& cloud_name_fit, const std::string& cloud_name_associate, bool absorb_track_guard) {
+    // doc sbnd_xin/docs/pr/93 round 4 (shower_detach_track_stem) -- see the
+    // header comment for the contract.  In-place mutation: m_shower_id and
+    // the Shower object identity are preserved (pr/92's
+    // dropped_satellite_shower_ids and IndexedShowerSet keying depend on it).
+    int Shower::detach_track_prefix(const std::vector<SegmentPtr>& prefix,
+                                    VertexPtr new_start_vertex,
+                                    const std::string& cloud_name_fit,
+                                    const std::string& cloud_name_associate)
+    {
+        if (prefix.empty()) return 0;
+        if (!new_start_vertex || !new_start_vertex->descriptor_valid()) return 0;
+        // Refuse to empty the shower: at least one member must remain.
+        if (this->edges().size() <= prefix.size()) return 0;
+        for (const auto& sg : prefix) {
+            if (!sg || !sg->descriptor_valid() || !this->has_edge(sg->get_descriptor())) return 0;
+        }
+
+        // Collect the prefix chain's vertices (candidates for view removal).
+        // Vector + membership-set of descriptors; never iterated by pointer.
+        std::vector<VertexPtr> prefix_vtxs;
+        std::unordered_set<size_t> seen_vtx_idx;
+        for (const auto& sg : prefix) {
+            auto [va, vb] = find_vertices(m_full_graph, sg);
+            for (VertexPtr v : {va, vb}) {
+                if (!v || !v->descriptor_valid() || v == new_start_vertex) continue;
+                const size_t idx = m_full_graph[v->get_descriptor()].index;
+                if (seen_vtx_idx.insert(idx).second) prefix_vtxs.push_back(v);
+            }
+        }
+
+        // Remove the prefix edges from the view.
+        int peeled = 0;
+        for (const auto& sg : prefix) {
+            if (TrajectoryView::remove_segment(sg)) ++peeled;
+        }
+
+        // A prefix vertex leaves the view only if NO remaining member still
+        // touches it -- otherwise (e.g. a branch point shared with an EM
+        // member) it must stay.  Membership set of graph indices, order-free.
+        std::unordered_set<size_t> keep_vtx_idx;
+        for (auto edesc : ordered_edges(*this, m_full_graph)) {
+            SegmentPtr seg = m_full_graph[edesc].segment;
+            if (!seg || !seg->descriptor_valid()) continue;
+            auto [ka, kb] = find_vertices(m_full_graph, seg);
+            if (ka && ka->descriptor_valid()) keep_vtx_idx.insert(m_full_graph[ka->get_descriptor()].index);
+            if (kb && kb->descriptor_valid()) keep_vtx_idx.insert(m_full_graph[kb->get_descriptor()].index);
+        }
+        for (const auto& v : prefix_vtxs) {
+            const size_t idx = m_full_graph[v->get_descriptor()].index;
+            if (keep_vtx_idx.count(idx)) continue;
+            TrajectoryView::remove_vertex(v);
+            // Without this, the old root (e.g. the MAIN vertex) stays a view
+            // node and wins calculate_kinematics' farthest-vertex end_point
+            // search.  Also forget its walked mark: if some later pass
+            // re-adds it, it is genuinely un-walked again.
+            m_walked_nodes.erase(v->get_descriptor());
+        }
+
+        // Re-root: conn type 2 on purpose -- the pseudo-gamma rendering
+        // class (append_pseudo_shower), the pi0 disconnected_showers class,
+        // and kine_energy_included stays 1 (only type 3 is penalized).
+        set_start_vertex(new_start_vertex, 2);
+
+        // Re-seat the start segment: remaining member closest to the new
+        // start vertex; graph-index tie-break.  ordered_edges = stable order.
+        const WireCell::Point nv_pt = new_start_vertex->fit().valid()
+            ? new_start_vertex->fit().point : new_start_vertex->wcpt().point;
+        SegmentPtr new_start = nullptr;
+        double best_dis = -1;
+        for (auto edesc : ordered_edges(*this, m_full_graph)) {
+            SegmentPtr seg = m_full_graph[edesc].segment;
+            if (!seg || !seg->descriptor_valid()) continue;
+            const double dis = segment_get_closest_point(seg, nv_pt).first;
+            if (!new_start || dis < best_dis) {
+                new_start = seg;
+                best_dis = dis;
+            }
+        }
+        if (new_start) {
+            // Already a member => the cloud-merge branch in
+            // set_start_segment is a no-op (was_member gate): no duplication.
+            set_start_segment(new_start);
+        }
+
+        // Rebuild the shower point clouds from the REMAINING members only.
+        // The clouds are add-only merges, and both kine_charge and the
+        // conn-2 start_point derivation read them -- without the rebuild the
+        // detached track's charge stays inside the daughter's energy.
+        // Same code shape as add_shower's batch merge; ordered_edges order.
+        for (const std::string& cname : {cloud_name_fit, cloud_name_associate}) {
+            if (cname.empty()) continue;
+            this->dpcloud(cname, nullptr);
+            Facade::DPCBatch batch;
+            for (auto edesc : ordered_edges(*this, m_full_graph)) {
+                SegmentPtr seg = m_full_graph[edesc].segment;
+                if (!seg || !seg->descriptor_valid()) continue;
+                auto seg_dpc = seg->dpcloud(cname);
+                if (!seg_dpc) continue;
+                if (!this->dpcloud(cname)) {
+                    this->dpcloud(cname, clone_dpc(*seg_dpc));
+                } else if (this->dpcloud(cname) != seg_dpc) {
+                    this->dpcloud(cname)->merge_wpid_params(*seg_dpc);
+                    batch.append(seg_dpc->points());
+                }
+            }
+            if (!batch.empty()) {
+                if (auto dpc = this->dpcloud(cname)) dpc->add_points(std::move(batch));
+            }
+        }
+
+        invalidate_segment_caches();
+        set_flag_kinematics(false);
+        return peeled;
+    }
+
+    // doc sbnd_xin/docs/pr/99 round 2 (shower_ghost_member_drop).  Contract
+    // and rationale in PRShower.h; bookkeeping forked BY DUPLICATION from
+    // detach_track_prefix above -- that production method stays untouched.
+    std::shared_ptr<Facade::DynamicPointCloud> Shower::rebuild_pcloud(const std::string& cloud_name)
+    {
+        // doc pr/99 round 3 (C1b).  Contract in PRShower.h.  Same code shape
+        // as the detach_track_prefix rebuild loop (ordered_edges order), but
+        // writing into a fresh cloud instead of this->dpcloud.
+        std::shared_ptr<Facade::DynamicPointCloud> out = nullptr;
+        Facade::DPCBatch batch;
+        for (auto edesc : ordered_edges(*this, m_full_graph)) {
+            SegmentPtr seg = m_full_graph[edesc].segment;
+            if (!seg || !seg->descriptor_valid()) continue;
+            auto seg_dpc = seg->dpcloud(cloud_name);
+            if (!seg_dpc) continue;
+            if (!out) {
+                out = clone_dpc(*seg_dpc);
+            } else {
+                out->merge_wpid_params(*seg_dpc);
+                batch.append(seg_dpc->points());
+            }
+        }
+        if (out && !batch.empty()) out->add_points(std::move(batch));
+        return out;
+    }
+
+    int Shower::drop_ghost_member(SegmentPtr ghost,
+                                  const std::string& cloud_name_fit,
+                                  const std::string& cloud_name_associate)
+    {
+        if (!ghost || !ghost->descriptor_valid() || !this->has_edge(ghost->get_descriptor())) return 0;
+        if (ghost == m_start_segment) return 0;
+        // Refuse to empty the shower: at least one member must remain.
+        if (this->edges().size() <= 1) return 0;
+        if (!m_start_segment || !m_start_segment->descriptor_valid()
+            || !this->has_edge(m_start_segment->get_descriptor())) return 0;
+
+        // Leaf-only guard: with the ghost edge filtered out, every remaining
+        // member must stay reachable from the start segment.  Test-remove is
+        // safe -- TrajectoryView::remove/add_segment are pure filter-set
+        // edits (no cloud merge, unlike Shower::add_segment).
+        TrajectoryView::remove_segment(ghost);
+        const int n_reach = count_connected_segments(m_start_segment);
+        if (n_reach != static_cast<int>(this->edges().size())) {
+            TrajectoryView::add_segment(ghost);  // restore: removal would strand a member
+            return 0;
+        }
+
+        // Ghost-only vertices leave the view (same rule as
+        // detach_track_prefix: a vertex still touched by a remaining member
+        // must stay; a departed one must not win the farthest-vertex
+        // end_point search, and its walked mark must be forgotten).
+        std::unordered_set<size_t> keep_vtx_idx;
+        for (auto edesc : ordered_edges(*this, m_full_graph)) {
+            SegmentPtr seg = m_full_graph[edesc].segment;
+            if (!seg || !seg->descriptor_valid()) continue;
+            auto [ka, kb] = find_vertices(m_full_graph, seg);
+            if (ka && ka->descriptor_valid()) keep_vtx_idx.insert(m_full_graph[ka->get_descriptor()].index);
+            if (kb && kb->descriptor_valid()) keep_vtx_idx.insert(m_full_graph[kb->get_descriptor()].index);
+        }
+        auto [gva, gvb] = find_vertices(m_full_graph, ghost);
+        for (VertexPtr v : {gva, gvb}) {
+            if (!v || !v->descriptor_valid()) continue;
+            const size_t idx = m_full_graph[v->get_descriptor()].index;
+            if (keep_vtx_idx.count(idx)) continue;
+            TrajectoryView::remove_vertex(v);
+            m_walked_nodes.erase(v->get_descriptor());
+        }
+
+        // Rebuild the shower point clouds from the REMAINING members only
+        // (detach_track_prefix rationale: the clouds are add-only merges and
+        // kine_charge reads them -- the ghost's charge must leave).
+        for (const std::string& cname : {cloud_name_fit, cloud_name_associate}) {
+            if (cname.empty()) continue;
+            this->dpcloud(cname, nullptr);
+            Facade::DPCBatch batch;
+            for (auto edesc : ordered_edges(*this, m_full_graph)) {
+                SegmentPtr seg = m_full_graph[edesc].segment;
+                if (!seg || !seg->descriptor_valid()) continue;
+                auto seg_dpc = seg->dpcloud(cname);
+                if (!seg_dpc) continue;
+                if (!this->dpcloud(cname)) {
+                    this->dpcloud(cname, clone_dpc(*seg_dpc));
+                } else if (this->dpcloud(cname) != seg_dpc) {
+                    this->dpcloud(cname)->merge_wpid_params(*seg_dpc);
+                    batch.append(seg_dpc->points());
+                }
+            }
+            if (!batch.empty()) {
+                if (auto dpc = this->dpcloud(cname)) dpc->add_points(std::move(batch));
+            }
+        }
+
+        invalidate_segment_caches();
+        set_flag_kinematics(false);
+        return 1;
+    }
+
+    void Shower::complete_structure_with_start_segment(IndexedSegmentSet& used_segments, const std::string& cloud_name_fit, const std::string& cloud_name_associate, bool absorb_track_guard, bool walk_visited_parity) {
         if (!m_start_segment || !m_start_segment->descriptor_valid()) return;
 
         // doc sbnd_xin/docs/pr/40 round 6 F12: the flood-fill below has no
@@ -361,6 +726,11 @@ namespace WireCell::Clus::PR {
             if (pdg == 0 || std::abs(pdg) == 11) return false;
             return segment_is_straight_long_track(seg);
         };
+        if (absorb_dbg()) {
+            std::fprintf(stderr, "SHOWER_ABSORB walk_begin shower_start_seg=%d start_vtx=%d cached_type=%d guard_arg=%d apply_guard=%d\n",
+                         seg_display_id(m_start_segment), vtx_display_id(m_start_vertex),
+                         this->get_particle_type(), (int)absorb_track_guard, (int)apply_guard);
+        }
         
         std::vector<SegmentPtr> new_segments;
         std::vector<VertexPtr> new_vertices;
@@ -374,10 +744,12 @@ namespace WireCell::Clus::PR {
         if (vertices.first && vertices.first != m_start_vertex) {
             this->add_vertex(vertices.first);
             new_vertices.push_back(vertices.first);
+            m_walked_nodes.insert(vertices.first->get_descriptor());  // doc pr/91 r3: about to be walked below
         }
         if (vertices.second && vertices.second != m_start_vertex) {
             this->add_vertex(vertices.second);
             new_vertices.push_back(vertices.second);
+            m_walked_nodes.insert(vertices.second->get_descriptor());  // doc pr/91 r3
         }
         
         // Worklist algorithm: explore connected segments and vertices
@@ -393,7 +765,21 @@ namespace WireCell::Clus::PR {
                         SegmentPtr seg = m_full_graph[edesc].segment;
                         if (seg && seg->descriptor_valid() && used_segments.find(seg) == used_segments.end()) {
                             // F12 (doc pr/40 round 6): see guard_excludes above.
-                            if (guard_excludes(seg)) continue;
+                            if (guard_excludes(seg)) {
+                                if (absorb_dbg()) {
+                                    std::fprintf(stderr, "SHOWER_ABSORB EXCLUDE shower_start_seg=%d seg=%d pdg=%d\n",
+                                                 seg_display_id(m_start_segment), seg_display_id(seg),
+                                                 seg->has_particle_info() && seg->particle_info() ? seg->particle_info()->pdg() : 0);
+                                }
+                                continue;
+                            }
+                            if (absorb_dbg()) {
+                                std::fprintf(stderr, "SHOWER_ABSORB ADD shower_start_seg=%d seg=%d pdg=%d len_cm=%.2f straight=%d\n",
+                                             seg_display_id(m_start_segment), seg_display_id(seg),
+                                             seg->has_particle_info() && seg->particle_info() ? seg->particle_info()->pdg() : 0,
+                                             segment_track_length(seg)/units::cm,
+                                             (int)segment_is_straight_long_track(seg));
+                            }
                             // add_segment() already performs the fit/associate merge
                             // (and merge_wpid_params, which the block that used to sit
                             // here omitted).  It previously ran with the DEFAULT cloud
@@ -418,16 +804,40 @@ namespace WireCell::Clus::PR {
                 
                 // Find vertices connected to this segment (excluding start_vertex)
                 auto vertices = find_vertices(m_full_graph, seg);
+                // doc pr/91 round 3: legacy frontier test is pure view
+                // MEMBERSHIP (!has_node) -- a vertex added by
+                // set_start_vertex()/set_start_segment()/add_segment()/
+                // add_shower() but never actually scanned by this worklist is
+                // permanently skipped.  walk_visited_parity switches the test
+                // to m_walked_nodes, the prototype's map_vtx_segs equivalent
+                // (WCShower.cxx:735-742): a present-but-unwalked vertex is
+                // re-enqueued.  See PRShower.h for the full mechanism.
                 if (vertices.first && vertices.first != m_start_vertex) {
-                    if (!this->has_node(vertices.first->get_descriptor())) {
+                    const auto vd = vertices.first->get_descriptor();
+                    const bool unseen = walk_visited_parity ? !m_walked_nodes.count(vd) : !this->has_node(vd);
+                    if (unseen) {
+                        if (walk_dbg() && this->has_node(vd)) {
+                            std::fprintf(stderr,
+                                         "SHOWER_WALK rewalk shower_id=%d via_seg=%d vtx=%d\n",
+                                         m_shower_id, seg_display_id(seg), vtx_display_id(vertices.first));
+                        }
                         this->add_vertex(vertices.first);
                         new_vertices.push_back(vertices.first);
+                        m_walked_nodes.insert(vd);  // about to be walked
                     }
                 }
                 if (vertices.second && vertices.second != m_start_vertex) {
-                    if (!this->has_node(vertices.second->get_descriptor())) {
+                    const auto vd = vertices.second->get_descriptor();
+                    const bool unseen = walk_visited_parity ? !m_walked_nodes.count(vd) : !this->has_node(vd);
+                    if (unseen) {
+                        if (walk_dbg() && this->has_node(vd)) {
+                            std::fprintf(stderr,
+                                         "SHOWER_WALK rewalk shower_id=%d via_seg=%d vtx=%d\n",
+                                         m_shower_id, seg_display_id(seg), vtx_display_id(vertices.second));
+                        }
                         this->add_vertex(vertices.second);
                         new_vertices.push_back(vertices.second);
+                        m_walked_nodes.insert(vd);  // about to be walked
                     }
                 }
             }
@@ -771,7 +1181,7 @@ namespace WireCell::Clus::PR {
         return total_length;
     }
 
-    void Shower::update_particle_type(const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, double mip_dqdx, VertexPtr main_vertex, bool protect_proton_daughter_pion, double proton_daughter_mip_dqdx){
+    void Shower::update_particle_type(const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, double mip_dqdx, VertexPtr main_vertex, bool protect_proton_daughter_pion, double proton_daughter_mip_dqdx, bool vote_track_pid_counts, bool accept_pid_guard, double accept_pid_min_len){
         double track_length = 0;
         double shower_length = 0;
         
@@ -795,16 +1205,29 @@ namespace WireCell::Clus::PR {
             double length = segment_track_length(seg);
             
             // Check if segment is a shower segment OR not a proton (PDG 2212)
-            bool is_shower = seg->flags_any(SegmentFlags::kShowerTrajectory) || 
+            bool is_shower = seg->flags_any(SegmentFlags::kShowerTrajectory) ||
                            seg->flags_any(SegmentFlags::kShowerTopology);
-            
+
             bool is_not_proton = true;
             if (seg->has_particle_info()) {
                 int pdg = seg->particle_info()->pdg();
                 is_not_proton = (std::abs(pdg) != 2212);
             }
-            
-            if (is_shower || is_not_proton) {
+
+            // doc sbnd_xin/docs/pr/93 Cause C (SBND 18255-292643): legacy
+            // vote counts ONLY confirmed protons as track, so an unflagged
+            // muon/pion chain always votes electron.  When enabled, any
+            // unflagged member carrying a track pdg {13,211,2212} counts as
+            // track.  No score conjunct: score 100 is the median-fallback
+            // population itself, not a confidence signal.
+            // C++ default false => byte-identical legacy vote.
+            bool counts_as_track = !is_not_proton;
+            if (vote_track_pid_counts && seg->has_particle_info() && seg->particle_info()) {
+                const int apdg = std::abs(seg->particle_info()->pdg());
+                counts_as_track = (apdg == 13 || apdg == 211 || apdg == 2212);
+            }
+
+            if (is_shower || !counts_as_track) {
                 shower_length += length;
             } else {
                 track_length += length;
@@ -823,10 +1246,19 @@ namespace WireCell::Clus::PR {
             // = byte-identical.
             const bool protected_pion = protect_proton_daughter_pion && main_vertex &&
                 segment_has_proton_daughter(m_full_graph, m_start_segment, main_vertex, proton_daughter_mip_dqdx);
+            // doc sbnd_xin/docs/pr/93 Cause B: shower_accept_pid_guard also
+            // guards THIS overwrite -- otherwise the vote re-flips a
+            // confidently-PID'd non-electron start segment one call after
+            // the acceptance-site guard spared it (348471's 0.23-score
+            // proton).  Same predicate as the acceptance sites, incl. the
+            // min-length floor.  C++ default false = legacy = byte-identical.
+            const bool protected_confident_pid = accept_pid_guard &&
+                segment_track_length(m_start_segment) > accept_pid_min_len &&
+                segment_confident_nonelectron_pid(m_start_segment);
             // if-guarded rather than an early return: keeps any code appended
             // to this function later from being silently skipped for a
             // protected shower.
-            if (!protected_pion) {
+            if (!protected_pion && !protected_confident_pid) {
                 // Calculate 4-momentum for electron (PDG = 11)
                 auto four_momentum = segment_cal_4mom(m_start_segment, 11, particle_data, recomb_model, mip_dqdx);
 
@@ -998,7 +1430,20 @@ namespace WireCell::Clus::PR {
         return vec_dQ_dx;
     }
 
-    void Shower::calculate_kinematics(const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, bool exclude_start_vertex_from_endpoint){
+    void Shower::calculate_kinematics(const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, bool exclude_start_vertex_from_endpoint, bool endpoint_skip_orphan_vertices){
+        // doc pr/91 round 1 -- the set of view nodes an actual member segment
+        // touches.  Built once here and consulted by both farthest-vertex
+        // searches below.  Empty (and never consulted) when the knob is off, so
+        // the legacy path does not even pay for the walk.
+        std::set<node_descriptor> pr91_touched;
+        if (endpoint_skip_orphan_vertices) {
+            for (auto edesc : ordered_edges(*this, m_full_graph)) {
+                SegmentPtr seg = m_full_graph[edesc].segment;
+                if (!seg || !seg->descriptor_valid()) continue;
+                pr91_touched.insert(boost::source(edesc, m_full_graph));
+                pr91_touched.insert(boost::target(edesc, m_full_graph));
+            }
+        }
         int nsegments = this->edges().size();
         
         if (nsegments == 1) {
@@ -1080,12 +1525,18 @@ namespace WireCell::Clus::PR {
                     }
 
                     // Find farthest vertex — ordered_nodes gives index-stable tie-breaking
+                    probe_endpoint(*this, m_full_graph, data.start_point, m_start_vertex,
+                                   data.start_connection_type,
+                                   exclude_start_vertex_from_endpoint,
+                                   endpoint_skip_orphan_vertices, "single_seg");
                     double max_dis = 0;
                     const auto& view = this->view_graph();
                     for (auto vdesc : ordered_nodes(*this, m_full_graph)) {
                         VertexPtr vtx = view[vdesc].vertex;
                         if (!vtx) continue;
                         if (exclude_start_vertex_from_endpoint && vtx == m_start_vertex) continue;
+                        // doc pr/91 F1: never end on a vertex no member segment reaches.
+                        if (endpoint_skip_orphan_vertices && !pr91_touched.count(vdesc)) continue;
                         double dis = (data.start_point - vtx->fit().point).magnitude();
                         if (dis > max_dis) {
                             max_dis = dis;
@@ -1189,11 +1640,17 @@ namespace WireCell::Clus::PR {
             }
 
             // Find farthest vertex for end_point — ordered_nodes gives index-stable tie-breaking
+            probe_endpoint(*this, m_full_graph, data.start_point, m_start_vertex,
+                           data.start_connection_type,
+                           exclude_start_vertex_from_endpoint,
+                           endpoint_skip_orphan_vertices, "multi_seg");
             double max_dis = 0;
             for (auto vdesc : ordered_nodes(*this, m_full_graph)) {
                 VertexPtr vtx = view[vdesc].vertex;
                 if (!vtx) continue;
                 if (exclude_start_vertex_from_endpoint && vtx == m_start_vertex) continue;
+                // doc pr/91 F1: never end on a vertex no member segment reaches.
+                if (endpoint_skip_orphan_vertices && !pr91_touched.count(vdesc)) continue;
                 double dis = (data.start_point - vtx->fit().point).magnitude();
                 if (dis > max_dis) {
                     max_dis = dis;
@@ -1263,7 +1720,7 @@ namespace WireCell::Clus::PR {
         //           << std::endl;
     }
 
-    void Shower::calculate_kinematics_long_muon(IndexedSegmentSet& segments_in_muons, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, bool exclude_start_vertex_from_endpoint){
+    void Shower::calculate_kinematics_long_muon(IndexedSegmentSet& segments_in_muons, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, bool exclude_start_vertex_from_endpoint, int best_mode, double ratio_lo, double ratio_hi){
         // Invariant: this function is only called when shower->get_particle_type() == 13
         // (NeutrinoEnergyReco.cxx), which requires shower->set_particle_type(13) to have been
         // called (NeutrinoShowerClustering.cxx:118), which in turn requires m_start_segment to
@@ -1339,6 +1796,28 @@ namespace WireCell::Clus::PR {
             }
         }
         
+        // doc pr/101 (K4): range over the muon chain as best energy.
+        // best_mode 0 keeps the legacy dQdx assignment above untouched.
+        if (best_mode != 0) {
+            int end_degree = -1;
+            if (farthest_vertex && farthest_vertex->descriptor_valid()) {
+                end_degree = static_cast<int>(boost::out_degree(farthest_vertex->get_descriptor(), m_full_graph));
+            }
+            const double ratio = data.kenergy_range > 0 ? data.kenergy_dQdx / data.kenergy_range : -1.0;
+            bool use_range = data.kenergy_range > 0;
+            if (best_mode == 2) {
+                use_range = use_range && end_degree == 1
+                    && ratio >= 1.0 - ratio_lo && ratio <= 1.0 + ratio_hi;
+            }
+            if (use_range) data.kenergy_best = data.kenergy_range;
+            SPDLOG_LOGGER_DEBUG(s_log,
+                "kine_long_muon: shower id={} nseg_chain={} L_cm={:.1f} range={:.1f} dqdx={:.1f} ratio={:.2f} "
+                "end_degree={} mode={} used={}",
+                m_shower_id, muon_vertices_by_index.size() ? muon_vertices_by_index.size() - 1 : 0,
+                total_length / units::cm, data.kenergy_range / units::MeV, data.kenergy_dQdx / units::MeV,
+                ratio, end_degree, best_mode, use_range ? "range" : "dqdx");
+        }
+
         // Set end point to the farthest vertex
         if (farthest_vertex) {
             data.end_point = farthest_vertex->fit().point;

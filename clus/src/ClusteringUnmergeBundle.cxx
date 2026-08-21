@@ -8,6 +8,7 @@
 #include "WireCellUtil/PointCloudDataset.h"
 #include "WireCellAux/Logger.h"
 
+#include <cstdlib>   // std::getenv  (WCT_FLASHT0_DEBUG instrumentation, removable)
 #include <map>
 #include <set>
 #include <vector>
@@ -451,6 +452,18 @@ private:
             part->set_flag(Flags::demoted_main);
             log->debug("cluster {}: demoted_main ({} blob(s) were a bundle main "
                        "before the flash merge)", part->ident(), nb);
+            // doc pr/94 Phase 5b root-cause trace: recover the PRE-merge
+            // ident(s) this part's blobs came from, so they can be
+            // cross-referenced against the Q/L-stage log's own flash
+            // assignment for that ident.  Diagnostic only.
+            if (std::getenv("WCT_FLASHT0_DEBUG")
+                && part->has_pcarray<int>(m_id_aname, m_pcarray_name)) {
+                const auto ids = part->get_pcarray<int>(m_id_aname, m_pcarray_name);
+                std::set<int> uniq(ids.begin(), ids.end());
+                log->info("flash-t0 debug: cluster {} (demoted_main, {} blobs) "
+                          "real_cluster_id={}", part->ident(), nb,
+                          [&]{ std::string s; for (int v : uniq) s += std::to_string(v)+","; return s; }());
+            }
             return;
         }
         if (n1 != 0) {

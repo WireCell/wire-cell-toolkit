@@ -811,16 +811,70 @@ TEST_CASE("pattern_recognition shower_clustering_with_nv [B]")
     auto graph_verts = algo.find_cluster_vertices(*ctx.graph, *env->fixture.main_cluster);
     IndexedVertexSet graph_vtx_set(graph_verts.begin(), graph_verts.end());
 
+    // doc sbnd_xin/docs/pr/97 D1: the ENTRY COUNT of map_vertex_to_shower is not
+    // stable across runs on this fixture -- shower_clustering_with_nv_from_vertices
+    // compares an indeterminate `main_pi`, so the branch it takes is decided by
+    // stale stack bytes (a leftover pointer, hence the address-space layout).
+    // One CHECK per entry therefore made this suite's assertion TOTAL flap
+    // (2214 <-> 2215 run to run), which is how the bug surfaced.  Keep the
+    // invariant, but spend a FIXED number of assertions on it so the suite
+    // total is stable.  The determinism itself is asserted by
+    // "shower_clustering_with_nv main_pi determinism [B]" below.
+    CHECK(graph_verts.size() > 0);
+    size_t n_null_start_vertex = 0;
     for (auto& [vtx, showers] : r.map_vertex_to_shower) {
-        bool found_in_graph = graph_vtx_set.count(vtx) > 0;
-        // Shower vertices may live in other clusters too — just check they're non-null.
-        CHECK(vtx != nullptr);
-        (void)found_in_graph;
+        if (!vtx) ++n_null_start_vertex;
+        // Shower vertices may live in other clusters too, so graph_vtx_set
+        // membership is not required -- only non-nullness is an invariant.
+        (void)graph_vtx_set;
     }
+    CHECK(n_null_start_vertex == 0);
+    MESSAGE("map_vertex_to_shower entries: ", r.map_vertex_to_shower.size());
 
     // pio_kine.mass should be finite (or zero if no pi0 was found)
     CHECK(std::isfinite(r.pio_kine.mass));
     CHECK(std::isfinite(r.pio_kine.energy_1));
+}
+
+TEST_CASE("pattern_recognition shower_clustering_with_nv main_pi determinism [B]")
+{
+    PrTestEnv* env = env_B_ptr();
+    if (!env) {
+        { std::string _m = std::string("Skipping: fixture B not found at ") + kDumpB; MESSAGE(_m); }
+        return;
+    }
+
+    // doc sbnd_xin/docs/pr/97 D1.  On this fixture the overall main vertex does
+    // NOT belong to main_cluster, so shower_clustering_with_nv_from_vertices
+    // never fills main_pi.min_angle / .min_dis and the legacy path compares
+    // indeterminate stack bytes: run the OFF path repeatedly under ASLR and the
+    // three other-cluster showers land on 3 different vertices (conn 3) or on 2
+    // shared vertices (conn 2), at random.  With the sentinel the "main vertex
+    // was never evaluated against this cluster" case deterministically prefers
+    // min_pi, so the outcome below is the same on every layout (verified 15/15
+    // runs with ASLR on and 15/15 under `setarch x86_64 -R`).
+    auto ctx = make_context(*env);
+    ctx.algo.m_shower_nv_main_pi_init = true;
+    auto r = run_through(*env, ctx, Step::AfterShowerClustering);
+    REQUIRE(r.final_main_vertex);
+
+    CHECK(r.showers.size() == 3);
+    CHECK(r.map_vertex_to_shower.size() == 2);
+
+    // All three are conn-2 (attached at their own closest main-cluster vertex),
+    // never conn-3 (the "no shower segment at the cluster's own main vertex"
+    // fallback the garbage read used to select).  Counted, not asserted
+    // per-shower, so the assertion total does not depend on the data.
+    size_t n_conn2 = 0;
+    std::string idx;
+    for (const auto& sh : r.showers) {
+        if (sh->get_start_vertex_and_type().second == 2) ++n_conn2;
+    }
+    for (const auto& [vtx, shs] : r.map_vertex_to_shower) {
+        idx += (idx.empty() ? "" : ",") + std::to_string(vtx->get_graph_index());
+    }
+    CHECK(n_conn2 == 3);
+    MESSAGE("main_pi_init start vertices (graph index): ", idx);
 }
 
 } // TEST_SUITE replay [B]

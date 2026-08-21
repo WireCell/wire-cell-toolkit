@@ -135,6 +135,30 @@ TEST_CASE("clus knob defaults: TaggerCheckNeutrino switches are all OFF")
     CHECK_KNOB_NUM(cfg, "stem_backfill_min_shower_len", 40.0);                // cm; inert while K4 off
     CHECK_KNOB_BOOL(cfg, "shower_conn3_unreachable", false);                  // K5 (pr/65 rung 2)
     CHECK_KNOB_NUM(cfg, "conn3_unreachable_min_len", 10.0);                   // cm; inert while K5 off
+    CHECK_KNOB_NUM(cfg, "conn3_stitch_max", 0.0);                             // cm; doc pr/84 r2 F3; 0 = off
+    CHECK_KNOB_BOOL(cfg, "shower_dedup_start_seg", false);                    // doc pr/84 r3 S1; off = legacy
+    CHECK_KNOB_BOOL(cfg, "shower_endpoint_skip_orphan_vtx", false);           // doc pr/91 r1 F1; off = legacy end_point search
+    CHECK_KNOB_BOOL(cfg, "shower_walk_visited_parity", false);               // doc pr/91 round 3; off = legacy has_node()-gated frontier
+    // doc pr/40 round 9 -- straight-track PID guard family + B2 bridge.
+    CHECK_KNOB_BOOL(cfg, "shower_connect_from_vertices_straight_guard", false);  // r8 Part A
+    CHECK_KNOB_BOOL(cfg, "shower_connect_start_seg_straight_guard", false);      // r7 c2c (D1 re-target)
+    CHECK_KNOB_BOOL(cfg, "examine_direction_dirsign_shower_in_guard", false);    // r7 c2a (D2 re-scope)
+    CHECK_KNOB_BOOL(cfg, "daughter_shower_angle_reclass_straight_guard", false); // r7 c2b
+    CHECK_KNOB_BOOL(cfg, "shower_topo_reexam_straight_guard", false);            // r7 c1 safety net
+    CHECK_KNOB_NUM(cfg, "sfv_kink_max", 25.0);                                   // deg; inert while guards off
+    CHECK_KNOB_BOOL(cfg, "shower_nv_bridge_track", false);                       // B2
+    CHECK_KNOB_NUM(cfg, "shower_nv_bridge_max_gap", 1.8);                        // cm; inert while B2 off
+    // doc pr/92 -- stray-satellite drop from kine/PF.
+    CHECK_KNOB_BOOL(cfg, "kine_drop_stray_satellites", false);                   // off = legacy Enu sum
+    CHECK_KNOB_NUM(cfg, "kine_sat_min_energy", 20.0);                            // MeV; inert while pr/92 off
+    CHECK_KNOB_NUM(cfg, "kine_sat_prox_max", 8.0);                               // cm; inert while pr/92 off
+    CHECK_KNOB_NUM(cfg, "kine_sat_angle_bad", 60.0);                             // deg; inert while pr/92 off
+    CHECK_KNOB_NUM(cfg, "kine_sat_angle_main", 45.0);                            // deg; inert while pr/92 off
+    CHECK_KNOB_NUM(cfg, "kine_sat_far_dis", 90.0);                               // cm; inert while pr/92 off
+    CHECK_KNOB_NUM(cfg, "kine_sat_axis_dis_cut", 30.0);                          // cm; inert while pr/92 off
+    CHECK_KNOB_NUM(cfg, "kine_sat_cont_kink", 25.0);                             // deg; inert while pr/92 off
+    CHECK_KNOB_NUM(cfg, "kine_sat_track_max_nseg", 3.0);                         // count; pr/92 r2 topology split
+    CHECK_KNOB_NUM(cfg, "kine_sat_em_far_dis", 150.0);                           // cm; pr/92 r2 EM far-drop
     CHECK_KNOB_BOOL(cfg, "shower_traj_michel_stem", false);                   // doc pr/74 round 4 K6
     CHECK_KNOB_NUM(cfg, "michel_stem_traj_min_len", 15.0);                    // cm; inert while K6 off
     CHECK_KNOB_NUM(cfg, "michel_stem_traj_max_len", 45.0);                    // cm; inert while K6 off
@@ -143,6 +167,51 @@ TEST_CASE("clus knob defaults: TaggerCheckNeutrino switches are all OFF")
     CHECK_KNOB_NUM(cfg, "michel_stem_traj_min_kink_deg", 40.0);               // deg; inert while K6 off
     // doc pr/44: long-muon pseudo-shower keeps its muon start segment.
     CHECK_KNOB_BOOL(cfg, "shower_long_muon_keep_type", false);
+    // doc pr/40 round 10: Bragg-PID-confident muon/proton start segment kept.
+    CHECK_KNOB_BOOL(cfg, "shower_bragg_protect_start_segment", false);
+    // doc pr/93 round 3 -- "electron" is really tracks / hadronic-pi0 shower.
+    CHECK_KNOB_BOOL(cfg, "shower_reclass_case_b_dqdx_guard", false);          // Cause A (55595)
+    CHECK_KNOB_BOOL(cfg, "shower_accept_pid_guard", false);                   // Cause B (348471, 69314)
+    CHECK_KNOB_NUM(cfg, "shower_pid_guard_min_len", 50.0);                    // cm; inert while Cause A/B off
+    CHECK_KNOB_BOOL(cfg, "shower_vote_track_pid_counts", false);              // Cause C (292643)
+    CHECK_KNOB_BOOL(cfg, "shower_cone_absorb_guard", false);               // Cause D (315167)
+    // doc pr/93 round 4 -- PF-hierarchy fine-tunes + 137238 cross-cluster muon.
+    CHECK_KNOB_BOOL(cfg, "shower_detach_track_stem", false);                  // r4 (348471, 292643)
+    // doc pr/99 round 2 -- shower_ghost_member_drop family.
+    CHECK_KNOB_BOOL(cfg, "shower_ghost_member_drop", false);                  // pr/99 r2 (395148); false = byte-identical
+    CHECK_KNOB_NUM(cfg, "shower_ghost_overlap_frac", 0.7);                    // inert while drop off
+    CHECK_KNOB_NUM(cfg, "shower_ghost_dqdx_ratio", 0.25);                     // inert while drop off
+    CHECK_KNOB_NUM(cfg, "shower_ghost_min_len", 10.0);                        // cm; inert while drop off
+
+    // doc pr/99 round 3 -- kine-charge ownership + A5 hadronic tag.
+    CHECK_KNOB_BOOL(cfg, "kine_charge_dedup", false);                         // pr/99 r3 C1 (168596); false = byte-identical
+    CHECK_KNOB_BOOL(cfg, "kine_charge_rebuild", false);                       // pr/99 r3 C1b; false = byte-identical
+    // doc pr/101 -- Enu accounting round (K1-K5); all defaults = legacy.
+    CHECK_KNOB_BOOL(cfg, "kine_charge_track_ctx", false);                     // pr/101 K1 (37112); false = byte-identical
+    CHECK_KNOB_BOOL(cfg, "kine_mass_rules", false);                           // pr/101 K2; false = byte-identical
+    CHECK_KNOB_BOOL(cfg, "kine_hadronic_dqdx", false);                        // pr/101 K3; false = byte-identical
+    CHECK_KNOB_NUM(cfg, "kine_long_muon_mode", 0);                            // pr/101 K4; 0 = legacy dQdx
+    CHECK_KNOB_NUM(cfg, "kine_long_muon_ratio_lo", 0.3);                      // inert unless mode 2
+    CHECK_KNOB_NUM(cfg, "kine_long_muon_ratio_hi", 0.5);                      // inert unless mode 2
+    CHECK_KNOB_BOOL(cfg, "kine_mainvtx_used_guard", false);                   // pr/101 K5; false = byte-identical
+    CHECK_KNOB_BOOL(cfg, "shower_hadronic_tag", false);                       // pr/99 r3 A5 (315167/395148); false = byte-identical
+    CHECK_KNOB_NUM(cfg, "shower_hadronic_min_len", 10.0);                     // cm; inert while tag off
+    CHECK_KNOB_NUM(cfg, "shower_hadronic_scan_len", 30.0);                    // cm; inert while tag off
+    CHECK_KNOB_NUM(cfg, "shower_hadronic_bin", 3.0);                          // cm; inert while tag off
+    CHECK_KNOB_NUM(cfg, "shower_hadronic_r_cyl", 8.0);                        // cm; inert while tag off
+    CHECK_KNOB_NUM(cfg, "shower_hadronic_r_core", 1.2);                       // cm; inert while tag off
+    CHECK_KNOB_NUM(cfg, "shower_hadronic_growth_max", 0.8);                   // ratio; inert while tag off
+    CHECK_KNOB_NUM(cfg, "shower_hadronic_growth_bragg", 1.2);                 // ratio; inert while tag off
+    CHECK_KNOB_NUM(cfg, "shower_hadronic_bragg_ratio", 3.0);                  // ratio; inert while tag off
+    CHECK_KNOB_NUM(cfg, "shower_hadronic_stem_ratio", 0.0);                  // MIP units; 0 = branch off
+    CHECK_KNOB_BOOL(cfg, "kine_count_orphan_tracks", false);                  // r4 (315167)
+    CHECK_KNOB_NUM(cfg, "kine_orphan_track_min", 50.0);                       // cm; read only when on
+    CHECK_KNOB_BOOL(cfg, "straight_cont_cross_cluster", false);               // r4 (137238)
+    CHECK_KNOB_BOOL(cfg, "sccc_bridge_body", false);                          // r4 second rung
+    CHECK_KNOB_NUM(cfg, "sccc_max_gap", 5.0);                                 // cm; base tier
+    CHECK_KNOB_NUM(cfg, "sccc_kink_max", 15.0);                               // deg; base tier
+    CHECK_KNOB_NUM(cfg, "sccc_gap_aligned", 12.0);                            // cm; aligned tier
+    CHECK_KNOB_NUM(cfg, "sccc_kink_tight", 7.5);                              // deg; aligned tier
     // doc pr/43 round 2 -- three PID-consistency knobs (K1/K2/K3).
     CHECK_KNOB_BOOL(cfg, "single_muon_proton_chain_veto", false);
     CHECK_KNOB_BOOL(cfg, "single_muon_long_muon_claim", false);
@@ -295,6 +364,20 @@ TEST_CASE("clus knob defaults: TaggerCheckNeutrino switches are all OFF")
     CHECK_KNOB_NUM(cfg, "mvga_splice_straighten", 0.0);  // doc pr/86 round 2 R1: 0 = concatenation verbatim, byte-identical
     CHECK_KNOB_NUM(cfg, "mvga_approach_collapse", 0.0);  // doc pr/86 round 2 R2: 0 = op3.5 skipped, byte-identical
     CHECK_KNOB_NUM(cfg, "mvga_straighten_radius", 0.0);  // doc pr/86 round 2: 0 = prototype 0.2 cm veto radius
+    CHECK_KNOB_NUM(cfg, "mvga_op1_radius", 0.0);   // doc pr/83 r3: 0 = use mvga_radius (-1 = unscoped), byte-identical
+    CHECK_KNOB_NUM(cfg, "mvga_op1_dup_frac", 0.0); // doc pr/83 r3: 0 = use mvga_dup_frac, byte-identical
+    CHECK_KNOB_BOOL(cfg, "mvga_op1_post", false);  // doc pr/83 r3 class A: post-op3 dup pass skipped, byte-identical
+    CHECK_KNOB_NUM(cfg, "mvga_carry_max", 0.0);    // doc pr/83 r3: 0 = unlimited carry, byte-identical
+    CHECK_KNOB_BOOL(cfg, "swap_orphan_dup_audit", false);  // doc pr/83 r3 Mechanism C: abandoned cluster unaudited, byte-identical
+    CHECK_KNOB_NUM(cfg, "mvga_proj_dup_frac", 0.0);  // doc pr/83 r4: projective dup collapse disabled, byte-identical
+    CHECK_KNOB_NUM(cfg, "mvga_proj_dqdx_ratio", 0.4);  // doc pr/83 r4: stem dQ/dx gate default; inert while frac == 0
+    CHECK_KNOB_NUM(cfg, "mvga_proj_angle", 0.0);  // doc pr/83 r4b: 0 = use mvga_dup_angle, byte-identical
+    CHECK_KNOB_NUM(cfg, "mvga_ac_veto_radius", 0.0);  // doc pr/99 r2: 0 = legacy straighten_radius rule, byte-identical
+    CHECK_KNOB_NUM(cfg, "mvga_ac_chord_max", 0.0);    // doc pr/99 r2: 0 = no chord cap, byte-identical
+    CHECK_KNOB_BOOL(cfg, "mvga_ac_no_cascade", false); // doc pr/99 r2: created products stay collapsible, byte-identical
+    CHECK_KNOB_NUM(cfg, "mvga_dup_starved_asym", 0.0); // doc pr/99 r2: 0 = op1-post angle decline stands, byte-identical
+    CHECK_KNOB_NUM(cfg, "mvga_dup_starved_mip", 0.0); // doc pr/99 r2: 0 = op1-post angle decline stands, byte-identical
+    CHECK_KNOB_NUM(cfg, "mvga_dup_starved_span", 0.0); // doc pr/99 r2: 0 = no span-comparability test, byte-identical
     CHECK_KNOB_NUM(cfg, "shower_topo_demote_len", 0.0);      // 0 = long segments stay shower-eligible
     CHECK_KNOB_NUM(cfg, "nu_skip_cosmic_bundle_min_length", 0.0);
     CHECK_KNOB_NUM(cfg, "cosmic_companion_min_length", 0.0);
@@ -555,6 +638,49 @@ TEST_CASE("clus knob defaults: segment_dqdx_spares_electron_reclass")
     CHECK(segment_dqdx_spares_electron_reclass(make_seg_with_dqdx(1.4 * MIP), MIP) == false);
     // Degenerate scale: never spares (guards the division).
     CHECK(segment_dqdx_spares_electron_reclass(make_seg_with_dqdx(3.0 * MIP), 0.0) == false);
+}
+
+// ---------------------------------------------------------------------------
+// doc sbnd_xin/docs/pr/93 Cause B -- segment_confident_nonelectron_pid is the
+// spare-test for the two forced set_pdg(11) shower-acceptance sites.  Pin the
+// predicate: real particle_info, pdg not in {0, +-11}, AND a real (<1.0)
+// template-PID score.  The 100 "unscored" sentinel (median-fallback pdg-13
+// stamps) must NOT spare.
+// ---------------------------------------------------------------------------
+
+TEST_CASE("clus knob defaults: segment_confident_nonelectron_pid")
+{
+    using namespace WireCell::Clus::PR;
+
+    auto make_seg_with_pid = [&](int pdg, double score) {
+        auto seg = std::make_shared<Segment>();
+        auto pinfo = std::make_shared<Aux::ParticleInfo>(
+            pdg, 100.0 * units::MeV, "test",
+            WireCell::D4Vector<double>(100.0 * units::MeV, 0, 0, 0));
+        seg->particle_info(pinfo);
+        seg->particle_score(score);
+        return seg;
+    };
+
+    // Null / no-particle-info: never spares.
+    CHECK(segment_confident_nonelectron_pid(nullptr) == false);
+    CHECK(segment_confident_nonelectron_pid(std::make_shared<Segment>()) == false);
+
+    // The two motivating tapes: confident proton (348471, score 0.23) and
+    // confident pion (69314) both spare.
+    CHECK(segment_confident_nonelectron_pid(make_seg_with_pid(2212, 0.23)) == true);
+    CHECK(segment_confident_nonelectron_pid(make_seg_with_pid(211, 0.5)) == true);
+    CHECK(segment_confident_nonelectron_pid(make_seg_with_pid(-13, 0.9)) == true);
+
+    // Median-fallback muon: pdg 13 but score 100 sentinel -- NOT confident,
+    // does not spare (this population is exactly what the vote/acceptance
+    // sites legitimately relabel).
+    CHECK(segment_confident_nonelectron_pid(make_seg_with_pid(13, 100.0)) == false);
+
+    // Already-electron or unset pdg: never spares regardless of score.
+    CHECK(segment_confident_nonelectron_pid(make_seg_with_pid(11, 0.1)) == false);
+    CHECK(segment_confident_nonelectron_pid(make_seg_with_pid(-11, 0.1)) == false);
+    CHECK(segment_confident_nonelectron_pid(make_seg_with_pid(0, 0.1)) == false);
 }
 
 // ---------------------------------------------------------------------------
@@ -1025,4 +1151,15 @@ TEST_CASE("clus knob defaults: MultiAlgBlobClustering BeePFConfig pf switches ar
     CHECK(pfc.pf_pi0_node_per_id == false);              // doc pr/34 F4
     CHECK(pfc.pf_pdg_name_prototype_fallback == false);  // doc pr/34 F5
     CHECK(pfc.pf_orphan_track_parentage == false);       // doc pr/38 Round 4
+    CHECK(pfc.pf_orphan_audit_only == false);            // doc pr/65 round 3 (pin was missing; added pr/84 r2)
+    CHECK(pfc.pf_direct_when_touching == false);         // doc pr/84 r2 F1
+    CHECK(pfc.pf_touch_max == 3.0 * WireCell::units::cm);        // read only when F1 on
+    CHECK(pfc.pf_touch_cross_main == false);             // doc pr/84 r2 F1 rung 2
+    CHECK(pfc.pf_touch_cross_max == 8.0 * WireCell::units::cm);  // read only when rung 2 on
+    CHECK(pfc.pf_pseudo_gap_from_main == false);         // doc pr/84 r2 F2
+    CHECK(pfc.pf_unique_node_ids == false);              // doc pr/84 r3 G1
+    CHECK(pfc.pf_drop_stray_satellites == false);        // doc pr/92
+    CHECK(pfc.pf_orphan_confident_track == false);       // doc pr/93 r4 (315167)
+    CHECK(pfc.pf_orphan_track_min == 50.0 * WireCell::units::cm);  // read only when on
+    CHECK(pfc.pf_track_owns_loose_vertex == false);      // doc pr/93 r4 (69314)
 }

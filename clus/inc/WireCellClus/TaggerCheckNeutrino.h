@@ -191,6 +191,20 @@ public:
         double m_mvga_splice_straighten{0.0}; // cm; op3 post-carry straighten reach past the junction (doc pr/86 round 2); 0 = concatenation verbatim, byte-identical
         double m_mvga_approach_collapse{0.0}; // cm; op3.5 junction-collapse radius around the main vertex (doc pr/86 round 2); 0 = pass skipped, byte-identical
         double m_mvga_straighten_radius{0.0}; // cm; R1/R2 straight-chain charge-veto radius (doc pr/86 round 2); 0 = prototype 0.2 cm; inert unless straighten/collapse on
+        double m_mvga_op1_radius{0.0};    // cm; op1-only scope radius (doc pr/83 r3); 0 = use mvga_radius, -1 = unscoped, byte-identical at 0
+        double m_mvga_op1_dup_frac{0.0};  // fraction; op1-only overlap threshold (doc pr/83 r3); 0 = use mvga_dup_frac, byte-identical
+        bool   m_mvga_op1_post{false};    // post-op3 duplicate-corridor pass incl. created segments (doc pr/83 r3 class A); false = byte-identical
+        int    m_mvga_carry_max{0};       // op3 interposed-carry prong-count ceiling (doc pr/83 r3); 0 = unlimited, byte-identical
+        bool   m_swap_orphan_dup_audit{false}; // dup-audit the abandoned main cluster inside swap_main_cluster (doc pr/83 r3 Mechanism C); false = byte-identical
+        double m_mvga_proj_dup_frac{0.0};  // 2nd-best per-view overlap threshold for the projective dup collapse (doc pr/83 r4); 0 = disabled, byte-identical
+        double m_mvga_proj_dqdx_ratio{0.4}; // stem dQ/dx asymmetry gate for the same pass (doc pr/83 r4); inert while frac == 0
+        double m_mvga_proj_angle{0.0};    // deg; op1-proj chord-angle ceiling (doc pr/83 r4b); 0 = use mvga_dup_angle, byte-identical
+        double m_mvga_ac_veto_radius{0.0};  // cm; op3.5-only collapse-chord charge-veto radius (doc pr/99 round 2); 0 = legacy straighten_radius rule, byte-identical
+        double m_mvga_ac_chord_max{0.0};    // cm; op3.5 replacement-chord length cap (doc pr/99 round 2); 0 = no cap, byte-identical
+        bool   m_mvga_ac_no_cascade{false}; // op3.5: skip candidates touching `created` products (doc pr/99 round 2); false = byte-identical
+        double m_mvga_dup_starved_asym{0.0}; // pair min/max dQ/dx asymmetry gate; op1-post angle-decline starved-member override (doc pr/99 round 2); 0 = off, byte-identical
+        double m_mvga_dup_starved_mip{0.0}; // absolute cap on the loser, ratio vs mip median; same override (doc pr/99 round 2); 0 = off, byte-identical
+        double m_mvga_dup_starved_span{0.0}; // pair min/max length comparability floor; same override (doc pr/99 round 2); 0 = no span test
         // Long shower-topology demote length, cm (doc sbnd_xin/docs/pr/25
         // sec 3).  0 => the guard never fires => byte-identical.  50 is the
         // scan-supported operating point (9/10 owner-scanned events; ~45
@@ -533,6 +547,86 @@ public:
                                                   // when a main-cluster candidate exists, so such
                                                   // events are byte-identical.  false = legacy: a
                                                   // demoted main is never a candidate.
+        // ---- doc pr/94 Phase 2: per-bundle neutrino candidates --------- //
+        // false = legacy: ONE event-wide winner, selected by the beam-gate
+        // block in visit(), which stays textually untouched.  true = one
+        // candidate per in-beam-window flash bundle, each running the full PR
+        // chain on its own TrackFitting and publishing into a "nu<i>" named
+        // slot, so a cosmic-convicted activity can no longer take its
+        // co-bundled neutrino candidate down with it (SBND 18255/395148).
+        //
+        // Within a bundle the selection rule is unchanged (longest untagged
+        // main, then the untagged demoted-main fallback) and the PER-MAIN
+        // cosmic veto is deliberately KEPT -- a TGM/STM/LM-convicted activity
+        // is not a neutrino candidate, which is what leaves an all-cosmic
+        // bundle with no row at all.  What per-bundle mode drops is the
+        // event-level `cosmic_gids` BUNDLE veto (m_nu_skip_cosmic_bundle):
+        // that veto exists only to keep a convicted bundle from supplying the
+        // single event-wide winner, and it is precisely what would discard a
+        // clean sibling.  Every evaluated activity's verdict is reported in
+        // its own TaggerInfo::act_* slot instead of vetoing anything.
+        bool m_nu_per_bundle{false};
+        // ---- doc pr/94 Phase 5b round 2: the dot guard ------------------ //
+        // cm.  Minimum length for a per-bundle candidate to be selectable,
+        // UNLESS it is the same activity the legacy event-wide selector would
+        // have picked (see `legacy_main` in the .cxx).  0 = no floor.
+        //
+        // Why this is needed.  Dropping the event-level bundle veto (see
+        // m_nu_per_bundle above) drops the ONLY thing that kept a sub-cm blob
+        // inside a cosmic bundle from being promoted to "the neutrino": SBND
+        // leaves nu_skip_cosmic_bundle_min_length at 0, i.e. the legacy veto
+        // removes EVERY bundle-mate of a convicted main regardless of length,
+        // and the chain then reaches the real interaction through the
+        // demoted-main fallback.  Measured on 1000 mcp1k events, per-bundle
+        // mode without this floor added 143 candidates of which 143 had a
+        // seed under 5 cm and 87 reconstructed to 100-149 MeV -- the muon
+        // rest mass plus a few MeV, i.e. a dot fitted as a muon at rest.
+        // Only 1 of the 97 non-cosmic-flagged ones scored numu_score > 0.
+        //
+        // Why "exempt the legacy winner" and not "exempt convicted bundles":
+        // round 1 scoped the floor to bundles holding a cosmic-tagged MAIN
+        // (not demoted), which is provably additive when
+        // nu_skip_cosmic_bundle_min_length=0 (legacy emits nothing from such
+        // a bundle).  But mcp1k evt 114446 disproved that as sufficient: its
+        // legacy-selected 10.9 cm candidate shares a bundle with a cosmic
+        // sibling that is DEMOTED, not main, so round 1 wrongly floored it
+        // away -- an additivity violation, not a dot removal (8 events lost a
+        // vertex on mcp1k).  Round 2 exempts the legacy winner directly
+        // (recomputed as a side-effect-free duplicate of the legacy selector,
+        // M10): mcp1k evt 62583 keeps a 1.6 cm row (it IS the legacy row)
+        // while evt 391854 loses a 1.7 cm row (it is NOT) -- no length or
+        // bundle-conviction rule can tell those apart, only "is this the
+        // legacy selection" can.  This makes additivity structural: the row
+        // the legacy chain reports can never be floored away.
+        double m_nu_per_bundle_min_length{0};
+        // Mirrors the cosmic taggers' evaluate_demoted_mains admission gate so
+        // TaggerInfo::act_evaluated can be exact.  The taggers set a flag only
+        // on a POSITIVE verdict, so a missing TGM/STM/FC flag cannot by itself
+        // distinguish "evaluated and exonerated" from "never looked at";
+        // reproducing their admission gate can.  Wire this from the SAME
+        // jsonnet variable that feeds TaggerCheck{TGM,STM,FC} or the two will
+        // drift.  Inert unless m_nu_per_bundle.
+        bool m_nu_per_bundle_demoted_acts{false};
+
+        // doc pr/94 round 3 -- nu_selected_as_main.
+        // The PR chain re-derives "am I the main cluster?" from the persisted
+        // Flags::main_cluster (NeutrinoPatternBase.cxx:2797,
+        // NeutrinoVertexFinder.cxx:3450, NeutrinoTrackShowerSep.cxx:2013), but
+        // ClusteringUnmergeBundle deliberately CLEARS that flag on a demoted
+        // main.  So when the selected neutrino candidate is a demoted main --
+        // the nu_fallback_demoted_mains path, and every per-bundle candidate --
+        // it silently loses the main-only correctives: the main-branch endpoint
+        // ordering that honours flag_back_search, main_cluster_initial_pair_
+        // vertices, examine_vertices_3, break_two_end_dqdx, improve_vertex +
+        // fix_maps_shower_in_track_out, and the main-cluster track/shower
+        // reclassification cut set.  SBND 18255/395148's secondary neutrino
+        // (cluster 21) is the owner-reported case.
+        // When on, the selected candidate carries Flags::main_cluster for the
+        // duration of its own PR pass and only that -- the flag is restored
+        // immediately afterwards, so no later visitor, no bundle-veto set and
+        // no output dump sees a changed flag.  C++ default false => the guard
+        // never engages => byte-identical.
+        bool m_nu_selected_as_main{false};
         bool m_sp_photon_flag{false};  // doc pr/26 sec. 8.2 port gap.  If true, the single-photon
                                        // tagger's verdict is stored in TaggerInfo::photon_flag,
                                        // as prototype NeutrinoID.cxx:271 does
@@ -588,6 +682,12 @@ public:
         // vertex from the end_point farthest-vertex search.  See
         // PatternAlgorithms::m_shower_endpoint_exclude_start_vertex.
         bool m_shower_endpoint_exclude_start_vertex{false};
+        // doc pr/91 round 1 F1: also skip a node no member segment touches.
+        // See PatternAlgorithms::m_shower_endpoint_skip_orphan_vtx.
+        bool m_shower_endpoint_skip_orphan_vtx{false};
+        // doc pr/91 round 3: flood-fill frontier test = visited, not merely
+        // present.  See PatternAlgorithms::m_shower_walk_visited_parity.
+        bool m_shower_walk_visited_parity{false};
         // doc sbnd_xin/docs/pr/40 -- track (proton/pion/muon) mis-identified
         // as electron.  F1 restores prototype-faithful PID persistence
         // (threaded via track_pid_options()); F2/F3 guard the wholesale
@@ -625,6 +725,30 @@ public:
         bool m_shower_in_cascade_guard{false};                      // doc pr/74 round 2 P1
         double m_shower_in_max_len{40};                             // cm; pr/74 P1 tunable
         double m_shower_in_mip_hi{1.3};                             // ratio; pr/74 P1 tunable
+        // doc pr/40 round 9 -- the rounds-7+8 straight-track PID guard
+        // family + the B2 cross-cluster bridge.  Rationale comments in
+        // NeutrinoPatternBase.h.
+        bool m_shower_connect_from_vertices_straight_guard{false};  // doc pr/40 round 9 (round 8 Part A)
+        bool m_shower_connect_start_seg_straight_guard{false};      // doc pr/40 round 9 (round 7 c2c, D1 re-target)
+        bool m_examine_direction_dirsign_shower_in_guard{false};    // doc pr/40 round 9 (round 7 c2a, D2 re-scope)
+        bool m_daughter_shower_angle_reclass_straight_guard{false}; // doc pr/40 round 9 (round 7 c2b)
+        bool m_shower_topo_reexam_straight_guard{false};            // doc pr/40 round 9 (round 7 c1 safety net)
+        double m_sfv_kink_max{25.0};                                // degrees; continuation-arm tunable
+        bool m_shower_nv_bridge_track{false};                       // doc pr/40 round 9 B2
+        bool m_shower_nv_main_pi_init{false};                       // doc pr/97 D1; false = legacy indeterminate main_pi read
+        double m_shower_nv_bridge_max_gap{1.8};                     // cm; B2 gap cut (steiner-cloud closest approach)
+        // doc pr/92 -- stray-satellite drop from kine/PF.  Rationale
+        // comments in NeutrinoPatternBase.h (pr/92 block).
+        bool m_kine_drop_stray_satellites{false};                   // doc pr/92 master
+        double m_kine_sat_min_energy{20.0};                         // MeV; drop-candidate floor
+        double m_kine_sat_prox_max{8.0};                            // cm; main-cluster proximity exemption
+        double m_kine_sat_angle_bad{60.0};                          // degrees; Arm A attachment-angle cut
+        double m_kine_sat_angle_main{45.0};                         // degrees; Arm B main-vertex-angle cut
+        double m_kine_sat_far_dis{90.0};                            // cm; Arm B far-attachment trigger
+        double m_kine_sat_axis_dis_cut{30.0};                       // cm; shower axis integration radius
+        double m_kine_sat_cont_kink{25.0};                          // degrees; Arm C continuation kink
+        double m_kine_sat_track_max_nseg{3.0};                      // count; round-2 track-like max segments
+        double m_kine_sat_em_far_dis{150.0};                        // cm; round-2 EM-satellite far-drop distance
         bool m_michel_stem_michel_check{false};                     // doc pr/74 round 2 P2
         double m_michel_stem_max_far_len{40};                       // cm; pr/74 P2 tunable
         bool m_shower_stem_backfill{false};                         // doc pr/74 round 2 K4
@@ -634,6 +758,8 @@ public:
         double m_stem_backfill_min_shower_len{40};                  // cm; pr/74 K4 tunable
         bool m_shower_conn3_unreachable{false};                     // doc pr/74 round 2 K5 (pr/65 rung 2)
         double m_conn3_unreachable_min_len{10};                     // cm; pr/74 K5 tunable
+        double m_conn3_stitch_max{0};                               // cm; doc pr/84 r2 F3; 0 = off = byte-identical
+        bool m_shower_dedup_start_seg{false};                       // doc pr/84 r3 S1; false = off = byte-identical
         bool m_shower_traj_michel_stem{false};                      // doc pr/74 round 4 K6 (18255-506746 muon+Michel)
         double m_michel_stem_traj_min_len{15};                      // cm; pr/74 K6 tunable
         double m_michel_stem_traj_max_len{45};                      // cm; pr/74 K6 tunable
@@ -641,6 +767,57 @@ public:
         double m_michel_stem_traj_max_far_len{40};                  // cm; pr/74 K6 tunable (own ceiling, not P2's)
         double m_michel_stem_traj_min_kink_deg{40.0};               // deg; pr/74 K6 tunable
         bool m_shower_long_muon_keep_type{false};                   // doc pr/44
+        bool m_shower_bragg_protect_start_segment{false};           // doc pr/40 round 10
+        // doc pr/93 round 3 -- rationale comments in NeutrinoPatternBase.h
+        // (pr/93 block).
+        bool m_shower_reclass_case_b_dqdx_guard{false};             // doc pr/93 Cause A (55595)
+        bool m_shower_accept_pid_guard{false};                      // doc pr/93 Cause B (348471, 69314)
+        double m_shower_pid_guard_min_len{50};                      // cm; shared Cause A/B floor, inert while both off
+        bool m_shower_vote_track_pid_counts{false};                 // doc pr/93 Cause C (292643)
+        bool m_shower_cone_absorb_guard{false};                  // doc pr/93 Cause D (315167)
+        // doc pr/93 round 4 -- rationale comments in NeutrinoPatternBase.h
+        // (pr/93 round-4 blocks).
+        bool m_shower_detach_track_stem{false};                     // doc pr/93 r4 (348471, 292643)
+        // doc pr/99 round 2 -- rationale comments in NeutrinoPatternBase.h
+        // (m_shower_ghost_* block).
+        bool m_shower_ghost_member_drop{false};                     // doc pr/99 r2 (395148 projective ghost)
+        double m_shower_ghost_overlap_frac{0.7};                    // 2nd-best per-view overlap gate; inert while drop off
+        double m_shower_ghost_dqdx_ratio{0.25};                     // starved gate, ratio vs mip median; inert while drop off
+        double m_shower_ghost_min_len{10.0};                        // cm; scaled at copy; inert while drop off
+        // doc pr/99 round 3: C1 kine-charge cell ownership + C1b prototype
+        // rebuild parity + A5 hadronic-shower tag.  Design blocks at the
+        // KineChargeOptions::dedup/rebuild and m_shower_hadronic_* members
+        // in NeutrinoPatternBase.h.
+        bool   m_kine_charge_dedup{false};                          // doc pr/99 r3 C1 (168596 Enu double count)
+        bool   m_kine_charge_rebuild{false};                        // doc pr/99 r3 C1b (prototype cloud-rebuild parity)
+        // doc sbnd_xin/docs/pr/101: Enu accounting round.  Design blocks at
+        // KineChargeOptions::track_ctx/mass_rules/hadronic_dqdx/long_muon_*/
+        // mainvtx_used_guard in NeutrinoPatternBase.h.
+        bool   m_kine_charge_track_ctx{false};                      // doc pr/101 K1 (37112 shower<->track overlap)
+        bool   m_kine_mass_rules{false};                            // doc pr/101 K2 (proton shower +938 MeV)
+        bool   m_kine_hadronic_dqdx{false};                         // doc pr/101 K3 (hadronic shower KE = sum dE/dx)
+        int    m_kine_long_muon_mode{0};                            // doc pr/101 K4 (0 dQdx, 1 range, 2 range w/ fallback)
+        double m_kine_long_muon_ratio_lo{0.3};                      // inert unless mode 2
+        double m_kine_long_muon_ratio_hi{0.5};                      // inert unless mode 2
+        bool   m_kine_mainvtx_used_guard{false};                    // doc pr/101 K5 (main-vertex member double count)
+        bool   m_shower_hadronic_tag{false};                        // doc pr/99 r3 A5 (hadronic shower labeled e-)
+        double m_shower_hadronic_min_len{10.0};                     // cm; scaled at copy; inert while tag off
+        double m_shower_hadronic_scan_len{30.0};                    // cm; scaled at copy; inert while tag off
+        double m_shower_hadronic_bin{3.0};                          // cm; scaled at copy; inert while tag off
+        double m_shower_hadronic_r_cyl{8.0};                        // cm; scaled at copy; inert while tag off
+        double m_shower_hadronic_r_core{1.2};                       // cm; scaled at copy; inert while tag off
+        double m_shower_hadronic_growth_max{0.8};                   // ratio; inert while tag off
+        double m_shower_hadronic_growth_bragg{1.2};                 // ratio; inert while tag off
+        double m_shower_hadronic_bragg_ratio{3.0};                  // ratio; inert while tag off
+        double m_shower_hadronic_stem_ratio{0.0};                   // MIP units; 0 = branch off; inert while tag off
+        bool m_kine_count_orphan_tracks{false};                     // doc pr/93 r4 (315167)
+        double m_kine_orphan_track_min{50};                         // cm; scaled at copy
+        bool m_straight_cont_cross_cluster{false};                  // doc pr/93 r4 (137238)
+        bool m_sccc_bridge_body{false};                             // doc pr/93 r4 second rung
+        double m_sccc_max_gap{5};                                   // cm; base tier
+        double m_sccc_kink_max{15.0};                               // deg; base tier
+        double m_sccc_gap_aligned{12};                              // cm; aligned tier
+        double m_sccc_kink_tight{7.5};                              // deg; aligned tier
         bool m_single_muon_proton_chain_veto{false};                // doc pr/43 round 2 K1
         bool m_single_muon_long_muon_claim{false};                  // doc pr/43 round 2 K2
         bool m_pid_flag_reconcile{false};                           // doc pr/43 round 2 K3

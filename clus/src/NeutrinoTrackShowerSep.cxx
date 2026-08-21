@@ -1416,10 +1416,30 @@ void PatternAlgorithms::improve_maps_no_dir_tracks(Graph& graph, Facade::Cluster
                         }
                         sg->dir_weak(true);
 
-                        int pdg_code = 11;
-                        auto pinfo = reclass_pinfo(sg, pdg_code, particle_data, recomb_model, m_mip_dqdx, m_reclass_preserve_4mom, true, m_reclass_never_computed_ke_floor);
-                        sg->particle_info(pinfo);
-                        flag_update = true;
+                        // doc sbnd_xin/docs/pr/93 Cause A (Case B: unguarded
+                        // sibling of Case E's F2 guard; SBND 18255-55595's
+                        // 193.8cm MIP muon reclassed e- here).  Same guard
+                        // shape as Case E above: only the CONVERSION is
+                        // guarded -- the dirsign/dir_weak direction
+                        // bookkeeping (this case's nominal purpose) is
+                        // untouched.  Unlike Case E (whose entry requires
+                        // |pdg|==13), Case B fires on ANY between-shower
+                        // segment, so short genuine EM fragments (2-34cm on
+                        // the nueCC48 attribution arm) reach this decline --
+                        // the m_shower_pid_guard_min_len floor (50cm, the
+                        // scale of SBND's own shower_topo_demote_len rule
+                        // "a >50cm segment is not EM-flaggable") restricts
+                        // the spare to segments that cannot be EM anyway.
+                        // C++ default false => byte-identical.
+                        if (!(m_shower_reclass_case_b_dqdx_guard && length > m_shower_pid_guard_min_len && segment_dqdx_spares_electron_reclass(sg, m_mip_dqdx))) {
+                            int pdg_code = 11;
+                            auto pinfo = reclass_pinfo(sg, pdg_code, particle_data, recomb_model, m_mip_dqdx, m_reclass_preserve_4mom, true, m_reclass_never_computed_ke_floor);
+                            sg->particle_info(pinfo);
+                            flag_update = true;
+                        }
+                        else {
+                            SPDLOG_LOGGER_DEBUG(s_log, "pr93 case_b_dqdx_guard: decline e- reclass seg={} len={:.1f}cm", sg->id(), length/units::cm);
+                        }
                     }
                 }
                 // Case H: No particle type, short length, high dQ/dx, has showers
@@ -2079,7 +2099,30 @@ void PatternAlgorithms::examine_all_showers(Graph& graph, Facade::Cluster& clust
             // doc sbnd_xin/docs/pr/40 F2 (same guard as improve_maps_shower_
             // in_track_out).  false = legacy = every non-shower segment in a
             // shower-dominated cluster becomes electron unconditionally.
-            if (!is_shower && m_shower_reclass_dqdx_guard && segment_dqdx_spares_electron_reclass(sg, m_mip_dqdx)) {
+            //
+            // doc sbnd_xin/docs/pr/40 round 10: shower_bragg_protect_start_
+            // segment is an additive sibling spare -- see
+            // segment_bragg_spares_electron_reclass's header comment.
+            // Restricted to the MAIN interaction cluster (is_main_cluster):
+            // owner review of the two round-10 movers (SBND 18255-314507
+            // vs 259542) found the topology, not the dQ/dx shape, is what
+            // tells them apart -- 314507's segment is a genuine
+            // disconnected muon fragment sitting IN the main cluster, while
+            // 259542's is embedded in a separate SATELLITE cluster (cluster
+            // 124, disjoint from the main interaction) that pr/92's
+            // dedicated satellite EM-vs-track classifier
+            // (kine_drop_stray_satellites, NeutrinoKinematics.cxx) already
+            // examined and correctly kept as EM.  A locally-good Bragg/
+            // dE-dx-template fit is not reliable evidence inside a
+            // satellite blob -- a photon's early conversion stem can score
+            // well against the muon template over the ~20-35cm comparison
+            // window before the cascade visibly multiplies -- so this spare
+            // is scoped to where the fix was actually motivated and proven:
+            // segments genuinely disconnected within the main cluster.
+            // false/is_main_cluster=false = legacy = byte-identical.
+            if (!is_shower &&
+                ((m_shower_reclass_dqdx_guard && segment_dqdx_spares_electron_reclass(sg, m_mip_dqdx)) ||
+                 (m_shower_bragg_protect_start_segment && is_main_cluster && segment_bragg_spares_electron_reclass(sg)))) {
                 continue;
             }
 
@@ -2209,5 +2252,120 @@ void PatternAlgorithms::shower_determining_in_main_cluster(Graph& graph, Facade:
         //         seg->dirsign(), seg_dir_weak(seg) ? 1 : 0,
         //         pdg, mass, ke, score);
         // }
+    }
+}
+
+// doc sbnd_xin/docs/pr/93 round 4 (straight_cont_cross_cluster) -- demote a
+// main-vertex kShowerTrajectory stem that is the CROSS-CLUSTER continuation
+// of a straight long track (SBND 18264-137238: a 14.6cm trajectory-flagged
+// stem in the main cluster, a pr/57 W-plane-gap over-clustering split at its
+// degree-1 tip, and the 81cm straight muon body 3-4cm away in another
+// cluster -- the whole chain became a fake "e- 152 MeV").  Runs between
+// examine_direction and shower_clustering_with_nv: all clusters' segments
+// exist in the graph, the pdg-11-with-score-100 trajectory stamp is already
+// written, and the shower seeder has not yet consumed flags/pdg.  Demotion =
+// clear the flag + re-PID via segment_determine_dir_track (the
+// NeutrinoVertexFinder re-examination precedent) with dirsign preserved --
+// examine_direction has already had the final word on orientation.  When
+// m_sccc_bridge_body is also on, records a bridge request that
+// shower_clustering_with_nv replays through nv_bridge_connect after its
+// entry clears (building the bridge here would be wiped by those clears).
+// Knob off => early return => byte-identical.
+void PatternAlgorithms::demote_cross_cluster_straight_stems(Graph& graph, VertexPtr main_vertex,
+                                                            const Clus::ParticleDataSet::pointer& particle_data,
+                                                            const IRecombinationModel::pointer& recomb_model)
+{
+    m_sccc_bridge_requests.clear();
+    m_sccc_shield_segs.clear();
+    if (!m_straight_cont_cross_cluster || !main_vertex || !main_vertex->descriptor_valid()) return;
+    // WCT_SCCC_DEBUG: stderr-only pass tape (byte-neutral).
+    static const bool sccc_dbg = std::getenv("WCT_SCCC_DEBUG") != nullptr;
+    if (sccc_dbg) {
+        std::fprintf(stderr, "SCCC pass: main_vtx_gidx=%zu gap=%.1f/%.1fcm kink=%.1f/%.1fdeg bridge=%d\n",
+                     main_vertex->get_graph_index(), m_sccc_max_gap / units::cm,
+                     m_sccc_gap_aligned / units::cm, m_sccc_kink_max, m_sccc_kink_tight,
+                     m_sccc_bridge_body ? 1 : 0);
+    }
+
+    StraightContCrossClusterParams cc;
+    cc.enable = true;
+    cc.max_gap = m_sccc_max_gap;
+    cc.max_kink_deg = m_sccc_kink_max;
+    cc.max_gap_aligned = m_sccc_gap_aligned;
+    cc.kink_tight_deg = m_sccc_kink_tight;
+
+    int n_demoted = 0;
+    for (auto edesc : sorted_out_edges(main_vertex->get_descriptor(), graph)) {
+        SegmentPtr sg = graph[edesc].segment;
+        if (!sg || !sg->descriptor_valid()) continue;
+        if (sccc_dbg) {
+            std::fprintf(stderr, "SCCC stem-cand: seg=%d len=%.1fcm traj=%d topo=%d\n",
+                         sg->id(), segment_track_length(sg) / units::cm,
+                         sg->flags_any(SegmentFlags::kShowerTrajectory) ? 1 : 0,
+                         sg->flags_any(SegmentFlags::kShowerTopology) ? 1 : 0);
+        }
+        // Trajectory-flagged stems only; topology has its own guarded family.
+        if (!sg->flags_any(SegmentFlags::kShowerTrajectory)) continue;
+        if (sg->flags_any(SegmentFlags::kShowerTopology)) continue;
+
+        SegmentPtr matched_sib = nullptr;
+        VertexPtr matched_vtx = nullptr;
+        if (!segment_is_straight_long_track_or_continuation(graph, sg, m_sccc_kink_max, cc,
+                                                            &matched_sib, &matched_vtx)) continue;
+        // The 3-arg same-cluster arms alone must NOT demote here -- that is
+        // pr/40 F11's (shower_traj_straight_guard's) jurisdiction at flag-set
+        // time.  Only a cross-cluster match (matched_sib filled) qualifies.
+        if (!matched_sib || !matched_vtx) continue;
+
+        const int old_pdg = (sg->has_particle_info() && sg->particle_info())
+                          ? sg->particle_info()->pdg() : 0;
+        const int dir_save = sg->dirsign();
+        sg->unset_flags(SegmentFlags::kShowerTrajectory);
+        // Re-PID as a track (replaces the trajectory branch's unconditional
+        // pdg-11/score-100 stamp); NeutrinoVertexFinder re-exam precedent.
+        const auto sdesc = sg->get_descriptor();
+        const auto source_v = boost::source(sdesc, graph);
+        const auto target_v = boost::target(sdesc, graph);
+        int start_n = boost::out_degree(source_v, graph);
+        int end_n = boost::out_degree(target_v, graph);
+        const auto& wcpts = sg->wcpts();
+        if (!wcpts.empty() &&
+            (graph[target_v].vertex->wcpt().point - wcpts.front().point).magnitude() < 0.01 * units::cm) {
+            std::swap(start_n, end_n);
+        }
+        segment_determine_dir_track(sg, start_n, end_n, particle_data, recomb_model,
+                                    m_mip_dqdx_median, false, track_pid_options());
+        if (sg->dirsign() != dir_save) {
+            SPDLOG_LOGGER_DEBUG(s_log,
+                "sccc demote: re-PID tried to flip dirsign {} -> {} on seg {}; restoring",
+                dir_save, sg->dirsign(), sg->id());
+            sg->dirsign(dir_save);
+        }
+        const int new_pdg = (sg->has_particle_info() && sg->particle_info())
+                          ? sg->particle_info()->pdg() : 0;
+        const auto* scl = sg->cluster();
+        Facade::Cluster* bcl = matched_sib->cluster();
+        SPDLOG_LOGGER_DEBUG(s_log,
+            "sccc demote: seg id={} cluster={} len_cm={:.1f} pdg {} -> {} sib id={} sib_cluster={} "
+            "sib_len_cm={:.1f}",
+            sg->id(), scl ? scl->get_cluster_id() : -1,
+            segment_track_length(sg) / units::cm, old_pdg, new_pdg,
+            matched_sib->id(), bcl ? bcl->get_cluster_id() : -1,
+            segment_track_length(matched_sib) / units::cm);
+        ++n_demoted;
+        m_sccc_shield_segs.insert(sg);   // keep the retarget off the demoted stem
+
+        if (m_sccc_bridge_body && bcl) {
+            // Main-side anchor = the stem's degree-1 tip = the far vertex
+            // (relative to the main vertex) of sg.
+            VertexPtr tip = find_other_vertex(graph, sg, main_vertex);
+            if (tip && tip->descriptor_valid()) {
+                m_sccc_bridge_requests.push_back({tip, bcl, matched_vtx});
+            }
+        }
+    }
+    if (n_demoted) {
+        SPDLOG_LOGGER_DEBUG(s_log, "sccc: {} stem(s) demoted, {} bridge request(s)",
+                            n_demoted, m_sccc_bridge_requests.size());
     }
 }

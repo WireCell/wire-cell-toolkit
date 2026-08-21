@@ -243,6 +243,18 @@ namespace WireCell::Clus::PR {
     static bool s_traj_cover_probe = false;
     void set_traj_cover_probe(bool enable) { s_traj_cover_probe = enable; }
 
+    // doc sbnd_xin/docs/pr/96: WCT_PR96_REMSEG_DEBUG -- which CALLER deletes a
+    // fitted segment.  pr/67's P6 sentinel above locates a removal
+    // geometrically but not by call site, and on SBND 18255-279955 the branch
+    // that covers the owner's uncovered charge is created and then removed
+    // twice, so the call site is the whole question.  Same mini-backtrace
+    // idiom as the WCT_DET_DEBUG=2 creation probe above.  Log-only and unset by
+    // default => byte-identical.
+    static bool remseg_dbg() {
+        static const bool on = std::getenv("WCT_PR96_REMSEG_DEBUG") != nullptr;
+        return on;
+    }
+
     bool remove_segment(Graph& graph, SegmentPtr seg)
     {
         if (! seg->descriptor_valid()) { return false; }
@@ -265,6 +277,23 @@ namespace WireCell::Clus::PR {
                 fits.empty() ? 0.0 : fits.back().point.x() / units::cm,
                 fits.empty() ? 0.0 : fits.back().point.y() / units::cm,
                 fits.empty() ? 0.0 : fits.back().point.z() / units::cm);
+        }
+        if (remseg_dbg()) {
+            const auto& fits = seg->fits();
+            fprintf(stderr, "PR96REMSEG nfits=%zu front=(%.2f,%.2f,%.2f) back=(%.2f,%.2f,%.2f)\n",
+                    fits.size(),
+                    fits.empty() ? 0.0 : fits.front().point.x() / units::cm,
+                    fits.empty() ? 0.0 : fits.front().point.y() / units::cm,
+                    fits.empty() ? 0.0 : fits.front().point.z() / units::cm,
+                    fits.empty() ? 0.0 : fits.back().point.x() / units::cm,
+                    fits.empty() ? 0.0 : fits.back().point.y() / units::cm,
+                    fits.empty() ? 0.0 : fits.back().point.z() / units::cm);
+            void* bt[12];
+            int nbt = backtrace(bt, 12);
+            char** syms = backtrace_symbols(bt, nbt);
+            for (int i = 1; i < nbt && i < 9; ++i)
+                fprintf(stderr, "PR96REMSEG   bt[%d] %s\n", i, syms ? syms[i] : "?");
+            free(syms);
         }
         boost::remove_edge(desc, graph);
         seg->invalidate_descriptor();

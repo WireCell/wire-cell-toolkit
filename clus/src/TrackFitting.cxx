@@ -633,16 +633,30 @@ int TrackFitting::get_channel_for_wire(int apa, int face, int plane, int wire) c
     auto cold_it = m_cold_cache.find(wire_key);
     if (cold_it != m_cold_cache.end()) {
         m_cache_stats.cold_hits++;
-        
+
+        // doc sbnd_xin/docs/pr/97 D2 -- read the channel BEFORE the promotion.
+        // cache_entire_plane() erases every wire of this plane from
+        // m_cold_cache (see its "Remove individual wire entries" loop), which
+        // frees the std::map node `cold_it` points at.  The legacy
+        // `return cold_it->second` after that call is a read of freed memory
+        // (valgrind: "Invalid read of size 4 ... 48 bytes inside a block of
+        // size 56 free'd", 3 contexts in wcdoctest-clus).  It is benign only
+        // while the allocator has not handed the 56-byte node to someone else;
+        // when it has, this returns a garbage channel number.  Not a knob: the
+        // legacy read is undefined behaviour and the intended value is
+        // unambiguous, so the fix is gated by an A/B instead (CLAUDE.md M13
+        // precedent: unknobbed fix OK only if undefined AND gated).
+        const int cached_channel = cold_it->second;
+
         // Update access count for this plane
         m_access_count[plane_key]++;
-        
+
         // Promote to hot cache if threshold reached
         if (m_access_count[plane_key] >= HOT_THRESHOLD) {
             cache_entire_plane(apa, face, plane);
         }
-        
-        return cold_it->second;
+
+        return cached_channel;
     }
     
     // Cache miss - fetch from anode and cache result
@@ -2640,28 +2654,92 @@ void TrackFitting::organize_ps_path(std::shared_ptr<PR::Segment> segment, std::v
 
  }
 
+// doc pr/98 perf: one kd query for the ONE plane the calling loop consumes,
+// instead of segment_get_closest_2d_distances' three (the prototype also
+// queries a single plane, ProtoSegment::get_closest_2d_dis(x,y,plane)).
+// Same cloud fallback as the tuple helper, plus the pr/98 sentinel guard:
+// absent/empty cloud OR empty per-plane tree (the -1.0 return) => 1e9 = "no
+// measurement", the prototype's empty-tree answer (ToyPointCloud.cxx:415-437).
+static double exclusion_closest_2d_dis(const std::shared_ptr<PR::Segment>& seg,
+                                       const WireCell::Point& p, int apa, int face, int plane)
+{
+    auto dpc = seg->dpcloud("fit");
+    if (!dpc || dpc->npoints() == 0) dpc = seg->dpcloud("main");
+    if (!dpc || dpc->npoints() == 0) return 1e9;
+    // doc pr/98 perf: distance-only query (no l2g/cluster lookups, no
+    // result-vector allocation); same search, same values.
+    const double d = dpc->get_closest_2d_dis(p, plane, face, apa);
+    return d < 0 ? 1e9 : d;
+}
+
+// doc pr/98 perf: pack a Coord2D's identity into one 64-bit key for the
+// per-segment decision cache (unordered_map beats std::map's Coord2D
+// operator< chain in the profile).  Fields are small non-negative ints:
+// apa/face a few, plane 0-2, wire and time each well under 2^24.
+static inline uint64_t exclusion_cache_key(const TrackFitting::Coord2D& c)
+{
+    return (static_cast<uint64_t>(static_cast<uint32_t>(c.apa) & 0xFF) << 56) |
+           (static_cast<uint64_t>(static_cast<uint32_t>(c.face) & 0xF) << 52) |
+           (static_cast<uint64_t>(static_cast<uint32_t>(c.plane) & 0xF) << 48) |
+           (static_cast<uint64_t>(static_cast<uint32_t>(c.wire) & 0xFFFFFF) << 24) |
+           (static_cast<uint64_t>(static_cast<uint32_t>(c.time) & 0xFFFFFF));
+}
+
 void TrackFitting::update_association(std::shared_ptr<PR::Segment> segment,
                                       const std::vector<std::shared_ptr<PR::Segment>>& all_segments,
-                                      PlaneData& temp_2dut, PlaneData& temp_2dvt, PlaneData& temp_2dwt){
+                                      PlaneData& temp_2dut, PlaneData& temp_2dvt, PlaneData& temp_2dwt,
+                                      ExclusionDecisionCache* decision_cache){
     if (!m_graph || !segment) return;
 
-    // Get cluster and transformation info
-    auto cluster = segment->cluster();
-    const auto transform = m_pcts->pc_transform(cluster->get_scope_transform(cluster->get_default_scope()));
-    // double cluster_t0 = cluster->get_cluster_t0();
+    // doc pr/98: the former `cluster`/`transform` locals here were dead (never
+    // read below; the prototype's update_association takes no transform either,
+    // PR3DCluster_multi_track_fitting.h:970) and their m_pcts dereference was
+    // the only obstacle to a fixture-level doctest.  Removed.
 
     // all_segments is pre-built by the caller (form_map_graph) and shared across all points
     // of a segment, avoiding a redundant O(S) rebuild per fit point (S3.4.1).
+    // It comes from get_segment_edges(), which m_cluster_filter restricts to the
+    // fitted cluster's own segments -- the same-cluster arbitration the prototype
+    // enforces via its get_cluster_id() filter (PR3DCluster_multi_track_fitting.h:739-748).
+    // Every m_fit_exclusion call site passes a cluster filter; an exclusion call with a
+    // nullptr filter would arbitrate against the whole graph and diverge from the prototype.
+
+    // doc pr/98: DynamicPointCloud::get_closest_2d_point_info returns a -1.0
+    // sentinel when a segment has no points at the queried (plane,face,apa) --
+    // e.g. a competitor segment on the other drift face.  The prototype's
+    // ToyPointCloud::get_closest_2d_dis returns 1e9 there (empty kd-tree,
+    // prototype data/src/ToyPointCloud.cxx:415-437), i.e. "no measurement".
+    // Unguarded, the -1.0 poisons min_dis1_track (one cross-face competitor
+    // strips every cell beyond the 0.3 cm floor) and inverts min_dis_track
+    // (always-keep).  Map negatives to 1e9 for prototype parity.
+
+    // doc pr/98 perf, all three plane loops:
+    //  - decision cache: the keep test is fit-point-independent, so a cell
+    //    already decided for this segment (this pass) is not recomputed;
+    //  - 0.3 cm floor first: such a cell is kept regardless of competitors,
+    //    so the competitor scan is skipped entirely;
+    //  - early break: one competitor at distance <= min_dis_track already
+    //    forces the drop (the keep rule is strict '<').
+    // All three reproduce the plain rule
+    //   keep <=> min_dis_track < min-over-others || min_dis_track < 0.3 cm
+    // decision-for-decision.
 
     // Process U plane (plane 0)
     std::set<Coord2D> save_2dut;
     for (auto it = temp_2dut.associated_2d_points.begin(); it != temp_2dut.associated_2d_points.end(); it++) {
         const auto& coord = *it;
 
+        if (decision_cache) {
+            auto hit = decision_cache->find(exclusion_cache_key(coord));
+            if (hit != decision_cache->end()) {
+                if (hit->second) save_2dut.insert(coord);
+                continue;
+            }
+        }
+
         int apa = coord.apa;
         int face = coord.face;
 
-        WirePlaneId wpid(kUlayer, face, apa);
         auto offset_it = wpid_offsets.find(WirePlaneId(kAllLayers, face, apa));
         auto slope_it = wpid_slopes.find(WirePlaneId(kAllLayers, face, apa));
 
@@ -2677,22 +2755,19 @@ void TrackFitting::update_association(std::shared_ptr<PR::Segment> segment,
 
         WireCell::Point test_point(raw_x, raw_y, 0);
 
-        auto main_distances = segment_get_closest_2d_distances(segment, test_point, apa, face, "fit");
-        double min_dis_track = std::get<0>(main_distances);
+        double min_dis_track = exclusion_closest_2d_dis(segment, test_point, apa, face, 0);
 
-        double min_dis1_track = 1e9;
-        for (const auto& other_seg : all_segments) {
-            if (other_seg == segment) continue;
-            auto other_distances = segment_get_closest_2d_distances(other_seg, test_point, apa, face, "fit");
-            double temp_dis = std::get<0>(other_distances);
-            if (temp_dis < min_dis1_track) {
-                min_dis1_track = temp_dis;
+        bool keep = true;
+        if (min_dis_track >= 0.3 * units::cm) {
+            for (const auto& other_seg : all_segments) {
+                if (other_seg == segment) continue;
+                double temp_dis = exclusion_closest_2d_dis(other_seg, test_point, apa, face, 0);
+                if (temp_dis <= min_dis_track) { keep = false; break; }
             }
         }
 
-        if (min_dis_track < min_dis1_track || min_dis_track < 0.3 * units::cm) {
-            save_2dut.insert(*it);
-        }
+        if (decision_cache) (*decision_cache)[exclusion_cache_key(coord)] = keep;
+        if (keep) save_2dut.insert(coord);
     }
 
     // Process V plane (plane 1)
@@ -2700,10 +2775,17 @@ void TrackFitting::update_association(std::shared_ptr<PR::Segment> segment,
     for (auto it = temp_2dvt.associated_2d_points.begin(); it != temp_2dvt.associated_2d_points.end(); it++) {
         const auto& coord = *it;
 
+        if (decision_cache) {
+            auto hit = decision_cache->find(exclusion_cache_key(coord));
+            if (hit != decision_cache->end()) {
+                if (hit->second) save_2dvt.insert(coord);
+                continue;
+            }
+        }
+
         int apa = coord.apa;
         int face = coord.face;
 
-        WirePlaneId wpid(kVlayer, face, apa);
         auto offset_it = wpid_offsets.find(WirePlaneId(kAllLayers, face, apa));
         auto slope_it = wpid_slopes.find(WirePlaneId(kAllLayers, face, apa));
 
@@ -2718,22 +2800,19 @@ void TrackFitting::update_association(std::shared_ptr<PR::Segment> segment,
         double raw_y = (coord.wire - offset_v)/slope_yv;
         WireCell::Point test_point(raw_x, raw_y, 0);
 
-        auto main_distances = segment_get_closest_2d_distances(segment, test_point, apa, face, "fit");
-        double min_dis_track = std::get<1>(main_distances);
+        double min_dis_track = exclusion_closest_2d_dis(segment, test_point, apa, face, 1);
 
-        double min_dis1_track = 1e9;
-        for (const auto& other_seg : all_segments) {
-            if (other_seg == segment) continue;
-            auto other_distances = segment_get_closest_2d_distances(other_seg, test_point, apa, face, "fit");
-            double temp_dis = std::get<1>(other_distances);
-            if (temp_dis < min_dis1_track) {
-                min_dis1_track = temp_dis;
+        bool keep = true;
+        if (min_dis_track >= 0.3 * units::cm) {
+            for (const auto& other_seg : all_segments) {
+                if (other_seg == segment) continue;
+                double temp_dis = exclusion_closest_2d_dis(other_seg, test_point, apa, face, 1);
+                if (temp_dis <= min_dis_track) { keep = false; break; }
             }
         }
 
-        if (min_dis_track < min_dis1_track || min_dis_track < 0.3 * units::cm) {
-            save_2dvt.insert(*it);
-        }
+        if (decision_cache) (*decision_cache)[exclusion_cache_key(coord)] = keep;
+        if (keep) save_2dvt.insert(coord);
     }
 
     // Process W plane (plane 2)
@@ -2741,10 +2820,17 @@ void TrackFitting::update_association(std::shared_ptr<PR::Segment> segment,
     for (auto it = temp_2dwt.associated_2d_points.begin(); it != temp_2dwt.associated_2d_points.end(); it++) {
         const auto& coord = *it;
 
+        if (decision_cache) {
+            auto hit = decision_cache->find(exclusion_cache_key(coord));
+            if (hit != decision_cache->end()) {
+                if (hit->second) save_2dwt.insert(coord);
+                continue;
+            }
+        }
+
         int apa = coord.apa;
         int face = coord.face;
 
-        WirePlaneId wpid(kWlayer, face, apa);
         auto offset_it = wpid_offsets.find(WirePlaneId(kAllLayers, face, apa));
         auto slope_it = wpid_slopes.find(WirePlaneId(kAllLayers, face, apa));
 
@@ -2761,22 +2847,19 @@ void TrackFitting::update_association(std::shared_ptr<PR::Segment> segment,
         double raw_z = (coord.wire - offset_w) / slope_zw;
         WireCell::Point test_point(raw_x, 0, raw_z);
 
-        auto main_distances = segment_get_closest_2d_distances(segment, test_point, apa, face, "fit");
-        double min_dis_track = std::get<2>(main_distances);
+        double min_dis_track = exclusion_closest_2d_dis(segment, test_point, apa, face, 2);
 
-        double min_dis1_track = 1e9;
-        for (const auto& other_seg : all_segments) {
-            if (other_seg == segment) continue;
-            auto other_distances = segment_get_closest_2d_distances(other_seg, test_point, apa, face, "fit");
-            double temp_dis = std::get<2>(other_distances);
-            if (temp_dis < min_dis1_track) {
-                min_dis1_track = temp_dis;
+        bool keep = true;
+        if (min_dis_track >= 0.3 * units::cm) {
+            for (const auto& other_seg : all_segments) {
+                if (other_seg == segment) continue;
+                double temp_dis = exclusion_closest_2d_dis(other_seg, test_point, apa, face, 2);
+                if (temp_dis <= min_dis_track) { keep = false; break; }
             }
         }
 
-        if (min_dis_track < min_dis1_track || min_dis_track < 0.3 * units::cm) {
-            save_2dwt.insert(*it);
-        }
+        if (decision_cache) (*decision_cache)[exclusion_cache_key(coord)] = keep;
+        if (keep) save_2dwt.insert(coord);
     }
 
     // Update the input plane data with filtered results
@@ -3414,6 +3497,11 @@ void TrackFitting::form_map_graph(bool flag_exclusion, double end_point_factor, 
         auto& fits = segment->fits();
         if (fits.empty()) continue;
 
+        // doc pr/98 perf: per-segment exclusion decision cache (valid for
+        // exactly this scope -- see the ExclusionDecisionCache comment in
+        // TrackFitting.h).  Unused when flag_exclusion is off.
+        ExclusionDecisionCache excl_cache;
+
         // Get start and end vertices for this segment
         auto vd1 = boost::source(ed, *m_graph);
         auto vd2 = boost::target(ed, *m_graph);
@@ -3486,7 +3574,7 @@ void TrackFitting::form_map_graph(bool flag_exclusion, double end_point_factor, 
 
 
                 if (flag_exclusion) {
-                    update_association(segment, segments, temp_2dut, temp_2dvt, temp_2dwt);
+                    update_association(segment, segments, temp_2dut, temp_2dvt, temp_2dwt, &excl_cache);
                 }
 
                 // Examine point association

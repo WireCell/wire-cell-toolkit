@@ -185,6 +185,48 @@ namespace WireCell::Clus::PR {
         return dir;
     }
 
+    // doc sbnd_xin/docs/pr/92 -- see the header comment.
+    bool shower_start_is_track_continuation(Graph& graph, Shower& shower,
+                                            double max_kink_deg)
+    {
+        SegmentPtr seg = shower.start_segment();
+        if (!seg || seg->fits().empty()) return false;
 
+        // The shower's own segment membership: a collinear sibling INSIDE the
+        // shower is EM branching, not a track continuation.
+        IndexedVertexSet member_vtxs;
+        IndexedSegmentSet member_segs;
+        shower.fill_sets(member_vtxs, member_segs, /*flag_exclude_start_segment=*/false);
+
+        auto [va, vb] = find_vertices(graph, seg);
+        for (VertexPtr vtx : {va, vb}) {
+            if (!vtx || !vtx->descriptor_valid()) continue;
+            const WireCell::Point vtx_pt = vtx->fit().valid() ? vtx->fit().point
+                                                              : vtx->wcpt().point;
+            for (auto edesc : sorted_out_edges(vtx->get_descriptor(), graph)) {
+                SegmentPtr sib = graph[edesc].segment;
+                if (!sib || sib == seg || sib->fits().empty()) continue;
+                if (sib->cluster() != seg->cluster()) continue;
+                if (member_segs.count(sib)) continue;
+                const double kink = segment_pair_kink_deg(seg, sib, vtx_pt, 15 * units::cm);
+                if (kink < 0 || kink >= max_kink_deg) continue;   // -1 = unmeasurable: not collinear
+                if (segment_is_straight_long_track(sib)) return true;
+                // combined arm: two medium halves of one straight object
+                auto far_pt = [&vtx_pt](SegmentPtr s) {
+                    const auto& f = s->fits();
+                    return ((f.front().point - vtx_pt).magnitude() >
+                            (f.back().point - vtx_pt).magnitude()) ? f.front().point
+                                                                   : f.back().point;
+                };
+                const double len = segment_track_length(seg) + segment_track_length(sib);
+                const double direct = (far_pt(seg) - far_pt(sib)).magnitude();
+                if (len > 10 * units::cm &&
+                    (direct >= 34 * units::cm || direct > 0.93 * len)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
 
 } // namespace WireCell::Clus::PR

@@ -458,7 +458,7 @@ local clus_per_face(anode, face, dump, output_dir, runNo, subRunNo, eventNo, bee
 // all-APA clustering + Bee in SCE true space (x_sce) instead of the T0-corrected
 // reco scope (x_t0cor).  Both SBND realities currently set use_sce=false (see
 // the reco table in the tail function), so this is a no-op for our chain.
-local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=null, premerged=false, rse_from_ident=false, rse_from_metadata=false, pos_offset_on=true, tensor_outname='', save_real_cluster_id=false, trace_bee=false, save_assoc_cluster_id=false, real_cluster_id_global=null, cathode_rescue_on=true, cathode_rescue_unmatched=true, adopt_nu_fragments=false, save_bundle_main_provenance=false, rescue_allow_in_beam_far=true, rescue_geom_first=true, rescue_pierce_test=true, rescue_pierce_cut=null, rescue_dest_beam_for_new=true, rescue_beam_main_only=true, use_sce=false, reality='data') = {
+local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=null, premerged=false, rse_from_ident=false, rse_from_metadata=false, pos_offset_on=true, tensor_outname='', save_real_cluster_id=false, trace_bee=false, save_assoc_cluster_id=false, real_cluster_id_global=null, cathode_rescue_on=true, cathode_rescue_unmatched=true, adopt_nu_fragments=false, save_bundle_main_provenance=false, rescue_allow_in_beam_far=true, rescue_geom_first=true, rescue_pierce_test=true, rescue_pierce_cut=null, rescue_dest_beam_for_new=true, rescue_beam_main_only=true, bee_flash_pred_min=null, use_sce=false, reality='data') = {
     local nanodes = std.length(anodes),
     local pcmerging = g.pnode({
         type: 'PointTreeMerging',
@@ -649,6 +649,15 @@ local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=
             // (op_cluster_ids array) with summed predicted PE, so a flash matched
             // to several clusters shows them together (MicroBooNE-style).
             bee_flash_per_flash: true,
+            // doc pr/94 round 3.  Minimum total predicted light (PE) for a
+            // matched cluster to appear in op_cluster_ids.  C++ default 100
+            // (the legacy dump_light filter): a genuine match below it is drawn
+            // as "matched to no flash", which is what made SBND 18255/73038's
+            // 26.5 cm beam-flash-matched activity (3.6 PE predicted of the
+            // flash's 602.6 PE) look unmatched while the PR chain reconstructed
+            // it.  null => key omitted => byte-identical display; 0 shows every
+            // genuine match.
+            [if bee_flash_pred_min != null then 'bee_flash_pred_min']: bee_flash_pred_min,
             // Group flashes from the two TPC sides by this ±time window and stash
             // a per-flash "group" array on the root opflash PC (pre-pipeline, so
             // the op dump and every later step can read it).  0 = off.
@@ -789,6 +798,7 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=null,
               // C++ defaults false; keys omitted when off => byte-identical
               // pre-knob config.  Display-only stage: mc.json is the artifact.
               pf_track_main_cluster_only=false,
+              pf_track_bridged_clusters=false,   // doc pr/40 round 9 B2; C++ default false. Key omitted when off => byte-identical.
               pf_shower_vertex_barrier=false,
               pf_shower_parent_precedence=false,
               pf_pi0_node_per_id=false,
@@ -801,6 +811,39 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=null,
               // segments, fabricate no PF-root node.  C++ default false; key
               // omitted when off => byte-identical.  Display-only (mc.json).
               pf_orphan_audit_only=false,
+              // doc pr/84 round 2 (F1/F2): vertex-touching pseudo-parent
+              // suppression + remote-gap anchor.  C++ defaults false/3cm/8cm;
+              // keys omitted when off/null => byte-identical pre-knob config.
+              // Display-only (mc.json).  Scalar params are in cm.
+              pf_direct_when_touching=false,
+              pf_touch_max=null,
+              pf_touch_cross_main=false,
+              pf_touch_cross_max=null,
+              pf_pseudo_gap_from_main=false,
+              // doc pr/84 round 3 (G1): guarantee unique jsTree node ids in
+              // mc.json.  C++ default false; key omitted when off =>
+              // byte-identical pre-fix config.
+              pf_unique_node_ids=false,
+              // pf_drop_stray_satellites (doc pr/92): skip showers the kine
+              // side's kine_drop_stray_satellites gate dropped from Enu, so
+              // the PF tree and Enu describe the same particle set.  Inert
+              // unless that kine knob is also on.  C++ default false; key
+              // omitted when off => byte-identical pre-pr/92 config.
+              pf_drop_stray_satellites=false,
+              // pf_orphan_confident_track (doc pr/93 round 4): emit a root PF
+              // node for an unclaimed main-cluster segment with a confident
+              // non-electron template PID, length > pf_orphan_track_min_cm
+              // (null => C++ 50cm), and straight-long (SBND 18255-315167's
+              // freed 150.7cm proton).  C++ default false; keys omitted when
+              // off => byte-identical.
+              pf_orphan_confident_track=false,
+              pf_orphan_track_min_cm=null,
+              // pf_track_owns_loose_vertex (doc pr/93 round 4): a vertex the
+              // track BFS reached via a real segment is not claimable by a
+              // root shower whose only tie to it is the loose fill_sets view
+              // (SBND 18264-69314's 67 MeV daughter stolen from its muon).
+              // C++ default false; key omitted when off => byte-identical.
+              pf_track_owns_loose_vertex=false,
               // restore_demoted_mains (doc pr/20 Part I P2; C++ default false,
               // key omitted when null => byte-identical pre-knob config): tag a
               // split-off part that was ITSELF a matched bundle main before the
@@ -1140,6 +1183,10 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=null,
               // mains (TGM/STM/lm) do not open their bundle.  null => key
               // omitted => C++ default.
               protect_skip_convicted=null,
+              // doc pr/94 round 3: let a convicted main open its bundle so the
+              // bundle's unconvicted members are graph-examined.  C++ default
+              // false; key omitted when null.
+              protect_open_convicted_bundles=null,
               protect_cathode_x=null,
               protect_cathode_rejoin_xcut=null,
               protect_cathode_rejoin_dyz=null,
@@ -1248,6 +1295,16 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=null,
               // branch (threaded to BOTH tagger_check_neutrino and
               // tagger_output).  C++ default false.
               neutrino_type_bitmask=false,
+              // doc pr/94 Phase 1: per-bundle identity + per-activity
+              // cosmic-flag T_tagger branches (tagger_output only, plumbing
+              // only -- nothing populates them yet).  C++ default false.
+              nu_per_bundle=false,
+              nu_per_bundle_min_length=null,   // doc pr/94 Phase 5b; cm; null => C++ default 0 (no floor)
+              // doc pr/94 round 3: the selected candidate gets the main-cluster
+              // PR treatment for its own pass even when it is a demoted main.
+              // C++ default false; key omitted when off.  NOT gated on
+              // nu_per_bundle -- the legacy demoted-main fallback needs it too.
+              nu_selected_as_main=false,
               // ---- doc sbnd_xin/docs/pr/33 §10 EM-shower-clustering knobs.
               // All C++ default false = keys omitted = byte-identical
               // pre-knob config.
@@ -1277,6 +1334,10 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=null,
               // end_point farthest-vertex search (prototype map_vtx_segs
               // parity).  Ships OFF pending owner gate review.
               shower_endpoint_exclude_start_vertex=false,
+              shower_endpoint_skip_orphan_vtx=false,
+              // doc pr/91 round 3: flood-fill frontier = visited, not merely
+              // present in the view.  Ships OFF pending owner gate review.
+              shower_walk_visited_parity=false,
               // doc sbnd_xin/docs/pr/40 -- track (proton/pion/muon)
               // mis-identified as electron.  F1 (persistence), F2/F3 (dQ/dx
               // guards on wholesale track-to-electron conversion).  All
@@ -1325,6 +1386,33 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=null,
               shower_in_cascade_guard=false,
               shower_in_max_len=null,
               shower_in_mip_hi=null,
+              // doc sbnd_xin/docs/pr/40 round 9 -- straight-track PID guard
+              // family + B2 cross-cluster bridge.  C++ defaults false
+              // (scalars 25 deg / 1.8 cm live in C++).  Keys omitted when
+              // off/null => byte-identical pre-round-9 config.
+              shower_connect_from_vertices_straight_guard=false,
+              shower_connect_start_seg_straight_guard=false,
+              examine_direction_dirsign_shower_in_guard=false,
+              daughter_shower_angle_reclass_straight_guard=false,
+              shower_topo_reexam_straight_guard=false,
+              sfv_kink_max=null,
+              shower_nv_bridge_track=false,
+              shower_nv_bridge_max_gap=null,
+              // doc pr/97 D1; C++ default false => legacy indeterminate main_pi read.
+              shower_nv_main_pi_init=false,
+              // doc pr/92 -- stray-satellite drop from kine/PF.  false/null =
+              // C++ defaults = OFF (20 MeV / 8 cm / 60 deg / 45 deg / 90 cm /
+              // 30 cm / 25 deg); keys omitted => byte-identical pre-pr/92.
+              kine_drop_stray_satellites=false,
+              kine_sat_min_energy=null,
+              kine_sat_prox_max=null,
+              kine_sat_angle_bad=null,
+              kine_sat_angle_main=null,
+              kine_sat_far_dis=null,
+              kine_sat_axis_dis_cut=null,
+              kine_sat_cont_kink=null,
+              kine_sat_track_max_nseg=null,
+              kine_sat_em_far_dis=null,
               michel_stem_michel_check=false,
               michel_stem_max_far_len=null,
               shower_stem_backfill=false,
@@ -1334,6 +1422,13 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=null,
               stem_backfill_min_shower_len=null,
               shower_conn3_unreachable=false,
               conn3_unreachable_min_len=null,
+              // doc pr/84 round 2 (F3): stitch radius in cm; null = C++
+              // default 0 = OFF, key omitted => byte-identical.
+              conn3_stitch_max=null,
+              // doc pr/84 round 3 (S1): collapse showers that share a start
+              // segment.  C++ default false = OFF, key omitted when off =>
+              // byte-identical pre-fix config.
+              shower_dedup_start_seg=false,
               shower_traj_michel_stem=false,
               michel_stem_traj_min_len=null,
               michel_stem_traj_max_len=null,
@@ -1346,6 +1441,52 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=null,
               // toolkit-only addition).  C++ default false; key omitted when
               // off => byte-identical pre-fix config.
               shower_long_muon_keep_type=false,
+              // doc pr/40 round 10; false = C++ default = OFF, key omitted =>
+              // byte-identical.
+              shower_bragg_protect_start_segment=false,
+              // doc pr/93 round 3 -- C++ defaults false; key-suppressed when off.
+              shower_reclass_case_b_dqdx_guard=false,
+              shower_accept_pid_guard=false,
+              shower_pid_guard_min_len=null,
+              shower_vote_track_pid_counts=false,
+              shower_cone_absorb_guard=false,
+              // doc pr/93 round 4 -- C++ defaults false / null = C++ defaults
+              // (orphan floor 50cm; sccc 5cm/15deg base + 12cm/7.5deg aligned).
+              // Keys suppressed when off => byte-identical.
+              shower_detach_track_stem=false,
+              shower_ghost_member_drop=false,
+              shower_ghost_overlap_frac=null,
+              shower_ghost_dqdx_ratio=null,
+              shower_ghost_min_len=null,
+              // doc pr/99 round 3; C++ defaults; keys suppressed when off.
+              kine_charge_dedup=false,
+              kine_charge_rebuild=false,
+              // doc pr/101 Enu accounting round; C++ defaults; keys suppressed when off.
+              kine_charge_track_ctx=false,
+              kine_mass_rules=false,
+              kine_hadronic_dqdx=false,
+              kine_long_muon_mode=null,
+              kine_long_muon_ratio_lo=null,
+              kine_long_muon_ratio_hi=null,
+              kine_mainvtx_used_guard=false,
+              shower_hadronic_tag=false,
+              shower_hadronic_min_len=null,
+              shower_hadronic_scan_len=null,
+              shower_hadronic_bin=null,
+              shower_hadronic_r_cyl=null,
+              shower_hadronic_r_core=null,
+              shower_hadronic_growth_max=null,
+              shower_hadronic_growth_bragg=null,
+              shower_hadronic_bragg_ratio=null,
+              shower_hadronic_stem_ratio=null,
+              kine_count_orphan_tracks=false,
+              kine_orphan_track_min=null,
+              straight_cont_cross_cluster=false,
+              sccc_bridge_body=false,
+              sccc_max_gap=null,
+              sccc_kink_max=null,
+              sccc_gap_aligned=null,
+              sccc_kink_tight=null,
               // doc pr/43 round 2 -- C++ defaults false; keys suppressed when off.
               single_muon_proton_chain_veto=false,
               single_muon_long_muon_claim=false,
@@ -1482,6 +1623,26 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=null,
               mvga_splice_straighten=null,
               mvga_approach_collapse=null,
               mvga_straighten_radius=null,
+              // doc pr/83 r3: op1 scope/threshold decouple (cm / fraction;
+              // radius -1 = unscoped), post-op3 dup pass, carry cap,
+              // abandoned-cluster dup audit.  C++ defaults 0/0/false/0/false
+              // (all legacy).  Keys omitted when null/false =>
+              // byte-identical.
+              mvga_op1_radius=null,
+              mvga_op1_dup_frac=null,
+              mvga_op1_post=false,
+              mvga_carry_max=null,
+              swap_orphan_dup_audit=false,
+              // doc pr/83 r4 -- projective dup collapse; null omits => byte-identical.
+              mvga_proj_dup_frac=null,
+              mvga_proj_dqdx_ratio=null,
+              mvga_proj_angle=null,
+              mvga_ac_veto_radius=null,
+              mvga_ac_chord_max=null,
+              mvga_ac_no_cascade=false,
+              mvga_dup_starved_asym=null,
+              mvga_dup_starved_mip=null,
+              mvga_dup_starved_span=null,
               // doc pr/51 (18255-506746) -- DL rerank cross-cluster swap
               // guard.  C++ default false; false omits the key =>
               // byte-identical.
@@ -1782,6 +1943,7 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=null,
             beam_window_low=beam_window[0],
             beam_window_high=beam_window[1],
             skip_convicted=protect_skip_convicted,
+            open_convicted_bundles=protect_open_convicted_bundles,
             cathode_x=protect_cathode_x,
             cathode_rejoin_xcut=protect_cathode_rejoin_xcut,
             cathode_rejoin_dyz=protect_cathode_rejoin_dyz,
@@ -2027,6 +2189,18 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=null,
             skip_cosmic_companions=skip_cosmic_companions,
             cosmic_companion_min_length=cosmic_companion_min_length,
             nu_fallback_demoted_mains=nu_fallback_demoted_mains,
+            // doc pr/94 Phase 2: the SAME switch that books the per-bundle
+            // T_tagger/T_kine branches on tagger_output below also turns on the
+            // per-bundle candidate loop here -- one row per in-beam-window
+            // bundle needs both halves or the extra rows have nothing to carry.
+            // nu_per_bundle_demoted_acts is wired straight from
+            // evaluate_demoted_mains (not from its own TLA) so the
+            // act_evaluated column can never drift from the admission gate the
+            // cosmic taggers actually used.
+            nu_per_bundle=nu_per_bundle,
+            nu_per_bundle_demoted_acts=evaluate_demoted_mains,
+            nu_per_bundle_min_length=nu_per_bundle_min_length,
+            nu_selected_as_main=nu_selected_as_main,
             sp_photon_flag=sp_photon_flag,
             dir_weak_use_score=dir_weak_use_score,
             mip_dqdx=mip_dqdx,
@@ -2103,6 +2277,8 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=null,
             shower_flag_pdg_electron=shower_flag_pdg_electron,
             shower_less_id_tiebreak=shower_less_id_tiebreak,
             shower_endpoint_exclude_start_vertex=shower_endpoint_exclude_start_vertex,
+            shower_endpoint_skip_orphan_vtx=shower_endpoint_skip_orphan_vtx,
+            shower_walk_visited_parity=shower_walk_visited_parity,
             track_pid_persist_dqdx=track_pid_persist_dqdx,
             shower_reclass_dqdx_guard=shower_reclass_dqdx_guard,
             shower_topo_dqdx_guard=shower_topo_dqdx_guard,
@@ -2120,6 +2296,25 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=null,
             shower_in_cascade_guard=shower_in_cascade_guard,
             shower_in_max_len=shower_in_max_len,
             shower_in_mip_hi=shower_in_mip_hi,
+            shower_connect_from_vertices_straight_guard=shower_connect_from_vertices_straight_guard,
+            shower_connect_start_seg_straight_guard=shower_connect_start_seg_straight_guard,
+            examine_direction_dirsign_shower_in_guard=examine_direction_dirsign_shower_in_guard,
+            daughter_shower_angle_reclass_straight_guard=daughter_shower_angle_reclass_straight_guard,
+            shower_topo_reexam_straight_guard=shower_topo_reexam_straight_guard,
+            sfv_kink_max=sfv_kink_max,
+            shower_nv_bridge_track=shower_nv_bridge_track,
+            shower_nv_bridge_max_gap=shower_nv_bridge_max_gap,
+            shower_nv_main_pi_init=shower_nv_main_pi_init,
+            kine_drop_stray_satellites=kine_drop_stray_satellites,
+            kine_sat_min_energy=kine_sat_min_energy,
+            kine_sat_prox_max=kine_sat_prox_max,
+            kine_sat_angle_bad=kine_sat_angle_bad,
+            kine_sat_angle_main=kine_sat_angle_main,
+            kine_sat_far_dis=kine_sat_far_dis,
+            kine_sat_axis_dis_cut=kine_sat_axis_dis_cut,
+            kine_sat_cont_kink=kine_sat_cont_kink,
+            kine_sat_track_max_nseg=kine_sat_track_max_nseg,
+            kine_sat_em_far_dis=kine_sat_em_far_dis,
             michel_stem_michel_check=michel_stem_michel_check,
             michel_stem_max_far_len=michel_stem_max_far_len,
             shower_stem_backfill=shower_stem_backfill,
@@ -2129,6 +2324,8 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=null,
             stem_backfill_min_shower_len=stem_backfill_min_shower_len,
             shower_conn3_unreachable=shower_conn3_unreachable,
             conn3_unreachable_min_len=conn3_unreachable_min_len,
+            conn3_stitch_max=conn3_stitch_max,
+            shower_dedup_start_seg=shower_dedup_start_seg,
             shower_traj_michel_stem=shower_traj_michel_stem,
             michel_stem_traj_min_len=michel_stem_traj_min_len,
             michel_stem_traj_max_len=michel_stem_traj_max_len,
@@ -2136,6 +2333,44 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=null,
             michel_stem_traj_max_far_len=michel_stem_traj_max_far_len,
             michel_stem_traj_min_kink_deg=michel_stem_traj_min_kink_deg,
             shower_long_muon_keep_type=shower_long_muon_keep_type,
+            shower_bragg_protect_start_segment=shower_bragg_protect_start_segment,
+            shower_reclass_case_b_dqdx_guard=shower_reclass_case_b_dqdx_guard,
+            shower_accept_pid_guard=shower_accept_pid_guard,
+            shower_pid_guard_min_len=shower_pid_guard_min_len,
+            shower_vote_track_pid_counts=shower_vote_track_pid_counts,
+            shower_cone_absorb_guard=shower_cone_absorb_guard,
+            shower_detach_track_stem=shower_detach_track_stem,
+            shower_ghost_member_drop=shower_ghost_member_drop,
+            shower_ghost_overlap_frac=shower_ghost_overlap_frac,
+            shower_ghost_dqdx_ratio=shower_ghost_dqdx_ratio,
+            shower_ghost_min_len=shower_ghost_min_len,
+            kine_charge_dedup=kine_charge_dedup,
+            kine_charge_rebuild=kine_charge_rebuild,
+            kine_charge_track_ctx=kine_charge_track_ctx,
+            kine_mass_rules=kine_mass_rules,
+            kine_hadronic_dqdx=kine_hadronic_dqdx,
+            kine_long_muon_mode=kine_long_muon_mode,
+            kine_long_muon_ratio_lo=kine_long_muon_ratio_lo,
+            kine_long_muon_ratio_hi=kine_long_muon_ratio_hi,
+            kine_mainvtx_used_guard=kine_mainvtx_used_guard,
+            shower_hadronic_tag=shower_hadronic_tag,
+            shower_hadronic_min_len=shower_hadronic_min_len,
+            shower_hadronic_scan_len=shower_hadronic_scan_len,
+            shower_hadronic_bin=shower_hadronic_bin,
+            shower_hadronic_r_cyl=shower_hadronic_r_cyl,
+            shower_hadronic_r_core=shower_hadronic_r_core,
+            shower_hadronic_growth_max=shower_hadronic_growth_max,
+            shower_hadronic_growth_bragg=shower_hadronic_growth_bragg,
+            shower_hadronic_bragg_ratio=shower_hadronic_bragg_ratio,
+            shower_hadronic_stem_ratio=shower_hadronic_stem_ratio,
+            kine_count_orphan_tracks=kine_count_orphan_tracks,
+            kine_orphan_track_min=kine_orphan_track_min,
+            straight_cont_cross_cluster=straight_cont_cross_cluster,
+            sccc_bridge_body=sccc_bridge_body,
+            sccc_max_gap=sccc_max_gap,
+            sccc_kink_max=sccc_kink_max,
+            sccc_gap_aligned=sccc_gap_aligned,
+            sccc_kink_tight=sccc_kink_tight,
             single_muon_proton_chain_veto=single_muon_proton_chain_veto,
             single_muon_long_muon_claim=single_muon_long_muon_claim,
             pid_flag_reconcile=pid_flag_reconcile,
@@ -2199,6 +2434,20 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=null,
             mvga_splice_straighten=mvga_splice_straighten,
             mvga_approach_collapse=mvga_approach_collapse,
             mvga_straighten_radius=mvga_straighten_radius,
+            mvga_op1_radius=mvga_op1_radius,
+            mvga_op1_dup_frac=mvga_op1_dup_frac,
+            mvga_op1_post=mvga_op1_post,
+            mvga_carry_max=mvga_carry_max,
+            swap_orphan_dup_audit=swap_orphan_dup_audit,
+            mvga_proj_dup_frac=mvga_proj_dup_frac,
+            mvga_proj_dqdx_ratio=mvga_proj_dqdx_ratio,
+            mvga_proj_angle=mvga_proj_angle,
+            mvga_ac_veto_radius=mvga_ac_veto_radius,
+            mvga_ac_chord_max=mvga_ac_chord_max,
+            mvga_ac_no_cascade=mvga_ac_no_cascade,
+            mvga_dup_starved_asym=mvga_dup_starved_asym,
+            mvga_dup_starved_mip=mvga_dup_starved_mip,
+            mvga_dup_starved_span=mvga_dup_starved_span,
             dl_vtx_swap_guard=dl_vtx_swap_guard,
             dl_vtx_topo_weight=dl_vtx_topo_weight,
             dl_vtx_topo_center=dl_vtx_topo_center,
@@ -2319,8 +2568,12 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=null,
         // tracking_visitor (and after both BDT scorers so the scores are set).
         // doc pr/36 sec 10.8 (F7): neutrino_type_bitmask books the
         // neutrino_type/I branch; key omitted when off => schema-identical.
+        // doc pr/94 Phase 1: nu_per_bundle books the per-bundle identity +
+        // per-activity cosmic-flag branches; key omitted when off =>
+        // schema-identical.  Plumbing only -- nothing populates them yet.
         tagger_output: cm.tagger_output(output_filename=tracking_pr_root,
-                                        neutrino_type_bitmask=neutrino_type_bitmask),
+                                        neutrino_type_bitmask=neutrino_type_bitmask,
+                                        nu_per_bundle=nu_per_bundle),
         // PR event-display calib dump (docs/pr/26): ONE self-contained JSON per
         // event carrying the PR-graph segments as polylines, the associated
         // track/shower points, the Steiner skeleton with its terminal flag, the
@@ -2593,6 +2846,7 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=null,
                     // doc pr/34 §10 port-fidelity knobs.  C++ defaults false;
                     // key omitted when off => byte-identical pre-knob config.
                     [if pf_track_main_cluster_only then 'pf_track_main_cluster_only']: true,
+                    [if pf_track_bridged_clusters then 'pf_track_bridged_clusters']: true,   // doc pr/40 round 9 B2
                     [if pf_shower_vertex_barrier then 'pf_shower_vertex_barrier']: true,
                     [if pf_shower_parent_precedence then 'pf_shower_parent_precedence']: true,
                     [if pf_pi0_node_per_id then 'pf_pi0_node_per_id']: true,
@@ -2603,6 +2857,20 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=null,
                     // doc pr/65 round 3.  C++ default false; key omitted when
                     // off => byte-identical pre-knob config.
                     [if pf_orphan_audit_only then 'pf_orphan_audit_only']: true,
+                    // doc pr/84 round 2 (F1/F2).  C++ defaults false (scalars
+                    // 3 cm / 8 cm); keys omitted when off/null =>
+                    // byte-identical pre-knob config.  Params in cm.
+                    [if pf_direct_when_touching then 'pf_direct_when_touching']: true,
+                    [if pf_touch_max != null then 'pf_touch_max']: pf_touch_max * wc.cm,
+                    [if pf_touch_cross_main then 'pf_touch_cross_main']: true,
+                    [if pf_touch_cross_max != null then 'pf_touch_cross_max']: pf_touch_cross_max * wc.cm,
+                    [if pf_pseudo_gap_from_main then 'pf_pseudo_gap_from_main']: true,
+                    [if pf_unique_node_ids then 'pf_unique_node_ids']: true,
+                    [if pf_drop_stray_satellites then 'pf_drop_stray_satellites']: true,
+                    // doc pr/93 round 4; params in cm.
+                    [if pf_orphan_confident_track then 'pf_orphan_confident_track']: true,
+                    [if pf_orphan_track_min_cm != null then 'pf_orphan_track_min']: pf_orphan_track_min_cm * wc.cm,
+                    [if pf_track_owns_loose_vertex then 'pf_track_owns_loose_vertex']: true,
                 },
             ],
             pipeline: wc.tns(cm_pipeline),
@@ -2668,7 +2936,8 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
             save_bundle_main_provenance=false,
             rescue_allow_in_beam_far=true, rescue_geom_first=true,
             rescue_pierce_test=true, rescue_pierce_cut=null,
-            rescue_dest_beam_for_new=true, rescue_beam_main_only=true)::
+            rescue_dest_beam_for_new=true, rescue_beam_main_only=true,
+            bee_flash_pred_min=null)::
         // Clustering + matching ONLY (all-APA MABC).  The follow-up PR tagger
         // pass (pr() below) and the wclsTensorSetLabeler are wired by the entry
         // configuration, not here -- see the note in clus_all_apa.
@@ -2688,6 +2957,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                      rescue_pierce_cut=rescue_pierce_cut,
                      rescue_dest_beam_for_new=rescue_dest_beam_for_new,
                      rescue_beam_main_only=rescue_beam_main_only,
+                     bee_flash_pred_min=bee_flash_pred_min,
                      use_sce=use_sce, reality=reality),
     // PR job: input is the reloaded post-QL tarball (see clus_pr above).
     // The TGM/FC and beam-window defaults here mirror clus_pr's -- i.e. the SBND
@@ -2712,6 +2982,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
        // doc pr/34 §10 particle-flow port-fidelity knobs; false = C++ default
        // = OFF, key omitted => byte-identical.  See clus_pr.
        pf_track_main_cluster_only=false,
+       pf_track_bridged_clusters=false,   // doc pr/40 round 9 B2
        pf_shower_vertex_barrier=false,
        pf_shower_parent_precedence=false,
        pf_pi0_node_per_id=false,
@@ -2721,6 +2992,21 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
        pf_orphan_track_parentage=false,
        // doc pr/65 round 3; false = C++ default = OFF.  See clus_pr.
        pf_orphan_audit_only=false,
+       // doc pr/84 round 2 (F1/F2); false/null = C++ defaults = OFF, keys
+       // omitted => byte-identical.  Params in cm.  See clus_pr.
+       pf_direct_when_touching=false,
+       pf_touch_max=null,
+       pf_touch_cross_main=false,
+       pf_touch_cross_max=null,
+       pf_pseudo_gap_from_main=false,
+       // doc pr/84 round 3 (G1); false = C++ default = OFF.  See clus_pr.
+       pf_unique_node_ids=false,
+       // doc pr/92; false = C++ default = OFF.  See clus_pr.
+       pf_drop_stray_satellites=false,
+       // doc pr/93 round 4; C++ defaults; keys suppressed when off.
+       pf_orphan_confident_track=false,
+       pf_orphan_track_min_cm=null,
+       pf_track_owns_loose_vertex=false,
        // doc pr/20 Part I P2; null = C++ default false = OFF.  See clus_pr.
        restore_demoted_mains=null,
        // doc pr/23 sec 4.2; null = C++ default false = warn-and-skip.  See clus_pr.
@@ -2860,6 +3146,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
        // prototype-faithful (re-join pass disabled).
        protect_graph_name=null,
        protect_skip_convicted=null,
+       protect_open_convicted_bundles=null,   // doc pr/94 round 3; null => C++ default false
        protect_cathode_x=0,
        protect_cathode_rejoin_xcut=5 * wc.cm,
        protect_cathode_rejoin_dyz=4 * wc.cm,
@@ -2913,6 +3200,12 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
        stem_endpoint_wcpt_parity=false,
        broken_muon_cluster_id_count=false,
        neutrino_type_bitmask=false,
+       // doc pr/94 Phase 1: per-bundle identity + per-activity cosmic-flag
+       // T_tagger branches (tagger_output only, plumbing only).  C++
+       // default false; key omitted when off => byte-identical.
+       nu_per_bundle=false,
+       nu_per_bundle_min_length=null,   // doc pr/94 Phase 5b; cm; null => C++ default 0 (no floor)
+       nu_selected_as_main=false,       // doc pr/94 round 3; C++ default false; key omitted when off
        // doc pr/33 sec 10 EM-shower-clustering knobs -- see the clus_pr arg
        // comments.  All false = keys omitted = byte-identical pre-knob
        // config.
@@ -2927,6 +3220,10 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
        // doc pr/39: exclude a shower's own start vertex from the end_point
        // farthest-vertex search.  Ships OFF pending owner gate review.
        shower_endpoint_exclude_start_vertex=false,
+       shower_endpoint_skip_orphan_vtx=false,
+       // doc pr/91 round 3: flood-fill frontier = visited, not merely
+       // present in the view.  Ships OFF pending owner gate review.
+       shower_walk_visited_parity=false,
        // doc sbnd_xin/docs/pr/40 -- track (proton/pion/muon) mis-identified
        // as electron.  All default false = legacy = byte-identical.
        track_pid_persist_dqdx=false,
@@ -2958,6 +3255,27 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
        shower_in_cascade_guard=false,
        shower_in_max_len=null,
        shower_in_mip_hi=null,
+       // doc sbnd_xin/docs/pr/40 round 9 -- see clus_pr above.
+       shower_connect_from_vertices_straight_guard=false,
+       shower_connect_start_seg_straight_guard=false,
+       examine_direction_dirsign_shower_in_guard=false,
+       daughter_shower_angle_reclass_straight_guard=false,
+       shower_topo_reexam_straight_guard=false,
+       sfv_kink_max=null,
+       shower_nv_bridge_track=false,
+       shower_nv_bridge_max_gap=null,
+       shower_nv_main_pi_init=false,   // doc pr/97 D1; false => legacy indeterminate main_pi read
+       // doc pr/92; false/null = C++ defaults = OFF.  See clus_pr.
+       kine_drop_stray_satellites=false,
+       kine_sat_min_energy=null,
+       kine_sat_prox_max=null,
+       kine_sat_angle_bad=null,
+       kine_sat_angle_main=null,
+       kine_sat_far_dis=null,
+       kine_sat_axis_dis_cut=null,
+       kine_sat_cont_kink=null,
+       kine_sat_track_max_nseg=null,
+       kine_sat_em_far_dis=null,
        michel_stem_michel_check=false,
        michel_stem_max_far_len=null,
        shower_stem_backfill=false,
@@ -2967,6 +3285,10 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
        stem_backfill_min_shower_len=null,
        shower_conn3_unreachable=false,
        conn3_unreachable_min_len=null,
+       // doc pr/84 round 2 (F3); null = C++ default 0 = OFF.  See clus_pr.
+       conn3_stitch_max=null,
+       // doc pr/84 round 3 (S1); false = C++ default = OFF.  See clus_pr.
+       shower_dedup_start_seg=false,
        shower_traj_michel_stem=false,
        michel_stem_traj_min_len=null,
        michel_stem_traj_max_len=null,
@@ -2975,6 +3297,49 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
        michel_stem_traj_min_kink_deg=null,
        // doc pr/44; false = C++ default = OFF, key omitted => byte-identical.
        shower_long_muon_keep_type=false,
+       // doc pr/40 round 10; false = C++ default = OFF, key omitted => byte-identical.
+       shower_bragg_protect_start_segment=false,
+       // doc pr/93 round 3 -- C++ defaults false; key-suppressed when off.
+       shower_reclass_case_b_dqdx_guard=false,
+       shower_accept_pid_guard=false,
+       shower_pid_guard_min_len=null,
+       shower_vote_track_pid_counts=false,
+       shower_cone_absorb_guard=false,
+       // doc pr/93 round 4; C++ defaults; keys suppressed when off.
+       shower_detach_track_stem=false,
+       shower_ghost_member_drop=false,
+       shower_ghost_overlap_frac=null,
+       shower_ghost_dqdx_ratio=null,
+       shower_ghost_min_len=null,
+       // doc pr/99 round 3; C++ defaults; keys suppressed when off.
+       kine_charge_dedup=false,
+       kine_charge_rebuild=false,
+       // doc pr/101 Enu accounting round; C++ defaults; keys suppressed when off.
+       kine_charge_track_ctx=false,
+       kine_mass_rules=false,
+       kine_hadronic_dqdx=false,
+       kine_long_muon_mode=null,
+       kine_long_muon_ratio_lo=null,
+       kine_long_muon_ratio_hi=null,
+       kine_mainvtx_used_guard=false,
+       shower_hadronic_tag=false,
+       shower_hadronic_min_len=null,
+       shower_hadronic_scan_len=null,
+       shower_hadronic_bin=null,
+       shower_hadronic_r_cyl=null,
+       shower_hadronic_r_core=null,
+       shower_hadronic_growth_max=null,
+       shower_hadronic_growth_bragg=null,
+       shower_hadronic_bragg_ratio=null,
+       shower_hadronic_stem_ratio=null,
+       kine_count_orphan_tracks=false,
+       kine_orphan_track_min=null,
+       straight_cont_cross_cluster=false,
+       sccc_bridge_body=false,
+       sccc_max_gap=null,
+       sccc_kink_max=null,
+       sccc_gap_aligned=null,
+       sccc_kink_tight=null,
        // doc pr/43 round 2 -- C++ defaults false.
        single_muon_proton_chain_veto=false,
        single_muon_long_muon_claim=false,
@@ -3084,6 +3449,26 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
               mvga_splice_straighten=null,
               mvga_approach_collapse=null,
               mvga_straighten_radius=null,
+              // doc pr/83 r3: op1 scope/threshold decouple (cm / fraction;
+              // radius -1 = unscoped), post-op3 dup pass, carry cap,
+              // abandoned-cluster dup audit.  C++ defaults 0/0/false/0/false
+              // (all legacy).  Keys omitted when null/false =>
+              // byte-identical.
+              mvga_op1_radius=null,
+              mvga_op1_dup_frac=null,
+              mvga_op1_post=false,
+              mvga_carry_max=null,
+              swap_orphan_dup_audit=false,
+              // doc pr/83 r4 -- projective dup collapse; null omits => byte-identical.
+              mvga_proj_dup_frac=null,
+              mvga_proj_dqdx_ratio=null,
+              mvga_proj_angle=null,
+              mvga_ac_veto_radius=null,
+              mvga_ac_chord_max=null,
+              mvga_ac_no_cascade=false,
+              mvga_dup_starved_asym=null,
+              mvga_dup_starved_mip=null,
+              mvga_dup_starved_span=null,
               dl_vtx_swap_guard=false,
               // doc pr/89 Arm C (C2) -- rule-1 topology term in the DL
               // rerank composite (weight, frac center).  C++ defaults 0/0;
@@ -3206,12 +3591,23 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 tgm_fv_y_margin=tgm_fv_y_margin,
                 save_stm_fit=save_stm_fit,
                 pf_track_main_cluster_only=pf_track_main_cluster_only,
+                pf_track_bridged_clusters=pf_track_bridged_clusters,
                 pf_shower_vertex_barrier=pf_shower_vertex_barrier,
                 pf_shower_parent_precedence=pf_shower_parent_precedence,
                 pf_pi0_node_per_id=pf_pi0_node_per_id,
                 pf_pdg_name_prototype_fallback=pf_pdg_name_prototype_fallback,
                 pf_orphan_track_parentage=pf_orphan_track_parentage,
                 pf_orphan_audit_only=pf_orphan_audit_only,
+                pf_direct_when_touching=pf_direct_when_touching,
+                pf_touch_max=pf_touch_max,
+                pf_touch_cross_main=pf_touch_cross_main,
+                pf_touch_cross_max=pf_touch_cross_max,
+                pf_pseudo_gap_from_main=pf_pseudo_gap_from_main,
+                pf_unique_node_ids=pf_unique_node_ids,
+                pf_drop_stray_satellites=pf_drop_stray_satellites,
+                pf_orphan_confident_track=pf_orphan_confident_track,
+                pf_orphan_track_min_cm=pf_orphan_track_min_cm,
+                pf_track_owns_loose_vertex=pf_track_owns_loose_vertex,
                 unmerge_bundle_mode=unmerge_bundle_mode,
                 restore_demoted_mains=restore_demoted_mains,
                 require_provenance=require_provenance,
@@ -3283,6 +3679,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 v3_extension_min_gain=v3_extension_min_gain,
                 protect_graph_name=protect_graph_name,
                 protect_skip_convicted=protect_skip_convicted,
+                protect_open_convicted_bundles=protect_open_convicted_bundles,
                 protect_cathode_x=protect_cathode_x,
                 protect_cathode_rejoin_xcut=protect_cathode_rejoin_xcut,
                 protect_cathode_rejoin_dyz=protect_cathode_rejoin_dyz,
@@ -3313,6 +3710,9 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 stem_endpoint_wcpt_parity=stem_endpoint_wcpt_parity,
                 broken_muon_cluster_id_count=broken_muon_cluster_id_count,
                 neutrino_type_bitmask=neutrino_type_bitmask,
+                nu_per_bundle=nu_per_bundle,
+                nu_per_bundle_min_length=nu_per_bundle_min_length,
+                nu_selected_as_main=nu_selected_as_main,
                 daughter_count_proto_main_vertex=daughter_count_proto_main_vertex,
                 daughter_count_proto_examine_showers=daughter_count_proto_examine_showers,
                 shower_pdg_from_start_segment=shower_pdg_from_start_segment,
@@ -3322,6 +3722,8 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 shower_flag_pdg_electron=shower_flag_pdg_electron,
                 shower_less_id_tiebreak=shower_less_id_tiebreak,
                 shower_endpoint_exclude_start_vertex=shower_endpoint_exclude_start_vertex,
+                shower_endpoint_skip_orphan_vtx=shower_endpoint_skip_orphan_vtx,
+                shower_walk_visited_parity=shower_walk_visited_parity,
                 track_pid_persist_dqdx=track_pid_persist_dqdx,
                 shower_reclass_dqdx_guard=shower_reclass_dqdx_guard,
                 shower_topo_dqdx_guard=shower_topo_dqdx_guard,
@@ -3339,6 +3741,25 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 shower_in_cascade_guard=shower_in_cascade_guard,
                 shower_in_max_len=shower_in_max_len,
                 shower_in_mip_hi=shower_in_mip_hi,
+                shower_connect_from_vertices_straight_guard=shower_connect_from_vertices_straight_guard,
+                shower_connect_start_seg_straight_guard=shower_connect_start_seg_straight_guard,
+                examine_direction_dirsign_shower_in_guard=examine_direction_dirsign_shower_in_guard,
+                daughter_shower_angle_reclass_straight_guard=daughter_shower_angle_reclass_straight_guard,
+                shower_topo_reexam_straight_guard=shower_topo_reexam_straight_guard,
+                sfv_kink_max=sfv_kink_max,
+                shower_nv_bridge_track=shower_nv_bridge_track,
+                shower_nv_bridge_max_gap=shower_nv_bridge_max_gap,
+                shower_nv_main_pi_init=shower_nv_main_pi_init,
+                kine_drop_stray_satellites=kine_drop_stray_satellites,
+                kine_sat_min_energy=kine_sat_min_energy,
+                kine_sat_prox_max=kine_sat_prox_max,
+                kine_sat_angle_bad=kine_sat_angle_bad,
+                kine_sat_angle_main=kine_sat_angle_main,
+                kine_sat_far_dis=kine_sat_far_dis,
+                kine_sat_axis_dis_cut=kine_sat_axis_dis_cut,
+                kine_sat_cont_kink=kine_sat_cont_kink,
+                kine_sat_track_max_nseg=kine_sat_track_max_nseg,
+                kine_sat_em_far_dis=kine_sat_em_far_dis,
                 michel_stem_michel_check=michel_stem_michel_check,
                 michel_stem_max_far_len=michel_stem_max_far_len,
                 shower_stem_backfill=shower_stem_backfill,
@@ -3348,6 +3769,8 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 stem_backfill_min_shower_len=stem_backfill_min_shower_len,
                 shower_conn3_unreachable=shower_conn3_unreachable,
                 conn3_unreachable_min_len=conn3_unreachable_min_len,
+                conn3_stitch_max=conn3_stitch_max,
+                shower_dedup_start_seg=shower_dedup_start_seg,
                 shower_traj_michel_stem=shower_traj_michel_stem,
                 michel_stem_traj_min_len=michel_stem_traj_min_len,
                 michel_stem_traj_max_len=michel_stem_traj_max_len,
@@ -3355,6 +3778,44 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 michel_stem_traj_max_far_len=michel_stem_traj_max_far_len,
                 michel_stem_traj_min_kink_deg=michel_stem_traj_min_kink_deg,
                 shower_long_muon_keep_type=shower_long_muon_keep_type,
+                shower_bragg_protect_start_segment=shower_bragg_protect_start_segment,
+                shower_reclass_case_b_dqdx_guard=shower_reclass_case_b_dqdx_guard,
+                shower_accept_pid_guard=shower_accept_pid_guard,
+                shower_pid_guard_min_len=shower_pid_guard_min_len,
+                shower_vote_track_pid_counts=shower_vote_track_pid_counts,
+                shower_cone_absorb_guard=shower_cone_absorb_guard,
+                shower_detach_track_stem=shower_detach_track_stem,
+                shower_ghost_member_drop=shower_ghost_member_drop,
+                shower_ghost_overlap_frac=shower_ghost_overlap_frac,
+                shower_ghost_dqdx_ratio=shower_ghost_dqdx_ratio,
+                shower_ghost_min_len=shower_ghost_min_len,
+                kine_charge_dedup=kine_charge_dedup,
+                kine_charge_rebuild=kine_charge_rebuild,
+                kine_charge_track_ctx=kine_charge_track_ctx,
+                kine_mass_rules=kine_mass_rules,
+                kine_hadronic_dqdx=kine_hadronic_dqdx,
+                kine_long_muon_mode=kine_long_muon_mode,
+                kine_long_muon_ratio_lo=kine_long_muon_ratio_lo,
+                kine_long_muon_ratio_hi=kine_long_muon_ratio_hi,
+                kine_mainvtx_used_guard=kine_mainvtx_used_guard,
+                shower_hadronic_tag=shower_hadronic_tag,
+                shower_hadronic_min_len=shower_hadronic_min_len,
+                shower_hadronic_scan_len=shower_hadronic_scan_len,
+                shower_hadronic_bin=shower_hadronic_bin,
+                shower_hadronic_r_cyl=shower_hadronic_r_cyl,
+                shower_hadronic_r_core=shower_hadronic_r_core,
+                shower_hadronic_growth_max=shower_hadronic_growth_max,
+                shower_hadronic_growth_bragg=shower_hadronic_growth_bragg,
+                shower_hadronic_bragg_ratio=shower_hadronic_bragg_ratio,
+                shower_hadronic_stem_ratio=shower_hadronic_stem_ratio,
+                kine_count_orphan_tracks=kine_count_orphan_tracks,
+                kine_orphan_track_min=kine_orphan_track_min,
+                straight_cont_cross_cluster=straight_cont_cross_cluster,
+                sccc_bridge_body=sccc_bridge_body,
+                sccc_max_gap=sccc_max_gap,
+                sccc_kink_max=sccc_kink_max,
+                sccc_gap_aligned=sccc_gap_aligned,
+                sccc_kink_tight=sccc_kink_tight,
                 single_muon_proton_chain_veto=single_muon_proton_chain_veto,
                 single_muon_long_muon_claim=single_muon_long_muon_claim,
                 pid_flag_reconcile=pid_flag_reconcile,
@@ -3418,6 +3879,20 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
             mvga_splice_straighten=mvga_splice_straighten,
             mvga_approach_collapse=mvga_approach_collapse,
             mvga_straighten_radius=mvga_straighten_radius,
+            mvga_op1_radius=mvga_op1_radius,
+            mvga_op1_dup_frac=mvga_op1_dup_frac,
+            mvga_op1_post=mvga_op1_post,
+            mvga_carry_max=mvga_carry_max,
+            swap_orphan_dup_audit=swap_orphan_dup_audit,
+            mvga_proj_dup_frac=mvga_proj_dup_frac,
+            mvga_proj_dqdx_ratio=mvga_proj_dqdx_ratio,
+            mvga_proj_angle=mvga_proj_angle,
+            mvga_ac_veto_radius=mvga_ac_veto_radius,
+            mvga_ac_chord_max=mvga_ac_chord_max,
+            mvga_ac_no_cascade=mvga_ac_no_cascade,
+            mvga_dup_starved_asym=mvga_dup_starved_asym,
+            mvga_dup_starved_mip=mvga_dup_starved_mip,
+            mvga_dup_starved_span=mvga_dup_starved_span,
                 dl_vtx_swap_guard=dl_vtx_swap_guard,
                 dl_vtx_topo_weight=dl_vtx_topo_weight,
                 dl_vtx_topo_center=dl_vtx_topo_center,

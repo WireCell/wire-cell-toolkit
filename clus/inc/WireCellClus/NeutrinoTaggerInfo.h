@@ -54,6 +54,17 @@ namespace WireCell::Clus::PR {
         float kine_pio_dis_2{0};
 
         float kine_pio_angle{0};
+
+        // ---- doc pr/94 Phase 2: per-bundle identity ------------------- //
+        // The same three identity fields TaggerInfo carries, so that
+        // T_kine[i] can be *verified* to refer to the same bundle as
+        // T_tagger[i] rather than merely assumed to by position (doc pr/94
+        // §10.1's sync check would otherwise be vacuous).  Booked as T_kine
+        // branches only when UbooneTaggerOutputVisitor's nu_per_bundle knob
+        // is on.  -1 = not populated (single-candidate legacy path).
+        int cluster_id{-1};
+        int matched_flash_gid{-1};
+        int nu_index{-1};
     };
 
 
@@ -1407,6 +1418,39 @@ namespace WireCell::Clus::PR {
         float nue_score{0};
 
         float photon_flag{0};
+
+        // ---- doc pr/94: per-bundle identity + per-activity cosmic block -- //
+        // Plumbing only (Phase 1): these fields are declared here and booked
+        // as T_tagger/T_kine branches by UbooneTaggerOutputVisitor when its
+        // nu_per_bundle knob is on, but nothing populates them yet --
+        // TaggerCheckNeutrino still fills exactly one TaggerInfo per event,
+        // so every field below carries its default (-1 / empty) until a
+        // later phase's TaggerCheckNeutrino change writes real values.
+        //
+        // Identity: which bundle/candidate this TaggerInfo belongs to, once
+        // T_tagger becomes multi-entry (one row per in-beam-window bundle).
+        // -1 = not populated (single-candidate legacy path).
+        int cluster_id{-1};
+        int matched_flash_gid{-1};
+        int nu_index{-1};
+
+        // Per-activity cosmic block: one element per main activity
+        // (flag_main_cluster or demoted_main) evaluated inside this bundle,
+        // so a cut on any of these can no longer discard a sibling activity
+        // just because it shares a bundle with a cosmic-tagged one (SBND
+        // 18255/395148).  act_evaluated distinguishes "evaluated and
+        // exonerated" (1, flag 0) from "never evaluated" (0) -- see
+        // Facade::normalize_cluster_flags, which back-fills every missing
+        // flag_* with 0 and would otherwise make the two indistinguishable.
+        std::vector<int>   act_cluster_id;
+        std::vector<float> act_length_cm;
+        std::vector<int>   act_is_selected;
+        std::vector<int>   act_is_demoted;
+        std::vector<int>   act_tgm;
+        std::vector<int>   act_stm;
+        std::vector<int>   act_fc;
+        std::vector<int>   act_lm;
+        std::vector<int>   act_evaluated;
     };
 
 } // namespace WireCell::Clus::PR

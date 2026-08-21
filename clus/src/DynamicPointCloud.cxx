@@ -381,6 +381,34 @@ DynamicPointCloud::get_closest_2d_point_info(const geo_point_t &p, const int pla
     return std::make_tuple(distance, m_pts.cluster[global_idx], global_idx);
 }
 
+double DynamicPointCloud::get_closest_2d_dis(const geo_point_t &p, const int plane, const int face,
+                                             const int apa) const
+{
+    // doc pr/98 perf: see the header comment.  Kept in lockstep with
+    // get_closest_2d_point_info above: same params lookup and raise, same
+    // projection, same search (knn1 == knn(1)), same -1.0 empty sentinel.
+    const WirePlaneId wpid_volume(kAllLayers, face, apa);
+
+    auto &kd2d = this->kd2d(plane, face, apa);
+
+    auto wpid_iter = m_wpid_params.find(wpid_volume);
+    if (wpid_iter == m_wpid_params.end()) {
+        raise<RuntimeError>("DynamicPointCloud: missing wpid params for wpid %s", wpid_volume.name());
+    }
+
+    const auto &[_, angle_u, angle_v, angle_w] = wpid_iter->second;
+    const double angle = (plane == 0) ? angle_u : ((plane == 1) ? angle_v : angle_w);
+
+    const std::array<double, 2> query = {p.x(), cos(angle) * p.z() - sin(angle) * p.y()};
+
+    size_t index = 0;
+    double metric = 0;
+    if (!kd2d.knn1(query, index, metric)) {
+        return -1.0;
+    }
+    return sqrt(metric);
+}
+
 std::tuple<double, const Cluster *, size_t>
 DynamicPointCloud::get_closest_2d_point_info_direct(
     double drift, double wire_perp, const int plane, const int face, const int apa) const

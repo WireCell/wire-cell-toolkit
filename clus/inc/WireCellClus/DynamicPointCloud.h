@@ -140,6 +140,15 @@ namespace WireCell::Clus::Facade {
         std::tuple<double, const Cluster *, size_t> get_closest_2d_point_info(const geo_point_t &p, const int plane,
                                                                               const int face, const int apa) const;
 
+        /// doc pr/98 perf: distance-only variant of get_closest_2d_point_info
+        /// for the fit_exclusion arbitration.  Same projection and the same
+        /// nanoflann search (NFKDVec::knn1 is documented identical to knn(1)),
+        /// but skips the l2g/global-index and cluster lookups the caller
+        /// discards, and allocates nothing.  Returns -1.0 when the
+        /// (plane,face,apa) tree is empty, matching the tuple variant's
+        /// empty-result sentinel.
+        double get_closest_2d_dis(const geo_point_t &p, const int plane, const int face, const int apa) const;
+
         /// @brief Like get_closest_2d_point_info but takes pre-projected (drift, wire_perp) coordinates
         /// directly from Grouping::convert_time_wire_2Dpoint(), bypassing the internal angle projection.
         /// Use this when the 2D coordinates are already in the wire-perpendicular space.

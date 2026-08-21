@@ -7,6 +7,7 @@
 #include "WireCellUtil/NamedFactory.h"
 #include "WireCellAux/Logger.h"
 
+#include <cstdlib>   // std::getenv  (WCT_FLASHT0_DEBUG instrumentation, removable)
 #include <unordered_map>
 #include <unordered_set>
 
@@ -215,6 +216,23 @@ static void clustering_examine_bundles(
         }
         log->debug("flash-t0 merge: {} in-scope matched clusters -> {} flash-time groups",
                    n_matched_inscope, matched_groups.size());
+
+        // doc pr/94 Phase 5b root-cause trace: dump the pre-merge identity of
+        // every in-scope, independently-matched cluster so a specific merged
+        // group's members can be inspected by ident/flash/gid/t0.  Diagnostic
+        // only; gated so it costs nothing and changes nothing when off.
+        if (std::getenv("WCT_FLASHT0_DEBUG")) {
+            for (auto c : pre_clusters) {
+                if (!c->get_scope_filter(scope)) continue;
+                const int flash = c->get_scalar<int>("flash", -1);
+                const int gid = c->get_scalar<int>("matched_flash_gid", -1);
+                log->info("flash-t0 debug: cluster {} flash={} matched_flash_gid={} "
+                          "cluster_t0={:.6f} us L={:.2f} cm main={} group={} nblobs={}",
+                          c->ident(), flash, gid, c->get_cluster_t0() / units::us,
+                          c->get_length() / units::cm, c->get_flag(Flags::main_cluster),
+                          flash_t0_group.at(c), c->nchildren());
+            }
+        }
 
         // Save, per blob, the original (pre-merge) cluster ident of each
         // flash-group member into a "real_cluster_id" array in the "perblob" PC,

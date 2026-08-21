@@ -69,6 +69,80 @@ namespace WireCell::Clus::PR {
         /// :187), correct independently of the cache's refresh schedule.
         /// Config key kine_shower_pdg_live; absent => legacy, byte-identical.
         bool shower_pdg_live{false};
+        /// doc pr/99 round 3 (C1).  false = legacy: every shower's
+        /// cal_kine_charge independently rescans the whole event's 2D charge
+        /// maps, so two spatially interleaved showers each collect the SAME
+        /// cells' full charge and the event Enu double-counts (SBND
+        /// 18255-168596: one 2016 MeV cascade split into 1843+1265 MeV,
+        /// Enu 2619->3533).  true = after all shower-structure passes,
+        /// recompute every shower's kine_charge in ONE scan of the charge
+        /// maps where each 2D cell is credited to exactly one shower (the
+        /// nearest accepting cloud; tie -> lowest shower creation id).  The
+        /// prototype is also ownership-free (NeutrinoID_energy_reco.h) --
+        /// this is a deliberate divergence in both trees, not a port fix.
+        /// Config key kine_charge_dedup; absent => legacy, byte-identical.
+        bool dedup{false};
+        /// doc pr/99 round 3 (C1b).  Prototype parity: WCP rebuilds a
+        /// shower's point clouds from CURRENT members before every
+        /// cal_kine_charge read (NeutrinoID_energy_reco.h:99); the toolkit
+        /// clouds are add-only merges, so stale points from departed members
+        /// keep pulling charge in.  true = the final recompute pass reads
+        /// EPHEMERAL member-true rebuilt clouds (stored clouds untouched --
+        /// taggers and the pi0 start_point derivation query them later, and
+        /// a rebuild changes row order hence kNN tie-breaks).  Config key
+        /// kine_charge_rebuild; absent => legacy, byte-identical.
+        bool rebuild{false};
+        /// doc sbnd_xin/docs/pr/101 (K1).  Shower<->track cell ownership.
+        /// With dedup alone, ownership is arbitrated only AMONG showers: a
+        /// track segment in no shower (a proton, a pion) contributes its KE
+        /// through range/dQdx AND every 2D cell of its charge that lies
+        /// within 0.6 cm of a neighbouring shower cloud is credited to that
+        /// shower as well (SBND 18255-37112: a 103 MeV proton beside the
+        /// pi0 pair).  true = every non-member graph segment gets its own
+        /// ownership context from its "associate_points"/"fit" clouds; the
+        /// charge a track wins is discarded (tracks stay range/dQdx valued),
+        /// so showers can only lose cells that a trajectory explains better.
+        /// Track contexts follow the shower contexts, so shower-vs-shower
+        /// tie-breaks are unchanged and an equal-distance shower/track tie
+        /// goes to the shower.  Requires dedup.  Config key
+        /// kine_charge_track_ctx; absent => byte-identical.
+        bool track_ctx{false};
+        /// doc pr/101 (K2).  The paper rule Enu = sum(K + m + B): rest mass
+        /// m only for mu/pi/e (e adds nothing), binding energy B = 8.6 MeV
+        /// for every proton (and a neutron-typed object, if one ever
+        /// appears), never the nucleon rest mass.  false = legacy: a
+        /// graph-reachable 2212-typed SHOWER receives the 938 MeV proton
+        /// mass through the bare `pdg != 11` test (the prototype's
+        /// NeutrinoID_kine.h:67 does the same), and a 211/13-typed leftover
+        /// shower receives no mass at all.  true = one rule table at every
+        /// add site and at the continuation refund.  Config key
+        /// kine_mass_rules; absent => byte-identical.
+        bool mass_rules{false};
+        /// doc pr/101 (K3).  Hadronic showers (2212/211/2112-typed,
+        /// including A5 re-types) take KE = sum dE/dx over member fits
+        /// (kenergy_dQdx) instead of the EM charge scaling, written into the
+        /// Shower's kenergy_best so PF/Bee, taggers and fill_kine_tree agree
+        /// (owner choice, object-level).  Long muons (|13|) are K4's.  Config
+        /// key kine_hadronic_dqdx; absent => byte-identical.
+        bool hadronic_dqdx{false};
+        /// doc pr/101 (K4).  Long-muon (mu->mu->mu chain) best energy.
+        /// 0 = legacy dQdx always (prototype WCShower.cxx:302, "should be
+        /// improved using range").  1 = range over the muon chain always.
+        /// 2 = range when the chain's far vertex is a graph dead-end (the
+        /// muon stops) AND dQdx/range lies in [1-ratio_lo, 1+ratio_hi];
+        /// otherwise dQdx (delta-ray-heavy or broken/exiting chains).  One
+        /// muon mass is added by fill_kine_tree either way.  Config keys
+        /// kine_long_muon_mode / _ratio_lo / _ratio_hi; 0 => byte-identical.
+        int    long_muon_mode{0};
+        double long_muon_ratio_lo{0.3};
+        double long_muon_ratio_hi{0.5};
+        /// doc pr/101 (K5).  The fill_kine_tree main-vertex pass lacks the
+        /// `used_segments` guard its BFS has (prototype NeutrinoID_kine.h:72
+        /// vs :130), so a shower MEMBER segment attached to the main vertex
+        /// is counted as a separate track on top of its shower's charge.
+        /// true = guard the first pass too.  Config key
+        /// kine_mainvtx_used_guard; absent => byte-identical.
+        bool mainvtx_used_guard{false};
     };
 
     struct Pi0KineFeatures {
@@ -645,6 +719,121 @@ namespace WireCell::Clus::PR {
         // the prototype 0.2 cm => recipe-faithful; > 0 => that radius.
         // Inert unless splice_straighten/approach_collapse is on.
         double m_mvga_straighten_radius{0};   ///< straight-chain veto radius, internal length units (doc pr/86 round 2); 0 = prototype 0.2 cm
+        // doc sbnd_xin/docs/pr/99 round 2 -- op3.5 approach-collapse guards.
+        // The pr/99 firing census (mcp2k production: 46 fires, median chord
+        // 15.7 cm, max 338.5 cm vs the 5.8 cm design case) showed op3.5
+        // off-envelope: it replaced a true 51 cm V with straight chords on
+        // 285567 (the flip regression) and built 315167's 146 cm fake EM
+        // trunk.  Three independent guards, each 0/false = legacy:
+        // - ac_veto_radius: dedicated is_good_point radius for the COLLAPSE
+        //   chord's charge veto.  Production m_mvga_straighten_radius=1.0cm
+        //   (relaxed for the pr/86 R1 splice-straighten purpose) leaked into
+        //   the collapse veto; the prototype ancestor examine_structure_2
+        //   (NeutrinoID_examine_structure.h line ~131) checks
+        //   is_good_point(test_p, 0.2*units::cm, 0, 0).  > 0 => that radius
+        //   for op3.5 only (R1 splice-straighten keeps m_mvga_straighten_radius).
+        // - ac_chord_max: decline a collapse whose replacement chord
+        //   |vtx1-vtx2| exceeds this; the prototype capped the removed
+        //   segment lengths at 5 cm (commented out in the ancestor, but the
+        //   design envelope is few-cm zigzags, not half-meter trunks).
+        // - ac_no_cascade: never collapse a candidate whose sg1/sg2 is
+        //   itself a `created` product (285567's second fire consumed its
+        //   own nfits=0 chord, 53.6 -> 58.3 cm).
+        double m_mvga_ac_veto_radius{0};      ///< op3.5-only charge-veto radius, internal length units (doc pr/99 round 2); 0 = legacy (straighten_radius rule)
+        double m_mvga_ac_chord_max{0};        ///< op3.5 replacement-chord length cap, internal length units (doc pr/99 round 2); 0 = no cap
+        bool   m_mvga_ac_no_cascade{false};   ///< op3.5: skip candidates touching `created` products (doc pr/99 round 2); false = legacy
+        // doc sbnd_xin/docs/pr/99 round 2 -- op1-post charge second-opinion.
+        // 70084: a 15.7 cm charge-starved chord rode a real prong at
+        // overlap 0.87 but the pair's ~30 deg chord opening angle declined
+        // the merge -- the angle guard exists so a genuine small-opening V
+        // never merges, and here it protected a ghost.  The refit SPLITS
+        // the shared corridor's charge across the pair (70084 measured
+        // median-dQ/dx ratios 1.16/0.62 vs m_mip_dqdx_median), so the
+        // discriminator is the op1-proj-style pair ASYMMETRY
+        // (min/max <= starved_asym; 70084 reads 0.53, op1-proj production
+        // gate 0.55) AND an absolute cap on the loser
+        // (min <= starved_mip; a genuine proton+MIP V's muon reads ~1.0
+        // and is never mistaken for a starved chord).  Both knobs > 0
+        // required; the LOWER-charge member is deleted (never the healthy
+        // one -- the pr/96 F3 safe direction).  Members without valid fits
+        // are skipped (no charge verdict possible, the op2 rule).  Either
+        // knob 0 (default) => the decline stands => byte-identical.
+        double m_mvga_dup_starved_asym{0};    ///< op1-post starved-member override: pair min/max dQ/dx asymmetry gate (doc pr/99 round 2); 0 = off
+        double m_mvga_dup_starved_mip{0};     ///< op1-post starved-member override: absolute cap on the loser, ratio vs m_mip_dqdx_median (doc pr/99 round 2); 0 = off
+        double m_mvga_dup_starved_span{0};    ///< op1-post starved-member override: pair min/max LENGTH comparability floor (doc pr/99 round 2); 0 = no span test
+        // doc sbnd_xin/docs/pr/83 round 3 (sec 9.6/sec 8.5): the duplicate-
+        // corridor family.  op1 is a global graph-correctness check ("no two
+        // segments double-book the same charge"), not inherently a
+        // near-vertex one like op2/op3 -- but it inherits m_mvga_radius and
+        // m_mvga_dup_frac, both tuned for other purposes (the radius bounds
+        // the expensive near-vertex audit; 0.8 closed a pr/86 marginal-
+        // overlap gap at the MAIN anchor).  Sec 9.2 measured 6 of 9 class-B
+        // duplicates 5-7 cm OUTSIDE the 15 cm scope; sec 9.3 measured 1
+        // declined at 0.74 by the raised 0.8.  These knobs decouple op1's
+        // scope and threshold from op2/op3's without re-litigating either
+        // tuning.  0 (default) => the shared member applies => byte-identical.
+        double m_mvga_op1_radius{0};          ///< op1-only scope radius (doc pr/83 r3); 0 = use m_mvga_radius, -1 = unscoped (whole main cluster)
+        double m_mvga_op1_dup_frac{0};        ///< op1-only overlap threshold (doc pr/83 r3); 0 = use m_mvga_dup_frac
+        // doc pr/83 r3 (sec 8, class A): the pr/85 interposed carry re-
+        // attaches N far prongs directly to the anchor and the pr/86
+        // splice-straighten re-derives each carried prong's near-anchor
+        // stretch over the same 26-35 cm reach -- N prongs acquire the SAME
+        // trunk geometry (138009: six stacked electrons, 204 cm of fitted
+        // length on a 43 cm trunk, kine_reco_Enu double-counted 1973 vs 1441
+        // MeV).  op1 runs BEFORE op3 and its `created` exemption makes the
+        // carried products structurally invisible (sec 8.3).  true => one
+        // additional op1-style duplicate-corridor pass AFTER the op3/op3.5
+        // interleave concludes (before the op4 refit), with the `created`
+        // exemption lifted, at op1's effective radius/threshold.  Benign
+        // carries overlap nothing and are untouched -- no pr/86 giveback at
+        // the 33 non-stacking multi-carry sites (sec 8.5's cost analysis of
+        // the blanket cap).  false (default) => pass skipped => byte-identical.
+        bool   m_mvga_op1_post{false};        ///< post-op3 duplicate-corridor pass incl. created segments (doc pr/83 r3, class A)
+        // doc pr/83 r3 (sec 8.5): the blanket fallback -- decline the
+        // interposed absorb/splice outright when it would carry more than
+        // this many far prongs (all 8 class-A events had carried >= 2; a cap
+        // of 1 keeps the stub as the shared trunk, the physically correct
+        // topology).  Costs pr/86 benefit at every benign multi-carry site,
+        // so m_mvga_op1_post is the primary fix; this ships only if that
+        // proves insufficient.  0 (default) => unlimited => byte-identical.
+        int    m_mvga_carry_max{0};           ///< op3 interposed-carry prong-count ceiling (doc pr/83 r3); 0 = unlimited
+        // doc pr/83 r3 (sec 9.5, Mechanism C + the 359980 follow-up): a
+        // cluster that went through find_proto_vertex but is not the final
+        // main cluster keeps its segments in the output yet never receives
+        // a duplicate-corridor pass.  Two ways in: swap_main_cluster
+        // re-points pattern recognition away from it (350935: an
+        // overlap-1.00 dup born in find_proto_vertex survives to Bee
+        // untouched), or it was a candidate that lost the main-cluster
+        // contest with no swap at all (359980: dup on cluster 75, main is
+        // 21).  true => one unscoped op1-style duplicate-corridor pass (no
+        // vertex to center a radius on -- these clusters have no main
+        // vertex), with a refit if anything merged: inside
+        // swap_main_cluster on the abandoned cluster, and once more over
+        // every non-main cluster before shower_clustering_with_nv consumes
+        // them (TaggerCheckNeutrino.cxx).  false (default) => byte-identical.
+        bool   m_swap_orphan_dup_audit{false}; ///< dup-audit non-main clusters: at swap + pre-shower sweep (doc pr/83 r3)
+
+        // ---- doc sbnd_xin/docs/pr/83 round 4: projective duplicate collapse --
+        // A 1-track-1-shower stem can be reported as TWO main-vertex tracks
+        // that overlap in >=2 of the 3 wire views while separating in 3D
+        // (the fitter places the same 2D charge on two 3D interpretations;
+        // the starved one reads far-below-MIP stem dQ/dx).  3D corridor
+        // overlap reads 0.14-0.58 (below every op1 gate), so round 3 never
+        // fires (138009 12094/12095, 168596 14168/14172, 74544 12105/12107).
+        // 0 = pass disabled = byte-identical legacy.  When > 0: minimum
+        // 2nd-best per-view overlap fraction (views at wire_angles, coord
+        // (x, cos(a)z - sin(a)y), tol = m_mvga_dup_tol).
+        double m_mvga_proj_dup_frac{0};
+        // Stem dQ/dx asymmetry gate: merge only when min/max of the two
+        // members' dQ/dx over the first 8 cm from the main vertex is below
+        // this ratio (measured: ghosts 0.08-0.28; real two-prong vertices
+        // carry MIP-level charge on both prongs).  Only consulted when
+        // m_mvga_proj_dup_frac > 0, so the default is inert.
+        double m_mvga_proj_dqdx_ratio{0.4};
+        // op1-proj's own chord-angle gate, degrees (doc pr/83 r4b, 284206:
+        // the residual stem pair reads 22 deg -- just over op1's shared
+        // 20 deg).  0 = use m_mvga_dup_angle (byte-identical legacy).
+        double m_mvga_proj_angle{0};
 
         // ---- doc sbnd_xin/docs/pr/51 round 4: rough-path diagnostic probe --
         // Diagnostic-only TRACE instrumentation for the near-vertex
@@ -1564,6 +1753,398 @@ namespace WireCell::Clus::PR {
         double m_shower_in_max_len{40*units::cm};
         double m_shower_in_mip_hi{1.3};
 
+        // ------------------------------------------------------------------
+        // doc sbnd_xin/docs/pr/40 round 9 -- the round-7/round-8 named guard
+        // family: five sites that force pdg 11 onto a straight long track
+        // with no geometry test, each declined (write skipped, structure
+        // untouched) when segment_is_straight_long_track(_or_continuation)
+        // fires.  All C++ default false = legacy = byte-identical.
+        //
+        // Site corrections found implementing (round-9 doc "D" findings):
+        // D1 -- round 7's "candidate 2c at NeutrinoShowerClustering.cxx:1401"
+        //   is the SAME write as round 8 Part A (line drift since the trace
+        //   commits); the start_seg knob below is re-targeted at the
+        //   accept-time set_pdg(11) in shower_clustering_connecting_to_main_
+        //   vertex, the real same-cluster analogue.
+        // D2 -- round 7's "dirsign()==0 branch at NeutrinoVertexFinder.cxx
+        //   :1659" is dead code (dirsign is assigned 6 lines above); the
+        //   real coverage gap is the pr/74 cascade veto's 40cm/1.3xMIP
+        //   thresholds, so the examine_direction knob adds a GEOMETRY arm
+        //   beside that veto in all three flag_shower_in branches.
+        // ------------------------------------------------------------------
+
+        // Round 8 Part A: shower_clustering_with_nv_from_vertices's pdg
+        // block (the ONLY creator of a conn-2 shower from a fresh track,
+        // SBND 286906 seg 9002 / 409546 seg 9000).  Uses the continuation-
+        // aware predicate because PATH C hands the guard a broken sub-10cm
+        // HALF of the track (286906: 8.68cm anchor at 4.9deg kink to the
+        // 126.89cm body).  Also co-guards the update_particle_type call for
+        // the same shower, which would otherwise redo the declined 13->11
+        // via the majority vote (PRShower.cxx:981-1009).
+        bool   m_shower_connect_from_vertices_straight_guard{false};
+
+        // D1 re-target: the accept-time set_pdg(11) on the winning
+        // main-vertex EM candidate's start segment (F10 vetoes only at seed
+        // time on the seed's own geometry; a short anchor collinear with a
+        // long straight sibling passes F10 and reaches this write).
+        bool   m_shower_connect_start_seg_straight_guard{false};
+
+        // doc sbnd_xin/docs/pr/93 round 3 -- four knobs for the five owner
+        // events where an "electron" is really tracks or a hadronic-pi0
+        // shower (SBND 18255-55595/348471/69314/292643/315167).  All C++
+        // default false = legacy = byte-identical.
+        //
+        // Cause A (55595): improve_maps_no_dir_tracks Case B writes pdg 11
+        // unconditionally when dirsign()==0, regardless of length (193.8cm
+        // MIP muon here).  Same F2 dQ/dx spare-test its sibling Case E
+        // already carries.
+        bool   m_shower_reclass_case_b_dqdx_guard{false};
+        // Cause B (348471, 69314): the new_shower_accepted and
+        // merged_shower_start_segment sites force set_pdg(11) on a shower's
+        // start segment with NO PID check -- decline the write when the
+        // segment already carries a confident non-electron template PID
+        // (segment_confident_nonelectron_pid).
+        bool   m_shower_accept_pid_guard{false};
+        // Shared minimum-length floor (internal units; 50cm default = the
+        // scale of SBND's shower_topo_demote_len "a >50cm segment is not
+        // EM-flaggable" rule) for the Cause A, Cause B, AND Cause D
+        // declines of this family.
+        // Below it, a confident non-electron template score is NOT reliable
+        // evidence against electron: real nueCC48 electron stems of 22-47cm
+        // carry 0.11-0.64 proton/muon scores (the template competition
+        // never considers electron), and the un-floored guards regressed
+        // 9+17 of 48 nueCC48 events on the attribution arms.  Inert while
+        // both guards are off.
+        double m_shower_pid_guard_min_len{50*units::cm};
+        // Cause C (292643): update_particle_type's vote counts only
+        // confirmed protons as track, so a muon/pion chain always votes
+        // electron -- when on, any unflagged member with |pdg| in
+        // {13,211,2212} counts as track (threaded as a trailing param to
+        // Shower::update_particle_type).
+        bool   m_shower_vote_track_pid_counts{false};
+        // Cause D (315167): pass 3's direction-cone absorber
+        // (shower_clustering_with_nv_from_main_cluster's angle/distance
+        // sweep) has no PID or straightness check, and with
+        // shower_absorb_unreachable_main ON (pr/65, SBND production) a
+        // graph-unreachable MAIN-cluster segment is eligible there --
+        // 315167's 150.7cm score-0.10 proton was cone-absorbed into a
+        // 15.7cm EM stub's shower, whose energy is then computed from
+        // total_length under the electron hypothesis (1046.7 MeV).  When
+        // on, that absorber declines a confidently-PID'd non-electron
+        // straight-long track (the flood-fill guard_excludes predicate,
+        // pr/40 F12); the declined segment stays unclaimed.  Confirmed by
+        // the WCT_SHOWER_ABSORB_DEBUG tape (site=pass3_cone seg=8001).
+        bool   m_shower_cone_absorb_guard{false};
+
+        // ------------------------------------------------------------------
+        // doc sbnd_xin/docs/pr/93 round 4 -- PF-hierarchy fine-tunes.
+        // ------------------------------------------------------------------
+        // shower_detach_track_stem (348471 + 292643): a TRACK-HEADED shower
+        // -- final start segment is a non-shower-flagged, non-zero,
+        // non-+-11-pdg track -- is really "track + daughter EM shower" glued
+        // into one object (348471: 53.5cm score-0.232 proton stem + 15 EM
+        // satellites; 292643: 22.9cm pi+ stem [score-100 sentinel] + 13.9cm
+        // mu continuation + 9 EM satellites).  When on, a post-pass after
+        // shower dedup peels the main-cluster track prefix back into the
+        // track pool and re-roots the shower at the prefix's far vertex
+        // (conn 2), so PF renders "track -> pseudo-gamma -> EM shower", kine
+        // costs the track by range (not shower charge + rest mass -- 348471
+        // gained 938 MeV of proton mass on a charge-based 719 MeV aggregate
+        // in round 3), and the pi0 pairing sees a real EM shower.
+        // STRUCTURE-keyed on purpose (not the round-3 confident-score/50cm
+        // family: 21 of the 50 non-trivial track-headed stems in the census
+        // carry the score-100 sentinel, and 292643's stem is under the
+        // floor).  Long-muon pseudo-showers (cached type +-13) are exempt;
+        // pure track chains and single-blob protons self-exclude (the
+        // detach refuses to empty a shower).
+        bool   m_shower_detach_track_stem{false};
+        // ------------------------------------------------------------------
+        // doc sbnd_xin/docs/pr/99 round 2 -- shower_ghost_member_drop.
+        // 395148: the 295 MeV "electron" held a 23.4 cm projective-ghost
+        // member (median per-point charge -678, 93% of points dQ<=0, 2D
+        // view overlap vs a sibling member 1.00/1.00/0.25 -- the pr/83
+        // op1-proj class) 95 cm from the main vertex, outside every mvga
+        // scope.  When on, a post-pass after shower dedup (and BEFORE the
+        // pi0 finders, so pairing never sees the ghost) scans member PAIRS
+        // of each shower with the op1-proj discriminator restated for
+        // membership: same (apa,face), 2nd-best per-view 2D overlap >=
+        // ghost_overlap_frac, candidate starved (median dQ/dx ratio <=
+        // ghost_dqdx_ratio OR frac(dQ<=0) > 0.5) while the partner is
+        // healthy (ratio >= 2x ghost_dqdx_ratio), candidate length >=
+        // ghost_min_len.  The conjunction is mandatory -- the pr/99 census
+        // measured 51/185 real multi-member showers with SOME charge-
+        // starved fragment; overlap-with-a-healthy-sibling is what makes it
+        // a ghost.  The ghost is dropped from the shower view (leaf-only,
+        // Shower::drop_ghost_member contract) and DELETED from the graph so
+        // it leaves the PF/Bee display; vote/kinematics/charge recomputed.
+        // No refit at this seat -- acceptable for a charge-starved ghost.
+        // false (default) => no pass => byte-identical; the numeric knobs
+        // are inert while the bool is off.
+        bool   m_shower_ghost_member_drop{false};   ///< doc pr/99 round 2; false = off
+        double m_shower_ghost_overlap_frac{0.7};    ///< 2nd-best per-view overlap gate; inert while drop off
+        double m_shower_ghost_dqdx_ratio{0.25};     ///< starved gate, ratio vs m_mip_dqdx_median; inert while drop off
+        double m_shower_ghost_min_len{10*units::cm}; ///< candidate min length, internal units; inert while drop off
+        // doc pr/99 round 3 (A5 hadronic-shower tag; owner: "many hadronic
+        // showers / particle flow still labeled as electrons").  A claimed
+        // EM shower (|particle_type|==11, conn type 1) whose surrounding
+        // charge population SHRINKS downstream is a hadron, not an electron:
+        // real EM cascades grow 3-6x in in-cylinder point population over
+        // the first 30 cm (measured round 1: 168596/14153 5.7x, 360535/7060
+        // 3.1x, adverse gamma control 506114 2.3x) while the pr/99 fakes
+        // read 0.2x (315167, terminal Bragg rise 2930->10801) and 0.5x
+        // (395148).  Verdict = smax >= min_len && (growth < growth_max ||
+        // (bragg >= bragg_ratio && growth < growth_bragg)).  On verdict the
+        // START SEGMENT's pdg is stamped 211 (pi+-) with mass + 4-momentum
+        // refresh (the pi0 incoming-track stamp recipe) plus
+        // shower->set_particle_type(211) -- the durable route, since
+        // Shower::calculate_kinematics re-copies the start segment's pdg on
+        // every recompute.  NOT 13: long-muon consumers route on |13| and
+        // would misroute a shower absent from segments_in_long_muon.  The
+        // re-typed shower is excluded from pi0 pairing via
+        // m_hadronic_retyped_shower_ids.  A DEBUG census line is emitted for
+        // EVERY evaluated shower (the offline calibration channel).  false
+        // (default) => no pass => byte-identical; numerics inert while off.
+        bool   m_shower_hadronic_tag{false};              ///< doc pr/99 round 3; false = off
+        double m_shower_hadronic_min_len{10*units::cm};   ///< min trajectory extent to judge; inert while tag off
+        double m_shower_hadronic_scan_len{30*units::cm};  ///< growth window along the trajectory; inert while tag off
+        double m_shower_hadronic_bin{3*units::cm};        ///< arc-length bin; inert while tag off
+        double m_shower_hadronic_r_cyl{8*units::cm};      ///< in-cylinder population radius; inert while tag off
+        double m_shower_hadronic_r_core{1.2*units::cm};   ///< core radius, off-axis census only; inert while tag off
+        double m_shower_hadronic_growth_max{0.8};         ///< growth below => hadronic; inert while tag off
+        double m_shower_hadronic_growth_bragg{1.2};       ///< growth ceiling for Bragg-confirmed branch; inert while tag off
+        double m_shower_hadronic_bragg_ratio{3.0};        ///< terminal/trunk median dQ/dx rise; inert while tag off
+        double m_shower_hadronic_stem_ratio{0};           ///< proton-stem branch: stem median (MIP units) at/above this + growth < growth_bragg => hadronic; 0 = branch off
+        /// Shower ids (stable per-run Shower::get_shower_id) re-typed by the
+        /// A5 pass this event; guards the pi0 finders' candidate collection.
+        /// Cleared at shower_clustering_with_nv pass entry.  Empty (tag off)
+        /// => the guards are no-ops => byte-identical.
+        std::set<int> m_hadronic_retyped_shower_ids;
+        // kine_count_orphan_tracks (315167): fill_kine_tree counterpart of
+        // the PF-side pf_orphan_confident_track knob (BeePFConfig).  A
+        // confident straight-long main-cluster track that is graph-
+        // disconnected from the main vertex (freed from shower membership by
+        // shower_cone_absorb_guard) is reached by NEITHER the kine BFS nor
+        // any shower: 315167's 150.7cm score-0.101 proton (~595 MeV KE)
+        // silently vanished from kine_reco_Enu.  When on, a post-pass
+        // pushes such segments via push_segment_kine (range KE + binding).
+        // Shares segment_orphan_confident_track with the PF side so the two
+        // outputs describe the same particle set.
+        bool   m_kine_count_orphan_tracks{false};
+        double m_kine_orphan_track_min{50*units::cm};
+
+        // D2: geometry arm beside the pr/74 P1 cascade veto in examine_
+        // direction's flag_shower_in branches (54629 seg 15007: 31cm,
+        // 1.42xMIP -- fails BOTH of the P1 veto's conjuncts, but 0.97
+        // direct/arc straightness catches it).
+        bool   m_examine_direction_dirsign_shower_in_guard{false};
+
+        // Round 7 candidate 2b: the num_daughter_showers>=4 / angle-
+        // collinearity wholesale reclass write (NeutrinoVertexFinder.cxx,
+        // 54629 seg 15011: 94.6cm, 0.980 straight).  Guards the write only,
+        // NOT the outer condition (falsifying that would re-route control
+        // into the pdg==11 else-if chain).
+        bool   m_daughter_shower_angle_reclass_straight_guard{false};
+
+        // Round 7 candidate 1 (320865 seg 13001: 48.1cm, 0.94 straight):
+        // third arm in improve_vertex's topology re-exam decline condition
+        // -- re-demote (unset kShowerTopology, keep the track PID) instead
+        // of the set_flags+pdg-11 escape.  Framed as a defensible safety
+        // net, NOT "the fix for 320865" (that segment only exists via a
+        // pr/90 side effect; a pr/90-side fix remains the open alternative).
+        // F11-displacement risk is highest here -- see the round-9 census.
+        bool   m_shower_topo_reexam_straight_guard{false};
+
+        // Max kink (DEGREES) for the collinear-continuation arm of
+        // segment_is_straight_long_track_or_continuation (286906 measures
+        // 4.9 deg; 25 matches the daughter-shower reclass's own >155-deg
+        // opening-angle idiom, i.e. kink < 25).
+        double m_sfv_kink_max{25.0};
+        // Transient record of the anchors whose electron write the
+        // from_vertices guard declined (same per-call lifecycle as
+        // m_absorb_unreachable_main_segs below; empty when the knob is
+        // off).  Kept as the marker for any later pass that would re-flip
+        // the anchor -- and as the hook the B2 bridge consumes.
+        IndexedSegmentSet m_sfv_declined_anchors;
+
+        // ------------------------------------------------------------------
+        // doc sbnd_xin/docs/pr/40 round 9 B2 -- cross-cluster track bridge.
+        // When shower_clustering_with_nv_from_vertices's directional match
+        // accepts a candidate in ANOTHER cluster, the candidate (or its
+        // collinear continuation) is a straight long track, and the exact
+        // steiner-cloud closest approach between the two clusters is below
+        // m_shower_nv_bridge_max_gap: do NOT fabricate the conn-2 electron;
+        // add a straight 2-point zero-charge bridge segment vertex->track
+        // to the PR graph (stamped main_cluster) so PF/kinematics see one
+        // continuous track (owner directive, 286906: gap 1.39cm bridges;
+        // 521075: 2.92cm must not).  The gap is a signal-processing hole
+        // with no charge -- no do_rough_path routing, no refit.  All
+        // bookkeeping below is empty when the knob is off => byte-identical.
+        // ------------------------------------------------------------------
+        bool   m_shower_nv_bridge_track{false};
+        double m_shower_nv_bridge_max_gap{1.8*units::cm};
+        // ------------------------------------------------------------------
+        // doc sbnd_xin/docs/pr/97 D1 -- shower_clustering_with_nv_from_vertices
+        // builds `cluster_point_info main_pi` and sets ONLY .cluster and
+        // .min_vertex; .min_angle/.min_dis/.min_point stay INDETERMINATE and
+        // are filled in the vertex loop only if main_vertex is itself one of
+        // main_cluster_vertices.  When the overall main vertex lives in a
+        // different cluster (reachable, and the state of the [B] doctest
+        // fixture) nothing fills them, and the "prefer main_pi over min_pi"
+        // comparison a few lines later reads stale stack bytes -- a leftover
+        // pointer, so the branch is decided by the address-space layout
+        // (ASLR, or just the size of the environment).  The prototype has the
+        // same hole (NeutrinoID_shower_clustering.h:1071-1073), so this is an
+        // inherited defect, not a porting slip.
+        // ON: sentinel-initialise so the "main vertex was never evaluated
+        // against this cluster" case deterministically prefers min_pi.
+        // OFF (default) = legacy indeterminate read, bit-for-bit.
+        // ------------------------------------------------------------------
+        bool   m_shower_nv_main_pi_init{false};
+        // Transient per-call state (same lifecycle as
+        // m_absorb_unreachable_main_segs above): the bridge segment plus the
+        // bridged cluster's own segments, shielded from every shower
+        // flood-fill/absorber so the rescued track is not re-swallowed
+        // (the pr/54 lesson: cross-boundary graph edits break the
+        // cluster()==main_cluster absorber invariant unless shielded).
+        IndexedSegmentSet m_nv_bridge_shield_segs;
+        std::set<int>     m_nv_bridge_cluster_ids;
+        // Pre-seed a shower flood-fill's used_segments with the shield set
+        // so complete_structure_with_start_segment never traverses the
+        // bridge or absorbs the rescued cluster (a no-op when the set is
+        // empty, i.e. whenever the bridge knob is off or never fired).
+        IndexedSegmentSet& nv_bridge_seed(IndexedSegmentSet& used) {
+            used.insert(m_nv_bridge_shield_segs.begin(), m_nv_bridge_shield_segs.end());
+            return used;
+        }
+
+        // B2 helpers (NeutrinoPatternBase.cxx / NeutrinoShowerClustering.cxx)
+        double cluster_steiner_gap(const Facade::Cluster& a, const Facade::Cluster& b) const;
+        bool   nv_bridge_track(Graph& graph, Facade::Cluster* main_cluster,
+                               Facade::Cluster* cluster, SegmentPtr sg1, VertexPtr vertex,
+                               const WireCell::Point& point,
+                               const std::vector<SegmentPtr>& cluster_segs,
+                               TrackFitting& track_fitter, IDetectorVolumes::pointer dv,
+                               const Clus::ParticleDataSet::pointer& particle_data,
+                               const IRecombinationModel::pointer& recomb_model);
+        // doc pr/93 round 4: the connect/register tail of nv_bridge_track,
+        // factored out (byte-identical) so the sccc bridge replay below can
+        // reuse it.  Returns the bridge segment or nullptr.
+        SegmentPtr nv_bridge_connect(Graph& graph, Facade::Cluster* main_cluster,
+                                     Facade::Cluster* cluster, VertexPtr vertex,
+                                     VertexPtr far_vtx,
+                                     const std::vector<SegmentPtr>& cluster_segs,
+                                     TrackFitting& track_fitter,
+                                     IDetectorVolumes::pointer dv);
+
+        // ------------------------------------------------------------------
+        // doc sbnd_xin/docs/pr/93 round 4 (straight_cont_cross_cluster,
+        // SBND 18264-137238) -- a main-vertex kShowerTrajectory stem that is
+        // the CROSS-CLUSTER continuation of a straight long track (a pr/57
+        // W-plane-gap over-clustering split: 14.6cm flagged stem, degree-1
+        // tip, 81cm straight muon body 3-4cm away in another cluster) seeds
+        // a fake electron over the whole chain.  demote_cross_cluster_
+        // straight_stems (called between examine_direction and
+        // shower_clustering_with_nv) clears the flag + re-PIDs the stem as a
+        // track when the cross-cluster arm of segment_is_straight_long_
+        // track_or_continuation matches under the two-tier geometric gate:
+        // base (max_gap, kink_max) OR aligned (gap_aligned, kink_tight) --
+        // the owner-requested "very aligned buys a larger gap" tier;
+        // pr/57:1336 records a 53-deg LOCAL kink at this break class, so
+        // the tight-angle long-lever arm is the robust one.  The pr/57
+        // owner-good W-gap pairs (21073 6-7, 122660 14-17, 61579 3-4) are
+        // mandatory negative controls for any retune.
+        // sccc_bridge_body (second rung): additionally RECORD a bridge
+        // request {stem tip, continuation cluster, continuation vertex};
+        // shower_clustering_with_nv replays it through nv_bridge_connect
+        // AFTER its entry clears (building it earlier would be wiped), so
+        // the muon body joins the PF/kine track chain through a real graph
+        // edge.  All state empty when the master bool is off =>
+        // byte-identical.  Gap params internal units; kinks DEGREES.
+        // ------------------------------------------------------------------
+        bool   m_straight_cont_cross_cluster{false};
+        bool   m_sccc_bridge_body{false};
+        double m_sccc_max_gap{5*units::cm};
+        double m_sccc_kink_max{15.0};
+        double m_sccc_gap_aligned{12*units::cm};
+        double m_sccc_kink_tight{7.5};
+        struct SCCCBridgeRequest {
+            VertexPtr main_vtx;          // the demoted stem's degree-1 tip
+            Facade::Cluster* cluster;    // the continuation's cluster
+            VertexPtr far_vtx;           // the continuation's near endpoint vertex
+        };
+        // Insertion order = sorted_out_edges(main_vertex) order; a plain
+        // vector, never iterated as a pointer-keyed container.
+        std::vector<SCCCBridgeRequest> m_sccc_bridge_requests;
+        // Demoted stems (per-event lifecycle: cleared at the demotion pass's
+        // entry).  Consulted by examine_showers' retarget selection: a stem
+        // this knob demoted to a muon head must not be re-adopted as a
+        // shower start segment -- the retarget's merged_shower_start_segment
+        // stamp writes pdg 11 with the score-100 sentinel, which
+        // shower_accept_pid_guard cannot decline (measured on 18264-137238:
+        // the demoted stem was re-captured as "e- 71 MeV").  Membership-
+        // tested only; empty when the knob is off => byte-identical.
+        IndexedSegmentSet m_sccc_shield_segs;
+        // Clusters bridged by the sccc REPLAY (not by nv_bridge_track's own
+        // Step-5 firing -- that population keeps its legacy behavior).
+        // Consulted by from_vertices' Step-3 candidate analysis: a cluster
+        // the replay already claimed as a muon-body chain must not be
+        // re-analyzed as an EM-shower candidate (measured on 18264-137238:
+        // Path C broke the bridged cluster's 3.2cm entry stub off as a
+        // conn-2 electron that examine_shower_1 then spliced back onto the
+        // demoted stem).  Cleared at shower_clustering_with_nv entry with
+        // the rest of the bridge state; empty when the knob is off =>
+        // byte-identical.
+        std::set<int> m_sccc_bridged_cluster_ids;
+        void demote_cross_cluster_straight_stems(Graph& graph, VertexPtr main_vertex,
+                                                 const Clus::ParticleDataSet::pointer& particle_data,
+                                                 const IRecombinationModel::pointer& recomb_model);
+
+        // ------------------------------------------------------------------
+        // doc sbnd_xin/docs/pr/92 -- drop stray satellite showers from the
+        // kinematics tree (and, via TrackFitting transport, the Bee PF
+        // tree).  fill_kine_tree's leftover pass admits every conn-2/3
+        // shower with no direction or distance check (the prototype has the
+        // identical hole, NeutrinoID_kine.h:209-255): overclustered cosmics
+        // (SBND 350935 shower 11001, 449 MeV at 93 deg off its attachment
+        // vertex; 321371 shower 18004, 98 MeV collinear tail of a 256 cm
+        // dropped cosmic) and second neutrinos (389538 shower 19040,
+        // 997 MeV attached 144.5 cm away, 69 deg off the main vertex) are
+        // summed into kine_reco_Enu.  Candidates: BFS-unreached, conn 2/3,
+        // start segment in a NON-main cluster, kine_best above the floor,
+        // not pi0-paired, not within the proximity exemption of a
+        // main-cluster attachment.  Drop arms (axis = fresh
+        // shower_cal_dir_3vector from the start point -- the STORED
+        // init_dir for conn 2/3 is exactly the vertex->start chord and
+        // would always read 0 deg):
+        //   A: angle(axis, start - attach_vtx) > m_kine_sat_angle_bad
+        //   B: (attach farther than m_kine_sat_far_dis OR attach vertex not
+        //      in the main cluster) AND angle(axis, start - main_vtx) >=
+        //      m_kine_sat_angle_main
+        //   C: shower_start_is_track_continuation (collinear straight-long
+        //      sibling OUTSIDE the shower; see PRShowerFunctions.h)
+        // All state empty / arms unreachable when the master bool is off =>
+        // byte-identical.  Angles in DEGREES (sfv_kink_max precedent).
+        // ------------------------------------------------------------------
+        bool   m_kine_drop_stray_satellites{false};
+        double m_kine_sat_min_energy{20*units::MeV};
+        double m_kine_sat_prox_max{8*units::cm};
+        double m_kine_sat_angle_bad{60.0};
+        double m_kine_sat_angle_main{45.0};
+        double m_kine_sat_far_dis{90*units::cm};
+        double m_kine_sat_axis_dis_cut{30*units::cm};
+        double m_kine_sat_cont_kink{25.0};
+        // pr/92 round 2 (owner retune, 2026-08-18): the direction arms
+        // A/B/C apply only to TRACK-like satellites (straight-long start
+        // segment with <= max_nseg segments, or an out-of-shower track
+        // continuation) -- for those, direction inconsistency means
+        // overclustering.  EM-shower-like satellites are usually genuinely
+        // detached (NCpi0-like) and are dropped only when FAR from the main
+        // vertex (> em_far_dis; second neutrinos sit 169-250 cm, legit
+        // detached fragments 18-119 cm on the survey samples) AND the
+        // folded (sign-insensitive) main-vertex angle fails.
+        int    m_kine_sat_track_max_nseg{3};
+        double m_kine_sat_em_far_dis{150*units::cm};
+
         // doc sbnd_xin/docs/pr/74 round 2 P2 (SBND 18255 evt 90055 seg
         // 11045).  override_michel_stem_muon (F14 above) accepts ANY
         // shower-like sibling at the stem's far vertex as "the Michel
@@ -1617,6 +2198,46 @@ namespace WireCell::Clus::PR {
         // C++ default false = legacy = byte-identical.
         bool   m_shower_conn3_unreachable{false};
         double m_conn3_unreachable_min_len{10*units::cm};
+
+        // doc sbnd_xin/docs/pr/84 round 3.  Two PR::Showers can be built on
+        // the SAME start segment, because the start-segment choice in
+        // shower_clustering_in_other_clusters consults no claim at all (its
+        // guards are cluster-level, and the segment it picks off the
+        // cluster's vertex can belong to another cluster entirely -- the
+        // prototype has the identical hole, NeutrinoID_shower_clustering.h
+        // :1481-1495), and because the K5 conn3_unreachable branch checks
+        // map_segment_in_shower, which update_shower_maps only refreshes at
+        // the END of the function.  Measured on SBND 169626/174752/347129/
+        // 394532: the twin renders a SECOND PF node carrying the same jsTree
+        // id (`cluster_id*1000 + seg_id`), which breaks the Bee tree, and it
+        // is counted a second time in kine_energy_particle -- 394532's
+        // kine_reco_Enu 352.2 MeV against 255.5 de-duplicated.  When on, a
+        // merge pass runs after examine_showers and before the pi0 finders:
+        // each group of showers sharing a start segment collapses onto its
+        // most-directly-connected member, which ABSORBS the others' segments
+        // (Shower::add_shower, whose membership gate makes the overlap
+        // idempotent), and the survivor's kinematics are recomputed by the
+        // production calculate_shower_kinematics (flag_kinematics cleared;
+        // every other shower keeps its flag and is untouched).  conn_type==4
+        // members never participate: they are skipped by both the PF tree and
+        // the kine tree, so folding their charge in would be a change with no
+        // reported defect behind it.  false = no pass = byte-identical.
+        bool   m_shower_dedup_start_seg{false};
+
+        // doc sbnd_xin/docs/pr/84 round 2 (F3 = pr/84 P2 "conn3_stitch").
+        // The main cluster's segment graph can end up disconnected (pr/54
+        // keep-isolated residuals, snap-stranded vertices) even though the
+        // cluster is one contiguous lump of charge; the unreachable pieces
+        // are then promoted to conn-3 "association" showers at anchor
+        // distances the log itself shows to be millimetres (pr/74
+        // conn3_unreachable anchor_dis 0.3 cm).  When a component's closest
+        // approach to a main-vertex-reachable vertex is within this radius,
+        // bridge it with a real rough-path segment BEFORE clustering_points,
+        // so the BFS reaches it and it is classified conn-1 naturally.
+        // shower_conn3_unreachable stays on as the backstop for wider gaps.
+        // Internal units (config surface takes cm).  C++ default 0 = off =
+        // legacy = byte-identical.
+        double m_conn3_stitch_max{0};
 
         // doc sbnd_xin/docs/pr/74 round 4 K6 (SBND 18255 evt 506746 seg
         // 21048).  A stopping muon that emits a Michel electron at the
@@ -1681,6 +2302,48 @@ namespace WireCell::Clus::PR {
         // n_multi_vtx acceptance.  C++ default false = legacy =
         // byte-identical.
         bool   m_shower_long_muon_keep_type{false};
+
+        // doc sbnd_xin/docs/pr/40 round 10 -- segment_dqdx_spares_electron_
+        // reclass (PRSegmentFunctions.cxx, doc pr/40 F2) already guards
+        // examine_all_showers' cluster-wide "every non-shower segment here
+        // becomes electron" reclassification (NeutrinoTrackShowerSep.cxx
+        // ~2070-2105) with a flat median-dQ/dx test: ratio>1.75 (proton) or
+        // ratio<1.2 (clean MIP) spares the segment.  A segment whose ratio
+        // falls in [1.2, 1.75] gets no protection there -- and that gap is
+        // exactly where a real, disconnected muon fragment can sit near
+        // end-of-range.  SBND 18255 evt 314507 seg 17002 (32.3 cm, xMIP
+        // 1.57x -- inside the gap): the flat guard doesn't fire,
+        // examine_all_showers force-relabels it 13->11 (traced with
+        // WCT_PID_WRITE_DEBUG=2 to NeutrinoTrackShowerSep.cxx:2091), even
+        // though its own Bragg/dE-dx-template PID (segment_do_track_pid,
+        // PRSegmentFunctions.cxx) already scored it 0.082 -- a confident
+        // fit -- moments earlier.  Above 20 cm the electron template is
+        // never in that PID's competition (PRSegmentFunctions.cxx ~2540),
+        // so a real (<1.0, i.e. not the 100 "unscored" sentinel) score
+        // there is unambiguous muon-or-proton evidence regardless of what
+        // particle_info ended up attached.  When on, threaded into
+        // examine_all_showers' reclassification test as an OR alongside
+        // segment_reclass_dqdx_guard's own check (new helper
+        // segment_bragg_spares_electron_reclass): a segment longer than
+        // 20 cm with particle_score < 1.0 is spared the same way a
+        // ratio-confirmed proton or clean MIP already is.  Purely
+        // protective -- can only add a spare, never remove one the flat
+        // guard already grants -- so it is additive to
+        // shower_reclass_dqdx_guard, not a replacement.
+        //
+        // Restricted to is_main_cluster (examine_all_showers' own local
+        // variable, no new plumbing).  Owner Bee review found a good Bragg
+        // score is not reliable evidence inside a SATELLITE cluster (SBND
+        // 18255-259542, cluster 124, disjoint from the main interaction):
+        // a photon's early conversion stem can score well against the
+        // muon template over the same 20-35 cm comparison window before
+        // the cascade visibly multiplies, and satellite clusters already
+        // have their own dedicated EM-vs-track classifier
+        // (kine_drop_stray_satellites, NeutrinoKinematics.cxx, doc pr/92)
+        // that correctly kept 259542 as EM.  314507 (the motivating case)
+        // sits in the main cluster and is unaffected by this restriction.
+        // C++ default false = legacy = byte-identical.
+        bool   m_shower_bragg_protect_start_segment{false};
 
         // doc sbnd_xin/docs/pr/43 round 2 K1 -- the single-muon selection in
         // examine_direction vetoes a muon candidate only when a proton sits
@@ -1973,6 +2636,51 @@ namespace WireCell::Clus::PR {
         // byte-identical.
         bool m_shower_endpoint_exclude_start_vertex{false};
 
+        // doc sbnd_xin/docs/pr/91 round 1 F1 -- the same farthest-vertex search
+        // must also skip a node that NO member segment of the shower touches.
+        //
+        // Such orphan nodes are a toolkit-only artefact: set_start_vertex()
+        // calls add_vertex() (PRShower.h fill_sets docstring, doc pr/38), so a
+        // conn-2/3 shower's view carries a vertex from somebody else's cluster
+        // -- routinely the nearest main-cluster or in-shower vertex chosen by
+        // shower_clustering_in_other_clusters.  While that shower owns it,
+        // m_shower_endpoint_exclude_start_vertex above hides it.  Then
+        // Shower::add_shower's node loop imports it wholesale into an absorber,
+        // where it is no longer the start vertex, the exclusion stops applying,
+        // and it wins the search.  shower_dedup_start_seg (doc pr/84 round 3,
+        // SBND ON) is what makes that routine: on SBND 169626/174752/347129/
+        // 394532 it produced 6 orphan imports and 5 wrong end points -- 394532's
+        // 30 MeV and 66 MeV showers report each other's charge as their end,
+        // and a single-13.6cm-segment shower in 347129 reports an end 67.8 cm
+        // away in another cluster.  Forcing the knob off reproduces 0 orphans /
+        // 0 bad end points / 0 add_shower calls on the same four events.
+        //
+        // end_point feeds the Bee PF node's `data.end` and every
+        // cal_dir_3vector / angle consumer; kine_charge, kine_energy_particle
+        // and kine_reco_Enu sum over member segments and do NOT move.
+        // Default false = legacy search, byte-identical.
+        bool m_shower_endpoint_skip_orphan_vtx{false};
+
+        // doc pr/91 round 3: Shower::complete_structure_with_start_segment's
+        // frontier test is view MEMBERSHIP (!has_node), not visitation -- a
+        // vertex added by set_start_vertex()/set_start_segment()/
+        // add_segment()/add_shower() but never actually scanned by a
+        // flood-fill worklist is permanently unreachable.  When true, the
+        // frontier test switches to Shower::m_walked_nodes, the prototype's
+        // map_vtx_segs equivalent (WCPPID::WCShower::set_start_vertex,
+        // WCShower.cxx:529-532, never touches map_vtx_segs -- only the
+        // pointer and connection type).  Instrumented on SBND nueCC evt
+        // 168596: the 2039 MeV electron's original start vertex 14027 (seeded
+        // by set_start_vertex, later superseded when examine_showers
+        // re-seats the shower onto the main vertex) walls off a 4.74 cm
+        // proton stub and, past it, a 7.7 cm electron stub 96% inside this
+        // shower's own point cloud -- left as a separate shower that later
+        // pairs into a spurious pi0 via the ownership-free kine_charge sum.
+        // See PRShower.h complete_structure_with_start_segment for the full
+        // mechanism.  Default false = legacy has_node()-gated frontier,
+        // byte-identical.
+        bool m_shower_walk_visited_parity{false};
+
         // 2D charge maps cached for the duration of shower_clustering_with_nv.
         // Populated once by collect_charge_maps(); reused by calculate_shower_kinematics
         // and all cal_kine_charge call sites to avoid O(N_hits) re-collection per shower.
@@ -2225,6 +2933,20 @@ namespace WireCell::Clus::PR {
         // replaces the pointer.  Gated on m_main_vertex_graph_audit (default
         // false => immediate return, no side effects).
         bool main_vertex_graph_audit(Graph& graph, Facade::Cluster& cluster, VertexPtr main_vertex, TrackFitting& track_fitter, IDetectorVolumes::pointer dv);
+        // doc pr/83 r3 (sec 9.5, Mechanism C): one unscoped duplicate-
+        // corridor pass over `cluster` (op1's metric and merge recipe,
+        // fork-by-duplication -- op1 itself is untouched), refitting the
+        // cluster if anything merged.  Called from swap_main_cluster on the
+        // ABANDONED main cluster when m_swap_orphan_dup_audit is set; that
+        // gate lives in the caller so this function itself is knob-free.
+        bool orphan_dup_audit(Graph& graph, Facade::Cluster& cluster, TrackFitting& track_fitter, IDetectorVolumes::pointer dv);
+        // doc sbnd_xin/docs/pr/84 round 2 (F3, see the m_conn3_stitch_max
+        // member block): bridge disconnected main-cluster components whose
+        // closest approach to the reachable side is within
+        // m_conn3_stitch_max, then one full refit.  Returns true iff at
+        // least one bridge was created.  Gated on m_conn3_stitch_max > 0
+        // (default 0 => immediate return, no side effects).
+        bool stitch_disconnected_main_cluster(Graph& graph, Facade::Cluster& cluster, VertexPtr main_vertex, TrackFitting& track_fitter, IDetectorVolumes::pointer dv);
         // doc sbnd_xin/docs/pr/51 round 4 (see the m_rough_path_probe member
         // block): diagnostic-only TRACE probe for the near-vertex short-cut
         // investigation.  Never edits graph, segment, or fit content; always
@@ -2237,12 +2959,17 @@ namespace WireCell::Clus::PR {
 
         // cluster functions ...
         Facade::geo_vector_t calc_dir_cluster(Graph& graph, Facade::Cluster& cluster, const Facade::geo_point_t& orig_p, double dis_cut);
-        Facade::Cluster* swap_main_cluster(Facade::Cluster& new_main_cluster, Facade::Cluster& old_main_cluster, std::vector<Facade::Cluster*>& other_clusters);
-        void examine_main_vertices(Graph& graph, ClusterVertexMap& map_cluster_main_vertices, Facade::Cluster*& main_cluster, std::vector<Facade::Cluster*>& other_clusters);
+        // doc pr/83 r3: the three trailing params exist only for
+        // m_swap_orphan_dup_audit (the abandoned-cluster duplicate audit,
+        // sec 9.5).  Defaulted null => every legacy call compiles and, knob
+        // off, behaves byte-identically; knob on with any of them missing
+        // logs a "skipped" TRACE rather than silently auditing nothing.
+        Facade::Cluster* swap_main_cluster(Facade::Cluster& new_main_cluster, Facade::Cluster& old_main_cluster, std::vector<Facade::Cluster*>& other_clusters, Graph* graph = nullptr, TrackFitting* track_fitter = nullptr, IDetectorVolumes::pointer dv = nullptr);
+        void examine_main_vertices(Graph& graph, ClusterVertexMap& map_cluster_main_vertices, Facade::Cluster*& main_cluster, std::vector<Facade::Cluster*>& other_clusters, TrackFitting* track_fitter = nullptr, IDetectorVolumes::pointer dv = nullptr);
 
         VertexPtr compare_main_vertices_global(Graph& graph, std::vector<VertexPtr>& vertex_candidates, Facade::Cluster& main_cluster, TrackFitting& track_fitter, IDetectorVolumes::pointer dv);
         Facade::Cluster* check_switch_main_cluster(Graph& graph, ClusterVertexMap map_cluster_main_vertices, Facade::Cluster* main_cluster, std::vector<Facade::Cluster*>& other_clusters, TrackFitting& track_fitter, IDetectorVolumes::pointer dv);
-        Facade::Cluster* check_switch_main_cluster_2(Graph& graph, VertexPtr temp_main_vertex, Facade::Cluster* max_length_cluster, Facade::Cluster* main_cluster, std::vector<Facade::Cluster*>& other_clusters);
+        Facade::Cluster* check_switch_main_cluster_2(Graph& graph, VertexPtr temp_main_vertex, Facade::Cluster* max_length_cluster, Facade::Cluster* main_cluster, std::vector<Facade::Cluster*>& other_clusters, TrackFitting* track_fitter = nullptr, IDetectorVolumes::pointer dv = nullptr);
         // doc sbnd_xin/docs/pr/51 round 3: map_cluster_main_vertices and
         // main_cluster are BY REFERENCE (matching determine_overall_main_vertex_DL
         // below) so a cluster swap decided internally (examine_main_vertices /
@@ -2276,6 +3003,9 @@ namespace WireCell::Clus::PR {
 
         // shower related functions
         void update_shower_maps(IndexedShowerSet& showers, ShowerVertexMap& map_vertex_in_shower, ShowerSegmentMap& map_segment_in_shower, VertexShowerSetMap& map_vertex_to_shower, ClusterPtrSet& used_shower_clusters);
+        // doc pr/84 round 3 -- see m_shower_dedup_start_seg.  Returns the
+        // number of showers absorbed (0 => nothing changed).
+        int merge_showers_sharing_start_segment(IndexedShowerSet& showers);
         // doc sbnd_xin/docs/pr/74 round 2 K4 -- see m_shower_stem_backfill.
         void stem_backfill(Graph& graph, VertexPtr main_vertex, IndexedShowerSet& showers, ShowerVertexMap& map_vertex_in_shower, ShowerSegmentMap& map_segment_in_shower, VertexShowerSetMap& map_vertex_to_shower, ClusterPtrSet& used_shower_clusters, IndexedSegmentSet& segments_in_long_muon, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model);
         void shower_clustering_with_nv_in_main_cluster(Graph& graph, VertexPtr main_vertex, IndexedShowerSet& showers, ShowerVertexMap& map_vertex_in_shower, ShowerSegmentMap& map_segment_in_shower, VertexShowerSetMap& map_vertex_to_shower, ClusterPtrSet& used_shower_clusters, IndexedVertexSet& vertices_in_long_muon, IndexedSegmentSet& segments_in_long_muon, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model);
@@ -2397,9 +3127,31 @@ namespace WireCell::Clus::PR {
                                 IDetectorVolumes::pointer dv,
                                 WireCell::IClusGeomHelper::pointer geom_helper,
                                 const Clus::ParticleDataSet::pointer& particle_data,
-                                const IRecombinationModel::pointer& recomb_model);
+                                const IRecombinationModel::pointer& recomb_model,
+                                // doc pr/92: pi0-paired showers (protected from the
+                                // stray-satellite drop; the TrackFitting copy is stale
+                                // at call time) and the out-param collecting dropped
+                                // shower ids for the Bee PF tree's matching gate.
+                                const IndexedShowerSet& pi0_showers = IndexedShowerSet{},
+                                std::set<int>* dropped_satellites = nullptr);
         // Convenience overloads: collect 2D charge maps internally (safe for isolated calls).
         double cal_kine_charge(ShowerPtr Shower, Graph& graph, TrackFitting& track_fitter, IDetectorVolumes::pointer dv);
+
+        /// doc pr/99 round 3 (C1/C1b): final knob-gated recompute of every
+        /// shower's kine_charge -- cross-shower 2D-cell ownership
+        /// (m_kine_charge.dedup) and/or ephemeral member-true clouds
+        /// (m_kine_charge.rebuild).  No-op unless one of the two flags is
+        /// set.  Called from shower_clustering_with_nv after all shower-
+        /// structure passes and BEFORE the pi0 finders, so pairing, taggers,
+        /// fill_kine_tree and the PF/Bee display all read one consistent
+        /// energy set while every mid-pipeline gate saw legacy values.
+        /// doc pr/101 (K1): `graph` supplies the non-member track segments
+        /// that receive ownership contexts when m_kine_charge.track_ctx is set.
+        void recompute_shower_kine_charge_final(IndexedShowerSet& showers, Graph& graph, TrackFitting& track_fitter, IDetectorVolumes::pointer dv);
+        /// doc pr/101 (K3): if m_kine_charge.hadronic_dqdx and the shower is
+        /// hadronic-typed (2212/211/2112, not a long muon), set kenergy_best
+        /// = kenergy_dQdx.  Returns true when it wrote.  No-op when off.
+        bool apply_hadronic_dqdx_best(const ShowerPtr& shower);
         double cal_kine_charge(SegmentPtr segment, Graph& graph, TrackFitting& track_fitter, IDetectorVolumes::pointer dv);
         // Fast overload: reuse pre-collected 2D charge maps (avoids O(N_hits) collection per call).
         // Collect maps once with track_fitter.collect_2D_charge() and pass here when calling in a loop.
