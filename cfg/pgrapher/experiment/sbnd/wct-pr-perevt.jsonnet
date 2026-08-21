@@ -1916,7 +1916,7 @@ function(
     // Numerics (vjs_* null) ride the C++ defaults (5 cm / 3 cm / 2 / 150 deg /
     // 0.5 cm / 1.0 cm / min_move 1.0 cm).  Rollback: -A vertex_junction_snap=false
     // (or the SBND_VERTEX_JUNCTION_SNAP=false runner env).
-    vertex_junction_snap = false,
+    vertex_junction_snap = true,
     vjs_radius = null,
     vjs_min_arm = null,
     vjs_min_prongs = null,
@@ -1927,7 +1927,7 @@ function(
     // created (405707/65289/345633 are kink-snap products); C++ default false.
     // SBND PRODUCTION ON 2026-08-21 (doc pr/104 sec 6, validated together with
     // vertex_junction_snap; 5 of the 13 final fires are kink-snap products).
-    vjs_override_kink_snap = false,
+    vjs_override_kink_snap = true,
     vjs_min_move = null,          // C++ default 1.0 cm
     // esva_ignore_empty_2d (sbnd_xin/docs/73 sec 12, round 3; C++ default
     // false = legacy): eliminate_short_vertex_activities case 5 treats the
