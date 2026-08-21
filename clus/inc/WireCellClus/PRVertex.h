@@ -39,6 +39,17 @@ namespace WireCell::Clus::PR {
         /// default-OFF knob paths (doc sbnd_xin/docs/pr/48); when no vertex
         /// carries it every examiner check is a no-op => byte-identical.
         kProtectedBreak = 1<<3,
+        /// The vertex was created by snap_main_vertex_to_kink (doc
+        /// sbnd_xin/docs/pr/50): the main vertex re-seated onto an image
+        /// corner of one of its arms.  Such a vertex also carries
+        /// kProtectedBreak (to survive the examiner re-merges), but unlike
+        /// a two-end dQ/dx break it makes no physics claim about being a
+        /// junction -- snap_main_vertex_to_junction (doc pr/104) may
+        /// arbitrate it against a nearby multi-prong junction when
+        /// vjs_override_kink_snap is set.  Nothing serialises the raw flags
+        /// word (only named bits are ever tested), so the bit is inert in
+        /// every output; it is set on the kink snap's own product only.
+        kKinkSnap = 1<<4,
     };
 
     /** A PR::Vertex instance represents a connection with one or more PR::Segment intances.

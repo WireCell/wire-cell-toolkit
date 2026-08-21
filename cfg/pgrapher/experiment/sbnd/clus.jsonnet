@@ -1564,6 +1564,17 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               // residual below this arc (cm).  C++ default 0 = off; null
               // omits the key => byte-identical.
               vks_carry_prong=null,
+              // doc pr/104 -- main-vertex junction snap (C++ defaults in
+              // TaggerCheckNeutrino.h).  false/null omit the keys => byte-identical.
+              vertex_junction_snap=false,
+              vjs_radius=null,
+              vjs_min_arm=null,
+              vjs_min_prongs=null,
+              vjs_collinear=null,
+              vjs_fit_margin=null,
+              vjs_fit_rms=null,
+              vjs_override_kink_snap=false,
+              vjs_min_move=null,
               // doc pr/51 -- main-vertex graph audit (near-vertex graph-shape
               // repair: dup-corridor merge / charge-less-bridge removal /
               // micro-stub absorb + re-seat / one refit; C++ defaults in
@@ -2423,6 +2434,15 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
             vks_fit_miss=vks_fit_miss,
             vks_hot_ratio=vks_hot_ratio,
             vks_carry_prong=vks_carry_prong,
+            vertex_junction_snap=vertex_junction_snap,
+            vjs_radius=vjs_radius,
+            vjs_min_arm=vjs_min_arm,
+            vjs_min_prongs=vjs_min_prongs,
+            vjs_collinear=vjs_collinear,
+            vjs_fit_margin=vjs_fit_margin,
+            vjs_fit_rms=vjs_fit_rms,
+            vjs_override_kink_snap=vjs_override_kink_snap,
+            vjs_min_move=vjs_min_move,
             esva_ignore_empty_2d=esva_ignore_empty_2d,
             main_vertex_graph_audit=main_vertex_graph_audit,
             mvga_radius=mvga_radius,
@@ -3378,6 +3398,17 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
               // residual below this arc (cm).  C++ default 0 = off; null
               // omits the key => byte-identical.
               vks_carry_prong=null,
+              // doc pr/104 -- main-vertex junction snap (C++ defaults in
+              // TaggerCheckNeutrino.h).  false/null omit the keys => byte-identical.
+              vertex_junction_snap=false,
+              vjs_radius=null,
+              vjs_min_arm=null,
+              vjs_min_prongs=null,
+              vjs_collinear=null,
+              vjs_fit_margin=null,
+              vjs_fit_rms=null,
+              vjs_override_kink_snap=false,
+              vjs_min_move=null,
               // doc pr/51 -- main-vertex graph audit + DL rerank
               // cross-cluster swap guard (506746).  false/null omit the
               // keys => byte-identical (see the clus_pr arg comments).
@@ -3843,6 +3874,15 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 vks_fit_miss=vks_fit_miss,
                 vks_hot_ratio=vks_hot_ratio,
                 vks_carry_prong=vks_carry_prong,
+                vertex_junction_snap=vertex_junction_snap,
+                vjs_radius=vjs_radius,
+                vjs_min_arm=vjs_min_arm,
+                vjs_min_prongs=vjs_min_prongs,
+                vjs_collinear=vjs_collinear,
+                vjs_fit_margin=vjs_fit_margin,
+                vjs_fit_rms=vjs_fit_rms,
+                vjs_override_kink_snap=vjs_override_kink_snap,
+                vjs_min_move=vjs_min_move,
                 esva_ignore_empty_2d=esva_ignore_empty_2d,
                 main_vertex_graph_audit=main_vertex_graph_audit,
                 mvga_radius=mvga_radius,

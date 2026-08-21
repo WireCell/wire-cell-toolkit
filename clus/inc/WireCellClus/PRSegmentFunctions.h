@@ -225,6 +225,20 @@ namespace WireCell::Clus::PR {
     /// A longer track earns a longer direction lever arm.
     double mvfit_rout_dyn(double chord, double frac, double rmin, double rmax);
 
+    /// doc sbnd_xin/docs/pr/104: pure helpers behind snap_main_vertex_to_junction.
+    /// Number of distinct direction classes among unit outward prong
+    /// directions: two prongs whose directions fold past `collinear_deg`
+    /// (i.e. angle between them > collinear_deg) are one class -- a track
+    /// passing through the vertex.  Greedy in input order.
+    int vjs_direction_classes(const std::vector<WireCell::Vector>& dirs, double collinear_deg);
+
+    /// Joint least-squares intersection of 3-D lines (anchor, unit dir):
+    /// minimises the sum of squared transverse distances.  Returns false
+    /// when the normal matrix is singular (all lines parallel).  `rms` is
+    /// the RMS transverse residual of the solution.
+    bool vjs_joint_fit(const std::vector<std::pair<WireCell::Point, WireCell::Vector>>& lines,
+                       WireCell::Point& out, double& rms);
+
     /// doc sbnd_xin/docs/pr/51 round 7: per-leg disagreement gate.  True iff
     /// the folded angle (acos|dot|, eigenvector signs are arbitrary) between
     /// the production inner axis and the outer window's leading axis exceeds

@@ -1906,6 +1906,29 @@ function(
     // the SBND_VKS_CARRY_PRONG runner env).  null/0 omits the key =>
     // byte-identical.
     vks_carry_prong = null,
+    // doc pr/104 -- main-vertex junction snap: re-point the main vertex to
+    // a nearby multi-prong track junction when the selected vertex has no
+    // track prong of its own, or the joint line fit of both vertices' prongs
+    // lands on the junction (18255-405707/65289/66712/282072/345633).
+    // C++ default false.  SBND PRODUCTION ON 2026-08-21 (doc pr/104 sec 6:
+    // OFF gates PASS 30/38/96/2000, zero ADVERSE movers on mcp1k/NCpi0,
+    // nueCC48 nue-selected 39->40, owner pre-authorized "same as before").
+    // Numerics (vjs_* null) ride the C++ defaults (5 cm / 3 cm / 2 / 150 deg /
+    // 0.5 cm / 1.0 cm / min_move 1.0 cm).  Rollback: -A vertex_junction_snap=false
+    // (or the SBND_VERTEX_JUNCTION_SNAP=false runner env).
+    vertex_junction_snap = false,
+    vjs_radius = null,
+    vjs_min_arm = null,
+    vjs_min_prongs = null,
+    vjs_collinear = null,
+    vjs_fit_margin = null,
+    vjs_fit_rms = null,
+    // doc pr/104: also arbitrate a main vertex that vertex_kink_snap itself
+    // created (405707/65289/345633 are kink-snap products); C++ default false.
+    // SBND PRODUCTION ON 2026-08-21 (doc pr/104 sec 6, validated together with
+    // vertex_junction_snap; 5 of the 13 final fires are kink-snap products).
+    vjs_override_kink_snap = false,
+    vjs_min_move = null,          // C++ default 1.0 cm
     // esva_ignore_empty_2d (sbnd_xin/docs/73 sec 12, round 3; C++ default
     // false = legacy): eliminate_short_vertex_activities case 5 treats the
     // empty-2D-index sentinel (-1: the pre-existing segment has no points in
@@ -2706,6 +2729,15 @@ function(
                              vks_fit_miss=vks_fit_miss,
                              vks_hot_ratio=vks_hot_ratio,
                              vks_carry_prong=vks_carry_prong,
+                             vertex_junction_snap=vertex_junction_snap,
+                             vjs_radius=vjs_radius,
+                             vjs_min_arm=vjs_min_arm,
+                             vjs_min_prongs=vjs_min_prongs,
+                             vjs_collinear=vjs_collinear,
+                             vjs_fit_margin=vjs_fit_margin,
+                             vjs_fit_rms=vjs_fit_rms,
+                             vjs_override_kink_snap=vjs_override_kink_snap,
+                             vjs_min_move=vjs_min_move,
                              esva_ignore_empty_2d=esva_ignore_empty_2d,
                              main_vertex_graph_audit=main_vertex_graph_audit,
                              mvga_radius=mvga_radius,

@@ -94,6 +94,60 @@ bool mvfit_leg_disagrees(const WireCell::Point& inner_axis,
     return angle > angle_deg;
 }
 
+// doc sbnd_xin/docs/pr/104: junction-snap helpers (declared in
+// PRSegmentFunctions.h, doctest_vertex_junction_snap.cxx).
+int vjs_direction_classes(const std::vector<WireCell::Vector>& dirs, double collinear_deg)
+{
+    int n = 0;
+    std::vector<bool> used(dirs.size(), false);
+    for (size_t i = 0; i < dirs.size(); i++) {
+        if (used[i]) continue;
+        used[i] = true;
+        n++;
+        for (size_t j = i + 1; j < dirs.size(); j++) {
+            if (used[j]) continue;
+            const double mi = dirs[i].magnitude(), mj = dirs[j].magnitude();
+            if (mi <= 0 || mj <= 0) continue;
+            double c = dirs[i].dot(dirs[j]) / (mi * mj);
+            if (c > 1.0) c = 1.0;
+            if (c < -1.0) c = -1.0;
+            if (std::acos(c) * 180.0 / M_PI > collinear_deg) used[j] = true;
+        }
+    }
+    return n;
+}
+
+bool vjs_joint_fit(const std::vector<std::pair<WireCell::Point, WireCell::Vector>>& lines,
+                   WireCell::Point& out, double& rms)
+{
+    Eigen::Matrix3d A = Eigen::Matrix3d::Zero();
+    Eigen::Vector3d b = Eigen::Vector3d::Zero();
+    std::vector<std::pair<Eigen::Vector3d, Eigen::Matrix3d>> terms;
+    for (const auto& [p, d] : lines) {
+        const double m = d.magnitude();
+        if (m <= 0) continue;
+        Eigen::Vector3d u(d.x() / m, d.y() / m, d.z() / m);
+        Eigen::Vector3d q(p.x(), p.y(), p.z());
+        Eigen::Matrix3d Pm = Eigen::Matrix3d::Identity() - u * u.transpose();
+        A += Pm;
+        b += Pm * q;
+        terms.emplace_back(q, Pm);
+    }
+    if (terms.size() < 2) return false;
+    Eigen::FullPivLU<Eigen::Matrix3d> lu(A);
+    if (!lu.isInvertible()) return false;
+    Eigen::Vector3d x = lu.solve(b);
+    if (!std::isfinite(x(0)) || !std::isfinite(x(1)) || !std::isfinite(x(2))) return false;
+    double ss = 0;
+    for (const auto& [q, Pm] : terms) {
+        Eigen::Vector3d r = Pm * (x - q);
+        ss += r.squaredNorm();
+    }
+    rms = std::sqrt(ss / terms.size());
+    out = WireCell::Point(x(0), x(1), x(2));
+    return true;
+}
+
 }  // namespace WireCell::Clus::PR
 
 MyFCN::MyFCN(VertexPtr vtx, bool flag_vtx_constraint, double vtx_constraint_range, 

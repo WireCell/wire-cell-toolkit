@@ -348,6 +348,16 @@ TEST_CASE("clus knob defaults: TaggerCheckNeutrino switches are all OFF")
     CHECK_KNOB_NUM(cfg, "vks_fit_miss", 0.35);
     CHECK_KNOB_NUM(cfg, "vks_hot_ratio", 0.0);
     CHECK_KNOB_NUM(cfg, "vks_carry_prong", 0.0);  // doc pr/85: 0 = no carry, byte-identical
+    // doc pr/104: main-vertex junction snap, inert while vertex_junction_snap is false.
+    CHECK_KNOB_BOOL(cfg, "vertex_junction_snap", false);
+    CHECK_KNOB_NUM(cfg, "vjs_radius", 5.0);
+    CHECK_KNOB_NUM(cfg, "vjs_min_arm", 3.0);
+    CHECK_KNOB_NUM(cfg, "vjs_min_prongs", 2);
+    CHECK_KNOB_NUM(cfg, "vjs_collinear", 150.0);
+    CHECK_KNOB_NUM(cfg, "vjs_fit_margin", 0.5);
+    CHECK_KNOB_NUM(cfg, "vjs_fit_rms", 1.0);
+    CHECK_KNOB_BOOL(cfg, "vjs_override_kink_snap", false);
+    CHECK_KNOB_NUM(cfg, "vjs_min_move", 1.0);
     // doc pr/51: the mvga_* operating point (cm/deg/dimensionless), all
     // inert while main_vertex_graph_audit is false.
     CHECK_KNOB_NUM(cfg, "mvga_radius", 15.0);

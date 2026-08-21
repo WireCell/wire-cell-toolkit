@@ -159,6 +159,20 @@ public:
         double m_vks_fit_miss{0.35};  // cm; snap only when the fit misses the image corner by >= this
         double m_vks_hot_ratio{0};    // x mip_dqdx_median; 0 = veto off (default: misfires on misassigned charge)
         double m_vks_carry_prong{0};  // cm; carry the old vertex's arms through the snap residual below this arc (doc pr/85); 0 = off, byte-identical
+        // doc sbnd_xin/docs/pr/104 -- main-vertex junction snap: re-point the
+        // main vertex to a nearby >=2-prong track junction when the selected
+        // vertex has no track prong of its own (tier A) or the joint
+        // line-intersection of both vertices' prongs lands on the junction
+        // (tier B).  All defaults = the pass never fires => byte-identical.
+        bool   m_vertex_junction_snap{false};
+        double m_vjs_radius{5.0};      // cm; graph-path reach from the main vertex
+        double m_vjs_min_arm{3.0};     // cm; a prong must carry at least this path length
+        int    m_vjs_min_prongs{2};    // direction classes the junction must carry
+        double m_vjs_collinear{150.0}; // deg; two prongs folding past this are one pass-through class
+        double m_vjs_fit_margin{0.5};  // cm; tier B: fit point must be nearer J than M by this
+        double m_vjs_fit_rms{1.0};     // cm; tier B: max RMS transverse residual of the joint fit
+        bool   m_vjs_override_kink_snap{false}; // let the snap arbitrate a main vertex the kink snap created (kKinkSnap); TEB vertices stay protected
+        double m_vjs_min_move{1.0};    // cm; never re-point to a junction closer than this (same point at label resolution; nueCC48 400474)
         // doc sbnd_xin/docs/pr/51 -- main-vertex graph audit (near-vertex
         // graph-shape repair: duplicate-corridor merge / charge-less-bridge
         // removal / micro-stub absorb + re-seat / one refit).  Mirrors of

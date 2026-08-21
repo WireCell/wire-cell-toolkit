@@ -2829,6 +2829,10 @@ bool PatternAlgorithms::snap_main_vertex_to_kink(Graph& graph, Facade::Cluster& 
     // Shield against examine_vertices / ES2 / ES3 re-merging the deliberate
     // break (the pr/48 kProtectedBreak contract).
     vtx_new->set_flags(VertexFlags::kProtectedBreak);
+    // doc pr/104: mark the product as a kink-snap vertex (inert bit, see
+    // VertexFlags::kKinkSnap) so the junction snap can tell it from a
+    // two-end dQ/dx break.
+    vtx_new->set_flags(VertexFlags::kKinkSnap);
     (void)segs;
 
     SPDLOG_LOGGER_DEBUG(s_log, "snap_main_vertex_to_kink: SNAP cluster {} old=({:.2f},{:.2f},{:.2f}) new=({:.2f},{:.2f},{:.2f}) turn={:.1f} deg arc={:.2f} cm bendV={:.1f} deg",
@@ -2898,6 +2902,343 @@ bool PatternAlgorithms::snap_main_vertex_to_kink(Graph& graph, Facade::Cluster& 
     // One full refit so the trajectory re-anchors on the corner before
     // improve_vertex polishes (same argument pattern as its refits).
     track_fitter.do_multi_tracking(true, true, true, m_fit_exclusion, false, &cluster);
+    return true;
+}
+
+
+// doc sbnd_xin/docs/pr/104: main-vertex junction snap.  Toolkit-only (no
+// prototype counterpart; the prototype has no post-selection re-point
+// either).  Reads fits()/wcpts() of the incident segments, edits nothing
+// but the `main_vertex` pointer.  Inert unless m_vertex_junction_snap.
+bool PatternAlgorithms::snap_main_vertex_to_junction(Graph& graph, Facade::Cluster& cluster, VertexPtr& main_vertex)
+{
+    if (!m_vertex_junction_snap) return false;
+    if (!main_vertex || main_vertex->cluster() != &cluster) {
+        s_log->trace("vjs: cluster {} declined (main vertex null or not in this cluster)", cluster.ident());
+        return false;
+    }
+    if (!main_vertex->descriptor_valid()) {
+        s_log->trace("vjs: cluster {} declined (main vertex descriptor invalid)", cluster.ident());
+        return false;
+    }
+    // G1 (as snap_main_vertex_to_kink): never steal a protected junction --
+    // except, under m_vjs_override_kink_snap, a vertex the kink snap itself
+    // created (kKinkSnap): that re-seat is a geometric heuristic, not a
+    // junction claim, and 18255-405707/65289/345633 are exactly kink-snap
+    // products 2-4 cm from the junction the prongs meet at.  Two-end dQ/dx
+    // breaks and kink_break_protect vertices stay protected.
+    if (main_vertex->flags_any(VertexFlags::kProtectedBreak)) {
+        const bool kink_product = main_vertex->flags_any(VertexFlags::kKinkSnap);
+        if (!(m_vjs_override_kink_snap && kink_product)) {
+            s_log->trace("vjs: cluster {} declined (main vertex kProtectedBreak, kink_snap_product={} override={})",
+                         cluster.ident(), kink_product, m_vjs_override_kink_snap);
+            return false;
+        }
+    }
+
+    // --- local helpers -------------------------------------------------
+    auto seg_path = [](const SegmentPtr& sg) {
+        std::vector<WireCell::Point> pts;
+        const auto& fits = sg->fits();
+        if (fits.size() >= 2) {
+            for (const auto& f : fits) pts.push_back(f.point);
+        }
+        else {
+            for (const auto& w : sg->wcpts()) pts.push_back(w.point);
+        }
+        return pts;
+    };
+    auto path_len = [](const std::vector<WireCell::Point>& pts) {
+        double L = 0;
+        for (size_t k = 1; k < pts.size(); k++) L += (pts[k] - pts[k-1]).magnitude();
+        return L;
+    };
+    // Oriented so that index 0 sits at `at` (by endpoint proximity -- the
+    // fit points of a segment start at one of its two vertices).
+    auto oriented = [&](const SegmentPtr& sg, const VertexPtr& at) {
+        auto pts = seg_path(sg);
+        if (pts.size() >= 2) {
+            const WireCell::Point vp = at->fit().valid() ? at->fit().point : at->wcpt().point;
+            if ((pts.back() - vp).magnitude() < (pts.front() - vp).magnitude()) {
+                std::reverse(pts.begin(), pts.end());
+            }
+        }
+        return pts;
+    };
+    // Track-like = not shower-flagged.  The particle_info pdg is NOT
+    // consulted here: at this stage (before the final examine_direction /
+    // PID) it is a provisional tag -- 345633's 47 cm pion and 14 cm muon
+    // both still carry pdg 11 when the snap runs -- whereas the shower flags
+    // are the topology verdict.
+    auto is_track = [](const SegmentPtr& sg) {
+        if (sg->flags_any(SegmentFlags::kShowerTrajectory) || sg->flags_any(SegmentFlags::kShowerTopology)) return false;
+        return true;
+    };
+    // Outward direction + anchor of a prong from its path points (index 0 at
+    // the vertex): PCA axis of the points 1-8 cm out (mvfit_annulus_pca),
+    // chord fallback when fewer than 3 points fall in the window.
+    auto prong_dir = [&](const std::vector<WireCell::Point>& pts, WireCell::Vector& dir, WireCell::Point& anchor) {
+        if (pts.size() < 2) return false;
+        const auto pca = mvfit_annulus_pca(pts, pts[0], 1.0*units::cm, 8.0*units::cm);
+        WireCell::Point far = pts.back();
+        for (size_t k = pts.size(); k-- > 1;) {
+            if ((pts[k] - pts[0]).magnitude() <= 8.0*units::cm) { far = pts[k]; break; }
+        }
+        if (pca.npts >= 3 && pca.axes[0].magnitude() > 0) {
+            dir = pca.axes[0];
+            if (dir.dot(far - pts[0]) < 0) dir = dir * (-1.0);
+            anchor = pca.center;
+            return true;
+        }
+        WireCell::Vector v = far - pts[0];
+        if (v.magnitude() <= 0) return false;
+        dir = v.norm();
+        anchor = pts[0];
+        return true;
+    };
+    struct Prong { WireCell::Vector dir; WireCell::Point anchor; double len; };
+    // Prongs at `at`, excluding the segments on the M-J path.  A stub shorter
+    // than m_vjs_min_arm whose far vertex has degree 2 and continues into a
+    // track counts, with the direction taken along stub + continuation.
+    auto prongs_at = [&](const VertexPtr& at, const std::vector<SegmentPtr>& excluded) {
+        std::vector<Prong> out;
+        if (!at->descriptor_valid()) return out;
+        for (auto edesc : sorted_out_edges(at->get_descriptor(), graph)) {
+            SegmentPtr sg = graph[edesc].segment;
+            if (!sg) continue;
+            if (std::find(excluded.begin(), excluded.end(), sg) != excluded.end()) continue;
+            if (!is_track(sg)) continue;
+            auto pts = oriented(sg, at);
+            const double L = path_len(pts);
+            Prong p;
+            if (L >= m_vjs_min_arm) {
+                if (prong_dir(pts, p.dir, p.anchor)) { p.len = L; out.push_back(p); }
+                continue;
+            }
+            auto [vf, vb] = find_vertices(graph, sg);
+            VertexPtr far = (vf == at) ? vb : vf;
+            if (!far || !far->descriptor_valid()) continue;
+            if (boost::degree(far->get_descriptor(), graph) != 2) continue;
+            SegmentPtr cont = nullptr;
+            for (auto e2 : sorted_out_edges(far->get_descriptor(), graph)) {
+                SegmentPtr s2 = graph[e2].segment;
+                if (s2 && s2 != sg) cont = s2;
+            }
+            if (!cont || !is_track(cont)) continue;
+            if (std::find(excluded.begin(), excluded.end(), cont) != excluded.end()) continue;
+            auto cpts = oriented(cont, far);
+            const double Lc = path_len(cpts);
+            if (Lc < m_vjs_min_arm) continue;
+            for (size_t k = 1; k < cpts.size(); k++) pts.push_back(cpts[k]);
+            if (prong_dir(pts, p.dir, p.anchor)) { p.len = L + Lc; out.push_back(p); }
+        }
+        return out;
+    };
+    auto classes_of = [&](const std::vector<Prong>& pr) {
+        std::vector<WireCell::Vector> dirs;
+        for (const auto& p : pr) dirs.push_back(p.dir);
+        return vjs_direction_classes(dirs, m_vjs_collinear);
+    };
+    auto vpos = [](const VertexPtr& v) { return v->fit().valid() ? v->fit().point : v->wcpt().point; };
+
+    // EM guard: a main vertex that owns a shower prong is an EM vertex --
+    // out of scope (owner: vertex inside a shower is not this problem).
+    // kShowerTrajectory alone does not count: a track piece inside a shower
+    // chain inherits it (345633's kink-snap arm), and the flag is re-derived
+    // downstream anyway; kShowerTopology / an electron pdg is the EM claim.
+    // A kink-snap product is exempt: its arms are the two halves of the
+    // segment the snap broke and inherit that segment's classification
+    // (345633: a 3.7 cm half tagged pdg 11), which says nothing about the
+    // kink vertex being an EM vertex.
+    const bool main_is_kink_product = main_vertex->flags_any(VertexFlags::kKinkSnap);
+    for (auto edesc : sorted_out_edges(main_vertex->get_descriptor(), graph)) {
+        if (main_is_kink_product) break;
+        SegmentPtr sg = graph[edesc].segment;
+        if (!sg) continue;
+        const bool em = sg->flags_any(SegmentFlags::kShowerTopology) ||
+                        (sg->particle_info() && std::abs(sg->particle_info()->pdg()) == 11);
+        if (!em) continue;
+        const double L = path_len(seg_path(sg));
+        if (L >= m_vjs_min_arm) {
+            s_log->trace("vjs: cluster {} declined (main vertex owns a shower prong len={:.2f} cm topo={} traj={} pdg={})",
+                cluster.ident(), L/units::cm, sg->flags_any(SegmentFlags::kShowerTopology),
+                sg->flags_any(SegmentFlags::kShowerTrajectory),
+                sg->particle_info() ? sg->particle_info()->pdg() : 0);
+            return false;
+        }
+    }
+
+    // --- reach: vertices within m_vjs_radius of graph path from M -----
+    struct Reach { VertexPtr vtx; double path; std::vector<SegmentPtr> segs; };
+    std::vector<Reach> reached;           // discovery order (deterministic: sorted_out_edges)
+    std::map<Vertex*, size_t> where;      // lookup only, never iterated
+    reached.push_back({main_vertex, 0.0, {}});
+    where[main_vertex.get()] = 0;
+    for (size_t head = 0; head < reached.size(); head++) {
+        const Reach cur = reached[head];   // copy: reached may grow
+        if (!cur.vtx->descriptor_valid()) continue;
+        for (auto edesc : sorted_out_edges(cur.vtx->get_descriptor(), graph)) {
+            SegmentPtr sg = graph[edesc].segment;
+            if (!sg) continue;
+            if (std::find(cur.segs.begin(), cur.segs.end(), sg) != cur.segs.end()) continue;
+            auto [vf, vb] = find_vertices(graph, sg);
+            VertexPtr w = (vf == cur.vtx) ? vb : vf;
+            if (!w || w == main_vertex) continue;
+            const double L = cur.path + path_len(seg_path(sg));
+            if (L > m_vjs_radius) continue;
+            auto it = where.find(w.get());
+            std::vector<SegmentPtr> segs = cur.segs;
+            segs.push_back(sg);
+            if (it == where.end()) {
+                where[w.get()] = reached.size();
+                reached.push_back({w, L, segs});
+            }
+            else if (L < reached[it->second].path) {
+                reached[it->second].path = L;
+                reached[it->second].segs = segs;
+            }
+        }
+    }
+
+    // Euclidean fallback: a junction whose connector to M has not been built
+    // yet (66712: the 3.2 cm M-J link is created later by improve_vertex /
+    // mvga) is still a candidate when it sits within m_vjs_radius of M in
+    // the same cluster.  No path segments to exclude; path recorded as the
+    // straight distance.  Iterated in stable vertex-index order.
+    const size_t n_reached = reached.size() - 1;
+    for (auto vdesc : boost::make_iterator_range(boost::vertices(graph))) {
+        VertexPtr w = graph[vdesc].vertex;
+        if (!w || w == main_vertex || w->cluster() != &cluster || !w->descriptor_valid()) continue;
+        if (where.count(w.get())) continue;
+        const double d = (vpos(w) - vpos(main_vertex)).magnitude();
+        if (d > m_vjs_radius) continue;
+        where[w.get()] = reached.size();
+        reached.push_back({w, d, {}});
+    }
+    s_log->trace("vjs: cluster {} main=({:.2f},{:.2f},{:.2f}) deg={} kink_snap_product={} reached {} vertices within {:.1f} cm (+{} euclidean)",
+        cluster.ident(), vpos(main_vertex).x()/units::cm, vpos(main_vertex).y()/units::cm, vpos(main_vertex).z()/units::cm,
+        boost::degree(main_vertex->get_descriptor(), graph), main_vertex->flags_any(VertexFlags::kKinkSnap),
+        n_reached, m_vjs_radius/units::cm, reached.size() - 1 - n_reached);
+
+    // --- evaluate every candidate J -----------------------------------
+    struct Cand { VertexPtr J; double path; int tier; int sM; int sJ; int degJ; double dfM; double dfJ; double rms;
+                  std::vector<Prong> prJ; std::vector<SegmentPtr> segs; };
+    std::vector<Cand> cands;
+    for (size_t i = 1; i < reached.size(); i++) {
+        const auto& r = reached[i];
+        VertexPtr J = r.vtx;
+        if (J->cluster() != &cluster || !J->descriptor_valid()) continue;
+        // Distance floor: two vertices closer than m_vjs_min_move are the
+        // same point at label resolution (pr/78 tolerance 1 cm) -- re-pointing
+        // between them only churns (nueCC48 400474: the kink snap had the
+        // vertex on the click, a 0.84 cm tier-B move took it off).
+        if ((vpos(J) - vpos(main_vertex)).magnitude() < m_vjs_min_move) {
+            s_log->trace("vjs: eval cluster {} J=({:.2f},{:.2f},{:.2f}) skipped (dist {:.2f} cm < min_move)",
+                cluster.ident(), vpos(J).x()/units::cm, vpos(J).y()/units::cm, vpos(J).z()/units::cm,
+                (vpos(J) - vpos(main_vertex)).magnitude()/units::cm);
+            continue;
+        }
+        const auto prM = prongs_at(main_vertex, r.segs);
+        const auto prJ = prongs_at(J, r.segs);
+        const int sM = classes_of(prM);
+        const int sJ = classes_of(prJ);
+        int tier = 0;
+        double dfM = -1, dfJ = -1, rms = -1;
+        if (sM == 0 && sJ >= m_vjs_min_prongs) {
+            tier = 1;
+        }
+        else if (sM >= 1 && sJ >= 1 && sM + sJ >= 3) {
+            std::vector<std::pair<WireCell::Point, WireCell::Vector>> lines;
+            for (const auto& p : prM) lines.emplace_back(p.anchor, p.dir);
+            for (const auto& p : prJ) lines.emplace_back(p.anchor, p.dir);
+            WireCell::Point fx;
+            if (vjs_joint_fit(lines, fx, rms)) {
+                dfM = (fx - vpos(main_vertex)).magnitude();
+                dfJ = (fx - vpos(J)).magnitude();
+                if (dfM - dfJ > m_vjs_fit_margin && rms < m_vjs_fit_rms) tier = 2;
+            }
+        }
+        const int degJ = boost::degree(J->get_descriptor(), graph);
+        s_log->trace("vjs: eval cluster {} J=({:.2f},{:.2f},{:.2f}) path={:.2f} cm degJ={} sM={} sJ={} tier={} fit_dM={:.2f} fit_dJ={:.2f} rms={:.2f}",
+            cluster.ident(), vpos(J).x()/units::cm, vpos(J).y()/units::cm, vpos(J).z()/units::cm,
+            r.path/units::cm, degJ, sM, sJ, tier, dfM/units::cm, dfJ/units::cm, rms/units::cm);
+        if (!tier) continue;
+        cands.push_back(Cand{J, r.path, tier, sM, sJ, degJ, dfM, dfJ, rms, prJ, r.segs});
+    }
+    if (cands.empty()) {
+        s_log->trace("vjs: cluster {} declined (no candidate junction)", cluster.ident());
+        return false;
+    }
+    // Rank: strength first.  Among equal-strength candidates (65289: the
+    // DL-selected vertex and the owner's junction both carry two prongs)
+    // the path length is not physics -- arbitrate with a joint fit of the
+    // prongs of M and of ALL tied candidates (every path segment excluded)
+    // and take the candidate nearest the fit point; fall back to the
+    // shortest path only when the fit is singular or too poor.
+    // Ambiguity arbitration.  When MORE THAN ONE junction (degree >= 3,
+    // qualified or not) sits within reach, the candidate is not unique:
+    // 65289 has the DL vertex and the owner's junction both carrying two
+    // prongs; 281837 has a 6-prong star still split into two partial deg-3
+    // junctions that improve_vertex's vertex-activity search assembles
+    // later.  A joint fit of the prongs of M and of every junction decides:
+    // it must converge (rms < m_vjs_fit_rms) and its nearest junction must
+    // be a qualified candidate -- otherwise decline (never fall back to the
+    // shortest path, which is not physics).  A single junction needs no
+    // arbitration.
+    std::vector<const Reach*> juncs;
+    for (size_t i = 1; i < reached.size(); i++) {
+        const auto& r = reached[i];
+        if (r.vtx->cluster() != &cluster || !r.vtx->descriptor_valid()) continue;
+        if (boost::degree(r.vtx->get_descriptor(), graph) >= 3) juncs.push_back(&r);
+    }
+    const Cand* pick = nullptr;
+    std::string how = "single";
+    if (juncs.size() <= 1) {
+        for (const auto& c : cands) {
+            if (!pick || c.sJ > pick->sJ || (c.sJ == pick->sJ && c.path < pick->path)) pick = &c;
+        }
+    }
+    else {
+        std::vector<SegmentPtr> all_path;
+        for (const auto* r : juncs) all_path.insert(all_path.end(), r->segs.begin(), r->segs.end());
+        std::vector<std::pair<WireCell::Point, WireCell::Vector>> lines;
+        for (const auto& p : prongs_at(main_vertex, all_path)) lines.emplace_back(p.anchor, p.dir);
+        for (const auto* r : juncs) for (const auto& p : prongs_at(r->vtx, all_path)) lines.emplace_back(p.anchor, p.dir);
+        WireCell::Point fx; double frms = -1;
+        const bool ok = lines.size() >= 2 && vjs_joint_fit(lines, fx, frms);
+        if (!ok || frms >= m_vjs_fit_rms) {
+            s_log->trace("vjs: cluster {} declined ({} junctions in reach, joint fit {} rms={:.2f} cm over {} lines)",
+                cluster.ident(), juncs.size(), ok ? "does not converge" : "singular", frms/units::cm, lines.size());
+            return false;
+        }
+        const Reach* nearest = nullptr; double bestd = 1e30;
+        for (const auto* r : juncs) {
+            const double d = (fx - vpos(r->vtx)).magnitude();
+            s_log->trace("vjs: arbitrate cluster {} J=({:.2f},{:.2f},{:.2f}) path={:.2f} cm fit_d={:.2f} cm (rms {:.2f}, {} lines)",
+                cluster.ident(), vpos(r->vtx).x()/units::cm, vpos(r->vtx).y()/units::cm, vpos(r->vtx).z()/units::cm,
+                r->path/units::cm, d/units::cm, frms/units::cm, lines.size());
+            if (d < bestd) { bestd = d; nearest = r; }
+        }
+        for (const auto& c : cands) if (nearest && c.J == nearest->vtx) pick = &c;
+        if (!pick) {
+            s_log->trace("vjs: cluster {} declined (fit lands on an unqualified junction, fit_d={:.2f} cm)",
+                cluster.ident(), bestd/units::cm);
+            return false;
+        }
+        how = "fit";
+    }
+    const Cand& best = *pick;
+
+    const WireCell::Point mp = vpos(main_vertex);
+    const WireCell::Point jp = vpos(best.J);
+    SPDLOG_LOGGER_DEBUG(s_log,
+        "vjs: SNAP cluster {} tier={} kink_snap_product={} M=({:.2f},{:.2f},{:.2f}) -> J=({:.2f},{:.2f},{:.2f}) dist={:.2f} cm path={:.2f} cm sM={} sJ={} degJ={} fit_dM={:.2f} fit_dJ={:.2f} rms={:.2f} ncand={} pick={}",
+        cluster.ident(), best.tier == 1 ? "A" : "B", main_vertex->flags_any(VertexFlags::kKinkSnap),
+        mp.x()/units::cm, mp.y()/units::cm, mp.z()/units::cm,
+        jp.x()/units::cm, jp.y()/units::cm, jp.z()/units::cm,
+        (jp - mp).magnitude()/units::cm, best.path/units::cm, best.sM, best.sJ, best.degJ,
+        best.dfM/units::cm, best.dfJ/units::cm, best.rms/units::cm, cands.size(), how);
+    main_vertex = best.J;
     return true;
 }
 

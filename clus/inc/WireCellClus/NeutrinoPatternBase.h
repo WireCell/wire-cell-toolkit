@@ -517,6 +517,18 @@ namespace WireCell::Clus::PR {
         double m_vks_min_arm{1.5*units::cm};  ///< outward arclength support required beyond the turn
         double m_vks_fit_miss{0.35*units::cm}; ///< snap only when the fit misses the image corner by at least this (a modeled kink has fit points on it)
         double m_vks_hot_ratio{0};            ///< OPTIONAL Bragg-hot veto scale, x m_mip_dqdx_median; default 0 = off (misfires on the failure class: misassigned charge reads hot)
+        // doc sbnd_xin/docs/pr/104: main-vertex junction snap (see
+        // snap_main_vertex_to_junction).  C++ default false => the pass
+        // returns immediately => byte-identical.
+        bool   m_vertex_junction_snap{false};
+        double m_vjs_radius{5*units::cm};      ///< graph-path reach from the main vertex
+        double m_vjs_min_arm{3*units::cm};     ///< minimum prong path length to count
+        int    m_vjs_min_prongs{2};            ///< direction classes the junction must carry
+        double m_vjs_collinear{150};           ///< deg; prongs folding past this are one pass-through class
+        double m_vjs_fit_margin{0.5*units::cm}; ///< tier B: fit point nearer J than M by this
+        double m_vjs_fit_rms{1.0*units::cm};   ///< tier B: max RMS transverse residual
+        bool   m_vjs_override_kink_snap{false}; ///< arbitrate a kKinkSnap main vertex too (never a two-end break)
+        double m_vjs_min_move{1.0*units::cm};  ///< never re-point to a junction closer than this
         // doc sbnd_xin/docs/pr/85: carry the prongs through the snap stub.
         // The snap re-breaks the arm at the image corner K and re-seats the
         // main vertex there, but the OLD vertex keeps every other arm plus
@@ -2980,6 +2992,17 @@ namespace WireCell::Clus::PR {
         // m_vertex_kink_snap (default false => immediate return, no side
         // effects).
         bool snap_main_vertex_to_kink(Graph& graph, Facade::Cluster& cluster, VertexPtr& main_vertex, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model);
+
+        /// doc sbnd_xin/docs/pr/104: main-vertex junction snap.  Re-points
+        /// `main_vertex` to a vertex J of the same cluster reachable through
+        /// <= m_vjs_radius of graph path when (tier A) the main vertex has
+        /// no track prong of its own and J carries >= m_vjs_min_prongs
+        /// direction classes, or (tier B) both carry prongs (>= 3 together)
+        /// and the joint least-squares intersection of all their prong
+        /// lines lands nearer J by m_vjs_fit_margin with RMS residual below
+        /// m_vjs_fit_rms.  Pointer move only, no graph edit.  Returns true
+        /// iff the pointer moved.  Inert unless m_vertex_junction_snap.
+        bool snap_main_vertex_to_junction(Graph& graph, Facade::Cluster& cluster, VertexPtr& main_vertex);
         // doc sbnd_xin/docs/pr/51 (see the m_main_vertex_graph_audit member
         // block): near-vertex graph audit on the main cluster.  Returns true
         // iff at least one operation edited the graph (followed by one full

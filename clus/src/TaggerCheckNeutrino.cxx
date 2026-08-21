@@ -206,6 +206,16 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_vks_fit_miss     = get(config, "vks_fit_miss",     m_vks_fit_miss);     // cm
     m_vks_hot_ratio    = get(config, "vks_hot_ratio",    m_vks_hot_ratio);
     m_vks_carry_prong  = get(config, "vks_carry_prong",  m_vks_carry_prong);  // cm (doc pr/85)
+    // doc sbnd_xin/docs/pr/104 -- main-vertex junction snap.
+    m_vertex_junction_snap = get(config, "vertex_junction_snap", m_vertex_junction_snap);
+    m_vjs_radius       = get(config, "vjs_radius",       m_vjs_radius);       // cm
+    m_vjs_min_arm      = get(config, "vjs_min_arm",      m_vjs_min_arm);      // cm
+    m_vjs_min_prongs   = get(config, "vjs_min_prongs",   m_vjs_min_prongs);
+    m_vjs_collinear    = get(config, "vjs_collinear",    m_vjs_collinear);    // deg
+    m_vjs_fit_margin   = get(config, "vjs_fit_margin",   m_vjs_fit_margin);   // cm
+    m_vjs_fit_rms      = get(config, "vjs_fit_rms",      m_vjs_fit_rms);      // cm
+    m_vjs_override_kink_snap = get(config, "vjs_override_kink_snap", m_vjs_override_kink_snap);
+    m_vjs_min_move     = get(config, "vjs_min_move",     m_vjs_min_move);     // cm
     // doc sbnd_xin/docs/pr/51 -- main-vertex graph audit.
     m_esva_ignore_empty_2d = get(config, "esva_ignore_empty_2d", m_esva_ignore_empty_2d);  // docs/73 sec 12 round 3
     m_main_vertex_graph_audit = get(config, "main_vertex_graph_audit", m_main_vertex_graph_audit);
@@ -718,6 +728,17 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["vks_fit_miss"]     = m_vks_fit_miss;
     cfg["vks_hot_ratio"]    = m_vks_hot_ratio;
     cfg["vks_carry_prong"]  = m_vks_carry_prong;  // cm; 0 = off, byte-identical (doc pr/85)
+    // doc sbnd_xin/docs/pr/104 -- main-vertex junction snap; false => the
+    // pass never fires => byte-identical.  Numerics cm/deg.
+    cfg["vertex_junction_snap"] = m_vertex_junction_snap;
+    cfg["vjs_radius"]       = m_vjs_radius;
+    cfg["vjs_min_arm"]      = m_vjs_min_arm;
+    cfg["vjs_min_prongs"]   = m_vjs_min_prongs;
+    cfg["vjs_collinear"]    = m_vjs_collinear;
+    cfg["vjs_fit_margin"]   = m_vjs_fit_margin;
+    cfg["vjs_fit_rms"]      = m_vjs_fit_rms;
+    cfg["vjs_override_kink_snap"] = m_vjs_override_kink_snap;
+    cfg["vjs_min_move"]     = m_vjs_min_move;
     // doc sbnd_xin/docs/pr/51 -- main-vertex graph audit; false => the pass
     // never fires => byte-identical.  Numerics cm/deg.
     cfg["esva_ignore_empty_2d"] = m_esva_ignore_empty_2d;  // docs/73 sec 12 round 3; case-5 empty-2D-index sentinel = no info, not coverage; false = legacy
@@ -1748,6 +1769,16 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
         pattern_algos.m_vks_fit_miss     = m_vks_fit_miss * units::cm;  // cm -> internal
         pattern_algos.m_vks_hot_ratio    = m_vks_hot_ratio;             // x mip median, no conversion
         pattern_algos.m_vks_carry_prong  = m_vks_carry_prong * units::cm; // cm -> internal (doc pr/85)
+        // doc sbnd_xin/docs/pr/104 -- main-vertex junction snap.
+        pattern_algos.m_vertex_junction_snap = m_vertex_junction_snap;
+        pattern_algos.m_vjs_radius       = m_vjs_radius * units::cm;     // cm -> internal
+        pattern_algos.m_vjs_min_arm      = m_vjs_min_arm * units::cm;    // cm -> internal
+        pattern_algos.m_vjs_min_prongs   = m_vjs_min_prongs;
+        pattern_algos.m_vjs_collinear    = m_vjs_collinear;              // deg, no conversion
+        pattern_algos.m_vjs_fit_margin   = m_vjs_fit_margin * units::cm; // cm -> internal
+        pattern_algos.m_vjs_fit_rms      = m_vjs_fit_rms * units::cm;    // cm -> internal
+        pattern_algos.m_vjs_override_kink_snap = m_vjs_override_kink_snap;
+        pattern_algos.m_vjs_min_move     = m_vjs_min_move * units::cm;   // cm -> internal
         // sbnd_xin/docs/73 sec 12 (round 3).
         pattern_algos.m_esva_ignore_empty_2d = m_esva_ignore_empty_2d;
         // doc sbnd_xin/docs/pr/51 -- main-vertex graph audit.
@@ -2276,6 +2307,21 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
                 map_cluster_main_vertices[main_cluster] = final_main_vertex;
                 detg_dump("snap_main_vertex_to_kink", *pr_graph);
                 dup_stage_census("snap_main_vertex_to_kink", *pr_graph, *main_cluster);
+            }
+
+            // doc sbnd_xin/docs/pr/104: main-vertex junction snap -- inert
+            // unless vertex_junction_snap.  Re-points final_main_vertex to a
+            // nearby multi-prong track junction (18255-405707/65289/66712/
+            // 282072/345633: the DL re-rank lands on a stub end or a
+            // pass-through point 2-4 cm from the junction the prongs meet
+            // at).  Runs AFTER the kink snap and BEFORE improve_vertex, so
+            // the vertex fit polishes the junction with its real prongs and
+            // main_vertex_graph_audit no longer has to re-anchor prongs onto
+            // the wrong point.  Pointer move only: no segment is edited.
+            if (pattern_algos.snap_main_vertex_to_junction(*pr_graph, *main_cluster, final_main_vertex)) {
+                map_cluster_main_vertices[main_cluster] = final_main_vertex;
+                detg_dump("snap_main_vertex_to_junction", *pr_graph);
+                dup_stage_census("snap_main_vertex_to_junction", *pr_graph, *main_cluster);
             }
 
             pattern_algos.improve_vertex(*pr_graph, *main_cluster, final_main_vertex,
