@@ -756,6 +756,12 @@ function(
     // Pass 4.0 for the pre-flip arm.
     dl_vtx_min_accept_score = 10.0,
     dl_vtx_top_k   = 5,
+    // doc pr/105: false = the legacy single-argmax DL branch (no composite
+    // re-rank; top voxel snapped, dl_vtx_cut gate, else the traditional
+    // vertex).  Default true = production; unset => byte-identical compiled
+    // config.  Validation: --tla-code dl_vtx_rerank=false (or
+    // SBND_DL_VTX_RERANK=false).
+    dl_vtx_rerank = true,
     // Beam window [low, high) in us on cluster_t0 (= matched flash time) selecting
     // the bundle that gets neutrino PR.  [0,0] disables the gate (then
     // tagger_check_neutrino falls back to uBooNE single-main selection, which on
@@ -2467,6 +2473,7 @@ function(
                              dl_weights=dl_weights,
                              dl_vtx_min_accept_score=dl_vtx_min_accept_score,
                              dl_vtx_top_k=dl_vtx_top_k,
+                             dl_vtx_rerank=dl_vtx_rerank,
                              beam_window=[t * wc.us for t in beam_window_us],
                              beam_window_only=beam_window_only,
                              nu_skip_cosmic=nu_skip_cosmic,

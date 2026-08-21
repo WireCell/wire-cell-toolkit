@@ -736,6 +736,12 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               // baseline DL total in [4,10)).  Pass 4.0 for the pre-flip arm.
               dl_vtx_min_accept_score=10.0,
               dl_vtx_top_k=5,
+              // doc pr/105: dl_vtx_rerank=false selects the legacy single-argmax
+              // DL branch (top voxel snapped, dl_vtx_cut gate, else the
+              // traditional vertex) -- strategy 3.1 of the vertex-selection
+              // comparison.  Default true = the pinned production value, so the
+              // compiled JSON is byte-identical when unset.
+              dl_vtx_rerank=true,
               // beam_window: internal-unit [low, high] on the matched flash time
               // (cluster_t0).  DEFAULT = the SBND BNB gate after the
               // frame_apply_at_caf correction, which is what production passes
@@ -2189,7 +2195,7 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
             // compiled JSON is unchanged by this pinning).  min_accept and top_k
             // are threaded from the clus_pr args (defaults identical to the old
             // pinned literals => byte-identical when unset; doc pr/79).
-            dl_vtx_rerank=true,
+            dl_vtx_rerank=dl_vtx_rerank,
             dl_vtx_top_k=dl_vtx_top_k,
             dl_vtx_min_accept_score=dl_vtx_min_accept_score,
             dl_vtx_score_scale=1000.0,
@@ -2956,6 +2962,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
        // DL re-rank operating point -- see the clus_pr arg comment (doc pr/79).
        dl_vtx_min_accept_score=10.0,
        dl_vtx_top_k=5,
+       dl_vtx_rerank=true,   // doc pr/105: see the clus_pr arg comment
        beam_window=[0.2 * wc.us, 2.2 * wc.us],
        tgm_neutrino_candidate=true,
        tgm_chord_charge=true, tgm_chord_mode='path',
@@ -3588,6 +3595,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 dl_weights=dl_weights,
                 dl_vtx_min_accept_score=dl_vtx_min_accept_score,
                 dl_vtx_top_k=dl_vtx_top_k,
+                dl_vtx_rerank=dl_vtx_rerank,
                 beam_window=beam_window,
                 tgm_neutrino_candidate=tgm_neutrino_candidate,
                 tgm_chord_charge=tgm_chord_charge,
