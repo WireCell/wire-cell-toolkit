@@ -503,7 +503,33 @@ bool PatternAlgorithms::cosmic_tagger(
     if (main_cluster && main_cluster->grouping())
         fiducial_utils = main_cluster->grouping()->get_fiducialutils();
 
+    // Consistent-FV containment (sbnd_xin/docs/74 G1): test p against the
+    // configured IFiducial with a tolerance vector, shifted-point convention.
+    // Deliberate duplication of FiducialUtils::inside_fiducial_volume (M10);
+    // negative tolerance = required inset, size 6/3/1 accepted.
+    auto contained_tol = [&](const Point& p, const std::vector<double>& tol) -> bool {
+        const auto& fid = m_cosmic_fiducial;
+        if (tol.empty()) return fid->contained(p);
+        double txl, txh, tyl, tyh, tzl, tzh;
+        if (tol.size() >= 6) {
+            txl = tol[0]; txh = tol[1]; tyl = tol[2]; tyh = tol[3]; tzl = tol[4]; tzh = tol[5];
+        } else if (tol.size() >= 3) {
+            txl = txh = tol[0]; tyl = tyh = tol[1]; tzl = tzh = tol[2];
+        } else {
+            txl = txh = tyl = tyh = tzl = tzh = tol[0];
+        }
+        if (!fid->contained(Point(p.x() - txl, p.y(), p.z()))) return false;
+        if (!fid->contained(Point(p.x() + txh, p.y(), p.z()))) return false;
+        if (!fid->contained(Point(p.x(), p.y() - tyl, p.z()))) return false;
+        if (!fid->contained(Point(p.x(), p.y() + tyh, p.z()))) return false;
+        if (!fid->contained(Point(p.x(), p.y(), p.z() - tzl))) return false;
+        if (!fid->contained(Point(p.x(), p.y(), p.z() + tzh))) return false;
+        return true;
+    };
+
     auto inside_fv = [&](const Point& p) -> bool {
+        if (m_cosmic_fiducial)  // doc 74 G1: inset box, same volume as TGM/STM/FC
+            return contained_tol(p, m_cosmic_fv_tolerance);
         if (!fiducial_utils) return true; // no FV check available → conservative
         return fiducial_utils->inside_fiducial_volume(p);
     };
@@ -533,8 +559,15 @@ bool PatternAlgorithms::cosmic_tagger(
         // Use tighter tolerance (STM-like -1.5cm) for the vertex outside-FV check.
         // The prototype calls fid->inside_fiducial_volume(test_p, offset_x, &stm_tol_vec)
         // with all tolerances set to -1.5 cm, meaning the fiducial volume is shrunk by 1.5cm.
+        // With cosmic_consistent_fv (doc 74 G1/G2) the same -1.5 cm applies to the
+        // configured bare volume (prototype parity: the SCB arrays carry no
+        // boundary_dis_cut inset either), and the CPA-hole bands of the
+        // FiducialUtils fallback vanish.
         const std::vector<double> stm_tol_vec(6, -1.5 * units::cm);
-        if (fiducial_utils && !fiducial_utils->inside_fiducial_volume(test_p, stm_tol_vec))
+        if (m_cosmic_fiducial) {
+            if (!contained_tol(test_p, stm_tol_vec))
+                flag_cosmic_1 = true;
+        } else if (fiducial_utils && !fiducial_utils->inside_fiducial_volume(test_p, stm_tol_vec))
             flag_cosmic_1 = true;
     }
 

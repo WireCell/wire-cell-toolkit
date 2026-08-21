@@ -479,6 +479,16 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
         SPDLOG_LOGGER_DEBUG(log, "TaggerCheckNeutrino: match_isFC uses the configured fiducial with {} tolerance value(s)",
                             m_fv_tolerance.size());
     }
+    // sbnd_xin/docs/74 G1/G2: route the SAME fiducial + fv_tolerance into
+    // cosmic_tagger()'s containment tests (its inside_fv lambda and the flag-1
+    // vertex test).  Requires "fiducial" to be configured; inert otherwise.
+    // Default false = cosmic_tagger keeps the historical FiducialUtils
+    // zero-margin sensitive-volume union, byte-identical.
+    m_cosmic_consistent_fv = get(config, "cosmic_consistent_fv", m_cosmic_consistent_fv);
+    if (m_cosmic_consistent_fv) {
+        SPDLOG_LOGGER_DEBUG(log, "TaggerCheckNeutrino: cosmic_consistent_fv on: cosmic_tagger containment uses the configured fiducial ({} tolerance value(s), fiducial {}configured)",
+                            m_fv_tolerance.size(), m_use_fiducial ? "" : "NOT ");
+    }
     m_sp_sce_correction            = get(config, "sp_sce_correction",            m_sp_sce_correction);
     m_tagger_ordered_segment_sets  = get(config, "tagger_ordered_segment_sets",  m_tagger_ordered_segment_sets);
     m_stem_endpoint_wcpt_parity    = get(config, "stem_endpoint_wcpt_parity",    m_stem_endpoint_wcpt_parity);
@@ -791,6 +801,7 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["cosmic_y_top_strict"]  = m_cosmic_y_top_strict;   // 102 = 15 cm below
     cfg["cosmic_y_top_loose"]   = m_cosmic_y_top_loose;    // 80  = 37 cm below
     cfg["cosmic_y_small_piece"] = m_cosmic_y_small_piece;  // 50  = 67 cm below
+    cfg["cosmic_consistent_fv"] = m_cosmic_consistent_fv;  // doc 74 G1/G2; false = FiducialUtils fallback
     cfg["vertex_z_prior_scale"] = m_vertex_z_prior_scale;  // cm; 200 = uBooNE (1037 cm detector)
     // SSM beam-line references, {x,y,z}; defaults = uBooNE BNB target / NuMI absorber.
     // Assign the array first: append() alone would accumulate rather than overwrite if
@@ -1784,6 +1795,12 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
         pattern_algos.m_cosmic_y_top_strict  = m_cosmic_y_top_strict  * units::cm;
         pattern_algos.m_cosmic_y_top_loose   = m_cosmic_y_top_loose   * units::cm;
         pattern_algos.m_cosmic_y_small_piece = m_cosmic_y_small_piece * units::cm;
+        // sbnd_xin/docs/74 G1/G2: consistent-FV routing for cosmic_tagger().
+        // m_fv_tolerance is already INTERNAL units (read raw in configure(),
+        // same values cluster_fc_check consumes) -- no conversion.
+        pattern_algos.m_cosmic_fiducial =
+            (m_cosmic_consistent_fv && m_use_fiducial) ? m_fiducial : nullptr;
+        pattern_algos.m_cosmic_fv_tolerance = m_fv_tolerance;
         pattern_algos.m_vertex_z_prior_scale = m_vertex_z_prior_scale * units::cm;
         // Dimensionless directions -- no unit conversion (unlike the dQ/dx scales).
         pattern_algos.m_ssm_target_dir   = WireCell::Vector(m_ssm_target_dir[0],   m_ssm_target_dir[1],   m_ssm_target_dir[2]);

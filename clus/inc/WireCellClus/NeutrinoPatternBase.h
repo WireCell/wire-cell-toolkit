@@ -6,6 +6,7 @@
 #include "WireCellClus/PRVertexScoreboard.h"
 #include "WireCellClus/IClusGeomHelper.h"
 #include "WireCellClus/PRSegmentFunctions.h"
+#include "WireCellIface/IFiducial.h"
 
 #include <array>
 #include <cmath>
@@ -2448,6 +2449,16 @@ namespace WireCell::Clus::PR {
                                                         // cluster counts as cosmic debris
                                                         // (acc_small_length) only if its PCA
                                                         // centre sits in the upper region.
+        // Consistent-FV routing for cosmic_tagger() (sbnd_xin/docs/74 G1/G2,
+        // via TaggerCheckNeutrino key "cosmic_consistent_fv").  When set, the
+        // tagger's containment tests run against this IFiducial with
+        // m_cosmic_fv_tolerance margins (shifted-point convention,
+        // FiducialUtils::inside_fiducial_volume) instead of the grouping's
+        // FiducialUtils zero-margin sensitive union; the flag-1 vertex test
+        // keeps its own prototype-faithful uniform -1.5 cm vector against the
+        // bare volume.  nullptr (default) = legacy path, byte-identical.
+        IFiducial::pointer m_cosmic_fiducial{nullptr};
+        std::vector<double> m_cosmic_fv_tolerance;      // [x_lo,x_hi,y_lo,y_hi,z_lo,z_hi], negative = inset, INTERNAL units
         // Upstream-z preference in compare_main_vertices (:875) and
         // compare_main_vertices_global (:3001): each candidate is penalised by
         // (z - min_z) / m_vertex_z_prior_scale, competing with the +0.25-per-

@@ -142,9 +142,25 @@ if (Emi < 25 * units::cm && ...)   // prototype has identical threshold
 
 In WireCell, `units::MeV = 1` and `units::cm ≈ 10` (mm-based internal units), so this threshold equals `~250 MeV` rather than `25 MeV`. This appears to be a threshold accidentally written using length units instead of energy units in the prototype. **The toolkit faithfully reproduces this behavior.** Changing it would be a physics decision outside the scope of this porting review.
 
+**UPDATE (2026-08-20, sbnd_xin/docs/74 F1):** the paragraph above is stale.
+Commit `02c23735` ("cosmic_tagger: fix units bug, …") later changed the
+toolkit to `Emi < 25 * units::MeV` — a deliberate, un-knobbed divergence from
+the prototype's effective 250 MeV. Physically correct (Michel endpoint
+52.8 MeV); recorded here so the review matches the code.
+
 #### ✅ Flag 9 — global cluster-direction PCA analysis
 
 The cluster loop, PCA/centroid direction computation, angle thresholds, and the `flagp_cosmic` → `flag_cosmic_9` decision all match the prototype.
+
+**UPDATE (2026-08-20, sbnd_xin/docs/74 F2):** one divergence was missed above.
+The prototype's `angle_cosmic < 30` relaxation tests `highest_y` — the
+*running maximum* over clusters processed so far (`NeutrinoID_cosmic_tagger.h:685,698`,
+`std::map<int,…>` id order) — while the toolkit (since the original port
+`ce14d372`) tests `highest_y_cl`, the **main cluster's own** highest point
+(`NeutrinoTaggerCosmic.cxx` `top_main`). The toolkit is stricter
+(running max ≥ own top) and removes the cluster-id-order dependence; the
+`cosmic_y_top_main` knob comment documents the toolkit semantics. Recorded as
+a deliberate determinism improvement, not reverted.
 
 #### NOTE — `pca.center.y()` vs `pts.front().y` (deliberate improvement)
 
@@ -231,8 +247,9 @@ once outside the loop, rather than recomputing it per candidate as the prototype
 | Flags 1–10 logic fidelity | ✅ Equivalent | — |
 | `segs_at_vtx` lambda (deterministic BGL iteration) | ✅ Improved vs prototype | — |
 | `pca.center.y()` vs `pts.front().y` in flag 9 | ✅ Deliberate improvement | — |
-| `Emi < 25 * units::cm` threshold | ℹ Faithful prototype quirk | — |
-| FV stm tolerance (flag 1) | ℹ Known limitation (TODO) | — |
+| `Emi < 25 * units::cm` threshold | ℹ Was a faithful quirk; **fixed to 25 MeV** in `02c23735` (see UPDATE above) | — |
+| Flag 9 `top_main` = main cluster's own top (prototype: running max) | ℹ Deliberate determinism improvement (doc 74 F2) | — |
+| FV stm tolerance (flag 1) | ℹ Known limitation (TODO) — addressed by `cosmic_consistent_fv` (sbnd_xin/docs/74 G1/G2) | — |
 | `calculate_num_daughter_showers/tracks` raw pointer sets | ⚠ Non-deterministic traversal order | No correctness impact; optional cleanup |
 | `find_cont_muon_segment_nue` fidelity | ✅ Equivalent | — |
 | `find_cont_muon_segment_nue` dir3 precompute | ✅ Minor efficiency improvement | — |

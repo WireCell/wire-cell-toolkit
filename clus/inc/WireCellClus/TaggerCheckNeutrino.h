@@ -369,6 +369,11 @@ public:
         double m_cosmic_y_top_strict{102};
         double m_cosmic_y_top_loose{80};
         double m_cosmic_y_small_piece{50};
+        // sbnd_xin/docs/74 G1/G2: when true (and "fiducial" is configured),
+        // cosmic_tagger()'s containment tests run against m_fiducial +
+        // m_fv_tolerance instead of the grouping's FiducialUtils zero-margin
+        // sensitive union.  Default false = legacy path, byte-identical.
+        bool m_cosmic_consistent_fv{false};
         // Denominator of the upstream-z vertex-score penalty (z-min_z)/scale in
         // compare_main_vertices{,_global}.  See PatternAlgorithms.
         double m_vertex_z_prior_scale{200};

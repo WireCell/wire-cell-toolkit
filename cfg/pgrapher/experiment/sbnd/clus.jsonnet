@@ -1247,6 +1247,13 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               // false => keys omitted => the historical FiducialUtils
               // fallback, byte-identical pre-knob config.
               neutrino_consistent_fv=false,
+              // sbnd_xin/docs/74 G1/G2: give cosmic_tagger()'s containment
+              // tests (its inside_fv lambda + the flag-1 vertex test) the
+              // SAME sbnd_pr_fv + sbnd_pr_fv_margins as TGM/STM/FC, instead
+              // of the FiducialUtils zero-margin sensitive union (which has
+              // no wall inset and excludes the CPA slab |x| < 0.45 cm).
+              // C++ default false; key omitted when off => byte-identical.
+              cosmic_consistent_fv=false,
               // F3 (= P2): single-photon SCE correction gate.  Vacuous on
               // SBND today (clus_geom_helper is ''); kept OFF by owner
               // decision 2026-08-04 so a future SBND SCE helper enables it
@@ -2231,8 +2238,11 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
             // doc pr/36 sec 10 (F1): same fiducial + margins as
             // tagger_check_{stm,tgm,fc} above -- one containment definition
             // across the stage.  Keys omitted when off.
-            fiducial=(if neutrino_consistent_fv then wc.tn(sbnd_pr_fv) else null),
-            fv_tolerance=(if neutrino_consistent_fv then sbnd_pr_fv_margins else []),
+            fiducial=(if neutrino_consistent_fv || cosmic_consistent_fv then wc.tn(sbnd_pr_fv) else null),
+            fv_tolerance=(if neutrino_consistent_fv || cosmic_consistent_fv then sbnd_pr_fv_margins else []),
+            // sbnd_xin/docs/74 G1/G2: cosmic_tagger() containment on the same
+            // fiducial + margins.  Key omitted when off => byte-identical.
+            cosmic_consistent_fv=cosmic_consistent_fv,
             sp_sce_correction=sp_sce_correction,
             tagger_ordered_segment_sets=tagger_ordered_segment_sets,
             stem_endpoint_wcpt_parity=stem_endpoint_wcpt_parity,
@@ -2595,7 +2605,7 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
                            // on.  Redundant in the default pipeline (TGM/FC
                            // already pull it in) => compiled config unchanged
                            // there; load-bearing only for a reduced pipeline.
-                           || (neutrino_consistent_fv
+                           || ((neutrino_consistent_fv || cosmic_consistent_fv)
                                && std.member(pipeline_names, 'tagger_check_neutrino'))
                            then [sbnd_pr_fv] else []),
     local bee_zip_path = (if output_dir == '' then '' else output_dir + '/') + 'mabc-pr.zip',
@@ -3114,6 +3124,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
        // config (and, for neutrino_type_bitmask, an identical T_tagger
        // schema).
        neutrino_consistent_fv=false,
+       cosmic_consistent_fv=false,
        sp_sce_correction=false,
        tagger_ordered_segment_sets=false,
        stem_endpoint_wcpt_parity=false,
@@ -3624,6 +3635,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 kine_w_value=kine_w_value,
                 kine_shower_pdg_live=kine_shower_pdg_live,
                 neutrino_consistent_fv=neutrino_consistent_fv,
+                cosmic_consistent_fv=cosmic_consistent_fv,
                 sp_sce_correction=sp_sce_correction,
                 tagger_ordered_segment_sets=tagger_ordered_segment_sets,
                 stem_endpoint_wcpt_parity=stem_endpoint_wcpt_parity,
