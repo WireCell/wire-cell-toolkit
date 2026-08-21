@@ -370,6 +370,12 @@ public:
         // counterfactual override for find_proto_vertex's hardcoded
         // branch-search round budget.  false / 0 => byte-identical.
         bool   m_traj_cover_probe{false};
+        // doc sbnd_xin/docs/pr/107: keep every trajectory point in the
+        // pre-dQ/dx form_map_graph pass (prototype parity for the dQ/dx fit
+        // input; the toolkit-only third pass otherwise deletes the
+        // junction-adjacent points whose cells fit_exclusion stripped).
+        // false => TrackFitting param 0 => byte-identical.
+        bool   m_dqdx_fit_keep_all_points{false};
         int    m_pr_find_other_rounds{0};
         bool   m_v3_extension_guard{false};
         double m_v3_extension_min_gain{-1.0};   // cm

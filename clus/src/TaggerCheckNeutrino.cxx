@@ -317,6 +317,8 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_iso_endpoint_min_aspect    = get(config, "iso_endpoint_min_aspect",    m_iso_endpoint_min_aspect);
     // doc sbnd_xin/docs/pr/67 (log-only probe + round-budget counterfactual).
     m_traj_cover_probe           = get(config, "traj_cover_probe",           m_traj_cover_probe);
+    // doc sbnd_xin/docs/pr/107: dQ/dx fit keeps every trajectory point (prototype parity).
+    m_dqdx_fit_keep_all_points   = get(config, "dqdx_fit_keep_all_points",   m_dqdx_fit_keep_all_points);
     m_pr_find_other_rounds       = get(config, "pr_find_other_rounds",       m_pr_find_other_rounds);
     // doc sbnd_xin/docs/pr/24 §18 (round 5).
     m_v3_extension_guard         = get(config, "v3_extension_guard",         m_v3_extension_guard);
@@ -835,6 +837,7 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["iso_endpoint_tube_radius"]   = m_iso_endpoint_tube_radius;    // cm
     cfg["iso_endpoint_min_aspect"]    = m_iso_endpoint_min_aspect;     // trimmed transverse/axial extent ratio
     cfg["traj_cover_probe"]           = m_traj_cover_probe;            // false = no pr/67 diagnostic lines
+    cfg["dqdx_fit_keep_all_points"]   = m_dqdx_fit_keep_all_points;    // doc pr/107: false = legacy (pre-dQ/dx pass drops zero-quantity points)
     cfg["pr_find_other_rounds"]       = m_pr_find_other_rounds;        // 0 = keep find_proto_vertex's hardcoded budget
     cfg["v3_extension_guard"]         = m_v3_extension_guard;          // false = examine_vertices_3 unconditional accept
     cfg["v3_extension_min_gain"]      = m_v3_extension_min_gain;       // cm
@@ -2078,6 +2081,11 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
         track_fitter->set_parameter("fit_blob_coverage", m_fit_blob_coverage);
         // doc pr/67 P3 (log-only end-trim probe); 0 = off = byte-identical.
         track_fitter->set_parameter("traj_cover_probe", m_traj_cover_probe ? 1.0 : 0.0);
+        // doc sbnd_xin/docs/pr/107: prototype-parity point retention for the
+        // dQ/dx fit; 0 = legacy drop = byte-identical.  Local fitters spawned
+        // via inherit_from copy m_params, so every do_multi_tracking site is
+        // covered.
+        track_fitter->set_parameter("dqdx_fit_keep_all_points", m_dqdx_fit_keep_all_points ? 1.0 : 0.0);
         // doc sbnd_xin/docs/pr/50 (fit_blob_coverage_defer, default false):
         // wrap the MAIN cluster's find_proto_vertex call so its recursive
         // break partition forms on legacy (undeweighted) fits -- the partition

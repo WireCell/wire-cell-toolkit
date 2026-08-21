@@ -2136,6 +2136,16 @@ function(
     // C++ default false => key omitted => byte-identical.  Validation:
     // --tla-code dl_vtx_cloud_no_exclusion=true (or SBND_DL_VTX_CLOUD_NO_EXCLUSION).
     dl_vtx_cloud_no_exclusion = false,
+    // doc pr/107 -- dQ/dx fit keeps every trajectory point (prototype
+    // parity).  do_multi_tracking's toolkit-only third form_map_graph pass
+    // (before dQ_dx_multi_fit) re-applies the zero-quantity drop to the final
+    // trajectory; with fit_exclusion on that deletes the junction-adjacent
+    // points whose cells update_association stripped (442 points over 47
+    // nueCC48 events vs 86 with exclusion off), which starves the DL vertex
+    // net's input cloud.  The prototype fits dQ/dx on every trajectory point.
+    // C++ default false => key omitted => byte-identical.  Validation:
+    // --tla-code dqdx_fit_keep_all_points=true (or SBND_DQDX_FIT_KEEP_ALL_POINTS).
+    dqdx_fit_keep_all_points = false,
     // doc pr/89 Arm C (C2) -- rule-1 outgoing-prong topology term in the DL
     // rerank composite: s_topo = w * (frac - center), vote-gated.  C++
     // defaults 0/0 = term never computed; null omits the keys =>
@@ -2793,6 +2803,7 @@ function(
                              mvga_dup_starved_span=mvga_dup_starved_span,
                              dl_vtx_swap_guard=dl_vtx_swap_guard,
                              dl_vtx_cloud_no_exclusion=dl_vtx_cloud_no_exclusion,
+                             dqdx_fit_keep_all_points=dqdx_fit_keep_all_points,
                              dl_vtx_topo_weight=dl_vtx_topo_weight,
                              dl_vtx_topo_center=dl_vtx_topo_center,
                              main_vertex_swap_apply=main_vertex_swap_apply,

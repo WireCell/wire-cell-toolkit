@@ -59,6 +59,8 @@ void TrackFitting::set_parameter(const std::string& name, double value) {
     // Map parameter names to struct members
     if (name == "traj_cover_probe") {          // doc pr/67, log-only
         m_params.traj_cover_probe = value;
+    } else if (name == "dqdx_fit_keep_all_points") {   // doc pr/107
+        m_params.dqdx_fit_keep_all_points = value;
     } else if (name == "DL") {
         m_params.DL = value;
     } else if (name == "DT") {
@@ -220,6 +222,8 @@ double TrackFitting::get_parameter(const std::string& name) const {
         return m_params.skip_dis_cut;
     } else if (name == "skip_revert_iso_xext_cut") {
         return m_params.skip_revert_iso_xext_cut;
+    } else if (name == "dqdx_fit_keep_all_points") {   // doc pr/107
+        return m_params.dqdx_fit_keep_all_points;
     } else if (name == "fit_blob_coverage") {
         return m_params.fit_blob_coverage;
     } else if (name == "fit_blob_coverage_ghost_dis") {
@@ -3582,7 +3586,11 @@ void TrackFitting::form_map_graph(bool flag_exclusion, double end_point_factor, 
                 examine_point_association(segment, fits[i].point, temp_2dut, temp_2dvt, temp_2dwt, is_end_point, charge_cut);
 
 
-                if (temp_2dut.quantity + temp_2dvt.quantity + temp_2dwt.quantity > 0) {
+                // doc pr/107: on the pre-dQ/dx pass with dqdx_fit_keep_all_points
+                // on, a zero-quantity point is stored (empty association,
+                // fresh index) instead of dropped -- prototype parity, see
+                // do_multi_tracking.  Legacy: drop.
+                if (temp_2dut.quantity + temp_2dvt.quantity + temp_2dwt.quantity > 0 || m_keep_zero_quantity_points) {
                     // Store in mapping structures
                     m_3d_to_2d[count].set_plane_data(WirePlaneLayer_t::kUlayer, temp_2dut);
                     m_3d_to_2d[count].set_plane_data(WirePlaneLayer_t::kVlayer, temp_2dvt);
@@ -8781,7 +8789,16 @@ void TrackFitting::do_multi_tracking(bool flag_dQ_dx_fit_reg, bool flag_dQ_dx_fi
             auto& eb = (*m_graph)[ed];
             if (eb.segment) n_fits_before += eb.segment->fits().size();
         }
+        // doc pr/107 (dqdx_fit_keep_all_points): the prototype never drops a
+        // trajectory point between the last trajectory round and the dQ/dx
+        // fit (reset_fit_prop is a resize; dQ_dx_multi_fit reads the fit
+        // indices and the 2-D charge maps, never the associations), so with
+        // the knob on this pass keeps every point.  Trajectory rounds 1-2
+        // above are untouched (exclusion stays exactly where the prototype
+        // applies it).
+        m_keep_zero_quantity_points = m_params.dqdx_fit_keep_all_points > 0;
         form_map_graph(flag_exclusion, m_params.end_point_factor, m_params.mid_point_factor, m_params.nlevel, m_params.time_tick_cut, m_params.charge_cut);
+        m_keep_zero_quantity_points = false;
         size_t n_fits_after = 0;
         for (const auto& ed : get_segment_edges()) {
             auto& eb = (*m_graph)[ed];

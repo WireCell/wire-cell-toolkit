@@ -238,6 +238,8 @@ TEST_CASE("clus knob defaults: TaggerCheckNeutrino switches are all OFF")
     CHECK_KNOB_BOOL(cfg, "dl_vtx_swap_guard", false);
     // doc pr/106 sec 10: exclusion-free charge cloud for the DL vertex net -- OFF.
     CHECK_KNOB_BOOL(cfg, "dl_vtx_cloud_no_exclusion", false);
+    // doc pr/107: dQ/dx fit keeps every trajectory point (prototype parity) -- OFF.
+    CHECK_KNOB_BOOL(cfg, "dqdx_fit_keep_all_points", false);
     // docs/73 sec 12 round 3: empty-2D-index sentinel guard in
     // eliminate_short_vertex_activities case 5 -- OFF.
     CHECK_KNOB_BOOL(cfg, "esva_ignore_empty_2d", false);
@@ -1076,6 +1078,20 @@ TEST_CASE("clus knob defaults: TrackFitting skip_revert_iso_xext_cut is off")
     // non-off value, is caught even if the in-class initializer above stays -1.
     auto preset = Clus::TrackFittingPresets::create_with_current_values();
     CHECK(preset.get_parameters().skip_revert_iso_xext_cut == doctest::Approx(-1.0));
+}
+
+TEST_CASE("clus knob defaults: TrackFitting dqdx_fit_keep_all_points is off")
+{
+    // doc pr/107: the pre-dQ/dx form_map_graph pass drops zero-quantity
+    // trajectory points (legacy, toolkit-only); > 0 keeps every point as the
+    // prototype does.  Default 0 = legacy = byte-identical; same
+    // set_parameter round-trip contract as the other double-sentinel knobs.
+    Clus::TrackFitting tf;
+    CHECK(tf.get_parameter("dqdx_fit_keep_all_points") == doctest::Approx(0.0));
+    tf.set_parameter("dqdx_fit_keep_all_points", 1.0);
+    CHECK(tf.get_parameter("dqdx_fit_keep_all_points") == doctest::Approx(1.0));
+    auto preset = Clus::TrackFittingPresets::create_with_current_values();
+    CHECK(preset.get_parameters().dqdx_fit_keep_all_points == doctest::Approx(0.0));
 }
 
 TEST_CASE("clus knob defaults: TrackFitting fit_blob_coverage is off")

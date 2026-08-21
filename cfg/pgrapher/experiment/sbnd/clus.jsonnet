@@ -1658,6 +1658,8 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               dl_vtx_swap_guard=false,
               // doc pr/106 sec 10: exclusion-free charge cloud for the DL vertex net. C++ default false.
               dl_vtx_cloud_no_exclusion=false,
+              // doc pr/107: dQ/dx fit keeps every trajectory point (prototype parity). C++ default false.
+              dqdx_fit_keep_all_points=false,
               // doc pr/89 Arm C (C2) -- rule-1 topology term in the DL
               // rerank composite (weight, frac center).  C++ defaults 0/0;
               // null omits the keys => byte-identical.
@@ -2491,6 +2493,7 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
             mvga_dup_starved_span=mvga_dup_starved_span,
             dl_vtx_swap_guard=dl_vtx_swap_guard,
             dl_vtx_cloud_no_exclusion=dl_vtx_cloud_no_exclusion,
+            dqdx_fit_keep_all_points=dqdx_fit_keep_all_points,
             dl_vtx_topo_weight=dl_vtx_topo_weight,
             dl_vtx_topo_center=dl_vtx_topo_center,
             main_vertex_swap_apply=main_vertex_swap_apply,
@@ -3485,6 +3488,8 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
               dl_vtx_swap_guard=false,
               // doc pr/106 sec 10: exclusion-free charge cloud for the DL vertex net. C++ default false.
               dl_vtx_cloud_no_exclusion=false,
+              // doc pr/107: dQ/dx fit keeps every trajectory point (prototype parity). C++ default false.
+              dqdx_fit_keep_all_points=false,
               // doc pr/89 Arm C (C2) -- rule-1 topology term in the DL
               // rerank composite (weight, frac center).  C++ defaults 0/0;
               // null omits the keys => byte-identical.
@@ -3936,6 +3941,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
             mvga_dup_starved_span=mvga_dup_starved_span,
                 dl_vtx_swap_guard=dl_vtx_swap_guard,
                 dl_vtx_cloud_no_exclusion=dl_vtx_cloud_no_exclusion,
+                dqdx_fit_keep_all_points=dqdx_fit_keep_all_points,
                 dl_vtx_topo_weight=dl_vtx_topo_weight,
                 dl_vtx_topo_center=dl_vtx_topo_center,
                 main_vertex_swap_apply=main_vertex_swap_apply,

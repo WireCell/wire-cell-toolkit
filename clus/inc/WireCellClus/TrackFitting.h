@@ -144,6 +144,27 @@ namespace WireCell::Clus {
             // set_parameter(name, value) plumbing.
             double traj_cover_probe = 0;
 
+            // doc sbnd_xin/docs/pr/107 -- dQ/dx-fit point retention (prototype
+            // parity).  do_multi_tracking runs a THIRD form_map_graph pass
+            // right before dQ_dx_multi_fit that the prototype does not have
+            // (pr/28 T4: PR::Fit::reset() clears the fit indices, the
+            // prototype's reset_fit_prop() is a resize that keeps them).
+            // That pass re-applies form_map_graph's "store the point only if
+            // its U+V+W quantity > 0" rule to the FINAL trajectory, so with
+            // fit_exclusion on every interior point whose cells were all
+            // stripped by update_association (cells equidistant from two
+            // prongs -- the last ~1 cm before a multi-prong junction) is
+            // DELETED from the trajectory before the dQ/dx fit, from the
+            // segment's fit point cloud and from the DL vertex net's input.
+            // The prototype fits dQ/dx on every trajectory point (its dQ/dx
+            // fit, like the toolkit's, never reads the association maps).
+            // > 0: the pre-dQ/dx pass keeps every point (zero-quantity
+            // points get an index and an empty association, exactly what the
+            // prototype's resize leaves).  Trajectory rounds 1-2 are
+            // untouched.  0 = legacy drop = byte-identical.  Reported as a
+            // double for the set_parameter(name, value) plumbing.
+            double dqdx_fit_keep_all_points = 0;
+
             double default_dQ_dx = 5000;
 
             double end_point_factor=0.6;
@@ -777,6 +798,11 @@ namespace WireCell::Clus {
         std::set<Facade::Cluster*, PR::ClusterPtrCmp> m_loaded_clusters;  ///< Clusters whose charge data has been loaded into m_charge_data
         bool m_charge_data_dirty{true};                ///< True when m_clusters has clusters not yet in m_charge_data
         Facade::Cluster* m_cluster_filter{nullptr};    ///< If non-null, restrict fitting to segments of this cluster
+        // doc pr/107: set by do_multi_tracking around its pre-dQ/dx
+        // form_map_graph call only (never on the trajectory rounds); while
+        // true form_map_graph stores zero-quantity interior points instead
+        // of dropping them.  Always false while the knob is 0.
+        bool m_keep_zero_quantity_points{false};
 
         // doc pr/49 round 3 (fit_blob_coverage knob): clusters owning a
         // segment in the current fit -- the "fitting scope" whose members
