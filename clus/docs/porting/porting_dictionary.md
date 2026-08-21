@@ -1001,3 +1001,25 @@ fixed bug).
   examine time (stub-root topology arises post-formation) — that class is
   prototype-parity and documented as a follow-up in
   sbnd_xin/docs/pr/46, not changed here.
+
+## The dQ/dx fit never reads the association maps — the exclusion fit reaches dQ/dx only through the trajectory (doc sbnd_xin/docs/pr/108)
+
+Both `TrackFitting::dQ_dx_multi_fit` (`clus/src/TrackFitting.cxx`) and the prototype's
+`PR3DCluster::dQ_dx_multi_fit` (`PR3DCluster_multi_dQ_dx_fit.h`) build their response matrices
+from the full 2-D charge map within a ±10 wire/slice window of each trajectory point; neither
+consumes `m_3d_to_2d`/`m_2d_to_3d` (toolkit) or `map_3D_2D*_set` (prototype).  `update_association`
+(exclusion) therefore changes dQ/dx only by changing the trajectory rounds 1-2.  doc pr/98 sec 1's
+sentence "the prototype's dQ/dx consumes the round-2 exclusion-filtered associations" is WRONG; it was
+the rationale for passing `flag_exclusion` to the toolkit-only third `form_map_graph` (pr/28 T4),
+whose zero-quantity drop deleted junction points (pr/107 `dqdx_fit_keep_all_points`).  Verified
+numerically: `WCT_DQDX_ASSOC_CHECK=1` (pr/108 Test A) refits dQ/dx with the opposite exclusion flag on
+the same points — max|dQ| = 0 over 382 fits / 45 552 points.
+
+Intentional divergences recorded the same round:
+- prototype end-vertex regulariser neighbour uses `indices.size()-2` (a size, not an index,
+  `multi_dQ_dx_fit.h:723`); the toolkit uses `fits[size-2].index` — keep the toolkit's.
+- prototype rescales U-plane dQ by 1/0.7 on hard-coded uBooNE channel ranges (`:870-885`); the
+  toolkit does not (detector-agnostic).  Undo it when comparing uBooNE fits (`--undo-u07`).
+- "shared wire" error inflation (8000): prototype = a wire also carrying an mcell of ANOTHER
+  cluster; toolkit = a blob outside ALL loaded clusters (`update_dQ_dx_data`).  Hundreds of channels
+  differ on 6805 (pr/108 sec 6).  Open.

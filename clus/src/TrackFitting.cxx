@@ -8815,6 +8815,62 @@ void TrackFitting::do_multi_tracking(bool flag_dQ_dx_fit_reg, bool flag_dQ_dx_fi
 
 
         dQ_dx_multi_fit(end_point_limit, flag_dQ_dx_fit_reg);
+        // doc sbnd_xin/docs/pr/108 Test A -- DEBUG-ONLY self-check, enabled by
+        // WCT_DQDX_ASSOC_CHECK=1 (no config, no knob; unset => no code path).
+        // Claim under test: the dQ/dx fit depends on the exclusion fit only
+        // through the trajectory point set/positions, never through the
+        // association maps (the prototype never re-associates before its
+        // dQ/dx fit).  Snapshot every fitted dQ/dx, rebuild the associations
+        // with the OPPOSITE flag_exclusion on the SAME point set (keep-all
+        // forced so no point is dropped), refit dQ/dx, report max |delta|,
+        // then restore the snapshot bit-for-bit.
+        {
+            static const bool assoc_check = (getenv("WCT_DQDX_ASSOC_CHECK") != nullptr);
+            if (assoc_check) {
+                std::vector<std::pair<PR::SegmentPtr, std::vector<PR::Fit>>> snap_seg;
+                std::vector<std::pair<PR::VertexPtr, PR::Fit>> snap_vtx;
+                for (const auto& ed : get_segment_edges()) {
+                    auto sg = (*m_graph)[ed].segment;
+                    if (sg) snap_seg.emplace_back(sg, sg->fits());
+                }
+                for (auto vd : m_ordered_nodes_vec) {
+                    auto vtx = (*m_graph)[vd].vertex;
+                    if (vtx) snap_vtx.emplace_back(vtx, vtx->fit());
+                }
+                for (auto vd : m_ordered_nodes_vec) {
+                    auto vtx = (*m_graph)[vd].vertex;
+                    if (!vtx) continue;
+                    bool ff = vtx->flag_fix(); vtx->reset_fit_prop(); vtx->flag_fix(ff);
+                }
+                for (const auto& ed : get_segment_edges()) {
+                    auto sg = (*m_graph)[ed].segment;
+                    if (sg) sg->reset_fit_prop();
+                }
+                m_keep_zero_quantity_points = true;
+                form_map_graph(!flag_exclusion, m_params.end_point_factor, m_params.mid_point_factor, m_params.nlevel, m_params.time_tick_cut, m_params.charge_cut);
+                m_keep_zero_quantity_points = false;
+                dQ_dx_multi_fit(end_point_limit, flag_dQ_dx_fit_reg);
+                size_t npts = 0, nmis = 0; double max_dq = 0, max_dx = 0, max_pos = 0;
+                for (auto& [sg, fits0] : snap_seg) {
+                    const auto& fits1 = sg->fits();
+                    if (fits1.size() != fits0.size()) { nmis++; continue; }
+                    for (size_t i = 0; i < fits0.size(); ++i) {
+                        npts++;
+                        max_dq  = std::max(max_dq,  std::abs(fits1[i].dQ - fits0[i].dQ));
+                        max_dx  = std::max(max_dx,  std::abs(fits1[i].dx - fits0[i].dx));
+                        max_pos = std::max(max_pos, (fits1[i].point - fits0[i].point).magnitude());
+                    }
+                }
+                for (auto& [vtx, f0] : snap_vtx) {
+                    max_dq = std::max(max_dq, std::abs(vtx->fit().dQ - f0.dQ));
+                    max_dx = std::max(max_dx, std::abs(vtx->fit().dx - f0.dx));
+                }
+                s_log->info("dqdx_assoc_check: flag_exclusion={} -> refit with {}: {} segment points ({} segments with changed point count), max|dQ| {} max|dx| {} cm max|dpos| {} cm",
+                          flag_exclusion, !flag_exclusion, npts, nmis, max_dq, max_dx / units::cm, max_pos / units::cm);
+                for (auto& [sg, fits0] : snap_seg) sg->fits(fits0);
+                for (auto& [vtx, f0] : snap_vtx) vtx->fit(f0);
+            }
+        }
         // if (m_perf) std::cout << "do_multiple_tracking timing: dQ/dx fitting took " << DST_MS(DST_Clock::now() - t_dst).count() << " ms" << std::endl; t_dst = DST_Clock::now();
 
 

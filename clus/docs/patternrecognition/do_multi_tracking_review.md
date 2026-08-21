@@ -230,7 +230,12 @@ Each vertex in the loop calls `m_dv->contained_by(init_p)` and then two `std::ma
 
 ---
 
-### 4.3 `form_map_graph` called redundantly before `dQ_dx_multi_fit` — NOT A BUG
+### 4.3 `form_map_graph` called redundantly before `dQ_dx_multi_fit` — NOT A BUG (index rebuild) / BUT its point drop IS a divergence — see doc sbnd_xin/docs/pr/107 + pr/108
+
+> 2026-08-21 (pr/108): the rebuild is needed only for the fit indices.  Its "quantity > 0" drop
+> deletes junction points that the prototype keeps, and neither dQ/dx fit reads the associations
+> it builds (pr/108 Test A: max|dQ| = 0 with the opposite exclusion flag).  `dqdx_fit_keep_all_points`
+> (pr/107, default OFF) removes the drop.
 
 **File:** `TrackFitting.cxx:7919` (third `form_map_graph` call in `do_multi_tracking`)
 
