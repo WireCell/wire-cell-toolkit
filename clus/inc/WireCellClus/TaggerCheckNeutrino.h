@@ -202,6 +202,10 @@ public:
         double m_mvga_ac_veto_radius{0.0};  // cm; op3.5-only collapse-chord charge-veto radius (doc pr/99 round 2); 0 = legacy straighten_radius rule, byte-identical
         double m_mvga_ac_chord_max{0.0};    // cm; op3.5 replacement-chord length cap (doc pr/99 round 2); 0 = no cap, byte-identical
         bool   m_mvga_ac_no_cascade{false}; // op3.5: skip candidates touching `created` products (doc pr/99 round 2); false = byte-identical
+        double m_mvga_passthru{0.0};        // cm; op0 pass-through split radius (doc pr/103, SBND 18255-405707): a prong of a junction J within this radius of the main vertex whose interior passes through the main vertex is split there; 0 = off, byte-identical
+        double m_mvga_interposed_fallback_min_angle{0.0}; // deg; op3 fallback: min measured far_angle (doc pr/103); 0 = no floor beyond 'measured'; inert while the fallback is off
+        bool   m_mvga_interposed_fallback{false}; // op3: when the interposed far-angle gate declines at the main anchor, try the per-prong charge-verified straighten splice instead (doc pr/103); false = byte-identical
+        double m_mvga_passthru_tol{1.0};    // cm; op0 miss tolerance -- max distance from the main-vertex wcpt to the passing prong (doc pr/103); inert while m_mvga_passthru == 0
         double m_mvga_dup_starved_asym{0.0}; // pair min/max dQ/dx asymmetry gate; op1-post angle-decline starved-member override (doc pr/99 round 2); 0 = off, byte-identical
         double m_mvga_dup_starved_mip{0.0}; // absolute cap on the loser, ratio vs mip median; same override (doc pr/99 round 2); 0 = off, byte-identical
         double m_mvga_dup_starved_span{0.0}; // pair min/max length comparability floor; same override (doc pr/99 round 2); 0 = no span test

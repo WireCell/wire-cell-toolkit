@@ -379,6 +379,10 @@ TEST_CASE("clus knob defaults: TaggerCheckNeutrino switches are all OFF")
     CHECK_KNOB_NUM(cfg, "mvga_ac_veto_radius", 0.0);  // doc pr/99 r2: 0 = legacy straighten_radius rule, byte-identical
     CHECK_KNOB_NUM(cfg, "mvga_ac_chord_max", 0.0);    // doc pr/99 r2: 0 = no chord cap, byte-identical
     CHECK_KNOB_BOOL(cfg, "mvga_ac_no_cascade", false); // doc pr/99 r2: created products stay collapsible, byte-identical
+    CHECK_KNOB_NUM(cfg, "mvga_passthru", 0.0);        // doc pr/103: 0 = op0 pass-through split off, byte-identical
+    CHECK_KNOB_NUM(cfg, "mvga_passthru_tol", 1.0);    // doc pr/103: miss tolerance (cm); inert while mvga_passthru == 0
+    CHECK_KNOB_BOOL(cfg, "mvga_interposed_fallback", false); // doc pr/103: far-angle decline stands, byte-identical
+    CHECK_KNOB_NUM(cfg, "mvga_interposed_fallback_min_angle", 0.0); // doc pr/103: no floor; inert while the fallback is off
     CHECK_KNOB_NUM(cfg, "mvga_dup_starved_asym", 0.0); // doc pr/99 r2: 0 = op1-post angle decline stands, byte-identical
     CHECK_KNOB_NUM(cfg, "mvga_dup_starved_mip", 0.0); // doc pr/99 r2: 0 = op1-post angle decline stands, byte-identical
     CHECK_KNOB_NUM(cfg, "mvga_dup_starved_span", 0.0); // doc pr/99 r2: 0 = no span-comparability test, byte-identical

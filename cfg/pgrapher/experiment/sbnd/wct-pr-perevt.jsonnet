@@ -2068,6 +2068,23 @@ function(
     mvga_ac_veto_radius = null,
     mvga_ac_chord_max = 30,
     mvga_ac_no_cascade = true,
+    // doc pr/103 (SBND 18255-405707) -- mvga op0 pass-through split: a prong of
+    // a junction J near the main vertex whose fitted interior passes through the
+    // main vertex is split there (the J-M piece becomes the connecting stub,
+    // so op1 no longer deletes the connector as a "duplicate" and op3 can
+    // re-anchor J's other prong onto the vertex).  C++ default 0 = off;
+    // passthru_tol C++ default 1.0 cm.  null => key omitted => byte-identical.
+    mvga_passthru = null,
+    mvga_passthru_tol = null,
+    // doc pr/103 -- op3 interposed splice: when the far-angle gate declines at
+    // the main anchor (the 3-track vertex split in two by a 0.6-4 cm stub:
+    // 65289/345633/400856/287517), try the per-prong charge-verified straighten
+    // splice instead.  C++ default false; false => key omitted => byte-identical.
+    mvga_interposed_fallback = false,
+    // doc pr/103 sec 6: measured-far_angle floor for the fallback (deg).  C++
+    // default 0 = only "measured"; validated production value 45 (hairpins /
+    // back-folds below it only shorten tracks).  null => key omitted.
+    mvga_interposed_fallback_min_angle = null,
     mvga_dup_starved_asym = 0.55,
     mvga_dup_starved_mip = 0.8,
     mvga_dup_starved_span = 0.5,
@@ -2717,6 +2734,10 @@ function(
                              mvga_ac_veto_radius=mvga_ac_veto_radius,
                              mvga_ac_chord_max=mvga_ac_chord_max,
                              mvga_ac_no_cascade=mvga_ac_no_cascade,
+                             mvga_passthru=mvga_passthru,
+                             mvga_passthru_tol=mvga_passthru_tol,
+                             mvga_interposed_fallback=mvga_interposed_fallback,
+                             mvga_interposed_fallback_min_angle=mvga_interposed_fallback_min_angle,
                              mvga_dup_starved_asym=mvga_dup_starved_asym,
                              mvga_dup_starved_mip=mvga_dup_starved_mip,
                              mvga_dup_starved_span=mvga_dup_starved_span,

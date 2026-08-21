@@ -309,6 +309,169 @@ bool PatternAlgorithms::main_vertex_graph_audit(Graph& graph, Facade::Cluster& c
         }
     };
 
+    // ---- op0: pass-through split (doc sbnd_xin/docs/pr/103, SBND 18255-405707)
+    // A junction J within m_mvga_passthru of the main vertex M carries a
+    // prong S whose fitted interior passes within m_mvga_passthru_tol of M
+    // (405707: the muon's 2 cm back-extension to J, where the proton
+    // attaches).  Production then reads the M-J connector as a DUPLICATE of
+    // S (op1 overlap=1.00) and deletes it -- reconnects=0, because the
+    // reconnect plan's "already linked" test sees the loser itself -- so J
+    // is cut off from M until stitch_disconnected_main_cluster re-adds a
+    // 4-point stub, and J's other prong (the proton) never reaches the
+    // vertex ("takes a shortcut").  op0 makes the graph say what the fit
+    // says: S is split at its wcpt closest to M, the remainder re-anchored
+    // on M (SegmentPtr identity kept, fits stale until op4 -- the
+    // carry_prong_execute contract), and the J->M piece becomes the
+    // connecting stub (an existing M-J segment is reused), registered in
+    // `passthru_stubs` so op3 treats it like a created stub: per-prong
+    // charge-verified straighten splice of J's remaining prongs onto M,
+    // admitted in pass 0.  Knob 0 (default) => block never runs and
+    // `passthru_stubs` stays empty => byte-identical.
+    IndexedSegmentSet passthru_stubs;
+    int n_op0 = 0;
+    if (m_mvga_passthru > 0 && main_vertex->descriptor_valid()) {
+        const double minrem = 3*units::cm;   // S must continue at least this far beyond M
+        const double tol = 0.01*units::cm;
+        const WCPoint mv_wcp = main_vertex->wcpt();
+        const auto mv_w = mv_wcp.point;
+        bool flag_continue = true;
+        while (flag_continue && n_op0 < kEditCap) {
+            flag_continue = false;
+            for (const auto& vd : ordered_nodes(graph)) {
+                if (flag_continue) break;
+                VertexPtr J = graph[vd].vertex;
+                if (!J || J->cluster() != &cluster || J == main_vertex) continue;
+                if (!J->descriptor_valid()) continue;
+                if (J->flags_any(VertexFlags::kProtectedBreak)) continue;
+                if (boost::degree(vd, graph) < 2) continue;
+                WireCell::Point jp = J->fit().valid() ? J->fit().point : J->wcpt().point;
+                const double dj = point_dis(jp, mv_pt);
+                if (dj >= m_mvga_passthru || dj < 0.05*units::cm) continue;
+
+                std::vector<SegmentPtr> inc_J;
+                for (auto edesc : sorted_out_edges(vd, graph)) {
+                    SegmentPtr sg = graph[edesc].segment;
+                    if (sg) inc_J.push_back(sg);
+                }
+                SegmentPtr link = find_segment(graph, J, main_vertex);
+
+                // best candidate S: smallest miss distance to M's wcpt
+                SegmentPtr best_S;
+                size_t best_k = 0;
+                double best_miss = 1e9, best_arc = 0, best_rem = 0;
+                bool best_front = true;
+                for (SegmentPtr S : inc_J) {
+                    if (S == link) continue;
+                    if (created.count(S) || passthru_stubs.count(S)) continue;
+                    VertexPtr vfar = find_other_vertex(graph, S, J);
+                    if (!vfar || vfar == main_vertex || !vfar->descriptor_valid()) continue;
+                    if (find_segment(graph, main_vertex, vfar)) continue;  // B.7: (M, far) slot must be free
+                    const auto& w = S->wcpts();
+                    if (w.size() < 3) continue;
+                    const bool front = point_dis(w.front().point, J->wcpt().point) < tol;
+                    if (!front && point_dis(w.back().point, J->wcpt().point) >= tol) continue;
+                    // Orient J-first; test the closest point on the wcpt POLYLINE
+                    // (wcpt chains are sparse -- 405707's muon has a 5.8 cm first
+                    // hop -- so a nearest-wcpt test cannot see the pass-through).
+                    std::vector<WCPoint> fw(w.begin(), w.end());
+                    if (!front) std::reverse(fw.begin(), fw.end());
+                    std::vector<double> arc(fw.size(), 0.0);
+                    for (size_t i = 1; i < fw.size(); ++i) arc[i] = arc[i-1] + point_dis(fw[i].point, fw[i-1].point);
+                    const double total = arc.back();
+                    size_t kbest = fw.size();   // split hop: between fw[kbest] and fw[kbest+1]
+                    double miss = 1e9, aj = -1;
+                    for (size_t i = 0; i + 1 < fw.size(); ++i) {
+                        const auto a = fw[i].point, b = fw[i+1].point;
+                        const auto ab = b - a;
+                        const double L2 = ab.dot(ab);
+                        if (L2 <= 0) continue;
+                        double t = (mv_w - a).dot(ab) / L2;
+                        t = std::clamp(t, 0.0, 1.0);
+                        const auto q = a + ab * t;
+                        const double d = point_dis(q, mv_w);
+                        const double aq = arc[i] + t * std::sqrt(L2);    // arc from J
+                        if (aq < 0.3*units::cm || aq > m_mvga_passthru + m_mvga_passthru_tol) continue;
+                        if (d < miss) { miss = d; kbest = i; aj = aq; }
+                    }
+                    bool other = false;   // J must keep a prong besides S and the link
+                    for (SegmentPtr o : inc_J) if (o != S && o != link) { other = true; break; }
+                    SPDLOG_LOGGER_TRACE(s_log,
+                        "mvga: op0 eval cluster={} dJ={:.2f}cm S_len={:.2f}cm npts={} miss={:.2f}cm arc={:.2f}cm rem={:.2f}cm other={}",
+                        cluster.ident(), dj/units::cm, total/units::cm, fw.size(),
+                        (kbest == fw.size()) ? -1.0 : miss/units::cm, aj/units::cm,
+                        (kbest == fw.size()) ? -1.0 : (total - aj)/units::cm, other ? 1 : 0);
+                    if (kbest == fw.size() || miss >= m_mvga_passthru_tol) continue;
+                    if (total - aj < minrem) continue;
+                    if (!other) continue;
+                    if (miss < best_miss) {
+                        best_miss = miss; best_S = S; best_k = kbest; best_front = front;
+                        best_arc = aj; best_rem = total - aj;
+                    }
+                }
+                if (!best_S) continue;
+
+                const auto& w = best_S->wcpts();
+                std::vector<WCPoint> fwd(w.begin(), w.end());
+                if (!best_front) std::reverse(fwd.begin(), fwd.end());
+                const size_t k = best_k;   // M lies on the hop fwd[k] -> fwd[k+1]
+                std::vector<WCPoint> stub_w(fwd.begin(), fwd.begin() + k + 1);   // J .. fwd[k]
+                if (point_dis(stub_w.back().point, mv_w) > tol) stub_w.push_back(mv_wcp);
+                std::vector<WCPoint> rem_w;
+                rem_w.push_back(mv_wcp);                                             // M .. far
+                for (size_t i = k + 1; i < fwd.size(); ++i)
+                    if (point_dis(fwd[i].point, rem_w.back().point) > tol) rem_w.push_back(fwd[i]);
+                if (rem_w.size() < 2 || stub_w.size() < 2) continue;
+                VertexPtr vfar = find_other_vertex(graph, best_S, J);
+                if (!vfar) continue;
+
+                SegmentPtr stub = link;
+                const bool stub_new = !stub;
+                if (stub_new) {
+                    std::vector<Facade::geo_point_t> spts;
+                    for (const auto& q : stub_w) spts.push_back(q.point);
+                    stub = create_segment_for_cluster(cluster, dv, spts, 0);
+                    if (!stub) continue;
+                    add_segment(graph, stub, J, main_vertex);
+                }
+                passthru_stubs.insert(stub);
+
+                best_S->wcpts(rem_w);
+                std::vector<Facade::geo_point_t> rpts;
+                for (const auto& q : rem_w) rpts.push_back(q.point);
+                create_segment_point_cloud(best_S, rpts, dv, "main");
+                // Trim the (stale) fit points to the remainder: op1/op3 read
+                // seg_points()/segment_track_length() from the fits until the
+                // op4 refit, and the J->M stretch must not be claimed twice.
+                {
+                    auto& fits = best_S->fits();
+                    if (fits.size() >= 3) {
+                        size_t imin = 0; double dmin = 1e9;
+                        for (size_t i = 0; i < fits.size(); ++i) {
+                            const double d = point_dis(fits[i].point, mv_w);
+                            if (d < dmin) { dmin = d; imin = i; }
+                        }
+                        const bool j_first = point_dis(fits.front().point, J->wcpt().point)
+                                           < point_dis(fits.back().point, J->wcpt().point);
+                        std::vector<Fit> kept;
+                        if (j_first) kept.assign(fits.begin() + imin, fits.end());
+                        else         kept.assign(fits.begin(), fits.begin() + imin + 1);
+                        if (kept.size() >= 2) best_S->fits(kept);
+                    }
+                }
+                remove_segment(graph, best_S);
+                add_segment(graph, best_S, main_vertex, vfar);
+
+                SPDLOG_LOGGER_DEBUG(s_log,
+                    "mvga: op0 passthru-split cluster={} dJ={:.2f}cm miss={:.2f}cm arc={:.2f}cm rem={:.2f}cm "
+                    "J_deg={} stub={} stub_npts={}",
+                    cluster.ident(), dj/units::cm, best_miss/units::cm, best_arc/units::cm, best_rem/units::cm,
+                    inc_J.size(), stub_new ? "created" : "existing", stub_w.size());
+                ++n_op0;
+                flag_continue = true;
+            }
+        }
+    }
+
     // ---- op1: duplicate-corridor merge -----------------------------------
     // doc pr/83 r3 sec 9.2/9.3: op1's scope and threshold decouple from
     // op2/op3's via m_mvga_op1_radius / m_mvga_op1_dup_frac.  Both default
@@ -337,6 +500,10 @@ bool PatternAlgorithms::main_vertex_graph_audit(Graph& graph, Facade::Cluster& c
                 for (size_t j = i + 1; j < segs.size() && !flag_continue; ++j) {
                     SegmentPtr sa = segs[i];
                     SegmentPtr sb = segs[j];
+                    // doc pr/103: the connector op0 just established is never a
+                    // duplicate to be merged away (405707: with S's stale fits
+                    // it reads overlap=1.00).  Empty set when the knob is off.
+                    if (passthru_stubs.count(sa) || passthru_stubs.count(sb)) continue;
                     double la = segment_track_length(sa);
                     double lb = segment_track_length(sb);
                     SegmentPtr shorter = (la <= lb) ? sa : sb;
@@ -780,7 +947,41 @@ bool PatternAlgorithms::main_vertex_graph_audit(Graph& graph, Facade::Cluster& c
                         // straighten gate: carry exactly those prongs whose
                         // straightened approach passes the es2 charge veto;
                         // the junction and stub survive for the rest.
-                        if (created.count(stub)) {
+                        // doc pr/103: op0's pass-through stubs take the same
+                        // per-prong charge-verified path (they are never in
+                        // `created`, so pass 0 admits them; knob off => empty set).
+                        // doc pr/103: `mvga_interposed_fallback` -- when the
+                        // far-angle gate would decline (65289 118.5 deg,
+                        // 345633 126.2, 400856 122.4, 287517 64.1 at a 0.64 cm
+                        // stub: the same 3-track vertex split in two), take
+                        // the same per-prong charge-verified path instead of
+                        // declining; prongs whose straight chord from the
+                        // anchor is off charge stay on the junction.  Off
+                        // (default) => the old angle decline verbatim.
+                        // Restricted to a DEGREE-2 far vertex (stub + ONE prong:
+                        // a single prong's elbow near the vertex -- the op3.5
+                        // shape without its whole-chain chord).  A far vertex
+                        // carrying >= 2 long prongs is a genuine multi-track
+                        // junction; when the click-anchored A/B was run on such
+                        // cases (65289 / 66712 / 345633) the owner's vertex was
+                        // J itself (2.4-3.7 cm from the reco main), and
+                        // collapsing J into M pulled every prong away from it
+                        // -- a vertex-placement question, not a topology one.
+                        // Angle floor (doc pr/103 sec 6 ledger): best_angle == 0
+                        // means NO measurable prong direction (fit-less prong)
+                        // -- the legacy gate declines those and so must the
+                        // fallback (235435: two 0.0-deg fires cut two prongs
+                        // off the vertex, Enu 818 -> 555 MeV); and a prong
+                        // leaving J nearly parallel to the stub (< ~45 deg) is a
+                        // hairpin / back-fold whose carry only shortens the
+                        // track (389588, 314705, 394532).  Production floor 45.
+                        const bool angle_fallback = m_mvga_interposed_fallback &&
+                                                    best_angle > 0 &&
+                                                    best_angle >= m_mvga_interposed_fallback_min_angle &&
+                                                    best_angle < m_mvga_interposed_angle &&
+                                                    boost::degree(vf->get_descriptor(), graph) == 2 &&
+                                                    !created.count(stub) && !passthru_stubs.count(stub);
+                        if (created.count(stub) || passthru_stubs.count(stub) || angle_fallback) {
                             if (m_mvga_splice_straighten <= 0) continue;  // no charge gate available
                             // doc pr/83 r3 (sec 8.5 fallback): decline a
                             // multi-prong carry outright above the cap --
@@ -835,9 +1036,11 @@ bool PatternAlgorithms::main_vertex_graph_audit(Graph& graph, Facade::Cluster& c
                                 cleanup_vertex(vf);
                             }
                             SPDLOG_LOGGER_DEBUG(s_log,
-                                "mvga: op3 created-splice cluster={} stub_arc={:.2f}cm carried={} vf_kept={}",
+                                "mvga: op3 created-splice cluster={} stub_arc={:.2f}cm carried={} vf_kept={} kind={} far_angle={:.1f}deg",
                                 cluster.ident(), stub_arc/units::cm, carried,
-                                vf->descriptor_valid() ? 1 : 0);
+                                vf->descriptor_valid() ? 1 : 0,
+                                angle_fallback ? "angle-fallback" : (passthru_stubs.count(stub) ? "passthru" : "created"),
+                                best_angle);
                             ++n_op3;
                             fired_here = true;
                             flag_continue = true;
@@ -1151,12 +1354,16 @@ bool PatternAlgorithms::main_vertex_graph_audit(Graph& graph, Facade::Cluster& c
     }  // audit_pass (op3 <-> op3.5 interleave)
 
     // ---- op4: one local refit --------------------------------------------
-    const bool fired_ops = (n_op1 + n_op2 + n_op3 + n_op3b) > 0;
+    // doc pr/103: op0 re-anchors wcpt chains (fits stale) -> it needs the refit too; n_op0 == 0 when the knob is off.
+    const bool fired_ops = (n_op0 + n_op1 + n_op2 + n_op3 + n_op3b) > 0;
     if (fired_ops) {
         track_fitter.do_multi_tracking(true, true, false, m_fit_exclusion, false, &cluster);
         SPDLOG_LOGGER_DEBUG(s_log,
             "mvga: fired cluster={} op1={} op2={} op3={} (refit done)",
             cluster.ident(), n_op1, n_op2, n_op3);
+        if (n_op0 > 0) {
+            SPDLOG_LOGGER_DEBUG(s_log, "mvga: op0 fired cluster={} splits={}", cluster.ident(), n_op0);
+        }
         if (n_op3b > 0) {
             SPDLOG_LOGGER_DEBUG(s_log,
                 "mvga: op3.5 fired cluster={} collapses={}", cluster.ident(), n_op3b);
@@ -1196,6 +1403,10 @@ bool PatternAlgorithms::main_vertex_graph_audit(Graph& graph, Facade::Cluster& c
                 for (size_t j = i + 1; j < segs.size() && !flag_continue; ++j) {
                     SegmentPtr sa = segs[i];
                     SegmentPtr sb = segs[j];
+                    // doc pr/103: the connector op0 just established is never a
+                    // duplicate to be merged away (405707: with S's stale fits
+                    // it reads overlap=1.00).  Empty set when the knob is off.
+                    if (passthru_stubs.count(sa) || passthru_stubs.count(sb)) continue;
                     double la = segment_track_length(sa);
                     double lb = segment_track_length(sb);
                     SegmentPtr shorter = (la <= lb) ? sa : sb;
@@ -1456,6 +1667,10 @@ bool PatternAlgorithms::main_vertex_graph_audit(Graph& graph, Facade::Cluster& c
                 for (size_t j = i + 1; j < segs.size() && !flag_continue; ++j) {
                     SegmentPtr sa = segs[i];
                     SegmentPtr sb = segs[j];
+                    // doc pr/103: the connector op0 just established is never a
+                    // duplicate to be merged away (405707: with S's stale fits
+                    // it reads overlap=1.00).  Empty set when the knob is off.
+                    if (passthru_stubs.count(sa) || passthru_stubs.count(sb)) continue;
                     double la = segment_track_length(sa);
                     double lb = segment_track_length(sb);
                     SegmentPtr shorter = (la <= lb) ? sa : sb;

@@ -743,6 +743,10 @@ namespace WireCell::Clus::PR {
         double m_mvga_ac_veto_radius{0};      ///< op3.5-only charge-veto radius, internal length units (doc pr/99 round 2); 0 = legacy (straighten_radius rule)
         double m_mvga_ac_chord_max{0};        ///< op3.5 replacement-chord length cap, internal length units (doc pr/99 round 2); 0 = no cap
         bool   m_mvga_ac_no_cascade{false};   ///< op3.5: skip candidates touching `created` products (doc pr/99 round 2); false = legacy
+        double m_mvga_passthru{0};            ///< op0 pass-through split radius, internal length units (doc pr/103); 0 = off
+        double m_mvga_interposed_fallback_min_angle{0}; ///< deg; op3 fallback min measured far_angle (doc pr/103)
+        bool   m_mvga_interposed_fallback{false}; ///< op3: charge-verified splice when the far-angle gate declines (doc pr/103); false = legacy
+        double m_mvga_passthru_tol{1.0*units::cm}; ///< op0 miss tolerance, internal length units (doc pr/103); inert while m_mvga_passthru == 0
         // doc sbnd_xin/docs/pr/99 round 2 -- op1-post charge second-opinion.
         // 70084: a 15.7 cm charge-starved chord rode a real prong at
         // overlap 0.87 but the pair's ~30 deg chord opening angle declined

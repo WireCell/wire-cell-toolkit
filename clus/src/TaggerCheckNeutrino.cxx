@@ -238,6 +238,10 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_mvga_ac_veto_radius = get(config, "mvga_ac_veto_radius", m_mvga_ac_veto_radius); // cm; doc pr/99 round 2; 0 = legacy
     m_mvga_ac_chord_max   = get(config, "mvga_ac_chord_max",   m_mvga_ac_chord_max);   // cm; doc pr/99 round 2; 0 = no cap
     m_mvga_ac_no_cascade  = get(config, "mvga_ac_no_cascade",  m_mvga_ac_no_cascade);  // doc pr/99 round 2
+    m_mvga_passthru       = get(config, "mvga_passthru",       m_mvga_passthru);       // cm; doc pr/103; 0 = off
+    m_mvga_passthru_tol   = get(config, "mvga_passthru_tol",   m_mvga_passthru_tol);   // cm; doc pr/103
+    m_mvga_interposed_fallback = get(config, "mvga_interposed_fallback", m_mvga_interposed_fallback);  // doc pr/103
+    m_mvga_interposed_fallback_min_angle = get(config, "mvga_interposed_fallback_min_angle", m_mvga_interposed_fallback_min_angle);  // deg; doc pr/103
     m_mvga_dup_starved_asym = get(config, "mvga_dup_starved_asym", m_mvga_dup_starved_asym); // pair asymmetry; doc pr/99 round 2; 0 = off
     m_mvga_dup_starved_mip = get(config, "mvga_dup_starved_mip", m_mvga_dup_starved_mip); // absolute cap on loser; doc pr/99 round 2; 0 = off
     m_mvga_dup_starved_span = get(config, "mvga_dup_starved_span", m_mvga_dup_starved_span); // pair length comparability; doc pr/99 round 2; 0 = off
@@ -747,6 +751,10 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["mvga_ac_veto_radius"] = m_mvga_ac_veto_radius; // cm; 0 = legacy straighten_radius rule, byte-identical (doc pr/99 round 2)
     cfg["mvga_ac_chord_max"]   = m_mvga_ac_chord_max;   // cm; 0 = no cap, byte-identical (doc pr/99 round 2)
     cfg["mvga_ac_no_cascade"]  = m_mvga_ac_no_cascade;  // false = created products collapsible, byte-identical (doc pr/99 round 2)
+    cfg["mvga_passthru"]       = m_mvga_passthru;       // cm; 0 = op0 pass-through split off, byte-identical (doc pr/103)
+    cfg["mvga_passthru_tol"]   = m_mvga_passthru_tol;   // cm; inert while mvga_passthru == 0 (doc pr/103)
+    cfg["mvga_interposed_fallback"] = m_mvga_interposed_fallback;  // false = far-angle decline stands, byte-identical (doc pr/103)
+    cfg["mvga_interposed_fallback_min_angle"] = m_mvga_interposed_fallback_min_angle;  // deg; inert while the fallback is off (doc pr/103)
     cfg["mvga_dup_starved_asym"] = m_mvga_dup_starved_asym; // pair asymmetry; 0 = angle decline stands, byte-identical (doc pr/99 round 2)
     cfg["mvga_dup_starved_mip"] = m_mvga_dup_starved_mip; // absolute cap on loser; 0 = angle decline stands, byte-identical (doc pr/99 round 2)
     cfg["mvga_dup_starved_span"] = m_mvga_dup_starved_span; // pair length comparability floor; 0 = no span test (doc pr/99 round 2)
@@ -1773,6 +1781,10 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
         pattern_algos.m_mvga_ac_veto_radius = m_mvga_ac_veto_radius * units::cm; // cm -> internal (doc pr/99 round 2)
         pattern_algos.m_mvga_ac_chord_max   = m_mvga_ac_chord_max * units::cm;   // cm -> internal (doc pr/99 round 2)
         pattern_algos.m_mvga_ac_no_cascade  = m_mvga_ac_no_cascade;               // doc pr/99 round 2
+        pattern_algos.m_mvga_passthru       = m_mvga_passthru * units::cm;        // cm -> internal (doc pr/103)
+        pattern_algos.m_mvga_passthru_tol   = m_mvga_passthru_tol * units::cm;    // cm -> internal (doc pr/103)
+        pattern_algos.m_mvga_interposed_fallback = m_mvga_interposed_fallback;    // doc pr/103
+        pattern_algos.m_mvga_interposed_fallback_min_angle = m_mvga_interposed_fallback_min_angle;  // deg (doc pr/103)
         pattern_algos.m_mvga_dup_starved_asym = m_mvga_dup_starved_asym;          // ratio, no conversion (doc pr/99 round 2)
         pattern_algos.m_mvga_dup_starved_mip = m_mvga_dup_starved_mip;            // ratio, no conversion (doc pr/99 round 2)
         pattern_algos.m_mvga_dup_starved_span = m_mvga_dup_starved_span;          // ratio, no conversion (doc pr/99 round 2)
