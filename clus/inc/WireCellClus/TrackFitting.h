@@ -803,6 +803,15 @@ namespace WireCell::Clus {
         // true form_map_graph stores zero-quantity interior points instead
         // of dropping them.  Always false while the knob is 0.
         bool m_keep_zero_quantity_points{false};
+        // doc pr/108 stage dump (debug only, env WCT_TRAJ_DUMP=<path>; unset => no
+        // code path): per trajectory round, every interior point's association
+        // counts before/after exclusion, live-plane quantities, kept flag, and
+        // the fitted positions after each round.  Mirrors WCP_TRAJ_DUMP in the
+        // prototype so the two can be diffed stage by stage.
+        FILE* m_traj_dump{nullptr};
+        int   m_traj_dump_call{0};
+        int   m_traj_dump_stage{0};
+        void  traj_dump_fits(const char* tag);
 
         // doc pr/49 round 3 (fit_blob_coverage knob): clusters owning a
         // segment in the current fit -- the "fitting scope" whose members

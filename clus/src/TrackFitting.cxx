@@ -3493,9 +3493,11 @@ void TrackFitting::form_map_graph(bool flag_exclusion, double end_point_factor, 
     int count = 0;
 
     // Process each segment
+    int dump_seg_index = -1;   // doc pr/108 stage dump: same segment numbering as traj_dump_fits
     for (const auto& ed : get_segment_edges()) {
         auto& edge_bundle = (*m_graph)[ed];
         if (!edge_bundle.segment) continue;
+        ++dump_seg_index;
 
         auto segment = edge_bundle.segment;
         auto& fits = segment->fits();
@@ -3573,6 +3575,7 @@ void TrackFitting::form_map_graph(bool flag_exclusion, double end_point_factor, 
             if (i != 0 && i + 1 != fits.size()) {
                 TrackFitting::PlaneData temp_2dut, temp_2dvt, temp_2dwt;
                 form_point_association(segment, fits[i].point, temp_2dut, temp_2dvt, temp_2dwt, dis_cut, nlevel, time_tick_cut);
+                const size_t dump_n0[3] = {temp_2dut.associated_2d_points.size(), temp_2dvt.associated_2d_points.size(), temp_2dwt.associated_2d_points.size()};  // doc pr/108
 
                 // std::cout << i << " " << fits[i].point << " " << temp_2dut.quantity << " " << temp_2dvt.quantity << " " << temp_2dwt.quantity << " " << temp_2dut.associated_2d_points.size() << " " << temp_2dvt.associated_2d_points.size() << " " << temp_2dwt.associated_2d_points.size() << " " << dis_cut/units::cm << " " << nlevel << " " << time_tick_cut<< std::endl;
 
@@ -3580,6 +3583,7 @@ void TrackFitting::form_map_graph(bool flag_exclusion, double end_point_factor, 
                 if (flag_exclusion) {
                     update_association(segment, segments, temp_2dut, temp_2dvt, temp_2dwt, &excl_cache);
                 }
+                const size_t dump_n1[3] = {temp_2dut.associated_2d_points.size(), temp_2dvt.associated_2d_points.size(), temp_2dwt.associated_2d_points.size()};  // doc pr/108: after exclusion, before examine
 
                 // Examine point association
                 bool is_end_point = (i == 1 || i + 2 == fits.size());
@@ -3590,6 +3594,16 @@ void TrackFitting::form_map_graph(bool flag_exclusion, double end_point_factor, 
                 // on, a zero-quantity point is stored (empty association,
                 // fresh index) instead of dropped -- prototype parity, see
                 // do_multi_tracking.  Legacy: drop.
+                if (m_traj_dump && m_traj_dump_stage > 0) {   // doc pr/108 stage dump
+                    const bool kept = (temp_2dut.quantity + temp_2dvt.quantity + temp_2dwt.quantity > 0 || m_keep_zero_quantity_points);
+                    fprintf(m_traj_dump, "%d map%d %d %zu %.4f %.4f %.4f %zu %zu %zu %zu %zu %zu %.3f %.3f %.3f %d %.3f %zu %zu %zu\n",
+                            m_traj_dump_call, m_traj_dump_stage, dump_seg_index, i,
+                            fits[i].point.x() / units::cm, fits[i].point.y() / units::cm, fits[i].point.z() / units::cm,
+                            dump_n0[0], dump_n0[1], dump_n0[2],
+                            dump_n1[0], dump_n1[1], dump_n1[2],
+                            temp_2dut.quantity, temp_2dvt.quantity, temp_2dwt.quantity, (int)kept, dis_cut / units::cm,
+                            temp_2dut.associated_2d_points.size(), temp_2dvt.associated_2d_points.size(), temp_2dwt.associated_2d_points.size());
+                }
                 if (temp_2dut.quantity + temp_2dvt.quantity + temp_2dwt.quantity > 0 || m_keep_zero_quantity_points) {
                     // Store in mapping structures
                     m_3d_to_2d[count].set_plane_data(WirePlaneLayer_t::kUlayer, temp_2dut);
@@ -8231,7 +8245,37 @@ void WireCell::Clus::TrackFitting::dQ_dx_fit(double dis_end_point_ext, bool flag
     recover_original_charge_data();
 }
 
+// doc pr/108: stage dump helper (see header).
+void TrackFitting::traj_dump_fits(const char* tag)
+{
+    if (!m_traj_dump) return;
+    int si = 0;
+    for (const auto& ed : get_segment_edges()) {
+        auto sg = (*m_graph)[ed].segment;
+        if (!sg) continue;
+        const auto& fits = sg->fits();
+        for (size_t i = 0; i < fits.size(); ++i) {
+            fprintf(m_traj_dump, "%d %s %d %zu %.4f %.4f %.4f %.1f %.4f\n", m_traj_dump_call, tag, si, i,
+                    fits[i].point.x() / units::cm, fits[i].point.y() / units::cm, fits[i].point.z() / units::cm,
+                    fits[i].dQ, fits[i].dx / units::cm);
+        }
+        ++si;
+    }
+    fflush(m_traj_dump);
+}
+
 void TrackFitting::do_multi_tracking(bool flag_dQ_dx_fit_reg, bool flag_dQ_dx_fit, bool flag_force_load_data, bool flag_exclusion, bool flag_hack, Facade::Cluster* cluster_filter){
+    {   // doc pr/108 stage dump: one shared file per process, call counter shared by all fitters.
+        static FILE* s_dump = [](){ const char* p = getenv("WCT_TRAJ_DUMP"); return p ? fopen(p, "a") : nullptr; }();
+        static int s_call = 0;
+        m_traj_dump = s_dump;
+        if (m_traj_dump) {
+            m_traj_dump_call = ++s_call;
+            m_traj_dump_stage = 0;
+            fprintf(m_traj_dump, "%d call excl=%d cluster=%d\n", m_traj_dump_call, (int)flag_exclusion,
+                    cluster_filter ? (int)cluster_filter->ident() : -1);
+        }
+    }
 
     // using DST_Clock = std::chrono::steady_clock;
     // using DST_MS = std::chrono::duration<double, std::milli>;
@@ -8405,6 +8449,7 @@ void TrackFitting::do_multi_tracking(bool flag_dQ_dx_fit_reg, bool flag_dQ_dx_fi
         //         std::cout << v_bundle.vertex->fit().point << " VTX " << v_bundle.vertex->fit().index << std::endl;
         //     }
         // }
+        m_traj_dump_stage = 1;
         form_map_graph(flag_exclusion, m_params.end_point_factor, m_params.mid_point_factor, m_params.nlevel, m_params.time_tick_cut, m_params.charge_cut);
         det_fits("form_map_1st");
 
@@ -8427,6 +8472,7 @@ void TrackFitting::do_multi_tracking(bool flag_dQ_dx_fit_reg, bool flag_dQ_dx_fi
         //     }
         // }
         multi_trajectory_fit(1, m_params.div_sigma);
+        traj_dump_fits("fit1");
         det_fits("fit_1st");
 
         // if (m_perf) std::cout << "do_multiple_tracking timing: first track fitting took " << DST_MS(DST_Clock::now() - t_dst).count() << " ms" << std::endl; t_dst = DST_Clock::now();
@@ -8599,11 +8645,13 @@ void TrackFitting::do_multi_tracking(bool flag_dQ_dx_fit_reg, bool flag_dQ_dx_fi
         //     }
         // }
 
+        m_traj_dump_stage = 2;
         form_map_graph(flag_exclusion, m_params.end_point_factor, m_params.mid_point_factor, m_params.nlevel, m_params.time_tick_cut, m_params.charge_cut);
         det_fits("form_map_2nd");
         // if (m_perf) std::cout << "do_multiple_tracking timing: form_map_graph took " << DST_MS(DST_Clock::now() - t_dst).count() << " ms" << std::endl; t_dst = DST_Clock::now();
 
         multi_trajectory_fit(1, m_params.div_sigma);
+        traj_dump_fits("fit2");
         det_fits("fit_2nd");
         // if (m_perf) std::cout << "do_multiple_tracking timing: second track fitting took " << DST_MS(DST_Clock::now() - t_dst).count() << " ms" << std::endl; t_dst = DST_Clock::now();
 
@@ -8797,6 +8845,7 @@ void TrackFitting::do_multi_tracking(bool flag_dQ_dx_fit_reg, bool flag_dQ_dx_fi
         // above are untouched (exclusion stays exactly where the prototype
         // applies it).
         m_keep_zero_quantity_points = m_params.dqdx_fit_keep_all_points > 0;
+        m_traj_dump_stage = 3;
         form_map_graph(flag_exclusion, m_params.end_point_factor, m_params.mid_point_factor, m_params.nlevel, m_params.time_tick_cut, m_params.charge_cut);
         m_keep_zero_quantity_points = false;
         size_t n_fits_after = 0;
@@ -8815,6 +8864,7 @@ void TrackFitting::do_multi_tracking(bool flag_dQ_dx_fit_reg, bool flag_dQ_dx_fi
 
 
         dQ_dx_multi_fit(end_point_limit, flag_dQ_dx_fit_reg);
+        traj_dump_fits("fit3");
         // doc sbnd_xin/docs/pr/108 Test A -- DEBUG-ONLY self-check, enabled by
         // WCT_DQDX_ASSOC_CHECK=1 (no config, no knob; unset => no code path).
         // Claim under test: the dQ/dx fit depends on the exclusion fit only
