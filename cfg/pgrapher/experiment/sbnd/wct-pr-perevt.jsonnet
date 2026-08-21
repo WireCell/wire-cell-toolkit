@@ -2263,7 +2263,7 @@ function(
     // -4/+1) and carries one named nue loss at 8 (389538 4.3 -> -15 vs
     // 30504 gain); doc pr/102 sec 8.3.  Owner hand-scan before any flip.
     other_seg_keep_isolated_min_nnf = null,
-    other_seg_keep_isolated_len_admit = null,
+    other_seg_keep_isolated_len_admit = 30.0,
     // doc pr/102 P2 -- 3-D uncovered-charge radius (cm): imaged charge
     // farther than this from EVERY existing fitted trajectory cannot be
     // 2-D-tagged in find_other_segments step 1 and counts toward
