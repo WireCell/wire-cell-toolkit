@@ -1084,6 +1084,17 @@ function(
     // 268784 360535), numu_score moves on all six, nue_score only on 137238;
     // no nusel verdict flips.  =false restores the FiducialUtils fallback.
     neutrino_consistent_fv = true,
+    // sbnd_xin/docs/74 G1/G2 ON (owner 2026-08-20 "please implement these
+    // fixes"): cosmic_tagger() containment on the same sbnd_pr_fv + margins
+    // as TGM/STM/FC (its inside_fv lambda + the flag-1 vertex test; the
+    // FiducialUtils fallback has no wall inset and excludes the CPA slab,
+    // leaving 5 of the 10 cosmict checks structurally near-dead on SBND).
+    // Measured (doc 74 sec 9): OFF gate 234/234 byte-identical; ON census
+    // 117 nu-MC events -> 2 false cosmic tags cleared (52085 flag_1 = the
+    // CPA-band artifact at x=-1.09 cm, 48895 flag_2), numu_score moves on
+    // 12 events, nue_score never.  =false restores the FiducialUtils
+    // fallback.
+    cosmic_consistent_fv = true,
     // F3 OFF (owner 2026-08-04): single-photon SCE gate.  Vacuous today (no
     // SBND SCE helper; clus_geom_helper is ''), proven zero-movement with
     // the knob forced; OFF keeps kine and single-photon independently
@@ -2480,6 +2491,7 @@ function(
                              kine_w_value=kine_w_value,
                              kine_shower_pdg_live=kine_shower_pdg_live,
                              neutrino_consistent_fv=neutrino_consistent_fv,
+                             cosmic_consistent_fv=cosmic_consistent_fv,
                              sp_sce_correction=sp_sce_correction,
                              tagger_ordered_segment_sets=tagger_ordered_segment_sets,
                              stem_endpoint_wcpt_parity=stem_endpoint_wcpt_parity,
