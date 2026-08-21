@@ -790,6 +790,16 @@ public:
         // in NeutrinoPatternBase.h.
         bool   m_kine_charge_dedup{false};                          // doc pr/99 r3 C1 (168596 Enu double count)
         bool   m_kine_charge_rebuild{false};                        // doc pr/99 r3 C1b (prototype cloud-rebuild parity)
+        // doc sbnd_xin/docs/pr/101: Enu accounting round.  Design blocks at
+        // KineChargeOptions::track_ctx/mass_rules/hadronic_dqdx/long_muon_*/
+        // mainvtx_used_guard in NeutrinoPatternBase.h.
+        bool   m_kine_charge_track_ctx{false};                      // doc pr/101 K1 (37112 shower<->track overlap)
+        bool   m_kine_mass_rules{false};                            // doc pr/101 K2 (proton shower +938 MeV)
+        bool   m_kine_hadronic_dqdx{false};                         // doc pr/101 K3 (hadronic shower KE = sum dE/dx)
+        int    m_kine_long_muon_mode{0};                            // doc pr/101 K4 (0 dQdx, 1 range, 2 range w/ fallback)
+        double m_kine_long_muon_ratio_lo{0.3};                      // inert unless mode 2
+        double m_kine_long_muon_ratio_hi{0.5};                      // inert unless mode 2
+        bool   m_kine_mainvtx_used_guard{false};                    // doc pr/101 K5 (main-vertex member double count)
         bool   m_shower_hadronic_tag{false};                        // doc pr/99 r3 A5 (hadronic shower labeled e-)
         double m_shower_hadronic_min_len{10.0};                     // cm; scaled at copy; inert while tag off
         double m_shower_hadronic_scan_len{30.0};                    // cm; scaled at copy; inert while tag off

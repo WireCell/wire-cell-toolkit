@@ -92,6 +92,57 @@ namespace WireCell::Clus::PR {
         /// a rebuild changes row order hence kNN tie-breaks).  Config key
         /// kine_charge_rebuild; absent => legacy, byte-identical.
         bool rebuild{false};
+        /// doc sbnd_xin/docs/pr/101 (K1).  Shower<->track cell ownership.
+        /// With dedup alone, ownership is arbitrated only AMONG showers: a
+        /// track segment in no shower (a proton, a pion) contributes its KE
+        /// through range/dQdx AND every 2D cell of its charge that lies
+        /// within 0.6 cm of a neighbouring shower cloud is credited to that
+        /// shower as well (SBND 18255-37112: a 103 MeV proton beside the
+        /// pi0 pair).  true = every non-member graph segment gets its own
+        /// ownership context from its "associate_points"/"fit" clouds; the
+        /// charge a track wins is discarded (tracks stay range/dQdx valued),
+        /// so showers can only lose cells that a trajectory explains better.
+        /// Track contexts follow the shower contexts, so shower-vs-shower
+        /// tie-breaks are unchanged and an equal-distance shower/track tie
+        /// goes to the shower.  Requires dedup.  Config key
+        /// kine_charge_track_ctx; absent => byte-identical.
+        bool track_ctx{false};
+        /// doc pr/101 (K2).  The paper rule Enu = sum(K + m + B): rest mass
+        /// m only for mu/pi/e (e adds nothing), binding energy B = 8.6 MeV
+        /// for every proton (and a neutron-typed object, if one ever
+        /// appears), never the nucleon rest mass.  false = legacy: a
+        /// graph-reachable 2212-typed SHOWER receives the 938 MeV proton
+        /// mass through the bare `pdg != 11` test (the prototype's
+        /// NeutrinoID_kine.h:67 does the same), and a 211/13-typed leftover
+        /// shower receives no mass at all.  true = one rule table at every
+        /// add site and at the continuation refund.  Config key
+        /// kine_mass_rules; absent => byte-identical.
+        bool mass_rules{false};
+        /// doc pr/101 (K3).  Hadronic showers (2212/211/2112-typed,
+        /// including A5 re-types) take KE = sum dE/dx over member fits
+        /// (kenergy_dQdx) instead of the EM charge scaling, written into the
+        /// Shower's kenergy_best so PF/Bee, taggers and fill_kine_tree agree
+        /// (owner choice, object-level).  Long muons (|13|) are K4's.  Config
+        /// key kine_hadronic_dqdx; absent => byte-identical.
+        bool hadronic_dqdx{false};
+        /// doc pr/101 (K4).  Long-muon (mu->mu->mu chain) best energy.
+        /// 0 = legacy dQdx always (prototype WCShower.cxx:302, "should be
+        /// improved using range").  1 = range over the muon chain always.
+        /// 2 = range when the chain's far vertex is a graph dead-end (the
+        /// muon stops) AND dQdx/range lies in [1-ratio_lo, 1+ratio_hi];
+        /// otherwise dQdx (delta-ray-heavy or broken/exiting chains).  One
+        /// muon mass is added by fill_kine_tree either way.  Config keys
+        /// kine_long_muon_mode / _ratio_lo / _ratio_hi; 0 => byte-identical.
+        int    long_muon_mode{0};
+        double long_muon_ratio_lo{0.3};
+        double long_muon_ratio_hi{0.5};
+        /// doc pr/101 (K5).  The fill_kine_tree main-vertex pass lacks the
+        /// `used_segments` guard its BFS has (prototype NeutrinoID_kine.h:72
+        /// vs :130), so a shower MEMBER segment attached to the main vertex
+        /// is counted as a separate track on top of its shower's charge.
+        /// true = guard the first pass too.  Config key
+        /// kine_mainvtx_used_guard; absent => byte-identical.
+        bool mainvtx_used_guard{false};
     };
 
     struct Pi0KineFeatures {
@@ -3094,7 +3145,13 @@ namespace WireCell::Clus::PR {
         /// structure passes and BEFORE the pi0 finders, so pairing, taggers,
         /// fill_kine_tree and the PF/Bee display all read one consistent
         /// energy set while every mid-pipeline gate saw legacy values.
-        void recompute_shower_kine_charge_final(IndexedShowerSet& showers, TrackFitting& track_fitter, IDetectorVolumes::pointer dv);
+        /// doc pr/101 (K1): `graph` supplies the non-member track segments
+        /// that receive ownership contexts when m_kine_charge.track_ctx is set.
+        void recompute_shower_kine_charge_final(IndexedShowerSet& showers, Graph& graph, TrackFitting& track_fitter, IDetectorVolumes::pointer dv);
+        /// doc pr/101 (K3): if m_kine_charge.hadronic_dqdx and the shower is
+        /// hadronic-typed (2212/211/2112, not a long muon), set kenergy_best
+        /// = kenergy_dQdx.  Returns true when it wrote.  No-op when off.
+        bool apply_hadronic_dqdx_best(const ShowerPtr& shower);
         double cal_kine_charge(SegmentPtr segment, Graph& graph, TrackFitting& track_fitter, IDetectorVolumes::pointer dv);
         // Fast overload: reuse pre-collected 2D charge maps (avoids O(N_hits) collection per call).
         // Collect maps once with track_fitter.collect_2D_charge() and pass here when calling in a loop.

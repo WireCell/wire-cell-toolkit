@@ -328,7 +328,8 @@ void PatternAlgorithms::calculate_shower_kinematics(IndexedShowerSet& showers, I
         if (std::abs(shower->get_particle_type()) != 13) {
             shower->calculate_kinematics(particle_data, recomb_model, m_shower_endpoint_exclude_start_vertex, m_shower_endpoint_skip_orphan_vtx);
         } else {
-            shower->calculate_kinematics_long_muon(segments_in_long_muon, particle_data, recomb_model, m_shower_endpoint_exclude_start_vertex);
+            shower->calculate_kinematics_long_muon(segments_in_long_muon, particle_data, recomb_model, m_shower_endpoint_exclude_start_vertex,
+                                                   m_kine_charge.long_muon_mode, m_kine_charge.long_muon_ratio_lo, m_kine_charge.long_muon_ratio_hi);
         }
 
         double fudge_factor = m_kine_charge.fudge_factor, recom_factor = m_kine_charge.recom_factor;
@@ -346,6 +347,7 @@ void PatternAlgorithms::calculate_shower_kinematics(IndexedShowerSet& showers, I
                 "calculate_shower_kinematics:   shower pdg={} nseg={} — no pclouds, kine_charge=0",
                 shower->get_particle_type(), shower->get_num_segments());
             shower->set_flag_kinematics(true);
+            apply_hadronic_dqdx_best(shower);   // doc pr/101 K3; no-op when off
             continue;
         }
         if (!pcloud1) pcloud1 = pcloud2;
@@ -367,6 +369,7 @@ void PatternAlgorithms::calculate_shower_kinematics(IndexedShowerSet& showers, I
 
         shower->set_kine_charge(kine_charge);
         shower->set_flag_kinematics(true);
+        apply_hadronic_dqdx_best(shower);   // doc pr/101 K3; no-op when off
     }
 }
 
@@ -506,7 +509,31 @@ static double kine_charge_finalize(const double sums[3], double fudge_factor, do
 } // anonymous namespace
 
 
-void PatternAlgorithms::recompute_shower_kine_charge_final(IndexedShowerSet& showers, TrackFitting& track_fitter, IDetectorVolumes::pointer dv)
+bool PatternAlgorithms::apply_hadronic_dqdx_best(const ShowerPtr& shower)
+{
+    if (!m_kine_charge.hadronic_dqdx || !shower) return false;
+    const int type = std::abs(shower->get_particle_type());
+    if (type != 2212 && type != 211 && type != 2112) return false;
+    // A single-segment object with no shower flag is a track wearing a
+    // Shower wrapper (conn-3/4 proton stubs): it keeps the track rule
+    // (range >= 4 cm, dQdx below) that calculate_kinematics already applied.
+    if (shower->get_num_segments() <= 1 && !shower->get_flag_shower()) return false;
+    const double dqdx = shower->get_kine_dQdx();
+    const double before = shower->get_kine_best();
+    const bool write = dqdx > 0;
+    if (write) shower->set_kine_best(dqdx);
+    auto [sv, conn] = shower->get_start_vertex_and_type();
+    (void)sv;
+    SPDLOG_LOGGER_DEBUG(s_log,
+        "kine_hadronic: shower id={} pdg={} conn={} nseg={} charge={:.1f} dqdx={:.1f} range={:.1f} best {:.1f} -> {:.1f} MeV used={}",
+        shower->get_shower_id(), shower->get_particle_type(), conn, shower->get_num_segments(),
+        shower->get_kine_charge() / units::MeV, dqdx / units::MeV, shower->get_kine_range() / units::MeV,
+        before / units::MeV, shower->get_kine_best() / units::MeV, write ? "dqdx" : "legacy");
+    return write;
+}
+
+
+void PatternAlgorithms::recompute_shower_kine_charge_final(IndexedShowerSet& showers, Graph& graph, TrackFitting& track_fitter, IDetectorVolumes::pointer dv)
 {
     if (!m_kine_charge.dedup && !m_kine_charge.rebuild) return;  // both knobs off => byte-identical
     auto grouping = track_fitter.grouping();
@@ -550,10 +577,68 @@ void PatternAlgorithms::recompute_shower_kine_charge_final(IndexedShowerSet& sho
         ctxs.push_back(std::move(c));
     }
     if (shs.empty()) return;
+    const size_t n_shower_ctx = ctxs.size();
+
+    // doc pr/101 (K1): ownership contexts for every graph segment that is
+    // in no shower.  Appended AFTER the shower contexts so shower-vs-shower
+    // tie-breaks are unchanged; their winnings are discarded (census only).
+    std::vector<SegmentPtr> track_segs;
+    if (m_kine_charge.track_ctx) {
+        if (!m_kine_charge.dedup) {
+            SPDLOG_LOGGER_WARN(s_log, "kine_charge_track_ctx set without kine_charge_dedup -- no effect");
+        }
+        else {
+            IndexedVertexSet  member_vtx;
+            IndexedSegmentSet members;
+            for (auto& shower : showers) {
+                if (shower) shower->fill_sets(member_vtx, members, /*flag_exclude_start_segment=*/false);
+            }
+            for (auto edesc : ordered_edges(graph)) {
+                SegmentPtr seg = graph[edesc].segment;
+                if (!seg || !seg->descriptor_valid()) continue;
+                if (members.count(seg)) continue;
+                auto pcloud1 = seg->dpcloud("associate_points");
+                auto pcloud2 = seg->dpcloud("fit");
+                if (!pcloud1 && !pcloud2) continue;
+                if (!pcloud1) pcloud1 = pcloud2;
+                if (!pcloud2) pcloud2 = pcloud1;
+                KineOwnedCtx c;
+                c.pcloud1 = pcloud1;
+                c.pcloud2 = pcloud2;
+                c.fudge = m_kine_charge.fudge_factor;
+                c.recom = m_kine_charge.recom_factor;
+                if (seg->flags_any(PR::SegmentFlags::kShowerTopology)) {
+                    c.recom = m_kine_charge.shower_recom_factor;
+                    c.fudge = m_kine_charge.shower_fudge_factor;
+                } else if (seg->has_particle_info() && std::abs(seg->particle_info()->pdg()) == 2212) {
+                    c.recom = m_kine_charge.proton_recom_factor;
+                }
+                track_segs.push_back(seg);
+                ctxs.push_back(std::move(c));
+            }
+        }
+    }
 
     if (m_kine_charge.dedup) {
         kine_charge_owned_scan(ctxs, m_charge_2d_u, m_charge_2d_v, m_charge_2d_w,
                                m_map_apa_ch_plane_wires, grouping, corr_fn, dis_cut);
+    }
+
+    for (size_t t = 0; t < track_segs.size(); ++t) {
+        const auto& c = ctxs[n_shower_ctx + t];
+        const SegmentPtr& seg = track_segs[t];
+        const double won = kine_charge_finalize(c.sums, c.fudge, c.recom, m_kine_charge);
+        SPDLOG_LOGGER_DEBUG(s_log,
+            "kine_track_ctx: seg idx={} cluster={} pdg={} len_cm={:.1f} ke_mev={:.1f} won_mev={:.1f}",
+            seg->get_graph_index(), (seg->cluster() ? seg->cluster()->get_cluster_id() : -1),
+            (seg->has_particle_info() ? seg->particle_info()->pdg() : 0),
+            segment_track_length(seg) / units::cm,
+            (seg->has_particle_info() ? seg->particle_info()->kinetic_energy() / units::MeV : 0.0),
+            won / units::MeV);
+    }
+    if (!track_segs.empty()) {
+        SPDLOG_LOGGER_DEBUG(s_log, "kine_track_ctx: {} track context(s) beside {} shower context(s)",
+                            track_segs.size(), n_shower_ctx);
     }
 
     for (size_t k = 0; k < shs.size(); ++k) {
@@ -569,10 +654,10 @@ void PatternAlgorithms::recompute_shower_kine_charge_final(IndexedShowerSet& sho
         }
         const double e_old = shs[k]->get_kine_charge();
         SPDLOG_LOGGER_DEBUG(s_log,
-            "kine final recompute: shower id={} pdg={} nseg={} kine_charge {:.1f} -> {:.1f} MeV (dedup={} rebuild={})",
+            "kine final recompute: shower id={} pdg={} nseg={} kine_charge {:.1f} -> {:.1f} MeV (dedup={} rebuild={} track_ctx={})",
             shs[k]->get_shower_id(), shs[k]->get_particle_type(), shs[k]->get_num_segments(),
             e_old / units::MeV, e_new / units::MeV,
-            m_kine_charge.dedup, m_kine_charge.rebuild);
+            m_kine_charge.dedup, m_kine_charge.rebuild, !track_segs.empty());
         shs[k]->set_kine_charge(e_new);
     }
 }

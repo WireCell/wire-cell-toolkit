@@ -1648,6 +1648,19 @@ function(
     // pre-round-3 config.
     kine_charge_dedup = true,    // SBND PRODUCTION ON 2026-08-20 (doc pr/99 round 3; owner-adjudicated full winner-take-all)
     kine_charge_rebuild = true,  // SBND PRODUCTION ON 2026-08-20 (doc pr/99 round 3; prototype cloud-rebuild parity)
+    // doc pr/101 -- Enu accounting round: K1 shower<->track cell ownership
+    // (37112), K2 paper mass/binding rules (proton shower +938 MeV), K3
+    // hadronic-shower KE = sum dE/dx, K4 long-muon range (0 dQdx / 1 range /
+    // 2 range with dead-end + ratio fallback), K5 main-vertex member guard.
+    // C++ defaults false/0/null = legacy.  Key omitted when off =>
+    // byte-identical pre-pr/101 config.
+    kine_charge_track_ctx = true,    // SBND PRODUCTION ON 2026-08-20 (doc pr/101 K1; gate 234 PASS, 0 nue/numu flips from this knob)
+    kine_mass_rules = true,          // SBND PRODUCTION ON 2026-08-20 (doc pr/101 K2; latent on the 117-evt manifest)
+    kine_hadronic_dqdx = true,       // SBND PRODUCTION ON 2026-08-20 (doc pr/101 K3; owner: object-level)
+    kine_long_muon_mode = 2,         // SBND PRODUCTION ON 2026-08-20 (doc pr/101 K4; range w/ dead-end + ratio fallback)
+    kine_long_muon_ratio_lo = null,  // C++ default 0.3
+    kine_long_muon_ratio_hi = null,  // C++ default 0.5
+    kine_mainvtx_used_guard = true,  // SBND PRODUCTION ON 2026-08-20 (doc pr/101 K5; latent on the manifest)
     shower_hadronic_tag = true,  // SBND PRODUCTION ON 2026-08-20 (doc pr/99 round 3, A5)
     shower_hadronic_min_len = null,   // cm; C++ default 10
     shower_hadronic_scan_len = null,  // cm; C++ default 30
@@ -2552,6 +2565,13 @@ function(
                              shower_ghost_min_len=shower_ghost_min_len,
                              kine_charge_dedup=if kine_charge_dedup == null then false else kine_charge_dedup,
                              kine_charge_rebuild=if kine_charge_rebuild == null then false else kine_charge_rebuild,
+                             kine_charge_track_ctx=if kine_charge_track_ctx == null then false else kine_charge_track_ctx,
+                             kine_mass_rules=if kine_mass_rules == null then false else kine_mass_rules,
+                             kine_hadronic_dqdx=if kine_hadronic_dqdx == null then false else kine_hadronic_dqdx,
+                             kine_long_muon_mode=kine_long_muon_mode,
+                             kine_long_muon_ratio_lo=kine_long_muon_ratio_lo,
+                             kine_long_muon_ratio_hi=kine_long_muon_ratio_hi,
+                             kine_mainvtx_used_guard=if kine_mainvtx_used_guard == null then false else kine_mainvtx_used_guard,
                              shower_hadronic_tag=if shower_hadronic_tag == null then false else shower_hadronic_tag,
                              shower_hadronic_min_len=shower_hadronic_min_len,
                              shower_hadronic_scan_len=shower_hadronic_scan_len,

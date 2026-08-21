@@ -1720,7 +1720,7 @@ namespace WireCell::Clus::PR {
         //           << std::endl;
     }
 
-    void Shower::calculate_kinematics_long_muon(IndexedSegmentSet& segments_in_muons, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, bool exclude_start_vertex_from_endpoint){
+    void Shower::calculate_kinematics_long_muon(IndexedSegmentSet& segments_in_muons, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, bool exclude_start_vertex_from_endpoint, int best_mode, double ratio_lo, double ratio_hi){
         // Invariant: this function is only called when shower->get_particle_type() == 13
         // (NeutrinoEnergyReco.cxx), which requires shower->set_particle_type(13) to have been
         // called (NeutrinoShowerClustering.cxx:118), which in turn requires m_start_segment to
@@ -1796,6 +1796,28 @@ namespace WireCell::Clus::PR {
             }
         }
         
+        // doc pr/101 (K4): range over the muon chain as best energy.
+        // best_mode 0 keeps the legacy dQdx assignment above untouched.
+        if (best_mode != 0) {
+            int end_degree = -1;
+            if (farthest_vertex && farthest_vertex->descriptor_valid()) {
+                end_degree = static_cast<int>(boost::out_degree(farthest_vertex->get_descriptor(), m_full_graph));
+            }
+            const double ratio = data.kenergy_range > 0 ? data.kenergy_dQdx / data.kenergy_range : -1.0;
+            bool use_range = data.kenergy_range > 0;
+            if (best_mode == 2) {
+                use_range = use_range && end_degree == 1
+                    && ratio >= 1.0 - ratio_lo && ratio <= 1.0 + ratio_hi;
+            }
+            if (use_range) data.kenergy_best = data.kenergy_range;
+            SPDLOG_LOGGER_DEBUG(s_log,
+                "kine_long_muon: shower id={} nseg_chain={} L_cm={:.1f} range={:.1f} dqdx={:.1f} ratio={:.2f} "
+                "end_degree={} mode={} used={}",
+                m_shower_id, muon_vertices_by_index.size() ? muon_vertices_by_index.size() - 1 : 0,
+                total_length / units::cm, data.kenergy_range / units::MeV, data.kenergy_dQdx / units::MeV,
+                ratio, end_degree, best_mode, use_range ? "range" : "dqdx");
+        }
+
         // Set end point to the farthest vertex
         if (farthest_vertex) {
             data.end_point = farthest_vertex->fit().point;

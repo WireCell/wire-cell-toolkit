@@ -149,6 +149,8 @@ namespace WireCell::Clus::PR {
         double get_kine_dQdx(){return data.kenergy_dQdx;};
         void set_kine_charge(double val){data.kenergy_charge = val;};
         double get_kine_charge(){return data.kenergy_charge;};
+        // doc pr/101 (K3): hadronic showers publish sum dE/dx as best.
+        void set_kine_best(double val){data.kenergy_best = val;};
         double get_kine_best(){  
             if (data.kenergy_best != 0) return data.kenergy_best; else return data.kenergy_charge;};
 
@@ -281,7 +283,10 @@ namespace WireCell::Clus::PR {
         // segments and are untouched either way.
         // Default false = legacy search, byte-identical.
         void calculate_kinematics(const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, bool exclude_start_vertex_from_endpoint = false, bool endpoint_skip_orphan_vertices = false);
-        void calculate_kinematics_long_muon(IndexedSegmentSet& segments_in_muons, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, bool exclude_start_vertex_from_endpoint = false);
+        // doc pr/101 (K4): best_mode 0 = legacy dQdx, 1 = range over the
+        // muon chain, 2 = range when the far muon vertex is a dead-end and
+        // dQdx/range is within [1-ratio_lo, 1+ratio_hi], else dQdx.
+        void calculate_kinematics_long_muon(IndexedSegmentSet& segments_in_muons, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, bool exclude_start_vertex_from_endpoint = false, int best_mode = 0, double ratio_lo = 0.3, double ratio_hi = 0.5);
 
         // doc sbnd_xin/docs/pr/93 round 4 (shower_detach_track_stem).
         // Remove `prefix` -- a connected chain of track segments beginning at

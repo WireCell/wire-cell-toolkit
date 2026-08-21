@@ -94,6 +94,25 @@ KineInfo PatternAlgorithms::fill_kine_tree(
     // -------------------------------------------------------------------------
     const double ave_binding_energy = 8.6 * units::MeV;
 
+    // doc pr/101 (K2, kine_mass_rules): the paper's rest term.  mu/pi (and
+    // any other non-nucleon, non-electron type) add the rest mass, nucleons
+    // add the binding energy, electrons add nothing.  Returned in MeV.
+    // Off => every add site keeps its legacy branch verbatim.
+    auto rest_term_rules = [&](int pdg, double mass) -> double {
+        const int a = std::abs(pdg);
+        if (a == 11) return 0.0;
+        if (a == 2212 || a == 2112) return ave_binding_energy / units::MeV;
+        if (a == 13 || a == 211 || a == 321) return mass / units::MeV;
+        if (a == 0 || a == 22 || a == 111) {
+            SPDLOG_LOGGER_INFO(s_log, "kine_mass_rules: unhandled pdg={} -> no rest term", pdg);
+            return 0.0;
+        }
+        return mass / units::MeV;
+    };
+    // Legacy value computed in parallel when the rules are on (census only).
+    float add_energy_legacy = 0;
+    int   n_2212_shower_graph = 0, n_leftover_nonem = 0, n_mainvtx_guard_skip = 0;
+
     IndexedVertexSet  used_vertices;
     IndexedSegmentSet used_segments;
     IndexedShowerSet  used_showers;
@@ -152,7 +171,15 @@ KineInfo PatternAlgorithms::fill_kine_tree(
             ktree.kine_energy_info.push_back(0); // dQdx
 
         // Add rest-mass correction for non-electrons/positrons
-        if (pdg != 11) {
+        if (m_kine_charge.mass_rules) {
+            SegmentPtr start_sg = shower->start_segment();
+            const double mass = (start_sg && start_sg->particle_info()) ? start_sg->particle_info()->mass() : 0.0;
+            if (pdg != 11 && start_sg && start_sg->particle_info())
+                add_energy_legacy += static_cast<float>(mass / units::MeV);
+            if (std::abs(pdg) == 2212) ++n_2212_shower_graph;
+            ktree.kine_reco_add_energy += static_cast<float>(rest_term_rules(pdg, mass));
+        }
+        else if (pdg != 11) {
             SegmentPtr start_sg = shower->start_segment();
             if (start_sg && start_sg->particle_info()) {
                 ktree.kine_reco_add_energy += static_cast<float>(
@@ -190,7 +217,12 @@ KineInfo PatternAlgorithms::fill_kine_tree(
 
         ktree.kine_energy_included.push_back(include_flag);
 
-        if (pdg == 2212) { // proton: add binding energy
+        if (m_kine_charge.mass_rules) {
+            if (pdg == 2212) add_energy_legacy += static_cast<float>(ave_binding_energy / units::MeV);
+            else if (pdg != 11) add_energy_legacy += static_cast<float>(mass / units::MeV);
+            ktree.kine_reco_add_energy += static_cast<float>(rest_term_rules(pdg, mass));
+        }
+        else if (pdg == 2212) { // proton: add binding energy
             ktree.kine_reco_add_energy += static_cast<float>(ave_binding_energy / units::MeV);
         }
         else if (pdg != 11) { // not electron: add rest mass
@@ -217,6 +249,17 @@ KineInfo PatternAlgorithms::fill_kine_tree(
         }
         else {
             // Track segment.
+            // doc pr/101 (K5): a shower MEMBER attached to the main vertex
+            // is already inside its shower's energy -- skip it the way the
+            // BFS below does.  Off => legacy double count (prototype parity).
+            if (m_kine_charge.mainvtx_used_guard && used_segments.count(seg)) {
+                ++n_mainvtx_guard_skip;
+                SPDLOG_LOGGER_INFO(s_log, "kine_mainvtx_guard: skipped shower-member seg idx={} pdg={} ke_mev={:.1f}",
+                                   seg->get_graph_index(),
+                                   (seg->particle_info() ? seg->particle_info()->pdg() : 0),
+                                   (seg->particle_info() ? seg->particle_info()->kinetic_energy() / units::MeV : 0.0));
+                continue;
+            }
             used_segments.insert(seg);
             VertexPtr other_vtx = find_other_vertex(graph, seg, main_vertex);
             segments_to_be_examined.emplace_back(other_vtx, seg);
@@ -279,7 +322,13 @@ KineInfo PatternAlgorithms::fill_kine_tree(
             // If we detected a particle continuation, undo the rest-mass/binding-energy
             // added for prev_sg (it was already counted earlier in the chain).
             if (flag_reduce && prev_sg->particle_info()) {
-                if (prev_pdg == 2212) {
+                if (m_kine_charge.mass_rules) {
+                    const double mass = prev_sg->particle_info()->mass();
+                    if (prev_pdg == 2212) add_energy_legacy -= static_cast<float>(ave_binding_energy / units::MeV);
+                    else if (prev_pdg != 11) add_energy_legacy -= static_cast<float>(mass / units::MeV);
+                    ktree.kine_reco_add_energy -= static_cast<float>(rest_term_rules(prev_pdg, mass));
+                }
+                else if (prev_pdg == 2212) {
                     ktree.kine_reco_add_energy -= static_cast<float>(ave_binding_energy / units::MeV);
                 }
                 else if (prev_pdg != 11) {
@@ -449,7 +498,24 @@ KineInfo PatternAlgorithms::fill_kine_tree(
         ktree.kine_energy_included.push_back(vtx_type != 3 ? 1 : vtx_type);
 
         // Binding energy correction for proton showers with length > 5 cm
-        if (pdg == 2212) {
+        if (m_kine_charge.mass_rules) {
+            // doc pr/101 (K2): leftover showers are detached (conn-2/3)
+            // objects.  Nucleon-typed ones get the binding energy behind the
+            // legacy 5 cm start-segment gate (2212 as before, 2112 added);
+            // mu/pi-typed ones stay MASSLESS as in legacy: the numu50 census
+            // showed every such object (12 events, 30-119 cm conn-2 pieces
+            // typed 13) sitting in an event whose muon mass is already
+            // counted on the attached track -- a second piece of the same
+            // muon, so a second mass would be the P4 double count.
+            SegmentPtr start_sg = shower->start_segment();
+            const bool pass_gate = start_sg && segment_track_length(start_sg) > 5.0 * units::cm;
+            if (pdg == 2212 && pass_gate)
+                add_energy_legacy += static_cast<float>(ave_binding_energy / units::MeV);
+            if (pdg != 11) ++n_leftover_nonem;
+            if (pass_gate && (std::abs(pdg) == 2212 || std::abs(pdg) == 2112))
+                ktree.kine_reco_add_energy += static_cast<float>(ave_binding_energy / units::MeV);
+        }
+        else if (pdg == 2212) {
             SegmentPtr start_sg = shower->start_segment();
             if (start_sg && segment_track_length(start_sg) > 5.0 * units::cm) {
                 ktree.kine_reco_add_energy += static_cast<float>(ave_binding_energy / units::MeV);
@@ -503,6 +569,12 @@ KineInfo PatternAlgorithms::fill_kine_tree(
         if (n_orphan) {
             SPDLOG_LOGGER_INFO(s_log, "kine_count_orphan_tracks: {} orphan track(s) added", n_orphan);
         }
+    }
+
+    if (m_kine_charge.mass_rules || m_kine_charge.mainvtx_used_guard) {
+        SPDLOG_LOGGER_INFO(s_log,
+            "kine_mass_census: add_legacy={:.1f} add_rules={:.1f} n_2212_showers_graph={} n_leftover_nonEM={} n_mainvtx_guard_skip={}",
+            add_energy_legacy, ktree.kine_reco_add_energy, n_2212_shower_graph, n_leftover_nonem, n_mainvtx_guard_skip);
     }
 
     // -------------------------------------------------------------------------

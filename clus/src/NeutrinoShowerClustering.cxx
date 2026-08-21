@@ -3864,7 +3864,21 @@ void PatternAlgorithms::id_pi0_with_vertex(int& acc_segment_id, IndexedShowerSet
             }
         }
 
-        if (mass_diff >= 35 * units::MeV || mass_diff <= -25 * units::MeV) break;
+        if (mass_diff >= 35 * units::MeV || mass_diff <= -25 * units::MeV) {
+            // doc pr/101 (L0): log-only.  Every remaining candidate pair
+            // fell outside the (100,160) MeV window -- the incoming-track
+            // pion stamp below will not fire for these vertices.
+            double best_mass = -1, best_abs = 1e9;
+            for (auto& [shower_pair, mass_vtx_vec] : map_shower_pair_mass_vertex)
+                for (auto& [mass, candidate_vtx] : mass_vtx_vec) {
+                    const double d = std::abs(mass - 135 * units::MeV + mass_offset);
+                    if (d < best_abs) { best_abs = d; best_mass = mass; }
+                }
+            SPDLOG_LOGGER_DEBUG(s_log, "pi0 window reject: {} pair(s) left, best mass={:.1f} MeV delta={:.1f}",
+                                map_shower_pair_mass_vertex.size(), best_mass / units::MeV,
+                                (best_mass - 135 * units::MeV + mass_offset) / units::MeV);
+            break;
+        }
 
         pi0_showers.insert(shower_1);
         pi0_showers.insert(shower_2);
@@ -3926,6 +3940,8 @@ void PatternAlgorithms::id_pi0_with_vertex(int& acc_segment_id, IndexedShowerSet
             if (is_incoming && sg->has_particle_info()) {
                 int pdg = sg->particle_info()->pdg();
                 if (std::abs(pdg) == 13 || pdg == 0) {
+                    SPDLOG_LOGGER_DEBUG(s_log, "pi0 incoming stamp: vtx idx={} seg idx={} pdg {} -> 211",
+                                        pi0_vtx->get_graph_index(), sg->get_graph_index(), pdg);
                     sg->particle_info()->set_pdg(211);
                     sg->particle_info()->set_mass(139.57 * units::MeV);
                     // Recalculate 4-momentum under pion hypothesis, mirroring prototype:
@@ -5127,6 +5143,12 @@ void PatternAlgorithms::shower_clustering_with_nv(int acc_segment_id, IndexedSho
         }
         if (n_retyped) {
             SPDLOG_LOGGER_DEBUG(s_log, "A5 hadronic tag: {} shower(s) re-typed 211", n_retyped);
+            // doc pr/101 (K3): the re-typed showers are now hadronic, so
+            // their best energy follows the hadronic rule.  No-op when off.
+            for (auto& shower : showers) {
+                if (shower && m_hadronic_retyped_shower_ids.count(shower->get_shower_id()))
+                    apply_hadronic_dqdx_best(shower);
+            }
         }
     }
 
@@ -5136,7 +5158,7 @@ void PatternAlgorithms::shower_clustering_with_nv(int acc_segment_id, IndexedSho
     // after ALL shower-structure passes (so every mid-pipeline gate saw
     // legacy values) and BEFORE the pi0 finders (which cache
     // get_kine_charge() at entry).  No-op when both knobs are off.
-    recompute_shower_kine_charge_final(showers, track_fitter, dv);
+    recompute_shower_kine_charge_final(showers, graph, track_fitter, dv);
 
     // Identify pi0 with vertex.
     // doc pr/33 F3: both finders get a reference to the same local copy, so

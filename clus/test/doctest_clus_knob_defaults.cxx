@@ -186,6 +186,14 @@ TEST_CASE("clus knob defaults: TaggerCheckNeutrino switches are all OFF")
     // doc pr/99 round 3 -- kine-charge ownership + A5 hadronic tag.
     CHECK_KNOB_BOOL(cfg, "kine_charge_dedup", false);                         // pr/99 r3 C1 (168596); false = byte-identical
     CHECK_KNOB_BOOL(cfg, "kine_charge_rebuild", false);                       // pr/99 r3 C1b; false = byte-identical
+    // doc pr/101 -- Enu accounting round (K1-K5); all defaults = legacy.
+    CHECK_KNOB_BOOL(cfg, "kine_charge_track_ctx", false);                     // pr/101 K1 (37112); false = byte-identical
+    CHECK_KNOB_BOOL(cfg, "kine_mass_rules", false);                           // pr/101 K2; false = byte-identical
+    CHECK_KNOB_BOOL(cfg, "kine_hadronic_dqdx", false);                        // pr/101 K3; false = byte-identical
+    CHECK_KNOB_NUM(cfg, "kine_long_muon_mode", 0);                            // pr/101 K4; 0 = legacy dQdx
+    CHECK_KNOB_NUM(cfg, "kine_long_muon_ratio_lo", 0.3);                      // inert unless mode 2
+    CHECK_KNOB_NUM(cfg, "kine_long_muon_ratio_hi", 0.5);                      // inert unless mode 2
+    CHECK_KNOB_BOOL(cfg, "kine_mainvtx_used_guard", false);                   // pr/101 K5; false = byte-identical
     CHECK_KNOB_BOOL(cfg, "shower_hadronic_tag", false);                       // pr/99 r3 A5 (315167/395148); false = byte-identical
     CHECK_KNOB_NUM(cfg, "shower_hadronic_min_len", 10.0);                     // cm; inert while tag off
     CHECK_KNOB_NUM(cfg, "shower_hadronic_scan_len", 30.0);                    // cm; inert while tag off
