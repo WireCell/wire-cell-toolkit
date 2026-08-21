@@ -63,6 +63,32 @@ static inline Point vtx_fit_pt(VertexPtr v) {
     return v->fit().valid() ? v->fit().point : v->wcpt().point;
 }
 
+// doc 75 -- consistent-FV containment for bad_reconstruction_2_sp, same
+// shape as NeutrinoTaggerCosmic.cxx's contained_tol (doc 74 G1) / the nue
+// tagger's contained_tol_nue (doc 75).  Deliberate per-file duplication
+// (M10); negative tolerance = required inset, size 6/3/1 accepted.  Only
+// called when the configured fiducial (PatternAlgorithms::m_nue_fiducial)
+// is non-null.
+static bool contained_tol_sp(const IFiducial::pointer& fid, const Point& p,
+                              const std::vector<double>& tol) {
+    if (tol.empty()) return fid->contained(p);
+    double txl, txh, tyl, tyh, tzl, tzh;
+    if (tol.size() >= 6) {
+        txl = tol[0]; txh = tol[1]; tyl = tol[2]; tyh = tol[3]; tzl = tol[4]; tzh = tol[5];
+    } else if (tol.size() >= 3) {
+        txl = txh = tol[0]; tyl = tyh = tol[1]; tzl = tzh = tol[2];
+    } else {
+        txl = txh = tyl = tyh = tzl = tzh = tol[0];
+    }
+    if (!fid->contained(Point(p.x() - txl, p.y(), p.z()))) return false;
+    if (!fid->contained(Point(p.x() + txh, p.y(), p.z()))) return false;
+    if (!fid->contained(Point(p.x(), p.y() - tyl, p.z()))) return false;
+    if (!fid->contained(Point(p.x(), p.y() + tyh, p.z()))) return false;
+    if (!fid->contained(Point(p.x(), p.y(), p.z() - tzl))) return false;
+    if (!fid->contained(Point(p.x(), p.y(), p.z() + tzh))) return false;
+    return true;
+}
+
 // Number of graph edges (segments) at a vertex.
 // Replaces prototype's map_vertex_segments[vtx].size().
 static inline int vtx_degree(VertexPtr vtx, const Graph& graph) {
@@ -731,8 +757,20 @@ static bool bad_reconstruction_2_sp(SpContext& ctx,
     FiducialUtilsPtr fiducial_utils;
     if (ctx.main_cluster && ctx.main_cluster->grouping())
         fiducial_utils = ctx.main_cluster->grouping()->get_fiducialutils();
-    bool other_fid = fiducial_utils
+    // doc 75 -- nue_sp_consistent_fv.  Same shape as the nue tagger's
+    // bad_reconstruction_2 (NeutrinoTaggerNuE.cxx): the prototype's
+    // NULL-tolerance bad_reconstruction_2_sp (NeutrinoID_singlephoton_tagger.h:
+    // 3538,3546) resolves to non-SCB polygons with a baked-in uniform -3cm
+    // boundary_dis_cut, so the faithful fix is the configured fiducial WITH a
+    // uniform -3cm tolerance, not the bare box.
+    bool other_fid;
+    if (ctx.self.m_nue_fiducial) {
+        other_fid = contained_tol_sp(ctx.self.m_nue_fiducial, vtx_fit_pt(other_vertex),
+                                      std::vector<double>(6, -3.0*units::cm));
+    } else {
+        other_fid = fiducial_utils
                      ? fiducial_utils->inside_fiducial_volume(vtx_fit_pt(other_vertex)) : true;
+    }
 
     if (Eshower < 150*units::MeV && total_main_length/total_length > 0.95 &&
         ((n_ele == 0 && n_other > 0) ||

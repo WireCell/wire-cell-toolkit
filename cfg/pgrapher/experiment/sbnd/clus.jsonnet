@@ -1254,6 +1254,13 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               // no wall inset and excludes the CPA slab |x| < 0.45 cm).
               // C++ default false; key omitted when off => byte-identical.
               cosmic_consistent_fv=false,
+              // sbnd_xin/docs/75: give the nue/single-photon taggers'
+              // containment tests (angular_cut, shower_to_wall,
+              // bad_reconstruction_2/_2_sp) the SAME sbnd_pr_fv +
+              // sbnd_pr_fv_margins as cosmic_consistent_fv above -- same
+              // zero-margin FiducialUtils inconsistency, same fix pattern.
+              // C++ default false; key omitted when off => byte-identical.
+              nue_sp_consistent_fv=false,
               // F3 (= P2): single-photon SCE correction gate.  Vacuous on
               // SBND today (clus_geom_helper is ''); kept OFF by owner
               // decision 2026-08-04 so a future SBND SCE helper enables it
@@ -1282,6 +1289,10 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               // C++ default false; key omitted when off.  NOT gated on
               // nu_per_bundle -- the legacy demoted-main fallback needs it too.
               nu_selected_as_main=false,
+              // doc 75: closes the DL-swap flag leak nu_selected_as_main's
+              // own guard leaves open (see common/clus.jsonnet comment).
+              // C++ default false; key omitted when off.
+              nu_selected_as_main_snapshot_all=false,
               // ---- doc sbnd_xin/docs/pr/33 §10 EM-shower-clustering knobs.
               // All C++ default false = keys omitted = byte-identical
               // pre-knob config.
@@ -2178,6 +2189,7 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
             nu_per_bundle_demoted_acts=evaluate_demoted_mains,
             nu_per_bundle_min_length=nu_per_bundle_min_length,
             nu_selected_as_main=nu_selected_as_main,
+            nu_selected_as_main_snapshot_all=nu_selected_as_main_snapshot_all,
             sp_photon_flag=sp_photon_flag,
             dir_weak_use_score=dir_weak_use_score,
             mip_dqdx=mip_dqdx,
@@ -2238,11 +2250,15 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
             // doc pr/36 sec 10 (F1): same fiducial + margins as
             // tagger_check_{stm,tgm,fc} above -- one containment definition
             // across the stage.  Keys omitted when off.
-            fiducial=(if neutrino_consistent_fv || cosmic_consistent_fv then wc.tn(sbnd_pr_fv) else null),
-            fv_tolerance=(if neutrino_consistent_fv || cosmic_consistent_fv then sbnd_pr_fv_margins else []),
+            fiducial=(if neutrino_consistent_fv || cosmic_consistent_fv || nue_sp_consistent_fv then wc.tn(sbnd_pr_fv) else null),
+            fv_tolerance=(if neutrino_consistent_fv || cosmic_consistent_fv || nue_sp_consistent_fv then sbnd_pr_fv_margins else []),
             // sbnd_xin/docs/74 G1/G2: cosmic_tagger() containment on the same
             // fiducial + margins.  Key omitted when off => byte-identical.
             cosmic_consistent_fv=cosmic_consistent_fv,
+            // sbnd_xin/docs/75: nue/single-photon tagger containment on the
+            // same fiducial (each site's own hardcoded tolerance -- see
+            // NeutrinoTaggerNuE.cxx).  Key omitted when off => byte-identical.
+            nue_sp_consistent_fv=nue_sp_consistent_fv,
             sp_sce_correction=sp_sce_correction,
             tagger_ordered_segment_sets=tagger_ordered_segment_sets,
             stem_endpoint_wcpt_parity=stem_endpoint_wcpt_parity,
@@ -2605,7 +2621,7 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
                            // on.  Redundant in the default pipeline (TGM/FC
                            // already pull it in) => compiled config unchanged
                            // there; load-bearing only for a reduced pipeline.
-                           || ((neutrino_consistent_fv || cosmic_consistent_fv)
+                           || ((neutrino_consistent_fv || cosmic_consistent_fv || nue_sp_consistent_fv)
                                && std.member(pipeline_names, 'tagger_check_neutrino'))
                            then [sbnd_pr_fv] else []),
     local bee_zip_path = (if output_dir == '' then '' else output_dir + '/') + 'mabc-pr.zip',
@@ -3125,6 +3141,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
        // schema).
        neutrino_consistent_fv=false,
        cosmic_consistent_fv=false,
+       nue_sp_consistent_fv=false,
        sp_sce_correction=false,
        tagger_ordered_segment_sets=false,
        stem_endpoint_wcpt_parity=false,
@@ -3136,6 +3153,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
        nu_per_bundle=false,
        nu_per_bundle_min_length=null,   // doc pr/94 Phase 5b; cm; null => C++ default 0 (no floor)
        nu_selected_as_main=false,       // doc pr/94 round 3; C++ default false; key omitted when off
+       nu_selected_as_main_snapshot_all=false,  // doc 75; C++ default false; key omitted when off
        // doc pr/33 sec 10 EM-shower-clustering knobs -- see the clus_pr arg
        // comments.  All false = keys omitted = byte-identical pre-knob
        // config.
@@ -3636,6 +3654,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 kine_shower_pdg_live=kine_shower_pdg_live,
                 neutrino_consistent_fv=neutrino_consistent_fv,
                 cosmic_consistent_fv=cosmic_consistent_fv,
+                nue_sp_consistent_fv=nue_sp_consistent_fv,
                 sp_sce_correction=sp_sce_correction,
                 tagger_ordered_segment_sets=tagger_ordered_segment_sets,
                 stem_endpoint_wcpt_parity=stem_endpoint_wcpt_parity,
@@ -3644,6 +3663,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 nu_per_bundle=nu_per_bundle,
                 nu_per_bundle_min_length=nu_per_bundle_min_length,
                 nu_selected_as_main=nu_selected_as_main,
+                nu_selected_as_main_snapshot_all=nu_selected_as_main_snapshot_all,
                 daughter_count_proto_main_vertex=daughter_count_proto_main_vertex,
                 daughter_count_proto_examine_showers=daughter_count_proto_examine_showers,
                 shower_pdg_from_start_segment=shower_pdg_from_start_segment,

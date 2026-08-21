@@ -79,6 +79,32 @@ static inline bool seg_is_shower(SegmentPtr seg) {
            (seg->has_particle_info() && std::abs(seg->particle_info()->pdg()) == 11);
 }
 
+// doc 75 -- consistent-FV containment for the nue tagger (angular_cut,
+// shower_to_wall, bad_reconstruction_2), same shape as
+// NeutrinoTaggerCosmic.cxx's contained_tol (doc 74 G1).  Deliberate
+// duplication of FiducialUtils::inside_fiducial_volume (M10); negative
+// tolerance = required inset, size 6/3/1 accepted.  Only called when the
+// configured fiducial (PatternAlgorithms::m_nue_fiducial) is non-null.
+static bool contained_tol_nue(const IFiducial::pointer& fid, const Point& p,
+                               const std::vector<double>& tol) {
+    if (tol.empty()) return fid->contained(p);
+    double txl, txh, tyl, tyh, tzl, tzh;
+    if (tol.size() >= 6) {
+        txl = tol[0]; txh = tol[1]; tyl = tol[2]; tyh = tol[3]; tzl = tol[4]; tzh = tol[5];
+    } else if (tol.size() >= 3) {
+        txl = txh = tol[0]; tyl = tyh = tol[1]; tzl = tzh = tol[2];
+    } else {
+        txl = txh = tyl = tyh = tzl = tzh = tol[0];
+    }
+    if (!fid->contained(Point(p.x() - txl, p.y(), p.z()))) return false;
+    if (!fid->contained(Point(p.x() + txh, p.y(), p.z()))) return false;
+    if (!fid->contained(Point(p.x(), p.y() - tyl, p.z()))) return false;
+    if (!fid->contained(Point(p.x(), p.y() + tyh, p.z()))) return false;
+    if (!fid->contained(Point(p.x(), p.y(), p.z() - tzl))) return false;
+    if (!fid->contained(Point(p.x(), p.y(), p.z() + tzh))) return false;
+    return true;
+}
+
 // Determine which end of seg is nearest to a given point.
 // Returns the endpoint (fit point) that is geometrically closest to ref_pt.
 // Used to replace prototype's wcpt-index comparison for front/back of segment.
@@ -367,7 +393,15 @@ static bool angular_cut(NuEContext& ctx, ShowerPtr shower,
     if (ctx.main_cluster && ctx.main_cluster->grouping())
         fiducial_utils = ctx.main_cluster->grouping()->get_fiducialutils();
 
-    if (fiducial_utils) {
+    // doc 75 -- nue_sp_consistent_fv: route this containment test through the
+    // configured fiducial (sbnd_pr_fv) instead of the grouping's FiducialUtils
+    // zero-margin sensitive union.  Same -1.5 cm tolerance either way
+    // (prototype NeutrinoID_nue_tagger.h:504,511, stm_tol_vec); default
+    // nullptr = legacy path, byte-identical.  The legacy call's own 5-element
+    // literal is untouched; the new path uses the 6-element form to avoid the
+    // FiducialUtils 5-element size(>=3) mapping trap (doc 75 FV audit) -- both
+    // are numerically the uniform -1.5 cm the prototype passes.
+    if (fiducial_utils || ctx.self.m_nue_fiducial) {
         IndexedSegmentSet fv_segs;
         IndexedVertexSet  fv_vtxs;
         shower->fill_sets(fv_vtxs, fv_segs, /*flag_exclude_start_segment=*/false);
@@ -376,9 +410,12 @@ static bool angular_cut(NuEContext& ctx, ShowerPtr shower,
         for (VertexPtr vtx1 : fv_vtxs) {
             if (vtx1 == start_vtx) continue;
             if (!vtx1->cluster() || vtx1->cluster() != start_cl) continue;
-            if (!fiducial_utils->inside_fiducial_volume(vtx_fit_pt(vtx1),
-                    {-1.5*units::cm, -1.5*units::cm, -1.5*units::cm, -1.5*units::cm, -1.5*units::cm}))
-                flag_main_outside = true;
+            const bool inside = ctx.self.m_nue_fiducial
+                ? contained_tol_nue(ctx.self.m_nue_fiducial, vtx_fit_pt(vtx1),
+                                     std::vector<double>(6, -1.5*units::cm))
+                : fiducial_utils->inside_fiducial_volume(vtx_fit_pt(vtx1),
+                    {-1.5*units::cm, -1.5*units::cm, -1.5*units::cm, -1.5*units::cm, -1.5*units::cm});
+            if (!inside) flag_main_outside = true;
         }
     }
 
@@ -2455,11 +2492,20 @@ static bool shower_to_wall(NuEContext& ctx, ShowerPtr shower,
     if (ctx.main_cluster && ctx.main_cluster->grouping())
         fiducial_utils = ctx.main_cluster->grouping()->get_fiducialutils();
 
+    // doc 75 -- nue_sp_consistent_fv (see angular_cut above for the rationale
+    // and the 5-vs-6-element note).  Legacy `stm_tol_vec` (5-element) stays
+    // untouched; the new path uses its own 6-element uniform -1.5 cm form.
+    const std::vector<double> stm_tol_vec6(6, -1.5*units::cm);
+    auto inside_fv_walk = [&](const Point& p) -> bool {
+        if (ctx.self.m_nue_fiducial) return contained_tol_nue(ctx.self.m_nue_fiducial, p, stm_tol_vec6);
+        return fiducial_utils->inside_fiducial_volume(p, stm_tol_vec);
+    };
+
     double dis = 0;
-    if (fiducial_utils) {
+    if (fiducial_utils || ctx.self.m_nue_fiducial) {
         const double step = 1*units::cm;
         Point test_p = vertex_point + dir * step;
-        while (fiducial_utils->inside_fiducial_volume(test_p, stm_tol_vec)) {
+        while (inside_fv_walk(test_p)) {
             test_p = test_p + dir * step;
         }
         dis = ray_length(Ray{vertex_point, test_p});
@@ -2599,11 +2645,11 @@ static bool shower_to_wall(NuEContext& ctx, ShowerPtr shower,
 
                 double dis1 = 0;
                 bool flag_bad4 = false;  // per-element flag (prototype resets each iteration)
-                if (dir1.angle(dir) / M_PI * 180.0 < 30 && fiducial_utils) {
+                if (dir1.angle(dir) / M_PI * 180.0 < 30 && (fiducial_utils || ctx.self.m_nue_fiducial)) {
                     const double step = 1*units::cm;
                     Point end_pt = shower1->get_end_point();
                     Point test_p = end_pt;
-                    while (fiducial_utils->inside_fiducial_volume(test_p, stm_tol_vec)) {
+                    while (inside_fv_walk(test_p)) {
                         test_p = test_p + dir1 * step;
                     }
                     dis1 = ray_length(Ray{end_pt, test_p});
@@ -3272,8 +3318,23 @@ static bool bad_reconstruction_2(NuEContext& ctx,
     FiducialUtilsPtr fiducial_utils;
     if (ctx.main_cluster && ctx.main_cluster->grouping())
         fiducial_utils = ctx.main_cluster->grouping()->get_fiducialutils();
-    bool other_fid = fiducial_utils
+    // doc 75 -- nue_sp_consistent_fv.  Legacy call passes NO tolerance at all
+    // (FiducialUtils zero-margin union).  The prototype's NULL-tolerance
+    // bad_reconstruction_2 (NeutrinoID_nue_tagger.h:3222,3230) resolves to its
+    // non-SCB polygons, which carry a baked-in UNIFORM boundary_dis_cut=3cm
+    // inset (ToyFiducial.cxx:118-131) -- so the faithful translation of "no
+    // tolerance" here is the configured fiducial WITH a uniform -3cm
+    // tolerance, not the bare box (doc 75 FV audit -- sbnd_pr_fv alone insets
+    // only 0.4-0.85cm from the zero-margin union and, being one box across
+    // both TPCs, also removes the |x|<0.45 CPA hole).
+    bool other_fid;
+    if (ctx.self.m_nue_fiducial) {
+        other_fid = contained_tol_nue(ctx.self.m_nue_fiducial, vtx_fit_pt(other_vertex),
+                                       std::vector<double>(6, -3.0*units::cm));
+    } else {
+        other_fid = fiducial_utils
                      ? fiducial_utils->inside_fiducial_volume(vtx_fit_pt(other_vertex)) : true;
+    }
 
     if (Eshower < 150*units::MeV && total_main_length/total_length > 0.95 &&
         ((n_ele == 0 && n_other > 0) ||

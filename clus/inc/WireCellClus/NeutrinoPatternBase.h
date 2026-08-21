@@ -2459,6 +2459,20 @@ namespace WireCell::Clus::PR {
         // bare volume.  nullptr (default) = legacy path, byte-identical.
         IFiducial::pointer m_cosmic_fiducial{nullptr};
         std::vector<double> m_cosmic_fv_tolerance;      // [x_lo,x_hi,y_lo,y_hi,z_lo,z_hi], negative = inset, INTERNAL units
+        // Consistent-FV routing for the nue/single-photon tagger family
+        // (sbnd_xin/docs/75, TaggerCheckNeutrino key "nue_sp_consistent_fv").
+        // Same shape as m_cosmic_fiducial above.  The per-site tolerances are
+        // literal prototype constants, not configurable margins (mirroring
+        // cosmic_tagger's flag-1 -1.5 cm), hardcoded at each call site:
+        // NeutrinoID_nue_tagger.h's angular_cut/shower_to_wall pass a
+        // non-null stm_tol_vec (uniform -1.5 cm, no baked-in inset -- doc 75
+        // FV audit) against SCB; bad_reconstruction_2/_2_sp pass NULL, which
+        // resolves to the prototype's non-SCB polygons carrying a baked-in
+        // uniform -3 cm boundary_dis_cut (ToyFiducial.cxx:118-131) -- so the
+        // faithful toolkit translation of a NULL-tolerance call is this
+        // fiducial WITH a uniform -3 cm tolerance, not the bare box.  nullptr
+        // (default) = legacy FiducialUtils zero-margin path, byte-identical.
+        IFiducial::pointer m_nue_fiducial{nullptr};
         // Upstream-z preference in compare_main_vertices (:875) and
         // compare_main_vertices_global (:3001): each candidate is penalised by
         // (z - min_z) / m_vertex_z_prior_scale, competing with the +0.25-per-

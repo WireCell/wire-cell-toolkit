@@ -374,6 +374,14 @@ public:
         // m_fv_tolerance instead of the grouping's FiducialUtils zero-margin
         // sensitive union.  Default false = legacy path, byte-identical.
         bool m_cosmic_consistent_fv{false};
+        // sbnd_xin/docs/75: when true (and "fiducial" is configured), the
+        // nue/single-photon taggers' containment tests (angular_cut,
+        // shower_to_wall, bad_reconstruction_2/_2_sp) run against m_fiducial
+        // instead of the grouping's FiducialUtils zero-margin sensitive
+        // union; each site keeps its own prototype-literal tolerance
+        // (uniform -1.5cm or -3cm, see NeutrinoTaggerNuE.cxx).  Default
+        // false = legacy path, byte-identical.
+        bool m_nue_sp_consistent_fv{false};
         // Denominator of the upstream-z vertex-score penalty (z-min_z)/scale in
         // compare_main_vertices{,_global}.  See PatternAlgorithms.
         double m_vertex_z_prior_scale{200};
@@ -627,11 +635,33 @@ public:
         // reclassification cut set.  SBND 18255/395148's secondary neutrino
         // (cluster 21) is the owner-reported case.
         // When on, the selected candidate carries Flags::main_cluster for the
-        // duration of its own PR pass and only that -- the flag is restored
-        // immediately afterwards, so no later visitor, no bundle-veto set and
-        // no output dump sees a changed flag.  C++ default false => the guard
-        // never engages => byte-identical.
+        // duration of its own PR pass, and the guard restores that ONE
+        // cluster's flag afterwards.
+        //
+        // CORRECTED (sbnd_xin/docs/75; the guarantee below as originally
+        // written does not hold).  If the DL/SCN vertex path
+        // (determine_overall_main_vertex_DL -> swap_main_cluster,
+        // NeutrinoVertexFinder.cxx:4976) reassigns Flags::main_cluster to a
+        // DIFFERENT cluster within {main_cluster} u other_clusters during the
+        // pass, this guard's narrow restore does not undo that -- the
+        // swapped-to cluster keeps the flag set after the pass ends, visible
+        // to PrDisplayDump/is_main_cluster and the persisted pctree flags
+        // (normalize_cluster_flags).  See m_nu_selected_as_main_snapshot_all
+        // below for the closing fix.  C++ default false => this guard never
+        // engages => byte-identical.
         bool m_nu_selected_as_main{false};
+        // sbnd_xin/docs/75 -- closes the gap above.  Snapshots
+        // Flags::main_cluster on every cluster in {main_cluster} u
+        // other_clusters BEFORE the candidate's PR pass (i.e. before
+        // m_nu_selected_as_main's own write and before any DL-path swap can
+        // fire), and restores each cluster's captured value AFTER the pass,
+        // regardless of how many swaps happened in between.  Independent of
+        // nu_per_bundle: the same swap_main_cluster call site runs for the
+        // single legacy candidate too (this leak pre-dates pr/94); it only
+        // matters in practice once a promoted candidate makes the flag state
+        // visible downstream.  A no-op unless armed.  C++ default false =>
+        // byte-identical.
+        bool m_nu_selected_as_main_snapshot_all{false};
         bool m_sp_photon_flag{false};  // doc pr/26 sec. 8.2 port gap.  If true, the single-photon
                                        // tagger's verdict is stored in TaggerInfo::photon_flag,
                                        // as prototype NeutrinoID.cxx:271 does

@@ -103,6 +103,10 @@ TEST_CASE("clus knob defaults: TaggerCheckNeutrino switches are all OFF")
     // stays the legacy gap even though SBND's cfg now flips it on, so every
     // other detector's tagger ntuple keeps a constant-0 photon_flag branch.
     CHECK_KNOB_BOOL(cfg, "sp_photon_flag", false);
+    // sbnd_xin/docs/75 -- nue/single-photon tagger FV consistency + the
+    // DL-swap main-flag leak fix.  Both false = legacy path, byte-identical.
+    CHECK_KNOB_BOOL(cfg, "nue_sp_consistent_fv", false);
+    CHECK_KNOB_BOOL(cfg, "nu_selected_as_main_snapshot_all", false);
     // doc pr/40: track (proton/pion/muon) mis-identified as electron.
     CHECK_KNOB_BOOL(cfg, "track_pid_persist_dqdx", false);      // F1
     CHECK_KNOB_BOOL(cfg, "shower_reclass_dqdx_guard", false);   // F2

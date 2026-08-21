@@ -450,6 +450,7 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_nu_per_bundle_demoted_acts = get(config, "nu_per_bundle_demoted_acts", m_nu_per_bundle_demoted_acts);
     m_nu_per_bundle_min_length = get(config, "nu_per_bundle_min_length", m_nu_per_bundle_min_length);  // cm
     m_nu_selected_as_main = get(config, "nu_selected_as_main", m_nu_selected_as_main);
+    m_nu_selected_as_main_snapshot_all = get(config, "nu_selected_as_main_snapshot_all", m_nu_selected_as_main_snapshot_all);
     m_sp_photon_flag          = get(config, "sp_photon_flag",          m_sp_photon_flag);
 
     // ---- doc sbnd_xin/docs/pr/36 §10 tagger-stage knobs ---------------------
@@ -488,6 +489,15 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     if (m_cosmic_consistent_fv) {
         SPDLOG_LOGGER_DEBUG(log, "TaggerCheckNeutrino: cosmic_consistent_fv on: cosmic_tagger containment uses the configured fiducial ({} tolerance value(s), fiducial {}configured)",
                             m_fv_tolerance.size(), m_use_fiducial ? "" : "NOT ");
+    }
+    // sbnd_xin/docs/75: route the SAME fiducial into the nue/single-photon
+    // taggers' containment tests.  Requires "fiducial" to be configured;
+    // inert otherwise.  Default false = legacy FiducialUtils zero-margin
+    // path, byte-identical.
+    m_nue_sp_consistent_fv = get(config, "nue_sp_consistent_fv", m_nue_sp_consistent_fv);
+    if (m_nue_sp_consistent_fv) {
+        SPDLOG_LOGGER_DEBUG(log, "TaggerCheckNeutrino: nue_sp_consistent_fv on: nue/single-photon tagger containment uses the configured fiducial (fiducial {}configured)",
+                            m_use_fiducial ? "" : "NOT ");
     }
     m_sp_sce_correction            = get(config, "sp_sce_correction",            m_sp_sce_correction);
     m_tagger_ordered_segment_sets  = get(config, "tagger_ordered_segment_sets",  m_tagger_ordered_segment_sets);
@@ -802,6 +812,7 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["cosmic_y_top_loose"]   = m_cosmic_y_top_loose;    // 80  = 37 cm below
     cfg["cosmic_y_small_piece"] = m_cosmic_y_small_piece;  // 50  = 67 cm below
     cfg["cosmic_consistent_fv"] = m_cosmic_consistent_fv;  // doc 74 G1/G2; false = FiducialUtils fallback
+    cfg["nue_sp_consistent_fv"] = m_nue_sp_consistent_fv;  // doc 75; false = FiducialUtils fallback
     cfg["vertex_z_prior_scale"] = m_vertex_z_prior_scale;  // cm; 200 = uBooNE (1037 cm detector)
     // SSM beam-line references, {x,y,z}; defaults = uBooNE BNB target / NuMI absorber.
     // Assign the array first: append() alone would accumulate rather than overwrite if
@@ -864,6 +875,7 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["nu_per_bundle_demoted_acts"] = m_nu_per_bundle_demoted_acts;  // doc pr/94; mirror of the taggers' evaluate_demoted_mains; inert unless nu_per_bundle
     cfg["nu_per_bundle_min_length"] = m_nu_per_bundle_min_length;      // doc pr/94 Phase 5b round 2; cm; length floor for a per-bundle candidate, exempting the legacy event-wide winner; 0 = none
     cfg["nu_selected_as_main"]      = m_nu_selected_as_main;           // doc pr/94 round 3; give a demoted-main candidate the main-cluster PR treatment for the duration of its own pass; false = legacy
+    cfg["nu_selected_as_main_snapshot_all"] = m_nu_selected_as_main_snapshot_all;  // doc 75; closes the DL-swap flag leak; false = legacy
     cfg["sp_photon_flag"] = m_sp_photon_flag;     // doc pr/26 sec. 8.2; store singlephoton_tagger()'s verdict in TaggerInfo::photon_flag (prototype NeutrinoID.cxx:271)
     // doc sbnd_xin/docs/pr/36 §10.
     cfg["fiducial"] = Json::Value();                 // null = the historical FiducialUtils containment fallback
@@ -1494,11 +1506,11 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
     // chain reads main-ness from that flag in three different files, so
     // threading a parameter into find_proto_vertex would only reach one of
     // them; setting the flag for exactly the candidate's own PR pass is what
-    // "give it the same treatment as a main" means.  Nothing outside the loop
-    // body observes the change: the destructor restores the original value
-    // before the next visitor, the bundle-veto set, normalize_cluster_flags or
-    // any Bee/ROOT dump can read it.  Disarmed (arm=false, the default knob
-    // state) or already-a-main => no write at all => byte-identical.
+    // "give it the same treatment as a main" means.  This guard's OWN
+    // restore only touches the candidate's own pointer -- see
+    // MainFlagSnapshotAllGuard below (sbnd_xin/docs/75) for the case where
+    // that is not enough.  Disarmed (arm=false, the default knob state) or
+    // already-a-main => no write at all => byte-identical.
     struct SelectedMainFlagGuard {
         Cluster* cluster{nullptr};
         bool armed{false};
@@ -1518,9 +1530,65 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
         SelectedMainFlagGuard& operator=(const SelectedMainFlagGuard&) = delete;
     };
 
+    // doc 75 -- nu_selected_as_main_snapshot_all.  Closes the gap
+    // SelectedMainFlagGuard leaves open: the DL/SCN vertex path
+    // (determine_overall_main_vertex_DL -> swap_main_cluster,
+    // NeutrinoVertexFinder.cxx:4976, called on the REAL main_cluster/
+    // other_clusters pointers at :2141-2148 below) can move
+    // Flags::main_cluster onto a DIFFERENT cluster within the candidate's
+    // own bundle mid-pass.  Snapshotting BEFORE SelectedMainFlagGuard runs
+    // (construction order below) captures the pristine pre-pass state of
+    // every cluster in {main_cluster} u other_clusters; restoring on
+    // destruction -- which runs AFTER SelectedMainFlagGuard's own (reverse
+    // construction order) -- is therefore authoritative regardless of how
+    // many swaps happened in between, including SelectedMainFlagGuard's own
+    // write.  Independent of nu_per_bundle (this swap call site is not
+    // pr/94-specific); a no-op unless armed.
+    struct MainFlagSnapshotAllGuard {
+        std::vector<std::pair<Cluster*, bool>> snapshot;
+        WireCell::Log::logptr_t glog;
+        bool armed{false};
+        MainFlagSnapshotAllGuard(Cluster* main, const std::vector<Cluster*>& others, bool arm,
+                                  WireCell::Log::logptr_t lg)
+            : glog(lg)
+        {
+            if (!arm) return;
+            armed = true;
+            if (main) snapshot.emplace_back(main, main->get_flag(Flags::main_cluster));
+            for (auto* c : others) {
+                if (c) snapshot.emplace_back(c, c->get_flag(Flags::main_cluster));
+            }
+        }
+        ~MainFlagSnapshotAllGuard()
+        {
+            if (!armed) return;
+            for (auto& cv : snapshot) {
+                if (!cv.first) continue;
+                const bool live = cv.first->get_flag(Flags::main_cluster);
+                if (live != cv.second && glog) {
+                    // A swap moved Flags::main_cluster onto/off this cluster
+                    // during the pass -- the census signal doc 75 asked for
+                    // (how often the narrow SelectedMainFlagGuard restore
+                    // alone would have left this cluster's flag wrong).
+                    SPDLOG_LOGGER_INFO(glog, "TaggerCheckNeutrino: [nu_selected_as_main_snapshot_all] "
+                                       "restoring cluster {} main_cluster flag {} -> {} (DL-swap leak closed)",
+                                       cv.first->get_cluster_id(), live, cv.second);
+                }
+                cv.first->set_flag(Flags::main_cluster, cv.second ? 1 : 0);
+            }
+        }
+        MainFlagSnapshotAllGuard(const MainFlagSnapshotAllGuard&) = delete;
+        MainFlagSnapshotAllGuard& operator=(const MainFlagSnapshotAllGuard&) = delete;
+    };
+
     for (size_t nu_index = 0; nu_index < candidates.size(); ++nu_index) {
         main_cluster   = candidates[nu_index].main;
         other_clusters = candidates[nu_index].others;
+
+        // Construct BEFORE SelectedMainFlagGuard so its snapshot is taken
+        // pre-write (see the class comment above) -- destroyed AFTER it.
+        MainFlagSnapshotAllGuard main_flag_snapshot(main_cluster, other_clusters,
+                                                     m_nu_selected_as_main_snapshot_all, log);
 
         // doc pr/94 round 3: the selected candidate is treated as the main
         // cluster for the duration of this pass (knob nu_selected_as_main).
@@ -1801,6 +1869,11 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
         pattern_algos.m_cosmic_fiducial =
             (m_cosmic_consistent_fv && m_use_fiducial) ? m_fiducial : nullptr;
         pattern_algos.m_cosmic_fv_tolerance = m_fv_tolerance;
+        // sbnd_xin/docs/75: consistent-FV routing for the nue/single-photon
+        // taggers -- same configured fiducial, own hardcoded per-site
+        // tolerances (see NeutrinoTaggerNuE.cxx / NeutrinoTaggerSinglePhoton.cxx).
+        pattern_algos.m_nue_fiducial =
+            (m_nue_sp_consistent_fv && m_use_fiducial) ? m_fiducial : nullptr;
         pattern_algos.m_vertex_z_prior_scale = m_vertex_z_prior_scale * units::cm;
         // Dimensionless directions -- no unit conversion (unlike the dQ/dx scales).
         pattern_algos.m_ssm_target_dir   = WireCell::Vector(m_ssm_target_dir[0],   m_ssm_target_dir[1],   m_ssm_target_dir[2]);
