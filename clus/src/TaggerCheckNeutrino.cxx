@@ -428,6 +428,8 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_dl_vtx_score_scale      = get(config, "dl_vtx_score_scale",      m_dl_vtx_score_scale);
     // doc sbnd_xin/docs/pr/51 (18255-506746): cross-cluster DL swap guard.
     m_dl_vtx_swap_guard       = get(config, "dl_vtx_swap_guard",       m_dl_vtx_swap_guard);
+    // doc sbnd_xin/docs/pr/106 sec 10: exclusion-free charge cloud for the DL vertex net.
+    m_dl_vtx_cloud_no_exclusion = get(config, "dl_vtx_cloud_no_exclusion", m_dl_vtx_cloud_no_exclusion);
     // doc sbnd_xin/docs/pr/89 Arm C (C2): rule-1 topology term weight/center.
     m_dl_vtx_topo_weight      = get(config, "dl_vtx_topo_weight",      m_dl_vtx_topo_weight);
     m_dl_vtx_topo_center      = get(config, "dl_vtx_topo_center",      m_dl_vtx_topo_center);
@@ -883,6 +885,7 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["dl_vtx_min_accept_score"] = 4.0;     // min composite score to accept a re-ranked DL vertex (empirical; correct uncertain-regime picks score 8-12, failure cases 3-5)
     cfg["dl_vtx_score_scale"]      = 1000.0;  // scale factor on raw DL score in composite re-rank (1.0 = unscaled)
     cfg["dl_vtx_swap_guard"]       = m_dl_vtx_swap_guard;  // doc pr/51 (506746): false = legacy (rerank may swap the main cluster)
+    cfg["dl_vtx_cloud_no_exclusion"] = m_dl_vtx_cloud_no_exclusion;  // doc pr/106 sec 10: false = legacy (net sees the exclusion fit's charge)
     cfg["dl_vtx_topo_weight"]      = m_dl_vtx_topo_weight; // doc pr/89 C2: 0 = legacy (rule-1 topology term never computed); offline C1 selected 3.0
     cfg["dl_vtx_topo_center"]      = m_dl_vtx_topo_center; // doc pr/89 C2: frac offset; frozen choice is 0.0 (the center-0.5 variant lost)
     cfg["main_vertex_swap_apply"]  = m_main_vertex_swap_apply;  // doc pr/51 round 3: false = legacy (traditional-path swap decision is computed then discarded)
@@ -1844,6 +1847,7 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
         pattern_algos.m_shower_topo_demote_len = m_shower_topo_demote_len * units::cm;  // cm -> internal
         // doc sbnd_xin/docs/pr/30 §11 port-fidelity knobs.
         pattern_algos.m_fit_exclusion            = m_fit_exclusion;
+        pattern_algos.m_dl_vtx_cloud_no_exclusion = m_dl_vtx_cloud_no_exclusion;   // doc pr/106 sec 10
         pattern_algos.m_graph_endpoint_strict    = m_graph_endpoint_strict;
         pattern_algos.m_graph_endpoint_tol       = m_graph_endpoint_tol * units::cm;   // cm -> internal
         pattern_algos.m_oov_prototype_parity     = m_oov_prototype_parity;

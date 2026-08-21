@@ -2128,6 +2128,14 @@ function(
     // SBND_DL_VTX_SWAP_GUARD runner env).  false omits the key =>
     // byte-identical.
     dl_vtx_swap_guard = false,
+    // doc pr/106 sec 10 -- exclusion-free charge cloud for the DL vertex net:
+    // with fit_exclusion on, the cells equidistant from two prongs are dropped
+    // from both and the net's vertex voxel is starved (nueCC DL-alone 34 -> 42
+    // /47 with exclusion off).  This refits each cluster once without
+    // exclusion, feeds that cloud to the net, and restores the exclusion fit.
+    // C++ default false => key omitted => byte-identical.  Validation:
+    // --tla-code dl_vtx_cloud_no_exclusion=true (or SBND_DL_VTX_CLOUD_NO_EXCLUSION).
+    dl_vtx_cloud_no_exclusion = false,
     // doc pr/89 Arm C (C2) -- rule-1 outgoing-prong topology term in the DL
     // rerank composite: s_topo = w * (frac - center), vote-gated.  C++
     // defaults 0/0 = term never computed; null omits the keys =>
@@ -2784,6 +2792,7 @@ function(
                              mvga_dup_starved_mip=mvga_dup_starved_mip,
                              mvga_dup_starved_span=mvga_dup_starved_span,
                              dl_vtx_swap_guard=dl_vtx_swap_guard,
+                             dl_vtx_cloud_no_exclusion=dl_vtx_cloud_no_exclusion,
                              dl_vtx_topo_weight=dl_vtx_topo_weight,
                              dl_vtx_topo_center=dl_vtx_topo_center,
                              main_vertex_swap_apply=main_vertex_swap_apply,

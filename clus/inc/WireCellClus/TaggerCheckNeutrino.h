@@ -464,6 +464,7 @@ public:
         // cluster (a confident wrong voxel's s_dl swamps every structural
         // term).  false = legacy = byte-identical.
         bool   m_dl_vtx_swap_guard{false};
+        bool   m_dl_vtx_cloud_no_exclusion{false};   // doc pr/106 sec 10: exclusion-free charge for the DL net input
         // doc sbnd_xin/docs/pr/89 Arm C (C2): rule-1 outgoing-prong topology
         // term in the DL rerank composite, s_topo = w * (frac - center) for
         // candidates with >= 1 decisive attached Bragg vote.  0 = legacy =

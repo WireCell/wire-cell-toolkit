@@ -4770,6 +4770,46 @@ bool PatternAlgorithms::determine_overall_main_vertex_DL(
     std::vector<std::vector<float>> vec_xyzq(4);
     std::vector<VertexPtr> cand_vertices;
 
+    // doc sbnd_xin/docs/pr/106 sec 10 -- dl_vtx_cloud_no_exclusion: build the
+    // net input from an exclusion-free fit.  Snapshot every fit first; the
+    // snapshot is restored right after vec_xyzq is filled, so the rest of
+    // this function (candidate positions, snapping, the traditional path)
+    // and every later stage see exactly the m_fit_exclusion fit they would
+    // have seen with the knob off.  See NeutrinoPatternBase.h for the why.
+    const bool cloud_no_excl = m_dl_vtx_cloud_no_exclusion && m_fit_exclusion && track_fitter.get_graph();
+    std::vector<std::pair<SegmentPtr, std::vector<PR::Fit>>> saved_seg_fits;
+    std::vector<std::pair<VertexPtr, PR::Fit>> saved_vtx_fits;
+    if (cloud_no_excl) {
+        for (auto e : ordered_edges(graph)) {
+            SegmentPtr sg = graph[e].segment;
+            if (sg) saved_seg_fits.emplace_back(sg, sg->fits());
+        }
+        for (const auto& nd : ordered_nodes(graph)) {
+            auto vtx = graph[nd].vertex;
+            if (vtx) saved_vtx_fits.emplace_back(vtx, vtx->fit());
+        }
+        std::vector<Facade::Cluster*> refit_clusters;
+        if (main_cluster) refit_clusters.push_back(main_cluster);
+        for (auto* cl : other_clusters) {
+            if (cl && cl != main_cluster) refit_clusters.push_back(cl);
+        }
+        int nrefit = 0;
+        for (auto* cl : refit_clusters) {
+            // Child fitter: inherits geometry + this cluster's charge data,
+            // shares the graph (the fit writes into the graph's segments,
+            // which is what we want and what the snapshot undoes); the
+            // parent's association caches stay exactly as the last
+            // exclusion fit left them.
+            TrackFitting local_fitter(TrackFitting::FittingType::Multiple);
+            local_fitter.inherit_from(track_fitter, cl);
+            local_fitter.add_graph(track_fitter.get_graph());
+            local_fitter.do_multi_tracking(true, true, false, /*flag_exclusion=*/false, false, cl);
+            ++nrefit;
+        }
+        SPDLOG_LOGGER_DEBUG(s_log, "determine_overall_main_vertex_DL: dl_vtx_cloud_no_exclusion refit {} clusters ({} segments, {} vertices snapshotted)",
+                            nrefit, saved_seg_fits.size(), saved_vtx_fits.size());
+    }
+
     // Stable node-index order: cand_vertices drives argmin vertex picks and
     // vec_xyzq is the DL model input point cloud.
     for (const auto& nd : ordered_nodes(graph)) {
@@ -4796,6 +4836,15 @@ bool PatternAlgorithms::determine_overall_main_vertex_DL(
             vec_xyzq[2].push_back(static_cast<float>(fit.point.z() / units::cm));
             vec_xyzq[3].push_back(static_cast<float>(fit.dQ * dQdx_scale + dQdx_offset));
         }
+    }
+    if (cloud_no_excl) {
+        // Restore the exclusion fit bit-for-bit (same write path the fitter
+        // uses: fits vector + the "fit" point cloud rebuilt from it).
+        for (auto& [sg, fits] : saved_seg_fits) {
+            sg->fits(fits);
+            PR::create_segment_fit_point_cloud(sg, dv, "fit");
+        }
+        for (auto& [vtx, fit] : saved_vtx_fits) vtx->fit(fit);
     }
     MS t_collect_pc(Clock::now() - t0); t0 = Clock::now();
 

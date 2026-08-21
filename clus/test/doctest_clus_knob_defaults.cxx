@@ -236,6 +236,8 @@ TEST_CASE("clus knob defaults: TaggerCheckNeutrino switches are all OFF")
     // guard (506746) -- both OFF.
     CHECK_KNOB_BOOL(cfg, "main_vertex_graph_audit", false);
     CHECK_KNOB_BOOL(cfg, "dl_vtx_swap_guard", false);
+    // doc pr/106 sec 10: exclusion-free charge cloud for the DL vertex net -- OFF.
+    CHECK_KNOB_BOOL(cfg, "dl_vtx_cloud_no_exclusion", false);
     // docs/73 sec 12 round 3: empty-2D-index sentinel guard in
     // eliminate_short_vertex_activities case 5 -- OFF.
     CHECK_KNOB_BOOL(cfg, "esva_ignore_empty_2d", false);

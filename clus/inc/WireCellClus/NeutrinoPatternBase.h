@@ -960,6 +960,20 @@ namespace WireCell::Clus::PR {
         // others") nor at NeutrinoVertexFinder.cxx:500 (a single-segment local
         // graph, where exclusion has nothing to exclude).
         bool   m_fit_exclusion{false};
+        // doc sbnd_xin/docs/pr/106 sec 9/10 -- dl_vtx_cloud_no_exclusion: feed the
+        // DL vertex net an EXCLUSION-FREE charge cloud while every fit keeps
+        // m_fit_exclusion.  update_association drops a 2-D cell that is
+        // (near-)equidistant from two segments from BOTH, so with exclusion on the
+        // last ~1 cm before a multi-prong junction loses charge (+4..50 % more
+        // within 3 cm of the true vertex with exclusion off on the flipped nueCC
+        // events) and the net's vertex voxel is starved.  With this knob,
+        // determine_overall_main_vertex_DL snapshots every segment/vertex fit,
+        // refits each cluster once with flag_exclusion=false through a child
+        // TrackFitting (parent caches untouched), builds vec_xyzq from that fit,
+        // then restores the snapshot bit-for-bit before anything else runs.
+        // Inert unless m_fit_exclusion is also on.  C++ default false =>
+        // byte-identical.
+        bool   m_dl_vtx_cloud_no_exclusion{false};
 
         // P8 -- endpoint-consistency check on PR::add_segment.
         // The prototype refuses a vertex/segment connection whose vertex wcpt
