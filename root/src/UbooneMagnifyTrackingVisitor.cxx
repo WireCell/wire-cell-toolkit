@@ -1,5 +1,7 @@
 #include "WireCellRoot/UbooneMagnifyTrackingVisitor.h"
 
+#include <cmath>
+
 #include "TFile.h"
 #include "TTree.h"
 
@@ -193,12 +195,16 @@ void Root::UbooneMagnifyTrackingVisitor::write_proj_data(TFile* output_tf, Clus:
     // Get ticks-per-slice map for time_slice conversion
     auto nticks_map = grouping.get_nticks_per_slice();
 
-    // Reorganize fitted charge data by cluster_id
-    std::map<int, std::vector<int>> cluster_channels;
-    std::map<int, std::vector<int>> cluster_time_slices;
-    std::map<int, std::vector<int>> cluster_charges;
-    std::map<int, std::vector<int>> cluster_charge_errs;
-    std::map<int, std::vector<int>> cluster_charge_preds;
+    // Reorganize fitted charge data by cluster_id.
+    // doc pr/109 §8: accumulate into an ORDERED per-cell map.  A snapshot is
+    // keyed by (wire, TICK) and prepare_data's dead-region filler writes one
+    // entry per tick (TrackFitting.cxx:896), so nticks_per_slice of them divide
+    // down to the same time_slice; emitting them raw would put duplicate
+    // (channel, time_slice) keys in one row.  Charge adds (the filler split the
+    // blob charge across those ticks), errors add in quadrature, predictions
+    // add -- identities for a live cell, which occurs once per slice.
+    struct Cell { double charge{0}, charge_err2{0}, pred{0}; };
+    std::map<int, std::map<std::pair<int, int>, Cell>> cluster_cells;
 
     // doc pr/109 §8: emit one row per FITTED cluster, from that cluster's own
     // snapshot -- the prototype's semantics (wire-cell-prod-nue-port.cxx:3272).
@@ -210,11 +216,10 @@ void Root::UbooneMagnifyTrackingVisitor::write_proj_data(TFile* output_tf, Clus:
                     const Clus::TrackFitting::WireTime& wt,
                     const Clus::TrackFitting::FittedCharge2D& fc) {
         int nticks_per_slice = nticks_map.at(apa).at(face);
-        cluster_channels[cid].push_back(kPlaneChOffset[plane_idx] + wt.first);
-        cluster_time_slices[cid].push_back(wt.second / nticks_per_slice);
-        cluster_charges[cid].push_back(static_cast<int>(fc.charge));
-        cluster_charge_errs[cid].push_back(static_cast<int>(fc.charge_err));
-        cluster_charge_preds[cid].push_back(static_cast<int>(fc.pred_charge));
+        auto& cell = cluster_cells[cid][{kPlaneChOffset[plane_idx] + wt.first, wt.second / nticks_per_slice}];
+        cell.charge += fc.charge;
+        cell.charge_err2 += fc.charge_err * fc.charge_err;
+        cell.pred += fc.pred_charge;
     };
 
     if (!per_cluster.empty()) {
@@ -241,13 +246,23 @@ void Root::UbooneMagnifyTrackingVisitor::write_proj_data(TFile* output_tf, Clus:
     std::vector<std::vector<int>> v_charge_err;
     std::vector<std::vector<int>> v_charge_pred;
 
-    for (const auto& [cid, chs] : cluster_channels) {
+    for (const auto& [cid, cells] : cluster_cells) {
         v_cluster_id.push_back(cid);
-        v_channel.push_back(chs);
-        v_time_slice.push_back(cluster_time_slices[cid]);
-        v_charge.push_back(cluster_charges[cid]);
-        v_charge_err.push_back(cluster_charge_errs[cid]);
-        v_charge_pred.push_back(cluster_charge_preds[cid]);
+        std::vector<int> ch, ts, q, qe, qp;
+        ch.reserve(cells.size()); ts.reserve(cells.size()); q.reserve(cells.size());
+        qe.reserve(cells.size()); qp.reserve(cells.size());
+        for (const auto& [key, cell] : cells) {           // std::map -> ordered
+            ch.push_back(key.first);
+            ts.push_back(key.second);
+            q.push_back(static_cast<int>(cell.charge));
+            qe.push_back(static_cast<int>(std::sqrt(cell.charge_err2)));
+            qp.push_back(static_cast<int>(cell.pred));
+        }
+        v_channel.push_back(std::move(ch));
+        v_time_slice.push_back(std::move(ts));
+        v_charge.push_back(std::move(q));
+        v_charge_err.push_back(std::move(qe));
+        v_charge_pred.push_back(std::move(qp));
     }
 
     TTree* tree = new TTree("T_proj_data", "T_proj_data");
