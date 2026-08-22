@@ -1127,26 +1127,28 @@ Configuration Clus::PrDisplayDump::dump_steiner(Facade::Grouping& grouping) cons
 // the cluster ids of a cell from a sorted vector, never from the iteration
 // order of fc.clusters (a std::set<Cluster*>).
 //
-// KNOWN NON-DETERMINISM, INHERITED, NOT INTRODUCED HERE: `charge_pred` is
-// run-dependent on cells claimed by more than one cluster -- 1379 of 13507
-// cells (10.2%) changed between two runs of SBND evt 18255/388 under
-// `setarch -R`, while wire/slice/charge/charge_err/cluster_id/flag were all
-// bit-identical, as was every other section of this dump.
+// `charge_pred` HERE IS NOT THIS CLUSTER'S PREDICTION.  This dumper reads the
+// MERGED map, TrackFitting::assemble_fitted_charge_2d(), which is
+// last-writer-wins in ident order on cells claimed by more than one cluster.
+// charge and charge_err depend only on the readout so the overwrite is benign
+// for them; pred_charge is per-cluster, so the cell shows whichever fit ran
+// last -- usually a satellite cluster's, which holds a main-cluster cell in
+// its padded bounding box and predicts 0 there (doc pr/109 §8, measured: SBND
+// 46363 main cluster kept 44% of its own predicted charge, uBooNE 5384-6528
+// kept 0%).  The per-cell truth is TrackFitting::get_cluster_fitted_charge_2d(),
+// which the three Magnify T_proj_data writers now read; this dumper's panels
+// are keyed by (apa,face,plane), not by cluster, so they still show the merge.
 //
-// Cause: TrackFitting::assemble_fitted_charge_2d (clus/src/TrackFitting.cxx:1139)
-// merges the per-cluster snapshots last-writer-wins while iterating
-// m_cluster_fitted_charge_2d, a std::map<Facade::Cluster*, ...> -- a
-// pointer-keyed container, whose order is not reproducible.  charge and
-// charge_err depend only on the readout so the overwrite is benign for them;
-// pred_charge is per-cluster, so the winner varies.
+// The run-to-run instability once reported here (1379 of 13507 cells, 10.2%,
+// SBND 18255/388) came from the same merge back when the snapshot store was
+// iterated in pointer order; the store has been ident-ordered since, and is a
+// capture-ordered vector re-sorted by ident as of doc pr/109 §8, so the merge
+// order is reproducible.  What remains is the cross-cluster overwrite above,
+// which is deterministic but still not "this cluster's prediction".
 //
 // Blast radius is diagnostic-only: the merged map is read by this dumper, the
-// three Magnify tracking writers and TaggerCheckSTM's stm_fit record.  No
-// tagger verdict, Bee layer or pctree tensor depends on it, which is why no
-// A/B gate has ever caught it.  Reported in sbnd_xin/docs/pr/26, NOT fixed
-// here (fixing it belongs in TrackFitting, with its own gate).  Until then,
-// do not read the display's per-cell measured-vs-predicted comparison as a
-// stable number.
+// Magnify writers' fallback path and TaggerCheckSTM's stm_fit record.  No
+// tagger verdict, Bee layer or pctree tensor depends on it.
 Configuration Clus::PrDisplayDump::dump_proj(Facade::Grouping& grouping, TFPtr tf_in) const
 {
     Configuration out = Json::arrayValue;

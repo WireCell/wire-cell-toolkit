@@ -494,6 +494,16 @@ namespace WireCell::Clus {
         using WireTime = std::pair<int, int>;            // (wire_index, time_slice)
         using APAFacePlane = std::tuple<int, int, int>;   // (apa, face, plane);
 
+        /// doc pr/109 §8: one captured snapshot of m_fitted_charge_2d, for one
+        /// cluster's dQ/dx fit.  Kept per fit (not merged) so a writer can emit
+        /// the prediction that THIS cluster's fit produced -- see
+        /// m_cluster_fitted_charge_2d for why the merged map cannot.
+        struct ClusterFitted2D {
+            Facade::Cluster* cluster{nullptr};
+            int ident{-1};
+            std::map<APAFacePlane, std::map<WireTime, FittedCharge2D>> cells;
+        };
+
         // Fill fitted 2D charge results after dQ/dx fitting
         void fill_fitted_charge_2d(
             const std::map<CoordReadout, std::pair<ChargeMeasurement, std::set<Coord2D>>>& map_U,
@@ -750,6 +760,17 @@ namespace WireCell::Clus {
         // Fitted 2D charge data organized by (apa, face, plane) -> (wire, time)
         const std::map<APAFacePlane, std::map<WireTime, FittedCharge2D>>& get_fitted_charge_2d() const { return m_fitted_charge_2d; }
 
+        /// Restrict the next fit (and the snapshot it captures) to one
+        /// cluster.  do_multi_tracking()/do_single_tracking() set this from
+        /// their cluster_filter argument; exposed so a test can drive
+        /// fill_fitted_charge_2d() the way a real fit does.
+        void set_cluster_filter(Facade::Cluster* cluster) { m_cluster_filter = cluster; }
+
+        /// doc pr/109 §8: the per-cluster snapshots, in capture order.  Unlike
+        /// get_fitted_charge_2d() these are NOT merged, so pred_charge is the
+        /// value the named cluster's own fit produced.
+        const std::vector<ClusterFitted2D>& get_cluster_fitted_charge_2d() const { return m_cluster_fitted_charge_2d; }
+
         /**
          * Get geometry information for wire plane offsets
          * @return Map of WirePlaneId to tuple (offset_t, offset_u, offset_v, offset_w)
@@ -918,24 +939,23 @@ namespace WireCell::Clus {
 
         /// Per-cluster snapshots of m_fitted_charge_2d captured at the end of
         /// every fill_fitted_charge_2d() call when m_cluster_filter is set.
-        /// Overwriting the same key on each refill gives "latest fit wins per
-        /// cluster", correctly handling re-fits during pattern recognition.
+        /// Refitting the same cluster replaces its entry in place, so this is
+        /// still "latest fit wins per cluster" across pattern recognition.
         /// Merged into m_fitted_charge_2d by assemble_fitted_charge_2d().
         ///
-        /// Ordered by PR::ClusterPtrCmp (cluster ident), NOT by pointer: the
-        /// merge in assemble_fitted_charge_2d() is last-writer-wins on cells
-        /// claimed by more than one cluster, so a pointer-ordered walk made
-        /// pred_charge run-dependent -- 10.2% of cells moved between two
-        /// `setarch -R` runs of SBND evt 388 (doc pr/28 §4.3, §14).  Same
-        /// comparator as m_clusters above.  Safe here because the map lives
-        /// entirely inside one visitor's visit(): idents are re-enumerated
-        /// only between visitors (MultiAlgBlobClustering.cxx:2445), never
-        /// while entries are held.  fill_fitted_charge_2d() warns if two
-        /// distinct clusters ever reach it with the same ident.
-        std::map<Facade::Cluster*,
-                 std::map<APAFacePlane, std::map<WireTime, FittedCharge2D>>,
-                 PR::ClusterPtrCmp>
-            m_cluster_fitted_charge_2d;
+        /// doc pr/109 §8: this was a std::map keyed by Facade::Cluster* and
+        /// ORDERED BY IDENT (PR::ClusterPtrCmp).  Ident order was needed --
+        /// the merge is last-writer-wins on shared cells and a pointer-ordered
+        /// walk made pred_charge run-dependent (10.2% of cells moved between
+        /// two `setarch -R` runs of SBND evt 388, doc pr/28 §4.3, §14) -- but
+        /// ident order also made two live clusters that share an ident compare
+        /// EQUAL, so the earlier snapshot was silently discarded.  That fired
+        /// on uBooNE 5384-6528 and cost the main cluster its entire prediction
+        /// (T_proj_data cid 19: 2141 cells, Σpred = 0).  A vector in capture
+        /// order keeps both; assemble_fitted_charge_2d() still walks them in
+        /// (ident, capture index) order, so the merged map is unchanged
+        /// wherever no collision occurs.
+        std::vector<ClusterFitted2D> m_cluster_fitted_charge_2d;
 
         // global geometry
 

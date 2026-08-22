@@ -3,6 +3,7 @@
 #include "WireCellClus/PRSegmentFunctions.h"
 
 #include "WireCellUtil/Logging.h"
+#include <algorithm>
 #include <chrono>
 #include <sstream>
 #include <iomanip>
@@ -1172,35 +1173,59 @@ void TrackFitting::fill_fitted_charge_2d(
     // Persist this cluster's cells so they survive when the next
     // do_multi_tracking(..., &other_cluster) clears m_fitted_charge_2d.
     if (m_cluster_filter) {
-        // The key is ordered by ident (PR::ClusterPtrCmp), so two live clusters
-        // sharing an ident would silently collapse -- the second would discard
-        // the first's whole snapshot rather than merely reorder it.  Idents are
-        // dense and unique within a grouping at the instant enumerate_idents()
-        // runs, and it runs only between visitors, so this cannot fire; say so
-        // out loud rather than assume it.
-        auto held = m_cluster_fitted_charge_2d.find(m_cluster_filter);
-        if (held != m_cluster_fitted_charge_2d.end() && held->first != m_cluster_filter) {
-            SPDLOG_LOGGER_WARN(s_log,
-                "fill_fitted_charge_2d: cluster ident {} is shared by two live clusters; "
-                "the earlier snapshot ({} plane group(s)) is being discarded",
-                m_cluster_filter->get_cluster_id(), held->second.size());
+        // doc pr/109 §8: identity is the CLUSTER POINTER, not its ident.  The
+        // previous ident-keyed map made two live clusters sharing an ident
+        // compare equal and discarded the earlier snapshot whole (uBooNE
+        // 5384-6528: the main cluster lost all 2141 cells of prediction).
+        // Capture order is deterministic -- it is the order the visitor fits
+        // clusters in -- and assemble_fitted_charge_2d() re-sorts by ident
+        // before merging, so the merged map keeps its old ordering guarantee.
+        auto held = std::find_if(m_cluster_fitted_charge_2d.begin(), m_cluster_fitted_charge_2d.end(),
+                                 [this](const ClusterFitted2D& e) { return e.cluster == m_cluster_filter; });
+        if (held != m_cluster_fitted_charge_2d.end()) {
+            held->cells = m_fitted_charge_2d;   // re-fit of the same cluster: latest wins
         }
-        m_cluster_fitted_charge_2d[m_cluster_filter] = m_fitted_charge_2d;
+        else {
+            const int ident = m_cluster_filter->get_cluster_id();
+            for (const auto& e : m_cluster_fitted_charge_2d) {
+                if (e.ident != ident) continue;
+                SPDLOG_LOGGER_WARN(s_log,
+                    "fill_fitted_charge_2d: cluster ident {} is shared by two live clusters; "
+                    "both snapshots are kept ({} plane group(s) held)",
+                    ident, e.cells.size());
+                break;
+            }
+            m_cluster_fitted_charge_2d.push_back({m_cluster_filter, ident, m_fitted_charge_2d});
+        }
     }
 }
 
 void TrackFitting::assemble_fitted_charge_2d()
 {
     m_fitted_charge_2d.clear();
-    for (const auto& [cl, afp_map] : m_cluster_fitted_charge_2d) {
-        (void)cl;
+    // doc pr/109 §8: walk in (ident, capture index) order.  The snapshots are
+    // held in capture order now, but the merge below is last-writer-wins on
+    // cells claimed by more than one cluster, so the walk order decides
+    // pred_charge and must not depend on anything run-dependent (doc pr/28
+    // §4.3: a pointer-ordered walk moved 10.2% of cells between two runs).
+    // std::stable_sort keeps capture order within one ident.
+    std::vector<const ClusterFitted2D*> ordered;
+    ordered.reserve(m_cluster_fitted_charge_2d.size());
+    for (const auto& e : m_cluster_fitted_charge_2d) ordered.push_back(&e);
+    std::stable_sort(ordered.begin(), ordered.end(),
+                     [](const ClusterFitted2D* a, const ClusterFitted2D* b) { return a->ident < b->ident; });
+    for (const auto* entry : ordered) {
+        const auto& afp_map = entry->cells;
         for (const auto& [afp, wt_map] : afp_map) {
             auto& dst = m_fitted_charge_2d[afp];
             for (const auto& [wt, fc] : wt_map) {
                 // Last-writer-wins on cross-cluster overlap.  charge/charge_err
                 // depend only on the readout (not the cluster), so the overwrite
-                // is benign.  pred_charge may differ between overlapping clusters
-                // but write_proj_data emits one row per cluster tag regardless.
+                // is benign; pred_charge is NOT -- a satellite cluster holding a
+                // main-cluster cell in its padded bounding box predicts 0 there
+                // and, having the higher ident, wins.  Writers that need the
+                // prediction a named cluster's own fit produced must read
+                // get_cluster_fitted_charge_2d() instead (doc pr/109 §8).
                 dst[wt] = fc;
             }
         }

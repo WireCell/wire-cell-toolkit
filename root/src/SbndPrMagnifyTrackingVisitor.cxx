@@ -248,7 +248,12 @@ void Root::SbndPrMagnifyTrackingVisitor::write_proj_data(TFile* output_tf, Clus:
     // One element when the knob is off, so this is the legacy test verbatim.
     bool any_fitted = false;
     for (const auto& t : nu_fitters) {
-        if (t && !t->get_fitted_charge_2d().empty()) { any_fitted = true; break; }
+        // doc pr/109 §8: the rows come from the per-cluster snapshots now, so
+        // either store being non-empty means there is something to write.
+        if (t && (!t->get_fitted_charge_2d().empty() || !t->get_cluster_fitted_charge_2d().empty())) {
+            any_fitted = true;
+            break;
+        }
     }
     if (!any_fitted) {
         log->warn("SbndPrMagnifyTrackingVisitor: fitted_charge_2d is empty");
@@ -265,14 +270,20 @@ void Root::SbndPrMagnifyTrackingVisitor::write_proj_data(TFile* output_tf, Clus:
     std::map<int, std::vector<int>> cluster_charge_errs;
     std::map<int, std::vector<int>> cluster_charge_preds;
 
-    for (const auto& tf : nu_fitters) {
-    if (!tf) continue;
-    const auto& fitted = tf->get_fitted_charge_2d();
-    for (const auto& [afp, wt_map] : fitted) {
-        int apa = std::get<0>(afp);
-        int face = std::get<1>(afp);
-        int plane_idx = std::get<2>(afp);
-
+    // doc pr/109 §8: emit one row per FITTED cluster, from that cluster's own
+    // snapshot -- the prototype's semantics (wire-cell-prod-nue-port.cxx:3272,
+    // one row straight out of each cluster's proj_data_*_map).  The old code
+    // read the MERGED map (get_fitted_charge_2d(), last-writer-wins across
+    // clusters) and tagged each cell by BLOB OWNERSHIP (fc.clusters), so a row
+    // labelled with cluster A could carry cluster B's prediction -- and near
+    // the vertex, where satellite clusters (higher ident, hence later in the
+    // merge) hold the main cluster's cells in their padded bounding box and
+    // predict 0 there, it usually did.  Measured on SBND 46363 before the fix:
+    // main cluster ident 19 kept 44% of its own predicted charge; uBooNE
+    // 5384-6528 kept 0%.
+    auto emit = [&](int cid, int apa, int face, int plane_idx,
+                    const Clus::TrackFitting::WireTime& wt,
+                    const Clus::TrackFitting::FittedCharge2D& fc) {
         // Per-(apa,face) ticks-per-slice with a safe default (the uBooNE
         // original's .at() lookup would throw on an unmapped pair).
         int nticks_per_slice = 1;
@@ -281,22 +292,31 @@ void Root::SbndPrMagnifyTrackingVisitor::write_proj_data(TFile* output_tf, Clus:
             auto fit_ = ait->second.find(face);
             if (fit_ != ait->second.end()) nticks_per_slice = fit_->second;
         }
+        cluster_channels[cid].push_back(cs.global(plane_idx, apa, wt.first));
+        cluster_time_slices[cid].push_back(wt.second / nticks_per_slice);
+        cluster_charges[cid].push_back(static_cast<int>(fc.charge));
+        cluster_charge_errs[cid].push_back(static_cast<int>(fc.charge_err));
+        cluster_charge_preds[cid].push_back(static_cast<int>(fc.pred_charge));
+    };
 
-        for (const auto& [wt, fc] : wt_map) {
-            int wire = wt.first;
-            int time = wt.second / nticks_per_slice;
-            int channel = cs.global(plane_idx, apa, wire);
-
-            for (auto* cl : fc.clusters) {
-                int cid = cl->get_cluster_id();
-                cluster_channels[cid].push_back(channel);
-                cluster_time_slices[cid].push_back(time);
-                cluster_charges[cid].push_back(static_cast<int>(fc.charge));
-                cluster_charge_errs[cid].push_back(static_cast<int>(fc.charge_err));
-                cluster_charge_preds[cid].push_back(static_cast<int>(fc.pred_charge));
-            }
+    for (const auto& tf : nu_fitters) {
+        if (!tf) continue;
+        const auto& per_cluster = tf->get_cluster_fitted_charge_2d();
+        if (!per_cluster.empty()) {
+            for (const auto& snap : per_cluster)
+                for (const auto& [afp, wt_map] : snap.cells)
+                    for (const auto& [wt, fc] : wt_map)
+                        emit(snap.ident, std::get<0>(afp), std::get<1>(afp), std::get<2>(afp), wt, fc);
+            continue;
         }
-    }
+        // Fallback: a fitter that never ran with a cluster filter has no
+        // snapshots (e.g. the "stm" holder fed by merge_fitted_charge_2d).
+        // Emit the merged map under its blob-ownership tags rather than
+        // dropping the tree.
+        for (const auto& [afp, wt_map] : tf->get_fitted_charge_2d())
+            for (const auto& [wt, fc] : wt_map)
+                for (auto* cl : fc.clusters)
+                    emit(cl->get_cluster_id(), std::get<0>(afp), std::get<1>(afp), std::get<2>(afp), wt, fc);
     }  // per-candidate
 
     // Build vectors in cluster_id order

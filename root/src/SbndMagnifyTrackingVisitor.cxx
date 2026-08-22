@@ -298,7 +298,8 @@ void Root::SbndMagnifyTrackingVisitor::write_proj_data(TFile* output_tf, Clus::F
     }
 
     const auto& fitted = tf->get_fitted_charge_2d();
-    if (fitted.empty()) {
+    const auto& per_cluster = tf->get_cluster_fitted_charge_2d();
+    if (fitted.empty() && per_cluster.empty()) {
         log->warn("SbndMagnifyTrackingVisitor: fitted_charge_2d is empty");
         return;
     }
@@ -323,43 +324,50 @@ void Root::SbndMagnifyTrackingVisitor::write_proj_data(TFile* output_tf, Clus::F
     std::map<int, std::vector<int>> cluster_charge_errs;
     std::map<int, std::vector<int>> cluster_charge_preds;
 
-    for (const auto& [afp, wt_map] : fitted) {
-        int apa = std::get<0>(afp);
-        int face = std::get<1>(afp);
-        int plane_idx = std::get<2>(afp);
-
+    // doc pr/109 §8: prefer each cluster's OWN snapshot over the merged map,
+    // whose pred_charge is last-writer-wins across clusters.  The STM slot this
+    // visitor normally reads is a holder fed by merge_fitted_charge_2d(), which
+    // carries no snapshots, so that path is unchanged and takes the fallback.
+    auto emit = [&](int cid, int apa, int face, int plane_idx,
+                    const Clus::TrackFitting::WireTime& wt,
+                    const Clus::TrackFitting::FittedCharge2D& fc) {
         int nticks_per_slice = 1;
         auto ait = nticks_map.find(apa);
         if (ait != nticks_map.end()) {
             auto fit_ = ait->second.find(face);
             if (fit_ != ait->second.end()) nticks_per_slice = fit_->second;
         }
-
-        for (const auto& [wt, fc] : wt_map) {
-            int wire = wt.first;
-            int time = wt.second / nticks_per_slice;
-            int channel = cs.global(plane_idx, apa, wire);
-
-            for (auto* cl : fc.clusters) {
-                int cid = cl->get_cluster_id();
-                auto pit = cluster_passes.find(cid);
-                // Fall back to a single pass-0 block when the cluster carries
-                // no stm_pass PC.  This DOES happen: a fitted cell can belong
-                // to an associated cluster that STM itself never fit, so
-                // T_proj_data can hold a block with no T_rec track (the GUI
-                // shows it only under "all clusters").
-                static const std::vector<int> pass0{0};
-                const auto& passes = (pit == cluster_passes.end()) ? pass0 : pit->second;
-                for (int pass : passes) {
-                    const int block_id = cid * 10 + pass;
-                    cluster_channels[block_id].push_back(channel);
-                    cluster_time_slices[block_id].push_back(time);
-                    cluster_charges[block_id].push_back(static_cast<int>(fc.charge));
-                    cluster_charge_errs[block_id].push_back(static_cast<int>(fc.charge_err));
-                    cluster_charge_preds[block_id].push_back(static_cast<int>(fc.pred_charge));
-                }
-            }
+        const int time = wt.second / nticks_per_slice;
+        const int channel = cs.global(plane_idx, apa, wt.first);
+        auto pit = cluster_passes.find(cid);
+        // Fall back to a single pass-0 block when the cluster carries
+        // no stm_pass PC.  This DOES happen: a fitted cell can belong
+        // to an associated cluster that STM itself never fit, so
+        // T_proj_data can hold a block with no T_rec track (the GUI
+        // shows it only under "all clusters").
+        static const std::vector<int> pass0{0};
+        const auto& passes = (pit == cluster_passes.end()) ? pass0 : pit->second;
+        for (int pass : passes) {
+            const int block_id = cid * 10 + pass;
+            cluster_channels[block_id].push_back(channel);
+            cluster_time_slices[block_id].push_back(time);
+            cluster_charges[block_id].push_back(static_cast<int>(fc.charge));
+            cluster_charge_errs[block_id].push_back(static_cast<int>(fc.charge_err));
+            cluster_charge_preds[block_id].push_back(static_cast<int>(fc.pred_charge));
         }
+    };
+
+    if (!per_cluster.empty()) {
+        for (const auto& snap : per_cluster)
+            for (const auto& [afp, wt_map] : snap.cells)
+                for (const auto& [wt, fc] : wt_map)
+                    emit(snap.ident, std::get<0>(afp), std::get<1>(afp), std::get<2>(afp), wt, fc);
+    }
+    else {
+        for (const auto& [afp, wt_map] : fitted)
+            for (const auto& [wt, fc] : wt_map)
+                for (auto* cl : fc.clusters)
+                    emit(cl->get_cluster_id(), std::get<0>(afp), std::get<1>(afp), std::get<2>(afp), wt, fc);
     }
 
     std::vector<int> v_cluster_id;
