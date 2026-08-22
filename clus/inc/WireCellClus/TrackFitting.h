@@ -834,6 +834,28 @@ namespace WireCell::Clus {
         int   m_traj_dump_stage{0};
         void  traj_dump_fits(const char* tag);
 
+        // doc pr/109 sec 9 exclusion-decision dump (debug only, env
+        // WCT_EXCL_DUMP=<path>; unset => no code path).  update_association's
+        // keep rule is "strictly closest of all siblings, or within 0.3 cm",
+        // but it discards the two distances the decision turns on and
+        // early-breaks out of the competitor scan as soon as one competitor
+        // ties or beats the segment.  With the dump on, the scan runs to
+        // completion so the TRUE nearest-competitor distance is recorded --
+        // the decision is unchanged, because
+        //     drop  <=>  exists other with dis <= min_dis_track
+        //           <=>  min-over-others <= min_dis_track,
+        // which is what the full scan evaluates.  One line per fresh
+        // (segment, cell) decision; cache hits are not re-dumped, so each
+        // decision appears exactly once.  Lets the recovery curve of a
+        // proposed tie margin or a larger keep floor be computed offline,
+        // from one run per detector, without building either knob.
+        FILE* m_excl_dump{nullptr};
+        WireCell::Point m_excl_dump_pt;   // the fit point whose association is being trimmed
+        bool  exclusion_keep_dump(const std::shared_ptr<PR::Segment>& segment,
+                                  const std::vector<std::shared_ptr<PR::Segment>>& all_segments,
+                                  const WireCell::Point& test_point, const Coord2D& coord,
+                                  int apa, int face, int plane, double min_dis_track);
+
         // doc pr/49 round 3 (fit_blob_coverage knob): clusters owning a
         // segment in the current fit -- the "fitting scope" whose members
         // never count as foreign in is_cell_covered_by_foreign_blobs.

@@ -2714,6 +2714,42 @@ static inline uint64_t exclusion_cache_key(const TrackFitting::Coord2D& c)
            (static_cast<uint64_t>(static_cast<uint32_t>(c.time) & 0xFFFFFF));
 }
 
+// doc pr/109 sec 9: exclusion-decision dump (env WCT_EXCL_DUMP; unset => this
+// function is never called and the fast path below is untouched).  Runs the
+// competitor scan to completion instead of early-breaking, so the recorded
+// min_other is the TRUE nearest-competitor distance rather than "the first one
+// that tied or beat us".  The returned decision is identical to the fast path:
+//   fast path keeps iff  min_dis < 0.3 cm  OR  no other has dis <= min_dis
+//   here      keeps iff  min_dis < 0.3 cm  OR  min-over-others > min_dis
+// which are the same predicate.
+bool TrackFitting::exclusion_keep_dump(const std::shared_ptr<PR::Segment>& segment,
+                                       const std::vector<std::shared_ptr<PR::Segment>>& all_segments,
+                                       const WireCell::Point& test_point, const Coord2D& coord,
+                                       int apa, int face, int plane, double min_dis_track)
+{
+    double min_other = 1e9;
+    for (const auto& other_seg : all_segments) {
+        if (other_seg == segment) continue;
+        const double d = exclusion_closest_2d_dis(other_seg, test_point, apa, face, plane);
+        if (d < min_other) min_other = d;
+    }
+    const bool floored = (min_dis_track < 0.3 * units::cm);
+    const bool keep = floored || (min_other > min_dis_track);
+
+    double q = 0; int flag = -1;
+    CoordReadout coord_key(coord.apa, coord.time, coord.channel);
+    auto charge_it = m_charge_data.find(coord_key);
+    if (charge_it != m_charge_data.end()) { q = charge_it->second.charge; flag = charge_it->second.flag; }
+
+    fprintf(m_excl_dump, "%d %d %d %d %d %d %d %.1f %d %.4f %.4f %d %d %zu %.3f %.3f %.3f\n",
+            m_traj_dump_call, m_traj_dump_stage, plane, apa, face, coord.wire, coord.time,
+            q, flag, min_dis_track / units::cm, min_other / units::cm,
+            (int)keep, (int)floored, all_segments.size(),
+            m_excl_dump_pt.x() / units::cm, m_excl_dump_pt.y() / units::cm,
+            m_excl_dump_pt.z() / units::cm);
+    return keep;
+}
+
 void TrackFitting::update_association(std::shared_ptr<PR::Segment> segment,
                                       const std::vector<std::shared_ptr<PR::Segment>>& all_segments,
                                       PlaneData& temp_2dut, PlaneData& temp_2dvt, PlaneData& temp_2dwt,
@@ -2787,7 +2823,10 @@ void TrackFitting::update_association(std::shared_ptr<PR::Segment> segment,
         double min_dis_track = exclusion_closest_2d_dis(segment, test_point, apa, face, 0);
 
         bool keep = true;
-        if (min_dis_track >= 0.3 * units::cm) {
+        if (m_excl_dump) {   // doc pr/109 sec 9, debug only; same decision, full scan
+            keep = exclusion_keep_dump(segment, all_segments, test_point, coord, apa, face, 0, min_dis_track);
+        }
+        else if (min_dis_track >= 0.3 * units::cm) {
             for (const auto& other_seg : all_segments) {
                 if (other_seg == segment) continue;
                 double temp_dis = exclusion_closest_2d_dis(other_seg, test_point, apa, face, 0);
@@ -2832,7 +2871,10 @@ void TrackFitting::update_association(std::shared_ptr<PR::Segment> segment,
         double min_dis_track = exclusion_closest_2d_dis(segment, test_point, apa, face, 1);
 
         bool keep = true;
-        if (min_dis_track >= 0.3 * units::cm) {
+        if (m_excl_dump) {   // doc pr/109 sec 9, debug only; same decision, full scan
+            keep = exclusion_keep_dump(segment, all_segments, test_point, coord, apa, face, 1, min_dis_track);
+        }
+        else if (min_dis_track >= 0.3 * units::cm) {
             for (const auto& other_seg : all_segments) {
                 if (other_seg == segment) continue;
                 double temp_dis = exclusion_closest_2d_dis(other_seg, test_point, apa, face, 1);
@@ -2879,7 +2921,10 @@ void TrackFitting::update_association(std::shared_ptr<PR::Segment> segment,
         double min_dis_track = exclusion_closest_2d_dis(segment, test_point, apa, face, 2);
 
         bool keep = true;
-        if (min_dis_track >= 0.3 * units::cm) {
+        if (m_excl_dump) {   // doc pr/109 sec 9, debug only; same decision, full scan
+            keep = exclusion_keep_dump(segment, all_segments, test_point, coord, apa, face, 2, min_dis_track);
+        }
+        else if (min_dis_track >= 0.3 * units::cm) {
             for (const auto& other_seg : all_segments) {
                 if (other_seg == segment) continue;
                 double temp_dis = exclusion_closest_2d_dis(other_seg, test_point, apa, face, 2);
@@ -3606,6 +3651,7 @@ void TrackFitting::form_map_graph(bool flag_exclusion, double end_point_factor, 
 
 
                 if (flag_exclusion) {
+                    if (m_excl_dump) m_excl_dump_pt = fits[i].point;   // doc pr/109 sec 9, debug only
                     update_association(segment, segments, temp_2dut, temp_2dvt, temp_2dwt, &excl_cache);
                 }
                 const size_t dump_n1[3] = {temp_2dut.associated_2d_points.size(), temp_2dvt.associated_2d_points.size(), temp_2dwt.associated_2d_points.size()};  // doc pr/108: after exclusion, before examine
@@ -8323,13 +8369,22 @@ void TrackFitting::traj_dump_fits(const char* tag)
 
 void TrackFitting::do_multi_tracking(bool flag_dQ_dx_fit_reg, bool flag_dQ_dx_fit, bool flag_force_load_data, bool flag_exclusion, bool flag_hack, Facade::Cluster* cluster_filter){
     {   // doc pr/108 stage dump: one shared file per process, call counter shared by all fitters.
+        // doc pr/109 sec 9 adds the exclusion-decision dump on the same counter.
         static FILE* s_dump = [](){ const char* p = getenv("WCT_TRAJ_DUMP"); return p ? fopen(p, "a") : nullptr; }();
+        static FILE* s_excl = [](){ const char* p = getenv("WCT_EXCL_DUMP"); return p ? fopen(p, "a") : nullptr; }();
         static int s_call = 0;
         m_traj_dump = s_dump;
-        if (m_traj_dump) {
+        m_excl_dump = s_excl;
+        if (m_traj_dump || m_excl_dump) {
             m_traj_dump_call = ++s_call;
             m_traj_dump_stage = 0;
+        }
+        if (m_traj_dump) {
             fprintf(m_traj_dump, "%d call excl=%d cluster=%d\n", m_traj_dump_call, (int)flag_exclusion,
+                    cluster_filter ? (int)cluster_filter->ident() : -1);
+        }
+        if (m_excl_dump) {
+            fprintf(m_excl_dump, "# call %d excl=%d cluster=%d\n", m_traj_dump_call, (int)flag_exclusion,
                     cluster_filter ? (int)cluster_filter->ident() : -1);
         }
     }
