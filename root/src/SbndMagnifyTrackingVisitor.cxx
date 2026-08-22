@@ -326,14 +326,28 @@ void Root::SbndMagnifyTrackingVisitor::write_proj_data(TFile* output_tf, Clus::F
     // same time_slice; without this they would be duplicate keys in one block.
     // Charge adds, errors add in quadrature, predictions add -- identities for
     // a live cell, which occurs once per slice.
-    struct Cell { double charge{0}, charge_err2{0}, pred{0}; };
+    // Live entries and dead-region fillers are kept apart: a slice can hold a
+    // real readout at one tick and fillers at the others (prepare_data inserts
+    // a filler only where no key exists, TrackFitting.cxx:904), and adding the
+    // filler's spread charge onto a measured cell would inflate the measured
+    // charge the tree reports.  Fillers are used only when the slice has no
+    // live entry at all -- which is the case that carries the dead-blob charge.
+    struct Cell {
+        double live_charge{0}, live_err2{0};
+        double dead_charge{0}, dead_err2{0};
+        double pred{0};
+        int nlive{0};
+        double charge() const { return nlive ? live_charge : dead_charge; }
+        double charge_err() const { return std::sqrt(nlive ? live_err2 : dead_err2); }
+    };
     std::map<int, std::map<std::pair<int, int>, Cell>> cluster_cells;
 
     // doc pr/109 §8: prefer each cluster's OWN snapshot over the merged map,
     // whose pred_charge is last-writer-wins across clusters.  The STM slot this
     // visitor normally reads is a holder fed by merge_fitted_charge_2d(), which
     // carries no snapshots, so that path is unchanged and takes the fallback.
-    auto emit = [&](int cid, int apa, int face, int plane_idx,
+    auto emit = [&](std::map<int, std::map<std::pair<int, int>, Cell>>& local,
+                    int cid, int apa, int face, int plane_idx,
                     const Clus::TrackFitting::WireTime& wt,
                     const Clus::TrackFitting::FittedCharge2D& fc) {
         int nticks_per_slice = 1;
@@ -353,24 +367,50 @@ void Root::SbndMagnifyTrackingVisitor::write_proj_data(TFile* output_tf, Clus::F
         static const std::vector<int> pass0{0};
         const auto& passes = (pit == cluster_passes.end()) ? pass0 : pit->second;
         for (int pass : passes) {
-            auto& cell = cluster_cells[cid * 10 + pass][{channel, time}];
-            cell.charge += fc.charge;
-            cell.charge_err2 += fc.charge_err * fc.charge_err;
+            auto& cell = local[cid * 10 + pass][{channel, time}];
+            if (fc.flag != 0) {
+                cell.live_charge += fc.charge;
+                cell.live_err2 += fc.charge_err * fc.charge_err;
+                ++cell.nlive;
+            }
+            else {
+                cell.dead_charge += fc.charge;
+                cell.dead_err2 += fc.charge_err * fc.charge_err;
+            }
             cell.pred += fc.pred_charge;
         }
     };
 
+    // ACROSS snapshots landing in the same block (two live clusters sharing an
+    // ident), charge and charge_err are properties of the READOUT and are taken
+    // once, not summed -- only the predictions add.
+    auto flush = [&](const std::map<int, std::map<std::pair<int, int>, Cell>>& local) {
+        for (const auto& [block, cells] : local) {
+            auto& dst = cluster_cells[block];
+            for (const auto& [key, cell] : cells) {
+                auto it = dst.find(key);
+                if (it == dst.end()) dst.emplace(key, cell);
+                else it->second.pred += cell.pred;
+            }
+        }
+    };
+
     if (!per_cluster.empty()) {
-        for (const auto& snap : per_cluster)
+        for (const auto& snap : per_cluster) {
+            std::map<int, std::map<std::pair<int, int>, Cell>> local;
             for (const auto& [afp, wt_map] : snap.cells)
                 for (const auto& [wt, fc] : wt_map)
-                    emit(snap.ident, std::get<0>(afp), std::get<1>(afp), std::get<2>(afp), wt, fc);
+                    emit(local, snap.ident, std::get<0>(afp), std::get<1>(afp), std::get<2>(afp), wt, fc);
+            flush(local);
+        }
     }
     else {
+        std::map<int, std::map<std::pair<int, int>, Cell>> local;
         for (const auto& [afp, wt_map] : fitted)
             for (const auto& [wt, fc] : wt_map)
                 for (auto* cl : fc.clusters)
-                    emit(cl->get_cluster_id(), std::get<0>(afp), std::get<1>(afp), std::get<2>(afp), wt, fc);
+                    emit(local, cl->get_cluster_id(), std::get<0>(afp), std::get<1>(afp), std::get<2>(afp), wt, fc);
+        flush(local);
     }
 
     std::vector<int> v_cluster_id;
@@ -388,8 +428,8 @@ void Root::SbndMagnifyTrackingVisitor::write_proj_data(TFile* output_tf, Clus::F
         for (const auto& [key, cell] : cells) {           // std::map -> ordered
             ch.push_back(key.first);
             ts.push_back(key.second);
-            q.push_back(static_cast<int>(cell.charge));
-            qe.push_back(static_cast<int>(std::sqrt(cell.charge_err2)));
+            q.push_back(static_cast<int>(cell.charge()));
+            qe.push_back(static_cast<int>(cell.charge_err()));
             qp.push_back(static_cast<int>(cell.pred));
         }
         v_channel.push_back(std::move(ch));

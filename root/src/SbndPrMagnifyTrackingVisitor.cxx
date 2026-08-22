@@ -276,7 +276,20 @@ void Root::SbndPrMagnifyTrackingVisitor::write_proj_data(TFile* output_tf, Clus:
     // Charge adds (the filler split the blob charge across those ticks), errors
     // add in quadrature, predictions add -- all three are identities for a live
     // cell, which occurs exactly once per slice.
-    struct Cell { double charge{0}, charge_err2{0}, pred{0}; };
+    // Live entries and dead-region fillers are kept apart: a slice can hold a
+    // real readout at one tick and fillers at the others (prepare_data inserts
+    // a filler only where no key exists, TrackFitting.cxx:904), and adding the
+    // filler's spread charge onto a measured cell would inflate the measured
+    // charge the tree reports.  Fillers are used only when the slice has no
+    // live entry at all -- which is the case that carries the dead-blob charge.
+    struct Cell {
+        double live_charge{0}, live_err2{0};
+        double dead_charge{0}, dead_err2{0};
+        double pred{0};
+        int nlive{0};
+        double charge() const { return nlive ? live_charge : dead_charge; }
+        double charge_err() const { return std::sqrt(nlive ? live_err2 : dead_err2); }
+    };
     std::map<int, std::map<std::pair<int, int>, Cell>> cluster_cells;
 
     // doc pr/109 §8: emit one row per FITTED cluster, from that cluster's own
@@ -290,9 +303,12 @@ void Root::SbndPrMagnifyTrackingVisitor::write_proj_data(TFile* output_tf, Clus:
     // predict 0 there, it usually did.  Measured on SBND 46363 before the fix:
     // main cluster ident 19 kept 44% of its own predicted charge; uBooNE
     // 5384-6528 kept 0%.
-    auto emit = [&](int cid, int apa, int face, int plane_idx,
-                    const Clus::TrackFitting::WireTime& wt,
-                    const Clus::TrackFitting::FittedCharge2D& fc) {
+    using CellMap = std::map<std::pair<int, int>, Cell>;
+
+    // Within ONE snapshot the tick entries of a slice are added up (above).
+    auto accumulate = [&](CellMap& local, int apa, int face, int plane_idx,
+                          const Clus::TrackFitting::WireTime& wt,
+                          const Clus::TrackFitting::FittedCharge2D& fc) {
         // Per-(apa,face) ticks-per-slice with a safe default (the uBooNE
         // original's .at() lookup would throw on an unmapped pair).
         int nticks_per_slice = 1;
@@ -301,30 +317,55 @@ void Root::SbndPrMagnifyTrackingVisitor::write_proj_data(TFile* output_tf, Clus:
             auto fit_ = ait->second.find(face);
             if (fit_ != ait->second.end()) nticks_per_slice = fit_->second;
         }
-        auto& cell = cluster_cells[cid][{cs.global(plane_idx, apa, wt.first), wt.second / nticks_per_slice}];
-        cell.charge += fc.charge;
-        cell.charge_err2 += fc.charge_err * fc.charge_err;
+        auto& cell = local[{cs.global(plane_idx, apa, wt.first), wt.second / nticks_per_slice}];
+        if (fc.flag != 0) {
+            cell.live_charge += fc.charge;
+            cell.live_err2 += fc.charge_err * fc.charge_err;
+            ++cell.nlive;
+        }
+        else {
+            cell.dead_charge += fc.charge;
+            cell.dead_err2 += fc.charge_err * fc.charge_err;
+        }
         cell.pred += fc.pred_charge;
+    };
+
+    // ACROSS snapshots that land in the same row (two live clusters sharing an
+    // ident, or two candidates), charge and charge_err are properties of the
+    // READOUT and must be taken once, not summed -- only the predictions add.
+    auto flush = [&](int cid, const CellMap& local) {
+        auto& dst = cluster_cells[cid];
+        for (const auto& [key, cell] : local) {
+            auto it = dst.find(key);
+            if (it == dst.end()) dst.emplace(key, cell);
+            else it->second.pred += cell.pred;   // readout fields taken once
+        }
     };
 
     for (const auto& tf : nu_fitters) {
         if (!tf) continue;
         const auto& per_cluster = tf->get_cluster_fitted_charge_2d();
         if (!per_cluster.empty()) {
-            for (const auto& snap : per_cluster)
+            for (const auto& snap : per_cluster) {
+                CellMap local;
                 for (const auto& [afp, wt_map] : snap.cells)
                     for (const auto& [wt, fc] : wt_map)
-                        emit(snap.ident, std::get<0>(afp), std::get<1>(afp), std::get<2>(afp), wt, fc);
+                        accumulate(local, std::get<0>(afp), std::get<1>(afp), std::get<2>(afp), wt, fc);
+                flush(snap.ident, local);
+            }
             continue;
         }
         // Fallback: a fitter that never ran with a cluster filter has no
         // snapshots (e.g. the "stm" holder fed by merge_fitted_charge_2d).
         // Emit the merged map under its blob-ownership tags rather than
         // dropping the tree.
+        std::map<int, CellMap> fallback;
         for (const auto& [afp, wt_map] : tf->get_fitted_charge_2d())
             for (const auto& [wt, fc] : wt_map)
                 for (auto* cl : fc.clusters)
-                    emit(cl->get_cluster_id(), std::get<0>(afp), std::get<1>(afp), std::get<2>(afp), wt, fc);
+                    accumulate(fallback[cl->get_cluster_id()],
+                               std::get<0>(afp), std::get<1>(afp), std::get<2>(afp), wt, fc);
+        for (const auto& [cid, local] : fallback) flush(cid, local);
     }  // per-candidate
 
     // Build vectors in cluster_id order
@@ -343,8 +384,8 @@ void Root::SbndPrMagnifyTrackingVisitor::write_proj_data(TFile* output_tf, Clus:
         for (const auto& [key, cell] : cells) {           // std::map -> ordered
             ch.push_back(key.first);
             ts.push_back(key.second);
-            q.push_back(static_cast<int>(cell.charge));
-            qe.push_back(static_cast<int>(std::sqrt(cell.charge_err2)));
+            q.push_back(static_cast<int>(cell.charge()));
+            qe.push_back(static_cast<int>(cell.charge_err()));
             qp.push_back(static_cast<int>(cell.pred));
         }
         v_channel.push_back(std::move(ch));
