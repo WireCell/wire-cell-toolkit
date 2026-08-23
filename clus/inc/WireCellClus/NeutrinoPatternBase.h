@@ -161,6 +161,43 @@ namespace WireCell::Clus::PR {
         double angle{0};     ///< opening angle between the two shower directions
     };
 
+    // doc sbnd_xin/docs/pr/112 sec 11 -- the DUAL CHAIN.  A second, exclusion-
+    // free pattern-recognition pass (TaggerCheckNeutrino::run_dual_chain_off_pass)
+    // suggests the neutrino vertex; the production (exclusion-ON) pass receives
+    // the suggestion through this struct and decides.  A nullptr hint in
+    // determine_overall_main_vertex_DL is the legacy path, line for line.
+    struct DualChainHint {
+        // ---- what the OFF pass found
+        bool has_vertex{false};
+        WireCell::Point vertex;            ///< OFF chain's final main vertex (internal units)
+        int  vertex_cluster_id{-1};
+        std::vector<float> voxels;         ///< raw SCN payload [x,y,z,score]*K, cm; empty = none
+        int  n_candidates{0};              ///< OFF graph vertex count
+        double off_ms{0};                  ///< wall of the OFF pass
+        // ---- how production may use it (copied from the TaggerCheckNeutrino knobs)
+        std::string mode{"snap"};          ///< "snap" | "voxels" | "union"
+        bool   transfer{false};            ///< false = PROBE: nothing moves, agreement only
+        double transfer_max{0};            ///< snap guard D (internal units); s_dual range in union
+        bool   allow_cluster_swap{true};
+        double vtx_weight{0};              ///< union: weight of the OFF-vertex proximity term
+    };
+
+    /// The snap-and-guard arithmetic of the "snap" mode, pure so a doctest can
+    /// pin it: nearest candidate to the OFF vertex among those the cluster
+    /// gate admits; accepted iff the distance is <= D (0.00 cm IS a transfer,
+    /// doc pr/112 sec 5.7.4).  index = -1 when nothing is admissible.
+    struct DualChainPick {
+        int    index{-1};
+        double dis{1e9};
+        bool   accepted{false};
+    };
+    DualChainPick dual_chain_pick(const std::vector<WireCell::Point>& cand_pts,
+                                  const std::vector<int>& cand_cluster_ids,
+                                  int main_cluster_id,
+                                  const WireCell::Point& off_vtx,
+                                  double transfer_max,
+                                  bool allow_cluster_swap);
+
     class PatternAlgorithms{
         public:
         bool m_perf{false};  // if true, print per-step timing to stdout
@@ -3084,7 +3121,13 @@ namespace WireCell::Clus::PR {
         // voxel (raw score 0.576 -> s_dl = +576 at score_scale 1000, which
         // swamps every +-2 structural term) moved the vertex 28 cm onto a
         // non-flash-matched cluster.  Default false => byte-identical.
-        bool determine_overall_main_vertex_DL(Graph& graph, ClusterVertexMap& map_cluster_main_vertices, Facade::Cluster*& main_cluster, std::vector<Facade::Cluster*>& other_clusters, IndexedVertexSet& vertices_in_long_muon, IndexedSegmentSet& segments_in_long_muon, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, const std::string& dl_weights, double dl_vtx_cut, double dQdx_scale = 0.1, double dQdx_offset = -1000.0, bool flag_rerank = false, int dl_vtx_top_k = 5, double dl_vtx_min_accept_score = 4.0, double dl_vtx_score_scale = 1000.0, bool dl_vtx_swap_guard = false, double dl_vtx_topo_weight = 0.0, double dl_vtx_topo_center = 0.0);
+        bool determine_overall_main_vertex_DL(Graph& graph, ClusterVertexMap& map_cluster_main_vertices, Facade::Cluster*& main_cluster, std::vector<Facade::Cluster*>& other_clusters, IndexedVertexSet& vertices_in_long_muon, IndexedSegmentSet& segments_in_long_muon, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, const std::string& dl_weights, double dl_vtx_cut, double dQdx_scale = 0.1, double dQdx_offset = -1000.0, bool flag_rerank = false, int dl_vtx_top_k = 5, double dl_vtx_min_accept_score = 4.0, double dl_vtx_score_scale = 1000.0, bool dl_vtx_swap_guard = false, double dl_vtx_topo_weight = 0.0, double dl_vtx_topo_center = 0.0, const DualChainHint* dual_hint = nullptr);
+
+        // doc pr/112 sec 11 -- the OFF pass's SCN inference on its own graph:
+        // builds the same cloud determine_overall_main_vertex_DL builds (vertex
+        // rows first, then segment-interior fit points) and returns the raw
+        // top-K payload.  n_candidates receives the vertex-row count.
+        std::vector<float> dual_chain_scn_voxels(Graph& graph, const std::string& dl_weights, double dQdx_scale, double dQdx_offset, int dl_vtx_top_k, int& n_candidates);
 
         // global information transfer
         void transfer_info_from_segment_to_cluster(Graph& graph, Facade::Cluster& cluster, const std::string& cloud_name = "associated_points");

@@ -4754,7 +4754,8 @@ bool PatternAlgorithms::determine_overall_main_vertex_DL(
     double dl_vtx_score_scale,
     bool dl_vtx_swap_guard,
     double dl_vtx_topo_weight,
-    double dl_vtx_topo_center)
+    double dl_vtx_topo_center,
+    const DualChainHint* dual_hint)
 {
     bool flag_change = false;
 
@@ -4886,7 +4887,29 @@ bool PatternAlgorithms::determine_overall_main_vertex_DL(
         // which returns the same 3-float argmax payload as before (byte-for-byte identical).
         // Rerank mode requests dl_vtx_top_k voxels and receives 4*K floats [x,y,z,score per voxel].
         int top_k_arg = flag_rerank ? std::max(1, dl_vtx_top_k) : 1;
-        auto dnn_vtx = WCPPyUtil::SCN_Vertex("SCN_Vertex", "SCN_Vertex", dl_weights, vec_xyzq, "float32", false, top_k_arg);
+        // doc sbnd_xin/docs/pr/112 sec 11 -- dual chain, "voxels" mode: the
+        // exclusion-free pass's top-K REPLACES this pass's own inference (no
+        // second SCN call); "union" mode: both payloads are pooled and the
+        // per-candidate dedup below keeps the higher score.  Rerank branch
+        // only (the legacy branch expects exactly 3 floats).  Gated on
+        // transfer so a probe never changes the payload.  nullptr hint (the
+        // default) => the single line the legacy path always ran.
+        const bool dual_voxels = dual_hint && dual_hint->transfer && flag_rerank
+                                 && !dual_hint->voxels.empty()
+                                 && (dual_hint->mode == "voxels" || dual_hint->mode == "union");
+        std::vector<float> dnn_vtx;
+        if (dual_voxels && dual_hint->mode == "voxels") {
+            dnn_vtx = dual_hint->voxels;
+            SPDLOG_LOGGER_DEBUG(s_log, "dual_chain: voxels mode, {} OFF-pass voxels replace the ON inference",
+                                dnn_vtx.size() / 4);
+        } else {
+            dnn_vtx = WCPPyUtil::SCN_Vertex("SCN_Vertex", "SCN_Vertex", dl_weights, vec_xyzq, "float32", false, top_k_arg);
+            if (dual_voxels) {
+                dnn_vtx.insert(dnn_vtx.end(), dual_hint->voxels.begin(), dual_hint->voxels.end());
+                SPDLOG_LOGGER_DEBUG(s_log, "dual_chain: union mode, {} OFF-pass voxels pooled with {} ON voxels",
+                                    dual_hint->voxels.size() / 4, (dnn_vtx.size() - dual_hint->voxels.size()) / 4);
+            }
+        }
         MS t_scn_inference(Clock::now() - t0); t0 = Clock::now();
 
         // -----------------------------------------------------------------------
@@ -5236,6 +5259,17 @@ bool PatternAlgorithms::determine_overall_main_vertex_DL(
                 }
 
                 double score = s_dl + s_snap + s_fwd_z + s_clen + s_isol + s_main + s_fv;
+                // doc pr/112 sec 11 -- "union" mode proximity term to the OFF
+                // chain's refined vertex: w * max(0, 1 - d/D).  Weight 0 (the
+                // default) or no hint => never computed => untouched sum.
+                if (dual_hint && dual_hint->transfer && dual_hint->mode == "union"
+                    && dual_hint->vtx_weight != 0.0 && dual_hint->has_vertex && dual_hint->transfer_max > 0) {
+                    const double d_off = (vtx_pt - dual_hint->vertex).magnitude();
+                    const double s_dual = dual_hint->vtx_weight * std::max(0.0, 1.0 - d_off / dual_hint->transfer_max);
+                    score += s_dual;
+                    SPDLOG_LOGGER_TRACE(s_log, "DL rerank cand [voxel {}] dual: d_off={:.2f}cm s_dual={:+.3f}",
+                                        sc.voxel_rank, d_off / units::cm, s_dual);
+                }
                 if (dl_vtx_topo_weight != 0.0) {
                     score += s_topo;
                     SPDLOG_LOGGER_TRACE(s_log,
@@ -5320,6 +5354,47 @@ bool PatternAlgorithms::determine_overall_main_vertex_DL(
             }
         }
 
+        // doc sbnd_xin/docs/pr/112 sec 11 -- dual chain, "snap" mode: the OFF
+        // chain's final vertex, snapped to the nearest production candidate
+        // the cluster gate admits, REPLACES the rerank's own choice iff the
+        // snap distance is <= transfer_max (sec 5.6: break-free on 0.5-3.5
+        // cm; 0.00 cm is a real transfer).  Beyond it, production keeps its
+        // own answer.  transfer=false (the probe) never enters here.
+        bool dual_transferred = false;
+        if (dual_hint && dual_hint->transfer && dual_hint->mode == "snap" && dual_hint->has_vertex) {
+            std::vector<WireCell::Point> cpts; std::vector<int> ccid;
+            cpts.reserve(cand_vertices.size()); ccid.reserve(cand_vertices.size());
+            for (auto vtx : cand_vertices) {
+                cpts.push_back(vtx->fit().valid() ? vtx->fit().point : vtx->wcpt().point);
+                ccid.push_back(vtx->cluster() ? vtx->cluster()->get_cluster_id() : -1);
+            }
+            const int main_id = main_cluster ? main_cluster->get_cluster_id() : -1;
+            const bool allow_swap = dual_hint->allow_cluster_swap && !dl_vtx_swap_guard;
+            const auto pick = dual_chain_pick(cpts, ccid, main_id, dual_hint->vertex, dual_hint->transfer_max, allow_swap);
+            if (pick.accepted) {
+                VertexPtr tv = cand_vertices[pick.index];
+                dual_transferred = (tv != min_vertex) || !flag_pass;
+                min_vertex = tv;
+                min_dis    = pick.dis;
+                flag_pass  = true;
+                if (m_vertex_scoreboard) {
+                    m_vtx_board.route = "dl-dual-snap-accept";
+                    auto& row = pr75_row(m_vtx_board, tv);
+                    row.dl_snapped = true;
+                    row.snap_dis   = pick.dis / units::cm;
+                    row.dl_winner  = true;
+                }
+                SPDLOG_LOGGER_INFO(s_log, "dual_chain: snap TRANSFER to cluster {} at d={:.2f} cm (<= {:.2f}){}",
+                                   tv->cluster() ? tv->cluster()->get_cluster_id() : -1,
+                                   pick.dis / units::cm, dual_hint->transfer_max / units::cm,
+                                   dual_transferred ? "" : " (same as production's own pick)");
+            } else {
+                if (m_vertex_scoreboard) m_vtx_board.route = flag_pass ? "dl-dual-snap-reject-accept" : "dl-dual-snap-reject";
+                SPDLOG_LOGGER_INFO(s_log, "dual_chain: snap REJECTED (nearest admissible d={:.2f} cm > {:.2f}, idx {}), production keeps its own pick",
+                                   pick.dis < 1e8 ? pick.dis / units::cm : -1.0, dual_hint->transfer_max / units::cm, pick.index);
+            }
+        }
+
         MS t_selection(Clock::now() - t0); t0 = Clock::now();
 
         MS t_examine_direction(MS::zero());
@@ -5354,6 +5429,47 @@ bool PatternAlgorithms::determine_overall_main_vertex_DL(
         }
 
         if (m_vertex_scoreboard) m_vtx_board.dl_accepted = flag_pass;
+
+        // doc pr/112 sec 5.5 / 11 -- the chain-AGREEMENT flag: does production's
+        // final pick coincide with the candidate nearest the OFF chain's
+        // vertex?  Computed in every mode including the probe; a 14.4x error
+        // concentrator on nueCC48.  Unrestricted nearest (no cluster gate).
+        if (dual_hint) {
+            VertexPtr prod_pick = nullptr;
+            if (flag_pass) prod_pick = min_vertex;
+            else {
+                auto it = map_cluster_main_vertices.find(main_cluster);
+                if (it != map_cluster_main_vertices.end()) prod_pick = it->second;
+            }
+            VertexPtr near_v = nullptr; double near_d = 1e9;
+            if (dual_hint->has_vertex) {
+                for (auto vtx : cand_vertices) {
+                    auto pt = vtx->fit().valid() ? vtx->fit().point : vtx->wcpt().point;
+                    const double d = (pt - dual_hint->vertex).magnitude();
+                    if (d < near_d) { near_d = d; near_v = vtx; }
+                }
+            }
+            const bool agree = dual_hint->has_vertex && near_v && prod_pick && (near_v == prod_pick);
+            SPDLOG_LOGGER_INFO(s_log, "dual_chain: mode={} transfer={} off_vertex={} off_ms={:.0f} nearest_d={:.2f}cm agree={} transferred={} prod_route={}",
+                               dual_hint->mode, dual_hint->transfer, dual_hint->has_vertex, dual_hint->off_ms,
+                               dual_hint->has_vertex ? near_d / units::cm : -1.0, agree, dual_transferred,
+                               m_vertex_scoreboard ? m_vtx_board.route : std::string("-"));
+            if (m_vertex_scoreboard) {
+                m_vtx_board.dual_used = true;
+                m_vtx_board.dual_mode = dual_hint->mode;
+                m_vtx_board.dual_transfer = dual_hint->transfer;
+                m_vtx_board.dual_has_vertex = dual_hint->has_vertex;
+                m_vtx_board.dual_x = dual_hint->vertex.x() / units::cm;
+                m_vtx_board.dual_y = dual_hint->vertex.y() / units::cm;
+                m_vtx_board.dual_z = dual_hint->vertex.z() / units::cm;
+                m_vtx_board.dual_nearest_id = near_v ? pr75_vertex_id(near_v) : -1;
+                m_vtx_board.dual_d = near_v ? near_d / units::cm : -1.0;
+                m_vtx_board.dual_agree = agree;
+                m_vtx_board.dual_transferred = dual_transferred;
+                m_vtx_board.dual_n_voxels = static_cast<int>(dual_hint->voxels.size() / 4);
+                m_vtx_board.dual_off_ms = dual_hint->off_ms;
+            }
+        }
 
         if (flag_pass) {
             flag_change = true;
@@ -5435,6 +5551,77 @@ bool PatternAlgorithms::determine_overall_main_vertex_DL(
 #endif  // HAVE_PYTHON_INC
 
     return flag_change;
+}
+
+// doc sbnd_xin/docs/pr/112 sec 11 -- pure snap-and-guard arithmetic of the
+// dual chain's "snap" mode (doctest_dual_chain_pick.cxx).
+DualChainPick WireCell::Clus::PR::dual_chain_pick(const std::vector<WireCell::Point>& cand_pts,
+                                                  const std::vector<int>& cand_cluster_ids,
+                                                  int main_cluster_id,
+                                                  const WireCell::Point& off_vtx,
+                                                  double transfer_max,
+                                                  bool allow_cluster_swap)
+{
+    DualChainPick pick;
+    for (size_t i = 0; i < cand_pts.size(); ++i) {
+        if (!allow_cluster_swap && i < cand_cluster_ids.size()
+            && cand_cluster_ids[i] != main_cluster_id) continue;
+        const double d = (cand_pts[i] - off_vtx).magnitude();
+        if (d < pick.dis) { pick.dis = d; pick.index = static_cast<int>(i); }
+    }
+    pick.accepted = (pick.index >= 0) && (pick.dis <= transfer_max);
+    return pick;
+}
+
+// doc sbnd_xin/docs/pr/112 sec 11 -- the OFF pass's own SCN inference.  A
+// DUPLICATE of the cloud build in determine_overall_main_vertex_DL
+// (:4813-4839 at b5c9f43a), not a shared helper: that production function
+// stays byte-for-byte (CLAUDE.md M10).
+std::vector<float> PatternAlgorithms::dual_chain_scn_voxels(Graph& graph, const std::string& dl_weights,
+                                                            double dQdx_scale, double dQdx_offset,
+                                                            int dl_vtx_top_k, int& n_candidates)
+{
+    std::vector<float> out;
+    n_candidates = 0;
+#ifdef HAVE_PYTHON_INC
+    std::vector<std::vector<float>> vec_xyzq(4);
+    for (const auto& nd : ordered_nodes(graph)) {
+        auto vtx = graph[nd].vertex;
+        if (!vtx) continue;
+        ++n_candidates;
+        auto pt = vtx->fit().valid() ? vtx->fit().point : vtx->wcpt().point;
+        vec_xyzq[0].push_back(static_cast<float>(pt.x() / units::cm));
+        vec_xyzq[1].push_back(static_cast<float>(pt.y() / units::cm));
+        vec_xyzq[2].push_back(static_cast<float>(pt.z() / units::cm));
+        double dQ = vtx->fit().valid() ? vtx->fit().dQ : 0.0;
+        vec_xyzq[3].push_back(static_cast<float>(dQ * dQdx_scale + dQdx_offset));
+    }
+    for (auto e : ordered_edges(graph)) {
+        SegmentPtr sg = graph[e].segment;
+        if (!sg) continue;
+        const auto& fits = sg->fits();
+        for (size_t i = 1; i + 1 < fits.size(); ++i) {
+            const auto& fit = fits[i];
+            vec_xyzq[0].push_back(static_cast<float>(fit.point.x() / units::cm));
+            vec_xyzq[1].push_back(static_cast<float>(fit.point.y() / units::cm));
+            vec_xyzq[2].push_back(static_cast<float>(fit.point.z() / units::cm));
+            vec_xyzq[3].push_back(static_cast<float>(fit.dQ * dQdx_scale + dQdx_offset));
+        }
+    }
+    if (vec_xyzq[0].empty() || dl_weights.empty()) return out;
+    try {
+        out = WCPPyUtil::SCN_Vertex("SCN_Vertex", "SCN_Vertex", dl_weights, vec_xyzq, "float32", false, std::max(1, dl_vtx_top_k));
+        if (out.size() < 4 || out.size() % 4 != 0) {
+            SPDLOG_LOGGER_WARN(s_log, "dual_chain_scn_voxels: unexpected payload size {}", out.size());
+            out.clear();
+        }
+    }
+    catch (const std::exception& ex) {
+        SPDLOG_LOGGER_WARN(s_log, "dual_chain_scn_voxels: DL inference failed: {}", ex.what());
+        out.clear();
+    }
+#endif
+    return out;
 }
 
 VertexPtr PatternAlgorithms::determine_overall_main_vertex(Graph& graph, ClusterVertexMap& map_cluster_main_vertices, Facade::Cluster*& main_cluster, std::vector<Facade::Cluster*>& other_clusters, IndexedVertexSet& vertices_in_long_muon, IndexedSegmentSet& segments_in_long_muon, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, bool flag_dev_chain){

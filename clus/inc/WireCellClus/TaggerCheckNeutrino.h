@@ -18,6 +18,10 @@ using namespace WireCell;
 using namespace WireCell::Clus;
 using namespace WireCell::Clus::Facade;
 
+// doc pr/112: the dual chain's hint + algorithm class live in
+// NeutrinoPatternBase.h, which carries no include guard; forward-declare.
+namespace WireCell::Clus::PR { struct DualChainHint; class PatternAlgorithms; }
+
 class TaggerCheckNeutrino : public Aux::Logger, public IConfigurable, public Clus::IEnsembleVisitor, private Clus::NeedDV, private Clus::NeedPCTS, private Clus::NeedRecombModel, private Clus::NeedParticleData, private Clus::NeedClusGeomHelper, private Clus::NeedFiducial {
 public:
     TaggerCheckNeutrino() : Aux::Logger("TaggerCheckNeutrino", "clus") {
@@ -471,6 +475,21 @@ public:
         // term).  false = legacy = byte-identical.
         bool   m_dl_vtx_swap_guard{false};
         bool   m_dl_vtx_cloud_no_exclusion{false};   // doc pr/106 sec 10: exclusion-free charge for the DL net input
+        // doc sbnd_xin/docs/pr/112 sec 11 -- the DUAL CHAIN.  A second, exclusion-
+        // free PR pass (run_dual_chain_off_pass, a DUPLICATE of the production
+        // stage sequence up to the vertex refinement block) suggests the
+        // neutrino vertex; production decides (determine_overall_main_vertex_DL,
+        // DualChainHint).  dl_vtx_dual_chain=false (default): not one
+        // instruction of it executes => byte-identical; also the retrain-era
+        // off switch.  dual_chain_transfer=false = PROBE (pass runs, the
+        // agreement flag is recorded, nothing moves) -- NOT transfer_max=0,
+        // which is a live guard at zero distance (sec 5.7.4).
+        bool        m_dl_vtx_dual_chain{false};
+        std::string m_dual_chain_mode{"snap"};          // snap | voxels | union
+        bool        m_dual_chain_transfer{false};
+        double      m_dual_chain_transfer_max{2.0};     // cm (converted at the use site)
+        bool        m_dual_chain_allow_cluster_swap{true};
+        double      m_dual_chain_vtx_weight{0.0};
         // doc sbnd_xin/docs/pr/89 Arm C (C2): rule-1 outgoing-prong topology
         // term in the DL rerank composite, s_topo = w * (frac - center) for
         // candidates with >= 1 decisive attached Bragg vote.  0 = legacy =
@@ -893,5 +912,14 @@ public:
         mutable std::shared_ptr<TrackFitting> m_track_fitter;
 
         void load_trackfitting_config(const std::string& config_file);
+        // doc pr/112 sec 11 -- the exclusion-free OFF pass.  Own graph, own
+        // fitter, own PatternAlgorithms copy; restores every main_cluster flag
+        // it touched.  Fills `hint` (what it found); never publishes anything.
+        void run_dual_chain_off_pass(const PR::PatternAlgorithms& prod_algos,
+                                     const TrackFitting& prod_fitter,
+                                     Facade::Cluster* main_cluster_in,
+                                     const std::vector<Facade::Cluster*>& other_clusters_in,
+                                     bool cov_defer_active,
+                                     PR::DualChainHint& hint) const;
 
 };

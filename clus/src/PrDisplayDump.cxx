@@ -710,6 +710,21 @@ Configuration Clus::PrDisplayDump::dump_vertex_scoreboard(Facade::Grouping& grou
         out["dl_topo_weight"] = b.topo_weight;
         out["dl_topo_center"] = b.topo_center;
     }
+    // doc pr/112 sec 11 -- dual chain, emitted only when the OFF pass ran.
+    if (b.dual_used) {
+        Configuration d;
+        d["mode"] = b.dual_mode;
+        d["transfer"] = b.dual_transfer;
+        d["has_vertex"] = b.dual_has_vertex;
+        d["x"] = b.dual_x; d["y"] = b.dual_y; d["z"] = b.dual_z;
+        d["nearest_id"] = b.dual_nearest_id;
+        d["d"] = b.dual_d;
+        d["agree"] = b.dual_agree;
+        d["transferred"] = b.dual_transferred;
+        d["n_voxels"] = b.dual_n_voxels;
+        d["off_ms"] = b.dual_off_ms;
+        out["dual_chain"] = d;
+    }
     out["final_vertex_id"] = b.final_vertex_id;
     out["final_x"] = b.final_x;
     out["final_y"] = b.final_y;

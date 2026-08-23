@@ -187,6 +187,21 @@ namespace WireCell::Clus::PR {
         std::vector<int> hv_single_candidate_ids;
         std::vector<int> hv_all_showers_winner_ids;
 
+        // ---- doc sbnd_xin/docs/pr/112 sec 11 -- dual chain.  Filled only when
+        // dl_vtx_dual_chain ran; emitted by PrDisplayDump only when dual_used,
+        // so knob-off calib JSON is byte-identical.
+        bool   dual_used{false};
+        std::string dual_mode;
+        bool   dual_transfer{false};      ///< the knob: false = probe
+        bool   dual_has_vertex{false};
+        double dual_x{0}, dual_y{0}, dual_z{0};  ///< OFF chain's final vertex, cm
+        int    dual_nearest_id{-1};       ///< nearest production candidate to it
+        double dual_d{-1};                ///< its distance, cm
+        bool   dual_agree{false};         ///< production's final pick == that candidate
+        bool   dual_transferred{false};   ///< the hint changed production's pick
+        int    dual_n_voxels{0};
+        double dual_off_ms{0};
+
         void clear() { *this = VertexScoreboard{}; }
     };
 

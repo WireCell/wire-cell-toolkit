@@ -432,6 +432,17 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_dl_vtx_swap_guard       = get(config, "dl_vtx_swap_guard",       m_dl_vtx_swap_guard);
     // doc sbnd_xin/docs/pr/106 sec 10: exclusion-free charge cloud for the DL vertex net.
     m_dl_vtx_cloud_no_exclusion = get(config, "dl_vtx_cloud_no_exclusion", m_dl_vtx_cloud_no_exclusion);
+    // doc sbnd_xin/docs/pr/112 sec 11: the dual chain (exclusion-free PR pass
+    // suggests the neutrino vertex).  All defaults = legacy.
+    m_dl_vtx_dual_chain            = get(config, "dl_vtx_dual_chain",            m_dl_vtx_dual_chain);
+    m_dual_chain_mode              = get(config, "dual_chain_mode",              m_dual_chain_mode);
+    m_dual_chain_transfer          = get(config, "dual_chain_transfer",          m_dual_chain_transfer);
+    m_dual_chain_transfer_max      = get(config, "dual_chain_transfer_max",      m_dual_chain_transfer_max);
+    m_dual_chain_allow_cluster_swap = get(config, "dual_chain_allow_cluster_swap", m_dual_chain_allow_cluster_swap);
+    m_dual_chain_vtx_weight        = get(config, "dual_chain_vtx_weight",        m_dual_chain_vtx_weight);
+    if (m_dl_vtx_dual_chain && m_dual_chain_mode != "snap" && m_dual_chain_mode != "voxels" && m_dual_chain_mode != "union") {
+        raise<ValueError>("TaggerCheckNeutrino: dual_chain_mode must be snap, voxels or union, got %s", m_dual_chain_mode.c_str());
+    }
     // doc sbnd_xin/docs/pr/89 Arm C (C2): rule-1 topology term weight/center.
     m_dl_vtx_topo_weight      = get(config, "dl_vtx_topo_weight",      m_dl_vtx_topo_weight);
     m_dl_vtx_topo_center      = get(config, "dl_vtx_topo_center",      m_dl_vtx_topo_center);
@@ -889,6 +900,12 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["dl_vtx_score_scale"]      = 1000.0;  // scale factor on raw DL score in composite re-rank (1.0 = unscaled)
     cfg["dl_vtx_swap_guard"]       = m_dl_vtx_swap_guard;  // doc pr/51 (506746): false = legacy (rerank may swap the main cluster)
     cfg["dl_vtx_cloud_no_exclusion"] = m_dl_vtx_cloud_no_exclusion;  // doc pr/106 sec 10: false = legacy (net sees the exclusion fit's charge)
+    cfg["dl_vtx_dual_chain"]       = m_dl_vtx_dual_chain;       // doc pr/112 sec 11: false = legacy (no exclusion-free second pass)
+    cfg["dual_chain_mode"]         = m_dual_chain_mode;         // doc pr/112 sec 11: snap | voxels | union
+    cfg["dual_chain_transfer"]     = m_dual_chain_transfer;     // doc pr/112 sec 11: false = probe (pass runs, nothing moves)
+    cfg["dual_chain_transfer_max"] = m_dual_chain_transfer_max; // doc pr/112 sec 11: cm, snap guard D (prototype dl_vtx_cut 2.0)
+    cfg["dual_chain_allow_cluster_swap"] = m_dual_chain_allow_cluster_swap;  // doc pr/112 sec 5.7.8
+    cfg["dual_chain_vtx_weight"]   = m_dual_chain_vtx_weight;   // doc pr/112 sec 11: union-mode proximity term, 0 = none
     cfg["dl_vtx_topo_weight"]      = m_dl_vtx_topo_weight; // doc pr/89 C2: 0 = legacy (rule-1 topology term never computed); offline C1 selected 3.0
     cfg["dl_vtx_topo_center"]      = m_dl_vtx_topo_center; // doc pr/89 C2: frac offset; frozen choice is 0.0 (the center-0.5 variant lost)
     cfg["main_vertex_swap_apply"]  = m_main_vertex_swap_apply;  // doc pr/51 round 3: false = legacy (traditional-path swap decision is computed then discarded)
@@ -2137,6 +2154,22 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
         // re-associated -- see the second call site further below.
         static const bool pr59_assoc_census = std::getenv("WCT_PR59_ASSOC_CENSUS") != nullptr;
 
+        // doc sbnd_xin/docs/pr/112 sec 11 -- the dual chain's OFF pass runs
+        // FIRST (it cannot inform a decision already made), on its own graph
+        // and fitter, and hands production a DualChainHint.  Knob off => the
+        // hint stays empty and a nullptr reaches determine_overall_main_vertex_DL.
+        PR::DualChainHint dual_hint;
+        if (m_dl_vtx_dual_chain) {
+            dual_hint.mode              = m_dual_chain_mode;
+            dual_hint.transfer          = m_dual_chain_transfer;
+            dual_hint.transfer_max      = m_dual_chain_transfer_max * units::cm;
+            dual_hint.allow_cluster_swap = m_dual_chain_allow_cluster_swap;
+            dual_hint.vtx_weight        = m_dual_chain_vtx_weight;
+            run_dual_chain_off_pass(pattern_algos, *track_fitter, main_cluster, other_clusters, cov_defer_active, dual_hint);
+            if (m_perf) SPDLOG_LOGGER_DEBUG(log, "TaggerCheckNeutrino timing: [dual-off] pass TOTAL took {} ms", MS(Clock::now() - t0).count());
+            t0 = Clock::now();
+        }
+
         {
             // initial pattern recognitions
             // particle_data (doc pr/48): stopping templates for the two-end
@@ -2258,7 +2291,8 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
                 m_dl_weights, m_dl_vtx_cut, m_dQdx_scale, m_dQdx_offset,
                 m_dl_vtx_rerank, m_dl_vtx_top_k, m_dl_vtx_min_accept_score,
                 m_dl_vtx_score_scale, m_dl_vtx_swap_guard,
-                m_dl_vtx_topo_weight, m_dl_vtx_topo_center);
+                m_dl_vtx_topo_weight, m_dl_vtx_topo_center,
+                m_dl_vtx_dual_chain ? &dual_hint : nullptr);   // doc pr/112 sec 11
         }
         if (!flag_dl_changed) {
             // doc sbnd_xin/docs/pr/51 round 3: determine_overall_main_vertex now
@@ -2910,6 +2944,225 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
             m_shower_pdg_exact_muon_test, m_pi0_id_shared_allocator,
             m_shower_flag_pdg_electron, m_shower_less_id_tiebreak);
     }
+}
+
+// doc sbnd_xin/docs/pr/112 sec 11 -- the dual chain's exclusion-free OFF pass.
+//
+// A DUPLICATE of visit()'s production stage sequence from the main-cluster
+// initial PR through the vertex refinement block (stitch_disconnected_main_
+// cluster), with fit_exclusion=false and everything non-essential removed:
+// no scoreboard/harvest, no detg_dump / dup_stage_census / std::cout, no
+// rough_path_probe, no env dumps.  Deliberately NOT a shared helper: the
+// production block stays byte-for-byte (CLAUDE.md M10, doc sec 5.7.3).  A
+// future round that inserts a stage into the production sequence must insert
+// it here too, or the two chains silently stop being comparable.
+//
+// Mode-dependent stop: "voxels" (and "union" with vtx_weight 0) needs only
+// the OFF graph's SCN top-K, so it stops after deghosting + one inference;
+// "snap" runs the full vertex determination and refinement, because the
+// measured +4/+5 was read off the OFF chain's SHIPPED vertex (sec 5.7.1).
+//
+// Facade residue: swap_main_cluster (reachable through the DL and traditional
+// vertex paths) writes Flags::main_cluster.  Every cluster of the bundle is
+// snapshotted before and restored after, unconditionally.
+void TaggerCheckNeutrino::run_dual_chain_off_pass(const PR::PatternAlgorithms& prod_algos,
+                                                  const TrackFitting& prod_fitter,
+                                                  Cluster* main_cluster_in,
+                                                  const std::vector<Cluster*>& other_clusters_in,
+                                                  bool cov_defer_active,
+                                                  PR::DualChainHint& hint) const
+{
+    using Clock = std::chrono::steady_clock;
+    using MS = std::chrono::duration<double, std::milli>;
+    auto t_total = Clock::now();
+    auto t0 = Clock::now();
+    const auto lap = [&](const char* what) {
+        if (m_perf) SPDLOG_LOGGER_DEBUG(log, "TaggerCheckNeutrino timing: [dual-off] {} took {} ms", what, MS(Clock::now() - t0).count());
+        t0 = Clock::now();
+    };
+
+    hint.has_vertex = false;
+    hint.voxels.clear();
+    hint.n_candidates = 0;
+    if (!main_cluster_in) return;
+
+    // Facade flag snapshot/restore (see the function comment).
+    std::vector<std::pair<Cluster*, bool>> flag_snapshot;
+    flag_snapshot.emplace_back(main_cluster_in, main_cluster_in->get_flag(Flags::main_cluster));
+    for (auto* c : other_clusters_in) if (c) flag_snapshot.emplace_back(c, c->get_flag(Flags::main_cluster));
+    struct FlagRestore {
+        std::vector<std::pair<Cluster*, bool>>& snap;
+        ~FlagRestore() { for (auto& cv : snap) cv.first->set_flag(Flags::main_cluster, cv.second ? 1 : 0); }
+    } flag_restore{flag_snapshot};
+
+    // Local copies: the vertex paths may repoint main_cluster / edit other_clusters.
+    Cluster* main_cluster = main_cluster_in;
+    std::vector<Cluster*> other_clusters = other_clusters_in;
+
+    // Own fitter, the visit() nu_index>0 recipe (parameters copied from the
+    // production fitter AFTER its per-visit set_parameter calls landed).
+    auto track_fitter = std::make_shared<TrackFitting>(TrackFittingPresets::create_with_current_values());
+    track_fitter->set_parameters(prod_fitter.get_parameters());
+    track_fitter->set_perf(prod_fitter.get_perf());
+    track_fitter->set_detector_volume(m_dv);
+    track_fitter->set_pc_transforms(m_pcts);
+    {
+        std::vector<Cluster*> clusters_to_preload;
+        clusters_to_preload.push_back(main_cluster);
+        for (auto* c : other_clusters) clusters_to_preload.push_back(c);
+        track_fitter->preload_clusters(clusters_to_preload);
+    }
+    auto pr_graph = std::make_shared<PR::Graph>();
+    track_fitter->add_graph(pr_graph);
+
+    // Own PatternAlgorithms: identical configuration, exclusion off, quiet.
+    PR::PatternAlgorithms pattern_algos = prod_algos;
+    // WCT_DUAL_CHAIN_OFF_EXCL=1: duplicate-fidelity debug switch (sec 5.7.3) --
+    // the OFF pass keeps production's exclusion setting, so its vertex must
+    // equal production's event by event.  Never a cfg key.
+    static const bool keep_excl = std::getenv("WCT_DUAL_CHAIN_OFF_EXCL") != nullptr;
+    if (!keep_excl) pattern_algos.m_fit_exclusion = false;
+    pattern_algos.m_dl_vtx_cloud_no_exclusion = false;
+    pattern_algos.m_vertex_scoreboard = false;
+    pattern_algos.m_vtx_harvest = false;
+    pattern_algos.m_vtx_board.clear();
+
+    IndexedVertexSet vertices_in_long_muon;
+    IndexedSegmentSet segments_in_long_muon;
+    VertexPtr main_vertex = nullptr;
+    ClusterVertexMap map_cluster_main_vertices;
+    lap("setup");
+
+    // ---- main cluster initial PR (production :2145-2183 at b5c9f43a)
+    {
+        if (cov_defer_active) track_fitter->set_parameter("fit_blob_coverage", -1);
+        pattern_algos.find_proto_vertex(*pr_graph, *main_cluster, *track_fitter, m_dv, true, 2, true, particle_data());
+        if (cov_defer_active) track_fitter->set_parameter("fit_blob_coverage", m_fit_blob_coverage);
+        pattern_algos.clustering_points(*pr_graph, *main_cluster, m_dv);
+        pattern_algos.separate_track_shower(*pr_graph, *main_cluster);
+        pattern_algos.determine_direction(*pr_graph, *main_cluster, particle_data(), m_recomb_model);
+        pattern_algos.shower_determining_in_main_cluster(*pr_graph, *main_cluster, particle_data(), m_recomb_model, m_dv);
+        pattern_algos.determine_main_vertex(*pr_graph, *main_cluster, main_vertex, vertices_in_long_muon, segments_in_long_muon, *track_fitter, m_dv, particle_data(), m_recomb_model);
+        pattern_algos.reassociate_cluster_orphans(*pr_graph, *main_cluster, m_dv);
+        if (main_vertex != nullptr) {
+            map_cluster_main_vertices[main_cluster] = main_vertex;
+            main_vertex = nullptr;
+        }
+    }
+    lap("main_cluster initial PR");
+
+    // ---- other clusters + deghosting (production :2196-2244)
+    if (!other_clusters.empty()) {
+        for (auto* cluster : other_clusters) {
+            if (cluster->get_length() > 6 * units::cm) {
+                pattern_algos.find_proto_vertex(*pr_graph, *cluster, *track_fitter, m_dv, true, 2, false);
+            } else {
+                if (!pattern_algos.find_proto_vertex(*pr_graph, *cluster, *track_fitter, m_dv, false, 1, false)) {
+                    pattern_algos.init_point_segment(*pr_graph, *cluster, *track_fitter, m_dv);
+                }
+            }
+            pattern_algos.clustering_points(*pr_graph, *cluster, m_dv);
+            pattern_algos.separate_track_shower(*pr_graph, *cluster);
+            pattern_algos.determine_direction(*pr_graph, *cluster, particle_data(), m_recomb_model);
+            pattern_algos.shower_determining_in_main_cluster(*pr_graph, *cluster, particle_data(), m_recomb_model, m_dv);
+            pattern_algos.determine_main_vertex(*pr_graph, *cluster, main_vertex, vertices_in_long_muon, segments_in_long_muon, *track_fitter, m_dv, particle_data(), m_recomb_model);
+            pattern_algos.reassociate_cluster_orphans(*pr_graph, *cluster, m_dv);
+            if (main_vertex != nullptr) {
+                map_cluster_main_vertices[cluster] = main_vertex;
+                main_vertex = nullptr;
+            }
+        }
+        lap("other_clusters PR");
+        std::vector<Cluster*> all_clusters;
+        all_clusters.push_back(main_cluster);
+        all_clusters.insert(all_clusters.end(), other_clusters.begin(), other_clusters.end());
+        pattern_algos.deghosting(*pr_graph, map_cluster_main_vertices, all_clusters, *track_fitter, m_dv);
+        lap("deghosting");
+    }
+
+    // ---- the OFF graph's own SCN top-K (voxels / union modes)
+    const bool want_voxels = (hint.mode == "voxels" || hint.mode == "union");
+    const bool want_vertex = (hint.mode == "snap") || (hint.mode == "union" && hint.vtx_weight != 0.0);
+    if (want_voxels && !m_dl_weights.empty()) {
+        hint.voxels = pattern_algos.dual_chain_scn_voxels(*pr_graph, m_dl_weights, m_dQdx_scale, m_dQdx_offset,
+                                                          m_dl_vtx_top_k, hint.n_candidates);
+        lap("scn voxels");
+    }
+    if (!want_vertex) {
+        if (hint.n_candidates == 0) {
+            for (const auto& nd : PR::ordered_nodes(*pr_graph)) if ((*pr_graph)[nd].vertex) ++hint.n_candidates;
+        }
+        hint.off_ms = MS(Clock::now() - t_total).count();
+        SPDLOG_LOGGER_INFO(log, "dual_chain: OFF pass ({}) {} candidates, {} voxels, {:.0f} ms",
+                           hint.mode, hint.n_candidates, hint.voxels.size() / 4, hint.off_ms);
+        return;
+    }
+
+    // ---- overall main vertex (production :2250-2304)
+    VertexPtr final_main_vertex = nullptr;
+    bool flag_dl_changed = false;
+    if (!m_dl_weights.empty()) {
+        flag_dl_changed = pattern_algos.determine_overall_main_vertex_DL(
+            *pr_graph, map_cluster_main_vertices, main_cluster, other_clusters,
+            vertices_in_long_muon, segments_in_long_muon,
+            *track_fitter, m_dv, particle_data(), m_recomb_model,
+            m_dl_weights, m_dl_vtx_cut, m_dQdx_scale, m_dQdx_offset,
+            m_dl_vtx_rerank, m_dl_vtx_top_k, m_dl_vtx_min_accept_score,
+            m_dl_vtx_score_scale, m_dl_vtx_swap_guard,
+            m_dl_vtx_topo_weight, m_dl_vtx_topo_center);
+    }
+    if (!flag_dl_changed) {
+        ClusterVertexMap map_copy = map_cluster_main_vertices;
+        Cluster* mc_copy = main_cluster;
+        final_main_vertex = pattern_algos.determine_overall_main_vertex(
+            *pr_graph, map_copy, mc_copy, other_clusters,
+            vertices_in_long_muon, segments_in_long_muon,
+            *track_fitter, m_dv, particle_data(), m_recomb_model, true);
+        if (mc_copy != main_cluster && m_main_vertex_swap_apply) {
+            main_cluster = mc_copy;
+            map_cluster_main_vertices = map_copy;
+        }
+        if (final_main_vertex) map_cluster_main_vertices[main_cluster] = final_main_vertex;
+    }
+    {
+        auto it = map_cluster_main_vertices.find(main_cluster);
+        if (it != map_cluster_main_vertices.end()) final_main_vertex = it->second;
+    }
+    lap("overall main vertex");
+
+    // ---- refinement block (production :2310-2373): part of vertex
+    // determination -- the measured gain requires it (sec 5.7.1).
+    if (final_main_vertex) {
+        if (pattern_algos.snap_main_vertex_to_kink(*pr_graph, *main_cluster, final_main_vertex,
+                                                   *track_fitter, m_dv, particle_data(), m_recomb_model)) {
+            map_cluster_main_vertices[main_cluster] = final_main_vertex;
+        }
+        if (pattern_algos.snap_main_vertex_to_junction(*pr_graph, *main_cluster, final_main_vertex)) {
+            map_cluster_main_vertices[main_cluster] = final_main_vertex;
+        }
+        pattern_algos.improve_vertex(*pr_graph, *main_cluster, final_main_vertex,
+                                     vertices_in_long_muon, segments_in_long_muon,
+                                     *track_fitter, m_dv, particle_data(), m_recomb_model,
+                                     true, true);
+        map_cluster_main_vertices[main_cluster] = final_main_vertex;
+        pattern_algos.main_vertex_graph_audit(*pr_graph, *main_cluster, final_main_vertex, *track_fitter, m_dv);
+        pattern_algos.stitch_disconnected_main_cluster(*pr_graph, *main_cluster, final_main_vertex, *track_fitter, m_dv);
+    }
+    lap("refinement");
+
+    if (final_main_vertex) {
+        hint.has_vertex = true;
+        hint.vertex = final_main_vertex->fit().valid() ? final_main_vertex->fit().point : final_main_vertex->wcpt().point;
+        hint.vertex_cluster_id = main_cluster ? main_cluster->get_cluster_id() : -1;
+    }
+    if (hint.n_candidates == 0) {
+        for (const auto& nd : PR::ordered_nodes(*pr_graph)) if ((*pr_graph)[nd].vertex) ++hint.n_candidates;
+    }
+    hint.off_ms = MS(Clock::now() - t_total).count();
+    SPDLOG_LOGGER_INFO(log, "dual_chain: OFF pass ({}) vertex={} ({:.2f},{:.2f},{:.2f}) cm cluster {} {} candidates, {} voxels, {:.0f} ms",
+                       hint.mode, hint.has_vertex,
+                       hint.vertex.x() / units::cm, hint.vertex.y() / units::cm, hint.vertex.z() / units::cm,
+                       hint.vertex_cluster_id, hint.n_candidates, hint.voxels.size() / 4, hint.off_ms);
 }
 
 void TaggerCheckNeutrino::load_trackfitting_config(const std::string& config_file)
