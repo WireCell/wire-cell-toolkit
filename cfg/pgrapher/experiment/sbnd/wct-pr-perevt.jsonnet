@@ -2148,10 +2148,24 @@ function(
     // recorded, nothing moves); NOT transfer_max=0, which transfers.
     // Runner env: SBND_DL_VTX_DUAL_CHAIN / SBND_DUAL_CHAIN_{MODE,TRANSFER,
     // TRANSFER_MAX,ALLOW_CLUSTER_SWAP,VTX_WEIGHT}.
-    dl_vtx_dual_chain = false,
-    dual_chain_mode = null,
-    dual_chain_transfer = false,
-    dual_chain_transfer_max = null,
+    //
+    // SBND PRODUCTION ON, owner flip 2026-08-23: "Can you make snapD2 as the
+    // default for SBND production for now?"  Operating point = mode "snap",
+    // transfer on, D = 2.0 cm (doc pr/112 sec 11.6).  Measured on the owner's
+    // per-arm-target metric (target = each arm's own candidate vertex nearest
+    // the hand-scan click), 1011 scannable labels (pr/88 sec 8 filter):
+    //   production 777 | uniW0 784 (+7) | snapD2 805 (+28) | snapD3 804 (+27)
+    //   exclusion-free chain alone 812 (+35) -- snapD2 captures 28 of the 35.
+    // Cost 1.58x TCN visit; 1 cm ruler 44 rescued / 18 ADVERSE.  This is NOT
+    // byte-identical -- it is a deliberate production change.  Revert with
+    // --tla-code dl_vtx_dual_chain=false (or SBND_DL_VTX_DUAL_CHAIN=''), which
+    // is also the retrain-era off switch the owner asked for.
+    // mode/transfer_max are pinned explicitly so the operating point is visible
+    // in the compiled config rather than inherited from a C++ default.
+    dl_vtx_dual_chain = true,
+    dual_chain_mode = 'snap',
+    dual_chain_transfer = true,
+    dual_chain_transfer_max = 2.0,
     dual_chain_allow_cluster_swap = null,
     dual_chain_vtx_weight = null,
     // doc pr/107 -- dQ/dx fit keeps every trajectory point (prototype
