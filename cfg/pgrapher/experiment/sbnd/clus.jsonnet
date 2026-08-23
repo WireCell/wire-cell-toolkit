@@ -1658,6 +1658,13 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               dl_vtx_swap_guard=false,
               // doc pr/106 sec 10: exclusion-free charge cloud for the DL vertex net. C++ default false.
               dl_vtx_cloud_no_exclusion=false,
+              // doc pr/112 sec 11: dual chain. C++ defaults false/"snap"/false/2.0/true/0; null/false => key omitted.
+              dl_vtx_dual_chain=false,
+              dual_chain_mode=null,
+              dual_chain_transfer=false,
+              dual_chain_transfer_max=null,
+              dual_chain_allow_cluster_swap=null,
+              dual_chain_vtx_weight=null,
               // doc pr/107: dQ/dx fit keeps every trajectory point (prototype parity). C++ default false.
               dqdx_fit_keep_all_points=false,
               // doc pr/89 Arm C (C2) -- rule-1 topology term in the DL
@@ -2493,6 +2500,12 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
             mvga_dup_starved_span=mvga_dup_starved_span,
             dl_vtx_swap_guard=dl_vtx_swap_guard,
             dl_vtx_cloud_no_exclusion=dl_vtx_cloud_no_exclusion,
+            dl_vtx_dual_chain=dl_vtx_dual_chain,
+            dual_chain_mode=dual_chain_mode,
+            dual_chain_transfer=dual_chain_transfer,
+            dual_chain_transfer_max=dual_chain_transfer_max,
+            dual_chain_allow_cluster_swap=dual_chain_allow_cluster_swap,
+            dual_chain_vtx_weight=dual_chain_vtx_weight,
             dqdx_fit_keep_all_points=dqdx_fit_keep_all_points,
             dl_vtx_topo_weight=dl_vtx_topo_weight,
             dl_vtx_topo_center=dl_vtx_topo_center,
@@ -3488,6 +3501,13 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
               dl_vtx_swap_guard=false,
               // doc pr/106 sec 10: exclusion-free charge cloud for the DL vertex net. C++ default false.
               dl_vtx_cloud_no_exclusion=false,
+              // doc pr/112 sec 11: dual chain. C++ defaults false/"snap"/false/2.0/true/0; null/false => key omitted.
+              dl_vtx_dual_chain=false,
+              dual_chain_mode=null,
+              dual_chain_transfer=false,
+              dual_chain_transfer_max=null,
+              dual_chain_allow_cluster_swap=null,
+              dual_chain_vtx_weight=null,
               // doc pr/107: dQ/dx fit keeps every trajectory point (prototype parity). C++ default false.
               dqdx_fit_keep_all_points=false,
               // doc pr/89 Arm C (C2) -- rule-1 topology term in the DL
@@ -3941,6 +3961,12 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
             mvga_dup_starved_span=mvga_dup_starved_span,
                 dl_vtx_swap_guard=dl_vtx_swap_guard,
                 dl_vtx_cloud_no_exclusion=dl_vtx_cloud_no_exclusion,
+                dl_vtx_dual_chain=dl_vtx_dual_chain,
+                dual_chain_mode=dual_chain_mode,
+                dual_chain_transfer=dual_chain_transfer,
+                dual_chain_transfer_max=dual_chain_transfer_max,
+                dual_chain_allow_cluster_swap=dual_chain_allow_cluster_swap,
+                dual_chain_vtx_weight=dual_chain_vtx_weight,
                 dqdx_fit_keep_all_points=dqdx_fit_keep_all_points,
                 dl_vtx_topo_weight=dl_vtx_topo_weight,
                 dl_vtx_topo_center=dl_vtx_topo_center,

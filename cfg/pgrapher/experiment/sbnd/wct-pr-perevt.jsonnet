@@ -2136,6 +2136,24 @@ function(
     // C++ default false => key omitted => byte-identical.  Validation:
     // --tla-code dl_vtx_cloud_no_exclusion=true (or SBND_DL_VTX_CLOUD_NO_EXCLUSION).
     dl_vtx_cloud_no_exclusion = false,
+    // doc pr/112 sec 11 -- the DUAL CHAIN: a second, exclusion-free PR pass
+    // suggests the neutrino vertex and the production (exclusion-ON) pass
+    // decides.  dl_vtx_dual_chain C++ default false => key omitted =>
+    // byte-identical (also the retrain-era off switch).  dual_chain_mode
+    // "snap" (OFF final vertex snapped to the nearest production candidate,
+    // accepted iff d <= dual_chain_transfer_max cm) | "voxels" (OFF top-K
+    // replaces the ON inference in the rerank) | "union" (pooled top-K, plus
+    // dual_chain_vtx_weight * max(0, 1-d/D) proximity term).
+    // dual_chain_transfer=false is the PROBE (pass runs, agreement flag
+    // recorded, nothing moves); NOT transfer_max=0, which transfers.
+    // Runner env: SBND_DL_VTX_DUAL_CHAIN / SBND_DUAL_CHAIN_{MODE,TRANSFER,
+    // TRANSFER_MAX,ALLOW_CLUSTER_SWAP,VTX_WEIGHT}.
+    dl_vtx_dual_chain = false,
+    dual_chain_mode = null,
+    dual_chain_transfer = false,
+    dual_chain_transfer_max = null,
+    dual_chain_allow_cluster_swap = null,
+    dual_chain_vtx_weight = null,
     // doc pr/107 -- dQ/dx fit keeps every trajectory point (prototype
     // parity).  do_multi_tracking's toolkit-only third form_map_graph pass
     // (before dQ_dx_multi_fit) re-applies the zero-quantity drop to the final
@@ -2803,6 +2821,12 @@ function(
                              mvga_dup_starved_span=mvga_dup_starved_span,
                              dl_vtx_swap_guard=dl_vtx_swap_guard,
                              dl_vtx_cloud_no_exclusion=dl_vtx_cloud_no_exclusion,
+                             dl_vtx_dual_chain=dl_vtx_dual_chain,
+                             dual_chain_mode=dual_chain_mode,
+                             dual_chain_transfer=dual_chain_transfer,
+                             dual_chain_transfer_max=dual_chain_transfer_max,
+                             dual_chain_allow_cluster_swap=dual_chain_allow_cluster_swap,
+                             dual_chain_vtx_weight=dual_chain_vtx_weight,
                              dqdx_fit_keep_all_points=dqdx_fit_keep_all_points,
                              dl_vtx_topo_weight=dl_vtx_topo_weight,
                              dl_vtx_topo_center=dl_vtx_topo_center,
