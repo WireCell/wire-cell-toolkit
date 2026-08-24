@@ -60,29 +60,17 @@ void Graphs::connect_graph_ctpc(
     size_t c79_pairs = 0, c79_hough = 0;
     size_t c79_steps[3] = {0, 0, 0}, c79_kills[3] = {0, 0, 0}, c79_savable[3] = {0, 0, 0};
 
-    // Initiate dist. metrics
-    std::vector<std::vector<std::tuple<int, int, double>>> index_index_dis(
-        num, std::vector<std::tuple<int, int, double>>(num));
-    std::vector<std::vector<std::tuple<int, int, double>>> index_index_dis_mst(
-        num, std::vector<std::tuple<int, int, double>>(num));
-
-    std::vector<std::vector<std::tuple<int, int, double>>> index_index_dis_dir1(
-        num, std::vector<std::tuple<int, int, double>>(num));
-    std::vector<std::vector<std::tuple<int, int, double>>> index_index_dis_dir2(
-        num, std::vector<std::tuple<int, int, double>>(num));
-    std::vector<std::vector<std::tuple<int, int, double>>> index_index_dis_dir_mst(
-        num, std::vector<std::tuple<int, int, double>>(num));
-
-    for (size_t j = 0; j != num; j++) {
-        for (size_t k = 0; k != num; k++) {
-            index_index_dis[j][k] = std::make_tuple(-1, -1, 1e9);
-            index_index_dis_mst[j][k] = std::make_tuple(-1, -1, 1e9);
-
-            index_index_dis_dir1[j][k] = std::make_tuple(-1, -1, 1e9);
-            index_index_dis_dir2[j][k] = std::make_tuple(-1, -1, 1e9);
-            index_index_dis_dir_mst[j][k] = std::make_tuple(-1, -1, 1e9);
-        }
-    }
+    // Initiate dist. metrics -- all sentinels (-1,-1,1e9) mean "no valid
+    // connection".  doc 79 round 1: direct construction instead of a
+    // zero-fill followed by an overwrite pass (exact; same fix the relaxed
+    // flavor carries).
+    const auto dg79_sentinel = std::make_tuple(-1, -1, 1e9);
+    const std::vector<std::tuple<int, int, double>> dg79_sentinel_row(num, dg79_sentinel);
+    std::vector<std::vector<std::tuple<int, int, double>>> index_index_dis(num, dg79_sentinel_row);
+    std::vector<std::vector<std::tuple<int, int, double>>> index_index_dis_mst(num, dg79_sentinel_row);
+    std::vector<std::vector<std::tuple<int, int, double>>> index_index_dis_dir1(num, dg79_sentinel_row);
+    std::vector<std::vector<std::tuple<int, int, double>>> index_index_dis_dir2(num, dg79_sentinel_row);
+    std::vector<std::vector<std::tuple<int, int, double>>> index_index_dis_dir_mst(num, dg79_sentinel_row);
 
     // Hoist scope-transform and cluster_t0 out of all per-step CTPC loops
     const bool needs_transform = (cluster.get_default_scope().hash() != cluster.get_raw_scope().hash());
@@ -160,6 +148,17 @@ void Graphs::connect_graph_ctpc(
                         (num_bad > 7 || (num_bad > 2 && num_bad >= 0.75 * num_steps))) {
                         c79_fk = ii;
                     }
+
+                    // doc 79 round 1: exact early break.  num_bad is monotone
+                    // nondecreasing and num_steps is fixed, so once the kill
+                    // predicate below holds it holds at loop end and this pair
+                    // is killed regardless of the remaining steps; the walk has
+                    // no other side effect.  Census mode walks the full path so
+                    // the savable counters stay complete (bit-identical output
+                    // either way -- the kill decision is unchanged).
+                    if (!dg79_census && (num_bad > 7 || (num_bad > 2 && num_bad >= 0.75 * num_steps))) {
+                        break;
+                    }
                 }
 
                 if (num_bad > 7 || (num_bad > 2 && num_bad >= 0.75 * num_steps)) {
@@ -207,6 +206,17 @@ void Graphs::connect_graph_ctpc(
                         (num_bad > 7 || (num_bad > 2 && num_bad >= 0.75 * num_steps))) {
                         c79_fk = ii;
                     }
+
+                    // doc 79 round 1: exact early break.  num_bad is monotone
+                    // nondecreasing and num_steps is fixed, so once the kill
+                    // predicate below holds it holds at loop end and this pair
+                    // is killed regardless of the remaining steps; the walk has
+                    // no other side effect.  Census mode walks the full path so
+                    // the savable counters stay complete (bit-identical output
+                    // either way -- the kill decision is unchanged).
+                    if (!dg79_census && (num_bad > 7 || (num_bad > 2 && num_bad >= 0.75 * num_steps))) {
+                        break;
+                    }
                 }
 
                 if (num_bad > 7 || (num_bad > 2 && num_bad >= 0.75 * num_steps)) {
@@ -251,6 +261,17 @@ void Graphs::connect_graph_ctpc(
                     if (dg79_census && c79_fk < 0 &&
                         (num_bad > 7 || (num_bad > 2 && num_bad >= 0.75 * num_steps))) {
                         c79_fk = ii;
+                    }
+
+                    // doc 79 round 1: exact early break.  num_bad is monotone
+                    // nondecreasing and num_steps is fixed, so once the kill
+                    // predicate below holds it holds at loop end and this pair
+                    // is killed regardless of the remaining steps; the walk has
+                    // no other side effect.  Census mode walks the full path so
+                    // the savable counters stay complete (bit-identical output
+                    // either way -- the kill decision is unchanged).
+                    if (!dg79_census && (num_bad > 7 || (num_bad > 2 && num_bad >= 0.75 * num_steps))) {
+                        break;
                     }
                 }
 
