@@ -5,6 +5,10 @@
 
 #include "connect_graphs.h"
 
+#include "WireCellUtil/Logging.h"
+
+#include <cstdlib>
+
 using namespace WireCell;
 using namespace WireCell::Clus;
 using namespace WireCell::Clus::Facade;
@@ -38,6 +42,23 @@ void Graphs::connect_graph_ctpc(
         pt_clouds[c]->add({points[0][i], points[1][i], points[2][i]});
         pt_clouds_global_indices[c].push_back(i);
     }
+
+    // doc 79 round 0 (WCT_CTPC_EDGE_CENSUS): log-only diagnostic, default
+    // OFF.  Env unset => no log lines and no behavior change of any kind;
+    // the graph construction below is untouched either way.  (Mirrors the
+    // relaxed-flavor WCT_RELAXED_EDGE_CENSUS probe, doc pr/53 F0.)
+    static const bool dg79_census = std::getenv("WCT_CTPC_EDGE_CENSUS") != nullptr;
+    static auto dg79_log = WireCell::Log::logger("clus");
+    if (dg79_census) {
+        dg79_log->debug("CTPC79CENSUS cluster nblobs={} npoints={} ncomp={}",
+                        cluster.nchildren(), cluster.npoints(), num);
+    }
+    // Aggregate walk/hough counters -- written only under dg79_census.
+    // Index 0 = main pair walk, 1 = dir1 walk, 2 = dir2 walk.  "savable" =
+    // steps taken after the kill predicate first became true (the waste an
+    // exact early break would remove).
+    size_t c79_pairs = 0, c79_hough = 0;
+    size_t c79_steps[3] = {0, 0, 0}, c79_kills[3] = {0, 0, 0}, c79_savable[3] = {0, 0, 0};
 
     // Initiate dist. metrics
     std::vector<std::vector<std::tuple<int, int, double>>> index_index_dis(
@@ -81,6 +102,7 @@ void Graphs::connect_graph_ctpc(
                 geo_point_t p1 = pt_clouds.at(j)->point(std::get<0>(index_index_dis[j][k]));
                 geo_point_t p2 = pt_clouds.at(k)->point(std::get<1>(index_index_dis[j][k]));
 
+                if (dg79_census) c79_hough++;
                 geo_point_t dir1 = cluster.vhough_transform(p1, 30 * units::cm, Cluster::HoughParamSpace::theta_phi, pt_clouds.at(j), pt_clouds_global_indices.at(j));
                 geo_point_t dir2 = cluster.vhough_transform(p2, 30 * units::cm, Cluster::HoughParamSpace::theta_phi, pt_clouds.at(k), pt_clouds_global_indices.at(k));
                 dir1 = dir1 * -1;
@@ -115,6 +137,7 @@ void Graphs::connect_graph_ctpc(
                 double step_dis = 1.0 * units::cm;
                 int num_steps = dis / step_dis + 1;
                 int num_bad = 0;
+                int c79_fk = -1;   // census only: first step where the kill predicate held
                 geo_point_t test_p;
                 for (int ii = 0; ii != num_steps; ii++) {
                     test_p.set(p1.x() + (p2.x() - p1.x()) / num_steps * (ii + 1),
@@ -132,10 +155,21 @@ void Graphs::connect_graph_ctpc(
                             if (!good_point) num_bad++;
                         }
                     }
+
+                    if (dg79_census && c79_fk < 0 &&
+                        (num_bad > 7 || (num_bad > 2 && num_bad >= 0.75 * num_steps))) {
+                        c79_fk = ii;
+                    }
                 }
 
                 if (num_bad > 7 || (num_bad > 2 && num_bad >= 0.75 * num_steps)) {
                     index_index_dis[j][k] = std::make_tuple(-1, -1, 1e9);
+                }
+
+                if (dg79_census) {
+                    c79_pairs++;
+                    c79_steps[0] += num_steps;
+                    if (c79_fk >= 0) { c79_kills[0]++; c79_savable[0] += num_steps - 1 - c79_fk; }
                 }
             }
 
@@ -151,6 +185,7 @@ void Graphs::connect_graph_ctpc(
                 double step_dis = 1.0 * units::cm;
                 int num_steps = dis / step_dis + 1;
                 int num_bad = 0;
+                int c79_fk = -1;   // census only: first step where the kill predicate held
                 geo_point_t test_p;
                 for (int ii = 0; ii != num_steps; ii++) {
                     test_p.set(p1.x() + (p2.x() - p1.x()) / num_steps * (ii + 1),
@@ -167,10 +202,20 @@ void Graphs::connect_graph_ctpc(
                             if (!good_point) num_bad++;
                         }
                     }
+
+                    if (dg79_census && c79_fk < 0 &&
+                        (num_bad > 7 || (num_bad > 2 && num_bad >= 0.75 * num_steps))) {
+                        c79_fk = ii;
+                    }
                 }
 
                 if (num_bad > 7 || (num_bad > 2 && num_bad >= 0.75 * num_steps)) {
                     index_index_dis_dir1[j][k] = std::make_tuple(-1, -1, 1e9);
+                }
+
+                if (dg79_census) {
+                    c79_steps[1] += num_steps;
+                    if (c79_fk >= 0) { c79_kills[1]++; c79_savable[1] += num_steps - 1 - c79_fk; }
                 }
             }
 
@@ -185,6 +230,7 @@ void Graphs::connect_graph_ctpc(
                 double step_dis = 1.0 * units::cm;
                 int num_steps = dis / step_dis + 1;
                 int num_bad = 0;
+                int c79_fk = -1;   // census only: first step where the kill predicate held
                 geo_point_t test_p;
                 for (int ii = 0; ii != num_steps; ii++) {
                     test_p.set(p1.x() + (p2.x() - p1.x()) / num_steps * (ii + 1),
@@ -201,13 +247,33 @@ void Graphs::connect_graph_ctpc(
                             if (!good_point) num_bad++;
                         }
                     }
+
+                    if (dg79_census && c79_fk < 0 &&
+                        (num_bad > 7 || (num_bad > 2 && num_bad >= 0.75 * num_steps))) {
+                        c79_fk = ii;
+                    }
                 }
 
                 if (num_bad > 7 || (num_bad > 2 && num_bad >= 0.75 * num_steps)) {
                     index_index_dis_dir2[j][k] = std::make_tuple(-1, -1, 1e9);
                 }
+
+                if (dg79_census) {
+                    c79_steps[2] += num_steps;
+                    if (c79_fk >= 0) { c79_kills[2]++; c79_savable[2] += num_steps - 1 - c79_fk; }
+                }
             }
         }
+    }
+
+    if (dg79_census) {
+        dg79_log->debug("CTPC79CENSUS summary ncomp={} pairs={} hough_pairs={} "
+                        "main(steps={} kills={} savable={}) dir1(steps={} kills={} savable={}) "
+                        "dir2(steps={} kills={} savable={})",
+                        num, c79_pairs, c79_hough,
+                        c79_steps[0], c79_kills[0], c79_savable[0],
+                        c79_steps[1], c79_kills[1], c79_savable[1],
+                        c79_steps[2], c79_kills[2], c79_savable[2]);
     }
 
     // deal with MST of first type

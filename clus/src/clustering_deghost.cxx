@@ -5,6 +5,9 @@
 #include "WireCellIface/IConfigurable.h"
 
 #include "WireCellUtil/NamedFactory.h"
+#include "WireCellUtil/Logging.h"
+
+#include <cstdlib>
 
 class ClusteringDeghost;
 WIRECELL_FACTORY(ClusteringDeghost, ClusteringDeghost,
@@ -58,6 +61,14 @@ static std::vector<size_t> get_path_wcps(const Cluster& cluster,
                                          bool use_ctpc)
 {
     auto [hi, lo] = skeleton_points_hilo(cluster);
+    // doc 79 round 0 (WCT_CTPC_EDGE_CENSUS): log-only cache census, default
+    // OFF.  Env unset => no log lines and no behavior change of any kind.
+    static const bool dg79_census = std::getenv("WCT_CTPC_EDGE_CENSUS") != nullptr;
+    if (dg79_census && use_ctpc) {
+        WireCell::Log::logger("clus")->debug(
+            "CTPC79CENSUS deghost path npoints={} length={:.1f}cm cached={}",
+            cluster.npoints(), cluster.get_length() / units::cm, cluster.has_graph("ctpc"));
+    }
     if (use_ctpc) {
         return cluster.graph_algorithms("ctpc", dv, pcts).shortest_path(hi, lo);
     }
