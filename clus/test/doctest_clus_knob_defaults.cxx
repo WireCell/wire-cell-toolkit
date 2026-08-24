@@ -124,7 +124,6 @@ TEST_CASE("clus knob defaults: TaggerCheckNeutrino switches are all OFF")
     CHECK_KNOB_BOOL(cfg, "shower_traj_straight_guard", false);                // F11
     // doc pr/40 round 6: boundary-level fixes the round-5 measurement demanded.
     CHECK_KNOB_BOOL(cfg, "shower_absorb_track_guard", false);                 // F12
-    CHECK_KNOB_BOOL(cfg, "shower_connect_protected_pion_guard", false);       // F13
     CHECK_KNOB_BOOL(cfg, "michel_stem_muon_rescue", false);                   // F14
     // doc pr/74 round 2 -- P1 cascade guard + P2 Michel-terminal check.
     CHECK_KNOB_BOOL(cfg, "shower_in_cascade_guard", false);                   // P1
@@ -235,7 +234,6 @@ TEST_CASE("clus knob defaults: TaggerCheckNeutrino switches are all OFF")
     // doc pr/51: main-vertex graph audit + DL rerank cross-cluster swap
     // guard (506746) -- both OFF.
     CHECK_KNOB_BOOL(cfg, "main_vertex_graph_audit", false);
-    CHECK_KNOB_BOOL(cfg, "dl_vtx_swap_guard", false);
     // doc pr/106 sec 10: exclusion-free charge cloud for the DL vertex net -- OFF.
     CHECK_KNOB_BOOL(cfg, "dl_vtx_cloud_no_exclusion", false);
     // doc pr/107: dQ/dx fit keeps every trajectory point (prototype parity) -- OFF.
@@ -329,7 +327,6 @@ TEST_CASE("clus knob defaults: TaggerCheckNeutrino switches are all OFF")
     // doc pr/90 round 2: R2 argmax arm-fill guard + second-prong gate cap;
     // both 0 = legacy even with two_end_break on.
     CHECK_KNOB_NUM(cfg, "teb_turn_min_arm_frac", 0.0);
-    CHECK_KNOB_NUM(cfg, "teb_second_max", 0.0);
     // doc pr/90 round 4: chain-topology gate admission (D1) + route R3
     // turn/activity thresholds (D3) + the R2 bragg veto (D4); all OFF =>
     // legacy even with two_end_break on.
@@ -385,7 +382,6 @@ TEST_CASE("clus knob defaults: TaggerCheckNeutrino switches are all OFF")
     CHECK_KNOB_NUM(cfg, "mvga_op1_radius", 0.0);   // doc pr/83 r3: 0 = use mvga_radius (-1 = unscoped), byte-identical
     CHECK_KNOB_NUM(cfg, "mvga_op1_dup_frac", 0.0); // doc pr/83 r3: 0 = use mvga_dup_frac, byte-identical
     CHECK_KNOB_BOOL(cfg, "mvga_op1_post", false);  // doc pr/83 r3 class A: post-op3 dup pass skipped, byte-identical
-    CHECK_KNOB_NUM(cfg, "mvga_carry_max", 0.0);    // doc pr/83 r3: 0 = unlimited carry, byte-identical
     CHECK_KNOB_BOOL(cfg, "swap_orphan_dup_audit", false);  // doc pr/83 r3 Mechanism C: abandoned cluster unaudited, byte-identical
     CHECK_KNOB_NUM(cfg, "mvga_proj_dup_frac", 0.0);  // doc pr/83 r4: projective dup collapse disabled, byte-identical
     CHECK_KNOB_NUM(cfg, "mvga_proj_dqdx_ratio", 0.4);  // doc pr/83 r4: stem dQ/dx gate default; inert while frac == 0
@@ -456,7 +452,6 @@ TEST_CASE("clus knob defaults: TaggerCheckNeutrino literals are the uBooNE value
     // units::cm at the copy into PatternAlgorithms.
     CHECK_KNOB_NUM(cfg, "other_seg_keep_isolated_min_nnf", 0.0);
     CHECK_KNOB_NUM(cfg, "other_seg_keep_isolated_len_admit", 0.0);
-    CHECK_KNOB_NUM(cfg, "other_seg_uncover_3d", 0.0);
 
     // Detector-extent literals (doc pr/2 sec 2e(iv)); uBooNE y=+117 top.
     CHECK_KNOB_NUM(cfg, "cosmic_y_top_main", 100.0);
@@ -1198,8 +1193,6 @@ TEST_CASE("clus knob defaults: MultiAlgBlobClustering BeePFConfig pf switches ar
     CHECK(pfc.pf_orphan_audit_only == false);            // doc pr/65 round 3 (pin was missing; added pr/84 r2)
     CHECK(pfc.pf_direct_when_touching == false);         // doc pr/84 r2 F1
     CHECK(pfc.pf_touch_max == 3.0 * WireCell::units::cm);        // read only when F1 on
-    CHECK(pfc.pf_touch_cross_main == false);             // doc pr/84 r2 F1 rung 2
-    CHECK(pfc.pf_touch_cross_max == 8.0 * WireCell::units::cm);  // read only when rung 2 on
     CHECK(pfc.pf_pseudo_gap_from_main == false);         // doc pr/84 r2 F2
     CHECK(pfc.pf_unique_node_ids == false);              // doc pr/84 r3 G1
     CHECK(pfc.pf_drop_stray_satellites == false);        // doc pr/92

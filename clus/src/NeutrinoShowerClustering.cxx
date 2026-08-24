@@ -862,11 +862,10 @@ void PatternAlgorithms::shower_clustering_connecting_to_main_vertex(Graph& graph
             // (probe tag "connecting_to_main_vertex"), reverting the pion
             // against proton daughter 15006.  The legacy pdg==211 branch two
             // blocks up only skips on HIGH dQ/dx (>2.0x MIP), which a real
-            // pion fails.  false = legacy = byte-identical.
-            if (m_shower_connect_protected_pion_guard && particle_type == 211 &&
-                segment_has_proton_daughter(graph, sg, main_vertex, m_mip_dqdx_median)) {
-                continue;
-            }
+            // pion fails.  doc 77 round 1 (2026-08-24):
+            // shower_connect_protected_pion_guard removed -- measured dead,
+            // never flipped (pr/40 sec 1459).  See
+            // sbnd_xin/docs/77_knob-ledger.tsv.
 
             // doc pr/93 round 4 (straight_cont_cross_cluster): a stem the
             // demotion pass claimed as the head of a cross-cluster muon

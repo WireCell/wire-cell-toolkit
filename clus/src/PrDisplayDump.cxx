@@ -704,12 +704,8 @@ Configuration Clus::PrDisplayDump::dump_vertex_scoreboard(Facade::Grouping& grou
     out["dl_min_accept_score"] = b.dl_min_accept_score;
     out["dl_score_scale"] = b.dl_score_scale;
     out["dl_top_k"] = b.dl_top_k;
-    // doc pr/89 C2 -- topo operating point, emitted only when the term ran
-    // (dl_vtx_topo_weight != 0), so knob-off dumps are byte-identical.
-    if (b.topo_used) {
-        out["dl_topo_weight"] = b.topo_weight;
-        out["dl_topo_center"] = b.topo_center;
-    }
+    // doc 77 round 1 (2026-08-24): the pr/89 C2 topo operating-point block
+    // removed along with dl_vtx_topo_weight/_center.
     // doc pr/112 sec 11 -- dual chain, emitted only when the OFF pass ran.
     if (b.dual_used) {
         Configuration d;
@@ -775,19 +771,11 @@ Configuration Clus::PrDisplayDump::dump_vertex_scoreboard(Facade::Grouping& grou
         j["s_isol"] = r->s_isol;
         j["s_main"] = r->s_main;
         j["s_fv"] = r->s_fv;
-        // doc pr/89 C2 -- topo-term keys, gated like the hv_* block below so
-        // dl_vtx_topo_weight == 0 (the default) leaves calib JSON
-        // byte-identical.  topo_frac -1 = no decisive attached track.
-        if (b.topo_used) {
-            j["s_topo"] = r->s_topo;
-            j["topo_frac"] = r->topo_frac;
-            j["topo_votes"] = r->topo_votes;
-        }
+        // doc 77 round 1 (2026-08-24): the pr/89 C2 topo-term keys and the
+        // pr/51 skipped_by_swap_guard key removed along with dl_vtx_topo_
+        // weight/_center and dl_vtx_swap_guard.
         j["total"] = r->total;
         j["dl_winner"] = r->dl_winner;
-        // All-zero terms with this set mean "removed before scoring", not
-        // "scored zero".
-        j["skipped_by_swap_guard"] = r->skipped_by_swap_guard;
         // doc pr/79 §10 -- harvest-only keys.  Gated so harvest-off calib
         // JSON (including scoreboard-on arms) stays byte-identical to
         // pre-knob output.

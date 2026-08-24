@@ -345,8 +345,9 @@ void MultiAlgBlobClustering::configure(const WireCell::Configuration& cfg)
             // doc pr/84 round 2; absent => legacy pseudo-parent rendering, byte-identical.
             pfc.pf_direct_when_touching = get<bool>(pf, "pf_direct_when_touching", false);
             pfc.pf_touch_max = get<double>(pf, "pf_touch_max", pfc.pf_touch_max);
-            pfc.pf_touch_cross_main = get<bool>(pf, "pf_touch_cross_main", false);
-            pfc.pf_touch_cross_max = get<double>(pf, "pf_touch_cross_max", pfc.pf_touch_cross_max);
+            // doc 77 round 1 (2026-08-24): pf_touch_cross_main/_max removed --
+            // zero movers on all 7 census candidates, F1.0 probe failure
+            // (pr/84 sec 607/622).  See sbnd_xin/docs/77_knob-ledger.tsv.
             pfc.pf_pseudo_gap_from_main = get<bool>(pf, "pf_pseudo_gap_from_main", false);
             pfc.pf_unique_node_ids = get<bool>(pf, "pf_unique_node_ids", false);
             // doc pr/92; absent => legacy (dropped-satellite set unread), byte-identical.
@@ -1996,27 +1997,19 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
     // doc pr/84 r2 F1 (pf_direct_when_touching): a conn-2/3 shower whose
     // fitted charge comes within pf_touch_max of the main vertex is a graph
     // artifact ("the BFS could not walk there"), not a neutral daughter --
-    // render it as a direct leaf.  Rung 2 (pf_touch_cross_main) extends to a
-    // conn-2 shower in a DIFFERENT cluster than the vertex when that cluster
-    // carries Flags::main_cluster: the vertex was seated in a small fragment
-    // of the bundle while the event body is elsewhere (evt 64921).  Distance
-    // deliberately excludes the pr/84 sec 4 remote-association population
-    // (min 4.91 cm > 3 cm default), which must KEEP its carrier (see F2).
-    // pi0 daughters never reach this test -- their carrier is correct.
+    // render it as a direct leaf.  Distance deliberately excludes the pr/84
+    // sec 4 remote-association population (min 4.91 cm > 3 cm default),
+    // which must KEEP its carrier (see F2).  pi0 daughters never reach this
+    // test -- their carrier is correct.  doc 77 round 1 (2026-08-24): rung 2
+    // (pf_touch_cross_main/_max) removed -- zero movers, F1.0 probe failure
+    // (pr/84 sec 607/622).  See sbnd_xin/docs/77_knob-ledger.tsv.
     auto effectively_touching = [&](PR::ShowerPtr sh) -> bool {
         if (!cfg.pf_direct_when_touching || !main_vertex) return false;
         const int conn = sh->get_start_vertex_and_type().second;
         if (conn != 2 && conn != 3) return false;
         const double d_fit = shower_get_closest_point(*sh, get_vtx_pt(main_vertex), "fit").first;
         if (d_fit < 0) return false;  // no fit cloud: fail safe, keep the carrier
-        if (d_fit <= cfg.pf_touch_max) return true;
-        if (cfg.pf_touch_cross_main && conn == 2) {
-            const auto* scl = sh->start_segment() ? sh->start_segment()->cluster() : nullptr;
-            if (scl && main_cluster && scl != main_cluster &&
-                scl->get_flag(Flags::main_cluster) &&
-                d_fit <= cfg.pf_touch_cross_max) return true;
-        }
-        return false;
+        return d_fit <= cfg.pf_touch_max;
     };
 
     // Append all showers (direct + indirect via pseudo-gamma) into a children array,

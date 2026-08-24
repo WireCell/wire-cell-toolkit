@@ -63,11 +63,10 @@ void PatternAlgorithms::find_other_segments(Graph& graph, Facade::Cluster& clust
     std::vector<bool> flag_tagged(N, false);
     // int num_tagged = 0;
 
-    // doc sbnd_xin/docs/pr/102 P2 (other_seg_uncover_3d, 0 = legacy/off):
-    // sentinel counters for the one-line-per-cluster log below.
-    int uncover3d_tag_veto = 0;   // points saved from the 2-D tag by 3-D distance
-    int uncover3d_nnf = 0;        // step-8/re-eval points counted not-faked by 3-D distance
-    
+    // doc 77 round 1 (2026-08-24): other_seg_uncover_3d and its sentinel
+    // counters removed -- 23 ADVERSE movers, stays OFF (pr/102 r2).  See
+    // sbnd_xin/docs/77_knob-ledger.tsv.
+
     const auto transform = track_fitter.get_pc_transforms()->pc_transform(cluster.get_scope_transform(cluster.get_default_scope()));
     double cluster_t0 = cluster.get_cluster_t0();
     
@@ -121,16 +120,11 @@ void PatternAlgorithms::find_other_segments(Graph& graph, Facade::Cluster& clust
 
         // Additional tagging based on 2D projections and dead channels
         if (!flag_tagged[i]) {
-            // doc pr/102 P2: a point farther than other_seg_uncover_3d from
-            // EVERY existing fitted trajectory in 3-D is real uncovered
-            // charge, not projection shadow -- it must stay untagged so its
-            // terminals can form one component instead of the 1-3-terminal
-            // fragments of pr/102 sec 4 B2.  Knob 0 => branch never taken =>
-            // byte-identical legacy tagging.
-            if (m_other_seg_uncover_3d > 0 && min_3d_dis > m_other_seg_uncover_3d) {
-                ++uncover3d_tag_veto;
-            }
-            else {
+            // doc 77 round 1 (2026-08-24): the other_seg_uncover_3d branch
+            // (a point farther than other_seg_uncover_3d from every existing
+            // fitted trajectory in 3-D stays untagged) removed -- 23 ADVERSE
+            // movers on the owner mcp1k census, stays OFF (pr/102 r2).  See
+            // sbnd_xin/docs/77_knob-ledger.tsv.
             auto p_raw = transform->backward(p, cluster_t0, face, apa);
 
             bool u_ok = (min_dis_u < scaling_2d * search_range ||
@@ -143,8 +137,7 @@ void PatternAlgorithms::find_other_segments(Graph& graph, Facade::Cluster& clust
             if (u_ok && v_ok && w_ok) {
                 flag_tagged[i] = true;
             }
-            }
-        
+
 
         // SPDLOG_LOGGER_TRACE(
         //     s_log,
@@ -428,8 +421,6 @@ void PatternAlgorithms::find_other_segments(Graph& graph, Facade::Cluster& clust
             // Check if point is fake (too close to existing segments)
             Facade::geo_point_t p(x_coords[idx], y_coords[idx], z_coords[idx]);
             double min_dis_u = 1e9, min_dis_v = 1e9, min_dis_w = 1e9;
-            double min_dis_3d = 1e9;  // doc pr/102 P2; only read when the knob is on
-
             WirePlaneId wpid = wpid_array[idx];
             int apa = wpid.apa();
             int face = wpid.face();
@@ -450,11 +441,6 @@ void PatternAlgorithms::find_other_segments(Graph& graph, Facade::Cluster& clust
                 if (dis_u < min_dis_u) min_dis_u = dis_u;
                 if (dis_v < min_dis_v) min_dis_v = dis_v;
                 if (dis_w < min_dis_w) min_dis_w = dis_w;
-
-                if (m_other_seg_uncover_3d > 0) {
-                    double dis_3d = segment_get_closest_point(seg, p, "fit").first;
-                    if (dis_3d < min_dis_3d) min_dis_3d = dis_3d;
-                }
             }
 
             auto p_raw = transform->backward(p, cluster_t0, face, apa);
@@ -467,14 +453,10 @@ void PatternAlgorithms::find_other_segments(Graph& graph, Facade::Cluster& clust
             if (min_dis_w > scaling_2d * search_range &&
                 !cluster.grouping()->get_closest_dead_chs(p_raw, 1, apa, face, 2)) flag_num++;
 
-            // doc pr/102 P2: 3-D-far charge is measured, whatever the 2-D
-            // projections say.  Promotes flag_num past the >=2 test below so
-            // the point counts toward number_not_faked.  Knob 0 => never taken.
-            if (m_other_seg_uncover_3d > 0 && flag_num < 2 &&
-                min_dis_3d > m_other_seg_uncover_3d) {
-                flag_num = 2;
-                ++uncover3d_nnf;
-            }
+            // doc 77 round 1 (2026-08-24): the other_seg_uncover_3d
+            // flag_num-promotion branch removed along with the knob -- 23
+            // ADVERSE movers, stays OFF (pr/102 r2).  See
+            // sbnd_xin/docs/77_knob-ledger.tsv.
             
             if (min_dis_u > max_dis_u && 
                 !cluster.grouping()->get_closest_dead_chs(p_raw, 1, apa, face, 0)) max_dis_u = min_dis_u;
@@ -969,7 +951,6 @@ void PatternAlgorithms::find_other_segments(Graph& graph, Facade::Cluster& clust
                 size_t idx = sep_clusters[*it][j];
                 Facade::geo_point_t p(x_coords[idx], y_coords[idx], z_coords[idx]);
                 double min_dis_u = 1e9, min_dis_v = 1e9, min_dis_w = 1e9;
-                double min_dis_3d = 1e9;  // doc pr/102 P2; only read when the knob is on
 
                 WirePlaneId wpid = wpid_array[idx];
                 int apa = wpid.apa();
@@ -991,11 +972,6 @@ void PatternAlgorithms::find_other_segments(Graph& graph, Facade::Cluster& clust
                     if (dis_u < min_dis_u) min_dis_u = dis_u;
                     if (dis_v < min_dis_v) min_dis_v = dis_v;
                     if (dis_w < min_dis_w) min_dis_w = dis_w;
-
-                    if (m_other_seg_uncover_3d > 0) {
-                        double dis_3d = segment_get_closest_point(seg, p, "fit").first;
-                        if (dis_3d < min_dis_3d) min_dis_3d = dis_3d;
-                    }
                 }
 
                 auto p_raw = transform->backward(p, cluster_t0, face, apa);
@@ -1008,14 +984,10 @@ void PatternAlgorithms::find_other_segments(Graph& graph, Facade::Cluster& clust
                 if (min_dis_w > scaling_2d * search_range &&
                     !cluster.grouping()->get_closest_dead_chs(p_raw, 1, apa, face, 2)) flag_num++;
 
-                // doc pr/102 P2: same 3-D escape as step 8.  This is the seat
-                // the pr/67 P5 comment below names as "the one rejection that
-                // can kill real charge without any 3-D evidence".
-                if (m_other_seg_uncover_3d > 0 && flag_num < 2 &&
-                    min_dis_3d > m_other_seg_uncover_3d) {
-                    flag_num = 2;
-                    ++uncover3d_nnf;
-                }
+                // doc 77 round 1 (2026-08-24): the other_seg_uncover_3d
+                // flag_num-promotion branch removed along with the knob
+                // (same 3-D escape as step 8) -- 23 ADVERSE movers, stays
+                // OFF (pr/102 r2).  See sbnd_xin/docs/77_knob-ledger.tsv.
 
                 if (flag_num >= 2) temp_segments[*it].number_not_faked++;
 
@@ -1063,15 +1035,9 @@ void PatternAlgorithms::find_other_segments(Graph& graph, Facade::Cluster& clust
         }
     }
 
-    // doc pr/102 P2 sentinel: one line per cluster where the 3-D escape did
-    // anything, so a knob-on census can attribute every change.  Never fires
-    // at the 0 default (both counters stay 0 and the knob gate is false).
-    if (m_other_seg_uncover_3d > 0 && (uncover3d_tag_veto > 0 || uncover3d_nnf > 0)) {
-        SPDLOG_LOGGER_DEBUG(s_log,
-            "pr102 uncover3d: cluster={} radius={:.2f} cm tag_veto={} nnf_3d={}",
-            cluster.get_cluster_id(), m_other_seg_uncover_3d / units::cm,
-            uncover3d_tag_veto, uncover3d_nnf);
-    }
+    // doc 77 round 1 (2026-08-24): the pr/102 P2 uncover3d sentinel log
+    // removed along with other_seg_uncover_3d.  See
+    // sbnd_xin/docs/77_knob-ledger.tsv.
 
     // Step 10: Break curvy/high-dQdx segments if requested
     if (flag_break_track) {

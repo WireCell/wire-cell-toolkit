@@ -125,10 +125,10 @@ public:
         // fraction of teb_turn_baseline, when such an index clears
         // teb_turn_angle on its own; otherwise the legacy argmax (starved
         // near-end candidates included) stands.  0 = legacy.
-        // second_max (cm): entry gate tolerates extra long prongs when
-        // exactly one segment exceeds this cap; 0 = legacy strict gate.
+        // doc 77 round 1 (2026-08-24): teb_second_max removed -- negative on
+        // its own motivating events (pr/90 sec 8.5), superseded by
+        // teb_chain_topology below.  See sbnd_xin/docs/77_knob-ledger.tsv.
         double m_teb_turn_min_arm_frac{0.0};
-        double m_teb_second_max{0};      // cm
         // doc pr/90 round 4 (sec 9.5 D1/D3/D4); all default OFF =>
         // byte-identical.  See the PatternAlgorithms member block.
         bool   m_teb_chain_topology{false};
@@ -212,7 +212,6 @@ public:
         double m_mvga_op1_radius{0.0};    // cm; op1-only scope radius (doc pr/83 r3); 0 = use mvga_radius, -1 = unscoped, byte-identical at 0
         double m_mvga_op1_dup_frac{0.0};  // fraction; op1-only overlap threshold (doc pr/83 r3); 0 = use mvga_dup_frac, byte-identical
         bool   m_mvga_op1_post{false};    // post-op3 duplicate-corridor pass incl. created segments (doc pr/83 r3 class A); false = byte-identical
-        int    m_mvga_carry_max{0};       // op3 interposed-carry prong-count ceiling (doc pr/83 r3); 0 = unlimited, byte-identical
         bool   m_swap_orphan_dup_audit{false}; // dup-audit the abandoned main cluster inside swap_main_cluster (doc pr/83 r3 Mechanism C); false = byte-identical
         double m_mvga_proj_dup_frac{0.0};  // 2nd-best per-view overlap threshold for the projective dup collapse (doc pr/83 r4); 0 = disabled, byte-identical
         double m_mvga_proj_dqdx_ratio{0.4}; // stem dQ/dx asymmetry gate for the same pass (doc pr/83 r4); inert while frac == 0
@@ -276,7 +275,6 @@ public:
         // behaviour they gate is already production.  Either way, defaults =>
         // byte-identical to the pre-pr/30 tree.
         bool   m_fit_exclusion{false};             // P1
-        bool   m_graph_endpoint_strict{false};     // P8 (the WARN is unconditional)
         double m_graph_endpoint_tol{0.3};          // cm
         bool   m_oov_prototype_parity{false};      // F2 (all three sites)
         bool   m_first_seg_local_pca{true};        // P2
@@ -292,10 +290,6 @@ public:
         // (design block at NeutrinoPatternBase.h).  0 = off, byte-identical.
         int    m_other_seg_keep_isolated_min_nnf{0};
         double m_other_seg_keep_isolated_len_admit{0.0}; // cm; scaled at copy
-        // doc sbnd_xin/docs/pr/102 P2 -- 3-D uncovered-charge radius for the
-        // find_other_segments tagging/nnf seats (design block at
-        // NeutrinoPatternBase.h).  0 = off, byte-identical.
-        double m_other_seg_uncover_3d{0.0}; // cm; scaled at copy
         // doc sbnd_xin/docs/pr/67 round 3 (S2) -- size gate on the isochronous
         // snap in find_other_segments.  Legacy 10 cm; lowering it lets a short
         // isochronously-displaced branch reach modify_vertex/segment_isochronous.
@@ -468,12 +462,8 @@ public:
         int    m_dl_vtx_top_k{5};                // number of top voxels from DL inference to re-rank (only when rerank enabled)
         double m_dl_vtx_min_accept_score{4.0};    // minimum composite re-rank score to accept DL vertex (only when rerank enabled; matches the 4.0 advertised in default_configuration -- docs/pr/2 sec 8.4)
         double m_dl_vtx_score_scale{1000.0};      // scale factor applied to the raw DL score term in the composite re-rank score
-        // doc sbnd_xin/docs/pr/51 (18255-506746): rerank-branch guard --
-        // skip DL candidates hosted on a different cluster than the current
-        // main cluster, so an accepted DL vertex can never swap the main
-        // cluster (a confident wrong voxel's s_dl swamps every structural
-        // term).  false = legacy = byte-identical.
-        bool   m_dl_vtx_swap_guard{false};
+        // doc 77 round 1 (2026-08-24): dl_vtx_swap_guard removed -- live A/B
+        // -36/1014 (pr/89 round 5).  See sbnd_xin/docs/77_knob-ledger.tsv.
         bool   m_dl_vtx_cloud_no_exclusion{false};   // doc pr/106 sec 10: exclusion-free charge for the DL net input
         // doc sbnd_xin/docs/pr/112 sec 11 -- the DUAL CHAIN.  A second, exclusion-
         // free PR pass (run_dual_chain_off_pass, a DUPLICATE of the production
@@ -490,13 +480,9 @@ public:
         double      m_dual_chain_transfer_max{2.0};     // cm (converted at the use site)
         bool        m_dual_chain_allow_cluster_swap{true};
         double      m_dual_chain_vtx_weight{0.0};
-        // doc sbnd_xin/docs/pr/89 Arm C (C2): rule-1 outgoing-prong topology
-        // term in the DL rerank composite, s_topo = w * (frac - center) for
-        // candidates with >= 1 decisive attached Bragg vote.  0 = legacy =
-        // byte-identical (the term is never computed).  The offline C1
-        // replay selected w = 3.0, center 0 (pr/89 sec 11.5).
-        double m_dl_vtx_topo_weight{0.0};
-        double m_dl_vtx_topo_center{0.0};
+        // doc 77 round 1 (2026-08-24): dl_vtx_topo_weight/_center removed --
+        // live A/B -8/1014 (pr/89 Arm C2, round 5).  See
+        // sbnd_xin/docs/77_knob-ledger.tsv.
         // doc sbnd_xin/docs/pr/51 round 3: the traditional (non-DL)
         // determine_overall_main_vertex takes main_cluster and its vertex
         // map BY VALUE, yet internally decides cluster swaps via
@@ -807,7 +793,9 @@ public:
         bool m_shower_traj_straight_guard{false};                   // doc pr/40 round 5 F11
         bool m_shower_absorb_track_guard{false};                    // doc pr/40 round 6 F12
         bool m_shower_absorb_unreachable_main{false};               // doc pr/65 round 3
-        bool m_shower_connect_protected_pion_guard{false};          // doc pr/40 round 6 F13
+        // doc 77 round 1 (2026-08-24): shower_connect_protected_pion_guard
+        // (F13) removed -- measured dead, never flipped (pr/40 sec 1459).
+        // See sbnd_xin/docs/77_knob-ledger.tsv.
         bool m_michel_stem_muon_rescue{false};                      // doc pr/40 round 6 F14
         bool m_shower_in_cascade_guard{false};                      // doc pr/74 round 2 P1
         double m_shower_in_max_len{40};                             // cm; pr/74 P1 tunable

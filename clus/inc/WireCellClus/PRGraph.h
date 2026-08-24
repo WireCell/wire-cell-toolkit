@@ -45,7 +45,8 @@ namespace WireCell::Clus::PR {
         std::atomic<uint64_t> add_segment_calls{0};
         std::atomic<uint64_t> add_segment_reentry{0}; // seg already in the graph => no-op
         std::atomic<uint64_t> endpoint_mismatch{0}; // a connection being MADE is inconsistent
-        std::atomic<uint64_t> endpoint_refused{0};  // ... and strict mode dropped it
+        // doc 77 round 1 (2026-08-24): endpoint_refused removed along with
+        // graph_endpoint_strict -- "must stay OFF" (pr/30 P8; pr/86:450).
         // P2 -- local-PCA first-segment endpoint refinement.
         std::atomic<uint64_t> pca_refine_calls{0};
         std::atomic<uint64_t> pca_refine_moved{0};
@@ -181,7 +182,6 @@ namespace WireCell::Clus::PR {
     /// before any graph is built.  Read-mostly; never written concurrently
     /// with graph construction.
     struct GraphEndpointPolicy {
-        bool   strict{false};              // refuse an inconsistent connection
         double tol{0.3 * units::cm};       // positional stand-in for wcpt-index equality
     };
     extern GraphEndpointPolicy g_graph_endpoint_policy;

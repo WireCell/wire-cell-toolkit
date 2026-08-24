@@ -278,13 +278,9 @@ namespace WireCell::Clus {
             // C++ default false => byte-identical legacy output.
             bool pf_direct_when_touching{false};
             double pf_touch_max{3.0 * units::cm};   // read only when F1 on
-            // pf_touch_cross_main: second rung for a conn-2 shower living in
-            // a DIFFERENT cluster than the vertex, when that cluster carries
-            // Flags::main_cluster (the vertex was seated in a small fragment
-            // of the bundle while the event body is elsewhere -- evt 64921).
-            // Wider reach, separately gated and separately flippable.
-            bool pf_touch_cross_main{false};
-            double pf_touch_cross_max{8.0 * units::cm};
+            // doc 77 round 1 (2026-08-24): pf_touch_cross_main/_max removed --
+            // zero movers on all 7 census candidates, F1.0 probe failure
+            // (pr/84 sec 607/622).  See sbnd_xin/docs/77_knob-ledger.tsv.
             // pf_pseudo_gap_from_main (= pr/84 P3): in the "start_vtx not in
             // BFS tree" fallback, anchor the synthetic carrier at the MAIN
             // vertex instead of the shower's own start vertex, so a genuinely

@@ -4656,82 +4656,10 @@ Facade::Cluster* PatternAlgorithms::check_switch_main_cluster_2(Graph& graph, Ve
     return main_cluster;
 }
 
-// doc sbnd_xin/docs/pr/89 Arm C (C2, owner-approved): rule-1 outgoing-prong
-// vote for one candidate vertex.  Port of the offline feature the +12/924
-// replay gain was measured with (wcp-porting-img sbnd_xin/vtx_rules/
-// vtx_rules.py outgoing_purity + vtx_geom.py end_dqdx/bragg_end; definition
-// frozen by pr/89 sec 11.5 C0: vote-gated fraction).  Of the attached
-// track-like segments >= 5 cm whose two end-window dQ/dx means are separated
-// by >= 1.3x, the fraction whose Bragg (stopping) end is AWAY from this
-// vertex.  A vertex with no decisive attached track returns n_votes == 0 and
-// contributes NOTHING to the composite -- pr/88 P6: below ~5 cm both end
-// windows cover the same points, so a missing vote must never read as 0.0.
-// NOTE stated, not hidden: the offline feature was computed from the FINAL
-// fitted dump geometry; here fits() are the rerank-time fits, which later
-// stages may still refine.  The live A/B is the arbiter of the difference.
-namespace {
-    struct TopoVote { double frac{-1.0}; int n_votes{0}; };
-    // Mirror vtx_rules.CFG / vtx_geom constants -- frozen with the pr/89 C1
-    // operating point, deliberately NOT configurable (the knob is the weight).
-    constexpr double TOPO_MIN_TRACK_CM    = 5.0;  // min_track_for_bragg
-    constexpr double TOPO_BRAGG_WINDOW_CM = 5.0;  // BRAGG_WINDOW
-    constexpr int    TOPO_MIN_POINTS_END  = 3;    // MIN_POINTS_END
-    constexpr double TOPO_BRAGG_RATIO     = 1.3;  // bragg_ratio
-}
-
-static TopoVote topo_rule1_vote(Graph& graph, const VertexPtr& vtx)
-{
-    TopoVote out;
-    int good = 0, dec = 0;
-    for (auto edesc : sorted_out_edges(vtx->get_descriptor(), graph)) {
-        SegmentPtr sg = graph[edesc].segment;
-        if (!sg) continue;
-        // is_track: neither shower flag (PrDisplayDump flag_shower semantics)
-        if (sg->flags_any(SegmentFlags::kShowerTrajectory) ||
-            sg->flags_any(SegmentFlags::kShowerTopology)) continue;
-        const auto& fits = sg->fits();
-        if (fits.size() < 2) continue;
-        // cumulative fitted arc length (vtx_geom.arclen over points[])
-        std::vector<double> s(fits.size(), 0.0);
-        for (size_t i = 0; i + 1 < fits.size(); ++i)
-            s[i + 1] = s[i] + (fits[i + 1].point - fits[i].point).magnitude();
-        const double total = s.back();
-        if (total < TOPO_MIN_TRACK_CM * WireCell::units::cm) continue;  // no Bragg vote
-        // End-window mean dQ/dx.  A point with no measurement (dx <= 0 or
-        // dQ < 0, the PR::Fit defaults) is dropped, never read as LOW dQ/dx
-        // (vtx_geom.valid_dqdx); fewer than TOPO_MIN_POINTS_END valid points
-        // in a window and that end is unmeasured, not low.
-        double lo_sum = 0, hi_sum = 0;
-        int lo_n = 0, hi_n = 0;
-        for (size_t i = 0; i < fits.size(); ++i) {
-            if (!(fits[i].dx > 0 && fits[i].dQ >= 0)) continue;
-            const double dqdx = fits[i].dQ / fits[i].dx;
-            if (s[i] <= TOPO_BRAGG_WINDOW_CM * WireCell::units::cm) { lo_sum += dqdx; ++lo_n; }
-            if (total - s[i] <= TOPO_BRAGG_WINDOW_CM * WireCell::units::cm) { hi_sum += dqdx; ++hi_n; }
-        }
-        if (lo_n < TOPO_MIN_POINTS_END || hi_n < TOPO_MIN_POINTS_END) continue;
-        const double d0 = lo_sum / lo_n, d1 = hi_sum / hi_n;
-        if (d0 <= 0 || d1 <= 0) continue;
-        int bragg;  // 0 = the fits.front() end, 1 = the fits.back() end
-        if (d1 / d0 >= TOPO_BRAGG_RATIO) bragg = 1;
-        else if (d0 / d1 >= TOPO_BRAGG_RATIO) bragg = 0;
-        else continue;  // ends not separated: no opinion, never a forced choice
-        ++dec;
-        // Which physical end carries this vertex: find_vertices .first is the
-        // fits.front() end -- the same invariant PrDisplayDump's rr block and
-        // start_vertex_id emission rely on.  A vertex that is somehow not an
-        // endpoint (here == -1) counts as "Bragg end away", matching the
-        // python's `be != end_name_of_vertex(...)` on a None end name.
-        auto [vf, vb] = find_vertices(graph, sg);
-        const int here = (vf == vtx) ? 0 : (vb == vtx ? 1 : -1);
-        if (bragg != here) ++good;
-    }
-    if (dec) {
-        out.frac = double(good) / dec;
-        out.n_votes = dec;
-    }
-    return out;
-}
+// doc 77 round 1 (2026-08-24): topo_rule1_vote() and the rule-1
+// outgoing-prong topology term removed along with dl_vtx_topo_weight/
+// _center -- live A/B -8/1014 (pr/89 Arm C2, round 5).  See
+// sbnd_xin/docs/77_knob-ledger.tsv.
 
 bool PatternAlgorithms::determine_overall_main_vertex_DL(
     Graph& graph,
@@ -4752,9 +4680,6 @@ bool PatternAlgorithms::determine_overall_main_vertex_DL(
     int dl_vtx_top_k,
     double dl_vtx_min_accept_score,
     double dl_vtx_score_scale,
-    bool dl_vtx_swap_guard,
-    double dl_vtx_topo_weight,
-    double dl_vtx_topo_center,
     const DualChainHint* dual_hint)
 {
     bool flag_change = false;
@@ -4928,11 +4853,6 @@ bool PatternAlgorithms::determine_overall_main_vertex_DL(
             m_vtx_board.dl_top_k  = dl_vtx_top_k;
             m_vtx_board.dl_min_accept_score = dl_vtx_min_accept_score;
             m_vtx_board.dl_score_scale      = dl_vtx_score_scale;
-            // doc pr/89 C2: emit-gate for the topo keys.  Off (weight 0) =>
-            // topo_used stays false and the calib JSON is byte-identical.
-            m_vtx_board.topo_used   = (dl_vtx_topo_weight != 0.0);
-            m_vtx_board.topo_weight = dl_vtx_topo_weight;
-            m_vtx_board.topo_center = dl_vtx_topo_center;
             m_vtx_board.route = "dl-failed";   // overwritten at every real exit
         }
 
@@ -5172,35 +5092,9 @@ bool PatternAlgorithms::determine_overall_main_vertex_DL(
                 VertexPtr vtx = sc.vtx;
                 auto vtx_pt = vtx->fit().valid() ? vtx->fit().point : vtx->wcpt().point;
 
-                // doc sbnd_xin/docs/pr/51 (18255-506746): a confident DL
-                // voxel (s_dl = raw_score x score_scale, here +576) swamps
-                // every +-2 structural term, so the rerank can move the
-                // vertex onto a different, non-flash-matched cluster (28 cm
-                // off the first-round main cluster).  With the guard on,
-                // cross-cluster candidates never enter the acceptance; if
-                // none survive, flag_pass stays false and the traditional
-                // fallback runs.  Default false => byte-identical.
-                if (dl_vtx_swap_guard && vtx->cluster() && main_cluster && vtx->cluster() != main_cluster) {
-                    SPDLOG_LOGGER_DEBUG(s_log,
-                        "dl_swap_guard: skipping cross-cluster DL candidate voxel {} "
-                        "(dl_score={:.4f}) cluster={} != main {} pos=({:.1f},{:.1f},{:.1f})cm snap={:.2f}cm",
-                        sc.voxel_rank, sc.dl_score,
-                        vtx->cluster()->get_cluster_id(), main_cluster->get_cluster_id(),
-                        vtx_pt.x()/units::cm, vtx_pt.y()/units::cm, vtx_pt.z()/units::cm,
-                        sc.snap_dis/units::cm);
-                    // doc pr/75: record the skip.  A guard-skipped candidate
-                    // has all-zero terms BY OMISSION, not by measurement --
-                    // the flag is what tells the two apart downstream.
-                    if (m_vertex_scoreboard) {
-                        auto& row = pr75_row(m_vtx_board, vtx);
-                        row.dl_snapped = true;
-                        row.voxel_rank = sc.voxel_rank;
-                        row.dl_score   = sc.dl_score;
-                        row.snap_dis   = sc.snap_dis / units::cm;
-                        row.skipped_by_swap_guard = true;
-                    }
-                    continue;
-                }
+                // doc 77 round 1 (2026-08-24): dl_vtx_swap_guard removed --
+                // live A/B -36/1014 (pr/89 round 5).  See
+                // sbnd_xin/docs/77_knob-ledger.tsv.
 
                 // (1) DL confidence — sigmoid-diff in [-1,+1], scaled by dl_vtx_score_scale.
                 double s_dl = sc.dl_score * dl_vtx_score_scale;
@@ -5240,23 +5134,9 @@ bool PatternAlgorithms::determine_overall_main_vertex_DL(
                     if (fv && fv->inside_fiducial_volume(vtx_pt)) s_fv = W_FV;
                 }
 
-                // (8) doc pr/89 Arm C (C2): rule-1 topology term, vote-gated.
-                //     s_topo = w * (frac - center) only when >= 1 attached
-                //     track gives a decisive Bragg answer; the offline C1
-                //     replay measured +12/924 at w = 3.0, center 0 (sec 11.5).
-                //     Weight 0.0 (the default): the helper never runs and the
-                //     sum below is the untouched 7-term expression --
-                //     byte-identical legacy path.
-                double s_topo = 0.0;
-                double topo_frac = -1.0;
-                int topo_votes = 0;
-                if (dl_vtx_topo_weight != 0.0) {
-                    const TopoVote tv = topo_rule1_vote(graph, vtx);
-                    topo_frac  = tv.frac;
-                    topo_votes = tv.n_votes;
-                    if (tv.n_votes >= 1)
-                        s_topo = dl_vtx_topo_weight * (tv.frac - dl_vtx_topo_center);
-                }
+                // doc 77 round 1 (2026-08-24): the (8th) rule-1 topology term
+                // (dl_vtx_topo_weight/_center) removed -- live A/B -8/1014
+                // (pr/89 Arm C2, round 5).  See sbnd_xin/docs/77_knob-ledger.tsv.
 
                 double score = s_dl + s_snap + s_fwd_z + s_clen + s_isol + s_main + s_fv;
                 // doc pr/112 sec 11 -- "union" mode proximity term to the OFF
@@ -5270,13 +5150,6 @@ bool PatternAlgorithms::determine_overall_main_vertex_DL(
                     SPDLOG_LOGGER_TRACE(s_log, "DL rerank cand [voxel {}] dual: d_off={:.2f}cm s_dual={:+.3f}",
                                         sc.voxel_rank, d_off / units::cm, s_dual);
                 }
-                if (dl_vtx_topo_weight != 0.0) {
-                    score += s_topo;
-                    SPDLOG_LOGGER_TRACE(s_log,
-                        "DL rerank cand [voxel {}] topo: frac={:.3f} votes={} s_topo={:+.3f}",
-                        sc.voxel_rank, topo_frac, topo_votes, s_topo);
-                }
-
                 SPDLOG_LOGGER_TRACE(s_log,
                     "DL rerank cand [voxel {}] cluster={} pos=({:.1f},{:.1f},{:.1f})cm "
                     "L={:.1f}cm snap={:.2f}cm | "
@@ -5305,11 +5178,6 @@ bool PatternAlgorithms::determine_overall_main_vertex_DL(
                     row.s_isol  = s_isol;
                     row.s_main  = s_main;
                     row.s_fv    = s_fv;
-                    // doc pr/89 C2 -- serialized only when board.topo_used
-                    // (defaults otherwise, so knob-off dumps are unchanged).
-                    row.s_topo     = s_topo;
-                    row.topo_frac  = topo_frac;
-                    row.topo_votes = topo_votes;
                     row.total   = score;
                 }
 
@@ -5369,8 +5237,10 @@ bool PatternAlgorithms::determine_overall_main_vertex_DL(
                 ccid.push_back(vtx->cluster() ? vtx->cluster()->get_cluster_id() : -1);
             }
             const int main_id = main_cluster ? main_cluster->get_cluster_id() : -1;
-            const bool allow_swap = dual_hint->allow_cluster_swap && !dl_vtx_swap_guard;
-            const auto pick = dual_chain_pick(cpts, ccid, main_id, dual_hint->vertex, dual_hint->transfer_max, allow_swap);
+            // doc 77 round 1 (2026-08-24): dl_vtx_swap_guard removed; this
+            // is back to dual_hint->allow_cluster_swap alone.
+            const auto pick = dual_chain_pick(cpts, ccid, main_id, dual_hint->vertex, dual_hint->transfer_max,
+                                              dual_hint->allow_cluster_swap);
             if (pick.accepted) {
                 VertexPtr tv = cand_vertices[pick.index];
                 dual_transferred = (tv != min_vertex) || !flag_pass;

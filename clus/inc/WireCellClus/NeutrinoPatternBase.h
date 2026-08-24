@@ -453,13 +453,10 @@ namespace WireCell::Clus::PR {
         // when one clears teb_turn_angle on its own; legacy argmax is the
         // fallback (mirrors TwoEndBreakOptions::turn_min_arm_frac); 0 =
         // legacy argmax, byte-identical.
-        // m_teb_second_max: tolerate additional long (> teb_stub_max)
-        // segments in the entry gate as long as exactly one segment exceeds
-        // this cap (that one is the candidate); 0 = legacy strict
-        // single-long-segment gate, byte-identical.  Internal length units
-        // (config takes cm).
+        // doc 77 round 1 (2026-08-24): m_teb_second_max removed -- negative
+        // on its own motivating events (pr/90 sec 8.5), superseded by
+        // m_teb_chain_topology below.  See sbnd_xin/docs/77_knob-ledger.tsv.
         double m_teb_turn_min_arm_frac{0.0};
-        double m_teb_second_max{0};
         // doc sbnd_xin/docs/pr/90 round 4 (sec 9.5) -- three default-OFF
         // knobs for the round-3 residual classes:
         // m_teb_chain_topology (D1): when n_long > 1, admit iff the
@@ -850,7 +847,9 @@ namespace WireCell::Clus::PR {
         // topology).  Costs pr/86 benefit at every benign multi-carry site,
         // so m_mvga_op1_post is the primary fix; this ships only if that
         // proves insufficient.  0 (default) => unlimited => byte-identical.
-        int    m_mvga_carry_max{0};           ///< op3 interposed-carry prong-count ceiling (doc pr/83 r3); 0 = unlimited
+        // doc 77 round 1 (2026-08-24): m_mvga_carry_max removed -- not
+        // needed, class A cleared 8/8 with it OFF (pr/83 r3 sec 8.5).
+        // See sbnd_xin/docs/77_knob-ledger.tsv.
         // doc pr/83 r3 (sec 9.5, Mechanism C + the 359980 follow-up): a
         // cluster that went through find_proto_vertex but is not the final
         // main cluster keeps its segments in the output yet never receives
@@ -1022,13 +1021,14 @@ namespace WireCell::Clus::PR {
         // (PRGraph.cxx:105-141 orders its pair by distance to the segment's
         // FIRST wcpt, which is only meaningful if both vertices really do sit
         // at the segment's two ends).
-        // The WARN is unconditional and log-only.  m_graph_endpoint_strict
-        // additionally REFUSES the connection, which changes the graph =>
-        // C++ default false => byte-identical.
+        // The WARN is unconditional and log-only.  doc 77 round 1
+        // (2026-08-24): m_graph_endpoint_strict removed -- a false positive
+        // as placed, refuses legitimate mid-repair connections and damages
+        // the result (22/48 events change, 5 nue lost vs 1 gained; pr/30
+        // P8, pr/86:450).  See sbnd_xin/docs/77_knob-ledger.tsv.
         // m_graph_endpoint_tol is the positional stand-in for wcpt-index
         // equality; 0.3 cm is well under the Steiner point spacing so it
         // cannot merge distinct ends, and well over FP noise in a copied point.
-        bool   m_graph_endpoint_strict{false};
         double m_graph_endpoint_tol{0.3 * units::cm};
 
         // F2 / P9 -- polarity of the out-of-detector-volume point guard.
@@ -1134,8 +1134,10 @@ namespace WireCell::Clus::PR {
         // step-9 re-evaluation -- such a point counts toward
         // number_not_faked whatever its 2-D projections say (the re-eval is
         // the seat the pr/67 P5 comment names as able to kill real charge
-        // with no 3-D evidence).  0 = off, byte-identical legacy.
-        double m_other_seg_uncover_3d{0.0 * units::cm};                 // 0 = off; internal units
+        // with no 3-D evidence).  doc 77 round 1 (2026-08-24):
+        // m_other_seg_uncover_3d removed -- 23 ADVERSE movers on the owner
+        // mcp1k census, stays OFF (pr/102 r2).  See
+        // sbnd_xin/docs/77_knob-ledger.tsv.
 
         // doc sbnd_xin/docs/pr/67 round 3 (S2) -- the size gate on the first
         // clause of the isochronous-snap guard in find_other_segments.  The
@@ -1803,8 +1805,9 @@ namespace WireCell::Clus::PR {
         // on the motivating case (confirmed: F11+F13 arm still shows the
         // merged e- node), and F12 alone yields the intended display.  Kept
         // as a documented negative result (doc pr/36 F2 precedent), default
-        // false, excluded from the round-6 flip.
-        bool   m_shower_connect_protected_pion_guard{false};
+        // false, excluded from the round-6 flip.  doc 77 round 1
+        // (2026-08-24): removed -- measured dead, never flipped (pr/40
+        // sec 1459).  See sbnd_xin/docs/77_knob-ledger.tsv.
 
         // doc sbnd_xin/docs/pr/40 round 6 F14 -- closes round 5's F10
         // residual (SBND evt 54341 seg 18005: split achieved, stem labelled
@@ -3112,16 +3115,10 @@ namespace WireCell::Clus::PR {
         // the selected vertex (in which case the traditional determine_overall_main_vertex
         // should NOT be called).  Returns false if the DL network was unavailable, failed,
         // or did not improve on the candidate vertices (fall back to traditional).
-        // dl_vtx_swap_guard (doc sbnd_xin/docs/pr/51, 18255-506746): when
-        // true, the RERANK branch skips candidates hosted on a different
-        // cluster than the current main cluster (each skip is one
-        // "dl_swap_guard:" DEBUG sentinel), so an accepted DL vertex can
-        // never swap the main cluster; if no candidate survives, the normal
-        // traditional fallback runs.  506746: a single confident uBooNE-net
-        // voxel (raw score 0.576 -> s_dl = +576 at score_scale 1000, which
-        // swamps every +-2 structural term) moved the vertex 28 cm onto a
-        // non-flash-matched cluster.  Default false => byte-identical.
-        bool determine_overall_main_vertex_DL(Graph& graph, ClusterVertexMap& map_cluster_main_vertices, Facade::Cluster*& main_cluster, std::vector<Facade::Cluster*>& other_clusters, IndexedVertexSet& vertices_in_long_muon, IndexedSegmentSet& segments_in_long_muon, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, const std::string& dl_weights, double dl_vtx_cut, double dQdx_scale = 0.1, double dQdx_offset = -1000.0, bool flag_rerank = false, int dl_vtx_top_k = 5, double dl_vtx_min_accept_score = 4.0, double dl_vtx_score_scale = 1000.0, bool dl_vtx_swap_guard = false, double dl_vtx_topo_weight = 0.0, double dl_vtx_topo_center = 0.0, const DualChainHint* dual_hint = nullptr);
+        // doc 77 round 1 (2026-08-24): dl_vtx_swap_guard (doc sbnd_xin/docs/
+        // pr/51, 18255-506746) removed -- live A/B -36/1014 (pr/89 round 5).
+        // See sbnd_xin/docs/77_knob-ledger.tsv.
+        bool determine_overall_main_vertex_DL(Graph& graph, ClusterVertexMap& map_cluster_main_vertices, Facade::Cluster*& main_cluster, std::vector<Facade::Cluster*>& other_clusters, IndexedVertexSet& vertices_in_long_muon, IndexedSegmentSet& segments_in_long_muon, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, const std::string& dl_weights, double dl_vtx_cut, double dQdx_scale = 0.1, double dQdx_offset = -1000.0, bool flag_rerank = false, int dl_vtx_top_k = 5, double dl_vtx_min_accept_score = 4.0, double dl_vtx_score_scale = 1000.0, const DualChainHint* dual_hint = nullptr);
 
         // doc pr/112 sec 11 -- the OFF pass's SCN inference on its own graph:
         // builds the same cloud determine_overall_main_vertex_DL builds (vertex

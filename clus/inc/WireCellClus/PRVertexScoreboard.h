@@ -51,19 +51,12 @@ namespace WireCell::Clus::PR {
         // The seven composite terms, exactly as summed at
         // NeutrinoVertexFinder.cxx (see the `DL rerank cand` TRACE line).
         double s_dl{0}, s_snap{0}, s_fwd_z{0}, s_clen{0}, s_isol{0}, s_main{0}, s_fv{0};
-        /// doc pr/89 C2 -- eighth term, rule-1 outgoing-prong topology
-        /// (knob dl_vtx_topo_weight, C++ default 0 = term absent).  Emitted
-        /// by PrDisplayDump only when board.topo_used, so knob-off calib
-        /// JSON is byte-identical.  topo_frac -1 = no decisive attached
-        /// track (NO OPINION, never a zero vote -- pr/88 P6).
-        double s_topo{0};
-        double topo_frac{-1};
-        int    topo_votes{0};
+        /// doc 77 round 1 (2026-08-24): the pr/89 C2 eighth-term fields
+        /// (s_topo/topo_frac/topo_votes) and the pr/51 skipped_by_swap_guard
+        /// flag removed along with dl_vtx_topo_weight/_center and
+        /// dl_vtx_swap_guard.  See sbnd_xin/docs/77_knob-ledger.tsv.
         double total{0};
         bool   dl_winner{false};
-        /// Candidate removed from the acceptance by dl_vtx_swap_guard before
-        /// scoring, so its terms are all zero BY OMISSION, not by measurement.
-        bool   skipped_by_swap_guard{false};
 
         /// Host cluster total track length in cm (the s_clen input), kept
         /// because it is the strongest geometric signal in the composite.
@@ -139,12 +132,6 @@ namespace WireCell::Clus::PR {
         double dl_score_scale{0};
         int    dl_top_k{0};
 
-        /// doc pr/89 C2 -- true only when dl_vtx_topo_weight != 0.  Gates
-        /// the s_topo/topo_* key emission in PrDisplayDump the same way
-        /// `harvest` gates the hv_* keys: knob-off calib JSON byte-identical.
-        bool   topo_used{false};
-        double topo_weight{0};
-        double topo_center{0};
 
         std::vector<DLVoxelRow> voxels;
         std::vector<VertexScoreRow> rows;

@@ -175,10 +175,6 @@ function(
     //   fit_exclusion (P1)            true  => the knobbed do_multi_tracking
     //                                          sites pass flag_exclusion, as 28
     //                                          of 30 live prototype sites do.
-    //   graph_endpoint_strict (P8)    true  => PR::add_segment REFUSES a
-    //                                          vertex/segment pair whose vertices
-    //                                          are not at the segment's ends.
-    //                                          The WARN + counter are always on.
     //   oov_prototype_parity (F2)     true  => a point outside every TPC votes
     //                                          the way the prototype's own helper
     //                                          answers, at all three sites.
@@ -194,7 +190,8 @@ function(
     // default stays false; -A fit_exclusion=false (or SBND_FIT_EXCLUSION=false)
     // restores the pre-flip production path byte-exactly (doc pr/98 §10).
     fit_exclusion = true,
-    graph_endpoint_strict = false,
+    // doc 77 round 1 (2026-08-24): graph_endpoint_strict removed -- "must
+    // stay OFF" (pr/30 P8; pr/86:450).  See sbnd_xin/docs/77_knob-ledger.tsv.
     graph_endpoint_tol = null,
     // **SBND PRODUCTION DEFAULT ON, owner 2026-08-04** (doc pr/30 §12.10).
     // This is a port BUG, not tunable behaviour: at all three out-of-TPC guard
@@ -943,16 +940,13 @@ function(
     // gamma/neutron carriers in 512 events (owner evts 283713 x2, 316025,
     // 407280 + round-1's 65289/347129/169626/174752); F2 re-anchored 106
     // remote carriers to draw their real gaps.  pf_touch_max stays null =
-    // C++ 3 cm.  Rung 2 (pf_touch_cross_main) stays OFF: the F1.0 probe
-    // showed Flags::main_cluster is NOT set on the event-body cluster at PF
-    // writer time (evt 64921 deferred -- root cause is vertex determination,
-    // doc pr/52 territory).  Runner env: SBND_PF_DIRECT_WHEN_TOUCHING,
-    // SBND_PF_TOUCH_MAX, SBND_PF_TOUCH_CROSS_MAIN, SBND_PF_TOUCH_CROSS_MAX,
+    // C++ 3 cm.  Runner env: SBND_PF_DIRECT_WHEN_TOUCHING, SBND_PF_TOUCH_MAX,
     // SBND_PF_PSEUDO_GAP_FROM_MAIN.
+    // doc 77 round 1 (2026-08-24): rung 2 (pf_touch_cross_main/_max) removed
+    // -- zero movers, F1.0 probe failure (pr/84:607/622).  See
+    // sbnd_xin/docs/77_knob-ledger.tsv.
     pf_direct_when_touching = true,
     pf_touch_max = null,
-    pf_touch_cross_main = false,
-    pf_touch_cross_max = null,
     pf_pseudo_gap_from_main = true,
     // doc pr/84 round 3 (G1) -- guarantee unique jsTree node ids in mc.json.
     // Bee keys its PF tree model by node id, so a repeated id is invalid
@@ -1401,11 +1395,9 @@ function(
     // confident-direction proton-called stem at a multi-prong stopping
     // vertex.  SBND PRODUCTION DEFAULT ON (same gate set as above).
     shower_absorb_track_guard = true,
-    // F13 shower_connect_protected_pion_guard: MEASURED DEAD as shaped
-    // (its motivating segment is already pdg 2212 by candidate-selection
-    // time -- see NeutrinoPatternBase.h), kept as a documented negative
-    // result, NEVER flip.
-    shower_connect_protected_pion_guard = false,
+    // doc 77 round 1 (2026-08-24): F13 shower_connect_protected_pion_guard
+    // removed -- measured dead, never flipped (pr/40:1459).  See
+    // sbnd_xin/docs/77_knob-ledger.tsv.
     michel_stem_muon_rescue = true,
     // doc sbnd_xin/docs/pr/74 round 2 P1: examine_direction's
     // flag_shower_in cascade relabels a downstream |pdg|==13/pdg==0 segment
@@ -1816,13 +1808,11 @@ function(
     // legacy argmax (starved near-end candidates included) is the fallback
     // (320865: a starved 4-pt/1.9 cm near-end arm outscored the true 33 deg
     // corner by 5 deg of PCA jitter; genuine corners at 4-5 cm from an end
-    // keep their legacy break -- pr/90 sec 8.6).  teb_second_max (cm): the
-    // entry gate tolerates extra >stub prongs when exactly one segment
-    // exceeds this cap (172832/61681: a second 11-13 cm prong made n_long=2
-    // and the strict gate declined; measured NEGATIVE on its own motivating
-    // events, pr/90 sec 8.5 -- stays OFF).  null = keys suppressed =>
-    // byte-identical pre-fix config.  Escapes: SBND_TEB_TURN_MIN_ARM_FRAC /
-    // SBND_TEB_SECOND_MAX runner envs (or -A).
+    // keep their legacy break -- pr/90 sec 8.6).  null = key suppressed =>
+    // byte-identical pre-fix config.  Escape: SBND_TEB_TURN_MIN_ARM_FRAC
+    // runner env (or -A).  doc 77 round 1 (2026-08-24): teb_second_max
+    // removed -- negative on its own motivating events (pr/90 sec 8.5).
+    // See sbnd_xin/docs/77_knob-ledger.tsv.
     //
     // teb_turn_min_arm_frac SBND PRODUCTION ON 2026-08-17 (owner request,
     // pr/90 sec 8.8-8.9 gates: knobs-off 1067/1067 byte-identical vs the
@@ -1834,7 +1824,6 @@ function(
     // census: excludes every starved arm (<= 6.1 cm) with >2x margin while
     // keeping the genuine 18.4 cm-arm break of evt 172942.
     teb_turn_min_arm_frac = 0.4,
-    teb_second_max = null,
     // doc pr/90 round 4 (sec 9.5 D1/D3/D4) -- three knobs for the round-3
     // residual classes, C++ defaults false/0 = legacy.
     // teb_chain_topology: when n_long > 1, admit iff the cluster's segment
@@ -2064,14 +2053,15 @@ function(
     // (class A), abandoned-cluster dup audit (Mechanism C + losing-candidate
     // orphans, 350935/359980).  Gates: knob-off 1022/1022 byte-identical;
     // census 17->0 (511-evt) and 14->0 (mcp2k), zero new findings.
-    // mvga_carry_max stays null (not needed; class A cleared without it).
     // Escapes: SBND_MVGA_OP1_RADIUS, SBND_MVGA_OP1_DUP_FRAC,
-    // SBND_MVGA_OP1_POST, SBND_MVGA_CARRY_MAX, SBND_SWAP_ORPHAN_DUP_AUDIT
+    // SBND_MVGA_OP1_POST, SBND_SWAP_ORPHAN_DUP_AUDIT
     // (or -A).  null/false omit the keys => byte-identical legacy path.
+    // doc 77 round 1 (2026-08-24): mvga_carry_max removed -- not needed,
+    // class A cleared 8/8 with it OFF (pr/83 r3 sec 8.5).  See
+    // sbnd_xin/docs/77_knob-ledger.tsv.
     mvga_op1_radius = -1,
     mvga_op1_dup_frac = 0.7,
     mvga_op1_post = true,
-    mvga_carry_max = null,
     swap_orphan_dup_audit = true,
     // doc pr/83 r4 -- projective duplicate collapse at the main vertex,
     // SBND PRODUCTION ON (owner flip 2026-08-18, 4-event Bee scan
@@ -2129,14 +2119,9 @@ function(
     mvga_dup_starved_asym = 0.55,
     mvga_dup_starved_mip = 0.8,
     mvga_dup_starved_span = 0.5,
-    // doc pr/51 (18255-506746) -- DL rerank cross-cluster swap guard: with
-    // the guard on, an accepted DL vertex can never swap the main cluster
-    // (506746: one confident uBooNE-net voxel, s_dl = +576, moved the
-    // vertex 28 cm onto a non-flash-matched cluster).  DEFAULT OFF pending
-    // owner review.  Validation: -A dl_vtx_swap_guard=true (or the
-    // SBND_DL_VTX_SWAP_GUARD runner env).  false omits the key =>
-    // byte-identical.
-    dl_vtx_swap_guard = false,
+    // doc 77 round 1 (2026-08-24): dl_vtx_swap_guard removed -- live A/B
+    // -36/1014, rider closed (pr/89 round 5; pr/100:113).  See
+    // sbnd_xin/docs/77_knob-ledger.tsv.
     // doc pr/106 sec 10 -- exclusion-free charge cloud for the DL vertex net:
     // with fit_exclusion on, the cells equidistant from two prongs are dropped
     // from both and the net's vertex voxel is starved (nueCC DL-alone 34 -> 42
@@ -2187,15 +2172,9 @@ function(
     // C++ default false => key omitted => byte-identical.  Validation:
     // --tla-code dqdx_fit_keep_all_points=true (or SBND_DQDX_FIT_KEEP_ALL_POINTS).
     dqdx_fit_keep_all_points = false,
-    // doc pr/89 Arm C (C2) -- rule-1 outgoing-prong topology term in the DL
-    // rerank composite: s_topo = w * (frac - center), vote-gated.  C++
-    // defaults 0/0 = term never computed; null omits the keys =>
-    // byte-identical.  The offline C1 replay selected weight 3.0, center 0
-    // (+12/924, pr/89 sec 11.5).  Validation: --tla-code dl_vtx_topo_weight=3.0
-    // (or the SBND_DL_VTX_TOPO_WEIGHT runner env).  DEFAULT OFF pending the
-    // live A/B.
-    dl_vtx_topo_weight = null,
-    dl_vtx_topo_center = null,
+    // doc 77 round 1 (2026-08-24): dl_vtx_topo_weight/_center (pr/89 Arm C2
+    // rule-1 outgoing-prong topology term) removed -- live A/B -8/1014.
+    // See sbnd_xin/docs/77_knob-ledger.tsv.
     // doc pr/51 round 3 -- apply the traditional main-vertex path's cluster
     // swap decision instead of silently discarding it (a latent bug: the
     // decision fires today but never reaches the caller).  DEFAULT OFF
@@ -2372,12 +2351,9 @@ function(
     // 30504 gain); doc pr/102 sec 8.3.  Owner hand-scan before any flip.
     other_seg_keep_isolated_min_nnf = null,
     other_seg_keep_isolated_len_admit = 30.0,
-    // doc pr/102 P2 -- 3-D uncovered-charge radius (cm): imaged charge
-    // farther than this from EVERY existing fitted trajectory cannot be
-    // 2-D-tagged in find_other_segments step 1 and counts toward
-    // number_not_faked at step 8 / re-eval (the B2 nnf=0 fragmentation
-    // family).  C++ default 0 = off; null omits the key => byte-identical.
-    other_seg_uncover_3d = null,
+    // doc 77 round 1 (2026-08-24): other_seg_uncover_3d (pr/102 P2, 3-D
+    // uncovered-charge radius) removed -- 23 ADVERSE movers, stays OFF.
+    // See sbnd_xin/docs/77_knob-ledger.tsv.
     // doc pr/67 round 3 (S2) -- isochronous-snap size gate in cm, the first
     // clause of the guard at NeutrinoOtherSegments.cxx:721.  The machinery
     // behind it (modify_vertex/segment_isochronous) is the only thing that
@@ -2560,8 +2536,6 @@ function(
                              pf_orphan_audit_only=pf_orphan_audit_only,
                              pf_direct_when_touching=pf_direct_when_touching,
                              pf_touch_max=pf_touch_max,
-                             pf_touch_cross_main=pf_touch_cross_main,
-                             pf_touch_cross_max=pf_touch_cross_max,
                              pf_pseudo_gap_from_main=pf_pseudo_gap_from_main,
                              pf_unique_node_ids=pf_unique_node_ids,
                              pf_drop_stray_satellites=pf_drop_stray_satellites,
@@ -2600,7 +2574,6 @@ function(
                              cathode_wide_kink_baseline=cathode_wide_kink_baseline,
                              shower_topo_demote_len=shower_topo_demote_len,
                              fit_exclusion=fit_exclusion,
-                             graph_endpoint_strict=graph_endpoint_strict,
                              graph_endpoint_tol=graph_endpoint_tol,
                              oov_prototype_parity=oov_prototype_parity,
                              first_seg_local_pca=first_seg_local_pca,
@@ -2687,7 +2660,6 @@ function(
                              shower_connect_main_vertex_straight_guard=shower_connect_main_vertex_straight_guard,
                              shower_traj_straight_guard=shower_traj_straight_guard,
                              shower_absorb_track_guard=shower_absorb_track_guard,
-                             shower_connect_protected_pion_guard=shower_connect_protected_pion_guard,
                              michel_stem_muon_rescue=michel_stem_muon_rescue,
                              shower_in_cascade_guard=shower_in_cascade_guard,
                              shower_in_max_len=shower_in_max_len,
@@ -2774,7 +2746,6 @@ function(
                              long_muon_stub_bridge=long_muon_stub_bridge,
                              two_end_break=two_end_break,
                              teb_turn_min_arm_frac=teb_turn_min_arm_frac,
-                             teb_second_max=teb_second_max,
                              teb_chain_topology=teb_chain_topology,
                              teb_r3_turn=teb_r3_turn,
                              teb_r3_hot=teb_r3_hot,
@@ -2827,7 +2798,6 @@ function(
                              mvga_op1_radius=mvga_op1_radius,
                              mvga_op1_dup_frac=mvga_op1_dup_frac,
                              mvga_op1_post=mvga_op1_post,
-                             mvga_carry_max=mvga_carry_max,
                              swap_orphan_dup_audit=swap_orphan_dup_audit,
                              mvga_proj_dup_frac=mvga_proj_dup_frac,
                              mvga_proj_dqdx_ratio=mvga_proj_dqdx_ratio,
@@ -2842,7 +2812,6 @@ function(
                              mvga_dup_starved_asym=mvga_dup_starved_asym,
                              mvga_dup_starved_mip=mvga_dup_starved_mip,
                              mvga_dup_starved_span=mvga_dup_starved_span,
-                             dl_vtx_swap_guard=dl_vtx_swap_guard,
                              dl_vtx_cloud_no_exclusion=dl_vtx_cloud_no_exclusion,
                              dl_vtx_dual_chain=dl_vtx_dual_chain,
                              dual_chain_mode=dual_chain_mode,
@@ -2851,8 +2820,6 @@ function(
                              dual_chain_allow_cluster_swap=dual_chain_allow_cluster_swap,
                              dual_chain_vtx_weight=dual_chain_vtx_weight,
                              dqdx_fit_keep_all_points=dqdx_fit_keep_all_points,
-                             dl_vtx_topo_weight=dl_vtx_topo_weight,
-                             dl_vtx_topo_center=dl_vtx_topo_center,
                              main_vertex_swap_apply=main_vertex_swap_apply,
                              rough_path_probe=rough_path_probe,
                              steiner_gap_penalty=steiner_gap_penalty,
@@ -2883,7 +2850,6 @@ function(
                              other_seg_keep_isolated_min_length=other_seg_keep_isolated_min_length,
                              other_seg_keep_isolated_min_nnf=other_seg_keep_isolated_min_nnf,
                              other_seg_keep_isolated_len_admit=other_seg_keep_isolated_len_admit,
-                             other_seg_uncover_3d=other_seg_uncover_3d,
                              iso_snap_min_dir_mag=iso_snap_min_dir_mag,
                              shower_absorb_unreachable_main=shower_absorb_unreachable_main,
                              assoc_full_recluster=assoc_full_recluster,

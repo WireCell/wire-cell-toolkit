@@ -983,17 +983,10 @@ bool PatternAlgorithms::main_vertex_graph_audit(Graph& graph, Facade::Cluster& c
                                                     !created.count(stub) && !passthru_stubs.count(stub);
                         if (created.count(stub) || passthru_stubs.count(stub) || angle_fallback) {
                             if (m_mvga_splice_straighten <= 0) continue;  // no charge gate available
-                            // doc pr/83 r3 (sec 8.5 fallback): decline a
-                            // multi-prong carry outright above the cap --
-                            // the stub stays as the shared trunk.  0
-                            // (default) => unlimited => byte-identical.
-                            if (m_mvga_carry_max > 0 &&
-                                static_cast<int>(prongs.size()) > m_mvga_carry_max) {
-                                SPDLOG_LOGGER_TRACE(s_log,
-                                    "mvga: op3 created-splice decline cluster={} reason=carry-max prongs={} cap={}",
-                                    cluster.ident(), prongs.size(), m_mvga_carry_max);
-                                continue;
-                            }
+                            // doc 77 round 1 (2026-08-24): mvga_carry_max
+                            // removed -- not needed, class A cleared 8/8
+                            // with it OFF (pr/83 r3 sec 8.5).  See
+                            // sbnd_xin/docs/77_knob-ledger.tsv.
                             double stub_arc = 0;
                             const auto& swc0 = stub->wcpts();
                             for (size_t i = 1; i < swc0.size(); ++i)
@@ -1049,16 +1042,10 @@ bool PatternAlgorithms::main_vertex_graph_audit(Graph& graph, Facade::Cluster& c
 
                         if (best_angle < m_mvga_interposed_angle) continue;
 
-                        // doc pr/83 r3 (sec 8.5 fallback): decline a
-                        // multi-prong carry outright above the cap.  0
-                        // (default) => unlimited => byte-identical.
-                        if (m_mvga_carry_max > 0 &&
-                            static_cast<int>(prongs.size()) > m_mvga_carry_max) {
-                            SPDLOG_LOGGER_TRACE(s_log,
-                                "mvga: op3 stub-interposed decline cluster={} reason=carry-max prongs={} cap={}",
-                                cluster.ident(), prongs.size(), m_mvga_carry_max);
-                            continue;
-                        }
+                        // doc 77 round 1 (2026-08-24): mvga_carry_max
+                        // removed -- not needed, class A cleared 8/8 with it
+                        // OFF (pr/83 r3 sec 8.5).  See
+                        // sbnd_xin/docs/77_knob-ledger.tsv.
 
                         // All-or-nothing: every prong must pre-verify
                         // (endpoint wcpt matches, far-slot free -- B.7)

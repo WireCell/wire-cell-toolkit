@@ -75,11 +75,14 @@ namespace WireCell::Clus::PR {
     // `vertex->wcpt().point = vtx_new_point` (:948).  So the inconsistency is
     // TRANSIENT and self-healing: by the time crawl_segment returns, every
     // one of those connections is consistent.  It is not a lost invariant.
-    // Consequently m_graph_endpoint_strict is a FALSE POSITIVE as placed --
-    // it refuses legitimate connections mid-repair, and measurably damages
+    // Consequently a refusal here would be a FALSE POSITIVE as placed -- it
+    // would refuse legitimate connections mid-repair, and measurably damage
     // the result (22/48 events change, 5 nue candidates lost vs 1 gained).
     // A check for a PERSISTENT violation would have to run at end-of-stage,
-    // not here.  This one is retained as a tripwire, not as a fix.
+    // not here.  doc 77 round 1 (2026-08-24): the refusal (knob
+    // graph_endpoint_strict, "must stay OFF", pr/30 P8/pr/86:450) was
+    // removed; this function is retained as a tripwire only.  See
+    // sbnd_xin/docs/77_knob-ledger.tsv.
     static bool endpoint_consistent(const SegmentPtr& seg,
                                     const VertexPtr& vtx1, const VertexPtr& vtx2)
     {
@@ -135,7 +138,7 @@ namespace WireCell::Clus::PR {
                 SPDLOG_LOGGER_DEBUG(log,
                     "PR::add_segment: vertex/segment endpoint mismatch (doc pr/30 P8): "
                     "seg nwcpts={} front=({:.3f},{:.3f},{:.3f}) back=({:.3f},{:.3f},{:.3f}) "
-                    "v1=({:.3f},{:.3f},{:.3f}) v2=({:.3f},{:.3f},{:.3f}) tol={:.3f} cm strict={}",
+                    "v1=({:.3f},{:.3f},{:.3f}) v2=({:.3f},{:.3f},{:.3f}) tol={:.3f} cm",
                     seg->wcpts().size(),
                     f.x()/units::cm, f.y()/units::cm, f.z()/units::cm,
                     b.x()/units::cm, b.y()/units::cm, b.z()/units::cm,
@@ -143,19 +146,7 @@ namespace WireCell::Clus::PR {
                     vtx1->wcpt().point.z()/units::cm,
                     vtx2->wcpt().point.x()/units::cm, vtx2->wcpt().point.y()/units::cm,
                     vtx2->wcpt().point.z()/units::cm,
-                    g_graph_endpoint_policy.tol/units::cm,
-                    g_graph_endpoint_policy.strict);
-            }
-            if (g_graph_endpoint_policy.strict) {
-                // Prototype behaviour: the connection is NOT made.  Most
-                // prototype callers ignore add_proto_connection's return
-                // value, so this reproduces the effective outcome as well as
-                // the nominal one.  Default OFF -- this changes the graph.
-                // NOTE the two vertices have already been added above, exactly
-                // as the prototype leaves any vertex it had already recorded;
-                // only the connection is withheld.
-                g_port_audit.endpoint_refused.fetch_add(1, std::memory_order_relaxed);
-                return changed;
+                    g_graph_endpoint_policy.tol/units::cm);
             }
         }
 

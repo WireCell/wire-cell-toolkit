@@ -185,7 +185,6 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_teb_turn_baseline   = get(config, "teb_turn_baseline",   m_teb_turn_baseline);   // cm
     m_teb_turn_skirt      = get(config, "teb_turn_skirt",      m_teb_turn_skirt);      // cm
     m_teb_turn_min_arm_frac = get(config, "teb_turn_min_arm_frac", m_teb_turn_min_arm_frac); // frac of baseline; doc pr/90 round 2
-    m_teb_second_max      = get(config, "teb_second_max",      m_teb_second_max);      // cm; doc pr/90 round 2
     m_teb_chain_topology  = get(config, "teb_chain_topology",  m_teb_chain_topology);  // doc pr/90 round 4 (D1)
     m_teb_r3_turn         = get(config, "teb_r3_turn",         m_teb_r3_turn);         // deg; doc pr/90 round 4 (D3)
     m_teb_r3_hot          = get(config, "teb_r3_hot",          m_teb_r3_hot);          // x mip median; doc pr/90 round 4 (D3)
@@ -240,7 +239,6 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_mvga_op1_radius   = get(config, "mvga_op1_radius",   m_mvga_op1_radius);   // cm; doc pr/83 r3; 0 = use mvga_radius, -1 = unscoped
     m_mvga_op1_dup_frac = get(config, "mvga_op1_dup_frac", m_mvga_op1_dup_frac); // doc pr/83 r3; 0 = use mvga_dup_frac
     m_mvga_op1_post     = get(config, "mvga_op1_post",     m_mvga_op1_post);     // doc pr/83 r3 (class A)
-    m_mvga_carry_max    = get(config, "mvga_carry_max",    m_mvga_carry_max);    // doc pr/83 r3; 0 = unlimited
     m_swap_orphan_dup_audit = get(config, "swap_orphan_dup_audit", m_swap_orphan_dup_audit); // doc pr/83 r3 (Mechanism C)
     m_mvga_proj_dup_frac  = get(config, "mvga_proj_dup_frac",  m_mvga_proj_dup_frac);  // doc pr/83 r4; 0 = pass disabled
     m_mvga_proj_dqdx_ratio = get(config, "mvga_proj_dqdx_ratio", m_mvga_proj_dqdx_ratio); // doc pr/83 r4; inert while frac == 0
@@ -270,7 +268,6 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_fit_blob_coverage_defer = get(config, "fit_blob_coverage_defer", m_fit_blob_coverage_defer);
     // doc sbnd_xin/docs/pr/30 §11 port-fidelity knobs.
     m_fit_exclusion            = get(config, "fit_exclusion",            m_fit_exclusion);
-    m_graph_endpoint_strict    = get(config, "graph_endpoint_strict",    m_graph_endpoint_strict);
     m_graph_endpoint_tol       = get(config, "graph_endpoint_tol",       m_graph_endpoint_tol);       // cm
     m_oov_prototype_parity     = get(config, "oov_prototype_parity",     m_oov_prototype_parity);
     m_first_seg_local_pca      = get(config, "first_seg_local_pca",      m_first_seg_local_pca);
@@ -284,7 +281,6 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     // doc sbnd_xin/docs/pr/102 P1+P2 -- keep-isolated disjuncts + 3-D uncovered radius.
     m_other_seg_keep_isolated_min_nnf    = get(config, "other_seg_keep_isolated_min_nnf",    m_other_seg_keep_isolated_min_nnf);
     m_other_seg_keep_isolated_len_admit  = get(config, "other_seg_keep_isolated_len_admit",  m_other_seg_keep_isolated_len_admit); // cm
-    m_other_seg_uncover_3d               = get(config, "other_seg_uncover_3d",               m_other_seg_uncover_3d); // cm
     // doc sbnd_xin/docs/pr/67 round 3 -- isochronous-snap size gate.
     m_iso_snap_min_dir_mag = get(config, "iso_snap_min_dir_mag", m_iso_snap_min_dir_mag); // cm
     // doc sbnd_xin/docs/pr/59 round 2 -- per-cluster orphaned-associate_points rescue.
@@ -429,7 +425,6 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_dl_vtx_min_accept_score = get(config, "dl_vtx_min_accept_score", m_dl_vtx_min_accept_score);
     m_dl_vtx_score_scale      = get(config, "dl_vtx_score_scale",      m_dl_vtx_score_scale);
     // doc sbnd_xin/docs/pr/51 (18255-506746): cross-cluster DL swap guard.
-    m_dl_vtx_swap_guard       = get(config, "dl_vtx_swap_guard",       m_dl_vtx_swap_guard);
     // doc sbnd_xin/docs/pr/106 sec 10: exclusion-free charge cloud for the DL vertex net.
     m_dl_vtx_cloud_no_exclusion = get(config, "dl_vtx_cloud_no_exclusion", m_dl_vtx_cloud_no_exclusion);
     // doc sbnd_xin/docs/pr/112 sec 11: the dual chain (exclusion-free PR pass
@@ -444,8 +439,6 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
         raise<ValueError>("TaggerCheckNeutrino: dual_chain_mode must be snap, voxels or union, got %s", m_dual_chain_mode.c_str());
     }
     // doc sbnd_xin/docs/pr/89 Arm C (C2): rule-1 topology term weight/center.
-    m_dl_vtx_topo_weight      = get(config, "dl_vtx_topo_weight",      m_dl_vtx_topo_weight);
-    m_dl_vtx_topo_center      = get(config, "dl_vtx_topo_center",      m_dl_vtx_topo_center);
     // doc sbnd_xin/docs/pr/51 round 3: traditional-path swap propagation.
     m_main_vertex_swap_apply  = get(config, "main_vertex_swap_apply",  m_main_vertex_swap_apply);
     // doc sbnd_xin/docs/pr/51 round 4: diagnostic-only rough-path probe.
@@ -565,7 +558,6 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_shower_absorb_track_guard                 = get(config, "shower_absorb_track_guard",                 m_shower_absorb_track_guard);
     // doc sbnd_xin/docs/pr/65 round 3 -- reachability-relaxed absorber guards.
     m_shower_absorb_unreachable_main            = get(config, "shower_absorb_unreachable_main",            m_shower_absorb_unreachable_main);
-    m_shower_connect_protected_pion_guard       = get(config, "shower_connect_protected_pion_guard",       m_shower_connect_protected_pion_guard);
     m_michel_stem_muon_rescue                   = get(config, "michel_stem_muon_rescue",                   m_michel_stem_muon_rescue);
     m_shower_in_cascade_guard                   = get(config, "shower_in_cascade_guard",                   m_shower_in_cascade_guard);
     m_shower_in_max_len                         = get(config, "shower_in_max_len",                         m_shower_in_max_len);
@@ -722,7 +714,6 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["teb_turn_baseline"]   = m_teb_turn_baseline;   // cm
     cfg["teb_turn_skirt"]      = m_teb_turn_skirt;      // cm
     cfg["teb_turn_min_arm_frac"] = m_teb_turn_min_arm_frac; // frac of teb_turn_baseline; 0 = legacy argmax (doc pr/90 round 2)
-    cfg["teb_second_max"]      = m_teb_second_max;      // cm; 0 = legacy strict gate (doc pr/90 round 2)
     cfg["teb_chain_topology"]  = m_teb_chain_topology;  // simple-path gate admission; false = legacy gate (doc pr/90 round 4)
     cfg["teb_r3_turn"]         = m_teb_r3_turn;         // deg; <= 0 disables route R3 (doc pr/90 round 4)
     cfg["teb_r3_hot"]          = m_teb_r3_hot;          // x mip_dqdx_median; <= 0 disables route R3 (doc pr/90 round 4)
@@ -779,7 +770,6 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["mvga_op1_radius"]   = m_mvga_op1_radius;   // cm; 0 = use mvga_radius, -1 = unscoped, byte-identical at 0 (doc pr/83 r3)
     cfg["mvga_op1_dup_frac"] = m_mvga_op1_dup_frac; // fraction; 0 = use mvga_dup_frac, byte-identical (doc pr/83 r3)
     cfg["mvga_op1_post"]     = m_mvga_op1_post;     // false = post-op3 dup pass skipped, byte-identical (doc pr/83 r3)
-    cfg["mvga_carry_max"]    = m_mvga_carry_max;    // 0 = unlimited carry, byte-identical (doc pr/83 r3)
     cfg["swap_orphan_dup_audit"] = m_swap_orphan_dup_audit; // false = abandoned main cluster never audited, byte-identical (doc pr/83 r3)
     cfg["mvga_proj_dup_frac"]  = m_mvga_proj_dup_frac;  // 0 = projective dup collapse disabled, byte-identical (doc pr/83 r4)
     cfg["mvga_proj_dqdx_ratio"] = m_mvga_proj_dqdx_ratio; // stem dQ/dx asymmetry gate; inert while frac == 0 (doc pr/83 r4)
@@ -803,7 +793,6 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     // doc sbnd_xin/docs/pr/30 §11.  Round-tripped so the compiled config
     // records the operating point; each default reproduces the pre-pr/30 tree.
     cfg["fit_exclusion"]            = m_fit_exclusion;             // false = legacy (all sites pass flag_exclusion=false)
-    cfg["graph_endpoint_strict"]    = m_graph_endpoint_strict;     // false = legacy (WARN only, connection still made)
     cfg["graph_endpoint_tol"]       = m_graph_endpoint_tol;        // cm
     cfg["oov_prototype_parity"]     = m_oov_prototype_parity;      // false = legacy (today's three polarities)
     cfg["first_seg_local_pca"]      = m_first_seg_local_pca;       // true  = legacy (the refinement runs)
@@ -816,7 +805,6 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     // doc sbnd_xin/docs/pr/102 P1+P2.
     cfg["other_seg_keep_isolated_min_nnf"]    = m_other_seg_keep_isolated_min_nnf;    // 0 = off; nnf disjunct on the keep
     cfg["other_seg_keep_isolated_len_admit"]  = m_other_seg_keep_isolated_len_admit;  // cm; 0 = off; length disjunct on the keep
-    cfg["other_seg_uncover_3d"]               = m_other_seg_uncover_3d;               // cm; 0 = off; 3-D uncovered radius (tag veto + nnf escape)
     // doc sbnd_xin/docs/pr/67 round 3.
     cfg["iso_snap_min_dir_mag"] = m_iso_snap_min_dir_mag; // cm; 10.0 = legacy isochronous-snap size gate
     // doc sbnd_xin/docs/pr/59 round 2.
@@ -898,7 +886,6 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["dl_vtx_top_k"]            = 5;       // number of top DL voxels to re-rank (only when dl_vtx_rerank==true)
     cfg["dl_vtx_min_accept_score"] = 4.0;     // min composite score to accept a re-ranked DL vertex (empirical; correct uncertain-regime picks score 8-12, failure cases 3-5)
     cfg["dl_vtx_score_scale"]      = 1000.0;  // scale factor on raw DL score in composite re-rank (1.0 = unscaled)
-    cfg["dl_vtx_swap_guard"]       = m_dl_vtx_swap_guard;  // doc pr/51 (506746): false = legacy (rerank may swap the main cluster)
     cfg["dl_vtx_cloud_no_exclusion"] = m_dl_vtx_cloud_no_exclusion;  // doc pr/106 sec 10: false = legacy (net sees the exclusion fit's charge)
     cfg["dl_vtx_dual_chain"]       = m_dl_vtx_dual_chain;       // doc pr/112 sec 11: false = legacy (no exclusion-free second pass)
     cfg["dual_chain_mode"]         = m_dual_chain_mode;         // doc pr/112 sec 11: snap | voxels | union
@@ -906,8 +893,6 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["dual_chain_transfer_max"] = m_dual_chain_transfer_max; // doc pr/112 sec 11: cm, snap guard D (prototype dl_vtx_cut 2.0)
     cfg["dual_chain_allow_cluster_swap"] = m_dual_chain_allow_cluster_swap;  // doc pr/112 sec 5.7.8
     cfg["dual_chain_vtx_weight"]   = m_dual_chain_vtx_weight;   // doc pr/112 sec 11: union-mode proximity term, 0 = none
-    cfg["dl_vtx_topo_weight"]      = m_dl_vtx_topo_weight; // doc pr/89 C2: 0 = legacy (rule-1 topology term never computed); offline C1 selected 3.0
-    cfg["dl_vtx_topo_center"]      = m_dl_vtx_topo_center; // doc pr/89 C2: frac offset; frozen choice is 0.0 (the center-0.5 variant lost)
     cfg["main_vertex_swap_apply"]  = m_main_vertex_swap_apply;  // doc pr/51 round 3: false = legacy (traditional-path swap decision is computed then discarded)
     cfg["rough_path_probe"]        = m_rough_path_probe;  // doc pr/51 round 4: false = legacy (diagnostic TRACE probe never runs)
     cfg["steiner_gap_penalty"]     = m_steiner_gap_penalty;  // doc pr/51 round 5: 0 = legacy (do_rough_path stays on the unpenalized "steiner_graph")
@@ -972,7 +957,6 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["shower_traj_straight_guard"]                = m_shower_traj_straight_guard;                // false = legacy (straightness never consulted)
     cfg["shower_absorb_track_guard"]                 = m_shower_absorb_track_guard;                 // false = legacy (flood-fill absorbs every connected segment)
     cfg["shower_absorb_unreachable_main"]            = m_shower_absorb_unreachable_main;            // false = legacy (absorbers skip ALL main-cluster segments, doc pr/65)
-    cfg["shower_connect_protected_pion_guard"]       = m_shower_connect_protected_pion_guard;       // false = legacy (proton-daughter pion selectable as EM candidate)
     cfg["michel_stem_muon_rescue"]                   = m_michel_stem_muon_rescue;                   // false = legacy (Michel rescue limited to weak-dir degree-2 vertices)
     cfg["shower_in_cascade_guard"]                   = m_shower_in_cascade_guard;                   // doc pr/74 round 2 P1; false = legacy (cascade relabels unconditionally)
     cfg["shower_in_max_len"]                         = m_shower_in_max_len;                         // cm; only read when shower_in_cascade_guard
@@ -1771,7 +1755,6 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
         pattern_algos.m_teb_turn_baseline   = m_teb_turn_baseline * units::cm; // cm -> internal
         pattern_algos.m_teb_turn_skirt      = m_teb_turn_skirt * units::cm;    // cm -> internal
         pattern_algos.m_teb_turn_min_arm_frac = m_teb_turn_min_arm_frac;       // dimensionless, no conversion
-        pattern_algos.m_teb_second_max      = m_teb_second_max * units::cm;    // cm -> internal
         pattern_algos.m_teb_chain_topology  = m_teb_chain_topology;
         pattern_algos.m_teb_r3_turn         = m_teb_r3_turn;                   // deg, no conversion
         pattern_algos.m_teb_r3_hot          = m_teb_r3_hot;                    // x mip median, no conversion
@@ -1827,7 +1810,6 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
         pattern_algos.m_mvga_op1_radius   = m_mvga_op1_radius * units::cm; // cm -> internal; 0 and the -1 sentinel both survive the scale (doc pr/83 r3)
         pattern_algos.m_mvga_op1_dup_frac = m_mvga_op1_dup_frac;           // fraction, no conversion (doc pr/83 r3)
         pattern_algos.m_mvga_op1_post     = m_mvga_op1_post;               // doc pr/83 r3 (class A)
-        pattern_algos.m_mvga_carry_max    = m_mvga_carry_max;              // count (doc pr/83 r3)
         pattern_algos.m_swap_orphan_dup_audit = m_swap_orphan_dup_audit;   // doc pr/83 r3 (Mechanism C)
         pattern_algos.m_mvga_proj_dup_frac  = m_mvga_proj_dup_frac;        // fraction, no conversion (doc pr/83 r4)
         pattern_algos.m_mvga_proj_dqdx_ratio = m_mvga_proj_dqdx_ratio;     // ratio, no conversion (doc pr/83 r4)
@@ -1868,7 +1850,6 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
         // doc sbnd_xin/docs/pr/30 §11 port-fidelity knobs.
         pattern_algos.m_fit_exclusion            = m_fit_exclusion;
         pattern_algos.m_dl_vtx_cloud_no_exclusion = m_dl_vtx_cloud_no_exclusion;   // doc pr/106 sec 10
-        pattern_algos.m_graph_endpoint_strict    = m_graph_endpoint_strict;
         pattern_algos.m_graph_endpoint_tol       = m_graph_endpoint_tol * units::cm;   // cm -> internal
         pattern_algos.m_oov_prototype_parity     = m_oov_prototype_parity;
         pattern_algos.m_first_seg_local_pca      = m_first_seg_local_pca;
@@ -1882,7 +1863,6 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
         // doc sbnd_xin/docs/pr/102 P1+P2.
         pattern_algos.m_other_seg_keep_isolated_min_nnf    = m_other_seg_keep_isolated_min_nnf;
         pattern_algos.m_other_seg_keep_isolated_len_admit  = m_other_seg_keep_isolated_len_admit * units::cm; // cm -> internal
-        pattern_algos.m_other_seg_uncover_3d               = m_other_seg_uncover_3d * units::cm; // cm -> internal
         // doc sbnd_xin/docs/pr/67 round 3.
         pattern_algos.m_iso_snap_min_dir_mag = m_iso_snap_min_dir_mag * units::cm; // cm -> internal
         // doc sbnd_xin/docs/pr/59 round 2.
@@ -1914,7 +1894,6 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
         // add_segment() is a free function with no component config in reach, so
         // the P8 policy travels through a process-wide struct written here, once,
         // before any graph is built (doc pr/30 §11 P8).
-        WireCell::Clus::PR::g_graph_endpoint_policy.strict = m_graph_endpoint_strict;
         WireCell::Clus::PR::g_graph_endpoint_policy.tol    = m_graph_endpoint_tol * units::cm;
         pattern_algos.m_iso_endpoint               = m_iso_endpoint;
         pattern_algos.m_iso_endpoint_min_length    = m_iso_endpoint_min_length * units::cm;  // cm -> internal
@@ -2008,7 +1987,6 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
         pattern_algos.m_shower_traj_straight_guard                = m_shower_traj_straight_guard;                // F11
         pattern_algos.m_shower_absorb_track_guard                 = m_shower_absorb_track_guard;                 // F12
         pattern_algos.m_shower_absorb_unreachable_main            = m_shower_absorb_unreachable_main;            // doc pr/65 round 3
-        pattern_algos.m_shower_connect_protected_pion_guard       = m_shower_connect_protected_pion_guard;       // F13
         pattern_algos.m_michel_stem_muon_rescue                   = m_michel_stem_muon_rescue;                   // F14
         pattern_algos.m_shower_in_cascade_guard                   = m_shower_in_cascade_guard;                   // pr/74 P1
         pattern_algos.m_shower_in_max_len                         = m_shower_in_max_len * units::cm;             // pr/74 P1
@@ -2290,8 +2268,7 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
                 *track_fitter, m_dv, particle_data(), m_recomb_model,
                 m_dl_weights, m_dl_vtx_cut, m_dQdx_scale, m_dQdx_offset,
                 m_dl_vtx_rerank, m_dl_vtx_top_k, m_dl_vtx_min_accept_score,
-                m_dl_vtx_score_scale, m_dl_vtx_swap_guard,
-                m_dl_vtx_topo_weight, m_dl_vtx_topo_center,
+                m_dl_vtx_score_scale,
                 m_dl_vtx_dual_chain ? &dual_hint : nullptr);   // doc pr/112 sec 11
         }
         if (!flag_dl_changed) {
@@ -2826,20 +2803,20 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
         const uint64_t moved = pa.pca_refine_moved.load();
         SPDLOG_LOGGER_INFO(log,
             "PR30AUDIT oov_iso={} oov_dead={} oov_uniq={} "
-            "addseg={} addseg_reentry={} ep_mismatch={} ep_refused={} "
+            "addseg={} addseg_reentry={} ep_mismatch={} "
             "pca_calls={} pca_moved={} pca_mean_cm={:.4f} pca_max_cm={:.4f} "
             "oseg_proto={} oseg_relaxed_only={} oseg_reject={} "
             "oseg_iso_drop={} oseg_iso_keep={} "
-            "knobs[fit_exclusion={} endpoint_strict={} oov_parity={} local_pca={} relaxed_accept={}]",
+            "knobs[fit_exclusion={} oov_parity={} local_pca={} relaxed_accept={}]",
             pa.oov_isochronous.load(), pa.oov_dead_scan.load(), pa.oov_unique_scan.load(),
             pa.add_segment_calls.load(), pa.add_segment_reentry.load(),
-            pa.endpoint_mismatch.load(), pa.endpoint_refused.load(),
+            pa.endpoint_mismatch.load(),
             pa.pca_refine_calls.load(), moved,
             moved ? (double(pa.pca_move_um_sum.load()) / moved) * units::um / units::cm : 0.0,
             double(pa.pca_move_um_max.load()) * units::um / units::cm,
             pa.oseg_accept_proto.load(), pa.oseg_accept_relaxed.load(), pa.oseg_reject.load(),
             pa.oseg_isolated_drop.load(), pa.oseg_isolated_keep.load(),
-            m_fit_exclusion, m_graph_endpoint_strict, m_oov_prototype_parity,
+            m_fit_exclusion, m_oov_prototype_parity,
             m_first_seg_local_pca, m_other_seg_relaxed_accept);
     }
 
@@ -3108,8 +3085,7 @@ void TaggerCheckNeutrino::run_dual_chain_off_pass(const PR::PatternAlgorithms& p
             *track_fitter, m_dv, particle_data(), m_recomb_model,
             m_dl_weights, m_dl_vtx_cut, m_dQdx_scale, m_dQdx_offset,
             m_dl_vtx_rerank, m_dl_vtx_top_k, m_dl_vtx_min_accept_score,
-            m_dl_vtx_score_scale, m_dl_vtx_swap_guard,
-            m_dl_vtx_topo_weight, m_dl_vtx_topo_center);
+            m_dl_vtx_score_scale);
     }
     if (!flag_dl_changed) {
         ClusterVertexMap map_copy = map_cluster_main_vertices;

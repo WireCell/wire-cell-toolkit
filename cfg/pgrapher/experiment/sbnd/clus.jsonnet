@@ -793,8 +793,8 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               // Display-only (mc.json).  Scalar params are in cm.
               pf_direct_when_touching=false,
               pf_touch_max=null,
-              pf_touch_cross_main=false,
-              pf_touch_cross_max=null,
+              // doc 77 round 1 (2026-08-24): pf_touch_cross_main/_max
+              // removed -- zero movers, F1.0 probe failure (pr/84:607/622).
               pf_pseudo_gap_from_main=false,
               // doc pr/84 round 3 (G1): guarantee unique jsTree node ids in
               // mc.json.  C++ default false; key omitted when off =>
@@ -1067,12 +1067,13 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               // ---- doc sbnd_xin/docs/pr/30 §11 port-fidelity knobs ------------
               // All five default to the pre-pr/30 behaviour, so the compiled JSON is
               // byte-identical until one is set.  See cfg/pgrapher/common/clus.jsonnet
-              // for what each does.  fit_exclusion (P1), graph_endpoint_strict (P8) and
-              // oov_prototype_parity (F2) turn NEW behaviour on (default off);
-              // first_seg_local_pca (P2) and other_seg_relaxed_accept (P4) gate behaviour
-              // that is ALREADY production, so null = on = legacy and false restores the
-              // prototype's narrower version.
-              fit_exclusion=false, graph_endpoint_strict=false, graph_endpoint_tol=null,
+              // for what each does.  fit_exclusion (P1) and oov_prototype_parity (F2)
+              // turn NEW behaviour on (default off); first_seg_local_pca (P2) and
+              // other_seg_relaxed_accept (P4) gate behaviour that is ALREADY production,
+              // so null = on = legacy and false restores the prototype's narrower
+              // version.  doc 77 round 1 (2026-08-24): graph_endpoint_strict (P8)
+              // removed -- "must stay OFF" (pr/30 P8; pr/86:450).
+              fit_exclusion=false, graph_endpoint_tol=null,
               oov_prototype_parity=false, first_seg_local_pca=null, other_seg_relaxed_accept=null,
               // shower_topo_proto_dir (doc pr/31 sec 11, F2 was P2): true skips the
               // stage-3 segment_determine_shower_direction call, leaving the topology
@@ -1372,7 +1373,8 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               // stopping-muon rescue past its weak-dir degree-2 limits.
               // All three default false = legacy = byte-identical.
               shower_absorb_track_guard=false,
-              shower_connect_protected_pion_guard=false,
+              // doc 77 round 1 (2026-08-24): shower_connect_protected_pion_
+              // guard removed -- measured dead, never flipped (pr/40:1459).
               michel_stem_muon_rescue=false,
               // doc sbnd_xin/docs/pr/74 round 2 -- P1 cascade guard + P2
               // Michel-terminal check.  C++ defaults false/40cm/1.3/40cm.
@@ -1517,10 +1519,11 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               teb_turn_angle=null,
               teb_turn_baseline=null,
               teb_turn_skirt=null,
-              // doc pr/90 round 2: R2 argmax arm-fill guard + second-prong
-              // gate cap.  null = C++ default 0 = legacy, key suppressed.
+              // doc pr/90 round 2: R2 argmax arm-fill guard.  null = C++
+              // default 0 = legacy, key suppressed.  doc 77 round 1
+              // (2026-08-24): teb_second_max removed -- negative on its own
+              // motivating events (pr/90 sec 8.5).
               teb_turn_min_arm_frac=null,
-              teb_second_max=null,
               // doc pr/90 round 4: chain-topology admission (D1), route R3
               // turn/activity (D3), R2 bragg veto (D4).  false/null = C++
               // default = legacy, key suppressed.
@@ -1636,7 +1639,8 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               mvga_op1_radius=null,
               mvga_op1_dup_frac=null,
               mvga_op1_post=false,
-              mvga_carry_max=null,
+              // doc 77 round 1 (2026-08-24): mvga_carry_max removed -- not
+              // needed, class A cleared 8/8 with it OFF (pr/83 r3 sec 8.5).
               swap_orphan_dup_audit=false,
               // doc pr/83 r4 -- projective dup collapse; null omits => byte-identical.
               mvga_proj_dup_frac=null,
@@ -1652,10 +1656,8 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               mvga_dup_starved_asym=null,
               mvga_dup_starved_mip=null,
               mvga_dup_starved_span=null,
-              // doc pr/51 (18255-506746) -- DL rerank cross-cluster swap
-              // guard.  C++ default false; false omits the key =>
-              // byte-identical.
-              dl_vtx_swap_guard=false,
+              // doc 77 round 1 (2026-08-24): dl_vtx_swap_guard removed --
+              // live A/B -36/1014 (pr/89 round 5).
               // doc pr/106 sec 10: exclusion-free charge cloud for the DL vertex net. C++ default false.
               dl_vtx_cloud_no_exclusion=false,
               // doc pr/112 sec 11: dual chain. C++ defaults false/"snap"/false/2.0/true/0; null/false => key omitted.
@@ -1667,11 +1669,9 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               dual_chain_vtx_weight=null,
               // doc pr/107: dQ/dx fit keeps every trajectory point (prototype parity). C++ default false.
               dqdx_fit_keep_all_points=false,
-              // doc pr/89 Arm C (C2) -- rule-1 topology term in the DL
-              // rerank composite (weight, frac center).  C++ defaults 0/0;
-              // null omits the keys => byte-identical.
-              dl_vtx_topo_weight=null,
-              dl_vtx_topo_center=null,
+              // doc 77 round 1 (2026-08-24): dl_vtx_topo_weight/_center
+              // (pr/89 Arm C2 rule-1 topology term) removed -- live A/B
+              // -8/1014.
               // doc pr/51 round 3 -- apply the traditional-path swap
               // decision instead of discarding it.  C++ default false;
               // false omits the key => byte-identical.
@@ -1736,10 +1736,9 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               // 0 = off.  null omits the keys => byte-identical.
               other_seg_keep_isolated_min_nnf=null,
               other_seg_keep_isolated_len_admit=null,
-              // doc pr/102 P2 -- 3-D uncovered-charge radius (cm) for the
-              // find_other_segments tagging/nnf seats.  C++ default 0 = off.
-              // null omits the key => byte-identical.
-              other_seg_uncover_3d=null,
+              // doc 77 round 1 (2026-08-24): other_seg_uncover_3d (pr/102
+              // P2, 3-D uncovered-charge radius) removed -- 23 ADVERSE
+              // movers, stays OFF.
               // doc pr/67 round 3 (S2) -- isochronous-snap size gate, cm.
               // C++ default 10.0 = legacy.  null omits the key.
               iso_snap_min_dir_mag=null,
@@ -2251,7 +2250,6 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
             cathode_wide_kink_baseline=cathode_wide_kink_baseline,
             shower_topo_demote_len=shower_topo_demote_len,
             fit_exclusion=fit_exclusion,
-            graph_endpoint_strict=graph_endpoint_strict,
             graph_endpoint_tol=graph_endpoint_tol,
             oov_prototype_parity=oov_prototype_parity,
             first_seg_local_pca=first_seg_local_pca,
@@ -2334,7 +2332,6 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
             shower_connect_main_vertex_straight_guard=shower_connect_main_vertex_straight_guard,
             shower_traj_straight_guard=shower_traj_straight_guard,
             shower_absorb_track_guard=shower_absorb_track_guard,
-            shower_connect_protected_pion_guard=shower_connect_protected_pion_guard,
             michel_stem_muon_rescue=michel_stem_muon_rescue,
             shower_in_cascade_guard=shower_in_cascade_guard,
             shower_in_max_len=shower_in_max_len,
@@ -2435,7 +2432,6 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
             teb_turn_baseline=teb_turn_baseline,
             teb_turn_skirt=teb_turn_skirt,
             teb_turn_min_arm_frac=teb_turn_min_arm_frac,
-            teb_second_max=teb_second_max,
             teb_chain_topology=teb_chain_topology,
             teb_r3_turn=teb_r3_turn,
             teb_r3_hot=teb_r3_hot,
@@ -2489,7 +2485,6 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
             mvga_op1_radius=mvga_op1_radius,
             mvga_op1_dup_frac=mvga_op1_dup_frac,
             mvga_op1_post=mvga_op1_post,
-            mvga_carry_max=mvga_carry_max,
             swap_orphan_dup_audit=swap_orphan_dup_audit,
             mvga_proj_dup_frac=mvga_proj_dup_frac,
             mvga_proj_dqdx_ratio=mvga_proj_dqdx_ratio,
@@ -2504,7 +2499,6 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
             mvga_dup_starved_asym=mvga_dup_starved_asym,
             mvga_dup_starved_mip=mvga_dup_starved_mip,
             mvga_dup_starved_span=mvga_dup_starved_span,
-            dl_vtx_swap_guard=dl_vtx_swap_guard,
             dl_vtx_cloud_no_exclusion=dl_vtx_cloud_no_exclusion,
             dl_vtx_dual_chain=dl_vtx_dual_chain,
             dual_chain_mode=dual_chain_mode,
@@ -2513,8 +2507,6 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
             dual_chain_allow_cluster_swap=dual_chain_allow_cluster_swap,
             dual_chain_vtx_weight=dual_chain_vtx_weight,
             dqdx_fit_keep_all_points=dqdx_fit_keep_all_points,
-            dl_vtx_topo_weight=dl_vtx_topo_weight,
-            dl_vtx_topo_center=dl_vtx_topo_center,
             main_vertex_swap_apply=main_vertex_swap_apply,
             rough_path_probe=rough_path_probe,
             steiner_gap_penalty=steiner_gap_penalty,
@@ -2543,7 +2535,6 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
             other_seg_keep_isolated_min_length=other_seg_keep_isolated_min_length,
             other_seg_keep_isolated_min_nnf=other_seg_keep_isolated_min_nnf,
             other_seg_keep_isolated_len_admit=other_seg_keep_isolated_len_admit,
-            other_seg_uncover_3d=other_seg_uncover_3d,
             iso_snap_min_dir_mag=iso_snap_min_dir_mag,
             shower_absorb_unreachable_main=shower_absorb_unreachable_main,
             assoc_full_recluster=assoc_full_recluster,
@@ -2881,8 +2872,6 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
                     // byte-identical pre-knob config.  Params in cm.
                     [if pf_direct_when_touching then 'pf_direct_when_touching']: true,
                     [if pf_touch_max != null then 'pf_touch_max']: pf_touch_max * wc.cm,
-                    [if pf_touch_cross_main then 'pf_touch_cross_main']: true,
-                    [if pf_touch_cross_max != null then 'pf_touch_cross_max']: pf_touch_cross_max * wc.cm,
                     [if pf_pseudo_gap_from_main then 'pf_pseudo_gap_from_main']: true,
                     [if pf_unique_node_ids then 'pf_unique_node_ids']: true,
                     [if pf_drop_stray_satellites then 'pf_drop_stray_satellites']: true,
@@ -3015,8 +3004,8 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
        // omitted => byte-identical.  Params in cm.  See clus_pr.
        pf_direct_when_touching=false,
        pf_touch_max=null,
-       pf_touch_cross_main=false,
-       pf_touch_cross_max=null,
+       // doc 77 round 1 (2026-08-24): pf_touch_cross_main/_max
+       // removed -- zero movers, F1.0 probe failure (pr/84:607/622).
        pf_pseudo_gap_from_main=false,
        // doc pr/84 round 3 (G1); false = C++ default = OFF.  See clus_pr.
        pf_unique_node_ids=false,
@@ -3103,12 +3092,13 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
        // ---- doc sbnd_xin/docs/pr/30 §11 port-fidelity knobs ------------
        // All five default to the pre-pr/30 behaviour, so the compiled JSON is
        // byte-identical until one is set.  See cfg/pgrapher/common/clus.jsonnet
-       // for what each does.  fit_exclusion (P1), graph_endpoint_strict (P8) and
-       // oov_prototype_parity (F2) turn NEW behaviour on (default off);
-       // first_seg_local_pca (P2) and other_seg_relaxed_accept (P4) gate behaviour
-       // that is ALREADY production, so null = on = legacy and false restores the
-       // prototype's narrower version.
-       fit_exclusion=false, graph_endpoint_strict=false, graph_endpoint_tol=null,
+       // for what each does.  fit_exclusion (P1) and oov_prototype_parity (F2)
+       // turn NEW behaviour on (default off); first_seg_local_pca (P2) and
+       // other_seg_relaxed_accept (P4) gate behaviour that is ALREADY production,
+       // so null = on = legacy and false restores the prototype's narrower
+       // version.  doc 77 round 1 (2026-08-24): graph_endpoint_strict (P8)
+       // removed -- "must stay OFF" (pr/30 P8; pr/86:450).
+       fit_exclusion=false, graph_endpoint_tol=null,
        oov_prototype_parity=false, first_seg_local_pca=null, other_seg_relaxed_accept=null,
        // shower_topo_proto_dir (doc pr/31 sec 11, F2 was P2): true skips the
        // stage-3 segment_determine_shower_direction call, leaving the topology
@@ -3271,7 +3261,8 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
        // default false = legacy = byte-identical.  See the clus_pr arg
        // comment.
        shower_absorb_track_guard=false,
-       shower_connect_protected_pion_guard=false,
+       // doc 77 round 1 (2026-08-24): shower_connect_protected_pion_guard
+       // removed -- measured dead, never flipped (pr/40:1459).
        michel_stem_muon_rescue=false,
        // doc sbnd_xin/docs/pr/74 round 2 -- P1 + P2 (see clus_pr above).
        shower_in_cascade_guard=false,
@@ -3388,10 +3379,11 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
        teb_turn_angle=null,
        teb_turn_baseline=null,
        teb_turn_skirt=null,
-       // doc pr/90 round 2: R2 argmax arm-fill guard + second-prong gate
-       // cap.  null = C++ default 0 = legacy, key suppressed.
+       // doc pr/90 round 2: R2 argmax arm-fill guard.  null = C++ default
+       // 0 = legacy, key suppressed.  doc 77 round 1 (2026-08-24):
+       // teb_second_max removed -- negative on its own motivating events
+       // (pr/90 sec 8.5).
        teb_turn_min_arm_frac=null,
-       teb_second_max=null,
        // doc pr/90 round 4: chain-topology admission (D1), route R3
        // turn/activity (D3), R2 bragg veto (D4).  false/null = C++ default
        // = legacy, key suppressed.
@@ -3490,7 +3482,8 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
               mvga_op1_radius=null,
               mvga_op1_dup_frac=null,
               mvga_op1_post=false,
-              mvga_carry_max=null,
+              // doc 77 round 1 (2026-08-24): mvga_carry_max removed -- not
+              // needed, class A cleared 8/8 with it OFF (pr/83 r3 sec 8.5).
               swap_orphan_dup_audit=false,
               // doc pr/83 r4 -- projective dup collapse; null omits => byte-identical.
               mvga_proj_dup_frac=null,
@@ -3506,7 +3499,8 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
               mvga_dup_starved_asym=null,
               mvga_dup_starved_mip=null,
               mvga_dup_starved_span=null,
-              dl_vtx_swap_guard=false,
+              // doc 77 round 1 (2026-08-24): dl_vtx_swap_guard removed --
+              // live A/B -36/1014 (pr/89 round 5).
               // doc pr/106 sec 10: exclusion-free charge cloud for the DL vertex net. C++ default false.
               dl_vtx_cloud_no_exclusion=false,
               // doc pr/112 sec 11: dual chain. C++ defaults false/"snap"/false/2.0/true/0; null/false => key omitted.
@@ -3518,11 +3512,9 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
               dual_chain_vtx_weight=null,
               // doc pr/107: dQ/dx fit keeps every trajectory point (prototype parity). C++ default false.
               dqdx_fit_keep_all_points=false,
-              // doc pr/89 Arm C (C2) -- rule-1 topology term in the DL
-              // rerank composite (weight, frac center).  C++ defaults 0/0;
-              // null omits the keys => byte-identical.
-              dl_vtx_topo_weight=null,
-              dl_vtx_topo_center=null,
+              // doc 77 round 1 (2026-08-24): dl_vtx_topo_weight/_center
+              // (pr/89 Arm C2 rule-1 topology term) removed -- live A/B
+              // -8/1014.
               main_vertex_swap_apply=false,
               // doc pr/51 round 4 -- diagnostic-only rough-path probe.
               // C++ default false; false omits the key => byte-identical.
@@ -3577,10 +3569,9 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
               // 0 = off.  null omits the keys => byte-identical.
               other_seg_keep_isolated_min_nnf=null,
               other_seg_keep_isolated_len_admit=null,
-              // doc pr/102 P2 -- 3-D uncovered-charge radius (cm) for the
-              // find_other_segments tagging/nnf seats.  C++ default 0 = off.
-              // null omits the key => byte-identical.
-              other_seg_uncover_3d=null,
+              // doc 77 round 1 (2026-08-24): other_seg_uncover_3d (pr/102
+              // P2, 3-D uncovered-charge radius) removed -- 23 ADVERSE
+              // movers, stays OFF.
               // doc pr/67 round 3 (S2) -- isochronous-snap size gate, cm.
               // C++ default 10.0 = legacy.  null omits the key.
               iso_snap_min_dir_mag=null,
@@ -3661,8 +3652,6 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 pf_orphan_audit_only=pf_orphan_audit_only,
                 pf_direct_when_touching=pf_direct_when_touching,
                 pf_touch_max=pf_touch_max,
-                pf_touch_cross_main=pf_touch_cross_main,
-                pf_touch_cross_max=pf_touch_cross_max,
                 pf_pseudo_gap_from_main=pf_pseudo_gap_from_main,
                 pf_unique_node_ids=pf_unique_node_ids,
                 pf_drop_stray_satellites=pf_drop_stray_satellites,
@@ -3708,7 +3697,6 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 cathode_wide_kink_baseline=cathode_wide_kink_baseline,
                 shower_topo_demote_len=shower_topo_demote_len,
                 fit_exclusion=fit_exclusion,
-                graph_endpoint_strict=graph_endpoint_strict,
                 graph_endpoint_tol=graph_endpoint_tol,
                 oov_prototype_parity=oov_prototype_parity,
                 first_seg_local_pca=first_seg_local_pca,
@@ -3800,7 +3788,6 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 shower_connect_main_vertex_straight_guard=shower_connect_main_vertex_straight_guard,
                 shower_traj_straight_guard=shower_traj_straight_guard,
                 shower_absorb_track_guard=shower_absorb_track_guard,
-                shower_connect_protected_pion_guard=shower_connect_protected_pion_guard,
                 michel_stem_muon_rescue=michel_stem_muon_rescue,
                 shower_in_cascade_guard=shower_in_cascade_guard,
                 shower_in_max_len=shower_in_max_len,
@@ -3901,7 +3888,6 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 teb_turn_baseline=teb_turn_baseline,
                 teb_turn_skirt=teb_turn_skirt,
                 teb_turn_min_arm_frac=teb_turn_min_arm_frac,
-                teb_second_max=teb_second_max,
                 teb_chain_topology=teb_chain_topology,
                 teb_r3_turn=teb_r3_turn,
                 teb_r3_hot=teb_r3_hot,
@@ -3955,7 +3941,6 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
             mvga_op1_radius=mvga_op1_radius,
             mvga_op1_dup_frac=mvga_op1_dup_frac,
             mvga_op1_post=mvga_op1_post,
-            mvga_carry_max=mvga_carry_max,
             swap_orphan_dup_audit=swap_orphan_dup_audit,
             mvga_proj_dup_frac=mvga_proj_dup_frac,
             mvga_proj_dqdx_ratio=mvga_proj_dqdx_ratio,
@@ -3970,7 +3955,6 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
             mvga_dup_starved_asym=mvga_dup_starved_asym,
             mvga_dup_starved_mip=mvga_dup_starved_mip,
             mvga_dup_starved_span=mvga_dup_starved_span,
-                dl_vtx_swap_guard=dl_vtx_swap_guard,
                 dl_vtx_cloud_no_exclusion=dl_vtx_cloud_no_exclusion,
                 dl_vtx_dual_chain=dl_vtx_dual_chain,
                 dual_chain_mode=dual_chain_mode,
@@ -3979,8 +3963,6 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 dual_chain_allow_cluster_swap=dual_chain_allow_cluster_swap,
                 dual_chain_vtx_weight=dual_chain_vtx_weight,
                 dqdx_fit_keep_all_points=dqdx_fit_keep_all_points,
-                dl_vtx_topo_weight=dl_vtx_topo_weight,
-                dl_vtx_topo_center=dl_vtx_topo_center,
                 main_vertex_swap_apply=main_vertex_swap_apply,
                 rough_path_probe=rough_path_probe,
                 steiner_gap_penalty=steiner_gap_penalty,
@@ -4009,7 +3991,6 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 other_seg_keep_isolated_min_length=other_seg_keep_isolated_min_length,
                 other_seg_keep_isolated_min_nnf=other_seg_keep_isolated_min_nnf,
                 other_seg_keep_isolated_len_admit=other_seg_keep_isolated_len_admit,
-                other_seg_uncover_3d=other_seg_uncover_3d,
                 iso_snap_min_dir_mag=iso_snap_min_dir_mag,
                 shower_absorb_unreachable_main=shower_absorb_unreachable_main,
                 assoc_full_recluster=assoc_full_recluster,
