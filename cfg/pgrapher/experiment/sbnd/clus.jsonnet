@@ -1816,7 +1816,13 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               // the DL SCN prediction to accept a candidate vertex.  Threaded
               // for configurability (docs/pr/2 sec 7.4); null keeps the C++
               // default, which is coupled to the uBooNE-trained net (gap G3).
-              dl_vtx_cut=null) = {
+              dl_vtx_cut=null,
+              // fast_xgb_forest: book the two XGB BDT combiners with
+              // TmvaGradForest instead of TMVA::Reader -- same scores, ~4 s
+              // and ~0.9 GB less per PR job (sbnd_xin/docs/76 round 2).
+              // C++ default false.  Key omitted when off => byte-identical
+              // pre-knob config.
+              fast_xgb_forest=false) = {
     // Only gate when the caller actually supplied a window; beam_window=[0,0]
     // (the arg default, i.e. "no beam window") must not silently drop every
     // cluster's tagger evaluation.
@@ -2566,7 +2572,8 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
             numu2_weights_xml=     bdt_weights_dir + '/numu_tagger2.weights.xml',
             numu3_weights_xml=     bdt_weights_dir + '/numu_tagger3.weights.xml',
             cosmict10_weights_xml= bdt_weights_dir + '/cos_tagger_10.weights.xml',
-            numu_xgboost_xml=      bdt_weights_dir + '/numu_scalars_scores_0923.xml'),
+            numu_xgboost_xml=      bdt_weights_dir + '/numu_scalars_scores_0923.xml',
+            fast_xgb_forest=fast_xgb_forest),
         nue_bdt_scorer: cm.nue_bdt_scorer(
             mipid_weights_xml=       bdt_weights_dir + '/mipid_BDT.weights.xml',
             gap_weights_xml=         bdt_weights_dir + '/gap_BDT.weights.xml',
@@ -2598,7 +2605,8 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
             tro_2_weights_xml=       bdt_weights_dir + '/tro_2_BDT.weights.xml',
             tro_4_weights_xml=       bdt_weights_dir + '/tro_4_BDT.weights.xml',
             tro_5_weights_xml=       bdt_weights_dir + '/tro_5_BDT.weights.xml',
-            nue_xgboost_xml=         bdt_weights_dir + '/XGB_nue_seed2_0923.xml'),
+            nue_xgboost_xml=         bdt_weights_dir + '/XGB_nue_seed2_0923.xml',
+            fast_xgb_forest=fast_xgb_forest),
         // PR-stage Magnify-tracking ROOT dump (docs/pr/3): fork of the uBooNE
         // writer reading the unnamed TrackFitting slot + PRGraph filled by
         // tagger_check_neutrino, with the two-TPC channel convention and
@@ -3615,7 +3623,10 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
        sp_dedx_use_recomb_model=true, sp_mean_dedx_cut=2.23,
        // dl_vtx_cut (mm) is threaded for configurability only (docs/pr/2
        // sec 7.4); null keeps the C++ 25.0 (= 2.5 cm) default.
-       dl_vtx_cut=null)::
+       dl_vtx_cut=null,
+       // fast_xgb_forest: TmvaGradForest for the two XGB BDT combiners
+       // (sbnd_xin/docs/76 round 2).  C++ default false; key omitted when off.
+       fast_xgb_forest=false)::
         clus_pr(anodes, dump=dump,
                 output_dir=output_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo,
                 rse_from_ident=rse_from_ident, pos_offset_on=pos_offset_on,
@@ -4015,7 +4026,8 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 use_power_recomb=use_power_recomb,
                 sp_dedx_use_recomb_model=sp_dedx_use_recomb_model,
                 sp_mean_dedx_cut=sp_mean_dedx_cut,
-                dl_vtx_cut=dl_vtx_cut),
+                dl_vtx_cut=dl_vtx_cut,
+                fast_xgb_forest=fast_xgb_forest),
     detector_volumes(anodes, face=0):: detector_volumes(anodes=anodes, face=face, pos_offset_on=pos_offset_on),
     // Primitives the entry configuration needs to build the wclsTensorSetLabeler
     // node itself (it is no longer wired inside clus_all_apa).  All are the exact

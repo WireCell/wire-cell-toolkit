@@ -105,8 +105,11 @@ void UbooneNueBDTScorer::configure(const WireCell::Configuration& cfg)
     m_tro_4_xml       = resolve(get<std::string>(cfg, "tro_4_weights_xml",       ""));
     m_tro_5_xml       = resolve(get<std::string>(cfg, "tro_5_weights_xml",       ""));
     m_nue_xgboost_xml = resolve(get<std::string>(cfg, "nue_xgboost_xml",         ""));
+    // C++ default false = TMVA::Reader books the XGB combiner (legacy).
+    m_fast_xgb_forest = get<bool>(cfg, "fast_xgb_forest", m_fast_xgb_forest);
 
-    init_readers();
+    // Readers are booked lazily by ensure_readers() on the first scoring
+    // visit (see the header note) -- nothing else to do here.
 }
 
 Configuration UbooneNueBDTScorer::default_configuration() const
@@ -144,17 +147,28 @@ Configuration UbooneNueBDTScorer::default_configuration() const
     cfg["tro_4_weights_xml"]       = "";
     cfg["tro_5_weights_xml"]       = "";
     cfg["nue_xgboost_xml"]         = "";  // e.g. wc.resolve("uboone/weights/XGB_nue_seed2_0923.xml")
+    // false = TMVA::Reader books nue_xgboost_xml (legacy); true = TmvaGradForest
+    // (same score, docs/76 round 2).  Key omitted when off => byte-identical config.
+    cfg["fast_xgb_forest"]         = false;
     return cfg;
 }
 
 // ===========================================================================
-// init_readers
+// ensure_readers
 //
-// Create all TMVA readers once at configure time. Each reader's variables
-// are bound to mutable member floats so that evaluate-time code only needs
-// to copy values into those members and call EvaluateMVA.
+// Create all TMVA readers once, on the first visit() that has something to
+// score (docs/76 round 1; formerly init_readers() at configure time).  Each
+// reader's variables are bound to mutable member floats so that
+// evaluate-time code only needs to copy values into those members and call
+// EvaluateMVA.  std::call_once keeps this single-shot even if a future graph
+// ever drives visit() from more than one thread.
 // ===========================================================================
-void UbooneNueBDTScorer::init_readers()
+void UbooneNueBDTScorer::ensure_readers() const
+{
+    std::call_once(m_readers_once, [this]() { this->init_readers_impl(); });
+}
+
+void UbooneNueBDTScorer::init_readers_impl() const
 {
     // ---- Vector sub-BDT readers ----
 
@@ -327,272 +341,302 @@ void UbooneNueBDTScorer::init_readers()
     // ---- Final XGBoost reader ----
 
     if (!m_nue_xgboost_xml.empty()) {
-        m_rdr_xgboost = std::make_unique<TMVA::Reader>("!V:Silent");
-        m_rdr_xgboost->AddVariable("match_isFC",                   &m_xgb_match_isFC);
-        m_rdr_xgboost->AddVariable("kine_reco_Enu",                &m_xgb_kine_reco_Enu);
-        m_rdr_xgboost->AddVariable("cme_mu_energy",                &m_xgb_cme_mu_energy);
-        m_rdr_xgboost->AddVariable("cme_energy",                   &m_xgb_cme_energy);
-        m_rdr_xgboost->AddVariable("cme_mu_length",                &m_xgb_cme_mu_length);
-        m_rdr_xgboost->AddVariable("cme_length",                   &m_xgb_cme_length);
-        m_rdr_xgboost->AddVariable("cme_angle_beam",               &m_xgb_cme_angle_beam);
-        m_rdr_xgboost->AddVariable("anc_angle",                    &m_xgb_anc_angle);
-        m_rdr_xgboost->AddVariable("anc_max_angle",                &m_xgb_anc_max_angle);
-        m_rdr_xgboost->AddVariable("anc_max_length",               &m_xgb_anc_max_length);
-        m_rdr_xgboost->AddVariable("anc_acc_forward_length",       &m_xgb_anc_acc_forward_length);
-        m_rdr_xgboost->AddVariable("anc_acc_backward_length",      &m_xgb_anc_acc_backward_length);
-        m_rdr_xgboost->AddVariable("anc_acc_forward_length1",      &m_xgb_anc_acc_forward_length1);
-        m_rdr_xgboost->AddVariable("anc_shower_main_length",       &m_xgb_anc_shower_main_length);
-        m_rdr_xgboost->AddVariable("anc_shower_total_length",      &m_xgb_anc_shower_total_length);
-        m_rdr_xgboost->AddVariable("anc_flag_main_outside",        &m_xgb_anc_flag_main_outside);
-        m_rdr_xgboost->AddVariable("gap_flag_prolong_u",           &m_xgb_gap_flag_prolong_u);
-        m_rdr_xgboost->AddVariable("gap_flag_prolong_v",           &m_xgb_gap_flag_prolong_v);
-        m_rdr_xgboost->AddVariable("gap_flag_prolong_w",           &m_xgb_gap_flag_prolong_w);
-        m_rdr_xgboost->AddVariable("gap_flag_parallel",            &m_xgb_gap_flag_parallel);
-        m_rdr_xgboost->AddVariable("gap_n_points",                 &m_xgb_gap_n_points);
-        m_rdr_xgboost->AddVariable("gap_n_bad",                    &m_xgb_gap_n_bad);
-        m_rdr_xgboost->AddVariable("gap_energy",                   &m_xgb_gap_energy);
-        m_rdr_xgboost->AddVariable("gap_num_valid_tracks",         &m_xgb_gap_num_valid_tracks);
-        m_rdr_xgboost->AddVariable("gap_flag_single_shower",       &m_xgb_gap_flag_single_shower);
-        m_rdr_xgboost->AddVariable("hol_1_n_valid_tracks",         &m_xgb_hol_1_n_valid_tracks);
-        m_rdr_xgboost->AddVariable("hol_1_min_angle",              &m_xgb_hol_1_min_angle);
-        m_rdr_xgboost->AddVariable("hol_1_energy",                 &m_xgb_hol_1_energy);
-        m_rdr_xgboost->AddVariable("hol_1_min_length",             &m_xgb_hol_1_min_length);
-        m_rdr_xgboost->AddVariable("hol_2_min_angle",              &m_xgb_hol_2_min_angle);
-        m_rdr_xgboost->AddVariable("hol_2_medium_dQ_dx",           &m_xgb_hol_2_medium_dQ_dx);
-        m_rdr_xgboost->AddVariable("hol_2_ncount",                 &m_xgb_hol_2_ncount);
-        m_rdr_xgboost->AddVariable("lol_3_angle_beam",             &m_xgb_lol_3_angle_beam);
-        m_rdr_xgboost->AddVariable("lol_3_n_valid_tracks",         &m_xgb_lol_3_n_valid_tracks);
-        m_rdr_xgboost->AddVariable("lol_3_min_angle",              &m_xgb_lol_3_min_angle);
-        m_rdr_xgboost->AddVariable("lol_3_vtx_n_segs",             &m_xgb_lol_3_vtx_n_segs);
-        m_rdr_xgboost->AddVariable("lol_3_shower_main_length",     &m_xgb_lol_3_shower_main_length);
-        m_rdr_xgboost->AddVariable("lol_3_n_out",                  &m_xgb_lol_3_n_out);
-        m_rdr_xgboost->AddVariable("lol_3_n_sum",                  &m_xgb_lol_3_n_sum);
-        m_rdr_xgboost->AddVariable("hol_1_flag_all_shower",        &m_xgb_hol_1_flag_all_shower);
-        m_rdr_xgboost->AddVariable("mgo_energy",                   &m_xgb_mgo_energy);
-        m_rdr_xgboost->AddVariable("mgo_max_energy",               &m_xgb_mgo_max_energy);
-        m_rdr_xgboost->AddVariable("mgo_total_energy",             &m_xgb_mgo_total_energy);
-        m_rdr_xgboost->AddVariable("mgo_n_showers",                &m_xgb_mgo_n_showers);
-        m_rdr_xgboost->AddVariable("mgo_max_energy_1",             &m_xgb_mgo_max_energy_1);
-        m_rdr_xgboost->AddVariable("mgo_max_energy_2",             &m_xgb_mgo_max_energy_2);
-        m_rdr_xgboost->AddVariable("mgo_total_other_energy",       &m_xgb_mgo_total_other_energy);
-        m_rdr_xgboost->AddVariable("mgo_n_total_showers",          &m_xgb_mgo_n_total_showers);
-        m_rdr_xgboost->AddVariable("mgo_total_other_energy_1",     &m_xgb_mgo_total_other_energy_1);
-        m_rdr_xgboost->AddVariable("mgt_flag_single_shower",       &m_xgb_mgt_flag_single_shower);
-        m_rdr_xgboost->AddVariable("mgt_max_energy",               &m_xgb_mgt_max_energy);
-        m_rdr_xgboost->AddVariable("mgt_total_other_energy",       &m_xgb_mgt_total_other_energy);
-        m_rdr_xgboost->AddVariable("mgt_max_energy_1",             &m_xgb_mgt_max_energy_1);
-        m_rdr_xgboost->AddVariable("mgt_e_indirect_max_energy",    &m_xgb_mgt_e_indirect_max_energy);
-        m_rdr_xgboost->AddVariable("mgt_e_direct_max_energy",      &m_xgb_mgt_e_direct_max_energy);
-        m_rdr_xgboost->AddVariable("mgt_n_direct_showers",         &m_xgb_mgt_n_direct_showers);
-        m_rdr_xgboost->AddVariable("mgt_e_direct_total_energy",    &m_xgb_mgt_e_direct_total_energy);
-        m_rdr_xgboost->AddVariable("mgt_flag_indirect_max_pio",    &m_xgb_mgt_flag_indirect_max_pio);
-        m_rdr_xgboost->AddVariable("mgt_e_indirect_total_energy",  &m_xgb_mgt_e_indirect_total_energy);
-        m_rdr_xgboost->AddVariable("mip_quality_energy",           &m_xgb_mip_quality_energy);
-        m_rdr_xgboost->AddVariable("mip_quality_overlap",          &m_xgb_mip_quality_overlap);
-        m_rdr_xgboost->AddVariable("mip_quality_n_showers",        &m_xgb_mip_quality_n_showers);
-        m_rdr_xgboost->AddVariable("mip_quality_n_tracks",         &m_xgb_mip_quality_n_tracks);
-        m_rdr_xgboost->AddVariable("mip_quality_flag_inside_pi0",  &m_xgb_mip_quality_flag_inside_pi0);
-        m_rdr_xgboost->AddVariable("mip_quality_n_pi0_showers",    &m_xgb_mip_quality_n_pi0_showers);
-        m_rdr_xgboost->AddVariable("mip_quality_shortest_length",  &m_xgb_mip_quality_shortest_length);
-        m_rdr_xgboost->AddVariable("mip_quality_acc_length",       &m_xgb_mip_quality_acc_length);
-        m_rdr_xgboost->AddVariable("mip_quality_shortest_angle",   &m_xgb_mip_quality_shortest_angle);
-        m_rdr_xgboost->AddVariable("mip_quality_flag_proton",      &m_xgb_mip_quality_flag_proton);
-        m_rdr_xgboost->AddVariable("br1_1_shower_type",            &m_xgb_br1_1_shower_type);
-        m_rdr_xgboost->AddVariable("br1_1_vtx_n_segs",             &m_xgb_br1_1_vtx_n_segs);
-        m_rdr_xgboost->AddVariable("br1_1_energy",                 &m_xgb_br1_1_energy);
-        m_rdr_xgboost->AddVariable("br1_1_n_segs",                 &m_xgb_br1_1_n_segs);
-        m_rdr_xgboost->AddVariable("br1_1_flag_sg_topology",       &m_xgb_br1_1_flag_sg_topology);
-        m_rdr_xgboost->AddVariable("br1_1_flag_sg_trajectory",     &m_xgb_br1_1_flag_sg_trajectory);
-        m_rdr_xgboost->AddVariable("br1_1_sg_length",              &m_xgb_br1_1_sg_length);
-        m_rdr_xgboost->AddVariable("br1_2_n_connected",            &m_xgb_br1_2_n_connected);
-        m_rdr_xgboost->AddVariable("br1_2_max_length",             &m_xgb_br1_2_max_length);
-        m_rdr_xgboost->AddVariable("br1_2_n_connected_1",          &m_xgb_br1_2_n_connected_1);
-        m_rdr_xgboost->AddVariable("br1_2_n_shower_segs",          &m_xgb_br1_2_n_shower_segs);
-        m_rdr_xgboost->AddVariable("br1_2_max_length_ratio",       &m_xgb_br1_2_max_length_ratio);
-        m_rdr_xgboost->AddVariable("br1_2_shower_length",          &m_xgb_br1_2_shower_length);
-        m_rdr_xgboost->AddVariable("br1_3_n_connected_p",          &m_xgb_br1_3_n_connected_p);
-        m_rdr_xgboost->AddVariable("br1_3_max_length_p",           &m_xgb_br1_3_max_length_p);
-        m_rdr_xgboost->AddVariable("br1_3_n_shower_main_segs",     &m_xgb_br1_3_n_shower_main_segs);
-        m_rdr_xgboost->AddVariable("br3_1_energy",                 &m_xgb_br3_1_energy);
-        m_rdr_xgboost->AddVariable("br3_1_n_shower_segments",      &m_xgb_br3_1_n_shower_segments);
-        m_rdr_xgboost->AddVariable("br3_1_sg_flag_trajectory",     &m_xgb_br3_1_sg_flag_trajectory);
-        m_rdr_xgboost->AddVariable("br3_1_sg_direct_length",       &m_xgb_br3_1_sg_direct_length);
-        m_rdr_xgboost->AddVariable("br3_1_sg_length",              &m_xgb_br3_1_sg_length);
-        m_rdr_xgboost->AddVariable("br3_1_total_main_length",      &m_xgb_br3_1_total_main_length);
-        m_rdr_xgboost->AddVariable("br3_1_total_length",           &m_xgb_br3_1_total_length);
-        m_rdr_xgboost->AddVariable("br3_1_iso_angle",              &m_xgb_br3_1_iso_angle);
-        m_rdr_xgboost->AddVariable("br3_1_sg_flag_topology",       &m_xgb_br3_1_sg_flag_topology);
-        m_rdr_xgboost->AddVariable("br3_2_n_ele",                  &m_xgb_br3_2_n_ele);
-        m_rdr_xgboost->AddVariable("br3_2_n_other",                &m_xgb_br3_2_n_other);
-        m_rdr_xgboost->AddVariable("br3_2_other_fid",              &m_xgb_br3_2_other_fid);
-        m_rdr_xgboost->AddVariable("br3_4_acc_length",             &m_xgb_br3_4_acc_length);
-        m_rdr_xgboost->AddVariable("br3_4_total_length",           &m_xgb_br3_4_total_length);
-        m_rdr_xgboost->AddVariable("br3_7_min_angle",              &m_xgb_br3_7_min_angle);
-        m_rdr_xgboost->AddVariable("br3_8_max_dQ_dx",              &m_xgb_br3_8_max_dQ_dx);
-        m_rdr_xgboost->AddVariable("br3_8_n_main_segs",            &m_xgb_br3_8_n_main_segs);
-        m_rdr_xgboost->AddVariable("vis_1_n_vtx_segs",             &m_xgb_vis_1_n_vtx_segs);
-        m_rdr_xgboost->AddVariable("vis_1_energy",                 &m_xgb_vis_1_energy);
-        m_rdr_xgboost->AddVariable("vis_1_num_good_tracks",        &m_xgb_vis_1_num_good_tracks);
-        m_rdr_xgboost->AddVariable("vis_1_max_angle",              &m_xgb_vis_1_max_angle);
-        m_rdr_xgboost->AddVariable("vis_1_max_shower_angle",       &m_xgb_vis_1_max_shower_angle);
-        m_rdr_xgboost->AddVariable("vis_1_tmp_length1",            &m_xgb_vis_1_tmp_length1);
-        m_rdr_xgboost->AddVariable("vis_1_tmp_length2",            &m_xgb_vis_1_tmp_length2);
-        m_rdr_xgboost->AddVariable("vis_2_n_vtx_segs",             &m_xgb_vis_2_n_vtx_segs);
-        m_rdr_xgboost->AddVariable("vis_2_min_angle",              &m_xgb_vis_2_min_angle);
-        m_rdr_xgboost->AddVariable("vis_2_min_weak_track",         &m_xgb_vis_2_min_weak_track);
-        m_rdr_xgboost->AddVariable("vis_2_angle_beam",             &m_xgb_vis_2_angle_beam);
-        m_rdr_xgboost->AddVariable("vis_2_min_angle1",             &m_xgb_vis_2_min_angle1);
-        m_rdr_xgboost->AddVariable("vis_2_iso_angle1",             &m_xgb_vis_2_iso_angle1);
-        m_rdr_xgboost->AddVariable("vis_2_min_medium_dQ_dx",       &m_xgb_vis_2_min_medium_dQ_dx);
-        m_rdr_xgboost->AddVariable("vis_2_min_length",             &m_xgb_vis_2_min_length);
-        m_rdr_xgboost->AddVariable("vis_2_sg_length",              &m_xgb_vis_2_sg_length);
-        m_rdr_xgboost->AddVariable("vis_2_max_angle",              &m_xgb_vis_2_max_angle);
-        m_rdr_xgboost->AddVariable("vis_2_max_weak_track",         &m_xgb_vis_2_max_weak_track);
-        m_rdr_xgboost->AddVariable("pio_1_mass",                   &m_xgb_pio_1_mass);
-        m_rdr_xgboost->AddVariable("pio_1_pio_type",               &m_xgb_pio_1_pio_type);
-        m_rdr_xgboost->AddVariable("pio_1_energy_1",               &m_xgb_pio_1_energy_1);
-        m_rdr_xgboost->AddVariable("pio_1_energy_2",               &m_xgb_pio_1_energy_2);
-        m_rdr_xgboost->AddVariable("pio_1_dis_1",                  &m_xgb_pio_1_dis_1);
-        m_rdr_xgboost->AddVariable("pio_1_dis_2",                  &m_xgb_pio_1_dis_2);
-        m_rdr_xgboost->AddVariable("pio_mip_id",                   &m_xgb_pio_mip_id);
-        m_rdr_xgboost->AddVariable("stem_dir_flag_single_shower",  &m_xgb_stem_dir_flag_single_shower);
-        m_rdr_xgboost->AddVariable("stem_dir_angle",               &m_xgb_stem_dir_angle);
-        m_rdr_xgboost->AddVariable("stem_dir_energy",              &m_xgb_stem_dir_energy);
-        m_rdr_xgboost->AddVariable("stem_dir_angle1",              &m_xgb_stem_dir_angle1);
-        m_rdr_xgboost->AddVariable("stem_dir_angle2",              &m_xgb_stem_dir_angle2);
-        m_rdr_xgboost->AddVariable("stem_dir_angle3",              &m_xgb_stem_dir_angle3);
-        m_rdr_xgboost->AddVariable("stem_dir_ratio",               &m_xgb_stem_dir_ratio);
-        m_rdr_xgboost->AddVariable("br2_num_valid_tracks",         &m_xgb_br2_num_valid_tracks);
-        m_rdr_xgboost->AddVariable("br2_n_shower_main_segs",       &m_xgb_br2_n_shower_main_segs);
-        m_rdr_xgboost->AddVariable("br2_max_angle",                &m_xgb_br2_max_angle);
-        m_rdr_xgboost->AddVariable("br2_sg_length",                &m_xgb_br2_sg_length);
-        m_rdr_xgboost->AddVariable("br2_flag_sg_trajectory",       &m_xgb_br2_flag_sg_trajectory);
-        m_rdr_xgboost->AddVariable("stem_len_energy",              &m_xgb_stem_len_energy);
-        m_rdr_xgboost->AddVariable("stem_len_length",              &m_xgb_stem_len_length);
-        m_rdr_xgboost->AddVariable("stem_len_flag_avoid_muon_check",&m_xgb_stem_len_flag_avoid_muon_check);
-        m_rdr_xgboost->AddVariable("stem_len_num_daughters",       &m_xgb_stem_len_num_daughters);
-        m_rdr_xgboost->AddVariable("stem_len_daughter_length",     &m_xgb_stem_len_daughter_length);
-        m_rdr_xgboost->AddVariable("brm_n_mu_segs",                &m_xgb_brm_n_mu_segs);
-        m_rdr_xgboost->AddVariable("brm_Ep",                       &m_xgb_brm_Ep);
-        m_rdr_xgboost->AddVariable("brm_acc_length",               &m_xgb_brm_acc_length);
-        m_rdr_xgboost->AddVariable("brm_shower_total_length",      &m_xgb_brm_shower_total_length);
-        m_rdr_xgboost->AddVariable("brm_connected_length",         &m_xgb_brm_connected_length);
-        m_rdr_xgboost->AddVariable("brm_n_size",                   &m_xgb_brm_n_size);
-        m_rdr_xgboost->AddVariable("brm_n_shower_main_segs",       &m_xgb_brm_n_shower_main_segs);
-        m_rdr_xgboost->AddVariable("brm_n_mu_main",                &m_xgb_brm_n_mu_main);
-        m_rdr_xgboost->AddVariable("lem_shower_main_length",       &m_xgb_lem_shower_main_length);
-        m_rdr_xgboost->AddVariable("lem_n_3seg",                   &m_xgb_lem_n_3seg);
-        m_rdr_xgboost->AddVariable("lem_e_charge",                 &m_xgb_lem_e_charge);
-        m_rdr_xgboost->AddVariable("lem_e_dQdx",                   &m_xgb_lem_e_dQdx);
-        m_rdr_xgboost->AddVariable("lem_shower_num_main_segs",     &m_xgb_lem_shower_num_main_segs);
-        m_rdr_xgboost->AddVariable("brm_acc_direct_length",        &m_xgb_brm_acc_direct_length);
-        m_rdr_xgboost->AddVariable("stw_1_energy",                 &m_xgb_stw_1_energy);
-        m_rdr_xgboost->AddVariable("stw_1_dis",                    &m_xgb_stw_1_dis);
-        m_rdr_xgboost->AddVariable("stw_1_dQ_dx",                  &m_xgb_stw_1_dQ_dx);
-        m_rdr_xgboost->AddVariable("stw_1_flag_single_shower",     &m_xgb_stw_1_flag_single_shower);
-        m_rdr_xgboost->AddVariable("stw_1_n_pi0",                  &m_xgb_stw_1_n_pi0);
-        m_rdr_xgboost->AddVariable("stw_1_num_valid_tracks",       &m_xgb_stw_1_num_valid_tracks);
-        m_rdr_xgboost->AddVariable("spt_shower_main_length",       &m_xgb_spt_shower_main_length);
-        m_rdr_xgboost->AddVariable("spt_shower_total_length",      &m_xgb_spt_shower_total_length);
-        m_rdr_xgboost->AddVariable("spt_angle_beam",               &m_xgb_spt_angle_beam);
-        m_rdr_xgboost->AddVariable("spt_angle_vertical",           &m_xgb_spt_angle_vertical);
-        m_rdr_xgboost->AddVariable("spt_max_dQ_dx",                &m_xgb_spt_max_dQ_dx);
-        m_rdr_xgboost->AddVariable("spt_angle_beam_1",             &m_xgb_spt_angle_beam_1);
-        m_rdr_xgboost->AddVariable("spt_angle_drift",              &m_xgb_spt_angle_drift);
-        m_rdr_xgboost->AddVariable("spt_angle_drift_1",            &m_xgb_spt_angle_drift_1);
-        m_rdr_xgboost->AddVariable("spt_num_valid_tracks",         &m_xgb_spt_num_valid_tracks);
-        m_rdr_xgboost->AddVariable("spt_n_vtx_segs",               &m_xgb_spt_n_vtx_segs);
-        m_rdr_xgboost->AddVariable("spt_max_length",               &m_xgb_spt_max_length);
-        m_rdr_xgboost->AddVariable("mip_energy",                   &m_xgb_mip_energy);
-        m_rdr_xgboost->AddVariable("mip_n_end_reduction",          &m_xgb_mip_n_end_reduction);
-        m_rdr_xgboost->AddVariable("mip_n_first_mip",              &m_xgb_mip_n_first_mip);
-        m_rdr_xgboost->AddVariable("mip_n_first_non_mip",          &m_xgb_mip_n_first_non_mip);
-        m_rdr_xgboost->AddVariable("mip_n_first_non_mip_1",        &m_xgb_mip_n_first_non_mip_1);
-        m_rdr_xgboost->AddVariable("mip_n_first_non_mip_2",        &m_xgb_mip_n_first_non_mip_2);
-        m_rdr_xgboost->AddVariable("mip_vec_dQ_dx_0",              &m_xgb_mip_vec_dQ_dx_0);
-        m_rdr_xgboost->AddVariable("mip_vec_dQ_dx_1",              &m_xgb_mip_vec_dQ_dx_1);
-        m_rdr_xgboost->AddVariable("mip_max_dQ_dx_sample",         &m_xgb_mip_max_dQ_dx_sample);
-        m_rdr_xgboost->AddVariable("mip_n_below_threshold",        &m_xgb_mip_n_below_threshold);
-        m_rdr_xgboost->AddVariable("mip_n_below_zero",             &m_xgb_mip_n_below_zero);
-        m_rdr_xgboost->AddVariable("mip_n_lowest",                 &m_xgb_mip_n_lowest);
-        m_rdr_xgboost->AddVariable("mip_n_highest",                &m_xgb_mip_n_highest);
-        m_rdr_xgboost->AddVariable("mip_lowest_dQ_dx",             &m_xgb_mip_lowest_dQ_dx);
-        m_rdr_xgboost->AddVariable("mip_highest_dQ_dx",            &m_xgb_mip_highest_dQ_dx);
-        m_rdr_xgboost->AddVariable("mip_medium_dQ_dx",             &m_xgb_mip_medium_dQ_dx);
-        m_rdr_xgboost->AddVariable("mip_stem_length",              &m_xgb_mip_stem_length);
-        m_rdr_xgboost->AddVariable("mip_length_main",              &m_xgb_mip_length_main);
-        m_rdr_xgboost->AddVariable("mip_length_total",             &m_xgb_mip_length_total);
-        m_rdr_xgboost->AddVariable("mip_angle_beam",               &m_xgb_mip_angle_beam);
-        m_rdr_xgboost->AddVariable("mip_iso_angle",                &m_xgb_mip_iso_angle);
-        m_rdr_xgboost->AddVariable("mip_n_vertex",                 &m_xgb_mip_n_vertex);
-        m_rdr_xgboost->AddVariable("mip_n_good_tracks",            &m_xgb_mip_n_good_tracks);
-        m_rdr_xgboost->AddVariable("mip_E_indirect_max_energy",    &m_xgb_mip_E_indirect_max_energy);
-        m_rdr_xgboost->AddVariable("mip_flag_all_above",           &m_xgb_mip_flag_all_above);
-        m_rdr_xgboost->AddVariable("mip_min_dQ_dx_5",              &m_xgb_mip_min_dQ_dx_5);
-        m_rdr_xgboost->AddVariable("mip_n_other_vertex",           &m_xgb_mip_n_other_vertex);
-        m_rdr_xgboost->AddVariable("mip_n_stem_size",              &m_xgb_mip_n_stem_size);
-        m_rdr_xgboost->AddVariable("mip_flag_stem_trajectory",     &m_xgb_mip_flag_stem_trajectory);
-        m_rdr_xgboost->AddVariable("mip_min_dis",                  &m_xgb_mip_min_dis);
-        m_rdr_xgboost->AddVariable("mip_vec_dQ_dx_2",              &m_xgb_mip_vec_dQ_dx_2);
-        m_rdr_xgboost->AddVariable("mip_vec_dQ_dx_3",              &m_xgb_mip_vec_dQ_dx_3);
-        m_rdr_xgboost->AddVariable("mip_vec_dQ_dx_4",              &m_xgb_mip_vec_dQ_dx_4);
-        m_rdr_xgboost->AddVariable("mip_vec_dQ_dx_5",              &m_xgb_mip_vec_dQ_dx_5);
-        m_rdr_xgboost->AddVariable("mip_vec_dQ_dx_6",              &m_xgb_mip_vec_dQ_dx_6);
-        m_rdr_xgboost->AddVariable("mip_vec_dQ_dx_7",              &m_xgb_mip_vec_dQ_dx_7);
-        m_rdr_xgboost->AddVariable("mip_vec_dQ_dx_8",              &m_xgb_mip_vec_dQ_dx_8);
-        m_rdr_xgboost->AddVariable("mip_vec_dQ_dx_9",              &m_xgb_mip_vec_dQ_dx_9);
-        m_rdr_xgboost->AddVariable("mip_vec_dQ_dx_10",             &m_xgb_mip_vec_dQ_dx_10);
-        m_rdr_xgboost->AddVariable("mip_vec_dQ_dx_11",             &m_xgb_mip_vec_dQ_dx_11);
-        m_rdr_xgboost->AddVariable("mip_vec_dQ_dx_12",             &m_xgb_mip_vec_dQ_dx_12);
-        m_rdr_xgboost->AddVariable("mip_vec_dQ_dx_13",             &m_xgb_mip_vec_dQ_dx_13);
-        m_rdr_xgboost->AddVariable("mip_vec_dQ_dx_14",             &m_xgb_mip_vec_dQ_dx_14);
-        m_rdr_xgboost->AddVariable("mip_vec_dQ_dx_15",             &m_xgb_mip_vec_dQ_dx_15);
-        m_rdr_xgboost->AddVariable("mip_vec_dQ_dx_16",             &m_xgb_mip_vec_dQ_dx_16);
-        m_rdr_xgboost->AddVariable("mip_vec_dQ_dx_17",             &m_xgb_mip_vec_dQ_dx_17);
-        m_rdr_xgboost->AddVariable("mip_vec_dQ_dx_18",             &m_xgb_mip_vec_dQ_dx_18);
-        m_rdr_xgboost->AddVariable("mip_vec_dQ_dx_19",             &m_xgb_mip_vec_dQ_dx_19);
-        m_rdr_xgboost->AddVariable("br3_3_score",                  &m_xgb_br3_3_score);
-        m_rdr_xgboost->AddVariable("br3_5_score",                  &m_xgb_br3_5_score);
-        m_rdr_xgboost->AddVariable("br3_6_score",                  &m_xgb_br3_6_score);
-        m_rdr_xgboost->AddVariable("pio_2_score",                  &m_xgb_pio_2_score);
-        m_rdr_xgboost->AddVariable("stw_2_score",                  &m_xgb_stw_2_score);
-        m_rdr_xgboost->AddVariable("stw_3_score",                  &m_xgb_stw_3_score);
-        m_rdr_xgboost->AddVariable("stw_4_score",                  &m_xgb_stw_4_score);
-        m_rdr_xgboost->AddVariable("sig_1_score",                  &m_xgb_sig_1_score);
-        m_rdr_xgboost->AddVariable("sig_2_score",                  &m_xgb_sig_2_score);
-        m_rdr_xgboost->AddVariable("lol_1_score",                  &m_xgb_lol_1_score);
-        m_rdr_xgboost->AddVariable("lol_2_score",                  &m_xgb_lol_2_score);
-        m_rdr_xgboost->AddVariable("tro_1_score",                  &m_xgb_tro_1_score);
-        m_rdr_xgboost->AddVariable("tro_2_score",                  &m_xgb_tro_2_score);
-        m_rdr_xgboost->AddVariable("tro_4_score",                  &m_xgb_tro_4_score);
-        m_rdr_xgboost->AddVariable("tro_5_score",                  &m_xgb_tro_5_score);
-        m_rdr_xgboost->AddVariable("br4_1_shower_main_length",     &m_xgb_br4_1_shower_main_length);
-        m_rdr_xgboost->AddVariable("br4_1_shower_total_length",    &m_xgb_br4_1_shower_total_length);
-        m_rdr_xgboost->AddVariable("br4_1_min_dis",                &m_xgb_br4_1_min_dis);
-        m_rdr_xgboost->AddVariable("br4_1_energy",                 &m_xgb_br4_1_energy);
-        m_rdr_xgboost->AddVariable("br4_1_flag_avoid_muon_check",  &m_xgb_br4_1_flag_avoid_muon_check);
-        m_rdr_xgboost->AddVariable("br4_1_n_vtx_segs",             &m_xgb_br4_1_n_vtx_segs);
-        m_rdr_xgboost->AddVariable("br4_2_ratio_45",               &m_xgb_br4_2_ratio_45);
-        m_rdr_xgboost->AddVariable("br4_2_ratio_35",               &m_xgb_br4_2_ratio_35);
-        m_rdr_xgboost->AddVariable("br4_2_ratio_25",               &m_xgb_br4_2_ratio_25);
-        m_rdr_xgboost->AddVariable("br4_2_ratio_15",               &m_xgb_br4_2_ratio_15);
-        m_rdr_xgboost->AddVariable("br4_2_ratio1_45",              &m_xgb_br4_2_ratio1_45);
-        m_rdr_xgboost->AddVariable("br4_2_ratio1_35",              &m_xgb_br4_2_ratio1_35);
-        m_rdr_xgboost->AddVariable("br4_2_ratio1_25",              &m_xgb_br4_2_ratio1_25);
-        m_rdr_xgboost->AddVariable("br4_2_ratio1_15",              &m_xgb_br4_2_ratio1_15);
-        m_rdr_xgboost->AddVariable("br4_2_iso_angle",              &m_xgb_br4_2_iso_angle);
-        m_rdr_xgboost->AddVariable("br4_2_iso_angle1",             &m_xgb_br4_2_iso_angle1);
-        m_rdr_xgboost->AddVariable("br4_2_angle",                  &m_xgb_br4_2_angle);
-        m_rdr_xgboost->AddVariable("tro_3_stem_length",            &m_xgb_tro_3_stem_length);
-        m_rdr_xgboost->AddVariable("tro_3_n_muon_segs",            &m_xgb_tro_3_n_muon_segs);
-        m_rdr_xgboost->AddVariable("br4_1_n_main_segs",            &m_xgb_br4_1_n_main_segs);
-        m_rdr_xgboost->BookMVA("MyBDT", m_nue_xgboost_xml);
+        // Both engines see the same variables in the same order; the TMVA
+        // reader is only created on the legacy path (docs/76 round 2).
+        m_xgb_names.clear();
+        m_xgb_ptrs.clear();
+        if (!m_fast_xgb_forest) m_rdr_xgboost = std::make_unique<TMVA::Reader>("!V:Silent");
+        auto add_xgb_var = [this](const char* name, float* ptr) {
+            m_xgb_names.emplace_back(name);
+            m_xgb_ptrs.push_back(ptr);
+            if (m_rdr_xgboost) m_rdr_xgboost->AddVariable(name, ptr);
+        };
+        add_xgb_var("match_isFC",                   &m_xgb_match_isFC);
+        add_xgb_var("kine_reco_Enu",                &m_xgb_kine_reco_Enu);
+        add_xgb_var("cme_mu_energy",                &m_xgb_cme_mu_energy);
+        add_xgb_var("cme_energy",                   &m_xgb_cme_energy);
+        add_xgb_var("cme_mu_length",                &m_xgb_cme_mu_length);
+        add_xgb_var("cme_length",                   &m_xgb_cme_length);
+        add_xgb_var("cme_angle_beam",               &m_xgb_cme_angle_beam);
+        add_xgb_var("anc_angle",                    &m_xgb_anc_angle);
+        add_xgb_var("anc_max_angle",                &m_xgb_anc_max_angle);
+        add_xgb_var("anc_max_length",               &m_xgb_anc_max_length);
+        add_xgb_var("anc_acc_forward_length",       &m_xgb_anc_acc_forward_length);
+        add_xgb_var("anc_acc_backward_length",      &m_xgb_anc_acc_backward_length);
+        add_xgb_var("anc_acc_forward_length1",      &m_xgb_anc_acc_forward_length1);
+        add_xgb_var("anc_shower_main_length",       &m_xgb_anc_shower_main_length);
+        add_xgb_var("anc_shower_total_length",      &m_xgb_anc_shower_total_length);
+        add_xgb_var("anc_flag_main_outside",        &m_xgb_anc_flag_main_outside);
+        add_xgb_var("gap_flag_prolong_u",           &m_xgb_gap_flag_prolong_u);
+        add_xgb_var("gap_flag_prolong_v",           &m_xgb_gap_flag_prolong_v);
+        add_xgb_var("gap_flag_prolong_w",           &m_xgb_gap_flag_prolong_w);
+        add_xgb_var("gap_flag_parallel",            &m_xgb_gap_flag_parallel);
+        add_xgb_var("gap_n_points",                 &m_xgb_gap_n_points);
+        add_xgb_var("gap_n_bad",                    &m_xgb_gap_n_bad);
+        add_xgb_var("gap_energy",                   &m_xgb_gap_energy);
+        add_xgb_var("gap_num_valid_tracks",         &m_xgb_gap_num_valid_tracks);
+        add_xgb_var("gap_flag_single_shower",       &m_xgb_gap_flag_single_shower);
+        add_xgb_var("hol_1_n_valid_tracks",         &m_xgb_hol_1_n_valid_tracks);
+        add_xgb_var("hol_1_min_angle",              &m_xgb_hol_1_min_angle);
+        add_xgb_var("hol_1_energy",                 &m_xgb_hol_1_energy);
+        add_xgb_var("hol_1_min_length",             &m_xgb_hol_1_min_length);
+        add_xgb_var("hol_2_min_angle",              &m_xgb_hol_2_min_angle);
+        add_xgb_var("hol_2_medium_dQ_dx",           &m_xgb_hol_2_medium_dQ_dx);
+        add_xgb_var("hol_2_ncount",                 &m_xgb_hol_2_ncount);
+        add_xgb_var("lol_3_angle_beam",             &m_xgb_lol_3_angle_beam);
+        add_xgb_var("lol_3_n_valid_tracks",         &m_xgb_lol_3_n_valid_tracks);
+        add_xgb_var("lol_3_min_angle",              &m_xgb_lol_3_min_angle);
+        add_xgb_var("lol_3_vtx_n_segs",             &m_xgb_lol_3_vtx_n_segs);
+        add_xgb_var("lol_3_shower_main_length",     &m_xgb_lol_3_shower_main_length);
+        add_xgb_var("lol_3_n_out",                  &m_xgb_lol_3_n_out);
+        add_xgb_var("lol_3_n_sum",                  &m_xgb_lol_3_n_sum);
+        add_xgb_var("hol_1_flag_all_shower",        &m_xgb_hol_1_flag_all_shower);
+        add_xgb_var("mgo_energy",                   &m_xgb_mgo_energy);
+        add_xgb_var("mgo_max_energy",               &m_xgb_mgo_max_energy);
+        add_xgb_var("mgo_total_energy",             &m_xgb_mgo_total_energy);
+        add_xgb_var("mgo_n_showers",                &m_xgb_mgo_n_showers);
+        add_xgb_var("mgo_max_energy_1",             &m_xgb_mgo_max_energy_1);
+        add_xgb_var("mgo_max_energy_2",             &m_xgb_mgo_max_energy_2);
+        add_xgb_var("mgo_total_other_energy",       &m_xgb_mgo_total_other_energy);
+        add_xgb_var("mgo_n_total_showers",          &m_xgb_mgo_n_total_showers);
+        add_xgb_var("mgo_total_other_energy_1",     &m_xgb_mgo_total_other_energy_1);
+        add_xgb_var("mgt_flag_single_shower",       &m_xgb_mgt_flag_single_shower);
+        add_xgb_var("mgt_max_energy",               &m_xgb_mgt_max_energy);
+        add_xgb_var("mgt_total_other_energy",       &m_xgb_mgt_total_other_energy);
+        add_xgb_var("mgt_max_energy_1",             &m_xgb_mgt_max_energy_1);
+        add_xgb_var("mgt_e_indirect_max_energy",    &m_xgb_mgt_e_indirect_max_energy);
+        add_xgb_var("mgt_e_direct_max_energy",      &m_xgb_mgt_e_direct_max_energy);
+        add_xgb_var("mgt_n_direct_showers",         &m_xgb_mgt_n_direct_showers);
+        add_xgb_var("mgt_e_direct_total_energy",    &m_xgb_mgt_e_direct_total_energy);
+        add_xgb_var("mgt_flag_indirect_max_pio",    &m_xgb_mgt_flag_indirect_max_pio);
+        add_xgb_var("mgt_e_indirect_total_energy",  &m_xgb_mgt_e_indirect_total_energy);
+        add_xgb_var("mip_quality_energy",           &m_xgb_mip_quality_energy);
+        add_xgb_var("mip_quality_overlap",          &m_xgb_mip_quality_overlap);
+        add_xgb_var("mip_quality_n_showers",        &m_xgb_mip_quality_n_showers);
+        add_xgb_var("mip_quality_n_tracks",         &m_xgb_mip_quality_n_tracks);
+        add_xgb_var("mip_quality_flag_inside_pi0",  &m_xgb_mip_quality_flag_inside_pi0);
+        add_xgb_var("mip_quality_n_pi0_showers",    &m_xgb_mip_quality_n_pi0_showers);
+        add_xgb_var("mip_quality_shortest_length",  &m_xgb_mip_quality_shortest_length);
+        add_xgb_var("mip_quality_acc_length",       &m_xgb_mip_quality_acc_length);
+        add_xgb_var("mip_quality_shortest_angle",   &m_xgb_mip_quality_shortest_angle);
+        add_xgb_var("mip_quality_flag_proton",      &m_xgb_mip_quality_flag_proton);
+        add_xgb_var("br1_1_shower_type",            &m_xgb_br1_1_shower_type);
+        add_xgb_var("br1_1_vtx_n_segs",             &m_xgb_br1_1_vtx_n_segs);
+        add_xgb_var("br1_1_energy",                 &m_xgb_br1_1_energy);
+        add_xgb_var("br1_1_n_segs",                 &m_xgb_br1_1_n_segs);
+        add_xgb_var("br1_1_flag_sg_topology",       &m_xgb_br1_1_flag_sg_topology);
+        add_xgb_var("br1_1_flag_sg_trajectory",     &m_xgb_br1_1_flag_sg_trajectory);
+        add_xgb_var("br1_1_sg_length",              &m_xgb_br1_1_sg_length);
+        add_xgb_var("br1_2_n_connected",            &m_xgb_br1_2_n_connected);
+        add_xgb_var("br1_2_max_length",             &m_xgb_br1_2_max_length);
+        add_xgb_var("br1_2_n_connected_1",          &m_xgb_br1_2_n_connected_1);
+        add_xgb_var("br1_2_n_shower_segs",          &m_xgb_br1_2_n_shower_segs);
+        add_xgb_var("br1_2_max_length_ratio",       &m_xgb_br1_2_max_length_ratio);
+        add_xgb_var("br1_2_shower_length",          &m_xgb_br1_2_shower_length);
+        add_xgb_var("br1_3_n_connected_p",          &m_xgb_br1_3_n_connected_p);
+        add_xgb_var("br1_3_max_length_p",           &m_xgb_br1_3_max_length_p);
+        add_xgb_var("br1_3_n_shower_main_segs",     &m_xgb_br1_3_n_shower_main_segs);
+        add_xgb_var("br3_1_energy",                 &m_xgb_br3_1_energy);
+        add_xgb_var("br3_1_n_shower_segments",      &m_xgb_br3_1_n_shower_segments);
+        add_xgb_var("br3_1_sg_flag_trajectory",     &m_xgb_br3_1_sg_flag_trajectory);
+        add_xgb_var("br3_1_sg_direct_length",       &m_xgb_br3_1_sg_direct_length);
+        add_xgb_var("br3_1_sg_length",              &m_xgb_br3_1_sg_length);
+        add_xgb_var("br3_1_total_main_length",      &m_xgb_br3_1_total_main_length);
+        add_xgb_var("br3_1_total_length",           &m_xgb_br3_1_total_length);
+        add_xgb_var("br3_1_iso_angle",              &m_xgb_br3_1_iso_angle);
+        add_xgb_var("br3_1_sg_flag_topology",       &m_xgb_br3_1_sg_flag_topology);
+        add_xgb_var("br3_2_n_ele",                  &m_xgb_br3_2_n_ele);
+        add_xgb_var("br3_2_n_other",                &m_xgb_br3_2_n_other);
+        add_xgb_var("br3_2_other_fid",              &m_xgb_br3_2_other_fid);
+        add_xgb_var("br3_4_acc_length",             &m_xgb_br3_4_acc_length);
+        add_xgb_var("br3_4_total_length",           &m_xgb_br3_4_total_length);
+        add_xgb_var("br3_7_min_angle",              &m_xgb_br3_7_min_angle);
+        add_xgb_var("br3_8_max_dQ_dx",              &m_xgb_br3_8_max_dQ_dx);
+        add_xgb_var("br3_8_n_main_segs",            &m_xgb_br3_8_n_main_segs);
+        add_xgb_var("vis_1_n_vtx_segs",             &m_xgb_vis_1_n_vtx_segs);
+        add_xgb_var("vis_1_energy",                 &m_xgb_vis_1_energy);
+        add_xgb_var("vis_1_num_good_tracks",        &m_xgb_vis_1_num_good_tracks);
+        add_xgb_var("vis_1_max_angle",              &m_xgb_vis_1_max_angle);
+        add_xgb_var("vis_1_max_shower_angle",       &m_xgb_vis_1_max_shower_angle);
+        add_xgb_var("vis_1_tmp_length1",            &m_xgb_vis_1_tmp_length1);
+        add_xgb_var("vis_1_tmp_length2",            &m_xgb_vis_1_tmp_length2);
+        add_xgb_var("vis_2_n_vtx_segs",             &m_xgb_vis_2_n_vtx_segs);
+        add_xgb_var("vis_2_min_angle",              &m_xgb_vis_2_min_angle);
+        add_xgb_var("vis_2_min_weak_track",         &m_xgb_vis_2_min_weak_track);
+        add_xgb_var("vis_2_angle_beam",             &m_xgb_vis_2_angle_beam);
+        add_xgb_var("vis_2_min_angle1",             &m_xgb_vis_2_min_angle1);
+        add_xgb_var("vis_2_iso_angle1",             &m_xgb_vis_2_iso_angle1);
+        add_xgb_var("vis_2_min_medium_dQ_dx",       &m_xgb_vis_2_min_medium_dQ_dx);
+        add_xgb_var("vis_2_min_length",             &m_xgb_vis_2_min_length);
+        add_xgb_var("vis_2_sg_length",              &m_xgb_vis_2_sg_length);
+        add_xgb_var("vis_2_max_angle",              &m_xgb_vis_2_max_angle);
+        add_xgb_var("vis_2_max_weak_track",         &m_xgb_vis_2_max_weak_track);
+        add_xgb_var("pio_1_mass",                   &m_xgb_pio_1_mass);
+        add_xgb_var("pio_1_pio_type",               &m_xgb_pio_1_pio_type);
+        add_xgb_var("pio_1_energy_1",               &m_xgb_pio_1_energy_1);
+        add_xgb_var("pio_1_energy_2",               &m_xgb_pio_1_energy_2);
+        add_xgb_var("pio_1_dis_1",                  &m_xgb_pio_1_dis_1);
+        add_xgb_var("pio_1_dis_2",                  &m_xgb_pio_1_dis_2);
+        add_xgb_var("pio_mip_id",                   &m_xgb_pio_mip_id);
+        add_xgb_var("stem_dir_flag_single_shower",  &m_xgb_stem_dir_flag_single_shower);
+        add_xgb_var("stem_dir_angle",               &m_xgb_stem_dir_angle);
+        add_xgb_var("stem_dir_energy",              &m_xgb_stem_dir_energy);
+        add_xgb_var("stem_dir_angle1",              &m_xgb_stem_dir_angle1);
+        add_xgb_var("stem_dir_angle2",              &m_xgb_stem_dir_angle2);
+        add_xgb_var("stem_dir_angle3",              &m_xgb_stem_dir_angle3);
+        add_xgb_var("stem_dir_ratio",               &m_xgb_stem_dir_ratio);
+        add_xgb_var("br2_num_valid_tracks",         &m_xgb_br2_num_valid_tracks);
+        add_xgb_var("br2_n_shower_main_segs",       &m_xgb_br2_n_shower_main_segs);
+        add_xgb_var("br2_max_angle",                &m_xgb_br2_max_angle);
+        add_xgb_var("br2_sg_length",                &m_xgb_br2_sg_length);
+        add_xgb_var("br2_flag_sg_trajectory",       &m_xgb_br2_flag_sg_trajectory);
+        add_xgb_var("stem_len_energy",              &m_xgb_stem_len_energy);
+        add_xgb_var("stem_len_length",              &m_xgb_stem_len_length);
+        add_xgb_var("stem_len_flag_avoid_muon_check",&m_xgb_stem_len_flag_avoid_muon_check);
+        add_xgb_var("stem_len_num_daughters",       &m_xgb_stem_len_num_daughters);
+        add_xgb_var("stem_len_daughter_length",     &m_xgb_stem_len_daughter_length);
+        add_xgb_var("brm_n_mu_segs",                &m_xgb_brm_n_mu_segs);
+        add_xgb_var("brm_Ep",                       &m_xgb_brm_Ep);
+        add_xgb_var("brm_acc_length",               &m_xgb_brm_acc_length);
+        add_xgb_var("brm_shower_total_length",      &m_xgb_brm_shower_total_length);
+        add_xgb_var("brm_connected_length",         &m_xgb_brm_connected_length);
+        add_xgb_var("brm_n_size",                   &m_xgb_brm_n_size);
+        add_xgb_var("brm_n_shower_main_segs",       &m_xgb_brm_n_shower_main_segs);
+        add_xgb_var("brm_n_mu_main",                &m_xgb_brm_n_mu_main);
+        add_xgb_var("lem_shower_main_length",       &m_xgb_lem_shower_main_length);
+        add_xgb_var("lem_n_3seg",                   &m_xgb_lem_n_3seg);
+        add_xgb_var("lem_e_charge",                 &m_xgb_lem_e_charge);
+        add_xgb_var("lem_e_dQdx",                   &m_xgb_lem_e_dQdx);
+        add_xgb_var("lem_shower_num_main_segs",     &m_xgb_lem_shower_num_main_segs);
+        add_xgb_var("brm_acc_direct_length",        &m_xgb_brm_acc_direct_length);
+        add_xgb_var("stw_1_energy",                 &m_xgb_stw_1_energy);
+        add_xgb_var("stw_1_dis",                    &m_xgb_stw_1_dis);
+        add_xgb_var("stw_1_dQ_dx",                  &m_xgb_stw_1_dQ_dx);
+        add_xgb_var("stw_1_flag_single_shower",     &m_xgb_stw_1_flag_single_shower);
+        add_xgb_var("stw_1_n_pi0",                  &m_xgb_stw_1_n_pi0);
+        add_xgb_var("stw_1_num_valid_tracks",       &m_xgb_stw_1_num_valid_tracks);
+        add_xgb_var("spt_shower_main_length",       &m_xgb_spt_shower_main_length);
+        add_xgb_var("spt_shower_total_length",      &m_xgb_spt_shower_total_length);
+        add_xgb_var("spt_angle_beam",               &m_xgb_spt_angle_beam);
+        add_xgb_var("spt_angle_vertical",           &m_xgb_spt_angle_vertical);
+        add_xgb_var("spt_max_dQ_dx",                &m_xgb_spt_max_dQ_dx);
+        add_xgb_var("spt_angle_beam_1",             &m_xgb_spt_angle_beam_1);
+        add_xgb_var("spt_angle_drift",              &m_xgb_spt_angle_drift);
+        add_xgb_var("spt_angle_drift_1",            &m_xgb_spt_angle_drift_1);
+        add_xgb_var("spt_num_valid_tracks",         &m_xgb_spt_num_valid_tracks);
+        add_xgb_var("spt_n_vtx_segs",               &m_xgb_spt_n_vtx_segs);
+        add_xgb_var("spt_max_length",               &m_xgb_spt_max_length);
+        add_xgb_var("mip_energy",                   &m_xgb_mip_energy);
+        add_xgb_var("mip_n_end_reduction",          &m_xgb_mip_n_end_reduction);
+        add_xgb_var("mip_n_first_mip",              &m_xgb_mip_n_first_mip);
+        add_xgb_var("mip_n_first_non_mip",          &m_xgb_mip_n_first_non_mip);
+        add_xgb_var("mip_n_first_non_mip_1",        &m_xgb_mip_n_first_non_mip_1);
+        add_xgb_var("mip_n_first_non_mip_2",        &m_xgb_mip_n_first_non_mip_2);
+        add_xgb_var("mip_vec_dQ_dx_0",              &m_xgb_mip_vec_dQ_dx_0);
+        add_xgb_var("mip_vec_dQ_dx_1",              &m_xgb_mip_vec_dQ_dx_1);
+        add_xgb_var("mip_max_dQ_dx_sample",         &m_xgb_mip_max_dQ_dx_sample);
+        add_xgb_var("mip_n_below_threshold",        &m_xgb_mip_n_below_threshold);
+        add_xgb_var("mip_n_below_zero",             &m_xgb_mip_n_below_zero);
+        add_xgb_var("mip_n_lowest",                 &m_xgb_mip_n_lowest);
+        add_xgb_var("mip_n_highest",                &m_xgb_mip_n_highest);
+        add_xgb_var("mip_lowest_dQ_dx",             &m_xgb_mip_lowest_dQ_dx);
+        add_xgb_var("mip_highest_dQ_dx",            &m_xgb_mip_highest_dQ_dx);
+        add_xgb_var("mip_medium_dQ_dx",             &m_xgb_mip_medium_dQ_dx);
+        add_xgb_var("mip_stem_length",              &m_xgb_mip_stem_length);
+        add_xgb_var("mip_length_main",              &m_xgb_mip_length_main);
+        add_xgb_var("mip_length_total",             &m_xgb_mip_length_total);
+        add_xgb_var("mip_angle_beam",               &m_xgb_mip_angle_beam);
+        add_xgb_var("mip_iso_angle",                &m_xgb_mip_iso_angle);
+        add_xgb_var("mip_n_vertex",                 &m_xgb_mip_n_vertex);
+        add_xgb_var("mip_n_good_tracks",            &m_xgb_mip_n_good_tracks);
+        add_xgb_var("mip_E_indirect_max_energy",    &m_xgb_mip_E_indirect_max_energy);
+        add_xgb_var("mip_flag_all_above",           &m_xgb_mip_flag_all_above);
+        add_xgb_var("mip_min_dQ_dx_5",              &m_xgb_mip_min_dQ_dx_5);
+        add_xgb_var("mip_n_other_vertex",           &m_xgb_mip_n_other_vertex);
+        add_xgb_var("mip_n_stem_size",              &m_xgb_mip_n_stem_size);
+        add_xgb_var("mip_flag_stem_trajectory",     &m_xgb_mip_flag_stem_trajectory);
+        add_xgb_var("mip_min_dis",                  &m_xgb_mip_min_dis);
+        add_xgb_var("mip_vec_dQ_dx_2",              &m_xgb_mip_vec_dQ_dx_2);
+        add_xgb_var("mip_vec_dQ_dx_3",              &m_xgb_mip_vec_dQ_dx_3);
+        add_xgb_var("mip_vec_dQ_dx_4",              &m_xgb_mip_vec_dQ_dx_4);
+        add_xgb_var("mip_vec_dQ_dx_5",              &m_xgb_mip_vec_dQ_dx_5);
+        add_xgb_var("mip_vec_dQ_dx_6",              &m_xgb_mip_vec_dQ_dx_6);
+        add_xgb_var("mip_vec_dQ_dx_7",              &m_xgb_mip_vec_dQ_dx_7);
+        add_xgb_var("mip_vec_dQ_dx_8",              &m_xgb_mip_vec_dQ_dx_8);
+        add_xgb_var("mip_vec_dQ_dx_9",              &m_xgb_mip_vec_dQ_dx_9);
+        add_xgb_var("mip_vec_dQ_dx_10",             &m_xgb_mip_vec_dQ_dx_10);
+        add_xgb_var("mip_vec_dQ_dx_11",             &m_xgb_mip_vec_dQ_dx_11);
+        add_xgb_var("mip_vec_dQ_dx_12",             &m_xgb_mip_vec_dQ_dx_12);
+        add_xgb_var("mip_vec_dQ_dx_13",             &m_xgb_mip_vec_dQ_dx_13);
+        add_xgb_var("mip_vec_dQ_dx_14",             &m_xgb_mip_vec_dQ_dx_14);
+        add_xgb_var("mip_vec_dQ_dx_15",             &m_xgb_mip_vec_dQ_dx_15);
+        add_xgb_var("mip_vec_dQ_dx_16",             &m_xgb_mip_vec_dQ_dx_16);
+        add_xgb_var("mip_vec_dQ_dx_17",             &m_xgb_mip_vec_dQ_dx_17);
+        add_xgb_var("mip_vec_dQ_dx_18",             &m_xgb_mip_vec_dQ_dx_18);
+        add_xgb_var("mip_vec_dQ_dx_19",             &m_xgb_mip_vec_dQ_dx_19);
+        add_xgb_var("br3_3_score",                  &m_xgb_br3_3_score);
+        add_xgb_var("br3_5_score",                  &m_xgb_br3_5_score);
+        add_xgb_var("br3_6_score",                  &m_xgb_br3_6_score);
+        add_xgb_var("pio_2_score",                  &m_xgb_pio_2_score);
+        add_xgb_var("stw_2_score",                  &m_xgb_stw_2_score);
+        add_xgb_var("stw_3_score",                  &m_xgb_stw_3_score);
+        add_xgb_var("stw_4_score",                  &m_xgb_stw_4_score);
+        add_xgb_var("sig_1_score",                  &m_xgb_sig_1_score);
+        add_xgb_var("sig_2_score",                  &m_xgb_sig_2_score);
+        add_xgb_var("lol_1_score",                  &m_xgb_lol_1_score);
+        add_xgb_var("lol_2_score",                  &m_xgb_lol_2_score);
+        add_xgb_var("tro_1_score",                  &m_xgb_tro_1_score);
+        add_xgb_var("tro_2_score",                  &m_xgb_tro_2_score);
+        add_xgb_var("tro_4_score",                  &m_xgb_tro_4_score);
+        add_xgb_var("tro_5_score",                  &m_xgb_tro_5_score);
+        add_xgb_var("br4_1_shower_main_length",     &m_xgb_br4_1_shower_main_length);
+        add_xgb_var("br4_1_shower_total_length",    &m_xgb_br4_1_shower_total_length);
+        add_xgb_var("br4_1_min_dis",                &m_xgb_br4_1_min_dis);
+        add_xgb_var("br4_1_energy",                 &m_xgb_br4_1_energy);
+        add_xgb_var("br4_1_flag_avoid_muon_check",  &m_xgb_br4_1_flag_avoid_muon_check);
+        add_xgb_var("br4_1_n_vtx_segs",             &m_xgb_br4_1_n_vtx_segs);
+        add_xgb_var("br4_2_ratio_45",               &m_xgb_br4_2_ratio_45);
+        add_xgb_var("br4_2_ratio_35",               &m_xgb_br4_2_ratio_35);
+        add_xgb_var("br4_2_ratio_25",               &m_xgb_br4_2_ratio_25);
+        add_xgb_var("br4_2_ratio_15",               &m_xgb_br4_2_ratio_15);
+        add_xgb_var("br4_2_ratio1_45",              &m_xgb_br4_2_ratio1_45);
+        add_xgb_var("br4_2_ratio1_35",              &m_xgb_br4_2_ratio1_35);
+        add_xgb_var("br4_2_ratio1_25",              &m_xgb_br4_2_ratio1_25);
+        add_xgb_var("br4_2_ratio1_15",              &m_xgb_br4_2_ratio1_15);
+        add_xgb_var("br4_2_iso_angle",              &m_xgb_br4_2_iso_angle);
+        add_xgb_var("br4_2_iso_angle1",             &m_xgb_br4_2_iso_angle1);
+        add_xgb_var("br4_2_angle",                  &m_xgb_br4_2_angle);
+        add_xgb_var("tro_3_stem_length",            &m_xgb_tro_3_stem_length);
+        add_xgb_var("tro_3_n_muon_segs",            &m_xgb_tro_3_n_muon_segs);
+        add_xgb_var("br4_1_n_main_segs",            &m_xgb_br4_1_n_main_segs);
+        if (m_rdr_xgboost) {
+            m_rdr_xgboost->BookMVA("MyBDT", m_nue_xgboost_xml);
+        }
+        else {
+            m_xgb_forest = std::make_unique<TmvaGradForest>();
+            m_xgb_forest->load(m_nue_xgboost_xml, m_xgb_names);  // throws on anything not mirrored
+            log->debug("UbooneNueBDTScorer: fast_xgb_forest booked {} ({} trees, {} nodes, {} vars)",
+                       m_nue_xgboost_xml, m_xgb_forest->ntrees(), m_xgb_forest->nnodes(), m_xgb_forest->nvars());
+        }
     }
+}
+
+double UbooneNueBDTScorer::eval_xgb() const
+{
+    if (m_xgb_forest) {
+        std::vector<float> vals(m_xgb_ptrs.size());
+        for (size_t i = 0; i < vals.size(); ++i) vals[i] = *m_xgb_ptrs[i];
+        return m_xgb_forest->evaluate(vals.data());
+    }
+    return m_rdr_xgboost->EvaluateMVA("MyBDT");
 }
 
 void UbooneNueBDTScorer::visit(Clus::Facade::Ensemble& ensemble) const
 {
-    if (!m_rdr_xgboost) {
+    // Same condition the configure-time booking produced (m_rdr_xgboost was
+    // created iff the resolved path is non-empty), tested on the path so the
+    // skip costs nothing before the readers exist.
+    if (m_nue_xgboost_xml.empty()) {
         log->warn("UbooneNueBDTScorer: nue_xgboost_xml not set or file not found — skipping nue BDT scoring");
         return;
     }
@@ -621,6 +665,14 @@ void UbooneNueBDTScorer::visit(Clus::Facade::Ensemble& ensemble) const
         fitters.push_back(tfi);
     }
     if (fitters.empty()) fitters.push_back(tf);
+
+    // First event with something to score pays the XML parse; every
+    // earlier event in this process skipped it entirely.
+    ensure_readers();
+    if (!have_xgb()) {
+        log->warn("UbooneNueBDTScorer: nue_xgboost_xml not set or file not found — skipping nue BDT scoring");
+        return;
+    }
 
     for (const auto& tfi : fitters) {
         Clus::PR::TaggerInfo& ti  = tfi->get_tagger_info_mutable();
@@ -1665,7 +1717,7 @@ void UbooneNueBDTScorer::cal_bdts_xgboost(Clus::PR::TaggerInfo& ti,
     if (std::isnan(ti.stem_dir_ratio)) ti.stem_dir_ratio = 1.0f;
 
     // ---- Step 3: copy ti fields to xgboost member float buffer, evaluate ----
-    if (!m_rdr_xgboost) {
+    if (!have_xgb()) {
         ti.nue_score = -15.f;
         return;
     }
@@ -1931,7 +1983,7 @@ void UbooneNueBDTScorer::cal_bdts_xgboost(Clus::PR::TaggerInfo& ti,
 
     // ---- Step 4: evaluate and transform -------------------------------------
     if (ti.br_filled == 1) {
-        float val1 = m_rdr_xgboost->EvaluateMVA("MyBDT");
+        float val1 = eval_xgb();
         // Clamp to avoid division by zero in log-odds transformation
         val1 = std::max(-0.9999f, std::min(0.9999f, val1));
         ti.nue_score = static_cast<float>(std::log10((1.0 + val1) / (1.0 - val1)));

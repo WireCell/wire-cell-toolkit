@@ -1457,12 +1457,17 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
         // Must run AFTER tagger_check_neutrino in the visitor list.
         // XML weight files should be resolved from wire-cell-data uboone/weights/.
         // Pass empty strings to disable (scorer will skip booking and EvaluateMVA).
+        // fast_xgb_forest: C++ default false = TMVA::Reader books the XGB
+        // combiner (legacy).  true = TmvaGradForest, the same score from a
+        // compact scan of the same XML (sbnd_xin/docs/76 round 2).  Key
+        // omitted when off => byte-identical pre-knob config.
         numu_bdt_scorer(name="",
                         numu1_weights_xml="",
                         numu2_weights_xml="",
                         numu3_weights_xml="",
                         cosmict10_weights_xml="",
-                        numu_xgboost_xml="") :: {
+                        numu_xgboost_xml="",
+                        fast_xgb_forest=false) :: {
             type: "UbooneNumuBDTScorer",
             name: prefix + name,
             data: {
@@ -1472,6 +1477,7 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
                 numu3_weights_xml:    numu3_weights_xml,
                 cosmict10_weights_xml: cosmict10_weights_xml,
                 numu_xgboost_xml:     numu_xgboost_xml,
+                [if fast_xgb_forest then 'fast_xgb_forest']: true,
             }
         },
 
@@ -1510,7 +1516,9 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
                        tro_2_weights_xml="",
                        tro_4_weights_xml="",
                        tro_5_weights_xml="",
-                       nue_xgboost_xml="") :: {
+                       nue_xgboost_xml="",
+                       // see numu_bdt_scorer: C++ default false; key omitted when off
+                       fast_xgb_forest=false) :: {
             type: "UbooneNueBDTScorer",
             name: prefix + name,
             data: {
@@ -1546,6 +1554,7 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
                 tro_4_weights_xml:       tro_4_weights_xml,
                 tro_5_weights_xml:       tro_5_weights_xml,
                 nue_xgboost_xml:         nue_xgboost_xml,
+                [if fast_xgb_forest then 'fast_xgb_forest']: true,
             }
         },
 

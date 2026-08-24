@@ -50,8 +50,11 @@ void UbooneNumuBDTScorer::configure(const WireCell::Configuration& cfg)
     m_numu3_xml        = resolve(get<std::string>(cfg, "numu3_weights_xml",     ""));
     m_cosmict10_xml    = resolve(get<std::string>(cfg, "cosmict10_weights_xml", ""));
     m_numu_xgboost_xml = resolve(get<std::string>(cfg, "numu_xgboost_xml",      ""));
+    // C++ default false = TMVA::Reader books the XGB combiner (legacy).
+    m_fast_xgb_forest = get<bool>(cfg, "fast_xgb_forest", m_fast_xgb_forest);
 
-    init_readers();
+    // Readers are booked lazily by ensure_readers() on the first scoring
+    // visit (see the header note) -- nothing else to do here.
 }
 
 Configuration UbooneNumuBDTScorer::default_configuration() const
@@ -63,14 +66,23 @@ Configuration UbooneNumuBDTScorer::default_configuration() const
     cfg["numu3_weights_xml"]    = "";
     cfg["cosmict10_weights_xml"] = "";  // e.g. wc.resolve("uboone/weights/cos_tagger_10.weights.xml")
     cfg["numu_xgboost_xml"]     = "";   // e.g. wc.resolve("uboone/weights/numu_scalars_scores_0923.xml")
+    // false = TMVA::Reader books numu_xgboost_xml (legacy); true = TmvaGradForest
+    // (same score, docs/76 round 2).  Key omitted when off => byte-identical config.
+    cfg["fast_xgb_forest"]      = false;
     return cfg;
 }
 
 // ===========================================================================
-// init_readers — create all TMVA readers and BookMVA once.
-// Called from configure() after XML paths are resolved.
+// ensure_readers — create all TMVA readers and BookMVA once, on the first
+// visit() that has something to score (docs/76 round 1; formerly
+// init_readers() at configure time).  XML paths were resolved in configure().
 // ===========================================================================
-void UbooneNumuBDTScorer::init_readers()
+void UbooneNumuBDTScorer::ensure_readers() const
+{
+    std::call_once(m_readers_once, [this]() { this->init_readers_impl(); });
+}
+
+void UbooneNumuBDTScorer::init_readers_impl() const
 {
     // --- cosmict_10 reader (5 variables) ---
     if (!m_cosmict10_xml.empty()) {
@@ -138,114 +150,144 @@ void UbooneNumuBDTScorer::init_readers()
         // Total = 74
         m_xgb_vars.resize(74, 0.0f);
 
-        m_reader_xgboost = std::make_unique<TMVA::Reader>("!V:Silent");
+        // Both engines see the same variables in the same order; the TMVA
+        // reader is only created on the legacy path (docs/76 round 2).
+        m_xgb_names.clear();
+        m_xgb_ptrs.clear();
+        if (!m_fast_xgb_forest) m_reader_xgboost = std::make_unique<TMVA::Reader>("!V:Silent");
+        auto add_xgb_var = [this](const char* name, float* ptr) {
+            m_xgb_names.emplace_back(name);
+            m_xgb_ptrs.push_back(ptr);
+            if (m_reader_xgboost) m_reader_xgboost->AddVariable(name, ptr);
+        };
         int idx = 0;
 
         // --- numu flag-3 features ---
-        m_reader_xgboost->AddVariable("numu_cc_flag_3",         &m_xgb_vars[idx++]); // 0
-        m_reader_xgboost->AddVariable("numu_cc_3_particle_type",&m_xgb_vars[idx++]); // 1
-        m_reader_xgboost->AddVariable("numu_cc_3_max_length",   &m_xgb_vars[idx++]); // 2
-        m_reader_xgboost->AddVariable("numu_cc_3_track_length", &m_xgb_vars[idx++]); // 3
-        m_reader_xgboost->AddVariable("numu_cc_3_max_length_all",   &m_xgb_vars[idx++]); // 4
-        m_reader_xgboost->AddVariable("numu_cc_3_max_muon_length",  &m_xgb_vars[idx++]); // 5
-        m_reader_xgboost->AddVariable("numu_cc_3_n_daughter_tracks",&m_xgb_vars[idx++]); // 6
-        m_reader_xgboost->AddVariable("numu_cc_3_n_daughter_all",   &m_xgb_vars[idx++]); // 7
+        add_xgb_var("numu_cc_flag_3",         &m_xgb_vars[idx++]); // 0
+        add_xgb_var("numu_cc_3_particle_type",&m_xgb_vars[idx++]); // 1
+        add_xgb_var("numu_cc_3_max_length",   &m_xgb_vars[idx++]); // 2
+        add_xgb_var("numu_cc_3_track_length", &m_xgb_vars[idx++]); // 3
+        add_xgb_var("numu_cc_3_max_length_all",   &m_xgb_vars[idx++]); // 4
+        add_xgb_var("numu_cc_3_max_muon_length",  &m_xgb_vars[idx++]); // 5
+        add_xgb_var("numu_cc_3_n_daughter_tracks",&m_xgb_vars[idx++]); // 6
+        add_xgb_var("numu_cc_3_n_daughter_all",   &m_xgb_vars[idx++]); // 7
 
         // --- cosmic tagger flag-2 features ---
-        m_reader_xgboost->AddVariable("cosmict_flag_2",               &m_xgb_vars[idx++]); // 8
-        m_reader_xgboost->AddVariable("cosmict_2_filled",             &m_xgb_vars[idx++]); // 9
-        m_reader_xgboost->AddVariable("cosmict_2_particle_type",      &m_xgb_vars[idx++]); // 10
-        m_reader_xgboost->AddVariable("cosmict_2_n_muon_tracks",      &m_xgb_vars[idx++]); // 11
-        m_reader_xgboost->AddVariable("cosmict_2_total_shower_length",&m_xgb_vars[idx++]); // 12
-        m_reader_xgboost->AddVariable("cosmict_2_flag_inside",        &m_xgb_vars[idx++]); // 13
-        m_reader_xgboost->AddVariable("cosmict_2_angle_beam",         &m_xgb_vars[idx++]); // 14
-        m_reader_xgboost->AddVariable("cosmict_2_flag_dir_weak",      &m_xgb_vars[idx++]); // 15
-        m_reader_xgboost->AddVariable("cosmict_2_dQ_dx_end",          &m_xgb_vars[idx++]); // 16
-        m_reader_xgboost->AddVariable("cosmict_2_dQ_dx_front",        &m_xgb_vars[idx++]); // 17
-        m_reader_xgboost->AddVariable("cosmict_2_theta",              &m_xgb_vars[idx++]); // 18
-        m_reader_xgboost->AddVariable("cosmict_2_phi",                &m_xgb_vars[idx++]); // 19
-        m_reader_xgboost->AddVariable("cosmict_2_valid_tracks",       &m_xgb_vars[idx++]); // 20
+        add_xgb_var("cosmict_flag_2",               &m_xgb_vars[idx++]); // 8
+        add_xgb_var("cosmict_2_filled",             &m_xgb_vars[idx++]); // 9
+        add_xgb_var("cosmict_2_particle_type",      &m_xgb_vars[idx++]); // 10
+        add_xgb_var("cosmict_2_n_muon_tracks",      &m_xgb_vars[idx++]); // 11
+        add_xgb_var("cosmict_2_total_shower_length",&m_xgb_vars[idx++]); // 12
+        add_xgb_var("cosmict_2_flag_inside",        &m_xgb_vars[idx++]); // 13
+        add_xgb_var("cosmict_2_angle_beam",         &m_xgb_vars[idx++]); // 14
+        add_xgb_var("cosmict_2_flag_dir_weak",      &m_xgb_vars[idx++]); // 15
+        add_xgb_var("cosmict_2_dQ_dx_end",          &m_xgb_vars[idx++]); // 16
+        add_xgb_var("cosmict_2_dQ_dx_front",        &m_xgb_vars[idx++]); // 17
+        add_xgb_var("cosmict_2_theta",              &m_xgb_vars[idx++]); // 18
+        add_xgb_var("cosmict_2_phi",                &m_xgb_vars[idx++]); // 19
+        add_xgb_var("cosmict_2_valid_tracks",       &m_xgb_vars[idx++]); // 20
 
         // --- cosmic tagger flag-4 features ---
-        m_reader_xgboost->AddVariable("cosmict_flag_4",            &m_xgb_vars[idx++]); // 21
-        m_reader_xgboost->AddVariable("cosmict_4_filled",          &m_xgb_vars[idx++]); // 22
-        m_reader_xgboost->AddVariable("cosmict_4_flag_inside",     &m_xgb_vars[idx++]); // 23
-        m_reader_xgboost->AddVariable("cosmict_4_angle_beam",      &m_xgb_vars[idx++]); // 24
-        m_reader_xgboost->AddVariable("cosmict_4_connected_showers",&m_xgb_vars[idx++]); // 25
+        add_xgb_var("cosmict_flag_4",            &m_xgb_vars[idx++]); // 21
+        add_xgb_var("cosmict_4_filled",          &m_xgb_vars[idx++]); // 22
+        add_xgb_var("cosmict_4_flag_inside",     &m_xgb_vars[idx++]); // 23
+        add_xgb_var("cosmict_4_angle_beam",      &m_xgb_vars[idx++]); // 24
+        add_xgb_var("cosmict_4_connected_showers",&m_xgb_vars[idx++]); // 25
 
         // --- cosmic tagger flag-3 features ---
-        m_reader_xgboost->AddVariable("cosmict_flag_3",        &m_xgb_vars[idx++]); // 26
-        m_reader_xgboost->AddVariable("cosmict_3_filled",      &m_xgb_vars[idx++]); // 27
-        m_reader_xgboost->AddVariable("cosmict_3_flag_inside", &m_xgb_vars[idx++]); // 28
-        m_reader_xgboost->AddVariable("cosmict_3_angle_beam",  &m_xgb_vars[idx++]); // 29
-        m_reader_xgboost->AddVariable("cosmict_3_flag_dir_weak",&m_xgb_vars[idx++]); // 30
-        m_reader_xgboost->AddVariable("cosmict_3_dQ_dx_end",   &m_xgb_vars[idx++]); // 31
-        m_reader_xgboost->AddVariable("cosmict_3_dQ_dx_front", &m_xgb_vars[idx++]); // 32
-        m_reader_xgboost->AddVariable("cosmict_3_theta",       &m_xgb_vars[idx++]); // 33
-        m_reader_xgboost->AddVariable("cosmict_3_phi",         &m_xgb_vars[idx++]); // 34
-        m_reader_xgboost->AddVariable("cosmict_3_valid_tracks",&m_xgb_vars[idx++]); // 35
+        add_xgb_var("cosmict_flag_3",        &m_xgb_vars[idx++]); // 26
+        add_xgb_var("cosmict_3_filled",      &m_xgb_vars[idx++]); // 27
+        add_xgb_var("cosmict_3_flag_inside", &m_xgb_vars[idx++]); // 28
+        add_xgb_var("cosmict_3_angle_beam",  &m_xgb_vars[idx++]); // 29
+        add_xgb_var("cosmict_3_flag_dir_weak",&m_xgb_vars[idx++]); // 30
+        add_xgb_var("cosmict_3_dQ_dx_end",   &m_xgb_vars[idx++]); // 31
+        add_xgb_var("cosmict_3_dQ_dx_front", &m_xgb_vars[idx++]); // 32
+        add_xgb_var("cosmict_3_theta",       &m_xgb_vars[idx++]); // 33
+        add_xgb_var("cosmict_3_phi",         &m_xgb_vars[idx++]); // 34
+        add_xgb_var("cosmict_3_valid_tracks",&m_xgb_vars[idx++]); // 35
 
         // --- cosmic tagger flag-5 features ---
-        m_reader_xgboost->AddVariable("cosmict_flag_5",            &m_xgb_vars[idx++]); // 36
-        m_reader_xgboost->AddVariable("cosmict_5_filled",          &m_xgb_vars[idx++]); // 37
-        m_reader_xgboost->AddVariable("cosmict_5_flag_inside",     &m_xgb_vars[idx++]); // 38
-        m_reader_xgboost->AddVariable("cosmict_5_angle_beam",      &m_xgb_vars[idx++]); // 39
-        m_reader_xgboost->AddVariable("cosmict_5_connected_showers",&m_xgb_vars[idx++]); // 40
+        add_xgb_var("cosmict_flag_5",            &m_xgb_vars[idx++]); // 36
+        add_xgb_var("cosmict_5_filled",          &m_xgb_vars[idx++]); // 37
+        add_xgb_var("cosmict_5_flag_inside",     &m_xgb_vars[idx++]); // 38
+        add_xgb_var("cosmict_5_angle_beam",      &m_xgb_vars[idx++]); // 39
+        add_xgb_var("cosmict_5_connected_showers",&m_xgb_vars[idx++]); // 40
 
         // --- cosmic tagger flag-6 features ---
-        m_reader_xgboost->AddVariable("cosmict_flag_6",       &m_xgb_vars[idx++]); // 41
-        m_reader_xgboost->AddVariable("cosmict_6_filled",     &m_xgb_vars[idx++]); // 42
-        m_reader_xgboost->AddVariable("cosmict_6_flag_dir_weak",&m_xgb_vars[idx++]); // 43
-        m_reader_xgboost->AddVariable("cosmict_6_flag_inside",&m_xgb_vars[idx++]); // 44
-        m_reader_xgboost->AddVariable("cosmict_6_angle",      &m_xgb_vars[idx++]); // 45
+        add_xgb_var("cosmict_flag_6",       &m_xgb_vars[idx++]); // 41
+        add_xgb_var("cosmict_6_filled",     &m_xgb_vars[idx++]); // 42
+        add_xgb_var("cosmict_6_flag_dir_weak",&m_xgb_vars[idx++]); // 43
+        add_xgb_var("cosmict_6_flag_inside",&m_xgb_vars[idx++]); // 44
+        add_xgb_var("cosmict_6_angle",      &m_xgb_vars[idx++]); // 45
 
         // --- cosmic tagger flag-7 features ---
-        m_reader_xgboost->AddVariable("cosmict_flag_7",              &m_xgb_vars[idx++]); // 46
-        m_reader_xgboost->AddVariable("cosmict_7_filled",            &m_xgb_vars[idx++]); // 47
-        m_reader_xgboost->AddVariable("cosmict_7_flag_sec",          &m_xgb_vars[idx++]); // 48
-        m_reader_xgboost->AddVariable("cosmict_7_n_muon_tracks",     &m_xgb_vars[idx++]); // 49
-        m_reader_xgboost->AddVariable("cosmict_7_total_shower_length",&m_xgb_vars[idx++]); // 50
-        m_reader_xgboost->AddVariable("cosmict_7_flag_inside",       &m_xgb_vars[idx++]); // 51
-        m_reader_xgboost->AddVariable("cosmict_7_angle_beam",        &m_xgb_vars[idx++]); // 52
-        m_reader_xgboost->AddVariable("cosmict_7_flag_dir_weak",     &m_xgb_vars[idx++]); // 53
-        m_reader_xgboost->AddVariable("cosmict_7_dQ_dx_end",         &m_xgb_vars[idx++]); // 54
-        m_reader_xgboost->AddVariable("cosmict_7_dQ_dx_front",       &m_xgb_vars[idx++]); // 55
-        m_reader_xgboost->AddVariable("cosmict_7_theta",             &m_xgb_vars[idx++]); // 56
-        m_reader_xgboost->AddVariable("cosmict_7_phi",               &m_xgb_vars[idx++]); // 57
+        add_xgb_var("cosmict_flag_7",              &m_xgb_vars[idx++]); // 46
+        add_xgb_var("cosmict_7_filled",            &m_xgb_vars[idx++]); // 47
+        add_xgb_var("cosmict_7_flag_sec",          &m_xgb_vars[idx++]); // 48
+        add_xgb_var("cosmict_7_n_muon_tracks",     &m_xgb_vars[idx++]); // 49
+        add_xgb_var("cosmict_7_total_shower_length",&m_xgb_vars[idx++]); // 50
+        add_xgb_var("cosmict_7_flag_inside",       &m_xgb_vars[idx++]); // 51
+        add_xgb_var("cosmict_7_angle_beam",        &m_xgb_vars[idx++]); // 52
+        add_xgb_var("cosmict_7_flag_dir_weak",     &m_xgb_vars[idx++]); // 53
+        add_xgb_var("cosmict_7_dQ_dx_end",         &m_xgb_vars[idx++]); // 54
+        add_xgb_var("cosmict_7_dQ_dx_front",       &m_xgb_vars[idx++]); // 55
+        add_xgb_var("cosmict_7_theta",             &m_xgb_vars[idx++]); // 56
+        add_xgb_var("cosmict_7_phi",               &m_xgb_vars[idx++]); // 57
 
         // --- cosmic tagger flag-8 features ---
-        m_reader_xgboost->AddVariable("cosmict_flag_8",      &m_xgb_vars[idx++]); // 58
-        m_reader_xgboost->AddVariable("cosmict_8_filled",    &m_xgb_vars[idx++]); // 59
-        m_reader_xgboost->AddVariable("cosmict_8_flag_out",  &m_xgb_vars[idx++]); // 60
-        m_reader_xgboost->AddVariable("cosmict_8_muon_length",&m_xgb_vars[idx++]); // 61
-        m_reader_xgboost->AddVariable("cosmict_8_acc_length",&m_xgb_vars[idx++]); // 62
+        add_xgb_var("cosmict_flag_8",      &m_xgb_vars[idx++]); // 58
+        add_xgb_var("cosmict_8_filled",    &m_xgb_vars[idx++]); // 59
+        add_xgb_var("cosmict_8_flag_out",  &m_xgb_vars[idx++]); // 60
+        add_xgb_var("cosmict_8_muon_length",&m_xgb_vars[idx++]); // 61
+        add_xgb_var("cosmict_8_acc_length",&m_xgb_vars[idx++]); // 62
 
         // --- cosmic tagger flag-9 features ---
-        m_reader_xgboost->AddVariable("cosmict_flag_9",  &m_xgb_vars[idx++]); // 63
+        add_xgb_var("cosmict_flag_9",  &m_xgb_vars[idx++]); // 63
 
         // --- top-level cosmic / numu flags ---
-        m_reader_xgboost->AddVariable("cosmic_flag",    &m_xgb_vars[idx++]); // 64
-        m_reader_xgboost->AddVariable("cosmic_filled",  &m_xgb_vars[idx++]); // 65
-        m_reader_xgboost->AddVariable("cosmict_flag",   &m_xgb_vars[idx++]); // 66
-        m_reader_xgboost->AddVariable("numu_cc_flag",   &m_xgb_vars[idx++]); // 67
-        m_reader_xgboost->AddVariable("cosmict_flag_1", &m_xgb_vars[idx++]); // 68
+        add_xgb_var("cosmic_flag",    &m_xgb_vars[idx++]); // 64
+        add_xgb_var("cosmic_filled",  &m_xgb_vars[idx++]); // 65
+        add_xgb_var("cosmict_flag",   &m_xgb_vars[idx++]); // 66
+        add_xgb_var("numu_cc_flag",   &m_xgb_vars[idx++]); // 67
+        add_xgb_var("cosmict_flag_1", &m_xgb_vars[idx++]); // 68
 
         // --- kinematics + fiducial flag ---
-        m_reader_xgboost->AddVariable("kine_reco_Enu", &m_xgb_vars[idx++]); // 69
-        m_reader_xgboost->AddVariable("match_isFC",    &m_xgb_vars[idx++]); // 70
+        add_xgb_var("kine_reco_Enu", &m_xgb_vars[idx++]); // 69
+        add_xgb_var("match_isFC",    &m_xgb_vars[idx++]); // 70
 
         // --- sub-BDT scores (filled above) ---
-        m_reader_xgboost->AddVariable("cosmict_10_score", &m_xgb_vars[idx++]); // 71
-        m_reader_xgboost->AddVariable("numu_1_score",     &m_xgb_vars[idx++]); // 72
-        m_reader_xgboost->AddVariable("numu_2_score",     &m_xgb_vars[idx++]); // 73
+        add_xgb_var("cosmict_10_score", &m_xgb_vars[idx++]); // 71
+        add_xgb_var("numu_1_score",     &m_xgb_vars[idx++]); // 72
+        add_xgb_var("numu_2_score",     &m_xgb_vars[idx++]); // 73
 
-        m_reader_xgboost->BookMVA("MyBDT", m_numu_xgboost_xml);
+        if (m_reader_xgboost) {
+            m_reader_xgboost->BookMVA("MyBDT", m_numu_xgboost_xml);
+        }
+        else {
+            m_xgb_forest = std::make_unique<TmvaGradForest>();
+            m_xgb_forest->load(m_numu_xgboost_xml, m_xgb_names);  // throws on anything not mirrored
+            log->debug("UbooneNumuBDTScorer: fast_xgb_forest booked {} ({} trees, {} nodes, {} vars)",
+                       m_numu_xgboost_xml, m_xgb_forest->ntrees(), m_xgb_forest->nnodes(), m_xgb_forest->nvars());
+        }
     }
+}
+
+double UbooneNumuBDTScorer::eval_xgb() const
+{
+    if (m_xgb_forest) {
+        std::vector<float> vals(m_xgb_ptrs.size());
+        for (size_t i = 0; i < vals.size(); ++i) vals[i] = *m_xgb_ptrs[i];
+        return m_xgb_forest->evaluate(vals.data());
+    }
+    return m_reader_xgboost->EvaluateMVA("MyBDT");
 }
 
 void UbooneNumuBDTScorer::visit(Clus::Facade::Ensemble& ensemble) const
 {
-    if (!m_reader_xgboost) {
+    // Same condition the configure-time booking produced (m_reader_xgboost
+    // was created iff the resolved path is non-empty), tested on the path so
+    // the skip costs nothing before the readers exist.
+    if (m_numu_xgboost_xml.empty()) {
         log->warn("UbooneNumuBDTScorer: numu_xgboost_xml not set or file not found — skipping numu BDT scoring");
         return;
     }
@@ -274,6 +316,14 @@ void UbooneNumuBDTScorer::visit(Clus::Facade::Ensemble& ensemble) const
         fitters.push_back(tfi);
     }
     if (fitters.empty()) fitters.push_back(tf);
+
+    // First event with something to score pays the XML parse; every
+    // earlier event in this process skipped it entirely.
+    ensure_readers();
+    if (!have_xgb()) {
+        log->warn("UbooneNumuBDTScorer: numu_xgboost_xml not set or file not found — skipping numu BDT scoring");
+        return;
+    }
 
     for (const auto& tfi : fitters) {
         Clus::PR::TaggerInfo& ti = tfi->get_tagger_info_mutable();
@@ -426,7 +476,7 @@ void UbooneNumuBDTScorer::cal_numu_bdts_xgboost(Clus::PR::TaggerInfo& ti,
     ti.cosmict_10_score = cal_cosmict_10_bdt(ti,  0.7f);
 
     // Copy TaggerInfo/KineInfo fields into the persistent float buffer.
-    // Index order must match AddVariable order in init_readers().
+    // Index order must match AddVariable order in init_readers_impl().
 
     // --- numu flag-3 features ---
     m_xgb_vars[ 0] = ti.numu_cc_flag_3;
@@ -532,7 +582,7 @@ void UbooneNumuBDTScorer::cal_numu_bdts_xgboost(Clus::PR::TaggerInfo& ti,
     if (std::isnan(m_xgb_vars[56])) m_xgb_vars[56] = 0; // cosmict_7_theta
     if (std::isnan(m_xgb_vars[57])) m_xgb_vars[57] = 0; // cosmict_7_phi
 
-    double val1 = m_reader_xgboost->EvaluateMVA("MyBDT");
+    double val1 = eval_xgb();
 
     // Clamp to avoid division by zero in log-odds transformation
     val1 = std::max(-0.9999, std::min(0.9999, val1));

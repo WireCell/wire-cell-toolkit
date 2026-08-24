@@ -18,8 +18,12 @@
 #include "WireCellClus/NeutrinoTaggerInfo.h"
 #include "WireCellUtil/Logging.h"
 
+#include "WireCellRoot/TmvaGradForest.h"
+
 #include "TMVA/Reader.h"
 #include <memory>
+#include <mutex>
+#include <string>
 #include <vector>
 
 namespace WireCell {
@@ -64,10 +68,27 @@ namespace WireCell {
             void cal_numu_bdts_xgboost(Clus::PR::TaggerInfo& ti,
                                        const Clus::PR::KineInfo& ki) const;
 
-            /// Initialize all TMVA readers — called once from configure().
-            void init_readers();
+            /// Create all TMVA readers and BookMVA their XML weights.  Called
+            /// LAZILY, once, from the first visit() that actually has a
+            /// TrackFitting to score (sbnd_xin/docs/76 round 1) -- see
+            /// UbooneNueBDTScorer.h for the rationale; same contract here
+            /// (~30 MB of XML, ~0.4 s, unchanged scores).
+            void ensure_readers() const;
+            void init_readers_impl() const;
+            mutable std::once_flag m_readers_once;
 
-            // --- Persistent TMVA readers (created once in configure) ---
+            /// fast_xgb_forest (C++ default false = TMVA::Reader, legacy).
+            /// true: numu_xgboost_xml is booked by TmvaGradForest -- same
+            /// score, far cheaper to load.  See UbooneNueBDTScorer.h and
+            /// sbnd_xin/docs/76 round 2.  The four sub-BDTs stay on TMVA.
+            bool m_fast_xgb_forest{false};
+            mutable std::unique_ptr<TmvaGradForest> m_xgb_forest;
+            mutable std::vector<std::string> m_xgb_names;
+            mutable std::vector<const float*> m_xgb_ptrs;
+            bool have_xgb() const { return m_reader_xgboost || m_xgb_forest; }
+            double eval_xgb() const;
+
+            // --- Persistent TMVA readers (created once, on first scoring visit) ---
             // Mutable because visit() and sub-BDT methods are const.
             mutable std::unique_ptr<TMVA::Reader> m_reader_cosmict10;
             mutable std::unique_ptr<TMVA::Reader> m_reader_numu1;
@@ -108,7 +129,7 @@ namespace WireCell {
             mutable float m_numu3_n_daughter_all{0};
 
             // xgboost final: ~72 vars (all scalar inputs)
-            // Indexed by the order they are added in init_readers().
+            // Indexed by the order they are added in init_readers_impl().
             mutable std::vector<float> m_xgb_vars;
         };
 

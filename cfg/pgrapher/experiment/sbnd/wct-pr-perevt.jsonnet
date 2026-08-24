@@ -730,6 +730,15 @@ function(
     // dl_vtx_cut (mm) is a configurability thread only (docs/pr/2 sec
     // 7.4); null keeps the C++ 25.0 (= 2.5 cm) default.
     dl_vtx_cut               = null,
+    // fast_xgb_forest: book the numu/nue XGB BDT combiners with
+    // TmvaGradForest (compact exact re-evaluation of the same XML) instead
+    // of TMVA::Reader.  Same scores (docs/76 sec 6 gate: 308 events, every
+    // archive/branch/table identical); the PR job loses ~3 s of wall and
+    // ~0.3-0.8 GB of peak RSS per event.  **SBND PRODUCTION DEFAULT ON
+    // (docs/76 round 2, 2026-08-23).**  C++ default false; false here
+    // omits the key => the byte-identical pre-knob config (the docs/76
+    // "off" arm; runner env SBND_FAST_XGB_FOREST=0).
+    fast_xgb_forest          = true,
     // When set, re-save the (post-PR) tree to this TensorDM tarball.  Used by the
     // round-trip gate (re-save with pipeline_names=[] and compare member hashes
     // against the input tarball).
@@ -2892,7 +2901,8 @@ function(
                              use_power_recomb=use_power_recomb,
                              sp_dedx_use_recomb_model=sp_dedx_use_recomb_model,
                              sp_mean_dedx_cut=sp_mean_dedx_cut,
-                             dl_vtx_cut=dl_vtx_cut);
+                             dl_vtx_cut=dl_vtx_cut,
+                             fast_xgb_forest=fast_xgb_forest);
 
     local graph = g.intern(
         innodes=[source],

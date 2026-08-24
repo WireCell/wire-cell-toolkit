@@ -18,8 +18,13 @@
 #include "WireCellClus/NeutrinoTaggerInfo.h"
 #include "WireCellUtil/Logging.h"
 
+#include "WireCellRoot/TmvaGradForest.h"
+
 #include "TMVA/Reader.h"
 #include <memory>
+#include <mutex>
+#include <string>
+#include <vector>
 
 namespace WireCell {
     namespace Root {
@@ -120,8 +125,33 @@ namespace WireCell {
             void cal_bdts_xgboost(Clus::PR::TaggerInfo& ti,
                                   const Clus::PR::KineInfo& ki) const;
 
-            /// Initialize all TMVA readers at configure time.
-            void init_readers();
+            /// Create all TMVA readers and BookMVA their XML weights.  Called
+            /// LAZILY, once, from the first visit() that actually has a
+            /// TrackFitting to score (sbnd_xin/docs/76 round 1): the XML set
+            /// is ~300 MB (XGB_nue_seed2_0923.xml alone is 199 MB) and costs
+            /// ~4.4 s + ~0.9 GB heap to parse, yet only ~20% of SBND
+            /// production events reach the scoring loop.  The readers, the
+            /// variable bindings and every EvaluateMVA are unchanged, so the
+            /// scores are byte-identical to the configure-time booking.
+            void ensure_readers() const;
+            void init_readers_impl() const;
+            mutable std::once_flag m_readers_once;
+
+            /// fast_xgb_forest (C++ default false = TMVA::Reader, the legacy
+            /// path).  true: the top-level XGB combiner is booked by
+            /// TmvaGradForest -- a scan of the same XML into a compact forest
+            /// evaluated with TMVA's own arithmetic (bit-identical score,
+            /// ~10x faster to load, ~1/30 of the heap).  The 30 sub-BDTs
+            /// carry variable transformations and stay on TMVA::Reader
+            /// either way.  sbnd_xin/docs/76 round 2.
+            bool m_fast_xgb_forest{false};
+            mutable std::unique_ptr<TmvaGradForest> m_xgb_forest;
+            /// AddVariable() order of the XGB inputs, kept for both engines.
+            mutable std::vector<std::string> m_xgb_names;
+            mutable std::vector<const float*> m_xgb_ptrs;
+            bool have_xgb() const { return m_rdr_xgboost || m_xgb_forest; }
+            /// EvaluateMVA("MyBDT") on whichever engine booked the combiner.
+            double eval_xgb() const;
 
             // ====== Cached TMVA readers and their float variable buffers ======
             // All mutable because visit() and the cal_*_bdt methods are const.
