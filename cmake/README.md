@@ -53,7 +53,7 @@ will and will not be built.
 -- WCT package 'pytorch' disabled (missing dependency: LIBTORCH)
 -- WCT package 'root' disabled (missing dependency: ROOTSYS)
 -- WCT package 'cuda' disabled (missing dependency: CUDA)
--- WCT packages configured: util;iface;aux;gen;sigproc;sig;img;pgraph;sio;quickhull;pyutil;clus;match;apps;test;cfg;docs;tbb;hio
+-- WCT packages configured: util;iface;aux;gen;sigproc;sig;img;pgraph;sio;quickhull;pyutil;clus;match;flash;apps;test;cfg;docs;tbb;hio
 -- Wire-Cell Toolkit cmake-build-0.35.0-904-g6ad16499 [triplet 0.35.0]
 --   build mode      : development (relaxed warnings)
 --   C++ standard    : c++17

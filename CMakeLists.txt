@@ -188,7 +188,7 @@ set(WCT_PACKAGES util iface aux gen sigproc sig img pgraph sio quickhull)
 if(WCT_HAVE_PYTHON)
   list(APPEND WCT_PACKAGES pyutil)
 endif()
-list(APPEND WCT_PACKAGES clus match apps test cfg docs)
+list(APPEND WCT_PACKAGES clus match flash apps test cfg docs)
 
 # Optional packages, each gated on the WCT_HAVE_<DEP> flags discovered by
 # WCTDependencies.  This mirrors the per-package removal table in waft/wcb.py:
