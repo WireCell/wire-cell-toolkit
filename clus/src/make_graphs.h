@@ -35,6 +35,15 @@ namespace WireCell::Clus::Graphs {
         IDetectorVolumes::pointer dv, 
         IPCTransformSet::pointer pcts);
 
+    // doc 79 round 2: same algorithm with the busy-cluster lazy walk armed
+    // (CtpcFastCfg defaults, connect_graphs.h).  Selected only by the
+    // "ctpc_fast" flavor (ClusteringDeghost graph_name knob); clusters at
+    // or below the busy threshold are bit-identical to make_graph_ctpc.
+    Weighted::Graph make_graph_ctpc_fast(
+        const Facade::Cluster& cluster,
+        IDetectorVolumes::pointer dv,
+        IPCTransformSet::pointer pcts);
+
     Weighted::Graph make_graph_ctpc_pid(
         const Facade::Cluster& cluster,
         const Facade::Cluster& ref_cluster,

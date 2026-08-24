@@ -58,6 +58,18 @@ Weighted::Graph WireCell::Clus::Graphs::make_graph_ctpc(
     return graph;
 }
 
+Weighted::Graph WireCell::Clus::Graphs::make_graph_ctpc_fast(
+    const Cluster& cluster,
+    IDetectorVolumes::pointer dv,
+    IPCTransformSet::pointer pcts)
+{
+    auto graph = make_graph_closely(cluster);
+    static const CtpcFastCfg fast_cfg;   // defaults, connect_graphs.h
+    connect_graph_ctpc(cluster, dv, pcts, graph, &fast_cfg);
+    connect_graph(cluster, graph);
+    return graph;
+}
+
 Weighted::Graph WireCell::Clus::Graphs::make_graph_ctpc_pid(
         const Cluster& cluster,
         const Cluster& ref_cluster,

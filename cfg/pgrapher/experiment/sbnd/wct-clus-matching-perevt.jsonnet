@@ -355,6 +355,12 @@ function(
     // the byte-identical legacy config.
     eb_fast = true,
     po_fast = true,
+    // doc 79 round 2: ClusteringDeghost busy-cluster lazy walk (the
+    // 'ctpc_fast' graph flavor, threshold 200).  C++ default is OFF
+    // ('ctpc'), so every other detector is untouched; false => the
+    // graph_name key is omitted => byte-identical compiled config.
+    // Escape: SBND_DG_FAST=1/0 via run_ql_evt.sh.
+    dg_fast = false,
 )
     // Build params inside the function so all physics values are TLAs.  These
     // are the documented Q/L drift/diffusion values (matching run_clust_QL_evt.sh),
@@ -390,7 +396,7 @@ function(
         subRunNo=subrun,
         eventNo=event,
         reality=reality);
-    local clus_pipes = [clus_maker.per_apa(anodes[n], dump=false, trace_bee=trace_bee, save_assoc_id=save_assoc, sep_vertex_veto=sep_vertex_veto, nu_iso_band_guard=nu_iso_band_guard, iso_cathode_guard=iso_cathode_guard, nu_band_veto=nu_band_veto, eb_fast=eb_fast, po_fast=po_fast)
+    local clus_pipes = [clus_maker.per_apa(anodes[n], dump=false, trace_bee=trace_bee, save_assoc_id=save_assoc, sep_vertex_veto=sep_vertex_veto, nu_iso_band_guard=nu_iso_band_guard, iso_cathode_guard=iso_cathode_guard, nu_band_veto=nu_band_veto, eb_fast=eb_fast, po_fast=po_fast, dg_fast=dg_fast)
                         for n in std.range(0, nanodes - 1)];
 
     // --- Q/L matching nodes ---

@@ -582,6 +582,25 @@ TEST_CASE("clus knob defaults: ClusteringExamineBundles")
     CHECK(cfg["graph_name"].asString() == "relaxed");
 }
 
+TEST_CASE("clus knob defaults: ClusteringDeghost")
+{
+    auto cfg = defaults_of("ClusteringDeghost");
+
+    // doc 79 round 2: the skeleton shortest-path graph flavor.  Default
+    // "ctpc" == byte-identical legacy behavior on every detector;
+    // "ctpc_fast" (SBND dg_fast cfg knob) arms the busy-cluster lazy walk.
+    REQUIRE(cfg.isMember("graph_name"));
+    CHECK(cfg["graph_name"].asString() == "ctpc");
+
+    // The four pre-existing keys, pinned in the same pass (this component
+    // had no default_configuration() until doc 79 added one, so none of
+    // them round-tripped before).
+    CHECK_KNOB_BOOL(cfg, "use_ctpc", true);
+    CHECK_KNOB_NUM(cfg, "length_cut", 0);
+    CHECK_KNOB_BOOL(cfg, "allow_mixed_faces", false);
+    CHECK_KNOB_BOOL(cfg, "empty_view_unique", false);
+}
+
 // ---------------------------------------------------------------------------
 // The three tagger-check components: demoted-main participation (doc pr/20).
 // ---------------------------------------------------------------------------

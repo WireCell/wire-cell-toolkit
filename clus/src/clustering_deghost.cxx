@@ -58,7 +58,8 @@ static std::pair<size_t, size_t> skeleton_points_hilo(const Cluster& cluster)
 static std::vector<size_t> get_path_wcps(const Cluster& cluster, 
                                          IDetectorVolumes::pointer dv,
                                          IPCTransformSet::pointer pcts,
-                                         bool use_ctpc)
+                                         bool use_ctpc,
+                                         const std::string& graph_name)
 {
     auto [hi, lo] = skeleton_points_hilo(cluster);
     // doc 79 round 0 (WCT_CTPC_EDGE_CENSUS): log-only cache census, default
@@ -70,7 +71,7 @@ static std::vector<size_t> get_path_wcps(const Cluster& cluster,
             cluster.npoints(), cluster.get_length() / units::cm, cluster.has_graph("ctpc"));
     }
     if (use_ctpc) {
-        return cluster.graph_algorithms("ctpc", dv, pcts).shortest_path(hi, lo);
+        return cluster.graph_algorithms(graph_name, dv, pcts).shortest_path(hi, lo);
     }
     else {
         return cluster.graph_algorithms().shortest_path(hi, lo);
@@ -84,6 +85,7 @@ static void clustering_deghost(Grouping& live_grouping,
                                IPCTransformSet::pointer pcts,
                                const Tree::Scope& scope,
                                const bool use_ctpc,
+                               const std::string& graph_name,
                                double length_cut = 0,
                                bool allow_mixed_faces = false,
                                bool empty_view_unique = false);
@@ -99,6 +101,11 @@ public:
         NeedScope::configure(config);
         
         use_ctpc_ = get(config, "use_ctpc", true);
+        // doc 79 round 2: graph flavor for the >30 cm skeleton shortest-path
+        // build.  Default "ctpc" == byte-identical legacy behavior;
+        // "ctpc_fast" arms the busy-cluster lazy walk (CtpcFastCfg,
+        // connect_graphs.h) for clusters with component count > 200.
+        graph_name_ = get(config, "graph_name", graph_name_);
         length_cut_ = get(config, "length_cut", 0);
         // Waive the same-face requirement of the multi-APA drift-group
         // validation (PDVD: both faces of a CRP share one drift volume).
@@ -111,17 +118,23 @@ public:
     }
     virtual Configuration default_configuration() const {
         Configuration cfg;
+        cfg["use_ctpc"] = use_ctpc_;
+        cfg["length_cut"] = length_cut_;
+        cfg["allow_mixed_faces"] = allow_mixed_faces_;
+        cfg["empty_view_unique"] = empty_view_unique_;
+        cfg["graph_name"] = graph_name_;
         return cfg;
     }
 
     void visit(Ensemble& ensemble) const {
         auto& live = *ensemble.with_name("live").at(0);
-        clustering_deghost(live, m_dv, m_pcts, m_scope,  use_ctpc_, length_cut_,
+        clustering_deghost(live, m_dv, m_pcts, m_scope,  use_ctpc_, graph_name_, length_cut_,
                            allow_mixed_faces_, empty_view_unique_);
     }
 
 private:
     bool use_ctpc_{true};
+    std::string graph_name_{"ctpc"};
     double length_cut_{0};
     bool allow_mixed_faces_{false};
     bool empty_view_unique_{false};
@@ -148,7 +161,7 @@ static void clustering_deghost(
     IDetectorVolumes::pointer dv,
     IPCTransformSet::pointer pcts,
     const Tree::Scope& scope,
-    const bool use_ctpc, double length_cut,
+    const bool use_ctpc, const std::string& graph_name, double length_cut,
     bool allow_mixed_faces, bool empty_view_unique)
 {
     // Get all the wire plane IDs from the grouping
@@ -280,7 +293,7 @@ static void clustering_deghost(
             global_point_cloud->add_points(make_points_cluster(live_clusters.at(i), wpid_params, true));
             if (live_clusters.at(i)->get_length() >
                 30 * units::cm) {  // should be the default for most of them ...
-                const auto& path_wcps = get_path_wcps(*live_clusters.at(i), dv, pcts, use_ctpc);
+                const auto& path_wcps = get_path_wcps(*live_clusters.at(i), dv, pcts, use_ctpc, graph_name);
                 // global_skeleton_cloud->add_points(live_clusters.at(i), 1);
                 global_skeleton_cloud->add_points(make_points_cluster_skeleton(live_clusters.at(i), dv, wpid_params, path_wcps, true));
             }
@@ -791,7 +804,7 @@ static void clustering_deghost(
                     // global_point_cloud_legacy->add_points(live_clusters.at(i), 0);
                     global_point_cloud->add_points(make_points_cluster(live_clusters.at(i), wpid_params, true));
                     if (live_clusters.at(i)->get_length() > 30 * units::cm) {
-                        const auto& path_wcps = get_path_wcps(*live_clusters.at(i), dv, pcts, use_ctpc);
+                        const auto& path_wcps = get_path_wcps(*live_clusters.at(i), dv, pcts, use_ctpc, graph_name);
                         // global_skeleton_cloud->add_points(live_clusters.at(i), 1);
                         global_skeleton_cloud->add_points(make_points_cluster_skeleton(live_clusters.at(i), dv, wpid_params, path_wcps, true ));
                     }
@@ -802,7 +815,7 @@ static void clustering_deghost(
                 // global_point_cloud_legacy->add_points(live_clusters.at(i), 0);
                 global_point_cloud->add_points(make_points_cluster(live_clusters.at(i), wpid_params, true));
                 if (live_clusters.at(i)->get_length() > 30 * units::cm) {
-                    const auto& path_wcps = get_path_wcps(*live_clusters.at(i), dv, pcts, use_ctpc);
+                    const auto& path_wcps = get_path_wcps(*live_clusters.at(i), dv, pcts, use_ctpc, graph_name);
                     // global_skeleton_cloud->add_points(live_clusters.at(i), 1);
                     global_skeleton_cloud->add_points(make_points_cluster_skeleton(live_clusters.at(i), dv, wpid_params, path_wcps, true));
                 }

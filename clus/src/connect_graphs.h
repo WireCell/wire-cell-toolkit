@@ -19,10 +19,27 @@ namespace WireCell::Clus::Graphs {
         const Facade::Cluster& ref_cluster,
         Weighted::Graph& graph);
 
+    // doc 79 round 2: parameters of the busy-cluster lazy-walk mode of
+    // connect_graph_ctpc, selected only by the "ctpc_fast" flavor
+    // (ClusteringDeghost graph_name knob).  A cluster whose
+    // connected-component count `num` is at or below busy_num_threshold
+    // takes the legacy path bit-for-bit; above it, the per-pair 1 cm
+    // is_good_point walk (the O(num^2 x path-cm) cost -- 49.5M steps on
+    // the mcp1k 280884 monster, doc 79 round 0) is evaluated lazily via
+    // a single-pass Kruskal: only pairs that would bridge two union-find
+    // components (plus the < 3 cm direct-edge pairs and pairs carrying a
+    // directional candidate) are walked.  Same scheme as RelaxedFastCfg
+    // above (doc 78); NOT proven bit-identical under exact distance ties,
+    // which is why it sits behind the busy gate and A/B validation.
+    struct CtpcFastCfg {
+        size_t busy_num_threshold{200};
+    };
+
     void connect_graph_ctpc(const Facade::Cluster& cluster,
                             IDetectorVolumes::pointer dv,
                             Clus::IPCTransformSet::pointer pcts,
-                            Weighted::Graph& graph);
+                            Weighted::Graph& graph,
+                            const CtpcFastCfg* fast = nullptr);
 
     void connect_graph_ctpc_with_reference(
         const Facade::Cluster& cluster,

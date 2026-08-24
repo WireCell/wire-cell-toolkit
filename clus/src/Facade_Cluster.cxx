@@ -2825,6 +2825,10 @@ Facade::Cluster::graph_type& Facade::Cluster::find_graph(
         // doc 78 round 2: busy-cluster lazy-walk variant (make_graphs.h).
         return this->give_graph(flavor, make_graph_relaxed_fast(*this, dv, pcts));
     }
+    if (flavor == "ctpc_fast") {
+        // doc 79 round 2: busy-cluster lazy-walk variant of ctpc (make_graphs.h).
+        return this->give_graph(flavor, make_graph_ctpc_fast(*this, dv, pcts));
+    }
     if (flavor == "relaxed_pid") {
         return this->give_graph(flavor, make_graph_relaxed_pid(*this, dv, pcts));
     }
@@ -2891,6 +2895,10 @@ Facade::Cluster::graph_type& Facade::Cluster::find_graph(
     if (flavor == "relaxed_fast") {
         // doc 78 round 2: busy-cluster lazy-walk variant (make_graphs.h).
         return this->give_graph(flavor, make_graph_relaxed_fast(*this, dv, pcts));
+    }
+    if (flavor == "ctpc_fast") {
+        // doc 79 round 2: busy-cluster lazy-walk variant of ctpc (make_graphs.h).
+        return this->give_graph(flavor, make_graph_ctpc_fast(*this, dv, pcts));
     }
     if (flavor == "relaxed_pid") {
         return this->give_graph(flavor, make_graph_relaxed_pid(*this, dv, pcts));
@@ -3029,6 +3037,13 @@ const GraphAlgorithms& Facade::Cluster::graph_algorithms(const std::string& flav
         return got.first->second;
     }
 
+    if (flavor == "ctpc_fast") {
+        // doc 79 round 2: busy-cluster lazy-walk variant of ctpc (make_graphs.h).
+        auto& gr = const_cast<Cluster*>(this)->give_graph(flavor, make_graph_ctpc_fast(*this, dv, pcts));
+        auto got = m_galgs.emplace(flavor, GraphAlgorithms(gr));
+        return got.first->second;
+    }
+
     if (flavor == "relaxed_pid") {
         auto& gr = const_cast<Cluster*>(this)->give_graph(flavor, make_graph_relaxed_pid(*this, dv, pcts));
         auto got = m_galgs.emplace(flavor, GraphAlgorithms(gr));
@@ -3115,6 +3130,13 @@ const GraphAlgorithms& Facade::Cluster::graph_algorithms(const std::string& flav
     if (flavor == "relaxed_fast") {
         // doc 78 round 2: busy-cluster lazy-walk variant (make_graphs.h).
         auto& gr = const_cast<Cluster*>(this)->give_graph(flavor, make_graph_relaxed_fast(*this, dv, pcts));
+        auto got = m_galgs.emplace(flavor, GraphAlgorithms(gr));
+        return got.first->second;
+    }
+
+    if (flavor == "ctpc_fast") {
+        // doc 79 round 2: busy-cluster lazy-walk variant of ctpc (make_graphs.h).
+        auto& gr = const_cast<Cluster*>(this)->give_graph(flavor, make_graph_ctpc_fast(*this, dv, pcts));
         auto got = m_galgs.emplace(flavor, GraphAlgorithms(gr));
         return got.first->second;
     }

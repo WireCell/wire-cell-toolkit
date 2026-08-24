@@ -1987,7 +1987,10 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
         // no other cluster counts as unique evidence instead of a bogus overlap
         // (else the first cluster of each not-yet-seeded volume is wrongly
         // destroyed).  Set true on per-drift-group instances.
-        deghost(name="", use_ctpc=true, length_cut=0, allow_mixed_faces=null, empty_view_unique=null) :: {
+        // graph_name (C++ default "ctpc"; key omitted when null => byte-identical
+        // pre-knob config): doc 79 round 2 -- "ctpc_fast" arms the busy-cluster
+        // lazy walk of the >30 cm skeleton shortest-path graph build.
+        deghost(name="", use_ctpc=true, length_cut=0, allow_mixed_faces=null, empty_view_unique=null, graph_name=null) :: {
             type: "ClusteringDeghost",
             name: prefix+name,
             data: {
@@ -1995,6 +1998,7 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
                 length_cut: length_cut,
                 [if allow_mixed_faces != null then 'allow_mixed_faces']: allow_mixed_faces,
                 [if empty_view_unique != null then 'empty_view_unique']: empty_view_unique,
+                [if graph_name != null then 'graph_name']: graph_name,
             } + dv_cfg + pcts_cfg + scope_cfg,
             uses: [detector_volumes, pc_transforms],
         },
