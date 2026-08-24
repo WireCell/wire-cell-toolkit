@@ -355,12 +355,17 @@ function(
     // the byte-identical legacy config.
     eb_fast = true,
     po_fast = true,
-    // doc 79 round 2: ClusteringDeghost busy-cluster lazy walk (the
-    // 'ctpc_fast' graph flavor, threshold 200).  C++ default is OFF
-    // ('ctpc'), so every other detector is untouched; false => the
-    // graph_name key is omitted => byte-identical compiled config.
-    // Escape: SBND_DG_FAST=1/0 via run_ql_evt.sh.
-    dg_fast = false,
+    // doc 79 round 2 -- **SBND PRODUCTION ON** (flipped after the gates:
+    // knob-ON outputs byte-identical to legacy on the 186-event Q/L
+    // manifest with the lazy path engaged on 41 events, and the 308-event
+    // PR gate PASS with zero nusel diffs; doc 79 sec 5).  dg_fast=true
+    // switches ClusteringDeghost (both per-face instances) to the
+    // 'ctpc_fast' graph flavor: clusters with component count > 200 defer
+    // the per-pair 1 cm walk to a single-pass lazy Kruskal (mcp1k 280884
+    // Deghost 16.5->2.9 s).  C++ default is OFF ('ctpc'), so every other
+    // detector is untouched.  Escape: SBND_DG_FAST=0 compiles back to the
+    // byte-identical legacy config.
+    dg_fast = true,
 )
     // Build params inside the function so all physics values are TLAs.  These
     // are the documented Q/L drift/diffusion values (matching run_clust_QL_evt.sh),
