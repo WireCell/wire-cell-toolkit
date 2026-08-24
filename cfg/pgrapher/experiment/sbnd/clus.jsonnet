@@ -861,7 +861,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
               // C++ defaults false; keys omitted when off => byte-identical
               // pre-knob config.  Display-only stage: mc.json is the artifact.
               pf_track_main_cluster_only=false,
-              pf_track_bridged_clusters=false,   // doc pr/40 round 9 B2; C++ default false. Key omitted when off => byte-identical.
+              pf_track_bridged_clusters=false,  // doc pr/40 round 9 B2; C++ default false. Key omitted when off => byte-identical.
               pf_shower_vertex_barrier=false,
               pf_shower_parent_precedence=false,
               pf_pi0_node_per_id=false,
@@ -944,14 +944,12 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
               // byte-identical): act on the verdict P3 produced -- drop a TGM/
               // STM-tagged companion from the neutrino's other_clusters, unless
               // it is shorter than the floor (cm).  Inert without P3.
-              skip_cosmic_companions=false, cosmic_companion_min_length=null,
               // nu_fallback_demoted_mains (docs/73 sec 12, round 3): when NO
               // candidate survives the primary loop, consider demoted mains
               // (same gates).  Inert without restore_demoted_mains upstream;
               // pairs with evaluate_demoted_mains (P3) so the candidates carry
               // tagger verdicts.  SBND PRODUCTION ON since 2026-08-17
               // (docs/73 sec 12 owner flip).
-              nu_fallback_demoted_mains=true,
               // sp_photon_flag: store the single-photon tagger's verdict in
               // TaggerInfo::photon_flag, as prototype NeutrinoID.cxx:271 does.
               // The port ran singlephoton_tagger() and filled its shw_sp_*
@@ -959,7 +957,6 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
               // C++ default false = that gap; key omitted when off =>
               // byte-identical.  Only the uBooNE tagger ntuple's photon_flag
               // branch changes when on -- nothing in the chain reads it.
-              sp_photon_flag=false,
               // mip_dqdx: SBND MIP dQ/dx scale in e/cm handed to
               // TaggerCheckSTM AND (since docs pr/7-pr/8) to
               // tagger_check_neutrino as the PR chain's flat-template/cal_4mom
@@ -1047,7 +1044,6 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
               // byte-identical uBooNE config).  DEFAULT TRUE for SBND (owner
               // 2026-07-30, sbnd_xin/docs/pr/3); zero production impact while
               // tagger_check_neutrino is not in pipeline_names.
-              nu_skip_cosmic=true,
               // nu_skip_cosmic_bundle: lift that verdict from the main to the
               // whole flash bundle -- if ANY in-window main sharing a
               // matched_flash_gid is cosmic-tagged, no main of that bundle is
@@ -1061,7 +1057,6 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
               // uBooNE config).  DEFAULT TRUE for SBND (owner 2026-08-01,
               // sbnd_xin/docs/pr/3 sec. 8).  NOT bit-identical: it removes PR
               // output on cosmic bundles that previously produced it.
-              nu_skip_cosmic_bundle=true,
               // nu_skip_cosmic_bundle_min_length (cm): design-A guard on the
               // bundle veto (docs/pr/16 sec. 7).  An UNTAGGED in-window main at
               // least this long survives the veto: the TGM/STM taggers examined
@@ -1132,7 +1127,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
               // ACCEPT candidates within that distance of x = cathode_x; the
               // angle arithmetic itself is untouched.
               // null = C++ default 0 = OFF (key omitted => byte-identical).
-              cathode_x=0, cathode_kink_xcut=5,
+              cathode_x=0,
               // cathode_wide_kink_angle (deg) / _skirt / _baseline (cm): the
               // wide-baseline cathode kink ACCEPT, doc pr/47 sec 8 (O1) --
               // the converse of the veto above.  At a cathode-crossing fit
@@ -1142,15 +1137,11 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
               // accept path fires when the skirt-excluded PCA turn angle
               // across the crossing exceeds the angle cut.  null = C++
               // default 0 = OFF (key omitted => byte-identical).
-              cathode_wide_kink_angle=25,
-              cathode_wide_kink_skirt=null,
-              cathode_wide_kink_baseline=null,
               // shower_topo_demote_len (cm, doc pr/25 sec 3): demote any
               // kShowerTopology segment longer than this to a track.  Owner
               // hand-scan 2026-08-03: 10/10 long shower-topology segments on
               // a selected nu-candidate main cluster are tracks, none showers.
               // null = C++ default 0 = OFF (key omitted => byte-identical).
-              shower_topo_demote_len=null,
               // ---- doc sbnd_xin/docs/pr/30 §11 port-fidelity knobs ------------
               // All five default to the pre-pr/30 behaviour, so the compiled JSON is
               // byte-identical until one is set.  See cfg/pgrapher/common/clus.jsonnet
@@ -1160,18 +1151,13 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
               // so null = on = legacy and false restores the prototype's narrower
               // version.  doc 77 round 1 (2026-08-24): graph_endpoint_strict (P8)
               // removed -- "must stay OFF" (pr/30 P8; pr/86:450).
-              fit_exclusion=false, graph_endpoint_tol=null,
-              oov_prototype_parity=false, first_seg_local_pca=null, other_seg_relaxed_accept=null,
               // shower_topo_proto_dir (doc pr/31 sec 11, F2 was P2): true skips the
               // stage-3 segment_determine_shower_direction call, leaving the topology
               // shower with the direction segment_is_shower_topology set -- the
               // prototype's state.  C++ default false = today's path = byte-identical.
-              shower_topo_proto_dir=false,
               // doc pr/32 sec 11: the four stage-4 vertex-ID port fixes.  C++
               // default false = today's path; keys omitted => byte-identical.
               // The SBND operating point lives in wct-pr-perevt.jsonnet.
-              vertex_dir_use_fit_point=false, shower_traj_recheck_parity=false,
-              main_vertex_require_descriptor=false, main_vertex_candidate_flag=false,
               // doc pr/31 sec 12: the sec 10.12 topology/PID/direction port
               // fixes (F5 cont-muon 30cm dir3, F6 empty-window abstain, F3
               // shower-topo reset, F1 preserve-4mom, F4 local median, F7
@@ -1179,9 +1165,6 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
               // C++ default false = today's path; keys omitted =>
               // byte-identical.  The SBND operating point lives in
               // wct-pr-perevt.jsonnet.
-              cont_muon_dir3_30cm=false, track_comp_empty_abstain=false,
-              shower_topo_reset=false, reclass_preserve_4mom=false,
-              dir_track_median_local=false, examine_showers_vertex_by_index=false,
               // Steiner TERMINAL filter fidelity (doc pr/29 D1 and D12).  Both
               // OFF here = the historical toolkit behaviour, keys omitted =>
               // byte-identical config.  Turning either on can only ADD Steiner
@@ -1214,24 +1197,13 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
               // sheet clusters instead of the wire-footprint boundary metric.
               // false/nulls = C++ defaults (false / 40 cm / 25 cm / 0.35 /
               // 0.02) = OFF (keys omitted => byte-identical).
-              iso_endpoint=false,
-              iso_endpoint_min_length=null,
-              iso_endpoint_max_xext=null,
-              iso_endpoint_xext_frac=null,
-              iso_endpoint_xext_quantile=null,
-              iso_endpoint_tube_radius=null,
-              iso_endpoint_min_aspect=null,
               // examine_vertices_3 extension-retraction guard (doc pr/24
               // round 5).  false/null = C++ defaults (false / -1.0 cm) = OFF
               // (keys omitted => byte-identical).
-              v3_extension_guard=false,
-              v3_extension_min_gain=null,
               // doc pr/67: log-only trajectory-coverage probe + the
               // counterfactual override for find_proto_vertex's hardcoded
               // main-cluster branch-search round budget.  false/null =
               // C++ defaults = OFF (keys omitted => byte-identical).
-              traj_cover_probe=false,
-              pr_find_other_rounds=null,
               // protect_bundle stage knobs (doc pr/23): the PR-stage
               // overclustering protection (uboone's second graph examination,
               // ProtectOverClustering.cxx).  The stage only acts when
@@ -1277,10 +1249,6 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
               // what docs/pr/2 sec 2e(iv) flagged.  DEFAULT ON for SBND (owner
               // 2026-07-30); null on any one of them restores that cut's uBooNE
               // value.  NOT bit-identical: cosmic_tagger verdicts can change.
-              cosmic_y_top_main=sbnd_y_top - 17,     // main cluster's own top
-              cosmic_y_top_strict=sbnd_y_top - 15,   // event top, 1-cosmic branch
-              cosmic_y_top_loose=sbnd_y_top - 37,    // event top, global gate
-              cosmic_y_small_piece=sbnd_y_top - 67,  // <3 cm debris, PCA centre
               // vertex_z_prior_scale (cm): denominator of the upstream-z penalty
               // (z - min_z)/scale that ranks main-vertex candidates against the
               // +0.25-per-track bonuses.  uBooNE's 200 cm spans ~5.2 penalty
@@ -1294,7 +1262,6 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
               // against track bonuses and transfers unchanged -- keeps 200;
               // pass null for that (docs/pr/2 sec 2e(iv)).
               // NOT bit-identical: vertex ranking can change.
-              vertex_z_prior_scale=100.0,
               // ssm_target_dir / ssm_absorber_dir: the SSM tagger's beam-line
               // reference directions [x,y,z] in the detector frame (docs/pr/2
               // sec 2e(i)).  null = the C++ defaults = the prototype's uBooNE
@@ -1304,8 +1271,6 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
               // NuMI-absorber features have no obvious SBND meaning.  Until
               // then the 8 ssm_*_angle_{target,absorber} features carry uBooNE
               // geometry -- they are only reachable now, not fixed.
-              ssm_target_dir=null,
-              ssm_absorber_dir=null,
               // kine_*: the charge -> kinetic-energy calibration constants of
               // NeutrinoEnergyReco (docs/pr/2 sec 2e(iii)).  null = the C++
               // defaults = the uBooNE-tuned literals they replaced.
@@ -1322,18 +1287,9 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
               // null on any one restores that factor's uBooNE value.
               // The plane weights [0.25,0.25,1.0], the 0.04 asymmetry
               // switch and kine_w_value (23.6 eV) still have NO SBND value.
-              kine_fudge_factor=null,
-              kine_recom_factor=0.87,         // 0.70 x 1.249 (track, docs/pr/10)
-              kine_shower_fudge_factor=null,
-              kine_shower_recom_factor=0.58,  // 0.50 x 1.169 (shower)
-              kine_proton_recom_factor=0.51,  // 0.35 x 1.453 (proton)
-              kine_plane_weights=null,
-              kine_plane_asym_switch=null,
-              kine_w_value=null,
               // doc pr/35 sec 10.2 (F1 = P1+P8): live start-segment PDG at the
               // four fill_kine_tree sites (prototype parity).  C++ default
               // false; key omitted when off => byte-identical pre-knob config.
-              kine_shower_pdg_live=false,
               // ---- doc sbnd_xin/docs/pr/36 sec 10 tagger-stage knobs -------
               // F1 (= P1): give the match_isFC recompute the SAME fiducial +
               // margins tagger_check_{stm,tgm,fc} use (sbnd_pr_fv +
@@ -1359,16 +1315,12 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
               // SBND today (clus_geom_helper is ''); kept OFF by owner
               // decision 2026-08-04 so a future SBND SCE helper enables it
               // as its own explicit step.  C++ default false.
-              sp_sce_correction=false,
               // F4 (= P3+P5): graph-index-ordered tagger accumulation sets
               // (M4 house-rule determinism fix).  C++ default false.
-              tagger_ordered_segment_sets=false,
               // F5 (= P6): prototype wcpt-identity stem-endpoint rule at the
               // 18 seg_endpoint_near sites.  C++ default false.
-              stem_endpoint_wcpt_parity=false,
               // F6 (= P8): broken_muon_id counts distinct cluster ids.  C++
               // default false.
-              broken_muon_cluster_id_count=false,
               // F7 (= P4): neutrino_type verdict bitmask + its T_tagger
               // branch (threaded to BOTH tagger_check_neutrino and
               // tagger_output).  C++ default false.
@@ -1377,71 +1329,50 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
               // cosmic-flag T_tagger branches (tagger_output only, plumbing
               // only -- nothing populates them yet).  C++ default false.
               nu_per_bundle=false,
-              nu_per_bundle_min_length=null,   // doc pr/94 Phase 5b; cm; null => C++ default 0 (no floor)
+              nu_per_bundle_min_length=null,  // doc pr/94 Phase 5b; cm; null => C++ default 0 (no floor)
               // doc pr/94 round 3: the selected candidate gets the main-cluster
               // PR treatment for its own pass even when it is a demoted main.
               // C++ default false; key omitted when off.  NOT gated on
               // nu_per_bundle -- the legacy demoted-main fallback needs it too.
-              nu_selected_as_main=false,
               // doc 75: closes the DL-swap flag leak nu_selected_as_main's
               // own guard leaves open (see common/clus.jsonnet comment).
               // C++ default false; key omitted when off.
-              nu_selected_as_main_snapshot_all=false,
               // ---- doc sbnd_xin/docs/pr/33 §10 EM-shower-clustering knobs.
               // All C++ default false = keys omitted = byte-identical
               // pre-knob config.
               // F1 (= P1): prototype calculate_num_daughter_tracks callee at
               // the main-vertex proton-skip site / the examine_showers
               // daughter_length site.
-              daughter_count_proto_main_vertex=false,
-              daughter_count_proto_examine_showers=false,
               // F2 (= P2): read the PDG off the object the prototype reads
               // (4 sites start-segment; 1 inverted site shower-type; 2 sites
               // exact ==13 muon test).  Parity at the :170 site needs
               // from_start_segment AND exact_muon_test together.
-              shower_pdg_from_start_segment=false,
-              shower_pdg_from_shower_type=false,
-              shower_pdg_exact_muon_test=false,
               // F3 (= P3): shared pi0-id allocation stream across the two
               // pi0 finders (prevents pio_id collision in the nue tagger
               // pi0 block and the Bee mc.json grouping).
-              pi0_id_shared_allocator=false,
               // F4 (= P6): is_shower gains the prototype's abs(pdg)==11
               // disjunct at the cluster-center-point site.
-              shower_flag_pdg_electron=false,
               // F5 (= P12): shower_less same-index tie-break by stable
               // shower id (house-rule determinism fix, prototype n/a).
-              shower_less_id_tiebreak=false,
               // doc pr/39: exclude a shower's own start vertex from the
               // end_point farthest-vertex search (prototype map_vtx_segs
               // parity).  Ships OFF pending owner gate review.
-              shower_endpoint_exclude_start_vertex=false,
-              shower_endpoint_skip_orphan_vtx=false,
               // doc pr/91 round 3: flood-fill frontier = visited, not merely
               // present in the view.  Ships OFF pending owner gate review.
-              shower_walk_visited_parity=false,
               // doc sbnd_xin/docs/pr/40 -- track (proton/pion/muon)
               // mis-identified as electron.  F1 (persistence), F2/F3 (dQ/dx
               // guards on wholesale track-to-electron conversion).  All
               // default false = legacy = byte-identical.
-              track_pid_persist_dqdx=false,
-              shower_reclass_dqdx_guard=false,
-              shower_topo_dqdx_guard=false,
               // doc sbnd_xin/docs/pr/40 round 2 -- two follow-on defects from the
               // pr/40 round: F1 zero-KE persistence stub, F2 proton-
               // daughter -> pion, F3 reclass_pinfo negative-KE stub.  All
               // default false = legacy = byte-identical.
-              reclass_never_computed_ke_floor=false,
-              track_pid_persist_4mom=false,
-              shower_proton_daughter_pion=false,
               // doc sbnd_xin/docs/pr/40 round 4 -- two follow-on defects from
               // round 2/3's F5: F7 clears the shower flags a relabelled pion
               // still carried (it was still being wrapped as a Shower); F8
               // relabels a muon segment at a multi-proton (>=2, charge-
               // confirmed) non-neutrino-vertex hadronic vertex to pion.  Both
               // default false = legacy = byte-identical.
-              shower_proton_daughter_pion_dissolve=false,
-              muon_multi_proton_pion=false,
               // doc sbnd_xin/docs/pr/40 round 5 -- muon mis-identified as
               // electron, three independent mechanisms.  F9 narrows F1 so it
               // no longer rescues an undirected electron guess; F10 excludes
@@ -1449,9 +1380,6 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
               // selection; F11 gives segment_is_shower_trajectory the same
               // straightness veto F3 gave segment_is_shower_topology's
               // dQ/dx.  All three default false = legacy = byte-identical.
-              track_pid_persist_dqdx_electron_guard=false,
-              shower_connect_main_vertex_straight_guard=false,
-              shower_traj_straight_guard=false,
               // doc sbnd_xin/docs/pr/40 round 6 -- boundary-level fixes the
               // round-5 measurement demanded.  F12 keeps the shower flood-
               // fill from absorbing a confident straight non-electron track;
@@ -1459,129 +1387,44 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
               // proton-daughter pion to electron; F14 widens the Michel
               // stopping-muon rescue past its weak-dir degree-2 limits.
               // All three default false = legacy = byte-identical.
-              shower_absorb_track_guard=false,
               // doc 77 round 1 (2026-08-24): shower_connect_protected_pion_
               // guard removed -- measured dead, never flipped (pr/40:1459).
-              michel_stem_muon_rescue=false,
               // doc sbnd_xin/docs/pr/74 round 2 -- P1 cascade guard + P2
               // Michel-terminal check.  C++ defaults false/40cm/1.3/40cm.
               // Keys omitted when off/null => byte-identical pre-pr/74.
-              shower_in_cascade_guard=false,
-              shower_in_max_len=null,
-              shower_in_mip_hi=null,
               // doc sbnd_xin/docs/pr/40 round 9 -- straight-track PID guard
               // family + B2 cross-cluster bridge.  C++ defaults false
               // (scalars 25 deg / 1.8 cm live in C++).  Keys omitted when
               // off/null => byte-identical pre-round-9 config.
-              shower_connect_from_vertices_straight_guard=false,
-              shower_connect_start_seg_straight_guard=false,
-              examine_direction_dirsign_shower_in_guard=false,
-              daughter_shower_angle_reclass_straight_guard=false,
-              shower_topo_reexam_straight_guard=false,
-              sfv_kink_max=null,
-              shower_nv_bridge_track=false,
-              shower_nv_bridge_max_gap=null,
               // doc pr/97 D1; C++ default false => legacy indeterminate main_pi read.
-              shower_nv_main_pi_init=false,
               // doc pr/92 -- stray-satellite drop from kine/PF.  false/null =
               // C++ defaults = OFF (20 MeV / 8 cm / 60 deg / 45 deg / 90 cm /
               // 30 cm / 25 deg); keys omitted => byte-identical pre-pr/92.
-              kine_drop_stray_satellites=false,
-              kine_sat_min_energy=null,
-              kine_sat_prox_max=null,
-              kine_sat_angle_bad=null,
-              kine_sat_angle_main=null,
-              kine_sat_far_dis=null,
-              kine_sat_axis_dis_cut=null,
-              kine_sat_cont_kink=null,
-              kine_sat_track_max_nseg=null,
-              kine_sat_em_far_dis=null,
-              michel_stem_michel_check=false,
-              michel_stem_max_far_len=null,
-              shower_stem_backfill=false,
-              stem_backfill_max_len=null,
-              stem_backfill_mip_lo=null,
-              stem_backfill_mip_hi=null,
-              stem_backfill_min_shower_len=null,
-              shower_conn3_unreachable=false,
-              conn3_unreachable_min_len=null,
               // doc pr/84 round 2 (F3): stitch radius in cm; null = C++
               // default 0 = OFF, key omitted => byte-identical.
-              conn3_stitch_max=null,
               // doc pr/84 round 3 (S1): collapse showers that share a start
               // segment.  C++ default false = OFF, key omitted when off =>
               // byte-identical pre-fix config.
-              shower_dedup_start_seg=false,
-              shower_traj_michel_stem=false,
-              michel_stem_traj_min_len=null,
-              michel_stem_traj_max_len=null,
-              michel_stem_traj_mip_lo=null,
-              michel_stem_traj_max_far_len=null,
-              michel_stem_traj_min_kink_deg=null,
               // doc pr/44: a multi-segment long-muon pseudo-shower keeps its
               // muon start segment (prototype parity; the update_particle_type
               // majority vote at the in_main_cluster seeding site is a
               // toolkit-only addition).  C++ default false; key omitted when
               // off => byte-identical pre-fix config.
-              shower_long_muon_keep_type=false,
               // doc pr/40 round 10; false = C++ default = OFF, key omitted =>
               // byte-identical.
-              shower_bragg_protect_start_segment=false,
               // doc pr/93 round 3 -- C++ defaults false; key-suppressed when off.
-              shower_reclass_case_b_dqdx_guard=false,
-              shower_accept_pid_guard=false,
-              shower_pid_guard_min_len=null,
-              shower_vote_track_pid_counts=false,
-              shower_cone_absorb_guard=false,
               // doc pr/93 round 4 -- C++ defaults false / null = C++ defaults
               // (orphan floor 50cm; sccc 5cm/15deg base + 12cm/7.5deg aligned).
               // Keys suppressed when off => byte-identical.
-              shower_detach_track_stem=false,
-              shower_ghost_member_drop=false,
-              shower_ghost_overlap_frac=null,
-              shower_ghost_dqdx_ratio=null,
-              shower_ghost_min_len=null,
               // doc pr/99 round 3; C++ defaults; keys suppressed when off.
-              kine_charge_dedup=false,
-              kine_charge_rebuild=false,
               // doc pr/101 Enu accounting round; C++ defaults; keys suppressed when off.
-              kine_charge_track_ctx=false,
-              kine_mass_rules=false,
-              kine_hadronic_dqdx=false,
-              kine_long_muon_mode=null,
-              kine_long_muon_ratio_lo=null,
-              kine_long_muon_ratio_hi=null,
-              kine_mainvtx_used_guard=false,
-              shower_hadronic_tag=false,
-              shower_hadronic_min_len=null,
-              shower_hadronic_scan_len=null,
-              shower_hadronic_bin=null,
-              shower_hadronic_r_cyl=null,
-              shower_hadronic_r_core=null,
-              shower_hadronic_growth_max=null,
-              shower_hadronic_growth_bragg=null,
-              shower_hadronic_bragg_ratio=null,
-              shower_hadronic_stem_ratio=null,
-              kine_count_orphan_tracks=false,
-              kine_orphan_track_min=null,
-              straight_cont_cross_cluster=false,
-              sccc_bridge_body=false,
-              sccc_max_gap=null,
-              sccc_kink_max=null,
-              sccc_gap_aligned=null,
-              sccc_kink_tight=null,
               // doc pr/43 round 2 -- C++ defaults false; keys suppressed when off.
-              single_muon_proton_chain_veto=false,
-              single_muon_long_muon_claim=false,
-              pid_flag_reconcile=false,
               // doc pr/45 -- find_other_segments empty-2D-tree sentinel guard
               // (SBND 18255-56463 isochronous tail).  C++ default false; key
               // suppressed when off => byte-identical.
-              other_seg_empty_2d_guard=false,
               // doc pr/46 -- long-muon stub bridge in find_cont_muon_segment
               // (18255-55595 broken muon behind a 2.4 cm vertex stub).  C++
               // default false; key suppressed when off => byte-identical.
-              long_muon_stub_bridge=false,
               // doc pr/48 -- back-to-back track fixes
               // (18255-51513/56211/57903/59335/57485: nu vertex mid-segment
               // on one unbroken track, dQ/dx rising at BOTH ends, no angular
@@ -1591,7 +1434,6 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
               // keys suppressed when off => byte-identical.  teb_* numerics:
               // null = C++ defaults (doc pr/48 sec 9 operating point), inert
               // while two_end_break is off.
-              two_end_break=false,
               teb_min_len=null,
               teb_min_arm=null,
               teb_min_arm_pts=null,
@@ -1610,16 +1452,9 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
               // default 0 = legacy, key suppressed.  doc 77 round 1
               // (2026-08-24): teb_second_max removed -- negative on its own
               // motivating events (pr/90 sec 8.5).
-              teb_turn_min_arm_frac=null,
               // doc pr/90 round 4: chain-topology admission (D1), route R3
               // turn/activity (D3), R2 bragg veto (D4).  false/null = C++
               // default = legacy, key suppressed.
-              teb_chain_topology=false,
-              teb_r3_turn=null,
-              teb_r3_hot=null,
-              teb_bragg_veto_turn=null,
-              kink_walk_dqdx_stop=false,
-              kink_break_protect=false,
               kink_dqdx_hot_ratio=null,
               // doc pr/49 -- cross-cluster projection-ghost deweighting in
               // the trajectory fit's 2D charge association (18255-57441
@@ -1633,7 +1468,6 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
               // omits the key => byte-identical.  >= 0 = on, value =
               // wire/slice tolerance in cells (0 = strict; the 57441
               // contamination is ONE cell away, so >= 1 re-admits it).
-              fit_blob_coverage=null,
               // doc pr/50 -- suspend the pr/49 deweighting during
               // find_proto_vertex (the partition-forming stage; its recursive
               // kink walk is globally sensitive to fit perturbations --
@@ -1641,36 +1475,14 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
               // neighbor).  All later fitting stages keep the deweighting.
               // C++ default false = pr/49 behavior; false omits the key =>
               // byte-identical.
-              fit_blob_coverage_defer=false,
               // doc pr/50 -- main-vertex kink-consistency snap (172230-class
               // near-vertex robustness; C++ defaults in TaggerCheckNeutrino.h).
               // false/null omit the keys => byte-identical.
-              vertex_kink_snap=false,
-              vks_radius=null,
-              vks_min_dis=null,
-              vks_angle=null,
-              vks_margin=null,
-              vks_collinear=null,
-              vks_skirt=null,
-              vks_baseline=null,
-              vks_min_arm=null,
-              vks_fit_miss=null,
-              vks_hot_ratio=null,
               // doc pr/85 -- carry the old vertex's arms through the snap
               // residual below this arc (cm).  C++ default 0 = off; null
               // omits the key => byte-identical.
-              vks_carry_prong=null,
               // doc pr/104 -- main-vertex junction snap (C++ defaults in
               // TaggerCheckNeutrino.h).  false/null omit the keys => byte-identical.
-              vertex_junction_snap=false,
-              vjs_radius=null,
-              vjs_min_arm=null,
-              vjs_min_prongs=null,
-              vjs_collinear=null,
-              vjs_fit_margin=null,
-              vjs_fit_rms=null,
-              vjs_override_kink_snap=false,
-              vjs_min_move=null,
               // doc pr/51 -- main-vertex graph audit (near-vertex graph-shape
               // repair: dup-corridor merge / charge-less-bridge removal /
               // micro-stub absorb + re-seat / one refit; C++ defaults in
@@ -1681,189 +1493,105 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
               // empty-2D-index sentinel (-1) as "covered" on cathode-crossing
               // clusters.  SBND PRODUCTION ON since 2026-08-17 (docs/73
               // sec 12 owner flip).
-              esva_ignore_empty_2d=true,
-              main_vertex_graph_audit=false,
-              mvga_radius=null,
-              mvga_dup_tol=null,
-              mvga_dup_frac=null,
-              mvga_dup_angle=null,
-              mvga_bridge_mip=null,
-              mvga_reconnect=null,
-              mvga_stub=null,
-              mvga_stub_pts=null,
-              mvga_reseat_angle=null,
               // doc pr/51 round 3 -- op3 satellite-anchor radius (cm).
               // C++ default 0 (main-vertex-only, round 2); null omits the
               // key => byte-identical.
-              mvga_satellite=null,
               // doc pr/85 -- op3 interposed-stub absorb at the main-vertex
               // anchor (angle in deg, C++ default 150).  false/null omit
               // the keys => byte-identical.
-              mvga_interposed=false,
-              mvga_interposed_angle=null,
               // doc pr/86: interposed-splice candidate ceiling, cm (C++
               // default 0 = use mvga_stub).  null omits the key =>
               // byte-identical.
-              mvga_interposed_len=null,
               // doc pr/86 P4: satellite-anchor op3 overlap threshold (C++
               // default 0 = use mvga_dup_frac).  null omits the key =>
               // byte-identical.
-              mvga_sat_dup_frac=null,
               // doc pr/86 P1b: interposed splice at degree-1 main anchors
               // (C++ default false).  false omits the key => byte-identical.
-              mvga_interposed_deg1=false,
               // doc pr/86 round 2: op3 post-carry straighten reach (cm) and
               // op3.5 junction-collapse radius (cm).  C++ defaults 0 (off).
               // Keys omitted when null => byte-identical.
-              mvga_splice_straighten=null,
-              mvga_approach_collapse=null,
-              mvga_straighten_radius=null,
               // doc pr/83 r3: op1 scope/threshold decouple (cm / fraction;
               // radius -1 = unscoped), post-op3 dup pass, carry cap,
               // abandoned-cluster dup audit.  C++ defaults 0/0/false/0/false
               // (all legacy).  Keys omitted when null/false =>
               // byte-identical.
-              mvga_op1_radius=null,
-              mvga_op1_dup_frac=null,
-              mvga_op1_post=false,
               // doc 77 round 1 (2026-08-24): mvga_carry_max removed -- not
               // needed, class A cleared 8/8 with it OFF (pr/83 r3 sec 8.5).
-              swap_orphan_dup_audit=false,
               // doc pr/83 r4 -- projective dup collapse; null omits => byte-identical.
-              mvga_proj_dup_frac=null,
-              mvga_proj_dqdx_ratio=null,
-              mvga_proj_angle=null,
-              mvga_ac_veto_radius=null,
-              mvga_ac_chord_max=null,
-              mvga_ac_no_cascade=false,
-              mvga_passthru=null,
-              mvga_passthru_tol=null,
-              mvga_interposed_fallback=false,
-              mvga_interposed_fallback_min_angle=null,
-              mvga_dup_starved_asym=null,
-              mvga_dup_starved_mip=null,
-              mvga_dup_starved_span=null,
               // doc 77 round 1 (2026-08-24): dl_vtx_swap_guard removed --
               // live A/B -36/1014 (pr/89 round 5).
               // doc pr/106 sec 10: exclusion-free charge cloud for the DL vertex net. C++ default false.
-              dl_vtx_cloud_no_exclusion=false,
               // doc pr/112 sec 11: dual chain. C++ defaults false/"snap"/false/2.0/true/0; null/false => key omitted.
-              dl_vtx_dual_chain=false,
-              dual_chain_mode=null,
-              dual_chain_transfer=false,
-              dual_chain_transfer_max=null,
-              dual_chain_allow_cluster_swap=null,
-              dual_chain_vtx_weight=null,
               // doc pr/107: dQ/dx fit keeps every trajectory point (prototype parity). C++ default false.
-              dqdx_fit_keep_all_points=false,
               // doc 77 round 1 (2026-08-24): dl_vtx_topo_weight/_center
               // (pr/89 Arm C2 rule-1 topology term) removed -- live A/B
               // -8/1014.
               // doc pr/51 round 3 -- apply the traditional-path swap
               // decision instead of discarding it.  C++ default false;
               // false omits the key => byte-identical.
-              main_vertex_swap_apply=false,
               // doc pr/51 round 4 -- diagnostic-only rough-path probe.
               // C++ default false; false omits the key => byte-identical.
-              rough_path_probe=false,
               // doc pr/51 round 5 -- steiner gap penalty (H1 short-cut fix):
               // do_rough_path routes on the support-penalized
               // "steiner_graph_gap" flavor when scale > 0.  C++ defaults:
               // scale 0 (off), dead_alpha 0.25, min_edge 0.5 cm,
               // sample_step 0.3 cm, point_radius 0.2 cm.  null omits the
               // keys => byte-identical.
-              steiner_gap_penalty=null,
-              sgp_dead_alpha=null,
-              sgp_min_edge=null,
-              sgp_sample_step=null,
-              sgp_point_radius=null,
               // doc pr/73: per-edge DEBUG sentinel for the steiner_graph_gap
               // scan (endpoints, midpoint, w, bad, both vertex charges,
               // deficit).  Log-only diagnostic.  C++ default false; false
               // omits the key => byte-identical compiled config.
-              sgp_edge_probe=false, vertex_scoreboard=false, dl_vtx_harvest=false,
               // doc pr/51 round 6 -- weak-charge deficit term on the same
               // gap flavor.  C++ defaults: weak_scale 0 (off), weak_qref
               // 2000 (charge units).  null omits the keys => byte-identical.
-              sgp_weak_scale=null,
-              sgp_weak_qref=null,
               // doc pr/73 round 2 F3a -- do_rough_path route excursion cap,
               // cm.  C++ default -1 = off; null omits the key.
-              sgp_max_sep=null,
               // doc pr/83 -- oriented break_segment splits (find_vertices, not
               // boost source/target).  C++ default false; key omitted when
               // off => byte-identical pre-fix config.
-              break_seg_orient=false,
               // doc pr/51 round 7 -- robust vertex fit (dynamic per-leg
               // direction windows for MyFCN).  C++ defaults: robust false,
               // main_only true, min_len 10, rin_margin 2, rout_frac 0.5,
               // rout_min 9, rout_max 18, angle 20, min_pts 5, min_aniso 3,
               // prior_range 1 (lengths cm, angle deg).  false/null omit the
               // keys => byte-identical.
-              mvfit_robust=false,
-              mvfit_main_only=null,
-              mvfit_min_len=null,
-              mvfit_rin_margin=null,
-              mvfit_rout_frac=null,
-              mvfit_rout_min=null,
-              mvfit_rout_max=null,
-              mvfit_angle=null,
-              mvfit_min_pts=null,
-              mvfit_min_aniso=null,
-              mvfit_prior_range=null,
               // doc pr/54 -- keep well-supported isolated residual segments
               // in find_other_segments (18255-142421 separated EM shower with
               // no fitted trajectory).  C++ defaults: keep false, floors
               // 25 points / 3 cm.  false/null omit the keys => byte-identical.
-              other_seg_keep_isolated=false,
-              other_seg_keep_isolated_min_points=null,
-              other_seg_keep_isolated_min_length=null,
               // doc pr/102 P1 -- OR-disjuncts on the pr/54 keep: min_nnf
               // (terminal not-faked floor) and len_admit (cm).  C++ defaults
               // 0 = off.  null omits the keys => byte-identical.
-              other_seg_keep_isolated_min_nnf=null,
-              other_seg_keep_isolated_len_admit=null,
               // doc 77 round 1 (2026-08-24): other_seg_uncover_3d (pr/102
               // P2, 3-D uncovered-charge radius) removed -- 23 ADVERSE
               // movers, stays OFF.
               // doc pr/67 round 3 (S2) -- isochronous-snap size gate, cm.
               // C++ default 10.0 = legacy.  null omits the key.
-              iso_snap_min_dir_mag=null,
               // doc pr/65 round 3 -- offer graph-unreachable main-cluster
               // segments (kept-isolated pr/54 residuals) to the shower
               // absorbers (reachability-relaxed guards).  C++ default false;
               // false omits the key => byte-identical.
-              shower_absorb_unreachable_main=false,
               // doc pr/59 round 2 -- per-cluster orphaned-associate_points
               // rescue.  C++ default false; false omits the key =>
               // byte-identical.
-              assoc_full_recluster=false,
               // doc pr/64 round 7 -- reassign same-cluster association
               // orphans that Stage C of clustering_points_segments would
               // otherwise drop (18259-18625: 12-18 pt blob at PF segment
               // 126042's own fit endpoint, in img charge but absent from
               // shower_track/associate_points).  C++ default false; false
               // omits the key => byte-identical.
-              assoc_reassign_orphans=false,
               // doc pr/64 round 8 -- clear a merge survivor's
               // associate_points when examine_structure_final_1/_1p/_3
               // deletes a segment that had non-empty associate_points, so
               // pr/59's reassociate_cluster_orphans any_orphan trigger
               // correctly re-fires.  C++ default false; false omits the key
               // => byte-identical.
-              assoc_clear_on_merge=false,
               // doc pr/72 round 2 -- guard examine_structure_3 against
               // merging a genuine near-vertex track stub into an unrelated
               // shower/track trunk (18255-196649).  C++ default false;
               // false/null omits the key => byte-identical.  Numeric
               // defaults null = component keeps its own C++ default
               // (fitted from a 117-event census).
-              es3_stub_guard=false,
-              es3sg_stub_max=null,
-              es3sg_len_ratio=null,
-              es3sg_ang3_min=null,
-              es3sg_ang_ratio=null,
-              es3sg_require_terminal=null,
               // doc pr/45 -- paint muon-typed (+-13) pseudo-showers as track in
               // the Bee shower_track layer + PrDisplayDump (18255-56463: 411 cm
               // muon painted red).  C++ default false; key suppressed when off
@@ -1880,7 +1608,6 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
               // Scales as 1/mip_dqdx_median: re-derive when the 48000
               // placeholder becomes a measurement.  null restores the uBooNE
               // refit [0.8866, 0.9533, 18, 0.4234] (byte-identical pre-knob).
-              muon_dqdx_curve=[0.8826, 1.0587, 18, 0.4745],
               // use_power_recomb: hand the taggers (STM + neutrino PR) the
               // free-power Modified-Box recombination fitted to SBND stopping
               // tracks (docs/55 sec 7g canonical, PowerBoxRecombination
@@ -1896,19 +1623,21 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
               // for SBND (owner 2026-07-30) with sp_mean_dedx_cut=2.23, the
               // physical-scale transfer of the legacy 2.3 (docs/pr/10 sec 5).
               // false/null restore the inline formula and the 2.3 literal.
-              sp_dedx_use_recomb_model=true,
-              sp_mean_dedx_cut=2.23,
               // dl_vtx_cut: max distance (mm; C++ default 25.0 = 2.5 cm) from
               // the DL SCN prediction to accept a candidate vertex.  Threaded
               // for configurability (docs/pr/2 sec 7.4); null keeps the C++
               // default, which is coupled to the uBooNE-trained net (gap G3).
-              dl_vtx_cut=null,
               // fast_xgb_forest: book the two XGB BDT combiners with
               // TmvaGradForest instead of TMVA::Reader -- same scores, ~4 s
               // and ~0.9 GB less per PR job (sbnd_xin/docs/76 round 2).
               // C++ default false.  Key omitted when off => byte-identical
               // pre-knob config.
-              fast_xgb_forest=false):: {
+              fast_xgb_forest=false,
+       // doc 77 round 2: the pattern-recognition knob bag, built once by the
+       // job (wct-pr-perevt.jsonnet) from its TLAs and handed to
+       // TaggerCheckNeutrino as-is.  An absent key is that knob's C++ default,
+       // exactly as the per-knob `+ (if x then {x: ...})` clauses it replaces.
+       tcn_knobs={}):: {
         // Only gate when the caller actually supplied a window; beam_window=[0,0]
         // (the arg default, i.e. "no beam window") must not silently drop every
         // cluster's tagger evaluation.
@@ -2304,12 +2033,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 dl_vtx_score_scale=1000.0,
                 beam_window_low=beam_window[0],
                 beam_window_high=beam_window[1],
-                nu_skip_cosmic=nu_skip_cosmic,
-                nu_skip_cosmic_bundle=nu_skip_cosmic_bundle,
                 nu_skip_cosmic_bundle_min_length=nu_skip_cosmic_bundle_min_length,
-                skip_cosmic_companions=skip_cosmic_companions,
-                cosmic_companion_min_length=cosmic_companion_min_length,
-                nu_fallback_demoted_mains=nu_fallback_demoted_mains,
                 // doc pr/94 Phase 2: the SAME switch that books the per-bundle
                 // T_tagger/T_kine branches on tagger_output below also turns on the
                 // per-bundle candidate loop here -- one row per in-beam-window
@@ -2321,64 +2045,11 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 nu_per_bundle=nu_per_bundle,
                 nu_per_bundle_demoted_acts=evaluate_demoted_mains,
                 nu_per_bundle_min_length=nu_per_bundle_min_length,
-                nu_selected_as_main=nu_selected_as_main,
-                nu_selected_as_main_snapshot_all=nu_selected_as_main_snapshot_all,
-                sp_photon_flag=sp_photon_flag,
                 dir_weak_use_score=dir_weak_use_score,
-                mip_dqdx=mip_dqdx,
                 mip_dqdx_median=mip_dqdx_median,
                 proton_dir_vote=proton_dir_vote,
                 endpoint_trim_retry=endpoint_trim_retry,
                 fit_vertex_min_seg_length=fit_vertex_min_seg_length,
-                cathode_x=cathode_x,
-                cathode_kink_xcut=cathode_kink_xcut,
-                cathode_wide_kink_angle=cathode_wide_kink_angle,
-                cathode_wide_kink_skirt=cathode_wide_kink_skirt,
-                cathode_wide_kink_baseline=cathode_wide_kink_baseline,
-                shower_topo_demote_len=shower_topo_demote_len,
-                fit_exclusion=fit_exclusion,
-                graph_endpoint_tol=graph_endpoint_tol,
-                oov_prototype_parity=oov_prototype_parity,
-                first_seg_local_pca=first_seg_local_pca,
-                other_seg_relaxed_accept=other_seg_relaxed_accept,
-                shower_topo_proto_dir=shower_topo_proto_dir,
-                cont_muon_dir3_30cm=cont_muon_dir3_30cm,
-                track_comp_empty_abstain=track_comp_empty_abstain,
-                shower_topo_reset=shower_topo_reset,
-                reclass_preserve_4mom=reclass_preserve_4mom,
-                dir_track_median_local=dir_track_median_local,
-                examine_showers_vertex_by_index=examine_showers_vertex_by_index,
-                vertex_dir_use_fit_point=vertex_dir_use_fit_point,
-                shower_traj_recheck_parity=shower_traj_recheck_parity,
-                main_vertex_require_descriptor=main_vertex_require_descriptor,
-                main_vertex_candidate_flag=main_vertex_candidate_flag,
-                iso_endpoint=iso_endpoint,
-                iso_endpoint_min_length=iso_endpoint_min_length,
-                iso_endpoint_max_xext=iso_endpoint_max_xext,
-                iso_endpoint_xext_frac=iso_endpoint_xext_frac,
-                iso_endpoint_xext_quantile=iso_endpoint_xext_quantile,
-                iso_endpoint_tube_radius=iso_endpoint_tube_radius,
-                iso_endpoint_min_aspect=iso_endpoint_min_aspect,
-                v3_extension_guard=v3_extension_guard,
-                traj_cover_probe=traj_cover_probe,
-                pr_find_other_rounds=pr_find_other_rounds,
-                v3_extension_min_gain=v3_extension_min_gain,
-                cosmic_y_top_main=cosmic_y_top_main,
-                cosmic_y_top_strict=cosmic_y_top_strict,
-                cosmic_y_top_loose=cosmic_y_top_loose,
-                cosmic_y_small_piece=cosmic_y_small_piece,
-                vertex_z_prior_scale=vertex_z_prior_scale,
-                ssm_target_dir=ssm_target_dir,
-                ssm_absorber_dir=ssm_absorber_dir,
-                kine_fudge_factor=kine_fudge_factor,
-                kine_recom_factor=kine_recom_factor,
-                kine_shower_fudge_factor=kine_shower_fudge_factor,
-                kine_shower_recom_factor=kine_shower_recom_factor,
-                kine_proton_recom_factor=kine_proton_recom_factor,
-                kine_plane_weights=kine_plane_weights,
-                kine_plane_asym_switch=kine_plane_asym_switch,
-                kine_w_value=kine_w_value,
-                kine_shower_pdg_live=kine_shower_pdg_live,
                 // doc pr/36 sec 10 (F1): same fiducial + margins as
                 // tagger_check_{stm,tgm,fc} above -- one containment definition
                 // across the stage.  Keys omitted when off.
@@ -2386,124 +2057,9 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 fv_tolerance=(if neutrino_consistent_fv || cosmic_consistent_fv || nue_sp_consistent_fv then sbnd_pr_fv_margins else []),
                 // sbnd_xin/docs/74 G1/G2: cosmic_tagger() containment on the same
                 // fiducial + margins.  Key omitted when off => byte-identical.
-                cosmic_consistent_fv=cosmic_consistent_fv,
                 // sbnd_xin/docs/75: nue/single-photon tagger containment on the
                 // same fiducial (each site's own hardcoded tolerance -- see
                 // NeutrinoTaggerNuE.cxx).  Key omitted when off => byte-identical.
-                nue_sp_consistent_fv=nue_sp_consistent_fv,
-                sp_sce_correction=sp_sce_correction,
-                tagger_ordered_segment_sets=tagger_ordered_segment_sets,
-                stem_endpoint_wcpt_parity=stem_endpoint_wcpt_parity,
-                broken_muon_cluster_id_count=broken_muon_cluster_id_count,
-                neutrino_type_bitmask=neutrino_type_bitmask,
-                daughter_count_proto_main_vertex=daughter_count_proto_main_vertex,
-                daughter_count_proto_examine_showers=daughter_count_proto_examine_showers,
-                shower_pdg_from_start_segment=shower_pdg_from_start_segment,
-                shower_pdg_from_shower_type=shower_pdg_from_shower_type,
-                shower_pdg_exact_muon_test=shower_pdg_exact_muon_test,
-                pi0_id_shared_allocator=pi0_id_shared_allocator,
-                shower_flag_pdg_electron=shower_flag_pdg_electron,
-                shower_less_id_tiebreak=shower_less_id_tiebreak,
-                shower_endpoint_exclude_start_vertex=shower_endpoint_exclude_start_vertex,
-                shower_endpoint_skip_orphan_vtx=shower_endpoint_skip_orphan_vtx,
-                shower_walk_visited_parity=shower_walk_visited_parity,
-                track_pid_persist_dqdx=track_pid_persist_dqdx,
-                shower_reclass_dqdx_guard=shower_reclass_dqdx_guard,
-                shower_topo_dqdx_guard=shower_topo_dqdx_guard,
-                reclass_never_computed_ke_floor=reclass_never_computed_ke_floor,
-                track_pid_persist_4mom=track_pid_persist_4mom,
-                shower_proton_daughter_pion=shower_proton_daughter_pion,
-                shower_proton_daughter_pion_dissolve=shower_proton_daughter_pion_dissolve,
-                muon_multi_proton_pion=muon_multi_proton_pion,
-                track_pid_persist_dqdx_electron_guard=track_pid_persist_dqdx_electron_guard,
-                shower_connect_main_vertex_straight_guard=shower_connect_main_vertex_straight_guard,
-                shower_traj_straight_guard=shower_traj_straight_guard,
-                shower_absorb_track_guard=shower_absorb_track_guard,
-                michel_stem_muon_rescue=michel_stem_muon_rescue,
-                shower_in_cascade_guard=shower_in_cascade_guard,
-                shower_in_max_len=shower_in_max_len,
-                shower_in_mip_hi=shower_in_mip_hi,
-                shower_connect_from_vertices_straight_guard=shower_connect_from_vertices_straight_guard,
-                shower_connect_start_seg_straight_guard=shower_connect_start_seg_straight_guard,
-                examine_direction_dirsign_shower_in_guard=examine_direction_dirsign_shower_in_guard,
-                daughter_shower_angle_reclass_straight_guard=daughter_shower_angle_reclass_straight_guard,
-                shower_topo_reexam_straight_guard=shower_topo_reexam_straight_guard,
-                sfv_kink_max=sfv_kink_max,
-                shower_nv_bridge_track=shower_nv_bridge_track,
-                shower_nv_bridge_max_gap=shower_nv_bridge_max_gap,
-                shower_nv_main_pi_init=shower_nv_main_pi_init,
-                kine_drop_stray_satellites=kine_drop_stray_satellites,
-                kine_sat_min_energy=kine_sat_min_energy,
-                kine_sat_prox_max=kine_sat_prox_max,
-                kine_sat_angle_bad=kine_sat_angle_bad,
-                kine_sat_angle_main=kine_sat_angle_main,
-                kine_sat_far_dis=kine_sat_far_dis,
-                kine_sat_axis_dis_cut=kine_sat_axis_dis_cut,
-                kine_sat_cont_kink=kine_sat_cont_kink,
-                kine_sat_track_max_nseg=kine_sat_track_max_nseg,
-                kine_sat_em_far_dis=kine_sat_em_far_dis,
-                michel_stem_michel_check=michel_stem_michel_check,
-                michel_stem_max_far_len=michel_stem_max_far_len,
-                shower_stem_backfill=shower_stem_backfill,
-                stem_backfill_max_len=stem_backfill_max_len,
-                stem_backfill_mip_lo=stem_backfill_mip_lo,
-                stem_backfill_mip_hi=stem_backfill_mip_hi,
-                stem_backfill_min_shower_len=stem_backfill_min_shower_len,
-                shower_conn3_unreachable=shower_conn3_unreachable,
-                conn3_unreachable_min_len=conn3_unreachable_min_len,
-                conn3_stitch_max=conn3_stitch_max,
-                shower_dedup_start_seg=shower_dedup_start_seg,
-                shower_traj_michel_stem=shower_traj_michel_stem,
-                michel_stem_traj_min_len=michel_stem_traj_min_len,
-                michel_stem_traj_max_len=michel_stem_traj_max_len,
-                michel_stem_traj_mip_lo=michel_stem_traj_mip_lo,
-                michel_stem_traj_max_far_len=michel_stem_traj_max_far_len,
-                michel_stem_traj_min_kink_deg=michel_stem_traj_min_kink_deg,
-                shower_long_muon_keep_type=shower_long_muon_keep_type,
-                shower_bragg_protect_start_segment=shower_bragg_protect_start_segment,
-                shower_reclass_case_b_dqdx_guard=shower_reclass_case_b_dqdx_guard,
-                shower_accept_pid_guard=shower_accept_pid_guard,
-                shower_pid_guard_min_len=shower_pid_guard_min_len,
-                shower_vote_track_pid_counts=shower_vote_track_pid_counts,
-                shower_cone_absorb_guard=shower_cone_absorb_guard,
-                shower_detach_track_stem=shower_detach_track_stem,
-                shower_ghost_member_drop=shower_ghost_member_drop,
-                shower_ghost_overlap_frac=shower_ghost_overlap_frac,
-                shower_ghost_dqdx_ratio=shower_ghost_dqdx_ratio,
-                shower_ghost_min_len=shower_ghost_min_len,
-                kine_charge_dedup=kine_charge_dedup,
-                kine_charge_rebuild=kine_charge_rebuild,
-                kine_charge_track_ctx=kine_charge_track_ctx,
-                kine_mass_rules=kine_mass_rules,
-                kine_hadronic_dqdx=kine_hadronic_dqdx,
-                kine_long_muon_mode=kine_long_muon_mode,
-                kine_long_muon_ratio_lo=kine_long_muon_ratio_lo,
-                kine_long_muon_ratio_hi=kine_long_muon_ratio_hi,
-                kine_mainvtx_used_guard=kine_mainvtx_used_guard,
-                shower_hadronic_tag=shower_hadronic_tag,
-                shower_hadronic_min_len=shower_hadronic_min_len,
-                shower_hadronic_scan_len=shower_hadronic_scan_len,
-                shower_hadronic_bin=shower_hadronic_bin,
-                shower_hadronic_r_cyl=shower_hadronic_r_cyl,
-                shower_hadronic_r_core=shower_hadronic_r_core,
-                shower_hadronic_growth_max=shower_hadronic_growth_max,
-                shower_hadronic_growth_bragg=shower_hadronic_growth_bragg,
-                shower_hadronic_bragg_ratio=shower_hadronic_bragg_ratio,
-                shower_hadronic_stem_ratio=shower_hadronic_stem_ratio,
-                kine_count_orphan_tracks=kine_count_orphan_tracks,
-                kine_orphan_track_min=kine_orphan_track_min,
-                straight_cont_cross_cluster=straight_cont_cross_cluster,
-                sccc_bridge_body=sccc_bridge_body,
-                sccc_max_gap=sccc_max_gap,
-                sccc_kink_max=sccc_kink_max,
-                sccc_gap_aligned=sccc_gap_aligned,
-                sccc_kink_tight=sccc_kink_tight,
-                single_muon_proton_chain_veto=single_muon_proton_chain_veto,
-                single_muon_long_muon_claim=single_muon_long_muon_claim,
-                pid_flag_reconcile=pid_flag_reconcile,
-                other_seg_empty_2d_guard=other_seg_empty_2d_guard,
-                long_muon_stub_bridge=long_muon_stub_bridge,
-                two_end_break=two_end_break,
                 teb_min_len=teb_min_len,
                 teb_min_arm=teb_min_arm,
                 teb_min_arm_pts=teb_min_arm_pts,
@@ -2518,125 +2074,16 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 teb_turn_angle=teb_turn_angle,
                 teb_turn_baseline=teb_turn_baseline,
                 teb_turn_skirt=teb_turn_skirt,
-                teb_turn_min_arm_frac=teb_turn_min_arm_frac,
-                teb_chain_topology=teb_chain_topology,
-                teb_r3_turn=teb_r3_turn,
-                teb_r3_hot=teb_r3_hot,
-                teb_bragg_veto_turn=teb_bragg_veto_turn,
-                kink_walk_dqdx_stop=kink_walk_dqdx_stop,
-                kink_break_protect=kink_break_protect,
                 kink_dqdx_hot_ratio=kink_dqdx_hot_ratio,
-                fit_blob_coverage=fit_blob_coverage,
-                fit_blob_coverage_defer=fit_blob_coverage_defer,
-                vertex_kink_snap=vertex_kink_snap,
-                vks_radius=vks_radius,
-                vks_min_dis=vks_min_dis,
-                vks_angle=vks_angle,
-                vks_margin=vks_margin,
-                vks_collinear=vks_collinear,
-                vks_skirt=vks_skirt,
-                vks_baseline=vks_baseline,
-                vks_min_arm=vks_min_arm,
-                vks_fit_miss=vks_fit_miss,
-                vks_hot_ratio=vks_hot_ratio,
-                vks_carry_prong=vks_carry_prong,
-                vertex_junction_snap=vertex_junction_snap,
-                vjs_radius=vjs_radius,
-                vjs_min_arm=vjs_min_arm,
-                vjs_min_prongs=vjs_min_prongs,
-                vjs_collinear=vjs_collinear,
-                vjs_fit_margin=vjs_fit_margin,
-                vjs_fit_rms=vjs_fit_rms,
-                vjs_override_kink_snap=vjs_override_kink_snap,
-                vjs_min_move=vjs_min_move,
-                esva_ignore_empty_2d=esva_ignore_empty_2d,
-                main_vertex_graph_audit=main_vertex_graph_audit,
-                mvga_radius=mvga_radius,
-                mvga_dup_tol=mvga_dup_tol,
-                mvga_dup_frac=mvga_dup_frac,
-                mvga_dup_angle=mvga_dup_angle,
-                mvga_bridge_mip=mvga_bridge_mip,
-                mvga_reconnect=mvga_reconnect,
-                mvga_stub=mvga_stub,
-                mvga_stub_pts=mvga_stub_pts,
-                mvga_reseat_angle=mvga_reseat_angle,
-                mvga_satellite=mvga_satellite,
-                mvga_interposed=mvga_interposed,
-                mvga_interposed_angle=mvga_interposed_angle,
-                mvga_interposed_len=mvga_interposed_len,
-                mvga_sat_dup_frac=mvga_sat_dup_frac,
-                mvga_interposed_deg1=mvga_interposed_deg1,
-                mvga_splice_straighten=mvga_splice_straighten,
-                mvga_approach_collapse=mvga_approach_collapse,
-                mvga_straighten_radius=mvga_straighten_radius,
-                mvga_op1_radius=mvga_op1_radius,
-                mvga_op1_dup_frac=mvga_op1_dup_frac,
-                mvga_op1_post=mvga_op1_post,
-                swap_orphan_dup_audit=swap_orphan_dup_audit,
-                mvga_proj_dup_frac=mvga_proj_dup_frac,
-                mvga_proj_dqdx_ratio=mvga_proj_dqdx_ratio,
-                mvga_proj_angle=mvga_proj_angle,
-                mvga_ac_veto_radius=mvga_ac_veto_radius,
-                mvga_ac_chord_max=mvga_ac_chord_max,
-                mvga_ac_no_cascade=mvga_ac_no_cascade,
-                mvga_passthru=mvga_passthru,
-                mvga_passthru_tol=mvga_passthru_tol,
-                mvga_interposed_fallback=mvga_interposed_fallback,
-                mvga_interposed_fallback_min_angle=mvga_interposed_fallback_min_angle,
-                mvga_dup_starved_asym=mvga_dup_starved_asym,
-                mvga_dup_starved_mip=mvga_dup_starved_mip,
-                mvga_dup_starved_span=mvga_dup_starved_span,
-                dl_vtx_cloud_no_exclusion=dl_vtx_cloud_no_exclusion,
-                dl_vtx_dual_chain=dl_vtx_dual_chain,
-                dual_chain_mode=dual_chain_mode,
-                dual_chain_transfer=dual_chain_transfer,
-                dual_chain_transfer_max=dual_chain_transfer_max,
-                dual_chain_allow_cluster_swap=dual_chain_allow_cluster_swap,
-                dual_chain_vtx_weight=dual_chain_vtx_weight,
-                dqdx_fit_keep_all_points=dqdx_fit_keep_all_points,
-                main_vertex_swap_apply=main_vertex_swap_apply,
-                rough_path_probe=rough_path_probe,
-                steiner_gap_penalty=steiner_gap_penalty,
-                sgp_dead_alpha=sgp_dead_alpha,
-                sgp_min_edge=sgp_min_edge,
-                sgp_sample_step=sgp_sample_step,
-                sgp_point_radius=sgp_point_radius,
-                sgp_edge_probe=sgp_edge_probe, vertex_scoreboard=vertex_scoreboard, dl_vtx_harvest=dl_vtx_harvest,
-                sgp_weak_scale=sgp_weak_scale,
-                sgp_weak_qref=sgp_weak_qref,
-                sgp_max_sep=sgp_max_sep,
-                break_seg_orient=break_seg_orient,
-                mvfit_robust=mvfit_robust,
-                mvfit_main_only=mvfit_main_only,
-                mvfit_min_len=mvfit_min_len,
-                mvfit_rin_margin=mvfit_rin_margin,
-                mvfit_rout_frac=mvfit_rout_frac,
-                mvfit_rout_min=mvfit_rout_min,
-                mvfit_rout_max=mvfit_rout_max,
-                mvfit_angle=mvfit_angle,
-                mvfit_min_pts=mvfit_min_pts,
-                mvfit_min_aniso=mvfit_min_aniso,
-                mvfit_prior_range=mvfit_prior_range,
-                other_seg_keep_isolated=other_seg_keep_isolated,
-                other_seg_keep_isolated_min_points=other_seg_keep_isolated_min_points,
-                other_seg_keep_isolated_min_length=other_seg_keep_isolated_min_length,
-                other_seg_keep_isolated_min_nnf=other_seg_keep_isolated_min_nnf,
-                other_seg_keep_isolated_len_admit=other_seg_keep_isolated_len_admit,
-                iso_snap_min_dir_mag=iso_snap_min_dir_mag,
-                shower_absorb_unreachable_main=shower_absorb_unreachable_main,
-                assoc_full_recluster=assoc_full_recluster,
-                assoc_reassign_orphans=assoc_reassign_orphans,
-                assoc_clear_on_merge=assoc_clear_on_merge,
-                es3_stub_guard=es3_stub_guard,
-                es3sg_stub_max=es3sg_stub_max,
-                es3sg_len_ratio=es3sg_len_ratio,
-                es3sg_ang3_min=es3sg_ang3_min,
-                es3sg_ang_ratio=es3sg_ang_ratio,
-                es3sg_require_terminal=es3sg_require_terminal,
-                muon_dqdx_curve=muon_dqdx_curve,
-                sp_dedx_use_recomb_model=sp_dedx_use_recomb_model,
-                sp_mean_dedx_cut=sp_mean_dedx_cut,
-                dl_vtx_cut=dl_vtx_cut),
+              // doc 77 round 2: these five are read elsewhere in pr() too, so they stay
+              // named parameters and join the knob bag here rather than at the job.
+              knobs=tcn_knobs + {
+                  [if cathode_x != null then 'cathode_x']: cathode_x,
+                  [if cosmic_consistent_fv then 'cosmic_consistent_fv']: true,
+                  [if mip_dqdx != null then 'mip_dqdx']: mip_dqdx,
+                  [if neutrino_type_bitmask then 'neutrino_type_bitmask']: true,
+                  [if nue_sp_consistent_fv then 'nue_sp_consistent_fv']: true,
+              }),
             // NuMu / nue BDT scorers (UbooneNumuBDTScorer / UbooneNueBDTScorer,
             // geometry-free TaggerInfo consumers).  The weights are the
             // uBooNE-TRAINED XMLs from wire-cell-data uboone/weights/ -- the same
