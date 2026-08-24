@@ -251,7 +251,7 @@ local bs_dead_face(apa, face) = {
 // clus/src/ClusteringFuncs.cxx band_veto_forbids(). false (legacy escape via
 // SBND_NU_BAND_VETO=0) omits the key => compiled config byte-identical to
 // before the knob existed; only meaningful with nu_iso_band_guard on.
-local clus_per_face(anode, face, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=null, rse_from_ident=false, pos_offset_on=true, trace_bee=false, save_assoc_id=false, sep_vertex_veto=true, nu_iso_band_guard=true, iso_cathode_guard=false, nu_band_veto=true) = {
+local clus_per_face(anode, face, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=null, rse_from_ident=false, pos_offset_on=true, trace_bee=false, save_assoc_id=false, sep_vertex_veto=true, nu_iso_band_guard=true, iso_cathode_guard=false, nu_band_veto=true, eb_fast=false, po_fast=false) = {
     local dv = detector_volumes([anode], face, pos_offset_on),
     local pcts = pctransforms(dv),
     local bsl = bs_live_face(anode.name, face),
@@ -310,7 +310,9 @@ local clus_per_face(anode, face, dump, output_dir, runNo, subRunNo, eventNo, bee
         // decomposes these groups into main+others for prototype-style bundle building.
         cm.deghost(),
         cm.examine_x_boundary(),
-        cm.protect_overclustering(),
+        // po_fast: doc 78 round 3 (C++ default 0 = off; false => key omitted
+        // => byte-identical compiled config).
+        cm.protect_overclustering(busy_num_threshold=(if po_fast then 200 else null)),
         // nu_iso_band_guard: see the clus_per_face header comment (doc pr/18).
         // nu_band_veto: see the clus_per_face header comment (doc pr/66).
         cm.neutrino(protect_iso_band=nu_iso_band_guard,
@@ -335,7 +337,11 @@ local clus_per_face(anode, face, dump, output_dir, runNo, subRunNo, eventNo, bee
         cm.isolated(length_cut=15 * wc.cm, save_assoc_id=save_assoc_id,
                     cathode_guard_xcut=(if iso_cathode_guard then 30 * wc.cm else null),
                     cathode_guard_dis_floor=(if iso_cathode_guard then 40 * wc.cm else null)),
-        cm.examine_bundles(),
+        // eb_fast (C++ side: doc 78 round 2): selects the "relaxed_fast"
+        // graph flavor (busy-cluster lazy walk).  Default false => the
+        // graph_name value stays 'relaxed' and the compiled config is
+        // byte-identical to the pre-knob config.
+        cm.examine_bundles(graph_name=(if eb_fast then 'relaxed_fast' else 'relaxed')),
     ],
     local bee_zip_path = (if output_dir == '' then '' else output_dir + '/')
                          + 'mabc-%s-face%d.zip' % [anode.name, face],
@@ -441,7 +447,7 @@ local clus_per_face(anode, face, dump, output_dir, runNo, subRunNo, eventNo, bee
 // all-APA clustering + Bee in SCE true space (x_sce) instead of the T0-corrected
 // reco scope (x_t0cor).  Both SBND realities currently set use_sce=false (see
 // the reco table in the tail function), so this is a no-op for our chain.
-local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=null, premerged=false, rse_from_ident=false, pos_offset_on=true, tensor_outname='', save_real_cluster_id=false, trace_bee=false, save_assoc_cluster_id=false, real_cluster_id_global=null, cathode_rescue_on=true, cathode_rescue_unmatched=true, adopt_nu_fragments=false, save_bundle_main_provenance=false, rescue_allow_in_beam_far=true, rescue_geom_first=true, rescue_pierce_test=true, rescue_pierce_cut=null, rescue_dest_beam_for_new=true, rescue_beam_main_only=true, bee_flash_pred_min=null, use_sce=false, reality='data') = {
+local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=null, premerged=false, rse_from_ident=false, pos_offset_on=true, tensor_outname='', save_real_cluster_id=false, trace_bee=false, save_assoc_cluster_id=false, real_cluster_id_global=null, cathode_rescue_on=true, cathode_rescue_unmatched=true, adopt_nu_fragments=false, save_bundle_main_provenance=false, rescue_allow_in_beam_far=true, rescue_geom_first=true, rescue_pierce_test=true, rescue_pierce_cut=null, rescue_dest_beam_for_new=true, rescue_beam_main_only=true, bee_flash_pred_min=null, use_sce=false, reality='data', eb_fast=false) = {
     local nanodes = std.length(anodes),
     local pcmerging = g.pnode({
         type: 'PointTreeMerging',
@@ -560,7 +566,9 @@ local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=
         // per blob, which members were matched bundle MAINS before this merge
         // demoted them.  Only this merge destroys that fact, and only the
         // all-APA instance runs it, so per-APA output cannot move.
-        cm.examine_bundles(use_flash_t0=true, flags_from_longest=true,
+        // eb_fast: see the per-face site -- same knob, C++ default 'relaxed'.
+        cm.examine_bundles(graph_name=(if eb_fast then 'relaxed_fast' else 'relaxed'),
+                           use_flash_t0=true, flags_from_longest=true,
                            save_bundle_main_provenance=save_bundle_main_provenance),
     ],
     local bee_zip_path = (if output_dir == '' then '' else output_dir + '/') + 'mabc-all-apa.zip',
@@ -2926,13 +2934,13 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                       bee_sink=bee_sink, rse_from_ident=rse_from_ident, pos_offset_on=pos_offset_on),
     // trace_bee (default false): per-step Bee layers for merge attribution; see
     // trace_sets above.  Diagnostic only, off => byte-identical compiled config.
-    per_apa(anode, dump=true, bee_sink=null, trace_bee=false, save_assoc_id=false, sep_vertex_veto=true, nu_iso_band_guard=true, iso_cathode_guard=false, nu_band_veto=true)::
+    per_apa(anode, dump=true, bee_sink=null, trace_bee=false, save_assoc_id=false, sep_vertex_veto=true, nu_iso_band_guard=true, iso_cathode_guard=false, nu_band_veto=true, eb_fast=false, po_fast=false)::
         clus_per_face(anode, face=0, dump=dump,
                       output_dir=output_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo,
                       bee_sink=bee_sink, rse_from_ident=rse_from_ident, pos_offset_on=pos_offset_on,
                       trace_bee=trace_bee, save_assoc_id=save_assoc_id, sep_vertex_veto=sep_vertex_veto,
                       nu_iso_band_guard=nu_iso_band_guard, iso_cathode_guard=iso_cathode_guard,
-                      nu_band_veto=nu_band_veto),
+                      nu_band_veto=nu_band_veto, eb_fast=eb_fast, po_fast=po_fast),
     // Production (LArSoft) entry point used by wcls-img-clus.jsonnet.
     per_volume(anode, face=0, dump=true, bee_sink=null)::
         clus_per_face(anode, face=face, dump=dump,
@@ -2944,7 +2952,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
             rescue_allow_in_beam_far=true, rescue_geom_first=true,
             rescue_pierce_test=true, rescue_pierce_cut=null,
             rescue_dest_beam_for_new=true, rescue_beam_main_only=true,
-            bee_flash_pred_min=null)::
+            bee_flash_pred_min=null, eb_fast=false)::
         // Clustering + matching ONLY (all-APA MABC).  The follow-up PR tagger
         // pass (pr() below) and the wclsTensorSetLabeler are wired by the entry
         // configuration, not here -- see the note in clus_all_apa.
@@ -2965,7 +2973,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                      rescue_dest_beam_for_new=rescue_dest_beam_for_new,
                      rescue_beam_main_only=rescue_beam_main_only,
                      bee_flash_pred_min=bee_flash_pred_min,
-                     use_sce=use_sce, reality=reality),
+                     use_sce=use_sce, reality=reality, eb_fast=eb_fast),
     // PR job: input is the reloaded post-QL tarball (see clus_pr above).
     // The TGM/FC and beam-window defaults here mirror clus_pr's -- i.e. the SBND
     // production operating point (see the comment block on clus_pr's arg list for

@@ -47,6 +47,16 @@ namespace WireCell::Clus::Graphs {
         IDetectorVolumes::pointer dv, 
         IPCTransformSet::pointer pcts);
 
+    // doc 78 round 2: same algorithm with the busy-cluster lazy walk armed
+    // (RelaxedFastCfg defaults, connect_graphs.h).  Selected only by the
+    // "relaxed_fast" flavor (ClusteringExamineBundles graph_name knob);
+    // clusters at or below the busy threshold are bit-identical to
+    // make_graph_relaxed.
+    Weighted::Graph make_graph_relaxed_fast(
+        const Facade::Cluster& cluster,
+        IDetectorVolumes::pointer dv,
+        IPCTransformSet::pointer pcts);
+
     Weighted::Graph make_graph_relaxed_pid(
         const Facade::Cluster& cluster,
         IDetectorVolumes::pointer dv,

@@ -37,12 +37,32 @@ namespace WireCell::Clus::Graphs {
     void connect_graph_closely_pid(const Facade::Cluster& cluster,
                                    Weighted::Graph& graph);                           
 
+    // doc 78 round 2: parameters of the busy-cluster lazy-walk mode of
+    // connect_graph_relaxed, selected only by the "relaxed_fast" flavor
+    // (ClusteringExamineBundles graph_name knob).  A cluster whose
+    // connected-component count `num` is at or below busy_num_threshold
+    // takes the legacy path bit-for-bit; above it, the per-pair path walk
+    // (the O(num^2 x path-cm) cost, doc 78 sec 2) is evaluated lazily:
+    // only pairs selected by the MST (plus the < 3 cm direct-edge pairs)
+    // are walked, iterating kill-and-rebuild until the MST is stable.
+    // The result is the MST of the walk-filtered graph computed by a
+    // different route -- NOT proven bit-identical to the eager order
+    // under Prim tie-breaking, which is why it sits behind the busy gate
+    // and per-event final-PR validation (doc 78 sec 6).
+    struct RelaxedFastCfg {
+        size_t busy_num_threshold{200};
+        // Safety valve: if the kill-and-rebuild loop exceeds this many
+        // iterations, evaluate every remaining selected pair eagerly.
+        size_t max_fixpoint_iters{200};
+    };
+
     // ne' overclustering protection
     void connect_graph_relaxed(
         const Facade::Cluster& cluster,
-        IDetectorVolumes::pointer dv, 
+        IDetectorVolumes::pointer dv,
         IPCTransformSet::pointer pcts,
-        Weighted::Graph& graph);
+        Weighted::Graph& graph,
+        const RelaxedFastCfg* fast = nullptr);
 
     void connect_graph_relaxed_pid(
         const Facade::Cluster& cluster,

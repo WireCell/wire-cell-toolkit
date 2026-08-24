@@ -8,6 +8,11 @@
 
 #include "WireCellUtil/Graph.h"
 
+#include "WireCellUtil/Logging.h"
+
+#include <algorithm>
+#include <functional>
+
 class ClusteringProtectOverclustering;
 WIRECELL_FACTORY(ClusteringProtectOverclustering, ClusteringProtectOverclustering,
                  WireCell::IConfigurable, WireCell::Clus::IEnsembleVisitor)
@@ -23,7 +28,8 @@ static void clustering_protect_overclustering(
     Grouping &live_grouping,
     IDetectorVolumes::pointer dv,
     IPCTransformSet::pointer pcts,
-    const Tree::Scope& scope
+    const Tree::Scope& scope,
+    size_t busy_num_threshold
     );
 
 class ClusteringProtectOverclustering : public IConfigurable, public Clus::IEnsembleVisitor, private NeedDV, private NeedPCTS, private NeedScope {
@@ -35,13 +41,22 @@ public:
         NeedDV::configure(config);
         NeedPCTS::configure(config);
         NeedScope::configure(config);
+        // doc 78 round 3: same busy-cluster lazy walk as the "relaxed_fast"
+        // graph flavor (doc 78 round 2), applied to this file's inline
+        // duplicate of connect_graph_relaxed.  0 (the default) = the legacy
+        // eager path for every cluster, byte-identical pre-knob behavior.
+        // NB: Configuration has no convert<size_t> specialization (the generic
+        // template silently returns the default) -- read as int and cast.
+        m_busy_num_threshold = (size_t)get<int>(config, "busy_num_threshold", (int)m_busy_num_threshold);
     }
 
     void visit(Ensemble& ensemble) const {
         auto& live = *ensemble.with_name("live").at(0);
-        clustering_protect_overclustering(live, m_dv, m_pcts, m_scope);
+        clustering_protect_overclustering(live, m_dv, m_pcts, m_scope, m_busy_num_threshold);
     }
 
+private:
+    size_t m_busy_num_threshold{0};
 };
 
 // NOTE: This function implements the same physics logic as
@@ -52,7 +67,8 @@ static std::map<int, Cluster *> Separate_overclustering(
     Cluster *cluster,
     IDetectorVolumes::pointer dv,
     IPCTransformSet::pointer pcts,
-    const Scope& scope)
+    const Scope& scope,
+    size_t busy_num_threshold)
 {
     // can follow ToyClustering_separate to add clusters ...
     auto* grouping = cluster->grouping();
@@ -281,6 +297,16 @@ static std::map<int, Cluster *> Separate_overclustering(
     std::vector<int> component(num_vertices(*graph));
     const int num = connected_components(*graph, &component[0]);
 
+    // doc 78 round 3: busy-cluster lazy walk (mirrors connect_graph_relaxed's
+    // "relaxed_fast" mode).  Only clusters above the threshold change route;
+    // 0 disables entirely.
+    const bool lazy_walk = busy_num_threshold > 0 && num > 0 && (size_t)num > busy_num_threshold;
+    if (num > 1) {
+        SPDLOG_LOGGER_DEBUG(WireCell::Log::logger("clus"),
+            "Separate_overclustering: npoints={} ncomp={} lazy={}",
+            cluster->npoints(), num, lazy_walk);
+    }
+
     // Create ordered components
     std::vector<ComponentInfo> ordered_components;
     ordered_components.reserve(num);  // num components, not num vertices (B.5 fix)
@@ -376,6 +402,13 @@ static std::map<int, Cluster *> Separate_overclustering(
                     // bad-step fraction is not artificially diluted (B.2 fix).
                     ++num_bad;
                 }
+                // doc 78 round 1 (mirrors connect_graph_relaxed): num_bad > 7
+                // already satisfies the kill predicate below regardless of the
+                // remaining steps -- exact early exit, counter used nowhere else.
+                if (num_bad > 7) {
+                    entry = std::make_tuple(-1, -1, 1e9);
+                    return;
+                }
             }
             if (num_bad > 7 || (num_bad > 2 && num_bad >= 0.75 * num_steps))
                 entry = std::make_tuple(-1, -1, 1e9);
@@ -425,9 +458,13 @@ static std::map<int, Cluster *> Separate_overclustering(
                 }
 
                 // Check path quality; invalidate entries with too many bad steps.
-                check_path(index_index_dis[j][k],
-                           *pt_clouds.at(j), pt_clouds_global_indices.at(j),
-                           *pt_clouds.at(k), pt_clouds_global_indices.at(k));
+                // (lazy mode defers the main entry's walk to the Kruskal pass
+                // below -- doc 78 round 3.)
+                if (!lazy_walk) {
+                    check_path(index_index_dis[j][k],
+                               *pt_clouds.at(j), pt_clouds_global_indices.at(j),
+                               *pt_clouds.at(k), pt_clouds_global_indices.at(k));
+                }
                 check_path(index_index_dis_dir1[j][k],
                            *pt_clouds.at(j), pt_clouds_global_indices.at(j),
                            *pt_clouds.at(k), pt_clouds_global_indices.at(k));
@@ -437,8 +474,64 @@ static std::map<int, Cluster *> Separate_overclustering(
             }
         }
 
+        if (lazy_walk) {
+            // doc 78 round 3: single-pass lazy Kruskal, identical in shape to
+            // connect_graph_relaxed's (see there for why kill-and-rebuild was
+            // rejected).  Near pairs (< 3 cm, the direct-edge rule below) are
+            // walked eagerly; every other pair is walked only when it would
+            // bridge two union-find components.
+            std::vector<std::vector<char>> walked(num, std::vector<char>(num, 0));
+            for (int j = 0; j != num; j++) {
+                for (int k = j + 1; k != num; k++) {
+                    if (std::get<0>(index_index_dis[j][k]) < 0) continue;
+                    // Near pairs feed the < 3 cm direct-edge rule; pairs with
+                    // a directional candidate feed MST #2's recording of the
+                    // MAIN entry (a killed main blocks the dir edges below)
+                    // -- both need the main verdict eagerly.
+                    if (std::get<2>(index_index_dis[j][k]) < 3 * units::cm ||
+                        std::get<0>(index_index_dis_dir1[j][k]) >= 0 ||
+                        std::get<0>(index_index_dis_dir2[j][k]) >= 0) {
+                        check_path(index_index_dis[j][k],
+                                   *pt_clouds.at(j), pt_clouds_global_indices.at(j),
+                                   *pt_clouds.at(k), pt_clouds_global_indices.at(k));
+                        walked[j][k] = 1;
+                    }
+                }
+            }
+            std::vector<std::tuple<double, int, int>> order;
+            order.reserve((size_t)num * (num - 1) / 2);
+            for (int j = 0; j != num; j++) {
+                for (int k = j + 1; k != num; k++) {
+                    if (std::get<0>(index_index_dis[j][k]) >= 0) {
+                        order.emplace_back(std::get<2>(index_index_dis[j][k]), j, k);
+                    }
+                }
+            }
+            std::sort(order.begin(), order.end());
+            std::vector<int> uf(num);
+            for (int i = 0; i != num; ++i) uf[i] = i;
+            std::function<int(int)> uf_find = [&](int x) {
+                while (uf[x] != x) { uf[x] = uf[uf[x]]; x = uf[x]; }
+                return x;
+            };
+            int n_accepted = 0;
+            for (const auto& [d, j, k] : order) {
+                const int rj = uf_find(j), rk = uf_find(k);
+                if (rj == rk) continue;
+                if (!walked[j][k]) {
+                    check_path(index_index_dis[j][k],
+                               *pt_clouds.at(j), pt_clouds_global_indices.at(j),
+                               *pt_clouds.at(k), pt_clouds_global_indices.at(k));
+                    walked[j][k] = 1;
+                }
+                if (std::get<0>(index_index_dis[j][k]) < 0) continue;  // killed bridge
+                uf[rj] = rk;
+                index_index_dis_mst[j][k] = index_index_dis[j][k];
+                if (++n_accepted + 1 == num) break;
+            }
+        }
+        else {
         // deal with MST
-        {
             const int N = num;
             Weighted::Graph temp_graph(N);
 
@@ -550,7 +643,8 @@ static void clustering_protect_overclustering(
     Grouping &live_grouping,
     IDetectorVolumes::pointer dv,
     IPCTransformSet::pointer pcts,
-    const Tree::Scope& scope)
+    const Tree::Scope& scope,
+    size_t busy_num_threshold)
 {
     std::vector<Cluster *> live_clusters = live_grouping.children();  // copy
 
@@ -562,7 +656,7 @@ static void clustering_protect_overclustering(
             // std::cout << "Test: Set default scope: " << pc_name << " " << coords[0] << " " << coords[1] << " " << coords[2] << " " << cluster->get_default_scope().hash() << " " << scope.hash() << std::endl;
         }
         // std::cout << "Cluster: " << i << " " << cluster->npoints() << std::endl;
-        Separate_overclustering(cluster, dv, pcts, scope);
+        Separate_overclustering(cluster, dv, pcts, scope, busy_num_threshold);
     }
 
     //   {

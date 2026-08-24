@@ -2080,10 +2080,15 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
             uses: [detector_volumes],
         },
 
-        protect_overclustering(name="") :: {
+        // busy_num_threshold (C++ default 0 = off; key omitted when null =>
+        // byte-identical pre-knob config): doc 78 round 3 -- busy-cluster
+        // lazy walk in the overclustering-protection pair loop, the same
+        // mode as the "relaxed_fast" graph flavor.
+        protect_overclustering(name="", busy_num_threshold=null) :: {
             type: "ClusteringProtectOverclustering",
             name: prefix+name,
-            data: dv_cfg + pcts_cfg + scope_cfg,
+            data: dv_cfg + pcts_cfg + scope_cfg
+              + (if busy_num_threshold != null then { busy_num_threshold: busy_num_threshold } else {}),
             uses: [detector_volumes, pc_transforms],
         },
 
