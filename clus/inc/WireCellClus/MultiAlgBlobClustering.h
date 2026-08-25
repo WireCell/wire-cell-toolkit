@@ -437,6 +437,27 @@ namespace WireCell::Clus {
         // the existing use_config_rse / auto-increment behavior unchanged.
         bool m_rse_from_ident{false};
 
+        // Like m_rse_from_ident for the EVENT number, but the configured run
+        // and subrun are kept.  A group of events streamed through one process
+        // can span several runs (SBND nueCC48 spans 12), so a per-group job
+        // supplies the run/subrun of each event in m_rse_map; an ident with no
+        // entry keeps the configured pair.  Default off => nothing changes.
+        bool m_event_from_ident{false};
+        // ident -> (run, subrun), consulted only when m_event_from_ident.
+        std::map<int, std::pair<int,int>> m_rse_map;
+
+        // Own (non-shared) Bee zip.  A printf conversion in the configured
+        // "bee_zip" means one zip per event: the open zip is closed and the
+        // next opened when the event number changes.  Without one the zip is
+        // opened in configure() exactly as before.
+        std::string m_bee_zip{"mabc.zip"};
+        bool m_bee_zip_templated{false};
+        int m_bee_zip_open_evt{-1};
+        /// Open the own-sink zip for the current event, if that is still needed.
+        void ensure_own_sink();
+        /// Set m_eventNo from the tensor ident, and run/subrun from m_rse_map.
+        void apply_event_from_ident(int ident);
+
         void flush(int ident = -1);
         void flush(WireCell::Bee::Points& bpts, int ident);
 

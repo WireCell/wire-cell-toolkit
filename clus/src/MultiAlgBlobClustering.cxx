@@ -174,7 +174,15 @@ void MultiAlgBlobClustering::configure(const WireCell::Configuration& cfg)
     }
     else {
         //std::cout << "Xin: " << m_initial_index << " " << bee_zip << std::endl;
-        m_sink.reset(bee_zip, m_initial_index);  // Use the new reset with initial index
+        m_bee_zip = bee_zip;
+        // A '%' means one zip per event, opened lazily by ensure_own_sink().
+        m_bee_zip_templated = m_bee_zip.find('%') != std::string::npos;
+        if (!m_bee_zip_templated) {
+            m_sink.reset(bee_zip, m_initial_index);  // Use the new reset with initial index
+        }
+        else {
+            log->debug("own Bee zip, one per event, name template {}", m_bee_zip);
+        }
     }
 
     // Configure RSE numbers
@@ -192,6 +200,27 @@ void MultiAlgBlobClustering::configure(const WireCell::Configuration& cfg)
     }
     // Take the event number from the per-event tensor ident (raw; run/subrun = 0).
     m_rse_from_ident = get(cfg, "rse_from_ident", m_rse_from_ident);
+
+    // Same, but keep the configured run/subrun -- with an optional per-ident
+    // override table, because a group of events can span several runs.
+    m_event_from_ident = get(cfg, "event_from_ident", m_event_from_ident);
+    if (cfg.isMember("rse_map")) {
+        const auto& rm = cfg["rse_map"];
+        for (const auto& key : rm.getMemberNames()) {
+            const auto& v = rm[key];
+            if (!v.isArray() || v.size() < 2) continue;
+            // Keys come from a jsonnet-built object, so a non-numeric one is
+            // a config bug, not user input -- say which key rather than let
+            // stoi throw an unlabelled invalid_argument out of configure().
+            try {
+                m_rse_map[std::stoi(key)] = {v[0].asInt(), v[1].asInt()};
+            }
+            catch (const std::exception&) {
+                THROW(ValueError() << errmsg{"MultiAlgBlobClustering: rse_map key is not an integer: " + key});
+            }
+        }
+        log->debug("rse_map with {} entries", m_rse_map.size());
+    }
 
     m_grouping2file_prefix = get(cfg, "grouping2file_prefix", m_grouping2file_prefix);
 
@@ -446,6 +475,7 @@ WireCell::Configuration MultiAlgBlobClustering::default_configuration() const
     cfg["subRunNo"] = m_subRunNo;
     cfg["eventNo"] = m_eventNo;
     cfg["rse_from_ident"] = m_rse_from_ident;
+    cfg["event_from_ident"] = m_event_from_ident;
 
     return cfg;
 }
@@ -458,9 +488,39 @@ void MultiAlgBlobClustering::finalize()
         // independent of which node finalizes last.
         m_shared_sink->release();
     }
-    else {
+    else if (!m_bee_zip_templated || m_bee_zip_open_evt >= 0) {
         m_sink.close();
     }
+}
+
+void MultiAlgBlobClustering::apply_event_from_ident(int ident)
+{
+    m_eventNo = ident;
+    auto it = m_rse_map.find(ident);
+    if (it != m_rse_map.end()) {
+        m_runNo = it->second.first;
+        m_subRunNo = it->second.second;
+    }
+    // else: keep the configured run/subrun -- correct whenever the whole group
+    // is one (run, subrun), and the honest fallback when the caller supplied no
+    // table.
+    if (!m_use_shared_sink) {
+        m_sink.set_rse(m_runNo, m_subRunNo, m_eventNo);
+    }
+}
+
+void MultiAlgBlobClustering::ensure_own_sink()
+{
+    if (!m_bee_zip_templated) return;
+    if (m_eventNo == m_bee_zip_open_evt) return;
+    if (m_bee_zip_open_evt >= 0) {
+        m_sink.close();
+    }
+    const std::string name = String::format(m_bee_zip, m_eventNo);
+    m_sink.reset(name, m_initial_index);
+    m_sink.set_rse(m_runNo, m_subRunNo, m_eventNo);
+    m_bee_zip_open_evt = m_eventNo;
+    log->debug("own Bee zip {} (event {})", name, m_eventNo);
 }
 
 size_t MultiAlgBlobClustering::write_obj(const WireCell::Bee::Object& obj)
@@ -468,6 +528,7 @@ size_t MultiAlgBlobClustering::write_obj(const WireCell::Bee::Object& obj)
     if (m_use_shared_sink) {
         return m_shared_sink->write(obj, m_bee_event_index, m_runNo, m_subRunNo, m_eventNo);
     }
+    ensure_own_sink();
     return m_sink.write(obj);
 }
 
@@ -491,6 +552,15 @@ void MultiAlgBlobClustering::flush(WireCell::Bee::Points& bpts, int ident)
 
 void MultiAlgBlobClustering::flush(int ident)
 {
+    // Nothing has been loaded since the last flush -- this is the second,
+    // redundant flush that arrives when EOS is followed by finalize().  Return
+    // rather than run the whole empty sweep: every write below is already
+    // no-op, but the unconditional ++m_bee_event_index at the bottom is not,
+    // and in a multi-event run the Bee index must count event boundaries, not
+    // flush calls.
+    if (m_last_ident < 0 && ident < 0) {
+        return;
+    }
     // flush(m_bee_img, ident);
     // flush(m_bee_ld,  ident);
      // Flush all bee points sets
@@ -3095,6 +3165,9 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
             m_runNo = 0; m_subRunNo = 0; m_eventNo = ident;
             if (!m_use_shared_sink) m_sink.set_rse(m_runNo, m_subRunNo, m_eventNo);
         }
+        else if (m_event_from_ident) {
+            apply_event_from_ident(ident);
+        }
         else if (m_use_config_rse && !m_use_shared_sink) {
             // Set RSE in the sink (shared-sink mode passes RSE per write_obj).
             m_sink.set_rse(m_runNo, m_subRunNo, m_eventNo);
@@ -3110,6 +3183,9 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
             m_runNo = 0; m_subRunNo = 0; m_eventNo = ident;
             if (!m_use_shared_sink) m_sink.set_rse(m_runNo, m_subRunNo, m_eventNo);
         }
+        else if (m_event_from_ident) {
+            apply_event_from_ident(ident);
+        }
         else if (m_use_config_rse) {
             // Update event number for next event
             m_eventNo++;
@@ -3124,6 +3200,19 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
 
     Points::node_t root;
     Ensemble& ensemble = *root.value.facade<Ensemble>();
+    // Tell the visitors which event this is.  A visitor that writes one file
+    // per event (SbndPrMagnifyTrackingVisitor, PrDisplayDump) has no other way
+    // to know: its own runNo/eventNo come from configure() and are constant for
+    // the whole process.
+    ensemble.set_ident(ident);
+    // Publish the RSE this node resolved (config, auto-increment, ident or
+    // rse_map) so the per-event writers downstream stamp THIS event rather than
+    // their own configure-time constant.  Only when a multi-event mode is on:
+    // in the one-event-per-process production path the visitors' own numbers
+    // are already right and must keep being used, byte for byte.
+    if (m_rse_from_ident || m_event_from_ident) {
+        ensemble.set_rse(m_runNo, m_subRunNo, m_eventNo);
+    }
 
     for (const auto& gname : m_groupings) {
         const auto datapath = inpath(gname, ident);

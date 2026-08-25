@@ -37,6 +37,33 @@ namespace WireCell::Clus::Facade {
         Ensemble() : Mixins::Cached<Ensemble, EnsembleCache>(*this, "ensemble_scalar") {}
         virtual ~Ensemble() {}
 
+        /// The ident of the ITensorSet this ensemble was loaded from -- for
+        /// SBND that is the event number.  An Ensemble is built fresh for each
+        /// event, so this is the one place a visitor can learn which event it
+        /// is looking at.  Set by MultiAlgBlobClustering; -1 when unset.
+        ///
+        /// Its reason for existing: a process that streams many events needs
+        /// its per-event file writers (the tracking ROOT file, the PR display
+        /// dump) to name their output after the event rather than have every
+        /// event overwrite one fixed name.
+        int ident() const { return m_ident; }
+        void set_ident(int ident) { m_ident = ident; }
+
+        /// The (run, subrun, event) MultiAlgBlobClustering resolved for this
+        /// event.  A visitor that stamps RSE into its output (the tracking ROOT
+        /// trees, the PR display metadata) otherwise has only its own
+        /// configure()-time numbers, which are one constant triplet for the
+        /// whole process -- right for one-event-per-process, wrong for every
+        /// event but the first of a group.  Valid only when set_rse() has been
+        /// called; rse_valid() says whether it has.
+        bool rse_valid() const { return m_rse_valid; }
+        int runNo() const { return m_runNo; }
+        int subRunNo() const { return m_subRunNo; }
+        int eventNo() const { return m_eventNo; }
+        void set_rse(int run, int subrun, int event) {
+            m_runNo = run; m_subRunNo = subrun; m_eventNo = event; m_rse_valid = true;
+        }
+
         /// Return false if no child Groupings have the name, else true.
         bool has(const std::string& name) const;
 
@@ -60,6 +87,13 @@ namespace WireCell::Clus::Facade {
 
         // Return the FIRST grouping found for each name.
         std::map<std::string, Grouping*> groupings_by_name();
+
+       private:
+        int m_ident{-1};
+        bool m_rse_valid{false};
+        int m_runNo{0};
+        int m_subRunNo{0};
+        int m_eventNo{0};
     };
 }
 #endif
