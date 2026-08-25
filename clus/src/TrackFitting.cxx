@@ -286,6 +286,39 @@ void TrackFitting::clear_graph(){
 }
 
 
+void TrackFitting::reset_for_new_event(){
+    // See the header for why this exists.  Order matters only in that
+    // clear_graph()/clear_segments() must run before m_grouping is dropped --
+    // neither reads it, but keeping the cheap containers first makes the
+    // "everything below points into the dead event tree" reading obvious.
+    clear_graph();
+    clear_segments();
+
+    // Points into the per-event Points tree.
+    m_grouping = nullptr;
+    m_cluster_filter = nullptr;
+
+    // Keyed by Facade::Blob* from the dead tree; fill_global_rb_map() refuses
+    // to rebuild while it is non-empty, so leaving it is silent corruption
+    // rather than a crash.
+    global_rb_map.clear();
+
+    // Keyed by CoordReadout (apa, time, channel) -- the SAME key space in
+    // every event, so a stale entry is not overwritten unless the new event
+    // happens to touch that cell.
+    m_charge_data.clear();
+    m_orig_charge_data.clear();
+    m_2d_to_3d.clear();
+    m_3d_to_2d.clear();
+    m_charge_data_dirty = true;
+
+    // Geometry-keyed and therefore reusable, but BuildGeometry() runs again on
+    // the next sync_from_graph() anyway; dropping it keeps "no state crosses
+    // the boundary" a single rule with no exceptions.
+    clear_cache();
+}
+
+
 void TrackFitting::clear_segments(){
     m_segments.clear();
     m_clusters.clear();

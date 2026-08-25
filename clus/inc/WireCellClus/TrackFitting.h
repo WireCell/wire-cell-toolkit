@@ -315,6 +315,27 @@ namespace WireCell::Clus {
 
         void clear_graph();
 
+        /// Drop every piece of state that belongs to one event.
+        ///
+        /// A visitor that owns a TrackFitting as a member (TaggerCheckSTM,
+        /// TaggerCheckNeutrino) keeps that fitter for the whole process, but
+        /// almost everything the fitter caches -- m_grouping, the cluster and
+        /// blob sets, global_rb_map, the charge maps -- points into the
+        /// per-event Points tree that MultiAlgBlobClustering::operator() builds
+        /// as a local and destroys when the event ends.  Streaming a second
+        /// event through the same process without this call is a use-after-free
+        /// (SBND mcp1k 48367 then 48895: SIGSEGV in form_point_association).
+        ///
+        /// Call it once per event, at the top of visit() -- never per
+        /// neutrino candidate.  Within one event the candidate loop
+        /// deliberately reuses the member fitter for candidate 0 and builds a
+        /// fresh one for the rest; this call adds freshness ACROSS events
+        /// without removing it WITHIN one.
+        ///
+        /// Inert in a one-event process: at the first visit() there is nothing
+        /// to drop, so the legacy per-event job is byte-identical.
+        void reset_for_new_event();
+
         void add_cluster(std::shared_ptr<Facade::Cluster> cluster);
 
         /// Pre-load all clusters at once and call prepare_data() a single time.

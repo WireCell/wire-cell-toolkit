@@ -6,6 +6,7 @@
 #include "WireCellClus/FiducialUtils.h"
 #include "WireCellIface/IConfigurable.h"
 #include "WireCellUtil/NamedFactory.h"
+#include "WireCellUtil/String.h"
 #include "WireCellUtil/Logging.h"
 #include "WireCellUtil/Persist.h"  // resolve() the TrackFitting config via WIRECELL_PATH
 #include "WireCellClus/PRGraph.h"
@@ -386,6 +387,16 @@ public:
 
     virtual void visit(Ensemble& ensemble) const {
 
+        // The member fitter outlives the event; its caches point into the
+        // previous event's destroyed Points tree (multi-event SIGSEGV in
+        // form_point_association).  No-op on the first event.
+        // Tag the parsed log lines with this event, but only when a group is
+        // streaming: empty tag => the per-event job's log text is unchanged.
+        m_evt_tag = ensemble.rse_valid()
+            ? WireCell::String::format("evt%d ", ensemble.ident()) : std::string();
+
+        m_track_fitter.reset_for_new_event();
+
         // Configure the track fitter with detector volume
         m_track_fitter.set_detector_volume(m_dv);
         m_track_fitter.set_pc_transforms(m_pcts);
@@ -495,7 +506,7 @@ public:
                 main_cluster->set_flag(Flags::STM);
             }
 
-            SPDLOG_LOGGER_INFO(s_log, "visit: TaggerCheckSTM: cluster {} → STM={} TGM={}",
+            SPDLOG_LOGGER_INFO(s_log, "{}visit: TaggerCheckSTM: cluster {} → STM={} TGM={}", m_evt_tag,
                 main_cluster->ident(),
                 main_cluster->get_flag(Flags::STM),
                 main_cluster->get_flag(Flags::TGM));
@@ -507,7 +518,7 @@ public:
             // the tagger did evaluate it).  Reporting it here needs no knowledge
             // of which path was taken.  Log-only.
             if (m_save_stm_fit && m_pass_records.empty()) {
-                SPDLOG_LOGGER_DEBUG(s_log, "check_stm_conditions: cluster {} no STM fit: evaluated but no pass recorded (exited after the round-1 fit)",
+                SPDLOG_LOGGER_DEBUG(s_log, "{}check_stm_conditions: cluster {} no STM fit: evaluated but no pass recorded (exited after the round-1 fit)", m_evt_tag,
                                     main_cluster->ident());
             }
 
@@ -696,6 +707,15 @@ private:
     bool m_use_fiducial{false};
     std::vector<double> m_fv_tolerance;
 
+    // Event tag for the log lines nusel_extract.py parses.  EMPTY in a
+    // one-event-per-process job, so its log text is byte-for-byte what it
+    // always was.  In a group job it is "evt<ID> ", which is the only reliable
+    // way to attribute a line to an event: the log carries lines from more than
+    // one spdlog sink and they do not arrive in time order, while cluster
+    // idents restart every event -- so a mis-attributed line lands on a
+    // COLLIDING ident and rewrites a verdict.  See
+    // sbnd_xin/scripts/multi/slice_group_log.py.
+    mutable std::string m_evt_tag;
     mutable TrackFitting m_track_fitter;
 
     // === save_stm_fit knob state (inert when off => byte-identical legacy) ===
@@ -2927,7 +2947,7 @@ private:
         // hand scan can tell "the tagger rejected this" from "the tagger never
         // looked at it".  Log-only: no verdict depends on them.
         if (!cluster.has_pc("steiner_pc") || cluster.get_pc("steiner_pc").size() == 0) {
-            SPDLOG_LOGGER_DEBUG(s_log, "check_stm_conditions: cluster {} no STM fit: no steiner_pc", cluster.ident());
+            SPDLOG_LOGGER_DEBUG(s_log, "{}check_stm_conditions: cluster {} no STM fit: no steiner_pc", m_evt_tag, cluster.ident());
             return false;
         }
 
@@ -2941,7 +2961,7 @@ private:
 
         if (fc_result.is_fc) {
             SPDLOG_LOGGER_TRACE(s_log, "check_stm_conditions: STMTagger: Mid Point: A");
-            SPDLOG_LOGGER_DEBUG(s_log, "check_stm_conditions: cluster {} no STM fit: fully contained (Mid Point A)", cluster.ident());
+            SPDLOG_LOGGER_DEBUG(s_log, "{}check_stm_conditions: cluster {} no STM fit: fully contained (Mid Point A)", m_evt_tag, cluster.ident());
             return false;
         }
 
@@ -2953,7 +2973,7 @@ private:
         // fiducial_utils and drift_dir are needed by the TGM checks below.
         auto fiducial_utils = cluster.grouping()->get_fiducialutils();
         if (!fiducial_utils) {
-            SPDLOG_LOGGER_DEBUG(s_log, "check_stm_conditions: cluster {} no STM fit: no fiducialutils (MakeFiducialUtils missing from the pipeline?)", cluster.ident());
+            SPDLOG_LOGGER_DEBUG(s_log, "{}check_stm_conditions: cluster {} no STM fit: no fiducialutils (MakeFiducialUtils missing from the pipeline?)", m_evt_tag, cluster.ident());
             return false;
         }
 
@@ -3040,7 +3060,7 @@ private:
                 
                 if (angle_between > 120./180.*3.1415926 && dis1 > 20*units::cm && dis2 > 20*units::cm) {
                     SPDLOG_LOGGER_TRACE(s_log, "check_stm_conditions: Mid Point: B");
-                    SPDLOG_LOGGER_DEBUG(s_log, "check_stm_conditions: cluster {} no STM fit: single exit point with a {:.0f} deg mid-track kink, arms {:.1f}/{:.1f} cm (Mid Point B)",
+                    SPDLOG_LOGGER_DEBUG(s_log, "{}check_stm_conditions: cluster {} no STM fit: single exit point with a {:.0f} deg mid-track kink, arms {:.1f}/{:.1f} cm (Mid Point B)", m_evt_tag,
                                         cluster.ident(), angle_between*180/3.1415926, dis1/units::cm, dis2/units::cm);
                     return false;
                 } else {
@@ -3052,7 +3072,7 @@ private:
                 }
             } else {
                 SPDLOG_LOGGER_TRACE(s_log, "check_stm_conditions: Mid Point: C");
-                SPDLOG_LOGGER_DEBUG(s_log, "check_stm_conditions: cluster {} no STM fit: {} candidate exit points, need exactly 1 (Mid Point C)",
+                SPDLOG_LOGGER_DEBUG(s_log, "{}check_stm_conditions: cluster {} no STM fit: {} candidate exit points, need exactly 1 (Mid Point C)", m_evt_tag,
                                     cluster.ident(), candidate_exit_wcps.size());
                 return false;
             }
@@ -3086,7 +3106,7 @@ private:
                 m_track_fitter.add_segment(segment);
                 m_track_fitter.do_single_tracking(segment, false);
                 if (is_forward && segment->fits().size() <= 3) {
-                    SPDLOG_LOGGER_DEBUG(s_log, "check_stm_conditions: cluster {} no STM fit: round-1 forward fit gave only {} points (<=3)",
+                    SPDLOG_LOGGER_DEBUG(s_log, "{}check_stm_conditions: cluster {} no STM fit: round-1 forward fit gave only {} points (<=3)", m_evt_tag,
                                         cluster.ident(), segment->fits().size());
                     return false;
                 }

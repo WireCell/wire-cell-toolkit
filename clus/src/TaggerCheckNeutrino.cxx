@@ -1052,6 +1052,13 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
     auto t_total = Clock::now();
     auto t0 = Clock::now();
 
+    // The member fitter outlives the event.  Everything it cached last event
+    // points into the previous event's (destroyed) Points tree, so drop it
+    // before touching anything -- once per event, never per candidate (the
+    // candidate loop below deliberately reuses this fitter for candidate 0).
+    // No-op on the first event, so a one-event process is unchanged.
+    m_track_fitter->reset_for_new_event();
+
     // Configure the track fitter with detector volume
     m_track_fitter->set_detector_volume(m_dv);
     m_track_fitter->set_pc_transforms(m_pcts); 
