@@ -844,6 +844,15 @@ namespace WireCell::Mcs::detail {
             }
             segPCAFit_prev = segFitVector;
 
+            // per-segment x extent, for the cathode-band test (sec 7.5)
+            double sxmin = seg.points.front()[0], sxmax = sxmin;
+            for (const auto& p : seg.points) {
+                sxmin = std::min(sxmin, p[0]);
+                sxmax = std::max(sxmax, p[0]);
+            }
+            out.seg_xmin.push_back(sxmin);
+            out.seg_xmax.push_back(sxmax);
+
             iseg++;
         }
 
@@ -1013,11 +1022,16 @@ namespace WireCell::Mcs::detail {
         // vx_1..vx_n].  The loop starts at i=2, which is what makes the i=1
         // "-1" angle sentinel safe (doc 80 sec 6.4 #16).
         double lnlikelihood_track(const double* KE, const double* par,
-                                  const McsOptions& opt, McsCounters& ctr)
+                                  const McsOptions& opt, McsCounters& ctr,
+                                  const std::vector<char>& angle_keep)
         {
             int nsegs = par[0];
             double lnlikelihood = 0;
             for (int i = 2; i < nsegs + 1; i++) {
+                // cathode section-excision: term i scores the angle at
+                // 0-based index i-1; a masked angle's term vanishes from the
+                // sum (independent per-angle terms, doc 80 sec 7.5)
+                if (!angle_keep.empty() && !angle_keep[i - 1]) continue;
                 double theta_xz = par[i + nsegs];
                 double theta_yz = par[i + 2 * nsegs];
                 double vx = par[i + 3 * nsegs];
@@ -1042,7 +1056,8 @@ namespace WireCell::Mcs::detail {
 
     EnergyResult estimate_energy(const VD& segs_distance_in, const VD& segs_angle_x,
                                  const VD& segs_angle_y, const VD& vx_comps,
-                                 const McsOptions& opt, McsCounters& ctr)
+                                 const McsOptions& opt, McsCounters& ctr,
+                                 const std::vector<char>& angle_keep)
     {
         // upstream (mcs.cxx:569-602).  The parameter vector is packed once and
         // reused (upstream reallocated per call -- hoisted, doc 80 sec 6.4).
@@ -1056,9 +1071,9 @@ namespace WireCell::Mcs::detail {
         const double emin = 0;
         const double emax = 4e3;  // 4 GeV max estimate
 
-        auto lnl = [&par, &opt, &ctr](double ke) {
+        auto lnl = [&par, &opt, &ctr, &angle_keep](double ke) {
             double KE = ke;
-            return lnlikelihood_track(&KE, &par[0], opt, ctr);
+            return lnlikelihood_track(&KE, &par[0], opt, ctr, angle_keep);
         };
 
         // TF1::GetMinimumX swaps in the full function range when handed an
@@ -1126,6 +1141,7 @@ McsResult MuonMCS::run(const std::vector<double>& vtx_start,
     else {
         res.mu_tracklen = rr_path;
         res.emu_tracklen = (KE_rr_path + Mmu) / 1000.;  // KE -> total E, MeV -> GeV
+        res.ke_tracklen = KE_rr_path;
     }
 
     // upstream (mcs.cxx:89-95): unusable paths keep emu_MCS = -1
@@ -1158,9 +1174,46 @@ McsResult MuonMCS::run(const std::vector<double>& vtx_start,
         if (!seg_dir.empty()) { vx_components.push_back(seg_dir[0]); }
     }
 
+    // cathode section-excision (sec 7.5): drop every segment intersecting the
+    // band, and mask both the dropped segments' angles and the angle that
+    // would bridge the gap.  Angle at index j pairs segments j-1 and j.
+    std::vector<char> angle_keep;
+    if (opt.cathode_xcut > 0) {
+        const int n = res.nsegs;
+        std::vector<char> in_band(n, 0);
+        for (int k = 0; k < n; k++) {
+            if (segs.seg_xmin[k] <= opt.cathode_x + opt.cathode_xcut &&
+                segs.seg_xmax[k] >= opt.cathode_x - opt.cathode_xcut) {
+                in_band[k] = 1;
+                res.counters.cathode_seg_dropped++;
+            }
+        }
+        if (res.counters.cathode_seg_dropped) {
+            angle_keep.assign(n, 1);
+            angle_keep[0] = 0;  // the -1 sentinel, never scored anyway
+            int kept = 0;
+            for (int j = 1; j < n; j++) {
+                if (in_band[j] || in_band[j - 1]) {
+                    angle_keep[j] = 0;
+                    res.counters.cathode_angle_masked++;
+                }
+                else {
+                    kept++;
+                }
+            }
+            if (opt.fix_single_segment && kept < 1) {
+                // every angle masked: the likelihood would be a constant --
+                // the same failure bug #7 guards against
+                res.counters.single_seg_abort++;
+                return res;
+            }
+        }
+    }
+
     EnergyResult er = estimate_energy(segs.distance, segs.angle_projB, segs.angle_projC,
-                                      vx_components, opt, res.counters);
+                                      vx_components, opt, res.counters, angle_keep);
     res.emu_MCS = (er.keguess + Mmu) / 1000.;  // KE -> total E, MeV -> GeV
+    res.ke_MCS = er.keguess;
     res.ambiguity_MCS = er.ambiguity;
     return res;
 }

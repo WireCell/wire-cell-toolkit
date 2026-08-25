@@ -64,18 +64,36 @@ namespace WireCell::Mcs {
         bool fix_remove_seg_by_index{true}; // #15: erase segment points by identity;
                                             //     upstream erases a contiguous block
                                             //     matched by exact float coordinates
+
+        // Cathode-crosser section excision (doc 80 sec 7.5, owner decision 9).
+        // A 14-cm segment whose point set intersects the band
+        // |x - cathode_x| <= cathode_xcut is dropped from the likelihood and
+        // so is every angle that would BRIDGE the resulting gap: dropping
+        // only points starves segments (get_seg slices by projection extent),
+        // and dropping segments while keeping the bridging angle makes it
+        // span 2*X0+ of argon against a one-X0 PDF, biasing emu_MCS LOW.
+        // lnlikelihood_track is a sum of independent per-angle terms, so
+        // masked terms simply vanish: the cost is resolution, not accuracy.
+        // segs_distance stays a pure projection difference, so the gap's
+        // energy loss remains accounted automatically.
+        // cathode_xcut = 0 (default) disables: bit-for-bit upstream.
+        double cathode_x{0};     // cathode plane x [cm]
+        double cathode_xcut{0};  // half-width of the excised band [cm]; 0 = off
     };
 
     /// Where each McsOptions fix actually fired on the last run.  All-zero
     /// means the fixed and upstream paths were arithmetically identical.
     struct McsCounters {
-        int single_seg_abort{0};       // #7 fired: <2 fitted segments
+        int single_seg_abort{0};       // #7 fired: <2 fitted segments (or every
+                                       //     angle cathode-masked)
         int ivx_overflow{0};           // #8 fired: a segment had |vx| >= 1
         int prob_floor{0};             // #9 fired: likelihood underflowed to 0
         int acos_clamp{0};             // #10 fired: |cos| > 1 clamped
         int degenerate_plane{0};       // #9 fired: drift-parallel prior segment
         int noncontiguous_removal{0};  // #15 fired: segment points not contiguous
         int bad_path{0};               // #12 relevant: trim failed start->end
+        int cathode_seg_dropped{0};    // segments in the cathode band (sec 7.5)
+        int cathode_angle_masked{0};   // angles removed with them (incl. bridges)
     };
 
     struct McsResult {
@@ -87,6 +105,8 @@ namespace WireCell::Mcs {
         double emu_MCS{-1};        // MCS TOTAL energy [GeV]; -1 = not computed
         double ambiguity_MCS{-1};  // max likelihood ratio of the two side minima
                                    // to the global one; 1 = most ambiguous
+        double ke_MCS{-1};         // the same MCS estimate as KINETIC energy [MeV]
+        double ke_tracklen{-1};    // emu_tracklen's KE [MeV] (CSDA of trimmed path)
         int nsegs{0};              // fitted 14-cm segments
         bool bad_path{false};      // trim could not reach the end vertex
         McsCounters counters;
@@ -150,6 +170,7 @@ namespace WireCell::Mcs {
             VVD aAxes;                  // per-segment principal axis
             VVD COM;
             VVD track_axes;             // whole-track PCA axes (unflipped)
+            VD seg_xmin, seg_xmax;      // per-segment x extent (cathode-band test)
         };
         SegResult form_segs(const VVD& points, const VD& muon_start,
                             const VD& muon_end, double seg_length,
@@ -163,9 +184,14 @@ namespace WireCell::Mcs {
             double ambiguity{-1};
             Scan scans[3];      // first prescan of each of the three minimisations
         };
+        /// angle_keep: per-segment mask over the angle arrays (empty = keep
+        /// all).  angle_keep[j] == 0 removes the term scoring the angle at
+        /// index j (which pairs segments j-1 and j) from the likelihood sum --
+        /// the cathode section-excision mechanism.
         EnergyResult estimate_energy(const VD& segs_distance, const VD& segs_angle_x,
                                      const VD& segs_angle_y, const VD& vx_comps,
-                                     const McsOptions& opt, McsCounters& ctr);
+                                     const McsOptions& opt, McsCounters& ctr,
+                                     const std::vector<char>& angle_keep = {});
 
         /// Single-angle likelihood terms, exposed for the round-4 pull test.
         double lnlikelihood_theta_xz(double angle, double T,

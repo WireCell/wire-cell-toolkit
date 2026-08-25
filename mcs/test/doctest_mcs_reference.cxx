@@ -123,6 +123,47 @@ TEST_CASE("mcs gate1 interp bitwise")
     }
 }
 
+TEST_CASE("mcs cathode section excision")
+{
+    // doc 80 sec 7.5.  On the golden cloud: xcut=0 and a far-away band are
+    // bit-identical to the default run; a band through the track's x range
+    // drops segments AND masks the bridging angles, still yielding a finite
+    // estimate.
+    auto fx = load_fixture("mcs_golden_ref.json");
+    VD vstart = jvec(fx["input"]["start"]);
+    VD vend = jvec(fx["input"]["end"]);
+    VVD points = jvecvec(fx["input"]["points"]);
+
+    McsResult base = MuonMCS{}.run(vstart, vend, points);
+    REQUIRE(base.emu_MCS > 0);
+
+    // mid-track x: median of the cloud
+    VD xs;
+    for (const auto& p : points) xs.push_back(p[0]);
+    std::sort(xs.begin(), xs.end());
+    double xmid = xs[xs.size() / 2];
+
+    McsOptions far_band;
+    far_band.cathode_x = xs.back() + 1000.0;
+    far_band.cathode_xcut = 5.0;
+    McsResult rfar = MuonMCS{ far_band }.run(vstart, vend, points);
+    CHECK(rfar.emu_MCS == base.emu_MCS);
+    CHECK(rfar.ambiguity_MCS == base.ambiguity_MCS);
+    CHECK(rfar.counters.cathode_seg_dropped == 0);
+
+    McsOptions band;
+    band.cathode_x = xmid;
+    band.cathode_xcut = 5.0;
+    McsResult rband = MuonMCS{ band }.run(vstart, vend, points);
+    CHECK(rband.counters.cathode_seg_dropped > 0);
+    CHECK(rband.counters.cathode_angle_masked > rband.counters.cathode_seg_dropped - 1);
+    CHECK(rband.emu_MCS > 0);
+    CHECK(std::isfinite(rband.emu_MCS));
+    // the trim/segmentation stages are untouched by the mask
+    CHECK(rband.nsegs == base.nsegs);
+    CHECK(rband.mu_tracklen == base.mu_tracklen);
+}
+
 TEST_CASE("mcs reference gates 2-7")
 {
     McsOptions upstream_compat;
