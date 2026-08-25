@@ -9,6 +9,11 @@
 
 #include <string>
 #include <chrono>
+#include <vector>
+#include <fstream>
+#include <filesystem>
+
+#include <unistd.h>
 
 using namespace WireCell;
 
@@ -86,4 +91,94 @@ TEST_CASE("logging various")
     auto us = std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0);
     spdlog::info("{} in {} us, {:.3f} MHz", nlookups, us.count(), double(nlookups) / us.count());
 
+}
+
+// A log FILE must not tear.
+//
+// Log::logger(name, share_sinks=false) makes a fresh sink per logger so each
+// can carry its own pattern -- Aux::Logger::set_name() does exactly that for
+// every configured component.  With spdlog's basic_file_sink that also means a
+// fresh FILE* per logger, so N components leave N independent 4096-byte stdio
+// buffers appending to one file.  They drain at different times, so one
+// component's buffer lands in the MIDDLE of another's line.
+//
+// Seen in production: an SBND imaging job with 98 component loggers tore 70 of
+// 5240 lines, every splice on an exact 4096-byte file offset, with the spliced
+// fragment up to 26 seconds older than the line it cut.  Downstream log parsing
+// was patched four separate times to tolerate it before the cause was found.
+//
+// The test writes enough through enough loggers to cross many buffer
+// boundaries and then requires that every line carry exactly one record
+// header.  Two headers on one line is the splice.
+TEST_CASE("logging file is not torn")
+{
+    const std::string fname =
+        (std::filesystem::temp_directory_path() /
+         ("wct-doctest-logging-tear-" + std::to_string(getpid()) + ".log")).string();
+    std::filesystem::remove(fname);
+
+    Log::add_file(fname, "debug");
+
+    // The sentinel opens each record and cannot occur in a payload, so
+    // counting it per line counts records per line.
+    const std::string sentinel = "|@|";
+    const size_t nloggers = 32, nmsgs = 200;
+
+    std::vector<Log::logptr_t> logs;
+    for (size_t i = 0; i < nloggers; ++i) {
+        const std::string name = "tear/" + std::to_string(i);
+        auto l = Log::logger(name, false);   // unique sinks, as Aux::Logger does
+        l->set_level(spdlog::level::debug);
+        // A per-logger pattern -- the reason unique sinks exist at all.
+        l->set_pattern(sentinel + " " + name + " %v");
+        logs.push_back(l);
+    }
+
+    // Round-robin so the per-logger buffers fill at different rates, which is
+    // what a real job does.  Messages are long enough that 32 x 200 of them
+    // cross buffer boundaries many times over.
+    const std::string filler(180, 'x');
+    for (size_t m = 0; m < nmsgs; ++m) {
+        for (size_t i = 0; i < nloggers; ++i) {
+            logs[i]->debug("msg {} of logger {} {}", m, i, filler);
+        }
+    }
+    for (auto& l : logs) {
+        l->flush();
+    }
+
+    // Other loggers in this test binary share the file, so count RECORDS by
+    // sentinel rather than counting lines: a line carrying two sentinels is a
+    // splice, and the sentinel total must account for every message written.
+    std::ifstream fp(fname);
+    REQUIRE(fp.good());
+    std::string line;
+    size_t nrecords = 0, ntorn = 0;
+    std::string first_torn;
+    while (std::getline(fp, line)) {
+        size_t nsent = 0;
+        for (size_t p = line.find(sentinel); p != std::string::npos;
+             p = line.find(sentinel, p + sentinel.size())) {
+            ++nsent;
+        }
+        nrecords += nsent;
+        if (nsent > 1) {
+            ++ntorn;
+            if (first_torn.empty()) {
+                first_torn = line.substr(0, 160);
+            }
+        }
+    }
+    fp.close();
+
+    spdlog::info("tear check: {} records, {} spliced lines, first: {}",
+                 nrecords, ntorn, first_torn);
+
+    // No line may carry two records, and nothing may be lost.
+    CHECK(ntorn == 0);
+    CHECK(nrecords == nloggers * nmsgs);
+
+    if (ntorn == 0) {
+        std::filesystem::remove(fname);
+    }
 }

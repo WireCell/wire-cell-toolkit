@@ -1,5 +1,6 @@
 #include "WireCellUtil/Logging.h"
 #include "WireCellUtil/String.h"
+#include "WireCellUtil/SharedFileSink.h"
 
 
 #include "spdlog/sinks/basic_file_sink.h"
@@ -77,7 +78,14 @@ static sink_makers_t common_sink_makers;
 // }
 void Log::add_file(std::string filename, std::string level)
 {
-    file_sink<spdlog::sinks::basic_file_sink_mt> m{level, filename};
+    // SharedFileSink, not basic_file_sink_mt.  logger(name, share_sinks=false)
+    // re-runs this maker per logger so each can hold its own pattern, and with
+    // basic_file_sink that also gave each its own FILE* -- N components then
+    // left N independent 4096-byte buffers appending to one file, splicing one
+    // component's stale buffer into the middle of another's line.  SharedFileSink
+    // keeps the per-instance formatter (so the emitted line is unchanged) and
+    // shares one handle per path.  See util/test/doctest_logging.cxx.
+    file_sink<Log::SharedFileSink> m{level, filename};
     wct_base_logger()->sinks().push_back(m());
     common_sink_makers.push_back(m);
 }
