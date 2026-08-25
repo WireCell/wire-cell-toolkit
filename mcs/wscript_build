@@ -1,0 +1,6 @@
+# -*- python -*-
+# Plain numeric library (quickhull precedent), NOT a plugin: never list
+# "WireCellMcs" in a jsonnet plugins: entry.  EIGEN is already a toolkit
+# external (util uses it); no new dependency is introduced.  Waf-only for now
+# (flash/ precedent) -- CMake lands with the upstreaming round (doc 80 sec 12).
+bld.smplpkg('WireCellMcs', use='WireCellUtil EIGEN')
