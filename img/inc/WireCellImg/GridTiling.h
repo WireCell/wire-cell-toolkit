@@ -51,8 +51,23 @@ namespace WireCell {
             double m_nudge{1e-3};
 
             // Count blobs in each contiguous stream to assign blob
-            // ident numbers.
+            // ident numbers.  Reset at EOS and, for a multi-event process,
+            // at each frame boundary (see m_last_frame_ident).
             size_t m_blobs_seen{0};
+
+            // The frame ident of the last slice seen, or -1 before any.  A
+            // process that streams MANY events (doc 76 round 2 group mode)
+            // gets no EOS between them, so m_blobs_seen would keep counting
+            // and event N's blobs would be identified from an offset instead
+            // of from 0.  That is not cosmetic: blob idents key the
+            // unordered_map<int,...>/unordered_set<int> containers in
+            // InSliceDeghosting, ProjectionDeghosting, BlobGrouping and
+            // LocalGeomClustering, whose ITERATION ORDER depends on the key
+            // values, so an offset flips order-dependent deghosting decisions
+            // and changes blob COUNTS and CHARGES on some events (doc 81
+            // round 0).  Inert for a one-event process: the sequence already
+            // starts at 0 and there is only ever one frame ident.
+            int m_last_frame_ident{-1};
 
             IAnodePlane::pointer m_anode;
             IAnodeFace::pointer m_face;

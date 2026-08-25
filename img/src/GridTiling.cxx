@@ -55,8 +55,23 @@ bool Img::GridTiling::operator()(const input_pointer& slice, output_pointer& out
     out = nullptr;
     if (!slice) {
         m_blobs_seen = 0;
+        m_last_frame_ident = -1;
         log->debug("EOS");
         return true;  // eos
+    }
+
+    // Restart the blob ident sequence at every frame (event) boundary.  In a
+    // one-event process this fires once, on the first slice, when the counter
+    // is already 0 -- so the legacy path is byte-identical.  In a multi-event
+    // process it is what makes each event's blob idents match what that event
+    // gets when run alone.  See the note on m_last_frame_ident in the header.
+    {
+        const auto iframe = slice->frame();
+        const int fident = iframe ? iframe->ident() : -1;
+        if (fident != m_last_frame_ident) {
+            m_blobs_seen = 0;
+            m_last_frame_ident = fident;
+        }
     }
 
     const auto anodeid = m_anode->ident();
