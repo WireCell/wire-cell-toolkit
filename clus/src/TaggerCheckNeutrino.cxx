@@ -2766,7 +2766,8 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
         // (run_dual_chain_off_pass) does not run MCS, so its rows keep -1.
         if (m_mcs.enable && final_main_vertex) {
             PR::mcs_fill_kine(kine_info, *pr_graph, segments_in_long_muon,
-                              final_main_vertex, beam_gate, m_mcs, log);
+                              final_main_vertex, beam_gate, m_mcs,
+                              particle_data(), m_recomb_model, log);
         }
         track_fitter->set_kine_info(kine_info);
         track_fitter->set_tagger_info(tagger_info);

@@ -14,6 +14,8 @@
 
 #include "WireCellClus/NeutrinoTaggerInfo.h"
 #include "WireCellClus/PRGraph.h"
+#include "WireCellClus/ParticleDataSet.h"
+#include "WireCellIface/IRecombinationModel.h"
 #include "WireCellUtil/Logging.h"
 
 #include <string>
@@ -40,11 +42,18 @@ namespace WireCell::Clus::PR {
     /// left at their -1 defaults when no muon qualifies.  beam_gate_active:
     /// whether the candidate list was built under a beam-window gate (the
     /// per-bundle candidates are already spill-coincident in that case).
+    /// particle_data/recomb_model (both may be null): when present, the INFO
+    /// line additionally carries the toolkit's cal_kine_range and
+    /// segment_cal_kine_dQdx KE for the SAME selected muon -- the round-4
+    /// comparators, emitted as a log sentinel (pr/94 ROW precedent) because
+    /// the T_kine schema deliberately stays at the five kine_mcs_* scalars.
     void mcs_fill_kine(KineInfo& kine, Graph& graph,
                        const IndexedSegmentSet& segments_in_long_muon,
                        const VertexPtr& main_vertex,
                        bool beam_gate_active,
                        const MuonMCSConfig& cfg,
+                       const Clus::ParticleDataSet::pointer& particle_data,
+                       const IRecombinationModel::pointer& recomb_model,
                        WireCell::Log::logptr_t log);
 
 }  // namespace WireCell::Clus::PR

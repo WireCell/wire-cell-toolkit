@@ -50,6 +50,8 @@ void PR::mcs_fill_kine(KineInfo& kine, Graph& graph,
                        const VertexPtr& main_vertex,
                        bool beam_gate_active,
                        const MuonMCSConfig& cfg,
+                       const Clus::ParticleDataSet::pointer& particle_data,
+                       const IRecombinationModel::pointer& recomb_model,
                        WireCell::Log::logptr_t log)
 {
     if (!cfg.enable) return;
@@ -259,12 +261,29 @@ void PR::mcs_fill_kine(KineInfo& kine, Graph& graph,
     kine.kine_mcs_segment_id = cl ? cl->get_cluster_id() * 1000 + static_cast<int>(id_segment->get_graph_index())
                                   : -1;
 
+    // Round-4 comparators for the SAME muon: the toolkit's own range and
+    // dQ/dx->dE/dx estimators (clus/src/PRSegmentFunctions.cxx:2620/:2436).
+    // Emitted only in the log (the pr/94 ROW-sentinel pattern) -- the T_kine
+    // schema stays at the five kine_mcs_* scalars (doc 80 sec 8).
+    double ke_range_toolkit = -1, ke_dqdx_toolkit = -1;
+    if (particle_data) {
+        ke_range_toolkit = cal_kine_range(total_length_cm * units::cm, 13, particle_data) / units::MeV;
+    }
+    if (recomb_model) {
+        ke_dqdx_toolkit = 0;
+        for (const auto& seg : muon_segments) { ke_dqdx_toolkit += segment_cal_kine_dQdx(seg, recomb_model); }
+        ke_dqdx_toolkit /= units::MeV;
+    }
+
     SPDLOG_LOGGER_INFO(log,
-                       "mcs: source={} nseg={} npoints={} len={:.1f}cm seg_id={} -> "
-                       "ke_MCS={:.1f} MeV amb={:.3g} tracklen={:.1f}cm ke_range={:.1f} MeV "
+                       "mcs: source={} nseg={} npoints={} len={:.1f}cm seg_id={} cluster={} -> "
+                       "ke_MCS={:.1f} MeV amb={:.4g} tracklen={:.1f}cm ke_range={:.1f} MeV "
+                       "ke_range_toolkit={:.1f} MeV ke_dqdx_toolkit={:.1f} MeV "
                        "(nsegs14={} bad_path={} cathode_drop={}/{})",
                        cfg.muon_source, muon_segments.size(), points.size(), total_length_cm,
-                       kine.kine_mcs_segment_id, kine.kine_mcs_energy, kine.kine_mcs_ambiguity,
-                       kine.kine_mcs_tracklen, kine.kine_mcs_range_energy, res.nsegs, res.bad_path,
+                       kine.kine_mcs_segment_id, kine.cluster_id,
+                       kine.kine_mcs_energy, kine.kine_mcs_ambiguity,
+                       kine.kine_mcs_tracklen, kine.kine_mcs_range_energy,
+                       ke_range_toolkit, ke_dqdx_toolkit, res.nsegs, res.bad_path,
                        res.counters.cathode_seg_dropped, res.counters.cathode_angle_masked);
 }
