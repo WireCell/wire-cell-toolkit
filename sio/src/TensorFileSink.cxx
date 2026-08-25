@@ -1,5 +1,6 @@
 #include "WireCellSio/TensorFileSink.h"
 #include "WireCellUtil/Stream.h"
+#include "WireCellUtil/String.h"
 
 #include "WireCellUtil/NamedFactory.h"
 
@@ -32,23 +33,68 @@ WireCell::Configuration TensorFileSink::default_configuration() const
 void TensorFileSink::configure(const WireCell::Configuration& cfg)
 {
     m_outname = get(cfg, "outname", m_outname);
+    m_prefix = get<std::string>(cfg, "prefix", m_prefix);
+
+    // A '%' in the name means one container per ITensorSet ident, opened
+    // lazily in operator() (see the header).  Without one, everything below is
+    // exactly as it was: a single container, opened here.
+    m_templated = m_outname.find('%') != std::string::npos;
+    if (m_templated) {
+        log->debug("sink one container per ident, name template {} with prefix \"{}\"",
+                   m_outname, m_prefix);
+    }
+    else {
+        m_out.clear();
+        custard::output_filters(m_out, m_outname);
+        if (m_out.empty()) {
+            const std::string msg = "ClusterFileSink: unsupported outname: " + m_outname;
+            log->critical(msg);
+            THROW(ValueError() << errmsg{msg});
+        }
+        m_open = true;
+        log->debug("sink through {} filters to {} with prefix \"{}\"",
+                   m_out.size(), m_outname, m_prefix);
+    }
+    m_dump_mode = get<bool>(cfg, "dump_mode", m_dump_mode);
+    log->debug("dump_mode={}", m_dump_mode);
+}
+
+void TensorFileSink::closeout()
+{
+    if (!m_open) return;
+    // reset() pops and closes every filter and device in the chain.  The
+    // single-container path below keeps its historical pop() so its bytes are
+    // untouched; a reopen must close the whole chain or the container is
+    // truncated.
+    m_out.reset();
     m_out.clear();
-    custard::output_filters(m_out, m_outname);
+    m_open = false;
+    m_open_ident = -1;
+}
+
+void TensorFileSink::reopen(int ident)
+{
+    closeout();
+    const std::string name = String::format(m_outname, ident);
+    custard::output_filters(m_out, name);
     if (m_out.empty()) {
-        const std::string msg = "ClusterFileSink: unsupported outname: " + m_outname;
+        const std::string msg = "TensorFileSink: unsupported outname: " + name;
         log->critical(msg);
         THROW(ValueError() << errmsg{msg});
     }
-    m_prefix = get<std::string>(cfg, "prefix", m_prefix);
+    m_open = true;
+    m_open_ident = ident;
     log->debug("sink through {} filters to {} with prefix \"{}\"",
-               m_out.size(), m_outname, m_prefix);
-    m_dump_mode = get<bool>(cfg, "dump_mode", m_dump_mode);
-    log->debug("dump_mode={}", m_dump_mode);
+               m_out.size(), name, m_prefix);
 }
 
 void TensorFileSink::finalize()
 {
     log->debug("closing {} after {} calls", m_outname, m_count);
+    if (m_templated) {
+        closeout();
+        return;
+    }
     m_out.pop();
 }
 
@@ -88,6 +134,10 @@ bool TensorFileSink::operator()(const ITensorSet::pointer &in)
         log->debug("dumping tensor set ident={} at call {}",
                    in->ident(), m_count);
         return true;
+    }
+
+    if (m_templated && in->ident() != m_open_ident) {
+        reopen(in->ident());
     }
 
     const std::string pre = m_prefix + "tensor";

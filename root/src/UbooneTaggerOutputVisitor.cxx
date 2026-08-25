@@ -4,6 +4,7 @@
 #include "TTree.h"
 
 #include "WireCellUtil/NamedFactory.h"
+#include "WireCellUtil/String.h"
 #include "WireCellClus/TrackFitting.h"
 #include "WireCellClus/Facade_Grouping.h"
 #include "WireCellClus/NeutrinoTaggerInfo.h"
@@ -13,6 +14,21 @@ WIRECELL_FACTORY(UbooneTaggerOutputVisitor, WireCell::Root::UbooneTaggerOutputVi
 
 using namespace WireCell;
 using namespace WireCell::Clus;
+
+
+namespace {
+    /// One file per event when the configured name carries a printf
+    /// conversion.  A process that streams many events would otherwise have
+    /// every event RECREATE (or UPDATE) the same path, leaving only the last.
+    /// No '%' in the name => the name is returned unchanged, so a
+    /// one-event-per-process job writes exactly the file it always wrote.
+    /// Same idiom as QLMatching's calib dump.
+    std::string event_filename(const std::string& tmpl, int ident)
+    {
+        if (tmpl.find('%') == std::string::npos) return tmpl;
+        return WireCell::String::format(tmpl, ident);
+    }
+}
 
 Root::UbooneTaggerOutputVisitor::UbooneTaggerOutputVisitor()
   : log(Log::logger("tagger_output"))
@@ -72,10 +88,13 @@ void Root::UbooneTaggerOutputVisitor::visit(Clus::Facade::Ensemble& ensemble) co
         nu_fitters.push_back(tfi);
     }
 
-    // Open existing ROOT file in UPDATE mode to add trees.
-    TFile* output_tf = TFile::Open(m_output_filename.c_str(), "UPDATE");
+    // Open existing ROOT file in UPDATE mode to add trees.  Same template as
+    // the tracking visitor that RECREATE'd it earlier in the pipeline, so both
+    // land on this event's file.
+    const std::string outname = event_filename(m_output_filename, ensemble.ident());
+    TFile* output_tf = TFile::Open(outname.c_str(), "UPDATE");
     if (!output_tf || output_tf->IsZombie()) {
-        log->error("UbooneTaggerOutputVisitor: cannot open {} for update", m_output_filename);
+        log->error("UbooneTaggerOutputVisitor: cannot open {} for update", outname);
         return;
     }
 
@@ -1198,7 +1217,7 @@ void Root::UbooneTaggerOutputVisitor::visit(Clus::Facade::Ensemble& ensemble) co
     output_tf->Close();
     delete output_tf;
 
-    log->debug("UbooneTaggerOutputVisitor: updated {}", m_output_filename);
+    log->debug("UbooneTaggerOutputVisitor: updated {}", outname);
 }
 
 // Local Variables:

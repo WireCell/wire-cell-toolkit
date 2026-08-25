@@ -56,6 +56,15 @@ namespace WireCell::Sio {
 
             >>> dat = wirecell.util.ario.load("file.npz")["name"]
 
+            If the name contains a printf conversion (a '%', eg
+            "pctree-pr-evt%d.tar.gz") the sink writes ONE CONTAINER PER
+            ITensorSet IDENT instead of one container for the whole stream: the
+            current container is closed and a new one opened, named
+            String::format(outname, ident), whenever the ident changes.  This
+            lets a single process that streams many events write the same
+            per-event files a one-event-per-process job writes.  A name with no
+            '%' behaves exactly as before -- one container, opened in
+            configure() -- so every existing job is unchanged.
         */
         std::string m_outname{"tensors.npz"};
 
@@ -88,6 +97,19 @@ namespace WireCell::Sio {
         using ostream_t = boost::iostreams::filtering_ostream;
         ostream_t m_out;
         size_t m_count{0};
+
+        // Set when m_outname carries a printf conversion: one container per
+        // ident (see the "outname" doc above).
+        bool m_templated{false};
+        // Whether m_out currently holds an open container, and for which
+        // ident.  Only meaningful when m_templated.
+        bool m_open{false};
+        int m_open_ident{-1};
+
+        /// Close any open container and open the one for this ident.
+        void reopen(int ident);
+        /// Close the open container, if any.
+        void closeout();
 
         void numpyify(ITensor::pointer ten, const std::string& fname);
         void jsonify(const Configuration& cfg, const std::string& fname);

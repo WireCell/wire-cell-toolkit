@@ -12,6 +12,7 @@
 #include "TTree.h"
 
 #include "WireCellUtil/NamedFactory.h"
+#include "WireCellUtil/String.h"
 #include "WireCellUtil/Units.h"
 #include "WireCellClus/TrackFitting.h"
 #include "WireCellClus/Facade_Grouping.h"
@@ -45,6 +46,38 @@ collect_nu_fitters(Clus::Facade::Grouping& grouping)
     }
     if (out.empty()) out.push_back(grouping.get_track_fitting());
     return out;
+}
+
+
+namespace {
+    /// One file per event when the configured name carries a printf
+    /// conversion.  A process that streams many events would otherwise have
+    /// every event RECREATE (or UPDATE) the same path, leaving only the last.
+    /// No '%' in the name => the name is returned unchanged, so a
+    /// one-event-per-process job writes exactly the file it always wrote.
+    /// Same idiom as QLMatching's calib dump.
+    std::string event_filename(const std::string& tmpl, int ident)
+    {
+        if (tmpl.find('%') == std::string::npos) return tmpl;
+        return WireCell::String::format(tmpl, ident);
+    }
+}
+
+
+namespace {
+    /// The (run, subrun, event) to stamp into this event's output.  A group
+    /// job's MultiAlgBlobClustering publishes the resolved triplet on the
+    /// ensemble; a one-event-per-process job publishes nothing and the
+    /// component's own configured numbers are used, unchanged.
+    struct Rse { int run, subrun, event; };
+    Rse event_rse(const WireCell::Clus::Facade::Ensemble& ensemble,
+                  int run, int subrun, int event)
+    {
+        if (ensemble.rse_valid()) {
+            return {ensemble.runNo(), ensemble.subRunNo(), ensemble.eventNo()};
+        }
+        return {run, subrun, event};
+    }
 }
 
 Root::SbndPrMagnifyTrackingVisitor::SbndPrMagnifyTrackingVisitor()
@@ -130,10 +163,17 @@ void Root::SbndPrMagnifyTrackingVisitor::visit(Clus::Facade::Ensemble& ensemble)
     log->debug("SbndPrMagnifyTrackingVisitor: channel scheme nch=[{},{},{}] base=[{},{},{}]",
                cs.nch[0], cs.nch[1], cs.nch[2], cs.base[0], cs.base[1], cs.base[2]);
 
+    // Resolve this event's RSE before anything writes it.
+    {
+        const auto rse = event_rse(ensemble, m_runNo, m_subRunNo, m_eventNo);
+        m_evt_runNo = rse.run; m_evt_subRunNo = rse.subrun; m_evt_eventNo = rse.event;
+    }
+
     // Open ROOT file
-    TFile* output_tf = TFile::Open(m_output_filename.c_str(), "RECREATE");
+    const std::string outname = event_filename(m_output_filename, ensemble.ident());
+    TFile* output_tf = TFile::Open(outname.c_str(), "RECREATE");
     if (!output_tf || output_tf->IsZombie()) {
-        log->error("SbndPrMagnifyTrackingVisitor: cannot open {}", m_output_filename);
+        log->error("SbndPrMagnifyTrackingVisitor: cannot open {}", outname);
         return;
     }
 
@@ -151,7 +191,7 @@ void Root::SbndPrMagnifyTrackingVisitor::visit(Clus::Facade::Ensemble& ensemble)
     output_tf->Close();
     delete output_tf;
 
-    log->debug("SbndPrMagnifyTrackingVisitor: wrote {}", m_output_filename);
+    log->debug("SbndPrMagnifyTrackingVisitor: wrote {}", outname);
 }
 
 void Root::SbndPrMagnifyTrackingVisitor::write_bad_channels(TFile* output_tf, Clus::Facade::Grouping& grouping,
@@ -164,9 +204,9 @@ void Root::SbndPrMagnifyTrackingVisitor::write_bad_channels(TFile* output_tf, Cl
     int plane = 0;
     int start_time = 0;
     int end_time = 0;
-    int runNo = m_runNo;
-    int subRunNo = m_subRunNo;
-    int eventNo = m_eventNo;
+    int runNo = m_evt_runNo;
+    int subRunNo = m_evt_subRunNo;
+    int eventNo = m_evt_eventNo;
 
     tree->Branch("chid", &chid, "chid/I");
     tree->Branch("plane", &plane, "plane/I");
@@ -215,9 +255,9 @@ void Root::SbndPrMagnifyTrackingVisitor::write_trun(TFile* output_tf) const
     TTree* tree = new TTree("Trun", "Trun");
     tree->SetDirectory(output_tf);
 
-    int eventNo = m_eventNo;
-    int runNo = m_runNo;
-    int subRunNo = m_subRunNo;
+    int eventNo = m_evt_eventNo;
+    int runNo = m_evt_runNo;
+    int subRunNo = m_evt_subRunNo;
     double dQdx_scale = m_dQdx_scale;
     double dQdx_offset = m_dQdx_offset;
 

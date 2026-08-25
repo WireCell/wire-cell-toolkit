@@ -57,6 +57,15 @@ namespace WireCell {
             int m_runNo{0};
             int m_subRunNo{0};
             int m_eventNo{0};
+            // The triplet actually stamped into THIS event's trees.  Equal to
+            // the three above for a one-event-per-process job; taken from the
+            // ensemble (which MultiAlgBlobClustering fills per event) when a
+            // group runs in one process, where the configured numbers are one
+            // constant for every event in the group.  Set at the top of
+            // visit(), which is const.
+            mutable int m_evt_runNo{0};
+            mutable int m_evt_subRunNo{0};
+            mutable int m_evt_eventNo{0};
             std::vector<IAnodePlane::pointer> m_anodes;
             IDetectorVolumes::pointer m_dv;
             double m_dQdx_scale{0.1};

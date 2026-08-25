@@ -54,6 +54,10 @@ namespace WireCell {
             int m_runNo{0};
             int m_subRunNo{0};
             int m_eventNo{0};
+            // This event's triplet; see SbndPrMagnifyTrackingVisitor.h.
+            mutable int m_evt_runNo{0};
+            mutable int m_evt_subRunNo{0};
+            mutable int m_evt_eventNo{0};
             std::vector<IAnodePlane::pointer> m_anodes;
             IDetectorVolumes::pointer m_dv;
             double m_dQdx_scale{0.1};

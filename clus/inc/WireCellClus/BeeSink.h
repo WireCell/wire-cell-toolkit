@@ -33,8 +33,18 @@ namespace WireCell::Clus {
         Bee::Sink m_sink;
         int m_refs{0};
         std::mutex m_mtx;
+        /// Zip name.  A printf conversion in it (eg "mabc-pr-evt%d.zip") means
+        /// ONE ZIP PER EVENT: the open zip is closed and a new one opened
+        /// whenever write() is handed a different event number.  This is what
+        /// lets a process that streams many events write the same per-event
+        /// files a one-event-per-process job writes.  No '%' => one zip for the
+        /// whole process, opened in configure(), exactly as before.
         std::string m_outname{"mabc.zip"};
         int m_initial_index{0};
+        bool m_templated{false};
+        /// Event number of the currently open zip; -1 when none is open.
+        /// Only meaningful when m_templated.
+        int m_open_evt{-1};
     };
 
 }  // namespace WireCell::Clus

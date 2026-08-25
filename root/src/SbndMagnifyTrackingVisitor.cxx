@@ -6,6 +6,7 @@
 #include "TTree.h"
 
 #include "WireCellUtil/NamedFactory.h"
+#include "WireCellUtil/String.h"
 #include "WireCellUtil/Units.h"
 #include "WireCellClus/TrackFitting.h"
 #include "WireCellClus/Facade_Grouping.h"
@@ -82,6 +83,28 @@ Root::SbndMagnifyTrackingVisitor::ChanScheme Root::SbndMagnifyTrackingVisitor::c
     return cs;
 }
 
+
+namespace {
+    /// One file per event, and this event's RSE, when a group runs in one
+    /// process.  A name with no '%' and an ensemble with no published RSE give
+    /// back exactly the configured name and numbers, so the per-event job is
+    /// unchanged.
+    std::string event_filename(const std::string& tmpl, int ident)
+    {
+        if (tmpl.find('%') == std::string::npos) return tmpl;
+        return WireCell::String::format(tmpl, ident);
+    }
+    struct Rse { int run, subrun, event; };
+    Rse event_rse(const WireCell::Clus::Facade::Ensemble& ensemble,
+                  int run, int subrun, int event)
+    {
+        if (ensemble.rse_valid()) {
+            return {ensemble.runNo(), ensemble.subRunNo(), ensemble.eventNo()};
+        }
+        return {run, subrun, event};
+    }
+}
+
 void Root::SbndMagnifyTrackingVisitor::visit(Clus::Facade::Ensemble& ensemble) const
 {
     auto groupings = ensemble.with_name(m_grouping_name);
@@ -99,9 +122,14 @@ void Root::SbndMagnifyTrackingVisitor::visit(Clus::Facade::Ensemble& ensemble) c
     log->debug("SbndMagnifyTrackingVisitor: channel scheme nch=[{},{},{}] base=[{},{},{}]",
                cs.nch[0], cs.nch[1], cs.nch[2], cs.base[0], cs.base[1], cs.base[2]);
 
-    TFile* output_tf = TFile::Open(m_output_filename.c_str(), "RECREATE");
+    {
+        const auto rse = event_rse(ensemble, m_runNo, m_subRunNo, m_eventNo);
+        m_evt_runNo = rse.run; m_evt_subRunNo = rse.subrun; m_evt_eventNo = rse.event;
+    }
+    const std::string outname = event_filename(m_output_filename, ensemble.ident());
+    TFile* output_tf = TFile::Open(outname.c_str(), "RECREATE");
     if (!output_tf || output_tf->IsZombie()) {
-        log->error("SbndMagnifyTrackingVisitor: cannot open {}", m_output_filename);
+        log->error("SbndMagnifyTrackingVisitor: cannot open {}", outname);
         return;
     }
 
@@ -120,7 +148,7 @@ void Root::SbndMagnifyTrackingVisitor::visit(Clus::Facade::Ensemble& ensemble) c
     output_tf->Close();
     delete output_tf;
 
-    log->debug("SbndMagnifyTrackingVisitor: wrote {}", m_output_filename);
+    log->debug("SbndMagnifyTrackingVisitor: wrote {}", outname);
 }
 
 void Root::SbndMagnifyTrackingVisitor::write_bad_channels(TFile* output_tf, Clus::Facade::Grouping& grouping,
@@ -133,9 +161,9 @@ void Root::SbndMagnifyTrackingVisitor::write_bad_channels(TFile* output_tf, Clus
     int plane = 0;
     int start_time = 0;
     int end_time = 0;
-    int runNo = m_runNo;
-    int subRunNo = m_subRunNo;
-    int eventNo = m_eventNo;
+    int runNo = m_evt_runNo;
+    int subRunNo = m_evt_subRunNo;
+    int eventNo = m_evt_eventNo;
 
     tree->Branch("chid", &chid, "chid/I");
     tree->Branch("plane", &plane, "plane/I");
@@ -275,9 +303,9 @@ void Root::SbndMagnifyTrackingVisitor::write_trun(TFile* output_tf) const
     TTree* tree = new TTree("Trun", "Trun");
     tree->SetDirectory(output_tf);
 
-    int eventNo = m_eventNo;
-    int runNo = m_runNo;
-    int subRunNo = m_subRunNo;
+    int eventNo = m_evt_eventNo;
+    int runNo = m_evt_runNo;
+    int subRunNo = m_evt_subRunNo;
     double dQdx_scale = m_dQdx_scale;
     double dQdx_offset = m_dQdx_offset;
 

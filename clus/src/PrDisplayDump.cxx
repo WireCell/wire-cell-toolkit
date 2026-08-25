@@ -11,6 +11,7 @@
 // Divergences from those two are deliberate and marked DELTA below.
 
 #include "WireCellClus/PrDisplayDump.h"
+#include "WireCellUtil/String.h"
 
 #include "WireCellClus/Facade_Grouping.h"
 #include "WireCellClus/Facade_Cluster.h"
@@ -240,10 +241,22 @@ void Clus::PrDisplayDump::visit(Facade::Ensemble& ensemble) const
         }
     }
 
-    Persist::dump(m_output_filename, top, m_pretty);
+    // One dump per event when the configured name carries a printf conversion
+    // (the per-event jobs template it in jsonnet with their fixed eventNo and
+    // so never take this branch).  Without it a process streaming many events
+    // leaves only the last event's dump.
+    std::string outname = m_output_filename;
+    if (outname.find('%') != std::string::npos) {
+        outname = String::format(outname, ensemble.ident());
+        // The metadata's eventNo comes from configure() and is constant for the
+        // process; a hand scan reading this file must see the event it is
+        // actually looking at.
+        top["meta"]["eventNo"] = ensemble.ident();
+    }
+    Persist::dump(outname, top, m_pretty);
 
     log->debug("wrote {}: {} segment(s), {} vertex(es), {} shower(s), {} steiner cluster(s), {} proj plane(s)",
-               m_output_filename, top["segments"].size(), top["vertices"].size(),
+               outname, top["segments"].size(), top["vertices"].size(),
                top["showers"].size(), top["steiner"].size(), top["proj"].size());
 }
 
