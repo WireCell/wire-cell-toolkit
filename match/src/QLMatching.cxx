@@ -3062,9 +3062,31 @@ void QLMatching::rescue_empty_flashes(ApaRun& run, const FlashBundlesMap& snapsh
     };
 
     // Where each currently-matched cluster lives: main_cluster -> (flash, metric).
+    //
+    // doc 82 round 3 (SBND Q/L non-determinism): when a cluster is the
+    // main_cluster of bundles on TWO different flashes here -- unremarkable,
+    // "one flash per cluster" is exactly what THIS function goes on to
+    // enforce, not a precondition of it -- this used to be a plain overwrite
+    // in raw run.flash_bundles_map order.  That order is std::map<Opflash*,
+    // ...>'s heap-address order, not this file's stable flash_iter_order()
+    // convention used at every other walk of this map (~10 sites below).
+    // Causally proven, not inferred: an instrumented census on SBND mcp1k
+    // evt 286191 caught the SAME two (cluster, flash-pair) inputs producing
+    // the two recorded outcome states on this event -- state A recorded
+    // cluster 1 -> flash 21, state B recorded cluster 1 -> flash 17, same
+    // binary, same input, only the two Opflash objects' relative heap
+    // addresses differing between runs.  That recorded (flash, metric) pair
+    // is load-bearing a few lines below (steal_bar), so the address order
+    // decided which flash a later candidate could steal the cluster from.
+    // Fix: walk flash_iter_order() like everywhere else in this file, so the
+    // last write is decided by ascending flash id -- deterministic, and a
+    // no-op on the overwhelmingly common case where a cluster's bundles live
+    // on only one flash.
     std::map<Cluster*, std::pair<Opflash*, double>> matched;
-    for (auto& kv : run.flash_bundles_map) {
-        for (auto& b : kv.second) matched[b->get_main_cluster()] = {kv.first, metric(b)};
+    for (auto* flash : flash_iter_order(run.flash_bundles_map)) {
+        for (auto& b : run.flash_bundles_map.at(flash)) {
+            matched[b->get_main_cluster()] = {flash, metric(b)};
+        }
     }
     // xtpc joint-pin: clusters bound to a pinned crosser flash must never be reassigned to
     // an empty flash by the light-quality guard below (the pin overrides light). Empty if off.
@@ -3368,13 +3390,18 @@ void QLMatching::rescue_empty_flashes_shared(std::vector<ApaRun>& runs)
 
     // Where each currently-matched cluster lives (clusters are per-run objects,
     // so one global map is collision-free): cluster -> (run idx, flash, metric).
+    // doc 82 round 3: same address-ordered-overwrite hazard as
+    // rescue_empty_flashes() above (this file, ~L3072) and the same fix --
+    // flash_iter_order() per run instead of raw flash_bundles_map order.
+    // Currently inert everywhere (m_empty_rescue_shared/empty_rescue_shared
+    // defaults false and no cfg sets it), so this has no gate footprint today.
     struct Cur { std::size_t k; Opflash* flash; double m; };
     std::map<Cluster*, Cur> matched;
     std::set<Cluster*> pin_locked;
     for (std::size_t k = 0; k < runs.size(); ++k) {
-        for (auto& kv : runs[k].flash_bundles_map) {
-            for (auto& b : kv.second) {
-                matched[b->get_main_cluster()] = {k, kv.first, metric(b)};
+        for (auto* flash : flash_iter_order(runs[k].flash_bundles_map)) {
+            for (auto& b : runs[k].flash_bundles_map.at(flash)) {
+                matched[b->get_main_cluster()] = {k, flash, metric(b)};
                 if (b->get_flag_xtpc_pin()) pin_locked.insert(b->get_main_cluster());
             }
         }
