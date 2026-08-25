@@ -334,6 +334,12 @@ namespace WireCell::Clus {
         ///
         /// Inert in a one-event process: at the first visit() there is nothing
         /// to drop, so the legacy per-event job is byte-identical.
+        ///
+        /// doc 76 round 3: it must drop the state that gives a WRONG ANSWER as
+        /// well as the state that CRASHES.  The ident-keyed memo
+        /// m_cluster_xext_cache is the one that moved a physics number -- see
+        /// the comment in the body.  Set WCT_TF_RESET_CENSUS=1 to have it log
+        /// what the previous event actually left behind.
         void reset_for_new_event();
 
         void add_cluster(std::shared_ptr<Facade::Cluster> cluster);

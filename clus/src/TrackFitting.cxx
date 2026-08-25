@@ -5,6 +5,8 @@
 #include "WireCellUtil/Logging.h"
 #include <algorithm>
 #include <chrono>
+#include <cstdlib>
+#include <string>
 #include <sstream>
 #include <iomanip>
 
@@ -291,6 +293,37 @@ void TrackFitting::reset_for_new_event(){
     // clear_graph()/clear_segments() must run before m_grouping is dropped --
     // neither reads it, but keeping the cheap containers first makes the
     // "everything below points into the dead event tree" reading obvious.
+    // WCT_TF_RESET_CENSUS=1: name what the PREVIOUS event left behind, at
+    // reset entry, before anything is dropped.  Diagnostic only -- unset =>
+    // not a single line and not a single branch taken in the hot path.  This
+    // is what identified m_cluster_xext_cache as the carrier (doc 76 round 3).
+    static const bool reset_census = std::getenv("WCT_TF_RESET_CENSUS") != nullptr;
+    if (reset_census) {
+        std::string carried;
+        const auto note = [&carried](const char* what, size_t n) {
+            if (n) carried += " " + std::string(what) + "=" + std::to_string(n);
+        };
+        note("graph", m_graph ? 1 : 0);
+        note("clusters", m_clusters.size());
+        note("blobs", m_blobs.size());
+        note("segments", m_segments.size());
+        note("global_rb_map", global_rb_map.size());
+        note("charge_data", m_charge_data.size());
+        note("cluster_xext_cache", m_cluster_xext_cache.size());
+        note("cov_fit_scope", m_cov_fit_scope.size());
+        note("cov_vtx_info", m_cov_vtx_info.size());
+        note("main_vertex", m_main_vertex ? 1 : 0);
+        note("showers", m_showers.size());
+        note("pi0_showers", m_pi0_showers.size());
+        note("map_shower_pio_id", m_map_shower_pio_id.size());
+        note("bridged_cluster_ids", m_bridged_cluster_ids.size());
+        note("dropped_satellite_shower_ids", m_dropped_satellite_shower_ids.size());
+        note("hot_cache", m_hot_cache.size());
+        note("cold_cache", m_cold_cache.size());
+        SPDLOG_LOGGER_INFO(s_log, "tf_reset_census: carried from the previous event:{}",
+                           carried.empty() ? std::string(" <nothing>") : carried);
+    }
+
     clear_graph();
     clear_segments();
 
@@ -316,6 +349,46 @@ void TrackFitting::reset_for_new_event(){
     // the next sync_from_graph() anyway; dropping it keeps "no state crosses
     // the boundary" a single rule with no exceptions.
     clear_cache();
+
+    // doc 76 round 3.  Everything above is state that would CRASH on reuse;
+    // everything below is state that would silently give the wrong ANSWER, so
+    // the first round did not notice it was missing.  The rule the block
+    // comment above claims -- no state crosses the event boundary -- is only
+    // true once both halves are dropped.
+    //
+    // m_cluster_xext_cache is the one that actually moved a physics number:
+    // it memoises cluster ident() -> blob-center drift-x extent for
+    // skip_revert_iso_xext_cut (SBND production 200.0 = 20 cm), and cluster
+    // idents REPEAT from event to event, so event N's cluster 11 was answered
+    // with event N-1's cluster 11 extent.  When the two straddle the cut, the
+    // trajectory-point charge revert is abstained (or not) for the wrong
+    // reason and the fitted trajectory moves.
+    m_cluster_xext_cache.clear();
+
+    // Rebuilt (cleared first) by rebuild_cov_fit_scope(), but only while the
+    // fit_blob_coverage knob is on -- with the knob off they would hold the
+    // previous event's Cluster* / vertex positions for the whole process.
+    m_cov_fit_scope.clear();
+    m_cov_vtx_info.clear();
+
+    // Pattern-recognition results TaggerCheckNeutrino stashes here for the
+    // downstream consumers (Bee particle flow, PrDisplayDump, the kine/tagger
+    // trees).  They are written at the END of visit(), so an event that
+    // finishes without writing one -- no vertex, a knob off, or a selected
+    // candidate >0 whose values landed on a FRESH fitter instead -- leaves the
+    // previous event's copy in place for a consumer to read as its own.  The
+    // shower/vertex handles additionally point into the destroyed event tree.
+    m_main_vertex = nullptr;
+    m_showers.clear();
+    m_pi0_showers.clear();
+    m_map_shower_pio_id.clear();
+    m_map_pio_id_showers.clear();
+    m_map_pio_id_mass.clear();
+    m_bridged_cluster_ids.clear();
+    m_dropped_satellite_shower_ids.clear();
+    m_kine_info = PR::KineInfo{};
+    m_tagger_info = PR::TaggerInfo{};
+    m_vertex_scoreboard.clear();
 }
 
 
