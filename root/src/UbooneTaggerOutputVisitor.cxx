@@ -45,6 +45,8 @@ void Root::UbooneTaggerOutputVisitor::configure(const WireCell::Configuration& c
     m_neutrino_type_bitmask = get<bool>(cfg, "neutrino_type_bitmask", m_neutrino_type_bitmask);
     // doc pr/94 Phase 1: see the member comment in the header.
     m_nu_per_bundle = get<bool>(cfg, "nu_per_bundle", m_nu_per_bundle);
+    // doc 80 round 3: see the member comment in the header.
+    m_mcs_output = get<bool>(cfg, "mcs_output", m_mcs_output);
 }
 
 WireCell::Configuration Root::UbooneTaggerOutputVisitor::default_configuration() const
@@ -54,6 +56,7 @@ WireCell::Configuration Root::UbooneTaggerOutputVisitor::default_configuration()
     cfg["grouping"] = "live";
     cfg["neutrino_type_bitmask"] = m_neutrino_type_bitmask;  // false = branch not booked, schema-identical
     cfg["nu_per_bundle"] = m_nu_per_bundle;  // false = branches not booked, schema-identical
+    cfg["mcs_output"] = m_mcs_output;  // false = kine_mcs_* branches not booked, schema-identical
     return cfg;
 }
 
@@ -1186,6 +1189,19 @@ void Root::UbooneTaggerOutputVisitor::visit(Clus::Facade::Ensemble& ensemble) co
         t_kine->Branch("cluster_id", &ki.cluster_id, "cluster_id/I");
         t_kine->Branch("matched_flash_gid", &ki.matched_flash_gid, "matched_flash_gid/I");
         t_kine->Branch("nu_index", &ki.nu_index, "nu_index/I");
+    }
+
+    // doc 80 round 3: MCS muon momentum scalars + join key.  Booked only
+    // under the mcs_output knob, so the knob-off T_kine schema stays
+    // byte-identical (an added branch changes the schema even when MCS is
+    // off -- the one place "purely additive" reasoning fails, sec 8.5).
+    // Scalars, so the per-bundle struct-assign refill below handles them.
+    if (m_mcs_output) {
+        t_kine->Branch("kine_mcs_energy", &ki.kine_mcs_energy, "kine_mcs_energy/F");
+        t_kine->Branch("kine_mcs_ambiguity", &ki.kine_mcs_ambiguity, "kine_mcs_ambiguity/F");
+        t_kine->Branch("kine_mcs_tracklen", &ki.kine_mcs_tracklen, "kine_mcs_tracklen/F");
+        t_kine->Branch("kine_mcs_range_energy", &ki.kine_mcs_range_energy, "kine_mcs_range_energy/F");
+        t_kine->Branch("kine_mcs_segment_id", &ki.kine_mcs_segment_id, "kine_mcs_segment_id/I");
     }
 
     if (nu_fitters.empty()) {

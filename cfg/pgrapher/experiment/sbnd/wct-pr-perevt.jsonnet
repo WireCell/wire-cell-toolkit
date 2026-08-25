@@ -1186,6 +1186,18 @@ function(
     // display half was fixed, the bookkeeping half was declined -- doc sec
     // 9.9/9.13).  null => C++ default 0 = no floor.
     nu_per_bundle_min_length = 15,
+    // doc 80: MCS muon momentum.  This ONE flag derives both the
+    // TaggerCheckNeutrino computation key (mcs_enable) and the
+    // UbooneTaggerOutputVisitor T_kine branch key (mcs_output) inside pr(),
+    // so the computation gate and the schema gate can never disagree.  The
+    // sub-knobs below ride the tcn_knobs bag and are ALL suppressed unless
+    // mcs_enable, so the OFF compiled config is byte-identical pre-MCS.
+    // C++ default false.
+    mcs_enable = false,
+    mcs_muon_source = 'pf_muon',         // pf_muon | long_muon | longest_segment
+    mcs_point_source = 'muon_segments',  // muon_segments | whole_event (validation only, doc 80 sec 7.3)
+    mcs_cathode_xcut = 5,                // cm half-band excised around cathode_x (doc 80 sec 7.5);
+                                         // C++ default 0 = off => the SBND value lives HERE only
     // doc pr/94 round 3.  Give the SELECTED neutrino candidate the
     // main-cluster PR treatment for the duration of its own pass, even when it
     // is a demoted main.  The PR chain reads main-ness from Flags::main_cluster
@@ -2529,6 +2541,13 @@ function(
     local tcn_knobs = {
         // (entries without an `if` are always emitted -- the job always supplies
         //  a value, exactly as the pr() call did.)
+        // doc 80: MCS sub-knobs, whole family suppressed unless mcs_enable.
+        // mcs_cathode_x is wired straight from cathode_x -- the established
+        // SBND cathode convention stays the single source (doc 80 sec 7.5).
+        [if mcs_enable then 'mcs_muon_source']: mcs_muon_source,
+        [if mcs_enable then 'mcs_point_source']: mcs_point_source,
+        [if mcs_enable then 'mcs_cathode_x']: cathode_x,
+        [if mcs_enable then 'mcs_cathode_xcut']: mcs_cathode_xcut,
         [if nu_skip_cosmic then 'nu_skip_cosmic']: true,
         [if nu_skip_cosmic_bundle then 'nu_skip_cosmic_bundle']: true,
         [if skip_cosmic_companions then 'skip_cosmic_companions']: true,
@@ -2898,6 +2917,7 @@ function(
                              neutrino_type_bitmask=neutrino_type_bitmask,
                              nu_per_bundle=nu_per_bundle,
                              nu_per_bundle_min_length=nu_per_bundle_min_length,
+                             mcs_enable=mcs_enable,
                              pseudo_shower_track_paint=pseudo_shower_track_paint,
                              use_power_recomb=use_power_recomb,
                              fast_xgb_forest=fast_xgb_forest,

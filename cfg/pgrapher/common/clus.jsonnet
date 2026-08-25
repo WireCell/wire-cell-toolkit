@@ -712,7 +712,7 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
         // Write T_tagger and T_kine trees into the existing tracking output ROOT file.
         // Must run AFTER numu_bdt_scorer and nue_bdt_scorer (BDT scores must be filled).
         // Must run AFTER UbooneMagnifyTrackingVisitor (file must already exist to UPDATE).
-        tagger_output(name="", output_filename="tracking_proj.root", neutrino_type_bitmask=false, nu_per_bundle=false) :: {
+        tagger_output(name="", output_filename="tracking_proj.root", neutrino_type_bitmask=false, nu_per_bundle=false, mcs_output=false) :: {
             type: "UbooneTaggerOutputVisitor",
             name: prefix + name,
             data: {
@@ -732,7 +732,11 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
               // populates them yet.  C++ default false = branches not booked;
               // key omitted when off => byte-identical pre-knob config AND
               // schema.
-              + (if nu_per_bundle then { nu_per_bundle: true } else {}),
+              + (if nu_per_bundle then { nu_per_bundle: true } else {})
+              // doc 80 round 3: book the five kine_mcs_* T_kine branches (MCS
+              // muon momentum).  C++ default false = branches not booked; key
+              // omitted when off => byte-identical pre-knob config AND schema.
+              + (if mcs_output then { mcs_output: true } else {}),
         },
 
         pointed(name="", groupings=["live"]) :: {

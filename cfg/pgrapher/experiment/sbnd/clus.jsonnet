@@ -1379,6 +1379,13 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, e
               // only -- nothing populates them yet).  C++ default false.
               nu_per_bundle=false,
               nu_per_bundle_min_length=null,  // doc pr/94 Phase 5b; cm; null => C++ default 0 (no floor)
+              // doc 80: MCS muon momentum.  ONE argument derives both the
+              // TaggerCheckNeutrino computation key (mcs_enable, via the knob
+              // bag) and the UbooneTaggerOutputVisitor T_kine branch key
+              // (mcs_output), so the two gates can never disagree.  C++
+              // default false on both; keys omitted when off =>
+              // byte-identical pre-MCS config AND schema.
+              mcs_enable=false,
               // doc pr/94 round 3: the selected candidate gets the main-cluster
               // PR treatment for its own pass even when it is a demoted main.
               // C++ default false; key omitted when off.  NOT gated on
@@ -2129,6 +2136,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, e
               knobs=tcn_knobs + {
                   [if cathode_x != null then 'cathode_x']: cathode_x,
                   [if cosmic_consistent_fv then 'cosmic_consistent_fv']: true,
+                  [if mcs_enable then 'mcs_enable']: true,  // doc 80; sub-knobs arrive via tcn_knobs
                   [if mip_dqdx != null then 'mip_dqdx']: mip_dqdx,
                   [if neutrino_type_bitmask then 'neutrino_type_bitmask']: true,
                   [if nue_sp_consistent_fv then 'nue_sp_consistent_fv']: true,
@@ -2217,9 +2225,13 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, e
             // doc pr/94 Phase 1: nu_per_bundle books the per-bundle identity +
             // per-activity cosmic-flag branches; key omitted when off =>
             // schema-identical.  Plumbing only -- nothing populates them yet.
+            // doc 80: mcs_output derives from the SAME mcs_enable argument as
+            // TaggerCheckNeutrino's computation key -- independent knobs would
+            // allow branches full of -1 or computed-and-discarded results.
             tagger_output: cm.tagger_output(output_filename=tracking_pr_root,
                                             neutrino_type_bitmask=neutrino_type_bitmask,
-                                            nu_per_bundle=nu_per_bundle),
+                                            nu_per_bundle=nu_per_bundle,
+                                            mcs_output=mcs_enable),
             // PR event-display calib dump (docs/pr/26): ONE self-contained JSON per
             // event carrying the PR-graph segments as polylines, the associated
             // track/shower points, the Steiner skeleton with its terminal flag, the

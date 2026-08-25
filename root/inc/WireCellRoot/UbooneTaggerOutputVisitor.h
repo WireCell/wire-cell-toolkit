@@ -51,6 +51,13 @@ namespace WireCell {
             // these fields yet (see NeutrinoTaggerInfo.h) -- this only wires
             // the schema; TaggerCheckNeutrino filling them is a later phase.
             bool m_nu_per_bundle{false};
+            // doc 80 round 3: book the five kine_mcs_* T_kine branches
+            // (MCS muon momentum, filled by TaggerCheckNeutrino's mcs_enable
+            // path).  C++ default false => branches not booked => T_kine
+            // schema byte-identical to the pre-knob tree.  The SBND config
+            // derives this and mcs_enable from ONE jsonnet argument so the
+            // computation gate and the branch gate can never disagree.
+            bool m_mcs_output{false};
         };
 
     }  // namespace Root
