@@ -42,6 +42,16 @@ function(
     subrun         = 0,
     event          = 0,
     reality        = 'sim',
+    // ---- doc 76 round 2: many events in ONE wire-cell process --------------
+    // multi_event: take each event's number from its tensor-set ident instead
+    // of the configured `event` (which is one constant for the whole process
+    // and whose auto-increment counts archive order, not event ids).  With it
+    // off nothing is emitted and this job is byte-identical.
+    multi_event    = false,
+    // { "<event id>": [run, subrun] } for the events in this job whose run and
+    // subrun differ from the `run`/`subrun` TLAs.  A group can span many runs
+    // (SBND nueCC48 spans 12).  Only read when multi_event is true.
+    rse_map        = {},
     semimodel_file = 'semi-analytical-sbnd.json',
     // DL/DT: sbndcode's production diffusion (wcsimsp_sbnd.fcl), restored
     // 2026-07-27, reverting the 6.5781/13.1349 retune of 2026-07-25 (docs/66).
@@ -400,6 +410,8 @@ function(
         runNo=run,
         subRunNo=subrun,
         eventNo=event,
+        event_from_ident=multi_event,
+        rse_map=rse_map,
         reality=reality);
     local clus_pipes = [clus_maker.per_apa(anodes[n], dump=false, trace_bee=trace_bee, save_assoc_id=save_assoc, sep_vertex_veto=sep_vertex_veto, nu_iso_band_guard=nu_iso_band_guard, iso_cathode_guard=iso_cathode_guard, nu_band_veto=nu_band_veto, eb_fast=eb_fast, po_fast=po_fast, dg_fast=dg_fast)
                         for n in std.range(0, nanodes - 1)];

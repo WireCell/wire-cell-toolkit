@@ -251,7 +251,7 @@ local bs_dead_face(apa, face) = {
 // clus/src/ClusteringFuncs.cxx band_veto_forbids(). false (legacy escape via
 // SBND_NU_BAND_VETO=0) omits the key => compiled config byte-identical to
 // before the knob existed; only meaningful with nu_iso_band_guard on.
-local clus_per_face(anode, face, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=null, rse_from_ident=false, pos_offset_on=true, trace_bee=false, save_assoc_id=false, sep_vertex_veto=true, nu_iso_band_guard=true, iso_cathode_guard=false, nu_band_veto=true, eb_fast=false, po_fast=false, dg_fast=false) = {
+local clus_per_face(anode, face, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=null, rse_from_ident=false, event_from_ident=false, rse_map={}, pos_offset_on=true, trace_bee=false, save_assoc_id=false, sep_vertex_veto=true, nu_iso_band_guard=true, iso_cathode_guard=false, nu_band_veto=true, eb_fast=false, po_fast=false, dg_fast=false) = {
     local dv = detector_volumes([anode], face, pos_offset_on),
     local pcts = pctransforms(dv),
     local bsl = bs_live_face(anode.name, face),
@@ -374,6 +374,8 @@ local clus_per_face(anode, face, dump, output_dir, runNo, subRunNo, eventNo, bee
             // = 0).  Conditional key: omitted when off, so production stays
             // byte-identical (mirrors the bee_sink conditional above).
             [if rse_from_ident then 'rse_from_ident']: true,
+            [if event_from_ident then 'event_from_ident']: true,
+            [if event_from_ident && std.length(rse_map) > 0 then 'rse_map']: rse_map,
             save_deadarea: bee_sink == null,
             // The isolated grouping's provenance pair is written HERE, at per-APA
             // scope, so it must be homogenized on THIS node's tensor output too:
@@ -451,7 +453,7 @@ local clus_per_face(anode, face, dump, output_dir, runNo, subRunNo, eventNo, bee
 // all-APA clustering + Bee in SCE true space (x_sce) instead of the T0-corrected
 // reco scope (x_t0cor).  Both SBND realities currently set use_sce=false (see
 // the reco table in the tail function), so this is a no-op for our chain.
-local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=null, premerged=false, rse_from_ident=false, pos_offset_on=true, tensor_outname='', save_real_cluster_id=false, trace_bee=false, save_assoc_cluster_id=false, real_cluster_id_global=null, cathode_rescue_on=true, cathode_rescue_unmatched=true, adopt_nu_fragments=false, save_bundle_main_provenance=false, rescue_allow_in_beam_far=true, rescue_geom_first=true, rescue_pierce_test=true, rescue_pierce_cut=null, rescue_dest_beam_for_new=true, rescue_beam_main_only=true, bee_flash_pred_min=null, use_sce=false, reality='data', eb_fast=false) = {
+local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=null, premerged=false, rse_from_ident=false, event_from_ident=false, rse_map={}, pos_offset_on=true, tensor_outname='', save_real_cluster_id=false, trace_bee=false, save_assoc_cluster_id=false, real_cluster_id_global=null, cathode_rescue_on=true, cathode_rescue_unmatched=true, adopt_nu_fragments=false, save_bundle_main_provenance=false, rescue_allow_in_beam_far=true, rescue_geom_first=true, rescue_pierce_test=true, rescue_pierce_cut=null, rescue_dest_beam_for_new=true, rescue_beam_main_only=true, bee_flash_pred_min=null, use_sce=false, reality='data', eb_fast=false) = {
     local nanodes = std.length(anodes),
     local pcmerging = g.pnode({
         type: 'PointTreeMerging',
@@ -599,6 +601,8 @@ local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=
             // = 0).  Conditional key: omitted when off, so production stays
             // byte-identical (mirrors the bee_sink conditional above).
             [if rse_from_ident then 'rse_from_ident']: true,
+            [if event_from_ident then 'event_from_ident']: true,
+            [if event_from_ident && std.length(rse_map) > 0 then 'rse_map']: rse_map,
             save_deadarea: true,
             dead_area_version: 2,
             // Homogenize the perblob PC key set at tensor-save time so the
@@ -708,12 +712,50 @@ local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=
 }.ret;
 
 
+// evt_subdir (default ''): a per-event output directory TEMPLATE for the
+// components that write one file per event (the PR Bee zip, tracking-pr.root,
+// the PrDisplayDump json).  When a group of events runs in one process every
+// one of those would otherwise overwrite one fixed path; setting
+// evt_subdir='pr_evt%1%' makes each event write into output_dir/pr_evt<ID>/,
+// i.e. exactly the layout the one-event-per-process job produces, so every
+// downstream gate and viewer keeps working unchanged.  The runner must create
+// those directories -- the sinks do not.  The conversion is boost::format, so
+// use %1% (not %d) when the id appears more than once in one name.  Empty by
+// default => the names are literal and production is byte-identical.
+//
+// event_from_ident (default false) / rse_map (default {}): the multi-event
+// counterpart of rse_from_ident that KEEPS the real run and subrun.  When a
+// single wire-cell process streams a group of events, the configured eventNo is
+// one number for the whole process and its auto-increment counts archive order,
+// not event ids -- so every Bee layer and every per-event output name would be
+// mislabelled.  event_from_ident takes the event number from each tensor set's
+// ident; rse_map is { "<ident>": [run, subrun] } for the events whose run/subrun
+// differ from the configured pair (an SBND group can span a dozen runs -- the
+// nueCC48 sample does).  An ident absent from the map keeps the configured pair.
+// Both default off/empty and are emitted as keys only when set, so the
+// one-event-per-process production config is byte-identical.
+//
 // rse_from_ident (default false): when true, the MultiAlgBlobClustering nodes take
 // the Bee event number from each event's tensor ident (run/subrun = 0) instead of
 // the configured runNo/eventNo auto-increment.  Used by the bundled standalone chain
 // (one wire-cell call over many events) whose ident already carries the real event
 // id.  Default false keeps production byte-identical (the key is omitted).
-function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, reality='data') {
+function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, event_from_ident=false, rse_map={}, evt_subdir='', reality='data') {
+    // Output prefix for the per-event writers: output_dir/ normally, and
+    // output_dir/<evt_subdir>/ when a group runs in one process (see the
+    // evt_subdir doc above).
+    local evt_out_prefix =
+        // evt_subdir and event_from_ident are a PAIR.  The tensor sink resolves
+        // its %-conversion from each tensor set's ident; MultiAlgBlobClustering's
+        // own Bee zip and the ROOT writers resolve theirs from the event number
+        // it published -- which is the configured constant unless
+        // event_from_ident is on.  Setting one without the other would send the
+        // two halves of one event's output to two different paths, so refuse.
+        assert (evt_subdir == '') || event_from_ident :
+            'clus.jsonnet: evt_subdir needs event_from_ident (see doc 76 round 2)';
+        (if output_dir == '' then '' else output_dir + '/')
+        + (if evt_subdir == '' then '' else evt_subdir + '/'),
+
     // Reco-chain reality config -- ONE place grouping every reality-dependent
     // toggle.  use_sce: run the all-APA clustering + Bee in SCE true space
     // (x_sce) vs the T0-corrected reco scope (x_t0cor).  pos_offset_on: per-TPC
@@ -735,13 +777,13 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
     per_face(anode, face=0, dump=true, bee_sink=null)::
         clus_per_face(anode, face=face, dump=dump,
                       output_dir=output_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo,
-                      bee_sink=bee_sink, rse_from_ident=rse_from_ident, pos_offset_on=pos_offset_on),
+                      bee_sink=bee_sink, rse_from_ident=rse_from_ident, event_from_ident=event_from_ident, rse_map=rse_map, pos_offset_on=pos_offset_on),
     // trace_bee (default false): per-step Bee layers for merge attribution; see
     // trace_sets above.  Diagnostic only, off => byte-identical compiled config.
     per_apa(anode, dump=true, bee_sink=null, trace_bee=false, save_assoc_id=false, sep_vertex_veto=true, nu_iso_band_guard=true, iso_cathode_guard=false, nu_band_veto=true, eb_fast=false, po_fast=false, dg_fast=false)::
         clus_per_face(anode, face=0, dump=dump,
                       output_dir=output_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo,
-                      bee_sink=bee_sink, rse_from_ident=rse_from_ident, pos_offset_on=pos_offset_on,
+                      bee_sink=bee_sink, rse_from_ident=rse_from_ident, event_from_ident=event_from_ident, rse_map=rse_map, pos_offset_on=pos_offset_on,
                       trace_bee=trace_bee, save_assoc_id=save_assoc_id, sep_vertex_veto=sep_vertex_veto,
                       nu_iso_band_guard=nu_iso_band_guard, iso_cathode_guard=iso_cathode_guard,
                       nu_band_veto=nu_band_veto, eb_fast=eb_fast, po_fast=po_fast, dg_fast=dg_fast),
@@ -749,7 +791,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
     per_volume(anode, face=0, dump=true, bee_sink=null)::
         clus_per_face(anode, face=face, dump=dump,
                       output_dir=output_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo,
-                      bee_sink=bee_sink, rse_from_ident=rse_from_ident, pos_offset_on=pos_offset_on),
+                      bee_sink=bee_sink, rse_from_ident=rse_from_ident, event_from_ident=event_from_ident, rse_map=rse_map, pos_offset_on=pos_offset_on),
     all_apa(anodes, dump=true, bee_sink=null, premerged=false, tensor_outname='', save_real_cluster_id=false, save_assoc_cluster_id=false,
             trace_bee=false, real_cluster_id_global=null, cathode_rescue_on=true, cathode_rescue_unmatched=true, adopt_nu_fragments=false,
             save_bundle_main_provenance=false,
@@ -762,7 +804,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
         // configuration, not here -- see the note in clus_all_apa.
         clus_all_apa(anodes, dump=dump,
                      output_dir=output_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo,
-                     bee_sink=bee_sink, premerged=premerged, rse_from_ident=rse_from_ident, pos_offset_on=pos_offset_on,
+                     bee_sink=bee_sink, premerged=premerged, rse_from_ident=rse_from_ident, event_from_ident=event_from_ident, rse_map=rse_map, pos_offset_on=pos_offset_on,
                      tensor_outname=tensor_outname, save_real_cluster_id=save_real_cluster_id,
                      save_assoc_cluster_id=save_assoc_cluster_id,
                      real_cluster_id_global=real_cluster_id_global,
@@ -1919,7 +1961,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 data: {
                     grouping: 'live',
                     track_fitting_name: 'stm',
-                    output_filename: (if output_dir == '' then '' else output_dir + '/') + 'tracking-stm.root',
+                    output_filename: evt_out_prefix + 'tracking-stm.root',
                     runNo: runNo,
                     subRunNo: subRunNo,
                     eventNo: eventNo,
@@ -2137,7 +2179,10 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
             // tagger_check_neutrino, with the two-TPC channel convention and
             // per-point APA from PR::Fit::paf.  Only active when named in
             // pipeline_names (the WireCellRoot plugin must be loaded by the job).
-            local tracking_pr_root = (if output_dir == '' then '' else output_dir + '/') + 'tracking-pr.root',
+            // evt_out_prefix, not output_dir: a group running in one process
+            // writes output_dir/pr_evt<ID>/tracking-pr.root, the same path the
+            // per-event job writes.  Empty evt_subdir => unchanged.
+            local tracking_pr_root = evt_out_prefix + 'tracking-pr.root',
             tracking_visitor: {
                 type: 'SbndPrMagnifyTrackingVisitor',
                 name: 'pr',
@@ -2183,8 +2228,12 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 name: 'pr',
                 data: {
                     grouping: 'live',
-                    output_filename: (if output_dir == '' then '' else output_dir + '/')
-                                     + 'calib-pr-evt' + std.toString(eventNo) + '.json',
+                    // The event id is in the NAME here, so a group run needs a
+                    // conversion rather than the configured (constant) eventNo.
+                    output_filename: evt_out_prefix
+                                     + (if evt_subdir == ''
+                                        then 'calib-pr-evt' + std.toString(eventNo)
+                                        else 'calib-pr-evt%1%') + '.json',
                     runNo: runNo,
                     subRunNo: subRunNo,
                     eventNo: eventNo,
@@ -2222,7 +2271,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                                || ((neutrino_consistent_fv || cosmic_consistent_fv || nue_sp_consistent_fv)
                                    && std.member(pipeline_names, 'tagger_check_neutrino'))
                                then [sbnd_pr_fv] else []),
-        local bee_zip_path = (if output_dir == '' then '' else output_dir + '/') + 'mabc-pr.zip',
+        local bee_zip_path = evt_out_prefix + 'mabc-pr.zip',
         local mabc = g.pnode({
             type: 'MultiAlgBlobClustering',
             name: 'clus_pr',
@@ -2239,6 +2288,8 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 subRunNo: subRunNo,
                 eventNo: eventNo,
                 [if rse_from_ident then 'rse_from_ident']: true,
+                [if event_from_ident then 'event_from_ident']: true,
+                [if event_from_ident && std.length(rse_map) > 0 then 'rse_map']: rse_map,
                 save_deadarea: true,
                 dead_area_version: 2,
                 save_opflash: false,

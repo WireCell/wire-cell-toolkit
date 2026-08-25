@@ -30,6 +30,7 @@
 #include "WireCellClus/FiducialUtils.h"
 #include "WireCellIface/IConfigurable.h"
 #include "WireCellUtil/NamedFactory.h"
+#include "WireCellUtil/String.h"
 #include "WireCellUtil/Logging.h"
 #include "WireCellUtil/Units.h"
 
@@ -255,7 +256,17 @@ public:
         return cfg;
     }
 
+    // Event tag for the log lines nusel_extract.py parses.  Empty in a
+    // one-event-per-process job (log text unchanged); "evt<ID> " in a group
+    // job, where the log's several spdlog sinks do not arrive in time order and
+    // cluster idents restart every event.  See
+    // sbnd_xin/scripts/multi/slice_group_log.py.
+    mutable std::string m_evt_tag;
+
     virtual void visit(Ensemble& ensemble) const {
+        m_evt_tag = ensemble.rse_valid()
+            ? WireCell::String::format("evt%d ", ensemble.ident()) : std::string();
+
         auto groupings = ensemble.with_name(m_grouping_name);
         if (groupings.empty()) return;
         auto& grouping = *groupings.at(0);
@@ -311,7 +322,7 @@ public:
                                    main_cluster->ident(), err.what());
             }
             if (is_tgm) main_cluster->set_flag(Flags::TGM);
-            SPDLOG_LOGGER_INFO(t_log, "visit: TaggerCheckTGM: cluster {} → TGM={}",
+            SPDLOG_LOGGER_INFO(t_log, "{}visit: TaggerCheckTGM: cluster {} → TGM={}", m_evt_tag,
                                main_cluster->ident(), is_tgm);
         }
     }

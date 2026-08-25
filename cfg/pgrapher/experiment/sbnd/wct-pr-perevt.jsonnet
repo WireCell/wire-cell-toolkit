@@ -48,6 +48,24 @@ function(
     subrun         = 0,
     event          = 0,
     reality        = 'sim',
+    // ---- doc 76 round 2: many events in ONE wire-cell process --------------
+    // multi_event: take each event's number from its tensor-set ident instead
+    // of the configured `event` (which is one constant for the whole process
+    // and whose auto-increment counts archive order, not event ids).  With it
+    // off nothing is emitted and this job is byte-identical.
+    multi_event    = false,
+    // { "<event id>": [run, subrun] } for the events in this job whose run and
+    // subrun differ from the `run`/`subrun` TLAs.  A group can span many runs
+    // (SBND nueCC48 spans 12).  Only read when multi_event is true.
+    rse_map        = {},
+    // Per-event output subdirectory TEMPLATE, e.g. 'pr_evt%1%'.  Empty (the
+    // default) => this job writes output_dir/{mabc-pr.zip,tracking-pr.root,...}
+    // exactly as it always has.  Set it and each event writes into
+    // output_dir/pr_evt<ID>/, i.e. the layout the per-event driver produces, so
+    // pr85_hash_gate.py / pr94_root_gate.py / nusel_extract.py all keep working
+    // on a group run.  boost::format conversion -- use %1% when the id appears
+    // more than once.  The RUNNER must create the directories.
+    evt_subdir     = '',
     // Same LAr TLAs as the Q/L job so the anode/params objects are identical.
     // DL/DT: sbndcode's production diffusion (wcsimsp_sbnd.fcl), restored
     // 2026-07-27, reverting the 6.5781/13.1349 retune of 2026-07-25 (docs/66).
@@ -2492,6 +2510,9 @@ function(
         runNo=run,
         subRunNo=subrun,
         eventNo=event,
+        event_from_ident=multi_event,
+        rse_map=rse_map,
+        evt_subdir=evt_subdir,
         reality=reality,
     );
     // dQ/dx (e/cm, SBND 0.5 kV/cm) + range (detector-agnostic) LinterpFunctions.

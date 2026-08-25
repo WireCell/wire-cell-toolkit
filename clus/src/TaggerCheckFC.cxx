@@ -53,6 +53,7 @@
 #include "WireCellClus/ClusteringFuncsMixins.h"
 #include "WireCellIface/IConfigurable.h"
 #include "WireCellUtil/NamedFactory.h"
+#include "WireCellUtil/String.h"
 #include "WireCellUtil/Logging.h"
 
 class TaggerCheckFC;
@@ -141,7 +142,17 @@ public:
         return cfg;
     }
 
+    // Event tag for the log lines nusel_extract.py parses.  Empty in a
+    // one-event-per-process job (log text unchanged); "evt<ID> " in a group
+    // job, where the log's several spdlog sinks do not arrive in time order and
+    // cluster idents restart every event.  See
+    // sbnd_xin/scripts/multi/slice_group_log.py.
+    mutable std::string m_evt_tag;
+
     virtual void visit(Ensemble& ensemble) const {
+        m_evt_tag = ensemble.rse_valid()
+            ? WireCell::String::format("evt%d ", ensemble.ident()) : std::string();
+
         auto groupings = ensemble.with_name(m_grouping_name);
         if (groupings.empty()) return;
         auto& grouping = *groupings.at(0);
@@ -203,7 +214,7 @@ public:
                                    main_cluster->ident(), err.what());
             }
             if (is_fc) main_cluster->set_flag(Flags::FC);
-            SPDLOG_LOGGER_INFO(f_log, "visit: TaggerCheckFC: cluster {} → FC={}",
+            SPDLOG_LOGGER_INFO(f_log, "{}visit: TaggerCheckFC: cluster {} → FC={}", m_evt_tag,
                                main_cluster->ident(), is_fc);
         }
     }
