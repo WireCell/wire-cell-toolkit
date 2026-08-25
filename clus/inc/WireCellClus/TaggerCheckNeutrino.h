@@ -7,7 +7,8 @@
 #include "WireCellUtil/NamedFactory.h"
 #include "WireCellAux/Logger.h"
 #include "WireCellClus/PRGraph.h"
-#include "WireCellClus/TrackFitting.h"  
+#include "WireCellClus/MuonMCSDriver.h"  // doc 80: MCS muon momentum config
+#include "WireCellClus/TrackFitting.h"
 #include "WireCellClus/TrackFittingPresets.h"
 #include "WireCellClus/PRSegmentFunctions.h"
 
@@ -89,6 +90,10 @@ public:
         // ClusteringCathodeConnect's cathode_x uses).
         double m_cathode_x{0};
         double m_cathode_kink_xcut{0};
+        // ---- doc 80: MCS muon momentum (knob-gated call site after
+        // fill_kine_tree; mcs.enable = false => call skipped entirely =>
+        // byte-identical legacy path).  All defaults in MuonMCSDriver.h.
+        PR::MuonMCSConfig m_mcs;
         // Wide-baseline cathode kink accept (doc sbnd_xin/docs/pr/47 sec 8,
         // O1): fifth segment_search_kink accept path at cathode-crossing fit
         // indices, keyed on the skirt-excluded PCA turn angle across the

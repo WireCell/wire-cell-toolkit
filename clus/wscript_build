@@ -1,4 +1,4 @@
-uses = 'WireCellAux WCPQuickhull'
+uses = 'WireCellAux WCPQuickhull WireCellMcs'
 if bld.env.INCLUDES_PYTHON:
     uses += ' WCPPyUtil'
 bld.smplpkg('WireCellClus', use=uses)

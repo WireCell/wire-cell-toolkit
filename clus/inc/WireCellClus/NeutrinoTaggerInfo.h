@@ -65,6 +65,22 @@ namespace WireCell::Clus::PR {
         int cluster_id{-1};
         int matched_flash_gid{-1};
         int nu_index{-1};
+
+        // ---- doc 80: MCS muon momentum (one muon per bundle) ---------- //
+        // Scalars plus a join key, NOT parallel arrays: the kine_* vectors
+        // above carry no per-row segment provenance, so a row could never be
+        // matched back to the measured muon (doc 80 sec 8.1).  Filled by
+        // mcs_fill_kine (MuonMCSDriver.cxx) behind TaggerCheckNeutrino's
+        // mcs_enable knob; booked as T_kine branches only behind
+        // UbooneTaggerOutputVisitor's mcs_output knob.  -1 = not computed.
+        // kine_mcs_range_energy is MCS's OWN CSDA-table range KE over the
+        // TRIMMED path -- deliberately not named like (and never to be
+        // confused with) cal_kine_range's estimate (doc 80 sec 8.3).
+        float kine_mcs_energy{-1};        // MCS KE [MeV]
+        float kine_mcs_ambiguity{-1};     // 1 = most ambiguous
+        float kine_mcs_tracklen{-1};      // MCS trimmed path length [cm]
+        float kine_mcs_range_energy{-1};  // MCS's own CSDA range KE [MeV]
+        int kine_mcs_segment_id{-1};      // cluster_id*1000 + graph_index join key
     };
 
 

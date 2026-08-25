@@ -165,6 +165,18 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_mvfit_prior_range = get(config, "mvfit_prior_range", m_mvfit_prior_range);  // cm
     m_cathode_x          = get(config, "cathode_x",          m_cathode_x);           // cm
     m_cathode_kink_xcut  = get(config, "cathode_kink_xcut",  m_cathode_kink_xcut);   // cm
+    // ---- doc 80: MCS muon momentum.  mcs_enable false => the call site is
+    // skipped entirely => byte-identical legacy path.  mcs_cathode_x/_xcut
+    // mirror the SBND cathode_x/cathode_kink_xcut convention (one 5 cm, one
+    // justification -- doc 80 sec 7.5).
+    m_mcs.enable             = get(config, "mcs_enable",             m_mcs.enable);
+    m_mcs.muon_source        = get(config, "mcs_muon_source",        m_mcs.muon_source);
+    m_mcs.muon_min_length_cm = get(config, "mcs_muon_min_length_cm", m_mcs.muon_min_length_cm);  // cm
+    m_mcs.point_source       = get(config, "mcs_point_source",       m_mcs.point_source);
+    m_mcs.beam_window_only   = get(config, "mcs_beam_window_only",   m_mcs.beam_window_only);
+    m_mcs.cathode_x_cm       = get(config, "mcs_cathode_x",          m_mcs.cathode_x_cm);    // cm
+    m_mcs.cathode_xcut_cm    = get(config, "mcs_cathode_xcut",       m_mcs.cathode_xcut_cm); // cm
+    m_mcs.max_points         = get(config, "mcs_max_points",         m_mcs.max_points);
     m_cathode_wide_kink_angle    = get(config, "cathode_wide_kink_angle",    m_cathode_wide_kink_angle);    // deg
     m_cathode_wide_kink_skirt    = get(config, "cathode_wide_kink_skirt",    m_cathode_wide_kink_skirt);    // cm
     m_cathode_wide_kink_baseline = get(config, "cathode_wide_kink_baseline", m_cathode_wide_kink_baseline); // cm
@@ -694,6 +706,15 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["mvfit_prior_range"] = m_mvfit_prior_range;  // cm, 2-leg substituted prior
     cfg["cathode_x"]         = m_cathode_x;          // cm, T0-corrected frame
     cfg["cathode_kink_xcut"] = m_cathode_kink_xcut;  // cm; 0 = legacy (the kink search sees every fit point)
+    // doc 80: MCS muon momentum.  All defaults = legacy no-op (enable false).
+    cfg["mcs_enable"]             = m_mcs.enable;
+    cfg["mcs_muon_source"]        = m_mcs.muon_source;         // pf_muon | long_muon | longest_segment
+    cfg["mcs_muon_min_length_cm"] = m_mcs.muon_min_length_cm;  // cm
+    cfg["mcs_point_source"]       = m_mcs.point_source;        // muon_segments | whole_event (validation)
+    cfg["mcs_beam_window_only"]   = m_mcs.beam_window_only;    // correctness gate, doc 80 sec 7.4
+    cfg["mcs_cathode_x"]          = m_mcs.cathode_x_cm;        // cm
+    cfg["mcs_cathode_xcut"]       = m_mcs.cathode_xcut_cm;     // cm; 0 = off (SBND: 5)
+    cfg["mcs_max_points"]         = m_mcs.max_points;
     cfg["cathode_wide_kink_angle"]    = m_cathode_wide_kink_angle;    // deg; 0 = legacy (no wide-baseline cathode accept)
     cfg["cathode_wide_kink_skirt"]    = m_cathode_wide_kink_skirt;    // cm excluded around the crossing
     cfg["cathode_wide_kink_baseline"] = m_cathode_wide_kink_baseline; // cm PCA baseline per arm beyond the skirt
@@ -2736,6 +2757,16 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
             kine_info.cluster_id        = main_cluster->get_cluster_id();
             kine_info.matched_flash_gid = candidates[nu_index].gid;
             kine_info.nu_index          = static_cast<int>(nu_index);
+        }
+        // doc 80 round 2: MCS muon momentum, once per bundle, default OFF.
+        // Placed here so all three muon_source modes see what they need --
+        // segments_in_long_muon is function-local to this scope (sec 4.2) --
+        // and the result rides the existing unconditional set_kine_info store
+        // below.  visit() only: the dual-chain off-pass
+        // (run_dual_chain_off_pass) does not run MCS, so its rows keep -1.
+        if (m_mcs.enable && final_main_vertex) {
+            PR::mcs_fill_kine(kine_info, *pr_graph, segments_in_long_muon,
+                              final_main_vertex, beam_gate, m_mcs, log);
         }
         track_fitter->set_kine_info(kine_info);
         track_fitter->set_tagger_info(tagger_info);
