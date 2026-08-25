@@ -251,7 +251,7 @@ local bs_dead_face(apa, face) = {
 // clus/src/ClusteringFuncs.cxx band_veto_forbids(). false (legacy escape via
 // SBND_NU_BAND_VETO=0) omits the key => compiled config byte-identical to
 // before the knob existed; only meaningful with nu_iso_band_guard on.
-local clus_per_face(anode, face, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=null, rse_from_ident=false, event_from_ident=false, rse_map={}, pos_offset_on=true, trace_bee=false, save_assoc_id=false, sep_vertex_veto=true, nu_iso_band_guard=true, iso_cathode_guard=false, nu_band_veto=true, eb_fast=false, po_fast=false, dg_fast=false) = {
+local clus_per_face(anode, face, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=null, rse_from_ident=false, event_from_ident=false, rse_map={}, pos_offset_on=true, trace_bee=false, save_assoc_id=false, sep_vertex_veto=true, nu_iso_band_guard=true, iso_cathode_guard=false, nu_band_veto=true, eb_fast=false, po_fast=false, dg_fast=false, evt_subdir='') = {
     local dv = detector_volumes([anode], face, pos_offset_on),
     local pcts = pctransforms(dv),
     local bsl = bs_live_face(anode.name, face),
@@ -347,7 +347,11 @@ local clus_per_face(anode, face, dump, output_dir, runNo, subRunNo, eventNo, bee
         // byte-identical to the pre-knob config.
         cm.examine_bundles(graph_name=(if eb_fast then 'relaxed_fast' else 'relaxed')),
     ],
+    // A group running in ONE process writes each event's Bee zip into
+    // output_dir/<evt_subdir>/ -- exactly the path a per-event job writes
+    // (doc 81 round 1).  Empty evt_subdir => byte-identical to before.
     local bee_zip_path = (if output_dir == '' then '' else output_dir + '/')
+                         + (if evt_subdir == '' then '' else evt_subdir + '/')
                          + 'mabc-%s-face%d.zip' % [anode.name, face],
     local mabc = g.pnode({
         local name = '%s-%d' % [anode.name, face],
@@ -453,7 +457,7 @@ local clus_per_face(anode, face, dump, output_dir, runNo, subRunNo, eventNo, bee
 // all-APA clustering + Bee in SCE true space (x_sce) instead of the T0-corrected
 // reco scope (x_t0cor).  Both SBND realities currently set use_sce=false (see
 // the reco table in the tail function), so this is a no-op for our chain.
-local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=null, premerged=false, rse_from_ident=false, event_from_ident=false, rse_map={}, pos_offset_on=true, tensor_outname='', save_real_cluster_id=false, trace_bee=false, save_assoc_cluster_id=false, real_cluster_id_global=null, cathode_rescue_on=true, cathode_rescue_unmatched=true, adopt_nu_fragments=false, save_bundle_main_provenance=false, rescue_allow_in_beam_far=true, rescue_geom_first=true, rescue_pierce_test=true, rescue_pierce_cut=null, rescue_dest_beam_for_new=true, rescue_beam_main_only=true, bee_flash_pred_min=null, use_sce=false, reality='data', eb_fast=false) = {
+local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=null, premerged=false, rse_from_ident=false, event_from_ident=false, rse_map={}, pos_offset_on=true, tensor_outname='', save_real_cluster_id=false, trace_bee=false, save_assoc_cluster_id=false, real_cluster_id_global=null, cathode_rescue_on=true, cathode_rescue_unmatched=true, adopt_nu_fragments=false, save_bundle_main_provenance=false, rescue_allow_in_beam_far=true, rescue_geom_first=true, rescue_pierce_test=true, rescue_pierce_cut=null, rescue_dest_beam_for_new=true, rescue_beam_main_only=true, bee_flash_pred_min=null, use_sce=false, reality='data', eb_fast=false, evt_subdir='') = {
     local nanodes = std.length(anodes),
     local pcmerging = g.pnode({
         type: 'PointTreeMerging',
@@ -577,7 +581,10 @@ local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=
                            use_flash_t0=true, flags_from_longest=true,
                            save_bundle_main_provenance=save_bundle_main_provenance),
     ],
-    local bee_zip_path = (if output_dir == '' then '' else output_dir + '/') + 'mabc-all-apa.zip',
+    // See the per-face site above (doc 81 round 1).
+    local bee_zip_path = (if output_dir == '' then '' else output_dir + '/')
+                         + (if evt_subdir == '' then '' else evt_subdir + '/')
+                         + 'mabc-all-apa.zip',
     local mabc = g.pnode({
         type: 'MultiAlgBlobClustering',
         name: 'clus_all_apa',
@@ -775,13 +782,13 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, e
     // output for this node goes into that single shared zip instead of this
     // node's own bee_zip.  Default null -> own zip (production byte-identical).
     per_face(anode, face=0, dump=true, bee_sink=null)::
-        clus_per_face(anode, face=face, dump=dump,
+        clus_per_face(anode, face=face, dump=dump, evt_subdir=evt_subdir,
                       output_dir=output_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo,
                       bee_sink=bee_sink, rse_from_ident=rse_from_ident, event_from_ident=event_from_ident, rse_map=rse_map, pos_offset_on=pos_offset_on),
     // trace_bee (default false): per-step Bee layers for merge attribution; see
     // trace_sets above.  Diagnostic only, off => byte-identical compiled config.
     per_apa(anode, dump=true, bee_sink=null, trace_bee=false, save_assoc_id=false, sep_vertex_veto=true, nu_iso_band_guard=true, iso_cathode_guard=false, nu_band_veto=true, eb_fast=false, po_fast=false, dg_fast=false)::
-        clus_per_face(anode, face=0, dump=dump,
+        clus_per_face(anode, face=0, dump=dump, evt_subdir=evt_subdir,
                       output_dir=output_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo,
                       bee_sink=bee_sink, rse_from_ident=rse_from_ident, event_from_ident=event_from_ident, rse_map=rse_map, pos_offset_on=pos_offset_on,
                       trace_bee=trace_bee, save_assoc_id=save_assoc_id, sep_vertex_veto=sep_vertex_veto,
@@ -789,7 +796,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, e
                       nu_band_veto=nu_band_veto, eb_fast=eb_fast, po_fast=po_fast, dg_fast=dg_fast),
     // Production (LArSoft) entry point used by wcls-img-clus.jsonnet.
     per_volume(anode, face=0, dump=true, bee_sink=null)::
-        clus_per_face(anode, face=face, dump=dump,
+        clus_per_face(anode, face=face, dump=dump, evt_subdir=evt_subdir,
                       output_dir=output_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo,
                       bee_sink=bee_sink, rse_from_ident=rse_from_ident, event_from_ident=event_from_ident, rse_map=rse_map, pos_offset_on=pos_offset_on),
     all_apa(anodes, dump=true, bee_sink=null, premerged=false, tensor_outname='', save_real_cluster_id=false, save_assoc_cluster_id=false,
@@ -802,7 +809,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, e
         // Clustering + matching ONLY (all-APA MABC).  The follow-up PR tagger
         // pass (pr() below) and the wclsTensorSetLabeler are wired by the entry
         // configuration, not here -- see the note in clus_all_apa.
-        clus_all_apa(anodes, dump=dump,
+        clus_all_apa(anodes, dump=dump, evt_subdir=evt_subdir,
                      output_dir=output_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo,
                      bee_sink=bee_sink, premerged=premerged, rse_from_ident=rse_from_ident, event_from_ident=event_from_ident, rse_map=rse_map, pos_offset_on=pos_offset_on,
                      tensor_outname=tensor_outname, save_real_cluster_id=save_real_cluster_id,

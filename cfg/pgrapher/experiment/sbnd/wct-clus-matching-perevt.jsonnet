@@ -52,6 +52,14 @@ function(
     // subrun differ from the `run`/`subrun` TLAs.  A group can span many runs
     // (SBND nueCC48 spans 12).  Only read when multi_event is true.
     rse_map        = {},
+    // doc 81 round 1: a per-event output directory TEMPLATE, exactly as
+    // wct-pr-perevt.jsonnet already has.  '' (default) => every key below is
+    // omitted and this job compiles byte-identically.  evt_subdir='ql_evt%1%'
+    // makes a GROUP process write each event into output_dir/ql_evt<ID>/,
+    // i.e. the same layout a per-event job writes, so the group products are
+    // a file-for-file drop-in for work-<s>-ql0819 and can be gated with the
+    // existing tools.  clus.jsonnet asserts evt_subdir needs event_from_ident.
+    evt_subdir     = '',
     semimodel_file = 'semi-analytical-sbnd.json',
     // DL/DT: sbndcode's production diffusion (wcsimsp_sbnd.fcl), restored
     // 2026-07-27, reverting the 6.5781/13.1349 retune of 2026-07-25 (docs/66).
@@ -412,6 +420,7 @@ function(
         eventNo=event,
         event_from_ident=multi_event,
         rse_map=rse_map,
+        evt_subdir=evt_subdir,
         reality=reality);
     local clus_pipes = [clus_maker.per_apa(anodes[n], dump=false, trace_bee=trace_bee, save_assoc_id=save_assoc, sep_vertex_veto=sep_vertex_veto, nu_iso_band_guard=nu_iso_band_guard, iso_cathode_guard=iso_cathode_guard, nu_band_veto=nu_band_veto, eb_fast=eb_fast, po_fast=po_fast, dg_fast=dg_fast)
                         for n in std.range(0, nanodes - 1)];
