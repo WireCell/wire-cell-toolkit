@@ -70,6 +70,14 @@ namespace WireCell::Match {
         // side face 0, +x side face 1). Empty (default) => use the single m_tpc_face
         // for every input => bit-identical for SBND / the per-side PDHD nodes.
         std::vector<int> m_tpc_faces;
+        // Optional per-input SECOND face ("tpc_extra_faces") to union into the active-
+        // volume box alongside tpc_face(s). PDHD/SBND anode faces span the full Y/Z and
+        // differ only slightly in X, so a single face's sensitive box already covers the
+        // TPC; PDVD's two faces instead split the Y range in half (adjacent, disjoint),
+        // so using only one face truncates the active-volume box (and the light-
+        // prediction inclusion gate) to roughly half the true Y extent. Empty (default)
+        // => no second face unioned => bit-identical for PDHD/SBND.
+        std::vector<int> m_tpc_extra_faces;
 
         // PMTs on vs off (default true => apply the OpDet type mask); see
         // ch_mask for further per-channel disables.
@@ -146,6 +154,18 @@ namespace WireCell::Match {
         double m_flash_minPE{500};
         double m_flash_mintime{-1.5 * units::ms};
         double m_flash_maxtime{1.5 * units::ms};
+        // Channel-scoped flash admission (on top of flash_minPE): admit a flash
+        // only if, over flash_sel_channels, sum(PE) >= flash_sel_minPE AND at
+        // least flash_sel_min_fired channels read >= flash_sel_fired_pe.  Meant
+        // for detectors where one PD family is the only reliable ruler (PDVD
+        // cathode X-ARAPUCAs: full-stream readout, 100% coverage, proportional
+        // response), so a flash whose evidence lives only on unreliable /
+        // self-trigger-silent families never enters matching.  Empty channel
+        // list (default) => no-op => bit-identical legacy admission.
+        std::vector<int> m_flash_sel_channels;
+        double m_flash_sel_minPE{0.0};
+        int m_flash_sel_min_fired{0};
+        double m_flash_sel_fired_pe{1.0};
         double m_beam_mintime{-5 * units::us};
         double m_beam_maxtime{5 * units::us};
         double m_QtoL{0.5};
@@ -168,6 +188,27 @@ namespace WireCell::Match {
         // trigger time base as the flash times. In WCT internal time units (ns).
         // Default 0 => detectors that DO bake it (e.g. SBND) are bit-identical.
         double m_trigger_offset{0.0};
+        // Per-INPUT trigger offsets ("trigger_offsets", one per input port), for
+        // detectors whose charge readout windows start at different times per
+        // drift volume (PDVD: the TDE/BDE crates open up to ~32 us apart, each
+        // wandering event-to-event vs the trigger-locked light window). Empty
+        // (the default) => m_trigger_offset for every input, bit-identical.
+        std::vector<double> m_trigger_offsets;
+        double trigger_offset_for(std::size_t input_idx) const
+        {
+            return m_trigger_offsets.empty() ? m_trigger_offset
+                                             : m_trigger_offsets.at(input_idx);
+        }
+        // Per-INPUT drift speeds ("drift_speeds", one per input port), for
+        // detectors whose drift volumes can carry different calibrated speeds
+        // (PDVD: bottom volume = port 0, top volume = port 1). Empty (the
+        // default) => m_drift_speed for every input, bit-identical.
+        std::vector<double> m_drift_speeds;
+        double drift_speed_for(std::size_t input_idx) const
+        {
+            return m_drift_speeds.empty() ? m_drift_speed
+                                          : m_drift_speeds.at(input_idx);
+        }
         // LASSO solution threshold below which a (flash, cluster) bundle is
         // dropped after each matching round. Was hard-coded 0.05 inline; pulled
         // out so it can be widened/narrowed from the jsonnet without rebuild.
@@ -208,6 +249,20 @@ namespace WireCell::Match {
         double m_anode_ext2{4.0 * units::cm};     // anode flag-window outer edge (low_x_cut_ext2)
         double m_cathode_ext1{1.2 * units::cm};   // PE-inclusion window edge, beyond the cathode (high_x_cut_ext1)
         double m_cathode_ext2{-2.0 * units::cm};  // cathode flag-window inner edge (high_x_cut_ext2)
+        // Extra tolerance BELOW anode_ext1, subtracted to form the anode-side floor
+        // used in TWO coupled places in compute_endpoint_flags: the containment gate
+        // (first_u > anode_ext1 - margin) and the anode flag-window inner edge
+        // (first_u > anode_ext1 - margin, which sets flag_at_x_boundary /
+        // flag_close_to_PMT). The two are deliberately the SAME bound: a cluster
+        // admitted by the containment slack must also acquire the at-x-boundary /
+        // close-to-PMT flags, else it would be a candidate that has silently dropped
+        // its T0-crosser constraint. Widening moves the floor outward (deeper past
+        // the anode) only -- the flag window's outer edge stays m_anode_ext2 -- so it
+        // cannot re-flag anode-SHORT ends the way a cathode_ext2 widening once did.
+        // Prototype hard-codes 1.0 cm (ProtectOverClustering.cxx:296); the knob keeps
+        // that as the default => byte-identical. PDVD production sets 2.0 cm (floor
+        // -2 -> -4 cm; run 039252 evt298567 full-gap crosser top:22 missed by 0.5 cm).
+        double m_anode_ext1_margin{1.0 * units::cm};
         double m_y_cushion{0.0 * units::cm};       // signed inward(+)/outward(-) shift of each |y| edge
         double m_z_cushion{0.0 * units::cm};       // signed inward(+)/outward(-) shift of each z edge
         // Proximity band for the diagnostic flag_two_boundary edge test: a main-PCA
@@ -252,6 +307,48 @@ namespace WireCell::Match {
         // existing density path is untouched.
         double m_robust_endpoint_gap{0.0};            // detachment-gap threshold (0 => disabled)
         double m_robust_endpoint_gap_charge_frac{0.0};// outer-charge cap for the gap path
+        // Mirror the gap path at the CATHODE end (default OFF => byte-identical, and in
+        // particular PDHD -- which sets the two keys above -- is unaffected until it opts
+        // in). The two knobs above were added for anode-end cases only, but nothing in
+        // their justification is direction-specific: a real cathode-REACHING track end is
+        // just as continuous as a real anode-piercing one, and the junk is just as
+        // detached. The exposure is symmetric by construction, because the upstream cause
+        // -- clustering_isolated's small->big merge (clustering_isolated.cxx: hardcoded
+        // small_big_dis_cut = 80 cm, no angle/direction/gap test) -- has no directional
+        // preference: it absorbs any "small" cluster into the nearest big one within
+        // 80 cm, at whichever end it happens to lie. The always-on legacy trims above
+        // already treat both ends as mirror images; only this knob-gated robust layer
+        // broke that symmetry, as an accident of where the first cases turned up.
+        // Compare PDHD evt 1007 uid-126 ("7 gap-separated groups marching from u=-111cm
+        // up to the body", ~2000 q/pt, anode end) with PDVD 039252 evt298567 apa-4
+        // ident 97 (6 gap-separated isolated-merged clumps, 5847 q/pt, CATHODE end):
+        // same pathology, same upstream cause, opposite ends -- only the first had a
+        // judge. When true the cathode-end walk reuses m_robust_endpoint_gap and
+        // m_robust_endpoint_gap_charge_frac (same thresholds, same safety bound: a real
+        // over-cathode stretch carrying more charge is left to fail, which is what stops
+        // a wrong-T0 hypothesis being rescued). Density path untouched.
+        // See pdvd/docs/qlmatch/16_pdvd-clus97-crosser-evt298567.md.
+        bool m_robust_endpoint_gap_cathode{false};
+        // Where the anode-end walk stops calling material "outside" (default OFF =>
+        // byte-identical). The walk breaks at the first slice above anode_in
+        // (= m_anode_ext1), but the containment gate it feeds is
+        // first_u > anode_in - m_anode_ext1_margin -- a floor m_anode_ext1_margin cm
+        // LOWER. So a cluster whose body legitimately starts in that dead band is
+        // contained, yet the walk marches past the detached junk INTO the body before
+        // it can break, hands the judges a slab of dense real track charge, and every
+        // judge then (correctly) refuses to trim. The junk survives and containment
+        // fails on it. Whether the rescue works at all then depends on cluster SIZE --
+        // whether max(frac*npoints, count) happens to cover the swallowed body points
+        // -- which is not physics: PDVD 039252 evt298567 apa-0 ident 34 (2649 pts,
+        // allowance 26.5) is rescued while apa-4 ident 1 (1375 pts, allowance 15)
+        // is not, on the same 20 swallowed points.
+        // When true the walk instead breaks at the floor the gate actually uses, so it
+        // never swallows material that is already inside the gate; the judges are
+        // unchanged and still protect genuine track ends (a body starting BELOW the
+        // floor still fails, as it must). Cathode end needs no counterpart: its gate
+        // (last_u < cathode_in) and its walk share one threshold.
+        // See pdvd/docs/qlmatch/15_pdvd-clus34-unmatched-evt298567.md.
+        bool m_robust_endpoint_walk_to_floor{false};
 
         // §D pre-selection / bad-match gates.
         double m_mc_saturation_pe{5000};      // MC saturated-PMT mask trigger (total flash PE)
@@ -275,6 +372,45 @@ namespace WireCell::Match {
         // likely to survive the strength cutoff.
         bool   m_lasso_flag_weight{false};
         double m_lasso_boundary_weight{0.2};
+        // Beam-window flash preference (SBND reco1 neutrino-candidate steering; see
+        // sbnd_xin/docs case study on evts 246579/116962). When m_beam_pref is on, a
+        // bundle whose flash time lies inside (beam_pref_tlow, beam_pref_thigh):
+        //  - is EXEMPT from the cull_inconsistent "rival kept a high/xtpc-consistent
+        //    bundle" drop, so it reaches the LASSO and competes there (evt 246579:
+        //    the cull removed the beam-flash bundle pre-fit, so the fit never saw
+        //    the beam flash's otherwise-unexplained PE);
+        //  - has its per-column L1 weight multiplied by m_beam_pref_lasso_weight
+        //    (<1 => shrunk less, exactly like lasso_boundary_weight), tilting
+        //    marginal LASSO competitions toward the beam flash (evt 116962).
+        // The xtpc scenario-1 / joint-pin culls are NOT relaxed (geometric
+        // cathode-crossing evidence outranks the time prior). Default OFF
+        // (false / weight 1.0) => bit-identical.
+        bool   m_beam_pref{false};
+        double m_beam_pref_tlow{0.2 * units::us};
+        double m_beam_pref_thigh{2.2 * units::us};
+        double m_beam_pref_lasso_weight{1.0};
+        // Empty-flash rescue steal guard (third beam_pref mechanism): when a
+        // NON-beam empty flash tries to REASSIGN a cluster away from a
+        // beam-window flash, its light metric must beat the current match by
+        // this scale (best_m < current_m * scale), not just strictly. 1.0 =>
+        // the historical strict-better test (evt 246579: the -326.8 us cosmic
+        // re-stole the beam cluster at 0.093 vs 0.406 -- light-better, wrong
+        // physics; scale 0.2 blocks it).
+        double m_beam_pref_rescue_scale{1.0};
+        // Bundle-quality gate on the preference (validation round 2, doc 22):
+        // without it the down-weighted beam flash sweeps up junk bundles --
+        // tiny predictions (8-300 PE) with ks 0.4-0.8 become near-free LASSO
+        // columns that mop up its PE residual and occasionally steal a true
+        // match from another flash (MC evt 18 cluster 1 at ks 0.68; MC evt 41
+        // a pred-8-PE bundle on a 3431-PE flash). Only a bundle with
+        // ks_dis <= max_ks AND total_pred_light >= min_pred_frac * flash PE
+        // receives the preference (cull exemption, L1 down-weight, rescue
+        // guard); others are handled exactly as without the knob. Genuine
+        // beam matches in every validated case have ks <= 0.27 and pred
+        // fraction >= 0.17. Defaults (1e9 / 0) = ungated, bit-identical to
+        // the round-1 behavior; the SBND shim sets 0.3 / 0.02.
+        double m_beam_pref_max_ks{1e9};
+        double m_beam_pref_min_pred_frac{0.0};
 
         // §G flash PE-error model (forwarded to Opflash for the LASSO; the same
         // floor/frac/knee feed the bundle chi2 via BundleQualityParams).
@@ -292,12 +428,118 @@ namespace WireCell::Match {
         // fit_lowpe.py): PDHD 2.1/4.0. Feeds the chi2 only; LASSO weight stays measured.
         double m_pe_err_lowpe_frac{-1.0};
         double m_pe_err_lowpe_knee{4.0};
+        // Per-PD-family PE-error override (PDVD cathode-XA vs PMT calibration;
+        // pdvd/docs/qlmatch/19_pdvd-scan-tuning-039252.md).  Parallel arrays:
+        // family i covers the channels of pe_err_family_channels[i]; the
+        // matching entry of pe_err_family_{floor,frac,lowpe_frac,lowpe_knee}
+        // overrides the global value on those channels in BOTH error paths
+        // (Opflash LASSO floor/frac; bundle-chi2 per_opdet_perr, all four).
+        // A missing/negative entry falls back to the global.  Empty channel
+        // list (default) => byte-identical legacy model.
+        std::vector<std::vector<int>> m_pe_err_family_channels;
+        std::vector<double> m_pe_err_family_floor;
+        std::vector<double> m_pe_err_family_frac;
+        std::vector<double> m_pe_err_family_lowpe_frac;
+        std::vector<double> m_pe_err_family_lowpe_knee;
+        // Resolved per-channel overrides (length m_nchan when any family is
+        // configured, else empty; -1 entry => use the global value).
+        std::vector<double> m_pe_err_ch_floor;
+        std::vector<double> m_pe_err_ch_frac;
+        std::vector<double> m_pe_err_ch_lowpe_frac;
+        std::vector<double> m_pe_err_ch_lowpe_knee;
         // Optional per-channel measured-PE gain correction (length nchan), applied
         // to every flash's measured PE as it is read. Empty => identity (byte-
         // identical). PDHD uses it to scale up the gain-biased -x full-stream half
         // (optical ch 120-159) so its measured light matches the prediction.
         std::vector<double> m_measured_pe_scale;
         double m_flash_pe_threshold{0.0};      // Opflash "fired" threshold (PE)
+        // Mask DAPHNE-rail-saturated channels PER FLASH (Opflash::get_sat,
+        // fed by the OpHitFinder flag_saturation -> OpFlashFinder flash_sat
+        // chain): the channel is dropped from that flash's opdet mask
+        // (=> pred, chi2, KS via bundle_mask_ks) and its LASSO rows are
+        // zeroed.  A railed channel's clipped PE can be a x2-10 underestimate
+        // (pdvd/docs/qlmatch/pdvd-saturation-recovery.md) -- masking beats
+        // both the veto (exact 0) and trusting the clipped value.  Default
+        // OFF -> bit-identical.
+        bool m_use_saturation_flag{false};
+
+        // Whether a rail-flagged channel is also DROPPED from that flash's
+        // opdet mask (=> out of chi2 and, under bundle_mask_ks, out of KS),
+        // or stays in them at its measured PE.
+        //
+        // The clipped PE is NOT a missing measurement: it is a LOWER BOUND on
+        // the true PE (11_pdvd-saturation-recovery.md §2.1 -- `clip` is a
+        // "tight deterministic underestimate", -4% at depth d=1.4, -14% at
+        // d=2, -40% at d=4, +-2% band), and with OpDecon saturation_repair on
+        // (the PDVD production chain) it is a repaired estimate biased high by
+        // ~+9% at d=2 / ~+23% at d=4 with a [1.06,2.05] band.  Either way the
+        // channel carries real information, so dropping it discards a
+        // constraint AND makes a wrong prediction free there.
+        //
+        // LASSO is deliberately NOT re-opened by this knob: a lower-bound
+        // measurement in a least-squares solve biases the fitted charge DOWN.
+        // The rail-flagged LASSO rows stay zeroed at every fit site, so the
+        // railed channel acts as a CHECK on the charge-derived prediction
+        // without constraining it.
+        //
+        // Pair with chi2_sat_inflate for the extra per-channel error.
+        // Default TRUE = the legacy drop => bit-identical for existing cfgs.
+        bool m_saturation_mask_fit{true};
+
+        // Track readout coverage PER FLASH (Opflash::get_cov, fed by the
+        // OpHitFinder emit_coverage -> OpFlashFinder flash_cov chain): a
+        // self-triggered channel (PDVD membrane XA / PMT 16.4-us snippets,
+        // duty ~5-30%) that carried no waveform over the flash window reads
+        // measured = 0.  Turning this on makes the per-flash coverage
+        // available to coverage_mask_fit and to the calib dump / ql_scan
+        // "nodata" label.  Default OFF -> bit-identical; legacy archives have
+        // get_cov == 1.
+        bool m_use_coverage_flag{false};
+        double m_coverage_min{1.0};
+
+        // Whether an uncovered channel is also DROPPED from that flash's
+        // opdet mask and LASSO rows (like a saturated one), or stays in the
+        // fit at its measured PE of 0.
+        //
+        // Dropping was the original 2026-07-16 reading: no snippet => no
+        // measurement.  The measurement says otherwise (18 evts run 039252,
+        // pdvd/docs/qlmatch/scripts/analyze_coverage_deadtime.py, coverage
+        // rebuilt against the chain's own flash_cov on 266071/266071 cells):
+        //   - DAPHNE has no dead time -- the minimum gap between consecutive
+        //     snippets on a channel is 0.336 us, so a channel is never busy
+        //     when a flash arrives;
+        //   - uncovered channels are QUIETER, not busier: median gap since
+        //     their last snippet 93.8 us vs 54.2 us for covered ones;
+        //   - the self-trigger threshold is ~1 PE (median snippet holds 3.3
+        //     PE, 25% under 0.96 PE).
+        // So silence is a real measurement -- "this channel saw < ~1 PE" --
+        // and dropping it discards an upper limit the prediction must
+        // respect, biasing the fit toward over-prediction.  The ~12% duty
+        // cycle is an EFFECT of there being no light, not an independent
+        // blindness.  Keep the channel: pair with pe_err_nodata so the
+        // measured 0 carries the threshold band rather than a tight error.
+        // Default TRUE = the legacy drop => bit-identical for existing cfgs.
+        bool m_coverage_mask_fit{true};
+
+        // PE_err floor (in PE) applied to readout-uncovered channels when
+        // they stay in the fit (coverage_mask_fit false).  Their measurement
+        // is the upper limit "PE < self-trigger threshold", not "PE == 0 +-
+        // pe_err_floor": at the 0.3 PE default floor a 5 PE over-prediction
+        // on a no-data channel costs the LASSO a pred/0.3 ~ 17 residual and
+        // over-punishes the true match just as the legacy path did.
+        //
+        // SCOPE: this sets Opflash::PE_err, so it always reaches the LASSO
+        // (pe_err = sqrt(PE + PE_err^2)).  It reaches the bundle chi2/KS ONLY
+        // when pe_err_on_pred is false -- with it true, per_opdet_perr
+        // (TimingTPCBundle.cxx:39-45) derives the error from the PREDICTED pe
+        // and ignores the measured one entirely.
+        //
+        // <= 0 => disabled (bit-identical); needs the coverage chain (cov
+        // empty => no-op).  PDVD leaves it unset: pe_err_floor is already 2.0
+        // (with pe_err_knee at the default 1.0) so the LASSO sees +-2 PE,
+        // ~2x the ~1 PE measured threshold, and pe_err_on_pred makes the chi2
+        // price a no-data channel gently on its own.  See doc 14 section 12.
+        double m_pe_err_nodata{-1.0};
 
         // §F bundle-quality thresholds (forwarded to TimingTPCBundle).
         double m_bundle_ks_merge_max{0.2};
@@ -320,6 +562,17 @@ namespace WireCell::Match {
         double m_chi2_pmt_excess{350.0};
         double m_chi2_pmt_ratio{1.3};
         double m_chi2_pmt_inflate{0.5};
+        // Extra chi2 denominator width on a rail-flagged channel, in the same
+        // form as chi2_pmt_inflate: denom += (pe * chi2_sat_inflate)^2.  Unlike
+        // the close_to_PMT widening this is gated on the sat flag ALONE, with no
+        // excess/ratio test -- those fire on measured >> predicted (near-PMT
+        // over-response), the OPPOSITE regime from a clipped channel, so reusing
+        // them here would be a silent no-op.
+        //
+        // Independent of chi2_relax (a railed channel need not be near a PD).
+        // Only bites when saturation_mask_fit is false (a masked channel never
+        // reaches the chi2 loop).  Default 0 = no extra width => bit-identical.
+        double m_chi2_sat_inflate{0.0};
 
         // §H raw readout-window truncation flag (T0-independent, APA-agnostic),
         // always computed. Flags a bundle whose cluster's leading/trailing time
@@ -368,6 +621,19 @@ namespace WireCell::Match {
         // the old path (validated same-binary on PDHD: matching identical with skip on/off).
         bool m_crossside_skip_vis{false};
 
+        // Approximation knob (default OFF): coarsen the per-point visibility loop of
+        // build_bundles for LARGE cluster groups. When vis_sample_stride > 1 and the
+        // group's total point count is >= vis_sample_min_pts, every stride-th point of
+        // each blob is evaluated and weighted by the number of points it stands in for
+        // (min(stride, npoints - i)), so each blob's total charge entering pred_flash
+        // is conserved exactly; the approximation is that the visibility is taken
+        // piecewise-constant over stride-long runs of the blob's point order. At the
+        // default stride 1 the loop body performs the identical FP operations
+        // (bit-identical output). Changes pred_flash on coarsened groups =>
+        // result-changing => jsonnet-togglable and A/B-validated before any enable.
+        int m_vis_sample_stride{1};
+        int m_vis_sample_min_pts{10000};
+
         // Light-pattern over-prediction prefilter (the prototype's fired-fraction
         // reject, FlashTPCBundle.cxx 547-602). Drop a (flash, cluster) bundle BEFORE
         // the chi2 fit when its predicted light is much larger than the measured
@@ -386,6 +652,15 @@ namespace WireCell::Match {
         bool m_reject_overpred{false};
         double m_overpred_total_ratio{1e9};   // R_total ceiling (inert when huge)
         double m_overpred_maxch_ratio{1e9};   // R_max   ceiling (inert when huge)
+        // Channel scope for the two ratios: when non-empty, R_total/R_max are
+        // computed over (overpred_channels ∩ opdet_mask) instead of the full
+        // masked set.  Lets the prefilter judge on one trusted PD family only
+        // (PDVD: cathode XAs — the wall XAs are bimodal and the PMTs
+        // self-trigger-silent ~46% of the time, so their meas~0 would fake
+        // over-prediction on a good bundle).  Empty (default) => legacy full
+        // masked set => bit-identical.
+        std::vector<int> m_overpred_channels;
+        std::vector<char> m_overpred_ch_sel;  // per-channel flag form, built at configure
 
         // §I empty-flash light-quality rescue (the prototype's flash-centric pick,
         // ToyMatching.cxx organize_matched_bundles). The LASSO selects by strength,
@@ -416,6 +691,18 @@ namespace WireCell::Match {
         // ks_max=0 => the gate ks<0 is vacuously false => no-op (doubly inert with the
         // bool guard) so production stays bit-identical; PDHD jsonnet turns it on.
         bool   m_cluster_rescue{false};
+        // Shared-flash-aware rescue variants (doc 19 phase 5; PDVD).  The legacy
+        // rescues above are per-run "empty flash" concepts and are SKIPPED under
+        // shared_flash; these run in the JOINT rounds instead.  empty_rescue_shared:
+        // a flash is empty only when NO drift side has a surviving bundle for it;
+        // the best snapshot candidate ACROSS sides is adopted (same metric/
+        // reassign-only-if-strictly-better/pin-locked rules as §I, same
+        // rescue_metric_max bar).  cluster_rescue_shared: per-run cluster-centric
+        // adoption exactly as §J (ADD-only; a shared flash legitimately holds
+        // bundles of both sides), gated by the same cluster_rescue_* thresholds.
+        // Both default OFF => byte-identical.
+        bool   m_empty_rescue_shared{false};
+        bool   m_cluster_rescue_shared{false};
         double m_cluster_rescue_ks_max{0.0};        // 0 => gate false => inert
         double m_cluster_rescue_chi2ndf_max{0.0};
         double m_cluster_rescue_ratio_lo{0.0};
@@ -430,6 +717,49 @@ namespace WireCell::Match {
         // by the same PE-scale bar, so purity stays bounded. Default OFF (snapshot pool,
         // = the shipped behaviour); PDHD-on.
         bool   m_cluster_rescue_precull{false};
+        // ADDITIVE precull (needs m_cluster_rescue_precull too): try the post-cull
+        // snapshot pool FIRST for each unmatched cluster, and only fall back to the
+        // pre-cull universe for clusters the snapshot cannot rescue. This keeps the
+        // shipped snapshot decision for every cluster it already handles, so the
+        // larger pre-cull pool can only ADD recoveries -- it can never re-decide (and
+        // mis-switch to a wrong flash) a cluster the snapshot rescue got right. In the
+        // many-flash PDVD regime the per-bundle score cannot always tell a track's
+        // true flash from a rival, so pure precull switches a few already-good rescues
+        // to the wrong flash (039252 doc 20); this guard removes that. Default OFF =>
+        // pure precull (the PDHD behaviour) when precull is on.
+        bool   m_cluster_rescue_precull_additive{false};
+        // Relaxed SECOND-CHANCE tier of the cluster rescue (039252 doc 21). The
+        // tight cluster_rescue_* gates sit at the per-bundle recall ceiling in the
+        // many-flash PDVD regime: most remaining non-matches DO have a candidate at
+        // the true flash time, but its light metrics fail the tight bar. This tier
+        // re-offers ONLY the clusters the tight pass left unmatched one more
+        // accept() with these relaxed gates, restricted to LONG clusters
+        // (main-cluster get_length() >= min_length, native units). Additive-only
+        // like the tight pass — it can never alter an existing match — and every
+        // adoption is stamped flag_cluster_rescue_relaxed so scans can treat it as
+        // lower-confidence. Same inert-default scheme as the tight gates: bool off
+        // AND ks_max 0 => vacuously-false gate => byte-identical.
+        bool   m_cluster_rescue_relaxed{false};
+        double m_cluster_rescue_relaxed_ks_max{0.0};
+        double m_cluster_rescue_relaxed_chi2ndf_max{0.0};
+        double m_cluster_rescue_relaxed_ratio_lo{0.0};
+        double m_cluster_rescue_relaxed_ratio_hi{0.0};
+        double m_cluster_rescue_relaxed_min_length{0.0};
+
+        // Saturation-aware ratio-high extension for the rescue gates (doc 23
+        // phase 1b). A DAPHNE-railed channel measures a LOWER BOUND, so when
+        // most of a flash's measured PE sits on saturation-flagged channels
+        // the pred/meas ratio is an overestimate and the ratio-HIGH gate
+        // rejects honest candidates (039252 evt298651 uid33: ks 0.041,
+        // ratio 3.51 vs gate 3.0 on a 100%-railed flash). Excluding railed
+        // channels is NOT viable -- the light lives on them (uid33 clean-
+        // channel ratio ~106 over 18 residual PE). Instead, when the railed
+        // fraction of measured PE exceeds sat_frac_min, both rescue tiers
+        // accept ratio up to ratio_hi * sat_ratio_mult (the low gate and
+        // ks/chi2 are untouched). Default OFF => byte-identical.
+        bool   m_cluster_rescue_sat_ratio_relax{false};
+        double m_cluster_rescue_sat_frac_min{0.5};
+        double m_cluster_rescue_sat_ratio_mult{2.0};
 
         // Bee-op flash gid: when a single global optical flash list is fed to
         // multiple per-side QLMatching nodes (PDHD all-PD light: both drift sides
@@ -443,6 +773,89 @@ namespace WireCell::Match {
         // legacy node-ident gid (byte-identical for SBND per-TPC flashes / single-
         // node configs, whose per-node flash lists are already one-per-side).
         bool   m_opflash_phys_gid{false};
+
+        // Stamp flag_main_cluster on EVERY matched bundle main, not only on the
+        // mains that decompose_cluster_groups actually SPLIT. That function sets
+        // the flag only when a cluster carries an "isolated"/"perblob" array with
+        // both a main (-1) and sub-components, i.e. only for multi-component
+        // groups; a compact single-component match keeps flag_main_cluster=0 and
+        // is therefore invisible to every downstream consumer that iterates
+        // main-flagged clusters (TaggerCheckTGM/STM/FC, the nusel bundle table).
+        // SBND evt286021: the 1.158 us beam-window flash is matched to a 141-point
+        // cluster at 437 PE predicted that no tagger ever evaluates, so the event
+        // reads "no-bundle". Default OFF => byte-identical (the flag set stays the
+        // split-mains-only legacy set).
+        bool   m_flag_matched_mains{false};
+
+        // ---- LM (light-mismatch) tagger (default OFF => byte-identical). ----
+        // prototype (ToyFiducial.cxx check_LM lines 598-660): once the matching is
+        // final, judge each matched bundle's predicted light against the measured
+        // flash by KS shape distance + total-PE normalization; a bundle whose
+        // matched flash its charge cannot explain is a light mismatch (LM) -- the
+        // canonical fake in-beam "nu-candidate" (SBND evt286021 main 8: 8.3 cm /
+        // 141 pt cluster matched to a 2566 PE beam-window flash).
+        //
+        // SBND adaptation (two drift volumes, PDs behind both anodes): the shape
+        // and normalization tests run PER DRIFT SIDE (OpDet x vs the cathode
+        // plane, same convention as flash_phys_side).  A side is judged only when
+        // its predicted PE reaches lm_side_pred_min: the photon library does not
+        // model the small cathode leakage light, so the far (low-prediction)
+        // side's measured PE must not be read as a mismatch.
+        //
+        // Verdict codes follow the prototype: 0 = pass, 1 = low energy
+        // (unjudgeable: prediction and cluster too small AND the flash itself is
+        // dim), 2 = light mismatch.  Unlike the prototype, a bright flash
+        // OVERRIDES the low-energy exemption (owner decision): a tiny-prediction
+        // cluster matched to a >= lm_flash_pe_bright flash is exactly the
+        // mismatch this tagger exists to catch, not "low energy".
+        //
+        // TWO cut regimes, tuned on the MCP2025C 20-event sample (doc 34).  The
+        // healthy long-track population under-predicts systematically (judged-
+        // side log10(pred/meas) median -0.16, 1st percentile -0.99, per-side KS
+        // up to 0.507 on hand-scanned-good crossers), so the LONG regime is
+        // loose: only egregious deficits tag.  The SMALL regime (cluster below
+        // the prototype low-E thresholds but flash bright) is where the fake
+        // in-beam nu-candidates live, and keeps prototype-tight cuts -- a
+        // sub-10 cm cluster physically cannot explain a kilo-PE flash unless
+        // its prediction says so.
+        //
+        // Stamped as cluster scalar "lm_flag" on main + associated clusters in
+        // apply_matched_t0s.  The stamped value is resolved PER FLASH: all of a
+        // flash's matched bundles later merge into one output cluster (MABC
+        // examine_bundles flash-T0 merge), so they all receive the verdict of
+        // the flash's largest-total-predicted-light bundle -- otherwise a
+        // grafted few-PE speck's verdict relabels a clean crosser (evt286021
+        // cluster 16) or demotes a genuine in-beam nu-candidate whose flash is
+        // dominated by a healthy track (evt287825 t=1.41 us, evt288639
+        // t=1.17 us).  Key absent when off => pctree byte-identical; dump_calib
+        // gets per-bundle "lm*" keys with each bundle's OWN verdict (absent
+        // when off).
+        bool   m_lm_tagger{false};
+        double m_lm_pred_pe_min{25.0};             // prototype: total_pred_pe < 25
+        double m_lm_length_min{10 * units::cm};    // prototype: cluster_length < 10 cm
+        double m_lm_flash_pe_bright{1000.0};       // low-E exemption only below this flash PE
+        double m_lm_side_pred_min{25.0};           // judge a side only above this predicted PE
+        double m_lm_ks_max{0.55};                  // LONG regime per-side KS ceiling
+        double m_lm_ks_max_relax{0.70};            // ... when close_to_PMT / at_x_boundary
+        double m_lm_lograt_min{-1.3};              // LONG log10(pred_s/meas_s) floor
+        double m_lm_lograt_min_relax{-1.6};        // ... relaxed
+        double m_lm_lograt_max{2.0};               // over-prediction ceiling (both regimes)
+        double m_lm_small_ks_max{0.45};            // SMALL regime KS ceiling (prototype-tight)
+        double m_lm_small_lograt_min{-0.55};       // SMALL lograt floor (prototype -0.55)
+        // Good-shape guard (both regimes; owner decision, doc 34 round 2): a
+        // bundle whose ONLY failure is the under-prediction floor is NOT a
+        // mismatch when the judged side's light PATTERN agrees -- activity
+        // close to a PMT (and the library's missing near-field / leakage
+        // response) suppresses the predicted STRENGTH but not the shape (SBND
+        // evt285999 t=524.8 us ks 0.20 lograt -0.92; evt286021 t=1485.5 us
+        // close_to_PMT ks 0.08 lograt -1.42).  Rescue requires every norm-
+        // failing judged side to have ks < lm_shape_ks_max AND lograt >=
+        // lm_shape_lograt_min; the true mismatch class keeps bad shape
+        // (evt286021 main 8: ks 0.482) or an absurd deficit (specks at
+        // lograt -2..-3.4).  Never applies to the totals-fallback (no judged
+        // side => no shape to trust) nor to over-prediction failures.
+        double m_lm_shape_ks_max{0.25};            // "pattern agrees" KS ceiling
+        double m_lm_shape_lograt_min{-1.8};        // deficit still explainable floor
 
         // Per-PMT non-linearity correction applied to the predicted PE total (study-grade,
         // scintillation-profile-dependent; see sbnd_xin/pmt_nonlinearity_curve.py and
@@ -523,8 +936,39 @@ namespace WireCell::Match {
         mutable std::unordered_map<const WireCell::Clus::Facade::Cluster*, uint8_t>
             m_wall_flag_cache;
 
+        // Per-cluster cache of the flash-independent part of the
+        // compute_endpoint_flags slice scan: the raw min/max slice ticks of the
+        // window-truncation block, and per (non-empty, with-3d-points) slice the
+        // raw first-point x plus blob/point/charge tallies, in time_blob_map
+        // traversal order (pre-sort).  The per-flash drift coordinate is an
+        // affine shift of x0, recomputed per call with the identical FP ops, so
+        // results are bit-identical while the O(nslices) map walk and the
+        // per-slice Blob::points() fetch run once per cluster instead of once
+        // per (flash x group).  Keyed lookup only (never iterated); cleared each
+        // event in operator() alongside m_extreme_cache.
+        struct EndpointSliceCache {
+            bool have_ticks{false};
+            int min_tick{0}, max_tick{0};
+            struct SliceRaw { double x0; int nblobs; int npts; double q; };
+            std::vector<SliceRaw> slices;
+        };
+        mutable std::unordered_map<const WireCell::Clus::Facade::Cluster*, EndpointSliceCache>
+            m_endpoint_slice_cache;
+
         std::string m_inpath{"pointtrees/%d"};
         std::string m_outpath{"pointtrees/%d"};
+        // Realign each recomposed main's node-local "perblob" dataset rows to
+        // the post-merge blob child order (doc 52 §12).  Default TRUE (owner
+        // decision 2026-07-25, doc 52 §12.8): leaving the arrays in their
+        // pre-decompose row order silently detaches every per-blob array from
+        // the blob it describes -- including the always-written "isolated" cc
+        // that the all-APA examine_bundles main-overlap vote consumes.
+        // VESTIGIAL since doc 52 §13 (option 2): the Grouping primitives now
+        // enforce the invariant themselves (separate() carves, merge()
+        // concatenates), byte-identically to the realign this used to gate.
+        // Kept only so existing configs keep compiling; false no longer
+        // reproduces the historical misaligned behavior.
+        bool m_realign_perblob{true};
         float m_cluster_t0{-1e12};
 
         // Hand-scan calibration dump. When non-empty, after all per-APA runs
@@ -586,6 +1030,139 @@ namespace WireCell::Match {
         bool   m_xtpc_joint_pin{false};
         double m_xtpc_pin_angle{20.0};            // degrees, folded track-axis collinearity
 
+        // Cross-TPC CATHODE RESCUE (off unless xtpc_cathode_tol > 0; needs xtpc_flag +
+        // 2 sides to ever confirm anything). Motivation: a genuine cathode crosser
+        // whose two halves meet a few cm off the nominal cathode plane fails BOTH
+        // admission gates at once -- the overshooting half fails containment
+        // (require_containment drops the bundle at build), and the short half misses
+        // the at_cathode window so it never gets flag_at_x_boundary and never enters
+        // cull_cross_tpc's candidate set. The pair the xtpc joint-pin exists for is
+        // then invisible to it (PDVD 039252 evt298567 top-97 + bot-139 vs flash 96:
+        // ends agree to 0.4 cm but meet ~3.5 cm below the cathode face; see
+        // wcp-porting-img/pdvd/docs/qlmatch/16_pdvd-clus97-crosser-evt298567.md §10).
+        // Mechanism, all gated on m_xtpc_cathode_tol > 0 (flat-cathode window only,
+        // never when m_cathode_fv is configured):
+        //  - a bundle failing containment ONLY by cathode overshoot is kept
+        //    PROVISIONALLY when its junk-tolerant cathode endpoint (the deepest slice
+        //    that cannot be discarded within a charge budget of m_xtpc_cathode_qfrac
+        //    of the cluster charge, walking from the deep end; qfrac<=0 => the raw
+        //    endpoint) lies within m_xtpc_cathode_tol past the containment gate;
+        //  - a CONTAINED bundle whose cathode end sits within m_xtpc_cathode_tol
+        //    BELOW the at_cathode window gets xtpc candidate admission only
+        //    (flag_xtpc_cathode_cand, NOT flag_at_x_boundary -- that flag also feeds
+        //    the ladder/cross-side/LASSO-weight paths, which stay legacy);
+        //  - cull_cross_tpc admits candidates by the new flag, but never confirms two
+        //    provisional (uncontained) halves with each other;
+        //  - after cull_cross_tpc, provisional bundles WITHOUT a scenario-1
+        //    confirmation are purged (purge_unconfirmed_cathode_rescue), BEFORE
+        //    cull_inconsistent/fit -- downstream then sees exactly the legacy set.
+        // So the tolerance is only ever exercised for a pair the existing scenario-1 /
+        // joint-pin geometry independently confirms (opposite-volume partner on the
+        // SAME flash, clouds meeting within xtpc_dmax at the cathode). Default 0 =>
+        // no flag is ever set, no bundle is kept or removed => byte-identical.
+        double m_xtpc_cathode_tol{0.0};           // length; 0 = off
+        double m_xtpc_cathode_qfrac{0.0};         // charge fraction discardable as junk
+
+        // -------- xtpc / selection quality gates (039252 scan tuning, doc 19) ----------
+        // All default to the legacy behaviour => byte-identical when unset.
+        //
+        // Pin strength floor: a pinned crosser half is exempt from the LASSO
+        // strength-cutoff prune ("the pin ignores light by design").  The 18-evt
+        // hand/AI scan showed that exemption is the pin path's phantom source:
+        // phantom pins have median strength 0.00 while agreed pins sit at p10
+        // 0.88.  When > 0, a pinned bundle whose solution <= this floor LOSES the
+        // exemption (pruned like any bundle; its cluster can then be rescued or
+        // stay unmatched).  0 (default) = pins always exempt.
+        double m_xtpc_pin_min_strength{0.0};
+        // Scenario-1/xtpc-consistent light gate: legacy sets the xtpc flags on
+        // both halves from GEOMETRY alone, at every coincident flash whose T0
+        // offset makes the halves touch -- junk bundles then monopolize
+        // cull_inconsistent's xtpc tiers (scan: sc1 phantoms ks p50 0.40 /
+        // chi2/ndf p50 76 vs agrees 0.17 / 1.3).  When on, a bundle acquires
+        // flag_xtpc_consistent / flag_xtpc_scenario1 only if its own light
+        // passes (ks <= sc1_ks_max AND chi2/ndf <= sc1_c2n_max).  The joint-pin
+        // candidacy itself is untouched (see pin_min_strength above).
+        bool   m_xtpc_sc1_light_gate{false};
+        double m_xtpc_sc1_ks_max{0.3};
+        double m_xtpc_sc1_c2n_max{50.0};
+        // Cathode-rescue ks ceiling: purge_unconfirmed_cathode_rescue keeps a
+        // provisional overshoot bundle on scenario-1 confirmation alone; scan
+        // shows those survivors at 69% phantom (ks p50 0.435 vs agrees 0.20).
+        // When > 0 a confirmed-but-dim bundle (ks > ceiling) is purged too.
+        double m_xtpc_cathode_ks_max{0.0};
+        // Joint-pin counts as cross-volume confirmation in the cathode-rescue
+        // purge (pdvd doc 27): the greedy pin (:4287) binds a
+        // direction-confirmed collinear pair (d < dmax) to its best-light
+        // coincident flash -- topologically stronger evidence than the
+        // sc1_light_gate'd scenario-1 flag, whose per-half ks ceiling was
+        // tuned as a junk-steering filter on ALREADY-CONTAINED bundles and
+        // guillotines genuine truncated-pattern crosser halves (ks 0.4-0.6)
+        // once the offset-0 frame routes formerly-contained cathode touchers
+        // through the provisional rescue (039252 evt298581 cluster 182).  A
+        // pin-confirmed keep is exempt from the cathode ks ceiling above.
+        // Default false => purge behaviour byte-identical.
+        bool   m_xtpc_pin_confirms_rescue{false};
+        // Solo (single-volume) cathode rescue (pdvd doc 27): keep a
+        // provisional cathode-overshoot bundle WITHOUT cross-volume
+        // confirmation when its own light is good (ks <= solo_ks AND, if
+        // solo_c2n > 0, chi2/ndf <= solo_c2n).  Single-volume cathode
+        // touchers (stopping tracks) have no xtpc partner, so at the
+        // offset-0 frame they drop from candidacy entirely once past the
+        // ceiling; scan forensics separates them cleanly from junk by light
+        // quality (recovered ks 0.03-0.29 vs phantom c2n 48-377 / ks 0.41).
+        // solo_ks 0 (default) => branch off => purge byte-identical.
+        double m_cathode_rescue_solo_ks{0.0};
+        double m_cathode_rescue_solo_c2n{0.0};
+        // Scenario-1 eviction ks margin (pdvd doc 27): cull_inconsistent's
+        // sc1-priority branch evicts ALL non-sc1 rivals of a cluster -- at
+        // the offset-0 frame spurious sc1 pairings (junk partner within
+        // dmax at the cathode) hijack clusters whose scan-endorsed
+        // high-consistent match has clearly BETTER light (truth ks
+        // 0.03-0.09 evicted by sc1 rivals ks 0.12-0.24).  When >= 0, a
+        // high-consistent rival is spared the eviction if the cluster's
+        // best sc1 ks is worse than rival_ks + margin, and competes in the
+        // LASSO instead (the scenario-2 precedent).  Default -1 = evict
+        // unconditionally = byte-identical.
+        double m_sc1_evict_ks_margin{-1.0};
+        // Post-fit cull of UNFLAGGED low-quality selections: a selected bundle
+        // carrying no quality flag (not consistent / xtpc_consistent /
+        // scenario1 / pin) survived on LASSO strength alone -- the largest
+        // phantom bucket (103/147 = 70% phantom; ks p50 0.35, chi2/ndf p50 27
+        // vs agrees 0.18 / 3.3).  When on, such a bundle is removed from the
+        // matched output if ks > postcull_ks_max OR chi2/ndf > postcull_c2n_max
+        // (cut 0.30/20 kills 72/92 flagged-phantoms at a cost of 8/40 agrees).
+        bool   m_postcull_unflagged{false};
+        double m_postcull_ks_max{0.30};
+        double m_postcull_c2n_max{20.0};
+        // Window-truncated overprediction cull (doc 23 phase 2): remove a
+        // selected bundle flagged window_truncated whose total pred/meas
+        // ratio exceeds the ceiling -- the dominant clean phantom signature
+        // (039252 scan comparison: wtrunc phantoms ratio p90 11.3 vs 1.5 for
+        // agreed wtrunc matches; ceiling 2.0 kills 14 phantoms / 0 agreed in
+        // the offline replay). Applies regardless of the high-consistent
+        // flag; xtpc pin/scenario-1 protected; flashes whose railed channels
+        // carry more than wtrunc_sat_frac of the measured PE are exempt
+        // (right-censored measurement). Default OFF => bit-identical.
+        bool   m_postcull_wtrunc_overpred{false};
+        double m_postcull_wtrunc_ratio_hi{2.0};
+        double m_postcull_wtrunc_sat_frac{0.5};
+        // xtpc-pin overprediction cull (doc 23 phase 2, same round): a pinned
+        // crosser half whose total pred/meas exceeds the ceiling is 30%
+        // phantom in the scan record (agree pins p90 1.4); ratio-ONLY -- a ks
+        // gate on pins is catastrophic (geometric pins legitimately carry bad
+        // ks, that is why they were pinned). Same sat-dominated exemption as
+        // the wtrunc branch (shared postcull_wtrunc_sat_frac). Default OFF.
+        bool   m_postcull_pin_overpred{false};
+        double m_postcull_pin_ratio_hi{2.0};
+        // Rescue blind-spot fix (doc 23 phase 1a): run the unflagged
+        // low-quality cull BEFORE the §I/§J rescues (extra early pass; the
+        // legacy post-rescue call stays).  Without it a strength-selected but
+        // postcull-doomed bundle still counts as "matched" during the rescues,
+        // making its cluster off-limits even when a gate-passing candidate at
+        // the true flash exists (039252: 4 such long clusters).  Only
+        // meaningful with postcull_unflagged; default OFF = bit-identical.
+        bool   m_postcull_before_rescue{false};
+
         // Path to the JSON file holding VUVHits, VISHits, geometry and the
         // SBND OpDet array.
         std::string m_semimodel_file{"sbnd/photodet/semi-analytical-sbnd.json"};
@@ -605,6 +1182,14 @@ namespace WireCell::Match {
         std::string m_light_model{"semi"};
         std::string m_photon_library_file{""};
         std::unique_ptr<PhotonLibraryModel> m_lib_model;
+        // Cross-check tolerance (cm) between the library's own optional
+        // per-channel chan_pos_cm and m_opdets[i].center, at configure time.
+        // Only exercised when the library file actually carries chan_pos_cm
+        // (older/hand-written files without it skip the check silently, so
+        // this is not a new requirement on existing files) -- catches a
+        // channel-order mismatch between the library export and the OpDet
+        // table that the bare nchan==nopdets count check cannot.
+        double m_photon_library_pos_tol{5.0};
 
         // Per-OpDet table (type + position) loaded from semimodel_file. Used to
         // build the SemiAnalyticalModel and, at execute() time, to derive the
@@ -762,7 +1347,17 @@ namespace WireCell::Match {
                                        WireCell::Clus::Facade::Cluster* main_cluster,
                                        double flash_x_offset, const ApaRun& run) const;
         void build_bundle_maps(ApaRun& run);         // flash/cluster/pair maps + deterministic sort
+        // xtpc cathode rescue resolution (m_xtpc_cathode_tol > 0 only): drop
+        // provisional cathode-overshoot bundles that cull_cross_tpc did not confirm
+        // as scenario-1 crosser halves; stamp survivors contained. Runs between
+        // cull_cross_tpc and cull_inconsistent.
+        void purge_unconfirmed_cathode_rescue(ApaRun& run);
         void cull_inconsistent(ApaRun& run);         // drop non-consistent rivals               [Stage 1]
+        // Pin exemption from the strength-cutoff prune, with the optional
+        // m_xtpc_pin_min_strength floor (doc 19); 0 => legacy always-exempt.
+        bool pin_exempt(const TimingTPCBundle* b, double strength) const;
+        // Post-fit cull of unflagged low-quality selections (m_postcull_unflagged).
+        void cull_unflagged_lowquality(ApaRun& run);
         void fit_round1(ApaRun& run);                // LASSO, per-flash background DOF           [Stage 2]
         void fit_round2(ApaRun& run);                // LASSO + KS-shape, keep best per cluster   [Stage 3]
 
@@ -780,6 +1375,31 @@ namespace WireCell::Match {
         // weight), else 1.0. Multiplies the pe-mismatch (+KS) base in both rounds.
         double lasso_flag_factor(const TimingTPCBundle::pointer& bundle) const;
 
+        // Beam-window preference test (m_beam_pref; see the §C knob block above):
+        // true iff the knob is on and the flash time lies inside
+        // (m_beam_pref_tlow, m_beam_pref_thigh). Knob off => always false.
+        bool in_beam_pref_window(const Opflash* f) const
+        {
+            if (!m_beam_pref || !f) return false;
+            const double t = f->get_time();
+            return t > m_beam_pref_tlow && t < m_beam_pref_thigh;
+        }
+        // Bundle-level test adds the quality gate (m_beam_pref_max_ks /
+        // m_beam_pref_min_pred_frac): only a bundle that could plausibly BE the
+        // beam match is preferred; junk bundles of a beam-window flash keep the
+        // un-preferred behavior (see the §C knob block).
+        bool in_beam_pref_window(const TimingTPCBundle::pointer& bundle) const
+        {
+            const auto* f = bundle->get_flash();
+            if (!in_beam_pref_window(f)) return false;
+            if (bundle->get_ks_dis() > m_beam_pref_max_ks) return false;
+            const double meas = f->get_total_PE();
+            if (meas > 0 && bundle->get_total_pred_light() < m_beam_pref_min_pred_frac * meas) {
+                return false;
+            }
+            return true;
+        }
+
         // Empty-flash light-quality rescue (m_empty_rescue; see §I). snapshot is the
         // full pre-strength-cutoff flash->candidate map; this mutates run.flash_bundles_map
         // in place, adopting the best light-quality candidate of each emptied flash.
@@ -791,8 +1411,31 @@ namespace WireCell::Match {
         // onto an already-non-empty flash. snapshot is the same pre-strength-cutoff
         // flash->candidate map; this mutates run.flash_bundles_map in place.
         void rescue_unmatched_clusters(ApaRun& run, const FlashBundlesMap& snapshot);
+        // Shared-flash empty-flash rescue (m_empty_rescue_shared): joint emptiness
+        // across all runs, best candidate across sides; mutates the owning run's
+        // flash_bundles_map.
+        void rescue_empty_flashes_shared(std::vector<ApaRun>& runs);
         void apply_matched_t0s(ApaRun& run);         // write cluster t0 / flash / matched gid
+        // LM verdict stamping (m_lm_tagger only): one verdict per +-80 ns
+        // flash GROUP across all runs (the MABC flash-T0 merge unit), from the
+        // group's largest-total-predicted-light bundle. See the .cxx comment.
+        void apply_lm_verdicts(std::vector<ApaRun>& runs);
         void write_opflash_pc(ApaRun& run);          // merge-safe per-root "opflash" PC
+
+        // LM (light-mismatch) verdict for one bundle (m_lm_tagger; see the knob
+        // block above). Pure function of the bundle's flash / prediction /
+        // opdet_mask / flags and the main cluster's uvwt length; never touches
+        // the matching. verdict: 0 = pass, 1 = low energy, 2 = light mismatch;
+        // ks/pred/meas are the per-drift-side metrics (ks = -1 when a side has
+        // no judgeable shape).
+        struct LMResult {
+            int verdict{0};
+            double ks[2]{-1.0, -1.0};
+            double pred[2]{0.0, 0.0};
+            double meas[2]{0.0, 0.0};
+            double length{0.0};
+        };
+        LMResult check_light_mismatch(TimingTPCBundle* bundle) const;
 
         // Physical drift side (0 = low-x, 1 = high-x of the cathode) of a flash,
         // from where its measured light actually sits. When m_opflash_phys_gid is
@@ -833,13 +1476,30 @@ namespace WireCell::Match {
             double off, dy, dz;
             bool wt;
         };
+        // Raw-coordinate (T0-independent) bounding boxes of one cluster's 3D points:
+        // the whole-cluster box plus per-chunk boxes over runs of XTPC_CHUNK
+        // consecutive points, used by xtpc_pair_consistent to prune its brute-force
+        // closest-approach loop against the running best distance. Pruning only
+        // skips point pairs that cannot strictly improve the minimum, and the
+        // iteration order of the surviving pairs is the legacy row-major order, so
+        // the closest pair (value AND argmin/tie-break) is bit-identical.
+        static constexpr int XTPC_CHUNK = 256;
+        struct XtpcBoxes {
+            std::array<double, 6> whole;                 // {xlo,xhi,ylo,yhi,zlo,zhi}
+            std::vector<std::array<double, 6>> chunks;   // per XTPC_CHUNK-point run
+        };
+        static XtpcBoxes xtpc_boxes(const WireCell::Clus::Facade::Cluster* c);
+
         // d_out (closest approach) and pin_collinear_out (scenario 1 AND the combined
         // local/global track-axis collinearity test for xtpc_joint_pin) are optional
         // outputs; the global-axis test is computed only when m_xtpc_joint_pin (off-path
-        // unchanged). The scenario return value is unchanged.
+        // unchanged). The scenario return value is unchanged. bx0/bx1 (optional) enable
+        // the box-pruned closest-approach path; null falls back to the plain loop.
         int xtpc_pair_consistent(const XtpcMC& m0, const XtpcMC& m1,
                                  double* d_out = nullptr,
-                                 bool* pin_collinear_out = nullptr) const;
+                                 bool* pin_collinear_out = nullptr,
+                                 const XtpcBoxes* bx0 = nullptr,
+                                 const XtpcBoxes* bx1 = nullptr) const;
 
         // Deterministic iteration orders over the bundle maps (pointer-keyed maps
         // would otherwise iterate in heap-address order). Static: no this-state.

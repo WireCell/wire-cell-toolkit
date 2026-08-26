@@ -158,16 +158,60 @@ private:
         // Skip if all blobs belong to a single component
         if (std::set<int>(cc_vec.begin(), cc_vec.end()).size() < 2) return;
 
+        // Snapshot the per-blob PC before the blobs move away.
+        // separate(remove=false) leaves the retained cluster holding its
+        // full-length "perblob" Dataset over a now-shorter blob list, and the
+        // split pieces with none -- both break the row-i == child-i invariant
+        // (doc 52 §13).  Re-carve it per part, exactly as
+        // ClusteringUnmergeBundle does.
+        const size_t nb = cc_vec.size();
+        PointCloud::Dataset perblob;
+        bool have_perblob = false;
+        {
+            auto& lpcs = cluster->value().local_pcs();
+            auto it = lpcs.find(m_pcarray_name);
+            if (it != lpcs.end()) {
+                if (it->second.size_major() == nb) {
+                    perblob = it->second;  // copy
+                    have_perblob = true;
+                }
+                else {
+                    log->warn("cluster {}: '{}' has {} rows for {} blobs, dropping it",
+                              cluster->ident(), m_pcarray_name,
+                              it->second.size_major(), nb);
+                }
+            }
+        }
+
         // Perform the separation
         const int main_cluster_id = cluster->ident();
         auto splits = grouping.separate(cluster, cc_vec);
         cluster->set_flag(Flags::main_cluster);
+
+        auto carve = [&](Cluster* part, int want) {
+            auto& lpcs = part->value().local_pcs();
+            lpcs.erase(m_pcarray_name);
+            if (!have_perblob) return;
+            std::vector<size_t> rows;
+            rows.reserve(nb);
+            for (size_t i = 0; i < nb; ++i) {
+                if (cc_vec[i] == want) rows.push_back(i);
+            }
+            if (rows.size() != (size_t) part->nchildren()) {
+                log->warn("cluster {}: carved {} rows for {} blobs, dropping '{}'",
+                          part->ident(), rows.size(), part->nchildren(), m_pcarray_name);
+                return;
+            }
+            lpcs[m_pcarray_name] = perblob.subset(rows);
+        };
+        carve(cluster, -1);
 
         int sub_id = 1;
         for (auto& [id, new_cluster] : splits) {
             new_cluster->set_ident(main_cluster_id * 100 + sub_id);
             ++sub_id;
             new_cluster->set_flag(Flags::associated_cluster);
+            carve(new_cluster, id);
         }
     }
 };

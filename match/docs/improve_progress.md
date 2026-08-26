@@ -62,6 +62,32 @@ knobs are now signed **cushions** (`anode_ext1/ext2`, `cathode_ext1/ext2`,
 ±2000/0–5000 literals (the inclusion window widens by the cushions); validated
 physics-neutral first (below), then shipped at the MicroBooNE defaults.
 
+`anode_ext1_margin` (default `1.0 cm`) is the extra tolerance subtracted *below*
+`anode_ext1` to form the anode-side floor. It gates **two coupled tests** in
+`compute_endpoint_flags()`, deliberately at the same bound: the containment gate
+(`first_u > anode_ext1 − margin`, whose value `require_containment` acts on) and the
+anode flag-window inner edge (which sets `flag_at_x_boundary` / `flag_close_to_PMT`).
+Tying them is required for coherence — a cluster admitted by the slack must still
+acquire the boundary flags, else it would be a candidate that has silently dropped
+its T0-crosser constraint. Widening moves the floor outward only (the flag window's
+outer edge stays `anode_ext2`), so it cannot re-flag anode-*short* ends. The
+prototype hard-codes the `1.0 cm` (`ProtectOverClustering.cxx:296`); the knob keeps
+that as the C++ default, so an omitted key is byte-identical. It does **not** touch
+the PE-inclusion window or the end-trim walk, which read `anode_ext1` directly —
+that separation is the reason a new knob was added rather than moving `anode_ext1`.
+
+PDVD production sets `2.0 cm` (floor −2 → −4 cm) via `run_clus_evt.sh`
+(`PDVD_QL_ANODE_MARGIN_CM`). Motivation: the PDVD 2 cm anode pull
+(`PDVD_QL_EXTRA_OFFSET_US=13.507`, adopted to rescue *cathode*-limited crossers)
+pushes an *anode*-limited full-gap crosser the other way. In run 039252 evt 298567
+cluster `top:22` spans 100% of the drift gap, so its admissible flash-time window is
+only ~33 µs; under the correct (274.4 µs, 19900 PE) flash its anode end sits at
+`first_u = −3.50 cm`, missing the old −3.0 floor by **0.501 cm**. The prefilter
+therefore deleted the correct flash from its pool and the cluster was matched to the
+neighbouring 244.0 µs flash, leaving the bright 274.4 µs flash with zero clusters.
+At floor −4 cm the cluster matches 274.4 µs and the flash is no longer orphaned.
+See `wcp-porting-img/pdvd/docs/qlport/pdvd-cathode-containment-flash-demotion.md` §11.
+
 The three boundary flags (`flag_close_to_PMT`, `flag_at_x_boundary`,
 `flag_spec_end`) are now **filled** by `compute_endpoint_flags()` — a faithful port
 of the prototype end-trimming walk over `time_blob_map()` — replacing the §D6 buggy

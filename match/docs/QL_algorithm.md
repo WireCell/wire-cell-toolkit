@@ -360,6 +360,10 @@ are the structural obstacles, roughly in order of how deep they cut.
    (`:233`), and the x correction `x += sign_offset * time * drift_speed` (`:245`) assumes all
    charge drifts the same way. Charge on the two sides of the cathode drifts in opposite
    directions; a joint correction must apply the correct sign per point/sub‑cluster.
+   *(Update: the toolkit `QLMatching` joint node resolves the sign per input port via
+   `run.sign_offset`, and since the `drift_speeds` knob the speed MAGNITUDE is also per
+   input port — `drift_speed_for(run.input_idx)`, empty ⇒ the single scalar,
+   bit-identical. See `qlmatching-code.md`.)*
 
 **Implication.** A genuine two‑TPC joint match is not a small tweak to `QLMatching`. It needs,
 upstream, clusters that can be associated across the cathode (or a dual‑anode matching

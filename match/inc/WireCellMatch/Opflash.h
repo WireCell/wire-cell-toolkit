@@ -16,6 +16,11 @@ namespace WireCell::Match {
         double floor = 0.3;  // PE_err for sub-knee channels
         double frac  = 0.3;  // fractional PE_err for channels at/above knee
         double knee  = 1.0;  // PE level (in PE) separating the two regimes
+        // Optional per-channel overrides (QLMatching pe_err_family_* knob,
+        // resolved to length-nchan arrays; -1 entry => scalar value above).
+        // Both empty (default) => the scalar rule, byte-identical.
+        std::vector<double> ch_floor;
+        std::vector<double> ch_frac;
     };
 
     /// The matcher's per-flash working object: a thin adapter over the canonical
@@ -61,6 +66,31 @@ namespace WireCell::Match {
         double get_high_time()    const { return high_time; }
         int    get_num_channels() const { return m_nchan; }
         double get_threshold()    const { return m_threshold; }
+        /// Per-flash per-channel saturation flag (DAPHNE rail overlap),
+        /// carried on the light-PC "error" field by FlashTensorToOpticalPCs.
+        /// All-zero unless the light chain ran with OpHitFinder
+        /// flag_saturation; consumed by QLMatching use_saturation_flag.
+        bool   get_sat(int ch)    const { return ch >= 0 && ch < (int)sat.size() && sat[ch]; }
+        /// Per-flash per-channel readout-coverage fraction (self-trigger
+        /// snippet livetime over this flash's window), carried on the
+        /// sparse "flashcov" PC by FlashTensorToOpticalPCs.  1.0 when the
+        /// PC is absent (legacy archives / full-stream channels); consumed
+        /// by QLMatching use_coverage_flag.
+        double get_cov(int ch)    const {
+            if (cov.empty() || ch < 0 || ch >= (int)cov.size()) return 1.0;
+            return cov[ch];
+        }
+
+        /// Widen PE_err to at least `err` on channels this flash never read
+        /// out (get_cov < cov_min).  Such a channel measured "PE < the
+        /// self-trigger threshold" (~1 PE on PDVD DAPHNE), not "PE == 0" to
+        /// the tight PEErr floor.  Call after construction (the ctor fills
+        /// cov after init() synthesizes PE_err).  Reaches the LASSO always;
+        /// reaches the bundle chi2 only when pe_err_on_pred is off (else
+        /// TimingTPCBundle derives the error from the predicted pe instead).
+        /// No-op when err <= 0 or the light chain carried no coverage =>
+        /// bit-identical by default.
+        void inflate_nodata_err(double err, double cov_min);
 
     private:
         // Shared ctor body: fills PE/PE_err/total_PE/fired from a per-channel
@@ -82,6 +112,8 @@ namespace WireCell::Match {
         std::vector<int>    fired_channels;
         std::vector<double> PE;
         std::vector<double> PE_err;
+        std::vector<unsigned char> sat;  // per-channel saturation flags (empty = none)
+        std::vector<float> cov;          // per-channel coverage fractions (empty = all 1)
     };
 
     struct OpFlashCompare {

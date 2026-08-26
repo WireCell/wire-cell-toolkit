@@ -49,6 +49,15 @@ function(params, tools, override = {}) {
                // false => key omitted => scalar r_break_roi_loop applies =>
                // byte-identical.
                w_col_break_roi_tune=true,
+               // Per-side collection-plane SP time offset (ctoffset).  The
+               // BDE (bottom, ident 0..3) and TDE (top, ident 4..7) crates
+               // have independent readout time bases; a per-crate value lets
+               // the reconstructed anode edge be centred separately.  Both
+               // default to the legacy 4 us => compiled config byte-identical
+               // when unchanged.  See pdvd/docs/qlmatch/
+               // pdvd-anode-time-consistency.md (anode-stop ensemble).
+               ctoffset_b=4*wc.microsecond,
+               ctoffset_t=4*wc.microsecond,
                dump_rawdecon=false)::
     // Top (_t) vs bottom (_b) anode filter suffix.  Bottom = ident 0..3,
     // top = ident 4..7.  See sp-filters.jsonnet for the registered names.
@@ -115,7 +124,7 @@ function(params, tools, override = {}) {
                              'Wire_col'       + sfx],
       ftoffset: 0.0, // default 0.0
       // ctoffset: 1.0*wc.microsecond, // default -8.0
-      ctoffset: 4*wc.microsecond, //consistent with FR: protodunevd_FR_imbalance3p_260501.json.bz2
+      ctoffset: if anode.data.ident < 4 then ctoffset_b else ctoffset_t, // per-side; both default 4us (byte-identical). consistent with FR: protodunevd_FR_imbalance3p_260501.json.bz2
       per_chan_resp: pc.name,
       fft_flag: 0,  // 1 is faster but higher memory, 0 is slightly slower but lower memory
       postgain: 1.0,  // default 1.2

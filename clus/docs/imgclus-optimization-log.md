@@ -1481,6 +1481,51 @@ levers) and item 7 (per-APA threading) remain documented-only.
 Cumulative imaging hd-max since round-4 close: 284→233 s wall,
 6190→3077 MB RSS.
 
+## Round 9 (2026-07-10): perf-campaign Tier-3 — LASSO Fit off the hd-max critical path
+
+Re-profile of hd-max (027305/0) anode 0 at HEAD, solo, tcmalloc profiler,
+`-d off` chain: **88 s wall (harness), `LassoModel::Fit` 32.4 % cumulative**
+(line profile: coordinate-descent inner loop ~22 %, dense Gram
+`X.col(i).dot(X.col(j))` ~14 % incl. Eigen redux) — round 7's item 4 picture,
+slightly sharpened by rounds 8's other wins.  Both halves fell to
+bit-identical fixes; the knob-gated restructure round 7 anticipated is moot.
+
+### 36. Coordinate descent skips exact-zero betas (bit-identical)
+
+`beta(j) -= it.value() * beta(it.row())` now skips terms whose
+`beta(it.row())` is exactly 0 (the guard the original prototype carried as a
+comment).  Zero betas here are always `+0.0` (`VectorXd::Zero` init or the
+literal-0 soft-threshold return), so the skipped term is `value * ±0.0 = ±0.0`
+and `x -= +0.0` is a bitwise no-op; after the first sweeps the LASSO support
+is sparse, so most inner-loop terms vanish.  hd-max a0 **88 → 78 s** (−11 %);
+descent line samples 4.7 k → ~0.5 k.
+
+### 37. Dense Gram build enumerates only support-overlapping column pairs (bit-identical)
+
+For sparse `X` (the imaging response; the QL dense path too), a column pair
+with disjoint row support has a dense dot of exactly `±0.0`, which the
+existing `value != 0` guard already discarded.  The `xnnz` probe (entry 34)
+now also records per-column supports; a row→columns adjacency enumerates the
+`j > i` partners with overlap and the **unchanged** Eigen dense dot runs on
+just those pairs — identical triplets, identical `XdX`, identical fit.  Dense
+`X` (`dense_X`, entry 34's detector) keeps the plain double loop.  hd-max a0
+**78 → 71 s**; Gram no longer visible in the top profile.
+
+### Round-9 closing
+
+hd-max a0 **88 → 71 s (−19 %)**; full event 144 → 121 s across the four
+anodes (a1 36→31 s, a2/a3 unchanged).  Gates: 8/8 cluster archives
+canonically identical (permutation-invariant `cmp_cluster_tars.py`, vs a
+same-day rebuilt pre-change binary), and QLMatching run-29107 evt-1015
+matching zips byte-identical (the descent loop is shared with the QL
+`sparse_lasso` path).  Post-change attribution: `LassoModel::Fit` 32.4 → 15.1 %
+cum; the top of the profile is now the `setS` cluster-graph churn
+(Rb-tree ops + allocator ≈ 30 %, the round-8 do-not-retry item), BlobShadow
+scan 2.5 %, BZ2 input 2.4 %.  **Decision: the round-7 item-4 knob-gated LASSO
+restructure (active-set pruning / warm starts / SpGEMM) is dropped** — its
+ceiling is now ≤15 % of the worst anode against a physics-validation cost that
+was justified only when Fit was a third of the job.
+
 ## Phase-2 profiling findings (PDHD/PDVD-specific)
 
 CPU profile of the pathological anode (hd-busy 028084/18 anode2, 465 s solo;

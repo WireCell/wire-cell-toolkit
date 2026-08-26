@@ -48,6 +48,16 @@ Configuration Bee::Points::asJson() const
     auto& jq = data["q"] = Json::arrayValue;
     auto& jc = data["cluster_id"] = Json::arrayValue;
     auto& jr = data["real_cluster_id"] = Json::arrayValue;
+    // Optional per-point extras (see the extended append): energy and the
+    // neutrino-interaction index.  Only emitted when they were populated for
+    // every point, so existing point clouds are unchanged.
+    const bool extra = m_has_extra && m_e.size() == m_x.size();
+    Json::Value* je = nullptr;
+    Json::Value* jn = nullptr;
+    if (extra) {
+        je = &(data["e"] = Json::arrayValue);
+        jn = &(data["nu_idx"] = Json::arrayValue);
+    }
     const size_t num = m_q.size();
     for (size_t ind = 0; ind < num; ++ind) {
         jx.append(m_x[ind]);
@@ -56,6 +66,10 @@ Configuration Bee::Points::asJson() const
         jq.append(m_q[ind]);
         jc.append(m_clid[ind]);
         jr.append(m_real_clid[ind]);
+        if (extra) {
+            je->append(m_e[ind]);
+            jn->append(m_nu_idx[ind]);
+        }
     }
     return data;
 }
@@ -95,6 +109,9 @@ void Bee::Points::reset(int evt, int sub, int run)
     m_q.clear();
     m_clid.clear();
     m_real_clid.clear();
+    m_e.clear();
+    m_nu_idx.clear();
+    m_has_extra = false;
 }
 
 std::vector<int> Bee::Points::rse() const
@@ -119,6 +136,15 @@ void Bee::Points::append(const Point& p, double q, int clid, int real_clid)
     m_real_clid.push_back(real_clid);
 }
 
+void Bee::Points::append(const Point& p, double q, int clid, int real_clid,
+                         double e, int nu_idx)
+{
+    append(p, q, clid, real_clid);
+    m_e.push_back(e);
+    m_nu_idx.push_back(nu_idx);
+    m_has_extra = true;
+}
+
 void Bee::Points::append(const Bee::Points& obj)
 {
     m_x.insert(m_x.end(), obj.m_x.begin(), obj.m_x.end());
@@ -127,6 +153,11 @@ void Bee::Points::append(const Bee::Points& obj)
     m_q.insert(m_q.end(), obj.m_q.begin(), obj.m_q.end());
     m_clid.insert(m_clid.end(), obj.m_clid.begin(), obj.m_clid.end());
     m_real_clid.insert(m_real_clid.end(), obj.m_real_clid.begin(), obj.m_real_clid.end());
+    if (obj.m_has_extra) {
+        m_e.insert(m_e.end(), obj.m_e.begin(), obj.m_e.end());
+        m_nu_idx.insert(m_nu_idx.end(), obj.m_nu_idx.begin(), obj.m_nu_idx.end());
+        m_has_extra = true;
+    }
 }
 
 size_t Bee::Points::size() const
@@ -343,6 +374,13 @@ void Bee::Flashes::set_groups(const std::vector<int>& groups)
     Json::Value jg(Json::arrayValue);
     for (int g : groups) jg.append(g);
     m_data["op_flash_group"] = jg;
+}
+
+void Bee::Flashes::set_t1(const std::vector<double>& t1)
+{
+    Json::Value jt(Json::arrayValue);
+    for (double t : t1) jt.append(t);
+    m_data["op_t1"] = jt;
 }
 
 size_t Bee::Flashes::size() const

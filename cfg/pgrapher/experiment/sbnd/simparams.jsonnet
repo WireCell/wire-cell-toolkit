@@ -6,9 +6,15 @@ local wc = import 'wirecell.jsonnet';
 base {
   lar: super.lar {
     // be sure you really want to have this. default value: 8 ms
-    // Longitudinal diffusion constant
+    // Longitudinal diffusion constant.  sbndcode's production value
+    // (wcsimsp_sbnd.fcl), restored 2026-07-27 after the owner clarified with
+    // colleagues; this REVERTS the 6.5781 retune of 2026-07-25.  Kept equal to
+    // the value the PR track fit assumes (sbnd_xin/sbnd_track_fitting.json) so
+    // simulation, fit, and the official MC on disk share one diffusion model.
+    // NOT bit-identical: changes simulated waveforms.  See sbnd_xin/docs/66
+    // (revert + validation) and docs/47 section 6a (the retune it undoes).
     DL :  4.0 * wc.cm2/wc.s,
-    // Transverse diffusion constant
+    // Transverse diffusion constant.  Same provenance (was 13.1349).
     DT :  8.8 * wc.cm2/wc.s,
     // Electron lifetime
     lifetime : 35*wc.ms,

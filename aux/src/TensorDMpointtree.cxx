@@ -1,6 +1,7 @@
 #include "WireCellAux/TensorDMpointtree.h"
 #include "WireCellAux/TensorDMcommon.h"
 #include "WireCellAux/SimpleTensor.h"
+#include "WireCellUtil/Logging.h"
 
 #include <iostream>             // debug
 
@@ -84,6 +85,22 @@ ITensor::vector WireCell::Aux::TensorDM::as_tensors(
             it->second[index] = pcds.size_major();
 
             auto& cpc = pointclouds[pcname];
+            // append() keys the copy on the ACCUMULATED dataset: an array
+            // whose key is absent from the first-seen node's same-named PC is
+            // silently dropped (and a key the tail lacks throws).  Same-named
+            // local PCs must therefore be key-homogeneous across nodes to
+            // round-trip.  Warn on the silent-drop case -- it cost a
+            // debugging session once (perblob/real_cluster_id, SBND flash
+            // merge).
+            if (!cpc.keys().empty()) {
+                for (const auto& key : pcds.keys()) {
+                    if (!cpc.has(key)) {
+                        spdlog::warn("TensorDM::as_tensors: dropping array '{}' of local PC '{}': "
+                                     "key absent from a prior node's same-named PC (datapath {})",
+                                     key, pcname, datapath);
+                    }
+                }
+            }
             cpc.append(pcds);
         }
     }

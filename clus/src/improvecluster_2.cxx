@@ -263,14 +263,18 @@ namespace WireCell::Clus {
         if (default_scope.hash()!=raw_scope.hash()){
             t0 = Clock::now();
             auto correction_name = orig_cluster->get_scope_transform(default_scope);
-            // std::vector<int> filter_results = c
+            // add_corrected_points builds x_t0cor from get_cluster_t0(), but a
+            // freshly-retiled cluster's T0 defaults to 0 and was only copied by
+            // from() AFTERWARD -- so the correction applied a ZERO drift shift,
+            // leaving x_t0cor equal to the raw drift-x.  Harmless for in-time
+            // clusters, but for an out-of-time cosmic it is off by v_drift*|T0|
+            // (~164 cm at T0 = -1051 us), which pushed steiner boundary points
+            // past the anode and gave TaggerCheckFC/STM/Neutrino spurious
+            // out-of-fiducial "exit" verdicts.  Set the real T0 first.
+            new_cluster.set_cluster_t0(orig_cluster->get_cluster_t0());
             new_cluster.add_corrected_points(m_pcts, correction_name);
-            // Get the new scope with corrected points
-            // const auto& correction_scope = new_cluster.get_scope(correction_name);
-            // Set this as the default scope for viewing
-            new_cluster.from(*orig_cluster); // copy state from original cluster
+            new_cluster.from(*orig_cluster); // copy remaining state from original cluster
             SPDLOG_LOGGER_TRACE(log, "timing: add_corrected_points took {} ms", MS(Clock::now()-t0).count());
-            // std::cout << "Test: Same:" << default_scope.hash() << " " << raw_scope.hash() << std::endl; 
         }
 
         // auto retiled_node = new_cluster.node();

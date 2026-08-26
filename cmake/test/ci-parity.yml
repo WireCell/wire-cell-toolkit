@@ -1,0 +1,64 @@
+# GitHub Actions workflow TEMPLATE for the Wire-Cell Toolkit CMake build and the
+# CMake-vs-waf parity harness (epic wct-ike, task wct-ike.13).
+#
+# This lives under cmake/test/ so it does not auto-run.  To enable it, copy to
+# .github/workflows/ and set `container.image` to an image that provides the WCT
+# dependencies (Boost, Eigen, spdlog, FFTW, JsonCpp, Jsonnet, ZLib, BZip2, and
+# whatever optional deps you want exercised).  Point WCT_DEPS at the prefix where
+# those dependencies are installed inside the image.
+#
+#   mkdir -p .github/workflows && cp toolkit/cmake/test/ci-parity.yml .github/workflows/
+
+name: cmake-waf-parity
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+
+# Set to the image that ships the WCT dependency stack, and the prefix within
+# it.  A spack/docker image built for WCT is the natural choice.
+env:
+  WCT_DEPS: /opt/wct           # <-- dependency install prefix inside the image
+  WCT_CMAKE_ARGS: ""           # e.g. "-DWITH_ROOTSYS=yes -DWITH_TBB=yes"
+  WCT_WAF_ARGS: ""             # e.g. "--with-root=/opt/wct"
+
+jobs:
+  cmake-build-and-test:
+    runs-on: ubuntu-latest
+    container:
+      image: wirecell/wct-deps:latest   # <-- replace with your deps image
+    strategy:
+      matrix:
+        generator: ["Unix Makefiles", "Ninja"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: >
+          cmake -S . -B build -G "${{ matrix.generator }}"
+          -DCMAKE_PREFIX_PATH="$WCT_DEPS"
+          -DWCT_WITH_TESTS=ON
+          -DCMAKE_INSTALL_PREFIX="$PWD/install-cmake"
+          $WCT_CMAKE_ARGS
+
+      - name: Build
+        run: cmake --build build -j "$(nproc)"
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure -LE 'history|report'
+
+      - name: Install
+        run: cmake --install build
+
+  parity:
+    runs-on: ubuntu-latest
+    container:
+      image: wirecell/wct-deps:latest   # <-- replace with your deps image
+    steps:
+      - uses: actions/checkout@v4
+
+      # parity.sh builds BOTH waf and cmake into fresh prefixes and diffs the
+      # installed libraries, apps, headers, BuildConfig.h, .pc and cmake config.
+      - name: waf vs cmake parity
+        run: bash cmake/test/parity.sh

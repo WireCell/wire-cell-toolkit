@@ -85,18 +85,293 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
             uses: [detector_volumes, pc_transforms],
         },
 
-        tagger_check_stm(name="", trackfitting_config_file="", particle_dataset="", recombination_model="") :: {
+        // Restore the prototype "main cluster + associated clusters" data
+        // product on a post-Q/L tree: split every flag_main_cluster cluster
+        // that the flash-time merge (examine_bundles use_flash_t0) built back
+        // into its pre-merge main (retained, keeps the flags and the cluster
+        // scalars) and one flag_associated_cluster cluster per other member.
+        // Without it the STM tagger fits a bundle of detached cosmics as one
+        // track and check_other_clusters() has no companions left to count.
+        //
+        // mode (C++ default "real"): "real" = per-blob real_cluster_main /
+        // real_cluster_id flash-merge provenance (exact; needs a pctree saved
+        // with MultiAlgBlobClustering save_real_cluster_id -- a cluster
+        // WITHOUT it is left alone with a warning, NOT proxied, because a
+        // connectivity split is a clustering decision and breaks cathode
+        // crossers).  "component" = longest connected component, opt-in only.
+        // require_in_scope (C++ default true): skip the out-of-volume shards
+        // switch_scope splits off.
+        //
+        // MUST be placed BEFORE the steiner stage: separate() does not carry
+        // node-local point clouds, and the retained main would otherwise keep
+        // a steiner_pc built from the pre-split blob set.
+        // id_aname / main_aname (C++ defaults "real_cluster_id" /
+        // "real_cluster_main"; keys omitted when null => byte-identical pre-knob
+        // config): which per-blob provenance pair to split on.  Pass
+        // "assoc_cluster_id" / "assoc_cluster_main" for a SECOND instance that
+        // undoes the isolated GROUPING (doc 52 Stage 3) rather than the flash
+        // merge.  Run the flash one first (outer) and the isolated one second
+        // (inner): that order reproduces the prototype's main_cluster +
+        // additional_clusters layout, and both must precede the steiner stage.
+        unmerge_bundle(name="", mode="real", graph_name="relaxed", require_in_scope=true,
+                       id_aname=null, main_aname=null) :: {
+            type: "ClusteringUnmergeBundle",
+            name: prefix + name,
+            data: dv_cfg + pcts_cfg + {
+                grouping: "live",
+                mode: mode,
+                pcarray_name: "perblob",
+                graph_name: graph_name,
+                require_in_scope: require_in_scope,
+                [if id_aname != null then 'id_aname']: id_aname,
+                [if main_aname != null then 'main_aname']: main_aname,
+            },
+            uses: [detector_volumes, pc_transforms],
+        },
+
+        // require_in_scope (default false): also require each candidate main to
+        // pass the default-scope filter set by switch_scope, i.e. to have blobs
+        // whose T0-corrected points land in the active volume.  switch_scope
+        // separates the out-of-volume blobs into their own cluster that keeps an
+        // inherited flag_main_cluster; without this the taggers evaluate those
+        // non-physical shards (which are outside the FV by construction, so they
+        // satisfy the TGM CASE-A test almost automatically).  Key emitted only
+        // when true so existing compiled configs stay byte-identical.
+        // save_stm_fit (C++ default false; key omitted when off => byte-identical):
+        // persist the per-pass STM track fits as cluster PCs
+        // (stm_fit/stm_pass/stm_eval) and a grouping-level "stm" TrackFitting
+        // for downstream writers (Bee stm_fit layer, SbndMagnifyTrackingVisitor).
+        // mip_dqdx (C++ default 50e3 = the MicroBooNE value; null here => key
+        // omitted => byte-identical pre-knob config): the MIP dQ/dx scale in
+        // ELECTRONS PER CM (not per internal length unit -- unlike the
+        // MIP_dQdx default arguments in PRSegmentFunctions.h, which are
+        // written 50000/units::cm).  One number, two roles inside
+        // TaggerCheckSTM: it sets the flat "MIP-like, not stopping" reference
+        // curves the fitted dQ/dx is KS-compared against, AND it is the
+        // divisor that normalizes measured dQ/dx for ~33 hard-coded cut
+        // thresholds.  Raising it rescales the reference and tightens all of
+        // those cuts on unchanged measured charge, so it is a behavior change,
+        // not a recalibration of the reference alone.
+        // fiducial / fv_tolerance (both C++ default unset; keys omitted then =>
+        // byte-identical pre-fix config): the fiducial volume for the
+        // cluster_fc_check containment gate that decides whether an STM fit is
+        // attempted at all.  Unset means the historical fallback, FiducialUtils
+        // -> DetectorVolumes::contained() = the union of per-(apa,face)
+        // sensitive volumes with NO margin -- which is NOT the volume
+        // tagger_check_tgm / tagger_check_fc use, and is more permissive at
+        // every wall (see clus/src/TaggerCheckSTM.cxx configure()).  Pass the
+        // SAME IFiducial name and the SAME margin vector given to
+        // tagger_check_tgm so "contained" means one thing across all three
+        // verdicts; that also matches the prototype, where check_stm and
+        // check_tgm are members of one ToyFiducial and share its boundaries.
+        // fv_tolerance = [x_lo,x_hi,y_lo,y_hi,z_lo,z_hi], negative = inset.
+        // beam_window_only (C++ default false; keys omitted when off =>
+        // byte-identical pre-knob config): evaluate ONLY the beam-coincident
+        // bundle, i.e. mains whose matched flash time (cluster_t0) is in
+        // [beam_window_low, beam_window_high).  Same gate as the steiner stage
+        // and tagger_check_{tgm,fc}; a surviving main's verdict is unchanged.
+        // accept_guards (C++ default false; key omitted when off =>
+        // byte-identical pre-knob config): the doc-63 round-1 pass-level
+        // acceptance guards (charge-desert one-objectness, spike-not-ramp
+        // vertex veto, eval ratio2 normalization cap).  Guard thresholds keep
+        // their C++ defaults (measured on the doc-62 owner baseline); only
+        // the master switch is threaded here.
+        // proton_muon_guard (C++ default false; key omitted when off =>
+        // byte-identical): the doc-63 round-2 muon-consistency guard on
+        // detect_proton's end-proton branches -- an end region matching the
+        // muon hypothesis in shape and normalization is not called a proton.
+        tagger_check_stm(name="", trackfitting_config_file="", particle_dataset="", recombination_model="",
+                         require_in_scope=false, save_stm_fit=false, mip_dqdx=null,
+                         fiducial=null, fv_tolerance=[],
+                         beam_window_only=false, beam_window_low=0, beam_window_high=0,
+                         accept_guards=false, proton_muon_guard=false,
+                         cathode_guard=false, anode_dist_fix=false,
+                         second_track_guard=false, deficit_guard=false,
+                         vertex_kink_guard=false,
+                         michel_res_length_cut=null, proton_tm_max=null,
+                         proton_b_ks2_max=null, proton_c_peak_max=null) :: {
             type: "TaggerCheckSTM",
             name: prefix + name,
             data: {
                 grouping: "live",           // Which grouping to process
-                trackfitting_config_file: trackfitting_config_file, 
+                trackfitting_config_file: trackfitting_config_file,
                 particle_dataset: particle_dataset,
                 recombination_model: recombination_model,
             } + dv_cfg + pcts_cfg
+              + (if require_in_scope then { require_in_scope: true } else {})
+              + (if save_stm_fit then { save_stm_fit: true } else {})
+              + (if mip_dqdx != null then { mip_dqdx: mip_dqdx } else {})
+              + (if fiducial != null then { fiducial: fiducial } else {})
+              + (if std.length(fv_tolerance) > 0 then { fv_tolerance: fv_tolerance } else {})
+              + (if beam_window_only then {
+                     beam_window_only: true,
+                     beam_window_low: beam_window_low,
+                     beam_window_high: beam_window_high,
+                 } else {})
+              + (if accept_guards then { accept_guards: true } else {})
+              + (if proton_muon_guard then { proton_muon_guard: true } else {})
+              + (if cathode_guard then { cathode_guard: true } else {})
+              // C++ default false.  Key omitted when off => byte-identical
+              // pre-fix config (doc-63 round 4a dist_to_anode face fix).
+              + (if anode_dist_fix then { anode_dist_fix: true } else {})
+              // C++ default false.  Key omitted when off => byte-identical
+              // pre-knob config (doc-63 round 4b/4c second-track vetoes).
+              + (if second_track_guard then { second_track_guard: true } else {})
+              // C++ defaults false.  Keys omitted when off => byte-identical
+              // pre-knob config (doc-63 round 5 stop-region vetoes).
+              + (if deficit_guard then { deficit_guard: true } else {})
+              + (if vertex_kink_guard then { vertex_kink_guard: true } else {})
+              // doc-66 sec 12 diffusion-margin cut package.  C++ defaults are
+              // the prototype constants (6 cm / 1.0 / 0.05 / 4.3); null here
+              // omits the key => byte-identical legacy config.
+              + (if michel_res_length_cut != null then { michel_res_length_cut: michel_res_length_cut } else {})
+              + (if proton_tm_max != null then { proton_tm_max: proton_tm_max } else {})
+              + (if proton_b_ks2_max != null then { proton_b_ks2_max: proton_b_ks2_max } else {})
+              + (if proton_c_peak_max != null then { proton_c_peak_max: proton_c_peak_max } else {})
         },
 
-        tagger_check_neutrino(name="", trackfitting_config_file="", particle_dataset="", recombination_model="", perf=false, dl_weights="", dQdx_scale=0.1, dQdx_offset=-1000.0, clus_geom_helper="", dl_vtx_rerank=true, dl_vtx_top_k=5, dl_vtx_min_accept_score=4.0, dl_vtx_score_scale=1000.0) :: {
+        // Through-going-muon tagger (port of prototype check_tgm).  fiducial
+        // names the IFiducial for the inside/outside-FV tests (e.g. a
+        // BoxFiducial spanning ALL TPCs so cathode crossers are not exiters);
+        // fv_tolerance = [x_lo,x_hi,y_lo,y_hi,z_lo,z_hi] margins (negative =
+        // inset).  check_neutrino_candidate (C++ default false): enable the
+        // ported prototype Dijkstra path-topology neutrino veto so
+        // in-beam-window bundles may be tagged; when false (default, key
+        // omitted => byte-identical pre-port config) in-beam bundles are
+        // never tagged through the protected branches.
+        // require_chord_charge (C++ default false; keys omitted when off =>
+        // byte-identical pre-fix config): before a pair of extreme points may
+        // tag, require the cluster to carry charge ALONG the chord between
+        // them -- no contiguous stretch longer than chord_max_gap without a
+        // cluster point within chord_support_radius.  Guards against the
+        // flash-time merge in examine_bundles(use_flash_t0) putting a detached
+        // fragment into the tagged Cluster: its chord to the real track passes
+        // the FV-only test trivially.  C++ defaults 6 cm / 30 cm.
+        // chord_charge_mode (C++ default "chord"; key omitted then =>
+        // byte-identical): "chord" samples the STRAIGHT segment between the
+        // extremes (rejects genuinely curved tracks -- SBND evt285185
+        // cluster 16 bows 10 cm off its 480 cm chord and lost a real TGM);
+        // "path" instead requires a piecewise charge path through the
+        // cluster's own points with no jump longer than chord_max_gap
+        // (chord_support_radius unused in that mode).
+        // component_extremes (C++ default false; key omitted when off): find
+        // the 8 extreme points PER connected component and union them.  The
+        // global scan gives each slot (max z, min x, ...) to whichever merge
+        // component reaches furthest, hiding the other component's own
+        // wall-exit, so a genuine through-goer inside a merged bundle can never
+        // form its pair.  USE TOGETHER WITH require_chord_charge: the union
+        // also creates cross-component pairs, and the chord test is what
+        // rejects those.  C++ component_min_length default 10 cm.
+        // component_rescue (C++ default false; key omitted when off): a
+        // component SHORTER than component_min_length still donates its
+        // extremes when it is path-connected (30 cm-step charge path, the
+        // path-mode chord rule) to a component that passed the length cut --
+        // a genuine track end that fragments into a sub-10 cm piece behind
+        // small gaps keeps its wall exit (SBND evt286681 cluster 7), while a
+        // detached merge-grafted speck stays dropped (path-disconnected).
+        // Only consulted when component_extremes is on.
+        // rescue_chord_check (C++ default false; key omitted when off): a
+        // pair whose end was donated by a RESCUED component must also pass
+        // the STRAIGHT-chord support test even in path mode -- a genuine
+        // fragmented track end lies on its own pair's chord, but path mode
+        // alone lets a rescued speck pair across TWO merged cosmics through
+        // an L-shaped charge detour (SBND evt288727 cluster 6).  Only
+        // consulted when component_rescue is on.
+        // main_component_pairs (C++ default false; key omitted when off): a
+        // pair may tag only when at least one end lies in the cluster's MAIN
+        // charge component (the 30 cm-step path component with the most
+        // points; a cathode crosser is ONE such component).  On a
+        // flash-merged Cluster a merged-in fragment that is itself
+        // through-going otherwise tags the whole bundle on its own
+        // within-component pair -- which the chord guard deliberately allows
+        // (SBND evt289343 cluster 9: in-beam bundle tagged TGM by a 26 cm
+        // corner-clipping cosmic fragment 450 cm from the main track).  The
+        // TGM verdict follows the main cluster instead.
+        // main_component_mode (C++ default "path"; key omitted then =>
+        // byte-identical): with main_component_pairs on, "path" identifies the
+        // main as the largest 30 cm path component (a proxy); "real" reads the
+        // per-blob "real_cluster_main" flash-merge provenance (exact, needs a
+        // pctree saved with save_real_cluster_id; falls back to the proxy when
+        // the array is absent).
+        // beam_window_only (C++ default false; key omitted when off =>
+        // byte-identical pre-knob config): evaluate ONLY the beam-coincident
+        // bundle, i.e. mains whose matched flash time (cluster_t0) is in the
+        // SAME [beam_window_low, beam_window_high) window the in-beam
+        // protection already uses.  Same gate as the steiner stage and
+        // tagger_check_{stm,fc}; verdicts on surviving mains are unchanged.
+        tagger_check_tgm(name="", fiducial="", fv_tolerance=[], beam_window_low=0, beam_window_high=0, beam_window_only=false, length_limit_frac=0.45, enable_case_b=true, require_in_scope=false, check_neutrino_candidate=false, require_chord_charge=false, chord_support_radius=null, chord_max_gap=null, chord_charge_mode="chord", component_extremes=false, component_min_length=null, component_rescue=false, rescue_chord_check=false, main_component_pairs=false, main_component_mode="path", interior_fv_tolerance=[]) :: {
+            type: "TaggerCheckTGM",
+            name: prefix + name,
+            data: {
+                grouping: "live",
+                fv_tolerance: fv_tolerance,
+                beam_window_low: beam_window_low,
+                beam_window_high: beam_window_high,
+                length_limit_frac: length_limit_frac,
+                enable_case_b: enable_case_b,
+            } + dv_cfg + pcts_cfg + (if fiducial == "" then {} else { fiducial: fiducial })
+              + (if beam_window_only then { beam_window_only: true } else {})
+              + (if require_in_scope then { require_in_scope: true } else {})
+              + (if check_neutrino_candidate then { check_neutrino_candidate: true } else {})
+              + (if require_chord_charge then { require_chord_charge: true } else {})
+              + (if chord_support_radius == null then {} else { chord_support_radius: chord_support_radius })
+              + (if chord_max_gap == null then {} else { chord_max_gap: chord_max_gap })
+              // Key only when the guard is ON and the mode is non-default, so
+              // a runner may pass the mode unconditionally without disturbing
+              // the knob-off compiled config.
+              + (if require_chord_charge && chord_charge_mode != "chord" then { chord_charge_mode: chord_charge_mode } else {})
+              + (if component_extremes then { component_extremes: true } else {})
+              + (if component_min_length == null then {} else { component_min_length: component_min_length })
+              + (if component_rescue then { component_rescue: true } else {})
+              + (if rescue_chord_check then { rescue_chord_check: true } else {})
+              + (if main_component_pairs then { main_component_pairs: true } else {})
+              // Key only when the guard is ON and the mode is non-default, so
+              // a runner may pass the mode unconditionally without disturbing
+              // the knob-off compiled config.
+              + (if main_component_pairs && main_component_mode != "path" then { main_component_mode: main_component_mode } else {})
+              // C++ default empty (= use fv_tolerance). Key omitted when
+              // empty => byte-identical pre-knob config.  Separate tolerance
+              // for the CASE-A interior-support tests only (doc 32 caveat:
+              // endpoint-only widening of the downstream-z inset).
+              + (if std.length(interior_fv_tolerance) > 0 then { interior_fv_tolerance: interior_fv_tolerance } else {}),
+        },
+
+        // Fully-contained (FC) tagger.  Records Facade::cluster_fc_check's
+        // verdict as the cluster flag "FC" -- the tagger-computed sibling of
+        // "TGM"/"STM", i.e. the prototype's event_type bit 2 / match_isFC.
+        // Needs the steiner and fiducialutils stages ahead of it (without
+        // them cluster_fc_check returns is_fc=false for every cluster).
+        // require_in_scope (C++ default false; key omitted when off =>
+        // byte-identical): evaluate only clusters passing switch_scope's
+        // active-volume filter.
+        // fiducial / fv_tolerance (both C++-default absent => keys omitted =>
+        // byte-identical): redirect the DIRECT containment tests from
+        // FiducialUtils to this IFiducial with these margins, so FC and TGM
+        // judge containment identically.  Pass the same values as
+        // tagger_check_tgm.  The dead-region / signal-processing checks keep
+        // using FiducialUtils either way, exactly as TaggerCheckTGM does.
+        // beam_window_only (C++ default false; keys omitted when off =>
+        // byte-identical pre-knob config): evaluate ONLY the beam-coincident
+        // bundle, i.e. mains whose matched flash time (cluster_t0) is in
+        // [beam_window_low, beam_window_high).  Same gate as the steiner stage
+        // and tagger_check_{tgm,stm}.
+        tagger_check_fc(name="", fiducial="", fv_tolerance=[], require_in_scope=false,
+                        beam_window_only=false, beam_window_low=0, beam_window_high=0) :: {
+            type: "TaggerCheckFC",
+            name: prefix + name,
+            data: {
+                grouping: "live",
+            } + dv_cfg + pcts_cfg
+              + (if fiducial == "" then {} else { fiducial: fiducial, fv_tolerance: fv_tolerance })
+              + (if require_in_scope then { require_in_scope: true } else {})
+              + (if beam_window_only then {
+                     beam_window_only: true,
+                     beam_window_low: beam_window_low,
+                     beam_window_high: beam_window_high,
+                 } else {}),
+        },
+
+        tagger_check_neutrino(name="", trackfitting_config_file="", particle_dataset="", recombination_model="", perf=false, dl_weights="", dQdx_scale=0.1, dQdx_offset=-1000.0, clus_geom_helper="", dl_vtx_rerank=true, dl_vtx_top_k=5, dl_vtx_min_accept_score=4.0, dl_vtx_score_scale=1000.0, beam_window_low=0, beam_window_high=0) :: {
             type: "TaggerCheckNeutrino",
             name: prefix + name,
             data: {
@@ -113,6 +388,8 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
                 dl_vtx_top_k: dl_vtx_top_k,             // number of top DL voxels to re-rank (only when dl_vtx_rerank==true)
                 dl_vtx_min_accept_score: dl_vtx_min_accept_score,  // min composite score to accept re-ranked DL vertex
                 dl_vtx_score_scale: dl_vtx_score_scale, // scale factor on raw DL score (1.0=unscaled; ~1000 for typical ~0.005 scores)
+                beam_window_low: beam_window_low,   // beam window on cluster_t0 (matched flash time); low >= high
+                beam_window_high: beam_window_high, // (default) disables the gate = uBooNE single-main selection
             } + dv_cfg + pcts_cfg
         },
 
@@ -331,7 +608,9 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
                         min_length=10*wc.cm, min_length_short=null,
                         short_dir_len=null, conn_short_cut=30.0,
                         tip_touch_cut=null, tip_touch_angle_cut=null,
-                        use_flash_t0=true, flash_t0_window=80*wc.ns) :: {
+                        use_flash_t0=true, flash_t0_window=80*wc.ns,
+                        crosser_conn_relax=null, crosser_pca_angle=null,
+                        cathode_band_dis=null) :: {
             type: "ClusteringCathodeConnect",
             name: prefix+name,
             data: {
@@ -353,6 +632,12 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
                 [if tip_touch_cut != null then "tip_touch_cut"]: tip_touch_cut,
                 // null => C++ defaults tip_touch_angle_cut to angle_cut (local-Hough fallback OFF)
                 [if tip_touch_angle_cut != null then "tip_touch_angle_cut"]: tip_touch_angle_cut,
+                // null => C++ defaults crosser_conn_relax to 0 (6cm-cathode cc_pca relaxation OFF)
+                [if crosser_conn_relax != null then "crosser_conn_relax"]: crosser_conn_relax,
+                // null => C++ defaults crosser_pca_angle to 0 (6cm-cathode tt_pca bound raise OFF)
+                [if crosser_pca_angle != null then "crosser_pca_angle"]: crosser_pca_angle,
+                // null => C++ defaults cathode_band_dis to 0 (near-cathode closest-approach retry OFF)
+                [if cathode_band_dis != null then "cathode_band_dis"]: cathode_band_dis,
                 use_flash_t0: use_flash_t0,
                 flash_t0_window: flash_t0_window,
             } + scope_cfg,
@@ -496,7 +781,18 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
         // thresholds. When null the key is omitted and ClusteringIsolated falls
         // back to its built-in defaults (20 cm / 150), so existing configs stay
         // byte-identical. Set to opt into a tighter/looser threshold.
-        isolated(name="", use_flash_t0=false, flash_t0_window=80*wc.ns, length_cut=null, range_cut=null) :: {
+        // save_assoc_id (C++ default false; key omitted when off => byte-identical
+        // pre-knob config): also record this pass's main + associated partition
+        // into the dedicated per-blob pair "assoc_cluster_id" /
+        // "assoc_cluster_main" ("perblob").  merge_clusters carries that pair
+        // across every later merge and clustering_switch_scope carves it through
+        // the scope rebuild, so ClusteringUnmergeBundle(id_aname=..., main_aname=...)
+        // can undo the grouping before the taggers run -- the prototype's
+        // main_cluster + additional_clusters layout.  Needs
+        // MultiAlgBlobClustering save_assoc_cluster_id=true to survive the pctree
+        // tarball.  Doc 52.
+        isolated(name="", use_flash_t0=false, flash_t0_window=80*wc.ns, length_cut=null, range_cut=null,
+                 save_assoc_id=false) :: {
             type: "ClusteringIsolated",
             name: prefix+name,
             data: {
@@ -504,17 +800,25 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
                 flash_t0_window: flash_t0_window,
                 [if length_cut != null then 'length_cut']: length_cut,
                 [if range_cut != null then 'range_cut']: range_cut,
+                [if save_assoc_id then 'save_assoc_id']: true,
             } + dv_cfg + scope_cfg,
         },
 
-        examine_bundles(name="", graph_name="relaxed", use_flash_t0=false, flash_t0_window=80*wc.ns) :: {
+        // flags_from_longest (default false): on the flash-time merge, take the
+        // merged cluster's flags from the same representative member that donates
+        // its flash instead of from an arbitrary (last-visited) member, so a
+        // matched main cannot lose flag_main_cluster to a co-merged fragment.
+        // Key emitted only when true so existing compiled configs stay
+        // byte-identical.  See merge_clusters() in clus/inc/.../ClusteringFuncs.h.
+        examine_bundles(name="", graph_name="relaxed", use_flash_t0=false, flash_t0_window=80*wc.ns,
+                        flags_from_longest=false) :: {
             type: "ClusteringExamineBundles",
             name: prefix+name,
             data: dv_cfg + pcts_cfg + scope_cfg + {
                 graph_name: graph_name,
                 use_flash_t0: use_flash_t0,
                 flash_t0_window: flash_t0_window,
-            },
+            } + (if flags_from_longest then { flags_from_longest: true } else {}),
             uses: [detector_volumes, pc_transforms],
         },
 
@@ -645,7 +949,17 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
         },
 
         // Run steiner-related on clusters in grouping, saving graph to them of the given name.
-        steiner(name="", retiler={}, grouping="live", graph="steiner", perf=true) :: {
+        // require_beam_flash=true (uBooNE): only beam_flash-flagged clusters; false
+        // (post-QL-matching detectors without that flag): every scope-passing cluster.
+        // beam_window_only (C++ default false; keys omitted when off =>
+        // byte-identical pre-knob config): build steiner graphs ONLY for the
+        // beam-coincident bundle -- the main clusters whose matched flash time
+        // (cluster_t0) is in [beam_window_low, beam_window_high) plus the
+        // companions sharing their matched_flash_gid.  Pass the same window the
+        // taggers get: with tagger_check_{tgm,stm,fc} gated the same way, the
+        // clusters that lose their graph are exactly the ones no tagger reads.
+        steiner(name="", retiler={}, grouping="live", graph="steiner", perf=true, require_beam_flash=true,
+                beam_window_only=false, beam_window_low=0, beam_window_high=0) :: {
             type: "CreateSteinerGraph",
             name: prefix+name,
             data: {
@@ -653,7 +967,13 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
                 graph: graph,
                 retiler: wc.tn(retiler),
                 perf: perf,
-            } + dv_cfg + pcts_cfg,
+                require_beam_flash: require_beam_flash,
+            } + dv_cfg + pcts_cfg
+              + (if beam_window_only then {
+                     beam_window_only: true,
+                     beam_window_low: beam_window_low,
+                     beam_window_high: beam_window_high,
+                 } else {}),
             uses: [detector_volumes, pc_transforms, retiler]
         },
 

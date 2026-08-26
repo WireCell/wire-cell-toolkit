@@ -270,7 +270,7 @@ bool Img::BlobDepoFill::operator()(const input_tuple_type& intup,
         std::vector<double> dwcenter;
         auto mydepos = sensitive(*(ideposet->depos()), ianodeface);
         log->debug("call={} face={} nblobs={} ndepos={}",
-                   m_count, bdescvector.size(), mydepos.size());
+                   m_count, ianodeface->ident(), bdescvector.size(), mydepos.size());
         for (const auto& maybe : mydepos) {
             const auto rpos = pimpos->relative(maybe->pos());
             if (rpos[0] < 0) {

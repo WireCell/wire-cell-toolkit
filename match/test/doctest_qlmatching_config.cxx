@@ -1,0 +1,54 @@
+#include "WireCellMatch/QLMatching.h"
+
+#include "WireCellUtil/Units.h"
+#include "WireCellUtil/doctest.h"
+
+using namespace WireCell;
+
+TEST_CASE("qlmatching default configuration knobs")
+{
+    // The ctor is service-free, so default_configuration() is testable
+    // without Factory-registered anodes/DetectorVolumes. Guard the
+    // byte-identical-when-off contracts of the per-input vector knobs:
+    // absent/empty arrays must leave the scalar members in force.
+    Match::QLMatching qlm;
+    auto cfg = qlm.default_configuration();
+
+    // Historical scalar defaults, relied on by detectors that do not
+    // override them.
+    CHECK(cfg["drift_speed"].asDouble() ==
+          doctest::Approx(1.563 * units::mm / units::us));
+    CHECK(cfg["trigger_offset"].asDouble() == doctest::Approx(0.0));
+
+    // Per-input vectors round-trip as EMPTY arrays: empty => the scalar is
+    // used for every input port (bit-identical legacy path).
+    REQUIRE(cfg.isMember("drift_speeds"));
+    CHECK(cfg["drift_speeds"].isArray());
+    CHECK(cfg["drift_speeds"].size() == 0);
+    REQUIRE(cfg.isMember("trigger_offsets"));
+    CHECK(cfg["trigger_offsets"].isArray());
+    CHECK(cfg["trigger_offsets"].size() == 0);
+
+    // Rescue blind-spot fix (doc 23 phase 1a): knob must round-trip and
+    // default OFF (bit-identical legacy ordering when absent).
+    REQUIRE(cfg.isMember("postcull_before_rescue"));
+    CHECK(cfg["postcull_before_rescue"].asBool() == false);
+
+    // Saturation-aware rescue ratio-high extension (doc 23 phase 1b):
+    // default OFF with inert thresholds round-tripped.
+    REQUIRE(cfg.isMember("cluster_rescue_sat_ratio_relax"));
+    CHECK(cfg["cluster_rescue_sat_ratio_relax"].asBool() == false);
+    CHECK(cfg["cluster_rescue_sat_frac_min"].asDouble() == doctest::Approx(0.5));
+    CHECK(cfg["cluster_rescue_sat_ratio_mult"].asDouble() == doctest::Approx(2.0));
+
+    // Window-truncated overprediction cull (doc 23 phase 2): default OFF.
+    REQUIRE(cfg.isMember("postcull_wtrunc_overpred"));
+    CHECK(cfg["postcull_wtrunc_overpred"].asBool() == false);
+    CHECK(cfg["postcull_wtrunc_ratio_hi"].asDouble() == doctest::Approx(2.0));
+    CHECK(cfg["postcull_wtrunc_sat_frac"].asDouble() == doctest::Approx(0.5));
+
+    // xtpc-pin overprediction cull (doc 23 phase 2): default OFF.
+    REQUIRE(cfg.isMember("postcull_pin_overpred"));
+    CHECK(cfg["postcull_pin_overpred"].asBool() == false);
+    CHECK(cfg["postcull_pin_ratio_hi"].asDouble() == doctest::Approx(2.0));
+}
