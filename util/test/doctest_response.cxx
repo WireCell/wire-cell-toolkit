@@ -13,6 +13,6 @@ TEST_CASE("util field response")
     // MESSAGE("WIRECELL_PATH=" << (wcpath ? wcpath : "(unset)"));
     // std::cerr << wcpath << std::endl;
 
-    /*auto fr =*/ Response::Schema::load(fr_file.c_str());
+    auto fr = Response::Schema::load(fr_file.c_str());
     /*auto fravg =*/ Response::wire_region_average(fr);
 }
