@@ -107,7 +107,17 @@ namespace WireCell::SPNG {
         auto frer_coarse = LMN::resample_interval(frer_fine, fr_period_fine, m_cfg.period, 1);
 
         /// Convert to units of voltage/electron and apply user scale.
-        frer_coarse = frer_coarse * (float)m_cfg.period * (float)m_cfg.scale;
+        ///
+        /// The FR*ER product above is a discrete convolution taken on the FR's
+        /// own (fine) sampling grid, so it approximates the continuous
+        /// convolution divided by that fine period.  Recovering [voltage]
+        /// therefore multiplies by fr_period_fine, not by the (coarse) kernel
+        /// period: resample_interval() above is amplitude preserving
+        /// (Normalization::kInterpolation) and so does not rescale to the new
+        /// period.  Using m_cfg.period here inflated the response by
+        /// m_cfg.period/fr_period_fine and left deconvolved charge low by that
+        /// same factor.
+        frer_coarse = frer_coarse * (float)fr_period_fine * (float)m_cfg.scale;
 
         log->debug("er_period={}, scale={}, er_fine={}, fr_period={}, fr_fine={}, linear_size={}, fr_pad={}, er_pad={}, frer_fine={}, frer_coarse={}",
                    er_sampling.binsize(), m_cfg.scale, to_string(er_fine),
