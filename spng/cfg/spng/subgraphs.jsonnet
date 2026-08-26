@@ -377,7 +377,8 @@ function(tpc, control={}, pg=real_pg, context_name="") {
         local name = $.this_name(extra_name, '_'+group.name);
         local plane_index = group.view_index;
         local fk = $.filter_kernel([tpc.filters[plane_index].channel.decon,{kind:"none"}],
-                                   extra_name=extra_name);
+                                //    extra_name=extra_name);
+                                   extra_name="v"+std.toString(plane_index)+extra_name);
         local rk = $.response_kernel(plane_index, extra_name=extra_name);
         $.decon_kernel(fk, rk, extra_name='_'+group.name+extra_name),
 
@@ -567,6 +568,7 @@ function(tpc, control={}, pg=real_pg, context_name="") {
     time_filter_view(filter, view_index, extra_name="")::
         local vis = std.toString(view_index);
         local name = $.this_name(extra_name, 'v'+vis);
+        //DO WE ALSO NEED TO SPECIFIY EXTRA NAME HERE FOR WIENER?
         local fk = $.filter_kernel([{kind:"none"}, tpc.filters[view_index].time[filter]], extra_name=extra_name);
         // local co = $.convo_options(0, view_index);
         local co_channel = {padding: "none", dft: false};
