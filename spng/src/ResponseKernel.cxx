@@ -105,7 +105,7 @@ namespace WireCell::SPNG {
         maybe_save(frer_fine, "fine_frer");
 
         auto frer_coarse = LMN::resample_interval(frer_fine, fr_period_fine, m_cfg.period, 1);
-
+        maybe_save(frer_coarse, "coarse_frer");
         /// Convert to units of voltage/electron and apply user scale.
         ///
         /// The FR*ER product above is a discrete convolution taken on the FR's
