@@ -105,7 +105,7 @@ namespace WireCell::SPNG {
         maybe_save(frer_fine, "fine_frer");
 
         auto frer_coarse = LMN::resample_interval(frer_fine, fr_period_fine, m_cfg.period, 1);
-
+        maybe_save(frer_coarse, "coarse_frer");
         /// Convert to units of voltage/electron and apply user scale.
         frer_coarse = frer_coarse * (float)m_cfg.period * (float)m_cfg.scale;
 
