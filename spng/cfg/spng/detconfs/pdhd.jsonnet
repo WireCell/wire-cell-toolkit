@@ -29,7 +29,7 @@ local response_start_time = tick0_time - response_time_offset;
 
 // How much to roll the response deconvolution. This essentially the ADC tick
 // where FR*ER goes to zero.
-local decon_roll = 128;
+local decon_roll = 129;
 
 local ductor = api.ductor(adc_tick, response_duration, response_start_time);
 local splat = api.splat(
@@ -135,11 +135,11 @@ local dnnroi_filters = [
     
 local channel_filters = [
     api.filter_axis([api.filter_function(scale=1.0 / wc.sqrtpi * 0.75)],
-                    period=1.0, ignore_baseline=false),
+                    period=0.5, ignore_baseline=false),
     api.filter_axis([api.filter_function(scale=1.0 / wc.sqrtpi * 0.75)],
-                     period=1.0, ignore_baseline=false),
+                     period=0.5, ignore_baseline=false),
     api.filter_axis([api.filter_function(scale=1.0 / wc.sqrtpi * 10.0)],
-                    period=1.0, ignore_baseline=false)
+                    period=0.5, ignore_baseline=false)
 ];
 
 local filters = [
