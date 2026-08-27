@@ -353,6 +353,7 @@ function(tpc, control={}, pg=real_pg, context_name="") {
                 plane_index: view_index,
                 // Scale to units of ADC
                 scale: -1 / tpc.adc.lsb_voltage,
+                debug_filename: "spng_resp_v" + std.toString(view_index)+".pkl",
             } + control,
             uses: [tpc.fr, tpc.er],
         },
@@ -388,6 +389,7 @@ function(tpc, control={}, pg=real_pg, context_name="") {
                     // See KernelConvolve for following options
                     tag="",
                     datapath_format="",
+                    debug_filename="",
                     extra_name="")::
         pg.pnode({
             type: "SPNGKernelConvolve",
@@ -397,6 +399,7 @@ function(tpc, control={}, pg=real_pg, context_name="") {
                 axis: axes_config,
                 tag: tag,
                 datapath_format: datapath_format,
+                debug_filename: debug_filename,
                 faster: true,       // use "faster DFT size"
             } + control
         }, nin=1, nout=1, uses=[kernel]),
@@ -421,6 +424,7 @@ function(tpc, control={}, pg=real_pg, context_name="") {
         };
         $.kernel_convolve(kernel, [co_channel, co_time],
                           datapath_format='/traces/group/' + std.toString(group_index) + "/KernelConvolve/" + name,
+                          debug_filename='spng_kernel_convolve'+std.toString(group_index)+'_dump.pkl',
                           tag="decon", extra_name='_'+group.name+extra_name),
 
     /// Return nodes[0] if length one else return a subgraph with a fanin that stacks the tensors.
