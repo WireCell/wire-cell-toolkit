@@ -81,7 +81,8 @@ TEST_CASE("photonlibrarymodel chan_pos_cm")
     const int nx = 2, ny = 2, nz = 2, nch = 2;
     std::vector<float> vis(nx * ny * nz * nch, 1.f);
 
-    const std::string dir = "/home/xqian/tmp";
+    WireCell::Persist::TempDir tmpdir;
+    const std::string dir = tmpdir.path.string();
     const std::string npy = dir + "/doctest_photlib_pos_vis.npy";
     const std::string meta_ok = dir + "/doctest_photlib_pos_meta_ok.json";
     const std::string meta_bad = dir + "/doctest_photlib_pos_meta_bad.json";

@@ -131,9 +131,13 @@ To install:
 
 ** Testing
 
-WCT comes with a large number of different types of tests which can be exercised via =ctest=.  The *doctest* target is the best compromise between coverage and speed.  In general, any failure is a bug but some failures require proper shell environment to find WCT data files.  Any failure of the *doctest* test is a bug.
+WCT comes with a large number of different types of tests which can be exercised via =ctest=.  The *doctest* target is the best compromise between coverage and speed.  In general, any failure is a bug but some failures require proper shell environment to find WCT data files.  Any failure of the *doctest* test is a bug.  To include tests, you must reconfigure.
 
 #+begin_example
+$ cmake -S toolkit -B build \
+        -DCMAKE_PREFIX_PATH="$PWD/local" \
+        -DCMAKE_INSTALL_PREFIX="$PWD/install" \
+        -DWCT_WITH_TESTS=ON
 $ ctest --test-dir build -L doctest      # the single aggregated wcdoctest runner
 $ ctest --test-dir build -L atomic       # the test_*/atomic* unit tests
 $ ctest --test-dir build -L script       # interpreted (.py/.sh/.bats/.jsonnet) tests
