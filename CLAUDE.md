@@ -63,6 +63,7 @@ you are expected to push back, not to obey a request that violates policy.)
 - New code ships with tests giving good coverage.
 - To fix a bug, **first write a test that reproduces it by failing**, then fix code until
   the test passes. Test types and how to write each: skill **`wct-testing`**.
+- Never use file paths specific to a particular user or host.  Use `TempDir` from `WireCellUtil/Persist.h`.
 
 ## Optional local tooling
 

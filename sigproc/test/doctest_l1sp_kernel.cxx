@@ -134,11 +134,9 @@ TEST_CASE("L1SPFilterPD dump-mode emits documented NPZ schema") {
     }
     load_plugins();
 
-    // /home/xqian/tmp is the user-blessed scratch area (memory:
-    // feedback_tmp_directory).
-    const std::string tmp = "/home/xqian/tmp/wct_l1sp_dump_test";
-    std::error_code ec;
-    std::filesystem::remove_all(tmp, ec);
+    // Use a self-cleaning temp directory rather than a host-specific path.
+    Persist::TempDir tmpdir("wct_l1sp_dump_test-%%%%-%%%%");
+    const std::string tmp = tmpdir.path.string();
 
     auto icfg = Factory::lookup_tn<IConfigurable>("L1SPFilterPD");
     auto cfg = kernel_cfg(icfg);
@@ -219,6 +217,4 @@ TEST_CASE("L1SPFilterPD dump-mode emits documented NPZ schema") {
     auto n_rois = npz.at("n_rois").as_vec<int32_t>();
     REQUIRE(n_rois.size() == 1);
     CHECK(n_rois[0] == 0);
-
-    std::filesystem::remove_all(tmp, ec);
 }
