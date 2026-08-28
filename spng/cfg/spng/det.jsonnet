@@ -9,7 +9,7 @@ local frame_mod = import "spng/frame.jsonnet";
 local spng_mod = import "spng/spng.jsonnet";
 local fans_mod = import "spng/fans.jsonnet";
 
-function(det, control)
+function(det, control, add_noise=true)
 {
     // Intern these
     det: det,
@@ -33,7 +33,7 @@ function(det, control)
     // [1]IDepoSet->IFrame[ntpcs] node.  Applies detector response to depos to
     // produce ADC waveforms.  There is one oport per TPC.
     inducer:
-        detsim_mod(det, control),
+        detsim_mod(det, control, add_noise=add_noise),
 
 
     /// Note, to fanout a 3 view node to both OSP and SPNG, use fans.fanout_select().
