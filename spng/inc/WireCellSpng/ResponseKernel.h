@@ -49,8 +49,11 @@ namespace WireCell::SPNG {
         /// A multiplicative scale applied to the natural response tensor.
         ///
         /// The FR is originally in units of [current].  The ER is in units
-        /// [voltage/charge] and its coarse sample period T is multiplied to the
-        /// convolution of the two to give T(FR*ER) in units [voltage].  When
+        /// [voltage/charge] and is sampled at the FR's own (fine) period.  That
+        /// fine period T_fr, and NOT the coarse "period" below, is multiplied
+        /// to the convolution of the two to give T_fr(FR*ER) in units
+        /// [voltage] -- the convolution is a discrete sum on the fine grid, so
+        /// it is the fine period that turns it into a time integral.  When
         /// the response is used to deconvolve an ADC waveform tensor, it is
         /// convenient to convert the response kernel from units of [voltage] to
         /// a unitless ADC [count].  This is done by giving a scale that is in
