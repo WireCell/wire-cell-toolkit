@@ -1740,7 +1740,7 @@ function(
     // SBND_SHOWER_MERGE_RELAX_CONTINUITY (+_CONT_FRAC, _CONT_GAP,
     // _CONT_QMED, _CONT_AXIS, _CONT_DMAX, _CONT_T1_GAP, _CONT_T1_FOLD).
     shower_ex1_conn3_body_dis = false,       // shipped OFF, not selected: measured ZERO yield (doc pr/118 sec 4a -- 1 admit in 98 events, fails angles)
-    shower_merge_relax_continuity = false,   // C++ default false (legacy merge_relax only)
+    shower_merge_relax_continuity = true,    // SBND PRODUCTION ON 2026-08-28 (doc pr/118 r1; owner pre-authorized "turn them on if validation pass"; 4 measured merges, +0.250/+0.035/+0.012, 0 negatives, 0 control churn, nusel 98/98 identical)
     shower_merge_relax_cont_frac = null,     // fraction; C++ default 1.0
     shower_merge_relax_cont_gap = null,      // cm; C++ default 8
     shower_merge_relax_cont_qmed = null,     // charge units; C++ default 5000
