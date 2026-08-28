@@ -892,6 +892,17 @@ public:
         double m_shower_hadronic_stem_ratio{0.0};                   // MIP units; 0 = branch off; inert while tag off
         bool m_kine_count_orphan_tracks{false};                     // doc pr/93 r4 (315167)
         double m_kine_orphan_track_min{50};                         // cm; scaled at copy
+        // doc sbnd_xin/docs/pr/117 round 1 -- rationale comments in
+        // NeutrinoPatternBase.h (m_shower_pass4_best_owner /
+        // m_shower_merge_relax / m_shower_flank_absorb blocks).
+        bool   m_shower_pass4_best_owner{false};                    // doc pr/117 r1 (48% of wrongly-held charge)
+        bool   m_shower_merge_relax{false};                         // doc pr/117 r1 (20-event merge class)
+        double m_shower_merge_relax_dis{6.0};                       // cm; scaled at copy; inert while off
+        double m_shower_merge_relax_angle{15.0};                    // deg, no conversion; inert while off
+        double m_shower_merge_relax_min_len{5.0};                   // cm; scaled at copy; fragment length floor; inert while off
+        bool   m_shower_flank_absorb{false};                        // doc pr/117 r1 (41 orphan stub marks)
+        double m_shower_flank_absorb_max_dis{6.0};                  // cm; scaled at copy; inert while off
+        double m_shower_flank_absorb_max_len{25.0};                 // cm; scaled at copy; inert while off
         bool m_straight_cont_cross_cluster{false};                  // doc pr/93 r4 (137238)
         bool m_sccc_bridge_body{false};                             // doc pr/93 r4 second rung
         double m_sccc_max_gap{5};                                   // cm; base tier

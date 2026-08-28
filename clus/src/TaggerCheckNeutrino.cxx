@@ -650,6 +650,15 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_shower_hadronic_stem_ratio                = get(config, "shower_hadronic_stem_ratio",                m_shower_hadronic_stem_ratio);
     m_kine_count_orphan_tracks                  = get(config, "kine_count_orphan_tracks",                  m_kine_count_orphan_tracks);
     m_kine_orphan_track_min                     = get(config, "kine_orphan_track_min",                     m_kine_orphan_track_min);
+    // doc sbnd_xin/docs/pr/117 round 1
+    m_shower_pass4_best_owner                   = get(config, "shower_pass4_best_owner",                   m_shower_pass4_best_owner);
+    m_shower_merge_relax                        = get(config, "shower_merge_relax",                        m_shower_merge_relax);
+    m_shower_merge_relax_dis                    = get(config, "shower_merge_relax_dis",                    m_shower_merge_relax_dis);
+    m_shower_merge_relax_angle                  = get(config, "shower_merge_relax_angle",                  m_shower_merge_relax_angle);
+    m_shower_merge_relax_min_len                = get(config, "shower_merge_relax_min_len",                m_shower_merge_relax_min_len);
+    m_shower_flank_absorb                       = get(config, "shower_flank_absorb",                       m_shower_flank_absorb);
+    m_shower_flank_absorb_max_dis               = get(config, "shower_flank_absorb_max_dis",               m_shower_flank_absorb_max_dis);
+    m_shower_flank_absorb_max_len               = get(config, "shower_flank_absorb_max_len",               m_shower_flank_absorb_max_len);
     m_straight_cont_cross_cluster               = get(config, "straight_cont_cross_cluster",               m_straight_cont_cross_cluster);
     m_sccc_bridge_body                          = get(config, "sccc_bridge_body",                          m_sccc_bridge_body);
     m_sccc_max_gap                              = get(config, "sccc_max_gap",                              m_sccc_max_gap);
@@ -1051,6 +1060,14 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["shower_hadronic_stem_ratio"]                = m_shower_hadronic_stem_ratio;                // MIP units; 0 = branch off (doc pr/99 r3)
     cfg["kine_count_orphan_tracks"]                  = m_kine_count_orphan_tracks;                  // doc pr/93 r4; false = legacy (graph-disconnected confident tracks absent from kine)
     cfg["kine_orphan_track_min"]                     = m_kine_orphan_track_min;                     // cm; only read when kine_count_orphan_tracks
+    cfg["shower_pass4_best_owner"]                   = m_shower_pass4_best_owner;                   // doc pr/117 r1; false = legacy greedy owner, byte-identical
+    cfg["shower_merge_relax"]                        = m_shower_merge_relax;                        // doc pr/117 r1; false = no pass, byte-identical
+    cfg["shower_merge_relax_dis"]                    = m_shower_merge_relax_dis;                    // cm; inert while merge_relax off (doc pr/117 r1)
+    cfg["shower_merge_relax_angle"]                  = m_shower_merge_relax_angle;                  // deg; inert while merge_relax off (doc pr/117 r1)
+    cfg["shower_merge_relax_min_len"]                = m_shower_merge_relax_min_len;                // cm; fragment length floor; inert while merge_relax off (doc pr/117 r1)
+    cfg["shower_flank_absorb"]                       = m_shower_flank_absorb;                       // doc pr/117 r1; false = no pass, byte-identical
+    cfg["shower_flank_absorb_max_dis"]               = m_shower_flank_absorb_max_dis;               // cm; inert while flank_absorb off (doc pr/117 r1)
+    cfg["shower_flank_absorb_max_len"]               = m_shower_flank_absorb_max_len;               // cm; inert while flank_absorb off (doc pr/117 r1)
     cfg["straight_cont_cross_cluster"]               = m_straight_cont_cross_cluster;               // doc pr/93 r4; false = legacy (no cross-cluster continuation demotion)
     cfg["sccc_bridge_body"]                          = m_sccc_bridge_body;                          // doc pr/93 r4; false = demote-only (no bridge replay)
     cfg["sccc_max_gap"]                              = m_sccc_max_gap;                              // cm; base tier, only read when straight_cont_cross_cluster
@@ -2079,6 +2096,14 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
         pattern_algos.m_shower_hadronic_stem_ratio                = m_shower_hadronic_stem_ratio;                // MIP units, no conversion (doc pr/99 r3)
         pattern_algos.m_kine_count_orphan_tracks                  = m_kine_count_orphan_tracks;                  // doc pr/93 r4
         pattern_algos.m_kine_orphan_track_min                     = m_kine_orphan_track_min * units::cm;         // doc pr/93 r4
+        pattern_algos.m_shower_pass4_best_owner                   = m_shower_pass4_best_owner;                   // doc pr/117 r1
+        pattern_algos.m_shower_merge_relax                        = m_shower_merge_relax;                        // doc pr/117 r1
+        pattern_algos.m_shower_merge_relax_dis                    = m_shower_merge_relax_dis * units::cm;        // cm -> internal (doc pr/117 r1)
+        pattern_algos.m_shower_merge_relax_angle                  = m_shower_merge_relax_angle;                  // deg, no conversion (doc pr/117 r1)
+        pattern_algos.m_shower_merge_relax_min_len                = m_shower_merge_relax_min_len * units::cm;    // cm -> internal (doc pr/117 r1)
+        pattern_algos.m_shower_flank_absorb                       = m_shower_flank_absorb;                       // doc pr/117 r1
+        pattern_algos.m_shower_flank_absorb_max_dis               = m_shower_flank_absorb_max_dis * units::cm;   // cm -> internal (doc pr/117 r1)
+        pattern_algos.m_shower_flank_absorb_max_len               = m_shower_flank_absorb_max_len * units::cm;   // cm -> internal (doc pr/117 r1)
         pattern_algos.m_straight_cont_cross_cluster               = m_straight_cont_cross_cluster;               // doc pr/93 r4
         pattern_algos.m_sccc_bridge_body                          = m_sccc_bridge_body;                          // doc pr/93 r4
         pattern_algos.m_sccc_max_gap                              = m_sccc_max_gap * units::cm;                  // doc pr/93 r4

@@ -1536,6 +1536,9 @@ bool PatternAlgorithms::nv_bridge_track(Graph& graph, Facade::Cluster* main_clus
 
 void PatternAlgorithms::shower_clustering_with_nv_from_vertices(Graph& graph, VertexPtr main_vertex, Facade::Cluster* main_cluster, std::vector<Facade::Cluster*>& other_clusters, IndexedShowerSet& showers, ShowerVertexMap& map_vertex_in_shower, ShowerSegmentMap& map_segment_in_shower, VertexShowerSetMap& map_vertex_to_shower, ClusterPtrSet& used_shower_clusters, IndexedVertexSet& vertices_in_long_muon, IndexedSegmentSet& segments_in_long_muon, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model){
     if (!main_vertex || !main_cluster) return;
+    if (m_shower_pass4_best_owner) {
+        SPDLOG_LOGGER_DEBUG(s_log, "pr117 pass4_best_owner on: direct-cone accepts arbitrated over all showers");
+    }
     
     // Build map_cluster_segments, map_segment_cluster, and seg_order.
     // seg_order holds unique segments in deterministic graph-index order for
@@ -1937,7 +1940,43 @@ void PatternAlgorithms::shower_clustering_with_nv_from_vertices(Graph& graph, Ve
             dir_shower = shower_cal_dir_3vector(*shower, test_p, 30 * units::cm);
         }
         if (dir_shower.magnitude() < 0.001) dir_shower = dir_main;
-        
+
+        // doc sbnd_xin/docs/pr/117 round 1 (shower_pass4_best_owner): rival
+        // list for the direct-cone arbitration below -- every OTHER existing
+        // shower (pass 1/2/3 and earlier pass-4 ones; this pass runs per
+        // candidate cluster nearest-first, so earlier winners are visible
+        // here), with its start point and 30cm local direction, in
+        // cluster-id/segment-id order (the pass-4 proximity comparator) for
+        // determinism.  Near-zero directions (1-segment stubs) are skipped so
+        // they cannot steal.  Also built under the WCT_SHOWER_ABSORB_DEBUG
+        // probe alone (knob off) to MEASURE the would-divert rate; the
+        // divert itself only happens under the knob.  Knob off + no probe =>
+        // list stays empty => the accept below is the legacy greedy add =>
+        // byte-identical.
+        struct Pass4Rival { ShowerPtr shower; WireCell::Point start_pt; WireCell::Vector dir; };
+        std::vector<Pass4Rival> pass4_rivals;
+        if (m_shower_pass4_best_owner || pr93_absorb_dbg()) {
+            std::vector<ShowerPtr> rival_order(showers.begin(), showers.end());
+            std::sort(rival_order.begin(), rival_order.end(), [](const ShowerPtr& a, const ShowerPtr& b) {
+                auto* sa = a->start_segment().get();
+                auto* sb = b->start_segment().get();
+                if (!sa || !sb) return sa < sb;
+                int cid_a = sa->cluster() ? sa->cluster()->get_cluster_id() : -1;
+                int cid_b = sb->cluster() ? sb->cluster()->get_cluster_id() : -1;
+                if (cid_a != cid_b) return cid_a < cid_b;
+                return sa->id() < sb->id();
+            });
+            for (auto& s1 : rival_order) {
+                if (s1 == shower) continue;
+                auto [rvtx, rtype] = s1->get_start_vertex_and_type();
+                WireCell::Point sp1 = rvtx ? (rvtx->fit().valid() ? rvtx->fit().point : rvtx->wcpt().point) : WireCell::Point(0, 0, 0);
+                auto [rd_, rtp] = shower_get_closest_point(*s1, sp1);
+                WireCell::Vector rdir = shower_cal_dir_3vector(*s1, rtp, 30 * units::cm);
+                if (rdir.magnitude() < 0.001) continue;
+                pass4_rivals.push_back({s1, sp1, rdir});
+            }
+        }
+
         // Add segments from other clusters.
         // Cache the shower start front point to avoid re-evaluating per segment.
         const WireCell::Point shower_start_front = shower->start_segment()->fits().front().point;
@@ -1974,8 +2013,52 @@ void PatternAlgorithms::shower_clustering_with_nv_from_vertices(Graph& graph, Ve
                         }
                     }
                 }
-                pr93_probe_absorb_direct("pass4_angle", shower, seg1);
-                shower->add_segment(seg1, true);
+                // doc sbnd_xin/docs/pr/117 round 1 (shower_pass4_best_owner):
+                // the cone has accepted seg1 -- arbitrate WHICH shower owns
+                // it.  Current shower's metric is the better of its two
+                // anchors (start vertex / closest-approach point, matching
+                // the acceptance disjunction above); each rival competes
+                // only if it passes the pass-3 cone disjunction from its own
+                // start point, on the same 40cm x 5cm ellipsoid metric.
+                // Empty rival list (knob off, no probe) => owner stays the
+                // current shower and the tag stays pass4_angle => the two
+                // legacy lines below are reached unchanged.
+                ShowerPtr p4_owner = shower;
+                if (!pass4_rivals.empty()) {
+                    auto p4_ellip = [](double dist, double angle_deg) {
+                        const double a = angle_deg * M_PI / 180.0;
+                        return std::pow(dist * std::cos(a), 2) / std::pow(40 * units::cm, 2) +
+                               std::pow(dist * std::sin(a), 2) / std::pow(5 * units::cm, 2);
+                    };
+                    const double metric_cur = std::min(p4_ellip(pair_dis, angle_v1),
+                                                       p4_ellip(v2.magnitude(), angle_v2));
+                    double best_metric = metric_cur;
+                    ShowerPtr best_shower = shower;
+                    for (const auto& r : pass4_rivals) {
+                        auto [rdist, rcp] = segment_get_closest_point(seg1, r.start_pt);
+                        WireCell::Vector rv1(rcp.x() - r.start_pt.x(), rcp.y() - r.start_pt.y(), rcp.z() - r.start_pt.z());
+                        double rangle = std::acos(std::clamp(r.dir.dot(rv1) / (r.dir.magnitude() * rv1.magnitude()), -1.0, 1.0)) / M_PI * 180.0;
+                        if (!((rangle < 25.0 && rdist < 80 * units::cm) ||
+                              (rangle < 12.5 && rdist < 130 * units::cm) ||
+                              (rangle < 5.0 && rdist < 200 * units::cm))) continue;
+                        const double m = p4_ellip(rdist, rangle);
+                        if (m < best_metric) { best_metric = m; best_shower = r.shower; }
+                    }
+                    if (pr93_absorb_dbg()) {
+                        std::fprintf(stderr,
+                            "SHOWER_ABSORB PASS4_OWNER seg=%d cur=%d cur_metric=%.4f best=%d best_metric=%.4f divert=%d applied=%d\n",
+                            pr91_seg_display_id(seg1),
+                            pr91_seg_display_id(shower->start_segment()),
+                            metric_cur,
+                            pr91_seg_display_id(best_shower->start_segment()),
+                            best_metric,
+                            (int)(best_shower != shower),
+                            (int)m_shower_pass4_best_owner);
+                    }
+                    if (m_shower_pass4_best_owner) p4_owner = best_shower;
+                }
+                pr93_probe_absorb_direct(p4_owner == shower ? "pass4_angle" : "pass4_angle_divert", p4_owner, seg1);
+                p4_owner->add_segment(seg1, true);
             }
         }
 
@@ -2183,6 +2266,234 @@ void PatternAlgorithms::examine_merge_showers(IndexedShowerSet& showers, VertexP
     if (!claimed.empty()) {
         update_shower_maps(showers, map_vertex_in_shower, map_segment_in_shower,
                           map_vertex_to_shower, used_shower_clusters);
+    }
+}
+
+
+// doc sbnd_xin/docs/pr/117 round 1 -- shower_flank_absorb.  Rationale at the
+// m_shower_flank_absorb member block (NeutrinoPatternBase.h).  A late single
+// sweep over UNCLAIMED shower-like segments, absorbing each into the argmin
+// shower by body distance.  This is a NEW absorber seat: the six legacy seats'
+// cluster()==main_cluster => continue guard is deliberately absent here (that
+// guard is what orphans the pr/115 stub class), and the track-safety burden
+// moves to the candidate filter instead.  Called only when the knob is on.
+void PatternAlgorithms::flank_absorb_orphans(Graph& graph, IndexedShowerSet& showers, ShowerVertexMap& map_vertex_in_shower, ShowerSegmentMap& map_segment_in_shower, VertexShowerSetMap& map_vertex_to_shower, ClusterPtrSet& used_shower_clusters, IndexedSegmentSet& segments_in_long_muon)
+{
+    if (showers.empty()) return;
+
+    // Unique segments in deterministic graph-index order (the pass-4 idiom).
+    std::vector<SegmentPtr> seg_order;
+    {
+        std::unordered_set<Segment*> seen;   // membership-tested only, never iterated
+        for (auto e : ordered_edges(graph)) {
+            SegmentPtr seg = graph[e].segment;
+            if (!seg || !seg->cluster()) continue;
+            if (seen.insert(seg.get()).second) seg_order.push_back(seg);
+        }
+    }
+
+    // Recipients in cluster-id/segment-id order (the pass-4 proximity comparator).
+    std::vector<ShowerPtr> sorted_showers(showers.begin(), showers.end());
+    std::sort(sorted_showers.begin(), sorted_showers.end(), [](const ShowerPtr& a, const ShowerPtr& b) {
+        auto* sa = a->start_segment().get();
+        auto* sb = b->start_segment().get();
+        if (!sa || !sb) return sa < sb;
+        int cid_a = sa->cluster() ? sa->cluster()->get_cluster_id() : -1;
+        int cid_b = sb->cluster() ? sb->cluster()->get_cluster_id() : -1;
+        if (cid_a != cid_b) return cid_a < cid_b;
+        return sa->id() < sb->id();
+    });
+
+    std::map<ShowerPtr, double> map_shower_length;   // lookup only, never iterated
+    for (auto& s : sorted_showers) map_shower_length[s] = s->get_total_length();
+
+    int n_absorbed = 0;
+    for (auto seg1 : seg_order) {
+        if (!seg1->descriptor_valid()) continue;
+        if (map_segment_in_shower.find(seg1) != map_segment_in_shower.end()) continue;
+        if (segments_in_long_muon.count(seg1)) continue;
+        const bool shower_like = seg1->flags_any(SegmentFlags::kShowerTrajectory) ||
+                                 seg1->flags_any(SegmentFlags::kShowerTopology) ||
+                                 (seg1->has_particle_info() && seg1->particle_info() &&
+                                  std::abs(seg1->particle_info()->pdg()) == 11);
+        if (!shower_like) continue;
+        // Track safety: a confidently-PID'd non-electron never moves (the
+        // pass-3 cone_absorb_guard / flood-fill guard_excludes predicate).
+        if (segment_confident_nonelectron_pid(seg1)) continue;
+        const double len = segment_track_length(seg1);
+        if (len >= m_shower_flank_absorb_max_len) continue;
+
+        double min_dis = 1e9;
+        ShowerPtr min_shower = nullptr;
+        for (auto& shower1 : sorted_showers) {
+            if (std::abs(shower1->get_particle_type()) == 13) continue;   // long-muon pseudo-shower
+            if (len > 0.75 * map_shower_length[shower1]) continue;        // the pass-4 proportionality guard
+            if (shower1->has_edge(seg1->get_descriptor())) continue;      // already a member (maps can lag)
+            const double dis = shower_get_closest_dis(*shower1, seg1);
+            if (dis < min_dis) { min_dis = dis; min_shower = shower1; }
+        }
+        if (!min_shower || min_dis >= m_shower_flank_absorb_max_dis) continue;
+
+        pr93_probe_absorb_direct("flank_absorb", min_shower, seg1);
+        SPDLOG_LOGGER_DEBUG(s_log,
+            "pr117 flank_absorb: seg={} len={:.1f}cm -> shower_id={} dis={:.2f}cm",
+            pr91_seg_display_id(seg1), len / units::cm,
+            min_shower->get_shower_id(), min_dis / units::cm);
+        min_shower->add_segment(seg1, true);
+        // calc-kine-2 skips flag_kinematics==true showers; the grown shower
+        // must be re-costed or the absorbed charge silently never counts.
+        min_shower->set_flag_kinematics(false);
+        map_shower_length[min_shower] = min_shower->get_total_length();
+        ++n_absorbed;
+    }
+    if (n_absorbed) {
+        update_shower_maps(showers, map_vertex_in_shower, map_segment_in_shower,
+                           map_vertex_to_shower, used_shower_clusters);
+        SPDLOG_LOGGER_DEBUG(s_log,
+            "pr117 flank_absorb: {} orphan segment(s) absorbed; maps rebuilt", n_absorbed);
+    }
+}
+
+
+// doc sbnd_xin/docs/pr/117 round 1 -- shower_merge_relax.  Rationale at the
+// m_shower_merge_relax member block (NeutrinoPatternBase.h).  A late fragment
+// consolidation pass, forked in SHAPE from examine_merge_showers' two-phase
+// plan/execute structure (that production pass stays byte-untouched, M10) but
+// with proximity + local-pivot geometry instead of the main-vertex 10-deg
+// test.  Called only when the knob is on.
+void PatternAlgorithms::merge_shower_fragments(Graph& graph, IndexedShowerSet& showers, VertexPtr main_vertex, ShowerVertexMap& map_vertex_in_shower, ShowerSegmentMap& map_segment_in_shower, VertexShowerSetMap& map_vertex_to_shower, ClusterPtrSet& used_shower_clusters, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model)
+{
+    if (showers.size() < 2) return;
+
+    std::vector<ShowerPtr> sorted_showers(showers.begin(), showers.end());
+    std::sort(sorted_showers.begin(), sorted_showers.end(), [](const ShowerPtr& a, const ShowerPtr& b) {
+        auto* sa = a->start_segment().get();
+        auto* sb = b->start_segment().get();
+        if (!sa || !sb) return sa < sb;
+        int cid_a = sa->cluster() ? sa->cluster()->get_cluster_id() : -1;
+        int cid_b = sb->cluster() ? sb->cluster()->get_cluster_id() : -1;
+        if (cid_a != cid_b) return cid_a < cid_b;
+        return sa->id() < sb->id();
+    });
+
+    std::map<ShowerPtr, double> map_shower_length;   // lookup only, never iterated
+    for (auto& s : sorted_showers) map_shower_length[s] = s->get_total_length();
+
+    // Phase 1: plan merges in deterministic order, FRAGMENT-FIRST -- each
+    // fragment picks its best (min-gap) absorber among the strictly-bigger
+    // showers that pass the gates, rather than the first bigger shower in
+    // iteration order claiming it.  'claimed' marks fragments already
+    // promised; a shower claimed as a fragment cannot itself absorb.
+    std::unordered_set<Shower*> claimed;   // membership-tested only, never iterated
+    std::map<ShowerPtr, std::vector<ShowerPtr>> plan_by_absorber;  // lookup + ordered exec below
+
+    for (auto& shower2 : sorted_showers) {                       // fragment candidate
+        // EM <-> EM only.  Measured (doc pr/117 sec 7): without this guard
+        // the two spurious directional merges in the 98-event set each had a
+        // proton-typed side (37112: pdg-2212 fragment into an e-; 389538:
+        // e- fragment into a pdg-2212 absorber on a GOOD event).  It also
+        // keeps this pass out of the track pool entirely.
+        if (std::abs(shower2->get_particle_type()) != 11) continue;
+        if (plan_by_absorber.count(shower2)) continue;           // already absorbing: no chains
+        const double len2 = map_shower_length[shower2];
+        // Fragment length FLOOR.  A fragment too short to carry a 30cm
+        // direction (the pr/115 'orphan' class measured: 40 of 41 are pdg-11
+        // one-segment showers, median 1.7 cm) is not a candidate at all:
+        // merging such stubs on gap alone measured net-NEGATIVE on the
+        // marked set (blind proximity cannot tell an under-clustered stub
+        // from an over-clustered one), and letting them into the angle test
+        // fires on a random ~3% of noise directions (doc pr/117 sec 7).
+        if (len2 < m_shower_merge_relax_min_len) continue;
+        auto [sv2, t2] = shower2->get_start_vertex_and_type();
+        const WireCell::Point p2 = shower2->get_start_point();
+
+        double best_gap = 1e9;
+        ShowerPtr best_absorber = nullptr;
+        for (auto& shower1 : sorted_showers) {                   // absorber candidate
+            if (shower1 == shower2 || claimed.count(shower1.get())) continue;
+            if (std::abs(shower1->get_particle_type()) != 11) continue;   // EM <-> EM only, see above
+            const double len1 = map_shower_length[shower1];
+            if (!(len2 < len1)) continue;                        // absorber is the strictly bigger object
+            auto [sv1, t1] = shower1->get_start_vertex_and_type();
+            // HARD gamma-gamma guard (not a knob): two showers both rooted
+            // at the main vertex with conn type 1/2 are exactly the pi0
+            // gamma-pair topology -- merging them is the legacy pass's
+            // 10-deg call, never this pass's.
+            if (sv1 == main_vertex && sv2 == main_vertex && t1 <= 2 && t2 <= 2) continue;
+
+            // Body gap: min over the fragment's members of the closest
+            // distance to the absorber's fit cloud.
+            double gap = 1e9;
+            for (auto e : ordered_edges(*shower2, graph)) {
+                SegmentPtr sb = graph[e].segment;
+                if (!sb) continue;
+                gap = std::min(gap, shower_get_closest_dis(*shower1, sb));
+            }
+            // Local-pivot directions at the meeting point (NOT the main
+            // vertex): fragments of one shower meet away from the vertex.
+            // Axis-folded agreement -- a fragment CONTINUING the absorber
+            // reads anti-parallel here (both dirs point into their own
+            // body), so |cos| is the right test.
+            double angle_fold = 180.0;
+            if (gap < m_shower_merge_relax_dis) {
+                auto [d1_, p1] = shower_get_closest_point(*shower1, p2);
+                WireCell::Vector dir1 = shower_cal_dir_3vector(*shower1, p1, 30 * units::cm);
+                WireCell::Vector dir2 = shower_cal_dir_3vector(*shower2, p2, 30 * units::cm);
+                if (dir1.magnitude() > 0.001 && dir2.magnitude() > 0.001) {
+                    const double c = std::abs(dir1.dot(dir2) / (dir1.magnitude() * dir2.magnitude()));
+                    angle_fold = std::acos(std::clamp(c, 0.0, 1.0)) / M_PI * 180.0;
+                }
+            }
+            const bool fires = gap < m_shower_merge_relax_dis && angle_fold < m_shower_merge_relax_angle;
+            if (pr91_merge_dbg())
+                std::fprintf(stderr, "SHOWER_MERGE tag=merge_relax keep_sid=%d keep_node=%d "
+                                     "cand_sid=%d cand_node=%d gap=%.2fcm angle_fold=%.2f len2=%.1fcm "
+                                     "cut_dis=%.2f cut_angle=%.2f verdict=%s\n",
+                             shower1->get_shower_id(), pr91_seg_display_id(shower1->start_segment()),
+                             shower2->get_shower_id(), pr91_seg_display_id(shower2->start_segment()),
+                             gap / units::cm, angle_fold, len2 / units::cm,
+                             m_shower_merge_relax_dis / units::cm, m_shower_merge_relax_angle,
+                             fires ? "MERGE" : (gap < m_shower_merge_relax_dis ? "angle_fold_fail" : "gap_fail"));
+            if (fires && gap < best_gap) {
+                best_gap = gap;
+                best_absorber = shower1;
+            }
+        }
+        if (best_absorber) {
+            plan_by_absorber[best_absorber].push_back(shower2);
+            claimed.insert(shower2.get());
+        }
+    }
+    // Rebuild the ordered execution plan (absorbers in sorted order).
+    std::vector<std::pair<ShowerPtr, std::vector<ShowerPtr>>> merge_plan;
+    for (auto& shower1 : sorted_showers) {
+        auto it = plan_by_absorber.find(shower1);
+        if (it != plan_by_absorber.end()) merge_plan.emplace_back(shower1, std::move(it->second));
+    }
+
+    // Phase 2: execute -- the examine_merge_showers bookkeeping, verbatim.
+    for (auto& [shower1, to_merge] : merge_plan) {
+        for (auto& shower2 : to_merge) {
+            pr93_probe_absorb_splice("merge_relax", shower1, shower2);
+            shower1->add_shower(*shower2);
+        }
+        shower1->update_particle_type(particle_data, recomb_model, m_mip_dqdx, main_vertex, m_shower_proton_daughter_pion, m_mip_dqdx_median, m_shower_vote_track_pid_counts, m_shower_accept_pid_guard, m_shower_pid_guard_min_len);
+        shower1->calculate_kinematics(particle_data, recomb_model, m_shower_endpoint_exclude_start_vertex, m_shower_endpoint_skip_orphan_vtx);
+        shower1->set_kine_charge(cal_kine_charge(shower1, m_charge_2d_u, m_charge_2d_v, m_charge_2d_w, m_map_apa_ch_plane_wires, track_fitter, dv));
+        shower1->set_flag_kinematics(true);
+    }
+    int n_merged = 0;
+    for (auto& [shower1, to_merge] : merge_plan) {               // deterministic erase order
+        for (auto& shower2 : to_merge) {
+            showers.erase(shower2);
+            ++n_merged;
+        }
+    }
+    if (n_merged) {
+        update_shower_maps(showers, map_vertex_in_shower, map_segment_in_shower,
+                           map_vertex_to_shower, used_shower_clusters);
+        SPDLOG_LOGGER_DEBUG(s_log,
+            "pr117 merge_relax: {} fragment shower(s) absorbed; {} remain", n_merged, showers.size());
     }
 }
 
@@ -4582,6 +4893,20 @@ void PatternAlgorithms::shower_clustering_with_nv(int acc_segment_id, IndexedSho
         t0 = Clock::now();
     }
 
+    // doc sbnd_xin/docs/pr/117 round 1 (shower_flank_absorb): absorb the
+    // orphan shower-like stubs no legacy seat can reach (main-cluster
+    // segments are categorically skipped by every cone/proximity absorber
+    // seat; stem_backfill walks only the vertex chain).  After stem_backfill
+    // and before the second kinematics pass so the absorbed charge is
+    // counted; the pass clears flag_kinematics on every shower it grows.
+    // false = no call = byte-identical.
+    if (m_shower_flank_absorb) {
+        flank_absorb_orphans(graph, showers, map_vertex_in_shower,
+                             map_segment_in_shower, map_vertex_to_shower,
+                             used_shower_clusters, segments_in_long_muon);
+        t0 = Clock::now();
+    }
+
     // Calculate shower kinematics again
     SPDLOG_LOGGER_TRACE(s_log,
         "shower_clustering_with_nv: {} shower(s) before calc_kine_2", showers.size());
@@ -4596,7 +4921,22 @@ void PatternAlgorithms::shower_clustering_with_nv(int acc_segment_id, IndexedSho
                    track_fitter, dv, particle_data, recomb_model);
     t_examine_showers = MS(Clock::now() - t0); t0 = Clock::now();
     // check_used_shower_cluster_933("examine_showers");
-    
+
+    // doc sbnd_xin/docs/pr/117 round 1 (shower_merge_relax): late fragment
+    // consolidation -- two PR::Showers that are one physical shower, rooted
+    // away from the main vertex, have no legacy merge pass
+    // (examine_merge_showers pairs only conn-1 x conn-2 AT the main vertex).
+    // After examine_showers (the last pass that creates or retargets) and
+    // before the dedup/detach/ghost family and the pi0 finders, so pairing
+    // sees the consolidated set.  false = no call = byte-identical.
+    if (m_shower_merge_relax) {
+        merge_shower_fragments(graph, showers, main_vertex, map_vertex_in_shower,
+                               map_segment_in_shower, map_vertex_to_shower,
+                               used_shower_clusters, track_fitter, dv,
+                               particle_data, recomb_model);
+        t0 = Clock::now();
+    }
+
     // doc sbnd_xin/docs/pr/84 round 3: collapse showers that share a start
     // segment.  Here and not earlier on purpose -- this is after EVERY pass
     // that can create or retarget a shower (examine_showers is the last), and

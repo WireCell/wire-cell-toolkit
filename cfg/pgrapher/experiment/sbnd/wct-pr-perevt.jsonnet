@@ -1715,6 +1715,22 @@ function(
     shower_ghost_overlap_frac = null,
     shower_ghost_dqdx_ratio = null,
     shower_ghost_min_len = null,
+    // doc pr/117 round 1 -- EM clustering, sized from the pr/115 hand-scan
+    // absorb census: pass-4 best-owner arbitration (48% of wrongly-held
+    // charge), late fragment consolidation (the 20-event merge class),
+    // orphan flank absorb (the 41 never-absorbed stub marks).  C++
+    // defaults false / 6cm / 15deg / 6cm / 25cm = legacy.  Key omitted
+    // when off => byte-identical pre-pr/117 config.  Runner envs
+    // SBND_SHOWER_PASS4_BEST_OWNER / SBND_SHOWER_MERGE_RELAX (+_DIS,
+    // _ANGLE) / SBND_SHOWER_FLANK_ABSORB (+_MAX_DIS, _MAX_LEN).
+    shower_pass4_best_owner = false,
+    shower_merge_relax = false,
+    shower_merge_relax_dis = null,       // cm; C++ default 6
+    shower_merge_relax_angle = null,     // deg; C++ default 15
+    shower_merge_relax_min_len = null,   // cm; C++ default 5 (fragment length floor)
+    shower_flank_absorb = false,     // shipped OFF, not selected: no targets in the marked set (doc pr/117 sec 6)
+    shower_flank_absorb_max_dis = null,  // cm; C++ default 6
+    shower_flank_absorb_max_len = null,  // cm; C++ default 25
     // doc pr/99 round 3 -- C1 kine-charge cell-ownership dedup + C1b
     // prototype cloud-rebuild parity (168596 Enu double count) + A5
     // hadronic-shower re-type (315167/395148 labels).  C++ defaults
@@ -2684,6 +2700,16 @@ function(
         [if shower_ghost_overlap_frac != null then 'shower_ghost_overlap_frac']: shower_ghost_overlap_frac,
         [if shower_ghost_dqdx_ratio != null then 'shower_ghost_dqdx_ratio']: shower_ghost_dqdx_ratio,
         [if shower_ghost_min_len != null then 'shower_ghost_min_len']: shower_ghost_min_len,
+        // doc pr/117 round 1.  C++ defaults false/6cm/15deg/6cm/25cm.
+        // Key omitted when off => byte-identical pre-pr/117 config.
+        [if shower_pass4_best_owner then 'shower_pass4_best_owner']: true,
+        [if shower_merge_relax then 'shower_merge_relax']: true,
+        [if shower_merge_relax_dis != null then 'shower_merge_relax_dis']: shower_merge_relax_dis,
+        [if shower_merge_relax_angle != null then 'shower_merge_relax_angle']: shower_merge_relax_angle,
+        [if shower_merge_relax_min_len != null then 'shower_merge_relax_min_len']: shower_merge_relax_min_len,
+        [if shower_flank_absorb then 'shower_flank_absorb']: true,
+        [if shower_flank_absorb_max_dis != null then 'shower_flank_absorb_max_dis']: shower_flank_absorb_max_dis,
+        [if shower_flank_absorb_max_len != null then 'shower_flank_absorb_max_len']: shower_flank_absorb_max_len,
         [if (if kine_charge_dedup == null then false else kine_charge_dedup) then 'kine_charge_dedup']: true,
         [if (if kine_charge_rebuild == null then false else kine_charge_rebuild) then 'kine_charge_rebuild']: true,
         [if (if kine_charge_track_ctx == null then false else kine_charge_track_ctx) then 'kine_charge_track_ctx']: true,

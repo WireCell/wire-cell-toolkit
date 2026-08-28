@@ -2015,6 +2015,75 @@ namespace WireCell::Clus::PR {
         /// Cleared at shower_clustering_with_nv pass entry.  Empty (tag off)
         /// => the guards are no-ops => byte-identical.
         std::set<int> m_hadronic_retyped_shower_ids;
+        // ------------------------------------------------------------------
+        // doc sbnd_xin/docs/pr/117 round 1 -- EM clustering knobs, all three
+        // sized from the pr/115 97-event hand-scan absorb census
+        // (sbnd_xin/docs/pr/115_*.md sec 16.5).
+        //
+        // (1) shower_pass4_best_owner.  The pass-4 direct cone absorber in
+        // shower_clustering_with_nv_from_vertices (probe tag pass4_angle) is
+        // first-come greedy: a segment inside the CURRENT shower's
+        // acceptance disjunction is taken even when another existing shower
+        // fits it better, and pass 4 runs per candidate cluster nearest-
+        // first, so the first shower wins.  The census charges this one seat
+        // with 48% of all wrongly-held charge, and 25 of its 30
+        // under-clustering misses sit in a NEIGHBOUR shower -- the same
+        // defect seen from both sides.  (Pass 3's cone, which DOES argmin-
+        // compete on the 40cm x 5cm ellipsoid metric, causes 5%.)  When on,
+        // each segment the cone accepts is given to the argmin over all
+        // existing showers of that same ellipsoid metric
+        // (d cos/40cm)^2 + (d sin/5cm)^2, rivals gated by the pass-3 cone
+        // disjunction; rivals iterated in cluster-id/segment-id order with
+        // strict < => deterministic.  The accepted segment SET is unchanged
+        // -- only which shower owns each segment -- so the track pool is
+        // untouched by construction.  false (default) => legacy greedy
+        // owner => byte-identical.
+        bool   m_shower_pass4_best_owner{false};   ///< doc pr/117 r1; false = legacy greedy owner
+        // (2) shower_merge_relax.  Fragments of one shower rooted away from
+        // the main vertex (the pr/115 'merge' class, 20 events, reference
+        // evt168596) have no merge pass at all: examine_merge_showers pairs
+        // only conn-1 x conn-2 both rooted AT the main vertex under a hard
+        // 10 deg on 100cm directions.  When on, a separate late
+        // consolidation pass (merge_shower_fragments -- after
+        // examine_showers, the last pass that retargets, and before shower
+        // dedup; the production pass stays byte-untouched, M10) absorbs a
+        // strictly-smaller shower into a bigger one when the body gap (min
+        // over the fragment's members of the closest distance to the
+        // absorber's fit cloud) is below merge_relax_dis and the LOCAL-
+        // PIVOT 30cm directions -- taken at the meeting point, not the main
+        // vertex -- agree below merge_relax_angle (axis-folded: fragments
+        // continue each other, so anti-parallel is agreement).  HARD guard,
+        // not a knob: never merge two main-vertex conn-1/2 showers with
+        // each other -- a genuine gamma-gamma pair at the vertex is exactly
+        // that topology and stays the legacy pass's 10-deg jurisdiction.
+        // false (default) => no pass => byte-identical; numerics inert
+        // while off.
+        bool   m_shower_merge_relax{false};             ///< doc pr/117 r1; false = no pass
+        double m_shower_merge_relax_dis{6*units::cm};   ///< body-gap ceiling, internal units; inert while off
+        double m_shower_merge_relax_angle{15.0};        ///< local-pivot axis agreement, DEGREES; inert while off
+        double m_shower_merge_relax_min_len{5*units::cm}; ///< fragment length FLOOR, internal units: a shorter fragment has no measurable direction and is not a candidate (gap-only stub merging measured net-negative, and a noise direction passes any angle cut on ~3% of stubs -- doc pr/117 sec 7); inert while merge_relax off
+        // (3) shower_flank_absorb.  41 of the 125 scan-missed segments
+        // (33%) were never absorbed by ANY pass: main-cluster segments are
+        // categorically skipped by all six cone/proximity absorber seats
+        // (cluster()==main_cluster => continue), stem_backfill walks only
+        // the main-vertex chain, and the cones are anchored at the shower
+        // START point so a stub off the flank fails on angle however close
+        // its charge sits.  When on, a late single sweep (after
+        // stem_backfill, before the second kinematics pass so the absorbed
+        // charge is costed) absorbs each UNCLAIMED shower-like segment
+        // (kShowerTrajectory/kShowerTopology flagged or |pdg|==11; NOT in a
+        // long muon; NOT confident non-electron PID; length under
+        // flank_absorb_max_len AND under 0.75x the recipient -- the pass-4
+        // proximity proportionality guard) into the argmin shower by body
+        // distance (shower_get_closest_dis) when below
+        // flank_absorb_max_dis.  Main-cluster segments ARE eligible: this
+        // is a new seat; the guarded legacy seats are untouched.  The pass
+        // clears flag_kinematics on every shower it grows so calc-kine-2
+        // recosts them.  false (default) => no pass => byte-identical;
+        // numerics inert while off.
+        bool   m_shower_flank_absorb{false};                ///< doc pr/117 r1; false = no pass
+        double m_shower_flank_absorb_max_dis{6*units::cm};  ///< body-distance ceiling, internal units; inert while off
+        double m_shower_flank_absorb_max_len{25*units::cm}; ///< candidate max length, internal units; inert while off
         // kine_count_orphan_tracks (315167): fill_kine_tree counterpart of
         // the PF-side pf_orphan_confident_track knob (BeePFConfig).  A
         // confident straight-long main-cluster track that is graph-
@@ -3139,6 +3208,10 @@ namespace WireCell::Clus::PR {
         int merge_showers_sharing_start_segment(IndexedShowerSet& showers);
         // doc sbnd_xin/docs/pr/74 round 2 K4 -- see m_shower_stem_backfill.
         void stem_backfill(Graph& graph, VertexPtr main_vertex, IndexedShowerSet& showers, ShowerVertexMap& map_vertex_in_shower, ShowerSegmentMap& map_segment_in_shower, VertexShowerSetMap& map_vertex_to_shower, ClusterPtrSet& used_shower_clusters, IndexedSegmentSet& segments_in_long_muon, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model);
+        // doc sbnd_xin/docs/pr/117 round 1 -- see m_shower_flank_absorb.
+        void flank_absorb_orphans(Graph& graph, IndexedShowerSet& showers, ShowerVertexMap& map_vertex_in_shower, ShowerSegmentMap& map_segment_in_shower, VertexShowerSetMap& map_vertex_to_shower, ClusterPtrSet& used_shower_clusters, IndexedSegmentSet& segments_in_long_muon);
+        // doc sbnd_xin/docs/pr/117 round 1 -- see m_shower_merge_relax.
+        void merge_shower_fragments(Graph& graph, IndexedShowerSet& showers, VertexPtr main_vertex, ShowerVertexMap& map_vertex_in_shower, ShowerSegmentMap& map_segment_in_shower, VertexShowerSetMap& map_vertex_to_shower, ClusterPtrSet& used_shower_clusters, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model);
         void shower_clustering_with_nv_in_main_cluster(Graph& graph, VertexPtr main_vertex, IndexedShowerSet& showers, ShowerVertexMap& map_vertex_in_shower, ShowerSegmentMap& map_segment_in_shower, VertexShowerSetMap& map_vertex_to_shower, ClusterPtrSet& used_shower_clusters, IndexedVertexSet& vertices_in_long_muon, IndexedSegmentSet& segments_in_long_muon, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model);
         void shower_clustering_connecting_to_main_vertex(Graph& graph, VertexPtr main_vertex, IndexedShowerSet& showers, ShowerVertexMap& map_vertex_in_shower, ShowerSegmentMap& map_segment_in_shower, VertexShowerSetMap& map_vertex_to_shower, ClusterPtrSet& used_shower_clusters);
         void shower_clustering_with_nv_from_main_cluster(Graph& graph, VertexPtr main_vertex, Facade::Cluster* main_cluster, IndexedShowerSet& showers, ShowerVertexMap& map_vertex_in_shower, ShowerSegmentMap& map_segment_in_shower, VertexShowerSetMap& map_vertex_to_shower, ClusterPtrSet& used_shower_clusters);

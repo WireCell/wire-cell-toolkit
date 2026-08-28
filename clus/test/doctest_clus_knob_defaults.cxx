@@ -209,6 +209,15 @@ TEST_CASE("clus knob defaults: TaggerCheckNeutrino switches are all OFF")
     CHECK_KNOB_NUM(cfg, "shower_hadronic_stem_ratio", 0.0);                  // MIP units; 0 = branch off
     CHECK_KNOB_BOOL(cfg, "kine_count_orphan_tracks", false);                  // r4 (315167)
     CHECK_KNOB_NUM(cfg, "kine_orphan_track_min", 50.0);                       // cm; read only when on
+    // doc pr/117 round 1 -- EM clustering knob families.
+    CHECK_KNOB_BOOL(cfg, "shower_pass4_best_owner", false);                   // pr/117 r1; false = legacy greedy owner
+    CHECK_KNOB_BOOL(cfg, "shower_merge_relax", false);                        // pr/117 r1; false = no pass
+    CHECK_KNOB_NUM(cfg, "shower_merge_relax_dis", 6.0);                       // cm; inert while off
+    CHECK_KNOB_NUM(cfg, "shower_merge_relax_angle", 15.0);                    // deg; inert while off
+    CHECK_KNOB_NUM(cfg, "shower_merge_relax_min_len", 5.0);                   // cm; fragment length floor; inert while off
+    CHECK_KNOB_BOOL(cfg, "shower_flank_absorb", false);                       // pr/117 r1; false = no pass
+    CHECK_KNOB_NUM(cfg, "shower_flank_absorb_max_dis", 6.0);                  // cm; inert while off
+    CHECK_KNOB_NUM(cfg, "shower_flank_absorb_max_len", 25.0);                 // cm; inert while off
     CHECK_KNOB_BOOL(cfg, "straight_cont_cross_cluster", false);               // r4 (137238)
     CHECK_KNOB_BOOL(cfg, "sccc_bridge_body", false);                          // r4 second rung
     CHECK_KNOB_NUM(cfg, "sccc_max_gap", 5.0);                                 // cm; base tier
