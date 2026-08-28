@@ -2571,6 +2571,363 @@ static void pr118_probe_continuity_pairs(const std::vector<ShowerPtr>& sorted_sh
     }
 }
 
+// doc sbnd_xin/docs/pr/119 -- byte-neutral shower-membership census under
+// WCT_SHOWER_EXPEL_DEBUG.  The 29 hand-scan OUT marks (segments wrongly HELD
+// by a shower) sit in 6 events, and on every one of them the wanted and
+// unwanted sides live in DIFFERENT imaging clusters (pr/115 sec 16.4: "what
+// those 6 need is a guard on the cross-cluster absorb"); 5 of the 6 have the
+// shower's own root on the wrong side, so the unit of measurement is not the
+// member but the (imaging-cluster x view-connected-component) GROUP, anchored
+// at the component that contains the start segment.  The probe partitions
+// every shower that way and prints per-group geometry/charge/junction
+// features so the offline census (scripts/pr119_expel_census.py) can test
+// the expel predicate before any behavior exists.  Log/stderr only: no
+// effect on emitted bytes.
+static inline bool pr119_expel_dbg()
+{
+    static const bool dbg = std::getenv("WCT_SHOWER_EXPEL_DEBUG") != nullptr;
+    return dbg;
+}
+
+namespace {
+    struct Pr119Group {
+        int cluster_id = -1;
+        bool anchor = false;               // holds the shower's start segment
+        std::vector<SegmentPtr> segs;      // ascending segment graph index
+    };
+}
+
+// Partition a shower's members into (imaging-cluster, view-connected
+// component) groups: anchor first (the start segment's component restricted
+// to the start segment's cluster), then remaining components seeded in
+// ascending segment graph-index order, each restricted to its own cluster.
+// Component membership is traversal-order independent; adjacency runs over
+// stable vertex indices, never pointer order.  Shared by the Phase-A probe
+// and the (future) Phase-B expel pass so the measurement is the mechanism.
+static std::vector<Pr119Group> pr119_partition(Shower& sh, Graph& graph)
+{
+    std::vector<Pr119Group> out;
+    std::vector<SegmentPtr> members;
+    for (auto edesc : ordered_edges(sh, graph)) {
+        SegmentPtr seg = graph[edesc].segment;
+        if (!seg || !seg->descriptor_valid()) continue;
+        members.push_back(seg);
+    }
+    std::sort(members.begin(), members.end(), SegmentIndexCmp{});
+    if (members.empty()) return out;
+
+    // vertex stable index -> member positions (the adjacency relation)
+    std::map<size_t, std::vector<size_t>> vtx_to_members;
+    std::vector<std::array<long long, 2>> member_vtx(members.size(), {-1, -1});
+    for (size_t i = 0; i < members.size(); ++i) {
+        auto [va, vb] = PR::find_vertices(graph, members[i]);
+        int k = 0;
+        for (VertexPtr v : {va, vb}) {
+            if (!v || !v->descriptor_valid()) continue;
+            const size_t idx = graph[v->get_descriptor()].index;
+            vtx_to_members[idx].push_back(i);
+            member_vtx[i][k++] = (long long) idx;
+        }
+    }
+    auto cluster_of = [](const SegmentPtr& s) {
+        return s->cluster() ? s->cluster()->get_cluster_id() : -1;
+    };
+    std::vector<char> visited(members.size(), 0);
+    auto flood = [&](size_t seed, int cid, Pr119Group& g) {
+        std::vector<size_t> stack{seed};
+        visited[seed] = 1;
+        while (!stack.empty()) {
+            const size_t cur = stack.back();
+            stack.pop_back();
+            g.segs.push_back(members[cur]);
+            for (long long vi : member_vtx[cur]) {
+                if (vi < 0) continue;
+                for (size_t nb : vtx_to_members[(size_t) vi]) {
+                    if (visited[nb]) continue;
+                    if (cluster_of(members[nb]) != cid) continue;
+                    visited[nb] = 1;
+                    stack.push_back(nb);
+                }
+            }
+        }
+        std::sort(g.segs.begin(), g.segs.end(), SegmentIndexCmp{});
+    };
+
+    SegmentPtr root = sh.start_segment();
+    size_t root_pos = members.size();
+    for (size_t i = 0; i < members.size(); ++i) {
+        if (members[i] == root) { root_pos = i; break; }
+    }
+    if (root_pos < members.size()) {
+        Pr119Group g;
+        g.cluster_id = cluster_of(root);
+        g.anchor = true;
+        flood(root_pos, g.cluster_id, g);
+        out.push_back(std::move(g));
+    }
+    for (size_t i = 0; i < members.size(); ++i) {
+        if (visited[i]) continue;
+        Pr119Group g;
+        g.cluster_id = cluster_of(members[i]);
+        flood(i, g.cluster_id, g);
+        out.push_back(std::move(g));
+    }
+    return out;
+}
+
+// Exact group->anchor junction: min distance over both sides' valid fit
+// points (deterministic double argmin, strict <).  Fills the Pr118Connector
+// endpoint fields so pr118_connector_walk can run unchanged on the result.
+static bool pr119_group_endpoints(const std::vector<SegmentPtr>& grp,
+                                  const std::vector<SegmentPtr>& anchor,
+                                  Pr118Connector& out)
+{
+    bool found = false;
+    for (const auto& sb : grp) {
+        for (const auto& fb : sb->fits()) {
+            if (!fb.valid()) continue;
+            for (const auto& sa : anchor) {
+                for (const auto& fa : sa->fits()) {
+                    if (!fa.valid()) continue;
+                    const double d = (fb.point - fa.point).magnitude();
+                    if (!found || d < out.gap_exact) {
+                        found = true;
+                        out.gap_exact = d;
+                        out.p_frag = fb.point;
+                        out.p_abs = fa.point;
+                        out.frag_seg = sb;
+                    }
+                }
+            }
+        }
+    }
+    return found;
+}
+
+static void pr119_probe_expel_groups(IndexedShowerSet& showers, Graph& graph,
+                                     VertexPtr main_vertex,
+                                     TrackFitting& track_fitter,
+                                     WireCell::IDetectorVolumes::pointer dv,
+                                     double mip_dqdx_median)
+{
+    if (!pr119_expel_dbg()) return;
+    const WireCell::Point mvp = (main_vertex && main_vertex->fit().valid())
+        ? main_vertex->fit().point
+        : (main_vertex ? main_vertex->wcpt().point : WireCell::Point(0, 0, 0));
+
+    for (auto& sh : showers) {                       // IndexedShowerSet order
+        if (!sh) continue;
+        auto [svtx, conn] = sh->get_start_vertex_and_type();
+        auto groups = pr119_partition(*sh, graph);
+        if (groups.empty()) continue;
+
+        double tot_dQ = 0, tot_len = 0;
+        std::set<int> clusters;
+        bool sh_touch_mv = false;
+        for (const auto& g : groups) {
+            clusters.insert(g.cluster_id);
+            for (const auto& seg : g.segs) {
+                tot_len += segment_track_length(seg);
+                for (const auto& f : seg->fits()) tot_dQ += f.dQ;
+                auto [va, vb] = PR::find_vertices(graph, seg);
+                if (va == main_vertex || vb == main_vertex) sh_touch_mv = true;
+            }
+        }
+        std::fprintf(stderr,
+                     "EXPEL_SHOWER shower_id=%d node_id=%d conn=%d pdg=%d nseg=%d ncls=%zu ngrp=%zu "
+                     "root_cluster=%d kine_charge=%.3f tot_len=%.2fcm tot_dQ=%.1f touches_main_vtx=%d\n",
+                     sh->get_shower_id(), pr91_seg_display_id(sh->start_segment()), conn,
+                     sh->get_particle_type(), sh->get_num_segments(), clusters.size(), groups.size(),
+                     groups.front().anchor ? groups.front().cluster_id : -1,
+                     sh->get_kine_charge() / WireCell::units::MeV,
+                     tot_len / WireCell::units::cm, tot_dQ, (int) sh_touch_mv);
+        if (groups.size() < 2) continue;             // single-group showers: header only
+
+        const bool have_anchor = groups.front().anchor;
+        const std::vector<SegmentPtr>& anchor_segs = groups.front().segs;
+        const WireCell::Point sp = sh->get_start_point();
+        const WireCell::Vector a30 = shower_cal_dir_3vector(*sh, sp, 30 * WireCell::units::cm);
+        const WireCell::Vector a100 = shower_cal_dir_3vector(*sh, sp, 100 * WireCell::units::cm);
+        auto ax_angle = [](const WireCell::Vector& ax, const WireCell::Vector& v) {
+            if (ax.magnitude() < 0.001 || v.magnitude() < 0.001) return -1.0;
+            return std::acos(std::clamp(ax.dot(v) / (ax.magnitude() * v.magnitude()), -1.0, 1.0)) / M_PI * 180.0;
+        };
+
+        for (size_t gi = 0; gi < groups.size(); ++gi) {
+            const auto& g = groups[gi];
+            double g_dQ = 0, g_len = 0, g_maxlen = 0;
+            int n_track_pid = 0;
+            bool g_touch_mv = false;
+            std::vector<double> dqdxs;
+            std::set<size_t> g_vtx_idx;
+            for (const auto& seg : g.segs) {
+                const double sl = segment_track_length(seg);
+                g_len += sl;
+                g_maxlen = std::max(g_maxlen, sl);
+                for (const auto& f : seg->fits()) {
+                    g_dQ += f.dQ;
+                    if (f.valid() && f.dx > 0) dqdxs.push_back(f.dQ / f.dx);
+                }
+                if (segment_confident_nonelectron_pid(seg)) ++n_track_pid;
+                auto [va, vb] = PR::find_vertices(graph, seg);
+                for (VertexPtr v : {va, vb}) {
+                    if (!v || !v->descriptor_valid()) continue;
+                    g_vtx_idx.insert(graph[v->get_descriptor()].index);
+                    if (v == main_vertex) g_touch_mv = true;
+                }
+            }
+            double med_dqdx_mip = -1;
+            if (!dqdxs.empty() && mip_dqdx_median > 0) {
+                std::sort(dqdxs.begin(), dqdxs.end());
+                med_dqdx_mip = dqdxs[dqdxs.size() / 2] / mip_dqdx_median;
+            }
+            // how many showers hold at least one member of this group (>1 =
+            // 47212-style double ownership: expel but do not spawn)
+            int nsh_holding = 0;
+            for (auto& other : showers) {
+                if (!other) continue;
+                bool holds = false;
+                for (const auto& seg : g.segs) {
+                    if (seg->descriptor_valid() && other->has_edge(seg->get_descriptor())) { holds = true; break; }
+                }
+                if (holds) ++nsh_holding;
+            }
+            // links to the rest of the shower: distinct vertices shared with
+            // non-group members (0 = the group floats free of the view)
+            std::set<size_t> other_vtx_idx;
+            for (size_t oj = 0; oj < groups.size(); ++oj) {
+                if (oj == gi) continue;
+                for (const auto& seg : groups[oj].segs) {
+                    auto [va, vb] = PR::find_vertices(graph, seg);
+                    for (VertexPtr v : {va, vb}) {
+                        if (v && v->descriptor_valid()) other_vtx_idx.insert(graph[v->get_descriptor()].index);
+                    }
+                }
+            }
+            int nlinks = 0;
+            for (size_t idx : g_vtx_idx) {
+                if (other_vtx_idx.count(idx)) ++nlinks;
+            }
+
+            // junction to the ANCHOR group + continuity walk + axis geometry
+            Pr118Connector c;
+            double ax30_ang = -1, ax100_ang = -1, dis_start = -1, grp_ang = -1;
+            bool have_jx = false;
+            if (!g.anchor && have_anchor) {
+                have_jx = pr119_group_endpoints(g.segs, anchor_segs, c);
+                if (have_jx) {
+                    pr118_connector_walk(c, track_fitter, dv);
+                    const WireCell::Vector vj(c.p_frag.x() - sp.x(), c.p_frag.y() - sp.y(),
+                                              c.p_frag.z() - sp.z());
+                    dis_start = vj.magnitude();
+                    ax30_ang = ax_angle(a30, vj);
+                    ax100_ang = ax_angle(a100, vj);
+                    // group development direction: junction -> farthest group
+                    // fit point, vs the shower axis
+                    double far_d = -1;
+                    WireCell::Point far_p = c.p_frag;
+                    for (const auto& seg : g.segs) {
+                        for (const auto& f : seg->fits()) {
+                            if (!f.valid()) continue;
+                            const double d = (f.point - c.p_frag).magnitude();
+                            if (d > far_d) { far_d = d; far_p = f.point; }
+                        }
+                    }
+                    const WireCell::Vector vg(far_p.x() - c.p_frag.x(), far_p.y() - c.p_frag.y(),
+                                              far_p.z() - c.p_frag.z());
+                    grp_ang = ax_angle(a30, vg);
+                }
+            }
+            // distance to the main vertex (min over group fit points)
+            double dis_main = -1;
+            for (const auto& seg : g.segs) {
+                for (const auto& f : seg->fits()) {
+                    if (!f.valid()) continue;
+                    const double d = (f.point - mvp).magnitude();
+                    if (dis_main < 0 || d < dis_main) dis_main = d;
+                }
+            }
+            // spawn-anchoring dry run (the conn3_unreachable recipe): nearest
+            // non-group vertex of the shower view (or the main vertex) to the
+            // group's longest member, 0.8*main_dis preference, <=80cm conn 3.
+            int anchor_vtx = -1, conn_new = -1;
+            double anchor_dis = -1;
+            if (!g.anchor) {
+                SegmentPtr seed = nullptr;
+                for (const auto& seg : g.segs) {
+                    if (!seed || segment_track_length(seg) > segment_track_length(seed)) seed = seg;
+                }
+                double min_dis = 1e9, main_dis = 1e9;
+                VertexPtr min_vertex = nullptr;
+                for (auto vdesc : ordered_nodes(*sh, graph)) {
+                    VertexPtr v = graph[vdesc].vertex;
+                    if (!v || !v->descriptor_valid()) continue;
+                    if (g_vtx_idx.count(graph[v->get_descriptor()].index)) continue;  // never anchor to your own component
+                    const WireCell::Point vp = v->fit().valid() ? v->fit().point : v->wcpt().point;
+                    const double d = segment_get_closest_point(seed, vp).first;
+                    if (d < 0) continue;
+                    if (d < min_dis) { min_dis = d; min_vertex = v; }
+                    if (v == main_vertex) main_dis = d;
+                }
+                if (main_vertex && main_vertex->descriptor_valid()
+                    && !g_vtx_idx.count(graph[main_vertex->get_descriptor()].index)) {
+                    const double d = segment_get_closest_point(seed, mvp).first;
+                    if (d >= 0 && d < main_dis) main_dis = d;
+                    if (d >= 0 && d < min_dis) { min_dis = d; min_vertex = main_vertex; }
+                }
+                if (min_vertex && min_dis > 0.8 * main_dis && main_dis < 1e8) {
+                    min_dis = main_dis;
+                    min_vertex = main_vertex;
+                }
+                if (min_vertex) {
+                    anchor_vtx = pr91_vtx_display_id(min_vertex);
+                    anchor_dis = min_dis;
+                    conn_new = (min_dis > 80 * WireCell::units::cm) ? 4 : 3;
+                }
+            }
+
+            std::fprintf(stderr,
+                         "EXPEL_GROUP shower_id=%d grp=%zu cluster=%d anchor=%d nseg=%zu len=%.2fcm "
+                         "dQ=%.1f qfrac=%.4f med_dqdx_mip=%.3f max_seglen=%.2fcm n_track_pid=%d "
+                         "nsh_holding=%d touches_main_vtx=%d nlinks=%d gap_exact=%.2fcm "
+                         "jx=(%.3f,%.3f,%.3f) nstep=%d cont_frac=%.3f conn_qmed=%.1f conn_qfrac=%.3f "
+                         "walked=%d ax30_ang=%.2f ax100_ang=%.2f grp_ang=%.2f dis_start=%.2fcm "
+                         "dis_main=%.2fcm anchor_vtx=%d anchor_dis=%.2fcm conn_new=%d t0_grp=%.1f\n",
+                         sh->get_shower_id(), gi, g.cluster_id, (int) g.anchor, g.segs.size(),
+                         g_len / WireCell::units::cm, g_dQ, tot_dQ > 0 ? g_dQ / tot_dQ : -1.0,
+                         med_dqdx_mip, g_maxlen / WireCell::units::cm, n_track_pid,
+                         nsh_holding, (int) g_touch_mv, nlinks,
+                         have_jx ? c.gap_exact / WireCell::units::cm : -1.0,
+                         have_jx ? c.p_frag.x() / WireCell::units::cm : 0.0,
+                         have_jx ? c.p_frag.y() / WireCell::units::cm : 0.0,
+                         have_jx ? c.p_frag.z() / WireCell::units::cm : 0.0,
+                         c.nstep, c.cont_frac, c.qmed, c.qfrac, (int) c.walked,
+                         ax30_ang, ax100_ang, grp_ang,
+                         dis_start >= 0 ? dis_start / WireCell::units::cm : -1.0,
+                         dis_main >= 0 ? dis_main / WireCell::units::cm : -1.0,
+                         anchor_vtx, anchor_dis >= 0 ? anchor_dis / WireCell::units::cm : -1.0,
+                         conn_new,
+                         (g.segs.front()->cluster())
+                             ? g.segs.front()->cluster()->get_cluster_t0() / WireCell::units::us : -1.0);
+
+            for (const auto& seg : g.segs) {
+                double sdQ = 0, sdx = 0;
+                for (const auto& f : seg->fits()) { sdQ += f.dQ; sdx += f.dx; }
+                auto [v0, v1] = PR::find_vertices(graph, seg);
+                std::fprintf(stderr,
+                             "EXPEL_MEMBER shower_id=%d seg=%d grp=%zu cluster=%d len=%.3fcm dQ=%.1f "
+                             "dQdx=%.1f pdg=%d dirsign=%d v0=%d v1=%d\n",
+                             sh->get_shower_id(), pr91_seg_display_id(seg), gi, g.cluster_id,
+                             segment_track_length(seg) / WireCell::units::cm, sdQ,
+                             sdx > 0 ? sdQ / (sdx / WireCell::units::cm) : 0.0,
+                             seg->has_particle_info() && seg->particle_info()
+                                 ? seg->particle_info()->pdg() : 0,
+                             seg->dirsign(), pr91_vtx_display_id(v0), pr91_vtx_display_id(v1));
+            }
+        }
+    }
+}
+
 // doc sbnd_xin/docs/pr/117 round 1 -- shower_merge_relax.  Rationale at the
 // m_shower_merge_relax member block (NeutrinoPatternBase.h).  A late fragment
 // consolidation pass, forked in SHAPE from examine_merge_showers' two-phase
@@ -5642,6 +5999,13 @@ void PatternAlgorithms::shower_clustering_with_nv(int acc_segment_id, IndexedSho
                 "pr99 ghost_member: {} member(s) dropped; maps rebuilt", n_ghost_dropped);
         }
     }
+
+    // doc sbnd_xin/docs/pr/119 -- byte-neutral membership census at the
+    // exact seat where a Phase-B expel pass would run: after every pass that
+    // grows, merges, detaches or drops members, before the hadronic tag, the
+    // final kine recompute and the pi0 finders.  Env-gated stderr only.
+    pr119_probe_expel_groups(showers, graph, main_vertex, track_fitter, dv,
+                             m_mip_dqdx_median);
 
     // doc pr/99 round 3 (A5, shower_hadronic_tag).  Design block at the
     // m_shower_hadronic_* members (NeutrinoPatternBase.h).  For every
