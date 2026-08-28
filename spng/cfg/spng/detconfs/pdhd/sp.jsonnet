@@ -27,7 +27,10 @@ function(tpc)
         data: {
             anode: wc.tn(tpc.anode),
             dft: "FftwDFT",
-            dump_2d_spectra: true,
+            // Heavy debug dumps (~366 MB/job): off by default.  Set true to
+            // write <dump_2d_prefix>_anode<N>_plane<P>.npz; the prefix is made
+            // per-job-unique (below) so concurrent workflow jobs do not collide.
+            dump_2d_spectra: false,
             dump_2d_prefix: dump_prefix,
             do_not_mp_protect_traditional: true, 
             field_response: wc.tn(tpc.fr),
