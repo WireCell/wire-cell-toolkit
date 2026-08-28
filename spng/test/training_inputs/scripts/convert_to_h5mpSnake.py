@@ -207,7 +207,7 @@ def process_truth(npz_path, output_tru0=None, output_tru1=None, output_tru2=None
                                    compression='gzip')
             
             if 2 in event_data and 3 in event_data and output_tru2 is not None:
-                w = np.concat([event_data[2], event_data[3]])
+                w = np.concatenate([event_data[2], event_data[3]])
                 print(f"  Creating tru-2/{event_num}/frame_ductor0, shape={w.shape}")
                 h5_w.create_dataset(f"{event_num}/frame_ductor0", 
                                     data=w, 

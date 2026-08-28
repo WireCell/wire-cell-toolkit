@@ -2,6 +2,7 @@
 # -*- snakemake -*-
 
 import os 
+import numpy as np
 SRC_DIR = workflow.basedir
 
 config.setdefault('nevents', '2')
@@ -489,6 +490,49 @@ def get_input_by_plane_xvu(wildcards):
         f'<results>/xvu-test_line_{wildcards.plane}plane_t1-{t1}-t2-{t2}.pt' for t1,t2 in angles
     ]
 
+rule pixel_eff_pur:
+    params:
+        # threshold=0.5,
+        chan_range=(0, 800),
+    run:
+        import torch
+        import numpy as np
+        t = torch.load(input[0])
+        labels = t['labels'][0].detach().cpu()
+        y = t['y'][0].detach().cpu()
+        this_range=params.chan_range
+        real_pixels = torch.where(labels[this_range[0]:this_range[1]] > 0)
+        threshold = float(wildcards.threshold)
+        eff = (y[this_range[0]:this_range[1]][real_pixels] > threshold).sum()/labels[this_range[0]:this_range[1]].sum()
+        pur = (y[this_range[0]:this_range[1]][real_pixels] > threshold).sum()/(y[this_range[0]:this_range[1]] > threshold).sum()
+
+        np.savez(output[0], eff=eff, pur=pur)
+
+use rule pixel_eff_pur as pixel_eff_pur_xvu_line with:
+    input:
+        '<results>/xvu-test_line_{plane}plane_t1-{t1}-t2-{t2}.pt'
+    output:
+        '<results>/xvu-test_line_{plane}plane_t1-{t1}-t2-{t2}-eff-pur-t{threshold}.npz'
+    # params:
+    #     threshold=wildcards.threshold
+
+rule eff_pur_scan:
+    input:
+        expand('<results>/xvu-test_line_uplane_t1-75-t2-75-eff-pur-t{threshold}.npz',
+               threshold=np.arange(0.05,1.0,0.05))
+    output:
+        '<results>/test_scan.npz'
+    run:
+        import numpy as np
+        effs = []
+        purs = []
+        for inp in input:
+            t = np.load(inp)
+            effs.append(t['eff'])
+            purs.append(t['pur'])
+        np.savez(output[0], effs=effs, purs=purs)
+
+
 rule plot_eff_pur:
     input:
         get_input_by_plane
@@ -686,7 +730,9 @@ def glob_epochs(w):
     from glob import glob
     # epoch_dirs = list(set(glob("epoch_**/")) - set(glob("epoch_benchmarks_**/")))
     cpts = glob(f'{config["cpt_dir"]}/checkpoint*.pt')
-    return [f'epoch_{d}/all_eff_pur_{p}plane-xvu.npz' for d in range(len(cpts)) for p in ('u', 'v', 'w')]
+    #return [f'epoch_{d}/all_eff_pur_{p}plane-xvu.npz' for d in range(len(cpts)) for p in ('u', 'v', 'w')]
+    #ASSUMES EPOCH NUMBER IS LAST IN STRING AND AFTER _
+    return [f'epoch_{cpt.replace(".pt","").split('_')[-1]}/all_eff_pur_{p}plane-xvu.npz' for cpt in cpts for p in ('u', 'v', 'w')]
 
 rule all_epochs_xvu:
     input: glob_epochs

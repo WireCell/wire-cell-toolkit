@@ -1,5 +1,8 @@
+import torch
+import scripts.roi_metrics as roi_metrics
+import numpy as np
+
 def get_with_chan_range(y, labels, chan_range):
-    import scripts.roi_metrics as roi_metrics
     res  = roi_metrics.roi_metrics(
         y[chan_range[0]:chan_range[1]],
         labels[chan_range[0]:chan_range[1]]
@@ -7,20 +10,24 @@ def get_with_chan_range(y, labels, chan_range):
     return res
 
 def load_y_labels(filename):
-    import torch
     t = torch.load(filename)
     labels = t['labels'][0].detach().cpu()
     y = t['y'][0].detach().cpu()
 
     return y, labels
 
-rule roi_eff_pur:
-    params:
-        chan_range=(0,800)
-    run:
+chan_ranges = {
+    'u':(0,800),
+    'v':(800,1600),
+    'w':(1600, 2560),
+    'w0':(1600, 2080),
+    'w1':(2080, 2560),
+}
 
+rule roi_eff_pur:
+    run:
         y, labels = load_y_labels(input[0])
-        res = get_with_chan_range(y, labels, params.chan_range)
+        res = get_with_chan_range(y, labels, chan_ranges[wildcards.plane])
         eff, pur = res['efficiency'].item(), res['purity'].item()
         print(eff,pur)
         import numpy as np
@@ -28,29 +35,31 @@ rule roi_eff_pur:
 
 use rule roi_eff_pur as angled_roi_eff_pur with:
     input:
-        "test_line_{plane}plane_{angles}.pt"
+        "<results>/xvu-test_line_{plane}plane_{angles}.pt"
     output:
-        temp("roi_effs_purs_{plane}plane_{angles}.npz")
+        temp("<results>/xvu-roi_effs_purs_{plane}plane_{angles}.npz")
 
+def load(filename, k='y'):
+    t = torch.load(filename)
+    return t[k][0].detach().cpu()
 
-rule roi_tables:
+rule roi_table:
     params:
-        chan_range=(0,800)
     run:
-        y, labels = load_y_labels(input[0])
-        res = get_with_chan_range(y, labels, params.chan_range)
-        true_t, reco_t = res['true_t'], res['reco_t']
+        chan_range = chan_ranges[wildcards.plane]
+        t = load(input[0], k=('y' if wildcards.type=='reco' else 'labels'))[chan_range[0]:chan_range[1]]
+        res = roi_metrics.roi_table(
+            (t == 1 if wildcards.type=='true' else t > float(wildcards.threshold))
+        )
         
-        import torch
-        torch.save(true_t, output.true)
-        torch.save(reco_t, output.reco)
+        torch.save(res, output[0])
 
-use rule roi_tables as angled_roi_tables with:
+use rule roi_table as xvu_angled_roi_table with:
     input:
-        "test_line_vplane_{angles}.pt"
+        "<results>/xvu-test_line_{plane}plane_{angles}.pt"
     output:
-        true="true_roi_table_vplane_{angles}.pt",
-        reco="reco_roi_table_vplane_{angles}.pt"
+        "<results>/xvu-{type}_roi_table_{plane}plane_{angles}-thresh-{threshold}.pt",
+
 
 rule merge_roi_eff_pur:
     run:
@@ -64,47 +73,46 @@ rule merge_roi_eff_pur:
         purs = np.array(purs)
 
         np.savez(output[0], effs=effs, purs=purs)
-
+vangles = [ 
+    "t1-75-t2-75", "t1-80-t2-80", "t1-82-t2-82", "t1-85-t2-85", 
+    "t1-75-t2-87", "t1-85-t2-87", "t1-87-t2-87",
+]
+uangles = [ 
+    "t1-75-t2-75", "t1-80-t2-80", "t1-82-t2-82", "t1-85-t2-85", 
+    "t1-87-t2-75", "t1-87-t2-85", "t1-87-t2-87",
+]
+wangles=uangles
 use rule merge_roi_eff_pur as merge_vplane_roi_eff_purs with:
     input:
-        "roi_effs_purs_vplane_t1-75-t2-75.npz",
-        "roi_effs_purs_vplane_t1-80-t2-80.npz",
-        "roi_effs_purs_vplane_t1-82-t2-82.npz",
-        "roi_effs_purs_vplane_t1-85-t2-85.npz",
-        "roi_effs_purs_vplane_t1-75-t2-87.npz",
-        "roi_effs_purs_vplane_t1-85-t2-87.npz",
-        "roi_effs_purs_vplane_t1-87-t2-87.npz",
+        expand(
+            '<results>/xvu-roi_effs_purs_vplane_{angles}.npz',
+            angles=vangles
+        )
     output:
-        "merged_roi_effs_purs_vplane_high_end.npz"
+        "<results>/xvu-merged_roi_effs_purs_vplane_high_end.npz"
 
 use rule merge_roi_eff_pur as merge_uplane_roi_eff_purs with:
     input:
-        "roi_effs_purs_uplane_t1-75-t2-75.npz",
-        "roi_effs_purs_uplane_t1-80-t2-80.npz",
-        "roi_effs_purs_uplane_t1-82-t2-82.npz",
-        "roi_effs_purs_uplane_t1-85-t2-85.npz",
-        "roi_effs_purs_uplane_t1-87-t2-75.npz",
-        "roi_effs_purs_uplane_t1-87-t2-85.npz",
-        "roi_effs_purs_uplane_t1-87-t2-87.npz",
+        expand(
+            '<results>/xvu-roi_effs_purs_uplane_{angles}.npz',
+            angles=uangles
+        )
     output:
-        "merged_roi_effs_purs_uplane_high_end.npz"
+        "<results>/xvu-merged_roi_effs_purs_uplane_high_end.npz"
 
 use rule merge_roi_eff_pur as merge_wplane_roi_eff_purs with:
     input:
-        "roi_effs_purs_wplane_t1-75-t2-75.npz",
-        "roi_effs_purs_wplane_t1-80-t2-80.npz",
-        "roi_effs_purs_wplane_t1-82-t2-82.npz",
-        "roi_effs_purs_wplane_t1-85-t2-85.npz",
-        "roi_effs_purs_wplane_t1-87-t2-75.npz",
-        "roi_effs_purs_wplane_t1-87-t2-85.npz",
-        "roi_effs_purs_wplane_t1-87-t2-87.npz",
+        expand(
+            '<results>/xvu-roi_effs_purs_wplane_{angles}.npz',
+            angles=wangles
+        )
     output:
-        "merged_roi_effs_purs_wplane_high_end.npz"
+        "<results>/xvu-merged_roi_effs_purs_wplane_high_end.npz"
 
 
 rule plot_merged_roi_eff_pur:
     params:
-        ylim=(0, 1.5)
+        ylim=(-.4, .4)
     run:
         import matplotlib.pyplot as plt
         import numpy as np
@@ -117,17 +125,17 @@ rule plot_merged_roi_eff_pur:
     
 
         plt.subplot(2, 1, 1)
-        plt.plot(all_effs, label='Efficiency')
+        plt.plot(1.-all_effs, label='1-Efficiency')
         plt.xticks(xpos, xlabels)
         plt.grid(True, axis='both')
         plt.ylim(*params.ylim)
         plt.subplot(2, 1, 2)
-        plt.plot(all_purs)
+        plt.plot(1.-all_purs)
         plt.grid(True, axis='both')
-        plt.yticks(np.arange(0.,1.5, .2))
-        plt.xticks(xpos, xlabels, label='Purity')
+        plt.yticks(np.arange(*params.ylim, .1))
+        plt.xticks(xpos, xlabels, label='1-Purity')
         plt.ylim(*params.ylim)
-        plt.yticks(np.arange(0.,1.5, .2))
+        plt.yticks(np.arange(*params.ylim, .1))
         f = output[0]
         print(type(f))
         print(f)
@@ -147,6 +155,45 @@ use rule plot_merged_roi_eff_pur as plot_merged_roi_eff_pur_uplane with:
     params:
         xlabels=lambda w : [f'{u},{v}' for u,v in get_angles(w)]
     input:
-        "merged_roi_effs_purs_{plane}plane_high_end.npz"
+        "<results>/xvu-merged_roi_effs_purs_{plane}plane_high_end.npz"
     output:
-        'all_roi_eff_pur_{plane}plane.png'
+        '<results>/xvu-all_roi_eff_pur_{plane}plane.png'
+
+rule all_roi_tables:
+    input:
+        (
+            expand("<results>/xvu-{type}_roi_table_uplane_{angles}-thresh-0.5.pt",
+                type=['true','reco'], angles=uangles) +
+            expand("<results>/xvu-{type}_roi_table_vplane_{angles}-thresh-0.5.pt",
+                type=['true', 'reco'], angles=vangles) +
+            expand("<results>/xvu-{type}_roi_table_wplane_{angles}-thresh-0.5.pt",
+                type=['true', 'reco'], angles=wangles)
+        )
+
+rule roi_lengths:
+    run:
+        nrois = []
+        lengths = []
+        names = []
+        for f in input:
+            t = torch.load(f)
+            lengths += t['length']
+            nrois.append(len(t['length']))
+            names.append(f)
+        
+        np.savez(output[0], lengths=lengths, nrois=nrois, names=names)
+
+use rule roi_lengths as true_u_roi_lengths with:
+    input:
+        expand("<results>/xvu-{{type}}_roi_table_uplane_{angles}-thresh-0.5.pt", angles=uangles)
+    output: "<results>/xvu-{type}_roi_table_info_uplane-thresh-0.5.npz"
+
+use rule roi_lengths as true_v_roi_lengths with:
+    input:
+        expand("<results>/xvu-{{type}}_roi_table_vplane_{angles}-thresh-0.5.pt", angles=vangles)
+    output: "<results>/xvu-{type}_roi_table_info_vplane-thresh-0.5.npz"
+
+use rule roi_lengths as true_w_roi_lengths with:
+    input:
+        expand("<results>/xvu-{{type}}_roi_table_wplane_{angles}-thresh-0.5.pt", angles=wangles)
+    output: "<results>/xvu-{type}_roi_table_info_wplane-thresh-0.5.npz"

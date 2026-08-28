@@ -185,6 +185,3 @@ def threshold_scan(y, labels, thresholds):
         "n_reco": torch.tensor(n_reco),
         "n_true": n_true,
     }
-
-
-# if 'snakemake' in globals():

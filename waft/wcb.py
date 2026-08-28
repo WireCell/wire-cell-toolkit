@@ -113,7 +113,7 @@ def configure(cfg):
         else:
             info('NO %s libs'%one)
 
-    cfg.check_boost(lib='system filesystem graph thread program_options iostreams regex')
+    cfg.check_boost(lib='filesystem graph thread program_options iostreams regex')
     haveit('boost')
 
     cfg.check(header_name="dlfcn.h", uselib_store='DYNAMO', lib=['dl'], mandatory=True)
