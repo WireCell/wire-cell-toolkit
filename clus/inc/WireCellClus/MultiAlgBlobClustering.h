@@ -213,6 +213,12 @@ namespace WireCell::Clus {
             // the historical behaviour (the flush skips empty trees), so a
             // config that does not set it is unchanged.
             bool emit_empty{false};
+            // Text of the marker node emitted when the event has NO
+            // reconstructed neutrino candidate, so "the tagger declined" is
+            // visible in Bee instead of looking like a bare particle list (or,
+            // on data, like nothing at all).  The reason is appended in
+            // parentheses.  Empty disables the marker entirely.
+            std::string no_candidate_text{"no reco neutrino candidate"};
             std::string visitor;             // dump after this visitor runs
             std::string grouping{"live"};    // grouping to read PR graph from
             // Prototype-parity options (defaults => legacy output, byte-identical):
@@ -419,6 +425,16 @@ namespace WireCell::Clus {
         /// concatenates bundles itself and would otherwise bypass the graft.
         void pf_set_particles(const BeePFConfig& cfg, Configuration particles,
                               std::shared_ptr<WireCell::Clus::TrackFitting> tf);
+
+        /// Build the single node that carries the reconstructed-neutrino
+        /// summary ("reco nu <Enu> MeV numu <s> nue <s>") with `children` hung
+        /// under it.  Independent of whether an upstream truth tree exists:
+        /// the summary describes THIS event's reco, and coupling it to the
+        /// truth merge is what hid Enu and the BDT scores on every data event
+        /// (data publishes no truth tree, so the merge branch never ran).
+        Configuration pf_summary_node(const BeePFConfig& cfg,
+                                      std::shared_ptr<WireCell::Clus::TrackFitting> tf,
+                                      Configuration children) const;
 
         std::map<int, std::map<int, Bee::Patches>> m_bee_dead_patches;
         // Bee::Patches m_bee_dead; // dead region ...

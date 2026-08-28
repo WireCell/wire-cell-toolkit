@@ -354,6 +354,10 @@ void MultiAlgBlobClustering::configure(const WireCell::Configuration& cfg)
             pfc.merge_node_text = get<std::string>(pf, "merge_node_text", "");
             pfc.merge_id_offset = get<int>(pf, "merge_id_offset", pfc.merge_id_offset);
             pfc.emit_empty = get<bool>(pf, "emit_empty", false);
+            // Default matches the in-class default, so a config that does not
+            // mention it still gets the marker; "" disables it.
+            pfc.no_candidate_text =
+                get<std::string>(pf, "no_candidate_text", pfc.no_candidate_text);
             pfc.pf_track_main_cluster_only = get<bool>(pf, "pf_track_main_cluster_only", false);
             pfc.pf_track_bridged_clusters = get<bool>(pf, "pf_track_bridged_clusters", false);  // doc pr/40 round 9 B2
             pfc.pf_shower_vertex_barrier = get<bool>(pf, "pf_shower_vertex_barrier", false);
@@ -1241,18 +1245,39 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
     // survive that: priority is truth+reco > truth alone > empty.
     const bool have_upstream = !cfg.merge_metadata_key.empty()
         && m_in_metadata.isMember(cfg.merge_metadata_key);
-    // Bail-out shared by every "no reco" path: emit whatever we do have.
+    // Bail-out shared by every "no reco" path: emit whatever we do have, plus a
+    // marker node saying so.  Without the marker a declined event is
+    // indistinguishable in Bee from one where the PF dump simply did not run --
+    // on MC it looks like a truth-only tree, on data like an empty layer.  The
+    // reason is carried in parentheses because it is exactly what a hand scan
+    // wants to know ("no main vertex" and "no PR graph" are different failures).
     auto emit_without_reco = [&](const char* why) {
+        Configuration marker;
+        const bool want_marker = !cfg.no_candidate_text.empty();
+        if (want_marker) {
+            marker["id"] = cfg.merge_id_offset - 1;   // outside both id spaces
+            marker["text"] = cfg.no_candidate_text + " (" + std::string(why) + ")";
+            Configuration dj;
+            for (int i = 0; i < 3; ++i) { dj["start"][i] = 0.0; dj["end"][i] = 0.0; }
+            marker["data"] = dj;
+            marker["children"] = Json::arrayValue;
+            marker["icon"] = "jstree-file";           // leaf, per the prototype format
+        }
         if (have_upstream) {
-            tree.set_particles(m_in_metadata[cfg.merge_metadata_key]);
+            Configuration out = m_in_metadata[cfg.merge_metadata_key];
+            if (want_marker) out.append(marker);
+            tree.set_particles(out);
             SPDLOG_LOGGER_DEBUG(log, "fill_bee_pf_tree '{}': {} -- emitting {} upstream "
                                 "node(s), no reco", cfg.name, why,
                                 m_in_metadata[cfg.merge_metadata_key].size());
         }
         else if (cfg.emit_empty) {
-            tree.set_particles(Json::arrayValue);
+            Configuration out = Json::arrayValue;
+            if (want_marker) out.append(marker);
+            tree.set_particles(out);
             SPDLOG_LOGGER_DEBUG(log, "fill_bee_pf_tree '{}': {} and no upstream tree -- "
-                                "emitting an empty layer", cfg.name, why);
+                                "emitting {}", cfg.name, why,
+                                want_marker ? "the no-candidate marker" : "an empty layer");
         }
         else {
             SPDLOG_LOGGER_DEBUG(log, "fill_bee_pf_tree '{}': {}, skipping", cfg.name, why);
@@ -2475,40 +2500,13 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
 
 // See the header: publish `particles` into the cfg.name Bee particle tree,
 // grafting the upstream (truth) forest on top when one was published.
-void MultiAlgBlobClustering::pf_set_particles(const BeePFConfig& cfg,
-                                              Configuration particles,
-                                              std::shared_ptr<WireCell::Clus::TrackFitting> tf)
+Configuration MultiAlgBlobClustering::pf_summary_node(
+    const BeePFConfig& cfg,
+    std::shared_ptr<WireCell::Clus::TrackFitting> tf,
+    Configuration children) const
 {
-    auto map_it = m_bee_pf_trees.find(cfg.name);
-    if (map_it == m_bee_pf_trees.end()) {
-        SPDLOG_LOGGER_WARN(log, "bee_pf tree storage '{}' not found", cfg.name);
-        return;
-    }
-    auto& tree = map_it->second;
-
-    const bool have_upstream = !cfg.merge_metadata_key.empty()
-        && m_in_metadata.isMember(cfg.merge_metadata_key);
-    if (!have_upstream) {
-        tree.set_particles(particles);
-        SPDLOG_LOGGER_TRACE(log, "fill_bee_pf_tree '{}': {} top-level particles",
-                            cfg.name, particles.size());
-        return;
-    }
-
-    const Configuration& upstream = m_in_metadata[cfg.merge_metadata_key];
-
-    // Renumber the reco subtree out of the upstream id space.  jsTree needs
-    // unique ids; a duplicate silently drops a branch from the display.
-    std::function<void(Configuration&)> shift_ids = [&](Configuration& nodes) {
-        for (auto& n : nodes) {
-            if (n.isMember("id")) { n["id"] = n["id"].asInt() + cfg.merge_id_offset; }
-            if (n.isMember("children")) { shift_ids(n["children"]); }
-        }
-    };
-    shift_ids(particles);
-
-    // Summary text: reconstructed Enu and the two BDT scores.  The BDT scorers
-    // run before the Bee fill, so by here the scores are set -- but TaggerInfo
+    // Summary text: reconstructed Enu and the two BDT scores.  The scorers run
+    // before the Bee fill, so by here the scores are set -- but TaggerInfo
     // initialises them to 0, which would read as a real score if the scorers
     // are absent from pipeline_names.  Say "n/a" rather than print a fake 0.
     std::string text = cfg.merge_node_text.empty() ? std::string("reco nu")
@@ -2531,20 +2529,69 @@ void MultiAlgBlobClustering::pf_set_particles(const BeePFConfig& cfg,
         text += buf;
     }
 
-    Configuration wrapper;
-    wrapper["id"] = cfg.merge_id_offset - 1;   // outside both id spaces
-    wrapper["text"] = text;
+    Configuration node;
+    node["id"] = cfg.merge_id_offset - 1;   // outside both id spaces
+    node["text"] = text;
     Configuration dj;
     for (int i = 0; i < 3; ++i) { dj["start"][i] = 0.0; dj["end"][i] = 0.0; }
-    wrapper["data"] = dj;
-    wrapper["children"] = particles.isNull() ? Json::arrayValue : particles;
+    node["data"] = dj;
+    node["children"] = children.isNull() ? Json::arrayValue : children;
+    return node;
+}
+
+
+// See the header: publish `particles` into the cfg.name Bee particle tree under
+// the reco-neutrino summary node, grafting the upstream (truth) forest on top
+// when one was published.
+void MultiAlgBlobClustering::pf_set_particles(const BeePFConfig& cfg,
+                                              Configuration particles,
+                                              std::shared_ptr<WireCell::Clus::TrackFitting> tf)
+{
+    auto map_it = m_bee_pf_trees.find(cfg.name);
+    if (map_it == m_bee_pf_trees.end()) {
+        SPDLOG_LOGGER_WARN(log, "bee_pf tree storage '{}' not found", cfg.name);
+        return;
+    }
+    auto& tree = map_it->second;
+
+    const bool have_upstream = !cfg.merge_metadata_key.empty()
+        && m_in_metadata.isMember(cfg.merge_metadata_key);
+
+    if (!have_upstream) {
+        // No truth to merge -- but there IS reco, so it still gets its summary
+        // node.  Building the summary only on the merge path is the bug this
+        // replaces: data publishes no truth tree, so every data event lost
+        // kine_reco_Enu and both BDT scores from the display even when the
+        // tagger had found a candidate (verified on 18255/1/49987, which has
+        // Enu 486.69 MeV and numu 2.6033 in T_kine/T_tagger but showed a bare
+        // "mu- 480 MeV" in mc.json).  No id shift here: without an upstream
+        // forest there is no id space to collide with, so the reco ids stay
+        // exactly as they were.
+        Configuration out = Json::arrayValue;
+        out.append(pf_summary_node(cfg, tf, particles));
+        tree.set_particles(out);
+        SPDLOG_LOGGER_DEBUG(log, "fill_bee_pf_tree '{}': {} reco particle(s) under the "
+                            "summary node, no upstream tree", cfg.name, particles.size());
+        return;
+    }
+
+    const Configuration& upstream = m_in_metadata[cfg.merge_metadata_key];
+
+    // Renumber the reco subtree out of the upstream id space.  jsTree needs
+    // unique ids; a duplicate silently drops a branch from the display.
+    std::function<void(Configuration&)> shift_ids = [&](Configuration& nodes) {
+        for (auto& n : nodes) {
+            if (n.isMember("id")) { n["id"] = n["id"].asInt() + cfg.merge_id_offset; }
+            if (n.isMember("children")) { shift_ids(n["children"]); }
+        }
+    };
+    shift_ids(particles);
 
     Configuration out = upstream;              // truth nodes at top level
-    out.append(wrapper);
+    out.append(pf_summary_node(cfg, tf, particles));
     tree.set_particles(out);
     SPDLOG_LOGGER_DEBUG(log, "fill_bee_pf_tree '{}': merged {} upstream + {} reco "
-                        "top-level nodes under '{}'",
-                        cfg.name, upstream.size(), particles.size(), text);
+                        "top-level nodes", cfg.name, upstream.size(), particles.size());
 }
 
 
