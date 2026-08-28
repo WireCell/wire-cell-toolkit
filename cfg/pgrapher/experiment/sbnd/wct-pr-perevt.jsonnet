@@ -1723,8 +1723,8 @@ function(
     // when off => byte-identical pre-pr/117 config.  Runner envs
     // SBND_SHOWER_PASS4_BEST_OWNER / SBND_SHOWER_MERGE_RELAX (+_DIS,
     // _ANGLE) / SBND_SHOWER_FLANK_ABSORB (+_MAX_DIS, _MAX_LEN).
-    shower_pass4_best_owner = false,
-    shower_merge_relax = false,
+    shower_pass4_best_owner = true,  // SBND PRODUCTION ON 2026-08-28 (doc pr/117 r1; owner pre-authorized "if validation passed"; 0 nusel diffs, no negative marked delta)
+    shower_merge_relax = true,       // SBND PRODUCTION ON 2026-08-28 (doc pr/117 r1; evt168596 0.852->1.000, EM<->EM directional only)
     shower_merge_relax_dis = null,       // cm; C++ default 6
     shower_merge_relax_angle = null,     // deg; C++ default 15
     shower_merge_relax_min_len = null,   // cm; C++ default 5 (fragment length floor)
