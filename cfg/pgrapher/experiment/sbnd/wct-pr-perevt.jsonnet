@@ -1731,6 +1731,23 @@ function(
     shower_flank_absorb = false,     // shipped OFF, not selected: no targets in the marked set (doc pr/117 sec 6)
     shower_flank_absorb_max_dis = null,  // cm; C++ default 6
     shower_flank_absorb_max_len = null,  // cm; C++ default 25
+    // doc pr/118 round 1 -- pr/91 P2 body-distance admission + the two-tier
+    // axis+charge merge path, thresholds MEASURED on the 98-event pair
+    // census (doc pr/118 sec 4: 4 true / 0 false admitted).  C++ defaults
+    // false / false / 1.0 / 8cm / 5000 / 7.5deg / 120cm / 1cm / 30deg =
+    // legacy.  Key omitted when off => byte-identical pre-pr/118 config.
+    // Runner envs SBND_SHOWER_EX1_CONN3_BODY_DIS /
+    // SBND_SHOWER_MERGE_RELAX_CONTINUITY (+_CONT_FRAC, _CONT_GAP,
+    // _CONT_QMED, _CONT_AXIS, _CONT_DMAX, _CONT_T1_GAP, _CONT_T1_FOLD).
+    shower_ex1_conn3_body_dis = false,       // shipped OFF, not selected: measured ZERO yield (doc pr/118 sec 4a -- 1 admit in 98 events, fails angles)
+    shower_merge_relax_continuity = false,   // C++ default false (legacy merge_relax only)
+    shower_merge_relax_cont_frac = null,     // fraction; C++ default 1.0
+    shower_merge_relax_cont_gap = null,      // cm; C++ default 8
+    shower_merge_relax_cont_qmed = null,     // charge units; C++ default 5000
+    shower_merge_relax_cont_axis = null,     // deg; C++ default 7.5
+    shower_merge_relax_cont_dmax = null,     // cm; C++ default 120
+    shower_merge_relax_cont_t1_gap = null,   // cm; C++ default 1
+    shower_merge_relax_cont_t1_fold = null,  // deg; C++ default 30
     // doc pr/99 round 3 -- C1 kine-charge cell-ownership dedup + C1b
     // prototype cloud-rebuild parity (168596 Enu double count) + A5
     // hadronic-shower re-type (315167/395148 labels).  C++ defaults
@@ -2710,6 +2727,18 @@ function(
         [if shower_flank_absorb then 'shower_flank_absorb']: true,
         [if shower_flank_absorb_max_dis != null then 'shower_flank_absorb_max_dis']: shower_flank_absorb_max_dis,
         [if shower_flank_absorb_max_len != null then 'shower_flank_absorb_max_len']: shower_flank_absorb_max_len,
+        // doc pr/118 round 1.  C++ defaults
+        // false/false/1.0/8cm/5000/7.5deg/120cm/1cm/30deg.
+        // Key omitted when off => byte-identical pre-pr/118 config.
+        [if shower_ex1_conn3_body_dis then 'shower_ex1_conn3_body_dis']: true,
+        [if shower_merge_relax_continuity then 'shower_merge_relax_continuity']: true,
+        [if shower_merge_relax_cont_frac != null then 'shower_merge_relax_cont_frac']: shower_merge_relax_cont_frac,
+        [if shower_merge_relax_cont_gap != null then 'shower_merge_relax_cont_gap']: shower_merge_relax_cont_gap,
+        [if shower_merge_relax_cont_qmed != null then 'shower_merge_relax_cont_qmed']: shower_merge_relax_cont_qmed,
+        [if shower_merge_relax_cont_axis != null then 'shower_merge_relax_cont_axis']: shower_merge_relax_cont_axis,
+        [if shower_merge_relax_cont_dmax != null then 'shower_merge_relax_cont_dmax']: shower_merge_relax_cont_dmax,
+        [if shower_merge_relax_cont_t1_gap != null then 'shower_merge_relax_cont_t1_gap']: shower_merge_relax_cont_t1_gap,
+        [if shower_merge_relax_cont_t1_fold != null then 'shower_merge_relax_cont_t1_fold']: shower_merge_relax_cont_t1_fold,
         [if (if kine_charge_dedup == null then false else kine_charge_dedup) then 'kine_charge_dedup']: true,
         [if (if kine_charge_rebuild == null then false else kine_charge_rebuild) then 'kine_charge_rebuild']: true,
         [if (if kine_charge_track_ctx == null then false else kine_charge_track_ctx) then 'kine_charge_track_ctx']: true,

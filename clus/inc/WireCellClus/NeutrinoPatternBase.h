@@ -2084,6 +2084,61 @@ namespace WireCell::Clus::PR {
         bool   m_shower_flank_absorb{false};                ///< doc pr/117 r1; false = no pass
         double m_shower_flank_absorb_max_dis{6*units::cm};  ///< body-distance ceiling, internal units; inert while off
         double m_shower_flank_absorb_max_len{25*units::cm}; ///< candidate max length, internal units; inert while off
+        // doc sbnd_xin/docs/pr/118 round 1 -- two knob families sized from
+        // the pr/117 residual census (sbnd_xin/docs/pr/117_*.md sec 5-7,
+        // sec 11).
+        //
+        // (1) shower_ex1_conn3_body_dis (pr/91 sec 7 "P2").  In
+        // examine_shower_1's merge half, the ONLY door for a conn-3/4
+        // shower into the main conn-1 shower is a 3 cm gate measured to the
+        // parent's START SEGMENT -- not to the parent's charge body -- so a
+        // candidate touching the parent's flank at 1.7 cm is rejected at
+        // 4.9 cm (evt174752, pr/91 sec 4).  When on, the gate (and the
+        // downstream min_dis < 28 cm term, coherently) is measured as the
+        // min over ALL the parent's member segments instead; the min
+        // includes the start segment, so the knob is strictly admissive and
+        // the 3 cm threshold is unchanged.  The candidate still faces the
+        // legacy angle < 15 && angle1 < 15 test -- admission, not a merge
+        // guarantee (evt394532 lesson).  false (default) => legacy
+        // start-segment measurement => byte-identical.
+        bool   m_shower_ex1_conn3_body_dis{false};          ///< doc pr/118 r1; false = start-segment gate
+        // (2) shower_merge_relax_continuity.  The pr/118 98-event pair
+        // census (2466 EM-EM pairs within 30 cm, truth from the emscan-0827
+        // marks) MEASURED three candidate discriminators for the residual
+        // merge classes: the local-pivot fold spreads 6-75 deg on true
+        // merges; is_good_point continuity along the connector is dead
+        // (near zero even for touching true pairs -- detached EM fragments
+        // are photon-connected, and the 3-plane 0.2 cm test fails between
+        // blobs); blind charge presence saturates (dense events).  What
+        // separates is the two-tier predicate below, which at the measured
+        // operating point admits 4 true merges and 0 false over all 2466
+        // pairs (doc pr/118 sec 4):
+        //   T1 "touching aligned"  (any length):  gap_exact <= cont_t1_gap
+        //     AND absorber-axis angle < cont_axis AND local fold <
+        //     cont_t1_fold;
+        //   T2 "bright aligned stub" (len2 < merge_relax_min_len only):
+        //     gap_exact <= cont_gap AND axis angle < cont_axis AND fragment
+        //     within cont_dmax of the absorber start AND the connector walk
+        //     has charge on every sample (qfrac >= cont_frac) with median
+        //     line charge > cont_qmed (a touching pair has no connector
+        //     samples and is T1's case, not T2's).
+        // Axis angle = min over the absorber's 30 cm and 100 cm start
+        // directions of the angle to the fragment junction point; the
+        // measured true stubs sit at 2-6 deg while false neighbours spread
+        // isotropically.  The EM-EM guard, gamma-gamma hard guard,
+        // fragment-first argmin planning and no-chain rule of
+        // merge_shower_fragments all apply unchanged.  Requires
+        // shower_merge_relax on (the pass itself).  false (default) =>
+        // legacy merge_relax semantics => byte-identical; numerics inert
+        // while off.
+        bool   m_shower_merge_relax_continuity{false};        ///< doc pr/118 r1; false = legacy merge_relax only
+        double m_shower_merge_relax_cont_frac{1.0};           ///< T2: min charge-presence fraction along connector; inert while off
+        double m_shower_merge_relax_cont_gap{8*units::cm};    ///< T2: stub gap_exact ceiling, internal units; inert while off
+        double m_shower_merge_relax_cont_qmed{5000.0};        ///< T2: median line-charge floor (get_ave_3d_charge units); inert while off
+        double m_shower_merge_relax_cont_axis{7.5};           ///< T1+T2: absorber-axis angle ceiling, DEGREES; inert while off
+        double m_shower_merge_relax_cont_dmax{120*units::cm}; ///< T2: junction distance ceiling from absorber start; inert while off
+        double m_shower_merge_relax_cont_t1_gap{1*units::cm}; ///< T1: touching gap_exact ceiling, internal units; inert while off
+        double m_shower_merge_relax_cont_t1_fold{30.0};       ///< T1: local-pivot fold ceiling, DEGREES; inert while off
         // kine_count_orphan_tracks (315167): fill_kine_tree counterpart of
         // the PF-side pf_orphan_confident_track knob (BeePFConfig).  A
         // confident straight-long main-cluster track that is graph-

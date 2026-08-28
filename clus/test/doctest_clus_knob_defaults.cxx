@@ -218,6 +218,16 @@ TEST_CASE("clus knob defaults: TaggerCheckNeutrino switches are all OFF")
     CHECK_KNOB_BOOL(cfg, "shower_flank_absorb", false);                       // pr/117 r1; false = no pass
     CHECK_KNOB_NUM(cfg, "shower_flank_absorb_max_dis", 6.0);                  // cm; inert while off
     CHECK_KNOB_NUM(cfg, "shower_flank_absorb_max_len", 25.0);                 // cm; inert while off
+    // doc pr/118 round 1 -- P2 body-distance + charge-continuity merge.
+    CHECK_KNOB_BOOL(cfg, "shower_ex1_conn3_body_dis", false);                 // pr/118 r1; false = start-segment gate
+    CHECK_KNOB_BOOL(cfg, "shower_merge_relax_continuity", false);             // pr/118 r1; false = legacy merge_relax only
+    CHECK_KNOB_NUM(cfg, "shower_merge_relax_cont_frac", 1.0);                 // T2 charge-presence fraction; inert while off
+    CHECK_KNOB_NUM(cfg, "shower_merge_relax_cont_gap", 8.0);                  // cm, T2 stub gap; inert while off
+    CHECK_KNOB_NUM(cfg, "shower_merge_relax_cont_qmed", 5000.0);              // T2 line-charge floor; inert while off
+    CHECK_KNOB_NUM(cfg, "shower_merge_relax_cont_axis", 7.5);                 // deg, T1+T2 axis cone; inert while off
+    CHECK_KNOB_NUM(cfg, "shower_merge_relax_cont_dmax", 120.0);               // cm, T2 junction reach; inert while off
+    CHECK_KNOB_NUM(cfg, "shower_merge_relax_cont_t1_gap", 1.0);               // cm, T1 touching gap; inert while off
+    CHECK_KNOB_NUM(cfg, "shower_merge_relax_cont_t1_fold", 30.0);             // deg, T1 fold; inert while off
     CHECK_KNOB_BOOL(cfg, "straight_cont_cross_cluster", false);               // r4 (137238)
     CHECK_KNOB_BOOL(cfg, "sccc_bridge_body", false);                          // r4 second rung
     CHECK_KNOB_NUM(cfg, "sccc_max_gap", 5.0);                                 // cm; base tier

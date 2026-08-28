@@ -2355,6 +2355,222 @@ void PatternAlgorithms::flank_absorb_orphans(Graph& graph, IndexedShowerSet& sho
 }
 
 
+// doc sbnd_xin/docs/pr/118 -- charge-continuity connector between two showers.
+// The pr/117 measurement showed blind gap cannot separate an under-clustered
+// stub from an over-clustered one (winner/loser gap distributions overlap
+// completely at 2.0-5.9 cm); the discriminating feature is whether CHARGE is
+// continuous along the connector.  Endpoints come from an exact deterministic
+// argmin over the fragment's member fit points against the absorber's fit
+// cloud (shower_get_closest_dis is a seeded ping-pong approximation -- fine
+// for the frozen legacy gates, wrong for walk endpoints).  The walk recipe is
+// forked from NeutrinoGraphAudit.cxx straight_steiner_chain (itself from
+// NeutrinoStructureExaminer.cxx:344-439): 0.6 cm steps, per sample
+// dv->contained_by then transform->backward on the fragment cluster's t0 then
+// is_good_point(0.2 cm, 0, 0); a sample outside every TPC is bad.  No early
+// exit -- callers want the full distribution.  Shared by the byte-neutral
+// pr/118 probe and (later) the knob path, so probe and knob measure ONE
+// implementation.
+namespace {
+    struct Pr118Connector {
+        double gap_exact = -1;             // exact frag-fit-point -> absorber-cloud distance
+        WireCell::Point p_frag, p_abs;     // walk endpoints (fragment side, absorber side)
+        SegmentPtr frag_seg;               // fragment member holding p_frag
+        int nstep = 0, ngood = 0, nbad = 0, badrun = 0;
+        double cont_frac = -1, qmed = -1, qfrac = -1;
+        bool walked = false;
+    };
+}
+
+static bool pr118_connector_endpoints(Shower& absorber, Shower& fragment, Graph& graph, Pr118Connector& out)
+{
+    bool found = false;
+    for (auto e : ordered_edges(fragment, graph)) {
+        SegmentPtr sb = graph[e].segment;
+        if (!sb) continue;
+        for (const auto& fit : sb->fits()) {
+            if (!fit.valid()) continue;
+            auto [d, p] = shower_get_closest_point(absorber, fit.point);
+            if (d < 0) continue;           // absorber cloud missing/empty
+            if (!found || d < out.gap_exact) {
+                found = true;
+                out.gap_exact = d;
+                out.p_frag = fit.point;
+                out.p_abs = p;
+                out.frag_seg = sb;
+            }
+        }
+    }
+    return found;
+}
+
+static void pr118_connector_walk(Pr118Connector& c, TrackFitting& track_fitter, WireCell::IDetectorVolumes::pointer dv)
+{
+    c.walked = false;
+    if (!c.frag_seg) return;
+    auto* cluster = c.frag_seg->cluster();
+    if (!cluster) return;
+    const auto transform = track_fitter.get_pc_transforms()->pc_transform(
+        cluster->get_scope_transform(cluster->get_default_scope()));
+    auto grouping = cluster->grouping();
+    if (!transform || !grouping) return;
+    const double t0 = cluster->get_cluster_t0();
+
+    const double step = 0.6 * WireCell::units::cm;
+    const double dx = c.p_abs.x() - c.p_frag.x();
+    const double dy = c.p_abs.y() - c.p_frag.y();
+    const double dz = c.p_abs.z() - c.p_frag.z();
+    const double dist = std::sqrt(dx * dx + dy * dy + dz * dz);
+    const int ncount = (int) std::round(dist / step);
+    int run = 0;
+    std::vector<double> qs;
+    for (int i = 1; i < ncount; ++i) {
+        WireCell::Point tp(c.p_frag.x() + dx / ncount * i,
+                           c.p_frag.y() + dy / ncount * i,
+                           c.p_frag.z() + dz / ncount * i);
+        ++c.nstep;
+        auto wpid = dv->contained_by(tp);
+        bool good = false;
+        if (wpid.face() != -1 && wpid.apa() != -1) {
+            auto p_raw = transform->backward(tp, t0, wpid.face(), wpid.apa());
+            good = grouping->is_good_point(p_raw, wpid.apa(), wpid.face(), 0.2 * WireCell::units::cm, 0, 0);
+            qs.push_back(grouping->get_ave_3d_charge(p_raw, wpid.apa(), wpid.face()));
+        }
+        if (good) { ++c.ngood; run = 0; }
+        else { ++c.nbad; c.badrun = std::max(c.badrun, ++run); }
+    }
+    // Zero interior samples (endpoints within one step) = touching showers:
+    // continuous by construction.
+    c.cont_frac = c.nstep > 0 ? (double) c.ngood / c.nstep : 1.0;
+    if (!qs.empty()) {
+        std::sort(qs.begin(), qs.end());
+        c.qmed = qs[qs.size() / 2];
+        int npos = 0;
+        for (double q : qs) if (q > 0) ++npos;
+        c.qfrac = (double) npos / qs.size();
+    }
+    c.walked = true;
+}
+
+// doc sbnd_xin/docs/pr/118 -- byte-neutral EM-EM shower-pair census under
+// WCT_SHOWER_MERGE_DEBUG: for every fragment/absorber pair within reach
+// (45 cm prefilter, gap_exact <= 30 cm -- covers the pr/115 orphan-stub body
+// distance IQR upper quartile 29.7 cm) print gap (production recipe),
+// gap_exact, the continuity walk, line charge, junction dQ/dx and the
+// gamma-gamma guard inputs (mv1/mv2), with NO min-len floor and NO guard cut
+// so offline analysis can apply any candidate predicate.  This is the
+// measurement that pins the Phase-B continuity thresholds.
+static void pr118_probe_continuity_pairs(const std::vector<ShowerPtr>& sorted_showers,
+                                         std::map<ShowerPtr, double>& map_shower_length,
+                                         VertexPtr main_vertex, Graph& graph,
+                                         TrackFitting& track_fitter, WireCell::IDetectorVolumes::pointer dv)
+{
+    for (auto& shower2 : sorted_showers) {                       // fragment candidate
+        if (std::abs(shower2->get_particle_type()) != 11) continue;
+        const double len2 = map_shower_length[shower2];
+        auto [sv2, t2] = shower2->get_start_vertex_and_type();
+        const WireCell::Point p2 = shower2->get_start_point();
+        for (auto& shower1 : sorted_showers) {                   // absorber candidate
+            if (shower1 == shower2) continue;
+            if (std::abs(shower1->get_particle_type()) != 11) continue;
+            const double len1 = map_shower_length[shower1];
+            if (!(len2 < len1)) continue;                        // fragment strictly shorter
+            // cheap prefilter before the per-fit-point scan (a -1 "no cloud"
+            // return passes here and is dropped by the endpoint argmin)
+            if (shower_get_closest_point(*shower1, p2).first > 45 * WireCell::units::cm) continue;
+            auto [sv1, t1] = shower1->get_start_vertex_and_type();
+
+            Pr118Connector c;
+            if (!pr118_connector_endpoints(*shower1, *shower2, graph, c)) continue;
+            if (c.gap_exact > 30 * WireCell::units::cm) continue;
+
+            // production gap recipe (merge_shower_fragments), for comparison
+            double gap = 1e9;
+            for (auto e : ordered_edges(*shower2, graph)) {
+                SegmentPtr sb = graph[e].segment;
+                if (!sb) continue;
+                gap = std::min(gap, shower_get_closest_dis(*shower1, sb));
+            }
+            // local-pivot axis-folded angle (merge_shower_fragments recipe),
+            // computed for every probed pair; -1 = unmeasurable direction
+            double angle_fold = -1;
+            {
+                auto [d1_, p1] = shower_get_closest_point(*shower1, p2);
+                WireCell::Vector dir1 = shower_cal_dir_3vector(*shower1, p1, 30 * WireCell::units::cm);
+                WireCell::Vector dir2 = shower_cal_dir_3vector(*shower2, p2, 30 * WireCell::units::cm);
+                if (dir1.magnitude() > 0.001 && dir2.magnitude() > 0.001) {
+                    const double cf = std::abs(dir1.dot(dir2) / (dir1.magnitude() * dir2.magnitude()));
+                    angle_fold = std::acos(std::clamp(cf, 0.0, 1.0)) / M_PI * 180.0;
+                }
+                (void) d1_;
+            }
+            pr118_connector_walk(c, track_fitter, dv);
+
+            const double dqdx_frag = segment_median_dQ_dx(c.frag_seg);
+            double dqdx_abs = -1;
+            {   // absorber member nearest the junction, deterministic argmin
+                double best = -1;
+                for (auto e : ordered_edges(*shower1, graph)) {
+                    SegmentPtr sa = graph[e].segment;
+                    if (!sa) continue;
+                    const double d = segment_get_closest_point(sa, c.p_frag).first;
+                    if (d < 0) continue;
+                    if (best < 0 || d < best) { best = d; dqdx_abs = segment_median_dQ_dx(sa); }
+                }
+            }
+            // Absorber-AXIS geometry (pr/118 second measurement pass): the
+            // local fold and the charge walk both measured non-separating;
+            // the axis cone is the remaining candidate discriminator.  Angle
+            // and distance of the fragment (start point p2 and junction
+            // p_frag) seen from the absorber START along its 15 cm and
+            // 100 cm axes, unfolded 0-180 deg; -1 when the axis direction is
+            // degenerate.
+            double ax15_ang = -1, ax100_ang = -1, ax_d = -1;
+            double jx15_ang = -1, jx100_ang = -1, jx_d = -1;
+            {
+                const WireCell::Point s1 = shower1->get_start_point();
+                WireCell::Vector a15 = shower_cal_dir_3vector(*shower1, s1, 30 * WireCell::units::cm);
+                WireCell::Vector a100 = shower_cal_dir_3vector(*shower1, s1, 100 * WireCell::units::cm);
+                auto ax_angle = [](const WireCell::Vector& ax, const WireCell::Vector& v) {
+                    if (ax.magnitude() < 0.001 || v.magnitude() < 0.001) return -1.0;
+                    return std::acos(std::clamp(ax.dot(v) / (ax.magnitude() * v.magnitude()), -1.0, 1.0)) / M_PI * 180.0;
+                };
+                WireCell::Vector v2(p2.x() - s1.x(), p2.y() - s1.y(), p2.z() - s1.z());
+                WireCell::Vector vj(c.p_frag.x() - s1.x(), c.p_frag.y() - s1.y(), c.p_frag.z() - s1.z());
+                ax_d = v2.magnitude();
+                jx_d = vj.magnitude();
+                ax15_ang = ax_angle(a15, v2);
+                ax100_ang = ax_angle(a100, v2);
+                jx15_ang = ax_angle(a15, vj);
+                jx100_ang = ax_angle(a100, vj);
+            }
+            const auto* frag_cl = c.frag_seg->cluster();
+            const auto* abs_cl = shower1->start_segment() ? shower1->start_segment()->cluster() : nullptr;
+            std::fprintf(stderr, "SHOWER_MERGE tag=cont_probe keep_sid=%d keep_node=%d "
+                                 "cand_sid=%d cand_node=%d conn1=%d conn2=%d mv1=%d mv2=%d "
+                                 "len1=%.1fcm len2=%.1fcm gap=%.2fcm gap_exact=%.2fcm "
+                                 "angle_fold=%.2f nstep=%d ngood=%d nbad=%d badrun=%d "
+                                 "cont_frac=%.3f qmed=%.1f qfrac=%.3f dqdx_frag=%.1f "
+                                 "dqdx_abs=%.1f t0_frag=%.1f t0_abs=%.1f walked=%d "
+                                 "ax15_ang=%.2f ax100_ang=%.2f ax_d=%.2fcm "
+                                 "jx15_ang=%.2f jx100_ang=%.2f jx_d=%.2fcm\n",
+                         shower1->get_shower_id(), pr91_seg_display_id(shower1->start_segment()),
+                         shower2->get_shower_id(), pr91_seg_display_id(shower2->start_segment()),
+                         t1, t2,
+                         (int) (sv1 == main_vertex && t1 <= 2),
+                         (int) (sv2 == main_vertex && t2 <= 2),
+                         len1 / WireCell::units::cm, len2 / WireCell::units::cm,
+                         gap / WireCell::units::cm, c.gap_exact / WireCell::units::cm,
+                         angle_fold, c.nstep, c.ngood, c.nbad, c.badrun,
+                         c.cont_frac, c.qmed, c.qfrac, dqdx_frag, dqdx_abs,
+                         frag_cl ? frag_cl->get_cluster_t0() / WireCell::units::us : -1.0,
+                         abs_cl ? abs_cl->get_cluster_t0() / WireCell::units::us : -1.0,
+                         (int) c.walked,
+                         ax15_ang, ax100_ang, ax_d / WireCell::units::cm,
+                         jx15_ang, jx100_ang, jx_d / WireCell::units::cm);
+        }
+    }
+}
+
 // doc sbnd_xin/docs/pr/117 round 1 -- shower_merge_relax.  Rationale at the
 // m_shower_merge_relax member block (NeutrinoPatternBase.h).  A late fragment
 // consolidation pass, forked in SHAPE from examine_merge_showers' two-phase
@@ -2378,6 +2594,12 @@ void PatternAlgorithms::merge_shower_fragments(Graph& graph, IndexedShowerSet& s
 
     std::map<ShowerPtr, double> map_shower_length;   // lookup only, never iterated
     for (auto& s : sorted_showers) map_shower_length[s] = s->get_total_length();
+
+    // doc sbnd_xin/docs/pr/118 -- byte-neutral pair census under
+    // WCT_SHOWER_MERGE_DEBUG only; the production loops below are untouched.
+    if (pr91_merge_dbg())
+        pr118_probe_continuity_pairs(sorted_showers, map_shower_length, main_vertex, graph,
+                                     track_fitter, dv);
 
     // Phase 1: plan merges in deterministic order, FRAGMENT-FIRST -- each
     // fragment picks its best (min-gap) absorber among the strictly-bigger
@@ -2403,7 +2625,10 @@ void PatternAlgorithms::merge_shower_fragments(Graph& graph, IndexedShowerSet& s
         // marked set (blind proximity cannot tell an under-clustered stub
         // from an over-clustered one), and letting them into the angle test
         // fires on a random ~3% of noise directions (doc pr/117 sec 7).
-        if (len2 < m_shower_merge_relax_min_len) continue;
+        // pr/118: with the continuity knob on, short fragments DO enter the
+        // loop -- for the continuity-only path; they never take the legacy
+        // gap+angle path (zeroed below).
+        if (len2 < m_shower_merge_relax_min_len && !m_shower_merge_relax_continuity) continue;
         auto [sv2, t2] = shower2->get_start_vertex_and_type();
         const WireCell::Point p2 = shower2->get_start_point();
 
@@ -2444,18 +2669,106 @@ void PatternAlgorithms::merge_shower_fragments(Graph& graph, IndexedShowerSet& s
                     angle_fold = std::acos(std::clamp(c, 0.0, 1.0)) / M_PI * 180.0;
                 }
             }
-            const bool fires = gap < m_shower_merge_relax_dis && angle_fold < m_shower_merge_relax_angle;
+            bool fires = gap < m_shower_merge_relax_dis && angle_fold < m_shower_merge_relax_angle;
+            // doc sbnd_xin/docs/pr/118 -- two-tier axis+charge admission path
+            // (rationale and the census behind every threshold at the
+            // m_shower_merge_relax_continuity member block).  T1 "touching
+            // aligned" (any length): gap_exact <= t1_gap, axis < cont_axis,
+            // local fold < t1_fold.  T2 "bright aligned stub" (below the
+            // min_len floor only): gap_exact <= cont_gap, axis < cont_axis,
+            // junction within cont_dmax, connector charged on every sample
+            // with median line charge > cont_qmed.  Knob off => no new
+            // computation, byte-identical.
+            bool cont_admit = false;
+            int cont_tier = 0;
+            double gap_exact = -1;
+            if (m_shower_merge_relax_continuity) {
+                if (len2 < m_shower_merge_relax_min_len) fires = false;   // short fragments: tier paths only
+                const double tier_gap_ceiling = std::max(m_shower_merge_relax_cont_gap,
+                                                         m_shower_merge_relax_cont_t1_gap);
+                if (!fires && shower_get_closest_point(*shower1, p2).first <= 45 * units::cm) {
+                    Pr118Connector c;
+                    if (pr118_connector_endpoints(*shower1, *shower2, graph, c) &&
+                        c.gap_exact <= tier_gap_ceiling) {
+                        gap_exact = c.gap_exact;
+                        // absorber-axis angle at the junction: min over the
+                        // 30 cm and 100 cm start directions (census: true
+                        // merges sit at 2-6 deg; false neighbours isotropic)
+                        double axang = 1e9;
+                        double jx_d = -1;
+                        {
+                            const WireCell::Point s1 = shower1->get_start_point();
+                            WireCell::Vector a15 = shower_cal_dir_3vector(*shower1, s1, 30 * units::cm);
+                            WireCell::Vector a100 = shower_cal_dir_3vector(*shower1, s1, 100 * units::cm);
+                            WireCell::Vector vj(c.p_frag.x() - s1.x(), c.p_frag.y() - s1.y(),
+                                                c.p_frag.z() - s1.z());
+                            jx_d = vj.magnitude();
+                            if (jx_d > 0.001) {
+                                for (const auto& ax : {a15, a100}) {
+                                    if (ax.magnitude() < 0.001) continue;
+                                    axang = std::min(axang,
+                                        std::acos(std::clamp(ax.dot(vj) / (ax.magnitude() * jx_d), -1.0, 1.0)) / M_PI * 180.0);
+                                }
+                            }
+                        }
+                        if (axang < m_shower_merge_relax_cont_axis) {
+                            if (c.gap_exact <= m_shower_merge_relax_cont_t1_gap) {
+                                // T1: touching + aligned + loose local fold
+                                double af = angle_fold;
+                                if (!(gap < m_shower_merge_relax_dis)) {   // legacy fold not computed above
+                                    auto [d1c, p1c] = shower_get_closest_point(*shower1, p2);
+                                    WireCell::Vector dc1 = shower_cal_dir_3vector(*shower1, p1c, 30 * units::cm);
+                                    WireCell::Vector dc2 = shower_cal_dir_3vector(*shower2, p2, 30 * units::cm);
+                                    af = 180.0;
+                                    if (dc1.magnitude() > 0.001 && dc2.magnitude() > 0.001) {
+                                        const double cf = std::abs(dc1.dot(dc2) / (dc1.magnitude() * dc2.magnitude()));
+                                        af = std::acos(std::clamp(cf, 0.0, 1.0)) / M_PI * 180.0;
+                                    }
+                                    (void) d1c;
+                                }
+                                if (af < m_shower_merge_relax_cont_t1_fold) {
+                                    cont_admit = true;
+                                    cont_tier = 1;
+                                }
+                            }
+                            if (!cont_admit && len2 < m_shower_merge_relax_min_len &&
+                                c.gap_exact <= m_shower_merge_relax_cont_gap &&
+                                jx_d < m_shower_merge_relax_cont_dmax) {
+                                // T2: bright aligned stub -- the connector must
+                                // carry charge on every sample (a touching pair
+                                // has no samples and is T1's case, not T2's)
+                                pr118_connector_walk(c, track_fitter, dv);
+                                if (c.walked && c.nstep > 0 &&
+                                    c.qfrac >= m_shower_merge_relax_cont_frac &&
+                                    c.qmed > m_shower_merge_relax_cont_qmed) {
+                                    cont_admit = true;
+                                    cont_tier = 2;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
             if (pr91_merge_dbg())
                 std::fprintf(stderr, "SHOWER_MERGE tag=merge_relax keep_sid=%d keep_node=%d "
                                      "cand_sid=%d cand_node=%d gap=%.2fcm angle_fold=%.2f len2=%.1fcm "
-                                     "cut_dis=%.2f cut_angle=%.2f verdict=%s\n",
+                                     "cut_dis=%.2f cut_angle=%.2f gap_exact=%.2fcm tier=%d verdict=%s\n",
                              shower1->get_shower_id(), pr91_seg_display_id(shower1->start_segment()),
                              shower2->get_shower_id(), pr91_seg_display_id(shower2->start_segment()),
                              gap / units::cm, angle_fold, len2 / units::cm,
                              m_shower_merge_relax_dis / units::cm, m_shower_merge_relax_angle,
-                             fires ? "MERGE" : (gap < m_shower_merge_relax_dis ? "angle_fold_fail" : "gap_fail"));
-            if (fires && gap < best_gap) {
-                best_gap = gap;
+                             gap_exact >= 0 ? gap_exact / units::cm : -1.0, cont_tier,
+                             fires ? "MERGE"
+                                   : cont_admit ? "MERGE_CONT"
+                                   : (m_shower_merge_relax_continuity && gap_exact >= 0) ? "cont_fail"
+                                   : (gap < m_shower_merge_relax_dis ? "angle_fold_fail" : "gap_fail"));
+            // Rank by the admitting metric (gap for the legacy path,
+            // gap_exact for the continuity path; the smaller when both).
+            double rank = 1e9;
+            if (fires) rank = std::min(rank, gap);
+            if (cont_admit) rank = std::min(rank, gap_exact);
+            if ((fires || cont_admit) && rank < best_gap) {
+                best_gap = rank;
                 best_absorber = shower1;
             }
         }
@@ -3403,6 +3716,53 @@ void PatternAlgorithms::examine_shower_1(Graph& graph, VertexPtr main_vertex, In
 
                     // Expensive KD-tree call — only after cheap filters pass.
                     double min_dis = shower_get_closest_dis(*shower1, shower->start_segment());
+                    // doc sbnd_xin/docs/pr/118 -- pr/91 P2: the same gate measured
+                    // against the parent's WHOLE fit body (min over its ordered
+                    // members; includes the start segment, so body_dis <=
+                    // start_dis always -- the knob is strictly admissive and the
+                    // 3 cm threshold is unchanged).  Measure-first idiom: body_dis
+                    // is computed under the knob OR the probe, printed under the
+                    // probe (with the would-be downstream angles, predicting the
+                    // admit set AND its angle-gate survival -- the 394532 lesson),
+                    // and APPLIED only under m_shower_ex1_conn3_body_dis.
+                    if (m_shower_ex1_conn3_body_dis || pr91_merge_dbg()) {
+                        double body_dis = min_dis;
+                        for (auto edesc : ordered_edges(*shower, graph)) {
+                            SegmentPtr mseg = graph[edesc].segment;
+                            if (!mseg) continue;
+                            body_dis = std::min(body_dis, shower_get_closest_dis(*shower1, mseg));
+                        }
+                        if (pr91_merge_dbg()) {
+                        // read-only copy of the downstream recipes just below
+                        auto [w_dis, w_pt] = shower_get_closest_point(*shower1, main_vtx_pt);
+                        WireCell::Vector w_d2(w_pt.x() - main_vtx_pt.x(),
+                                              w_pt.y() - main_vtx_pt.y(),
+                                              w_pt.z() - main_vtx_pt.z());
+                        double w_angle = std::acos(std::clamp(dir1.dot(w_d2) / (dir1.magnitude() * w_d2.magnitude()), -1.0, 1.0)) / M_PI * 180.0;
+                        WireCell::Vector w_d3 = shower_cal_dir_3vector(*shower1, shower1->get_start_point(), 30 * units::cm);
+                        double w_angle1 = std::acos(std::clamp(w_d2.dot(w_d3) / (w_d2.magnitude() * w_d3.magnitude()), -1.0, 1.0)) / M_PI * 180.0;
+                        const bool legacy_gate_fail = conn_type1 > 2 && min_dis > 3 * units::cm;
+                        const bool body_gate_fail   = conn_type1 > 2 && body_dis > 3 * units::cm;
+                        const bool angles_pass      = w_angle < 15 && w_angle1 < 15 && body_dis < 28 * units::cm;
+                        std::fprintf(stderr, "SHOWER_MERGE tag=ex_shower1_p2dis parent_sid=%d "
+                                             "parent_node=%d cand_sid=%d cand_node=%d cand_conn=%d "
+                                             "cand_len=%.3f start_dis=%.3f body_dis=%.3f angle=%.3f "
+                                             "angle1=%.3f legacy_gate=%s body_gate=%s angles_pass=%d\n",
+                                     shower->get_shower_id(),
+                                     pr91_seg_display_id(shower->start_segment()),
+                                     shower1->get_shower_id(),
+                                     pr91_seg_display_id(shower1->start_segment()),
+                                     conn_type1, shower1->get_total_length() / units::cm,
+                                     min_dis / units::cm, body_dis / units::cm, w_angle, w_angle1,
+                                     legacy_gate_fail ? "FAIL" : "PASS",
+                                     body_gate_fail ? "FAIL" : "PASS", (int) angles_pass);
+                        (void) w_dis;
+                        }
+                        // Coherent substitution: body_dis also feeds the
+                        // min_dis < 28 cm term below -- intentional (strictly
+                        // admissive there too).
+                        if (m_shower_ex1_conn3_body_dis) min_dis = body_dis;
+                    }
                     // G-C: for every conn-3/4 shower this 3 cm gate to the PARENT'S
                     // START SEGMENT (not the parent's whole charge) is the only door.
                     if (conn_type1 > 2 && min_dis > 3 * units::cm) { pr91_rej("conn_gt2_min_dis_gt_3cm", min_dis / units::cm); continue; }

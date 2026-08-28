@@ -903,6 +903,18 @@ public:
         bool   m_shower_flank_absorb{false};                        // doc pr/117 r1 (41 orphan stub marks)
         double m_shower_flank_absorb_max_dis{6.0};                  // cm; scaled at copy; inert while off
         double m_shower_flank_absorb_max_len{25.0};                 // cm; scaled at copy; inert while off
+        // doc sbnd_xin/docs/pr/118 round 1 -- rationale comments in
+        // NeutrinoPatternBase.h (m_shower_ex1_conn3_body_dis /
+        // m_shower_merge_relax_continuity blocks).
+        bool   m_shower_ex1_conn3_body_dis{false};                  // doc pr/118 r1 (pr/91 P2); strictly admissive
+        bool   m_shower_merge_relax_continuity{false};              // doc pr/118 r1 (two-tier axis+charge merge path)
+        double m_shower_merge_relax_cont_frac{1.0};                 // fraction, no conversion; inert while off
+        double m_shower_merge_relax_cont_gap{8.0};                  // cm; scaled at copy; inert while off
+        double m_shower_merge_relax_cont_qmed{5000.0};              // charge units, no conversion; inert while off
+        double m_shower_merge_relax_cont_axis{7.5};                 // deg, no conversion; inert while off
+        double m_shower_merge_relax_cont_dmax{120.0};               // cm; scaled at copy; inert while off
+        double m_shower_merge_relax_cont_t1_gap{1.0};               // cm; scaled at copy; inert while off
+        double m_shower_merge_relax_cont_t1_fold{30.0};             // deg, no conversion; inert while off
         bool m_straight_cont_cross_cluster{false};                  // doc pr/93 r4 (137238)
         bool m_sccc_bridge_body{false};                             // doc pr/93 r4 second rung
         double m_sccc_max_gap{5};                                   // cm; base tier

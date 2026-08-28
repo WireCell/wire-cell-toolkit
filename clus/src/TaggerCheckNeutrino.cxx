@@ -659,6 +659,16 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_shower_flank_absorb                       = get(config, "shower_flank_absorb",                       m_shower_flank_absorb);
     m_shower_flank_absorb_max_dis               = get(config, "shower_flank_absorb_max_dis",               m_shower_flank_absorb_max_dis);
     m_shower_flank_absorb_max_len               = get(config, "shower_flank_absorb_max_len",               m_shower_flank_absorb_max_len);
+    // doc sbnd_xin/docs/pr/118 round 1
+    m_shower_ex1_conn3_body_dis                 = get(config, "shower_ex1_conn3_body_dis",                 m_shower_ex1_conn3_body_dis);
+    m_shower_merge_relax_continuity             = get(config, "shower_merge_relax_continuity",             m_shower_merge_relax_continuity);
+    m_shower_merge_relax_cont_frac              = get(config, "shower_merge_relax_cont_frac",              m_shower_merge_relax_cont_frac);
+    m_shower_merge_relax_cont_gap               = get(config, "shower_merge_relax_cont_gap",               m_shower_merge_relax_cont_gap);
+    m_shower_merge_relax_cont_qmed              = get(config, "shower_merge_relax_cont_qmed",              m_shower_merge_relax_cont_qmed);
+    m_shower_merge_relax_cont_axis              = get(config, "shower_merge_relax_cont_axis",              m_shower_merge_relax_cont_axis);
+    m_shower_merge_relax_cont_dmax              = get(config, "shower_merge_relax_cont_dmax",              m_shower_merge_relax_cont_dmax);
+    m_shower_merge_relax_cont_t1_gap            = get(config, "shower_merge_relax_cont_t1_gap",            m_shower_merge_relax_cont_t1_gap);
+    m_shower_merge_relax_cont_t1_fold           = get(config, "shower_merge_relax_cont_t1_fold",           m_shower_merge_relax_cont_t1_fold);
     m_straight_cont_cross_cluster               = get(config, "straight_cont_cross_cluster",               m_straight_cont_cross_cluster);
     m_sccc_bridge_body                          = get(config, "sccc_bridge_body",                          m_sccc_bridge_body);
     m_sccc_max_gap                              = get(config, "sccc_max_gap",                              m_sccc_max_gap);
@@ -1068,6 +1078,15 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["shower_flank_absorb"]                       = m_shower_flank_absorb;                       // doc pr/117 r1; false = no pass, byte-identical
     cfg["shower_flank_absorb_max_dis"]               = m_shower_flank_absorb_max_dis;               // cm; inert while flank_absorb off (doc pr/117 r1)
     cfg["shower_flank_absorb_max_len"]               = m_shower_flank_absorb_max_len;               // cm; inert while flank_absorb off (doc pr/117 r1)
+    cfg["shower_ex1_conn3_body_dis"]                 = m_shower_ex1_conn3_body_dis;                 // doc pr/118 r1; false = start-segment gate, byte-identical
+    cfg["shower_merge_relax_continuity"]             = m_shower_merge_relax_continuity;             // doc pr/118 r1; false = legacy merge_relax only, byte-identical
+    cfg["shower_merge_relax_cont_frac"]              = m_shower_merge_relax_cont_frac;              // T2 charge-presence fraction; inert while continuity off (doc pr/118 r1)
+    cfg["shower_merge_relax_cont_gap"]               = m_shower_merge_relax_cont_gap;               // cm, T2 stub gap; inert while continuity off (doc pr/118 r1)
+    cfg["shower_merge_relax_cont_qmed"]              = m_shower_merge_relax_cont_qmed;              // T2 line-charge floor; inert while continuity off (doc pr/118 r1)
+    cfg["shower_merge_relax_cont_axis"]              = m_shower_merge_relax_cont_axis;              // deg, T1+T2 axis cone; inert while continuity off (doc pr/118 r1)
+    cfg["shower_merge_relax_cont_dmax"]              = m_shower_merge_relax_cont_dmax;              // cm, T2 junction reach; inert while continuity off (doc pr/118 r1)
+    cfg["shower_merge_relax_cont_t1_gap"]            = m_shower_merge_relax_cont_t1_gap;            // cm, T1 touching gap; inert while continuity off (doc pr/118 r1)
+    cfg["shower_merge_relax_cont_t1_fold"]           = m_shower_merge_relax_cont_t1_fold;           // deg, T1 fold; inert while continuity off (doc pr/118 r1)
     cfg["straight_cont_cross_cluster"]               = m_straight_cont_cross_cluster;               // doc pr/93 r4; false = legacy (no cross-cluster continuation demotion)
     cfg["sccc_bridge_body"]                          = m_sccc_bridge_body;                          // doc pr/93 r4; false = demote-only (no bridge replay)
     cfg["sccc_max_gap"]                              = m_sccc_max_gap;                              // cm; base tier, only read when straight_cont_cross_cluster
@@ -2104,6 +2123,15 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
         pattern_algos.m_shower_flank_absorb                       = m_shower_flank_absorb;                       // doc pr/117 r1
         pattern_algos.m_shower_flank_absorb_max_dis               = m_shower_flank_absorb_max_dis * units::cm;   // cm -> internal (doc pr/117 r1)
         pattern_algos.m_shower_flank_absorb_max_len               = m_shower_flank_absorb_max_len * units::cm;   // cm -> internal (doc pr/117 r1)
+        pattern_algos.m_shower_ex1_conn3_body_dis                 = m_shower_ex1_conn3_body_dis;                 // doc pr/118 r1
+        pattern_algos.m_shower_merge_relax_continuity             = m_shower_merge_relax_continuity;             // doc pr/118 r1
+        pattern_algos.m_shower_merge_relax_cont_frac              = m_shower_merge_relax_cont_frac;              // fraction, no conversion (doc pr/118 r1)
+        pattern_algos.m_shower_merge_relax_cont_gap               = m_shower_merge_relax_cont_gap * units::cm;   // cm -> internal (doc pr/118 r1)
+        pattern_algos.m_shower_merge_relax_cont_qmed              = m_shower_merge_relax_cont_qmed;              // charge units, no conversion (doc pr/118 r1)
+        pattern_algos.m_shower_merge_relax_cont_axis              = m_shower_merge_relax_cont_axis;              // deg, no conversion (doc pr/118 r1)
+        pattern_algos.m_shower_merge_relax_cont_dmax              = m_shower_merge_relax_cont_dmax * units::cm;  // cm -> internal (doc pr/118 r1)
+        pattern_algos.m_shower_merge_relax_cont_t1_gap            = m_shower_merge_relax_cont_t1_gap * units::cm; // cm -> internal (doc pr/118 r1)
+        pattern_algos.m_shower_merge_relax_cont_t1_fold           = m_shower_merge_relax_cont_t1_fold;           // deg, no conversion (doc pr/118 r1)
         pattern_algos.m_straight_cont_cross_cluster               = m_straight_cont_cross_cluster;               // doc pr/93 r4
         pattern_algos.m_sccc_bridge_body                          = m_sccc_bridge_body;                          // doc pr/93 r4
         pattern_algos.m_sccc_max_gap                              = m_sccc_max_gap * units::cm;                  // doc pr/93 r4
