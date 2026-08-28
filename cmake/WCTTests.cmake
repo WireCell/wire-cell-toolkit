@@ -70,6 +70,14 @@ function(wct_register_tests NAME pkgdir have_lib test_use)
     list(APPEND _link ${NAME})
   endif()
   list(APPEND _link ${_tlibs})
+  # Some tests use the vendored custard/miniz zip API directly.  The WCT
+  # libraries no longer export miniz (its symbols are hidden to avoid colliding
+  # with libtorch's own bundled miniz -- see WCTMiniz.cmake), so tests must get
+  # the private copy too.  Archive semantics make this a no-op for tests that
+  # do not reference miniz.
+  if(TARGET wct_miniz)
+    list(APPEND _link wct_miniz)
+  endif()
 
   set(_inc "${pkgdir}/inc" "${_testdir}" "${WCT_GENERATED_INCLUDE_DIR}")
 

@@ -171,6 +171,8 @@ include(WCTBuildConfig)
 # optional-dependency gating are completed in wct-ike.5 / wct-ike.6.
 # ---------------------------------------------------------------------------
 include(WCTPackage)
+include(WCTMiniz)      # isolate vendored miniz (hidden static) so it never
+                       # collides with libtorch's own bundled miniz
 include(WCTRootDict)   # wct-ike.7: provides the wct_package_root_dict() hook
 if(WCT_WITH_TESTS)
   include(WCTTests)    # wct-ike.9: provides wct_register_tests(); enables CTest
