@@ -17,6 +17,10 @@ function(tpc)
     local fullscale = tpc.adc.fullscale[1] - tpc.adc.fullscale[0];
     local ADC_mV_ratio = ((1 << resolution) - 1 ) / fullscale;
     local anode = tpc.anode;
+    // Per-job dump prefix injected onto tpc by detector.subset(); fall back to
+    // the legacy fixed name when absent (e.g. the un-subsetted default path).
+    local dump_prefix = if std.objectHasAll(tpc, "sp_dump_prefix")
+                        then tpc.sp_dump_prefix else "osp_dump";
     pg.pnode({
         type: 'OmnibusSigProc',
         name: tpc.name,
@@ -24,7 +28,7 @@ function(tpc)
             anode: wc.tn(tpc.anode),
             dft: "FftwDFT",
             dump_2d_spectra: true,
-            dump_2d_prefix: "osp_dump",
+            dump_2d_prefix: dump_prefix,
             do_not_mp_protect_traditional: true, 
             field_response: wc.tn(tpc.fr),
             filter_responses_tn: [ ], // FIXME: this needs to be special for "bad APA1"
