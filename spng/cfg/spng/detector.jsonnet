@@ -515,11 +515,18 @@ local known_detectors = import "detectors.jsonnet";
 
     /// Return a detector with a subset of TPCs selected by ID numbers.
     /// The device parameter is forwarded to osp_subgraphs (e.g. for TorchService).
-    subset(det, tpc_idents, device="cpu")::
+    subset(det, tpc_idents, device="cpu", sp_dump_prefix="osp_dump")::
         local selected = if std.length(tpc_idents) == 0
                          then det.tpcs
                          else [det.tpc[$.tpc_name(ident)] for ident in tpc_idents];
-        local patched = [t { osp_subgraphs: t._osp_subgraphs(t, device) } for t in selected];
+        // Carry the per-job OSP dump prefix on the tpc (hidden) so osp_subgraphs
+        // / sp can name their debug dumps uniquely per job.  Injected here rather
+        // than as a new _osp_subgraphs() argument so per-detector osp functions
+        // keep their (tpc, device) signature.
+        local patched = [
+            local t2 = t { sp_dump_prefix:: sp_dump_prefix };
+            t2 { osp_subgraphs: t2._osp_subgraphs(t2, device) }
+            for t in selected];
         det { tpcs: patched },
 
 

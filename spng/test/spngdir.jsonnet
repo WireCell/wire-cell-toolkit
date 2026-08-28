@@ -34,8 +34,15 @@ function(input,
 
     local tpcids = [0];
 
+    // Per-job-unique prefix for OSP's optional 2D-spectra debug dumps.  Every
+    // wire-cell job in the workflow shares a working directory and the OSP dump
+    // filename is <prefix>_anode<N>_plane<P>.npz, so a fixed prefix makes
+    // concurrent jobs race on the same files (corrupting them).  Derive the
+    // prefix from outpat so each job writes its own set.
+    local osp_dump_prefix = std.strReplace(outpat % {tier: "osp_dump"}, ".npz", "");
+
     local controls = control_mod(device=device, verbosity=wc.intify(verbosity));
-    local det = detconf.get(detname, tpcids);
+    local det = detconf.get(detname, tpcids, sp_dump_prefix=osp_dump_prefix);
 
     // make source node
     local source = io.depo_source(input);
