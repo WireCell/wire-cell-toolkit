@@ -35,6 +35,7 @@ function(input,
          output="adc.npz",
          detname='pdhd',
          engine='Pgrapher',
+         add_noise=true,
          tpcid=0)
 
     local controls = control_js();
@@ -57,7 +58,7 @@ function(input,
 
     local sg = subgraphs_js(tpc, control);
 
-    local detmod = det_js(det, control);
+    local detmod = det_js(det, control, add_noise=add_noise);
 
     local sim = detmod.inducer;
 

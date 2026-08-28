@@ -1307,6 +1307,16 @@ void OmnibusSigProc::decon_2D_init(int plane)
     Waveform::realseq_t wire_filter_wf;
     auto ncr1 = Factory::find<IFilterWaveform>("HfFilter", m_Wire_filters[plane]);
     wire_filter_wf = ncr1->filter_waveform(m_c_data[plane].rows());
+
+    //Save for debugging if requested
+    if (m_dump_2d_spectra) {
+          const char* pn = (plane == 0) ? "U" : ((plane == 1) ? "V" : "W");
+          std::string fname = m_dump_2d_prefix + "_anode"
+                            + std::to_string(m_anode->ident()) + "_plane" + pn + ".npz";
+          cnpy::npz_save(fname, "wire_filter", wire_filter_wf, "a");
+      }
+
+    //Apply filter
     for (int irow = 0; irow < m_c_data[plane].rows(); ++irow) {
         for (int icol = 0; icol < m_c_data[plane].cols(); ++icol) {
             float val = abs(m_c_data[plane](irow, icol));
