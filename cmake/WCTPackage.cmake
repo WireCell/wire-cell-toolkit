@@ -68,6 +68,12 @@ function(wct_package NAME)
   set(_have_lib FALSE)
   if(IS_DIRECTORY "${_dir}/src")
     file(GLOB _srcs CONFIGURE_DEPENDS "${_dir}/src/*.cxx")
+    # miniz.cxx is a vendored third-party zip library.  It is built separately
+    # as the hidden-visibility static target `wct_miniz` (see WCTMiniz.cmake)
+    # and linked in below, so its global symbols never leak into any WCT shared
+    # object's dynamic symbol table where they would collide with libtorch's own
+    # bundled miniz.  Keep it out of the normal source glob.
+    list(FILTER _srcs EXCLUDE REGEX "/miniz\\.cxx$")
     # CUDA sources compile via the CUDA language enabled at the top level
     # (wct-ike.8); only glob them when CUDA is in use.
     if(WCT_HAVE_CUDA)
@@ -92,6 +98,12 @@ function(wct_package NAME)
         "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>")
       if(_use_tgts)
         target_link_libraries(${NAME} PUBLIC ${_use_tgts})
+      endif()
+      # Provide the vendored miniz privately (hidden symbols).  Archive
+      # semantics pull its objects into only those libraries that actually
+      # reference miniz (util, sio, clus, img); it is a no-op for the rest.
+      if(TARGET wct_miniz)
+        target_link_libraries(${NAME} PRIVATE wct_miniz)
       endif()
       # Exported name strips the WireCell/WCP prefix so downstream consumers use
       # WireCell::Util, WireCell::Quickhull, ... (the established contract from
