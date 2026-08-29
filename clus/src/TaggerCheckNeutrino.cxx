@@ -1318,6 +1318,12 @@ int long_muon_cathode_bridge_pass(PatternAlgorithms& pattern_algos, Graph& graph
                 for (auto* vp : {&va, &vb}) {
                     VertexPtr v = *vp;
                     if (!v || !v->descriptor_valid()) continue;
+                    // Never traverse THROUGH the interaction point: other
+                    // prongs at the main vertex are their own particles, not
+                    // the muon's far half (77978/177536: a ~10-24 cm proton
+                    // prong shares the vertex with the muon and must stay a
+                    // separate PF node, not be folded into the muon).
+                    if (v == main_vertex) continue;
                     for (auto ed : sorted_out_edges(v->get_descriptor(), graph)) {
                         SegmentPtr nx = graph[ed].segment;
                         if (!nx || seen.count(nx->get_graph_index())) continue;
@@ -1343,11 +1349,26 @@ int long_muon_cathode_bridge_pass(PatternAlgorithms& pattern_algos, Graph& graph
                 taken.insert(seg->get_graph_index());
                 absorbed_len += segment_track_length(seg);
             }
+            // When the absorbed chain reaches the main vertex the muon's true
+            // start IS the interaction point: re-seat the shower there so the
+            // kinematics start_point / init_dir and the Bee PF tree connect
+            // nu -> mu instead of leaving the vertex marker dangling on the
+            // far side (77978: nu at x=-7.5 with the muon drawn from +4.8).
+            SegmentPtr vtx_seg = nullptr;
+            for (auto& seg : chain) {
+                auto [sa, sb] = find_vertices(graph, seg);
+                if (sa == main_vertex || sb == main_vertex) { vtx_seg = seg; break; }
+            }
+            if (vtx_seg) {
+                me.shower->set_start_vertex(main_vertex, 1);
+                me.shower->set_start_segment(vtx_seg, true);
+            }
             SPDLOG_LOGGER_DEBUG(log,
                 "long_muon_cathode_bridge: absorb bare chain into sid={} nseg={} len={:.1f}cm "
-                "gap={:.1f}cm ends x=({:.1f},{:.1f})cm",
+                "gap={:.1f}cm ends x=({:.1f},{:.1f})cm reseat={}",
                 me.shower->get_shower_id(), chain.size(), absorbed_len / units::cm,
-                best_gap / units::cm, me.p.x() / units::cm, best->p.x() / units::cm);
+                best_gap / units::cm, me.p.x() / units::cm, best->p.x() / units::cm,
+                vtx_seg ? 1 : 0);
             me.shower->set_flag_kinematics(false);
         }
         ++n_bridged;
