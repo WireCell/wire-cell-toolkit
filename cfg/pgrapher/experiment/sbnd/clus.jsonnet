@@ -950,6 +950,10 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, e
               // off => byte-identical.
               pf_orphan_confident_track=false,
               pf_orphan_track_min_cm=null,
+              // pf_orphan_guard_freed (doc pr/123 round 2): root PF node
+              // for a pass4-track-guard-freed segment (kPass4GuardFreed);
+              // C++ default false. Key omitted when off => byte-identical.
+              pf_orphan_guard_freed=false,
               // pf_track_owns_loose_vertex (doc pr/93 round 4): a vertex the
               // track BFS reached via a real segment is not claimable by a
               // root shower whose only tie to it is the loose fill_sets view
@@ -2482,6 +2486,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, e
                         // doc pr/93 round 4; params in cm.
                         [if pf_orphan_confident_track then 'pf_orphan_confident_track']: true,
                         [if pf_orphan_track_min_cm != null then 'pf_orphan_track_min']: pf_orphan_track_min_cm * wc.cm,
+                        [if pf_orphan_guard_freed then 'pf_orphan_guard_freed']: true,  // doc pr/123 r2
                         [if pf_track_owns_loose_vertex then 'pf_track_owns_loose_vertex']: true,
                     },
                 ],

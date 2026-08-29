@@ -989,6 +989,9 @@ function(
     // (owner round 2026-08-18; validation in that block).
     pf_orphan_confident_track = true,
     pf_orphan_track_min_cm = null,  // null => C++ default 50cm
+    // doc pr/123 r2: root PF node for a pass4-guard-freed track (171572's
+    // muon). C++ default false.
+    pf_orphan_guard_freed = true,   // SBND PRODUCTION ON 2026-08-28 (doc pr/123 r2; owner "should not be lost in the PF tree"; fires on exactly 171572 + 393505 in 239 events: the guard-freed muons return as root PF nodes, 304.8/268.7 MeV)
     pf_track_owns_loose_vertex = true,
     // doc pr/38: F2's ON-behavior was CORRECTED in place (owner decision
     // 2026-08-05, no new knobs): the barrier now excludes each shower's
@@ -1831,6 +1834,8 @@ function(
     shower_hadronic_stem_ratio = 2.8,    // calibrated (reaches 395148 at C++ stem 2.98; gammas ~2)
     kine_count_orphan_tracks = true,
     kine_orphan_track_min = null,  // null => C++ default 50cm
+    // doc pr/123 r2: kine twin of pf_orphan_guard_freed. C++ default false.
+    kine_count_guard_freed = true,  // SBND PRODUCTION ON 2026-08-28 (doc pr/123 r2; pr/93 principle: PF and kine describe the same particle set; restores 304.7/268.7 MeV muon KE to kine_reco_Enu on the same 2 events; nusel identical)
     straight_cont_cross_cluster = true,
     sccc_bridge_body = true,
     sccc_max_gap = 6,          // cm; base tier (C++ default 5; 137238 g=5.68)
@@ -2844,6 +2849,7 @@ function(
         [if shower_hadronic_stem_ratio != null then 'shower_hadronic_stem_ratio']: shower_hadronic_stem_ratio,
         [if kine_count_orphan_tracks then 'kine_count_orphan_tracks']: true,
         [if kine_orphan_track_min != null then 'kine_orphan_track_min']: kine_orphan_track_min,
+        [if kine_count_guard_freed then 'kine_count_guard_freed']: true,  // doc pr/123 r2
         [if straight_cont_cross_cluster then 'straight_cont_cross_cluster']: true,
         [if sccc_bridge_body then 'sccc_bridge_body']: true,
         [if sccc_max_gap != null then 'sccc_max_gap']: sccc_max_gap,
@@ -3022,6 +3028,7 @@ function(
                              pf_drop_stray_satellites=pf_drop_stray_satellites,
                              pf_orphan_confident_track=pf_orphan_confident_track,
                              pf_orphan_track_min_cm=pf_orphan_track_min_cm,
+                             pf_orphan_guard_freed=pf_orphan_guard_freed,
                              pf_track_owns_loose_vertex=pf_track_owns_loose_vertex,
                              unmerge_bundle_mode=unmerge_bundle_mode,
                              restore_demoted_mains=restore_demoted_mains,
