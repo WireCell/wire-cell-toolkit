@@ -1209,7 +1209,7 @@ function(
     // kine_mcs_* (T_kine) + log sentinels; segments_in_long_muon and every
     // tagger/nusel input stay untouched.  C++ default false; key suppressed
     // when off => byte-identical compiled config.
-    mcs_bridged_members = false,
+    mcs_bridged_members = true,   // SBND PRODUCTION ON 2026-08-28 (doc 84 round 3, owner pre-authorization; moves T_kine kine_mcs_* only)
     // doc pr/94 round 3.  Give the SELECTED neutrino candidate the
     // main-cluster PR treatment for the duration of its own pass, even when it
     // is a demoted main.  The PR chain reads main-ness from Flags::main_cluster
