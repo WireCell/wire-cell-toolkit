@@ -535,6 +535,29 @@ namespace WireCell::Clus::PR {
     /// CALLER-side conjunct: the "main cluster" notion differs per context.
     bool segment_orphan_confident_track(SegmentPtr seg, double min_len);
 
+    /// doc sbnd_xin/docs/pr/128 -- admission test for an unclaimed
+    /// CROSS-CLUSTER track segment that touches the emitted candidate,
+    /// SHARED by fill_bee_pf_tree (pf_orphan_near_cross_cluster) and
+    /// fill_kine_tree (kine_count_near_cross_cluster) so the display and the
+    /// energy cannot describe different particle sets.
+    ///
+    /// Fork-by-duplication of segment_orphan_confident_track (M10 -- that
+    /// function has live consumers and stays byte-for-byte).  Same shape
+    /// MINUS the particle_score() < 1.0 term inside
+    /// segment_confident_nonelectron_pid: measured over both SBND production
+    /// manifests, 10 of the 19 near-and-long objects of this class carry
+    /// particle_score == 100 -- the trajectory branch's unconditional
+    /// sentinel stamp, not a PID verdict -- and would be rejected on the
+    /// score alone (doc pr/128 §3), including SBND 18255-55740's 123.1cm muon
+    /// and 18255-72786's 114.3/108.3cm muons, all touching the candidate at
+    /// gap 0.00 cm.  pf_orphan_guard_freed (doc pr/123 r2) hit the same wall
+    /// and answered it with a flag predicate; this class has no flag, so the
+    /// confidence has to come from the pdg and straight-long terms instead.
+    /// |pdg|==11 is excluded: an electron touching a displayed shower is far
+    /// more likely to be that shower's own material than a lost particle.
+    /// Proximity and cluster membership stay CALLER-side conjuncts.
+    bool segment_near_candidate_track(SegmentPtr seg, double min_len);
+
     /// doc sbnd_xin/docs/pr/74 round 2 P1 -- veto for examine_direction's
     /// flag_shower_in cascade (the |pdg|==13/pdg==0 electron relabel).
     /// True iff `seg` is BOTH long (track length > max_len) AND MIP-like

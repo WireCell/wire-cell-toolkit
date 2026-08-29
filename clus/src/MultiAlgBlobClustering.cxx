@@ -387,6 +387,13 @@ void MultiAlgBlobClustering::configure(const WireCell::Configuration& cfg)
             pfc.pf_orphan_track_min = get<double>(pf, "pf_orphan_track_min", pfc.pf_orphan_track_min);
             // doc pr/123 round 2; absent => legacy (guard-freed tracks not re-rooted), byte-identical.
             pfc.pf_orphan_guard_freed = get<bool>(pf, "pf_orphan_guard_freed", false);
+            // doc pr/128; absent => legacy (cross-cluster near tracks invisible,
+            // conn-4 showers skipped unconditionally), byte-identical.
+            pfc.pf_orphan_near_cross_cluster = get<bool>(pf, "pf_orphan_near_cross_cluster", false);
+            pfc.pf_orphan_near_gap = get<double>(pf, "pf_orphan_near_gap", pfc.pf_orphan_near_gap);
+            pfc.pf_orphan_near_min_len = get<double>(pf, "pf_orphan_near_min_len", pfc.pf_orphan_near_min_len);
+            pfc.pf_conn4_near_candidate = get<bool>(pf, "pf_conn4_near_candidate", false);
+            pfc.pf_conn4_near_gap = get<double>(pf, "pf_conn4_near_gap", pfc.pf_conn4_near_gap);
             pfc.pf_track_owns_loose_vertex = get<bool>(pf, "pf_track_owns_loose_vertex", false);
             m_bee_pf_configs.push_back(pfc);
             m_bee_pf_trees[pfc.name] = Bee::ParticleTree(pfc.name);
@@ -1315,7 +1322,24 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
                !pi0_showers.count(sh) &&
                dropped_sat_ids.count(sh->get_shower_id()) > 0;
     };
+    auto seg_display_id = [](PR::SegmentPtr seg) -> int {
+        int sid = seg->id();
+        if (sid < 0) sid = static_cast<int>(seg->get_graph_index());
+        const auto* cl = seg->cluster();
+        return cl ? cl->get_cluster_id() * 1000 + sid : sid;
+    };
+
     PR::IndexedSegmentSet conn4_skip_segs;
+    // doc pr/128 (pf_conn4_near_candidate): conn-4 showers whose material is
+    // the candidate's OWN -- closest approach to the main cluster within
+    // pf_conn4_near_gap.  Populated below; empty when the knob is off, so
+    // every conn-4 consumer keeps its legacy behavior byte-identically.
+    PR::IndexedShowerSet conn4_keep_showers;
+    // Byte-neutral census tape: WCT_PFNEAR_DEBUG=1 prints one line per conn-4
+    // shower and per cross-cluster near-track candidate, from THIS code path,
+    // so the offline census and the knob cannot use different definitions
+    // (the pr/127 WCT_SCCC_DEBUG pattern).  stderr only -- no effect on bytes.
+    static const bool pfnear_dbg = std::getenv("WCT_PFNEAR_DEBUG") != nullptr;
 
     // --- Vertex → node-descriptor map ---
     std::map<PR::VertexPtr, PR::node_descriptor, PR::VertexIndexCmp> vtx_to_nd;
@@ -1346,8 +1370,49 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
 
         auto [_, conn_type] = shower->get_start_vertex_and_type();
         if (conn_type == 4) {
-            for (const auto& seg : ss) conn4_skip_segs.insert(seg);
-            if (auto start_seg = shower->start_segment()) conn4_skip_segs.insert(start_seg);
+            // doc pr/128: is this the candidate's own material or far-away
+            // activity?  Measure the shower's closest approach to the MAIN
+            // CLUSTER with the same Facade API the conn-4 producers use
+            // (Cluster::get_closest_dis), so "gap" means the same thing here
+            // as it does at :3733 / :3858 / :6435 / :6645.
+            double gap = -1.0;
+            if ((cfg.pf_conn4_near_candidate || pfnear_dbg) && main_cluster) {
+                for (const auto& seg : ss) {
+                    for (const auto& f : seg->fits()) {
+                        const double d = main_cluster->get_closest_dis(f.point);
+                        if (d >= 0 && (gap < 0 || d < gap)) gap = d;
+                    }
+                }
+            }
+            const bool keep = cfg.pf_conn4_near_candidate && gap >= 0 &&
+                              gap <= cfg.pf_conn4_near_gap;
+            if (pfnear_dbg) {
+                auto start_seg = shower->start_segment();
+                const auto* cl = start_seg ? start_seg->cluster() : nullptr;
+                std::fprintf(stderr,
+                    "PFNEAR conn4 shower_id=%d node=%d cluster=%s pdg=%d ke_mev=%.2f "
+                    "len_cm=%.1f nseg=%zu gap_cm=%.2f verdict=%s\n",
+                    shower->get_shower_id(), start_seg ? seg_display_id(start_seg) : -1,
+                    cl ? std::to_string(cl->get_cluster_id()).c_str() : "?",
+                    shower->get_particle_type(), shower->get_kine_best() / units::MeV,
+                    shower->get_total_length() / units::cm, ss.size(),
+                    gap >= 0 ? gap / units::cm : -1.0, keep ? "KEEP" : "skip");
+            }
+            if (keep) {
+                conn4_keep_showers.insert(shower);
+                SPDLOG_LOGGER_INFO(log,
+                    "pr128 pf-conn4-near: KEEP shower_id={} cluster={} pdg={} ke_mev={:.2f} "
+                    "len_cm={:.1f} gap_cm={:.2f}",
+                    shower->get_shower_id(),
+                    shower->start_segment() && shower->start_segment()->cluster()
+                        ? std::to_string(shower->start_segment()->cluster()->get_cluster_id()) : "?",
+                    shower->get_particle_type(), shower->get_kine_best() / units::MeV,
+                    shower->get_total_length() / units::cm, gap / units::cm);
+            }
+            else {
+                for (const auto& seg : ss) conn4_skip_segs.insert(seg);
+                if (auto start_seg = shower->start_segment()) conn4_skip_segs.insert(start_seg);
+            }
         }
     }
 
@@ -1468,7 +1533,9 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
             any_added = false;
             for (const auto& shower : showers) {
                 auto [start_vtx, conn_type] = shower->get_start_vertex_and_type();
-                if (conn_type == 4) continue;
+                // doc pr/128: a conn-4 shower kept by pf_conn4_near_candidate
+                // resolves its parentage like any other (empty set when off).
+                if (conn_type == 4 && !conn4_keep_showers.count(shower)) continue;
                 if (!start_vtx) continue;
 
                 const bool at_main  = (start_vtx == main_vertex);
@@ -1632,8 +1699,11 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
     for (const auto& shower : showers) {
         auto [start_vtx, conn_type] = shower->get_start_vertex_and_type();
 
-        // type 4 = "not clearly connected"; skip entirely (prototype behaviour)
-        if (conn_type == 4) {
+        // type 4 = "not clearly connected"; skip entirely (prototype behaviour).
+        // doc pr/128 (pf_conn4_near_candidate): except when the "not clearly
+        // connected" material is the candidate's own -- see the knob comment.
+        // Empty keep set when the knob is off => legacy skip, byte-identical.
+        if (conn_type == 4 && !conn4_keep_showers.count(shower)) {
             if (flag_print) {
                 auto start_seg = shower->start_segment();
                 const auto* cl = start_seg ? start_seg->cluster() : nullptr;
@@ -1816,13 +1886,6 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
     };
 
     // ID following prototype convention: cluster_id * 1000 + seg_id
-    auto seg_display_id = [](PR::SegmentPtr seg) -> int {
-        int sid = seg->id();
-        if (sid < 0) sid = static_cast<int>(seg->get_graph_index());
-        const auto* cl = seg->cluster();
-        return cl ? cl->get_cluster_id() * 1000 + sid : sid;
-    };
-
     // doc pr/38 Round 4 (pf_orphan_track_parentage): graph-faithful parentage
     // for barrier-orphaned track segments.  The flat safety net below emits
     // every BFS-unreached segment as a parentless, childless root -- even when
@@ -2507,6 +2570,107 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
                 cl ? std::to_string(cl->get_cluster_id()) : "?",
                 pi->pdg(), pi->kinetic_energy() / units::MeV,
                 PR::segment_track_length(seg) / units::cm);
+        }
+    }
+
+    // doc pr/128 (pf_orphan_near_cross_cluster): an unclaimed CROSS-CLUSTER
+    // track segment whose fit points TOUCH the emitted candidate.  Every
+    // orphan pool above -- and the pr/65 audit line -- is same_cluster gated
+    // (prototype NeutrinoID.cxx:1488), so this class reaches no output at
+    // all: 29 objects in 18 of 239 SBND events, 21 within 10 cm of displayed
+    // content and many at gap 0.00 cm, against a main-cluster control of 1
+    // (doc pr/128 §1).  SBND 18255-137238's 79.3cm muon was one of them
+    // (doc pr/127 fixed that instance upstream, by re-tiering sccc).
+    //
+    // Reference set for "touches": used_segs MINUS conn4_skip_segs, i.e.
+    // exactly the segments this tree draws.  Using raw used_segs would let a
+    // candidate qualify by touching an invisible conn-4 cosmic.
+    //
+    // Rendering follows the pr/123 displaced-object convention (owner
+    // correction 2026-08-28): the track is not connected to the neutrino
+    // vertex, so it hangs under a pseudo-neutron carrier, nu -> n -> track.
+    // Knob off => this block never runs => byte-identical.
+    if (cfg.pf_orphan_near_cross_cluster || pfnear_dbg) {
+        std::vector<WireCell::Point> ref_pts;
+        for (const auto& seg : used_segs) {
+            if (conn4_skip_segs.count(seg)) continue;
+            for (const auto& f : seg->fits()) ref_pts.push_back(f.point);
+        }
+        std::vector<std::pair<PR::SegmentPtr, double>> near_cands;
+        if (!ref_pts.empty()) {
+            for (auto edesc : mir(boost::edges(*pr_graph))) {
+                auto seg = (*pr_graph)[edesc].segment;
+                if (!seg || used_segs.count(seg) || conn4_skip_segs.count(seg)) continue;
+                if (seg->dirsign() == 0) continue;
+                if (seg->fits().empty()) continue;
+                if (same_cluster(seg)) continue;   // the pools above own this case
+                if (!PR::segment_near_candidate_track(seg, cfg.pf_orphan_near_min_len)) continue;
+                double gap = -1.0;
+                for (const auto& f : seg->fits()) {
+                    for (const auto& rp : ref_pts) {
+                        const double d = (f.point - rp).magnitude();
+                        if (gap < 0 || d < gap) gap = d;
+                    }
+                }
+                if (pfnear_dbg) {
+                    const auto* cl = seg->cluster();
+                    std::fprintf(stderr,
+                        "PFNEAR track seg=%d cluster=%s pdg=%d score=%.3f len_cm=%.1f "
+                        "ke_mev=%.2f gap_cm=%.2f verdict=%s\n",
+                        seg_display_id(seg),
+                        cl ? std::to_string(cl->get_cluster_id()).c_str() : "?",
+                        seg->has_particle_info() && seg->particle_info()
+                            ? seg->particle_info()->pdg() : 0,
+                        seg->particle_score(),
+                        PR::segment_track_length(seg) / units::cm,
+                        seg->has_particle_info() && seg->particle_info()
+                            ? seg->particle_info()->kinetic_energy() / units::MeV : 0.0,
+                        gap / units::cm,
+                        (gap >= 0 && gap <= cfg.pf_orphan_near_gap) ? "EMIT" : "too_far");
+                }
+                if (!cfg.pf_orphan_near_cross_cluster) continue;
+                if (gap < 0 || gap > cfg.pf_orphan_near_gap) continue;
+                near_cands.emplace_back(seg, gap);
+            }
+        }
+        std::sort(near_cands.begin(), near_cands.end(),
+                  [&](const auto& a, const auto& b) {
+                      return seg_display_id(a.first) < seg_display_id(b.first);
+                  });
+        for (const auto& [seg, gap] : near_cands) {
+            auto pi = seg->particle_info();
+            const std::string pname = cfg.prototype_names
+                ? pf_pdg_to_name(pi->pdg(), true, cfg.pf_pdg_name_prototype_fallback)
+                : pi->name();
+            const std::string ke_str = format_mev(pi->kinetic_energy());
+            const auto& fits = seg->fits();
+            const WireCell::Point& p_front = fits.front().point;
+            const WireCell::Point& p_back  = fits.back().point;
+            const bool fwd = (seg->dirsign() == 1);
+            auto node = make_node(seg_display_id(seg),
+                                  pname + "  " + ke_str + " MeV",
+                                  fwd ? p_front : p_back,
+                                  fwd ? p_back : p_front);
+            node["icon"] = "jstree-file";
+            if (!keep_node(pi->pdg(), pi->kinetic_energy(), node)) continue;
+            const std::string nname = pf_pdg_to_name(2112, cfg.prototype_names,
+                                                     cfg.pf_pdg_name_prototype_fallback);
+            WireCell::Point gstart = main_vertex ? get_vtx_pt(main_vertex)
+                                                 : (fwd ? p_front : p_back);
+            const WireCell::Point& near_pt = fwd ? p_front : p_back;
+            const int pseudo_id = next_id++;
+            auto pseudo = make_node(pseudo_id, nname + "  " + ke_str + " MeV",
+                                    gstart, near_pt);
+            pseudo["children"].append(node);
+            particles.append(pseudo);
+            const auto* cl = seg->cluster();
+            SPDLOG_LOGGER_INFO(log,
+                "pr128 pf-orphan-near-cross-cluster: EMIT pseudo-n id={} -> seg={} cluster={} "
+                "pdg={} score={:.3f} ke_mev={:.2f} len_cm={:.1f} gap_cm={:.2f}",
+                pseudo_id, seg_display_id(seg),
+                cl ? std::to_string(cl->get_cluster_id()) : "?",
+                pi->pdg(), seg->particle_score(), pi->kinetic_energy() / units::MeV,
+                PR::segment_track_length(seg) / units::cm, gap / units::cm);
         }
     }
 

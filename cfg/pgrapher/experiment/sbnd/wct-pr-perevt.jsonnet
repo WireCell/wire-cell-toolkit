@@ -992,6 +992,13 @@ function(
     // doc pr/123 r2: root PF node for a pass4-guard-freed track (171572's
     // muon). C++ default false.
     pf_orphan_guard_freed = true,   // SBND PRODUCTION ON 2026-08-28 (doc pr/123 r2; owner "should not be lost in the PF tree"; fires on exactly 171572 + 393505 in 239 events: the guard-freed muons return as root PF nodes, 304.8/268.7 MeV)
+    // doc pr/128: PF completeness pair.  Both C++ default false; keys omitted
+    // when off => byte-identical pre-fix config.
+    pf_orphan_near_cross_cluster = false,
+    pf_orphan_near_gap_cm = null,      // null => C++ default 5cm
+    pf_orphan_near_min_len_cm = null,  // null => C++ default 30cm
+    pf_conn4_near_candidate = false,
+    pf_conn4_near_gap_cm = null,       // null => C++ default 20cm
     pf_track_owns_loose_vertex = true,
     // doc pr/38: F2's ON-behavior was CORRECTED in place (owner decision
     // 2026-08-05, no new knobs): the barrier now excludes each shower's
@@ -1875,6 +1882,14 @@ function(
     kine_orphan_track_min = null,  // null => C++ default 50cm
     // doc pr/123 r2: kine twin of pf_orphan_guard_freed. C++ default false.
     kine_count_guard_freed = true,  // SBND PRODUCTION ON 2026-08-28 (doc pr/123 r2; pr/93 principle: PF and kine describe the same particle set; restores 304.7/268.7 MeV muon KE to kine_reco_Enu on the same 2 events; nusel identical)
+    // doc pr/128: kine twins of the PF completeness pair.  These move
+    // kine_reco_Enu, so they are separate knobs, approved separately.
+    // C++ defaults false; keys omitted when off => byte-identical.
+    kine_count_near_cross_cluster = false,
+    kine_near_gap_cm = null,           // null => C++ default 5cm
+    kine_near_min_len_cm = null,       // null => C++ default 30cm
+    kine_count_conn4_near = false,
+    kine_conn4_near_gap_cm = null,     // null => C++ default 20cm
     straight_cont_cross_cluster = true,
     sccc_bridge_body = true,
     // doc pr/127 (owner 2026-08-29: "137238, the electron 89 MeV should
@@ -2920,6 +2935,12 @@ function(
         [if kine_count_orphan_tracks then 'kine_count_orphan_tracks']: true,
         [if kine_orphan_track_min != null then 'kine_orphan_track_min']: kine_orphan_track_min,
         [if kine_count_guard_freed then 'kine_count_guard_freed']: true,  // doc pr/123 r2
+        // doc pr/128; params in cm (the C++ scales them by units::cm at copy).
+        [if kine_count_near_cross_cluster then 'kine_count_near_cross_cluster']: true,
+        [if kine_near_gap_cm != null then 'kine_near_gap']: kine_near_gap_cm,
+        [if kine_near_min_len_cm != null then 'kine_near_min_len']: kine_near_min_len_cm,
+        [if kine_count_conn4_near then 'kine_count_conn4_near']: true,
+        [if kine_conn4_near_gap_cm != null then 'kine_conn4_near_gap']: kine_conn4_near_gap_cm,
         [if straight_cont_cross_cluster then 'straight_cont_cross_cluster']: true,
         [if sccc_bridge_body then 'sccc_bridge_body']: true,
         [if sccc_max_gap != null then 'sccc_max_gap']: sccc_max_gap,
@@ -3099,6 +3120,11 @@ function(
                              pf_orphan_confident_track=pf_orphan_confident_track,
                              pf_orphan_track_min_cm=pf_orphan_track_min_cm,
                              pf_orphan_guard_freed=pf_orphan_guard_freed,
+                             pf_orphan_near_cross_cluster=pf_orphan_near_cross_cluster,
+                             pf_orphan_near_gap_cm=pf_orphan_near_gap_cm,
+                             pf_orphan_near_min_len_cm=pf_orphan_near_min_len_cm,
+                             pf_conn4_near_candidate=pf_conn4_near_candidate,
+                             pf_conn4_near_gap_cm=pf_conn4_near_gap_cm,
                              pf_track_owns_loose_vertex=pf_track_owns_loose_vertex,
                              unmerge_bundle_mode=unmerge_bundle_mode,
                              restore_demoted_mains=restore_demoted_mains,

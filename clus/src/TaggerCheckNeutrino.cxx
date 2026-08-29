@@ -705,6 +705,11 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_shower_satellite_absorb_host_mev          = get(config, "shower_satellite_absorb_host_mev",          m_shower_satellite_absorb_host_mev);       // doc pr/125, MeV
     m_shower_pass4_track_guard_len              = get(config, "shower_pass4_track_guard_len",              m_shower_pass4_track_guard_len);           // doc pr/123 r1, cm
     m_kine_count_guard_freed                    = get(config, "kine_count_guard_freed",                    m_kine_count_guard_freed);                 // doc pr/123 r2
+    m_kine_count_near_cross_cluster             = get(config, "kine_count_near_cross_cluster",             m_kine_count_near_cross_cluster);          // doc pr/128
+    m_kine_near_gap                             = get(config, "kine_near_gap",                             m_kine_near_gap);                          // doc pr/128
+    m_kine_near_min_len                         = get(config, "kine_near_min_len",                         m_kine_near_min_len);                      // doc pr/128
+    m_kine_count_conn4_near                     = get(config, "kine_count_conn4_near",                     m_kine_count_conn4_near);                  // doc pr/128
+    m_kine_conn4_near_gap                       = get(config, "kine_conn4_near_gap",                       m_kine_conn4_near_gap);                    // doc pr/128
     m_straight_cont_cross_cluster               = get(config, "straight_cont_cross_cluster",               m_straight_cont_cross_cluster);
     m_sccc_bridge_body                          = get(config, "sccc_bridge_body",                          m_sccc_bridge_body);
     m_sccc_max_gap                              = get(config, "sccc_max_gap",                              m_sccc_max_gap);
@@ -1160,6 +1165,11 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["shower_satellite_absorb_host_mev"]          = m_shower_satellite_absorb_host_mev;          // doc pr/125; MeV, inert while pass off
     cfg["shower_pass4_track_guard_len"]              = m_shower_pass4_track_guard_len;              // doc pr/123 r1; cm, 0 = no guard, byte-identical
     cfg["kine_count_guard_freed"]                    = m_kine_count_guard_freed;                    // doc pr/123 r2; false = guard-freed tracks uncounted, byte-identical
+    cfg["kine_count_near_cross_cluster"]             = m_kine_count_near_cross_cluster;             // doc pr/128; false = near cross-cluster tracks uncounted, byte-identical
+    cfg["kine_near_gap"]                             = m_kine_near_gap;                             // cm; only read when kine_count_near_cross_cluster
+    cfg["kine_near_min_len"]                         = m_kine_near_min_len;                         // cm; only read when kine_count_near_cross_cluster
+    cfg["kine_count_conn4_near"]                     = m_kine_count_conn4_near;                     // doc pr/128; false = every conn-4 shower uncounted, byte-identical
+    cfg["kine_conn4_near_gap"]                       = m_kine_conn4_near_gap;                       // cm; only read when kine_count_conn4_near
     cfg["straight_cont_cross_cluster"]               = m_straight_cont_cross_cluster;               // doc pr/93 r4; false = legacy (no cross-cluster continuation demotion)
     cfg["sccc_bridge_body"]                          = m_sccc_bridge_body;                          // doc pr/93 r4; false = demote-only (no bridge replay)
     cfg["sccc_max_gap"]                              = m_sccc_max_gap;                              // cm; base tier, only read when straight_cont_cross_cluster
@@ -2582,6 +2592,11 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
         pattern_algos.m_shower_satellite_absorb_host_mev          = m_shower_satellite_absorb_host_mev * units::MeV; // doc pr/125, MeV -> internal
         pattern_algos.m_shower_pass4_track_guard_len              = m_shower_pass4_track_guard_len * units::cm;  // doc pr/123 r1, cm -> internal
         pattern_algos.m_kine_count_guard_freed                    = m_kine_count_guard_freed;                    // doc pr/123 r2
+        pattern_algos.m_kine_count_near_cross_cluster             = m_kine_count_near_cross_cluster;             // doc pr/128
+        pattern_algos.m_kine_near_gap                             = m_kine_near_gap * units::cm;                 // doc pr/128
+        pattern_algos.m_kine_near_min_len                         = m_kine_near_min_len * units::cm;             // doc pr/128
+        pattern_algos.m_kine_count_conn4_near                     = m_kine_count_conn4_near;                     // doc pr/128
+        pattern_algos.m_kine_conn4_near_gap                       = m_kine_conn4_near_gap * units::cm;           // doc pr/128
         pattern_algos.m_straight_cont_cross_cluster               = m_straight_cont_cross_cluster;               // doc pr/93 r4
         pattern_algos.m_sccc_bridge_body                          = m_sccc_bridge_body;                          // doc pr/93 r4
         pattern_algos.m_sccc_max_gap                              = m_sccc_max_gap * units::cm;                  // doc pr/93 r4

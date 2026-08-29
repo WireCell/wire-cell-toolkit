@@ -122,6 +122,44 @@ KineInfo PatternAlgorithms::fill_kine_tree(
         shower->fill_sets(used_vertices, used_segments, /*flag_exclude_start_segment=*/false);
     }
 
+    // doc sbnd_xin/docs/pr/128 (kine_count_conn4_near): conn-4 showers whose
+    // material is the candidate's OWN -- closest approach to the main cluster
+    // within m_kine_conn4_near_gap.  conn-4 means "cluster >80 cm from the
+    // candidate" and dropping it from Enu is right for 490 of the 514 conn-4
+    // showers measured (2815 of 3514 MeV, all >=50 cm away: the far-away
+    // over-clustered activity the owner ruled must NOT be counted).  But
+    // pr/74 conn3_unreachable, pr/123 pass4_prune and pr/124 pass4_prune2
+    // stamp conn-4 on material they just rescued or shed -- 481.5 MeV in 4
+    // events, e.g. SBND 18255-105074's two pdg-13 showers at 215.1 + 162.0
+    // MeV inside the main cluster.  That energy is counted in NO object: the
+    // prune removed it from its parent, whose kinematics were then recomputed.
+    // Empty set when the knob is off => byte-identical.
+    IndexedShowerSet conn4_keep_showers;
+    if (m_kine_count_conn4_near && main_vertex) {
+        const auto* main_cl = main_vertex->cluster();
+        for (const ShowerPtr& shower : showers) {
+            if (shower->get_start_vertex_and_type().second != 4) continue;
+            if (!main_cl) continue;
+            IndexedVertexSet sv; IndexedSegmentSet ss;
+            shower->fill_sets(sv, ss, /*flag_exclude_start_segment=*/false);
+            double gap = -1.0;
+            for (const auto& seg : ss) {
+                for (const auto& f : seg->fits()) {
+                    const double d = main_cl->get_closest_dis(f.point);
+                    if (d >= 0 && (gap < 0 || d < gap)) gap = d;
+                }
+            }
+            if (gap < 0 || gap > m_kine_conn4_near_gap) continue;
+            conn4_keep_showers.insert(shower);
+            SPDLOG_LOGGER_INFO(s_log,
+                "kine_count_conn4_near: COUNT shower_id={} pdg={} ke_mev={:.2f} "
+                "len_cm={:.1f} gap_cm={:.2f}",
+                shower->get_shower_id(), shower->get_particle_type(),
+                shower->get_kine_best() / units::MeV,
+                shower->get_total_length() / units::cm, gap / units::cm);
+        }
+    }
+
     // Map from start-segment -> shower, for fast lookup during graph traversal.
     std::map<SegmentPtr, ShowerPtr, SegmentIndexCmp> map_sg_shower;
     for (const ShowerPtr& shower : showers) {
@@ -478,7 +516,10 @@ KineInfo PatternAlgorithms::fill_kine_tree(
         if (sat_drop_set.count(shower)) continue;
 
         auto [start_vtx, vtx_type] = shower->get_start_vertex_and_type();
-        if (vtx_type > 3) continue;
+        // doc pr/128: a conn-4 shower kept by kine_count_conn4_near is the
+        // candidate's own material and is counted like a conn-3 shower.
+        // Empty keep set when the knob is off => legacy skip.
+        if (vtx_type > 3 && !conn4_keep_showers.count(shower)) continue;
 
         double kine_best   = shower->get_kine_best();
         double kine_charge = shower->get_kine_charge();
@@ -609,6 +650,89 @@ KineInfo PatternAlgorithms::fill_kine_tree(
         }
         if (n_freed) {
             SPDLOG_LOGGER_INFO(s_log, "kine_count_guard_freed: {} guard-freed track(s) added", n_freed);
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // doc sbnd_xin/docs/pr/128 (kine_count_near_cross_cluster): kine twin of
+    // pf_orphan_near_cross_cluster.  An unclaimed CROSS-CLUSTER track segment
+    // whose fit points TOUCH the counted candidate.  kine_count_orphan_tracks
+    // (pr/93 r4) is main-cluster-only by an explicit cluster-id test, and
+    // kine_count_guard_freed (pr/123 r2) needs the kPass4GuardFreed flag, so
+    // this class -- 29 objects in 18 of 239 SBND events, 21 of them within
+    // 10 cm of displayed content and many touching it at 0.00 cm -- is
+    // counted by neither.  Predicate is segment_near_candidate_track, NOT
+    // segment_orphan_confident_track: 10 of the 19 near-and-long objects
+    // carry the score-100 sentinel stamp the latter rejects (doc pr/128 §3).
+    //
+    // Double counting: the candidate is not in used_segments and not a shower
+    // start, and it lives in a different cluster, hence on different blobs
+    // than any counted shower's charge integration -- so its charge is in no
+    // counted object.  §7 of the doc verifies that per fired event rather
+    // than resting on the argument.
+    // C++ default false => no pass => byte-identical.
+    // -------------------------------------------------------------------------
+    if (m_kine_count_near_cross_cluster && main_vertex) {
+        const auto* main_cl = main_vertex->cluster();
+        // Reference cloud = what this tree actually counts: every counted
+        // shower's segments (conn-4 ones only when kept) plus every segment
+        // the traversal claimed.  Using raw used_segments would let a
+        // candidate qualify by touching an uncounted conn-4 cosmic.
+        std::vector<WireCell::Point> ref_pts;
+        {
+            IndexedSegmentSet counted;
+            for (const ShowerPtr& shower : showers) {
+                if (shower->get_start_vertex_and_type().second > 3 &&
+                    !conn4_keep_showers.count(shower)) continue;
+                IndexedVertexSet sv; IndexedSegmentSet ss;
+                shower->fill_sets(sv, ss, /*flag_exclude_start_segment=*/false);
+                counted.insert(ss.begin(), ss.end());
+            }
+            for (const auto& seg : used_segments) counted.insert(seg);
+            for (const auto& seg : counted)
+                for (const auto& f : seg->fits()) ref_pts.push_back(f.point);
+        }
+        std::vector<std::pair<size_t, SegmentPtr>> near_cands;
+        std::map<SegmentPtr, double, SegmentIndexCmp> near_gap;
+        if (!ref_pts.empty()) {
+            for (auto edesc : mir(boost::edges(graph))) {
+                SegmentPtr seg = graph[edesc].segment;
+                if (!seg || !seg->descriptor_valid()) continue;
+                if (used_segments.count(seg)) continue;
+                if (map_sg_shower.count(seg)) continue;   // shower starts stay shower-owned
+                const auto* cl = seg->cluster();
+                if (!main_cl || !cl) continue;
+                if (cl->get_cluster_id() == main_cl->get_cluster_id()) continue;  // pr/93 r4 owns this
+                if (!segment_near_candidate_track(seg, m_kine_near_min_len)) continue;
+                double gap = -1.0;
+                for (const auto& f : seg->fits()) {
+                    for (const auto& rp : ref_pts) {
+                        const double d = (f.point - rp).magnitude();
+                        if (gap < 0 || d < gap) gap = d;
+                    }
+                }
+                if (gap < 0 || gap > m_kine_near_gap) continue;
+                near_gap[seg] = gap;
+                near_cands.emplace_back(graph[edesc].index, seg);
+            }
+        }
+        std::sort(near_cands.begin(), near_cands.end(),
+                  [](const auto& a, const auto& b) { return a.first < b.first; });
+        size_t n_near = 0;
+        for (const auto& [eidx, seg] : near_cands) {
+            used_segments.insert(seg);
+            const int pdg = push_segment_kine(seg, 1);
+            ++n_near;
+            SPDLOG_LOGGER_INFO(s_log,
+                "kine_count_near_cross_cluster: COUNT seg idx={} cluster={} pdg={} score={:.3f} "
+                "ke_mev={:.2f} len_cm={:.1f} gap_cm={:.2f}",
+                eidx, seg->cluster()->get_cluster_id(), pdg, seg->particle_score(),
+                (seg->particle_info() ? seg->particle_info()->kinetic_energy() / units::MeV : 0.0),
+                segment_track_length(seg) / units::cm, near_gap.at(seg) / units::cm);
+        }
+        if (n_near) {
+            SPDLOG_LOGGER_INFO(s_log,
+                "kine_count_near_cross_cluster: {} near cross-cluster track(s) added", n_near);
         }
     }
 

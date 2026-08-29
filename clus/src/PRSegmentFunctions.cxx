@@ -1715,6 +1715,18 @@ namespace WireCell::Clus::PR {
         return segment_is_straight_long_track(seg);
     }
 
+    // doc sbnd_xin/docs/pr/128 -- see the header comment.  Deliberately NOT
+    // segment_confident_nonelectron_pid: its particle_score() < 1.0 term
+    // rejects the score-100 sentinel stamp that 10 of this class's 19
+    // near-and-long objects carry.
+    bool segment_near_candidate_track(SegmentPtr seg, double min_len) {
+        if (!seg || !seg->has_particle_info() || !seg->particle_info()) return false;
+        const int pdg = seg->particle_info()->pdg();
+        if (pdg == 0 || std::abs(pdg) == 11) return false;
+        if (segment_track_length(seg) <= min_len) return false;
+        return segment_is_straight_long_track(seg);
+    }
+
     // doc sbnd_xin/docs/pr/40 round 2 F5 -- see the header comment.
     bool segment_has_proton_daughter(Graph& graph, SegmentPtr seg, VertexPtr main_vertex, double MIP_dQdx) {
         static const bool dbg = std::getenv("WCT_PROTON_DAUGHTER_DEBUG") != nullptr;

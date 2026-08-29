@@ -955,6 +955,12 @@ public:
         double m_shower_satellite_absorb_host_mev{20.0};            // doc pr/125; MeV, host kine floor
         double m_shower_pass4_track_guard_len{0.0};                 // doc pr/123 r1; cm, 0 = no length guard
         bool   m_kine_count_guard_freed{false};                     // doc pr/123 r2; kine twin of pf_orphan_guard_freed
+        // doc pr/128; kine twins of pf_orphan_near_cross_cluster / pf_conn4_near_candidate
+        bool   m_kine_count_near_cross_cluster{false};              // doc pr/128 (137238 class generalised)
+        double m_kine_near_gap{5};                                  // cm; scaled at copy
+        double m_kine_near_min_len{30};                             // cm; scaled at copy
+        bool   m_kine_count_conn4_near{false};                      // doc pr/128 (105074 / 179048)
+        double m_kine_conn4_near_gap{20};                           // cm; scaled at copy
         bool m_straight_cont_cross_cluster{false};                  // doc pr/93 r4 (137238)
         bool m_sccc_bridge_body{false};                             // doc pr/93 r4 second rung
         double m_sccc_max_gap{5};                                   // cm; base tier

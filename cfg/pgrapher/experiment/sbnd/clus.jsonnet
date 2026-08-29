@@ -954,6 +954,25 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, e
               // for a pass4-track-guard-freed segment (kPass4GuardFreed);
               // C++ default false. Key omitted when off => byte-identical.
               pf_orphan_guard_freed=false,
+              // pf_orphan_near_cross_cluster (doc pr/128): PF node for an
+              // unclaimed CROSS-CLUSTER track segment whose fit points come
+              // within pf_orphan_near_gap_cm (null => C++ 5cm) of the emitted
+              // candidate and which is longer than pf_orphan_near_min_len_cm
+              // (null => C++ 30cm).  Every orphan pool is same_cluster gated,
+              // so this class reaches no output (SBND 18255-137238's muon).
+              // C++ default false; keys omitted when off => byte-identical.
+              pf_orphan_near_cross_cluster=false,
+              pf_orphan_near_gap_cm=null,
+              pf_orphan_near_min_len_cm=null,
+              // pf_conn4_near_candidate (doc pr/128): stop skipping a conn-4
+              // shower whose closest approach to the main cluster is within
+              // pf_conn4_near_gap_cm (null => C++ 20cm) -- the candidate's own
+              // material that pr/74 conn3_unreachable or the pr/123+pr/124
+              // prune re-seeds stamped conn-4 (SBND 18255-105074, 377 MeV).
+              // Far conn-4 (490 of 514 showers, >=50cm) stays skipped.
+              // C++ default false; keys omitted when off => byte-identical.
+              pf_conn4_near_candidate=false,
+              pf_conn4_near_gap_cm=null,
               // pf_track_owns_loose_vertex (doc pr/93 round 4): a vertex the
               // track BFS reached via a real segment is not claimable by a
               // root shower whose only tie to it is the loose fill_sets view
@@ -2487,6 +2506,12 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, e
                         [if pf_orphan_confident_track then 'pf_orphan_confident_track']: true,
                         [if pf_orphan_track_min_cm != null then 'pf_orphan_track_min']: pf_orphan_track_min_cm * wc.cm,
                         [if pf_orphan_guard_freed then 'pf_orphan_guard_freed']: true,  // doc pr/123 r2
+                        // doc pr/128; params in cm.
+                        [if pf_orphan_near_cross_cluster then 'pf_orphan_near_cross_cluster']: true,
+                        [if pf_orphan_near_gap_cm != null then 'pf_orphan_near_gap']: pf_orphan_near_gap_cm * wc.cm,
+                        [if pf_orphan_near_min_len_cm != null then 'pf_orphan_near_min_len']: pf_orphan_near_min_len_cm * wc.cm,
+                        [if pf_conn4_near_candidate then 'pf_conn4_near_candidate']: true,
+                        [if pf_conn4_near_gap_cm != null then 'pf_conn4_near_gap']: pf_conn4_near_gap_cm * wc.cm,
                         [if pf_track_owns_loose_vertex then 'pf_track_owns_loose_vertex']: true,
                     },
                 ],

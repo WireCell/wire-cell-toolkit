@@ -336,6 +336,41 @@ namespace WireCell::Clus {
             // any-cluster unclaimed population -- largely cosmics -- stays
             // invisible).  false = legacy = byte-identical.
             bool pf_orphan_guard_freed{false};
+            // ---- doc sbnd_xin/docs/pr/128 (PF/kine completeness) ----
+            // pf_orphan_near_cross_cluster: emit a PF node for an unclaimed
+            // CROSS-CLUSTER track segment whose fit points come within
+            // pf_orphan_near_gap of the emitted candidate.  Every PF orphan
+            // pool -- and the pr/65 audit line itself -- is same_cluster
+            // gated (prototype NeutrinoID.cxx:1488), so this class reaches no
+            // output and is not even counted: 29 objects in 18 of 239 SBND
+            // events, 21 within 10 cm of displayed content, many at gap 0.00,
+            // against a main-cluster control of 1 (doc pr/128 §1).  The
+            // 137238 class of doc pr/127, generalised.  Admission is
+            // segment_near_candidate_track + the proximity test; rendering
+            // follows the pr/123 displaced-object convention (pseudo-neutron
+            // carrier, owner correction 2026-08-28).  PF ONLY -- the energy
+            // moves with the kine twin kine_count_near_cross_cluster.
+            // false = legacy = byte-identical.
+            bool pf_orphan_near_cross_cluster{false};
+            double pf_orphan_near_gap{5.0 * units::cm};      // read only when the bool is on
+            double pf_orphan_near_min_len{30.0 * units::cm}; // read only when the bool is on
+            // pf_conn4_near_candidate: stop skipping a conn-4 shower whose
+            // material is the candidate's own -- i.e. whose closest approach
+            // to the main cluster is within pf_conn4_near_gap.  conn-4 means
+            // "cluster >80 cm from the candidate" (NeutrinoShowerClustering.
+            // cxx:3733) and its skip is correct for 490 of the 514 conn-4
+            // showers measured (2815 of 3514 MeV, all >=50 cm away -- the
+            // far-away over-clustered activity the owner ruled must NOT be
+            // counted, 2026-08-29).  But three of our OWN passes stamp conn-4
+            // on material they just rescued or shed -- pr/74
+            // conn3_unreachable (:3858), pr/123 pass4_prune (:6435), pr/124
+            // pass4_prune2 (:6645) -- and conn-4 is the one label that means
+            // show nowhere and count nowhere.  That is 481.5 MeV in 4 events
+            // (doc pr/128 §2), e.g. SBND 18255-105074's two pdg-13 showers,
+            // 215.1 + 162.0 MeV, 82.9 and 58.2 cm, in the main cluster.
+            // false = legacy = byte-identical.
+            bool pf_conn4_near_candidate{false};
+            double pf_conn4_near_gap{20.0 * units::cm};      // read only when the bool is on
             // pf_track_owns_loose_vertex (doc pr/93 round 4): in the F3a
             // root branch, a root-anchored shower's fill_sets() vertex VIEW
             // overrides the track BFS wherever the two disagree, and

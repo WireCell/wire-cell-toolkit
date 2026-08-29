@@ -2236,6 +2236,14 @@ namespace WireCell::Clus::PR {
         // shower claimed into kine_energy_particle (171572's 125cm muon,
         // ~390 MeV absent from kine_reco_Enu).  false => byte-identical.
         bool   m_kine_count_guard_freed{false};          ///< doc pr/123 r2; false = freed tracks uncounted
+        // doc sbnd_xin/docs/pr/128 -- kine twins of the PF completeness knobs.
+        // The PF knob changes only the picture; these move kine_reco_Enu, so
+        // they are separate knobs and are approved separately.
+        bool   m_kine_count_near_cross_cluster{false};   ///< doc pr/128; false = near cross-cluster tracks uncounted
+        double m_kine_near_gap{5*units::cm};
+        double m_kine_near_min_len{30*units::cm};
+        bool   m_kine_count_conn4_near{false};           ///< doc pr/128; false = every conn-4 shower uncounted
+        double m_kine_conn4_near_gap{20*units::cm};
         // kine_count_orphan_tracks (315167): fill_kine_tree counterpart of
         // the PF-side pf_orphan_confident_track knob (BeePFConfig).  A
         // confident straight-long main-cluster track that is graph-
