@@ -1808,7 +1808,7 @@ function(
     // SBND 18255-69314: sub-10-MeV pdg-11 crumb showers whose start vertex
     // is a vertex of a bigger EM shower's own chain fold back into it).
     // C++ defaults false / 10 MeV / 20 MeV.
-    shower_satellite_absorb = false,         // C++ default false. Key omitted when off => byte-identical.
+    shower_satellite_absorb = true,          // SBND PRODUCTION ON 2026-08-29 (doc pr/125 K5; owner verdict on the K5 decision Bee pair b169a068/defaa224: "item 3, flip on is fine" -- the scanned operating point, max_mev 10 / host_mev 20, NOT the cap-3 variant).  69314: 25->18 showers, the 7 vertex-connected crumbs fold into the primary e- (68.9->74.7 MeV, keeps pdg 11), PF electron entries 38->30.  1105 fires / 208 events; physics checks clean (0 movers, owned +0, nusel identical, 0 pdg flips >15 MeV, no genuine pi0 touched); the accepted cost is unlabeled crumb charge booked as impurity (141-set med qF1 0.949->0.910, sum q_extra 2.41e7->3.12e7).  C++ default false.
     shower_satellite_absorb_max_mev = 10,    // MeV; C++ default 10. Emitted only when non-default AND pass on.
     shower_satellite_absorb_host_mev = 20,   // MeV; C++ default 20. Emitted only when non-default AND pass on.
     // doc pr/99 round 3 -- C1 kine-charge cell-ownership dedup + C1b
