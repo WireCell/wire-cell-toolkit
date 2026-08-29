@@ -994,12 +994,31 @@ function(
     pf_orphan_guard_freed = true,   // SBND PRODUCTION ON 2026-08-28 (doc pr/123 r2; owner "should not be lost in the PF tree"; fires on exactly 171572 + 393505 in 239 events: the guard-freed muons return as root PF nodes, 304.8/268.7 MeV)
     // doc pr/128: PF completeness pair.  Both C++ default false; keys omitted
     // when off => byte-identical pre-fix config.
-    pf_orphan_near_cross_cluster = false,
+    // SBND PRODUCTION ON 2026-08-29 (doc pr/128; owner 2026-08-29, opening the round: "the key here is that we do not want to lose "+
+    // energies (or double count energies) for the neutrino candidate ... we do not want
+    // to count energy for overclustering activitys, far away", and authorising the flip:
+    // "I assume validation will pass, then turn the knobs on by default for SBND running."
+    // Fires on exactly 2 of 239 events at the default operating point (gap 5cm,
+    // end tol 10cm, kink 30deg, min len 30cm): 392901 (+118.5 MeV, kink 4.8deg)
+    // and 55740 (+300.6 MeV, kink 13.0deg), both end-to-end at gap 0.00 cm.
+    // The continuation terms are load-bearing, not decoration: on proximity
+    // alone the same knob admitted four cosmics on 72786 and put +1151 MeV on a
+    // 701 MeV candidate.  25 deg of margin between the last accepted candidate
+    // (13.3) and the first rejected one (38.4).  C++ default false.
+    pf_orphan_near_cross_cluster = true,
     pf_orphan_near_gap_cm = null,      // null => C++ default 5cm
     pf_orphan_near_min_len_cm = null,  // null => C++ default 30cm
     pf_orphan_near_end_tol_cm = null,  // null => C++ default 10cm (end-to-end touch)
     pf_orphan_near_kink_deg = null,    // null => C++ default 30 deg (straight continuation)
-    pf_conn4_near_candidate = false,
+    // SBND PRODUCTION ON 2026-08-29 (doc pr/128, same owner authorisation).
+    // Fires on 6 showers in 4 events, 484.1 MeV -- material our OWN passes
+    // (pr/74 conn3_unreachable, pr/123 pass4_prune, pr/124 pass4_prune2)
+    // rescued or shed and then stamped conn-4, the label that means show
+    // nowhere and count nowhere.  105074's two pdg-13 showers (215.1 + 162.0
+    // MeV, in main cluster 23 at gap 0.07 cm) are the motivating case.  The
+    // 490 far conn-4 showers (>=50 cm, 2814 MeV) stay skipped, as required.
+    // C++ default false.
+    pf_conn4_near_candidate = true,
     pf_conn4_near_gap_cm = null,       // null => C++ default 20cm
     pf_track_owns_loose_vertex = true,
     // doc pr/38: F2's ON-behavior was CORRECTED in place (owner decision
@@ -1887,12 +1906,19 @@ function(
     // doc pr/128: kine twins of the PF completeness pair.  These move
     // kine_reco_Enu, so they are separate knobs, approved separately.
     // C++ defaults false; keys omitted when off => byte-identical.
-    kine_count_near_cross_cluster = false,
+    // Both SBND PRODUCTION ON 2026-08-29 (doc pr/128, same owner authorisation).
+    // These are the knobs that actually move kine_reco_Enu: +1114.4 MeV over
+    // 6 of 239 events, every one of it recovery.  Verified per event by
+    // multiset diff of the kine particle list -- nothing REMOVED anywhere, so
+    // no charge is counted twice; the +105.7 MeV add_energy on the two class-A
+    // events is the muon rest-mass term every counted muon gets.  The pr/93 r4
+    // principle: PF and kine must describe the same particle set.
+    kine_count_near_cross_cluster = true,
     kine_near_gap_cm = null,           // null => C++ default 5cm
     kine_near_min_len_cm = null,       // null => C++ default 30cm
     kine_near_end_tol_cm = null,       // null => C++ default 10cm
     kine_near_kink_deg = null,         // null => C++ default 30 deg
-    kine_count_conn4_near = false,
+    kine_count_conn4_near = true,
     kine_conn4_near_gap_cm = null,     // null => C++ default 20cm
     straight_cont_cross_cluster = true,
     sccc_bridge_body = true,
