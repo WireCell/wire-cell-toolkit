@@ -1193,14 +1193,14 @@ function(
     // sub-knobs below ride the tcn_knobs bag and are ALL suppressed unless
     // mcs_enable, so the OFF compiled config is byte-identical pre-MCS.
     // C++ default false.
-    mcs_enable = false,
-    mcs_muon_source = 'pf_muon',         // pf_muon | long_muon | longest_segment
+    mcs_enable = true,               // SBND PRODUCTION ON 2026-08-28 (doc 84 round 1, owner pre-authorization; books the five kine_mcs_* T_kine branches)
+    mcs_muon_source = 'long_muon_else_pf',  // SBND PRODUCTION ON 2026-08-28 (doc 84 round 1 P4: chain when one exists, else the pf muon; pf_muon | long_muon | longest_segment | long_muon_else_pf)
     mcs_point_source = 'muon_segments',  // muon_segments | whole_event (validation only, doc 80 sec 7.3)
     mcs_cathode_xcut = 5,                // cm half-band excised around cathode_x (doc 80 sec 7.5);
                                          // C++ default 0 = off => the SBND value lives HERE only
     // doc 84 round 1 (P5).  Log-only chain-range comparator sentinel beside
     // the mcs: line; no output bytes move either way.  C++ default false.
-    mcs_range_comparator_chain = false,
+    mcs_range_comparator_chain = true,   // SBND PRODUCTION ON 2026-08-28 (doc 84 round 1 P5, log-only)
     // doc pr/94 round 3.  Give the SELECTED neutrino candidate the
     // main-cluster PR treatment for the duration of its own pass, even when it
     // is a demoted main.  The PR chain reads main-ness from Flags::main_cluster
@@ -1796,7 +1796,7 @@ function(
     // silently falls back (28/242 SBND showers, worst 332.8 cm).  true =
     // sum the muon-typed members when the chain contributed nothing.
     // C++ default false.  Key omitted when off => byte-identical.
-    long_muon_range_empty_chain_fallback = false,
+    long_muon_range_empty_chain_fallback = true,  // SBND PRODUCTION ON 2026-08-28 (doc 84 round 1 P1, owner pre-authorization)
     kine_mainvtx_used_guard = true,  // SBND PRODUCTION ON 2026-08-20 (doc pr/101 K5; latent on the manifest)
     shower_hadronic_tag = true,  // SBND PRODUCTION ON 2026-08-20 (doc pr/99 round 3, A5)
     shower_hadronic_min_len = null,   // cm; C++ default 10
