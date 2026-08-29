@@ -2221,6 +2221,15 @@ namespace WireCell::Clus::PR {
         double m_shower_pass4_prune2_mdqdx{2.5};         ///< doc pr/124 A; x m_mip_dqdx_median
         double m_shower_pass3_cone_guard_len{0};         ///< doc pr/124 C; 0 = no pass3 track-pdg decline
         double m_shower_pass4_track_guard_len{0};        ///< doc pr/123 r1; 0 = no length guard
+        // doc pr/125 (owner 2026-08-29): same-vertex track-typed fragment
+        // absorb (SBND 18259-37112) + vertex-connected satellite absorb
+        // (SBND 18255-69314).  false (defaults) => no pass => byte-identical.
+        bool   m_shower_samevtx_track_absorb{false};     ///< doc pr/125; false = no pass
+        double m_shower_samevtx_absorb_gap{6 * units::cm};   ///< doc pr/125; frag<->host cloud gap cap
+        double m_shower_samevtx_absorb_max_len{50 * units::cm}; ///< doc pr/125; fragment length cap
+        bool   m_shower_satellite_absorb{false};         ///< doc pr/125; false = no pass
+        double m_shower_satellite_absorb_max_mev{10 * units::MeV};  ///< doc pr/125; satellite kine cap
+        double m_shower_satellite_absorb_host_mev{20 * units::MeV}; ///< doc pr/125; host kine floor
         // doc pr/123 round 2: kine twin of pf_orphan_guard_freed -- count a
         // guard-freed (kPass4GuardFreed) track that neither the BFS nor any
         // shower claimed into kine_energy_particle (171572's 125cm muon,

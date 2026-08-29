@@ -1796,6 +1796,20 @@ function(
     // 9 surviving labeled-OUT cone absorbs all track-pdg, IN track members
     // top out at 14.1 cm).  C++ default 0 = off.
     shower_pass3_cone_guard_len = 0,         // cm; C++ default 0 = off. Key omitted when 0 => byte-identical.  NOT flipped (doc pr/124 C): 94392 0.221->1.000 and 52693 0.766->1.000, BUT 415278 reshuffles tracks between its two labeled showers (0.959->0.884, 0.976->0.910) -- owner trade-off, morning decision table in doc sec C.3.
+    // doc pr/125 -- same-vertex track-typed fragment absorb (owner
+    // 2026-08-29, SBND 18259-37112: the pdg-2212 half of a gamma conversion
+    // re-merges into the 549 MeV gamma at their shared non-main vertex).
+    // C++ defaults false / 6 cm / 50 cm.
+    shower_samevtx_track_absorb = false,     // C++ default false. Key omitted when off => byte-identical.
+    shower_samevtx_absorb_gap = 6,           // cm; C++ default 6. Emitted only when non-default AND pass on.
+    shower_samevtx_absorb_max_len = 50,      // cm; C++ default 50. Emitted only when non-default AND pass on.
+    // doc pr/125 -- vertex-connected satellite absorb (owner 2026-08-29,
+    // SBND 18255-69314: sub-10-MeV pdg-11 crumb showers whose start vertex
+    // is a vertex of a bigger EM shower's own chain fold back into it).
+    // C++ defaults false / 10 MeV / 20 MeV.
+    shower_satellite_absorb = false,         // C++ default false. Key omitted when off => byte-identical.
+    shower_satellite_absorb_max_mev = 10,    // MeV; C++ default 10. Emitted only when non-default AND pass on.
+    shower_satellite_absorb_host_mev = 20,   // MeV; C++ default 20. Emitted only when non-default AND pass on.
     // doc pr/99 round 3 -- C1 kine-charge cell-ownership dedup + C1b
     // prototype cloud-rebuild parity (168596 Enu double count) + A5
     // hadronic-shower re-type (315167/395148 labels).  C++ defaults
@@ -2850,6 +2864,12 @@ function(
         [if shower_pass4_prune_gap2 != 0 && shower_pass4_prune2_ang != 40 then 'shower_pass4_prune2_ang']: shower_pass4_prune2_ang,
         [if shower_pass4_prune_gap2 != 0 && shower_pass4_prune2_mdqdx != 2.5 then 'shower_pass4_prune2_mdqdx']: shower_pass4_prune2_mdqdx,
         [if shower_pass3_cone_guard_len != 0 then 'shower_pass3_cone_guard_len']: shower_pass3_cone_guard_len,
+        [if shower_samevtx_track_absorb then 'shower_samevtx_track_absorb']: true,
+        [if shower_samevtx_track_absorb && shower_samevtx_absorb_gap != 6 then 'shower_samevtx_absorb_gap']: shower_samevtx_absorb_gap,
+        [if shower_samevtx_track_absorb && shower_samevtx_absorb_max_len != 50 then 'shower_samevtx_absorb_max_len']: shower_samevtx_absorb_max_len,
+        [if shower_satellite_absorb then 'shower_satellite_absorb']: true,
+        [if shower_satellite_absorb && shower_satellite_absorb_max_mev != 10 then 'shower_satellite_absorb_max_mev']: shower_satellite_absorb_max_mev,
+        [if shower_satellite_absorb && shower_satellite_absorb_host_mev != 20 then 'shower_satellite_absorb_host_mev']: shower_satellite_absorb_host_mev,
         [if (if kine_charge_dedup == null then false else kine_charge_dedup) then 'kine_charge_dedup']: true,
         [if (if kine_charge_rebuild == null then false else kine_charge_rebuild) then 'kine_charge_rebuild']: true,
         [if (if kine_charge_track_ctx == null then false else kine_charge_track_ctx) then 'kine_charge_track_ctx']: true,

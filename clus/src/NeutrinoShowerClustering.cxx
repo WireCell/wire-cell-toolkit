@@ -5980,6 +5980,199 @@ void PatternAlgorithms::shower_clustering_with_nv(int acc_segment_id, IndexedSho
         }
     }
 
+    // doc sbnd_xin/docs/pr/125 (owner 2026-08-29, SBND 18259-37112): a
+    // track-typed shower that shares a NON-main start vertex with a bigger
+    // EM shower at essentially zero cloud gap is the same physical shower
+    // with a mis-typed half (37112: the pdg-2212 half of a gamma conversion,
+    // stem dQ/dx 2.4-9 MIP, 1.28 cm from the 549 MeV gamma at shared vertex
+    // 84104).  merge_shower_fragments cannot take it (EM<->EM only, by
+    // design -- pr/117 sec 7); this dedicated pass absorbs it.  Runs BEFORE
+    // the pass4 prunes on purpose: post-merge the tier-2 union-find sees the
+    // fragment's members contiguous with the absorber body and keeps them
+    // (the owner-adjudicated "they are connected" outcome).  Manifest scan
+    // (docs/pr/pr125-pairs.tsv): the shared-non-main-vertex + gap<6cm +
+    // track-typed gate fires on 37112 alone across both manifests; next
+    // candidates sit at 17.4+ cm.  Knob off => no pass => byte-identical.
+    if (m_shower_samevtx_track_absorb) {
+        std::vector<ShowerPtr> sv_order(showers.begin(), showers.end());
+        std::sort(sv_order.begin(), sv_order.end(), [](const ShowerPtr& a, const ShowerPtr& b) {
+            auto* sa = a->start_segment().get();
+            auto* sb = b->start_segment().get();
+            if (!sa || !sb) return sa < sb;
+            int cid_a = sa->cluster() ? sa->cluster()->get_cluster_id() : -1;
+            int cid_b = sb->cluster() ? sb->cluster()->get_cluster_id() : -1;
+            if (cid_a != cid_b) return cid_a < cid_b;
+            return sa->id() < sb->id();
+        });
+        auto collect_members = [&](const ShowerPtr& shw) {
+            std::vector<SegmentPtr> mem;
+            std::unordered_set<size_t> seen;
+            for (auto edesc : ordered_edges(*shw, graph)) {
+                SegmentPtr sg = graph[edesc].segment;
+                if (!sg || !sg->descriptor_valid()) continue;
+                if (seen.insert(graph[sg->get_descriptor()].index).second) mem.push_back(sg);
+            }
+            return mem;
+        };
+        auto cross_gap = [&](const std::vector<SegmentPtr>& ma,
+                             const std::vector<SegmentPtr>& mb) -> double {
+            double best = -1.0;
+            for (const auto& a : ma) {
+                for (const auto& f : a->fits()) {
+                    if (!f.valid()) continue;
+                    for (const auto& b : mb) {
+                        const double d = segment_get_closest_point(b, f.point).first;
+                        if (d >= 0 && (best < 0 || d < best)) best = d;
+                    }
+                }
+            }
+            return best;
+        };
+        std::vector<std::pair<ShowerPtr, ShowerPtr>> sv_plan;   // (absorber, fragment)
+        for (auto& frag : sv_order) {
+            const int fpdg = std::abs(frag->get_particle_type());
+            if (!(fpdg == 13 || fpdg == 211 || fpdg == 2212)) continue;
+            VertexPtr fv = frag->start_vertex();
+            if (!fv || fv == main_vertex) continue;
+            const double flen = frag->get_total_length();
+            if (m_shower_samevtx_absorb_max_len > 0 && flen > m_shower_samevtx_absorb_max_len) continue;
+            auto fmem = collect_members(frag);
+            if (fmem.empty()) continue;
+            ShowerPtr best;
+            double best_gap = -1.0;
+            for (auto& host : sv_order) {
+                if (host == frag) continue;
+                if (std::abs(host->get_particle_type()) != 11) continue;
+                if (host->start_vertex() != fv) continue;
+                if (!(host->get_total_length() > flen)) continue;
+                const double g = cross_gap(fmem, collect_members(host));
+                if (g >= 0 && g < m_shower_samevtx_absorb_gap && (best_gap < 0 || g < best_gap)) {
+                    best = host;
+                    best_gap = g;
+                }
+            }
+            if (pr91_merge_dbg())
+                std::fprintf(stderr, "SHOWER_MERGE tag=samevtx_absorb frag_sid=%d frag_node=%d "
+                                     "pdg=%d len_cm=%.1f host_sid=%d gap_cm=%.2f verdict=%s\n",
+                             frag->get_shower_id(), pr91_seg_display_id(frag->start_segment()),
+                             frag->get_particle_type(), flen / units::cm,
+                             best ? best->get_shower_id() : -1,
+                             best_gap >= 0 ? best_gap / units::cm : -1.0,
+                             best ? "MERGE" : "no_host");
+            if (best) sv_plan.emplace_back(best, frag);
+        }
+        int n_sv_merged = 0;
+        for (auto& [host, frag] : sv_plan) {
+            pr93_probe_absorb_splice("samevtx_absorb", host, frag);
+            host->add_shower(*frag);
+            host->update_particle_type(particle_data, recomb_model, m_mip_dqdx, main_vertex, m_shower_proton_daughter_pion, m_mip_dqdx_median, m_shower_vote_track_pid_counts, m_shower_accept_pid_guard, m_shower_pid_guard_min_len);
+            host->calculate_kinematics(particle_data, recomb_model, m_shower_endpoint_exclude_start_vertex, m_shower_endpoint_skip_orphan_vtx);
+            host->set_kine_charge(cal_kine_charge(host, m_charge_2d_u, m_charge_2d_v, m_charge_2d_w, m_map_apa_ch_plane_wires, track_fitter, dv));
+            host->set_flag_kinematics(true);
+            showers.erase(frag);
+            ++n_sv_merged;
+        }
+        if (n_sv_merged) {
+            update_shower_maps(showers, map_vertex_in_shower, map_segment_in_shower,
+                               map_vertex_to_shower, used_shower_clusters);
+            SPDLOG_LOGGER_DEBUG(s_log,
+                "pr125 samevtx_absorb: {} track-typed fragment shower(s) absorbed; {} remain",
+                n_sv_merged, showers.size());
+        }
+    }
+
+    // doc sbnd_xin/docs/pr/125 (owner 2026-08-29, SBND 18255-69314): the PF
+    // list renders a fragmented EM shower as a "cascade of electrons" -- in
+    // 69314, 38 pdg-11 entries of which 28 are below 5 MeV.  The crumbs are
+    // separate PR::Showers seeded from graph-CONNECTED pdg-11 segments: their
+    // start vertex is a vertex OF the big shower's own member chain.  Absorb
+    // such satellites (EM-typed, conn 2/3, kine below the cap) into the
+    // connected host.  Manifest scan (docs/pr/pr125-satellites.tsv +
+    // vertex-connected variant): 31 IN-marked recoveries, 0 OUT-marked once
+    // conn-4 (the disconnected class -- its nominal vertex link is an
+    // artifact) is excluded.  Knob off => no pass => byte-identical.
+    if (m_shower_satellite_absorb) {
+        std::vector<ShowerPtr> sat_order(showers.begin(), showers.end());
+        std::sort(sat_order.begin(), sat_order.end(), [](const ShowerPtr& a, const ShowerPtr& b) {
+            auto* sa = a->start_segment().get();
+            auto* sb = b->start_segment().get();
+            if (!sa || !sb) return sa < sb;
+            int cid_a = sa->cluster() ? sa->cluster()->get_cluster_id() : -1;
+            int cid_b = sb->cluster() ? sb->cluster()->get_cluster_id() : -1;
+            if (cid_a != cid_b) return cid_a < cid_b;
+            return sa->id() < sb->id();
+        });
+        // Hosts: EM showers above the host floor.  Vertex sets snapshotted
+        // BEFORE any absorb (single pass, no chaining).  The pointer-keyed
+        // set is used for membership tests only, never iterated.
+        std::vector<std::pair<ShowerPtr, std::set<Vertex*>>> sat_hosts;
+        for (auto& host : sat_order) {
+            if (std::abs(host->get_particle_type()) != 11) continue;
+            if (host->get_kine_charge() < m_shower_satellite_absorb_host_mev) continue;
+            std::set<Vertex*> vset;
+            std::unordered_set<size_t> seen;
+            for (auto edesc : ordered_edges(*host, graph)) {
+                SegmentPtr sg = graph[edesc].segment;
+                if (!sg || !sg->descriptor_valid()) continue;
+                if (!seen.insert(graph[sg->get_descriptor()].index).second) continue;
+                auto [v0, v1] = find_vertices(graph, sg);
+                if (v0) vset.insert(v0.get());
+                if (v1) vset.insert(v1.get());
+            }
+            if (!vset.empty()) sat_hosts.emplace_back(host, std::move(vset));
+        }
+        std::vector<std::pair<ShowerPtr, ShowerPtr>> sat_plan;   // (host, satellite)
+        std::set<Shower*> sat_claimed;                           // membership only
+        for (auto& sat : sat_order) {
+            if (std::abs(sat->get_particle_type()) != 11) continue;
+            const int conn = sat->get_start_vertex_and_type().second;
+            if (conn != 2 && conn != 3) continue;
+            if (sat->get_kine_charge() >= m_shower_satellite_absorb_max_mev) continue;
+            VertexPtr sv = sat->start_vertex();
+            if (!sv) continue;
+            ShowerPtr host;
+            for (auto& [h, vset] : sat_hosts) {
+                if (h == sat || sat_claimed.count(h.get())) continue;
+                if (!(h->get_kine_charge() > sat->get_kine_charge())) continue;
+                if (vset.count(sv.get())) { host = h; break; }
+            }
+            if (pr91_merge_dbg())
+                std::fprintf(stderr, "SHOWER_MERGE tag=satellite_absorb sat_sid=%d sat_node=%d "
+                                     "ke_mev=%.2f conn=%d host_sid=%d verdict=%s\n",
+                             sat->get_shower_id(), pr91_seg_display_id(sat->start_segment()),
+                             sat->get_kine_charge() / units::MeV, conn,
+                             host ? host->get_shower_id() : -1,
+                             host ? "MERGE" : "no_host");
+            if (host) {
+                sat_plan.emplace_back(host, sat);
+                sat_claimed.insert(sat.get());
+            }
+        }
+        int n_sat_merged = 0;
+        std::set<Shower*> sat_recalc;                            // membership only
+        for (auto& [host, sat] : sat_plan) {
+            pr93_probe_absorb_splice("satellite_absorb", host, sat);
+            host->add_shower(*sat);
+            showers.erase(sat);
+            sat_recalc.insert(host.get());
+            ++n_sat_merged;
+        }
+        if (n_sat_merged) {
+            for (auto& [host, vset] : sat_hosts) {
+                if (!sat_recalc.count(host.get())) continue;
+                host->update_particle_type(particle_data, recomb_model, m_mip_dqdx, main_vertex, m_shower_proton_daughter_pion, m_mip_dqdx_median, m_shower_vote_track_pid_counts, m_shower_accept_pid_guard, m_shower_pid_guard_min_len);
+                host->calculate_kinematics(particle_data, recomb_model, m_shower_endpoint_exclude_start_vertex, m_shower_endpoint_skip_orphan_vtx);
+                host->set_kine_charge(cal_kine_charge(host, m_charge_2d_u, m_charge_2d_v, m_charge_2d_w, m_map_apa_ch_plane_wires, track_fitter, dv));
+                host->set_flag_kinematics(true);
+            }
+            update_shower_maps(showers, map_vertex_in_shower, map_segment_in_shower,
+                               map_vertex_to_shower, used_shower_clusters);
+            SPDLOG_LOGGER_DEBUG(s_log,
+                "pr125 satellite_absorb: {} satellite shower(s) absorbed; {} remain",
+                n_sat_merged, showers.size());
+        }
+    }
+
     // doc sbnd_xin/docs/pr/93 round 4 (shower_detach_track_stem, SBND
     // 18255-348471 + 18255-292643): a TRACK-HEADED shower -- one whose final
     // start segment is a non-shower-flagged, non-zero, non-+-11-pdg track --

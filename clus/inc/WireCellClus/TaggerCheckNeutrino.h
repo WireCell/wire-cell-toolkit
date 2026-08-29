@@ -946,6 +946,12 @@ public:
         double m_shower_pass4_prune2_ang{40.0};                     // doc pr/124 A; deg off kept-core centroid
         double m_shower_pass4_prune2_mdqdx{2.5};                    // doc pr/124 A; x mip_dqdx_median
         double m_shower_pass3_cone_guard_len{0.0};                  // doc pr/124 C; cm, 0 = no pass3 track-pdg decline
+        bool   m_shower_samevtx_track_absorb{false};                // doc pr/125; false = no pass
+        double m_shower_samevtx_absorb_gap{6.0};                    // doc pr/125; cm, frag<->host cloud gap cap
+        double m_shower_samevtx_absorb_max_len{50.0};               // doc pr/125; cm, fragment length cap
+        bool   m_shower_satellite_absorb{false};                    // doc pr/125; false = no pass
+        double m_shower_satellite_absorb_max_mev{10.0};             // doc pr/125; MeV, satellite kine cap
+        double m_shower_satellite_absorb_host_mev{20.0};            // doc pr/125; MeV, host kine floor
         double m_shower_pass4_track_guard_len{0.0};                 // doc pr/123 r1; cm, 0 = no length guard
         bool   m_kine_count_guard_freed{false};                     // doc pr/123 r2; kine twin of pf_orphan_guard_freed
         bool m_straight_cont_cross_cluster{false};                  // doc pr/93 r4 (137238)

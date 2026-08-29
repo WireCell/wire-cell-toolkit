@@ -256,6 +256,12 @@ TEST_CASE("clus knob defaults: TaggerCheckNeutrino switches are all OFF")
     CHECK_KNOB_NUM(cfg, "shower_pass4_prune2_ang", 40.0);                     // deg; inert while gap2 = 0
     CHECK_KNOB_NUM(cfg, "shower_pass4_prune2_mdqdx", 2.5);                    // x MIP; inert while gap2 = 0
     CHECK_KNOB_NUM(cfg, "shower_pass3_cone_guard_len", 0.0);                  // cm; 0 = no pass3 track-pdg decline
+    CHECK_KNOB_BOOL(cfg, "shower_samevtx_track_absorb", false);               // doc pr/125; false = no pass
+    CHECK_KNOB_NUM(cfg, "shower_samevtx_absorb_gap", 6.0);                    // cm; inert while pass off
+    CHECK_KNOB_NUM(cfg, "shower_samevtx_absorb_max_len", 50.0);               // cm; inert while pass off
+    CHECK_KNOB_BOOL(cfg, "shower_satellite_absorb", false);                   // doc pr/125; false = no pass
+    CHECK_KNOB_NUM(cfg, "shower_satellite_absorb_max_mev", 10.0);             // MeV; inert while pass off
+    CHECK_KNOB_NUM(cfg, "shower_satellite_absorb_host_mev", 20.0);            // MeV; inert while pass off
     CHECK_KNOB_BOOL(cfg, "kine_count_guard_freed", false);                    // pr/123 r2; kine twin of pf_orphan_guard_freed
     CHECK_KNOB_BOOL(cfg, "straight_cont_cross_cluster", false);               // r4 (137238)
     CHECK_KNOB_BOOL(cfg, "sccc_bridge_body", false);                          // r4 second rung
