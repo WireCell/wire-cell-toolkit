@@ -879,6 +879,7 @@ public:
         int    m_kine_long_muon_mode{0};                            // doc pr/101 K4 (0 dQdx, 1 range, 2 range w/ fallback)
         double m_kine_long_muon_ratio_lo{0.3};                      // inert unless mode 2
         double m_kine_long_muon_ratio_hi{0.5};                      // inert unless mode 2
+        bool   m_long_muon_range_empty_chain_fallback{false};       // doc 84 round 1 (P1): range over muon-typed members when the chain missed the shower
         bool   m_kine_mainvtx_used_guard{false};                    // doc pr/101 K5 (main-vertex member double count)
         bool   m_shower_hadronic_tag{false};                        // doc pr/99 r3 A5 (hadronic shower labeled e-)
         double m_shower_hadronic_min_len{10.0};                     // cm; scaled at copy; inert while tag off
@@ -921,6 +922,9 @@ public:
         double m_stem_backfill_back_ang{110.0};                     // deg, no conversion; inert while off
         bool   m_shower_ex1_walk_em_track_guard{false};             // doc pr/120 r1 (54332 mis-PID'd track)
         double m_shower_ex1_walk_em_track_len{20.0};                // cm; scaled at copy; inert while off
+        // doc sbnd_xin/docs/pr/121 round 1 -- rationale comment in
+        // NeutrinoPatternBase.h (m_shower_ex1_dedup_rehome block).
+        bool   m_shower_ex1_dedup_rehome{false};                    // doc pr/121 r1 (348471 dedup orphaning)
         bool m_straight_cont_cross_cluster{false};                  // doc pr/93 r4 (137238)
         bool m_sccc_bridge_body{false};                             // doc pr/93 r4 second rung
         double m_sccc_max_gap{5};                                   // cm; base tier
@@ -931,6 +935,9 @@ public:
         bool m_single_muon_long_muon_claim{false};                  // doc pr/43 round 2 K2
         bool m_pid_flag_reconcile{false};                           // doc pr/43 round 2 K3
         bool m_long_muon_stub_bridge{false};                        // doc pr/46
+        double m_long_muon_stub_bridge_len{6.0};                    // doc 84 round 1 (P3): stub precondition [cm]; 6.0 = legacy
+        bool   m_long_muon_angle_relax_long{false};                 // doc 84 round 1 (P2): >50 cm MIP continuation angle relax
+        double m_long_muon_angle_relax_deg{16.0};                   // doc 84 round 1 (P2): relaxed cap [deg]; inert unless relax on
         mutable std::shared_ptr<TrackFitting> m_track_fitter;
 
         void load_trackfitting_config(const std::string& config_file);

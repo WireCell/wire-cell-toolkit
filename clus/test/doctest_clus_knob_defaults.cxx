@@ -196,6 +196,7 @@ TEST_CASE("clus knob defaults: TaggerCheckNeutrino switches are all OFF")
     CHECK_KNOB_NUM(cfg, "kine_long_muon_mode", 0);                            // pr/101 K4; 0 = legacy dQdx
     CHECK_KNOB_NUM(cfg, "kine_long_muon_ratio_lo", 0.3);                      // inert unless mode 2
     CHECK_KNOB_NUM(cfg, "kine_long_muon_ratio_hi", 0.5);                      // inert unless mode 2
+    CHECK_KNOB_BOOL(cfg, "long_muon_range_empty_chain_fallback", false);      // doc 84 r1 P1; false = byte-identical
     CHECK_KNOB_BOOL(cfg, "kine_mainvtx_used_guard", false);                   // pr/101 K5; false = byte-identical
     CHECK_KNOB_BOOL(cfg, "shower_hadronic_tag", false);                       // pr/99 r3 A5 (315167/395148); false = byte-identical
     CHECK_KNOB_NUM(cfg, "shower_hadronic_min_len", 10.0);                     // cm; inert while tag off
@@ -233,6 +234,8 @@ TEST_CASE("clus knob defaults: TaggerCheckNeutrino switches are all OFF")
     CHECK_KNOB_NUM(cfg, "stem_backfill_back_ang", 110.0);                     // deg, backward ceiling; inert while off
     CHECK_KNOB_BOOL(cfg, "shower_ex1_walk_em_track_guard", false);            // pr/120 r1; false = legacy ex1 walk
     CHECK_KNOB_NUM(cfg, "shower_ex1_walk_em_track_len", 20.0);                // cm, e- straight-long floor; inert while off
+    // doc pr/121 round 1 -- examine_shower_1 dedup re-homes multi-seg victims.
+    CHECK_KNOB_BOOL(cfg, "shower_ex1_dedup_rehome", false);                   // pr/121 r1; false = legacy dedup drop
     CHECK_KNOB_BOOL(cfg, "straight_cont_cross_cluster", false);               // r4 (137238)
     CHECK_KNOB_BOOL(cfg, "sccc_bridge_body", false);                          // r4 second rung
     CHECK_KNOB_NUM(cfg, "sccc_max_gap", 5.0);                                 // cm; base tier
@@ -247,6 +250,16 @@ TEST_CASE("clus knob defaults: TaggerCheckNeutrino switches are all OFF")
     CHECK_KNOB_BOOL(cfg, "other_seg_empty_2d_guard", false);
     // doc pr/46: long-muon stub bridge in find_cont_muon_segment.
     CHECK_KNOB_BOOL(cfg, "long_muon_stub_bridge", false);
+    // doc 84 round 1: P3 stub length (6.0 = the legacy literal) + P2 angle relax.
+    CHECK_KNOB_NUM(cfg, "long_muon_stub_bridge_len", 6.0);                    // cm; 6.0 = byte-identical
+    CHECK_KNOB_BOOL(cfg, "long_muon_angle_relax_long", false);                // false = legacy 10 deg walk
+    CHECK_KNOB_NUM(cfg, "long_muon_angle_relax_deg", 16.0);                   // inert unless relax on
+    // doc 84 round 1: MCS defaults stay legacy (enable false, single-segment
+    // pf_muon source, no chain-comparator log line).
+    CHECK_KNOB_BOOL(cfg, "mcs_enable", false);
+    REQUIRE_MESSAGE(cfg.isMember("mcs_muon_source"), "missing knob: mcs_muon_source");
+    CHECK(cfg["mcs_muon_source"].asString() == "pf_muon");
+    CHECK_KNOB_BOOL(cfg, "mcs_range_comparator_chain", false);                // P5, log-only
     // doc pr/48: back-to-back track fixes.  All three ship OFF; the teb_*
     // operating point is inert until two_end_break opens the pass.
     CHECK_KNOB_BOOL(cfg, "two_end_break", false);

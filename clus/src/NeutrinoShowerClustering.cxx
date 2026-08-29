@@ -98,6 +98,49 @@ static inline void pr93_probe_absorb_splice(const char* site, const ShowerPtr& i
                  pr91_seg_display_id(from->start_segment()), from->get_num_segments());
 }
 
+// doc sbnd_xin/docs/pr/121 round 1: the examine_shower_1 accept-branch dedup
+// erases ANY pre-existing (main_vertex, conn-1) shower sharing the accepted
+// shower1's start segment, with no re-homing.  Written for stale
+// single-segment wrappers, its predicate never checks the segment count --
+// SBND 17394-348471: it erased a 13-member 352.6 MeV shower (retargeted onto
+// proton seg 12052 by examine_showers_retarget_seed), orphaning 12 EM
+// segments from PF output (doc pr/115 sec 17.7).  Prints every dedup
+// candidate with its size so the census can count multi-segment erasures.
+// stderr only, no effect on emitted bytes.
+static inline void pr121_probe_ex1_dedup(const ShowerPtr& keep, const ShowerPtr& old,
+                                         int old_ctype, int old_svtx_main, int erase)
+{
+    if (!pr93_absorb_dbg() || !keep || !old) return;
+    std::fprintf(stderr,
+                 "SHOWER_ABSORB EX1_DEDUP into_start_seg=%d old_shower_id=%d old_nseg=%d "
+                 "old_ctype=%d old_svtx_main=%d old_kine_mev=%.1f erase=%d\n",
+                 pr91_seg_display_id(keep->start_segment()), old->get_shower_id(),
+                 old->get_num_segments(), old_ctype, old_svtx_main,
+                 old->get_kine_charge() / WireCell::units::MeV, erase);
+}
+
+// doc sbnd_xin/docs/pr/122 round 1: the in_main_cluster seeder accepts a
+// segment as a shower root on the flag disjunction alone -- no length,
+// straightness, or dQ/dx test (SBND 18255-54332: a straight 32.3 cm track
+// carrying a kShowerTopology mis-flag seeded a 2.89e6 q_extra shower).  One
+// line per accepted seed with the features a guard could use; the feature
+// calls run only under the env gate.  stderr only, no effect on emitted bytes.
+static inline void pr122_probe_seed(const SegmentPtr& sg, bool f_traj, bool f_topo,
+                                    bool f_pdg11, bool in_long_muon, double mip_dqdx_median)
+{
+    if (!pr93_absorb_dbg() || !sg) return;
+    const double len = segment_track_length(sg);
+    const double med = segment_median_dQ_dx(sg);
+    std::fprintf(stderr,
+                 "SHOWER_SEED site=in_main_cluster seg=%d gidx=%zu pdg=%d traj=%d topo=%d pdg11=%d "
+                 "long_muon=%d len_cm=%.2f med_dqdx_mip=%.3f straight=%d\n",
+                 pr91_seg_display_id(sg), sg->get_graph_index(),
+                 sg->has_particle_info() && sg->particle_info() ? sg->particle_info()->pdg() : 0,
+                 (int)f_traj, (int)f_topo, (int)f_pdg11, (int)in_long_muon,
+                 len / WireCell::units::cm, mip_dqdx_median > 0 ? med / mip_dqdx_median : -1.0,
+                 (int)segment_is_straight_long_track(sg));
+}
+
 // doc sbnd_xin/docs/pr/91 round 1: WCT_SHOWER_MERGE_DEBUG prints, at every
 // shower-merge decision site, the candidate pair and EVERY quantity in the
 // condition together with the verdict -- fired or not -- plus a one-line reason
@@ -601,7 +644,13 @@ void PatternAlgorithms::stem_backfill(Graph& graph, VertexPtr main_vertex,
 }
 
 void PatternAlgorithms::shower_clustering_with_nv_in_main_cluster(Graph& graph, VertexPtr main_vertex, IndexedShowerSet& showers, ShowerVertexMap& map_vertex_in_shower, ShowerSegmentMap& map_segment_in_shower, VertexShowerSetMap& map_vertex_to_shower, ClusterPtrSet& used_shower_clusters, IndexedVertexSet& vertices_in_long_muon, IndexedSegmentSet& segments_in_long_muon, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model){
-    if (!main_vertex || !main_vertex->descriptor_valid()) return;
+    if (!main_vertex || !main_vertex->descriptor_valid()) {
+        // doc pr/122 round 1 (case c): answers "was seeding ever attempted".
+        if (pr93_absorb_dbg())
+            std::fprintf(stderr, "SHOWER_SEED site=in_main_cluster ABORT no_main_vertex=%d\n",
+                         main_vertex ? 0 : 1);
+        return;
+    }
 
     // BFS from main_vertex: find shower-flagged segments anywhere in the segment tree.
     // Segment ordering is guaranteed by sorted_out_edges() which sorts by stable graph index,
@@ -626,13 +675,17 @@ void PatternAlgorithms::shower_clustering_with_nv_in_main_cluster(Graph& graph, 
             if (!used_segments.insert(curr_sg).second) continue;
 
             // get_flag_shower() = kShowerTrajectory || kShowerTopology || abs(pdg)==11
-            bool is_shower_seg = curr_sg->flags_any(SegmentFlags::kShowerTrajectory) ||
-                                 curr_sg->flags_any(SegmentFlags::kShowerTopology) ||
-                                 (curr_sg->has_particle_info() && curr_sg->particle_info() &&
+            // (doc pr/122 round 1: disjuncts named so the seed probe can
+            // report which one admitted the root; no semantic change.)
+            const bool f_traj = curr_sg->flags_any(SegmentFlags::kShowerTrajectory);
+            const bool f_topo = curr_sg->flags_any(SegmentFlags::kShowerTopology);
+            const bool f_pdg11 = (curr_sg->has_particle_info() && curr_sg->particle_info() &&
                                   std::abs(curr_sg->particle_info()->pdg()) == 11);
+            bool is_shower_seg = f_traj || f_topo || f_pdg11;
             bool in_long_muon = segments_in_long_muon.count(curr_sg) > 0;
 
             if (is_shower_seg || in_long_muon) {
+                pr122_probe_seed(curr_sg, f_traj, f_topo, f_pdg11, in_long_muon, m_mip_dqdx_median);
                 // Parent vertex is the other end from daughter_vtx
                 VertexPtr parent_vtx = find_other_vertex(graph, curr_sg, daughter_vtx);
                 ShowerPtr shower = std::make_shared<Shower>(graph);
@@ -4077,13 +4130,42 @@ void PatternAlgorithms::examine_shower_1(Graph& graph, VertexPtr main_vertex, In
                 // is a stale single-segment wrapper left from shower_clustering_with_nv_in_main_cluster;
                 // shower1 supersedes it.  Without this both objects survive in the showers set and
                 // fill_bee_pf_tree emits duplicate nodes with identical cluster*1000+seg_id display ids.
+                bool pr121_rehomed = false;
                 for (auto sh_old : showers) {
                     if (sh_old == shower1) continue;
                     if (sh_old->start_segment() != sg) continue;
                     auto [svtx_old, ctype_old] = sh_old->get_start_vertex_and_type();
-                    if (svtx_old == main_vertex && ctype_old == 1) {
+                    const bool erase_old = (svtx_old == main_vertex && ctype_old == 1);
+                    pr121_probe_ex1_dedup(shower1, sh_old, ctype_old,
+                                          svtx_old == main_vertex ? 1 : 0, erase_old ? 1 : 0);
+                    if (erase_old) {
+                        // doc pr/121 r1: a MULTI-segment dedup victim carries
+                        // real membership (348471: 13 members, 352.6 MeV --
+                        // see pr121_probe_ex1_dedup's comment); dropping it
+                        // orphans every member.  Re-home into shower1 first,
+                        // the same shape as the pr/84 start-seg dedup
+                        // (keep->add_shower(*drop)).  false = legacy drop =
+                        // byte-identical.
+                        if (m_shower_ex1_dedup_rehome && sh_old->get_num_segments() > 1) {
+                            SPDLOG_LOGGER_DEBUG(s_log,
+                                "pr121 ex1_dedup_rehome: shower1 seg={} absorbs dedup victim shower_id={} nseg={} kine={:.1f} MeV",
+                                pr91_seg_display_id(shower1->start_segment()),
+                                sh_old->get_shower_id(), sh_old->get_num_segments(),
+                                sh_old->get_kine_charge() / WireCell::units::MeV);
+                            pr93_probe_absorb_splice("ex1_dedup_rehome", shower1, sh_old);
+                            shower1->add_shower(*sh_old);
+                            pr121_rehomed = true;
+                        }
                         del_showers.insert(sh_old);
                     }
+                }
+                // doc pr/121 r1: the kinematics above predate the re-home;
+                // recompute once so the absorbed membership is counted.
+                if (pr121_rehomed) {
+                    shower1->calculate_kinematics(particle_data, recomb_model, m_shower_endpoint_exclude_start_vertex, m_shower_endpoint_skip_orphan_vtx);
+                    double kine_charge2 = cal_kine_charge(shower1, m_charge_2d_u, m_charge_2d_v, m_charge_2d_w, m_map_apa_ch_plane_wires, track_fitter, dv);
+                    shower1->set_kine_charge(kine_charge2);
+                    shower1->set_flag_kinematics(true);
                 }
 
                 showers.insert(shower1);

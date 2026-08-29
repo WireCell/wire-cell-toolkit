@@ -137,6 +137,16 @@ namespace WireCell::Clus::PR {
         int    long_muon_mode{0};
         double long_muon_ratio_lo{0.3};
         double long_muon_ratio_hi{0.5};
+        /// doc 84 round 1.  A long-muon pseudo-shower is dispatched to
+        /// calculate_kinematics_long_muon on ITS pdg (|13|) but the range
+        /// length is summed over segments_in_long_muon MEMBERSHIP; when the
+        /// formation walk never reached this shower the sum is 0 and
+        /// kenergy_range is silently 0 (28/242 SBND showers, doc 84 sec 3.2,
+        /// worst 332.8 cm -- mode 2 then silently falls back to dQdx/charge).
+        /// true = when the chain contributes nothing, sum the muon-typed
+        /// member segments instead.  Config key
+        /// long_muon_range_empty_chain_fallback; absent => byte-identical.
+        bool   long_muon_range_fallback{false};
         /// doc pr/101 (K5).  The fill_kine_tree main-vertex pass lacks the
         /// `used_segments` guard its BFS has (prototype NeutrinoID_kine.h:72
         /// vs :130), so a shower MEMBER segment attached to the main vertex
@@ -2166,6 +2176,21 @@ namespace WireCell::Clus::PR {
         double m_stem_backfill_back_ang{110.0};          ///< backward-angle ceiling, DEGREES; inert while off
         bool   m_shower_ex1_walk_em_track_guard{false};  ///< doc pr/120 r1; false = legacy examine_shower_1 walk
         double m_shower_ex1_walk_em_track_len{20*units::cm}; ///< e- straight-long floor, internal units; inert while off
+        // doc sbnd_xin/docs/pr/121 -- the examine_shower_1 accept-branch dedup
+        // erases ANY pre-existing (main_vertex, conn-1) shower sharing the
+        // accepted shower1's start segment.  Written for stale SINGLE-segment
+        // wrappers left by shower_clustering_with_nv_in_main_cluster, its
+        // predicate never checks the segment count: SBND 17394-348471 (doc
+        // pr/115 sec 17.7, the one orphaning regression of the 141-event
+        // out-of-sample scan) erased a 13-member 352.6 MeV shower --
+        // retargeted onto proton seg 12052 by examine_showers_retarget_seed
+        // -- re-homing nothing, so 12 EM segments left PF output entirely.
+        // When on, a multi-segment dedup victim is absorbed into shower1
+        // (add_shower, the same re-home shape as the pr/84 start-seg dedup)
+        // before the erase, and shower1's kinematics are recomputed once.
+        // Single-segment wrappers keep the legacy drop either way.
+        // false (default) => byte-identical.
+        bool   m_shower_ex1_dedup_rehome{false};         ///< doc pr/121 r1; false = legacy dedup drop
         // kine_count_orphan_tracks (315167): fill_kine_tree counterpart of
         // the PF-side pf_orphan_confident_track knob (BeePFConfig).  A
         // confident straight-long main-cluster track that is graph-
@@ -2647,6 +2672,32 @@ namespace WireCell::Clus::PR {
         // seed gate are unchanged.  Sample footprint: 2/206 diagnostic
         // events (55595, 61461).  C++ default false = legacy.
         bool   m_long_muon_stub_bridge{false};
+
+        // doc 84 round 1 (P3) -- the stub-bridge "incoming segment < 6 cm"
+        // precondition above, as a length [cm].  Doc 84 sec 4: SBND 18255
+        // evt 66366 breaks a 126+174 cm muon on a 6.81 cm stub, 0.81 cm
+        // above the literal.  Read only inside the flag_stub_bridge block,
+        // which only the formation walk enables, so the NuMu tagger and
+        // examine_main_vertices_local stay legacy.  Config key
+        // long_muon_stub_bridge_len; default 6.0 = byte-identical.
+        double m_long_muon_stub_bridge_len_cm{6.0};
+
+        // doc 84 round 1 (P2) -- long-MIP continuation angle relaxation.
+        // The chain walk requires < 10 deg between fitted directions; doc 84
+        // sec 4.2 measured 25 candidates > 50 cm rejected on angle alone
+        // (median 15.6 deg, min 10.4): SBND 18255 evt 313847 loses a 162 cm
+        // MIP continuation at 10.99 deg, evt 66366 a 174 cm one at 14.62.
+        // When on, a candidate LONGER than 50 cm that passes the unchanged
+        // dQ/dx MIP test (ratio < 1.3) is accepted up to
+        // m_long_muon_angle_relax_deg, unless the junction has another
+        // substantial track-like arm (> 10 cm, not shower-flagged,
+        // pdg != +-11 -- the same veto the stub bridge uses: a genuine
+        // hadronic vertex must not merge).  Applied ONLY via the
+        // flag_angle_relax parameter from the formation walk (stub-bridge
+        // scoping precedent).  Config keys long_muon_angle_relax_long /
+        // long_muon_angle_relax_deg; C++ default false / 16.0 = legacy.
+        bool   m_long_muon_angle_relax_long{false};
+        double m_long_muon_angle_relax_deg{16.0};
 
         // doc sbnd_xin/docs/pr/43 round 2 K3 -- late particle-info/flag
         // reconciliation pass (reconcile_particle_flags), called from
@@ -3185,7 +3236,7 @@ namespace WireCell::Clus::PR {
         VertexPtr compare_main_vertices_all_showers(Graph& graph, Facade::Cluster& cluster, std::vector<VertexPtr>& vertex_candidates, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model);
         float calc_conflict_maps(Graph& graph, VertexPtr vertex);
         VertexPtr compare_main_vertices(Graph& graph, Facade::Cluster& cluster, std::vector<VertexPtr>& vertex_candidates);
-        std::pair<SegmentPtr, VertexPtr> find_cont_muon_segment(Graph &graph, SegmentPtr sg, VertexPtr vtx, bool flag_ignore_dQ_dx = false, bool flag_stub_bridge = false);
+        std::pair<SegmentPtr, VertexPtr> find_cont_muon_segment(Graph &graph, SegmentPtr sg, VertexPtr vtx, bool flag_ignore_dQ_dx = false, bool flag_stub_bridge = false, bool flag_angle_relax = false);
         bool examine_direction(Graph& graph, VertexPtr vertex, VertexPtr main_vertex, IndexedVertexSet& vertices_in_long_muon, IndexedSegmentSet& segments_in_long_muon, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, bool flag_final = false);
 
         bool fit_vertex(Facade::Cluster& cluster, VertexPtr vertex, VertexPtr main_vertex, std::vector<SegmentPtr>& sg_set, TrackFitting& track_fitter, IDetectorVolumes::pointer dv);

@@ -177,6 +177,7 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_mcs.cathode_x_cm       = get(config, "mcs_cathode_x",          m_mcs.cathode_x_cm);    // cm
     m_mcs.cathode_xcut_cm    = get(config, "mcs_cathode_xcut",       m_mcs.cathode_xcut_cm); // cm
     m_mcs.max_points         = get(config, "mcs_max_points",         m_mcs.max_points);
+    m_mcs.range_comparator_chain = get(config, "mcs_range_comparator_chain", m_mcs.range_comparator_chain);  // doc 84 round 1 (P5), log-only
     m_cathode_wide_kink_angle    = get(config, "cathode_wide_kink_angle",    m_cathode_wide_kink_angle);    // deg
     m_cathode_wide_kink_skirt    = get(config, "cathode_wide_kink_skirt",    m_cathode_wide_kink_skirt);    // cm
     m_cathode_wide_kink_baseline = get(config, "cathode_wide_kink_baseline", m_cathode_wide_kink_baseline); // cm
@@ -637,6 +638,7 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_kine_long_muon_mode                       = get(config, "kine_long_muon_mode",                       m_kine_long_muon_mode);
     m_kine_long_muon_ratio_lo                   = get(config, "kine_long_muon_ratio_lo",                   m_kine_long_muon_ratio_lo);
     m_kine_long_muon_ratio_hi                   = get(config, "kine_long_muon_ratio_hi",                   m_kine_long_muon_ratio_hi);
+    m_long_muon_range_empty_chain_fallback      = get(config, "long_muon_range_empty_chain_fallback",      m_long_muon_range_empty_chain_fallback);  // doc 84 round 1 (P1)
     m_kine_mainvtx_used_guard                   = get(config, "kine_mainvtx_used_guard",                   m_kine_mainvtx_used_guard);
     m_shower_hadronic_tag                       = get(config, "shower_hadronic_tag",                       m_shower_hadronic_tag);
     m_shower_hadronic_min_len                   = get(config, "shower_hadronic_min_len",                   m_shower_hadronic_min_len);
@@ -674,6 +676,8 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_stem_backfill_back_ang                    = get(config, "stem_backfill_back_ang",                    m_stem_backfill_back_ang);
     m_shower_ex1_walk_em_track_guard            = get(config, "shower_ex1_walk_em_track_guard",            m_shower_ex1_walk_em_track_guard);
     m_shower_ex1_walk_em_track_len              = get(config, "shower_ex1_walk_em_track_len",              m_shower_ex1_walk_em_track_len);
+    // doc sbnd_xin/docs/pr/121 round 1
+    m_shower_ex1_dedup_rehome                   = get(config, "shower_ex1_dedup_rehome",                   m_shower_ex1_dedup_rehome);
     m_straight_cont_cross_cluster               = get(config, "straight_cont_cross_cluster",               m_straight_cont_cross_cluster);
     m_sccc_bridge_body                          = get(config, "sccc_bridge_body",                          m_sccc_bridge_body);
     m_sccc_max_gap                              = get(config, "sccc_max_gap",                              m_sccc_max_gap);
@@ -684,6 +688,9 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_single_muon_long_muon_claim               = get(config, "single_muon_long_muon_claim",               m_single_muon_long_muon_claim);
     m_pid_flag_reconcile                        = get(config, "pid_flag_reconcile",                        m_pid_flag_reconcile);
     m_long_muon_stub_bridge                     = get(config, "long_muon_stub_bridge",                     m_long_muon_stub_bridge);
+    m_long_muon_stub_bridge_len                 = get(config, "long_muon_stub_bridge_len",                 m_long_muon_stub_bridge_len);              // doc 84 round 1 (P3), cm
+    m_long_muon_angle_relax_long                = get(config, "long_muon_angle_relax_long",                m_long_muon_angle_relax_long);             // doc 84 round 1 (P2)
+    m_long_muon_angle_relax_deg                 = get(config, "long_muon_angle_relax_deg",                 m_long_muon_angle_relax_deg);              // doc 84 round 1 (P2), deg
 
     if (!m_trackfitting_config_file.empty()) {
         load_trackfitting_config(m_trackfitting_config_file);
@@ -739,6 +746,7 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["mcs_cathode_x"]          = m_mcs.cathode_x_cm;        // cm
     cfg["mcs_cathode_xcut"]       = m_mcs.cathode_xcut_cm;     // cm; 0 = off (SBND: 5)
     cfg["mcs_max_points"]         = m_mcs.max_points;
+    cfg["mcs_range_comparator_chain"] = m_mcs.range_comparator_chain;  // doc 84 round 1 (P5), log-only
     cfg["cathode_wide_kink_angle"]    = m_cathode_wide_kink_angle;    // deg; 0 = legacy (no wide-baseline cathode accept)
     cfg["cathode_wide_kink_skirt"]    = m_cathode_wide_kink_skirt;    // cm excluded around the crossing
     cfg["cathode_wide_kink_baseline"] = m_cathode_wide_kink_baseline; // cm PCA baseline per arm beyond the skirt
@@ -1062,6 +1070,7 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["kine_long_muon_mode"]                       = m_kine_long_muon_mode;                       // doc pr/101 K4; 0 = legacy dQdx, byte-identical
     cfg["kine_long_muon_ratio_lo"]                   = m_kine_long_muon_ratio_lo;                   // inert unless mode 2
     cfg["kine_long_muon_ratio_hi"]                   = m_kine_long_muon_ratio_hi;                   // inert unless mode 2
+    cfg["long_muon_range_empty_chain_fallback"]      = m_long_muon_range_empty_chain_fallback;      // doc 84 round 1 (P1); false = legacy (chainless muon shower keeps range 0)
     cfg["kine_mainvtx_used_guard"]                   = m_kine_mainvtx_used_guard;                   // doc pr/101 K5; false = legacy, byte-identical
     cfg["shower_hadronic_tag"]                       = m_shower_hadronic_tag;                       // doc pr/99 r3 A5; false = legacy (label 11 stays), byte-identical
     cfg["shower_hadronic_min_len"]                   = m_shower_hadronic_min_len;                   // cm; inert while tag off (doc pr/99 r3)
@@ -1096,6 +1105,7 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["stem_backfill_back_ang"]                    = m_stem_backfill_back_ang;                    // deg, backward ceiling; inert while guard off (doc pr/120 r1)
     cfg["shower_ex1_walk_em_track_guard"]            = m_shower_ex1_walk_em_track_guard;            // doc pr/120 r1; false = legacy examine_shower_1 walk, byte-identical
     cfg["shower_ex1_walk_em_track_len"]              = m_shower_ex1_walk_em_track_len;              // cm, e- straight-long floor; inert while guard off (doc pr/120 r1)
+    cfg["shower_ex1_dedup_rehome"]                   = m_shower_ex1_dedup_rehome;                   // doc pr/121 r1; false = legacy dedup drop, byte-identical
     cfg["straight_cont_cross_cluster"]               = m_straight_cont_cross_cluster;               // doc pr/93 r4; false = legacy (no cross-cluster continuation demotion)
     cfg["sccc_bridge_body"]                          = m_sccc_bridge_body;                          // doc pr/93 r4; false = demote-only (no bridge replay)
     cfg["sccc_max_gap"]                              = m_sccc_max_gap;                              // cm; base tier, only read when straight_cont_cross_cluster
@@ -1106,6 +1116,9 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["single_muon_long_muon_claim"]               = m_single_muon_long_muon_claim;               // false = legacy (long-muon chain never claims the vertex muon slot)
     cfg["pid_flag_reconcile"]                        = m_pid_flag_reconcile;                        // false = legacy (no late reconciliation pass)
     cfg["long_muon_stub_bridge"]                     = m_long_muon_stub_bridge;                     // false = legacy (stub-blocked long-muon chains never form)
+    cfg["long_muon_stub_bridge_len"]                 = m_long_muon_stub_bridge_len;                 // doc 84 round 1 (P3), cm; 6.0 = legacy literal
+    cfg["long_muon_angle_relax_long"]                = m_long_muon_angle_relax_long;                // doc 84 round 1 (P2); false = legacy 10 deg walk
+    cfg["long_muon_angle_relax_deg"]                 = m_long_muon_angle_relax_deg;                 // doc 84 round 1 (P2), deg; inert unless relax on
 
 
     return cfg;
@@ -2028,6 +2041,7 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
         pattern_algos.m_kine_charge.long_muon_mode      = m_kine_long_muon_mode;                        // doc pr/101 K4
         pattern_algos.m_kine_charge.long_muon_ratio_lo  = m_kine_long_muon_ratio_lo;
         pattern_algos.m_kine_charge.long_muon_ratio_hi  = m_kine_long_muon_ratio_hi;
+        pattern_algos.m_kine_charge.long_muon_range_fallback = m_long_muon_range_empty_chain_fallback;  // doc 84 round 1 (P1)
         pattern_algos.m_kine_charge.mainvtx_used_guard  = m_kine_mainvtx_used_guard;                    // doc pr/101 K5
         // doc sbnd_xin/docs/pr/36 §10 tagger-stage knobs (F4/F5/F6/F7).
         pattern_algos.m_tagger_ordered_segment_sets  = m_tagger_ordered_segment_sets;
@@ -2145,6 +2159,7 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
         pattern_algos.m_stem_backfill_back_ang                    = m_stem_backfill_back_ang;                    // deg, no conversion (doc pr/120 r1)
         pattern_algos.m_shower_ex1_walk_em_track_guard            = m_shower_ex1_walk_em_track_guard;            // doc pr/120 r1
         pattern_algos.m_shower_ex1_walk_em_track_len              = m_shower_ex1_walk_em_track_len * units::cm;  // cm -> internal (doc pr/120 r1)
+        pattern_algos.m_shower_ex1_dedup_rehome                   = m_shower_ex1_dedup_rehome;                   // doc pr/121 r1
         pattern_algos.m_straight_cont_cross_cluster               = m_straight_cont_cross_cluster;               // doc pr/93 r4
         pattern_algos.m_sccc_bridge_body                          = m_sccc_bridge_body;                          // doc pr/93 r4
         pattern_algos.m_sccc_max_gap                              = m_sccc_max_gap * units::cm;                  // doc pr/93 r4
@@ -2155,6 +2170,9 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
         pattern_algos.m_single_muon_long_muon_claim               = m_single_muon_long_muon_claim;               // doc pr/43 round 2 K2
         pattern_algos.m_pid_flag_reconcile                        = m_pid_flag_reconcile;                        // doc pr/43 round 2 K3
         pattern_algos.m_long_muon_stub_bridge                     = m_long_muon_stub_bridge;                     // doc pr/46
+        pattern_algos.m_long_muon_stub_bridge_len_cm              = m_long_muon_stub_bridge_len;                 // doc 84 round 1 (P3)
+        pattern_algos.m_long_muon_angle_relax_long                = m_long_muon_angle_relax_long;                // doc 84 round 1 (P2)
+        pattern_algos.m_long_muon_angle_relax_deg                 = m_long_muon_angle_relax_deg;                 // doc 84 round 1 (P2)
         // Muon dQ/dx-vs-length envelope: c0/c1/power dimensionless, pivot cm -> internal.
         pattern_algos.m_muon_dqdx_curve = {m_muon_dqdx_curve[0], m_muon_dqdx_curve[1],
                                            m_muon_dqdx_curve[2] * units::cm, m_muon_dqdx_curve[3]};

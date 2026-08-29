@@ -1198,6 +1198,9 @@ function(
     mcs_point_source = 'muon_segments',  // muon_segments | whole_event (validation only, doc 80 sec 7.3)
     mcs_cathode_xcut = 5,                // cm half-band excised around cathode_x (doc 80 sec 7.5);
                                          // C++ default 0 = off => the SBND value lives HERE only
+    // doc 84 round 1 (P5).  Log-only chain-range comparator sentinel beside
+    // the mcs: line; no output bytes move either way.  C++ default false.
+    mcs_range_comparator_chain = false,
     // doc pr/94 round 3.  Give the SELECTED neutrino candidate the
     // main-cluster PR treatment for the duration of its own pass, even when it
     // is a demoted main.  The PR chain reads main-ness from Flags::main_cluster
@@ -1760,6 +1763,15 @@ function(
     stem_backfill_back_ang = null,           // deg; C++ default 110
     shower_ex1_walk_em_track_guard = false,  // shipped OFF, not selected: measured ZERO yield (doc pr/120 sec 5 -- its one target, 54332 seg 16014, is SEEDED via a kShowerTopology mis-flag in the current chain, not walk-absorbed; recognition thread)
     shower_ex1_walk_em_track_len = null,     // cm; C++ default 20
+    // doc pr/121 round 1 -- the examine_shower_1 accept-branch dedup erases a
+    // pre-existing same-start-segment (main_vertex, conn-1) shower without
+    // checking its size; SBND 17394-348471 (doc pr/115 sec 17.7) lost a
+    // 13-member 352.6 MeV shower to it (12 EM segments orphaned from PF).
+    // When on, a MULTI-segment victim is re-homed into the accepted shower
+    // (add_shower) before the erase.  C++ default false = legacy drop.
+    // Key omitted when off => byte-identical pre-pr/121 config.  Runner env
+    // SBND_SHOWER_EX1_DEDUP_REHOME.
+    shower_ex1_dedup_rehome = false,         // C++ default false = legacy dedup drop
     // doc pr/99 round 3 -- C1 kine-charge cell-ownership dedup + C1b
     // prototype cloud-rebuild parity (168596 Enu double count) + A5
     // hadronic-shower re-type (315167/395148 labels).  C++ defaults
@@ -1779,6 +1791,12 @@ function(
     kine_long_muon_mode = 2,         // SBND PRODUCTION ON 2026-08-20 (doc pr/101 K4; range w/ dead-end + ratio fallback)
     kine_long_muon_ratio_lo = null,  // C++ default 0.3
     kine_long_muon_ratio_hi = null,  // C++ default 0.5
+    // doc 84 round 1 (P1).  A muon-typed pseudo-shower whose segments never
+    // entered segments_in_long_muon reports kine_range = 0 and mode 2
+    // silently falls back (28/242 SBND showers, worst 332.8 cm).  true =
+    // sum the muon-typed members when the chain contributed nothing.
+    // C++ default false.  Key omitted when off => byte-identical.
+    long_muon_range_empty_chain_fallback = false,
     kine_mainvtx_used_guard = true,  // SBND PRODUCTION ON 2026-08-20 (doc pr/101 K5; latent on the manifest)
     shower_hadronic_tag = true,  // SBND PRODUCTION ON 2026-08-20 (doc pr/99 round 3, A5)
     shower_hadronic_min_len = null,   // cm; C++ default 10
@@ -1859,6 +1877,19 @@ function(
     // 284145 hadronic vertex).  Gate arms work-pr46-{base48,base19n,off48,
     // off19n,on48,on19n,oncase,m1koffb,m1konb}.  Doc pr/46.
     long_muon_stub_bridge = true,
+    // doc 84 round 1 (P3).  The stub-bridge 'incoming < 6 cm' precondition as
+    // a length [cm] (evt 66366 misses the bridge by 0.81 cm).  C++ default
+    // 6.0 = the legacy literal.  Key omitted when null => byte-identical.
+    // HOLD: owner hand-scan pending (doc 84 round 1).
+    long_muon_stub_bridge_len = null,
+    // doc 84 round 1 (P2).  Long-MIP continuation angle relax: a candidate
+    // > 50 cm passing the unchanged dQ/dx MIP test may continue the chain up
+    // to long_muon_angle_relax_deg (C++ default 16.0) with the stub-bridge
+    // junction veto (doc 84 sec 4.2: 25 rejections, median 15.6 deg; evt
+    // 313847 at 10.99).  C++ default false.  Keys omitted when off/null =>
+    // byte-identical.  HOLD: owner hand-scan pending (doc 84 round 1).
+    long_muon_angle_relax_long = false,
+    long_muon_angle_relax_deg = null,
     // doc pr/48 (18255-51513/56211/57903/59335/57485) -- back-to-back track
     // fixes.  two_end_break: the two-end residual-range break pass (nu
     // vertex mid-segment on a single unbroken track, dQ/dx rising at BOTH
@@ -2593,6 +2624,7 @@ function(
         [if mcs_enable then 'mcs_point_source']: mcs_point_source,
         [if mcs_enable then 'mcs_cathode_x']: cathode_x,
         [if mcs_enable then 'mcs_cathode_xcut']: mcs_cathode_xcut,
+        [if mcs_enable && mcs_range_comparator_chain then 'mcs_range_comparator_chain']: true,  // doc 84 r1 P5; C++ default false
         [if nu_skip_cosmic then 'nu_skip_cosmic']: true,
         [if nu_skip_cosmic_bundle then 'nu_skip_cosmic_bundle']: true,
         [if skip_cosmic_companions then 'skip_cosmic_companions']: true,
@@ -2757,6 +2789,9 @@ function(
         [if stem_backfill_back_ang != null then 'stem_backfill_back_ang']: stem_backfill_back_ang,
         [if shower_ex1_walk_em_track_guard then 'shower_ex1_walk_em_track_guard']: true,
         [if shower_ex1_walk_em_track_len != null then 'shower_ex1_walk_em_track_len']: shower_ex1_walk_em_track_len,
+        // doc pr/121 round 1.  C++ default false.
+        // Key omitted when off => byte-identical pre-pr/121 config.
+        [if shower_ex1_dedup_rehome then 'shower_ex1_dedup_rehome']: true,
         [if (if kine_charge_dedup == null then false else kine_charge_dedup) then 'kine_charge_dedup']: true,
         [if (if kine_charge_rebuild == null then false else kine_charge_rebuild) then 'kine_charge_rebuild']: true,
         [if (if kine_charge_track_ctx == null then false else kine_charge_track_ctx) then 'kine_charge_track_ctx']: true,
@@ -2765,6 +2800,7 @@ function(
         [if kine_long_muon_mode != null then 'kine_long_muon_mode']: kine_long_muon_mode,
         [if kine_long_muon_ratio_lo != null then 'kine_long_muon_ratio_lo']: kine_long_muon_ratio_lo,
         [if kine_long_muon_ratio_hi != null then 'kine_long_muon_ratio_hi']: kine_long_muon_ratio_hi,
+        [if long_muon_range_empty_chain_fallback then 'long_muon_range_empty_chain_fallback']: true,  // doc 84 r1 P1; C++ default false. Key omitted when off => byte-identical.
         [if (if kine_mainvtx_used_guard == null then false else kine_mainvtx_used_guard) then 'kine_mainvtx_used_guard']: true,
         [if (if shower_hadronic_tag == null then false else shower_hadronic_tag) then 'shower_hadronic_tag']: true,
         [if shower_hadronic_min_len != null then 'shower_hadronic_min_len']: shower_hadronic_min_len,
@@ -2789,6 +2825,9 @@ function(
         [if pid_flag_reconcile then 'pid_flag_reconcile']: true,
         [if other_seg_empty_2d_guard then 'other_seg_empty_2d_guard']: true,
         [if long_muon_stub_bridge then 'long_muon_stub_bridge']: true,
+        [if long_muon_stub_bridge_len != null then 'long_muon_stub_bridge_len']: long_muon_stub_bridge_len,  // doc 84 r1 P3; C++ default 6.0 cm
+        [if long_muon_angle_relax_long then 'long_muon_angle_relax_long']: true,  // doc 84 r1 P2; C++ default false
+        [if long_muon_angle_relax_deg != null then 'long_muon_angle_relax_deg']: long_muon_angle_relax_deg,  // doc 84 r1 P2; C++ default 16.0 deg
         [if two_end_break then 'two_end_break']: true,
         [if teb_turn_min_arm_frac != null then 'teb_turn_min_arm_frac']: teb_turn_min_arm_frac,
         [if teb_chain_topology then 'teb_chain_topology']: true,

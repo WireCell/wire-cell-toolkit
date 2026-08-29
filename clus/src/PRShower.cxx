@@ -82,6 +82,19 @@ namespace WireCell::Clus::PR {
             static const bool dbg = std::getenv("WCT_SHOWER_ABSORB_DEBUG") != nullptr;
             return dbg;
         }
+        // doc sbnd_xin/docs/pr/122 round 1 -- WCT_SHOWER_PID_DEBUG.  A shower's
+        // REPORTED particle type is not the update_particle_type vote: the vote
+        // only ever writes pdg 11 on the start segment, and calculate_kinematics
+        // later copies the start segment's pdg verbatim into data.particle_type
+        // (SBND 18255-166870: a real 4-segment gamma reported as mu- 38.6 MeV).
+        // These probes trace the vote's accumulators, its guard verdicts, and
+        // every data.particle_type copy, so the write that leaves a non-EM pdg
+        // on an EM shower can be named.  stderr only, no effect on emitted bytes.
+        bool pid_dbg()
+        {
+            static const bool dbg = std::getenv("WCT_SHOWER_PID_DEBUG") != nullptr;
+            return dbg;
+        }
         int vtx_display_id(const VertexPtr& v)
         {
             if (!v) return -1;
@@ -1201,6 +1214,9 @@ namespace WireCell::Clus::PR {
         
         // Only process if there's more than one segment
         if (this->edges().size() <= 1) {
+            if (pid_dbg())
+                std::fprintf(stderr, "SHOWER_PID VOTE_SKIP shower_id=%d start_seg=%d nseg=%zu\n",
+                             get_shower_id(), seg_display_id(m_start_segment), this->edges().size());
             return;
         }
         
@@ -1246,8 +1262,26 @@ namespace WireCell::Clus::PR {
             } else {
                 track_length += length;
             }
+            if (pid_dbg())
+                std::fprintf(stderr,
+                             "SHOWER_PID VOTE_MEM shower_id=%d seg=%d len_cm=%.2f pdg=%d "
+                             "traj=%d topo=%d counts_track=%d\n",
+                             get_shower_id(), seg_display_id(seg), length / units::cm,
+                             seg->has_particle_info() && seg->particle_info() ? seg->particle_info()->pdg() : 0,
+                             (int)seg->flags_any(SegmentFlags::kShowerTrajectory),
+                             (int)seg->flags_any(SegmentFlags::kShowerTopology),
+                             (int)(!is_shower && counts_as_track));
         }
-        
+        if (pid_dbg())
+            std::fprintf(stderr,
+                         "SHOWER_PID VOTE shower_id=%d start_seg=%d start_pdg=%d nseg=%zu "
+                         "shower_len_cm=%.2f track_len_cm=%.2f fired=%d\n",
+                         get_shower_id(), seg_display_id(m_start_segment),
+                         m_start_segment && m_start_segment->has_particle_info() && m_start_segment->particle_info()
+                             ? m_start_segment->particle_info()->pdg() : 0,
+                         this->edges().size(), shower_length / units::cm, track_length / units::cm,
+                         (int)(shower_length > track_length && m_start_segment));
+
         // If shower_length dominates, update start_segment to electron
         if (shower_length > track_length && m_start_segment) {
             // doc sbnd_xin/docs/pr/40 round 3: an electron cannot father a
@@ -1269,6 +1303,12 @@ namespace WireCell::Clus::PR {
             const bool protected_confident_pid = accept_pid_guard &&
                 segment_track_length(m_start_segment) > accept_pid_min_len &&
                 segment_confident_nonelectron_pid(m_start_segment);
+            if (pid_dbg())
+                std::fprintf(stderr,
+                             "SHOWER_PID GUARD shower_id=%d start_seg=%d prot_pion=%d prot_pid=%d write_e=%d\n",
+                             get_shower_id(), seg_display_id(m_start_segment),
+                             (int)protected_pion, (int)protected_confident_pid,
+                             (int)(!protected_pion && !protected_confident_pid));
             // if-guarded rather than an early return: keeps any code appended
             // to this function later from being silently skipped for a
             // protected shower.
@@ -1467,8 +1507,11 @@ namespace WireCell::Clus::PR {
             // Set particle type from start segment
             if (m_start_segment->has_particle_info()) {
                 data.particle_type = m_start_segment->particle_info()->pdg();
+                if (pid_dbg())
+                    std::fprintf(stderr, "SHOWER_PID COPY shower_id=%d nseg=1 start_seg=%d pdg=%d\n",
+                                 get_shower_id(), seg_display_id(m_start_segment), data.particle_type);
             }
-            
+
             // Mirrors prototype: ProtoSegment::get_flag_shower() = flag_shower_trajectory || flag_shower_topology || get_flag_shower_dQdx()
             // where get_flag_shower_dQdx() = (|particle_type| == 11)
             bool flag_shower = m_start_segment->flags_any(SegmentFlags::kShowerTrajectory) ||
@@ -1585,6 +1628,10 @@ namespace WireCell::Clus::PR {
             // Set particle type
             if (m_start_segment->has_particle_info()) {
                 data.particle_type = m_start_segment->particle_info()->pdg();
+                if (pid_dbg())
+                    std::fprintf(stderr, "SHOWER_PID COPY shower_id=%d nseg=%d start_seg=%d pdg=%d\n",
+                                 get_shower_id(), nsegments, seg_display_id(m_start_segment),
+                                 data.particle_type);
             }
             
             // Mirrors prototype: ProtoSegment::get_flag_shower() = flag_shower_trajectory || flag_shower_topology || get_flag_shower_dQdx()
@@ -1734,7 +1781,7 @@ namespace WireCell::Clus::PR {
         //           << std::endl;
     }
 
-    void Shower::calculate_kinematics_long_muon(IndexedSegmentSet& segments_in_muons, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, bool exclude_start_vertex_from_endpoint, int best_mode, double ratio_lo, double ratio_hi){
+    void Shower::calculate_kinematics_long_muon(IndexedSegmentSet& segments_in_muons, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, bool exclude_start_vertex_from_endpoint, int best_mode, double ratio_lo, double ratio_hi, bool range_empty_chain_fallback){
         // Invariant: this function is only called when shower->get_particle_type() == 13
         // (NeutrinoEnergyReco.cxx), which requires shower->set_particle_type(13) to have been
         // called (NeutrinoShowerClustering.cxx:118), which in turn requires m_start_segment to
@@ -1756,6 +1803,16 @@ namespace WireCell::Clus::PR {
         // Use a set keyed by vertex index (stable across runs) to deduplicate muon vertices.
         // Ordered by index so subsequent max-distance search is deterministic on ties.
         std::map<size_t, VertexPtr> muon_vertices_by_index;
+        // doc 84 round 1 (long_muon_range_empty_chain_fallback): a shower is
+        // dispatched here on ITS pdg (NeutrinoEnergyReco.cxx |pdg|==13) but the
+        // length is measured over segments_in_long_muon MEMBERSHIP -- when the
+        // formation walk never reached this shower's segments the chain sum is
+        // 0 and kenergy_range is silently 0 (28/242 SBND showers, doc 84 sec
+        // 3.2, worst 332.8 cm).  Knob-on fallback: sum the muon-typed member
+        // segments instead.  Knob off => accumulators stay empty, byte-identical.
+        double fb_length = 0;
+        std::map<size_t, VertexPtr> fb_vertices_by_index;
+        bool used_fallback = false;
 
         for (auto edesc : ordered_edges(*this, m_full_graph)) {
             if (!has_edge(edesc)) continue;
@@ -1769,12 +1826,29 @@ namespace WireCell::Clus::PR {
                 if (va) muon_vertices_by_index[m_full_graph[va->get_descriptor()].index] = va;
                 if (vb) muon_vertices_by_index[m_full_graph[vb->get_descriptor()].index] = vb;
             }
+            else if (range_empty_chain_fallback && seg->has_particle_info()
+                     && std::abs(seg->particle_info()->pdg()) == 13) {
+                // doc 84 round 1: muon-typed member NOT in the chain set.  Only
+                // consumed below when the chain contributed nothing at all.
+                fb_length += segment_track_length(seg);
+                auto [va, vb] = find_vertices(m_full_graph, seg);
+                if (va) fb_vertices_by_index[m_full_graph[va->get_descriptor()].index] = va;
+                if (vb) fb_vertices_by_index[m_full_graph[vb->get_descriptor()].index] = vb;
+            }
 
             const auto& seg_fits = seg->fits();
             for (const auto& fit : seg_fits) {
                 vec_dQ.push_back(fit.dQ);
                 vec_dx.push_back(fit.dx);
             }
+        }
+
+        if (range_empty_chain_fallback && total_length == 0 && fb_length > 0) {
+            // Chain missed this shower entirely: measure over the muon-typed
+            // members so range (and the mode-2 end_degree test) see the muon.
+            total_length = fb_length;
+            muon_vertices_by_index.insert(fb_vertices_by_index.begin(), fb_vertices_by_index.end());
+            used_fallback = true;
         }
 
         // Calculate kinetic energies
@@ -1826,10 +1900,10 @@ namespace WireCell::Clus::PR {
             if (use_range) data.kenergy_best = data.kenergy_range;
             SPDLOG_LOGGER_DEBUG(s_log,
                 "kine_long_muon: shower id={} nseg_chain={} L_cm={:.1f} range={:.1f} dqdx={:.1f} ratio={:.2f} "
-                "end_degree={} mode={} used={}",
+                "end_degree={} mode={} used={} fallback={}",
                 m_shower_id, muon_vertices_by_index.size() ? muon_vertices_by_index.size() - 1 : 0,
                 total_length / units::cm, data.kenergy_range / units::MeV, data.kenergy_dQdx / units::MeV,
-                ratio, end_degree, best_mode, use_range ? "range" : "dqdx");
+                ratio, end_degree, best_mode, use_range ? "range" : "dqdx", used_fallback ? 1 : 0);
         }
 
         // Set end point to the farthest vertex
