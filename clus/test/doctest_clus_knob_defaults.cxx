@@ -264,6 +264,8 @@ TEST_CASE("clus knob defaults: TaggerCheckNeutrino switches are all OFF")
     CHECK_KNOB_NUM(cfg, "shower_satellite_absorb_max_mev", 10.0);             // MeV; inert while pass off
     CHECK_KNOB_NUM(cfg, "shower_satellite_absorb_host_mev", 20.0);            // MeV; inert while pass off
     CHECK_KNOB_BOOL(cfg, "kine_count_guard_freed", false);                    // pr/123 r2; kine twin of pf_orphan_guard_freed
+    CHECK_KNOB_NUM(cfg, "kine_guard_freed_impact", 0.0);                     // pr/129; 0 = pointing test off
+    CHECK_KNOB_NUM(cfg, "kine_guard_freed_miss_deg", 90.0);                  // pr/129
     CHECK_KNOB_BOOL(cfg, "kine_count_near_cross_cluster", false);             // pr/128; kine twin of pf_orphan_near_cross_cluster
     CHECK_KNOB_BOOL(cfg, "kine_count_conn4_near", false);                     // pr/128; kine twin of pf_conn4_near_candidate
     CHECK_KNOB_BOOL(cfg, "straight_cont_cross_cluster", false);               // r4 (137238)

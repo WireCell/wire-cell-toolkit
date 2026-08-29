@@ -1903,6 +1903,15 @@ function(
     kine_orphan_track_min = null,  // null => C++ default 50cm
     // doc pr/123 r2: kine twin of pf_orphan_guard_freed. C++ default false.
     kine_count_guard_freed = true,  // SBND PRODUCTION ON 2026-08-28 (doc pr/123 r2; pr/93 principle: PF and kine describe the same particle set; restores 304.7/268.7 MeV muon KE to kine_reco_Enu on the same 2 events; nusel identical)
+    // doc pr/129: the guard-freed pool is the only pool with NO geometric
+    // admission test, which is how it counted 268.70 MeV of an
+    // owner-adjudicated cosmic into kine_reco_Enu (SBND 18255-393505).
+    // Owner 2026-08-29: "if the direction of the track is point to the main
+    // vertex, it is more likely to be part of neutrino.  For overclustering
+    // they are generally not point to neutrino vertex."
+    // C++ default 0 = no test.  0 => keys omitted => byte-identical.
+    kine_guard_freed_impact = 0,    // cm; perpendicular miss of the track's line at the nu vertex
+    kine_guard_freed_miss_deg = 90, // deg; 0 = runs straight out of the vertex, >90 = vertex is in FRONT
     // doc pr/128: kine twins of the PF completeness pair.  These move
     // kine_reco_Enu, so they are separate knobs, approved separately.
     // C++ defaults false; keys omitted when off => byte-identical.
@@ -2965,6 +2974,10 @@ function(
         [if kine_count_orphan_tracks then 'kine_count_orphan_tracks']: true,
         [if kine_orphan_track_min != null then 'kine_orphan_track_min']: kine_orphan_track_min,
         [if kine_count_guard_freed then 'kine_count_guard_freed']: true,  // doc pr/123 r2
+        // doc pr/129: pointing test on the guard-freed pool.  C++ default 0 =
+        // no test => key omitted when off => byte-identical pre-fix config.
+        [if kine_guard_freed_impact != 0 then 'kine_guard_freed_impact']: kine_guard_freed_impact,
+        [if kine_guard_freed_impact != 0 then 'kine_guard_freed_miss_deg']: kine_guard_freed_miss_deg,
         // doc pr/128; params in cm (the C++ scales them by units::cm at copy).
         [if kine_count_near_cross_cluster then 'kine_count_near_cross_cluster']: true,
         [if kine_near_gap_cm != null then 'kine_near_gap']: kine_near_gap_cm,

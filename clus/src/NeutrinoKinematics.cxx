@@ -736,6 +736,38 @@ KineInfo PatternAlgorithms::fill_kine_tree(
                   [](const auto& a, const auto& b) { return a.first < b.first; });
         size_t n_freed = 0;
         for (const auto& [eidx, seg] : freed_cands) {
+            // -----------------------------------------------------------------
+            // doc sbnd_xin/docs/pr/129 -- THE POINTING TEST.  Owner, 2026-08-29:
+            // "the key difference is the direction, if the direction of the
+            //  track is point to the main vertex, it is more likely to be part
+            //  of neutrino.  For overclustering they are generally not point to
+            //  neutrino vertex."
+            //
+            // This pool is the ONLY one with no geometric admission test at
+            // all -- its predicate is the kPass4GuardFreed flag and nothing
+            // else -- which is how it came to count 268.70 MeV of an
+            // owner-adjudicated cosmic into kine_reco_Enu (SBND 18255-393505).
+            // The test asks the daughter question: does this track's line aim
+            // back at the neutrino vertex, and does the vertex lie behind it?
+            //
+            // m_kine_guard_freed_impact == 0 => no test => every candidate
+            // counted exactly as before => byte-identical.
+            // -----------------------------------------------------------------
+            if (m_kine_guard_freed_impact > 0 && main_vertex) {
+                const auto p = segment_vertex_pointing(seg, main_vertex->fit().point);
+                const bool aims = p.d_vtx >= 0 &&
+                                  p.impact   <= m_kine_guard_freed_impact &&
+                                  p.miss_deg <= m_kine_guard_freed_miss_deg;
+                SPDLOG_LOGGER_INFO(s_log,
+                    "kine_guard_freed_impact: seg idx={} cluster={} ke_mev={:.2f} "
+                    "d_vtx_cm={:.2f} impact_cm={:.2f} miss_deg={:.1f} -> {}",
+                    eidx, seg->cluster() ? seg->cluster()->get_cluster_id() : -1,
+                    (seg->particle_info() ? seg->particle_info()->kinetic_energy() / units::MeV : 0.0),
+                    p.d_vtx < 0 ? -1.0 : p.d_vtx / units::cm,
+                    p.impact > 1e8 ? -1.0 : p.impact / units::cm,
+                    p.miss_deg, aims ? "COUNT" : "SKIP");
+                if (!aims) continue;
+            }
             used_segments.insert(seg);
             const int pdg = push_segment_kine(seg, 1);
             ++n_freed;

@@ -1794,6 +1794,59 @@ namespace WireCell::Clus::PR {
         return out;
     }
 
+    // doc sbnd_xin/docs/pr/129 -- see the header comment.  The owner's
+    // pointing discriminator: a daughter's line aims back at the vertex and
+    // has the vertex BEHIND its near end; an over-clustered cosmic does not.
+    VertexPointing segment_vertex_pointing(
+        SegmentPtr seg, const WireCell::Point& vtx, double dir_window)
+    {
+        VertexPointing out;
+        if (!seg || seg->fits().empty()) return out;
+        const auto& cf = seg->fits();
+        const size_t n = cf.size();
+        if (n < 2) return out;
+
+        // Near end = whichever of the candidate's two ENDS is closer to the
+        // vertex.  d_vtx is reported over all fit points, so a track that
+        // brushes the vertex with its middle still reports a small d_vtx --
+        // the pointing terms below are what reject it.
+        out.d_vtx = 1e9;
+        for (const auto& f : cf) out.d_vtx = std::min(out.d_vtx, (f.point - vtx).magnitude());
+        const bool front_is_near =
+            (cf.front().point - vtx).magnitude() <= (cf.back().point - vtx).magnitude();
+        const size_t i = front_is_near ? 0 : n - 1;
+
+        // Windowed inward direction at the near end: from it toward the point
+        // ~dir_window further into the body.  Same construction as
+        // segment_continuation_geometry, so a scattered track is judged by its
+        // direction NEAR THE VERTEX rather than by a whole-length chord.
+        size_t j = i;
+        double walked = 0.0;
+        while (walked < dir_window) {
+            const size_t k = front_is_near ? j + 1 : (j == 0 ? 0 : j - 1);
+            if (k == j || k >= n) break;
+            walked += (cf[k].point - cf[j].point).magnitude();
+            j = k;
+        }
+        if (j == i) j = front_is_near ? n - 1 : 0;
+        WireCell::Vector u = cf[j].point - cf[i].point;
+        const double um = u.magnitude();
+        if (um <= 0) { out.d_vtx = -1.0; return out; }
+        u = WireCell::Vector(u.x() / um, u.y() / um, u.z() / um);
+
+        // w: near end -> vertex.  For a daughter travelling out of the vertex
+        // the two are ANTI-parallel, so miss_deg (measured from anti-parallel)
+        // is ~0 and the vertex sits behind.  miss_deg > 90 means the vertex is
+        // in front of the near end.
+        const WireCell::Vector w = vtx - cf[i].point;
+        const double wm = w.magnitude();
+        if (wm <= 0) { out.impact = 0.0; out.miss_deg = 0.0; return out; }
+        const double c = std::max(-1.0, std::min(1.0, u.dot(w) / wm));
+        out.miss_deg = 180.0 - std::acos(c) / M_PI * 180.0;
+        out.impact = w.cross(u).magnitude();   // |w| sin(theta), u is a unit vector
+        return out;
+    }
+
     // doc sbnd_xin/docs/pr/40 round 2 F5 -- see the header comment.
     bool segment_has_proton_daughter(Graph& graph, SegmentPtr seg, VertexPtr main_vertex, double MIP_dQdx) {
         static const bool dbg = std::getenv("WCT_PROTON_DAUGHTER_DEBUG") != nullptr;

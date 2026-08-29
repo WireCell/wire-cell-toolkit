@@ -2236,6 +2236,8 @@ namespace WireCell::Clus::PR {
         // shower claimed into kine_energy_particle (171572's 125cm muon,
         // ~390 MeV absent from kine_reco_Enu).  false => byte-identical.
         bool   m_kine_count_guard_freed{false};          ///< doc pr/123 r2; false = freed tracks uncounted
+        double m_kine_guard_freed_impact{0.0};           ///< doc pr/129; 0 = no pointing test, byte-identical
+        double m_kine_guard_freed_miss_deg{90.0};        ///< doc pr/129; only used when the impact cut is armed
         // doc sbnd_xin/docs/pr/128 -- kine twins of the PF completeness knobs.
         // The PF knob changes only the picture; these move kine_reco_Enu, so
         // they are separate knobs and are approved separately.

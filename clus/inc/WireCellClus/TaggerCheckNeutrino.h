@@ -955,6 +955,8 @@ public:
         double m_shower_satellite_absorb_host_mev{20.0};            // doc pr/125; MeV, host kine floor
         double m_shower_pass4_track_guard_len{0.0};                 // doc pr/123 r1; cm, 0 = no length guard
         bool   m_kine_count_guard_freed{false};                     // doc pr/123 r2; kine twin of pf_orphan_guard_freed
+        double m_kine_guard_freed_impact{0.0};                      // doc pr/129; 0 = no pointing test
+        double m_kine_guard_freed_miss_deg{90.0};                   // doc pr/129
         // doc pr/128; kine twins of pf_orphan_near_cross_cluster / pf_conn4_near_candidate
         bool   m_kine_count_near_cross_cluster{false};              // doc pr/128 (137238 class generalised)
         double m_kine_near_gap{5};                                  // cm; scaled at copy

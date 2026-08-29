@@ -597,6 +597,40 @@ namespace WireCell::Clus::PR {
         SegmentPtr seg, const std::vector<SegmentPtr>& refs,
         double dir_window = 15 * units::cm);
 
+    /// doc sbnd_xin/docs/pr/129 -- DOES THIS TRACK POINT BACK AT THE NEUTRINO
+    /// VERTEX?  The owner's discriminator, in his words (2026-08-29): "if the
+    /// direction of the track is point to the main vertex, it is more likely
+    /// to be part of neutrino.  For overclustering they are generally not
+    /// point to neutrino vertex."
+    ///
+    /// A daughter leaves the vertex and travels outward, so even when only a
+    /// FRAGMENT of it survives far from the vertex, the fragment's line still
+    /// aims back at the vertex and the vertex lies BEHIND its near end.  An
+    /// over-clustered cosmic that merely passes nearby does neither.
+    ///
+    /// Measured at the candidate's own end closest to `vtx`, using the same
+    /// windowed inward direction as segment_continuation_geometry (so a
+    /// scattered track is judged by its direction near the vertex, not by a
+    /// chord across its whole length):
+    ///   d_vtx     min distance from any of the candidate's fit points to vtx
+    ///   impact    perpendicular distance from vtx to the INFINITE line through
+    ///             the near end along that direction -- "by how much does the
+    ///             track's line miss the vertex"
+    ///   miss_deg  0 when the track runs exactly straight out from the vertex;
+    ///             90 when it runs across; >90 when the vertex is IN FRONT of
+    ///             the near end (the track heads toward/through it rather than
+    ///             away from it, which a daughter never does)
+    /// A candidate with no fits, or a degenerate direction, yields d_vtx = -1
+    /// and is never admitted by a caller testing these terms.
+    struct VertexPointing {
+        double d_vtx{-1.0};
+        double impact{1e9};
+        double miss_deg{180.0};
+    };
+    VertexPointing segment_vertex_pointing(
+        SegmentPtr seg, const WireCell::Point& vtx,
+        double dir_window = 15 * units::cm);
+
     /// doc sbnd_xin/docs/pr/74 round 2 P1 -- veto for examine_direction's
     /// flag_shower_in cascade (the |pdg|==13/pdg==0 electron relabel).
     /// True iff `seg` is BOTH long (track length > max_len) AND MIP-like
