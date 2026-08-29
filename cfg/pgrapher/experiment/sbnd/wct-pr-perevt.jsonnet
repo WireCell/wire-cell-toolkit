@@ -1840,9 +1840,9 @@ function(
     // doc 84 round 4 -- the three admission misses the owner named from the
     // round-3 Bee scan of the unclaimed Pop-B pairs.  All null => C++ legacy
     // defaults => key omitted => byte-identical compiled config.
-    long_muon_cathode_bridge_lever = null,          // cm; C++ default 5.0 (the round-2 hardcode).  G1 / 172794
-    long_muon_cathode_bridge_track_partner = null,  // C++ default false.  G2 / 347890 (admit |211| partner showers; EM stays out)
-    long_muon_cathode_bridge_short_gap = null,      // cm; C++ default 0.0 = off.  G3 / 67026
+    long_muon_cathode_bridge_lever = 15,            // SBND PRODUCTION ON 2026-08-29 (doc 84 r4 G1, owner pre-authorization; C++ default 5.0 = the round-2 hardcode).  172794: 5cm reject, 10cm reject, 15cm bridges
+    long_muon_cathode_bridge_track_partner = true,  // SBND PRODUCTION ON 2026-08-29 (doc 84 r4 G2, owner pre-authorization; C++ default false).  347890; EM (11/22) stays excluded by design
+    long_muon_cathode_bridge_short_gap = 8,         // cm; SBND PRODUCTION ON 2026-08-29 (doc 84 r4 G3, owner pre-authorization; C++ default 0.0 = off).  67026
     long_muon_cathode_bridge_short_gap_angle = null, // deg; C++ default 10.0; inert while short_gap 0
     long_muon_cathode_bridge_short_gap_len = null,  // cm; C++ default 50.0; inert while short_gap 0
     kine_mainvtx_used_guard = true,  // SBND PRODUCTION ON 2026-08-20 (doc pr/101 K5; latent on the manifest)
