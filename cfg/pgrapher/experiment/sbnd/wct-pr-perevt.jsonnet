@@ -1877,8 +1877,22 @@ function(
     kine_count_guard_freed = true,  // SBND PRODUCTION ON 2026-08-28 (doc pr/123 r2; pr/93 principle: PF and kine describe the same particle set; restores 304.7/268.7 MeV muon KE to kine_reco_Enu on the same 2 events; nusel identical)
     straight_cont_cross_cluster = true,
     sccc_bridge_body = true,
-    sccc_max_gap = 6,          // cm; base tier (C++ default 5; 137238 g=5.68)
-    sccc_kink_max = 18,        // deg; base tier (C++ default 15; 137238 K=17.0)
+    // doc pr/127 (owner 2026-08-29: "137238, the electron 89 MeV should
+    // connect to some thing, which is missing from the PF tree").  The pr/93
+    // r4 fix for THIS event died silently when the Q/L era moved cb0805 ->
+    // grp0825: its muon-body candidate, measured g=5.68cm K=17.0deg in
+    // 2026-08-18 (which is why the base tier was cut at 6cm), now measures
+    // g=8.00cm K=14.0deg -- 2.3cm further out, 3deg straighter, i.e. in the
+    // notch between the base tier's gap and the aligned tier's kink.  Zero
+    // sccc demotes fired anywhere in 239 events at 6cm.  Census over the same
+    // 239 events (docs/pr/pr127-sccc-census.tsv, 107 cross-cluster candidates
+    // in the g<=12cm window): 137238's body at K=14.0 is the ONLY candidate
+    // below K=28.6, so ANY gap up to the aligned ceiling admits it and
+    // nothing else.  10cm = 2x the measured 8.00cm margin while the two-tier
+    // structure stays meaningful; 12cm was equally collateral-free and is the
+    // fallback if the geometry drifts again.
+    sccc_max_gap = 10,         // cm; base tier (C++ default 5; SBND 6 since doc pr/93 r4, 10 since doc pr/127; 137238 g=8.00)
+    sccc_kink_max = 18,        // deg; base tier (C++ default 15; 137238 K=14.0, was 17.0 in doc pr/93 r4)
     sccc_gap_aligned = null,   // null => C++ default 12cm (aligned tier)
     sccc_kink_tight = null,    // null => C++ default 7.5deg (aligned tier)
 
