@@ -1204,6 +1204,12 @@ function(
     // doc 84 round 1 (P5).  Log-only chain-range comparator sentinel beside
     // the mcs: line; no output bytes move either way.  C++ default false.
     mcs_range_comparator_chain = true,   // SBND PRODUCTION ON 2026-08-28 (doc 84 round 1 P5, log-only)
+    // doc 84 round 3.  Feed the cathode-bridge absorbed member set into the
+    // MCS fit so a cathode-split muon is fit on its full track.  Moves ONLY
+    // kine_mcs_* (T_kine) + log sentinels; segments_in_long_muon and every
+    // tagger/nusel input stay untouched.  C++ default false; key suppressed
+    // when off => byte-identical compiled config.
+    mcs_bridged_members = false,
     // doc pr/94 round 3.  Give the SELECTED neutrino candidate the
     // main-cluster PR treatment for the duration of its own pass, even when it
     // is a demoted main.  The PR chain reads main-ness from Flags::main_cluster
@@ -2650,6 +2656,7 @@ function(
         [if mcs_enable then 'mcs_cathode_x']: cathode_x,
         [if mcs_enable then 'mcs_cathode_xcut']: mcs_cathode_xcut,
         [if mcs_enable && mcs_range_comparator_chain then 'mcs_range_comparator_chain']: true,  // doc 84 r1 P5; C++ default false
+        [if mcs_enable && mcs_bridged_members then 'mcs_bridged_members']: true,  // doc 84 r3; C++ default false
         [if nu_skip_cosmic then 'nu_skip_cosmic']: true,
         [if nu_skip_cosmic_bundle then 'nu_skip_cosmic_bundle']: true,
         [if skip_cosmic_companions then 'skip_cosmic_companions']: true,

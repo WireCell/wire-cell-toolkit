@@ -47,6 +47,7 @@ namespace {
 
 void PR::mcs_fill_kine(KineInfo& kine, Graph& graph,
                        const IndexedSegmentSet& segments_in_long_muon,
+                       const IndexedSegmentSet& bridged_segments,
                        const VertexPtr& main_vertex,
                        bool beam_gate_active,
                        const MuonMCSConfig& cfg,
@@ -155,6 +156,32 @@ void PR::mcs_fill_kine(KineInfo& kine, Graph& graph,
     else {
         SPDLOG_LOGGER_WARN(log, "mcs: unknown muon_source '{}', skipping", cfg.muon_source);
         return;
+    }
+
+    // doc 84 round 3 (mcs_bridged_members): additionally feed the cathode-
+    // bridge absorbed member set into the fit.  The bridge pass
+    // (long_muon_cathode_bridge_pass) joins the far half of a cathode-split
+    // muon to the SHOWER only -- segments_in_long_muon deliberately keeps its
+    // legacy content so tagger features and the chain comparator stay put --
+    // which left MCS fitting the near half.  Dedup by graph index; an empty
+    // selection stays empty (the bridge implies a near half exists, never
+    // invent one).  IndexedSegmentSet iterates in segment-index order, so the
+    // appended points are deterministic.
+    size_t n_bridged_added = 0;
+    double len_bridged_cm = 0;
+    if (cfg.bridged_members && !bridged_segments.empty() && !muon_segments.empty()) {
+        std::set<size_t> have;
+        for (const auto& seg : muon_segments) { have.insert(seg->get_graph_index()); }
+        for (const auto& seg : bridged_segments) {
+            if (have.count(seg->get_graph_index())) continue;
+            muon_segments.push_back(seg);
+            len_bridged_cm += segment_track_length(seg) / units::cm;
+            ++n_bridged_added;
+        }
+        if (n_bridged_added) {
+            SPDLOG_LOGGER_INFO(log, "mcs: bridged members added nseg_bridged={} len_bridged={:.1f}cm",
+                               n_bridged_added, len_bridged_cm);
+        }
     }
 
     if (muon_segments.empty()) {

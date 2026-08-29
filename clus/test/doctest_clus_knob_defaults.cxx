@@ -271,6 +271,7 @@ TEST_CASE("clus knob defaults: TaggerCheckNeutrino switches are all OFF")
     REQUIRE_MESSAGE(cfg.isMember("mcs_muon_source"), "missing knob: mcs_muon_source");
     CHECK(cfg["mcs_muon_source"].asString() == "pf_muon");
     CHECK_KNOB_BOOL(cfg, "mcs_range_comparator_chain", false);                // P5, log-only
+    CHECK_KNOB_BOOL(cfg, "mcs_bridged_members", false);                       // doc 84 round 3
     // doc pr/48: back-to-back track fixes.  All three ship OFF; the teb_*
     // operating point is inert until two_end_break opens the pass.
     CHECK_KNOB_BOOL(cfg, "two_end_break", false);

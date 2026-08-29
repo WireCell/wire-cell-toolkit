@@ -178,6 +178,7 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_mcs.cathode_xcut_cm    = get(config, "mcs_cathode_xcut",       m_mcs.cathode_xcut_cm); // cm
     m_mcs.max_points         = get(config, "mcs_max_points",         m_mcs.max_points);
     m_mcs.range_comparator_chain = get(config, "mcs_range_comparator_chain", m_mcs.range_comparator_chain);  // doc 84 round 1 (P5), log-only
+    m_mcs.bridged_members        = get(config, "mcs_bridged_members",        m_mcs.bridged_members);  // doc 84 round 3: fit the cathode-bridge member set too (T_kine + log only)
     m_cathode_wide_kink_angle    = get(config, "cathode_wide_kink_angle",    m_cathode_wide_kink_angle);    // deg
     m_cathode_wide_kink_skirt    = get(config, "cathode_wide_kink_skirt",    m_cathode_wide_kink_skirt);    // cm
     m_cathode_wide_kink_baseline = get(config, "cathode_wide_kink_baseline", m_cathode_wide_kink_baseline); // cm
@@ -757,6 +758,7 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["mcs_cathode_xcut"]       = m_mcs.cathode_xcut_cm;     // cm; 0 = off (SBND: 5)
     cfg["mcs_max_points"]         = m_mcs.max_points;
     cfg["mcs_range_comparator_chain"] = m_mcs.range_comparator_chain;  // doc 84 round 1 (P5), log-only
+    cfg["mcs_bridged_members"]        = m_mcs.bridged_members;         // doc 84 round 3: fit the cathode-bridge member set too
     cfg["cathode_wide_kink_angle"]    = m_cathode_wide_kink_angle;    // deg; 0 = legacy (no wide-baseline cathode accept)
     cfg["cathode_wide_kink_skirt"]    = m_cathode_wide_kink_skirt;    // cm excluded around the crossing
     cfg["cathode_wide_kink_baseline"] = m_cathode_wide_kink_baseline; // cm PCA baseline per arm beyond the skirt
@@ -1186,12 +1188,18 @@ inline double cb_angle_deg(const WireCell::Vector& a, const WireCell::Vector& b)
     return std::acos(c) * 180.0 / 3.141592653589793;
 }
 
+// bridged_out (doc 84 round 3, may be null): collects the muon-typed
+// segments this pass absorbs -- the merged partner's members in the
+// shower branch, the retyped BFS chain in the bare branch -- so the MCS
+// driver can optionally fit the full track (mcs_bridged_members).  Filling
+// it moves no output bytes by itself.
 int long_muon_cathode_bridge_pass(PatternAlgorithms& pattern_algos, Graph& graph,
     VertexPtr main_vertex, IndexedShowerSet& showers,
     ShowerSegmentMap& map_segment_in_shower,
     const Clus::ParticleDataSet::pointer& particle_data,
     const IRecombinationModel::pointer& recomb_model,
-    const CathodeBridgeCfg& cfg, std::shared_ptr<spdlog::logger> log)
+    const CathodeBridgeCfg& cfg, IndexedSegmentSet* bridged_out,
+    std::shared_ptr<spdlog::logger> log)
 {
     const double min_len = 5 * units::cm;   // ignore sub-5cm fragments on either side
     const double lever = 5 * units::cm;     // tangent lever arm at an end
@@ -1298,6 +1306,16 @@ int long_muon_cathode_bridge_pass(PatternAlgorithms& pattern_algos, Graph& graph
                 keep->get_shower_id(), muon_member_length(keep) / units::cm,
                 drop->get_shower_id(), muon_member_length(drop) / units::cm,
                 best_gap / units::cm, me.p.x() / units::cm, best->p.x() / units::cm);
+            if (bridged_out) {
+                // The dropped partner's muon-typed members are the piece MCS
+                // never saw; enumerable only BEFORE add_shower folds them in.
+                for (const auto& seg : members[drop]) {
+                    if (seg->has_particle_info() &&
+                        std::abs(seg->particle_info()->pdg()) == 13) {
+                        bridged_out->insert(seg);
+                    }
+                }
+            }
             keep->add_shower(*drop);
             showers.erase(drop);
             gone.insert(drop);
@@ -1349,6 +1367,7 @@ int long_muon_cathode_bridge_pass(PatternAlgorithms& pattern_algos, Graph& graph
                 }
                 me.shower->add_segment(seg, true);
                 taken.insert(seg->get_graph_index());
+                if (bridged_out) bridged_out->insert(seg);
                 absorbed_len += segment_track_length(seg);
             }
             // When the absorbed chain reaches the main vertex the muon's true
@@ -2022,6 +2041,11 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
 
         IndexedVertexSet vertices_in_long_muon;
         IndexedSegmentSet segments_in_long_muon;
+        // doc 84 round 3: cathode-bridge absorbed members, captured by
+        // long_muon_cathode_bridge_pass and consumed only by the MCS driver
+        // under mcs_bridged_members.  Deliberately separate from
+        // segments_in_long_muon, which taggers keep reading unchanged.
+        IndexedSegmentSet bridged_in_long_muon;
         VertexPtr main_vertex = nullptr;
         ClusterVertexMap map_cluster_main_vertices;
 
@@ -2920,7 +2944,7 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
                 const int n_bridged = long_muon_cathode_bridge_pass(
                     pattern_algos, *pr_graph, final_main_vertex, showers,
                     map_segment_in_shower, particle_data(), m_recomb_model,
-                    cb_cfg, log);
+                    cb_cfg, &bridged_in_long_muon, log);
                 if (n_bridged > 0) {
                     pattern_algos.update_shower_maps(showers, map_vertex_in_shower,
                                                      map_segment_in_shower,
@@ -3175,6 +3199,7 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
         // (run_dual_chain_off_pass) does not run MCS, so its rows keep -1.
         if (m_mcs.enable && final_main_vertex) {
             PR::mcs_fill_kine(kine_info, *pr_graph, segments_in_long_muon,
+                              bridged_in_long_muon,
                               final_main_vertex, beam_gate, m_mcs,
                               particle_data(), m_recomb_model, log);
         }

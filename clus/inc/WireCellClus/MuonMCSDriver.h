@@ -40,6 +40,14 @@ namespace WireCell::Clus::PR {
                                              // sentinel with the long-muon chain's
                                              // summed-length range KE; no output
                                              // bytes move either way
+        bool bridged_members{false};   // doc 84 round 3: additionally feed the
+                                       // cathode-bridge absorbed member set
+                                       // (bridged_segments param) into the MCS
+                                       // fit, so a cathode-split muon is fit on
+                                       // its full track.  segments_in_long_muon
+                                       // and every tagger input stay untouched;
+                                       // only kine_mcs_* (T_kine) and the log
+                                       // sentinels move.
     };
 
     /// Run MCS for this bundle and fill kine's kine_mcs_* fields.  Fields are
@@ -51,8 +59,13 @@ namespace WireCell::Clus::PR {
     /// segment_cal_kine_dQdx KE for the SAME selected muon -- the round-4
     /// comparators, emitted as a log sentinel (pr/94 ROW precedent) because
     /// the T_kine schema deliberately stays at the five kine_mcs_* scalars.
+    /// bridged_segments (doc 84 round 3): the cathode-bridge absorbed member
+    /// set captured by long_muon_cathode_bridge_pass; consumed only when
+    /// cfg.bridged_members, otherwise ignored (pass an empty set when the
+    /// bridge did not run).
     void mcs_fill_kine(KineInfo& kine, Graph& graph,
                        const IndexedSegmentSet& segments_in_long_muon,
+                       const IndexedSegmentSet& bridged_segments,
                        const VertexPtr& main_vertex,
                        bool beam_gate_active,
                        const MuonMCSConfig& cfg,
