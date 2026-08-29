@@ -949,6 +949,7 @@ public:
         bool   m_shower_samevtx_track_absorb{false};                // doc pr/125; false = no pass
         double m_shower_samevtx_absorb_gap{6.0};                    // doc pr/125; cm, frag<->host cloud gap cap
         double m_shower_samevtx_absorb_max_len{50.0};               // doc pr/125; cm, fragment length cap
+        double m_shower_samevtx_absorb_min_len{5.0};                // doc pr/125; cm, fragment length floor
         bool   m_shower_satellite_absorb{false};                    // doc pr/125; false = no pass
         double m_shower_satellite_absorb_max_mev{10.0};             // doc pr/125; MeV, satellite kine cap
         double m_shower_satellite_absorb_host_mev{20.0};            // doc pr/125; MeV, host kine floor

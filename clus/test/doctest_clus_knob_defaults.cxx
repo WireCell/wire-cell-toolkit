@@ -259,6 +259,7 @@ TEST_CASE("clus knob defaults: TaggerCheckNeutrino switches are all OFF")
     CHECK_KNOB_BOOL(cfg, "shower_samevtx_track_absorb", false);               // doc pr/125; false = no pass
     CHECK_KNOB_NUM(cfg, "shower_samevtx_absorb_gap", 6.0);                    // cm; inert while pass off
     CHECK_KNOB_NUM(cfg, "shower_samevtx_absorb_max_len", 50.0);               // cm; inert while pass off
+    CHECK_KNOB_NUM(cfg, "shower_samevtx_absorb_min_len", 5.0);                // cm; inert while pass off
     CHECK_KNOB_BOOL(cfg, "shower_satellite_absorb", false);                   // doc pr/125; false = no pass
     CHECK_KNOB_NUM(cfg, "shower_satellite_absorb_max_mev", 10.0);             // MeV; inert while pass off
     CHECK_KNOB_NUM(cfg, "shower_satellite_absorb_host_mev", 20.0);            // MeV; inert while pass off

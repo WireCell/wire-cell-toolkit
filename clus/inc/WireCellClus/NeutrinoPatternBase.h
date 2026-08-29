@@ -2227,6 +2227,7 @@ namespace WireCell::Clus::PR {
         bool   m_shower_samevtx_track_absorb{false};     ///< doc pr/125; false = no pass
         double m_shower_samevtx_absorb_gap{6 * units::cm};   ///< doc pr/125; frag<->host cloud gap cap
         double m_shower_samevtx_absorb_max_len{50 * units::cm}; ///< doc pr/125; fragment length cap
+        double m_shower_samevtx_absorb_min_len{5 * units::cm};  ///< doc pr/125; fragment length floor (crumbs excluded)
         bool   m_shower_satellite_absorb{false};         ///< doc pr/125; false = no pass
         double m_shower_satellite_absorb_max_mev{10 * units::MeV};  ///< doc pr/125; satellite kine cap
         double m_shower_satellite_absorb_host_mev{20 * units::MeV}; ///< doc pr/125; host kine floor

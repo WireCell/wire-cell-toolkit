@@ -1803,6 +1803,7 @@ function(
     shower_samevtx_track_absorb = false,     // C++ default false. Key omitted when off => byte-identical.
     shower_samevtx_absorb_gap = 6,           // cm; C++ default 6. Emitted only when non-default AND pass on.
     shower_samevtx_absorb_max_len = 50,      // cm; C++ default 50. Emitted only when non-default AND pass on.
+    shower_samevtx_absorb_min_len = 5,       // cm; C++ default 5. Emitted only when non-default AND pass on.
     // doc pr/125 -- vertex-connected satellite absorb (owner 2026-08-29,
     // SBND 18255-69314: sub-10-MeV pdg-11 crumb showers whose start vertex
     // is a vertex of a bigger EM shower's own chain fold back into it).
@@ -2867,6 +2868,7 @@ function(
         [if shower_samevtx_track_absorb then 'shower_samevtx_track_absorb']: true,
         [if shower_samevtx_track_absorb && shower_samevtx_absorb_gap != 6 then 'shower_samevtx_absorb_gap']: shower_samevtx_absorb_gap,
         [if shower_samevtx_track_absorb && shower_samevtx_absorb_max_len != 50 then 'shower_samevtx_absorb_max_len']: shower_samevtx_absorb_max_len,
+        [if shower_samevtx_track_absorb && shower_samevtx_absorb_min_len != 5 then 'shower_samevtx_absorb_min_len']: shower_samevtx_absorb_min_len,
         [if shower_satellite_absorb then 'shower_satellite_absorb']: true,
         [if shower_satellite_absorb && shower_satellite_absorb_max_mev != 10 then 'shower_satellite_absorb_max_mev']: shower_satellite_absorb_max_mev,
         [if shower_satellite_absorb && shower_satellite_absorb_host_mev != 20 then 'shower_satellite_absorb_host_mev']: shower_satellite_absorb_host_mev,
