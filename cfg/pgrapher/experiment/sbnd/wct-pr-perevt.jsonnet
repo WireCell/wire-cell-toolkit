@@ -1756,7 +1756,7 @@ function(
     // when off => byte-identical pre-pr/120 config.  Runner envs
     // SBND_STEM_BACKFILL_BACK_GUARD (+_BACK_ANG) /
     // SBND_SHOWER_EX1_WALK_EM_TRACK_GUARD (+_EM_TRACK_LEN).
-    stem_backfill_back_guard = false,        // default OFF (flip in the follow-up commit)
+    stem_backfill_back_guard = true,         // SBND PRODUCTION ON 2026-08-28 (doc pr/120 r1; owner "same validation as previous rounds"; fires on exactly the 2 scanner-condemned backward absorbs: 47212 qF1 0.965->1.000, 281567 scan-note stem released; 96/98 events byte-identical, nusel 98/98 identical, 0 movers)
     stem_backfill_back_ang = null,           // deg; C++ default 110
     shower_ex1_walk_em_track_guard = false,  // shipped OFF, not selected: measured ZERO yield (doc pr/120 sec 5 -- its one target, 54332 seg 16014, is SEEDED via a kShowerTopology mis-flag in the current chain, not walk-absorbed; recognition thread)
     shower_ex1_walk_em_track_len = null,     // cm; C++ default 20
