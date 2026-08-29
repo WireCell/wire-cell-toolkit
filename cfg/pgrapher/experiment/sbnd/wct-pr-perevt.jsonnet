@@ -1880,15 +1880,14 @@ function(
     // doc 84 round 1 (P3).  The stub-bridge 'incoming < 6 cm' precondition as
     // a length [cm] (evt 66366 misses the bridge by 0.81 cm).  C++ default
     // 6.0 = the legacy literal.  Key omitted when null => byte-identical.
-    // HOLD: owner hand-scan pending (doc 84 round 1).
-    long_muon_stub_bridge_len = null,
+    long_muon_stub_bridge_len = 7.5,  // SBND PRODUCTION ON 2026-08-28 (doc 84 round 1 P3, owner-directed post Bee scan; 66366 stub 6.81 cm bridges, chain 126->301 cm, best -> range 692 MeV)
     // doc 84 round 1 (P2).  Long-MIP continuation angle relax: a candidate
     // > 50 cm passing the unchanged dQ/dx MIP test may continue the chain up
     // to long_muon_angle_relax_deg (C++ default 16.0) with the stub-bridge
     // junction veto (doc 84 sec 4.2: 25 rejections, median 15.6 deg; evt
     // 313847 at 10.99).  C++ default false.  Keys omitted when off/null =>
-    // byte-identical.  HOLD: owner hand-scan pending (doc 84 round 1).
-    long_muon_angle_relax_long = false,
+    // byte-identical.
+    long_muon_angle_relax_long = true,  // SBND PRODUCTION ON 2026-08-28 (doc 84 round 1 P2, owner-directed; latent on the 98-evt gate manifest AND the 31-evt case list -- formation-time census owns the follow-up, doc 84 R1.5)
     long_muon_angle_relax_deg = null,
     // doc pr/48 (18255-51513/56211/57903/59335/57485) -- back-to-back track
     // fixes.  two_end_break: the two-end residual-range break pass (nu
