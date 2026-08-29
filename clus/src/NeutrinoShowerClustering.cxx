@@ -6128,7 +6128,13 @@ void PatternAlgorithms::shower_clustering_with_nv(int acc_segment_id, IndexedSho
             const int conn = sat->get_start_vertex_and_type().second;
             if (conn != 2 && conn != 3) continue;
             if (sat->get_kine_charge() >= m_shower_satellite_absorb_max_mev) continue;
-            VertexPtr sv = sat->start_vertex();
+            // Attach vertex: the start SEGMENT's own first vertex -- the
+            // dump's start_vertex_id convention that the offline scan
+            // measured.  NOT sat->start_vertex(), which for conn-3 re-seeded
+            // showers is the far main vertex (the pr/124 apex lesson).
+            SegmentPtr sat_ss = sat->start_segment();
+            if (!sat_ss || !sat_ss->descriptor_valid()) continue;
+            VertexPtr sv = find_vertices(graph, sat_ss).first;
             if (!sv) continue;
             ShowerPtr host;
             for (auto& [h, vset] : sat_hosts) {
@@ -6160,7 +6166,10 @@ void PatternAlgorithms::shower_clustering_with_nv(int acc_segment_id, IndexedSho
         if (n_sat_merged) {
             for (auto& [host, vset] : sat_hosts) {
                 if (!sat_recalc.count(host.get())) continue;
-                host->update_particle_type(particle_data, recomb_model, m_mip_dqdx, main_vertex, m_shower_proton_daughter_pion, m_mip_dqdx_median, m_shower_vote_track_pid_counts, m_shower_accept_pid_guard, m_shower_pid_guard_min_len);
+                // Deliberately NO update_particle_type here: a sub-10-MeV
+                // crumb must not re-vote its host's PID (first build re-typed
+                // 37112's 84070 e->pi via the vote; kinematics-only is the
+                // minimal absorb).
                 host->calculate_kinematics(particle_data, recomb_model, m_shower_endpoint_exclude_start_vertex, m_shower_endpoint_skip_orphan_vtx);
                 host->set_kine_charge(cal_kine_charge(host, m_charge_2d_u, m_charge_2d_v, m_charge_2d_w, m_map_apa_ch_plane_wires, track_fitter, dv));
                 host->set_flag_kinematics(true);
