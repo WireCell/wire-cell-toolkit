@@ -1772,6 +1772,11 @@ function(
     // Key omitted when off => byte-identical pre-pr/121 config.  Runner env
     // SBND_SHOWER_EX1_DEDUP_REHOME.
     shower_ex1_dedup_rehome = true,          // SBND PRODUCTION ON 2026-08-28 (doc pr/121 r1; owner "consistent with previous round"; fires on exactly 1 event in 239 across both scan manifests: 348471 qF1 0.205->0.895, 12 orphaned EM segments reclaimed, leading shower 92.0->427.8 MeV; 98-set 196/196 + 141-set 281/282 byte-identical, nusel identical, 0 losses)
+    // doc pr/123 r1 -- pass4_angle over-reach, the owner's over-reach line
+    // (2026-08-28: detached-from-the-body OR track-like-beyond-it).
+    shower_pass4_prune_detached = true,      // SBND PRODUCTION ON 2026-08-28 (doc pr/123 r1; owner G=40 + re-seed disposition; 141-set marked showers: med qF1 0.887->0.935, sum q_extra 4.86e7->2.69e7 (-45%), 8 showers to 1.000; zero orphans, 0 vertices moved, nusel identical; adjudication rows Bee idx 13/14)
+    shower_pass4_prune_gap = 40,             // cm; C++ default 40. Emitted only when non-default AND prune on => byte-identical.
+    shower_pass4_track_guard_len = 50,       // cm; SBND PRODUCTION ON 2026-08-28 (doc pr/123 r1; owner len>50; exactly 3 declines in 239 events: 171572 125cm mu qF1 0.096->1.000, 393505 108cm mu 0.273->1.000, 105074 83cm; zero labeled-good collateral)
     // doc pr/99 round 3 -- C1 kine-charge cell-ownership dedup + C1b
     // prototype cloud-rebuild parity (168596 Enu double count) + A5
     // hadronic-shower re-type (315167/395148 labels).  C++ defaults
@@ -2807,6 +2812,10 @@ function(
         // doc pr/121 round 1.  C++ default false.
         // Key omitted when off => byte-identical pre-pr/121 config.
         [if shower_ex1_dedup_rehome then 'shower_ex1_dedup_rehome']: true,
+        // doc pr/123 r1: C++ defaults false / 40 cm / 0. Keys omitted when off => byte-identical.
+        [if shower_pass4_prune_detached then 'shower_pass4_prune_detached']: true,
+        [if shower_pass4_prune_detached && shower_pass4_prune_gap != 40 then 'shower_pass4_prune_gap']: shower_pass4_prune_gap,
+        [if shower_pass4_track_guard_len != 0 then 'shower_pass4_track_guard_len']: shower_pass4_track_guard_len,
         [if (if kine_charge_dedup == null then false else kine_charge_dedup) then 'kine_charge_dedup']: true,
         [if (if kine_charge_rebuild == null then false else kine_charge_rebuild) then 'kine_charge_rebuild']: true,
         [if (if kine_charge_track_ctx == null then false else kine_charge_track_ctx) then 'kine_charge_track_ctx']: true,
