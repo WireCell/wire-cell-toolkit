@@ -1795,12 +1795,12 @@ function(
     // doc pr/124 front C -- pass3_cone track-pdg decline (post-flip census:
     // 9 surviving labeled-OUT cone absorbs all track-pdg, IN track members
     // top out at 14.1 cm).  C++ default 0 = off.
-    shower_pass3_cone_guard_len = 0,         // cm; C++ default 0 = off. Key omitted when 0 => byte-identical.  NOT flipped (doc pr/124 C): 94392 0.221->1.000 and 52693 0.766->1.000, BUT 415278 reshuffles tracks between its two labeled showers (0.959->0.884, 0.976->0.910) -- owner trade-off, morning decision table in doc sec C.3.
+    shower_pass3_cone_guard_len = 15,        // cm; SBND PRODUCTION ON 2026-08-29 (doc pr/125; resolves doc pr/124 sec C.3 as option 1 -- owner: the four fake electrons "should not be ided as electron, but track object", and on the dQ/dx-non-separator measurement, "Flip anyway").  94392 305->45 MeV e + released mu, 52693 183->153 + mu, 77328 180->38 + p, 173819 302->10 + p; adjudicated cost 415278 (0.959->0.884 / 0.976->0.910 reshuffle between its two labeled showers).  C++ default 0 = off.
     // doc pr/125 -- same-vertex track-typed fragment absorb (owner
     // 2026-08-29, SBND 18259-37112: the pdg-2212 half of a gamma conversion
     // re-merges into the 549 MeV gamma at their shared non-main vertex).
     // C++ defaults false / 6 cm / 50 cm.
-    shower_samevtx_track_absorb = false,     // C++ default false. Key omitted when off => byte-identical.
+    shower_samevtx_track_absorb = true,      // SBND PRODUCTION ON 2026-08-29 (doc pr/125; owner: 37112's gamma 549 + proton 469 "should be one EM shower... they are connected" -- "one shower, everything").  Fires on exactly 2 fragments across both manifests, both in 37112 (proton stem gap 0.00 + prune-re-seeded comp gap 3.81, shared non-main vertex 84104) => one 797.3 MeV shower.  0 movers, owned net +0, nusel identical.  C++ default false.
     shower_samevtx_absorb_gap = 6,           // cm; C++ default 6. Emitted only when non-default AND pass on.
     shower_samevtx_absorb_max_len = 50,      // cm; C++ default 50. Emitted only when non-default AND pass on.
     shower_samevtx_absorb_min_len = 5,       // cm; C++ default 5. Emitted only when non-default AND pass on.
