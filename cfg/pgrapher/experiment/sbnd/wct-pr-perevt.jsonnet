@@ -1812,8 +1812,8 @@ function(
     // opposite drift sides, gap, double angle-continuity), value knobs in
     // cm/deg.  C++ defaults false/0.0/6.0/20.0/25.0.  Keys omitted when
     // off/null => byte-identical.
-    long_muon_members_geometry = false,       // HOLD: owner hand-scan pending (doc 84 round 2)
-    long_muon_cathode_bridge = false,         // HOLD: owner hand-scan pending (doc 84 round 2)
+    long_muon_members_geometry = true,   // SBND PRODUCTION ON 2026-08-28 (doc 84 round 2, owner-directed post Bee scan: "other than [77978] the rest looks good"; 313847 547.5->602.2, 281595 750.1->808.5 MeV)
+    long_muon_cathode_bridge = true,     // SBND PRODUCTION ON 2026-08-28 (doc 84 round 2, owner-directed; ships WITH the round-2.1 main-vertex BFS guard + re-seat fix for 77978/177536)
     long_muon_cathode_bridge_x = null,        // cm; C++ default 0.0 (SBND seam)
     long_muon_cathode_bridge_xcut = null,     // cm; C++ default 6.0
     long_muon_cathode_bridge_gap = null,      // cm; C++ default 20.0
