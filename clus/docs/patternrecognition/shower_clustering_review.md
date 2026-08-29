@@ -22,6 +22,38 @@ The toolkit equivalents are in:
 
 ---
 
+## π⁰: superseded by the pr/126 audit
+
+Sections 11 and 12 below (`id_pi0_with_vertex`, `id_pi0_without_vertex`) predate
+a large refactor and their line numbers are stale by ~2500 lines.  The π⁰ paths —
+both finders **and** the tagger-side consumers (`pi0_identification`,
+`pi0_identification_sp`, the SSM π⁰ momentum and KDAR veto, the T_tagger/T_kine
+`pio_*` branches) — were re-audited end to end against the prototype in
+
+> `wcp-porting-img/sbnd/sbnd_xin/docs/pr/126_pi0-audit-and-em-charge-scale.md`
+
+Read that first.  Its findings that change this file:
+
+* **B.2, B.3 and B.5 below are all FIXED** in the current source
+  (`NeutrinoShowerClustering.cxx:5592`, `:5464-5470`, `:5145-5153` respectively).
+  The `Status` column's "Fix" means *fix required*, and for these three it no
+  longer is.
+* The mass/angle direction split pr/114 §6.1 measured (78 of 282 pairs differing
+  by >5 %) is **inherited from WCP**, not a port error — the prototype computes
+  the mass from `local_dirs` and the stored `pio_kine.angle` from
+  `cal_dir_3vector(…,15 cm)` in the same function.
+* `NeutrinoTaggerPi0.h` being empty is **correct**: the prototype's
+  `NeutrinoID_pio_tagger.h` is a 2-byte stub.  This closes the open question at
+  `clus/docs/porting/neutrino_id_function_map.md:368`.
+* Two prototype defects the toolkit does **not** reproduce: `kine_pio_vtx_dis`
+  left inconsistent with the rest of its own block, and `fill_pi0_reco_tree`
+  writing the invariant mass as a kinetic energy.
+* One port gap that matters for every EM energy: `cal_corr_factor`
+  (`NeutrinoEnergyReco.cxx:14-34`) is a stub returning 1.0 where the prototype
+  applies a dead-region correction.
+
+---
+
 ## Implementation Status
 
 | ID | Issue | Status | Location |
