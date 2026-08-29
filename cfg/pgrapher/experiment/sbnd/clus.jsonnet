@@ -964,6 +964,12 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, e
               pf_orphan_near_cross_cluster=false,
               pf_orphan_near_gap_cm=null,
               pf_orphan_near_min_len_cm=null,
+              // Continuation terms (doc pr/128 §3.1): the touch must be
+              // END-to-END and run STRAIGHT ON.  Proximity alone admitted two
+              // cosmics on SBND 18255-72786 (+1151 MeV on a 701 MeV
+              // candidate).  null => C++ 10cm / 30deg.
+              pf_orphan_near_end_tol_cm=null,
+              pf_orphan_near_kink_deg=null,
               // pf_conn4_near_candidate (doc pr/128): stop skipping a conn-4
               // shower whose closest approach to the main cluster is within
               // pf_conn4_near_gap_cm (null => C++ 20cm) -- the candidate's own
@@ -2510,6 +2516,8 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, e
                         [if pf_orphan_near_cross_cluster then 'pf_orphan_near_cross_cluster']: true,
                         [if pf_orphan_near_gap_cm != null then 'pf_orphan_near_gap']: pf_orphan_near_gap_cm * wc.cm,
                         [if pf_orphan_near_min_len_cm != null then 'pf_orphan_near_min_len']: pf_orphan_near_min_len_cm * wc.cm,
+                        [if pf_orphan_near_end_tol_cm != null then 'pf_orphan_near_end_tol']: pf_orphan_near_end_tol_cm * wc.cm,
+                        [if pf_orphan_near_kink_deg != null then 'pf_orphan_near_kink_deg']: pf_orphan_near_kink_deg,
                         [if pf_conn4_near_candidate then 'pf_conn4_near_candidate']: true,
                         [if pf_conn4_near_gap_cm != null then 'pf_conn4_near_gap']: pf_conn4_near_gap_cm * wc.cm,
                         [if pf_track_owns_loose_vertex then 'pf_track_owns_loose_vertex']: true,

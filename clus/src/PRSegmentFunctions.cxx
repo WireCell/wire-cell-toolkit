@@ -1727,6 +1727,73 @@ namespace WireCell::Clus::PR {
         return segment_is_straight_long_track(seg);
     }
 
+    // doc sbnd_xin/docs/pr/128 -- see the header comment.
+    ContinuationGeometry segment_continuation_geometry(
+        SegmentPtr seg, const std::vector<SegmentPtr>& refs, double dir_window)
+    {
+        ContinuationGeometry out;
+        if (!seg || seg->fits().empty()) return out;
+        const auto& cf = seg->fits();
+
+        // Inward unit direction at fit index `i` of chain `pts`: from that
+        // point toward the point ~dir_window further into the body, on the
+        // side that has room.  Falls back to the whole chain when short.
+        auto inward_dir = [&](const std::vector<Fit>& pts, size_t i) -> WireCell::Vector {
+            const size_t n = pts.size();
+            if (n < 2) return WireCell::Vector(0, 0, 0);
+            const bool near_front = (i <= n - 1 - i);
+            size_t j = i;
+            double walked = 0.0;
+            while (walked < dir_window) {
+                const size_t k = near_front ? j + 1 : (j == 0 ? 0 : j - 1);
+                if (k == j || k >= n) break;
+                walked += (pts[k].point - pts[j].point).magnitude();
+                j = k;
+            }
+            if (j == i) j = near_front ? n - 1 : 0;
+            WireCell::Vector v = pts[j].point - pts[i].point;
+            const double m = v.magnitude();
+            return m > 0 ? WireCell::Vector(v.x() / m, v.y() / m, v.z() / m)
+                         : WireCell::Vector(0, 0, 0);
+        };
+        auto end_dis = [](const std::vector<Fit>& pts, size_t i) -> double {
+            double front = 0.0, back = 0.0;
+            for (size_t k = 1; k <= i && k < pts.size(); ++k)
+                front += (pts[k].point - pts[k - 1].point).magnitude();
+            for (size_t k = i + 1; k < pts.size(); ++k)
+                back += (pts[k].point - pts[k - 1].point).magnitude();
+            return std::min(front, back);
+        };
+
+        size_t best_ci = 0, best_ri = 0;
+        for (const auto& r : refs) {
+            if (!r || r->fits().empty()) continue;
+            const auto& rf = r->fits();
+            for (size_t ci = 0; ci < cf.size(); ++ci) {
+                for (size_t ri = 0; ri < rf.size(); ++ri) {
+                    const double d = (cf[ci].point - rf[ri].point).magnitude();
+                    if (out.gap >= 0 && d >= out.gap) continue;
+                    out.gap = d; out.ref = r; best_ci = ci; best_ri = ri;
+                }
+            }
+        }
+        if (out.gap < 0 || !out.ref) return out;
+
+        const auto& rf = out.ref->fits();
+        out.cand_end_dis = end_dis(cf, best_ci);
+        out.ref_end_dis  = end_dis(rf, best_ri);
+        const WireCell::Vector u = inward_dir(rf, best_ri);   // into the reference
+        const WireCell::Vector v = inward_dir(cf, best_ci);   // into the candidate
+        if (u.magnitude() > 0 && v.magnitude() > 0) {
+            const double c = std::max(-1.0, std::min(1.0, u.dot(v)));
+            // A straight continuation has the two INWARD directions
+            // anti-parallel (each points back into its own body), i.e. 180
+            // deg apart.  Report the KINK from that ideal so 0 = collinear.
+            out.angle_deg = 180.0 - std::acos(c) / M_PI * 180.0;
+        }
+        return out;
+    }
+
     // doc sbnd_xin/docs/pr/40 round 2 F5 -- see the header comment.
     bool segment_has_proton_daughter(Graph& graph, SegmentPtr seg, VertexPtr main_vertex, double MIP_dQdx) {
         static const bool dbg = std::getenv("WCT_PROTON_DAUGHTER_DEBUG") != nullptr;

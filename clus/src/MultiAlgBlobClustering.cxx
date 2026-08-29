@@ -392,6 +392,8 @@ void MultiAlgBlobClustering::configure(const WireCell::Configuration& cfg)
             pfc.pf_orphan_near_cross_cluster = get<bool>(pf, "pf_orphan_near_cross_cluster", false);
             pfc.pf_orphan_near_gap = get<double>(pf, "pf_orphan_near_gap", pfc.pf_orphan_near_gap);
             pfc.pf_orphan_near_min_len = get<double>(pf, "pf_orphan_near_min_len", pfc.pf_orphan_near_min_len);
+            pfc.pf_orphan_near_end_tol = get<double>(pf, "pf_orphan_near_end_tol", pfc.pf_orphan_near_end_tol);
+            pfc.pf_orphan_near_kink_deg = get<double>(pf, "pf_orphan_near_kink_deg", pfc.pf_orphan_near_kink_deg);
             pfc.pf_conn4_near_candidate = get<bool>(pf, "pf_conn4_near_candidate", false);
             pfc.pf_conn4_near_gap = get<double>(pf, "pf_conn4_near_gap", pfc.pf_conn4_near_gap);
             pfc.pf_track_owns_loose_vertex = get<bool>(pf, "pf_track_owns_loose_vertex", false);
@@ -2591,13 +2593,16 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
     // vertex, so it hangs under a pseudo-neutron carrier, nu -> n -> track.
     // Knob off => this block never runs => byte-identical.
     if (cfg.pf_orphan_near_cross_cluster || pfnear_dbg) {
-        std::vector<WireCell::Point> ref_pts;
+        // Reference segments (not just their points): the continuation test
+        // below needs the touched segment's own geometry, not a point soup.
+        std::vector<PR::SegmentPtr> ref_segs;
         for (const auto& seg : used_segs) {
             if (conn4_skip_segs.count(seg)) continue;
-            for (const auto& f : seg->fits()) ref_pts.push_back(f.point);
+            if (seg->fits().empty()) continue;
+            ref_segs.push_back(seg);
         }
         std::vector<std::pair<PR::SegmentPtr, double>> near_cands;
-        if (!ref_pts.empty()) {
+        if (!ref_segs.empty()) {
             for (auto edesc : mir(boost::edges(*pr_graph))) {
                 auto seg = (*pr_graph)[edesc].segment;
                 if (!seg || used_segs.count(seg) || conn4_skip_segs.count(seg)) continue;
@@ -2605,18 +2610,18 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
                 if (seg->fits().empty()) continue;
                 if (same_cluster(seg)) continue;   // the pools above own this case
                 if (!PR::segment_near_candidate_track(seg, cfg.pf_orphan_near_min_len)) continue;
-                double gap = -1.0;
-                for (const auto& f : seg->fits()) {
-                    for (const auto& rp : ref_pts) {
-                        const double d = (f.point - rp).magnitude();
-                        if (gap < 0 || d < gap) gap = d;
-                    }
-                }
+                const auto g = PR::segment_continuation_geometry(seg, ref_segs);
+                const bool pass =
+                    g.gap >= 0 && g.gap <= cfg.pf_orphan_near_gap &&
+                    g.cand_end_dis <= cfg.pf_orphan_near_end_tol &&
+                    g.ref_end_dis  <= cfg.pf_orphan_near_end_tol &&
+                    g.angle_deg    <= cfg.pf_orphan_near_kink_deg;
                 if (pfnear_dbg) {
                     const auto* cl = seg->cluster();
                     std::fprintf(stderr,
                         "PFNEAR track seg=%d cluster=%s pdg=%d score=%.3f len_cm=%.1f "
-                        "ke_mev=%.2f gap_cm=%.2f verdict=%s\n",
+                        "ke_mev=%.2f gap_cm=%.2f cand_end_cm=%.2f ref_end_cm=%.2f "
+                        "kink_deg=%.1f d_mainvtx_cm=%.1f verdict=%s\n",
                         seg_display_id(seg),
                         cl ? std::to_string(cl->get_cluster_id()).c_str() : "?",
                         seg->has_particle_info() && seg->particle_info()
@@ -2625,12 +2630,14 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
                         PR::segment_track_length(seg) / units::cm,
                         seg->has_particle_info() && seg->particle_info()
                             ? seg->particle_info()->kinetic_energy() / units::MeV : 0.0,
-                        gap / units::cm,
-                        (gap >= 0 && gap <= cfg.pf_orphan_near_gap) ? "EMIT" : "too_far");
+                        g.gap / units::cm, g.cand_end_dis / units::cm,
+                        g.ref_end_dis / units::cm, g.angle_deg,
+                        PR::segment_get_closest_point(seg, get_vtx_pt(main_vertex)).first / units::cm,
+                        pass ? "EMIT" : "reject");
                 }
                 if (!cfg.pf_orphan_near_cross_cluster) continue;
-                if (gap < 0 || gap > cfg.pf_orphan_near_gap) continue;
-                near_cands.emplace_back(seg, gap);
+                if (!pass) continue;
+                near_cands.emplace_back(seg, g.gap);
             }
         }
         std::sort(near_cands.begin(), near_cands.end(),

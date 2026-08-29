@@ -354,6 +354,13 @@ namespace WireCell::Clus {
             bool pf_orphan_near_cross_cluster{false};
             double pf_orphan_near_gap{5.0 * units::cm};      // read only when the bool is on
             double pf_orphan_near_min_len{30.0 * units::cm}; // read only when the bool is on
+            // Continuation terms (doc pr/128 §3.1).  Proximity alone admits
+            // cosmics that brush the far end of a displayed track: SBND
+            // 18255-72786 gained +1151 MeV on a 701 MeV candidate that way.
+            // A continuation joins END to END and runs STRAIGHT ON, the same
+            // discriminator doc pr/127's sccc fix uses.
+            double pf_orphan_near_end_tol{10.0 * units::cm};
+            double pf_orphan_near_kink_deg{30.0};
             // pf_conn4_near_candidate: stop skipping a conn-4 shower whose
             // material is the candidate's own -- i.e. whose closest approach
             // to the main cluster is within pf_conn4_near_gap.  conn-4 means

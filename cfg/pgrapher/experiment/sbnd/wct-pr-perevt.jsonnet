@@ -997,6 +997,8 @@ function(
     pf_orphan_near_cross_cluster = false,
     pf_orphan_near_gap_cm = null,      // null => C++ default 5cm
     pf_orphan_near_min_len_cm = null,  // null => C++ default 30cm
+    pf_orphan_near_end_tol_cm = null,  // null => C++ default 10cm (end-to-end touch)
+    pf_orphan_near_kink_deg = null,    // null => C++ default 30 deg (straight continuation)
     pf_conn4_near_candidate = false,
     pf_conn4_near_gap_cm = null,       // null => C++ default 20cm
     pf_track_owns_loose_vertex = true,
@@ -1888,6 +1890,8 @@ function(
     kine_count_near_cross_cluster = false,
     kine_near_gap_cm = null,           // null => C++ default 5cm
     kine_near_min_len_cm = null,       // null => C++ default 30cm
+    kine_near_end_tol_cm = null,       // null => C++ default 10cm
+    kine_near_kink_deg = null,         // null => C++ default 30 deg
     kine_count_conn4_near = false,
     kine_conn4_near_gap_cm = null,     // null => C++ default 20cm
     straight_cont_cross_cluster = true,
@@ -2939,6 +2943,8 @@ function(
         [if kine_count_near_cross_cluster then 'kine_count_near_cross_cluster']: true,
         [if kine_near_gap_cm != null then 'kine_near_gap']: kine_near_gap_cm,
         [if kine_near_min_len_cm != null then 'kine_near_min_len']: kine_near_min_len_cm,
+        [if kine_near_end_tol_cm != null then 'kine_near_end_tol']: kine_near_end_tol_cm,
+        [if kine_near_kink_deg != null then 'kine_near_kink_deg']: kine_near_kink_deg,
         [if kine_count_conn4_near then 'kine_count_conn4_near']: true,
         [if kine_conn4_near_gap_cm != null then 'kine_conn4_near_gap']: kine_conn4_near_gap_cm,
         [if straight_cont_cross_cluster then 'straight_cont_cross_cluster']: true,
@@ -3123,6 +3129,8 @@ function(
                              pf_orphan_near_cross_cluster=pf_orphan_near_cross_cluster,
                              pf_orphan_near_gap_cm=pf_orphan_near_gap_cm,
                              pf_orphan_near_min_len_cm=pf_orphan_near_min_len_cm,
+                             pf_orphan_near_end_tol_cm=pf_orphan_near_end_tol_cm,
+                             pf_orphan_near_kink_deg=pf_orphan_near_kink_deg,
                              pf_conn4_near_candidate=pf_conn4_near_candidate,
                              pf_conn4_near_gap_cm=pf_conn4_near_gap_cm,
                              pf_track_owns_loose_vertex=pf_track_owns_loose_vertex,

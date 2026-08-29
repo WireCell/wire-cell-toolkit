@@ -959,6 +959,8 @@ public:
         bool   m_kine_count_near_cross_cluster{false};              // doc pr/128 (137238 class generalised)
         double m_kine_near_gap{5};                                  // cm; scaled at copy
         double m_kine_near_min_len{30};                             // cm; scaled at copy
+        double m_kine_near_end_tol{10};                             // cm; scaled at copy
+        double m_kine_near_kink_deg{30};                            // deg
         bool   m_kine_count_conn4_near{false};                      // doc pr/128 (105074 / 179048)
         double m_kine_conn4_near_gap{20};                           // cm; scaled at copy
         bool m_straight_cont_cross_cluster{false};                  // doc pr/93 r4 (137238)

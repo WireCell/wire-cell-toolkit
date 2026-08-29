@@ -558,6 +558,45 @@ namespace WireCell::Clus::PR {
     /// Proximity and cluster membership stay CALLER-side conjuncts.
     bool segment_near_candidate_track(SegmentPtr seg, double min_len);
 
+    /// doc sbnd_xin/docs/pr/128 -- geometry of "is this segment a
+    /// CONTINUATION of something the candidate already contains?", shared by
+    /// the PF and kine near-cross-cluster pools.
+    ///
+    /// Proximity alone is not a usable predicate and the measurement says so:
+    /// SBND 18255-72786's cluster 9 (148 cm extent, 35 cm off the neutrino
+    /// vertex) and cluster 45 (102 cm, 77 cm off) both read gap 0.00 cm
+    /// against the candidate, because they brush the FAR END of the
+    /// candidate's own 94 cm muon.  Admitting them on gap alone added
+    /// +1151 MeV to a 701 MeV candidate -- over-clustered activity counted as
+    /// neutrino energy, the outcome the owner ruled out on 2026-08-29.
+    ///
+    /// The discriminator is the one doc pr/127's sccc fix already uses for
+    /// this exact question: a continuation joins END to END and runs
+    /// STRAIGHT ON.  Returned per candidate, against its nearest reference
+    /// segment:
+    ///   gap           min distance from the candidate's fit points to any
+    ///                 reference segment's fit points
+    ///   cand_end_dis  distance from the candidate's touching point to the
+    ///                 NEARER of the candidate's own two ends (0 => the
+    ///                 candidate starts where it touches; large => the
+    ///                 reference brushes the candidate's middle, a crossing)
+    ///   ref_end_dis   the same on the reference segment
+    ///   angle_deg     KINK: 0 means the two bodies run collinearly away from
+    ///                 the touch point (a continuation); 180 means they double
+    ///                 back on each other
+    /// `ref` is the reference segment the geometry was measured against.
+    /// An empty `refs`, or a candidate with no fits, yields gap = -1.
+    struct ContinuationGeometry {
+        double gap{-1.0};
+        double cand_end_dis{1e9};
+        double ref_end_dis{1e9};
+        double angle_deg{180.0};
+        SegmentPtr ref{nullptr};
+    };
+    ContinuationGeometry segment_continuation_geometry(
+        SegmentPtr seg, const std::vector<SegmentPtr>& refs,
+        double dir_window = 15 * units::cm);
+
     /// doc sbnd_xin/docs/pr/74 round 2 P1 -- veto for examine_direction's
     /// flag_shower_in cascade (the |pdg|==13/pdg==0 electron relabel).
     /// True iff `seg` is BOTH long (track length > max_len) AND MIP-like

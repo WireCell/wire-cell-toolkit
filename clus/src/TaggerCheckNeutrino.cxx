@@ -708,6 +708,8 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_kine_count_near_cross_cluster             = get(config, "kine_count_near_cross_cluster",             m_kine_count_near_cross_cluster);          // doc pr/128
     m_kine_near_gap                             = get(config, "kine_near_gap",                             m_kine_near_gap);                          // doc pr/128
     m_kine_near_min_len                         = get(config, "kine_near_min_len",                         m_kine_near_min_len);                      // doc pr/128
+    m_kine_near_end_tol                         = get(config, "kine_near_end_tol",                         m_kine_near_end_tol);                      // doc pr/128
+    m_kine_near_kink_deg                        = get(config, "kine_near_kink_deg",                        m_kine_near_kink_deg);                     // doc pr/128
     m_kine_count_conn4_near                     = get(config, "kine_count_conn4_near",                     m_kine_count_conn4_near);                  // doc pr/128
     m_kine_conn4_near_gap                       = get(config, "kine_conn4_near_gap",                       m_kine_conn4_near_gap);                    // doc pr/128
     m_straight_cont_cross_cluster               = get(config, "straight_cont_cross_cluster",               m_straight_cont_cross_cluster);
@@ -1168,6 +1170,8 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["kine_count_near_cross_cluster"]             = m_kine_count_near_cross_cluster;             // doc pr/128; false = near cross-cluster tracks uncounted, byte-identical
     cfg["kine_near_gap"]                             = m_kine_near_gap;                             // cm; only read when kine_count_near_cross_cluster
     cfg["kine_near_min_len"]                         = m_kine_near_min_len;                         // cm; only read when kine_count_near_cross_cluster
+    cfg["kine_near_end_tol"]                         = m_kine_near_end_tol;                         // cm; only read when kine_count_near_cross_cluster
+    cfg["kine_near_kink_deg"]                        = m_kine_near_kink_deg;                        // deg; only read when kine_count_near_cross_cluster
     cfg["kine_count_conn4_near"]                     = m_kine_count_conn4_near;                     // doc pr/128; false = every conn-4 shower uncounted, byte-identical
     cfg["kine_conn4_near_gap"]                       = m_kine_conn4_near_gap;                       // cm; only read when kine_count_conn4_near
     cfg["straight_cont_cross_cluster"]               = m_straight_cont_cross_cluster;               // doc pr/93 r4; false = legacy (no cross-cluster continuation demotion)
@@ -2595,6 +2599,8 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
         pattern_algos.m_kine_count_near_cross_cluster             = m_kine_count_near_cross_cluster;             // doc pr/128
         pattern_algos.m_kine_near_gap                             = m_kine_near_gap * units::cm;                 // doc pr/128
         pattern_algos.m_kine_near_min_len                         = m_kine_near_min_len * units::cm;             // doc pr/128
+        pattern_algos.m_kine_near_end_tol                         = m_kine_near_end_tol * units::cm;             // doc pr/128
+        pattern_algos.m_kine_near_kink_deg                        = m_kine_near_kink_deg;                        // doc pr/128
         pattern_algos.m_kine_count_conn4_near                     = m_kine_count_conn4_near;                     // doc pr/128
         pattern_algos.m_kine_conn4_near_gap                       = m_kine_conn4_near_gap * units::cm;           // doc pr/128
         pattern_algos.m_straight_cont_cross_cluster               = m_straight_cont_cross_cluster;               // doc pr/93 r4

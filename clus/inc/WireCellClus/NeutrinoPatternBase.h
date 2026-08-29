@@ -2242,6 +2242,8 @@ namespace WireCell::Clus::PR {
         bool   m_kine_count_near_cross_cluster{false};   ///< doc pr/128; false = near cross-cluster tracks uncounted
         double m_kine_near_gap{5*units::cm};
         double m_kine_near_min_len{30*units::cm};
+        double m_kine_near_end_tol{10*units::cm};
+        double m_kine_near_kink_deg{30.0};
         bool   m_kine_count_conn4_near{false};           ///< doc pr/128; false = every conn-4 shower uncounted
         double m_kine_conn4_near_gap{20*units::cm};
         // kine_count_orphan_tracks (315167): fill_kine_tree counterpart of

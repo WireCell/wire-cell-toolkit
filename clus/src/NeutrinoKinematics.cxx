@@ -678,7 +678,7 @@ KineInfo PatternAlgorithms::fill_kine_tree(
         // shower's segments (conn-4 ones only when kept) plus every segment
         // the traversal claimed.  Using raw used_segments would let a
         // candidate qualify by touching an uncounted conn-4 cosmic.
-        std::vector<WireCell::Point> ref_pts;
+        std::vector<SegmentPtr> ref_segs;
         {
             IndexedSegmentSet counted;
             for (const ShowerPtr& shower : showers) {
@@ -690,11 +690,11 @@ KineInfo PatternAlgorithms::fill_kine_tree(
             }
             for (const auto& seg : used_segments) counted.insert(seg);
             for (const auto& seg : counted)
-                for (const auto& f : seg->fits()) ref_pts.push_back(f.point);
+                if (seg && !seg->fits().empty()) ref_segs.push_back(seg);
         }
         std::vector<std::pair<size_t, SegmentPtr>> near_cands;
         std::map<SegmentPtr, double, SegmentIndexCmp> near_gap;
-        if (!ref_pts.empty()) {
+        if (!ref_segs.empty()) {
             for (auto edesc : mir(boost::edges(graph))) {
                 SegmentPtr seg = graph[edesc].segment;
                 if (!seg || !seg->descriptor_valid()) continue;
@@ -704,15 +704,15 @@ KineInfo PatternAlgorithms::fill_kine_tree(
                 if (!main_cl || !cl) continue;
                 if (cl->get_cluster_id() == main_cl->get_cluster_id()) continue;  // pr/93 r4 owns this
                 if (!segment_near_candidate_track(seg, m_kine_near_min_len)) continue;
-                double gap = -1.0;
-                for (const auto& f : seg->fits()) {
-                    for (const auto& rp : ref_pts) {
-                        const double d = (f.point - rp).magnitude();
-                        if (gap < 0 || d < gap) gap = d;
-                    }
-                }
-                if (gap < 0 || gap > m_kine_near_gap) continue;
-                near_gap[seg] = gap;
+                // Continuation, not mere proximity -- see
+                // segment_continuation_geometry's header (SBND 18255-72786:
+                // gap alone admitted two cosmics and +1151 MeV).
+                const auto g = segment_continuation_geometry(seg, ref_segs);
+                if (g.gap < 0 || g.gap > m_kine_near_gap) continue;
+                if (g.cand_end_dis > m_kine_near_end_tol) continue;
+                if (g.ref_end_dis  > m_kine_near_end_tol) continue;
+                if (g.angle_deg    > m_kine_near_kink_deg) continue;
+                near_gap[seg] = g.gap;
                 near_cands.emplace_back(graph[edesc].index, seg);
             }
         }
