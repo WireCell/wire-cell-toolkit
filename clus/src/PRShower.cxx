@@ -699,7 +699,7 @@ namespace WireCell::Clus::PR {
         return 1;
     }
 
-    void Shower::complete_structure_with_start_segment(IndexedSegmentSet& used_segments, const std::string& cloud_name_fit, const std::string& cloud_name_associate, bool absorb_track_guard, bool walk_visited_parity) {
+    void Shower::complete_structure_with_start_segment(IndexedSegmentSet& used_segments, const std::string& cloud_name_fit, const std::string& cloud_name_associate, bool absorb_track_guard, bool walk_visited_parity, double em_straight_min_len) {
         if (!m_start_segment || !m_start_segment->descriptor_valid()) return;
 
         // doc sbnd_xin/docs/pr/40 round 6 F12: the flood-fill below has no
@@ -719,11 +719,25 @@ namespace WireCell::Clus::PR {
         // NOT consulted (a stale flag must not defeat the exclusion).
         // false = legacy = byte-identical.
         const bool apply_guard = absorb_track_guard && this->get_particle_type() != 13;
+        // doc sbnd_xin/docs/pr/120: the pdg==11 early-out below is the hole
+        // evt54332 fell through -- a 32.3 cm straight=1 track mis-PID'd as
+        // e- was walk-absorbed here (the scan note: "overclustering a
+        // track").  When em_straight_min_len > 0 (only the examine_shower_1
+        // call site passes it, knob-gated), an electron-PID'd segment LONGER
+        // than that floor faces the same straight-long-track exclusion as
+        // any other PID.  Measured over the 98-event manifest: exactly one
+        // walk-add at that site matches (evt54332 seg 16014); the two other
+        // >=20 cm straight-long e- walk-adds are at in_main_cluster, whose
+        // call site does not pass the floor.  0 = legacy = byte-identical.
         auto guard_excludes = [&](const SegmentPtr& seg) -> bool {
             if (!apply_guard) return false;
             if (!seg->has_particle_info() || !seg->particle_info()) return false;
             const int pdg = seg->particle_info()->pdg();
-            if (pdg == 0 || std::abs(pdg) == 11) return false;
+            if (pdg == 0) return false;
+            if (std::abs(pdg) == 11) {
+                if (!(em_straight_min_len > 0 &&
+                      segment_track_length(seg) > em_straight_min_len)) return false;
+            }
             return segment_is_straight_long_track(seg);
         };
         if (absorb_dbg()) {

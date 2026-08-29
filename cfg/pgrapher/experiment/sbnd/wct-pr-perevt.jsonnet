@@ -1748,6 +1748,18 @@ function(
     shower_merge_relax_cont_dmax = null,     // cm; C++ default 120
     shower_merge_relax_cont_t1_gap = null,   // cm; C++ default 1
     shower_merge_relax_cont_t1_fold = null,  // deg; C++ default 30
+    // doc pr/120 round 1 -- backward-stem + em-straight-track admission
+    // guards, firing sets MEASURED on the 98-event emscan manifest (doc
+    // pr/120 sec 3: stem guard fires on exactly the two scanner-condemned
+    // backward absorbs 47212/281567; ex1 guard on exactly 54332 seg 16014).
+    // C++ defaults false / 110deg / false / 20cm = legacy.  Key omitted
+    // when off => byte-identical pre-pr/120 config.  Runner envs
+    // SBND_STEM_BACKFILL_BACK_GUARD (+_BACK_ANG) /
+    // SBND_SHOWER_EX1_WALK_EM_TRACK_GUARD (+_EM_TRACK_LEN).
+    stem_backfill_back_guard = false,        // default OFF (flip in the follow-up commit)
+    stem_backfill_back_ang = null,           // deg; C++ default 110
+    shower_ex1_walk_em_track_guard = false,  // shipped OFF, not selected: measured ZERO yield (doc pr/120 sec 5 -- its one target, 54332 seg 16014, is SEEDED via a kShowerTopology mis-flag in the current chain, not walk-absorbed; recognition thread)
+    shower_ex1_walk_em_track_len = null,     // cm; C++ default 20
     // doc pr/99 round 3 -- C1 kine-charge cell-ownership dedup + C1b
     // prototype cloud-rebuild parity (168596 Enu double count) + A5
     // hadronic-shower re-type (315167/395148 labels).  C++ defaults
@@ -2739,6 +2751,12 @@ function(
         [if shower_merge_relax_cont_dmax != null then 'shower_merge_relax_cont_dmax']: shower_merge_relax_cont_dmax,
         [if shower_merge_relax_cont_t1_gap != null then 'shower_merge_relax_cont_t1_gap']: shower_merge_relax_cont_t1_gap,
         [if shower_merge_relax_cont_t1_fold != null then 'shower_merge_relax_cont_t1_fold']: shower_merge_relax_cont_t1_fold,
+        // doc pr/120 round 1.  C++ defaults false/110deg/false/20cm.
+        // Key omitted when off => byte-identical pre-pr/120 config.
+        [if stem_backfill_back_guard then 'stem_backfill_back_guard']: true,
+        [if stem_backfill_back_ang != null then 'stem_backfill_back_ang']: stem_backfill_back_ang,
+        [if shower_ex1_walk_em_track_guard then 'shower_ex1_walk_em_track_guard']: true,
+        [if shower_ex1_walk_em_track_len != null then 'shower_ex1_walk_em_track_len']: shower_ex1_walk_em_track_len,
         [if (if kine_charge_dedup == null then false else kine_charge_dedup) then 'kine_charge_dedup']: true,
         [if (if kine_charge_rebuild == null then false else kine_charge_rebuild) then 'kine_charge_rebuild']: true,
         [if (if kine_charge_track_ctx == null then false else kine_charge_track_ctx) then 'kine_charge_track_ctx']: true,

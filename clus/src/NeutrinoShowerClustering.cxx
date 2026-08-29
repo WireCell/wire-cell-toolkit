@@ -453,7 +453,63 @@ void PatternAlgorithms::stem_backfill(Graph& graph, VertexPtr main_vertex,
                 "pr74 stem_backfill: shower(start gidx={} conn={}) chain gidx={} len {:.1f}cm dqdx {:.2f}x -> {}",
                 start_seg->get_graph_index(), conn_type, stem->get_graph_index(),
                 len/units::cm, ratio, ok ? "absorb" : "stop");
+            // doc sbnd_xin/docs/pr/120 -- byte-neutral admission census.  The
+            // hand-scan OUT marks admitted here sit at 146-148 deg to the
+            // FINAL shower axis; this prints the scan-equivalent angle (shower
+            // dir15/dir60 at the CURRENT pre-re-seat start vs start->closest
+            // stem point) for EVERY chain candidate, accepted or not, so the
+            // census can measure whether admission-time geometry already
+            // separates.  Env-gated stderr only: no effect on emitted bytes.
+            if (pr93_absorb_dbg()) {
+                const WireCell::Point sp0 = shower->get_start_point();
+                const WireCell::Vector s15 = shower_cal_dir_3vector(*shower, sp0, 15 * units::cm);
+                const WireCell::Vector s60 = shower_cal_dir_3vector(*shower, sp0, 60 * units::cm);
+                auto [sdist, scp] = segment_get_closest_point(stem, sp0);
+                const WireCell::Vector sv(scp.x() - sp0.x(), scp.y() - sp0.y(), scp.z() - sp0.z());
+                auto p120_ang = [](const WireCell::Vector& ax, const WireCell::Vector& v) {
+                    if (ax.magnitude() < 0.001 || v.magnitude() < 0.001) return -1.0;
+                    return std::acos(std::clamp(ax.dot(v) / (ax.magnitude() * v.magnitude()), -1.0, 1.0)) / M_PI * 180.0;
+                };
+                std::fprintf(stderr,
+                             "SHOWER_ABSORB P120_STEM shower_start_seg=%d conn=%d seg=%d pdg=%d "
+                             "len_cm=%.2f ratio=%.2f ok=%d ang15=%.2f ang60=%.2f dist_cm=%.2f\n",
+                             pr91_seg_display_id(start_seg), conn_type, pr91_seg_display_id(stem),
+                             stem->has_particle_info() && stem->particle_info()
+                                 ? stem->particle_info()->pdg() : 0,
+                             len / units::cm, ratio, (int) ok,
+                             p120_ang(s15, sv), p120_ang(s60, sv), sdist / units::cm);
+            }
             if (!ok) break;
+            // doc sbnd_xin/docs/pr/120 -- backward-stem guard.  Measured over
+            // the 98-event emscan manifest: stem_backfill accepted 5 absorbs;
+            // the 3 with a degenerate scan-equivalent angle (conn-1 showers
+            // whose start already sits on the chain, dist=0) are trunk
+            // extensions in "good"-note events, while BOTH measurable-angle
+            // absorbs develop backward (~150 deg: the shower points away from
+            // the chain) and both are scanner-condemned over-clustering
+            // (evt47212 seg 2103 OUT-marked; evt281567 seg 95128 named in the
+            // scan note).  Decline the absorb -- and stop the chain -- when
+            // the angle is measurable and beyond the cut.  C++ default false
+            // => byte-identical.
+            if (m_stem_backfill_back_guard) {
+                const WireCell::Point gsp = shower->get_start_point();
+                const WireCell::Vector g15 = shower_cal_dir_3vector(*shower, gsp, 15 * units::cm);
+                auto [gdist, gcp] = segment_get_closest_point(stem, gsp);
+                const WireCell::Vector gv(gcp.x() - gsp.x(), gcp.y() - gsp.y(), gcp.z() - gsp.z());
+                double gang = -1.0;
+                if (g15.magnitude() > 0.001 && gv.magnitude() > 0.001) {
+                    gang = std::acos(std::clamp(g15.dot(gv) / (g15.magnitude() * gv.magnitude()), -1.0, 1.0)) / M_PI * 180.0;
+                }
+                (void) gdist;
+                if (gang >= 0 && gang > m_stem_backfill_back_ang) {
+                    SPDLOG_LOGGER_DEBUG(s_log,
+                        "pr120 stem_backfill_back_guard: decline shower(start gidx={} conn={}) "
+                        "chain gidx={} ang15={:.1f} > {:.1f}",
+                        start_seg->get_graph_index(), conn_type, stem->get_graph_index(),
+                        gang, m_stem_backfill_back_ang);
+                    break;
+                }
+            }
             pr93_probe_absorb_direct("stem_backfill", shower, stem);
             shower->add_segment(stem, true);
             map_segment_in_shower[stem] = shower;   // claim immediately; full rebuild below
@@ -1289,6 +1345,7 @@ void PatternAlgorithms::shower_clustering_with_nv_from_main_cluster(Graph& graph
 
         double min_dis = 1e9;
         ShowerPtr min_shower = nullptr;
+        const ShowerDirInfo* min_info = nullptr;   // doc pr/120: census fields for the winner
 
         for (auto& info : shower_dir_info) {
             const auto& dir = info.dir;
@@ -1317,8 +1374,39 @@ void PatternAlgorithms::shower_clustering_with_nv_from_main_cluster(Graph& graph
                 if (dis < min_dis) {
                     min_dis = dis;
                     min_shower = info.shower;
+                    min_info = &info;
                 }
             }
+        }
+
+        // doc sbnd_xin/docs/pr/120 -- byte-neutral admission census for the
+        // winning (segment, shower) pair: the site's own angle/dist (recomputed
+        // from min_info, identical arithmetic to the loop) plus the
+        // scan-equivalent angle (shower_cal_dir_3vector at the same start, 15
+        // and 60 cm) so the census can measure how the two frames diverge --
+        // the OUT marks admitted here sit at 113-134 deg to the FINAL axis yet
+        // passed the <=30 deg cone above.  Env-gated stderr only.
+        if (min_shower && min_info && pr93_absorb_dbg()) {
+            auto [pdist, pcp] = segment_get_closest_point(seg1, min_info->start_point);
+            const WireCell::Vector pv(pcp.x() - min_info->start_point.x(),
+                                      pcp.y() - min_info->start_point.y(),
+                                      pcp.z() - min_info->start_point.z());
+            auto p120_ang = [](const WireCell::Vector& ax, const WireCell::Vector& v) {
+                if (ax.magnitude() < 0.001 || v.magnitude() < 0.001) return -1.0;
+                return std::acos(std::clamp(ax.dot(v) / (ax.magnitude() * v.magnitude()), -1.0, 1.0)) / M_PI * 180.0;
+            };
+            const WireCell::Vector c15 = shower_cal_dir_3vector(*min_shower, min_info->start_point, 15 * units::cm);
+            const WireCell::Vector c60 = shower_cal_dir_3vector(*min_shower, min_info->start_point, 60 * units::cm);
+            std::fprintf(stderr,
+                         "SHOWER_ABSORB P120_P3CONE seg=%d pdg=%d len_cm=%.2f shower_start_seg=%d "
+                         "site_ang=%.2f dist_cm=%.2f ang15=%.2f ang60=%.2f ao=%.1f\n",
+                         pr91_seg_display_id(seg1),
+                         seg1->has_particle_info() && seg1->particle_info()
+                             ? seg1->particle_info()->pdg() : 0,
+                         segment_track_length(seg1) / units::cm,
+                         pr91_seg_display_id(min_shower->start_segment()),
+                         p120_ang(min_info->dir, pv), pdist / units::cm,
+                         p120_ang(c15, pv), p120_ang(c60, pv), min_info->angle_offset);
         }
 
         if (min_shower) {
@@ -3716,7 +3804,7 @@ void PatternAlgorithms::examine_shower_1(Graph& graph, VertexPtr main_vertex, In
                 shower1->set_start_vertex(main_vertex, 1);
                 shower1->set_start_segment(sg);
                 pr93_probe_absorb_site("examine_shower_1_tmp", shower1, m_shower_absorb_track_guard);
-                shower1->complete_structure_with_start_segment(nv_bridge_seed(used_segments), "fit", "associate_points", m_shower_absorb_track_guard, m_shower_walk_visited_parity);  // doc pr/40 round 9 B2: shield pre-seed, no-op when bridge off
+                shower1->complete_structure_with_start_segment(nv_bridge_seed(used_segments), "fit", "associate_points", m_shower_absorb_track_guard, m_shower_walk_visited_parity, m_shower_ex1_walk_em_track_guard ? m_shower_ex1_walk_em_track_len : 0);  // doc pr/40 round 9 B2: shield pre-seed, no-op when bridge off; doc pr/120: em-straight floor, 0 when knob off => byte-identical
                 pr84_probe_shower(shower1, "examine_shower_1_tmp");
 
 

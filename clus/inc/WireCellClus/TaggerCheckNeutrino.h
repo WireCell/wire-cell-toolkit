@@ -915,6 +915,12 @@ public:
         double m_shower_merge_relax_cont_dmax{120.0};               // cm; scaled at copy; inert while off
         double m_shower_merge_relax_cont_t1_gap{1.0};               // cm; scaled at copy; inert while off
         double m_shower_merge_relax_cont_t1_fold{30.0};             // deg, no conversion; inert while off
+        // doc sbnd_xin/docs/pr/120 round 1 -- rationale comments in
+        // NeutrinoPatternBase.h (m_stem_backfill_back_guard block).
+        bool   m_stem_backfill_back_guard{false};                   // doc pr/120 r1 (47212/281567 backward stems)
+        double m_stem_backfill_back_ang{110.0};                     // deg, no conversion; inert while off
+        bool   m_shower_ex1_walk_em_track_guard{false};             // doc pr/120 r1 (54332 mis-PID'd track)
+        double m_shower_ex1_walk_em_track_len{20.0};                // cm; scaled at copy; inert while off
         bool m_straight_cont_cross_cluster{false};                  // doc pr/93 r4 (137238)
         bool m_sccc_bridge_body{false};                             // doc pr/93 r4 second rung
         double m_sccc_max_gap{5};                                   // cm; base tier

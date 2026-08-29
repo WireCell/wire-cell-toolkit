@@ -228,6 +228,11 @@ TEST_CASE("clus knob defaults: TaggerCheckNeutrino switches are all OFF")
     CHECK_KNOB_NUM(cfg, "shower_merge_relax_cont_dmax", 120.0);               // cm, T2 junction reach; inert while off
     CHECK_KNOB_NUM(cfg, "shower_merge_relax_cont_t1_gap", 1.0);               // cm, T1 touching gap; inert while off
     CHECK_KNOB_NUM(cfg, "shower_merge_relax_cont_t1_fold", 30.0);             // deg, T1 fold; inert while off
+    // doc pr/120 round 1 -- backward-stem + em-straight-track admission guards.
+    CHECK_KNOB_BOOL(cfg, "stem_backfill_back_guard", false);                  // pr/120 r1; false = legacy stem_backfill
+    CHECK_KNOB_NUM(cfg, "stem_backfill_back_ang", 110.0);                     // deg, backward ceiling; inert while off
+    CHECK_KNOB_BOOL(cfg, "shower_ex1_walk_em_track_guard", false);            // pr/120 r1; false = legacy ex1 walk
+    CHECK_KNOB_NUM(cfg, "shower_ex1_walk_em_track_len", 20.0);                // cm, e- straight-long floor; inert while off
     CHECK_KNOB_BOOL(cfg, "straight_cont_cross_cluster", false);               // r4 (137238)
     CHECK_KNOB_BOOL(cfg, "sccc_bridge_body", false);                          // r4 second rung
     CHECK_KNOB_NUM(cfg, "sccc_max_gap", 5.0);                                 // cm; base tier

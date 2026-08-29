@@ -2139,6 +2139,33 @@ namespace WireCell::Clus::PR {
         double m_shower_merge_relax_cont_dmax{120*units::cm}; ///< T2: junction distance ceiling from absorber start; inert while off
         double m_shower_merge_relax_cont_t1_gap{1*units::cm}; ///< T1: touching gap_exact ceiling, internal units; inert while off
         double m_shower_merge_relax_cont_t1_fold{30.0};       ///< T1: local-pivot fold ceiling, DEGREES; inert while off
+        // doc sbnd_xin/docs/pr/120 -- two admission-time guards, measured
+        // over the 98-event emscan manifest (census
+        // scripts/pr120_absorb_census.py):
+        // (1) stem_backfill backward-stem guard: of the 5 accepted stem
+        //     absorbs in the sample, the 3 with a degenerate scan-equivalent
+        //     angle (conn-1, start on the chain) are legitimate trunk
+        //     extensions; BOTH measurable-angle absorbs develop backward
+        //     (~150 deg away from the chain) and both are scanner-condemned
+        //     over-clustering (evt47212 seg 2103 OUT-marked at 147.9 deg;
+        //     evt281567 seg 95128 named in the scan note).  Decline when the
+        //     shower dir15-at-start vs start->closest-stem-point angle is
+        //     measurable and > m_stem_backfill_back_ang.
+        // (2) examine_shower_1 walk em-track guard: the flood-fill's
+        //     absorb_track_guard exempts pdg==11 from the straight-long-
+        //     track exclusion; evt54332's mis-PID'd 32.3 cm straight track
+        //     (seg 16014, scan note "overclustering a track") slipped
+        //     through.  When on, the examine_shower_1 call site passes
+        //     m_shower_ex1_walk_em_track_len to guard_excludes so long
+        //     straight e--PID'd segments are excluded too.  Measured firing
+        //     set at 20 cm: exactly evt54332 seg 16014 (the two other
+        //     >=20 cm straight-long e- walk-adds are at in_main_cluster,
+        //     which does not pass the floor).
+        // false (defaults) => byte-identical; numerics inert while off.
+        bool   m_stem_backfill_back_guard{false};        ///< doc pr/120 r1; false = legacy stem_backfill
+        double m_stem_backfill_back_ang{110.0};          ///< backward-angle ceiling, DEGREES; inert while off
+        bool   m_shower_ex1_walk_em_track_guard{false};  ///< doc pr/120 r1; false = legacy examine_shower_1 walk
+        double m_shower_ex1_walk_em_track_len{20*units::cm}; ///< e- straight-long floor, internal units; inert while off
         // kine_count_orphan_tracks (315167): fill_kine_tree counterpart of
         // the PF-side pf_orphan_confident_track knob (BeePFConfig).  A
         // confident straight-long main-cluster track that is graph-
