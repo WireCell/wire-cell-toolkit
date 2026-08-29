@@ -687,6 +687,10 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_shower_ex1_dedup_rehome                   = get(config, "shower_ex1_dedup_rehome",                   m_shower_ex1_dedup_rehome);
     m_shower_pass4_prune_detached               = get(config, "shower_pass4_prune_detached",               m_shower_pass4_prune_detached);            // doc pr/123 r1
     m_shower_pass4_prune_gap                    = get(config, "shower_pass4_prune_gap",                    m_shower_pass4_prune_gap);                 // doc pr/123 r1, cm
+    m_shower_pass4_prune_gap2                   = get(config, "shower_pass4_prune_gap2",                   m_shower_pass4_prune_gap2);                // doc pr/124 A, cm
+    m_shower_pass4_prune2_ang                   = get(config, "shower_pass4_prune2_ang",                   m_shower_pass4_prune2_ang);                // doc pr/124 A, deg
+    m_shower_pass4_prune2_mdqdx                 = get(config, "shower_pass4_prune2_mdqdx",                 m_shower_pass4_prune2_mdqdx);              // doc pr/124 A, x MIP
+    m_shower_pass3_cone_guard_len               = get(config, "shower_pass3_cone_guard_len",               m_shower_pass3_cone_guard_len);            // doc pr/124 C, cm
     m_shower_pass4_track_guard_len              = get(config, "shower_pass4_track_guard_len",              m_shower_pass4_track_guard_len);           // doc pr/123 r1, cm
     m_kine_count_guard_freed                    = get(config, "kine_count_guard_freed",                    m_kine_count_guard_freed);                 // doc pr/123 r2
     m_straight_cont_cross_cluster               = get(config, "straight_cont_cross_cluster",               m_straight_cont_cross_cluster);
@@ -1126,6 +1130,10 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["shower_ex1_dedup_rehome"]                   = m_shower_ex1_dedup_rehome;                   // doc pr/121 r1; false = legacy dedup drop, byte-identical
     cfg["shower_pass4_prune_detached"]               = m_shower_pass4_prune_detached;               // doc pr/123 r1; false = no prune pass, byte-identical
     cfg["shower_pass4_prune_gap"]                    = m_shower_pass4_prune_gap;                    // doc pr/123 r1; cm, inert while prune off
+    cfg["shower_pass4_prune_gap2"]                   = m_shower_pass4_prune_gap2;                   // doc pr/124 A; cm, 0 = no tier-2 band prune
+    cfg["shower_pass4_prune2_ang"]                   = m_shower_pass4_prune2_ang;                   // doc pr/124 A; deg, inert while gap2 = 0
+    cfg["shower_pass4_prune2_mdqdx"]                 = m_shower_pass4_prune2_mdqdx;                 // doc pr/124 A; x MIP, inert while gap2 = 0
+    cfg["shower_pass3_cone_guard_len"]               = m_shower_pass3_cone_guard_len;               // doc pr/124 C; cm, 0 = no pass3 decline
     cfg["shower_pass4_track_guard_len"]              = m_shower_pass4_track_guard_len;              // doc pr/123 r1; cm, 0 = no guard, byte-identical
     cfg["kine_count_guard_freed"]                    = m_kine_count_guard_freed;                    // doc pr/123 r2; false = guard-freed tracks uncounted, byte-identical
     cfg["straight_cont_cross_cluster"]               = m_straight_cont_cross_cluster;               // doc pr/93 r4; false = legacy (no cross-cluster continuation demotion)
@@ -2443,6 +2451,10 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
         pattern_algos.m_shower_ex1_dedup_rehome                   = m_shower_ex1_dedup_rehome;                   // doc pr/121 r1
         pattern_algos.m_shower_pass4_prune_detached               = m_shower_pass4_prune_detached;               // doc pr/123 r1
         pattern_algos.m_shower_pass4_prune_gap                    = m_shower_pass4_prune_gap * units::cm;        // doc pr/123 r1, cm -> internal
+        pattern_algos.m_shower_pass4_prune_gap2                   = m_shower_pass4_prune_gap2 * units::cm;       // doc pr/124 A, cm -> internal
+        pattern_algos.m_shower_pass4_prune2_ang                   = m_shower_pass4_prune2_ang;                   // doc pr/124 A, deg
+        pattern_algos.m_shower_pass4_prune2_mdqdx                 = m_shower_pass4_prune2_mdqdx;                 // doc pr/124 A, x MIP
+        pattern_algos.m_shower_pass3_cone_guard_len               = m_shower_pass3_cone_guard_len * units::cm;   // doc pr/124 C, cm -> internal
         pattern_algos.m_shower_pass4_track_guard_len              = m_shower_pass4_track_guard_len * units::cm;  // doc pr/123 r1, cm -> internal
         pattern_algos.m_kine_count_guard_freed                    = m_kine_count_guard_freed;                    // doc pr/123 r2
         pattern_algos.m_straight_cont_cross_cluster               = m_straight_cont_cross_cluster;               // doc pr/93 r4

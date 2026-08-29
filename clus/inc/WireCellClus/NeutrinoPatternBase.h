@@ -2216,6 +2216,10 @@ namespace WireCell::Clus::PR {
         // false / 0 (defaults) => no pass / no test => byte-identical.
         bool   m_shower_pass4_prune_detached{false};     ///< doc pr/123 r1; false = no prune pass
         double m_shower_pass4_prune_gap{40 * units::cm}; ///< doc pr/123 r1; component linkage gap
+        double m_shower_pass4_prune_gap2{0};             ///< doc pr/124 A; 0 = no tier-2 band prune
+        double m_shower_pass4_prune2_ang{40.0};          ///< doc pr/124 A; deg off kept-core centroid
+        double m_shower_pass4_prune2_mdqdx{2.5};         ///< doc pr/124 A; x m_mip_dqdx_median
+        double m_shower_pass3_cone_guard_len{0};         ///< doc pr/124 C; 0 = no pass3 track-pdg decline
         double m_shower_pass4_track_guard_len{0};        ///< doc pr/123 r1; 0 = no length guard
         // doc pr/123 round 2: kine twin of pf_orphan_guard_freed -- count a
         // guard-freed (kPass4GuardFreed) track that neither the BFS nor any

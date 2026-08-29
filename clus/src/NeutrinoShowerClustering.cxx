@@ -1528,11 +1528,42 @@ void PatternAlgorithms::shower_clustering_with_nv_from_main_cluster(Graph& graph
                 std::abs(seg1->particle_info()->pdg()) != 11 &&
                 segment_track_length(seg1) > m_shower_pid_guard_min_len &&
                 segment_is_straight_long_track(seg1);
+            // doc sbnd_xin/docs/pr/124 front C (shower_pass3_cone_guard_len):
+            // the post-flip census over both manifests measured the 9
+            // surviving labeled-OUT cone absorbs as ALL track-pdg
+            // (13/211/2212: 52693 34cm mu at 3.8deg/114cm, 94392 29.8+46.8cm
+            // mu, 175896 5.6+17.6cm p, ...), while labeled-IN track-pdg
+            // members top out at 14.1cm (76346).  Decline the cone absorb
+            // for a track-pdg segment longer than the knob; the pass4 guard
+            // (50cm) does not cover this earlier site.  The declined seg is
+            // flagged kPass4GuardFreed so the (SBND-ON) PF/kine orphan
+            // passes claim it if nothing else does (the pr/123 r2 lesson).
+            // 0 = off = legacy.
+            bool p3_track_guard = false;
+            if (m_shower_pass3_cone_guard_len > 0 &&
+                segment_track_length(seg1) > m_shower_pass3_cone_guard_len &&
+                seg1->has_particle_info() && seg1->particle_info()) {
+                const int p3_pdg = std::abs(seg1->particle_info()->pdg());
+                p3_track_guard = (p3_pdg == 13 || p3_pdg == 211 || p3_pdg == 2212);
+            }
             if (cone_guard_excludes) {
                 SPDLOG_LOGGER_DEBUG(s_log,
                     "pr93 cone_absorb_guard: decline absorb seg={} pdg={} len={:.1f}cm",
                     pr91_seg_display_id(seg1), seg1->particle_info()->pdg(),
                     segment_track_length(seg1)/units::cm);
+            }
+            else if (p3_track_guard) {
+                seg1->set_flags(SegmentFlags::kPass4GuardFreed);
+                if (pr93_absorb_dbg()) {
+                    std::fprintf(stderr,
+                        "SHOWER_ABSORB PASS3_CONE_GUARD seg=%d pdg=%d len_cm=%.1f declined=1\n",
+                        pr91_seg_display_id(seg1), seg1->particle_info()->pdg(),
+                        segment_track_length(seg1) / units::cm);
+                }
+                SPDLOG_LOGGER_DEBUG(s_log,
+                    "pr124 pass3_cone_guard: decline seg={} pdg={} len={:.1f}cm",
+                    pr91_seg_display_id(seg1), seg1->particle_info()->pdg(),
+                    segment_track_length(seg1) / units::cm);
             }
             else {
                 pr93_probe_absorb_direct("pass3_cone", min_shower, seg1);
@@ -6429,6 +6460,206 @@ void PatternAlgorithms::shower_clustering_with_nv(int acc_segment_id, IndexedSho
                                         graph, track_fitter, dv, particle_data, recomb_model);
             SPDLOG_LOGGER_DEBUG(s_log,
                 "pr123 pass4_prune: {} detached component(s) re-seeded; {} shower(s) now",
+                n_comp_pruned, showers.size());
+        }
+    }
+
+    // doc sbnd_xin/docs/pr/124 front A (shower_pass4_prune_gap2): the 25-40
+    // cm gap band.  The pr/123 prune's G=40 was deliberately conservative;
+    // the offline component scan (pr124_gapband_scan.py, both label sets,
+    // seg-level join) measured the band at 15 BAD / 2 COL components and a
+    // ZERO-collateral qualifier pair on the FINAL body re-split at gap2:
+    // a sub-component not holding the start segment is over-reach when its
+    // charge centroid sits > prune2_ang degrees off the kept core (seen from
+    // the start vertex) OR its pooled median dQ/dx exceeds prune2_mdqdx MIP
+    // (heavily-ionizing hadronic blob, e.g. 406125's q_frac-0.949 proton at
+    // 3.6x median-MIP).  Thresholds are in m_mip_dqdx_median multiples; the
+    // scan's plateau-normalized 2.0 converts to 2.5 here (54657.7/43000).
+    // Machinery forked from the tier-1 pass above (house fork-by-duplication;
+    // tier 1 stays byte-identical).  Disposition identical: detach + re-seed
+    // (conn 3/4).  Operating point measured with tier 1 ON at 40.  C++
+    // default 0 => no pass => byte-identical.
+    if (m_shower_pass4_prune_gap2 > 0) {
+        std::vector<ShowerPtr> prune_order(showers.begin(), showers.end());
+        std::sort(prune_order.begin(), prune_order.end(), [](const ShowerPtr& a, const ShowerPtr& b) {
+            auto* sa = a->start_segment().get();
+            auto* sb = b->start_segment().get();
+            if (!sa || !sb) return sa < sb;
+            int cid_a = sa->cluster() ? sa->cluster()->get_cluster_id() : -1;
+            int cid_b = sb->cluster() ? sb->cluster()->get_cluster_id() : -1;
+            if (cid_a != cid_b) return cid_a < cid_b;
+            return sa->id() < sb->id();
+        });
+        int n_comp_pruned = 0;
+        std::vector<ShowerPtr> reseeded;
+        for (auto& shower : prune_order) {
+            SegmentPtr ss = shower->start_segment();
+            if (!ss || !ss->descriptor_valid()) continue;
+            if (std::abs(shower->get_particle_type()) == 13) continue;  // long-muon pseudo-shower
+            std::vector<SegmentPtr> mem;
+            {
+                std::unordered_set<size_t> seen;
+                for (auto edesc : ordered_edges(*shower, graph)) {
+                    SegmentPtr sg = graph[edesc].segment;
+                    if (!sg || !sg->descriptor_valid()) continue;
+                    if (seen.insert(graph[sg->get_descriptor()].index).second) mem.push_back(sg);
+                }
+            }
+            if (mem.size() < 2) continue;
+            const size_t nmem = mem.size();
+            size_t start_idx = nmem;
+            for (size_t i = 0; i < nmem; ++i) if (mem[i] == ss) { start_idx = i; break; }
+            if (start_idx == nmem) continue;
+            auto pair_dis_fn = [&](const SegmentPtr& a, const SegmentPtr& b) -> double {
+                double best = -1.0;
+                for (const auto& f : a->fits()) {
+                    if (!f.valid()) continue;
+                    const double d = segment_get_closest_point(b, f.point).first;
+                    if (d >= 0 && (best < 0 || d < best)) best = d;
+                }
+                return best;
+            };
+            std::vector<std::vector<double>> dmat(nmem, std::vector<double>(nmem, -1.0));
+            for (size_t i = 0; i < nmem; ++i)
+                for (size_t k = i + 1; k < nmem; ++k) {
+                    double d = pair_dis_fn(mem[i], mem[k]);
+                    if (d < 0) d = pair_dis_fn(mem[k], mem[i]);
+                    dmat[i][k] = dmat[k][i] = d;
+                }
+            std::vector<size_t> parent(nmem);
+            for (size_t i = 0; i < nmem; ++i) parent[i] = i;
+            std::function<size_t(size_t)> find = [&](size_t x) {
+                while (parent[x] != x) { parent[x] = parent[parent[x]]; x = parent[x]; }
+                return x;
+            };
+            for (size_t i = 0; i < nmem; ++i)
+                for (size_t k = i + 1; k < nmem; ++k)
+                    if (dmat[i][k] >= 0 && dmat[i][k] < m_shower_pass4_prune_gap2) {
+                        size_t pi_ = find(i), pk = find(k);
+                        if (pi_ != pk) parent[pi_] = pk;
+                    }
+            for (size_t i = 0; i < nmem; ++i) {
+                bool any = false;
+                for (size_t k = 0; k < nmem; ++k) if (k != i && dmat[i][k] >= 0) { any = true; break; }
+                if (!any) { size_t pi_ = find(i), pk = find(start_idx); if (pi_ != pk) parent[pi_] = pk; }
+            }
+            const size_t keep_root = find(start_idx);
+            std::map<size_t, std::vector<size_t>> comps;
+            for (size_t i = 0; i < nmem; ++i) if (find(i) != keep_root) comps[find(i)].push_back(i);
+            if (comps.empty()) continue;
+            std::vector<std::vector<size_t>> comp_list;
+            for (auto& [root_, idxs] : comps) comp_list.push_back(idxs);
+            std::sort(comp_list.begin(), comp_list.end(),
+                      [](const std::vector<size_t>& a, const std::vector<size_t>& b) { return a.front() < b.front(); });
+            const WireCell::Point sv_pt = shower->start_vertex()
+                ? (shower->start_vertex()->fit().valid() ? shower->start_vertex()->fit().point
+                                                         : shower->start_vertex()->wcpt().point)
+                : WireCell::Point(0, 0, 0);
+            // Angle apex: the start SEGMENT's own vertex (what the dump
+            // writes as start_vertex_id and what the offline qualifier scan
+            // measured) -- NOT the shower start vertex, which for conn-3/4
+            // re-seeded showers is the far main vertex and compresses the
+            // angle (168432: 59 deg local vs 24 deg from main).
+            WireCell::Point apex_pt = sv_pt;
+            {
+                auto [p3sv, p3ev] = find_vertices(graph, ss);
+                if (p3sv) apex_pt = p3sv->fit().valid() ? p3sv->fit().point : p3sv->wcpt().point;
+            }
+            // Charge centroid of a member-index set from valid fit points.
+            auto centroid_fn = [&](const std::vector<size_t>& idxs, bool from_keep) -> std::pair<WireCell::Point, double> {
+                WireCell::Point acc(0, 0, 0);
+                double qsum = 0;
+                for (size_t i = 0; i < nmem; ++i) {
+                    const bool in_set = from_keep ? (find(i) == keep_root)
+                                                  : (std::find(idxs.begin(), idxs.end(), i) != idxs.end());
+                    if (!in_set) continue;
+                    for (const auto& f : mem[i]->fits()) {
+                        if (!f.valid()) continue;
+                        const double q = std::abs(f.dQ);
+                        acc += f.point * q;
+                        qsum += q;
+                    }
+                }
+                if (qsum > 0) acc = acc / qsum;
+                return {acc, qsum};
+            };
+            const auto [kcen, kq] = centroid_fn({}, true);
+            for (const auto& comp : comp_list) {
+                const auto [ccen, cq] = centroid_fn(comp, false);
+                double ang_deg = -1.0;
+                if (kq > 0 && cq > 0) {
+                    const WireCell::Vector vk = kcen - apex_pt;
+                    const WireCell::Vector vc = ccen - apex_pt;
+                    if (vk.magnitude() > 0.1 * units::cm && vc.magnitude() > 0.1 * units::cm) {
+                        double c = vk.dot(vc) / (vk.magnitude() * vc.magnitude());
+                        c = std::max(-1.0, std::min(1.0, c));
+                        ang_deg = std::acos(c) / M_PI * 180.0;
+                    }
+                }
+                double med_ratio = -1.0;
+                if (m_mip_dqdx_median > 0) {
+                    std::vector<double> dqdx;
+                    for (size_t i : comp)
+                        for (const auto& f : mem[i]->fits()) {
+                            if (!f.valid() || f.dx <= 0) continue;
+                            dqdx.push_back(std::abs(f.dQ) / f.dx);
+                        }
+                    if (!dqdx.empty()) {
+                        std::sort(dqdx.begin(), dqdx.end());
+                        med_ratio = dqdx[dqdx.size() / 2] / m_mip_dqdx_median;
+                    }
+                }
+                const bool over = (ang_deg >= 0 && ang_deg > m_shower_pass4_prune2_ang) ||
+                                  (med_ratio >= 0 && med_ratio > m_shower_pass4_prune2_mdqdx);
+                if (pr93_absorb_dbg()) {
+                    std::fprintf(stderr,
+                        "SHOWER_ABSORB PASS4_PRUNE2 shower=%d comp_first=%d comp_nseg=%zu "
+                        "ang_deg=%.1f med_mip=%.2f prune=%d\n",
+                        pr91_seg_display_id(ss), pr91_seg_display_id(mem[comp.front()]),
+                        comp.size(), ang_deg, med_ratio, (int)over);
+                }
+                if (!over) continue;
+                std::vector<SegmentPtr> comp_segs;
+                for (size_t i : comp) comp_segs.push_back(mem[i]);
+                const int removed = shower->detach_member_set(comp_segs);
+                if (!removed) {
+                    SPDLOG_LOGGER_DEBUG(s_log,
+                        "pr124 pass4_prune2: refuse shower_id={} comp_nseg={}",
+                        shower->get_shower_id(), comp_segs.size());
+                    continue;
+                }
+                size_t root_i = comp.front();
+                double root_d = -1.0;
+                for (size_t i : comp) {
+                    double d_keep = -1.0;
+                    for (size_t k = 0; k < nmem; ++k) {
+                        if (find(k) != keep_root) continue;
+                        if (dmat[i][k] >= 0 && (d_keep < 0 || dmat[i][k] < d_keep)) d_keep = dmat[i][k];
+                    }
+                    if (d_keep >= 0 && (root_d < 0 || d_keep < root_d)) { root_d = d_keep; root_i = i; }
+                }
+                SegmentPtr root_sg = mem[root_i];
+                const double root_sv_dis = segment_get_closest_point(root_sg, sv_pt).first;
+                const int conn = (root_sv_dis >= 0 && root_sv_dis <= 80 * units::cm) ? 3 : 4;
+                ShowerPtr ns = std::make_shared<Shower>(graph);
+                if (shower->start_vertex()) ns->set_start_vertex(shower->start_vertex(), conn);
+                ns->set_start_segment(root_sg);
+                for (size_t i : comp) if (mem[i] != root_sg) ns->add_segment(mem[i], true);
+                reseeded.push_back(ns);
+                ++n_comp_pruned;
+                SPDLOG_LOGGER_DEBUG(s_log,
+                    "pr124 pass4_prune2: shower_id={} sheds {} band seg(s) (ang={:.1f} med_mip={:.2f}), reseed root seg={} conn={}",
+                    shower->get_shower_id(), removed, ang_deg, med_ratio, root_sg->id(), conn);
+            }
+        }
+        if (n_comp_pruned) {
+            for (auto& ns : reseeded) showers.insert(ns);
+            update_shower_maps(showers, map_vertex_in_shower, map_segment_in_shower,
+                               map_vertex_to_shower, used_shower_clusters);
+            calculate_shower_kinematics(showers, vertices_in_long_muon, segments_in_long_muon,
+                                        graph, track_fitter, dv, particle_data, recomb_model);
+            SPDLOG_LOGGER_DEBUG(s_log,
+                "pr124 pass4_prune2: {} band component(s) re-seeded; {} shower(s) now",
                 n_comp_pruned, showers.size());
         }
     }
