@@ -2609,6 +2609,18 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
                 if (seg->dirsign() == 0) continue;
                 if (seg->fits().empty()) continue;
                 if (same_cluster(seg)) continue;   // the pools above own this case
+                // DOUBLE-EMISSION GUARD.  The pr/123 guard-freed pool above
+                // emits its nodes without inserting into used_segs, so its
+                // segments are still visible here -- and they overlap this
+                // class: SBND 18255-171572's 125.1cm muon appears in the
+                // census with gap 0.00 cm and kink 38.4 deg.  Without this
+                // line the knob would draw it twice (the kine side is already
+                // safe: kine_count_guard_freed inserts into used_segments and
+                // runs first).  Found in the doc pr/128 §3.2 census, not by a
+                // test -- the owner's "do not double count" rule made it a
+                // gate.
+                if (cfg.pf_orphan_guard_freed &&
+                    seg->flags_any(PR::SegmentFlags::kPass4GuardFreed)) continue;
                 if (!PR::segment_near_candidate_track(seg, cfg.pf_orphan_near_min_len)) continue;
                 const auto g = PR::segment_continuation_geometry(seg, ref_segs);
                 const bool pass =
