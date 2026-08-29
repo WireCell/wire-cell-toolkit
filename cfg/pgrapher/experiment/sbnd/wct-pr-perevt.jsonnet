@@ -1771,7 +1771,7 @@ function(
     // (add_shower) before the erase.  C++ default false = legacy drop.
     // Key omitted when off => byte-identical pre-pr/121 config.  Runner env
     // SBND_SHOWER_EX1_DEDUP_REHOME.
-    shower_ex1_dedup_rehome = false,         // C++ default false = legacy dedup drop
+    shower_ex1_dedup_rehome = true,          // SBND PRODUCTION ON 2026-08-28 (doc pr/121 r1; owner "consistent with previous round"; fires on exactly 1 event in 239 across both scan manifests: 348471 qF1 0.205->0.895, 12 orphaned EM segments reclaimed, leading shower 92.0->427.8 MeV; 98-set 196/196 + 141-set 281/282 byte-identical, nusel identical, 0 losses)
     // doc pr/99 round 3 -- C1 kine-charge cell-ownership dedup + C1b
     // prototype cloud-rebuild parity (168596 Enu double count) + A5
     // hadronic-shower re-type (315167/395148 labels).  C++ defaults
