@@ -2217,6 +2217,11 @@ namespace WireCell::Clus::PR {
         bool   m_shower_pass4_prune_detached{false};     ///< doc pr/123 r1; false = no prune pass
         double m_shower_pass4_prune_gap{40 * units::cm}; ///< doc pr/123 r1; component linkage gap
         double m_shower_pass4_track_guard_len{0};        ///< doc pr/123 r1; 0 = no length guard
+        // doc pr/123 round 2: kine twin of pf_orphan_guard_freed -- count a
+        // guard-freed (kPass4GuardFreed) track that neither the BFS nor any
+        // shower claimed into kine_energy_particle (171572's 125cm muon,
+        // ~390 MeV absent from kine_reco_Enu).  false => byte-identical.
+        bool   m_kine_count_guard_freed{false};          ///< doc pr/123 r2; false = freed tracks uncounted
         // kine_count_orphan_tracks (315167): fill_kine_tree counterpart of
         // the PF-side pf_orphan_confident_track knob (BeePFConfig).  A
         // confident straight-long main-cluster track that is graph-

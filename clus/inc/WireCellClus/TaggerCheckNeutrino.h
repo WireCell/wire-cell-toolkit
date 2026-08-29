@@ -938,6 +938,7 @@ public:
         bool   m_shower_pass4_prune_detached{false};                // doc pr/123 r1; false = no prune pass
         double m_shower_pass4_prune_gap{40.0};                      // doc pr/123 r1; cm, component linkage gap
         double m_shower_pass4_track_guard_len{0.0};                 // doc pr/123 r1; cm, 0 = no length guard
+        bool   m_kine_count_guard_freed{false};                     // doc pr/123 r2; kine twin of pf_orphan_guard_freed
         bool m_straight_cont_cross_cluster{false};                  // doc pr/93 r4 (137238)
         bool m_sccc_bridge_body{false};                             // doc pr/93 r4 second rung
         double m_sccc_max_gap{5};                                   // cm; base tier

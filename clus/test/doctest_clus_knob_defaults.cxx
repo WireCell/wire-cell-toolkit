@@ -246,6 +246,7 @@ TEST_CASE("clus knob defaults: TaggerCheckNeutrino switches are all OFF")
     CHECK_KNOB_BOOL(cfg, "shower_pass4_prune_detached", false);               // pr/123 r1; false = no prune pass
     CHECK_KNOB_NUM(cfg, "shower_pass4_prune_gap", 40.0);                      // cm; inert while prune off
     CHECK_KNOB_NUM(cfg, "shower_pass4_track_guard_len", 0.0);                 // cm; 0 = no length guard
+    CHECK_KNOB_BOOL(cfg, "kine_count_guard_freed", false);                    // pr/123 r2; kine twin of pf_orphan_guard_freed
     CHECK_KNOB_BOOL(cfg, "straight_cont_cross_cluster", false);               // r4 (137238)
     CHECK_KNOB_BOOL(cfg, "sccc_bridge_body", false);                          // r4 second rung
     CHECK_KNOB_NUM(cfg, "sccc_max_gap", 5.0);                                 // cm; base tier

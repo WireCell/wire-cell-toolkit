@@ -47,6 +47,17 @@ namespace WireCell::Clus::PR {
         /// when off.  Nothing serialises the raw flags word (only named bits
         /// are ever tested), so a new bit is inert in every output.
         kMuonStemGuard = 1<<6,
+        /// The segment was declined by the pass4_angle long-track absorb
+        /// guard (doc sbnd_xin/docs/pr/123 round 2): a straight-long
+        /// track-like segment (e.g. SBND 18255-171572's 125cm muon) that
+        /// the cone would have absorbed into an EM shower.  Read only by
+        /// the default-OFF pf_orphan_guard_freed (PF root node) and
+        /// kine_count_guard_freed (kine push) passes, so such a track is
+        /// not lost from the PF tree / kine_reco_Enu when nothing else
+        /// claims it.  Set only when shower_pass4_track_guard_len > 0 =>
+        /// byte-identical when that knob is off; nothing serialises the
+        /// raw flags word, so the bit alone is inert in every output.
+        kPass4GuardFreed = 1<<7,
     };
 
 

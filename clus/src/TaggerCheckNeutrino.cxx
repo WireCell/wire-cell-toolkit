@@ -687,6 +687,7 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_shower_pass4_prune_detached               = get(config, "shower_pass4_prune_detached",               m_shower_pass4_prune_detached);            // doc pr/123 r1
     m_shower_pass4_prune_gap                    = get(config, "shower_pass4_prune_gap",                    m_shower_pass4_prune_gap);                 // doc pr/123 r1, cm
     m_shower_pass4_track_guard_len              = get(config, "shower_pass4_track_guard_len",              m_shower_pass4_track_guard_len);           // doc pr/123 r1, cm
+    m_kine_count_guard_freed                    = get(config, "kine_count_guard_freed",                    m_kine_count_guard_freed);                 // doc pr/123 r2
     m_straight_cont_cross_cluster               = get(config, "straight_cont_cross_cluster",               m_straight_cont_cross_cluster);
     m_sccc_bridge_body                          = get(config, "sccc_bridge_body",                          m_sccc_bridge_body);
     m_sccc_max_gap                              = get(config, "sccc_max_gap",                              m_sccc_max_gap);
@@ -1124,6 +1125,7 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["shower_pass4_prune_detached"]               = m_shower_pass4_prune_detached;               // doc pr/123 r1; false = no prune pass, byte-identical
     cfg["shower_pass4_prune_gap"]                    = m_shower_pass4_prune_gap;                    // doc pr/123 r1; cm, inert while prune off
     cfg["shower_pass4_track_guard_len"]              = m_shower_pass4_track_guard_len;              // doc pr/123 r1; cm, 0 = no guard, byte-identical
+    cfg["kine_count_guard_freed"]                    = m_kine_count_guard_freed;                    // doc pr/123 r2; false = guard-freed tracks uncounted, byte-identical
     cfg["straight_cont_cross_cluster"]               = m_straight_cont_cross_cluster;               // doc pr/93 r4; false = legacy (no cross-cluster continuation demotion)
     cfg["sccc_bridge_body"]                          = m_sccc_bridge_body;                          // doc pr/93 r4; false = demote-only (no bridge replay)
     cfg["sccc_max_gap"]                              = m_sccc_max_gap;                              // cm; base tier, only read when straight_cont_cross_cluster
@@ -2418,6 +2420,7 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
         pattern_algos.m_shower_pass4_prune_detached               = m_shower_pass4_prune_detached;               // doc pr/123 r1
         pattern_algos.m_shower_pass4_prune_gap                    = m_shower_pass4_prune_gap * units::cm;        // doc pr/123 r1, cm -> internal
         pattern_algos.m_shower_pass4_track_guard_len              = m_shower_pass4_track_guard_len * units::cm;  // doc pr/123 r1, cm -> internal
+        pattern_algos.m_kine_count_guard_freed                    = m_kine_count_guard_freed;                    // doc pr/123 r2
         pattern_algos.m_straight_cont_cross_cluster               = m_straight_cont_cross_cluster;               // doc pr/93 r4
         pattern_algos.m_sccc_bridge_body                          = m_sccc_bridge_body;                          // doc pr/93 r4
         pattern_algos.m_sccc_max_gap                              = m_sccc_max_gap * units::cm;                  // doc pr/93 r4

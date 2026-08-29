@@ -571,6 +571,47 @@ KineInfo PatternAlgorithms::fill_kine_tree(
         }
     }
 
+    // -------------------------------------------------------------------------
+    // doc sbnd_xin/docs/pr/123 round 2 (kine_count_guard_freed): count a
+    // track the pass4 long-track guard declined (SegmentFlags::
+    // kPass4GuardFreed) that neither the BFS nor any shower claimed.  The
+    // kine twin of pf_orphan_guard_freed, so PF and kine describe the same
+    // particle set (the pr/93 round-4 principle).  Outside the
+    // kine_count_orphan_tracks scope on both axes: the freed track is
+    // cross-cluster (main-cluster filter) and sentinel-scored (confident
+    // test) -- SBND 18255-171572's 125cm muon, ~390 MeV silently absent
+    // from kine_reco_Enu.  The flag is the predicate; the 120-segment
+    // any-cluster unclaimed population stays uncounted.
+    // C++ default false => no pass => byte-identical.
+    // -------------------------------------------------------------------------
+    if (m_kine_count_guard_freed) {
+        std::vector<std::pair<size_t, SegmentPtr>> freed_cands;
+        for (auto edesc : mir(boost::edges(graph))) {
+            SegmentPtr seg = graph[edesc].segment;
+            if (!seg || !seg->descriptor_valid()) continue;
+            if (used_segments.count(seg)) continue;
+            if (map_sg_shower.count(seg)) continue;
+            if (!seg->flags_any(SegmentFlags::kPass4GuardFreed)) continue;
+            freed_cands.emplace_back(graph[edesc].index, seg);
+        }
+        std::sort(freed_cands.begin(), freed_cands.end(),
+                  [](const auto& a, const auto& b) { return a.first < b.first; });
+        size_t n_freed = 0;
+        for (const auto& [eidx, seg] : freed_cands) {
+            used_segments.insert(seg);
+            const int pdg = push_segment_kine(seg, 1);
+            ++n_freed;
+            SPDLOG_LOGGER_INFO(s_log,
+                "kine_count_guard_freed: COUNT seg idx={} cluster={} pdg={} ke_mev={:.2f} len_cm={:.1f}",
+                eidx, seg->cluster()->get_cluster_id(), pdg,
+                (seg->particle_info() ? seg->particle_info()->kinetic_energy() / units::MeV : 0.0),
+                segment_track_length(seg) / units::cm);
+        }
+        if (n_freed) {
+            SPDLOG_LOGGER_INFO(s_log, "kine_count_guard_freed: {} guard-freed track(s) added", n_freed);
+        }
+    }
+
     if (m_kine_charge.mass_rules || m_kine_charge.mainvtx_used_guard) {
         SPDLOG_LOGGER_INFO(s_log,
             "kine_mass_census: add_legacy={:.1f} add_rules={:.1f} n_2212_showers_graph={} n_leftover_nonEM={} n_mainvtx_guard_skip={}",

@@ -326,6 +326,16 @@ namespace WireCell::Clus {
             // C++ default false => byte-identical legacy output.
             bool pf_orphan_confident_track{false};
             double pf_orphan_track_min{50.0 * units::cm};  // read only when the bool is on
+            // pf_orphan_guard_freed (doc pr/123 round 2): emit a root PF
+            // node for an unclaimed segment carrying SegmentFlags::
+            // kPass4GuardFreed -- a track the pass4 long-track guard
+            // declined (SBND 18255-171572's 125cm muon), which is outside
+            // the pf_orphan_confident_track scope (cross-cluster,
+            // score-100 sentinel PID).  The flag IS the predicate: the
+            // guard's own decline set, nothing wider (the 120-segment
+            // any-cluster unclaimed population -- largely cosmics -- stays
+            // invisible).  false = legacy = byte-identical.
+            bool pf_orphan_guard_freed{false};
             // pf_track_owns_loose_vertex (doc pr/93 round 4): in the F3a
             // root branch, a root-anchored shower's fill_sets() vertex VIEW
             // overrides the track BFS wherever the two disagree, and

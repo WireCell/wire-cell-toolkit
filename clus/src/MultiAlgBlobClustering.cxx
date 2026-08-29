@@ -385,6 +385,8 @@ void MultiAlgBlobClustering::configure(const WireCell::Configuration& cfg)
             // shower-view vertex precedence, byte-identical.
             pfc.pf_orphan_confident_track = get<bool>(pf, "pf_orphan_confident_track", false);
             pfc.pf_orphan_track_min = get<double>(pf, "pf_orphan_track_min", pfc.pf_orphan_track_min);
+            // doc pr/123 round 2; absent => legacy (guard-freed tracks not re-rooted), byte-identical.
+            pfc.pf_orphan_guard_freed = get<bool>(pf, "pf_orphan_guard_freed", false);
             pfc.pf_track_owns_loose_vertex = get<bool>(pf, "pf_track_owns_loose_vertex", false);
             m_bee_pf_configs.push_back(pfc);
             m_bee_pf_trees[pfc.name] = Bee::ParticleTree(pfc.name);
@@ -2436,6 +2438,59 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
                           << "\n";
             }
             particles.append(node);
+        }
+    }
+
+    // doc pr/123 round 2 (pf_orphan_guard_freed): a track the pass4
+    // long-track guard declined (SegmentFlags::kPass4GuardFreed) that no
+    // shower and no BFS claimed gets a root PF node -- SBND 18255-171572's
+    // 125cm muon: correctly expelled from the EM shower, but cross-cluster
+    // and score-100-sentinel PID, so both the pr/93 confident-track class
+    // and the main-cluster audit scope miss it and it vanished from the PF
+    // tree.  Node construction mirrors the pr/93 emission (dirsign/fit
+    // display filters, KeepMC floors).  The flag is the predicate: nothing
+    // outside the guard's own decline set is touched.  Knob off => this
+    // block never runs => byte-identical.
+    if (cfg.pf_orphan_guard_freed) {
+        std::vector<PR::SegmentPtr> freed;
+        for (auto edesc : mir(boost::edges(*pr_graph))) {
+            auto seg = (*pr_graph)[edesc].segment;
+            if (!seg || used_segs.count(seg) || conn4_skip_segs.count(seg)) continue;
+            if (!seg->flags_any(PR::SegmentFlags::kPass4GuardFreed)) continue;
+            if (seg->dirsign() == 0) continue;
+            if (seg->fits().empty()) continue;
+            if (!seg->has_particle_info() || !seg->particle_info()) continue;
+            freed.push_back(seg);
+        }
+        std::sort(freed.begin(), freed.end(),
+                  [&](const PR::SegmentPtr& a, const PR::SegmentPtr& b) {
+                      return seg_display_id(a) < seg_display_id(b);
+                  });
+        for (const auto& seg : freed) {
+            auto pi = seg->particle_info();
+            const std::string pname = cfg.prototype_names
+                ? pf_pdg_to_name(pi->pdg(), true, cfg.pf_pdg_name_prototype_fallback)
+                : pi->name();
+            const std::string ke_str = format_mev(pi->kinetic_energy());
+            const auto& fits = seg->fits();
+            const WireCell::Point& p_front = fits.front().point;
+            const WireCell::Point& p_back  = fits.back().point;
+            const bool fwd = (seg->dirsign() == 1);
+            auto node = make_node(seg_display_id(seg),
+                                  pname + "  " + ke_str + " MeV",
+                                  fwd ? p_front : p_back,
+                                  fwd ? p_back : p_front);
+            node["icon"] = "jstree-file";
+            if (!keep_node(pi->pdg(), pi->kinetic_energy(), node)) continue;
+            particles.append(node);
+            const auto* cl = seg->cluster();
+            SPDLOG_LOGGER_INFO(log,
+                "pr123 pf-orphan-guard-freed: EMIT root seg={} cluster={} pdg={} "
+                "ke_mev={:.2f} len_cm={:.1f}",
+                seg_display_id(seg),
+                cl ? std::to_string(cl->get_cluster_id()) : "?",
+                pi->pdg(), pi->kinetic_energy() / units::MeV,
+                PR::segment_track_length(seg) / units::cm);
         }
     }
 

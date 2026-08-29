@@ -2271,6 +2271,14 @@ void PatternAlgorithms::shower_clustering_with_nv_from_vertices(Graph& graph, Ve
                             guard_trk = segment_median_dQ_dx(seg1) < 1.3 * m_mip_dqdx_median;
                         }
                         if (guard_trk) {
+                            // doc pr/123 round 2: mark the freed track so
+                            // the (default-OFF) PF/kine orphan passes can
+                            // claim it if nothing else does -- SBND
+                            // 18255-171572's muon vanished from the PF tree
+                            // (cross-cluster + score-100 sentinel, outside
+                            // the pr/93 orphan machinery's scope).  Inert
+                            // bit unless those knobs are on.
+                            seg1->set_flags(SegmentFlags::kPass4GuardFreed);
                             if (pr93_absorb_dbg()) {
                                 std::fprintf(stderr,
                                     "SHOWER_ABSORB PASS4_TRACK_GUARD seg=%d pdg=%d len_cm=%.1f declined=1\n",
