@@ -290,7 +290,7 @@ namespace WireCell::Clus::PR {
         // doc pr/101 (K4): best_mode 0 = legacy dQdx, 1 = range over the
         // muon chain, 2 = range when the far muon vertex is a dead-end and
         // dQdx/range is within [1-ratio_lo, 1+ratio_hi], else dQdx.
-        void calculate_kinematics_long_muon(IndexedSegmentSet& segments_in_muons, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, bool exclude_start_vertex_from_endpoint = false, int best_mode = 0, double ratio_lo = 0.3, double ratio_hi = 0.5);
+        void calculate_kinematics_long_muon(IndexedSegmentSet& segments_in_muons, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, bool exclude_start_vertex_from_endpoint = false, int best_mode = 0, double ratio_lo = 0.3, double ratio_hi = 0.5, bool range_empty_chain_fallback = false);
 
         // doc sbnd_xin/docs/pr/93 round 4 (shower_detach_track_stem).
         // Remove `prefix` -- a connected chain of track segments beginning at

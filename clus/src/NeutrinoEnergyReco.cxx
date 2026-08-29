@@ -329,7 +329,8 @@ void PatternAlgorithms::calculate_shower_kinematics(IndexedShowerSet& showers, I
             shower->calculate_kinematics(particle_data, recomb_model, m_shower_endpoint_exclude_start_vertex, m_shower_endpoint_skip_orphan_vtx);
         } else {
             shower->calculate_kinematics_long_muon(segments_in_long_muon, particle_data, recomb_model, m_shower_endpoint_exclude_start_vertex,
-                                                   m_kine_charge.long_muon_mode, m_kine_charge.long_muon_ratio_lo, m_kine_charge.long_muon_ratio_hi);
+                                                   m_kine_charge.long_muon_mode, m_kine_charge.long_muon_ratio_lo, m_kine_charge.long_muon_ratio_hi,
+                                                   m_kine_charge.long_muon_range_fallback);
         }
 
         double fudge_factor = m_kine_charge.fudge_factor, recom_factor = m_kine_charge.recom_factor;

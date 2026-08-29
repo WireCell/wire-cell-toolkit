@@ -1336,7 +1336,7 @@ VertexPtr PatternAlgorithms::compare_main_vertices(Graph& graph, Facade::Cluster
 }
 
 
-std::pair<SegmentPtr, VertexPtr> PatternAlgorithms::find_cont_muon_segment(Graph &graph, SegmentPtr sg, VertexPtr vtx, bool flag_ignore_dQ_dx, bool flag_stub_bridge){
+std::pair<SegmentPtr, VertexPtr> PatternAlgorithms::find_cont_muon_segment(Graph &graph, SegmentPtr sg, VertexPtr vtx, bool flag_ignore_dQ_dx, bool flag_stub_bridge, bool flag_angle_relax){
     SegmentPtr sg1 = nullptr;
     VertexPtr vtx1 = nullptr;
     
@@ -1413,8 +1413,43 @@ std::pair<SegmentPtr, VertexPtr> PatternAlgorithms::find_cont_muon_segment(Graph
         // additionally excluded by the angle cap).  Delta-ray electrons and
         // tiny fragments do not veto.  See m_long_muon_stub_bridge.
         if (flag_stub_bridge && !angle_ok && ratio_ok &&
-            sg_length < 6*units::cm && length > 35*units::cm &&
+            sg_length < m_long_muon_stub_bridge_len_cm*units::cm && length > 35*units::cm &&
             (angle < 45.0 || angle1 < 45.0)) {
+            bool has_other_track = false;
+            for (auto e2_it : edge_range) {
+                SegmentPtr sg3 = graph[e2_it].segment;
+                if (!sg3 || sg3 == sg || sg3 == sg2) continue;
+                if (sg3->flags_any(SegmentFlags::kShowerTrajectory) ||
+                    sg3->flags_any(SegmentFlags::kShowerTopology)) continue;
+                if (sg3->has_particle_info() &&
+                    std::abs(sg3->particle_info()->pdg()) == 11) continue;
+                if (segment_track_length(sg3) > 10*units::cm) {
+                    has_other_track = true;
+                    break;
+                }
+            }
+            if (!has_other_track) angle_ok = true;
+        }
+
+        // doc 84 round 1 (P2) long-MIP angle relaxation: a candidate LONGER
+        // than 50 cm passing the unchanged dQ/dx MIP test may continue the
+        // chain up to m_long_muon_angle_relax_deg (doc 84 sec 4.2: 25 such
+        // rejections, median 15.6 deg; evt 313847 loses a 162 cm MIP at
+        // 10.99 deg).  Same junction veto as the stub bridge above: another
+        // substantial track-like arm means a genuine hadronic vertex --
+        // deliberately duplicated, not shared, so the production block above
+        // stays untouched.  Only the formation walk passes flag_angle_relax.
+        if (flag_angle_relax && !angle_ok) {
+            SPDLOG_LOGGER_DEBUG(s_log,
+                "long_muon_angle_relax: cand seg len={:.1f}cm angle={:.2f} angle1={:.2f} ratio={:.3f} "
+                "sg_len={:.1f}cm cap={:.1f} considered={}",
+                length / units::cm, angle, angle1, ratio, sg_length / units::cm,
+                m_long_muon_angle_relax_deg,
+                (ratio_ok && length > 50*units::cm) ? 1 : 0);
+        }
+        if (flag_angle_relax && !angle_ok && ratio_ok &&
+            length > 50*units::cm &&
+            (angle < m_long_muon_angle_relax_deg || angle1 < m_long_muon_angle_relax_deg)) {
             bool has_other_track = false;
             for (auto e2_it : edge_range) {
                 SegmentPtr sg3 = graph[e2_it].segment;
@@ -1885,11 +1920,11 @@ bool PatternAlgorithms::examine_direction(Graph& graph, VertexPtr vertex, Vertex
             acc_segments.push_back(sg);
             acc_vertices.push_back(vtx);
             
-            auto results = find_cont_muon_segment(graph, sg, vtx, false, m_long_muon_stub_bridge);
+            auto results = find_cont_muon_segment(graph, sg, vtx, false, m_long_muon_stub_bridge, m_long_muon_angle_relax_long);
             while (results.first != nullptr) {
                 acc_segments.push_back(results.first);
                 acc_vertices.push_back(results.second);
-                results = find_cont_muon_segment(graph, results.first, results.second, false, m_long_muon_stub_bridge);
+                results = find_cont_muon_segment(graph, results.first, results.second, false, m_long_muon_stub_bridge, m_long_muon_angle_relax_long);
             }
             
             double total_length = 0, max_length = 0;

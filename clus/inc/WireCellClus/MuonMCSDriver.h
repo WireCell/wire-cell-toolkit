@@ -27,7 +27,7 @@ namespace WireCell::Clus::PR {
         // sec 7.1.  seg_length (14 cm = X0(LAr)) is deliberately NOT here: it
         // is a structural constant of the tune, not a knob.
         bool enable{false};
-        std::string muon_source{"pf_muon"};          // pf_muon | long_muon | longest_segment
+        std::string muon_source{"pf_muon"};          // pf_muon | long_muon | longest_segment | long_muon_else_pf (doc 84 round 1)
         double muon_min_length_cm{40};
         std::string point_source{"muon_segments"};   // muon_segments | whole_event (validation only)
         bool beam_window_only{true};   // correctness, not cost: out-of-spill readout
@@ -36,6 +36,10 @@ namespace WireCell::Clus::PR {
         double cathode_x_cm{0};        // cathode plane x [cm]
         double cathode_xcut_cm{0};     // excised half-band [cm]; 0 = off (SBND: 5)
         int max_points{20000};         // whole_event perf guard
+        bool range_comparator_chain{false};  // doc 84 round 1 (P5): extra log-only
+                                             // sentinel with the long-muon chain's
+                                             // summed-length range KE; no output
+                                             // bytes move either way
     };
 
     /// Run MCS for this bundle and fill kine's kine_mcs_* fields.  Fields are

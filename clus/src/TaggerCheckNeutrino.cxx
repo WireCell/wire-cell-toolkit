@@ -2610,6 +2610,37 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
                                                    map_vertex_in_shower, map_segment_in_shower,
                                                    map_vertex_to_shower, map_shower_pio_id,
                                                    particle_data(), m_recomb_model);
+
+            // doc 84 round 1 (P1).  A shower (re)typed |13| AFTER its
+            // kinematics pass keeps the generic multi-track verdict
+            // kenergy_range = 0 / kenergy_best = 0 (PRShower.cxx generic
+            // path), because retyping never clears flag_kinematics -- the
+            // dominant mechanism behind the 28/242 range_zero census (doc 84
+            // sec 3.2; mcp2k 497311, 332.8 cm muon reported as charge).  With
+            // the labels now settled, clear the flag on exactly those showers
+            // and rerun the kinematics pass: they re-dispatch through
+            // calculate_kinematics_long_muon, whose empty-chain fallback
+            // (same knob) supplies the muon-typed member length.  Knob off =>
+            // no pass, byte-identical.
+            if (m_long_muon_range_empty_chain_fallback) {
+                int n_stale = 0;
+                for (auto& shower : showers) {
+                    if (!shower || !shower->get_flag_kinematics()) continue;
+                    if (std::abs(shower->get_particle_type()) != 13) continue;
+                    if (shower->get_kine_range() != 0) continue;
+                    shower->set_flag_kinematics(false);
+                    ++n_stale;
+                }
+                if (n_stale > 0) {
+                    pattern_algos.calculate_shower_kinematics(showers, vertices_in_long_muon,
+                                                              segments_in_long_muon, *pr_graph,
+                                                              *track_fitter, m_dv,
+                                                              particle_data(), m_recomb_model);
+                    SPDLOG_LOGGER_DEBUG(log,
+                        "long_muon_range_empty_chain_fallback: recomputed kinematics for {} retyped muon shower(s)",
+                        n_stale);
+                }
+            }
         }
 
 

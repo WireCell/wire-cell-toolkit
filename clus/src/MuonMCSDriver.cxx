@@ -109,6 +109,37 @@ void PR::mcs_fill_kine(KineInfo& kine, Graph& graph,
             }
         }
     }
+    else if (cfg.muon_source == "long_muon_else_pf") {
+        // doc 84 round 1 (P4) hybrid arm.  The long_muon arm needs >= 2
+        // segments to exist at all (the chain accept gate) so it silently
+        // skips every UNBROKEN muon; pf_muon always takes exactly one
+        // segment so a broken muon yields a truncated trajectory (doc 84
+        // sec 5.3: all 290 mcs80on evaluations had nseg=1, 37/287 short of
+        // the PR muon by >= 20%).  Chain when one exists, else the pf muon.
+        // Both blocks are verbatim copies of the arms above (fork, don't
+        // share -- the production arms stay untouched).
+        double best_len = -1;
+        for (const auto& seg : segments_in_long_muon) {
+            muon_segments.push_back(seg);
+            const double len = segment_track_length(seg);
+            if (len > best_len) {
+                best_len = len;
+                id_segment = seg;  // join key: the longest chain member
+            }
+        }
+        if (muon_segments.empty()) {
+            double best_ke = -1;
+            for (const auto& [idx, seg] : all) {
+                const auto& pi = seg->particle_info();
+                if (!pi || std::abs(pi->pdg()) != 13) continue;
+                if (pi->kinetic_energy() > best_ke) {
+                    best_ke = pi->kinetic_energy();
+                    id_segment = seg;
+                }
+            }
+            if (id_segment) muon_segments.push_back(id_segment);
+        }
+    }
     else if (cfg.muon_source == "longest_segment") {
         // PID-independent control arm: longest segment by track length.
         double best_len = -1;
@@ -286,4 +317,21 @@ void PR::mcs_fill_kine(KineInfo& kine, Graph& graph,
                        kine.kine_mcs_tracklen, kine.kine_mcs_range_energy,
                        ke_range_toolkit, ke_dqdx_toolkit, res.nsegs, res.bad_path,
                        res.counters.cathode_seg_dropped, res.counters.cathode_angle_masked);
+
+    // doc 84 round 1 (P5): chain-based range comparator, log-only.  Under
+    // pf_muon/longest_segment the sentinel's ke_range_toolkit above covers
+    // only the single selected segment; this second line reports what the
+    // long-muon chain says for the SAME event, so a fragmented selection is
+    // visible without moving any output byte.  Key mcs_range_comparator_chain;
+    // false => the line is never emitted (existing sentinel untouched).
+    if (cfg.range_comparator_chain && particle_data) {
+        double chain_len_cm = 0;
+        for (const auto& seg : segments_in_long_muon) { chain_len_cm += segment_track_length(seg) / units::cm; }
+        const double ke_range_chain =
+            chain_len_cm > 0 ? cal_kine_range(chain_len_cm * units::cm, 13, particle_data) / units::MeV : -1.0;
+        SPDLOG_LOGGER_INFO(log,
+                           "mcs: chain comparator nseg_chain={} len_chain={:.1f}cm ke_range_chain={:.1f} MeV seg_id={}",
+                           segments_in_long_muon.size(), chain_len_cm, ke_range_chain,
+                           kine.kine_mcs_segment_id);
+    }
 }
