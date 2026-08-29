@@ -886,6 +886,11 @@ public:
         double m_long_muon_cathode_bridge_xcut{6.0};                // doc 84 round 2: both facing ends within this of the cathode [cm]
         double m_long_muon_cathode_bridge_gap{20.0};                // doc 84 round 2: max 3D gap between facing ends [cm] (census 6.5-13.9)
         double m_long_muon_cathode_bridge_angle{25.0};              // doc 84 round 2: max continuation angle, gap vector AND partner tangent [deg] (census <= 14.9)
+        double m_long_muon_cathode_bridge_lever{5.0};               // doc 84 round 4 (G1): end-direction lever [cm]; 5.0 == the round-2 hardcode, so legacy by default (172794)
+        bool   m_long_muon_cathode_bridge_track_partner{false};     // doc 84 round 4 (G2): also admit a |211|-typed partner SHOWER; EM (11/22) stays excluded (347890)
+        double m_long_muon_cathode_bridge_short_gap{0.0};           // doc 84 round 4 (G3): 0 == off; below this gap [cm] the gap-vector angle is waived (67026)
+        double m_long_muon_cathode_bridge_short_gap_angle{10.0};    // doc 84 round 4 (G3): partner-direction angle cap [deg] required when the waiver applies; inert while short_gap == 0
+        double m_long_muon_cathode_bridge_short_gap_len{50.0};      // doc 84 round 4 (G3): min partner length [cm] required when the waiver applies; inert while short_gap == 0
         bool   m_kine_mainvtx_used_guard{false};                    // doc pr/101 K5 (main-vertex member double count)
         bool   m_shower_hadronic_tag{false};                        // doc pr/99 r3 A5 (hadronic shower labeled e-)
         double m_shower_hadronic_min_len{10.0};                     // cm; scaled at copy; inert while tag off

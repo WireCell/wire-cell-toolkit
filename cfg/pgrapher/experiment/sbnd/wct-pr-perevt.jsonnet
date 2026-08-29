@@ -1837,6 +1837,14 @@ function(
     long_muon_cathode_bridge_xcut = null,     // cm; C++ default 6.0
     long_muon_cathode_bridge_gap = null,      // cm; C++ default 20.0
     long_muon_cathode_bridge_angle = null,    // deg; C++ default 25.0
+    // doc 84 round 4 -- the three admission misses the owner named from the
+    // round-3 Bee scan of the unclaimed Pop-B pairs.  All null => C++ legacy
+    // defaults => key omitted => byte-identical compiled config.
+    long_muon_cathode_bridge_lever = null,          // cm; C++ default 5.0 (the round-2 hardcode).  G1 / 172794
+    long_muon_cathode_bridge_track_partner = null,  // C++ default false.  G2 / 347890 (admit |211| partner showers; EM stays out)
+    long_muon_cathode_bridge_short_gap = null,      // cm; C++ default 0.0 = off.  G3 / 67026
+    long_muon_cathode_bridge_short_gap_angle = null, // deg; C++ default 10.0; inert while short_gap 0
+    long_muon_cathode_bridge_short_gap_len = null,  // cm; C++ default 50.0; inert while short_gap 0
     kine_mainvtx_used_guard = true,  // SBND PRODUCTION ON 2026-08-20 (doc pr/101 K5; latent on the manifest)
     shower_hadronic_tag = true,  // SBND PRODUCTION ON 2026-08-20 (doc pr/99 round 3, A5)
     shower_hadronic_min_len = null,   // cm; C++ default 10
@@ -2857,6 +2865,11 @@ function(
         [if long_muon_cathode_bridge_xcut != null then 'long_muon_cathode_bridge_xcut']: long_muon_cathode_bridge_xcut,  // doc 84 r2; C++ default 6.0 cm
         [if long_muon_cathode_bridge_gap != null then 'long_muon_cathode_bridge_gap']: long_muon_cathode_bridge_gap,  // doc 84 r2; C++ default 20.0 cm
         [if long_muon_cathode_bridge_angle != null then 'long_muon_cathode_bridge_angle']: long_muon_cathode_bridge_angle,  // doc 84 r2; C++ default 25.0 deg
+        [if long_muon_cathode_bridge_lever != null then 'long_muon_cathode_bridge_lever']: long_muon_cathode_bridge_lever,  // doc 84 r4 G1; C++ default 5.0 cm
+        [if long_muon_cathode_bridge_track_partner != null then 'long_muon_cathode_bridge_track_partner']: long_muon_cathode_bridge_track_partner,  // doc 84 r4 G2; C++ default false
+        [if long_muon_cathode_bridge_short_gap != null then 'long_muon_cathode_bridge_short_gap']: long_muon_cathode_bridge_short_gap,  // doc 84 r4 G3; C++ default 0.0 cm = off
+        [if long_muon_cathode_bridge_short_gap_angle != null then 'long_muon_cathode_bridge_short_gap_angle']: long_muon_cathode_bridge_short_gap_angle,  // doc 84 r4 G3; C++ default 10.0 deg
+        [if long_muon_cathode_bridge_short_gap_len != null then 'long_muon_cathode_bridge_short_gap_len']: long_muon_cathode_bridge_short_gap_len,  // doc 84 r4 G3; C++ default 50.0 cm
         [if (if kine_mainvtx_used_guard == null then false else kine_mainvtx_used_guard) then 'kine_mainvtx_used_guard']: true,
         [if (if shower_hadronic_tag == null then false else shower_hadronic_tag) then 'shower_hadronic_tag']: true,
         [if shower_hadronic_min_len != null then 'shower_hadronic_min_len']: shower_hadronic_min_len,

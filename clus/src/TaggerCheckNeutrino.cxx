@@ -646,6 +646,11 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_long_muon_cathode_bridge_xcut             = get(config, "long_muon_cathode_bridge_xcut",             m_long_muon_cathode_bridge_xcut);          // doc 84 round 2, cm
     m_long_muon_cathode_bridge_gap              = get(config, "long_muon_cathode_bridge_gap",              m_long_muon_cathode_bridge_gap);           // doc 84 round 2, cm
     m_long_muon_cathode_bridge_angle            = get(config, "long_muon_cathode_bridge_angle",            m_long_muon_cathode_bridge_angle);         // doc 84 round 2, deg
+    m_long_muon_cathode_bridge_lever            = get(config, "long_muon_cathode_bridge_lever",            m_long_muon_cathode_bridge_lever);         // doc 84 round 4 G1, cm
+    m_long_muon_cathode_bridge_track_partner    = get(config, "long_muon_cathode_bridge_track_partner",    m_long_muon_cathode_bridge_track_partner); // doc 84 round 4 G2
+    m_long_muon_cathode_bridge_short_gap        = get(config, "long_muon_cathode_bridge_short_gap",        m_long_muon_cathode_bridge_short_gap);     // doc 84 round 4 G3, cm
+    m_long_muon_cathode_bridge_short_gap_angle  = get(config, "long_muon_cathode_bridge_short_gap_angle",  m_long_muon_cathode_bridge_short_gap_angle); // doc 84 round 4 G3, deg
+    m_long_muon_cathode_bridge_short_gap_len    = get(config, "long_muon_cathode_bridge_short_gap_len",    m_long_muon_cathode_bridge_short_gap_len); // doc 84 round 4 G3, cm
     m_kine_mainvtx_used_guard                   = get(config, "kine_mainvtx_used_guard",                   m_kine_mainvtx_used_guard);
     m_shower_hadronic_tag                       = get(config, "shower_hadronic_tag",                       m_shower_hadronic_tag);
     m_shower_hadronic_min_len                   = get(config, "shower_hadronic_min_len",                   m_shower_hadronic_min_len);
@@ -1093,6 +1098,11 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["long_muon_cathode_bridge_xcut"]             = m_long_muon_cathode_bridge_xcut;             // doc 84 round 2, cm; inert unless bridge on
     cfg["long_muon_cathode_bridge_gap"]              = m_long_muon_cathode_bridge_gap;              // doc 84 round 2, cm; inert unless bridge on
     cfg["long_muon_cathode_bridge_angle"]            = m_long_muon_cathode_bridge_angle;            // doc 84 round 2, deg; inert unless bridge on
+    cfg["long_muon_cathode_bridge_lever"]            = m_long_muon_cathode_bridge_lever;            // doc 84 round 4 G1, cm; inert unless bridge on
+    cfg["long_muon_cathode_bridge_track_partner"]    = m_long_muon_cathode_bridge_track_partner;    // doc 84 round 4 G2; inert unless bridge on
+    cfg["long_muon_cathode_bridge_short_gap"]        = m_long_muon_cathode_bridge_short_gap;        // doc 84 round 4 G3, cm; 0 == off
+    cfg["long_muon_cathode_bridge_short_gap_angle"]  = m_long_muon_cathode_bridge_short_gap_angle;  // doc 84 round 4 G3, deg; inert while short_gap 0
+    cfg["long_muon_cathode_bridge_short_gap_len"]    = m_long_muon_cathode_bridge_short_gap_len;    // doc 84 round 4 G3, cm; inert while short_gap 0
     cfg["kine_mainvtx_used_guard"]                   = m_kine_mainvtx_used_guard;                   // doc pr/101 K5; false = legacy, byte-identical
     cfg["shower_hadronic_tag"]                       = m_shower_hadronic_tag;                       // doc pr/99 r3 A5; false = legacy (label 11 stays), byte-identical
     cfg["shower_hadronic_min_len"]                   = m_shower_hadronic_min_len;                   // cm; inert while tag off (doc pr/99 r3)
@@ -1177,6 +1187,13 @@ struct CathodeBridgeCfg {
     double xcut;    // end-to-plane admission window
     double gap;     // max 3D gap between facing ends
     double angle;   // max continuation angle [deg]
+    // doc 84 round 4 -- all default to the round-2 behaviour, so the pass is
+    // byte-identical until one is moved off its legacy value.
+    double lever;           // end-direction lever; 5cm == the round-2 hardcode (G1)
+    bool   track_partner;   // admit a |211|-typed partner SHOWER too (G2)
+    double short_gap;       // 0 == off; below this gap the gap-vector angle is waived (G3)
+    double short_gap_angle; // partner-direction cap [deg] required when the waiver applies
+    double short_gap_len;   // min partner length required when the waiver applies
 };
 
 struct CathodeEnd {
@@ -1210,7 +1227,14 @@ int long_muon_cathode_bridge_pass(PatternAlgorithms& pattern_algos, Graph& graph
     std::shared_ptr<spdlog::logger> log)
 {
     const double min_len = 5 * units::cm;   // ignore sub-5cm fragments on either side
-    const double lever = 5 * units::cm;     // tangent lever arm at an end
+    // doc 84 round 4 (G1): the end-direction lever, hardcoded 5cm in round 2.
+    // segment_cal_dir_3vector is a CENTROID direction -- it averages every fit
+    // point within `lever` of the end -- and it is evaluated exactly where the
+    // cathode charge loss is worst, so a 5cm baseline can be badly bent while
+    // the segment as a whole is straight (172794: both angle tests fail at
+    // 40.5/38.1 deg against a corrupted reference, while the gap vector and
+    // the partner direction agree with EACH OTHER to 8 deg).
+    const double lever = cfg.lever;
 
     // Member lists per shower.  map_segment_in_shower is index-ordered
     // (SegmentIndexCmp), the grouping map is ShowerIndexCmp -- deterministic.
@@ -1267,7 +1291,19 @@ int long_muon_cathode_bridge_pass(PatternAlgorithms& pattern_algos, Graph& graph
         if (!seg) continue;
         auto mit = map_segment_in_shower.find(seg);
         ShowerPtr osh = (mit != map_segment_in_shower.end()) ? mit->second : nullptr;
-        if (osh && std::abs(osh->get_particle_type()) != 13) continue;
+        // doc 84 round 4 (G2): a cathode-split muon's near-seam stub is often
+        // mis-PID'd -- 347890's far half is a |13| shower but its facing
+        // partner is a 27cm shower typed 211 (pi+), geometrically cleaner
+        // (gap 14.3cm, angles 15.4/6.2 deg) than three of the four round-2
+        // successes.  track_partner admits |211| as well.  EM (11/22) is NOT
+        // admitted and must not be: absorbing a genuine EM shower across the
+        // seam is the failure mode this guard exists for (392901's far half is
+        // a 106 MeV electron shower with comparably good geometry).
+        if (osh) {
+            const int optype = std::abs(osh->get_particle_type());
+            const bool ok = (optype == 13) || (cfg.track_partner && optype == 211);
+            if (!ok) continue;
+        }
         collect_ends(seg, osh, partner_ends);
     }
     if (partner_ends.empty()) return 0;
@@ -1290,8 +1326,45 @@ int long_muon_cathode_bridge_pass(PatternAlgorithms& pattern_algos, Graph& graph
             const double gap = gapv.magnitude();
             if (gap >= best_gap) continue;
             const WireCell::Vector cont = -1.0 * me.into;
-            if (cb_angle_deg(cont, gapv) > cfg.angle) continue;
-            if (cb_angle_deg(cont, pe.into) > cfg.angle) continue;
+            const double a_gap = cb_angle_deg(cont, gapv);
+            const double a_tan = cb_angle_deg(cont, pe.into);
+            // doc 84 round 4 (G3): the gap vector's angular precision goes as
+            // ~atan(sigma_endpoint / gap), so at a short gap it carries no
+            // information -- 67026's two halves are 4 deg collinear over
+            // 257.9cm of partner but sit ~4.9cm laterally apart, putting the
+            // 5.6cm gap vector 78 deg off both tracks.  Waive the gap-vector
+            // test there, with the partner-direction test tightened and a
+            // minimum partner length standing in for the lost constraint.
+            //
+            // The waiver must NEVER apply to a degenerate gap: cb_angle_deg
+            // returns 181 for a zero-length gap vector, and that is the ONLY
+            // thing rejecting a partner that shares a vertex with the muon
+            // (407798: gap exactly 0, a normal graph junction inside one
+            // cluster, owner-confirmed correct reject).  Hence gap > 0 is a
+            // hard precondition, not a consequence of the other two gates.
+            const bool waive_gap_angle =
+                cfg.short_gap > 0 && gap > 0 && gap <= cfg.short_gap &&
+                a_tan <= cfg.short_gap_angle &&
+                segment_track_length(pe.seg) >= cfg.short_gap_len;
+            const char* reject = nullptr;
+            if (!waive_gap_angle && a_gap > cfg.angle) reject = "angle_gap";
+            else if (a_tan > cfg.angle) reject = "angle_tan";
+            if (reject) {
+                // Round 4: the pass logged accepted bridges only and was
+                // silent on rejects, so a non-firing bridge could not be
+                // diagnosed without re-deriving the geometry outside the
+                // toolkit.  One line per geometrically-reachable candidate.
+                SPDLOG_LOGGER_DEBUG(log,
+                    "long_muon_cathode_bridge: reject {} sid={} seg={} partner={} "
+                    "partner_kind={} partner_len={:.1f}cm gap={:.1f}cm a_gap={:.1f} "
+                    "a_tan={:.1f} lever={:.1f}cm ends x=({:.1f},{:.1f})cm",
+                    reject, me.shower->get_shower_id(), me.seg->get_graph_index(),
+                    pe.seg->get_graph_index(), pe.shower ? "shower" : "bare",
+                    segment_track_length(pe.seg) / units::cm, gap / units::cm,
+                    a_gap, a_tan, cfg.lever / units::cm,
+                    me.p.x() / units::cm, pe.p.x() / units::cm);
+                continue;
+            }
             best = &pe;
             best_gap = gap;
         }
@@ -1301,13 +1374,44 @@ int long_muon_cathode_bridge_pass(PatternAlgorithms& pattern_algos, Graph& graph
             // Shower partner: decide the keeper -- main-vertex attachment
             // first, then the longer muon membership, then the smaller id.
             ShowerPtr a = me.shower, b = best->shower;
-            auto rank = [&](const ShowerPtr& s) {
-                return std::make_tuple(s->start_vertex() == main_vertex ? 0 : 1,
-                                       -muon_member_length(s),
-                                       s->get_shower_id());
-            };
-            ShowerPtr keep = (rank(a) <= rank(b)) ? a : b;
-            ShowerPtr drop = (keep == a) ? b : a;
+            // doc 84 round 4 (G2): a partner admitted only by track_partner is
+            // a mis-PID'd stub, not a peer, so the muon shower must stay the
+            // keeper and the stub must be retyped.  Letting the rank contest
+            // run would hand 347890 to the 211-typed pi+ shower -- it is the
+            // root-attached one, so it wins the first rank key -- relabelling
+            // a 177.7cm muon as a pion and diverting the merged object out of
+            // calculate_kinematics_long_muon.  Unreachable while
+            // track_partner is off: E5 admits no non-|13| partner shower then.
+            const bool track_only = std::abs(b->get_particle_type()) != 13;
+            ShowerPtr keep, drop;
+            if (track_only) {
+                keep = a;
+                drop = b;
+                // Retype the absorbed stub to 13, mirroring what the
+                // bare-chain branch does below, so its length reaches the
+                // range/endpoint accumulators, bridged_out (MCS) and the PF
+                // label as muon rather than staying a pion beside one.
+                for (auto& seg : members[drop]) {
+                    if (!seg->has_particle_info() ||
+                        std::abs(seg->particle_info()->pdg()) != 13) {
+                        auto mom = segment_cal_4mom(seg, 13, particle_data, recomb_model,
+                                                    pattern_algos.m_mip_dqdx);
+                        seg->particle_info(std::make_shared<Aux::ParticleInfo>(
+                            13, particle_data->get_particle_mass(13),
+                            particle_data->pdg_to_name(13), mom));
+                    }
+                }
+                drop->set_particle_type(13);
+            }
+            else {
+                auto rank = [&](const ShowerPtr& s) {
+                    return std::make_tuple(s->start_vertex() == main_vertex ? 0 : 1,
+                                           -muon_member_length(s),
+                                           s->get_shower_id());
+                };
+                keep = (rank(a) <= rank(b)) ? a : b;
+                drop = (keep == a) ? b : a;
+            }
             SPDLOG_LOGGER_DEBUG(log,
                 "long_muon_cathode_bridge: merge shower sid={} (mu_len={:.1f}cm) <- sid={} "
                 "(mu_len={:.1f}cm) gap={:.1f}cm ends x=({:.1f},{:.1f})cm",
@@ -2952,7 +3056,12 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
                     m_long_muon_cathode_bridge_x * units::cm,
                     m_long_muon_cathode_bridge_xcut * units::cm,
                     m_long_muon_cathode_bridge_gap * units::cm,
-                    m_long_muon_cathode_bridge_angle};
+                    m_long_muon_cathode_bridge_angle,
+                    m_long_muon_cathode_bridge_lever * units::cm,
+                    m_long_muon_cathode_bridge_track_partner,
+                    m_long_muon_cathode_bridge_short_gap * units::cm,
+                    m_long_muon_cathode_bridge_short_gap_angle,
+                    m_long_muon_cathode_bridge_short_gap_len * units::cm};
                 const int n_bridged = long_muon_cathode_bridge_pass(
                     pattern_algos, *pr_graph, final_main_vertex, showers,
                     map_segment_in_shower, particle_data(), m_recomb_model,
