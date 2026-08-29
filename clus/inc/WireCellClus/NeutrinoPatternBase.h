@@ -2201,6 +2201,22 @@ namespace WireCell::Clus::PR {
         // Single-segment wrappers keep the legacy drop either way.
         // false (default) => byte-identical.
         bool   m_shower_ex1_dedup_rehome{false};         ///< doc pr/121 r1; false = legacy dedup drop
+        // doc sbnd_xin/docs/pr/123 round 1 -- pass4_angle over-reach, the
+        // owner's over-reach line (2026-08-28: detached-from-the-body OR
+        // track-like-beyond-it) as two independent default-OFF knobs.
+        // (1) prune_detached: after the dedup/detach/ghost family, single-
+        // linkage components of each shower's final membership at prune_gap
+        // (owner: 40 cm); a component not holding the start segment leaves
+        // the shower and RE-SEEDS as its own shower (owner disposition --
+        // zero orphans), rooted at its member nearest the kept body.
+        // (2) track_guard_len: at the pass4_angle accept, decline a
+        // track-like segment (pdg 13/211/2212 or median dQ/dx < 1.3 MIP)
+        // longer than this (owner: 50 cm; census: zero labeled-good absorbs
+        // above it -- SBND 171572 125cm mu-, 393505 108cm mu-).
+        // false / 0 (defaults) => no pass / no test => byte-identical.
+        bool   m_shower_pass4_prune_detached{false};     ///< doc pr/123 r1; false = no prune pass
+        double m_shower_pass4_prune_gap{40 * units::cm}; ///< doc pr/123 r1; component linkage gap
+        double m_shower_pass4_track_guard_len{0};        ///< doc pr/123 r1; 0 = no length guard
         // kine_count_orphan_tracks (315167): fill_kine_tree counterpart of
         // the PF-side pf_orphan_confident_track knob (BeePFConfig).  A
         // confident straight-long main-cluster track that is graph-

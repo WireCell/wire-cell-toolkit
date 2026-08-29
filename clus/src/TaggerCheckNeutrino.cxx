@@ -684,6 +684,9 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_shower_ex1_walk_em_track_len              = get(config, "shower_ex1_walk_em_track_len",              m_shower_ex1_walk_em_track_len);
     // doc sbnd_xin/docs/pr/121 round 1
     m_shower_ex1_dedup_rehome                   = get(config, "shower_ex1_dedup_rehome",                   m_shower_ex1_dedup_rehome);
+    m_shower_pass4_prune_detached               = get(config, "shower_pass4_prune_detached",               m_shower_pass4_prune_detached);            // doc pr/123 r1
+    m_shower_pass4_prune_gap                    = get(config, "shower_pass4_prune_gap",                    m_shower_pass4_prune_gap);                 // doc pr/123 r1, cm
+    m_shower_pass4_track_guard_len              = get(config, "shower_pass4_track_guard_len",              m_shower_pass4_track_guard_len);           // doc pr/123 r1, cm
     m_straight_cont_cross_cluster               = get(config, "straight_cont_cross_cluster",               m_straight_cont_cross_cluster);
     m_sccc_bridge_body                          = get(config, "sccc_bridge_body",                          m_sccc_bridge_body);
     m_sccc_max_gap                              = get(config, "sccc_max_gap",                              m_sccc_max_gap);
@@ -1118,6 +1121,9 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["shower_ex1_walk_em_track_guard"]            = m_shower_ex1_walk_em_track_guard;            // doc pr/120 r1; false = legacy examine_shower_1 walk, byte-identical
     cfg["shower_ex1_walk_em_track_len"]              = m_shower_ex1_walk_em_track_len;              // cm, e- straight-long floor; inert while guard off (doc pr/120 r1)
     cfg["shower_ex1_dedup_rehome"]                   = m_shower_ex1_dedup_rehome;                   // doc pr/121 r1; false = legacy dedup drop, byte-identical
+    cfg["shower_pass4_prune_detached"]               = m_shower_pass4_prune_detached;               // doc pr/123 r1; false = no prune pass, byte-identical
+    cfg["shower_pass4_prune_gap"]                    = m_shower_pass4_prune_gap;                    // doc pr/123 r1; cm, inert while prune off
+    cfg["shower_pass4_track_guard_len"]              = m_shower_pass4_track_guard_len;              // doc pr/123 r1; cm, 0 = no guard, byte-identical
     cfg["straight_cont_cross_cluster"]               = m_straight_cont_cross_cluster;               // doc pr/93 r4; false = legacy (no cross-cluster continuation demotion)
     cfg["sccc_bridge_body"]                          = m_sccc_bridge_body;                          // doc pr/93 r4; false = demote-only (no bridge replay)
     cfg["sccc_max_gap"]                              = m_sccc_max_gap;                              // cm; base tier, only read when straight_cont_cross_cluster
@@ -2388,6 +2394,9 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
         pattern_algos.m_shower_ex1_walk_em_track_guard            = m_shower_ex1_walk_em_track_guard;            // doc pr/120 r1
         pattern_algos.m_shower_ex1_walk_em_track_len              = m_shower_ex1_walk_em_track_len * units::cm;  // cm -> internal (doc pr/120 r1)
         pattern_algos.m_shower_ex1_dedup_rehome                   = m_shower_ex1_dedup_rehome;                   // doc pr/121 r1
+        pattern_algos.m_shower_pass4_prune_detached               = m_shower_pass4_prune_detached;               // doc pr/123 r1
+        pattern_algos.m_shower_pass4_prune_gap                    = m_shower_pass4_prune_gap * units::cm;        // doc pr/123 r1, cm -> internal
+        pattern_algos.m_shower_pass4_track_guard_len              = m_shower_pass4_track_guard_len * units::cm;  // doc pr/123 r1, cm -> internal
         pattern_algos.m_straight_cont_cross_cluster               = m_straight_cont_cross_cluster;               // doc pr/93 r4
         pattern_algos.m_sccc_bridge_body                          = m_sccc_bridge_body;                          // doc pr/93 r4
         pattern_algos.m_sccc_max_gap                              = m_sccc_max_gap * units::cm;                  // doc pr/93 r4

@@ -614,6 +614,87 @@ namespace WireCell::Clus::PR {
         return peeled;
     }
 
+    // doc sbnd_xin/docs/pr/123 round 1 (shower_pass4_prune_detached).
+    // Contract in PRShower.h; bookkeeping forked BY DUPLICATION from
+    // detach_track_prefix above -- that production method stays untouched.
+    // Differences from the fork source: no re-root and no start re-seat
+    // (the detached component leaves, the shower keeps its identity), and
+    // the members are an arbitrary set rather than a root-anchored prefix.
+    int Shower::detach_member_set(const std::vector<SegmentPtr>& members,
+                                  const std::string& cloud_name_fit,
+                                  const std::string& cloud_name_associate)
+    {
+        if (members.empty()) return 0;
+        // Refuse to empty the shower: at least one member must remain.
+        if (this->edges().size() <= members.size()) return 0;
+        for (const auto& sg : members) {
+            if (!sg || !sg->descriptor_valid() || !this->has_edge(sg->get_descriptor())) return 0;
+            if (sg == m_start_segment) return 0;
+        }
+
+        // Collect the removed set's vertices (candidates for view removal).
+        std::vector<VertexPtr> comp_vtxs;
+        std::unordered_set<size_t> seen_vtx_idx;
+        for (const auto& sg : members) {
+            auto [va, vb] = find_vertices(m_full_graph, sg);
+            for (VertexPtr v : {va, vb}) {
+                if (!v || !v->descriptor_valid() || v == m_start_vertex) continue;
+                const size_t idx = m_full_graph[v->get_descriptor()].index;
+                if (seen_vtx_idx.insert(idx).second) comp_vtxs.push_back(v);
+            }
+        }
+
+        // Remove the member edges from the view.
+        int removed = 0;
+        for (const auto& sg : members) {
+            if (TrajectoryView::remove_segment(sg)) ++removed;
+        }
+
+        // A component vertex leaves the view only if NO remaining member
+        // still touches it.  Membership set of graph indices, order-free.
+        std::unordered_set<size_t> keep_vtx_idx;
+        for (auto edesc : ordered_edges(*this, m_full_graph)) {
+            SegmentPtr seg = m_full_graph[edesc].segment;
+            if (!seg || !seg->descriptor_valid()) continue;
+            auto [ka, kb] = find_vertices(m_full_graph, seg);
+            if (ka && ka->descriptor_valid()) keep_vtx_idx.insert(m_full_graph[ka->get_descriptor()].index);
+            if (kb && kb->descriptor_valid()) keep_vtx_idx.insert(m_full_graph[kb->get_descriptor()].index);
+        }
+        for (const auto& v : comp_vtxs) {
+            const size_t idx = m_full_graph[v->get_descriptor()].index;
+            if (keep_vtx_idx.count(idx)) continue;
+            TrajectoryView::remove_vertex(v);
+            m_walked_nodes.erase(v->get_descriptor());
+        }
+
+        // Rebuild the shower point clouds from the REMAINING members only
+        // (same reason and shape as the detach_track_prefix rebuild).
+        for (const std::string& cname : {cloud_name_fit, cloud_name_associate}) {
+            if (cname.empty()) continue;
+            this->dpcloud(cname, nullptr);
+            Facade::DPCBatch batch;
+            for (auto edesc : ordered_edges(*this, m_full_graph)) {
+                SegmentPtr seg = m_full_graph[edesc].segment;
+                if (!seg || !seg->descriptor_valid()) continue;
+                auto seg_dpc = seg->dpcloud(cname);
+                if (!seg_dpc) continue;
+                if (!this->dpcloud(cname)) {
+                    this->dpcloud(cname, clone_dpc(*seg_dpc));
+                } else if (this->dpcloud(cname) != seg_dpc) {
+                    this->dpcloud(cname)->merge_wpid_params(*seg_dpc);
+                    batch.append(seg_dpc->points());
+                }
+            }
+            if (!batch.empty()) {
+                if (auto dpc = this->dpcloud(cname)) dpc->add_points(std::move(batch));
+            }
+        }
+
+        invalidate_segment_caches();
+        set_flag_kinematics(false);
+        return removed;
+    }
+
     // doc sbnd_xin/docs/pr/99 round 2 (shower_ghost_member_drop).  Contract
     // and rationale in PRShower.h; bookkeeping forked BY DUPLICATION from
     // detach_track_prefix above -- that production method stays untouched.

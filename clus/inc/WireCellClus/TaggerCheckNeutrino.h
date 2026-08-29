@@ -931,6 +931,13 @@ public:
         // doc sbnd_xin/docs/pr/121 round 1 -- rationale comment in
         // NeutrinoPatternBase.h (m_shower_ex1_dedup_rehome block).
         bool   m_shower_ex1_dedup_rehome{false};                    // doc pr/121 r1 (348471 dedup orphaning)
+        // doc pr/123 r1 (pass4_angle over-reach; owner over-reach line
+        // 2026-08-28): final-membership detached-component prune + re-seed,
+        // and the long-track absorb guard.  cm-valued here; pushed into
+        // pattern_algos with units in configure (NeutrinoPatternBase.h block).
+        bool   m_shower_pass4_prune_detached{false};                // doc pr/123 r1; false = no prune pass
+        double m_shower_pass4_prune_gap{40.0};                      // doc pr/123 r1; cm, component linkage gap
+        double m_shower_pass4_track_guard_len{0.0};                 // doc pr/123 r1; cm, 0 = no length guard
         bool m_straight_cont_cross_cluster{false};                  // doc pr/93 r4 (137238)
         bool m_sccc_bridge_body{false};                             // doc pr/93 r4 second rung
         double m_sccc_max_gap{5};                                   // cm; base tier

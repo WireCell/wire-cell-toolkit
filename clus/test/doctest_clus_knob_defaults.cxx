@@ -242,6 +242,10 @@ TEST_CASE("clus knob defaults: TaggerCheckNeutrino switches are all OFF")
     CHECK_KNOB_NUM(cfg, "shower_ex1_walk_em_track_len", 20.0);                // cm, e- straight-long floor; inert while off
     // doc pr/121 round 1 -- examine_shower_1 dedup re-homes multi-seg victims.
     CHECK_KNOB_BOOL(cfg, "shower_ex1_dedup_rehome", false);                   // pr/121 r1; false = legacy dedup drop
+    // doc pr/123 round 1 -- pass4_angle over-reach (owner line 2026-08-28).
+    CHECK_KNOB_BOOL(cfg, "shower_pass4_prune_detached", false);               // pr/123 r1; false = no prune pass
+    CHECK_KNOB_NUM(cfg, "shower_pass4_prune_gap", 40.0);                      // cm; inert while prune off
+    CHECK_KNOB_NUM(cfg, "shower_pass4_track_guard_len", 0.0);                 // cm; 0 = no length guard
     CHECK_KNOB_BOOL(cfg, "straight_cont_cross_cluster", false);               // r4 (137238)
     CHECK_KNOB_BOOL(cfg, "sccc_bridge_body", false);                          // r4 second rung
     CHECK_KNOB_NUM(cfg, "sccc_max_gap", 5.0);                                 // cm; base tier

@@ -341,6 +341,25 @@ namespace WireCell::Clus::PR {
                               const std::string& cloud_name_fit = "fit",
                               const std::string& cloud_name_associate = "associate_points");
 
+        // doc sbnd_xin/docs/pr/123 round 1 (shower_pass4_prune_detached).
+        // Remove a SET of members -- a spatially detached component -- from
+        // this shower's view WITHOUT re-rooting: start vertex, connection
+        // type and start segment stay.  Refuses (returns 0) when the set is
+        // empty, contains the start segment, includes a non-member, or would
+        // empty the shower.  Vertices touched only by removed members leave
+        // the view (walked marks erased); the named point clouds are REBUILT
+        // from the remaining members (kine_charge reads the clouds).  No
+        // connectivity requirement on the remainder -- unlike
+        // drop_ghost_member's leaf-only contract, the caller removes a whole
+        // spatial component and re-seeds it as its own shower.  Caller must
+        // re-run calculate_kinematics / set_kine_charge / update_shower_maps.
+        // Bookkeeping forked BY DUPLICATION from detach_track_prefix
+        // (production method stays byte-untouched).  Returns the number of
+        // segments removed.
+        int detach_member_set(const std::vector<SegmentPtr>& members,
+                              const std::string& cloud_name_fit = "fit",
+                              const std::string& cloud_name_associate = "associate_points");
+
         // doc pr/99 round 3 (C1b, kine_charge_rebuild).  Build and return an
         // EPHEMERAL point cloud of the named kind ("fit" or
         // "associate_points") from the shower's CURRENT members only --

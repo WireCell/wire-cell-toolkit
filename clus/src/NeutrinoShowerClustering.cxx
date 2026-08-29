@@ -141,6 +141,53 @@ static inline void pr122_probe_seed(const SegmentPtr& sg, bool f_traj, bool f_to
                  (int)segment_is_straight_long_track(sg));
 }
 
+// doc sbnd_xin/docs/pr/123 round 1: the pass4_angle acceptance in
+// shower_clustering_with_nv_from_vertices has no term for the shower's own
+// extent or contiguity -- a stub 80 cm from the start vertex is absorbed even
+// when detached from the body (doc pr/115 sec 16.5: 48% of wrongly-held
+// marks; sec 17.6: 4.80e7 q_extra untouched by every shipped knob).  Owner
+// over-reach definition 2026-08-28: a far member counts as over-reach when
+// detached from the contiguous body (gap) OR track-like beyond the body.
+// One line per ACCEPTED segment with every quantity in the acceptance
+// disjunction plus the features that definition needs; all geometry is
+// already computed unconditionally at the call site, only the dQ/dx median
+// runs under the env gate.  stderr only, no effect on emitted bytes.
+// Probe v2: body_dis (to the CURRENT body) is chain-laundered -- once a first
+// far stub is absorbed, later stubs sit close to it and print small gaps
+// (SBND 278420: first stub body_dis 23.9, the six followers 5-16).  snap_dis
+// is the gap to the shower's membership AT LOOP ENTRY (chain-immune), the
+// guard-usable form of the owner rule's "detached from the contiguous body".
+static inline void pr123_probe_pass4_geom(const SegmentPtr& sg, const ShowerPtr& cur,
+                                          const ShowerPtr& owner, double pair_dis,
+                                          double front_dis, double body_dis,
+                                          double snap_dis,
+                                          double angle_v1, double angle_v2,
+                                          double mip_dqdx_median)
+{
+    if (!pr93_absorb_dbg() || !sg || !cur || !owner) return;
+    const double cm = WireCell::units::cm;
+    int tier = 0;
+    if      (angle_v1 < 25   && (pair_dis < 80 * cm  || body_dis < 25 * cm)) tier = 1;
+    else if (angle_v2 < 25   && (front_dis < 40 * cm || body_dis < 25 * cm)) tier = 2;
+    else if (angle_v1 < 12.5 && (pair_dis < 120 * cm || body_dis < 40 * cm)) tier = 3;
+    else if (angle_v2 < 12.5 && (front_dis < 80 * cm || body_dis < 40 * cm)) tier = 4;
+    const double med = segment_median_dQ_dx(sg);
+    std::fprintf(stderr,
+                 "SHOWER_ABSORB PASS4_GEOM seg=%d pdg=%d len_cm=%.2f med_dqdx_mip=%.3f "
+                 "cur=%d cur_nseg=%d cur_len_cm=%.1f owner=%d divert=%d "
+                 "pair_dis_cm=%.2f front_dis_cm=%.2f body_dis_cm=%.2f snap_dis_cm=%.2f "
+                 "angle_v1=%.2f angle_v2=%.2f tier=%d\n",
+                 pr91_seg_display_id(sg),
+                 sg->has_particle_info() && sg->particle_info() ? sg->particle_info()->pdg() : 0,
+                 segment_track_length(sg) / cm,
+                 mip_dqdx_median > 0 ? med / mip_dqdx_median : -1.0,
+                 pr91_seg_display_id(cur->start_segment()), cur->get_num_segments(),
+                 cur->get_total_length() / cm,
+                 pr91_seg_display_id(owner->start_segment()), (int)(owner != cur),
+                 pair_dis / cm, front_dis / cm, body_dis / cm, snap_dis / cm,
+                 angle_v1, angle_v2, tier);
+}
+
 // doc sbnd_xin/docs/pr/91 round 1: WCT_SHOWER_MERGE_DEBUG prints, at every
 // shower-merge decision site, the candidate pair and EVERY quantity in the
 // condition together with the verdict -- fired or not -- plus a one-line reason
@@ -2121,6 +2168,16 @@ void PatternAlgorithms::shower_clustering_with_nv_from_vertices(Graph& graph, Ve
         // Add segments from other clusters.
         // Cache the shower start front point to avoid re-evaluating per segment.
         const WireCell::Point shower_start_front = shower->start_segment()->fits().front().point;
+
+        // doc pr/123: pass-entry membership snapshot for the probe's
+        // chain-immune gap (env-gated, read-only, empty when probes off).
+        std::vector<SegmentPtr> pr123_snapshot;
+        if (pr93_absorb_dbg()) {
+            for (auto edesc : shower->edges()) {
+                auto sg_ = shower->view_graph()[edesc].segment;
+                if (sg_) pr123_snapshot.push_back(sg_);
+            }
+        }
         for (auto seg1 : seg_order) {
             if ((seg1->cluster() == main_cluster && !m_absorb_unreachable_main_segs.count(seg1)) || m_nv_bridge_shield_segs.count(seg1)) continue;  // doc pr/65 round 3: guard means "claimed by the main_vertex graph walk", so graph-unreachable main-cluster segments stay eligible (set empty when knob off => legacy); doc pr/40 round 9 B2: bridged-cluster segments stay un-absorbable (shield set empty when bridge off)
             if (map_segment_in_shower.find(seg1) != map_segment_in_shower.end()) continue;
@@ -2198,6 +2255,49 @@ void PatternAlgorithms::shower_clustering_with_nv_from_vertices(Graph& graph, Ve
                     }
                     if (m_shower_pass4_best_owner) p4_owner = best_shower;
                 }
+                // doc sbnd_xin/docs/pr/123 round 1 (shower_pass4_track_guard_len):
+                // the owner's track-like prong.  A long MIP-flat / track-pdg
+                // segment riding the cone axis is a muon or hadron track, not
+                // EM growth (SBND 171572: 125 cm mu- absorbed at 3.9 deg;
+                // 393505: 108 cm mu-); the census shows zero labeled-good
+                // absorbs above 50 cm.  Decline the absorb; 0 = off = legacy.
+                if (m_shower_pass4_track_guard_len > 0) {
+                    const double guard_len = segment_track_length(seg1);
+                    if (guard_len > m_shower_pass4_track_guard_len) {
+                        const int guard_pdg = seg1->has_particle_info() && seg1->particle_info()
+                            ? std::abs(seg1->particle_info()->pdg()) : 0;
+                        bool guard_trk = (guard_pdg == 13 || guard_pdg == 211 || guard_pdg == 2212);
+                        if (!guard_trk && m_mip_dqdx_median > 0) {
+                            guard_trk = segment_median_dQ_dx(seg1) < 1.3 * m_mip_dqdx_median;
+                        }
+                        if (guard_trk) {
+                            if (pr93_absorb_dbg()) {
+                                std::fprintf(stderr,
+                                    "SHOWER_ABSORB PASS4_TRACK_GUARD seg=%d pdg=%d len_cm=%.1f declined=1\n",
+                                    pr91_seg_display_id(seg1), guard_pdg,
+                                    guard_len / units::cm);
+                            }
+                            SPDLOG_LOGGER_DEBUG(s_log,
+                                "pr123 pass4_track_guard: decline seg={} pdg={} len={:.1f}cm",
+                                seg1->id(), guard_pdg, guard_len / units::cm);
+                            continue;
+                        }
+                    }
+                }
+                // doc pr/123: chain-immune gap -- min distance from seg1 to
+                // the pass-entry membership (env-gated; -1 when unavailable).
+                double pr123_snap_dis = -1.0;
+                if (pr93_absorb_dbg()) {
+                    for (const auto& sa : pr123_snapshot) {
+                        for (const auto& f : sa->fits()) {
+                            const double d_ = segment_get_closest_point(seg1, f.point).first;
+                            if (d_ >= 0 && (pr123_snap_dis < 0 || d_ < pr123_snap_dis)) pr123_snap_dis = d_;
+                        }
+                    }
+                }
+                pr123_probe_pass4_geom(seg1, shower, p4_owner, pair_dis, tmp_shower_dis,
+                                       close_shower_dis, pr123_snap_dis,
+                                       angle_v1, angle_v2, m_mip_dqdx_median);
                 pr93_probe_absorb_direct(p4_owner == shower ? "pass4_angle" : "pass4_angle_divert", p4_owner, seg1);
                 p4_owner->add_segment(seg1, true);
             }
@@ -6167,6 +6267,161 @@ void PatternAlgorithms::shower_clustering_with_nv(int acc_segment_id, IndexedSho
                                map_vertex_to_shower, used_shower_clusters);
             SPDLOG_LOGGER_DEBUG(s_log,
                 "pr99 ghost_member: {} member(s) dropped; maps rebuilt", n_ghost_dropped);
+        }
+    }
+
+    // doc sbnd_xin/docs/pr/123 round 1 (shower_pass4_prune_detached): the
+    // owner's over-reach line (decision 2026-08-28: detached-from-the-body
+    // OR track-like-beyond-it), applied to the FINAL shower geometry.  The
+    // per-absorb census measured that no absorb-time threshold separates --
+    // legitimate EM growth chains far fragments exactly like over-reach does
+    // (doc pr/123 sec 5) -- so the test runs here, on the finished object:
+    // single-linkage components of the membership at m_shower_pass4_prune_gap
+    // (owner: 40 cm); a component not containing the start segment is
+    // detached and leaves the shower.  Disposition (owner decision): the
+    // component RE-SEEDS as its own shower rooted at its member nearest the
+    // kept body (conn 3 near / 4 far, the in_other_clusters typing), so no
+    // segment is orphaned and the pi0 pairing sees the separated object.
+    // Placed with the dedup/detach/ghost family: after every pass that
+    // grows, merges, detaches or drops members, before the pr/119 census,
+    // the hadronic tag, the final kine recompute and the pi0 finders.
+    // C++ default false => no pass => byte-identical.
+    if (m_shower_pass4_prune_detached && m_shower_pass4_prune_gap > 0) {
+        std::vector<ShowerPtr> prune_order(showers.begin(), showers.end());
+        std::sort(prune_order.begin(), prune_order.end(), [](const ShowerPtr& a, const ShowerPtr& b) {
+            auto* sa = a->start_segment().get();
+            auto* sb = b->start_segment().get();
+            if (!sa || !sb) return sa < sb;
+            int cid_a = sa->cluster() ? sa->cluster()->get_cluster_id() : -1;
+            int cid_b = sb->cluster() ? sb->cluster()->get_cluster_id() : -1;
+            if (cid_a != cid_b) return cid_a < cid_b;
+            return sa->id() < sb->id();
+        });
+        int n_comp_pruned = 0;
+        std::vector<ShowerPtr> reseeded;
+        for (auto& shower : prune_order) {
+            SegmentPtr ss = shower->start_segment();
+            if (!ss || !ss->descriptor_valid()) continue;
+            if (std::abs(shower->get_particle_type()) == 13) continue;  // long-muon pseudo-shower
+            // Member list in stable view order, unique.
+            std::vector<SegmentPtr> mem;
+            {
+                std::unordered_set<size_t> seen;
+                for (auto edesc : ordered_edges(*shower, graph)) {
+                    SegmentPtr sg = graph[edesc].segment;
+                    if (!sg || !sg->descriptor_valid()) continue;
+                    if (seen.insert(graph[sg->get_descriptor()].index).second) mem.push_back(sg);
+                }
+            }
+            if (mem.size() < 2) continue;
+            const size_t nmem = mem.size();
+            size_t start_idx = nmem;
+            for (size_t i = 0; i < nmem; ++i) if (mem[i] == ss) { start_idx = i; break; }
+            if (start_idx == nmem) continue;
+            // Pairwise min fit-cloud distances; a member with no usable fit
+            // cloud is immune (forced into the kept component).
+            auto pair_dis_fn = [&](const SegmentPtr& a, const SegmentPtr& b) -> double {
+                double best = -1.0;
+                for (const auto& f : a->fits()) {
+                    if (!f.valid()) continue;
+                    const double d = segment_get_closest_point(b, f.point).first;
+                    if (d >= 0 && (best < 0 || d < best)) best = d;
+                }
+                return best;
+            };
+            std::vector<std::vector<double>> dmat(nmem, std::vector<double>(nmem, -1.0));
+            for (size_t i = 0; i < nmem; ++i)
+                for (size_t k = i + 1; k < nmem; ++k) {
+                    double d = pair_dis_fn(mem[i], mem[k]);
+                    if (d < 0) d = pair_dis_fn(mem[k], mem[i]);
+                    dmat[i][k] = dmat[k][i] = d;
+                }
+            // Union-find at the gap; cloudless pairs (d < 0) never link.
+            std::vector<size_t> parent(nmem);
+            for (size_t i = 0; i < nmem; ++i) parent[i] = i;
+            std::function<size_t(size_t)> find = [&](size_t x) {
+                while (parent[x] != x) { parent[x] = parent[parent[x]]; x = parent[x]; }
+                return x;
+            };
+            for (size_t i = 0; i < nmem; ++i)
+                for (size_t k = i + 1; k < nmem; ++k)
+                    if (dmat[i][k] >= 0 && dmat[i][k] < m_shower_pass4_prune_gap) {
+                        size_t pi_ = find(i), pk = find(k);
+                        if (pi_ != pk) parent[pi_] = pk;
+                    }
+            // A member whose distance to EVERY other member is unknown is
+            // immune: union it with the start component.
+            for (size_t i = 0; i < nmem; ++i) {
+                bool any = false;
+                for (size_t k = 0; k < nmem; ++k) if (k != i && dmat[i][k] >= 0) { any = true; break; }
+                if (!any) { size_t pi_ = find(i), pk = find(start_idx); if (pi_ != pk) parent[pi_] = pk; }
+            }
+            const size_t keep_root = find(start_idx);
+            std::map<size_t, std::vector<size_t>> comps;   // root -> member indices (index order = stable)
+            for (size_t i = 0; i < nmem; ++i) if (find(i) != keep_root) comps[find(i)].push_back(i);
+            if (comps.empty()) continue;
+            // Deterministic component order: by smallest member index.
+            std::vector<std::vector<size_t>> comp_list;
+            for (auto& [root_, idxs] : comps) comp_list.push_back(idxs);
+            std::sort(comp_list.begin(), comp_list.end(),
+                      [](const std::vector<size_t>& a, const std::vector<size_t>& b) { return a.front() < b.front(); });
+            const WireCell::Point sv_pt = shower->start_vertex()
+                ? (shower->start_vertex()->fit().valid() ? shower->start_vertex()->fit().point
+                                                         : shower->start_vertex()->wcpt().point)
+                : WireCell::Point(0, 0, 0);
+            for (const auto& comp : comp_list) {
+                std::vector<SegmentPtr> comp_segs;
+                for (size_t i : comp) comp_segs.push_back(mem[i]);
+                const int removed = shower->detach_member_set(comp_segs);
+                if (!removed) {
+                    SPDLOG_LOGGER_DEBUG(s_log,
+                        "pr123 pass4_prune: refuse shower_id={} comp_nseg={}",
+                        shower->get_shower_id(), comp_segs.size());
+                    continue;
+                }
+                // Root of the re-seed: component member nearest the KEPT
+                // body; min-index tie-break (dmat is symmetric and stable).
+                size_t root_i = comp.front();
+                double root_d = -1.0;
+                for (size_t i : comp) {
+                    double d_keep = -1.0;
+                    for (size_t k = 0; k < nmem; ++k) {
+                        if (find(k) != keep_root) continue;
+                        if (dmat[i][k] >= 0 && (d_keep < 0 || dmat[i][k] < d_keep)) d_keep = dmat[i][k];
+                    }
+                    if (d_keep >= 0 && (root_d < 0 || d_keep < root_d)) { root_d = d_keep; root_i = i; }
+                }
+                SegmentPtr root_sg = mem[root_i];
+                const double root_sv_dis = segment_get_closest_point(root_sg, sv_pt).first;
+                const int conn = (root_sv_dis >= 0 && root_sv_dis <= 80 * units::cm) ? 3 : 4;
+                ShowerPtr ns = std::make_shared<Shower>(graph);
+                if (shower->start_vertex()) ns->set_start_vertex(shower->start_vertex(), conn);
+                ns->set_start_segment(root_sg);
+                for (size_t i : comp) if (mem[i] != root_sg) ns->add_segment(mem[i], true);
+                reseeded.push_back(ns);
+                ++n_comp_pruned;
+                if (pr93_absorb_dbg()) {
+                    std::fprintf(stderr,
+                        "SHOWER_ABSORB PASS4_PRUNE shower=%d comp_root=%d comp_nseg=%zu "
+                        "gap_cm=%.1f root_body_dis_cm=%.2f conn=%d\n",
+                        pr91_seg_display_id(ss), pr91_seg_display_id(root_sg), comp.size(),
+                        m_shower_pass4_prune_gap / units::cm,
+                        root_d >= 0 ? root_d / units::cm : -1.0, conn);
+                }
+                SPDLOG_LOGGER_DEBUG(s_log,
+                    "pr123 pass4_prune: shower_id={} sheds {} detached seg(s), reseed root seg={} conn={}",
+                    shower->get_shower_id(), removed, root_sg->id(), conn);
+            }
+        }
+        if (n_comp_pruned) {
+            for (auto& ns : reseeded) showers.insert(ns);
+            update_shower_maps(showers, map_vertex_in_shower, map_segment_in_shower,
+                               map_vertex_to_shower, used_shower_clusters);
+            calculate_shower_kinematics(showers, vertices_in_long_muon, segments_in_long_muon,
+                                        graph, track_fitter, dv, particle_data, recomb_model);
+            SPDLOG_LOGGER_DEBUG(s_log,
+                "pr123 pass4_prune: {} detached component(s) re-seeded; {} shower(s) now",
+                n_comp_pruned, showers.size());
         }
     }
 
