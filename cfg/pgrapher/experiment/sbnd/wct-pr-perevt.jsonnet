@@ -1786,6 +1786,16 @@ function(
     shower_pass4_prune_detached = true,      // SBND PRODUCTION ON 2026-08-28 (doc pr/123 r1; owner G=40 + re-seed disposition; 141-set marked showers: med qF1 0.887->0.935, sum q_extra 4.86e7->2.69e7 (-45%), 8 showers to 1.000; zero orphans, 0 vertices moved, nusel identical; adjudication rows Bee idx 13/14)
     shower_pass4_prune_gap = 40,             // cm; C++ default 40. Emitted only when non-default AND prune on => byte-identical.
     shower_pass4_track_guard_len = 50,       // cm; SBND PRODUCTION ON 2026-08-28 (doc pr/123 r1; owner len>50; exactly 3 declines in 239 events: 171572 125cm mu qF1 0.096->1.000, 393505 108cm mu 0.273->1.000, 105074 83cm; zero labeled-good collateral)
+    // doc pr/124 front A -- 25-40 cm gap-band tier-2 prune (qualifier pair
+    // ang>40deg OR mdqdx>2.5 MIP measured zero-labeled-collateral on both
+    // label sets).  C++ defaults: gap2 0 (off), ang 40, mdqdx 2.5.
+    shower_pass4_prune_gap2 = 25,            // cm; SBND PRODUCTION ON 2026-08-28 night (doc pr/124 A; 141-set med qF1 0.935->0.949, sum q_extra 2.69e7->2.41e7, 406125 qF1 0.097->1.000, 168432 0.924->0.946, 386442->1.000; 98-set 76346 evt 0.596->0.817, 54332 0.616->0.730; q_miss delta only 423981 -0.008 (unmarked 3.56-MIP blob, Bee adjudication row); 0 vertices moved, nusel identical, owned net +0)
+    shower_pass4_prune2_ang = 40,            // deg; C++ default 40. Emitted only when non-default AND gap2 on.
+    shower_pass4_prune2_mdqdx = 2.5,         // x MIP; C++ default 2.5. Emitted only when non-default AND gap2 on.
+    // doc pr/124 front C -- pass3_cone track-pdg decline (post-flip census:
+    // 9 surviving labeled-OUT cone absorbs all track-pdg, IN track members
+    // top out at 14.1 cm).  C++ default 0 = off.
+    shower_pass3_cone_guard_len = 0,         // cm; C++ default 0 = off. Key omitted when 0 => byte-identical.  NOT flipped (doc pr/124 C): 94392 0.221->1.000 and 52693 0.766->1.000, BUT 415278 reshuffles tracks between its two labeled showers (0.959->0.884, 0.976->0.910) -- owner trade-off, morning decision table in doc sec C.3.
     // doc pr/99 round 3 -- C1 kine-charge cell-ownership dedup + C1b
     // prototype cloud-rebuild parity (168596 Enu double count) + A5
     // hadronic-shower re-type (315167/395148 labels).  C++ defaults
@@ -2828,6 +2838,10 @@ function(
         [if shower_pass4_prune_detached then 'shower_pass4_prune_detached']: true,
         [if shower_pass4_prune_detached && shower_pass4_prune_gap != 40 then 'shower_pass4_prune_gap']: shower_pass4_prune_gap,
         [if shower_pass4_track_guard_len != 0 then 'shower_pass4_track_guard_len']: shower_pass4_track_guard_len,
+        [if shower_pass4_prune_gap2 != 0 then 'shower_pass4_prune_gap2']: shower_pass4_prune_gap2,
+        [if shower_pass4_prune_gap2 != 0 && shower_pass4_prune2_ang != 40 then 'shower_pass4_prune2_ang']: shower_pass4_prune2_ang,
+        [if shower_pass4_prune_gap2 != 0 && shower_pass4_prune2_mdqdx != 2.5 then 'shower_pass4_prune2_mdqdx']: shower_pass4_prune2_mdqdx,
+        [if shower_pass3_cone_guard_len != 0 then 'shower_pass3_cone_guard_len']: shower_pass3_cone_guard_len,
         [if (if kine_charge_dedup == null then false else kine_charge_dedup) then 'kine_charge_dedup']: true,
         [if (if kine_charge_rebuild == null then false else kine_charge_rebuild) then 'kine_charge_rebuild']: true,
         [if (if kine_charge_track_ctx == null then false else kine_charge_track_ctx) then 'kine_charge_track_ctx']: true,
