@@ -1910,8 +1910,16 @@ function(
     // vertex, it is more likely to be part of neutrino.  For overclustering
     // they are generally not point to neutrino vertex."
     // C++ default 0 = no test.  0 => keys omitted => byte-identical.
-    kine_guard_freed_impact = 0,    // cm; perpendicular miss of the track's line at the nu vertex
-    kine_guard_freed_miss_deg = 90, // deg; 0 = runs straight out of the vertex, >90 = vertex is in FRONT
+    // SBND PRODUCTION ON 2026-08-29 (owner flip: "this is good, can flip on as
+    // default, also push then").  Verdicts this reproduces exactly, from the
+    // bee/pr129gf A/B: 171572 keeps its 304.75 MeV ("784.9 MeV should be the
+    // right energy"), 393505 drops 268.70 ("should be the lower energy"),
+    // 94392 unchanged ("is OK").  Measured margin on the pool's ENTIRE
+    // population of 3 objects: impact 4.16 / 6.59 cm kept vs 68.67 dropped.
+    // Footprint: 478/478 archives byte-identical, exactly ONE event's
+    // kine_reco_Enu moves (393505, -374.4 MeV), and the PR tree is unchanged.
+    kine_guard_freed_impact = 20,   // cm; perpendicular miss of the track's line at the nu vertex
+    kine_guard_freed_miss_deg = 30, // deg; 0 = runs straight out of the vertex, >90 = vertex is in FRONT
     // doc pr/128: kine twins of the PF completeness pair.  These move
     // kine_reco_Enu, so they are separate knobs, approved separately.
     // C++ defaults false; keys omitted when off => byte-identical.
