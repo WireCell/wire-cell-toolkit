@@ -7,6 +7,7 @@
 #include "WireCellUtil/GraphTools.h"  // doc pr/93 r4: mir() for the orphan-track pass
 #include <cmath>
 #include <cstdlib>
+#include <cstdio>   // doc pr/130 probe: std::fprintf
 #include <iostream>
 #include <sstream>
 
@@ -609,6 +610,102 @@ KineInfo PatternAlgorithms::fill_kine_tree(
         }
         if (n_orphan) {
             SPDLOG_LOGGER_INFO(s_log, "kine_count_orphan_tracks: {} orphan track(s) added", n_orphan);
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // doc sbnd_xin/docs/pr/130 -- BYTE-NEUTRAL PROBE, no decision change.
+    // kine_count_guard_freed (pr/123 r2, SBND ON) has exactly one predicate,
+    // the kPass4GuardFreed flag -- no cluster, length, distance or
+    // continuation term.  doc pr/129 found it counting 268.70 MeV of an
+    // owner-adjudicated cosmic into kine_reco_Enu (SBND 18255-393505: the
+    // segment chains end-to-end into one 295.0 cm object that never comes
+    // within 68.9 cm of the neutrino vertex).  This tape reports, for every
+    // candidate the pool is about to count, the four terms of the shipped
+    // continuation test (doc pr/128) -- the question being whether that test
+    // separates 393505 from 171572/94392 without any new threshold.
+    //
+    // Deliberately a SEPARATE block, not a `|| probe` widening of the
+    // production block below (CLAUDE.md sec 2: the shipped path stays
+    // byte-for-byte untouched).  The reference cloud is frozen at pool entry
+    // so same-pool candidates cannot qualify each other.
+    // Absent env var => nothing runs => byte-identical.
+    // -------------------------------------------------------------------------
+    const bool gf_probe = (std::getenv("WCT_KINE_GUARDFREED_PROBE") != nullptr);
+    if (gf_probe && main_vertex) {
+        std::vector<std::pair<size_t, SegmentPtr>> probe_cands;
+        for (auto edesc : mir(boost::edges(graph))) {
+            SegmentPtr seg = graph[edesc].segment;
+            if (!seg || !seg->descriptor_valid()) continue;
+            if (used_segments.count(seg)) continue;
+            if (map_sg_shower.count(seg)) continue;
+            if (!seg->flags_any(SegmentFlags::kPass4GuardFreed)) continue;
+            probe_cands.emplace_back(graph[edesc].index, seg);
+        }
+        std::sort(probe_cands.begin(), probe_cands.end(),
+                  [](const auto& a, const auto& b) { return a.first < b.first; });
+        if (!probe_cands.empty()) {
+            // Same reference cloud pr/128's pools test against: what this
+            // tree actually counts (conn-4 showers only when kept), plus
+            // every segment the traversal claimed.
+            std::vector<SegmentPtr> ref_segs;
+            {
+                IndexedSegmentSet counted;
+                for (const ShowerPtr& shower : showers) {
+                    if (shower->get_start_vertex_and_type().second > 3 &&
+                        !conn4_keep_showers.count(shower)) continue;
+                    IndexedVertexSet sv; IndexedSegmentSet ss;
+                    shower->fill_sets(sv, ss, /*flag_exclude_start_segment=*/false);
+                    counted.insert(ss.begin(), ss.end());
+                }
+                for (const auto& seg : used_segments) counted.insert(seg);
+                for (const auto& seg : counted)
+                    if (seg && !seg->fits().empty()) ref_segs.push_back(seg);
+            }
+            const auto* main_cl = main_vertex->cluster();
+            const Point mv_pt = main_vertex->fit().point;
+            for (const auto& [eidx, seg] : probe_cands) {
+                const auto g = segment_continuation_geometry(seg, ref_segs);
+                // Descriptive only (doc pr/129 ruled out a geometric bound):
+                // closest approach to the main vertex, and the candidate's
+                // own end-to-end extent.
+                double d_mainvtx = -1.0, extent = 0.0;
+                const auto& cf = seg->fits();
+                if (!cf.empty()) {
+                    d_mainvtx = 1e9;
+                    for (const auto& f : cf)
+                        d_mainvtx = std::min(d_mainvtx, (f.point - mv_pt).magnitude());
+                    extent = (cf.back().point - cf.front().point).magnitude();
+                }
+                std::fprintf(stderr,
+                    "PR130_GUARDFREED idx=%zu cluster=%d main_cluster=%d pdg=%d score=%.3f "
+                    "ke_mev=%.2f len_cm=%.1f extent_cm=%.1f d_mainvtx_cm=%.2f "
+                    "gap_cm=%.2f cand_end_cm=%.2f ref_end_cm=%.2f kink_deg=%.2f "
+                    "ref_cluster=%d ref_idx=%d ref_len_cm=%.1f ref_pdg=%d "
+                    "ref_ke_mev=%.2f ref_is_shower_start=%d ref_in_used=%d n_ref=%zu\n",
+                    eidx,
+                    seg->cluster() ? seg->cluster()->get_cluster_id() : -1,
+                    main_cl ? main_cl->get_cluster_id() : -1,
+                    (seg->particle_info() ? seg->particle_info()->pdg() : 0),
+                    seg->particle_score(),
+                    (seg->particle_info() ? seg->particle_info()->kinetic_energy() / units::MeV : 0.0),
+                    segment_track_length(seg) / units::cm,
+                    extent / units::cm,
+                    d_mainvtx < 0 ? -1.0 : d_mainvtx / units::cm,
+                    g.gap < 0 ? -1.0 : g.gap / units::cm,
+                    g.cand_end_dis > 1e8 ? -1.0 : g.cand_end_dis / units::cm,
+                    g.ref_end_dis  > 1e8 ? -1.0 : g.ref_end_dis  / units::cm,
+                    g.angle_deg,
+                    (g.ref && g.ref->cluster()) ? g.ref->cluster()->get_cluster_id() : -1,
+                    g.ref ? static_cast<int>(g.ref->get_graph_index()) : -1,
+                    g.ref ? segment_track_length(g.ref) / units::cm : -1.0,
+                    (g.ref && g.ref->particle_info()) ? g.ref->particle_info()->pdg() : 0,
+                    (g.ref && g.ref->particle_info())
+                        ? g.ref->particle_info()->kinetic_energy() / units::MeV : 0.0,
+                    (g.ref && map_sg_shower.count(g.ref)) ? 1 : 0,
+                    (g.ref && used_segments.count(g.ref)) ? 1 : 0,
+                    ref_segs.size());
+            }
         }
     }
 
