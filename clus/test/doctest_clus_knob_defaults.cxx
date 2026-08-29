@@ -197,6 +197,12 @@ TEST_CASE("clus knob defaults: TaggerCheckNeutrino switches are all OFF")
     CHECK_KNOB_NUM(cfg, "kine_long_muon_ratio_lo", 0.3);                      // inert unless mode 2
     CHECK_KNOB_NUM(cfg, "kine_long_muon_ratio_hi", 0.5);                      // inert unless mode 2
     CHECK_KNOB_BOOL(cfg, "long_muon_range_empty_chain_fallback", false);      // doc 84 r1 P1; false = byte-identical
+    CHECK_KNOB_BOOL(cfg, "long_muon_members_geometry", false);                // doc 84 r2; false = byte-identical
+    CHECK_KNOB_BOOL(cfg, "long_muon_cathode_bridge", false);                  // doc 84 r2; false = byte-identical
+    CHECK_KNOB_NUM(cfg, "long_muon_cathode_bridge_x", 0.0);                   // cm; inert unless bridge on
+    CHECK_KNOB_NUM(cfg, "long_muon_cathode_bridge_xcut", 6.0);                // cm; inert unless bridge on
+    CHECK_KNOB_NUM(cfg, "long_muon_cathode_bridge_gap", 20.0);                // cm; inert unless bridge on
+    CHECK_KNOB_NUM(cfg, "long_muon_cathode_bridge_angle", 25.0);              // deg; inert unless bridge on
     CHECK_KNOB_BOOL(cfg, "kine_mainvtx_used_guard", false);                   // pr/101 K5; false = byte-identical
     CHECK_KNOB_BOOL(cfg, "shower_hadronic_tag", false);                       // pr/99 r3 A5 (315167/395148); false = byte-identical
     CHECK_KNOB_NUM(cfg, "shower_hadronic_min_len", 10.0);                     // cm; inert while tag off

@@ -880,6 +880,12 @@ public:
         double m_kine_long_muon_ratio_lo{0.3};                      // inert unless mode 2
         double m_kine_long_muon_ratio_hi{0.5};                      // inert unless mode 2
         bool   m_long_muon_range_empty_chain_fallback{false};       // doc 84 round 1 (P1): range over muon-typed members when the chain missed the shower
+        bool   m_long_muon_members_geometry{false};                 // doc 84 round 2: add out-of-chain muon members to range/endpoint (313847, 281595)
+        bool   m_long_muon_cathode_bridge{false};                   // doc 84 round 2: absorb the cathode-split far half of a muon (53793, 177536, 77978)
+        double m_long_muon_cathode_bridge_x{0.0};                   // doc 84 round 2: cathode plane x [cm] (SBND seam at x=0, mirrors mcs_cathode_x)
+        double m_long_muon_cathode_bridge_xcut{6.0};                // doc 84 round 2: both facing ends within this of the cathode [cm]
+        double m_long_muon_cathode_bridge_gap{20.0};                // doc 84 round 2: max 3D gap between facing ends [cm] (census 6.5-13.9)
+        double m_long_muon_cathode_bridge_angle{25.0};              // doc 84 round 2: max continuation angle, gap vector AND partner tangent [deg] (census <= 14.9)
         bool   m_kine_mainvtx_used_guard{false};                    // doc pr/101 K5 (main-vertex member double count)
         bool   m_shower_hadronic_tag{false};                        // doc pr/99 r3 A5 (hadronic shower labeled e-)
         double m_shower_hadronic_min_len{10.0};                     // cm; scaled at copy; inert while tag off

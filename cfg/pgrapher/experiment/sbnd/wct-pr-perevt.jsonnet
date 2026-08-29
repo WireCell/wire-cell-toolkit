@@ -1797,6 +1797,22 @@ function(
     // sum the muon-typed members when the chain contributed nothing.
     // C++ default false.  Key omitted when off => byte-identical.
     long_muon_range_empty_chain_fallback = true,  // SBND PRODUCTION ON 2026-08-28 (doc 84 round 1 P1, owner pre-authorization)
+    // doc 84 round 2 -- the owner's Bee-scan findings on the round-1 sets.
+    // members_geometry: chain-truncated muons (313847 arrow at 38%, chain
+    // 98.5 vs 260.9 cm of muon members; 281595 130.0 vs 351.0; census 6/54
+    // muon showers) take length/endpoint/end_degree from ALL muon-typed
+    // members.  cathode_bridge: a cathode-split muon absorbs its facing far
+    // half (53793 shower pair 367+528 MeV; 177536/77978 bare far track);
+    // guards are geometric (ends within xcut of the cathode, far ends on
+    // opposite drift sides, gap, double angle-continuity), value knobs in
+    // cm/deg.  C++ defaults false/0.0/6.0/20.0/25.0.  Keys omitted when
+    // off/null => byte-identical.
+    long_muon_members_geometry = false,       // HOLD: owner hand-scan pending (doc 84 round 2)
+    long_muon_cathode_bridge = false,         // HOLD: owner hand-scan pending (doc 84 round 2)
+    long_muon_cathode_bridge_x = null,        // cm; C++ default 0.0 (SBND seam)
+    long_muon_cathode_bridge_xcut = null,     // cm; C++ default 6.0
+    long_muon_cathode_bridge_gap = null,      // cm; C++ default 20.0
+    long_muon_cathode_bridge_angle = null,    // deg; C++ default 25.0
     kine_mainvtx_used_guard = true,  // SBND PRODUCTION ON 2026-08-20 (doc pr/101 K5; latent on the manifest)
     shower_hadronic_tag = true,  // SBND PRODUCTION ON 2026-08-20 (doc pr/99 round 3, A5)
     shower_hadronic_min_len = null,   // cm; C++ default 10
@@ -2800,6 +2816,12 @@ function(
         [if kine_long_muon_ratio_lo != null then 'kine_long_muon_ratio_lo']: kine_long_muon_ratio_lo,
         [if kine_long_muon_ratio_hi != null then 'kine_long_muon_ratio_hi']: kine_long_muon_ratio_hi,
         [if long_muon_range_empty_chain_fallback then 'long_muon_range_empty_chain_fallback']: true,  // doc 84 r1 P1; C++ default false. Key omitted when off => byte-identical.
+        [if long_muon_members_geometry then 'long_muon_members_geometry']: true,  // doc 84 r2; C++ default false. Key omitted when off => byte-identical.
+        [if long_muon_cathode_bridge then 'long_muon_cathode_bridge']: true,  // doc 84 r2; C++ default false. Key omitted when off => byte-identical.
+        [if long_muon_cathode_bridge_x != null then 'long_muon_cathode_bridge_x']: long_muon_cathode_bridge_x,  // doc 84 r2; C++ default 0.0 cm
+        [if long_muon_cathode_bridge_xcut != null then 'long_muon_cathode_bridge_xcut']: long_muon_cathode_bridge_xcut,  // doc 84 r2; C++ default 6.0 cm
+        [if long_muon_cathode_bridge_gap != null then 'long_muon_cathode_bridge_gap']: long_muon_cathode_bridge_gap,  // doc 84 r2; C++ default 20.0 cm
+        [if long_muon_cathode_bridge_angle != null then 'long_muon_cathode_bridge_angle']: long_muon_cathode_bridge_angle,  // doc 84 r2; C++ default 25.0 deg
         [if (if kine_mainvtx_used_guard == null then false else kine_mainvtx_used_guard) then 'kine_mainvtx_used_guard']: true,
         [if (if shower_hadronic_tag == null then false else shower_hadronic_tag) then 'shower_hadronic_tag']: true,
         [if shower_hadronic_min_len != null then 'shower_hadronic_min_len']: shower_hadronic_min_len,

@@ -639,6 +639,12 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_kine_long_muon_ratio_lo                   = get(config, "kine_long_muon_ratio_lo",                   m_kine_long_muon_ratio_lo);
     m_kine_long_muon_ratio_hi                   = get(config, "kine_long_muon_ratio_hi",                   m_kine_long_muon_ratio_hi);
     m_long_muon_range_empty_chain_fallback      = get(config, "long_muon_range_empty_chain_fallback",      m_long_muon_range_empty_chain_fallback);  // doc 84 round 1 (P1)
+    m_long_muon_members_geometry                = get(config, "long_muon_members_geometry",                m_long_muon_members_geometry);             // doc 84 round 2
+    m_long_muon_cathode_bridge                  = get(config, "long_muon_cathode_bridge",                  m_long_muon_cathode_bridge);               // doc 84 round 2
+    m_long_muon_cathode_bridge_x                = get(config, "long_muon_cathode_bridge_x",                m_long_muon_cathode_bridge_x);             // doc 84 round 2, cm
+    m_long_muon_cathode_bridge_xcut             = get(config, "long_muon_cathode_bridge_xcut",             m_long_muon_cathode_bridge_xcut);          // doc 84 round 2, cm
+    m_long_muon_cathode_bridge_gap              = get(config, "long_muon_cathode_bridge_gap",              m_long_muon_cathode_bridge_gap);           // doc 84 round 2, cm
+    m_long_muon_cathode_bridge_angle            = get(config, "long_muon_cathode_bridge_angle",            m_long_muon_cathode_bridge_angle);         // doc 84 round 2, deg
     m_kine_mainvtx_used_guard                   = get(config, "kine_mainvtx_used_guard",                   m_kine_mainvtx_used_guard);
     m_shower_hadronic_tag                       = get(config, "shower_hadronic_tag",                       m_shower_hadronic_tag);
     m_shower_hadronic_min_len                   = get(config, "shower_hadronic_min_len",                   m_shower_hadronic_min_len);
@@ -1071,6 +1077,12 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["kine_long_muon_ratio_lo"]                   = m_kine_long_muon_ratio_lo;                   // inert unless mode 2
     cfg["kine_long_muon_ratio_hi"]                   = m_kine_long_muon_ratio_hi;                   // inert unless mode 2
     cfg["long_muon_range_empty_chain_fallback"]      = m_long_muon_range_empty_chain_fallback;      // doc 84 round 1 (P1); false = legacy (chainless muon shower keeps range 0)
+    cfg["long_muon_members_geometry"]                = m_long_muon_members_geometry;                // doc 84 round 2; false = legacy (chain-truncated range/endpoint)
+    cfg["long_muon_cathode_bridge"]                  = m_long_muon_cathode_bridge;                  // doc 84 round 2; false = legacy (cathode-split muon stays split)
+    cfg["long_muon_cathode_bridge_x"]                = m_long_muon_cathode_bridge_x;                // doc 84 round 2, cm; inert unless bridge on
+    cfg["long_muon_cathode_bridge_xcut"]             = m_long_muon_cathode_bridge_xcut;             // doc 84 round 2, cm; inert unless bridge on
+    cfg["long_muon_cathode_bridge_gap"]              = m_long_muon_cathode_bridge_gap;              // doc 84 round 2, cm; inert unless bridge on
+    cfg["long_muon_cathode_bridge_angle"]            = m_long_muon_cathode_bridge_angle;            // doc 84 round 2, deg; inert unless bridge on
     cfg["kine_mainvtx_used_guard"]                   = m_kine_mainvtx_used_guard;                   // doc pr/101 K5; false = legacy, byte-identical
     cfg["shower_hadronic_tag"]                       = m_shower_hadronic_tag;                       // doc pr/99 r3 A5; false = legacy (label 11 stays), byte-identical
     cfg["shower_hadronic_min_len"]                   = m_shower_hadronic_min_len;                   // cm; inert while tag off (doc pr/99 r3)
@@ -1123,6 +1135,221 @@ Configuration TaggerCheckNeutrino::default_configuration() const
 
     return cfg;
 }
+
+namespace {
+
+// doc 84 round 2 (long_muon_cathode_bridge).  A muon that crosses the SBND
+// cathode can reconstruct as two disconnected PR halves: the near half is a
+// |13|-typed shower whose member trajectory ends at |x| < ~5 cm of the seam,
+// and the far half is either a second muon-typed shower (mcp2k 53793:
+// 367 + 528 MeV) or a bare not-in-any-shower segment chain (177536: 98.1 cm;
+// 77978: 23.5 cm + a 9.8 cm Bragg stub typed 2212).  The halves do NOT share
+// a PR cluster_id (53793: 37 vs 12), so the guards are purely geometric:
+// both facing ends within `xcut` of the cathode plane, far ends on opposite
+// drift sides (near ends may jitter onto one side -- 77978's far half itself
+// crosses x=0), 3D gap < `gap`, and the continuation direction leaving the
+// muon end within `angle` of BOTH the gap vector and the partner's tangent.
+// Partner showers must themselves be |13|-typed (392901's 106 MeV EM shower
+// across the seam is excluded by design); bare partners are absorbed as a
+// BFS over connected not-in-any-shower segments and retyped to 13 so the
+// members-geometry accumulators count them.  Only called when the knob is
+// on => byte-identical off.
+struct CathodeBridgeCfg {
+    double x;       // cathode plane [internal units]
+    double xcut;    // end-to-plane admission window
+    double gap;     // max 3D gap between facing ends
+    double angle;   // max continuation angle [deg]
+};
+
+struct CathodeEnd {
+    ShowerPtr shower;      // nullptr for a bare segment
+    SegmentPtr seg;
+    WireCell::Point p;     // the end near the cathode
+    WireCell::Point far_p; // the other end of the segment
+    WireCell::Vector into; // unit vector from p into the segment
+};
+
+inline double cb_angle_deg(const WireCell::Vector& a, const WireCell::Vector& b)
+{
+    const double ma = a.magnitude(), mb = b.magnitude();
+    if (ma <= 0 || mb <= 0) return 181.0;   // degenerate: fails any cut
+    double c = a.dot(b) / (ma * mb);
+    c = std::max(-1.0, std::min(1.0, c));
+    return std::acos(c) * 180.0 / 3.141592653589793;
+}
+
+int long_muon_cathode_bridge_pass(PatternAlgorithms& pattern_algos, Graph& graph,
+    VertexPtr main_vertex, IndexedShowerSet& showers,
+    ShowerSegmentMap& map_segment_in_shower,
+    const Clus::ParticleDataSet::pointer& particle_data,
+    const IRecombinationModel::pointer& recomb_model,
+    const CathodeBridgeCfg& cfg, std::shared_ptr<spdlog::logger> log)
+{
+    const double min_len = 5 * units::cm;   // ignore sub-5cm fragments on either side
+    const double lever = 5 * units::cm;     // tangent lever arm at an end
+
+    // Member lists per shower.  map_segment_in_shower is index-ordered
+    // (SegmentIndexCmp), the grouping map is ShowerIndexCmp -- deterministic.
+    std::map<ShowerPtr, std::vector<SegmentPtr>, ShowerIndexCmp> members;
+    for (auto& [seg, sh] : map_segment_in_shower) {
+        if (seg && sh) members[sh].push_back(seg);
+    }
+    auto muon_member_length = [&](const ShowerPtr& sh) {
+        double tot = 0;
+        auto it = members.find(sh);
+        if (it == members.end()) return tot;
+        for (auto& seg : it->second) {
+            if (seg && seg->has_particle_info() &&
+                std::abs(seg->particle_info()->pdg()) == 13)
+                tot += segment_track_length(seg);
+        }
+        return tot;
+    };
+
+    auto collect_ends = [&](SegmentPtr seg, ShowerPtr sh, std::vector<CathodeEnd>& out) {
+        if (!seg) return;
+        if (segment_track_length(seg) < min_len) return;
+        const auto& fits = seg->fits();
+        if (fits.size() < 2) return;
+        const WireCell::Point ends[2] = { fits.front().point, fits.back().point };
+        for (int e = 0; e < 2; ++e) {
+            WireCell::Point p = ends[e];
+            if (std::abs(p.x() - cfg.x) >= cfg.xcut) continue;
+            WireCell::Vector into = segment_cal_dir_3vector(seg, p, lever);
+            if (into.magnitude() <= 0) continue;
+            out.push_back({sh, seg, p, ends[1 - e], into});
+        }
+    };
+
+    // Receiver ends: muon-typed member segments of |13|-typed showers.
+    std::vector<CathodeEnd> mu_ends;
+    for (auto& sh : showers) {
+        if (!sh || std::abs(sh->get_particle_type()) != 13) continue;
+        auto it = members.find(sh);
+        if (it == members.end()) continue;
+        for (auto& seg : it->second) {
+            if (!seg || !seg->has_particle_info()) continue;
+            if (std::abs(seg->particle_info()->pdg()) != 13) continue;
+            collect_ends(seg, sh, mu_ends);
+        }
+    }
+    if (mu_ends.empty()) return 0;
+
+    // Partner ends: bare (not-in-any-shower) segments, or members of OTHER
+    // |13|-typed showers.  ordered_edges => deterministic.
+    std::vector<CathodeEnd> partner_ends;
+    for (auto ed : WireCell::Clus::PR::ordered_edges(graph)) {
+        SegmentPtr seg = graph[ed].segment;
+        if (!seg) continue;
+        auto mit = map_segment_in_shower.find(seg);
+        ShowerPtr osh = (mit != map_segment_in_shower.end()) ? mit->second : nullptr;
+        if (osh && std::abs(osh->get_particle_type()) != 13) continue;
+        collect_ends(seg, osh, partner_ends);
+    }
+    if (partner_ends.empty()) return 0;
+
+    std::set<ShowerPtr, ShowerIndexCmp> gone;   // showers absorbed by a merge
+    std::set<size_t> taken;                     // graph indices of absorbed bare segments
+    int n_bridged = 0;
+
+    for (auto& me : mu_ends) {
+        if (gone.count(me.shower)) continue;
+        const CathodeEnd* best = nullptr;
+        double best_gap = cfg.gap;
+        for (auto& pe : partner_ends) {
+            if (pe.seg == me.seg) continue;
+            if (pe.shower && pe.shower == me.shower) continue;
+            if (pe.shower && gone.count(pe.shower)) continue;
+            if (!pe.shower && taken.count(pe.seg->get_graph_index())) continue;
+            if ((me.far_p.x() - cfg.x) * (pe.far_p.x() - cfg.x) > 0) continue;
+            WireCell::Vector gapv = pe.p - me.p;
+            const double gap = gapv.magnitude();
+            if (gap >= best_gap) continue;
+            const WireCell::Vector cont = -1.0 * me.into;
+            if (cb_angle_deg(cont, gapv) > cfg.angle) continue;
+            if (cb_angle_deg(cont, pe.into) > cfg.angle) continue;
+            best = &pe;
+            best_gap = gap;
+        }
+        if (!best) continue;
+
+        if (best->shower) {
+            // Shower partner: decide the keeper -- main-vertex attachment
+            // first, then the longer muon membership, then the smaller id.
+            ShowerPtr a = me.shower, b = best->shower;
+            auto rank = [&](const ShowerPtr& s) {
+                return std::make_tuple(s->start_vertex() == main_vertex ? 0 : 1,
+                                       -muon_member_length(s),
+                                       s->get_shower_id());
+            };
+            ShowerPtr keep = (rank(a) <= rank(b)) ? a : b;
+            ShowerPtr drop = (keep == a) ? b : a;
+            SPDLOG_LOGGER_DEBUG(log,
+                "long_muon_cathode_bridge: merge shower sid={} (mu_len={:.1f}cm) <- sid={} "
+                "(mu_len={:.1f}cm) gap={:.1f}cm ends x=({:.1f},{:.1f})cm",
+                keep->get_shower_id(), muon_member_length(keep) / units::cm,
+                drop->get_shower_id(), muon_member_length(drop) / units::cm,
+                best_gap / units::cm, me.p.x() / units::cm, best->p.x() / units::cm);
+            keep->add_shower(*drop);
+            showers.erase(drop);
+            gone.insert(drop);
+            keep->set_flag_kinematics(false);
+        }
+        else {
+            // Bare partner: absorb the connected not-in-any-shower chain,
+            // retyping to 13 so range/endpoint accumulators count it (the
+            // 77978 far half carries a 9.8 cm Bragg stub typed 2212 beyond
+            // the 23.5 cm muon-typed piece).
+            std::vector<SegmentPtr> chain;
+            std::set<size_t> seen;
+            std::vector<SegmentPtr> todo{best->seg};
+            seen.insert(best->seg->get_graph_index());
+            while (!todo.empty()) {
+                SegmentPtr cur = todo.back();
+                todo.pop_back();
+                chain.push_back(cur);
+                auto [va, vb] = find_vertices(graph, cur);
+                for (auto* vp : {&va, &vb}) {
+                    VertexPtr v = *vp;
+                    if (!v || !v->descriptor_valid()) continue;
+                    for (auto ed : sorted_out_edges(v->get_descriptor(), graph)) {
+                        SegmentPtr nx = graph[ed].segment;
+                        if (!nx || seen.count(nx->get_graph_index())) continue;
+                        if (map_segment_in_shower.count(nx)) continue;   // stays bare-only
+                        if (taken.count(nx->get_graph_index())) continue;
+                        seen.insert(nx->get_graph_index());
+                        todo.push_back(nx);
+                    }
+                }
+                if (chain.size() > 64) break;   // safety valve; never seen in census
+            }
+            double absorbed_len = 0;
+            for (auto& seg : chain) {
+                if (!seg->has_particle_info() ||
+                    std::abs(seg->particle_info()->pdg()) != 13) {
+                    auto mom = segment_cal_4mom(seg, 13, particle_data, recomb_model,
+                                                pattern_algos.m_mip_dqdx);
+                    seg->particle_info(std::make_shared<Aux::ParticleInfo>(
+                        13, particle_data->get_particle_mass(13),
+                        particle_data->pdg_to_name(13), mom));
+                }
+                me.shower->add_segment(seg, true);
+                taken.insert(seg->get_graph_index());
+                absorbed_len += segment_track_length(seg);
+            }
+            SPDLOG_LOGGER_DEBUG(log,
+                "long_muon_cathode_bridge: absorb bare chain into sid={} nseg={} len={:.1f}cm "
+                "gap={:.1f}cm ends x=({:.1f},{:.1f})cm",
+                me.shower->get_shower_id(), chain.size(), absorbed_len / units::cm,
+                best_gap / units::cm, me.p.x() / units::cm, best->p.x() / units::cm);
+            me.shower->set_flag_kinematics(false);
+        }
+        ++n_bridged;
+    }
+    return n_bridged;
+}
+
+}  // namespace
 
 void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
 {
@@ -2042,6 +2269,7 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
         pattern_algos.m_kine_charge.long_muon_ratio_lo  = m_kine_long_muon_ratio_lo;
         pattern_algos.m_kine_charge.long_muon_ratio_hi  = m_kine_long_muon_ratio_hi;
         pattern_algos.m_kine_charge.long_muon_range_fallback = m_long_muon_range_empty_chain_fallback;  // doc 84 round 1 (P1)
+        pattern_algos.m_kine_charge.long_muon_members_geometry = m_long_muon_members_geometry;          // doc 84 round 2
         pattern_algos.m_kine_charge.mainvtx_used_guard  = m_kine_mainvtx_used_guard;                    // doc pr/101 K5
         // doc sbnd_xin/docs/pr/36 §10 tagger-stage knobs (F4/F5/F6/F7).
         pattern_algos.m_tagger_ordered_segment_sets  = m_tagger_ordered_segment_sets;
@@ -2639,6 +2867,39 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
                     SPDLOG_LOGGER_DEBUG(log,
                         "long_muon_range_empty_chain_fallback: recomputed kinematics for {} retyped muon shower(s)",
                         n_stale);
+                }
+            }
+
+            // doc 84 round 2 (long_muon_cathode_bridge) -- docstring at the
+            // helper above.  Runs after the labels and the round-1 fallback
+            // recompute settle, so the |13| typing it keys on is final.  The
+            // absorbed far half joins the SHOWER only, deliberately not
+            // segments_in_long_muon: tagger features (numu muon_length) and
+            // the MCS chain keep their legacy inputs, so nusel stays put and
+            // the change is confined to kine/PF output.  Knob off => no pass,
+            // byte-identical.
+            if (m_long_muon_cathode_bridge) {
+                const CathodeBridgeCfg cb_cfg{
+                    m_long_muon_cathode_bridge_x * units::cm,
+                    m_long_muon_cathode_bridge_xcut * units::cm,
+                    m_long_muon_cathode_bridge_gap * units::cm,
+                    m_long_muon_cathode_bridge_angle};
+                const int n_bridged = long_muon_cathode_bridge_pass(
+                    pattern_algos, *pr_graph, final_main_vertex, showers,
+                    map_segment_in_shower, particle_data(), m_recomb_model,
+                    cb_cfg, log);
+                if (n_bridged > 0) {
+                    pattern_algos.update_shower_maps(showers, map_vertex_in_shower,
+                                                     map_segment_in_shower,
+                                                     map_vertex_to_shower,
+                                                     used_shower_clusters);
+                    pattern_algos.calculate_shower_kinematics(showers, vertices_in_long_muon,
+                                                              segments_in_long_muon, *pr_graph,
+                                                              *track_fitter, m_dv,
+                                                              particle_data(), m_recomb_model);
+                    SPDLOG_LOGGER_DEBUG(log,
+                        "long_muon_cathode_bridge: {} bridge(s), shower maps + kinematics recomputed",
+                        n_bridged);
                 }
             }
         }

@@ -147,6 +147,16 @@ namespace WireCell::Clus::PR {
         /// member segments instead.  Config key
         /// long_muon_range_empty_chain_fallback; absent => byte-identical.
         bool   long_muon_range_fallback{false};
+        /// doc 84 round 2.  Same dispatch-vs-membership gap as above, partial
+        /// form: the chain reached the shower but stopped early, so range,
+        /// end point and end_degree describe a prefix of the muon (SBND
+        /// 313847 chain 98.5 cm vs 260.9 cm of muon-typed members, Bee arrow
+        /// at 38%; 281595 130.0 vs 351.0; census 6/54 muon showers over the
+        /// 129-event round-2 manifest).  true = when muon-typed members lie
+        /// outside the chain, add their length and vertices to the range /
+        /// endpoint accumulators (dQdx already summed all members).  Config
+        /// key long_muon_members_geometry; absent => byte-identical.
+        bool   long_muon_members_geometry{false};
         /// doc pr/101 (K5).  The fill_kine_tree main-vertex pass lacks the
         /// `used_segments` guard its BFS has (prototype NeutrinoID_kine.h:72
         /// vs :130), so a shower MEMBER segment attached to the main vertex

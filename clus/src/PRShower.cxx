@@ -1781,7 +1781,7 @@ namespace WireCell::Clus::PR {
         //           << std::endl;
     }
 
-    void Shower::calculate_kinematics_long_muon(IndexedSegmentSet& segments_in_muons, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, bool exclude_start_vertex_from_endpoint, int best_mode, double ratio_lo, double ratio_hi, bool range_empty_chain_fallback){
+    void Shower::calculate_kinematics_long_muon(IndexedSegmentSet& segments_in_muons, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, bool exclude_start_vertex_from_endpoint, int best_mode, double ratio_lo, double ratio_hi, bool range_empty_chain_fallback, bool members_geometry){
         // Invariant: this function is only called when shower->get_particle_type() == 13
         // (NeutrinoEnergyReco.cxx), which requires shower->set_particle_type(13) to have been
         // called (NeutrinoShowerClustering.cxx:118), which in turn requires m_start_segment to
@@ -1810,9 +1810,16 @@ namespace WireCell::Clus::PR {
         // 0 and kenergy_range is silently 0 (28/242 SBND showers, doc 84 sec
         // 3.2, worst 332.8 cm).  Knob-on fallback: sum the muon-typed member
         // segments instead.  Knob off => accumulators stay empty, byte-identical.
+        // doc 84 round 2 (long_muon_members_geometry): the same accumulators
+        // also serve the PARTIAL-truncation case -- the chain reached this
+        // shower but stopped early (SBND 313847: chain 98.5 cm vs 260.9 cm of
+        // muon-typed members; 281595: 130.0 vs 351.0).  Knob-on, the members
+        // outside the chain are ADDED to the chain sum instead of replacing
+        // an empty one.  Both knobs off => accumulators stay empty.
         double fb_length = 0;
         std::map<size_t, VertexPtr> fb_vertices_by_index;
         bool used_fallback = false;
+        bool used_members = false;
 
         for (auto edesc : ordered_edges(*this, m_full_graph)) {
             if (!has_edge(edesc)) continue;
@@ -1826,7 +1833,7 @@ namespace WireCell::Clus::PR {
                 if (va) muon_vertices_by_index[m_full_graph[va->get_descriptor()].index] = va;
                 if (vb) muon_vertices_by_index[m_full_graph[vb->get_descriptor()].index] = vb;
             }
-            else if (range_empty_chain_fallback && seg->has_particle_info()
+            else if ((range_empty_chain_fallback || members_geometry) && seg->has_particle_info()
                      && std::abs(seg->particle_info()->pdg()) == 13) {
                 // doc 84 round 1: muon-typed member NOT in the chain set.  Only
                 // consumed below when the chain contributed nothing at all.
@@ -1849,6 +1856,15 @@ namespace WireCell::Clus::PR {
             total_length = fb_length;
             muon_vertices_by_index.insert(fb_vertices_by_index.begin(), fb_vertices_by_index.end());
             used_fallback = true;
+        }
+        else if (members_geometry && fb_length > 0) {
+            // doc 84 round 2: chain present but truncated -- muon-typed
+            // members outside it extend the range sum, and their vertices
+            // join the endpoint search so end_point / end_degree describe
+            // the full muon rather than the chain prefix.
+            total_length += fb_length;
+            muon_vertices_by_index.insert(fb_vertices_by_index.begin(), fb_vertices_by_index.end());
+            used_members = true;
         }
 
         // Calculate kinetic energies
@@ -1900,10 +1916,11 @@ namespace WireCell::Clus::PR {
             if (use_range) data.kenergy_best = data.kenergy_range;
             SPDLOG_LOGGER_DEBUG(s_log,
                 "kine_long_muon: shower id={} nseg_chain={} L_cm={:.1f} range={:.1f} dqdx={:.1f} ratio={:.2f} "
-                "end_degree={} mode={} used={} fallback={}",
+                "end_degree={} mode={} used={} fallback={} members={}",
                 m_shower_id, muon_vertices_by_index.size() ? muon_vertices_by_index.size() - 1 : 0,
                 total_length / units::cm, data.kenergy_range / units::MeV, data.kenergy_dQdx / units::MeV,
-                ratio, end_degree, best_mode, use_range ? "range" : "dqdx", used_fallback ? 1 : 0);
+                ratio, end_degree, best_mode, use_range ? "range" : "dqdx", used_fallback ? 1 : 0,
+                used_members ? 1 : 0);
         }
 
         // Set end point to the farthest vertex
