@@ -2482,12 +2482,28 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
                                   fwd ? p_back : p_front);
             node["icon"] = "jstree-file";
             if (!keep_node(pi->pdg(), pi->kinetic_energy(), node)) continue;
-            particles.append(node);
+            // Owner correction 2026-08-28 (ON-behavior corrected in place,
+            // the pf/F2 precedent -- no new knob): the freed track is NOT
+            // connected to the neutrino vertex directly, so it must not
+            // hang at root.  Render it the way every displaced object is
+            // rendered (append_pseudo_shower convention): a pseudo-NEUTRON
+            // carrier from the main vertex to the track's near end, with
+            // the track as its single leaf -- nu -> n -> mu.
+            const std::string nname = pf_pdg_to_name(2112, cfg.prototype_names,
+                                                     cfg.pf_pdg_name_prototype_fallback);
+            WireCell::Point gstart = main_vertex ? get_vtx_pt(main_vertex)
+                                                 : (fwd ? p_front : p_back);
+            const WireCell::Point& near_pt = fwd ? p_front : p_back;
+            const int pseudo_id = next_id++;
+            auto pseudo = make_node(pseudo_id, nname + "  " + ke_str + " MeV",
+                                    gstart, near_pt);
+            pseudo["children"].append(node);
+            particles.append(pseudo);
             const auto* cl = seg->cluster();
             SPDLOG_LOGGER_INFO(log,
-                "pr123 pf-orphan-guard-freed: EMIT root seg={} cluster={} pdg={} "
+                "pr123 pf-orphan-guard-freed: EMIT pseudo-n id={} -> seg={} cluster={} pdg={} "
                 "ke_mev={:.2f} len_cm={:.1f}",
-                seg_display_id(seg),
+                pseudo_id, seg_display_id(seg),
                 cl ? std::to_string(cl->get_cluster_id()) : "?",
                 pi->pdg(), pi->kinetic_energy() / units::MeV,
                 PR::segment_track_length(seg) / units::cm);
