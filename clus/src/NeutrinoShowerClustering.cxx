@@ -560,14 +560,52 @@ void PatternAlgorithms::stem_backfill(Graph& graph, VertexPtr main_vertex,
                     if (ax.magnitude() < 0.001 || v.magnitude() < 0.001) return -1.0;
                     return std::acos(std::clamp(ax.dot(v) / (ax.magnitude() * v.magnitude()), -1.0, 1.0)) / M_PI * 180.0;
                 };
+                // doc sbnd_xin/docs/pr/130 part 5 -- VERTEX-RELATIVE geometry.
+                // Part 4 measured every feature above (pdg, len, dQ/dx ratio,
+                // ang15, ang60, dist) as interleaved between the absorb-wanted
+                // and decline-ok classes over the guard's COMPLETE 8-candidate
+                // firing set, so no admission-time cut separates them.  Every
+                // one of those is local to the shower/stem pair; none
+                // references the neutrino vertex.  The physics that is missing:
+                // a stem that is the shower's true PARENT lies BETWEEN the
+                // vertex and the shower, so it is closer to the vertex than the
+                // shower start (toward > 0) and sits on nearly the same ray out
+                // of the vertex (vang small); a separate hadronic prong sits AT
+                // the vertex and leaves along a different ray (vang large).
+                // Same env gate, stderr only -- no effect on emitted bytes.
+                double dvtx_start = -1.0, dvtx_stem = -1.0, vang = -1.0, toward = 0.0;
+                if (main_vertex && main_vertex->descriptor_valid()) {
+                    const WireCell::Point vp = main_vertex->fit().point;
+                    const WireCell::Vector a(sp0.x() - vp.x(), sp0.y() - vp.y(), sp0.z() - vp.z());
+                    dvtx_start = a.magnitude();
+                    WireCell::Point best;
+                    for (const auto& f : stem->fits()) {
+                        const WireCell::Vector d(f.point.x() - vp.x(), f.point.y() - vp.y(),
+                                                 f.point.z() - vp.z());
+                        const double dm = d.magnitude();
+                        if (dvtx_stem < 0 || dm < dvtx_stem) { dvtx_stem = dm; best = f.point; }
+                    }
+                    if (dvtx_stem >= 0) {
+                        // >0 => absorbing this stem pulls the shower start
+                        // TOWARD the neutrino vertex.
+                        toward = dvtx_start - dvtx_stem;
+                        const WireCell::Vector b(best.x() - vp.x(), best.y() - vp.y(),
+                                                 best.z() - vp.z());
+                        vang = p120_ang(a, b);
+                    }
+                }
                 std::fprintf(stderr,
                              "SHOWER_ABSORB P120_STEM shower_start_seg=%d conn=%d seg=%d pdg=%d "
-                             "len_cm=%.2f ratio=%.2f ok=%d ang15=%.2f ang60=%.2f dist_cm=%.2f\n",
+                             "len_cm=%.2f ratio=%.2f ok=%d ang15=%.2f ang60=%.2f dist_cm=%.2f "
+                             "dvtx_start_cm=%.2f dvtx_stem_cm=%.2f toward_cm=%.2f vang=%.2f\n",
                              pr91_seg_display_id(start_seg), conn_type, pr91_seg_display_id(stem),
                              stem->has_particle_info() && stem->particle_info()
                                  ? stem->particle_info()->pdg() : 0,
                              len / units::cm, ratio, (int) ok,
-                             p120_ang(s15, sv), p120_ang(s60, sv), sdist / units::cm);
+                             p120_ang(s15, sv), p120_ang(s60, sv), sdist / units::cm,
+                             dvtx_start < 0 ? -1.0 : dvtx_start / units::cm,
+                             dvtx_stem  < 0 ? -1.0 : dvtx_stem  / units::cm,
+                             toward / units::cm, vang);
             }
             if (!ok) break;
             // doc sbnd_xin/docs/pr/120 -- backward-stem guard.  Measured over
