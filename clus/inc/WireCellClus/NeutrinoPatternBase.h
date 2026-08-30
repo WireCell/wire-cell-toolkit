@@ -2223,6 +2223,7 @@ namespace WireCell::Clus::PR {
         double m_shower_pass4_track_guard_len{0};        ///< doc pr/123 r1; 0 = no length guard
         double m_shower_pass4_prox_guard_len{0};         ///< doc pr/130 item 1b; 0 = pass4_proximity unguarded (legacy)
         double m_shower_pass3_backfill_guard_len{0};     ///< doc pr/130 item 1b; 0 = pass3 sibling backfill ignores pr/124's decline (legacy)
+        double m_stem_backfill_back_dvtx{0};             ///< doc pr/130 item B; 0 = back guard declines regardless of shower-start distance to the nu vertex (legacy)
         // doc pr/125 (owner 2026-08-29): same-vertex track-typed fragment
         // absorb (SBND 18259-37112) + vertex-connected satellite absorb
         // (SBND 18255-69314).  false (defaults) => no pass => byte-identical.

@@ -629,6 +629,47 @@ void PatternAlgorithms::stem_backfill(Graph& graph, VertexPtr main_vertex,
                     gang = std::acos(std::clamp(g15.dot(gv) / (g15.magnitude() * gv.magnitude()), -1.0, 1.0)) / M_PI * 180.0;
                 }
                 (void) gdist;
+                // doc sbnd_xin/docs/pr/130 item B (stem_backfill_back_dvtx):
+                // the owner ruled the guard WRONG on 2 of the 8 candidates it
+                // can reach -- 292643 (declines an absorb that should happen,
+                // -234.0 MeV) and 179369 (the decline leaves a spurious pi0,
+                // +376.0 MeV).  The separator is the distance from the SHOWER
+                // START to the neutrino vertex: a shower that starts far from
+                // the vertex is detached, so a backward stem is plausibly its
+                // parent; one that starts at the vertex has a backward stem
+                // that is a separate prong.
+                //
+                // The 239-event P120_STEM census at the 2026-08-29 production
+                // point proves this population is CLOSED: `if (!ok) break;`
+                // above means the guard only ever sees chains the MIP window
+                // accepted, and there are exactly 9 such rows in 8 events over
+                // both manifests -- precisely the set the owner adjudicated.
+                // The 10 further rows meeting the angle condition all carry
+                // ok=0 and never reach here.  So this knob cannot touch an
+                // unadjudicated candidate: absorb-wanted are 46.84 and 88.11
+                // cm, every decline-ok is <= 44.34 cm.  0 = off = legacy.
+                if (m_stem_backfill_back_dvtx > 0 && main_vertex
+                    && main_vertex->descriptor_valid()) {
+                    const WireCell::Point mvp = main_vertex->fit().point;
+                    const WireCell::Vector dv(gsp.x() - mvp.x(), gsp.y() - mvp.y(),
+                                              gsp.z() - mvp.z());
+                    if (dv.magnitude() > m_stem_backfill_back_dvtx) {
+                        if (pr93_absorb_dbg()) {
+                            std::fprintf(stderr,
+                                "SHOWER_ABSORB P130_BACK_DVTX shower_start_seg=%d seg=%d "
+                                "dvtx_start_cm=%.2f > %.2f -- decline suppressed\n",
+                                pr91_seg_display_id(start_seg), pr91_seg_display_id(stem),
+                                dv.magnitude() / units::cm,
+                                m_stem_backfill_back_dvtx / units::cm);
+                        }
+                        SPDLOG_LOGGER_DEBUG(s_log,
+                            "pr130 stem_backfill_back_dvtx: suppress decline seg={} "
+                            "dvtx_start={:.1f}cm > {:.1f}cm",
+                            pr91_seg_display_id(stem), dv.magnitude() / units::cm,
+                            m_stem_backfill_back_dvtx / units::cm);
+                        gang = -1.0;   // fall through to the normal absorb path
+                    }
+                }
                 if (gang >= 0 && gang > m_stem_backfill_back_ang) {
                     SPDLOG_LOGGER_DEBUG(s_log,
                         "pr120 stem_backfill_back_guard: decline shower(start gidx={} conn={}) "

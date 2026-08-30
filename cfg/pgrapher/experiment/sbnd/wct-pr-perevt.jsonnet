@@ -1818,6 +1818,12 @@ function(
     // C++ default 0 for both.  Key omitted when 0 => byte-identical pre-fix config.
     shower_pass4_prox_guard_len = 50,        // cm; SBND PRODUCTION ON 2026-08-29 (owner flip on the bee/pr130r3 A/B: "I think these two are OK").  Threshold is pr/123's own value at the sibling pass4_angle seat, not a refit.  pass4_proximity had no track guard at all; census: 4 segments already declined by pr/93's cone_absorb_guard were re-admitted here (100222 seg 14003 = 110cm mu -> EM shower 2523->2203 MeV and a standalone mu- 271 appears; 176502 segs 20008/20013/109141).  C++ default 0 = off.
     shower_pass3_backfill_guard_len = 15,    // cm; SBND PRODUCTION ON 2026-08-29 (same flip).  Threshold is pr/124's own value at the sibling pass3_cone seat.  The pass3 sibling backfill honoured pr/93's predicate but not pr/124's, re-adopting a declined track-pdg segment into the SAME shower and force-relabelling it pdg 11; census: 6 segments in 5 events (137238, 175896, 176502, 396222 x2, 415278).  C++ default 0 = off.
+    // doc pr/130 item B -- the back guard's two owner-ruled errors.  The
+    // guard's reachable population is CLOSED at 8 events (`if (!ok) break;`
+    // precedes it), all of them adjudicated, so this cannot touch an
+    // unadjudicated candidate.  C++ default 0.  Key omitted when 0 =>
+    // byte-identical pre-fix config.
+    stem_backfill_back_dvtx = 0,             // cm; 0 = OFF (legacy).  Suppress the backward-stem decline when the SHOWER START is further than this from the nu vertex.  Measured: absorb-wanted 46.84 (292643) and 88.11 (179369); every decline-ok <= 44.34.
     // doc pr/124 front A -- 25-40 cm gap-band tier-2 prune (qualifier pair
     // ang>40deg OR mdqdx>2.5 MIP measured zero-labeled-collateral on both
     // label sets).  C++ defaults: gap2 0 (off), ang 40, mdqdx 2.5.
@@ -2943,6 +2949,7 @@ function(
         [if shower_pass4_track_guard_len != 0 then 'shower_pass4_track_guard_len']: shower_pass4_track_guard_len,
         [if shower_pass4_prox_guard_len != 0 then 'shower_pass4_prox_guard_len']: shower_pass4_prox_guard_len,
         [if shower_pass3_backfill_guard_len != 0 then 'shower_pass3_backfill_guard_len']: shower_pass3_backfill_guard_len,
+        [if stem_backfill_back_dvtx != 0 then 'stem_backfill_back_dvtx']: stem_backfill_back_dvtx,
         [if shower_pass4_prune_gap2 != 0 then 'shower_pass4_prune_gap2']: shower_pass4_prune_gap2,
         [if shower_pass4_prune_gap2 != 0 && shower_pass4_prune2_ang != 40 then 'shower_pass4_prune2_ang']: shower_pass4_prune2_ang,
         [if shower_pass4_prune_gap2 != 0 && shower_pass4_prune2_mdqdx != 2.5 then 'shower_pass4_prune2_mdqdx']: shower_pass4_prune2_mdqdx,

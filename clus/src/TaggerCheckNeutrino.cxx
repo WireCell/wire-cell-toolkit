@@ -706,6 +706,7 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_shower_pass4_track_guard_len              = get(config, "shower_pass4_track_guard_len",              m_shower_pass4_track_guard_len);           // doc pr/123 r1, cm
     m_shower_pass4_prox_guard_len               = get(config, "shower_pass4_prox_guard_len",               m_shower_pass4_prox_guard_len);            // doc pr/130 item 1b, cm
     m_shower_pass3_backfill_guard_len           = get(config, "shower_pass3_backfill_guard_len",           m_shower_pass3_backfill_guard_len);        // doc pr/130 item 1b, cm
+    m_stem_backfill_back_dvtx                   = get(config, "stem_backfill_back_dvtx",                   m_stem_backfill_back_dvtx);                // doc pr/130 item B, cm
     m_kine_count_guard_freed                    = get(config, "kine_count_guard_freed",                    m_kine_count_guard_freed);                 // doc pr/123 r2
     m_kine_guard_freed_impact                   = get(config, "kine_guard_freed_impact",                   m_kine_guard_freed_impact);                // doc pr/129
     m_kine_guard_freed_miss_deg                 = get(config, "kine_guard_freed_miss_deg",                 m_kine_guard_freed_miss_deg);              // doc pr/129
@@ -1172,6 +1173,7 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["shower_pass4_track_guard_len"]              = m_shower_pass4_track_guard_len;              // doc pr/123 r1; cm, 0 = no guard, byte-identical
     cfg["shower_pass4_prox_guard_len"]               = m_shower_pass4_prox_guard_len;               // doc pr/130 item 1b; cm, 0 = unguarded, byte-identical
     cfg["shower_pass3_backfill_guard_len"]           = m_shower_pass3_backfill_guard_len;           // doc pr/130 item 1b; cm, 0 = unguarded, byte-identical
+    cfg["stem_backfill_back_dvtx"]                   = m_stem_backfill_back_dvtx;                   // doc pr/130 item B; cm, 0 = off, byte-identical
     cfg["kine_count_guard_freed"]                    = m_kine_count_guard_freed;                    // doc pr/123 r2; false = guard-freed tracks uncounted, byte-identical
     cfg["kine_guard_freed_impact"]                   = m_kine_guard_freed_impact;                   // doc pr/129; 0 = pointing test off, byte-identical
     cfg["kine_guard_freed_miss_deg"]                 = m_kine_guard_freed_miss_deg;                 // doc pr/129
@@ -2605,6 +2607,7 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
         pattern_algos.m_shower_pass4_track_guard_len              = m_shower_pass4_track_guard_len * units::cm;  // doc pr/123 r1, cm -> internal
         pattern_algos.m_shower_pass4_prox_guard_len               = m_shower_pass4_prox_guard_len * units::cm;   // doc pr/130 item 1b, cm -> internal
         pattern_algos.m_shower_pass3_backfill_guard_len           = m_shower_pass3_backfill_guard_len * units::cm; // doc pr/130 item 1b, cm -> internal
+        pattern_algos.m_stem_backfill_back_dvtx                   = m_stem_backfill_back_dvtx * units::cm;         // doc pr/130 item B, cm -> internal
         pattern_algos.m_kine_count_guard_freed                    = m_kine_count_guard_freed;                    // doc pr/123 r2
         pattern_algos.m_kine_guard_freed_impact                   = m_kine_guard_freed_impact * units::cm;       // doc pr/129
         pattern_algos.m_kine_guard_freed_miss_deg                 = m_kine_guard_freed_miss_deg;                 // doc pr/129
