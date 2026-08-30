@@ -106,6 +106,18 @@ static inline bool pr132_pi0_dbg()
     static const bool dbg = std::getenv("WCT_PI0_PAIR_DEBUG") != nullptr;
     return dbg;
 }
+// doc pr/132 round 10: the opening-angle census tape.  For every recorded
+// path-1 pair, prints the LEGACY pair mass/angle (local_dirs: init_dir for
+// attached, start-vtx ray for associated) next to the centroid-ray variant
+// (vertex -> associate-cloud centroid for both members).  Round 7 measured
+// the below-window true-pair population as angle-compressed (103798:
+// charges 0.96/1.02 of label, mass 74) -- this tape measures whether the
+// centroid ray decompresses it.  stderr only, byte-neutral.
+static inline bool pr132_pi0_angle_dbg()
+{
+    static const bool dbg = std::getenv("WCT_PI0_ANGLE_DEBUG") != nullptr;
+    return dbg;
+}
 static inline int pr132_pi0_shid(const ShowerPtr& s)
 {
     return s ? pr91_seg_display_id(s->start_segment()) : -1;
@@ -5797,6 +5809,26 @@ void PatternAlgorithms::id_pi0_with_vertex(int& acc_segment_id, IndexedShowerSet
         auto it = kqc.find(sh);
         return it != kqc.end() ? it->second : sh->get_kine_charge();
     };
+    // doc pr/132 round 10: associate-cloud centroids, computed lazily and
+    // ONLY under the angle tape (pointer-keyed map, lookup-only).
+    std::map<ShowerPtr, WireCell::Point> ang_cent;
+    auto get_centroid = [&](ShowerPtr sh) -> WireCell::Point {
+        auto it = ang_cent.find(sh);
+        if (it != ang_cent.end()) return it->second;
+        WireCell::Point c(0, 0, 0);
+        auto pc = sh->get_pcloud("associate_points");
+        const size_t n = pc ? pc->npoints() : 0;
+        if (n > 0) {
+            double cx = 0, cy = 0, cz = 0;
+            for (size_t i = 0; i < n; ++i) {
+                auto p = pc->point3d(i);
+                cx += p.x(); cy += p.y(); cz += p.z();
+            }
+            c = WireCell::Point(cx / n, cy / n, cz / n);
+        }
+        ang_cent[sh] = c;
+        return c;
+    };
 
     // -- Build map_vertex_segments (ordered_edges gives deterministic order) --
     std::map<VertexPtr, std::vector<SegmentPtr>> map_vertex_segments;
@@ -6039,6 +6071,25 @@ void PatternAlgorithms::id_pi0_with_vertex(int& acc_segment_id, IndexedShowerSet
                                  pr132_pi0_shid(sh1), pr132_pi0_shid(sh2), ct1, ct2,
                                  pr91_vtx_display_id(cand_vtx), kq1 / units::MeV,
                                  kq2 / units::MeV, mass_pio / units::MeV);
+                // doc pr/132 round 10: the opening-angle census tape
+                // (docstring at pr132_pi0_angle_dbg).
+                if (pr132_pi0_angle_dbg()) {
+                    const WireCell::Point c1 = get_centroid(sh1);
+                    const WireCell::Point c2 = get_centroid(sh2);
+                    const WireCell::Vector r1(c1.x()-vtx_pt.x(), c1.y()-vtx_pt.y(), c1.z()-vtx_pt.z());
+                    const WireCell::Vector r2(c2.x()-vtx_pt.x(), c2.y()-vtx_pt.y(), c2.z()-vtx_pt.z());
+                    double a_cent = -1, m_cent = -1;
+                    if (r1.magnitude() > 0.1 * units::cm && r2.magnitude() > 0.1 * units::cm) {
+                        a_cent = std::acos(std::clamp(
+                            r1.dot(r2) / (r1.magnitude() * r2.magnitude()), -1.0, 1.0));
+                        m_cent = std::sqrt(4 * kq1 * kq2 * std::pow(std::sin(a_cent / 2.0), 2));
+                    }
+                    std::fprintf(stderr, "PI0_ANGLE vtx=%d sh1=%d sh2=%d ct1=%d ct2=%d E1=%.1f E2=%.1f m_start=%.1f a_start=%.2f m_cent=%.1f a_cent=%.2f\n",
+                                 pr91_vtx_display_id(cand_vtx), pr132_pi0_shid(sh1), pr132_pi0_shid(sh2),
+                                 ct1, ct2, kq1 / units::MeV, kq2 / units::MeV,
+                                 mass_pio / units::MeV, angle / M_PI * 180.0,
+                                 m_cent / units::MeV, a_cent >= 0 ? a_cent / M_PI * 180.0 : -1.0);
+                }
             }
         }
     }
