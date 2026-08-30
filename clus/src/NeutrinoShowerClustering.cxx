@@ -5671,7 +5671,7 @@ bool PatternAlgorithms::pi0_mu_shower_admit(const ShowerPtr& shower, const Index
     return true;
 }
 
-void PatternAlgorithms::id_pi0_backproject_vertex(int& acc_segment_id, IndexedShowerSet& pi0_showers, ShowerIntMap& map_shower_pio_id, std::map<int, std::vector<ShowerPtr > >& map_pio_id_showers, std::map<int, std::pair<double, int> >& map_pio_id_mass, Graph& graph, VertexPtr main_vertex, IndexedShowerSet& showers, ShowerVertexMap& map_vertex_in_shower, ShowerSegmentMap& map_segment_in_shower, VertexShowerSetMap& map_vertex_to_shower, ClusterPtrSet& used_shower_clusters, IndexedSegmentSet& segments_in_long_muon, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model)
+void PatternAlgorithms::id_pi0_backproject_vertex(int& acc_segment_id, IndexedShowerSet& pi0_showers, ShowerIntMap& map_shower_pio_id, std::map<int, std::vector<ShowerPtr > >& map_pio_id_showers, std::map<int, std::pair<double, int> >& map_pio_id_mass, Graph& graph, VertexPtr main_vertex, IndexedShowerSet& showers, ShowerVertexMap& map_vertex_in_shower, ShowerSegmentMap& map_segment_in_shower, VertexShowerSetMap& map_vertex_to_shower, ClusterPtrSet& used_shower_clusters, IndexedSegmentSet& segments_in_long_muon, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model)
 {
     if (m_pi0_bp_miss <= 0) return;  // knob off = byte-identical
     if (!main_vertex) return;
@@ -5780,6 +5780,7 @@ void PatternAlgorithms::id_pi0_backproject_vertex(int& acc_segment_id, IndexedSh
     const double mass_offset = m_pi0_mass_offset;  // K1
     double best_abs = 1e9, best_mass = 0;
     double best_miss = 1e9;   // doc pr/133 K21 v2 ranking (v4 mode only)
+    double best_ang = 0;      // doc pr/133 K21 v2.2; opening angle at accept, for the post-absorb mass refresh
     ShowerPtr b1 = nullptr, b2 = nullptr;
     WireCell::Point best_x;
 
@@ -5864,6 +5865,7 @@ void PatternAlgorithms::id_pi0_backproject_vertex(int& acc_segment_id, IndexedSh
                             best_miss = miss;
                             best_abs = std::abs(delta);
                             best_mass = m;
+                            best_ang = ang;
                             b1 = s1; b2 = s2; best_x = x;
                         }
                     }
@@ -5934,6 +5936,71 @@ void PatternAlgorithms::id_pi0_backproject_vertex(int& acc_segment_id, IndexedSh
         for (auto& rsh : {b1, b2})
             if (std::abs(rsh->get_particle_type()) != 11)
                 pi0_restamp_shower_em(rsh, particle_data, recomb_model);
+    }
+    // doc pr/133 K21 v2.2 (owner 2026-08-30): "once the vertex is changed,
+    // the electron connecting to the original vertex should be updated, or
+    // included in the EM shower ... The other low-energy gammas can be
+    // associated with the pi0 gammas."  Post-fire Particle-Flow update,
+    // NC-signature mode only:
+    //   (1) an object CO-STARTED with a pair gamma (< 1 cm: the old wrong
+    //       vertex is seated INSIDE the shower, so its attached small
+    //       "electron" shares the exact start point -- 76346's 14058,
+    //       116962's 21070/21073) is the same complex: absorbed into that
+    //       gamma regardless of energy;
+    //   (2) any other LOW-ENERGY (< 35 MeV) shower whose start lies within
+    //       the knob cone of a pair gamma's ray from the NEW vertex is a
+    //       satellite of that gamma: absorbed too.
+    // Long-muon members never touched.  The registered pio mass is then
+    // refreshed from the post-absorb charges at the accept-time opening
+    // angle (it may leave the window -- the window gated ACCEPTANCE; the
+    // PF update is honest charge accounting).  0 (default) = off.
+    if (m_pi0_nc_sig_angle > 0 && m_pi0_nc_pf_assoc > 0) {
+        std::vector<ShowerPtr> pf_absorb;               // graph-index order
+        std::map<ShowerPtr, ShowerPtr> pf_target;       // lookup-only (never iterated)
+        WireCell::Vector g1(b1->get_start_point().x()-best_x.x(), b1->get_start_point().y()-best_x.y(), b1->get_start_point().z()-best_x.z());
+        WireCell::Vector g2(b2->get_start_point().x()-best_x.x(), b2->get_start_point().y()-best_x.y(), b2->get_start_point().z()-best_x.z());
+        const double g1m = g1.magnitude(), g2m = g2.magnitude();
+        for (auto sh : showers) {
+            if (sh == b1 || sh == b2) continue;
+            auto ssl = sh->start_segment();
+            if (ssl && segments_in_long_muon.find(ssl) != segments_in_long_muon.end()) continue;
+            ShowerPtr tgt = nullptr;
+            if ((sh->get_start_point() - b1->get_start_point()).magnitude() < 1 * units::cm) tgt = b1;
+            else if ((sh->get_start_point() - b2->get_start_point()).magnitude() < 1 * units::cm) tgt = b2;
+            else if (sh->get_kine_charge() < 35 * units::MeV) {
+                WireCell::Vector vs(sh->get_start_point().x()-best_x.x(), sh->get_start_point().y()-best_x.y(), sh->get_start_point().z()-best_x.z());
+                const double vsm = vs.magnitude();
+                if (vsm > 1 * units::cm && g1m > 0 && g2m > 0) {
+                    const double a1 = std::acos(std::clamp(vs.dot(g1) / (vsm * g1m), -1.0, 1.0)) * 180.0 / M_PI;
+                    const double a2 = std::acos(std::clamp(vs.dot(g2) / (vsm * g2m), -1.0, 1.0)) * 180.0 / M_PI;
+                    if (std::min(a1, a2) < m_pi0_nc_pf_assoc) tgt = (a1 <= a2) ? b1 : b2;
+                }
+            }
+            if (tgt) { pf_absorb.push_back(sh); pf_target[sh] = tgt; }
+        }
+        for (auto sh : pf_absorb) {
+            ShowerPtr tgt = pf_target[sh];
+            if (pr132_pi0_dbg())
+                std::fprintf(stderr, "PI0_PAIR P0 bp pfassoc sh=%d E=%.1f -> gamma=%d\n",
+                             pr132_pi0_shid(sh), sh->get_kine_charge() / units::MeV,
+                             pr132_pi0_shid(tgt));
+            pr93_probe_absorb_splice("nc_pf_assoc", tgt, sh);
+            tgt->add_shower(*sh);
+            showers.erase(sh);
+        }
+        if (!pf_absorb.empty()) {
+            for (auto& g : {b1, b2}) {
+                double kq = cal_kine_charge(g, m_charge_2d_u, m_charge_2d_v, m_charge_2d_w, m_map_apa_ch_plane_wires, track_fitter, dv);
+                g->set_kine_charge(kq);
+                g->set_flag_kinematics(true);
+            }
+            const double m_new = std::sqrt(4 * b1->get_kine_charge() * b2->get_kine_charge()
+                                           * std::pow(std::sin(best_ang / 2.0), 2));
+            map_pio_id_mass[pio_id] = {m_new, 2};
+            if (pr132_pi0_dbg())
+                std::fprintf(stderr, "PI0_PAIR P0 bp pfmass n_absorb=%zu m %.1f -> %.1f\n",
+                             pf_absorb.size(), best_mass / units::MeV, m_new / units::MeV);
+        }
     }
     b1->set_start_vertex(main_vertex, 2);
     b1->calculate_kinematics(particle_data, recomb_model, m_shower_endpoint_exclude_start_vertex, m_shower_endpoint_skip_orphan_vtx);
@@ -8790,7 +8857,7 @@ void PatternAlgorithms::shower_clustering_with_nv(int acc_segment_id, IndexedSho
                               map_pio_id_mass, graph, main_vertex, showers,
                               map_vertex_in_shower, map_segment_in_shower,
                               map_vertex_to_shower, used_shower_clusters,
-                              segments_in_long_muon, particle_data, recomb_model);
+                              segments_in_long_muon, track_fitter, dv, particle_data, recomb_model);
     id_pi0_with_vertex(pi0_acc, pi0_showers, map_shower_pio_id, map_pio_id_showers, map_pio_id_mass,
                       map_pio_id_saved_pair, pio_kine, graph, main_vertex, showers, main_cluster,
                       other_clusters, map_cluster_main_vertices, map_vertex_in_shower,
