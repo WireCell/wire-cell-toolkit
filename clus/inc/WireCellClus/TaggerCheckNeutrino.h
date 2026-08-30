@@ -966,6 +966,7 @@ public:
         bool   m_pi0_readmit_retyped{false};                        // doc pr/132 K7; readmit hadronic-retyped showers into pi0 pairing
         bool   m_pi0_admit_type3{false};                            // doc pr/132 K8; admit conn_type-3 showers into the with-vertex pool
         double m_pi0_crumb_assoc_mev{0.0};                          // doc pr/132 K9; MeV, 0 = crumbs keep the association-angle test
+        double m_pi0_collinear_merge_deg{0.0};                      // doc pr/132 K12; deg, 0 = pairing sees each detached fragment alone
         double m_pi0_nv_max_vtx_shift_cm{0.0};                      // doc pr/132 K10; cm, 0 = no without-vertex decay-point shift cap
         double m_pi0_nv_mass_window_mev{60.0};                      // doc pr/132 K11; MeV, without-vertex acceptance half-window (legacy 60)
         bool   m_kine_count_guard_freed{false};                     // doc pr/123 r2; kine twin of pf_orphan_guard_freed

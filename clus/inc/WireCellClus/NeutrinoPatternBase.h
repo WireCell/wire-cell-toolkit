@@ -2234,6 +2234,7 @@ namespace WireCell::Clus::PR {
         bool   m_pi0_readmit_retyped{false};             ///< doc pr/132 K7; readmit A5 hadronic-retyped showers into pi0 pairing (accepted members re-stamped EM)
         bool   m_pi0_admit_type3{false};                 ///< doc pr/132 K8; admit conn_type==3 showers into the with-vertex disconnected pool
         double m_pi0_crumb_assoc_max{0};                 ///< doc pr/132 K9; 0 = off; below this energy a disconnected shower skips the association-angle test
+        double m_pi0_collinear_merge_deg{0};             ///< doc pr/132 K12; deg, 0 = off; with-vertex pairing virtually merges detached fragments within this vertex-ray cone (real absorb on accept)
         double m_pi0_nv_max_vtx_shift{0};                ///< doc pr/132 K10; 0 = off; without-vertex selection skips pairs whose decay point is farther than this from the current main vertex
         double m_pi0_nv_mass_window{60 * units::MeV};    ///< doc pr/132 K11; without-vertex acceptance half-window |m-135+offset| (legacy 60)
         // doc pr/125 (owner 2026-08-29): same-vertex track-typed fragment
