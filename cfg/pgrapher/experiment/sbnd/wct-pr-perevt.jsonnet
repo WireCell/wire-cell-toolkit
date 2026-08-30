@@ -1823,7 +1823,7 @@ function(
     // precedes it), all of them adjudicated, so this cannot touch an
     // unadjudicated candidate.  C++ default 0.  Key omitted when 0 =>
     // byte-identical pre-fix config.
-    stem_backfill_back_dvtx = 0,             // cm; 0 = OFF (legacy).  Suppress the backward-stem decline when the SHOWER START is further than this from the nu vertex.  Measured: absorb-wanted 46.84 (292643) and 88.11 (179369); every decline-ok <= 44.34.
+    stem_backfill_back_dvtx = 45,            // cm; SBND PRODUCTION ON 2026-08-29 (owner flip: "For B, flip on for SBND production").  Suppress the backward-stem decline when the SHOWER START is further than this from the nu vertex.  The guard's reachable population is CLOSED at 8 events (`if (!ok) break;` precedes it) and all 8 are owner-adjudicated: absorb-wanted 46.84 (292643) and 88.11 (179369), every decline-ok <= 44.34, so 45 sits in an empty interval and the flip changes exactly those 2 of 239 events.  On both, the resulting PF tree is IDENTICAL to the guard-OFF shape the owner reviewed in bee/pr130r2 and preferred.  C++ default 0 = off.
     // doc pr/124 front A -- 25-40 cm gap-band tier-2 prune (qualifier pair
     // ang>40deg OR mdqdx>2.5 MIP measured zero-labeled-collateral on both
     // label sets).  C++ defaults: gap2 0 (off), ang 40, mdqdx 2.5.
