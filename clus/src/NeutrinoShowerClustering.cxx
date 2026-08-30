@@ -5736,24 +5736,50 @@ void PatternAlgorithms::id_pi0_backproject_vertex(int& acc_segment_id, IndexedSh
     // iterates in graph-index order: deterministic.
     std::vector<ShowerPtr> cands;
     std::map<ShowerPtr, WireCell::Vector> cdir;   // lookup-only
+    std::map<ShowerPtr, WireCell::Vector> edir;   // v2: end-anchored local dir, lookup-only
+    // doc pr/133 K21 v2 (owner 2026-08-30 "go ahead"): inside the signature
+    // the partner floor drops to the knob (76346's TRUE gamma2 is 5.0 MeV,
+    // below the 20 MeV floor -- the proposer paired a wrong partner).
+    // 0 (default) or v3 mode = the legacy 20 MeV floor, byte-identical.
+    const double cand_floor = (m_pi0_nc_sig_angle > 0 && m_pi0_nc_floor > 0)
+        ? m_pi0_nc_floor : 20 * units::MeV;
     for (auto sh : showers) {
         // doc pr/133 K20: the mu-admit escape (default off = legacy skip).
         if (std::abs(sh->get_particle_type()) == 13 &&
             !pi0_mu_shower_admit(sh, segments_in_long_muon)) continue;
         if (sh->get_total_length() < 3 * units::cm) continue;
-        if (sh->get_kine_charge() < 20 * units::MeV) continue;
+        if (sh->get_kine_charge() < cand_floor) continue;
         WireCell::Vector d = shower_cal_dir_3vector(*sh, sh->get_start_point(), 15 * units::cm);
         if (d.magnitude() <= 0) continue;
         cands.push_back(sh);
         cdir[sh] = d * (1.0 / d.magnitude());
+        // doc pr/133 K21 v2: the 76346 lesson -- the wrong NC vertex is
+        // SEATED as a gamma's start, so the reco orientation can be
+        // inverted (76346: the reco END is the owner's truth click).  Build
+        // the end-anchored ray too; the pairing tries both orientations.
+        if (m_pi0_nc_sig_angle > 0) {
+            WireCell::Vector de = shower_cal_dir_3vector(*sh, sh->get_end_point(), 15 * units::cm);
+            if (de.magnitude() > 0) edir[sh] = de * (1.0 / de.magnitude());
+        }
     }
     if (cands.size() < 2) return;
+    // doc pr/133 K21 v2: the owner gate (b) made explicit -- "at least
+    // another major object [that] looks like [an EM] shower".  With the
+    // floor lowered, majorness (>= 20 MeV) must still hold for at least
+    // one non-host candidate.
+    if (m_pi0_nc_sig_angle > 0) {
+        bool major_other = false;
+        for (auto sh : cands)
+            if (!nc_sig_hosts.count(sh) && sh->get_kine_charge() >= 20 * units::MeV) major_other = true;
+        if (!major_other) return;
+    }
     if (pr132_pi0_dbg())
         std::fprintf(stderr, "PI0_PAIR P0 bp gate vtx=%d n_cand=%zu\n",
                      pr91_vtx_display_id(main_vertex), cands.size());
 
     const double mass_offset = m_pi0_mass_offset;  // K1
     double best_abs = 1e9, best_mass = 0;
+    double best_miss = 1e9;   // doc pr/133 K21 v2 ranking (v4 mode only)
     ShowerPtr b1 = nullptr, b2 = nullptr;
     WireCell::Point best_x;
 
@@ -5766,10 +5792,83 @@ void PatternAlgorithms::id_pi0_backproject_vertex(int& acc_segment_id, IndexedSh
             // member must be a vertex-hosting shower, and the two axes must
             // be misaligned by more than the knob (split-shower fragments
             // are near-collinear).  0 (default) = v3 behavior, unrestricted.
+            //
+            // v2 (owner 2026-08-30 "go ahead" after the r10-verdict scan):
+            // end-agnostic rays -- both orientations of each gamma tried
+            // (the 76346 inversion), ranked by geometric MISS (the
+            // flat-mass finding: the window cannot validate a vertex), the
+            // mass recorded but NOT gating.  Verified offline: end-flipped
+            // gamma1 x the 5-MeV gamma2 reproduces the owner's hand vertex
+            // to 0.5 cm (doc pr/133 sec 9).  v3 math below is untouched.
             if (m_pi0_nc_sig_angle > 0) {
                 if (!nc_sig_hosts.count(s1) && !nc_sig_hosts.count(s2)) continue;
-                const double axang = std::acos(std::clamp(d1.dot(d2), -1.0, 1.0)) * 180.0 / M_PI;
-                if (axang < m_pi0_nc_sig_angle) continue;
+                // v2 co-seat veto (v3 of the veto): two candidates whose
+                // START POINTS coincide are fragments of one complex
+                // (116962: 21072 x 21073 x 21070 all start at the same
+                // point on the wrong main; self-paired under flips at miss
+                // 7.2) -- a pi0 pair must come from two distinct objects.
+                // NOTE the first cut used seat-POINTER equality, which is
+                // wrong: ct2/ct3 showers all seat at the main vertex object
+                // (it killed the 76346 rescue 14059 x 49048, full-arm k21v2).
+                if ((s1->get_start_point() - s2->get_start_point()).magnitude()
+                    < 0.5 * units::cm) continue;
+                for (int o1 = 0; o1 < 2; ++o1) {
+                    if (o1 && !edir.count(s1)) continue;
+                    const WireCell::Point a1 = o1 ? s1->get_end_point() : p1;
+                    const WireCell::Vector dd1 = o1 ? edir[s1] : d1;
+                    for (int o2 = 0; o2 < 2; ++o2) {
+                        if (o2 && !edir.count(s2)) continue;
+                        const WireCell::Point a2 = o2 ? s2->get_end_point() : p2;
+                        const WireCell::Vector dd2 = o2 ? edir[s2] : d2;
+                        const double axang = std::acos(std::clamp(dd1.dot(dd2), -1.0, 1.0)) * 180.0 / M_PI;
+                        if (axang < m_pi0_nc_sig_angle) continue;
+                        const WireCell::Vector w0v(a1.x()-a2.x(), a1.y()-a2.y(), a1.z()-a2.z());
+                        const double bb = dd1.dot(dd2);
+                        const double den = 1.0 - bb * bb;
+                        if (den < 1e-6) continue;
+                        const double dv = dd1.dot(w0v), ev = dd2.dot(w0v);
+                        const double u1 = (bb * ev - dv) / den;
+                        const double u2 = (ev - bb * dv) / den;
+                        if (u1 > 1 * units::cm || u1 < -120 * units::cm) continue;
+                        if (u2 > 1 * units::cm || u2 < -120 * units::cm) continue;
+                        const WireCell::Point c1(a1.x()+u1*dd1.x(), a1.y()+u1*dd1.y(), a1.z()+u1*dd1.z());
+                        const WireCell::Point c2(a2.x()+u2*dd2.x(), a2.y()+u2*dd2.y(), a2.z()+u2*dd2.z());
+                        const double miss = (c1 - c2).magnitude();
+                        if (miss > m_pi0_bp_miss) continue;
+                        const WireCell::Point x((c1.x()+c2.x())/2, (c1.y()+c2.y())/2, (c1.z()+c2.z())/2);
+                        const double shift = (x - vtx_pt).magnitude();
+                        if (shift < 1 * units::cm || shift > 100 * units::cm) continue;
+                        const WireCell::Vector r1(a1.x()-x.x(), a1.y()-x.y(), a1.z()-x.z());
+                        const WireCell::Vector r2(a2.x()-x.x(), a2.y()-x.y(), a2.z()-x.z());
+                        if (r1.magnitude() < 1 * units::cm || r2.magnitude() < 1 * units::cm) continue;
+                        const double ang = std::acos(std::clamp(
+                            r1.dot(r2) / (r1.magnitude() * r2.magnitude()), -1.0, 1.0));
+                        const double kq1 = s1->get_kine_charge(), kq2 = s2->get_kine_charge();
+                        const double m = std::sqrt(4 * kq1 * kq2 * std::pow(std::sin(ang / 2.0), 2));
+                        const double delta = m - 135 * units::MeV + mass_offset;
+                        if (pr132_pi0_dbg())
+                            std::fprintf(stderr, "PI0_PAIR P0 bp try2 sh1=%d sh2=%d o1=%d o2=%d miss=%.1f u1=%.1f u2=%.1f shift=%.1f m=%.1f\n",
+                                         pr132_pi0_shid(s1), pr132_pi0_shid(s2), o1, o2,
+                                         miss / units::cm, u1 / units::cm, u2 / units::cm,
+                                         shift / units::cm, m / units::MeV);
+                        // v2.1: the window RESTORED as the sanity gate (the
+                        // dbg7 tape: every collateral fire -- incl. both
+                        // ADVERSE, 21073 off a dead-on click and 282979 --
+                        // has a grossly non-pi0 mass 47.5-503.0, while both
+                        // owner rescues sit in-window at 121.5/125.8).  The
+                        // v1 failure was rays+ranking, never the window;
+                        // ranking stays miss-first among in-window combos.
+                        if (delta >= 35 * units::MeV || delta <= -25 * units::MeV) continue;
+                        if (miss < best_miss - 1e-9 ||
+                            (std::abs(miss - best_miss) <= 1e-9 && std::abs(delta) < best_abs)) {
+                            best_miss = miss;
+                            best_abs = std::abs(delta);
+                            best_mass = m;
+                            b1 = s1; b2 = s2; best_x = x;
+                        }
+                    }
+                }
+                continue;   // v4 fully handled; the v3 block below stays v3-only
             }
             // Closest approach of the two axis lines.
             const WireCell::Vector w0(p1.x()-p2.x(), p1.y()-p2.y(), p1.z()-p2.z());

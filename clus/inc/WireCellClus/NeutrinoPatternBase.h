@@ -2247,6 +2247,7 @@ namespace WireCell::Clus::PR {
         double m_pi0_bp_miss{0};                         ///< doc pr/132 K19 (round 9); 0 = off; back-projection NC vertex proposer, axis closest-approach miss cap
         bool   m_pi0_admit_mu_showers{false};            ///< doc pr/133 K20; admit shower-topology pdg +-13 objects (not in the long muon) into the pi0 pools; accepted members re-stamped EM
         double m_pi0_nc_sig_angle{0};                    ///< doc pr/133 K21; deg, 0 = off (v3 gate); owner NC signature for the bp proposer: vertex inside an EM shower + a second non-aligned major EM object
+        double m_pi0_nc_floor{0};                        ///< doc pr/133 K21 v2; 0 = legacy 20 MeV; signature-mode pairing-partner floor (76346's true gamma2 = 5.0 MeV)
         double m_pi0_nv_max_vtx_shift{0};                ///< doc pr/132 K10; 0 = off; without-vertex selection skips pairs whose decay point is farther than this from the current main vertex
         double m_pi0_nv_mass_window{60 * units::MeV};    ///< doc pr/132 K11; without-vertex acceptance half-window |m-135+offset| (legacy 60)
         // doc pr/125 (owner 2026-08-29): same-vertex track-typed fragment
