@@ -957,6 +957,12 @@ public:
         double m_shower_pass4_prox_guard_len{0.0};                  // doc pr/130 item 1b; cm, 0 = pass4_proximity unguarded (legacy)
         double m_shower_pass3_backfill_guard_len{0.0};              // doc pr/130 item 1b; cm, 0 = pass3 sibling backfill ignores pr/124's decline (legacy)
         double m_stem_backfill_back_dvtx{0.0};                      // doc pr/130 item B; cm, 0 = back guard ignores the vertex distance (legacy)
+        // doc pr/132: pi0-finder knobs; defaults = the legacy hard-coded constants.
+        double m_pi0_mass_offset{10.0};                             // doc pr/132 K1; MeV, the finders' "+10" window offset
+        double m_pi0_assoc_angle_deg{30.0};                         // doc pr/132 K2; deg, disconnected<->vertex association cut
+        double m_pi0_attached_partner_min_mev{0.0};                 // doc pr/132 K3; MeV, 0 = no nueCC-fake guard
+        bool   m_pi0_nv_allow_type2{false};                         // doc pr/132 K4; false = without-vertex pool is conn_type 3 only
+        int    m_pi0_nv_max_prongs{2};                              // doc pr/132 K5; without-vertex GATE1 prong cap
         bool   m_kine_count_guard_freed{false};                     // doc pr/123 r2; kine twin of pf_orphan_guard_freed
         double m_kine_guard_freed_impact{0.0};                      // doc pr/129; 0 = no pointing test
         double m_kine_guard_freed_miss_deg{90.0};                   // doc pr/129

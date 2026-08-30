@@ -707,6 +707,11 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_shower_pass4_prox_guard_len               = get(config, "shower_pass4_prox_guard_len",               m_shower_pass4_prox_guard_len);            // doc pr/130 item 1b, cm
     m_shower_pass3_backfill_guard_len           = get(config, "shower_pass3_backfill_guard_len",           m_shower_pass3_backfill_guard_len);        // doc pr/130 item 1b, cm
     m_stem_backfill_back_dvtx                   = get(config, "stem_backfill_back_dvtx",                   m_stem_backfill_back_dvtx);                // doc pr/130 item B, cm
+    m_pi0_mass_offset                           = get(config, "pi0_mass_offset",                           m_pi0_mass_offset);                        // doc pr/132 K1, MeV
+    m_pi0_assoc_angle_deg                       = get(config, "pi0_assoc_angle_deg",                       m_pi0_assoc_angle_deg);                    // doc pr/132 K2, deg
+    m_pi0_attached_partner_min_mev              = get(config, "pi0_attached_partner_min_mev",              m_pi0_attached_partner_min_mev);           // doc pr/132 K3, MeV
+    m_pi0_nv_allow_type2                        = get(config, "pi0_nv_allow_type2",                        m_pi0_nv_allow_type2);                     // doc pr/132 K4
+    m_pi0_nv_max_prongs                         = get(config, "pi0_nv_max_prongs",                         m_pi0_nv_max_prongs);                      // doc pr/132 K5
     m_kine_count_guard_freed                    = get(config, "kine_count_guard_freed",                    m_kine_count_guard_freed);                 // doc pr/123 r2
     m_kine_guard_freed_impact                   = get(config, "kine_guard_freed_impact",                   m_kine_guard_freed_impact);                // doc pr/129
     m_kine_guard_freed_miss_deg                 = get(config, "kine_guard_freed_miss_deg",                 m_kine_guard_freed_miss_deg);              // doc pr/129
@@ -1174,6 +1179,11 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["shower_pass4_prox_guard_len"]               = m_shower_pass4_prox_guard_len;               // doc pr/130 item 1b; cm, 0 = unguarded, byte-identical
     cfg["shower_pass3_backfill_guard_len"]           = m_shower_pass3_backfill_guard_len;           // doc pr/130 item 1b; cm, 0 = unguarded, byte-identical
     cfg["stem_backfill_back_dvtx"]                   = m_stem_backfill_back_dvtx;                   // doc pr/130 item B; cm, 0 = off, byte-identical
+    cfg["pi0_mass_offset"]                           = m_pi0_mass_offset;                           // doc pr/132 K1; MeV, 10 = legacy, byte-identical
+    cfg["pi0_assoc_angle_deg"]                       = m_pi0_assoc_angle_deg;                       // doc pr/132 K2; deg, 30 = legacy, byte-identical
+    cfg["pi0_attached_partner_min_mev"]              = m_pi0_attached_partner_min_mev;              // doc pr/132 K3; MeV, 0 = no guard, byte-identical
+    cfg["pi0_nv_allow_type2"]                        = m_pi0_nv_allow_type2;                        // doc pr/132 K4; false = legacy pool, byte-identical
+    cfg["pi0_nv_max_prongs"]                         = m_pi0_nv_max_prongs;                         // doc pr/132 K5; 2 = legacy gate, byte-identical
     cfg["kine_count_guard_freed"]                    = m_kine_count_guard_freed;                    // doc pr/123 r2; false = guard-freed tracks uncounted, byte-identical
     cfg["kine_guard_freed_impact"]                   = m_kine_guard_freed_impact;                   // doc pr/129; 0 = pointing test off, byte-identical
     cfg["kine_guard_freed_miss_deg"]                 = m_kine_guard_freed_miss_deg;                 // doc pr/129
@@ -2608,6 +2618,11 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
         pattern_algos.m_shower_pass4_prox_guard_len               = m_shower_pass4_prox_guard_len * units::cm;   // doc pr/130 item 1b, cm -> internal
         pattern_algos.m_shower_pass3_backfill_guard_len           = m_shower_pass3_backfill_guard_len * units::cm; // doc pr/130 item 1b, cm -> internal
         pattern_algos.m_stem_backfill_back_dvtx                   = m_stem_backfill_back_dvtx * units::cm;         // doc pr/130 item B, cm -> internal
+        pattern_algos.m_pi0_mass_offset                           = m_pi0_mass_offset * units::MeV;                // doc pr/132 K1, MeV -> internal
+        pattern_algos.m_pi0_assoc_angle_deg                       = m_pi0_assoc_angle_deg;                         // doc pr/132 K2, deg (no scaling)
+        pattern_algos.m_pi0_attached_partner_min                  = m_pi0_attached_partner_min_mev * units::MeV;   // doc pr/132 K3, MeV -> internal
+        pattern_algos.m_pi0_nv_allow_type2                        = m_pi0_nv_allow_type2;                          // doc pr/132 K4
+        pattern_algos.m_pi0_nv_max_prongs                         = m_pi0_nv_max_prongs;                           // doc pr/132 K5
         pattern_algos.m_kine_count_guard_freed                    = m_kine_count_guard_freed;                    // doc pr/123 r2
         pattern_algos.m_kine_guard_freed_impact                   = m_kine_guard_freed_impact * units::cm;       // doc pr/129
         pattern_algos.m_kine_guard_freed_miss_deg                 = m_kine_guard_freed_miss_deg;                 // doc pr/129

@@ -254,6 +254,12 @@ TEST_CASE("clus knob defaults: TaggerCheckNeutrino switches are all OFF")
     CHECK_KNOB_NUM(cfg, "shower_pass4_prox_guard_len", 0.0);                  // cm; 0 = pass4_proximity unguarded (doc pr/130 item 1b)
     CHECK_KNOB_NUM(cfg, "shower_pass3_backfill_guard_len", 0.0);              // cm; 0 = pass3 sibling backfill unguarded (doc pr/130 item 1b)
     CHECK_KNOB_NUM(cfg, "stem_backfill_back_dvtx", 0.0);                      // cm; 0 = back guard ignores vertex distance (doc pr/130 item B)
+    // doc pr/132 -- pi0-finder knobs; defaults = the legacy hard-coded constants.
+    CHECK_KNOB_NUM(cfg, "pi0_mass_offset", 10.0);                             // MeV; the finders' "+10" offset (doc pr/132 K1)
+    CHECK_KNOB_NUM(cfg, "pi0_assoc_angle_deg", 30.0);                         // deg; association cut (doc pr/132 K2)
+    CHECK_KNOB_NUM(cfg, "pi0_attached_partner_min_mev", 0.0);                 // MeV; 0 = no nueCC-fake guard (doc pr/132 K3)
+    CHECK_KNOB_BOOL(cfg, "pi0_nv_allow_type2", false);                        // doc pr/132 K4; false = conn_type-3-only pool
+    CHECK_KNOB_NUM(cfg, "pi0_nv_max_prongs", 2.0);                            // doc pr/132 K5; without-vertex prong cap
     // doc pr/124 front A -- 25-40 cm gap-band tier-2 prune.
     CHECK_KNOB_NUM(cfg, "shower_pass4_prune_gap2", 0.0);                      // cm; 0 = no tier-2 band prune
     CHECK_KNOB_NUM(cfg, "shower_pass4_prune2_ang", 40.0);                     // deg; inert while gap2 = 0

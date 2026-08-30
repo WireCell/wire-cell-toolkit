@@ -93,6 +93,23 @@ static inline bool pr130_xclus_dbg()
     static const bool dbg = std::getenv("WCT_SHOWER_XCLUS_DEBUG") != nullptr;
     return dbg;
 }
+// doc sbnd_xin/docs/pr/132 -- WCT_PI0_PAIR_DEBUG, the pi0-finder attribution
+// tape.  The pr/126 census says WHICH hand pi0 the finders miss but not WHY:
+// the pair pool, the 30-degree association verdicts, the mass-window/ranking
+// verdicts and the without-vertex pre-gate that killed the event are all
+// invisible in the outputs.  This probe prints each of those decisions.
+// Shower ids use the calib-dump "id" encoding (pf_node_id ==
+// pr91_seg_display_id of the start segment) so lines join to labels and
+// census rows directly.  stderr only, no effect on emitted bytes.
+static inline bool pr132_pi0_dbg()
+{
+    static const bool dbg = std::getenv("WCT_PI0_PAIR_DEBUG") != nullptr;
+    return dbg;
+}
+static inline int pr132_pi0_shid(const ShowerPtr& s)
+{
+    return s ? pr91_seg_display_id(s->start_segment()) : -1;
+}
 static inline void pr93_probe_absorb_site(const char* site, const ShowerPtr& sh, bool guard)
 {
     if (!pr93_absorb_dbg() || !sh) return;
@@ -5265,6 +5282,11 @@ void PatternAlgorithms::id_pi0_with_vertex(int& acc_segment_id, IndexedShowerSet
         }
     }
 
+    if (pr132_pi0_dbg())
+        std::fprintf(stderr, "PI0_PAIR P1 begin main_vtx=%d n_cand_vtx=%zu n_disc=%zu\n",
+                     pr91_vtx_display_id(main_vertex), candidate_vertices.size(),
+                     disconnected_showers.size());
+
     // -- Map shower pairs → masses and candidate vertices -------------------
     // Custom comparator eliminates pointer-address ordering of pair keys.
     std::map<std::pair<ShowerPtr,ShowerPtr>,
@@ -5308,7 +5330,12 @@ void PatternAlgorithms::id_pi0_with_vertex(int& acc_segment_id, IndexedShowerSet
             } else {
                 double angle = std::acos(std::clamp(
                     dir1.dot(dir2) / (dir1.magnitude() * dir2.magnitude()), -1.0, 1.0)) / M_PI * 180.0;
-                if (angle < 30) {
+                if (pr132_pi0_dbg())
+                    std::fprintf(stderr, "PI0_PAIR P1 assoc vtx=%d sh=%d E=%.1f angle=%.1f acc=%d\n",
+                                 pr91_vtx_display_id(cand_vtx), pr132_pi0_shid(shower),
+                                 get_kq(shower) / units::MeV, angle,
+                                 angle < m_pi0_assoc_angle_deg ? 1 : 0);
+                if (angle < m_pi0_assoc_angle_deg) {  // doc pr/132 K2; 30 deg = legacy
                     tmp_showers.push_back(shower);
                     local_dirs[shower] = dir2;
                 }
@@ -5336,6 +5363,11 @@ void PatternAlgorithms::id_pi0_with_vertex(int& acc_segment_id, IndexedShowerSet
                     dir1.dot(dir2) / (dir1.magnitude() * dir2.magnitude()), -1.0, 1.0));
                 double mass_pio = std::sqrt(4 * kq1 * get_kq(sh2) * std::pow(std::sin(angle / 2.0), 2));
                 map_shower_pair_mass_vertex[{sh1, sh2}].push_back({mass_pio, cand_vtx});
+                if (pr132_pi0_dbg())
+                    std::fprintf(stderr, "PI0_PAIR P1 pair sh1=%d sh2=%d ct1=%d ct2=%d vtx=%d E1=%.1f E2=%.1f m=%.1f\n",
+                                 pr132_pi0_shid(sh1), pr132_pi0_shid(sh2), ct1, ct2,
+                                 pr91_vtx_display_id(cand_vtx), kq1 / units::MeV,
+                                 get_kq(sh2) / units::MeV, mass_pio / units::MeV);
             }
         }
     }
@@ -5405,7 +5437,7 @@ void PatternAlgorithms::id_pi0_with_vertex(int& acc_segment_id, IndexedShowerSet
         double mass_save = 0;
         ShowerPtr shower_1 = nullptr;
         ShowerPtr shower_2 = nullptr;
-        const double mass_offset = 10 * units::MeV;
+        const double mass_offset = m_pi0_mass_offset;  // doc pr/132 K1; 10 MeV = legacy
         VertexPtr vtx = nullptr;
         double mass_penalty = 0;
 
@@ -5413,6 +5445,27 @@ void PatternAlgorithms::id_pi0_with_vertex(int& acc_segment_id, IndexedShowerSet
         for (auto& [shower_pair, mass_vtx_vec] : map_shower_pair_mass_vertex) {
             auto [sv1, ct1] = get_svc(shower_pair.first);
             auto [sv2, ct2] = get_svc(shower_pair.second);
+            // doc pr/132 K3: nueCC-fake guard.  A recorded pair has at most
+            // one conn_type==1 member (ct1==1 && ct2==1 never recorded), and
+            // such a pair exists only at that member's own start vertex -- so
+            // sv==main_vertex identifies the "primary electron attached at
+            // the nu vertex" topology.  Reject the pairing when the detached
+            // partner is below the threshold.  Selection-loop only: the
+            // T_KINE pio_kine scan above is untouched.  0 (default) = off =
+            // byte-identical.
+            if (m_pi0_attached_partner_min > 0) {
+                const bool veto =
+                    (ct1 == 1 && sv1 == main_vertex && get_kq(shower_pair.second) < m_pi0_attached_partner_min) ||
+                    (ct2 == 1 && sv2 == main_vertex && get_kq(shower_pair.first)  < m_pi0_attached_partner_min);
+                if (veto) {
+                    if (pr132_pi0_dbg())
+                        std::fprintf(stderr, "PI0_PAIR P1 veto sh1=%d sh2=%d E1=%.1f E2=%.1f\n",
+                                     pr132_pi0_shid(shower_pair.first), pr132_pi0_shid(shower_pair.second),
+                                     get_kq(shower_pair.first) / units::MeV,
+                                     get_kq(shower_pair.second) / units::MeV);
+                    continue;
+                }
+            }
             double tmp_penalty = (ct1 == 2 && ct2 == 2) ? 6 * units::MeV : 0.0;
 
             for (auto& [mass, candidate_vtx] : mass_vtx_vec) {
@@ -5442,9 +5495,24 @@ void PatternAlgorithms::id_pi0_with_vertex(int& acc_segment_id, IndexedShowerSet
             SPDLOG_LOGGER_DEBUG(s_log, "pi0 window reject: {} pair(s) left, best mass={:.1f} MeV delta={:.1f}",
                                 map_shower_pair_mass_vertex.size(), best_mass / units::MeV,
                                 (best_mass - 135 * units::MeV + mass_offset) / units::MeV);
+            if (pr132_pi0_dbg())
+                for (auto& [shower_pair, mass_vtx_vec] : map_shower_pair_mass_vertex) {
+                    double bb = 1e9, bm = -1;
+                    for (auto& [mass, candidate_vtx] : mass_vtx_vec) {
+                        const double d = std::abs(mass - 135 * units::MeV + mass_offset);
+                        if (d < bb) { bb = d; bm = mass; }
+                    }
+                    std::fprintf(stderr, "PI0_PAIR P1 winreject sh1=%d sh2=%d best_m=%.1f\n",
+                                 pr132_pi0_shid(shower_pair.first), pr132_pi0_shid(shower_pair.second),
+                                 bm / units::MeV);
+                }
             break;
         }
 
+        if (pr132_pi0_dbg())
+            std::fprintf(stderr, "PI0_PAIR P1 accept sh1=%d sh2=%d vtx=%d m=%.1f\n",
+                         pr132_pi0_shid(shower_1), pr132_pi0_shid(shower_2),
+                         pr91_vtx_display_id(vtx), mass_save / units::MeV);
         pi0_showers.insert(shower_1);
         pi0_showers.insert(shower_2);
 
@@ -5542,9 +5610,14 @@ void PatternAlgorithms::id_pi0_without_vertex(int& acc_segment_id, IndexedShower
     }
 
     // Check main vertex conditions
-    if (main_vertex_segs.size() > 2) return;
+    // doc pr/132 K5: 2 = legacy prong cap, byte-identical.
+    if (main_vertex_segs.size() > static_cast<size_t>(m_pi0_nv_max_prongs)) {
+        if (pr132_pi0_dbg())
+            std::fprintf(stderr, "PI0_PAIR P2 return=gate1 nsegs=%zu\n", main_vertex_segs.size());
+        return;
+    }
 
-    if (!main_vertex_segs.empty()) {
+    if (!main_vertex_segs.empty() && main_vertex_segs.size() <= 2) {
         auto first_seg = main_vertex_segs.front();
         auto last_seg = main_vertex_segs.back();
         
@@ -5552,6 +5625,24 @@ void PatternAlgorithms::id_pi0_without_vertex(int& acc_segment_id, IndexedShower
              map_segment_in_shower.find(last_seg) == map_segment_in_shower.end()) ||
             segments_in_long_muon.find(first_seg) != segments_in_long_muon.end() ||
             segments_in_long_muon.find(last_seg) != segments_in_long_muon.end()) {
+            if (pr132_pi0_dbg())
+                std::fprintf(stderr, "PI0_PAIR P2 return=gate2 nsegs=%zu\n", main_vertex_segs.size());
+            return;
+        }
+    }
+    else if (main_vertex_segs.size() > 2) {
+        // doc pr/132 K5 companion: reachable only when m_pi0_nv_max_prongs > 2
+        // (GATE1 above returns otherwise), so the legacy path stays
+        // byte-identical.  The front/back test generalizes to: at least one
+        // main-vertex segment in a shower, none in a long muon.
+        bool any_shower = false, any_muon = false;
+        for (auto sg : main_vertex_segs) {
+            if (map_segment_in_shower.find(sg) != map_segment_in_shower.end()) any_shower = true;
+            if (segments_in_long_muon.find(sg) != segments_in_long_muon.end()) any_muon = true;
+        }
+        if (!any_shower || any_muon) {
+            if (pr132_pi0_dbg())
+                std::fprintf(stderr, "PI0_PAIR P2 return=gate2 nsegs=%zu\n", main_vertex_segs.size());
             return;
         }
     }
@@ -5583,7 +5674,17 @@ void PatternAlgorithms::id_pi0_without_vertex(int& acc_segment_id, IndexedShower
         auto it = map_vertex_to_shower.find(main_vertex);
         if (it != map_vertex_to_shower.end()) {
             for (auto shower : it->second) {
-                if (pi0_showers.find(shower) != pi0_showers.end()) return;
+                if (pi0_showers.find(shower) != pi0_showers.end()) {
+                    if (pr132_pi0_dbg()) {
+                        int n_left = 0;
+                        for (auto sh2 : it->second)
+                            if (pi0_showers.find(sh2) == pi0_showers.end() &&
+                                sh2->get_start_vertex_and_type().second == 1) n_left++;
+                        std::fprintf(stderr, "PI0_PAIR P2 return=already_paired sh=%d unpaired_ct1_left=%d\n",
+                                     pr132_pi0_shid(shower), n_left);
+                    }
+                    return;
+                }
 
                 // doc pr/99 round 3 (A5): re-typed hadronic showers never enter
                 // pi0 pairing; empty set (tag off) => no-op, byte-identical.
@@ -5629,7 +5730,11 @@ void PatternAlgorithms::id_pi0_without_vertex(int& acc_segment_id, IndexedShower
         if (flag_return && static_cast<size_t>(num_showers) == main_vertex_segs.size()) {
             flag_return = false;
         }
-        if (flag_return) return;
+        if (flag_return) {
+            if (pr132_pi0_dbg())
+                std::fprintf(stderr, "PI0_PAIR P2 return=gate3\n");
+            return;
+        }
     }
     
     // Build map of showers to rays (lines), ordered by shower_less for deterministic iteration
@@ -5660,6 +5765,10 @@ void PatternAlgorithms::id_pi0_without_vertex(int& acc_segment_id, IndexedShower
             WireCell::Vector dir = shower_cal_dir_3vector(*shower, test_p, 15 * units::cm);
             WireCell::Point p2(test_p.x() + dir.x(), test_p.y() + dir.y(), test_p.z() + dir.z());
             map_shower_ray[shower] = WireCell::Ray(test_p, p2);
+            if (pr132_pi0_dbg())
+                std::fprintf(stderr, "PI0_PAIR P2 ray src=main sh=%d E=%.1f len=%.1f\n",
+                             pr132_pi0_shid(shower), shower->get_kine_charge() / units::MeV,
+                             shower->get_total_length() / units::cm);
         }
     }
     
@@ -5688,7 +5797,18 @@ void PatternAlgorithms::id_pi0_without_vertex(int& acc_segment_id, IndexedShower
             if (pi0_showers.find(shower) != pi0_showers.end()) continue;
 
             auto [start_vtx, conn_type] = shower->get_start_vertex_and_type();
-            if (conn_type != 3) continue;
+            // doc pr/132 K4: legacy pool is conn_type==3 only (prototype
+            // NeutrinoID_shower_clustering.h:514); the knob also admits
+            // conn_type==2 (vertex-associated but detached) showers.
+            // false (default) = byte-identical.
+            const bool ct_ok = (conn_type == 3) || (m_pi0_nv_allow_type2 && conn_type == 2);
+            if (!ct_ok) {
+                if (pr132_pi0_dbg())
+                    std::fprintf(stderr, "PI0_PAIR P2 rayreject src=other sh=%d ct=%d E=%.1f\n",
+                                 pr132_pi0_shid(shower), conn_type,
+                                 shower->get_kine_charge() / units::MeV);
+                continue;
+            }
             
             {
                 bool is_shower_seg = shower->start_segment()->flags_any(SegmentFlags::kShowerTrajectory) ||
@@ -5698,7 +5818,12 @@ void PatternAlgorithms::id_pi0_without_vertex(int& acc_segment_id, IndexedShower
                     int seg_pdg = 0;
                     if (shower->start_segment()->has_particle_info() && shower->start_segment()->particle_info())
                         seg_pdg = shower->start_segment()->particle_info()->pdg();
-                    if (std::abs(seg_pdg) != 11) continue;
+                    if (std::abs(seg_pdg) != 11) {
+                        if (pr132_pi0_dbg())
+                            std::fprintf(stderr, "PI0_PAIR P2 rayreject src=other sh=%d notshower pdg=%d\n",
+                                         pr132_pi0_shid(shower), seg_pdg);
+                        continue;
+                    }
                 }
             }
             
@@ -5706,9 +5831,18 @@ void PatternAlgorithms::id_pi0_without_vertex(int& acc_segment_id, IndexedShower
             WireCell::Vector dir = shower_cal_dir_3vector(*shower, test_p, 15 * units::cm);
             WireCell::Point p2(test_p.x() + dir.x(), test_p.y() + dir.y(), test_p.z() + dir.z());
             map_shower_ray[shower] = WireCell::Ray(test_p, p2);
+            if (pr132_pi0_dbg())
+                std::fprintf(stderr, "PI0_PAIR P2 ray src=other sh=%d ct=%d E=%.1f len=%.1f\n",
+                             pr132_pi0_shid(shower), conn_type,
+                             shower->get_kine_charge() / units::MeV,
+                             shower->get_total_length() / units::cm);
         }
     }
     
+    if (pr132_pi0_dbg())
+        std::fprintf(stderr, "PI0_PAIR P2 pool n_ray=%zu n_good=%zu\n",
+                     map_shower_ray.size(), good_showers.size());
+
     if (map_shower_ray.size() > 1) {
         // Calculate pi0 masses for shower pairs.
         // Use shower_less-based comparator on pair key to guarantee deterministic iteration order.
@@ -5759,13 +5893,22 @@ void PatternAlgorithms::id_pi0_without_vertex(int& acc_segment_id, IndexedShower
                     double angle1 = std::acos(std::clamp(dir_to_shower1.dot(dir1) / (dir_to_shower1.magnitude() * dir1.magnitude()), -1.0, 1.0)) / M_PI * 180.0;
                     double angle2 = std::acos(std::clamp(dir_to_shower2.dot(dir2) / (dir_to_shower2.magnitude() * dir2.magnitude()), -1.0, 1.0)) / M_PI * 180.0;
                     
-                    if (angle1 > 25 || angle2 > 25) continue;
+                    if (angle1 > 25 || angle2 > 25) {
+                        if (pr132_pi0_dbg())
+                            std::fprintf(stderr, "PI0_PAIR P2 colreject sh1=%d sh2=%d a1=%.1f a2=%.1f\n",
+                                         pr132_pi0_shid(shower_1), pr132_pi0_shid(shower_2), angle1, angle2);
+                        continue;
+                    }
                     
                     double angle = std::acos(std::clamp(dir_to_shower1.dot(dir_to_shower2) / (dir_to_shower1.magnitude() * dir_to_shower2.magnitude()), -1.0, 1.0));
                     double mass_pio = std::sqrt(4 * shower_1->get_kine_charge() * shower_2->get_kine_charge() * 
                                                std::pow(std::sin(angle / 2.0), 2));
                     map_shower_pair_mass_point[std::make_pair(shower_1, shower_2)] = std::make_pair(mass_pio, center);
-                    
+                    if (pr132_pi0_dbg())
+                        std::fprintf(stderr, "PI0_PAIR P2 pair br=LL sh1=%d sh2=%d m=%.1f\n",
+                                     pr132_pi0_shid(shower_1), pr132_pi0_shid(shower_2),
+                                     mass_pio / units::MeV);
+
                 } else if (length_1 > 15 * units::cm || length_2 > 15 * units::cm) {
                     WireCell::Vector dir_to_c1, dir_to_c2;
 
@@ -5788,7 +5931,12 @@ void PatternAlgorithms::id_pi0_without_vertex(int& acc_segment_id, IndexedShower
                         
                         double angle1 = std::acos(std::clamp(dir_to_c1.dot(dir1) / (dir_to_c1.magnitude() * dir1.magnitude()), -1.0, 1.0)) / M_PI * 180.0;
                         double angle2 = std::acos(std::clamp(dir_to_c2.dot(dir3) / (dir_to_c2.magnitude() * dir3.magnitude()), -1.0, 1.0)) / M_PI * 180.0;
-                        if (angle1 > 25 || angle2 > 25) continue;
+                        if (angle1 > 25 || angle2 > 25) {
+                        if (pr132_pi0_dbg())
+                            std::fprintf(stderr, "PI0_PAIR P2 colreject sh1=%d sh2=%d a1=%.1f a2=%.1f\n",
+                                         pr132_pi0_shid(shower_1), pr132_pi0_shid(shower_2), angle1, angle2);
+                        continue;
+                    }
                         
                     } else {
                         // center already holds (p1_closest + p2_closest)/2 from above
@@ -5809,15 +5957,27 @@ void PatternAlgorithms::id_pi0_without_vertex(int& acc_segment_id, IndexedShower
                         
                         double angle1 = std::acos(std::clamp(dir_to_c1.dot(dir3) / (dir_to_c1.magnitude() * dir3.magnitude()), -1.0, 1.0)) / M_PI * 180.0;
                         double angle2 = std::acos(std::clamp(dir_to_c2.dot(dir2) / (dir_to_c2.magnitude() * dir2.magnitude()), -1.0, 1.0)) / M_PI * 180.0;
-                        if (angle1 > 25 || angle2 > 25) continue;
+                        if (angle1 > 25 || angle2 > 25) {
+                        if (pr132_pi0_dbg())
+                            std::fprintf(stderr, "PI0_PAIR P2 colreject sh1=%d sh2=%d a1=%.1f a2=%.1f\n",
+                                         pr132_pi0_shid(shower_1), pr132_pi0_shid(shower_2), angle1, angle2);
+                        continue;
+                    }
                     }
                     
                     double angle = std::acos(std::clamp(dir_to_c1.dot(dir_to_c2) / (dir_to_c1.magnitude() * dir_to_c2.magnitude()), -1.0, 1.0));
                     double mass_pio = std::sqrt(4 * shower_1->get_kine_charge() * shower_2->get_kine_charge() * 
                                                std::pow(std::sin(angle / 2.0), 2));
                     map_shower_pair_mass_point[std::make_pair(shower_1, shower_2)] = std::make_pair(mass_pio, center);
-                    
+                    if (pr132_pi0_dbg())
+                        std::fprintf(stderr, "PI0_PAIR P2 pair br=LS sh1=%d sh2=%d m=%.1f\n",
+                                     pr132_pi0_shid(shower_1), pr132_pi0_shid(shower_2),
+                                     mass_pio / units::MeV);
+
                 } else {
+                    if (pr132_pi0_dbg())
+                        std::fprintf(stderr, "PI0_PAIR P2 bothshort sh1=%d sh2=%d\n",
+                                     pr132_pi0_shid(shower_1), pr132_pi0_shid(shower_2));
                     break; // both showers short: exit inner loop (prototype line 614)
                 }
             }
@@ -5868,7 +6028,7 @@ void PatternAlgorithms::id_pi0_without_vertex(int& acc_segment_id, IndexedShower
         double mass_save = 0;
         ShowerPtr shower_1 = nullptr;
         ShowerPtr shower_2 = nullptr;
-        double mass_offset = 10 * units::MeV;
+        double mass_offset = m_pi0_mass_offset;  // doc pr/132 K1; 10 MeV = legacy
         WireCell::Point vtx_point;
 
         for (auto& [shower_pair, mass_point] : map_shower_pair_mass_point) {
@@ -5884,6 +6044,19 @@ void PatternAlgorithms::id_pi0_without_vertex(int& acc_segment_id, IndexedShower
             }
         }
         
+        if (pr132_pi0_dbg()) {
+            for (auto& [shower_pair, mass_point] : map_shower_pair_mass_point) {
+                const bool good = good_showers.count(shower_pair.first) || good_showers.count(shower_pair.second);
+                std::fprintf(stderr, "PI0_PAIR P2 pairsel sh1=%d sh2=%d m=%.1f good=%d\n",
+                             pr132_pi0_shid(shower_pair.first), pr132_pi0_shid(shower_pair.second),
+                             mass_point.first / units::MeV, good ? 1 : 0);
+            }
+            std::fprintf(stderr, "PI0_PAIR P2 best sh1=%d sh2=%d m=%.1f acc=%d\n",
+                         pr132_pi0_shid(shower_1), pr132_pi0_shid(shower_2),
+                         mass_save / units::MeV,
+                         (mass_diff < 60 * units::MeV && shower_1 && shower_2) ? 1 : 0);
+        }
+
         // If found good pi0, update everything
         if (mass_diff < 60 * units::MeV && shower_1 && shower_2) {
             pi0_showers.insert(shower_1);

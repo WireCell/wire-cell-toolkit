@@ -2224,6 +2224,13 @@ namespace WireCell::Clus::PR {
         double m_shower_pass4_prox_guard_len{0};         ///< doc pr/130 item 1b; 0 = pass4_proximity unguarded (legacy)
         double m_shower_pass3_backfill_guard_len{0};     ///< doc pr/130 item 1b; 0 = pass3 sibling backfill ignores pr/124's decline (legacy)
         double m_stem_backfill_back_dvtx{0};             ///< doc pr/130 item B; 0 = back guard declines regardless of shower-start distance to the nu vertex (legacy)
+        // doc pr/132: pi0-finder knobs (owner round 2026-08-29).  Defaults
+        // reproduce the legacy hard-coded constants => byte-identical.
+        double m_pi0_mass_offset{10 * units::MeV};       ///< doc pr/132 K1; the finders' "+10 MeV" window offset (both paths)
+        double m_pi0_assoc_angle_deg{30.0};              ///< doc pr/132 K2; deg, disconnected-shower <-> candidate-vertex association
+        double m_pi0_attached_partner_min{0};            ///< doc pr/132 K3; 0 = off; min partner energy when the attached member sits at the MAIN vertex
+        bool   m_pi0_nv_allow_type2{false};              ///< doc pr/132 K4; admit conn_type==2 showers into the without-vertex ray pool
+        int    m_pi0_nv_max_prongs{2};                   ///< doc pr/132 K5; without-vertex GATE1 prong cap (legacy 2)
         // doc pr/125 (owner 2026-08-29): same-vertex track-typed fragment
         // absorb (SBND 18259-37112) + vertex-connected satellite absorb
         // (SBND 18255-69314).  false (defaults) => no pass => byte-identical.

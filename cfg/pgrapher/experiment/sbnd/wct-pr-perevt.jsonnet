@@ -1823,6 +1823,15 @@ function(
     // precedes it), all of them adjudicated, so this cannot touch an
     // unadjudicated candidate.  C++ default 0.  Key omitted when 0 =>
     // byte-identical pre-fix config.
+    // doc pr/132 -- the pi0-finder knobs (owner pi0 round 2026-08-29).  C++
+    // defaults are the legacy hard-coded constants (offset 10 MeV, assoc 30
+    // deg, guard 0 = off, type2 false, prongs 2); every key is omitted at
+    // its default => byte-identical pre-round config.
+    pi0_mass_offset = null,                  // MeV; null => C++ default 10 (the finders' "+10" window offset)
+    pi0_assoc_angle_deg = null,              // deg; null => C++ default 30 (disconnected<->vertex association)
+    pi0_attached_partner_min_mev = 0,        // MeV; 0 = no nueCC-fake guard (C++ default 0)
+    pi0_nv_allow_type2 = false,              // C++ default false (without-vertex pool conn_type 3 only)
+    pi0_nv_max_prongs = null,                // null => C++ default 2 (without-vertex GATE1 prong cap)
     stem_backfill_back_dvtx = 45,            // cm; SBND PRODUCTION ON 2026-08-29 (owner flip: "For B, flip on for SBND production").  Suppress the backward-stem decline when the SHOWER START is further than this from the nu vertex.  The guard's reachable population is CLOSED at 8 events (`if (!ok) break;` precedes it) and all 8 are owner-adjudicated: absorb-wanted 46.84 (292643) and 88.11 (179369), every decline-ok <= 44.34, so 45 sits in an empty interval and the flip changes exactly those 2 of 239 events.  On both, the resulting PF tree is IDENTICAL to the guard-OFF shape the owner reviewed in bee/pr130r2 and preferred.  C++ default 0 = off.
     // doc pr/124 front A -- 25-40 cm gap-band tier-2 prune (qualifier pair
     // ang>40deg OR mdqdx>2.5 MIP measured zero-labeled-collateral on both
@@ -2950,6 +2959,12 @@ function(
         [if shower_pass4_prox_guard_len != 0 then 'shower_pass4_prox_guard_len']: shower_pass4_prox_guard_len,
         [if shower_pass3_backfill_guard_len != 0 then 'shower_pass3_backfill_guard_len']: shower_pass3_backfill_guard_len,
         [if stem_backfill_back_dvtx != 0 then 'stem_backfill_back_dvtx']: stem_backfill_back_dvtx,
+        // doc pr/132: C++ defaults 10 MeV / 30 deg / 0 / false / 2.  Keys omitted at defaults => byte-identical.
+        [if pi0_mass_offset != null then 'pi0_mass_offset']: pi0_mass_offset,
+        [if pi0_assoc_angle_deg != null then 'pi0_assoc_angle_deg']: pi0_assoc_angle_deg,
+        [if pi0_attached_partner_min_mev != 0 then 'pi0_attached_partner_min_mev']: pi0_attached_partner_min_mev,
+        [if pi0_nv_allow_type2 then 'pi0_nv_allow_type2']: true,
+        [if pi0_nv_max_prongs != null then 'pi0_nv_max_prongs']: pi0_nv_max_prongs,
         [if shower_pass4_prune_gap2 != 0 then 'shower_pass4_prune_gap2']: shower_pass4_prune_gap2,
         [if shower_pass4_prune_gap2 != 0 && shower_pass4_prune2_ang != 40 then 'shower_pass4_prune2_ang']: shower_pass4_prune2_ang,
         [if shower_pass4_prune_gap2 != 0 && shower_pass4_prune2_mdqdx != 2.5 then 'shower_pass4_prune2_mdqdx']: shower_pass4_prune2_mdqdx,
