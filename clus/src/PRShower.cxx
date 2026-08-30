@@ -82,6 +82,23 @@ namespace WireCell::Clus::PR {
             static const bool dbg = std::getenv("WCT_SHOWER_ABSORB_DEBUG") != nullptr;
             return dbg;
         }
+        // doc sbnd_xin/docs/pr/130 item 4 part 8 -- WCT_SHOWER_BLOCKED_DEBUG.
+        // The flood-fill below skips any segment already in used_segments, and
+        // that skip is SILENT: the existing tape emits ADD and EXCLUDE but
+        // nothing when a walk is turned away by a prior claim.  So "the wrong
+        // shower got there first" and "the right shower never reaches this
+        // segment" are observationally identical, and the owner's 2026-08-29
+        // scan (17/17 merges approved, no geometric predicate) cannot be acted
+        // on without telling them apart.  This tape carries only the walking
+        // shower and the blocked segment; WHO holds it is joined offline from
+        // the probe sidecar, so no signature changes and no map is built.
+        // Separate from WCT_SHOWER_ABSORB_DEBUG on purpose: prep_em_scan.py
+        // parses the ABSORB tape, and this must not enter that stream.
+        bool blocked_dbg()
+        {
+            static const bool dbg = std::getenv("WCT_SHOWER_BLOCKED_DEBUG") != nullptr;
+            return dbg;
+        }
         // doc sbnd_xin/docs/pr/122 round 1 -- WCT_SHOWER_PID_DEBUG.  A shower's
         // REPORTED particle type is not the update_particle_type vote: the vote
         // only ever writes pdg 11 on the start segment, and calculate_kinematics
@@ -900,6 +917,16 @@ namespace WireCell::Clus::PR {
                             this->add_segment(seg, false, cloud_name_fit, cloud_name_associate);
                             new_segments.push_back(seg);
                             used_segments.insert(seg);
+                        }
+                        // doc pr/130 item 4 part 8: the walk reached this segment
+                        // and was turned away because something already claimed
+                        // it.  blocked_dbg() is tested FIRST so the branch costs
+                        // one static bool when the env is unset -- byte-identical.
+                        else if (blocked_dbg() && seg && seg->descriptor_valid()) {
+                            std::fprintf(stderr, "SHOWER_ABSORB BLOCKED shower_start_seg=%d seg=%d pdg=%d len_cm=%.2f\n",
+                                         seg_display_id(m_start_segment), seg_display_id(seg),
+                                         seg->has_particle_info() && seg->particle_info() ? seg->particle_info()->pdg() : 0,
+                                         segment_track_length(seg)/units::cm);
                         }
                     }
                 }
