@@ -77,6 +77,22 @@ static inline bool pr93_absorb_dbg()
     static const bool dbg = std::getenv("WCT_SHOWER_ABSORB_DEBUG") != nullptr;
     return dbg;
 }
+// doc sbnd_xin/docs/pr/130 item 4 part 10 -- WCT_SHOWER_XCLUS_DEBUG.
+// Part 9 proved the shower WALK never reaches the charge the owner's scan
+// wants (0 of 78 contention, 96.2% of it in clusters the shower does not hold
+// at all), so the whole of the approved under-clustering is CROSS-CLUSTER
+// acquisition.  The cross-cluster absorbers tape admissions only, so a segment
+// that shower A wanted and shower B took leaves no record of A ever having
+// looked -- exactly the gap the BLOCKED probe closed one level down.  This
+// tape records the REJECTIONS at the pass-4 direct-cone acceptance, with the
+// quantities the disjunction tests, plus every rival's arbitration metric.
+// It answers: was A a candidate that lost, or never a candidate at all?
+// stderr only; separate env var so prep_em_scan.py's ABSORB stream is untouched.
+static inline bool pr130_xclus_dbg()
+{
+    static const bool dbg = std::getenv("WCT_SHOWER_XCLUS_DEBUG") != nullptr;
+    return dbg;
+}
 static inline void pr93_probe_absorb_site(const char* site, const ShowerPtr& sh, bool guard)
 {
     if (!pr93_absorb_dbg() || !sh) return;
@@ -2324,7 +2340,21 @@ void PatternAlgorithms::shower_clustering_with_nv_from_vertices(Graph& graph, Ve
         }
         for (auto seg1 : seg_order) {
             if ((seg1->cluster() == main_cluster && !m_absorb_unreachable_main_segs.count(seg1)) || m_nv_bridge_shield_segs.count(seg1)) continue;  // doc pr/65 round 3: guard means "claimed by the main_vertex graph walk", so graph-unreachable main-cluster segments stay eligible (set empty when knob off => legacy); doc pr/40 round 9 B2: bridged-cluster segments stay un-absorbable (shield set empty when bridge off)
-            if (map_segment_in_shower.find(seg1) != map_segment_in_shower.end()) continue;
+            // doc pr/130 part 10: the decisive skip.  A segment already owned by
+            // ANOTHER shower is dropped here BEFORE any geometry is computed, so the
+            // owning shower's claim is invisible to every later shower -- the same
+            // silent-skip shape the BLOCKED probe found in the walk one level down.
+            if (map_segment_in_shower.find(seg1) != map_segment_in_shower.end()) {
+                if (pr130_xclus_dbg()) {
+                    const auto& owner_sh = map_segment_in_shower.find(seg1)->second;
+                    std::fprintf(stderr,
+                        "SHOWER_XCLUS OWNED site=pass4_angle shower=%d seg=%d owner=%d\n",
+                        pr91_seg_display_id(shower->start_segment()),
+                        pr91_seg_display_id(seg1),
+                        owner_sh ? pr91_seg_display_id(owner_sh->start_segment()) : -1);
+                }
+                continue;
+            }
             if (seg1->cluster() == shower->start_segment()->cluster()) continue;
 
             auto it1 = map_cluster_associated_vertex.find(seg1->cluster());
@@ -2337,7 +2367,19 @@ void PatternAlgorithms::shower_clustering_with_nv_from_vertices(Graph& graph, Ve
             double angle_v2 = std::acos(std::clamp(dir_shower.dot(v2) / (dir_shower.magnitude() * v2.magnitude()), -1.0, 1.0)) / M_PI * 180.0;
 
             // Filter early before the two expensive KD-tree calls below
-            if (angle_v2 > 30) continue;
+            if (angle_v2 > 30) {
+                // doc pr/130 part 10: this shower looked at this segment and
+                // dropped it on the cheap angle gate.  Gate tested first, so
+                // the branch costs one static bool when the env is unset.
+                if (pr130_xclus_dbg()) {
+                    std::fprintf(stderr,
+                        "SHOWER_XCLUS REJECT site=pass4_angle_early shower=%d seg=%d angle_v1=%.1f angle_v2=%.1f pair_dis_cm=%.1f\n",
+                        pr91_seg_display_id(shower->start_segment()),
+                        pr91_seg_display_id(seg1), angle_v1, angle_v2,
+                        pair_dis / units::cm);
+                }
+                continue;
+            }
 
             double tmp_shower_dis = segment_get_closest_point(seg1, shower_start_front).first;
             double close_shower_dis = shower_get_closest_dis(*shower, seg1);
@@ -2384,6 +2426,17 @@ void PatternAlgorithms::shower_clustering_with_nv_from_vertices(Graph& graph, Ve
                               (rangle < 12.5 && rdist < 130 * units::cm) ||
                               (rangle < 5.0 && rdist < 200 * units::cm))) continue;
                         const double m = p4_ellip(rdist, rangle);
+                        // doc pr/130 part 10: every rival's own metric, so a
+                        // shower that competed and lost is distinguishable from
+                        // one that was never in the list at all.
+                        if (pr130_xclus_dbg()) {
+                            std::fprintf(stderr,
+                                "SHOWER_XCLUS RIVAL seg=%d cur=%d rival=%d rival_metric=%.4f rival_dist_cm=%.1f rival_angle=%.1f\n",
+                                pr91_seg_display_id(seg1),
+                                pr91_seg_display_id(shower->start_segment()),
+                                pr91_seg_display_id(r.shower->start_segment()),
+                                m, rdist / units::cm, rangle);
+                        }
                         if (m < best_metric) { best_metric = m; best_shower = r.shower; }
                     }
                     if (pr93_absorb_dbg()) {
@@ -2452,6 +2505,16 @@ void PatternAlgorithms::shower_clustering_with_nv_from_vertices(Graph& graph, Ve
                                        angle_v1, angle_v2, m_mip_dqdx_median);
                 pr93_probe_absorb_direct(p4_owner == shower ? "pass4_angle" : "pass4_angle_divert", p4_owner, seg1);
                 p4_owner->add_segment(seg1, true);
+            }
+            // doc pr/130 part 10: the acceptance disjunction refused it.  All
+            // five quantities are already computed, so the tape is free.
+            else if (pr130_xclus_dbg()) {
+                std::fprintf(stderr,
+                    "SHOWER_XCLUS REJECT site=pass4_angle_cone shower=%d seg=%d angle_v1=%.1f angle_v2=%.1f pair_dis_cm=%.1f tmp_dis_cm=%.1f close_dis_cm=%.1f\n",
+                    pr91_seg_display_id(shower->start_segment()),
+                    pr91_seg_display_id(seg1), angle_v1, angle_v2,
+                    pair_dis / units::cm, tmp_shower_dis / units::cm,
+                    close_shower_dis / units::cm);
             }
         }
 
@@ -3743,7 +3806,21 @@ void PatternAlgorithms::shower_clustering_in_other_clusters(Graph& graph, Vertex
             // Cluster with the rest - add segments based on angle and distance
             for (auto seg1 : seg_order) {
                 if ((seg1->cluster() == main_cluster && !m_absorb_unreachable_main_segs.count(seg1)) || m_nv_bridge_shield_segs.count(seg1)) continue;  // doc pr/65 round 3: guard means "claimed by the main_vertex graph walk", so graph-unreachable main-cluster segments stay eligible (set empty when knob off => legacy); doc pr/40 round 9 B2: bridged-cluster segments stay un-absorbable (shield set empty when bridge off)
-                if (map_segment_in_shower.find(seg1) != map_segment_in_shower.end()) continue;
+                // doc pr/130 part 10: the decisive skip.  A segment already owned by
+                // ANOTHER shower is dropped here BEFORE any geometry is computed, so the
+                // owning shower's claim is invisible to every later shower -- the same
+                // silent-skip shape the BLOCKED probe found in the walk one level down.
+                if (map_segment_in_shower.find(seg1) != map_segment_in_shower.end()) {
+                    if (pr130_xclus_dbg()) {
+                        const auto& owner_sh = map_segment_in_shower.find(seg1)->second;
+                        std::fprintf(stderr,
+                            "SHOWER_XCLUS OWNED site=in_other_clusters shower=%d seg=%d owner=%d\n",
+                            pr91_seg_display_id(shower->start_segment()),
+                            pr91_seg_display_id(seg1),
+                            owner_sh ? pr91_seg_display_id(owner_sh->start_segment()) : -1);
+                    }
+                    continue;
+                }
                 if (seg1->cluster() == shower->start_segment()->cluster()) continue;
                 
                 // Find the closest point
