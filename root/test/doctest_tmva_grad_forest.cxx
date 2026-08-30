@@ -215,7 +215,7 @@ TEST_CASE("tmva grad forest refuses files outside the mirrored class")
 // zero events by construction, and every strongly-signal-like event piled up
 // on one value.  Written against the clamped code these cases FAIL: the
 // reachability case returns 4.30103 instead of ~8.3, and the two ceilings
-// come back as 4.3009362 (float) / 4.3010083 (double) instead of 16.2555.
+// come back as 4.3009362 (float) / 4.3010083 (double) instead of 16.25562.
 // ===========================================================================
 TEST_CASE("bdt log-odds: the MicroBooNE nue working point is reachable")
 {
@@ -251,7 +251,7 @@ TEST_CASE("bdt log-odds: degenerate forest outputs stay finite")
     // that is log10(2/0) = +inf, which would reach a ROOT float branch.
     const double hi = bdt_log_odds_score(1.0, quiet, "test");
     CHECK(std::isfinite(hi));
-    CHECK(hi == doctest::Approx(16.2555).epsilon(1e-4));
+    CHECK(hi == doctest::Approx(16.25562).epsilon(1e-6));
     CHECK(static_cast<float>(hi) < std::numeric_limits<float>::max());
 
     // TmvaGradForest::evaluate returns -999 when any input variable is NaN
@@ -260,7 +260,7 @@ TEST_CASE("bdt log-odds: degenerate forest outputs stay finite")
     // clamp sent it (-4.30103), not to NaN.
     const double lo = bdt_log_odds_score(-999.0, quiet, "test");
     CHECK(std::isfinite(lo));
-    CHECK(lo == doctest::Approx(-16.2555).epsilon(1e-4));
+    CHECK(lo == doctest::Approx(-16.25562).epsilon(1e-6));
     CHECK(lo < -15.0);   // below the "not filled" sentinel, as background-like
 
     CHECK(std::isfinite(bdt_log_odds_score(-1.0, quiet, "test")));

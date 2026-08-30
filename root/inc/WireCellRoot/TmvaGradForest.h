@@ -90,7 +90,7 @@ namespace WireCell::Root {
     /// BDT scorers used to clamp v to +-0.9999 first, capping |score| at
     /// 4.30103; the prototype (NeutrinoID_nue_bdts.h:300-301,
     /// NeutrinoID_numu_bdts.h:94-95) carries v in a double and does not clamp,
-    /// so |score| reaches 16.2555 and the -15 "not filled" sentinel sits below
+    /// so |score| reaches 16.25562 and the -15 "not filled" sentinel sits below
     /// the real floor.  The clamp made MicroBooNE's nue_score > 7.0 working
     /// point select zero events by construction.  It is gone; this is the
     /// transform that replaced it.
@@ -101,7 +101,7 @@ namespace WireCell::Root {
     /// sentinel when any input variable is NaN (log10 of a negative ratio =
     /// NaN).  Either would leave a non-finite value in a ROOT float branch and
     /// in every downstream cut, so |v| >= 1 and non-finite v are pulled to the
-    /// neighbouring double -- a 1.1e-16 move to the finite extremes +-16.2555,
+    /// neighbouring double -- a 1.1e-16 move to the finite extremes +-16.25562,
     /// not the +-4.30103 truncation the clamp imposed.  `log` and `who` are
     /// used only to report a hit: a silent inf is the failure mode a
     /// 3000-event batch cannot show you.
