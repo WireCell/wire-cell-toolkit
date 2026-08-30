@@ -5784,6 +5784,176 @@ void PatternAlgorithms::id_pi0_backproject_vertex(int& acc_segment_id, IndexedSh
     ShowerPtr b1 = nullptr, b2 = nullptr;
     WireCell::Point best_x;
 
+    // doc pr/134 K22 (owner 2026-08-30: 116962 "still not good, the nu
+    // vertex is not at the right place"): the six-fragment gamma problem.
+    // Fragment-level rays cannot find the true crossing (each fragment's
+    // local dir is a fragment artifact), and fragment-level charges put the
+    // true crossing's mass out of the window while an in-window FALSE pair
+    // (21072 x 55030, m=125.8) wins.  Complex-level pairing instead:
+    //   host complex  = the nc_sig_hosts (co-seated at the wrong main),
+    //   partner rays  = each non-host candidate's start/end anchor with the
+    //                   local dir computed over the MERGED non-host cloud,
+    //   masses        = merged charges (host sum x assigned-partner sum).
+    // Under merged charges the 116962 false pair leaves the window
+    // (125.8 -> 166.1) and the true crossing enters it (33.1 -> 146.4) --
+    // the merge kills the wrong fire and enables the right one with the
+    // SAME legacy window.  Offline final-sim (doc pr/134): 116962 fires at
+    // (-70.1,-79.7,111.7) 44.3 cm upstream; 76346 reproduces its v2.2
+    // vertex exactly; 21073/282979/175896/176502/275011/499423 all NO FIRE.
+    // false (default) = the v2.1/v2.2 fragment-level path, byte-identical.
+    bool mrg_mode = (m_pi0_nc_sig_angle > 0 && m_pi0_nc_frag_merge);
+    std::vector<ShowerPtr> mrg_hosts, mrg_partners;   // graph-index order (never iterate the pointer set)
+    std::vector<ShowerPtr> best_pmembers;             // partner-complex members of the winning pair
+    if (mrg_mode) {
+        for (auto sh : showers)
+            if (nc_sig_hosts.count(sh)) mrg_hosts.push_back(sh);
+        for (auto sh : cands)
+            if (!nc_sig_hosts.count(sh)) mrg_partners.push_back(sh);
+        if (mrg_hosts.empty() || mrg_partners.empty()) return;
+        // The EM-host guard (full-arm k2223 v1 ADVERSE, SBND 499423): a
+        // 211-typed attached prong passed the v4 gate as a "shower" host
+        // and the merged partner charges lifted its false pair into the
+        // window (vertex moved 4.7 cm off the hand click).  The owner
+        // signature is "we are inside an EM shower": every host-complex
+        // member must be EM-typed (pdg +-11; +-13 only through the K20
+        // admit).  A non-EM host falls back to the fragment-level loop --
+        // exactly the k21v5 behavior the owner accepted (499423: no fire).
+        for (auto sh : mrg_hosts) {
+            const int hpdg = std::abs(sh->get_particle_type());
+            if (hpdg == 11) continue;
+            if (hpdg == 13 && pi0_mu_shower_admit(sh, segments_in_long_muon)) continue;
+            mrg_mode = false;
+            if (pr132_pi0_dbg())
+                std::fprintf(stderr, "PI0_PAIR P0 bp mrg refuse host=%d pdg=%d\n",
+                             pr132_pi0_shid(sh), sh->get_particle_type());
+            break;
+        }
+    }
+    if (mrg_mode) {
+        // Merged-cloud local dir: the multi-shower analogue of
+        // shower_cal_dir_3vector (unweighted fit-point centroid within
+        // 15 cm), accumulated across the member showers in vector order.
+        auto mrg_dir = [&graph](const std::vector<ShowerPtr>& members, const WireCell::Point& p) -> WireCell::Vector {
+            const double R2 = std::pow(15 * units::cm, 2);
+            double sx = 0, sy = 0, sz = 0; int ncount = 0;
+            for (const auto& msh : members) {
+                const auto& view = msh->view_graph();
+                for (auto edesc : ordered_edges(*msh, graph)) {
+                    SegmentPtr seg = view[edesc].segment;
+                    if (!seg) continue;
+                    for (const auto& fit : seg->fits()) {
+                        const double dx = fit.point.x() - p.x();
+                        const double dy = fit.point.y() - p.y();
+                        const double dz = fit.point.z() - p.z();
+                        if (dx*dx + dy*dy + dz*dz < R2) { sx += fit.point.x(); sy += fit.point.y(); sz += fit.point.z(); ++ncount; }
+                    }
+                }
+            }
+            if (!ncount) return WireCell::Vector(0, 0, 0);
+            WireCell::Vector dir(sx/ncount - p.x(), sy/ncount - p.y(), sz/ncount - p.z());
+            const double mag = dir.magnitude();
+            return mag > 0 ? dir * (1.0 / mag) : WireCell::Vector(0, 0, 0);
+        };
+        // Per-shower whole-cloud centroid (for the partner-charge assignment).
+        auto sh_centroid = [&graph](const ShowerPtr& msh, WireCell::Point& out) -> bool {
+            double sx = 0, sy = 0, sz = 0; int ncount = 0;
+            const auto& view = msh->view_graph();
+            for (auto edesc : ordered_edges(*msh, graph)) {
+                SegmentPtr seg = view[edesc].segment;
+                if (!seg) continue;
+                for (const auto& fit : seg->fits()) { sx += fit.point.x(); sy += fit.point.y(); sz += fit.point.z(); ++ncount; }
+            }
+            if (!ncount) return false;
+            out = WireCell::Point(sx/ncount, sy/ncount, sz/ncount);
+            return true;
+        };
+        struct MrgRay { ShowerPtr sh; WireCell::Point a; WireCell::Vector d; };
+        std::vector<MrgRay> hrays, prays;
+        for (auto sh : mrg_hosts)
+            for (int o = 0; o < 2; ++o) {
+                const WireCell::Point a = o ? sh->get_end_point() : sh->get_start_point();
+                const WireCell::Vector dd = mrg_dir(mrg_hosts, a);
+                if (dd.magnitude() > 0) hrays.push_back({sh, a, dd});
+            }
+        for (auto sh : mrg_partners)
+            for (int o = 0; o < 2; ++o) {
+                const WireCell::Point a = o ? sh->get_end_point() : sh->get_start_point();
+                const WireCell::Vector dd = mrg_dir(mrg_partners, a);
+                if (dd.magnitude() > 0) prays.push_back({sh, a, dd});
+            }
+        double Eh = 0;
+        ShowerPtr host_head = nullptr;
+        for (auto sh : mrg_hosts) {
+            Eh += sh->get_kine_charge();
+            if (!host_head || sh->get_kine_charge() > host_head->get_kine_charge()) host_head = sh;
+        }
+        if (pr132_pi0_dbg())
+            std::fprintf(stderr, "PI0_PAIR P0 bp mrg hosts=%zu partners=%zu Eh=%.1f head=%d\n",
+                         mrg_hosts.size(), mrg_partners.size(), Eh / units::MeV,
+                         pr132_pi0_shid(host_head));
+        for (const auto& hr : hrays) {
+            for (const auto& pr : prays) {
+                const double axang = std::acos(std::clamp(hr.d.dot(pr.d), -1.0, 1.0)) * 180.0 / M_PI;
+                if (axang < m_pi0_nc_sig_angle) continue;
+                const WireCell::Vector w0v(hr.a.x()-pr.a.x(), hr.a.y()-pr.a.y(), hr.a.z()-pr.a.z());
+                const double bb = hr.d.dot(pr.d);
+                const double den = 1.0 - bb * bb;
+                if (den < 1e-6) continue;
+                const double dvv = hr.d.dot(w0v), evv = pr.d.dot(w0v);
+                const double u1 = (bb * evv - dvv) / den;
+                const double u2 = (evv - bb * dvv) / den;
+                if (u1 > 1 * units::cm || u1 < -120 * units::cm) continue;
+                if (u2 > 1 * units::cm || u2 < -120 * units::cm) continue;
+                const WireCell::Point c1(hr.a.x()+u1*hr.d.x(), hr.a.y()+u1*hr.d.y(), hr.a.z()+u1*hr.d.z());
+                const WireCell::Point c2(pr.a.x()+u2*pr.d.x(), pr.a.y()+u2*pr.d.y(), pr.a.z()+u2*pr.d.z());
+                const double miss = (c1 - c2).magnitude();
+                if (miss > m_pi0_bp_miss) continue;
+                const WireCell::Point x((c1.x()+c2.x())/2, (c1.y()+c2.y())/2, (c1.z()+c2.z())/2);
+                const double shift = (x - vtx_pt).magnitude();
+                if (shift < 1 * units::cm || shift > 100 * units::cm) continue;
+                const WireCell::Vector r1(hr.a.x()-x.x(), hr.a.y()-x.y(), hr.a.z()-x.z());
+                const WireCell::Vector r2(pr.a.x()-x.x(), pr.a.y()-x.y(), pr.a.z()-x.z());
+                if (r1.magnitude() < 1 * units::cm || r2.magnitude() < 1 * units::cm) continue;
+                const double ang = std::acos(std::clamp(
+                    r1.dot(r2) / (r1.magnitude() * r2.magnitude()), -1.0, 1.0));
+                // Partner-charge assignment: the anchor fragment always
+                // belongs to the partner (its charge is the conversion
+                // stem); every other non-host candidate joins the side
+                // whose vertex ray its cloud centroid sits closer to.
+                double Ep = pr.sh->get_kine_charge();
+                std::vector<ShowerPtr> pmem{pr.sh};
+                for (auto osh : mrg_partners) {
+                    if (osh == pr.sh) continue;
+                    WireCell::Point cen;
+                    if (!sh_centroid(osh, cen)) continue;
+                    const WireCell::Vector vs(cen.x()-x.x(), cen.y()-x.y(), cen.z()-x.z());
+                    const double vsm = vs.magnitude();
+                    if (vsm <= 0) continue;
+                    const double aH = std::acos(std::clamp(vs.dot(r1) / (vsm * r1.magnitude()), -1.0, 1.0));
+                    const double aP = std::acos(std::clamp(vs.dot(r2) / (vsm * r2.magnitude()), -1.0, 1.0));
+                    if (aP <= aH) { Ep += osh->get_kine_charge(); pmem.push_back(osh); }
+                }
+                const double m = std::sqrt(4 * Eh * Ep * std::pow(std::sin(ang / 2.0), 2));
+                const double delta = m - 135 * units::MeV + mass_offset;
+                if (pr132_pi0_dbg())
+                    std::fprintf(stderr, "PI0_PAIR P0 bp try3 h=%d p=%d miss=%.1f u1=%.1f u2=%.1f shift=%.1f Ep=%.1f npm=%zu m=%.1f\n",
+                                 pr132_pi0_shid(hr.sh), pr132_pi0_shid(pr.sh),
+                                 miss / units::cm, u1 / units::cm, u2 / units::cm,
+                                 shift / units::cm, Ep / units::MeV, pmem.size(), m / units::MeV);
+                if (delta >= 35 * units::MeV || delta <= -25 * units::MeV) continue;
+                if (miss < best_miss - 1e-9 ||
+                    (std::abs(miss - best_miss) <= 1e-9 && std::abs(delta) < best_abs)) {
+                    best_miss = miss;
+                    best_abs = std::abs(delta);
+                    best_mass = m;
+                    best_ang = ang;
+                    b1 = host_head; b2 = pr.sh; best_x = x;
+                    best_pmembers = pmem;
+                }
+            }
+        }
+    }
+    else
     for (size_t i = 0; i < cands.size(); ++i) {
         for (size_t j = i + 1; j < cands.size(); ++j) {
             ShowerPtr s1 = cands[i], s2 = cands[j];
@@ -5936,6 +6106,49 @@ void PatternAlgorithms::id_pi0_backproject_vertex(int& acc_segment_id, IndexedSh
         for (auto& rsh : {b1, b2})
             if (std::abs(rsh->get_particle_type()) != 11)
                 pi0_restamp_shower_em(rsh, particle_data, recomb_model);
+    }
+    // doc pr/134 K22: the accepted pair was formed at COMPLEX level -- make
+    // the merge real (the K12/K18 accept-time precedent): the other host
+    // members fold into the host head, the assigned partner members into
+    // the partner anchor, then both gammas' charges and the registered mass
+    // refresh from the merged objects at the accept-time opening angle.
+    if (mrg_mode) {
+        size_t n_mrg = 0;
+        for (auto sh : mrg_hosts) {
+            if (sh == b1) continue;
+            if (pr132_pi0_dbg())
+                std::fprintf(stderr, "PI0_PAIR P0 bp mrgabsorb sh=%d E=%.1f -> gamma=%d\n",
+                             pr132_pi0_shid(sh), sh->get_kine_charge() / units::MeV,
+                             pr132_pi0_shid(b1));
+            pr93_probe_absorb_splice("nc_frag_merge", b1, sh);
+            b1->add_shower(*sh);
+            showers.erase(sh);
+            ++n_mrg;
+        }
+        for (auto sh : best_pmembers) {
+            if (sh == b2) continue;
+            if (pr132_pi0_dbg())
+                std::fprintf(stderr, "PI0_PAIR P0 bp mrgabsorb sh=%d E=%.1f -> gamma=%d\n",
+                             pr132_pi0_shid(sh), sh->get_kine_charge() / units::MeV,
+                             pr132_pi0_shid(b2));
+            pr93_probe_absorb_splice("nc_frag_merge", b2, sh);
+            b2->add_shower(*sh);
+            showers.erase(sh);
+            ++n_mrg;
+        }
+        if (n_mrg) {
+            for (auto& g : {b1, b2}) {
+                double kq = cal_kine_charge(g, m_charge_2d_u, m_charge_2d_v, m_charge_2d_w, m_map_apa_ch_plane_wires, track_fitter, dv);
+                g->set_kine_charge(kq);
+                g->set_flag_kinematics(true);
+            }
+            const double m_new = std::sqrt(4 * b1->get_kine_charge() * b2->get_kine_charge()
+                                           * std::pow(std::sin(best_ang / 2.0), 2));
+            map_pio_id_mass[pio_id] = {m_new, 2};
+            if (pr132_pi0_dbg())
+                std::fprintf(stderr, "PI0_PAIR P0 bp mrgmass n_absorb=%zu m %.1f -> %.1f\n",
+                             n_mrg, best_mass / units::MeV, m_new / units::MeV);
+        }
     }
     // doc pr/133 K21 v2.2 (owner 2026-08-30): "once the vertex is changed,
     // the electron connecting to the original vertex should be updated, or
@@ -6185,6 +6398,9 @@ void PatternAlgorithms::id_pi0_with_vertex(int& acc_segment_id, IndexedShowerSet
     std::map<VertexPtr, std::map<ShowerPtr, double>> cm_vkq;
     std::map<VertexPtr, std::set<ShowerPtr>> cm_absorbed;
     bool cm_did_absorb = false;
+    // doc pr/134 K23: pairs accepted in this call, for the post-loop PF
+    // satellite absorb.  Only filled knob-on (empty vector = byte-identical).
+    std::vector<std::tuple<int, ShowerPtr, ShowerPtr, VertexPtr>> p1_pairs;
 
     for (auto cand_vtx : candidate_vertices) {
         std::vector<ShowerPtr> tmp_showers;
@@ -6650,6 +6866,8 @@ void PatternAlgorithms::id_pi0_with_vertex(int& acc_segment_id, IndexedShowerSet
         map_pio_id_mass[pio_id]      = {mass_save, 1};
         map_pio_id_showers[pio_id].push_back(shower_1);
         map_pio_id_showers[pio_id].push_back(shower_2);
+        if (m_pi0_pf_assoc > 0)   // doc pr/134 K23
+            p1_pairs.emplace_back(pio_id, shower_1, shower_2, vtx);
 
         auto [sv1, ct1] = get_svc(shower_1);
         if (sv1 != vtx) {
@@ -6706,6 +6924,113 @@ void PatternAlgorithms::id_pi0_with_vertex(int& acc_segment_id, IndexedShowerSet
                 if (cm_gone.count(sp.first) || cm_gone.count(sp.second))
                     to_remove.push_back(sp);
         for (auto& p : to_remove) map_shower_pair_mass_vertex.erase(p);
+    }
+
+    // doc pr/134 K23: the with-vertex port of the v2.2 Particle-Flow update
+    // (owner 2026-08-30, on the NC finder: "The other low-energy gammas can
+    // be associated with the pi0 gammas").  After the whole selection loop,
+    // each accepted pair gamma absorbs its DETACHED low-energy satellites:
+    //   - E < 35 MeV (the v2.2 cap), never an attached (conn-1) primary,
+    //   - start within (0.5, 120] cm of the gamma start and inside the knob
+    //     cone of the gamma's own 15 cm axis (the gamma-ledger sibling
+    //     criterion, doc pr/132), assigned to the closer-in-angle gamma,
+    //   - never a pair member, never a long-muon member, and never a shower
+    //     that still owns a recorded pi0 pairing of its own.
+    // Charges then refresh and the registered mass rescales by the charge
+    // ratio (the opening angle is unchanged).  0 (default) = off.
+    if (m_pi0_pf_assoc > 0 && !p1_pairs.empty()) {
+        for (auto& [pf_pid, pf_g1, pf_g2, pf_vtx] : p1_pairs) {
+            const double kq1_old = pf_g1->get_kine_charge();
+            const double kq2_old = pf_g2->get_kine_charge();
+            const WireCell::Point pf_vp = pf_vtx->fit().valid()
+                ? pf_vtx->fit().point : pf_vtx->wcpt().point;
+            // Cone apex = the pair vertex; axis = the gamma FLIGHT direction
+            // (vertex -> conversion start) when the conversion is displaced.
+            // The reco shower's own local dir is deficit-biased -- on 105946
+            // it points 50+ deg away from the label axis (the missing charge
+            // IS the downstream tail), while vertex->start reproduces the
+            // label axis to 5 deg.  Attached gammas (start at the vertex)
+            // fall back to the 15 cm local dir.
+            auto pf_axis = [&](const ShowerPtr& g) -> WireCell::Vector {
+                WireCell::Vector ax = g->get_start_point() - pf_vp;
+                if (ax.magnitude() > 2 * units::cm) return ax * (1.0 / ax.magnitude());
+                ax = shower_cal_dir_3vector(*g, g->get_start_point(), 15 * units::cm);
+                const double m = ax.magnitude();
+                return m > 0 ? ax * (1.0 / m) : WireCell::Vector(0, 0, 0);
+            };
+            const WireCell::Vector ax1 = pf_axis(pf_g1);
+            const WireCell::Vector ax2 = pf_axis(pf_g2);
+            std::vector<ShowerPtr> pf_sat;             // graph-index order
+            std::map<ShowerPtr, ShowerPtr> pf_tgt;     // lookup-only
+            for (auto sh : showers) {
+                if (sh == pf_g1 || sh == pf_g2) continue;
+                if (pi0_showers.count(sh)) continue;
+                if (sh->get_kine_charge() >= 35 * units::MeV) continue;
+                auto [sat_sv, sat_ct] = sh->get_start_vertex_and_type();
+                if (sat_ct == 1) continue;             // attached primaries stay
+                auto ssl = sh->start_segment();
+                if (ssl && segments_in_long_muon.find(ssl) != segments_in_long_muon.end()) continue;
+                // No recorded-pairing guard: the selection loop above runs
+                // until no acceptable pair remains, so every SURVIVING
+                // recorded pairing is one the selector already rejected --
+                // it is not a competing pi0 candidate (105946: all five
+                // sub-35 MeV satellites own rejected pairings).
+                double bang = 1e9; ShowerPtr tgt = nullptr;
+                for (const auto& [g, ax] : {std::pair<ShowerPtr, WireCell::Vector>{pf_g1, ax1},
+                                            std::pair<ShowerPtr, WireCell::Vector>{pf_g2, ax2}}) {
+                    const double axm = ax.magnitude();
+                    if (axm <= 0) continue;
+                    const WireCell::Vector v = sh->get_start_point() - pf_vp;
+                    const double vm = v.magnitude();
+                    if (vm <= 0.5 * units::cm || vm > 120 * units::cm) continue;
+                    const double ang = std::acos(std::clamp(v.dot(ax) / (vm * axm), -1.0, 1.0)) * 180.0 / M_PI;
+                    if (ang < m_pi0_pf_assoc && ang < bang) { bang = ang; tgt = g; }
+                }
+                if (tgt) { pf_sat.push_back(sh); pf_tgt[sh] = tgt; }
+            }
+            if (pf_sat.empty()) continue;
+            // Charges update ARITHMETICALLY (gamma + absorbed satellites),
+            // never via a cal_kine_charge re-derivation: the full-arm k2223
+            // v1 measured the refresh re-deriving stored kine_best charges
+            // wholesale (47212 g1 221.9 -> 130.1 with no absorb into it;
+            // 285567/314838/506746/71372 inflated 60-107 MeV beyond their
+            // satellites) -- 8 ledger gammas left OK from the refresh alone.
+            std::map<ShowerPtr, double> pf_add;   // lookup-only
+            for (auto sh : pf_sat) {
+                ShowerPtr tgt = pf_tgt[sh];
+                if (pr132_pi0_dbg())
+                    std::fprintf(stderr, "PI0_PAIR P1 pfassoc sh=%d E=%.1f -> gamma=%d\n",
+                                 pr132_pi0_shid(sh), sh->get_kine_charge() / units::MeV,
+                                 pr132_pi0_shid(tgt));
+                pf_add[tgt] += sh->get_kine_charge();
+                pr93_probe_absorb_splice("p1_pf_assoc", tgt, sh);
+                tgt->add_shower(*sh);
+                showers.erase(sh);
+                kqc.erase(sh);
+                svc.erase(sh);
+            }
+            for (auto& g : {pf_g1, pf_g2}) {
+                auto ait = pf_add.find(g);
+                if (ait == pf_add.end()) continue;
+                const double kq = g->get_kine_charge() + ait->second;
+                g->set_kine_charge(kq);
+                kqc[g] = kq;
+            }
+            if (kq1_old > 0 && kq2_old > 0) {
+                const double scale = std::sqrt((pf_g1->get_kine_charge() * pf_g2->get_kine_charge())
+                                               / (kq1_old * kq2_old));
+                auto mit = map_pio_id_mass.find(pf_pid);
+                if (mit != map_pio_id_mass.end()) {
+                    const double m_old = mit->second.first;
+                    mit->second.first = m_old * scale;
+                    if (pr132_pi0_dbg())
+                        std::fprintf(stderr, "PI0_PAIR P1 pfmass pid=%d n_absorb=%zu m %.1f -> %.1f\n",
+                                     pf_pid, pf_sat.size(), m_old / units::MeV,
+                                     mit->second.first / units::MeV);
+                }
+            }
+            cm_did_absorb = true;
+        }
     }
 
     // doc pr/132 round 3 (K12) + round 7 (K18): fragments were physically

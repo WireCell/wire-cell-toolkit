@@ -730,6 +730,8 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_pi0_nc_sig_angle_deg                      = get(config, "pi0_nc_sig_angle_deg",                      m_pi0_nc_sig_angle_deg);                   // doc pr/133 K21, deg
     m_pi0_nc_floor_mev                          = get(config, "pi0_nc_floor_mev",                          m_pi0_nc_floor_mev);                       // doc pr/133 K21 v2, MeV
     m_pi0_nc_pf_assoc_deg                       = get(config, "pi0_nc_pf_assoc_deg",                       m_pi0_nc_pf_assoc_deg);                    // doc pr/133 K21 v2.2, deg
+    m_pi0_nc_frag_merge                         = get(config, "pi0_nc_frag_merge",                         m_pi0_nc_frag_merge);                      // doc pr/134 K22
+    m_pi0_pf_assoc_deg                          = get(config, "pi0_pf_assoc_deg",                          m_pi0_pf_assoc_deg);                       // doc pr/134 K23, deg
     m_pi0_nv_max_vtx_shift_cm                   = get(config, "pi0_nv_max_vtx_shift_cm",                   m_pi0_nv_max_vtx_shift_cm);                // doc pr/132 K10, cm
     m_pi0_nv_mass_window_mev                    = get(config, "pi0_nv_mass_window_mev",                    m_pi0_nv_mass_window_mev);                 // doc pr/132 K11, MeV
     m_kine_count_guard_freed                    = get(config, "kine_count_guard_freed",                    m_kine_count_guard_freed);                 // doc pr/123 r2
@@ -1222,6 +1224,8 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["pi0_nc_sig_angle_deg"]                      = m_pi0_nc_sig_angle_deg;                      // doc pr/133 K21; 0 = v3 gate, byte-identical
     cfg["pi0_nc_floor_mev"]                          = m_pi0_nc_floor_mev;                          // doc pr/133 K21 v2; 0 = legacy 20 MeV floor, byte-identical
     cfg["pi0_nc_pf_assoc_deg"]                       = m_pi0_nc_pf_assoc_deg;                       // doc pr/133 K21 v2.2; 0 = no post-fire PF update, byte-identical
+    cfg["pi0_nc_frag_merge"]                         = m_pi0_nc_frag_merge;                         // doc pr/134 K22; false = fragment-level bp pairing, byte-identical
+    cfg["pi0_pf_assoc_deg"]                          = m_pi0_pf_assoc_deg;                          // doc pr/134 K23; 0 = no P1 post-accept PF absorb, byte-identical
     cfg["pi0_nv_max_vtx_shift_cm"]                   = m_pi0_nv_max_vtx_shift_cm;                   // doc pr/132 K10; 0 = no cap, byte-identical
     cfg["pi0_nv_mass_window_mev"]                    = m_pi0_nv_mass_window_mev;                    // doc pr/132 K11; 60 = legacy window, byte-identical
     cfg["kine_count_guard_freed"]                    = m_kine_count_guard_freed;                    // doc pr/123 r2; false = guard-freed tracks uncounted, byte-identical
@@ -2681,6 +2685,8 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
         pattern_algos.m_pi0_nc_sig_angle                          = m_pi0_nc_sig_angle_deg;                        // doc pr/133 K21, deg (unscaled, like K2)
         pattern_algos.m_pi0_nc_floor                              = m_pi0_nc_floor_mev * units::MeV;               // doc pr/133 K21 v2, MeV -> internal
         pattern_algos.m_pi0_nc_pf_assoc                           = m_pi0_nc_pf_assoc_deg;                         // doc pr/133 K21 v2.2, deg (unscaled)
+        pattern_algos.m_pi0_nc_frag_merge                         = m_pi0_nc_frag_merge;                           // doc pr/134 K22
+        pattern_algos.m_pi0_pf_assoc                              = m_pi0_pf_assoc_deg;                            // doc pr/134 K23, deg (unscaled)
         pattern_algos.m_pi0_nv_max_vtx_shift                      = m_pi0_nv_max_vtx_shift_cm * units::cm;         // doc pr/132 K10, cm -> internal
         pattern_algos.m_pi0_nv_mass_window                        = m_pi0_nv_mass_window_mev * units::MeV;         // doc pr/132 K11, MeV -> internal
         pattern_algos.m_kine_count_guard_freed                    = m_kine_count_guard_freed;                    // doc pr/123 r2
