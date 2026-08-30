@@ -1816,8 +1816,8 @@ function(
     shower_pass4_track_guard_len = 50,       // cm; SBND PRODUCTION ON 2026-08-28 (doc pr/123 r1; owner len>50; exactly 3 declines in 239 events: 171572 125cm mu qF1 0.096->1.000, 393505 108cm mu 0.273->1.000, 105074 83cm; zero labeled-good collateral)
     // doc pr/130 item 1b -- the two absorbers that overrule an existing guard.
     // C++ default 0 for both.  Key omitted when 0 => byte-identical pre-fix config.
-    shower_pass4_prox_guard_len = 0,         // cm; 0 = OFF (legacy).  pass4_proximity has no track guard while its sibling pass4_angle does; census: 4 segments already declined by pr/93's cone_absorb_guard are re-admitted here (100222 seg 14003 = 110cm mu, 176502 segs 20008/20013/109141).
-    shower_pass3_backfill_guard_len = 0,     // cm; 0 = OFF (legacy).  The pass3 sibling backfill honours pr/93's predicate but not pr/124's; census: 6 segments in 5 events (137238, 175896, 176502, 396222 x2, 415278).
+    shower_pass4_prox_guard_len = 50,        // cm; SBND PRODUCTION ON 2026-08-29 (owner flip on the bee/pr130r3 A/B: "I think these two are OK").  Threshold is pr/123's own value at the sibling pass4_angle seat, not a refit.  pass4_proximity had no track guard at all; census: 4 segments already declined by pr/93's cone_absorb_guard were re-admitted here (100222 seg 14003 = 110cm mu -> EM shower 2523->2203 MeV and a standalone mu- 271 appears; 176502 segs 20008/20013/109141).  C++ default 0 = off.
+    shower_pass3_backfill_guard_len = 15,    // cm; SBND PRODUCTION ON 2026-08-29 (same flip).  Threshold is pr/124's own value at the sibling pass3_cone seat.  The pass3 sibling backfill honoured pr/93's predicate but not pr/124's, re-adopting a declined track-pdg segment into the SAME shower and force-relabelling it pdg 11; census: 6 segments in 5 events (137238, 175896, 176502, 396222 x2, 415278).  C++ default 0 = off.
     // doc pr/124 front A -- 25-40 cm gap-band tier-2 prune (qualifier pair
     // ang>40deg OR mdqdx>2.5 MIP measured zero-labeled-collateral on both
     // label sets).  C++ defaults: gap2 0 (off), ang 40, mdqdx 2.5.
