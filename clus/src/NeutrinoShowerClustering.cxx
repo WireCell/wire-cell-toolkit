@@ -6021,7 +6021,112 @@ void PatternAlgorithms::id_pi0_with_vertex(int& acc_segment_id, IndexedShowerSet
                                  pr132_pi0_shid(shower_pair.first), pr132_pi0_shid(shower_pair.second),
                                  bm / units::MeV);
                 }
-            break;
+
+            // doc pr/132 round 7 (K18): acceptance-aware fragment merge.
+            // Three geometric merges (K12 pairing cone, K16 forward cone,
+            // K17 back tube) all measured net-negative: near a pi0 decay
+            // vertex "own fragment" and "partner gamma" are locally
+            // degenerate in charge geometry (132 doc sec 13.3).  The mass
+            // constraint is the discriminator geometry lacks, so the merge
+            // decision moves INTO the acceptance test: only after every
+            // remaining pair fell outside the window, a BELOW-window pair
+            // (a charge deficit only lowers mass, so absorbing charge can
+            // only raise it back toward the window) may absorb ONE nearby
+            // detached fragment, and only when the augmented mass lands
+            // in-window.  Nothing in-window is ever destroyed: the rescue
+            // runs only when no in-window candidate remains, and accepted
+            // pairs already left the map.  The T_KINE pio_kine scan above is
+            // untouched.  0 (default) = off = byte-identical.
+            bool am_rescued = false;
+            if (m_pi0_am_dis > 0) {
+                double am_best_abs = 1e9, am_best_mass = 0;
+                ShowerPtr am_s1 = nullptr, am_s2 = nullptr, am_host = nullptr, am_frag = nullptr;
+                VertexPtr am_vtx = nullptr;
+                for (auto& [shower_pair, mass_vtx_vec] : map_shower_pair_mass_vertex) {
+                    auto [asv1, act1] = get_svc(shower_pair.first);
+                    auto [asv2, act2] = get_svc(shower_pair.second);
+                    // The K3 nueCC-fake guard holds in the rescue too.
+                    if (m_pi0_attached_partner_min > 0) {
+                        const bool veto =
+                            (act1 == 1 && asv1 == main_vertex && get_kq(shower_pair.second) < m_pi0_attached_partner_min) ||
+                            (act2 == 1 && asv2 == main_vertex && get_kq(shower_pair.first)  < m_pi0_attached_partner_min);
+                        if (veto) continue;
+                    }
+                    for (auto& [mass, candidate_vtx] : mass_vtx_vec) {
+                        if (mass - 135 * units::MeV + mass_offset > -25 * units::MeV) continue;
+                        for (const auto& host : {shower_pair.first, shower_pair.second}) {
+                            const double kqh = get_kq(host);
+                            if (kqh <= 0) continue;
+                            for (auto frag : disconnected_showers) {
+                                if (frag == shower_pair.first || frag == shower_pair.second) continue;
+                                if (pi0_showers.count(frag) || !showers.count(frag)) continue;
+                                // v2 SUBORDINATION guard (round-7 r7am v1
+                                // postmortem, SBND 18255-169626): a fragment
+                                // never outweighs its host.  Without it the
+                                // analytic boost sqrt((kqh+kqf)/kqh) lets a
+                                // crumb pair fabricate any mass by absorbing
+                                // a large shower (169626: a 1.3 MeV host
+                                // "absorbed" the 511 MeV gamma, 5.5->111,
+                                // and the accept blocked the without-vertex
+                                // finder's true pair).  With it the boost
+                                // caps at sqrt(2), so only pairs already at
+                                // m >= 71 MeV can reach the window.
+                                if (get_kq(frag) >= kqh) continue;
+                                const double dis = (frag->get_start_point() - host->get_start_point()).magnitude();
+                                if (dis > m_pi0_am_dis) continue;
+                                const double m2 = mass * std::sqrt((kqh + get_kq(frag)) / kqh);
+                                const double d2 = m2 - 135 * units::MeV + mass_offset;
+                                if (pr132_pi0_dbg())
+                                    std::fprintf(stderr, "PI0_PAIR P1 amtry sh1=%d sh2=%d host=%d frag=%d dis=%.1f m=%.1f m2=%.1f in=%d\n",
+                                                 pr132_pi0_shid(shower_pair.first), pr132_pi0_shid(shower_pair.second),
+                                                 pr132_pi0_shid(host), pr132_pi0_shid(frag), dis / units::cm,
+                                                 mass / units::MeV, m2 / units::MeV,
+                                                 (d2 < 35 * units::MeV && d2 > -25 * units::MeV) ? 1 : 0);
+                                if (d2 >= 35 * units::MeV || d2 <= -25 * units::MeV) continue;
+                                if (std::abs(d2) < am_best_abs) {
+                                    am_best_abs  = std::abs(d2);
+                                    am_best_mass = m2;
+                                    am_s1 = shower_pair.first;
+                                    am_s2 = shower_pair.second;
+                                    am_host = host;
+                                    am_frag = frag;
+                                    am_vtx  = candidate_vtx;
+                                }
+                            }
+                        }
+                    }
+                }
+                if (am_frag) {
+                    if (pr132_pi0_dbg())
+                        std::fprintf(stderr, "PI0_PAIR P1 amrescue sh1=%d sh2=%d host=%d frag=%d m2=%.1f\n",
+                                     pr132_pi0_shid(am_s1), pr132_pi0_shid(am_s2), pr132_pi0_shid(am_host),
+                                     pr132_pi0_shid(am_frag), am_best_mass / units::MeV);
+                    // Real absorb (the K12 accept-time precedent), then fall
+                    // through to the shared accept path below.
+                    pr93_probe_absorb_splice("pi0_accept_merge", am_host, am_frag);
+                    am_host->add_shower(*am_frag);
+                    showers.erase(am_frag);
+                    am_host->calculate_kinematics(particle_data, recomb_model, m_shower_endpoint_exclude_start_vertex, m_shower_endpoint_skip_orphan_vtx);
+                    double am_kq = cal_kine_charge(am_host, m_charge_2d_u, m_charge_2d_v, m_charge_2d_w, m_map_apa_ch_plane_wires, track_fitter, dv);
+                    am_host->set_kine_charge(am_kq);
+                    am_host->set_flag_kinematics(true);
+                    kqc[am_host] = am_kq;  // keep the charge cache consistent
+                    cm_did_absorb = true;  // update_shower_maps at loop exit
+                    // The fragment's own recorded pairings are stale now.
+                    std::vector<std::pair<ShowerPtr,ShowerPtr>> am_stale;
+                    for (auto& [sp, _] : map_shower_pair_mass_vertex)
+                        if (sp.first == am_frag || sp.second == am_frag)
+                            am_stale.push_back(sp);
+                    for (auto& p : am_stale) map_shower_pair_mass_vertex.erase(p);
+                    shower_1  = am_s1;
+                    shower_2  = am_s2;
+                    vtx       = am_vtx;
+                    mass_save = am_best_mass;
+                    mass_diff = am_best_mass - 135 * units::MeV + mass_offset;
+                    am_rescued = true;
+                }
+            }
+            if (!am_rescued) break;
         }
 
         if (pr132_pi0_dbg())
@@ -6144,9 +6249,10 @@ void PatternAlgorithms::id_pi0_with_vertex(int& acc_segment_id, IndexedShowerSet
         for (auto& p : to_remove) map_shower_pair_mass_vertex.erase(p);
     }
 
-    // doc pr/132 round 3 (K12): fragments were physically absorbed above --
-    // refresh the membership maps (P2 does the same on accept).  Knob-off:
-    // cm_did_absorb is always false, no call, byte-identical.
+    // doc pr/132 round 3 (K12) + round 7 (K18): fragments were physically
+    // absorbed above -- refresh the membership maps (P2 does the same on
+    // accept).  Knobs-off: cm_did_absorb is always false, no call,
+    // byte-identical.
     if (cm_did_absorb)
         update_shower_maps(showers, map_vertex_in_shower, map_segment_in_shower,
                           map_vertex_to_shower, used_shower_clusters);

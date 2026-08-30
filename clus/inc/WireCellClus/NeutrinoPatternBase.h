@@ -2243,6 +2243,7 @@ namespace WireCell::Clus::PR {
         double m_em_collinear_merge_min_host{20 * units::MeV};  ///< doc pr/132 K16; hosts below this never absorb
         double m_em_backext_perp{0};                     ///< doc pr/132 K17 (round 6); 0 = off; back-extension tube radius
         double m_em_backext_len{40 * units::cm};         ///< doc pr/132 K17; max upstream reach of the tube
+        double m_pi0_am_dis{0};                          ///< doc pr/132 K18 (round 7); 0 = off; acceptance-aware fragment merge reach (frag start -> host start)
         double m_pi0_nv_max_vtx_shift{0};                ///< doc pr/132 K10; 0 = off; without-vertex selection skips pairs whose decay point is farther than this from the current main vertex
         double m_pi0_nv_mass_window{60 * units::MeV};    ///< doc pr/132 K11; without-vertex acceptance half-window |m-135+offset| (legacy 60)
         // doc pr/125 (owner 2026-08-29): same-vertex track-typed fragment
