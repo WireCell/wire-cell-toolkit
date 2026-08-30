@@ -725,6 +725,7 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_shower_em_backext_perp_cm                 = get(config, "shower_em_backext_perp_cm",                 m_shower_em_backext_perp_cm);              // doc pr/132 K17, cm
     m_shower_em_backext_len_cm                  = get(config, "shower_em_backext_len_cm",                  m_shower_em_backext_len_cm);               // doc pr/132 K17, cm
     m_pi0_accept_merge_dis_cm                   = get(config, "pi0_accept_merge_dis_cm",                   m_pi0_accept_merge_dis_cm);                // doc pr/132 K18, cm
+    m_pi0_bp_vertex_miss_cm                     = get(config, "pi0_bp_vertex_miss_cm",                     m_pi0_bp_vertex_miss_cm);                  // doc pr/132 K19, cm
     m_pi0_nv_max_vtx_shift_cm                   = get(config, "pi0_nv_max_vtx_shift_cm",                   m_pi0_nv_max_vtx_shift_cm);                // doc pr/132 K10, cm
     m_pi0_nv_mass_window_mev                    = get(config, "pi0_nv_mass_window_mev",                    m_pi0_nv_mass_window_mev);                 // doc pr/132 K11, MeV
     m_kine_count_guard_freed                    = get(config, "kine_count_guard_freed",                    m_kine_count_guard_freed);                 // doc pr/123 r2
@@ -1212,6 +1213,7 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["shower_em_backext_perp_cm"]                 = m_shower_em_backext_perp_cm;                 // doc pr/132 K17; 0 = no back-extension, byte-identical
     cfg["shower_em_backext_len_cm"]                  = m_shower_em_backext_len_cm;                  // doc pr/132 K17; inert while perp = 0
     cfg["pi0_accept_merge_dis_cm"]                   = m_pi0_accept_merge_dis_cm;                   // doc pr/132 K18; 0 = no acceptance merge, byte-identical
+    cfg["pi0_bp_vertex_miss_cm"]                     = m_pi0_bp_vertex_miss_cm;                     // doc pr/132 K19; 0 = no NC vertex proposer, byte-identical
     cfg["pi0_nv_max_vtx_shift_cm"]                   = m_pi0_nv_max_vtx_shift_cm;                   // doc pr/132 K10; 0 = no cap, byte-identical
     cfg["pi0_nv_mass_window_mev"]                    = m_pi0_nv_mass_window_mev;                    // doc pr/132 K11; 60 = legacy window, byte-identical
     cfg["kine_count_guard_freed"]                    = m_kine_count_guard_freed;                    // doc pr/123 r2; false = guard-freed tracks uncounted, byte-identical
@@ -2666,6 +2668,7 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
         pattern_algos.m_em_backext_perp                           = m_shower_em_backext_perp_cm * units::cm;       // doc pr/132 K17, cm -> internal
         pattern_algos.m_em_backext_len                            = m_shower_em_backext_len_cm * units::cm;        // doc pr/132 K17, cm -> internal
         pattern_algos.m_pi0_am_dis                                = m_pi0_accept_merge_dis_cm * units::cm;         // doc pr/132 K18, cm -> internal
+        pattern_algos.m_pi0_bp_miss                               = m_pi0_bp_vertex_miss_cm * units::cm;           // doc pr/132 K19, cm -> internal
         pattern_algos.m_pi0_nv_max_vtx_shift                      = m_pi0_nv_max_vtx_shift_cm * units::cm;         // doc pr/132 K10, cm -> internal
         pattern_algos.m_pi0_nv_mass_window                        = m_pi0_nv_mass_window_mev * units::MeV;         // doc pr/132 K11, MeV -> internal
         pattern_algos.m_kine_count_guard_freed                    = m_kine_count_guard_freed;                    // doc pr/123 r2

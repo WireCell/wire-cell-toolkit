@@ -1861,6 +1861,10 @@ function(
     // detached fragment iff the augmented mass lands in the window.
     // C++ default 0 = off.  Key omitted when null => byte-identical.
     pi0_accept_merge_dis_cm = null,          // cm; null => C++ default 0 (no acceptance merge)
+    // doc pr/132 round 9 (K19): gamma-ray back-projection NC vertex
+    // proposer (fires only when the main vertex sits inside a shower).
+    // C++ default 0 = off.  Key omitted when null => byte-identical.
+    pi0_bp_vertex_miss_cm = null,            // cm; null => C++ default 0 (no NC vertex proposer)
     stem_backfill_back_dvtx = 45,            // cm; SBND PRODUCTION ON 2026-08-29 (owner flip: "For B, flip on for SBND production").  Suppress the backward-stem decline when the SHOWER START is further than this from the nu vertex.  The guard's reachable population is CLOSED at 8 events (`if (!ok) break;` precedes it) and all 8 are owner-adjudicated: absorb-wanted 46.84 (292643) and 88.11 (179369), every decline-ok <= 44.34, so 45 sits in an empty interval and the flip changes exactly those 2 of 239 events.  On both, the resulting PF tree is IDENTICAL to the guard-OFF shape the owner reviewed in bee/pr130r2 and preferred.  C++ default 0 = off.
     // doc pr/124 front A -- 25-40 cm gap-band tier-2 prune (qualifier pair
     // ang>40deg OR mdqdx>2.5 MIP measured zero-labeled-collateral on both
@@ -3009,6 +3013,7 @@ function(
         [if shower_em_backext_perp_cm != null then 'shower_em_backext_perp_cm']: shower_em_backext_perp_cm,
         [if shower_em_backext_len_cm != null then 'shower_em_backext_len_cm']: shower_em_backext_len_cm,
         [if pi0_accept_merge_dis_cm != null then 'pi0_accept_merge_dis_cm']: pi0_accept_merge_dis_cm,
+        [if pi0_bp_vertex_miss_cm != null then 'pi0_bp_vertex_miss_cm']: pi0_bp_vertex_miss_cm,
         [if shower_pass4_prune_gap2 != 0 then 'shower_pass4_prune_gap2']: shower_pass4_prune_gap2,
         [if shower_pass4_prune_gap2 != 0 && shower_pass4_prune2_ang != 40 then 'shower_pass4_prune2_ang']: shower_pass4_prune2_ang,
         [if shower_pass4_prune_gap2 != 0 && shower_pass4_prune2_mdqdx != 2.5 then 'shower_pass4_prune2_mdqdx']: shower_pass4_prune2_mdqdx,

@@ -5600,6 +5600,156 @@ static void pr132_pi0_ncvtx_probe(const IndexedShowerSet& showers,
     }
 }
 
+// doc pr/132 round 9 (K19): the gamma-ray back-projection NC vertex
+// proposer.  Round 8 measured the without-vertex finder structurally unable
+// to reach the owner's NC wrong-vertex class (doc sec 15): it runs AFTER
+// path 1 consumes the gammas, and its start-point rays are corrupted by the
+// vertex defect itself.  This runs BEFORE path 1, fires ONLY on the owner's
+// reco-checkable NC signature -- the main vertex sits INSIDE a shower, not
+// at its start (map_vertex_in_shower, the round-3 verdicts' "nu vertex
+// inside one arm of an EM shower") -- and proposes the pi0 decay point as
+// the closest-approach midpoint of two shower AXES back-projected from
+// their starts (the em_geom pi0_backproject construction of the hand-label
+// pass).  Acceptance needs: miss distance < knob, both crossings BEHIND the
+// starts (within 120 cm), the pair mass at the proposed point inside the
+// (100,160) window (K1 offset honored), shift 1-100 cm.  On accept the
+// P2 precedent applies verbatim: move main_vertex->fit().point, register
+// the pair (pio_type 2 = the displaced-vertex family the BDTs know), seat
+// both starts on the moved vertex (conn 2), refresh the maps; path 1 then
+// skips the paired showers (knob-gated skips in its pools).  0 (default)
+// = off = byte-identical.
+void PatternAlgorithms::id_pi0_backproject_vertex(int& acc_segment_id, IndexedShowerSet& pi0_showers, ShowerIntMap& map_shower_pio_id, std::map<int, std::vector<ShowerPtr > >& map_pio_id_showers, std::map<int, std::pair<double, int> >& map_pio_id_mass, Graph& graph, VertexPtr main_vertex, IndexedShowerSet& showers, ShowerVertexMap& map_vertex_in_shower, ShowerSegmentMap& map_segment_in_shower, VertexShowerSetMap& map_vertex_to_shower, ClusterPtrSet& used_shower_clusters, IndexedSegmentSet& segments_in_long_muon, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model)
+{
+    if (m_pi0_bp_miss <= 0) return;  // knob off = byte-identical
+    if (!main_vertex) return;
+    // The NC signature gate (owner diagnostic, reco-checkable).  v2 -- the
+    // r9 smoke measured in_shower_map=0 on 180801/259542: the wrong vertex
+    // is seated as the shower's START vertex, which map_vertex_in_shower
+    // excludes by construction.  Use the P2-style segment test instead: a
+    // pure-shower multi-prong vertex (>= 2 segments, ALL in showers, none
+    // in a long muon).  CC track vertices and 1-prong primary electrons
+    // are excluded.
+    {
+        std::vector<SegmentPtr> mv_segs;
+        auto vd = main_vertex->get_descriptor();
+        for (auto eit : sorted_out_edges(vd, graph)) {
+            SegmentPtr seg = graph[eit].segment;
+            if (seg) mv_segs.push_back(seg);
+        }
+        if (mv_segs.size() < 2) return;
+        // v3 (r9 smoke round 2): 180801/259542 carry a non-shower stub
+        // prong, so "ALL in showers" over-excludes.  Use exactly the P2
+        // gate2 semantics extended to any prong count: >= 1 main-vertex
+        // segment in a shower, none in a long muon.  The tight acceptance
+        // (miss cap, back-projection behind both starts, the (100,160)
+        // window -- far tighter than P2's |m-125|<60) carries the safety;
+        // the rounds-1-4 ADVERSE P2 masses (85.2/75.5) are window-excluded.
+        bool any_shower = false;
+        for (auto sg : mv_segs) {
+            if (map_segment_in_shower.find(sg) != map_segment_in_shower.end()) any_shower = true;
+            if (segments_in_long_muon.find(sg) != segments_in_long_muon.end()) return;
+        }
+        if (!any_shower) return;
+    }
+
+    const WireCell::Point vtx_pt = main_vertex->fit().valid()
+        ? main_vertex->fit().point : main_vertex->wcpt().point;
+
+    // Candidate gammas: EM, >= 3 cm, >= 20 MeV (the K13 floor constant --
+    // a tiny partner must not relocate the vertex).  IndexedShowerSet
+    // iterates in graph-index order: deterministic.
+    std::vector<ShowerPtr> cands;
+    std::map<ShowerPtr, WireCell::Vector> cdir;   // lookup-only
+    for (auto sh : showers) {
+        if (std::abs(sh->get_particle_type()) == 13) continue;
+        if (sh->get_total_length() < 3 * units::cm) continue;
+        if (sh->get_kine_charge() < 20 * units::MeV) continue;
+        WireCell::Vector d = shower_cal_dir_3vector(*sh, sh->get_start_point(), 15 * units::cm);
+        if (d.magnitude() <= 0) continue;
+        cands.push_back(sh);
+        cdir[sh] = d * (1.0 / d.magnitude());
+    }
+    if (cands.size() < 2) return;
+    if (pr132_pi0_dbg())
+        std::fprintf(stderr, "PI0_PAIR P0 bp gate vtx=%d n_cand=%zu\n",
+                     pr91_vtx_display_id(main_vertex), cands.size());
+
+    const double mass_offset = m_pi0_mass_offset;  // K1
+    double best_abs = 1e9, best_mass = 0;
+    ShowerPtr b1 = nullptr, b2 = nullptr;
+    WireCell::Point best_x;
+
+    for (size_t i = 0; i < cands.size(); ++i) {
+        for (size_t j = i + 1; j < cands.size(); ++j) {
+            ShowerPtr s1 = cands[i], s2 = cands[j];
+            const WireCell::Point p1 = s1->get_start_point(), p2 = s2->get_start_point();
+            const WireCell::Vector d1 = cdir[s1], d2 = cdir[s2];
+            // Closest approach of the two axis lines.
+            const WireCell::Vector w0(p1.x()-p2.x(), p1.y()-p2.y(), p1.z()-p2.z());
+            const double b = d1.dot(d2);
+            const double denom = 1.0 - b * b;
+            if (denom < 1e-6) continue;                       // parallel axes
+            const double d = d1.dot(w0), e = d2.dot(w0);
+            const double t1 = (b * e - d) / denom;
+            const double t2 = (e - b * d) / denom;
+            // BACK-projection: the conversion point lies upstream of both
+            // starts (1 cm forward slop for a mis-seated start).
+            if (t1 > 1 * units::cm || t1 < -120 * units::cm) continue;
+            if (t2 > 1 * units::cm || t2 < -120 * units::cm) continue;
+            const WireCell::Point c1(p1.x()+t1*d1.x(), p1.y()+t1*d1.y(), p1.z()+t1*d1.z());
+            const WireCell::Point c2(p2.x()+t2*d2.x(), p2.y()+t2*d2.y(), p2.z()+t2*d2.z());
+            const double miss = (c1 - c2).magnitude();
+            if (miss > m_pi0_bp_miss) continue;
+            const WireCell::Point x((c1.x()+c2.x())/2, (c1.y()+c2.y())/2, (c1.z()+c2.z())/2);
+            const double shift = (x - vtx_pt).magnitude();
+            if (shift < 1 * units::cm || shift > 100 * units::cm) continue;
+            const WireCell::Vector r1(p1.x()-x.x(), p1.y()-x.y(), p1.z()-x.z());
+            const WireCell::Vector r2(p2.x()-x.x(), p2.y()-x.y(), p2.z()-x.z());
+            if (r1.magnitude() < 1 * units::cm || r2.magnitude() < 1 * units::cm) continue;
+            const double ang = std::acos(std::clamp(
+                r1.dot(r2) / (r1.magnitude() * r2.magnitude()), -1.0, 1.0));
+            const double kq1 = s1->get_kine_charge(), kq2 = s2->get_kine_charge();
+            const double m = std::sqrt(4 * kq1 * kq2 * std::pow(std::sin(ang / 2.0), 2));
+            const double delta = m - 135 * units::MeV + mass_offset;
+            if (pr132_pi0_dbg())
+                std::fprintf(stderr, "PI0_PAIR P0 bp try sh1=%d sh2=%d miss=%.1f t1=%.1f t2=%.1f shift=%.1f m=%.1f in=%d\n",
+                             pr132_pi0_shid(s1), pr132_pi0_shid(s2), miss / units::cm,
+                             t1 / units::cm, t2 / units::cm, shift / units::cm, m / units::MeV,
+                             (delta < 35 * units::MeV && delta > -25 * units::MeV) ? 1 : 0);
+            if (delta >= 35 * units::MeV || delta <= -25 * units::MeV) continue;
+            if (std::abs(delta) < best_abs) {
+                best_abs = std::abs(delta);
+                best_mass = m;
+                b1 = s1; b2 = s2; best_x = x;
+            }
+        }
+    }
+    if (!b1) return;
+
+    if (pr132_pi0_dbg())
+        std::fprintf(stderr, "PI0_PAIR P0 bp accept sh1=%d sh2=%d m=%.1f shift=%.1f\n",
+                     pr132_pi0_shid(b1), pr132_pi0_shid(b2), best_mass / units::MeV,
+                     (best_x - vtx_pt).magnitude() / units::cm);
+
+    // The P2 acceptance, verbatim mechanics (vertex hack + registration).
+    main_vertex->fit().point = best_x;
+    main_vertex->fit().dQ = 0;
+    pi0_showers.insert(b1);
+    pi0_showers.insert(b2);
+    const int pio_id = acc_segment_id++;
+    map_shower_pio_id[b1] = pio_id;
+    map_shower_pio_id[b2] = pio_id;
+    map_pio_id_mass[pio_id] = {best_mass, 2};   // 2 = displaced-vertex family (BDT pio_type in-distribution)
+    map_pio_id_showers[pio_id].push_back(b1);
+    map_pio_id_showers[pio_id].push_back(b2);
+    b1->set_start_vertex(main_vertex, 2);
+    b1->calculate_kinematics(particle_data, recomb_model, m_shower_endpoint_exclude_start_vertex, m_shower_endpoint_skip_orphan_vtx);
+    b2->set_start_vertex(main_vertex, 2);
+    b2->calculate_kinematics(particle_data, recomb_model, m_shower_endpoint_exclude_start_vertex, m_shower_endpoint_skip_orphan_vtx);
+    update_shower_maps(showers, map_vertex_in_shower, map_segment_in_shower,
+                       map_vertex_to_shower, used_shower_clusters);
+}
+
 void PatternAlgorithms::id_pi0_with_vertex(int& acc_segment_id, IndexedShowerSet& pi0_showers, ShowerIntMap& map_shower_pio_id, std::map<int, std::vector<ShowerPtr > >& map_pio_id_showers, std::map<int, std::pair<double, int> >& map_pio_id_mass, std::map<int, std::pair<int, int> >& map_pio_id_saved_pair, Pi0KineFeatures& pio_kine, Graph& graph, VertexPtr main_vertex, IndexedShowerSet& showers, Facade::Cluster* main_cluster, std::vector<Facade::Cluster*>& other_clusters, ClusterVertexMap map_cluster_main_vertices, ShowerVertexMap& map_vertex_in_shower, ShowerSegmentMap& map_segment_in_shower, VertexShowerSetMap& map_vertex_to_shower, ClusterPtrSet& used_shower_clusters, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model){
 
     if (!main_vertex) return;
@@ -5691,6 +5841,8 @@ void PatternAlgorithms::id_pi0_with_vertex(int& acc_segment_id, IndexedShowerSet
                                               map_vertex_to_shower.at(vtx).end());
         std::sort(sorted_showers.begin(), sorted_showers.end(), shower_cmp);
         for (auto shower : sorted_showers) {
+            // doc pr/132 round 9 (K19): proposer-paired showers stay paired.
+            if (m_pi0_bp_miss > 0 && pi0_showers.count(shower)) continue;
             // doc pr/99 round 3 (A5): re-typed hadronic showers never enter
             // pi0 pairing; empty set (tag off) => no-op, byte-identical.
             // doc pr/132 round 2 (K7): the knob readmits them -- the A5 dQdx
@@ -5765,6 +5917,10 @@ void PatternAlgorithms::id_pi0_with_vertex(int& acc_segment_id, IndexedShowerSet
             std::vector<ShowerPtr> sv(it2->second.begin(), it2->second.end());
             std::sort(sv.begin(), sv.end(), shower_cmp);
             for (auto shower : sv) {
+                // doc pr/132 round 9 (K19): a shower already paired by the
+                // back-projection proposer stays paired.  Knob-off:
+                // pi0_showers is empty at path-1 entry, unreachable.
+                if (m_pi0_bp_miss > 0 && pi0_showers.count(shower)) continue;
                 // doc pr/99 round 3 (A5): re-typed hadronic showers never enter
                 // pi0 pairing; empty set (tag off) => no-op, byte-identical.
                 // doc pr/132 round 2 (K7): knob readmits (see the pool above).
@@ -8387,6 +8543,14 @@ void PatternAlgorithms::shower_clustering_with_nv(int acc_segment_id, IndexedSho
     // amendment 1).  Knob-off restores the copy between the two finders, so
     // each seeds from the same base = the legacy by-value behavior.
     int pi0_acc = acc_segment_id;
+    // doc pr/132 round 9 (K19): back-projection NC vertex proposer -- runs
+    // BEFORE path 1 so a corrected NC vertex is set before the gammas are
+    // consumed (the round-8 ordering lock).  No-op when the knob is off.
+    id_pi0_backproject_vertex(pi0_acc, pi0_showers, map_shower_pio_id, map_pio_id_showers,
+                              map_pio_id_mass, graph, main_vertex, showers,
+                              map_vertex_in_shower, map_segment_in_shower,
+                              map_vertex_to_shower, used_shower_clusters,
+                              segments_in_long_muon, particle_data, recomb_model);
     id_pi0_with_vertex(pi0_acc, pi0_showers, map_shower_pio_id, map_pio_id_showers, map_pio_id_mass,
                       map_pio_id_saved_pair, pio_kine, graph, main_vertex, showers, main_cluster,
                       other_clusters, map_cluster_main_vertices, map_vertex_in_shower,
