@@ -698,7 +698,14 @@ function(
     // null on any factor restores its uBooNE value.
     kine_fudge_factor        = null,
     kine_recom_factor        = 0.87,   // 0.70 x 1.249 (track)
-    kine_shower_fudge_factor = null,
+    // 2026-08-29 (docs/pr/132 sec 4 + docs/pr/126 sec 4g): the pi0-mass
+    // calibration.  Owner order: "adjust the EM charge scaling factor to
+    // 0.84, so that the pi0 mass is aligned to 135 MeV."  Peak fit on the
+    // hand-paired pi0 gives fudge 0.833-0.835 (floors, per the toy bias
+    // study); the prototype's own cal_pi0_mass.cxx x0.95 implies 0.842.
+    // At 0.84 every EM kine_charge scales x0.952 and the fitted peak lands
+    // at 134.1 MeV.  SBND PRODUCTION ON (was null => uBooNE 0.80).
+    kine_shower_fudge_factor = 0.84,
     kine_shower_recom_factor = 0.58,   // 0.50 x 1.169 (shower)
     kine_proton_recom_factor = 0.51,   // 0.35 x 1.453 (proton)
     kine_plane_weights       = null,
