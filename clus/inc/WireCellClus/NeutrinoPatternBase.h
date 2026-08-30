@@ -2231,6 +2231,11 @@ namespace WireCell::Clus::PR {
         double m_pi0_attached_partner_min{0};            ///< doc pr/132 K3; 0 = off; min partner energy when the attached member sits at the MAIN vertex
         bool   m_pi0_nv_allow_type2{false};              ///< doc pr/132 K4; admit conn_type==2 showers into the without-vertex ray pool
         int    m_pi0_nv_max_prongs{2};                   ///< doc pr/132 K5; without-vertex GATE1 prong cap (legacy 2)
+        bool   m_pi0_readmit_retyped{false};             ///< doc pr/132 K7; readmit A5 hadronic-retyped showers into pi0 pairing (accepted members re-stamped EM)
+        bool   m_pi0_admit_type3{false};                 ///< doc pr/132 K8; admit conn_type==3 showers into the with-vertex disconnected pool
+        double m_pi0_crumb_assoc_max{0};                 ///< doc pr/132 K9; 0 = off; below this energy a disconnected shower skips the association-angle test
+        double m_pi0_nv_max_vtx_shift{0};                ///< doc pr/132 K10; 0 = off; without-vertex selection skips pairs whose decay point is farther than this from the current main vertex
+        double m_pi0_nv_mass_window{60 * units::MeV};    ///< doc pr/132 K11; without-vertex acceptance half-window |m-135+offset| (legacy 60)
         // doc pr/125 (owner 2026-08-29): same-vertex track-typed fragment
         // absorb (SBND 18259-37112) + vertex-connected satellite absorb
         // (SBND 18255-69314).  false (defaults) => no pass => byte-identical.
@@ -3556,6 +3561,9 @@ namespace WireCell::Clus::PR {
         /// hadronic-typed (2212/211/2112, not a long muon), set kenergy_best
         /// = kenergy_dQdx.  Returns true when it wrote.  No-op when off.
         bool apply_hadronic_dqdx_best(const ShowerPtr& shower);
+        // doc pr/132 round 2 (K7/K8/K9): re-stamp an accepted pi0-pair member
+        // back to EM -- reverse of the A5 hadronic retype.
+        void pi0_restamp_shower_em(const ShowerPtr& shower, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model);
         double cal_kine_charge(SegmentPtr segment, Graph& graph, TrackFitting& track_fitter, IDetectorVolumes::pointer dv);
         // Fast overload: reuse pre-collected 2D charge maps (avoids O(N_hits) collection per call).
         // Collect maps once with track_fitter.collect_2D_charge() and pass here when calling in a loop.

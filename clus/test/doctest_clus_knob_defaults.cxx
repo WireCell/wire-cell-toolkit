@@ -260,6 +260,11 @@ TEST_CASE("clus knob defaults: TaggerCheckNeutrino switches are all OFF")
     CHECK_KNOB_NUM(cfg, "pi0_attached_partner_min_mev", 0.0);                 // MeV; 0 = no nueCC-fake guard (doc pr/132 K3)
     CHECK_KNOB_BOOL(cfg, "pi0_nv_allow_type2", false);                        // doc pr/132 K4; false = conn_type-3-only pool
     CHECK_KNOB_NUM(cfg, "pi0_nv_max_prongs", 2.0);                            // doc pr/132 K5; without-vertex prong cap
+    CHECK_KNOB_BOOL(cfg, "pi0_readmit_retyped", false);                       // doc pr/132 K7; retyped showers stay out of pi0 pairing
+    CHECK_KNOB_BOOL(cfg, "pi0_admit_type3", false);                           // doc pr/132 K8; with-vertex pool conn_type 2 only
+    CHECK_KNOB_NUM(cfg, "pi0_crumb_assoc_mev", 0.0);                          // doc pr/132 K9; 0 = crumbs keep the angle test
+    CHECK_KNOB_NUM(cfg, "pi0_nv_max_vtx_shift_cm", 0.0);                      // doc pr/132 K10; 0 = no decay-point shift cap
+    CHECK_KNOB_NUM(cfg, "pi0_nv_mass_window_mev", 60.0);                      // doc pr/132 K11; legacy without-vertex half-window
     // doc pr/124 front A -- 25-40 cm gap-band tier-2 prune.
     CHECK_KNOB_NUM(cfg, "shower_pass4_prune_gap2", 0.0);                      // cm; 0 = no tier-2 band prune
     CHECK_KNOB_NUM(cfg, "shower_pass4_prune2_ang", 40.0);                     // deg; inert while gap2 = 0

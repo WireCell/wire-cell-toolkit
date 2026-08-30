@@ -5265,9 +5265,19 @@ void PatternAlgorithms::id_pi0_with_vertex(int& acc_segment_id, IndexedShowerSet
         for (auto shower : sorted_showers) {
             // doc pr/99 round 3 (A5): re-typed hadronic showers never enter
             // pi0 pairing; empty set (tag off) => no-op, byte-identical.
-            if (m_hadronic_retyped_shower_ids.count(shower->get_shower_id())) continue;
+            // doc pr/132 round 2 (K7): the knob readmits them -- the A5 dQdx
+            // track call is overruled by pairing evidence (accepted members
+            // are re-stamped EM below).  false (default) = byte-identical.
+            if (!m_pi0_readmit_retyped &&
+                m_hadronic_retyped_shower_ids.count(shower->get_shower_id())) continue;
             auto [start_vtx, conn_type] = get_svc(shower);
-            if (conn_type == 2 && std::abs(shower->get_particle_type()) != 13) {
+            // doc pr/132 round 2 (K8): legacy disconnected pool is
+            // conn_type==2 only; the knob also admits conn_type==3
+            // (other-cluster) showers, which no path-1 pool ever saw
+            // (specimen: SBND 18255-47212 g2).  false (default) = legacy.
+            const bool ct_pool_ok = (conn_type == 2) ||
+                                    (m_pi0_admit_type3 && conn_type == 3);
+            if (ct_pool_ok && std::abs(shower->get_particle_type()) != 13) {
                 disconnected_showers.insert(shower);
                 if (!map_shower_dir.count(shower))
                     map_shower_dir[shower] = shower_cal_dir_3vector(
@@ -5308,7 +5318,9 @@ void PatternAlgorithms::id_pi0_with_vertex(int& acc_segment_id, IndexedShowerSet
             for (auto shower : sv) {
                 // doc pr/99 round 3 (A5): re-typed hadronic showers never enter
                 // pi0 pairing; empty set (tag off) => no-op, byte-identical.
-                if (m_hadronic_retyped_shower_ids.count(shower->get_shower_id())) continue;
+                // doc pr/132 round 2 (K7): knob readmits (see the pool above).
+                if (!m_pi0_readmit_retyped &&
+                    m_hadronic_retyped_shower_ids.count(shower->get_shower_id())) continue;
                 auto [start_vtx, conn_type] = get_svc(shower);
                 if (conn_type == 1 && std::abs(shower->get_particle_type()) != 13) {
                     tmp_showers.push_back(shower);
@@ -5330,12 +5342,20 @@ void PatternAlgorithms::id_pi0_with_vertex(int& acc_segment_id, IndexedShowerSet
             } else {
                 double angle = std::acos(std::clamp(
                     dir1.dot(dir2) / (dir1.magnitude() * dir2.magnitude()), -1.0, 1.0)) / M_PI * 180.0;
+                // doc pr/132 round 2 (K9): a low-energy crumb's 15-cm PCA
+                // direction is noise (specimen: SBND 18255-71872 g2, a
+                // 23 MeV crumb at 73 deg) -- below the threshold the angle
+                // test is skipped; the mass window, greedy selection and the
+                // K3 attached-partner guard control the combinatorics.
+                // 0 (default) = off = byte-identical.
+                const bool crumb_ok = (m_pi0_crumb_assoc_max > 0 &&
+                                       get_kq(shower) < m_pi0_crumb_assoc_max);
                 if (pr132_pi0_dbg())
-                    std::fprintf(stderr, "PI0_PAIR P1 assoc vtx=%d sh=%d E=%.1f angle=%.1f acc=%d\n",
+                    std::fprintf(stderr, "PI0_PAIR P1 assoc vtx=%d sh=%d E=%.1f angle=%.1f crumb=%d acc=%d\n",
                                  pr91_vtx_display_id(cand_vtx), pr132_pi0_shid(shower),
-                                 get_kq(shower) / units::MeV, angle,
-                                 angle < m_pi0_assoc_angle_deg ? 1 : 0);
-                if (angle < m_pi0_assoc_angle_deg) {  // doc pr/132 K2; 30 deg = legacy
+                                 get_kq(shower) / units::MeV, angle, crumb_ok ? 1 : 0,
+                                 (angle < m_pi0_assoc_angle_deg || crumb_ok) ? 1 : 0);
+                if (angle < m_pi0_assoc_angle_deg || crumb_ok) {  // doc pr/132 K2 + K9
                     tmp_showers.push_back(shower);
                     local_dirs[shower] = dir2;
                 }
@@ -5516,6 +5536,18 @@ void PatternAlgorithms::id_pi0_with_vertex(int& acc_segment_id, IndexedShowerSet
         pi0_showers.insert(shower_1);
         pi0_showers.insert(shower_2);
 
+        // doc pr/132 round 2 (K7/K8/K9): an accepted pair member still typed
+        // as a track (A5-retyped 211, PID 2212, ...) is re-stamped EM -- the
+        // owner's direction: "the code can look at them, and update them to
+        // an EM shower in the pi0 reconstruction code".  Gated on the rescue
+        // family: all knobs off => no track-typed member can newly appear
+        // here beyond legacy, and the stamp does not fire => byte-identical.
+        if (m_pi0_readmit_retyped || m_pi0_admit_type3 || m_pi0_crumb_assoc_max > 0) {
+            for (auto& rsh : {shower_1, shower_2})
+                if (std::abs(rsh->get_particle_type()) != 11)
+                    pi0_restamp_shower_em(rsh, particle_data, recomb_model);
+        }
+
         int pio_id = acc_segment_id++;
         g_pr33_audit.f3_pi0_with_vertex++;
         map_shower_pio_id[shower_1]  = pio_id;
@@ -5688,7 +5720,12 @@ void PatternAlgorithms::id_pi0_without_vertex(int& acc_segment_id, IndexedShower
 
                 // doc pr/99 round 3 (A5): re-typed hadronic showers never enter
                 // pi0 pairing; empty set (tag off) => no-op, byte-identical.
-                if (m_hadronic_retyped_shower_ids.count(shower->get_shower_id())) continue;
+                // doc pr/132 round 2 (K7): knob readmits -- the without-vertex
+                // "one member attached at main" requirement then accepts a
+                // retyped attached gamma (specimen: SBND 18255-169626, whose
+                // true pair m=145.8 formed and died only on good=0).
+                if (!m_pi0_readmit_retyped &&
+                    m_hadronic_retyped_shower_ids.count(shower->get_shower_id())) continue;
                 auto [start_vtx, conn_type] = shower->get_start_vertex_and_type();
                 if (conn_type == 1) {
                     good_showers.insert(shower);
@@ -5779,7 +5816,9 @@ void PatternAlgorithms::id_pi0_without_vertex(int& acc_segment_id, IndexedShower
         for (auto shower : shower_set) {
             // doc pr/99 round 3 (A5): re-typed hadronic showers never enter
             // pi0 pairing; empty set (tag off) => no-op, byte-identical.
-            if (m_hadronic_retyped_shower_ids.count(shower->get_shower_id())) continue;
+            // doc pr/132 round 2 (K7): knob readmits (see id_pi0_with_vertex).
+            if (!m_pi0_readmit_retyped &&
+                m_hadronic_retyped_shower_ids.count(shower->get_shower_id())) continue;
             // doc pr/33 F2: prototype reads the start segment's PDG here
             // (NeutrinoID_shower_clustering.h:511, exact ==13).
             {
@@ -6032,6 +6071,20 @@ void PatternAlgorithms::id_pi0_without_vertex(int& acc_segment_id, IndexedShower
         WireCell::Point vtx_point;
 
         for (auto& [shower_pair, mass_point] : map_shower_pair_mass_point) {
+            // doc pr/132 round 2 (K10): acceptance-quality gate.  A candidate
+            // decay point far from the current main vertex is how the round-1
+            // ADVERSE movers happened (122660 pulled the vertex 23 cm off the
+            // truth click, 171143 5.8 cm) -- skip the pair so the next-best
+            // eligible one can win instead.  0 (default) = off.
+            if (m_pi0_nv_max_vtx_shift > 0 &&
+                (mass_point.second - main_vtx_pt).magnitude() > m_pi0_nv_max_vtx_shift) {
+                if (pr132_pi0_dbg())
+                    std::fprintf(stderr, "PI0_PAIR P2 shiftrej sh1=%d sh2=%d m=%.1f shift=%.1f\n",
+                                 pr132_pi0_shid(shower_pair.first), pr132_pi0_shid(shower_pair.second),
+                                 mass_point.first / units::MeV,
+                                 (mass_point.second - main_vtx_pt).magnitude() / units::cm);
+                continue;
+            }
             if (std::abs(mass_point.first - 135 * units::MeV + mass_offset) < mass_diff) {
                 if (good_showers.find(shower_pair.first) == good_showers.end() && 
                     good_showers.find(shower_pair.second) == good_showers.end()) continue;
@@ -6051,17 +6104,33 @@ void PatternAlgorithms::id_pi0_without_vertex(int& acc_segment_id, IndexedShower
                              pr132_pi0_shid(shower_pair.first), pr132_pi0_shid(shower_pair.second),
                              mass_point.first / units::MeV, good ? 1 : 0);
             }
-            std::fprintf(stderr, "PI0_PAIR P2 best sh1=%d sh2=%d m=%.1f acc=%d\n",
+            std::fprintf(stderr, "PI0_PAIR P2 best sh1=%d sh2=%d m=%.1f shift=%.1f acc=%d\n",
                          pr132_pi0_shid(shower_1), pr132_pi0_shid(shower_2),
                          mass_save / units::MeV,
-                         (mass_diff < 60 * units::MeV && shower_1 && shower_2) ? 1 : 0);
+                         shower_1 ? (vtx_point - main_vtx_pt).magnitude() / units::cm : -1.0,
+                         (mass_diff < m_pi0_nv_mass_window && shower_1 && shower_2) ? 1 : 0);
         }
 
         // If found good pi0, update everything
-        if (mass_diff < 60 * units::MeV && shower_1 && shower_2) {
+        // doc pr/132 round 2 (K11): the acceptance-quality gate the data
+        // supports -- the round-1 ADVERSE path-2 acceptances are low-mass
+        // (122660 m=85.2, 171143 m=75.5) while the good ones sit near 135
+        // (396222 m=133.5, 169626 m=138.9); a decay-point shift cap does NOT
+        // separate them (shifts 23.0/5.8 vs 14.5/59.6 cm).  60 (default) =
+        // legacy window = byte-identical.
+        if (mass_diff < m_pi0_nv_mass_window && shower_1 && shower_2) {
             pi0_showers.insert(shower_1);
             pi0_showers.insert(shower_2);
-            
+
+            // doc pr/132 round 2 (K7/K8/K9): re-stamp track-typed accepted
+            // members EM (see id_pi0_with_vertex) BEFORE the
+            // calculate_kinematics calls below so kinematics reflect EM.
+            if (m_pi0_readmit_retyped || m_pi0_admit_type3 || m_pi0_crumb_assoc_max > 0) {
+                for (auto& rsh : {shower_1, shower_2})
+                    if (std::abs(rsh->get_particle_type()) != 11)
+                        pi0_restamp_shower_em(rsh, particle_data, recomb_model);
+            }
+
             int pio_id = acc_segment_id;
             acc_segment_id++;
             g_pr33_audit.f3_pi0_without_vertex++;
@@ -6108,6 +6177,36 @@ void PatternAlgorithms::id_pi0_without_vertex(int& acc_segment_id, IndexedShower
                 mass_save / units::MeV, shower_1->get_kine_charge() / units::MeV, shower_2->get_kine_charge() / units::MeV);
         }
     }
+}
+
+
+// doc pr/132 round 2 (K7/K8/K9) -- reverse of the A5 hadronic retype (see
+// shower_clustering_with_nv below) for a shower accepted into a pi0 pair:
+// the pairing evidence (mass window + geometry) overrules the dQdx-based
+// track call.  set_kine_best(0) restores the EM best-energy fall-through
+// (PRShower.h get_kine_best returns kenergy_charge when kenergy_best==0),
+// undoing apply_hadronic_dqdx_best's override; erasing the id from
+// m_hadronic_retyped_shower_ids makes later A5-aware consumers see EM.
+// Reached only when a rescue knob is on (call sites are gated).
+void PatternAlgorithms::pi0_restamp_shower_em(const ShowerPtr& shower, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model)
+{
+    if (!shower) return;
+    auto ss = shower->start_segment();
+    if (ss && ss->has_particle_info() && ss->particle_info()) {
+        ss->particle_info()->set_pdg(11);
+        ss->particle_info()->set_mass(0.511 * units::MeV);
+        if (ss->particle_info()->kinetic_energy() > 0) {
+            auto four_momentum = segment_cal_4mom(ss, 11, particle_data, recomb_model, m_mip_dqdx);
+            ss->particle_info()->set_four_momentum(four_momentum);
+        }
+    }
+    shower->set_particle_type(11);
+    shower->set_kine_best(0);
+    m_hadronic_retyped_shower_ids.erase(shower->get_shower_id());
+    SPDLOG_LOGGER_DEBUG(s_log, "pi0 restamp EM: shower id={} -> pdg 11 (doc pr/132 round 2 rescue)",
+                        shower->get_shower_id());
+    if (pr132_pi0_dbg())
+        std::fprintf(stderr, "PI0_PAIR restamp sh=%d -> pdg 11\n", pr132_pi0_shid(shower));
 }
 
 

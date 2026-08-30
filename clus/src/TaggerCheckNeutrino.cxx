@@ -712,6 +712,11 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_pi0_attached_partner_min_mev              = get(config, "pi0_attached_partner_min_mev",              m_pi0_attached_partner_min_mev);           // doc pr/132 K3, MeV
     m_pi0_nv_allow_type2                        = get(config, "pi0_nv_allow_type2",                        m_pi0_nv_allow_type2);                     // doc pr/132 K4
     m_pi0_nv_max_prongs                         = get(config, "pi0_nv_max_prongs",                         m_pi0_nv_max_prongs);                      // doc pr/132 K5
+    m_pi0_readmit_retyped                       = get(config, "pi0_readmit_retyped",                       m_pi0_readmit_retyped);                    // doc pr/132 K7
+    m_pi0_admit_type3                           = get(config, "pi0_admit_type3",                           m_pi0_admit_type3);                        // doc pr/132 K8
+    m_pi0_crumb_assoc_mev                       = get(config, "pi0_crumb_assoc_mev",                       m_pi0_crumb_assoc_mev);                    // doc pr/132 K9, MeV
+    m_pi0_nv_max_vtx_shift_cm                   = get(config, "pi0_nv_max_vtx_shift_cm",                   m_pi0_nv_max_vtx_shift_cm);                // doc pr/132 K10, cm
+    m_pi0_nv_mass_window_mev                    = get(config, "pi0_nv_mass_window_mev",                    m_pi0_nv_mass_window_mev);                 // doc pr/132 K11, MeV
     m_kine_count_guard_freed                    = get(config, "kine_count_guard_freed",                    m_kine_count_guard_freed);                 // doc pr/123 r2
     m_kine_guard_freed_impact                   = get(config, "kine_guard_freed_impact",                   m_kine_guard_freed_impact);                // doc pr/129
     m_kine_guard_freed_miss_deg                 = get(config, "kine_guard_freed_miss_deg",                 m_kine_guard_freed_miss_deg);              // doc pr/129
@@ -1184,6 +1189,11 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["pi0_attached_partner_min_mev"]              = m_pi0_attached_partner_min_mev;              // doc pr/132 K3; MeV, 0 = no guard, byte-identical
     cfg["pi0_nv_allow_type2"]                        = m_pi0_nv_allow_type2;                        // doc pr/132 K4; false = legacy pool, byte-identical
     cfg["pi0_nv_max_prongs"]                         = m_pi0_nv_max_prongs;                         // doc pr/132 K5; 2 = legacy gate, byte-identical
+    cfg["pi0_readmit_retyped"]                       = m_pi0_readmit_retyped;                       // doc pr/132 K7; false = legacy exclusion, byte-identical
+    cfg["pi0_admit_type3"]                           = m_pi0_admit_type3;                           // doc pr/132 K8; false = legacy pool, byte-identical
+    cfg["pi0_crumb_assoc_mev"]                       = m_pi0_crumb_assoc_mev;                       // doc pr/132 K9; 0 = legacy angle test, byte-identical
+    cfg["pi0_nv_max_vtx_shift_cm"]                   = m_pi0_nv_max_vtx_shift_cm;                   // doc pr/132 K10; 0 = no cap, byte-identical
+    cfg["pi0_nv_mass_window_mev"]                    = m_pi0_nv_mass_window_mev;                    // doc pr/132 K11; 60 = legacy window, byte-identical
     cfg["kine_count_guard_freed"]                    = m_kine_count_guard_freed;                    // doc pr/123 r2; false = guard-freed tracks uncounted, byte-identical
     cfg["kine_guard_freed_impact"]                   = m_kine_guard_freed_impact;                   // doc pr/129; 0 = pointing test off, byte-identical
     cfg["kine_guard_freed_miss_deg"]                 = m_kine_guard_freed_miss_deg;                 // doc pr/129
@@ -2623,6 +2633,11 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
         pattern_algos.m_pi0_attached_partner_min                  = m_pi0_attached_partner_min_mev * units::MeV;   // doc pr/132 K3, MeV -> internal
         pattern_algos.m_pi0_nv_allow_type2                        = m_pi0_nv_allow_type2;                          // doc pr/132 K4
         pattern_algos.m_pi0_nv_max_prongs                         = m_pi0_nv_max_prongs;                           // doc pr/132 K5
+        pattern_algos.m_pi0_readmit_retyped                       = m_pi0_readmit_retyped;                         // doc pr/132 K7
+        pattern_algos.m_pi0_admit_type3                           = m_pi0_admit_type3;                             // doc pr/132 K8
+        pattern_algos.m_pi0_crumb_assoc_max                       = m_pi0_crumb_assoc_mev * units::MeV;            // doc pr/132 K9, MeV -> internal
+        pattern_algos.m_pi0_nv_max_vtx_shift                      = m_pi0_nv_max_vtx_shift_cm * units::cm;         // doc pr/132 K10, cm -> internal
+        pattern_algos.m_pi0_nv_mass_window                        = m_pi0_nv_mass_window_mev * units::MeV;         // doc pr/132 K11, MeV -> internal
         pattern_algos.m_kine_count_guard_freed                    = m_kine_count_guard_freed;                    // doc pr/123 r2
         pattern_algos.m_kine_guard_freed_impact                   = m_kine_guard_freed_impact * units::cm;       // doc pr/129
         pattern_algos.m_kine_guard_freed_miss_deg                 = m_kine_guard_freed_miss_deg;                 // doc pr/129
