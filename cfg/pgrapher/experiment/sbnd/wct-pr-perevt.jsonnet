@@ -1836,7 +1836,7 @@ function(
     // its default => byte-identical pre-round config.
     pi0_mass_offset = null,                  // MeV; null => C++ default 10 (the finders' "+10" window offset)
     pi0_assoc_angle_deg = null,              // deg; null => C++ default 30 (disconnected<->vertex association)
-    pi0_attached_partner_min_mev = 28,       // MeV; SBND PRODUCTION 20 -> 28 2026-08-30 round 3 (owner: "Let's execute according to your recommendations" on "flip K7+K8 ... together with a K3 bump to 28-30").  28 = the safe end: kills the K7-regenerated fake 116962 (partner 27.0 MeV) and the three round-2 fake-topology survivors 54095/76350/268784 (26.1/20.5/22.0) while keeping 76346's partial-group partner (29.6) and 176502 (28.7).  Round-3 measurement (doc pr/132 sec 10, r3flip vs r2off): fakes 5 -> 2, ZERO hand-pi0 downgrades, 0 movers.  History: flipped at 20 2026-08-30 round 2 (owner: "Let's proceed to 1").  Rejects a with-vertex pairing whose conn-1 member sits AT THE MAIN VERTEX and whose detached partner is below 20 MeV -- the owner's nueCC fake mode (primary electron + tiny gamma).  Round-1 measurement (doc pr/132 sec 6.2, onguard vs onfudge, all 6 samples): fake topologies 10 -> 5, ZERO change on the hand pi0, 0 ADVERSE movers.  The 5 survivors have partners 20.5-29.6 MeV; 25-30 stays an owner Bee-adjudication item.  C++ default 0 = no guard.
+    pi0_attached_partner_min_mev = 29,       // MeV; SBND PRODUCTION 28 -> 29 2026-08-30 doc pr/133 iter 3 (owner: "K3 28-29 is good").  The closed interval (28.7, 29.6): kills the last real fake-topology accept 176502 (partner 28.7) and NOTHING else in 239 events (census 0 rows moved, ledger flat, movers 0x4); 30 would veto 76346's true NC pair (partner 29.6).  Earlier: PRODUCTION 20 -> 28 2026-08-30 round 3 (owner: "Let's execute according to your recommendations" on "flip K7+K8 ... together with a K3 bump to 28-30").  28 = the safe end: kills the K7-regenerated fake 116962 (partner 27.0 MeV) and the three round-2 fake-topology survivors 54095/76350/268784 (26.1/20.5/22.0) while keeping 76346's partial-group partner (29.6) and 176502 (28.7).  Round-3 measurement (doc pr/132 sec 10, r3flip vs r2off): fakes 5 -> 2, ZERO hand-pi0 downgrades, 0 movers.  History: flipped at 20 2026-08-30 round 2 (owner: "Let's proceed to 1").  Rejects a with-vertex pairing whose conn-1 member sits AT THE MAIN VERTEX and whose detached partner is below 20 MeV -- the owner's nueCC fake mode (primary electron + tiny gamma).  Round-1 measurement (doc pr/132 sec 6.2, onguard vs onfudge, all 6 samples): fake topologies 10 -> 5, ZERO change on the hand pi0, 0 ADVERSE movers.  The 5 survivors have partners 20.5-29.6 MeV; 25-30 stays an owner Bee-adjudication item.  C++ default 0 = no guard.
     pi0_nv_allow_type2 = false,              // C++ default false (without-vertex pool conn_type 3 only)
     pi0_nv_max_prongs = null,                // null => C++ default 2 (without-vertex GATE1 prong cap)
     // doc pr/132 round 2 -- the rescue family + the path-2 quality gate.
@@ -1851,8 +1851,8 @@ function(
     pi0_nv_partner_min_mev = null,           // MeV; null => C++ default 0 (no path-2 partner floor)
     pi0_nv_retry_paired = false,             // C++ default false (path-2 abandons on any pi0-paired main-vertex shower)
     pi0_reseat_start_assoc = false,          // C++ default false (accepted conn-2 starts stay on the fit cloud)
-    shower_em_collinear_deg = null,          // deg; null => C++ default 0 (no build-time EM collinear-fragment merge)
-    shower_em_collinear_dis_cm = null,       // cm; null => C++ default 60 (inert while deg off)
+    shower_em_collinear_deg = 10,            // deg; SBND PRODUCTION ON 2026-08-30 doc pr/133 K16@120 (owner Bee scan bee/pr133k16, verdict: "K16 looks OK").  Build-time EM collinear-fragment merge.  Measured (doc pr/132 sec 12.3, r5cmw): 54332 partial->exact (+1), 54341 g1 charge 0.68->0.82; cost 99838/165157/347824 gammas go OVER 1.36-1.51 of label.  C++ default 0 = off.
+    shower_em_collinear_dis_cm = 120,        // cm; SBND PRODUCTION 2026-08-30 with the deg flip above (the K16@120 point -- 60 was measured inert on target, doc pr/132 sec 12.3).  C++ default 60.
     shower_em_collinear_host_mev = null,     // MeV; null => C++ default 20 (inert while deg off)
     shower_em_backext_perp_cm = null,        // cm; null => C++ default 0 (no EM start back-extension)
     shower_em_backext_len_cm = null,         // cm; null => C++ default 40 (inert while perp off)
@@ -1870,7 +1870,7 @@ function(
     // re-stamped EM (the K7/K8 precedent; specimens SBND 18255-348691 sh
     // 51080 79.8 MeV, -166870 g2 38.6 MeV -- 3 of the 132 hand gammas).
     // C++ default false.  Key omitted when false => byte-identical.
-    pi0_admit_muon_showers = false,
+    pi0_admit_muon_showers = true,           // SBND PRODUCTION ON 2026-08-30 doc pr/133 (owner: "K20 is good").  Admits shower-ish mu-typed (pdg +-13) objects into the pi0 pools (not-in-long-muon AND (flag_shower OR len<40cm+dir-weak)); accepted members re-stamped EM.  Measured: 166870 true pair m=109.1 accepted, zero collateral (census/ledger/movers flat elsewhere).  C++ default false.
     // doc pr/133 K21: owner NC-pi0 signature (2026-08-30) for the
     // back-projection vertex proposer (needs pi0_bp_vertex_miss_cm > 0):
     // main vertex inside an EM shower (ALL prongs in showers, none in the
