@@ -124,6 +124,26 @@ static inline bool pr132_pi0_substruct_dbg()
     static const bool dbg = std::getenv("WCT_PI0_SUBSTRUCT_DEBUG") != nullptr;
     return dbg;
 }
+// doc sbnd_xin/docs/pr/132 round 4 -- WCT_PI0_NCVTX_DEBUG, two tapes in one
+// env (132 doc sec 10.9 fronts 1+2; owner scan verdicts sec 10.8):
+//   PI0_NCVTX -- the NC vertex-in-shower recognizer.  Per shower above
+//     50 MeV: distance main-vertex -> nearest associate-cloud point, distance
+//     main-vertex -> shower start, and f_back = the fraction of associate
+//     points BEHIND the main vertex along the vertex->centroid axis.  A
+//     gamma truly starting at the vertex has f_back ~ 0; a vertex mis-seated
+//     inside one arm (owner: 76346, 116962) has charge on both sides.
+//   PI0_START -- the accepted-shower start-derivation audit.  Per pi0-paired
+//     shower: distance start-vertex -> current start point, -> nearest
+//     "fit"-cloud point (the conn-2 derivation, PRShower calculate_kinematics)
+//     and -> nearest "associate_points" cloud point, plus the gap between the
+//     two cloud answers.  169626 measured 13.4 cm of start bias (owner scan);
+//     this tape tells whether the associate cloud closes it.
+// stderr only, no effect on emitted bytes.
+static inline bool pr132_pi0_ncvtx_dbg()
+{
+    static const bool dbg = std::getenv("WCT_PI0_NCVTX_DEBUG") != nullptr;
+    return dbg;
+}
 static inline void pr93_probe_absorb_site(const char* site, const ShowerPtr& sh, bool guard)
 {
     if (!pr93_absorb_dbg() || !sh) return;
@@ -5284,6 +5304,76 @@ static void pr132_pi0_substruct_probe(const IndexedShowerSet& showers,
     }
 }
 
+// doc pr/132 round 4 -- body of the WCT_PI0_NCVTX_DEBUG tapes (docstring at
+// pr132_pi0_ncvtx_dbg above).  Deterministic: IndexedShowerSet iteration is
+// id-ordered; kd-tree queries are read-only.
+static void pr132_pi0_ncvtx_probe(const IndexedShowerSet& showers,
+                                  const IndexedShowerSet& pi0_showers,
+                                  VertexPtr main_vertex,
+                                  ShowerVertexMap& map_vertex_in_shower)
+{
+    if (!main_vertex) return;
+    const WireCell::Point mvp = main_vertex->fit().valid()
+        ? main_vertex->fit().point : main_vertex->wcpt().point;
+    {
+        auto it = map_vertex_in_shower.find(main_vertex);
+        std::fprintf(stderr, "PI0_NCVTX mainvtx=%d in_shower_map=%d insh=%d\n",
+                     pr91_vtx_display_id(main_vertex),
+                     it != map_vertex_in_shower.end() ? 1 : 0,
+                     it != map_vertex_in_shower.end() ? pr132_pi0_shid(it->second) : -1);
+    }
+    for (auto shower : showers) {
+        if (!shower) continue;
+        const double kq = shower->get_kine_charge();
+        if (kq < 50 * WireCell::units::MeV) continue;
+        auto pc = shower->get_pcloud("associate_points");
+        const size_t n = pc ? pc->npoints() : 0;
+        auto [sv, ct] = shower->get_start_vertex_and_type();
+        const double d_start = (shower->get_start_point() - mvp).magnitude();
+        double d_assoc = -1;
+        double f_back = -1;
+        if (n >= 10) {
+            auto [dd, pp] = shower_get_closest_point(*shower, mvp, "associate_points");
+            d_assoc = dd;
+            double cx = 0, cy = 0, cz = 0;
+            for (size_t i = 0; i < n; ++i) {
+                auto p = pc->point3d(i);
+                cx += p.x(); cy += p.y(); cz += p.z();
+            }
+            WireCell::Vector axis(cx / n - mvp.x(), cy / n - mvp.y(), cz / n - mvp.z());
+            const double am = axis.magnitude();
+            if (am > 0) {
+                size_t nb = 0;
+                for (size_t i = 0; i < n; ++i) {
+                    auto p = pc->point3d(i);
+                    const double d = (p.x()-mvp.x())*axis.x() + (p.y()-mvp.y())*axis.y() + (p.z()-mvp.z())*axis.z();
+                    if (d < 0) ++nb;
+                }
+                f_back = (double)nb / (double)n;
+            }
+        }
+        const int pdg = shower->get_particle_type();
+        std::fprintf(stderr, "PI0_NCVTX sh=%d E=%.1f ct=%d pdg=%d d_assoc=%.1f d_start=%.1f f_back=%.3f n=%zu inpi0=%d\n",
+                     pr132_pi0_shid(shower), kq / WireCell::units::MeV, ct, pdg,
+                     d_assoc / WireCell::units::cm, d_start / WireCell::units::cm,
+                     f_back, n, pi0_showers.count(shower) ? 1 : 0);
+    }
+    for (auto shower : pi0_showers) {
+        if (!shower) continue;
+        auto [sv, ct] = shower->get_start_vertex_and_type();
+        if (!sv) continue;
+        const WireCell::Point vp = sv->fit().valid() ? sv->fit().point : sv->wcpt().point;
+        const double d_vtx_start = (shower->get_start_point() - vp).magnitude();
+        auto [d_fit, p_fit]     = shower_get_closest_point(*shower, vp, "fit");
+        auto [d_assoc, p_assoc] = shower_get_closest_point(*shower, vp, "associate_points");
+        const double gap = (d_fit >= 0 && d_assoc >= 0) ? (p_fit - p_assoc).magnitude() : -1;
+        std::fprintf(stderr, "PI0_START sh=%d E=%.1f ct=%d d_vtx_start=%.1f d_vtx_fit=%.1f d_vtx_assoc=%.1f gap=%.1f\n",
+                     pr132_pi0_shid(shower), shower->get_kine_charge() / WireCell::units::MeV, ct,
+                     d_vtx_start / WireCell::units::cm, d_fit / WireCell::units::cm,
+                     d_assoc / WireCell::units::cm, gap / WireCell::units::cm);
+    }
+}
+
 void PatternAlgorithms::id_pi0_with_vertex(int& acc_segment_id, IndexedShowerSet& pi0_showers, ShowerIntMap& map_shower_pio_id, std::map<int, std::vector<ShowerPtr > >& map_pio_id_showers, std::map<int, std::pair<double, int> >& map_pio_id_mass, std::map<int, std::pair<int, int> >& map_pio_id_saved_pair, Pi0KineFeatures& pio_kine, Graph& graph, VertexPtr main_vertex, IndexedShowerSet& showers, Facade::Cluster* main_cluster, std::vector<Facade::Cluster*>& other_clusters, ClusterVertexMap map_cluster_main_vertices, ShowerVertexMap& map_vertex_in_shower, ShowerSegmentMap& map_segment_in_shower, VertexShowerSetMap& map_vertex_to_shower, ClusterPtrSet& used_shower_clusters, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model){
 
     if (!main_vertex) return;
@@ -5784,6 +5874,32 @@ void PatternAlgorithms::id_pi0_with_vertex(int& acc_segment_id, IndexedShowerSet
             svc[shower_2] = {vtx, 2};
         }
 
+        // doc pr/132 round 4 (K15): re-seat the accepted conn-2 start on the
+        // ASSOCIATE cloud.  The conn-2 derivation in calculate_kinematics
+        // reads the "fit" cloud, which for a rescued ex-track shower covers
+        // the track core only -- 169626's gamma start landed 13.4 cm deep
+        // (owner scan, sec 10.8).  Move the start to the associate-cloud
+        // point nearest the accepted vertex when that is a real improvement.
+        // false (default) = byte-identical.
+        if (m_pi0_reseat_start_assoc) {
+            for (const auto& rsh : {shower_1, shower_2}) {
+                auto [rsv, rct] = rsh->get_start_vertex_and_type();
+                if (rct != 2 || !rsv) continue;
+                const WireCell::Point vp = rsv->fit().valid() ? rsv->fit().point : rsv->wcpt().point;
+                auto [d_assoc, p_assoc] = shower_get_closest_point(*rsh, vp, "associate_points");
+                if (d_assoc < 0) continue;
+                const double d_cur = (rsh->get_start_point() - vp).magnitude();
+                const double moved = (rsh->get_start_point() - p_assoc).magnitude();
+                if (moved > 1.0 * units::cm && d_assoc < d_cur) {
+                    if (pr132_pi0_dbg())
+                        std::fprintf(stderr, "PI0_PAIR P1 reseat sh=%d moved=%.1f d_cur=%.1f d_assoc=%.1f\n",
+                                     pr132_pi0_shid(rsh), moved / units::cm,
+                                     d_cur / units::cm, d_assoc / units::cm);
+                    rsh->set_start_point(p_assoc);
+                }
+            }
+        }
+
         SPDLOG_LOGGER_TRACE(s_log, "examine_showers: Pi0 found with mass: {} MeV with {} MeV + {} MeV",
             mass_save / units::MeV, shower_1->get_kine_charge() / units::MeV, shower_2->get_kine_charge() / units::MeV);
 
@@ -5935,6 +6051,21 @@ void PatternAlgorithms::id_pi0_without_vertex(int& acc_segment_id, IndexedShower
         if (it != map_vertex_to_shower.end()) {
             for (auto shower : it->second) {
                 if (pi0_showers.find(shower) != pi0_showers.end()) {
+                    // doc pr/132 round 4 (K14): the legacy early-return
+                    // abandons path 2 the moment ANY main-vertex shower is
+                    // already pi0-paired -- for an NC pi0 whose nu vertex is
+                    // mis-seated inside a shower arm (owner scan: 76346),
+                    // path 1 pairs at the WRONG vertex first and this return
+                    // then blocks the vertex correction.  The knob skips the
+                    // paired shower instead (the ray pool below already
+                    // excludes pi0_showers members), letting path 2 run on
+                    // the remainder.  false (default) = byte-identical.
+                    if (m_pi0_nv_retry_paired) {
+                        if (pr132_pi0_dbg())
+                            std::fprintf(stderr, "PI0_PAIR P2 skip=paired sh=%d\n",
+                                         pr132_pi0_shid(shower));
+                        continue;
+                    }
                     if (pr132_pi0_dbg()) {
                         int n_left = 0;
                         for (auto sh2 : it->second)
@@ -6313,6 +6444,24 @@ void PatternAlgorithms::id_pi0_without_vertex(int& acc_segment_id, IndexedShower
                                  (mass_point.second - main_vtx_pt).magnitude() / units::cm);
                 continue;
             }
+            // doc pr/132 round 4 (K13): path-2 partner floor -- the K3
+            // analog for the without-vertex finder.  A big shower plus a
+            // tiny partner can land in-window and drag the main vertex with
+            // it (round-2 sec 9.8: 116962's unresolved acceptance had a
+            // 31 MeV partner); skip the pair when the smaller member is
+            // below the floor.  Selection-loop only, T_KINE untouched.
+            // 0 (default) = off = byte-identical.
+            if (m_pi0_nv_partner_min > 0 &&
+                std::min(shower_pair.first->get_kine_charge(),
+                         shower_pair.second->get_kine_charge()) < m_pi0_nv_partner_min) {
+                if (pr132_pi0_dbg())
+                    std::fprintf(stderr, "PI0_PAIR P2 floorrej sh1=%d sh2=%d E1=%.1f E2=%.1f m=%.1f\n",
+                                 pr132_pi0_shid(shower_pair.first), pr132_pi0_shid(shower_pair.second),
+                                 shower_pair.first->get_kine_charge() / units::MeV,
+                                 shower_pair.second->get_kine_charge() / units::MeV,
+                                 mass_point.first / units::MeV);
+                continue;
+            }
             if (std::abs(mass_point.first - 135 * units::MeV + mass_offset) < mass_diff) {
                 if (good_showers.find(shower_pair.first) == good_showers.end() && 
                     good_showers.find(shower_pair.second) == good_showers.end()) continue;
@@ -6397,7 +6546,28 @@ void PatternAlgorithms::id_pi0_without_vertex(int& acc_segment_id, IndexedShower
             
             shower_2->set_start_vertex(main_vertex, 2);
             shower_2->calculate_kinematics(particle_data, recomb_model, m_shower_endpoint_exclude_start_vertex, m_shower_endpoint_skip_orphan_vtx);
-            
+
+            // doc pr/132 round 4 (K15): associate-cloud start re-seat -- same
+            // rationale as the path-1 site (169626 is a PATH-2 acceptance).
+            if (m_pi0_reseat_start_assoc) {
+                for (const auto& rsh : {shower_1, shower_2}) {
+                    auto [rsv, rct] = rsh->get_start_vertex_and_type();
+                    if (rct != 2 || !rsv) continue;
+                    const WireCell::Point vp = rsv->fit().valid() ? rsv->fit().point : rsv->wcpt().point;
+                    auto [d_assoc, p_assoc] = shower_get_closest_point(*rsh, vp, "associate_points");
+                    if (d_assoc < 0) continue;
+                    const double d_cur = (rsh->get_start_point() - vp).magnitude();
+                    const double moved = (rsh->get_start_point() - p_assoc).magnitude();
+                    if (moved > 1.0 * units::cm && d_assoc < d_cur) {
+                        if (pr132_pi0_dbg())
+                            std::fprintf(stderr, "PI0_PAIR P2 reseat sh=%d moved=%.1f d_cur=%.1f d_assoc=%.1f\n",
+                                         pr132_pi0_shid(rsh), moved / units::cm,
+                                         d_cur / units::cm, d_assoc / units::cm);
+                        rsh->set_start_point(p_assoc);
+                    }
+                }
+            }
+
             update_shower_maps(showers, map_vertex_in_shower, map_segment_in_shower,
                               map_vertex_to_shower, used_shower_clusters);
             
@@ -7894,6 +8064,11 @@ void PatternAlgorithms::shower_clustering_with_nv(int acc_segment_id, IndexedSho
     // only; docstring at pr132_pi0_substruct_dbg).
     if (pr132_pi0_substruct_dbg())
         pr132_pi0_substruct_probe(showers, pi0_showers);
+
+    // doc pr/132 round 4: NC vertex-in-shower recognizer + start-derivation
+    // audit (byte-neutral, stderr only; docstring at pr132_pi0_ncvtx_dbg).
+    if (pr132_pi0_ncvtx_dbg())
+        pr132_pi0_ncvtx_probe(showers, pi0_showers, main_vertex, map_vertex_in_shower);
 
     if (m_perf) {
         SPDLOG_LOGGER_TRACE(s_log,
