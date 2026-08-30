@@ -954,6 +954,8 @@ public:
         double m_shower_satellite_absorb_max_mev{10.0};             // doc pr/125; MeV, satellite kine cap
         double m_shower_satellite_absorb_host_mev{20.0};            // doc pr/125; MeV, host kine floor
         double m_shower_pass4_track_guard_len{0.0};                 // doc pr/123 r1; cm, 0 = no length guard
+        double m_shower_pass4_prox_guard_len{0.0};                  // doc pr/130 item 1b; cm, 0 = pass4_proximity unguarded (legacy)
+        double m_shower_pass3_backfill_guard_len{0.0};              // doc pr/130 item 1b; cm, 0 = pass3 sibling backfill ignores pr/124's decline (legacy)
         bool   m_kine_count_guard_freed{false};                     // doc pr/123 r2; kine twin of pf_orphan_guard_freed
         double m_kine_guard_freed_impact{0.0};                      // doc pr/129; 0 = no pointing test
         double m_kine_guard_freed_miss_deg{90.0};                   // doc pr/129

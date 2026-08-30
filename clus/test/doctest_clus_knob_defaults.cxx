@@ -251,6 +251,8 @@ TEST_CASE("clus knob defaults: TaggerCheckNeutrino switches are all OFF")
     CHECK_KNOB_BOOL(cfg, "shower_pass4_prune_detached", false);               // pr/123 r1; false = no prune pass
     CHECK_KNOB_NUM(cfg, "shower_pass4_prune_gap", 40.0);                      // cm; inert while prune off
     CHECK_KNOB_NUM(cfg, "shower_pass4_track_guard_len", 0.0);                 // cm; 0 = no length guard
+    CHECK_KNOB_NUM(cfg, "shower_pass4_prox_guard_len", 0.0);                  // cm; 0 = pass4_proximity unguarded (doc pr/130 item 1b)
+    CHECK_KNOB_NUM(cfg, "shower_pass3_backfill_guard_len", 0.0);              // cm; 0 = pass3 sibling backfill unguarded (doc pr/130 item 1b)
     // doc pr/124 front A -- 25-40 cm gap-band tier-2 prune.
     CHECK_KNOB_NUM(cfg, "shower_pass4_prune_gap2", 0.0);                      // cm; 0 = no tier-2 band prune
     CHECK_KNOB_NUM(cfg, "shower_pass4_prune2_ang", 40.0);                     // deg; inert while gap2 = 0

@@ -1649,6 +1649,40 @@ void PatternAlgorithms::shower_clustering_with_nv_from_main_cluster(Graph& graph
                     segment_track_length(seg1)/units::cm);
                 continue;
             }
+            // doc sbnd_xin/docs/pr/130 item 1b (shower_pass3_backfill_guard_len):
+            // pr/93's predicate was given a second seat here (the block
+            // above, SBND 315167) but pr/124's shower_pass3_cone_guard_len
+            // was not -- so a track-pdg segment the pass-3 cone absorber
+            // declined ~40 lines above is re-adopted into the SAME shower
+            // here, and force-relabelled pdg 11 just below.  That defeats
+            // pr/124's own stated intent: its decline sets kPass4GuardFreed
+            // precisely so the PF/kine orphan passes can claim the segment,
+            // not so this backfill can put it straight back.  Census over
+            // both standard manifests: 6 segments in 5 events (137238
+            // seg 145067, 175896 seg 66041, 176502 seg 109123, 396222 segs
+            // 9080/9098, 415278 seg 24072), every one of them
+            // pass3_cone_guard -> pass3_cluster_map.  Same predicate as
+            // pr/124's; the flag is already set, so this only has to stop
+            // the re-adoption.  0 = off = legacy => byte-identical.
+            if (m_shower_pass3_backfill_guard_len > 0 &&
+                segment_track_length(seg1) > m_shower_pass3_backfill_guard_len &&
+                seg1->has_particle_info() && seg1->particle_info()) {
+                const int bf_pdg = std::abs(seg1->particle_info()->pdg());
+                if (bf_pdg == 13 || bf_pdg == 211 || bf_pdg == 2212) {
+                    seg1->set_flags(SegmentFlags::kPass4GuardFreed);
+                    if (pr93_absorb_dbg()) {
+                        std::fprintf(stderr,
+                            "SHOWER_ABSORB PASS3_BACKFILL_GUARD seg=%d pdg=%d len_cm=%.1f declined=1\n",
+                            pr91_seg_display_id(seg1), seg1->particle_info()->pdg(),
+                            segment_track_length(seg1) / units::cm);
+                    }
+                    SPDLOG_LOGGER_DEBUG(s_log,
+                        "pr130 pass3_backfill_guard: decline seg={} pdg={} len={:.1f}cm",
+                        pr91_seg_display_id(seg1), seg1->particle_info()->pdg(),
+                        segment_track_length(seg1) / units::cm);
+                    continue;
+                }
+            }
             pr93_probe_absorb_direct("pass3_cluster_map", it->second, seg1);
             it->second->add_segment(seg1, true);
             if (seg1->has_particle_info() && seg1->particle_info()) {
@@ -2427,6 +2461,45 @@ void PatternAlgorithms::shower_clustering_with_nv_from_vertices(Graph& graph, Ve
                 for (auto seg1 : seg_order) {
                     if ((seg1->cluster() == main_cluster && !m_absorb_unreachable_main_segs.count(seg1)) || m_nv_bridge_shield_segs.count(seg1)) continue;  // doc pr/65 round 3: guard means "claimed by the main_vertex graph walk", so graph-unreachable main-cluster segments stay eligible (set empty when knob off => legacy); doc pr/40 round 9 B2: bridged-cluster segments stay un-absorbable (shield set empty when bridge off)
                     if (map_segment_in_shower.find(seg1) != map_segment_in_shower.end()) continue;
+
+                    // doc sbnd_xin/docs/pr/130 item 1b (shower_pass4_prox_guard_len):
+                    // pass4_proximity is the only pass-4 absorber with no
+                    // track guard.  Its sibling pass4_angle (~50 lines above)
+                    // declines a long track-pdg / MIP-flat segment via
+                    // pr/123's shower_pass4_track_guard_len; this loop tests
+                    // only distance (3.5 cm) and angle (45 deg), and the
+                    // 0.75 x shower_length ceiling does not bite on a large
+                    // shower.  The 239-event census found 4 segments that
+                    // pr/93's cone_absorb_guard had ALREADY declined being
+                    // re-admitted here: SBND 100222 seg 14003 (110 cm pdg-13,
+                    // 34.5% of the labelled over-clustering charge on the
+                    // 141-set) and 176502 segs 20008 / 20013 / 109141.  Same
+                    // predicate and same kPass4GuardFreed release as pr/123's
+                    // guard, so a declined track stays claimable by the PF /
+                    // kine orphan passes.  0 = off = legacy => byte-identical.
+                    if (m_shower_pass4_prox_guard_len > 0) {
+                        const double prox_len = segment_track_length(seg1);
+                        if (prox_len > m_shower_pass4_prox_guard_len) {
+                            const int prox_pdg = seg1->has_particle_info() && seg1->particle_info()
+                                ? std::abs(seg1->particle_info()->pdg()) : 0;
+                            bool prox_trk = (prox_pdg == 13 || prox_pdg == 211 || prox_pdg == 2212);
+                            if (!prox_trk && m_mip_dqdx_median > 0) {
+                                prox_trk = segment_median_dQ_dx(seg1) < 1.3 * m_mip_dqdx_median;
+                            }
+                            if (prox_trk) {
+                                seg1->set_flags(SegmentFlags::kPass4GuardFreed);
+                                if (pr93_absorb_dbg()) {
+                                    std::fprintf(stderr,
+                                        "SHOWER_ABSORB PASS4_PROX_GUARD seg=%d pdg=%d len_cm=%.1f declined=1\n",
+                                        pr91_seg_display_id(seg1), prox_pdg, prox_len / units::cm);
+                                }
+                                SPDLOG_LOGGER_DEBUG(s_log,
+                                    "pr130 pass4_prox_guard: decline seg={} pdg={} len={:.1f}cm",
+                                    pr91_seg_display_id(seg1), prox_pdg, prox_len / units::cm);
+                                continue;
+                            }
+                        }
+                    }
 
                     double min_dis = 1e9;
                     ShowerPtr min_shower = nullptr;

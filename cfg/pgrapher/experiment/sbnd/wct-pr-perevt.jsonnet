@@ -1814,6 +1814,10 @@ function(
     shower_pass4_prune_detached = true,      // SBND PRODUCTION ON 2026-08-28 (doc pr/123 r1; owner G=40 + re-seed disposition; 141-set marked showers: med qF1 0.887->0.935, sum q_extra 4.86e7->2.69e7 (-45%), 8 showers to 1.000; zero orphans, 0 vertices moved, nusel identical; adjudication rows Bee idx 13/14)
     shower_pass4_prune_gap = 40,             // cm; C++ default 40. Emitted only when non-default AND prune on => byte-identical.
     shower_pass4_track_guard_len = 50,       // cm; SBND PRODUCTION ON 2026-08-28 (doc pr/123 r1; owner len>50; exactly 3 declines in 239 events: 171572 125cm mu qF1 0.096->1.000, 393505 108cm mu 0.273->1.000, 105074 83cm; zero labeled-good collateral)
+    // doc pr/130 item 1b -- the two absorbers that overrule an existing guard.
+    // C++ default 0 for both.  Key omitted when 0 => byte-identical pre-fix config.
+    shower_pass4_prox_guard_len = 0,         // cm; 0 = OFF (legacy).  pass4_proximity has no track guard while its sibling pass4_angle does; census: 4 segments already declined by pr/93's cone_absorb_guard are re-admitted here (100222 seg 14003 = 110cm mu, 176502 segs 20008/20013/109141).
+    shower_pass3_backfill_guard_len = 0,     // cm; 0 = OFF (legacy).  The pass3 sibling backfill honours pr/93's predicate but not pr/124's; census: 6 segments in 5 events (137238, 175896, 176502, 396222 x2, 415278).
     // doc pr/124 front A -- 25-40 cm gap-band tier-2 prune (qualifier pair
     // ang>40deg OR mdqdx>2.5 MIP measured zero-labeled-collateral on both
     // label sets).  C++ defaults: gap2 0 (off), ang 40, mdqdx 2.5.
@@ -2937,6 +2941,8 @@ function(
         [if shower_pass4_prune_detached then 'shower_pass4_prune_detached']: true,
         [if shower_pass4_prune_detached && shower_pass4_prune_gap != 40 then 'shower_pass4_prune_gap']: shower_pass4_prune_gap,
         [if shower_pass4_track_guard_len != 0 then 'shower_pass4_track_guard_len']: shower_pass4_track_guard_len,
+        [if shower_pass4_prox_guard_len != 0 then 'shower_pass4_prox_guard_len']: shower_pass4_prox_guard_len,
+        [if shower_pass3_backfill_guard_len != 0 then 'shower_pass3_backfill_guard_len']: shower_pass3_backfill_guard_len,
         [if shower_pass4_prune_gap2 != 0 then 'shower_pass4_prune_gap2']: shower_pass4_prune_gap2,
         [if shower_pass4_prune_gap2 != 0 && shower_pass4_prune2_ang != 40 then 'shower_pass4_prune2_ang']: shower_pass4_prune2_ang,
         [if shower_pass4_prune_gap2 != 0 && shower_pass4_prune2_mdqdx != 2.5 then 'shower_pass4_prune2_mdqdx']: shower_pass4_prune2_mdqdx,
