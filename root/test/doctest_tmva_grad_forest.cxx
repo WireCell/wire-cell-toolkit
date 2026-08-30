@@ -15,6 +15,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <random>
 #include <string>
 #include <vector>
@@ -203,4 +204,72 @@ TEST_CASE("tmva grad forest refuses files outside the mirrored class")
     x = make_xml(names, trees);
     x.replace(x.find("NCoef=\"0\""), 9, "NCoef=\"2\"");
     CHECK_THROWS_AS(f.load_string(x, names), ValueError);
+}
+
+// ===========================================================================
+// doc sbnd_xin/docs/85 sec 7.2 -- the log-odds transform, unclamped.
+//
+// The bug these cases pin: the two BDT scorers used to clamp the forest
+// output to +-0.9999 before log10((1+v)/(1-v)), capping |score| at 4.30103.
+// MicroBooNE's nue working point is nue_score > 7.0, so that cut selected
+// zero events by construction, and every strongly-signal-like event piled up
+// on one value.  Written against the clamped code these cases FAIL: the
+// reachability case returns 4.30103 instead of ~8.3, and the two ceilings
+// come back as 4.3009362 (float) / 4.3010083 (double) instead of 16.2555.
+// ===========================================================================
+TEST_CASE("bdt log-odds: the MicroBooNE nue working point is reachable")
+{
+    using WireCell::Root::bdt_log_odds_score;
+    auto quiet = Log::logger("test.bdt_log_odds");
+
+    // v = 0.99999998 is what a uB nue_score of 7.0 corresponds to; a forest
+    // that separates this well must be able to say so.
+    const double v7 = (std::pow(10.0, 7.0) - 1.0) / (std::pow(10.0, 7.0) + 1.0);
+    CHECK(bdt_log_odds_score(v7, quiet, "test") == doctest::Approx(7.0).epsilon(1e-9));
+    CHECK(bdt_log_odds_score(v7, quiet, "test") > 7.0 - 1e-6);
+
+    // The removed clamp's ceiling is now an ordinary interior value, not a
+    // wall: scores above it exist and stay ordered.
+    const double s_clamp = std::log10((1.0 + 0.9999) / (1.0 - 0.9999));
+    CHECK(s_clamp == doctest::Approx(4.30103).epsilon(1e-5));
+    CHECK(bdt_log_odds_score(0.99999, quiet, "test") > s_clamp);
+    CHECK(bdt_log_odds_score(0.999999, quiet, "test") >
+          bdt_log_odds_score(0.99999, quiet, "test"));
+
+    // Sign symmetry and the neutral point, so a sign slip cannot pass.
+    CHECK(bdt_log_odds_score(0.0, quiet, "test") == doctest::Approx(0.0));
+    CHECK(bdt_log_odds_score(-0.5, quiet, "test") ==
+          doctest::Approx(-bdt_log_odds_score(0.5, quiet, "test")));
+}
+
+TEST_CASE("bdt log-odds: degenerate forest outputs stay finite")
+{
+    using WireCell::Root::bdt_log_odds_score;
+    auto quiet = Log::logger("test.bdt_log_odds");
+
+    // tanh(sum) rounds to exactly 1.0 in double once sum > ~18.4.  Unguarded
+    // that is log10(2/0) = +inf, which would reach a ROOT float branch.
+    const double hi = bdt_log_odds_score(1.0, quiet, "test");
+    CHECK(std::isfinite(hi));
+    CHECK(hi == doctest::Approx(16.2555).epsilon(1e-4));
+    CHECK(static_cast<float>(hi) < std::numeric_limits<float>::max());
+
+    // TmvaGradForest::evaluate returns -999 when any input variable is NaN
+    // (mirroring TMVA::Reader::EvaluateMVA).  log10 of a negative ratio is
+    // NaN; the guard must send it to the floor, the same direction the old
+    // clamp sent it (-4.30103), not to NaN.
+    const double lo = bdt_log_odds_score(-999.0, quiet, "test");
+    CHECK(std::isfinite(lo));
+    CHECK(lo == doctest::Approx(-16.2555).epsilon(1e-4));
+    CHECK(lo < -15.0);   // below the "not filled" sentinel, as background-like
+
+    CHECK(std::isfinite(bdt_log_odds_score(-1.0, quiet, "test")));
+    CHECK(std::isfinite(bdt_log_odds_score(
+        std::numeric_limits<double>::quiet_NaN(), quiet, "test")));
+    CHECK(std::isfinite(bdt_log_odds_score(
+        std::numeric_limits<double>::infinity(), quiet, "test")));
+
+    // The guard is degenerate-only: it must not move an ordinary value.
+    CHECK(bdt_log_odds_score(0.9999, quiet, "test") ==
+          doctest::Approx(std::log10((1.0 + 0.9999) / (1.0 - 0.9999))));
 }

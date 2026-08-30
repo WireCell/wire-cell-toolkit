@@ -359,3 +359,20 @@ double TmvaGradForest::evaluate(const float* values) const
     }
     return 2.0 / (1.0 + exp(-2.0 * sum)) - 1;
 }
+
+// doc sbnd_xin/docs/85 sec 9.  Docstring on the declaration.
+double WireCell::Root::bdt_log_odds_score(double v, const WireCell::Log::logptr_t& log,
+                                          const char* who)
+{
+    if (!std::isfinite(v) || std::fabs(v) >= 1.0) {
+        const double sign = (std::isfinite(v) && v > 0) ? 1.0 : -1.0;
+        const double sat = sign * std::nextafter(1.0, 0.0);
+        if (log) {
+            log->warn("{}: raw BDT output {} is degenerate for the log-odds transform "
+                      "(|v| >= 1 or non-finite); using {:.17g} => score {:.4f}",
+                      who, v, sat, std::log10((1.0 + sat) / (1.0 - sat)));
+        }
+        v = sat;
+    }
+    return std::log10((1.0 + v) / (1.0 - v));
+}

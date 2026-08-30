@@ -39,6 +39,8 @@
 #ifndef WIRECELLROOT_TMVAGRADFOREST
 #define WIRECELLROOT_TMVAGRADFOREST
 
+#include "WireCellUtil/Logging.h"
+
 #include <cstdint>
 #include <string>
 #include <string_view>
@@ -81,6 +83,29 @@ namespace WireCell::Root {
         std::vector<int32_t> m_roots;  // one per tree, in file order
         size_t m_nvars{0};
     };
+
+    /// The prototype's log-odds transform of a forest output: log10((1+v)/(1-v)).
+    ///
+    /// doc sbnd_xin/docs/85 sec 7.2 (owner decision 2026-08-30).  Both uBooNE
+    /// BDT scorers used to clamp v to +-0.9999 first, capping |score| at
+    /// 4.30103; the prototype (NeutrinoID_nue_bdts.h:300-301,
+    /// NeutrinoID_numu_bdts.h:94-95) carries v in a double and does not clamp,
+    /// so |score| reaches 16.2555 and the -15 "not filled" sentinel sits below
+    /// the real floor.  The clamp made MicroBooNE's nue_score > 7.0 working
+    /// point select zero events by construction.  It is gone; this is the
+    /// transform that replaced it.
+    ///
+    /// The one guard kept is the degenerate one the transform needs.
+    /// evaluate() above returns tanh(sum), which rounds to exactly +-1 in
+    /// double once |sum| > ~18.4 (log10(2/0) = inf), and returns the -999
+    /// sentinel when any input variable is NaN (log10 of a negative ratio =
+    /// NaN).  Either would leave a non-finite value in a ROOT float branch and
+    /// in every downstream cut, so |v| >= 1 and non-finite v are pulled to the
+    /// neighbouring double -- a 1.1e-16 move to the finite extremes +-16.2555,
+    /// not the +-4.30103 truncation the clamp imposed.  `log` and `who` are
+    /// used only to report a hit: a silent inf is the failure mode a
+    /// 3000-event batch cannot show you.
+    double bdt_log_odds_score(double v, const Log::logptr_t& log, const char* who);
 
 }  // namespace WireCell::Root
 

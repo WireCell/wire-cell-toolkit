@@ -582,10 +582,11 @@ void UbooneNumuBDTScorer::cal_numu_bdts_xgboost(Clus::PR::TaggerInfo& ti,
     if (std::isnan(m_xgb_vars[56])) m_xgb_vars[56] = 0; // cosmict_7_theta
     if (std::isnan(m_xgb_vars[57])) m_xgb_vars[57] = 0; // cosmict_7_phi
 
-    double val1 = eval_xgb();
+    const double val1 = eval_xgb();
 
-    // Clamp to avoid division by zero in log-odds transformation
-    val1 = std::max(-0.9999, std::min(0.9999, val1));
-    // Convert raw TMVA output to log-likelihood ratio (matches prototype).
-    ti.numu_score = static_cast<float>(std::log10((1.0 + val1) / (1.0 - val1)));
+    // Convert raw TMVA output to log-likelihood ratio, unclamped, exactly as
+    // the prototype does (NeutrinoID_numu_bdts.h:94-95).  doc 85 sec 7.2: the
+    // old +-0.9999 clamp is gone; TmvaGradForest.h documents what replaced it.
+    ti.numu_score = static_cast<float>(
+        bdt_log_odds_score(val1, log, "UbooneNumuBDTScorer::cal_numu_bdts_xgboost"));
 }

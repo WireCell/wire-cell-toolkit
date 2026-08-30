@@ -1983,10 +1983,13 @@ void UbooneNueBDTScorer::cal_bdts_xgboost(Clus::PR::TaggerInfo& ti,
 
     // ---- Step 4: evaluate and transform -------------------------------------
     if (ti.br_filled == 1) {
-        float val1 = eval_xgb();
-        // Clamp to avoid division by zero in log-odds transformation
-        val1 = std::max(-0.9999f, std::min(0.9999f, val1));
-        ti.nue_score = static_cast<float>(std::log10((1.0 + val1) / (1.0 - val1)));
+        // `double`, not `float`: the prototype declares val1 double
+        // (NeutrinoID_nue_bdts.h:300) and eval_xgb() already returns one.
+        // Narrowing to float would cap |score| near 7.5 on its own, well
+        // inside the range the -15 sentinel was chosen to sit below.
+        const double val1 = eval_xgb();
+        ti.nue_score = static_cast<float>(
+            bdt_log_odds_score(val1, log, "UbooneNueBDTScorer::cal_bdts_xgboost"));
     } else {
         ti.nue_score = -15.f;  // background-like default; matches prototype default_val = -15
     }
