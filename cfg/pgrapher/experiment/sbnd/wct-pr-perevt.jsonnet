@@ -1851,6 +1851,9 @@ function(
     pi0_nv_partner_min_mev = null,           // MeV; null => C++ default 0 (no path-2 partner floor)
     pi0_nv_retry_paired = false,             // C++ default false (path-2 abandons on any pi0-paired main-vertex shower)
     pi0_reseat_start_assoc = false,          // C++ default false (accepted conn-2 starts stay on the fit cloud)
+    shower_em_collinear_deg = null,          // deg; null => C++ default 0 (no build-time EM collinear-fragment merge)
+    shower_em_collinear_dis_cm = null,       // cm; null => C++ default 60 (inert while deg off)
+    shower_em_collinear_host_mev = null,     // MeV; null => C++ default 20 (inert while deg off)
     stem_backfill_back_dvtx = 45,            // cm; SBND PRODUCTION ON 2026-08-29 (owner flip: "For B, flip on for SBND production").  Suppress the backward-stem decline when the SHOWER START is further than this from the nu vertex.  The guard's reachable population is CLOSED at 8 events (`if (!ok) break;` precedes it) and all 8 are owner-adjudicated: absorb-wanted 46.84 (292643) and 88.11 (179369), every decline-ok <= 44.34, so 45 sits in an empty interval and the flip changes exactly those 2 of 239 events.  On both, the resulting PF tree is IDENTICAL to the guard-OFF shape the owner reviewed in bee/pr130r2 and preferred.  C++ default 0 = off.
     // doc pr/124 front A -- 25-40 cm gap-band tier-2 prune (qualifier pair
     // ang>40deg OR mdqdx>2.5 MIP measured zero-labeled-collateral on both
@@ -2993,6 +2996,9 @@ function(
         [if pi0_nv_partner_min_mev != null then 'pi0_nv_partner_min_mev']: pi0_nv_partner_min_mev,
         [if pi0_nv_retry_paired then 'pi0_nv_retry_paired']: true,
         [if pi0_reseat_start_assoc then 'pi0_reseat_start_assoc']: true,
+        [if shower_em_collinear_deg != null then 'shower_em_collinear_deg']: shower_em_collinear_deg,
+        [if shower_em_collinear_dis_cm != null then 'shower_em_collinear_dis_cm']: shower_em_collinear_dis_cm,
+        [if shower_em_collinear_host_mev != null then 'shower_em_collinear_host_mev']: shower_em_collinear_host_mev,
         [if shower_pass4_prune_gap2 != 0 then 'shower_pass4_prune_gap2']: shower_pass4_prune_gap2,
         [if shower_pass4_prune_gap2 != 0 && shower_pass4_prune2_ang != 40 then 'shower_pass4_prune2_ang']: shower_pass4_prune2_ang,
         [if shower_pass4_prune_gap2 != 0 && shower_pass4_prune2_mdqdx != 2.5 then 'shower_pass4_prune2_mdqdx']: shower_pass4_prune2_mdqdx,

@@ -267,6 +267,9 @@ TEST_CASE("clus knob defaults: TaggerCheckNeutrino switches are all OFF")
     CHECK_KNOB_NUM(cfg, "pi0_nv_partner_min_mev", 0.0);                       // doc pr/132 K13; 0 = no path-2 partner floor
     CHECK_KNOB_BOOL(cfg, "pi0_nv_retry_paired", false);                       // doc pr/132 K14; legacy path-2 early return
     CHECK_KNOB_BOOL(cfg, "pi0_reseat_start_assoc", false);                    // doc pr/132 K15; fit-cloud conn-2 starts
+    CHECK_KNOB_NUM(cfg, "shower_em_collinear_deg", 0.0);                      // doc pr/132 K16; 0 = no build-time EM collinear merge
+    CHECK_KNOB_NUM(cfg, "shower_em_collinear_dis_cm", 60.0);                  // doc pr/132 K16; inert while deg = 0
+    CHECK_KNOB_NUM(cfg, "shower_em_collinear_host_mev", 20.0);                // doc pr/132 K16; inert while deg = 0
     CHECK_KNOB_NUM(cfg, "pi0_nv_max_vtx_shift_cm", 0.0);                      // doc pr/132 K10; 0 = no decay-point shift cap
     CHECK_KNOB_NUM(cfg, "pi0_nv_mass_window_mev", 60.0);                      // doc pr/132 K11; legacy without-vertex half-window
     // doc pr/124 front A -- 25-40 cm gap-band tier-2 prune.

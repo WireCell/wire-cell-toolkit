@@ -719,6 +719,9 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_pi0_nv_partner_min_mev                    = get(config, "pi0_nv_partner_min_mev",                    m_pi0_nv_partner_min_mev);                 // doc pr/132 K13, MeV
     m_pi0_nv_retry_paired                       = get(config, "pi0_nv_retry_paired",                       m_pi0_nv_retry_paired);                    // doc pr/132 K14
     m_pi0_reseat_start_assoc                    = get(config, "pi0_reseat_start_assoc",                    m_pi0_reseat_start_assoc);                 // doc pr/132 K15
+    m_shower_em_collinear_deg                   = get(config, "shower_em_collinear_deg",                   m_shower_em_collinear_deg);                // doc pr/132 K16, deg
+    m_shower_em_collinear_dis_cm                = get(config, "shower_em_collinear_dis_cm",                m_shower_em_collinear_dis_cm);             // doc pr/132 K16, cm
+    m_shower_em_collinear_host_mev              = get(config, "shower_em_collinear_host_mev",              m_shower_em_collinear_host_mev);           // doc pr/132 K16, MeV
     m_pi0_nv_max_vtx_shift_cm                   = get(config, "pi0_nv_max_vtx_shift_cm",                   m_pi0_nv_max_vtx_shift_cm);                // doc pr/132 K10, cm
     m_pi0_nv_mass_window_mev                    = get(config, "pi0_nv_mass_window_mev",                    m_pi0_nv_mass_window_mev);                 // doc pr/132 K11, MeV
     m_kine_count_guard_freed                    = get(config, "kine_count_guard_freed",                    m_kine_count_guard_freed);                 // doc pr/123 r2
@@ -1200,6 +1203,9 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["pi0_nv_partner_min_mev"]                    = m_pi0_nv_partner_min_mev;                    // doc pr/132 K13; 0 = no floor, byte-identical
     cfg["pi0_nv_retry_paired"]                       = m_pi0_nv_retry_paired;                       // doc pr/132 K14; false = legacy early return, byte-identical
     cfg["pi0_reseat_start_assoc"]                    = m_pi0_reseat_start_assoc;                    // doc pr/132 K15; false = fit-cloud starts, byte-identical
+    cfg["shower_em_collinear_deg"]                   = m_shower_em_collinear_deg;                   // doc pr/132 K16; 0 = no merge, byte-identical
+    cfg["shower_em_collinear_dis_cm"]                = m_shower_em_collinear_dis_cm;                // doc pr/132 K16; inert while deg = 0
+    cfg["shower_em_collinear_host_mev"]              = m_shower_em_collinear_host_mev;              // doc pr/132 K16; inert while deg = 0
     cfg["pi0_nv_max_vtx_shift_cm"]                   = m_pi0_nv_max_vtx_shift_cm;                   // doc pr/132 K10; 0 = no cap, byte-identical
     cfg["pi0_nv_mass_window_mev"]                    = m_pi0_nv_mass_window_mev;                    // doc pr/132 K11; 60 = legacy window, byte-identical
     cfg["kine_count_guard_freed"]                    = m_kine_count_guard_freed;                    // doc pr/123 r2; false = guard-freed tracks uncounted, byte-identical
@@ -2648,6 +2654,9 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
         pattern_algos.m_pi0_nv_partner_min                        = m_pi0_nv_partner_min_mev * units::MeV;         // doc pr/132 K13, MeV -> internal
         pattern_algos.m_pi0_nv_retry_paired                       = m_pi0_nv_retry_paired;                         // doc pr/132 K14
         pattern_algos.m_pi0_reseat_start_assoc                    = m_pi0_reseat_start_assoc;                      // doc pr/132 K15
+        pattern_algos.m_em_collinear_merge_deg                    = m_shower_em_collinear_deg;                     // doc pr/132 K16, deg (no scaling)
+        pattern_algos.m_em_collinear_merge_dis                    = m_shower_em_collinear_dis_cm * units::cm;      // doc pr/132 K16, cm -> internal
+        pattern_algos.m_em_collinear_merge_min_host               = m_shower_em_collinear_host_mev * units::MeV;   // doc pr/132 K16, MeV -> internal
         pattern_algos.m_pi0_nv_max_vtx_shift                      = m_pi0_nv_max_vtx_shift_cm * units::cm;         // doc pr/132 K10, cm -> internal
         pattern_algos.m_pi0_nv_mass_window                        = m_pi0_nv_mass_window_mev * units::MeV;         // doc pr/132 K11, MeV -> internal
         pattern_algos.m_kine_count_guard_freed                    = m_kine_count_guard_freed;                    // doc pr/123 r2

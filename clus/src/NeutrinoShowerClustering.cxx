@@ -5304,6 +5304,104 @@ static void pr132_pi0_substruct_probe(const IndexedShowerSet& showers,
     }
 }
 
+// doc pr/132 round 5 (K16) -- EM collinear-fragment merge, the build-time
+// answer to the fragmentation class the pairing-time K12 could not fix (132
+// doc sec 10.3) and the existing seats never see: the round-5 gamma ledger
+// (pr132_gamma_ledger.py) measures the UNDER+SIBS fragments at 2.6-8.5 deg
+// off the host gamma's axis but 25-108 cm downstream (specimens SBND
+// 18255-76346 g1, 342199 g1+g2, 105946 g1, 54332 g1) -- far beyond the
+// pr/118 axis-merge and pr/125 satellite-absorb reach (and above the 10 MeV
+// satellite cap).  For each EM host (leading-first), absorb every remaining
+// DETACHED (conn_type != 1 -- the primary-electron guard) EM shower whose
+// start lies within the axis cone (angle < m_em_collinear_merge_deg from
+// the host's 15-cm direction at its start) and within
+// m_em_collinear_merge_dis of the host start; a fragment long enough to
+// carry its own direction (> 10 cm) must also CONTINUE the host axis
+// (< 30 deg, signed -- the pr/128 lesson: proximity alone admits cosmics).
+// Hosts below m_em_collinear_merge_min_host never absorb.  Vertices are
+// never touched (the owner's round-5 scope rule).  deg 0 (default) = off =
+// byte-identical.
+void PatternAlgorithms::em_collinear_merge(IndexedShowerSet& showers,
+    ShowerVertexMap& map_vertex_in_shower, ShowerSegmentMap& map_segment_in_shower,
+    VertexShowerSetMap& map_vertex_to_shower, ClusterPtrSet& used_shower_clusters,
+    TrackFitting& track_fitter, IDetectorVolumes::pointer dv,
+    const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model)
+{
+    if (m_em_collinear_merge_deg <= 0) return;
+    std::vector<ShowerPtr> pool;
+    for (auto sh : showers) {
+        if (!sh) continue;
+        if (std::abs(sh->get_particle_type()) != 11) continue;
+        pool.push_back(sh);
+    }
+    // Leading-first; deterministic tie-break by the stable per-run shower id.
+    std::stable_sort(pool.begin(), pool.end(), [](const ShowerPtr& a, const ShowerPtr& b) {
+        const double ka = a->get_kine_charge(), kb = b->get_kine_charge();
+        if (ka != kb) return ka > kb;
+        return a->get_shower_id() < b->get_shower_id();
+    });
+    std::set<ShowerPtr> gone;  // lookup-only, never iterated
+    bool did = false;
+    for (size_t i = 0; i < pool.size(); ++i) {
+        ShowerPtr host = pool[i];
+        if (gone.count(host)) continue;
+        if (host->get_kine_charge() < m_em_collinear_merge_min_host) continue;
+        if (host->get_total_length() < 3 * units::cm) continue;
+        const WireCell::Point hs = host->get_start_point();
+        const WireCell::Vector axis = shower_cal_dir_3vector(*host, hs, 15 * units::cm);
+        const double am = axis.magnitude();
+        if (am <= 0) continue;
+        std::vector<ShowerPtr> taken;
+        for (size_t j = i + 1; j < pool.size(); ++j) {
+            ShowerPtr frag = pool[j];
+            if (gone.count(frag)) continue;
+            auto [fsv, fct] = frag->get_start_vertex_and_type();
+            if (fct == 1) continue;
+            const WireCell::Point fs = frag->get_start_point();
+            const WireCell::Vector v(fs.x() - hs.x(), fs.y() - hs.y(), fs.z() - hs.z());
+            const double vm = v.magnitude();
+            if (vm <= 0.5 * units::cm || vm > m_em_collinear_merge_dis) continue;
+            const double ang = std::acos(std::clamp(v.dot(axis) / (vm * am), -1.0, 1.0)) / M_PI * 180.0;
+            if (ang >= m_em_collinear_merge_deg) continue;
+            if (frag->get_total_length() > 10 * units::cm) {
+                const WireCell::Vector fax = shower_cal_dir_3vector(*frag, fs, 15 * units::cm);
+                const double fm = fax.magnitude();
+                if (fm > 0) {
+                    const double a2 = std::acos(std::clamp(fax.dot(axis) / (fm * am), -1.0, 1.0)) / M_PI * 180.0;
+                    if (a2 >= 30) {
+                        if (pr93_absorb_dbg())
+                            std::fprintf(stderr, "SHOWER_ABSORB EMCOL reject=continuation host=%d frag=%d ang=%.1f a2=%.1f\n",
+                                         pr132_pi0_shid(host), pr132_pi0_shid(frag), ang, a2);
+                        continue;
+                    }
+                }
+            }
+            if (pr93_absorb_dbg())
+                std::fprintf(stderr, "SHOWER_ABSORB EMCOL take host=%d Eh=%.1f frag=%d Ef=%.1f ang=%.1f dis=%.1f fct=%d\n",
+                             pr132_pi0_shid(host), host->get_kine_charge() / units::MeV,
+                             pr132_pi0_shid(frag), frag->get_kine_charge() / units::MeV,
+                             ang, vm / units::cm, fct);
+            taken.push_back(frag);
+        }
+        for (auto& frag : taken) {
+            pr93_probe_absorb_splice("em_collinear_merge", host, frag);
+            host->add_shower(*frag);
+            showers.erase(frag);
+            gone.insert(frag);
+            did = true;
+        }
+        if (!taken.empty()) {
+            host->calculate_kinematics(particle_data, recomb_model, m_shower_endpoint_exclude_start_vertex, m_shower_endpoint_skip_orphan_vtx);
+            double kine_charge = cal_kine_charge(host, m_charge_2d_u, m_charge_2d_v, m_charge_2d_w, m_map_apa_ch_plane_wires, track_fitter, dv);
+            host->set_kine_charge(kine_charge);
+            host->set_flag_kinematics(true);
+        }
+    }
+    if (did)
+        update_shower_maps(showers, map_vertex_in_shower, map_segment_in_shower,
+                          map_vertex_to_shower, used_shower_clusters);
+}
+
 // doc pr/132 round 4 -- body of the WCT_PI0_NCVTX_DEBUG tapes (docstring at
 // pr132_pi0_ncvtx_dbg above).  Deterministic: IndexedShowerSet iteration is
 // id-ordered; kd-tree queries are read-only.
@@ -8033,6 +8131,13 @@ void PatternAlgorithms::shower_clustering_with_nv(int acc_segment_id, IndexedSho
     // after ALL shower-structure passes (so every mid-pipeline gate saw
     // legacy values) and BEFORE the pi0 finders (which cache
     // get_kine_charge() at entry).  No-op when both knobs are off.
+    // doc pr/132 round 5 (K16): EM collinear-fragment merge -- BEFORE the
+    // final kine recompute and the pi0 finders, so merged charge feeds both.
+    // No-op when the knob is off (default), byte-identical.
+    em_collinear_merge(showers, map_vertex_in_shower, map_segment_in_shower,
+                       map_vertex_to_shower, used_shower_clusters,
+                       track_fitter, dv, particle_data, recomb_model);
+
     recompute_shower_kine_charge_final(showers, graph, track_fitter, dv);
 
     // Identify pi0 with vertex.
