@@ -119,10 +119,11 @@ KineInfo PatternAlgorithms::fill_kine_tree(
     IndexedShowerSet  used_showers;
 
     // doc 85 sec 9 (owner request 2026-08-30): exactly the segments whose
-    // kinetic energy reaches kine_reco_Enu -- recorded inside the two push
-    // helpers so it cannot drift from what they actually summed.  NOT
-    // used_segments, which is pre-seeded below with every shower's members
-    // including showers this walk never counts.
+    // kinetic energy reaches kine_reco_Enu.  TRACK rows only -- filled by
+    // push_segment_kine, the single site that pushes one.  The SHOWER half is
+    // derived from used_showers at the census, not here.  NOT used_segments,
+    // which is pre-seeded below with every shower's members including showers
+    // this walk never counts.
     IndexedSegmentSet counted_segs;
 
     // Mark all shower-internal vertices and segments as used.
@@ -208,12 +209,9 @@ KineInfo PatternAlgorithms::fill_kine_tree(
 
         ktree.kine_energy_particle.push_back(static_cast<float>(kine_best / units::MeV));
         ktree.kine_particle_type.push_back(pdg);
-
-        // doc 85 sec 9: the shower's kine_best covers every member segment.
-        {
-            IndexedVertexSet vtmp;
-            shower->fill_sets(vtmp, counted_segs, /*flag_exclude_start_segment=*/false);
-        }
+        // doc 85 sec 9: this helper records nothing.  The shower half of
+        // counted_segs is derived once from used_showers at the census -- see
+        // the comment there for why per-site recording was wrong.
 
         if (std::fabs(kine_best - kine_charge) < 0.001 * kine_best)
             ktree.kine_energy_info.push_back(2); // charge
@@ -916,6 +914,23 @@ KineInfo PatternAlgorithms::fill_kine_tree(
     // walk is the same mir(boost::edges(...)) the pr/93 r4 orphan pass uses.
     // -------------------------------------------------------------------------
     {
+        // The shower half of counted_segs, derived ONCE from used_showers.
+        //
+        // Every shower whose energy reached the tree is in used_showers -- all
+        // three push sites insert into it immediately after pushing their row
+        // (:301, :369, :583) -- and a shower's kine_best covers all of its
+        // member segments, so this is exact.  Recording inside
+        // push_shower_kine instead was WRONG and measurably so: the leftover
+        // shower pass duplicates that helper inline and never calls it, so on
+        // SBND ncpi0 114446 four leftover showers totalling 8.2 MeV were in
+        // kine_reco_Enu AND counted again as "excluded" (n_counted read 1
+        // against a five-row kine tree).  Deriving it here cannot miss a site
+        // because it does not depend on which site ran.
+        for (const ShowerPtr& sh : used_showers) {
+            IndexedVertexSet vtmp;
+            sh->fill_sets(vtmp, counted_segs, /*flag_exclude_start_segment=*/false);
+        }
+
         const auto* main_cl = main_vertex ? main_vertex->cluster() : nullptr;
         const int main_cid = main_cl ? main_cl->get_cluster_id() : -1;
 
@@ -961,11 +976,13 @@ KineInfo PatternAlgorithms::fill_kine_tree(
         SPDLOG_LOGGER_INFO(s_log,
             "kine_excluded_census: Enu={:.1f} excluded={:.1f} (main={:.1f} other={:.1f}) "
             "n_excluded={} flagged_inside_Enu={:.1f} main_cid={} n_graph_seg={} "
-            "n_graph_main={} n_counted={} n_excluded_nocluster={}",
+            "n_graph_main={} n_counted={} n_kine_rows={} n_used_showers={} "
+            "n_excluded_nocluster={}",
             ktree.kine_reco_Enu, ktree.kine_energy_excluded,
             ktree.kine_energy_excluded_main, ktree.kine_energy_excluded_other,
             ktree.kine_n_excluded, ktree.kine_energy_flagged,
-            main_cid, n_graph, n_graph_main, (int)counted_segs.size(), n_nocl);
+            main_cid, n_graph, n_graph_main, (int)counted_segs.size(),
+            (int)ktree.kine_energy_particle.size(), (int)used_showers.size(), n_nocl);
     }
 
     // -------------------------------------------------------------------------
