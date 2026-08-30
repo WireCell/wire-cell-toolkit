@@ -973,6 +973,8 @@ public:
         double m_shower_em_collinear_deg{0.0};                      // doc pr/132 K16; deg, 0 = no build-time EM collinear merge
         double m_shower_em_collinear_dis_cm{60.0};                  // doc pr/132 K16; cm, host->fragment reach
         double m_shower_em_collinear_host_mev{20.0};                // doc pr/132 K16; MeV, host floor
+        double m_shower_em_backext_perp_cm{0.0};                    // doc pr/132 K17; cm, 0 = no start back-extension
+        double m_shower_em_backext_len_cm{40.0};                    // doc pr/132 K17; cm, upstream reach
         double m_pi0_nv_max_vtx_shift_cm{0.0};                      // doc pr/132 K10; cm, 0 = no without-vertex decay-point shift cap
         double m_pi0_nv_mass_window_mev{60.0};                      // doc pr/132 K11; MeV, without-vertex acceptance half-window (legacy 60)
         bool   m_kine_count_guard_freed{false};                     // doc pr/123 r2; kine twin of pf_orphan_guard_freed

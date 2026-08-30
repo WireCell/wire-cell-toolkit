@@ -2241,6 +2241,8 @@ namespace WireCell::Clus::PR {
         double m_em_collinear_merge_deg{0};              ///< doc pr/132 K16 (round 5); deg, 0 = off; build-time EM collinear-fragment merge axis cone
         double m_em_collinear_merge_dis{60 * units::cm}; ///< doc pr/132 K16; max host-start -> fragment-start distance
         double m_em_collinear_merge_min_host{20 * units::MeV};  ///< doc pr/132 K16; hosts below this never absorb
+        double m_em_backext_perp{0};                     ///< doc pr/132 K17 (round 6); 0 = off; back-extension tube radius
+        double m_em_backext_len{40 * units::cm};         ///< doc pr/132 K17; max upstream reach of the tube
         double m_pi0_nv_max_vtx_shift{0};                ///< doc pr/132 K10; 0 = off; without-vertex selection skips pairs whose decay point is farther than this from the current main vertex
         double m_pi0_nv_mass_window{60 * units::MeV};    ///< doc pr/132 K11; without-vertex acceptance half-window |m-135+offset| (legacy 60)
         // doc pr/125 (owner 2026-08-29): same-vertex track-typed fragment
@@ -3566,6 +3568,8 @@ namespace WireCell::Clus::PR {
         void recompute_shower_kine_charge_final(IndexedShowerSet& showers, Graph& graph, TrackFitting& track_fitter, IDetectorVolumes::pointer dv);
         /// doc pr/132 round 5 (K16): build-time EM collinear-fragment merge (docstring at the definition).
         void em_collinear_merge(IndexedShowerSet& showers, ShowerVertexMap& map_vertex_in_shower, ShowerSegmentMap& map_segment_in_shower, VertexShowerSetMap& map_vertex_to_shower, ClusterPtrSet& used_shower_clusters, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model);
+        /// doc pr/132 round 6 (K17): EM shower start back-extension (docstring at the definition).
+        void em_start_backext(IndexedShowerSet& showers, ShowerVertexMap& map_vertex_in_shower, ShowerSegmentMap& map_segment_in_shower, VertexShowerSetMap& map_vertex_to_shower, ClusterPtrSet& used_shower_clusters, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model);
         /// doc pr/101 (K3): if m_kine_charge.hadronic_dqdx and the shower is
         /// hadronic-typed (2212/211/2112, not a long muon), set kenergy_best
         /// = kenergy_dQdx.  Returns true when it wrote.  No-op when off.

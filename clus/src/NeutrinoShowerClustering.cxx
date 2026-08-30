@@ -5402,6 +5402,134 @@ void PatternAlgorithms::em_collinear_merge(IndexedShowerSet& showers,
                           map_vertex_to_shower, used_shower_clusters);
 }
 
+// doc pr/132 round 6 (K17) -- EM shower start back-extension.  The round-5
+// root-cause finding (132 doc sec 12.3): the reco EM start is often DEEP in
+// the true gamma -- the round-6 start ledger measures 5 hand gammas with the
+// reco start 9-51 cm DOWNSTREAM of the scanner's em_start_correction
+// (105946 +11.9, 169626 +51.4, 342199 +9.3, 347129 +11.7, 76346 +30.2 cm)
+// -- and the missing upstream charge, where it was reconstructed at all,
+// lives in DETACHED EM fragments that sit BESIDE/BEHIND the reco start
+// (41031 at 158.8 deg off the forward axis), unreachable by any forward
+// cone.  This seat back-projects from each EM host's start along -axis and
+// absorbs detached EM fragments whose endpoints fall inside the tube
+// (perpendicular distance < m_em_backext_perp, upstream projection in
+// (0, m_em_backext_len]); a conn-2/3 host's start is then re-seated to the
+// upstream-most absorbed point (conn-1 starts stay vertex-anchored, and
+// vertices are never touched -- the owner's scope rule).  Hadronic/track
+// fragments (pdg != 11) never qualify: an incoming cosmic or track cannot
+// be eaten.  perp 0 (default) = off = byte-identical.
+void PatternAlgorithms::em_start_backext(IndexedShowerSet& showers,
+    ShowerVertexMap& map_vertex_in_shower, ShowerSegmentMap& map_segment_in_shower,
+    VertexShowerSetMap& map_vertex_to_shower, ClusterPtrSet& used_shower_clusters,
+    TrackFitting& track_fitter, IDetectorVolumes::pointer dv,
+    const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model)
+{
+    if (m_em_backext_perp <= 0) return;
+    std::vector<ShowerPtr> pool;
+    for (auto sh : showers) {
+        if (!sh) continue;
+        if (std::abs(sh->get_particle_type()) != 11) continue;
+        pool.push_back(sh);
+    }
+    std::stable_sort(pool.begin(), pool.end(), [](const ShowerPtr& a, const ShowerPtr& b) {
+        const double ka = a->get_kine_charge(), kb = b->get_kine_charge();
+        if (ka != kb) return ka > kb;
+        return a->get_shower_id() < b->get_shower_id();
+    });
+    std::set<ShowerPtr> gone;  // lookup-only
+    bool did = false;
+    for (size_t i = 0; i < pool.size(); ++i) {
+        ShowerPtr host = pool[i];
+        if (gone.count(host)) continue;
+        if (host->get_total_length() < 3 * units::cm) continue;
+        const WireCell::Point hs = host->get_start_point();
+        const WireCell::Vector axis = shower_cal_dir_3vector(*host, hs, 15 * units::cm);
+        const double am = axis.magnitude();
+        if (am <= 0) continue;
+        // upstream = -axis
+        const WireCell::Vector up(-axis.x() / am, -axis.y() / am, -axis.z() / am);
+        std::vector<std::pair<double, ShowerPtr>> taken;  // (upstream reach, frag)
+        for (size_t j = 0; j < pool.size(); ++j) {
+            if (j == i) continue;
+            ShowerPtr frag = pool[j];
+            if (gone.count(frag) || frag == host) continue;
+            auto [fsv, fct] = frag->get_start_vertex_and_type();
+            if (fct == 1) continue;
+            double best_reach = -1;
+            bool ok = false;
+            for (const WireCell::Point& fp : {frag->get_start_point(), frag->get_end_point()}) {
+                const WireCell::Vector v(fp.x() - hs.x(), fp.y() - hs.y(), fp.z() - hs.z());
+                const double proj = v.dot(up);
+                if (proj <= 0 || proj > m_em_backext_len) continue;
+                const double perp2 = v.magnitude() * v.magnitude() - proj * proj;
+                if (perp2 > m_em_backext_perp * m_em_backext_perp) continue;
+                ok = true;
+                if (proj > best_reach) best_reach = proj;
+            }
+            if (!ok) continue;
+            // v2 CONTINUATION guard (round-6 r6be v1 postmortem): the tube
+            // passes through the pi0 decay-vertex convergence region, where
+            // the PARTNER gamma also starts -- v1 swallowed true gamma-2s
+            // wholesale (census 31 -> 21 exact).  A fragment long enough to
+            // carry its own direction must CONTINUE the host axis; a partner
+            // gamma diverges by the opening angle and is vetoed.
+            if (frag->get_total_length() > 10 * units::cm) {
+                const WireCell::Vector fax = shower_cal_dir_3vector(*frag, frag->get_start_point(), 15 * units::cm);
+                const double fm = fax.magnitude();
+                if (fm > 0) {
+                    const double a2 = std::acos(std::clamp(std::abs(fax.dot(axis)) / (fm * am), 0.0, 1.0)) / M_PI * 180.0;
+                    if (a2 >= 30) {
+                        if (pr93_absorb_dbg())
+                            std::fprintf(stderr, "SHOWER_ABSORB EMBACK reject=continuation host=%d frag=%d a2=%.1f\n",
+                                         pr132_pi0_shid(host), pr132_pi0_shid(frag), a2);
+                        continue;
+                    }
+                }
+            }
+            if (pr93_absorb_dbg())
+                std::fprintf(stderr, "SHOWER_ABSORB EMBACK take host=%d Eh=%.1f frag=%d Ef=%.1f reach=%.1f fct=%d\n",
+                             pr132_pi0_shid(host), host->get_kine_charge() / units::MeV,
+                             pr132_pi0_shid(frag), frag->get_kine_charge() / units::MeV,
+                             best_reach / units::cm, fct);
+            taken.push_back({best_reach, frag});
+        }
+        if (taken.empty()) continue;
+        double far_reach = 0;
+        WireCell::Point new_start = hs;
+        for (auto& [reach, frag] : taken) {
+            // the upstream-most endpoint of the absorbed set becomes the new start
+            for (const WireCell::Point& fp : {frag->get_start_point(), frag->get_end_point()}) {
+                const WireCell::Vector v(fp.x() - hs.x(), fp.y() - hs.y(), fp.z() - hs.z());
+                const double proj = v.dot(up);
+                const double perp2 = v.magnitude() * v.magnitude() - proj * proj;
+                if (proj > far_reach && perp2 <= m_em_backext_perp * m_em_backext_perp) {
+                    far_reach = proj;
+                    new_start = fp;
+                }
+            }
+            pr93_probe_absorb_splice("em_start_backext", host, frag);
+            host->add_shower(*frag);
+            showers.erase(frag);
+            gone.insert(frag);
+            did = true;
+        }
+        host->calculate_kinematics(particle_data, recomb_model, m_shower_endpoint_exclude_start_vertex, m_shower_endpoint_skip_orphan_vtx);
+        double kine_charge = cal_kine_charge(host, m_charge_2d_u, m_charge_2d_v, m_charge_2d_w, m_map_apa_ch_plane_wires, track_fitter, dv);
+        host->set_kine_charge(kine_charge);
+        host->set_flag_kinematics(true);
+        auto [hsv, hct] = host->get_start_vertex_and_type();
+        if (hct != 1 && far_reach > 0) {
+            if (pr93_absorb_dbg())
+                std::fprintf(stderr, "SHOWER_ABSORB EMBACK reseat host=%d reach=%.1f\n",
+                             pr132_pi0_shid(host), far_reach / units::cm);
+            host->set_start_point(new_start);
+        }
+    }
+    if (did)
+        update_shower_maps(showers, map_vertex_in_shower, map_segment_in_shower,
+                          map_vertex_to_shower, used_shower_clusters);
+}
+
 // doc pr/132 round 4 -- body of the WCT_PI0_NCVTX_DEBUG tapes (docstring at
 // pr132_pi0_ncvtx_dbg above).  Deterministic: IndexedShowerSet iteration is
 // id-ordered; kd-tree queries are read-only.
@@ -8137,6 +8265,12 @@ void PatternAlgorithms::shower_clustering_with_nv(int acc_segment_id, IndexedSho
     em_collinear_merge(showers, map_vertex_in_shower, map_segment_in_shower,
                        map_vertex_to_shower, used_shower_clusters,
                        track_fitter, dv, particle_data, recomb_model);
+
+    // doc pr/132 round 6 (K17): EM start back-extension -- after the forward
+    // merge, before the final kine recompute and the finders.  No-op off.
+    em_start_backext(showers, map_vertex_in_shower, map_segment_in_shower,
+                     map_vertex_to_shower, used_shower_clusters,
+                     track_fitter, dv, particle_data, recomb_model);
 
     recompute_shower_kine_charge_final(showers, graph, track_fitter, dv);
 
