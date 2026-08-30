@@ -1836,7 +1836,7 @@ function(
     // its default => byte-identical pre-round config.
     pi0_mass_offset = null,                  // MeV; null => C++ default 10 (the finders' "+10" window offset)
     pi0_assoc_angle_deg = null,              // deg; null => C++ default 30 (disconnected<->vertex association)
-    pi0_attached_partner_min_mev = 0,        // MeV; 0 = no nueCC-fake guard (C++ default 0)
+    pi0_attached_partner_min_mev = 20,       // MeV; SBND PRODUCTION ON 2026-08-30 (owner: "Let's proceed to 1" on the round-1 recommendation "flip K3 at 20").  Rejects a with-vertex pairing whose conn-1 member sits AT THE MAIN VERTEX and whose detached partner is below 20 MeV -- the owner's nueCC fake mode (primary electron + tiny gamma).  Round-1 measurement (doc pr/132 sec 6.2, onguard vs onfudge, all 6 samples): fake topologies 10 -> 5, ZERO change on the hand pi0, 0 ADVERSE movers.  The 5 survivors have partners 20.5-29.6 MeV; 25-30 stays an owner Bee-adjudication item.  C++ default 0 = no guard.
     pi0_nv_allow_type2 = false,              // C++ default false (without-vertex pool conn_type 3 only)
     pi0_nv_max_prongs = null,                // null => C++ default 2 (without-vertex GATE1 prong cap)
     // doc pr/132 round 2 -- the rescue family + the path-2 quality gate.
