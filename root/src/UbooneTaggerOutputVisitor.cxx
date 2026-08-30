@@ -1182,6 +1182,18 @@ void Root::UbooneTaggerOutputVisitor::visit(Clus::Facade::Ensemble& ensemble) co
     t_kine->Branch("kine_pio_dis_2", &ki.kine_pio_dis_2, "kine_pio_dis_2/F");
     t_kine->Branch("kine_pio_angle", &ki.kine_pio_angle, "kine_pio_angle/F");
 
+    // doc 85 sec 9 (owner request 2026-08-30): the energy kine_reco_Enu does
+    // NOT carry.  Booked unconditionally, unlike the two knobbed blocks
+    // below: this is a production schema change the owner asked for, not an
+    // opt-in diagnostic, so an arm that has it must be readable as such.
+    // Filled by fill_kine_tree; see NeutrinoTaggerInfo.h for the definitions
+    // and for why kine_energy_flagged is NOT one of these (it is inside Enu).
+    t_kine->Branch("kine_energy_excluded", &ki.kine_energy_excluded, "kine_energy_excluded/F");
+    t_kine->Branch("kine_energy_excluded_main", &ki.kine_energy_excluded_main, "kine_energy_excluded_main/F");
+    t_kine->Branch("kine_energy_excluded_other", &ki.kine_energy_excluded_other, "kine_energy_excluded_other/F");
+    t_kine->Branch("kine_n_excluded", &ki.kine_n_excluded, "kine_n_excluded/I");
+    t_kine->Branch("kine_energy_flagged", &ki.kine_energy_flagged, "kine_energy_flagged/F");
+
     // doc pr/94 Phase 2: the same identity triple T_tagger carries, so a row
     // pairing can be VERIFIED rather than assumed from position.  Booked under
     // the same knob, so the knob-off T_kine schema is byte-identical.

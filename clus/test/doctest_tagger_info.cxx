@@ -94,6 +94,17 @@ TEST_CASE("KineInfo default initialization")
     CHECK(ki.kine_pio_energy_2   == doctest::Approx(0.0f));
     CHECK(ki.kine_pio_angle      == doctest::Approx(0.0f));
 
+    // doc 85 sec 9: the excluded-energy census.  Zero on a default-constructed
+    // KineInfo means an event whose fill_kine_tree never ran reads as "no
+    // excluded energy" rather than as garbage -- the same convention every
+    // other scalar here follows, and the reason the reader must gate on
+    // nu_evaluated (doc 85 sec 1.1) before believing any of them.
+    CHECK(ki.kine_energy_excluded       == doctest::Approx(0.0f));
+    CHECK(ki.kine_energy_excluded_main  == doctest::Approx(0.0f));
+    CHECK(ki.kine_energy_excluded_other == doctest::Approx(0.0f));
+    CHECK(ki.kine_n_excluded            == 0);
+    CHECK(ki.kine_energy_flagged        == doctest::Approx(0.0f));
+
     // Per-particle vectors are empty
     CHECK(ki.kine_energy_particle.empty());
     CHECK(ki.kine_energy_info.empty());

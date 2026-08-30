@@ -38,6 +38,32 @@ namespace WireCell::Clus::PR {
         std::vector<int>   kine_particle_type;     // PDG code
         std::vector<int>   kine_energy_included;   // 1 = included in Enu sum
 
+        // ---- doc 85 sec 9: the energy kine_reco_Enu does NOT carry ----- //
+        // Owner request 2026-08-30.  kine_reco_Enu is a sum over the objects
+        // the main-vertex walk reached; these say how much reconstructed
+        // kinetic energy the same PR graph holds that the sum never saw.
+        // Read-only: computed at the very end of fill_kine_tree, appending
+        // nothing to the vectors above and moving no existing field, so the
+        // whole block is inert with respect to kine_reco_Enu by construction.
+        //
+        // "Excluded" = a PR-graph segment whose energy entered NEITHER a
+        // push_segment_kine row NOR (as a member) a push_shower_kine row.
+        // The split follows the doc pr/131 census: `main` is the same cluster
+        // as the main vertex -- material the candidate arguably owns --
+        // and `other` is a different cluster, the cross-cluster population
+        // that pr/128 could not put a denominator under.  MeV.
+        float kine_energy_excluded{0};        // main + other
+        float kine_energy_excluded_main{0};   // same cluster as the main vertex
+        float kine_energy_excluded_other{0};  // a different cluster
+        int   kine_n_excluded{0};             // segments behind the sums
+        // NOT the above: the rows kine_energy_included flags as != 1.  Those
+        // ARE inside kine_reco_Enu -- both the toolkit (NeutrinoKinematics.cxx
+        // "Total reconstructed neutrino energy") and the prototype
+        // (NeutrinoID_kine.h:249-256) sum kine_energy_particle
+        // unconditionally, despite the flag's name.  Reported separately so
+        // the distinction is visible instead of assumed.
+        float kine_energy_flagged{0};         // sum of rows with included != 1
+
         // pi0 kinematics (filled by id_pi0_with/without_vertex)
         float kine_pio_mass{0};
         int   kine_pio_flag{0};    // 0=not found, 1=with vertex, 2=without vertex

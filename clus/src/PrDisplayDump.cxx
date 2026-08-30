@@ -639,6 +639,13 @@ Configuration Clus::PrDisplayDump::dump_kine(Facade::Grouping& grouping, TFPtr t
 
     out["kine_reco_Enu"] = k.kine_reco_Enu;
     out["kine_reco_add_energy"] = k.kine_reco_add_energy;
+    // doc 85 sec 9: the energy Enu does not carry (definitions in
+    // NeutrinoTaggerInfo.h).  kine_energy_flagged is INSIDE Enu.
+    out["kine_energy_excluded"] = k.kine_energy_excluded;
+    out["kine_energy_excluded_main"] = k.kine_energy_excluded_main;
+    out["kine_energy_excluded_other"] = k.kine_energy_excluded_other;
+    out["kine_n_excluded"] = k.kine_n_excluded;
+    out["kine_energy_flagged"] = k.kine_energy_flagged;
     out["kine_nu_x_corr"] = k.kine_nu_x_corr;
     out["kine_nu_y_corr"] = k.kine_nu_y_corr;
     out["kine_nu_z_corr"] = k.kine_nu_z_corr;

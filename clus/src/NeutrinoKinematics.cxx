@@ -118,6 +118,13 @@ KineInfo PatternAlgorithms::fill_kine_tree(
     IndexedSegmentSet used_segments;
     IndexedShowerSet  used_showers;
 
+    // doc 85 sec 9 (owner request 2026-08-30): exactly the segments whose
+    // kinetic energy reaches kine_reco_Enu -- recorded inside the two push
+    // helpers so it cannot drift from what they actually summed.  NOT
+    // used_segments, which is pre-seeded below with every shower's members
+    // including showers this walk never counts.
+    IndexedSegmentSet counted_segs;
+
     // Mark all shower-internal vertices and segments as used.
     for (const ShowerPtr& shower : showers) {
         shower->fill_sets(used_vertices, used_segments, /*flag_exclude_start_segment=*/false);
@@ -202,6 +209,12 @@ KineInfo PatternAlgorithms::fill_kine_tree(
         ktree.kine_energy_particle.push_back(static_cast<float>(kine_best / units::MeV));
         ktree.kine_particle_type.push_back(pdg);
 
+        // doc 85 sec 9: the shower's kine_best covers every member segment.
+        {
+            IndexedVertexSet vtmp;
+            shower->fill_sets(vtmp, counted_segs, /*flag_exclude_start_segment=*/false);
+        }
+
         if (std::fabs(kine_best - kine_charge) < 0.001 * kine_best)
             ktree.kine_energy_info.push_back(2); // charge
         else if (std::fabs(kine_best - kine_range) < 0.001 * kine_best)
@@ -246,6 +259,7 @@ KineInfo PatternAlgorithms::fill_kine_tree(
 
         ktree.kine_energy_particle.push_back(static_cast<float>(kine_best / units::MeV));
         ktree.kine_particle_type.push_back(pdg);
+        counted_segs.insert(seg);   // doc 85 sec 9
 
         if (std::fabs(kine_best - kine_charge) < 0.001 * kine_best)
             ktree.kine_energy_info.push_back(2);
@@ -879,6 +893,80 @@ KineInfo PatternAlgorithms::fill_kine_tree(
         ktree.kine_reco_Enu += e;
     }
     ktree.kine_reco_Enu += ktree.kine_reco_add_energy;
+
+    // -------------------------------------------------------------------------
+    // doc 85 sec 9 -- the excluded-energy census (owner request 2026-08-30).
+    //
+    // Everything above is finished; this block only READS.  It appends to no
+    // kine_* vector, writes only the five new KineInfo scalars, and never
+    // touches kine_reco_Enu -- so the Enu of every event is bit-identical to
+    // what the same binary would produce without this block.
+    //
+    // What it answers: kine_reco_Enu sums the objects the main-vertex walk
+    // reached; how much reconstructed kinetic energy does the SAME PR graph
+    // hold that the walk never summed?  That is the quantity docs pr/128 and
+    // pr/131 could only measure behind an env-gated stderr probe.  Here it
+    // becomes a stored variable, per candidate, always.
+    //
+    // Split (doc pr/131's own distinction): same cluster as the main vertex
+    // ("main" -- material the candidate arguably owns, the population pr/65's
+    // audit line can see) vs a different cluster ("other" -- the
+    // cross-cluster activity named nowhere).  Cluster identity is compared by
+    // id, never by pointer order (CLAUDE.md determinism rule); the graph edge
+    // walk is the same mir(boost::edges(...)) the pr/93 r4 orphan pass uses.
+    // -------------------------------------------------------------------------
+    {
+        const auto* main_cl = main_vertex ? main_vertex->cluster() : nullptr;
+        const int main_cid = main_cl ? main_cl->get_cluster_id() : -1;
+
+        double exc_main = 0, exc_other = 0;
+        int n_exc = 0, n_nocl = 0, n_graph = 0, n_graph_main = 0;
+        for (auto edesc : mir(boost::edges(graph))) {
+            const SegmentPtr& seg = graph[edesc].segment;
+            if (!seg) continue;
+            ++n_graph;
+            const auto* cl = seg->cluster();
+            const bool same_cl = (cl && main_cid >= 0 && cl->get_cluster_id() == main_cid);
+            if (same_cl) ++n_graph_main;
+            if (counted_segs.count(seg)) continue;
+            if (!seg->has_particle_info() || !seg->particle_info()) continue;
+            const double ke = seg->particle_info()->kinetic_energy() / units::MeV;
+            if (!(ke > 0)) continue;
+            ++n_exc;
+            if (!cl) ++n_nocl;
+            if (same_cl) exc_main += ke;
+            else exc_other += ke;
+        }
+        ktree.kine_energy_excluded_main  = static_cast<float>(exc_main);
+        ktree.kine_energy_excluded_other = static_cast<float>(exc_other);
+        ktree.kine_energy_excluded       = static_cast<float>(exc_main + exc_other);
+        ktree.kine_n_excluded            = n_exc;
+
+        // The rows the tree itself flags as not-included.  These ARE inside
+        // kine_reco_Enu (the sum above is unconditional, in the toolkit and in
+        // the prototype alike) -- reported so the two quantities cannot be
+        // confused for one another.
+        double flagged = 0;
+        const size_t nrow = std::min(ktree.kine_energy_particle.size(),
+                                     ktree.kine_energy_included.size());
+        for (size_t i = 0; i < nrow; ++i) {
+            if (ktree.kine_energy_included[i] != 1) flagged += ktree.kine_energy_particle[i];
+        }
+        ktree.kine_energy_flagged = static_cast<float>(flagged);
+
+        // The three census counters after n_excluded are what makes a zero
+        // readable: main=0 with n_graph_main > n_counted means the walk really
+        // did consume every main-cluster segment, while main=0 with
+        // n_graph_main=0 would mean the cluster-id compare never matched.
+        SPDLOG_LOGGER_INFO(s_log,
+            "kine_excluded_census: Enu={:.1f} excluded={:.1f} (main={:.1f} other={:.1f}) "
+            "n_excluded={} flagged_inside_Enu={:.1f} main_cid={} n_graph_seg={} "
+            "n_graph_main={} n_counted={} n_excluded_nocluster={}",
+            ktree.kine_reco_Enu, ktree.kine_energy_excluded,
+            ktree.kine_energy_excluded_main, ktree.kine_energy_excluded_other,
+            ktree.kine_n_excluded, ktree.kine_energy_flagged,
+            main_cid, n_graph, n_graph_main, (int)counted_segs.size(), n_nocl);
+    }
 
     // -------------------------------------------------------------------------
     // Pi0 kinematics (from pio_kine struct, angles converted to degrees)
