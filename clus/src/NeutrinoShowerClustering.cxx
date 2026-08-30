@@ -5630,6 +5630,47 @@ static void pr132_pi0_ncvtx_probe(const IndexedShowerSet& showers,
 // both starts on the moved vertex (conn 2), refresh the maps; path 1 then
 // skips the paired showers (knob-gated skips in its pools).  0 (default)
 // = off = byte-identical.
+// doc pr/133 (K20): a shower-topology object typed muon (pdg +-13) can be a
+// mistyped pi0 gamma -- the r9-verdict typing census found 3 of the 132 hand
+// gammas in this class (specimens: SBND 18255-348691 sh 51080, 79.8 MeV,
+// 5.4 cm from the owner's click; 166870 g2, 38.6 MeV), and unlike the
+// A5/211 tag (K7) no readmit path exists.  Knob-on, such an object enters
+// the pi0 pools iff it carries a real shower flag (topology/trajectory --
+// for pdg 13 the get_flag_shower() pdg-11 clause is moot) and its start
+// segment is not part of the long muon (the pseudo-shower wrap).  Accepted
+// members are re-stamped EM by the K7/K8 machinery.  Knob off (default) =>
+// returns false => every call site keeps the legacy exclusion =>
+// byte-identical.
+bool PatternAlgorithms::pi0_mu_shower_admit(const ShowerPtr& shower, const IndexedSegmentSet& segments_in_long_muon) const
+{
+    if (!m_pi0_admit_mu_showers) return false;
+    if (!shower) return false;
+    auto ss = shower->start_segment();
+    if (ss && segments_in_long_muon.find(ss) != segments_in_long_muon.end()) {
+        if (pr132_pi0_dbg())
+            std::fprintf(stderr, "PI0_PAIR K20 mu-reject sh=%d why=longmu\n", pr132_pi0_shid(shower));
+        return false;
+    }
+    // v2: the target class carries NO shower flag -- get_flag_shower() being
+    // false is exactly why it got typed 13 (dbg2 tape: 348691 sh 51080 and
+    // 166870 sh 85045 both refuse why=notflag).  Fall back to the file's own
+    // shower-ish-muon idiom (three sites, e.g. the :3922 center-point cut):
+    // short AND direction-weak.  A genuine traveling muon is long or
+    // dir-strong; a wrapped long muon is caught above.
+    const bool shower_ish = shower->get_flag_shower() ||
+        (shower->get_total_length() < 40 * units::cm && ss && seg_dir_weak(ss));
+    if (!shower_ish) {
+        if (pr132_pi0_dbg())
+            std::fprintf(stderr, "PI0_PAIR K20 mu-reject sh=%d why=trackish len=%.1f\n",
+                         pr132_pi0_shid(shower), shower->get_total_length() / units::cm);
+        return false;
+    }
+    if (pr132_pi0_dbg())
+        std::fprintf(stderr, "PI0_PAIR K20 mu-admit sh=%d E=%.1f\n",
+                     pr132_pi0_shid(shower), shower->get_kine_charge() / units::MeV);
+    return true;
+}
+
 void PatternAlgorithms::id_pi0_backproject_vertex(int& acc_segment_id, IndexedShowerSet& pi0_showers, ShowerIntMap& map_shower_pio_id, std::map<int, std::vector<ShowerPtr > >& map_pio_id_showers, std::map<int, std::pair<double, int> >& map_pio_id_mass, Graph& graph, VertexPtr main_vertex, IndexedShowerSet& showers, ShowerVertexMap& map_vertex_in_shower, ShowerSegmentMap& map_segment_in_shower, VertexShowerSetMap& map_vertex_to_shower, ClusterPtrSet& used_shower_clusters, IndexedSegmentSet& segments_in_long_muon, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model)
 {
     if (m_pi0_bp_miss <= 0) return;  // knob off = byte-identical
@@ -5641,6 +5682,7 @@ void PatternAlgorithms::id_pi0_backproject_vertex(int& acc_segment_id, IndexedSh
     // pure-shower multi-prong vertex (>= 2 segments, ALL in showers, none
     // in a long muon).  CC track vertices and 1-prong primary electrons
     // are excluded.
+    std::set<ShowerPtr> nc_sig_hosts;   // doc pr/133 K21; membership tests only (never iterated -- pointer-set rule)
     {
         std::vector<SegmentPtr> mv_segs;
         auto vd = main_vertex->get_descriptor();
@@ -5648,6 +5690,27 @@ void PatternAlgorithms::id_pi0_backproject_vertex(int& acc_segment_id, IndexedSh
             SegmentPtr seg = graph[eit].segment;
             if (seg) mv_segs.push_back(seg);
         }
+        if (m_pi0_nc_sig_angle > 0) {
+            // doc pr/133 K21 -- gate v4, the owner signature (2026-08-30):
+            // "a) we are inside an EM shower b) there is at least another
+            // major object [that] looks like [an EM] shower, and the
+            // direction is not aligned ... we can assume the 2 gamma
+            // (1 pi0) case."  ALL main-vertex prongs must sit inside
+            // showers (the 406125 lesson: a p+mu track vertex passed v3),
+            // none in the long muon; the hosting shower(s) are recorded and
+            // the pairing below is restricted to host x non-aligned other.
+            if (mv_segs.empty()) return;
+            for (auto sg : mv_segs) {
+                auto hit = map_segment_in_shower.find(sg);
+                if (hit == map_segment_in_shower.end()) return;   // a track prong => not inside an EM shower
+                if (segments_in_long_muon.find(sg) != segments_in_long_muon.end()) return;
+                nc_sig_hosts.insert(hit->second);
+            }
+            if (pr132_pi0_dbg())
+                std::fprintf(stderr, "PI0_PAIR P0 bp gate=v4 vtx=%d n_host=%zu\n",
+                             pr91_vtx_display_id(main_vertex), nc_sig_hosts.size());
+        }
+        else {
         if (mv_segs.size() < 2) return;
         // v3 (r9 smoke round 2): 180801/259542 carry a non-shower stub
         // prong, so "ALL in showers" over-excludes.  Use exactly the P2
@@ -5662,6 +5725,7 @@ void PatternAlgorithms::id_pi0_backproject_vertex(int& acc_segment_id, IndexedSh
             if (segments_in_long_muon.find(sg) != segments_in_long_muon.end()) return;
         }
         if (!any_shower) return;
+        }
     }
 
     const WireCell::Point vtx_pt = main_vertex->fit().valid()
@@ -5673,7 +5737,9 @@ void PatternAlgorithms::id_pi0_backproject_vertex(int& acc_segment_id, IndexedSh
     std::vector<ShowerPtr> cands;
     std::map<ShowerPtr, WireCell::Vector> cdir;   // lookup-only
     for (auto sh : showers) {
-        if (std::abs(sh->get_particle_type()) == 13) continue;
+        // doc pr/133 K20: the mu-admit escape (default off = legacy skip).
+        if (std::abs(sh->get_particle_type()) == 13 &&
+            !pi0_mu_shower_admit(sh, segments_in_long_muon)) continue;
         if (sh->get_total_length() < 3 * units::cm) continue;
         if (sh->get_kine_charge() < 20 * units::MeV) continue;
         WireCell::Vector d = shower_cal_dir_3vector(*sh, sh->get_start_point(), 15 * units::cm);
@@ -5696,6 +5762,15 @@ void PatternAlgorithms::id_pi0_backproject_vertex(int& acc_segment_id, IndexedSh
             ShowerPtr s1 = cands[i], s2 = cands[j];
             const WireCell::Point p1 = s1->get_start_point(), p2 = s2->get_start_point();
             const WireCell::Vector d1 = cdir[s1], d2 = cdir[s2];
+            // doc pr/133 K21: assume the 2-gamma (1 pi0) case -- one
+            // member must be a vertex-hosting shower, and the two axes must
+            // be misaligned by more than the knob (split-shower fragments
+            // are near-collinear).  0 (default) = v3 behavior, unrestricted.
+            if (m_pi0_nc_sig_angle > 0) {
+                if (!nc_sig_hosts.count(s1) && !nc_sig_hosts.count(s2)) continue;
+                const double axang = std::acos(std::clamp(d1.dot(d2), -1.0, 1.0)) * 180.0 / M_PI;
+                if (axang < m_pi0_nc_sig_angle) continue;
+            }
             // Closest approach of the two axis lines.
             const WireCell::Vector w0(p1.x()-p2.x(), p1.y()-p2.y(), p1.z()-p2.z());
             const double b = d1.dot(d2);
@@ -5754,6 +5829,13 @@ void PatternAlgorithms::id_pi0_backproject_vertex(int& acc_segment_id, IndexedSh
     map_pio_id_mass[pio_id] = {best_mass, 2};   // 2 = displaced-vertex family (BDT pio_type in-distribution)
     map_pio_id_showers[pio_id].push_back(b1);
     map_pio_id_showers[pio_id].push_back(b2);
+    // doc pr/133 K20: a mu-typed member admitted by the knob is re-stamped
+    // EM BEFORE its kinematics are recomputed (the K7/K8 precedent).
+    if (m_pi0_admit_mu_showers) {
+        for (auto& rsh : {b1, b2})
+            if (std::abs(rsh->get_particle_type()) != 11)
+                pi0_restamp_shower_em(rsh, particle_data, recomb_model);
+    }
     b1->set_start_vertex(main_vertex, 2);
     b1->calculate_kinematics(particle_data, recomb_model, m_shower_endpoint_exclude_start_vertex, m_shower_endpoint_skip_orphan_vtx);
     b2->set_start_vertex(main_vertex, 2);
@@ -5762,7 +5844,7 @@ void PatternAlgorithms::id_pi0_backproject_vertex(int& acc_segment_id, IndexedSh
                        map_vertex_to_shower, used_shower_clusters);
 }
 
-void PatternAlgorithms::id_pi0_with_vertex(int& acc_segment_id, IndexedShowerSet& pi0_showers, ShowerIntMap& map_shower_pio_id, std::map<int, std::vector<ShowerPtr > >& map_pio_id_showers, std::map<int, std::pair<double, int> >& map_pio_id_mass, std::map<int, std::pair<int, int> >& map_pio_id_saved_pair, Pi0KineFeatures& pio_kine, Graph& graph, VertexPtr main_vertex, IndexedShowerSet& showers, Facade::Cluster* main_cluster, std::vector<Facade::Cluster*>& other_clusters, ClusterVertexMap map_cluster_main_vertices, ShowerVertexMap& map_vertex_in_shower, ShowerSegmentMap& map_segment_in_shower, VertexShowerSetMap& map_vertex_to_shower, ClusterPtrSet& used_shower_clusters, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model){
+void PatternAlgorithms::id_pi0_with_vertex(int& acc_segment_id, IndexedShowerSet& pi0_showers, ShowerIntMap& map_shower_pio_id, std::map<int, std::vector<ShowerPtr > >& map_pio_id_showers, std::map<int, std::pair<double, int> >& map_pio_id_mass, std::map<int, std::pair<int, int> >& map_pio_id_saved_pair, Pi0KineFeatures& pio_kine, Graph& graph, VertexPtr main_vertex, IndexedShowerSet& showers, Facade::Cluster* main_cluster, std::vector<Facade::Cluster*>& other_clusters, ClusterVertexMap map_cluster_main_vertices, ShowerVertexMap& map_vertex_in_shower, ShowerSegmentMap& map_segment_in_shower, VertexShowerSetMap& map_vertex_to_shower, ClusterPtrSet& used_shower_clusters, IndexedSegmentSet& segments_in_long_muon, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model){
 
     if (!main_vertex) return;
 
@@ -5889,7 +5971,9 @@ void PatternAlgorithms::id_pi0_with_vertex(int& acc_segment_id, IndexedShowerSet
             // (specimen: SBND 18255-47212 g2).  false (default) = legacy.
             const bool ct_pool_ok = (conn_type == 2) ||
                                     (m_pi0_admit_type3 && conn_type == 3);
-            if (ct_pool_ok && std::abs(shower->get_particle_type()) != 13) {
+            // doc pr/133 K20: the mu-admit escape (default off = legacy).
+            if (ct_pool_ok && (std::abs(shower->get_particle_type()) != 13 ||
+                               pi0_mu_shower_admit(shower, segments_in_long_muon))) {
                 disconnected_showers.insert(shower);
                 if (!map_shower_dir.count(shower))
                     map_shower_dir[shower] = shower_cal_dir_3vector(
@@ -5959,7 +6043,9 @@ void PatternAlgorithms::id_pi0_with_vertex(int& acc_segment_id, IndexedShowerSet
                 if (!m_pi0_readmit_retyped &&
                     m_hadronic_retyped_shower_ids.count(shower->get_shower_id())) continue;
                 auto [start_vtx, conn_type] = get_svc(shower);
-                if (conn_type == 1 && std::abs(shower->get_particle_type()) != 13) {
+                // doc pr/133 K20: the mu-admit escape (default off = legacy).
+                if (conn_type == 1 && (std::abs(shower->get_particle_type()) != 13 ||
+                                       pi0_mu_shower_admit(shower, segments_in_long_muon))) {
                     tmp_showers.push_back(shower);
                     local_dirs[shower] = shower->get_init_dir();
                 }
@@ -6349,7 +6435,7 @@ void PatternAlgorithms::id_pi0_with_vertex(int& acc_segment_id, IndexedShowerSet
         // an EM shower in the pi0 reconstruction code".  Gated on the rescue
         // family: all knobs off => no track-typed member can newly appear
         // here beyond legacy, and the stamp does not fire => byte-identical.
-        if (m_pi0_readmit_retyped || m_pi0_admit_type3 || m_pi0_crumb_assoc_max > 0) {
+        if (m_pi0_readmit_retyped || m_pi0_admit_type3 || m_pi0_crumb_assoc_max > 0 || m_pi0_admit_mu_showers) {
             for (auto& rsh : {shower_1, shower_2})
                 if (std::abs(rsh->get_particle_type()) != 11)
                     pi0_restamp_shower_em(rsh, particle_data, recomb_model);
@@ -6691,7 +6777,9 @@ void PatternAlgorithms::id_pi0_without_vertex(int& acc_segment_id, IndexedShower
                 const bool skip_proto  = type_startseg == 13;
                 g_pr33_audit.f2_calls[4]++;
                 if (skip_legacy != skip_proto) g_pr33_audit.f2_disagree[4]++;
-                if (m_shower_pdg_from_start_segment ? skip_proto : skip_legacy) continue;
+                // doc pr/133 K20: the mu-admit escape (default off = legacy).
+                if ((m_shower_pdg_from_start_segment ? skip_proto : skip_legacy) &&
+                    !pi0_mu_shower_admit(shower, segments_in_long_muon)) continue;
             }
             if (shower->get_total_length() < 3 * units::cm) continue;
             if (pi0_showers.find(shower) != pi0_showers.end()) continue;
@@ -6728,7 +6816,9 @@ void PatternAlgorithms::id_pi0_without_vertex(int& acc_segment_id, IndexedShower
                 const bool skip_proto  = type_startseg == 13;
                 g_pr33_audit.f2_calls[5]++;
                 if (skip_legacy != skip_proto) g_pr33_audit.f2_disagree[5]++;
-                if (m_shower_pdg_from_start_segment ? skip_proto : skip_legacy) continue;
+                // doc pr/133 K20: the mu-admit escape (default off = legacy).
+                if ((m_shower_pdg_from_start_segment ? skip_proto : skip_legacy) &&
+                    !pi0_mu_shower_admit(shower, segments_in_long_muon)) continue;
             }
             if (shower->get_total_length() < 3 * units::cm) continue;
             if (pi0_showers.find(shower) != pi0_showers.end()) continue;
@@ -7041,7 +7131,7 @@ void PatternAlgorithms::id_pi0_without_vertex(int& acc_segment_id, IndexedShower
             // doc pr/132 round 2 (K7/K8/K9): re-stamp track-typed accepted
             // members EM (see id_pi0_with_vertex) BEFORE the
             // calculate_kinematics calls below so kinematics reflect EM.
-            if (m_pi0_readmit_retyped || m_pi0_admit_type3 || m_pi0_crumb_assoc_max > 0) {
+            if (m_pi0_readmit_retyped || m_pi0_admit_type3 || m_pi0_crumb_assoc_max > 0 || m_pi0_admit_mu_showers) {
                 for (auto& rsh : {shower_1, shower_2})
                     if (std::abs(rsh->get_particle_type()) != 11)
                         pi0_restamp_shower_em(rsh, particle_data, recomb_model);
@@ -8606,7 +8696,7 @@ void PatternAlgorithms::shower_clustering_with_nv(int acc_segment_id, IndexedSho
                       map_pio_id_saved_pair, pio_kine, graph, main_vertex, showers, main_cluster,
                       other_clusters, map_cluster_main_vertices, map_vertex_in_shower,
                       map_segment_in_shower, map_vertex_to_shower, used_shower_clusters,
-                      track_fitter, dv, particle_data, recomb_model);
+                      segments_in_long_muon, track_fitter, dv, particle_data, recomb_model);
     t_id_pi0_with_vertex = MS(Clock::now() - t0); t0 = Clock::now();
     // check_used_shower_cluster_933("id_pi0_with_vertex");
 

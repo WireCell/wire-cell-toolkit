@@ -1865,6 +1865,19 @@ function(
     // proposer (fires only when the main vertex sits inside a shower).
     // C++ default 0 = off.  Key omitted when null => byte-identical.
     pi0_bp_vertex_miss_cm = null,            // cm; null => C++ default 0 (no NC vertex proposer)
+    // doc pr/133 K20: admit shower-topology mu-typed (pdg +-13) objects that
+    // are NOT part of the long muon into the pi0 pools; accepted members are
+    // re-stamped EM (the K7/K8 precedent; specimens SBND 18255-348691 sh
+    // 51080 79.8 MeV, -166870 g2 38.6 MeV -- 3 of the 132 hand gammas).
+    // C++ default false.  Key omitted when false => byte-identical.
+    pi0_admit_muon_showers = false,
+    // doc pr/133 K21: owner NC-pi0 signature (2026-08-30) for the
+    // back-projection vertex proposer (needs pi0_bp_vertex_miss_cm > 0):
+    // main vertex inside an EM shower (ALL prongs in showers, none in the
+    // long muon) + a second major EM object misaligned by more than this
+    // many degrees; the pair is then assumed 2-gamma/1-pi0.
+    // C++ default 0 = the r9 v3 gate.  Key omitted when null => byte-identical.
+    pi0_nc_sig_angle_deg = null,
     stem_backfill_back_dvtx = 45,            // cm; SBND PRODUCTION ON 2026-08-29 (owner flip: "For B, flip on for SBND production").  Suppress the backward-stem decline when the SHOWER START is further than this from the nu vertex.  The guard's reachable population is CLOSED at 8 events (`if (!ok) break;` precedes it) and all 8 are owner-adjudicated: absorb-wanted 46.84 (292643) and 88.11 (179369), every decline-ok <= 44.34, so 45 sits in an empty interval and the flip changes exactly those 2 of 239 events.  On both, the resulting PF tree is IDENTICAL to the guard-OFF shape the owner reviewed in bee/pr130r2 and preferred.  C++ default 0 = off.
     // doc pr/124 front A -- 25-40 cm gap-band tier-2 prune (qualifier pair
     // ang>40deg OR mdqdx>2.5 MIP measured zero-labeled-collateral on both
@@ -3014,6 +3027,8 @@ function(
         [if shower_em_backext_len_cm != null then 'shower_em_backext_len_cm']: shower_em_backext_len_cm,
         [if pi0_accept_merge_dis_cm != null then 'pi0_accept_merge_dis_cm']: pi0_accept_merge_dis_cm,
         [if pi0_bp_vertex_miss_cm != null then 'pi0_bp_vertex_miss_cm']: pi0_bp_vertex_miss_cm,
+        [if pi0_admit_muon_showers then 'pi0_admit_muon_showers']: true,
+        [if pi0_nc_sig_angle_deg != null then 'pi0_nc_sig_angle_deg']: pi0_nc_sig_angle_deg,
         [if shower_pass4_prune_gap2 != 0 then 'shower_pass4_prune_gap2']: shower_pass4_prune_gap2,
         [if shower_pass4_prune_gap2 != 0 && shower_pass4_prune2_ang != 40 then 'shower_pass4_prune2_ang']: shower_pass4_prune2_ang,
         [if shower_pass4_prune_gap2 != 0 && shower_pass4_prune2_mdqdx != 2.5 then 'shower_pass4_prune2_mdqdx']: shower_pass4_prune2_mdqdx,

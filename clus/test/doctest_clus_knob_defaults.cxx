@@ -274,6 +274,8 @@ TEST_CASE("clus knob defaults: TaggerCheckNeutrino switches are all OFF")
     CHECK_KNOB_NUM(cfg, "shower_em_backext_len_cm", 40.0);                    // doc pr/132 K17; inert while perp = 0
     CHECK_KNOB_NUM(cfg, "pi0_accept_merge_dis_cm", 0.0);                      // doc pr/132 K18; 0 = no acceptance-aware merge
     CHECK_KNOB_NUM(cfg, "pi0_bp_vertex_miss_cm", 0.0);                        // doc pr/132 K19; 0 = no NC vertex proposer
+    CHECK_KNOB_BOOL(cfg, "pi0_admit_muon_showers", false);                    // doc pr/133 K20; mu-typed showers stay out of the pi0 pools
+    CHECK_KNOB_NUM(cfg, "pi0_nc_sig_angle_deg", 0.0);                         // doc pr/133 K21; 0 = v3 bp gate
     CHECK_KNOB_NUM(cfg, "pi0_nv_max_vtx_shift_cm", 0.0);                      // doc pr/132 K10; 0 = no decay-point shift cap
     CHECK_KNOB_NUM(cfg, "pi0_nv_mass_window_mev", 60.0);                      // doc pr/132 K11; legacy without-vertex half-window
     // doc pr/124 front A -- 25-40 cm gap-band tier-2 prune.
