@@ -1342,6 +1342,9 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
     // so the offline census and the knob cannot use different definitions
     // (the pr/127 WCT_SCCC_DEBUG pattern).  stderr only -- no effect on bytes.
     static const bool pfnear_dbg = std::getenv("WCT_PFNEAR_DEBUG") != nullptr;
+    // doc sbnd_xin/docs/pr/131 -- the denominator census (stderr only, no
+    // knob, no gate relaxed).  See the block near the end of this function.
+    static const bool pfdenom_dbg = std::getenv("WCT_PFDENOM_DEBUG") != nullptr;
 
     // --- Vertex → node-descriptor map ---
     std::map<PR::VertexPtr, PR::node_descriptor, PR::VertexIndexCmp> vtx_to_nd;
@@ -2385,6 +2388,16 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
     // owner's requirement: an unclaimed orphan must never become a root-level
     // PF particle.  Load-bearing only with rung 1 (shower_absorb_unreachable_main)
     // claiming the fragments first.
+    // doc pr/131: three pools below append a PF node WITHOUT inserting the
+    // segment into used_segs (pr/93 confident-track, pr/123 guard-freed,
+    // pr/128 near-cross-cluster).  The denominator census at the end of this
+    // function would therefore book them as UNCLAIMED and over-state the
+    // hidden population by exactly the loudest events in the manifests
+    // (171572, 393505, 315167).  Recorded here, filled only under the census
+    // env gate so the production path is literally unchanged.  Lookup-only:
+    // never iterated (determinism, CLAUDE.md sec 2).
+    PR::IndexedSegmentSet pfdenom_extra_drawn;
+
     if (cfg.pf_shower_vertex_barrier && cfg.pf_orphan_audit_only) {
         std::vector<PR::SegmentPtr> unclaimed;
         for (auto edesc : mir(boost::edges(*pr_graph))) {
@@ -2436,6 +2449,7 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
                 node["icon"] = "jstree-file";
                 if (keep_node(pi->pdg(), pi->kinetic_energy(), node)) {
                     particles.append(node);
+                    if (pfdenom_dbg) pfdenom_extra_drawn.insert(seg);   // doc pr/131
                     ++n_emitted;
                     SPDLOG_LOGGER_INFO(log,
                         "pr93 pf-orphan-confident-track: EMIT root seg={} cluster={} pdg={} "
@@ -2564,6 +2578,7 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
                                     gstart, near_pt);
             pseudo["children"].append(node);
             particles.append(pseudo);
+            if (pfdenom_dbg) pfdenom_extra_drawn.insert(seg);   // doc pr/131
             const auto* cl = seg->cluster();
             SPDLOG_LOGGER_INFO(log,
                 "pr123 pf-orphan-guard-freed: EMIT pseudo-n id={} -> seg={} cluster={} pdg={} "
@@ -2682,6 +2697,7 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
                                     gstart, near_pt);
             pseudo["children"].append(node);
             particles.append(pseudo);
+            if (pfdenom_dbg) pfdenom_extra_drawn.insert(seg);   // doc pr/131
             const auto* cl = seg->cluster();
             SPDLOG_LOGGER_INFO(log,
                 "pr128 pf-orphan-near-cross-cluster: EMIT pseudo-n id={} -> seg={} cluster={} "
@@ -2691,6 +2707,103 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
                 pi->pdg(), seg->particle_score(), pi->kinetic_energy() / units::MeV,
                 PR::segment_track_length(seg) / units::cm, gap / units::cm);
         }
+    }
+
+    // doc sbnd_xin/docs/pr/131 -- THE DENOMINATOR CENSUS.  Measurement only:
+    // stderr, env-gated, appends no node, touches no `particles`/`next_id`,
+    // and relaxes NO production gate.  The `same_cluster` filters above are
+    // deliberately left alone -- doc pr/128 sec 4 cleared M15 for the pr/128
+    // KNOBS, not for a blanket un-gating, and this round only counts.
+    //
+    // Why it exists.  doc pr/128 shipped four completeness knobs and then
+    // recorded that it could not state a FRACTION: "the same_cluster gate
+    // hides the audit line as well as the pools, so there is no denominator:
+    // we cannot say what fraction of near-candidate reconstructed charge is
+    // missing from kine_reco_Enu, only that these 13 objects existed."  The
+    // pr/65 audit line above is same_cluster-gated (:2394) and its rollup
+    // counts only the post-gate survivors, so the cross-cluster unclaimed
+    // population is counted nowhere in the toolkit.
+    //
+    // Bucketing.  conn4_skip_segs is tested BEFORE same_cluster in every pool
+    // above, so "conn-4" and "cross-cluster" OVERLAP.  The SUM line therefore
+    // uses five mutually exclusive buckets, while the per-segment line
+    // carries the raw flags independently so any later cut is possible
+    // without a re-run (the pr/128 census tape's own lesson).
+    if (pfdenom_dbg) {
+        // Reference = what this tree actually draws: the pr/128 definition
+        // (used_segs MINUS conn4_skip_segs) PLUS the three late pools that
+        // emit without inserting into used_segs (pfdenom_extra_drawn).
+        std::vector<PR::SegmentPtr> ref_segs;
+        for (const auto& seg : used_segs) {
+            if (conn4_skip_segs.count(seg)) continue;
+            if (seg->fits().empty()) continue;
+            ref_segs.push_back(seg);
+        }
+        auto ke_mev = [](const PR::SegmentPtr& s) {
+            return (s->has_particle_info() && s->particle_info())
+                ? s->particle_info()->kinetic_energy() / units::MeV : 0.0;
+        };
+        std::vector<PR::SegmentPtr> all;
+        for (auto edesc : mir(boost::edges(*pr_graph))) {
+            auto seg = (*pr_graph)[edesc].segment;
+            if (seg) all.push_back(seg);
+        }
+        std::sort(all.begin(), all.end(),
+                  [&](const PR::SegmentPtr& a, const PR::SegmentPtr& b) {
+                      return seg_display_id(a) < seg_display_id(b);
+                  });
+        // 0 drawn, 1 conn4, 2 extra (a late pool drew it), 3 audited
+        // (same-cluster, named by the pr/65 line), 4 hidden (cross-cluster,
+        // named nowhere).
+        static const char* bname[5] = {"drawn", "conn4", "extra", "audited", "hidden"};
+        double bn[5] = {0,0,0,0,0}, bke[5] = {0,0,0,0,0}, blen[5] = {0,0,0,0,0};
+        for (const auto& seg : all) {
+            const bool is_conn4 = conn4_skip_segs.count(seg) > 0;
+            const bool is_used  = used_segs.count(seg) > 0;
+            const bool xclus    = !same_cluster(seg);
+            const bool extra    = pfdenom_extra_drawn.count(seg) > 0;
+            int b;
+            if (is_used && !is_conn4) b = 0;
+            else if (is_conn4)        b = 1;
+            else if (extra)           b = 2;
+            else if (!xclus)          b = 3;
+            else                      b = 4;
+            const double k = ke_mev(seg);
+            const double l = PR::segment_track_length(seg) / units::cm;
+            bn[b] += 1; bke[b] += k; blen[b] += l;
+            if (b == 0) continue;    // plainly drawn: counted, not listed
+            double dmin = -1.0;
+            if (!seg->fits().empty()) {
+                for (const auto& r : ref_segs) {
+                    if (r == seg) continue;
+                    for (const auto& f : r->fits()) {
+                        const double d = PR::segment_get_closest_point(seg, f.point).first;
+                        if (d >= 0 && (dmin < 0 || d < dmin)) dmin = d;
+                    }
+                }
+            }
+            const double dvtx = seg->fits().empty() ? -1.0
+                : PR::segment_get_closest_point(seg, get_vtx_pt(main_vertex)).first / units::cm;
+            const auto* cl = seg->cluster();
+            std::fprintf(stderr,
+                "PFDENOM seg=%d cluster=%s pdg=%d ke_mev=%.2f len_cm=%.2f nfits=%d "
+                "dirsign=%d conn4=%d xclus=%d gf=%d shown=%d bucket=%s "
+                "dmin_cm=%.2f d_mainvtx_cm=%.2f\n",
+                seg_display_id(seg),
+                cl ? std::to_string(cl->get_cluster_id()).c_str() : "?",
+                (seg->has_particle_info() && seg->particle_info())
+                    ? seg->particle_info()->pdg() : 0,
+                k, l, (int)seg->fits().size(), seg->dirsign(),
+                (int)is_conn4, (int)xclus,
+                (int)seg->flags_any(PR::SegmentFlags::kPass4GuardFreed),
+                (int)extra, bname[b],
+                dmin < 0 ? -1.0 : dmin / units::cm, dvtx);
+        }
+        std::fprintf(stderr, "PFDENOM_SUM nseg=%d", (int)all.size());
+        for (int b = 0; b < 5; ++b) {
+            std::fprintf(stderr, " %s=%.0f/%.1f/%.1f", bname[b], bn[b], bke[b], blen[b]);
+        }
+        std::fprintf(stderr, "  (n/ke_mev/len_cm)\n");
     }
 
     if (out_particles) {
