@@ -1836,17 +1836,18 @@ function(
     // its default => byte-identical pre-round config.
     pi0_mass_offset = null,                  // MeV; null => C++ default 10 (the finders' "+10" window offset)
     pi0_assoc_angle_deg = null,              // deg; null => C++ default 30 (disconnected<->vertex association)
-    pi0_attached_partner_min_mev = 20,       // MeV; SBND PRODUCTION ON 2026-08-30 (owner: "Let's proceed to 1" on the round-1 recommendation "flip K3 at 20").  Rejects a with-vertex pairing whose conn-1 member sits AT THE MAIN VERTEX and whose detached partner is below 20 MeV -- the owner's nueCC fake mode (primary electron + tiny gamma).  Round-1 measurement (doc pr/132 sec 6.2, onguard vs onfudge, all 6 samples): fake topologies 10 -> 5, ZERO change on the hand pi0, 0 ADVERSE movers.  The 5 survivors have partners 20.5-29.6 MeV; 25-30 stays an owner Bee-adjudication item.  C++ default 0 = no guard.
+    pi0_attached_partner_min_mev = 28,       // MeV; SBND PRODUCTION 20 -> 28 2026-08-30 round 3 (owner: "Let's execute according to your recommendations" on "flip K7+K8 ... together with a K3 bump to 28-30").  28 = the safe end: kills the K7-regenerated fake 116962 (partner 27.0 MeV) and the three round-2 fake-topology survivors 54095/76350/268784 (26.1/20.5/22.0) while keeping 76346's partial-group partner (29.6) and 176502 (28.7).  Round-3 measurement (doc pr/132 sec 10, r3flip vs r2off): fakes 5 -> 2, ZERO hand-pi0 downgrades, 0 movers.  History: flipped at 20 2026-08-30 round 2 (owner: "Let's proceed to 1").  Rejects a with-vertex pairing whose conn-1 member sits AT THE MAIN VERTEX and whose detached partner is below 20 MeV -- the owner's nueCC fake mode (primary electron + tiny gamma).  Round-1 measurement (doc pr/132 sec 6.2, onguard vs onfudge, all 6 samples): fake topologies 10 -> 5, ZERO change on the hand pi0, 0 ADVERSE movers.  The 5 survivors have partners 20.5-29.6 MeV; 25-30 stays an owner Bee-adjudication item.  C++ default 0 = no guard.
     pi0_nv_allow_type2 = false,              // C++ default false (without-vertex pool conn_type 3 only)
     pi0_nv_max_prongs = null,                // null => C++ default 2 (without-vertex GATE1 prong cap)
     // doc pr/132 round 2 -- the rescue family + the path-2 quality gate.
     // C++ defaults all off; every key omitted at its default =>
     // byte-identical pre-round-2 config.
-    pi0_readmit_retyped = false,             // C++ default false (A5-retyped showers stay out of pi0 pairing; ON readmits + re-stamps accepted members EM)
-    pi0_admit_type3 = false,                 // C++ default false (with-vertex disconnected pool conn_type 2 only)
+    pi0_readmit_retyped = true,              // SBND PRODUCTION ON 2026-08-30 round 3 (owner: "Let's execute according to your recommendations" on "flip K7+K8 (the track-gamma rescue)").  Readmits A5-retyped showers into pi0 pairing and re-stamps accepted members EM.  With K8+K3=28 (r3flip vs r2off): exact 26 -> 31, partial 13 -> 16, ZERO downgrades, 0 movers, fakes 5 -> 2.  C++ default false.
+    pi0_admit_type3 = true,                  // SBND PRODUCTION ON 2026-08-30 round 3 (owner flip, same order as pi0_readmit_retyped above; specimen 47212 g2 none -> exact).  Admits conn_type-3 showers into the with-vertex disconnected pool.  C++ default false.
     pi0_crumb_assoc_mev = null,              // MeV; null => C++ default 0 (crumbs keep the association-angle test)
     pi0_nv_max_vtx_shift_cm = null,          // cm; null => C++ default 0 (no without-vertex decay-point shift cap)
     pi0_nv_mass_window_mev = null,           // MeV; null => C++ default 60 (legacy without-vertex acceptance half-window)
+    pi0_collinear_merge_deg = null,          // deg; null => C++ default 0 (no virtual collinear merge of detached fragments at pairing time)
     stem_backfill_back_dvtx = 45,            // cm; SBND PRODUCTION ON 2026-08-29 (owner flip: "For B, flip on for SBND production").  Suppress the backward-stem decline when the SHOWER START is further than this from the nu vertex.  The guard's reachable population is CLOSED at 8 events (`if (!ok) break;` precedes it) and all 8 are owner-adjudicated: absorb-wanted 46.84 (292643) and 88.11 (179369), every decline-ok <= 44.34, so 45 sits in an empty interval and the flip changes exactly those 2 of 239 events.  On both, the resulting PF tree is IDENTICAL to the guard-OFF shape the owner reviewed in bee/pr130r2 and preferred.  C++ default 0 = off.
     // doc pr/124 front A -- 25-40 cm gap-band tier-2 prune (qualifier pair
     // ang>40deg OR mdqdx>2.5 MIP measured zero-labeled-collateral on both
@@ -2985,6 +2986,7 @@ function(
         [if pi0_crumb_assoc_mev != null then 'pi0_crumb_assoc_mev']: pi0_crumb_assoc_mev,
         [if pi0_nv_max_vtx_shift_cm != null then 'pi0_nv_max_vtx_shift_cm']: pi0_nv_max_vtx_shift_cm,
         [if pi0_nv_mass_window_mev != null then 'pi0_nv_mass_window_mev']: pi0_nv_mass_window_mev,
+        [if pi0_collinear_merge_deg != null then 'pi0_collinear_merge_deg']: pi0_collinear_merge_deg,
         [if shower_pass4_prune_gap2 != 0 then 'shower_pass4_prune_gap2']: shower_pass4_prune_gap2,
         [if shower_pass4_prune_gap2 != 0 && shower_pass4_prune2_ang != 40 then 'shower_pass4_prune2_ang']: shower_pass4_prune2_ang,
         [if shower_pass4_prune_gap2 != 0 && shower_pass4_prune2_mdqdx != 2.5 then 'shower_pass4_prune2_mdqdx']: shower_pass4_prune2_mdqdx,
