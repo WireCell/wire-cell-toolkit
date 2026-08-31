@@ -5830,6 +5830,96 @@ void PatternAlgorithms::id_pi0_backproject_vertex(int& acc_segment_id, IndexedSh
         }
     }
     if (mrg_mode) {
+        // ---- doc pr/134 K22 v2 (owner verdicts on the v1 Bee, 2026-08-30):
+        // "cluster 58035 should be part of cluster 21072" and "the vertex
+        // should be much upstream of both".  Three v2 rules, all derived
+        // and verified offline before implementation (doc sec 9):
+        //  (1) HOST-COLLINEAR PROMOTION: a partner candidate whose own PCA
+        //      axis is within 25 deg of the host-complex PCA axis AND whose
+        //      centroid sits within 15 deg of the host BACK-ray from the
+        //      seat is the host gamma's upstream conversion stem -- it
+        //      joins the host complex (116962: 58035 at 16.7/1.0 deg;
+        //      67056 refused by the ray test at 60.7 deg).
+        //  (2) PARTNER PCA RAYS: a multi-fragment partner gamma's direction
+        //      only emerges from the merged cloud -- add the two
+        //      PCA-axis rays (anchored at the extremal points) of the
+        //      >= 35 MeV partners (sub-35 satellites would twist the axis;
+        //      they stay assignment/PF material).
+        //  (3) MERGE-MODE WINDOW FLOOR at m > 65 (delta > -60): the
+        //      properly-grouped 116962 pair sits at m=79 -- the
+        //      under-collection class (reco mass far below label, pr/132
+        //      sec B) -- while every measured collateral crossing is
+        //      <= 56.2 (282979 PCA) or >= 166 (fragment fires).
+        auto cloud_points = [&graph](const std::vector<ShowerPtr>& members, std::vector<WireCell::Point>& out) {
+            for (const auto& msh : members) {
+                const auto& view = msh->view_graph();
+                for (auto edesc : ordered_edges(*msh, graph)) {
+                    SegmentPtr seg = view[edesc].segment;
+                    if (!seg) continue;
+                    for (const auto& fit : seg->fits()) out.push_back(fit.point);
+                }
+            }
+        };
+        auto points_pca = [](const std::vector<WireCell::Point>& pts, WireCell::Point& cen, WireCell::Vector& axis) -> bool {
+            const size_t n = pts.size();
+            if (n < 3) return false;
+            double cx = 0, cy = 0, cz = 0;
+            for (const auto& p : pts) { cx += p.x(); cy += p.y(); cz += p.z(); }
+            cx /= n; cy /= n; cz /= n;
+            cen = WireCell::Point(cx, cy, cz);
+            double xx = 0, xy = 0, xz = 0, yy = 0, yz = 0, zz = 0;
+            for (const auto& p : pts) {
+                const double dx = p.x()-cx, dy = p.y()-cy, dz = p.z()-cz;
+                xx += dx*dx; xy += dx*dy; xz += dx*dz; yy += dy*dy; yz += dy*dz; zz += dz*dz;
+            }
+            // power iteration for the principal axis; deterministic seed =
+            // the largest-variance coordinate axis
+            double vx = (xx >= yy && xx >= zz) ? 1 : 0;
+            double vy = (yy > xx && yy >= zz) ? 1 : 0;
+            double vz = (vx == 0 && vy == 0) ? 1 : 0;
+            for (int it = 0; it < 60; ++it) {
+                const double nx = xx*vx + xy*vy + xz*vz;
+                const double ny = xy*vx + yy*vy + yz*vz;
+                const double nz = xz*vx + yz*vy + zz*vz;
+                const double nm = std::sqrt(nx*nx + ny*ny + nz*nz);
+                if (nm <= 0) return false;
+                vx = nx/nm; vy = ny/nm; vz = nz/nm;
+            }
+            axis = WireCell::Vector(vx, vy, vz);
+            return true;
+        };
+        {
+            std::vector<WireCell::Point> hpts;
+            cloud_points(mrg_hosts, hpts);
+            WireCell::Point hcen; WireCell::Vector haxis;
+            if (points_pca(hpts, hcen, haxis)) {
+                // orient the host axis from the seat INTO the cloud
+                const WireCell::Vector seat2cen(hcen.x()-vtx_pt.x(), hcen.y()-vtx_pt.y(), hcen.z()-vtx_pt.z());
+                if (seat2cen.dot(haxis) < 0) haxis = haxis * -1.0;
+                std::vector<ShowerPtr> keep;
+                for (auto sh : mrg_partners) {
+                    std::vector<WireCell::Point> fpts;
+                    cloud_points({sh}, fpts);
+                    WireCell::Point fcen; WireCell::Vector faxis;
+                    bool promote = false;
+                    if (points_pca(fpts, fcen, faxis)) {
+                        const double a_ax = std::acos(std::clamp(std::abs(faxis.dot(haxis)), 0.0, 1.0)) * 180.0 / M_PI;
+                        const WireCell::Vector disp(fcen.x()-vtx_pt.x(), fcen.y()-vtx_pt.y(), fcen.z()-vtx_pt.z());
+                        const double dm = disp.magnitude();
+                        const double a_ray = dm > 0
+                            ? std::acos(std::clamp(disp.dot(haxis * -1.0) / dm, -1.0, 1.0)) * 180.0 / M_PI : 180.0;
+                        promote = (a_ax < 25.0 && a_ray < 15.0);
+                        if (promote && pr132_pi0_dbg())
+                            std::fprintf(stderr, "PI0_PAIR P0 bp mrg promote sh=%d a_ax=%.1f a_ray=%.1f\n",
+                                         pr132_pi0_shid(sh), a_ax, a_ray);
+                    }
+                    if (promote) mrg_hosts.push_back(sh);
+                    else keep.push_back(sh);
+                }
+                mrg_partners.swap(keep);
+                if (mrg_partners.empty()) return;   // whole event is one complex
+            }
+        }
         // Merged-cloud local dir: the multi-shower analogue of
         // shower_cal_dir_3vector (unweighted fit-point centroid within
         // 15 cm), accumulated across the member showers in vector order.
@@ -5881,6 +5971,32 @@ void PatternAlgorithms::id_pi0_backproject_vertex(int& acc_segment_id, IndexedSh
                 const WireCell::Vector dd = mrg_dir(mrg_partners, a);
                 if (dd.magnitude() > 0) prays.push_back({sh, a, dd});
             }
+        // v2 rule (2): the two partner-cloud PCA rays (>= 35 MeV members).
+        {
+            std::vector<ShowerPtr> pmajor;
+            ShowerPtr phead = nullptr;
+            for (auto sh : mrg_partners)
+                if (sh->get_kine_charge() >= 35 * units::MeV) {
+                    pmajor.push_back(sh);
+                    if (!phead || sh->get_kine_charge() > phead->get_kine_charge()) phead = sh;
+                }
+            std::vector<WireCell::Point> ppts;
+            if (!pmajor.empty()) cloud_points(pmajor, ppts);
+            WireCell::Point pcen; WireCell::Vector paxis;
+            if (phead && points_pca(ppts, pcen, paxis)) {
+                double tmin = 1e30, tmax = -1e30;
+                WireCell::Point amin, amax;
+                for (const auto& p : ppts) {
+                    const double t = (p.x()-pcen.x())*paxis.x() + (p.y()-pcen.y())*paxis.y() + (p.z()-pcen.z())*paxis.z();
+                    if (t < tmin) { tmin = t; amin = p; }
+                    if (t > tmax) { tmax = t; amax = p; }
+                }
+                if (tmax > tmin) {
+                    prays.push_back({phead, amin, paxis});
+                    prays.push_back({phead, amax, paxis * -1.0});
+                }
+            }
+        }
         double Eh = 0;
         ShowerPtr host_head = nullptr;
         for (auto sh : mrg_hosts) {
@@ -5940,7 +6056,8 @@ void PatternAlgorithms::id_pi0_backproject_vertex(int& acc_segment_id, IndexedSh
                                  pr132_pi0_shid(hr.sh), pr132_pi0_shid(pr.sh),
                                  miss / units::cm, u1 / units::cm, u2 / units::cm,
                                  shift / units::cm, Ep / units::MeV, pmem.size(), m / units::MeV);
-                if (delta >= 35 * units::MeV || delta <= -25 * units::MeV) continue;
+                // v2 rule (3): merge-mode floor -60 (m > 65), upper edge legacy.
+                if (delta >= 35 * units::MeV || delta <= -60 * units::MeV) continue;
                 if (miss < best_miss - 1e-9 ||
                     (std::abs(miss - best_miss) <= 1e-9 && std::abs(delta) < best_abs)) {
                     best_miss = miss;
@@ -6378,6 +6495,47 @@ void PatternAlgorithms::id_pi0_with_vertex(int& acc_segment_id, IndexedShowerSet
              std::vector<std::pair<double,VertexPtr>>,
              decltype(shower_pair_cmp)> map_shower_pair_mass_vertex(shower_pair_cmp);
 
+    // doc pr/134 K24 round-2 fix: showers whose presence in the MAIN-vertex
+    // pool exists ONLY because of the relaxed admission (they failed the
+    // 30-deg dir test and the crumb bypass there).  Membership lookups only
+    // -- never iterated (determinism rule).  Empty when the knob is off.
+    std::set<ShowerPtr> main_relax_only;
+
+    // doc pr/134 K24 round-2 fix (part 2, the ambiguity constraint): the
+    // owner's rule is "if there is a direction ambiguity, the preference
+    // should give to neutrino vertex" -- so the relaxed admission at main is
+    // reserved for showers that DO legacy-admit at some other candidate
+    // vertex (the ambiguity exists; 105946's 55063 admits at the proton-end
+    // vertex).  A shower that admits NOWHERE is a pure relax artifact
+    // (54332's 120071/128111: angle 50-176 deg at every vertex) and seeded
+    // 19 unadjudicated pi0 groups across 239 events in the v4 arm.
+    // Lookups only, never iterated.  Empty when the knob is off.
+    std::set<ShowerPtr> main_amb_ok;
+    if (m_pi0_prefer_main_vertex) {
+        for (auto shower : disconnected_showers) {
+            const WireCell::Vector dir1 = map_shower_dir[shower];
+            auto [start_vtx, conn_type] = get_svc(shower);
+            for (auto cand_vtx : candidate_vertices) {
+                if (cand_vtx == main_vertex) continue;
+                // Own-start admission counts as ambiguity (105946's 55063
+                // seats at its own conversion vertex 48 cm away); the
+                // ct1-partner rule at the pair-recording site is what keeps
+                // pure artifacts (54332's 120071/128111) from pairing.
+                if (start_vtx == cand_vtx) { main_amb_ok.insert(shower); break; }
+                const WireCell::Point vtx_pt = cand_vtx->fit().valid()
+                    ? cand_vtx->fit().point : cand_vtx->wcpt().point;
+                const WireCell::Vector dir2(shower->get_start_point().x() - vtx_pt.x(),
+                                            shower->get_start_point().y() - vtx_pt.y(),
+                                            shower->get_start_point().z() - vtx_pt.z());
+                const double angle = std::acos(std::clamp(
+                    dir1.dot(dir2) / (dir1.magnitude() * dir2.magnitude()), -1.0, 1.0)) / M_PI * 180.0;
+                const bool crumb_ok = (m_pi0_crumb_assoc_max > 0 &&
+                                       get_kq(shower) < m_pi0_crumb_assoc_max);
+                if (angle < m_pi0_assoc_angle_deg || crumb_ok) { main_amb_ok.insert(shower); break; }
+            }
+        }
+    }
+
     // doc pr/132 round 3 (K12): virtual collinear merge (132 doc sec 9.9
     // idea 1).  A second gamma split into collinear detached fragments never
     // forms an in-window pair (specimen SBND 18255-54341: right topology,
@@ -6460,9 +6618,29 @@ void PatternAlgorithms::id_pi0_with_vertex(int& acc_segment_id, IndexedShowerSet
                                  pr91_vtx_display_id(cand_vtx), pr132_pi0_shid(shower),
                                  get_kq(shower) / units::MeV, angle, crumb_ok ? 1 : 0,
                                  (angle < m_pi0_assoc_angle_deg || crumb_ok) ? 1 : 0);
-                if (angle < m_pi0_assoc_angle_deg || crumb_ok) {  // doc pr/132 K2 + K9
+                // doc pr/134 K24 (owner 2026-08-30: "the pi0 should be at
+                // the neutrino vertex ... if there is a direction
+                // ambiguity ... the preference should give to neutrino
+                // vertex"): at the MAIN vertex only, a disconnected shower
+                // enters the pool regardless of the 30-deg dir test.  The
+                // shower's internal dir is deficit-biased (measured 50-75
+                // deg off the flight line on 105946's 55063 -- it steered
+                // the gamma to a proton-end vertex 48 cm away); the
+                // conversion displacement (start - vertex) IS the gamma
+                // direction, and that is the ray the recorded mass uses.
+                // Round-2 fix: relax only for genuinely ambiguous showers
+                // (legacy-admitted at some OTHER vertex -- main_amb_ok).
+                const bool main_relax = (m_pi0_prefer_main_vertex && cand_vtx == main_vertex &&
+                                         main_amb_ok.count(shower));
+                const bool legacy_ok = (angle < m_pi0_assoc_angle_deg || crumb_ok);
+                if (legacy_ok || main_relax) {  // doc pr/132 K2 + K9; pr/134 K24
                     tmp_showers.push_back(shower);
                     local_dirs[shower] = dir2;
+                    // K24 round-2: remember relax-ONLY admissions -- a pair
+                    // built on one ranks below any legacy pair at main
+                    // (54332/506746: a relax-admitted fake partner displaced
+                    // the true pair that had already won at main).
+                    if (!legacy_ok) main_relax_only.insert(shower);
                 }
             }
         }
@@ -6525,6 +6703,18 @@ void PatternAlgorithms::id_pi0_with_vertex(int& acc_segment_id, IndexedShowerSet
                 if (m_pi0_collinear_merge_deg > 0 && cm_absorbed[cand_vtx].count(sh2)) continue;
                 auto [sv2, ct2] = get_svc(sh2);
                 if (ct1 == 1 && ct2 == 1) continue;  // ineligible — skip before expensive ops
+
+                // doc pr/134 K24 round-2 (the legacy-anchor rule): the
+                // relaxed admission may COMPLETE a pair whose other member
+                // is legacy-admitted at main (105946: 56056 passes the
+                // 30-deg test at main, 18.5 deg, and anchors the relaxed
+                // 55063), but two relax-only members cannot fabricate a
+                // pair between themselves (54332: 120071 x 122091 m=121.6
+                // and 16017 x 122091 m=109.8, every member angle-failed at
+                // main, displaced the true pair at its true vertex).
+                // Empty set when the knob is off = byte-identical.
+                if (cand_vtx == main_vertex &&
+                    main_relax_only.count(sh1) && main_relax_only.count(sh2)) continue;
 
                 double kq2 = get_kq(sh2);
                 if (m_pi0_collinear_merge_deg > 0 && cm_vkq[cand_vtx].count(sh2))
@@ -6630,6 +6820,7 @@ void PatternAlgorithms::id_pi0_with_vertex(int& acc_segment_id, IndexedShowerSet
         const double mass_offset = m_pi0_mass_offset;  // doc pr/132 K1; 10 MeV = legacy
         VertexPtr vtx = nullptr;
         double mass_penalty = 0;
+        int best_tier = 0;   // doc pr/134 K24; knob-off everything is tier 0 = legacy comparator
 
         // Hoist start-vertex lookup out of the mass_vtx_vec inner loop.
         for (auto& [shower_pair, mass_vtx_vec] : map_shower_pair_mass_vertex) {
@@ -6661,13 +6852,35 @@ void PatternAlgorithms::id_pi0_with_vertex(int& acc_segment_id, IndexedShowerSet
             for (auto& [mass, candidate_vtx] : mass_vtx_vec) {
                 double delta = mass - 135 * units::MeV + mass_offset;
                 if (delta >= 35 * units::MeV || delta <= -25 * units::MeV) continue;
-                if (std::abs(delta) - tmp_penalty < std::abs(mass_diff) - mass_penalty) {
+                // doc pr/134 K24 (round-2 tier fix): three-tier main-first
+                // ranking among in-window candidates.  Tier 2 = at main with
+                // BOTH members legacy-admitted there; tier 1 = at main but
+                // riding the relaxed admission; tier 0 = non-main.  Higher
+                // tier wins outright; the legacy |delta|-with-bonus key
+                // decides within a tier.  Rationale: an in-window pair AT
+                // the nu vertex beats any non-main pair (47212: same pair at
+                // main m=133.7 lost to a pion-stub end m=132.8 by 0.9 MeV),
+                // but a relax-admitted partner must NOT displace a pair that
+                // already won at main under the legacy tests (54332: true
+                // pair 27025x122091 displaced by relax-fake 120071; same on
+                // 506746).  Knob off: tier stays 0 -- byte-identical.
+                int tier = 0;
+                if (m_pi0_prefer_main_vertex && candidate_vtx == main_vertex) {
+                    const bool relaxed = main_relax_only.count(shower_pair.first) ||
+                                         main_relax_only.count(shower_pair.second);
+                    tier = relaxed ? 1 : 2;
+                }
+                bool better;
+                if (tier != best_tier) better = (tier > best_tier);
+                else better = (std::abs(delta) - tmp_penalty < std::abs(mass_diff) - mass_penalty);
+                if (better) {
                     mass_diff    = delta;
                     mass_penalty = tmp_penalty;
                     mass_save    = mass;
                     shower_1     = shower_pair.first;
                     shower_2     = shower_pair.second;
                     vtx          = candidate_vtx;
+                    best_tier    = tier;
                 }
             }
         }

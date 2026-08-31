@@ -280,6 +280,7 @@ TEST_CASE("clus knob defaults: TaggerCheckNeutrino switches are all OFF")
     CHECK_KNOB_NUM(cfg, "pi0_nc_pf_assoc_deg", 0.0);                          // doc pr/133 K21 v2.2; 0 = no post-fire PF update
     CHECK_KNOB_BOOL(cfg, "pi0_nc_frag_merge", false);                         // doc pr/134 K22; false = fragment-level bp pairing
     CHECK_KNOB_NUM(cfg, "pi0_pf_assoc_deg", 0.0);                             // doc pr/134 K23; 0 = no P1 post-accept PF absorb
+    CHECK_KNOB_BOOL(cfg, "pi0_prefer_main_vertex", false);                    // doc pr/134 K24; false = legacy association + ranking
     CHECK_KNOB_NUM(cfg, "pi0_nv_max_vtx_shift_cm", 0.0);                      // doc pr/132 K10; 0 = no decay-point shift cap
     CHECK_KNOB_NUM(cfg, "pi0_nv_mass_window_mev", 60.0);                      // doc pr/132 K11; legacy without-vertex half-window
     // doc pr/124 front A -- 25-40 cm gap-band tier-2 prune.

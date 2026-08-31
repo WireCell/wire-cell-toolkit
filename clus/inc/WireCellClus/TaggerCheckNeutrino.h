@@ -983,6 +983,7 @@ public:
         double m_pi0_nc_pf_assoc_deg{0.0};                          // doc pr/133 K21 v2.2; deg, 0 = off; post-fire PF association cone
         bool   m_pi0_nc_frag_merge{false};                          // doc pr/134 K22; NC bp pairing at merged-complex level
         double m_pi0_pf_assoc_deg{0.0};                             // doc pr/134 K23; deg, 0 = off; with-vertex post-accept PF satellite cone
+        bool   m_pi0_prefer_main_vertex{false};                     // doc pr/134 K24; P1 nu-vertex preference
         double m_pi0_nv_max_vtx_shift_cm{0.0};                      // doc pr/132 K10; cm, 0 = no without-vertex decay-point shift cap
         double m_pi0_nv_mass_window_mev{60.0};                      // doc pr/132 K11; MeV, without-vertex acceptance half-window (legacy 60)
         bool   m_kine_count_guard_freed{false};                     // doc pr/123 r2; kine twin of pf_orphan_guard_freed
