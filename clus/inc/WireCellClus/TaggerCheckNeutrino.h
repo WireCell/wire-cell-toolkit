@@ -960,6 +960,7 @@ public:
         double m_shower_split_bundle_gap{4};                    // doc pr/138 B3; cm; single-linkage bundle gap
         double m_shower_split_snap{0.80};                       // doc pr/138 B3; k>=3 bundle dominance floor
         bool   m_shower_split_skip_shared{false};           // doc pr/139 P1.1; refuse a component holding a segment another shower also owns
+        bool   m_shower_split_shed_shared{false};           // doc pr/139 sec 15; shed an ENTIRELY co-owned refused component instead of refusing it
         double m_shower_split_max_impact{0};                // doc pr/139 P1.2; cm; 0 = no bound
         bool   m_shower_split_em_start{false};              // doc pr/139 P1.3; seed the daughter on its nearest EM-typed member
         bool   m_shower_split_rehome{false};                // doc pr/139 P1.4; offer an orphan daughter to the nearest larger EM shower

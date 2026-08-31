@@ -710,6 +710,7 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_shower_split_bundle_gap = get(config, "shower_split_bundle_gap", m_shower_split_bundle_gap);   // doc pr/138 B3; single-linkage bundle gap
     m_shower_split_snap = get(config, "shower_split_snap", m_shower_split_snap);   // doc pr/138 B3; k>=3 bundle dominance floor
     m_shower_split_skip_shared = get(config, "shower_split_skip_shared", m_shower_split_skip_shared);   // doc pr/139 P1.1; refuse a component holding a segment another shower also owns
+    m_shower_split_shed_shared = get(config, "shower_split_shed_shared", m_shower_split_shed_shared);   // doc pr/139 sec 15; shed an ENTIRELY co-owned refused component
     m_shower_split_max_impact = get(config, "shower_split_max_impact", m_shower_split_max_impact);   // doc pr/139 P1.2; cm; 0 = no bound
     m_shower_split_em_start = get(config, "shower_split_em_start", m_shower_split_em_start);   // doc pr/139 P1.3; seed the daughter on its nearest EM-typed member
     m_shower_split_rehome = get(config, "shower_split_rehome", m_shower_split_rehome);   // doc pr/139 P1.4; offer an orphan daughter to the nearest larger EM shower
@@ -1221,6 +1222,7 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["shower_split_bundle_gap"] = m_shower_split_bundle_gap;   // doc pr/138 B3; cm, inert while the pass is off
     cfg["shower_split_snap"] = m_shower_split_snap;   // doc pr/138 B3; k>=3 bundle dominance floor
     cfg["shower_split_skip_shared"] = m_shower_split_skip_shared;   // doc pr/139 P1.1; refuse a component holding a segment another shower also owns
+    cfg["shower_split_shed_shared"] = m_shower_split_shed_shared;   // doc pr/139 sec 15; shed an ENTIRELY co-owned refused component
     cfg["shower_split_max_impact"] = m_shower_split_max_impact;   // doc pr/139 P1.2; cm; 0 = no bound
     cfg["shower_split_em_start"] = m_shower_split_em_start;   // doc pr/139 P1.3; seed the daughter on its nearest EM-typed member
     cfg["shower_split_rehome"] = m_shower_split_rehome;   // doc pr/139 P1.4; offer an orphan daughter to the nearest larger EM shower
@@ -2699,6 +2701,7 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
         pattern_algos.m_shower_split_bundle_gap = m_shower_split_bundle_gap * units::cm;   // doc pr/138 B3, cm -> internal
         pattern_algos.m_shower_split_snap = m_shower_split_snap;   // doc pr/138 B3; k>=3 bundle dominance floor
         pattern_algos.m_shower_split_skip_shared = m_shower_split_skip_shared;   // doc pr/139 P1.1; refuse a component holding a segment another shower also owns
+        pattern_algos.m_shower_split_shed_shared = m_shower_split_shed_shared;   // doc pr/139 sec 15; shed an ENTIRELY co-owned refused component
         pattern_algos.m_shower_split_max_impact = m_shower_split_max_impact * units::cm;   // doc pr/139 P1.2; cm -> internal; 0 = no bound
         pattern_algos.m_shower_split_em_start = m_shower_split_em_start;   // doc pr/139 P1.3; seed the daughter on its nearest EM-typed member
         pattern_algos.m_shower_split_rehome = m_shower_split_rehome;   // doc pr/139 P1.4; offer an orphan daughter to the nearest larger EM shower

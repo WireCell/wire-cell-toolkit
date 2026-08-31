@@ -1991,6 +1991,14 @@ function(
     // byte-identical to the pre-pr/139 config while they stay at these values.
     shower_split_skip_shared = false,        // P1.1 refuse a peel of segments another shower also owns.
                                              // C++ default false. Key omitted when off => byte-identical.
+    // doc pr/139 sec 15.  When shower_split_skip_shared refuses a component and
+    // EVERY member of it is also owned by another shower, honour the owner's cut
+    // by detaching the component from this parent and building NO daughter --
+    // the charge already has a home in the co-owner.  Only the all-shared case:
+    // the partial case is measured to make a false fire on evt165157 (KEEP).
+    // C++ default false.  Key omitted when off => byte-identical pre-fix config.
+    // Inert unless shower_split_skip_shared is also on.
+    shower_split_shed_shared = false,        // sec 15 shed an ENTIRELY co-owned refused component.
     shower_split_max_impact = 0,             // P1.2 cm; fire only when the object's own axis misses the
                                              // reference vertex by <= this.  C++ default 0 = no bound.
                                              // Key omitted when 0 => byte-identical.
@@ -3200,6 +3208,7 @@ function(
         // doc pr/139 phase 1 -- key-suppression idiom: nothing is emitted while
         // each knob holds its shipped default, so the compiled JSON does not move.
         [if shower_split && shower_split_skip_shared then 'shower_split_skip_shared']: true,
+        [if shower_split && shower_split_skip_shared && shower_split_shed_shared then 'shower_split_shed_shared']: true,
         [if shower_split && shower_split_max_impact != 0 then 'shower_split_max_impact']: shower_split_max_impact,
         [if shower_split && shower_split_em_start then 'shower_split_em_start']: true,
         [if shower_split && shower_split_rehome then 'shower_split_rehome']: true,

@@ -5785,7 +5785,7 @@ void PatternAlgorithms::shower_split(Graph& graph, VertexPtr main_vertex, Indexe
     });
 
     const size_t cap = (size_t) std::max(2, m_shower_split_max_parts);
-    int n_fired = 0, n_peeled = 0, n_shared_refused = 0, n_vetoed = 0;
+    int n_fired = 0, n_peeled = 0, n_shared_refused = 0, n_vetoed = 0, n_shed = 0;
     std::vector<ShowerPtr> daughters;
     std::vector<ShowerPtr> dau_parent;   // aligned with `daughters` (doc pr/139 P1.4)
 
@@ -5956,20 +5956,68 @@ void PatternAlgorithms::shower_split(Graph& graph, VertexPtr main_vertex, Indexe
             // between duplicate objects, which is the kine_charge dedup
             // problem (kine_charge_owned_scan, knob-gated, runs later).
             if (m_shower_split_skip_shared) {
-                bool shared = false;
+                // Count rather than short-circuit: doc pr/139 §15 needs to know
+                // WHETHER THE WHOLE COMPONENT IS CO-OWNED, not merely that some
+                // member is, and the tape has to carry the split so the shed
+                // rule below is priced instead of assumed.
+                size_t nshared = 0;
+                double q_shared = 0, q_comp = 0;
                 for (const auto& sg : comp) {
-                    if (!sg || !sg->descriptor_valid()) continue;
+                    if (!sg) continue;
+                    double qs = 0;
+                    for (const auto& f : sg->fits()) if (f.valid()) qs += f.dQ;
+                    q_comp += qs;
+                    if (!sg->descriptor_valid()) continue;
                     auto it = seg_nshower.find(graph[sg->get_descriptor()].index);
-                    if (it != seg_nshower.end() && it->second > 1) { shared = true; break; }
+                    if (it != seg_nshower.end() && it->second > 1) { ++nshared; q_shared += qs; }
                 }
-                if (shared) {
+                if (nshared) {
+                    // doc pr/139 §15 -- the SHED.  When EVERY member of the
+                    // refused component is also owned by another shower, the
+                    // owner's cut can be honoured without building anything:
+                    // detach the component from this parent and create NO
+                    // daughter, because the charge already has a home in the
+                    // co-owner.  That is the whole fix for evt281485, where all
+                    // four members of part 1 are held by shower 91112 as well,
+                    // so the peel that P1.1 refuses would have produced a
+                    // kine_charge = 0 duplicate (§2) and the "drop the shared
+                    // members and peel the remainder" alternative has NOTHING
+                    // left to peel.
+                    //
+                    // The partial case is deliberately still refused.  Measured
+                    // on the pr136 sidecars: evt165157 part 0 is 2 shared of 7
+                    // and evt350354 part 1 is 1 of 12, and peeling their
+                    // remainders would MAKE A CUT ON 165157 -- an object the
+                    // owner labels KEEP.  A rule that fires there buys one
+                    // confirmed cut and pays a false fire, so the shed is
+                    // restricted to the unambiguous all-shared case.
+                    const bool shed = m_shower_split_shed_shared && nshared == comp.size();
+                    if (shed) {
+                        const int nrem = shower->detach_member_set(comp);
+                        if (nrem) {
+                            ++n_shed;
+                            if (dbg)
+                                std::fprintf(stderr,
+                                    "SHOWER_SPLIT shed shower=%d part=%zu nseg=%zu q=%.4g\n",
+                                    pr91_seg_display_id(ss), g, comp.size(), q_comp);
+                            SPDLOG_LOGGER_DEBUG(s_log,
+                                "pr139 shower_split: shed all-shared component shower_id={} part={} nseg={}",
+                                shower->get_shower_id(), g, comp.size());
+                            continue;
+                        }
+                        // detach refused (the component holds the start
+                        // segment): fall through to the ordinary refusal.
+                    }
                     ++n_shared_refused;
                     if (dbg)
-                        std::fprintf(stderr, "SHOWER_SPLIT shared shower=%d part=%zu nseg=%zu\n",
-                                     pr91_seg_display_id(ss), g, comp.size());
+                        std::fprintf(stderr,
+                            "SHOWER_SPLIT shared shower=%d part=%zu nseg=%zu nshared=%zu "
+                            "q_excl_frac=%.3f\n",
+                            pr91_seg_display_id(ss), g, comp.size(), nshared,
+                            q_comp > 0 ? (q_comp - q_shared) / q_comp : 0.0);
                     SPDLOG_LOGGER_DEBUG(s_log,
-                        "pr139 shower_split: shared-member refusal shower_id={} part={} nseg={}",
-                        shower->get_shower_id(), g, comp.size());
+                        "pr139 shower_split: shared-member refusal shower_id={} part={} nseg={} nshared={}",
+                        shower->get_shower_id(), g, comp.size(), nshared);
                     continue;
                 }
             }
@@ -6052,7 +6100,11 @@ void PatternAlgorithms::shower_split(Graph& graph, VertexPtr main_vertex, Indexe
         }
     }
 
-    if (n_peeled) {
+    // A shed removes members from a parent without producing a daughter, so it
+    // still needs the map rebuild and the kinematics refresh below -- the
+    // parent's charge and PDG are now different.  `daughters` is empty in that
+    // case and every loop over it no-ops.
+    if (n_peeled || n_shed) {
         for (auto& ns : daughters) showers.insert(ns);
         update_shower_maps(showers, map_vertex_in_shower, map_segment_in_shower,
                            map_vertex_to_shower, used_shower_clusters);
@@ -6188,8 +6240,8 @@ void PatternAlgorithms::shower_split(Graph& graph, VertexPtr main_vertex, Indexe
 
         SPDLOG_LOGGER_DEBUG(s_log,
             "pr138 shower_split: {} candidate(s) fired, {} daughter(s) peeled; {} shower(s) now"
-            " (pr139: {} shared-member refusal(s), {} impact veto(es))",
-            n_fired, n_peeled, showers.size(), n_shared_refused, n_vetoed);
+            " (pr139: {} shared-member refusal(s), {} impact veto(es), {} all-shared shed(s))",
+            n_fired, n_peeled, showers.size(), n_shared_refused, n_vetoed, n_shed);
     }
 }
 

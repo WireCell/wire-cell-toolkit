@@ -2331,6 +2331,7 @@ namespace WireCell::Clus::PR {
         // splitter.  Every one defaults to the shipped behaviour, so the
         // production path stays byte-identical until a knob is turned on.
         bool   m_shower_split_skip_shared{false};        ///< doc pr/139 P1.1; refuse a component holding a segment another shower also owns
+        bool   m_shower_split_shed_shared{false};        ///< doc pr/139 sec 15; when a refused component is ENTIRELY co-owned, detach it from this parent and build NO daughter -- the charge already has a home
         double m_shower_split_max_impact{0.0};           ///< doc pr/139 P1.2; 0 = no bound; else fire only when the object's axis misses the reference vertex by <= this
         bool   m_shower_split_em_start{false};           ///< doc pr/139 P1.3; seed the daughter on its nearest EM-typed member (falls back to nearest-overall)
         bool   m_shower_split_rehome{false};             ///< doc pr/139 P1.4; offer an orphan daughter to the nearest larger EM shower that is not its parent
