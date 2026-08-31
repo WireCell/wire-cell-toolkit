@@ -9,7 +9,12 @@ local frame_mod = import "spng/frame.jsonnet";
 local spng_mod = import "spng/spng.jsonnet";
 local fans_mod = import "spng/fans.jsonnet";
 
-function(det, control, add_noise=true)
+// The spng_maker is a function (tpc, control) -> a 1->1 node consuming ADC
+// IFrame from one anode and producing a signal IFrame.  It defaults to the full
+// "kitchen sink" SPNG chain (spng.jsonnet).  Callers wanting a variant (eg a
+// decon-only chain for validating signal processing upstream of ROI finding)
+// may pass their own builder.
+function(det, control, add_noise=true, spng_maker=spng_mod)
 {
     // Intern these
     det: det,
@@ -45,9 +50,10 @@ function(det, control, add_noise=true)
         pg.crossline([tpc.osp_subgraphs.osp for tpc in det.tpcs]),
 
     // [ntpcs]IFrame->IFrame[ntpcs] node.  Input ADC frames to Signal
-    // Processing, Next Generation subgraph to produce signals.
+    // Processing, Next Generation subgraph to produce signals.  The per-tpc
+    // node builder is spng_maker (default: full chain from spng.jsonnet).
     spng:
-        pg.crossline([spng_mod(tpc, control) for tpc in det.tpcs]),
+        pg.crossline([spng_maker(tpc, control) for tpc in det.tpcs]),
     
     // [1]IDepoSet -> IFrame[ntpcs].  Depos input to drift and detsim to produce ADC frames.
     depos_to_adc:
