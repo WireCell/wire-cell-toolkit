@@ -1864,7 +1864,7 @@ function(
     // doc pr/132 round 9 (K19): gamma-ray back-projection NC vertex
     // proposer (fires only when the main vertex sits inside a shower).
     // C++ default 0 = off.  Key omitted when null => byte-identical.
-    pi0_bp_vertex_miss_cm = null,            // cm; null => C++ default 0 (no NC vertex proposer)
+    pi0_bp_vertex_miss_cm = 8,               // cm; SBND PRODUCTION ON 2026-08-31 doc pr/134 round 2 (owner: "Things looks good, you can go ahead update the default the production chain").  The NC-signature chain's miss bound; fires on 2 of 239 events (76346 60.2 cm, 116962 83.5 cm upstream).  C++ default 0 = off.
     // doc pr/133 K20: admit shower-topology mu-typed (pdg +-13) objects that
     // are NOT part of the long muon into the pi0 pools; accepted members are
     // re-stamped EM (the K7/K8 precedent; specimens SBND 18255-348691 sh
@@ -1877,13 +1877,13 @@ function(
     // long muon) + a second major EM object misaligned by more than this
     // many degrees; the pair is then assumed 2-gamma/1-pi0.
     // C++ default 0 = the r9 v3 gate.  Key omitted when null => byte-identical.
-    pi0_nc_sig_angle_deg = null,
+    pi0_nc_sig_angle_deg = 15,               // deg; SBND PRODUCTION ON 2026-08-31 doc pr/134 round 2 (owner flip, see pi0_bp_vertex_miss_cm).  The owner's NC-pi0 signature angle.  C++ default 0 = the r9 v3 gate.
     // doc pr/133 K21 v2: signature-mode pairing-partner floor (MeV).  The
     // 76346 lesson: the true gamma2 is 5.0 MeV, below the legacy 20 MeV
     // candidate floor.  Majorness (gate b) still requires one >= 20 MeV
     // non-host object.  C++ default 0 = legacy 20.  Key omitted when null
     // => byte-identical.
-    pi0_nc_floor_mev = null,
+    pi0_nc_floor_mev = 5,                    // MeV; SBND PRODUCTION ON 2026-08-31 doc pr/134 round 2 (owner flip).  76346's true gamma2 is 5.0 MeV.  C++ default 0 = legacy 20.
     // doc pr/133 K21 v2.2: post-fire Particle-Flow update cone (deg) --
     // owner 2026-08-30: "once the vertex is changed, the electron
     // connecting to the original vertex should be updated, or included in
@@ -1892,7 +1892,7 @@ function(
     // < 35 MeV satellites within this cone of a gamma ray absorb too.
     // NC-signature fires only.  C++ default 0 = off.  Key omitted when
     // null => byte-identical.
-    pi0_nc_pf_assoc_deg = null,
+    pi0_nc_pf_assoc_deg = 20,                // deg; SBND PRODUCTION ON 2026-08-31 doc pr/134 round 2 (owner flip).  The owner's post-fire Particle-Flow update cone, NC-signature fires only.  C++ default 0 = off.
     // doc pr/134 K22: NC-signature back-projection pairing at MERGED-COMPLEX
     // level -- owner 2026-08-30: 116962 "is still not good, the nu vertex is
     // not at the right place".  The host complex (all co-seated main-vertex
@@ -1901,7 +1901,7 @@ function(
     // in-window fragment pair (125.8 -> 166.1, out) and admits the true
     // crossing 44 cm upstream (33.1 -> 146.4, in).  C++ default false.
     // Key omitted when false => byte-identical pre-fix config.
-    pi0_nc_frag_merge = false,
+    pi0_nc_frag_merge = true,                // SBND PRODUCTION ON 2026-08-31 doc pr/134 round 2 (owner flip; owner grouping verdict "cluster = 58035 --> should be part of cluster = 21072" delivered: 116962 lands 83.5 cm upstream, event = two showers 595.0+167.3 MeV).  C++ default false.
     // doc pr/134 K23: the with-vertex-finder port of the v2.2 PF update
     // (owner: "The other low-energy gammas can be associated with the pi0
     // gammas").  After the P1 selection loop, accepted pair gammas absorb
@@ -1917,7 +1917,7 @@ function(
     // test (the internal dir is deficit-biased; the conversion displacement
     // is the gamma direction), and in-window main-vertex pairs rank first.
     // C++ default false.  Key omitted when false => byte-identical.
-    pi0_prefer_main_vertex = false,
+    pi0_prefer_main_vertex = true,           // SBND PRODUCTION ON 2026-08-31 doc pr/134 round 2 (owner: "if there is a direction ambiguities ... the preferance should give to neutrino vertex").  v8 rules: ambiguity-gated relaxed admission at main + legacy-anchor (two relax-only members cannot pair) + three-tier main-first ranking.  Census 32->33 exact (50.0%), ledger 90.9% flat, ADVERSE 0.  C++ default false.
     stem_backfill_back_dvtx = 45,            // cm; SBND PRODUCTION ON 2026-08-29 (owner flip: "For B, flip on for SBND production").  Suppress the backward-stem decline when the SHOWER START is further than this from the nu vertex.  The guard's reachable population is CLOSED at 8 events (`if (!ok) break;` precedes it) and all 8 are owner-adjudicated: absorb-wanted 46.84 (292643) and 88.11 (179369), every decline-ok <= 44.34, so 45 sits in an empty interval and the flip changes exactly those 2 of 239 events.  On both, the resulting PF tree is IDENTICAL to the guard-OFF shape the owner reviewed in bee/pr130r2 and preferred.  C++ default 0 = off.
     // doc pr/124 front A -- 25-40 cm gap-band tier-2 prune (qualifier pair
     // ang>40deg OR mdqdx>2.5 MIP measured zero-labeled-collateral on both
