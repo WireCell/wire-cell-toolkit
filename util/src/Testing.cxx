@@ -10,6 +10,9 @@ using namespace WireCell;
 
 void boost::assertion_failed_msg(char const* expr, char const* msg, char const* function, char const* file, long line)
 {
+    // Intentionally a bare spdlog::critical (the process default logger): an
+    // assertion can fail before any WCT sink is configured, and spdlog's
+    // built-in default (stdout) guarantees the message is seen regardless.
     spdlog::critical("{}:{}:{} {} {}", file, function, line, expr, msg or "");
 
     std::stringstream ss;

@@ -30,6 +30,7 @@ local sg_js = import "spng/subgraphs.jsonnet";
 // - Input depos should be arranged to populate the given tpcid.
 
 function(input,
+         model_file,
          output="spng.npz",
          detname='pdhd',
          tpcid=0,
@@ -70,6 +71,9 @@ function(input,
         SPNGRebaseliner: {
             "rebaseline": "_applyroi",
         },
+        SPNGRebinner: {
+            "rebin": "_rebin"
+        }
     };
     local is_set(itype) = std.get({'SPNGCellViews': true}, itype, false);
     local make_wrapper = tio.pickle_wrapper("spng-%(itype)s-%(iname)s.pkl", is_set);
@@ -79,29 +83,16 @@ function(input,
 
     local sg = sg_js(det.tpcs[0], controls.config, pg);
 
-
-    // True if care about cross view info for the view.
-    local crossed_views = [1,1,0];
-    local all_views = wc.iota(std.length(crossed_views));
-    local rebin = 4;
-
-    local dnnroi_model_file = "/nfs/data/1/abashyal/spng/model_files/Pytorch-UNet/ts-model-2.3/unet-l23-cosmic500-e50.ts";
-    // local dnnroi_model_file = "/nfs/data/1/calcuttj/wire-cell-python/test_dnnroi_thresh_10epochs_tru0.05.ts";
-
     local source = io.frame_array_source(input);
     local sink = io.frame_array_any_sink(output);
 
     local head = sg.frame_to_tdm(extra_name="_TOTDM");
     local tail = sg.tdm_to_frame(extra_name="_FROMTDM");
 
-    local infer = sg.dnnroi_inference(modelfile=dnnroi_model_file,
-                                      rebin=rebin,
-                                    //   do_transpose=false,
-                                      crossed_views=crossed_views);
-    local pack = sg.tensor_packer(extra_name="_signals");
+    local infer = sg.dnnroi_inference_cat(modelfile=model_file, do_transpose=false);
+    local pack = sg.tensor_packer(multiplicity=1, extra_name="_signals");
     local guts = pg.shuntlines([infer, pack]);
     local body = sg.wrap_bypass(guts);
-
 
     local graph = pg.pipeline([source, head, body, tail, sink]);
 

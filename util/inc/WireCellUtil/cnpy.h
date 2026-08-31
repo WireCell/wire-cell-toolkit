@@ -192,7 +192,10 @@ namespace cnpy {
 
         // get the CRC of the data to be added
         uint32_t crc = crc32(0L, (uint8_t*) &npy_header[0], npy_header.size());
-        crc = crc32(crc, (uint8_t*) data, nels * sizeof(T));
+        // Guard: zlib crc32(crc, NULL, 0) returns 0 regardless of crc; call only
+        // when there is actual data to hash (nels > 0, data non-null).
+        if (nels > 0)
+            crc = crc32(crc, (uint8_t*) data, nels * sizeof(T));
 
         // build the local header
         std::vector<char> local_header;

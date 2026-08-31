@@ -113,12 +113,12 @@ namespace WireCell {
     Binning subset(const Binning& bins, double xmin, double xmax) {
         if (xmin > xmax) std::swap(xmin, xmax);
         const int lo = std::max(0,            bins.bin(xmin));
-        const int hi = std::min(bins.nbins(), bins.bin(xmax));
+        const int hi = std::min(bins.nbins(), bins.bin(xmax) + 1);
         const int n = hi-lo;
         if (n <= 0) {
             return Binning();
         }
-        return Binning(hi-lo, bins.edge(lo), bins.edge(hi));
+        return Binning(n, bins.edge(lo), bins.edge(hi));
     }
 
     // P(X<=L) for X ~ N(mean,sigma)

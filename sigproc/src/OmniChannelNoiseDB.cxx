@@ -2,7 +2,9 @@
 #include "WireCellAux/DftTools.h"
 #include "WireCellUtil/Response.h"
 #include "WireCellUtil/NamedFactory.h"
+#include "WireCellUtil/Point.h"
 
+#include <algorithm>
 #include <cmath>
 
 WIRECELL_FACTORY(OmniChannelNoiseDB, WireCell::SigProc::OmniChannelNoiseDB, WireCell::IChannelNoiseDatabase,
@@ -25,6 +27,20 @@ OmniChannelNoiseDB::~OmniChannelNoiseDB()
     //    delete it->second;
     // }
     // m_db.clear();
+}
+
+void OmniChannelNoiseDB::cache_wire_lengths()
+{
+    if (m_wire_length_cached) return;
+    for (int ch : m_anode->channels()) {
+        double total = 0.0;
+        for (auto wire : m_anode->wires(ch)) {
+            total += ray_length(wire->ray());
+        }
+        m_wire_length_cm[ch] = total / units::cm;
+    }
+    m_wire_length_cached = true;
+    log->debug("OmniChannelNoiseDB: wire-length cache built for {} channels", m_wire_length_cm.size());
 }
 
 OmniChannelNoiseDB::ChannelInfo::ChannelInfo()
@@ -145,8 +161,8 @@ OmniChannelNoiseDB::shared_filter_t OmniChannelNoiseDB::make_filter(std::complex
 }
 OmniChannelNoiseDB::shared_filter_t OmniChannelNoiseDB::default_filter()
 {
-    static shared_filter_t def = make_filter();
-    return def;
+    // Not cached: must reflect the current m_nsamples (which may change via set_nsamples).
+    return make_filter();
 }
 
 OmniChannelNoiseDB::shared_filter_t OmniChannelNoiseDB::parse_freqmasks(Json::Value jfm)
@@ -157,12 +173,35 @@ OmniChannelNoiseDB::shared_filter_t OmniChannelNoiseDB::parse_freqmasks(Json::Va
 
     auto spectrum = make_filter(std::complex<float>(1, 0));
     for (auto jone : jfm) {
-        double value = jone["value"].asDouble();
-        int lo = std::max(jone["lobin"].asInt(), 0);
-        int hi = std::min(jone["hibin"].asInt(), m_nsamples - 1);
-        // std::cerr << "freqmasks: set [" << lo << "," << hi << "] to " << value << std::endl;
+        const double value = jone["value"].asDouble();
+        int lo, hi;
+        bool auto_mirror = false;
+        if (jone.isMember("flo") || jone.isMember("fhi")) {
+            // Physical-frequency form: resolve to bins from the current m_tick/m_nsamples
+            // so the mask follows physical frequency across runtime frame-size changes.
+            const double flo = jone["flo"].asDouble();
+            const double fhi = jone["fhi"].asDouble();
+            lo = (int) std::floor(flo * m_tick * m_nsamples);
+            hi = (int) std::floor(fhi * m_tick * m_nsamples);
+            auto_mirror = true;
+        }
+        else {
+            lo = jone["lobin"].asInt();
+            hi = jone["hibin"].asInt();
+        }
+        lo = std::max(lo, 0);
+        hi = std::min(hi, m_nsamples - 1);
         for (int ind = lo; ind <= hi; ++ind) {  // inclusive
             spectrum->at(ind) = value;
+        }
+        // For physical-frequency entries, also zero the conjugate-mirror bins
+        // so the real-IFFT result remains real-valued.
+        if (auto_mirror) {
+            int mlo = std::max(m_nsamples - hi, 0);
+            int mhi = std::min(m_nsamples - lo, m_nsamples - 1);
+            for (int ind = mlo; ind <= mhi; ++ind) {
+                spectrum->at(ind) = value;
+            }
         }
     }
     return spectrum;
@@ -417,22 +456,72 @@ void OmniChannelNoiseDB::update_channels(Json::Value cfg)
             get_ci(ch).response_offset = val;
         }
     }
+    auto eval_rms_cut = [&](const Json::Value& jv, int ch, double scalar) -> double {
+        // Wirelength-dependent RMS cut.
+        // type=linear_in_wirelength : 2-point clamped (l0,v0)->(l1,v1)
+        // type=piecewise_linear_in_wirelength : list "points":[{l,v},...]
+        //   sorted by l, clamped at endpoints, linear between adjacent pts
+        if (!jv.isObject()) return scalar;
+        const std::string t = jv.get("type", "").asString();
+        if (t == "linear_in_wirelength") {
+            const double l0 = jv["l0"].asDouble(), v0 = jv["v0"].asDouble();
+            const double l1 = jv["l1"].asDouble(), v1 = jv["v1"].asDouble();
+            auto it = m_wire_length_cm.find(ch);
+            const double L = (it == m_wire_length_cm.end()) ? l0 : it->second;
+            const double f = std::clamp((L - l0) / (l1 - l0), 0.0, 1.0);
+            return v0 + f * (v1 - v0);
+        }
+        if (t == "piecewise_linear_in_wirelength") {
+            const auto& pts = jv["points"];
+            const int n = (int)pts.size();
+            if (n < 1) return scalar;
+            auto it = m_wire_length_cm.find(ch);
+            const double L = (it == m_wire_length_cm.end()) ? pts[0]["l"].asDouble()
+                                                            : it->second;
+            if (n == 1) return pts[0]["v"].asDouble();
+            // clamp left
+            if (L <= pts[0]["l"].asDouble()) return pts[0]["v"].asDouble();
+            // clamp right
+            if (L >= pts[n-1]["l"].asDouble()) return pts[n-1]["v"].asDouble();
+            // find segment
+            for (int i = 0; i < n - 1; ++i) {
+                const double la = pts[i]["l"].asDouble(),
+                             lb = pts[i+1]["l"].asDouble();
+                if (L >= la && L <= lb) {
+                    const double va = pts[i]["v"].asDouble(),
+                                 vb = pts[i+1]["v"].asDouble();
+                    const double f = (lb > la) ? (L - la) / (lb - la) : 0.0;
+                    return va + f * (vb - va);
+                }
+            }
+            return pts[n-1]["v"].asDouble();
+        }
+        return scalar;  // shouldn't happen for object jv with unknown type
+    };
+
+    auto needs_lengths = [](const Json::Value& jv) {
+        if (!jv.isObject()) return false;
+        const std::string t = jv.get("type", "").asString();
+        return t == "linear_in_wirelength"
+            || t == "piecewise_linear_in_wirelength";
+    };
+
     if (cfg.isMember("min_rms_cut")) {
-        double val = cfg["min_rms_cut"].asDouble();
-        // dump_cfg("minrms", chans, val);
+        const auto& jv = cfg["min_rms_cut"];
+        const bool wl = needs_lengths(jv);
+        const double scalar_val = wl ? 0.0 : jv.asDouble();
+        if (wl) cache_wire_lengths();
         for (int ch : chans) {
-            // m_db.at(ch).min_rms_cut = val;
-            // dbget(ch).min_rms_cut = val;
-            get_ci(ch).min_rms_cut = val;
+            get_ci(ch).min_rms_cut = wl ? eval_rms_cut(jv, ch, scalar_val) : scalar_val;
         }
     }
     if (cfg.isMember("max_rms_cut")) {
-        double val = cfg["max_rms_cut"].asDouble();
-        // dump_cfg("maxrms", chans, val);
+        const auto& jv = cfg["max_rms_cut"];
+        const bool wl = needs_lengths(jv);
+        const double scalar_val = wl ? 0.0 : jv.asDouble();
+        if (wl) cache_wire_lengths();
         for (int ch : chans) {
-            // m_db.at(ch).max_rms_cut = val;
-            // dbget(ch).max_rms_cut = val;
-            get_ci(ch).max_rms_cut = val;
+            get_ci(ch).max_rms_cut = wl ? eval_rms_cut(jv, ch, scalar_val) : scalar_val;
         }
     }
     if (cfg.isMember("pad_window_front")) {
@@ -621,7 +710,28 @@ void OmniChannelNoiseDB::configure(const WireCell::Configuration& cfg)
     }
 
     m_miscfg_channels.clear();
-    for (auto jci : cfg["channel_info"]) {
+    m_cfg_channel_info = cfg["channel_info"];
+    for (auto jci : m_cfg_channel_info) {
+        update_channels(jci);
+    }
+}
+
+void OmniChannelNoiseDB::set_nsamples(int n)
+{
+    if (n == m_nsamples) return;
+    log->info("OmniChannelNoiseDB: nsamples {} -> {}, rebuilding spectra", m_nsamples, n);
+    m_nsamples = n;
+    m_rcrc_cache.clear();
+    m_reconfig_cache.clear();
+    m_waveform_cache.clear();
+    m_response_cache.clear();
+    for (auto& kv : m_db) {
+        kv.second.rcrc = nullptr;
+        kv.second.config = nullptr;
+        kv.second.noise = nullptr;
+        kv.second.response = nullptr;
+    }
+    for (auto jci : m_cfg_channel_info) {
         update_channels(jci);
     }
 }

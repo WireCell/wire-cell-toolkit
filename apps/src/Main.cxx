@@ -256,17 +256,25 @@ void Main::initialize()
     // backends the same.
     Log::set_pattern("[%H:%M:%S.%03e] %L [%^%=8n%$] %v");
     log = Log::logger("main");
-    log->set_pattern("[%H:%M:%S.%03e] %L [  main  ] %v");
+    // Log::set_level("debug", "main");
+    Log::set_pattern("[%H:%M:%S.%03e] %L [  main  ] %v", "main");
     log->debug("logging to \"main\"");
 
     // Load configuration files
     for (auto filename : m_cfgfiles) {
-        log->debug("loading config file {}", filename);
+        log->debug("loading config file {}: extvars={} extcode={} tlavars={} tlacode={} load_paths={}",
+                   filename, m_extvars.size(), m_extcode.size(),
+                   m_tlavars.size(), m_tlacode.size(), m_load_path.size());
         Persist::Parser p(m_load_path, m_extvars, m_extcode, m_tlavars, m_tlacode);
+        log->debug("parser ready, calling p.load({})", filename);
         Json::Value one = p.load(filename);  // throws
+        log->debug("p.load({}) returned: top-level type={} size={}",
+                   filename, (int)one.type(), one.size());
         //log->debug(one.toStyledString());
-        m_cfgmgr.extend(one);
+        m_cfgmgr.extend(std::move(one));  // move avoids the ~tree-size deep-copy
+        log->debug("config file {} merged into cfgmgr", filename);
     }
+    log->debug("all config files loaded ({} total)", m_cfgfiles.size());
 
     // Find if we have our own special configuration entry
     int ind = m_cfgmgr.index("wire-cell");
@@ -288,7 +296,7 @@ void Main::initialize()
 
     // Load any plugin shared libraries requested by user.
     PluginManager& pm = PluginManager::instance();
-    for (auto plugin : m_plugins) {
+    for (const auto& plugin : m_plugins) {
         string pname, lname;
         std::tie(pname, lname) = String::parse_pair(plugin);
         log->debug("adding plugin: \"{}\"", plugin);
@@ -301,7 +309,7 @@ void Main::initialize()
     // Apply any component configuration sequence.
 
     // Instantiation
-    for (auto c : m_cfgmgr.all()) {
+    for (const auto& c : m_cfgmgr.all()) {
         if (c.isNull()) {
             continue;  // allow and ignore any totally empty configurations
         }
@@ -314,13 +322,13 @@ void Main::initialize()
         log->debug("constructing component: \"{}\":\"{}\"", type, name);
         auto iface = Factory::lookup<Interface>(type, name);  // throws
     }
-    for (auto c : m_apps) {
+    for (const auto& c : m_apps) {
         log->debug("constructing app: \"{}\"", c);
         Factory::lookup_tn<IApplication>(c);
     }
 
     // Give any named components their name.
-    for (auto c : m_cfgmgr.all()) {
+    for (const auto& c : m_cfgmgr.all()) {
         if (c.isNull()) {
             continue;  // allow and ignore any totally empty configurations
         }
@@ -339,7 +347,7 @@ void Main::initialize()
 
     // Finally, ask any configurables for their default, merge with
     // user config and give back.
-    for (auto c : m_cfgmgr.all()) {
+    for (const auto& c : m_cfgmgr.all()) {
         if (c.isNull()) {
             continue;  // allow and ignore any totally empty configurations
         }
@@ -354,16 +362,30 @@ void Main::initialize()
         // Get component's hard-coded default config, update it with
         // anything the user may have provided and apply it.
         Configuration cfg = cfgobj->default_configuration();
-        cfg = update(cfg, c["data"]);
-        cfgobj->configure(cfg);  // throws
+        if (cfg.isNull()) {
+            // Component has no defaults — skip the merge and pass user config directly.
+            cfgobj->configure(c["data"]);  // throws
+        }
+        else {
+            Configuration user_data = c["data"];  // update() needs a non-const ref
+            update(cfg, user_data);
+            cfgobj->configure(cfg);  // throws
+        }
+        log->debug("configured component:  \"{}\":\"{}\"", type, name);
     }
+
+    // All components are now configured.  Drop the bulk "data" sub-trees
+    // from the cfgmgr (finalize() only needs type/name) so the multi-GB
+    // resident Json::Value tree is released before event processing begins.
+    m_cfgmgr.clear_data();
+    log->debug("released config data sub-trees from cfgmgr");
 }
 
 void Main::operator()()
 {
     // Find all IApplications to execute
     vector<IApplication::pointer> app_objs;
-    for (auto component : m_apps) {
+    for (const auto& component : m_apps) {
         string type, name;
         std::tie(type, name) = String::parse_pair(component);
         auto a = Factory::find<IApplication>(type, name);  // throws
@@ -396,7 +418,7 @@ void Main::operator()()
 
 void Main::finalize()
 {
-    for (auto c : m_cfgmgr.all()) {
+    for (const auto& c : m_cfgmgr.all()) {
         if (c.isNull()) {
             continue;  // allow and ignore any totally empty configurations
         }

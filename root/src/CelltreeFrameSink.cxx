@@ -196,6 +196,8 @@ bool Root::CelltreeFrameSink::operator()(const IFrame::pointer &frame, IFrame::p
         cout << "channelId size: " << raw_channelId->size() << "\n";
         bchannelId->Fill();
         bwf->Fill();
+        delete raw_channelId;
+        delete sim_wf;
     }  // frames
 
     // trace summaries
@@ -223,7 +225,13 @@ bool Root::CelltreeFrameSink::operator()(const IFrame::pointer &frame, IFrame::p
         TBranch *bthreshold = Sim->Branch("channelThreshold", &channelThreshold);
 
         const int ntot = traces.size();
-        channelThreshold->resize(ntot, 0);
+        // Find max channel ID to size the vector correctly
+        int max_chid = 0;
+        for (int ind = 0; ind < ntot; ++ind) {
+            int chid = traces[ind]->channel();
+            if (chid > max_chid) max_chid = chid;
+        }
+        channelThreshold->resize(max_chid + 1, 0);
         for (int ind = 0; ind < ntot; ++ind) {
             const int chid = traces[ind]->channel();
             const double val = summary[ind];
@@ -242,6 +250,7 @@ bool Root::CelltreeFrameSink::operator()(const IFrame::pointer &frame, IFrame::p
         //}
 
         bthreshold->Fill();
+        delete channelThreshold;
     }
 
     // bad channels
@@ -268,13 +277,13 @@ bool Root::CelltreeFrameSink::operator()(const IFrame::pointer &frame, IFrame::p
             TBranch *be = Sim->Branch(Endname.c_str(), &End);
 
             for (auto const &chmask : it.second) {
-                Channel->push_back(chmask.first);
                 auto mask = chmask.second;
                 if (mask.size() != 1) {
                     std::cerr << "CelltreeFrameSink: Warning: channel mask: " << chmask.first
                               << " has >1 dead period [begin, end] \n";
                     continue;
                 }
+                Channel->push_back(chmask.first);
                 for (size_t ind = 0; ind < mask.size(); ++ind) {
                     Begin->push_back(mask[ind].first);
                     End->push_back(mask[ind].second);
@@ -284,6 +293,9 @@ bool Root::CelltreeFrameSink::operator()(const IFrame::pointer &frame, IFrame::p
             bch->Fill();
             bb->Fill();
             be->Fill();
+            delete Channel;
+            delete Begin;
+            delete End;
         }
     }
 

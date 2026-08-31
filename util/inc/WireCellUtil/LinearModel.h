@@ -16,13 +16,13 @@ namespace WireCell {
         Eigen::MatrixXd& GetX() { return _X; }
         Eigen::VectorXd& Getbeta() { return _beta; }
 
-        virtual void SetData(Eigen::MatrixXd X, Eigen::VectorXd y)
+        virtual void SetData(const Eigen::MatrixXd& X, const Eigen::VectorXd& y)
         {
             SetX(X);
             Sety(y);
         }
         virtual void Sety(Eigen::VectorXd y) { _y = y; }
-        virtual void SetX(Eigen::MatrixXd X)
+        virtual void SetX(const Eigen::MatrixXd& X)
         {
             _X = X;
             _beta = Eigen::VectorXd::Zero(X.cols());

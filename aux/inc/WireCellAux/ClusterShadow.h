@@ -73,6 +73,12 @@ namespace WireCell::Aux::ClusterShadow {
     graph_t shadow(const cluster_graph_t& cgraph,
                    const BlobShadow::graph_t& bsgraph);
 
+    // As above but from flat shadows (BlobShadow::shadow_list), which
+    // avoid the per-edge container overhead of the blob shadow graph.
+    graph_t shadow(const cluster_graph_t& cgraph,
+                   const BlobShadow::Shadows& shadows,
+                   blob_cluster_map_t & clusters);
+
 }
 
 

@@ -42,7 +42,8 @@ function(input, output, tpcid=0, view_crossed=[1,1,0],
     local tpcid_num = wc.intify(tpcid);
 
     local det = detector.subset(detconf[detname], [tpcid_num]);
-    local tpc = det.tpcs[tpcid_num];
+    // subset() returns only the selected TPC, re-indexed to position 0.
+    local tpc = det.tpcs[0];
 
     local controls = control_module(device=device,
                                     verbosity=wc.intify(verbosity),

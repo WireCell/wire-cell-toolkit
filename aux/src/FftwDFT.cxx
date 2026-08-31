@@ -26,11 +26,14 @@ using plan_val_t = fftwf_complex;
 static
 plan_key_t make_key(const void * src, void * dst, int nrows, int ncols, int dir, int axis=-1)
 {
-    ++axis;                     // need three positive values, default is both axis 
+    ++axis;                     // need three positive values, default is both axis
     bool inverse = dir == FFTW_BACKWARD;
     bool inplace = (dst==src);
-    bool aligned = ( (reinterpret_cast<size_t>(src)&15) | (reinterpret_cast<size_t>(dst)&15) ) == 0;
-    int64_t key = ( ( (((int64_t)nrows) << 32)| (ncols<<5 ) | (axis<<3) | (inverse<<2) | (inplace<<1) | aligned ) << 1 ) + 1;
+    // Drop 'aligned' from the key: plans are created with FFTW_UNALIGNED so a
+    // single plan serves any buffer alignment. Removing this address-derived bit
+    // from the key is what makes the cache reproducible across runs (heap
+    // addresses vary between processes under ASLR and even without it).
+    int64_t key = ( ( (((int64_t)nrows) << 32)| (ncols<<5 ) | (axis<<3) | (inverse<<2) | (inplace<<1) ) << 1 ) + 1;
     return key;
 }
 
@@ -94,7 +97,7 @@ void Aux::FftwDFT::fwd1d(const complex_t* in, complex_t* out, int ncols) const
     auto dst = pval_cast(out);
     auto key = make_key(src, dst, 1, ncols, dir);
     doit<plan_val_t>(mutex, plans, key, src, dst, [&]( ) {
-        return fftwf_plan_dft_1d(ncols, src, dst, dir, FFTW_ESTIMATE|FFTW_PRESERVE_INPUT);
+        return fftwf_plan_dft_1d(ncols, src, dst, dir, FFTW_ESTIMATE|FFTW_PRESERVE_INPUT|FFTW_UNALIGNED);
     }, fftwf_execute_dft);
 }
 void Aux::FftwDFT::inv1d(const complex_t* in, complex_t* out, int ncols) const
@@ -107,7 +110,7 @@ void Aux::FftwDFT::inv1d(const complex_t* in, complex_t* out, int ncols) const
     auto key = make_key(src, dst, 1, ncols, dir);
 
     doit<plan_val_t>(mutex, plans, key, src, dst, [&]( ) {
-        return fftwf_plan_dft_1d(ncols, src, dst, dir, FFTW_ESTIMATE|FFTW_PRESERVE_INPUT);
+        return fftwf_plan_dft_1d(ncols, src, dst, dir, FFTW_ESTIMATE|FFTW_PRESERVE_INPUT|FFTW_UNALIGNED);
     }, fftwf_execute_dft);
 
     // Apply 1/n normalization
@@ -116,6 +119,166 @@ void Aux::FftwDFT::inv1d(const complex_t* in, complex_t* out, int ncols) const
     }
 }
 
+
+void Aux::FftwDFT::fwd_r2c_1d(const scalar_t* in, complex_t* out, int size) const
+{
+    static std::shared_mutex mutex;
+    static plan_map_t plans;
+    auto src = const_cast<scalar_t*>(in);
+    auto dst = pval_cast(out);
+    auto key = make_key(src, dst, 1, size, FFTW_FORWARD);
+    auto plan = get_plan(mutex, plans, key);
+    if (!plan) {
+        std::unique_lock lock(mutex);
+        auto it = plans.find(key);
+        if (it == plans.end()) {
+            plan = fftwf_plan_dft_r2c_1d(size, src, dst,
+                                         FFTW_ESTIMATE | FFTW_PRESERVE_INPUT | FFTW_UNALIGNED);
+            plans[key] = plan;
+        }
+        else {
+            plan = it->second;
+        }
+    }
+    fftwf_execute_dft_r2c(plan, src, dst);
+    // FFTW fills the non-redundant lower half; mirror the rest so the
+    // caller sees the full-size Hermitian spectrum.
+    for (int ind = size / 2 + 1; ind < size; ++ind) {
+        out[ind] = std::conj(out[size - ind]);
+    }
+}
+
+void Aux::FftwDFT::inv_c2r_1d(const complex_t* in, scalar_t* out, int size) const
+{
+    static std::shared_mutex mutex;
+    static plan_map_t plans;
+    // c2r reads only the size/2+1 lower half of the spectrum (the
+    // Hermitian assumption); rank-1 out-of-place supports
+    // FFTW_PRESERVE_INPUT so the caller's spectrum is untouched.
+    auto src = pval_cast(in);
+    auto dst = out;
+    auto key = make_key(src, dst, 1, size, FFTW_BACKWARD);
+    auto plan = get_plan(mutex, plans, key);
+    if (!plan) {
+        std::unique_lock lock(mutex);
+        auto it = plans.find(key);
+        if (it == plans.end()) {
+            plan = fftwf_plan_dft_c2r_1d(size, src, dst,
+                                         FFTW_ESTIMATE | FFTW_PRESERVE_INPUT | FFTW_UNALIGNED);
+            plans[key] = plan;
+        }
+        else {
+            plan = it->second;
+        }
+    }
+    fftwf_execute_dft_c2r(plan, src, dst);
+    // Apply 1/n normalization
+    for (int ind = 0; ind < size; ++ind) {
+        out[ind] /= size;
+    }
+}
+
+void Aux::FftwDFT::fwd_r2c_1b(const scalar_t* in, complex_t* out,
+                              int nrows, int ncols, int axis) const
+{
+    static std::shared_mutex mutex;
+    static plan_map_t plans;
+    auto src = const_cast<scalar_t*>(in);
+    auto dst = pval_cast(out);
+    auto key = make_key(src, dst, nrows, ncols, FFTW_FORWARD, axis);
+    auto plan = get_plan(mutex, plans, key);
+    if (!plan) {
+        std::unique_lock lock(mutex);
+        auto it = plans.find(key);
+        if (it == plans.end()) {
+            const int rank = 1;
+            int n = ncols;      // along rows
+            int howmany = nrows;
+            int stride = 1;
+            int dist = ncols;
+            if (axis == 0) {    // along columns
+                n = nrows;
+                howmany = ncols;
+                stride = ncols;
+                dist = 1;
+            }
+            // The plan writes only the non-redundant n/2+1 lower half
+            // of each transform; dist/stride place it inside the
+            // full-size output array and the mirror below fills the rest.
+            plan = fftwf_plan_many_dft_r2c(rank, &n, howmany,
+                                           src, &n, stride, dist,
+                                           dst, &n, stride, dist,
+                                           FFTW_ESTIMATE | FFTW_PRESERVE_INPUT | FFTW_UNALIGNED);
+            plans[key] = plan;
+        }
+        else {
+            plan = it->second;
+        }
+    }
+    fftwf_execute_dft_r2c(plan, src, dst);
+    // Mirror to the full-size Hermitian spectrum along the transform axis.
+    if (axis) {
+        for (int irow = 0; irow < nrows; ++irow) {
+            complex_t* row = out + (size_t) irow * ncols;
+            for (int icol = ncols / 2 + 1; icol < ncols; ++icol) {
+                row[icol] = std::conj(row[ncols - icol]);
+            }
+        }
+    }
+    else {
+        for (int irow = nrows / 2 + 1; irow < nrows; ++irow) {
+            for (int icol = 0; icol < ncols; ++icol) {
+                out[(size_t) irow * ncols + icol] = std::conj(out[(size_t) (nrows - irow) * ncols + icol]);
+            }
+        }
+    }
+}
+
+void Aux::FftwDFT::inv_c2r_1b(const complex_t* in, scalar_t* out,
+                              int nrows, int ncols, int axis) const
+{
+    static std::shared_mutex mutex;
+    static plan_map_t plans;
+    // c2r reads only the n/2+1 lower half along the transform axis
+    // (the Hermitian assumption); rank-1 out-of-place supports
+    // FFTW_PRESERVE_INPUT so the caller's spectrum is untouched.
+    auto src = pval_cast(in);
+    auto dst = out;
+    auto key = make_key(src, dst, nrows, ncols, FFTW_BACKWARD, axis);
+    auto plan = get_plan(mutex, plans, key);
+    if (!plan) {
+        std::unique_lock lock(mutex);
+        auto it = plans.find(key);
+        if (it == plans.end()) {
+            const int rank = 1;
+            int n = ncols;      // along rows
+            int howmany = nrows;
+            int stride = 1;
+            int dist = ncols;
+            if (axis == 0) {    // along columns
+                n = nrows;
+                howmany = ncols;
+                stride = ncols;
+                dist = 1;
+            }
+            plan = fftwf_plan_many_dft_c2r(rank, &n, howmany,
+                                           src, &n, stride, dist,
+                                           dst, &n, stride, dist,
+                                           FFTW_ESTIMATE | FFTW_PRESERVE_INPUT | FFTW_UNALIGNED);
+            plans[key] = plan;
+        }
+        else {
+            plan = it->second;
+        }
+    }
+    fftwf_execute_dft_c2r(plan, src, dst);
+    // Apply 1/n normalization
+    const int norm = axis ? ncols : nrows;
+    const int ntot = ncols * nrows;
+    for (int ind = 0; ind < ntot; ++ind) {
+        out[ind] /= norm;
+    }
+}
 
 fftwf_plan plan_1b(fftwf_complex *in, fftwf_complex *out,
                    int nrows, int ncols, int sign, int axis)
@@ -135,7 +298,7 @@ fftwf_plan plan_1b(fftwf_complex *in, fftwf_complex *out,
     }
     int *inembed=&n, *onembed=&n;
 
-    unsigned int flags =  FFTW_ESTIMATE|FFTW_PRESERVE_INPUT;
+    unsigned int flags =  FFTW_ESTIMATE|FFTW_PRESERVE_INPUT|FFTW_UNALIGNED;
 
     return fftwf_plan_many_dft(rank, &n, howmany,
                                in, inembed,
@@ -192,7 +355,7 @@ void Aux::FftwDFT::fwd2d(const complex_t* in, complex_t* out, int nrows, int nco
     auto dst = pval_cast(out);
     auto key = make_key(src, dst, nrows, ncols, dir);
     doit<plan_val_t>(mutex, plans, key, src, dst, [&]( ) {
-        return fftwf_plan_dft_2d(ncols, nrows, src, dst, dir, FFTW_ESTIMATE|FFTW_PRESERVE_INPUT);
+        return fftwf_plan_dft_2d(ncols, nrows, src, dst, dir, FFTW_ESTIMATE|FFTW_PRESERVE_INPUT|FFTW_UNALIGNED);
     }, fftwf_execute_dft);
 }
 
@@ -206,7 +369,7 @@ void Aux::FftwDFT::inv2d(const complex_t* in, complex_t* out, int nrows, int nco
     auto dst = pval_cast(out);
     auto key = make_key(src, dst, nrows, ncols, dir);
     doit<plan_val_t>(mutex, plans, key, src, dst, [&]( ) {
-        return fftwf_plan_dft_2d(ncols, nrows, src, dst, dir, FFTW_ESTIMATE|FFTW_PRESERVE_INPUT);
+        return fftwf_plan_dft_2d(ncols, nrows, src, dst, dir, FFTW_ESTIMATE|FFTW_PRESERVE_INPUT|FFTW_UNALIGNED);
     }, fftwf_execute_dft);
 
     // reverse normalization
@@ -221,7 +384,7 @@ void Aux::FftwDFT::inv2d(const complex_t* in, complex_t* out, int nrows, int nco
 static
 plan_type transpose_plan_complex(plan_val_t *in, plan_val_t *out, int rows, int cols)
 {
-    const unsigned flags = FFTW_ESTIMATE; /* other flags are possible */
+    const unsigned flags = FFTW_ESTIMATE|FFTW_UNALIGNED; /* other flags are possible */
     fftw_iodim howmany_dims[2];
 
     howmany_dims[0].n  = rows;
@@ -253,7 +416,7 @@ void Aux::FftwDFT::transpose(const complex_t* in, complex_t* out,
 static
 plan_type transpose_plan_real(float *in, float *out, int rows, int cols)
 {
-    const unsigned flags = FFTW_ESTIMATE; /* other flags are possible */
+    const unsigned flags = FFTW_ESTIMATE|FFTW_UNALIGNED; /* other flags are possible */
     fftw_iodim howmany_dims[2];
 
     howmany_dims[0].n  = rows;

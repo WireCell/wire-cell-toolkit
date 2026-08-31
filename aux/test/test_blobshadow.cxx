@@ -18,7 +18,7 @@ struct FakeSlice : public ISlice {
     virtual int ident() const { return _ident; }
     virtual double start() const { THROW (RuntimeError()); }
     virtual double span() const { THROW (RuntimeError()); }
-    virtual map_t activity() const { THROW (RuntimeError()); }
+    virtual const map_t& activity() const { THROW (RuntimeError()); }
 };
 
 struct FakeBlob : public IBlob {

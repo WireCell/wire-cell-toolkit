@@ -48,7 +48,8 @@ static cluster_node_t to_channel(Json::Value jchan, const IWire::vector& wires)
 static cluster_node_t to_blob(Json::Value jblob,
                               ISlice::pointer islice,
                               IAnodeFace::pointer iface,
-                              const IWire::vector& wires)
+                              const IWire::vector& wires,
+                              bool restore_corners = false)
 {
     const int ident = jblob["ident"].asInt();
     const double value = jblob["val"].asDouble();
@@ -75,7 +76,25 @@ static cluster_node_t to_blob(Json::Value jblob,
         bshape.add(coords, strip);
     }
 
-    IBlob::pointer iblob = std::make_shared<SimpleBlob>(ident, value, error, bshape, islice, iface);
+    auto sblob = std::make_shared<SimpleBlob>(ident, value, error, bshape, islice, iface);
+
+    // Optionally carry the original imaging-time corners (x,y,z) stored in the
+    // JSON onto the blob.  The reloaded shape above omits the RayGrid boundary
+    // layers (see the "fixme" on the bounding box) so its re-derived corners can
+    // run past the wire boundary for 2-view (dead) blobs; the stored corners are
+    // correct.  Used only by the dead-area "corner" point cloud, so the shape
+    // and all geometry consumers are left untouched.
+    if (restore_corners && jblob.isMember("corners")) {
+        std::vector<Point> corners;
+        for (const auto& jc : jblob["corners"]) {
+            if (jc.isArray() && jc.size() >= 3) {
+                corners.emplace_back(jc[0].asDouble(), jc[1].asDouble(), jc[2].asDouble());
+            }
+        }
+        sblob->set_stored_corners(std::move(corners));
+    }
+
+    IBlob::pointer iblob = sblob;
     return cluster_node_t(iblob);
 }
 
@@ -317,7 +336,7 @@ cluster_graph_t ClusterLoader::load(const Json::Value& jgraph,
             const int sliceid = jobj["sliceid"].asInt();
             auto islice = slices[sliceid];
             WirePlaneId faceid(jobj["faceid"].asInt());
-            cgraph[vtx] = to_blob(jobj, islice, face(faceid), wires);
+            cgraph[vtx] = to_blob(jobj, islice, face(faceid), wires, m_restore_corners);
             continue;
         }
     }

@@ -96,40 +96,59 @@ Array& Array::operator=(Array&& rhs)
     return *this;
 }
 
-Array Array::slice(size_t position, size_t count, bool share) 
+size_t Array::jump_size() const
 {
     const size_t ndims = m_shape.size();
+    size_t jump = m_ele_size;
+    for (size_t idim=1; idim < ndims; ++idim) {
+        jump *= m_shape[idim];
+    }
+    return jump;
+}
+
+Array Array::slice(size_t position, size_t count, bool share) 
+{
     shape_t shape = m_shape;
     shape[0] = count;
 
     // The number of bytes into the flattened (possibly N-d) array where major
     // axis element position starts.
-    size_t start_bytes = m_ele_size * position;
-    for (size_t idim=1; idim < ndims; ++idim) {
-        start_bytes *= m_shape[idim];
-    }
+    const size_t start_bytes = jump_size() * position;
 
     // Build array on the slice 
     return Array(m_store.data() + start_bytes, m_dtype, shape, share);
 }
+
 Array Array::slice(size_t position, size_t count) const
 {
-    const size_t ndims = m_shape.size();
     shape_t shape = m_shape;
     shape[0] = count;
 
     // The number of bytes into the flattened (possibly N-d) array where major
     // axis element position starts.
-    size_t start_bytes = m_ele_size * position;
-    for (size_t idim=1; idim < ndims; ++idim) {
-        start_bytes *= m_shape[idim];
-    }
+    const size_t start_bytes = jump_size() * position;
 
     // Build array on the slice 
     return Array(m_store.data() + start_bytes, m_dtype, shape);
 }
 
-Array Array::zeros_like(size_t nmaj)
+Array Array::slice(const std::vector<size_t>& indices) const
+{
+    shape_t shape = m_shape;
+    shape[0] = indices.size();
+
+    std::vector<std::byte> dat;
+    const size_t jump = jump_size();
+    const std::byte* my_data = m_store.data();
+    for (size_t ind : indices) {
+        const std::byte* ptr = my_data + ind*jump;
+        dat.insert(dat.end(), ptr, ptr+jump);
+    }
+    return Array(dat.data(), m_dtype, shape);
+}
+
+
+Array Array::zeros_like(size_t nmaj) const
 {
     Array ret;
     ret.m_metadata = m_metadata;
@@ -150,6 +169,7 @@ Array Array::zeros_like(size_t nmaj)
     ret.update_span();
     return ret;
 }
+
 
 /// Return the total number of elements.
 size_t Array::num_elements() const

@@ -133,6 +133,38 @@ Dataset::const_selection_t Dataset::selection(const name_list_t& names) const
     return ret;
 }
 
+Dataset Dataset::subset(const name_list_t& names) const
+{
+    Dataset ret;
+    for (const auto& name : names) {
+        auto it = m_store.find(name);
+        if (it == m_store.end()) {
+            return Dataset();
+        }
+        Array arr(*it->second);
+        ret.add(name, std::move(arr));
+    }
+    return ret;
+}
+Dataset Dataset::subset(const std::vector<size_t>& indices, name_list_t names) const
+{
+    Dataset ret;
+    if (names.empty()) {
+        names = keys();
+    }
+    for (const auto& name : names) {
+        auto it = m_store.find(name);
+        if (it == m_store.end()) {
+            return Dataset();
+        }
+        auto arr = it->second->slice(indices);
+        if (0 == arr.size_major()) {
+            return Dataset();
+        }
+        ret.add(name, std::move(arr));
+    }
+    return ret;
+}
 
 template<typename MapType>
 auto map_keys(const MapType& m)
@@ -145,9 +177,9 @@ auto map_keys(const MapType& m)
 }
 
 
-Dataset::keys_t difference(const Dataset::keys_t& a, const Dataset::keys_t& b)
+Dataset::name_list_t difference(const Dataset::name_list_t& a, const Dataset::name_list_t& b)
 {
-    Dataset::keys_t diff;
+    Dataset::name_list_t diff;
     std::set_difference(a.begin(), a.end(),
                         b.begin(), b.end(),
                         std::inserter(diff, diff.end()));
@@ -163,9 +195,9 @@ Dataset Dataset::zeros_like(size_t nmaj)
     return ret;
 }
 
-Dataset::keys_t Dataset::keys() const
+Dataset::name_list_t Dataset::keys() const
 {
-    keys_t ret;
+    name_list_t ret;
     for (const auto& [k,_] : m_store) {
         ret.push_back(k);
     }

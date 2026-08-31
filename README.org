@@ -1,5 +1,10 @@
+#+BEGIN_COMMENT
+\mainpage
+#+END_COMMENT
+
 #+TITLE: Wire-Cell Toolkit 
 #+SETUPFILE: docs/setup-readme.org
+
 
 
 Welcome to the Wire-Cell Toolkit (WCT) source repository at https://github.com/wirecell/wire-cell-toolkit.
@@ -54,15 +59,21 @@ Black arrows are library dependencies, blue are for applications and gray are fo
 
 The dependencies for the ~WireCellUtil~ package are required.  The rest are optional.  Missing optional dependencies, or ones specifically turned off, will cause the dependent WCT package to not be built.
 
-Some external dependencies have explicit minimum required versions:
+Wire-Cell Toolkit's MINIMUM required versions for dependencies:
 
-- TBB (oneAPI) 2021.1.1
+- C++ 17
 - Boost 1.80.0
 - Eigen 3.4.0
-- FFTW 3.3.10
-- JsonCPP 1.9.4
-- SPDLOG 1.9.2 with external fmtlib
-- Jsonnet (better, Go-Jsonnet) 0.19.1
+- JsonCPP 1.94
+- Go Jsonnet 0.19.1 (C++ jsonnet works but is much slower)
+- SPDLOG 1.9.2 (with external and not bundled fmt)
+- fftw 3.3.10 (no mpi)
+- fmt 9
+- TBB (oneAPI) 2021.1.1 (suggested)
+- ROOT 6.28.04 (optional)
+
+
+MINIMUM is really a bare minimum and means if you go lower you will almost certainly hit some problems.  Going higher is encouraged.  If you find any of these versions are no longer compatible (need raising) [[https://github.com/WireCell/wire-cell-toolkit/issues][make an issue]].
 
 You may provide the necessary external software dependencies in a manner of your own choosing and some options include:
 
@@ -92,40 +103,22 @@ Users may also anonymously clone in the usual way:
 
 ** Configuring the source
 
-On well-behaved systems, configuring the source may be as simple as:
+On well-behaved systems, with dependencies in a =local/= directory, configuring the source is as simple as:
 
 #+BEGIN_EXAMPLE
-  $ ./wcb configure --prefix=/path/to/install
+  $ cmake -S toolkit -B build \
+          -DCMAKE_PREFIX_PATH="$PWD/local" \
+          -DCMAKE_INSTALL_PREFIX="$PWD/install"
 #+END_EXAMPLE
 
-Software dependencies which can not automatically be located in system areas or via ~pkg-config~ can be manually specified.  For a list of options run:
-
-#+BEGIN_EXAMPLE
-  $ ./wcb --help
-#+END_EXAMPLE
-
-Here is an example where some packages are found automatically and some need help and others are explicitly turned off:
-
-#+begin_example
-  $ ./wcb configure \
-          --prefix=$HOME/dev/wct/install \
-          --with-jsonnet=$HOME/opt/jsonnet \
-          --with-root=no
-  ...
-  Removing submodule "dfp" due to lack of external
-  Removing package "tbb" due to lack of external dependency
-  Removing package "root" due to lack of external dependency
-  Removing package "cuda" due to lack of external dependency
-  Configured for submodules: apps, cfg, gen, iface, img, pgraph, ress, sigproc, sio, util
-  'configure' finished successfully (5.683s)
-#+end_example
+Software dependencies that can not be automatically located can have their locations specified with ~-DWITH_<NAME>=<PREFIX>~ or to force automatic location of optional packages add ~-=DWITH_<NAME>=ON~.
 
 ** Building
 
 The libraries and programs may be built with:
 
 #+BEGIN_EXAMPLE
-  $ ./wcb
+  $ cmake --build build -j
 #+END_EXAMPLE
 
 ** Installing
@@ -133,20 +126,24 @@ The libraries and programs may be built with:
 To install:
 
 #+BEGIN_EXAMPLE
-  $ ./wcb install
+  $ cmake --install build
 #+END_EXAMPLE
-
-Optionally, the *reference* configuration and data files for one or more supported experiments may be installed by giving naming them with the ~--install-config~ option.  A name matches a sub-directory under [[file:cfg/pgrapher/experiment/][cfg/pgrapher/experiment/]] or the special ~all~ name will install all.
-
-#+begin_example
-  $ ./wcb --install-config=<name> install
-#+end_example
 
 ** Testing
 
-Running the tests can take a while but are off by default.  They may be run with:
+WCT comes with a large number of different types of tests which can be exercised via =ctest=.  The *doctest* target is the best compromise between coverage and speed.  In general, any failure is a bug but some failures require proper shell environment to find WCT data files.  Any failure of the *doctest* test is a bug.  To include tests, you must reconfigure.
+
 #+begin_example
-  $ ./wcb --tests
+$ cmake -S toolkit -B build \
+        -DCMAKE_PREFIX_PATH="$PWD/local" \
+        -DCMAKE_INSTALL_PREFIX="$PWD/install" \
+        -DWCT_WITH_TESTS=ON
+$ ctest --test-dir build -L doctest      # the single aggregated wcdoctest runner
+$ ctest --test-dir build -L atomic       # the test_*/atomic* unit tests
+$ ctest --test-dir build -L script       # interpreted (.py/.sh/.bats/.jsonnet) tests
+$ ctest --test-dir build -L history      # history-group tests (need test data, below)
+$ ctest --test-dir build -R WireCellUtil # by name regex
+$ ctest --test-dir build -N              # list without running
 #+end_example
 
 See [[file:tests/README.org]] for more details on testing.
@@ -159,5 +156,7 @@ To make releases, the above details are baked into two test scripts [[https://gi
 
 * Meta
 
-Prior to 0.25.0, ~wcb~ was a custom version of [[https://waf.io][Waf]] and is now simply a copy of ~waf~.  The customized tools are held in the [[file:waft/]] directory.
+- Prior to and including version 0.37.0, Waf (=wcb=) was the only build mechanism.  This is still supported but use of =cmake= is now recommended.  
+
+- Prior to 0.25.0, ~wcb~ was a custom version of [[https://waf.io][Waf]] and is now simply a copy of ~waf~.  The customized tools are held in the [[file:waft/]] directory.
 

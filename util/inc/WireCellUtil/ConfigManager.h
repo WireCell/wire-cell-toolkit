@@ -25,6 +25,10 @@ namespace WireCell {
         ~ConfigManager();
 
         /// Extend current list of configuration objects with more.
+        /// Pass by value (kept for ABI compatibility with pre-built binaries
+        /// such as cvmfs libWireCellApps.so); the body consumes `more` via
+        /// per-entry std::move into m_top, so new callers should pass an
+        /// rvalue (e.g. std::move(cfg)) to skip the caller-side deep-copy.
         void extend(Configuration more);
 
         // Add a fully-built configurable configuration for an instance, return its index
@@ -34,7 +38,7 @@ namespace WireCell {
         int add(Configuration& data, const std::string& type, const std::string& name = "");
 
         /// Return top-level, aggregate configuration
-        Configuration all() const { return m_top; }
+        const Configuration& all() const { return m_top; }
 
         Configuration at(int index) const;
 
@@ -48,9 +52,17 @@ namespace WireCell {
         /// Remove configuration at given index and return it.
         Configuration pop(int ind);
 
+        /// Drop the bulk "data" sub-tree from every top-level entry, retaining
+        /// only "type" and "name".  Useful after every IConfigurable has been
+        /// constructed and configured: the resident Json::Value tree (which
+        /// can be multiple GB for ICARUS-scale configs) is no longer needed
+        /// for downstream operation since finalize() only consults type/name.
+        void clear_data();
+
         /// Return a list of all known configurables
         typedef std::pair<std::string, std::string> ClassInstance;
         std::vector<ClassInstance> configurables() const;
+
     };
 
 }  // namespace WireCell

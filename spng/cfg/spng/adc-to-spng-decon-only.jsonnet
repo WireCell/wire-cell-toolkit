@@ -40,6 +40,7 @@ function(input,
          engine='Pgrapher',
          device='cpu',
          dump="",
+         rebin=4,
          outstage='gauss', //gauss, dnnroi, decon, tightroi?
          verbosity=0)
     
@@ -86,7 +87,6 @@ function(input,
 
 
     // True if care about cross view info for the view.
-    local rebin = 4;
 
     local source = io.frame_array_source(input,
                                          tags=if std.length(intag) == 0 then [] else [intag]);

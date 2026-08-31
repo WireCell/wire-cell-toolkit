@@ -21,12 +21,14 @@ bats_load_library wct-bats.sh
     wcb_env
     [[ -n "$PREFIX" ]]
 
+    if [ ! -d $PREFIX/include/WireCellUtil ] ; then
+        echo "Skip test for $BuildConfig because WCT is not installed"
+        return
+    fi
+
     echo "Expect build config file installed at: $PREFIX/include/$BuildConfig"
     [[ -f "$PREFIX/include/$BuildConfig" ]]
-}
 
-@test "external build with config" {
-    wcb_env
     [[ -n "$CXX" ]]
 
     cd_tmp

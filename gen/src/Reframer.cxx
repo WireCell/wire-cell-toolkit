@@ -41,6 +41,7 @@ WireCell::Configuration Gen::Reframer::default_configuration() const
     cfg["toffset"] = m_toffset;
     cfg["fill"] = m_fill;
     cfg["ignore_tags"] = m_ignore_tags;
+    cfg["keep_masks"] = m_keep_masks;
 
     return cfg;
 }
@@ -61,15 +62,20 @@ void Gen::Reframer::configure(const WireCell::Configuration& cfg)
     m_fill = get(cfg, "fill", m_fill);
     m_nticks = get(cfg, "nticks", m_nticks);
     m_ignore_tags = get(cfg, "ignore_tags", m_ignore_tags);
+    m_keep_masks = get(cfg, "keep_masks", m_keep_masks);
     if ( m_ignore_tags && m_input_tags.size() ) {
         raise<ValueError>("providing and ignoring tags is not consistent");
     }
 }
 
 std::pair<ITrace::vector, IFrame::trace_summary_t> Gen::Reframer::process_one(const ITrace::vector& itraces, const IFrame::trace_summary_t& isummary) {
-    if(isummary.size() !=0 && itraces.size() != isummary.size()) {
-        log->error("itraces.size() != isummary.size()");
-        THROW(RuntimeError() << errmsg{"itraces.size() != isummary.size()"});
+    if(isummary.size() != 0 && isummary.size() < itraces.size()) {
+        log->error("isummary.size()={} < itraces.size()={}", isummary.size(), itraces.size());
+        THROW(RuntimeError() << errmsg{"isummary.size() < itraces.size()"});
+    }
+    if(isummary.size() != 0 && isummary.size() != itraces.size()) {
+        log->warn("isummary.size()={} != itraces.size()={}, using first {} summary values",
+                  isummary.size(), itraces.size(), itraces.size());
     }
     // Storage for samples indexed by channel ident.
     std::map<int, std::vector<float> > waves;
@@ -144,6 +150,8 @@ bool Gen::Reframer::operator()(const input_pointer& inframe, output_pointer& out
         return true;
     }
 
+    log->debug("input : {}", Aux::taginfo(inframe, 1));
+
     // Get traces to consider
     ITrace::vector out_traces;
     std::unordered_map< std::string, IFrame::trace_list_t> tag_indicies;
@@ -160,12 +168,15 @@ bool Gen::Reframer::operator()(const input_pointer& inframe, output_pointer& out
                 log->warn("will combine traces from {} trace tags in frame:{}", ttags.size(), ss.str());
             }
         }
+        log->debug("reframing monolithic frame");
         out_traces = process_one(*(inframe->traces()));
     }
     else {
         for (const auto& tag : m_input_tags) {
             const auto& isummary = inframe->trace_summary(tag);
             ITrace::vector in_traces = Aux::tagged_traces(inframe, tag);
+            log->debug("reframing tag {} with {} traces", tag, in_traces.size());
+
             auto [out_one, threshold] = process_one(in_traces, isummary);
             tag_summary[tag] = threshold;
             size_t nbeg = out_traces.size();
@@ -177,7 +188,8 @@ bool Gen::Reframer::operator()(const input_pointer& inframe, output_pointer& out
     }
 
     auto sframe = make_shared<SimpleFrame>(inframe->ident(), inframe->time() + m_toffset + m_tbin * inframe->tick(),
-                                           out_traces, inframe->tick());
+                                           out_traces, inframe->tick(),
+                                           m_keep_masks ? inframe->masks() : Waveform::ChannelMaskMap());
     if (! m_frame_tag.empty()) {
         sframe->tag_frame(m_frame_tag);
     }
@@ -188,9 +200,7 @@ bool Gen::Reframer::operator()(const input_pointer& inframe, output_pointer& out
 
     outframe = sframe;
 
-    log->debug("input : {}", Aux::taginfo(inframe));
-    log->debug("output: {}", Aux::taginfo(outframe));
-
+    log->debug("output: {}", Aux::taginfo(outframe, 1));
     ++m_count;
     return true;
 }

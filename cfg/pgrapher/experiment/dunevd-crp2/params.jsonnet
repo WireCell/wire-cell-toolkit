@@ -24,7 +24,8 @@ base {
         // start.  Garfield calcualtions start somewhere relative to
         // something, here's where that is made concrete.  This MUST
         // match what field response functions also used.
-        response_plane: 18.92*wc.cm, // relative to collection wires
+        response_plane: 18.1*wc.cm, // relative to collection wires
+                                    // synced to protodunevd / params.files.fields
         local res_plane = 0.5*apa_w2w + self.response_plane,
 
         // The cathode plane is like the anode cut off plane.  Any
@@ -67,6 +68,10 @@ base {
     },
 
     adc: super.adc {
+        // ADC resolution (bits): restores the default removed from the
+        // shared base params in commit 41e02736 (pre-41e02736 inherited 12).
+        resolution: 12,
+
         // per tdr, chapter 2
         // induction plane: 2350 ADC, collection plane: 900 ADC
         baselines: [1003.4*wc.millivolt,1003.4*wc.millivolt,507.7*wc.millivolt],
@@ -79,9 +84,13 @@ base {
     },
 
     elec: super.elec {
+      // FE gain: restores the default removed from the shared base in
+      // commit 41e02736.  JsonElecResponse loads its response from file,
+      // but the jsonnet still requires the field to exist.
+      gain: 14.0*wc.mV/wc.fC,
       type: "JsonElecResponse",
       filename: "dunevd-coldbox-elecresp-top-psnorm_400.json.bz2",
-      postgain: 1.0,
+      postgain: 1.36, // synced to protodunevd top elec: 11mV/fC, 1.94 -> 14mV/fC
     },
 
     sim: super.sim {
@@ -117,10 +126,12 @@ base {
         wires: "dunevdcrp2-wires-larsoft-v1.json.bz2",
 
         fields: [
-            "dunevd-resp-isoc3views-18d92.json.bz2",
+            // synced to protodunevd field response (CRP, 18.1 cm response plane)
+            "protodunevd_FR_imbalance3p_260501.json.bz2",
         ],
 
-        noise: "protodune-noise-spectra-v1.json.bz2",
+        // synced to protodunevd top-drift electronics-noise spectra
+        noise: "pdvd-top-noise-spectra-v3.json.bz2",
 
 
         chresp: null,

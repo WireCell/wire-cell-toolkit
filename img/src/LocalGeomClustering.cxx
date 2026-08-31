@@ -51,8 +51,10 @@ bool LocalGeomClustering::operator()(const input_pointer& in, output_pointer& ou
         log->debug("EOS");
         return true;
     }
-    const auto in_graph = in->graph();
-    log->debug("in_graph: {}", dumps(in_graph));
+    const auto& in_graph = in->graph();
+    // dumps() serializes the whole graph to JSON; it is a log->debug ARGUMENT (always
+    // evaluated), so guard it behind the level check to avoid the cost at -L info.
+    if (log->level() <= spdlog::level::debug) log->debug("in_graph: {}", dumps(in_graph));
 
     /// Find b-b clusters using old edges
     std::unordered_map<cluster_vertex_t, int> clusters;
@@ -84,21 +86,25 @@ bool LocalGeomClustering::operator()(const input_pointer& in, output_pointer& ou
     /// FIXME: guaranteed identical vdesc?
     boost::copy_graph(fg_no_bb, cg_new_bb);
     /// DEBUGONLY:
-    log->debug("rm bb: {}", dumps(cg_new_bb));
+    if (log->level() <= spdlog::level::debug) log->debug("rm bb: {}", dumps(cg_new_bb));
     grouped_geom_clustering(cg_new_bb, m_clustering_policy, clusters);
 
-    /// DEBUGONLY:
-    {
+    /// DEBUGONLY: this connected_components only feeds the log line below (the result
+    /// overwrites `clusters`, which is not used after this point) -- guard it so the
+    /// graph traversal does not run at production log levels (cf. GlobalGeomClustering).
+    if (log->level() <= spdlog::level::debug) {
         Filtered bcg(cg_new_bb, {}, [&](auto vtx) { return cg_new_bb[vtx].code() == 'b'; });
         auto nclust = boost::connected_components(bcg, boost::make_assoc_property_map(clusters));
         log->debug("out #clusters {}", nclust);
     }
 
     /// DEBUGONLY:
-    log->debug("in: {}", dumps(in_graph));
-    log->debug("out: {}", dumps(cg_new_bb));
+    if (log->level() <= spdlog::level::debug) {
+        log->debug("in: {}", dumps(in_graph));
+        log->debug("out: {}", dumps(cg_new_bb));
+    }
 
-    out = std::make_shared<Aux::SimpleCluster>(cg_new_bb, in->ident());
+    out = std::make_shared<Aux::SimpleCluster>(std::move(cg_new_bb), in->ident());
     if (m_dryrun) {
         out = std::make_shared<Aux::SimpleCluster>(in_graph, in->ident());
     }

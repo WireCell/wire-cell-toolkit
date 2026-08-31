@@ -50,6 +50,9 @@ namespace WireCell {
     /// memory is constrained and double precision is not required.
     typedef D3Vector<float> PointF;
 
+    /** NOTE: BoundingBox class provides a replacement for some of these
+     * methods. */
+
     /** Return true if point is contained in a rectangular solid
      * described by the ray bounds running between diagonally opposed
      * corners.*/
@@ -81,6 +84,18 @@ namespace WireCell {
      * projected onto the ray's direction. */
     double ray_dist(const Ray& ray, const Point& point);
 
+    /** Return the perpendicular distance from a point to the infinite line
+     * defined by the ray. This is the shortest distance from the point to the line. */
+    double ray_closest_dis(const Ray& ray, const Point& point);
+
+    /** Return the shortest distance between two infinite lines defined by the rays.
+     * For skew lines, this is the distance between the two closest approach points. */
+    double ray_closest_dis(const Ray& ray1, const Ray& ray2);
+
+    /** Return a pair of points representing the closest points on two infinite lines
+     * defined by the rays. The first point is on ray1, the second on ray2. */
+    std::pair<Point, Point> ray_closest_points(const Ray& ray1, const Ray& ray2);
+
     /** Return the volume of a box aligned with axes and with the ray
      * at opposite corners. */
     double ray_volume(const Ray& ray);
@@ -88,6 +103,14 @@ namespace WireCell {
     /** Return the ray representing the intersection of two BoundingBox. */
     Ray box_intersect(const Ray& r1, const Ray& r2);
 
+    /** Return true if the line segment crosses the plane.  The plane is defined
+     * by a point and a normal vector. */
+    bool plane_split(const Point& point, const Vector& normal, const Ray& segment);
+
+    /** Return the point of intersection for a line drawn through the segment and a plane. */ 
+    Point plane_intersection(const Point& point, const Vector& normal, const Ray& segment);
+
+    /// What follows is to support use of Point/Ray with Configuration objects and iostreams.
     template <>
     inline  // fixme: ignores default
         WireCell::Point

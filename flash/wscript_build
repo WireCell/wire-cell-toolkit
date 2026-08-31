@@ -1,0 +1,1 @@
+bld.smplpkg('WireCellFlash', use='WireCellUtil WireCellIface WireCellAux')

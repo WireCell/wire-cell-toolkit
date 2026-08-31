@@ -1,0 +1,3312 @@
+#include "WireCellClus/IEnsembleVisitor.h"
+#include <optional>
+#include "WireCellClus/ClusteringFuncs.h"
+#include "WireCellClus/ClusteringFuncsMixins.h"
+#include "WireCellClus/ParticleDataSet.h"
+#include "WireCellClus/FiducialUtils.h"
+#include "WireCellIface/IConfigurable.h"
+#include "WireCellUtil/NamedFactory.h"
+#include "WireCellUtil/Logging.h"
+#include "WireCellUtil/Persist.h"  // resolve() the TrackFitting config via WIRECELL_PATH
+#include "WireCellClus/PRGraph.h"
+#include "WireCellClus/TrackFitting.h"  
+#include "WireCellClus/TrackFittingPresets.h"
+#include "WireCellClus/PRSegmentFunctions.h"
+
+#include "WireCellIface/IScalarFunction.h"
+#include "WireCellUtil/KSTest.h"
+#include "WireCellUtil/PointCloudDataset.h"
+
+
+
+
+class TaggerCheckSTM;
+WIRECELL_FACTORY(TaggerCheckSTM, TaggerCheckSTM,
+                 WireCell::IConfigurable, WireCell::Clus::IEnsembleVisitor)
+
+using namespace WireCell;
+using namespace WireCell::Clus;
+using namespace WireCell::Clus::Facade;
+
+static auto s_log = WireCell::Log::logger("clus.NeutrinoPattern");
+
+struct edge_base_t {
+    typedef boost::edge_property_tag kind;
+};
+
+/**
+ * Clustering function that checks the main cluster from clustering_recovering_bundle
+ * for Short Track Muon (STM) characteristics and sets the STM flag when conditions are met.
+ * This function works on clusters that have already been processed by clustering_recovering_bundle.
+ */
+class TaggerCheckSTM : public IConfigurable, public Clus::IEnsembleVisitor, private Clus::NeedDV, private Clus::NeedPCTS, private Clus::NeedRecombModel, private Clus::NeedParticleData, private Clus::NeedFiducial {
+public:
+    TaggerCheckSTM() {
+        // Initialize with default preset
+        m_track_fitter = TrackFittingPresets::create_with_current_values();
+    }
+    virtual ~TaggerCheckSTM() {}
+
+    virtual void configure(const WireCell::Configuration& config) {
+        NeedDV::configure(config);
+        NeedPCTS::configure(config); 
+        NeedRecombModel::configure(config);
+        NeedParticleData::configure(config);  
+
+        m_grouping_name = get<std::string>(config, "grouping", "live");
+        // See the visit() comment: default false = historical behavior.
+        m_require_in_scope = get<bool>(config, "require_in_scope", m_require_in_scope);
+
+        // Fiducial volume for the containment (cluster_fc_check) gate.
+        //
+        // "fiducial" absent => the historical fallback, FiducialUtils ->
+        // DetectorVolumes::contained() = the union of per-(apa,face)
+        // IAnodeFace::sensitive() boxes with NO margin.  That volume is NOT the
+        // one TaggerCheckTGM and TaggerCheckFC use, and the difference is not
+        // small: AnodePlane builds each sensitive box as x in [anode_x,
+        // cathode_x], so it runs to the wire plane and exceeds a metadata FV box
+        // at every wall before any margin is applied (SBND: 0.40 cm in x, 0.65
+        // in y, 0.85 in z), and it is holed at the CPA slab that TGM's single
+        // cross-cathode box spans.  A cluster ending in that shell is "fully
+        // contained" here -- so check_stm_conditions returns at Mid Point A and
+        // NO fit is ever attempted -- while being an exiter to TGM/FC.  On a
+        // 30-event SBND sample 96 of the 147 clusters skipped as contained were
+        // called exiters by TaggerCheckFC, all 96 through the box alone.
+        //
+        // The prototype has no such split: check_stm, check_tgm and
+        // check_fully_contained are all members of ONE WCP2dToy/WCPPID
+        // ToyFiducial object (prototype pid/src/ToyFiducial.cxx:405 check_stm,
+        // pid/src/Cosmic_tagger.h:1331 check_tgm, 2dtoy/src/ToyFiducial.cxx:816
+        // check_fully_contained) and all call the same
+        // inside_fiducial_volume(p, offset_x) with tolerance_vec = NULL, i.e.
+        // the identical boundary polygons -- inset once in the constructor by
+        // boundary_dis_cut = 3 cm (uboone_nusel_app/apps/
+        // prod-wire-cell-matching-nusel.cxx:351).  Setting "fiducial" +
+        // "fv_tolerance" to the values TaggerCheckTGM gets therefore RESTORES
+        // prototype parity rather than inventing a new volume.
+        //
+        // NeedFiducial::configure runs ONLY when the key is present: it
+        // otherwise falls back to the type-only name "DetectorVolumes", which is
+        // not an instantiated component in the SBND PR config (it is named
+        // dv-apa0-1) and would throw.  Same guard as TaggerCheckFC.cxx:82.
+        m_use_fiducial = !config["fiducial"].isNull();
+        if (m_use_fiducial) NeedFiducial::configure(config);
+        // fv_tolerance: [x_lo,x_hi,y_lo,y_hi,z_lo,z_hi] margins, negative =
+        // inset (FiducialUtils::inside_fiducial_volume convention; 3 or 1
+        // element also accepted).  Only the ENDPOINT containment tests exist in
+        // cluster_fc_check, so TaggerCheckTGM's separate interior_fv_tolerance
+        // has no counterpart here and none is needed.
+        auto tol = config["fv_tolerance"];
+        if (!tol.isNull() && tol.isArray()) {
+            m_fv_tolerance.clear();
+            for (const auto& t : tol) m_fv_tolerance.push_back(t.asDouble());
+        }
+        if (m_use_fiducial) {
+            SPDLOG_LOGGER_DEBUG(s_log, "configure: TaggerCheckSTM: containment uses the configured fiducial with {} tolerance value(s)",
+                                m_fv_tolerance.size());
+        }
+
+        // Optional detector-specific shorted-wire-region guard for find_first_kink.
+        // Provide as a 2-element array [w_min, w_max] (W-wire indices, exclusive).
+        // Leave empty (default) to disable. Example for UBoone: [7135, 7264].
+        auto syw = config["shorted_y_w_range"];
+        if (!syw.isNull() && syw.isArray() && syw.size() == 2) {
+            m_shorted_y_w_min = syw[0].asInt();
+            m_shorted_y_w_max = syw[1].asInt();
+        }
+
+        // save_stm_fit (default false = byte-identical legacy): persist the
+        // per-pass final track fits as cluster PCs (stm_fit/stm_pass/stm_eval)
+        // and hand an accumulator TrackFitting to the grouping slot "stm".
+        m_save_stm_fit = get<bool>(config, "save_stm_fit", m_save_stm_fit);
+        if (m_save_stm_fit) {
+            SPDLOG_LOGGER_DEBUG(s_log, "configure: TaggerCheckSTM: save_stm_fit ON");
+        }
+
+        // mip_dqdx (electrons per cm; C++ default 50e3 = the MicroBooNE value,
+        // so an absent key is byte-identical to the pre-knob code).  See the
+        // m_mip_dqdx declaration for the two roles this one number drives.
+        m_mip_dqdx = get<double>(config, "mip_dqdx", m_mip_dqdx);
+        if (m_mip_dqdx != 50e3) {
+            SPDLOG_LOGGER_DEBUG(s_log, "configure: TaggerCheckSTM: mip_dqdx = {} e/cm (default 50000)", m_mip_dqdx);
+        }
+
+        // accept_guards (C++ default false => byte-identical legacy): the
+        // doc-63 round-1 pass-level acceptance guards, designed against the
+        // owner-adjudicated 72-bundle baseline of sbnd_xin/docs/62 (every
+        // threshold measured there; see docs/63 sec 1 for the separations and
+        // margins).  Three guards, all rejecting an acceptance the legacy
+        // eval would have granted -- they can only turn STM into not-STM:
+        //   1. charge desert: the fitted muon segment bridges >= 3 cm of
+        //      essentially chargeless path (dQ/dx < 0.02 MIP) -- the fit ran
+        //      across detached objects (one-objectness, doc 61 sec 5e);
+        //   2. spike-not-ramp: the "Bragg" is a spike (peak within 1.5 cm of
+        //      the stop > 3.2x the 2-6 cm base) with a cold 1.5-4 cm shoulder
+        //      (< 1.8 MIP) -- a nu-vertex signature, not a stopping muon,
+        //      whose ramp elevates the shoulder;
+        //   3. ratio2 cap (inside eval_stm_core): the first acceptance branch
+        //      checks only that flat-MIP is a worse SHAPE than the muon
+        //      hypothesis, never that the measured charge is muon-NORMALIZED;
+        //      ratio2 > 2.0 means the accepted window sums more than 2x
+        //      below MIP -- a ghost, not an under-collected muon.
+        m_accept_guards = get<bool>(config, "accept_guards", m_accept_guards);
+        m_guard_desert_cm = get<double>(config, "guard_desert_cm", m_guard_desert_cm);
+        m_guard_desert_frac = get<double>(config, "guard_desert_frac", m_guard_desert_frac);
+        m_guard_spike_ratio = get<double>(config, "guard_spike_ratio", m_guard_spike_ratio);
+        m_guard_spike_shoulder = get<double>(config, "guard_spike_shoulder", m_guard_spike_shoulder);
+        m_guard_ratio2_max = get<double>(config, "guard_ratio2_max", m_guard_ratio2_max);
+        if (m_accept_guards) {
+            SPDLOG_LOGGER_DEBUG(s_log, "configure: TaggerCheckSTM: accept_guards ON (desert>={}cm@<{}MIP, spike>{}@shoulder<{}MIP, ratio2>{})",
+                                m_guard_desert_cm, m_guard_desert_frac,
+                                m_guard_spike_ratio, m_guard_spike_shoulder, m_guard_ratio2_max);
+        }
+
+        // cathode_guard (C++ default false => byte-identical legacy): the
+        // doc-63 round-3 cathode-truncation veto.  A track whose fitted stop
+        // sits within guard_cathode_cm of the CATHODE plane with no Bragg
+        // rise (end peak < guard_cathode_peak x MIP) did not stop -- its
+        // charge continues into the other TPC uncollected in this cluster
+        // (SBND CPA at x ~ 0).  Full-population survey (all 153 d59k STM
+        // tags): the two owner-rejected flat tracks 72586 (|x| = 2.8, peak
+        // 1.95) and 392200 (1.1, 1.08) are exactly this; the near-cathode
+        // GENUINE stops carry real Braggs (289343: 6.3 cm, 5.74 MIP; 281148:
+        // 2.2 cm, 3.31 MIP) and pass one or both conditions.  docs/63 sec 4
+        // round 3.
+        m_cathode_guard = get<bool>(config, "cathode_guard", m_cathode_guard);
+        m_guard_cathode_cm = get<double>(config, "guard_cathode_cm", m_guard_cathode_cm);
+        m_guard_cathode_peak = get<double>(config, "guard_cathode_peak", m_guard_cathode_peak);
+        if (m_cathode_guard) {
+            SPDLOG_LOGGER_DEBUG(s_log, "configure: TaggerCheckSTM: cathode_guard ON (stop<{}cm of cathode with end peak<{}MIP)",
+                                m_guard_cathode_cm, m_guard_cathode_peak);
+        }
+
+        // second_track_guard (C++ default false => byte-identical legacy):
+        // the doc-63 round-4b/4c vetoes on a second MIP TRACK the accepted
+        // fit tolerates.  Full-d59k survey (docs/63 sec 1.7):
+        //   4b -- a leftover past the kink that is LONG and STRAIGHT is a
+        //   second track (V topology, 353223:15: 28.6 cm, straightness
+        //   0.972), not a Michel/overshoot (correct STMs: left_L <= 22.3 cm,
+        //   and <= 21.1 cm among straight ones);
+        //   4c -- a search_other_tracks segment that is LONG at MIP dQ/dx is
+        //   a second track regardless of straightness (349241:15: 20.4 cm at
+        //   1.00 MIP escaped the len<25 && medQ<1 Michel clause; the longest
+        //   MIP-like segment on any correct STM is 12.4 cm).
+        m_second_track_guard = get<bool>(config, "second_track_guard", m_second_track_guard);
+        m_guard_left_track_cm = get<double>(config, "guard_left_track_cm", m_guard_left_track_cm);
+        m_guard_left_track_straight = get<double>(config, "guard_left_track_straight", m_guard_left_track_straight);
+        m_guard_seg_track_cm = get<double>(config, "guard_seg_track_cm", m_guard_seg_track_cm);
+        m_guard_seg_mip_lo = get<double>(config, "guard_seg_mip_lo", m_guard_seg_mip_lo);
+        m_guard_seg_mip_hi = get<double>(config, "guard_seg_mip_hi", m_guard_seg_mip_hi);
+        if (m_second_track_guard) {
+            SPDLOG_LOGGER_DEBUG(s_log, "configure: TaggerCheckSTM: second_track_guard ON (leftover>{}cm@straight>{}, seg>{}cm@{}-{}MIP)",
+                                m_guard_left_track_cm, m_guard_left_track_straight,
+                                m_guard_seg_track_cm, m_guard_seg_mip_lo, m_guard_seg_mip_hi);
+        }
+
+        // proton_muon_guard (C++ default false => byte-identical legacy): the
+        // doc-63 round-2 muon-consistency guard on detect_proton's end-proton
+        // branches.  The doc-62 baseline's one missed STM (evt 62613 main 17)
+        // was killed by the dQ_dx[max_bin] > 4.3 MIP && ks3 > 0.03 clause by
+        // margins of 0.0007 and 0.003 while its end region matched the muon
+        // hypothesis almost perfectly (ks1 = 0.030, ratio3 = 1.06); the owner-
+        // confirmed proton rejections have ks1 = 0.063 / ratio3 = 1.22
+        // (319809) or fired through the delta-ray path (288859), which this
+        // guard does not touch.  See sbnd_xin/docs/63 sec 1.4.
+        m_proton_muon_guard = get<bool>(config, "proton_muon_guard", m_proton_muon_guard);
+        m_guard_proton_ks1 = get<double>(config, "guard_proton_ks1", m_guard_proton_ks1);
+        m_guard_proton_ratio3 = get<double>(config, "guard_proton_ratio3", m_guard_proton_ratio3);
+        if (m_proton_muon_guard) {
+            SPDLOG_LOGGER_DEBUG(s_log, "configure: TaggerCheckSTM: proton_muon_guard ON (ks1<{}, ratio3<{})",
+                                m_guard_proton_ks1, m_guard_proton_ratio3);
+        }
+
+        // doc-66 sec 12 diffusion-margin cut package (C++ defaults = the
+        // prototype's original constants => absent keys are byte-identical
+        // legacy).  The 4.0/8.8 diffusion revert moved four discriminants
+        // across these fixed thresholds by hairline margins on four SBND
+        // bundles the owner's hand scan adjudicated (sbnd_xin/docs/66 sec
+        // 12.1); the SBND production values 6.5 cm / 1.05 / 0.055 / 4.1 were
+        // chosen from a full-sample margin sweep with zero measured
+        // collateral (sec 12.2).
+        m_michel_res_len_cut = get<double>(config, "michel_res_length_cut", m_michel_res_len_cut);
+        m_proton_tm_max = get<double>(config, "proton_tm_max", m_proton_tm_max);
+        m_proton_b_ks2_max = get<double>(config, "proton_b_ks2_max", m_proton_b_ks2_max);
+        m_proton_c_peak_max = get<double>(config, "proton_c_peak_max", m_proton_c_peak_max);
+        if (m_michel_res_len_cut != 6.0 * units::cm || m_proton_tm_max != 1.0 ||
+            m_proton_b_ks2_max != 0.05 || m_proton_c_peak_max != 4.3) {
+            SPDLOG_LOGGER_DEBUG(s_log,
+                "configure: TaggerCheckSTM: doc-66 cut package (michel_res>{:.1f}cm, tm<{}, b_ks2<{}, c_peak>{})",
+                m_michel_res_len_cut / units::cm, m_proton_tm_max, m_proton_b_ks2_max, m_proton_c_peak_max);
+        }
+
+        // deficit_guard + vertex_kink_guard (C++ defaults false =>
+        // byte-identical legacy): the doc-63 round-5 vetoes on the STOP
+        // REGION itself.  Full-d59k survey (docs/63 sec 1.8):
+        //   5a -- an end whose last-5cm median dQ/dx is below ~0.6 MIP with
+        //   no charge bump at all in the last 15 cm (max < 2.0 MIP) is a
+        //   reconstruction truncation (321371:18: 0.43 MIP median, 1.30 max;
+        //   correct STMs bottom out at 0.72, and the truncated/overshoot
+        //   Bragg cases 353487:3 and 283485:15 are kept by their bumps);
+        //   5b -- a sharp (>45 deg) turn within 12 cm of the stop into a
+        //   >2.2 MIP prong is a nu vertex plus proton, not a Bragg rise
+        //   (402330:1: 53.5 deg into 3.67 MIP; sharpest correct turn with a
+        //   hot prong is 34.8 deg).
+        m_deficit_guard = get<bool>(config, "deficit_guard", m_deficit_guard);
+        m_guard_deficit_med = get<double>(config, "guard_deficit_med", m_guard_deficit_med);
+        m_guard_deficit_bragg = get<double>(config, "guard_deficit_bragg", m_guard_deficit_bragg);
+        if (m_deficit_guard) {
+            SPDLOG_LOGGER_DEBUG(s_log, "configure: TaggerCheckSTM: deficit_guard ON (end5 med<{} MIP && last15 max<{} MIP)",
+                                m_guard_deficit_med, m_guard_deficit_bragg);
+        }
+        m_vertex_kink_guard = get<bool>(config, "vertex_kink_guard", m_vertex_kink_guard);
+        m_guard_vertex_turn = get<double>(config, "guard_vertex_turn", m_guard_vertex_turn);
+        m_guard_vertex_mip = get<double>(config, "guard_vertex_mip", m_guard_vertex_mip);
+        if (m_vertex_kink_guard) {
+            SPDLOG_LOGGER_DEBUG(s_log, "configure: TaggerCheckSTM: vertex_kink_guard ON (turn>{} deg && post>{} MIP)",
+                                m_guard_vertex_turn, m_guard_vertex_mip);
+        }
+
+        // anode_dist_fix (C++ default false => byte-identical legacy): fix
+        // the inverted face selection in check_stm_conditions' dist_to_anode
+        // helper.  IAnodeFace::dirx points from the anode INTO the drift
+        // volume, so the anode sits at min x when fdx > 0 -- the legacy
+        // helper picks the OPPOSITE face and on SBND returns the distance to
+        // the CATHODE, so the prototype's anode-clipped-TGM catch
+        // (ToyFiducial.cxx:762 "at Anode", x < 2 cm with the uBooNE anode at
+        // x = 0) fires at the wrong drift boundary.  For contained points
+        // |x - anode_x| equals the prototype's signed quantity, so the fixed
+        // helper is a faithful translation.  docs/63 sec 4 round 4a.
+        m_anode_dist_fix = get<bool>(config, "anode_dist_fix", m_anode_dist_fix);
+        if (m_anode_dist_fix) {
+            SPDLOG_LOGGER_DEBUG(s_log, "configure: TaggerCheckSTM: anode_dist_fix ON (dist_to_anode uses the true anode face)");
+        }
+
+        // beam_window_only + beam_window_low/high (all C++-default off =>
+        // byte-identical legacy behavior): evaluate only the beam-coincident
+        // bundle, i.e. the main clusters whose matched flash time (cluster_t0)
+        // lies in [low, high) -- the same gate TaggerCheckTGM/TaggerCheckFC and
+        // the steiner stage carry, and the same window TaggerCheckNeutrino uses
+        // to pick its bundle.  Only the loop population changes: a surviving
+        // main's verdict is computed from itself and its own matched_flash_gid
+        // companions, so gating cannot perturb it.
+        m_beam_window_only = get<bool>(config, "beam_window_only", m_beam_window_only);
+        m_beam_window_low = get<double>(config, "beam_window_low", m_beam_window_low);
+        m_beam_window_high = get<double>(config, "beam_window_high", m_beam_window_high);
+        if (m_beam_window_only && !(m_beam_window_low < m_beam_window_high)) {
+            SPDLOG_LOGGER_WARN(s_log, "configure: TaggerCheckSTM: beam_window_only set but the window is empty ([{}, {}) us) -- gate disabled, every main evaluated",
+                               m_beam_window_low/units::us, m_beam_window_high/units::us);
+        }
+
+        m_trackfitting_config_file = get<std::string>(config, "trackfitting_config_file", "");
+
+        if (!m_trackfitting_config_file.empty()) {
+            SPDLOG_LOGGER_TRACE(s_log, "configure: TaggerCheckSTM: Loading TrackFitting config from: {}", m_trackfitting_config_file);
+            load_trackfitting_config(m_trackfitting_config_file);
+        } else {
+            SPDLOG_LOGGER_TRACE(s_log, "configure: TaggerCheckSTM: No TrackFitting config file specified, using defaults");
+        }
+
+    }
+    
+    virtual Configuration default_configuration() const {
+        Configuration cfg;
+        cfg["grouping"] = m_grouping_name;
+        cfg["detector_volumes"] = "DetectorVolumes";
+        cfg["pc_transforms"] = "PCTransformSet";
+        cfg["recombination_model"] = "BoxRecombination";  
+        cfg["particle_dataset"] = "ParticleDataSet"; 
+
+        cfg["trackfitting_config_file"] = "";
+        // Detector-specific shorted-wire-region guard (disabled by default).
+        // Set to [w_min, w_max] W-wire index range to enable. Example: [7135, 7264] for UBoone.
+        cfg["shorted_y_w_range"] = Json::Value(Json::arrayValue);
+        cfg["require_in_scope"] = m_require_in_scope;
+        // Evaluate only mains whose cluster_t0 is in [low, high); false (or an
+        // empty window) = every main, i.e. legacy behavior.
+        cfg["beam_window_only"] = m_beam_window_only;
+        cfg["beam_window_low"] = m_beam_window_low;
+        cfg["beam_window_high"] = m_beam_window_high;
+        cfg["save_stm_fit"] = m_save_stm_fit;
+        cfg["mip_dqdx"] = m_mip_dqdx;
+        // doc-63 round-1 acceptance guards; false = byte-identical legacy.
+        cfg["accept_guards"] = m_accept_guards;
+        cfg["guard_desert_cm"] = m_guard_desert_cm;
+        cfg["guard_desert_frac"] = m_guard_desert_frac;
+        cfg["guard_spike_ratio"] = m_guard_spike_ratio;
+        cfg["guard_spike_shoulder"] = m_guard_spike_shoulder;
+        cfg["guard_ratio2_max"] = m_guard_ratio2_max;
+        // doc-63 round-2 muon-consistency guard; false = byte-identical legacy.
+        cfg["proton_muon_guard"] = m_proton_muon_guard;
+        cfg["guard_proton_ks1"] = m_guard_proton_ks1;
+        cfg["guard_proton_ratio3"] = m_guard_proton_ratio3;
+        // doc-66 sec 12 cut package; prototype constants = byte-identical legacy.
+        cfg["michel_res_length_cut"] = m_michel_res_len_cut;
+        cfg["proton_tm_max"] = m_proton_tm_max;
+        cfg["proton_b_ks2_max"] = m_proton_b_ks2_max;
+        cfg["proton_c_peak_max"] = m_proton_c_peak_max;
+        // doc-63 round-3 cathode-truncation veto; false = byte-identical legacy.
+        cfg["cathode_guard"] = m_cathode_guard;
+        cfg["guard_cathode_cm"] = m_guard_cathode_cm;
+        cfg["guard_cathode_peak"] = m_guard_cathode_peak;
+        // doc-63 round-4a dist_to_anode face fix; false = byte-identical legacy.
+        cfg["anode_dist_fix"] = m_anode_dist_fix;
+        // doc-63 round-4b/4c second-track vetoes; false = byte-identical legacy.
+        cfg["second_track_guard"] = m_second_track_guard;
+        cfg["guard_left_track_cm"] = m_guard_left_track_cm;
+        cfg["guard_left_track_straight"] = m_guard_left_track_straight;
+        cfg["guard_seg_track_cm"] = m_guard_seg_track_cm;
+        cfg["guard_seg_mip_lo"] = m_guard_seg_mip_lo;
+        cfg["guard_seg_mip_hi"] = m_guard_seg_mip_hi;
+        // doc-63 round-5 stop-region vetoes; false = byte-identical legacy.
+        cfg["deficit_guard"] = m_deficit_guard;
+        cfg["guard_deficit_med"] = m_guard_deficit_med;
+        cfg["guard_deficit_bragg"] = m_guard_deficit_bragg;
+        cfg["vertex_kink_guard"] = m_vertex_kink_guard;
+        cfg["guard_vertex_turn"] = m_guard_vertex_turn;
+        cfg["guard_vertex_mip"] = m_guard_vertex_mip;
+        // Null/empty => the historical FiducialUtils containment (union of
+        // per-face sensitive volumes, no margin).  Naming an IFiducial here
+        // redirects cluster_fc_check's direct containment tests to it; pass the
+        // same values TaggerCheckTGM gets to make the two verdicts agree.
+        cfg["fiducial"] = Json::Value();   // null = use FiducialUtils
+        cfg["fv_tolerance"] = Json::Value(Json::arrayValue);
+
+        return cfg;
+    }
+
+    virtual void visit(Ensemble& ensemble) const {
+
+        // Configure the track fitter with detector volume
+        m_track_fitter.set_detector_volume(m_dv);
+        m_track_fitter.set_pc_transforms(m_pcts);
+
+        // Get the specified grouping (default: "live")
+        auto groupings = ensemble.with_name(m_grouping_name);
+        if (groupings.empty()) {
+            return;
+        }
+
+        auto& grouping = *groupings.at(0);
+
+        // Find the main cluster(s) and all associated clusters.  uBooNE has a
+        // single (beam-flash) main cluster per event; a post-QL-matching
+        // detector like SBND has one main cluster per matched flash bundle.
+        std::vector<Cluster*> main_clusters;
+        std::vector<Cluster*> associated_all;
+
+        int n_out_of_scope = 0;
+        int n_out_of_window = 0;
+        const bool beam_gate = m_beam_window_only && m_beam_window_low < m_beam_window_high;
+        for (auto* cluster : grouping.children()) {
+            // See TaggerCheckTGM: switch_scope leaves out-of-volume shards in the
+            // grouping carrying an inherited flag_main_cluster.  require_in_scope
+            // (default false = historical) drops them.
+            const bool in_scope = !m_require_in_scope
+                || cluster->get_scope_filter(cluster->get_default_scope());
+            if (cluster->get_flag(Flags::main_cluster)) {
+                if (!in_scope) { ++n_out_of_scope; continue; }
+                if (beam_gate) {
+                    const double t0 = cluster->get_cluster_t0();
+                    if (t0 < m_beam_window_low || t0 >= m_beam_window_high) {
+                        ++n_out_of_window;
+                        continue;
+                    }
+                }
+                main_clusters.push_back(cluster);
+            } else if (cluster->get_flag(Flags::associated_cluster)) {
+                if (!in_scope) continue;
+                // Not gated: the per-main loop below already keeps only the
+                // companions carrying the surviving main's matched_flash_gid.
+                associated_all.push_back(cluster);
+            }
+        }
+        if (n_out_of_scope) {
+            SPDLOG_LOGGER_INFO(s_log, "visit: TaggerCheckSTM: skipped {} out-of-scope main cluster(s)",
+                               n_out_of_scope);
+        }
+        if (beam_gate) {
+            SPDLOG_LOGGER_INFO(s_log, "visit: TaggerCheckSTM: beam_window_only [{:.3f}, {:.3f}) us: {} main(s) evaluated, {} out of window",
+                               m_beam_window_low/units::us, m_beam_window_high/units::us,
+                               main_clusters.size(), n_out_of_window);
+        }
+
+        SPDLOG_LOGGER_TRACE(s_log, "visit: TaggerCheckSTM: Found {} main cluster(s); {} associated clusters.",
+            main_clusters.size(), associated_all.size());
+
+        if (main_clusters.empty()) return;
+
+        for (auto* main_cluster : main_clusters) {
+            // Honor an upstream TGM verdict (TaggerCheckTGM): a through-going
+            // muon is never an STM.  No existing pipeline pre-sets the flag,
+            // so this is inert unless tagger_check_tgm runs earlier.
+            if (main_cluster->get_flag(Flags::TGM)) {
+                SPDLOG_LOGGER_INFO(s_log, "visit: TaggerCheckSTM: cluster {} already TGM; skipping",
+                    main_cluster->ident());
+                continue;
+            }
+            // Associated sub-clusters belong to the same matched flash when the
+            // QL-matching gid annotation exists; without it (uBooNE: flags come
+            // from the WCP file, single beam bundle) every associated cluster
+            // belongs to the lone main cluster.
+            const int gid = main_cluster->get_scalar<int>("matched_flash_gid", -1);
+            std::vector<Cluster*> associated_clusters;
+            for (auto* oc : associated_all) {
+                if (gid < 0 || oc->get_scalar<int>("matched_flash_gid", -1) == gid) {
+                    associated_clusters.push_back(oc);
+                }
+            }
+
+            if (m_save_stm_fit) { m_pass_records.clear(); m_eval_records.clear(); }
+
+            bool is_stm = check_stm_conditions(*main_cluster, associated_clusters);
+
+            // TGM is set inside check_stm_conditions; set STM only when not TGM
+            if (is_stm && !main_cluster->get_flag(Flags::TGM)) {
+                main_cluster->set_flag(Flags::STM);
+            }
+
+            SPDLOG_LOGGER_INFO(s_log, "visit: TaggerCheckSTM: cluster {} → STM={} TGM={}",
+                main_cluster->ident(),
+                main_cluster->get_flag(Flags::STM),
+                main_cluster->get_flag(Flags::TGM));
+
+            // Complete-by-construction companion to the "no STM fit:" lines
+            // inside check_stm_conditions: those name every PRE-fit exit, but a
+            // cluster can also exit AFTER the round-1 fit through a path that
+            // records no pass (so the dQ/dx dump has nothing for it even though
+            // the tagger did evaluate it).  Reporting it here needs no knowledge
+            // of which path was taken.  Log-only.
+            if (m_save_stm_fit && m_pass_records.empty()) {
+                SPDLOG_LOGGER_DEBUG(s_log, "check_stm_conditions: cluster {} no STM fit: evaluated but no pass recorded (exited after the round-1 fit)",
+                                    main_cluster->ident());
+            }
+
+            if (m_save_stm_fit) persist_stm_fit(*main_cluster);
+        }
+
+        // Hand the accumulated fits to downstream writers (Bee dump reads the
+        // cluster PCs; SbndMagnifyTrackingVisitor reads this named slot for
+        // the pred/meas 2D charge and the segments).
+        if (m_save_stm_fit) {
+            auto saved = std::make_shared<TrackFitting>();
+            saved->set_parameters(m_track_fitter.get_parameters());
+            // add_segment triggers BuildGeometry on first use -- give the
+            // holder the same DV/transform setup as the live fitter above.
+            saved->set_detector_volume(m_dv);
+            saved->set_pc_transforms(m_pcts);
+            for (auto& [cid, seg] : m_saved_segments) saved->add_segment(seg);
+            saved->merge_fitted_charge_2d(m_acc_fitted_charge);
+            grouping.set_track_fitting("stm", saved);
+            SPDLOG_LOGGER_INFO(s_log,
+                "visit: TaggerCheckSTM: save_stm_fit stored {} segment(s) in grouping slot 'stm'",
+                m_saved_segments.size());
+            m_saved_segments.clear();
+            m_acc_fitted_charge.clear();
+        }
+
+        // (dead-code stub removed — see git history for the tracking-infrastructure
+        //  validation harness that used a hard-coded 48-point wcpts() override)
+
+        // bool flag_stm = check_stm_conditions(*main_cluster, main_to_associated[main_cluster] );
+        // std::cout << "STM tagger: " << " " << flag_stm << std::endl;
+        // if (flag_stm) {
+        //     main_cluster->set_flag(Flags::STM);
+        //     stm_count++;
+        // }
+        
+        // (void)stm_count;
+
+        // // hack ... 
+        // {
+        //     auto segs = m_track_fitter.get_segments();
+        //     // std::cout << "Xin: " << segs.size() << std::endl;
+        //     clustering_points_segments(segs,m_dv);
+
+        //     // Get the last segment from the set
+        //     if (!segs.empty()) {
+        //         auto segment = *segs.rbegin();  // Get last element from set
+                
+        //         // test point cloud fit
+        //         create_segment_fit_point_cloud(segment, m_dv, "fit");
+                
+        //         // Now access it directly from the segment
+        //         auto fit_dpcloud = segment->dpcloud("fit");  // Get the DynamicPointCloud
+
+        //         // if (fit_dpcloud) {
+        //         //     const auto& points = fit_dpcloud->get_points();
+                    
+        //         //     std::cout << "Fit point cloud has " << points.size() << " points:" << std::endl;
+        //         //     for (size_t i = 0; i < points.size(); ++i) {
+        //         //         std::cout << "  Point " << i << ": (" 
+        //         //                 << points[i].x/units::cm << ", "
+        //         //                 << points[i].y/units::cm << ", "
+        //         //                 << points[i].z/units::cm << ") cm" << std::endl;
+        //         //     }
+                    
+        //         //     // You can also verify against the segment's fit data
+        //         //     const auto& fits = segment->fits();
+        //         //     std::cout << "\nVerification:" << std::endl;
+        //         //     std::cout << "  Point cloud size: " << points.size() << std::endl;
+        //         //     std::cout << "  Segment fits size: " << fits.size() << std::endl;
+                    
+        //         //     if (points.size() == fits.size()) {
+        //         //         std::cout << "  ✓ Sizes match!" << std::endl;
+        //         //     }
+        //         // } else {
+        //         //     std::cout << "Fit point cloud not found on segment!" << std::endl;
+        //         // }
+        //     }
+
+        // }
+
+    }
+
+private:
+    std::string m_grouping_name{"live"};
+    bool m_require_in_scope{false};
+    // Beam-window gate on cluster_t0 (see configure()).  Off by default.
+    bool m_beam_window_only{false};
+    double m_beam_window_low{0};
+    double m_beam_window_high{0};
+    std::string m_trackfitting_config_file;  // Path to TrackFitting config file
+    // Shorted-wire-region guard for find_first_kink: W-wire index range [w_min, w_max).
+    // -1/-1 means disabled (default, detector-agnostic).
+    int m_shorted_y_w_min{-1};
+    int m_shorted_y_w_max{-1};
+
+    // MIP dQ/dx scale, in electrons per cm (NOT per internal length unit --
+    // every use site divides a dQ/dx that has already been multiplied by
+    // units::cm, or builds a reference vector compared against such values).
+    // Note this differs from PRSegmentFunctions.h, whose MIP_dQdx default
+    // arguments are written 50000/units::cm.
+    //
+    // Two distinct roles, both driven by this one number:
+    //   1. the flat "MIP-like, not stopping" REFERENCE curves that the fitted
+    //      dQ/dx is KS-compared against (detect_proton's const_ref and
+    //      eval_stm_core's ref_flat);
+    //   2. the DIVISOR that normalizes measured dQ/dx into MIP units for ~33
+    //      hard-coded cut thresholds (e.g. ave_res_dQ_dx/mip > 0.9).
+    // Raising it therefore both rescales the reference and tightens every one
+    // of those cuts on unchanged measured charge.  Default 50e3 is the
+    // MicroBooNE value the thresholds were tuned against, so leaving the knob
+    // unset is byte-identical to the pre-knob code.
+    //
+    // As of doc 57 there are no absolute e/cm literals left in this file.  The
+    // seven sites that had them -- five distinct values: 1000 in
+    // adjust_rough_path, 72500 (x3) / 85000 / 92500 in the Michel-electron
+    // residual veto, 75000 in check_other_tracks -- are now written
+    // a * m_mip_dqdx, with a = the literal over MicroBooNE's 50000.  Every one
+    // was an exact multiple of it, so this is a change of convention, not a
+    // re-tuning: at the default 50e3 each product is bit-identical to the
+    // literal it replaced.  At SBND's 56000 the seven now follow the MIP scale
+    // like the ~33 ratio cuts already did.  Anything ADDED here must use the
+    // same form: a * m_mip_dqdx, never an absolute e/cm literal.  That is the
+    // convention going forward (owner decision 2026-07-26, after the 30-event
+    // A/B in doc 57 sec 5a-bis came back bit-identical).
+    double m_mip_dqdx{50e3};
+
+    // doc-63 round-1 acceptance guards (see configure()).  All inert unless
+    // m_accept_guards; every threshold was measured on the doc-62 owner
+    // baseline (sbnd_xin/docs/63 sec 1).  Scale convention: fractions of
+    // m_mip_dqdx, never absolute e/cm.
+    bool m_accept_guards{false};
+    double m_guard_desert_cm{3.0};      // min bridged-desert length to veto
+    double m_guard_desert_frac{0.02};   // "no charge" = dQ/dx below this x MIP
+    double m_guard_spike_ratio{3.2};    // peak(<1.5cm) / median(2-6cm)
+    double m_guard_spike_shoulder{1.8}; // median(1.5-4cm) in MIP units
+    double m_guard_ratio2_max{2.0};     // eval acceptance normalization cap
+
+    // doc-63 round-2 muon-consistency guard on detect_proton (see configure()).
+    bool m_proton_muon_guard{false};
+    // 0.040, not the 0.045 first tried: the full-population review found
+    // 405740:14 reversing its proton veto at ks1 = 0.044 while the AI-scan
+    // record shows no Bragg trend and no established boundary entry; 0.040
+    // keeps it rejected and still recovers the doc-62 miss (ks1 = 0.030).
+    double m_guard_proton_ks1{0.040};   // end matches muon shape below this
+    double m_guard_proton_ratio3{1.1};  // ... and muon normalization below this
+
+    // doc-63 round-4a dist_to_anode face fix (see configure()).
+    bool m_anode_dist_fix{false};
+
+    // doc-63 round-4b/4c second-track vetoes (see configure()).
+    bool m_second_track_guard{false};
+    double m_guard_left_track_cm{25.0};       // leftover past kink longer than this ...
+    double m_guard_left_track_straight{0.9};  // ... and straighter than this => 2nd track
+    double m_guard_seg_track_cm{15.0};        // other-track segment longer than this ...
+    double m_guard_seg_mip_lo{0.4};           // ... with MIP-like median dQ/dx in
+    double m_guard_seg_mip_hi{1.5};           // (lo, hi) => 2nd track
+
+    // doc-63 round-5 stop-region vetoes (see configure()).
+    bool m_deficit_guard{false};
+    double m_guard_deficit_med{0.60};    // end-5cm median below this (MIP) ...
+    double m_guard_deficit_bragg{2.0};   // ... with last-15cm max below this => truncation
+    bool m_vertex_kink_guard{false};
+    double m_guard_vertex_turn{45.0};    // sharpest end-region turn above this (deg) ...
+    double m_guard_vertex_mip{2.2};      // ... into a post-turn median above this (MIP) => vertex
+
+    // doc-63 round-3 cathode-truncation veto (see configure()).
+    bool m_cathode_guard{false};
+    double m_guard_cathode_cm{5.0};     // stop-to-cathode distance below this
+    double m_guard_cathode_peak{2.5};   // ... with end peak below this x MIP
+
+    // doc-66 sec 12 diffusion-margin cut package (see configure()).  All four
+    // defaults are the prototype's original constants => absent keys are
+    // byte-identical legacy behavior.  SBND production overrides
+    // 6.5 cm / 1.05 / 0.055 / 4.1 (sbnd_xin/docs/66 sec 12.2).
+    double m_michel_res_len_cut{6.0 * units::cm};  // eval Michel veto res_length floor
+    double m_proton_tm_max{1.0};        // detect_proton block-C track_medium gate
+    double m_proton_b_ks2_max{0.05};    // detect_proton block-B entry ks2 ceiling
+    double m_proton_c_peak_max{4.3};    // detect_proton C1 dQ_dx[max_bin]/MIP clause
+
+    // Containment fiducial volume for the cluster_fc_check gate.  Unset by
+    // default => the historical FiducialUtils / sensitive-volume-union fallback,
+    // i.e. an absent "fiducial" key is byte-identical to the pre-knob code.
+    // See configure() for why that fallback disagrees with TGM/FC.
+    bool m_use_fiducial{false};
+    std::vector<double> m_fv_tolerance;
+
+    mutable TrackFitting m_track_fitter;
+
+    // === save_stm_fit knob state (inert when off => byte-identical legacy) ===
+    //
+    // Pass status codes recorded per fitted pass:
+    //   0 accepted (STM), 1 TGM, 2 rejected long-leftover past kink
+    //   ("Mid Point A"), 3 rejected dQ/dx eval (KS tests), 4 rejected
+    //   extra-tracks veto, 5 rejected proton endpoint, 6 fitted but no
+    //   decision (fell through), 7 rejected by the doc-63 accept_guards,
+    //   cathode_guard, second_track_guard's leftover veto, deficit_guard or
+    //   vertex_kink_guard (desert/spike/cathode/leftover-track/deficit-end/
+    //   vertex-kink; a ratio2-cap rejection shows as 3 -- it fires inside
+    //   the eval -- and a round-4c segment veto as 4).
+    // Round-1 rough fits and passes aborted with <=3 fit points are NOT
+    // recorded (no round-2 segment exists).
+    bool m_save_stm_fit{false};
+    struct StmPassRecord {
+        std::shared_ptr<PR::Segment> segment;
+        int pass{0};        // 0 forward, 1 backward
+        int status{6};
+        int kink_num{-1};
+        double exit_L{0}, left_L{0}, exit_Q{0}, left_Q{0};
+    };
+    struct StmEvalRecord {
+        int pass{0};
+        double peak_range{0}, offset_length{0}, com_range{0};
+        int strong{0};
+        double ks1{0}, ks2{0}, ratio1{0}, ratio2{0}, res_length{0}, ave_res_dQ_dx{0};
+        int verdict{-1};
+    };
+    mutable std::vector<StmPassRecord> m_pass_records;   // current cluster
+    mutable std::vector<StmEvalRecord> m_eval_records;   // current cluster
+    mutable int m_cur_pass{0};
+    // Grouping-level accumulation across clusters for the "stm" hand-off.
+    mutable std::vector<std::pair<int, std::shared_ptr<PR::Segment>>> m_saved_segments;
+    mutable std::map<TrackFitting::APAFacePlane,
+                     std::map<TrackFitting::WireTime, TrackFitting::FittedCharge2D>> m_acc_fitted_charge;
+
+    // Called right after the round-2 (final) fit of a pass.
+    void begin_pass_record(std::shared_ptr<PR::Segment> segment, bool is_forward) const {
+        m_cur_pass = is_forward ? 0 : 1;
+        StmPassRecord rec;
+        rec.segment = segment;
+        rec.pass = m_cur_pass;
+        m_pass_records.push_back(std::move(rec));
+        // Snapshot this pass's pred/meas 2D charge before the next
+        // clear_segments() wipes it (last-writer-wins on overlap).
+        for (const auto& [afp, wt_map] : m_track_fitter.get_fitted_charge_2d()) {
+            auto& dst = m_acc_fitted_charge[afp];
+            for (const auto& [wt, fc] : wt_map) dst[wt] = fc;
+        }
+    }
+    void note_pass_kink(int kink_num, double exit_L, double left_L, double exit_Q, double left_Q) const {
+        if (m_pass_records.empty()) return;
+        auto& rec = m_pass_records.back();
+        rec.kink_num = kink_num;
+        rec.exit_L = exit_L; rec.left_L = left_L;
+        rec.exit_Q = exit_Q; rec.left_Q = left_Q;
+    }
+    void set_pass_status(int status) const {
+        if (m_pass_records.empty()) return;
+        m_pass_records.back().status = status;
+    }
+
+    // Persist the recorded passes/evals of one main cluster as node-local PCs
+    // (consumed same-job by the MABC Bee dump and SbndMagnifyTrackingVisitor;
+    // the PR job does not re-save the pctree tarball).
+    void persist_stm_fit(Cluster& cluster) const {
+        using WireCell::PointCloud::Array;
+        using WireCell::PointCloud::Dataset;
+
+        if (!m_pass_records.empty()) {
+            std::vector<double> x, y, z, dQ, dx, L, rr, pu, pv, pw, pt, chi2;
+            std::vector<int> apa, face, pass, status;
+            for (const auto& rec : m_pass_records) {
+                const auto& fits = rec.segment->fits();
+                const size_t n = fits.size();
+                std::vector<double> cumL(n, 0);
+                for (size_t i = 1; i < n; i++) {
+                    cumL[i] = cumL[i-1] + (fits[i].point - fits[i-1].point).magnitude();
+                }
+                const double Ltot = n ? cumL.back() : 0;
+                for (size_t i = 0; i < n; i++) {
+                    const auto& f = fits[i];
+                    x.push_back(f.point.x()); y.push_back(f.point.y()); z.push_back(f.point.z());
+                    dQ.push_back(f.dQ); dx.push_back(f.dx);
+                    L.push_back(cumL[i]);
+                    // Residual range from the candidate stopping end (= path end).
+                    rr.push_back(Ltot - cumL[i]);
+                    pu.push_back(f.pu); pv.push_back(f.pv); pw.push_back(f.pw); pt.push_back(f.pt);
+                    chi2.push_back(f.reduced_chi2);
+                    apa.push_back(f.paf.first); face.push_back(f.paf.second);
+                    pass.push_back(rec.pass); status.push_back(rec.status);
+                }
+                SPDLOG_LOGGER_INFO(s_log,
+                    "persist_stm_fit: cluster {} stmfit pass={} status={} kink={} exit_L={:.1f} left_L={:.1f} npts={}",
+                    cluster.get_cluster_id(), rec.pass, rec.status, rec.kink_num,
+                    rec.exit_L/units::cm, rec.left_L/units::cm, n);
+                m_saved_segments.emplace_back(cluster.get_cluster_id(), rec.segment);
+            }
+            std::map<std::string, Array> arrays;
+            arrays.emplace("x", Array(x)); arrays.emplace("y", Array(y)); arrays.emplace("z", Array(z));
+            arrays.emplace("dQ", Array(dQ)); arrays.emplace("dx", Array(dx));
+            arrays.emplace("L", Array(L)); arrays.emplace("rr", Array(rr));
+            arrays.emplace("pu", Array(pu)); arrays.emplace("pv", Array(pv));
+            arrays.emplace("pw", Array(pw)); arrays.emplace("pt", Array(pt));
+            arrays.emplace("reduced_chi2", Array(chi2));
+            arrays.emplace("apa", Array(apa)); arrays.emplace("face", Array(face));
+            arrays.emplace("pass", Array(pass)); arrays.emplace("status", Array(status));
+            cluster.local_pcs()["stm_fit"] = Dataset(arrays);
+
+            std::vector<int> p_pass, p_status, p_kink, p_npts;
+            std::vector<double> p_exit_L, p_left_L, p_exit_dqdx, p_left_dqdx;
+            for (const auto& rec : m_pass_records) {
+                p_pass.push_back(rec.pass); p_status.push_back(rec.status);
+                p_kink.push_back(rec.kink_num);
+                p_npts.push_back(static_cast<int>(rec.segment->fits().size()));
+                p_exit_L.push_back(rec.exit_L); p_left_L.push_back(rec.left_L);
+                p_exit_dqdx.push_back(rec.exit_Q/(rec.exit_L/units::cm + 1e-9));
+                p_left_dqdx.push_back(rec.left_Q/(rec.left_L/units::cm + 1e-9));
+            }
+            std::map<std::string, Array> parrays;
+            parrays.emplace("pass", Array(p_pass)); parrays.emplace("status", Array(p_status));
+            parrays.emplace("kink_num", Array(p_kink)); parrays.emplace("npoints", Array(p_npts));
+            parrays.emplace("exit_L", Array(p_exit_L)); parrays.emplace("left_L", Array(p_left_L));
+            parrays.emplace("exit_dqdx", Array(p_exit_dqdx)); parrays.emplace("left_dqdx", Array(p_left_dqdx));
+            cluster.local_pcs()["stm_pass"] = Dataset(parrays);
+        }
+
+        if (!m_eval_records.empty()) {
+            std::vector<int> e_pass, e_strong, e_verdict;
+            std::vector<double> e_peak, e_off, e_com, e_ks1, e_ks2, e_r1, e_r2, e_resl, e_resq;
+            for (const auto& er : m_eval_records) {
+                e_pass.push_back(er.pass); e_strong.push_back(er.strong); e_verdict.push_back(er.verdict);
+                e_peak.push_back(er.peak_range); e_off.push_back(er.offset_length); e_com.push_back(er.com_range);
+                e_ks1.push_back(er.ks1); e_ks2.push_back(er.ks2);
+                e_r1.push_back(er.ratio1); e_r2.push_back(er.ratio2);
+                e_resl.push_back(er.res_length); e_resq.push_back(er.ave_res_dQ_dx);
+            }
+            std::map<std::string, Array> earrays;
+            earrays.emplace("pass", Array(e_pass)); earrays.emplace("strong", Array(e_strong));
+            earrays.emplace("verdict", Array(e_verdict));
+            earrays.emplace("peak_range", Array(e_peak)); earrays.emplace("offset_length", Array(e_off));
+            earrays.emplace("com_range", Array(e_com));
+            earrays.emplace("ks1", Array(e_ks1)); earrays.emplace("ks2", Array(e_ks2));
+            earrays.emplace("ratio1", Array(e_r1)); earrays.emplace("ratio2", Array(e_r2));
+            earrays.emplace("res_length", Array(e_resl)); earrays.emplace("ave_res_dqdx", Array(e_resq));
+            cluster.local_pcs()["stm_eval"] = Dataset(earrays);
+        }
+
+        m_pass_records.clear();
+        m_eval_records.clear();
+    }
+
+    void load_trackfitting_config(const std::string& config_file) {
+        try {
+            // Resolve through WIRECELL_PATH so the parameter file can be named
+            // relatively (e.g. 'pgrapher/experiment/sbnd/sbnd_track_fitting.json')
+            // instead of as an absolute path.  Persist::resolve() returns an
+            // absolute path unchanged and "" when a relative name is not found,
+            // so callers that already pass an absolute path are unaffected and
+            // the not-found diagnostic below still names what was asked for.
+            const std::string resolved = Persist::resolve(config_file);
+            // Load JSON file
+            std::ifstream file(resolved.empty() ? config_file : resolved);
+            if (!file.is_open()) {
+                std::cerr << "TaggerCheckSTM: Cannot open config file: " << config_file
+                          << " (not found on WIRECELL_PATH either)" << std::endl;
+                return;
+            }
+            
+            Json::Value root;
+            Json::CharReaderBuilder builder;
+            std::string errs;
+            
+            if (!Json::parseFromStream(builder, file, &root, &errs)) {
+                std::cerr << "TaggerCheckSTM: Failed to parse JSON: " << errs << std::endl;
+                return;
+            }
+            
+            // Apply each parameter from the JSON file
+            for (const auto& param_name : root.getMemberNames()) {
+                if (param_name.substr(0, 1) == "_") continue;  // Skip comments
+                
+                try {
+                    double value = root[param_name].asDouble();
+                    m_track_fitter.set_parameter(param_name, value);
+                    SPDLOG_LOGGER_TRACE(s_log, "load_trackfitting_config: TaggerCheckSTM: Set {} = {}", param_name, value);
+                } catch (const std::exception& e) {
+                    std::cerr << "TaggerCheckSTM: Failed to set parameter " << param_name 
+                            << ": " << e.what() << std::endl;
+                }
+            }
+            
+            SPDLOG_LOGGER_TRACE(s_log, "load_trackfitting_config: TaggerCheckSTM: Successfully loaded TrackFitting configuration");
+            
+        } catch (const std::exception& e) {
+            std::cerr << "TaggerCheckSTM: Exception loading config: " << e.what() << std::endl;
+            std::cerr << "TaggerCheckSTM: Using default TrackFitting parameters" << std::endl;
+        }
+    }
+
+    std::vector<geo_point_t> do_rough_path(const Cluster& cluster,geo_point_t& first_point, geo_point_t& last_point) const{
+         // 1. Get Steiner point cloud and graph
+        // const auto& steiner_pc = cluster.get_pc("steiner_pc");
+        // const auto& steiner_graph = cluster.get_graph("steiner_graph");
+        
+        // 2. Find the closest point indices in the Steiner point cloud
+  
+        // Find closest indices in the steiner point cloud
+        auto first_knn_results = cluster.kd_steiner_knn(1, first_point, "steiner_pc");
+        auto last_knn_results = cluster.kd_steiner_knn(1, last_point, "steiner_pc");
+        
+        auto first_index = first_knn_results[0].first;  // Get the index from the first result
+        auto last_index = last_knn_results[0].first;   // Get the index from the first result
+ 
+        // 4. Use Steiner graph to find the shortest path
+        const std::vector<size_t>& path_indices = 
+            cluster.graph_algorithms("steiner_graph").shortest_path(first_index, last_index);
+            
+        std::vector<geo_point_t> path_points;
+        if (!cluster.has_pc("steiner_pc")) return path_points;
+        const auto& steiner_pc = cluster.get_pc("steiner_pc");
+        const auto& coords = cluster.get_default_scope().coords;
+        const auto& x_coords = steiner_pc.get(coords.at(0))->elements<double>();
+        const auto& y_coords = steiner_pc.get(coords.at(1))->elements<double>();
+        const auto& z_coords = steiner_pc.get(coords.at(2))->elements<double>();
+
+        for (size_t idx : path_indices) {
+            path_points.emplace_back(x_coords[idx], y_coords[idx], z_coords[idx]);
+        }
+        return path_points;
+    }
+
+    // return a vector of point, also the mid_p is also a return point ...
+    std::vector<geo_point_t> adjust_rough_path(const Cluster& cluster, geo_point_t& mid_p) const{
+
+        const geo_point_t drift_dir_abs(1,0,0); 
+        // use the m_track_fitter ...
+        auto fine_tracking_path = m_track_fitter.get_fine_tracking_path();
+        auto dQ = m_track_fitter.get_dQ();
+        auto dx = m_track_fitter.get_dx();
+
+        mid_p.at(0) = fine_tracking_path.at(0).first.x();
+        mid_p.at(1) = fine_tracking_path.at(0).first.y();
+        mid_p.at(2) = fine_tracking_path.at(0).first.z();
+
+        // Initialize variables
+        int save_i = 0;
+        bool flag_crawl = false;
+
+        // Initialize angle vectors
+        std::vector<double> refl_angles(fine_tracking_path.size(), 0);
+        std::vector<double> para_angles(fine_tracking_path.size(), 0);
+
+        const int path_size = static_cast<int>(fine_tracking_path.size());
+
+        // First part: Calculate reflection and parallel angles for each point
+        for (int i = 0; i < path_size; i++) {
+            double angle1 = 0;  // reflection angle
+            double angle2 = 0;  // parallel angle
+            
+            // Calculate angles using vectors to neighboring points at different distances
+            for (int j = 0; j != 6; j++) {
+                WireCell::Vector v10(0, 0, 0);  // Vector from previous point
+                WireCell::Vector v20(0, 0, 0);  // Vector to next point
+                
+                // Backward vector (from point i-j-1 to point i)
+                if (i > j) {
+                    v10 = WireCell::Vector(fine_tracking_path.at(i).first.x() - fine_tracking_path.at(i-j-1).first.x(),
+                                        fine_tracking_path.at(i).first.y() - fine_tracking_path.at(i-j-1).first.y(),
+                                        fine_tracking_path.at(i).first.z() - fine_tracking_path.at(i-j-1).first.z());
+                }
+                
+                // Forward vector (from point i to point i+j+1)
+                if (i + j + 1 < path_size) {
+                    v20 = WireCell::Vector(fine_tracking_path.at(i+j+1).first.x() - fine_tracking_path.at(i).first.x(),
+                                        fine_tracking_path.at(i+j+1).first.y() - fine_tracking_path.at(i).first.y(),
+                                        fine_tracking_path.at(i+j+1).first.z() - fine_tracking_path.at(i).first.z());
+                }
+                
+                if (j == 0) {
+                    // For the first iteration, set initial values
+                    if (v10.magnitude() > 0 && v20.magnitude() > 0) {
+                        angle1 = std::acos(v10.dot(v20) / (v10.magnitude() * v20.magnitude())) / 3.1415926 * 180.0;
+                    }                
+                    // Calculate angles with drift direction
+                    if (v10.magnitude() > 0) {
+                        double angle_v10 = std::acos(v10.dot(drift_dir_abs) / v10.magnitude()) / 3.1415926 * 180.0;
+                        angle2 = std::abs(angle_v10 - 90.0);
+                    }
+                    if (v20.magnitude() > 0) {
+                        double angle_v20 = std::acos(v20.dot(drift_dir_abs) / v20.magnitude()) / 3.1415926 * 180.0;
+                        angle2 = std::max(angle2, std::abs(angle_v20 - 90.0));
+                    }
+                } else {
+                    // For subsequent iterations, take minimum values
+                    if (v10.magnitude() != 0 && v20.magnitude() != 0) {
+                        double temp_angle1 = std::acos(v10.dot(v20) / (v10.magnitude() * v20.magnitude())) / 3.1415926 * 180.0;
+                        angle1 = std::min(temp_angle1, angle1);
+                        
+                        double angle_v10 = std::acos(v10.dot(drift_dir_abs) / v10.magnitude()) / 3.1415926 * 180.0;
+                        double angle_v20 = std::acos(v20.dot(drift_dir_abs) / v20.magnitude()) / 3.1415926 * 180.0;
+                        double temp_angle2 = std::max(std::abs(angle_v10 - 90.0), std::abs(angle_v20 - 90.0));
+                        angle2 = std::min(temp_angle2, angle2);
+                    }
+                }
+            }
+            
+            refl_angles.at(i) = angle1;
+            para_angles.at(i) = angle2;
+
+            // std::cout << i << " " << angle1 << " " << angle2 << std::endl;
+        }
+
+        // Second part: Analyze charge and find breakpoints
+        for (int i = 0; i < path_size; i++) {
+            double min_dQ_dx = dQ.at(i) / dx.at(i);
+            
+            // Find minimum dQ/dx in the next 5 points
+            for (int j = 1; j <= 5; j++) {
+                if (i + j < path_size && dQ.at(i + j) / dx.at(i + j) < min_dQ_dx) {
+                    min_dQ_dx = dQ.at(i + j) / dx.at(i + j);
+                }
+            }
+            
+            // Calculate sum of reflection angles in a local window
+            double sum_angles = 0;
+            double nsum = 0;
+            
+            for (int j = -2; j != 3; j++) {
+                if (i + j >= 0 && i + j < path_size) {
+                    if (para_angles.at(i + j) > 10) {
+                        sum_angles += pow(refl_angles.at(i + j), 2);
+                        nsum++;
+                    }
+                }
+            }
+            
+            if (nsum != 0) {
+                sum_angles = sqrt(sum_angles / nsum);
+            }
+            
+            // std::cout << i << " " << min_dQ_dx << " " << para_angles.at(i) << " " << refl_angles.at(i) <<" " << sum_angles << std::endl;
+
+            // First breakpoint condition: Low charge with significant angles.
+            // min_dQ_dx is dQ per INTERNAL length unit (dQ/dx with dx unscaled),
+            // so the threshold carries a units::cm that the MIP-normalised cuts
+            // elsewhere in this file do not.  Was a bare 1000, i.e. 10000 e/cm,
+            // i.e. 0.2 x MicroBooNE's 50000 MIP -- see the m_mip_dqdx comment.
+            if (min_dQ_dx < 0.2 * m_mip_dqdx / units::cm && para_angles.at(i) > 10 && refl_angles.at(i) > 25) {
+                SPDLOG_LOGGER_TRACE(s_log, "adjust_rough_path: Mid_Point_Break: {} {} {} {} {} {} {}", i, refl_angles.at(i), para_angles.at(i), min_dQ_dx, fine_tracking_path.at(i).first.x(), fine_tracking_path.at(i).first.y(), fine_tracking_path.at(i).first.z());
+                flag_crawl = true;
+                save_i = i;
+                break;
+            }
+            // Second breakpoint condition: Higher angle thresholds with geometric constraints
+            else if (para_angles.at(i) > 15 && refl_angles.at(i) > 27 && sum_angles > 12.5) {
+                // Calculate angle between vectors from start to point and point to end
+                WireCell::Vector v10(fine_tracking_path.at(i).first.x() - fine_tracking_path.front().first.x(),
+                                    fine_tracking_path.at(i).first.y() - fine_tracking_path.front().first.y(),
+                                    fine_tracking_path.at(i).first.z() - fine_tracking_path.front().first.z());
+
+                WireCell::Vector v20(fine_tracking_path.back().first.x() - fine_tracking_path.at(i).first.x(),
+                                    fine_tracking_path.back().first.y() - fine_tracking_path.at(i).first.y(),
+                                    fine_tracking_path.back().first.z() - fine_tracking_path.at(i).first.z());
+
+                double angle3 = 0;
+                if (v10.magnitude() > 0 && v20.magnitude() > 0) {
+                    angle3 = std::acos(v10.dot(v20) / (v10.magnitude() * v20.magnitude())) / 3.1415926 * 180.0;
+                }
+                
+                // Skip if the angle is too small (nearly straight line)
+                if (angle3 < 20) continue;
+                
+                SPDLOG_LOGGER_TRACE(s_log, "adjust_rough_path: Mid_Point_Break: {} {} {} {} {} {} {} {}", i, refl_angles.at(i), para_angles.at(i), angle3, min_dQ_dx, fine_tracking_path.at(i).first.x(), fine_tracking_path.at(i).first.y(), fine_tracking_path.at(i).first.z());
+                flag_crawl = true;
+                save_i = i;
+                break;
+            }
+        }
+
+        std::vector<geo_point_t> out_path_points;
+
+        // std::cout <<"flag crawl " << flag_crawl << std::endl;
+
+        if (flag_crawl && cluster.has_pc("steiner_pc")){
+            // Start to Crawl
+            const double step_dis = 1.0 * units::cm;
+
+            // Get point clouds and coordinate arrays from cluster
+            const auto& steiner_pc = cluster.get_pc("steiner_pc");
+            const auto& coords = cluster.get_default_scope().coords;
+            const auto& steiner_x = steiner_pc.get(coords.at(0))->elements<double>();
+            const auto& steiner_y = steiner_pc.get(coords.at(1))->elements<double>();
+            const auto& steiner_z = steiner_pc.get(coords.at(2))->elements<double>();
+      
+            
+            // Initialization - get starting point from fine tracking path
+            geo_point_t p(fine_tracking_path.at(save_i).first.x(), 
+                        fine_tracking_path.at(save_i).first.y(), 
+                        fine_tracking_path.at(save_i).first.z());
+            
+            // Find closest point in steiner point cloud
+            auto curr_knn_results = cluster.kd_steiner_knn(1, p, "steiner_pc");
+            size_t curr_index = curr_knn_results[0].first;
+            geo_point_t curr_wcp(steiner_x[curr_index], steiner_y[curr_index], steiner_z[curr_index]);
+            
+            // Calculate previous point direction
+            geo_point_t prev_p(0, 0, 0);
+            int num_p = 0;
+            for (int i = 1; i != 6; i++) {
+                if (save_i >= i) {
+                    prev_p.at(0) += fine_tracking_path.at(save_i - i).first.x();
+                    prev_p.at(1) += fine_tracking_path.at(save_i - i).first.y();
+                    prev_p.at(2) += fine_tracking_path.at(save_i - i).first.z();
+                    num_p++;
+                }
+            }
+            prev_p.at(0) /= num_p;
+            prev_p.at(1) /= num_p;
+            prev_p.at(2) /= num_p;
+            
+            // Calculate initial direction
+            WireCell::Vector dir(p.at(0) - prev_p.at(0), p.at(1) - prev_p.at(1), p.at(2) - prev_p.at(2));
+            dir = dir.norm();
+            
+            bool flag_continue = true;
+            while (flag_continue) {
+                flag_continue = false;
+                
+                for (int i = 0; i != 3; i++) {
+                    // Calculate test point
+                    geo_point_t test_p(curr_wcp.at(0) + dir.x() * step_dis * (i + 1),
+                                       curr_wcp.at(1) + dir.y() * step_dis * (i + 1),
+                                       curr_wcp.at(2) + dir.z() * step_dis * (i + 1));
+                    // Try normal point cloud first
+                    auto search_result = cluster.get_closest_wcpoint(test_p);
+                    geo_point_t next_wcp = search_result.second;
+                    WireCell::Vector dir1(next_wcp.at(0) - curr_wcp.at(0),
+                                          next_wcp.at(1) - curr_wcp.at(1),
+                                          next_wcp.at(2) - curr_wcp.at(2));
+
+                    // Check angle constraint (30 degrees)
+                    if (dir1.magnitude() != 0 && (std::acos(dir1.dot(dir) / dir1.magnitude()) / 3.1415926 * 180.0 < 30)) {
+                        flag_continue = true;
+                        curr_wcp = next_wcp;
+                        dir = dir1 + dir * 5.0 * units::cm; // momentum trick
+                        dir = dir.norm();
+                        break;
+                    }
+                    
+                    // Try steiner point cloud
+                    auto next_knn_steiner = cluster.kd_steiner_knn(1, test_p, "steiner_pc");
+                    size_t next_index = next_knn_steiner[0].first;
+                    next_wcp.at(0) = steiner_x[next_index];
+                    next_wcp.at(1) = steiner_y[next_index];
+                    next_wcp.at(2) = steiner_z[next_index];
+                    WireCell::Vector dir2(next_wcp.at(0) - curr_wcp.at(0),
+                                          next_wcp.at(1) - curr_wcp.at(1),
+                                          next_wcp.at(2) - curr_wcp.at(2));
+                    
+                    // Check angle constraint (30 degrees)
+                    if (dir2.magnitude() != 0 && (std::acos(dir2.dot(dir) / dir2.magnitude()) / 3.1415926 * 180.0 < 30)) {
+                        flag_continue = true;
+                        curr_wcp = next_wcp;
+                        dir = dir2 + dir * 5.0 * units::cm; // momentum trick
+                        dir = dir.norm();
+                        break;
+                    }
+                }
+            }
+            
+            // Find first and last points in steiner point cloud
+            geo_point_t first_p(fine_tracking_path.front().first.x(), 
+                            fine_tracking_path.front().first.y(), 
+                            fine_tracking_path.front().first.z());
+            auto first_knn_results = cluster.kd_steiner_knn(1, first_p, "steiner_pc");
+            size_t first_index = first_knn_results[0].first;
+            
+            geo_point_t last_p(fine_tracking_path.back().first.x(), 
+                            fine_tracking_path.back().first.y(), 
+                            fine_tracking_path.back().first.z());
+            auto last_knn_results = cluster.kd_steiner_knn(1, last_p, "steiner_pc");
+            size_t last_index = last_knn_results[0].first;
+            
+            // Update current point to closest steiner point
+            auto curr_steiner_knn = cluster.kd_steiner_knn(1, curr_wcp, "steiner_pc");
+            curr_index = curr_steiner_knn[0].first;
+            
+            mid_p = curr_wcp;
+
+            
+            
+            // Calculate distance from current to last point
+            double dis = std::sqrt(std::pow(steiner_x[curr_index] - steiner_x[last_index], 2) + 
+                                std::pow(steiner_y[curr_index] - steiner_y[last_index], 2) + 
+                                std::pow(steiner_z[curr_index] - steiner_z[last_index], 2));
+
+            SPDLOG_LOGGER_TRACE(s_log, "adjust_rough_path: First, Center: {} {} {} {} {} {} {}", steiner_x[first_index], steiner_y[first_index], steiner_z[first_index], steiner_x[curr_index], steiner_y[curr_index], steiner_z[curr_index], dis/units::cm);
+            
+            if (dis > 1.0 * units::cm) {
+                // Find path from first to current point
+                const std::vector<size_t>& path1_indices = 
+                    cluster.graph_algorithms("steiner_graph").shortest_path(first_index, curr_index);
+                
+                // Find path from current to last point
+                const std::vector<size_t>& path2_indices = 
+                    cluster.graph_algorithms("steiner_graph").shortest_path(curr_index, last_index);
+                
+                std::list<size_t> path2_indices_list(path2_indices.begin(), path2_indices.end());
+                // Combine paths, removing duplicate middle point
+                // Copy first path to temporary storage
+                std::vector<size_t> temp_path_indices = path1_indices;
+                
+                // Find overlapping portion between end of path1 and beginning of path2
+                int count = 0;
+                auto it1 = temp_path_indices.rbegin();  // reverse iterator for temp path
+                for (auto it = path2_indices.begin(); it != path2_indices.end() && it1 != temp_path_indices.rend(); ++it, ++it1) {
+                    if (*it == *it1) {
+                        count++;
+                    } else {
+                        break;
+                    }
+                }
+                
+                // std::cout << temp_path_indices.size() << " " << count << " " << path2_indices.size() << std::endl;
+
+                // Remove from end of temp_path_indices
+                for (int i = 0; i != count; i++) {
+                    if (i!=count-1){
+                         temp_path_indices.pop_back();
+                    }
+                    path2_indices_list.pop_front();
+                }
+                
+                // Add first path (without overlapping end)
+                for (size_t idx : temp_path_indices) {
+                    out_path_points.emplace_back(steiner_x[idx], steiner_y[idx], steiner_z[idx]);
+                }
+                
+                // Add second path (without overlapping beginning)
+                for (size_t idx : path2_indices_list) {
+                    out_path_points.emplace_back(steiner_x[idx], steiner_y[idx], steiner_z[idx]);
+                }
+                
+            }
+        } else {
+        
+        }
+
+        return out_path_points;
+    }
+
+    int find_first_kink(std::shared_ptr<PR::Segment> segment) const{
+        // Implement your logic to find the first kink in the cluster
+
+        auto& cluster = *segment->cluster();
+
+        // Get FiducialUtils from the grouping
+        auto fiducial_utils = cluster.grouping()->get_fiducialutils();
+        if (!fiducial_utils) {
+            SPDLOG_LOGGER_TRACE(s_log, "find_first_kink: TaggerCheckSTM: No FiducialUtils available in find_first_kink");
+            return static_cast<int>(segment->fits().size()); // no-kink sentinel
+        }
+        const auto transform = m_pcts->pc_transform(cluster.get_scope_transform(cluster.get_default_scope()));
+        double cluster_t0 = cluster.get_cluster_t0();
+        
+        // Extract fit results from the segment
+        const auto& fits = segment->fits();
+        
+        // Convert fit data to vectors matching the TrackFitting interface
+        std::vector<std::pair<WireCell::Point, std::shared_ptr<PR::Segment>>> fine_tracking_path;
+        std::vector<double> dQ, dx, pu, pv, pw, pt;
+        std::vector<std::pair<int,int>> paf;
+        
+        for (const auto& fit : fits) {
+            fine_tracking_path.emplace_back(fit.point, segment);
+            dQ.push_back(fit.dQ);
+            dx.push_back(fit.dx);
+            pu.push_back(fit.pu);
+            pv.push_back(fit.pv);
+            pw.push_back(fit.pw);
+            pt.push_back(fit.pt);
+            paf.push_back(fit.paf);
+        }
+
+        if (fine_tracking_path.empty()) {
+            return static_cast<int>(fine_tracking_path.size()); // no-kink sentinel (0 == fits.size())
+        }
+        const int dq_size = static_cast<int>(dQ.size());
+
+        // Define drift direction (X direction in detector coordinates)
+        WireCell::Vector drift_dir_abs(1.0, 0.0, 0.0);
+        
+        // Initialize angle vectors
+        std::vector<double> refl_angles(fine_tracking_path.size(), 0);
+        std::vector<double> para_angles(fine_tracking_path.size(), 0);
+        std::vector<double> ave_angles(fine_tracking_path.size(), 0);
+        std::vector<int> max_numbers(fine_tracking_path.size(), -1);
+        const int path_size = static_cast<int>(fine_tracking_path.size());
+        
+        // Calculate reflection and parallel angles for each point
+        for (int i = 0; i < path_size; i++) {
+            double angle1 = 0;
+            double angle2 = 0;
+            
+            for (int j = 0; j != 6; j++) {
+                WireCell::Vector v10(0, 0, 0);
+                WireCell::Vector v20(0, 0, 0);
+                
+                // Backward vector (from point i-j-1 to point i)
+                if (i > j) {
+                    v10 = WireCell::Vector(fine_tracking_path.at(i).first.x() - fine_tracking_path.at(i-j-1).first.x(),
+                                        fine_tracking_path.at(i).first.y() - fine_tracking_path.at(i-j-1).first.y(),
+                                        fine_tracking_path.at(i).first.z() - fine_tracking_path.at(i-j-1).first.z());
+                }
+                
+                // Forward vector (from point i to point i+j+1)
+                if (i + j + 1 < path_size) {
+                    v20 = WireCell::Vector(fine_tracking_path.at(i+j+1).first.x() - fine_tracking_path.at(i).first.x(),
+                                        fine_tracking_path.at(i+j+1).first.y() - fine_tracking_path.at(i).first.y(),
+                                        fine_tracking_path.at(i+j+1).first.z() - fine_tracking_path.at(i).first.z());
+                }
+                
+                if (j == 0) {
+                    // For the first iteration, set initial values
+                    if (v10.magnitude() > 0 && v20.magnitude() > 0) {
+                        angle1 = std::acos(v10.dot(v20) / (v10.magnitude() * v20.magnitude())) / 3.1415926 * 180.0;
+                    }                
+                    // Calculate angles with drift direction
+                    if (v10.magnitude() > 0) {
+                        double angle_v10 = std::acos(v10.dot(drift_dir_abs) / v10.magnitude()) / 3.1415926 * 180.0;
+                        angle2 = std::abs(angle_v10 - 90.0);
+                    }
+                    if (v20.magnitude() > 0) {
+                        double angle_v20 = std::acos(v20.dot(drift_dir_abs) / v20.magnitude()) / 3.1415926 * 180.0;
+                        angle2 = std::max(angle2, std::abs(angle_v20 - 90.0));
+                    }
+                } else {
+                    // For subsequent iterations, take minimum values
+                    if (v10.magnitude() != 0 && v20.magnitude() != 0) {
+                        double temp_angle1 = std::acos(v10.dot(v20) / (v10.magnitude() * v20.magnitude())) / 3.1415926 * 180.0;
+                        angle1 = std::min(temp_angle1, angle1);
+                        
+                        double angle_v10 = std::acos(v10.dot(drift_dir_abs) / v10.magnitude()) / 3.1415926 * 180.0;
+                        double angle_v20 = std::acos(v20.dot(drift_dir_abs) / v20.magnitude()) / 3.1415926 * 180.0;
+                        double temp_angle2 = std::max(std::abs(angle_v10 - 90.0), std::abs(angle_v20 - 90.0));
+                        angle2 = std::min(temp_angle2, angle2);
+                    }
+                }
+            }
+            
+            refl_angles.at(i) = angle1;
+            para_angles.at(i) = angle2;
+
+            // std::cout << i << " " << angle1 << " " << angle2 << std::endl;
+        }
+        
+        // Calculate average angles in a 5-point window
+        for (int i = 0; i < path_size; i++) {
+            double sum_angles = 0;
+            double nsum = 0;
+            double max_angle = 0;
+            int max_num = -1;
+            
+            for (int j = -2; j != 3; j++) {
+                if (i + j >= 0 && i + j < path_size) {
+                    if (para_angles.at(i + j) > 12) {
+                        sum_angles += pow(refl_angles.at(i + j), 2);
+                        nsum++;
+                        if (refl_angles.at(i + j) > max_angle) {
+                            max_angle = refl_angles.at(i + j);
+                            max_num = i + j;
+                        }
+                    }
+                }
+            }
+            
+            if (nsum != 0) sum_angles = sqrt(sum_angles / nsum);
+            ave_angles.at(i) = sum_angles;
+            max_numbers.at(i) = max_num;
+
+            // std::cout << i << " " << sum_angles << " " << max_num << std::endl;
+        }
+        
+        // Look for kink candidates
+        for (int i = 0; i < path_size; i++) {
+            geo_point_t current_point(fine_tracking_path.at(i).first.x(),
+                                    fine_tracking_path.at(i).first.y(),
+                                    fine_tracking_path.at(i).first.z());
+            
+            // Check basic angle conditions and fiducial volume
+            if ((refl_angles.at(i) > 20 && ave_angles.at(i) > 10) && 
+                fiducial_utils->inside_fiducial_volume(current_point)) {
+                
+                // Calculate angle between start-to-kink and kink-to-end vectors
+                WireCell::Vector v10(fine_tracking_path.at(i).first.x() - fine_tracking_path.front().first.x(),
+                                    fine_tracking_path.at(i).first.y() - fine_tracking_path.front().first.y(),
+                                    fine_tracking_path.at(i).first.z() - fine_tracking_path.front().first.z());
+                WireCell::Vector v20(fine_tracking_path.back().first.x() - fine_tracking_path.at(i).first.x(),
+                                    fine_tracking_path.back().first.y() - fine_tracking_path.at(i).first.y(),
+                                    fine_tracking_path.back().first.z() - fine_tracking_path.at(i).first.z());
+                
+                double angle3 = 0;
+                if (v10.magnitude() > 0 && v20.magnitude() > 0) {
+                    angle3 = std::acos(v10.dot(v20) / (v10.magnitude() * v20.magnitude())) / 3.1415926 * 180.0;
+                }
+                
+                double angle3p = angle3;
+                if (i + 1 < path_size) {
+                    WireCell::Vector v11(fine_tracking_path.at(i+1).first.x() - fine_tracking_path.front().first.x(),
+                                        fine_tracking_path.at(i+1).first.y() - fine_tracking_path.front().first.y(),
+                                        fine_tracking_path.at(i+1).first.z() - fine_tracking_path.front().first.z());
+                    WireCell::Vector v21(fine_tracking_path.back().first.x() - fine_tracking_path.at(i+1).first.x(),
+                                        fine_tracking_path.back().first.y() - fine_tracking_path.at(i+1).first.y(),
+                                        fine_tracking_path.back().first.z() - fine_tracking_path.at(i+1).first.z());
+                    if (v11.magnitude() > 0 && v21.magnitude() > 0) {
+                        angle3p = std::acos(v11.dot(v21) / (v11.magnitude() * v21.magnitude())) / 3.1415926 * 180.0;
+                    }
+                }
+
+                // std::cout << i << " " << angle3 << " " << angle3p << " " << v10.magnitude()/units::cm << " " << v20.magnitude()/units::cm << std::endl;
+
+                
+                // need to calculate current_point_raw ...
+                WireCell::Point current_point_raw= transform->backward(current_point, cluster_t0, paf.at(i).second, paf.at(i).first);
+
+                // Apply selection criteria
+                if ((angle3 < 20 && ave_angles.at(i) < 20) || 
+                    (angle3 < 12.5 && fiducial_utils->inside_dead_region(current_point_raw, paf.at(i).first, paf.at(i).second, 2)) || 
+                    angle3 < 7.5 || i <= 4) continue;
+                
+                if ((angle3 > 30 && (refl_angles.at(i) > 25.5 && ave_angles.at(i) > 12.5)) ||
+                    (angle3 > 40 && angle3 > angle3p && v10.magnitude() > 5*units::cm && v20.magnitude() > 5*units::cm)) {
+                    
+                    // Shorted-wire-region guard (sweep 1): configurable via shorted_y_w_range.
+                    // Disabled by default (m_shorted_y_w_min == -1). Enable for detectors
+                    // where a W-wire range has nearby dead V-plane wires that cause false kinks.
+                    if (m_shorted_y_w_min >= 0 && pw.at(i) > m_shorted_y_w_min && pw.at(i) < m_shorted_y_w_max) {
+                        bool flag_bad = false;
+                        for (int k = -1; k != 2; k++) {
+                            if (cluster.grouping()->is_wire_dead(paf.at(i).first, paf.at(i).second, 1,
+                                                                  std::round(pv.at(i) + k), std::round(pt.at(i)))) {
+                                flag_bad = true;
+                                break;
+                            }
+                        }
+                        if (flag_bad) continue;
+                    }
+
+                    // Calculate charge density before and after kink
+                    double sum_fQ = 0;
+                    double sum_fx = 0;
+                    double sum_bQ = 0;
+                    double sum_bx = 0;
+                    
+                    for (int k = 0; k != 10; k++) {
+                        if (i >= k + 1) {
+                            sum_fQ += dQ.at(i - k - 1);
+                            sum_fx += dx.at(i - k - 1);
+                        }
+                        if (i + k + 1 < dq_size) {
+                            sum_bQ += dQ.at(i + k + 1);
+                            sum_bx += dx.at(i + k + 1);
+                        }
+                    }
+                    
+                    sum_fQ /= (sum_fx / units::cm + 1e-9) * m_mip_dqdx;
+                    sum_bQ /= (sum_bx / units::cm + 1e-9) * m_mip_dqdx;
+                    
+                    // Final selection criteria
+                    if ((sum_fQ > 0.6 && sum_bQ > 0.6) || 
+                        (sum_fQ + sum_bQ > 1.4 && (sum_fQ > 0.8 || sum_bQ > 0.8) && 
+                        v10.magnitude() > 10*units::cm && v20.magnitude() > 10*units::cm)) {
+                        
+                        if (i + 2 < dq_size) {
+                            SPDLOG_LOGGER_TRACE(s_log, "find_first_kink: Kink: {} {} {} {} {} {} {} {} {} {}", i, refl_angles.at(i), para_angles.at(i), ave_angles.at(i), max_numbers.at(i), angle3, dQ.at(i)/dx.at(i)*units::cm/m_mip_dqdx, pu.at(i), pv.at(i), pw.at(i));
+                            return max_numbers.at(i);
+                        }
+                    }
+                }
+            }
+        }
+
+        for (int i = 0; i < path_size; i++){
+            // std::cout << i << " " << refl_angles.at(i) << " " << ave_angles.at(i) << " " << inside_fiducial_volume(fine_tracking_path.at(i)) << std::endl;
+            
+            geo_point_t current_point(fine_tracking_path.at(i).first.x(),
+                                    fine_tracking_path.at(i).first.y(),
+                                    fine_tracking_path.at(i).first.z());
+            
+            if ((refl_angles.at(i) > 20 && ave_angles.at(i) > 15) && 
+                fiducial_utils->inside_fiducial_volume(current_point)) {
+
+                WireCell::Vector v10(fine_tracking_path.at(i).first.x() - fine_tracking_path.front().first.x(),
+                                fine_tracking_path.at(i).first.y() - fine_tracking_path.front().first.y(),
+                                fine_tracking_path.at(i).first.z() - fine_tracking_path.front().first.z());
+                WireCell::Vector v20(fine_tracking_path.back().first.x() - fine_tracking_path.at(i).first.x(),
+                                fine_tracking_path.back().first.y() - fine_tracking_path.at(i).first.y(),
+                                fine_tracking_path.back().first.z() - fine_tracking_path.at(i).first.z());
+                
+                double angle3 = 0;
+                if (v10.magnitude() > 0 && v20.magnitude() > 0) {
+                    angle3 = std::acos(v10.dot(v20) / (v10.magnitude() * v20.magnitude())) / 3.1415926 * 180.0;
+                }
+                
+                // Convert to raw coordinates for dead region check
+                WireCell::Point current_point_raw = transform->backward(current_point, cluster_t0, paf.at(i).second, paf.at(i).first);
+                
+                if ((angle3 < 20 && ave_angles.at(i) < 20) || 
+                    (angle3 < 12.5 && fiducial_utils->inside_dead_region(current_point_raw, paf.at(i).first, paf.at(i).second, 2)) || 
+                    angle3 < 7.5 || i <= 4) continue;
+                
+                if (angle3 > 30){
+                    // Shorted-wire-region guard (sweep 2): configurable via shorted_y_w_range.
+                    if (m_shorted_y_w_min >= 0 && pw.at(i) > m_shorted_y_w_min && pw.at(i) < m_shorted_y_w_max) {
+                        bool flag_bad = false;
+                        for (int k = -1; k != 2; k++) {
+                            if (cluster.grouping()->is_wire_dead(paf.at(i).first, paf.at(i).second, 1,
+                                                                  std::round(pv.at(i) + k), std::round(pt.at(i)))) {
+                                flag_bad = true;
+                                break;
+                            }
+                        }
+                        if (flag_bad) continue;
+                    }
+                    bool flag_bad_u = false;
+                    {
+                        for (int k=-1;k!=2;k++){
+                            if (cluster.grouping()->is_wire_dead(paf.at(i).first, paf.at(i).second, 0, std::round(pu.at(i)+k), std::round(pt.at(i)))){
+                                flag_bad_u = true;
+                                break;
+                            }
+                        }
+                    }
+                    bool flag_bad_v = false;
+                    {
+                        for (int k=-1;k!=2;k++){
+                            if (cluster.grouping()->is_wire_dead(paf.at(i).first, paf.at(i).second, 1, std::round(pv.at(i)+k), std::round(pt.at(i)))){
+                                flag_bad_v = true;
+                                break;
+                            }
+                        }
+                    }
+                    bool flag_bad_w = false;
+                    {
+                        for (int k=-1;k!=2;k++){
+                            if (cluster.grouping()->is_wire_dead(paf.at(i).first, paf.at(i).second, 2, std::round(pw.at(i)+k), std::round(pt.at(i)))){
+                                flag_bad_w = true;
+                                break;
+                            }
+                        }
+                    }
+                    
+                    double sum_fQ = 0;
+                    double sum_fx = 0;
+                    double sum_bQ = 0;
+                    double sum_bx = 0;
+                    for (int k=0;k!=10;k++){
+                        if (i>=k+1){
+                            sum_fQ += dQ.at(i-k-1);
+                            sum_fx += dx.at(i-k-1);
+                        }
+                        if (i+k+1 < dq_size){
+                            sum_bQ += dQ.at(i+k+1);
+                            sum_bx += dx.at(i+k+1);
+                        }
+                    }
+                    sum_fQ /= (sum_fx/units::cm+1e-9)*m_mip_dqdx;
+                    sum_bQ /= (sum_bx/units::cm+1e-9)*m_mip_dqdx;
+                    //std::cout << sum_fQ << " " << sum_bQ << std::endl;
+                    if (std::abs(sum_fQ-sum_bQ) < 0.07*(sum_fQ+sum_bQ) && (flag_bad_u||flag_bad_v||flag_bad_w)) continue;
+                    
+                    if (sum_fQ > 0.6 && sum_bQ > 0.6 ){
+                        if (i+2<dq_size){
+                            SPDLOG_LOGGER_TRACE(s_log, "find_first_kink: Kink: {} {} {} {} {} {} {}", i, refl_angles.at(i), para_angles.at(i), ave_angles.at(i), max_numbers.at(i), angle3, dQ.at(i)/dx.at(i)*units::cm/m_mip_dqdx);
+                            return max_numbers.at(i);
+                        }
+                    }
+                }
+            }
+        }
+
+
+        return static_cast<int>(fine_tracking_path.size());  // Placeholder return value
+    }
+
+    bool detect_proton(std::shared_ptr<PR::Segment> segment, int kink_num, std::vector<std::shared_ptr<PR::Segment>>& fitted_segments) const{
+        auto& cluster = *segment->cluster();
+        // Get FiducialUtils from the grouping
+        auto fiducial_utils = cluster.grouping()->get_fiducialutils();
+        if (!fiducial_utils) {
+            SPDLOG_LOGGER_TRACE(s_log, "detect_proton: TaggerCheckSTM: No FiducialUtils available");
+            return false; // cannot determine → assume no proton, allow STM
+        }
+        const auto transform = m_pcts->pc_transform(cluster.get_scope_transform(cluster.get_default_scope()));
+        
+        // Extract fit results from the segment
+        const auto& fits = segment->fits();
+        
+        // Convert fit data to vectors matching the TrackFitting interface
+        std::vector<std::pair<WireCell::Point, std::shared_ptr<PR::Segment>>> fine_tracking_path;
+        std::vector<double> dQ, dx;
+        std::vector<std::pair<int,int>> paf;
+        
+        for (const auto& fit : fits) {
+            fine_tracking_path.emplace_back(fit.point, segment);
+            dQ.push_back(fit.dQ);
+            dx.push_back(fit.dx);
+            paf.push_back(fit.paf);
+        }
+
+        // std::cout << fitted_segments.size() << " " << fine_tracking_path.size() << std::endl;
+
+        if (fine_tracking_path.empty()) {
+            return false;
+        }
+
+        // Extract points vector for compatibility with prototype algorithm
+        std::vector<WireCell::Point> pts;
+        for (const auto& path_point : fine_tracking_path) {
+            pts.push_back(path_point.first);
+        }
+        const int num_pts = static_cast<int>(pts.size());
+
+        // Determine end point
+        WireCell::Point end_p;
+        if (kink_num < 0 || kink_num >= num_pts) {
+            end_p = pts.back();
+        } else {
+            end_p = pts.at(static_cast<size_t>(kink_num));
+        }
+
+        // Calculate main track direction vector
+        geo_point_t p1(pts.front().x() - pts.back().x(),
+                    pts.front().y() - pts.back().y(),
+                    pts.front().z() - pts.back().z());
+
+        // Check fitted segments for Michel electrons and delta rays
+        for (size_t i = 1; i < fitted_segments.size(); i++) {
+            const auto& seg_fits = fitted_segments[i]->fits();
+            if (seg_fits.empty()) continue;
+
+            double dis = sqrt(pow(end_p.x() - seg_fits.front().point.x(), 2) +
+                            pow(end_p.y() - seg_fits.front().point.y(), 2) +
+                            pow(end_p.z() - seg_fits.front().point.z(), 2));
+
+            // Protection against Michel electron
+            double seg_length = segment_track_length(fitted_segments[i], 1);
+            double seg_dQ_dx = segment_median_dQ_dx(fitted_segments[i]) * units::cm / m_mip_dqdx;
+            
+
+            // std::cout << i << " " << dis/units::cm << " " << seg_length/units::cm << " " << seg_dQ_dx << std::endl;
+
+            if (dis < 1*units::cm && seg_length > 4*units::cm && seg_dQ_dx > 0.5) {
+                return false;
+            }
+
+            // Check for delta rays
+            if (dis > 10*units::cm && seg_length > 4*units::cm ) {
+                geo_point_t p2(seg_fits.back().point.x() - seg_fits.front().point.x(),
+                        seg_fits.back().point.y() - seg_fits.front().point.y(),
+                        seg_fits.back().point.z() - seg_fits.front().point.z()); 
+                
+                // Get closest point on the segment to point p
+                const auto& fit_seg_dpc = segment->dpcloud("main");
+                auto closest_result_back = fit_seg_dpc->kd3d().knn(1, seg_fits.back().point);
+                size_t closest_index_back = closest_result_back[0].first;
+
+                auto closest_result_front = fit_seg_dpc->kd3d().knn(1, seg_fits.front().point);
+                size_t closest_index_front = closest_result_front[0].first;
+                
+                // Access the actual 3D points at the found indices
+                geo_point_t back_point = fit_seg_dpc->point3d(closest_index_back);
+                geo_point_t front_point = fit_seg_dpc->point3d(closest_index_front);
+                
+                geo_point_t p3(0,0,0);
+                if (pow(end_p.x() - back_point.x(), 2) + pow(end_p.y() - back_point.y(), 2) + pow(end_p.z() - back_point.z(), 2) < 
+                    pow(end_p.x() - front_point.x(), 2) + pow(end_p.y() - front_point.y(), 2) + pow(end_p.z() - front_point.z(), 2)) {
+                    p3.set(front_point.x() - back_point.x(), front_point.y() - back_point.y(), front_point.z() - back_point.z());
+                } else {
+                    p3.set(back_point.x() - front_point.x(), back_point.y() - front_point.y(), back_point.z() - front_point.z());
+                }
+
+                // std::cout << p2 << " " << p3 << std::endl;
+
+                // Judge direction for delta ray detection
+                if ((p2.angle(p1)/3.1415926*180. < 20 || 
+                    (p3.angle(p1)/3.1415926*180. < 15 && p3.magnitude() > 4*units::cm && p2.angle(p1)/3.1415926*180. < 35)) &&
+                    seg_dQ_dx > 0.8) {
+                    SPDLOG_LOGGER_TRACE(s_log, "detect_proton: Delta Ray Dir: {} {} {} {} {}", p2.angle(p1)/3.1415926*180., p3.angle(p1)/3.1415926*180., p3.magnitude()/units::cm, dis/units::cm, seg_length/units::cm);
+                    return true;
+                }
+            }
+        }
+
+        // Calculate cumulative distances and dQ/dx along track
+        std::vector<double> L(pts.size(), 0);
+        std::vector<double> dQ_dx(pts.size(), 0);
+        double dis = 0;
+        L[0] = dis;
+        dQ_dx[0] = dQ[0] / (dx[0] / units::cm + 1e-9);
+        
+        for (size_t i = 1; i != pts.size(); i++) {
+            dis += sqrt(pow(pts[i].x() - pts[i-1].x(), 2) + pow(pts[i].y() - pts[i-1].y(), 2) + pow(pts[i].z() - pts[i-1].z(), 2));
+            L[i] = dis;
+            dQ_dx[i] = dQ[i] / (dx[i] / units::cm + 1e-9);
+        }
+
+        double end_L;
+        size_t max_num;
+        if (kink_num < 0 || kink_num >= num_pts) {
+            end_L = L.back();
+            max_num = L.size();
+        } else {
+            const size_t kink_idx = static_cast<size_t>(kink_num);
+            end_L = L[kink_idx] - 0.5*units::cm;
+            max_num = kink_idx;
+        }
+
+        // Find the maximum bin
+        double max_bin = -1;
+        double max_sum = 0;
+        for (size_t i = 0; i != L.size(); i++) {
+            double sum = 0;
+            double nsum = 0;
+            double temp_max_bin = i;
+            double temp_max_val = dQ_dx[i];
+            
+            if (L[i] < end_L + 0.5*units::cm && L[i] > end_L - 40*units::cm && i < max_num) {
+                sum += dQ_dx[i]; nsum++;
+                if (i >= 2) {
+                    sum += dQ_dx[i-2]; nsum++;
+                    if (dQ_dx[i-2] > temp_max_val && i-2 < max_num) {
+                        temp_max_val = dQ_dx[i-2];
+                        temp_max_bin = i-2;
+                    }
+                }
+                if (i >= 1) {
+                    sum += dQ_dx[i-1]; nsum++;
+                    if (dQ_dx[i-1] > temp_max_val && i-1 < max_num) {
+                        temp_max_val = dQ_dx[i-1];
+                        temp_max_bin = i-1;
+                    }
+                }
+                if (i+1 < L.size()) {
+                    sum += dQ_dx[i+1]; nsum++;
+                    if (dQ_dx[i+1] > temp_max_val && i+1 < max_num) {
+                        temp_max_val = dQ_dx[i+1];
+                        temp_max_bin = i+1;
+                    }
+                }
+                if (i+2 < L.size()) {
+                    sum += dQ_dx[i+2]; nsum++;
+                    if (dQ_dx[i+2] > temp_max_val && i+2 < max_num) {
+                        temp_max_val = dQ_dx[i+2];
+                        temp_max_bin = i+2;
+                    }
+                }
+                sum /= nsum;
+                if (sum > max_sum) {
+                    max_sum = sum;
+                    max_bin = temp_max_bin;
+                }
+            }
+        }
+
+        end_L = L[max_bin] + 0.2*units::cm;
+        int ncount = 0, ncount_p = 0;
+        std::vector<double> vec_x, vec_xp;
+        std::vector<double> vec_y, vec_yp;
+
+        for (size_t i = 0; i != L.size(); i++) {
+            if (end_L - L[i] < 35*units::cm && end_L - L[i] > 3*units::cm) {
+                vec_x.push_back(end_L - L[i]);
+                vec_y.push_back(dQ_dx[i]);
+                
+                // std::cout << ncount << " " << vec_x.back() << " " << vec_y.back() << std::endl;
+
+                ncount++;
+            }
+           
+
+
+            if (end_L - L[i] < 20*units::cm) {
+                vec_xp.push_back(end_L - L[i]);
+                vec_yp.push_back(dQ_dx[i]);
+                ncount_p++;
+            }
+        }
+
+        if (ncount >= 5) {
+            // Create reference vectors for comparison
+            const size_t count = static_cast<size_t>(ncount);
+            const size_t count_p = static_cast<size_t>(ncount_p);
+            std::vector<double> muon_ref(count);
+            std::vector<double> const_ref(count, m_mip_dqdx);
+            std::vector<double> muon_ref_p(count_p);
+
+            for (size_t i = 0; i < count; i++) {
+                muon_ref[i] = particle_data()->get_dEdx_function("muon")->scalar_function((vec_x[i])/units::cm);
+            }
+            for (size_t i = 0; i < count_p; i++) {
+                muon_ref_p[i] = particle_data()->get_dEdx_function("muon")->scalar_function((vec_xp[i])/units::cm);
+            }
+
+            // Perform KS-like tests using kslike_compare
+            double ks1 = WireCell::kslike_compare(vec_y, muon_ref);
+            double ratio1 = std::accumulate(muon_ref.begin(), muon_ref.end(), 0.0) / 
+                        (std::accumulate(vec_y.begin(), vec_y.end(), 0.0) + 1e-9);
+            double ks2 = WireCell::kslike_compare(vec_y, const_ref);
+            double ratio2 = std::accumulate(const_ref.begin(), const_ref.end(), 0.0) / 
+                        (std::accumulate(vec_y.begin(), vec_y.end(), 0.0) + 1e-9);
+            double ks3 = WireCell::kslike_compare(vec_yp, muon_ref_p);
+            double ratio3 = std::accumulate(vec_yp.begin(), vec_yp.end(), 0.0) / 
+                        (std::accumulate(muon_ref_p.begin(), muon_ref_p.end(), 0.0) + 1e-9);
+
+            SPDLOG_LOGGER_TRACE(s_log, "detect_proton: End proton detection: {} {} {} {} {} {} {} {} {} ", ks1, ks2, ratio1, ratio2, ks3, ratio3, ks1-ks2 + (fabs(ratio1-1)-fabs(ratio2-1))/1.5*0.3, dQ_dx[max_bin]/m_mip_dqdx, dQ_dx.size() - max_bin);
+
+            // doc-63 round-2 (inert unless proton_muon_guard): when the end
+            // region matches the muon hypothesis in both shape and
+            // normalization, do not let the high-dQ/dx branches below call it
+            // a proton -- a proton Bragg is far steeper and higher than the
+            // muon curve, so a good muon match and a proton are exclusive.
+            // Guards every end-proton KS branch below (a real proton fails
+            // ratio3 < 1.1 regardless of branch); the Michel/delta-ray checks
+            // above are untouched.
+            if (m_proton_muon_guard && ks1 < m_guard_proton_ks1 && ratio3 < m_guard_proton_ratio3) {
+                SPDLOG_LOGGER_DEBUG(s_log, "detect_proton: proton_muon_guard: end matches the muon hypothesis (ks1={:.3f}, ratio3={:.3f}); not a proton",
+                                    ks1, ratio3);
+                return false;
+            }
+
+            // prototype ks2 < 0.05; m_proton_b_ks2_max widens the entry so a
+            // deep-Bragg end whose flat-MIP KS drifts a hair above 0.05 under
+            // 4.0/8.8 diffusion still reaches the comb veto below (doc 66
+            // sec 12.1, 390864:16 at ks2 = 0.0507).
+            if (ks1-ks2 + (fabs(ratio1-1)-fabs(ratio2-1))/1.5*0.3 > 0.02 && dQ_dx[max_bin]/m_mip_dqdx > 2.3 &&
+                (dQ_dx.size() - max_bin <= 3 || (ks2 < m_proton_b_ks2_max && dQ_dx.size() - max_bin <= 12))) {
+                if (dQ_dx.size()-max_bin <= 1 && dQ_dx[max_bin]/m_mip_dqdx > 2.5 && ks2 < 0.035 && fabs(ratio2-1) < 0.1)
+                return true;
+                if (dQ_dx.size()-max_bin <= 1 && ((dQ_dx[max_bin]/m_mip_dqdx < 3.0 && ((ks1 < 0.06 && ks2 > 0.03) || (ks1 < 0.065 && ks2 > 0.04))) || (ks1 < 0.035 && dQ_dx[max_bin]/m_mip_dqdx < 4.0)))
+                return false;
+                if (ks1-ks2 + (fabs(ratio1-1)-fabs(ratio2-1))/1.5*0.3 > 0.027)
+                return true;
+            }
+
+            // Check for proton with very high dQ_dx
+            double track_medium_dQ_dx = segment_median_dQ_dx(fitted_segments[0]) * units::cm / m_mip_dqdx;
+            SPDLOG_LOGGER_TRACE(s_log, "detect_proton: End proton detection1: {} {} {} {}", track_medium_dQ_dx, dQ_dx[max_bin]/m_mip_dqdx, ks3, ratio3);
+                    
+            // prototype track_medium < 1.0 and peak > 4.3; m_proton_tm_max /
+            // m_proton_c_peak_max restore this block for ends whose track
+            // median dQ/dx rises just past MIP under 4.0/8.8 diffusion (doc
+            // 66 sec 12.1: 317543:15 at tm = 1.010, 319809:20 at tm = 1.021
+            // with peak 4.16; nearest non-target STM sits above tm = 1.10).
+            if (track_medium_dQ_dx < m_proton_tm_max && dQ_dx.at(max_bin)/m_mip_dqdx > 3.5){
+                if ((ks3 > 0.06 && ratio3 > 1.1 && ks1 > 0.045) || (ks3 > 0.1 && ks2 < 0.19) || (ratio3 > 1.3)) return true;
+                if ((ks2 < 0.045 && ks3 > 0.03) || (dQ_dx.at(max_bin)/m_mip_dqdx > m_proton_c_peak_max && ks3 > 0.03)) return true;
+            }else if (track_medium_dQ_dx < m_proton_tm_max && dQ_dx.at(max_bin)/m_mip_dqdx > 3.0){
+                if (ks3 > 0.12 && ks1 > 0.03) return true;
+            }
+        }
+
+        return false;
+    }
+
+    // Pre-computed per-segment data shared across multiple eval_stm calls with the same segment.
+    struct STMEvalArrays {
+        std::vector<WireCell::Point> pts;
+        std::vector<double> L;
+        std::vector<double> dQ_dx;
+        bool valid{false};
+    };
+
+    STMEvalArrays build_eval_arrays(std::shared_ptr<PR::Segment> segment) const {
+        STMEvalArrays arrs;
+        const auto& fits = segment->fits();
+        if (fits.empty()) return arrs;
+        for (const auto& fit : fits) {
+            arrs.pts.push_back(fit.point);
+            arrs.L.push_back(0);
+            arrs.dQ_dx.push_back(fit.dQ / (fit.dx / units::cm + 1e-9));
+        }
+        double dis = 0;
+        for (size_t i = 1; i < arrs.pts.size(); i++) {
+            const auto& a = arrs.pts[i-1];
+            const auto& b = arrs.pts[i];
+            dis += sqrt(pow(b.x()-a.x(),2) + pow(b.y()-a.y(),2) + pow(b.z()-a.z(),2));
+            arrs.L[i] = dis;
+        }
+        arrs.valid = true;
+        return arrs;
+    }
+
+    // doc-63 round-1 pass-level acceptance guards (see configure()).  Called
+    // only when m_accept_guards and the eval chain accepted; a true return
+    // vetoes the acceptance for this pass.  Both guards are functions of the
+    // final fit and the kink alone, so unlike the ratio2 cap they do not
+    // depend on which eval call accepted.  kink semantics match
+    // eval_stm_core_impl: out-of-range kink means the stop is the path end.
+    bool accept_guards_reject(const STMEvalArrays& arrs, int kink_num, int cluster_ident) const {
+        const auto& L = arrs.L;
+        const auto& dQ_dx = arrs.dQ_dx;
+        const int n = static_cast<int>(L.size());
+        if (n < 3) return false;
+        const int k = (kink_num >= 0 && kink_num < n) ? kink_num : n - 1;
+
+        // Guard 1 -- charge desert: longest contiguous stretch of the muon
+        // segment [0, kink] with essentially no charge under the fit.  A fit
+        // that bridges detached objects crosses such a desert (doc-62
+        // baseline: 23.4 and 6.7 cm on the two bridge cases, 0.0 cm on every
+        // other accepted bundle).
+        //
+        // Cathode-join exemption (docs/63 full-population review): a genuine
+        // cathode CROSSER also dips to ~zero for several cm where the two
+        // half-tracks join at the CPA (evt 290844: an 8.3 cm instrumental
+        // desert on a textbook STM).  A below-threshold run whose endpoints
+        // sit in DIFFERENT TPC volumes (or leave the known volumes) is that
+        // join, not topology -- exempt it, but only up to 4x the veto length
+        // (a detached-object bridge that merely happens to straddle the CPA
+        // stays vetoed).  Both baseline bridge cases are single-TPC.
+        const auto& gpts = arrs.pts;
+        const double desert_thresh = m_guard_desert_frac * m_mip_dqdx;
+        double max_desert = 0;
+        for (int i = 0; i <= k;) {
+            if (dQ_dx[i] < desert_thresh) {
+                int j = i;
+                while (j + 1 <= k && dQ_dx[j + 1] < desert_thresh) ++j;
+                const double len = L[std::min(j + 1, k)] - L[i];
+                bool crosses = false;
+                if (len < 4 * m_guard_desert_cm * units::cm) {
+                    const WirePlaneId wa = m_dv->contained_by(gpts[static_cast<size_t>(i)]);
+                    const WirePlaneId wb = m_dv->contained_by(gpts[static_cast<size_t>(std::min(j, k))]);
+                    crosses = (wa.apa() < 0 || wb.apa() < 0 ||
+                               wa.apa() != wb.apa() || wa.face() != wb.face());
+                }
+                if (!crosses && len > max_desert) max_desert = len;
+                i = j + 1;
+            }
+            else ++i;
+        }
+        if (max_desert >= m_guard_desert_cm * units::cm) {
+            SPDLOG_LOGGER_INFO(s_log, "accept_guards: cluster {} rejected: fit bridges a {:.1f} cm charge desert (one-objectness)",
+                               cluster_ident, max_desert / units::cm);
+            return true;
+        }
+
+        // Guard 2 -- spike-not-ramp: a genuine Bragg is a RAMP (muon table:
+        // ~1.7 MIP at rr=3cm rising to ~3 at 0.5cm, so the 1.5-4 cm shoulder
+        // before the stop is elevated); a nu-vertex is a SPIKE on a MIP-flat
+        // approach.  Veto when the peak within 1.5 cm of the stop towers over
+        // the 2-6 cm base AND the shoulder is cold.
+        const double L_stop = L[k];
+        double peak = -1;
+        std::vector<double> shoulder, base;
+        for (int i = 0; i <= k; ++i) {
+            const double d = L_stop - L[i];
+            if (d < 1.5 * units::cm) peak = std::max(peak, dQ_dx[i]);
+            if (d >= 1.5 * units::cm && d < 4 * units::cm) shoulder.push_back(dQ_dx[i]);
+            if (d >= 2 * units::cm && d < 6 * units::cm) base.push_back(dQ_dx[i]);
+        }
+        auto median = [](std::vector<double>& v) {
+            std::sort(v.begin(), v.end());
+            const size_t m = v.size() / 2;
+            return v.size() % 2 ? v[m] : 0.5 * (v[m - 1] + v[m]);
+        };
+        if (peak > 0 && base.size() >= 2 && !shoulder.empty()) {
+            const double base_med = median(base);
+            const double shoulder_med = median(shoulder);
+            if (peak / (base_med + 1e-9) > m_guard_spike_ratio &&
+                shoulder_med < m_guard_spike_shoulder * m_mip_dqdx) {
+                SPDLOG_LOGGER_INFO(s_log, "accept_guards: cluster {} rejected: end spike {:.1f}x base with cold shoulder {:.2f} MIP (vertex, not Bragg)",
+                                   cluster_ident, peak / (base_med + 1e-9), shoulder_med / m_mip_dqdx);
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // doc-63 round-3 cathode-truncation veto (see configure()).  Same calling
+    // convention as accept_guards_reject; gated on m_cathode_guard.
+    bool cathode_guard_reject(const STMEvalArrays& arrs, int kink_num, int cluster_ident) const {
+        const auto& pts = arrs.pts;
+        const auto& L = arrs.L;
+        const auto& dQ_dx = arrs.dQ_dx;
+        const int n = static_cast<int>(L.size());
+        if (n < 3) return false;
+        const int k = (kink_num >= 0 && kink_num < n) ? kink_num : n - 1;
+
+        // Distance from the stop point to the cathode plane of its own TPC.
+        // face_dirx is the face-normal sign (IAnodeFace::dirx), pointing from
+        // the anode INTO the drift volume, i.e. toward the cathode; the
+        // sensitive-volume BoundingBox is component-wise normalized
+        // (first=min, second=max), so fdx>0 puts the cathode at max x
+        // (verified on SBND apa0: fdx=+1, bb.x=[-201.45,-0.45]cm, cathode at
+        // -0.45).  A point outside all known volumes cannot be judged -- no
+        // veto.
+        const auto& stop = pts[static_cast<size_t>(k)];
+        WirePlaneId wpid = m_dv->contained_by(stop);
+        if (wpid.apa() < 0 || wpid.face() < 0) return false;
+        WirePlaneId wpid_u(kUlayer, wpid.face(), wpid.apa());
+        const int fdx = m_dv->face_dirx(wpid_u);
+        WireCell::BoundingBox bb = m_dv->inner_bounds(wpid_u);
+        const double cathode_x = (fdx > 0) ? bb.bounds().second.x() : bb.bounds().first.x();
+        const double dist = std::abs(stop.x() - cathode_x);
+        SPDLOG_LOGGER_DEBUG(s_log, "cathode_guard: cluster {} stop x={:.2f}cm apa={} face={} fdx={} bb.x=[{:.2f},{:.2f}]cm cathode_x={:.2f}cm dist={:.2f}cm",
+                            cluster_ident, stop.x() / units::cm, wpid.apa(), wpid.face(), fdx,
+                            bb.bounds().first.x() / units::cm, bb.bounds().second.x() / units::cm,
+                            cathode_x / units::cm, dist / units::cm);
+        if (dist >= m_guard_cathode_cm * units::cm) return false;
+
+        // A genuine near-cathode stop still shows its Bragg rise.
+        const double L_stop = L[k];
+        double peak = -1;
+        for (int i = 0; i <= k; ++i) {
+            const double d = L_stop - L[i];
+            if (d >= 0 && d < 5 * units::cm) peak = std::max(peak, dQ_dx[i]);
+        }
+        if (peak > 0 && peak < m_guard_cathode_peak * m_mip_dqdx) {
+            SPDLOG_LOGGER_INFO(s_log, "cathode_guard: cluster {} rejected: stop {:.1f} cm from the cathode with end peak {:.2f} MIP (drift-boundary truncation, not a stop)",
+                               cluster_ident, dist / units::cm, peak / m_mip_dqdx);
+            return true;
+        }
+        return false;
+    }
+
+    // doc-63 round-4b: a leftover past the kink that is LONG and STRAIGHT is
+    // a second track (V topology), not the Michel/overshoot debris a genuine
+    // stopping muon leaves.  Same calling convention as accept_guards_reject;
+    // gated on m_second_track_guard.
+    bool second_track_leftover_reject(const STMEvalArrays& arrs, int kink_num, int cluster_ident) const {
+        const auto& pts = arrs.pts;
+        const auto& L = arrs.L;
+        const int n = static_cast<int>(L.size());
+        if (kink_num < 0 || kink_num >= n - 2) return false;  // need >=3 leftover points
+        const double left_L = L.back() - L[kink_num];
+        if (left_L < m_guard_left_track_cm * units::cm) return false;
+        double path = 0;
+        for (int i = kink_num + 1; i < n; ++i) {
+            path += std::sqrt((pts[i] - pts[i - 1]).dot(pts[i] - pts[i - 1]));
+        }
+        if (path <= 0) return false;
+        const auto chord_v = pts[n - 1] - pts[static_cast<size_t>(kink_num)];
+        const double straight = std::sqrt(chord_v.dot(chord_v)) / path;
+        if (straight > m_guard_left_track_straight) {
+            SPDLOG_LOGGER_INFO(s_log, "second_track_guard: cluster {} rejected: {:.1f} cm leftover past the kink with straightness {:.3f} (a second track, not a Michel)",
+                               cluster_ident, left_L / units::cm, straight);
+            return true;
+        }
+        return false;
+    }
+
+    // doc-63 round-5a stop-deficit veto: the fitted stop region carries
+    // neither MIP-level charge (end-5cm median below ~0.6 MIP -- no stopping
+    // particle deposits HALF a MIP at its stop) nor ANY charge bump in the
+    // last 15 cm (max below 2.0 MIP), so the visible end is a reconstruction
+    // truncation, not a stopping point.  Full-d59k survey (docs/63 sec 1.8):
+    // correct STMs bottom out at end-5cm median 0.72 MIP; the vetoed end
+    // 321371:18 sits at 0.43 with a last-15cm max of only 1.30 (its charge
+    // decays into NEGATIVE noise).  The 2.0 MIP bump threshold deliberately
+    // keeps every truncated-but-plausible Bragg: 353487:3 (bump 2.19 then a
+    // 3 cm dead tail -- the doc-61 scan reads it as a genuine STM) and
+    // 283485:15 (smooth Bragg to 2.5, endpoint overshoot) both survive.
+    // The kink argument must be the RECORDED kink, not the post-short-track-
+    // reset one (see the call site).  Same calling convention as
+    // accept_guards_reject; gated on m_deficit_guard.
+    bool deficit_guard_reject(const STMEvalArrays& arrs, int kink_num, int cluster_ident) const {
+        const auto& L = arrs.L;
+        const auto& dQ_dx = arrs.dQ_dx;
+        const int n = static_cast<int>(L.size());
+        if (n < 3) return false;
+        const int k = (kink_num >= 0 && kink_num < n) ? kink_num : n - 1;
+        const double L_stop = L[k];
+        std::vector<double> end5;
+        double max15 = -1;
+        for (int i = 0; i <= k; ++i) {
+            const double d = L_stop - L[i];
+            if (d >= 0 && d < 5 * units::cm) end5.push_back(dQ_dx[i]);
+            if (d >= 0 && d < 15 * units::cm) max15 = std::max(max15, dQ_dx[i]);
+        }
+        if (end5.size() < 2) return false;
+        std::sort(end5.begin(), end5.end());
+        const size_t m = end5.size() / 2;
+        const double end5_med = end5.size() % 2 ? end5[m] : 0.5 * (end5[m - 1] + end5[m]);
+        if (end5_med < m_guard_deficit_med * m_mip_dqdx &&
+            max15 < m_guard_deficit_bragg * m_mip_dqdx) {
+            SPDLOG_LOGGER_INFO(s_log, "deficit_guard: cluster {} rejected: end-5cm median {:.2f} MIP with last-15cm max {:.2f} MIP (charge-deficient end, truncation not a stop)",
+                               cluster_ident, end5_med / m_mip_dqdx, max15 / m_mip_dqdx);
+            return true;
+        }
+        return false;
+    }
+
+    // doc-63 round-5b vertex-kink veto: a genuine Bragg rise is SMOOTH -- no
+    // direction break at its onset -- while a nu vertex fitted through reads
+    // as MIP leg -> sharp turn -> short HIGH-dQ/dx prong (a proton) that the
+    // eval mistakes for the Bragg.  Veto when the sharpest 2.5 cm-window turn
+    // in [stop-12, stop-2] cm exceeds the angle cut AND the median dQ/dx from
+    // that turn to the stop is hot.  Full-d59k survey (docs/63 sec 1.8):
+    // vetoed 402330:1 turns 53.5 deg into a 3.67 MIP prong; the sharpest
+    // correct-STM turn WITH a hot prong is 34.8 deg (389544:13), the hottest
+    // prong behind a >45 deg turn on a correct STM is 0.72 MIP (283463:14),
+    // and the borderline genuine short stopper 406752:7 (post-turn 2.01 MIP)
+    // stays below the 2.2 MIP cut.  Same calling convention as
+    // accept_guards_reject; gated on m_vertex_kink_guard.
+    bool vertex_kink_reject(const STMEvalArrays& arrs, int kink_num, int cluster_ident) const {
+        const auto& pts = arrs.pts;
+        const auto& L = arrs.L;
+        const auto& dQ_dx = arrs.dQ_dx;
+        const int n = static_cast<int>(L.size());
+        if (n < 8) return false;
+        const int k = (kink_num >= 0 && kink_num < n) ? kink_num : n - 1;
+        const double L_stop = L[k];
+        if (L_stop < 20 * units::cm) return false;  // need a MIP body before the window
+
+        // direction of the path chord over L in [lo, hi]; false if degenerate
+        auto wdir = [&](double lo, double hi, WireCell::Point& out) -> bool {
+            int a = -1, b = -1;
+            for (int i = 0; i <= k; ++i) {
+                if (L[i] >= lo && L[i] <= hi) {
+                    if (a < 0) a = i;
+                    b = i;
+                }
+            }
+            if (a < 0 || b <= a) return false;
+            out = pts[static_cast<size_t>(b)] - pts[static_cast<size_t>(a)];
+            const double mag = std::sqrt(out.dot(out));
+            if (mag <= 0) return false;
+            out = out * (1.0 / mag);
+            return true;
+        };
+
+        double best_ang = 0, best_t = -1;
+        const double t_lo = std::max(2.5 * units::cm, L_stop - 12 * units::cm);
+        for (double t = t_lo; t <= L_stop - 2 * units::cm; t += 0.5 * units::cm) {
+            WireCell::Point d1, d2;
+            if (!wdir(t - 2.5 * units::cm, t, d1) || !wdir(t, t + 2.5 * units::cm, d2)) continue;
+            const double c = std::max(-1.0, std::min(1.0, d1.dot(d2)));
+            const double ang = std::acos(c) * 180.0 / 3.1415926;
+            if (ang > best_ang) { best_ang = ang; best_t = t; }
+        }
+        if (best_t < 0 || best_ang < m_guard_vertex_turn) return false;
+        std::vector<double> post;
+        for (int i = 0; i <= k; ++i) {
+            if (L[i] >= best_t) post.push_back(dQ_dx[i]);
+        }
+        if (post.size() < 2) return false;
+        std::sort(post.begin(), post.end());
+        const size_t m = post.size() / 2;
+        const double post_med = post.size() % 2 ? post[m] : 0.5 * (post[m - 1] + post[m]);
+        if (post_med > m_guard_vertex_mip * m_mip_dqdx) {
+            SPDLOG_LOGGER_INFO(s_log, "vertex_kink_guard: cluster {} rejected: {:.1f} deg turn {:.1f} cm before the stop into a {:.2f} MIP prong (vertex, not Bragg)",
+                               cluster_ident, best_ang, (L_stop - best_t) / units::cm, post_med / m_mip_dqdx);
+            return true;
+        }
+        return false;
+    }
+
+    // Core STM evaluation using pre-built arrays (called once per (peak_range, offset, com_range) combo).
+    bool eval_stm_core_impl(const STMEvalArrays& arrs, int kink_num,
+                       double peak_range, double offset_length, double com_range,
+                       bool flag_strong_check) const {
+        const auto& pts   = arrs.pts;
+        const auto& L     = arrs.L;
+        const auto& dQ_dx = arrs.dQ_dx;
+        const int num_pts = static_cast<int>(pts.size());
+
+        double end_L;
+        size_t max_num;
+        if (kink_num < 0 || kink_num >= num_pts) {
+            end_L = L.back();
+            max_num = L.size();
+        } else {
+            const size_t kink_idx = static_cast<size_t>(kink_num);
+            end_L = L[kink_idx] - 0.5 * units::cm;
+            max_num = kink_idx;
+        }
+
+        double max_bin = -1;
+        double max_sum = 0;
+        for (size_t i = 0; i != L.size(); i++) {
+            double sum = 0;
+            double nsum = 0;
+            double temp_max_bin = i;
+            double temp_max_val = dQ_dx[i];
+            
+            if (L[i] < end_L + 0.5 * units::cm && L[i] > end_L - peak_range && i < max_num) {
+                sum += dQ_dx[i]; nsum++;
+                if (i >= 2) {
+                    sum += dQ_dx[i-2]; nsum++;
+                    if (dQ_dx[i-2] > temp_max_val && i-2 < max_num) {
+                        temp_max_val = dQ_dx[i-2];
+                        temp_max_bin = i-2;
+                    }
+                }
+                if (i >= 1) {
+                    sum += dQ_dx[i-1]; nsum++;
+                    if (dQ_dx[i-1] > temp_max_val && i-1 < max_num) {
+                        temp_max_val = dQ_dx[i-1];
+                        temp_max_bin = i-1;
+                    }
+                }
+                if (i+1 < L.size()) {
+                    sum += dQ_dx[i+1]; nsum++;
+                    if (dQ_dx[i+1] > temp_max_val && i+1 < max_num) {
+                        temp_max_val = dQ_dx[i+1];
+                        temp_max_bin = i+1;
+                    }
+                }
+                if (i+2 < L.size()) {
+                    sum += dQ_dx[i+2]; nsum++;
+                    if (dQ_dx[i+2] > temp_max_val && i+2 < max_num) {
+                        temp_max_val = dQ_dx[i+2];
+                        temp_max_bin = i+2;
+                    }
+                }
+                sum /= nsum;
+                if (sum > max_sum) {
+                    max_sum = sum;
+                    max_bin = temp_max_bin;
+                }
+            }
+        }
+
+        if (max_bin == -1)
+            max_bin = max_num;
+
+        end_L = L[max_bin] + 0.2 * units::cm;
+        int ncount = 0;
+        std::vector<double> vec_x;
+        std::vector<double> vec_y;
+        std::vector<double> vec_res_x;
+        std::vector<double> vec_res_y;
+
+        for (size_t i = 0; i != L.size(); i++) {
+            if (end_L - L[i] < com_range && end_L - L[i] > 0) {
+                vec_x.push_back(end_L - L[i]);
+                vec_y.push_back(dQ_dx[i]);
+                ncount++;
+            } else if (L[i] > end_L) {
+                vec_res_x.push_back(L[i] - end_L);
+                vec_res_y.push_back(dQ_dx[i]);
+            }
+        }
+
+        double ave_res_dQ_dx = 0;
+        double res_length = 0;
+        for (size_t i = 0; i != vec_res_y.size(); i++) {
+            ave_res_dQ_dx += vec_res_y[i];
+        }
+
+        if (vec_res_y.size() > 0) {
+            res_length = vec_res_x.back();
+            ave_res_dQ_dx /= 1. * vec_res_y.size();
+        }
+
+        double res_length1 = 0, res_dis1 = 0;
+        if (max_bin + 3 < L.size()) {
+            res_length1 = L.back() - L[max_bin + 3];
+            res_dis1 = sqrt(pow(pts.back().x() - pts[max_bin + 3].x(), 2) +
+                        pow(pts.back().y() - pts[max_bin + 3].y(), 2) +
+                        pow(pts.back().z() - pts[max_bin + 3].z(), 2));
+        }
+
+        // std::cout << "Test: " << res_length/units::cm << " " << ave_res_dQ_dx << " " << res_length1/units::cm << " " << res_dis1/units::cm << std::endl;
+
+        // Create vectors for KS test instead of histograms
+        const size_t count = static_cast<size_t>(ncount);
+        std::vector<double> test_data(count);
+        std::vector<double> ref_muon(count);
+        std::vector<double> ref_flat(count);
+
+        for (size_t i = 0; i < count; i++) {
+            test_data[i] = vec_y[i];
+            ref_muon[i] = particle_data()->get_dEdx_function("muon")->scalar_function((vec_x[i] + offset_length) / units::cm);
+            ref_flat[i] = m_mip_dqdx;
+        }
+
+        double ks1 = WireCell::kslike_compare(test_data, ref_muon);
+        double ratio1 = std::accumulate(ref_muon.begin(), ref_muon.end(), 0.0) / 
+                        (std::accumulate(test_data.begin(), test_data.end(), 0.0) + 1e-9);
+        double ks2 = WireCell::kslike_compare(test_data, ref_flat);
+        double ratio2 = std::accumulate(ref_flat.begin(), ref_flat.end(), 0.0) / 
+                        (std::accumulate(test_data.begin(), test_data.end(), 0.0) + 1e-9);
+
+        SPDLOG_LOGGER_TRACE(s_log, "eval_stm: KS value: {} {} {} {} {} {} {} {} {}", flag_strong_check, ks1, ks2, ratio1, ratio2, ks1-ks2 + (fabs(ratio1-1)-fabs(ratio2-1))/1.5*0.3, res_dis1/(res_length1+1e-9), res_length/units::cm, ave_res_dQ_dx/m_mip_dqdx);
+
+        if (m_save_stm_fit) {
+            StmEvalRecord er;
+            er.pass = m_cur_pass;
+            er.peak_range = peak_range; er.offset_length = offset_length; er.com_range = com_range;
+            er.strong = flag_strong_check ? 1 : 0;
+            er.ks1 = ks1; er.ks2 = ks2; er.ratio1 = ratio1; er.ratio2 = ratio2;
+            er.res_length = res_length; er.ave_res_dQ_dx = ave_res_dQ_dx;
+            m_eval_records.push_back(er);
+        }
+
+        // doc-63 round-1 ratio2 cap (inert unless accept_guards): the branch-1
+        // acceptance below tests only that flat-MIP is a worse SHAPE than the
+        // muon hypothesis, never that the measured charge is muon-normalized.
+        // ratio2 > 2.0 means the accepted window sums more than 2x BELOW MIP
+        // -- no under-collected muon loses half its charge; a ghost/shower
+        // mess does (doc-62 baseline: the false accept 285443 sits at 3.96;
+        // the highest CORRECT accepting call is 1.48, evt 283463, a sub-MIP
+        // track the owner accepts, which a first-try 1.1 cap wrongly killed
+        // -- docs/63 round-1 record).
+        if (m_accept_guards && ratio2 > m_guard_ratio2_max) return false;
+
+        if (ks1 - ks2 >= 0.0) return false;
+        if (sqrt(pow(ks2/0.06, 2) + pow((ratio2-1)/0.06, 2)) < 1.4 &&
+            ks1 - ks2 + (fabs(ratio1-1) - fabs(ratio2-1))/1.5*0.3 > -0.02) return false;
+
+        if (((res_length > 8*units::cm && ave_res_dQ_dx/m_mip_dqdx > 0.9 && res_length1 > 5*units::cm) ||
+            (res_length1 > 1.5*units::cm && ave_res_dQ_dx/m_mip_dqdx > 2.3)) && res_dis1/(res_length1+1e-9) > 0.99)
+            return false;
+
+        // If residual does not look like a michel electron.
+        //
+        // The five thresholds written 1.45/1.7/1.85 x m_mip_dqdx below were bare
+        // 72500 / 85000 / 92500 e/cm, i.e. absolute charge on MicroBooNE's scale
+        // where the MIP reference is 50000 e/cm.  Each is an EXACT multiple of
+        // it (72500/50000 = 1.45, 85000 = 1.7, 92500 = 1.85), which is what
+        // makes the rewrite unambiguous rather than an interpretation.  They sat
+        // in this same conditional as the /m_mip_dqdx ratios on the surrounding
+        // lines, so before this change half of one veto followed mip_dqdx to
+        // SBND's 56000 and half of it stayed on MicroBooNE's 50000.  See doc 57.
+        if ((res_length > 20 * units::cm && ave_res_dQ_dx/m_mip_dqdx > 1.2 && 
+            ks1 - ks2 + (fabs(ratio1-1) - fabs(ratio2-1))/1.5*0.3 > -0.02) ||
+            (res_length > 16 * units::cm && ave_res_dQ_dx > 1.45 * m_mip_dqdx) || 
+            (res_length > 10 * units::cm && ave_res_dQ_dx > 1.45 * m_mip_dqdx && 
+            ks1 - ks2 + (fabs(ratio1-1) - fabs(ratio2-1))/1.5*0.3 > -0.05) ||
+            (res_length > 10 * units::cm && ave_res_dQ_dx > 1.7 * m_mip_dqdx) ||
+            // prototype 6 cm floor on both clauses; m_michel_res_len_cut lets
+            // a hairline-past-6cm residual through when the fit under 4.0/8.8
+            // diffusion leaves one on a deeply-accepting stop (doc 66 sec
+            // 12.1, 281632:8 at res_length = 6.10 cm; the only bundle in
+            // (6, 7] cm over the 1000-event sample).
+            (res_length > m_michel_res_len_cut && ave_res_dQ_dx > 1.85 * m_mip_dqdx) ||
+            (res_length > m_michel_res_len_cut && ave_res_dQ_dx > 1.45 * m_mip_dqdx &&
+            ks1 - ks2 + (fabs(ratio1-1) - fabs(ratio2-1))/1.5*0.3 > -0.05) ||
+            (res_length > 4 * units::cm && ave_res_dQ_dx/m_mip_dqdx > 1.4 && 
+            ks1 - ks2 + (fabs(ratio1-1) - fabs(ratio2-1))/1.5*0.3 > 0.02) ||
+            (res_length > 2*units::cm && ave_res_dQ_dx/m_mip_dqdx > 4.5))
+            return false;
+
+        if (!flag_strong_check) {
+            if (ks1 - ks2 < -0.02 && ((ks2 > 0.09 && fabs(ratio2-1) > 0.1) || ratio2 > 1.5 || ks2 > 0.2)) 
+                return true;
+            if (ks1 - ks2 + (fabs(ratio1-1) - fabs(ratio2-1))/1.5*0.3 < 0) 
+                return true;
+        } else {
+            if (ks1 - ks2 < -0.02 && (ks2 > 0.09 || ratio2 > 1.5) && ks1 < 0.05 && fabs(ratio1-1) < 0.1) 
+                return true;
+            if (ks1 - ks2 + (fabs(ratio1-1) - fabs(ratio2-1))/1.5*0.3 < 0 && ks1 < 0.05 && fabs(ratio1-1) < 0.1) 
+                return true;
+        }
+
+
+        return false;
+    } // end eval_stm_core_impl
+
+    // Thin wrapper so the save_stm_fit dump can record each call's verdict
+    // (the record itself is pushed at the stats point inside the impl, which
+    // every code path reaches before returning).
+    bool eval_stm_core(const STMEvalArrays& arrs, int kink_num,
+                       double peak_range, double offset_length, double com_range,
+                       bool flag_strong_check = false) const {
+        const bool ok = eval_stm_core_impl(arrs, kink_num, peak_range, offset_length, com_range, flag_strong_check);
+        if (m_save_stm_fit && !m_eval_records.empty()) {
+            m_eval_records.back().verdict = ok ? 1 : 0;
+        }
+        return ok;
+    }
+
+    // Public wrapper: builds arrays once and delegates to core.
+    bool eval_stm(std::shared_ptr<PR::Segment> segment, int kink_num,
+                  double peak_range = 40*units::cm, double offset_length = 0*units::cm,
+                  double com_range = 35*units::cm, bool flag_strong_check = false) const {
+        auto& cluster = *segment->cluster();
+        auto fiducial_utils = cluster.grouping()->get_fiducialutils();
+        if (!fiducial_utils) {
+            SPDLOG_LOGGER_TRACE(s_log, "eval_stm: TaggerCheckSTM: No FiducialUtils available");
+            return false;
+        }
+        auto arrs = build_eval_arrays(segment);
+        if (!arrs.valid) return false;
+        return eval_stm_core(arrs, kink_num, peak_range, offset_length, com_range, flag_strong_check);
+    }
+
+    std::shared_ptr<PR::Segment> create_segment_for_cluster(WireCell::Clus::Facade::Cluster& cluster,
+                               const std::vector<geo_point_t>& path_points) const{
+    
+        // Step 3: Prepare segment data
+        std::vector<PR::WCPoint> wcpoints;
+        // const auto transform = m_pcts->pc_transform(cluster.get_scope_transform(cluster.get_default_scope()));
+        // Step 4: Create segment connecting the vertices
+        auto segment = PR::make_segment();
+        
+        // create and associate Dynamic Point Cloud
+        for (const auto& point : path_points) {
+            PR::WCPoint wcp;
+            wcp.point = point; 
+            wcpoints.push_back(wcp);
+        }
+
+        // Step 5: Configure the segment
+        segment->wcpts(wcpoints).cluster(&cluster).dirsign(1); // direction: +1, 0, or -1
+               
+        // auto& wcpts = segment->wcpts();
+        // for (size_t i=0;i!=path_points.size(); i++){
+        //     std::cout << "A: " << i << " " << path_points.at(i) << " " << wcpts.at(i).point << std::endl;
+        // }
+        create_segment_point_cloud(segment, path_points, m_dv, "main");
+
+        return segment;
+    }
+
+    void search_other_tracks(Cluster& cluster, std::vector<std::shared_ptr<PR::Segment>>& fitted_segments, double search_range = 1.5*units::cm, double scaling_2d = 0.8) const{
+        std::vector<std::shared_ptr<PR::Segment> > other_segments;
+
+        // Early return if no existing segment
+        if (fitted_segments.empty()) return;
+        if (!cluster.has_pc("steiner_pc")) return;
+
+        const auto& steiner_pc = cluster.get_pc("steiner_pc");
+        const auto& coords = cluster.get_default_scope().coords;
+        const auto& x_coords = steiner_pc.get(coords.at(0))->elements<double>();
+        const auto& y_coords = steiner_pc.get(coords.at(1))->elements<double>();
+        const auto& z_coords = steiner_pc.get(coords.at(2))->elements<double>();
+        const auto& wpid_array = steiner_pc.get("wpid")->elements<WirePlaneId>();
+
+        const size_t N = x_coords.size();
+        if (N == 0) return;
+        
+        std::vector<bool> flag_tagged(N, false);
+        int num_tagged = 0;
+
+        const auto transform = m_pcts->pc_transform(cluster.get_scope_transform(cluster.get_default_scope()));
+        double cluster_t0 = cluster.get_cluster_t0();
+        
+        // Step 1: Tag points within search_range of existing tracks        
+        for (size_t i = 0; i < N; i++) {
+            geo_point_t p(x_coords[i], y_coords[i], z_coords[i]);
+            double min_dis_u = 1e9, min_dis_v = 1e9, min_dis_w = 1e9;
+            
+            // Get closest 2D distances for each plane using DynamicPointCloud
+            // Get wire plane parameters for 2D projections
+            WirePlaneId wpid = wpid_array[i];
+            int apa = wpid.apa();
+            int face = wpid.face();
+
+            for (const auto& fit_seg : fitted_segments) {
+                // Get closest point on the segment to point p
+                const auto& fit_seg_dpc = fit_seg->dpcloud("main");
+
+                auto closest_result = fit_seg_dpc->kd3d().knn(1, p);
+                if (closest_result.empty()) continue;
+                
+                // size_t closest_index = closest_result[0].first;
+                double closest_3d_distance = sqrt(closest_result[0].second);
+                
+                if (closest_3d_distance < search_range) {
+                    flag_tagged[i] = true;
+                    num_tagged++;
+                    break;
+                }    
+    
+                // Check distances in each plane (U, V, W)
+                for (int plane = 0; plane < 3; plane++) {
+                    auto closest_2d = fit_seg_dpc->get_closest_2d_point_info(p, plane, face, apa);
+                    double dist_2d = std::get<0>(closest_2d);
+                    
+                    if (plane == 0 && dist_2d < min_dis_u) min_dis_u = dist_2d;
+                    else if (plane == 1 && dist_2d < min_dis_v) min_dis_v = dist_2d;
+                    else if (plane == 2 && dist_2d < min_dis_w) min_dis_w = dist_2d;
+                }
+
+                // std::cout << i << " " << closest_3d_distance << " " << min_dis_u/units::cm << " " << min_dis_v/units::cm << " " << min_dis_w/units::cm << std::endl;
+
+            }
+            
+            // Additional tagging based on 2D projections and dead channels
+            if (!flag_tagged[i]) {
+                // Check if point should be tagged based on 2D distances or dead channels
+                // figure out the raw_point ...
+                auto p_raw= transform->backward(p, cluster_t0, face, apa);
+
+                // Note: Dead channel checking would require access to detector status
+                bool u_ok = (min_dis_u < scaling_2d * search_range || cluster.grouping()->get_closest_dead_chs(p_raw, 1, apa, face, 0));  // U plane
+                bool v_ok = (min_dis_v < scaling_2d * search_range || cluster.grouping()->get_closest_dead_chs(p_raw, 1, apa, face, 1));  // V plane  
+                bool w_ok = (min_dis_w < scaling_2d * search_range || cluster.grouping()->get_closest_dead_chs(p_raw, 1, apa, face, 2));  // W plane
+                
+                if (u_ok && v_ok && w_ok) {
+                    flag_tagged[i] = true;
+                }
+            }
+        }
+        // std::cout << num_tagged << " " << N << std::endl;
+        (void) num_tagged;
+
+        // Step 2: Get Steiner_Graph and its terminals ...
+        const auto& steiner_graph = cluster.get_graph("steiner_graph");
+        const auto& flag_steiner_terminal = steiner_pc.get("flag_steiner_terminal")->elements<int>();
+        
+        // Step 3: Identify terminal vertices from cluster boundary points
+        std::vector<size_t> terminals;
+        std::map<size_t, size_t> map_oindex_tindex;
+        for (size_t i = 0;i!=flag_steiner_terminal.size();i++){
+            if (flag_steiner_terminal[i]){
+                map_oindex_tindex[i] = terminals.size();
+                terminals.push_back(i);
+            }
+        }
+
+        // Step 4: Use cluster's graph for Voronoi computation
+        using namespace WireCell::Clus::Graphs::Weighted;
+        auto vor = voronoi(steiner_graph, terminals);
+        // Access nearest terminal for any vertex like this:
+        // auto nearest_terminal_for_vertex_i = vor.terminal[i];
+
+        // Step 5: Build terminal graph and find MST
+        using Base = boost::property<edge_base_t, edge_type>;  // Not edge_name_t!
+        using WeightProperty = boost::property<boost::edge_weight_t, double, Base>;
+        using TerminalGraph = boost::adjacency_list<boost::vecS, boost::vecS, boost::undirectedS,
+                                                boost::no_property, WeightProperty>;
+        
+        TerminalGraph terminal_graph(N);
+        std::map<std::pair<size_t, size_t>, std::pair<double, edge_type>> map_saved_edge;
+        
+        // Build terminal graph from Voronoi regions
+        auto edge_weight = get(boost::edge_weight, steiner_graph);
+
+        for (auto w : boost::make_iterator_range(edges(steiner_graph))) {
+            size_t nearest_to_source = vor.terminal[source(w, steiner_graph)];
+            size_t nearest_to_target = vor.terminal[target(w, steiner_graph)];
+            
+            if (nearest_to_source != nearest_to_target) {
+                double weight = vor.distance[source(w, steiner_graph)] + 
+                            vor.distance[target(w, steiner_graph)] + 
+                            edge_weight[w];  // Don't forget the edge weight!
+                
+                // Convert terminal indices back to actual terminal vertices
+                auto edge_pair1 = std::make_pair(nearest_to_source, nearest_to_target);
+                auto edge_pair2 = std::make_pair(nearest_to_target, nearest_to_source);
+
+                auto it1 = map_saved_edge.find(edge_pair1);
+                auto it2 = map_saved_edge.find(edge_pair2);
+
+                if (it1 != map_saved_edge.end()) {
+                    // Update (A,B) if better
+                    if (weight < it1->second.first) {
+                        it1->second = std::make_pair(weight, w);
+                    }
+                } else if (it2 != map_saved_edge.end()) {
+                    // Update (B,A) if better  
+                    if (weight < it2->second.first) {
+                        it2->second = std::make_pair(weight, w);
+                    }
+                } else {
+                    // Create new entry
+                    map_saved_edge[edge_pair1] = std::make_pair(weight, w);
+                }
+            }
+        }
+        
+        // Add edges with compound properties
+        for (const auto& [edge_pair, weight_info] : map_saved_edge) {
+            boost::add_edge(edge_pair.first, edge_pair.second, 
+                        WeightProperty(weight_info.first, Base(weight_info.second)),
+                        terminal_graph);
+        }
+        
+        // Step 6: Find minimum spanning tree
+        std::vector<boost::graph_traits<TerminalGraph>::edge_descriptor> mst_edges;
+        boost::kruskal_minimum_spanning_tree(terminal_graph, std::back_inserter(mst_edges));
+        
+        // Step 7: Create cluster graph and find connected components
+        TerminalGraph terminal_graph_cluster(terminals.size());
+        std::map<size_t, std::set<size_t>> map_connection;
+        
+        for (const auto& edge : mst_edges) {
+            size_t source_idx = boost::source(edge, terminal_graph);
+            size_t target_idx = boost::target(edge, terminal_graph);
+            
+            if (flag_tagged[source_idx] == flag_tagged[target_idx]) {
+                boost::add_edge(map_oindex_tindex[source_idx], map_oindex_tindex[target_idx], terminal_graph_cluster);
+            } else { 
+                if (map_connection.find(source_idx)==map_connection.end()){
+                    std::set<size_t> temp_results;
+                    temp_results.insert(target_idx);
+                    map_connection[source_idx] = temp_results;
+                }else{
+                    map_connection[source_idx].insert(target_idx);
+                }
+                if (map_connection.find(target_idx)==map_connection.end()){
+                    std::set<size_t> temp_results;
+                    temp_results.insert(source_idx);
+                    map_connection[target_idx] = temp_results;
+                }else{
+                    map_connection[target_idx].insert(source_idx);
+                }
+            }
+        }
+        
+        // Step 8: Find connected components
+        std::vector<int> component(boost::num_vertices(terminal_graph_cluster));
+        const int num_components = boost::connected_components(terminal_graph_cluster, &component[0]);
+        std::vector<int> ncounts(num_components, 0);
+        std::vector<std::vector<size_t>> sep_clusters(num_components);
+        
+        for (size_t i = 0; i < component.size(); ++i) {
+            ncounts[component[i]]++;
+            sep_clusters[component[i]].push_back(terminals[i]);
+        }
+        
+        // Step 9: Filter and create new segments for valid clusters
+        for (int comp_idx = 0; comp_idx < num_components; comp_idx++) {
+            // Skip if inside original track or just one point
+            if (flag_tagged[sep_clusters[comp_idx].front()] || ncounts[comp_idx] == 1) continue;    
+            // Find connection point to existing track
+            size_t special_A = SIZE_MAX;
+            const int cluster_size = ncounts[comp_idx];
+            for (int j = 0; j < cluster_size; j++) {
+                if (map_connection.find(sep_clusters[comp_idx][j]) != map_connection.end()) {
+                    special_A = sep_clusters[comp_idx][j];
+                    break;
+                }
+            }
+            if (special_A == SIZE_MAX) continue;
+            
+            // Find furthest point from special_A
+            size_t special_B = special_A;
+            double max_dis = 0;
+            int number_not_faked = 0;
+            double max_dis_u = 0, max_dis_v = 0, max_dis_w = 0;
+            
+            for (int j = 0; j < cluster_size; j++) {
+                size_t point_idx = sep_clusters[comp_idx][j];
+                geo_point_t p1(x_coords[special_A], y_coords[special_A], z_coords[special_A]);
+                geo_point_t p2(x_coords[point_idx], y_coords[point_idx], z_coords[point_idx]);
+
+                double dis = sqrt(pow(p1.x() - p2.x(), 2) + pow(p1.y() - p2.y(), 2) + pow(p1.z() - p2.z(), 2));
+                if (dis > max_dis) {
+                    max_dis = dis;
+                    special_B = point_idx;
+                }
+                
+                // Check if this track segment is "fake" (too close to existing tracks)
+                double min_dis_u = 1e9, min_dis_v = 1e9, min_dis_w = 1e9;
+                WirePlaneId wpid = wpid_array[point_idx];
+                int apa = wpid.apa();
+                int face = wpid.face();
+
+                for (const auto& fit_seg : fitted_segments) {
+                    const auto& fit_seg_dpc = fit_seg->dpcloud("main");
+                    for (int plane = 0; plane < 3; plane++) {
+                        auto closest_2d = fit_seg_dpc->get_closest_2d_point_info(p2, plane, face, apa);
+                        double dist_2d = std::get<0>(closest_2d);
+                        
+                        if (plane == 0 && dist_2d < min_dis_u) min_dis_u = dist_2d;
+                        else if (plane == 1 && dist_2d < min_dis_v) min_dis_v = dist_2d;
+                        else if (plane == 2 && dist_2d < min_dis_w) min_dis_w = dist_2d;
+                    }
+                }
+                
+
+                auto p_raw= transform->backward(p2, cluster_t0, face, apa);
+
+                int flag_num = 0;
+                if (min_dis_u > scaling_2d * search_range && (!cluster.grouping()->get_closest_dead_chs(p_raw, 1, apa, face, 0))) flag_num++;
+                if (min_dis_v > scaling_2d * search_range && (!cluster.grouping()->get_closest_dead_chs(p_raw, 1, apa, face, 1))) flag_num++;
+                if (min_dis_w > scaling_2d * search_range && (!cluster.grouping()->get_closest_dead_chs(p_raw, 1, apa, face, 2))) flag_num++;
+
+                if (min_dis_u > max_dis_u && (!cluster.grouping()->get_closest_dead_chs(p_raw, 1, apa, face, 0))) max_dis_u = min_dis_u;
+                if (min_dis_v > max_dis_v && (!cluster.grouping()->get_closest_dead_chs(p_raw, 1, apa, face, 1))) max_dis_v = min_dis_v;
+                if (min_dis_w > max_dis_w && (!cluster.grouping()->get_closest_dead_chs(p_raw, 1, apa, face, 2))) max_dis_w = min_dis_w;
+
+                if (flag_num >= 2) number_not_faked++;
+            }
+            
+            // Apply quality cuts (from prototype)
+            if (number_not_faked < 4 && (number_not_faked < 0.15 * ncounts[comp_idx] || number_not_faked == 1)) continue;
+            
+            bool quality_check = ((max_dis_u/units::cm > 4 || max_dis_v/units::cm > 4 || max_dis_w/units::cm > 4) && 
+                                max_dis_u + max_dis_v + max_dis_w > 7*units::cm) ||
+                                (number_not_faked > 4 && number_not_faked >= 0.75*ncounts[comp_idx]);
+            
+            if (!quality_check) continue;
+            
+            // Step 10: Create new segment for this cluster
+            std::vector<size_t> path_indices;
+            
+            // Use cluster's shortest path algorithm to connect special_A to special_B
+            auto path_wcps = cluster.graph_algorithms("steiner_graph", m_dv, m_pcts).shortest_path(special_A, special_B);
+
+            // Convert path to points
+            std::vector<geo_point_t> path_points;
+            for (size_t idx : path_wcps) {
+                path_points.push_back({x_coords[idx],y_coords[idx],z_coords[idx]});
+            }
+
+            auto new_segment = create_segment_for_cluster(cluster, path_points);
+        
+            m_track_fitter.add_segment(new_segment);
+            m_track_fitter.do_single_tracking(new_segment, true, true, false);
+
+            if (new_segment->fits().size() > 1) {
+                fitted_segments.push_back(new_segment);
+            }
+        }
+
+        // std::cout << "Fitted segments: " << fitted_segments.size() << std::endl;
+
+    }
+
+    bool check_other_clusters(Cluster& main_cluster, std::vector<Cluster*> associated_clusters) const {
+        int number_clusters = 0;
+        double total_length = 0;
+        
+        // Iterate through all associated clusters
+        for (auto it = associated_clusters.begin(); it != associated_clusters.end(); it++) {
+            Cluster* cluster = *it;
+            
+            // Get the two boundary points (equivalent to get_two_boundary_wcps in prototype)
+            std::pair<geo_point_t, geo_point_t> boundary_points = cluster->get_two_boundary_wcps();
+            
+            // Calculate coverage_x (difference in x coordinates)
+            double coverage_x = boundary_points.first.x() - boundary_points.second.x();
+            
+            // Get cluster length using the toolkit's built-in function
+            double length = sqrt(pow(boundary_points.first.x() - boundary_points.second.x(), 2) +
+                                pow(boundary_points.first.y() - boundary_points.second.y(), 2) +
+                                pow(boundary_points.first.z() - boundary_points.second.z(), 2));
+            
+            // Get closest points between main cluster and current cluster
+            std::tuple<int, int, double> results = main_cluster.get_closest_points(*cluster);
+            
+            // std::cout << "ABC: " << coverage_x/units::cm <<  " " << length/units::cm << " " << std::get<2>(results)/units::cm << std::endl;
+
+            // Apply the same conditions as in the prototype:
+            // - Distance between clusters < 25 cm
+            // - Absolute coverage in X > 0.75 cm  
+            // - Length > 5 cm
+            if (std::get<2>(results) < 25*units::cm && 
+                fabs(coverage_x) > 0.75*units::cm && 
+                length > 5*units::cm) {
+                number_clusters++;
+                total_length += length;
+            }
+        }
+        
+        // Apply the final condition from prototype
+        if (number_clusters > 0 &&
+            (number_clusters/3. + total_length/(35*units::cm)/number_clusters) >= 1) {
+            SPDLOG_LOGGER_TRACE(s_log, "check_other_clusters: Other clusters: {} {}", number_clusters, (number_clusters/3. + total_length/(35*units::cm)/number_clusters));
+            return true;
+        }
+
+      return false;
+    }
+
+    bool check_other_tracks(Cluster& cluster, std::vector<std::shared_ptr<PR::Segment>>& fitted_segments) const {
+        if (fitted_segments.size() <= 1) return false;
+    
+        int ntracks = 0;
+        
+        geo_point_t drift_dir_abs(1, 0, 0);
+        
+        // Loop through segments starting from index 1 (skip main segment)
+        for (size_t i = 1; i < fitted_segments.size(); i++) {
+            auto segment = fitted_segments[i];
+            // Use helper functions from PRSegmentFunctions.h
+            double track_length1 = segment_track_length(segment, 1) / units::cm;
+            double track_medium_dQ_dx = segment_median_dQ_dx(segment) * units::cm / m_mip_dqdx;
+            // 75000 e/cm was 1.5 x MicroBooNE's 50000 MIP; the argument is a
+            // dQ/dx per internal length unit, hence the /units::cm.
+            double track_length_threshold = segment_track_length_threshold(segment, 1.5 * m_mip_dqdx / units::cm) / units::cm;
+            
+            
+
+            // Calculate direction vector (geometric path from front to back)
+            const auto& fits = segment->fits();
+            if (fits.empty()) continue;  // Skip if no fits available
+            
+            const auto& front_pt = fits.front().point;
+            const auto& back_pt = fits.back().point;
+            geo_point_t dir1(
+                front_pt.x() - back_pt.x(),
+                front_pt.y() - back_pt.y(), 
+                front_pt.z() - back_pt.z()
+            );
+            
+            // Calculate geometric length using helper function (maps to get_track_length(2))
+            double straightness_ratio = dir1.magnitude() / segment_track_length(segment);
+
+            // Log-only (doc 63 round-3 diagnosis): what search_other_tracks
+            // found and the quantities every veto below cuts on.  No verdict
+            // depends on this line.
+            SPDLOG_LOGGER_DEBUG(s_log, "check_other_tracks: cluster {} seg {}/{}: len={:.1f}cm medQ={:.2f}MIP lenThr={:.1f}cm straight={:.3f} front=({:.1f},{:.1f},{:.1f})cm",
+                                cluster.ident(), i, fitted_segments.size() - 1,
+                                track_length1, track_medium_dQ_dx, track_length_threshold,
+                                straightness_ratio,
+                                front_pt.x()/units::cm, front_pt.y()/units::cm, front_pt.z()/units::cm);
+
+            // Main logic from prototype
+            if (track_length1 > 5 && track_medium_dQ_dx > 0.4) {
+                ntracks++;
+            }
+            if (track_length1 > 40 && track_medium_dQ_dx > 0.8) return true;
+            
+            double angle_deg = dir1.angle(drift_dir_abs) * 180. / 3.1415926;
+            if (fabs(angle_deg - 90.0) < 7.5) continue;  // Skip tracks nearly perpendicular to drift
+
+            // doc-63 round-4c (gated): a LONG segment at MIP dQ/dx is a
+            // second track regardless of straightness -- 349241:15's 20.4 cm
+            // 1.00-MIP segment escaped the len<25 && medQ<1 Michel clause
+            // below, while the longest MIP-like segment on any correct STM
+            // in the full d59k population is 12.4 cm.  Placed after the
+            // perpendicular skip to inherit its isochronous-noise
+            // protection.
+            if (m_second_track_guard && track_length1 > m_guard_seg_track_cm &&
+                track_medium_dQ_dx > m_guard_seg_mip_lo && track_medium_dQ_dx < m_guard_seg_mip_hi) {
+                SPDLOG_LOGGER_INFO(s_log, "second_track_guard: cluster {} rejected: other-track segment {:.1f} cm at {:.2f} MIP (a second track)",
+                                   cluster.ident(), track_length1, track_medium_dQ_dx);
+                return true;
+            }
+
+            // Complex condition from prototype
+            if (((track_length1 > 5 && track_medium_dQ_dx > 0.7) &&
+                ((track_medium_dQ_dx - 0.7)/0.1 > (19 - track_length1)/7.) &&
+                straightness_ratio > 0.99) ||
+                (track_length1 > 4 && track_medium_dQ_dx > 1.5 && straightness_ratio > 0.975)) {
+                return true;
+            }
+            
+            if (track_medium_dQ_dx > 1.5 && track_length1 > 8 && straightness_ratio < 0.9) continue;
+            
+            if ((track_medium_dQ_dx > 1.5 && track_length1 > 3) ||
+                (track_medium_dQ_dx > 2.5 && track_length1 > 2.5) ||
+                (track_length_threshold > 5 && ((track_length_threshold > 0.6 * track_length1) || track_length1 > 20))) {
+
+                if (track_length1 < 5 && track_medium_dQ_dx < 2) continue;
+                else if (track_length1 < 25 && track_medium_dQ_dx < 1) continue;
+                // 85/50. and 110/50. are ALREADY in the a x MIP form this file
+                // now uses everywhere: track_medium_dQ_dx is measured/m_mip_dqdx,
+                // so these are 1.7 and 2.2 MIP.  Left as written fractions
+                // because the spelled-out 50 is the direct evidence that
+                // MicroBooNE's MIP reference -- not the 48879 e/cm table plateau
+                // -- is the scale the absolute literals here were written on.
+                // Doc 57 sec 5a.
+                else if (track_length1 < 10 && track_medium_dQ_dx < 85/50.) continue;
+                else if (track_length1 < 3.5 && track_medium_dQ_dx < 110/50.) continue;
+                else return true;
+            }
+        }
+        
+        if (ntracks >= 3) return true;
+        return false;
+    }
+
+    /**
+     * Check if a cluster meets the conditions for STM (Short Track Muon) tagging.
+     * This is where you'll implement your specific STM detection algorithm.
+     * 
+     * @param cluster The main cluster to analyze
+     * @return true if cluster should be flagged as STM
+     */
+    bool check_stm_conditions(Cluster& cluster, std::vector<Cluster*> associated_clusters) const {
+        SPDLOG_LOGGER_TRACE(s_log, "check_stm_conditions: TaggerCheckSTM: Checking cluster with {} wire plane IDs.",
+            cluster.grouping()->wpids().size());
+
+        // Early exit if no steiner graph points.
+        // The "no STM fit" DEBUG lines below name every pre-fit exit, so a
+        // hand scan can tell "the tagger rejected this" from "the tagger never
+        // looked at it".  Log-only: no verdict depends on them.
+        if (!cluster.has_pc("steiner_pc") || cluster.get_pc("steiner_pc").size() == 0) {
+            SPDLOG_LOGGER_DEBUG(s_log, "check_stm_conditions: cluster {} no STM fit: no steiner_pc", cluster.ident());
+            return false;
+        }
+
+        // Perform two-round fully-contained boundary check using the shared function.
+        // This also returns the exit endpoint data needed for subsequent STM analysis.
+        // m_use_fiducial ? the TGM/FC box : the historical FiducialUtils
+        // fallback.  Same call shape as TaggerCheckFC.cxx:145.
+        auto fc_result = Facade::cluster_fc_check(cluster, m_dv,
+                                                 m_use_fiducial ? m_fiducial : nullptr,
+                                                 m_fv_tolerance);
+
+        if (fc_result.is_fc) {
+            SPDLOG_LOGGER_TRACE(s_log, "check_stm_conditions: STMTagger: Mid Point: A");
+            SPDLOG_LOGGER_DEBUG(s_log, "check_stm_conditions: cluster {} no STM fit: fully contained (Mid Point A)", cluster.ident());
+            return false;
+        }
+
+        const auto& candidate_exit_wcps  = fc_result.exit_wcps;
+        const auto& temp_set             = fc_result.exit_boundary_set;
+        const geo_point_t boundary_point_first  = fc_result.boundary_first;
+        const geo_point_t boundary_point_second = fc_result.boundary_second;
+
+        // fiducial_utils and drift_dir are needed by the TGM checks below.
+        auto fiducial_utils = cluster.grouping()->get_fiducialutils();
+        if (!fiducial_utils) {
+            SPDLOG_LOGGER_DEBUG(s_log, "check_stm_conditions: cluster {} no STM fit: no fiducialutils (MakeFiducialUtils missing from the pipeline?)", cluster.ident());
+            return false;
+        }
+
+        // drift_dir: x-axis direction from the first wire plane's face.
+        geo_point_t drift_dir;
+        {
+            const auto& wpids = cluster.grouping()->wpids();
+            if (!wpids.empty()) {
+                const auto& first_wpid = *wpids.begin();
+                WirePlaneId wpid_u(kUlayer, first_wpid.face(), first_wpid.apa());
+                int face_dirx = m_dv->face_dirx(wpid_u);
+                drift_dir = geo_point_t(face_dirx, 0, 0);
+            }
+        }
+
+        // Per-face distance-to-anode helper: replaces hardcoded x < threshold comparisons.
+        // Falls back to |x| if the point is outside all known volumes (preserves UBoone behaviour).
+        //
+        // face_dirx (IAnodeFace::dirx) points from the anode INTO the drift
+        // volume, and the sensitive-volume BoundingBox is component-wise
+        // normalized (first=min), so the anode sits at MIN x when fdx > 0
+        // (verified on SBND apa0: fdx=+1, anode at bb min x=-201.45 cm).
+        // The legacy selection below is inverted -- on SBND it returns the
+        // distance to the CATHODE -- but it shipped inside validated
+        // productions, so the corrected form is the anode_dist_fix knob
+        // (docs/63 round 4a) and the inverted form stays the byte-identical
+        // default.
+        auto dist_to_anode = [this](const WireCell::Point& pt) -> double {
+            WirePlaneId wpid = m_dv->contained_by(pt);
+            if (wpid.apa() < 0 || wpid.face() < 0) {
+                return std::abs(pt.x());
+            }
+            WirePlaneId wpid_u(kUlayer, wpid.face(), wpid.apa());
+            int fdx = m_dv->face_dirx(wpid_u);
+            WireCell::BoundingBox bb = m_dv->inner_bounds(wpid_u);
+            const double anode_x = m_anode_dist_fix
+                ? ((fdx > 0) ? bb.bounds().first.x() : bb.bounds().second.x())
+                : ((fdx < 0) ? bb.bounds().first.x() : bb.bounds().second.x());
+            return std::abs(pt.x() - anode_x);
+        };
+
+        SPDLOG_LOGGER_TRACE(s_log, "check_stm_conditions: end_point: {} {}", temp_set.size(), candidate_exit_wcps.size());
+
+        // Determine first and last points for further analysis
+        geo_point_t first_wcp, last_wcp;
+        bool flag_double_end = false;
+
+        if (temp_set.size() != 0) {
+            if (*temp_set.begin() == 0) {
+                first_wcp = boundary_point_first;
+                last_wcp = boundary_point_second;
+            } else {
+                first_wcp = boundary_point_second;
+                last_wcp = boundary_point_first;
+            }
+            if (temp_set.size() == 2) flag_double_end = true;
+        } else {
+            if (candidate_exit_wcps.size() == 1) {
+                first_wcp = candidate_exit_wcps.at(0);
+
+                geo_vector_t dir1 = boundary_point_first - candidate_exit_wcps.at(0);
+                geo_vector_t dir2 = boundary_point_second - candidate_exit_wcps.at(0);
+                double dis1 = dir1.magnitude();
+                double dis2 = dir2.magnitude();
+                
+                double angle_between = acos(dir1.dot(dir2) / (dis1 * dis2));
+                
+                if (angle_between > 120./180.*3.1415926 && dis1 > 20*units::cm && dis2 > 20*units::cm) {
+                    SPDLOG_LOGGER_TRACE(s_log, "check_stm_conditions: Mid Point: B");
+                    SPDLOG_LOGGER_DEBUG(s_log, "check_stm_conditions: cluster {} no STM fit: single exit point with a {:.0f} deg mid-track kink, arms {:.1f}/{:.1f} cm (Mid Point B)",
+                                        cluster.ident(), angle_between*180/3.1415926, dis1/units::cm, dis2/units::cm);
+                    return false;
+                } else {
+                    if (dis1 < dis2) {
+                        last_wcp = boundary_point_second;
+                    } else {
+                        last_wcp = boundary_point_first;
+                    }
+                }
+            } else {
+                SPDLOG_LOGGER_TRACE(s_log, "check_stm_conditions: Mid Point: C");
+                SPDLOG_LOGGER_DEBUG(s_log, "check_stm_conditions: cluster {} no STM fit: {} candidate exit points, need exactly 1 (Mid Point C)",
+                                    cluster.ident(), candidate_exit_wcps.size());
+                return false;
+            }
+        }
+
+        bool flag_other_clusters = check_other_clusters(cluster, associated_clusters);
+
+        SPDLOG_LOGGER_TRACE(s_log, "check_stm_conditions: STM analysis: flag_double_end={}, flag_other_clusters={}", flag_double_end, flag_other_clusters);
+
+        // Unified forward/backward pass.
+        // Returns nullopt (continue), false (not STM), or true (STM/TGM, flag already set).
+        // Differences between passes:
+        //   is_forward=true:  early fits.size()<=3 exit; TGM dead-volume else-if branch;
+        //                     left_L>40cm only returns false when !flag_double_end;
+        //                     extra 5cm short-track reset condition.
+        //   is_forward=false: none of the above; always returns false if left_L>40cm.
+        auto run_pass = [&](const geo_point_t& start_wcp, const geo_point_t& end_wcp,
+                            bool is_forward) -> std::optional<bool> {
+            if (is_forward && flag_double_end)
+                SPDLOG_LOGGER_TRACE(s_log, "check_stm_conditions: Forward check!");
+            if (!is_forward)
+                SPDLOG_LOGGER_TRACE(s_log, "check_stm_conditions: Backward check!");
+
+            // do_rough_path takes non-const refs; use local copies.
+            geo_point_t start_copy = start_wcp;
+            geo_point_t end_copy   = end_wcp;
+            auto path_points = do_rough_path(cluster, start_copy, end_copy);
+            {
+                m_track_fitter.clear_segments();
+                auto segment = create_segment_for_cluster(cluster, path_points);
+                m_track_fitter.add_segment(segment);
+                m_track_fitter.do_single_tracking(segment, false);
+                if (is_forward && segment->fits().size() <= 3) {
+                    SPDLOG_LOGGER_DEBUG(s_log, "check_stm_conditions: cluster {} no STM fit: round-1 forward fit gave only {} points (<=3)",
+                                        cluster.ident(), segment->fits().size());
+                    return false;
+                }
+            }
+
+            SPDLOG_LOGGER_TRACE(s_log, "check_stm_conditions: Finish first round of fitting");
+
+            geo_point_t mid_point(0, 0, 0);
+            auto adjusted_path_points = adjust_rough_path(cluster, mid_point);
+            if (adjusted_path_points.size() == 0) adjusted_path_points = path_points;
+            auto adjusted_segment = create_segment_for_cluster(cluster, adjusted_path_points);
+            m_track_fitter.clear_segments();
+            m_track_fitter.add_segment(adjusted_segment);
+            m_track_fitter.do_single_tracking(adjusted_segment);
+
+            if (m_save_stm_fit) begin_pass_record(adjusted_segment, is_forward);
+
+            SPDLOG_LOGGER_TRACE(s_log, "check_stm_conditions: Finish second round of fitting");
+
+            std::vector<double> dQ, dx;
+            std::vector<WireCell::Point> pts;
+            for (const auto& fit : adjusted_segment->fits()) {
+                dQ.push_back(fit.dQ);
+                dx.push_back(fit.dx);
+                pts.push_back(fit.point);
+            }
+            const int total_pts = static_cast<int>(pts.size());
+
+            int kink_num = find_first_kink(adjusted_segment);
+
+            double left_L = 0, left_Q = 0, exit_L = 0, exit_Q = 0;
+            const size_t dx_size = dx.size();
+            size_t first_loop_end = dx_size, second_loop_start = dx_size;
+            if (kink_num == 0) {
+                first_loop_end = 0;
+                second_loop_start = 0;
+            } else if (kink_num > 0) {
+                const size_t kink_idx = std::min(static_cast<size_t>(kink_num), dx_size);
+                first_loop_end = kink_idx;
+                second_loop_start = kink_idx;
+            }
+            for (size_t i = 0; i < first_loop_end; i++) { exit_L += dx[i]; exit_Q += dQ[i]; }
+            for (size_t i = second_loop_start; i < dx_size; i++) { left_L += dx[i]; left_Q += dQ[i]; }
+
+            if (m_save_stm_fit) note_pass_kink(kink_num, exit_L, left_L, exit_Q, left_Q);
+            // The doc-63 round-5 guards evaluate the stop at THIS kink -- the
+            // one the pass record stores and the one their full-d59k
+            // calibration (docs/63 sec 1.8) measured -- NOT the post-reset
+            // value: the short-track reset below moves kink_num to the path
+            // end, which drags a genuine STM's low-charge Michel/overshoot
+            // tail into the end-5cm window (62303:12: recorded-kink median
+            // 0.99 MIP vs path-end 0.53, a false deficit veto).
+            const int kink_recorded = kink_num;
+
+            SPDLOG_LOGGER_TRACE(s_log, "check_stm_conditions: Left: {} {} {} {}",
+                exit_L/units::cm, left_L/units::cm,
+                (left_Q/(left_L/units::cm+1e-9))/m_mip_dqdx,
+                (exit_Q/(exit_L/units::cm+1e-9))/m_mip_dqdx);
+
+            // TGM check
+            if (!fiducial_utils->inside_fiducial_volume(pts.front()) &&
+                !fiducial_utils->inside_fiducial_volume(pts.back())) {
+
+                bool flag_TGM_anode = false;
+                if ((dist_to_anode(pts.back()) < 2*units::cm || dist_to_anode(pts.front()) < 2*units::cm) &&
+                    kink_num >= 0 && kink_num < total_pts) {
+                    const size_t kink_idx = static_cast<size_t>(kink_num);
+                    if (dist_to_anode(pts[kink_idx]) < 6*units::cm) {
+                        geo_point_t v10(pts.back().x()-pts[kink_idx].x(),
+                                        pts.back().y()-pts[kink_idx].y(),
+                                        pts.back().z()-pts[kink_idx].z());
+                        geo_point_t v20(pts.front().x()-pts[kink_idx].x(),
+                                        pts.front().y()-pts[kink_idx].y(),
+                                        pts.front().z()-pts[kink_idx].z());
+                        if ((fabs(v10.angle(drift_dir)/3.1415926*180.-90) < 12.5 && v10.magnitude() > 15*units::cm) ||
+                            (fabs(v20.angle(drift_dir)/3.1415926*180.-90) < 12.5 && v20.magnitude() > 15*units::cm)) {
+                            flag_TGM_anode = true;
+                        }
+                    }
+                }
+                if ((exit_L < 3*units::cm || left_L < 3*units::cm) || flag_TGM_anode) {
+                    SPDLOG_LOGGER_TRACE(s_log, "check_stm_conditions: TGM: {} {}", pts.front(), pts.back());
+                    cluster.set_flag(Flags::TGM);
+                    if (m_save_stm_fit) set_pass_status(1);
+                    return true;
+                }
+            } else if (is_forward &&
+                       !fiducial_utils->inside_fiducial_volume(pts.front()) &&
+                       left_L < 3*units::cm) {
+                // Forward pass only: dead-volume check for single-end-outside case.
+                WireCell::Point p1 = pts.back();
+                geo_point_t dir_vec = cluster.vhough_transform(p1, 30*units::cm);
+                dir_vec *= -1;
+                if (!fiducial_utils->check_dead_volume(cluster, p1, dir_vec, 1*units::cm)) {
+                    if (exit_L < 3*units::cm || left_L < 3*units::cm) {
+                        SPDLOG_LOGGER_TRACE(s_log, "check_stm_conditions: TGM: {} {}", pts.front(), pts.back());
+                        cluster.set_flag(Flags::TGM);
+                        if (m_save_stm_fit) set_pass_status(1);
+                        return true;
+                    }
+                }
+            }
+
+            // STM evaluation
+            if (left_L > 40*units::cm || (left_L > 7.5*units::cm && (left_Q/(left_L/units::cm+1e-9))/m_mip_dqdx > 2.0)) {
+                if (m_save_stm_fit) set_pass_status(2);
+                if (!is_forward) {
+                    SPDLOG_LOGGER_TRACE(s_log, "check_stm_conditions: Mid Point A  Fid {} {} {}",
+                        mid_point, left_L, (left_Q/(left_L/units::cm+1e-9))/m_mip_dqdx);
+                    return false;
+                }
+                if (!flag_double_end) {
+                    SPDLOG_LOGGER_TRACE(s_log, "check_stm_conditions: Mid Point A  Fid  {} {} {}",
+                        mid_point, left_L, (left_Q/(left_L/units::cm+1e-9))/m_mip_dqdx);
+                    return false;
+                }
+                // is_forward && flag_double_end: no decision — let backward pass run.
+                return std::nullopt;
+            }
+
+            bool flag_fix_end = (exit_L < 35*units::cm ||
+                                  ((left_Q/(left_L/units::cm+1e-9))/m_mip_dqdx > 2.0 && left_L > 2*units::cm));
+
+            // Short-track reset; forward pass has an extra 5cm condition (prototype-faithful).
+            bool short_track = (left_L < 8*units::cm && (left_Q/(left_L/units::cm+1e-9))/m_mip_dqdx < 1.5) ||
+                               (left_L < 6*units::cm && (left_Q/(left_L/units::cm+1e-9))/m_mip_dqdx < 1.7) ||
+                               (is_forward && left_L < 5*units::cm && (left_Q/(left_L/units::cm+1e-9))/m_mip_dqdx < 1.8) ||
+                               (left_L < 3*units::cm && (left_Q/(left_L/units::cm+1e-9))/m_mip_dqdx < 1.9);
+            if (short_track) {
+                left_L = 0;
+                kink_num = static_cast<int>(dQ.size());
+                exit_L = 40*units::cm;
+                flag_fix_end = false;
+            }
+
+            // Pre-build arrays once; all eval_stm_core calls below reuse them.
+            auto eval_arrs = build_eval_arrays(adjusted_segment);
+            bool flag_pass = false;
+            if (!eval_arrs.valid) {
+                flag_pass = false;
+            } else if (!flag_other_clusters) {
+                if (left_L < 40*units::cm) {
+                    if (flag_fix_end) {
+                        flag_pass = eval_stm_core(eval_arrs, kink_num, 5*units::cm, 0., 35*units::cm) ||
+                                    eval_stm_core(eval_arrs, kink_num, 5*units::cm, 3.*units::cm, 35*units::cm);
+                    } else {
+                        flag_pass = eval_stm_core(eval_arrs, kink_num, 40*units::cm - left_L, 0., 35*units::cm) ||
+                                    eval_stm_core(eval_arrs, kink_num, 40*units::cm - left_L, 3.*units::cm, 35*units::cm);
+                    }
+                    if (!flag_pass) {
+                        if (flag_fix_end) {
+                            flag_pass = eval_stm_core(eval_arrs, kink_num, 5*units::cm, 0., 15*units::cm) ||
+                                        eval_stm_core(eval_arrs, kink_num, 5*units::cm, 3.*units::cm, 15*units::cm);
+                        } else {
+                            flag_pass = eval_stm_core(eval_arrs, kink_num, 40*units::cm - left_L, 0., 15*units::cm) ||
+                                        eval_stm_core(eval_arrs, kink_num, 40*units::cm - left_L, 3.*units::cm, 15*units::cm);
+                        }
+                    }
+                }
+                if (left_L < 20*units::cm) {
+                    if (!flag_pass) {
+                        if (flag_fix_end) {
+                            flag_pass = eval_stm_core(eval_arrs, kink_num, 5*units::cm, 0., 35*units::cm) ||
+                                        eval_stm_core(eval_arrs, kink_num, 5*units::cm, 3.*units::cm, 35*units::cm);
+                        } else {
+                            flag_pass = eval_stm_core(eval_arrs, kink_num, 20*units::cm - left_L, 0., 35*units::cm) ||
+                                        eval_stm_core(eval_arrs, kink_num, 20*units::cm - left_L, 3.*units::cm, 35*units::cm);
+                        }
+                    }
+                    if (!flag_pass) {
+                        if (flag_fix_end) {
+                            flag_pass = eval_stm_core(eval_arrs, kink_num, 5*units::cm, 0., 15*units::cm) ||
+                                        eval_stm_core(eval_arrs, kink_num, 5*units::cm, 3.*units::cm, 15*units::cm);
+                        } else {
+                            flag_pass = eval_stm_core(eval_arrs, kink_num, 20*units::cm - left_L, 0., 15*units::cm) ||
+                                        eval_stm_core(eval_arrs, kink_num, 20*units::cm - left_L, 3.*units::cm, 15*units::cm);
+                        }
+                    }
+                }
+            } else {
+                flag_pass = flag_fix_end
+                    ? eval_stm_core(eval_arrs, kink_num, 5*units::cm, 0., 35*units::cm, true)
+                    : eval_stm_core(eval_arrs, kink_num, 40*units::cm, 0., 35*units::cm, true);
+            }
+
+            // doc-63 round-1 pass-level guards: desert + spike (see
+            // accept_guards_reject).  After the eval chain so the eval
+            // records are complete either way; before the other-track /
+            // proton stages whose outcome they would preempt.
+            if (m_accept_guards && flag_pass &&
+                accept_guards_reject(eval_arrs, kink_num, cluster.ident())) {
+                if (m_save_stm_fit) set_pass_status(7);
+                return std::nullopt;
+            }
+            // doc-63 round-3: cathode-truncation veto (own knob; same
+            // placement rationale as accept_guards above).
+            if (m_cathode_guard && flag_pass &&
+                cathode_guard_reject(eval_arrs, kink_num, cluster.ident())) {
+                if (m_save_stm_fit) set_pass_status(7);
+                return std::nullopt;
+            }
+            // doc-63 round-4b: long straight leftover = second track (own
+            // knob; same placement rationale).  The short-track reset cannot
+            // have fired for a leftover this long (it requires left_L < 8
+            // cm), so kink_num here is the real kink.
+            if (m_second_track_guard && flag_pass &&
+                second_track_leftover_reject(eval_arrs, kink_num, cluster.ident())) {
+                if (m_save_stm_fit) set_pass_status(7);
+                return std::nullopt;
+            }
+            // doc-63 round-5a: charge-deficient end with no Bragg =
+            // reconstruction truncation (own knob; same placement rationale;
+            // kink_recorded, not the post-reset kink_num -- see its comment).
+            if (m_deficit_guard && flag_pass &&
+                deficit_guard_reject(eval_arrs, kink_recorded, cluster.ident())) {
+                if (m_save_stm_fit) set_pass_status(7);
+                return std::nullopt;
+            }
+            // doc-63 round-5b: sharp end-region turn into a hot prong =
+            // vertex, not Bragg (own knob; same placement rationale and kink).
+            if (m_vertex_kink_guard && flag_pass &&
+                vertex_kink_reject(eval_arrs, kink_recorded, cluster.ident())) {
+                if (m_save_stm_fit) set_pass_status(7);
+                return std::nullopt;
+            }
+
+            if (flag_pass) {
+                std::vector<std::shared_ptr<PR::Segment>> fitted_segments{adjusted_segment};
+                search_other_tracks(cluster, fitted_segments);
+                if (check_other_tracks(cluster, fitted_segments)) {
+                    SPDLOG_LOGGER_TRACE(s_log, "check_stm_conditions: Mid Point Tracks");
+                    if (m_save_stm_fit) set_pass_status(4);
+                    return false;
+                }
+                if (!detect_proton(adjusted_segment, kink_num, fitted_segments)) {
+                    if (m_save_stm_fit) set_pass_status(0);
+                    return true;
+                }
+            }
+            if (m_save_stm_fit) set_pass_status(flag_pass ? 5 : 3);
+            return std::nullopt;
+        };
+
+        // Forward pass
+        if (auto fwd = run_pass(first_wcp, last_wcp, true); fwd.has_value()) return *fwd;
+
+        // Backward pass (only for double-ended clusters)
+        if (flag_double_end) {
+            if (auto bwd = run_pass(last_wcp, first_wcp, false); bwd.has_value()) return *bwd;
+        }
+
+        SPDLOG_LOGGER_TRACE(s_log, "check_stm_conditions: Mid Point ");
+
+
+
+
+
+
+
+        // // std::cout << "STMTagger tracking " << first_wcp << " " << last_wcp << std::endl;
+
+        // // temporary tracking implementation ...
+        // auto path_points = do_rough_path(cluster, first_wcp, last_wcp);
+        // // Optional: Print path info for debugging
+        // std::cout << "TaggerCheckSTM: Steiner path: " << path_points.size() << " points from index " << first_wcp << " " <<path_points.front() << " " << last_wcp << " " << path_points.back() << std::endl;
+
+        // auto segment = create_segment_for_cluster(cluster, path_points);
+        // // auto& wcpts = segment->wcpts();
+        // // for (size_t i=0;i!=path_points.size(); i++){
+        // //     std::cout << i << " " << path_points.at(i) << " " << wcpts.at(i).point << std::endl;
+        // // }
+        // m_track_fitter.add_segment(segment);
+
+        // auto ch = m_track_fitter.get_channel_for_wire(0,0,1,50);
+        // auto test_results = m_track_fitter.get_wires_for_channel(0,ch);
+        // std::cout << ch << " " << test_results.size() << " wires. " << " " << std::get<0>(test_results.front()) << " " << std::get<1>(test_results.front()) << " " << std::get<2>(test_results.front()) << std::endl;
+
+        // m_track_fitter.do_single_tracking(segment);
+
+
+        // geo_point_t mid_point(0,0,0);
+        // adjust_rough_path(cluster, mid_point);
+
+        // auto kink_num = find_first_kink(segment);
+
+        // check_other_clusters(cluster, associated_clusters);
+
+        // std::vector<std::shared_ptr<PR::Segment>> fitted_segments;
+        // fitted_segments.push_back(segment);
+        // search_other_tracks(cluster, fitted_segments);
+
+        // detect_proton(segment, kink_num, fitted_segments);
+
+        // eval_stm(segment, kink_num);
+
+        // // missing check other tracks ...
+        // m_track_fitter.prepare_data();
+        // m_track_fitter.fill_global_rb_map();
+        // auto organized_path = m_track_fitter.organize_orig_path(segment);
+        // // auto test = m_track_fitter.examine_end_ps_vec(segment, organized_path, true, true);
+        // auto test_path = organized_path;
+        // m_track_fitter.organize_ps_path(segment, test_path, 1.2*units::cm, 0.6*units::cm);
+        // std::cout << "TaggerCheckSTM: Organized path: " << organized_path.size() << " points." << " original " << segment->wcpts().size() << " " << test_path.size() << std::endl;
+        // // std::cout << m_track_fitter.get_pc_transforms() << " " << m_track_fitter.get_detector_volume() << std::endl;
+        // // WireCell::Point p = organized_path.front();
+        // // TrackFitting::PlaneData temp_2dut, temp_2dvt, temp_2dwt;
+        // // m_track_fitter.form_point_association(segment, p, temp_2dut, temp_2dvt, temp_2dwt, 1.0*units::cm, 3, 20);
+        // // m_track_fitter.examine_point_association(segment, p, temp_2dut, temp_2dvt, temp_2dwt, true);
+        // // std::cout << "2D Association: " << temp_2dut.associated_2d_points.size() << " " << temp_2dut.quantity << " " << temp_2dvt.associated_2d_points.size() << " " << temp_2dvt.quantity << " " << temp_2dwt.associated_2d_points.size() << " " << temp_2dwt.quantity << std::endl;
+        // std::vector<std::pair<WireCell::Point, std::shared_ptr<PR::Segment>>> ptss;
+        // for (const auto& p : organized_path) {
+        //     ptss.emplace_back(p, segment);
+        // }
+        // m_track_fitter.form_map(ptss);
+        // m_track_fitter.trajectory_fit(ptss);
+        // m_track_fitter.dQ_dx_fit();
+        // std::cout << m_track_fitter.get_parameter("DL") << std::endl;
+        // std::cout << "TaggerCheckSTM: Formed map with " << organized_path.size() << " points." << std::endl;
+
+        return false;
+    }
+    
+ 
+};

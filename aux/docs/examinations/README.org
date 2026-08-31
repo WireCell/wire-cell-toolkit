@@ -1,0 +1,88 @@
+#+title: Code Examination Findings for aux Package
+#+include: ../../../docs/include-topic.org
+
+* Purpose
+
+This directory contains code examination findings for the =aux= package
+of the Wire-Cell Toolkit.  The examination covers signal processing,
+frame manipulation, cluster/blob operations, and tensor data model code.
+
+*No source code has been modified.*  All findings are documented for
+review before any changes are made.
+
+* Scope
+
+- ~81 source files, ~59 headers in =aux/=
+- Examination date: 2026-04
+- Three areas examined, documented separately
+
+* Summary of Findings
+
+| Area                    | Document                                      | Critical | Moderate | Minor |
+|-------------------------+-----------------------------------------------+----------+----------+-------|
+| DFT/Signal Processing   | [[file:dft-signal-processing.org]]             |        2 |        4 |     4 |
+| Frame Processing        | [[file:frame-processing.org]]                  |        1 |        5 |     4 |
+| Cluster/Blob/Tensor     | [[file:cluster-blob-tensor.org]]               |        3 |        5 |     4 |
+|-------------------------+-----------------------------------------------+----------+----------+-------|
+| *Total*                 |                                               |        6 |       14 |    12 |
+
+Each document also includes efficiency observations (labeled EFF-) that
+are not severity-rated but may inform optimization work.
+
+* Severity Definitions
+
+- *Critical*: Produces wrong results, crashes at runtime, or causes
+  undefined behavior under normal operation.  Examples: out-of-bounds
+  access, wrong variable used, division by zero.
+
+- *Moderate*: Resource leak, robustness gap, or confusing logic that
+  risks future bugs or fails on edge-case inputs.  Examples: memory
+  leak on exception path, unchecked shape, fragile design patterns.
+
+- *Minor*: Code quality, style, incomplete features, or performance
+  improvements.  Examples: hard-coded constants, unnecessary allocation,
+  missing validation for unlikely inputs.
+
+* How to Use These Documents
+
+Each finding follows a uniform template:
+
+- *ID*: =SEVERITY-AREA-NN= (e.g., =CRIT-DSP-01=) for cross-referencing
+  in commit messages and issue trackers.
+- *File*: Project-relative path with line number (=src/DftTools.cxx:191=).
+- *Severity*: Critical, Moderate, or Minor.
+- *Category*: Bug, Robustness, Resource Leak, Performance, Maintainability.
+- *Description*: What the issue is.
+- *Evidence*: Code snippet showing the problematic lines.
+- *Impact*: What can go wrong.
+- *Suggested Remediation*: Concrete fix or approach.
+- *Testing*: How to verify (where applicable).
+
+Findings are ordered critical-first within each document to surface the
+most important issues first.
+
+* Top Priority Items
+
+The following findings have the highest impact and should be reviewed
+first:
+
+1. *CRIT-DSP-01*: =DftTools::replace()= uses time-domain vectors where
+   frequency-domain spectra are needed, plus out-of-bounds access.
+   ([[file:dft-signal-processing.org::*CRIT-DSP-01]])
+
+2. *CRIT-CBT-01*: =BlobShadow::connected_leaves()= pushes wire vertex
+   instead of channel vertex.
+   ([[file:cluster-blob-tensor.org::*CRIT-CBT-01]])
+
+3. *CRIT-DSP-02*: Division by zero in =replace()= spectral division.
+   ([[file:dft-signal-processing.org::*CRIT-DSP-02]])
+
+4. *CRIT-FRM-01*: =FrameSync::flush()= unbounded recursion.
+   ([[file:frame-processing.org::*CRIT-FRM-01]])
+
+5. *CRIT-CBT-02*: =ClusterArrays= activity vector sized by wrong
+   dimension.
+   ([[file:cluster-blob-tensor.org::*CRIT-CBT-02]])
+
+6. *CRIT-CBT-03*: Unsigned comparison =aind < 0= always false.
+   ([[file:cluster-blob-tensor.org::*CRIT-CBT-03]])

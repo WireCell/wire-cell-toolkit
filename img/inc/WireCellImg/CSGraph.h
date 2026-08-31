@@ -137,6 +137,10 @@ namespace WireCell::Img::CS {
     // value above or equal to threshold.  Any blobless measures are
     // also removed.
     graph_t prune(const graph_t& csg, float threshold=0);
+
+    // Rvalue overload: when no blob falls below threshold the input is
+    // moved through unchanged, skipping the identity rebuild.
+    graph_t prune(graph_t&& csg, float threshold=0);
 }
 
 namespace std {

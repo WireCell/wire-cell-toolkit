@@ -47,7 +47,12 @@ WireCell::Plugin* WireCell::PluginManager::add(const std::string& plugin_name, c
         else {
             lname = libname;
         }
-        void* lib = dlopen(lname.c_str(), RTLD_NOW);
+        // RTLD_NODELETE: keep the plugin mapped even across dlclose, so that
+        // global factory makers (std::function targets living in this lib)
+        // remain valid through static teardown at program exit. Without it,
+        // the plugin is unmapped at exit before the GlobalFactoryRegistry
+        // singleton is destroyed -> use-after-unload crash (macOS).
+        void* lib = dlopen(lname.c_str(), RTLD_NOW | RTLD_NODELETE);
         if (!lib) {
             l->error("Failed to load {}: {}", lname, dlerror());
             continue;

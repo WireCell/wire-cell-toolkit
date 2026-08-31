@@ -108,6 +108,6 @@ ICluster::pointer TensorDM::as_cluster(const TensorIndex& ti,
     }
 
     auto cgraph = to_cluster(nas, eas, anodes);
-    return std::make_shared<SimpleCluster>(cgraph, ident);
+    return std::make_shared<SimpleCluster>(std::move(cgraph), ident);
     
 }

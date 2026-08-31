@@ -1,0 +1,180 @@
+#!/usr/bin/env -S snakemake --cores all --snakefile
+# -*- snakemake -*-
+
+# Suggested running:
+#
+# $ ./spng/test/spcmp --config detector=pdhd --directory=spcmp-pdhd all
+#
+# This is a sibling of spng/test/spngdir.  Where spngdir sweeps track angles,
+# spcmp fires ONE ideal line track per wire plane that is:
+#
+#   - parallel to the wire planes (no drift component),
+#   - perpendicular to that plane's wire direction (i.e. along its pitch),
+#   - placed a fixed drift distance (default 1 m) in front of the collection
+#     plane and centered in the transverse plane.
+#
+# One wire-cell job per plane produces (splat, osp, spng) signals, giving a
+# 3x3 = (splat,osp,spng) x (U,V,W) set.  A follow-on python script compares
+# them in one figure with three plots, one per plane, each overlaying the three
+# signal waveforms from a common channel near the middle of the track.
+#
+# Requires snakemake and wire-cell-python ("wcpy"), same as spngdir.
+#
+# NOTE: this file is parsed by snakemake's own interpreter, which does NOT have
+# numpy/wirecell.  So we keep parse-time imports to the stdlib only and defer all
+# geometry work to helper scripts run inside shell rules (where the wirecell
+# environment that provides `wcpy` is on PATH).
+
+# Hard-wired configuration defaults; override with --config k=v.
+for k, v in dict(
+        # Canonical detector name.
+        detector="pdhd",
+        # Wire plane indices.  Probably universal.
+        planes=[0, 1, 2],
+        # Which anode/APA to populate (the jsonnet hard-wires TPC ID 0).
+        apa=0,
+        # Drift distance (mm) of the track in front of the collection plane.
+        drift_mm=1000.0,
+        # Track length (along the pitch direction).
+        track_length="1*m",
+        # What the spng output carries.  "roiuniter" (default) runs the full
+        # direct dense->ROI DNN graph (cf adc-to-spng.jsonnet).  For validating
+        # the signal processing upstream of ROI finding, choose a bare decon
+        # stage instead: "gauss" (signal-preserving, comparable to splat),
+        # "decon" (raw FR*ER, noise-dominated), "dnnroi" (loose-LF dense image),
+        # "wiener" or "tight".
+        outstage="roiuniter",
+        # Path to the roiuniter TorchScript ROI DNN model (used by outstage=
+        # roiuniter).  Override with --config model_file=/path/to/model.ts.
+        model_file="/nfs/data/1/calcuttj/toolkit_testing/legacy_roiuniter_083126.ts",
+        # Downsample factor for the filtered decon stages (ignored by "decon"
+        # and "roiuniter").  1 keeps full time sampling so the spng waveform
+        # aligns with splat/osp.
+        rebin=1,
+        # Optional, override the default jsonnet.
+        wire_cell_config=workflow.basedir + "/spcmp.jsonnet",
+).items():
+    config.setdefault(k, v)
+
+detector = config['detector']
+planes = config['planes']
+apa = int(config['apa'])
+drift_mm = float(config['drift_mm'])
+track_length = config['track_length']
+outstage = config['outstage']
+model_file = config['model_file']
+rebin = config['rebin']
+wire_cell_config = config['wire_cell_config']
+
+# The kinds of signal produced by one wire-cell job.
+sig_kinds = ["splat", "osp", "spng"]
+
+
+# Generate one ideal track per plane: in the wire plane (theta_xz=0, no drift)
+# and perpendicular to the plane's wires (theta_y=90 deg in wire-plane coords).
+# The per-plane --offset is computed by spcmp-offset.py so that all planes' tracks
+# land at the same global point (drift_mm in front of the collection plane,
+# centered transversely).
+rule tracking:
+    output:
+        depos="{detector}-depos-p{plane}.npz",
+        meta="{detector}-depos-p{plane}.json",
+    shell: '''
+    offset=$(LD_LIBRARY_PATH="" python3 {workflow.basedir}/spcmp-offset.py \
+             --detector {wildcards.detector} --apa %d \
+             --plane {wildcards.plane} --drift-mm %g) && \
+    wcpy gen detlinegen \
+    --detector={wildcards.detector} \
+    --apa=%d \
+    --plane={wildcards.plane} \
+    --angle-coords=wire-plane \
+    --theta_y="90*deg" \
+    --theta_xz="0*deg" \
+    --length="%s" \
+    --offset="$offset" \
+    --output_depos {output.depos} \
+    --output_meta {output.meta}
+    ''' % (apa, drift_mm, apa, track_length)
+
+
+rule all_depos:
+    input:
+        expand("{detector}-depos-p{plane}.npz", detector=detector, plane=planes)
+
+
+# One wire-cell job per plane: sim + splat + oSp + Spng.
+rule ssss:
+    input:
+        cfg=wire_cell_config,
+        depos="{detector}-depos-p{plane}.npz",
+    output:
+        splat="{detector}-signals-splat-p{plane}.npz",
+        osp="{detector}-signals-osp-p{plane}.npz",
+        spng="{detector}-signals-spng-p{plane}.npz",
+        log="{detector}-p{plane}.log",
+    params:
+        outpat=lambda w: f"{w.detector}-signals-%(tier)s-p{w.plane}.npz",
+    shell: '''
+    wire-cell -c {input.cfg} -l {output.log} -L debug \
+    -A input={input.depos} \
+    -A "outpat={params.outpat}" \
+    -A detname={wildcards.detector} \
+    -A outstage=%s -A rebin=%d \
+    -A "model_file=%s" \
+    -A engine=Pgrapher -A device=cpu -A verbosity=0
+    ''' % (outstage, int(rebin), model_file)
+
+
+rule all_signals:
+    input:
+        expand("{detector}-signals-{kind}-p{plane}.npz",
+               detector=detector, kind=sig_kinds, plane=planes)
+
+
+# Compare (splat,osp,spng) x (U,V,W) in one figure with three per-plane plots.
+rule compare:
+    input:
+        lambda w: expand("{detector}-signals-{kind}-p{plane}.npz",
+                         detector=w.detector, kind=sig_kinds, plane=planes)
+    output:
+        "{detector}-spcmp.pdf"
+    shell: '''
+    LD_LIBRARY_PATH="" \
+    python3 {workflow.basedir}/spcmp-plot.py \
+      --detector {wildcards.detector} \
+      --output {output} \
+      {input}
+    '''
+
+
+# Render the WCT data-flow graph (splat + osp + spng "kitchen sink") to PDF for
+# inspecting how signals and, in particular, the SPNG ROIs are produced.
+#
+# FIXME (as in spngdir): when running from a Spack view with wcpy from uv there
+# is a dependency mismatch related to python graphviz pango.  LD_LIBRARY_PATH=""
+# sidesteps the Spack view and uses only what Python finds directly.
+rule dag:
+    input:
+        wire_cell_config,
+    output:
+        "{detector}-spcmp-dag.pdf"
+    shell: '''
+    LD_LIBRARY_PATH="" \
+    wcpy pgraph dotify \
+    -A input="input.npz" \
+    -A detname={wildcards.detector} \
+    -A engine=Pgrapher -A device=cpu -A verbosity=0 \
+    --no-services --no-params \
+    --graph-options rankdir=TB \
+    {input} {output}
+    '''
+
+
+rule all_dags:
+    input:
+        expand("{detector}-spcmp-dag.pdf", detector=detector)
+
+
+rule all:
+    input:
+        expand("{detector}-spcmp.pdf", detector=detector)

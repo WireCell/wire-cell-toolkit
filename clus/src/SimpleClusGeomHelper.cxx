@@ -2,6 +2,7 @@
 #include "WireCellUtil/Exceptions.h"
 #include "WireCellUtil/NamedFactory.h"
 #include "WireCellUtil/String.h"
+#include "WireCellUtil/Units.h"
 
 #include <string>
 
@@ -28,7 +29,7 @@ void Clus::SimpleClusGeomHelper::configure(const WireCell::Configuration& cfg)
 {
     m_tpcparams = cfg;
     Json::FastWriter fastWriter;
-    log->debug("m_tpcparams: {}", fastWriter.write(m_tpcparams));
+    SPDLOG_LOGGER_TRACE(log, "m_tpcparams: {}", fastWriter.write(m_tpcparams));
 
     for (const auto& apaface : m_tpcparams.getMemberNames()) {
         const Json::Value& tpcparam = m_tpcparams[apaface];
@@ -45,13 +46,13 @@ void Clus::SimpleClusGeomHelper::configure(const WireCell::Configuration& cfg)
         fv.m_FV_ymax_margin = get<double>(tpcparam, "FV_ymax_margin", fv.m_FV_ymax_margin);
         fv.m_FV_zmin_margin = get<double>(tpcparam, "FV_zmin_margin", fv.m_FV_zmin_margin);
         fv.m_FV_zmax_margin = get<double>(tpcparam, "FV_zmax_margin", fv.m_FV_zmax_margin);
+        m_FV_map[apaface] = fv;
     }
-    
 }
 
 WireCell::Configuration Clus::SimpleClusGeomHelper::get_params(const int apa, const int face) const
 {
-    const std::string apa_face = format("a%df%d", apa, face);
+    const std::string apa_face = String::format("a%df%d", apa, face);
     if (!m_tpcparams.isMember(apa_face)) {
         raise<ValueError>("failed to find params for apa %d face %d", apa, face);
     }
@@ -61,7 +62,7 @@ WireCell::Configuration Clus::SimpleClusGeomHelper::get_params(const int apa, co
 
 bool Clus::SimpleClusGeomHelper::is_in_FV(const WireCell::Point& point, const int apa, const int face) const
 {
-    const std::string apa_face = format("a%df%d", apa, face);
+    const std::string apa_face = String::format("a%df%d", apa, face);
     if (m_FV_map.find(apa_face) == m_FV_map.end()) {
         raise<ValueError>("failed to find face for wpid %d", face);
     }
@@ -80,7 +81,7 @@ bool Clus::SimpleClusGeomHelper::is_in_FV(const WireCell::Point& point, const in
 
 bool Clus::SimpleClusGeomHelper::is_in_FV_dim(const WireCell::Point& point, const int dim, const double margin, const int apa, const int face) const
 {
-    const std::string apa_face = format("a%df%d", apa, face);
+    const std::string apa_face = String::format("a%df%d", apa, face);
     if (m_FV_map.find(apa_face) == m_FV_map.end()) {
         raise<ValueError>("failed to find face for wpid %d", face);
     }
@@ -106,7 +107,7 @@ bool Clus::SimpleClusGeomHelper::is_in_FV_dim(const WireCell::Point& point, cons
 WireCell::Point Clus::SimpleClusGeomHelper::get_corrected_point(const WireCell::Point& point, const WireCell::IClusGeomHelper::CorrectionType type, const int apa, const int face) const
 {
     if (type != WireCell::IClusGeomHelper::CorrectionType::NONE) {
-        raise<ValueError>("failed to find face for wpid %d", type);
+        raise<ValueError>("SimpleClusGeomHelper does not support CorrectionType %d; use UbooneGeomHelper for SCE correction", static_cast<int>(type));
     }
     return point;
 }

@@ -48,6 +48,10 @@ function(params) base {
 
     adc: super.adc {
         
+        // ADC resolution (bits): restores the default removed from the
+        // shared base params in commit 41e02736 (pre-41e02736 inherited 12).
+        resolution: 12,
+
         // Set 0 for now
         //baselines: [0*wc.millivolt, 0*wc.millivolt, 0*wc.millivolt],
         //resolution: 12,
@@ -59,16 +63,15 @@ function(params) base {
 
     },
 
-    // Take BNL cold electronics on ProtoDUNE as reference here
+    // Electronics response synced to protodunevd top-drift elec.  This
+    // single-CRP geometry (one upper CRP) is treated as the top drift.
     elec: super.elec {
-
-        type: "ColdElecResponse",
-
-        // copied from pdsp
+        // gain is a jsonnet-required placeholder: JsonElecResponse loads
+        // its response from file.
         gain: 14*wc.mV/wc.fC,
-        shaping: 2.2 * wc.us,
-        postgain: 1.1365,
-        start: 0,
+        type: "JsonElecResponse",
+        filename: "dunevd-coldbox-elecresp-top-psnorm_400.json.bz2",
+        postgain: 1.36, // 11mV/fC, 1.94 -> 14mV/fC
     },
 
     sim: super.sim {
@@ -91,15 +94,13 @@ function(params) base {
         // Standard wire geometry with 2 wire planes and third dummy induction
         wires: "dunevd10kt-1x6x6-3view30deg-wires-v1.json.bz2",
 
-        // Based on the simulations made for the 50L prototype 
+        // Field response synced to protodunevd (CRP, 18.1 cm response plane).
         fields: [
-            "dunevd-resp-isoc3views-18d92.json.bz2",
+            "protodunevd_FR_imbalance3p_260501.json.bz2",
         ],
 
-        // fixme: this is for microboone and probably bogus for
-        // protodune because (at least) the span of MB wire lengths do
-        // not cover pdsp's.
-        noise: "dunevd10kt-1x6x6-3view30deg-noise-spectra-v1.json.bz2",
+        // Electronics-noise spectra synced to protodunevd top-drift spectra.
+        noise: "pdvd-top-noise-spectra-v3.json.bz2",
 
         chresp: null,
 

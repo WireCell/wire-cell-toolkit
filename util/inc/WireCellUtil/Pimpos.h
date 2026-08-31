@@ -27,9 +27,9 @@ namespace WireCell {
         For 3D "lab" to "plane" coordinate transformations there is a
         plane coordinate system which has these three orthogonal axes:
 
-        axis0) anti nominal drift direction (normal to the wire plane) and
-        axis1) along the wire direction such that,
-        axis2) the pitch direction is the cross product of axis0 X axis1.
+        axis0) cross(axis1,axis2), right-hand coordinate system
+        axis1) along the wire direction
+        axis2) along pitch direction
     */
 
     class Pimpos {
@@ -80,8 +80,9 @@ namespace WireCell {
         /// Return given 3-point origin for plane pitch.
         const Point& origin() const { return m_origin; }
 
-        /// Return an axis of the plane.  0=normal to plane (aka
-        /// anti-drift), 1=wire direction, 2=pitch direction.
+        /// Return an axis of the plane.  0=normal to plane (note, this points
+        /// in the same global X direction regardless of which face the Pimpos
+        /// is attached), 1=wire direction, 2=pitch direction.
         const Vector& axis(int i) const { return m_axis[i]; }
 
         /// Return the vector from the origin to the given point.
@@ -128,8 +129,12 @@ namespace WireCell {
         /// index.
         int reflect(int wireind, int impind) const;
 
+        /// return pitch
+        double pitch() const { return m_pitch; }
+
        private:
         int m_nimpbins_per_wire;
+        double m_pitch;
         Point m_origin;
         Vector m_axis[3];
         Binning m_regionbins, m_impactbins;

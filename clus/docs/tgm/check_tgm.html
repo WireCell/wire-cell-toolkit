@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Through-Going Muon Tagger (check_tgm) — Algorithm Walkthrough</title>
+<style>
+  :root {
+    --fg: #1c1e21; --bg: #ffffff; --muted: #5b6470; --accent: #1a5fb4;
+    --accent2: #c01c28; --code-bg: #f4f6f8; --border: #d7dce2; --ok: #26794f;
+  }
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+         color: var(--fg); background: var(--bg); line-height: 1.55;
+         max-width: 980px; margin: 0 auto; padding: 2rem 1.5rem 5rem; }
+  h1 { font-size: 1.9rem; border-bottom: 3px solid var(--accent); padding-bottom: .4rem; }
+  h2 { font-size: 1.4rem; margin-top: 2.4rem; color: var(--accent);
+       border-bottom: 1px solid var(--border); padding-bottom: .3rem; }
+  h3 { font-size: 1.12rem; margin-top: 1.6rem; color: var(--accent2); }
+  code { background: var(--code-bg); padding: .1rem .35rem; border-radius: 4px;
+         font-family: "SF Mono", Menlo, Consolas, monospace; font-size: .88em; }
+  pre { background: var(--code-bg); border: 1px solid var(--border); border-radius: 8px;
+        padding: 1rem; overflow-x: auto; font-size: .85rem; line-height: 1.45; }
+  pre code { background: none; padding: 0; }
+  .meta { color: var(--muted); font-size: .9rem; }
+  .loc { font-family: "SF Mono", Menlo, Consolas, monospace; font-size: .82rem;
+         color: var(--muted); }
+  table { border-collapse: collapse; width: 100%; margin: 1rem 0; font-size: .9rem; }
+  th, td { border: 1px solid var(--border); padding: .5rem .7rem; text-align: left; vertical-align: top; }
+  th { background: var(--code-bg); }
+  .note { background: #eef5fc; border-left: 4px solid var(--accent); padding: .8rem 1rem;
+          border-radius: 0 6px 6px 0; margin: 1rem 0; }
+  .warn { background: #fdf0ef; border-left: 4px solid var(--accent2); padding: .8rem 1rem;
+          border-radius: 0 6px 6px 0; margin: 1rem 0; }
+  .step { background: #fafbfc; border: 1px solid var(--border); border-radius: 8px;
+          padding: .4rem 1.2rem; margin: 1rem 0; }
+  ol.steps > li { margin: .6rem 0; }
+  .ret-true { color: var(--accent2); font-weight: 600; }
+  .ret-false { color: var(--ok); font-weight: 600; }
+  ul.compact li { margin: .2rem 0; }
+  .toc { background: var(--code-bg); border: 1px solid var(--border); border-radius: 8px;
+         padding: 1rem 1.4rem; }
+  .toc ul { margin: .3rem 0; }
+  .pill { display: inline-block; background: var(--accent); color: #fff; font-size: .72rem;
+          padding: .1rem .5rem; border-radius: 10px; vertical-align: middle; }
+</style>
+</head>
+<body>
+
+<h1>Through-Going Muon (TGM) Tagger — <code>check_tgm</code></h1>
+<p class="meta">Algorithm walkthrough of the WireCell-Prototype cosmic-rejection tagger.<br>
+Source: <span class="loc">pid/src/Cosmic_tagger.h:1331</span> &nbsp;·&nbsp;
+Declaration: <span class="loc">pid/inc/WCPPID/ToyFiducial.h:42</span> &nbsp;·&nbsp;
+Class <code>WCPPID::ToyFiducial</code></p>
+
+<div class="note">
+<strong>What it does, in one sentence:</strong> Given the reconstructed 3-D cluster of an event
+and a candidate optical flash (which fixes the drift offset), <code>check_tgm</code> returns
+<code>true</code> if the cluster looks like a <em>through-going muon</em> — a cosmic track whose
+two ends both <em>exit</em> the detector's fiducial volume — rather than a contained
+neutrino interaction.
+</div>
+
+<div class="toc">
+<strong>Contents</strong>
+<ul class="compact">
+  <li><a href="#context">1. Context &amp; signature</a></li>
+  <li><a href="#inputs">2. Inputs and key geometric concepts</a></li>
+  <li><a href="#overview">3. High-level logic</a></li>
+  <li><a href="#walk">4. Step-by-step walkthrough</a></li>
+  <li><a href="#helpers">5. Helper routines</a></li>
+  <li><a href="#flash">6. The flash-type=2 (cathode-crossing) special case</a></li>
+  <li><a href="#callers">7. Where it is called from</a></li>
+  <li><a href="#summary">8. Summary &amp; decision table</a></li>
+</ul>
+</div>
+
+<h2 id="context">1. Context &amp; signature</h2>
+<pre><code>bool WCPPID::ToyFiducial::check_tgm(
+        WCPPID::PR3DCluster* main_cluster,   // the 3-D reconstructed cluster
+        Opflash*             main_flash,     // candidate flash (sets drift time)
+        double               offset_x,       // x-offset = drift distance from t0
+        WCP::ToyCTPointCloud& ct_point_cloud // charge/wire point cloud (for dead/SP checks)
+);</code></pre>
+<p>It is one of three cosmic taggers in <code>ToyFiducial</code>:</p>
+<ul class="compact">
+  <li><code>check_tgm</code> — through-going muon (both ends exit). <span class="loc">Cosmic_tagger.h:1331</span></li>
+  <li><code>check_stm</code> — stopping muon (one end exits, one stops). <em>(separate)</em></li>
+  <li><code>M2_check_tgm</code> — a flash-independent "method-2" TGM variant. <span class="loc">Cosmic_tagger.h:2733</span></li>
+</ul>
+
+<h2 id="inputs">2. Inputs and key geometric concepts</h2>
+
+<h3>The extreme points of the cluster</h3>
+<pre><code>std::vector&lt;std::vector&lt;WCPoint&gt;&gt; out_vec_wcps = main_cluster-&gt;get_extreme_wcps();</code></pre>
+<p><code>out_vec_wcps</code> is a list of <em>endpoint groups</em>. Each group
+<code>out_vec_wcps.at(i)</code> is a small bundle of candidate extreme points sitting at one
+"tip" of the cluster (the principal extreme first, then alternates). Group <code>0</code> and
+group <code>1</code> are the two ends of the cluster's <strong>main (longest) axis</strong>; further
+groups are other protrusions. The algorithm tests <em>pairs of ends</em> to see whether a
+straight muon trajectory connecting them would exit the detector at both ends.</p>
+
+<h3>The fiducial volume</h3>
+<p><code>inside_fiducial_volume(p, offset_x)</code> (<span class="loc">ToyFiducial.cxx:1743</span>)
+returns whether a point is inside the active TPC, using a 2-D point-in-polygon test
+(<code>pnpoly</code>) in the <em>x–y</em> and <em>x–z</em> projections. The <code>offset_x</code>
+(derived from the flash time) shifts the cluster in <em>x</em> so the drift coordinate is
+physical. A point with both projections inside &rArr; inside; otherwise it is an
+<strong>exit point</strong> (touches anode, cathode, top/bottom, or upstream/downstream edge).</p>
+
+<h3>Wire-plane directions</h3>
+<pre><code>TVector3 drift_dir(1,0,0);                                  // x = drift
+TVector3 U_dir(0, cos60,  sin60);                           // U induction
+TVector3 V_dir(0, cos60, -sin60);                           // V induction
+TVector3 W_dir(0, 1, 0);                                    // W collection</code></pre>
+<p>These are used to detect track segments that run nearly parallel to a wire plane (a
+"prolonged" / isochronous direction), where reconstruction is unreliable and a true track
+end may be hidden — handled via signal-processing and dead-region checks.</p>
+
+<h2 id="overview">3. High-level logic</h2>
+<p>The core idea: a through-going muon has <strong>two ends that both lie outside</strong> the
+fiducial volume, with a genuine track between them. The function searches over all pairs of
+endpoint groups <code>(i, k)</code> and tries to confirm that both ends exit, with safeguards
+against (a) gaps caused by dead channels / signal-processing holes, and (b) real neutrino
+topologies that merely poke a track out of the boundary.</p>
+
+<pre><code>length_limit = |end0 - end1|            // length of the main axis
+
+for each pair of endpoint groups (i, k):
+    determine if group i has a point OUTSIDE the FV  -> flag_p1_inside, p1_index
+    determine if group k has a point OUTSIDE the FV  -> flag_p2_inside, p2_index
+
+    CASE A: both ends are OUTSIDE (!p1_inside && !p2_inside)
+        verify the connecting segment actually passes THROUGH the FV
+        -> confirm it is not a neutrino candidate / handle flash type 2
+        -> may return TRUE
+
+    CASE B: at least one end is INSIDE
+        only proceed if the pair is nearly the full main axis (angle &gt; 75 deg, or i,k = 0,1)
+        for each inside end, "push" it outward along its local Hough direction and
+        re-test using dead-region + signal-processing checks
+        if both ends then qualify as effectively outside -> may return TRUE
+
+return false   // not a TGM</code></pre>
+
+<h2 id="walk">4. Step-by-step walkthrough</h2>
+
+<div class="step">
+<h3>Step 0 — Setup <span class="loc">lines 1333–1345</span></h3>
+<ul class="compact">
+  <li>Grab the cluster's extreme-point groups.</li>
+  <li>Define drift &amp; wire-plane unit vectors.</li>
+  <li>Compute <code>length_limit</code> = distance between the two principal extreme points
+      (the main-axis length). Later, a candidate exit-to-exit chord must be at least
+      <strong>45% of this</strong> to count, rejecting short stubs.</li>
+</ul>
+</div>
+
+<div class="step">
+<h3>Step 1 — Outer loops over endpoint-group pairs <span class="loc">lines 1350–1374</span></h3>
+<p>For group <code>i</code>, scan its points; the first point found <em>outside</em> the FV sets
+<code>flag_p1_inside = false</code> and records <code>p1_index</code>. If every point is inside,
+the group is "inside". Same for group <code>k</code> (<code>flag_p2_inside</code>,
+<code>p2_index</code>). The pair <code>(i,k)</code> with <code>k &gt; i</code> is then classified.</p>
+</div>
+
+<div class="step">
+<h3>Step 2 — CASE A: both ends outside the FV <span class="loc">lines 1392–1478</span></h3>
+<ol class="steps">
+  <li><strong>Sanity-check the middle of the track.</strong> Sample 3 points at &frac14;, &frac12;, &frac34;
+      along the segment from <code>p1</code> to <code>p2</code>; <code>flag_check</code> is true if
+      <em>any</em> interior sample is inside the FV. This confirms the two exit points are
+      actually joined by a track that traverses the detector (not two unrelated edge hits).</li>
+
+  <li><strong>If the midpoint check passes</strong> (<code>flag_check == true</code>):
+    <ul class="compact">
+      <li>If <code>main_flash-&gt;get_type()==2</code> (cathode-crossing flash, ambiguous t0):
+          require the chord length <code>&gt; 0.45 × length_limit</code> <em>and</em> that
+          <code>check_neutrino_candidate(...)</code> returns false (i.e. the path does NOT look
+          like a neutrino). For the principal pair <code>(i,k)=(0,1)</code> the stricter
+          two-view check is enabled (<code>flag_2view_check=true</code>).
+          &rarr; <span class="ret-true">return true</span>.</li>
+      <li>Otherwise (normal flash): <span class="ret-true">return true</span> directly —
+          a clean through-going muon.</li>
+    </ul>
+  </li>
+
+  <li><strong>If the midpoint check fails</strong> (track seems to leave the FV in the middle):
+    <ul class="compact">
+      <li>If there are only 2 endpoint groups total, accept anyway:
+          <span class="ret-true">return true</span>.</li>
+      <li>Otherwise, re-test using the <em>other</em> endpoint groups as intermediate waypoints
+          (<code>flag_check_again</code>): sample along <code>p1 &rarr; other</code> and
+          <code>other &rarr; p2</code>. If no interior point is inside the FV
+          (<code>!flag_check_again</code>) and the chord exceeds 45% of the main axis and it is
+          not a neutrino candidate &rarr; <span class="ret-true">return true</span>.</li>
+    </ul>
+  </li>
+</ol>
+</div>
+
+<div class="step">
+<h3>Step 3 — CASE B: at least one end appears inside the FV <span class="loc">lines 1479–1596</span></h3>
+<p>A reconstructed end can falsely look "inside" when the true exit is hidden by dead channels
+or a signal-processing gap. CASE B recovers these.</p>
+<ol class="steps">
+  <li><strong>Gate on geometry.</strong> Only proceed if the pair is essentially the full track:
+      the connecting direction is within 15&deg; of the cluster's principal PCA axis
+      (<code>|90&deg; − angle(dir_test, dir_main)| &gt; 75&deg;</code>) OR the pair is the principal
+      pair <code>(0,1)</code>. Otherwise this pair is skipped.</li>
+
+  <li><strong>Push each "inside" end outward.</strong> For an inside end <code>p1</code>:
+    <ul class="compact">
+      <li>Compute the local track direction via a Hough transform over a 30&nbsp;cm
+          neighbourhood (<code>VHoughTrans</code>), pointing outward.</li>
+      <li>Geometric consistency guard: skip the pair if this direction disagrees with the
+          end-to-end direction (<code>angle &gt; 120&deg;</code> for p1; <code>&lt; 60&deg;</code> for p2).</li>
+      <li><strong>Prolonged-track (isochronous) check:</strong> compute the angle of the
+          direction to each wire plane (U, V, W). If the track is nearly parallel to a plane
+          (<code>angle1_1 &lt; 10&deg;</code>, <code>angle2_1 &lt; 10&deg;</code>, or
+          <code>angle3_1 &lt; 5&deg;</code>), require <code>check_signal_processing(...)</code> to
+          pass — i.e. the apparent containment is not just a signal-processing hole.</li>
+      <li><strong>Dead-region check:</strong> if the direction is far from the drift direction
+          (<code>angle &gt; 60&deg;</code>), require <code>check_dead_volume(...)</code> — the
+          extrapolated exit path is not dominated by dead channels.</li>
+      <li>If these checks fail, <code>flag_p1_inside_p</code> is cleared — the end is treated as
+          effectively <em>outside</em>.</li>
+    </ul>
+    The same procedure is applied to the other end <code>p2</code> &rarr;
+    <code>flag_p2_inside_p</code>.</li>
+
+  <li><strong>Decision.</strong> If after these corrections both ends are effectively outside
+      (<code>!flag_p1_inside_p &amp;&amp; !flag_p2_inside_p</code>):
+    <ul class="compact">
+      <li>flash type 2 &rarr; same neutrino-candidate + 45%-length guard as CASE A;</li>
+      <li>otherwise &rarr; <span class="ret-true">return true</span>.</li>
+    </ul>
+  </li>
+</ol>
+</div>
+
+<div class="step">
+<h3>Step 4 — Default <span class="loc">line 1601</span></h3>
+<p>If no endpoint pair satisfied either case, the cluster is not a through-going muon:
+<span class="ret-false">return false</span>.</p>
+</div>
+
+<h2 id="helpers">5. Helper routines</h2>
+<table>
+  <tr><th>Function</th><th>Location</th><th>Role in <code>check_tgm</code></th></tr>
+  <tr>
+    <td><code>get_extreme_wcps()</code></td>
+    <td class="loc">PR3DCluster</td>
+    <td>Returns the endpoint groups (tips) of the cluster; groups 0 &amp; 1 span the main axis.</td>
+  </tr>
+  <tr>
+    <td><code>inside_fiducial_volume(p, offset_x)</code></td>
+    <td class="loc">ToyFiducial.cxx:1743</td>
+    <td>Point-in-polygon test in x–y and x–z (with optional space-charge boundary tolerances).
+        Defines "exit" vs "contained".</td>
+  </tr>
+  <tr>
+    <td><code>check_neutrino_candidate(cluster, wcp1, wcp2, offset_x, ct_pc, 2view)</code></td>
+    <td class="loc">Cosmic_tagger.h:1677</td>
+    <td>Builds the graph, runs Dijkstra shortest path between the two ends, and inspects the
+        path (segment kinks, multiplicity, optional U/V two-view consistency) to decide whether
+        the topology looks like a neutrino interaction. TGM only fires when this returns
+        <em>false</em>.</td>
+  </tr>
+  <tr>
+    <td><code>check_signal_processing(p, dir, ct_pc, step, offset_x)</code></td>
+    <td class="loc">ToyFiducial.cxx:1655</td>
+    <td>Walks from <code>p</code> along <code>dir</code> in steps; counts points lacking nearby
+        charge in U/V/W (within 1.2&nbsp;cm) or sitting in a dead region. Returns false if
+        &gt;80% of the path is "dead/missing" — meaning an apparent containment is really a
+        signal-processing gap.</td>
+  </tr>
+  <tr>
+    <td><code>check_dead_volume(p, dir, step, offset_x)</code></td>
+    <td class="loc">ToyFiducial.cxx:1703</td>
+    <td>Like above but purely against dead regions; returns false if &gt;81% of the
+        extrapolated exit path is dead.</td>
+  </tr>
+  <tr>
+    <td><code>VHoughTrans(p, 30 cm)</code></td>
+    <td class="loc">PR3DCluster</td>
+    <td>Local track direction at an endpoint, via a Hough transform over a 30&nbsp;cm sphere.</td>
+  </tr>
+  <tr>
+    <td><code>get_PCA_axis(0)</code></td>
+    <td class="loc">PR3DCluster</td>
+    <td>Principal axis of the cluster; used to gate CASE B to near-axial endpoint pairs.</td>
+  </tr>
+</table>
+
+<h2 id="flash">6. The flash-type = 2 (cathode-crossing) special case</h2>
+<div class="warn">
+When <code>main_flash-&gt;get_type()==2</code> the flash↔cluster match is a
+<strong>cathode-crossing / ambiguous-t0</strong> hypothesis, so the tagger is more conservative:
+it never returns <code>true</code> on geometry alone. It additionally demands that
+<code>check_neutrino_candidate</code> rejects the neutrino hypothesis <em>and</em> that the
+exit-to-exit chord is longer than <code>0.45 × length_limit</code>. The principal pair
+<code>(0,1)</code> additionally enables the stricter U/V two-view path check.
+(<code>get_type()</code> is defined in <span class="loc">data/inc/WCPData/Opflash.h:31</span>.)
+</div>
+
+<h2 id="callers">7. Where it is called from</h2>
+<ul class="compact">
+  <li><span class="loc">Cosmic_tagger.h:174</span> — inside the master boundary/flash-matching
+      routine: a TGM tag is stored when <code>boundary_num==2</code> and <code>check_tgm</code>
+      confirms it.</li>
+  <li><span class="loc">Cosmic_tagger.h:2449</span> — used by <code>check_stm</code>-related logic
+      to give TGM priority over the stopping-muon hypothesis.</li>
+  <li>The result ultimately sets bit 3 of <code>event_type</code>
+      (<code>event_type |= 1UL &lt;&lt; 3</code>) in the STM apps
+      <span class="loc">pid/apps/wire-cell-stm.cxx</span> /
+      <span class="loc">wire-cell-prod-stm.cxx</span>, which downstream cuts read as the
+      "through-going muon" flag.</li>
+</ul>
+
+<h2 id="summary">8. Summary &amp; decision table</h2>
+<table>
+  <tr><th>Situation</th><th>Extra requirement</th><th>Result</th></tr>
+  <tr>
+    <td>Both ends outside FV, track passes through FV, normal flash</td>
+    <td>—</td>
+    <td><span class="ret-true">TGM (true)</span></td>
+  </tr>
+  <tr>
+    <td>Both ends outside FV, flash type 2</td>
+    <td>not a neutrino candidate AND chord &gt; 0.45 × main-axis</td>
+    <td><span class="ret-true">TGM (true)</span></td>
+  </tr>
+  <tr>
+    <td>Both ends outside, midpoint check fails, only 2 endpoint groups</td>
+    <td>—</td>
+    <td><span class="ret-true">TGM (true)</span></td>
+  </tr>
+  <tr>
+    <td>Both ends outside, midpoint fails, but no interior point inside via other tips</td>
+    <td>not a neutrino candidate AND chord &gt; 0.45 × main-axis</td>
+    <td><span class="ret-true">TGM (true)</span></td>
+  </tr>
+  <tr>
+    <td>One/both ends look inside, but near-axial pair</td>
+    <td>after Hough push-out, both ends fail dead-region / signal-processing checks (effectively outside)</td>
+    <td><span class="ret-true">TGM (true)</span></td>
+  </tr>
+  <tr>
+    <td>Ends genuinely contained, or topology looks like a neutrino</td>
+    <td>—</td>
+    <td><span class="ret-false">not TGM (false)</span></td>
+  </tr>
+</table>
+
+<div class="note">
+<strong>Take-away.</strong> <code>check_tgm</code> is fundamentally a <em>both-ends-exit</em> test made
+robust against detector imperfections: it (1) confirms a real track spans two FV exits, (2)
+rescues exits hidden by dead channels or signal-processing gaps using local Hough directions,
+and (3) refuses to tag anything that the neutrino-candidate path analysis flags as a plausible
+interaction — being especially strict for ambiguous (type-2) flashes.
+</div>
+
+<hr style="margin-top:3rem;border:none;border-top:1px solid var(--border)">
+<p class="meta">Generated from source at commit-pinned submodule <code>pid</code>
+(<span class="loc">a8badf5</span>). Line numbers refer to that checkout.</p>
+
+</body>
+</html>

@@ -321,7 +321,7 @@ function() {
             ] + if add_dump then [
             img.dump(anode, anode.name+"-ms-masked", params.lar.drift_speed),] else [])
     else {
-        local st = if multi_slicing == "multi-2view"
+        local st = if multi_slicing == "multi-2view" || multi_slicing == "multi-3view"
         then img.multi_active_slicing_tiling(anode, anode.name+"-ms-active", 4)
         else g.pipeline([
             img.slicing(anode, anode.name, 4, active_planes=[0,1,2], masked_planes=[],dummy_planes=[]), // 109*22*4

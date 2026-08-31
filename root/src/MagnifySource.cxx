@@ -64,6 +64,9 @@ bool Root::MagnifySource::operator()(IFrame::pointer& out)
     std::string url = m_cfg["filename"].asString();
 
     TFile* tfile = TFile::Open(url.c_str());
+    if (!tfile || tfile->IsZombie()) {
+        THROW(IOError() << errmsg{"MagnifySource: failed to open input file: " + url});
+    }
 
     int frame_ident = 0;
     int nticks = 0;
@@ -124,6 +127,9 @@ bool Root::MagnifySource::operator()(IFrame::pointer& out)
                 std::string hist_name = Form("h%c_%s", 'u' + iplane, frametag.c_str());
                 std::cerr << "MagnifySource: loading " << hist_name << std::endl;
                 TH2* hist = (TH2*) tfile->Get(hist_name.c_str());
+                if (!hist) {
+                    THROW(IOError() << errmsg{"MagnifySource: failed to find histogram: " + hist_name});
+                }
 
                 ITrace::vector plane_traces;
 
@@ -160,5 +166,9 @@ bool Root::MagnifySource::operator()(IFrame::pointer& out)
     }
 
     out = IFrame::pointer(sframe);
+
+    tfile->Close();
+    delete tfile;
+
     return true;
 }

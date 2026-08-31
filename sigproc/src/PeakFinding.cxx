@@ -24,13 +24,18 @@ PeakFinding::~PeakFinding() { Clear(); }
 void PeakFinding::Clear()
 {
     delete[] source;
+    source = nullptr;
     delete[] destVector;
+    destVector = nullptr;
     delete[] fPositionX;
+    fPositionX = nullptr;
     delete[] fPositionY;
+    fPositionY = nullptr;
 }
 
 int PeakFinding::find_peak(Waveform::realseq_t& signal)
 {
+    Clear();  // free any previous allocations to prevent memory leak
     ssize = int(signal.size());
     source = new double[ssize];
     for (size_t i = 0; i != signal.size(); i++) {

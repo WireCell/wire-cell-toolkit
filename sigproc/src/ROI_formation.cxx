@@ -73,7 +73,7 @@ void ROI_formation::apply_roi(int plane, Array::array_xxf& r_data, int flag)
                 for (int i = start_bin; i < end_bin + 1; i++) {
                     int content =
                         r_data(irow, i) -
-                        ((end_content - start_content) * (i - start_bin) / (end_bin - start_bin) + start_content);
+                        ((end_bin != start_bin) ? (end_content - start_content) * (i - start_bin) / (end_bin - start_bin) + start_content : start_content);
                     signal.at(i) = content;
                 }
             }
@@ -105,7 +105,7 @@ void ROI_formation::apply_roi(int plane, Array::array_xxf& r_data, int flag)
                 for (int i = start_bin; i < end_bin + 1; i++) {
                     int content =
                         r_data(irow, i) -
-                        ((end_content - start_content) * (i - start_bin) / (end_bin - start_bin) + start_content);
+                        ((end_bin != start_bin) ? (end_content - start_content) * (i - start_bin) / (end_bin - start_bin) + start_content : start_content);
                     signal.at(i) = content;
                 }
             }
@@ -361,16 +361,32 @@ void ROI_formation::create_ROI_connect_info(int plane)
     }
 }
 
-double ROI_formation::cal_RMS(Waveform::realseq_t signal)
+double ROI_formation::cal_RMS(const Waveform::realseq_t& signal)
 {
     double result = 0;
     if (signal.size() > 0) {
+        float rms = 0;
+        if (use_mad_rms) {
+            // Median absolute deviation: robust to a strong signal occupying
+            // up to half the waveform (the percentile-spread estimate below
+            // breaks down past ~16% occupancy).  1.4826 converts MAD to the
+            // Gaussian-equivalent sigma so the downstream 5*rms cut and
+            // th_factor thresholds keep their meaning.
+            const float med = WireCell::Waveform::percentile(signal, 0.5);
+            Waveform::realseq_t absdev(signal.size());
+            for (size_t i = 0; i != signal.size(); i++) {
+                absdev.at(i) = fabs(signal.at(i) - med);
+            }
+            rms = 1.4826 * WireCell::Waveform::percentile(absdev, 0.5);
+        }
+        else {
         // do quantile ...
         float par[3];
         par[0] = WireCell::Waveform::percentile(signal, 0.5 - 0.34);
         par[1] = WireCell::Waveform::percentile(signal, 0.5);
         par[2] = WireCell::Waveform::percentile(signal, 0.5 + 0.34);
-        float rms = sqrt((pow(par[2] - par[1], 2) + pow(par[1] - par[0], 2)) / 2.);
+        rms = sqrt((pow(par[2] - par[1], 2) + pow(par[1] - par[0], 2)) / 2.);
+        }
 
         float rms2 = 0;
         float rms1 = 0;
@@ -408,13 +424,15 @@ void ROI_formation::find_ROI_by_decon_itself(int plane, const Array::array_xxf& 
         Waveform::realseq_t signal1(nbins);
         Waveform::realseq_t signal2(nbins);
 
-        if (bad_ch_map.find(irow + offset) != bad_ch_map.end()) {
+        auto bad_it = bad_ch_map.find(irow + offset);
+        if (bad_it != bad_ch_map.end()) {
+            const auto& bad_ranges = bad_it->second;
             int ncount = 0;
             for (int icol = 0; icol != r_data.cols(); icol++) {
                 bool flag = true;
-                for (size_t i = 0; i != bad_ch_map[irow + offset].size(); i++) {
-                    if (icol >= bad_ch_map[irow + offset].at(i).first &&
-                        icol <= bad_ch_map[irow + offset].at(i).second) {
+                for (size_t i = 0; i != bad_ranges.size(); i++) {
+                    if (icol >= bad_ranges.at(i).first &&
+                        icol <= bad_ranges.at(i).second) {
                         flag = false;
                         break;
                     }
@@ -705,13 +723,15 @@ void ROI_formation::find_ROI_loose(int plane, const Array::array_xxf& r_data)
 
         // std::cout << "xin1" << std::endl;
 
-        if (bad_ch_map.find(irow + offset) != bad_ch_map.end()) {
+        auto bad_it = bad_ch_map.find(irow + offset);
+        if (bad_it != bad_ch_map.end()) {
+            const auto& bad_ranges = bad_it->second;
             int ncount = 0;
             for (int icol = 0; icol != r_data.cols(); icol++) {
                 bool flag = true;
-                for (size_t i = 0; i != bad_ch_map[irow + offset].size(); i++) {
-                    if (icol >= bad_ch_map[irow + offset].at(i).first &&
-                        icol <= bad_ch_map[irow + offset].at(i).second) {
+                for (size_t i = 0; i != bad_ranges.size(); i++) {
+                    if (icol >= bad_ranges.at(i).first &&
+                        icol <= bad_ranges.at(i).second) {
                         flag = false;
                         break;
                     }
@@ -860,10 +880,10 @@ void ROI_formation::find_ROI_loose(int plane, const Array::array_xxf& r_data)
         if (ROIs_1.size() == 1) {
         }
         else if (ROIs_1.size() > 1) {
-            int flag_repeat = 0;
+            int flag_repeat = 1;
             //  cout << "Xin1: " << ROIs_1.size() << endl;;
             while (flag_repeat) {
-                flag_repeat = 1;
+                flag_repeat = 0;
                 for (int k = 0; k < int(ROIs_1.size() - 1); k++) {
                     int begin = ROIs_1.at(k).first;
                     int end = ROIs_1.at(k + 1).second;

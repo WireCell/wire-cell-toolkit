@@ -1,0 +1,112 @@
+#+title: WCP data summaries
+
+* bv's review notes and questions on WCP
+
+As I read the data and algorithm summaries I (bv) provide my interpretation and questions
+marked as a checklist with a :question: icon.
+
+#+begin_quote
+Meta: Xin, please check if any interpretation is inconsistent with reality.  I
+want to complete each checklist item by appending a (likely brief) answer.
+Probably best to do this "live" during a discussion.
+#+end_quote
+
+** Data summaries
+
+[[file:wcp-data.svg]]
+
+*** ProtoSegment
+
+In WCP, a *segment* (~ProtoSegment~) represents a portion of a *track trajectory*
+along which no *discrete physics processes* occurred (were reconstructed).  The
+segment has a starting and an ending *point* in 3-space.  These points are
+considered *vertices* and indicate some discrete process occurred.  For example, a
+delta ray is emitted from a longer muon track at a vertex.
+
+Along a segment is a set of points (~wcpt_vec~).  They need not lie on a line but
+are represented by a displacement vector (~fit_pt_vec~).  A number of PCs are
+associated to a segment ("nominal", "fit", "associated" and "steiner").
+
+- [ ] :question: How are the pointes for these PCs determined?
+  - Xin: the starting 3D points are derived by closest distance approach (Vorono diagram)
+  - Xin: the other points (~wcpc_vec~, shortest path?, ~fit_pt_vec~, fitted results, so derived, Steiner tree, also derived and used shortest path) are derived.
+- [ ] :question: Do these PCs need to be persisted between algorithms or can they be constructed locally?
+  - Xin: they would need to be persisted in general. 
+- [ ] :question: What is the life cycle of ~ProtoSegments~?  Are they always temporary/local?  Is there a single "owner" of them alL?
+  - Xin: they are used throughout the entire pattern recognition cycle.
+  - Xin: the basic PR is like solving a Sudoku puzzle, we try to gradually reconstruct the missing pieces. Once we have all the pieces known, we need to make guesses on the remaining missing pieces. Then, based on all the information, we will try to extract the features to do what we need (event selection or energy reconstruction).
+
+Each segment is identified by a number (~id~) and is associated with a cluster
+(~cluster_id~) and particle properties (type, mass, momentum, energy).
+
+- [ ] :question: What is the relationship between segment and cluster?
+  - Xin: cluster contains one or more segments. One segment cannot go across multiple clusters. 
+
+A collection of *track/shower* properties are also associated to each segment.
+
+- [ ] :question: I assume the ~*_vec~ are arrays.  From the description it is not clear if elements of these arrays are associated with a *point* or an *interval* between two points.  Eg, ~dQ~, ~dx~, etc sound like per-interval but ~p{uvwt}~ sound like per-point.
+  - Xin: these dQ, dx, are associated with the fitted trajectory points, each point can also be viewed as segment, half with previous point, half with next point. These points are not the original 3D points, but newly created points.
+
+*** ProtoVertex
+
+This represents a vertex though an initial point and a fitted point.
+
+- [ ] :question: It also carries values relevant to an extended object such as ~dQ~ and ~dx~.  The comment is "Track length segment".  Does this refer to a ~ProtoSegment~ or something else?
+  - Xin, same as before, each vertex carry a whole bunch of dx, each represents the half between vertex and nearby trajectory points (from each protosegment).
+
+- [ ] :question: Is a ~ProtoSegment~ and a ~ProtoVertex~ associated?  If so, how?  Only through a ~WCShower~? 
+  - Xin, not sure the meaning of the question. The protoSegment and protovertex are basically the initial hypotheses of the trajectory fitting, so they form a graph (in WCP, it was represented by two maps, vertex --> segments, segments --> vertex). Then this graph was used in doing the trajectory and dQ/dx fitting.  A similar graph (two maps) was also used inside the WCShower. 
+
+*** WCShower
+
+In WCP, a *shower* (~WCShower~) represents a classification of - and an extension to - a set of *segments*.
+
+- [ ] :question: There is a ~flag_shower~.  Does this mean that ~WCShower~ is used
+  to represent physics tracks (eg, due to a muon/pion/proton) as well as physics
+  showers (em, hadronic)?
+  * Xin, yes we also use WCShower to represent the long muons (many segements represent delta ray and muon segements). We should have used a different data product in WCP. 
+
+
+A shower has a *starting vertex* and a *starting segment* as well as *staring point* and *ending point*.
+
+
+- [ ] :question: Are the *starting vertex*, the *starting point* and the vertex of the *starting segment* in fact identical?
+  - Xin: starting vertex should be one vertex of the starting segement. Note, starting segement have another vertex inside the shower. 
+  - Xin: the starting point is very likely the best-fit point of the starting vertex.
+  
+
+A shower has two point clouds ("fit" and "associated").
+- Xin: associated are the original 3D points, fit are the results from track trajectory and dQ/dx fitting. 
+
+A shower has two maps to represent a bipartite graph of segment and vertex nodes.
+
+#+begin_src c++
+  typedef std::map<ProtoSegment*, ProtoVertexSet, ProtoSegmentCompare> Map_Proto_Segment_Vertices;
+  typedef std::map<ProtoVertex*, ProtoSegmentSet, ProtoVertexCompare> Map_Proto_Vertex_Segments;
+#+end_src
+
+
+*** Steiner tree
+
+In WCP, a Steiner tree is constructed from initial set of 3D points.
+
+- [ ] :question: Can we state a set-theoretic inequality that enumerates the sets of points and there sizes?  My impression is that we have 3 sets: "sampling points" $\subseteq$ "Steiner vertices" $\subseteq$ "Steiner terminals".
+  - Xin, I believe so, we need to talk more to make sure my understanding of this is correct. 
+
+There is an association of a blob (WCP's ~SlimMergeGeomCell~) to a set of "point indices" (~cell_point_indices_map~)
+
+- [ ] :question: Which point set from the above (3?) sets are these points?
+  - Xin: looking at the original code, it seems that they are original 3D points.
+
+This brings in PAAL as a dependency.  Relies on the "CT PC" (PC form of wire vs time activity sparse image).
+
+** Algorithm summaries.
+
+*** Multi dQ/dx fitting
+
+The [[https://github.com/BNLIF/wire-cell-pid/blob/537a3fd17f8a7b3cf5412594267c14c4cc1775cb/docs/PR3DCluster_multi_dQ_dx_fit.md][WCP summary]] describes the fitting as begin across multiple 3D track segments.
+
+- [ ] :question: Is the fit really across segments or is it one independent fit per segment?
+  - Xin, it is fit across all involved segements and vertices 
+
+

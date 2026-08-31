@@ -21,6 +21,8 @@ using node_ptr = std::unique_ptr<Points::node_t>;
 TEST_CASE("point tree scope")
 {
     Scope s;
+    debug("default scope hash: {}", s.hash());
+
     CHECK(s.pcname == "");
     CHECK(s.coords.empty());
     CHECK(s.depth == 0);
@@ -269,3 +271,54 @@ TEST_CASE("point tree json summary")
     CHECK(back["children"].size() == 2);
 
 }
+
+TEST_CASE("point tree filtered scoped view")
+{
+    auto root = make_simple_pctree();
+    auto nkeys = root->children()[0]->value.local_pc("3d").keys().size();
+    auto n1 = root->children()[0]->value.local_pc("3d").size_major();
+    auto n2 = root->children()[1]->value.local_pc("3d").size_major();
+
+    auto* n = root->insert(Points({ {"3d", make_janky_track(
+                        Ray(Point(0,0,0), Point(1, -2, -3)))} }));
+    auto n3 = n->value.local_pc("3d").size_major();
+    debug("add 3rd child with {} 3d points to siblings with {} and {}", n3, n1, n2);
+    REQUIRE(n3 < n1);
+    REQUIRE(n3 < n2);
+
+    Scope every{ "3d", {"x","y","z"} };
+    Scope bigger{ "3d", {"x","y","z"}, 0, "bigger" };
+
+    auto& esv = root->value.scoped_view(every);
+    REQUIRE(esv.nodes().size() == 3);
+
+    // We make a *filtered* scoped view by giving a selector function that
+    // returns true only on nodes with "3d" PC of more than two nodes.  This
+    // will select the "janky" track node and exclude the 
+    auto& bsv = root->value.scoped_view(bigger, [&](const Points::node_t& node) -> bool {
+        return node.value.local_pc("3d").size_major() > n3;
+    });
+    CHECK(bsv.nodes().size() == 2);
+
+    REQUIRE(root->value.get_scoped(every) == &esv);
+    REQUIRE(root->value.get_scoped(bigger) == &bsv);
+
+    {
+        auto xyz = esv.flat_coords();
+        auto all = esv.flat_pc("3d");
+        CHECK(xyz.size_major() == n1+n2+n3);
+        CHECK(all.size_major() == n1+n2+n3);
+        CHECK(xyz.keys().size() == 3); // just x,y,z
+        CHECK(all.keys().size() == nkeys); // more
+    }
+    {
+        auto xyz = bsv.flat_coords();
+        auto all = bsv.flat_pc("3d");
+        CHECK(xyz.size_major() == n1+n2);
+        CHECK(all.size_major() == n1+n2);
+        CHECK(xyz.keys().size() == 3); // just x,y,z
+        CHECK(all.keys().size() == nkeys); // more
+    }
+
+}
+       

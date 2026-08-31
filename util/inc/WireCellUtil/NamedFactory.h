@@ -10,6 +10,8 @@
 #include "WireCellUtil/Exceptions.h"
 #include "WireCellUtil/Logging.h"
 #include <unordered_map>
+#include <functional>
+#include <mutex>
 
 #include <iostream>  // fixme: remove
 #include <exception>
@@ -19,6 +21,58 @@
 namespace WireCell {
 
     struct FactoryException : virtual public Exception {
+    };
+
+    /** Global registry that tracks all interface-specific factory registries.
+     * This allows introspection of all registered factories without
+     * compile-time knowledge of interface types.
+     */
+    class GlobalFactoryRegistry {
+       public:
+        /// Information about a registered interface type
+        struct InterfaceInfo {
+            std::string interface_name;  ///< Demangled interface type name
+
+            /// Get all known type names for this interface
+            std::function<std::vector<std::string>()> get_known_types;
+
+            /// Instantiate an object by classname, returns Interface::pointer or nullptr
+            std::function<Interface::pointer(const std::string&, bool)> instantiate;
+        };
+
+        /// Register an interface type with the global registry
+        void register_interface(const std::string& interface_name,
+                               std::function<std::vector<std::string>()> get_known_types,
+                               std::function<Interface::pointer(const std::string&, bool)> instantiate)
+        {
+            std::lock_guard<std::mutex> lock(m_mutex);
+            // Check if already registered
+            for (const auto& info : m_interfaces) {
+                if (info.interface_name == interface_name) {
+                    return;  // Already registered
+                }
+            }
+            m_interfaces.push_back({interface_name, get_known_types, instantiate});
+        }
+
+        /// Get all registered interface types
+        std::vector<InterfaceInfo> all_interfaces() const
+        {
+            std::lock_guard<std::mutex> lock(m_mutex);
+            return m_interfaces;
+        }
+
+        /// Singleton access
+        static GlobalFactoryRegistry& instance()
+        {
+            static GlobalFactoryRegistry s_instance;
+            return s_instance;
+        }
+
+       private:
+        GlobalFactoryRegistry() {}
+        std::vector<InterfaceInfo> m_interfaces;
+        mutable std::mutex m_mutex;
     };
 
     /** A templated factory of objects of type Type that associates a
@@ -84,6 +138,28 @@ namespace WireCell {
         NamedFactoryRegistry()
           : l(Log::logger("factory"))
         {
+            // Register this interface-specific registry with the global registry
+            std::string interface_name = demangle(typeid(IType).name());
+
+            // Capture this registry in lambdas for the global registry
+            auto get_types = [this]() -> std::vector<std::string> {
+                auto ktset = this->known_types();
+                return std::vector<std::string>(ktset.begin(), ktset.end());
+            };
+
+            auto instantiate = [this](const std::string& classname, bool nullok) -> Interface::pointer {
+                try {
+                    interface_ptr iptr = this->instance(classname, "", true, nullok);
+                    // Cast from interface_ptr (shared_ptr<IType>) to Interface::pointer (shared_ptr<Interface>)
+                    return std::dynamic_pointer_cast<Interface>(iptr);
+                }
+                catch (...) {
+                    if (nullok) return nullptr;
+                    throw;
+                }
+            };
+
+            GlobalFactoryRegistry::instance().register_interface(interface_name, get_types, instantiate);
         }
         size_t hello(const std::string& classname)
         {
@@ -318,6 +394,18 @@ namespace WireCell {
             auto ktset = nfr.known_types();
             std::vector<std::string> ret(ktset.begin(), ktset.end());
             return ret;
+        }
+
+        /// Access the global factory registry for introspection
+        inline GlobalFactoryRegistry& global_registry()
+        {
+            return GlobalFactoryRegistry::instance();
+        }
+
+        /// Get all registered interface types
+        inline std::vector<GlobalFactoryRegistry::InterfaceInfo> all_interfaces()
+        {
+            return GlobalFactoryRegistry::instance().all_interfaces();
         }
     }  // namespace Factory
 

@@ -1,0 +1,296 @@
+#+title: Efficiency Examination — wire-cell-toolkit/pytorch
+
+* Summary
+
+This document examines performance and efficiency concerns in the ~pytorch~
+package. Issues are categorized:
+- *PERF-HIGH*: significant performance impact, worth optimizing
+- *PERF-MEDIUM*: noticeable overhead in certain scenarios
+- *PERF-LOW*: minor inefficiency, optimization may not be worthwhile
+
+* PERF-HIGH
+
+** PERF-H1: DFT doit() performs 2-3 memory copies per transform
+
+File: ~src/DFT.cxx:42-77~
+
+Each FFT/IFFT call goes through:
+
+1. ~memcpy(out, in, ...)~ — copy input to output buffer (if in != out)
+2. ~src.to(ctx.device())~ — copy from CPU to GPU (if GPU)
+3. ~dst.contiguous()~ — copy to ensure row-major layout
+4. ~.cpu()~ — copy from GPU to CPU (if GPU)
+5. ~memcpy(out, dst.data_ptr(), ...)~ — copy from tensor to output buffer
+
+That is *up to 5 data movements* per transform. For CPU-only operation, it's
+still 3 copies (steps 1, 3, 5). The ~contiguous()~ call in step 3 always
+allocates a new tensor even when the data is already contiguous (for 1D and 2D
+transforms that don't involve logical transposes).
+
+*Impact*: For the typical 2D FFT on detector data (~2000×800~ complex floats ≈
+12.8 MB), each call copies ~40-65 MB of data. In a signal processing pipeline
+with many FFT calls, this adds up.
+
+*Possible improvements*:
+- Use ~dst.is_contiguous()~ check to skip the ~contiguous()~ copy when not
+  needed (true for fwd1d, inv1d, fwd2d, inv2d).
+- For CPU-only operation, consider using the output buffer directly as the
+  tensor storage to avoid copies 1 and 5.
+- Consider batching multiple DFT calls to amortize CPU↔GPU transfer.
+
+** PERF-H2: DNNROIFinding creates large temporary Eigen arrays per call
+
+File: ~src/DNNROIFinding.cxx:243-256~
+
+Each ~operator()~ call creates multiple large Eigen arrays:
+
+#+begin_src c++
+  std::vector<Array::array_xxf> ch_eigen;
+  for (auto tag : m_cfg.intags) {
+      // creates m_nrows × m_ncols array (e.g., 2400 × 6000 = 57.6 MB)
+      auto arr = traces_to_eigen(traces);
+      // downsample creates another array
+      ch_eigen.push_back(Array::downsample(arr, m_cfg.tick_per_slice, 1));
+  }
+#+end_src
+
+With 3 input tags and typical dimensions (~2400 channels × 6000 ticks~):
+- 3 full arrays: 3 × 57.6 MB = 172.8 MB
+- 3 downsampled arrays: 3 × 5.76 MB = 17.3 MB
+- Plus the original ~arr~ temporaries
+
+Total temporary memory: ~350+ MB per call, allocated and freed every frame.
+
+*Possible improvements*:
+- Reuse pre-allocated arrays across calls (member variables sized once in
+  ~configure~).
+- Combine the fill + scale + downsample into a single pass to avoid the
+  intermediate full-size array.
+
+** PERF-H3: traces_to_eigen fills a zero-initialized array via Aux::fill
+
+File: ~src/DNNROIFinding.cxx:183-192~
+
+The function first creates a zero-initialized array of full size, then calls
+~Aux::fill()~ which writes over portions of it. For sparse data (which is
+typical — most channels have data only in ROI regions), the zero-initialization
+is mostly wasted. However, the bigger issue is that this happens for *each input
+tag separately*, and for 3 tags the full array allocation happens 3 times.
+
+** PERF-H4: downsample and upsample use element-wise loops
+
+File: ~util/src/Array.cxx:11-47~
+
+The downsample function:
+
+#+begin_src c++
+  for (unsigned int i = 0; i < in.cols(); ++i) {
+      out.col(i / k) = out.col(i / k) + in.col(i);
+  }
+  return out / k;
+#+end_src
+
+This has two issues:
+1. Each iteration reads and writes an entire column (or row). With
+   ~k=10~ and ~ncols=6000~, that's 6000 column reads and 6000 column
+   read-modify-writes for the accumulation, then another full-array division.
+2. The division ~out / k~ creates another temporary array.
+
+For the upsample, each output row/col is independently assigned, which is
+fine, but the loop over ~rows*k~ elements with individual row copies is
+less cache-friendly than a block copy approach.
+
+*Possible improvement*: Use Eigen's ~.reshaped()~ or block operations to
+batch the downsample as a matrix multiplication or reshape operation.
+
+* PERF-MEDIUM
+
+** PERF-M1: torch::from_blob → to_itensor → from_itensor round-trip copies
+
+File: ~src/DNNROIFinding.cxx:273-284~, ~src/Util.cxx~
+
+The inference pipeline does:
+1. Eigen array → ~from_blob~ (zero-copy torch tensor)
+2. → ~to_itensor~ (memcpy to SimpleTensor)
+3. → TorchService → ~from_itensor~ (from_blob, zero-copy from SimpleTensor)
+4. → TorchService moves to GPU
+5. → inference
+6. → ~to_itensor~ (memcpy from torch tensor to SimpleTensor)
+7. → ~from_itensor~ in DNNROIFinding (from_blob, zero-copy)
+8. → ~.cpu()~ and ~.clone()~
+
+Steps 2-3 and 6-7 each involve a memcpy that could be avoided if the
+ITensorForward interface accepted torch tensors directly. The
+~ITensorSet~ abstraction adds a serialization/deserialization layer.
+
+*Impact*: For a ~{1, 3, 2400, 600}~ float tensor (~17.3 MB~), each
+unnecessary copy adds ~5-10 ms on modern hardware. With 2 extra copies per
+direction, that's ~20-40 ms overhead per inference.
+
+** PERF-M2: DNNROIFinding clone() after from_itensor
+
+File: ~src/DNNROIFinding.cxx:280-283~
+
+#+begin_src c++
+  torch::Tensor ochunk = Pytorch::from_itensor({oitens}).front().toTensor().cpu();
+  // NOTE: ochunk DOES NOT copy data from oitens!
+  outputs.push_back(ochunk.clone());
+#+end_src
+
+The ~.cpu()~ call already copies data from GPU to CPU (if on GPU). Then
+~.clone()~ makes another copy. The clone is necessary because ~from_itensor~
+returns a view into the ~ITensorSet~ memory, but the ~.cpu()~ already produces
+a new tensor if the data was on GPU. So:
+- On GPU: ~.cpu()~ copies, then ~.clone()~ copies again — one copy is redundant.
+- On CPU: ~.cpu()~ is a no-op, ~.clone()~ is needed — correct.
+
+*Recommendation*: Check device and conditionally clone:
+~outputs.push_back(ochunk.is_cuda() ? ochunk : ochunk.clone())~.
+Or since ~.cpu()~ already called, check ~ochunk.device()~.
+
+Actually, the issue is more subtle: ~from_itensor~ creates a tensor via
+~from_blob~ pointing to ~ITensorSet~ memory. Even after ~.cpu()~, if the
+original was already on CPU, the tensor still shares memory. So the clone
+is indeed needed in the CPU case. The redundancy is only in the GPU case.
+
+** PERF-M3: select() copies and resizes trace vector
+
+File: ~src/DNNROIFinding.cxx:172-180~
+
+#+begin_src c++
+  ITrace::vector Pytorch::DNNROIFinding::select(ITrace::vector traces)
+#+end_src
+
+The function takes traces *by value* (copies the entire vector of shared
+pointers), then uses ~remove_if~ + ~resize~. A more efficient approach would
+be to take by reference and return a filtered vector, or use the erase-remove
+idiom in place.
+
+*Impact*: For frames with ~10,000+~ traces, copying the shared_ptr vector
+involves atomic reference count increments for each pointer. Not huge but
+unnecessary.
+
+** PERF-M4: baseline_subtraction division inside inner loop
+
+File: ~util/src/Array.cxx:59-81~
+
+#+begin_src c++
+  ret(i, ich) = in(i, ich) - (in(sta, ich) + (i - sta) * (in(end, ich) - in(sta, ich)) / (end - sta));
+#+end_src
+
+The division ~(end - sta)~ is constant for each ROI segment but is
+recomputed for every tick within the segment. The compiler may or may not
+hoist this.
+
+*Recommendation*: Precompute ~slope = (in(end,ich) - in(sta,ich)) / (end - sta)~
+before the inner loop.
+
+** PERF-M5: TorchScript redundant .to(device) on every call
+
+File: ~src/TorchScript.cxx:80-85~
+
+As noted in bugs (BUG-L4), the model is moved to the device on every inference
+call. While libtorch internally checks if the model is already on the correct
+device, the check itself iterates over all model parameters and buffers. For
+large DNN models, this iteration is non-trivial.
+
+** PERF-M6: No NoGradGuard in DNNROIFinding::operator()
+
+File: ~src/DNNROIFinding.cxx:232-351~
+
+~TorchService::forward()~ correctly uses ~NoGradGuard~, but the tensor
+operations in ~DNNROIFinding::operator()~ (stacking, transposing, chunking,
+concatenating at lines 260-285) happen *outside* the forward call, without a
+~NoGradGuard~. These operations may build autograd graphs unnecessarily.
+
+*Impact*: The tensors are created from ~from_blob~ which doesn't require grad
+by default, so autograd overhead is likely minimal. But adding ~NoGradGuard~
+at the top of ~operator()~ would be a cheap safety measure.
+
+* PERF-LOW
+
+** PERF-L1: eigen_to_traces creates ChargeSequence per row
+
+File: ~src/DNNROIFinding.cxx:213-229~
+
+#+begin_src c++
+  ITrace::ChargeSequence charge(m_ncols, 0.0);
+  for (size_t irow = 0; irow < m_nrows; ++irow) {
+      for (size_t icol=0; icol<m_ncols; ++icol) {
+          charge[icol] = wave(icol);
+          ...
+      }
+      traces.push_back(std::make_shared<Aux::SimpleTrace>(ch, 0, charge));
+  }
+#+end_src
+
+The ~charge~ vector is declared outside the loop and reused, which is good.
+However, each ~SimpleTrace~ constructor likely copies the charge vector.
+For ~2400 channels × 6000 ticks~, that's ~2400~ vector copies of ~6000~ floats
+(~57.6 MB total).
+
+Using move semantics (~std::move(charge)~) and re-creating the vector each
+iteration would avoid the copy at the cost of allocation.
+
+** PERF-L2: String formatting in log messages even at debug level
+
+File: ~src/DNNROIFinding.cxx:338-342~
+
+#+begin_src c++
+  std::string ss;
+  for (const auto& rms : summary) {
+      ss += fmt::format("{:.2f} ", rms);
+  }
+  log->trace("call={} summary: {}", m_save_count, ss);
+#+end_src
+
+The summary string is built even if the trace log level is not active. With
+~2400~ channels, this creates a ~12 KB string every call. The ~spdlog~ library
+does check the log level before formatting the final message, but the string
+~ss~ is built unconditionally.
+
+*Recommendation*: Guard with ~if (log->should_log(spdlog::level::trace))~.
+
+** PERF-L3: DFT operations acquire semaphore even on CPU
+
+File: ~src/DFT.cxx:48~
+
+The semaphore is always acquired in ~doit()~, even when running on CPU. For
+CPU operations, the semaphore serves no purpose (CPU memory is not the
+constrained resource that the semaphore is designed to protect). Each
+semaphore acquire/release pair involves mutex operations.
+
+*Impact*: Minimal for typical workloads, but adds unnecessary synchronization
+overhead in multi-threaded CPU-only configurations.
+
+** PERF-L4: get_summary_e builds a hash map per call
+
+File: ~src/DNNROIFinding.cxx:194-211~
+
+The ~ch2row~ map is rebuilt from ~m_chlist~ on every call. Since ~m_chlist~
+doesn't change after ~configure()~, this map could be built once and cached.
+
+* Overall Performance Profile
+
+For a typical DNNROIFinding call with one anode plane (~2400 channels, 6000
+ticks, 3 input tags, tick_per_slice=10~):
+
+| Phase                    | Estimated time | Memory    | Notes                         |
+|--------------------------+----------------+-----------+-------------------------------|
+| Frame → Eigen (×3 tags) | ~50 ms         | ~350 MB   | Allocation + fill + downsample|
+| Eigen → Torch tensor    | ~5 ms          | ~17 MB    | from_blob (zero-copy)         |
+| Tensor stacking/reshape  | ~2 ms          | ~17 MB    | stack + transpose             |
+| ITensorSet conversion   | ~10 ms         | ~17 MB    | memcpy round-trip             |
+| DNN inference            | ~100-500 ms    | ~100+ MB  | Model-dependent               |
+| Output conversion        | ~10 ms         | ~17 MB    | memcpy + clone                |
+| Mask upsample            | ~20 ms         | ~57 MB    | Row-by-row copy               |
+| Mask application         | ~10 ms         | ~57 MB    | Elementwise                   |
+| Baseline subtraction     | ~30 ms         | ~57 MB    | Per-channel scan              |
+| Eigen → traces           | ~30 ms         | ~57 MB    | Per-row copy                  |
+|--------------------------+----------------+-----------+-------------------------------|
+| *Total overhead*         | ~170 ms        | ~650 MB   | Excluding DNN inference       |
+
+The DNN inference itself is typically the dominant cost (especially on CPU).
+But the data preparation overhead of ~170 ms and ~650 MB temporary allocations
+per call is significant, particularly for multi-anode configurations where
+multiple planes are processed.

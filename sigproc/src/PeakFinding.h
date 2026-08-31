@@ -31,12 +31,12 @@ namespace WireCell {
             int averWindow;
 
             // data ...
-            double* source;
-            int ssize;
+            double* source = nullptr;
+            int ssize = 0;
 
-            double* destVector;
-            double* fPositionX;
-            double* fPositionY;
+            double* destVector = nullptr;
+            double* fPositionX = nullptr;
+            double* fPositionY = nullptr;
 
             int npeaks;
 

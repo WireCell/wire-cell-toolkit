@@ -92,18 +92,53 @@ namespace WireCell {
         virtual 
         void fwd1d(const complex_t* in, complex_t* out, int size) const = 0;
 
-        virtual 
+        virtual
         void inv1d(const complex_t* in, complex_t* out, int size) const = 0;
+
+        // Real 1d transforms.  fwd_r2c_1d transforms a real waveform
+        // of `size` samples to its full-size complex spectrum
+        // (Hermitian by construction).  inv_c2r_1d transforms a
+        // complex spectrum to a real waveform with 1/size
+        // normalization; the spectrum is assumed Hermitian and values
+        // above the Nyquist frequency are ignored.  Default
+        // implementations widen to the complex transforms; an
+        // implementation MAY override with true real-optimized
+        // transforms, whose results agree with the complex path only
+        // up to round-off.
+        virtual
+        void fwd_r2c_1d(const scalar_t* in, complex_t* out, int size) const;
+
+        virtual
+        void inv_c2r_1d(const complex_t* in, scalar_t* out, int size) const;
 
         // 1b
 
-        virtual 
+        virtual
         void fwd1b(const complex_t* in, complex_t* out,
                    int nrows, int ncols, int axis) const;
 
-        virtual 
+        virtual
         void inv1b(const complex_t* in, complex_t* out,
                    int nrows, int ncols, int axis) const;
+
+        // Real 1b transforms, batched analogues of fwd_r2c_1d /
+        // inv_c2r_1d following the fwd1b/inv1b array and axis
+        // conventions.  fwd_r2c_1b fills "out" with the full-size
+        // spectrum, Hermitian along the transform axis by
+        // construction.  inv_c2r_1b assumes the spectrum is Hermitian
+        // along the transform axis (values above the Nyquist
+        // frequency are ignored) and applies 1/n normalization with n
+        // the length along that axis.  Default implementations widen
+        // to the complex 1b transforms; an implementation MAY
+        // override with true real-optimized batched transforms, whose
+        // results agree with the complex path only up to round-off.
+        virtual
+        void fwd_r2c_1b(const scalar_t* in, complex_t* out,
+                        int nrows, int ncols, int axis) const;
+
+        virtual
+        void inv_c2r_1b(const complex_t* in, scalar_t* out,
+                        int nrows, int ncols, int axis) const;
 
         // 2d
 

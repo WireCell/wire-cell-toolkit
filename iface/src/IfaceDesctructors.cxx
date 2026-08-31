@@ -102,6 +102,9 @@
 #include "WireCellIface/ITiling.h"
 #include "WireCellIface/ITrace.h"
 #include "WireCellIface/ITraceRanker.h"
+#include "WireCellIface/ITrackSegment.h"
+#include "WireCellIface/ITrackSegmentSampler.h"
+#include "WireCellIface/ITrackSegmentSet.h"
 #include "WireCellIface/IWaveform.h"
 #include "WireCellIface/IWaveformMap.h"
 #include "WireCellIface/IWireGenerator.h"
@@ -110,6 +113,7 @@
 #include "WireCellIface/IWireSource.h"
 #include "WireCellIface/IWireSummarizer.h"
 #include "WireCellIface/IWireSummary.h"
+#include "WireCellIface/IYZMap.h"
 
 using namespace WireCell;
 
@@ -207,6 +211,9 @@ ITerminal::~ITerminal() {}
 ITiling::~ITiling() {}
 ITrace::~ITrace() {}
 ITraceRanker::~ITraceRanker() {}
+ITrackSegment::~ITrackSegment() {}
+ITrackSegmentSampler::~ITrackSegmentSampler() {}
+ITrackSegmentSet::~ITrackSegmentSet() {}
 IWaveform::~IWaveform() {}
 IWaveformMap::~IWaveformMap() {}
 IWireGenerator::~IWireGenerator() {}
@@ -215,4 +222,5 @@ IWireSchema::~IWireSchema() {}
 IWireSource::~IWireSource() {}
 IWireSummarizer::~IWireSummarizer() {}
 IWireSummary::~IWireSummary() {}
+IYZMap::~IYZMap() {}
 

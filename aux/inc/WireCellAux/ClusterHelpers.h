@@ -52,9 +52,17 @@ namespace WireCell::Aux {
         // Return known anode face by id or nullptr if id not found;
         IAnodeFace::pointer face(WirePlaneId faceid) const;
 
+        // When true, the original per-blob corners stored in the JSON are
+        // carried onto the loaded SimpleBlob (set_stored_corners) so the
+        // dead-area "corner" point cloud reproduces the imaging-time corners
+        // instead of re-deriving them from the boundary-less reloaded shape.
+        // Default false keeps existing behaviour byte-identical.
+        void set_restore_corners(bool tf) { m_restore_corners = tf; }
+
     private:
         using faces_t = std::unordered_map<int, IAnodeFace::pointer>;
         faces_t m_faces;
+        bool m_restore_corners{false};
     };
 
     /// Return GraphViz dot representation of a cluster graph like

@@ -1,0 +1,286 @@
+#+title: Requirements and nominal design - work in progress
+
+* Major elements
+
+I am prescriptive here to be brief and expect we will delete/change anything bad.
+
+** Basics
+
+- PC-tree remains the central data structure.
+- We update MABC / clustering function interface to pass ~std::map<std::string,Grouping*>~
+  - Can we understand how to remove the ~cluster_connected_dead~ argument?
+- Add a general interface that allows serialization between Boost Graph and ~std::map<std::string, PointCloud::Dataset>~ ("named datasets").
+  - This will allow aggregate (eg ~struct~) and heterotypic (eg ~std::variant~ or ~boost::any~) graph vertex and edge property types.
+  - It will require instrumenting these types with some simple Boost.Serialization code.
+  - A Boost.Serialization "archive" class is needed to use named datasets as the store.
+  - A convention of a graph having a "name" must be defined such that ~<name>_graph~, ~<name>_nodes~ and ~<name>_edges~ hold the graph, node and edge properties, respectively.
+    - In addition to the ~<name>_edges~ dataset holding per-edge scalar properties, two special arrays called ~tail~ and ~head~ will hold a pair of indices into the ~<name>_nodes~ dataset to represent the edge, itself.
+
+- Top level WCP code like the methods of ~NeutrinoID~ can then become "clustering functions".
+  - Functions need to agree on certain things:
+    - Which PC-tree layer holds any given graph (mostly Grouping vs Cluster).
+    - What are the "names" of the graphs.
+
+** MABC / clustering API clean up      
+
+- Make it a proper Interface API using WCT ~NamedFactory~, etc, facilities.
+- Besides the calling interface, allow for declaring consumer/producer metadata as:
+
+  #+begin_src c++
+    using GroupingMap = std::map<std::string, std::shared_ptr<const Grouping>>;
+    struct IClusteringFunction : public Inteface {
+
+        // The API cleanup and generalization.  Original / most all clustering
+        // "functions" would take a map with a "live" entry, some with a "dead"
+        // entry and some would produce/take a "shadow" entry.
+        GroupingMap operator()(GroupingMap groupings) = 0;
+
+        // Optional idea #1:
+        std::vector<std::string> produces_groupings() const { return {}; }
+        std::vector<std::string> consumes_groupings() const { return {}; }
+
+        // Optional idea #2.
+        std::vector<std::string> produces_graphs() const { return {}; }
+        std::vector<std::string> consumes_graphs() const { return {}; }
+  #+end_src
+  
+Optional ideas 1 and 2 are to give a chance to detect when a user has provided broken configuration.
+
+
+One big question is if we should actually define this interface:
+
+#+begin_src c++
+        GroupingMap operator()(GroupingMap groupings) = 0;
+#+end_src
+
+or this one:
+
+#+begin_src c++
+        void operator()(GroupingMap& groupings) = 0;
+#+end_src
+
+That is, do we want to allow a "feed-forward by default" paradigm or a truly functional form?
+
+
+* 
+
+The rest of this doc can be ignored for now.
+
+
+* Requirements
+
+A lot of requirements have been raised in discussion.  Here is my attempt to capture some of them.
+
+- There many associations between different types of objects.
+
+- Associations between objects can be directionless (especially in the initial processing) and directed (especially toward the end of processing).
+
+
+* Nominal design
+
+** High level guidelines
+
+Algorithms are provided in a (soft) [[https://en.wikipedia.org/wiki/Functional_programming][functional form]].  This means:
+
+- They are given well defined input and produce well defined output and no other information between algorithms is allowed.
+
+- They may be considered stateless.
+
+- They may be *composed* into pipelines and other flow patterns by higher-order functions.
+
+We allow "soft" functional form which means:
+
+- An algorithm may be a C++ function or an instance of a C++ class with a "callable" method (~operator()~).
+
+- The class form may accept configuration information prior to first call.
+
+- In function or class form, internal data may persist between calls but such state must not influence results of calls.
+
+** Basic data and calling interface.
+
+We *decompose* the algorithms into functions that consume and produce data in a graph representation. 
+
+#+begin_src c++
+  graph = algorithm(graph);
+#+end_src
+
+We expect at least a pipeline of algorithms to progressively rewrite the graphs 
+
+#+begin_example
+(grouping) -> [encode] -> (graph) -> [a1] -> ... -> [a3] -> (graph)
+#+end_example
+
+Or, written as function calls:
+
+#+begin_src c++
+  auto graph = a3(a2(a1(encode(grouping))))
+#+end_src
+
+We expect to perform the *functional composition* in a configurable way so that the end user can determine the exact data flow processing.
+
+** Graphs
+
+Here I collect some ideas, questions, possible designs related to using graphs as the central data structure (filling the roll of the "pc tree" for clustering).
+
+#+begin_quote
+Terms.
+
+Here we will strictly use the term "node" (and not "vertex") to refer to
+the graph element of that name.  Some nodes may represent a kind of "vertex"
+which describes the problem space and does not refer generically to a "graph
+vertex".
+
+The term "type" refers strictly to some C++ type.  A "type" of graph refers to the ~boost::graph~ typedef.
+
+The term "kind" will be used to refer to how an instance of a C++ type may be interpreted.  Eg, we may have different kinds of ~int~.  Some context may consider an ~int~ to refer to an ID or to an index.
+
+A "descriptor" is a number that identifies a node or an edge in the context of a graph.  In a sense, the descriptor *is* the node or edge.  It's value may sometimes be interpreted as an index for certain types of graphs.  This interpretation is unstable under graph mutations.
+
+An "identifier" (or "ident") is a number carried by a node that is assigned independent from graph structure or membership.
+
+#+end_quote
+
+*** General graph type issues
+
+To represent WCP data types and their associations in graph form we must allow nodes and edges to represent instances of a *variety of types*.  For example, a *segment* can be partly represented by edges connecting nodes representing points but the end points are special in that they are considered a ~ProtoVertex~ (in WCP grammar).
+
+We must also contend with, at least conceptually, "graph of graphs".  For example, a graph must be formed from the points of the clusters.  Each "cluster of points" must retain some cohesive identity.  In addition, clusters may be associated into a graph.  This starts with a "main + other" clusters which collect clusters that may be disconnected by some initial criteria become connected with a new criteria.  This kind of association will be extended further as clusters are "stitched" across AnodePlane boundaries.  The final "particle flow" (PF) result is also a graph that is derived from these and other prior representations.  The PF graph will have nodes that correspond to nodes in other graphs (eg, a PF graph may have nodes representing or associated to points in space that correspond to nodes in a segment graph).  In most generality, graph nodes MAY represent points, segments, vertices, clusters, groups of clusters, flashes, segments, particle trajectories.
+
+*** Heterotypic vs homotypic graph types
+
+A graph type is determined by its storage model, its directionality and the types for its nodes and edges.
+Focusing just on node/edge types, we may require both to be of exactly one type (homotypic, HO) or allow a mix of types (heterotypic, HE).  In actual practice, a HE graph is not truly heterotypic.  Rather its node or edge types would be of a variant type (eg, based on ~std::variant~).  We may also consider a single graph type across the entire system or allow for a variety of graph types.  We thus must select 1 element from a 2x2 choice matrix:
+
+|---------+----+----|
+| all/one | HO | HE |
+|---------+----+----|
+| HO      | ?? | ?? |
+| HE      | ?? | ?? |
+|---------+----+----|
+
+What are the tradeoffs for each system?
+
+- HO/HO :: A single graph type with a single node and edge type.
+  - Most simple but most constraining.  Complexity will be pushed elsewhere.
+
+  - Algorithm functions will have simple interfaces (one type of graph).
+
+  - Algorithms must accept and produce collections of graphs.
+    
+  - Multiple graph instances will be required in any context as well as a way for algorithms to interpret the kinds of graphs it is given.  This category could describe the underlying PC tree of the clustering system (ie, ignoring facades).
+
+- HE/HO :: Many graph types, each with a single node and edge type.
+  - More complexity can be soaked up by the types.
+  - Algorithm functions will have more complex interfaces having to accept different types.
+
+  - May require an "abstract base graph" type to form heterogeneous collections of graphs.
+
+  - Primitive graph operations (Dijkstra's shortest path, connected components) can be directly applied.
+  - Each type is still subject to representing different kinds of graphs and thus interpretation rules are needed.
+
+- HO/HE :: A singe graph type with multiple types for nodes and edges.
+  - This is essentially the same as he/ho but that we put all graphs types into one and allow edges between their nodes.
+  - Yet more complexity can be taken by the type.
+  - Algorithm functions will have simple interfaces (one type of graph).
+
+  - Algorithms must accept and produce collections of graphs.
+  - Functions must be developed to extract a homotypic subgraph in order to apply primitive operations. 
+
+- HE/HE :: Many graph types, each with multiple types for nodes and edges.
+  - Most of the complexity can be absorbed in the graph types.
+  - Functions must be developed to extract a homotypic subgraph in order to apply primitive operations. 
+  - Algorithm functions will have more complex interfaces having to accept different types.
+
+  - May require an "abstract base graph" type to form heterogeneous collections of graphs.
+    
+*** Extracting subgraphs 
+
+Most primitive graph operations must be applied only to a HO graph as the operation does not have features to distinguish different node/edge types in a HE graph.  However, a HO graph can be derived from a HE graph
+
+#+begin_src c++
+  boost::filtered_graph<HE, select_ho> gHO(gHE, select_ho());
+#+end_src
+
+The node/edge descriptors of ~gHO~ are a subset of those from ~gHE~.
+
+*** Modifying graphs
+
+In general, mutating a Boost graph in-place is error prone and show not be done.  Depending on the graph type the descriptors may not be stable under addition and deletion.  Furthermore, a filtered graph can immediately reflect changes made to the original graph.  A copy of a read-only, filtered graph can be created and modified but the  descriptors of the copy do not correspond to those in the original.
+
+We thus seek a general algorithm to produce an output graph that reflects an arbitrary set of changes to an input graph.  We require node identity is preserved and do not expect descriptors to be stable through the algorithm.
+
+As an example, let us assume we have a large HE graph and wish to run "connected components" on a HO subgraph that contains all nodes for a given type and their mutual edges.  We wish to keep the nodes in the largest component unchanged.  Nodes from each lesser component are to be removed and replaced with a single node that then represents that component.  This new "component" node must have edges to any other nodes in the subgraph of the HE graph that is the compliment of the HO subgraph.  New edges must also be made form each "component" graph to either the unchanged nodes from the largest component or to the new component nodes.  Below we have a non-working, incomplete sketch of the code that might supply this algorithm. 
+
+#+begin_src c++
+  struct select_ho { ... };
+
+  gHE = boost::copy(input_graph);
+
+  using FG = boost::filtered_graph<HE, select_ho>;
+  FG fg(gHE, select_ho());
+
+  std::vector<boost::graph_traits<FG>::vertices_size_type> component_ids(num_vertices(fg));
+
+  boost::connected_components(
+        fg,
+        // This puts the result in index-order.  Note, the filtered graph will not have consecutive descriptors. 
+        boost::make_iterator_property_map(component_ids.begin(), get(boost::vertex_index, fg))
+    );
+
+  // cc ID of largest component
+  auto max_id = most_seen(component_ids);
+
+  std::map<int, desc> newcompnodes;
+  const auto fg_node_vec = boost::vertices(fg);
+  size_t nfg = fg_node_vec.size();
+  for (size_t fg_ind=0; fg<nfg; ++fg_ind) {
+      auto cc_id = component_ids[fg_ind];
+      if (cc_id = max_id) continue;
+
+      if (! has(newcompnodes, cc_id)) {
+          newcompnodes[cc_id] = boost::vertex(gHE);
+      }
+      auto newdesc = newcompnodes[cc_id];
+      auto dead = fg_node_vec[fg_ind];
+
+      // FYI, this does not properly handle inter-fg edges.  A more sophisticated
+      // map is needed.
+      for (auto succ : out_neighbors(dead)) {
+          boost::add_edge(newdesc, succ);
+      }
+      for (auto pred : in_neighbors(dead)) {
+          boost::add_edge(pred, newdesc);
+      }
+  }
+
+  // Finally we make another filtered graph that rejects any nodes or their edges
+  // in fg_node_vec, but less the nodes with max_id.  We then return a copy.
+
+#+end_src
+
+
+This code relies on existing descriptors to be stable when new nodes are added.  This is true when appending to a ~vecS~ graph or at all times when using a ~listS~ graph.  We add the new elements while the elements to be removed temporarily remain.  We then make a copy of a filtered graph that does not include the removed elements.  
+
+
+*** Connections between graph and point cloud tree
+
+The PC tree is the input data structure and will be needed for at least part of the processing chain.  Associations between graph and tree nodes are expected.  To start, graph and tree both represent (in part) 3D locations and other point attributes.  A tree is a special case of a directed graph however the "graph" we will construct is not directed.
+
+The WCP types ~ProtoSegment~ has a few PCs over its points.  These are not necessarily determined by PC-tree units.  It is not clear if these PCs need to persist.
+
+
+tbd: how properties and property maps may be used.
+
+
+
+* Particle flow
+
+HepMC2 provides a class modeling "particle flow".  HepMC2 is now deprecated and HepMC3 does not have a ~Flow~ type.
+
+https://portal.nersc.gov/project/dayabay/nuwa/HepMC/html/classHepMC_1_1Flow.html
+
+(historically interesting URL there).
+
+- [ ] :question: Does this sufficiently model what WCP particle flow covers?
+
+

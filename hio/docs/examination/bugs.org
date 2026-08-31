@@ -1,0 +1,221 @@
+#+title: Bug Examination — wire-cell-toolkit/hio
+
+* 1. HDF5 Resource Leak on Error Paths
+
+*File*: ~src/HDF5FrameTap.cxx~, lines 234-310
+
+*Issue*: HDF5 resource handles (~lcpl~, ~dcpl~, ~dspace~, ~dtype~, ~dset~)
+are allocated sequentially, but if any intermediate step fails and ~raise<>()~
+is called, previously allocated handles are leaked. For example:
+
+#+begin_src cpp
+hid_t lcpl = H5Pcreate(H5P_LINK_CREATE);       // allocated
+// ...
+hid_t dcpl = H5Pcreate(H5P_DATASET_CREATE);     // allocated
+// ...
+if (H5Pset_deflate(dcpl, m_gzip) < 0) {
+    raise<IOError>(...);  // lcpl and dcpl are leaked
+}
+#+end_src
+
+The cleanup code at lines 306-310 (~H5Dclose~, ~H5Tclose~, etc.) only runs on
+the success path. Any ~raise<>()~ before that point leaks all previously
+opened handles.
+
+*Severity*: Medium. In practice, exceptions likely terminate the process soon
+after, but in a long-running job that catches exceptions, this could accumulate
+leaked HDF5 handles.
+
+*Potential fix*: Use RAII wrappers or a scope-guard pattern for HDF5 handles.
+
+
+* 2. Wrong Error Check for =H5Dwrite= Return Value
+
+*File*: ~src/HDF5FrameTap.cxx~, lines 302-304, 324-326, 347-349
+
+*Issue*: The return value of ~H5Dwrite()~ is ~herr_t~ (0 on success, negative
+on failure). But the code compares against ~H5I_INVALID_HID~:
+
+#+begin_src cpp
+herr_t status = H5Dwrite(...);
+if (status == H5I_INVALID_HID) {
+    raise<IOError>("HDF5FrameTap: failed to write samples");
+}
+#+end_src
+
+~H5I_INVALID_HID~ is defined as ~-1~ in HDF5. ~herr_t~ failure is also
+typically ~-1~, so this check /happens to work/ in the common failure case.
+However, it is semantically incorrect -- HDF5 can return other negative values
+for errors. The correct check is:
+
+#+begin_src cpp
+if (status < 0) { ... }
+#+end_src
+
+*Severity*: Low-Medium. Works by coincidence for the most common error case,
+but could miss unusual error codes.
+
+*Also affects*: The same pattern appears for the channel array write (line 324)
+and tickinfo write (line 347).
+
+
+* 3. Deprecated HDF5 API Usage: =H5Dcreate1=
+
+*File*: ~src/HDF5FrameTap.cxx~, lines 323, 342
+
+*Issue*: The channel array and tickinfo dataset creation use the deprecated
+~H5Dcreate1()~ API:
+
+#+begin_src cpp
+hid_t dset = H5Dcreate1(m_hfile, aname.c_str(), dtype, dspace, H5P_DEFAULT);
+#+end_src
+
+While the frame array block (line 286) correctly uses ~H5Dcreate2()~ with
+full property list support. The ~H5Dcreate1~ calls lack a link creation
+property list, meaning:
+- No UTF-8 encoding is set for the dataset names
+- No intermediate group creation is enabled
+
+If the group ~/<sequence>/~ does not already exist when writing channels or
+tickinfo /before/ the frame dataset, the ~H5Dcreate1~ calls would fail. In
+practice this does not happen because the frame dataset (which uses
+~H5Dcreate2~ with ~H5Pset_create_intermediate_group~) is always written first.
+
+*Severity*: Low. Works in current execution order but is fragile if the write
+order changes.
+
+*Note*: ~H5Dcreate1~ is deprecated since HDF5 1.8 (2008). Consider migrating
+all calls to ~H5Dcreate2~ for consistency and to avoid future compatibility
+issues.
+
+
+* 4. Missing HDF5 Resource Cleanup for Channel and Tickinfo Datasets
+
+*File*: ~src/HDF5FrameTap.cxx~, lines 316-350
+
+*Issue*: The channel array block (lines 316-331) does not close the link
+creation property list because it does not create one (it uses ~H5Dcreate1~).
+However, it also does not set up error-path cleanup for ~dspace~, ~dtype~, and
+~dset~ -- same leak-on-exception issue as Bug #1.
+
+Additionally, neither the channel nor tickinfo blocks apply compression or
+chunking. This is reasonable for small arrays but means the channel array
+(which can be ~8000 int32s = 32KB) is always stored uncompressed.
+
+*Severity*: Low.
+
+
+* 5. =H5F_ACC_TRUNC= Silently Overwrites Existing Files
+
+*File*: ~src/HDF5FrameTap.cxx~, lines 91-98
+
+*Issue*: The file creation logic is:
+
+#+begin_src cpp
+m_hfile = H5Fcreate(fn.c_str(), H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT);
+if (m_hfile == H5I_INVALID_HID) {
+    m_hfile = H5Fopen(fn.c_str(), H5F_ACC_RDWR, H5P_DEFAULT);
+}
+#+end_src
+
+~H5F_ACC_TRUNC~ *truncates* (overwrites) an existing file. So if a file
+exists and is not locked, it will be silently destroyed. The fallback to
+~H5Fopen~ only triggers if ~H5Fcreate~ fails (e.g., file is locked by another
+process).
+
+This contradicts the comment in ~default_configuration()~ (line 144):
+
+#+begin_example
+// Writing is always in "append" mode.
+#+end_example
+
+The code does NOT append -- it truncates. This is a documentation/behavior
+mismatch. Users relying on the "append" comment may lose data.
+
+*Severity*: Medium. Data loss risk if users expect append behavior based on
+the comment.
+
+
+* 6. Duplicate Frame Sequence IDs Cause Dataset Creation Failure
+
+*File*: ~src/HDF5FrameTap.cxx~, line 231
+
+*Issue*: The HDF5 group path uses ~inframe->ident()~ as the sequence number:
+
+#+begin_src cpp
+const std::string aname = String::format("/%d/frame_%s", sequence, tag.c_str());
+#+end_src
+
+If two frames arrive with the same ~ident()~ and the same tag, ~H5Dcreate2~
+will fail because the dataset already exists. There is no check for this
+condition and no fallback (the existing dataset is not opened for overwrite).
+
+*Severity*: Low-Medium. Depends on whether duplicate frame idents can occur
+in practice. If they can, this will raise an unrecoverable IOError.
+
+
+* 7. =m_calls= Not Incremented on EOS
+
+*File*: ~src/HDF5FrameTap.cxx~, lines 158-162
+
+*Issue*: When an EOS (end-of-stream, null frame) arrives:
+
+#+begin_src cpp
+if (!inframe) {
+    log->debug("EOS at call={}", m_calls++);
+    outframe = nullptr;
+    return true;
+}
+#+end_src
+
+The ~m_calls~ is incremented here (post-increment in the log). But ~m_calls~
+is also incremented at the end of the function (line 353). For normal frames,
+only the line-353 increment fires. For EOS, only the line-159 increment fires.
+This means the call counter is consistent (each call increments exactly once),
+so this is *not a bug* -- but the split increment locations make the logic
+fragile and easy to break during maintenance.
+
+*Severity*: Informational (not a bug, but a maintenance concern).
+
+
+* 8. Chunk Size Can Exceed Data Dimensions
+
+*File*: ~src/HDF5FrameTap.cxx~, lines 252-259
+
+*Issue*: When gzip is enabled, the chunk dimensions are set from the
+configuration without checking against the actual data dimensions:
+
+#+begin_src cpp
+if (H5Pset_chunk(dcpl, 2, m_chunk.data()) < 0) { ... }
+#+end_src
+
+If the configured chunk size (e.g., 256x256) exceeds the data dimensions
+(e.g., a frame with only 100 ticks), HDF5 will still work but will allocate
+oversized chunks, wasting space and potentially degrading performance. HDF5
+does handle this internally, but the library documentation recommends chunk
+sizes not exceeding the dataset dimensions.
+
+*Severity*: Low. HDF5 handles it gracefully, but suboptimal for small
+datasets.
+
+
+* 9. =test_hdf5.cxx=: Double File Handle Without Close Between
+
+*File*: ~test/test_hdf5.cxx~, lines 14-17
+
+*Issue*: The test creates two file handles to the same file without closing
+the first:
+
+#+begin_src cpp
+auto hfile_existing = H5Fcreate(fn.c_str(), H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT);
+hid_t hfile = H5Fcreate(fn.c_str(), H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT);
+#+end_src
+
+~hfile_existing~ is only closed at the very end (line 48), after ~hfile~ has
+been used for all operations. This means two file handles are open to the same
+file simultaneously. The second ~H5Fcreate~ with ~H5F_ACC_TRUNC~ is expected
+to fail (which is the test's purpose), but ~hfile_existing~ is closed after
+~hfile~, which is unusual.
+
+*Severity*: Low (test code only, but demonstrates the confusing file
+creation logic also present in the main code).

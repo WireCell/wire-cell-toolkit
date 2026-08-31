@@ -35,6 +35,58 @@ An important and communal responsibility is to select a proper log "level" for a
 |----------+-----------+--------------------------------------------------------------------------------+---------|
 
 
+* Using =Aux::Logger=
+
+Most WCT code is in the form of a data flow graph node class.  Node classes that need to produce logging should inherit from =Aux::Logger=.  Here is an example from the drifter:
+
+#+begin_src c++
+  #include "WireCellAux/Logger.h"
+
+  class Drifter : public Aux::Logger /* ... */ {};
+
+  WIRECELL_FACTORY(Drifter, /*...*/)
+
+  Gen::Drifter::Drifter()
+    : Aux::Logger("Drifter", "gen")
+      { /*...*/}
+
+  void Gen::Drifter::configure(const WireCell::Configuration& cfg)
+  {
+      /* ... */
+      log->debug("time offset: {} ms, drift speed: {} mm/us", m_toffset / units::ms,
+               m_speed / (units::mm / units::us));
+  }
+#+end_src
+
+The two arguments to the =Aux::Logger()= constructor
+
+1. The "type" name as passed to =WIRECELL_FACTORY()=.  Usually, but not always the C++ class name.
+2. The group name, usually, but not always the name of the WCT "sub package".
+
+* Bare logging
+
+Some code lives outside of a DFP graph node and so can not make use of the =Aux::Logger= facilities.  Such code should *not* call bare =spdlog::debug()= type functions as they are not subject to WCT's logging control.  Instead, they should use a "static" logger defined like:
+
+#+begin_src c++
+
+  // In, say, pkg/src/mycode.cxx
+  #include "WireCellUtil/Logging.h"
+
+  static Log::logptr_t logger() {
+      static Log::logptr_t l = Log::logger("pkg.mycode");
+      return l;
+  }
+
+  void my_function(int x) {
+      if (x < 0) {
+          logger()->warn("I do not like negative x: {}", x);
+          return ;
+      }
+  }
+#+end_src
+
+Avoid making a new logger at a code site that is called frequently as there is some overhead.  The static logger pattern avoids that overhead and is safe to call in a tight loop.
+
 * WCT specifics
 
 ** Building

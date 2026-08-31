@@ -28,8 +28,13 @@ static Log::logptr_t wct_base_logger()
     std::vector<spdlog::sink_ptr> sv;
     base_logger = std::make_shared<spdlog::logger>(name, sv.begin(), sv.end());
     spdlog::register_logger(base_logger);
-    base_logger->debug("create default logger \"wct\"");
-    spdlog::set_default_logger(base_logger);
+    base_logger->debug("create base logger \"wct\"");
+    // NOTE: we deliberately do NOT call spdlog::set_default_logger() here.
+    // WCT is often loaded as a plugin into a host application (eg art, Phlex)
+    // that owns the process-global default logger.  Repointing the default to
+    // this (initially sinkless) logger would silence the host's bare
+    // spdlog::info()/debug()/... calls.  WCT logs through its own named loggers
+    // (see Log::logger()), so it has no need to commandeer the default.
 
     return base_logger;
 }

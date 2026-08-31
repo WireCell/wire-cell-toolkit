@@ -126,6 +126,11 @@ namespace WireCell {
             int m_toffset_bin;
             int m_poffset_bin;
         };
+
+        struct GausDiffTimeCompare{
+            bool operator()(const std::shared_ptr<Gen::GaussianDiffusion>& lhs,
+                            const std::shared_ptr<Gen::GaussianDiffusion>& rhs) const;
+        };
     }  // namespace Gen
 }  // namespace WireCell
 

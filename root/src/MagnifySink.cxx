@@ -8,6 +8,8 @@
 #include "TTree.h"
 
 #include "WireCellUtil/NamedFactory.h"
+#include "WireCellUtil/Point.h"
+#include "WireCellUtil/Units.h"
 #include "WireCellAux/FrameTools.h"
 
 #include <vector>
@@ -102,6 +104,9 @@ WireCell::Configuration Root::MagnifySink::default_configuration() const
     // default operator is "sum".
     cfg["summary_operator"] = Json::objectValue;
 
+    // When non-empty, write a T_geo TTree of per-channel geometry once per output file.
+    cfg["geo_tree"] = "";
+
     return cfg;
 }
 
@@ -119,7 +124,7 @@ std::vector<WireCell::Binning> collate_byplane(const ITrace::vector& traces, con
                                                ITrace::vector byplane[])
 {
     std::vector<int> uvwt[4];
-    for (auto trace : traces) {
+    for (const auto& trace : traces) {
         const int chid = trace->channel();
         auto wpid = anode->resolve(chid);
         const int iplane = wpid.index();
@@ -170,6 +175,35 @@ void Root::MagnifySink::create_file()
     output_tf = nullptr;
 }
 
+void Root::MagnifySink::write_geo_tree(TFile* output_tf)
+{
+    const std::string treename = m_cfg["geo_tree"].asString();
+    if (treename.empty() || m_geo_written) return;
+
+    TTree* tree = new TTree(treename.c_str(), treename.c_str());
+    int chid = 0, plane = 0, nwires = 0;
+    double length = 0.0;
+    tree->Branch("chid",   &chid,   "chid/I");
+    tree->Branch("plane",  &plane,  "plane/I");
+    tree->Branch("nwires", &nwires, "nwires/I");
+    tree->Branch("length", &length, "length/D");
+    tree->SetDirectory(output_tf);
+
+    for (int ch : m_anode->channels()) {
+        plane = m_anode->resolve(ch).index();
+        if (plane < 0) continue;
+        auto wires = m_anode->wires(ch);
+        double len = 0.0;
+        for (auto w : wires) len += ray_length(w->ray());
+        chid   = ch;
+        nwires = (int) wires.size();
+        length = len / units::cm;
+        tree->Fill();
+    }
+    log->debug("MagnifySink: wrote geo tree \"{}\" with {} entries", treename, tree->GetEntries());
+    m_geo_written = true;
+}
+
 void Root::MagnifySink::do_shunt(TFile* output_tf)
 {
     std::stringstream ss;
@@ -179,13 +213,15 @@ void Root::MagnifySink::do_shunt(TFile* output_tf)
         rtree->SetDirectory(output_tf);
         ss << "MagnifySink: making Tree RunInfo:\n";
 
+        // Reserve before any push_back so the vector never reallocates.
+        // push_back + Branch(&ints.back()) registers a pointer into the
+        // vector; reallocation invalidates those pointers before Fill().
+        const std::size_t nkeys = truncfg.getMemberNames().size();
         std::vector<int> ints;
-        // issue to be fixed:
-        // the first element seems to be misconnected
-        // to a wrong address in the rtree->Branch when rtree->Fill
-        // So kind of initilized to the vector could solve this issues
-        ints.push_back(0);
+        ints.reserve(nkeys + 1);
+        ints.push_back(0);  // index-0 placeholder keeps first branch address stable
         std::vector<float> floats;
+        floats.reserve(nkeys + 1);
         floats.push_back(0.0);
 
         int frame_number = 0;
@@ -421,7 +457,7 @@ bool Root::MagnifySink::operator()(const IFrame::pointer& frame, IFrame::pointer
                 const int ch0 = *mme.first;
                 const int chf = *mme.second;
                 const std::string hname = Form("h%c_%s", 'u' + iplane, tag.c_str());
-                TH1F* hist = new TH1F(hname.c_str(), hname.c_str(), chf - ch0 + 1, ch0, chf);
+                TH1F* hist = new TH1F(hname.c_str(), hname.c_str(), chf - ch0 + 1, ch0, chf + 1);
                 for (size_t ind = 0; ind < chans.size(); ++ind) {
                     const int x = chans[ind] + 0.5;
                     const double val = vals[ind];
@@ -469,6 +505,9 @@ bool Root::MagnifySink::operator()(const IFrame::pointer& frame, IFrame::pointer
             for (auto const& chmask : it.second) {
                 chid = chmask.first;
                 plane = m_anode->resolve(chid).index();
+                if (plane < 0) {
+                    continue;  // channel belongs to a different anode, skip
+                }
                 auto mask = chmask.second;
                 for (size_t ind = 0; ind < mask.size(); ++ind) {
                     start_time = mask[ind].first;
@@ -479,6 +518,7 @@ bool Root::MagnifySink::operator()(const IFrame::pointer& frame, IFrame::pointer
         }
     }
 
+    write_geo_tree(output_tf);
     do_shunt(output_tf);
 
     auto count = output_tf->Write();

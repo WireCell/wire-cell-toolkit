@@ -1,0 +1,237 @@
+#!/usr/bin/env python3
+"""check-build - drive a PR/branch/tag test cycle for the wire-cell-toolkit.
+
+Sub-commands:
+
+  switch <REF>   Switch the worktree to <REF>.  <REF> is one of:
+                   - the name of an existing local branch (switched to directly)
+                   - an integer, interpreted as a GitHub PR number
+                   - a remote branch name
+                   - a tag name
+                 For PR/branch/tag a local branch "check/<kind>/<REF>" is
+                 created (kind = pr|branch|tag) and switched to.
+
+  configure [args...]
+                 With no args, re-run the "./wcb configure ..." command
+                 memoized in the .lock-waf* file.  With args, run
+                 "./wcb configure args...".
+
+  build [args...]
+                 Run "./wcb args...".
+
+  tests          Run the build/*/test[_-]* binaries.
+  doctests       Run the build/*/wcdoctest[_-]* binaries.
+  test           Run "tests" then "doctests".
+
+  all <REF>      switch <REF>; configure; build; tests; doctests.
+
+This script is intentionally dependency-free (Python >= 3.9 stdlib only).
+"""
+
+import os
+import sys
+import glob
+import subprocess
+
+REMOTE = "origin"
+
+
+def die(msg, code=1):
+    print(f"check-build: {msg}", file=sys.stderr)
+    sys.exit(code)
+
+
+def find_root():
+    r = subprocess.run(["git", "rev-parse", "--show-toplevel"],
+                       capture_output=True, text=True)
+    if r.returncode != 0:
+        die("not inside a git worktree")
+    return r.stdout.strip()
+
+
+ROOT = find_root()
+os.chdir(ROOT)
+
+
+def git(*args, check=True, capture=False):
+    return subprocess.run(["git", *args], check=check,
+                          capture_output=capture, text=True)
+
+
+def wcb(args):
+    """Run ./wcb with args, return exit code."""
+    return subprocess.run(["./wcb", *args]).returncode
+
+
+# ---------------------------------------------------------------- switch
+
+def branch_exists(name):
+    return git("rev-parse", "--verify", "--quiet", f"refs/heads/{name}",
+               check=False, capture=True).returncode == 0
+
+
+def remote_has(ref):
+    r = git("ls-remote", REMOTE, ref, capture=True)
+    return bool(r.stdout.strip())
+
+
+def cmd_switch(rest):
+    if len(rest) != 1:
+        die("usage: check-build switch <REF>")
+    ref = rest[0]
+
+    # An existing local branch wins outright: just switch to it.
+    if branch_exists(ref):
+        git("switch", ref)
+        print(f"switch to existing branch '{ref}' from {ref}", file=sys.stderr)
+        return 0
+
+    # Classify the ref into pr / branch / tag and pick a fetch source.
+    if ref.isdigit():
+        kind, src = "pr", f"pull/{ref}/head"
+    elif remote_has(f"refs/heads/{ref}"):
+        kind, src = "branch", f"refs/heads/{ref}"
+    elif remote_has(f"refs/tags/{ref}"):
+        kind, src = "tag", f"refs/tags/{ref}"
+    else:
+        die(f"'{ref}' is not a local branch, a PR number, "
+            f"nor a branch/tag on '{REMOTE}'")
+
+    target = f"check/{kind}/{ref}"
+
+    if branch_exists(target):
+        git("switch", target)
+        age = "existing"
+    else:
+        # Fetch the ref straight into the local check/ branch, then switch.
+        git("fetch", REMOTE, f"{src}:{target}")
+        git("switch", target)
+        age = "new"
+
+    print(f"switch to {age} branch '{target}' from {ref}", file=sys.stderr)
+    return 0
+
+
+# ------------------------------------------------------------- configure
+
+def cmd_configure(rest):
+    if rest:
+        return wcb(["configure", *rest])
+
+    locks = sorted(glob.glob(".lock-waf*"))
+    if not locks:
+        die("no .lock-waf* file found.\n"
+            "  Run an initial configure first, e.g.:\n"
+            "    ./wcb configure [your options]\n"
+            "  (or your configit.sh), then re-run 'check-build configure'.")
+    if len(locks) > 1:
+        listing = "\n".join(f"    {f}" for f in locks)
+        die("more than one .lock-waf* file found:\n"
+            f"{listing}\n"
+            "  Remove the stale one(s) so exactly one remains, e.g.:\n"
+            f"    rm {locks[0]}")
+
+    ns = {}
+    with open(locks[0]) as fp:
+        exec(fp.read(), ns)
+    argv = ns.get("argv")
+    if not argv:
+        die(f"'{locks[0]}' has no memoized 'argv'; reconfigure manually")
+    print(f"check-build: replaying: {' '.join(argv)}", file=sys.stderr)
+    return subprocess.run(argv).returncode
+
+
+# ----------------------------------------------------------------- build
+
+def cmd_build(rest):
+    return wcb(rest)
+
+
+# ------------------------------------------------------- tests / doctests
+
+def find_bins(patterns):
+    out = set()
+    for pat in patterns:
+        for p in glob.glob(pat):
+            if "." in p:                       # skip .cxx, .o, etc.
+                continue
+            if os.path.isfile(p) and os.access(p, os.X_OK):
+                out.add(p)
+    return sorted(out)
+
+
+def run_bins(label, bins):
+    if not bins:
+        print(f"[{label}] no binaries matched", file=sys.stderr)
+        return 0
+    failures = []
+    for i, b in enumerate(bins, 1):
+        print(f"[{label} {i}/{len(bins)}] {b}", file=sys.stderr)
+        rc = subprocess.run([os.path.join(".", b)]).returncode
+        if rc != 0:
+            failures.append((b, rc))
+    if failures:
+        print(f"[{label}] {len(failures)}/{len(bins)} FAILED:", file=sys.stderr)
+        for b, rc in failures:
+            print(f"    {b} (exit {rc})", file=sys.stderr)
+    else:
+        print(f"[{label}] all {len(bins)} passed", file=sys.stderr)
+    return len(failures)
+
+
+def cmd_tests(rest):
+    return run_bins("tests", find_bins(["build/*/test_*", "build/*/test-*"]))
+
+
+def cmd_doctests(rest):
+    return run_bins("doctests",
+                    find_bins(["build/*/wcdoctest_*", "build/*/wcdoctest-*"]))
+
+
+def cmd_test(rest):
+    return cmd_tests(rest) + cmd_doctests(rest)
+
+
+# ------------------------------------------------------------------- all
+
+def cmd_all(rest):
+    if len(rest) != 1:
+        die("usage: check-build all <REF>")
+    cmd_switch(rest)
+    rc = cmd_configure([])
+    if rc:
+        die(f"configure failed (exit {rc})", rc)
+    rc = cmd_build([])
+    if rc:
+        die(f"build failed (exit {rc})", rc)
+    return cmd_test([])
+
+
+# ------------------------------------------------------------- dispatch
+
+COMMANDS = {
+    "switch": cmd_switch,
+    "configure": cmd_configure,
+    "build": cmd_build,
+    "tests": cmd_tests,
+    "doctests": cmd_doctests,
+    "test": cmd_test,
+    "all": cmd_all,
+}
+
+
+def main(argv):
+    if not argv or argv[0] in ("-h", "--help"):
+        print(__doc__, file=sys.stderr)
+        return 0 if argv else 2
+    cmd, rest = argv[0], argv[1:]
+    fn = COMMANDS.get(cmd)
+    if fn is None:
+        die(f"unknown sub-command '{cmd}' "
+            f"(choose from: {', '.join(COMMANDS)})", 2)
+    nfail = fn(rest)
+    return 1 if nfail else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

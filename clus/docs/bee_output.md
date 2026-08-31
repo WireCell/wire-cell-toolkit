@@ -1,0 +1,360 @@
+# Bee Visualization Output
+
+**Source files:**
+- `clus/inc/WireCellClus/MultiAlgBlobClustering.h` — `BeePointsConfig`, `BeePFConfig`, `ApaBeePoints`
+- `clus/src/MultiAlgBlobClustering.cxx` — all `fill_bee_*` functions
+- `WireCellUtil/Bee.h` — `Bee::Points`, `Bee::ParticleTree`, `Bee::Sink`
+
+---
+
+## What is the Bee Viewer?
+
+Bee is a web-based 3D event display for LArTPC data. It reads ZIP files
+containing per-event JSON files. `MultiAlgBlobClustering` produces these ZIP
+files at configurable points in the pipeline. There are two distinct output
+modes:
+
+1. **Point-cloud dumps** (`bee_points`): raw 3D point sets, one per named
+   grouping or algorithm, used for visual debugging at any pipeline stage.
+2. **Particle-flow tree** (`bee_pf`): a hierarchical JSON tree representing
+   the full reconstructed event (tracks + showers + kinematics), consumed
+   by Bee's particle-flow panel.
+
+---
+
+## Point-Cloud Dumps
+
+### Configuration (`BeePointsConfig`)
+
+```cpp
+struct BeePointsConfig {
+    std::string name;        // Bee dataset name (e.g. "live", "steiner")
+    std::string detector;    // geometry name (e.g. "uboone")
+    std::string algorithm;   // algorithm label
+    std::string pcname;      // which named PC to dump from each cluster
+    std::string grouping;    // which Facade::Grouping to read ("live", "dead")
+    std::string visitor;     // dump after this visitor runs (empty = at end)
+    std::vector<std::string> coords; // coordinate names in the PC (e.g. ["x","y","z"])
+    bool individual;         // true = one file per APA/face; false = global
+    int  filter{1};          // 1=normal, 0=off, -1=inverse filter
+    double dQdx_scale{1.0};
+    double dQdx_offset{0.0};
+    bool use_associate_points{false}; // use dpcloud("associate_points") + shower charge
+    bool use_graph_vertices{false};   // dump PR::Vertex positions instead of PC
+    std::vector<ApaGroup> apa_groups; // drift-side grouping (empty = off), see below
+};
+```
+
+### `fill_bee_points(name, grouping)`
+
+```
+clus/src/MultiAlgBlobClustering.cxx line 380
+```
+
+Iterates all clusters in `grouping`. For each cluster calls
+`fill_bee_points_from_cluster()` which:
+
+1. Reads the named point cloud (`pcname`) from the cluster's local PC storage.
+2. For each point, computes an encoded cluster ID:
+   ```cpp
+   encoded_id = cluster_id * 1000 + segment_graph_index
+   ```
+   This encoding lets the Bee viewer link each point back to a specific
+   segment for selection/highlighting.
+3. Applies `dQdx_scale` and `dQdx_offset` to the charge value before appending.
+4. Appends `(x, y, z, charge, encoded_id)` to `Bee::Points`.
+
+If `individual=true`, points are bucketed per APA+face combination so Bee can
+display one readout plane at a time. If `individual=false`, all points go into
+a single global `Bee::Points` object. If `apa_groups` is set (see below), each
+cluster is routed by its APA into one bucket per group instead.
+
+---
+
+## APA grouping (drift-side display)
+
+For multi-APA detectors the default output produces one Bee instance per APA
+(or per APA/face), which can be more images than wanted. The `apa_groups`
+feature collapses several APAs into a single Bee instance, keeping the
+clustering computation unchanged — it only changes how a dump is bucketed.
+
+### Clustering points
+
+A point set that carries `apa_groups` routes each cluster (by its APA, via
+`Cluster::wpids_blob_set()`) into the first group that owns one of those APAs,
+and dumps one `Bee::Points` per group named `"<algorithm>-<group name>"` (e.g.
+`clustering-group02`). `apa_groups` empty → behavior unchanged (byte-identical).
+`enumerate_idents()` has run before any dump, so cluster ids are globally
+unique and the groups partition the clusters with no color collisions.
+
+The dump *timing* (set by the `name`/`visitor` fields, see "Trigger timing")
+selects *which* clustering stage is grouped. On the all-APA MABC node the PDHD
+config uses two sets, giving the natural per-stage views:
+
+```jsonnet
+bee_points_sets: [
+    // (c) full-detector clustering: end-of-pipeline global dump
+    { name:"clustering", detector:"protodunehd", algorithm:"clustering",
+      pcname:"3d", coords:["x","y","z"], individual:false },             // -> clustering-global
+    // (b) per-APA clustering: name "img" dumps the live grouping BEFORE the
+    //     all-APA pipeline (= the merged per-APA result), grouped by drift side
+    { name:"img", detector:"protodunehd", algorithm:"clustering",
+      pcname:"3d", coords:["x","y","z"], individual:false,
+      apa_groups: [ {name:"group02", apas:[0,2]}, {name:"group13", apas:[1,3]} ] },
+                                            // -> clustering-group02 / clustering-group13
+]
+```
+
+The special name `"img"` dumps the live grouping *before* the pipeline runs;
+on the all-APA node that input is exactly the merged per-APA clustering, so the
+`img` + `apa_groups` set yields the per-APA result grouped by drift side, while
+the plain `clustering` set (end dump) yields the full-detector `clustering-global`.
+
+### Dead area
+
+The same grouping is applied to the dead-area patches via the node-level
+`dead_apa_groups` config:
+
+```jsonnet
+MultiAlgBlobClustering: { ..., save_deadarea: true, dead_area_version: 2,
+    dead_apa_groups: [ {name:"group02", apas:[0,2]}, {name:"group13", apas:[1,3]} ] }
+```
+
+Each dead blob is routed by APA into one `Bee::Patches` per group, named
+`channel-deadarea-<group name>`, replacing the per-(apa,face) dead files.
+
+The v2 dead wrapper carries a single `tpc` index that the Bee viewer
+(`wire-cell-bee3`) uses only to place the slab's anode-face **X** (drift
+direction); the polygons themselves carry global Y,Z. Grouping is therefore
+only valid when every APA in a group shares the same anode-X and drift
+direction — which is exactly the drift-side split (PDHD even APAs at x0=−358,
+odd APAs at x0=+358). The group's first APA is used as the representative
+`tpc`, so the grouped dead area is **positionally identical** to the old
+per-(apa,face) output, just merged into fewer instances. `dead_apa_groups`
+empty → per-(apa,face) output unchanged.
+
+### Detector usage
+
+The grouping is driven entirely by the jsonnet `apas` lists, so it generalises
+to any detector. Two are wired up today, both splitting by drift side into two
+instances:
+
+| Detector | Anodes | Groups |
+|---|---|---|
+| `protodunehd` (`pdhd/clus.jsonnet`) | 0–3 | `group02` = {0,2} (x0=−358), `group13` = {1,3} (x0=+358) |
+| `protodunevd` (`pdvd/clus.jsonnet`) | 0–7 | `group0123` = {0,1,2,3} (bottom, x0=−341.5), `group4567` = {4,5,6,7} (top, x0=+341.5) |
+
+Routing is per-anode (`wpid.apa()`), so on PDVD each anode's two faces fold into
+its drift-side group automatically.
+
+### `fill_bee_points_from_pr_graph(name, grouping)`
+
+Reads the PR graph from the grouping instead of raw point clouds. For each
+segment in the graph, uses the `"fit"` point cloud (fitted track positions).
+Charge is set to the dQ value from the fit multiplied by the calibration
+factors.
+
+### `fill_bee_vertices_from_pr_graph(name, grouping)`
+
+Dumps vertex positions from the PR graph:
+- Primary vertex (`kNeutrinoVertex`): charge = 15000 (appears bright in Bee)
+- Other vertices: charge = 0
+
+### Trigger timing
+
+Each `BeePointsConfig` has a `visitor` field. After each visitor runs,
+`MultiAlgBlobClustering::operator()` checks whether any `BeePointsConfig`
+names that visitor and, if so, calls `fill_bee_points` immediately. This
+allows dumping intermediate states (e.g., after clustering, after Steiner,
+after PR) into separate Bee files.
+
+---
+
+## Particle-Flow Tree
+
+### Configuration (`BeePFConfig`)
+
+```cpp
+struct BeePFConfig {
+    std::string name{"mc"};       // output file name in the ZIP
+    std::string visitor;          // dump after this visitor (usually "" = at end)
+    std::string grouping{"live"}; // grouping to read PR graph from
+};
+```
+
+The default name `"mc"` matches what the Bee viewer expects for its
+particle-flow panel.
+
+### `fill_bee_pf_tree(cfg, grouping)`
+
+```
+clus/src/MultiAlgBlobClustering.cxx line 697
+```
+
+Builds a `Bee::ParticleTree` — a hierarchical JSON structure representing
+the neutrino interaction — by combining the PR graph, shower information,
+and kinematics.
+
+#### Step 1 — Retrieve PR state
+
+```cpp
+auto pr_graph   = grouping.get_pr_graph();
+auto tf         = grouping.get_track_fitting();
+auto main_vertex = tf->get_main_vertex();
+auto showers    = tf->get_showers();
+auto pi0_showers = tf->get_pi0_showers();
+```
+
+#### Step 2 — BFS over the track skeleton
+
+Starting from `main_vertex`, BFS traverses **track-only** (non-shower) segments.
+Shower segments are pre-marked as `used_segs` so the BFS never crosses them.
+The BFS builds four maps:
+
+| Map | Key | Value |
+|---|---|---|
+| `seg_parent` | segment | parent segment (nullptr = root) |
+| `seg_children` | segment | list of child segments |
+| `seg_endpoints` | segment | `{near_vtx, far_vtx}` |
+| `vtx_incoming_seg` | vertex | the segment that first arrived at this vertex |
+
+#### Step 3 — Resolve shower attachment
+
+Showers can attach at three types of parents:
+1. **Root-level** (start vertex == main_vertex or in `root_reachable_vtxs`):
+   the shower is a direct daughter of the neutrino interaction.
+2. **Track-level** (start vertex in `vtx_incoming_seg`): the shower branches
+   off a track segment.
+3. **Nested** (start vertex belongs to another shower): shower-inside-shower
+   (e.g., photon converting inside a different shower).
+
+An iterative fixed-point loop (`while any_added`) propagates `vtx_incoming_seg`
+into shower vertex sets until all showers are resolved.
+
+Connection type 4 showers are excluded entirely from the output.
+
+#### Step 4 — Build jsTree nodes
+
+Each track segment becomes a node with:
+- `id`: `cluster_id × 1000 + segment_graph_index`
+- `text`: `"<particle_name> KE=<energy_MeV> MeV"`
+- `data`: `{start: [x,y,z], end: [x,y,z]}` (from fitted endpoint positions)
+- `children`: sub-track segments and attached showers
+
+Each shower becomes a leaf node with:
+- `id`: `shower_id` (mirrors start segment ID)
+- `text`: `"<particle> KE=<kenergy_best_MeV> MeV"`
+- For π0 pairs: a pseudo-gamma parent node is inserted with the π0 invariant
+  mass, with the two photon showers as children.
+
+#### Output format
+
+The resulting `Bee::ParticleTree` is serialized as a JSON array:
+```json
+[
+  {
+    "id": 1042,
+    "text": "mu- KE=312.4 MeV",
+    "data": { "start": [10.3, -5.2, 44.1], "end": [82.1, -12.3, 55.6] },
+    "children": [
+      { "id": 1040, "text": "p KE=88.1 MeV", "data": {...}, "children": [] }
+    ]
+  },
+  {
+    "id": 2001,
+    "text": "e- KE=245.0 MeV",
+    "data": { "start": [10.5, -5.0, 44.3], "end": [55.2, 2.1, 71.8] },
+    "children": []
+  }
+]
+```
+
+---
+
+## Output ZIP File
+
+All Bee output is written to the ZIP file configured by `bee_zip` in the
+jsonnet:
+
+```jsonnet
+MultiAlgBlobClustering: {
+    ...
+    bee_zip: "bee-output.zip",
+    bee_points: [ { name: "live", ... }, { name: "steiner", ... } ],
+    bee_pf:     [ { name: "mc",   visitor: "" } ],
+}
+```
+
+Inside the ZIP, each event produces files named:
+```
+<name>-<run>-<subrun>-<event>-*.json   (point cloud files)
+mc-<run>-<subrun>-<event>.json         (particle flow tree)
+```
+
+The ZIP is flushed at the end of each event (`flush()`) and can be dragged
+directly into the Bee web viewer.
+
+---
+
+## Shared sink (one ZIP from multiple nodes)
+
+By default each `MultiAlgBlobClustering` (MABC) node owns its own `Bee::Sink`
+and writes its own `bee_zip`.  A multi-stage chain (e.g. SBND: per-APA MABCs
+*before* QL matching plus an all-APA MABC *after* the merge) therefore emits one
+ZIP per node.  The per-APA views are snapshots taken before QL matching splits
+clusters, so they cannot be reconstructed by the downstream all-APA node — to
+get a single ZIP they must be captured at the per-APA stage and merged.
+
+The `BeeSink` component (`clus/src/BeeSink.cxx`, interface
+`clus/inc/WireCellClus/IBeeSink.h`) is a standalone `IConfigurable` wrapping one
+`Bee::Sink`.  When an MABC's `bee_sink` config names a `BeeSink`, that MABC
+routes all Bee writes to the shared sink instead of its own `m_sink`, so every
+referencing node writes into one ZIP:
+
+```jsonnet
+local shared = { type: 'BeeSink', name: 'mabc_shared',
+                 data: { outname: 'mabc.zip', initial_index: 0 } };
+MultiAlgBlobClustering: { ..., bee_sink: wc.tn(shared) }   // for each node
+```
+
+Key points:
+
+- **Explicit per-event index.** Each MABC advances its own per-event counter
+  (one step per `flush(int)`) and writes at that explicit index via
+  `Bee::Sink::set_index`.  The default name-collision auto-increment is *not*
+  used — it desyncs across interleaved writers.  All nodes process the same
+  event stream, so node-k's k-th flush lands at the same Bee index.
+- **Reference-counted close.** Each MABC `acquire()`s in `configure()` and
+  `release()`s in `finalize()`; the shared ZIP is closed on the last release,
+  independent of node finalize ordering.
+- **Entry names must be unique per index.** Distinct algorithm labels keep
+  per-node JSON files from colliding.  In SBND the only clash is
+  `channel-deadarea-apaX-face0` (written by both a per-APA node and the all-APA
+  node), so `save_deadarea` is disabled on the per-APA nodes in shared mode (the
+  all-APA node already writes byte-identical dead-area for every APA).
+- **Opt-in.** `bee_sink` defaults empty → own `bee_zip` → all existing configs
+  unchanged.
+
+---
+
+## RSE (Run/Subrun/Event) Numbering
+
+By default, the ident integer from the input tensor set is decoded as:
+```cpp
+run = (ident >> 16) & 0x7fff;
+evt = ident & 0xffff;
+```
+
+If `use_config_rse=true` and `runNo`/`subRunNo`/`eventNo` are set in the
+jsonnet configuration, those values override the ident decoding. This is
+useful when the ident encodes something other than RSE.
+
+If `rse_from_ident=true` (default `false`), the event number is taken directly
+from each input tensor set's ident as a raw integer (`eventNo = ident`,
+`run = subrun = 0`), re-applied on every new ident, not just the first. This is
+for the bundled standalone chain — a single `wire-cell` invocation that streams
+many events through one MABC node — where the ident already carries the real
+event id. Without it, such a run would otherwise label every event by the
+configured `eventNo` auto-increment (i.e. by archive order, so "event 2" in the
+zip is the 2nd event processed, not `eventNo==2`). Default `false` keeps the
+existing `use_config_rse` / ident-decode behavior byte-identical.

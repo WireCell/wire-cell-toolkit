@@ -15,6 +15,7 @@
 #include <iterator>
 #include <chrono>
 #include <fstream>
+#include <limits>
 
 WIRECELL_FACTORY(ProjectionDeghosting, WireCell::Img::ProjectionDeghosting, WireCell::INamed, WireCell::IClusterFilter,
                  WireCell::IConfigurable)
@@ -107,13 +108,16 @@ namespace {
     }
 
     // run in keep mode if removal_mode is false
-    cluster_graph_t remove_blobs(const cluster_graph_t& cg, std::unordered_set<cluster_vertex_t> blobs,
+    cluster_graph_t remove_blobs(const cluster_graph_t& cg, const std::unordered_set<cluster_vertex_t>& blobs,
                                  bool removal_mode = true)
     {
         cluster_graph_t cg_out;
 
         // size_t nblobs = 0;
-        std::unordered_map<cluster_vertex_t, cluster_vertex_t> old2new;
+        // vecS vertex descriptors are dense indices: a flat vector remap
+        // beats a hash map here.  "max" marks a removed (unmapped) vertex.
+        constexpr cluster_vertex_t unmapped = std::numeric_limits<cluster_vertex_t>::max();
+        std::vector<cluster_vertex_t> old2new(boost::num_vertices(cg), unmapped);
         for (const auto& vtx : GraphTools::mir(boost::vertices(cg))) {
             const auto& node = cg[vtx];
             if (node.code() == 'b') {
@@ -133,16 +137,17 @@ namespace {
             auto old_tail = boost::source(edge, cg);
             auto old_head = boost::target(edge, cg);
 
-            auto old_tit = old2new.find(old_tail);
-            if (old_tit == old2new.end()) {
+            const auto new_tail = old2new[old_tail];
+            if (new_tail == unmapped) {
                 continue;
             }
-            auto old_hit = old2new.find(old_head);
-            if (old_hit == old2new.end()) {
+            const auto new_head = old2new[old_head];
+            if (new_head == unmapped) {
                 continue;
             }
-            boost::add_edge(old_tit->second, old_hit->second, cg_out);
+            boost::add_edge(new_tail, new_head, cg_out);
         }
+        // (void)nblobs;
         // std::cout << "boost::num_vertices(cg_out): " << boost::num_vertices(cg_out) << std::endl;
         return cg_out;
     }
@@ -156,14 +161,24 @@ bool Img::ProjectionDeghosting::operator()(const input_pointer& in, output_point
         return true;
     }
 
-    const auto in_graph = in->graph();
+    const auto& in_graph = in->graph();
     log->debug("in_graph: {}", dumps(in_graph));
-    // blob shadow ... vertex = blob, edge --> wire/channel, plane
-    BlobShadow::graph_t bsgraph = BlobShadow::shadow(in_graph, 'w');  // or 'c'
 
     // cluster shadow map, blob to cluster map ???
     ClusterShadow::blob_cluster_map_t clusters;
-    auto cs_graph = ClusterShadow::shadow(in_graph, bsgraph, clusters);
+    ClusterShadow::graph_t cs_graph;
+    {
+        // blob shadows ... vertex = blob, edge --> wire/channel, plane.
+        // Flat form (no boost graph: at busy-event edge counts the edge
+        // containers cost more than the edges).  Only ClusterShadow::shadow
+        // consumes them; scoped so the storage is freed before the
+        // projection/judge phase below.
+        const auto shadows = BlobShadow::shadow_list(in_graph, 'w');  // or 'c'
+        // plain assignment would invoke adjacency_list's copy operator=
+        // (boost has no move members); steal the temporary instead.
+        auto cs_tmp = ClusterShadow::shadow(in_graph, shadows, clusters);
+        move_graph(cs_graph, cs_tmp);
+    }
 
     // make a cluster -> blob map
     std::unordered_map<ClusterShadow::vdesc_t, std::set<cluster_vertex_t>> c2b;
@@ -213,16 +228,34 @@ bool Img::ProjectionDeghosting::operator()(const input_pointer& in, output_point
         wp_2D_3D_clus_map[kWlayer] = w_2D_3D_clus_map;
     }
 
+    // The heavy per-cluster Eigen projections (m_layer_proj) are only ever
+    // judged while their cluster is the current vertex of the main loop or
+    // remains a key of a per-layer clus_2D_3D_map; every later access reads
+    // only the scalar metadata which survives eviction.  Drop the matrices
+    // as soon as neither holds to bound the cache's live size.
+    auto evict_projections = [&](ClusterShadow::vdesc_t id) {
+        for (const auto& wp : wp_2D_3D_clus_map) {
+            if (wp.second.count(id)) return;
+        }
+        auto pit = id2lproj.find(id);
+        if (pit != id2lproj.end()) {
+            pit->second.m_layer_proj.clear();
+        }
+    };
+
     // run algorithm ...
     for (auto cs_cluster : GraphTools::mir(boost::vertices(cs_graph))) {
-        auto b_cluster = c2b[cs_cluster];          // cluster_vertex_t
+        const auto& b_cluster = c2b[cs_cluster];          // cluster_vertex_t
         int gid_cluster = cluster2id[cs_cluster];  // cluster id ...
         Projection2D::LayerProjection2DMap& proj_cluster =
             get_projection(id2lproj, cs_cluster, in_graph, b_cluster, m_nchan, m_nslice, m_uncer_cut,
                            m_dead_default_charge);  // 3 views are all here ...
 
         // empty ...
-        if (proj_cluster.m_number_slices == 0) continue;
+        if (proj_cluster.m_number_slices == 0) {
+            evict_projections(cs_cluster);
+            continue;
+        }
 
         // loop over each plane ...
         for (auto it = wp_2D_3D_clus_map.begin(); it != wp_2D_3D_clus_map.end(); it++) {
@@ -254,7 +287,7 @@ bool Img::ProjectionDeghosting::operator()(const input_pointer& in, output_point
                     const auto& eobj = cs_graph[cedge];
                     if (layer_cluster != eobj.wpid.layer()) continue;
 
-                    auto b_clust3D = c2b[clust3D];
+                    const auto& b_clust3D = c2b[clust3D];
                     Projection2D::LayerProjection2DMap& proj_clust3D = get_projection(
                         id2lproj, clust3D, in_graph, b_clust3D, m_nchan, m_nslice, m_uncer_cut, m_dead_default_charge);
 
@@ -287,6 +320,9 @@ bool Img::ProjectionDeghosting::operator()(const input_pointer& in, output_point
             for (auto it1 = to_be_removed.begin(); it1 != to_be_removed.end(); it1++) {
                 clus_2D_3D_map.erase(*it1);
             }
+            for (auto it1 = to_be_removed.begin(); it1 != to_be_removed.end(); it1++) {
+                evict_projections(*it1);
+            }
             if (flag_save) {
                 std::vector<ClusterShadow::vdesc_t> vec_3Dclus;
                 vec_3Dclus.push_back(cs_cluster);
@@ -294,6 +330,8 @@ bool Img::ProjectionDeghosting::operator()(const input_pointer& in, output_point
             }
 
         }  // loop over plane
+
+        evict_projections(cs_cluster);
     }
 
     log->debug("2D --> 3D size: {} {} {}", wp_2D_3D_clus_map[kUlayer].size(), wp_2D_3D_clus_map[kVlayer].size(),
@@ -310,7 +348,7 @@ bool Img::ProjectionDeghosting::operator()(const input_pointer& in, output_point
             ClusterShadow::vdesc_t clust3D = it1->first;
             if (find(to_be_removed.begin(), to_be_removed.end(), clust3D) == to_be_removed.end()) {
                 int gid_clust3D = cluster2id[clust3D];
-                auto b_clust3D = c2b[clust3D];
+                const auto& b_clust3D = c2b[clust3D];
                 Projection2D::LayerProjection2DMap& proj_clust3D = get_projection(
                     id2lproj, clust3D, in_graph, b_clust3D, m_nchan, m_nslice, m_uncer_cut, m_dead_default_charge);
                 Projection2D::Projection2D& proj2D_clust3D = proj_clust3D.m_layer_proj[layer_cluster];
@@ -329,7 +367,7 @@ bool Img::ProjectionDeghosting::operator()(const input_pointer& in, output_point
                         const auto& eobj = cs_graph[cedge];
                         if (layer_cluster != eobj.wpid.layer()) continue;
 
-                        auto b_comp_3Dclus = c2b[comp_3Dclus];
+                        const auto& b_comp_3Dclus = c2b[comp_3Dclus];
                         Projection2D::LayerProjection2DMap& proj_comp_3Dclus =
                             get_projection(id2lproj, comp_3Dclus, in_graph, b_comp_3Dclus, m_nchan, m_nslice,
                                            m_uncer_cut, m_dead_default_charge);
@@ -355,11 +393,14 @@ bool Img::ProjectionDeghosting::operator()(const input_pointer& in, output_point
         for (auto it1 = to_be_removed.begin(); it1 != to_be_removed.end(); it1++) {
             clus_2D_3D_map.erase(*it1);
         }
+        for (auto it1 = to_be_removed.begin(); it1 != to_be_removed.end(); it1++) {
+            evict_projections(*it1);
+        }
 
         for (auto it1 = clus_2D_3D_map.begin(); it1 != clus_2D_3D_map.end(); it1++) {
             for (auto it2 = it1->second.begin(); it2 != it1->second.end(); it2++) {
                 ClusterShadow::vdesc_t clust3D = *it2;
-                auto b_clust3D = c2b[clust3D];
+                const auto& b_clust3D = c2b[clust3D];
                 Projection2D::LayerProjection2DMap& proj_clust3D = get_projection(
                     id2lproj, clust3D, in_graph, b_clust3D, m_nchan, m_nslice, m_uncer_cut, m_dead_default_charge);
                 proj_clust3D.m_saved_flag++;
@@ -367,6 +408,12 @@ bool Img::ProjectionDeghosting::operator()(const input_pointer& in, output_point
         }
 
     }  // loop over plane
+
+    // All judging is done; everything below (and remove_blobs) reads only
+    // the scalar metadata, so free every remaining projection matrix now.
+    for (auto& pit : id2lproj) {
+        pit.second.m_layer_proj.clear();
+    }
 
     log->debug("2D --> 3D size: {} {} {}", wp_2D_3D_clus_map[kUlayer].size(), wp_2D_3D_clus_map[kVlayer].size(),
                wp_2D_3D_clus_map[kWlayer].size());
@@ -379,7 +426,7 @@ bool Img::ProjectionDeghosting::operator()(const input_pointer& in, output_point
             int max_flag_saved = -1;
             for (auto it2 = it1->second.begin(); it2 != it1->second.end(); it2++) {
                 ClusterShadow::vdesc_t clust3D = *it2;
-                auto b_clust3D = c2b[clust3D];
+                const auto& b_clust3D = c2b[clust3D];
                 Projection2D::LayerProjection2DMap& proj_clust3D = get_projection(
                     id2lproj, clust3D, in_graph, b_clust3D, m_nchan, m_nslice, m_uncer_cut, m_dead_default_charge);
                 if (proj_clust3D.m_saved_flag > max_flag_saved) max_flag_saved = proj_clust3D.m_saved_flag;
@@ -387,7 +434,7 @@ bool Img::ProjectionDeghosting::operator()(const input_pointer& in, output_point
 
             for (auto it2 = it1->second.begin(); it2 != it1->second.end(); it2++) {
                 ClusterShadow::vdesc_t clust3D = *it2;
-                auto b_clust3D = c2b[clust3D];
+                const auto& b_clust3D = c2b[clust3D];
                 Projection2D::LayerProjection2DMap& proj_clust3D = get_projection(
                     id2lproj, clust3D, in_graph, b_clust3D, m_nchan, m_nslice, m_uncer_cut, m_dead_default_charge);
                 if (proj_clust3D.m_saved_flag != max_flag_saved) proj_clust3D.m_saved_flag_1++;
@@ -397,7 +444,7 @@ bool Img::ProjectionDeghosting::operator()(const input_pointer& in, output_point
 
     // delete blobs ...
     for (auto cs_cluster : GraphTools::mir(boost::vertices(cs_graph))) {
-        auto b_cluster = c2b[cs_cluster];  // cluster_vertex_t
+        const auto& b_cluster = c2b[cs_cluster];  // cluster_vertex_t
         //       int gid_cluster = cluster2id[cs_cluster];
         Projection2D::LayerProjection2DMap& proj_cluster = get_projection(
             id2lproj, cs_cluster, in_graph, b_cluster, m_nchan, m_nslice, m_uncer_cut, m_dead_default_charge);
@@ -464,7 +511,7 @@ bool Img::ProjectionDeghosting::operator()(const input_pointer& in, output_point
     log->debug("in_graph: {}", dumps(in_graph));
     log->debug("out_graph: {}", dumps(out_graph));
 
-    out = std::make_shared<Aux::SimpleCluster>(out_graph, in->ident());
+    out = std::make_shared<Aux::SimpleCluster>(std::move(out_graph), in->ident());
     if (m_dryrun) {
         out = std::make_shared<Aux::SimpleCluster>(in_graph, in->ident());
     }

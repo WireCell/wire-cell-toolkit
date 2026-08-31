@@ -1,0 +1,207 @@
+// ProtoDUNE-SP specific parameters.  This file inerets from the
+// generic set of parameters and overrides things specific to PDSP.
+
+local wc = import "wirecell.jsonnet";
+local base = import "pgrapher/dune/params.jsonnet";
+
+// Electronics-noise file, selected by the front-end gain.  The cold
+// electronics has four gain settings -- 4.7 / 7.8 / 14 / 25 mV/fC -- and
+// noise-spectra files currently exist only for 7.8 and 14.  Any other gain
+// (a setting with no file, or a value that is not a valid setting) aborts the
+// configuration rather than silently using a wrong-gain spectrum.
+local pdhd_noise(gain) =
+    local g = gain / (wc.mV / wc.fC);
+    if std.abs(g - 7.8) < 0.05 then "protodunehd-noise-spectra-7d8mVfC-v1.json.bz2"
+    else if std.abs(g - 14.0) < 0.05 then "protodunehd-noise-spectra-14mVfC-v1.json.bz2"
+    else error ("PDHD noise: no spectra file for elec.gain = " + g
+                + " mV/fC.  Valid cold-electronics gain settings are"
+                + " 4.7/7.8/14/25 mV/fC; spectra files exist only for 7.8 and 14.");
+
+base {
+    // This section will be overwritten in simparams.jsonnet
+    det : {
+
+        // The "faces" is consumed by, at least, the Drifter and
+        // AnodePlane.  The "wires" number is used to set
+        // AnodePlane.ident used to lookup the anode in WireSchema.
+        // It corresponds to the anode number.
+
+        // Numbers determined from protodunehd_v6 gdml
+        local apa_cpa = 3.5734*wc.m,
+        local cpa_thick = 3.175*wc.mm, // 1/8", from Bo Yu (BNL) and confirmed with LArSoft
+        local apa_w2w = 85.87*wc.mm,
+        local plane_gap = 4.76*wc.mm,
+        local apa_g2g = apa_w2w + 6*plane_gap,
+
+        // The "anode" cut off plane, here measured from APA
+        // centerline, determines how close to the wires do we
+        // consider any depo.  Anything closer will simply be
+        // discarded, else it will either be drifted or "backed up" to
+        // the response plane.  This is somewhat arbitrary choice.
+        // Placing it w/in the response plane means any depos that are
+        // "backed up" won't have proper field response.  But, the
+        // tighter this is made, the less volume is simulated.
+        // local apa_plane = 0.5*apa_g2g, // pick it to be at the grid wires
+        local apa_plane = 0.5*apa_g2g - plane_gap, // pick it to be at the first induction wires
+
+        // The "response" plane is where the field response functions
+        // start.  Garfield calcualtions start somewhere relative to
+        // something, here's where that is made concrete.  This MUST
+        // match what field response functions also used.
+        response_plane: 10*wc.cm, // relative to collection wires
+        local res_plane = 0.5*apa_w2w + self.response_plane,
+
+        // The cathode plane is like the anode cut off plane.  Any
+        // depo not between the two is dropped prior to drifting.
+        local cpa_plane = apa_cpa - 0.5*cpa_thick,
+
+
+        // The volumes are then defined in terms of these above
+        // numbers.  You can use "wirecell-util wires-info" or
+        // "wirecell-util wires-volumes" or others to understand the
+        // mapping of anode number to the 6 locations in X and Z.  For
+        // Larsoft wires the numbering is column major starting at
+        // small X and Z so the centerline is -/+/-/+/-/+.  Also
+        // important is that the faces are listed "front" first.
+        // Front is the one with the more positive X coordinates and
+        // if we want to ignore a face it is made null.
+        volumes: [
+            {
+                local sign = 2*(n%2)-1,
+                local centerline = sign*apa_cpa,
+                wires: n,       // anode number
+                name: "apa%d"%n,
+                faces:
+                // top, front face is against cryo wall
+                if sign > 0
+                then [
+                    null,
+                    {
+                        anode: centerline - apa_plane,
+                        response: centerline - res_plane,
+                        cathode: centerline - cpa_plane, 
+                    }
+                ]
+                // bottom, back face is against cryo wall
+                else [
+                    {
+                        anode: centerline + apa_plane,
+                        response: centerline + res_plane,
+                        cathode: centerline + cpa_plane, 
+                    },
+                    null
+                ],
+            } for n in std.range(0,3)],
+
+        // This describes some rough, overall bounding box.  It's not
+        // directly needed but can be useful on the Jsonnet side, for
+        // example when defining some simple kinematics.  It is
+        // represented by a ray going from extreme corners of a
+        // rectangular solid.  Again "wirecell-util wires-info" helps
+        // to choose something.
+        bounds : {
+            tail: wc.point(-4.0, 0.0, 0.0, wc.m),
+            head: wc.point(+4.0, 6.1, 7.0, wc.m),
+        }
+    },
+
+    lar: super.lar {
+        // Calibrated from PDHD data.  1.565 was the anode->cathode crossing-track
+        // x-span midpoint [~1.55 over-merge, ~1.57 crosser-truncation]; 1.585 was a
+        // first cathode-end-registration pass on two evt-983 crossers.  Adding two
+        // more evt-983 cathode crossers (n=4) showed 1.585 systematically OVER-shoots
+        // the cathode (3 of 4 cathode ends land +0.9..+2.9 cm PAST it).  The four ends
+        // hold a fixed ~3.5 cm spread (the irreducible +-2 cm t0/velocity/SCE residual),
+        // so no velocity collapses it; v only slides the centroid.  1.576 puts the most-
+        // overshooting crosser just INSIDE the cathode (clus62 +0.84 cm) instead of past
+        // it, so containment (QLMatching cathode_ext1) reverts to ~the C++ default 1.5 cm
+        // and the undershoot residual lands entirely on the benign flag-only window
+        // (cathode_ext2 widened -2.0->-3.0).  This biases global drift-x ~-0.6 cm vs the
+        // 4-crosser mean (well inside the +-2 cm degenerate band).  See
+        // pdhd/docs/clustering-algorithm.md.
+        drift_speed: 1.576 * wc.mm / wc.us,  // 1.580/1.585 (over-shot cathode), 1.565 (A-C x-span), 1.6 (default)
+    },
+
+    daq: super.daq {
+        tick: 512*wc.ns,
+        nticks: 6000,
+        // nf.nsamples inherits from nticks (=6000) but is auto-rebuilt at
+        // runtime to match the post-Resampler frame size (currently 5999).
+        // No manual override is needed.
+    },
+
+    adc: super.adc {
+        resolution: 14, 
+        // reuse ProtoDUNE SP values
+        baselines: [1003.4*wc.millivolt,1003.4*wc.millivolt,507.7*wc.millivolt],
+        fullscale: [0.2*wc.volt, 1.6*wc.volt],
+    },
+
+    elecs: [
+      super.elec {
+        // The FE amplifier gain in units of Voltage/Charge.
+        // Override with: wire-cell -V elecGain=7.8 ...  (string ext-var) or
+        // --ext-code elecGain=7.8 (number, e.g. from dunesw).  Accept both:
+        // parseJson only a string; a number passes through unchanged.
+        gain : (local g = std.extVar("elecGain");
+                if std.isString(g) then std.parseJson(g) else g)*wc.mV/wc.fC,
+
+        // The shaping (aka peaking) time of the amplifier shaper.
+        shaping : 2.2*wc.us,
+      }
+      for n in std.range(0,3)
+    ],
+
+    elec: $.elecs[0], // nominal
+
+    sim: super.sim {
+
+        // For running in LArSoft, the simulation must be in fixed time mode. 
+        fixed: true,
+
+        // The "absolute" time (ie, in G4 time) that the lower edge of
+        // of final readout tick #0 should correspond to.  This is a
+        // "fixed" notion.
+        local tick0_time = -250*wc.us,
+
+        // Open the ductor's gate a bit early.
+        local response_time_offset = $.det.response_plane / $.lar.drift_speed,
+        local response_nticks = wc.roundToInt(response_time_offset / $.daq.tick),
+
+        ductor : {
+            nticks: $.daq.nticks + response_nticks,
+            readout_time: self.nticks * $.daq.tick,
+            start_time: tick0_time - response_time_offset,
+        },
+
+        // To counter the enlarged duration of the ductor, a Reframer
+        // chops off the little early, extra time.  Note, tags depend on how 
+        reframer: {
+            tbin: response_nticks,
+            nticks: $.daq.nticks,
+        }
+        
+    },
+
+    files: {
+        wires: "protodunehd-wires-larsoft-v1.json.bz2",
+
+        fields: [
+            "np04hd-garfield-6paths-mcmc-bestfit.json.bz2",
+            "dune-garfield-1d565.json.bz2",
+            "dune-garfield-1d565.json.bz2",
+            "dune-garfield-1d565.json.bz2",
+        ],
+
+        fltresp: "protodunehd-field-response-filters.json.bz2",
+
+        // Noise model, selected by the FE amplifier gain (`pdhd_noise`,
+        // above -- set the gain in the `elec` field).
+        noise: pdhd_noise($.elec.gain),
+
+
+        chresp: null,
+    },
+
+}
+

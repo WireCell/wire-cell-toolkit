@@ -49,6 +49,10 @@ namespace WireCell::SPNG {
             if (m_config.nbatch == 0) {
                 the_batch = the_batch.squeeze(batch_dimension);
             }
+            //If the shape of the tensor is [N, 1, C, H, W], squeeze the second dimension to make it [N, C, H, W]
+            if(the_batch.dim()==5 && the_batch.size(1)==1) {
+                the_batch = the_batch.squeeze(1);
+            }
 
             log->debug("forwarding {} {}/{}: input:{}",
                        m_config.nbatch ? "batch" : "unbatched",

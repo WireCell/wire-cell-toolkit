@@ -71,6 +71,8 @@ namespace WireCell {
             // config. The minimum norm passed to LassoModel solver.
             double m_lasso_minnorm{1e-6};
 
+            double m_lasso_lambda_scale{1.0};
+
             // config. The blob weighting strategies for each of a
             // number of solving rounds.  This is an arbitrary long
             // sequence of strategy names from the set: "uniform" (all
@@ -92,6 +94,11 @@ namespace WireCell {
             // formed on the measurement uncertainties and is
             // "whitened" via Cholesky decomposition.
             bool m_whiten{true};
+
+            // Config: minimum blob charge for connectivity-based weighting.
+            // Blobs below this threshold are ignored when determining
+            // prev/next slice connections in the uboone weighting strategy.
+            double m_good_blob_charge_th{300.};
 
             int m_count{0};
         };

@@ -197,16 +197,16 @@ bats_load_library wct-bats.sh
         touch $dir/junk.txt
     done
 
-    declare -a got=( $(find_category_version_paths -c testing) )
+    declare -a got=( $(category_version_paths -c testing) )
     [[ ${#got[@]} -eq 1 ]]
     [[ ${got[0]} = "$test_data/testing/$release" ]]
 
-    got=( $(find_category_version_paths -c testing -d) )
+    got=( $(category_version_paths -c testing -d) )
     [[ ${#got[@]} -eq 2 ]]
     [[ ${got[0]} = "$test_data/testing/$release" ]]
     [[ ${got[1]} = "$test_data/testing/$dirty" ]]
 
-    got=( $(find_category_version_paths -c testing -d) )
+    got=( $(category_version_paths -c testing -d) )
     [[ ${#got[@]} -eq 2 ]]
     [[ ${got[0]} = "$test_data/testing/$release" ]]
     [[ ${got[1]} = "$test_data/testing/$dirty" ]]

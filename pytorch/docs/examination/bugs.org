@@ -1,0 +1,297 @@
+#+title: Potential Bugs Examination — wire-cell-toolkit/pytorch
+
+* Summary
+
+This document catalogs potential bugs found during code examination of the
+~pytorch~ package. Issues are categorized by severity:
+- *HIGH*: likely to cause incorrect results or crashes under certain conditions
+- *MEDIUM*: could cause issues in edge cases or non-default configurations
+- *LOW*: minor issues unlikely to cause problems in practice
+
+* HIGH Severity
+
+** BUG-H1: to_itensor copies wrong amount of data when batch or channel > 1
+
+File: ~src/Util.cxx:22-48~
+
+In ~to_itensor()~, the code copies data starting from ~ten[0][0]~ but copies
+~nbyte~ equal to the *full* 4D tensor size:
+
+#+begin_src c++
+  std::vector<size_t> shape = {(size_t) ten.size(0), (size_t) ten.size(1),
+                               (size_t) ten.size(2), (size_t) ten.size(3)};
+  Aux::SimpleTensor *st = new Aux::SimpleTensor(shape, (float*)nullptr);
+  size_t nbyte = 4;
+  for (auto n : shape) nbyte *= n;
+  auto data = (float *) st->data();
+  memcpy(data, (float *) ten[0][0].data_ptr<float>(), nbyte);
+#+end_src
+
+If the tensor has ~batch > 1~ or ~channels > 1~, the pointer ~ten[0][0]~
+points to the start of element [0][0], but the copy size covers the entire
+tensor. This *happens* to work when batch=1 and channels=1 because the data
+is contiguous from [0][0] onward. However:
+
+1. If the tensor is not contiguous (e.g., from a slice or transpose), the
+   ~data_ptr~ from ~ten[0][0]~ may not contain ~nbyte~ of valid contiguous
+   data.
+2. The destination ~SimpleTensor~ has the full 4D shape but the copy starts
+   from the [0][0] sub-tensor — this is semantically confusing and fragile.
+
+*Current impact*: In practice, the DNN models output shape ~{1, 1, nch, nticks}~
+so batch=1, channels=1, and this works. But the code would break silently for
+other tensor shapes.
+
+*Recommendation*: Use ~ten.contiguous().data_ptr<float>()~ instead of
+~ten[0][0].data_ptr<float>()~ and ensure the tensor is contiguous before copy.
+
+** BUG-H2: from_itensor hardcodes GPU device 0
+
+File: ~src/Util.cxx:51-74~
+
+When ~gpu=true~, the code always sends tensors to CUDA device 0:
+
+#+begin_src c++
+  ten = ten.to(torch::Device(torch::kCUDA, 0));
+#+end_src
+
+But the model in ~TorchService~ may have been loaded on a different GPU (e.g.,
+~gpu1~ or ~gpu2~). This means the input tensor and the model are on different
+devices, which will cause a runtime error from PyTorch.
+
+*Current impact*: Works when using a single GPU (device 0). Breaks for
+multi-GPU configurations.
+
+*Recommendation*: Pass the actual ~TorchContext~ or device to ~from_itensor()~
+instead of a boolean flag, or at least pass the device index.
+
+** BUG-H3: TorchScript infinite retry loop is unreachable
+
+File: ~src/TorchScript.cxx:73-115~
+
+The retry logic in ~TorchScript::operator()~ catches ~std::runtime_error~ (which
+rethrows) and then has a catch-all ~(...)~ that sleeps and retries. However:
+
+1. ~torch::jit::Module::forward()~ typically throws ~c10::Error~ which inherits
+   from ~std::exception~ → ~std::runtime_error~. So the first catch block
+   will match and *rethrow*, never reaching the catch-all.
+2. Even if the catch-all were reached, the retry loop would be infinite with
+   no timeout or retry limit — it would hang forever.
+3. The ~from_itensor~ call is *inside* the loop, meaning input tensors are
+   re-created on every retry attempt (wasteful but not harmful).
+
+*Current impact*: The retry mechanism effectively does not function — all
+torch errors are caught by the ~runtime_error~ handler and rethrown.
+
+** BUG-H4: baseline_subtraction boundary handling
+
+File: ~util/src/Array.cxx:59-81~ (used by DNNROIFinding)
+
+The baseline subtraction algorithm has an edge case:
+
+#+begin_src c++
+  for (int it = 0; it < in.rows(); ++it) {
+      if (in(it, ich) == 0) {
+          if (sta < end) {
+              for (int i = sta; i < end + 1; ++i) {
+                  ret(i, ich) = in(i, ich) - (in(sta, ich) + ...);
+              }
+          }
+          sta = it + 1;
+      }
+      else {
+          end = it;
+      }
+  }
+#+end_src
+
+Problem: If a non-zero ROI extends to the very last tick (the waveform doesn't
+end with zero), the ROI is never "closed" — the zero-check that triggers the
+subtraction never fires for the final segment. This means the *last ROI in any
+channel is silently dropped* if it touches the array boundary.
+
+*Current impact*: For typical detector data with 6000 ticks, the last few ticks
+often have zero signal, so this may not manifest. But if the nticks window is
+chosen such that signal extends to the boundary, charge in the final ROI will
+be zeroed out.
+
+*Recommendation*: Add a post-loop check: if ~sta < end~ after the loop
+completes, process the final ROI segment.
+
+* MEDIUM Severity
+
+** BUG-M1: Eigen column-major vs torch row-major transpose confusion
+
+File: ~src/DNNROIFinding.cxx:260-266~
+
+The Eigen-to-torch conversion does:
+
+#+begin_src c++
+  ch.push_back(torch::from_blob(ch_eigen[i].data(), {ch_eigen[i].cols(), ch_eigen[i].rows()}));
+#+end_src
+
+Eigen stores arrays in *column-major* order by default. ~from_blob~ interprets
+the raw memory as *row-major* (C-order). So passing ~{cols, rows}~ effectively
+transposes the data: what Eigen sees as ~(nrows, ncols)~ = ~(nchannels, nticks)~
+becomes a torch tensor of shape ~(nticks, nchannels)~.
+
+Then later:
+
+#+begin_src c++
+  auto batch = torch::stack({torch::transpose(img, 1, 2)}, 0);
+#+end_src
+
+This transposes back to ~(nchannels, nticks)~ and adds the batch dimension.
+
+While the *final result is correct* (the two transposes cancel out), the code is
+fragile and confusing. If the Eigen array type were ever changed to row-major
+(~Eigen::RowMajor~), or if the ~from_blob~ shape were "fixed" to match the
+logical shape, the data would be silently corrupted.
+
+*Recommendation*: Add a clear comment documenting the column-major → row-major
+transpose trick, or explicitly handle the layout conversion.
+
+** BUG-M2: DNNROIFinding output Eigen::Map dimension ordering
+
+File: ~src/DNNROIFinding.cxx:289~
+
+#+begin_src c++
+  Eigen::Map<Eigen::ArrayXXf> out_e(output[0][0].data_ptr<float>(), output.size(3), output.size(2));
+#+end_src
+
+The output tensor has shape ~{1, 1, nchannels, nticks_ds}~. The ~Eigen::Map~
+maps this as ~(size(3), size(2))~ = ~(nticks_ds, nchannels)~. Since ~Eigen::Map~
+with default ~ColMajor~ storage interprets data column-by-column, and torch
+tensors are row-major (last dimension contiguous), this mapping implicitly
+transposes the data.
+
+This works correctly in concert with the subsequent ~mask~ and
+~baseline_subtraction~ operations (which operate on the transposed layout), and
+the explicit ~sp_charge_T.transpose()~ at line 311. However, the implicit
+transpose through memory layout mismatch is a maintenance hazard.
+
+** BUG-M3: arr.sum() == 0.0 is a weak emptiness check
+
+File: ~src/DNNROIFinding.cxx:248~
+
+#+begin_src c++
+  if (arr.sum() == 0.0) {
+      log->warn("call={} no traces for input tag {}, using zeros", ...);
+  }
+#+end_src
+
+Using ~sum() == 0.0~ to detect "no traces" is unreliable because:
+1. Floating-point equality comparison with zero.
+2. A valid trace array could sum to zero if positive and negative values cancel.
+
+*Current impact*: This is only a logging check (the zeros array is still used),
+so it doesn't affect correctness. But the warning message is misleading — it
+says "no traces" when there may actually be traces that sum to zero.
+
+** BUG-M4: TorchContext device name parsing is fragile
+
+File: ~src/TorchContext.cxx:14-28~
+
+#+begin_src c++
+  if (devname == "cpu") {
+      m_dev = torch::Device(torch::kCPU);
+  }
+  else {
+      int devnum = 0;
+      if (devname.size() > 3) {
+          devnum = atoi(devname.substr(3).c_str());
+      }
+      m_dev = torch::Device(torch::kCUDA, devnum);
+  }
+#+end_src
+
+Any string that isn't ~"cpu"~ is treated as a CUDA device. So ~"mps"~, ~"xpu"~,
+or a typo like ~"cpi"~ would silently be interpreted as CUDA:0. Also, ~atoi~
+returns 0 on parse failure, so ~"gpuX"~ → GPU 0 silently.
+
+*Recommendation*: Validate the device name prefix is ~"gpu"~ and handle
+unexpected values with an error.
+
+** BUG-M5: NoGradGuard in TorchContext::connect has limited scope
+
+File: ~src/TorchContext.cxx:18~
+
+The ~NoGradGuard~ at the top of ~connect()~ is a stack-scoped guard. It only
+disables gradients within the ~connect~ method. This is fine for the connect
+method itself, but the comment "Use almost 1/2 the memory and 3/4 the time"
+seems to imply it should have broader effect. The actual benefit during
+~connect()~ is minimal since no tensors are created.
+
+The same comment appears in ~TorchService::configure()~ (line 72) where it has a
+more meaningful effect during model loading.
+
+* LOW Severity
+
+** BUG-L1: Unused ~ind~ variable in to_itensor
+
+File: ~src/Util.cxx:27,43~
+
+The variable ~ind~ is incremented but never used. This is harmless but suggests
+incomplete implementation (perhaps ~seqno~ was intended to use it).
+
+** BUG-L2: Raw ~new~ without smart pointer in to_itensor
+
+File: ~src/Util.cxx:24-25~
+
+#+begin_src c++
+  ITensor::vector *itv = new ITensor::vector;
+  // ...
+  Aux::SimpleTensor *st = new Aux::SimpleTensor(shape, (float*)nullptr);
+#+end_src
+
+While both raw pointers are eventually wrapped in shared_ptrs, there's a
+window where an exception between ~new~ and the shared_ptr wrapping would
+leak memory. In practice, the operations between are unlikely to throw, but
+it's not exception-safe by construction.
+
+** BUG-L3: seqno always 0 in to_itensor
+
+File: ~src/Util.cxx:45~
+
+#+begin_src c++
+  // FIXME use a correct seqno
+  int seqno = 0;
+#+end_src
+
+The sequence number is hardcoded to 0. For the current usage (single
+round-trip through TorchService), this doesn't matter. But if multiple
+tensor sets were tracked, the sequence numbers would collide.
+
+** BUG-L4: TorchScript moves model to device on every call
+
+File: ~src/TorchScript.cxx:80-85~
+
+#+begin_src c++
+  if (m_gpu) {
+      m_module.to(at::kCUDA);
+  }
+  else {
+      m_module.to(at::kCPU);
+  }
+#+end_src
+
+The model is moved to the device on *every single inference call*. If the model
+is already on the correct device, this is a no-op internally in libtorch, but
+the redundant call adds unnecessary overhead.
+
+** BUG-L5: Debug code uses undefined members
+
+File: ~src/DNNROIFinding.cxx:316-322~ (inside ~#ifdef DNNROI_HDF5_DEBUG~)
+
+The debug block references ~m_cfg.debugevalfile~ (line 316) and ~m_anode~
+(line 320), but the actual member is ~m_cfg.debugfile~ and there is no
+~m_anode~ member. This debug code would not compile if the ~DNNROI_HDF5_DEBUG~
+macro were enabled.
+
+** BUG-L6: Typos in comments and documentation
+
+- ~DNNROIFinding.h:1~: "Troch" should be "Torch"
+- ~DNNROIFinding.h:107~: "exeexecuted" should be "executed"
+- ~DNNROIFinding.h:135~: "mathch" should be "match"
+- ~TorchContext.h:1~: missing include guard
+- ~architecture.org:49~: "TorchSemaphor" missing final "e"

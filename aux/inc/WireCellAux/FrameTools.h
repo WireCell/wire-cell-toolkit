@@ -19,7 +19,8 @@ namespace WireCell {
         void dump_frame(WireCell::IFrame::pointer frame, Log::logptr_t log = nullptr);
 
         /// Return brief info string summarizing frame and trace tag.
-        std::string taginfo(const WireCell::IFrame::pointer& frame);
+        std::string taginfo(const WireCell::IFrame::pointer& frame,
+                            int verbosity=0);
 
         /// Return a vector of traces which have no trace tags.  Here,
         /// any frame tags are ignored.  Returned vector of traces has

@@ -107,6 +107,11 @@ function(params) base {
     },
 
     adc: super.adc {
+        // ADC resolution (bits) -- the DUNE FD-HD TPC digitises to 14 bits
+        // (same as PDHD).  The shared base no longer supplies a default
+        // (removed in commit 41e02736), so it must be set explicitly here.
+        resolution: 14,
+
         // per tdr, chapter 2
         // induction plane: 2350 ADC, collection plane: 900 ADC
         baselines: [1003.4*wc.millivolt,1003.4*wc.millivolt,507.7*wc.millivolt],
@@ -127,6 +132,10 @@ function(params) base {
     elec: super.elec {
       postgain: 1.1365, // pulser calibration: 41.649 ADC*tick/1ke
                        // theoretical elec resp (14mV/fC): 36.6475 ADC*tick/1ke
+      // FE amplifier gain.  Follows the PDHD default (14 mV/fC).  The shared
+      // base no longer supplies a gain default (removed in commit 41e02736),
+      // so it must be set explicitly here.
+      gain: 14.0 * wc.mV / wc.fC,
       shaping: 2.2 * wc.us,
     },
 
@@ -160,20 +169,20 @@ function(params) base {
     },
 
     files: {
-        wires: "dune10kt-1x2x6-wires-larsoft-v1.json.bz2", // "protodune-wires-larsoft-v4.json.bz2",
+        wires: "dune10kt-1x2x6-wires-larsoft-v1.json.bz2",
 
+        // Field response: follows PDHD (the generic DUNE HD Garfield 1D
+        // response that PDHD uses for its standard APAs).  Replaces the
+        // former dune-garfield-1d60563.json.bz2, which is absent from
+        // wire-cell-data.
         fields: [
-            // "garfield-1d-3planes-21wires-6impacts-dune-v1.json.bz2",
-            // "garfield-1d-boundary-path-rev-dune.json.bz2",
-            // "dune-garfield-1d565.json.bz2",
-            "dune-garfield-1d60563.json.bz2",
+            "dune-garfield-1d565.json.bz2",
         ],
 
-        // fixme: this is for microboone and probably bogus for
-        // protodune because (at least) the span of MB wire lengths do
-        // not cover pdsp's.
-        noise: "protodune-noise-spectra-v1.json.bz2",
-
+        // Electronics-noise spectra: follows PDHD, matched to the 14 mV/fC
+        // FE gain set in `elec` above.  Replaces the former
+        // protodune-noise-spectra-v1.json.bz2 (a MicroBooNE-derived file).
+        noise: "protodunehd-noise-spectra-14mVfC-v1.json.bz2",
 
         chresp: null,
     },

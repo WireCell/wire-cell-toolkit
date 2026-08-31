@@ -81,23 +81,27 @@ struct FromActivity {
 
     const ISlice::value_t bogus_value{0, 1e-10};
 
-    // A cache of chid->IChannel lookup.  Will replenish with iwplane if cache miss.
+    // A cache of chid->IChannel lookup.  Pre-populated on first use per face.
     std::unordered_map<int, IChannel::pointer> chid2ich;
+    int cached_face_ident{-1};
+    void ensure_cache(const IAnodeFace::pointer& iface)
+    {
+        if (iface->ident() == cached_face_ident) return;
+        for (auto iwplane : iface->planes()) {
+            for (const auto& ich : iwplane->channels()) {
+                chid2ich[ich->ident()] = ich;
+            }
+        }
+        cached_face_ident = iface->ident();
+    }
     IChannel::pointer ichan(int chid, const IAnodeFace::pointer& iface)
     {
+        ensure_cache(iface);
         auto it = chid2ich.find(chid);
-        if (it == chid2ich.end()) { // cache miss
-            for (auto iwplane : iface->planes()) {
-                for (const auto& ich : iwplane->channels()) {
-                    chid2ich[ich->ident()] = ich;
-                }
-            }
-            it = chid2ich.find(chid); // 2nd chance
-        }
         if (it == chid2ich.end()) {
             raise<ValueError>("no chid %d in face %d", chid, iface->ident());
         }
-        return it->second;        
+        return it->second;
     }
 
     ITrace::vector operator()(const IBlob::pointer& iblob, double time0)

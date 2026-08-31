@@ -1,0 +1,43 @@
+files:
+  - label: drifted-cosmics-0-depos
+    name: 3UNets/drifted-cosmics_0_wct-depos.npz
+    dset: "frame_*_1"
+    format: npz
+    xaxis_label: tick
+    yaxis_label: channel within view
+    trace_yaxis_label: collected charge
+    channel_mapping:
+      U: [0, 800]
+      V: [800, 1600]
+      W: [1600, 2560]
+      tick_info: 6000
+    separate_axis:
+      enabled: true
+      yaxis_label: ADC values
+
+  - label: spng-sigproc-cosmics_0_wct-depos
+    name: 3UNets/spng-sigproc-cosmics_0_wct-depos.npz
+    dset: "frame_*_1"
+    format: npz
+    xaxis_label: tick
+    yaxis_label: channel within view
+    trace_yaxis_label: ADC values
+    channel_mapping:
+      U: [0, 800]
+      V: [800, 1600]
+      W: [1600, 2560]
+      tick_info: 6000
+
+  - label: splat-cosmics-0-depos
+    name: 3UNets/splat-cosmics_0_wct-depos.npz
+    dset: "frame_*_1"
+    format: npz
+    xaxis_label: tick
+    yaxis_label: channel within view
+    trace_yaxis_label: collected charge
+    channel_mapping:
+      U: [0, 800]
+      V: [800, 1600]
+      W: [1600, 2560]
+      tick_info: 6000
+

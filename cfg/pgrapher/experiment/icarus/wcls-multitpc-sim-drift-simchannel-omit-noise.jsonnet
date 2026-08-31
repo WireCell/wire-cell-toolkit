@@ -7,7 +7,7 @@ local f = import 'pgrapher/common/funcs.jsonnet';
 local wc = import 'wirecell.jsonnet';
 
 local io = import 'pgrapher/common/fileio.jsonnet';
-local tools_maker = import 'pgrapher/experiment/icarus/tools.jsonnet';
+local tools_maker = import 'pgrapher/experiment/icarus/icarus_tools.jsonnet';
 // local params = import 'pgrapher/experiment/icarus/simparams.jsonnet';
 local base = import 'pgrapher/experiment/icarus/simparams.jsonnet';
 local params = base {
@@ -105,9 +105,6 @@ local wcls_output = {
   // separation.  Both are used in downstream WC code.
   sp_signals: wcls.output.signals(name='spsignals', tags=['gauss', 'wiener']),
 
-  // save "threshold" from normal decon for each channel noise
-  // used in imaging
-  sp_thresholds: wcls.output.thresholds(name='spthresholds', tags=['threshold']),
 };
 
 //local deposio = io.numpy.depos(output);

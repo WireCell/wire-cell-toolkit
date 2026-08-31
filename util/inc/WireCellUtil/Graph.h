@@ -1,3 +1,6 @@
+// Include this header and not directly any bare boost/* in order to avoid some
+// compiler warnings.
+
 #ifndef WIRECELL_GRAPH
 #define WIRECELL_GRAPH
 
@@ -17,6 +20,9 @@
 #include <boost/graph/filtered_graph.hpp>
 #include <boost/graph/dijkstra_shortest_paths.hpp>
 #include <boost/graph/prim_minimum_spanning_tree.hpp>
+#include <boost/graph/kruskal_min_spanning_tree.hpp>
+#include <boost/graph/connected_components.hpp>
+#include <boost/graph/properties.hpp>
 
 #ifdef __clang__
 #  if defined(__has_warning)
@@ -44,6 +50,29 @@
 
 #include <boost/graph/copy.hpp> // keep this at the bottom, ref clus/test/doctest_boost_dijkstra.cxx
 
+#include <utility>
 
+namespace WireCell {
+
+    // Move the contents of one boost::adjacency_list into another.
+    //
+    // boost::adjacency_list (through at least 1.85) user-declares its
+    // copy constructor/assignment and provides no move members, so
+    // move-construction and move-assignment of graphs silently degrade
+    // to a whole-graph copy_impl().  This transfers the underlying
+    // vertex and edge containers instead.  Container moves do not
+    // relocate elements, so the stored edge iterators and edge-property
+    // pointers held inside remain valid and vertex/edge iteration order
+    // is exactly the source's.  The graph-level property is swapped
+    // into dst (src receives dst's prior one).  src is left empty.
+    template <typename AdjacencyList>
+    inline void move_graph(AdjacencyList& dst, AdjacencyList& src)
+    {
+        dst.m_vertices = std::move(src.m_vertices);
+        dst.m_edges = std::move(src.m_edges);
+        dst.m_property.swap(src.m_property);
+        src.clear();
+    }
+}
 
 #endif

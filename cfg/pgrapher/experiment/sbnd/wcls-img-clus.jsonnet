@@ -50,7 +50,9 @@ local img_maker = img();
 local img_pipes = [img_maker.per_anode(a, "multi-3view", add_dump = false) for a in tools.anodes];
 
 local clus = import 'pgrapher/experiment/sbnd/clus.jsonnet';
-local clus_maker = clus();
+// reality gates the data-only pos_offset transverse calibration (data -> on,
+// sim -> off); see cfg/.../sbnd/clus.jsonnet pos_offset comment.
+local clus_maker = clus(reality=reality);
 local clus_pipes = [clus_maker.per_volume(tools.anodes[0], face=0, dump=true), clus_maker.per_volume(tools.anodes[1], face=1, dump=true)];
 
 local img_clus_pipe = [g.intern(

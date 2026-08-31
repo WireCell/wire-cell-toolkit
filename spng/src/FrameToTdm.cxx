@@ -323,15 +323,15 @@ namespace WireCell::SPNG {
                     int tbin = trace->tbin();
                     int nbins = trace->charge().size();
                     
-                    group_tirs.emplace_back(TIR{trace, summary_index, row});
-
                     if (group_tirs.empty()) { // first time
                         tbeg = tbin;
                         tend = tbin+nbins;
-                        continue;
                     }
-                    if (tbeg < tbin) { tbeg = tbin; }
-                    if (tend < tbin+nbins) { tend = tbin+nbins;}
+                    else {
+                      if (tbeg < tbin) { tbeg = tbin; }
+                      if (tend < tbin+nbins) { tend = tbin+nbins;}
+                    }
+                    group_tirs.emplace_back(TIR{trace, summary_index, row});
 
                 }
                 int nrows = group.chid2row.size(); // span all channels as traces may be sparse

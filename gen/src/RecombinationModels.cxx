@@ -6,9 +6,9 @@
 
 WIRECELL_FACTORY(MipRecombination, WireCell::Gen::MipRecombination, WireCell::IRecombinationModel,
                  WireCell::IConfigurable)
-WIRECELL_FACTORY(BirksRecombination, WireCell::Gen::MipRecombination, WireCell::IRecombinationModel,
+WIRECELL_FACTORY(BirksRecombination, WireCell::Gen::BirksRecombination, WireCell::IRecombinationModel,
                  WireCell::IConfigurable)
-WIRECELL_FACTORY(BoxRecombination, WireCell::Gen::MipRecombination, WireCell::IRecombinationModel,
+WIRECELL_FACTORY(BoxRecombination, WireCell::Gen::BoxRecombination, WireCell::IRecombinationModel,
                  WireCell::IConfigurable)
 
 using namespace WireCell;
@@ -23,6 +23,7 @@ Gen::MipRecombination::MipRecombination(double Rmip, double Wi)
 }
 Gen::MipRecombination::~MipRecombination() {}
 double Gen::MipRecombination::operator()(double dE, double dX) { return m_rmip * dE / m_wi; }
+double Gen::MipRecombination::dE(double dQ, double dX) { return dQ * m_wi / m_rmip; }
 void Gen::MipRecombination::configure(const WireCell::Configuration& config)
 {
     m_rmip = get(config, "Rmip", m_rmip);
@@ -50,8 +51,19 @@ Gen::BirksRecombination::BirksRecombination(double Efield, double A3t, double k3
 Gen::BirksRecombination::~BirksRecombination() {}
 double Gen::BirksRecombination::operator()(double dE, double dX)
 {
+    // dE/dX and k3t/(Efield*rho) are both expressed in the WCT system of
+    // units so their product is already dimensionless.  (An earlier version
+    // multiplied dE/dX by a spurious units::cm, inflating the quenching
+    // term 10x and yielding R~0.32 instead of ~0.70 for a MIP at 500 V/cm.)
     const double R = m_a3t / (1 + (dE / dX) * m_k3t / (m_efield * m_rho));
     return R * dE / m_wi;
+}
+double Gen::BirksRecombination::dE(double dQ, double dX)
+{
+    const double numerator = dQ;
+    const double denominator = m_a3t/m_wi - dQ/dX * m_k3t/(m_efield*m_rho);
+
+    return numerator / denominator;
 }
 void Gen::BirksRecombination::configure(const WireCell::Configuration& config)
 {
@@ -86,9 +98,20 @@ Gen::BoxRecombination::BoxRecombination(double Efield, double A, double B, doubl
 Gen::BoxRecombination::~BoxRecombination() {}
 double Gen::BoxRecombination::operator()(double dE, double dX)
 {
+    // See the units note in BirksRecombination::operator() -- dE/dX times
+    // B/(Efield*rho) is already dimensionless in the WCT system of units.
     const double tmp = (dE / dX) * m_b / (m_efield * m_rho);
     const double R = std::log(m_a + tmp) / tmp;
     return R * dE / m_wi;
+}
+double Gen::BoxRecombination::dE(double dQ, double dX)
+{
+    const double coeff = m_b / (m_efield * m_rho);
+    const double a_exp = std::exp(dQ/dX * coeff * m_wi);
+    const double numerator = (a_exp - m_a) * dX;
+    const double denominator = coeff;
+
+    return numerator / denominator;
 }
 void Gen::BoxRecombination::configure(const WireCell::Configuration& config)
 {

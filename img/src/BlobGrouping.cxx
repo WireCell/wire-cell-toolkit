@@ -38,6 +38,18 @@ void doit(cluster_graph_t& cgraph)
     // Count to set measure idents.
     int tot_meas = 0;
 
+    // Per-wire cache of adjacent channel descriptors, filled lazily in the
+    // wire's adjacency iteration order.  A wire's channel edges never change
+    // during this function (only measure edges to blobs and channels are
+    // added), so replaying the cached vector visits exactly the channels the
+    // adjacency scan would visit, in the same order.  Without the cache the
+    // per-(blob,wire) scan walks the wire's full adjacency set -- dominated
+    // by the *other blobs* sharing the wire -- making this loop quadratic in
+    // the number of blobs (65% of total imaging CPU on a busy PDHD anode).
+    const size_t nverts_in = boost::num_vertices(cgraph);
+    std::vector<std::vector<cluster_vertex_t>> w2c(nverts_in);
+    std::vector<char> w2c_filled(nverts_in, 0);
+
     for (const auto& svtx : vertex_range(cgraph)) {
         const auto& snode = cgraph[svtx];
         const char scode = snode.code();
@@ -46,7 +58,7 @@ void doit(cluster_graph_t& cgraph)
         }
 
         const auto islice = std::get<ISlice::pointer>(snode.ptr);
-        ISlice::map_t activity = islice->activity();
+        const ISlice::map_t& activity = islice->activity();
 
         // Recieve b and c reached from this s per plane
         std::vector<bcdesc::graph_t> bcs(3); // fixme: hard-code 3 planes
@@ -77,13 +89,18 @@ void doit(cluster_graph_t& cgraph)
                 
                 const auto iwire = std::get<IWire::pointer>(wnode.ptr);
 
-                // channels
-                for (auto cvtx : mir(boost::adjacent_vertices(wvtx, cgraph))) {
-                    const auto& cnode = cgraph[cvtx];
-                    const char ccode = cnode.code();
-                    if (ccode != 'c') {
-                        continue;
+                if (!w2c_filled[wvtx]) {
+                    w2c_filled[wvtx] = 1;
+                    for (auto cvtx : mir(boost::adjacent_vertices(wvtx, cgraph))) {
+                        if (cgraph[cvtx].code() == 'c') {
+                            w2c[wvtx].push_back(cvtx);
+                        }
                     }
+                }
+
+                // channels
+                for (auto cvtx : w2c[wvtx]) {
+                    const auto& cnode = cgraph[cvtx];
 
                     auto ich = std::get<IChannel::pointer>(cnode.ptr);
                     const auto wpid = ich->planeid();
@@ -141,7 +158,11 @@ void doit(cluster_graph_t& cgraph)
                 const auto& node = cgraph[vtx];
                 if (node.code() == 'c') {
                     auto ich = std::get<IChannel::pointer>(node.ptr);
-                    const auto sig = activity[ich];
+                    // find with zero default == previous operator[] on a local
+                    // copy of the activity map (default-inserted {0,0}).
+                    static const ISlice::value_t zero_signal{};
+                    const auto ait = activity.find(ich);
+                    const auto sig = (ait == activity.end()) ? zero_signal : ait->second;
                     const auto wpid = ich->planeid();
                     sm->sig += sig;
                     sm->wpid = wpid;
@@ -196,7 +217,7 @@ bool Img::BlobGrouping::operator()(const input_pointer& in, output_pointer& out)
                boost::num_vertices(outgr),
                boost::num_edges(outgr));
 
-    out = std::make_shared<Aux::SimpleCluster>(outgr, in->ident());
+    out = std::make_shared<Aux::SimpleCluster>(std::move(outgr), in->ident());
     ++m_count;
     return true;
 

@@ -92,27 +92,78 @@ namespace WireCell::NFKDVec {
         explicit Tree(size_t dimensionality)
             : m_points(dimensionality)
         {
+            bind_owned();
         }
 
         // Must use this for static, may use it for dynamic.
         explicit Tree(const points_type& points)
             : m_points(points.size())
         {
+            bind_owned();
             append(points);
+        }
+
+        /// Bind external per-dimension coordinate columns.  The tree then
+        /// reads coordinates directly from the caller's columns instead of
+        /// copying them into its own (zero-copy).  The caller must keep the
+        /// column vectors alive and append-only for the lifetime of the
+        /// tree, and announce growth via append_external().  Must be called
+        /// before any points are appended.
+        void bind_external(const std::vector<const coordinates_type*>& cols) {
+            if (cols.size() != ndim()) {
+                raise<LogicError>("NFKD::Tree: bind_external dimension mismatch: %d != %d",
+                                  cols.size(), ndim());
+            }
+            if (npoints()) {
+                raise<LogicError>("NFKD::Tree: bind_external requires an empty tree");
+            }
+            m_cols = cols;
+            m_external = true;
+        }
+
+        /// Announce that `adding` points have been appended to the bound
+        /// external columns.  Mirrors append() block accounting exactly.
+        void append_external(size_t adding) {
+            if (!m_external) {
+                raise<LogicError>("NFKD::Tree: append_external requires bind_external");
+            }
+            const size_t block_index = m_nblocks++;
+            if (!adding) {
+                return;
+            }
+            const size_t newsize = m_cols[0]->size();
+            const size_t oldsize = m_major_indices.size();
+            if (newsize != oldsize + adding) {
+                raise<LogicError>("NFKD::Tree: append_external size mismatch: %d != %d + %d",
+                                  newsize, oldsize, adding);
+            }
+            m_major_indices.resize(newsize, block_index);
+            m_minor_indices.resize(newsize);
+            std::iota(m_minor_indices.begin() + oldsize, m_minor_indices.end(), 0);
+            this->addn<nfkdindex_type>(oldsize, adding);
         }
 
         ~Tree()
         {
         }
 
+        // Non-copyable, non-movable: a built nanoflann index references this
+        // object as its dataset adaptor, and m_cols points into m_points (or
+        // caller storage).  Relocation would dangle both.
+        Tree(const Tree&) = delete;
+        Tree& operator=(const Tree&) = delete;
+        Tree(Tree&&) = delete;
+        Tree& operator=(Tree&&) = delete;
+
         // Return the number of dimensions of the K-D space
         const size_t ndim() const { return m_points.size(); }
 
-        // Access the collection of points.
+        // Access the collection of points.  Owned-storage mode only; an
+        // external-bound tree (bind_external) keeps no copy here.
         const points_type& points() const { return m_points; }
         size_t npoints() const {
-            if (m_points.empty()) { return 0; }
-            return m_points[0].size();
+            if (m_cols.empty()) { return 0; }
+            return m_cols[0]->size();
         }
 
         // Build and return point at index across coordinate arrays.
@@ -120,7 +171,7 @@ namespace WireCell::NFKDVec {
             const size_t ndims = ndim();
             std::vector<element_type> ret(ndims);
             for (size_t dim=0; dim<ndims; ++dim) {
-                ret[dim] = m_points.at(dim).at(index);
+                ret[dim] = m_cols.at(dim)->at(index);
             }
             return ret;
         }
@@ -129,9 +180,9 @@ namespace WireCell::NFKDVec {
             if (ndim() != 3) {
                 raise<LogicError>("NFKD::Tree: point3d requires 3 dimension, have %d", ndim());
             }
-            return Point(m_points.at(0).at(index),
-                         m_points.at(1).at(index),
-                         m_points.at(2).at(index));
+            return Point(m_cols.at(0)->at(index),
+                         m_cols.at(1)->at(index),
+                         m_cols.at(2)->at(index));
         }
 
         // Access the vector of block number by point index.
@@ -141,7 +192,7 @@ namespace WireCell::NFKDVec {
         // Number of blocks that have been appended.  Note, this is not
         // necessarily the value of the last element of major_indices.  Empty
         // blocks can be appended and they are counted but have no entries in
-        // the {major,minor_indices.
+        // the {major,minor}_indices.
         size_t nblocks() const {
             return m_nblocks;
         }
@@ -158,6 +209,9 @@ namespace WireCell::NFKDVec {
 
         // Append one PointCloud::Dataset selection (vector of PC arrays)
         void append(const PointCloud::Dataset::selection_t& sel) {
+            if (m_external) {
+                raise<LogicError>("NFKD::Tree: owned append on external-bound tree");
+            }
             const size_t block_index = m_nblocks++;
 
             if (sel.empty()) {
@@ -187,6 +241,9 @@ namespace WireCell::NFKDVec {
 
         // Append with vector of vector of element.
         void append(const points_type& pts) {
+            if (m_external) {
+                raise<LogicError>("NFKD::Tree: owned append on external-bound tree");
+            }
             const size_t block_index = m_nblocks++;
 
             if (pts.empty()) {
@@ -227,6 +284,23 @@ namespace WireCell::NFKDVec {
             }
             this->prepquery<nfkdindex_type>();
 
+            // Fast path for k=1 (the common nearest/existence query, e.g. the
+            // good-point tests in clustering).  Use stack scalars instead of two
+            // single-element heap vectors; nanoflann writes the same index and
+            // distance, so the result is bit-identical.
+            if (kay == 1) {
+                size_t index = 0;
+                distance_type distance = 0;
+                nanoflann::KNNResultSet<element_type> nf(1);
+                nf.init(&index, &distance);
+                m_nfkdindex->findNeighbors(nf, query_point.data(),
+                                           nanoflann::SearchParameters());
+                if (nf.size() > 0) {
+                    ret.emplace_back(index, distance);
+                }
+                return ret;
+            }
+
             std::vector<size_t> indices(kay,0);
             std::vector<distance_type> distances(kay, 0);
             nanoflann::KNNResultSet<element_type> nf(kay);
@@ -241,6 +315,29 @@ namespace WireCell::NFKDVec {
             return ret;
         }
 
+
+        // Single-nearest-neighbor query without the result-vector heap
+        // allocation of knn(1).  Returns true and fills index/metric when a
+        // neighbor exists; the search and results are identical to knn(1).
+        template<typename VectorLike>
+        bool knn1(const VectorLike& query_point, size_t& index, distance_type& metric) const {
+            if (!npoints() || query_point.size() != ndim()) {
+                return false;
+            }
+            this->prepquery<nfkdindex_type>();
+            size_t idx = 0;
+            distance_type dist = 0;
+            nanoflann::KNNResultSet<element_type> nf(1);
+            nf.init(&idx, &dist);
+            m_nfkdindex->findNeighbors(nf, query_point.data(),
+                                       nanoflann::SearchParameters());
+            if (nf.size() == 0) {
+                return false;
+            }
+            index = idx;
+            metric = dist;
+            return true;
+        }
 
         template<typename VectorLike>
         results_type radius(distance_type rad, const VectorLike& query_point) const {
@@ -263,6 +360,38 @@ namespace WireCell::NFKDVec {
             return ret;
         }
 
+        // Result set for exists_within(): terminates the k-d tree search at
+        // the first point strictly inside the squared radius.  Subtree
+        // pruning uses worstDist() == r2, identical to a radius() query, and
+        // the strict '<' matches both RadiusResultSet collection and the
+        // knn(1)-based existence test (res[0].second < radius^2).
+        struct exists_result_set_t {
+            distance_type r2;
+            bool found{false};
+            explicit exists_result_set_t(distance_type r2_) : r2(r2_) {}
+            bool full() const { return found; }
+            bool addPoint(distance_type dist, size_t /*index*/) {
+                if (dist < r2) { found = true; return false; }
+                return true;
+            }
+            distance_type worstDist() const { return r2; }
+        };
+
+        // Return true iff any point lies strictly within squared distance
+        // rad of the query point.  Boolean-identical to
+        // knn(1, q)[0].second < rad, but the search stops at the first
+        // in-radius point instead of resolving the true nearest neighbor.
+        template<typename VectorLike>
+        bool exists_within(distance_type rad, const VectorLike& query_point) const {
+            if (rad==0 || !npoints() || query_point.size() != ndim()) {
+                return false;
+            }
+            this->prepquery<nfkdindex_type>();
+            exists_result_set_t rs(rad);
+            m_nfkdindex->findNeighbors(rs, query_point.data());
+            return rs.found;
+        }
+
         // nanoflann API.  Total number of points.
         inline size_t kdtree_get_point_count() const {
             return npoints();
@@ -276,11 +405,22 @@ namespace WireCell::NFKDVec {
         // nanoflann API.  Value of a point's dimension coordinate.
         inline element_type kdtree_get_pt(size_t idx, size_t dim) const {
             ++m_point_calls;
-            return m_points.at(dim).at(idx);
+            return m_cols[dim]->at(idx);
         }
 
       private:
         points_type m_points;
+        // Per-dimension column pointers: into m_points (owned mode, the
+        // inner vectors have stable addresses) or caller storage
+        // (bind_external).  All coordinate reads go through this.
+        std::vector<const coordinates_type*> m_cols;
+        bool m_external{false};
+        void bind_owned() {
+            m_cols.clear();
+            for (const auto& col : m_points) {
+                m_cols.push_back(&col);
+            }
+        }
         size_t m_nblocks{0};     // how many times we have been appended to.
         // The index is made lazily
         mutable std::unique_ptr<nfkdindex_type> m_nfkdindex;

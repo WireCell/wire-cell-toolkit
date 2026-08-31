@@ -10,8 +10,18 @@ function(params, tools) {
 
     local nanodes = std.length(tools.anodes),
 
+    // Drift-volume index for an anode: bottom CRMs (ident < half) -> 0, top
+    // -> 1.  Clamped to the number of field responses so single-drift params
+    // (one field/elec/noise) map every anode to index 0.
+    local noise_files = if std.objectHas(params.files, "noises")
+                        then params.files.noises else [params.files.noise],
+    local ndrift = std.length(noise_files),
+    local drift_idx = function(anode)
+        local raw = if anode.data.ident < std.length(params.det.volumes) / 2
+                    then 0 else 1;
+        if raw < ndrift then raw else ndrift - 1,
 
-    local ductors = [sim.make_depotransform("ductor%d"%anode.data.ident, anode, tools.pirs[0]) for anode in tools.anodes],
+    local ductors = [sim.make_depotransform("ductor%d"%anode.data.ident, anode, tools.pirs[drift_idx(anode)]) for anode in tools.anodes],
 
     local reframers = [
         g.pnode({
@@ -28,14 +38,14 @@ function(params, tools) {
         }, nin=1, nout=1) for anode in tools.anodes],
 
     // fixme: see https://github.com/WireCell/wire-cell-gen/issues/29
-    local make_noise_model = function(anode, csdb=null) {
+    local make_noise_model = function(anode, spectra, csdb=null) {
         type: "EmpiricalNoiseModel",
         name: "empericalnoise%s"% anode.name,
         data: {
             anode: wc.tn(anode),
             dft: wc.tn(tools.dft),
             chanstat: if std.type(csdb) == "null" then "" else wc.tn(csdb),
-            spectra_file: params.files.noise,
+            spectra_file: spectra,
             nsamples: params.daq.nticks,
             period: params.daq.tick,
             wire_length_scale: 1.0*wc.cm, // optimization binning
@@ -43,13 +53,16 @@ function(params, tools) {
         uses: [anode, tools.dft] + if std.type(csdb) == "null" then [] else [csdb],
     },
 
-    local mega_anode = {
+    // Electronics-noise spectra synced to protodunevd: top and bottom drift
+    // volumes use different spectra, so there is one shared noise model per
+    // drift (noise_files = [bottom, top]; single-drift params has just one).
+    local mega_anode = function(d) {
         type: 'MegaAnodePlane',
-        name: 'meganodes',
+        name: 'meganodes%d' % d,
         data: {
-            anodes_tn: [wc.tn(anode) for anode in tools.anodes],
+            anodes_tn: [wc.tn(a) for a in tools.anodes if drift_idx(a) == d],
         },
-        uses: [anode for anode in tools.anodes],
+        uses: [a for a in tools.anodes if drift_idx(a) == d],
     },
 
     local add_noise = function(model, name="") g.pnode({
@@ -63,11 +76,10 @@ function(params, tools) {
             replacement_percentage: 0.02, // random optimization
         }}, nin=1, nout=1, uses=[tools.random, tools.dft, model]),
 
-    // TODO: make this an option?
-    local use_shared_model = true,
-    local noises = if use_shared_model == true
-    then [add_noise(make_noise_model(mega_anode), anode.name) for anode in tools.anodes]
-    else [add_noise(make_noise_model(anode), anode.name) for anode in tools.anodes],
+    local noises = [
+        add_noise(make_noise_model(mega_anode(drift_idx(anode)),
+                                   noise_files[drift_idx(anode)]), anode.name)
+        for anode in tools.anodes],
 
     local digitizers = [
         sim.digitizer(anode, name="digitizer%d"%anode.data.ident, tag="orig%d"%anode.data.ident)

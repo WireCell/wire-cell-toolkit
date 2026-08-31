@@ -160,8 +160,8 @@ local g = import "pgraph.jsonnet";
         // connect comb_fan_out-piples
         ret : g.intern(
             innodes = [fout_node],
-            centernodes = pipelines,
-            outnodes = [],
+            centernodes = [],
+            outnodes = pipelines,
             edges = [g.edge(fout_node,pipelines[n],n,0) for n in std.range(0,npipe-1)]
         ),
     }.ret,

@@ -34,6 +34,21 @@ function(params, anode, field, n, rms_cuts=[])
     // list then last mention wins.
     channel_info: [
 
+      // Note: all active freqmasks here are empty.  The commented-out blocks
+      // below use the legacy {value, lobin, hibin} schema and would NOT
+      // auto-mirror conjugate-frequency bins under OmniChannelNoiseDB's
+      // current parser.  iceberg's Microboone::OneChannelNoise consumer
+      // (Microboone.cxx, half-complex fwd_r2c) reads m_noisedb->noise(ch)
+      // for ALL channels (no plane gating), so reviving notches here would
+      // really exercise the freqmask path.  Note also that the
+      // wcls-sim-drift-simchannel-splusn-{correlated,uncorrelated}.jsonnet
+      // variants override RUN_NTICKS and chndb's nsamples together, so they
+      // already match — but OmniChannelNoiseDB::set_nsamples() additionally
+      // protects against any future drift between daq.nticks and nf.nsamples.
+      // When reactivating notches, prefer wc.freqmasks_phys([freqs], delta)
+      // from wirecell.jsonnet for runtime-resolved bins and automatic
+      // conjugate-mirror.
+
       // First entry provides default channel info across ALL
       // channels.  Subsequent entries override a subset of channels
       // with a subset of these entries.  There's no reason to

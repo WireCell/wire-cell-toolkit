@@ -1,0 +1,53 @@
+* Test job
+
+#+begin_example
+bats-debug -f steiner clus/test/test-porting.bats
+#+end_example
+
+This merely appends ~MakeFiducialUtils~ to MABC pipeline after the "steiner"
+related. 
+
+However, the recently completed "steiner" porting has left this broken.  It can
+be repeated with the N-1 test:
+
+#+begin_example
+bats-debug -f steiner clus/test/test-porting.bats
+#+end_example
+
+
+* Instructions for Xin
+
+- FiducialUtils is the replacement for ToyFiducial
+- It separates data into "static", "dynamic" and "internal".
+  - Static is intended to hold data that is unchanged over many "events".
+  - Dynamic is meant to hold data about the current "event".
+  - Internal is whatever cache derived from static+dynamic needed by the query methods
+- You may extend these three structs as needed.
+- You may add more "query" methods as needed.
+- The initial InternalData has a "dummy" placeholder.
+  - It should be removed when you start filling in the ported details.
+- example config
+  - ~pgrapher/common/clus.jsonnet~ provides a ~fiducialutils()~ function to add to an MABC pipeline.
+  - a new ~clus/test/test-porting/stm/main.jsonnet~ provides a top-level config
+- example job
+  - ~bats-debug -f stm clus/test/test-porting.bats~
+
+
+Next steps to make an ~StmTagger~ (or whatever name) "ensemble visitor" to do
+whatever ~Check_STM~ does:
+
+- Make a new "ensemble visitor" class.
+  - You can use the new ~clus/src/make_fiducialutils.cxx~ as an example.
+- Add a config maker in  ~pgrapher/common/clus.jsonnet~
+- Extend  ~clus/test/test-porting/stm/main.jsonnet~ to include it in the MABC pipeline
+
+
+
+
+* Questions to Xin
+
+
+- [ ] The "offset_x" and/or "step" in the "query methods" are given default
+  values in WCP's ToyFiducial.  Are these values indeed the same for all calls
+  for a given "event"?  If so, their values should be moved out of the method
+  arguments and into the "StaticData" struct.

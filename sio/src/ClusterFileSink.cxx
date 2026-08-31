@@ -78,6 +78,17 @@ void Sio::ClusterFileSink::dotify(const ICluster& cluster)
 
 void Sio::ClusterFileSink::numpify(const ICluster& cluster)
 {
+    // An empty cluster graph yields no arrays, hence no archive members,
+    // and a downstream ClusterFileSource would then see EOS instead of an
+    // empty cluster -- desynchronizing multi-stream consumers (e.g. the
+    // live/dead pair feeding PointTreeBuilding).  The JSON serializer
+    // always writes one (tiny) member per cluster and the source
+    // dispatches per-member by extension, so fall back to it here.
+    if (boost::num_vertices(cluster.graph()) == 0) {
+        jsonify(cluster);
+        return;
+    }
+
     auto fn = [&](const std::string& name) {
         return this->fqn(cluster, name, "npy");
     };

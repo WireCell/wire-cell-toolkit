@@ -64,17 +64,45 @@ namespace WireCell::Aux::BlobShadow {
         WirePlaneId wpid{0};
     };
 
-    using graph_t = boost::adjacency_list<boost::multisetS, boost::vecS,
+    // All-vecS storage: shadow edges on busy events number in the tens of
+    // millions and the node-based defaults (multisetS out-edges + listS
+    // edge list) cost ~200 B of container overhead per edge.  Safe because
+    // the builder accumulates edges in a side table and adds them to the
+    // graph in one final pass -- no edge descriptor is ever held across an
+    // add_edge() (vecS edge storage invalidates them on growth).  Consumers
+    // iterate only the global edges() list, whose order remains add_edge()
+    // insertion order.
+    using graph_t = boost::adjacency_list<boost::vecS, boost::vecS,
                                           boost::undirectedS,
                                           Node, Edge, Graph>;
     using vdesc_t = boost::graph_traits<graph_t>::vertex_descriptor;
     using edesc_t = boost::graph_traits<graph_t>::edge_descriptor;
 
+    /// Flat shadow representation.  Vertex v of the equivalent shadow graph
+    /// is nodes[v]; edges are in the same first-encounter order that
+    /// edges(graph) of the equivalent graph would yield.  Production
+    /// consumers (ClusterShadow) only ever iterate that edge list, so the
+    /// flat form replaces the graph wholesale: no boost edge containers
+    /// (which cost more than the edges themselves at busy-event counts).
+    struct EdgeRec {
+        vdesc_t v1, v2;
+        Edge prop;
+    };
+    struct Shadows {
+        char stype;
+        std::vector<Node> nodes;
+        std::vector<EdgeRec> edges;
+    };
+
+    // Return flat shadows for either a wire-shadow (code='w') or a
+    // channel-shadow (code='c').
+    Shadows shadow_list(const cluster_graph_t& cgraph, char code);
 
     // Return a shadow graph for either a wire-shadow (code='w') or a
-    // channel-shadow (code='c').
+    // channel-shadow (code='c').  Equivalent graph form of shadow_list(),
+    // for consumers that want graph algorithms run on the shadows.
     graph_t shadow(const cluster_graph_t& cgraph, char code);
-     
+
 }
 
 #endif

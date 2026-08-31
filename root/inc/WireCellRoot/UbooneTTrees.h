@@ -40,6 +40,8 @@ namespace WireCell::Root {
         Long64_t m_nentries{0}; // number of entries in the trees.
         Long64_t m_entry{-1};   // not yet loaded.  Only use next() to advance
 
+        
+
     public:
 
         // The data is available after construction and refreshed on each call
@@ -55,6 +57,11 @@ namespace WireCell::Root {
             int nrebin{0};
             // float unit_dis{0};
 
+            unsigned int triggerBits{0};
+            int time_offset{0};
+            double lowerwindow{0};
+            double upperwindow{0};
+
             void set_addresses(TTree& tree) {
                 tree.SetBranchAddress("triggerTime", &triggerTime);
                 tree.SetBranchAddress("runNo", &runNo);
@@ -62,6 +69,32 @@ namespace WireCell::Root {
                 tree.SetBranchAddress("eventNo", &eventNo);
                 tree.SetBranchAddress("nrebin", &nrebin);
                 // tree.SetBranchAddress("unit_dis",&unit_dis);
+
+                tree.SetBranchAddress("triggerBits", &triggerBits);
+                tree.SetBranchAddress("time_offset", &time_offset);
+            }
+
+            void calculate_beam_windows() {
+                lowerwindow = 0;
+                upperwindow = 0;
+                
+                // Following the prototype logic
+                if((triggerBits>>11) & 1U) { 
+                    lowerwindow = 3.1875; 
+                    upperwindow = 4.96876;
+                } // bnb 
+                if ((triggerBits>>12) & 1U) { 
+                    lowerwindow = 4.9295; 
+                    upperwindow = 16.6483;
+                } // NUMI
+                if(((triggerBits>>9) & 1U) && time_offset != 5) { 
+                    lowerwindow = 3.5625; 
+                    upperwindow = 5.34376; 
+                } //extbnb
+                if (((triggerBits>>9) & 1U) && time_offset == 5) {
+                    lowerwindow = 5.3045; 
+                    upperwindow = 17.0233;
+                } // EXTNUMI
             }
         };
         Header header;
@@ -99,8 +132,10 @@ namespace WireCell::Root {
             std::vector<std::vector<int>> *wire_index_v_vec{nullptr};
             std::vector<std::vector<int>> *wire_index_w_vec{nullptr};
 
-            // Lord, forgive us our sins.
-            std::vector<std::vector<int>*> flag_uvw;
+            // Return current flag pointers (must be called after GetEntry)
+            std::vector<std::vector<int>*> get_flag_uvw() const {
+                return {flag_u_vec, flag_v_vec, flag_w_vec};
+            }
 
             virtual const std::vector<int>& cluster_ids() const
             {
@@ -109,10 +144,10 @@ namespace WireCell::Root {
 
 
             void set_addresses(TTree& tree, int kind = 0) {
-                
-                tree.SetBranchAddress("cluster_id", &cluster_id_vec); 
+
+                tree.SetBranchAddress("cluster_id", &cluster_id_vec);
                 // in the uboone files, parent_cluster_id, is the main_cluster, which is used in T_match tree
-                // the cluster_id is the individual cluster id, some of them are associated with the main cluster, 
+                // the cluster_id is the individual cluster id, some of them are associated with the main cluster,
                 // not directly used in T_match tree
                 tree.SetBranchAddress("flag_u", &flag_u_vec);
                 tree.SetBranchAddress("flag_v", &flag_v_vec);
@@ -120,9 +155,6 @@ namespace WireCell::Root {
                 tree.SetBranchAddress("wire_index_u", &wire_index_u_vec);
                 tree.SetBranchAddress("wire_index_v", &wire_index_v_vec);
                 tree.SetBranchAddress("wire_index_w", &wire_index_w_vec);
-
-                // derived
-                flag_uvw = {flag_u_vec, flag_v_vec, flag_w_vec};
             }
         };
 
@@ -135,20 +167,34 @@ namespace WireCell::Root {
 
             virtual const std::vector<int>& cluster_ids() const
             {
+                // load the parent cluster_ids ...
                 return *parent_cluster_id_vec;
-                // return *cluster_id_vec;
             }
 
+            const std::vector<int>& parent_cluster_ids() const
+            {
+                return *parent_cluster_id_vec;  // Access parent/main cluster IDs
+            }
+
+            const std::vector<int>& individual_cluster_ids() const
+            {
+                return *cluster_id_vec;  // Access individual cluster IDs
+            }
+
+
             void set_addresses(TTree& tree) {
-                // tree.SetBranchAddress("cluster_id", &cluster_id_vec); 
+                // tree.SetBranchAddress("cluster_id", &cluster_id_vec);
                 // in the uboone files, parent_cluster_id, is the main_cluster, which is used in T_match tree
-                // the cluster_id is the individual cluster id, some of them are associated with the main cluster, 
+                // the cluster_id is the individual cluster id, some of them are associated with the main cluster,
                 // not directly used in T_match tree
-                if (tree.GetBranch("parent_cluster_id"))
-                    tree.SetBranchAddress("parent_cluster_id", &parent_cluster_id_vec); 
-                else
-                    tree.SetBranchAddress("cluster_id", &parent_cluster_id_vec); 
                 Blob::set_addresses(tree);
+
+                if (tree.GetBranch("parent_cluster_id")) {
+                    tree.SetBranchAddress("parent_cluster_id", &parent_cluster_id_vec);
+                }
+                // else: no parent_cluster_id branch; parent_cluster_id_vec stays null here
+                // and is synced to cluster_id_vec in UbooneTTrees::next() after GetEntry().
+
                 tree.SetBranchAddress("q", &q_vec);
                 tree.SetBranchAddress("time_slice", &time_slice_vec);
             }
@@ -243,12 +289,18 @@ namespace WireCell::Root {
             int eventNo{0};
             int cluster_id{0}, flash_id{0};
 
+            int event_type{0};
+            double cluster_length{0};
+
             void set_addresses(TTree& tree) {
                 tree.SetBranchAddress("eventNo",&eventNo);
                 tree.SetBranchAddress("subRunNo",&subRunNo);
                 tree.SetBranchAddress("runNo",&runNo);
                 tree.SetBranchAddress("tpc_cluster_id", &cluster_id);
                 tree.SetBranchAddress("flash_id", &flash_id);
+
+                tree.SetBranchAddress("event_type", &event_type);
+                tree.SetBranchAddress("cluster_length", &cluster_length);
             }            
         };
         Match match;
@@ -288,11 +340,17 @@ namespace WireCell::Root {
         // cluster.
         std::map<int, size_t> cluster_flash;
 
+        std::map<int, int> cluster_event_type;
+        std::map<int, double> cluster_length_map;
+
         // Load optical data.  It does not make sense to call this for "dead"
         // clusters.
         void load_optical() {
             optical.clear();
             cluster_flash.clear();
+
+            cluster_event_type.clear();
+            cluster_length_map.clear();
 
             std::map<int, size_t> fid_ind;
 
@@ -303,8 +361,11 @@ namespace WireCell::Root {
             std::vector<double> ftime(nflashes), ftmin(nflashes), ftmax(nflashes), fval(nflashes);
             std::vector<int> fident(nflashes), ftype(nflashes);
 
-            // TDM light
-            std::vector<double> lid, lt, lq, ldq;
+            // TDM light.  lid holds OpDet channel numbers and must be int:
+            // Grouping::flash_at() reads it as get_pcarray<int>("ident","light")
+            // (and the SBND writer FlashTensorToOpticalPCs stores it as int).
+            std::vector<int> lid;
+            std::vector<double> lt, lq, ldq;
 
             // TDM flashlight
             std::vector<int> fl_flash, fl_light;
@@ -344,6 +405,14 @@ namespace WireCell::Root {
                 ++find;
             }
 
+            // Trim flash vectors to actual count (they were pre-sized to total nflashes)
+            ftime.resize(find);
+            ftmin.resize(find);
+            ftmax.resize(find);
+            fval.resize(find);
+            fident.resize(find);
+            ftype.resize(find);
+
             PointCloud::Dataset light_ds;
             light_ds.add("ident", PointCloud::Array(lid));
             light_ds.add("time", PointCloud::Array(lt));
@@ -375,6 +444,8 @@ namespace WireCell::Root {
                 if (match.eventNo != header.eventNo) { continue; }
 
                 cluster_flash[match.cluster_id] = fid_ind[match.flash_id];
+                cluster_event_type[match.cluster_id] = match.event_type;
+                cluster_length_map[match.cluster_id] = match.cluster_length;
             }
         }
 
@@ -436,15 +507,44 @@ namespace WireCell::Root {
             }
             m_activity->GetEntry(m_entry);
             m_live->GetEntry(m_entry);
+            // If no parent_cluster_id branch, alias parent_cluster_id_vec to cluster_id_vec.
+            if (!live.parent_cluster_id_vec) {
+                live.parent_cluster_id_vec = live.cluster_id_vec;
+            }
             if (m_dead) {
                 m_dead->GetEntry(m_entry);
             }
+
+            header.calculate_beam_windows();
 
             load_clusters();
 
             if (!m_dead && m_flash && m_match) {
                 load_optical();
             }
+        }
+
+        bool is_beam_flash_coincident(int cluster_id) const {
+            auto flash_it = cluster_flash.find(cluster_id);
+            if (flash_it == cluster_flash.end()) return false;
+            
+            size_t flash_index = flash_it->second;
+            if (flash_index >= optical.at("flash").get("time")->size_major()) return false;
+            
+            double flash_time = optical.at("flash").get("time")->element<double>(flash_index);
+            flash_time /= units::us; // Convert to microseconds
+            
+            return (flash_time > header.lowerwindow && flash_time < header.upperwindow);
+        }
+        
+        int get_event_type(int cluster_id) const {
+            auto it = cluster_event_type.find(cluster_id);
+            return (it != cluster_event_type.end()) ? it->second : 0;
+        }
+        
+        double get_cluster_length(int cluster_id) const {
+            auto it = cluster_length_map.find(cluster_id);
+            return (it != cluster_length_map.end()) ? it->second : 0.0;
         }
 
         // Get live or dead blob data
@@ -547,6 +647,8 @@ namespace WireCell::Root {
             log->debug("read {} slices in entry {}, call={}", n_slices_data, trees->entry(), m_calls);
             return true;
         }
+
+       
     };
 }
 

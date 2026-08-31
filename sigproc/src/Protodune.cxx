@@ -340,8 +340,8 @@ bool Protodune::LinearInterpSticky(WireCell::Waveform::realseq_t& signal, WireCe
                 digits.push_back(signal.at(i));
             }
 
-            auto min = std::max_element(digits.begin(), digits.end());
-            auto max = std::min_element(digits.begin(), digits.end());
+            auto max = std::max_element(digits.begin(), digits.end());
+            auto min = std::min_element(digits.begin(), digits.end());
             double max_value = *max;
             double min_value = *min;
 

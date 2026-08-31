@@ -25,7 +25,7 @@ namespace WireCell::Aux {
         int ident() const { return m_ident; }
         double start() const { return m_start; }
         double span() const { return m_span; }
-        map_t activity() const { return m_activity; }
+        const map_t& activity() const { return m_activity; }
         map_t& activity() { return m_activity; }
     };
 }

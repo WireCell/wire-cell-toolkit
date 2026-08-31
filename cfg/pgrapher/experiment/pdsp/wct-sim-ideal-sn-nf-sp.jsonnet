@@ -11,7 +11,6 @@ local wc = import "wirecell.jsonnet";
 local g = import "pgraph.jsonnet";
 local f = import "pgrapher/common/funcs.jsonnet";
 
-local io = import "pgrapher/common/fileio.jsonnet";
 local params = import "pgrapher/experiment/pdsp/simparams.jsonnet";
 local tools_maker = import "pgrapher/common/tools.jsonnet";
 local sim_maker = import "pgrapher/experiment/pdsp/sim.jsonnet";
@@ -56,14 +55,13 @@ local tracklist = [
    // },
 ];
 
-local output = "wct-pdsp-sim-ideal-sn-nf-sp.npz";
+local output = "wct-pdsp-sim-ideal-sn-nf-sp.tar.bz2";
     
 //local depos = g.join_sources(g.pnode({type:"DepoMerger", name:"BlipTrackJoiner"}, nin=2, nout=1),
 //                             [sim.ar39(), sim.tracks(tracklist)]);
 local depos = sim.tracks(tracklist);
 
 
-local deposio = io.numpy.depos(output);
 local drifter = sim.drifter;
 local bagger = sim.make_bagger();
 
@@ -75,11 +73,21 @@ local sn_sp = [g.pipeline([sn_pipes[n], sp_pipes[n]], "sn_sp_pipe_%d" % n)
 
 local snsp_graph = f.fanpipe('DepoSetFanout', sn_sp, 'FrameFanin', "snsp");
 
-local frameio = io.numpy.frames(output);
-local sink = sim.frame_sink;
+// Save the simulated raw frame.  Replaces the removed
+// pgrapher/common/fileio.jsonnet npz helper -- inline FrameFileSink,
+// following the pdhd_sim pattern (output: tar.bz2).
+local frame_sink = g.pnode({
+    type: "FrameFileSink",
+    name: "framesink",
+    data: {
+        outname: output,
+        tags: [],
+        digitize: false,
+        masks: false,
+    },
+}, nin=1, nout=0);
 
-
-local graph = g.pipeline([depos, deposio, drifter, bagger, snsp_graph, frameio, sink]);
+local graph = g.pipeline([depos, drifter, bagger, snsp_graph, frame_sink]);
 
 local app = {
     type: "Pgrapher",

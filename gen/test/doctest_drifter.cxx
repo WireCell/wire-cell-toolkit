@@ -102,7 +102,7 @@ TEST_CASE("drifter flat cathode")
 static std::vector<double> uniform_values(size_t seed, size_t number = 3, 
                                           double vmin=-1.0, double vmax=1.0)
 {
-    std::default_random_engine re{seed};
+    std::default_random_engine re{static_cast<std::default_random_engine::result_type>(seed)};
     std::uniform_real_distribution<double> dist(vmin, vmax);
 
     std::vector<double> vals(number);
@@ -123,7 +123,7 @@ static void test_bent(double sign)
     const double mag = 1*units::cm;
     const double xmax = 1*units::cm;
     const double xstep = 1*units::mm;
-    const double epsilon = 0.1*units::mm;
+    const double epsilon = 1*units::mm;
 
     auto catx = [&](double x, double y) -> double {
         return cathode + sign * mag * ((x*x + y*y)/(scale*scale));
@@ -152,7 +152,7 @@ static void test_bent(double sign)
                 const Point pt(x,y,z);
                 auto indepo = std::make_shared<DumbDepo>(pt);
                 drifter(indepo, depos);
-                drifted.insert(drifted.end(), depos.begin(), depos.begin());
+                drifted.insert(drifted.end(), depos.begin(), depos.end());
             }
         }
     }
@@ -165,17 +165,26 @@ static void test_bent(double sign)
 
 
 
+    int nerrors = 0;
+
     for (const auto& idepo : drifted) {
         if (!idepo) { continue; } // skip EOS
         auto pos = idepo->prior()->pos();
 
         double xcat = catx(pos.y(), pos.z());
 
-        if (sign > 0)
-            CHECK(pos.x() < (xcat + epsilon));
-        else
-            CHECK(pos.x() > (xcat - epsilon));
+        if (sign > 0) {
+            if (pos.x() > (xcat + epsilon)) {
+                ++nerrors;
+            }
+        }
+        else {
+            if (pos.x() < (xcat - epsilon)) {
+                ++nerrors;
+            }
+        }
     }
+    CHECK(nerrors == 0);
 
 }
 

@@ -16,6 +16,11 @@ function(params, tools, override = {}) {
   local fullscale = params.adc.fullscale[1] - params.adc.fullscale[0],
   local ADC_mV_ratio = ((1 << resolution) - 1 ) / fullscale,
 
+  // Drift-volume electronics response: bottom CRMs (ident < half) use
+  // elecs[0], top use elecs[1].  elec_resp_for clamps for single-elec params.
+  local elec_for(anode) = tools.elec_resp_for(
+      if anode.data.ident < std.length(params.det.volumes) / 2 then 0 else 1),
+
   // pDSP needs a per-anode sigproc
   make_sigproc(anode, name=null):: g.pnode({
     type: 'OmnibusSigProc',
@@ -49,7 +54,7 @@ function(params, tools, override = {}) {
       anode: wc.tn(anode),
       dft: wc.tn(tools.dft),
       field_response: wc.tn(tools.field),
-      elecresponse: wc.tn(tools.elec_resp),
+      elecresponse: wc.tn(elec_for(anode)),
       ftoffset: 0.0, // default 0.0
       ctoffset: 1.0*wc.microsecond, // default -8.0
       per_chan_resp: pc.name,
@@ -91,6 +96,6 @@ function(params, tools, override = {}) {
       mp3_roi_tag: 'mp3_roi%d' % anode.data.ident,
       mp2_roi_tag: 'mp2_roi%d' % anode.data.ident,
     } + override,
-  }, nin=1, nout=1, uses=[anode, tools.dft, tools.field, tools.elec_resp] + pc.uses + spfilt),
+  }, nin=1, nout=1, uses=[anode, tools.dft, tools.field, elec_for(anode)] + pc.uses + spfilt),
 
 }

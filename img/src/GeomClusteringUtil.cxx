@@ -23,9 +23,9 @@ static bool adjacent(const std::set<double>& times, const double& time1, const d
     double tmax = time2;
     if (time1 > time2) std::swap(tmin, tmax);
     auto iter1 = times.find(tmin);
-    if (iter1 == times.end()) THROW(ValueError() << errmsg{String::format("tmin \"%d\" not in \"times\"", tmin)});
+    if (iter1 == times.end()) THROW(ValueError() << errmsg{String::format("tmin \"%f\" not in \"times\"", tmin)});
     auto iter2 = times.find(tmax);
-    if (iter2 == times.end()) THROW(ValueError() << errmsg{String::format("tmax \"%d\" not in \"times\"", tmin)});
+    if (iter2 == times.end()) THROW(ValueError() << errmsg{String::format("tmax \"%f\" not in \"times\"", tmax)});
     return (std::distance(iter1, iter2) == 1);
 }
 
@@ -275,9 +275,9 @@ void WireCell::Img::grouped_geom_clustering(cluster_graph_t& cg, std::string pol
             if (map_gap_tol.find(rel_diff) == map_gap_tol.end()) continue;
             if (policy == "uboone_local" && !adjacent(slice_times, islice1->start(), islice2->start())) continue;
             if (policy == "dead_clus") {
-                std::cout << "adjacent_dead: "
-                          << islice1->start() << " " << islice1->span() << " "
-                          << islice2->start() << " " << islice2->span() << std::endl;
+                // std::cout << "adjacent_dead: "
+                //           << islice1->start() << " " << islice1->span() << " "
+                //           << islice2->start() << " " << islice2->span() << std::endl;
                 if (!adjacent_dead(islice1, islice2)) continue;
                 rel_diff = 0; // use 1 as wire offset
             }

@@ -18,6 +18,8 @@ Pimpos::Pimpos(int nwires, double minwirepitch, double maxwirepitch, const Vecto
     // total pitch span from first to last wire
     const double regionsize = (maxwirepitch - minwirepitch) / (nwires - 1);
 
+    m_pitch = regionsize;
+
     // expand by 1/2 pitch on either end to get total sensitive span in pitch direction
     const double pmin = minwirepitch - 0.5 * regionsize;
     const double pmax = maxwirepitch + 0.5 * regionsize;

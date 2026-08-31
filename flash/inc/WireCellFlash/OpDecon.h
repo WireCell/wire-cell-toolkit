@@ -1,0 +1,196 @@
+/** Optical waveform deconvolution for PDHD light reconstruction.
+ *
+ * A dependency-free port of the duneopdet `Deconvolution` module
+ * (Wiener filter built from a single-p.e. template, optional Gauss
+ * post-filter and post baseline correction), operating on tagged
+ * optical-snippet traces of an IFrame.  See
+ * flash/docs/stage2-reconstruction.md for the fcl correspondence.
+ *
+ * Input: traces tagged `intag` (raw ADC snippets, channel = OpChannel).
+ * Output: the input frame plus SPE-normalized traces tagged `outtag`.
+ */
+#ifndef WIRECELLFLASH_OPDECON
+#define WIRECELLFLASH_OPDECON
+
+#include "WireCellIface/IFrameFilter.h"
+#include "WireCellIface/IConfigurable.h"
+#include "WireCellIface/IDFT.h"
+#include "WireCellAux/Logger.h"
+
+#include <map>
+#include <vector>
+
+namespace WireCell {
+    namespace Flash {
+        class OpDecon : public Aux::Logger, public IFrameFilter, public IConfigurable {
+          public:
+            OpDecon();
+            virtual ~OpDecon();
+
+            virtual bool operator()(const IFrame::pointer& in, IFrame::pointer& out);
+
+            virtual WireCell::Configuration default_configuration() const;
+            virtual void configure(const WireCell::Configuration& config);
+
+          private:
+            std::string m_intag{"raw"};
+            std::string m_outtag{"decon"};
+            // JSON file with SPE templates and the channel -> template map.
+            std::string m_spe_file{"pgrapher/experiment/pdhd/pdhd-spe-templates.json"};
+            // Optional JSON file with per-channel noise power spectra
+            // (half-spectrum |FFT|^2, LArSoft NoiseTemplateFiles).  Empty
+            // means the flat LineNoiseRMS^2 * Samples default.
+            std::string m_noise_file{""};
+            // protodunehd_deconvolution fcl values.
+            int m_samples{1024};
+            int m_pre_trigger{50};
+            int m_pedestal_buffer{30};
+            double m_line_noise_rms{4.5};
+            int m_input_polarity{-1};
+            bool m_auto_scale{true};       // Wiener: scale from filtered SPE response
+            double m_scale{1.0};           // used when auto_scale is false
+            // Fixed Wiener signal-to-noise ratio R = S2/N^2.  By default
+            // (<= 0) S2 is taken from each waveform's own peak (adaptive,
+            // signal- and length-dependent).  When > 0, S2 = R * N^2 so the
+            // filter G = conj(H) R / (|H|^2 R + 1) is independent of signal
+            // amplitude AND record length -- the same filter for the 1024-tick
+            // snippets and the 343808-tick full stream.  Assumes flat noise.
+            double m_fixed_snr{-1.0};
+            // Wiener-INSPIRED mode.  Default OFF -> bit-identical to every
+            // existing config.  When ON the deconvolution spectrum becomes
+            // the pure inverse times a band filter pinned to 1 at zero
+            // frequency:
+            //   G = conj(H) F(f) / (|H|^2 + eps),  F(f) = exp(-0.5 (f/sigma)^p)
+            // with eps = (wi_eps_rel * max_k|H_k|)^2 guarding template
+            // spectral nulls.  F(0) = 1 makes the deconvolved 1-PE area
+            // exactly 1 independent of the filter parameters, so AutoScale
+            // is skipped (scale = `scale`, default 1) and fixed_snr /
+            // line_noise_rms are unused.  The Gauss post-filter should be
+            // disabled in this mode (F *is* the band filter).  See
+            // pdvd/docs/pdvd-light-filter.md.
+            bool m_wiener_inspired{false};
+            double m_wi_sigma_mhz{1.0};   // F half form: exp(-0.5 (f/sigma)^power)
+            double m_wi_power{2.0};
+            double m_wi_eps_rel{1e-3};
+            bool m_apply_postfilter{true};
+            double m_postfilter_cutoff{1.5};  // MHz, Gauss post-filter
+            bool m_apply_post_blcorr{true};
+            // Perf knobs, default OFF -> bit-identical to every existing
+            // config.  use_real_dft: run the transforms as true real FFTs
+            // (FFTW r2c/c2r plans) -- same results up to round-off (~1e-7),
+            // about half the FFT flops and transform memory.
+            // fold_postfilter: multiply the Gauss post-filter into the
+            // deconvolution spectrum instead of a separate fwd+inv pair per
+            // record.  The post baseline correction keeps its exact
+            // semantics (mean of the UNfiltered decon head): that mean is a
+            // linear functional of the spectrum and is evaluated with the
+            // precomputed m_ped_w weights, so only round-off differs.
+            bool m_use_real_dft{false};
+            bool m_fold_postfilter{false};
+            // 14-bit ADC saturation detection.  Default OFF -> the output frame
+            // carries no masks, bit-identical to every existing config.  When ON:
+            // any input snippet with >= saturation_min_samples raw samples at or
+            // above saturation_adc (the DAPHNE 14-bit rail, 16383) is flagged by
+            // adding its [tbin, tbin+len) range to a "saturation" ChannelMaskMap
+            // on the output frame.  Deconvolving a clipped flat-top yields a broad
+            // plateau that OpHitFinder over-integrates (one ~16 us hit) and
+            // fragments (many spurious wide hits); OpHitFinder's veto_saturation
+            // consumes this mask to drop such snippets.  See
+            // pdhd/docs/run29107-evt1015-light-anomaly.md.
+            bool m_detect_saturation{false};
+            int m_saturation_adc{16383};
+            int m_saturation_min_samples{1};
+            // Pad (ticks) added each side of a railed run.  Deconvolving a
+            // clipped flat-top yields a plateau wider than the clip itself, so
+            // the over-integrated hits extend beyond the railed samples; the pad
+            // widens the vetoed range to cover them.
+            int m_saturation_pad{0};
+            // Repair railed runs BEFORE deconvolving (requires
+            // detect_saturation): fill each run with the two-sided
+            // exponential bridge min(rising-edge extrapolation, falling-edge
+            // back-extrapolation), clamped >= the measured (railed) samples.
+            // Per-channel taus are fit from the SPE template (tail: log-linear
+            // beyond peak+25; rise: last 4 pre-peak samples).  Bias on
+            // synthetically clipped real pulses: +2% at depth 1.4, +9% at 2,
+            // +23% median at 4 -- vs -14%/-40% deconvolving through the clip.
+            // Default OFF -> bit-identical.  See
+            // pdvd/docs/qlmatch/pdvd-saturation-recovery.md.
+            bool m_saturation_repair{false};
+            int m_repair_fit_samples{8};   // post-run anchor samples for the tail fit
+            // Overflow-encoded-as-zero repair (requires detect_saturation).
+            // Default OFF -> bit-identical.  PDVD membrane XA self-trigger
+            // snippets do NOT clamp an over-range pulse at saturation_adc: the
+            // raw ADC pins at the BOTTOM of the range (0, occasionally 1) for
+            // the whole excursion, then reappears just below the ceiling and
+            // decays.  detect_saturation never sees it (those snippets peak
+            // BELOW saturation_adc), so the chain deconvolves a -pedestal notch
+            // at the pulse peak as if it were data.  When on, each floor-pinned
+            // run whose IMMEDIATE neighbours on BOTH sides reach
+            // overflow_min_neighbor is rewritten to saturation_adc before the
+            // rail scan, so the existing detect/flag/repair chain handles it.
+            //
+            // Both sides must be high because the same floor pin also occurs in
+            // the deep post-pulse undershoot, where the true signal is BELOW 0;
+            // raising those to the rail would invent a huge fake pulse (and the
+            // saturation flag does not protect flash totals).  Evidence and the
+            // unconfirmed-mechanism caveat:
+            // pdvd/docs/qlmatch/14_pdvd-lightpattern-sp-investigation.md.
+            bool m_overflow_to_rail{false};
+            int m_overflow_adc{1};             // samples <= this are floor-pinned
+            int m_overflow_min_samples{5};     // run length to qualify
+            int m_overflow_min_neighbor{8000}; // both immediate neighbours must reach this
+
+            IDFT::pointer m_dft;
+
+            // Per-template precomputed state.  The spectrum is built lazily
+            // on a template's first use: a branch instance configured with
+            // the full template file only pays the (m_samples-long) FFT and
+            // spectrum storage for the channels it actually deconvolves.
+            struct SPETemplate {
+                std::vector<float> wave;            // time domain, unpadded (<= m_samples)
+                std::vector<std::complex<float>> fft;  // full-size spectrum, lazy
+                double amplitude;                   // max(wave), >= 1
+                double wi_eps{0.0};                 // (wi_eps_rel * max|fft|)^2, lazy
+                // Exponential time constants (ticks) fit from the template,
+                // used by saturation_repair.  <= 0 => fit failed, no repair.
+                double tau_fall{0.0};
+                double tau_rise{0.0};
+                // AutoScale normalization cached when the Wiener filter is
+                // record-independent (fixed_snr > 0, flat noise): the filtered
+                // SPE response then depends only on the template, so the extra
+                // inverse FFT per record collapses to one per template.
+                double cached_scale{0.0};
+                bool scale_cached{false};
+            };
+            std::vector<SPETemplate> m_templates;
+            void ensure_fft(SPETemplate& spe);
+            // Fill railed runs of `w` in place (two-sided exp bridge).
+            void repair_runs(std::vector<float>& w,
+                             const std::vector<std::pair<int, int>>& runs,
+                             double pedestal, const SPETemplate& spe) const;
+            // Rewrite floor-pinned OVERFLOW runs of `w` to m_saturation_adc in
+            // place; returns the number rewritten.  Used by overflow_to_rail.
+            int unclip_overflow(std::vector<float>& w) const;
+            double auto_scale(const SPETemplate& spe,
+                              const std::vector<std::complex<float>>& xG) const;
+            // Transform via the complex (default) or real (use_real_dft) path.
+            std::vector<std::complex<float>> dft_fwd(const std::vector<float>& wave) const;
+            std::vector<float> dft_inv(const std::vector<std::complex<float>>& spec) const;
+            std::map<int, size_t> m_chan2tmpl;
+            std::vector<std::complex<float>> m_postfilter;  // full-size spectrum
+            std::vector<double> m_wi_filter;  // full-size F(f), wiener_inspired
+            // Spectral weights for the head-pedestal mean, used by
+            // fold_postfilter: mean_{i<nped} x_i = Re sum_k X_k m_ped_w[k].
+            std::vector<std::complex<double>> m_ped_w;
+
+            // Noise power spectra, half-spectrum (samples/2+1) bins.
+            std::vector<std::vector<double>> m_noise_templates;
+            std::map<int, size_t> m_chan2noise;
+
+            std::vector<float> deconvolve(const std::vector<float>& adc, const SPETemplate& spe,
+                                          const std::vector<double>* noise) const;
+        };
+    }  // namespace Flash
+}  // namespace WireCell
+
+#endif

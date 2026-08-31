@@ -1,0 +1,902 @@
+{
+ "comment": "PDHD hardware DAPHNE channel -> OpDet map, from flashopdet/opch_map. Informational only: all reconstruction-level products use the offline OpChannel basis, which equals OpDet. Covers the instrumented channels of the 2024 run configuration.",
+ "source": "onevent_run27305_final.root",
+ "channels": [
+  {
+   "hwch": 0,
+   "opdet": 1
+  },
+  {
+   "hwch": 1,
+   "opdet": 1
+  },
+  {
+   "hwch": 2,
+   "opdet": 1
+  },
+  {
+   "hwch": 3,
+   "opdet": 1
+  },
+  {
+   "hwch": 4,
+   "opdet": 3
+  },
+  {
+   "hwch": 5,
+   "opdet": 3
+  },
+  {
+   "hwch": 6,
+   "opdet": 3
+  },
+  {
+   "hwch": 7,
+   "opdet": 3
+  },
+  {
+   "hwch": 8,
+   "opdet": 5
+  },
+  {
+   "hwch": 9,
+   "opdet": 5
+  },
+  {
+   "hwch": 10,
+   "opdet": 5
+  },
+  {
+   "hwch": 11,
+   "opdet": 5
+  },
+  {
+   "hwch": 12,
+   "opdet": 7
+  },
+  {
+   "hwch": 13,
+   "opdet": 7
+  },
+  {
+   "hwch": 14,
+   "opdet": 7
+  },
+  {
+   "hwch": 15,
+   "opdet": 7
+  },
+  {
+   "hwch": 16,
+   "opdet": 9
+  },
+  {
+   "hwch": 17,
+   "opdet": 9
+  },
+  {
+   "hwch": 18,
+   "opdet": 9
+  },
+  {
+   "hwch": 19,
+   "opdet": 9
+  },
+  {
+   "hwch": 20,
+   "opdet": 11
+  },
+  {
+   "hwch": 21,
+   "opdet": 11
+  },
+  {
+   "hwch": 22,
+   "opdet": 11
+  },
+  {
+   "hwch": 23,
+   "opdet": 11
+  },
+  {
+   "hwch": 24,
+   "opdet": 13
+  },
+  {
+   "hwch": 25,
+   "opdet": 13
+  },
+  {
+   "hwch": 26,
+   "opdet": 13
+  },
+  {
+   "hwch": 27,
+   "opdet": 13
+  },
+  {
+   "hwch": 28,
+   "opdet": 15
+  },
+  {
+   "hwch": 29,
+   "opdet": 15
+  },
+  {
+   "hwch": 30,
+   "opdet": 15
+  },
+  {
+   "hwch": 31,
+   "opdet": 15
+  },
+  {
+   "hwch": 32,
+   "opdet": 17
+  },
+  {
+   "hwch": 33,
+   "opdet": 17
+  },
+  {
+   "hwch": 34,
+   "opdet": 17
+  },
+  {
+   "hwch": 35,
+   "opdet": 17
+  },
+  {
+   "hwch": 36,
+   "opdet": 19
+  },
+  {
+   "hwch": 37,
+   "opdet": 19
+  },
+  {
+   "hwch": 38,
+   "opdet": 19
+  },
+  {
+   "hwch": 39,
+   "opdet": 19
+  },
+  {
+   "hwch": 48,
+   "opdet": 21
+  },
+  {
+   "hwch": 49,
+   "opdet": 21
+  },
+  {
+   "hwch": 50,
+   "opdet": 21
+  },
+  {
+   "hwch": 51,
+   "opdet": 21
+  },
+  {
+   "hwch": 52,
+   "opdet": 23
+  },
+  {
+   "hwch": 53,
+   "opdet": 23
+  },
+  {
+   "hwch": 54,
+   "opdet": 23
+  },
+  {
+   "hwch": 55,
+   "opdet": 23
+  },
+  {
+   "hwch": 56,
+   "opdet": 25
+  },
+  {
+   "hwch": 57,
+   "opdet": 25
+  },
+  {
+   "hwch": 58,
+   "opdet": 25
+  },
+  {
+   "hwch": 59,
+   "opdet": 25
+  },
+  {
+   "hwch": 60,
+   "opdet": 27
+  },
+  {
+   "hwch": 61,
+   "opdet": 27
+  },
+  {
+   "hwch": 62,
+   "opdet": 27
+  },
+  {
+   "hwch": 63,
+   "opdet": 27
+  },
+  {
+   "hwch": 64,
+   "opdet": 29
+  },
+  {
+   "hwch": 65,
+   "opdet": 29
+  },
+  {
+   "hwch": 66,
+   "opdet": 29
+  },
+  {
+   "hwch": 67,
+   "opdet": 29
+  },
+  {
+   "hwch": 68,
+   "opdet": 31
+  },
+  {
+   "hwch": 69,
+   "opdet": 31
+  },
+  {
+   "hwch": 70,
+   "opdet": 31
+  },
+  {
+   "hwch": 71,
+   "opdet": 31
+  },
+  {
+   "hwch": 72,
+   "opdet": 33
+  },
+  {
+   "hwch": 73,
+   "opdet": 33
+  },
+  {
+   "hwch": 74,
+   "opdet": 33
+  },
+  {
+   "hwch": 75,
+   "opdet": 33
+  },
+  {
+   "hwch": 76,
+   "opdet": 35
+  },
+  {
+   "hwch": 77,
+   "opdet": 35
+  },
+  {
+   "hwch": 78,
+   "opdet": 35
+  },
+  {
+   "hwch": 79,
+   "opdet": 35
+  },
+  {
+   "hwch": 80,
+   "opdet": 37
+  },
+  {
+   "hwch": 81,
+   "opdet": 37
+  },
+  {
+   "hwch": 82,
+   "opdet": 37
+  },
+  {
+   "hwch": 83,
+   "opdet": 37
+  },
+  {
+   "hwch": 84,
+   "opdet": 39
+  },
+  {
+   "hwch": 85,
+   "opdet": 39
+  },
+  {
+   "hwch": 86,
+   "opdet": 39
+  },
+  {
+   "hwch": 87,
+   "opdet": 39
+  },
+  {
+   "hwch": 96,
+   "opdet": 41
+  },
+  {
+   "hwch": 97,
+   "opdet": 41
+  },
+  {
+   "hwch": 98,
+   "opdet": 41
+  },
+  {
+   "hwch": 99,
+   "opdet": 41
+  },
+  {
+   "hwch": 100,
+   "opdet": 43
+  },
+  {
+   "hwch": 101,
+   "opdet": 43
+  },
+  {
+   "hwch": 102,
+   "opdet": 43
+  },
+  {
+   "hwch": 103,
+   "opdet": 43
+  },
+  {
+   "hwch": 104,
+   "opdet": 45
+  },
+  {
+   "hwch": 105,
+   "opdet": 45
+  },
+  {
+   "hwch": 106,
+   "opdet": 45
+  },
+  {
+   "hwch": 107,
+   "opdet": 45
+  },
+  {
+   "hwch": 108,
+   "opdet": 49
+  },
+  {
+   "hwch": 109,
+   "opdet": 49
+  },
+  {
+   "hwch": 110,
+   "opdet": 49
+  },
+  {
+   "hwch": 111,
+   "opdet": 49
+  },
+  {
+   "hwch": 112,
+   "opdet": 51
+  },
+  {
+   "hwch": 113,
+   "opdet": 51
+  },
+  {
+   "hwch": 114,
+   "opdet": 51
+  },
+  {
+   "hwch": 115,
+   "opdet": 51
+  },
+  {
+   "hwch": 116,
+   "opdet": 53
+  },
+  {
+   "hwch": 117,
+   "opdet": 53
+  },
+  {
+   "hwch": 118,
+   "opdet": 53
+  },
+  {
+   "hwch": 119,
+   "opdet": 53
+  },
+  {
+   "hwch": 120,
+   "opdet": 55
+  },
+  {
+   "hwch": 121,
+   "opdet": 55
+  },
+  {
+   "hwch": 122,
+   "opdet": 55
+  },
+  {
+   "hwch": 123,
+   "opdet": 55
+  },
+  {
+   "hwch": 124,
+   "opdet": 57
+  },
+  {
+   "hwch": 125,
+   "opdet": 57
+  },
+  {
+   "hwch": 126,
+   "opdet": 57
+  },
+  {
+   "hwch": 127,
+   "opdet": 57
+  },
+  {
+   "hwch": 128,
+   "opdet": 59
+  },
+  {
+   "hwch": 129,
+   "opdet": 59
+  },
+  {
+   "hwch": 130,
+   "opdet": 59
+  },
+  {
+   "hwch": 131,
+   "opdet": 59
+  },
+  {
+   "hwch": 132,
+   "opdet": 47
+  },
+  {
+   "hwch": 133,
+   "opdet": 47
+  },
+  {
+   "hwch": 134,
+   "opdet": 47
+  },
+  {
+   "hwch": 135,
+   "opdet": 47
+  },
+  {
+   "hwch": 136,
+   "opdet": 47
+  },
+  {
+   "hwch": 137,
+   "opdet": 47
+  },
+  {
+   "hwch": 138,
+   "opdet": 47
+  },
+  {
+   "hwch": 139,
+   "opdet": 47
+  },
+  {
+   "hwch": 140,
+   "opdet": 47
+  },
+  {
+   "hwch": 141,
+   "opdet": 47
+  },
+  {
+   "hwch": 142,
+   "opdet": 47
+  },
+  {
+   "hwch": 143,
+   "opdet": 47
+  },
+  {
+   "hwch": 144,
+   "opdet": 0
+  },
+  {
+   "hwch": 145,
+   "opdet": 0
+  },
+  {
+   "hwch": 146,
+   "opdet": 0
+  },
+  {
+   "hwch": 147,
+   "opdet": 0
+  },
+  {
+   "hwch": 148,
+   "opdet": 2
+  },
+  {
+   "hwch": 149,
+   "opdet": 2
+  },
+  {
+   "hwch": 150,
+   "opdet": 2
+  },
+  {
+   "hwch": 151,
+   "opdet": 2
+  },
+  {
+   "hwch": 152,
+   "opdet": 4
+  },
+  {
+   "hwch": 153,
+   "opdet": 4
+  },
+  {
+   "hwch": 154,
+   "opdet": 4
+  },
+  {
+   "hwch": 155,
+   "opdet": 4
+  },
+  {
+   "hwch": 156,
+   "opdet": 6
+  },
+  {
+   "hwch": 157,
+   "opdet": 6
+  },
+  {
+   "hwch": 158,
+   "opdet": 6
+  },
+  {
+   "hwch": 159,
+   "opdet": 6
+  },
+  {
+   "hwch": 160,
+   "opdet": 8
+  },
+  {
+   "hwch": 161,
+   "opdet": 8
+  },
+  {
+   "hwch": 162,
+   "opdet": 8
+  },
+  {
+   "hwch": 163,
+   "opdet": 8
+  },
+  {
+   "hwch": 164,
+   "opdet": 10
+  },
+  {
+   "hwch": 165,
+   "opdet": 10
+  },
+  {
+   "hwch": 166,
+   "opdet": 10
+  },
+  {
+   "hwch": 167,
+   "opdet": 10
+  },
+  {
+   "hwch": 168,
+   "opdet": 12
+  },
+  {
+   "hwch": 169,
+   "opdet": 12
+  },
+  {
+   "hwch": 170,
+   "opdet": 12
+  },
+  {
+   "hwch": 171,
+   "opdet": 12
+  },
+  {
+   "hwch": 172,
+   "opdet": 14
+  },
+  {
+   "hwch": 173,
+   "opdet": 14
+  },
+  {
+   "hwch": 174,
+   "opdet": 14
+  },
+  {
+   "hwch": 175,
+   "opdet": 14
+  },
+  {
+   "hwch": 176,
+   "opdet": 16
+  },
+  {
+   "hwch": 177,
+   "opdet": 16
+  },
+  {
+   "hwch": 178,
+   "opdet": 16
+  },
+  {
+   "hwch": 179,
+   "opdet": 16
+  },
+  {
+   "hwch": 180,
+   "opdet": 18
+  },
+  {
+   "hwch": 181,
+   "opdet": 18
+  },
+  {
+   "hwch": 182,
+   "opdet": 18
+  },
+  {
+   "hwch": 183,
+   "opdet": 18
+  },
+  {
+   "hwch": 192,
+   "opdet": 48
+  },
+  {
+   "hwch": 193,
+   "opdet": 48
+  },
+  {
+   "hwch": 194,
+   "opdet": 48
+  },
+  {
+   "hwch": 195,
+   "opdet": 48
+  },
+  {
+   "hwch": 196,
+   "opdet": 52
+  },
+  {
+   "hwch": 197,
+   "opdet": 52
+  },
+  {
+   "hwch": 198,
+   "opdet": 52
+  },
+  {
+   "hwch": 199,
+   "opdet": 52
+  },
+  {
+   "hwch": 200,
+   "opdet": 54
+  },
+  {
+   "hwch": 201,
+   "opdet": 54
+  },
+  {
+   "hwch": 202,
+   "opdet": 54
+  },
+  {
+   "hwch": 203,
+   "opdet": 54
+  },
+  {
+   "hwch": 204,
+   "opdet": 58
+  },
+  {
+   "hwch": 205,
+   "opdet": 58
+  },
+  {
+   "hwch": 206,
+   "opdet": 58
+  },
+  {
+   "hwch": 207,
+   "opdet": 58
+  },
+  {
+   "hwch": 216,
+   "opdet": 40
+  },
+  {
+   "hwch": 217,
+   "opdet": 40
+  },
+  {
+   "hwch": 218,
+   "opdet": 40
+  },
+  {
+   "hwch": 219,
+   "opdet": 40
+  },
+  {
+   "hwch": 220,
+   "opdet": 42
+  },
+  {
+   "hwch": 221,
+   "opdet": 42
+  },
+  {
+   "hwch": 222,
+   "opdet": 42
+  },
+  {
+   "hwch": 223,
+   "opdet": 42
+  },
+  {
+   "hwch": 224,
+   "opdet": 44
+  },
+  {
+   "hwch": 225,
+   "opdet": 44
+  },
+  {
+   "hwch": 226,
+   "opdet": 44
+  },
+  {
+   "hwch": 227,
+   "opdet": 44
+  },
+  {
+   "hwch": 228,
+   "opdet": 46
+  },
+  {
+   "hwch": 229,
+   "opdet": 46
+  },
+  {
+   "hwch": 230,
+   "opdet": 46
+  },
+  {
+   "hwch": 231,
+   "opdet": 46
+  },
+  {
+   "hwch": 232,
+   "opdet": 50
+  },
+  {
+   "hwch": 233,
+   "opdet": 50
+  },
+  {
+   "hwch": 234,
+   "opdet": 50
+  },
+  {
+   "hwch": 235,
+   "opdet": 50
+  },
+  {
+   "hwch": 236,
+   "opdet": 56
+  },
+  {
+   "hwch": 237,
+   "opdet": 56
+  },
+  {
+   "hwch": 238,
+   "opdet": 56
+  },
+  {
+   "hwch": 239,
+   "opdet": 56
+  },
+  {
+   "hwch": 240,
+   "opdet": 20
+  },
+  {
+   "hwch": 241,
+   "opdet": 20
+  },
+  {
+   "hwch": 242,
+   "opdet": 20
+  },
+  {
+   "hwch": 243,
+   "opdet": 20
+  },
+  {
+   "hwch": 244,
+   "opdet": 22
+  },
+  {
+   "hwch": 245,
+   "opdet": 22
+  },
+  {
+   "hwch": 246,
+   "opdet": 22
+  },
+  {
+   "hwch": 247,
+   "opdet": 22
+  },
+  {
+   "hwch": 248,
+   "opdet": 24
+  },
+  {
+   "hwch": 249,
+   "opdet": 24
+  },
+  {
+   "hwch": 250,
+   "opdet": 24
+  },
+  {
+   "hwch": 251,
+   "opdet": 24
+  },
+  {
+   "hwch": 252,
+   "opdet": 26
+  },
+  {
+   "hwch": 253,
+   "opdet": 26
+  },
+  {
+   "hwch": 254,
+   "opdet": 26
+  },
+  {
+   "hwch": 255,
+   "opdet": 26
+  }
+ ]
+}
