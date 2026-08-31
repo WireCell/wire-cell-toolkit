@@ -317,6 +317,7 @@ TEST_CASE("clus knob defaults: TaggerCheckNeutrino switches are all OFF")
     // one defaults to the shipped behaviour, so production stays byte-identical.
     CHECK_KNOB_BOOL(cfg, "shower_split_skip_shared", false);                  // doc pr/139 P1.1; false = shipped (shared peels allowed)
     CHECK_KNOB_BOOL(cfg, "shower_split_shed_shared", false);                  // doc pr/139 sec 15; false = shipped (an all-shared component is refused, not shed)
+    CHECK_KNOB_NUM(cfg, "shower_split_max_seeds", 4);                         // doc pr/139 sec 17; 4 = shipped angular-maxima cap
     CHECK_KNOB_NUM(cfg, "shower_split_max_impact", 0.0);                      // doc pr/139 P1.2; cm; 0 = no bound = shipped
     CHECK_KNOB_BOOL(cfg, "shower_split_em_start", false);                     // doc pr/139 P1.3; false = nearest-overall seed = shipped
     CHECK_KNOB_BOOL(cfg, "shower_split_rehome", false);                       // doc pr/139 P1.4; false = no re-home pass

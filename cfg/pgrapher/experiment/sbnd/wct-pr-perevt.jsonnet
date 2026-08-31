@@ -1999,6 +1999,12 @@ function(
     // C++ default false.  Key omitted when off => byte-identical pre-fix config.
     // Inert unless shower_split_skip_shared is also on.
     shower_split_shed_shared = false,        // sec 15 shed an ENTIRELY co-owned refused component.
+    // doc pr/139 sec 17.  Cap on the angular maxima the split kernel seeds on.
+    // C++ default 4 = shipped; it BINDS on 76% of fired candidates and on every
+    // object the owner cut into k>=3 (k = 3,3,5,7), so it -- not
+    // shower_split_max_parts -- is what stops k>=3 being expressible.
+    // Key omitted when 4 => byte-identical pre-fix config.
+    shower_split_max_seeds = 4,              // sec 17 angular-maxima cap.
     shower_split_max_impact = 0,             // P1.2 cm; fire only when the object's own axis misses the
                                              // reference vertex by <= this.  C++ default 0 = no bound.
                                              // Key omitted when 0 => byte-identical.
@@ -3209,6 +3215,7 @@ function(
         // each knob holds its shipped default, so the compiled JSON does not move.
         [if shower_split && shower_split_skip_shared then 'shower_split_skip_shared']: true,
         [if shower_split && shower_split_skip_shared && shower_split_shed_shared then 'shower_split_shed_shared']: true,
+        [if shower_split && shower_split_max_seeds != 4 then 'shower_split_max_seeds']: shower_split_max_seeds,
         [if shower_split && shower_split_max_impact != 0 then 'shower_split_max_impact']: shower_split_max_impact,
         [if shower_split && shower_split_em_start then 'shower_split_em_start']: true,
         [if shower_split && shower_split_rehome then 'shower_split_rehome']: true,

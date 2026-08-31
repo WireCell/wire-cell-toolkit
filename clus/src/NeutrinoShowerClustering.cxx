@@ -5837,7 +5837,14 @@ void PatternAlgorithms::shower_split(Graph& graph, VertexPtr main_vertex, Indexe
         if (Q < m_shower_split_min_charge) continue;
 
         const Pr138Cloud C = pr138_cloud(mem, v);
-        const Pr138Maxima M = pr138_angular_maxima(C);
+        // doc pr/139 sec 17 -- the seed cap is the REAL k>=3 constraint, not
+        // `max_parts`.  Measured on the 2026-09-01 labels: n_seed sits at the
+        // hardcoded 4 on 76 % of fired candidates and on ALL FOUR objects the
+        // owner cut into k >= 3, whose k values are 3, 3, 5 and 7 -- a 4-seed
+        // finder cannot express 7.  Default 4 keeps the shipped behaviour
+        // byte for byte.
+        const Pr138Maxima M = pr138_angular_maxima(
+            C, 1.6, (size_t) std::max(2, m_shower_split_max_seeds));
         const std::vector<size_t> acc = pr138_accept(M, m_shower_split_max_valley,
                                                      m_shower_split_min_frac, cap);
         // valley_best / angle_best for the tape: the same pair statistic sec
