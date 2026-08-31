@@ -957,6 +957,9 @@ public:
         double m_shower_pass4_prox_guard_len{0.0};                  // doc pr/130 item 1b; cm, 0 = pass4_proximity unguarded (legacy)
         double m_shower_pass3_backfill_guard_len{0.0};              // doc pr/130 item 1b; cm, 0 = pass3 sibling backfill ignores pr/124's decline (legacy)
         double m_stem_backfill_back_dvtx{0.0};                      // doc pr/130 item B; cm, 0 = back guard ignores the vertex distance (legacy)
+        bool   m_shower_pass4_prefilter_v1_escape{false};           // doc pr/136 r2; false = pass-4 angle_v2>30 pre-filter discards regardless of angle_v1 (legacy)
+        double m_shower_pass4_prefilter_v1_max_v2{0.0};             // doc pr/136 r2; deg, 0 = the angle_v1 escape has no angle_v2 ceiling
+        double m_shower_pass4_prefilter_v1_max_dis{0.0};            // doc pr/136 r3; cm, 0 = the angle_v1 escape has no proximity bound
         // doc pr/132: pi0-finder knobs; defaults = the legacy hard-coded constants.
         double m_pi0_mass_offset{10.0};                             // doc pr/132 K1; MeV, the finders' "+10" window offset
         double m_pi0_assoc_angle_deg{30.0};                         // doc pr/132 K2; deg, disconnected<->vertex association cut

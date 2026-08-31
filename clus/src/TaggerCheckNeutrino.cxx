@@ -707,6 +707,9 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_shower_pass4_prox_guard_len               = get(config, "shower_pass4_prox_guard_len",               m_shower_pass4_prox_guard_len);            // doc pr/130 item 1b, cm
     m_shower_pass3_backfill_guard_len           = get(config, "shower_pass3_backfill_guard_len",           m_shower_pass3_backfill_guard_len);        // doc pr/130 item 1b, cm
     m_stem_backfill_back_dvtx                   = get(config, "stem_backfill_back_dvtx",                   m_stem_backfill_back_dvtx);                // doc pr/130 item B, cm
+    m_shower_pass4_prefilter_v1_escape           = get(config, "shower_pass4_prefilter_v1_escape",           m_shower_pass4_prefilter_v1_escape);       // doc pr/136 r2
+    m_shower_pass4_prefilter_v1_max_v2          = get(config, "shower_pass4_prefilter_v1_max_v2",          m_shower_pass4_prefilter_v1_max_v2);       // doc pr/136 r2, deg
+    m_shower_pass4_prefilter_v1_max_dis         = get(config, "shower_pass4_prefilter_v1_max_dis",         m_shower_pass4_prefilter_v1_max_dis);      // doc pr/136 r3, cm
     m_pi0_mass_offset                           = get(config, "pi0_mass_offset",                           m_pi0_mass_offset);                        // doc pr/132 K1, MeV
     m_pi0_assoc_angle_deg                       = get(config, "pi0_assoc_angle_deg",                       m_pi0_assoc_angle_deg);                    // doc pr/132 K2, deg
     m_pi0_attached_partner_min_mev              = get(config, "pi0_attached_partner_min_mev",              m_pi0_attached_partner_min_mev);           // doc pr/132 K3, MeV
@@ -1202,6 +1205,9 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["shower_pass4_prox_guard_len"]               = m_shower_pass4_prox_guard_len;               // doc pr/130 item 1b; cm, 0 = unguarded, byte-identical
     cfg["shower_pass3_backfill_guard_len"]           = m_shower_pass3_backfill_guard_len;           // doc pr/130 item 1b; cm, 0 = unguarded, byte-identical
     cfg["stem_backfill_back_dvtx"]                   = m_stem_backfill_back_dvtx;                   // doc pr/130 item B; cm, 0 = off, byte-identical
+    cfg["shower_pass4_prefilter_v1_escape"]          = m_shower_pass4_prefilter_v1_escape;          // doc pr/136 r2; false = legacy pre-filter, byte-identical
+    cfg["shower_pass4_prefilter_v1_max_v2"]          = m_shower_pass4_prefilter_v1_max_v2;          // doc pr/136 r2; deg, 0 = no ceiling, inert while escape off
+    cfg["shower_pass4_prefilter_v1_max_dis"]         = m_shower_pass4_prefilter_v1_max_dis;         // doc pr/136 r3; cm, 0 = no proximity bound, inert while escape off
     cfg["pi0_mass_offset"]                           = m_pi0_mass_offset;                           // doc pr/132 K1; MeV, 10 = legacy, byte-identical
     cfg["pi0_assoc_angle_deg"]                       = m_pi0_assoc_angle_deg;                       // doc pr/132 K2; deg, 30 = legacy, byte-identical
     cfg["pi0_attached_partner_min_mev"]              = m_pi0_attached_partner_min_mev;              // doc pr/132 K3; MeV, 0 = no guard, byte-identical
@@ -2664,6 +2670,9 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
         pattern_algos.m_shower_pass4_prox_guard_len               = m_shower_pass4_prox_guard_len * units::cm;   // doc pr/130 item 1b, cm -> internal
         pattern_algos.m_shower_pass3_backfill_guard_len           = m_shower_pass3_backfill_guard_len * units::cm; // doc pr/130 item 1b, cm -> internal
         pattern_algos.m_stem_backfill_back_dvtx                   = m_stem_backfill_back_dvtx * units::cm;         // doc pr/130 item B, cm -> internal
+        pattern_algos.m_shower_pass4_prefilter_v1_escape          = m_shower_pass4_prefilter_v1_escape;            // doc pr/136 r2 (bool, no scaling)
+        pattern_algos.m_shower_pass4_prefilter_v1_max_v2          = m_shower_pass4_prefilter_v1_max_v2;            // doc pr/136 r2, deg (no scaling)
+        pattern_algos.m_shower_pass4_prefilter_v1_max_dis         = m_shower_pass4_prefilter_v1_max_dis * units::cm; // doc pr/136 r3, cm -> internal
         pattern_algos.m_pi0_mass_offset                           = m_pi0_mass_offset * units::MeV;                // doc pr/132 K1, MeV -> internal
         pattern_algos.m_pi0_assoc_angle_deg                       = m_pi0_assoc_angle_deg;                         // doc pr/132 K2, deg (no scaling)
         pattern_algos.m_pi0_attached_partner_min                  = m_pi0_attached_partner_min_mev * units::MeV;   // doc pr/132 K3, MeV -> internal

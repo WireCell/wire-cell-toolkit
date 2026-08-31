@@ -1951,6 +1951,31 @@ function(
     shower_satellite_absorb = true,          // SBND PRODUCTION ON 2026-08-29 (doc pr/125 K5; owner verdict on the K5 decision Bee pair b169a068/defaa224: "item 3, flip on is fine" -- the scanned operating point, max_mev 10 / host_mev 20, NOT the cap-3 variant).  69314: 25->18 showers, the 7 vertex-connected crumbs fold into the primary e- (68.9->74.7 MeV, keeps pdg 11), PF electron entries 38->30.  1105 fires / 208 events; physics checks clean (0 movers, owned +0, nusel identical, 0 pdg flips >15 MeV, no genuine pi0 touched); the accepted cost is unlabeled crumb charge booked as impurity (141-set med qF1 0.949->0.910, sum q_extra 2.41e7->3.12e7).  C++ default false.
     shower_satellite_absorb_max_mev = 10,    // MeV; C++ default 10. Emitted only when non-default AND pass on.
     shower_satellite_absorb_host_mev = 20,   // MeV; C++ default 20. Emitted only when non-default AND pass on.
+    // doc pr/136 round 2 -- shower_pass4_prefilter_v1_escape.  The pass-4
+    // cross-cluster loop's cheap `angle_v2 > 30` pre-filter is stricter than the
+    // acceptance disjunction it guards: two of that disjunction's four clauses
+    // test angle_v1 against pair_dis and never mention angle_v2.  ON re-tests
+    // exactly those two clauses (on the pair_dis halves only -- the
+    // close_shower_dis halves need the KD-tree call the filter exists to avoid).
+    // Measured target: 10 segments = 17.3% of the hand-scan q_miss, including
+    // SBND 142421 seg 7010 (9% of the whole deficit).  Faithful to the
+    // prototype, so this is an improvement, not a parity fix.
+    // C++ default false.  Key omitted when off => byte-identical pre-fix config.
+    shower_pass4_prefilter_v1_escape = false,
+    // deg; ceiling on angle_v2 for the escape above.  0 = no ceiling.  57% of
+    // the escape's population sits above 90 deg (BEHIND the shower) and carries
+    // only 3 of the 10 target segments, so 90 selects the forward half without
+    // inheriting K17 back-extension's two deaths.  C++ default 0.
+    // Emitted only when non-zero AND the escape is on.
+    shower_pass4_prefilter_v1_max_v2 = 0,
+    // cm; proximity bound on the escape above.  0 = none.  Round 2 measured the
+    // unbraked knob failing the hand-scan trade (q_extra 7.0 -> 12.2% against a
+    // q_miss fall of 14.0 -> 11.3%), with half the rise reached through the
+    // chain rather than a direct admission.  Every clean recovery sits below
+    // 21 cm; the runaway events fire at 26-61 cm.  25 takes the escape from
+    // 350 fires / 92 events to 33 / 22 and keeps all three clean winners.
+    // C++ default 0.  Emitted only when non-zero AND the escape is on.
+    shower_pass4_prefilter_v1_max_dis = 0,
     // doc pr/99 round 3 -- C1 kine-charge cell-ownership dedup + C1b
     // prototype cloud-rebuild parity (168596 Enu double count) + A5
     // hadronic-shower re-type (315167/395148 labels).  C++ defaults
@@ -3092,6 +3117,9 @@ function(
         [if shower_satellite_absorb then 'shower_satellite_absorb']: true,
         [if shower_satellite_absorb && shower_satellite_absorb_max_mev != 10 then 'shower_satellite_absorb_max_mev']: shower_satellite_absorb_max_mev,
         [if shower_satellite_absorb && shower_satellite_absorb_host_mev != 20 then 'shower_satellite_absorb_host_mev']: shower_satellite_absorb_host_mev,
+        [if shower_pass4_prefilter_v1_escape then 'shower_pass4_prefilter_v1_escape']: true,
+        [if shower_pass4_prefilter_v1_escape && shower_pass4_prefilter_v1_max_v2 != 0 then 'shower_pass4_prefilter_v1_max_v2']: shower_pass4_prefilter_v1_max_v2,
+        [if shower_pass4_prefilter_v1_escape && shower_pass4_prefilter_v1_max_dis != 0 then 'shower_pass4_prefilter_v1_max_dis']: shower_pass4_prefilter_v1_max_dis,
         [if (if kine_charge_dedup == null then false else kine_charge_dedup) then 'kine_charge_dedup']: true,
         [if (if kine_charge_rebuild == null then false else kine_charge_rebuild) then 'kine_charge_rebuild']: true,
         [if (if kine_charge_track_ctx == null then false else kine_charge_track_ctx) then 'kine_charge_track_ctx']: true,

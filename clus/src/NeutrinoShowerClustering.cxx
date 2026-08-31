@@ -2431,17 +2431,48 @@ void PatternAlgorithms::shower_clustering_with_nv_from_vertices(Graph& graph, Ve
 
             // Filter early before the two expensive KD-tree calls below
             if (angle_v2 > 30) {
-                // doc pr/130 part 10: this shower looked at this segment and
-                // dropped it on the cheap angle gate.  Gate tested first, so
-                // the branch costs one static bool when the env is unset.
+                // doc sbnd_xin/docs/pr/136 round 2
+                // (shower_pass4_prefilter_v1_escape): this cheap filter is
+                // STRICTER than the acceptance disjunction it guards -- clauses
+                // 1 and 3 below test angle_v1 against pair_dis and never look at
+                // angle_v2.  The escape re-tests exactly those two clauses, and
+                // only on the halves whose quantities are already in hand
+                // (angle_v1, pair_dis); the close_shower_dis halves would need
+                // the KD-tree call this filter exists to avoid, so they stay out
+                // (doc pr/136 sec 10.3 -- that is also why the measured ceiling
+                // is a floor).  Knob off => the disjunction is never evaluated
+                // and every candidate takes the legacy `continue` => the pass is
+                // byte-identical, tape included.
+                const bool p4_v1_escape =
+                    m_shower_pass4_prefilter_v1_escape &&
+                    (m_shower_pass4_prefilter_v1_max_v2 <= 0 ||
+                     angle_v2 < m_shower_pass4_prefilter_v1_max_v2) &&
+                    (m_shower_pass4_prefilter_v1_max_dis <= 0 ||
+                     pair_dis < m_shower_pass4_prefilter_v1_max_dis) &&
+                    ((angle_v1 < 25 && pair_dis < 80 * units::cm) ||
+                     (angle_v1 < 12.5 && pair_dis < 120 * units::cm));
+                if (!p4_v1_escape) {
+                    // doc pr/130 part 10: this shower looked at this segment and
+                    // dropped it on the cheap angle gate.  Gate tested first, so
+                    // the branch costs one static bool when the env is unset.
+                    if (pr130_xclus_dbg()) {
+                        std::fprintf(stderr,
+                            "SHOWER_XCLUS REJECT site=pass4_angle_early shower=%d seg=%d angle_v1=%.1f angle_v2=%.1f pair_dis_cm=%.1f\n",
+                            pr91_seg_display_id(shower->start_segment()),
+                            pr91_seg_display_id(seg1), angle_v1, angle_v2,
+                            pair_dis / units::cm);
+                    }
+                    continue;
+                }
+                // The escape fired: fall through to the full disjunction.  Taped
+                // so the ON arm's admissions are attributable segment by segment.
                 if (pr130_xclus_dbg()) {
                     std::fprintf(stderr,
-                        "SHOWER_XCLUS REJECT site=pass4_angle_early shower=%d seg=%d angle_v1=%.1f angle_v2=%.1f pair_dis_cm=%.1f\n",
+                        "SHOWER_XCLUS ESCAPE site=pass4_prefilter_v1 shower=%d seg=%d angle_v1=%.1f angle_v2=%.1f pair_dis_cm=%.1f\n",
                         pr91_seg_display_id(shower->start_segment()),
                         pr91_seg_display_id(seg1), angle_v1, angle_v2,
                         pair_dis / units::cm);
                 }
-                continue;
             }
 
             double tmp_shower_dis = segment_get_closest_point(seg1, shower_start_front).first;

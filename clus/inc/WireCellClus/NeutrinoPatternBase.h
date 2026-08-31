@@ -2224,6 +2224,53 @@ namespace WireCell::Clus::PR {
         double m_shower_pass4_prox_guard_len{0};         ///< doc pr/130 item 1b; 0 = pass4_proximity unguarded (legacy)
         double m_shower_pass3_backfill_guard_len{0};     ///< doc pr/130 item 1b; 0 = pass3 sibling backfill ignores pr/124's decline (legacy)
         double m_stem_backfill_back_dvtx{0};             ///< doc pr/130 item B; 0 = back guard declines regardless of shower-start distance to the nu vertex (legacy)
+        // doc sbnd_xin/docs/pr/136 round 2 -- shower_pass4_prefilter_v1_escape.
+        // The pass-4 cross-cluster loop computes BOTH angles and then applies a
+        // cheap early filter, `if (angle_v2 > 30) continue;`, before the two
+        // expensive KD-tree calls (NeutrinoShowerClustering.cxx:2434).  But two
+        // of the four clauses of the acceptance disjunction it guards
+        // (:2450-2453) do not mention angle_v2 at all -- they test angle_v1
+        // against pair_dis.  So the pre-filter is STRICTER than the test it
+        // protects, and the doc pr/136 sec 10.3 census measures the cost: 10
+        // segments carrying 17.3% of the hand-scan q_miss satisfy an angle_v1
+        // clause and were discarded before it was evaluated, including the
+        // single largest missed segment in the census (SBND 142421 seg 7010,
+        // angle_v1 21.3 deg, 9% of the whole deficit).
+        //
+        // NOT a porting defect (M15): prototype_base NeutrinoID_shower_clustering.h
+        // :1299 carries the same pre-filter with the same disjunction below it,
+        // so this is an improvement to an algorithm both codebases share.
+        //
+        // The escape re-tests ONLY the two angle_v1 clauses, and only with
+        // quantities already computed at the filter (angle_v1, pair_dis) -- the
+        // close_shower_dis halves of those clauses need a KD-tree call and would
+        // defeat the filter's whole purpose.  false => predicate never evaluated
+        // => byte-identical legacy path.
+        bool   m_shower_pass4_prefilter_v1_escape{false}; ///< doc pr/136 r2; false = angle_v2>30 discards regardless of angle_v1 (legacy)
+        // doc pr/136 round 2 -- the escape's backward half.  The 810 candidates
+        // the escape would admit over the 239-event manifest are almost flat in
+        // angle_v2 and 57% of them sit ABOVE 90 deg, i.e. BEHIND the shower
+        // relative to the cluster anchor -- the same geometry class as the K17
+        // back-extension that died twice (doc pr/124: v1 31->21 exact; v2 26
+        // exact, net -5).  They carry only 3 of the 10 target segments.  This
+        // caps the escape at an angle_v2 ceiling so the forward half can be
+        // measured without inheriting a known death.  0 = no ceiling = the
+        // escape as written above.  Inert while the escape is off.
+        double m_shower_pass4_prefilter_v1_max_v2{0};    ///< doc pr/136 r2; deg, 0 = escape unbounded in angle_v2
+        // doc pr/136 round 3 -- the escape's proximity brake, added because round
+        // 2 measured the unbraked knob failing.  onV1c90 recovered its targets
+        // (142421 seg 7010 +5.91e6 with q_extra -6.2e4; 314838 +2.49e6 with
+        // +3.8e4; 84229 +7.4e5 with 0) but the hand-scan q_extra rose 7.0 ->
+        // 12.2% against a q_miss fall of only 14.0 -> 11.3%, and HALF that rise
+        // was one shower (269774/97197, +1.24e7) reached through the CHAIN, not
+        // through a direct escape admission.  The separator is proximity: every
+        // clean recovery sits below 21 cm of pair_dis while the runaway events
+        // fire at 26-61 cm.  Offline on the OFF tape a 25 cm cap takes the
+        // escape from 350 fires / 92 events to 33 / 22, keeps all three clean
+        // winners, and leaves 1 firing in the four runaway events.
+        // 0 = no proximity bound = round 2's behaviour.  Inert while the escape
+        // is off.
+        double m_shower_pass4_prefilter_v1_max_dis{0};   ///< doc pr/136 r3; cm, 0 = escape unbounded in pair_dis
         // doc pr/132: pi0-finder knobs (owner round 2026-08-29).  Defaults
         // reproduce the legacy hard-coded constants => byte-identical.
         double m_pi0_mass_offset{10 * units::MeV};       ///< doc pr/132 K1; the finders' "+10 MeV" window offset (both paths)
