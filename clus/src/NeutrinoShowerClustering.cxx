@@ -5699,6 +5699,53 @@ static std::pair<size_t, double> pr138_place(const std::vector<SegmentPtr>& mem,
     return {best, share[best] / tot};
 }
 
+// doc sbnd_xin/docs/pr/139 P1.2 -- the impact parameter b: how far the object's
+// OWN charge-weighted principal axis misses the reference vertex.  pr/138 sec
+// 4.2b killed void_frac (AUC 0.146, BACKWARDS) because everything measured
+// ALONG the vertex ray is confounded -- seen from a wrong origin one shower
+// genuinely looks like two well-separated ones.  b is perpendicular, and on the
+// eight census movers every gain sits below 11 cm and every loss above 13.
+//
+// Transcribed from sbnd_xin/scripts/pr139_pointing.py:38-46, which builds
+// X = (pts - c) * sqrt(w) and takes the first right singular vector.  The
+// weighted covariance below has the same eigenvectors (X^T X), so the two
+// agree to rounding; the tape prints b so that identity is CHECKED on the arm
+// rather than asserted (the pr/138 sec B1 discipline).  Weights follow
+// pr137_lib.qwt(): dQ clamped at zero, unit weights if the clamp empties it.
+// NO decimation here -- the offline reference uses every point.
+inline double pr139_impact(const std::vector<SegmentPtr>& segs, const WireCell::Point& v)
+{
+    std::vector<const PR::Fit*> fp;
+    for (const auto& sg : segs) {
+        if (!sg) continue;
+        for (const auto& f : sg->fits()) if (f.valid()) fp.push_back(&f);
+    }
+    if (fp.size() < 8) return -1.0;
+    std::vector<double> w(fp.size());
+    double wsum = 0;
+    for (size_t i = 0; i < fp.size(); ++i) { w[i] = std::max(fp[i]->dQ, 0.0); wsum += w[i]; }
+    if (wsum <= 0) { for (auto& x : w) x = 1.0; wsum = (double) w.size(); }
+    WireCell::Vector c(0, 0, 0);
+    for (size_t i = 0; i < fp.size(); ++i) c = c + fp[i]->point * w[i];
+    c = c / wsum;
+    Eigen::Matrix3d cov = Eigen::Matrix3d::Zero();
+    for (size_t i = 0; i < fp.size(); ++i) {
+        const WireCell::Vector d = fp[i]->point - c;
+        const double dv[3] = {d.x(), d.y(), d.z()};
+        for (int a = 0; a < 3; ++a)
+            for (int b = 0; b < 3; ++b) cov(a, b) += w[i] * dv[a] * dv[b];
+    }
+    Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> es(cov);
+    if (es.info() != Eigen::Success) return -1.0;
+    const Eigen::Vector3d e = es.eigenvectors().col(2);   // ascending eigenvalues
+    WireCell::Vector ax(e(0), e(1), e(2));
+    const double an = ax.magnitude();
+    if (an <= 0) return -1.0;
+    ax = ax / an;
+    const WireCell::Vector d = c - v;
+    return (d - ax * d.dot(ax)).magnitude();
+}
+
 /// doc sbnd_xin/docs/pr/138 Phase B -- the EM shower splitter.  Full docstring
 /// and provenance at the pr138_split_dbg() block above.  No-op when
 /// m_shower_split is false, which is the default and makes the pass
@@ -5738,8 +5785,36 @@ void PatternAlgorithms::shower_split(Graph& graph, VertexPtr main_vertex, Indexe
     });
 
     const size_t cap = (size_t) std::max(2, m_shower_split_max_parts);
-    int n_fired = 0, n_peeled = 0;
+    int n_fired = 0, n_peeled = 0, n_shared_refused = 0, n_vetoed = 0;
     std::vector<ShowerPtr> daughters;
+    std::vector<ShowerPtr> dau_parent;   // aligned with `daughters` (doc pr/139 P1.4)
+
+    // doc pr/139 P1.1 -- how many showers own each segment.  WCT showers MAY
+    // share members, and a peel of shared segments makes a DUPLICATE object:
+    // kine_charge is computed per shower from its own point clouds against the
+    // 2D charge maps with no cross-shower dedup, so the charge lands on one of
+    // the two arbitrarily.  Both failure modes are in the shipped arms
+    // (work-pr138r2-c90on-*): evt281485's daughter gets 0.00 MeV while its
+    // co-owner gains the whole 38.9, and evt165157's daughter is seeded on a
+    // segment that already ROOTS another shower.  7 of 50 fired parents hold
+    // shared members.  The dump's segment->shower field is single-valued and
+    // cannot see this; the count below can.
+    //
+    // Counted into an unordered_map keyed by the segment's GRAPH INDEX, not by
+    // pointer -- addition is order-free, and nothing here iterates the map.
+    std::unordered_map<size_t, int> seg_nshower;
+    if (m_shower_split_skip_shared) {
+        for (const auto& sh : split_order) {
+            if (!sh) continue;
+            std::unordered_set<size_t> seen;
+            for (auto edesc : ordered_edges(*sh, graph)) {
+                SegmentPtr sg = graph[edesc].segment;
+                if (!sg || !sg->descriptor_valid()) continue;
+                const size_t idx = graph[sg->get_descriptor()].index;
+                if (seen.insert(idx).second) seg_nshower[idx] += 1;
+            }
+        }
+    }
 
     for (auto& shower : split_order) {
         SegmentPtr ss = shower ? shower->start_segment() : nullptr;
@@ -5807,6 +5882,18 @@ void PatternAlgorithms::shower_split(Graph& graph, VertexPtr main_vertex, Indexe
         const bool fired = (!acc.empty() && nparts >= 2);
         if (fired) ++n_fired;
 
+        // doc pr/139 P1.2 -- the impact-parameter veto.  Computed whenever the
+        // tape is on (so the C++ value can be checked against
+        // pr139_pointing.py on the same arm) or whenever the bound is armed.
+        // m_shower_split_max_impact == 0 is the shipped behaviour: no bound.
+        // A cloud too small for pr139_impact() returns -1 and is NEVER vetoed
+        // -- absence of the feature must not silently suppress a fire.
+        double bimp = -1.0;
+        if (dbg || m_shower_split_max_impact > 0) bimp = pr139_impact(mem, v);
+        const bool vetoed = fired && m_shower_split_max_impact > 0 && bimp >= 0
+                            && bimp > m_shower_split_max_impact;
+        if (vetoed) ++n_vetoed;
+
         if (dbg) {
             double vgap = -1.0;
             for (const auto& sg : mem)
@@ -5819,13 +5906,14 @@ void PatternAlgorithms::shower_split(Graph& graph, VertexPtr main_vertex, Indexe
                 "SHOWER_SPLIT cand shower=%d pdg=%d nseg=%zu npts=%zu Q=%.4g "
                 "n_seed=%zu valley_best=%.4f angle_best=%.2f nacc=%zu nparts=%zu "
                 "fired=%d decim=%d vtx=%.2f,%.2f,%.2f vgap_cm=%.2f "
-                "vchi2=%.3f vdQ=%.4g vfit=%d\n",
+                "vchi2=%.3f vdQ=%.4g vfit=%d b_cm=%.2f veto=%d\n",
                 pr91_seg_display_id(ss), shower->get_particle_type(), mem.size(), npts, Q,
                 M.dirs.size(), vbest, abest, acc.size(), nparts, fired ? 1 : 0,
                 npts > 4000 ? 1 : 0, v.x() / units::cm, v.y() / units::cm, v.z() / units::cm,
                 vgap >= 0 ? vgap / units::cm : -1.0,
                 main_vertex->fit().reduced_chi2, main_vertex->fit().dQ,
-                main_vertex->fit().valid() ? 1 : 0);
+                main_vertex->fit().valid() ? 1 : 0,
+                bimp >= 0 ? bimp / units::cm : -1.0, vetoed ? 1 : 0);
             if (fired)
                 for (size_t g = 0; g < acc.size(); ++g) {
                     std::string segs; double qg = 0; size_t ng = 0;
@@ -5842,7 +5930,7 @@ void PatternAlgorithms::shower_split(Graph& graph, VertexPtr main_vertex, Indexe
                 }
         }
 
-        if (!m_shower_split || !fired) continue;
+        if (!m_shower_split || !fired || vetoed) continue;
         // Long-muon pseudo-showers are never cut -- same exclusion as
         // shower_pass4_prune_detached (:8607).  The TAPE above deliberately
         // still records them: 8 of the 172 scanned objects are track-typed
@@ -5862,6 +5950,29 @@ void PatternAlgorithms::shower_split(Graph& graph, VertexPtr main_vertex, Indexe
             std::vector<SegmentPtr> comp;
             for (size_t i = 0; i < mem.size(); ++i) if (part[i] == g) comp.push_back(mem[i]);
             if (comp.empty()) continue;
+            // doc pr/139 P1.1 -- refuse a component holding a segment that a
+            // shower OTHER than this parent also owns.  A refusal, not a
+            // repair: making a shared peel work means dividing 2D charge
+            // between duplicate objects, which is the kine_charge dedup
+            // problem (kine_charge_owned_scan, knob-gated, runs later).
+            if (m_shower_split_skip_shared) {
+                bool shared = false;
+                for (const auto& sg : comp) {
+                    if (!sg || !sg->descriptor_valid()) continue;
+                    auto it = seg_nshower.find(graph[sg->get_descriptor()].index);
+                    if (it != seg_nshower.end() && it->second > 1) { shared = true; break; }
+                }
+                if (shared) {
+                    ++n_shared_refused;
+                    if (dbg)
+                        std::fprintf(stderr, "SHOWER_SPLIT shared shower=%d part=%zu nseg=%zu\n",
+                                     pr91_seg_display_id(ss), g, comp.size());
+                    SPDLOG_LOGGER_DEBUG(s_log,
+                        "pr139 shower_split: shared-member refusal shower_id={} part={} nseg={}",
+                        shower->get_shower_id(), g, comp.size());
+                    continue;
+                }
+            }
             const int removed = shower->detach_member_set(comp);
             if (!removed) {
                 SPDLOG_LOGGER_DEBUG(s_log, "pr138 shower_split: refuse shower_id={} part={} nseg={}",
@@ -5875,13 +5986,37 @@ void PatternAlgorithms::shower_split(Graph& graph, VertexPtr main_vertex, Indexe
             // after this pass and read get_start_point() and get_init_dir() --
             // seeding at the downstream end would point the daughter back at
             // its sibling and poison exactly the pi0 mass this round is for.
+            //
+            // doc pr/139 P1.3 -- and that choice takes NO account of PDG, which
+            // is the defect this knob fixes.  SBND runs
+            // shower_pdg_from_start_segment, and Shower::calculate_kinematics
+            // copies the start segment's pdg verbatim into data.particle_type
+            // (PRShower.cxx:1617, :1738), so a daughter whose nearest member
+            // happens to be muon-typed becomes a muon shower: 11 of 50
+            // daughters in the shipped arm, four of them with an EM-MAJORITY
+            // segment composition (evt84229 at 476 MeV, evt269774 at 182).
+            // The harm is double.  A mu-typed shower is invisible to the pi0
+            // finder except through K20, AND its energy is wrong: kine_charge
+            // divides by recom*fudge chosen on get_flag_shower()
+            // (NeutrinoEnergyReco.cxx:337-342), which the muon branch clears,
+            // so at the SBND values 0.58*0.86 vs 0.87*0.95 the mu-typed energy
+            // is LOW BY A FACTOR 1.657.
+            // Knob on: prefer the nearest EM-typed member, fall back to the
+            // legacy nearest-overall when the daughter has none.  Knob off:
+            // the single pass below IS the legacy loop, byte for byte.
             SegmentPtr root_sg = comp.front();
             double root_d = -1.0;
-            for (const auto& sg : comp) {
-                double d = -1.0;
-                for (const auto& f : sg->fits())
-                    if (f.valid()) { const double t = (f.point - v).magnitude(); if (d < 0 || t < d) d = t; }
-                if (d >= 0 && (root_d < 0 || d < root_d)) { root_d = d; root_sg = sg; }
+            for (int rpass = 0; rpass < (m_shower_split_em_start ? 2 : 1); ++rpass) {
+                const bool em_only = (m_shower_split_em_start && rpass == 0);
+                for (const auto& sg : comp) {
+                    if (em_only && !(sg->has_particle_info() && sg->particle_info()
+                                     && std::abs(sg->particle_info()->pdg()) == 11)) continue;
+                    double d = -1.0;
+                    for (const auto& f : sg->fits())
+                        if (f.valid()) { const double t = (f.point - v).magnitude(); if (d < 0 || t < d) d = t; }
+                    if (d >= 0 && (root_d < 0 || d < root_d)) { root_d = d; root_sg = sg; }
+                }
+                if (em_only && root_d >= 0) break;   // an EM member won the seed
             }
             const double root_sv_dis = segment_get_closest_point(root_sg, sv_pt).first;
             const int conn = (root_sv_dis >= 0 && root_sv_dis <= 80 * units::cm) ? 3 : 4;
@@ -5890,6 +6025,7 @@ void PatternAlgorithms::shower_split(Graph& graph, VertexPtr main_vertex, Indexe
             ns->set_start_segment(root_sg);
             for (const auto& sg : comp) if (sg != root_sg) ns->add_segment(sg, true);
             daughters.push_back(ns);
+            dau_parent.push_back(shower);   // doc pr/139 P1.4: never re-home into the parent
             ++n_peeled;
             if (dbg) {
                 // The forward-seeding check the choice above exists to satisfy:
@@ -5925,9 +6061,135 @@ void PatternAlgorithms::shower_split(Graph& graph, VertexPtr main_vertex, Indexe
         // the production configuration.
         calculate_shower_kinematics(showers, vertices_in_long_muon, segments_in_long_muon,
                                     graph, track_fitter, dv, particle_data, recomb_model);
+
+        // doc pr/139 P1.4 -- re-home the orphan daughter.  The owner's scan
+        // says a cut that leaves an orphan has not finished the job, five
+        // times ("keep, but this should be part of the earlier EM shower
+        // cluster"), and again on 2026-08-31: "We should re-sit them into the
+        // nearby showers."
+        //
+        // A FORK of pr125 satellite_absorb (:9864 in the shipped tree), not a
+        // shared helper -- CLAUDE.md M10: that pass is production ON and stays
+        // byte-for-byte untouched.  Three constraints satellite_absorb's own
+        // predicates do not carry:
+        //   (1) never re-home into the PARENT -- that silently undoes the
+        //       split.  The owner says the EARLIER shower, i.e. a third object.
+        //   (2) host must be EM-typed and out-charge the daughter (the
+        //       satellite_absorb host rule).
+        //   (3) the sibling-merge trap: if the nearest EM shower is the pi0
+        //       PARTNER, this merges the two gammas and destroys the pair the
+        //       split just enabled.  The census is the referee; a census below
+        //       35 on this arm means checking the moved events for exactly
+        //       that before anything else.
+        // Knob off => the block never runs => byte-identical.
+        if (m_shower_split_rehome && !daughters.empty()) {
+            auto rh_points = [&](const ShowerPtr& sh, size_t cap) {
+                std::vector<WireCell::Point> out;
+                std::vector<const PR::Fit*> fp;
+                std::unordered_set<size_t> seen;
+                for (auto edesc : ordered_edges(*sh, graph)) {
+                    SegmentPtr sg = graph[edesc].segment;
+                    if (!sg || !sg->descriptor_valid()) continue;
+                    if (!seen.insert(graph[sg->get_descriptor()].index).second) continue;
+                    for (const auto& f : sg->fits()) if (f.valid()) fp.push_back(&f);
+                }
+                const size_t stride = fp.size() > cap ? (fp.size() + cap - 1) / cap : 1;
+                for (size_t i = 0; i < fp.size(); i += stride) out.push_back(fp[i]->point);
+                return out;
+            };
+            // Deterministic host order -- the same (cluster id, segment id)
+            // key the candidate loop above uses.
+            std::vector<ShowerPtr> host_order(showers.begin(), showers.end());
+            std::sort(host_order.begin(), host_order.end(), [](const ShowerPtr& a, const ShowerPtr& b) {
+                auto* sa = a->start_segment().get();
+                auto* sb = b->start_segment().get();
+                if (!sa || !sb) return sa < sb;
+                const int ca = sa->cluster() ? sa->cluster()->get_cluster_id() : -1;
+                const int cb = sb->cluster() ? sb->cluster()->get_cluster_id() : -1;
+                if (ca != cb) return ca < cb;
+                return sa->id() < sb->id();
+            });
+            std::set<Shower*> rh_is_dau;          // membership only
+            for (const auto& d : daughters) if (d) rh_is_dau.insert(d.get());
+            // Host clouds once, in host_order, before anything merges.
+            std::vector<std::vector<WireCell::Point>> host_pts(host_order.size());
+            std::vector<char> host_ok(host_order.size(), 0);
+            for (size_t hi = 0; hi < host_order.size(); ++hi) {
+                const ShowerPtr& h = host_order[hi];
+                if (!h || rh_is_dau.count(h.get())) continue;
+                if (std::abs(h->get_particle_type()) != 11) continue;
+                host_pts[hi] = rh_points(h, 400);
+                host_ok[hi] = !host_pts[hi].empty();
+            }
+            std::vector<std::pair<ShowerPtr, ShowerPtr>> rh_plan;   // (host, daughter)
+            std::set<Shower*> rh_claimed;                            // membership only
+            for (size_t di = 0; di < daughters.size(); ++di) {
+                const ShowerPtr& dau = daughters[di];
+                if (!dau || !showers.count(dau)) continue;
+                const std::vector<WireCell::Point> dpts = rh_points(dau, 400);
+                if (dpts.empty()) continue;
+                ShowerPtr best; double best_gap = -1.0;
+                for (size_t hi = 0; hi < host_order.size(); ++hi) {
+                    if (!host_ok[hi]) continue;
+                    const ShowerPtr& h = host_order[hi];
+                    if (h == dau || h == dau_parent[di]) continue;
+                    if (rh_claimed.count(h.get())) continue;
+                    if (!(h->get_kine_charge() > dau->get_kine_charge())) continue;
+                    double g = -1.0;
+                    for (const auto& a : dpts)
+                        for (const auto& b : host_pts[hi]) {
+                            const double t = (a - b).magnitude();
+                            if (g < 0 || t < g) g = t;
+                        }
+                    if (g >= 0 && g <= m_shower_split_rehome_gap && (best_gap < 0 || g < best_gap)) {
+                        best_gap = g; best = h;
+                    }
+                }
+                if (dbg)
+                    std::fprintf(stderr,
+                        "SHOWER_SPLIT rehome dau=%d parent=%d ke_mev=%.2f host=%d gap_cm=%.2f verdict=%s\n",
+                        pr91_seg_display_id(dau->start_segment()),
+                        dau_parent[di] ? pr91_seg_display_id(dau_parent[di]->start_segment()) : -1,
+                        dau->get_kine_charge() / units::MeV,
+                        best ? pr91_seg_display_id(best->start_segment()) : -1,
+                        best_gap >= 0 ? best_gap / units::cm : -1.0,
+                        best ? "REHOME" : "orphan");
+                if (best) { rh_plan.emplace_back(best, dau); rh_claimed.insert(dau.get()); }
+            }
+            int n_rehomed = 0;
+            std::set<Shower*> rh_recalc;                             // membership only
+            for (auto& hd : rh_plan) {
+                pr93_probe_absorb_splice("split_rehome", hd.first, hd.second);
+                hd.first->add_shower(*hd.second);
+                showers.erase(hd.second);
+                rh_recalc.insert(hd.first.get());
+                ++n_rehomed;
+            }
+            if (n_rehomed) {
+                for (const auto& h : host_order) {
+                    if (!h || !rh_recalc.count(h.get())) continue;
+                    // Deliberately NO update_particle_type -- the same minimal
+                    // absorb pr125 satellite_absorb settled on.
+                    h->calculate_kinematics(particle_data, recomb_model,
+                                            m_shower_endpoint_exclude_start_vertex,
+                                            m_shower_endpoint_skip_orphan_vtx);
+                    h->set_kine_charge(cal_kine_charge(h, m_charge_2d_u, m_charge_2d_v,
+                                                       m_charge_2d_w, m_map_apa_ch_plane_wires,
+                                                       track_fitter, dv));
+                    h->set_flag_kinematics(true);
+                }
+                update_shower_maps(showers, map_vertex_in_shower, map_segment_in_shower,
+                                   map_vertex_to_shower, used_shower_clusters);
+                SPDLOG_LOGGER_DEBUG(s_log,
+                    "pr139 shower_split: {} daughter(s) re-homed; {} shower(s) now",
+                    n_rehomed, showers.size());
+            }
+        }
+
         SPDLOG_LOGGER_DEBUG(s_log,
-            "pr138 shower_split: {} candidate(s) fired, {} daughter(s) peeled; {} shower(s) now",
-            n_fired, n_peeled, showers.size());
+            "pr138 shower_split: {} candidate(s) fired, {} daughter(s) peeled; {} shower(s) now"
+            " (pr139: {} shared-member refusal(s), {} impact veto(es))",
+            n_fired, n_peeled, showers.size(), n_shared_refused, n_vetoed);
     }
 }
 

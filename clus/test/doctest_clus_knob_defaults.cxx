@@ -313,6 +313,13 @@ TEST_CASE("clus knob defaults: TaggerCheckNeutrino switches are all OFF")
     CHECK_KNOB_NUM(cfg, "shower_split_min_nseg", 3.0);                        // inert while pass off
     CHECK_KNOB_NUM(cfg, "shower_split_bundle_gap", 4.0);                      // cm; inert while pass off
     CHECK_KNOB_NUM(cfg, "shower_split_snap", 0.80);                           // k>=3 only; inert while pass off
+    // doc pr/139 phase 1 -- four follow-ups to the shipped splitter.  Every
+    // one defaults to the shipped behaviour, so production stays byte-identical.
+    CHECK_KNOB_BOOL(cfg, "shower_split_skip_shared", false);                  // doc pr/139 P1.1; false = shipped (shared peels allowed)
+    CHECK_KNOB_NUM(cfg, "shower_split_max_impact", 0.0);                      // doc pr/139 P1.2; cm; 0 = no bound = shipped
+    CHECK_KNOB_BOOL(cfg, "shower_split_em_start", false);                     // doc pr/139 P1.3; false = nearest-overall seed = shipped
+    CHECK_KNOB_BOOL(cfg, "shower_split_rehome", false);                       // doc pr/139 P1.4; false = no re-home pass
+    CHECK_KNOB_NUM(cfg, "shower_split_rehome_gap", 4.0);                      // doc pr/139 P1.4; cm; inert while the pass is off
     CHECK_KNOB_BOOL(cfg, "kine_count_guard_freed", false);                    // pr/123 r2; kine twin of pf_orphan_guard_freed
     CHECK_KNOB_NUM(cfg, "kine_guard_freed_impact", 0.0);                     // pr/129; 0 = pointing test off
     CHECK_KNOB_NUM(cfg, "kine_guard_freed_miss_deg", 90.0);                  // pr/129

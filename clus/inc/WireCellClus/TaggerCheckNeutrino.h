@@ -959,6 +959,11 @@ public:
         int    m_shower_split_min_nseg{3};                      // doc pr/138 B1; candidate member-count floor
         double m_shower_split_bundle_gap{4};                    // doc pr/138 B3; cm; single-linkage bundle gap
         double m_shower_split_snap{0.80};                       // doc pr/138 B3; k>=3 bundle dominance floor
+        bool   m_shower_split_skip_shared{false};           // doc pr/139 P1.1; refuse a component holding a segment another shower also owns
+        double m_shower_split_max_impact{0};                // doc pr/139 P1.2; cm; 0 = no bound
+        bool   m_shower_split_em_start{false};              // doc pr/139 P1.3; seed the daughter on its nearest EM-typed member
+        bool   m_shower_split_rehome{false};                // doc pr/139 P1.4; offer an orphan daughter to the nearest larger EM shower
+        double m_shower_split_rehome_gap{4};                // doc pr/139 P1.4; cm; max daughter->host 3-D gap
         double m_shower_satellite_absorb_max_mev{10.0};             // doc pr/125; MeV, satellite kine cap
         double m_shower_satellite_absorb_host_mev{20.0};            // doc pr/125; MeV, host kine floor
         double m_shower_pass4_track_guard_len{0.0};                 // doc pr/123 r1; cm, 0 = no length guard

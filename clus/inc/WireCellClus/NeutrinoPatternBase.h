@@ -2327,6 +2327,14 @@ namespace WireCell::Clus::PR {
         int    m_shower_split_min_nseg{3};               ///< doc pr/138 B1; candidate member-count floor
         double m_shower_split_bundle_gap{4 * units::cm}; ///< doc pr/138 B3; single-linkage bundle gap
         double m_shower_split_snap{0.80};                ///< doc pr/138 B3; k>=3 only: a bundle below this charge dominance is cut at the segment level
+        // doc pr/139 phase 1 -- four independent follow-ups to the shipped
+        // splitter.  Every one defaults to the shipped behaviour, so the
+        // production path stays byte-identical until a knob is turned on.
+        bool   m_shower_split_skip_shared{false};        ///< doc pr/139 P1.1; refuse a component holding a segment another shower also owns
+        double m_shower_split_max_impact{0.0};           ///< doc pr/139 P1.2; 0 = no bound; else fire only when the object's axis misses the reference vertex by <= this
+        bool   m_shower_split_em_start{false};           ///< doc pr/139 P1.3; seed the daughter on its nearest EM-typed member (falls back to nearest-overall)
+        bool   m_shower_split_rehome{false};             ///< doc pr/139 P1.4; offer an orphan daughter to the nearest larger EM shower that is not its parent
+        double m_shower_split_rehome_gap{4 * units::cm}; ///< doc pr/139 P1.4; max 3-D gap daughter->host for the re-home
         // doc pr/123 round 2: kine twin of pf_orphan_guard_freed -- count a
         // guard-freed (kPass4GuardFreed) track that neither the BFS nor any
         // shower claimed into kine_energy_particle (171572's 125cm muon,

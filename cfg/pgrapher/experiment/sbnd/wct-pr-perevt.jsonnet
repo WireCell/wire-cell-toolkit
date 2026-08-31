@@ -1984,6 +1984,23 @@ function(
     shower_split_min_nseg = 3,               // C++ default 3. Emitted only when non-default AND pass on.
     shower_split_bundle_gap = 4,             // cm; C++ default 4. Emitted only when non-default AND pass on.
     shower_split_snap = 0.80,                // C++ default 0.80, k>=3 only. Emitted only when non-default AND pass on.
+
+    // doc pr/139 phase 1 -- four independent follow-ups to the shipped splitter,
+    // each measured ALONE before any combination (doc pr/139 sec 1, standing bar).
+    // Every default below is the shipped behaviour, so the compiled JSON is
+    // byte-identical to the pre-pr/139 config while they stay at these values.
+    shower_split_skip_shared = false,        // P1.1 refuse a peel of segments another shower also owns.
+                                             // C++ default false. Key omitted when off => byte-identical.
+    shower_split_max_impact = 0,             // P1.2 cm; fire only when the object's own axis misses the
+                                             // reference vertex by <= this.  C++ default 0 = no bound.
+                                             // Key omitted when 0 => byte-identical.
+    shower_split_em_start = false,           // P1.3 seed the daughter on its nearest EM-typed member.
+                                             // C++ default false. Key omitted when off => byte-identical.
+    shower_split_rehome = false,             // P1.4 re-home an orphan daughter into the nearest larger EM
+                                             // shower that is not its parent.  C++ default false.
+                                             // Key omitted when off => byte-identical.
+    shower_split_rehome_gap = 4,             // P1.4 cm; C++ default 4. Emitted only when non-default AND
+                                             // the re-home pass is on.
     // doc pr/136 round 2 -- shower_pass4_prefilter_v1_escape.  The pass-4
     // cross-cluster loop's cheap `angle_v2 > 30` pre-filter is stricter than the
     // acceptance disjunction it guards: two of that disjunction's four clauses
@@ -3168,6 +3185,13 @@ function(
         [if shower_split && shower_split_min_nseg != 3 then 'shower_split_min_nseg']: shower_split_min_nseg,
         [if shower_split && shower_split_bundle_gap != 4 then 'shower_split_bundle_gap']: shower_split_bundle_gap,
         [if shower_split && shower_split_snap != 0.80 then 'shower_split_snap']: shower_split_snap,
+        // doc pr/139 phase 1 -- key-suppression idiom: nothing is emitted while
+        // each knob holds its shipped default, so the compiled JSON does not move.
+        [if shower_split && shower_split_skip_shared then 'shower_split_skip_shared']: true,
+        [if shower_split && shower_split_max_impact != 0 then 'shower_split_max_impact']: shower_split_max_impact,
+        [if shower_split && shower_split_em_start then 'shower_split_em_start']: true,
+        [if shower_split && shower_split_rehome then 'shower_split_rehome']: true,
+        [if shower_split && shower_split_rehome && shower_split_rehome_gap != 4 then 'shower_split_rehome_gap']: shower_split_rehome_gap,
         [if shower_pass4_prefilter_v1_escape then 'shower_pass4_prefilter_v1_escape']: true,
         [if shower_pass4_prefilter_v1_escape && shower_pass4_prefilter_v1_max_v2 != 0 then 'shower_pass4_prefilter_v1_max_v2']: shower_pass4_prefilter_v1_max_v2,
         [if shower_pass4_prefilter_v1_escape && shower_pass4_prefilter_v1_max_dis != 0 then 'shower_pass4_prefilter_v1_max_dis']: shower_pass4_prefilter_v1_max_dis,

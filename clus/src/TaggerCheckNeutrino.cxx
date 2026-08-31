@@ -709,6 +709,11 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_shower_split_min_nseg = get(config, "shower_split_min_nseg", m_shower_split_min_nseg);   // doc pr/138 B1; candidate member-count floor
     m_shower_split_bundle_gap = get(config, "shower_split_bundle_gap", m_shower_split_bundle_gap);   // doc pr/138 B3; single-linkage bundle gap
     m_shower_split_snap = get(config, "shower_split_snap", m_shower_split_snap);   // doc pr/138 B3; k>=3 bundle dominance floor
+    m_shower_split_skip_shared = get(config, "shower_split_skip_shared", m_shower_split_skip_shared);   // doc pr/139 P1.1; refuse a component holding a segment another shower also owns
+    m_shower_split_max_impact = get(config, "shower_split_max_impact", m_shower_split_max_impact);   // doc pr/139 P1.2; cm; 0 = no bound
+    m_shower_split_em_start = get(config, "shower_split_em_start", m_shower_split_em_start);   // doc pr/139 P1.3; seed the daughter on its nearest EM-typed member
+    m_shower_split_rehome = get(config, "shower_split_rehome", m_shower_split_rehome);   // doc pr/139 P1.4; offer an orphan daughter to the nearest larger EM shower
+    m_shower_split_rehome_gap = get(config, "shower_split_rehome_gap", m_shower_split_rehome_gap);   // doc pr/139 P1.4; cm; max daughter->host 3-D gap
     m_shower_satellite_absorb_max_mev           = get(config, "shower_satellite_absorb_max_mev",           m_shower_satellite_absorb_max_mev);        // doc pr/125, MeV
     m_shower_satellite_absorb_host_mev          = get(config, "shower_satellite_absorb_host_mev",          m_shower_satellite_absorb_host_mev);       // doc pr/125, MeV
     m_shower_pass4_track_guard_len              = get(config, "shower_pass4_track_guard_len",              m_shower_pass4_track_guard_len);           // doc pr/123 r1, cm
@@ -1215,6 +1220,11 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["shower_split_min_nseg"] = m_shower_split_min_nseg;   // doc pr/138 B1; candidate member-count floor
     cfg["shower_split_bundle_gap"] = m_shower_split_bundle_gap;   // doc pr/138 B3; cm, inert while the pass is off
     cfg["shower_split_snap"] = m_shower_split_snap;   // doc pr/138 B3; k>=3 bundle dominance floor
+    cfg["shower_split_skip_shared"] = m_shower_split_skip_shared;   // doc pr/139 P1.1; refuse a component holding a segment another shower also owns
+    cfg["shower_split_max_impact"] = m_shower_split_max_impact;   // doc pr/139 P1.2; cm; 0 = no bound
+    cfg["shower_split_em_start"] = m_shower_split_em_start;   // doc pr/139 P1.3; seed the daughter on its nearest EM-typed member
+    cfg["shower_split_rehome"] = m_shower_split_rehome;   // doc pr/139 P1.4; offer an orphan daughter to the nearest larger EM shower
+    cfg["shower_split_rehome_gap"] = m_shower_split_rehome_gap;   // doc pr/139 P1.4; cm; max daughter->host 3-D gap
     cfg["shower_satellite_absorb_max_mev"]           = m_shower_satellite_absorb_max_mev;           // doc pr/125; MeV, inert while pass off
     cfg["shower_satellite_absorb_host_mev"]          = m_shower_satellite_absorb_host_mev;          // doc pr/125; MeV, inert while pass off
     cfg["shower_pass4_track_guard_len"]              = m_shower_pass4_track_guard_len;              // doc pr/123 r1; cm, 0 = no guard, byte-identical
@@ -2688,6 +2698,11 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
         pattern_algos.m_shower_split_min_nseg = m_shower_split_min_nseg;   // doc pr/138 B1; candidate member-count floor
         pattern_algos.m_shower_split_bundle_gap = m_shower_split_bundle_gap * units::cm;   // doc pr/138 B3, cm -> internal
         pattern_algos.m_shower_split_snap = m_shower_split_snap;   // doc pr/138 B3; k>=3 bundle dominance floor
+        pattern_algos.m_shower_split_skip_shared = m_shower_split_skip_shared;   // doc pr/139 P1.1; refuse a component holding a segment another shower also owns
+        pattern_algos.m_shower_split_max_impact = m_shower_split_max_impact * units::cm;   // doc pr/139 P1.2; cm -> internal; 0 = no bound
+        pattern_algos.m_shower_split_em_start = m_shower_split_em_start;   // doc pr/139 P1.3; seed the daughter on its nearest EM-typed member
+        pattern_algos.m_shower_split_rehome = m_shower_split_rehome;   // doc pr/139 P1.4; offer an orphan daughter to the nearest larger EM shower
+        pattern_algos.m_shower_split_rehome_gap = m_shower_split_rehome_gap * units::cm;   // doc pr/139 P1.4; cm; max daughter->host 3-D gap, cm -> internal
         pattern_algos.m_shower_satellite_absorb_max_mev           = m_shower_satellite_absorb_max_mev * units::MeV;  // doc pr/125, MeV -> internal
         pattern_algos.m_shower_satellite_absorb_host_mev          = m_shower_satellite_absorb_host_mev * units::MeV; // doc pr/125, MeV -> internal
         pattern_algos.m_shower_pass4_track_guard_len              = m_shower_pass4_track_guard_len * units::cm;  // doc pr/123 r1, cm -> internal
