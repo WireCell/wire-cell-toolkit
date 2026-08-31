@@ -1967,7 +1967,16 @@ function(
     //            experiment (mean 0.573 -> 0.772, doc sec B3's >= 0.85 target
     //            MISSED) and is not production-eligible yet.
     // C++ defaults false / 0.95 / 0.03 / 2 / 1e6 / 3 / 4 cm / 0.80.
-    shower_split = false,                    // C++ default false. Key omitted when off => byte-identical pre-fix config.
+    // SBND PRODUCTION ON 2026-08-31 (doc pr/138 sec 3; owner: "lets use
+    // 'onV1c90 + splitter' as the new baseline for SBND production").  It is
+    // the COMPOSITION that was validated, not the splitter alone: on its own at
+    // the pre-escape production point it moves no pi0 and costs 3 kinematically
+    // impossible pairs, while together with the escape above it returns q_extra
+    // to the floor and lifts the pi0 census to 35/66.  max_parts stays 2 -- the
+    // only setting whose boundary was measured exact against the 172 owner
+    // labels (median agreement 1.000, 21 of 27 exactly right, doc sec B3).
+    // C++ default false.
+    shower_split = true,
     shower_split_max_valley = 0.95,          // C++ default 0.95. Emitted only when non-default AND pass on.
     shower_split_min_frac = 0.03,            // C++ default 0.03. Emitted only when non-default AND pass on.
     shower_split_max_parts = 2,              // C++ default 2. Emitted only when non-default AND pass on.
@@ -1985,13 +1994,23 @@ function(
     // SBND 142421 seg 7010 (9% of the whole deficit).  Faithful to the
     // prototype, so this is an improvement, not a parity fix.
     // C++ default false.  Key omitted when off => byte-identical pre-fix config.
-    shower_pass4_prefilter_v1_escape = false,
+    // SBND PRODUCTION ON 2026-08-31 (doc pr/138 sec 3; owner: "lets use
+    // 'onV1c90 + splitter' as the new baseline for SBND production").  NOT
+    // shippable alone -- round 2 measured the escape paying q_extra 7.0 ->
+    // 12.0% for a q_miss fall of 15.1 -> 11.6%.  It ships WITH shower_split
+    // below, which hands the q_extra back: the pair measures q_extra 6.7%
+    // (production floor 6.9%), q_miss 16.7% raw of which +4.85 pt is the
+    // sec 3.3 label-epoch artefact, and the pi0 census 32 -> 35 of 66, the
+    // best of the campaign.  0 vertex movers, 0 ADVERSE, 239 events x 4 samples.
+    shower_pass4_prefilter_v1_escape = true,
     // deg; ceiling on angle_v2 for the escape above.  0 = no ceiling.  57% of
     // the escape's population sits above 90 deg (BEHIND the shower) and carries
     // only 3 of the 10 target segments, so 90 selects the forward half without
     // inheriting K17 back-extension's two deaths.  C++ default 0.
     // Emitted only when non-zero AND the escape is on.
-    shower_pass4_prefilter_v1_max_v2 = 0,
+    // SBND PRODUCTION 90 2026-08-31 -- the validated onV1c90 operating point
+    // (doc pr/136 sec 11; doc pr/138 sec 3 measured the composition).
+    shower_pass4_prefilter_v1_max_v2 = 90,
     // cm; proximity bound on the escape above.  0 = none.  Round 2 measured the
     // unbraked knob failing the hand-scan trade (q_extra 7.0 -> 12.2% against a
     // q_miss fall of 14.0 -> 11.3%), with half the rise reached through the
