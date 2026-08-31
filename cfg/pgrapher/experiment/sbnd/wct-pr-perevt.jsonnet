@@ -1951,6 +1951,30 @@ function(
     shower_satellite_absorb = true,          // SBND PRODUCTION ON 2026-08-29 (doc pr/125 K5; owner verdict on the K5 decision Bee pair b169a068/defaa224: "item 3, flip on is fine" -- the scanned operating point, max_mev 10 / host_mev 20, NOT the cap-3 variant).  69314: 25->18 showers, the 7 vertex-connected crumbs fold into the primary e- (68.9->74.7 MeV, keeps pdg 11), PF electron entries 38->30.  1105 fires / 208 events; physics checks clean (0 movers, owned +0, nusel identical, 0 pdg flips >15 MeV, no genuine pi0 touched); the accepted cost is unlabeled crumb charge booked as impurity (141-set med qF1 0.949->0.910, sum q_extra 2.41e7->3.12e7).  C++ default false.
     shower_satellite_absorb_max_mev = 10,    // MeV; C++ default 10. Emitted only when non-default AND pass on.
     shower_satellite_absorb_host_mev = 20,   // MeV; C++ default 20. Emitted only when non-default AND pass on.
+    // doc sbnd_xin/docs/pr/138 Phase B -- the EM SHOWER SPLITTER, the only pass
+    // in the chain that cuts.  Runs LAST among the shower-structure passes and
+    // BEFORE the pi0 finders (a gamma pair over-clustered into one shower can
+    // only be PAIRED after it is cut apart).  Every number below is a Phase A
+    // measurement against 172 owner hand labels, not a tuning choice:
+    //   trigger  a second angular maximum with a charge valley <= 0.95 between
+    //            it and the first.  eff 0.791 / pur 0.791 on the 164 labelled
+    //            EM objects (doc sec A5.4 + B3), against doc pr/137 sec 4's
+    //            27-36% ceiling.  The 0.95 is the fit-half knee and its holdout
+    //            has been opened once -- do not re-tune it here.
+    //   kernel   max_parts 2 is the setting whose boundary was measured EXACT
+    //            (median charge agreement with the owner 1.000, mean 0.974 over
+    //            27 fired two-way splits).  max_parts >= 3 is the k>=3
+    //            experiment (mean 0.573 -> 0.772, doc sec B3's >= 0.85 target
+    //            MISSED) and is not production-eligible yet.
+    // C++ defaults false / 0.95 / 0.03 / 2 / 1e6 / 3 / 4 cm / 0.80.
+    shower_split = false,                    // C++ default false. Key omitted when off => byte-identical pre-fix config.
+    shower_split_max_valley = 0.95,          // C++ default 0.95. Emitted only when non-default AND pass on.
+    shower_split_min_frac = 0.03,            // C++ default 0.03. Emitted only when non-default AND pass on.
+    shower_split_max_parts = 2,              // C++ default 2. Emitted only when non-default AND pass on.
+    shower_split_min_charge = 1e6,           // raw Fit::dQ; C++ default 1e6. Emitted only when non-default AND pass on.
+    shower_split_min_nseg = 3,               // C++ default 3. Emitted only when non-default AND pass on.
+    shower_split_bundle_gap = 4,             // cm; C++ default 4. Emitted only when non-default AND pass on.
+    shower_split_snap = 0.80,                // C++ default 0.80, k>=3 only. Emitted only when non-default AND pass on.
     // doc pr/136 round 2 -- shower_pass4_prefilter_v1_escape.  The pass-4
     // cross-cluster loop's cheap `angle_v2 > 30` pre-filter is stricter than the
     // acceptance disjunction it guards: two of that disjunction's four clauses
@@ -3117,6 +3141,14 @@ function(
         [if shower_satellite_absorb then 'shower_satellite_absorb']: true,
         [if shower_satellite_absorb && shower_satellite_absorb_max_mev != 10 then 'shower_satellite_absorb_max_mev']: shower_satellite_absorb_max_mev,
         [if shower_satellite_absorb && shower_satellite_absorb_host_mev != 20 then 'shower_satellite_absorb_host_mev']: shower_satellite_absorb_host_mev,
+        [if shower_split then 'shower_split']: true,
+        [if shower_split && shower_split_max_valley != 0.95 then 'shower_split_max_valley']: shower_split_max_valley,
+        [if shower_split && shower_split_min_frac != 0.03 then 'shower_split_min_frac']: shower_split_min_frac,
+        [if shower_split && shower_split_max_parts != 2 then 'shower_split_max_parts']: shower_split_max_parts,
+        [if shower_split && shower_split_min_charge != 1e6 then 'shower_split_min_charge']: shower_split_min_charge,
+        [if shower_split && shower_split_min_nseg != 3 then 'shower_split_min_nseg']: shower_split_min_nseg,
+        [if shower_split && shower_split_bundle_gap != 4 then 'shower_split_bundle_gap']: shower_split_bundle_gap,
+        [if shower_split && shower_split_snap != 0.80 then 'shower_split_snap']: shower_split_snap,
         [if shower_pass4_prefilter_v1_escape then 'shower_pass4_prefilter_v1_escape']: true,
         [if shower_pass4_prefilter_v1_escape && shower_pass4_prefilter_v1_max_v2 != 0 then 'shower_pass4_prefilter_v1_max_v2']: shower_pass4_prefilter_v1_max_v2,
         [if shower_pass4_prefilter_v1_escape && shower_pass4_prefilter_v1_max_dis != 0 then 'shower_pass4_prefilter_v1_max_dis']: shower_pass4_prefilter_v1_max_dis,

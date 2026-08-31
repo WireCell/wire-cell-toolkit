@@ -5364,6 +5364,573 @@ static void pr132_pi0_substruct_probe(const IndexedShowerSet& showers,
 // Hosts below m_em_collinear_merge_min_host never absorb.  Vertices are
 // never touched (the owner's round-5 scope rule).  deg 0 (default) = off =
 // byte-identical.
+// ===================================================================== pr/138
+// doc sbnd_xin/docs/pr/138 Phase B -- the EM SHOWER SPLITTER.
+//
+// Every other shower pass in this chain merges.  This one cuts, and it runs
+// LAST (after shower_dedup_start_seg, pass4_prune_detached, pass4_prune_gap2,
+// samevtx_absorb, satellite_absorb, em_collinear_merge and em_start_backext,
+// all SBND production ON) because the owner's architecture is "merge them
+// together, then separate cleanly".  It runs BEFORE the pi0 finders on purpose:
+// a gamma pair that was over-clustered into one shower can only be PAIRED into
+// a pi0 after it has been cut apart.
+//
+// TRIGGER AND KERNEL ARE THE SAME OBJECT, which is the whole borrow.  ATLAS
+// topo-cluster splitting, CMS particle flow and GARLIC all seed on local
+// maxima and let the SEED COUNT be the multiplicity decision; doc pr/137 sec 10
+// found that shape in the literature and doc pr/138 sec A5.3 measured it here:
+// `valley_best` -- the charge dip between the two best angular maxima -- scored
+// AUC 0.930 and purity 0.857 at 50% efficiency against 164 owner hand labels,
+// with the owner's own three stated factors (direction, size, distance) behind
+// it in his order.
+//
+// The numbers are Phase A measurements, and NONE of them is free to tune here:
+//   valley <= 0.95   sec A5.4; a fit-half threshold scan says 0.95 IS the knee
+//                    (0.90 -> 0.875/0.913, 0.95 -> 0.917/0.917, 0.99 ->
+//                    0.917/0.815) and the holdout has been opened once.
+//   frac  >= 0.03    the trigger's own pair filter (split_model.propose()).
+//   w_single(r) = 3.575 + 0.0283*r cm  the in-situ single-shower width null,
+//                    FITTED on 346 SINGLE showers by pr137_null_model.py.  It
+//                    is not a PDG number: the LAr Moliere radius is quoted in
+//                    the doc for scale and is a threshold nowhere.  sigma(r) =
+//                    w_single(r)/r radians, clipped to [2, 60] degrees, so a
+//                    compact late-converting gamma is not smoothed away by the
+//                    kernel that fits the near wide one (owner factors 2+3).
+//   sep_scale 1.6, max_seeds 4, 25 arc samples, cap 4000 points
+//                    frozen at the Phase A operating point -- moving any of
+//                    them moves n_seed, which moves the trigger, which
+//                    invalidates sec A5.4's fire list.
+//
+// Reference implementation and the source of every constant:
+//   sbnd_xin/scripts/pr137_lib.py:391-455   profile_sigma_fn / angular_maxima
+//   sbnd_xin/split_display/split_model.py:106-205  propose()
+//   sbnd_xin/scripts/pr138_kernel_k.py      the sec B3 kernel comparison
+//
+// stderr tape WCT_SHOWER_SPLIT_DEBUG, byte-neutral, gate tested first so the
+// cost with the env unset is one static bool.
+static inline bool pr138_split_dbg()
+{
+    static const bool dbg = std::getenv("WCT_SHOWER_SPLIT_DEBUG") != nullptr;
+    return dbg;
+}
+
+namespace {
+
+// The angular point cloud of one shower, seen from the reference vertex.
+struct Pr138Cloud {
+    std::vector<WireCell::Vector> u;    // unit ray, vertex -> point
+    std::vector<double> w;              // charge weight, clamped at 0
+    std::vector<double> sig;            // per-point kernel bandwidth, radians
+    double wsum{0};
+};
+
+struct Pr138Maxima {
+    std::vector<WireCell::Vector> dirs;             // seed directions, density order
+    std::vector<double> dens;                       // density at each seed
+    std::vector<std::vector<double>> valley;        // pairwise valley depth
+    std::vector<double> frac;                       // charge share nearest each seed
+};
+
+// pr137_lib.py:391 profile_sigma_fn -- w_single(r)/r, clipped.
+inline double pr138_sigma(double r_cm)
+{
+    static const double lo = 2.0 * M_PI / 180.0, hi = 60.0 * M_PI / 180.0;
+    const double r = std::max(r_cm, 1e-6);
+    const double s = (3.575 + 0.0283 * r) / r;
+    return std::clamp(s, lo, hi);
+}
+
+// pr137_lib.py:129 rays + :136 qwt.  dQ in the dump can be NEGATIVE
+// (noise-subtracted); an unclamped weighted statistic then goes negative, so
+// every weight in this module goes through the same clamp, and an all-zero
+// cloud falls back to unit weights exactly as qwt() does.
+Pr138Cloud pr138_cloud(const std::vector<SegmentPtr>& segs, const WireCell::Point& v,
+                       size_t max_pts = 4000)
+{
+    Pr138Cloud C;
+    std::vector<const PR::Fit*> fp;
+    for (const auto& sg : segs) {
+        if (!sg) continue;
+        for (const auto& f : sg->fits()) if (f.valid()) fp.push_back(&f);
+    }
+    // Deterministic stride decimation above the cap.  The Phase A population
+    // never reaches it (max 1414 points over 172 scanned objects), and the
+    // offline reference draws a seeded random subsample there instead -- so a
+    // fire when this line trips is NOT comparable to the offline number and
+    // says so on the tape.
+    const size_t stride = fp.size() > max_pts ? (fp.size() + max_pts - 1) / max_pts : 1;
+    for (size_t i = 0; i < fp.size(); i += stride) {
+        const WireCell::Vector d = fp[i]->point - v;
+        double r = d.magnitude();
+        if (r <= 0) r = 1e-9;
+        C.u.push_back(d / r);
+        C.w.push_back(std::max(fp[i]->dQ, 0.0));
+        C.sig.push_back(pr138_sigma(r / WireCell::units::cm));
+    }
+    for (double x : C.w) C.wsum += x;
+    if (C.wsum <= 0) { for (auto& x : C.w) x = 1.0; C.wsum = (double) C.w.size(); }
+    return C;
+}
+
+// Charge-weighted angular density at one direction.  The bandwidth belongs to
+// the SOURCE point, not the probe direction -- pr137_lib.py:445 broadcasts
+// sig[None,:] over the second index and this must match it exactly.
+inline double pr138_density(const Pr138Cloud& C, const WireCell::Vector& d)
+{
+    double s = 0;
+    for (size_t j = 0; j < C.u.size(); ++j) {
+        const double a = std::acos(std::clamp(d.dot(C.u[j]), -1.0, 1.0));
+        const double t = a / C.sig[j];
+        s += std::exp(-0.5 * t * t) * C.w[j];
+    }
+    return s;
+}
+
+// pr137_lib.py:405 angular_maxima.  Local maxima of the density, separated by
+// more than the in-situ single-shower width, with the pairwise VALLEY between
+// them: a genuine second core has a charge dip on the great-circle arc to the
+// first; a bright patch inside ONE shower does not.
+Pr138Maxima pr138_angular_maxima(const Pr138Cloud& C, double sep_scale = 1.6,
+                                 size_t max_seeds = 4, int narc = 25)
+{
+    Pr138Maxima M;
+    const size_t n = C.u.size();
+    if (n < 8) return M;
+    std::vector<double> dens(n, 0.0);
+    for (size_t i = 0; i < n; ++i) dens[i] = pr138_density(C, C.u[i]);
+    std::vector<size_t> order(n);
+    for (size_t i = 0; i < n; ++i) order[i] = i;
+    // Stable by construction: index breaks a density tie, so the seed set can
+    // never depend on sort implementation or on pointer order (CLAUDE.md M4).
+    std::stable_sort(order.begin(), order.end(), [&dens](size_t a, size_t b) {
+        if (dens[a] != dens[b]) return dens[a] > dens[b];
+        return a < b;
+    });
+    std::vector<size_t> seeds;
+    for (size_t oi = 0; oi < order.size() && seeds.size() < max_seeds; ++oi) {
+        const size_t i = order[oi];
+        bool close = false;
+        for (size_t j : seeds) {
+            const double a = std::acos(std::clamp(C.u[i].dot(C.u[j]), -1.0, 1.0));
+            if (a < sep_scale * std::max(C.sig[i], C.sig[j])) { close = true; break; }
+        }
+        if (!close) seeds.push_back(i);
+    }
+    const size_t k = seeds.size();
+    M.dirs.resize(k); M.dens.resize(k); M.frac.assign(k, 0.0);
+    M.valley.assign(k, std::vector<double>(k, 1.0));
+    for (size_t i = 0; i < k; ++i) { M.dirs[i] = C.u[seeds[i]]; M.dens[i] = dens[seeds[i]]; }
+    for (size_t i = 0; i < k; ++i) {
+        for (size_t j = i + 1; j < k; ++j) {
+            double mn = -1.0;
+            for (int t = 0; t < narc; ++t) {
+                const double tt = (double) t / (double) (narc - 1);
+                WireCell::Vector arc = M.dirs[i] * (1.0 - tt) + M.dirs[j] * tt;
+                const double nn = arc.magnitude();
+                arc = (nn > 0) ? arc / nn : M.dirs[i];
+                const double d = pr138_density(C, arc);
+                if (mn < 0 || d < mn) mn = d;
+            }
+            const double denom = std::max(std::min(M.dens[i], M.dens[j]), 1e-12);
+            M.valley[i][j] = M.valley[j][i] = mn / denom;
+        }
+    }
+    if (k) {
+        for (size_t p = 0; p < n; ++p) {
+            size_t best = 0; double bs = -2.0;
+            for (size_t i = 0; i < k; ++i) {
+                const double s = C.u[p].dot(M.dirs[i]);
+                if (s > bs) { bs = s; best = i; }
+            }
+            M.frac[best] += C.w[p];
+        }
+        double f = 0; for (double x : M.frac) f += x;
+        if (f > 0) for (auto& x : M.frac) x /= f;
+    }
+    return M;
+}
+
+// The ACCEPT test and the multiplicity decision, in one greedy walk -- doc
+// pr/138 sec B2 + B3.  The brightest maximum is always a seed.  A later one
+// joins iff it carries `min_frac` of the charge AND a charge valley at most
+// `max_valley` separates it from a seed already accepted, i.e. it is a distinct
+// core rather than a bright patch.  Firing is |accepted| >= 2, so the trigger
+// IS the seed count, which is the shape sec 10 borrowed.
+//
+// Measured against the 164 owner-labelled EM objects (pr138_kernel_k.py):
+// efficiency 0.791, purity 0.791.  The shipped Phase A rule -- best PAIR by
+// minimum valley -- scores 0.791/0.773 and differs on exactly ONE object of
+// 164 (evt281567 node99193, owner KEEP, which this rule correctly declines).
+std::vector<size_t> pr138_accept(const Pr138Maxima& M, double max_valley,
+                                 double min_frac, size_t cap)
+{
+    const size_t k = M.dirs.size();
+    if (k < 1 || cap < 2) return {};
+    std::vector<size_t> acc{0};
+    for (size_t s = 1; s < k && acc.size() < cap; ++s) {
+        if (M.frac[s] < min_frac) continue;
+        double best = 2.0;
+        for (size_t a : acc) best = std::min(best, M.valley[s][a]);
+        if (best <= max_valley) acc.push_back(s);
+    }
+    if (acc.size() < 2) return {};
+    return acc;
+}
+
+}  // namespace
+
+// Single-linkage components of a member list at `gap` -- the BUNDLE, the
+// spatially connected unit the owner's hand labels move wholesale.  Same idiom
+// and same gap semantics as shower_pass4_prune_detached (:8607-8656); the
+// distance is the exact minimum between the two segments' fit clouds, which is
+// what the offline reference (scipy cKDTree) computes.
+static std::vector<std::vector<size_t>> pr138_bundles(const std::vector<SegmentPtr>& mem,
+                                                      double gap)
+{
+    const size_t n = mem.size();
+    std::vector<size_t> parent(n);
+    for (size_t i = 0; i < n; ++i) parent[i] = i;
+    std::function<size_t(size_t)> find = [&](size_t x) {
+        while (parent[x] != x) { parent[x] = parent[parent[x]]; x = parent[x]; }
+        return x;
+    };
+    for (size_t i = 0; i < n; ++i) {
+        for (size_t j = i + 1; j < n; ++j) {
+            if (find(i) == find(j)) continue;
+            double best = -1.0;
+            for (const auto& fa : mem[i]->fits()) {
+                if (!fa.valid()) continue;
+                for (const auto& fb : mem[j]->fits()) {
+                    if (!fb.valid()) continue;
+                    const double d = (fa.point - fb.point).magnitude();
+                    if (best < 0 || d < best) best = d;
+                    if (best < gap) break;
+                }
+                if (best >= 0 && best < gap) break;
+            }
+            if (best >= 0 && best < gap) { size_t pi = find(i), pj = find(j); if (pi != pj) parent[pi] = pj; }
+        }
+    }
+    std::map<size_t, std::vector<size_t>> comp;
+    for (size_t i = 0; i < n; ++i) comp[find(i)].push_back(i);
+    std::vector<std::vector<size_t>> out;
+    for (auto& [root, idxs] : comp) out.push_back(idxs);
+    // Descending charge, min-member-index tie-break: bundle 0 is the main body
+    // and the order never depends on a pointer.
+    std::vector<double> bq(out.size(), 0.0);
+    for (size_t b = 0; b < out.size(); ++b)
+        for (size_t i : out[b])
+            for (const auto& f : mem[i]->fits()) if (f.valid()) bq[b] += std::max(f.dQ, 0.0);
+    std::vector<size_t> ord(out.size());
+    for (size_t i = 0; i < ord.size(); ++i) ord[i] = i;
+    std::stable_sort(ord.begin(), ord.end(), [&](size_t a, size_t b) {
+        if (bq[a] != bq[b]) return bq[a] > bq[b];
+        return out[a].front() < out[b].front();
+    });
+    std::vector<std::vector<size_t>> sorted;
+    for (size_t i : ord) sorted.push_back(out[i]);
+    return sorted;
+}
+
+// Assign one unit (a bundle, or a single segment) to an accepted seed.
+// Returns (seed index into `acc`, that seed's share of the unit's charge).
+//
+// TWO MODES, and which one is used is decided by k, not by a free parameter.
+//   k == 2   the unit's charge-weighted CENTROID RAY picks the seed.  This is
+//            what split_model.propose() does and it is what the owner
+//            corrected; conditioned on the trigger firing it reproduces his
+//            two-way boundary with median charge agreement 1.000 and mean
+//            0.974 over 27 objects (sec B3).  Nothing may touch it.
+//   k >= 3   a bundle can now straddle two parts, and a centroid ray sends the
+//            whole of it to one.  So the seed holding the PLURALITY of the
+//            unit's own per-point charge wins, and a bundle whose winner holds
+//            less than `snap` of it is cut at the SEGMENT level -- the finest
+//            cut detach_member_set can make (PRShower.cxx:640-700).  Measured:
+//            k>=3 mean agreement 0.573 -> 0.772.
+static std::pair<size_t, double> pr138_place(const std::vector<SegmentPtr>& mem,
+                                             const std::vector<size_t>& unit,
+                                             const WireCell::Point& v,
+                                             const std::vector<WireCell::Vector>& dirs,
+                                             bool plurality)
+{
+    const size_t k = dirs.size();
+    if (!plurality) {
+        WireCell::Vector c(0, 0, 0);
+        double wsum = 0;
+        for (size_t i : unit)
+            for (const auto& f : mem[i]->fits()) {
+                if (!f.valid()) continue;
+                const double w = std::max(f.dQ, 0.0);
+                c = c + f.point * w; wsum += w;
+            }
+        if (wsum <= 0) {   // qwt() falls back to unit weights on an all-zero cloud
+            c = WireCell::Vector(0, 0, 0); wsum = 0;
+            for (size_t i : unit)
+                for (const auto& f : mem[i]->fits()) {
+                    if (!f.valid()) continue;
+                    c = c + f.point; wsum += 1.0;
+                }
+        }
+        if (wsum <= 0) return {k, 0.0};
+        WireCell::Vector ray = c / wsum - v;
+        const double n = ray.magnitude();
+        if (n <= 0) return {k, 0.0};
+        ray = ray / n;
+        size_t best = 0; double bs = -2.0;
+        for (size_t i = 0; i < k; ++i) { const double s = ray.dot(dirs[i]); if (s > bs) { bs = s; best = i; } }
+        return {best, 1.0};
+    }
+    std::vector<double> share(k, 0.0);
+    for (size_t i : unit)
+        for (const auto& f : mem[i]->fits()) {
+            if (!f.valid()) continue;
+            WireCell::Vector r = f.point - v;
+            const double n = r.magnitude();
+            if (n <= 0) continue;
+            r = r / n;
+            size_t best = 0; double bs = -2.0;
+            for (size_t j = 0; j < k; ++j) { const double s = r.dot(dirs[j]); if (s > bs) { bs = s; best = j; } }
+            share[best] += std::max(f.dQ, 0.0);
+        }
+    double tot = 0; for (double x : share) tot += x;
+    if (tot <= 0) return {k, 0.0};
+    size_t best = 0;
+    for (size_t j = 1; j < k; ++j) if (share[j] > share[best]) best = j;
+    return {best, share[best] / tot};
+}
+
+/// doc sbnd_xin/docs/pr/138 Phase B -- the EM shower splitter.  Full docstring
+/// and provenance at the pr138_split_dbg() block above.  No-op when
+/// m_shower_split is false, which is the default and makes the pass
+/// byte-identical.
+void PatternAlgorithms::shower_split(Graph& graph, VertexPtr main_vertex, IndexedShowerSet& showers,
+    ShowerVertexMap& map_vertex_in_shower, ShowerSegmentMap& map_segment_in_shower,
+    VertexShowerSetMap& map_vertex_to_shower, ClusterPtrSet& used_shower_clusters,
+    IndexedVertexSet& vertices_in_long_muon, IndexedSegmentSet& segments_in_long_muon,
+    TrackFitting& track_fitter, IDetectorVolumes::pointer dv,
+    const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model)
+{
+    const bool dbg = pr138_split_dbg();
+    if (!m_shower_split && !dbg) return;
+    if (!main_vertex) return;
+    // The reference vertex is the event's NEUTRINO main vertex for every
+    // candidate -- the same choice pr137_lib.build_population() makes, so the
+    // offline features and these are measured from the same point.  NOTE the
+    // pi0 finders re-seat this vertex at an accepted two-photon decay point
+    // (:7886 and :6241, doc sec A1.4) and they run AFTER this pass, so on a
+    // pi0 event the calib dump's main_vertex is NOT the point used here.  The
+    // tape prints the vertex it used so the comparison is controlled rather
+    // than explained away.
+    const WireCell::Point v = main_vertex->fit().valid() ? main_vertex->fit().point
+                                                         : main_vertex->wcpt().point;
+
+    // Deterministic candidate order: cluster id, then segment id.  Never
+    // iterate the shower set itself (CLAUDE.md determinism rule).
+    std::vector<ShowerPtr> split_order(showers.begin(), showers.end());
+    std::sort(split_order.begin(), split_order.end(), [](const ShowerPtr& a, const ShowerPtr& b) {
+        auto* sa = a->start_segment().get();
+        auto* sb = b->start_segment().get();
+        if (!sa || !sb) return sa < sb;
+        const int ca = sa->cluster() ? sa->cluster()->get_cluster_id() : -1;
+        const int cb = sb->cluster() ? sb->cluster()->get_cluster_id() : -1;
+        if (ca != cb) return ca < cb;
+        return sa->id() < sb->id();
+    });
+
+    const size_t cap = (size_t) std::max(2, m_shower_split_max_parts);
+    int n_fired = 0, n_peeled = 0;
+    std::vector<ShowerPtr> daughters;
+
+    for (auto& shower : split_order) {
+        SegmentPtr ss = shower ? shower->start_segment() : nullptr;
+        if (!ss || !ss->descriptor_valid()) continue;
+        // Member list in stable view order, unique -- transcribed from
+        // shower_pass4_prune_detached (:8610-8618).
+        std::vector<SegmentPtr> mem;
+        {
+            std::unordered_set<size_t> seen;
+            for (auto edesc : ordered_edges(*shower, graph)) {
+                SegmentPtr sg = graph[edesc].segment;
+                if (!sg || !sg->descriptor_valid()) continue;
+                if (seen.insert(graph[sg->get_descriptor()].index).second) mem.push_back(sg);
+            }
+        }
+        if ((int) mem.size() < m_shower_split_min_nseg) continue;
+        double Q = 0; size_t npts = 0;
+        for (const auto& sg : mem)
+            for (const auto& f : sg->fits()) if (f.valid()) { Q += f.dQ; ++npts; }
+        if (Q < m_shower_split_min_charge) continue;
+
+        const Pr138Cloud C = pr138_cloud(mem, v);
+        const Pr138Maxima M = pr138_angular_maxima(C);
+        const std::vector<size_t> acc = pr138_accept(M, m_shower_split_max_valley,
+                                                     m_shower_split_min_frac, cap);
+        // valley_best / angle_best for the tape: the same pair statistic sec
+        // A5.3 ranked, over the seeds carrying at least min_frac.
+        double vbest = 1.0, abest = -1.0;
+        for (size_t i = 0; i < M.dirs.size(); ++i)
+            for (size_t j = i + 1; j < M.dirs.size(); ++j) {
+                if (std::min(M.frac[i], M.frac[j]) < m_shower_split_min_frac) continue;
+                if (M.valley[i][j] < vbest) {
+                    vbest = M.valley[i][j];
+                    abest = std::acos(std::clamp(M.dirs[i].dot(M.dirs[j]), -1.0, 1.0)) * 180.0 / M_PI;
+                }
+            }
+
+        std::vector<size_t> part(mem.size(), 0);
+        size_t nparts = 1;
+        if (!acc.empty()) {
+            std::vector<WireCell::Vector> dirs;
+            for (size_t i : acc) dirs.push_back(M.dirs[i]);
+            const bool plural = dirs.size() >= 3;
+            for (const auto& b : pr138_bundles(mem, m_shower_split_bundle_gap)) {
+                auto [g, dom] = pr138_place(mem, b, v, dirs, plural);
+                if (g >= dirs.size()) continue;
+                if (plural && dom < m_shower_split_snap && b.size() > 1) {
+                    for (size_t i : b) {
+                        auto [gi, di] = pr138_place(mem, {i}, v, dirs, true);
+                        (void) di;
+                        if (gi < dirs.size()) part[i] = gi;
+                    }
+                    continue;
+                }
+                for (size_t i : b) part[i] = g;
+            }
+            std::set<size_t> used(part.begin(), part.end());
+            nparts = used.size();
+        }
+        // The HONESTY CHECK, transcribed from split_model.propose():205 -- the
+        // seeds can be well separated and every bundle still fall to one of
+        // them (evt389538 node19021: valley_best 0.091 yet one group), because
+        // a minority lobe that is not its own connected component has no unit
+        // to carry it.  Firing with one part is not a split.
+        const bool fired = (!acc.empty() && nparts >= 2);
+        if (fired) ++n_fired;
+
+        if (dbg) {
+            double vgap = -1.0;
+            for (const auto& sg : mem)
+                for (const auto& f : sg->fits())
+                    if (f.valid()) {
+                        const double d = (f.point - v).magnitude();
+                        if (vgap < 0 || d < vgap) vgap = d;
+                    }
+            std::fprintf(stderr,
+                "SHOWER_SPLIT cand shower=%d pdg=%d nseg=%zu npts=%zu Q=%.4g "
+                "n_seed=%zu valley_best=%.4f angle_best=%.2f nacc=%zu nparts=%zu "
+                "fired=%d decim=%d vtx=%.2f,%.2f,%.2f vgap_cm=%.2f "
+                "vchi2=%.3f vdQ=%.4g vfit=%d\n",
+                pr91_seg_display_id(ss), shower->get_particle_type(), mem.size(), npts, Q,
+                M.dirs.size(), vbest, abest, acc.size(), nparts, fired ? 1 : 0,
+                npts > 4000 ? 1 : 0, v.x() / units::cm, v.y() / units::cm, v.z() / units::cm,
+                vgap >= 0 ? vgap / units::cm : -1.0,
+                main_vertex->fit().reduced_chi2, main_vertex->fit().dQ,
+                main_vertex->fit().valid() ? 1 : 0);
+            if (fired)
+                for (size_t g = 0; g < acc.size(); ++g) {
+                    std::string segs; double qg = 0; size_t ng = 0;
+                    for (size_t i = 0; i < mem.size(); ++i) {
+                        if (part[i] != g) continue;
+                        ++ng;
+                        for (const auto& f : mem[i]->fits()) if (f.valid()) qg += f.dQ;
+                        if (!segs.empty()) segs += ",";
+                        segs += std::to_string(pr91_seg_display_id(mem[i]));
+                    }
+                    if (!ng) continue;
+                    std::fprintf(stderr, "SHOWER_SPLIT part shower=%d part=%zu nseg=%zu q=%.4g segs=%s\n",
+                                 pr91_seg_display_id(ss), g, ng, qg, segs.c_str());
+                }
+        }
+
+        if (!m_shower_split || !fired) continue;
+        // Long-muon pseudo-showers are never cut -- same exclusion as
+        // shower_pass4_prune_detached (:8607).  The TAPE above deliberately
+        // still records them: 8 of the 172 scanned objects are track-typed
+        // (sec A1.6) and dropping them from the tape would shrink the
+        // offline comparison population.
+        if (std::abs(shower->get_particle_type()) == 13) continue;
+
+        const auto ss_it = std::find(mem.begin(), mem.end(), ss);
+        if (ss_it == mem.end()) continue;
+        const size_t keep_part = part[std::distance(mem.begin(), ss_it)];
+        const WireCell::Point sv_pt = shower->start_vertex()
+            ? (shower->start_vertex()->fit().valid() ? shower->start_vertex()->fit().point
+                                                     : shower->start_vertex()->wcpt().point)
+            : WireCell::Point(0, 0, 0);
+        for (size_t g = 0; g < acc.size(); ++g) {
+            if (g == keep_part) continue;
+            std::vector<SegmentPtr> comp;
+            for (size_t i = 0; i < mem.size(); ++i) if (part[i] == g) comp.push_back(mem[i]);
+            if (comp.empty()) continue;
+            const int removed = shower->detach_member_set(comp);
+            if (!removed) {
+                SPDLOG_LOGGER_DEBUG(s_log, "pr138 shower_split: refuse shower_id={} part={} nseg={}",
+                                    shower->get_shower_id(), g, comp.size());
+                continue;
+            }
+            // The daughter's start segment is the member NEAREST THE REFERENCE
+            // VERTEX, not the one nearest the parent body the way
+            // pass4_prune_detached picks it.  A prune re-seeds a fragment that
+            // fell off; a split re-seeds a SHOWER, and the pi0 finders run
+            // after this pass and read get_start_point() and get_init_dir() --
+            // seeding at the downstream end would point the daughter back at
+            // its sibling and poison exactly the pi0 mass this round is for.
+            SegmentPtr root_sg = comp.front();
+            double root_d = -1.0;
+            for (const auto& sg : comp) {
+                double d = -1.0;
+                for (const auto& f : sg->fits())
+                    if (f.valid()) { const double t = (f.point - v).magnitude(); if (d < 0 || t < d) d = t; }
+                if (d >= 0 && (root_d < 0 || d < root_d)) { root_d = d; root_sg = sg; }
+            }
+            const double root_sv_dis = segment_get_closest_point(root_sg, sv_pt).first;
+            const int conn = (root_sv_dis >= 0 && root_sv_dis <= 80 * units::cm) ? 3 : 4;
+            ShowerPtr ns = std::make_shared<Shower>(graph);
+            if (shower->start_vertex()) ns->set_start_vertex(shower->start_vertex(), conn);
+            ns->set_start_segment(root_sg);
+            for (const auto& sg : comp) if (sg != root_sg) ns->add_segment(sg, true);
+            daughters.push_back(ns);
+            ++n_peeled;
+            if (dbg) {
+                // The forward-seeding check the choice above exists to satisfy:
+                // does the daughter's own charge sit DOWNSTREAM of its start?
+                WireCell::Vector c(0, 0, 0); double wq = 0;
+                for (const auto& sg : comp)
+                    for (const auto& f : sg->fits())
+                        if (f.valid()) { const double w = std::max(f.dQ, 0.0); c = c + f.point * w; wq += w; }
+                double fwd = 0;
+                if (wq > 0 && root_d >= 0) {
+                    WireCell::Vector body = c / wq - v;
+                    WireCell::Vector st(0, 0, 0);
+                    for (const auto& f : root_sg->fits())
+                        if (f.valid()) { st = f.point - v; break; }
+                    if (body.magnitude() > 0 && st.magnitude() > 0)
+                        fwd = body.norm().dot(st.norm());
+                }
+                std::fprintf(stderr,
+                    "SHOWER_SPLIT peel shower=%d part=%zu new_start=%d nseg=%zu "
+                    "conn=%d root_vtx_cm=%.2f fwd=%.3f\n",
+                    pr91_seg_display_id(ss), g, pr91_seg_display_id(root_sg), comp.size(),
+                    conn, root_d >= 0 ? root_d / units::cm : -1.0, fwd);
+            }
+        }
+    }
+
+    if (n_peeled) {
+        for (auto& ns : daughters) showers.insert(ns);
+        update_shower_maps(showers, map_vertex_in_shower, map_segment_in_shower,
+                           map_vertex_to_shower, used_shower_clusters);
+        // The splitter owns its refresh: the only recompute after this point is
+        // recompute_shower_kine_charge_final, which is knob-gated and no-ops in
+        // the production configuration.
+        calculate_shower_kinematics(showers, vertices_in_long_muon, segments_in_long_muon,
+                                    graph, track_fitter, dv, particle_data, recomb_model);
+        SPDLOG_LOGGER_DEBUG(s_log,
+            "pr138 shower_split: {} candidate(s) fired, {} daughter(s) peeled; {} shower(s) now",
+            n_fired, n_peeled, showers.size());
+    }
+}
+
 void PatternAlgorithms::em_collinear_merge(IndexedShowerSet& showers,
     ShowerVertexMap& map_vertex_in_shower, ShowerSegmentMap& map_segment_in_shower,
     VertexShowerSetMap& map_vertex_to_shower, ClusterPtrSet& used_shower_clusters,
@@ -9409,6 +9976,15 @@ void PatternAlgorithms::shower_clustering_with_nv(int acc_segment_id, IndexedSho
     em_start_backext(showers, map_vertex_in_shower, map_segment_in_shower,
                      map_vertex_to_shower, used_shower_clusters,
                      track_fitter, dv, particle_data, recomb_model);
+
+    // doc sbnd_xin/docs/pr/138 Phase B: the SPLITTER -- the last structure pass
+    // and the only one that cuts.  After every merging pass (the owner's
+    // "merge them together, then separate cleanly") and BEFORE the pi0
+    // finders, so a gamma pair that was over-clustered into one shower can
+    // still be paired.  No-op when the knob is off (default), byte-identical.
+    shower_split(graph, main_vertex, showers, map_vertex_in_shower, map_segment_in_shower,
+                 map_vertex_to_shower, used_shower_clusters, vertices_in_long_muon,
+                 segments_in_long_muon, track_fitter, dv, particle_data, recomb_model);
 
     recompute_shower_kine_charge_final(showers, graph, track_fitter, dv);
 

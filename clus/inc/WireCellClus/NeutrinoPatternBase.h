@@ -2311,6 +2311,22 @@ namespace WireCell::Clus::PR {
         bool   m_shower_satellite_absorb{false};         ///< doc pr/125; false = no pass
         double m_shower_satellite_absorb_max_mev{10 * units::MeV};  ///< doc pr/125; satellite kine cap
         double m_shower_satellite_absorb_host_mev{20 * units::MeV}; ///< doc pr/125; host kine floor
+        // doc sbnd_xin/docs/pr/138 Phase B -- the EM shower SPLITTER, the one
+        // pass in the chain that CUTS instead of merging.  Every constant below
+        // is a Phase A measurement against 172 owner hand labels, not a tuning
+        // choice: the valley threshold is sec A5.4's knee (its holdout is
+        // spent), the charge-share floor is the trigger's own pair filter, and
+        // max_parts=2 is the setting whose boundary was measured EXACT (median
+        // charge agreement 1.000 over 27 fired two-way splits, sec B3).
+        // false => no pass => byte-identical.
+        bool   m_shower_split{false};                    ///< doc pr/138 B2; false = no pass
+        double m_shower_split_max_valley{0.95};          ///< doc pr/138 B2; accept a seed pair only below this charge valley
+        double m_shower_split_min_frac{0.03};            ///< doc pr/138 B2; per-seed charge share floor
+        int    m_shower_split_max_parts{2};              ///< doc pr/138 B3; 2 = the measured-exact kernel; >2 is the k>=3 experiment
+        double m_shower_split_min_charge{1e6};           ///< doc pr/138 B1; candidate charge floor, raw Fit::dQ (the Phase A population's q_floor)
+        int    m_shower_split_min_nseg{3};               ///< doc pr/138 B1; candidate member-count floor
+        double m_shower_split_bundle_gap{4 * units::cm}; ///< doc pr/138 B3; single-linkage bundle gap
+        double m_shower_split_snap{0.80};                ///< doc pr/138 B3; k>=3 only: a bundle below this charge dominance is cut at the segment level
         // doc pr/123 round 2: kine twin of pf_orphan_guard_freed -- count a
         // guard-freed (kPass4GuardFreed) track that neither the BFS nor any
         // shower claimed into kine_energy_particle (171572's 125cm muon,
@@ -3626,6 +3642,8 @@ namespace WireCell::Clus::PR {
         void recompute_shower_kine_charge_final(IndexedShowerSet& showers, Graph& graph, TrackFitting& track_fitter, IDetectorVolumes::pointer dv);
         /// doc pr/132 round 5 (K16): build-time EM collinear-fragment merge (docstring at the definition).
         void em_collinear_merge(IndexedShowerSet& showers, ShowerVertexMap& map_vertex_in_shower, ShowerSegmentMap& map_segment_in_shower, VertexShowerSetMap& map_vertex_to_shower, ClusterPtrSet& used_shower_clusters, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model);
+        /// doc sbnd_xin/docs/pr/138 Phase B: the EM shower splitter (docstring at the definition).
+        void shower_split(Graph& graph, VertexPtr main_vertex, IndexedShowerSet& showers, ShowerVertexMap& map_vertex_in_shower, ShowerSegmentMap& map_segment_in_shower, VertexShowerSetMap& map_vertex_to_shower, ClusterPtrSet& used_shower_clusters, IndexedVertexSet& vertices_in_long_muon, IndexedSegmentSet& segments_in_long_muon, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model);
         /// doc pr/132 round 6 (K17): EM shower start back-extension (docstring at the definition).
         void em_start_backext(IndexedShowerSet& showers, ShowerVertexMap& map_vertex_in_shower, ShowerSegmentMap& map_segment_in_shower, VertexShowerSetMap& map_vertex_to_shower, ClusterPtrSet& used_shower_clusters, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model);
         /// doc pr/101 (K3): if m_kine_charge.hadronic_dqdx and the shower is

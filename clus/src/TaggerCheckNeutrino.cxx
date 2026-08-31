@@ -701,6 +701,14 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_shower_samevtx_absorb_max_len             = get(config, "shower_samevtx_absorb_max_len",             m_shower_samevtx_absorb_max_len);          // doc pr/125, cm
     m_shower_samevtx_absorb_min_len             = get(config, "shower_samevtx_absorb_min_len",             m_shower_samevtx_absorb_min_len);          // doc pr/125, cm
     m_shower_satellite_absorb                   = get(config, "shower_satellite_absorb",                   m_shower_satellite_absorb);                // doc pr/125
+    m_shower_split = get(config, "shower_split", m_shower_split);   // doc pr/138 B2; false = no pass
+    m_shower_split_max_valley = get(config, "shower_split_max_valley", m_shower_split_max_valley);   // doc pr/138 B2; sec A5.4 knee
+    m_shower_split_min_frac = get(config, "shower_split_min_frac", m_shower_split_min_frac);   // doc pr/138 B2; per-seed charge share floor
+    m_shower_split_max_parts = get(config, "shower_split_max_parts", m_shower_split_max_parts);   // doc pr/138 B3; 2 = the measured-exact kernel
+    m_shower_split_min_charge = get(config, "shower_split_min_charge", m_shower_split_min_charge);   // doc pr/138 B1; candidate charge floor (raw Fit::dQ)
+    m_shower_split_min_nseg = get(config, "shower_split_min_nseg", m_shower_split_min_nseg);   // doc pr/138 B1; candidate member-count floor
+    m_shower_split_bundle_gap = get(config, "shower_split_bundle_gap", m_shower_split_bundle_gap);   // doc pr/138 B3; single-linkage bundle gap
+    m_shower_split_snap = get(config, "shower_split_snap", m_shower_split_snap);   // doc pr/138 B3; k>=3 bundle dominance floor
     m_shower_satellite_absorb_max_mev           = get(config, "shower_satellite_absorb_max_mev",           m_shower_satellite_absorb_max_mev);        // doc pr/125, MeV
     m_shower_satellite_absorb_host_mev          = get(config, "shower_satellite_absorb_host_mev",          m_shower_satellite_absorb_host_mev);       // doc pr/125, MeV
     m_shower_pass4_track_guard_len              = get(config, "shower_pass4_track_guard_len",              m_shower_pass4_track_guard_len);           // doc pr/123 r1, cm
@@ -1199,6 +1207,14 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["shower_samevtx_absorb_max_len"]             = m_shower_samevtx_absorb_max_len;             // doc pr/125; cm, inert while pass off
     cfg["shower_samevtx_absorb_min_len"]             = m_shower_samevtx_absorb_min_len;             // doc pr/125; cm, inert while pass off
     cfg["shower_satellite_absorb"]                   = m_shower_satellite_absorb;                   // doc pr/125; false = no pass, byte-identical
+    cfg["shower_split"] = m_shower_split;   // doc pr/138 B2; false = no pass
+    cfg["shower_split_max_valley"] = m_shower_split_max_valley;   // doc pr/138 B2; sec A5.4 knee
+    cfg["shower_split_min_frac"] = m_shower_split_min_frac;   // doc pr/138 B2; per-seed charge share floor
+    cfg["shower_split_max_parts"] = m_shower_split_max_parts;   // doc pr/138 B3; 2 = the measured-exact kernel
+    cfg["shower_split_min_charge"] = m_shower_split_min_charge;   // doc pr/138 B1; candidate charge floor (raw Fit::dQ)
+    cfg["shower_split_min_nseg"] = m_shower_split_min_nseg;   // doc pr/138 B1; candidate member-count floor
+    cfg["shower_split_bundle_gap"] = m_shower_split_bundle_gap;   // doc pr/138 B3; cm, inert while the pass is off
+    cfg["shower_split_snap"] = m_shower_split_snap;   // doc pr/138 B3; k>=3 bundle dominance floor
     cfg["shower_satellite_absorb_max_mev"]           = m_shower_satellite_absorb_max_mev;           // doc pr/125; MeV, inert while pass off
     cfg["shower_satellite_absorb_host_mev"]          = m_shower_satellite_absorb_host_mev;          // doc pr/125; MeV, inert while pass off
     cfg["shower_pass4_track_guard_len"]              = m_shower_pass4_track_guard_len;              // doc pr/123 r1; cm, 0 = no guard, byte-identical
@@ -2664,6 +2680,14 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
         pattern_algos.m_shower_samevtx_absorb_max_len             = m_shower_samevtx_absorb_max_len * units::cm; // doc pr/125, cm -> internal
         pattern_algos.m_shower_samevtx_absorb_min_len             = m_shower_samevtx_absorb_min_len * units::cm; // doc pr/125, cm -> internal
         pattern_algos.m_shower_satellite_absorb                   = m_shower_satellite_absorb;                   // doc pr/125
+        pattern_algos.m_shower_split = m_shower_split;   // doc pr/138 B2; false = no pass
+        pattern_algos.m_shower_split_max_valley = m_shower_split_max_valley;   // doc pr/138 B2; sec A5.4 knee
+        pattern_algos.m_shower_split_min_frac = m_shower_split_min_frac;   // doc pr/138 B2; per-seed charge share floor
+        pattern_algos.m_shower_split_max_parts = m_shower_split_max_parts;   // doc pr/138 B3; 2 = the measured-exact kernel
+        pattern_algos.m_shower_split_min_charge = m_shower_split_min_charge;   // doc pr/138 B1; candidate charge floor (raw Fit::dQ)
+        pattern_algos.m_shower_split_min_nseg = m_shower_split_min_nseg;   // doc pr/138 B1; candidate member-count floor
+        pattern_algos.m_shower_split_bundle_gap = m_shower_split_bundle_gap * units::cm;   // doc pr/138 B3, cm -> internal
+        pattern_algos.m_shower_split_snap = m_shower_split_snap;   // doc pr/138 B3; k>=3 bundle dominance floor
         pattern_algos.m_shower_satellite_absorb_max_mev           = m_shower_satellite_absorb_max_mev * units::MeV;  // doc pr/125, MeV -> internal
         pattern_algos.m_shower_satellite_absorb_host_mev          = m_shower_satellite_absorb_host_mev * units::MeV; // doc pr/125, MeV -> internal
         pattern_algos.m_shower_pass4_track_guard_len              = m_shower_pass4_track_guard_len * units::cm;  // doc pr/123 r1, cm -> internal

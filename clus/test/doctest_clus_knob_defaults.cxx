@@ -298,6 +298,21 @@ TEST_CASE("clus knob defaults: TaggerCheckNeutrino switches are all OFF")
     CHECK_KNOB_BOOL(cfg, "shower_satellite_absorb", false);                   // doc pr/125; false = no pass
     CHECK_KNOB_NUM(cfg, "shower_satellite_absorb_max_mev", 10.0);             // MeV; inert while pass off
     CHECK_KNOB_NUM(cfg, "shower_satellite_absorb_host_mev", 20.0);            // MeV; inert while pass off
+    // doc pr/138 Phase B -- the EM shower splitter, the one pass that CUTS.
+    // shower_split false is what keeps the whole chain byte-identical; the rest
+    // are Phase A measurements against 172 owner hand labels and are inert
+    // while the pass is off.  max_parts 2 is load-bearing: it is the ONLY
+    // setting whose boundary was measured exact (median charge agreement with
+    // the owner 1.000 over 27 fired two-way splits), and 3+ is an experiment
+    // that MISSED its pre-registered target (doc sec B3).
+    CHECK_KNOB_BOOL(cfg, "shower_split", false);                              // doc pr/138 B2; false = no pass
+    CHECK_KNOB_NUM(cfg, "shower_split_max_valley", 0.95);                     // sec A5.4 knee; inert while pass off
+    CHECK_KNOB_NUM(cfg, "shower_split_min_frac", 0.03);                       // per-seed charge share floor; inert while pass off
+    CHECK_KNOB_NUM(cfg, "shower_split_max_parts", 2.0);                       // 2 = the measured-exact kernel; inert while pass off
+    CHECK_KNOB_NUM(cfg, "shower_split_min_charge", 1e6);                      // raw Fit::dQ; inert while pass off
+    CHECK_KNOB_NUM(cfg, "shower_split_min_nseg", 3.0);                        // inert while pass off
+    CHECK_KNOB_NUM(cfg, "shower_split_bundle_gap", 4.0);                      // cm; inert while pass off
+    CHECK_KNOB_NUM(cfg, "shower_split_snap", 0.80);                           // k>=3 only; inert while pass off
     CHECK_KNOB_BOOL(cfg, "kine_count_guard_freed", false);                    // pr/123 r2; kine twin of pf_orphan_guard_freed
     CHECK_KNOB_NUM(cfg, "kine_guard_freed_impact", 0.0);                     // pr/129; 0 = pointing test off
     CHECK_KNOB_NUM(cfg, "kine_guard_freed_miss_deg", 90.0);                  // pr/129

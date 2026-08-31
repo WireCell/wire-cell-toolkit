@@ -951,6 +951,14 @@ public:
         double m_shower_samevtx_absorb_max_len{50.0};               // doc pr/125; cm, fragment length cap
         double m_shower_samevtx_absorb_min_len{5.0};                // doc pr/125; cm, fragment length floor
         bool   m_shower_satellite_absorb{false};                    // doc pr/125; false = no pass
+        bool   m_shower_split{false};                           // doc pr/138 B2; false = no pass
+        double m_shower_split_max_valley{0.95};                 // doc pr/138 B2; sec A5.4 knee
+        double m_shower_split_min_frac{0.03};                   // doc pr/138 B2; per-seed charge share floor
+        int    m_shower_split_max_parts{2};                     // doc pr/138 B3; 2 = the measured-exact kernel
+        double m_shower_split_min_charge{1e6};                  // doc pr/138 B1; candidate charge floor (raw Fit::dQ)
+        int    m_shower_split_min_nseg{3};                      // doc pr/138 B1; candidate member-count floor
+        double m_shower_split_bundle_gap{4};                    // doc pr/138 B3; cm; single-linkage bundle gap
+        double m_shower_split_snap{0.80};                       // doc pr/138 B3; k>=3 bundle dominance floor
         double m_shower_satellite_absorb_max_mev{10.0};             // doc pr/125; MeV, satellite kine cap
         double m_shower_satellite_absorb_host_mev{20.0};            // doc pr/125; MeV, host kine floor
         double m_shower_pass4_track_guard_len{0.0};                 // doc pr/123 r1; cm, 0 = no length guard
