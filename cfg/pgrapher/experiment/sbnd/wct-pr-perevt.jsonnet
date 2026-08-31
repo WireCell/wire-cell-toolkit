@@ -705,7 +705,14 @@ function(
     // study); the prototype's own cal_pi0_mass.cxx x0.95 implies 0.842.
     // At 0.84 every EM kine_charge scales x0.952 and the fitted peak lands
     // at 134.1 MeV.  SBND PRODUCTION ON (was null => uBooNE 0.80).
-    kine_shower_fudge_factor = 0.84,
+    // 2026-08-31 (docs/pr/135 sec 8+10): owner order "Let's update the
+    // parameter to 0.86 and redo the campaign."  The refit at the flipped
+    // production point put the fixed-pairing peak at 138.3 MeV [134.5,141.7]
+    // => implied fudge 0.861 (mode estimators 0.93-0.96, in-window median
+    // 0.892); 0.86 is the primary-estimator value.  Every EM kine_charge
+    // scales a further x0.977 (0.84/0.86); masses and EM energies drop 2.3%.
+    // NOT byte-identical by construction -- this is a production constant.
+    kine_shower_fudge_factor = 0.86,
     kine_shower_recom_factor = 0.58,   // 0.50 x 1.169 (shower)
     kine_proton_recom_factor = 0.51,   // 0.35 x 1.453 (proton)
     kine_plane_weights       = null,
