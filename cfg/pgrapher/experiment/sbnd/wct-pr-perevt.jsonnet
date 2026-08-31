@@ -1994,8 +1994,20 @@ function(
     shower_split_max_impact = 0,             // P1.2 cm; fire only when the object's own axis misses the
                                              // reference vertex by <= this.  C++ default 0 = no bound.
                                              // Key omitted when 0 => byte-identical.
-    shower_split_em_start = false,           // P1.3 seed the daughter on its nearest EM-typed member.
-                                             // C++ default false. Key omitted when off => byte-identical.
+    // SBND PRODUCTION ON (owner flip 2026-08-31): "flip shower_split_em_start now
+    // as you said."  doc pr/139 P1.3.  The pr/138 B3 daughter seed took no
+    // account of PDG and SBND runs shower_pdg_from_start_segment, so 11 of 50
+    // peeled daughters came out MUONS -- four with an EM-majority segment
+    // composition, one at 476 MeV.  A mu-typed shower is invisible to the pi0
+    // finder AND its kine_charge divides by the TRACK recom*fudge pair
+    // (0.87*0.95) instead of the shower pair (0.58*0.86), i.e. LOW BY A FACTOR
+    // 1.657.  Arm work-pr139r1-onemst-*: mu-typed daughters 11 -> 2, 461 MeV of
+    // EM energy restored, 51 peels with ZERO backwards fwd (mean 0.945 vs the
+    // shipped rule's 0.940 on the same events), and every other instrument --
+    // census exact 35, q_miss 16.7 %, q_extra 6.7 %, median q_f1 0.922 --
+    // unchanged to the digit.  0 ADVERSE movers.
+    shower_split_em_start = true,            // P1.3 seed the daughter on its nearest EM-typed member.
+                                             // C++ default false; this is a deliberate production override.
     shower_split_rehome = false,             // P1.4 re-home an orphan daughter into the nearest larger EM
                                              // shower that is not its parent.  C++ default false.
                                              // Key omitted when off => byte-identical.
