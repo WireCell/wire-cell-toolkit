@@ -746,7 +746,10 @@ function(
     // sec 7g canonical) -- every model-driven dQ/dx -> dE/dx conversion
     // (kinematics, PID energies) uses the measured SBND recombination.
     // false restores sbnd_box_recomb (A=1.0, B=0.255 at 0.5 kV/cm), the
-    // byte-identical pre-pr/10 config.
+    // byte-identical pre-pr/10 config.  doc 88: that node is typed
+    // PracticalBoxRecombination so its practical-unit numbers keep computing
+    // the pre-pr/10 values -- upstream e6fb7ef3 changed how
+    // Gen::BoxRecombination interprets them.
     use_power_recomb         = true,
     // Single-photon stem dE/dx: DEFAULT ON (owner 2026-07-30) -- route
     // shw_sp_vec_{median,mean}_dedx through the configured recombination

@@ -197,7 +197,7 @@
 			"rho" : 1.3799999999999999
 		},
 		"name" : "box_recomb",
-		"type" : "BoxRecombination"
+		"type" : "PracticalBoxRecombination"
 	},
 	{
 		"data" : 
@@ -11745,7 +11745,7 @@
 			"grouping" : "live",
 			"particle_dataset" : "ParticleDataSet:ParticleDataSet",
 			"pc_transforms" : "PCTransformSet",
-			"recombination_model" : "BoxRecombination:box_recomb",
+			"recombination_model" : "PracticalBoxRecombination:box_recomb",
 			"trackfitting_config_file" : "uboone_track_fitting.json"
 		},
 		"name" : "",

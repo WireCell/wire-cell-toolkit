@@ -1715,8 +1715,11 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, e
               // defaults) instead of the plain sbnd_box_recomb above.
               // DEFAULT ON for SBND (owner 2026-07-30, docs/pr/10 sec 7):
               // every model-driven dQ/dx -> dE/dx conversion now uses the
-              // measured SBND recombination.  false restores sbnd_box_recomb
-              // (the byte-identical pre-pr/10 config).
+              // measured SBND recombination.  false restores sbnd_box_recomb,
+              // which is byte-identical to the pre-pr/10 config AND (since
+              // doc 88 re-typed it to PracticalBoxRecombination) computes the
+              // same numbers it did then -- upstream e6fb7ef3 changed what
+              // Gen::BoxRecombination does with practical-unit parameters.
               use_power_recomb=true,
               // sp_dedx_use_recomb_model: route the single-photon stem dE/dx
               // through the configured recombination model instead of the
@@ -1760,8 +1763,15 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, e
         local cm = clus.clustering_methods(
             prefix='pr', detector_volumes=dv, pc_transforms=pcts, fiducial=dv, coords=common_corr_coords(pos_offset_on)),
         // Box-model recombination at the SBND drift field (uBooNE used 0.273 kV/cm).
+        // doc 88: PracticalBoxRecombination, NOT BoxRecombination -- the
+        // numbers below are in practical units (kV/cm, (kV/cm)(g/cm^2)/MeV,
+        // g/cm^3).  Upstream e6fb7ef3 made Gen::BoxRecombination consistently
+        // WCT-unit, so handing it these numbers is wrong by a factor
+        // units::cm/units::MeV = 10 in the quenching term.  The Practical
+        // class carries the pre-e6fb7ef3 arithmetic verbatim, so this path is
+        // bit-identical to what it computed before that merge.
         local sbnd_box_recomb = {
-            type: 'BoxRecombination',
+            type: 'PracticalBoxRecombination',
             name: 'sbnd_box_recomb',
             data: { A: 1.0, B: 0.255, Efield: 0.5, rho: 1.38, Wi: 23.6e-6 },
         },

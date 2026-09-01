@@ -135,7 +135,7 @@ static PrTestEnv build_env(const std::string& dump_path)
     } catch (...) {}
 
     try {
-        env.recomb = Factory::find_tn<IRecombinationModel>("BoxRecombination:box_recomb");
+        env.recomb = Factory::find_tn<IRecombinationModel>("PracticalBoxRecombination:box_recomb");
     } catch (...) {}
 
     env.fixture = DebugIO::load_tagger_inputs(dump_path);

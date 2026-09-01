@@ -132,7 +132,7 @@ TEST_CASE("tagger_check_neutrino end-to-end")
     REQUIRE(pdata);
 
     try {
-        recomb = Factory::find_tn<IRecombinationModel>("BoxRecombination:box_recomb");
+        recomb = Factory::find_tn<IRecombinationModel>("PracticalBoxRecombination:box_recomb");
     } catch (...) {}
     REQUIRE(recomb);
 
