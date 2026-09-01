@@ -227,11 +227,7 @@ TEST_CASE("clus knob defaults: TaggerCheckNeutrino switches are all OFF")
     CHECK_KNOB_NUM(cfg, "shower_merge_relax_dis", 6.0);                       // cm; inert while off
     CHECK_KNOB_NUM(cfg, "shower_merge_relax_angle", 15.0);                    // deg; inert while off
     CHECK_KNOB_NUM(cfg, "shower_merge_relax_min_len", 5.0);                   // cm; fragment length floor; inert while off
-    CHECK_KNOB_BOOL(cfg, "shower_flank_absorb", false);                       // pr/117 r1; false = no pass
-    CHECK_KNOB_NUM(cfg, "shower_flank_absorb_max_dis", 6.0);                  // cm; inert while off
-    CHECK_KNOB_NUM(cfg, "shower_flank_absorb_max_len", 25.0);                 // cm; inert while off
     // doc pr/118 round 1 -- P2 body-distance + charge-continuity merge.
-    CHECK_KNOB_BOOL(cfg, "shower_ex1_conn3_body_dis", false);                 // pr/118 r1; false = start-segment gate
     CHECK_KNOB_BOOL(cfg, "shower_merge_relax_continuity", false);             // pr/118 r1; false = legacy merge_relax only
     CHECK_KNOB_NUM(cfg, "shower_merge_relax_cont_frac", 1.0);                 // T2 charge-presence fraction; inert while off
     CHECK_KNOB_NUM(cfg, "shower_merge_relax_cont_gap", 8.0);                  // cm, T2 stub gap; inert while off
@@ -243,8 +239,6 @@ TEST_CASE("clus knob defaults: TaggerCheckNeutrino switches are all OFF")
     // doc pr/120 round 1 -- backward-stem + em-straight-track admission guards.
     CHECK_KNOB_BOOL(cfg, "stem_backfill_back_guard", false);                  // pr/120 r1; false = legacy stem_backfill
     CHECK_KNOB_NUM(cfg, "stem_backfill_back_ang", 110.0);                     // deg, backward ceiling; inert while off
-    CHECK_KNOB_BOOL(cfg, "shower_ex1_walk_em_track_guard", false);            // pr/120 r1; false = legacy ex1 walk
-    CHECK_KNOB_NUM(cfg, "shower_ex1_walk_em_track_len", 20.0);                // cm, e- straight-long floor; inert while off
     // doc pr/121 round 1 -- examine_shower_1 dedup re-homes multi-seg victims.
     CHECK_KNOB_BOOL(cfg, "shower_ex1_dedup_rehome", false);                   // pr/121 r1; false = legacy dedup drop
     // doc pr/123 round 1 -- pass4_angle over-reach (owner line 2026-08-28).

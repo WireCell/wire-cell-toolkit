@@ -2082,47 +2082,10 @@ namespace WireCell::Clus::PR {
         double m_shower_merge_relax_dis{6*units::cm};   ///< body-gap ceiling, internal units; inert while off
         double m_shower_merge_relax_angle{15.0};        ///< local-pivot axis agreement, DEGREES; inert while off
         double m_shower_merge_relax_min_len{5*units::cm}; ///< fragment length FLOOR, internal units: a shorter fragment has no measurable direction and is not a candidate (gap-only stub merging measured net-negative, and a noise direction passes any angle cut on ~3% of stubs -- doc pr/117 sec 7); inert while merge_relax off
-        // (3) shower_flank_absorb.  41 of the 125 scan-missed segments
-        // (33%) were never absorbed by ANY pass: main-cluster segments are
-        // categorically skipped by all six cone/proximity absorber seats
-        // (cluster()==main_cluster => continue), stem_backfill walks only
-        // the main-vertex chain, and the cones are anchored at the shower
-        // START point so a stub off the flank fails on angle however close
-        // its charge sits.  When on, a late single sweep (after
-        // stem_backfill, before the second kinematics pass so the absorbed
-        // charge is costed) absorbs each UNCLAIMED shower-like segment
-        // (kShowerTrajectory/kShowerTopology flagged or |pdg|==11; NOT in a
-        // long muon; NOT confident non-electron PID; length under
-        // flank_absorb_max_len AND under 0.75x the recipient -- the pass-4
-        // proximity proportionality guard) into the argmin shower by body
-        // distance (shower_get_closest_dis) when below
-        // flank_absorb_max_dis.  Main-cluster segments ARE eligible: this
-        // is a new seat; the guarded legacy seats are untouched.  The pass
-        // clears flag_kinematics on every shower it grows so calc-kine-2
-        // recosts them.  false (default) => no pass => byte-identical;
-        // numerics inert while off.
-        bool   m_shower_flank_absorb{false};                ///< doc pr/117 r1; false = no pass
-        double m_shower_flank_absorb_max_dis{6*units::cm};  ///< body-distance ceiling, internal units; inert while off
-        double m_shower_flank_absorb_max_len{25*units::cm}; ///< candidate max length, internal units; inert while off
-        // doc sbnd_xin/docs/pr/118 round 1 -- two knob families sized from
-        // the pr/117 residual census (sbnd_xin/docs/pr/117_*.md sec 5-7,
-        // sec 11).
-        //
-        // (1) shower_ex1_conn3_body_dis (pr/91 sec 7 "P2").  In
-        // examine_shower_1's merge half, the ONLY door for a conn-3/4
-        // shower into the main conn-1 shower is a 3 cm gate measured to the
-        // parent's START SEGMENT -- not to the parent's charge body -- so a
-        // candidate touching the parent's flank at 1.7 cm is rejected at
-        // 4.9 cm (evt174752, pr/91 sec 4).  When on, the gate (and the
-        // downstream min_dis < 28 cm term, coherently) is measured as the
-        // min over ALL the parent's member segments instead; the min
-        // includes the start segment, so the knob is strictly admissive and
-        // the 3 cm threshold is unchanged.  The candidate still faces the
-        // legacy angle < 15 && angle1 < 15 test -- admission, not a merge
-        // guarantee (evt394532 lesson).  false (default) => legacy
-        // start-segment measurement => byte-identical.
-        bool   m_shower_ex1_conn3_body_dis{false};          ///< doc pr/118 r1; false = start-segment gate
-        // (2) shower_merge_relax_continuity.  The pr/118 98-event pair
+        // doc sbnd_xin/docs/pr/118 round 1 -- the merge-continuity knob
+        // family, sized from the pr/117 residual census
+        // (sbnd_xin/docs/pr/117_*.md sec 5-7, sec 11).
+        // shower_merge_relax_continuity.  The pr/118 98-event pair
         // census (2466 EM-EM pairs within 30 cm, truth from the emscan-0827
         // marks) MEASURED three candidate discriminators for the residual
         // merge classes: the local-pivot fold spreads 6-75 deg on true
@@ -2159,33 +2122,21 @@ namespace WireCell::Clus::PR {
         double m_shower_merge_relax_cont_dmax{120*units::cm}; ///< T2: junction distance ceiling from absorber start; inert while off
         double m_shower_merge_relax_cont_t1_gap{1*units::cm}; ///< T1: touching gap_exact ceiling, internal units; inert while off
         double m_shower_merge_relax_cont_t1_fold{30.0};       ///< T1: local-pivot fold ceiling, DEGREES; inert while off
-        // doc sbnd_xin/docs/pr/120 -- two admission-time guards, measured
+        // doc sbnd_xin/docs/pr/120 -- the backward-stem admission guard, measured
         // over the 98-event emscan manifest (census
         // scripts/pr120_absorb_census.py):
-        // (1) stem_backfill backward-stem guard: of the 5 accepted stem
-        //     absorbs in the sample, the 3 with a degenerate scan-equivalent
-        //     angle (conn-1, start on the chain) are legitimate trunk
-        //     extensions; BOTH measurable-angle absorbs develop backward
-        //     (~150 deg away from the chain) and both are scanner-condemned
-        //     over-clustering (evt47212 seg 2103 OUT-marked at 147.9 deg;
-        //     evt281567 seg 95128 named in the scan note).  Decline when the
-        //     shower dir15-at-start vs start->closest-stem-point angle is
-        //     measurable and > m_stem_backfill_back_ang.
-        // (2) examine_shower_1 walk em-track guard: the flood-fill's
-        //     absorb_track_guard exempts pdg==11 from the straight-long-
-        //     track exclusion; evt54332's mis-PID'd 32.3 cm straight track
-        //     (seg 16014, scan note "overclustering a track") slipped
-        //     through.  When on, the examine_shower_1 call site passes
-        //     m_shower_ex1_walk_em_track_len to guard_excludes so long
-        //     straight e--PID'd segments are excluded too.  Measured firing
-        //     set at 20 cm: exactly evt54332 seg 16014 (the two other
-        //     >=20 cm straight-long e- walk-adds are at in_main_cluster,
-        //     which does not pass the floor).
+        // stem_backfill backward-stem guard: of the 5 accepted stem
+        // absorbs in the sample, the 3 with a degenerate scan-equivalent
+        // angle (conn-1, start on the chain) are legitimate trunk
+        // extensions; BOTH measurable-angle absorbs develop backward
+        // (~150 deg away from the chain) and both are scanner-condemned
+        // over-clustering (evt47212 seg 2103 OUT-marked at 147.9 deg;
+        // evt281567 seg 95128 named in the scan note).  Decline when the
+        // shower dir15-at-start vs start->closest-stem-point angle is
+        // measurable and > m_stem_backfill_back_ang.
         // false (defaults) => byte-identical; numerics inert while off.
         bool   m_stem_backfill_back_guard{false};        ///< doc pr/120 r1; false = legacy stem_backfill
         double m_stem_backfill_back_ang{110.0};          ///< backward-angle ceiling, DEGREES; inert while off
-        bool   m_shower_ex1_walk_em_track_guard{false};  ///< doc pr/120 r1; false = legacy examine_shower_1 walk
-        double m_shower_ex1_walk_em_track_len{20*units::cm}; ///< e- straight-long floor, internal units; inert while off
         // doc sbnd_xin/docs/pr/121 -- the examine_shower_1 accept-branch dedup
         // erases ANY pre-existing (main_vertex, conn-1) shower sharing the
         // accepted shower1's start segment.  Written for stale SINGLE-segment
@@ -3508,8 +3459,6 @@ namespace WireCell::Clus::PR {
         int merge_showers_sharing_start_segment(IndexedShowerSet& showers);
         // doc sbnd_xin/docs/pr/74 round 2 K4 -- see m_shower_stem_backfill.
         void stem_backfill(Graph& graph, VertexPtr main_vertex, IndexedShowerSet& showers, ShowerVertexMap& map_vertex_in_shower, ShowerSegmentMap& map_segment_in_shower, VertexShowerSetMap& map_vertex_to_shower, ClusterPtrSet& used_shower_clusters, IndexedSegmentSet& segments_in_long_muon, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model);
-        // doc sbnd_xin/docs/pr/117 round 1 -- see m_shower_flank_absorb.
-        void flank_absorb_orphans(Graph& graph, IndexedShowerSet& showers, ShowerVertexMap& map_vertex_in_shower, ShowerSegmentMap& map_segment_in_shower, VertexShowerSetMap& map_vertex_to_shower, ClusterPtrSet& used_shower_clusters, IndexedSegmentSet& segments_in_long_muon);
         // doc sbnd_xin/docs/pr/117 round 1 -- see m_shower_merge_relax.
         void merge_shower_fragments(Graph& graph, IndexedShowerSet& showers, VertexPtr main_vertex, ShowerVertexMap& map_vertex_in_shower, ShowerSegmentMap& map_segment_in_shower, VertexShowerSetMap& map_vertex_to_shower, ClusterPtrSet& used_shower_clusters, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model);
         void shower_clustering_with_nv_in_main_cluster(Graph& graph, VertexPtr main_vertex, IndexedShowerSet& showers, ShowerVertexMap& map_vertex_in_shower, ShowerSegmentMap& map_segment_in_shower, VertexShowerSetMap& map_vertex_to_shower, ClusterPtrSet& used_shower_clusters, IndexedVertexSet& vertices_in_long_muon, IndexedSegmentSet& segments_in_long_muon, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model);

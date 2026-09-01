@@ -670,11 +670,7 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_shower_merge_relax_dis                    = get(config, "shower_merge_relax_dis",                    m_shower_merge_relax_dis);
     m_shower_merge_relax_angle                  = get(config, "shower_merge_relax_angle",                  m_shower_merge_relax_angle);
     m_shower_merge_relax_min_len                = get(config, "shower_merge_relax_min_len",                m_shower_merge_relax_min_len);
-    m_shower_flank_absorb                       = get(config, "shower_flank_absorb",                       m_shower_flank_absorb);
-    m_shower_flank_absorb_max_dis               = get(config, "shower_flank_absorb_max_dis",               m_shower_flank_absorb_max_dis);
-    m_shower_flank_absorb_max_len               = get(config, "shower_flank_absorb_max_len",               m_shower_flank_absorb_max_len);
     // doc sbnd_xin/docs/pr/118 round 1
-    m_shower_ex1_conn3_body_dis                 = get(config, "shower_ex1_conn3_body_dis",                 m_shower_ex1_conn3_body_dis);
     m_shower_merge_relax_continuity             = get(config, "shower_merge_relax_continuity",             m_shower_merge_relax_continuity);
     m_shower_merge_relax_cont_frac              = get(config, "shower_merge_relax_cont_frac",              m_shower_merge_relax_cont_frac);
     m_shower_merge_relax_cont_gap               = get(config, "shower_merge_relax_cont_gap",               m_shower_merge_relax_cont_gap);
@@ -686,8 +682,6 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     // doc sbnd_xin/docs/pr/120 round 1
     m_stem_backfill_back_guard                  = get(config, "stem_backfill_back_guard",                  m_stem_backfill_back_guard);
     m_stem_backfill_back_ang                    = get(config, "stem_backfill_back_ang",                    m_stem_backfill_back_ang);
-    m_shower_ex1_walk_em_track_guard            = get(config, "shower_ex1_walk_em_track_guard",            m_shower_ex1_walk_em_track_guard);
-    m_shower_ex1_walk_em_track_len              = get(config, "shower_ex1_walk_em_track_len",              m_shower_ex1_walk_em_track_len);
     // doc sbnd_xin/docs/pr/121 round 1
     m_shower_ex1_dedup_rehome                   = get(config, "shower_ex1_dedup_rehome",                   m_shower_ex1_dedup_rehome);
     m_shower_pass4_prune_detached               = get(config, "shower_pass4_prune_detached",               m_shower_pass4_prune_detached);            // doc pr/123 r1
@@ -1190,10 +1184,6 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["shower_merge_relax_dis"]                    = m_shower_merge_relax_dis;                    // cm; inert while merge_relax off (doc pr/117 r1)
     cfg["shower_merge_relax_angle"]                  = m_shower_merge_relax_angle;                  // deg; inert while merge_relax off (doc pr/117 r1)
     cfg["shower_merge_relax_min_len"]                = m_shower_merge_relax_min_len;                // cm; fragment length floor; inert while merge_relax off (doc pr/117 r1)
-    cfg["shower_flank_absorb"]                       = m_shower_flank_absorb;                       // doc pr/117 r1; false = no pass, byte-identical
-    cfg["shower_flank_absorb_max_dis"]               = m_shower_flank_absorb_max_dis;               // cm; inert while flank_absorb off (doc pr/117 r1)
-    cfg["shower_flank_absorb_max_len"]               = m_shower_flank_absorb_max_len;               // cm; inert while flank_absorb off (doc pr/117 r1)
-    cfg["shower_ex1_conn3_body_dis"]                 = m_shower_ex1_conn3_body_dis;                 // doc pr/118 r1; false = start-segment gate, byte-identical
     cfg["shower_merge_relax_continuity"]             = m_shower_merge_relax_continuity;             // doc pr/118 r1; false = legacy merge_relax only, byte-identical
     cfg["shower_merge_relax_cont_frac"]              = m_shower_merge_relax_cont_frac;              // T2 charge-presence fraction; inert while continuity off (doc pr/118 r1)
     cfg["shower_merge_relax_cont_gap"]               = m_shower_merge_relax_cont_gap;               // cm, T2 stub gap; inert while continuity off (doc pr/118 r1)
@@ -1204,8 +1194,6 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["shower_merge_relax_cont_t1_fold"]           = m_shower_merge_relax_cont_t1_fold;           // deg, T1 fold; inert while continuity off (doc pr/118 r1)
     cfg["stem_backfill_back_guard"]                  = m_stem_backfill_back_guard;                  // doc pr/120 r1; false = legacy stem_backfill, byte-identical
     cfg["stem_backfill_back_ang"]                    = m_stem_backfill_back_ang;                    // deg, backward ceiling; inert while guard off (doc pr/120 r1)
-    cfg["shower_ex1_walk_em_track_guard"]            = m_shower_ex1_walk_em_track_guard;            // doc pr/120 r1; false = legacy examine_shower_1 walk, byte-identical
-    cfg["shower_ex1_walk_em_track_len"]              = m_shower_ex1_walk_em_track_len;              // cm, e- straight-long floor; inert while guard off (doc pr/120 r1)
     cfg["shower_ex1_dedup_rehome"]                   = m_shower_ex1_dedup_rehome;                   // doc pr/121 r1; false = legacy dedup drop, byte-identical
     cfg["shower_pass4_prune_detached"]               = m_shower_pass4_prune_detached;               // doc pr/123 r1; false = no prune pass, byte-identical
     cfg["shower_pass4_prune_gap"]                    = m_shower_pass4_prune_gap;                    // doc pr/123 r1; cm, inert while prune off
@@ -2674,10 +2662,6 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
         pattern_algos.m_shower_merge_relax_dis                    = m_shower_merge_relax_dis * units::cm;        // cm -> internal (doc pr/117 r1)
         pattern_algos.m_shower_merge_relax_angle                  = m_shower_merge_relax_angle;                  // deg, no conversion (doc pr/117 r1)
         pattern_algos.m_shower_merge_relax_min_len                = m_shower_merge_relax_min_len * units::cm;    // cm -> internal (doc pr/117 r1)
-        pattern_algos.m_shower_flank_absorb                       = m_shower_flank_absorb;                       // doc pr/117 r1
-        pattern_algos.m_shower_flank_absorb_max_dis               = m_shower_flank_absorb_max_dis * units::cm;   // cm -> internal (doc pr/117 r1)
-        pattern_algos.m_shower_flank_absorb_max_len               = m_shower_flank_absorb_max_len * units::cm;   // cm -> internal (doc pr/117 r1)
-        pattern_algos.m_shower_ex1_conn3_body_dis                 = m_shower_ex1_conn3_body_dis;                 // doc pr/118 r1
         pattern_algos.m_shower_merge_relax_continuity             = m_shower_merge_relax_continuity;             // doc pr/118 r1
         pattern_algos.m_shower_merge_relax_cont_frac              = m_shower_merge_relax_cont_frac;              // fraction, no conversion (doc pr/118 r1)
         pattern_algos.m_shower_merge_relax_cont_gap               = m_shower_merge_relax_cont_gap * units::cm;   // cm -> internal (doc pr/118 r1)
@@ -2688,8 +2672,6 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
         pattern_algos.m_shower_merge_relax_cont_t1_fold           = m_shower_merge_relax_cont_t1_fold;           // deg, no conversion (doc pr/118 r1)
         pattern_algos.m_stem_backfill_back_guard                  = m_stem_backfill_back_guard;                  // doc pr/120 r1
         pattern_algos.m_stem_backfill_back_ang                    = m_stem_backfill_back_ang;                    // deg, no conversion (doc pr/120 r1)
-        pattern_algos.m_shower_ex1_walk_em_track_guard            = m_shower_ex1_walk_em_track_guard;            // doc pr/120 r1
-        pattern_algos.m_shower_ex1_walk_em_track_len              = m_shower_ex1_walk_em_track_len * units::cm;  // cm -> internal (doc pr/120 r1)
         pattern_algos.m_shower_ex1_dedup_rehome                   = m_shower_ex1_dedup_rehome;                   // doc pr/121 r1
         pattern_algos.m_shower_pass4_prune_detached               = m_shower_pass4_prune_detached;               // doc pr/123 r1
         pattern_algos.m_shower_pass4_prune_gap                    = m_shower_pass4_prune_gap * units::cm;        // doc pr/123 r1, cm -> internal

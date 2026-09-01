@@ -906,19 +906,14 @@ public:
         double m_kine_orphan_track_min{50};                         // cm; scaled at copy
         // doc sbnd_xin/docs/pr/117 round 1 -- rationale comments in
         // NeutrinoPatternBase.h (m_shower_pass4_best_owner /
-        // m_shower_merge_relax / m_shower_flank_absorb blocks).
+        // m_shower_merge_relax block).
         bool   m_shower_pass4_best_owner{false};                    // doc pr/117 r1 (48% of wrongly-held charge)
         bool   m_shower_merge_relax{false};                         // doc pr/117 r1 (20-event merge class)
         double m_shower_merge_relax_dis{6.0};                       // cm; scaled at copy; inert while off
         double m_shower_merge_relax_angle{15.0};                    // deg, no conversion; inert while off
         double m_shower_merge_relax_min_len{5.0};                   // cm; scaled at copy; fragment length floor; inert while off
-        bool   m_shower_flank_absorb{false};                        // doc pr/117 r1 (41 orphan stub marks)
-        double m_shower_flank_absorb_max_dis{6.0};                  // cm; scaled at copy; inert while off
-        double m_shower_flank_absorb_max_len{25.0};                 // cm; scaled at copy; inert while off
         // doc sbnd_xin/docs/pr/118 round 1 -- rationale comments in
-        // NeutrinoPatternBase.h (m_shower_ex1_conn3_body_dis /
-        // m_shower_merge_relax_continuity blocks).
-        bool   m_shower_ex1_conn3_body_dis{false};                  // doc pr/118 r1 (pr/91 P2); strictly admissive
+        // NeutrinoPatternBase.h (m_shower_merge_relax_continuity block).
         bool   m_shower_merge_relax_continuity{false};              // doc pr/118 r1 (two-tier axis+charge merge path)
         double m_shower_merge_relax_cont_frac{1.0};                 // fraction, no conversion; inert while off
         double m_shower_merge_relax_cont_gap{8.0};                  // cm; scaled at copy; inert while off
@@ -931,8 +926,6 @@ public:
         // NeutrinoPatternBase.h (m_stem_backfill_back_guard block).
         bool   m_stem_backfill_back_guard{false};                   // doc pr/120 r1 (47212/281567 backward stems)
         double m_stem_backfill_back_ang{110.0};                     // deg, no conversion; inert while off
-        bool   m_shower_ex1_walk_em_track_guard{false};             // doc pr/120 r1 (54332 mis-PID'd track)
-        double m_shower_ex1_walk_em_track_len{20.0};                // cm; scaled at copy; inert while off
         // doc sbnd_xin/docs/pr/121 round 1 -- rationale comment in
         // NeutrinoPatternBase.h (m_shower_ex1_dedup_rehome block).
         bool   m_shower_ex1_dedup_rehome{false};                    // doc pr/121 r1 (348471 dedup orphaning)

@@ -199,11 +199,7 @@ namespace WireCell::Clus::PR {
         // are unchanged) -- only FORMER start vertices and other view-only
         // insertions become reachable.  Default false = legacy
         // has_node()-gated frontier, byte-identical.
-        // em_straight_min_len (doc pr/120): when > 0, an electron-PID'd
-        // segment longer than this faces the same straight-long-track
-        // exclusion as other PIDs (closes the pdg==11 exemption evt54332's
-        // mis-PID'd 32 cm track slipped through).  0 = legacy behavior.
-        void complete_structure_with_start_segment(IndexedSegmentSet& used_segments, const std::string& cloud_name_fit = "fit", const std::string& cloud_name_associate = "associate_points", bool absorb_track_guard = false, bool walk_visited_parity = false, double em_straight_min_len = 0);
+        void complete_structure_with_start_segment(IndexedSegmentSet& used_segments, const std::string& cloud_name_fit = "fit", const std::string& cloud_name_associate = "associate_points", bool absorb_track_guard = false, bool walk_visited_parity = false);
 
 
         // get the information from the shower.

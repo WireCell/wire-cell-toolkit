@@ -1771,29 +1771,27 @@ function(
     shower_ghost_min_len = null,
     // doc pr/117 round 1 -- EM clustering, sized from the pr/115 hand-scan
     // absorb census: pass-4 best-owner arbitration (48% of wrongly-held
-    // charge), late fragment consolidation (the 20-event merge class),
-    // orphan flank absorb (the 41 never-absorbed stub marks).  C++
-    // defaults false / 6cm / 15deg / 6cm / 25cm = legacy.  Key omitted
-    // when off => byte-identical pre-pr/117 config.  Runner envs
+    // charge), late fragment consolidation (the 20-event merge class).  C++
+    // defaults false / 6cm / 15deg / 5cm = legacy.  Key omitted when off =>
+    // byte-identical pre-pr/117 config.  Runner envs
     // SBND_SHOWER_PASS4_BEST_OWNER / SBND_SHOWER_MERGE_RELAX (+_DIS,
-    // _ANGLE) / SBND_SHOWER_FLANK_ABSORB (+_MAX_DIS, _MAX_LEN).
+    // _ANGLE, _MIN_LEN).  The round's third knob, shower_flank_absorb
+    // (+_MAX_DIS, _MAX_LEN), was retired in doc 77 round 3 -- no targets in
+    // the marked set; see sbnd_xin/docs/77_knob-ledger.tsv.
     shower_pass4_best_owner = true,  // SBND PRODUCTION ON 2026-08-28 (doc pr/117 r1; owner pre-authorized "if validation passed"; 0 nusel diffs, no negative marked delta)
     shower_merge_relax = true,       // SBND PRODUCTION ON 2026-08-28 (doc pr/117 r1; evt168596 0.852->1.000, EM<->EM directional only)
     shower_merge_relax_dis = null,       // cm; C++ default 6
     shower_merge_relax_angle = null,     // deg; C++ default 15
     shower_merge_relax_min_len = null,   // cm; C++ default 5 (fragment length floor)
-    shower_flank_absorb = false,     // shipped OFF, not selected: no targets in the marked set (doc pr/117 sec 6)
-    shower_flank_absorb_max_dis = null,  // cm; C++ default 6
-    shower_flank_absorb_max_len = null,  // cm; C++ default 25
-    // doc pr/118 round 1 -- pr/91 P2 body-distance admission + the two-tier
-    // axis+charge merge path, thresholds MEASURED on the 98-event pair
-    // census (doc pr/118 sec 4: 4 true / 0 false admitted).  C++ defaults
-    // false / false / 1.0 / 8cm / 5000 / 7.5deg / 120cm / 1cm / 30deg =
-    // legacy.  Key omitted when off => byte-identical pre-pr/118 config.
-    // Runner envs SBND_SHOWER_EX1_CONN3_BODY_DIS /
-    // SBND_SHOWER_MERGE_RELAX_CONTINUITY (+_CONT_FRAC, _CONT_GAP,
-    // _CONT_QMED, _CONT_AXIS, _CONT_DMAX, _CONT_T1_GAP, _CONT_T1_FOLD).
-    shower_ex1_conn3_body_dis = false,       // shipped OFF, not selected: measured ZERO yield (doc pr/118 sec 4a -- 1 admit in 98 events, fails angles)
+    // doc pr/118 round 1 -- the two-tier axis+charge merge path, thresholds
+    // MEASURED on the 98-event pair census (doc pr/118 sec 4: 4 true / 0
+    // false admitted).  C++ defaults false / 1.0 / 8cm / 5000 / 7.5deg /
+    // 120cm / 1cm / 30deg = legacy.  Key omitted when off => byte-identical
+    // pre-pr/118 config.  Runner envs SBND_SHOWER_MERGE_RELAX_CONTINUITY
+    // (+_CONT_FRAC, _CONT_GAP, _CONT_QMED, _CONT_AXIS, _CONT_DMAX,
+    // _CONT_T1_GAP, _CONT_T1_FOLD).  The round's pr/91 P2 admission knob,
+    // shower_ex1_conn3_body_dis, was retired in doc 77 round 3 -- measured
+    // ZERO yield; see sbnd_xin/docs/77_knob-ledger.tsv.
     shower_merge_relax_continuity = true,    // SBND PRODUCTION ON 2026-08-28 (doc pr/118 r1; owner pre-authorized "turn them on if validation pass"; 4 measured merges, +0.250/+0.035/+0.012, 0 negatives, 0 control churn, nusel 98/98 identical)
     shower_merge_relax_cont_frac = null,     // fraction; C++ default 1.0
     shower_merge_relax_cont_gap = null,      // cm; C++ default 8
@@ -1802,18 +1800,16 @@ function(
     shower_merge_relax_cont_dmax = null,     // cm; C++ default 120
     shower_merge_relax_cont_t1_gap = null,   // cm; C++ default 1
     shower_merge_relax_cont_t1_fold = null,  // deg; C++ default 30
-    // doc pr/120 round 1 -- backward-stem + em-straight-track admission
-    // guards, firing sets MEASURED on the 98-event emscan manifest (doc
-    // pr/120 sec 3: stem guard fires on exactly the two scanner-condemned
-    // backward absorbs 47212/281567; ex1 guard on exactly 54332 seg 16014).
-    // C++ defaults false / 110deg / false / 20cm = legacy.  Key omitted
-    // when off => byte-identical pre-pr/120 config.  Runner envs
-    // SBND_STEM_BACKFILL_BACK_GUARD (+_BACK_ANG) /
-    // SBND_SHOWER_EX1_WALK_EM_TRACK_GUARD (+_EM_TRACK_LEN).
+    // doc pr/120 round 1 -- backward-stem admission guard, firing set
+    // MEASURED on the 98-event emscan manifest (doc pr/120 sec 3: fires on
+    // exactly the two scanner-condemned backward absorbs 47212/281567).
+    // C++ defaults false / 110deg = legacy.  Key omitted when off =>
+    // byte-identical pre-pr/120 config.  Runner env
+    // SBND_STEM_BACKFILL_BACK_GUARD (+_BACK_ANG).  The round's second knob,
+    // shower_ex1_walk_em_track_guard (+_LEN), was retired in doc 77 round 3
+    // -- measured ZERO yield; see sbnd_xin/docs/77_knob-ledger.tsv.
     stem_backfill_back_guard = true,         // SBND PRODUCTION ON 2026-08-28 (doc pr/120 r1; owner "same validation as previous rounds"; fires on exactly the 2 scanner-condemned backward absorbs: 47212 qF1 0.965->1.000, 281567 scan-note stem released; 96/98 events byte-identical, nusel 98/98 identical, 0 movers)
     stem_backfill_back_ang = null,           // deg; C++ default 110
-    shower_ex1_walk_em_track_guard = false,  // shipped OFF, not selected: measured ZERO yield (doc pr/120 sec 5 -- its one target, 54332 seg 16014, is SEEDED via a kShowerTopology mis-flag in the current chain, not walk-absorbed; recognition thread)
-    shower_ex1_walk_em_track_len = null,     // cm; C++ default 20
     // doc pr/121 round 1 -- the examine_shower_1 accept-branch dedup erases a
     // pre-existing same-start-segment (main_vertex, conn-1) shower without
     // checking its size; SBND 17394-348471 (doc pr/115 sec 17.7) lost a
@@ -3156,20 +3152,16 @@ function(
         [if shower_ghost_overlap_frac != null then 'shower_ghost_overlap_frac']: shower_ghost_overlap_frac,
         [if shower_ghost_dqdx_ratio != null then 'shower_ghost_dqdx_ratio']: shower_ghost_dqdx_ratio,
         [if shower_ghost_min_len != null then 'shower_ghost_min_len']: shower_ghost_min_len,
-        // doc pr/117 round 1.  C++ defaults false/6cm/15deg/6cm/25cm.
+        // doc pr/117 round 1.  C++ defaults false/false/6cm/15deg/5cm.
         // Key omitted when off => byte-identical pre-pr/117 config.
         [if shower_pass4_best_owner then 'shower_pass4_best_owner']: true,
         [if shower_merge_relax then 'shower_merge_relax']: true,
         [if shower_merge_relax_dis != null then 'shower_merge_relax_dis']: shower_merge_relax_dis,
         [if shower_merge_relax_angle != null then 'shower_merge_relax_angle']: shower_merge_relax_angle,
         [if shower_merge_relax_min_len != null then 'shower_merge_relax_min_len']: shower_merge_relax_min_len,
-        [if shower_flank_absorb then 'shower_flank_absorb']: true,
-        [if shower_flank_absorb_max_dis != null then 'shower_flank_absorb_max_dis']: shower_flank_absorb_max_dis,
-        [if shower_flank_absorb_max_len != null then 'shower_flank_absorb_max_len']: shower_flank_absorb_max_len,
         // doc pr/118 round 1.  C++ defaults
-        // false/false/1.0/8cm/5000/7.5deg/120cm/1cm/30deg.
+        // false/1.0/8cm/5000/7.5deg/120cm/1cm/30deg.
         // Key omitted when off => byte-identical pre-pr/118 config.
-        [if shower_ex1_conn3_body_dis then 'shower_ex1_conn3_body_dis']: true,
         [if shower_merge_relax_continuity then 'shower_merge_relax_continuity']: true,
         [if shower_merge_relax_cont_frac != null then 'shower_merge_relax_cont_frac']: shower_merge_relax_cont_frac,
         [if shower_merge_relax_cont_gap != null then 'shower_merge_relax_cont_gap']: shower_merge_relax_cont_gap,
@@ -3178,12 +3170,10 @@ function(
         [if shower_merge_relax_cont_dmax != null then 'shower_merge_relax_cont_dmax']: shower_merge_relax_cont_dmax,
         [if shower_merge_relax_cont_t1_gap != null then 'shower_merge_relax_cont_t1_gap']: shower_merge_relax_cont_t1_gap,
         [if shower_merge_relax_cont_t1_fold != null then 'shower_merge_relax_cont_t1_fold']: shower_merge_relax_cont_t1_fold,
-        // doc pr/120 round 1.  C++ defaults false/110deg/false/20cm.
+        // doc pr/120 round 1.  C++ defaults false/110deg.
         // Key omitted when off => byte-identical pre-pr/120 config.
         [if stem_backfill_back_guard then 'stem_backfill_back_guard']: true,
         [if stem_backfill_back_ang != null then 'stem_backfill_back_ang']: stem_backfill_back_ang,
-        [if shower_ex1_walk_em_track_guard then 'shower_ex1_walk_em_track_guard']: true,
-        [if shower_ex1_walk_em_track_len != null then 'shower_ex1_walk_em_track_len']: shower_ex1_walk_em_track_len,
         // doc pr/121 round 1.  C++ default false.
         // Key omitted when off => byte-identical pre-pr/121 config.
         [if shower_ex1_dedup_rehome then 'shower_ex1_dedup_rehome']: true,

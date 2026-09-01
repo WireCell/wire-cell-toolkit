@@ -2859,91 +2859,6 @@ void PatternAlgorithms::examine_merge_showers(IndexedShowerSet& showers, VertexP
 }
 
 
-// doc sbnd_xin/docs/pr/117 round 1 -- shower_flank_absorb.  Rationale at the
-// m_shower_flank_absorb member block (NeutrinoPatternBase.h).  A late single
-// sweep over UNCLAIMED shower-like segments, absorbing each into the argmin
-// shower by body distance.  This is a NEW absorber seat: the six legacy seats'
-// cluster()==main_cluster => continue guard is deliberately absent here (that
-// guard is what orphans the pr/115 stub class), and the track-safety burden
-// moves to the candidate filter instead.  Called only when the knob is on.
-void PatternAlgorithms::flank_absorb_orphans(Graph& graph, IndexedShowerSet& showers, ShowerVertexMap& map_vertex_in_shower, ShowerSegmentMap& map_segment_in_shower, VertexShowerSetMap& map_vertex_to_shower, ClusterPtrSet& used_shower_clusters, IndexedSegmentSet& segments_in_long_muon)
-{
-    if (showers.empty()) return;
-
-    // Unique segments in deterministic graph-index order (the pass-4 idiom).
-    std::vector<SegmentPtr> seg_order;
-    {
-        std::unordered_set<Segment*> seen;   // membership-tested only, never iterated
-        for (auto e : ordered_edges(graph)) {
-            SegmentPtr seg = graph[e].segment;
-            if (!seg || !seg->cluster()) continue;
-            if (seen.insert(seg.get()).second) seg_order.push_back(seg);
-        }
-    }
-
-    // Recipients in cluster-id/segment-id order (the pass-4 proximity comparator).
-    std::vector<ShowerPtr> sorted_showers(showers.begin(), showers.end());
-    std::sort(sorted_showers.begin(), sorted_showers.end(), [](const ShowerPtr& a, const ShowerPtr& b) {
-        auto* sa = a->start_segment().get();
-        auto* sb = b->start_segment().get();
-        if (!sa || !sb) return sa < sb;
-        int cid_a = sa->cluster() ? sa->cluster()->get_cluster_id() : -1;
-        int cid_b = sb->cluster() ? sb->cluster()->get_cluster_id() : -1;
-        if (cid_a != cid_b) return cid_a < cid_b;
-        return sa->id() < sb->id();
-    });
-
-    std::map<ShowerPtr, double> map_shower_length;   // lookup only, never iterated
-    for (auto& s : sorted_showers) map_shower_length[s] = s->get_total_length();
-
-    int n_absorbed = 0;
-    for (auto seg1 : seg_order) {
-        if (!seg1->descriptor_valid()) continue;
-        if (map_segment_in_shower.find(seg1) != map_segment_in_shower.end()) continue;
-        if (segments_in_long_muon.count(seg1)) continue;
-        const bool shower_like = seg1->flags_any(SegmentFlags::kShowerTrajectory) ||
-                                 seg1->flags_any(SegmentFlags::kShowerTopology) ||
-                                 (seg1->has_particle_info() && seg1->particle_info() &&
-                                  std::abs(seg1->particle_info()->pdg()) == 11);
-        if (!shower_like) continue;
-        // Track safety: a confidently-PID'd non-electron never moves (the
-        // pass-3 cone_absorb_guard / flood-fill guard_excludes predicate).
-        if (segment_confident_nonelectron_pid(seg1)) continue;
-        const double len = segment_track_length(seg1);
-        if (len >= m_shower_flank_absorb_max_len) continue;
-
-        double min_dis = 1e9;
-        ShowerPtr min_shower = nullptr;
-        for (auto& shower1 : sorted_showers) {
-            if (std::abs(shower1->get_particle_type()) == 13) continue;   // long-muon pseudo-shower
-            if (len > 0.75 * map_shower_length[shower1]) continue;        // the pass-4 proportionality guard
-            if (shower1->has_edge(seg1->get_descriptor())) continue;      // already a member (maps can lag)
-            const double dis = shower_get_closest_dis(*shower1, seg1);
-            if (dis < min_dis) { min_dis = dis; min_shower = shower1; }
-        }
-        if (!min_shower || min_dis >= m_shower_flank_absorb_max_dis) continue;
-
-        pr93_probe_absorb_direct("flank_absorb", min_shower, seg1);
-        SPDLOG_LOGGER_DEBUG(s_log,
-            "pr117 flank_absorb: seg={} len={:.1f}cm -> shower_id={} dis={:.2f}cm",
-            pr91_seg_display_id(seg1), len / units::cm,
-            min_shower->get_shower_id(), min_dis / units::cm);
-        min_shower->add_segment(seg1, true);
-        // calc-kine-2 skips flag_kinematics==true showers; the grown shower
-        // must be re-costed or the absorbed charge silently never counts.
-        min_shower->set_flag_kinematics(false);
-        map_shower_length[min_shower] = min_shower->get_total_length();
-        ++n_absorbed;
-    }
-    if (n_absorbed) {
-        update_shower_maps(showers, map_vertex_in_shower, map_segment_in_shower,
-                           map_vertex_to_shower, used_shower_clusters);
-        SPDLOG_LOGGER_DEBUG(s_log,
-            "pr117 flank_absorb: {} orphan segment(s) absorbed; maps rebuilt", n_absorbed);
-    }
-}
-
-
 // doc sbnd_xin/docs/pr/118 -- charge-continuity connector between two showers.
 // The pr/117 measurement showed blind gap cannot separate an under-clustered
 // stub from an over-clustered one (winner/loser gap distributions overlap
@@ -4319,7 +4234,7 @@ void PatternAlgorithms::examine_shower_1(Graph& graph, VertexPtr main_vertex, In
                 shower1->set_start_vertex(main_vertex, 1);
                 shower1->set_start_segment(sg);
                 pr93_probe_absorb_site("examine_shower_1_tmp", shower1, m_shower_absorb_track_guard);
-                shower1->complete_structure_with_start_segment(nv_bridge_seed(used_segments), "fit", "associate_points", m_shower_absorb_track_guard, m_shower_walk_visited_parity, m_shower_ex1_walk_em_track_guard ? m_shower_ex1_walk_em_track_len : 0);  // doc pr/40 round 9 B2: shield pre-seed, no-op when bridge off; doc pr/120: em-straight floor, 0 when knob off => byte-identical
+                shower1->complete_structure_with_start_segment(nv_bridge_seed(used_segments), "fit", "associate_points", m_shower_absorb_track_guard, m_shower_walk_visited_parity);  // doc pr/40 round 9 B2: shield pre-seed, no-op when bridge off
                 pr84_probe_shower(shower1, "examine_shower_1_tmp");
 
 
@@ -4708,13 +4623,15 @@ void PatternAlgorithms::examine_shower_1(Graph& graph, VertexPtr main_vertex, In
                     // doc sbnd_xin/docs/pr/118 -- pr/91 P2: the same gate measured
                     // against the parent's WHOLE fit body (min over its ordered
                     // members; includes the start segment, so body_dis <=
-                    // start_dis always -- the knob is strictly admissive and the
-                    // 3 cm threshold is unchanged).  Measure-first idiom: body_dis
-                    // is computed under the knob OR the probe, printed under the
-                    // probe (with the would-be downstream angles, predicting the
-                    // admit set AND its angle-gate survival -- the 394532 lesson),
-                    // and APPLIED only under m_shower_ex1_conn3_body_dis.
-                    if (m_shower_ex1_conn3_body_dis || pr91_merge_dbg()) {
+                    // start_dis always -- strictly admissive, the 3 cm threshold
+                    // unchanged).  The APPLY knob (shower_ex1_conn3_body_dis) was
+                    // retired in doc 77 round 3 -- measured ZERO yield, 1 admit in
+                    // 98 events and it failed the angles (pr/118 sec 4a).  What
+                    // survives is the PROBE: body_dis is computed and printed under
+                    // pr91_merge_dbg() with the would-be downstream angles, so the
+                    // admit set and its angle-gate survival stay measurable (the
+                    // 394532 lesson).  scripts/pr118_probe_census.py parses it.
+                    if (pr91_merge_dbg()) {
                         double body_dis = min_dis;
                         for (auto edesc : ordered_edges(*shower, graph)) {
                             SegmentPtr mseg = graph[edesc].segment;
@@ -4747,10 +4664,6 @@ void PatternAlgorithms::examine_shower_1(Graph& graph, VertexPtr main_vertex, In
                                      body_gate_fail ? "FAIL" : "PASS", (int) angles_pass);
                         (void) w_dis;
                         }
-                        // Coherent substitution: body_dis also feeds the
-                        // min_dis < 28 cm term below -- intentional (strictly
-                        // admissive there too).
-                        if (m_shower_ex1_conn3_body_dis) min_dis = body_dis;
                     }
                     // G-C: for every conn-3/4 shower this 3 cm gate to the PARENT'S
                     // START SEGMENT (not the parent's whole charge) is the only door.
@@ -9175,20 +9088,6 @@ void PatternAlgorithms::shower_clustering_with_nv(int acc_segment_id, IndexedSho
                       map_segment_in_shower, map_vertex_to_shower,
                       used_shower_clusters, segments_in_long_muon,
                       particle_data, recomb_model);
-        t0 = Clock::now();
-    }
-
-    // doc sbnd_xin/docs/pr/117 round 1 (shower_flank_absorb): absorb the
-    // orphan shower-like stubs no legacy seat can reach (main-cluster
-    // segments are categorically skipped by every cone/proximity absorber
-    // seat; stem_backfill walks only the vertex chain).  After stem_backfill
-    // and before the second kinematics pass so the absorbed charge is
-    // counted; the pass clears flag_kinematics on every shower it grows.
-    // false = no call = byte-identical.
-    if (m_shower_flank_absorb) {
-        flank_absorb_orphans(graph, showers, map_vertex_in_shower,
-                             map_segment_in_shower, map_vertex_to_shower,
-                             used_shower_clusters, segments_in_long_muon);
         t0 = Clock::now();
     }
 
