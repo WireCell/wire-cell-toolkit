@@ -353,6 +353,7 @@ function(tpc, control={}, pg=real_pg, context_name="") {
                 plane_index: view_index,
                 // Scale to units of ADC
                 scale: -1 / tpc.adc.lsb_voltage,
+                debug_filename: "spng_resp_v" + std.toString(view_index)+".pkl",
             } + control,
             uses: [tpc.fr, tpc.er],
         },
@@ -377,7 +378,8 @@ function(tpc, control={}, pg=real_pg, context_name="") {
         local name = $.this_name(extra_name, '_'+group.name);
         local plane_index = group.view_index;
         local fk = $.filter_kernel([tpc.filters[plane_index].channel.decon,{kind:"none"}],
-                                   extra_name=extra_name);
+                                //    extra_name=extra_name);
+                                   extra_name="v"+std.toString(plane_index)+extra_name);
         local rk = $.response_kernel(plane_index, extra_name=extra_name);
         $.decon_kernel(fk, rk, extra_name='_'+group.name+extra_name),
 
@@ -387,6 +389,7 @@ function(tpc, control={}, pg=real_pg, context_name="") {
                     // See KernelConvolve for following options
                     tag="",
                     datapath_format="",
+                    debug_filename="",
                     extra_name="")::
         pg.pnode({
             type: "SPNGKernelConvolve",
@@ -396,6 +399,7 @@ function(tpc, control={}, pg=real_pg, context_name="") {
                 axis: axes_config,
                 tag: tag,
                 datapath_format: datapath_format,
+                debug_filename: debug_filename,
                 faster: true,       // use "faster DFT size"
             } + control
         }, nin=1, nout=1, uses=[kernel]),
@@ -420,6 +424,7 @@ function(tpc, control={}, pg=real_pg, context_name="") {
         };
         $.kernel_convolve(kernel, [co_channel, co_time],
                           datapath_format='/traces/group/' + std.toString(group_index) + "/KernelConvolve/" + name,
+                          debug_filename='spng_kernel_convolve'+std.toString(group_index)+'_dump.pkl',
                           tag="decon", extra_name='_'+group.name+extra_name),
 
     /// Return nodes[0] if length one else return a subgraph with a fanin that stacks the tensors.
@@ -567,6 +572,7 @@ function(tpc, control={}, pg=real_pg, context_name="") {
     time_filter_view(filter, view_index, extra_name="")::
         local vis = std.toString(view_index);
         local name = $.this_name(extra_name, 'v'+vis);
+        //DO WE ALSO NEED TO SPECIFIY EXTRA NAME HERE FOR WIENER?
         local fk = $.filter_kernel([{kind:"none"}, tpc.filters[view_index].time[filter]], extra_name=extra_name);
         // local co = $.convo_options(0, view_index);
         local co_channel = {padding: "none", dft: false};

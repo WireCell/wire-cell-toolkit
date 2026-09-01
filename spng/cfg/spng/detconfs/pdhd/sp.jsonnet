@@ -23,7 +23,8 @@ function(tpc)
         data: {
             anode: wc.tn(tpc.anode),
             dft: "FftwDFT",
-            
+            dump_2d_spectra: true,
+            dump_2d_prefix: "osp_dump",
             do_not_mp_protect_traditional: true, 
             field_response: wc.tn(tpc.fr),
             filter_responses_tn: [ ], // FIXME: this needs to be special for "bad APA1"

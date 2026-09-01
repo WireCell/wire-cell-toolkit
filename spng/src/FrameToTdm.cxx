@@ -326,7 +326,6 @@ namespace WireCell::SPNG {
                     if (group_tirs.empty()) { // first time
                         tbeg = tbin;
                         tend = tbin+nbins;
-                        continue;
                     }
                     group_tirs.emplace_back(TIR{trace, summary_index, row});
 

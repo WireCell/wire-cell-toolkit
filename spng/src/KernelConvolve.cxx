@@ -91,6 +91,8 @@ namespace WireCell::SPNG {
             raise<ValueError>("convolution requires 2D axes, got (%d)", naxes);
         }
 
+        //Assumes 2D as above
+        log->debug("Initial convolution kernel shape {} {}", kshape[0], kshape[1]);
 
         // Collect and check per input dimension values.
         m_roll.clear();
@@ -246,6 +248,7 @@ namespace WireCell::SPNG {
             maybe_save(tensor, fmt::format("resized_dim{}", dim));
         }
 
+        log->debug("Reshaping kernel to {}, {}", convolve_shape[0], convolve_shape[1]);
         auto kernel = to(m_kernel->spectrum(convolve_shape));
         if (has_nan(kernel)) {
             log->critical("kernel has NaNs {}", to_string(kernel));
@@ -254,7 +257,7 @@ namespace WireCell::SPNG {
 
         // This is supposed to not change data shared by other shallow copies.
         kernel = kernel.unsqueeze(0);
-
+        maybe_save(kernel, "final_kernel");
         // Our main event of the evening.
         tensor = convolve(tensor, kernel);
 

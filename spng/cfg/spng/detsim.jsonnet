@@ -9,15 +9,16 @@ local pg = import "pgraph.jsonnet";
 local drift = import "drift.jsonnet";
 local sim = import "sim.jsonnet";
 
-function(det, control={}, extra_name="")
+function(det, control={}, add_noise=true, extra_name="")
     // local drifter = drift(det, control).drifter;
     local the_sims = [sim(tpc, control) for tpc in det.tpcs];
     local pipes = [pg.pipeline([
         the_sim.depo_transform,
-        the_sim.reframer("_detsim"),
-        the_sim.addnoise_empirical,
-        the_sim.digitizer
-    ]) for the_sim in the_sims];
+        the_sim.reframer("_detsim"),] +
+        (if add_noise then [the_sim.addnoise_empirical]
+        else []) +
+        [the_sim.digitizer]
+    ) for the_sim in the_sims];
 
     if std.length(pipes) == 1
     then pipes[0]

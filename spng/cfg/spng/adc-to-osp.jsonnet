@@ -32,6 +32,9 @@ function(input,
          detname='pdhd',
          tpcid=0,
          engine='Pgrapher',
+         run_dnnroi=true,
+         sink_tags=[], ##If you want to add tags then add them here. Note the tpcid will be appended
+                       ## i.e. --tla-code sink_tags="['decon_charge']" 
          device='cpu')
     
     local controls = control_js(device=device);
@@ -49,9 +52,17 @@ function(input,
         
     local roi = tpc.osp_subgraphs.dnnroi;
 
-    local sink = io.frame_array_sink(output);
+    local sink = io.frame_array_sink(
+        output,
+        // tags=['decon_charge'+std.toString(tpcid)]
+        tags=[t + std.toString(tpcid) for t in sink_tags]
+    );
 
-    local graph = pg.pipeline([source, sp, roi, sink]);
+    local graph = pg.pipeline(
+        [source, sp,] +
+        (if run_dnnroi then [roi,] else []) +
+        [sink]
+    );
     pg.main(graph, engine,
             plugins=["WireCellSpng", "WireCellSigProc", "WireCellPytorch"],
             uses = controls.uses)
