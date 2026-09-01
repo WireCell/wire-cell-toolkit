@@ -79,7 +79,12 @@ TEST_CASE("powerbox recombination configurable")
     Configuration alt;
     const double b_over_re = 0.255 / (1.38 * 0.5);  // sbnd_box_recomb parameters
     alt["p"] = 1.0;
-    alt["k"] = b_over_re * 2.1;
+    // PowerBox builds u from dE/dx expressed in MeV/cm, while BoxRecombination's
+    // quenching term is the plain WCT-units ratio since upstream e6fb7ef3 fixed a
+    // 10x unit error there.  The mapping constant must carry that same factor or
+    // the p=1 identity no longer holds.  (PowerBox itself is unchanged, and SBND
+    // production uses the fitted A/k/p/C, not this mapping -- doc 87 sec 1.)
+    alt["k"] = b_over_re * 2.1 * (units::MeV / units::cm);
     alt["C"] = 1.0;
     alt["A"] = 1.0;
     model.configure(alt);
