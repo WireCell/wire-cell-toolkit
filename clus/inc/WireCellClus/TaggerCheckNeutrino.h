@@ -997,6 +997,9 @@ public:
         double m_pi0_accept_merge_dis_cm{0.0};                      // doc pr/132 K18; cm, 0 = no acceptance-aware fragment merge
         double m_pi0_bp_vertex_miss_cm{0.0};                        // doc pr/132 K19; cm, 0 = no back-projection NC vertex proposer
         bool   m_pi0_admit_muon_showers{false};                     // doc pr/133 K20; admit shower-topology mu-typed objects into the pi0 pools
+        bool   m_pi0_mu_shower_hypothesis{false};                   // doc pr/141 M1; price mu-typed pi0 candidates under the SHOWER recombination+fudge
+        double m_pi0_mu_shower_max_len{-1};                         // doc pr/141 M2; cm; K20 shower-ish length bound, <0 => C++ default 40 cm
+        double m_pi0_mu_shower_hyp_min_len{-1};                     // doc pr/141 M3; cm; length floor for M1 re-pricing, <0 => C++ default 0 (no floor)
         double m_pi0_nc_sig_angle_deg{0.0};                         // doc pr/133 K21; deg, 0 = off; owner NC signature for the bp proposer
         double m_pi0_nc_floor_mev{0.0};                             // doc pr/133 K21 v2; MeV, 0 = legacy 20; signature-mode partner floor
         double m_pi0_nc_pf_assoc_deg{0.0};                          // doc pr/133 K21 v2.2; deg, 0 = off; post-fire PF association cone

@@ -746,6 +746,9 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_pi0_accept_merge_dis_cm                   = get(config, "pi0_accept_merge_dis_cm",                   m_pi0_accept_merge_dis_cm);                // doc pr/132 K18, cm
     m_pi0_bp_vertex_miss_cm                     = get(config, "pi0_bp_vertex_miss_cm",                     m_pi0_bp_vertex_miss_cm);                  // doc pr/132 K19, cm
     m_pi0_admit_muon_showers                    = get(config, "pi0_admit_muon_showers",                    m_pi0_admit_muon_showers);                 // doc pr/133 K20
+    m_pi0_mu_shower_hypothesis                  = get(config, "pi0_mu_shower_hypothesis",                  m_pi0_mu_shower_hypothesis);               // doc pr/141 M1
+    m_pi0_mu_shower_max_len                     = get(config, "pi0_mu_shower_max_len",                     m_pi0_mu_shower_max_len);                  // doc pr/141 M2
+    m_pi0_mu_shower_hyp_min_len                 = get(config, "pi0_mu_shower_hyp_min_len",                 m_pi0_mu_shower_hyp_min_len);              // doc pr/141 M3
     m_pi0_nc_sig_angle_deg                      = get(config, "pi0_nc_sig_angle_deg",                      m_pi0_nc_sig_angle_deg);                   // doc pr/133 K21, deg
     m_pi0_nc_floor_mev                          = get(config, "pi0_nc_floor_mev",                          m_pi0_nc_floor_mev);                       // doc pr/133 K21 v2, MeV
     m_pi0_nc_pf_assoc_deg                       = get(config, "pi0_nc_pf_assoc_deg",                       m_pi0_nc_pf_assoc_deg);                    // doc pr/133 K21 v2.2, deg
@@ -1260,6 +1263,9 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["pi0_accept_merge_dis_cm"]                   = m_pi0_accept_merge_dis_cm;                   // doc pr/132 K18; 0 = no acceptance merge, byte-identical
     cfg["pi0_bp_vertex_miss_cm"]                     = m_pi0_bp_vertex_miss_cm;                     // doc pr/132 K19; 0 = no NC vertex proposer, byte-identical
     cfg["pi0_admit_muon_showers"]                    = m_pi0_admit_muon_showers;                    // doc pr/133 K20; false = legacy mu exclusion, byte-identical
+    cfg["pi0_mu_shower_hypothesis"]                  = m_pi0_mu_shower_hypothesis;                  // doc pr/141 M1; false = track price = byte-identical
+    cfg["pi0_mu_shower_max_len"]                     = m_pi0_mu_shower_max_len;                     // doc pr/141 M2; <0 = C++ default 40 cm = byte-identical
+    cfg["pi0_mu_shower_hyp_min_len"]                 = m_pi0_mu_shower_hyp_min_len;                 // doc pr/141 M3; <0 = C++ default 0 = no floor
     cfg["pi0_nc_sig_angle_deg"]                      = m_pi0_nc_sig_angle_deg;                      // doc pr/133 K21; 0 = v3 gate, byte-identical
     cfg["pi0_nc_floor_mev"]                          = m_pi0_nc_floor_mev;                          // doc pr/133 K21 v2; 0 = legacy 20 MeV floor, byte-identical
     cfg["pi0_nc_pf_assoc_deg"]                       = m_pi0_nc_pf_assoc_deg;                       // doc pr/133 K21 v2.2; 0 = no post-fire PF update, byte-identical
@@ -2741,6 +2747,11 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
         pattern_algos.m_pi0_am_dis                                = m_pi0_accept_merge_dis_cm * units::cm;         // doc pr/132 K18, cm -> internal
         pattern_algos.m_pi0_bp_miss                               = m_pi0_bp_vertex_miss_cm * units::cm;           // doc pr/132 K19, cm -> internal
         pattern_algos.m_pi0_admit_mu_showers                      = m_pi0_admit_muon_showers;                      // doc pr/133 K20
+        pattern_algos.m_pi0_mu_shower_hypothesis                  = m_pi0_mu_shower_hypothesis;                    // doc pr/141 M1
+        if (m_pi0_mu_shower_max_len >= 0)
+            pattern_algos.m_pi0_mu_shower_max_len                 = m_pi0_mu_shower_max_len * units::cm;           // doc pr/141 M2
+        if (m_pi0_mu_shower_hyp_min_len >= 0)
+            pattern_algos.m_pi0_mu_shower_hyp_min_len             = m_pi0_mu_shower_hyp_min_len * units::cm;       // doc pr/141 M3
         pattern_algos.m_pi0_nc_sig_angle                          = m_pi0_nc_sig_angle_deg;                        // doc pr/133 K21, deg (unscaled, like K2)
         pattern_algos.m_pi0_nc_floor                              = m_pi0_nc_floor_mev * units::MeV;               // doc pr/133 K21 v2, MeV -> internal
         pattern_algos.m_pi0_nc_pf_assoc                           = m_pi0_nc_pf_assoc_deg;                         // doc pr/133 K21 v2.2, deg (unscaled)

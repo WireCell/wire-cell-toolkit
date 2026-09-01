@@ -1878,6 +1878,28 @@ function(
     // 51080 79.8 MeV, -166870 g2 38.6 MeV -- 3 of the 132 hand gammas).
     // C++ default false.  Key omitted when false => byte-identical.
     pi0_admit_muon_showers = true,           // SBND PRODUCTION ON 2026-08-30 doc pr/133 (owner: "K20 is good").  Admits shower-ish mu-typed (pdg +-13) objects into the pi0 pools (not-in-long-muon AND (flag_shower OR len<40cm+dir-weak)); accepted members re-stamped EM.  Measured: 166870 true pair m=109.1 accepted, zero collateral (census/ledger/movers flat elsewhere).  C++ default false.
+    // doc pr/141 M1: price a mu-typed pi0 candidate under the SHOWER
+    // recombination+fudge inside id_pi0_with_vertex.  A shower with no shower
+    // flag is converted with the TRACK factors, and the conversion is a pure
+    // division, so the same charge under the shower hypothesis is the exact
+    // global ratio (recom_track*fudge_track)/(recom_shower*fudge_shower) =
+    // (0.87*0.95)/(0.58*0.86) = 1.657 at these factors.  Scope = the K20 class
+    // (|pdg|==13, no shower flag).  Measured: of the six mu-typed 40-80 cm
+    // candidates in the 239-event population, ZERO make an in-window pair at
+    // the track price and three do at the shower price.
+    // C++ default false.  Key omitted when off => byte-identical config.
+    pi0_mu_shower_hypothesis = false,
+    // doc pr/141 M2: K20's "shower-ish muon" length bound, in cm.  The 40 cm
+    // literal is the file's own idiom, not a scanned number, and M1 is INERT
+    // without this: every mu-typed pi0 candidate in the 239-event population
+    // is 40-78 cm, so K20 refuses them on length before the price is read.
+    // null => C++ default 40 => byte-identical.
+    pi0_mu_shower_max_len = null,
+    // doc pr/141 M3: length floor (cm) below which M1 leaves the track price
+    // alone.  Scopes the re-pricing to what M2 newly admits.  Measured reason:
+    // re-pricing the legacy <40 cm K20 population broke 166870, the pi0 K20 was
+    // shipped to rescue (census 35 -> 34).  null => C++ default 0 = no floor.
+    pi0_mu_shower_hyp_min_len = null,
     // doc pr/133 K21: owner NC-pi0 signature (2026-08-30) for the
     // back-projection vertex proposer (needs pi0_bp_vertex_miss_cm > 0):
     // main vertex inside an EM shower (ALL prongs in showers, none in the
@@ -3195,6 +3217,9 @@ function(
         [if pi0_accept_merge_dis_cm != null then 'pi0_accept_merge_dis_cm']: pi0_accept_merge_dis_cm,
         [if pi0_bp_vertex_miss_cm != null then 'pi0_bp_vertex_miss_cm']: pi0_bp_vertex_miss_cm,
         [if pi0_admit_muon_showers then 'pi0_admit_muon_showers']: true,
+        [if pi0_mu_shower_hypothesis then 'pi0_mu_shower_hypothesis']: true,
+        [if pi0_mu_shower_max_len != null then 'pi0_mu_shower_max_len']: pi0_mu_shower_max_len,
+        [if pi0_mu_shower_hyp_min_len != null then 'pi0_mu_shower_hyp_min_len']: pi0_mu_shower_hyp_min_len,
         [if pi0_nc_sig_angle_deg != null then 'pi0_nc_sig_angle_deg']: pi0_nc_sig_angle_deg,
         [if pi0_nc_floor_mev != null then 'pi0_nc_floor_mev']: pi0_nc_floor_mev,
         [if pi0_nc_pf_assoc_deg != null then 'pi0_nc_pf_assoc_deg']: pi0_nc_pf_assoc_deg,

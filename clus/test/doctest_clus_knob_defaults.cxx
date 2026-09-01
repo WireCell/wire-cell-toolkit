@@ -278,6 +278,9 @@ TEST_CASE("clus knob defaults: TaggerCheckNeutrino switches are all OFF")
     CHECK_KNOB_NUM(cfg, "pi0_accept_merge_dis_cm", 0.0);                      // doc pr/132 K18; 0 = no acceptance-aware merge
     CHECK_KNOB_NUM(cfg, "pi0_bp_vertex_miss_cm", 0.0);                        // doc pr/132 K19; 0 = no NC vertex proposer
     CHECK_KNOB_BOOL(cfg, "pi0_admit_muon_showers", false);                    // doc pr/133 K20; mu-typed showers stay out of the pi0 pools
+    CHECK_KNOB_BOOL(cfg, "pi0_mu_shower_hypothesis", false);                  // doc pr/141 M1; mu-typed pi0 candidates keep the TRACK price
+    CHECK_KNOB_NUM(cfg, "pi0_mu_shower_max_len", -1);                         // doc pr/141 M2; <0 => the C++ 40 cm literal
+    CHECK_KNOB_NUM(cfg, "pi0_mu_shower_hyp_min_len", -1);                     // doc pr/141 M3; <0 => the C++ 0 = no floor
     CHECK_KNOB_NUM(cfg, "pi0_nc_sig_angle_deg", 0.0);                         // doc pr/133 K21; 0 = v3 bp gate
     CHECK_KNOB_NUM(cfg, "pi0_nc_floor_mev", 0.0);                             // doc pr/133 K21 v2; 0 = legacy 20 MeV partner floor
     CHECK_KNOB_NUM(cfg, "pi0_nc_pf_assoc_deg", 0.0);                          // doc pr/133 K21 v2.2; 0 = no post-fire PF update

@@ -2274,6 +2274,9 @@ namespace WireCell::Clus::PR {
         // doc pr/132: pi0-finder knobs (owner round 2026-08-29).  Defaults
         // reproduce the legacy hard-coded constants => byte-identical.
         double m_pi0_mass_offset{10 * units::MeV};       ///< doc pr/132 K1; the finders' "+10 MeV" window offset (both paths)
+        bool m_pi0_mu_shower_hypothesis{false};          ///< doc pr/141 M1; price mu-typed pi0 candidates (no shower flag, |pdg|==13) under the SHOWER recombination+fudge inside id_pi0_with_vertex.  false = legacy = byte-identical.
+        double m_pi0_mu_shower_max_len{40 * units::cm};   ///< doc pr/141 M2; K20's "shower-ish muon" length bound, exposed as a knob.  40 cm = the shipped literal = byte-identical.
+        double m_pi0_mu_shower_hyp_min_len{0.0};         ///< doc pr/141 M3; length floor (cm) below which M1 leaves the track price alone.  0 = no floor = re-price every mu-typed object.
         double m_pi0_assoc_angle_deg{30.0};              ///< doc pr/132 K2; deg, disconnected-shower <-> candidate-vertex association
         double m_pi0_attached_partner_min{0};            ///< doc pr/132 K3; 0 = off; min partner energy when the attached member sits at the MAIN vertex
         bool   m_pi0_nv_allow_type2{false};              ///< doc pr/132 K4; admit conn_type==2 showers into the without-vertex ray pool

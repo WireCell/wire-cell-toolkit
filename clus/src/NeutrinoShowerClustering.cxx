@@ -6639,8 +6639,15 @@ bool PatternAlgorithms::pi0_mu_shower_admit(const ShowerPtr& shower, const Index
     // shower-ish-muon idiom (three sites, e.g. the :3922 center-point cut):
     // short AND direction-weak.  A genuine traveling muon is long or
     // dir-strong; a wrapped long muon is caught above.
+    // doc pr/141 M2: the 40 cm bound is K20's own "shower-ish muon" idiom,
+    // taken from the file's three-site convention rather than from a scan.  It
+    // is exposed as a knob (default 40 cm = the shipped literal = byte-
+    // identical) because M1's re-pricing is provably INERT without it: every
+    // mu-typed pi0 candidate in the 239-event population is 40-78 cm, so K20
+    // refuses all of them on length before the price is ever consulted (tape:
+    // "K20 mu-reject sh=23011 why=trackish len=57.3" fires with M1 on).
     const bool shower_ish = shower->get_flag_shower() ||
-        (shower->get_total_length() < 40 * units::cm && ss && seg_dir_weak(ss));
+        (shower->get_total_length() < m_pi0_mu_shower_max_len && ss && seg_dir_weak(ss));
     if (!shower_ish) {
         if (pr132_pi0_dbg())
             std::fprintf(stderr, "PI0_PAIR K20 mu-reject sh=%d why=trackish len=%.1f\n",
@@ -7352,11 +7359,49 @@ void PatternAlgorithms::id_pi0_with_vertex(int& acc_segment_id, IndexedShowerSet
     // Covers all showers reachable through map_vertex_to_shower.
     std::map<ShowerPtr, std::pair<VertexPtr,int>> svc;  // {start_vertex, conn_type}
     std::map<ShowerPtr, double>                   kqc;  // kine_charge
+    // doc pr/141 (M1): price a mu-typed pi0 candidate under the SHOWER
+    // hypothesis.  A shower carrying no shower flag is converted with the
+    // TRACK recombination and fudge (NeutrinoEnergyReco.cxx:337-342), and the
+    // conversion is a pure division -- overall / recom / fudge (:188) -- so the
+    // SAME collected charge under the shower hypothesis is an exact global
+    // ratio, with nothing re-measured:
+    //     E_shower = E_track * (recom_track  * fudge_track)
+    //                        / (recom_shower * fudge_shower)
+    // At the SBND production factors that is (0.87*0.95)/(0.58*0.86) = 1.657.
+    // Scope is the K20 class exactly -- |pdg| == 13 with no shower flag, i.e.
+    // the objects pi0_mu_shower_admit lets into the disconnected pool.  K20
+    // already re-stamps accepted members EM, but that happens AFTER the mass
+    // window has judged the pair, so a true gamma typed 13 is rejected on a
+    // track-priced mass and never reaches the re-stamp.  Measured (doc pr/141):
+    // of the six mu-typed 40-80 cm candidates in the 239-event population, ZERO
+    // can form an in-window pair at the track price and three can at the shower
+    // price.  false (default) = byte-identical.
+    auto mu_hyp = [&](const ShowerPtr& sh, double kq) -> double {
+        if (!m_pi0_mu_shower_hypothesis || !sh) return kq;
+        if (sh->get_flag_shower()) return kq;
+        if (std::abs(sh->get_particle_type()) != 13) return kq;
+        // doc pr/141 M3.  Scope the re-pricing to the objects the RAISED
+        // admission bound newly lets in, leaving the legacy K20 population at
+        // the track price.  Measured reason (doc pr/141 sec 9): re-pricing the
+        // legacy <40 cm population moved the greedy partner choice and broke
+        // the one pi0 K20 was shipped to rescue -- 166870, where 85045 goes
+        // 38.6 -> 63.9 MeV and its accepted partner switches 87058 (m=116.9,
+        // the hand pair) -> 10074 (m=138.8).  Census 35 -> 34.  0 (default) =
+        // no floor = every mu-typed object re-priced = the M1 v1 behaviour.
+        if (sh->get_total_length() < m_pi0_mu_shower_hyp_min_len) return kq;
+        const double den = m_kine_charge.shower_recom_factor * m_kine_charge.shower_fudge_factor;
+        if (den <= 0) return kq;
+        const double r = (m_kine_charge.recom_factor * m_kine_charge.fudge_factor) / den;
+        if (pr132_pi0_dbg())
+            std::fprintf(stderr, "PI0_PAIR M1 mu-hyp sh=%d E=%.1f -> %.1f (x%.3f)\n",
+                         pr132_pi0_shid(sh), kq / units::MeV, kq * r / units::MeV, r);
+        return kq * r;
+    };
     for (auto& [vtx, shower_set] : map_vertex_to_shower) {
         for (auto sh : shower_set) {
             if (!svc.count(sh)) {
                 svc[sh] = sh->get_start_vertex_and_type();
-                kqc[sh] = sh->get_kine_charge();
+                kqc[sh] = mu_hyp(sh, sh->get_kine_charge());
             }
         }
     }
@@ -7367,7 +7412,7 @@ void PatternAlgorithms::id_pi0_with_vertex(int& acc_segment_id, IndexedShowerSet
     };
     auto get_kq = [&](ShowerPtr sh) -> double {
         auto it = kqc.find(sh);
-        return it != kqc.end() ? it->second : sh->get_kine_charge();
+        return it != kqc.end() ? it->second : mu_hyp(sh, sh->get_kine_charge());
     };
     // doc pr/132 round 10: associate-cloud centroids, computed lazily and
     // ONLY under the angle tape (pointer-keyed map, lookup-only).
