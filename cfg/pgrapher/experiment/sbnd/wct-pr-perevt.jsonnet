@@ -779,7 +779,16 @@ function(
     // in_scope is otherwise recorded ONLY implicitly, by which clusters the Bee
     // clustering layer happens to contain.
     // C++ default false.  Key omitted when off => byte-identical config.
-    save_in_scope  = false,
+    // SBND PRODUCTION ON, owner ask 2026-09-01: "Can we fix this problem, I
+    // think we want the final rootfile for each event to contain this
+    // information?"  C++ default stays false (doctest_sbnd_pr_tracking_defaults
+    // pins it); this is the SBND job's operating point, not a default change.
+    // CONSEQUENCE, stated where a future round will read it: tracking-pr.root
+    // now carries a T_cluster tree, so pr94_root_gate.py comparing a new arm
+    // against any PRE-doc-87 arm will FAIL on the tree list.  That is expected;
+    // use scripts/pr87_root_tree_diff.py, which reports every SHARED tree as
+    // identical and names T_cluster as the only addition.
+    save_in_scope  = true,
     // pr_bee (doc 87): write pr_evt<ID>/mabc-pr.zip (~0.24 GB/1000 evt).
     // DEFAULT TRUE = today's behaviour, byte-identical.  false sets the MABC
     // node's bee_zip to '', which means "write no Bee zip at all".
