@@ -199,9 +199,6 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_teb_turn_baseline   = get(config, "teb_turn_baseline",   m_teb_turn_baseline);   // cm
     m_teb_turn_skirt      = get(config, "teb_turn_skirt",      m_teb_turn_skirt);      // cm
     m_teb_turn_min_arm_frac = get(config, "teb_turn_min_arm_frac", m_teb_turn_min_arm_frac); // frac of baseline; doc pr/90 round 2
-    m_teb_chain_topology  = get(config, "teb_chain_topology",  m_teb_chain_topology);  // doc pr/90 round 4 (D1)
-    m_teb_r3_turn         = get(config, "teb_r3_turn",         m_teb_r3_turn);         // deg; doc pr/90 round 4 (D3)
-    m_teb_r3_hot          = get(config, "teb_r3_hot",          m_teb_r3_hot);          // x mip median; doc pr/90 round 4 (D3)
     m_teb_bragg_veto_turn = get(config, "teb_bragg_veto_turn", m_teb_bragg_veto_turn); // deg; doc pr/90 round 4 (D4)
     m_kink_walk_dqdx_stop = get(config, "kink_walk_dqdx_stop", m_kink_walk_dqdx_stop);
     m_kink_break_protect  = get(config, "kink_break_protect",  m_kink_break_protect);
@@ -257,7 +254,6 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_mvga_proj_dup_frac  = get(config, "mvga_proj_dup_frac",  m_mvga_proj_dup_frac);  // doc pr/83 r4; 0 = pass disabled
     m_mvga_proj_dqdx_ratio = get(config, "mvga_proj_dqdx_ratio", m_mvga_proj_dqdx_ratio); // doc pr/83 r4; inert while frac == 0
     m_mvga_proj_angle = get(config, "mvga_proj_angle", m_mvga_proj_angle); // deg; doc pr/83 r4b; 0 = use mvga_dup_angle
-    m_mvga_ac_veto_radius = get(config, "mvga_ac_veto_radius", m_mvga_ac_veto_radius); // cm; doc pr/99 round 2; 0 = legacy
     m_mvga_ac_chord_max   = get(config, "mvga_ac_chord_max",   m_mvga_ac_chord_max);   // cm; doc pr/99 round 2; 0 = no cap
     m_mvga_ac_no_cascade  = get(config, "mvga_ac_no_cascade",  m_mvga_ac_no_cascade);  // doc pr/99 round 2
     m_mvga_passthru       = get(config, "mvga_passthru",       m_mvga_passthru);       // cm; doc pr/103; 0 = off
@@ -293,7 +289,6 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_other_seg_keep_isolated_min_points = get(config, "other_seg_keep_isolated_min_points", m_other_seg_keep_isolated_min_points);
     m_other_seg_keep_isolated_min_length = get(config, "other_seg_keep_isolated_min_length", m_other_seg_keep_isolated_min_length); // cm
     // doc sbnd_xin/docs/pr/102 P1+P2 -- keep-isolated disjuncts + 3-D uncovered radius.
-    m_other_seg_keep_isolated_min_nnf    = get(config, "other_seg_keep_isolated_min_nnf",    m_other_seg_keep_isolated_min_nnf);
     m_other_seg_keep_isolated_len_admit  = get(config, "other_seg_keep_isolated_len_admit",  m_other_seg_keep_isolated_len_admit); // cm
     // doc sbnd_xin/docs/pr/67 round 3 -- isochronous-snap size gate.
     m_iso_snap_min_dir_mag = get(config, "iso_snap_min_dir_mag", m_iso_snap_min_dir_mag); // cm
@@ -723,15 +718,12 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_pi0_mass_offset                           = get(config, "pi0_mass_offset",                           m_pi0_mass_offset);                        // doc pr/132 K1, MeV
     m_pi0_assoc_angle_deg                       = get(config, "pi0_assoc_angle_deg",                       m_pi0_assoc_angle_deg);                    // doc pr/132 K2, deg
     m_pi0_attached_partner_min_mev              = get(config, "pi0_attached_partner_min_mev",              m_pi0_attached_partner_min_mev);           // doc pr/132 K3, MeV
-    m_pi0_nv_allow_type2                        = get(config, "pi0_nv_allow_type2",                        m_pi0_nv_allow_type2);                     // doc pr/132 K4
     m_pi0_nv_max_prongs                         = get(config, "pi0_nv_max_prongs",                         m_pi0_nv_max_prongs);                      // doc pr/132 K5
     m_pi0_readmit_retyped                       = get(config, "pi0_readmit_retyped",                       m_pi0_readmit_retyped);                    // doc pr/132 K7
     m_pi0_admit_type3                           = get(config, "pi0_admit_type3",                           m_pi0_admit_type3);                        // doc pr/132 K8
     m_pi0_crumb_assoc_mev                       = get(config, "pi0_crumb_assoc_mev",                       m_pi0_crumb_assoc_mev);                    // doc pr/132 K9, MeV
     m_pi0_collinear_merge_deg                   = get(config, "pi0_collinear_merge_deg",                   m_pi0_collinear_merge_deg);                // doc pr/132 K12, deg
     m_pi0_nv_partner_min_mev                    = get(config, "pi0_nv_partner_min_mev",                    m_pi0_nv_partner_min_mev);                 // doc pr/132 K13, MeV
-    m_pi0_nv_retry_paired                       = get(config, "pi0_nv_retry_paired",                       m_pi0_nv_retry_paired);                    // doc pr/132 K14
-    m_pi0_reseat_start_assoc                    = get(config, "pi0_reseat_start_assoc",                    m_pi0_reseat_start_assoc);                 // doc pr/132 K15
     m_shower_em_collinear_deg                   = get(config, "shower_em_collinear_deg",                   m_shower_em_collinear_deg);                // doc pr/132 K16, deg
     m_shower_em_collinear_dis_cm                = get(config, "shower_em_collinear_dis_cm",                m_shower_em_collinear_dis_cm);             // doc pr/132 K16, cm
     m_shower_em_collinear_host_mev              = get(config, "shower_em_collinear_host_mev",              m_shower_em_collinear_host_mev);           // doc pr/132 K16, MeV
@@ -740,9 +732,6 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_pi0_accept_merge_dis_cm                   = get(config, "pi0_accept_merge_dis_cm",                   m_pi0_accept_merge_dis_cm);                // doc pr/132 K18, cm
     m_pi0_bp_vertex_miss_cm                     = get(config, "pi0_bp_vertex_miss_cm",                     m_pi0_bp_vertex_miss_cm);                  // doc pr/132 K19, cm
     m_pi0_admit_muon_showers                    = get(config, "pi0_admit_muon_showers",                    m_pi0_admit_muon_showers);                 // doc pr/133 K20
-    m_pi0_mu_shower_hypothesis                  = get(config, "pi0_mu_shower_hypothesis",                  m_pi0_mu_shower_hypothesis);               // doc pr/141 M1
-    m_pi0_mu_shower_max_len                     = get(config, "pi0_mu_shower_max_len",                     m_pi0_mu_shower_max_len);                  // doc pr/141 M2
-    m_pi0_mu_shower_hyp_min_len                 = get(config, "pi0_mu_shower_hyp_min_len",                 m_pi0_mu_shower_hyp_min_len);              // doc pr/141 M3
     m_pi0_nc_sig_angle_deg                      = get(config, "pi0_nc_sig_angle_deg",                      m_pi0_nc_sig_angle_deg);                   // doc pr/133 K21, deg
     m_pi0_nc_floor_mev                          = get(config, "pi0_nc_floor_mev",                          m_pi0_nc_floor_mev);                       // doc pr/133 K21 v2, MeV
     m_pi0_nc_pf_assoc_deg                       = get(config, "pi0_nc_pf_assoc_deg",                       m_pi0_nc_pf_assoc_deg);                    // doc pr/133 K21 v2.2, deg
@@ -851,9 +840,6 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["teb_turn_baseline"]   = m_teb_turn_baseline;   // cm
     cfg["teb_turn_skirt"]      = m_teb_turn_skirt;      // cm
     cfg["teb_turn_min_arm_frac"] = m_teb_turn_min_arm_frac; // frac of teb_turn_baseline; 0 = legacy argmax (doc pr/90 round 2)
-    cfg["teb_chain_topology"]  = m_teb_chain_topology;  // simple-path gate admission; false = legacy gate (doc pr/90 round 4)
-    cfg["teb_r3_turn"]         = m_teb_r3_turn;         // deg; <= 0 disables route R3 (doc pr/90 round 4)
-    cfg["teb_r3_hot"]          = m_teb_r3_hot;          // x mip_dqdx_median; <= 0 disables route R3 (doc pr/90 round 4)
     cfg["teb_bragg_veto_turn"] = m_teb_bragg_veto_turn; // deg; <= 0 disables the R2 bragg veto (doc pr/90 round 4)
     cfg["kink_walk_dqdx_stop"] = m_kink_walk_dqdx_stop; // false = legacy (flag_search bypasses the walk gate)
     cfg["kink_break_protect"]  = m_kink_break_protect;  // false = legacy (no protected kink breaks)
@@ -911,7 +897,6 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["mvga_proj_dup_frac"]  = m_mvga_proj_dup_frac;  // 0 = projective dup collapse disabled, byte-identical (doc pr/83 r4)
     cfg["mvga_proj_dqdx_ratio"] = m_mvga_proj_dqdx_ratio; // stem dQ/dx asymmetry gate; inert while frac == 0 (doc pr/83 r4)
     cfg["mvga_proj_angle"] = m_mvga_proj_angle; // deg; 0 = use mvga_dup_angle, byte-identical (doc pr/83 r4b)
-    cfg["mvga_ac_veto_radius"] = m_mvga_ac_veto_radius; // cm; 0 = legacy straighten_radius rule, byte-identical (doc pr/99 round 2)
     cfg["mvga_ac_chord_max"]   = m_mvga_ac_chord_max;   // cm; 0 = no cap, byte-identical (doc pr/99 round 2)
     cfg["mvga_ac_no_cascade"]  = m_mvga_ac_no_cascade;  // false = created products collapsible, byte-identical (doc pr/99 round 2)
     cfg["mvga_passthru"]       = m_mvga_passthru;       // cm; 0 = op0 pass-through split off, byte-identical (doc pr/103)
@@ -940,7 +925,6 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["other_seg_keep_isolated_min_points"] = m_other_seg_keep_isolated_min_points; // component-point floor when the keep is on
     cfg["other_seg_keep_isolated_min_length"] = m_other_seg_keep_isolated_min_length; // cm; fitted-length floor when the keep is on
     // doc sbnd_xin/docs/pr/102 P1+P2.
-    cfg["other_seg_keep_isolated_min_nnf"]    = m_other_seg_keep_isolated_min_nnf;    // 0 = off; nnf disjunct on the keep
     cfg["other_seg_keep_isolated_len_admit"]  = m_other_seg_keep_isolated_len_admit;  // cm; 0 = off; length disjunct on the keep
     // doc sbnd_xin/docs/pr/67 round 3.
     cfg["iso_snap_min_dir_mag"] = m_iso_snap_min_dir_mag; // cm; 10.0 = legacy isochronous-snap size gate
@@ -1234,15 +1218,12 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["pi0_mass_offset"]                           = m_pi0_mass_offset;                           // doc pr/132 K1; MeV, 10 = legacy, byte-identical
     cfg["pi0_assoc_angle_deg"]                       = m_pi0_assoc_angle_deg;                       // doc pr/132 K2; deg, 30 = legacy, byte-identical
     cfg["pi0_attached_partner_min_mev"]              = m_pi0_attached_partner_min_mev;              // doc pr/132 K3; MeV, 0 = no guard, byte-identical
-    cfg["pi0_nv_allow_type2"]                        = m_pi0_nv_allow_type2;                        // doc pr/132 K4; false = legacy pool, byte-identical
     cfg["pi0_nv_max_prongs"]                         = m_pi0_nv_max_prongs;                         // doc pr/132 K5; 2 = legacy gate, byte-identical
     cfg["pi0_readmit_retyped"]                       = m_pi0_readmit_retyped;                       // doc pr/132 K7; false = legacy exclusion, byte-identical
     cfg["pi0_admit_type3"]                           = m_pi0_admit_type3;                           // doc pr/132 K8; false = legacy pool, byte-identical
     cfg["pi0_crumb_assoc_mev"]                       = m_pi0_crumb_assoc_mev;                       // doc pr/132 K9; 0 = legacy angle test, byte-identical
     cfg["pi0_collinear_merge_deg"]                   = m_pi0_collinear_merge_deg;                   // doc pr/132 K12; 0 = legacy pairing, byte-identical
     cfg["pi0_nv_partner_min_mev"]                    = m_pi0_nv_partner_min_mev;                    // doc pr/132 K13; 0 = no floor, byte-identical
-    cfg["pi0_nv_retry_paired"]                       = m_pi0_nv_retry_paired;                       // doc pr/132 K14; false = legacy early return, byte-identical
-    cfg["pi0_reseat_start_assoc"]                    = m_pi0_reseat_start_assoc;                    // doc pr/132 K15; false = fit-cloud starts, byte-identical
     cfg["shower_em_collinear_deg"]                   = m_shower_em_collinear_deg;                   // doc pr/132 K16; 0 = no merge, byte-identical
     cfg["shower_em_collinear_dis_cm"]                = m_shower_em_collinear_dis_cm;                // doc pr/132 K16; inert while deg = 0
     cfg["shower_em_collinear_host_mev"]              = m_shower_em_collinear_host_mev;              // doc pr/132 K16; inert while deg = 0
@@ -1251,9 +1232,6 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["pi0_accept_merge_dis_cm"]                   = m_pi0_accept_merge_dis_cm;                   // doc pr/132 K18; 0 = no acceptance merge, byte-identical
     cfg["pi0_bp_vertex_miss_cm"]                     = m_pi0_bp_vertex_miss_cm;                     // doc pr/132 K19; 0 = no NC vertex proposer, byte-identical
     cfg["pi0_admit_muon_showers"]                    = m_pi0_admit_muon_showers;                    // doc pr/133 K20; false = legacy mu exclusion, byte-identical
-    cfg["pi0_mu_shower_hypothesis"]                  = m_pi0_mu_shower_hypothesis;                  // doc pr/141 M1; false = track price = byte-identical
-    cfg["pi0_mu_shower_max_len"]                     = m_pi0_mu_shower_max_len;                     // doc pr/141 M2; <0 = C++ default 40 cm = byte-identical
-    cfg["pi0_mu_shower_hyp_min_len"]                 = m_pi0_mu_shower_hyp_min_len;                 // doc pr/141 M3; <0 = C++ default 0 = no floor
     cfg["pi0_nc_sig_angle_deg"]                      = m_pi0_nc_sig_angle_deg;                      // doc pr/133 K21; 0 = v3 gate, byte-identical
     cfg["pi0_nc_floor_mev"]                          = m_pi0_nc_floor_mev;                          // doc pr/133 K21 v2; 0 = legacy 20 MeV floor, byte-identical
     cfg["pi0_nc_pf_assoc_deg"]                       = m_pi0_nc_pf_assoc_deg;                       // doc pr/133 K21 v2.2; 0 = no post-fire PF update, byte-identical
@@ -2359,9 +2337,6 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
         pattern_algos.m_teb_turn_baseline   = m_teb_turn_baseline * units::cm; // cm -> internal
         pattern_algos.m_teb_turn_skirt      = m_teb_turn_skirt * units::cm;    // cm -> internal
         pattern_algos.m_teb_turn_min_arm_frac = m_teb_turn_min_arm_frac;       // dimensionless, no conversion
-        pattern_algos.m_teb_chain_topology  = m_teb_chain_topology;
-        pattern_algos.m_teb_r3_turn         = m_teb_r3_turn;                   // deg, no conversion
-        pattern_algos.m_teb_r3_hot          = m_teb_r3_hot;                    // x mip median, no conversion
         pattern_algos.m_teb_bragg_veto_turn = m_teb_bragg_veto_turn;           // deg, no conversion
         pattern_algos.m_kink_walk_dqdx_stop = m_kink_walk_dqdx_stop;
         pattern_algos.m_kink_break_protect  = m_kink_break_protect;
@@ -2418,7 +2393,6 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
         pattern_algos.m_mvga_proj_dup_frac  = m_mvga_proj_dup_frac;        // fraction, no conversion (doc pr/83 r4)
         pattern_algos.m_mvga_proj_dqdx_ratio = m_mvga_proj_dqdx_ratio;     // ratio, no conversion (doc pr/83 r4)
         pattern_algos.m_mvga_proj_angle = m_mvga_proj_angle;               // deg, no conversion (doc pr/83 r4b)
-        pattern_algos.m_mvga_ac_veto_radius = m_mvga_ac_veto_radius * units::cm; // cm -> internal (doc pr/99 round 2)
         pattern_algos.m_mvga_ac_chord_max   = m_mvga_ac_chord_max * units::cm;   // cm -> internal (doc pr/99 round 2)
         pattern_algos.m_mvga_ac_no_cascade  = m_mvga_ac_no_cascade;               // doc pr/99 round 2
         pattern_algos.m_mvga_passthru       = m_mvga_passthru * units::cm;        // cm -> internal (doc pr/103)
@@ -2465,7 +2439,6 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
         pattern_algos.m_other_seg_keep_isolated_min_points = m_other_seg_keep_isolated_min_points;
         pattern_algos.m_other_seg_keep_isolated_min_length = m_other_seg_keep_isolated_min_length * units::cm; // cm -> internal
         // doc sbnd_xin/docs/pr/102 P1+P2.
-        pattern_algos.m_other_seg_keep_isolated_min_nnf    = m_other_seg_keep_isolated_min_nnf;
         pattern_algos.m_other_seg_keep_isolated_len_admit  = m_other_seg_keep_isolated_len_admit * units::cm; // cm -> internal
         // doc sbnd_xin/docs/pr/67 round 3.
         pattern_algos.m_iso_snap_min_dir_mag = m_iso_snap_min_dir_mag * units::cm; // cm -> internal
@@ -2712,15 +2685,12 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
         pattern_algos.m_pi0_mass_offset                           = m_pi0_mass_offset * units::MeV;                // doc pr/132 K1, MeV -> internal
         pattern_algos.m_pi0_assoc_angle_deg                       = m_pi0_assoc_angle_deg;                         // doc pr/132 K2, deg (no scaling)
         pattern_algos.m_pi0_attached_partner_min                  = m_pi0_attached_partner_min_mev * units::MeV;   // doc pr/132 K3, MeV -> internal
-        pattern_algos.m_pi0_nv_allow_type2                        = m_pi0_nv_allow_type2;                          // doc pr/132 K4
         pattern_algos.m_pi0_nv_max_prongs                         = m_pi0_nv_max_prongs;                           // doc pr/132 K5
         pattern_algos.m_pi0_readmit_retyped                       = m_pi0_readmit_retyped;                         // doc pr/132 K7
         pattern_algos.m_pi0_admit_type3                           = m_pi0_admit_type3;                             // doc pr/132 K8
         pattern_algos.m_pi0_crumb_assoc_max                       = m_pi0_crumb_assoc_mev * units::MeV;            // doc pr/132 K9, MeV -> internal
         pattern_algos.m_pi0_collinear_merge_deg                   = m_pi0_collinear_merge_deg;                     // doc pr/132 K12, deg (no scaling)
         pattern_algos.m_pi0_nv_partner_min                        = m_pi0_nv_partner_min_mev * units::MeV;         // doc pr/132 K13, MeV -> internal
-        pattern_algos.m_pi0_nv_retry_paired                       = m_pi0_nv_retry_paired;                         // doc pr/132 K14
-        pattern_algos.m_pi0_reseat_start_assoc                    = m_pi0_reseat_start_assoc;                      // doc pr/132 K15
         pattern_algos.m_em_collinear_merge_deg                    = m_shower_em_collinear_deg;                     // doc pr/132 K16, deg (no scaling)
         pattern_algos.m_em_collinear_merge_dis                    = m_shower_em_collinear_dis_cm * units::cm;      // doc pr/132 K16, cm -> internal
         pattern_algos.m_em_collinear_merge_min_host               = m_shower_em_collinear_host_mev * units::MeV;   // doc pr/132 K16, MeV -> internal
@@ -2729,11 +2699,6 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
         pattern_algos.m_pi0_am_dis                                = m_pi0_accept_merge_dis_cm * units::cm;         // doc pr/132 K18, cm -> internal
         pattern_algos.m_pi0_bp_miss                               = m_pi0_bp_vertex_miss_cm * units::cm;           // doc pr/132 K19, cm -> internal
         pattern_algos.m_pi0_admit_mu_showers                      = m_pi0_admit_muon_showers;                      // doc pr/133 K20
-        pattern_algos.m_pi0_mu_shower_hypothesis                  = m_pi0_mu_shower_hypothesis;                    // doc pr/141 M1
-        if (m_pi0_mu_shower_max_len >= 0)
-            pattern_algos.m_pi0_mu_shower_max_len                 = m_pi0_mu_shower_max_len * units::cm;           // doc pr/141 M2
-        if (m_pi0_mu_shower_hyp_min_len >= 0)
-            pattern_algos.m_pi0_mu_shower_hyp_min_len             = m_pi0_mu_shower_hyp_min_len * units::cm;       // doc pr/141 M3
         pattern_algos.m_pi0_nc_sig_angle                          = m_pi0_nc_sig_angle_deg;                        // doc pr/133 K21, deg (unscaled, like K2)
         pattern_algos.m_pi0_nc_floor                              = m_pi0_nc_floor_mev * units::MeV;               // doc pr/133 K21 v2, MeV -> internal
         pattern_algos.m_pi0_nc_pf_assoc                           = m_pi0_nc_pf_assoc_deg;                         // doc pr/133 K21 v2.2, deg (unscaled)

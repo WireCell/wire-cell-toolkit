@@ -255,15 +255,12 @@ TEST_CASE("clus knob defaults: TaggerCheckNeutrino switches are all OFF")
     CHECK_KNOB_NUM(cfg, "pi0_mass_offset", 10.0);                             // MeV; the finders' "+10" offset (doc pr/132 K1)
     CHECK_KNOB_NUM(cfg, "pi0_assoc_angle_deg", 30.0);                         // deg; association cut (doc pr/132 K2)
     CHECK_KNOB_NUM(cfg, "pi0_attached_partner_min_mev", 0.0);                 // MeV; 0 = no nueCC-fake guard (doc pr/132 K3)
-    CHECK_KNOB_BOOL(cfg, "pi0_nv_allow_type2", false);                        // doc pr/132 K4; false = conn_type-3-only pool
     CHECK_KNOB_NUM(cfg, "pi0_nv_max_prongs", 2.0);                            // doc pr/132 K5; without-vertex prong cap
     CHECK_KNOB_BOOL(cfg, "pi0_readmit_retyped", false);                       // doc pr/132 K7; retyped showers stay out of pi0 pairing
     CHECK_KNOB_BOOL(cfg, "pi0_admit_type3", false);                           // doc pr/132 K8; with-vertex pool conn_type 2 only
     CHECK_KNOB_NUM(cfg, "pi0_crumb_assoc_mev", 0.0);                          // doc pr/132 K9; 0 = crumbs keep the angle test
     CHECK_KNOB_NUM(cfg, "pi0_collinear_merge_deg", 0.0);                      // doc pr/132 K12; 0 = no virtual collinear merge
     CHECK_KNOB_NUM(cfg, "pi0_nv_partner_min_mev", 0.0);                       // doc pr/132 K13; 0 = no path-2 partner floor
-    CHECK_KNOB_BOOL(cfg, "pi0_nv_retry_paired", false);                       // doc pr/132 K14; legacy path-2 early return
-    CHECK_KNOB_BOOL(cfg, "pi0_reseat_start_assoc", false);                    // doc pr/132 K15; fit-cloud conn-2 starts
     CHECK_KNOB_NUM(cfg, "shower_em_collinear_deg", 0.0);                      // doc pr/132 K16; 0 = no build-time EM collinear merge
     CHECK_KNOB_NUM(cfg, "shower_em_collinear_dis_cm", 60.0);                  // doc pr/132 K16; inert while deg = 0
     CHECK_KNOB_NUM(cfg, "shower_em_collinear_host_mev", 20.0);                // doc pr/132 K16; inert while deg = 0
@@ -272,9 +269,6 @@ TEST_CASE("clus knob defaults: TaggerCheckNeutrino switches are all OFF")
     CHECK_KNOB_NUM(cfg, "pi0_accept_merge_dis_cm", 0.0);                      // doc pr/132 K18; 0 = no acceptance-aware merge
     CHECK_KNOB_NUM(cfg, "pi0_bp_vertex_miss_cm", 0.0);                        // doc pr/132 K19; 0 = no NC vertex proposer
     CHECK_KNOB_BOOL(cfg, "pi0_admit_muon_showers", false);                    // doc pr/133 K20; mu-typed showers stay out of the pi0 pools
-    CHECK_KNOB_BOOL(cfg, "pi0_mu_shower_hypothesis", false);                  // doc pr/141 M1; mu-typed pi0 candidates keep the TRACK price
-    CHECK_KNOB_NUM(cfg, "pi0_mu_shower_max_len", -1);                         // doc pr/141 M2; <0 => the C++ 40 cm literal
-    CHECK_KNOB_NUM(cfg, "pi0_mu_shower_hyp_min_len", -1);                     // doc pr/141 M3; <0 => the C++ 0 = no floor
     CHECK_KNOB_NUM(cfg, "pi0_nc_sig_angle_deg", 0.0);                         // doc pr/133 K21; 0 = v3 bp gate
     CHECK_KNOB_NUM(cfg, "pi0_nc_floor_mev", 0.0);                             // doc pr/133 K21 v2; 0 = legacy 20 MeV partner floor
     CHECK_KNOB_NUM(cfg, "pi0_nc_pf_assoc_deg", 0.0);                          // doc pr/133 K21 v2.2; 0 = no post-fire PF update
@@ -457,9 +451,6 @@ TEST_CASE("clus knob defaults: TaggerCheckNeutrino switches are all OFF")
     // doc pr/90 round 4: chain-topology gate admission (D1) + route R3
     // turn/activity thresholds (D3) + the R2 bragg veto (D4); all OFF =>
     // legacy even with two_end_break on.
-    CHECK_KNOB_BOOL(cfg, "teb_chain_topology", false);
-    CHECK_KNOB_NUM(cfg, "teb_r3_turn", 0.0);
-    CHECK_KNOB_NUM(cfg, "teb_r3_hot", 0.0);
     CHECK_KNOB_NUM(cfg, "teb_bragg_veto_turn", 0.0);
     // doc pr/50: the vks_* operating point (cm/deg/dimensionless), all inert
     // while vertex_kink_snap is false.  vks_hot_ratio 0 = the optional
@@ -513,7 +504,6 @@ TEST_CASE("clus knob defaults: TaggerCheckNeutrino switches are all OFF")
     CHECK_KNOB_NUM(cfg, "mvga_proj_dup_frac", 0.0);  // doc pr/83 r4: projective dup collapse disabled, byte-identical
     CHECK_KNOB_NUM(cfg, "mvga_proj_dqdx_ratio", 0.4);  // doc pr/83 r4: stem dQ/dx gate default; inert while frac == 0
     CHECK_KNOB_NUM(cfg, "mvga_proj_angle", 0.0);  // doc pr/83 r4b: 0 = use mvga_dup_angle, byte-identical
-    CHECK_KNOB_NUM(cfg, "mvga_ac_veto_radius", 0.0);  // doc pr/99 r2: 0 = legacy straighten_radius rule, byte-identical
     CHECK_KNOB_NUM(cfg, "mvga_ac_chord_max", 0.0);    // doc pr/99 r2: 0 = no chord cap, byte-identical
     CHECK_KNOB_BOOL(cfg, "mvga_ac_no_cascade", false); // doc pr/99 r2: created products stay collapsible, byte-identical
     CHECK_KNOB_NUM(cfg, "mvga_passthru", 0.0);        // doc pr/103: 0 = op0 pass-through split off, byte-identical
@@ -577,7 +567,6 @@ TEST_CASE("clus knob defaults: TaggerCheckNeutrino literals are the uBooNE value
     // find_other_segments admission/tagging behaviour on every detector.
     // len_admit and uncover_3d are in cm at the component and scaled by
     // units::cm at the copy into PatternAlgorithms.
-    CHECK_KNOB_NUM(cfg, "other_seg_keep_isolated_min_nnf", 0.0);
     CHECK_KNOB_NUM(cfg, "other_seg_keep_isolated_len_admit", 0.0);
 
     // Detector-extent literals (doc pr/2 sec 2e(iv)); uBooNE y=+117 top.

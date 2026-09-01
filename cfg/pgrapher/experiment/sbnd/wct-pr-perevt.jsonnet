@@ -1840,7 +1840,6 @@ function(
     pi0_mass_offset = null,                  // MeV; null => C++ default 10 (the finders' "+10" window offset)
     pi0_assoc_angle_deg = null,              // deg; null => C++ default 30 (disconnected<->vertex association)
     pi0_attached_partner_min_mev = 29,       // MeV; SBND PRODUCTION 28 -> 29 2026-08-30 doc pr/133 iter 3 (owner: "K3 28-29 is good").  The closed interval (28.7, 29.6): kills the last real fake-topology accept 176502 (partner 28.7) and NOTHING else in 239 events (census 0 rows moved, ledger flat, movers 0x4); 30 would veto 76346's true NC pair (partner 29.6).  Earlier: PRODUCTION 20 -> 28 2026-08-30 round 3 (owner: "Let's execute according to your recommendations" on "flip K7+K8 ... together with a K3 bump to 28-30").  28 = the safe end: kills the K7-regenerated fake 116962 (partner 27.0 MeV) and the three round-2 fake-topology survivors 54095/76350/268784 (26.1/20.5/22.0) while keeping 76346's partial-group partner (29.6) and 176502 (28.7).  Round-3 measurement (doc pr/132 sec 10, r3flip vs r2off): fakes 5 -> 2, ZERO hand-pi0 downgrades, 0 movers.  History: flipped at 20 2026-08-30 round 2 (owner: "Let's proceed to 1").  Rejects a with-vertex pairing whose conn-1 member sits AT THE MAIN VERTEX and whose detached partner is below 20 MeV -- the owner's nueCC fake mode (primary electron + tiny gamma).  Round-1 measurement (doc pr/132 sec 6.2, onguard vs onfudge, all 6 samples): fake topologies 10 -> 5, ZERO change on the hand pi0, 0 ADVERSE movers.  The 5 survivors have partners 20.5-29.6 MeV; 25-30 stays an owner Bee-adjudication item.  C++ default 0 = no guard.
-    pi0_nv_allow_type2 = false,              // C++ default false (without-vertex pool conn_type 3 only)
     pi0_nv_max_prongs = null,                // null => C++ default 2 (without-vertex GATE1 prong cap)
     // doc pr/132 round 2 -- the rescue family + the path-2 quality gate.
     // C++ defaults all off; every key omitted at its default =>
@@ -1852,8 +1851,11 @@ function(
     pi0_nv_mass_window_mev = null,           // MeV; null => C++ default 60 (legacy without-vertex acceptance half-window)
     pi0_collinear_merge_deg = null,          // deg; null => C++ default 0 (no virtual collinear merge of detached fragments at pairing time)
     pi0_nv_partner_min_mev = null,           // MeV; null => C++ default 0 (no path-2 partner floor)
-    pi0_nv_retry_paired = false,             // C++ default false (path-2 abandons on any pi0-paired main-vertex shower)
-    pi0_reseat_start_assoc = false,          // C++ default false (accepted conn-2 starts stay on the fit cloud)
+    // doc 77 round 4 (2026-09-01): pr/132's K4 (pi0_nv_allow_type2), K14
+    // (pi0_nv_retry_paired) and K15 (pi0_reseat_start_assoc) removed -- the
+    // path-2 revival family measured ZERO NC rescues across pr/132 rounds 4
+    // and 8, and K15's 22 fires moved neither census nor any hand pi0.
+    // See sbnd_xin/docs/77_knob-ledger.tsv.
     shower_em_collinear_deg = 10,            // deg; SBND PRODUCTION ON 2026-08-30 doc pr/133 K16@120 (owner Bee scan bee/pr133k16, verdict: "K16 looks OK").  Build-time EM collinear-fragment merge.  Measured (doc pr/132 sec 12.3, r5cmw): 54332 partial->exact (+1), 54341 g1 charge 0.68->0.82; cost 99838/165157/347824 gammas go OVER 1.36-1.51 of label.  C++ default 0 = off.
     shower_em_collinear_dis_cm = 120,        // cm; SBND PRODUCTION 2026-08-30 with the deg flip above (the K16@120 point -- 60 was measured inert on target, doc pr/132 sec 12.3).  C++ default 60.
     shower_em_collinear_host_mev = null,     // MeV; null => C++ default 20 (inert while deg off)
@@ -1874,28 +1876,14 @@ function(
     // 51080 79.8 MeV, -166870 g2 38.6 MeV -- 3 of the 132 hand gammas).
     // C++ default false.  Key omitted when false => byte-identical.
     pi0_admit_muon_showers = true,           // SBND PRODUCTION ON 2026-08-30 doc pr/133 (owner: "K20 is good").  Admits shower-ish mu-typed (pdg +-13) objects into the pi0 pools (not-in-long-muon AND (flag_shower OR len<40cm+dir-weak)); accepted members re-stamped EM.  Measured: 166870 true pair m=109.1 accepted, zero collateral (census/ledger/movers flat elsewhere).  C++ default false.
-    // doc pr/141 M1: price a mu-typed pi0 candidate under the SHOWER
-    // recombination+fudge inside id_pi0_with_vertex.  A shower with no shower
-    // flag is converted with the TRACK factors, and the conversion is a pure
-    // division, so the same charge under the shower hypothesis is the exact
-    // global ratio (recom_track*fudge_track)/(recom_shower*fudge_shower) =
-    // (0.87*0.95)/(0.58*0.86) = 1.657 at these factors.  Scope = the K20 class
-    // (|pdg|==13, no shower flag).  Measured: of the six mu-typed 40-80 cm
-    // candidates in the 239-event population, ZERO make an in-window pair at
-    // the track price and three do at the shower price.
-    // C++ default false.  Key omitted when off => byte-identical config.
-    pi0_mu_shower_hypothesis = false,
-    // doc pr/141 M2: K20's "shower-ish muon" length bound, in cm.  The 40 cm
-    // literal is the file's own idiom, not a scanned number, and M1 is INERT
-    // without this: every mu-typed pi0 candidate in the 239-event population
-    // is 40-78 cm, so K20 refuses them on length before the price is read.
-    // null => C++ default 40 => byte-identical.
-    pi0_mu_shower_max_len = null,
-    // doc pr/141 M3: length floor (cm) below which M1 leaves the track price
-    // alone.  Scopes the re-pricing to what M2 newly admits.  Measured reason:
-    // re-pricing the legacy <40 cm K20 population broke 166870, the pi0 K20 was
-    // shipped to rescue (census 35 -> 34).  null => C++ default 0 = no floor.
-    pi0_mu_shower_hyp_min_len = null,
+    // doc 77 round 4 (2026-09-01): pr/141's M1 (pi0_mu_shower_hypothesis,
+    // re-pricing a mu-typed pi0 candidate under the SHOWER recombination+fudge),
+    // M2 (pi0_mu_shower_max_len, K20's 40 cm "shower-ish muon" bound) and M3
+    // (pi0_mu_shower_hyp_min_len, the floor on M1) removed -- M1 was a
+    // REGRESSION (census 35 -> 34, breaking 166870, K20's own justifying
+    // event), M2 measured INERT (seg_dir_weak, not length, is the gate) and M3
+    // moot without M1.  K20's bound is back to the file's 40 cm literal.
+    // See sbnd_xin/docs/77_knob-ledger.tsv.
     // doc pr/133 K21: owner NC-pi0 signature (2026-08-30) for the
     // back-projection vertex proposer (needs pi0_bp_vertex_miss_cm > 0):
     // main vertex inside an EM shower (ALL prongs in showers, none in the
@@ -2320,27 +2308,19 @@ function(
     // census: excludes every starved arm (<= 6.1 cm) with >2x margin while
     // keeping the genuine 18.4 cm-arm break of evt 172942.
     teb_turn_min_arm_frac = 0.4,
-    // doc pr/90 round 4 (sec 9.5 D1/D3/D4) -- three knobs for the round-3
-    // residual classes, C++ defaults false/0 = legacy.
-    // teb_chain_topology: when n_long > 1, admit iff the cluster's segment
-    // graph is a simple path ("still a line, no 3-track vertex") and the
-    // candidate is the unique longest segment; chain-admitted candidates go
-    // to route R3 only.  teb_r3_turn (deg) / teb_r3_hot (x mip median):
-    // R3 breaks at the largest 10 cm-baseline local turn that carries a
-    // vertex-activity spot within +-2 cm, refined to the activity maximum
-    // (172832: t10 plateau 19-23.5 deg + 2.50x MIP at the click vs t35
-    // 18.3 < 25; 61681: t10 54 deg + 3.1x MIP).  teb_bragg_veto_turn (deg):
-    // veto an accepted R2 break below this turn when its short-arm end is
-    // not Bragg-consistent (peak >= 2x MIP AND hot extent <= peak cm/MIP;
-    // sec 9.4b owner calibration: kills 26.5-27.4 deg vs keeps >= 32.5).
-    // false/null = keys suppressed => byte-identical pre-fix config.
-    // Escapes: SBND_TEB_CHAIN_TOPOLOGY / SBND_TEB_R3_TURN / SBND_TEB_R3_HOT
-    // / SBND_TEB_BRAGG_VETO_TURN runner envs (or -A).
+    // doc pr/90 round 4 (sec 9.5 D4) -- teb_bragg_veto_turn (deg): veto an
+    // accepted R2 break below this turn when its short-arm end is not
+    // Bragg-consistent (peak >= 2x MIP AND hot extent <= peak cm/MIP; sec
+    // 9.4b owner calibration: kills 26.5-27.4 deg vs keeps >= 32.5).  C++
+    // default 0 = legacy; null = key suppressed => byte-identical.
+    // Escape: SBND_TEB_BRAGG_VETO_TURN runner env (or -A).
     //
-    // teb_chain_topology / teb_r3_* STAY OFF: the D1+D3 live A/B was net
-    // NEGATIVE (pr/90 sec 10.6: 19 ADVERSE vs 6 toward on harv3 labels,
-    // two cosmict flips) -- no local scalar separates a true interior
-    // junction from an energetic delta ray.
+    // doc 77 round 4 (2026-09-01): teb_chain_topology and teb_r3_turn /
+    // teb_r3_hot removed, along with route R3 itself -- the D1+D3 live A/B
+    // was net NEGATIVE (pr/90 sec 10.6: 19 ADVERSE vs 6 toward on harv3
+    // labels, two cosmict flips); no local scalar separates a true interior
+    // junction from an energetic delta ray.  D4 (teb_bragg_veto_turn) below
+    // is unaffected.  See sbnd_xin/docs/77_knob-ledger.tsv.
     //
     // teb_bragg_veto_turn SBND PRODUCTION ON 2026-08-17 (owner request,
     // pr/90 sec 10.8-10.9 gates: knobs-off 1000/1000 byte-identical vs
@@ -2348,9 +2328,6 @@ function(
     // A/B movers EXACTLY the five vetoed near-end breaks; labels: 291064
     // 159.36 -> 0.00 toward, 64503 sanctioned sec 9.0; 349461/278420
     // mid-track breaks byte-identical under the 15 cm near-end scope).
-    teb_chain_topology = false,
-    teb_r3_turn = null,
-    teb_r3_hot = null,
     teb_bragg_veto_turn = 30.0,
     kink_walk_dqdx_stop = true,
     kink_break_protect = true,
@@ -2585,11 +2562,13 @@ function(
     // second-opinion.  C++ defaults 0/false = legacy.  null/false => key
     // omitted => byte-identical pre-fix config.
     // SBND PRODUCTION ON 2026-08-20 (doc pr/99 round 2; owner pre-authorized
-    // flip on validation PASS).  ac_veto_radius stays OFF: 0.2 cm measured
-    // ADVERSE (kills the 349945 design case -- re-confirms pr/86 Stage A's
-    // deliberate 1.0 cm relax).  Ghost thresholds ride the C++ defaults
+    // flip on validation PASS).  Ghost thresholds ride the C++ defaults
     // (overlap 0.7 / dqdx 0.25 / min_len 10 cm).
-    mvga_ac_veto_radius = null,
+    // doc 77 round 4 (2026-09-01): mvga_ac_veto_radius removed -- 0.2 cm
+    // measured ADVERSE (kills the 349945 design case, re-confirming pr/86
+    // Stage A's deliberate 1.0 cm relax).  The collapse chord uses the R1
+    // straighten-radius rule, which is what production always ran.
+    // See sbnd_xin/docs/77_knob-ledger.tsv.
     mvga_ac_chord_max = 30,
     mvga_ac_no_cascade = true,
     // doc pr/103 (SBND 18255-405707) -- mvga op0 pass-through split: a prong of
@@ -2842,10 +2821,11 @@ function(
     // -A other_seg_keep_isolated_len_admit=0 (or SBND_OSEG_LEN_ADMIT=0...
     // any empty env leaves this default) -- C++ knob default stays 0.
     //
-    // min_nnf: STAYS OFF -- validation FAILED at 4 (nueCC48 nue ledger
-    // -4/+1) and carries one named nue loss at 8 (389538 4.3 -> -15 vs
-    // 30504 gain); doc pr/102 sec 8.3.  Owner hand-scan before any flip.
-    other_seg_keep_isolated_min_nnf = null,
+    // doc 77 round 4 (2026-09-01): other_seg_keep_isolated_min_nnf removed --
+    // its validation FAILED at 4 (nueCC48 nue ledger -4/+1) and it carried a
+    // named nue loss at 8 (389538 4.3 -> -15 vs 30504 gain); doc pr/102 sec
+    // 8.3.  The len_admit disjunct below is unaffected and stays PRODUCTION
+    // ON at 30.  See sbnd_xin/docs/77_knob-ledger.tsv.
     other_seg_keep_isolated_len_admit = 30.0,
     // doc 77 round 1 (2026-08-24): other_seg_uncover_3d (pr/102 P2, 3-D
     // uncovered-charge radius) removed -- 23 ADVERSE movers, stays OFF.
@@ -3188,7 +3168,6 @@ function(
         [if pi0_mass_offset != null then 'pi0_mass_offset']: pi0_mass_offset,
         [if pi0_assoc_angle_deg != null then 'pi0_assoc_angle_deg']: pi0_assoc_angle_deg,
         [if pi0_attached_partner_min_mev != 0 then 'pi0_attached_partner_min_mev']: pi0_attached_partner_min_mev,
-        [if pi0_nv_allow_type2 then 'pi0_nv_allow_type2']: true,
         [if pi0_nv_max_prongs != null then 'pi0_nv_max_prongs']: pi0_nv_max_prongs,
         [if pi0_readmit_retyped then 'pi0_readmit_retyped']: true,
         [if pi0_admit_type3 then 'pi0_admit_type3']: true,
@@ -3197,8 +3176,6 @@ function(
         [if pi0_nv_mass_window_mev != null then 'pi0_nv_mass_window_mev']: pi0_nv_mass_window_mev,
         [if pi0_collinear_merge_deg != null then 'pi0_collinear_merge_deg']: pi0_collinear_merge_deg,
         [if pi0_nv_partner_min_mev != null then 'pi0_nv_partner_min_mev']: pi0_nv_partner_min_mev,
-        [if pi0_nv_retry_paired then 'pi0_nv_retry_paired']: true,
-        [if pi0_reseat_start_assoc then 'pi0_reseat_start_assoc']: true,
         [if shower_em_collinear_deg != null then 'shower_em_collinear_deg']: shower_em_collinear_deg,
         [if shower_em_collinear_dis_cm != null then 'shower_em_collinear_dis_cm']: shower_em_collinear_dis_cm,
         [if shower_em_collinear_host_mev != null then 'shower_em_collinear_host_mev']: shower_em_collinear_host_mev,
@@ -3207,9 +3184,6 @@ function(
         [if pi0_accept_merge_dis_cm != null then 'pi0_accept_merge_dis_cm']: pi0_accept_merge_dis_cm,
         [if pi0_bp_vertex_miss_cm != null then 'pi0_bp_vertex_miss_cm']: pi0_bp_vertex_miss_cm,
         [if pi0_admit_muon_showers then 'pi0_admit_muon_showers']: true,
-        [if pi0_mu_shower_hypothesis then 'pi0_mu_shower_hypothesis']: true,
-        [if pi0_mu_shower_max_len != null then 'pi0_mu_shower_max_len']: pi0_mu_shower_max_len,
-        [if pi0_mu_shower_hyp_min_len != null then 'pi0_mu_shower_hyp_min_len']: pi0_mu_shower_hyp_min_len,
         [if pi0_nc_sig_angle_deg != null then 'pi0_nc_sig_angle_deg']: pi0_nc_sig_angle_deg,
         [if pi0_nc_floor_mev != null then 'pi0_nc_floor_mev']: pi0_nc_floor_mev,
         [if pi0_nc_pf_assoc_deg != null then 'pi0_nc_pf_assoc_deg']: pi0_nc_pf_assoc_deg,
@@ -3310,9 +3284,6 @@ function(
         [if long_muon_angle_relax_deg != null then 'long_muon_angle_relax_deg']: long_muon_angle_relax_deg,  // doc 84 r1 P2; C++ default 16.0 deg
         [if two_end_break then 'two_end_break']: true,
         [if teb_turn_min_arm_frac != null then 'teb_turn_min_arm_frac']: teb_turn_min_arm_frac,
-        [if teb_chain_topology then 'teb_chain_topology']: true,
-        [if teb_r3_turn != null then 'teb_r3_turn']: teb_r3_turn,
-        [if teb_r3_hot != null then 'teb_r3_hot']: teb_r3_hot,
         [if teb_bragg_veto_turn != null then 'teb_bragg_veto_turn']: teb_bragg_veto_turn,
         [if kink_walk_dqdx_stop then 'kink_walk_dqdx_stop']: true,
         [if kink_break_protect then 'kink_break_protect']: true,
@@ -3366,7 +3337,6 @@ function(
         [if mvga_proj_dup_frac != null then 'mvga_proj_dup_frac']: mvga_proj_dup_frac,
         [if mvga_proj_dqdx_ratio != null then 'mvga_proj_dqdx_ratio']: mvga_proj_dqdx_ratio,
         [if mvga_proj_angle != null then 'mvga_proj_angle']: mvga_proj_angle,
-        [if mvga_ac_veto_radius != null then 'mvga_ac_veto_radius']: mvga_ac_veto_radius,
         [if mvga_ac_chord_max != null then 'mvga_ac_chord_max']: mvga_ac_chord_max,
         [if mvga_ac_no_cascade then 'mvga_ac_no_cascade']: true,
         [if mvga_passthru != null then 'mvga_passthru']: mvga_passthru,
@@ -3412,7 +3382,6 @@ function(
         [if other_seg_keep_isolated then 'other_seg_keep_isolated']: true,
         [if other_seg_keep_isolated_min_points != null then 'other_seg_keep_isolated_min_points']: other_seg_keep_isolated_min_points,
         [if other_seg_keep_isolated_min_length != null then 'other_seg_keep_isolated_min_length']: other_seg_keep_isolated_min_length,
-        [if other_seg_keep_isolated_min_nnf != null then 'other_seg_keep_isolated_min_nnf']: other_seg_keep_isolated_min_nnf,
         [if other_seg_keep_isolated_len_admit != null then 'other_seg_keep_isolated_len_admit']: other_seg_keep_isolated_len_admit,
         [if iso_snap_min_dir_mag != null then 'iso_snap_min_dir_mag']: iso_snap_min_dir_mag,
         [if shower_absorb_unreachable_main then 'shower_absorb_unreachable_main']: true,

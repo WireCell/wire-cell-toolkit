@@ -6552,15 +6552,11 @@ bool PatternAlgorithms::pi0_mu_shower_admit(const ShowerPtr& shower, const Index
     // shower-ish-muon idiom (three sites, e.g. the :3922 center-point cut):
     // short AND direction-weak.  A genuine traveling muon is long or
     // dir-strong; a wrapped long muon is caught above.
-    // doc pr/141 M2: the 40 cm bound is K20's own "shower-ish muon" idiom,
-    // taken from the file's three-site convention rather than from a scan.  It
-    // is exposed as a knob (default 40 cm = the shipped literal = byte-
-    // identical) because M1's re-pricing is provably INERT without it: every
-    // mu-typed pi0 candidate in the 239-event population is 40-78 cm, so K20
-    // refuses all of them on length before the price is ever consulted (tape:
-    // "K20 mu-reject sh=23011 why=trackish len=57.3" fires with M1 on).
+    // doc 77 round 4: pr/141 M2 exposed this 40 cm bound as a knob and
+    // measured it INERT (seg_dir_weak, not length, is what refuses the
+    // mu-typed candidates), so it is back to the file's own literal.
     const bool shower_ish = shower->get_flag_shower() ||
-        (shower->get_total_length() < m_pi0_mu_shower_max_len && ss && seg_dir_weak(ss));
+        (shower->get_total_length() < 40 * units::cm && ss && seg_dir_weak(ss));
     if (!shower_ish) {
         if (pr132_pi0_dbg())
             std::fprintf(stderr, "PI0_PAIR K20 mu-reject sh=%d why=trackish len=%.1f\n",
@@ -7272,49 +7268,17 @@ void PatternAlgorithms::id_pi0_with_vertex(int& acc_segment_id, IndexedShowerSet
     // Covers all showers reachable through map_vertex_to_shower.
     std::map<ShowerPtr, std::pair<VertexPtr,int>> svc;  // {start_vertex, conn_type}
     std::map<ShowerPtr, double>                   kqc;  // kine_charge
-    // doc pr/141 (M1): price a mu-typed pi0 candidate under the SHOWER
-    // hypothesis.  A shower carrying no shower flag is converted with the
-    // TRACK recombination and fudge (NeutrinoEnergyReco.cxx:337-342), and the
-    // conversion is a pure division -- overall / recom / fudge (:188) -- so the
-    // SAME collected charge under the shower hypothesis is an exact global
-    // ratio, with nothing re-measured:
-    //     E_shower = E_track * (recom_track  * fudge_track)
-    //                        / (recom_shower * fudge_shower)
-    // At the SBND production factors that is (0.87*0.95)/(0.58*0.86) = 1.657.
-    // Scope is the K20 class exactly -- |pdg| == 13 with no shower flag, i.e.
-    // the objects pi0_mu_shower_admit lets into the disconnected pool.  K20
-    // already re-stamps accepted members EM, but that happens AFTER the mass
-    // window has judged the pair, so a true gamma typed 13 is rejected on a
-    // track-priced mass and never reaches the re-stamp.  Measured (doc pr/141):
-    // of the six mu-typed 40-80 cm candidates in the 239-event population, ZERO
-    // can form an in-window pair at the track price and three can at the shower
-    // price.  false (default) = byte-identical.
-    auto mu_hyp = [&](const ShowerPtr& sh, double kq) -> double {
-        if (!m_pi0_mu_shower_hypothesis || !sh) return kq;
-        if (sh->get_flag_shower()) return kq;
-        if (std::abs(sh->get_particle_type()) != 13) return kq;
-        // doc pr/141 M3.  Scope the re-pricing to the objects the RAISED
-        // admission bound newly lets in, leaving the legacy K20 population at
-        // the track price.  Measured reason (doc pr/141 sec 9): re-pricing the
-        // legacy <40 cm population moved the greedy partner choice and broke
-        // the one pi0 K20 was shipped to rescue -- 166870, where 85045 goes
-        // 38.6 -> 63.9 MeV and its accepted partner switches 87058 (m=116.9,
-        // the hand pair) -> 10074 (m=138.8).  Census 35 -> 34.  0 (default) =
-        // no floor = every mu-typed object re-priced = the M1 v1 behaviour.
-        if (sh->get_total_length() < m_pi0_mu_shower_hyp_min_len) return kq;
-        const double den = m_kine_charge.shower_recom_factor * m_kine_charge.shower_fudge_factor;
-        if (den <= 0) return kq;
-        const double r = (m_kine_charge.recom_factor * m_kine_charge.fudge_factor) / den;
-        if (pr132_pi0_dbg())
-            std::fprintf(stderr, "PI0_PAIR M1 mu-hyp sh=%d E=%.1f -> %.1f (x%.3f)\n",
-                         pr132_pi0_shid(sh), kq / units::MeV, kq * r / units::MeV, r);
-        return kq * r;
-    };
+    // doc 77 round 4: pr/141's M1 re-pricing of mu-typed pi0 candidates under
+    // the SHOWER recombination+fudge (and M3's length floor on it) is retired
+    // -- M1 was a REGRESSION, census 35 -> 34, because it moved the greedy
+    // partner choice and broke 166870, the very event K20 was shipped to
+    // rescue (doc pr/141 sec 9.1).  Every shower keeps the price its own type
+    // gives it, as production always did.
     for (auto& [vtx, shower_set] : map_vertex_to_shower) {
         for (auto sh : shower_set) {
             if (!svc.count(sh)) {
                 svc[sh] = sh->get_start_vertex_and_type();
-                kqc[sh] = mu_hyp(sh, sh->get_kine_charge());
+                kqc[sh] = sh->get_kine_charge();
             }
         }
     }
@@ -7325,7 +7289,7 @@ void PatternAlgorithms::id_pi0_with_vertex(int& acc_segment_id, IndexedShowerSet
     };
     auto get_kq = [&](ShowerPtr sh) -> double {
         auto it = kqc.find(sh);
-        return it != kqc.end() ? it->second : mu_hyp(sh, sh->get_kine_charge());
+        return it != kqc.end() ? it->second : sh->get_kine_charge();
     };
     // doc pr/132 round 10: associate-cloud centroids, computed lazily and
     // ONLY under the angle tape (pointer-keyed map, lookup-only).
@@ -8035,31 +7999,11 @@ void PatternAlgorithms::id_pi0_with_vertex(int& acc_segment_id, IndexedShowerSet
             svc[shower_2] = {vtx, 2};
         }
 
-        // doc pr/132 round 4 (K15): re-seat the accepted conn-2 start on the
-        // ASSOCIATE cloud.  The conn-2 derivation in calculate_kinematics
-        // reads the "fit" cloud, which for a rescued ex-track shower covers
-        // the track core only -- 169626's gamma start landed 13.4 cm deep
-        // (owner scan, sec 10.8).  Move the start to the associate-cloud
-        // point nearest the accepted vertex when that is a real improvement.
-        // false (default) = byte-identical.
-        if (m_pi0_reseat_start_assoc) {
-            for (const auto& rsh : {shower_1, shower_2}) {
-                auto [rsv, rct] = rsh->get_start_vertex_and_type();
-                if (rct != 2 || !rsv) continue;
-                const WireCell::Point vp = rsv->fit().valid() ? rsv->fit().point : rsv->wcpt().point;
-                auto [d_assoc, p_assoc] = shower_get_closest_point(*rsh, vp, "associate_points");
-                if (d_assoc < 0) continue;
-                const double d_cur = (rsh->get_start_point() - vp).magnitude();
-                const double moved = (rsh->get_start_point() - p_assoc).magnitude();
-                if (moved > 1.0 * units::cm && d_assoc < d_cur) {
-                    if (pr132_pi0_dbg())
-                        std::fprintf(stderr, "PI0_PAIR P1 reseat sh=%d moved=%.1f d_cur=%.1f d_assoc=%.1f\n",
-                                     pr132_pi0_shid(rsh), moved / units::cm,
-                                     d_cur / units::cm, d_assoc / units::cm);
-                    rsh->set_start_point(p_assoc);
-                }
-            }
-        }
+        // doc 77 round 4: pr/132's K15 (re-seat an accepted conn-2 start on
+        // the ASSOCIATE cloud) is retired.  It fired 22 times with the census
+        // identical and no hand-pi0 effect -- 169626's 13.4 cm start bias is
+        // charge the shower does not contain, not a wrong cloud choice
+        // (pr/132 sec 11.3).  Starts stay on the fit cloud.
 
         SPDLOG_LOGGER_TRACE(s_log, "examine_showers: Pi0 found with mass: {} MeV with {} MeV + {} MeV",
             mass_save / units::MeV, shower_1->get_kine_charge() / units::MeV, shower_2->get_kine_charge() / units::MeV);
@@ -8320,21 +8264,13 @@ void PatternAlgorithms::id_pi0_without_vertex(int& acc_segment_id, IndexedShower
         if (it != map_vertex_to_shower.end()) {
             for (auto shower : it->second) {
                 if (pi0_showers.find(shower) != pi0_showers.end()) {
-                    // doc pr/132 round 4 (K14): the legacy early-return
-                    // abandons path 2 the moment ANY main-vertex shower is
-                    // already pi0-paired -- for an NC pi0 whose nu vertex is
-                    // mis-seated inside a shower arm (owner scan: 76346),
-                    // path 1 pairs at the WRONG vertex first and this return
-                    // then blocks the vertex correction.  The knob skips the
-                    // paired shower instead (the ray pool below already
-                    // excludes pi0_showers members), letting path 2 run on
-                    // the remainder.  false (default) = byte-identical.
-                    if (m_pi0_nv_retry_paired) {
-                        if (pr132_pi0_dbg())
-                            std::fprintf(stderr, "PI0_PAIR P2 skip=paired sh=%d\n",
-                                         pr132_pi0_shid(shower));
-                        continue;
-                    }
+                    // Path 2 is abandoned the moment ANY main-vertex shower
+                    // is already pi0-paired.  doc 77 round 4: pr/132's K14,
+                    // which skipped the paired shower and let path 2 run on
+                    // the remainder, is retired -- the mechanism worked but
+                    // its 239-event ledger was 0 rescues (pr/132 sec 11.2:
+                    // path 1 consumes the gammas first, an ordering lock the
+                    // retry cannot reach).
                     if (pr132_pi0_dbg()) {
                         int n_left = 0;
                         for (auto sh2 : it->second)
@@ -8468,11 +8404,12 @@ void PatternAlgorithms::id_pi0_without_vertex(int& acc_segment_id, IndexedShower
             if (pi0_showers.find(shower) != pi0_showers.end()) continue;
 
             auto [start_vtx, conn_type] = shower->get_start_vertex_and_type();
-            // doc pr/132 K4: legacy pool is conn_type==3 only (prototype
-            // NeutrinoID_shower_clustering.h:514); the knob also admits
-            // conn_type==2 (vertex-associated but detached) showers.
-            // false (default) = byte-identical.
-            const bool ct_ok = (conn_type == 3) || (m_pi0_nv_allow_type2 && conn_type == 2);
+            // The pool is conn_type==3 only (prototype
+            // NeutrinoID_shower_clustering.h:514).  doc 77 round 4: pr/132's
+            // K4, which also admitted conn_type==2, is retired -- the P2
+            // family measured ZERO NC rescues over two rounds and its only
+            // new acceptances were ADVERSE vertex-draggers (pr/132 sec 6.3).
+            const bool ct_ok = (conn_type == 3);
             if (!ct_ok) {
                 if (pr132_pi0_dbg())
                     std::fprintf(stderr, "PI0_PAIR P2 rayreject src=other sh=%d ct=%d E=%.1f\n",
@@ -8820,26 +8757,6 @@ void PatternAlgorithms::id_pi0_without_vertex(int& acc_segment_id, IndexedShower
             shower_2->set_start_vertex(main_vertex, 2);
             shower_2->calculate_kinematics(particle_data, recomb_model, m_shower_endpoint_exclude_start_vertex, m_shower_endpoint_skip_orphan_vtx);
 
-            // doc pr/132 round 4 (K15): associate-cloud start re-seat -- same
-            // rationale as the path-1 site (169626 is a PATH-2 acceptance).
-            if (m_pi0_reseat_start_assoc) {
-                for (const auto& rsh : {shower_1, shower_2}) {
-                    auto [rsv, rct] = rsh->get_start_vertex_and_type();
-                    if (rct != 2 || !rsv) continue;
-                    const WireCell::Point vp = rsv->fit().valid() ? rsv->fit().point : rsv->wcpt().point;
-                    auto [d_assoc, p_assoc] = shower_get_closest_point(*rsh, vp, "associate_points");
-                    if (d_assoc < 0) continue;
-                    const double d_cur = (rsh->get_start_point() - vp).magnitude();
-                    const double moved = (rsh->get_start_point() - p_assoc).magnitude();
-                    if (moved > 1.0 * units::cm && d_assoc < d_cur) {
-                        if (pr132_pi0_dbg())
-                            std::fprintf(stderr, "PI0_PAIR P2 reseat sh=%d moved=%.1f d_cur=%.1f d_assoc=%.1f\n",
-                                         pr132_pi0_shid(rsh), moved / units::cm,
-                                         d_cur / units::cm, d_assoc / units::cm);
-                        rsh->set_start_point(p_assoc);
-                    }
-                }
-            }
 
             update_shower_maps(showers, map_vertex_in_shower, map_segment_in_shower,
                               map_vertex_to_shower, used_shower_clusters);

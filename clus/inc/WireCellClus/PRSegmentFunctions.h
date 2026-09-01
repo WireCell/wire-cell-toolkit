@@ -146,24 +146,19 @@ namespace WireCell::Clus::PR {
     /// shower) from "isolated and sparse" (noise fragments).  Pure
     /// predicate, all lengths internal units.
     ///
-    /// doc sbnd_xin/docs/pr/102 P1 (pr/67 sec 10.3 S1 / pr/96 sec 7 F1):
-    /// two additional OR-disjuncts, each inert at its 0 default so every
-    /// pre-pr/102 call site stays byte-identical:
-    ///  - min_nnf > 0: admit a candidate below the min_points floor when its
-    ///    number_not_faked (terminals with >=2 planes clear of every
-    ///    existing segment, computed at the step-8 call site and previously
-    ///    thrown away) is at least min_nnf AND track_length >= min_length.
-    ///    Sized against the pr/54 sec 13 noise components (nnf = 0 at both
-    ///    pr/102 nnf0_short drops) vs 18255-70084's candidate (nnf 10/12).
+    /// doc sbnd_xin/docs/pr/102 P1 (pr/96 sec 7 F1): one additional
+    /// OR-disjunct, inert at its 0 default so every pre-pr/102 call site
+    /// stays byte-identical:
     ///  - len_admit > 0: admit any candidate whose fitted track_length is at
     ///    least len_admit regardless of terminal count.  min_points counts
     ///    STEINER TERMINALS, not size: pr/102 sec 4 B1 measured 67-145 cm
     ///    candidates dropped at 16-23 terminals against the 25 floor, while
     ///    the noise population the floor was sized on is <= 10 cm.
+    /// doc 77 round 4: P1's other disjunct (min_nnf, with its nnf argument)
+    /// was removed -- validation FAILED at 4 and it never left 0.
     bool other_seg_keep_isolated_ok(bool keep_isolated, int component_points,
                                     double track_length, int min_points,
                                     double min_length,
-                                    int nnf = -1, int min_nnf = 0,
                                     double len_admit = 0.0);
 
     /// doc sbnd_xin/docs/pr/51 (main-vertex graph audit): fraction of pts_a
@@ -318,9 +313,6 @@ namespace WireCell::Clus::PR {
     ///   byte-identical.  Calibrated operating point 30.0 (margins -8.7% /
     ///   +8.3% against the 11 owner verdicts; the -1 cm extent offset is the
     ///   sec 10.3 in-code recalibration that keeps 64503 vetoed).
-    /// - r3_turn (deg) / r3_hot (x mip_dqdx_median): options for
-    ///   segment_chain_turn_break_scan (route R3, doc pr/90 sec 9.5 D3);
-    ///   unused by segment_two_end_break_scan itself.  Both > 0 enables R3.
     struct TwoEndBreakOptions {
         double mip_dqdx{50000/units::cm};
         double mip_dqdx_median{43000/units::cm};
@@ -339,8 +331,6 @@ namespace WireCell::Clus::PR {
         double turn_skirt{3*units::cm};
         double turn_min_arm_frac{0.0};
         double bragg_veto_turn{0.0};
-        double r3_turn{0.0};
-        double r3_hot{0.0};
     };
 
     /// Result of segment_two_end_break_scan.  `found` is the overall accept
@@ -354,9 +344,6 @@ namespace WireCell::Clus::PR {
         bool   found{false};
         bool   route1{false};
         bool   route2{false};
-        /// Route R3 (segment_chain_turn_break_scan) accept; exclusive with
-        /// route1/route2 (a scan call runs either R1/R2 or R3, never both).
-        bool   route3{false};
         int    break_idx{-1};
         int    idx_dip{-1};
         int    idx_turn{-1};
@@ -411,29 +398,11 @@ namespace WireCell::Clus::PR {
         SegmentPtr seg, const Clus::ParticleDataSet::pointer& particle_data,
         const TwoEndBreakOptions& opt = {});
 
-    /// doc sbnd_xin/docs/pr/90 sec 9.5 D3 -- route R3: the turn+activity
-    /// junction scan for CHAIN-admitted candidates (the owner's "still a
-    /// line, no 3-track vertex" class: muon->Michel 172832, 2-track 61681).
-    /// Their junction signature is the opposite of the two-Bragg valley R1/R2
-    /// look for: a BRIGHT vertex-activity spot (measured 2.50x / 3.1x MIP at
-    /// the clicks) coincident with a LOCAL 10 cm-baseline turn (t10 plateau
-    /// 19-23.5 deg / climb to 54 deg, vs a 5-7 deg mid-track baseline), while
-    /// the production 35 cm turn averages the corner away (18.3 deg < 25) and
-    /// the deepest dip is an ordinary MIP fluctuation (0.77x).  Candidate
-    /// indices: arm_ok (min_arm/min_arm_pts) AND
-    /// t10 = segment_wide_turn_angle(fits, k, turn_skirt, 10 cm) >= r3_turn
-    /// AND max dQ/dx within +-2 cm arclength >= r3_hot x mip_dqdx_median.
-    /// Winner: largest t10 (ties: smaller index) with a WELL-FORMED
-    /// preference tier (both t10 windows fully achievable) ahead of the
-    /// unrestricted tier -- a starved near-end t10 window reads jitter AND
-    /// can sit on genuinely bright EM charge (172832's Michel end), so the
-    /// activity corroboration alone cannot guard it; refined to the +-2 cm
-    /// activity argmax (ties: smaller index) subject to arm_ok.
-    /// Returns route3/found/break_idx/turn_deg (t10 at the winning index)
-    /// and arm lengths; every other member stays at its default.  Pure
-    /// measurement, deterministic.  Never call with r3_turn or r3_hot <= 0.
-    TwoEndBreakResult segment_chain_turn_break_scan(
-        SegmentPtr seg, const TwoEndBreakOptions& opt);
+    /// doc 77 round 4: route R3 (segment_chain_turn_break_scan, doc pr/90
+    /// sec 9.5 D3 -- the turn+activity junction scan for chain-admitted
+    /// candidates) was removed with the teb_chain_topology / teb_r3_* knobs
+    /// that were its only entry point; the D1+D3 A/B was net NEGATIVE
+    /// (pr/90 sec 10.6).  See sbnd_xin/docs/77_knob-ledger.tsv.
 
     /// Calculate track length from segment
     ///

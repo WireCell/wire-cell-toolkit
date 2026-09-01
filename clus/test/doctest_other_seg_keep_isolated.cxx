@@ -39,37 +39,23 @@ TEST_CASE("pr54 keep-isolated: knob on separates well-supported from sparse")
     CHECK_FALSE(other_seg_keep_isolated_ok(true, MIN_POINTS - 1, MIN_LENGTH, MIN_POINTS, MIN_LENGTH));
 }
 
-// doc sbnd_xin/docs/pr/102 P1 -- the two OR-disjuncts.
-TEST_CASE("pr102 keep-isolated: nnf disjunct admits well-measured below the terminal floor")
-{
-    // 18255-70084's candidate: 12 terminals, nnf 10 -- below the 25 floor,
-    // admitted at min_nnf 4 (the pr/67 sec 10.3 scan centre).
-    CHECK(other_seg_keep_isolated_ok(true, 12, 8.8 * units::cm, MIN_POINTS, MIN_LENGTH, 10, 4, 0.0));
-    // pr/54 sec 13 noise: nnf 0 at both pr/102 nnf0_short drops -- stays out.
-    CHECK_FALSE(other_seg_keep_isolated_ok(true, 12, 8.8 * units::cm, MIN_POINTS, MIN_LENGTH, 0, 4, 0.0));
-    // min_length still applies on the nnf path: a 2 cm stub stays out.
-    CHECK_FALSE(other_seg_keep_isolated_ok(true, 12, 2.0 * units::cm, MIN_POINTS, MIN_LENGTH, 10, 4, 0.0));
-    // Disjunct inert at its 0 default, whatever nnf reads.
-    CHECK_FALSE(other_seg_keep_isolated_ok(true, 12, 8.8 * units::cm, MIN_POINTS, MIN_LENGTH, 10, 0, 0.0));
-    // Boundary inclusive.
-    CHECK(other_seg_keep_isolated_ok(true, 12, 8.8 * units::cm, MIN_POINTS, MIN_LENGTH, 4, 4, 0.0));
-    CHECK_FALSE(other_seg_keep_isolated_ok(true, 12, 8.8 * units::cm, MIN_POINTS, MIN_LENGTH, 3, 4, 0.0));
-}
-
+// doc sbnd_xin/docs/pr/102 P1 -- the length OR-disjunct.  doc 77 round 4
+// retired P1's other disjunct (the nnf one) and took its TEST_CASE with it:
+// the knob's validation FAILED at 4 and it never left 0 in any config.
 TEST_CASE("pr102 keep-isolated: length disjunct admits long candidates at any terminal count")
 {
     const double LEN_ADMIT = 30.0 * units::cm;
     // pr/102 sec 4 B1: 145.5 cm at 23 terminals, 67.1 cm at 16 -- admitted.
-    CHECK(other_seg_keep_isolated_ok(true, 23, 145.5 * units::cm, MIN_POINTS, MIN_LENGTH, 0, 0, LEN_ADMIT));
-    CHECK(other_seg_keep_isolated_ok(true, 16, 67.1 * units::cm, MIN_POINTS, MIN_LENGTH, 0, 0, LEN_ADMIT));
+    CHECK(other_seg_keep_isolated_ok(true, 23, 145.5 * units::cm, MIN_POINTS, MIN_LENGTH, LEN_ADMIT));
+    CHECK(other_seg_keep_isolated_ok(true, 16, 67.1 * units::cm, MIN_POINTS, MIN_LENGTH, LEN_ADMIT));
     // The pr/54 noise population is <= 10 cm: stays out at the same setting.
-    CHECK_FALSE(other_seg_keep_isolated_ok(true, 10, 10.0 * units::cm, MIN_POINTS, MIN_LENGTH, 0, 0, LEN_ADMIT));
+    CHECK_FALSE(other_seg_keep_isolated_ok(true, 10, 10.0 * units::cm, MIN_POINTS, MIN_LENGTH, LEN_ADMIT));
     // Disjunct inert at its 0 default.
-    CHECK_FALSE(other_seg_keep_isolated_ok(true, 23, 145.5 * units::cm, MIN_POINTS, MIN_LENGTH, 0, 0, 0.0));
+    CHECK_FALSE(other_seg_keep_isolated_ok(true, 23, 145.5 * units::cm, MIN_POINTS, MIN_LENGTH, 0.0));
     // Boundary inclusive.
-    CHECK(other_seg_keep_isolated_ok(true, 1, LEN_ADMIT, MIN_POINTS, MIN_LENGTH, 0, 0, LEN_ADMIT));
+    CHECK(other_seg_keep_isolated_ok(true, 1, LEN_ADMIT, MIN_POINTS, MIN_LENGTH, LEN_ADMIT));
     // Knob-off master switch still discards everything.
-    CHECK_FALSE(other_seg_keep_isolated_ok(false, 23, 145.5 * units::cm, MIN_POINTS, MIN_LENGTH, 10, 4, LEN_ADMIT));
+    CHECK_FALSE(other_seg_keep_isolated_ok(false, 23, 145.5 * units::cm, MIN_POINTS, MIN_LENGTH, LEN_ADMIT));
 }
 
 TEST_CASE("pr102 keep-isolated: pre-pr/102 call shape unchanged (default args)")

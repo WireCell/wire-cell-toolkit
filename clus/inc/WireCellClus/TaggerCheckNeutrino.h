@@ -131,14 +131,14 @@ public:
         // teb_turn_angle on its own; otherwise the legacy argmax (starved
         // near-end candidates included) stands.  0 = legacy.
         // doc 77 round 1 (2026-08-24): teb_second_max removed -- negative on
-        // its own motivating events (pr/90 sec 8.5), superseded by
-        // teb_chain_topology below.  See sbnd_xin/docs/77_knob-ledger.tsv.
+        // its own motivating events (pr/90 sec 8.5); its successor
+        // teb_chain_topology was itself retired in doc 77 round 4, also
+        // negative.  See sbnd_xin/docs/77_knob-ledger.tsv.
         double m_teb_turn_min_arm_frac{0.0};
-        // doc pr/90 round 4 (sec 9.5 D1/D3/D4); all default OFF =>
-        // byte-identical.  See the PatternAlgorithms member block.
-        bool   m_teb_chain_topology{false};
-        double m_teb_r3_turn{0.0};       // deg; <= 0 disables route R3
-        double m_teb_r3_hot{0.0};        // x mip_dqdx_median; <= 0 disables route R3
+        // doc pr/90 round 4 (sec 9.5 D4).  D1 (teb_chain_topology) and D3
+        // (teb_r3_turn / teb_r3_hot, and route R3 itself) were retired in
+        // doc 77 round 4: net NEGATIVE, 19 ADVERSE vs 6 toward (pr/90 sec
+        // 10.6).  D4 below is PRODUCTION ON.
         double m_teb_bragg_veto_turn{0.0}; // deg; <= 0 disables the R2 bragg veto
         // 59335 fix (a): the local-dQ/dx walk gate also stops the C4 /
         // straightness (flag_search) accepts.  false => byte-identical.
@@ -221,7 +221,6 @@ public:
         double m_mvga_proj_dup_frac{0.0};  // 2nd-best per-view overlap threshold for the projective dup collapse (doc pr/83 r4); 0 = disabled, byte-identical
         double m_mvga_proj_dqdx_ratio{0.4}; // stem dQ/dx asymmetry gate for the same pass (doc pr/83 r4); inert while frac == 0
         double m_mvga_proj_angle{0.0};    // deg; op1-proj chord-angle ceiling (doc pr/83 r4b); 0 = use mvga_dup_angle, byte-identical
-        double m_mvga_ac_veto_radius{0.0};  // cm; op3.5-only collapse-chord charge-veto radius (doc pr/99 round 2); 0 = legacy straighten_radius rule, byte-identical
         double m_mvga_ac_chord_max{0.0};    // cm; op3.5 replacement-chord length cap (doc pr/99 round 2); 0 = no cap, byte-identical
         bool   m_mvga_ac_no_cascade{false}; // op3.5: skip candidates touching `created` products (doc pr/99 round 2); false = byte-identical
         double m_mvga_passthru{0.0};        // cm; op0 pass-through split radius (doc pr/103, SBND 18255-405707): a prong of a junction J within this radius of the main vertex whose interior passes through the main vertex is split there; 0 = off, byte-identical
@@ -291,9 +290,10 @@ public:
         bool   m_other_seg_keep_isolated{false};
         int    m_other_seg_keep_isolated_min_points{25};
         double m_other_seg_keep_isolated_min_length{3.0}; // cm; scaled at copy
-        // doc sbnd_xin/docs/pr/102 P1 -- OR-disjuncts on the keep above
-        // (design block at NeutrinoPatternBase.h).  0 = off, byte-identical.
-        int    m_other_seg_keep_isolated_min_nnf{0};
+        // doc sbnd_xin/docs/pr/102 P1 -- the length OR-disjunct on the keep
+        // above (design block at NeutrinoPatternBase.h).  0 = off,
+        // byte-identical.  P1's min_nnf disjunct was retired in doc 77 round
+        // 4: validation FAILED at 4, with a named nue loss at 8.
         double m_other_seg_keep_isolated_len_admit{0.0}; // cm; scaled at copy
         // doc sbnd_xin/docs/pr/67 round 3 (S2) -- size gate on the isochronous
         // snap in find_other_segments.  Legacy 10 cm; lowering it lets a short
@@ -973,15 +973,12 @@ public:
         double m_pi0_mass_offset{10.0};                             // doc pr/132 K1; MeV, the finders' "+10" window offset
         double m_pi0_assoc_angle_deg{30.0};                         // doc pr/132 K2; deg, disconnected<->vertex association cut
         double m_pi0_attached_partner_min_mev{0.0};                 // doc pr/132 K3; MeV, 0 = no nueCC-fake guard
-        bool   m_pi0_nv_allow_type2{false};                         // doc pr/132 K4; false = without-vertex pool is conn_type 3 only
         int    m_pi0_nv_max_prongs{2};                              // doc pr/132 K5; without-vertex GATE1 prong cap
         bool   m_pi0_readmit_retyped{false};                        // doc pr/132 K7; readmit hadronic-retyped showers into pi0 pairing
         bool   m_pi0_admit_type3{false};                            // doc pr/132 K8; admit conn_type-3 showers into the with-vertex pool
         double m_pi0_crumb_assoc_mev{0.0};                          // doc pr/132 K9; MeV, 0 = crumbs keep the association-angle test
         double m_pi0_collinear_merge_deg{0.0};                      // doc pr/132 K12; deg, 0 = pairing sees each detached fragment alone
         double m_pi0_nv_partner_min_mev{0.0};                       // doc pr/132 K13; MeV, 0 = no path-2 partner floor
-        bool   m_pi0_nv_retry_paired{false};                        // doc pr/132 K14; false = legacy path-2 early return on any paired main-vertex shower
-        bool   m_pi0_reseat_start_assoc{false};                     // doc pr/132 K15; false = conn-2 starts stay on the fit cloud
         double m_shower_em_collinear_deg{0.0};                      // doc pr/132 K16; deg, 0 = no build-time EM collinear merge
         double m_shower_em_collinear_dis_cm{60.0};                  // doc pr/132 K16; cm, host->fragment reach
         double m_shower_em_collinear_host_mev{20.0};                // doc pr/132 K16; MeV, host floor
@@ -990,9 +987,6 @@ public:
         double m_pi0_accept_merge_dis_cm{0.0};                      // doc pr/132 K18; cm, 0 = no acceptance-aware fragment merge
         double m_pi0_bp_vertex_miss_cm{0.0};                        // doc pr/132 K19; cm, 0 = no back-projection NC vertex proposer
         bool   m_pi0_admit_muon_showers{false};                     // doc pr/133 K20; admit shower-topology mu-typed objects into the pi0 pools
-        bool   m_pi0_mu_shower_hypothesis{false};                   // doc pr/141 M1; price mu-typed pi0 candidates under the SHOWER recombination+fudge
-        double m_pi0_mu_shower_max_len{-1};                         // doc pr/141 M2; cm; K20 shower-ish length bound, <0 => C++ default 40 cm
-        double m_pi0_mu_shower_hyp_min_len{-1};                     // doc pr/141 M3; cm; length floor for M1 re-pricing, <0 => C++ default 0 (no floor)
         double m_pi0_nc_sig_angle_deg{0.0};                         // doc pr/133 K21; deg, 0 = off; owner NC signature for the bp proposer
         double m_pi0_nc_floor_mev{0.0};                             // doc pr/133 K21 v2; MeV, 0 = legacy 20; signature-mode partner floor
         double m_pi0_nc_pf_assoc_deg{0.0};                          // doc pr/133 K21 v2.2; deg, 0 = off; post-fire PF association cone

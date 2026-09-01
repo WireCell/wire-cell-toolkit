@@ -29,16 +29,17 @@ struct Res_proto_segment {
 };
 
 // doc sbnd_xin/docs/pr/54 -- see the declaration in PRSegmentFunctions.h.
-// doc sbnd_xin/docs/pr/102 P1: nnf and length disjuncts, both inert at 0.
+// doc sbnd_xin/docs/pr/102 P1: the length disjunct, inert at 0.
+// doc 77 round 4: the pr/102 P1a nnf disjunct (and with it the nnf/min_nnf
+// parameters) retired -- validation FAILED at min_nnf 4 and the knob never
+// left 0.  The surviving disjuncts are textually the ones production ran.
 bool WireCell::Clus::PR::other_seg_keep_isolated_ok(bool keep_isolated, int component_points,
                                                     double track_length, int min_points,
                                                     double min_length,
-                                                    int nnf, int min_nnf, double len_admit)
+                                                    double len_admit)
 {
     if (!keep_isolated) return false;  // legacy discard, byte-identical
     if (component_points >= min_points && track_length >= min_length) return true;
-    // pr/102 P1a (pr/67 S1): well-measured below the terminal floor.
-    if (min_nnf > 0 && nnf >= min_nnf && track_length >= min_length) return true;
     // pr/102 P1b: a long fitted candidate is not noise at any terminal count.
     if (len_admit > 0 && track_length >= len_admit) return true;
     return false;
@@ -856,8 +857,6 @@ void PatternAlgorithms::find_other_segments(Graph& graph, Facade::Cluster& clust
                                                    kept_length,
                                                    m_other_seg_keep_isolated_min_points,
                                                    m_other_seg_keep_isolated_min_length,
-                                                   kept_nnf,
-                                                   m_other_seg_keep_isolated_min_nnf,
                                                    m_other_seg_keep_isolated_len_admit)) {
                         // doc pr/102 P1 sentinel: fires ONLY for an admission
                         // the legacy floors would have refused, so the events
@@ -865,13 +864,9 @@ void PatternAlgorithms::find_other_segments(Graph& graph, Facade::Cluster& clust
                         if (kept_points < m_other_seg_keep_isolated_min_points) {
                             SPDLOG_LOGGER_DEBUG(s_log,
                                 "pr102 keep-isolated-admit: cluster {} n_points={} nnf={} "
-                                "length={:.2f} cm reason={}",
+                                "length={:.2f} cm reason=len",
                                 cluster.get_cluster_id(), kept_points, kept_nnf,
-                                kept_length / units::cm,
-                                (m_other_seg_keep_isolated_min_nnf > 0 &&
-                                 kept_nnf >= m_other_seg_keep_isolated_min_nnf &&
-                                 kept_length >= m_other_seg_keep_isolated_min_length)
-                                    ? "nnf" : "len");
+                                kept_length / units::cm);
                         }
                         // Keep: add as a disconnected piece of this cluster's
                         // graph and refit jointly, exactly like the

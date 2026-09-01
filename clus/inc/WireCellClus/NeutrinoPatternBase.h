@@ -474,28 +474,23 @@ namespace WireCell::Clus::PR {
         // fallback (mirrors TwoEndBreakOptions::turn_min_arm_frac); 0 =
         // legacy argmax, byte-identical.
         // doc 77 round 1 (2026-08-24): m_teb_second_max removed -- negative
-        // on its own motivating events (pr/90 sec 8.5), superseded by
-        // m_teb_chain_topology below.  See sbnd_xin/docs/77_knob-ledger.tsv.
+        // on its own motivating events (pr/90 sec 8.5); its successor
+        // m_teb_chain_topology was itself retired in doc 77 round 4 (also
+        // negative, pr/90 sec 10.6), so nothing replaced it and the legacy
+        // n_long == 1 gate stands.  See sbnd_xin/docs/77_knob-ledger.tsv.
         double m_teb_turn_min_arm_frac{0.0};
-        // doc sbnd_xin/docs/pr/90 round 4 (sec 9.5) -- three default-OFF
-        // knobs for the round-3 residual classes:
-        // m_teb_chain_topology (D1): when n_long > 1, admit iff the
-        // cluster's segment graph is a simple path (the owner's "still a
-        // line, no 3-track vertex") and the candidate is the unique longest
-        // segment; chain-admitted candidates are scanned by route R3 only,
-        // so admission also requires both R3 knobs.  false = legacy gate,
-        // byte-identical.
-        // m_teb_r3_turn (deg) / m_teb_r3_hot (x m_mip_dqdx_median) (D3):
-        // route R3's local-turn threshold on the 10 cm-baseline turn and the
-        // +-2 cm vertex-activity corroboration floor
-        // (TwoEndBreakOptions::r3_turn / r3_hot).  <= 0 = R3 off.
+        // doc sbnd_xin/docs/pr/90 round 4 (sec 9.5).  D1
+        // (m_teb_chain_topology, the simple-path admission for n_long > 1)
+        // and D3 (m_teb_r3_turn / m_teb_r3_hot, route R3's local-turn and
+        // vertex-activity thresholds) were retired in doc 77 round 4: the
+        // D1+D3 live A/B was net NEGATIVE, 19 ADVERSE vs 6 toward with two
+        // cosmict flips (pr/90 sec 10.6).  Route R3 itself
+        // (segment_chain_turn_break_scan) went with them -- it was reachable
+        // only through D1.  D4 survives and is PRODUCTION ON:
         // m_teb_bragg_veto_turn (deg) (D4): veto an accepted R2 break whose
         // turn is below this when its short-arm end is not Bragg-consistent
         // (TwoEndBreakOptions::bragg_veto_turn; owner-calibrated keep/kill
         // rule, sec 9.4b).  <= 0 = off, byte-identical.
-        bool   m_teb_chain_topology{false};
-        double m_teb_r3_turn{0.0};
-        double m_teb_r3_hot{0.0};
         double m_teb_bragg_veto_turn{0.0};
 
         // m_kink_walk_dqdx_stop -- 59335 fix (a): forwarded to
@@ -791,14 +786,13 @@ namespace WireCell::Clus::PR {
         // 15.7 cm, max 338.5 cm vs the 5.8 cm design case) showed op3.5
         // off-envelope: it replaced a true 51 cm V with straight chords on
         // 285567 (the flip regression) and built 315167's 146 cm fake EM
-        // trunk.  Three independent guards, each 0/false = legacy:
-        // - ac_veto_radius: dedicated is_good_point radius for the COLLAPSE
-        //   chord's charge veto.  Production m_mvga_straighten_radius=1.0cm
-        //   (relaxed for the pr/86 R1 splice-straighten purpose) leaked into
-        //   the collapse veto; the prototype ancestor examine_structure_2
-        //   (NeutrinoID_examine_structure.h line ~131) checks
-        //   is_good_point(test_p, 0.2*units::cm, 0, 0).  > 0 => that radius
-        //   for op3.5 only (R1 splice-straighten keeps m_mvga_straighten_radius).
+        // trunk.  Three independent guards were built, each 0/false =
+        // legacy.  ac_veto_radius (a dedicated is_good_point radius for the
+        // COLLAPSE chord's charge veto, the prototype examine_structure_2
+        // 0.2 cm) was retired in doc 77 round 4: measured ADVERSE at 0.2 cm
+        // -- it kills the 349945 design case, re-confirming pr/86 Stage A's
+        // deliberate 1.0 cm relax (M15: the divergence is documented, not a
+        // bug).  The two that survive:
         // - ac_chord_max: decline a collapse whose replacement chord
         //   |vtx1-vtx2| exceeds this; the prototype capped the removed
         //   segment lengths at 5 cm (commented out in the ancestor, but the
@@ -806,7 +800,6 @@ namespace WireCell::Clus::PR {
         // - ac_no_cascade: never collapse a candidate whose sg1/sg2 is
         //   itself a `created` product (285567's second fire consumed its
         //   own nfits=0 chord, 53.6 -> 58.3 cm).
-        double m_mvga_ac_veto_radius{0};      ///< op3.5-only charge-veto radius, internal length units (doc pr/99 round 2); 0 = legacy (straighten_radius rule)
         double m_mvga_ac_chord_max{0};        ///< op3.5 replacement-chord length cap, internal length units (doc pr/99 round 2); 0 = no cap
         bool   m_mvga_ac_no_cascade{false};   ///< op3.5: skip candidates touching `created` products (doc pr/99 round 2); false = legacy
         double m_mvga_passthru{0};            ///< op0 pass-through split radius, internal length units (doc pr/103); 0 = off
@@ -1132,16 +1125,15 @@ namespace WireCell::Clus::PR {
         int    m_other_seg_keep_isolated_min_points{25};
         double m_other_seg_keep_isolated_min_length{3.0 * units::cm}; // internal units
 
-        // doc sbnd_xin/docs/pr/102 P1 -- two OR-disjuncts on the keep above,
-        // each inert at its 0 default (see other_seg_keep_isolated_ok in
-        // PRSegmentFunctions.h).  min_nnf admits a candidate below the
-        // 25-terminal floor when its number_not_faked is at least min_nnf
-        // (pr/67 sec 10.3 S1: 18255-70084's candidate read nnf 10/12 against
-        // pr/54 sec 13 noise at nnf 0); len_admit admits any candidate whose
+        // doc sbnd_xin/docs/pr/102 P1 -- an OR-disjunct on the keep above,
+        // inert at its 0 default (see other_seg_keep_isolated_ok in
+        // PRSegmentFunctions.h).  len_admit admits any candidate whose
         // fitted track is at least that long (pr/102 sec 4 B1: 67-145 cm
         // candidates dropped at 16-23 terminals -- the floor counts STEINER
         // TERMINALS, not size, and the noise it was sized on is <= 10 cm).
-        int    m_other_seg_keep_isolated_min_nnf{0};                    // 0 = off
+        // P1's other disjunct, min_nnf, was retired in doc 77 round 4: its
+        // validation FAILED at 4 (nueCC48 nue ledger -4/+1) and it carried a
+        // named nue loss at 8 (pr/102 sec 8.3), so it never left 0.
         double m_other_seg_keep_isolated_len_admit{0.0 * units::cm};    // 0 = off; internal units
 
         // doc sbnd_xin/docs/pr/102 P2 -- the B2 family (Steiner
@@ -2225,20 +2217,23 @@ namespace WireCell::Clus::PR {
         // doc pr/132: pi0-finder knobs (owner round 2026-08-29).  Defaults
         // reproduce the legacy hard-coded constants => byte-identical.
         double m_pi0_mass_offset{10 * units::MeV};       ///< doc pr/132 K1; the finders' "+10 MeV" window offset (both paths)
-        bool m_pi0_mu_shower_hypothesis{false};          ///< doc pr/141 M1; price mu-typed pi0 candidates (no shower flag, |pdg|==13) under the SHOWER recombination+fudge inside id_pi0_with_vertex.  false = legacy = byte-identical.
-        double m_pi0_mu_shower_max_len{40 * units::cm};   ///< doc pr/141 M2; K20's "shower-ish muon" length bound, exposed as a knob.  40 cm = the shipped literal = byte-identical.
-        double m_pi0_mu_shower_hyp_min_len{0.0};         ///< doc pr/141 M3; length floor (cm) below which M1 leaves the track price alone.  0 = no floor = re-price every mu-typed object.
+        // doc 77 round 4: pr/141's M1/M2/M3 (mu-typed shower re-pricing, the
+        // K20 length bound, the re-pricing floor) retired -- M1 was a
+        // regression (census 35 -> 34, breaking K20's own justifying event
+        // 166870), M2 inert, M3 moot.  K20's 40 cm bound is back to the
+        // literal it always was.  See sbnd_xin/docs/77_knob-ledger.tsv.
         double m_pi0_assoc_angle_deg{30.0};              ///< doc pr/132 K2; deg, disconnected-shower <-> candidate-vertex association
         double m_pi0_attached_partner_min{0};            ///< doc pr/132 K3; 0 = off; min partner energy when the attached member sits at the MAIN vertex
-        bool   m_pi0_nv_allow_type2{false};              ///< doc pr/132 K4; admit conn_type==2 showers into the without-vertex ray pool
         int    m_pi0_nv_max_prongs{2};                   ///< doc pr/132 K5; without-vertex GATE1 prong cap (legacy 2)
         bool   m_pi0_readmit_retyped{false};             ///< doc pr/132 K7; readmit A5 hadronic-retyped showers into pi0 pairing (accepted members re-stamped EM)
         bool   m_pi0_admit_type3{false};                 ///< doc pr/132 K8; admit conn_type==3 showers into the with-vertex disconnected pool
         double m_pi0_crumb_assoc_max{0};                 ///< doc pr/132 K9; 0 = off; below this energy a disconnected shower skips the association-angle test
         double m_pi0_collinear_merge_deg{0};             ///< doc pr/132 K12; deg, 0 = off; with-vertex pairing virtually merges detached fragments within this vertex-ray cone (real absorb on accept)
         double m_pi0_nv_partner_min{0};                  ///< doc pr/132 K13; internal energy units, 0 = off; path-2 selection skips pairs whose smaller member is below this
-        bool   m_pi0_nv_retry_paired{false};             ///< doc pr/132 K14; path-2 skips an already-pi0-paired main-vertex shower instead of abandoning the whole pass
-        bool   m_pi0_reseat_start_assoc{false};          ///< doc pr/132 K15; re-seat accepted conn-2 pi0 shower starts on the associate cloud (fit-cloud bias, 169626)
+        // doc 77 round 4: pr/132's K4 (conn_type-2 admission), K14 (path-2
+        // retry past a paired main-vertex shower) and K15 (associate-cloud
+        // start re-seat) retired -- the P2 family measured ZERO NC rescues
+        // over two rounds and K15 moved nothing (pr/132 sec 11.2/11.3).
         double m_em_collinear_merge_deg{0};              ///< doc pr/132 K16 (round 5); deg, 0 = off; build-time EM collinear-fragment merge axis cone
         double m_em_collinear_merge_dis{60 * units::cm}; ///< doc pr/132 K16; max host-start -> fragment-start distance
         double m_em_collinear_merge_min_host{20 * units::MeV};  ///< doc pr/132 K16; hosts below this never absorb

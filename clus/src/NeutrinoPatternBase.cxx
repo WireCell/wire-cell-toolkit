@@ -3018,55 +3018,12 @@ bool PatternAlgorithms::break_two_end_dqdx(Graph& graph, Facade::Cluster& cluste
             cand = sg;
         }
     }
-    bool admitted_chain = false;
-    if (n_long != 1) {
-        // doc sbnd_xin/docs/pr/90 sec 9.5 D1 (knob teb_chain_topology): the
-        // owner's actual admission criterion for the 172832/61681 class --
-        // "this is still a line, no 3-track vertex".  When n_long > 1, admit
-        // iff the cluster's segment graph is a SIMPLE PATH (every vertex
-        // degree <= 2 and a single connected chain: n_vertices = n_edges + 1)
-        // and the candidate is the STRICTLY unique longest segment.  A
-        // genuine multi-prong vertex (any degree-3 vertex) never qualifies.
-        // Chain-admitted candidates go to route R3 ONLY (segment_chain_turn_
-        // break_scan below) -- the legacy dip route on this class breaks at
-        // an ordinary MIP fluctuation (sec 8.5's ADVERSE) -- so admission
-        // additionally requires the R3 knobs.  All knobs off => this branch
-        // unreachable, byte-identical.
-        if (m_teb_chain_topology && m_teb_r3_turn > 0 && m_teb_r3_hot > 0 && n_long > 1) {
-            // Degree census over this cluster's edges.  The map is keyed by
-            // (pointer-valued) vertex descriptors but is NEVER iterated --
-            // only aggregates (size, running max) are read, which are
-            // insertion-order independent.
-            std::map<Graph::vertex_descriptor, int> deg;
-            int max_deg = 0;
-            size_t n_edges = 0;
-            SegmentPtr longest = nullptr;
-            double len1 = -1, len2 = -1;   // longest and runner-up lengths
-            for (const auto& ed : ordered_edges(graph)) {
-                SegmentPtr sg = graph[ed].segment;
-                if (!sg || sg->cluster() != &cluster) continue;
-                n_edges++;
-                max_deg = std::max(max_deg, ++deg[boost::source(ed, graph)]);
-                max_deg = std::max(max_deg, ++deg[boost::target(ed, graph)]);
-                const double len = segment_track_length(sg, 0);
-                if (len > len1) {
-                    len2 = len1;
-                    len1 = len;
-                    longest = sg;
-                }
-                else if (len > len2) {
-                    len2 = len;
-                }
-            }
-            const bool simple_path = max_deg <= 2 && deg.size() == n_edges + 1;
-            if (!(simple_path && longest && len1 > len2)) return false;
-            cand = longest;
-            admitted_chain = true;
-        }
-        else {
-            return false;
-        }
-    }
+    // doc sbnd_xin/docs/pr/90 sec 9.5 D1 (knob teb_chain_topology) admitted
+    // an n_long > 1 cluster whose segment graph is a simple path, and sent it
+    // to route R3.  doc 77 round 4 retired D1 and D3: the live A/B was net
+    // NEGATIVE (19 ADVERSE vs 6 toward, pr/90 sec 10.6).  Back to the legacy
+    // gate -- exactly one long segment, or no candidate.
+    if (n_long != 1) return false;
     if (!cand) return false;
     const auto& fits = cand->fits();
     if (fits.size() < 3) return false;
@@ -3100,30 +3057,22 @@ bool PatternAlgorithms::break_two_end_dqdx(Graph& graph, Facade::Cluster& cluste
     opt.turn_skirt      = m_teb_turn_skirt;
     opt.turn_min_arm_frac = m_teb_turn_min_arm_frac;
     opt.bragg_veto_turn = m_teb_bragg_veto_turn;
-    opt.r3_turn         = m_teb_r3_turn;
-    opt.r3_hot          = m_teb_r3_hot;
 
-    // Chain-admitted candidates (D1) carry the sec 9.2/9.3 junction
-    // signature -- bright vertex activity + a local 10 cm turn, NOT a
-    // two-Bragg valley -- so they are scanned by route R3 exclusively; the
-    // legacy n_long == 1 admissions keep the R1/R2 scan untouched.
-    auto res = admitted_chain
-        ? segment_chain_turn_break_scan(cand, opt)
-        : segment_two_end_break_scan(cand, particle_data, opt);
+    auto res = segment_two_end_break_scan(cand, particle_data, opt);
     SPDLOG_LOGGER_DEBUG(s_log,
         "break_two_end_dqdx: cluster {} seg len {:.1f}cm k*={} (dip {} turn {}) arms {:.1f}/{:.1f}cm "
         "J={:.3f} s15=({:.3f}{},{:.3f}{}) rise=({:.2f},{:.2f}) absmed=({:.2f},{:.2f})xMIP "
-        "turn={:.1f}deg routes=({},{},{}) found={} nlong={} armfrac={:.2f} "
-        "chain={} vetoed={} vpeak={:.2f}xMIP vext={:.1f}cm",
+        "turn={:.1f}deg routes=({},{}) found={} nlong={} armfrac={:.2f} "
+        "vetoed={} vpeak={:.2f}xMIP vext={:.1f}cm",
         cluster.get_cluster_id(), segment_track_length(cand, 0)/units::cm, res.break_idx,
         res.idx_dip, res.idx_turn,
         res.arm_a_len/units::cm, res.arm_b_len/units::cm, res.joint_score,
         res.sA, res.flagA ? "F" : "f", res.sB, res.flagB ? "F" : "f",
         res.ratio_lo, res.ratio_hi,
         res.absmed_lo/m_mip_dqdx_median, res.absmed_hi/m_mip_dqdx_median,
-        res.turn_deg, res.route1, res.route2, res.route3, res.found,
+        res.turn_deg, res.route1, res.route2, res.found,
         n_long, m_teb_turn_min_arm_frac,
-        admitted_chain, res.bragg_vetoed, res.veto_peak, res.veto_extent/units::cm);
+        res.bragg_vetoed, res.veto_peak, res.veto_extent/units::cm);
     for (const auto& a : res.attempts) {
         SPDLOG_LOGGER_DEBUG(s_log,
             "break_two_end_dqdx:   cand idx={} m3={:.2f}xMIP sA={:.3f}{} sB={:.3f}{} accepted={}",

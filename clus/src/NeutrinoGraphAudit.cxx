@@ -1292,13 +1292,12 @@ bool PatternAlgorithms::main_vertex_graph_audit(Graph& graph, Facade::Cluster& c
                 }
 
                 std::vector<WCPoint> straight;
-                // pr/99 round 2: the collapse chord gets its own veto radius
-                // (prototype es2: 0.2 cm) when m_mvga_ac_veto_radius > 0;
-                // legacy falls back to the R1 straighten radius rule.
-                const double good_r = (m_mvga_ac_veto_radius > 0)
-                    ? m_mvga_ac_veto_radius
-                    : ((m_mvga_straighten_radius > 0)
-                       ? m_mvga_straighten_radius : 0.2*units::cm);
+                // doc 77 round 4: the pr/99 round-2 dedicated collapse-chord
+                // veto radius (m_mvga_ac_veto_radius) is retired -- 0.2 cm was
+                // measured ADVERSE and it never left 0.  The R1 straighten
+                // radius rule below is what production ran throughout.
+                const double good_r = (m_mvga_straighten_radius > 0)
+                    ? m_mvga_straighten_radius : 0.2*units::cm;
                 if (!straight_steiner_chain(cluster, track_fitter, dv,
                                             vtx1->wcpt(), vtx2->wcpt(), straight, good_r)) {
                     SPDLOG_LOGGER_TRACE(s_log,
