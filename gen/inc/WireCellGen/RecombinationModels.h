@@ -45,6 +45,23 @@ namespace WireCell {
         /// Modified Box model, R = ln(a+b*dE/dX)/(b*dE/dX), dQ = (R/Wi)*dE
         /// a=A, b=B/(Efield*rho) as defined in:
         /// http://lar.bnl.gov/properties/pass.html#recombination
+        ///
+        /// PARAMETERS ARE IN THE WCT SYSTEM OF UNITS -- note the unit factors
+        /// on the constructor defaults below.  Gen::PracticalBoxRecombination
+        /// (PracticalRecombinationModels.h) is the SAME physics with the SAME
+        /// numerals but in practical units (Efield in kV/cm, B in
+        /// (kV/cm)(g/cm^2)/MeV), which is how LArSoft's ModBox constants, the
+        /// WCP prototype and every detector config in this tree express them.
+        ///
+        /// The two are NOT interchangeable and NOT a duplicate to be merged:
+        /// feeding practical-unit numbers to this class is wrong by
+        /// units::cm/units::MeV = 10 in the quenching term, which silently
+        /// moved a MIP from 2.10 to 1.37 MeV/cm across 23 of 35 uBooNE events.
+        /// gen/test/doctest_practical_recombination.cxx pins both conventions
+        /// and asserts the mismatched combination stays wrong; if that test
+        /// ever goes green on the mismatch, the classes have converged and the
+        /// uBooNE binding must be revisited.  Background: doc 88, upstream
+        /// e6fb7ef3.
         class BoxRecombination : public IRecombinationModel, public IConfigurable {
             double m_efield, m_a, m_b, m_rho, m_wi;
 
