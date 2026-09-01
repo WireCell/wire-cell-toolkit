@@ -65,7 +65,9 @@ function(input,
     local osp_dump_prefix = std.strReplace(outpat % {tier: "osp_dump"}, ".npz", "");
 
     local controls = control_mod(device=device, verbosity=wc.intify(verbosity));
-    local det = detconf.get(detname, tpcids, sp_dump_prefix=osp_dump_prefix);
+    // Pass device through to detconf.get so the OSP DNNROI's TorchService runs
+    // on the same device as the SPNG nodes (which get it via controls above).
+    local det = detconf.get(detname, tpcids, device=device, sp_dump_prefix=osp_dump_prefix);
 
     // A per-tpc SPNG builder that ends at a bare decon stage (no crossviews/ROI/
     // DNN).  Mirrors spng/adc-to-spng-decon-only.jsonnet: frame_to_tdm ->

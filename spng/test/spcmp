@@ -51,6 +51,10 @@ for k, v in dict(
         # and "roiuniter").  1 keeps full time sampling so the spng waveform
         # aligns with splat/osp.
         rebin=1,
+        # Compute device passed into the jsonnet "device" TLA.  "cpu" (default)
+        # or "gpu" ("gpu1", "cuda", ... also accepted).  This drives BOTH the
+        # SPNG nodes (via control) AND the OSP DNNROI TorchService.
+        device="cpu",
         # Optional, override the default jsonnet.
         wire_cell_config=workflow.basedir + "/spcmp.jsonnet",
 ).items():
@@ -64,6 +68,7 @@ track_length = config['track_length']
 outstage = config['outstage']
 model_file = config['model_file']
 rebin = config['rebin']
+device = config['device']
 wire_cell_config = config['wire_cell_config']
 
 # The kinds of signal produced by one wire-cell job.
@@ -121,8 +126,8 @@ rule ssss:
     -A detname={wildcards.detector} \
     -A outstage=%s -A rebin=%d \
     -A "model_file=%s" \
-    -A engine=Pgrapher -A device=cpu -A verbosity=0
-    ''' % (outstage, int(rebin), model_file)
+    -A engine=Pgrapher -A device=%s -A verbosity=0
+    ''' % (outstage, int(rebin), model_file, device)
 
 
 rule all_signals:
@@ -163,11 +168,11 @@ rule dag:
     wcpy pgraph dotify \
     -A input="input.npz" \
     -A detname={wildcards.detector} \
-    -A engine=Pgrapher -A device=cpu -A verbosity=0 \
+    -A engine=Pgrapher -A device=%s -A verbosity=0 \
     --no-services --no-params \
     --graph-options rankdir=TB \
     {input} {output}
-    '''
+    ''' % device
 
 
 rule all_dags:
