@@ -172,6 +172,13 @@ void MultiAlgBlobClustering::configure(const WireCell::Configuration& cfg)
         m_bee_event_index = m_initial_index;
         log->debug("using shared Bee sink {} (own bee_zip disabled)", bee_sink_tn);
     }
+    else if (bee_zip.empty()) {
+        // doc 87: no Bee output at all.  Bee::Sink::reset("") raises IOError
+        // (util/src/Bee.cxx:426), so an empty name was never a disable -- the
+        // sink is simply never built and every write becomes a no-op.
+        m_bee_disabled = true;
+        log->debug("pr87 bee_off: bee_zip is empty, writing no Bee zip");
+    }
     else {
         //std::cout << "Xin: " << m_initial_index << " " << bee_zip << std::endl;
         m_bee_zip = bee_zip;
@@ -522,6 +529,7 @@ void MultiAlgBlobClustering::apply_event_from_ident(int ident)
 
 void MultiAlgBlobClustering::ensure_own_sink()
 {
+    if (m_bee_disabled) return;
     if (!m_bee_zip_templated) return;
     if (m_eventNo == m_bee_zip_open_evt) return;
     if (m_bee_zip_open_evt >= 0) {
@@ -536,6 +544,7 @@ void MultiAlgBlobClustering::ensure_own_sink()
 
 size_t MultiAlgBlobClustering::write_obj(const WireCell::Bee::Object& obj)
 {
+    if (m_bee_disabled) return 0;  // doc 87
     if (m_use_shared_sink) {
         return m_shared_sink->write(obj, m_bee_event_index, m_runNo, m_subRunNo, m_eventNo);
     }

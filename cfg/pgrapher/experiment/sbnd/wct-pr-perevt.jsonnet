@@ -780,6 +780,13 @@ function(
     // clustering layer happens to contain.
     // C++ default false.  Key omitted when off => byte-identical config.
     save_in_scope  = false,
+    // pr_bee (doc 87): write pr_evt<ID>/mabc-pr.zip (~0.24 GB/1000 evt).
+    // DEFAULT TRUE = today's behaviour, byte-identical.  false sets the MABC
+    // node's bee_zip to '', which means "write no Bee zip at all".
+    // NOTE the coupling: nusel_extract.py's parse_prbee() takes the IN-SCOPE
+    // cluster set from this zip, so turning it off costs nusel-evt<ID>.tsv
+    // UNLESS save_in_scope is also on (then T_cluster carries it instead).
+    pr_bee         = true,
     // SCN (DL) neutrino-vertex weights, WIRECELL_PATH-resolved.
     // DEFAULT = ON, the uBooNE-trained net (owner adopted 2026-07-30 on nueCC48
     // evt 18253/1/172230: the geometric vertex sat at the far end of a proton
@@ -3413,6 +3420,7 @@ function(
                              pipeline_names=pipeline_names,
                              tensor_outname=save_tensors,
                              save_in_scope=save_in_scope,
+                             pr_bee=pr_bee,
                              trackfitting_config_file=trackfitting_config,
                              particle_dataset=pds.particle_dataset,
                              extra_uses=pds.all,

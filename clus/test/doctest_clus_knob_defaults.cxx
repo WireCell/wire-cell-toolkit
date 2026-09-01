@@ -1335,3 +1335,21 @@ TEST_CASE("clus knob defaults: MultiAlgBlobClustering BeePFConfig pf switches ar
     CHECK(pfc.pf_orphan_track_min == 50.0 * WireCell::units::cm);  // read only when on
     CHECK(pfc.pf_track_owns_loose_vertex == false);      // doc pr/93 r4 (69314)
 }
+
+// ---------------------------------------------------------------------------
+// doc 87: bee_zip is a FILENAME, and its default must stay non-empty.
+//
+// Since doc 87 an EMPTY bee_zip means "write no Bee zip at all" (the empty
+// name used to raise IOError out of Bee::Sink::reset, so it was never a legal
+// value).  That makes the default load-bearing in a new way: if it ever became
+// "", every detector would silently stop writing mabc*.zip, and the SBND PR
+// chain would lose nusel-evt<ID>.tsv with it (nusel_extract.py needs the
+// clustering layer for the in-scope set).  A zero-fires gate cannot see this,
+// so pin the default here.
+TEST_CASE("clus knob defaults: MultiAlgBlobClustering bee_zip default is non-empty")
+{
+    auto cfg = defaults_of("MultiAlgBlobClustering");
+    REQUIRE_MESSAGE(cfg.isMember("bee_zip"), "missing knob: bee_zip");
+    CHECK(cfg["bee_zip"].asString() == "mabc.zip");
+    CHECK(!cfg["bee_zip"].asString().empty());
+}

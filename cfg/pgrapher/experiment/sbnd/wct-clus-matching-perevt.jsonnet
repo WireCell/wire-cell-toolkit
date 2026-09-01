@@ -149,6 +149,16 @@ function(
     // downstream pattern-recognition job (sbnd/docs/sbnd-pattern-recognition.md).
     // run_ql_evt.sh -save-pctree points it at work/ql_evt<ID>/pctree-evt<ID>.tar.gz.
     save_tensors   = '',
+    // doc 87 -- production output minimization.  Both DEFAULT TRUE = today's
+    // behaviour, byte-identical.  false makes the corresponding MABC node's
+    // bee_zip the empty string, which means "write no Bee zip at all".
+    //   perface_bee: ql_evt<ID>/mabc-apa{0,1}-face0.zip -- ~0.24 GB/1000 evt.
+    //     Read by NOTHING in either repo; the PR chain never opens them.
+    //   allapa_bee:  ql_evt<ID>/mabc-all-apa.zip -- ~0.47 GB/1000 evt.
+    //     Read only by nusel_extract.py --qlbee, an OPTIONAL per-merge-component
+    //     geometry cross-check that group mode already runs with QLBEE="".
+    perface_bee = true,
+    allapa_bee = true,
     // Persist the flash-merge per-blob provenance (real_cluster_id /
     // real_cluster_main "perblob" arrays) through the save_tensors tarball:
     // the tensor serializer drops heterogeneous PC keys, so without this the
@@ -422,7 +432,7 @@ function(
         rse_map=rse_map,
         evt_subdir=evt_subdir,
         reality=reality);
-    local clus_pipes = [clus_maker.per_apa(anodes[n], dump=false, trace_bee=trace_bee, save_assoc_id=save_assoc, sep_vertex_veto=sep_vertex_veto, nu_iso_band_guard=nu_iso_band_guard, iso_cathode_guard=iso_cathode_guard, nu_band_veto=nu_band_veto, eb_fast=eb_fast, po_fast=po_fast, dg_fast=dg_fast)
+    local clus_pipes = [clus_maker.per_apa(anodes[n], dump=false, per_face_bee=perface_bee, trace_bee=trace_bee, save_assoc_id=save_assoc, sep_vertex_veto=sep_vertex_veto, nu_iso_band_guard=nu_iso_band_guard, iso_cathode_guard=iso_cathode_guard, nu_band_veto=nu_band_veto, eb_fast=eb_fast, po_fast=po_fast, dg_fast=dg_fast)
                         for n in std.range(0, nanodes - 1)];
 
     // --- Q/L matching nodes ---
@@ -479,7 +489,7 @@ function(
                                                beam_pref_rescue=(if beam_pref then beam_pref_rescue else null),
                                                main_flag=main_flag, lm=lm, realign_perblob=realign);
             // MABC takes the single pre-merged tree directly (no PointTreeMerging).
-            local clus_all = clus_maker.all_apa(anodes, dump=true, premerged=true, tensor_outname=save_tensors, save_real_cluster_id=save_rcid, save_assoc_cluster_id=save_assoc, trace_bee=trace_bee, real_cluster_id_global=rcid_global, cathode_rescue_on=cathode_rescue, cathode_rescue_unmatched=cathode_rescue_unmatched, adopt_nu_fragments=adopt_nu_fragments, save_bundle_main_provenance=save_bundle_main_provenance, rescue_allow_in_beam_far=rescue_in_beam_far, rescue_geom_first=rescue_geom_first, rescue_pierce_test=rescue_pierce_test, rescue_pierce_cut=rescue_pierce_cut, rescue_dest_beam_for_new=rescue_dest_beam_for_new, rescue_beam_main_only=rescue_beam_main_only, bee_flash_pred_min=bee_flash_pred_min, eb_fast=eb_fast);
+            local clus_all = clus_maker.all_apa(anodes, dump=true, all_apa_bee=allapa_bee, premerged=true, tensor_outname=save_tensors, save_real_cluster_id=save_rcid, save_assoc_cluster_id=save_assoc, trace_bee=trace_bee, real_cluster_id_global=rcid_global, cathode_rescue_on=cathode_rescue, cathode_rescue_unmatched=cathode_rescue_unmatched, adopt_nu_fragments=adopt_nu_fragments, save_bundle_main_provenance=save_bundle_main_provenance, rescue_allow_in_beam_far=rescue_in_beam_far, rescue_geom_first=rescue_geom_first, rescue_pierce_test=rescue_pierce_test, rescue_pierce_cut=rescue_pierce_cut, rescue_dest_beam_for_new=rescue_dest_beam_for_new, rescue_beam_main_only=rescue_beam_main_only, bee_flash_pred_min=bee_flash_pred_min, eb_fast=eb_fast);
             local per_apa_pre = [g.intern(
                 innodes=[active_clusters[n], masked_clusters[n], opflash_sources[n]],
                 centernodes=[clus_pipes[n]],
@@ -514,7 +524,7 @@ function(
                     g.edge(flash_attach[n], matching_pipes[n], 0, 0),
                 ]
             ) for n in std.range(0, nanodes - 1)];
-            local clus_all = clus_maker.all_apa(anodes, dump=true, tensor_outname=save_tensors, save_real_cluster_id=save_rcid, save_assoc_cluster_id=save_assoc, trace_bee=trace_bee, real_cluster_id_global=rcid_global, cathode_rescue_on=cathode_rescue, cathode_rescue_unmatched=cathode_rescue_unmatched, adopt_nu_fragments=adopt_nu_fragments, save_bundle_main_provenance=save_bundle_main_provenance, rescue_allow_in_beam_far=rescue_in_beam_far, rescue_geom_first=rescue_geom_first, rescue_pierce_test=rescue_pierce_test, rescue_pierce_cut=rescue_pierce_cut, rescue_dest_beam_for_new=rescue_dest_beam_for_new, rescue_beam_main_only=rescue_beam_main_only, bee_flash_pred_min=bee_flash_pred_min, eb_fast=eb_fast);
+            local clus_all = clus_maker.all_apa(anodes, dump=true, all_apa_bee=allapa_bee, tensor_outname=save_tensors, save_real_cluster_id=save_rcid, save_assoc_cluster_id=save_assoc, trace_bee=trace_bee, real_cluster_id_global=rcid_global, cathode_rescue_on=cathode_rescue, cathode_rescue_unmatched=cathode_rescue_unmatched, adopt_nu_fragments=adopt_nu_fragments, save_bundle_main_provenance=save_bundle_main_provenance, rescue_allow_in_beam_far=rescue_in_beam_far, rescue_geom_first=rescue_geom_first, rescue_pierce_test=rescue_pierce_test, rescue_pierce_cut=rescue_pierce_cut, rescue_dest_beam_for_new=rescue_dest_beam_for_new, rescue_beam_main_only=rescue_beam_main_only, bee_flash_pred_min=bee_flash_pred_min, eb_fast=eb_fast);
             g.intern(
                 innodes=per_apa,
                 outnodes=[clus_all],

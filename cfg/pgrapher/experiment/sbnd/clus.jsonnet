@@ -251,7 +251,7 @@ local bs_dead_face(apa, face) = {
 // clus/src/ClusteringFuncs.cxx band_veto_forbids(). false (legacy escape via
 // SBND_NU_BAND_VETO=0) omits the key => compiled config byte-identical to
 // before the knob existed; only meaningful with nu_iso_band_guard on.
-local clus_per_face(anode, face, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=null, rse_from_ident=false, event_from_ident=false, rse_map={}, pos_offset_on=true, trace_bee=false, save_assoc_id=false, sep_vertex_veto=true, nu_iso_band_guard=true, iso_cathode_guard=false, nu_band_veto=true, eb_fast=false, po_fast=false, dg_fast=false, evt_subdir='') = {
+local clus_per_face(anode, face, dump, output_dir, runNo, subRunNo, eventNo, per_face_bee=true, bee_sink=null, rse_from_ident=false, event_from_ident=false, rse_map={}, pos_offset_on=true, trace_bee=false, save_assoc_id=false, sep_vertex_veto=true, nu_iso_band_guard=true, iso_cathode_guard=false, nu_band_veto=true, eb_fast=false, po_fast=false, dg_fast=false, evt_subdir='') = {
     local dv = detector_volumes([anode], face, pos_offset_on),
     local pcts = pctransforms(dv),
     local bsl = bs_live_face(anode.name, face),
@@ -362,7 +362,9 @@ local clus_per_face(anode, face, dump, output_dir, runNo, subRunNo, eventNo, bee
             outpath: 'pointtrees/%d',
             perf: true,
             bee_dir: bee_dir,
-            bee_zip: bee_zip_path,
+            // doc 87: '' => MultiAlgBlobClustering writes no Bee zip at all.
+            // DEFAULT true = today's behaviour, byte-identical.
+            bee_zip: if per_face_bee then bee_zip_path else '',
             // When a shared Bee sink is supplied, all Bee writes go to that one
             // zip (bee_zip is then ignored) and the per-APA dead-area is dropped
             // to avoid a duplicate channel-deadarea-* entry (the all-APA node
@@ -457,7 +459,7 @@ local clus_per_face(anode, face, dump, output_dir, runNo, subRunNo, eventNo, bee
 // all-APA clustering + Bee in SCE true space (x_sce) instead of the T0-corrected
 // reco scope (x_t0cor).  Both SBND realities currently set use_sce=false (see
 // the reco table in the tail function), so this is a no-op for our chain.
-local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=null, premerged=false, rse_from_ident=false, event_from_ident=false, rse_map={}, pos_offset_on=true, tensor_outname='', save_real_cluster_id=false, trace_bee=false, save_assoc_cluster_id=false, real_cluster_id_global=null, cathode_rescue_on=true, cathode_rescue_unmatched=true, adopt_nu_fragments=false, save_bundle_main_provenance=false, rescue_allow_in_beam_far=true, rescue_geom_first=true, rescue_pierce_test=true, rescue_pierce_cut=null, rescue_dest_beam_for_new=true, rescue_beam_main_only=true, bee_flash_pred_min=null, use_sce=false, reality='data', eb_fast=false, evt_subdir='') = {
+local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo, all_apa_bee=true, bee_sink=null, premerged=false, rse_from_ident=false, event_from_ident=false, rse_map={}, pos_offset_on=true, tensor_outname='', save_real_cluster_id=false, trace_bee=false, save_assoc_cluster_id=false, real_cluster_id_global=null, cathode_rescue_on=true, cathode_rescue_unmatched=true, adopt_nu_fragments=false, save_bundle_main_provenance=false, rescue_allow_in_beam_far=true, rescue_geom_first=true, rescue_pierce_test=true, rescue_pierce_cut=null, rescue_dest_beam_for_new=true, rescue_beam_main_only=true, bee_flash_pred_min=null, use_sce=false, reality='data', eb_fast=false, evt_subdir='') = {
     local nanodes = std.length(anodes),
     local pcmerging = g.pnode({
         type: 'PointTreeMerging',
@@ -593,7 +595,9 @@ local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=
             outpath: 'pointtrees/%d',
             perf: true,
             bee_dir: bee_dir,
-            bee_zip: bee_zip_path,
+            // doc 87: '' => MultiAlgBlobClustering writes no Bee zip at all.
+            // DEFAULT true = today's behaviour, byte-identical.
+            bee_zip: if all_apa_bee then bee_zip_path else '',
             // When a shared Bee sink is supplied, the all-APA views (img/
             // clustering/op + dead-area for both APAs) are written into that one
             // shared zip together with the per-APA views; bee_zip is ignored.
@@ -787,8 +791,8 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, e
                       bee_sink=bee_sink, rse_from_ident=rse_from_ident, event_from_ident=event_from_ident, rse_map=rse_map, pos_offset_on=pos_offset_on),
     // trace_bee (default false): per-step Bee layers for merge attribution; see
     // trace_sets above.  Diagnostic only, off => byte-identical compiled config.
-    per_apa(anode, dump=true, bee_sink=null, trace_bee=false, save_assoc_id=false, sep_vertex_veto=true, nu_iso_band_guard=true, iso_cathode_guard=false, nu_band_veto=true, eb_fast=false, po_fast=false, dg_fast=false)::
-        clus_per_face(anode, face=0, dump=dump, evt_subdir=evt_subdir,
+    per_apa(anode, dump=true, per_face_bee=true, bee_sink=null, trace_bee=false, save_assoc_id=false, sep_vertex_veto=true, nu_iso_band_guard=true, iso_cathode_guard=false, nu_band_veto=true, eb_fast=false, po_fast=false, dg_fast=false)::
+        clus_per_face(anode, face=0, dump=dump, evt_subdir=evt_subdir, per_face_bee=per_face_bee,
                       output_dir=output_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo,
                       bee_sink=bee_sink, rse_from_ident=rse_from_ident, event_from_ident=event_from_ident, rse_map=rse_map, pos_offset_on=pos_offset_on,
                       trace_bee=trace_bee, save_assoc_id=save_assoc_id, sep_vertex_veto=sep_vertex_veto,
@@ -799,7 +803,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, e
         clus_per_face(anode, face=face, dump=dump, evt_subdir=evt_subdir,
                       output_dir=output_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo,
                       bee_sink=bee_sink, rse_from_ident=rse_from_ident, event_from_ident=event_from_ident, rse_map=rse_map, pos_offset_on=pos_offset_on),
-    all_apa(anodes, dump=true, bee_sink=null, premerged=false, tensor_outname='', save_real_cluster_id=false, save_assoc_cluster_id=false,
+    all_apa(anodes, dump=true, all_apa_bee=true, bee_sink=null, premerged=false, tensor_outname='', save_real_cluster_id=false, save_assoc_cluster_id=false,
             trace_bee=false, real_cluster_id_global=null, cathode_rescue_on=true, cathode_rescue_unmatched=true, adopt_nu_fragments=false,
             save_bundle_main_provenance=false,
             rescue_allow_in_beam_far=true, rescue_geom_first=true,
@@ -809,7 +813,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, e
         // Clustering + matching ONLY (all-APA MABC).  The follow-up PR tagger
         // pass (pr() below) and the wclsTensorSetLabeler are wired by the entry
         // configuration, not here -- see the note in clus_all_apa.
-        clus_all_apa(anodes, dump=dump, evt_subdir=evt_subdir,
+        clus_all_apa(anodes, dump=dump, evt_subdir=evt_subdir, all_apa_bee=all_apa_bee,
                      output_dir=output_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo,
                      bee_sink=bee_sink, premerged=premerged, rse_from_ident=rse_from_ident, event_from_ident=event_from_ident, rse_map=rse_map, pos_offset_on=pos_offset_on,
                      tensor_outname=tensor_outname, save_real_cluster_id=save_real_cluster_id,
@@ -848,6 +852,11 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, e
               // and the pctree suppressed and still produce a full nusel table.
               // C++ default false.  Key omitted when off => byte-identical config.
               save_in_scope=false,
+              // pr_bee (doc 87): write pr_evt<ID>/mabc-pr.zip.  false => bee_zip is the
+              // empty string, which MultiAlgBlobClustering reads as "write no Bee
+              // zip at all" (an empty name used to raise IOError, so it was never
+              // a legal value).  DEFAULT TRUE = today's behaviour, byte-identical.
+              pr_bee=true,
               // trackfitting_config_file: the SBND TrackFitting parameter JSON.
               // DEFAULT = the canonical in-tree file, resolved through
               // WIRECELL_PATH by TaggerCheckSTM/TaggerCheckNeutrino
@@ -2337,7 +2346,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, e
                 outpath: 'pointtrees/%d',
                 perf: true,
                 bee_dir: bee_dir,
-                bee_zip: bee_zip_path,
+                bee_zip: if pr_bee then bee_zip_path else '',  // doc 87
                 bee_detector: 'sbnd',
                 initial_index: 0,
                 use_config_rse: true,

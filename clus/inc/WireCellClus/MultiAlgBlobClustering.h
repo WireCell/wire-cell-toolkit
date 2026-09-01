@@ -504,6 +504,11 @@ namespace WireCell::Clus {
         // opened in configure() exactly as before.
         std::string m_bee_zip{"mabc.zip"};
         bool m_bee_zip_templated{false};
+        /** doc 87: an EMPTY "bee_zip" (and no "bee_sink") means write no Bee
+            zip at all.  Bee::Sink::reset("") would raise IOError -- an empty
+            name was never a disable -- so the sink is simply never built and
+            write_obj() becomes a no-op.  Default "mabc.zip" => unchanged. */
+        bool m_bee_disabled{false};
         int m_bee_zip_open_evt{-1};
         /// Open the own-sink zip for the current event, if that is still needed.
         void ensure_own_sink();
