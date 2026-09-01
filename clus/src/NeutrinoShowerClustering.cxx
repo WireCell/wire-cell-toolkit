@@ -5786,6 +5786,8 @@ void PatternAlgorithms::shower_split(Graph& graph, VertexPtr main_vertex, Indexe
 
     const size_t cap = (size_t) std::max(2, m_shower_split_max_parts);
     int n_fired = 0, n_peeled = 0, n_shared_refused = 0, n_vetoed = 0, n_shed = 0;
+    std::vector<ShowerPtr> em_retype;   // doc pr/139 sec 25
+    int n_em_retyped = 0;
     std::vector<ShowerPtr> daughters;
     std::vector<ShowerPtr> dau_parent;   // aligned with `daughters` (doc pr/139 P1.4)
 
@@ -6081,6 +6083,43 @@ void PatternAlgorithms::shower_split(Graph& graph, VertexPtr main_vertex, Indexe
             for (const auto& sg : comp) if (sg != root_sg) ns->add_segment(sg, true);
             daughters.push_back(ns);
             dau_parent.push_back(shower);   // doc pr/139 P1.4: never re-home into the parent
+            // doc pr/139 sec 25 -- the owner's rule, 2026-09-03: "the key issue
+            // is track vs. shower separation.  If there is a track like MIP
+            // muon is a descent candidate.  But if it is an EM shower, electron
+            // would be the right choice."
+            //
+            // The separator cannot make that call on a short object and does not
+            // fail loudly -- it DEFAULTS to track.  Measured on this manifest:
+            // flag_shower is set on 0.1% of segments below 0.8 cm and 0.6%
+            // between 0.8 and 1.2 cm, against 14.7% at 1.2-2.0 cm and 46.7% at
+            // 2-4 cm.  So below ~1.2 cm "track-like" is an absence of evidence.
+            //
+            // A daughter that (a) is shorter than the knob, (b) holds no
+            // EM-typed member of its own, and (c) was peeled off an EM-typed
+            // parent, is a fragment of an electron shower by construction.  Type
+            // it 11 rather than letting a 2-point stub be reported as a muon.
+            // A LONGER daughter keeps whatever the separator says, which is the
+            // owner's "a track like MIP muon is a decent candidate" half.
+            if (m_shower_split_em_type_max_len > 0
+                && std::abs(shower->get_particle_type()) == 11) {
+                double dlen = 0;
+                bool has_em = false;
+                for (const auto& sg : comp) {
+                    if (!sg) continue;
+                    dlen += segment_track_length(sg);
+                    if (sg->has_particle_info() && sg->particle_info()
+                        && std::abs(sg->particle_info()->pdg()) == 11) has_em = true;
+                }
+                if (!has_em && dlen < m_shower_split_em_type_max_len) {
+                    em_retype.push_back(ns);
+                    if (dbg)
+                        std::fprintf(stderr,
+                            "SHOWER_SPLIT emtype shower=%d part=%zu new_start=%d nseg=%zu "
+                            "len_cm=%.2f parent_pdg=%d\n",
+                            pr91_seg_display_id(ss), g, pr91_seg_display_id(root_sg),
+                            comp.size(), dlen / units::cm, shower->get_particle_type());
+                }
+            }
             ++n_peeled;
             if (dbg) {
                 // The forward-seeding check the choice above exists to satisfy:
@@ -6120,6 +6159,29 @@ void PatternAlgorithms::shower_split(Graph& graph, VertexPtr main_vertex, Indexe
         // the production configuration.
         calculate_shower_kinematics(showers, vertices_in_long_muon, segments_in_long_muon,
                                     graph, track_fitter, dv, particle_data, recomb_model);
+
+        // doc pr/139 sec 25 -- applied HERE, not at the peel, because
+        // calculate_kinematics copies the start segment's pdg verbatim into
+        // data.particle_type (PRShower.cxx:1617, :1738 -- the defect doc pr/122
+        // named) and would overwrite an earlier write.  This fixes the REPORTED
+        // type, which is what NeutrinoKinematics reads for the rest-mass term
+        // and what the pi0 finders read.  It does NOT re-derive kine_charge,
+        // which keeps the value computed under the start segment's typing; on a
+        // sub-1.2 cm object that is a 1-3 MeV difference and is left alone
+        // rather than re-running the whole refresh.
+        for (auto& ns : em_retype) {
+            if (!ns) continue;
+            const int was = ns->get_particle_type();
+            ns->set_particle_type(11);
+            ns->set_flags(ShowerFlags::kShower);
+            ++n_em_retyped;
+            if (dbg)
+                std::fprintf(stderr, "SHOWER_SPLIT emtype APPLIED shower_id=%d %d -> 11\n",
+                             ns->get_shower_id(), was);
+            SPDLOG_LOGGER_DEBUG(s_log,
+                "pr139 shower_split: em-retype daughter shower_id={} pdg {} -> 11",
+                ns->get_shower_id(), was);
+        }
 
         // doc pr/139 P1.4 -- re-home the orphan daughter.  The owner's scan
         // says a cut that leaves an orphan has not finished the job, five
@@ -6247,8 +6309,9 @@ void PatternAlgorithms::shower_split(Graph& graph, VertexPtr main_vertex, Indexe
 
         SPDLOG_LOGGER_DEBUG(s_log,
             "pr138 shower_split: {} candidate(s) fired, {} daughter(s) peeled; {} shower(s) now"
-            " (pr139: {} shared-member refusal(s), {} impact veto(es), {} all-shared shed(s))",
-            n_fired, n_peeled, showers.size(), n_shared_refused, n_vetoed, n_shed);
+            " (pr139: {} shared-member refusal(s), {} impact veto(es), {} all-shared shed(s),"
+            " {} em-retyped daughter(s))",
+            n_fired, n_peeled, showers.size(), n_shared_refused, n_vetoed, n_shed, n_em_retyped);
     }
 }
 

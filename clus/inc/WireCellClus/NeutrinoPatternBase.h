@@ -2324,6 +2324,7 @@ namespace WireCell::Clus::PR {
         double m_shower_split_min_frac{0.03};            ///< doc pr/138 B2; per-seed charge share floor
         int    m_shower_split_max_parts{2};              ///< doc pr/138 B3; 2 = the measured-exact kernel; >2 is the k>=3 experiment
         int    m_shower_split_max_seeds{4};              ///< doc pr/139 sec 17; angular-maxima cap.  4 = shipped, and it BINDS on 76% of fires and on every object the owner cut into k>=3
+        double m_shower_split_em_type_max_len{0.0};      ///< doc pr/139 sec 25; 0 = off.  Below this length the track/shower separator has no resolving power (flag_shower fires on 0.1-0.6% of sub-1.2cm segments), so a daughter of an EM parent with no EM member inherits pdg 11 instead of defaulting to track
         double m_shower_split_min_charge{1e6};           ///< doc pr/138 B1; candidate charge floor, raw Fit::dQ (the Phase A population's q_floor)
         int    m_shower_split_min_nseg{3};               ///< doc pr/138 B1; candidate member-count floor
         double m_shower_split_bundle_gap{4 * units::cm}; ///< doc pr/138 B3; single-linkage bundle gap

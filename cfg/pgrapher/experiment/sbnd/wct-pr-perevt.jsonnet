@@ -2005,6 +2005,15 @@ function(
     // shower_split_max_parts -- is what stops k>=3 being expressible.
     // Key omitted when 4 => byte-identical pre-fix config.
     shower_split_max_seeds = 4,              // sec 17 angular-maxima cap.
+    // doc pr/139 sec 25, the owner's track-vs-shower rule (2026-09-03): "If there
+    // is a track like MIP muon is a descent candidate.  But if it is an EM
+    // shower, electron would be the right choice."  Below ~1.2 cm the separator
+    // has no resolving power -- flag_shower fires on 0.1% of segments under
+    // 0.8 cm and 0.6% from 0.8-1.2 cm, vs 14.7% at 1.2-2.0 and 46.7% at 2-4 --
+    // so "track-like" there is an absence of evidence, not evidence.  A daughter
+    // shorter than this, with no EM member, peeled off an EM parent, is typed 11.
+    // cm; C++ default 0 = OFF.  Key omitted when 0 => byte-identical pre-fix config.
+    shower_split_em_type_max_len = 0,        // sec 25 cm; 0 = off.  1.2 is the measured knee.
     shower_split_max_impact = 0,             // P1.2 cm; fire only when the object's own axis misses the
                                              // reference vertex by <= this.  C++ default 0 = no bound.
                                              // Key omitted when 0 => byte-identical.
@@ -3216,6 +3225,7 @@ function(
         [if shower_split && shower_split_skip_shared then 'shower_split_skip_shared']: true,
         [if shower_split && shower_split_skip_shared && shower_split_shed_shared then 'shower_split_shed_shared']: true,
         [if shower_split && shower_split_max_seeds != 4 then 'shower_split_max_seeds']: shower_split_max_seeds,
+        [if shower_split && shower_split_em_type_max_len != 0 then 'shower_split_em_type_max_len']: shower_split_em_type_max_len,
         [if shower_split && shower_split_max_impact != 0 then 'shower_split_max_impact']: shower_split_max_impact,
         [if shower_split && shower_split_em_start then 'shower_split_em_start']: true,
         [if shower_split && shower_split_rehome then 'shower_split_rehome']: true,
