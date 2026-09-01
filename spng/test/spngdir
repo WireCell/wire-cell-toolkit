@@ -45,6 +45,9 @@ for k,v in dict(
         theta_xz_deg=( 30, 60 ),
         # The plane numbers.  Probably universal.
         planes = [0,1,2],
+        # Path to the roiuniter TorchScript ROI DNN model used by the spng chain.
+        # Override with --config model_file=/path/to/model.ts.
+        model_file = "/nfs/data/1/calcuttj/toolkit_testing/legacy_roiuniter_083126.ts",
         # Optional, override the default jsonnet.
         wire_cell_config = workflow.basedir + "/spngdir.jsonnet",
 ).items():
@@ -65,6 +68,8 @@ planes = config['planes']
 known_tiers = ["depos", "signals", "metrics", "mplots", "plots"]
 # The kinds of signal tier
 sig_kinds = ["splat", "osp", "spng"]
+# The roiuniter ROI DNN model file used by the spng chain.
+model_file = config['model_file']
 # The config for wire-cell
 wire_cell_config = config['wire_cell_config']
 
@@ -189,8 +194,9 @@ rule ssss:
     -A input={input.depos} \
     -A "outpat={params.outpat}" \
     -A detname={wildcards.detector} \
+    -A "model_file=%s" \
     -A engine=Pgrapher -A device=cpu -A verbosity=0
-    '''
+    ''' % (model_file,)
 
 # A prototypical DAG for the ssss job.  Bogus file names are used as
 # documentation placeholders.
@@ -209,11 +215,12 @@ rule ssss_dag:
     wcpy pgraph dotify \
     -A input="input.npz" \
     -A detname={wildcards.detector} \
+    -A "model_file=%s" \
     -A engine=Pgrapher -A device=cpu -A verbosity=0 \
     --no-services --no-params \
     --graph-options rankdir=TB \
     {input} {output}
-    '''
+    ''' % (model_file,)
 
 
 rule all_signals:
