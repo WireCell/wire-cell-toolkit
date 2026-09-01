@@ -68,6 +68,11 @@ namespace WireCell {
             mutable int m_evt_eventNo{0};
             std::vector<IAnodePlane::pointer> m_anodes;
             IDetectorVolumes::pointer m_dv;
+            // doc 87: when true, add a per-cluster T_cluster tree recording the
+            // in-scope set (switch_scope's scope_filter) and the per-bundle
+            // summary nusel_extract.py otherwise has to read out of the Bee zip
+            // and the pctree.  DEFAULT FALSE => tracking-pr.root byte-identical.
+            bool m_save_in_scope{false};
             double m_dQdx_scale{0.1};
             double m_dQdx_offset{-1000};
             bool m_flag_skip_vertex{false};
@@ -91,6 +96,7 @@ namespace WireCell {
             void write_proj_data(TFile* output_tf, Clus::Facade::Grouping& grouping, const ChanScheme& cs) const;
             void write_t_rec_data(TFile* output_tf, Clus::Facade::Grouping& grouping, const ChanScheme& cs) const;
             void write_trun(TFile* output_tf) const;
+            void write_cluster_summary(TFile* output_tf, Clus::Facade::Grouping& grouping) const;
         };
     }  // namespace Root
 }  // namespace WireCell

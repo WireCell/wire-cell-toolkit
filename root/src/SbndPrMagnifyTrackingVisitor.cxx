@@ -98,6 +98,8 @@ void Root::SbndPrMagnifyTrackingVisitor::configure(const WireCell::Configuration
     m_dQdx_offset = get<double>(cfg, "dQdx_offset", -1000);
     m_flag_skip_vertex = get<bool>(cfg, "flag_skip_vertex", false);
     m_nticks = get<int>(cfg, "nticks", m_nticks);
+    // doc 87: DEFAULT FALSE keeps tracking-pr.root byte-identical.
+    m_save_in_scope = get<bool>(cfg, "save_in_scope", m_save_in_scope);
 
     auto anode_tns = cfg["anodes"];
     for (auto anode_tn : anode_tns) {
@@ -113,6 +115,7 @@ WireCell::Configuration Root::SbndPrMagnifyTrackingVisitor::default_configuratio
     Configuration cfg;
     cfg["output_filename"] = "tracking-pr.root";
     cfg["grouping"] = "live";
+    cfg["save_in_scope"] = m_save_in_scope;
     cfg["anodes"] = Json::arrayValue;
     cfg["detector_volumes"] = "";
     cfg["runNo"] = 0;
@@ -181,6 +184,9 @@ void Root::SbndPrMagnifyTrackingVisitor::visit(Clus::Facade::Ensemble& ensemble)
     write_trun(output_tf);
     write_proj_data(output_tf, grouping, cs);
     write_t_rec_data(output_tf, grouping, cs);
+    if (m_save_in_scope) {
+        write_cluster_summary(output_tf, grouping);
+    }
 
     // Empty T_proj tree kept for reader compatibility.
     TTree* tree_proj = new TTree("T_proj", "T_proj");
@@ -270,6 +276,94 @@ void Root::SbndPrMagnifyTrackingVisitor::write_trun(TFile* output_tf) const
     tree->Fill();
 
     log->debug("SbndPrMagnifyTrackingVisitor: wrote Trun with dQdx_scale={}, dQdx_offset={}", dQdx_scale, dQdx_offset);
+}
+
+// doc 87: T_cluster -- one row per live cluster, carrying (a) the IN-SCOPE flag
+// and (b) the per-bundle summary that nusel_extract.py otherwise reconstructs
+// from mabc-pr.zip plus the pctree.  Written on EVERY event (unlike T_tagger /
+// T_kine, which UbooneTaggerOutputVisitor writes only when a neutrino candidate
+// is evaluated), so an arm run with the Bee zip and the pctree suppressed still
+// yields a complete nusel table.
+//
+// in_scope is the SAME predicate the Bee clustering layer is gated on --
+// Cluster::get_scope_filter(default_scope), stamped by switch_scope
+// (clustering_switch_scope.cxx:125) and consulted by every tagger's
+// require_in_scope.  MultiAlgBlobClustering.cxx:2906-2923 gates the Bee layer on
+// literally this call, so the set recorded here is the Bee set by construction.
+void Root::SbndPrMagnifyTrackingVisitor::write_cluster_summary(TFile* output_tf,
+                                                               Clus::Facade::Grouping& grouping) const
+{
+    namespace Facade = WireCell::Clus::Facade;
+
+    TTree* tree = new TTree("T_cluster", "T_cluster");
+    tree->SetDirectory(output_tf);
+
+    int cluster_id = 0, in_scope = 0, is_main = 0, is_associated = 0;
+    int tgm = 0, stm = 0, fc = 0, lm = 0, beam_flash = 0;
+    int flash_id = -1, npoints = 0;
+    double flash_time_us = 0, flash_pe = 0, length_cm = 0, cluster_t0_us = 0;
+
+    tree->Branch("cluster_id", &cluster_id, "cluster_id/I");
+    tree->Branch("in_scope", &in_scope, "in_scope/I");
+    tree->Branch("is_main", &is_main, "is_main/I");
+    tree->Branch("is_associated", &is_associated, "is_associated/I");
+    tree->Branch("tgm", &tgm, "tgm/I");
+    tree->Branch("stm", &stm, "stm/I");
+    tree->Branch("fc", &fc, "fc/I");
+    tree->Branch("lm", &lm, "lm/I");
+    tree->Branch("beam_flash", &beam_flash, "beam_flash/I");
+    tree->Branch("flash_id", &flash_id, "flash_id/I");
+    tree->Branch("flash_time_us", &flash_time_us, "flash_time_us/D");
+    tree->Branch("flash_pe", &flash_pe, "flash_pe/D");
+    tree->Branch("npoints", &npoints, "npoints/I");
+    tree->Branch("length_cm", &length_cm, "length_cm/D");
+    tree->Branch("cluster_t0_us", &cluster_t0_us, "cluster_t0_us/D");
+
+    // Determinism: children() order is not guaranteed stable, so emit by
+    // ascending cluster id (CLAUDE.md -- never iterate pointer-keyed order).
+    std::vector<const Facade::Cluster*> clusters;
+    for (const auto* cl : grouping.children()) {
+        if (cl) clusters.push_back(cl);
+    }
+    std::sort(clusters.begin(), clusters.end(),
+              [](const Facade::Cluster* a, const Facade::Cluster* b) {
+                  return a->get_cluster_id() < b->get_cluster_id();
+              });
+
+    int n_in = 0;
+    for (const auto* cl : clusters) {
+        cluster_id = cl->get_cluster_id();
+        in_scope = cl->get_scope_filter(cl->get_default_scope()) ? 1 : 0;
+        n_in += in_scope;
+
+        is_main = cl->get_flag(Facade::Flags::main_cluster);
+        is_associated = cl->get_flag(Facade::Flags::associated_cluster);
+        tgm = cl->get_flag(Facade::Flags::tgm);
+        stm = cl->get_flag(Facade::Flags::short_track_muon);
+        fc = cl->get_flag(Facade::Flags::fully_contained);
+        lm = cl->get_flag(Facade::Flags::light_mismatch);
+        beam_flash = cl->get_flag(Facade::Flags::beam_flash);
+
+        npoints = cl->npoints();
+        length_cm = cl->get_length() / units::cm;
+        cluster_t0_us = cl->get_cluster_t0() / units::us;
+
+        const auto flash = cl->get_flash();
+        if (flash) {
+            flash_id = flash.ident();
+            flash_time_us = flash.time() / units::us;
+            flash_pe = flash.value();
+        }
+        else {
+            flash_id = -1;
+            flash_time_us = 0;
+            flash_pe = 0;
+        }
+        tree->Fill();
+    }
+
+    log->debug("pr87 in_scope: wrote T_cluster with {} clusters, {} in scope",
+               clusters.size(), n_in);
 }
 
 void Root::SbndPrMagnifyTrackingVisitor::write_proj_data(TFile* output_tf, Clus::Facade::Grouping& grouping,

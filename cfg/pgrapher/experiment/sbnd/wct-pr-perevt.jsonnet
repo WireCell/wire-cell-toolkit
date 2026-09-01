@@ -772,6 +772,14 @@ function(
     // round-trip gate (re-save with pipeline_names=[] and compare member hashes
     // against the input tarball).
     save_tensors   = '',
+    // save_in_scope (doc 87): write the per-cluster T_cluster tree into
+    // tracking-pr.root -- the in-scope cluster set plus the per-bundle summary
+    // (flags, flash, npoints, length).  This is what lets an arm run with
+    // mabc-pr.zip and the pctree suppressed and still yield a full nusel table:
+    // in_scope is otherwise recorded ONLY implicitly, by which clusters the Bee
+    // clustering layer happens to contain.
+    // C++ default false.  Key omitted when off => byte-identical config.
+    save_in_scope  = false,
     // SCN (DL) neutrino-vertex weights, WIRECELL_PATH-resolved.
     // DEFAULT = ON, the uBooNE-trained net (owner adopted 2026-07-30 on nueCC48
     // evt 18253/1/172230: the geometric vertex sat at the far end of a proton
@@ -3404,6 +3412,7 @@ function(
     local pr = clus_maker.pr(anodes, dump=true,
                              pipeline_names=pipeline_names,
                              tensor_outname=save_tensors,
+                             save_in_scope=save_in_scope,
                              trackfitting_config_file=trackfitting_config,
                              particle_dataset=pds.particle_dataset,
                              extra_uses=pds.all,

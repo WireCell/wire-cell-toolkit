@@ -841,6 +841,13 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, e
     // is off: the op display needs the per-cluster flashpred pcarray, which is
     // consumed by the Q/L job's pre-pipeline op dump and is not in the tarball.
     pr(anodes, dump=true, pipeline_names=[], tensor_outname='',
+              // save_in_scope (doc 87): add the per-cluster T_cluster tree to
+              // tracking-pr.root -- the in-scope set (switch_scope's scope_filter,
+              // the SAME predicate the Bee clustering layer is gated on) plus the
+              // per-bundle summary.  It is what lets an arm run with mabc-pr.zip
+              // and the pctree suppressed and still produce a full nusel table.
+              // C++ default false.  Key omitted when off => byte-identical config.
+              save_in_scope=false,
               // trackfitting_config_file: the SBND TrackFitting parameter JSON.
               // DEFAULT = the canonical in-tree file, resolved through
               // WIRECELL_PATH by TaggerCheckSTM/TaggerCheckNeutrino
@@ -2243,6 +2250,8 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, e
                     flag_skip_vertex: false,
                     // Readout length in ticks; only clamps T_bad_ch time ranges.
                     nticks: 3427,
+                    // doc 87.  Key omitted when off => byte-identical config.
+                    [if save_in_scope then 'save_in_scope']: true,
                 },
             },
             // T_tagger/T_kine writer (UbooneTaggerOutputVisitor, reused as-is: it
