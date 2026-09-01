@@ -53,13 +53,17 @@ Gen::BirksRecombination::BirksRecombination(double Efield, double A3t, double k3
 Gen::BirksRecombination::~BirksRecombination() {}
 double Gen::BirksRecombination::operator()(double dE, double dX)
 {
-    const double R = m_a3t / (1 + (dE * units::cm / dX) * m_k3t / (m_efield * m_rho));
+    // dE/dX and k3t/(Efield*rho) are both expressed in the WCT system of
+    // units so their product is already dimensionless.  (An earlier version
+    // multiplied dE/dX by a spurious units::cm, inflating the quenching
+    // term 10x and yielding R~0.32 instead of ~0.70 for a MIP at 500 V/cm.)
+    const double R = m_a3t / (1 + (dE / dX) * m_k3t / (m_efield * m_rho));
     return R * dE / m_wi;
 }
 double Gen::BirksRecombination::dE(double dQ, double dX)
 {
     const double numerator = dQ;
-    const double denominator = m_a3t/m_wi - dQ/dX*units::cm * m_k3t/(m_efield*m_rho);
+    const double denominator = m_a3t/m_wi - dQ/dX * m_k3t/(m_efield*m_rho);
 
     return numerator / denominator;
 }
@@ -96,18 +100,18 @@ Gen::BoxRecombination::BoxRecombination(double Efield, double A, double B, doubl
 Gen::BoxRecombination::~BoxRecombination() {}
 double Gen::BoxRecombination::operator()(double dE, double dX)
 {
-    const double tmp = (dE /units::MeV*units::cm/ dX) * m_b / (m_efield * m_rho);
+    // See the units note in BirksRecombination::operator() -- dE/dX times
+    // B/(Efield*rho) is already dimensionless in the WCT system of units.
+    const double tmp = (dE / dX) * m_b / (m_efield * m_rho);
     const double R = std::log(m_a + tmp) / tmp;
     return R * dE / m_wi;
 }
 double Gen::BoxRecombination::dE(double dQ, double dX)
 {
     const double coeff = m_b / (m_efield * m_rho);
-    const double a_exp = std::exp(dQ/dX*units::cm * coeff * m_wi);
-    const double numerator = (a_exp - m_a) * units::MeV/units::cm *dX;
+    const double a_exp = std::exp(dQ/dX * coeff * m_wi);
+    const double numerator = (a_exp - m_a) * dX;
     const double denominator = coeff;
-
-    // std::cout << "Test: " << m_a << " " << m_b << " " << coeff << " " << a_exp << " " << numerator << " " << denominator << std::endl;
 
     return numerator / denominator;
 }
