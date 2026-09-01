@@ -1,3 +1,17 @@
+// GCC 12 reports a false -Wdangling-pointer here.  Rectangles::intersection()
+// iterates a boost::icl operator& result; the range-init temporary IS
+// lifetime-extended, so the code is correct.  The warning comes from
+// libstdc++'s _Rb_tree header node, whose _M_parent legitimately holds the
+// address of the tree it belongs to (stl_tree.h:2090 _M_root()->_M_parent =
+// _M_end()), which the middle-end sees escaping a local as the map is moved
+// out.  It is not fixable in our code: rewriting the loop with named locals
+// does not silence it, and neither does a pragma at the call site or around
+// the template definition in Rectangles.h -- for this middle-end warning only
+// file scope in the TU that instantiates it works.  Any future caller of
+// intersection() built with -Werror will need the same line.
+#if defined(__GNUC__) && !defined(__clang__) && __GNUC__ >= 12
+#pragma GCC diagnostic ignored "-Wdangling-pointer"
+#endif
 #include "WireCellUtil/Rectangles.h"
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wattributes"
