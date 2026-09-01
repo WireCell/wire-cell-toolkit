@@ -434,7 +434,15 @@ if(_wct_mode STREQUAL "SKIP")
 else()
   find_package(ROOT QUIET)
   if(ROOT_FOUND)
-    _wct_provide(ROOTSYS LINK ${ROOT_LIBRARIES} INCLUDE ${ROOT_INCLUDE_DIRS})
+    # ROOT 6's `root-config --libs` omits TMVA, so it is absent from
+    # ROOT_LIBRARIES; waft/rootsys.py appends it explicitly when the library is
+    # present and this mirrors that (root/src/TmvaGradForest.cxx needs it).
+    # Absent TMVA is not an error -- the waf side skips it the same way.
+    set(_wct_root_libs ${ROOT_LIBRARIES})
+    if(TARGET ROOT::TMVA)
+      list(APPEND _wct_root_libs ROOT::TMVA)
+    endif()
+    _wct_provide(ROOTSYS LINK ${_wct_root_libs} INCLUDE ${ROOT_INCLUDE_DIRS})
   else()
     _wct_missing(ROOTSYS)
   endif()

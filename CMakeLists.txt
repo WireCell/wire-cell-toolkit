@@ -182,7 +182,7 @@ endif()
 # readability.  (wct-ike.5 fills in the remaining packages; wct-ike.6 adds the
 # optional-dependency gating that conditions the optional ones.)
 # Core, always-on packages (their externals are all mandatory).
-set(WCT_PACKAGES util iface aux gen sigproc sig img pgraph sio quickhull)
+set(WCT_PACKAGES util iface aux gen sigproc sig img pgraph sio quickhull mcs)
 # pyutil is Python-gated but is also a build dependency of clus when Python is
 # present, so it is placed here (before clus) when enabled.
 if(WCT_HAVE_PYTHON)

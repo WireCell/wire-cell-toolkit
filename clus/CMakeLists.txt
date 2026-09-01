@@ -1,6 +1,6 @@
 # WireCellClus (mirrors clus/wscript_build): WCPPyUtil is added only when
 # Python is available, exactly as the wscript_build keys off INCLUDES_PYTHON.
-set(_clus_use WireCellAux WCPQuickhull)
+set(_clus_use WireCellAux WCPQuickhull WireCellMcs)
 if(WCT_HAVE_PYTHON)
   list(APPEND _clus_use WCPPyUtil)
 endif()
