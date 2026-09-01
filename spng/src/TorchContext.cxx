@@ -1,6 +1,5 @@
 #include "WireCellSpng/TorchContext.h"
 #include "WireCellUtil/String.h"
-#include "WireCellUtil/Exceptions.h"
 #include "WireCellUtil/NamedFactory.h"
 
 namespace WireCell::SPNG {
@@ -18,17 +17,24 @@ namespace WireCell::SPNG {
         } // all rest are cuda
         else if (torch::cuda::is_available()) {
 
-            if (devname == "gpu" || devname == "cuda") {
-                m_dev = torch::Device(torch::kCUDA);
+            int devnum = 0;
+            
+            if (devname == "gpu" || devname == "cuda") { //Assumes 0
+                devnum = 0;
+            }
+            else if (String::startswith(devname, "cuda:")) {
+                devnum = get_devnum(devname, 5);
+            }
+            else if (String::startswith(devname, "gpu:") || String::startswith(devname, "cuda")) {
+                devnum = get_devnum(devname, 4);
             }
             else if (String::startswith(devname, "gpu")) {
-                int devnum = atoi(devname.substr(3).c_str());
-                m_dev = torch::Device(torch::kCUDA, devnum);
+                devnum = get_devnum(devname, 3);
             }
-            else {              // assume integer
-                int devnum = atoi(devname.c_str());
-                m_dev = torch::Device(torch::kCUDA, devnum);
+            else { // assume integer
+                devnum = get_devnum(devname);
             }
+            m_dev = torch::Device(torch::kCUDA, devnum);
         }
         else {
             raise<RuntimeError>("No torch device matches: \"%s\"", devname);
