@@ -1146,21 +1146,37 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, e
               // point is an EXIT and the vertex sits a few tens of cm inside.
               // Every other predicate in TaggerCheckSTM reads the STOP end;
               // this is the only one that reads where the fit starts.
-              // DEFAULT FALSE -- the operating point is set from the measured
-              // population; setting stm_entry_min_cm above the feature's
-              // range turns the boolean into a pure probe that changes no
-              // verdict.  C++ defaults false/1.3/5/30/70; keys omitted when
-              // off => byte-identical.  See sbnd_xin/docs/94 sec 12.
               // Round 3 (owner hand-scan, 2026-09-02) adds stm_entry_kink_deg:
               // the fitted path must also TURN somewhere along the muon.  Two
               // particles meeting at a vertex turn; a single muon carrying a
               // delta-ray fluctuation at the boundary does not.  The AND is
-              // what works -- five of the owner's STMs clear 22 deg on their
-              // own.  stm_entry_max_cm 30 -> 60 in the same round: the owner
+              // what works -- the kink is worthless alone (104 of the 246
+              // evaluated STM bundles, 42.3%, clear 22 deg).
+              // stm_entry_max_cm 30 -> 60 in the same round: the owner
               // adjudicated 350099 (shoulder 48.8 cm) a NEUTRINO, so the
               // "no decay above 30 cm" premise was wrong, and the kink now
               // carries what that bound was there for.
-              stm_entry_rise_guard=false,
+              //
+              // DEFAULT TRUE = SBND production as of doc 94 round 3 (owner
+              // 2026-09-02, after hand-adjudicating every bundle it moves).
+              // NOT byte-identical.  Validation:
+              //   - recovers 827-27-4, the one of the owner's five that the
+              //     round-1 vertex_hadron_guard could not: STM -> nu-candidate;
+              //   - all 3067 SBND data events: 34,825 bundles identical, 2
+              //     flipped, 0 one-arm-only, 0 bundles gain a cosmic tag, 414
+              //     of 416 STM bundles keep their tag, and BOTH flips
+              //     (164466:7, 350099:15) are bundles the owner adjudicated
+              //     NEUTRINOS -- measured contamination ZERO;
+              //   - right on 10 of the 11 hand-adjudicated bundles; the one
+              //     error is a MISS (707-18-12, docs/94 sec 14), not a false
+              //     release;
+              //   - probe arm with the cut disabled reproduces the baseline on
+              //     3067 of 3067 events;
+              //   - causal negative control: frac 1.3 -> 5.0 so no elevated
+              //     run can form => 0 fires, every verdict back to baseline.
+              // C++ defaults stay false/1.3/5/60/70/22, so every other
+              // detector is untouched; set false for the A/B.
+              stm_entry_rise_guard=true,
               stm_entry_frac=1.3,
               stm_entry_min_cm=5.0,
               stm_entry_max_cm=60.0,

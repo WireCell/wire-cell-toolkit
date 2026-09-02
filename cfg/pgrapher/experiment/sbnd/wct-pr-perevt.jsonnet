@@ -682,15 +682,21 @@ function(
     // ABOVE the feature's range (e.g. 1000) makes stm_entry_rise_guard=true a
     // pure probe: the DEBUG line prints shoulder, its no-first-point twin and
     // the integrated excess on every evaluated bundle and no verdict moves.
-    // DEFAULT FALSE.  Keys omitted when off => byte-identical.
-    // See sbnd_xin/docs/94 sec 12.
     // Round 3 (owner hand-scan, 2026-09-02): stm_entry_kink_deg -- the path
-    // must ALSO turn.  A two-particle vertex turns; a delta-ray fluctuation
-    // on a straight muon does not.  The AND is the discriminator: the kink
-    // alone clears 22 deg on five of the owner's own STMs.
+    // must ALSO turn.  A two-particle vertex turns; a delta-ray fluctuation on
+    // a straight muon does not.  The AND is the discriminator: the kink is
+    // worthless alone (42.3% of the evaluated STM population clears 22 deg).
     // stm_entry_max_cm 30 -> 60 in the same round (the owner adjudicated
     // 350099, shoulder 48.8 cm, a NEUTRINO).
-    stm_entry_rise_guard = false,
+    //
+    // DEFAULT TRUE = SBND production as of doc 94 round 3 (owner 2026-09-02).
+    // Recovers 827-27-4; over all 3067 SBND data events the measured A/B flips
+    // 2 bundles of 34,827 and the owner adjudicated BOTH (164466:7, 350099:15)
+    // NEUTRINOS, so measured contamination is zero; no bundle gains a cosmic
+    // tag; 414 of 416 STM bundles keep their tag.  NOT byte-identical.
+    // Escape for the A/B: PR_EXTRA_TLA line "stm_entry_rise_guard=false".
+    // See sbnd_xin/docs/94 sec 13.
+    stm_entry_rise_guard = true,
     stm_entry_frac = 1.3,
     stm_entry_min_cm = 5.0,
     stm_entry_max_cm = 60.0,
