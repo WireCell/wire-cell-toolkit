@@ -26,6 +26,14 @@
 //  * the CAUSAL NEGATIVE CONTROL: feeding the same points back through a
 //    zero-inset FV removes the effect entirely.  Corrupt exactly the quantity
 //    the knob supplies and the new behavior must disappear.
+//
+// SCOPE, stated plainly: the third test MIRRORS JudgeSeparateDec_2's four y/z
+// comparisons in yz_contacts() rather than calling it.  Invoking the judge
+// needs a Cluster with a populated convex hull, which no unit test here can
+// build.  So this file is a unit test of inset_scope_fv() plus a demonstration
+// of the arithmetic the judge performs on its output -- it does not exercise
+// the judge itself.  If those four comparisons ever gain a margin term,
+// yz_contacts() must follow or this test quietly stops describing production.
 
 #include "WireCellUtil/doctest.h"
 #include "WireCellUtil/Units.h"
