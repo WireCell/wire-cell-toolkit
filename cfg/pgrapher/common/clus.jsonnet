@@ -1078,6 +1078,7 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
                  track_repartition=false, band_merge_back=false, band_recarve=false,
                  drift_side_fv_x=false,
                  far_point_x_cut=null, far_point_mid_dis=null, track_recarve=false,
+                 fv_inset_yz=null,
                  dec1_guard_main_angle=null, iso_slab_split=false, tag_family=false,
                  collinear_global_merge=false, vertex_veto=false) :: {
             type: "ClusteringSeparate",
@@ -1128,6 +1129,15 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
                 // long crossing track arms (an "X" that pure connectivity cannot
                 // hold apart).  Key omitted when false: bit-identical.
                 [if track_recarve then 'track_recarve']: track_recarve,
+                // Separation-scoped y/z fiducial inset.  null (default) => the
+                // pass sees exactly the FV in the DetectorVolumes metadata,
+                // bit-identical.  A positive value shrinks ymin/ymax/zmin/zmax
+                // for THIS pass only, so JudgeSeparateDec_2's surface-contact
+                // test can register a track that stops short of the wall.
+                // PDHD/PDVD reach the same effect by insetting the shared
+                // DetectorVolumes block, which also moves clustering_neutrino
+                // and the containment taggers; this key does not.
+                [if fv_inset_yz != null then 'fv_inset_yz']: fv_inset_yz,
                 // Dec_1 drift-aligned protection guard applies only when the
                 // cluster MAIN axis is within this angle (deg) of drift.  null
                 // (default) keeps the legacy unconditional guard, which wide

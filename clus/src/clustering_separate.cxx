@@ -128,6 +128,18 @@ ScopeFV WireCell::Clus::Facade::select_scope_fv(IDetectorVolumes::pointer dv, bo
     return fv;
 }
 
+// Separation-scoped y/z fiducial inset; see the header for why it exists.
+// inset_yz <= 0 returns the input unchanged, which is what makes the knob that
+// uses it bit-identical when off.
+ScopeFV WireCell::Clus::Facade::inset_scope_fv(const ScopeFV& fv, double inset_yz)
+{
+    if (!(inset_yz > 0)) return fv;
+    ScopeFV out = fv;
+    out.ymin += inset_yz;  out.ymax -= inset_yz;
+    out.zmin += inset_yz;  out.zmax -= inset_yz;
+    return out;
+}
+
 
 // SBND-only two-track boundary tag (default OFF; gated by sbnd_boundary_tag).
 //
@@ -2133,7 +2145,8 @@ static void clustering_separate(Grouping& live_grouping,
                                 const bool iso_slab_split,
                                 const bool tag_family,
                                 const bool collinear_global_merge,
-                                const bool vertex_veto);
+                                const bool vertex_veto,
+                                const double fv_inset_yz);
 
 class ClusteringSeparate : public IConfigurable, public Clus::IEnsembleVisitor, private NeedDV, private NeedPCTS, private NeedScope {
 public:
@@ -2205,6 +2218,13 @@ public:
         // at their mutual closest approach (default OFF => bit-identical).
         // See veto_vertex_split.
         vertex_veto_ = get(config, "vertex_veto", false);
+        // Separation-scoped y/z fiducial inset.  0 (default) => bit-identical:
+        // the pass sees exactly the FV in the DetectorVolumes metadata.  A
+        // positive value shrinks ymin/ymax/zmin/zmax for THIS pass only, so
+        // JudgeSeparateDec_2's surface-contact test can register a track that
+        // stops short of the wall (doc 97; SBND's own FV is inset 0.65-2.05 cm
+        // and Dec_2 fires on 0 of 74 in-time clusters, doc 96 sec 6.1).
+        fv_inset_yz_ = get(config, "fv_inset_yz", 0.0);
     }
 
     void visit(Ensemble& ensemble) const {
@@ -2214,7 +2234,8 @@ public:
                             track_repartition_, band_merge_back_,
                             band_recarve_, drift_side_fv_x_,
                             far_point_x_cut_, far_point_mid_dis_, track_recarve_, dec1_guard_main_angle_,
-                            iso_slab_split_, tag_family_, collinear_global_merge_, vertex_veto_);
+                            iso_slab_split_, tag_family_, collinear_global_merge_, vertex_veto_,
+                            fv_inset_yz_);
     }
 
 private:
@@ -2236,6 +2257,7 @@ private:
     bool tag_family_{false};
     bool collinear_global_merge_{false};
     bool vertex_veto_{false};
+    double fv_inset_yz_{0.0};
 };
 
 
@@ -2266,7 +2288,8 @@ static void clustering_separate(
     const bool iso_slab_split,
     const bool tag_family,
     const bool collinear_global_merge,
-    const bool vertex_veto)
+    const bool vertex_veto,
+    const double fv_inset_yz)
 {
     // Check that live_grouping has exactly one wpid
 	// if (live_grouping.wpids().size() != 1 ) {
@@ -2286,7 +2309,21 @@ static void clustering_separate(
     // multi-APA (all-APA) stages use the cryostat envelope, except that with
     // drift_side_fv_x a common-face multi-APA scope (drift group) keeps its
     // drift side's x-range.  See select_scope_fv.
-    const ScopeFV fv = select_scope_fv(dv, drift_side_fv_x);
+    // fv_inset_yz shrinks the y and z fiducial bounds by a fixed amount for the
+    // SEPARATION PASS ONLY.  The same effect can be had by insetting FV_ymin/ymax/
+    // zmin/zmax in the DetectorVolumes metadata -- which is what PDHD and PDVD do
+    // (clus/docs/clustering-separate-fv.md) -- but that block is shared, via
+    // select_scope_fv, with clustering_neutrino and the containment taggers, so a
+    // config-level inset moves far more than separation.  Applying it here keeps
+    // the change inside this pass.  Default 0 => bit-identical to prior behavior.
+    //
+    // Why an inset is needed at all: JudgeSeparateDec_2 counts a cluster's
+    // *surface contacts* by testing extreme points against `FV_* +/- margin`, so
+    // on a detector whose FV is inset by only ~1 cm the test lands essentially on
+    // the physical wall and a track that stops a few cm short of it is not
+    // counted.  doc 96 sec 6.1 measured the consequence on SBND: Dec_2 accepts
+    // 0 of 74 in-time clusters, including 0 of the 33 longer than 250 cm.
+    const ScopeFV fv = inset_scope_fv(select_scope_fv(dv, drift_side_fv_x), fv_inset_yz);
     const double det_FV_ymax = fv.ymax;
     const geo_point_t beam_dir = fv.beam_dir;
     const geo_point_t vertical_dir = fv.vertical_dir;

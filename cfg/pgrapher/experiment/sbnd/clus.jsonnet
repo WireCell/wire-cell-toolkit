@@ -251,7 +251,35 @@ local bs_dead_face(apa, face) = {
 // clus/src/ClusteringFuncs.cxx band_veto_forbids(). false (legacy escape via
 // SBND_NU_BAND_VETO=0) omits the key => compiled config byte-identical to
 // before the knob existed; only meaningful with nu_iso_band_guard on.
-local clus_per_face(anode, face, dump, output_dir, runNo, subRunNo, eventNo, per_face_bee=true, bee_sink=null, rse_from_ident=false, event_from_ident=false, rse_map={}, pos_offset_on=true, trace_bee=false, save_assoc_id=false, sep_vertex_veto=true, nu_iso_band_guard=true, iso_cathode_guard=false, nu_band_veto=true, eb_fast=false, po_fast=false, dg_fast=false, evt_subdir='') = {
+// sep_fv_point (SBND default FALSE, doc 97 campaign): move the per-APA
+// separate() pass to the PDHD/PDVD SEPARATION operating point, and only that
+// pass.  Four values move together because doc 96 sec 8.3 measured that
+// neither half works alone on the motivating event (105-23-21):
+//     fv_inset_yz          = 15 cm   (C++ default 0)
+//     far_point_x_cut      = 14 cm   (C++ default 140 cm, effectively dead)
+//     far_point_mid_dis    = 60 cm   (C++ default 25 cm)
+//     dec1_guard_main_angle= 45 deg  (C++ default -1 = unconditional guard)
+// The inset is the reason this is a C++ knob and not a config edit: PDHD/PDVD
+// inset the shared DetectorVolumes FV, which also moves clustering_neutrino
+// and the containment taggers, while fv_inset_yz is read only inside
+// clustering_separate.  Why it is needed on SBND: JudgeSeparateDec_2 counts
+// surface contacts against `FV_* +/- margin`, SBND's FV is inset only
+// 0.65-2.05 cm, and doc 96 sec 6.1 measured Dec_2 accepting 0 of 74 in-time
+// clusters (0 of the 33 longer than 250 cm).  false omits all four keys =>
+// compiled config byte-identical to before the knob existed
+// (runner: run_ql_evt.sh -sep-fv-point).
+// sep_track_recarve (SBND default FALSE, doc 97 campaign): per-APA separate()
+// post-pass that k=2 3D-line self-splits a member holding two long crossing
+// track arms -- an "X"/"T" whose arms both END inside the volume, which pure
+// connectivity cannot hold apart and which neither JudgeSeparateDec_2 nor the
+// angle ladders can ever reach (both need surface contacts).  The C++
+// `track_recarve` knob is default false and is already production on PDHD and
+// PDVD (cfg/.../pdhd/clus.jsonnet:472, protodunevd/clus.jsonnet:514).
+// Motivating SBND event: run 272 subrun 2 event 30 (doc 96 sec 8.2) -- a
+// 423 cm main that is really a 412 cm through-going cosmic touching a 343 cm
+// second track at 0.35 cm.  false omits the key => compiled config
+// byte-identical to before the knob existed (runner: -sep-recarve).
+local clus_per_face(anode, face, dump, output_dir, runNo, subRunNo, eventNo, per_face_bee=true, bee_sink=null, rse_from_ident=false, event_from_ident=false, rse_map={}, pos_offset_on=true, trace_bee=false, save_assoc_id=false, sep_vertex_veto=true, sep_track_recarve=false, sep_fv_point=false, nu_iso_band_guard=true, iso_cathode_guard=false, nu_band_veto=true, eb_fast=false, po_fast=false, dg_fast=false, evt_subdir='') = {
     local dv = detector_volumes([anode], face, pos_offset_on),
     local pcts = pctransforms(dv),
     local bsl = bs_live_face(anode.name, face),
@@ -295,8 +323,18 @@ local clus_per_face(anode, face, dump, output_dir, runNo, subRunNo, eventNo, per
         // at their mutual closest approach) that the top-cosmic angle ladders
         // mistook for a cosmic -- doc pr/15, run 18255 evt 56463 nu cut in two
         // at its vertex.  C++ default false; SBND ON via sep_vertex_veto.
+        // track_recarve: post-separation k=2 3D-line self-split of a member
+        // holding two long crossing track arms ("X"/"T" whose arms both end
+        // inside the volume).  C++ default false; SBND via sep_track_recarve
+        // (doc 97).  Key omitted when off => byte-identical compiled config.
+        // sep_fv_point: the PDHD/PDVD separation operating point, scoped to
+        // this pass.  All four keys are omitted when false => byte-identical.
         cm.separate(use_ctpc=true, max_hull_points=100000, sbnd_boundary_tag=true,
-                    vertex_veto=sep_vertex_veto),
+                    vertex_veto=sep_vertex_veto, track_recarve=sep_track_recarve,
+                    fv_inset_yz=if sep_fv_point then 15 * wc.cm else null,
+                    far_point_x_cut=if sep_fv_point then 14 * wc.cm else null,
+                    far_point_mid_dis=if sep_fv_point then 60 * wc.cm else null,
+                    dec1_guard_main_angle=if sep_fv_point then 45 else null),
         // SBND: cap the isochronous-relaxed connection on the real closest-point
         // distance.  Without it, connect1 merges two genuinely-separate isochronous
         // cosmics (e.g. evt 183888, ~7.3 cm apart in drift) on the misleadingly small
@@ -791,11 +829,12 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, e
                       bee_sink=bee_sink, rse_from_ident=rse_from_ident, event_from_ident=event_from_ident, rse_map=rse_map, pos_offset_on=pos_offset_on),
     // trace_bee (default false): per-step Bee layers for merge attribution; see
     // trace_sets above.  Diagnostic only, off => byte-identical compiled config.
-    per_apa(anode, dump=true, per_face_bee=true, bee_sink=null, trace_bee=false, save_assoc_id=false, sep_vertex_veto=true, nu_iso_band_guard=true, iso_cathode_guard=false, nu_band_veto=true, eb_fast=false, po_fast=false, dg_fast=false)::
+    per_apa(anode, dump=true, per_face_bee=true, bee_sink=null, trace_bee=false, save_assoc_id=false, sep_vertex_veto=true, sep_track_recarve=false, sep_fv_point=false, nu_iso_band_guard=true, iso_cathode_guard=false, nu_band_veto=true, eb_fast=false, po_fast=false, dg_fast=false)::
         clus_per_face(anode, face=0, dump=dump, evt_subdir=evt_subdir, per_face_bee=per_face_bee,
                       output_dir=output_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo,
                       bee_sink=bee_sink, rse_from_ident=rse_from_ident, event_from_ident=event_from_ident, rse_map=rse_map, pos_offset_on=pos_offset_on,
                       trace_bee=trace_bee, save_assoc_id=save_assoc_id, sep_vertex_veto=sep_vertex_veto,
+                      sep_track_recarve=sep_track_recarve, sep_fv_point=sep_fv_point,
                       nu_iso_band_guard=nu_iso_band_guard, iso_cathode_guard=iso_cathode_guard,
                       nu_band_veto=nu_band_veto, eb_fast=eb_fast, po_fast=po_fast, dg_fast=dg_fast),
     // Production (LArSoft) entry point used by wcls-img-clus.jsonnet.

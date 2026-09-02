@@ -243,6 +243,23 @@ function(
     // ladder).  false omits the key => compiled config byte-identical to
     // before the knob existed (runner: SBND_SEP_VVETO=0).
     sep_vertex_veto = true,
+    // sep_track_recarve (SBND default FALSE, doc 97 campaign): per-APA
+    // separate() post-pass that k=2 3D-line self-splits a member holding two
+    // long crossing track arms whose ends are both INSIDE the volume, which no
+    // surface-contact judge can reach (doc 96 sec 5.1/8.2, run 272-2-30).
+    // Already production on PDHD/PDVD.  C++ default false; false here omits
+    // the key => compiled config byte-identical to before the knob existed
+    // (runner: run_ql_evt.sh -sep-recarve).
+    sep_track_recarve = false,
+    // sep_fv_point (SBND default FALSE, doc 97 campaign): the PDHD/PDVD
+    // SEPARATION operating point, scoped to that pass -- fv_inset_yz 15 cm,
+    // far_point_x_cut 14 cm, far_point_mid_dis 60 cm, dec1_guard_main_angle 45
+    // deg.  Needed together (doc 96 sec 8.3); the inset is a C++ knob read only
+    // inside clustering_separate, so unlike the PDHD config edit it does not
+    // move clustering_neutrino or the containment taggers.  false omits all
+    // four keys => compiled config byte-identical to before the knob existed
+    // (runner: run_ql_evt.sh -sep-fv-point).
+    sep_fv_point = false,
     // nu_iso_band_guard (SBND default TRUE since doc pr/18, owner decision
     // 2026-08-01): the per-APA neutrino stage may not merge an isochronous
     // band with a non-band cluster spanning > 20 cm of drift, even on touch
@@ -432,7 +449,7 @@ function(
         rse_map=rse_map,
         evt_subdir=evt_subdir,
         reality=reality);
-    local clus_pipes = [clus_maker.per_apa(anodes[n], dump=false, per_face_bee=perface_bee, trace_bee=trace_bee, save_assoc_id=save_assoc, sep_vertex_veto=sep_vertex_veto, nu_iso_band_guard=nu_iso_band_guard, iso_cathode_guard=iso_cathode_guard, nu_band_veto=nu_band_veto, eb_fast=eb_fast, po_fast=po_fast, dg_fast=dg_fast)
+    local clus_pipes = [clus_maker.per_apa(anodes[n], dump=false, per_face_bee=perface_bee, trace_bee=trace_bee, save_assoc_id=save_assoc, sep_vertex_veto=sep_vertex_veto, sep_track_recarve=sep_track_recarve, sep_fv_point=sep_fv_point, nu_iso_band_guard=nu_iso_band_guard, iso_cathode_guard=iso_cathode_guard, nu_band_veto=nu_band_veto, eb_fast=eb_fast, po_fast=po_fast, dg_fast=dg_fast)
                         for n in std.range(0, nanodes - 1)];
 
     // --- Q/L matching nodes ---

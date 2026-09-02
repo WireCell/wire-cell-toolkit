@@ -362,6 +362,23 @@ namespace WireCell::Clus::Facade {
     // reflect the group's drift volume rather than the union of both drift sides.
     ScopeFV select_scope_fv(IDetectorVolumes::pointer dv, bool common_face_x = false);
 
+    // Shrink a ScopeFV's y and z bounds by `inset_yz` on every side, leaving x,
+    // every *_margin and the direction vectors alone.  inset_yz <= 0 returns the
+    // input unchanged, which is what makes the knob that uses this bit-identical
+    // when off.
+    //
+    // Why it exists: JudgeSeparateDec_2 decides whether a cluster reaches a
+    // detector surface by testing its extreme points against `FV_* +/- margin`.
+    // On a detector whose configured FV is inset from the physical wall by only
+    // ~1 cm that test effectively asks for a point ON the wall, so a track that
+    // stops a few cm short is not counted and a two-track overcluster never
+    // shows the two independent surfaces the judge needs.  PDHD and PDVD fix
+    // this by insetting FV_ymin/ymax/zmin/zmax ~15 cm in the DetectorVolumes
+    // metadata (clus/docs/clustering-separate-fv.md); that block is shared with
+    // clustering_neutrino and the containment taggers, so this function lets a
+    // single pass take the same inset without moving anything else.
+    ScopeFV inset_scope_fv(const ScopeFV& fv, double inset_yz);
+
     // These Judge*() functions are used by multiple clustering methods.  They
     // are defined in clustering_separate.cxx.
 
