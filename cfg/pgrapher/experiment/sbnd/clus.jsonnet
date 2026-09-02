@@ -1137,6 +1137,23 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, e
               stm_vertex_hadron_guard=true,
               stm_hadron_len_cm=12.0,
               stm_hadron_mip=1.5,
+              // stm_entry_rise_guard: doc-94 round-2 veto on a CONTIGUOUS
+              // elevated dQ/dx run ANCHORED at the boundary end of the fit
+              // that then DECAYS to the body level -- two particles sharing
+              // that stretch, one of which left the detector, so the boundary
+              // point is an EXIT and the vertex sits a few tens of cm inside.
+              // Every other predicate in TaggerCheckSTM reads the STOP end;
+              // this is the only one that reads where the fit starts.
+              // DEFAULT FALSE -- the operating point is set from the measured
+              // population; setting stm_entry_min_cm above the feature's
+              // range turns the boolean into a pure probe that changes no
+              // verdict.  C++ defaults false/1.3/5/30/70; keys omitted when
+              // off => byte-identical.  See sbnd_xin/docs/94 sec 12.
+              stm_entry_rise_guard=false,
+              stm_entry_frac=1.3,
+              stm_entry_min_cm=5.0,
+              stm_entry_max_cm=30.0,
+              stm_entry_min_len_cm=70.0,
               // stm_d66_cuts: the doc-66 sec 12 diffusion-margin cut package
               // (Michel-veto res_length floor 6 -> 6.5 cm, detect_proton
               // track_medium gate 1.0 -> 1.05, block-B ks2 entry 0.05 ->
@@ -2031,6 +2048,13 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, e
                 vertex_hadron_guard=stm_vertex_hadron_guard,
                 guard_hadron_len_cm=(if stm_vertex_hadron_guard then stm_hadron_len_cm else null),
                 guard_hadron_mip=(if stm_vertex_hadron_guard then stm_hadron_mip else null),
+                // entry_rise_guard (C++ default false; keys omitted when off
+                // => byte-identical): doc-94 round-2 entry-rise veto.
+                entry_rise_guard=stm_entry_rise_guard,
+                guard_entry_frac=(if stm_entry_rise_guard then stm_entry_frac else null),
+                guard_entry_min_cm=(if stm_entry_rise_guard then stm_entry_min_cm else null),
+                guard_entry_max_cm=(if stm_entry_rise_guard then stm_entry_max_cm else null),
+                guard_entry_min_len_cm=(if stm_entry_rise_guard then stm_entry_min_len_cm else null),
                 // doc-66 sec 12 cut package (C++ defaults = prototype constants;
                 // keys omitted when stm_d66_cuts=false => byte-identical).
                 michel_res_length_cut=(if stm_d66_cuts then stm_michel_res_cm * wc.cm else null),

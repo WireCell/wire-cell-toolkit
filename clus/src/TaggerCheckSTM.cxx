@@ -315,6 +315,23 @@ public:
                                 m_guard_descent_cos_y, m_guard_descent_min_cm);
         }
 
+        // entry_rise_guard (C++ default false => byte-identical legacy): the
+        // doc-94 round-2 veto on a CONTIGUOUS elevated dQ/dx run ANCHORED at
+        // the boundary end of the fit and decaying to the body level.  Every
+        // other predicate in this file reads the stop end; this is the only
+        // one that reads the end where the fit starts.  See the guard body for
+        // the physics and for what each of the two shape requirements buys.
+        m_entry_rise_guard = get<bool>(config, "entry_rise_guard", m_entry_rise_guard);
+        m_guard_entry_frac = get<double>(config, "guard_entry_frac", m_guard_entry_frac);
+        m_guard_entry_min_cm = get<double>(config, "guard_entry_min_cm", m_guard_entry_min_cm);
+        m_guard_entry_max_cm = get<double>(config, "guard_entry_max_cm", m_guard_entry_max_cm);
+        m_guard_entry_min_len_cm = get<double>(config, "guard_entry_min_len_cm", m_guard_entry_min_len_cm);
+        if (m_entry_rise_guard) {
+            SPDLOG_LOGGER_DEBUG(s_log, "configure: TaggerCheckSTM: entry_rise_guard ON (run>={}x max(body,MIP) for {}-{}cm from the boundary, muon>={}cm)",
+                                m_guard_entry_frac, m_guard_entry_min_cm,
+                                m_guard_entry_max_cm, m_guard_entry_min_len_cm);
+        }
+
         // anode_dist_fix (C++ default false => byte-identical legacy): fix
         // the inverted face selection in check_stm_conditions' dist_to_anode
         // helper.  IAnodeFace::dirx points from the anode INTO the drift
@@ -422,6 +439,12 @@ public:
         cfg["descent_guard"] = m_descent_guard;
         cfg["guard_descent_cos_y"] = m_guard_descent_cos_y;
         cfg["guard_descent_min_cm"] = m_guard_descent_min_cm;
+        // doc-94 round-2 entry-rise veto; false = byte-identical legacy.
+        cfg["entry_rise_guard"] = m_entry_rise_guard;
+        cfg["guard_entry_frac"] = m_guard_entry_frac;
+        cfg["guard_entry_min_cm"] = m_guard_entry_min_cm;
+        cfg["guard_entry_max_cm"] = m_guard_entry_max_cm;
+        cfg["guard_entry_min_len_cm"] = m_guard_entry_min_len_cm;
         // Null/empty => the historical FiducialUtils containment (union of
         // per-face sensitive volumes, no margin).  Naming an IFiducial here
         // redirects cluster_fc_check's direct containment tests to it; pass the
@@ -749,6 +772,18 @@ private:
     bool m_descent_guard{false};
     double m_guard_descent_cos_y{1.01};   // reject when dy/|d| of (stop-entry) exceeds this
     double m_guard_descent_min_cm{10.0};  // chord shorter than this defines no direction => no verdict
+
+    // doc-94 round-2 entry-rise veto (see entry_rise_reject()).  The boolean
+    // defaults false, so an absent key is byte-identical legacy behavior; the
+    // thresholds below are the operating point measured in doc 94 round 2 and
+    // are meaningless until it is on.  Forcing the boolean on with
+    // guard_entry_min_cm set above the feature's range turns the guard into a
+    // pure probe -- that is how the population distribution was measured.
+    bool m_entry_rise_guard{false};
+    double m_guard_entry_frac{1.3};        // shoulder bar = this x max(body, 1 MIP)
+    double m_guard_entry_min_cm{5.0};      // shorter anchored run => a fluctuation, not a track
+    double m_guard_entry_max_cm{30.0};     // longer => hot everywhere, no decay => not this signature
+    double m_guard_entry_min_len_cm{70.0}; // shorter muon => no room for a body estimate
 
     // doc-63 round-3 cathode-truncation veto (see configure()).
     bool m_cathode_guard{false};
@@ -2338,6 +2373,139 @@ private:
         return false;
     }
 
+    // doc-94 round 2: the ENTRY-END rise.  Owner, 2026-09-02: "The telling
+    // feature is actually on the rise of dQ/dx near the exiting detector (or
+    // entry point).  This is a signature of two particles, one particle going
+    // out of the detector."
+    //
+    // Why nothing else in this file sees it: EVERY other predicate reads the
+    // STOP end.  eval_stm_core hunts the Bragg peak in a window that ENDS at
+    // the kink; detect_proton tests the last 20-35 cm; all five doc-63 guards
+    // read the stop region; vertex_hadron_guard reads the prongs.  The
+    // boundary point where the fit STARTS is never examined.
+    //
+    // The physics: at the boundary a cosmic stopping muon is at its most
+    // energetic, so its dQ/dx there is at its LOWEST, ~1 MIP, and stays flat
+    // until the Bragg rise at the far end.  Charge well above MIP AT the
+    // boundary that then DECAYS to the body level within a few tens of cm is
+    // two particles sharing that stretch, one of which leaves the detector --
+    // i.e. the "entry" point is really an EXIT, the interaction vertex sits
+    // shoulder_L cm inside the boundary, and only the surviving prong reaches
+    // the stop.  827-27-4 (owner-adjudicated neutrino, doc 94 sec 0.3) is the
+    // textbook case: 3.4 MIP at L=0 decaying to a flat 1.05 by L ~ 14 cm.
+    //
+    // The feature is the CONTIGUOUS elevated run ANCHORED at L=0 -- not a bare
+    // entry/body ratio, and not an integrated excess.  Two design choices carry
+    // the discrimination and each is answerable to a labelled event:
+    //
+    //   * ANCHORING at the boundary is what rejects 707-18-12, the one event
+    //     of the six the owner confirmed is a GENUINE STM.  Its profile does
+    //     carry a 1.8 MIP spike -- but at 2-4 cm, on top of a 0.98 MIP first
+    //     window.  A hot stretch that does not reach the boundary is a delta
+    //     ray on an entering muon, not a particle that left the detector.
+    //   * A REQUIRED DECAY (shoulder_L <= max) is what separates "hot at the
+    //     entry, then MIP" from "hot everywhere".  A bare ratio cannot: doc 94
+    //     sec 0.3 records 304-6-28 at entry/body 2.15 with a body that never
+    //     comes down, which the ratio would call for the wrong reason.
+    //
+    // The running median over a 5 cm window (>= 3 fit points) is deliberate:
+    // one truncated dx on a single fit point can neither create a run nor
+    // break one.  The DEBUG probe additionally reports the run re-anchored at
+    // the SECOND fit point, so a population arm measures how much of the
+    // feature rests on the boundary-most point -- the dominant systematic of a
+    // predicate that keys on L = 0.
+    //
+    // Placement matches the doc-63 family and descent_guard: beside them, so
+    // this also runs on the BACKWARD pass and returns through the same nullopt
+    // path.  On a flag_double_end cluster the backward pass swaps which end is
+    // the boundary, which is a different physical hypothesis and deserves its
+    // own entry test -- and then gets one.  Same calling convention as
+    // accept_guards_reject; gated on m_entry_rise_guard.
+    bool entry_rise_reject(const STMEvalArrays& arrs, int kink_num, int cluster_ident) const {
+        const auto& L = arrs.L;
+        const auto& dQ_dx = arrs.dQ_dx;
+        const int n = static_cast<int>(L.size());
+        if (n < 8) return false;
+        const int k = (kink_num >= 0 && kink_num < n) ? kink_num : n - 1;
+        const double L_stop = L[k];
+        if (L_stop < m_guard_entry_min_len_cm * units::cm) return false;
+
+        auto median_over = [&](double lo, double hi) -> std::pair<double,int> {
+            std::vector<double> v;
+            for (int i = 0; i <= k; ++i) {
+                if (L[i] >= lo && L[i] <= hi) v.push_back(dQ_dx[i]);
+            }
+            if (v.empty()) return {-1.0, 0};
+            std::sort(v.begin(), v.end());
+            const size_t m = v.size() / 2;
+            return {v.size() % 2 ? v[m] : 0.5 * (v[m-1] + v[m]), static_cast<int>(v.size())};
+        };
+
+        // Body level of the muon hypothesis: median over the muon segment with
+        // the entry shoulder and the Bragg region excluded.  Both window edges
+        // are fixed geometry, not knobs -- 20 cm is past any shoulder this
+        // guard will accept (max 30 cm is a decline, see below), and 25 cm is
+        // the same stop-region exclusion deficit_guard uses.  min_len_cm keeps
+        // the window from collapsing.
+        const double body_lo = 20 * units::cm;
+        const double body_hi = L_stop - 25 * units::cm;
+        const auto [body, body_npts] = median_over(body_lo, body_hi);
+        if (body <= 0 || body_npts < 5) return false;
+
+        // Threshold: relative to the body, floored at 1 MIP.  A muon body
+        // cannot physically sit below MIP, so clamping it there stops a
+        // charge-deficient reconstruction from lowering its own bar.
+        const double thresh = m_guard_entry_frac * std::max(body, m_mip_dqdx);
+        const double win = 5 * units::cm;
+
+        // Length of the contiguous run, anchored at fit point i0, over which
+        // the forward 5 cm running median stays at or above thresh.  Returns
+        // the L of the first window that drops below (0 if it is the first).
+        auto run_len = [&](int i0) -> double {
+            for (int i = i0; i <= k; ++i) {
+                std::vector<double> v;
+                for (int j = i; j <= k && L[j] <= L[i] + win; ++j) v.push_back(dQ_dx[j]);
+                if (static_cast<int>(v.size()) < 3) return L[i] - L[i0];
+                std::sort(v.begin(), v.end());
+                const size_t m = v.size() / 2;
+                const double mm = v.size() % 2 ? v[m] : 0.5 * (v[m-1] + v[m]);
+                if (mm < thresh) return L[i] - L[i0];
+            }
+            return L[k] - L[i0];
+        };
+        const double sh0 = run_len(0);   // the feature
+        const double sh1 = run_len(1);   // same run re-anchored: the L=0 systematic
+
+        // MIP-equivalent extra track length carried by the shoulder.  Confined
+        // to the anchored run, so unlike a windowed integral it does not
+        // rectify noise into a signal.
+        double excess = 0;
+        for (int i = 0; i <= k && L[i] <= sh0; ++i) {
+            const double dl = (i == 0) ? (L[1] - L[0]) : (L[i] - L[i-1]);
+            excess += std::max(0.0, dQ_dx[i] - body) * dl;
+        }
+        excess /= std::max(body, m_mip_dqdx);
+
+        const auto [ent, ent_npts] = median_over(0.0, 3 * units::cm);
+
+        // Probe line on EVERY evaluation, not only rejections -- same
+        // convention as cathode_guard's geometry line and descent_guard's --
+        // so one instrumented population run measures the feature, its L=0
+        // systematic and the excess on every STM-evaluated bundle at once.
+        SPDLOG_LOGGER_DEBUG(s_log, "entry_rise: cluster {} L_stop={:.1f}cm body={:.2f}MIP({}pts) ent={:.2f}MIP({}pts) rise={:.2f} shoulder={:.1f}cm shoulder_nofirst={:.1f}cm excess={:.1f}cm",
+                            cluster_ident, L_stop / units::cm, body / m_mip_dqdx, body_npts,
+                            ent / m_mip_dqdx, ent_npts, (ent > 0 ? ent / body : -1.0),
+                            sh0 / units::cm, sh1 / units::cm, excess / units::cm);
+
+        if (sh0 >= m_guard_entry_min_cm * units::cm && sh0 <= m_guard_entry_max_cm * units::cm) {
+            SPDLOG_LOGGER_INFO(s_log, "entry_rise_guard: cluster {} rejected: {:.1f} cm of {:.2f} MIP charge anchored at the boundary decaying to a {:.2f} MIP body ({:.1f} cm of extra MIP track; two particles, one exiting)",
+                               cluster_ident, sh0 / units::cm, ent / m_mip_dqdx,
+                               body / m_mip_dqdx, excess / units::cm);
+            return true;
+        }
+        return false;
+    }
+
     // Core STM evaluation using pre-built arrays (called once per (peak_range, offset, com_range) combo).
     bool eval_stm_core_impl(const STMEvalArrays& arrs, int kink_num,
                        double peak_range, double offset_length, double com_range,
@@ -3493,6 +3661,17 @@ private:
             // chord to a Michel/overshoot tail instead of to the stop).
             if (m_descent_guard && flag_pass &&
                 descent_guard_reject(eval_arrs, kink_recorded, cluster.ident())) {
+                if (m_save_stm_fit) set_pass_status(7);
+                return std::nullopt;
+            }
+            // doc-94 round-2: a contiguous elevated dQ/dx run anchored at the
+            // BOUNDARY end that decays to the body = two particles, one of
+            // which left the detector (own knob; same placement rationale;
+            // kink_recorded, not the post-reset kink_num -- the reset moves
+            // kink_num to the path end, which drags the Bragg rise into the
+            // body window and inflates the bar this guard measures against).
+            if (m_entry_rise_guard && flag_pass &&
+                entry_rise_reject(eval_arrs, kink_recorded, cluster.ident())) {
                 if (m_save_stm_fit) set_pass_status(7);
                 return std::nullopt;
             }

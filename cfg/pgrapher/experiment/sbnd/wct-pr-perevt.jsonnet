@@ -668,6 +668,27 @@ function(
     stm_vertex_hadron_guard = true,
     stm_hadron_len_cm = 12.0,
     stm_hadron_mip = 1.5,
+    // stm_entry_rise_guard (doc 94 round 2): veto an STM accept whose fit
+    // carries a CONTIGUOUS elevated dQ/dx run ANCHORED at the BOUNDARY end
+    // that then DECAYS to the body level.  At the boundary a cosmic stopping
+    // muon is at its most energetic, so its dQ/dx there is at its LOWEST;
+    // charge well above MIP there that comes back down within a few tens of
+    // cm is two particles sharing that stretch, one of which left the
+    // detector -- the "entry" point is an EXIT and the vertex sits inside.
+    // This is the only predicate in TaggerCheckSTM that reads the end where
+    // the fit STARTS; every other one reads the stop.
+    //
+    // stm_entry_min_cm is the shortest anchored run that vetoes.  Setting it
+    // ABOVE the feature's range (e.g. 1000) makes stm_entry_rise_guard=true a
+    // pure probe: the DEBUG line prints shoulder, its no-first-point twin and
+    // the integrated excess on every evaluated bundle and no verdict moves.
+    // DEFAULT FALSE.  Keys omitted when off => byte-identical.
+    // See sbnd_xin/docs/94 sec 12.
+    stm_entry_rise_guard = false,
+    stm_entry_frac = 1.3,
+    stm_entry_min_cm = 5.0,
+    stm_entry_max_cm = 30.0,
+    stm_entry_min_len_cm = 70.0,
     // doc-66 sec 12 diffusion-margin cut package: Michel-veto res_length
     // floor 6 -> 6.5 cm, detect_proton track_medium gate 1.0 -> 1.05,
     // block-B ks2 entry 0.05 -> 0.055, C1 peak clause 4.3 -> 4.1.  Restores
@@ -3533,6 +3554,11 @@ function(
                              stm_vertex_hadron_guard=stm_vertex_hadron_guard,
                              stm_hadron_len_cm=stm_hadron_len_cm,
                              stm_hadron_mip=stm_hadron_mip,
+                             stm_entry_rise_guard=stm_entry_rise_guard,
+                             stm_entry_frac=stm_entry_frac,
+                             stm_entry_min_cm=stm_entry_min_cm,
+                             stm_entry_max_cm=stm_entry_max_cm,
+                             stm_entry_min_len_cm=stm_entry_min_len_cm,
                              stm_d66_cuts=stm_d66_cuts,
                              cathode_x=cathode_x,
                              steiner_terminal_wire_tol=steiner_terminal_wire_tol,

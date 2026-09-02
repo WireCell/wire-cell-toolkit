@@ -766,6 +766,46 @@ TEST_CASE("clus knob defaults: TaggerCheckSTM descent_guard is off and inert")
     CHECK_KNOB_NUM(cfg, "guard_descent_min_cm", 10.0);
 }
 
+TEST_CASE("clus knob defaults: TaggerCheckSTM entry_rise_guard is off, and its shape window is the contract")
+{
+    auto cfg = defaults_of("TaggerCheckSTM");
+
+    // Contract 1 -- OFF, so an absent key leaves every legacy STM verdict
+    // untouched (gate: prod_cfg_gate.py PASS 21/21 against
+    // ref/prod-2026-09-02 with the jsonnet knob false).
+    CHECK_KNOB_BOOL(cfg, "entry_rise_guard", false);
+
+    // Contract 2 -- the two shape bounds, which are what distinguish this
+    // guard from a bare entry/body ratio (sbnd_xin/docs/94 sec 12).  min_cm
+    // demands a run long enough to be a track rather than a fluctuation;
+    // max_cm demands that the run END, i.e. that the entry charge actually
+    // DECAYS to the body level.  Dropping the upper bound would make the
+    // guard fire on "hot everywhere" clusters, which is exactly the wrong
+    // reason doc 94 sec 0.3 recorded.  A bound that is not finite and above
+    // the lower bound is therefore not this predicate any more.
+    REQUIRE(cfg.isMember("guard_entry_min_cm"));
+    REQUIRE(cfg.isMember("guard_entry_max_cm"));
+    CHECK(cfg["guard_entry_min_cm"].asDouble() > 0.0);
+    CHECK(cfg["guard_entry_max_cm"].asDouble() > cfg["guard_entry_min_cm"].asDouble());
+    CHECK_KNOB_NUM(cfg, "guard_entry_min_cm", 5.0);
+    CHECK_KNOB_NUM(cfg, "guard_entry_max_cm", 30.0);
+
+    // Contract 3 -- the bar is ABOVE the body level it is compared with.  The
+    // guard measures a run that stands out from the muon body; frac <= 1
+    // would make every point of every fit "elevated" and the anchored run
+    // would run the whole track for any cluster at all.
+    REQUIRE(cfg.isMember("guard_entry_frac"));
+    CHECK(cfg["guard_entry_frac"].asDouble() > 1.0);
+    CHECK_KNOB_NUM(cfg, "guard_entry_frac", 1.3);
+
+    // Contract 4 -- the muon-length floor must leave the body window (fixed
+    // geometry: L in [20 cm, L_stop - 25 cm]) non-empty, or the body estimate
+    // the whole predicate is measured against does not exist.
+    REQUIRE(cfg.isMember("guard_entry_min_len_cm"));
+    CHECK(cfg["guard_entry_min_len_cm"].asDouble() > 20.0 + 25.0);
+    CHECK_KNOB_NUM(cfg, "guard_entry_min_len_cm", 70.0);
+}
+
 // ---------------------------------------------------------------------------
 // The POD option structs.  These carry defaults that never pass through
 // default_configuration(), so a factory round-trip cannot see them: the
