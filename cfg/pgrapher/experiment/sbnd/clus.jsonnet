@@ -1114,17 +1114,27 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, e
               stm_descent_guard=false,
               stm_descent_cos_y=1.01,
               stm_descent_min_cm=10.0,
-              // stm_vertex_hadron_guard: doc-94 round-1 veto on a LONG,
-              // HEAVILY IONIZING prong off the fitted main -- a proton from a
-              // neutrino vertex, which check_other_tracks (a second-MUON
-              // predicate) lets through because protons scatter.  DEFAULT
-              // FALSE pending the owner's hand scan of what it releases; on
-              // all 3067 SBND data events it releases exactly 1 STM bundle of
-              // 401 (64475:23) and breaks 0 of the 36 owner-adjudicated
-              // correct STMs.  C++ defaults
-              // false/12/1.5; keys omitted when off => byte-identical.
-              // See sbnd_xin/docs/94.
-              stm_vertex_hadron_guard=false,
+              // stm_vertex_hadron_guard: doc-94 veto on a LONG, HEAVILY
+              // IONIZING prong off the fitted main -- a proton from a neutrino
+              // vertex, which check_other_tracks (a second-MUON predicate)
+              // lets through because protons scatter and every clause there
+              // wants straightness > 0.975 or MIP-band charge.
+              // DEFAULT TRUE = SBND production as of doc 94 (owner
+              // 2026-09-02, after the validation below).  NOT byte-identical.
+              //   - recovers 3 of the 4 events the owner adjudicated as
+              //     neutrinos: 966-2-22, 304-6-28, 146-60-31 all flip
+              //     STM -> nu-candidate (707-18-12 is a genuine STM and was
+              //     never a target);
+              //   - measured A/B over all 3067 SBND data events: 1 bundle
+              //     flips of 34,827, and the owner adjudicated that bundle
+              //     (64475:23) a NEUTRINO, so the measured cost is zero;
+              //   - breaks 0 of the 36 owner-adjudicated correct STMs
+              //     (doc 62, scan-d59k/stm-baseline.tsv);
+              //   - causal negative control: len bar raised to 30 cm => 0
+              //     fires and every verdict returns to baseline.
+              // C++ defaults stay false/12/1.5, so every other detector is
+              // untouched; set false for the A/B.
+              stm_vertex_hadron_guard=true,
               stm_hadron_len_cm=12.0,
               stm_hadron_mip=1.5,
               // stm_d66_cuts: the doc-66 sec 12 diffusion-margin cut package

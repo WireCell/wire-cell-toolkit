@@ -657,10 +657,15 @@ function(
     // activity from a neutrino interaction.  check_other_tracks was ported to
     // find a second MUON: every acceptance clause there wants high
     // straightness or MIP-band charge, and a hot CURVED segment is skipped by
-    // name.  A proton scatters, so it escapes all of it.  DEFAULT FALSE
-    // pending the owner's hand scan.  Keys omitted when off =>
-    // byte-identical.  See sbnd_xin/docs/94.
-    stm_vertex_hadron_guard = false,
+    // name.  A proton scatters, so it escapes all of it.
+    // DEFAULT TRUE = SBND production as of doc 94 (owner 2026-09-02).
+    // Recovers 3 of the 4 owner-adjudicated neutrinos; over all 3067 SBND
+    // data events the measured A/B flips 1 bundle of 34,827 and the owner
+    // adjudicated that bundle (64475:23) a NEUTRINO, so the measured cost is
+    // zero; 0 of the 36 owner-adjudicated correct STMs (doc 62) break.
+    // NOT byte-identical.  Escape for the A/B: PR_EXTRA_TLA line
+    // "stm_vertex_hadron_guard=false".  See sbnd_xin/docs/94.
+    stm_vertex_hadron_guard = true,
     stm_hadron_len_cm = 12.0,
     stm_hadron_mip = 1.5,
     // doc-66 sec 12 diffusion-margin cut package: Michel-veto res_length
