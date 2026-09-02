@@ -295,10 +295,12 @@ DynamicPointCloud::get_2d_points_info(const geo_point_t &p, const double radius,
     auto &l2g = this->kd2d_l2g(plane, face, apa);
 
     // Get angle parameters - lookup once
-    if (m_wpid_params.find(wpid_volume) == m_wpid_params.end()) {
-        raise<RuntimeError>("DynamicPointCloud: missing wpid params for wpid %s", wpid_volume.name());
+    if (m_wpid_params.empty()) {
+        raise<RuntimeError>("DynamicPointCloud: empty wpid params for wpid %s", wpid_volume.name());
     }
-    const auto [_, angle_u, angle_v, angle_w] = m_wpid_params.at(wpid_volume);
+    // doc pdvd/25 M3: a query volume this cloud has no params for is resolved
+    // (same apa, else first key) instead of raising.
+    const auto [_, angle_u, angle_v, angle_w] = m_wpid_params.at(resolve_wpid_key(m_wpid_params, wpid_volume));
 
     // Compute projected point
     const double angle = (plane == 0) ? angle_u : ((plane == 1) ? angle_v : angle_w);
@@ -352,10 +354,11 @@ DynamicPointCloud::get_closest_2d_point_info(const geo_point_t &p, const int pla
     auto &l2g = this->kd2d_l2g(plane, face, apa);
 
     // Check and get angle parameters
-    auto wpid_iter = m_wpid_params.find(wpid_volume);
-    if (wpid_iter == m_wpid_params.end()) {
-        raise<RuntimeError>("DynamicPointCloud: missing wpid params for wpid %s", wpid_volume.name());
+    if (m_wpid_params.empty()) {
+        raise<RuntimeError>("DynamicPointCloud: empty wpid params for wpid %s", wpid_volume.name());
     }
+    // doc pdvd/25 M3: resolve a foreign query volume instead of raising.
+    auto wpid_iter = m_wpid_params.find(resolve_wpid_key(m_wpid_params, wpid_volume));
 
     // Calculate angle more directly based on plane parameter
     const auto &[_, angle_u, angle_v, angle_w] = wpid_iter->second;
@@ -391,10 +394,11 @@ double DynamicPointCloud::get_closest_2d_dis(const geo_point_t &p, const int pla
 
     auto &kd2d = this->kd2d(plane, face, apa);
 
-    auto wpid_iter = m_wpid_params.find(wpid_volume);
-    if (wpid_iter == m_wpid_params.end()) {
-        raise<RuntimeError>("DynamicPointCloud: missing wpid params for wpid %s", wpid_volume.name());
+    if (m_wpid_params.empty()) {
+        raise<RuntimeError>("DynamicPointCloud: empty wpid params for wpid %s", wpid_volume.name());
     }
+    // doc pdvd/25 M3: resolve a foreign query volume instead of raising.
+    auto wpid_iter = m_wpid_params.find(resolve_wpid_key(m_wpid_params, wpid_volume));
 
     const auto &[_, angle_u, angle_v, angle_w] = wpid_iter->second;
     const double angle = (plane == 0) ? angle_u : ((plane == 1) ? angle_v : angle_w);
