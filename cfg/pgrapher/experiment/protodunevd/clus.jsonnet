@@ -652,6 +652,13 @@ local clus_all_tpc (
     // (img-side-bot / img-side-top), alongside the whole img-global.  false =>
     // the bee_points_sets list is unchanged => compiled config byte-identical.
     bee_img_per_side = false,
+    // Persist the post-Q/L point-cloud tree (doc pdvd/25 M1).  '' (default) keeps
+    // the inert dump_mode sink writing trash-all-apa.tar.gz => compiled config
+    // byte-identical.  A non-empty path turns the SAME TensorFileSink into a real
+    // TensorDM writer (prefix 'clustering_', dump_mode false) so the PR job
+    // (pdvd/wct-pr-perevt.jsonnet, TensorFileSource) can load the tree.  Runner
+    // flag: run_clus_evt.sh -save-pctree -> work/<RUN6>_<EVT>/pctree-evt<ID>.tar.gz.
+    tensor_outname = '',
     ) = {
     local pcmerging = g.pnode({
         type: "PointTreeMerging",
@@ -812,9 +819,9 @@ local clus_all_tpc (
         type: "TensorFileSink",
         name: "clus_all_tpc",
         data: {
-            outname: "%s/trash-all-apa.tar.gz"%[bee_dir],
+            outname: if tensor_outname == '' then "%s/trash-all-apa.tar.gz"%[bee_dir] else tensor_outname,
             prefix: "clustering_", // json, numpy, dummy
-            dump_mode: true,
+            dump_mode: tensor_outname == '',
         }
     }, nin=1, nout=0),
     local end = if dump
@@ -839,8 +846,23 @@ local clus_all_tpc (
     per_face(anode, face=0, dump=true) :: clus_per_face(anode, face=face, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo, stepped_center_fallback=stepped_center_fallback),
     per_apa(anode, dump=true) :: clus_per_apa(anode, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo, stepped_center_fallback=stepped_center_fallback),
     per_group(anodes, group_name, dump=true) :: clus_per_group(anodes, group_name, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo),
-    all_tpc(anodes, ngroups=2, dump=true, save_opflash=false, premerged=false, cc_tip_touch_cut=null, cc_tip_touch_angle_cut=null, cc_cathode_x_cut=5*wc.cm, cc_drift_cut=8*wc.cm, cc_dis_cut=5*wc.cm, cc_crosser_conn_relax=null, cc_crosser_pca_angle=null, cc_cathode_band_dis=null, bee_img_per_side=false) :: clus_all_tpc(anodes, ngroups=ngroups, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo, save_opflash=save_opflash, premerged=premerged, cc_tip_touch_cut=cc_tip_touch_cut, cc_tip_touch_angle_cut=cc_tip_touch_angle_cut, cc_cathode_x_cut=cc_cathode_x_cut, cc_drift_cut=cc_drift_cut, cc_dis_cut=cc_dis_cut, cc_crosser_conn_relax=cc_crosser_conn_relax, cc_crosser_pca_angle=cc_crosser_pca_angle, cc_cathode_band_dis=cc_cathode_band_dis, bee_img_per_side=bee_img_per_side),
+    all_tpc(anodes, ngroups=2, dump=true, save_opflash=false, premerged=false, cc_tip_touch_cut=null, cc_tip_touch_angle_cut=null, cc_cathode_x_cut=5*wc.cm, cc_drift_cut=8*wc.cm, cc_dis_cut=5*wc.cm, cc_crosser_conn_relax=null, cc_crosser_pca_angle=null, cc_cathode_band_dis=null, bee_img_per_side=false, tensor_outname='') :: clus_all_tpc(anodes, ngroups=ngroups, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo, save_opflash=save_opflash, premerged=premerged, cc_tip_touch_cut=cc_tip_touch_cut, cc_tip_touch_angle_cut=cc_tip_touch_angle_cut, cc_cathode_x_cut=cc_cathode_x_cut, cc_drift_cut=cc_drift_cut, cc_dis_cut=cc_dis_cut, cc_crosser_conn_relax=cc_crosser_conn_relax, cc_crosser_pca_angle=cc_crosser_pca_angle, cc_cathode_band_dis=cc_cathode_band_dis, bee_img_per_side=bee_img_per_side, tensor_outname=tensor_outname),
     // Expose the DetectorVolumes node builder so the Q/L matching graph can
     // reference the SAME all-anode DV the clustering uses (deterministic by name).
     detector_volumes(anodes, face="") :: detector_volumes(anodes, face),
+    // Primitives the PDVD pattern-recognition builder
+    // (pgrapher/experiment/protodunevd/pr.jsonnet, doc pdvd/25) needs to rebuild the
+    // SAME geometry objects the clustering used: the PCTransformSet for a DV, the
+    // per-(anode,face) 'stepped' live sampler with the per-crate drift speed, and
+    // the T0 scope coordinates.  Hidden fields => nothing here reaches a compiled
+    // clustering config.
+    pc_transforms(dv) :: pctransforms(dv),
+    live_sampler(anode, face, center_fallback=stepped_center_fallback) ::
+        bs_live_face(anode.name, face, center_fallback=center_fallback,
+                     speed=if anode.data.ident < 4 then drift_speed_bot else drift_speed_top),
+    drift_speed_bot :: drift_speed_bot,
+    drift_speed_top :: drift_speed_top,
+    time_offset :: time_offset,
+    scope_coords :: ["x", "y", "z"],
+    t0cor_coords :: ["x_t0cor", "y", "z"],
 }
