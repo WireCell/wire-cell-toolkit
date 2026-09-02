@@ -703,6 +703,19 @@ DPCBatch Clus::Facade::make_points_direct(const Cluster *cluster, const IDetecto
 }
 
 
+const std::tuple<Clus::Facade::geo_point_t, double, double, double>&
+Clus::Facade::resolve_wpid_params(const std::map<WirePlaneId, std::tuple<geo_point_t, double, double, double>>& wpid_params,
+                                  const WirePlaneId& wpid, const WirePlaneId& fallback)
+{
+    auto it = wpid_params.find(wpid);
+    if (it != wpid_params.end()) return it->second;
+    if (wpid.face() >= 0 && wpid.apa() >= 0) {
+        it = wpid_params.find(WirePlaneId(kAllLayers, wpid.face(), wpid.apa()));
+        if (it != wpid_params.end()) return it->second;
+    }
+    return wpid_params.at(fallback);
+}
+
 DPCBatch
 Clus::Facade::make_points_cluster_skeleton(
     const Cluster *cluster, const IDetectorVolumes::pointer dv,
@@ -794,7 +807,11 @@ Clus::Facade::make_points_cluster_skeleton(
                     std::array<double, 3> temp_angle_uvw;
                     auto cache_it = wpid_angles_cache.find(temp_wpid.ident());
                     if (cache_it == wpid_angles_cache.end()) {
-                        const auto& [drift_dir, angle_u, angle_v, angle_w] = wpid_params.at(temp_wpid);
+                        // contained_by() may name a volume this cluster has no
+                        // blobs in (doc pdvd/25 M3); resolve with fallbacks
+                        // instead of aborting on a missing key.
+                        const auto& [drift_dir, angle_u, angle_v, angle_w] =
+                            resolve_wpid_params(wpid_params, temp_wpid, wpid_test_point);
                         temp_angle_uvw = {angle_u, angle_v, angle_w};
                         wpid_angles_cache[temp_wpid.ident()] = temp_angle_uvw;
                     } else {

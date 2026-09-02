@@ -779,6 +779,16 @@ namespace WireCell::Clus {
         std::vector<double> get_pw() const { return pw; }
         std::vector<double> get_pt() const { return pt; }
         std::vector<std::pair<int,int>> get_paf() const {return paf;}
+
+        /// Which dx rule applies to trajectory point i of n in dQ_dx_fit, given
+        /// the per-point (apa, face) list: 0 = first point of an (apa,face) run
+        /// (extrapolate backward from i+1), 1 = last point of a run (extrapolate
+        /// forward from i-1), 2 = interior point, 3 = isolated.  A run boundary
+        /// at the very LAST point is a "last" point, not a "first" one: the
+        /// former predicate read i+1 there and threw std::out_of_range
+        /// (doc pdvd/25 M3: PDVD trajectories cross 16 (anode,face) volumes).
+        /// Identical to the former branch order whenever i+1 exists.
+        static int dqdx_path_point_role(int i, int n, const std::vector<std::pair<int, int>>& paf);
         std::vector<double> get_reduced_chi2() const { return reduced_chi2; }
 
         // Measured 2D charge data access

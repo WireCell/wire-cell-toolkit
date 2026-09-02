@@ -131,6 +131,16 @@ namespace WireCell::Clus {
         auto& temp_cluster = m_grouping->make_child();
         temp_cluster.take_children(*temp_cluster_1);  // Move all blobs from improved cluster
         temp_cluster.from(*orig_cluster);
+        // doc pdvd/25 M3: a retile can yield NO points (PDVD run 039252 evt 4,
+        // a protect_bundle fragment); everything below indexes point 0 and
+        // threw std::out_of_range.  Hand the (empty) ImproveCluster_1 node
+        // back unchanged; the caller skips such a cluster.
+        if (temp_cluster.npoints() == 0) {
+            SPDLOG_LOGGER_WARN(log, "ImproveCluster_2: retiled cluster {} has no points; skipping the improvement", orig_cluster->ident());
+            auto* temp_cluster_ptr0 = &temp_cluster;
+            m_grouping->destroy_child(temp_cluster_ptr0, true);
+            return temp_node;
+        }
         SPDLOG_LOGGER_TRACE(log, "timing: ImproveCluster_1::mutate took {} ms", MS(Clock::now()-t0).count());
         SPDLOG_LOGGER_TRACE(log, "Grouping {} {}", m_grouping->get_name(), m_grouping->children().size());
 

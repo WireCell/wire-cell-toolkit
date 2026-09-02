@@ -66,6 +66,10 @@ void Steiner::CreateSteinerGraph::configure(const WireCell::Configuration& cfg)
     // argument, so an unchanged config is bit-for-bit as before.
     m_grapher_config.edge_charge_forward_dead_mix =
         get(cfg, "edge_charge_forward_dead_mix", m_grapher_config.edge_charge_forward_dead_mix);
+    // doc pdvd/25 M3: Steiner-terminal per-point charge floor (C++ default 4000 =
+    // the prototype constant => byte-identical when the key is absent).
+    m_grapher_config.terminal_charge_threshold =
+        get(cfg, "terminal_charge_threshold", m_grapher_config.terminal_charge_threshold);
     const std::string retiler_tn = get<std::string>(cfg, "retiler", "RetileCluster");
     m_grapher_config.retile = Factory::find_tn<IPCTreeMutate>(retiler_tn);
 }
@@ -97,6 +101,7 @@ Configuration Steiner::CreateSteinerGraph::default_configuration() const
     // doc pr/29 D1: wire slack, in wires, for the Steiner terminal filter ONLY
     // (the prototype uses 1 there and 0 in get_extreme_wcps).  0 = legacy.
     cfg["terminal_wire_tol"] = m_grapher_config.terminal_wire_tol;
+    cfg["terminal_charge_threshold"] = m_grapher_config.terminal_charge_threshold;
     // doc pr/29 D12: step the terminal filter's adjacent-slice lookup by the
     // face's ticks-per-slice instead of by 1.  The map is tick-keyed, so the
     // legacy step of 1 never matches and the fallback is dead.  false = legacy.
@@ -221,6 +226,15 @@ void Steiner::CreateSteinerGraph::visit(Ensemble& ensemble) const
         auto& new_cluster = grouping.make_child();
         new_cluster.take_children(*new_cluster_1);
         new_cluster.from(*src);
+        // doc pdvd/25 M3: an EMPTY retiled cluster (PDVD run 039252 evt 4)
+        // cannot be path-found (get_two_boundary_wcps / closest point on zero
+        // points); treat it like the no-steiner_graph case below.
+        if (new_cluster.npoints() == 0) {
+            SPDLOG_LOGGER_WARN(log, "CreateSteinerGraph: retiled cluster for {} has no points, skipping", tag);
+            auto* empty_ptr = &new_cluster;
+            grouping.destroy_child(empty_ptr, true);
+            return false;
+        }
         if (m_perf) SPDLOG_LOGGER_TRACE(log, "CreateSteinerGraph timing: [{}] retile->mutate took {} ms", tag, MS(Clock::now() - t0).count());
 
         t0 = Clock::now();

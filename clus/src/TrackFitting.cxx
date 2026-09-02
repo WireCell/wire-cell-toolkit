@@ -7641,6 +7641,15 @@ void TrackFitting::dQ_dx_multi_fit(double dis_end_point_ext, bool flag_dQ_dx_fit
 }
 
 
+int Clus::TrackFitting::dqdx_path_point_role(int i, int n, const std::vector<std::pair<int, int>>& paf)
+{
+    if (i == 0) return 0;
+    if (i != n - 1 && paf.at(i) != paf.at(i - 1)) return 0;   // run starts here and i+1 exists
+    if (i == n - 1 || paf.at(i) != paf.at(i + 1)) return 1;   // run ends here (incl. the last point)
+    if (paf.at(i) == paf.at(i - 1) && paf.at(i) == paf.at(i + 1)) return 2;
+    return 3;
+}
+
 void WireCell::Clus::TrackFitting::dQ_dx_fit(double dis_end_point_ext, bool flag_dQ_dx_fit_reg) {
     if (fine_tracking_path.size() <= 1) return;
     
@@ -7826,8 +7835,9 @@ void WireCell::Clus::TrackFitting::dQ_dx_fit(double dis_end_point_ext, bool flag
 
         // if (i!=0) std::cout << i << " TTT " << (paf.at(i) == paf.at(i-1)) << std::endl;
 
-        if (i == 0 || (i!=0 && paf.at(i) != paf.at(i-1))) {
-            // First point: extrapolate backward
+        const int role = dqdx_path_point_role(i, n_3D_pos, paf);
+        if (role == 0) {
+            // First point (of an (apa,face) run): extrapolate backward
             if (n_3D_pos > 1) {
                 WireCell::Point next_point = fine_tracking_path.at(i+1).first;
                 WireCell::Vector dir = next_point - curr_rec_pos;
@@ -7842,8 +7852,8 @@ void WireCell::Clus::TrackFitting::dQ_dx_fit(double dis_end_point_ext, bool flag
                 prev_rec_pos = curr_rec_pos;
                 next_rec_pos = curr_rec_pos;
             }
-        } else if (i == n_3D_pos - 1 || (i!=n_3D_pos-1 && paf.at(i) != paf.at(i+1))) {
-            // Last point: extrapolate forward
+        } else if (role == 1) {
+            // Last point (of an (apa,face) run): extrapolate forward
             WireCell::Point prev_point = fine_tracking_path.at(i-1).first;
             WireCell::Vector dir = curr_rec_pos - prev_point;
             double length = dir.magnitude();
@@ -7853,7 +7863,7 @@ void WireCell::Clus::TrackFitting::dQ_dx_fit(double dis_end_point_ext, bool flag
                 next_rec_pos = curr_rec_pos;
             }
             prev_rec_pos = (curr_rec_pos + prev_point) * 0.5;
-        } else if (paf.at(i) == paf.at(i-1) && paf.at(i) == paf.at(i+1)){
+        } else if (role == 2) {
             // Middle point
             prev_rec_pos = (curr_rec_pos + fine_tracking_path.at(i-1).first) * 0.5;
             next_rec_pos = (curr_rec_pos + fine_tracking_path.at(i+1).first) * 0.5;
@@ -7993,7 +8003,8 @@ void WireCell::Clus::TrackFitting::dQ_dx_fit(double dis_end_point_ext, bool flag
         
         // Calculate previous and next positions for Gaussian integration
         WireCell::Point prev_rec_pos, next_rec_pos;
-        if (i == 0 || (i!=0 && paf.at(i) != paf.at(i-1))) {
+        const int role = dqdx_path_point_role(i, n_3D_pos, paf);
+        if (role == 0) {
             if (n_3D_pos > 1) {
                 WireCell::Point next_point = fine_tracking_path.at(i+1).first;
                 next_rec_pos = (curr_rec_pos + next_point) * 0.5;
@@ -8007,7 +8018,7 @@ void WireCell::Clus::TrackFitting::dQ_dx_fit(double dis_end_point_ext, bool flag
             } else {
                 prev_rec_pos = next_rec_pos = curr_rec_pos;
             }
-        } else if (i == n_3D_pos - 1 || (i!=n_3D_pos-1 && paf.at(i) != paf.at(i+1))) {
+        } else if (role == 1) {
             WireCell::Point prev_point = fine_tracking_path.at(i-1).first;
             prev_rec_pos = (curr_rec_pos + prev_point) * 0.5;
             WireCell::Vector dir = curr_rec_pos - prev_point;
@@ -8017,7 +8028,7 @@ void WireCell::Clus::TrackFitting::dQ_dx_fit(double dis_end_point_ext, bool flag
             } else {
                 next_rec_pos = curr_rec_pos;
             }
-        } else if (paf.at(i) == paf.at(i-1) && paf.at(i) == paf.at(i+1)) {
+        } else if (role == 2) {
             prev_rec_pos = (curr_rec_pos + fine_tracking_path.at(i-1).first) * 0.5;
             next_rec_pos = (curr_rec_pos + fine_tracking_path.at(i+1).first) * 0.5;
         }else{

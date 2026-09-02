@@ -183,6 +183,19 @@ public:
         // 2.2 cm, 3.31 MIP) and pass one or both conditions.  docs/63 sec 4
         // round 3.
         m_cathode_guard = get<bool>(config, "cathode_guard", m_cathode_guard);
+        // readout_edge_guard (C++ default false => byte-identical legacy; doc
+        // pdvd/25 M3): a stop whose fitted arrival tick sits within
+        // guard_readout_edge_ticks of the readout window's edges [0,
+        // readout_nticks) is cut by the window, not by a Bragg stop (PDVD: a
+        // track running into time slice 0 was accepted as STM).  readout_nticks
+        // <= 0 disables the late-edge half.
+        m_readout_edge_guard = get<bool>(config, "readout_edge_guard", m_readout_edge_guard);
+        m_guard_readout_edge_ticks = get<double>(config, "guard_readout_edge_ticks", m_guard_readout_edge_ticks);
+        m_readout_nticks = get<int>(config, "readout_nticks", m_readout_nticks);
+        if (m_readout_edge_guard) {
+            SPDLOG_LOGGER_DEBUG(s_log, "configure: TaggerCheckSTM: readout_edge_guard ON (stop tick within {} of [0,{}))",
+                                m_guard_readout_edge_ticks, m_readout_nticks);
+        }
         m_guard_cathode_cm = get<double>(config, "guard_cathode_cm", m_guard_cathode_cm);
         m_guard_cathode_peak = get<double>(config, "guard_cathode_peak", m_guard_cathode_peak);
         if (m_cathode_guard) {
@@ -415,6 +428,9 @@ public:
         cfg["proton_c_peak_max"] = m_proton_c_peak_max;
         // doc-63 round-3 cathode-truncation veto; false = byte-identical legacy.
         cfg["cathode_guard"] = m_cathode_guard;
+        cfg["readout_edge_guard"] = m_readout_edge_guard;
+        cfg["guard_readout_edge_ticks"] = m_guard_readout_edge_ticks;
+        cfg["readout_nticks"] = m_readout_nticks;
         cfg["guard_cathode_cm"] = m_guard_cathode_cm;
         cfg["guard_cathode_peak"] = m_guard_cathode_peak;
         // doc-63 round-4a dist_to_anode face fix; false = byte-identical legacy.
@@ -791,6 +807,9 @@ private:
 
     // doc-63 round-3 cathode-truncation veto (see configure()).
     bool m_cathode_guard{false};
+    bool m_readout_edge_guard{false};       // doc pdvd/25: readout-window truncation veto
+    double m_guard_readout_edge_ticks{60};  // stop tick within this of the window edges
+    int m_readout_nticks{0};                // readout length in ticks; <= 0 = late edge unchecked
     double m_guard_cathode_cm{5.0};     // stop-to-cathode distance below this
     double m_guard_cathode_peak{2.5};   // ... with end peak below this x MIP
 
@@ -2045,6 +2064,7 @@ private:
         std::vector<WireCell::Point> pts;
         std::vector<double> L;
         std::vector<double> dQ_dx;
+        std::vector<double> pt;    // fitted arrival tick per point (readout_edge_guard)
         bool valid{false};
     };
 
@@ -2056,6 +2076,7 @@ private:
             arrs.pts.push_back(fit.point);
             arrs.L.push_back(0);
             arrs.dQ_dx.push_back(fit.dQ / (fit.dx / units::cm + 1e-9));
+            arrs.pt.push_back(fit.pt);
         }
         double dis = 0;
         for (size_t i = 1; i < arrs.pts.size(); i++) {
@@ -2195,6 +2216,29 @@ private:
         if (peak > 0 && peak < m_guard_cathode_peak * m_mip_dqdx) {
             SPDLOG_LOGGER_INFO(s_log, "cathode_guard: cluster {} rejected: stop {:.1f} cm from the cathode with end peak {:.2f} MIP (drift-boundary truncation, not a stop)",
                                cluster_ident, dist / units::cm, peak / m_mip_dqdx);
+            return true;
+        }
+        return false;
+    }
+
+    // doc pdvd/25 M3: a stop whose fitted arrival tick sits within
+    // guard_readout_edge_ticks of the readout window's edges was cut by the
+    // window, not by a Bragg stop.  Same calling convention as
+    // cathode_guard_reject; gated on m_readout_edge_guard.  Unlike a fiducial
+    // x-margin this follows the cluster's own t0: the truncated end lands at
+    // x = anode + (0 - t0) v, anywhere in the drift.
+    bool readout_edge_guard_reject(const STMEvalArrays& arrs, int kink_num, int cluster_ident) const {
+        const int n = static_cast<int>(arrs.L.size());
+        if (n < 3 || arrs.pt.size() != arrs.L.size()) return false;
+        const int k = (kink_num >= 0 && kink_num < n) ? kink_num : n - 1;
+        const double tick = arrs.pt[static_cast<size_t>(k)];
+        const bool early = tick < m_guard_readout_edge_ticks;
+        const bool late = m_readout_nticks > 0 && tick > m_readout_nticks - m_guard_readout_edge_ticks;
+        SPDLOG_LOGGER_DEBUG(s_log, "readout_edge_guard: cluster {} stop tick={:.1f} window=[0,{}) edge={} early={} late={}",
+                            cluster_ident, tick, m_readout_nticks, m_guard_readout_edge_ticks, early, late);
+        if (early || late) {
+            SPDLOG_LOGGER_INFO(s_log, "readout_edge_guard: cluster {} rejected: stop at tick {:.1f} within {} ticks of the readout window edge (window truncation, not a stop)",
+                               cluster_ident, tick, m_guard_readout_edge_ticks);
             return true;
         }
         return false;
@@ -3698,6 +3742,13 @@ private:
             // placement rationale as accept_guards above).
             if (m_cathode_guard && flag_pass &&
                 cathode_guard_reject(eval_arrs, kink_num, cluster.ident())) {
+                if (m_save_stm_fit) set_pass_status(7);
+                return std::nullopt;
+            }
+            // doc pdvd/25 M3: readout-window truncation veto (own knob; same
+            // placement rationale as cathode_guard above).
+            if (m_readout_edge_guard && flag_pass &&
+                readout_edge_guard_reject(eval_arrs, kink_num, cluster.ident())) {
                 if (m_save_stm_fit) set_pass_status(7);
                 return std::nullopt;
             }

@@ -3645,6 +3645,13 @@ std::pair<int, int> Cluster::get_two_boundary_steiner_graph_idx(const std::strin
 
 std::pair<geo_point_t, geo_point_t> Cluster::get_two_boundary_wcps(bool flag_cosmic) const 
 {
+    // Early exit for an EMPTY cluster (doc pdvd/25 M3): a retile can yield a
+    // cluster with no points (PDVD run 039252 evt 4, a protect_bundle
+    // fragment); point3d(0) on it threw std::out_of_range and aborted the
+    // job.  A defined, degenerate answer lets the caller decide.
+    if (npoints() == 0) {
+        return std::make_pair(geo_point_t(0, 0, 0), geo_point_t(0, 0, 0));
+    }
     // Early exit for single point
     if (npoints() <= 1) {
         geo_point_t single_point = point3d(0);

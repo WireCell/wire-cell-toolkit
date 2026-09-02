@@ -202,6 +202,24 @@ namespace WireCell::Clus::Facade {
     make_points_cluster_steiner(const Cluster *cluster,
                         const std::map<WirePlaneId, std::tuple<geo_point_t, double, double, double>> &wpid_params, bool flag_wrap = false);
 
+    /// Resolve the (drift_dir, angle_u, angle_v, angle_w) parameters for a
+    /// wire-plane id that may NOT be a key of @p wpid_params.  Order:
+    ///   1. the exact @p wpid;
+    ///   2. the same (apa, face) under kAllLayers -- blob wpids are stored
+    ///      that way, while IDetectorVolumes::contained_by() may answer with
+    ///      another layer;
+    ///   3. @p fallback, which the caller guarantees IS a key (typically the
+    ///      wpid of the path point the interpolation is heading to).
+    /// Never throws for a missing @p wpid.  This is the crash-path fix of
+    /// doc pdvd/25 M3: on PDVD a cluster's path routinely crosses into a CRP
+    /// / face whose blobs are not in the cluster, and the former
+    /// wpid_params.at(wpid) aborted the job (std::out_of_range) -- the same
+    /// trap connect_graph_relaxed.cxx keys around.  On any run that did not
+    /// throw, the result is identical to the exact-key lookup.
+    const std::tuple<geo_point_t, double, double, double>&
+    resolve_wpid_params(const std::map<WirePlaneId, std::tuple<geo_point_t, double, double, double>>& wpid_params,
+                        const WirePlaneId& wpid, const WirePlaneId& fallback);
+
     DPCBatch make_points_cluster_skeleton(
         const Cluster *cluster, const IDetectorVolumes::pointer dv,
         const std::map<WirePlaneId, std::tuple<geo_point_t, double, double, double>> &wpid_params,

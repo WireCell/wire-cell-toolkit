@@ -429,7 +429,7 @@ Steiner::Grapher::vertex_set Steiner::Grapher::find_peak_point_indices(
     std::map<size_t, double> map_index_charge;
     std::set<std::pair<double, size_t>, std::greater<std::pair<double, size_t>>> candidates_set;
     
-    const double charge_threshold = 4000.0;
+    const double charge_threshold = m_config.terminal_charge_threshold;   // 4000 = prototype (doc pdvd/25 M3)
     
     for (size_t point_idx : all_indices) {
         auto [charge_quality, charge] = m_cluster.calc_charge_wcp(point_idx, charge_threshold, disable_dead_mix_cell);

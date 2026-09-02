@@ -79,6 +79,17 @@ namespace WireCell::Clus::Steiner {
             /// downstream, whatever the caller asked for);
             /// true = prototype parity, the caller's value is honoured.
             bool edge_charge_forward_dead_mix{false};
+
+            /// doc pdvd/25 M3.  Per-point charge floor (electrons, per plane and
+            /// on the plane-RMS) below which a point cannot be a Steiner
+            /// terminal (find_peak_point_indices).  4000 is the WCP prototype
+            /// constant, tuned to uBooNE's 3 mm pitch: on PDVD (7.65 / 5.10 mm
+            /// pitch, stepped sampling) the W-plane per-point charge has a
+            /// median of ~1400 e and only ~12 % of points clear 4000 on all
+            /// three planes, so a fifth of the mains get NO terminals at all
+            /// (a 3 m track included).  Default 4000 = bit-for-bit the
+            /// historical behaviour; PDVD sets its own value.
+            double terminal_charge_threshold{4000.0};
         };
         Log::logptr_t log;
 
