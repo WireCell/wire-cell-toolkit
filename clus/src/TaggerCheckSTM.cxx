@@ -850,7 +850,10 @@ private:
     //   cathode_guard, second_track_guard's leftover veto, deficit_guard or
     //   vertex_kink_guard (desert/spike/cathode/leftover-track/deficit-end/
     //   vertex-kink; a ratio2-cap rejection shows as 3 -- it fires inside
-    //   the eval -- and a round-4c segment veto as 4).
+    //   the eval -- and a round-4c segment veto as 4), 8 round-2 fit
+    //   returned no points (TrackFitting dropped an inconsistent fit; the
+    //   pass is abandoned -- PDVD 039349:50/77, 039252:8 segfaulted on
+    //   pts.front() here before this guard existed).
     // Round-1 rough fits and passes aborted with <=3 fit points are NOT
     // recorded (no round-2 segment exists).
     bool m_save_stm_fit{false};
@@ -3571,6 +3574,18 @@ private:
                 pts.push_back(fit.point);
             }
             const int total_pts = static_cast<int>(pts.size());
+            if (pts.empty()) {
+                // TrackFitting::do_single_tracking drops a fit whose output
+                // sizes disagree (leaving fits() empty) and expects the caller
+                // to filter on fits().size(); this pass never did, and
+                // pts.front() below dereferenced an empty vector (SIGSEGV,
+                // PDVD stm2 arm, doc pdvd/25 sec 13.4). Abandon the pass;
+                // every pass with >= 1 fit point is untouched.
+                SPDLOG_LOGGER_DEBUG(s_log, "{}check_stm_conditions: cluster {} no STM fit: round-2 {} fit returned no points", m_evt_tag,
+                                    cluster.ident(), is_forward ? "forward" : "backward");
+                if (m_save_stm_fit) set_pass_status(8);
+                return std::nullopt;
+            }
 
             int kink_num = find_first_kink(adjusted_segment);
 
