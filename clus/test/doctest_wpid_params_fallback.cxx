@@ -59,3 +59,13 @@ TEST_CASE("wpid params: resolve_wpid_params never throws and prefers the exact k
         CHECK(std::get<1>(t) == doctest::Approx(0.10));
     }
 }
+
+TEST_CASE("wpid params: resolve_wpid_key gives a key the map holds")
+{
+    auto p = make_params();
+    CHECK(Facade::resolve_wpid_key(p, WirePlaneId(kUlayer, 0, 3)) == WirePlaneId(kUlayer, 0, 3));          // exact
+    CHECK(Facade::resolve_wpid_key(p, WirePlaneId(kWlayer, 1, 0)) == WirePlaneId(kAllLayers, 1, 0));       // same (apa, face)
+    CHECK(Facade::resolve_wpid_key(p, WirePlaneId(kVlayer, 1, 3)) == WirePlaneId(kUlayer, 0, 3));          // same apa, other face
+    CHECK(p.count(Facade::resolve_wpid_key(p, WirePlaneId(kUlayer, 1, 5))) == 1);                          // foreign apa: some key
+    CHECK(p.count(Facade::resolve_wpid_key(p, WirePlaneId(kUnknownLayer, -1, -1))) == 1);
+}

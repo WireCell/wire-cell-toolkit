@@ -1991,6 +1991,10 @@ bool PatternAlgorithms::replace_segment_and_vertex(Graph& graph, SegmentPtr& seg
         // Initialize the start test point
         Facade::geo_point_t break_wcp = start_v->wcpt().point;
         const auto& point_vec = curr_sg->fits();  // use fit points, matching prototype's get_point_vec()
+        // doc pdvd/25 M3: a segment whose fit produced no points (PDVD run
+        // 039252 evt 1) dereferenced front() of an empty vector -> SIGSEGV.
+        // Mirror the wcpts guard above: nothing to break here.
+        if (point_vec.empty()) continue;
         Facade::geo_point_t test_start_p = point_vec.front().point;
         
         if (dis_cut > 0) {

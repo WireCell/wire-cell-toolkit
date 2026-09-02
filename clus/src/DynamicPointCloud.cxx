@@ -661,9 +661,11 @@ DPCBatch Clus::Facade::make_points_direct(const Cluster *cluster, const IDetecto
     for (auto& [test_point, wpid_test_point] : points_info) {
         // Skip points outside the detector volume (apa=-1) or with unknown wpid
         if (wpid_test_point.apa() == -1) continue;
-        if (wpid_params.find(wpid_test_point) == wpid_params.end()) {
-            raise<RuntimeError>("make_points_cluster: missing wpid params for wpid %s", wpid_test_point.name());
+        if (wpid_params.empty()) {
+            raise<RuntimeError>("make_points_cluster: empty wpid params for wpid %s", wpid_test_point.name());
         }
+        // doc pdvd/25 M3: resolve a foreign volume instead of raising.
+        const WirePlaneId wpid_key = resolve_wpid_key(wpid_params, wpid_test_point);
 
         batch.add_point(test_point.x(), test_point.y(), test_point.z(),
                         wpid_test_point.ident(), cluster, nullptr,
@@ -675,7 +677,7 @@ DPCBatch Clus::Facade::make_points_direct(const Cluster *cluster, const IDetecto
             std::array<double, 3> temp_angle_uvw;
             auto cache_it = wpid_angles_cache.find(wpid_test_point.ident());
             if (cache_it == wpid_angles_cache.end()) {
-                const auto& [drift_dir, angle_u, angle_v, angle_w] = wpid_params.at(wpid_test_point);
+                const auto& [drift_dir, angle_u, angle_v, angle_w] = wpid_params.at(wpid_key);
                 temp_angle_uvw = {angle_u, angle_v, angle_w};
                 wpid_angles_cache[wpid_test_point.ident()] = temp_angle_uvw;
             } else {
@@ -702,6 +704,18 @@ DPCBatch Clus::Facade::make_points_direct(const Cluster *cluster, const IDetecto
 
 }
 
+
+WirePlaneId Clus::Facade::resolve_wpid_key(const std::map<WirePlaneId, std::tuple<geo_point_t, double, double, double>>& wpid_params,
+                                           const WirePlaneId& wpid)
+{
+    if (wpid_params.find(wpid) != wpid_params.end()) return wpid;
+    if (wpid.face() >= 0 && wpid.apa() >= 0) {
+        const WirePlaneId cand(kAllLayers, wpid.face(), wpid.apa());
+        if (wpid_params.find(cand) != wpid_params.end()) return cand;
+        for (const auto& [k, v] : wpid_params) if (k.apa() == wpid.apa()) return k;
+    }
+    return wpid_params.begin()->first;
+}
 
 const std::tuple<Clus::Facade::geo_point_t, double, double, double>&
 Clus::Facade::resolve_wpid_params(const std::map<WirePlaneId, std::tuple<geo_point_t, double, double, double>>& wpid_params,
@@ -750,15 +764,17 @@ Clus::Facade::make_points_cluster_skeleton(
         double dis = (test_point - prev_wcp).magnitude();
         auto wpid_test_point = cluster->wire_plane_id(*it);
 
-        if (wpid_params.find(wpid_test_point) == wpid_params.end()) {
-            raise<RuntimeError>("make_points_cluster: missing wpid params for wpid %s", wpid_test_point.name());
+        if (wpid_params.empty()) {
+            raise<RuntimeError>("make_points_cluster: empty wpid params for wpid %s", wpid_test_point.name());
         }
+        // doc pdvd/25 M3: resolve a foreign volume instead of raising.
+        const WirePlaneId wpid_key = resolve_wpid_key(wpid_params, wpid_test_point);
 
         // Get or compute angle values for this wpid
         std::array<double, 3> angle_uvw;
         auto cache_it = wpid_angles_cache.find(wpid_test_point.ident());
         if (cache_it == wpid_angles_cache.end()) {
-            const auto& [drift_dir, angle_u, angle_v, angle_w] = wpid_params.at(wpid_test_point);
+            const auto& [drift_dir, angle_u, angle_v, angle_w] = wpid_params.at(wpid_key);
             angle_uvw = {angle_u, angle_v, angle_w};
             wpid_angles_cache[wpid_test_point.ident()] = angle_uvw;
         } else {
@@ -865,10 +881,11 @@ DPCBatch Clus::Facade::make_points_linear_extrapolation(
     // grouping's first wpid (legacy single-volume behavior).
     const auto wpid = (seed_wpid.apa() >= 0) ? seed_wpid : *(cluster->grouping()->wpids().begin());
 
-    // Check wpid early
-    if (wpid_params.find(wpid) == wpid_params.end()) {
-        raise<RuntimeError>("make_points_cluster: missing wpid params for wpid %s", wpid.name());
+    // Check wpid early; doc pdvd/25 M3: resolve a foreign volume instead of raising.
+    if (wpid_params.empty()) {
+        raise<RuntimeError>("make_points_cluster: empty wpid params for wpid %s", wpid.name());
     }
+    const WirePlaneId wpid_key = resolve_wpid_key(wpid_params, wpid);
 
     // Pre-compute constants
     const double DEG_TO_RAD = 3.1415926/180.0;
@@ -889,7 +906,7 @@ DPCBatch Clus::Facade::make_points_linear_extrapolation(
     double dz_step = dir.z() * dis_seg;
 
     // Get angle values once
-    const auto [drift_dir, angle_u, angle_v, angle_w] = wpid_params.at(wpid);
+    const auto [drift_dir, angle_u, angle_v, angle_w] = wpid_params.at(wpid_key);
     const double cos_angle_uvw[3] = {cos(angle_u), cos(angle_v), cos(angle_w)};
     const double sin_angle_uvw[3] = {sin(angle_u), sin(angle_v), sin(angle_w)};
 
@@ -912,7 +929,7 @@ DPCBatch Clus::Facade::make_points_linear_extrapolation(
         // Calculate distance cut
         const double dis_cut = std::floor(std::min(std::max(MIN_DIS_CUT, k_dis * sin_angle_rad), MAX_DIS_CUT));
 
-        WirePlaneId pt_wpid = wpid;
+        WirePlaneId pt_wpid = wpid_key;
         const double* cos_uvw = cos_angle_uvw;
         const double* sin_uvw = sin_angle_uvw;
         if (multi_volume) {

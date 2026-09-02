@@ -220,6 +220,13 @@ namespace WireCell::Clus::Facade {
     resolve_wpid_params(const std::map<WirePlaneId, std::tuple<geo_point_t, double, double, double>>& wpid_params,
                         const WirePlaneId& wpid, const WirePlaneId& fallback);
 
+    /// The KEY resolve_wpid_params would use, for callers that index the map
+    /// themselves: exact @p wpid, else the same (apa, face) under kAllLayers,
+    /// else any key with the same apa, else the map's first key.  @p wpid_params
+    /// must be non-empty.
+    WirePlaneId resolve_wpid_key(const std::map<WirePlaneId, std::tuple<geo_point_t, double, double, double>>& wpid_params,
+                                 const WirePlaneId& wpid);
+
     DPCBatch make_points_cluster_skeleton(
         const Cluster *cluster, const IDetectorVolumes::pointer dv,
         const std::map<WirePlaneId, std::tuple<geo_point_t, double, double, double>> &wpid_params,
