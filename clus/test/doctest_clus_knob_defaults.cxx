@@ -788,7 +788,7 @@ TEST_CASE("clus knob defaults: TaggerCheckSTM entry_rise_guard is off, and its s
     CHECK(cfg["guard_entry_min_cm"].asDouble() > 0.0);
     CHECK(cfg["guard_entry_max_cm"].asDouble() > cfg["guard_entry_min_cm"].asDouble());
     CHECK_KNOB_NUM(cfg, "guard_entry_min_cm", 5.0);
-    CHECK_KNOB_NUM(cfg, "guard_entry_max_cm", 30.0);
+    CHECK_KNOB_NUM(cfg, "guard_entry_max_cm", 60.0);
 
     // Contract 3 -- the bar is ABOVE the body level it is compared with.  The
     // guard measures a run that stands out from the muon body; frac <= 1
@@ -804,6 +804,18 @@ TEST_CASE("clus knob defaults: TaggerCheckSTM entry_rise_guard is off, and its s
     REQUIRE(cfg.isMember("guard_entry_min_len_cm"));
     CHECK(cfg["guard_entry_min_len_cm"].asDouble() > 20.0 + 25.0);
     CHECK_KNOB_NUM(cfg, "guard_entry_min_len_cm", 70.0);
+
+    // Contract 5 -- the owner's KINK bar (round 3).  It is an AND with the
+    // shoulder, and it must be a real turn: several of the bundles the owner
+    // hand-labelled clear 22 deg on their own -- two of his four STMs
+    // (282033 at 25 deg, 56257 at 42) and the not-STM control 36-77-17 at
+    // 30 -- so a bar at or below multiple-scattering level would turn the
+    // guard back into the shoulder-only predicate that released 95500.  A bar above 90 deg cannot fire at all (two chords
+    // meeting at a point on a fitted trajectory never reverse).
+    REQUIRE(cfg.isMember("guard_entry_kink_deg"));
+    CHECK(cfg["guard_entry_kink_deg"].asDouble() > 15.0);
+    CHECK(cfg["guard_entry_kink_deg"].asDouble() < 90.0);
+    CHECK_KNOB_NUM(cfg, "guard_entry_kink_deg", 22.0);
 }
 
 // ---------------------------------------------------------------------------

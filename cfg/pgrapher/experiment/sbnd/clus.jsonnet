@@ -1123,8 +1123,10 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, e
               // 2026-09-02, after the validation below).  NOT byte-identical.
               //   - recovers 3 of the 4 events the owner adjudicated as
               //     neutrinos: 966-2-22, 304-6-28, 146-60-31 all flip
-              //     STM -> nu-candidate (707-18-12 is a genuine STM and was
-              //     never a target);
+              //     STM -> nu-candidate.  (707-18-12 was adjudicated a
+              //     genuine STM on 2026-09-02 then re-adjudicated a NEUTRINO
+              //     the same day, the owner having re-read the truth; it is
+              //     the one of the five that no guard recovers -- docs/94.)
               //   - measured A/B over all 3067 SBND data events: 1 bundle
               //     flips of 34,827, and the owner adjudicated that bundle
               //     (64475:23) a NEUTRINO, so the measured cost is zero;
@@ -1149,11 +1151,21 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, e
               // range turns the boolean into a pure probe that changes no
               // verdict.  C++ defaults false/1.3/5/30/70; keys omitted when
               // off => byte-identical.  See sbnd_xin/docs/94 sec 12.
+              // Round 3 (owner hand-scan, 2026-09-02) adds stm_entry_kink_deg:
+              // the fitted path must also TURN somewhere along the muon.  Two
+              // particles meeting at a vertex turn; a single muon carrying a
+              // delta-ray fluctuation at the boundary does not.  The AND is
+              // what works -- five of the owner's STMs clear 22 deg on their
+              // own.  stm_entry_max_cm 30 -> 60 in the same round: the owner
+              // adjudicated 350099 (shoulder 48.8 cm) a NEUTRINO, so the
+              // "no decay above 30 cm" premise was wrong, and the kink now
+              // carries what that bound was there for.
               stm_entry_rise_guard=false,
               stm_entry_frac=1.3,
               stm_entry_min_cm=5.0,
-              stm_entry_max_cm=30.0,
+              stm_entry_max_cm=60.0,
               stm_entry_min_len_cm=70.0,
+              stm_entry_kink_deg=22.0,
               // stm_d66_cuts: the doc-66 sec 12 diffusion-margin cut package
               // (Michel-veto res_length floor 6 -> 6.5 cm, detect_proton
               // track_medium gate 1.0 -> 1.05, block-B ks2 entry 0.05 ->
@@ -2055,6 +2067,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, e
                 guard_entry_min_cm=(if stm_entry_rise_guard then stm_entry_min_cm else null),
                 guard_entry_max_cm=(if stm_entry_rise_guard then stm_entry_max_cm else null),
                 guard_entry_min_len_cm=(if stm_entry_rise_guard then stm_entry_min_len_cm else null),
+                guard_entry_kink_deg=(if stm_entry_rise_guard then stm_entry_kink_deg else null),
                 // doc-66 sec 12 cut package (C++ defaults = prototype constants;
                 // keys omitted when stm_d66_cuts=false => byte-identical).
                 michel_res_length_cut=(if stm_d66_cuts then stm_michel_res_cm * wc.cm else null),

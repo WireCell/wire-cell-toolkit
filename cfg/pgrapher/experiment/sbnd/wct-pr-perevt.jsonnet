@@ -684,11 +684,18 @@ function(
     // the integrated excess on every evaluated bundle and no verdict moves.
     // DEFAULT FALSE.  Keys omitted when off => byte-identical.
     // See sbnd_xin/docs/94 sec 12.
+    // Round 3 (owner hand-scan, 2026-09-02): stm_entry_kink_deg -- the path
+    // must ALSO turn.  A two-particle vertex turns; a delta-ray fluctuation
+    // on a straight muon does not.  The AND is the discriminator: the kink
+    // alone clears 22 deg on five of the owner's own STMs.
+    // stm_entry_max_cm 30 -> 60 in the same round (the owner adjudicated
+    // 350099, shoulder 48.8 cm, a NEUTRINO).
     stm_entry_rise_guard = false,
     stm_entry_frac = 1.3,
     stm_entry_min_cm = 5.0,
-    stm_entry_max_cm = 30.0,
+    stm_entry_max_cm = 60.0,
     stm_entry_min_len_cm = 70.0,
+    stm_entry_kink_deg = 22.0,
     // doc-66 sec 12 diffusion-margin cut package: Michel-veto res_length
     // floor 6 -> 6.5 cm, detect_proton track_medium gate 1.0 -> 1.05,
     // block-B ks2 entry 0.05 -> 0.055, C1 peak clause 4.3 -> 4.1.  Restores
@@ -3559,6 +3566,7 @@ function(
                              stm_entry_min_cm=stm_entry_min_cm,
                              stm_entry_max_cm=stm_entry_max_cm,
                              stm_entry_min_len_cm=stm_entry_min_len_cm,
+                             stm_entry_kink_deg=stm_entry_kink_deg,
                              stm_d66_cuts=stm_d66_cuts,
                              cathode_x=cathode_x,
                              steiner_terminal_wire_tol=steiner_terminal_wire_tol,

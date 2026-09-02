@@ -326,10 +326,12 @@ public:
         m_guard_entry_min_cm = get<double>(config, "guard_entry_min_cm", m_guard_entry_min_cm);
         m_guard_entry_max_cm = get<double>(config, "guard_entry_max_cm", m_guard_entry_max_cm);
         m_guard_entry_min_len_cm = get<double>(config, "guard_entry_min_len_cm", m_guard_entry_min_len_cm);
+        m_guard_entry_kink_deg = get<double>(config, "guard_entry_kink_deg", m_guard_entry_kink_deg);
         if (m_entry_rise_guard) {
-            SPDLOG_LOGGER_DEBUG(s_log, "configure: TaggerCheckSTM: entry_rise_guard ON (run>={}x max(body,MIP) for {}-{}cm from the boundary, muon>={}cm)",
+            SPDLOG_LOGGER_DEBUG(s_log, "configure: TaggerCheckSTM: entry_rise_guard ON (run>={}x max(body,MIP) for {}-{}cm from the boundary AND a >={}deg turn, muon>={}cm)",
                                 m_guard_entry_frac, m_guard_entry_min_cm,
-                                m_guard_entry_max_cm, m_guard_entry_min_len_cm);
+                                m_guard_entry_max_cm, m_guard_entry_kink_deg,
+                                m_guard_entry_min_len_cm);
         }
 
         // anode_dist_fix (C++ default false => byte-identical legacy): fix
@@ -445,6 +447,7 @@ public:
         cfg["guard_entry_min_cm"] = m_guard_entry_min_cm;
         cfg["guard_entry_max_cm"] = m_guard_entry_max_cm;
         cfg["guard_entry_min_len_cm"] = m_guard_entry_min_len_cm;
+        cfg["guard_entry_kink_deg"] = m_guard_entry_kink_deg;
         // Null/empty => the historical FiducialUtils containment (union of
         // per-face sensitive volumes, no margin).  Naming an IFiducial here
         // redirects cluster_fc_check's direct containment tests to it; pass the
@@ -782,8 +785,9 @@ private:
     bool m_entry_rise_guard{false};
     double m_guard_entry_frac{1.3};        // shoulder bar = this x max(body, 1 MIP)
     double m_guard_entry_min_cm{5.0};      // shorter anchored run => a fluctuation, not a track
-    double m_guard_entry_max_cm{30.0};     // longer => hot everywhere, no decay => not this signature
+    double m_guard_entry_max_cm{60.0};     // longer => the run never ends, so nothing decayed
     double m_guard_entry_min_len_cm{70.0}; // shorter muon => no room for a body estimate
+    double m_guard_entry_kink_deg{22.0};   // the path must TURN this much somewhere (owner's kink)
 
     // doc-63 round-3 cathode-truncation veto (see configure()).
     bool m_cathode_guard{false};
@@ -2398,11 +2402,14 @@ private:
     // entry/body ratio, and not an integrated excess.  Two design choices carry
     // the discrimination and each is answerable to a labelled event:
     //
-    //   * ANCHORING at the boundary is what rejects 707-18-12, the one event
-    //     of the six the owner confirmed is a GENUINE STM.  Its profile does
-    //     carry a 1.8 MIP spike -- but at 2-4 cm, on top of a 0.98 MIP first
-    //     window.  A hot stretch that does not reach the boundary is a delta
-    //     ray on an entering muon, not a particle that left the detector.
+    //   * ANCHORING at the boundary is what makes the run a SEPARATOR at all.
+    //     Measured on the owner's hand-labelled bundles: anchored, they run
+    //     8.4 cm (827-27-4, neutrino) and 5.5 cm (95500, STM) with every
+    //     other labelled bundle at or below 4.4 cm.  Drop the anchor, take
+    //     the longest elevated run ANYWHERE on the muon, and every one of
+    //     them lands between 11 and 35 cm -- no separation left.  Physically:
+    //     a particle that LEFT the detector was on the path where the path
+    //     meets the boundary, so the stretch they shared must start there.
     //   * A REQUIRED DECAY (shoulder_L <= max) is what separates "hot at the
     //     entry, then MIP" from "hot everywhere".  A bare ratio cannot: doc 94
     //     sec 0.3 records 304-6-28 at entry/body 2.15 with a body that never
@@ -2410,7 +2417,19 @@ private:
     //
     // The running median over a 5 cm window (>= 3 fit points) is deliberate:
     // one truncated dx on a single fit point can neither create a run nor
-    // break one.  The DEBUG probe additionally reports the run re-anchored at
+    // break one.
+    //
+    // WHAT THIS GUARD CANNOT SEE, stated so nobody re-derives it: 707-18-12,
+    // which the owner adjudicated a NEUTRINO on 2026-09-02 after re-reading
+    // the truth, has NO entry rise -- entry 1.04 MIP on a 0.84 MIP body, and
+    // a first-window median of exactly 1.00 MIP, i.e. the floor.  Firing on
+    // it needs guard_entry_frac <= 1.00, a bar at or below MIP, which fires
+    // on everything.  Its actual signature is a 32 deg turn 44 cm BEFORE the
+    // stop with MIP charge on both sides: a mid-track two-prong vertex, not
+    // two particles sharing a stretch.  vertex_kink_guard misses it too --
+    // that one scans [L_stop-12cm, L_stop-2cm] for a >=45 deg turn into a
+    // >=2.2 MIP prong, and 707-18-12 fails all three.  A different mechanism,
+    // not a re-tune of this one (docs/94 sec 14).  The DEBUG probe additionally reports the run re-anchored at
     // the SECOND fit point, so a population arm measures how much of the
     // feature rests on the boundary-most point -- the dominant systematic of a
     // predicate that keys on L = 0.
@@ -2488,19 +2507,71 @@ private:
 
         const auto [ent, ent_npts] = median_over(0.0, 3 * units::cm);
 
+        // The KINK -- owner, 2026-09-02, after hand-scanning the round-2
+        // releases: "another key to separate the other events from this event
+        // is along the track, there is a kink (large angle change).  This
+        // event does not have a large angle change, which makes it more STM
+        // like."  Two particles meeting at a vertex make the fitted path
+        // TURN; a single muon carrying a delta-ray fluctuation at the
+        // boundary stays straight.  Largest direction change between two 5 cm
+        // chords meeting at a fit point, scanned over the muon segment.
+        //
+        // The last 15 cm before the stop are excluded: a muon scatters hard
+        // in its final centimetres, and that scattering is range straggling,
+        // not a vertex.  On the owner's 12 hand-labelled bundles the
+        // exclusion moves only the one it is meant to (95500: 17.3 -> 13.8
+        // deg) and no other verdict.
+        //
+        // The kink is an AND with the shoulder and is useless on its own:
+        // two of the owner's four hand-labelled STMs clear 22 deg (282033 at
+        // 25, 56257 at 42), as does the not-STM control 36-77-17 at 30.
+        // What separates is "extra charge anchored at the boundary AND the
+        // path turns".
+        const auto& pts = arrs.pts;
+        const double kink_win = 5 * units::cm;
+        const double kink_end_excl = 15 * units::cm;
+        auto chord = [&](double lo, double hi, geo_vector_t& out) -> bool {
+            int a = -1, b = -1;
+            for (int i = 0; i <= k; ++i) {
+                if (L[i] >= lo && L[i] <= hi) { if (a < 0) a = i; b = i; }
+            }
+            if (a < 0 || b <= a) return false;
+            const auto& pa = pts[static_cast<size_t>(a)];
+            const auto& pb = pts[static_cast<size_t>(b)];
+            out = geo_vector_t(pb.x() - pa.x(), pb.y() - pa.y(), pb.z() - pa.z());
+            const double mag = out.magnitude();
+            if (mag <= 0) return false;
+            out = out * (1.0 / mag);
+            return true;
+        };
+        double best_kink = 0, best_kink_L = -1;
+        for (int i = 0; i <= k; ++i) {
+            const double t = L[i];
+            if (t < kink_win || t > L_stop - kink_end_excl - kink_win) continue;
+            geo_vector_t d1, d2;
+            if (!chord(t - kink_win, t, d1) || !chord(t, t + kink_win, d2)) continue;
+            const double c = std::max(-1.0, std::min(1.0, d1.dot(d2)));
+            const double ang = std::acos(c) * 180.0 / 3.1415926;
+            if (ang > best_kink) { best_kink = ang; best_kink_L = t; }
+        }
+
         // Probe line on EVERY evaluation, not only rejections -- same
         // convention as cathode_guard's geometry line and descent_guard's --
         // so one instrumented population run measures the feature, its L=0
-        // systematic and the excess on every STM-evaluated bundle at once.
-        SPDLOG_LOGGER_DEBUG(s_log, "entry_rise: cluster {} L_stop={:.1f}cm body={:.2f}MIP({}pts) ent={:.2f}MIP({}pts) rise={:.2f} shoulder={:.1f}cm shoulder_nofirst={:.1f}cm excess={:.1f}cm",
+        // systematic, the excess and the kink on every STM-evaluated bundle
+        // at once.
+        SPDLOG_LOGGER_DEBUG(s_log, "entry_rise: cluster {} L_stop={:.1f}cm body={:.2f}MIP({}pts) ent={:.2f}MIP({}pts) rise={:.2f} shoulder={:.1f}cm shoulder_nofirst={:.1f}cm excess={:.1f}cm kink={:.1f}deg at L={:.1f}cm",
                             cluster_ident, L_stop / units::cm, body / m_mip_dqdx, body_npts,
                             ent / m_mip_dqdx, ent_npts, (ent > 0 ? ent / body : -1.0),
-                            sh0 / units::cm, sh1 / units::cm, excess / units::cm);
+                            sh0 / units::cm, sh1 / units::cm, excess / units::cm,
+                            best_kink, best_kink_L / units::cm);
 
-        if (sh0 >= m_guard_entry_min_cm * units::cm && sh0 <= m_guard_entry_max_cm * units::cm) {
-            SPDLOG_LOGGER_INFO(s_log, "entry_rise_guard: cluster {} rejected: {:.1f} cm of {:.2f} MIP charge anchored at the boundary decaying to a {:.2f} MIP body ({:.1f} cm of extra MIP track; two particles, one exiting)",
+        if (sh0 >= m_guard_entry_min_cm * units::cm && sh0 <= m_guard_entry_max_cm * units::cm &&
+            best_kink >= m_guard_entry_kink_deg) {
+            SPDLOG_LOGGER_INFO(s_log, "entry_rise_guard: cluster {} rejected: {:.1f} cm of {:.2f} MIP charge anchored at the boundary decaying to a {:.2f} MIP body ({:.1f} cm of extra MIP track), and the path turns {:.0f} deg at L={:.1f} cm (two particles, one exiting)",
                                cluster_ident, sh0 / units::cm, ent / m_mip_dqdx,
-                               body / m_mip_dqdx, excess / units::cm);
+                               body / m_mip_dqdx, excess / units::cm,
+                               best_kink, best_kink_L / units::cm);
             return true;
         }
         return false;

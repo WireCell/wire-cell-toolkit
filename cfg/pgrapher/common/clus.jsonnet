@@ -285,7 +285,7 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
                          guard_hadron_mip=null,
                          entry_rise_guard=false, guard_entry_frac=null,
                          guard_entry_min_cm=null, guard_entry_max_cm=null,
-                         guard_entry_min_len_cm=null,
+                         guard_entry_min_len_cm=null, guard_entry_kink_deg=null,
                          michel_res_length_cut=null, proton_tm_max=null,
                          proton_b_ks2_max=null, proton_c_peak_max=null) :: {
             type: "TaggerCheckSTM",
@@ -338,13 +338,17 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
               // ANCHORED at the boundary end of the fit and decaying to the
               // body level is two particles, one of which left the detector.
               // The only predicate in TaggerCheckSTM that reads the end where
-              // the fit STARTS.  C++ defaults false/1.3/5/30/70; keys omitted
-              // when off => byte-identical pre-knob config.
+              // the fit STARTS.  Round 3 adds the owner's KINK: the path must
+              // also TURN somewhere, which is what tells a two-particle vertex
+              // from a delta-ray fluctuation on a straight muon.
+              // C++ defaults false/1.3/5/60/70/22; keys omitted when off =>
+              // byte-identical pre-knob config.
               + (if entry_rise_guard then { entry_rise_guard: true } else {})
               + (if guard_entry_frac != null then { guard_entry_frac: guard_entry_frac } else {})
               + (if guard_entry_min_cm != null then { guard_entry_min_cm: guard_entry_min_cm } else {})
               + (if guard_entry_max_cm != null then { guard_entry_max_cm: guard_entry_max_cm } else {})
               + (if guard_entry_min_len_cm != null then { guard_entry_min_len_cm: guard_entry_min_len_cm } else {})
+              + (if guard_entry_kink_deg != null then { guard_entry_kink_deg: guard_entry_kink_deg } else {})
               // doc-66 sec 12 diffusion-margin cut package.  C++ defaults are
               // the prototype constants (6 cm / 1.0 / 0.05 / 4.3); null here
               // omits the key => byte-identical legacy config.
