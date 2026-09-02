@@ -279,6 +279,10 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
                          cathode_guard=false, anode_dist_fix=false,
                          second_track_guard=false, deficit_guard=false,
                          vertex_kink_guard=false,
+                         descent_guard=false, guard_descent_cos_y=null,
+                         guard_descent_min_cm=null,
+                         vertex_hadron_guard=false, guard_hadron_len_cm=null,
+                         guard_hadron_mip=null,
                          michel_res_length_cut=null, proton_tm_max=null,
                          proton_b_ks2_max=null, proton_c_peak_max=null) :: {
             type: "TaggerCheckSTM",
@@ -313,6 +317,20 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
               // pre-knob config (doc-63 round 5 stop-region vetoes).
               + (if deficit_guard then { deficit_guard: true } else {})
               + (if vertex_kink_guard then { vertex_kink_guard: true } else {})
+              // doc-94 round 1 descent veto: a cosmic stopping muon must have
+              // travelled DOWNWARD to reach its stop.  C++ default false and
+              // cos_y default +1.01 (above the feature range = pure probe);
+              // keys omitted when off => byte-identical pre-knob config.
+              + (if descent_guard then { descent_guard: true } else {})
+              + (if guard_descent_cos_y != null then { guard_descent_cos_y: guard_descent_cos_y } else {})
+              + (if guard_descent_min_cm != null then { guard_descent_min_cm: guard_descent_min_cm } else {})
+              // doc-94 round 1 vertex-hadron veto: a long, heavily-ionizing prong
+              // off the fitted main is a neutrino vertex hadron, not the
+              // second muon check_other_tracks looks for.  C++ defaults
+              // false/12/1.5; keys omitted when off => byte-identical.
+              + (if vertex_hadron_guard then { vertex_hadron_guard: true } else {})
+              + (if guard_hadron_len_cm != null then { guard_hadron_len_cm: guard_hadron_len_cm } else {})
+              + (if guard_hadron_mip != null then { guard_hadron_mip: guard_hadron_mip } else {})
               // doc-66 sec 12 diffusion-margin cut package.  C++ defaults are
               // the prototype constants (6 cm / 1.0 / 0.05 / 4.3); null here
               // omits the key => byte-identical legacy config.

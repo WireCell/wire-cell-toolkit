@@ -276,6 +276,45 @@ public:
                                 m_guard_vertex_turn, m_guard_vertex_mip);
         }
 
+        // descent_guard (C++ default false => byte-identical legacy): the
+        // doc-94 round-1 veto on a stop that was reached travelling UPWARD or
+        // near-horizontally.  A COSMIC stopping muon arrived from the sky, so
+        // it entered through a boundary face ABOVE the point where it came to
+        // rest; the flux falls as cos^2(zenith) and a stopping muon crossing
+        // near-horizontally would need an impossible slant depth.  Every
+        // other guard in this file reads charge or topology -- travel
+        // direction is a NEW information source, which docs/63 sec 9 named as
+        // the precondition for any further STM round, and it is the PR-chain
+        // "direction" argument evaluated on what the tagger already holds
+        // (owner, 2026-09-01).
+        //
+        // guard_descent_cos_y is compared against dy/|d| of (stop - entry):
+        // -1 straight down, 0 horizontal, +1 straight up.  The default +1.01
+        // is ABOVE the feature's range, so even with the boolean forced on the
+        // guard is a pure probe -- that is how the population distribution is
+        // measured before a cut is chosen.
+        // vertex_hadron_guard (C++ default false => byte-identical legacy): the
+        // doc-94 veto on a LONG, HEAVILY IONIZING prong hanging off the
+        // fitted main.  check_other_tracks was ported to find a second MUON;
+        // a proton from a neutrino vertex is short, hot and CURVED, and falls
+        // through every clause there.  See the guard body for the placement
+        // argument (before the perpendicular skip) and the measurement.
+        m_vertex_hadron_guard = get<bool>(config, "vertex_hadron_guard", m_vertex_hadron_guard);
+        m_guard_hadron_len_cm = get<double>(config, "guard_hadron_len_cm", m_guard_hadron_len_cm);
+        m_guard_hadron_mip = get<double>(config, "guard_hadron_mip", m_guard_hadron_mip);
+        if (m_vertex_hadron_guard) {
+            SPDLOG_LOGGER_DEBUG(s_log, "configure: TaggerCheckSTM: vertex_hadron_guard ON (prong>{}cm at >{}MIP)",
+                                m_guard_hadron_len_cm, m_guard_hadron_mip);
+        }
+
+        m_descent_guard = get<bool>(config, "descent_guard", m_descent_guard);
+        m_guard_descent_cos_y = get<double>(config, "guard_descent_cos_y", m_guard_descent_cos_y);
+        m_guard_descent_min_cm = get<double>(config, "guard_descent_min_cm", m_guard_descent_min_cm);
+        if (m_descent_guard) {
+            SPDLOG_LOGGER_DEBUG(s_log, "configure: TaggerCheckSTM: descent_guard ON (reject cos_y>{} over chord>={}cm)",
+                                m_guard_descent_cos_y, m_guard_descent_min_cm);
+        }
+
         // anode_dist_fix (C++ default false => byte-identical legacy): fix
         // the inverted face selection in check_stm_conditions' dist_to_anode
         // helper.  IAnodeFace::dirx points from the anode INTO the drift
@@ -375,6 +414,14 @@ public:
         cfg["vertex_kink_guard"] = m_vertex_kink_guard;
         cfg["guard_vertex_turn"] = m_guard_vertex_turn;
         cfg["guard_vertex_mip"] = m_guard_vertex_mip;
+        // doc-94 round-1 vertex-hadron veto; false = byte-identical legacy.
+        cfg["vertex_hadron_guard"] = m_vertex_hadron_guard;
+        cfg["guard_hadron_len_cm"] = m_guard_hadron_len_cm;
+        cfg["guard_hadron_mip"] = m_guard_hadron_mip;
+        // doc-94 round-1 descent veto; false = byte-identical legacy.
+        cfg["descent_guard"] = m_descent_guard;
+        cfg["guard_descent_cos_y"] = m_guard_descent_cos_y;
+        cfg["guard_descent_min_cm"] = m_guard_descent_min_cm;
         // Null/empty => the historical FiducialUtils containment (union of
         // per-face sensitive volumes, no margin).  Naming an IFiducial here
         // redirects cluster_fc_check's direct containment tests to it; pass the
@@ -685,6 +732,23 @@ private:
     bool m_vertex_kink_guard{false};
     double m_guard_vertex_turn{45.0};    // sharpest end-region turn above this (deg) ...
     double m_guard_vertex_mip{2.2};      // ... into a post-turn median above this (MIP) => vertex
+
+    // doc-94 round-1 descent veto (see configure()).  cos_y default +1.01 is
+    // above the feature's range => a pure probe even when the boolean is on,
+    // which is how the population distribution is measured before a cut is
+    // chosen.  The boolean itself defaults false, so an absent key is
+    // byte-identical legacy behavior either way.
+    // doc-94 round-1 vertex-hadron veto (see configure()).  Thresholds are the
+    // measured separation, not a fit: the three symptom prongs are 14.8-25.9
+    // cm at 1.65-2.47 MIP, the single population fire is 20.0 cm at 2.38 MIP,
+    // and no owner-adjudicated correct STM has any prong above 12 cm at all.
+    bool m_vertex_hadron_guard{false};
+    double m_guard_hadron_len_cm{12.0};  // prong longer than this ...
+    double m_guard_hadron_mip{1.5};      // ... and hotter than this x MIP => vertex hadron
+
+    bool m_descent_guard{false};
+    double m_guard_descent_cos_y{1.01};   // reject when dy/|d| of (stop-entry) exceeds this
+    double m_guard_descent_min_cm{10.0};  // chord shorter than this defines no direction => no verdict
 
     // doc-63 round-3 cathode-truncation veto (see configure()).
     bool m_cathode_guard{false};
@@ -2229,6 +2293,51 @@ private:
         return false;
     }
 
+    // doc-94 round-1: a COSMIC stopping muon must have travelled DOWNWARD to
+    // reach the point where it stopped.  The STM fit already knows both ends:
+    // pts.front() is the single boundary exit point check_stm_conditions
+    // selected (candidate_exit_wcps / boundary_point_*, verified outside the
+    // inset FV on all five doc-94 symptom events), and pts[kink] is the stop
+    // the eval just accepted.  cos_y = dy/|d| of (stop - entry) is -1 straight
+    // down, 0 horizontal, +1 straight up.
+    //
+    // Placement is deliberate: beside the other five guards, so this also runs
+    // on the BACKWARD pass and returns through the same nullopt path.  On a
+    // flag_double_end cluster the backward pass reverses which end is the
+    // stop -- that is a DIFFERENT orientation hypothesis and deserves its own
+    // direction test, which it then gets.  On a single-ended cluster (all five
+    // doc-94 symptom events: flag_double_end=false) there is no second
+    // orientation, so the veto is terminal in effect.
+    //
+    // The DEBUG probe line prints on EVERY evaluation, not only rejections --
+    // same convention as cathode_guard's geometry line -- so one instrumented
+    // population run measures the feature on every STM-evaluated bundle.
+    // Same calling convention as accept_guards_reject; gated on m_descent_guard.
+    bool descent_guard_reject(const STMEvalArrays& arrs, int kink_num, int cluster_ident) const {
+        const auto& pts = arrs.pts;
+        const auto& L = arrs.L;
+        const int n = static_cast<int>(L.size());
+        if (n < 3) return false;
+        const int k = (kink_num >= 0 && kink_num < n) ? kink_num : n - 1;
+        const auto& entry = pts.front();
+        const auto& stop = pts[static_cast<size_t>(k)];
+        const geo_vector_t d(stop.x() - entry.x(), stop.y() - entry.y(), stop.z() - entry.z());
+        const double mag = d.magnitude();
+        if (mag < m_guard_descent_min_cm * units::cm) return false;
+        const double cos_y = d.y() / mag;
+        SPDLOG_LOGGER_DEBUG(s_log, "descent_guard: cluster {} entry=({:.1f},{:.1f},{:.1f})cm stop=({:.1f},{:.1f},{:.1f})cm chord={:.1f}cm cos_y={:.3f}",
+                            cluster_ident,
+                            entry.x() / units::cm, entry.y() / units::cm, entry.z() / units::cm,
+                            stop.x() / units::cm, stop.y() / units::cm, stop.z() / units::cm,
+                            mag / units::cm, cos_y);
+        if (cos_y > m_guard_descent_cos_y) {
+            SPDLOG_LOGGER_INFO(s_log, "descent_guard: cluster {} rejected: stop reached travelling cos_y={:.3f} over a {:.1f} cm chord (not a downward cosmic)",
+                               cluster_ident, cos_y, mag / units::cm);
+            return true;
+        }
+        return false;
+    }
+
     // Core STM evaluation using pre-built arrays (called once per (peak_range, offset, com_range) combo).
     bool eval_stm_core_impl(const STMEvalArrays& arrs, int kink_num,
                        double peak_range, double offset_length, double com_range,
@@ -2882,6 +2991,51 @@ private:
             if (track_length1 > 40 && track_medium_dQ_dx > 0.8) return true;
             
             double angle_deg = dir1.angle(drift_dir_abs) * 180. / 3.1415926;
+
+            // doc-94 round 1 (gated): a prong that is LONG and HEAVILY
+            // IONIZING is vertex HADRONIC activity -- a proton off a neutrino
+            // interaction -- not the second MUON this function was written to
+            // find.  Every acceptance clause below demands high straightness
+            // (>0.99 / >0.975) or MIP-band charge; the
+            // `medQ>1.5 && len>8 && straight<0.9` clause further down SKIPS a
+            // hot CURVED segment by name; and second_track_guard's round-4c
+            // clause is bounded to (0.4, 1.5) MIP.  A proton scatters, so it
+            // falls through all of it.  Three of the five doc-94 symptom
+            // events carry exactly such a prong and are tagged STM anyway:
+            // 966-2-22 14.9 cm @ 2.47 MIP (straightness 0.971), 304-6-28
+            // 25.9 @ 2.22 (0.719), 146-60-31 14.8 @ 1.65 (0.861).
+            //
+            // Placed BEFORE the perpendicular skip on purpose.  That skip
+            // discards segments within 7.5 deg of isochronous, where 2D
+            // reconstruction noise lives -- but a segment carrying more than
+            // 1.5 MIP over more than 12 cm is not noise, so the concern the
+            // skip exists for does not apply to it.  966-2-22's prong reaches
+            // that skip, and nothing after it can see the prong at all.
+            //
+            // Returns true like every other veto here, i.e. run_pass returns
+            // false -- TERMINAL, no backward pass.  That is right for a prong
+            // feature: the prong is a property of the cluster, not of which
+            // end the fit called the stop, so the backward pass would find
+            // the same object and reject again.
+            //
+            // Measured over all 3067 SBND data events at the prod0901b
+            // operating point (sbnd_xin/docs/94 sec 3): 1 of 401 STM=1
+            // bundles carries such a prong, and 0 of the 36
+            // owner-adjudicated correct STMs (doc 62,
+            // scan-d59k/stm-baseline.tsv) do.  16 bundles in the sample carry
+            // one, but 15 already have STM=0 -- their prongs are STRAIGHT
+            // (0.92-0.996) and the `straight>0.975` clause below already
+            // catches them.  This guard's marginal effect is confined to the
+            // curved ones, which is exactly the blind spot it is for.
+            if (m_vertex_hadron_guard &&
+                track_length1 > m_guard_hadron_len_cm &&
+                track_medium_dQ_dx > m_guard_hadron_mip) {
+                SPDLOG_LOGGER_INFO(s_log, "vertex_hadron_guard: cluster {} rejected: {:.1f} cm prong at {:.2f} MIP, straightness {:.3f}, {:.0f} deg to drift (vertex hadron, not a second muon)",
+                                   cluster.ident(), track_length1, track_medium_dQ_dx,
+                                   straightness_ratio, angle_deg);
+                return true;
+            }
+
             if (fabs(angle_deg - 90.0) < 7.5) continue;  // Skip tracks nearly perpendicular to drift
 
             // doc-63 round-4c (gated): a LONG segment at MIP dQ/dx is a
@@ -3329,6 +3483,16 @@ private:
             // vertex, not Bragg (own knob; same placement rationale and kink).
             if (m_vertex_kink_guard && flag_pass &&
                 vertex_kink_reject(eval_arrs, kink_recorded, cluster.ident())) {
+                if (m_save_stm_fit) set_pass_status(7);
+                return std::nullopt;
+            }
+            // doc-94 round-1: the stop was reached travelling up or flat =
+            // not a cosmic stopping muon (own knob; same placement rationale;
+            // kink_recorded, not the post-reset kink_num -- the short-track
+            // reset moves kink_num to the path end, which would measure the
+            // chord to a Michel/overshoot tail instead of to the stop).
+            if (m_descent_guard && flag_pass &&
+                descent_guard_reject(eval_arrs, kink_recorded, cluster.ident())) {
                 if (m_save_stm_fit) set_pass_status(7);
                 return std::nullopt;
             }

@@ -634,6 +634,35 @@ function(
     // -stm-vertex-guard / SBND_STM_VERTEX_GUARD=1.
     stm_deficit_guard = true,
     stm_vertex_kink_guard = true,
+    // stm_descent_guard (doc 94 round 1): veto an STM accept whose stop was
+    // reached travelling UPWARD or near-horizontally.  A cosmic stopping muon
+    // arrived from the sky, so it entered a boundary face ABOVE the point
+    // where it came to rest; the flux falls as cos^2(zenith) and a stopping
+    // muon crossing near-horizontally needs an impossible slant depth.  This
+    // is the first STM guard to read TRAVEL DIRECTION -- every earlier one
+    // reads charge or topology -- which is the new information source docs/63
+    // sec 9 required before any further STM round.
+    //
+    // stm_descent_cos_y is compared against dy/|d| of (stop - entry): -1
+    // straight down, 0 horizontal, +1 straight up.  DEFAULT +1.01 is ABOVE
+    // the feature's range, so setting stm_descent_guard=true WITHOUT lowering
+    // the cut is a pure probe: the DEBUG line prints the feature on every
+    // evaluated bundle and no verdict moves.  DEFAULT FALSE.
+    // Keys omitted when off => byte-identical.  See sbnd_xin/docs/94.
+    stm_descent_guard = false,
+    stm_descent_cos_y = 1.01,
+    stm_descent_min_cm = 10.0,
+    // stm_vertex_hadron_guard (doc 94 round 1): veto an STM accept whose
+    // fitted main carries a LONG, HEAVILY IONIZING prong -- vertex hadronic
+    // activity from a neutrino interaction.  check_other_tracks was ported to
+    // find a second MUON: every acceptance clause there wants high
+    // straightness or MIP-band charge, and a hot CURVED segment is skipped by
+    // name.  A proton scatters, so it escapes all of it.  DEFAULT FALSE
+    // pending the owner's hand scan.  Keys omitted when off =>
+    // byte-identical.  See sbnd_xin/docs/94.
+    stm_vertex_hadron_guard = false,
+    stm_hadron_len_cm = 12.0,
+    stm_hadron_mip = 1.5,
     // doc-66 sec 12 diffusion-margin cut package: Michel-veto res_length
     // floor 6 -> 6.5 cm, detect_proton track_medium gate 1.0 -> 1.05,
     // block-B ks2 entry 0.05 -> 0.055, C1 peak clause 4.3 -> 4.1.  Restores
@@ -3493,6 +3522,12 @@ function(
                              stm_second_track_guard=stm_second_track_guard,
                              stm_deficit_guard=stm_deficit_guard,
                              stm_vertex_kink_guard=stm_vertex_kink_guard,
+                             stm_descent_guard=stm_descent_guard,
+                             stm_descent_cos_y=stm_descent_cos_y,
+                             stm_descent_min_cm=stm_descent_min_cm,
+                             stm_vertex_hadron_guard=stm_vertex_hadron_guard,
+                             stm_hadron_len_cm=stm_hadron_len_cm,
+                             stm_hadron_mip=stm_hadron_mip,
                              stm_d66_cuts=stm_d66_cuts,
                              cathode_x=cathode_x,
                              steiner_terminal_wire_tol=steiner_terminal_wire_tol,

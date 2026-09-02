@@ -1102,6 +1102,31 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, e
               // (owner 2026-07-26, after validation).
               stm_deficit_guard=true,
               stm_vertex_kink_guard=true,
+              // stm_descent_guard: doc-94 round-1 veto on a stop reached
+              // travelling UPWARD or near-horizontally.  A cosmic stopping
+              // muon arrived from the sky, so it entered a boundary face
+              // ABOVE the point where it stopped.  DEFAULT FALSE -- the cut
+              // is set from the measured population, and stm_descent_cos_y
+              // +1.01 is above the feature's range, so turning the boolean on
+              // WITHOUT lowering the cut is a pure probe that changes no
+              // verdict.  C++ defaults false/+1.01/10; keys omitted when off
+              // => byte-identical.  See sbnd_xin/docs/94.
+              stm_descent_guard=false,
+              stm_descent_cos_y=1.01,
+              stm_descent_min_cm=10.0,
+              // stm_vertex_hadron_guard: doc-94 round-1 veto on a LONG,
+              // HEAVILY IONIZING prong off the fitted main -- a proton from a
+              // neutrino vertex, which check_other_tracks (a second-MUON
+              // predicate) lets through because protons scatter.  DEFAULT
+              // FALSE pending the owner's hand scan of what it releases; on
+              // all 3067 SBND data events it releases exactly 1 STM bundle of
+              // 401 (64475:23) and breaks 0 of the 36 owner-adjudicated
+              // correct STMs.  C++ defaults
+              // false/12/1.5; keys omitted when off => byte-identical.
+              // See sbnd_xin/docs/94.
+              stm_vertex_hadron_guard=false,
+              stm_hadron_len_cm=12.0,
+              stm_hadron_mip=1.5,
               // stm_d66_cuts: the doc-66 sec 12 diffusion-margin cut package
               // (Michel-veto res_length floor 6 -> 6.5 cm, detect_proton
               // track_medium gate 1.0 -> 1.05, block-B ks2 entry 0.05 ->
@@ -1986,6 +2011,16 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, e
                 // omitted when off => byte-identical): doc-63 round-5 vetoes.
                 deficit_guard=stm_deficit_guard,
                 vertex_kink_guard=stm_vertex_kink_guard,
+                // descent_guard (C++ default false; keys omitted when off =>
+                // byte-identical): doc-94 round-1 travel-direction veto.
+                descent_guard=stm_descent_guard,
+                guard_descent_cos_y=(if stm_descent_guard then stm_descent_cos_y else null),
+                guard_descent_min_cm=(if stm_descent_guard then stm_descent_min_cm else null),
+                // vertex_hadron_guard (C++ default false; keys omitted when off
+                // => byte-identical): doc-94 round-1 vertex-hadron veto.
+                vertex_hadron_guard=stm_vertex_hadron_guard,
+                guard_hadron_len_cm=(if stm_vertex_hadron_guard then stm_hadron_len_cm else null),
+                guard_hadron_mip=(if stm_vertex_hadron_guard then stm_hadron_mip else null),
                 // doc-66 sec 12 cut package (C++ defaults = prototype constants;
                 // keys omitted when stm_d66_cuts=false => byte-identical).
                 michel_res_length_cut=(if stm_d66_cuts then stm_michel_res_cm * wc.cm else null),

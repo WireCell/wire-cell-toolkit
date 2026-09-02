@@ -734,6 +734,39 @@ TEST_CASE("clus knob defaults: tagger checks do not evaluate demoted mains")
 }
 
 // ---------------------------------------------------------------------------
+// doc 94: the STM descent guard.  Two separate contracts are pinned here.
+// ---------------------------------------------------------------------------
+
+TEST_CASE("clus knob defaults: TaggerCheckSTM descent_guard is off and inert")
+{
+    auto cfg = defaults_of("TaggerCheckSTM");
+
+    // Contract 1 -- the guard is OFF, so an absent key leaves every legacy
+    // STM verdict untouched (gate: prod_cfg_gate.py PASS 21/21 against
+    // ref/prod-2026-09-01c with the jsonnet knob false).
+    CHECK_KNOB_BOOL(cfg, "descent_guard", false);
+
+    // Contract 2 -- the cut default is ABOVE the feature's mathematical
+    // range, which is what makes the probe run in sbnd_xin/docs/94 valid.
+    // descent_guard_reject compares cos_y = dy/|d| of (stop - entry), so the
+    // feature is bounded by |cos_y| <= 1 for any geometry whatsoever.  A
+    // default strictly greater than 1 therefore CANNOT reject, and forcing
+    // the boolean on without lowering the cut is a pure measurement: it
+    // prints the DEBUG probe line on every STM-evaluated bundle and moves no
+    // verdict.  That property was relied on to measure the population
+    // distribution before a cut was chosen, and it is verified empirically
+    // (work-{ncpi0,nuecc48}-d94probe reproduce work-*-prod0901b's tgm/stm/fc
+    // on 67 of 67 events).  If someone lowers this default to a firing value,
+    // that measurement silently becomes a behaviour change -- hence the test.
+    REQUIRE(cfg.isMember("guard_descent_cos_y"));
+    CHECK(cfg["guard_descent_cos_y"].asDouble() > 1.0);
+
+    // The chord floor below which no direction is defined.  Not a physics
+    // cut: two fit points a few mm apart carry no usable direction.
+    CHECK_KNOB_NUM(cfg, "guard_descent_min_cm", 10.0);
+}
+
+// ---------------------------------------------------------------------------
 // The POD option structs.  These carry defaults that never pass through
 // default_configuration(), so a factory round-trip cannot see them: the
 // in-class initializer IS the legacy contract at every call site that takes
