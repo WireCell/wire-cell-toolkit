@@ -251,15 +251,18 @@ function(
     // the key => compiled config byte-identical to before the knob existed
     // (runner: run_ql_evt.sh -sep-recarve).
     sep_track_recarve = false,
-    // sep_fv_point (SBND default FALSE, doc 97 campaign): the PDHD/PDVD
+    // sep_fv_point (SBND PRODUCTION ON, owner flip 2026-09-02 -- doc 97): the PDHD/PDVD
     // SEPARATION operating point, scoped to that pass -- fv_inset_yz 15 cm,
     // far_point_x_cut 14 cm, far_point_mid_dis 60 cm, dec1_guard_main_angle 45
     // deg.  Needed together (doc 96 sec 8.3); the inset is a C++ knob read only
     // inside clustering_separate, so unlike the PDHD config edit it does not
     // move clustering_neutrino or the containment taggers.  false omits all
     // four keys => compiled config byte-identical to before the knob existed
-    // (runner: run_ql_evt.sh -sep-fv-point).
-    sep_fv_point = false,
+    // (legacy escape: run_ql_evt.sh -no-sep-fv-point).  It rescues BOTH doc-95
+    // separation cases; validated on 3067 data + 48 nueCC + 19 NCpi0 in doc 97
+    // sec 5 and flipped on the owner's word after he adjudicated the three
+    // apparently-adverse flips as improvements.
+    sep_fv_point = true,
     // nu_iso_band_guard (SBND default TRUE since doc pr/18, owner decision
     // 2026-08-01): the per-APA neutrino stage may not merge an isochronous
     // band with a non-band cluster spanning > 20 cm of drift, even on touch

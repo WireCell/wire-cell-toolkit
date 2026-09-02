@@ -251,9 +251,9 @@ local bs_dead_face(apa, face) = {
 // clus/src/ClusteringFuncs.cxx band_veto_forbids(). false (legacy escape via
 // SBND_NU_BAND_VETO=0) omits the key => compiled config byte-identical to
 // before the knob existed; only meaningful with nu_iso_band_guard on.
-// sep_fv_point (SBND default FALSE, doc 97 campaign): move the per-APA
-// separate() pass to the PDHD/PDVD SEPARATION operating point, and only that
-// pass.  Four values move together because doc 96 sec 8.3 measured that
+// sep_fv_point (SBND PRODUCTION ON, owner flip 2026-09-02 -- doc 97): move the
+// per-APA separate() pass to the PDHD/PDVD SEPARATION operating point, and only
+// that pass.  Four values move together because doc 96 sec 8.3 measured that
 // neither half works alone on the motivating event (105-23-21):
 //     fv_inset_yz          = 15 cm   (C++ default 0)
 //     far_point_x_cut      = 14 cm   (C++ default 140 cm, effectively dead)
@@ -266,8 +266,23 @@ local bs_dead_face(apa, face) = {
 // surface contacts against `FV_* +/- margin`, SBND's FV is inset only
 // 0.65-2.05 cm, and doc 96 sec 6.1 measured Dec_2 accepting 0 of 74 in-time
 // clusters (0 of the 33 longer than 250 cm).  false omits all four keys =>
-// compiled config byte-identical to before the knob existed
-// (runner: run_ql_evt.sh -sep-fv-point).
+// compiled config byte-identical to before the knob existed (legacy escape:
+// run_ql_evt.sh -no-sep-fv-point, or SBND_SEP_FV_POINT=0).
+//
+// What the owner approved (doc 97 sec 5, 3067 data + 48 nueCC + 19 NCpi0
+// against a fresh knob-off arm): it rescues BOTH doc-95 separation cases --
+// 272-2-30 and 105-23-21, each TGM -> nu-candidate -- for 6 in-beam verdict
+// flips in 34799 bundles.  Of the 1277 events whose clustering it changes, ten
+// show any in-beam movement at all and 38 of the 40 in-beam mains that change
+// keep their length to within 0.05 cm: it is re-partition at unchanged extent,
+// not splitting or merging.  The owner adjudicated the three flips that looked
+// adverse (mcp2k 105074, 162363, 392901) as improvements on 2026-09-02, which
+// is what made the flip a net gain.
+//
+// NOT flipped alongside it: sep_track_recarve stays default false.  It reaches
+// 50 events this knob does not, so the two together are a configuration nobody
+// has run, and its own two sentinel failures (mcp2k 94392, 53793) are still
+// unadjudicated.
 // sep_track_recarve (SBND default FALSE, doc 97 campaign): per-APA separate()
 // post-pass that k=2 3D-line self-splits a member holding two long crossing
 // track arms -- an "X"/"T" whose arms both END inside the volume, which pure
@@ -279,7 +294,7 @@ local bs_dead_face(apa, face) = {
 // 423 cm main that is really a 412 cm through-going cosmic touching a 343 cm
 // second track at 0.35 cm.  false omits the key => compiled config
 // byte-identical to before the knob existed (runner: -sep-recarve).
-local clus_per_face(anode, face, dump, output_dir, runNo, subRunNo, eventNo, per_face_bee=true, bee_sink=null, rse_from_ident=false, event_from_ident=false, rse_map={}, pos_offset_on=true, trace_bee=false, save_assoc_id=false, sep_vertex_veto=true, sep_track_recarve=false, sep_fv_point=false, nu_iso_band_guard=true, iso_cathode_guard=false, nu_band_veto=true, eb_fast=false, po_fast=false, dg_fast=false, evt_subdir='') = {
+local clus_per_face(anode, face, dump, output_dir, runNo, subRunNo, eventNo, per_face_bee=true, bee_sink=null, rse_from_ident=false, event_from_ident=false, rse_map={}, pos_offset_on=true, trace_bee=false, save_assoc_id=false, sep_vertex_veto=true, sep_track_recarve=false, sep_fv_point=true, nu_iso_band_guard=true, iso_cathode_guard=false, nu_band_veto=true, eb_fast=false, po_fast=false, dg_fast=false, evt_subdir='') = {
     local dv = detector_volumes([anode], face, pos_offset_on),
     local pcts = pctransforms(dv),
     local bsl = bs_live_face(anode.name, face),
@@ -829,7 +844,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, e
                       bee_sink=bee_sink, rse_from_ident=rse_from_ident, event_from_ident=event_from_ident, rse_map=rse_map, pos_offset_on=pos_offset_on),
     // trace_bee (default false): per-step Bee layers for merge attribution; see
     // trace_sets above.  Diagnostic only, off => byte-identical compiled config.
-    per_apa(anode, dump=true, per_face_bee=true, bee_sink=null, trace_bee=false, save_assoc_id=false, sep_vertex_veto=true, sep_track_recarve=false, sep_fv_point=false, nu_iso_band_guard=true, iso_cathode_guard=false, nu_band_veto=true, eb_fast=false, po_fast=false, dg_fast=false)::
+    per_apa(anode, dump=true, per_face_bee=true, bee_sink=null, trace_bee=false, save_assoc_id=false, sep_vertex_veto=true, sep_track_recarve=false, sep_fv_point=true, nu_iso_band_guard=true, iso_cathode_guard=false, nu_band_veto=true, eb_fast=false, po_fast=false, dg_fast=false)::
         clus_per_face(anode, face=0, dump=dump, evt_subdir=evt_subdir, per_face_bee=per_face_bee,
                       output_dir=output_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo,
                       bee_sink=bee_sink, rse_from_ident=rse_from_ident, event_from_ident=event_from_ident, rse_map=rse_map, pos_offset_on=pos_offset_on,
