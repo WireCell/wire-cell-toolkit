@@ -2502,10 +2502,20 @@ static bool shower_to_wall(NuEContext& ctx, ShowerPtr shower,
     };
 
     double dis = 0;
-    if (fiducial_utils || ctx.self.m_nue_fiducial) {
+    // A shower with no points within 15 cm of its vertex gives a zero (or
+    // NaN) direction; the walk below then never moves and never leaves the
+    // fiducial volume -- an infinite loop (PDVD stm3 arm, 039253:13 and
+    // 039349:48, both 40+ min at 100 % CPU in this loop; doc pdvd/25
+    // sec 13.4 item 11).  The sibling walk in bad_reconstruction_2 below
+    // already skips a zero dir1; mirror it here, and cap the walk at a
+    // length no finite fiducial volume can exceed.  Every shower with a
+    // usable direction takes exactly the same path as before.
+    if ((fiducial_utils || ctx.self.m_nue_fiducial) && dir.magnitude() > 0) {
         const double step = 1*units::cm;
+        const size_t max_steps = 100000;   // 1 km
+        size_t nsteps = 0;
         Point test_p = vertex_point + dir * step;
-        while (inside_fv_walk(test_p)) {
+        while (inside_fv_walk(test_p) && ++nsteps < max_steps) {
             test_p = test_p + dir * step;
         }
         dis = ray_length(Ray{vertex_point, test_p});
