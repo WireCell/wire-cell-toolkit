@@ -664,6 +664,33 @@ public:
         // drift.  Inert unless m_nu_per_bundle.
         bool m_nu_per_bundle_demoted_acts{false};
 
+        // ---- pdvd doc 25 sec 13.10 -- nu_per_bundle_stm_only -------------- //
+        // Run the per-bundle neutrino PR ONLY on bundles whose selected
+        // activity carries Flags::STM.  Default false = every bundle, i.e.
+        // the pr/94 behavior; inert unless m_nu_per_bundle.
+        //
+        // Why: on PDVD the campaign's signal IS the stopping muon (doc 25
+        // sec 2.3), so the neutrino PR is run to give an STM-tagged track its
+        // fit, its dQ/dx and its Michel search -- not to find a neutrino.
+        // Every other bundle in the event is paid for and thrown away.
+        // Measured on the stm3 arm (20 events): 538 bundles reach the PR, 96
+        // of them with an STM-tagged selection, and TaggerCheckNeutrino is
+        // 97.5 s of the 125 s pass on 039252/0.
+        //
+        // This is the exact inverse of m_nu_skip_cosmic (which REFUSES a
+        // TGM/STM/lm-convicted activity): both on selects nothing, and
+        // configure() warns.  It is NOT a length floor, so the legacy-winner
+        // exemption of m_nu_per_bundle_min_length deliberately does not apply
+        // -- exempting it would silently re-admit one non-STM candidate per
+        // event and make the census unexplainable.
+        //
+        // Note it is a selector, not only a filter: in a bundle whose longest
+        // main is untagged but which also holds a shorter STM-tagged main,
+        // the candidate CHANGES identity to the STM one (36 of the stm3 arm's
+        // 132 STM mains sit in such a bundle).  That is the intended
+        // behavior -- the STM track is the object being reconstructed.
+        bool m_nu_per_bundle_stm_only{false};
+
         // doc pr/94 round 3 -- nu_selected_as_main.
         // The PR chain re-derives "am I the main cluster?" from the persisted
         // Flags::main_cluster (NeutrinoPatternBase.cxx:2797,

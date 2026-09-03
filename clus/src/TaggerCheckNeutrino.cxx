@@ -484,6 +484,13 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_nu_per_bundle = get(config, "nu_per_bundle", m_nu_per_bundle);
     m_nu_per_bundle_demoted_acts = get(config, "nu_per_bundle_demoted_acts", m_nu_per_bundle_demoted_acts);
     m_nu_per_bundle_min_length = get(config, "nu_per_bundle_min_length", m_nu_per_bundle_min_length);  // cm
+    // pdvd doc 25 sec 13.10: run the per-bundle PR only on STM-tagged bundles.
+    m_nu_per_bundle_stm_only = get(config, "nu_per_bundle_stm_only", m_nu_per_bundle_stm_only);
+    if (m_nu_per_bundle_stm_only && m_nu_skip_cosmic) {
+        SPDLOG_LOGGER_WARN(log, "TaggerCheckNeutrino: nu_per_bundle_stm_only and nu_skip_cosmic are exact inverses "
+                                "(one keeps ONLY STM-tagged activities, the other REFUSES them); no bundle can "
+                                "supply a candidate.");
+    }
     m_nu_selected_as_main = get(config, "nu_selected_as_main", m_nu_selected_as_main);
     m_nu_selected_as_main_snapshot_all = get(config, "nu_selected_as_main_snapshot_all", m_nu_selected_as_main_snapshot_all);
     m_sp_photon_flag          = get(config, "sp_photon_flag",          m_sp_photon_flag);
@@ -1040,6 +1047,7 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["nu_per_bundle"]             = m_nu_per_bundle;                // doc pr/94; false = legacy single event-wide candidate
     cfg["nu_per_bundle_demoted_acts"] = m_nu_per_bundle_demoted_acts;  // doc pr/94; mirror of the taggers' evaluate_demoted_mains; inert unless nu_per_bundle
     cfg["nu_per_bundle_min_length"] = m_nu_per_bundle_min_length;      // doc pr/94 Phase 5b round 2; cm; length floor for a per-bundle candidate, exempting the legacy event-wide winner; 0 = none
+    cfg["nu_per_bundle_stm_only"]   = m_nu_per_bundle_stm_only;        // pdvd doc 25 sec 13.10; keep only bundles whose selected activity is STM-tagged; false = every bundle; inert unless nu_per_bundle
     cfg["nu_selected_as_main"]      = m_nu_selected_as_main;           // doc pr/94 round 3; give a demoted-main candidate the main-cluster PR treatment for the duration of its own pass; false = legacy
     cfg["nu_selected_as_main_snapshot_all"] = m_nu_selected_as_main_snapshot_all;  // doc 75; closes the DL-swap flag leak; false = legacy
     cfg["sp_photon_flag"] = m_sp_photon_flag;     // doc pr/26 sec. 8.2; store singlephoton_tagger()'s verdict in TaggerInfo::photon_flag (prototype NeutrinoID.cxx:271)
@@ -2016,6 +2024,19 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
                                                gid, c->get_cluster_id(), c->get_length()/units::cm, tgm, stm, lm);
                             continue;
                         }
+                    }
+                    // pdvd doc 25 sec 13.10 -- the STM-only working mode.
+                    // The exact inverse of nu_skip_cosmic above: keep only
+                    // the activities the STM tagger convicted, because on
+                    // PDVD the stopping muon is the object being
+                    // reconstructed.  Applied inside pick(), so the
+                    // demoted-main fallback obeys it too; NOT exempting the
+                    // legacy winner, unlike the length floor below.
+                    if (m_nu_per_bundle_stm_only && !c->get_flag(Flags::STM)) {
+                        SPDLOG_LOGGER_INFO(log, "TaggerCheckNeutrino: [nu_per_bundle] gid {} activity {} (L {:.1f} cm) is not STM-tagged (TGM={} STM={}); not a candidate (nu_per_bundle_stm_only)",
+                                           gid, c->get_cluster_id(), c->get_length()/units::cm,
+                                           c->get_flag(Flags::TGM), c->get_flag(Flags::STM));
+                        continue;
                     }
                     // The dot guard.  Without it, dropping the bundle veto
                     // promotes sub-cm blobs to "the neutrino" of their bundle
