@@ -1,3 +1,4 @@
+#include "WireCellClus/ExaminerPassBudget.h"
 #include "WireCellClus/NeutrinoPatternBase.h"
 #include "WireCellClus/PRSegmentFunctions.h"
 #include "WireCellClus/PRShowerFunctions.h"
@@ -1516,7 +1517,9 @@ void PatternAlgorithms::shower_clustering_with_nv_from_main_cluster(Graph& graph
         }
 
         bool flag_continue = true;
+        ExaminerPassCounter epb_shower_clustering_with_nv_from_main_cluster("shower_clustering_with_nv_from_main_cluster", main_cluster ? main_cluster->get_cluster_id() : -1);   // doc pdvd/26 round 2
         while (flag_continue) {
+            if (epb_shower_clustering_with_nv_from_main_cluster.exceeded()) break;
             flag_continue = false;
             for (auto seg1 : seg_order) {
                 if ((seg1->cluster() == main_cluster && !m_absorb_unreachable_main_segs.count(seg1)) || m_nv_bridge_shield_segs.count(seg1)) continue;  // doc pr/65 round 3: guard means "claimed by the main_vertex graph walk", so graph-unreachable main-cluster segments stay eligible (set empty when knob off => legacy); doc pr/40 round 9 B2: bridged-cluster segments stay un-absorbable (shield set empty when bridge off)
@@ -2654,7 +2657,9 @@ void PatternAlgorithms::shower_clustering_with_nv_from_vertices(Graph& graph, Ve
             }
 
             bool flag_continue = true;
+            ExaminerPassCounter epb_shower_clustering_with_nv_from_vertices("shower_clustering_with_nv_from_vertices", main_cluster ? main_cluster->get_cluster_id() : -1);   // doc pdvd/26 round 2
             while (flag_continue) {
+                if (epb_shower_clustering_with_nv_from_vertices.exceeded()) break;
                 flag_continue = false;
                 for (auto seg1 : seg_order) {
                     if ((seg1->cluster() == main_cluster && !m_absorb_unreachable_main_segs.count(seg1)) || m_nv_bridge_shield_segs.count(seg1)) continue;  // doc pr/65 round 3: guard means "claimed by the main_vertex graph walk", so graph-unreachable main-cluster segments stay eligible (set empty when knob off => legacy); doc pr/40 round 9 B2: bridged-cluster segments stay un-absorbable (shield set empty when bridge off)

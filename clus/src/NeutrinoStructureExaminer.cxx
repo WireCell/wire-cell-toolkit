@@ -1,5 +1,6 @@
 #include "WireCellClus/NeutrinoPatternBase.h"
 #include "WireCellClus/PRSegmentFunctions.h"
+#include "WireCellClus/ExaminerPassBudget.h"
 
 #include "WireCellAux/Logger.h"
 #include "WireCellUtil/Spdlog.h" // for fmt, used by the pr/72 round 2 census
@@ -296,7 +297,9 @@ bool PatternAlgorithms::examine_structure_2(Graph& graph, Facade::Cluster& clust
     }
     
     bool flag_continue = true;
+    ExaminerPassCounter epb_examine_structure_2("examine_structure_2", cluster.get_cluster_id());   // doc pdvd/26 round 2
     while (flag_continue) {
+        if (epb_examine_structure_2.exceeded()) break;
         flag_continue = false;
 
         // Iterate in insertion order for deterministic results
@@ -496,7 +499,9 @@ bool PatternAlgorithms::examine_structure_3(Graph& graph, Facade::Cluster& clust
     bool flag_update = false;
     bool flag_continue = true;
 
+    ExaminerPassCounter epb_examine_structure_3("examine_structure_3", cluster.get_cluster_id());   // doc pdvd/26 round 2
     while (flag_continue) {
+        if (epb_examine_structure_3.exceeded()) break;
         flag_continue = false;
         es3_sweep++;
 
@@ -2403,7 +2408,9 @@ bool PatternAlgorithms::examine_vertices_4(Graph&graph, Facade::Cluster&cluster,
 void PatternAlgorithms::examine_vertices(Graph& graph, Facade::Cluster& cluster, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, VertexPtr main_vertex){
     bool flag_continue = true;
     
+    ExaminerPassCounter epb_examine_vertices("examine_vertices", cluster.get_cluster_id());   // doc pdvd/26 round 2
     while (flag_continue) {
+        if (epb_examine_vertices.exceeded()) break;
         flag_continue = false;
         
         // Examine and clean up segment topology
@@ -2435,7 +2442,9 @@ void PatternAlgorithms::examine_partial_identical_segments(Graph& graph, Facade:
     
     
     
+    ExaminerPassCounter epb_examine_partial_identical_segments("examine_partial_identical_segments", cluster.get_cluster_id());   // doc pdvd/26 round 2
     while (flag_continue) {
+        if (epb_examine_partial_identical_segments.exceeded()) break;
         flag_continue = false;
         
         // Iterate in insertion order for deterministic results
@@ -2530,8 +2539,53 @@ void PatternAlgorithms::examine_partial_identical_segments(Graph& graph, Facade:
                     }
                 }
                 
-                if (min_dis < 0.3 * units::cm) {
-                    // Merge to existing vertex
+                // doc pdvd/26 round 2: decide the merge target BEFORE branching.  The
+                // prototype tests the existing vertices against max_point, but the
+                // new vertex is created at the steiner point closest to max_point,
+                // which on a sparse cloud can be centimetres away (8.7 cm on PDVD
+                // 039349/14).  So when no vertex sits at max_point, also test them
+                // against where the vertex would actually go: a vertex within 0.3 cm
+                // of that steiner point is the merge target -- creating a second
+                // vertex there would be the "ping-pong" variant of the round-1 fixed
+                // point.  The split vertex itself there is the round-1 case (skip).
+                // Neither test fires when the closest steiner point is near max_point,
+                // i.e. on every dense cloud: that path is unchanged.
+                VertexPtr merge_target = (min_dis < 0.3 * units::cm) ? min_vertex : nullptr;
+                std::optional<Facade::geo_point_t> split_pt;
+                if (!merge_target) {
+                    split_pt = partial_identical_split_point(cluster, max_point, vtx->wcpt().point);
+                    if (!split_pt) {
+                        SPDLOG_LOGGER_DEBUG(s_log,
+                            "examine_partial_identical_segments: cluster {} degenerate split skipped: "
+                            "vtx=({:.1f},{:.1f},{:.1f}) max_dis={:.2f} cm max_point=({:.1f},{:.1f},{:.1f}) nv={} ne={}",
+                            cluster.get_cluster_id(),
+                            vtx->wcpt().point.x(), vtx->wcpt().point.y(), vtx->wcpt().point.z(),
+                            max_dis / units::cm, max_point.x(), max_point.y(), max_point.z(),
+                            boost::num_vertices(graph), boost::num_edges(graph));
+                        continue;
+                    }
+                    const auto [near_v, near_d] = closest_cluster_vertex(graph, cluster, *split_pt);
+                    if (near_v && near_d < 0.3 * units::cm) {
+                        if (near_v == vtx) {
+                            SPDLOG_LOGGER_DEBUG(s_log,
+                                "examine_partial_identical_segments: cluster {} degenerate split skipped (vertex itself, {:.2f} cm)",
+                                cluster.get_cluster_id(), near_d / units::cm);
+                            continue;
+                        }
+                        SPDLOG_LOGGER_DEBUG(s_log,
+                            "examine_partial_identical_segments: cluster {} split point coincides with an existing vertex "
+                            "({:.2f} cm; {:.2f} cm from max_point) -- merging there instead of a duplicate vertex (doc pdvd/26 round 2)",
+                            cluster.get_cluster_id(), near_d / units::cm,
+                            ray_length(Ray{*split_pt, max_point}) / units::cm);
+                        merge_target = near_v;
+                    }
+                }
+
+                if (merge_target) {
+                    // Merge to existing vertex (the block below is the prototype's,
+                    // written against min_vertex; the round-2 redirect only changes
+                    // which vertex that is).
+                    min_vertex = merge_target;
                     
                     // Check if there's already a segment between min_vertex and vtx
                     SegmentPtr good_segment = find_segment(graph, min_vertex, vtx);
@@ -2600,25 +2654,13 @@ void PatternAlgorithms::examine_partial_identical_segments(Graph& graph, Facade:
                     track_fitter.do_multi_tracking(true, true, false, m_fit_exclusion, false, &cluster);
                     
                 } else {
-                    // Create new vertex at split point.  doc pdvd/26: the point
-                    // comes from partial_identical_split_point(); when it has
-                    // none -- no steiner cloud, or the closest steiner point to
-                    // the overlap's far end is this very vertex -- the vertex
-                    // cannot be split and is skipped WITHOUT raising
-                    // flag_continue.  Before, an empty kNN fell through to
-                    // flag_continue = true and the self-coincident case cloned
-                    // the vertex in place forever (PDVD 039349/14, /53).
-                    const auto split_pt = partial_identical_split_point(cluster, max_point, vtx->wcpt().point);
-                    if (!split_pt) {
-                        SPDLOG_LOGGER_DEBUG(s_log,
-                            "examine_partial_identical_segments: cluster {} degenerate split skipped: "
-                            "vtx=({:.1f},{:.1f},{:.1f}) max_dis={:.2f} cm max_point=({:.1f},{:.1f},{:.1f}) nv={} ne={}",
-                            cluster.get_cluster_id(),
-                            vtx->wcpt().point.x(), vtx->wcpt().point.y(), vtx->wcpt().point.z(),
-                            max_dis / units::cm, max_point.x(), max_point.y(), max_point.z(),
-                            boost::num_vertices(graph), boost::num_edges(graph));
-                        continue;
-                    }
+                    // Create new vertex at the split point (doc pdvd/26: the point
+                    // comes from partial_identical_split_point() above; when it
+                    // has none -- no steiner cloud, or the closest steiner point to
+                    // the overlap's far end is this very vertex -- the vertex was
+                    // skipped WITHOUT raising flag_continue.  Before, an empty kNN
+                    // fell through to flag_continue = true and the self-coincident
+                    // case cloned the vertex in place forever, PDVD 039349/14, /53).
                     {
                         Facade::geo_point_t vtx_new_point = *split_pt;   // non-const: do_rough_path takes geo_point_t&
                         
@@ -2724,6 +2766,37 @@ std::optional<Facade::geo_point_t> PatternAlgorithms::partial_identical_split_po
     // vertex is not itself exactly a steiner point.
     if ((pt - vtx_point).magnitude() < 0.1 * units::cm) return std::nullopt;
     return pt;
+}
+
+std::pair<VertexPtr, double> PatternAlgorithms::closest_cluster_vertex(Graph& graph, const Facade::Cluster& cluster, const Facade::geo_point_t& point) const
+{
+    VertexPtr best;
+    double best_d = 1e9;
+    for (const auto& nd : ordered_nodes(graph)) {
+        VertexPtr v = graph[nd].vertex;
+        if (!v || v->cluster() != &cluster) continue;
+        const double d = ray_length(Ray{point, v->wcpt().point});
+        if (d < best_d) {
+            best_d = d;
+            best = v;
+        }
+    }
+    return {best, best_d};
+}
+
+// doc pdvd/26 round 2 -- see ExaminerPassBudget.h.
+bool ExaminerPassCounter::exceeded()
+{
+    if (++passes <= kExaminerPassBudget) return false;
+    SPDLOG_LOGGER_WARN(s_log,
+        "{}: cluster {} exceeded the examiner pass budget ({}) -- stopping the loop where it stands (doc pdvd/26 round 2)",
+        who, cluster_id, kExaminerPassBudget);
+    return true;
+}
+
+ExaminerPassCounter::~ExaminerPassCounter()
+{
+    SPDLOG_LOGGER_DEBUG(s_log, "examiner passes: {} cluster {} passes={}", who, cluster_id, passes);
 }
 
 Facade::geo_point_t PatternAlgorithms::get_local_extension(Facade::Cluster& cluster, const Facade::geo_point_t& wcp){
@@ -3085,7 +3158,9 @@ bool PatternAlgorithms::examine_structure_final_1(Graph& graph, VertexPtr main_v
         return false;
     }
     
+    ExaminerPassCounter epb_examine_structure_final_1("examine_structure_final_1", cluster.get_cluster_id());   // doc pdvd/26 round 2
     while (flag_continue) {
+        if (epb_examine_structure_final_1.exceeded()) break;
         flag_continue = false;
         
         // Iterate in insertion order for deterministic results
@@ -3471,7 +3546,9 @@ bool PatternAlgorithms::examine_structure_final_2(Graph& graph, VertexPtr main_v
     
     // Continue looping until no more updates
     bool flag_continue = true;
+    ExaminerPassCounter epb_examine_structure_final_2("examine_structure_final_2", cluster.get_cluster_id());   // doc pdvd/26 round 2
     while (flag_continue) {
+        if (epb_examine_structure_final_2.exceeded()) break;
         flag_continue = false;
         bool flag_update = false;
         
@@ -3662,7 +3739,9 @@ bool PatternAlgorithms::examine_structure_final_3(Graph& graph, VertexPtr main_v
     
     // Continue looping until no more updates
     bool flag_continue = true;
+    ExaminerPassCounter epb_examine_structure_final_3("examine_structure_final_3", cluster.get_cluster_id());   // doc pdvd/26 round 2
     while (flag_continue) {
+        if (epb_examine_structure_final_3.exceeded()) break;
         flag_continue = false;
         bool flag_update = false;
         

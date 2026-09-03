@@ -1,3 +1,4 @@
+#include "WireCellClus/ExaminerPassBudget.h"
 #include "WireCellClus/NeutrinoPatternBase.h"
 #include <algorithm>
 #include <vector>
@@ -2272,7 +2273,9 @@ bool PatternAlgorithms::eliminate_short_vertex_activities(Graph& graph, Facade::
     bool flag_updated = false;
     bool flag_continue = true;
         
+    ExaminerPassCounter epb_eliminate_short_vertex_activities("eliminate_short_vertex_activities", cluster.get_cluster_id());   // doc pdvd/26 round 2
     while (flag_continue) {
+        if (epb_eliminate_short_vertex_activities.exceeded()) break;
         flag_continue = false;
         std::set<SegmentPtr> to_be_removed_segments;
         std::set<VertexPtr> to_be_removed_vertices;

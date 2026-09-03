@@ -115,3 +115,59 @@ TEST_CASE("partial_identical_split_point: no or point-less steiner cloud -> no s
         CHECK_FALSE(pa.partial_identical_split_point(cl, max_point, vtx).has_value());
     }
 }
+
+// ---------------------------------------------------------------------------
+// doc pdvd/26 round 2
+// ---------------------------------------------------------------------------
+
+#include "WireCellClus/PRGraph.h"
+#include "WireCellClus/ExaminerPassBudget.h"
+
+TEST_CASE("closest_cluster_vertex: nearest wcpt of THIS cluster, ignoring other clusters' vertices")
+{
+    Points::node_t root;
+    auto* g = root.value.facade<Facade::Grouping>();
+    auto& cl_a = g->make_child();
+    auto& cl_b = g->make_child();
+
+    Graph graph;
+    auto va0 = make_vertex(graph); va0->wcpt().point = Facade::geo_point_t(0, 0, 0);           va0->cluster(&cl_a);
+    auto va1 = make_vertex(graph); va1->wcpt().point = Facade::geo_point_t(100 * units::cm, 0, 0); va1->cluster(&cl_a);
+    auto vb0 = make_vertex(graph); vb0->wcpt().point = Facade::geo_point_t(1 * units::cm, 0, 0);  vb0->cluster(&cl_b);
+
+    PatternAlgorithms pa;
+    const Facade::geo_point_t q(2 * units::cm, 0, 0);
+
+    SUBCASE("cluster A: the 2 cm vertex, not cluster B's 1 cm one") {
+        auto [v, d] = pa.closest_cluster_vertex(graph, cl_a, q);
+        REQUIRE(v);
+        CHECK(v == va0);
+        CHECK(std::abs(d - 2 * units::cm) < 1e-6);
+    }
+    SUBCASE("cluster B: its own vertex") {
+        auto [v, d] = pa.closest_cluster_vertex(graph, cl_b, q);
+        REQUIRE(v);
+        CHECK(v == vb0);
+        CHECK(std::abs(d - 1 * units::cm) < 1e-6);
+    }
+    SUBCASE("a cluster with no vertex in the graph") {
+        auto& cl_c = g->make_child();
+        auto [v, d] = pa.closest_cluster_vertex(graph, cl_c, q);
+        CHECK(!v);
+        CHECK(d > 1e8);
+    }
+}
+
+TEST_CASE("ExaminerPassCounter: silent up to the budget, true once past it")
+{
+    ExaminerPassCounter c("doctest", 7);
+    for (int i = 0; i < kExaminerPassBudget; ++i) {
+        CHECK_FALSE(c.exceeded());
+    }
+    CHECK(c.passes == kExaminerPassBudget);
+    CHECK(c.exceeded());                 // pass kExaminerPassBudget + 1 is refused
+    CHECK(c.passes == kExaminerPassBudget + 1);
+    // The budget must stay far above any pass count seen in production (doc
+    // pdvd/26 sec 7 census); the number is pinned so a change is a decision.
+    CHECK(kExaminerPassBudget == 1000);
+}

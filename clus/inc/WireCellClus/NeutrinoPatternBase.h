@@ -3215,6 +3215,12 @@ namespace WireCell::Clus::PR {
         // segment per iteration.  Reached only when the overlap lies in a charge gap
         // with no steiner support between the vertex and the split location.
         std::optional<Facade::geo_point_t> partial_identical_split_point(const Facade::Cluster& cluster, const Facade::geo_point_t& max_point, const Facade::geo_point_t& vtx_point) const;
+        // doc pdvd/26 round 2: the vertex of `cluster` whose wcpt is nearest to
+        // `point`, with that distance ({nullptr, 1e9} when the cluster has no
+        // vertex in the graph).  wcpt, not fit: the wcpt is where segments are
+        // routed from, so two vertices with the same wcpt are the same node of
+        // the steiner graph whatever their fits say.
+        std::pair<VertexPtr, double> closest_cluster_vertex(Graph& graph, const Facade::Cluster& cluster, const Facade::geo_point_t& point) const;
 
         //examine vertices
         void examine_vertices(Graph& graph, Facade::Cluster& cluster, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, VertexPtr main_vertex = nullptr);
