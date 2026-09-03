@@ -176,6 +176,33 @@ namespace WireCell::Clus {
             SPDLOG_LOGGER_TRACE(log, "timing: sample_live loop (apa={},face={}) took {} ms", apa, face, MS(Clock::now()-t0).count());
             SPDLOG_LOGGER_TRACE(log, "{} points sampled for apa {} face {} Blobs {}", npoints, apa, face, niblobs);
 
+            // doc pdvd/27: the blobs being retiled must lie inside the face
+            // volume they are retiled into.  They do not when the point tree
+            // was sampled with a different wires file than this job's anodes:
+            // PDVD v6 -> v7-uvwfit swapped the face idents of anodes 2,3,6,7,
+            // and every retile on those anodes then landed one face height off
+            // (039349/53's "isolated piece" and chords).  Log-only diagnostic;
+            // outputs are unchanged.
+            {
+                double oy0 = 1e9, oy1 = -1e9, oz0 = 1e9, oz1 = -1e9;
+                for (int pi = 0; pi < orig_cluster->npoints(); ++pi) {
+                    const auto w = orig_cluster->wire_plane_id(pi);
+                    if (w.apa() != apa || w.face() != face) continue;
+                    const auto pp = orig_cluster->point3d_raw(pi);
+                    oy0 = std::min(oy0, pp.y()); oy1 = std::max(oy1, pp.y());
+                    oz0 = std::min(oz0, pp.z()); oz1 = std::max(oz1, pp.z());
+                }
+                const auto& bb = m_face.at(apa).at(face)->sensitive().bounds();
+                const double tol = 1 * units::cm;
+                const double sy0 = std::min(bb.first.y(), bb.second.y()) - tol, sy1 = std::max(bb.first.y(), bb.second.y()) + tol;
+                const double sz0 = std::min(bb.first.z(), bb.second.z()) - tol, sz1 = std::max(bb.first.z(), bb.second.z()) + tol;
+                if (oy0 <= oy1 && (oy0 < sy0 || oy1 > sy1 || oz0 < sz0 || oz1 > sz1)) {
+                    SPDLOG_LOGGER_WARN(log, "ImproveCluster_1: cluster {} apa {} face {}: its points span y=[{:.1f},{:.1f}] z=[{:.1f},{:.1f}] cm but this face's sensitive volume is y=[{:.1f},{:.1f}] z=[{:.1f},{:.1f}] cm -- the point tree and this job's anode geometry disagree (point tree sampled with another wires file?); the retile lands in the wrong face (doc pdvd/27)",
+                                       orig_cluster->ident(), apa, face, oy0/units::cm, oy1/units::cm, oz0/units::cm, oz1/units::cm,
+                                       sy0/units::cm, sy1/units::cm, sz0/units::cm, sz1/units::cm);
+                }
+            }
+
 
             // remove bad blobs ...
             t0 = Clock::now();
