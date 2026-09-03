@@ -2749,6 +2749,21 @@ Facade::Cluster::Flash Facade::Cluster::get_flash() const
 }
 
 
+Facade::Cluster::Flash Facade::Cluster::get_matched_flash() const
+{
+    // Same delegation shape as get_flash(), but keyed on the globally-unique
+    // "matched_flash_gid" QLMatching stamps alongside the per-input "flash" row
+    // index -- the one of the two that survives the multi-input merge.
+    const auto* p = this->node()->parent;
+    if (!p)  return Flash{};
+    const auto* g = p->value.facade<Grouping>();
+    if (!g)  return Flash{};
+
+    const int gid = this->get_scalar("matched_flash_gid", -1);
+    return g->flash_by_gid(gid);
+}
+
+
 const Facade::Cluster::graph_type& Facade::Cluster::find_graph(const std::string& flavor) const
 {
     return const_cast<const graph_type&>(const_cast<Cluster*>(this)->find_graph(flavor));

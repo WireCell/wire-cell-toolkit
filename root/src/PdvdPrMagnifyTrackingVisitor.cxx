@@ -102,6 +102,9 @@ void Root::PdvdPrMagnifyTrackingVisitor::configure(const WireCell::Configuration
     m_nticks = get<int>(cfg, "nticks", m_nticks);
     // doc 87: DEFAULT FALSE keeps tracking-pr.root byte-identical.
     m_save_in_scope = get<bool>(cfg, "save_in_scope", m_save_in_scope);
+    // doc 99: DEFAULT FALSE keeps the legacy (per-input row index) resolution.
+    // UNVALIDATED on PDVD -- no config wires it; see the header.
+    m_flash_by_gid = get<bool>(cfg, "flash_by_gid", m_flash_by_gid);
 
     auto anode_tns = cfg["anodes"];
     for (auto anode_tn : anode_tns) {
@@ -118,6 +121,7 @@ WireCell::Configuration Root::PdvdPrMagnifyTrackingVisitor::default_configuratio
     cfg["output_filename"] = "tracking-pr.root";
     cfg["grouping"] = "live";
     cfg["save_in_scope"] = m_save_in_scope;
+    cfg["flash_by_gid"] = m_flash_by_gid;
     cfg["anodes"] = Json::arrayValue;
     cfg["detector_volumes"] = "";
     cfg["runNo"] = 0;
@@ -371,7 +375,8 @@ void Root::PdvdPrMagnifyTrackingVisitor::write_cluster_summary(TFile* output_tf,
         length_cm = cl->get_length() / units::cm;
         cluster_t0_us = cl->get_cluster_t0() / units::us;
 
-        const auto flash = cl->get_flash();
+        // doc 99, and see the header: OFF is the legacy per-input row index.
+        const auto flash = m_flash_by_gid ? cl->get_matched_flash() : cl->get_flash();
         if (flash) {
             flash_id = flash.ident();
             flash_time_us = flash.time() / units::us;

@@ -674,21 +674,45 @@ namespace WireCell::Clus::Facade {
         // Grouping::flash_at() for the matched flash index ("flash" scalar).
         //
         // CAVEAT, multi-APA detectors.  The "flash" scalar is the row id of the
-        // flash within the PER-APA flash tensor QLMatching matched against, but
-        // the grouping keeps ONE canonical "flash" PC and each APA's
-        // FlashTensorToOpticalPCs ASSIGNS it, so only the last APA's flash list
-        // survives into the archive.  A cluster matched by any earlier APA
-        // therefore resolves to a row of a different list: an out-of-range index
-        // now yields an invalid Flash (it used to read raw memory), but an
-        // in-range one silently yields a DIFFERENT, real flash.  In SBND
-        // production that is 24024 of 50699 matched clusters.
+        // flash within the PER-INPUT flash tensor QLMatching matched against,
+        // but the canonical "flash"/"light"/"flashlight" PCs are NOT merge-safe:
+        // the multi-input merge (QLMatching::operator(), or the standalone
+        // PointTreeMerging it replaces) keeps only the PRIMARY input's PCs and
+        // DROPS every other input's -- only names in root_pcs_to_merge survive.
+        // A cluster matched on any non-primary input therefore resolves against
+        // a list that is not its own: an out-of-range index yields an invalid
+        // Flash (it used to read raw memory), but an in-range one silently
+        // yields a DIFFERENT, real flash.  In SBND production that is 24024 of
+        // 50699 matched clusters.
         //
         // The archive-local test for "did I resolve the right row" is
         //     flash.time() == cluster->get_cluster_t0()
         // -- QLMatching sets cluster_t0 from the flash the cluster actually
         // matched, and that survives even when the flash's PC row does not.
-        // Full measurement and the options for a real fix: sbnd_xin/docs/99.
+        // Full measurement: sbnd_xin/docs/99.
+        //
+        // Prefer get_matched_flash() below, which is immune to all of this.
         Flash get_flash() const;
+
+        // Return this cluster's matched flash, resolved by the globally-unique
+        // "matched_flash_gid" scalar against the merge-safe "opflash" PC rather
+        // than by the per-input "flash" row index.  This is the correct read for
+        // a merged multi-input grouping: unlike get_flash() it resolves the
+        // flash the cluster ACTUALLY matched, whichever input matched it.
+        // Measured on SBND production: 20156/20156 clusters correct (by the
+        // flash.time() == cluster_t0 test), against 50.7% for get_flash().
+        //
+        // Invalid Flash (operator bool() == false) when the cluster carries no
+        // matched flash, when the grouping has no "opflash" PC, or when the gid
+        // resolves to no row -- see Grouping::flash_by_gid(), whose header also
+        // carries the gid-uniqueness precondition.
+        //
+        // Differences from get_flash() on a row it resolves correctly: ident()
+        // is the GID (globally unique, joins to "opflash") and not the per-input
+        // row id; type() is 0; errors() are 0 and cov_idents()/covs() are empty
+        // ("opflash" carries no saturation or coverage columns).  time() and
+        // value() are bit-identical.
+        Flash get_matched_flash() const;
 
         /// Helper function to check if a point is spatially related to a reference cluster using time_blob_map
         /// Implements the same filtering logic as prototype's old_time_mcells_map checking

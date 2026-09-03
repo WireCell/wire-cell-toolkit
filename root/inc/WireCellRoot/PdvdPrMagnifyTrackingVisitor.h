@@ -72,6 +72,17 @@ namespace WireCell {
             // summary nusel_extract.py otherwise has to read out of the Bee zip
             // and the pctree.  DEFAULT FALSE => tracking-pr.root byte-identical.
             bool m_save_in_scope{false};
+            // doc 99: T_cluster's flash columns from Cluster::get_matched_flash()
+            // (matched_flash_gid vs the merge-safe "opflash" PC) instead of
+            // Cluster::get_flash().  DEFAULT FALSE => byte-identical.
+            //
+            // PRESENT BUT UNVALIDATED HERE.  The fix was measured on SBND, whose
+            // gid side is the anode ident and therefore unique across inputs.
+            // PDVD's gid encoding (opflash_phys_gid / shared_flash, per-drift-side
+            // flash lists) has NOT been checked against the uniqueness
+            // precondition in Grouping::flash_by_gid(), so no PDVD config wires
+            // this key.  Check that first, then wire it.
+            bool m_flash_by_gid{false};
             double m_dQdx_scale{0.1};
             double m_dQdx_offset{-1000};
             bool m_flag_skip_vertex{false};

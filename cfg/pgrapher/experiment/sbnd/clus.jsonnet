@@ -906,6 +906,15 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, e
               // and the pctree suppressed and still produce a full nusel table.
               // C++ default false.  Key omitted when off => byte-identical config.
               save_in_scope=false,
+              // flash_by_gid (doc 99): resolve T_cluster's flash columns through
+              // Cluster::get_matched_flash() (the globally-unique
+              // matched_flash_gid against the merge-safe "opflash" PC) instead of
+              // Cluster::get_flash() (the per-input "flash" row index, which the
+              // multi-APA merge invalidates for every cluster not matched on the
+              // primary input -- 49.4% of production rows name the wrong real
+              // flash).  C++ default false.  Key omitted when off =>
+              // byte-identical pre-fix config.
+              flash_by_gid=false,
               // pr_bee (doc 87): write pr_evt<ID>/mabc-pr.zip.  false => bee_zip is the
               // empty string, which MultiAlgBlobClustering reads as "write no Bee
               // zip at all" (an empty name used to raise IOError, so it was never
@@ -2423,6 +2432,8 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, e
                     nticks: 3427,
                     // doc 87.  Key omitted when off => byte-identical config.
                     [if save_in_scope then 'save_in_scope']: true,
+                    // doc 99.  Key omitted when off => byte-identical config.
+                    [if flash_by_gid then 'flash_by_gid']: true,
                 },
             },
             // T_tagger/T_kine writer (UbooneTaggerOutputVisitor, reused as-is: it

@@ -100,6 +100,8 @@ void Root::SbndPrMagnifyTrackingVisitor::configure(const WireCell::Configuration
     m_nticks = get<int>(cfg, "nticks", m_nticks);
     // doc 87: DEFAULT FALSE keeps tracking-pr.root byte-identical.
     m_save_in_scope = get<bool>(cfg, "save_in_scope", m_save_in_scope);
+    // doc 99: DEFAULT FALSE keeps the legacy (per-input row index) resolution.
+    m_flash_by_gid = get<bool>(cfg, "flash_by_gid", m_flash_by_gid);
 
     auto anode_tns = cfg["anodes"];
     for (auto anode_tn : anode_tns) {
@@ -116,6 +118,7 @@ WireCell::Configuration Root::SbndPrMagnifyTrackingVisitor::default_configuratio
     cfg["output_filename"] = "tracking-pr.root";
     cfg["grouping"] = "live";
     cfg["save_in_scope"] = m_save_in_scope;
+    cfg["flash_by_gid"] = m_flash_by_gid;
     cfg["anodes"] = Json::arrayValue;
     cfg["detector_volumes"] = "";
     cfg["runNo"] = 0;
@@ -348,7 +351,15 @@ void Root::SbndPrMagnifyTrackingVisitor::write_cluster_summary(TFile* output_tf,
         length_cm = cl->get_length() / units::cm;
         cluster_t0_us = cl->get_cluster_t0() / units::us;
 
-        const auto flash = cl->get_flash();
+        // doc 99.  Legacy (knob off) = get_flash(), the per-input "flash" row
+        // index, which the multi-input merge invalidates for every cluster not
+        // matched on the primary input -- 49.4% of SBND production rows name
+        // the wrong real flash.  Knob on = get_matched_flash(), resolving the
+        // globally-unique matched_flash_gid against the merge-safe "opflash" PC
+        // (measured 100% correct).  The self-contained check on this tree is
+        // flash_time_us == cluster_t0_us for every row with flash_id >= 0.
+        // NB flash_id then carries the GID, not the per-input row id.
+        const auto flash = m_flash_by_gid ? cl->get_matched_flash() : cl->get_flash();
         if (flash) {
             flash_id = flash.ident();
             flash_time_us = flash.time() / units::us;

@@ -219,6 +219,34 @@ namespace WireCell::Clus::Facade {
         /// Enumerate ALL flashes from the grouping-level optical PCs (the
         /// pre-match read path).  Empty if there is no "flash" PC.
         std::vector<::WireCell::Clus::Facade::Flash> flashes() const;
+
+        /// Resolve a flash by its globally-unique matched-flash gid, read from
+        /// the merge-safe "opflash" PC (gid/time/ch/pe, one row per
+        /// (flash, channel); written by QLMatching::write_opflash_pc and
+        /// concatenated across inputs by its root_pcs_to_merge).
+        ///
+        /// Why this exists.  The canonical "flash" PC is NOT merge-safe: the
+        /// multi-APA merge keeps only the PRIMARY input's list, so the "flash"
+        /// row index a cluster stores (Cluster::get_flash()) is meaningless for
+        /// clusters matched on any other input.  "opflash" survives the merge
+        /// intact and its gid is the same number QLMatching stamps on the
+        /// cluster as "matched_flash_gid", so this path resolves every matched
+        /// cluster, on every input.  See Cluster::get_matched_flash().
+        ///
+        /// Returns an invalid Flash (operator bool() == false) when gid < 0,
+        /// when there is no "opflash" PC, or when no row carries that gid.
+        ///
+        /// PRECONDITION -- gid uniqueness.  QLMatching builds
+        ///   gid = gid_side * 1000000 + index-into-this-input's-flash-list
+        /// with gid_side = the input's anode ident (SBND production), which is
+        /// unique across inputs.  A config setting `opflash_phys_gid` makes
+        /// gid_side the flash's PHYSICAL drift side instead, and two inputs
+        /// holding DIFFERENT flash lists can then emit the same gid.  This
+        /// method detects that (a channel appearing twice under one gid) and
+        /// returns an invalid Flash rather than a silently doubled PE sum.  Do
+        /// not enable a gid-resolving consumer on such a config until its gid
+        /// encoding has been checked.  (sbnd_xin/docs/99)
+        ::WireCell::Clus::Facade::Flash flash_by_gid(int gid) const;
         IChannel::vector get_plane_channels(const int apa, const int face, const WirePlaneLayer_t layer) const{return cache().map_plane_channels.at(apa).at(face).at(layer);}
         std::shared_ptr<const WireCell::IChannel> get_plane_channel_wind(const int apa, const int face, const WirePlaneLayer_t layer, const int wind) const{ return cache().map_plane_channels.at(apa).at(face).at(layer).at(wind);}
 

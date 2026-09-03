@@ -73,6 +73,12 @@ namespace WireCell {
             // summary nusel_extract.py otherwise has to read out of the Bee zip
             // and the pctree.  DEFAULT FALSE => tracking-pr.root byte-identical.
             bool m_save_in_scope{false};
+            // doc 99: when true, T_cluster's flash_id/flash_time_us/flash_pe
+            // come from Cluster::get_matched_flash() (matched_flash_gid against
+            // the merge-safe "opflash" PC) instead of Cluster::get_flash() (the
+            // per-input row index the multi-APA merge invalidates).  DEFAULT
+            // FALSE => tracking-pr.root byte-identical.
+            bool m_flash_by_gid{false};
             double m_dQdx_scale{0.1};
             double m_dQdx_offset{-1000};
             bool m_flag_skip_vertex{false};

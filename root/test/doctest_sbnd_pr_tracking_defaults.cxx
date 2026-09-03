@@ -29,6 +29,15 @@ TEST_CASE("root knob defaults: SbndPrMagnifyTrackingVisitor save_in_scope is OFF
     REQUIRE_MESSAGE(cfg.isMember("save_in_scope"), "missing knob: save_in_scope");
     CHECK(cfg["save_in_scope"].asBool() == false);
 
+    // doc 99.  flash_by_gid switches T_cluster's flash columns from the per-input
+    // "flash" row index (Cluster::get_flash()) to matched_flash_gid resolved
+    // against the merge-safe "opflash" PC.  It MUST default false: with it on the
+    // three flash columns change value on ~half the rows, and flash_id changes
+    // MEANING (it carries the gid), so tracking-pr.root stops being comparable to
+    // every arm recorded before doc 99.
+    REQUIRE_MESSAGE(cfg.isMember("flash_by_gid"), "missing knob: flash_by_gid");
+    CHECK(cfg["flash_by_gid"].asBool() == false);
+
     // The legacy output name must not drift either -- the runner and every
     // gate script look for exactly this file.
     REQUIRE(cfg.isMember("output_filename"));

@@ -860,6 +860,17 @@ function(
     // use scripts/pr87_root_tree_diff.py, which reports every SHARED tree as
     // identical and names T_cluster as the only addition.
     save_in_scope  = true,
+    // flash_by_gid (doc 99): fill T_cluster's flash_id/flash_time_us/flash_pe
+    // from Cluster::get_matched_flash() -- matched_flash_gid resolved against the
+    // merge-safe "opflash" PC -- instead of Cluster::get_flash(), whose per-input
+    // "flash" row index the multi-APA merge invalidates (the merge keeps only the
+    // primary input's flash PC, so 49.4% of production rows named a DIFFERENT
+    // real flash and 0.8% were out of range).  The self-contained check on the
+    // tree is flash_time_us == cluster_t0_us on every row with flash_id >= 0.
+    // NB flash_id then carries the GID, joinable to the "opflash" PC's gid, not
+    // the per-input row id.
+    // C++ default false.  Key omitted when off => byte-identical config.
+    flash_by_gid   = false,
     // pr_bee (doc 87): write pr_evt<ID>/mabc-pr.zip (~0.24 GB/1000 evt).
     // DEFAULT TRUE = today's behaviour, byte-identical.  false sets the MABC
     // node's bee_zip to '', which means "write no Bee zip at all".
@@ -3500,6 +3511,7 @@ function(
                              pipeline_names=pipeline_names,
                              tensor_outname=save_tensors,
                              save_in_scope=save_in_scope,
+                             flash_by_gid=flash_by_gid,
                              pr_bee=pr_bee,
                              trackfitting_config_file=trackfitting_config,
                              particle_dataset=pds.particle_dataset,

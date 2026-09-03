@@ -4,6 +4,7 @@
 #include "WireCellClus/TrackFitting.h"
 #include "WireCellAux/PlaneTools.h"
 #include <boost/container_hash/hash.hpp>
+#include <algorithm>
 
 using namespace WireCell;
 using namespace WireCell::Clus;
@@ -1264,6 +1265,80 @@ std::vector<Facade::Flash> Facade::Grouping::flashes() const
         out.push_back(flash_at((int)i));
     }
     return out;
+}
+
+Facade::Flash Facade::Grouping::flash_by_gid(int gid) const
+{
+    Flash flash;                // starts invalid
+    if (gid < 0) {
+        return flash;
+    }
+    if (! this->has_pc("opflash")) {
+        return flash;           // detector/config that emits no merged flash PC
+    }
+    const auto ogid  = this->get_pcarray<int>("gid", "opflash");
+    const auto otime = this->get_pcarray<double>("time", "opflash");
+    const auto och   = this->get_pcarray<int>("ch", "opflash");
+    const auto ope   = this->get_pcarray<double>("pe", "opflash");
+    const size_t nrow = ogid.size();
+    // Every column must cover every row: these are written together, but a
+    // hand-built or partially-merged PC need not be, and get_pcarray hands back
+    // an UNCHECKED span (see the range guard in flash_at()).
+    if (nrow == 0 || otime.size() < nrow || och.size() < nrow || ope.size() < nrow) {
+        return flash;
+    }
+
+    std::vector<size_t> rows;
+    for (size_t i = 0; i < nrow; ++i) {
+        if (ogid[i] == gid) rows.push_back(i);
+    }
+    if (rows.empty()) {
+        return flash;           // no such flash in this grouping
+    }
+
+    // Sum in ASCENDING CHANNEL order, not row order.  The "value" of the
+    // canonical flash PC is FlashTensorToOpticalPCs' `sum += pe` over channels
+    // 0..nchan-1, so summing this way reproduces it BIT-EXACTLY; summing in row
+    // order does not survive the merge's row interleaving (measured: 27.5%
+    // agreement, worst error 1.5e-10, vs 100% in channel order).  Skipped zero
+    // channels cannot change a double sum, so dropping them below is safe.
+    std::stable_sort(rows.begin(), rows.end(),
+                     [&och](size_t a, size_t b) { return och[a] < och[b]; });
+
+    double sum = 0.0;
+    std::vector<int> idents;
+    std::vector<double> times, values;
+    int last_ch = -1;
+    for (size_t r : rows) {
+        if (och[r] == last_ch) {
+            // Two rows for one (gid, channel) => this gid names more than one
+            // flash (see the gid-uniqueness precondition in the header).  Refuse
+            // rather than return a doubled PE sum from a Frankenstein flash.
+            return Flash{};
+        }
+        last_ch = och[r];
+        sum += ope[r];
+        if (ope[r] != 0.0) {    // the "light" PC likewise stores only fired channels
+            idents.push_back(och[r]);
+            times.push_back(otime[r]);
+            values.push_back(ope[r]);
+        }
+    }
+
+    flash.m_valid = true;
+    flash.m_time  = otime[rows.front()];   // one time per flash; all rows equal
+    flash.m_value = sum;
+    // The ident is the GID, not a row index: that is the whole point of this
+    // path, and it is what joins a consumer's output back to the "opflash" PC.
+    flash.m_ident = gid;
+    flash.m_type  = 0;                     // opflash carries no type column
+    flash.m_idents = std::move(idents);
+    flash.m_times  = std::move(times);
+    flash.m_values = std::move(values);
+    flash.m_errors.assign(flash.m_idents.size(), 0.0);  // no per-channel error here
+    // m_cov_idents / m_covs stay empty: "opflash" carries no coverage column,
+    // and empty means "fully covered" by the Flash contract.
+    return flash;
 }
 
 
