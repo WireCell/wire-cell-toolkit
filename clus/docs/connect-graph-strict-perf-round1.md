@@ -213,11 +213,29 @@ byte-identical outputs.
 `relaxed_strict_img_2d_rescue_long_wtrack_fast` is **not selected by any job**.
 Two reasons to leave it that way for now:
 
-1. Kruskal and the legacy per-component Prim can differ on exact distance ties.
-   Doc 78 found them byte-identical on all 186 SBND gate events; this round
-   adds 039252/8 (byte-identical Bee zip, all 25 split lines identical). That
-   is evidence, not proof, which is exactly why doc 78 kept its own port behind
-   a busy gate and a knob.
+1. Kruskal and the legacy per-component Prim can differ on exact distance ties,
+   and **this port's lazy path has been exercised on exactly one cluster.**
+   Be precise about the two separate bodies of evidence:
+   - Doc 78's 186 byte-identical SBND gate events exercised
+     **`connect_graph_relaxed`**'s lazy Kruskal — the same *scheme*, a
+     different function.
+   - Gate round 10 below never ran the strict lazy path at all: SBND selects
+     `..._long_wtrack`, not `..._long_wtrack_fast`. That is exactly why its
+     201/201 is a meaningful identity gate for items 1, 3 and 4 — and exactly
+     why it is **zero** witnesses for item 2's tie behaviour.
+   - The only witness for **this** code is `r10fast` on 039252/8: one
+     `lazy=true` line (cluster 84, ncomp=509), byte-identical `mabc-pr.zip`,
+     all 25 split lines identical. Every other cluster in that event came in
+     at ncomp 3–10 and took the legacy path.
+
+   So: n = 1 cluster, not 187. Do not read the union.
+
+   **What would validate it** (the owner's next question): run any event with
+   the `_fast` flavor and census the `ncomp=` / `lazy=` debug line to find
+   which PDVD `_keep` events hold a cluster above the 200 threshold at all,
+   then run lazy-vs-eager and `abtest/hash_archive.py` on that subset only.
+   Note 039252/16 may contribute zero witnesses — its `b12` arms ran the eager
+   flavor, so there is no `ncomp` reading for it.
 2. On PDVD the scope knob already dominates it. With
    `protect_stm_only_bundles=true` (doc 25 §13.11, the working mode) the stage
    on 039252/8 is **146 ms**; the 2.15× here applies to the 798 s / 1711 s
