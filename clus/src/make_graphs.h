@@ -143,6 +143,17 @@ namespace WireCell::Clus::Graphs {
         IDetectorVolumes::pointer dv,
         IPCTransformSet::pointer pcts);
 
+    // doc clus/connect-graph-strict-perf round 2: identical to
+    // ..._long_wtrack, plus the doc 78 busy-gated lazy walk (RelaxedFastCfg
+    // defaults, busy_num_threshold=200).  Separate flavor NAME rather than a
+    // config key, so a job that does not ask for it is byte-identical by
+    // construction -- the same wiring choice doc 78 round 2 made for
+    // "relaxed_fast".
+    Weighted::Graph make_graph_relaxed_strict_img_2d_rescue_long_wtrack_fast(
+        const Facade::Cluster& cluster,
+        IDetectorVolumes::pointer dv,
+        IPCTransformSet::pointer pcts);
+
 }
 
 #endif

@@ -2871,6 +2871,12 @@ Facade::Cluster::graph_type& Facade::Cluster::find_graph(
     if (flavor == "relaxed_strict_img_2d_rescue_long_wtrack") {
         return this->give_graph(flavor, make_graph_relaxed_strict_img_2d_rescue_long_wtrack(*this, dv, pcts));
     }
+    // doc clus/connect-graph-strict-perf round 2: same connector, busy-gated
+    // lazy walk (RelaxedFastCfg defaults).  Distinct name => a job that does
+    // not select it is byte-identical by construction.
+    if (flavor == "relaxed_strict_img_2d_rescue_long_wtrack_fast") {
+        return this->give_graph(flavor, make_graph_relaxed_strict_img_2d_rescue_long_wtrack_fast(*this, dv, pcts));
+    }
 
     // Do a hail mary, maybe user made a mistake by passing dv/pcts and really
     // wants a flavor that we can make implicitly.
@@ -2941,6 +2947,12 @@ Facade::Cluster::graph_type& Facade::Cluster::find_graph(
     }
     if (flavor == "relaxed_strict_img_2d_rescue_long_wtrack") {
         return this->give_graph(flavor, make_graph_relaxed_strict_img_2d_rescue_long_wtrack(*this, dv, pcts));
+    }
+    // doc clus/connect-graph-strict-perf round 2: same connector, busy-gated
+    // lazy walk (RelaxedFastCfg defaults).  Distinct name => a job that does
+    // not select it is byte-identical by construction.
+    if (flavor == "relaxed_strict_img_2d_rescue_long_wtrack_fast") {
+        return this->give_graph(flavor, make_graph_relaxed_strict_img_2d_rescue_long_wtrack_fast(*this, dv, pcts));
     }
 
     // Do a hail mary, maybe user made a mistake by passing dv/pcts and really
@@ -3106,6 +3118,12 @@ const GraphAlgorithms& Facade::Cluster::graph_algorithms(const std::string& flav
         auto got = m_galgs.emplace(flavor, GraphAlgorithms(gr));
         return got.first->second;
     }
+    // doc clus/connect-graph-strict-perf round 2 (see above).
+    if (flavor == "relaxed_strict_img_2d_rescue_long_wtrack_fast") {
+        auto& gr = const_cast<Cluster*>(this)->give_graph(flavor, make_graph_relaxed_strict_img_2d_rescue_long_wtrack_fast(*this, dv, pcts));
+        auto got = m_galgs.emplace(flavor, GraphAlgorithms(gr));
+        return got.first->second;
+    }
 
     // Do a hail mary, maybe user made a mistake by passing dv/pcts and really
     // wants a flavor that we can make implicitly.
@@ -3200,6 +3218,12 @@ const GraphAlgorithms& Facade::Cluster::graph_algorithms(const std::string& flav
     }
     if (flavor == "relaxed_strict_img_2d_rescue_long_wtrack") {
         auto& gr = const_cast<Cluster*>(this)->give_graph(flavor, make_graph_relaxed_strict_img_2d_rescue_long_wtrack(*this, dv, pcts));
+        auto got = m_galgs.emplace(flavor, GraphAlgorithms(gr));
+        return got.first->second;
+    }
+    // doc clus/connect-graph-strict-perf round 2 (see above).
+    if (flavor == "relaxed_strict_img_2d_rescue_long_wtrack_fast") {
+        auto& gr = const_cast<Cluster*>(this)->give_graph(flavor, make_graph_relaxed_strict_img_2d_rescue_long_wtrack_fast(*this, dv, pcts));
         auto got = m_galgs.emplace(flavor, GraphAlgorithms(gr));
         return got.first->second;
     }

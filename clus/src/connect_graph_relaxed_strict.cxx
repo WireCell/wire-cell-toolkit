@@ -602,7 +602,8 @@ void Graphs::connect_graph_relaxed_strict(
     bool two_d_rescue,
     bool long_check,
     int long_min_planes,
-    bool w_track_excuse)
+    bool w_track_excuse,
+    const RelaxedFastCfg* fast)
 {
     const bool use_ctpc = true;
     const auto* grouping = cluster.grouping();
@@ -664,6 +665,17 @@ void Graphs::connect_graph_relaxed_strict(
     // change of any kind; the graph construction below is untouched either way.
     static const bool oc53_census = std::getenv("WCT_RELAXED_EDGE_CENSUS") != nullptr;
     static auto oc53_log = WireCell::Log::logger("clus");
+
+    // doc clus/connect-graph-strict-perf round 2: busy-gated lazy walk, the
+    // exact scheme connect_graph_relaxed.cxx got in doc 78 round 2.  Off
+    // unless a cfg is supplied AND this cluster is busy; census mode always
+    // takes the legacy order so the per-pair log stays complete.
+    const bool lazy_walk = fast && !oc53_census && num > fast->busy_num_threshold;
+    if (fast) {
+        SPDLOG_LOGGER_DEBUG(WireCell::Log::logger("clus"),
+            "connect_graph_relaxed_strict: nblobs={} npoints={} ncomp={} threshold={} lazy={}",
+            cluster.nchildren(), cluster.npoints(), num, fast->busy_num_threshold, lazy_walk);
+    }
 
     // doc pr/57: per-cluster-call dump state. graph_call is a globally
     // unique id for THIS call (one per cluster's candidate graph); the
@@ -1899,9 +1911,11 @@ void Graphs::connect_graph_relaxed_strict(
                                                                 result2.second);
                 }
             }
-            // Now check the path 
-
-            eval_pair_verdict(j, k);
+            // Now check the path (legacy: every pair; lazy mode defers to the
+            // Kruskal below -- doc 78 round 2, ported)
+            if (!lazy_walk) {
+                eval_pair_verdict(j, k);
+            }
 
             // Now check path again ...
             if (std::get<0>(index_index_dis_dir1[j][k]) >= 0) {
@@ -2173,7 +2187,68 @@ void Graphs::connect_graph_relaxed_strict(
     }
 
     // deal with MST of first type
-    {
+    if (lazy_walk) {
+        // Ported verbatim from connect_graph_relaxed.cxx (doc 78 round 2):
+        // consider pairs in ascending (distance, j, k) order and evaluate the
+        // closest-pair walk ONLY when a pair would bridge two union-find
+        // components.  Killed bridges are skipped; the accepted set IS the
+        // spanning forest of the walk-filtered graph, identical to the legacy
+        // per-component Prim except possibly on exact distance ties -- which
+        // is why this stays behind the busy gate and its own flavor name.
+        // The < 3 cm direct-edge rule further below needs every near pair's
+        // verdict regardless of the forest, and MST #2 records the MAIN entry
+        // for pairs carrying a directional candidate, so both are walked
+        // eagerly first.
+        std::vector<std::vector<char>> walked(num, std::vector<char>(num, 0));
+        for (size_t j = 0; j != num; j++) {
+            for (size_t k = j + 1; k != num; k++) {
+                if (std::get<0>(index_index_dis[j][k]) < 0) continue;
+                if (std::get<2>(index_index_dis[j][k]) < 3 * units::cm ||
+                    std::get<0>(index_index_dis_dir1[j][k]) >= 0 ||
+                    std::get<0>(index_index_dis_dir2[j][k]) >= 0) {
+                    eval_pair_verdict(j, k);
+                    walked[j][k] = 1;
+                }
+            }
+        }
+
+        std::vector<std::tuple<double, size_t, size_t>> order;
+        order.reserve(num * (num - 1) / 2);
+        for (size_t j = 0; j != num; j++) {
+            for (size_t k = j + 1; k != num; k++) {
+                if (std::get<0>(index_index_dis[j][k]) >= 0) {
+                    order.emplace_back(std::get<2>(index_index_dis[j][k]), j, k);
+                }
+            }
+        }
+        std::sort(order.begin(), order.end());
+
+        std::vector<size_t> uf(num);
+        for (size_t i = 0; i != num; ++i) uf[i] = i;
+        std::function<size_t(size_t)> uf_find = [&](size_t x) {
+            while (uf[x] != x) { uf[x] = uf[uf[x]]; x = uf[x]; }
+            return x;
+        };
+
+        size_t n_walked = 0, n_accepted = 0;
+        for (const auto& [d, j, k] : order) {
+            const size_t rj = uf_find(j), rk = uf_find(k);
+            if (rj == rk) continue;
+            if (!walked[j][k]) {
+                eval_pair_verdict(j, k);
+                walked[j][k] = 1;
+                ++n_walked;
+            }
+            if (std::get<0>(index_index_dis[j][k]) < 0) continue;  // killed bridge
+            uf[rj] = rk;
+            index_index_dis_mst[j][k] = index_index_dis[j][k];
+            if (++n_accepted + 1 == num) break;  // spanning forest complete
+        }
+        SPDLOG_LOGGER_DEBUG(WireCell::Log::logger("clus"),
+            "connect_graph_relaxed_strict lazy: num={} pairs={} walked={} accepted={}",
+            num, order.size(), n_walked, n_accepted);
+    }
+    else {
         Weighted::Graph temp_graph(num);
         for (size_t j = 0; j != num; j++) {
             for (size_t k = j + 1; k != num; k++) {

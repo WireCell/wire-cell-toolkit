@@ -180,7 +180,15 @@ namespace WireCell::Clus::Graphs {
         bool two_d_rescue = false,
         bool long_check = false,
         int long_min_planes = 1,
-        bool w_track_excuse = false);
+        bool w_track_excuse = false,
+        // doc clus/connect-graph-strict-perf round 2: the doc 78 busy-gated
+        // lazy walk, ported from connect_graph_relaxed.  nullptr (default) =
+        // the legacy eager path, bit-for-bit.  Non-null AND num above the
+        // threshold = the closest-pair verdict is evaluated lazily by a
+        // single-pass Kruskal.  Reuses RelaxedFastCfg: same knob, same
+        // meaning, and the same "not proven identical under exact distance
+        // ties" caveat, which is why it needs its own flavor name.
+        const RelaxedFastCfg* fast = nullptr);
 
     bool is_point_good(const Facade::Cluster& cluster, size_t point_index, int ncut = 3);
 
