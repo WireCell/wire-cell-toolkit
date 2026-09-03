@@ -1541,7 +1541,7 @@ void TrackFitting::organize_segments_path_3rd(double step_size){
         bool flag_endv_end = (boost::degree(vd2, *m_graph) == 1);
         
         std::vector<WireCell::Point> pts, curr_pts;
-        
+
         // Get current fitted path from the segment
         if (!segment->fits().empty()) {
             for (const auto& fit : segment->fits()) {
@@ -1551,6 +1551,24 @@ void TrackFitting::organize_segments_path_3rd(double step_size){
             // If no fits, use original wcpts
             for (const auto& wcpt : segment->wcpts()) {
                 curr_pts.push_back(wcpt.point);
+            }
+        }
+
+        // doc pdvd/30 follow-up: env-gated (WCT_DQDX_DROP_DEBUG=1), source of
+        // curr_pts BEFORE examine_end_ps_vec, to see whether a segment enters
+        // this pass already empty (never populated by an earlier round) or
+        // gets drained here.  No config knob, no behavior change.
+        {
+            static const bool debug_seg_drop = (getenv("WCT_DQDX_DROP_DEBUG") != nullptr);
+            if (debug_seg_drop) {
+                const int cid = segment->cluster() ? segment->cluster()->get_cluster_id() : -1;
+                const int gi = static_cast<int>(segment->get_graph_index());
+                SPDLOG_LOGGER_DEBUG(s_log,
+                    "organize_segments_path_3rd: segment gi={} cluster={} pre-examine curr_pts={} "
+                    "(from {}), fits_size={}, wcpts_size={}",
+                    gi, cid, curr_pts.size(),
+                    segment->fits().empty() ? "wcpts" : "fits",
+                    segment->fits().size(), segment->wcpts().size());
             }
         }
 
@@ -2197,15 +2215,36 @@ std::vector<WireCell::Point> TrackFitting::examine_end_ps_vec(std::shared_ptr<PR
 
     // doc pr/67 P3: report only when the ends actually moved, so the line is
     // a signal rather than per-call noise.
-    if (pr67_probe && !tmp_pts.empty() && pr67_n_in > 0) {
+    // doc pdvd/30 follow-up: also fire on a total drain (tmp_pts empty),
+    // which the original !tmp_pts.empty() guard hid entirely -- that is
+    // exactly the case organize_segments_path_3rd's size()<=1 fallback
+    // cares about, so it must not be silent here.  Cluster id + graph
+    // index added (segment->id() alone, printed before, is a different,
+    // often-unset internal id and cannot be cross-referenced against the
+    // WCT_DQDX_DROP_DEBUG segment gi=/cluster= lines).  Still gated on the
+    // pre-existing pr67_probe knob (C++ default off): byte-identical when
+    // off, and this file's own existing convention for read-only, log-only
+    // instrumentation.
+    if (pr67_probe && pr67_n_in > 0) {
+        const int cid = segment && segment->cluster() ? segment->cluster()->get_cluster_id() : -1;
+        const int gi = segment ? static_cast<int>(segment->get_graph_index()) : -1;
+        if (tmp_pts.empty()) {
+            SPDLOG_LOGGER_DEBUG(s_log,
+                "pr67 examine_end_ps_vec: segment gi={} cluster={} DRAINED TO EMPTY: "
+                "npts {} -> 0; in front=({:.2f},{:.2f},{:.2f}) back=({:.2f},{:.2f},{:.2f})",
+                gi, cid, pr67_n_in,
+                pr67_front_in.x()/units::cm, pr67_front_in.y()/units::cm, pr67_front_in.z()/units::cm,
+                pr67_back_in.x()/units::cm, pr67_back_in.y()/units::cm, pr67_back_in.z()/units::cm);
+            return tmp_pts;
+        }
         const double moved_front = ray_length(Ray{pr67_front_in, tmp_pts.front()});
         const double moved_back  = ray_length(Ray{pr67_back_in,  tmp_pts.back()});
-        if (moved_front > 0.5*units::cm || moved_back > 0.5*units::cm) {
+        if (moved_front > 0.5*units::cm || moved_back > 0.5*units::cm || tmp_pts.size() <= 2) {
             SPDLOG_LOGGER_DEBUG(s_log,
-                "pr67 examine_end_ps_vec: segment={} npts {} -> {}; front moved {:.2f} cm "
+                "pr67 examine_end_ps_vec: segment gi={} cluster={} npts {} -> {}; front moved {:.2f} cm "
                 "({:.2f},{:.2f},{:.2f})->({:.2f},{:.2f},{:.2f}); back moved {:.2f} cm "
                 "({:.2f},{:.2f},{:.2f})->({:.2f},{:.2f},{:.2f})",
-                segment ? segment->id() : -1, pr67_n_in, tmp_pts.size(),
+                gi, cid, pr67_n_in, tmp_pts.size(),
                 moved_front/units::cm,
                 pr67_front_in.x()/units::cm, pr67_front_in.y()/units::cm, pr67_front_in.z()/units::cm,
                 tmp_pts.front().x()/units::cm, tmp_pts.front().y()/units::cm, tmp_pts.front().z()/units::cm,
