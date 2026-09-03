@@ -859,8 +859,8 @@ int TrackFitting::fetch_channel_from_anode(int apa, int face, int plane, int wir
     if (plane >= static_cast<int>(planes.size())) return -1;
     
     const auto& wires = planes[plane]->wires();
-    if (wire >= static_cast<int>(wires.size())) return -1;
-    
+    if (wire < 0 || wire >= static_cast<int>(wires.size())) return -1;
+
     return wires[wire]->channel();
 }
 
