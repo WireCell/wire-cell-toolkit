@@ -99,10 +99,20 @@ namespace WireCell::Clus::Facade {
         for(size_t i = 0; i < one.points()[0].size(); i += stride) {
             // Get K nearest neighbors from second cloud
             auto p1 = one.point(i);
-            auto knn = two.kd().knn(5, p1); // Get 5 nearest neighbors
+            // The knn(5) call that used to sit here had BOTH of its returned
+            // values overwritten on the first two statements of the loop body
+            // below -- it only fixed the iteration count at min(5, npoints).
+            // Take that count directly and skip the query (one kd search per
+            // seed, ~20 seeds per component pair).  nanoflann's KNNResultSet
+            // truncates, so knn(5, .).size() IS min(5, npoints) for a valid
+            // 3D query, and knn() returns empty on an empty cloud -- both
+            // reproduced exactly.  The alternating walk below is stateful in
+            // p1, so the iteration COUNT is load-bearing and is preserved.
             
             // Refine search around these neighbors
-            for(auto [idx2, dist] : knn) {
+            const size_t nrefine = std::min<size_t>(5, two.kd().npoints());
+            for(size_t refine = 0; refine != nrefine; ++refine) {
+                size_t idx2 = 0;
                 geo_point_t p2; // = two.point3d(idx2); // why call this?
                 
                 // Local refinement by checking neighboring points
