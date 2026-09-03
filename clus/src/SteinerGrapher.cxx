@@ -34,9 +34,41 @@ void Steiner::Grapher::create_steiner_tree(
                (reference_cluster ? "provided" : "null"), path_point_indices.size(),
                disable_dead_mix_cell, m_config.edge_charge_forward_dead_mix);
 
+    // doc pdvd/31: env-gated per-phase terminal DUMP, log-only.  The existing
+    // TRACE lines give per-phase COUNTS, which showed the phase-2/3 filters
+    // remove only ~4% -- so the question became WHERE the surviving terminals
+    // are, which a count cannot answer.  Default OFF: getenv is null in
+    // production, the lambda returns immediately, and no output changes.
+    static const bool s_phase_dump = (getenv("WCT_STEINER_PHASE_DUMP") != nullptr);
+    auto dump_terminals = [&](const char* phase, const vertex_set& terms) {
+        if (!s_phase_dump) return;
+        for (const auto idx : terms) {
+            const auto p = m_cluster.point3d(idx);
+            SPDLOG_LOGGER_DEBUG(log,
+                "steiner_phase_pt: npts={} nterm={} phase={} x={:.2f} y={:.2f} z={:.2f}",
+                m_cluster.npoints(), terms.size(), phase,
+                p.x() / units::cm, p.y() / units::cm, p.z() / units::cm);
+        }
+    };
+
+    // Same gate: dump the cluster's OWN points once per call, for big clusters
+    // only (bounds the log).  Needed because the steiner stage runs on a
+    // RETILED cluster whose point cloud is not the input pctree's, so "are
+    // there points there at all" cannot be answered from the dump alone.
+    if (s_phase_dump && m_cluster.npoints() > 1000) {
+        const int npts = m_cluster.npoints();
+        for (int i = 0; i < npts; ++i) {
+            const auto p = m_cluster.point3d(i);
+            SPDLOG_LOGGER_DEBUG(log,
+                "steiner_phase_pt: npts={} nterm=0 phase=P0_cluster x={:.2f} y={:.2f} z={:.2f}",
+                npts, p.x() / units::cm, p.y() / units::cm, p.z() / units::cm);
+        }
+    }
+
     // Phase 1: Find initial steiner terminals
     vertex_set steiner_terminals = find_steiner_terminals(graph_name, disable_dead_mix_cell);
     SPDLOG_LOGGER_TRACE(log, "create_steiner_tree: found {} initial steiner terminals", steiner_terminals.size());
+    dump_terminals("P1_find", steiner_terminals);
 
     // std::cout << "Test1: " << steiner_terminals.size() << std::endl;
 
@@ -56,6 +88,7 @@ void Steiner::Grapher::create_steiner_tree(
                    " (wire_tol={} adjacent_slice={})",
                    original_size.size(), steiner_terminals.size(),
                    m_config.terminal_wire_tol, m_config.terminal_adjacent_slice);
+        dump_terminals("P2_refcluster", steiner_terminals);
     }
 
     // std::cout << "Test2: " << steiner_terminals.size() << std::endl;
@@ -67,6 +100,7 @@ void Steiner::Grapher::create_steiner_tree(
         steiner_terminals = filter_by_path_constraints(steiner_terminals, path_point_indices);
         SPDLOG_LOGGER_TRACE(log, "create_steiner_tree: path filtering: {} -> {} terminals",
                    pre_path_size.size(), steiner_terminals.size());
+        dump_terminals("P3_path", steiner_terminals);
     }
 
     // std::cout << "Test3: " << steiner_terminals.size() << std::endl;
