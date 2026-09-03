@@ -35,7 +35,8 @@ local clus = import "pgrapher/common/clus.jsonnet";
 function (output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=false,
           time_offset=0 * wc.us, relax_containment_filter=true,
           trigger_offset=0 * wc.us, trigger_offset_top=null,
-          drift_speed_b=null, drift_speed_t=null)
+          drift_speed_b=null, drift_speed_t=null,
+          wrapped_channel_charge=false)
 
 // Calibrated from PDVD data (anode->cathode crossing tracks: reconstructed drift
 // x-span vs the collection-plane->cathode-surface distance 338.55 cm; cathode
@@ -195,7 +196,16 @@ local bs_live_face(apa, face, center_fallback=false, speed=drift_speed) = {
         // center_fallback: emit one point at the blob center when the stepped
         // grid yields none (tiny 1-wire blobs); default off -> bit-identical.
         strategy: [{name: "stepped", center_fallback: center_fallback}],
-        extra: [".*wire_index", ".*charge_val", ".*charge_unc", "wpid"]
+        extra: [".*wire_index", ".*charge_val", ".*charge_unc", "wpid"],
+        // wrapped_channel_charge: read a sampled point's induction charge by
+        // channel IDENT when its wire is a wrapped strip's continuation.  PDVD
+        // wraps 1568 U/V wires (11.3%) at the CRU boundary; a plane's
+        // channels() omits their channels (AnodePlane.cxx:244-247), so the
+        // legacy operator[] lookup silently read channels[0] and left both
+        // charge_val and charge_unc at 0 -- which calc_charge_wcp reads as "no
+        // signal".  C++ default false.  Key omitted when off => byte-identical
+        // pre-fix config.  See pdvd/docs/nf_sp_img_clus/31_*.md.
+        [if wrapped_channel_charge then 'wrapped_channel_charge']: true,
     }
 };
 local bs_dead_face(apa, face) = {

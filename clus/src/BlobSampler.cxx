@@ -40,6 +40,7 @@ Configuration cpp2cfg(const BlobSampler::CommonConfig& cc)
     for (const auto& res : cc.extra) {
         cfg["extra"].append(res);
     }
+    cfg["wrapped_channel_charge"] = cc.wrapped_channel_charge;
     return cfg;
 }
 BlobSampler::CommonConfig cfg2cpp(const Configuration& cfg,
@@ -58,6 +59,7 @@ BlobSampler::CommonConfig cfg2cpp(const Configuration& cfg,
     for (const auto& res : get(cfg, "extra", def.extra)) {
         cc.extra_re.push_back(std::regex(res));
     }
+    cc.wrapped_channel_charge = get(cfg, "wrapped_channel_charge", def.wrapped_channel_charge);
 
     return cc;
 }
@@ -232,6 +234,39 @@ struct BlobSampler::Sampler : public Aux::Logger
     using plane_ident2index_t = std::unordered_map<IWirePlane::pointer, ident2index_t>;
     plane_ident2index_t plane_ident2index;
 
+    // Slice activity re-keyed by channel IDENT, for the
+    // "wrapped_channel_charge" path.  ISlice::map_t is already ident-hashed
+    // and ident-compared (ISlice.h:36-48), so an ident is a complete key and
+    // this is a lossless re-keying, not an approximation.
+    //
+    // Only ever built after a p_chi2i miss, which can only happen on a wrapped
+    // strip's continuation -- so on SBND and uBooNE (no wrapped channels at
+    // all) this map is never built and the knob costs nothing.
+    //
+    // Iterating a pointer-keyed container is normally forbidden here, but the
+    // RESULT is order-independent: every source ident is distinct (IdentEq), so
+    // each lands in exactly one slot regardless of visit order.  Nothing
+    // ordered is derived from the traversal.  PointTreeBuilding::add_ctpc walks
+    // the same map to build the ctpc clouds.
+    // The cache key is held as a SHARED POINTER, not a raw one: a raw
+    // `const ISlice*` compares equal when a freed slice's address is reused by
+    // a new one, which would serve stale activity -- silently wrong charge,
+    // the same failure mode this path exists to fix.  Holding the pointer
+    // keeps the slice alive, so address equality really is identity.
+    ISlice::pointer act_slice{nullptr};
+    std::unordered_map<int, ISlice::value_t> act_by_ident;
+    const std::unordered_map<int, ISlice::value_t>& activity_by_ident(const ISlice::pointer& islice)
+    {
+        if (islice != act_slice) {
+            act_slice = islice;
+            act_by_ident.clear();
+            for (const auto& [ich, val] : islice->activity()) {
+                act_by_ident[ich->ident()] = val;
+            }
+        }
+        return act_by_ident;
+    }
+
     bool want_extra(const std::string& letter, const std::vector<std::string>& names) {
         for (const auto& name : names) {
             if (is_extra(letter + name)) { return true; }
@@ -344,16 +379,50 @@ struct BlobSampler::Sampler : public Aux::Logger
                 const auto& wpid_wire = iwire->planeid();
                 wpid_blob = WireCell::WirePlaneId(kAllLayers, wpid_wire.face(), wpid_wire.apa());
                 channel_ident[ipt] = iwire->channel();
-                channel_attach[ipt] = p_chi2i[channel_ident[ipt]];
-                auto ich = channels[channel_attach[ipt]];
 
-                
-
-                auto ait = activity.find(ich);
-                if (ait != activity.end()) {
-                    auto act = ait->second;
-                    charge_val[ipt] = act.value();
-                    charge_unc[ipt] = act.uncertainty();
+                auto chit = p_chi2i.find(channel_ident[ipt]);
+                if (chit != p_chi2i.end()) {
+                    // The plane lists this channel: index straight into it.
+                    channel_attach[ipt] = chit->second;
+                    auto ich = channels[chit->second];
+                    auto ait = activity.find(ich);
+                    if (ait != activity.end()) {
+                        auto act = ait->second;
+                        charge_val[ipt] = act.value();
+                        charge_unc[ipt] = act.uncertainty();
+                    }
+                }
+                else if (cc.wrapped_channel_charge) {
+                    // A wrapped strip's continuation.  Its channel is real and
+                    // carries real activity, but it is attached to the sibling
+                    // face's plane, so there is no index into THIS plane's
+                    // channel vector -- hence -1.  Resolve the charge by ident
+                    // instead, the way add_ctpc does by walking activity
+                    // forward, which is why the ctpc 2-D maps have always had
+                    // the charge these points were missing.
+                    channel_attach[ipt] = -1;
+                    const auto& abi = activity_by_ident(islice);
+                    auto ait = abi.find(channel_ident[ipt]);
+                    if (ait != abi.end()) {
+                        charge_val[ipt] = ait->second.value();
+                        charge_unc[ipt] = ait->second.uncertainty();
+                    }
+                }
+                else {
+                    // Legacy, reproduced exactly: operator[] INSERTED 0 for the
+                    // missing ident (so the cache answers 0 for it forever
+                    // after) and the charge was read from channels[0] -- some
+                    // unrelated channel, usually with no activity in this
+                    // slice, leaving charge_val AND charge_unc at 0.
+                    p_chi2i[channel_ident[ipt]] = 0;
+                    channel_attach[ipt] = 0;
+                    auto ich = channels[0];
+                    auto ait = activity.find(ich);
+                    if (ait != activity.end()) {
+                        auto act = ait->second;
+                        charge_val[ipt] = act.value();
+                        charge_unc[ipt] = act.uncertainty();
+                    }
                 }
 
                 // std::cout << "Test: wire_index " << wire_index[ipt]

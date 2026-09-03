@@ -35,7 +35,9 @@ local clus_mod = import 'pgrapher/experiment/protodunevd/clus.jsonnet';
 function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=false,
          time_offset=0 * wc.us, relax_containment_filter=true,
          trigger_offset=0 * wc.us, trigger_offset_top=null,
-         drift_speed_b=null, drift_speed_t=null) {
+         drift_speed_b=null, drift_speed_t=null,
+         // See clus.jsonnet's bs_live_face.  false => key omitted => byte-identical.
+         wrapped_channel_charge=false) {
     // The PDVD clustering module, configured EXACTLY as the Q/L job configured it
     // (same drift speeds, trigger offsets, time offset): switch_scope re-derives
     // x_t0cor from cluster_t0 through these, so they must match for the M2
@@ -44,7 +46,8 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
                                 stepped_center_fallback=stepped_center_fallback,
                                 time_offset=time_offset, relax_containment_filter=relax_containment_filter,
                                 trigger_offset=trigger_offset, trigger_offset_top=trigger_offset_top,
-                                drift_speed_b=drift_speed_b, drift_speed_t=drift_speed_t),
+                                drift_speed_b=drift_speed_b, drift_speed_t=drift_speed_t,
+                                wrapped_channel_charge=wrapped_channel_charge),
     local bee_dir = if output_dir == '' then 'data' else output_dir,
     local evt_out_prefix = bee_dir + '/',
 

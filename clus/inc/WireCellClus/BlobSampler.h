@@ -64,6 +64,26 @@ namespace WireCell::Clus {
             std::vector<std::string> extra = {};
             std::vector<std::regex> extra_re = {};
 
+            /** Config: "wrapped_channel_charge".  Resolve a sampled point's
+                per-plane charge by channel IDENT against the slice activity
+                when the point's wire is a wrapped strip's continuation.
+
+                Gen::AnodePlane builds IWirePlane::channels() by skipping every
+                wire with segment() > 0 (AnodePlane.cxx:244-247), so a plane
+                does not list the channels of wrapped wires whose segment-0 half
+                lives in the sibling face.  The legacy lookup here is
+                `p_chi2i[ident]` -- unordered_map::operator[], which inserts 0 on
+                a miss -- so those points silently take channels[0]'s activity
+                (normally absent, hence charge 0 AND uncertainty 0, which
+                Cluster::calc_charge_wcp reads as "this plane saw nothing").
+
+                Affects only detectors with wrapped channels: PDVD 1568 wires
+                (11.3%), PDHD 6400 (28.8%).  SBND and uBooNE have none and
+                cannot move.  C++ default false => legacy path, byte-identical.
+                See wcp-porting-img/pdvd/docs/nf_sp_img_clus/31_*.md.
+            */
+            bool wrapped_channel_charge{false};
+
         };
         CommonConfig m_cc;
 
