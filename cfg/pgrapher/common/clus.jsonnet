@@ -1400,7 +1400,14 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
 
         // This configures ImproveCluster_2, which inherits from ImproveCluster_1
         // and adds advanced Steiner tree improvements.
-        improve_cluster_2(name="", anodes=[], samplers=[], verbose=true) :: {
+        // doc pdvd/31 round 5: wrapped_channel_activity resolves a wire's
+        // channel by ident instead of indexing IWirePlane::channels() -- a
+        // channel LIST that omits wrapped continuations -- by wire index.
+        // C++ default false.  Key omitted when off => byte-identical pre-fix
+        // config, which is what keeps SBND and uBooNE (whose configs never name
+        // it) untouched.
+        improve_cluster_2(name="", anodes=[], samplers=[], verbose=true,
+                          wrapped_channel_activity=false) :: {
             local sampler_objs = [s.sobj for s in samplers],
             local sampler_cfgs = [{name:wc.tn(s.sobj), apa:s.apa, face:s.face} for s in samplers],
             type: "ImproveCluster_2",
@@ -1409,6 +1416,7 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
                 anodes: wc.tns(anodes),
                 samplers: sampler_cfgs,
                 verbose: verbose,
+                [if wrapped_channel_activity then 'wrapped_channel_activity']: true,
             } + dv_cfg + pcts_cfg,
             uses: [detector_volumes, pc_transforms]+anodes+sampler_objs,
         },

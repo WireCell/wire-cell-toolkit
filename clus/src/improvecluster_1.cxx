@@ -831,22 +831,69 @@ std::vector<IBlob::pointer> ImproveCluster_1::make_iblobs_improved(std::map<std:
             
             auto wire_plane = planes[plane_idx];
             const auto& channels = wire_plane->channels();
-            
+            const auto& pwires = wire_plane->wires();
+
+            // doc pdvd/31 round 5.  `plane_measures` is indexed by WIRE index
+            // (it is sized total_wires and filled that way by
+            // get_activity_improved from the wind-keyed ctpc clouds), but
+            // `channels` is Gen::AnodePlane's channel LIST, built by walking the
+            // plane's wires and SKIPPING every segment>0 wire
+            // (AnodePlane.cxx:242-256).  So
+            //     channels[i]->ident() == wires[i]->channel()
+            // holds only until the first continuation is skipped, and
+            // channels.size() == wires.size() - n_seg_gt0.  On the 16 PDVD
+            // planes carrying continuations the legacy lookup below therefore
+            // writes each slice's activity under the WRONG channel -- shifted by
+            // the whole 98-wire band on the 8 planes whose band starts at wire
+            // index 0 -- and drops the top band outright.  Measured consequence
+            // (doc 31 section 8.2): along the starved stretch of PDVD 039349/14
+            // the retiled cluster holds U != 0 on 0.000 and V != 0 on 0.004 of
+            // its points, so 99.8% carry fewer than the two non-zero planes
+            // Cluster::calc_charge_wcp requires and can never be Steiner
+            // terminal candidates at any threshold.
+            //
+            // The fix resolves the channel by IDENT through the anode, which
+            // knows every channel of both its faces.  The "round5" doctest pins
+            // its precondition: every continuation's channel has a segment-0
+            // wire somewhere in the SAME anode, on all four production
+            // geometries, so channel() never returns nullptr for one.
+            //
+            // SBND and uBooNE have no segment>0 wire at all, so both branches
+            // agree there by construction, not merely by gate.
+            IAnodePlane::pointer ianode = nullptr;
+            if (m_wrapped_channel_activity) {
+                auto ait = m_anode.find(apa);
+                if (ait != m_anode.end()) ianode = ait->second;
+            }
+
             // Map wire indices to channels and populate activity
             for (size_t wire_idx = 0; wire_idx < plane_measures.size(); ++wire_idx) {
-                if (plane_measures[wire_idx] > 0.0) {
-                    // Find the channel corresponding to this wire index
-                    if (wire_idx < channels.size()) {
-                        auto ichan = channels[wire_idx];
-                        if (ichan) {
-                            // Set activity with value and zero uncertainty
-                            if (plane_measures[wire_idx]==1e-3){
-                                slice_activity[ichan] = ISlice::value_t(0.0, 1e12);
-                            } else {
-                                slice_activity[ichan] = ISlice::value_t(plane_measures[wire_idx], 0.0);
-                            }
-                        }
+                if (plane_measures[wire_idx] <= 0.0) continue;
+
+                IChannel::pointer ichan = nullptr;
+                if (ianode) {
+                    // Two wires of one plane may share a channel (PDHD has 5568
+                    // such strips; PDVD none -- there every continuation's
+                    // partner is in the sibling face).  The second write is
+                    // benign: PointTreeBuilding::add_ctpc walks the activity
+                    // forward and writes the SAME channel charge into both
+                    // wires' ctpc rows, so the two measures agree.
+                    if (wire_idx < pwires.size()) {
+                        ichan = ianode->channel(pwires[wire_idx]->channel());
                     }
+                }
+                else if (wire_idx < channels.size()) {
+                    // Legacy, reproduced exactly: positional index into the
+                    // channel list, and wires past its end contribute nothing.
+                    ichan = channels[wire_idx];
+                }
+                if (!ichan) continue;
+
+                // Set activity with value and zero uncertainty
+                if (plane_measures[wire_idx]==1e-3){
+                    slice_activity[ichan] = ISlice::value_t(0.0, 1e12);
+                } else {
+                    slice_activity[ichan] = ISlice::value_t(plane_measures[wire_idx], 0.0);
                 }
             }
         }

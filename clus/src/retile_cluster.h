@@ -26,6 +26,7 @@
 #include "WireCellIface/IBlob.h"
 #include "WireCellIface/IBlobSampler.h"
 #include "WireCellIface/IAnodeFace.h"
+#include "WireCellIface/IAnodePlane.h"
 #include "WireCellIface/IDetectorVolumes.h"
 #include "WireCellIface/IPCTreeMutate.h"
 
@@ -78,6 +79,9 @@ public:
     void configure(const WireCell::Configuration& config);
     virtual Configuration default_configuration() const {
         Configuration cfg;
+        // doc pdvd/31 round 5.  C++ default false => a config that never
+        // mentions the key compiles and runs bit-for-bit as before.
+        cfg["wrapped_channel_activity"] = m_wrapped_channel_activity;
         return cfg;
     }
 
@@ -107,6 +111,19 @@ protected:
     // Per-(apa,face) map to IAnodeFace, populated in configure() from the "anodes" array.
     // The per-face loop in mutate() iterates all faces a cluster spans via wpids_blob().
     std::map<int, std::map<int, IAnodeFace::pointer>> m_face;
+
+    // Per-apa IAnodePlane, from the same "anodes" array.  Needed only by the
+    // wrapped_channel_activity path: IWirePlane::channels() is a channel LIST
+    // that omits wrapped continuations, so a wire's channel must be resolved by
+    // IDENT through the anode (which knows every channel of both its faces),
+    // not by indexing that list positionally.  See doc pdvd/31 section 8.2 and
+    // the "round5" doctest, which pins that every continuation's channel really
+    // does resolve within its own anode.
+    std::map<int, IAnodePlane::pointer> m_anode;
+
+    // doc pdvd/31 round 5.  Default false = the historical positional lookup,
+    // reproduced exactly.  See make_iblobs() / make_iblobs_improved().
+    bool m_wrapped_channel_activity{false};
 
     // Step 3. Form IBlobs from activities.
     std::vector<WireCell::IBlob::pointer> make_iblobs(std::map<std::pair<int, int>, std::vector<WireCell::RayGrid::measure_t> >& map_slices_measures, int apa, int face) const;

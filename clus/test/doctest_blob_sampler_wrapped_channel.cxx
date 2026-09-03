@@ -121,6 +121,38 @@ namespace {
         std::vector<PlaneRow> broken;
     };
 
+    // doc pdvd/31 round 5: the PRECONDITION of the retile-mapping fix.
+    //
+    // The fix resolves a wire's channel through IAnodePlane::channel(ident),
+    // which reads Gen::AnodePlane's m_ichannels -- a map filled ONLY from
+    // segment-0 wires (AnodePlane.cxx:253, inside the same loop that skips
+    // segment>0).  It therefore resolves an orphan of one plane only because
+    // that channel's segment-0 wire lives in ANOTHER plane of the SAME anode.
+    //
+    // Returns the number of channels that break that assumption: seen on a
+    // segment>0 wire somewhere in an anode, and on no segment-0 wire anywhere
+    // in that same anode.  Must be 0, or IAnodePlane::channel() returns nullptr
+    // and the fix silently drops exactly the wires it exists to rescue.
+    int unresolvable_channels(const std::string& filename)
+    {
+        int bad = 0;
+        const auto store = WireSchema::load(filename.c_str());
+        for (const auto& anode : store.anodes()) {
+            std::set<int> seg0, segn;
+            for (const auto& face : store.faces(anode)) {
+                for (const auto& plane : store.planes(face)) {
+                    for (const auto& w : store.wires(plane)) {
+                        (w.segment == 0 ? seg0 : segn).insert(w.channel);
+                    }
+                }
+            }
+            for (int ch : segn) {
+                if (!seg0.count(ch)) ++bad;
+            }
+        }
+        return bad;
+    }
+
     PlaneMap channel_index_invariant(const std::string& filename)
     {
         PlaneMap out;
@@ -281,4 +313,40 @@ TEST_CASE("pdvd doc31 round4: channels[wire_index] is not a valid lookup on wrap
     }
     CHECK(a4f0_u == 0);
     CHECK(a4f0_v == 189);
+}
+
+TEST_CASE("pdvd doc31 round5: wrapped_channel_activity defaults OFF")
+{
+    // ImproveCluster_2 is the retiler the Steiner stage actually runs
+    // (cm.improve_cluster_2 on PDVD, SBND and uBooNE alike).  This default is
+    // the whole of SBND's and uBooNE's protection -- neither config mentions the
+    // key -- and of PDVD's until the owner flips it, so pin it here rather than
+    // trusting the jsonnet key suppression alone.
+    //
+    // Only the default is checked: configure() runs NeedDV, which requires a
+    // live DetectorVolumes instance this test has no business standing up.  The
+    // ON path is exercised end-to-end by the doc-31 round-5 arms instead.
+    PluginManager::instance().add("WireCellClus");
+    auto icfg = Factory::lookup<IConfigurable>("ImproveCluster_2", "doc31_retile_probe");
+    REQUIRE(icfg);
+
+    auto cfg = icfg->default_configuration();
+    REQUIRE_MESSAGE(cfg.isMember("wrapped_channel_activity"),
+                    "missing knob: wrapped_channel_activity");
+    CHECK(cfg["wrapped_channel_activity"].asBool() == false);
+}
+
+TEST_CASE("pdvd doc31 round5: every continuation's channel resolves within its own anode")
+{
+    // The precondition the retile-mapping fix rests on.  If this were non-zero
+    // for any detector, IAnodePlane::channel() would hand back nullptr for
+    // exactly the wires the fix exists to rescue, and the "fix" would silently
+    // reproduce the bug.  Checked on all four production geometries so that a
+    // future wires file cannot quietly break it.
+    CHECK(unresolvable_channels("protodunevd-wires-larsoft-v7-uvwfit.json.bz2") == 0);
+    CHECK(unresolvable_channels("protodunehd-wires-larsoft-v1.json.bz2") == 0);
+    // Vacuously true for the unwrapped two, but pin them anyway: it is the
+    // statement "no channel of this detector needs the anode-level lookup".
+    CHECK(unresolvable_channels("sbnd-wires-geometry-v0206.json.bz2") == 0);
+    CHECK(unresolvable_channels("microboone-celltree-wires-v2.1.json.bz2") == 0);
 }

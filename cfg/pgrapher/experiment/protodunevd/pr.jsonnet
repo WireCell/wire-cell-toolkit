@@ -74,6 +74,13 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
               // terminal_charge_threshold, C++ default 4000 = prototype).  null =>
               // key omitted => byte-identical.  PDVD needs its own (doc 25 M3).
               steiner_terminal_charge=null,
+              // doc pdvd/31 round 5: ImproveCluster_2 (the Steiner stage's
+              // retiler) resolves a wire's channel by ident instead of indexing
+              // IWirePlane::channels() -- which omits wrapped continuations --
+              // by wire index.  C++ default false; key omitted when off =>
+              // byte-identical.  PDVD is the only detector this can move: SBND
+              // and uBooNE have no wrapped strips and PDHD runs no Steiner stage.
+              retile_wrapped_channel_activity=false,
               // save_in_scope (doc 87): add the per-cluster T_cluster tree to
               // tracking-pr.root -- the in-scope set (switch_scope's scope_filter,
               // the SAME predicate the Bee clustering layer is gated on) plus the
@@ -1169,7 +1176,8 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
         local improve2 = cm.improve_cluster_2(
             anodes=anodes,
             samplers=[clus.sampler(clus_maker.live_sampler(a, f), apa=a.data.ident, face=f)
-                      for a in anodes for f in [0, 1]]),
+                      for a in anodes for f in [0, 1]],
+            wrapped_channel_activity=retile_wrapped_channel_activity),
         // Visitors available to the PR pipeline, by name.  switch_scope re-applies
         // the per-cluster T0 correction on the loaded tree (the corrected scope is
         // runtime state and does not persist through the tarball); it recomputes

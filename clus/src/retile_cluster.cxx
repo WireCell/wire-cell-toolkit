@@ -57,6 +57,7 @@ void RetileCluster::configure(const WireCell::Configuration& cfg)
     for (const auto& aname : cfg["anodes"]) {
         auto anode = Factory::find_tn<IAnodePlane>(aname.asString());
         anodes_tn.push_back(anode);
+        m_anode[anode->ident()] = anode;
         for (const auto& face1 : anode->faces()) {
             int apa = anode->ident();
             int face = face1->which();
@@ -78,6 +79,11 @@ void RetileCluster::configure(const WireCell::Configuration& cfg)
     m_cut_time_low = get(cfg, "cut_time_low", -1e9);
     m_cut_time_high = get(cfg, "cut_time_high", 1e9);
     m_verbose = get(cfg, "verbose", false);
+    // doc pdvd/31 round 5: resolve a wire's channel by ident instead of
+    // indexing IWirePlane::channels() by wire index.  Default false keeps the
+    // legacy (and, on wrapped-strip detectors, wrong) positional lookup.
+    m_wrapped_channel_activity =
+        get(cfg, "wrapped_channel_activity", m_wrapped_channel_activity);
 
 }
 
@@ -424,19 +430,40 @@ std::vector<IBlob::pointer> RetileCluster::make_iblobs(std::map<std::pair<int, i
             
             auto wire_plane = planes[plane_idx];
             const auto& channels = wire_plane->channels();
-            
+            const auto& pwires = wire_plane->wires();
+
+            // doc pdvd/31 round 5.  The same wire-index-into-a-channel-LIST
+            // defect fixed in ImproveCluster_1::make_iblobs_improved, kept in
+            // step with it.  This site is NOT reached by any production
+            // pipeline today -- `cm.retile` (ClusteringRetile) is commented out
+            // in every experiment config, and the Steiner stage's retiler is
+            // ImproveCluster_2 -- so it is fixed for correctness and symmetry,
+            // not because anything currently depends on it.  See that function
+            // for the full explanation and the measured consequence.
+            IAnodePlane::pointer ianode = nullptr;
+            if (m_wrapped_channel_activity) {
+                auto ait = m_anode.find(apa);
+                if (ait != m_anode.end()) ianode = ait->second;
+            }
+
             // Map wire indices to channels and populate activity
             for (size_t wire_idx = 0; wire_idx < plane_measures.size(); ++wire_idx) {
-                if (plane_measures[wire_idx] > 0.0) {
-                    // Find the channel corresponding to this wire index
-                    if (wire_idx < channels.size()) {
-                        auto ichan = channels[wire_idx];
-                        if (ichan) {
-                            // Set activity with value and zero uncertainty
-                            slice_activity[ichan] = ISlice::value_t(plane_measures[wire_idx], 0.0);
-                        }
+                if (plane_measures[wire_idx] <= 0.0) continue;
+
+                IChannel::pointer ichan = nullptr;
+                if (ianode) {
+                    if (wire_idx < pwires.size()) {
+                        ichan = ianode->channel(pwires[wire_idx]->channel());
                     }
                 }
+                else if (wire_idx < channels.size()) {
+                    // Legacy, reproduced exactly.
+                    ichan = channels[wire_idx];
+                }
+                if (!ichan) continue;
+
+                // Set activity with value and zero uncertainty
+                slice_activity[ichan] = ISlice::value_t(plane_measures[wire_idx], 0.0);
             }
         }
 
