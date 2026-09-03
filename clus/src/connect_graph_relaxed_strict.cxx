@@ -113,6 +113,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cmath>
 #include <cstdlib>
 #include <fstream>
@@ -666,6 +667,29 @@ void Graphs::connect_graph_relaxed_strict(
     static const bool oc53_census = std::getenv("WCT_RELAXED_EDGE_CENSUS") != nullptr;
     static auto oc53_log = WireCell::Log::logger("clus");
 
+    // doc pdvd/28 (PDVD PR perf round 1): env-gated timing census,
+    // WCT_RELAXED_EDGE_TIMING=1.  Log-only: unset => no clock read, no log
+    // line, no behavior change.  Unlike WCT_RELAXED_EDGE_CENSUS it keeps the
+    // walk order (lazy or eager) as configured, so the numbers are the
+    // production cost split: closest-pair walk vs dir1/dir2 walks vs the S5
+    // ghost test inside them.
+    static const bool oc28_timing = std::getenv("WCT_RELAXED_EDGE_TIMING") != nullptr;
+    double oc28_t_closest = 0, oc28_t_dir1 = 0, oc28_t_dir2 = 0, oc28_t_ghost = 0;
+    size_t oc28_n_closest = 0, oc28_n_dir1 = 0, oc28_n_dir2 = 0, oc28_n_ghost = 0, oc28_n_ghost_steps = 0;
+    struct Oc28Timer {
+        bool on;
+        double& acc;
+        std::chrono::steady_clock::time_point t0;
+        Oc28Timer(bool on_, double& acc_) : on(on_), acc(acc_) {
+            if (on) t0 = std::chrono::steady_clock::now();
+        }
+        ~Oc28Timer() {
+            if (on) acc += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+        }
+    };
+    std::chrono::steady_clock::time_point oc28_t_start;
+    if (oc28_timing) oc28_t_start = std::chrono::steady_clock::now();
+
     // doc clus/connect-graph-strict-perf round 2: busy-gated lazy walk, the
     // exact scheme connect_graph_relaxed.cxx got in doc 78 round 2.  Off
     // unless a cfg is supplied AND this cluster is busy; census mode always
@@ -843,6 +867,8 @@ void Graphs::connect_graph_relaxed_strict(
     // dead-channel-excused on any plane.  Returns the longest contiguous run.
     auto max_ghost_run = [&](const geo_point_t& p1, const geo_point_t& p2, int num_steps,
                               const WirePlaneId& wpid_p1, const WirePlaneId& wpid_p2) -> int {
+        Oc28Timer oc28_timer(oc28_timing, oc28_t_ghost);
+        if (oc28_timing) { ++oc28_n_ghost; oc28_n_ghost_steps += num_steps; }
         int run = 0, best = 0;
         for (int ii = 0; ii != num_steps; ii++) {
             geo_point_t test_p(
@@ -859,9 +885,22 @@ void Graphs::connect_graph_relaxed_strict(
                 }
                 int scores[6];
                 grouping->test_good_point(test_p_raw, test_wpid.apa(), test_wpid.face(), scores);
+                // doc pdvd/28 S1: one knn1 on the cluster's own kd-tree
+                // instead of one per component.  The component clouds are
+                // filled from cluster.points() (== kd3d().points()) over every
+                // graph vertex, so their union IS the kd3d point set; both
+                // trees are nanoflann L2 over the same doubles, knn1 is exact,
+                // and sqrt is monotone, so sqrt(min_q metric_q) equals
+                // min_q sqrt(metric_q) bit for bit.  Only img_dis > radius is
+                // consumed.  Was O(num) queries per 1 cm step: num=385 cost
+                // 449 s on PDVD 039252/5.
                 double img_dis = 1e9;
-                for (size_t q = 0; q != num; ++q) {
-                    img_dis = std::min(img_dis, pt_clouds.at(q)->get_closest_dis(test_p));
+                {
+                    size_t kd_ind = 0;
+                    double kd_metric = 0;
+                    if (cluster.kd3d().knn1(test_p, kd_ind, kd_metric)) {
+                        img_dis = std::sqrt(kd_metric);
+                    }
                 }
                 const bool dead_excused = (scores[3] + scores[4] + scores[5]) > 0;
                 ghost = (img_dis > m_img_radius) && !dead_excused;
@@ -1816,8 +1855,12 @@ void Graphs::connect_graph_relaxed_strict(
                 // 3D-image test does not depend on wire-direction angles).
                 // No-op, byte-identical to round-6 "relaxed_strict" when
                 // image_check is false (default).
+                // doc pdvd/28 S2: skip the ghost walk when S1-S3 already
+                // killed the candidate -- its only effect there would be to
+                // invalidate an invalid tuple.  Census mode keeps the walk
+                // so the OC53CENSUS-IMG line stays complete.
                 int ghost_run = 0;
-                if (image_check) {
+                if (image_check && (oc53_census || std::get<0>(index_index_dis[j][k]) >= 0)) {
                     ghost_run = max_ghost_run(p1, p2, num_steps, wpid_p1, wpid_p2);
                     if (relaxed_img_bad(ghost_run, dis / units::cm)) {
                         invalidate_distance();
@@ -1917,11 +1960,15 @@ void Graphs::connect_graph_relaxed_strict(
             // Now check the path (legacy: every pair; lazy mode defers to the
             // Kruskal below -- doc 78 round 2, ported)
             if (!lazy_walk) {
+                Oc28Timer oc28_timer(oc28_timing, oc28_t_closest);
+                if (oc28_timing) ++oc28_n_closest;
                 eval_pair_verdict(j, k);
             }
 
             // Now check path again ...
             if (std::get<0>(index_index_dis_dir1[j][k]) >= 0) {
+                Oc28Timer oc28_timer(oc28_timing, oc28_t_dir1);
+                if (oc28_timing) ++oc28_n_dir1;
                 geo_point_t p1 = pt_clouds.at(j)->point(std::get<0>(index_index_dis_dir1[j][k])); 
                 auto wpid_p1 = cluster.wire_plane_id(pt_clouds_global_indices.at(j).at(std::get<0>(index_index_dis_dir1[j][k])));
                 geo_point_t p2 = pt_clouds.at(k)->point(std::get<1>(index_index_dis_dir1[j][k])); 
@@ -2011,7 +2058,7 @@ void Graphs::connect_graph_relaxed_strict(
                 // doc pr/53 round 7 sec 18 S5 (see the closest-pair block for
                 // the full comment). No-op when image_check is false.
                 int dir1_ghost_run = 0;
-                if (image_check) {
+                if (image_check && (oc53_census || std::get<0>(index_index_dis_dir1[j][k]) >= 0)) {  // doc pdvd/28 S2
                     dir1_ghost_run = max_ghost_run(p1, p2, num_steps, wpid_p1, wpid_p2);
                     if (relaxed_img_bad(dir1_ghost_run, dis / units::cm)) {
                         index_index_dis_dir1[j][k] = std::make_tuple(-1, -1, 1e9);
@@ -2055,6 +2102,8 @@ void Graphs::connect_graph_relaxed_strict(
             //Now check path again ... 
             // Now check the path...
             if (std::get<0>(index_index_dis_dir2[j][k]) >= 0) {
+                Oc28Timer oc28_timer(oc28_timing, oc28_t_dir2);
+                if (oc28_timing) ++oc28_n_dir2;
                 geo_point_t p1 = pt_clouds.at(j)->point(std::get<0>(index_index_dis_dir2[j][k]));
                 auto wpid_p1 = cluster.wire_plane_id(pt_clouds_global_indices.at(j).at(std::get<0>(index_index_dis_dir2[j][k])));
                 geo_point_t p2 = pt_clouds.at(k)->point(std::get<1>(index_index_dis_dir2[j][k]));
@@ -2146,7 +2195,7 @@ void Graphs::connect_graph_relaxed_strict(
                 // doc pr/53 round 7 sec 18 S5 (see the closest-pair block for
                 // the full comment). No-op when image_check is false.
                 int dir2_ghost_run = 0;
-                if (image_check) {
+                if (image_check && (oc53_census || std::get<0>(index_index_dis_dir2[j][k]) >= 0)) {  // doc pdvd/28 S2
                     dir2_ghost_run = max_ghost_run(p1, p2, num_steps, wpid_p1, wpid_p2);
                     if (relaxed_img_bad(dir2_ghost_run, dis / units::cm)) {
                         index_index_dis_dir2[j][k] = std::make_tuple(-1, -1, 1e9);
@@ -2209,6 +2258,8 @@ void Graphs::connect_graph_relaxed_strict(
                 if (std::get<2>(index_index_dis[j][k]) < 3 * units::cm ||
                     std::get<0>(index_index_dis_dir1[j][k]) >= 0 ||
                     std::get<0>(index_index_dis_dir2[j][k]) >= 0) {
+                    Oc28Timer oc28_timer(oc28_timing, oc28_t_closest);
+                    if (oc28_timing) ++oc28_n_closest;
                     eval_pair_verdict(j, k);
                     walked[j][k] = 1;
                 }
@@ -2238,6 +2289,8 @@ void Graphs::connect_graph_relaxed_strict(
             const size_t rj = uf_find(j), rk = uf_find(k);
             if (rj == rk) continue;
             if (!walked[j][k]) {
+                Oc28Timer oc28_timer(oc28_timing, oc28_t_closest);
+                if (oc28_timing) ++oc28_n_closest;
                 eval_pair_verdict(j, k);
                 walked[j][k] = 1;
                 ++n_walked;
@@ -2453,6 +2506,13 @@ void Graphs::connect_graph_relaxed_strict(
         rec["final"] = finalj;
         rec["edges"] = oc56_emitted;
         oc56_dump.write(rec);
+    }
+
+    if (oc28_timing) {
+        const double total_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - oc28_t_start).count();
+        oc53_log->debug("OC28TIMING strict ncomp={} lazy={} total_ms={:.1f} closest n={} ms={:.1f} dir1 n={} ms={:.1f} dir2 n={} ms={:.1f} ghost n={} steps={} ms={:.1f}",
+                        num, lazy_walk, total_ms, oc28_n_closest, oc28_t_closest, oc28_n_dir1, oc28_t_dir1,
+                        oc28_n_dir2, oc28_t_dir2, oc28_n_ghost, oc28_n_ghost_steps, oc28_t_ghost);
     }
 
     if (oc53_census) {
