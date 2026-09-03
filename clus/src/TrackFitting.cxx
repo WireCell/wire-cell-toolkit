@@ -64,6 +64,8 @@ void TrackFitting::set_parameter(const std::string& name, double value) {
         m_params.traj_cover_probe = value;
     } else if (name == "dqdx_fit_keep_all_points") {   // doc pr/107
         m_params.dqdx_fit_keep_all_points = value;
+    } else if (name == "traj_degenerate_wcpts_fallback") {   // doc pdvd/30
+        m_params.traj_degenerate_wcpts_fallback = value;
     } else if (name == "DL") {
         m_params.DL = value;
     } else if (name == "DT") {
@@ -227,6 +229,8 @@ double TrackFitting::get_parameter(const std::string& name) const {
         return m_params.skip_revert_iso_xext_cut;
     } else if (name == "dqdx_fit_keep_all_points") {   // doc pr/107
         return m_params.dqdx_fit_keep_all_points;
+    } else if (name == "traj_degenerate_wcpts_fallback") {   // doc pdvd/30
+        return m_params.traj_degenerate_wcpts_fallback;
     } else if (name == "fit_blob_coverage") {
         return m_params.fit_blob_coverage;
     } else if (name == "fit_blob_coverage_ghost_dis") {
@@ -1542,13 +1546,31 @@ void TrackFitting::organize_segments_path_3rd(double step_size){
         
         std::vector<WireCell::Point> pts, curr_pts;
 
-        // Get current fitted path from the segment
-        if (!segment->fits().empty()) {
+        // Get current fitted path from the segment.
+        //
+        // doc pdvd/30 round 2: once fits() has collapsed to its two endpoint
+        // vertices it carries no shape at all, yet it is still *non-empty*, so
+        // the legacy test keeps it and the (bent) wcpts() path held in the very
+        // same object is never consulted again -- the pass resamples a straight
+        // chord instead.  With the knob on, that one state falls back to
+        // wcpts(), which is the input the prototype effectively always has
+        // (its ProtoSegment ctor seeds get_point_vec() from the full wcpt
+        // path; porting_dictionary.md:218-219 maps the two fields).  The
+        // wcpts() > 2*fits() test requires the raw path to carry strictly more
+        // shape than the chord, so a genuinely short 2-wcpt segment is left
+        // alone.  Knob 0 => `fits().empty()` => byte-identical.
+        const bool use_wcpts =
+            segment->fits().empty() ||
+            (m_params.traj_degenerate_wcpts_fallback > 0 &&
+             segment->fits().size() <= 2 &&
+             segment->wcpts().size() > 2 * segment->fits().size());
+
+        if (!use_wcpts) {
             for (const auto& fit : segment->fits()) {
                 curr_pts.push_back(fit.point);
             }
         } else {
-            // If no fits, use original wcpts
+            // No fits at all, or (knob on) a degenerate fits(): use wcpts
             for (const auto& wcpt : segment->wcpts()) {
                 curr_pts.push_back(wcpt.point);
             }
@@ -1567,7 +1589,7 @@ void TrackFitting::organize_segments_path_3rd(double step_size){
                     "organize_segments_path_3rd: segment gi={} cluster={} pre-examine curr_pts={} "
                     "(from {}), fits_size={}, wcpts_size={}",
                     gi, cid, curr_pts.size(),
-                    segment->fits().empty() ? "wcpts" : "fits",
+                    use_wcpts ? "wcpts" : "fits",
                     segment->fits().size(), segment->wcpts().size());
             }
         }
@@ -3872,6 +3894,24 @@ void TrackFitting::form_map_graph(bool flag_exclusion, double end_point_factor, 
 
         // std::cout << "Form Map: "  << " " << saved_pts.size() << " " << m_2d_to_3d.size() << " " << m_3d_to_2d.size() << std::endl;
 
+
+        // doc pdvd/30 round 2: WCT_DQDX_DROP_DEBUG=1 attributes the
+        // zero-quantity interior-point drop to the form_map_graph call that
+        // actually performs it.  do_multi_tracking's own counter wraps only
+        // the third (pre-dQ/dx) call, so a segment collapsed during
+        // trajectory round 1 or 2 -- which dqdx_fit_keep_all_points does NOT
+        // cover -- was invisible.  Log-only, env-gated; no behavior change.
+        {
+            static const bool debug_seg_drop = (getenv("WCT_DQDX_DROP_DEBUG") != nullptr);
+            if (debug_seg_drop && saved_fits.size() != fits.size()) {
+                const int cid = segment->cluster() ? segment->cluster()->get_cluster_id() : -1;
+                SPDLOG_LOGGER_DEBUG(s_log,
+                    "form_map_graph: WCT_DQDX_DROP_DEBUG stage={} segment gi={} cluster={} "
+                    "zero-quantity drop {} -> {} points (wcpts={})",
+                    m_traj_dump_stage, static_cast<int>(segment->get_graph_index()), cid,
+                    fits.size(), saved_fits.size(), segment->wcpts().size());
+            }
+        }
 
         // Set fit associate vector for the segment
         segment->set_fit_associate_vec(std::move(saved_fits), m_dv, "fit");

@@ -379,6 +379,11 @@ public:
         // junction-adjacent points whose cells fit_exclusion stripped).
         // false => TrackFitting param 0 => byte-identical.
         bool   m_dqdx_fit_keep_all_points{false};
+        // doc pdvd/30 round 2: organize_segments_path_3rd falls back to the
+        // segment's raw wcpts() when its fits() has collapsed to the two
+        // endpoint vertices while wcpts() still carries a much longer path.
+        // false => TrackFitting param 0 => byte-identical.
+        bool   m_traj_degenerate_wcpts_fallback{false};
         int    m_pr_find_other_rounds{0};
         bool   m_v3_extension_guard{false};
         double m_v3_extension_min_gain{-1.0};   // cm

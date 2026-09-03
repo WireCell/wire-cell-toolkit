@@ -359,6 +359,8 @@ TEST_CASE("clus knob defaults: TaggerCheckNeutrino switches are all OFF")
     CHECK_KNOB_BOOL(cfg, "dl_vtx_cloud_no_exclusion", false);
     // doc pr/107: dQ/dx fit keeps every trajectory point (prototype parity) -- OFF.
     CHECK_KNOB_BOOL(cfg, "dqdx_fit_keep_all_points", false);
+    // doc pdvd/30: degenerate-fits() fallback to wcpts() in organize_segments_path_3rd -- OFF.
+    CHECK_KNOB_BOOL(cfg, "traj_degenerate_wcpts_fallback", false);
     // docs/73 sec 12 round 3: empty-2D-index sentinel guard in
     // eliminate_short_vertex_activities case 5 -- OFF.
     CHECK_KNOB_BOOL(cfg, "esva_ignore_empty_2d", false);
@@ -1307,6 +1309,23 @@ TEST_CASE("clus knob defaults: TrackFitting dqdx_fit_keep_all_points is off")
     CHECK(tf.get_parameter("dqdx_fit_keep_all_points") == doctest::Approx(1.0));
     auto preset = Clus::TrackFittingPresets::create_with_current_values();
     CHECK(preset.get_parameters().dqdx_fit_keep_all_points == doctest::Approx(0.0));
+}
+
+TEST_CASE("clus knob defaults: TrackFitting traj_degenerate_wcpts_fallback is off")
+{
+    // doc pdvd/30 round 2: organize_segments_path_3rd takes its input from
+    // segment->fits() whenever that is merely non-empty, so a fits() collapsed
+    // to its two endpoint vertices is resampled as a straight chord and the
+    // bent wcpts() path in the same object is never reconsidered.  > 0 falls
+    // back to wcpts() in exactly that state.  Default 0 = legacy =
+    // byte-identical; same set_parameter round-trip contract as the other
+    // double-sentinel knobs.
+    Clus::TrackFitting tf;
+    CHECK(tf.get_parameter("traj_degenerate_wcpts_fallback") == doctest::Approx(0.0));
+    tf.set_parameter("traj_degenerate_wcpts_fallback", 1.0);
+    CHECK(tf.get_parameter("traj_degenerate_wcpts_fallback") == doctest::Approx(1.0));
+    auto preset = Clus::TrackFittingPresets::create_with_current_values();
+    CHECK(preset.get_parameters().traj_degenerate_wcpts_fallback == doctest::Approx(0.0));
 }
 
 TEST_CASE("clus knob defaults: TrackFitting fit_blob_coverage is off")

@@ -165,6 +165,29 @@ namespace WireCell::Clus {
             // double for the set_parameter(name, value) plumbing.
             double dqdx_fit_keep_all_points = 0;
 
+            // doc pdvd/30 round 2 (PDVD 039252/2 evt 298595, cluster 86).
+            // organize_segments_path_3rd takes its input path from
+            // segment->fits() whenever that is merely *non-empty*, and only
+            // falls back to the raw wcpts() when it is exactly empty.  A
+            // segment whose fits() has collapsed to its two endpoint vertices
+            // therefore re-enters the pass as a 2-point straight chord, gets
+            // resampled into a straight interpolation, and never again
+            // consults the (bent) wcpts() path still held in the same object.
+            // Measured on evt 298595: a 128-wcpt, ~64 cm arm rendered as a
+            // chord with max perpendicular deviation 0.001 cm sitting a median
+            // 3.45 cm off the trajectory TaggerCheckSTM fits on the same
+            // charge.  > 0: when fits() carries no shape (<= 2 points) while
+            // wcpts() carries substantially more, prefer wcpts().  The
+            // prototype needs no such test -- its ProtoSegment ctor seeds
+            // fit_pt_vec (= get_point_vec(), the same field, see
+            // clus/docs/porting/porting_dictionary.md:218-219) from the FULL
+            // path_wcps, so its equivalent input is never degenerate by
+            // construction.  0 = legacy = byte-identical.  Applies to
+            // organize_segments_path_3rd only; organize_segments_path_2nd
+            // (:1716) has the identical pattern but is deliberately left
+            // untouched for want of measurement (doc pdvd/30 sec "Scope").
+            double traj_degenerate_wcpts_fallback = 0;
+
             double default_dQ_dx = 5000;
 
             double end_point_factor=0.6;
