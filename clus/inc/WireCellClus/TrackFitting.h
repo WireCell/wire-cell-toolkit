@@ -222,6 +222,13 @@ namespace WireCell::Clus {
         explicit TrackFitting(FittingType fitting_type = FittingType::Single);   
         virtual ~TrackFitting();
 
+        /// doc pdvd/28 M3: drop the fit-side scratch (charge maps, 2D<->3D
+        /// association, global readout->blob map, per-cluster caches) of a
+        /// fitter that is only read from now on.  Every consumer getter
+        /// (graph, segments, fitted 2D charge, showers, tagger/kine info,
+        /// scoreboard, pi0 maps) keeps its data; a later fit reloads.
+        void release_fit_scratch();
+
         /**
          * Set the fitting type
          * @param fitting_type The new fitting type to use

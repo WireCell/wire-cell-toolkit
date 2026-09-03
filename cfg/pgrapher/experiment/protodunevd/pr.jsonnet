@@ -1370,6 +1370,23 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
             // with the two-TPC concatenated-per-plane channel convention.  Only
             // active when named in pipeline_names (needs -stm-fit; the WireCellRoot
             // plugin must be loaded by the job).
+            // doc pdvd/28 (memory): drop per-cluster graphs / graph-algorithm
+            // caches and the fit-side scratch of the parked TrackFitting slots
+            // once the neutrino stage is done -- place right after
+            // tagger_check_neutrino.  Nothing downstream reads them; the
+            // local PCs (steiner_pc, stm_fit) stay.  Absent from pipeline_names
+            // => absent from the compiled config (byte-identical job).
+            release_post_nu: {
+                type: 'ClusteringReleaseCaches',
+                name: 'pr',
+                data: {
+                    grouping: 'live',
+                    graphs: true,
+                    fitter_scratch: true,
+                    cluster_cache: false,
+                    slots: ['stm'],
+                },
+            },
             stm_magnify: {
                 type: 'PdvdMagnifyTrackingVisitor',
                 name: 'pr',

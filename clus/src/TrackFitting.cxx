@@ -292,6 +292,45 @@ void TrackFitting::clear_graph(){
 }
 
 
+// doc pdvd/28 M3: drop the fit-side scratch of a fitter that will only be READ
+// from now on (the grouping slots the writers walk: unnamed, "nu<i>", "stm").
+// Keeps everything a consumer getter returns -- m_graph, m_segments,
+// m_fitted_charge_2d, m_cluster_fitted_charge_2d, showers / pi0 maps / main
+// vertex / tagger + kine info / scoreboard / bridged + dropped id sets -- and
+// clears the rest: the readout-charge maps, the 2D<->3D association maps, the
+// global readout->blob map, per-cluster charge caches, edge/node caches,
+// channel lookup caches and the coverage index.  Any later fit on this object
+// reloads them (m_charge_data_dirty), so the release is output-neutral for a
+// consumer that never fits again.  The 039252/5 heap profile put ~0.78 GB of
+// live heap in these members across the 12 candidate fitters.
+void TrackFitting::release_fit_scratch(){
+    m_charge_data.clear();
+    m_orig_charge_data.clear();
+    m_2d_to_3d.clear();
+    m_3d_to_2d.clear();
+    global_rb_map.clear();
+    m_cluster_charge_data.clear();
+    m_loaded_clusters.clear();
+    m_charge_data_dirty = true;
+    m_blobs.clear();
+    m_cluster_edges.clear();
+    m_all_edges.clear();
+    m_ordered_nodes_vec.clear();
+    m_cluster_xext_cache.clear();
+    m_hot_cache.clear();
+    m_cold_cache.clear();
+    m_access_count.clear();
+    m_cov_fit_scope.clear();
+    m_cov_vtx_info.clear();
+    m_cov_index = CovIndex();
+    // unordered_map::clear() keeps the bucket array; swap it away too.
+    decltype(m_charge_data)().swap(m_charge_data);
+    decltype(m_orig_charge_data)().swap(m_orig_charge_data);
+    decltype(global_rb_map)().swap(global_rb_map);
+    decltype(m_cluster_charge_data)().swap(m_cluster_charge_data);
+    decltype(m_cluster_edges)().swap(m_cluster_edges);
+}
+
 void TrackFitting::reset_for_new_event(){
     // See the header for why this exists.  Order matters only in that
     // clear_graph()/clear_segments() must run before m_grouping is dropped --
