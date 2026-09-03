@@ -170,6 +170,7 @@ namespace WireCell::Clus::Facade {
             for (const auto& [wpid, params] : other.m_wpid_params) {
                 m_wpid_params.emplace(wpid, params);  // no-op if key already present
             }
+            m_angle_trig.clear();   // doc pdvd/28 D1: key resolution may change
         }
 
 
@@ -187,6 +188,14 @@ namespace WireCell::Clus::Facade {
         mutable std::unique_ptr<nfkd_t> m_kd3d{nullptr};
 
         std::map<WirePlaneId, std::tuple<geo_point_t, double, double, double>> m_wpid_params;
+
+        // doc pdvd/28 D1: per query volume (kAllLayers, face, apa) ident ->
+        // {cos, sin} of the three plane angles, computed once by the same
+        // resolve_wpid_key + cos/sin calls the 2D queries used to make per
+        // call (same libm on the same double => same bits).  Cleared whenever
+        // m_wpid_params changes (merge_wpid_params); the constructor sets it.
+        mutable std::unordered_map<int, std::array<double, 6>> m_angle_trig;
+        const std::array<double, 6>& angle_trig(const WirePlaneId& wpid_volume) const;
 
         // for 2D, wpid to kd
         mutable std::map<int, std::unique_ptr<nfkd_t>> m_kd2d;

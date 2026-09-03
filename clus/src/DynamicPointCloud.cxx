@@ -300,11 +300,11 @@ DynamicPointCloud::get_2d_points_info(const geo_point_t &p, const double radius,
     }
     // doc pdvd/25 M3: a query volume this cloud has no params for is resolved
     // (same apa, else first key) instead of raising.
-    const auto [_, angle_u, angle_v, angle_w] = m_wpid_params.at(resolve_wpid_key(m_wpid_params, wpid_volume));
+    // doc pdvd/28 D1: cos/sin of the resolved plane angle, cached per volume.
+    const auto& trig = angle_trig(wpid_volume);
 
     // Compute projected point
-    const double angle = (plane == 0) ? angle_u : ((plane == 1) ? angle_v : angle_w);
-    const double projected_y = cos(angle) * p.z() - sin(angle) * p.y();
+    const double projected_y = trig[2 * plane] * p.z() - trig[2 * plane + 1] * p.y();
 
     // Prepare query point
     std::vector<double> query = {p.x(), projected_y};
@@ -358,14 +358,11 @@ DynamicPointCloud::get_closest_2d_point_info(const geo_point_t &p, const int pla
         raise<RuntimeError>("DynamicPointCloud: empty wpid params for wpid %s", wpid_volume.name());
     }
     // doc pdvd/25 M3: resolve a foreign query volume instead of raising.
-    auto wpid_iter = m_wpid_params.find(resolve_wpid_key(m_wpid_params, wpid_volume));
-
-    // Calculate angle more directly based on plane parameter
-    const auto &[_, angle_u, angle_v, angle_w] = wpid_iter->second;
-    const double angle = (plane == 0) ? angle_u : ((plane == 1) ? angle_v : angle_w);
+    // doc pdvd/28 D1: cos/sin of the resolved plane angle, cached per volume.
+    const auto& trig = angle_trig(wpid_volume);
 
     // Prepare query point more efficiently
-    const double projected_y = cos(angle) * p.z() - sin(angle) * p.y();
+    const double projected_y = trig[2 * plane] * p.z() - trig[2 * plane + 1] * p.y();
     const std::vector<double> query = {p.x(), projected_y};
 
     // Perform nearest neighbor search
@@ -384,6 +381,24 @@ DynamicPointCloud::get_closest_2d_point_info(const geo_point_t &p, const int pla
     return std::make_tuple(distance, m_pts.cluster[global_idx], global_idx);
 }
 
+// doc pdvd/28 D1: {cos_u, sin_u, cos_v, sin_v, cos_w, sin_w} of the plane
+// angles this query volume resolves to, computed once per volume with the
+// same resolve_wpid_key lookup and the same cos()/sin() calls on the same
+// doubles the three 2D queries used to make per call.  Same libm routine on
+// the same input gives the same bits, so the projections are unchanged.
+// Cleared by merge_wpid_params (the resolution can change when keys appear).
+const std::array<double, 6>& DynamicPointCloud::angle_trig(const WirePlaneId& wpid_volume) const
+{
+    auto it = m_angle_trig.find(wpid_volume.ident());
+    if (it != m_angle_trig.end()) return it->second;
+    const auto& [_, angle_u, angle_v, angle_w] = m_wpid_params.at(resolve_wpid_key(m_wpid_params, wpid_volume));
+    std::array<double, 6> t;
+    t[0] = cos(angle_u); t[1] = sin(angle_u);
+    t[2] = cos(angle_v); t[3] = sin(angle_v);
+    t[4] = cos(angle_w); t[5] = sin(angle_w);
+    return m_angle_trig.emplace(wpid_volume.ident(), t).first->second;
+}
+
 double DynamicPointCloud::get_closest_2d_dis(const geo_point_t &p, const int plane, const int face,
                                              const int apa) const
 {
@@ -398,12 +413,10 @@ double DynamicPointCloud::get_closest_2d_dis(const geo_point_t &p, const int pla
         raise<RuntimeError>("DynamicPointCloud: empty wpid params for wpid %s", wpid_volume.name());
     }
     // doc pdvd/25 M3: resolve a foreign query volume instead of raising.
-    auto wpid_iter = m_wpid_params.find(resolve_wpid_key(m_wpid_params, wpid_volume));
+    // doc pdvd/28 D1: cos/sin of the resolved plane angle, cached per volume.
+    const auto& trig = angle_trig(wpid_volume);
 
-    const auto &[_, angle_u, angle_v, angle_w] = wpid_iter->second;
-    const double angle = (plane == 0) ? angle_u : ((plane == 1) ? angle_v : angle_w);
-
-    const std::array<double, 2> query = {p.x(), cos(angle) * p.z() - sin(angle) * p.y()};
+    const std::array<double, 2> query = {p.x(), trig[2 * plane] * p.z() - trig[2 * plane + 1] * p.y()};
 
     size_t index = 0;
     double metric = 0;
