@@ -2191,7 +2191,21 @@ std::vector<WireCell::Point> TrackFitting::examine_end_ps_vec(std::shared_ptr<PR
         }
     }
 
-    if (flag_end) {
+    // doc pdvd/30: the flag_start block above can legitimately leave ps_list
+    // EMPTY -- it pops every point failing is_good_point, and its S1.7
+    // else-branch re-inserts temp_start ONLY when that point has a valid face.
+    // The empty-INPUT guard at the top of this function does not cover that
+    // drained-to-empty state, so `ps_list.back()` below read a std::list
+    // sentinel.  That is not merely undefined-but-harmless: the garbage point
+    // becomes temp_end, and the symmetric S1.7 else-branch at :2229 will
+    // push_back() it if contained_by() happens to report a valid face --
+    // inventing an out-of-detector point, precisely what S1.7 exists to
+    // prevent.  Skipping the block yields the empty list that the S1.7 comment
+    // already documents as the intended "caller falls back to the original
+    // pts" signal.  Same class as the pr/82 sec 12.7 guard at the top of this
+    // function, and shipped the same way (unconditional): the behaviour it
+    // replaces is undefined, not a legacy path to be preserved.
+    if (flag_end && !ps_list.empty()) {
         WireCell::Point temp_end = ps_list.back();
         while (ps_list.size() > 0) {
             // figure out the wpid for the ps_list.back() ...

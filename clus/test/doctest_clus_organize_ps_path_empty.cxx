@@ -27,6 +27,27 @@
  * removed, the empty case would dereference through examine_end_ps_vec and this
  * test would crash the runner instead of failing politely.  That is the
  * intended revert behaviour: this test cannot pass without the fix.
+ *
+ * ---------------------------------------------------------------------------
+ * doc pdvd/30: a SECOND, sibling empty-list read in the same function is NOT
+ * covered here, and deliberately so.  examine_end_ps_vec's flag_start block can
+ * leave ps_list empty on a NON-empty input (it pops every point that fails
+ * is_good_point, and its S1.7 else-branch re-inserts temp_start only when that
+ * point has a valid face); the flag_end block below it then read ps_list.back()
+ * on that empty list.  Worse than a bare UB read: the resulting sentinel
+ * garbage becomes temp_end, and the symmetric S1.7 else-branch push_back()s it
+ * whenever contained_by() reports a valid face -- inventing an out-of-detector
+ * point.  Now guarded (`flag_end && !ps_list.empty()`).
+ *
+ * It gets no reproducer in this file because it CANNOT have a fixture-free one:
+ * unlike the cases above, draining the list requires m_dv->contained_by(),
+ * m_pcts->pc_transform() and m_grouping->is_good_point() to be live, so a null
+ * segment and a default-constructed TrackFitting crash long before the drain.
+ * A real reproducer needs geometry injected through TrackFittingTestHarness
+ * (the doc pr/98 friend seam used by doctest_update_association.cxx) plus a
+ * grouping whose is_good_point() returns false everywhere.  That fixture is
+ * worth building; it was out of scope for the round that found the bug, and is
+ * recorded here rather than papered over with a test that could not fail.
  */
 #include "WireCellClus/TrackFitting.h"
 #include "WireCellUtil/Units.h"
