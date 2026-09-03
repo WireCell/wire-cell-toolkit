@@ -672,6 +672,22 @@ namespace WireCell::Clus::Facade {
         // Return this cluster's matched flash.  If there is none, it will hold
         // default values (operator bool() == false).  Delegates to
         // Grouping::flash_at() for the matched flash index ("flash" scalar).
+        //
+        // CAVEAT, multi-APA detectors.  The "flash" scalar is the row id of the
+        // flash within the PER-APA flash tensor QLMatching matched against, but
+        // the grouping keeps ONE canonical "flash" PC and each APA's
+        // FlashTensorToOpticalPCs ASSIGNS it, so only the last APA's flash list
+        // survives into the archive.  A cluster matched by any earlier APA
+        // therefore resolves to a row of a different list: an out-of-range index
+        // now yields an invalid Flash (it used to read raw memory), but an
+        // in-range one silently yields a DIFFERENT, real flash.  In SBND
+        // production that is 24024 of 50699 matched clusters.
+        //
+        // The archive-local test for "did I resolve the right row" is
+        //     flash.time() == cluster->get_cluster_t0()
+        // -- QLMatching sets cluster_t0 from the flash the cluster actually
+        // matched, and that survives even when the flash's PC row does not.
+        // Full measurement and the options for a real fix: sbnd_xin/docs/99.
         Flash get_flash() const;
 
         /// Helper function to check if a point is spatially related to a reference cluster using time_blob_map

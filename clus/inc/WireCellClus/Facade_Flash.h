@@ -32,8 +32,16 @@ namespace WireCell::Clus::Facade {
         std::vector<double> m_covs;                      // their covered fractions
     public:
 
-        /// A "false" means there was no "flash" PC array and all values
-        /// are invalid.  A "true" does not guarantee all values are valid.
+        /// A "false" means the index addressed no flash -- there was no "flash"
+        /// PC array, the index was negative, or it was past the last row -- and
+        /// every value below is the invalid default.
+        ///
+        /// A "true" means the singular values (time/value/ident/type) were read
+        /// from a real row of the "flash" PC.  It does NOT promise the plural
+        /// per-OpDet vectors are filled (they are empty without the "light" and
+        /// "flashlight" PCs), and for Cluster::get_flash() it does NOT promise
+        /// the row is the flash that cluster actually matched -- see the caveat
+        /// on Cluster::get_flash().
         explicit operator bool() const { return m_valid; }
 
         /// Any "singular" methods are about the flash itself.

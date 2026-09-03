@@ -1182,12 +1182,36 @@ Facade::Flash Facade::Grouping::flash_at(int flash_index) const
     if (! this->has_pc("flash")) {
         return flash;
     }
+
+    // The index must address a row that exists.  Without this, the reads below
+    // ran off the end of the arrays: get_element() (Facade_Mixins.h) forwards to
+    // Array::element(), an UNCHECKED pointer offset, so a stale index returned
+    // raw memory while operator bool() still said "true".  In SBND production
+    // 758 of 50699 matched clusters did exactly that (sbnd_xin/docs/99).
+    //
+    // Bound on the SAME array flashes() sizes its loop with, deliberately: every
+    // flash_at() call made from flashes() then passes by construction, so the
+    // enumeration path (and with it QLMatching) cannot move -- only a caller
+    // resolving a STORED index, i.e. Cluster::get_flash(), can.
+    const auto ftime = this->get_pcarray<double>("time", "flash");
+    if ((size_t) flash_index >= ftime.size()) {
+        return flash;           // stale/foreign index: addresses no flash
+    }
     flash.m_valid = true;
 
-    flash.m_time  = this->get_element<double>("flash", "time", flash_index, 0);
-    flash.m_value = this->get_element<double>("flash", "value", flash_index, 0);
-    flash.m_ident = this->get_element<int>("flash", "ident", flash_index, -1);
-    flash.m_type  = this->get_element<int>("flash", "type", flash_index, -1);
+    // Read the singular values straight off their spans rather than through
+    // get_element().  Validity stays keyed on "time" alone (above), so a PC that
+    // omits a companion array -- as a legacy archive may -- still enumerates
+    // every flash and merely defaults that one field, exactly as the old
+    // get_element(..., def) call did.
+    const auto fvalue = this->get_pcarray<double>("value", "flash");
+    const auto fident = this->get_pcarray<int>("ident", "flash");
+    const auto ftype  = this->get_pcarray<int>("type", "flash");
+    const size_t fi = (size_t) flash_index;
+    flash.m_time  = ftime[fi];
+    flash.m_value = fi < fvalue.size() ? fvalue[fi] : 0.0;
+    flash.m_ident = fi < fident.size() ? fident[fi] : -1;
+    flash.m_type  = fi < ftype.size()  ? ftype[fi]  : -1;
 
     if (!(this->has_pc("light") && this->has_pc("flashlight"))) {
         return flash;           // valid, but no per-OpDet info.
