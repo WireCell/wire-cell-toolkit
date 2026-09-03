@@ -42,6 +42,15 @@ TEST_CASE("root knob defaults: PdvdPrMagnifyTrackingVisitor (PR stage)")
     CHECK(cfg["output_filename"].asString() == "tracking-pr.root");
     REQUIRE_MESSAGE(cfg.isMember("save_in_scope"), "missing knob: save_in_scope");
     CHECK(cfg["save_in_scope"].asBool() == false);
+    // sbnd_xin/docs/99 sec 9.  flash_by_gid resolves T_cluster's flash columns
+    // through matched_flash_gid against the "opflash" PC.  It is validated on
+    // SBND ONLY: its precondition is that a gid names one flash, which holds
+    // because SBND's gid side is the anode ident.  PDVD's gid encoding
+    // (opflash_phys_gid / shared_flash, per-drift-side flash lists) has NOT been
+    // checked against it, so this default is the tripwire that keeps PDVD off
+    // until someone does.  Do not flip it to true without that check.
+    REQUIRE_MESSAGE(cfg.isMember("flash_by_gid"), "missing knob: flash_by_gid");
+    CHECK(cfg["flash_by_gid"].asBool() == false);
     REQUIRE(cfg.isMember("nticks"));
     CHECK(cfg["nticks"].asInt() == 10000);
 }

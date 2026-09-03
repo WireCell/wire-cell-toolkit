@@ -32,16 +32,28 @@ namespace WireCell::Clus::Facade {
         std::vector<double> m_covs;                      // their covered fractions
     public:
 
-        /// A "false" means the index addressed no flash -- there was no "flash"
-        /// PC array, the index was negative, or it was past the last row -- and
-        /// every value below is the invalid default.
+        /// A "false" means nothing was resolved, and every value below is the
+        /// invalid default.  There are two producers of a Flash and each has its
+        /// own reasons:
+        ///
+        ///   Grouping::flash_at(index)  -- no "flash" PC array, a negative
+        ///     index, or an index past the last row.
+        ///   Grouping::flash_by_gid(gid) -- no "opflash" PC, a negative gid, no
+        ///     row carrying that gid, or a gid that names more than one flash
+        ///     (see the uniqueness precondition on that method).
         ///
         /// A "true" means the singular values (time/value/ident/type) were read
-        /// from a real row of the "flash" PC.  It does NOT promise the plural
-        /// per-OpDet vectors are filled (they are empty without the "light" and
-        /// "flashlight" PCs), and for Cluster::get_flash() it does NOT promise
-        /// the row is the flash that cluster actually matched -- see the caveat
-        /// on Cluster::get_flash().
+        /// from real data.  It does NOT promise the plural per-OpDet vectors are
+        /// filled (they are empty without the "light" and "flashlight" PCs), and
+        /// for Cluster::get_flash() it does NOT promise the row is the flash
+        /// that cluster actually matched -- see the caveat on
+        /// Cluster::get_flash(), and prefer Cluster::get_matched_flash().
+        ///
+        /// The two producers also differ in what the fields MEAN: on the gid
+        /// path ident() is the globally-unique gid rather than a per-input row
+        /// id, type() is 0, errors() are 0 and cov_idents()/covs() are empty,
+        /// because the "opflash" PC carries no type, saturation or coverage
+        /// column.  time() and value() are identical on both.
         explicit operator bool() const { return m_valid; }
 
         /// Any "singular" methods are about the flash itself.
