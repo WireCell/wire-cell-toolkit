@@ -169,6 +169,9 @@ void QLMatching::configure(const WireCell::Configuration& cfg)
         m_root_pcs_to_merge.clear();
         for (const auto& jname : cfg["root_pcs_to_merge"]) m_root_pcs_to_merge.insert(jname.asString());
     }
+    // doc 99. DEFAULT FALSE => the merge keeps exactly the historical name set,
+    // nothing is shifted, and the output is byte-identical.
+    m_merge_flash_pcs = get(cfg, "merge_flash_pcs", m_merge_flash_pcs);
 
     m_dv    = Factory::find_tn<IDetectorVolumes>(cfg["detector_volumes"].asString());
 
@@ -738,6 +741,7 @@ WireCell::Configuration QLMatching::default_configuration() const
     cfg["outpath"]         = m_outpath;
     cfg["realign_perblob"] = m_realign_perblob;
     cfg["calib_dump"]      = m_calib_dump;
+    cfg["merge_flash_pcs"] = m_merge_flash_pcs;   // doc 99; false => historical merge
     cfg["flash_group_window"] = m_flash_group_window;
     cfg["cathode_diag"]    = m_cathode_diag;
     cfg["cathode_diag_radius"] = m_cathode_diag_radius;
@@ -1110,9 +1114,22 @@ bool QLMatching::operator()(const input_vector& invec, output_pointer& out)
         // from each source tree, then normalize the merged-tree local-PC keys.
         auto* root_live = runs.front().root_live.get();
         auto root_dead = Aux::TensorDM::as_pctree(*invec[0]->tensors(), runs.front().inpath + "/dead");
+        // doc 99. Knob off => live_names IS m_root_pcs_to_merge and nothing is
+        // shifted, i.e. the historical merge byte-for-byte.  Knob on => the
+        // canonical optical PCs are concatenated too, after each source input's
+        // flash-row references have been re-based onto the growing merged list.
+        std::set<std::string> live_names = m_root_pcs_to_merge;
+        if (m_merge_flash_pcs) {
+            live_names.insert("flash");
+            live_names.insert("light");
+            live_names.insert("flashlight");
+            live_names.insert("flashcov");
+        }
         for (std::size_t k = 1; k < runs.size(); ++k) {
             auto src_dead = Aux::TensorDM::as_pctree(*invec[k]->tensors(), runs[k].inpath + "/dead");
-            merge_pct(root_live, runs[k].root_live.get(), m_root_pcs_to_merge);
+            if (m_merge_flash_pcs) shift_flash_indices(runs[k], root_live);
+            merge_pct(root_live, runs[k].root_live.get(), live_names);
+            // The dead tree carries no optical PCs; keep its name set historical.
             merge_pct(root_dead.get(), src_dead.get(), m_root_pcs_to_merge);
         }
         normalize_pctree_local_pcs(root_live);
@@ -3772,6 +3789,70 @@ int QLMatching::flash_phys_side(const Opflash* flash) const
         else pe_lo += p;
     }
     return (pe_hi > pe_lo) ? 1 : 0;
+}
+
+// doc 99 / m_merge_flash_pcs.  Re-base one source input's flash-row references
+// onto the merged list, so its canonical optical PCs can be CONCATENATED onto
+// the primary root instead of dropped.  Everything that names a flash row by
+// position moves by the number of flash rows already merged; everything that
+// names a light row moves by the light rows already merged.
+//
+// Called immediately before merge_pct appends this source, so the target's
+// current row counts ARE the offsets (they grow input by input).
+void QLMatching::shift_flash_indices(ApaRun& src, Points::node_t* tgt) const
+{
+    auto nrows = [](Points::node_t* n, const std::string& pcname,
+                    const std::string& aname) -> int {
+        if (!n) return 0;
+        auto& lpcs = n->value.local_pcs();
+        auto it = lpcs.find(pcname);
+        if (it == lpcs.end()) return 0;
+        auto arr = it->second.get(aname);
+        return arr ? (int) arr->size_major() : 0;
+    };
+    const int foff = nrows(tgt, "flash", "time");
+    const int loff = nrows(tgt, "light", "ident");
+    auto* g = src.grouping;
+    if (!g) return;
+    if (foff == 0 && loff == 0) {
+        return;   // nothing on the target yet: this source's indices already fit
+    }
+
+    // Shift one int column of one grouping-level PC in place.  Reads through the
+    // facade (a span) and writes back with put_pcarray, which assigns onto the
+    // existing array; a missing PC or column is simply skipped.
+    auto shift = [g](const std::string& aname, const std::string& pcname, int off) {
+        if (off == 0) return;
+        if (! g->has_pcarray<int>(aname, pcname)) return;
+        const auto sp = g->get_pcarray<int>(aname, pcname);
+        std::vector<int> v(sp.begin(), sp.end());
+        for (auto& x : v) x += off;
+        g->put_pcarray<int>(v, aname, pcname);
+    };
+
+    // The flash PC's own "ident" is the row id by the FlashTensorToOpticalPCs
+    // schema ("ident(=row)"), and the row is about to change -- shift it so the
+    // merged archive keeps ident == row and a flash id is unique in the event.
+    shift("ident", "flash", foff);
+    // The flashlight join: one row per (flash, fired channel), both columns
+    // positional.
+    shift("flash", "flashlight", foff);
+    shift("light", "flashlight", loff);
+    // Sparse readout-coverage rows, keyed on the flash row (the "channel" column
+    // is a channel id, not a row -- leave it).
+    shift("flash", "flashcov", foff);
+
+    // The per-cluster matched-flash row index Cluster::get_flash() resolves.
+    // Unmatched clusters hold -1 and must stay -1.
+    if (foff) {
+        for (auto* cluster : g->children()) {
+            if (!cluster) continue;
+            const int fi = cluster->get_scalar<int>("flash", -1);
+            if (fi >= 0) cluster->set_scalar<int>("flash", fi + foff);
+        }
+    }
+    log->debug("merge_flash_pcs: input {} shifted by flash+{} light+{} "
+               "({} clusters)", src.input_idx, foff, loff, g->children().size());
 }
 
 void QLMatching::write_opflash_pc(ApaRun& run)

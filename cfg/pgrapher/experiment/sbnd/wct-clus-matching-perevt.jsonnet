@@ -89,6 +89,18 @@ function(
     // per-APA path (one QLMatching per APA -> PointTreeMerging -> all-APA
     // MABC); runner escape: --per-apa / SBND_JOINT=0.
     joint          = true,
+    // merge_flash (doc 99): make the joint node's merge carry EVERY APA's
+    // canonical "flash"/"light"/"flashlight"/"flashcov" PCs, re-basing each APA's
+    // flash-row references (including the per-cluster "flash" scalar) onto the
+    // merged list.  Off (default) the merge keeps only APA0's optical PCs and
+    // drops APA1's, so Cluster::get_flash() -- and therefore
+    // tracking-pr.root:T_cluster's flash columns -- resolves a DIFFERENT, real
+    // flash for every cluster matched on APA1.
+    // C++ default false.  Key omitted when off => byte-identical compiled config.
+    // NOT byte-identical when ON: the archive gains rows and its cluster "flash"
+    // scalars change, so every downstream hash moves.  Owner decision to flip.
+    // Only reaches the joint node -- the per-APA path never merges.
+    merge_flash    = false,
     // Hand-scan calibration dump path. '' (default) = off, production-identical.
     // When set, QLMatching writes one per-event JSON (both TPCs) for the Q/L
     // hand-scan viewer (sbnd_xin/ql_scan). run_ql_evt.sh -calib points it at
@@ -507,7 +519,8 @@ function(
                                                beam_pref=(if beam_pref then true else null),
                                                beam_pref_weight=(if beam_pref then beam_pref_weight else null),
                                                beam_pref_rescue=(if beam_pref then beam_pref_rescue else null),
-                                               main_flag=main_flag, lm=lm, realign_perblob=realign);
+                                               main_flag=main_flag, lm=lm, realign_perblob=realign,
+                                               merge_flash=merge_flash);
             // MABC takes the single pre-merged tree directly (no PointTreeMerging).
             local clus_all = clus_maker.all_apa(anodes, dump=true, all_apa_bee=allapa_bee, premerged=true, tensor_outname=save_tensors, save_real_cluster_id=save_rcid, save_assoc_cluster_id=save_assoc, trace_bee=trace_bee, real_cluster_id_global=rcid_global, cathode_rescue_on=cathode_rescue, cathode_rescue_unmatched=cathode_rescue_unmatched, adopt_nu_fragments=adopt_nu_fragments, save_bundle_main_provenance=save_bundle_main_provenance, rescue_allow_in_beam_far=rescue_in_beam_far, rescue_geom_first=rescue_geom_first, rescue_pierce_test=rescue_pierce_test, rescue_pierce_cut=rescue_pierce_cut, rescue_dest_beam_for_new=rescue_dest_beam_for_new, rescue_beam_main_only=rescue_beam_main_only, bee_flash_pred_min=bee_flash_pred_min, eb_fast=eb_fast);
             local per_apa_pre = [g.intern(

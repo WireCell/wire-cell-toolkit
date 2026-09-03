@@ -383,8 +383,19 @@ function(params) {
     // standalone clus_all_apa PointTreeMerging it replaces.  `dv` is the all-anode
     // DetectorVolumes (clus_maker.detector_volumes(anodes)).  Same tuning as
     // matching(); adds the anodes list and the opflash root-PC concatenation.
+    // merge_flash (doc 99): carry EVERY input's canonical "flash"/"light"/
+    // "flashlight"/"flashcov" PCs through the joint node's merge, re-basing each
+    // input's flash-row references (including the per-cluster "flash" scalar) onto
+    // the merged list.  Without it the merge keeps only input 0's optical PCs and
+    // drops the rest, so Cluster::get_flash() resolves a DIFFERENT, real flash for
+    // every cluster matched on another APA (measured: 49.4% of SBND production
+    // rows).  C++ default false.  Key omitted when off => byte-identical config,
+    // and the merge is then the historical one byte-for-byte.
+    // NOT byte-identical when ON: the merged tree gains the other APAs' flash rows
+    // and its cluster "flash" scalars change, so every downstream archive hash
+    // moves.  Flipping it is an owner decision.
     matching_joint(anodes, dv, reality, semimodel_file, cathode_fiducial='', calib_dump='', pmt_nl=true, lm=true, lm_params={}, realign_perblob=null,
-                   cathode_diag='', main_flag=true, auto_mask=null, beam_pref=null, beam_pref_weight=null, beam_pref_rescue=null, extra={}):: g.pnode({
+                   cathode_diag='', main_flag=true, auto_mask=null, beam_pref=null, beam_pref_weight=null, beam_pref_rescue=null, merge_flash=false, extra={}):: g.pnode({
         type: 'QLMatching',
         name: 'matching_joint',
         data: {
@@ -392,6 +403,8 @@ function(params) {
             // Concatenate the per-APA optical-flash display PC into the merged
             // grouping (mirrors clus_all_apa PointTreeMerging.root_pcs_to_merge).
             root_pcs_to_merge: ['opflash'],
+            // doc 99.  Key omitted when off => byte-identical config.
+            [if merge_flash then 'merge_flash_pcs']: true,
             // Hand-scan calibration dump path ('' => off, production-identical).
             // The joint node sees BOTH APAs in one operator() call, so a single
             // dump file holds both TPCs (sbnd_xin/ql_scan).

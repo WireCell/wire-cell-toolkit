@@ -29,6 +29,15 @@ TEST_CASE("qlmatching default configuration knobs")
     CHECK(cfg["trigger_offsets"].isArray());
     CHECK(cfg["trigger_offsets"].size() == 0);
 
+    // Multi-input optical-PC merge (sbnd_xin/docs/99): default OFF, so the
+    // merge keeps exactly the historical name set (only root_pcs_to_merge) and
+    // nothing re-bases its flash-row indices.  ON is NOT byte-identical -- the
+    // merged tree gains the non-primary inputs' flash/light rows and its
+    // per-cluster "flash" scalars shift -- so this default is what keeps every
+    // pre-doc-99 archive hash reproducible.
+    REQUIRE(cfg.isMember("merge_flash_pcs"));
+    CHECK(cfg["merge_flash_pcs"].asBool() == false);
+
     // Rescue blind-spot fix (doc 23 phase 1a): knob must round-trip and
     // default OFF (bit-identical legacy ordering when absent).
     REQUIRE(cfg.isMember("postcull_before_rescue"));

@@ -905,6 +905,40 @@ namespace WireCell::Match {
         // trees (multi-APA path only); mirrors PointTreeMerging. ['opflash'] = the
         // optical-flash display PC; everything else is dropped from non-primary roots.
         std::set<std::string> m_root_pcs_to_merge{"opflash"};
+
+        /** Config: "merge_flash_pcs"  (doc 99; DEFAULT FALSE)
+         *
+         * Carry the canonical "flash"/"light"/"flashlight"/"flashcov" PCs of
+         * EVERY input through the multi-input merge, instead of keeping only the
+         * primary input's and dropping the rest.
+         *
+         * The defect this fixes.  merge_pct() concatenates only the names in
+         * root_pcs_to_merge ("opflash") and drops every other root PC of the
+         * non-primary inputs.  QLMatching stamps each cluster with the row index
+         * of its matched flash WITHIN ITS OWN INPUT's flash list ("flash"
+         * scalar), so after the merge that index addresses the primary input's
+         * list instead: Cluster::get_flash() then returns a DIFFERENT, real
+         * flash (or an out-of-range index).  Measured on SBND production, 3067
+         * events: only 50.6% of matched clusters resolved to their own flash.
+         *
+         * When true, before appending each non-primary input we shift that
+         * input's flash-row references -- the "flash" scalar of each of its
+         * clusters, its flashlight/flashcov join columns and the flash PC's own
+         * "ident" (which the FlashTensorToOpticalPCs schema defines as the row
+         * id) -- by the number of flash/light rows already on the merged root,
+         * then concatenate.  Cluster::get_flash() is then correct for every
+         * cluster of every input, and the archive is self-consistent
+         * (ident == merged row index).
+         *
+         * NOT byte-identical when on: the merged live tree gains the other
+         * inputs' flash/light/flashlight rows and its cluster "flash" scalars
+         * change, so every downstream archive hash moves.  Off => merge_pct is
+         * called with exactly the historical name set and nothing is shifted.
+         *
+         * Single-input jobs never merge, so this is a no-op there.
+         */
+        bool m_merge_flash_pcs{false};
+
         IDetectorVolumes::pointer m_dv;
 
         // Optional SBND CPA structure-exclusion fiducial volume. When set (the
@@ -1421,6 +1455,12 @@ namespace WireCell::Match {
         // group's largest-total-predicted-light bundle. See the .cxx comment.
         void apply_lm_verdicts(std::vector<ApaRun>& runs);
         void write_opflash_pc(ApaRun& run);          // merge-safe per-root "opflash" PC
+        // doc 99 / m_merge_flash_pcs: shift one source input's flash-row
+        // references by the row counts already on the merged target, so its
+        // canonical optical PCs can be concatenated rather than dropped.  Called
+        // once per non-primary input, immediately before merge_pct appends it.
+        void shift_flash_indices(ApaRun& src,
+                                 WireCell::PointCloud::Tree::Points::node_t* tgt) const;
 
         // LM (light-mismatch) verdict for one bundle (m_lm_tagger; see the knob
         // block above). Pure function of the bundle's flash / prediction /
