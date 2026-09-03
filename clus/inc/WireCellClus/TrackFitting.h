@@ -220,7 +220,7 @@ namespace WireCell::Clus {
          * @param fitting_type The type of fitting to perform (single or multiple tracks)
          */
         explicit TrackFitting(FittingType fitting_type = FittingType::Single);   
-        virtual ~TrackFitting() = default;
+        virtual ~TrackFitting();
 
         /**
          * Set the fitting type
@@ -926,6 +926,38 @@ namespace WireCell::Clus {
         // preload_clusters() with charge-cache-only clusters that own no
         // segment.
         std::set<const Facade::Cluster*> m_cov_fit_scope;
+
+        // doc pdvd/28 T1 (PDVD PR perf round 1): per-grouping coverage index
+        // for is_cell_covered_by_foreign_blobs.  For every (apa,face), the
+        // grouping's clusters owning at least one blob there, in
+        // grouping->children() order, with the bounding box of those blobs
+        // in (slice index, u/v/w wire index).  The box is a NECESSARY
+        // condition of the per-blob predicate is_cell_covered_by_own_blobs,
+        // so walking the index, skipping by box and re-applying the
+        // unchanged predicate visits a superset of the covering clusters in
+        // the original order: same first claimant, same OR.  Validity: a
+        // (cluster pointer, nblobs) signature of children() is re-checked at
+        // every rebuild_cov_fit_scope() (top of each fit pass; clusters are
+        // never mutated inside a pass) and grouping + child count at every
+        // use; reset_for_new_event() drops it.  Never iterated by pointer
+        // (children() order only), so determinism is unaffected.
+        struct CovBox {
+            const Facade::Cluster* cluster = nullptr;
+            int smin = 0, smax = 0;        // min slice_index_min .. max slice_index_max
+            int wmin[3] = {0, 0, 0};       // per-plane min wire_index_min
+            int wmax[3] = {0, 0, 0};       // per-plane max wire_index_max
+        };
+        struct CovIndex {
+            const Facade::Grouping* grouping = nullptr;
+            std::vector<std::pair<const Facade::Cluster*, size_t>> signature;
+            std::map<std::pair<int, int>, std::vector<CovBox>> by_face;  // (apa,face) -> children order
+        };
+        mutable CovIndex m_cov_index;
+        void ensure_cov_index(const Facade::Grouping* grouping) const;
+        // WCT_TF_COVERAGE_CENSUS=1: log-only counters (calls, index entries
+        // visited, box survivors, covering clusters), printed at each index
+        // rebuild and at destruction.  Unset => no counting, no log line.
+        mutable size_t m_cov_census[4] = {0, 0, 0, 0};
 
         // doc pr/50 (172230-class near-vertex robustness): graph vertex
         // positions (fit point when valid, else wcpt) and degrees at the

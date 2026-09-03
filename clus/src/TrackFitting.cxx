@@ -374,6 +374,7 @@ void TrackFitting::reset_for_new_event(){
     // previous event's Cluster* / vertex positions for the whole process.
     m_cov_fit_scope.clear();
     m_cov_vtx_info.clear();
+    m_cov_index = CovIndex();   // doc pdvd/28 T1: points into the dead event tree
 
     // Pattern-recognition results TaggerCheckNeutrino stashes here for the
     // downstream consumers (Bee particle flow, PrDisplayDump, the kine/tagger
@@ -3175,6 +3176,74 @@ bool TrackFitting::is_cell_covered_by_own_blobs(const Facade::Cluster* cluster, 
 // clusters (stable child order, and order cannot affect an OR), each via the
 // same interval-search predicate above; the kd query runs only for a cluster
 // that actually covers the cell, so the common case never pays it.
+// doc pdvd/28 T1: build (or re-validate) the per-grouping coverage index --
+// see the header.  Cost O(total blobs) per rebuild; rebuilt only when the
+// (cluster, nblobs) signature of children() changed.
+static const bool s_cov_census = std::getenv("WCT_TF_COVERAGE_CENSUS") != nullptr;
+
+void TrackFitting::ensure_cov_index(const Facade::Grouping* grouping) const
+{
+    const auto& kids = grouping->children();
+    bool fresh = (m_cov_index.grouping == grouping && m_cov_index.signature.size() == kids.size());
+    for (size_t i = 0; fresh && i < kids.size(); ++i) {
+        if (m_cov_index.signature[i].first != kids[i] ||
+            m_cov_index.signature[i].second != static_cast<size_t>(kids[i]->nchildren())) {
+            fresh = false;
+        }
+    }
+    if (fresh) return;
+    m_cov_index.grouping = grouping;
+    m_cov_index.signature.clear();
+    m_cov_index.by_face.clear();
+    m_cov_index.signature.reserve(kids.size());
+    for (const auto* c : kids) {
+        m_cov_index.signature.emplace_back(c, static_cast<size_t>(c->nchildren()));
+        for (const auto& [apa, fmap] : c->time_blob_map()) {
+            for (const auto& [face, smap] : fmap) {
+                CovBox box;
+                box.cluster = c;
+                bool first = true;
+                for (const auto& [key, blobs] : smap) {
+                    for (const auto* b : blobs) {
+                        const int smin = b->slice_index_min(), smax = b->slice_index_max();
+                        const int wmin[3] = {b->u_wire_index_min(), b->v_wire_index_min(), b->w_wire_index_min()};
+                        const int wmax[3] = {b->u_wire_index_max(), b->v_wire_index_max(), b->w_wire_index_max()};
+                        if (first) {
+                            box.smin = smin; box.smax = smax;
+                            for (int q = 0; q < 3; ++q) { box.wmin[q] = wmin[q]; box.wmax[q] = wmax[q]; }
+                            first = false;
+                            continue;
+                        }
+                        box.smin = std::min(box.smin, smin);
+                        box.smax = std::max(box.smax, smax);
+                        for (int q = 0; q < 3; ++q) {
+                            box.wmin[q] = std::min(box.wmin[q], wmin[q]);
+                            box.wmax[q] = std::max(box.wmax[q], wmax[q]);
+                        }
+                    }
+                }
+                if (!first) m_cov_index.by_face[{apa, face}].push_back(box);
+            }
+        }
+    }
+    if (s_cov_census) {
+        size_t nboxes = 0;
+        for (const auto& kv : m_cov_index.by_face) nboxes += kv.second.size();
+        s_log->debug("TF_COV_CENSUS index rebuilt: clusters={} faces={} boxes={} | since last: calls={} visited={} box_pass={} covered={}",
+                     kids.size(), m_cov_index.by_face.size(), nboxes,
+                     m_cov_census[0], m_cov_census[1], m_cov_census[2], m_cov_census[3]);
+        for (auto& v : m_cov_census) v = 0;
+    }
+}
+
+TrackFitting::~TrackFitting()
+{
+    if (s_cov_census && m_cov_census[0]) {
+        s_log->debug("TF_COV_CENSUS at destruction: calls={} visited={} box_pass={} covered={}",
+                     m_cov_census[0], m_cov_census[1], m_cov_census[2], m_cov_census[3]);
+    }
+}
+
 bool TrackFitting::is_cell_covered_by_foreign_blobs(const Facade::Grouping* grouping,
                                                     const Facade::Cluster* cluster,
                                                     const WireCell::Point& p, double ghost_dis,
@@ -3184,11 +3253,31 @@ bool TrackFitting::is_cell_covered_by_foreign_blobs(const Facade::Grouping* grou
                                                     const Facade::Cluster** claimant) const
 {
     if (!grouping) return false;
-    for (const auto* other : grouping->children()) {
+    // doc pdvd/28 T1: walk the (apa,face) index instead of every cluster in
+    // the grouping.  A cluster with no blob in this (apa,face) can never
+    // cover the cell (is_cell_covered_by_own_blobs returns false at the
+    // apa/face lookups); a cluster whose box excludes (time, wire) can never
+    // cover it either (every blob interval lies inside the box).  Survivors
+    // are visited in children() order with the verbatim predicate.
+    if (m_cov_index.grouping != grouping || m_cov_index.signature.size() != grouping->children().size()) {
+        ensure_cov_index(grouping);
+    }
+    if (s_cov_census) ++m_cov_census[0];
+    auto fit = m_cov_index.by_face.find({apa, face});
+    if (fit == m_cov_index.by_face.end()) return false;
+    const int tol_ticks = tol_cells * nticks_per_slice;
+    const int pl = (plane == 0) ? 0 : (plane == 1) ? 1 : 2;
+    for (const auto& box : fit->second) {
+        const auto* other = box.cluster;
         if (other == cluster) continue;
+        if (s_cov_census) ++m_cov_census[1];
+        if (time < box.smin - tol_ticks || time >= box.smax + tol_ticks) continue;
+        if (wire < box.wmin[pl] - tol_cells || wire >= box.wmax[pl] + tol_cells) continue;
+        if (s_cov_census) ++m_cov_census[2];
         if (m_cov_fit_scope.count(other)) continue;
         if (!is_cell_covered_by_own_blobs(other, apa, face, plane, wire, time,
                                           tol_cells, nticks_per_slice)) continue;
+        if (s_cov_census) ++m_cov_census[3];
         if (ghost_dis <= 0 || other->get_closest_dis(p) > ghost_dis) {
             if (claimant) *claimant = other;
             return true;
@@ -3209,6 +3298,7 @@ void TrackFitting::rebuild_cov_fit_scope(const std::shared_ptr<PR::Segment>& seg
 {
     m_cov_fit_scope.clear();
     m_cov_vtx_info.clear();
+    if (m_grouping) ensure_cov_index(m_grouping);   // doc pdvd/28 T1: full signature check per pass
     if (m_graph) {
         for (const auto& ed : PR::ordered_edges(*m_graph)) {
             auto& edge_bundle = (*m_graph)[ed];
@@ -7611,13 +7701,22 @@ void TrackFitting::dQ_dx_multi_fit(double dis_end_point_ext, bool flag_dQ_dx_fit
                 det_fnv(data_w_2D.data(), data_w_2D.size()),
                 det_fnv(local_dx.data(), local_dx.size()), hp);
     }
+    // doc pdvd/28: env-gated solver census (WCT_DQDX_SOLVE_CENSUS=1), log-only.
+    static const bool solve_census = std::getenv("WCT_DQDX_SOLVE_CENSUS") != nullptr;
+    std::chrono::steady_clock::time_point solve_t0;
+    if (solve_census) solve_t0 = std::chrono::steady_clock::now();
     solver.compute(A);
     pos_3D = solver.solveWithGuess(b, pos_3D_init);
     if (det_dbg()) fprintf(stderr, "WCT_DET dqdx_multi_out x=%016lx iters=%ld err=%.17g\n",
                            det_fnv(pos_3D.data(), pos_3D.size()), (long)solver.iterations(), solver.error());
-    
+
     if (std::isnan(solver.error())) {
         pos_3D = solver.solve(b);
+    }
+    if (solve_census) {
+        s_log->debug("DQDX_SOLVE multi n3d={} n2d={}/{}/{} nnzA={} iters={} err={:.3g} ms={:.1f}",
+                     n_3D_pos, n_2D_u, n_2D_v, n_2D_w, (long)A.nonZeros(), (long)solver.iterations(), solver.error(),
+                     std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - solve_t0).count());
     }
 
     // doc sbnd_xin/docs/pr/108 sec 9 -- dQ/dx SYSTEM dump (debug only, env WCT_DQDX_DUMP=<path>;
@@ -8495,13 +8594,22 @@ void WireCell::Clus::TrackFitting::dQ_dx_fit(double dis_end_point_ext, bool flag
     //     // You can add your processing logic here
     // }
 
+    // doc pdvd/28: env-gated solver census (WCT_DQDX_SOLVE_CENSUS=1), log-only.
+    static const bool solve_census = std::getenv("WCT_DQDX_SOLVE_CENSUS") != nullptr;
+    std::chrono::steady_clock::time_point solve_t0;
+    if (solve_census) solve_t0 = std::chrono::steady_clock::now();
     solver.compute(A);
     pos_3D = solver.solveWithGuess(b, pos_3D_init);
-    
+
     if (std::isnan(solver.error())) {
         pos_3D = solver.solve(b);
     }
-    
+    if (solve_census) {
+        s_log->debug("DQDX_SOLVE single n3d={} n2d={}/{}/{} nnzA={} iters={} err={:.3g} ms={:.1f}",
+                     n_3D_pos, n_2D_u, n_2D_v, n_2D_w, (long)A.nonZeros(), (long)solver.iterations(), solver.error(),
+                     std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - solve_t0).count());
+    }
+
     // Extract dQ values and apply corrections
     dQ.resize(n_3D_pos);
     for (int i=0;i!=n_3D_pos;i++){
