@@ -10,6 +10,7 @@
 
 #include <array>
 #include <cmath>
+#include <optional>
 
 namespace WireCell::Clus::PR {
 
@@ -3203,6 +3204,17 @@ namespace WireCell::Clus::PR {
         void examine_segment(Graph& graph, Facade::Cluster& cluster, TrackFitting& track_fitter, IDetectorVolumes::pointer dv);
         bool crawl_segment(Graph& graph, Facade::Cluster& cluster, SegmentPtr seg, VertexPtr vertex, TrackFitting& track_fitter, IDetectorVolumes::pointer dv );
         void examine_partial_identical_segments(Graph& graph, Facade::Cluster& cluster, TrackFitting& track_fitter, IDetectorVolumes::pointer dv);
+        // doc pdvd/26: the steiner point at which examine_partial_identical_segments
+        // splits the shared trunk of two overlapping segments leaving the vertex at
+        // `vtx_point` -- the closest steiner point to `max_point`, the far end of
+        // the overlap.  nullopt when the cluster has no steiner points, or when that
+        // closest point IS the vertex's own position (within 0.1 cm).  A split there
+        // clones the vertex in place, hands the clone the same two segments, and the
+        // next pass finds the identical overlap: the fixed point that ran PDVD
+        // 039349/14 and /53 for 48 min, adding one vertex and one zero-length
+        // segment per iteration.  Reached only when the overlap lies in a charge gap
+        // with no steiner support between the vertex and the split location.
+        std::optional<Facade::geo_point_t> partial_identical_split_point(const Facade::Cluster& cluster, const Facade::geo_point_t& max_point, const Facade::geo_point_t& vtx_point) const;
 
         //examine vertices
         void examine_vertices(Graph& graph, Facade::Cluster& cluster, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, VertexPtr main_vertex = nullptr);

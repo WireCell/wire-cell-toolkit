@@ -8,6 +8,7 @@
 #include <array>
 #include <atomic>
 #include <cstdlib>
+#include <optional>
 
 using namespace WireCell::Clus::PR;
 using namespace WireCell::Clus;
@@ -2599,20 +2600,27 @@ void PatternAlgorithms::examine_partial_identical_segments(Graph& graph, Facade:
                     track_fitter.do_multi_tracking(true, true, false, m_fit_exclusion, false, &cluster);
                     
                 } else {
-                    // Create new vertex at split point
-                    if (!cluster.has_pc("steiner_pc")) continue;
-                    // Get steiner point cloud
-                    const auto& steiner_pc = cluster.get_pc("steiner_pc");
-                    const auto& coords = cluster.get_default_scope().coords;
-                    const auto& x_coords = steiner_pc.get(coords.at(0))->elements<double>();
-                    const auto& y_coords = steiner_pc.get(coords.at(1))->elements<double>();
-                    const auto& z_coords = steiner_pc.get(coords.at(2))->elements<double>();
-
-                    // Find closest steiner point
-                    auto knn_results = cluster.kd_steiner_knn(1, max_point, "steiner_pc");
-                    if (!knn_results.empty()) {
-                        size_t idx = knn_results[0].first;
-                        Facade::geo_point_t vtx_new_point(x_coords[idx], y_coords[idx], z_coords[idx]);
+                    // Create new vertex at split point.  doc pdvd/26: the point
+                    // comes from partial_identical_split_point(); when it has
+                    // none -- no steiner cloud, or the closest steiner point to
+                    // the overlap's far end is this very vertex -- the vertex
+                    // cannot be split and is skipped WITHOUT raising
+                    // flag_continue.  Before, an empty kNN fell through to
+                    // flag_continue = true and the self-coincident case cloned
+                    // the vertex in place forever (PDVD 039349/14, /53).
+                    const auto split_pt = partial_identical_split_point(cluster, max_point, vtx->wcpt().point);
+                    if (!split_pt) {
+                        SPDLOG_LOGGER_DEBUG(s_log,
+                            "examine_partial_identical_segments: cluster {} degenerate split skipped: "
+                            "vtx=({:.1f},{:.1f},{:.1f}) max_dis={:.2f} cm max_point=({:.1f},{:.1f},{:.1f}) nv={} ne={}",
+                            cluster.get_cluster_id(),
+                            vtx->wcpt().point.x(), vtx->wcpt().point.y(), vtx->wcpt().point.z(),
+                            max_dis / units::cm, max_point.x(), max_point.y(), max_point.z(),
+                            boost::num_vertices(graph), boost::num_edges(graph));
+                        continue;
+                    }
+                    {
+                        Facade::geo_point_t vtx_new_point = *split_pt;   // non-const: do_rough_path takes geo_point_t&
                         
                         // Create new vertex
                         auto vtx2 = make_vertex(graph);
@@ -2685,6 +2693,37 @@ void PatternAlgorithms::examine_partial_identical_segments(Graph& graph, Facade:
             if (flag_continue) break;
         }
     }
+}
+
+std::optional<Facade::geo_point_t> PatternAlgorithms::partial_identical_split_point(const Facade::Cluster& cluster, const Facade::geo_point_t& max_point, const Facade::geo_point_t& vtx_point) const
+{
+    // Same present-but-empty guard as do_rough_path (SBND MC evt 11): the kNN
+    // on a point-less cloud returns nothing and [0] would read past the end.
+    if (!cluster.has_pc("steiner_pc")) return std::nullopt;
+    const auto& steiner_pc = cluster.get_pc("steiner_pc");
+    if (steiner_pc.size_major() == 0) return std::nullopt;
+    const auto& coords = cluster.get_default_scope().coords;
+    const auto& x_coords = steiner_pc.get(coords.at(0))->elements<double>();
+    const auto& y_coords = steiner_pc.get(coords.at(1))->elements<double>();
+    const auto& z_coords = steiner_pc.get(coords.at(2))->elements<double>();
+
+    // Closest steiner point to the far end of the overlap (prototype:
+    // pcloud->get_closest_wcpoint(max_point), NeutrinoID_proto_vertex.h).
+    auto knn_results = cluster.kd_steiner_knn(1, max_point, "steiner_pc");
+    if (knn_results.empty()) return std::nullopt;
+    const size_t idx = knn_results[0].first;
+    const Facade::geo_point_t pt(x_coords[idx], y_coords[idx], z_coords[idx]);
+
+    // The degenerate case (doc pdvd/26, PDVD 039349/14 and /53): the overlap
+    // lies in a charge gap and the closest steiner point to its far end is the
+    // vertex's own position.  A vertex "split" there clones the vertex in
+    // place, hands the clone the same two segments, and the next pass finds
+    // the identical overlap on the clone -- a fixed point of the while loop.
+    // 0.1 cm is "the same point" (steiner spacing is several mm; the split the
+    // caller wants is > 5 cm out), and the tolerance only matters when the
+    // vertex is not itself exactly a steiner point.
+    if ((pt - vtx_point).magnitude() < 0.1 * units::cm) return std::nullopt;
+    return pt;
 }
 
 Facade::geo_point_t PatternAlgorithms::get_local_extension(Facade::Cluster& cluster, const Facade::geo_point_t& wcp){
