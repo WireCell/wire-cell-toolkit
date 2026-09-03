@@ -1633,52 +1633,13 @@ void Graphs::connect_graph_relaxed_strict(
         return killed;
     };
 
-    // Calculate distances between components
-    for (size_t j = 0; j != num; j++) {
-        for (size_t k = j + 1; k != num; k++) {
-            // Get closest points between components
-            index_index_dis[j][k] = pt_clouds.at(j)->get_closest_points(*pt_clouds.at(k));
-
-            // C.4: skip the expensive Hough probes when clouds are too far apart to benefit.
-            // get_closest_point_along_vec is called with max_dis=80 cm, so a closest-pair
-            // distance already >= 80 cm guarantees both directional probes return nothing.
-            const bool close_enough = std::get<2>(index_index_dis[j][k]) < 80 * units::cm;
-
-            // Skip small clouds
-            if (close_enough &&
-                ((num < 100 && pt_clouds.at(j)->get_num_points() > 100 && pt_clouds.at(k)->get_num_points() > 100 &&
-                  (pt_clouds.at(j)->get_num_points() + pt_clouds.at(k)->get_num_points()) > 400) ||
-                 (pt_clouds.at(j)->get_num_points() > 500 && pt_clouds.at(k)->get_num_points() > 500))) {
-
-                // Get closest points and calculate directions
-                geo_point_t p1 = pt_clouds.at(j)->point(std::get<0>(index_index_dis[j][k]));
-                geo_point_t p2 = pt_clouds.at(k)->point(std::get<1>(index_index_dis[j][k]));
-
-                geo_vector_t dir1 = cluster.vhough_transform(p1, 30 * units::cm, Cluster::HoughParamSpace::theta_phi, pt_clouds.at(j), 
-                                                pt_clouds_global_indices.at(j));
-                geo_vector_t dir2 = cluster.vhough_transform(p2, 30 * units::cm, Cluster::HoughParamSpace::theta_phi, pt_clouds.at(k),
-                                                pt_clouds_global_indices.at(k)); 
-                dir1 = dir1 * -1;
-                dir2 = dir2 * -1;
-
-                std::pair<int, double> result1 = pt_clouds.at(k)->get_closest_point_along_vec(p1, dir1, 80 * units::cm, 5 * units::cm, 7.5, 3 * units::cm);
-
-                if (result1.first >= 0) {
-                    index_index_dis_dir1[j][k] = std::make_tuple(std::get<0>(index_index_dis[j][k]), 
-                                                                result1.first, result1.second);
-                }
-
-                std::pair<int, double> result2 = pt_clouds.at(j)->get_closest_point_along_vec(p2, dir2, 80 * units::cm, 5 * units::cm, 7.5, 3 * units::cm); 
-
-                if (result2.first >= 0) {
-                    index_index_dis_dir2[j][k] = std::make_tuple(result2.first,
-                                                                std::get<1>(index_index_dis[j][k]), 
-                                                                result2.second);
-                }
-            }
-            // Now check the path 
-
-            {
+    // doc clus/connect-graph-strict-perf round 1: the closest-pair walk,
+    // hoisted verbatim out of the (j,k) loop below into a lambda so it can be
+    // called on demand.  Pure refactor -- same statements, same order, same
+    // captures; the only change at this step is WHERE it is written.  The lazy
+    // Kruskal of round 2 needs exactly this handle (doc 78 round 1 did the same
+    // to connect_graph_relaxed.cxx before its round 2).
+    auto eval_pair_verdict = [&](size_t j, size_t k) {
                 geo_point_t p1 = pt_clouds.at(j)->point(std::get<0>(index_index_dis[j][k]));
                 auto wpid_p1 = cluster.wire_plane_id(pt_clouds_global_indices.at(j).at(std::get<0>(index_index_dis[j][k])));
                 geo_point_t p2 = pt_clouds.at(k)->point(std::get<1>(index_index_dis[j][k]));
@@ -1893,7 +1854,54 @@ void Graphs::connect_graph_relaxed_strict(
                         num_bad[0], num_bad[1], num_bad[2], num_bad[3],
                         num_bad1[0], num_bad1[1], num_bad1[2], num_bad1[3], killed);
                 }
+    };
+
+    // Calculate distances between components
+    for (size_t j = 0; j != num; j++) {
+        for (size_t k = j + 1; k != num; k++) {
+            // Get closest points between components
+            index_index_dis[j][k] = pt_clouds.at(j)->get_closest_points(*pt_clouds.at(k));
+
+            // C.4: skip the expensive Hough probes when clouds are too far apart to benefit.
+            // get_closest_point_along_vec is called with max_dis=80 cm, so a closest-pair
+            // distance already >= 80 cm guarantees both directional probes return nothing.
+            const bool close_enough = std::get<2>(index_index_dis[j][k]) < 80 * units::cm;
+
+            // Skip small clouds
+            if (close_enough &&
+                ((num < 100 && pt_clouds.at(j)->get_num_points() > 100 && pt_clouds.at(k)->get_num_points() > 100 &&
+                  (pt_clouds.at(j)->get_num_points() + pt_clouds.at(k)->get_num_points()) > 400) ||
+                 (pt_clouds.at(j)->get_num_points() > 500 && pt_clouds.at(k)->get_num_points() > 500))) {
+
+                // Get closest points and calculate directions
+                geo_point_t p1 = pt_clouds.at(j)->point(std::get<0>(index_index_dis[j][k]));
+                geo_point_t p2 = pt_clouds.at(k)->point(std::get<1>(index_index_dis[j][k]));
+
+                geo_vector_t dir1 = cluster.vhough_transform(p1, 30 * units::cm, Cluster::HoughParamSpace::theta_phi, pt_clouds.at(j), 
+                                                pt_clouds_global_indices.at(j));
+                geo_vector_t dir2 = cluster.vhough_transform(p2, 30 * units::cm, Cluster::HoughParamSpace::theta_phi, pt_clouds.at(k),
+                                                pt_clouds_global_indices.at(k)); 
+                dir1 = dir1 * -1;
+                dir2 = dir2 * -1;
+
+                std::pair<int, double> result1 = pt_clouds.at(k)->get_closest_point_along_vec(p1, dir1, 80 * units::cm, 5 * units::cm, 7.5, 3 * units::cm);
+
+                if (result1.first >= 0) {
+                    index_index_dis_dir1[j][k] = std::make_tuple(std::get<0>(index_index_dis[j][k]), 
+                                                                result1.first, result1.second);
+                }
+
+                std::pair<int, double> result2 = pt_clouds.at(j)->get_closest_point_along_vec(p2, dir2, 80 * units::cm, 5 * units::cm, 7.5, 3 * units::cm); 
+
+                if (result2.first >= 0) {
+                    index_index_dis_dir2[j][k] = std::make_tuple(result2.first,
+                                                                std::get<1>(index_index_dis[j][k]), 
+                                                                result2.second);
+                }
             }
+            // Now check the path 
+
+            eval_pair_verdict(j, k);
 
             // Now check path again ...
             if (std::get<0>(index_index_dis_dir1[j][k]) >= 0) {
