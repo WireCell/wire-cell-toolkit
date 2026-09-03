@@ -2870,8 +2870,19 @@ void MultiAlgBlobClustering::fill_bee_points_from_cluster(
         const auto& fy = fit_pc.get(coords.at(1))->elements<double>();
         const auto& fz = fit_pc.get(coords.at(2))->elements<double>();
         const auto& fdQ = fit_pc.get("dQ")->elements<double>();
+        // real_clid = clid (doc pdvd/30): the general scoped-view branch
+        // below stamps real_cluster_id == clid whenever no per-blob
+        // genealogy is available (its documented backward-compatible
+        // fallback); an STM fit trajectory carries no per-blob provenance
+        // at all, so 0 -- which reads in Bee as "genuinely cluster 0",
+        // colliding with any cluster whose real id IS 0 -- was simply
+        // wrong, not merely a placeholder.  clid matches the same
+        // fallback convention.  Only reachable when save_stm_fit is on
+        // (an opt-in diagnostic dump); the loop body never executes when
+        // it is off, so this is byte-identical for every production
+        // config.
         for (size_t i = 0; i < fx.size(); ++i) {
-            bpts.append(Point(fx[i], fy[i], fz[i]), fdQ[i]*dQdx_scale + dQdx_offset, clid, 0);
+            bpts.append(Point(fx[i], fy[i], fz[i]), fdQ[i]*dQdx_scale + dQdx_offset, clid, clid);
         }
         return;
     }
