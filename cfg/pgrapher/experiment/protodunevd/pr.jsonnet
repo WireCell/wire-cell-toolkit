@@ -1082,16 +1082,19 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
         // units::cm/units::MeV = 10 in the quenching term.  The Practical
         // class carries the pre-e6fb7ef3 arithmetic verbatim, so this path is
         // bit-identical to what it computed before that merge.
-        // PDVD (doc pdvd/25 sec 7c): Modified Box with the SAME parameter set the
-        // dQ/dx reference tables were generated with (convert_field.C: alpha 0.93,
-        // beta 0.212, rho 1.38) at the PDVD field 0.44 kV/cm implied by the
-        // data-calibrated drift velocity (pdvd/stm/pdvd_transport.py).  SBND's
-        // A=1.0/B=0.255 is a different parameter set (energy_loss/docs/
-        // dqdx_consistency_check.md sec 6); PDVD keeps tables and model consistent.
+        // PDVD (doc pdvd/25 sec 7c, updated doc pdvd/29): Modified Box with the SAME
+        // parameter set the dQ/dx reference tables were generated with
+        // (convert_field.C: alpha 0.93, beta 0.212, rho 1.38) at the PDVD field
+        // 0.45 kV/cm (450 V/cm) -- the ADOPTED production field (owner decision
+        // 2026-09-03), set directly rather than derived from the data-calibrated
+        // drift velocity as the previous 0.44 kV/cm value was (pdvd/stm/
+        // pdvd_transport.py).  SBND's A=1.0/B=0.255 is a different parameter set
+        // (energy_loss/docs/dqdx_consistency_check.md sec 6); PDVD keeps tables
+        // and model consistent.
         local pdvd_box_recomb = {
             type: 'PracticalBoxRecombination',
             name: 'pdvd_box_recomb',
-            data: { A: 0.93, B: 0.212, Efield: 0.44, rho: 1.38, Wi: 23.6e-6 },
+            data: { A: 0.93, B: 0.212, Efield: 0.45, rho: 1.38, Wi: 23.6e-6 },
         },
         // Free-power Modified Box fitted to SBND stopping-track dQ/dx vs residual
         // range (docs/55 sec 7g; canonical parameters in stm_ref_dqdx.json:

@@ -129,6 +129,28 @@ base {
         // Consistent with the Walkowiak nominal at the PDVD field.  See
         // pdvd/docs/clus-workflow.md (drift-velocity calibration).
         drift_speed: 1.568 * wc.mm / wc.us,  // was 1.57 (D=339.01); 1.6 orig default
+
+        // Adopted PDVD production drift field, DL/DT and lifetime (owner decision
+        // 2026-09-03, doc pdvd/29).  E = 0.45 kV/cm (450 V/cm) is set directly (it
+        // is also what pgrapher/experiment/protodunevd/pr.jsonnet's
+        // pdvd_box_recomb.Efield and pdvd_track_fitting.json's DL/DT now use).
+        // DL/DT are the physical PDVD transport coefficients from the BNL
+        // LAr-properties parameterisation (lar.bnl.gov/properties;
+        // pdvd/stm/pdvd_transport.py: diffusion(0.45, T=87.3)), NOT derived from
+        // drift_speed above -- drift_speed was left unchanged by this update and
+        // is currently NOT the value that inverts to E = 0.45 kV/cm under the
+        // same parameterisation (see doc pdvd/29 for the flagged inconsistency).
+        // Neither DL/DT nor lifetime has a production consumer via this `lar`
+        // block today (real-data reconstruction reads its own copy of DL/DT from
+        // pdvd_track_fitting.json, and no PDVD lifetime-attenuation correction is
+        // wired up yet); these are recorded here as the single physical source of
+        // truth for whoever adds that correction.  PDVD's own simulation
+        // (simparams.jsonnet) is unaffected -- it still drifts with the sim pair
+        // DL=4.0/DT=8.8 and lifetime=1000 ms (effectively off), by design (MC
+        // consistency, not physical PDVD values).
+        DL: 4.1307 * wc.cm2 / wc.s,
+        DT: 7.9135 * wc.cm2 / wc.s,
+        lifetime: 20 * wc.ms,
     },
 
     daq: super.daq {
@@ -210,7 +232,17 @@ base {
         // U at W-13.2 mm (340.23), vs the v5 LArSoft 0.2 mm-step convention.
         // See pdvd/docs/qlmatch/pdvd-crp-anode-plane-geometry.md.  NOT
         // byte-identical to v5 reco (sigproc/imaging induction-plane geometry).
-        wires: "protodunevd-wires-larsoft-v6.json.bz2",
+        //
+        // v7-uvwfit (2026-09-03, owner decision, doc pdvd/29) = v6 with a
+        // refit U/V/W wire geometry from a colleague's fit, superseding v6 as
+        // the PDVD production default.  On the 039252 evt 2 Michel/STM sample
+        // it partially improves the Steiner terminal-charge AND-gate pass rate
+        // (17.4%->20.2% at the 4000e floor, 42.7%->48.2% at 500e; doc
+        // pdvd/28 sec 7) by making individual per-point charge lookups more
+        // accurate, though it does not reduce the underlying three-plane
+        // wire-crossing ambiguity.  NOT byte-identical to v6 reco (sigproc/
+        // imaging induction-plane geometry, same as the v5->v6 change above).
+        wires: "protodunevd-wires-larsoft-v7-uvwfit.json.bz2",
         strip_length: "PDVD_strip_length.json.bz2",
 
         fields: [

@@ -14,30 +14,41 @@
 // drift field; only the five *Range tables (range cm -> kinetic energy MeV)
 // are detector-independent and are copied from the SBND file unchanged.
 //
-// The five *DeDx tables were generated for PDVD at E = 0.44 kV/cm (2026-09-02):
+// The five *DeDx tables were regenerated for PDVD at E = 0.45 kV/cm (450 V/cm,
+// 2026-09-03; supersedes the 2026-09-02 0.44 kV/cm version, doc pdvd/29):
 //
 //     energy_loss/pion_travel/convert_field.C
-//       root -l -b -q 'convert_field.C(0.44, "stopping_ave_dQ_dx_pdvd.root", true)'
-//     energy_loss/docs/emit_jsonnet_dedx.py pion_travel/stopping_ave_dQ_dx_pdvd.root
+//       root -l -b -q 'convert_field.C(0.45, "stopping_ave_dQ_dx_pdvd045.root", true)'
+//     energy_loss/docs/emit_jsonnet_dedx.py pion_travel/stopping_ave_dQ_dx_pdvd045.root
 //
 //   dQ/dx = ln(alpha + beta'*dE/dx) / (beta' * W_ion) * 0.85
 //   alpha = 0.93, beta = 0.212, rho = 1.38 g/cm^3, W_ion = 23.6 eV, beta' = beta/(rho*E)
 //
-// Why 0.44 and not the nominal 0.5: the field is the one implied by PDVD's
-// data-calibrated drift velocity, v = 1.48073 mm/us (production Q/L value,
-// run_clus_evt.sh), inverted through the BNL LAr-properties mobility
-// parameterisation at T = 87.68 K (dunecore) -> E = 0.439 kV/cm
-// (pdvd/stm/pdvd_transport.py).  Owner decision 2026-09-02: trust the
-// velocity; the dQ/dx-vs-residual-range comparison with data is the
-// confirmation of the field.  A 0.50 kV/cm comparison set lives in
-// energy_loss/pion_travel/stopping_ave_dQ_dx_pdvd050.root and in
+// 0.45 kV/cm (450 V/cm) is now the ADOPTED PDVD production field (owner
+// decision 2026-09-03, doc pdvd/29), set directly rather than derived from the
+// data-calibrated drift velocity as the previous 0.44 kV/cm value was.  It is
+// the same field the DL/DT transport coefficients in params.jsonnet's `lar`
+// block and pdvd_track_fitting.json are now evaluated at (pdvd/stm/
+// pdvd_transport.py, T = 87.3 K site default).  NOTE: the current production
+// drift speed (1.48073 mm/us, run_clus_evt.sh) and the params.jsonnet default
+// (1.568 mm/us) both correspond to a lower field (~0.439-0.51 kV/cm depending
+// on T) than 0.45 kV/cm under the same BNL parameterisation -- this doc flags
+// that residual inconsistency rather than silently reconciling it; drift
+// speed was not part of this change.  The previous 0.44 kV/cm tables remain in
+// energy_loss/pion_travel/stopping_ave_dQ_dx_pdvd.root (uncommitted there; the
+// energy_loss repo has its own remote, lastgeorge/energy_loss, and is not
+// part of this change).  A 0.50 kV/cm comparison set from the earlier round
+// lives in energy_loss/pion_travel/stopping_ave_dQ_dx_pdvd050.root and in
 // pdvd/stm/pdvd_ref_dqdx.json (keys *DeDx_E050) -- it is NOT in this file.
 //
-// Consequences (0.44 vs 0.50): muon plateau at rr = 59.5 cm 53798.3 vs
-// 54657.7 e/cm (-1.6 %), muon Bragg bin 158255 vs 168151 (-5.9 %), MIP
-// (2.1 MeV/cm) 52481 vs 53266.  mip_dqdx for PDVD follows SBND's rule
-// (56000 = plateau 54657.7 x 1.0246): 53798.3 x 1.0246 = 55120 -> 55000;
-// mip_dqdx_median scales the same way from SBND's 48000 -> 47000.
+// Consequences (0.45 vs the previous 0.44): muon plateau at rr = 59.5 cm
+// 53965.5 vs 53798.3 e/cm (+0.31 %), muon Bragg bin 159982 vs 158255 (+1.1 %),
+// MIP (2.1 MeV/cm) 52635.2 vs 52481.  Applying the same SBND-derived scaling
+// rule (mip_dqdx = plateau x 1.0246, rounded to the nearest 1000) to the new
+// plateau still rounds to 55000/47000 -- mip_dqdx/mip_dqdx_median in pr.jsonnet
+// are UNCHANGED by this table refresh and were already stale relative to the
+// 0.44 kV/cm tables (still literally 56000/48000, the raw SBND values) before
+// this change; that pre-existing gap is out of scope here (see doc pdvd/29).
 //
 // The undocumented 0.85 scale factor is deliberately RETAINED (it is not a
 // physics term and is degenerate with the missing gain / electron-lifetime
@@ -57,12 +68,12 @@ function() {
           start: 0.5,    // First x-coordinate
           step: 1,     // Spacing between x-coordinates
           values: [
-              158255, 113432, 99198.5, 90952.9, 85329.2, 81187.9, 78060.5, 75361.5, 73225.6, 71346.9,
-              69781.5, 68389.4, 67182.8, 66108, 65158.2, 64292.7, 63525.8, 62810, 62176, 61571.6,
-              61041.1, 60528.9, 60081.1, 59653.4, 59261.8, 58896.8, 58548.3, 58232.8, 57923.6, 57640.8,
-              57366.1, 57116, 56889.5, 56668, 56464.6, 56266.5, 56122.3, 56019.9, 55917.7, 55815.6,
-              55713.6, 55611.7, 55509.9, 55408.3, 55306.7, 55205.4, 55104.1, 55003, 54901.9, 54801,
-              54700.2, 54599.5, 54498.9, 54398.5, 54298.2, 54198, 54097.8, 53997.9, 53898.1, 53798.3
+              159982, 114380, 99931.5, 91568.6, 85868.3, 81672.4, 78504.9, 75771.9, 73609.8, 71708.3,
+              70124.2, 68715.7, 67495.1, 66407.8, 65447.2, 64571.9, 63796.4, 63072.7, 62431.6, 61820.6,
+              61284.3, 60766.5, 60313.8, 59881.5, 59485.8, 59116.8, 58764.6, 58445.8, 58133.4, 57847.6,
+              57570, 57317.3, 57088.4, 56864.6, 56659.1, 56458.9, 56313.3, 56209.8, 56106.5, 56003.3,
+              55900.3, 55797.3, 55694.6, 55591.9, 55489.3, 55386.9, 55284.6, 55182.4, 55080.3, 54978.4,
+              54876.6, 54774.8, 54673.2, 54571.8, 54470.5, 54369.3, 54268.1, 54167.2, 54066.3, 53965.5
           ]
       }
   },
@@ -73,12 +84,12 @@ function() {
           start: 0.5,    // First x-coordinate
           step: 1,     // Spacing between x-coordinates
           values: [
-              51411.6, 51411.6, 54212.5, 56357.5, 58004.6, 59408.5, 60640.4, 61742.2, 62711.1, 63579.3,
-              64354, 65047.1, 65667.5, 66223.6, 66719.2, 66966.1, 66966.1, 66966.1, 66966.1, 66966.1,
-              66966.1, 66966.1, 66966.1, 66966.1, 66966.1, 66966.1, 66966.1, 66966.1, 66966.1, 66966.1,
-              66966.1, 66966.1, 66966.1, 66966.1, 66966.1, 66966.1, 66966.1, 66966.1, 66966.1, 66966.1,
-              66966.1, 66966.1, 66966.1, 66966.1, 66966.1, 66966.1, 66966.1, 66966.1, 66966.1, 66966.1,
-              66966.1, 66966.1, 66966.1, 66966.1, 66966.1, 66966.1, 66966.1, 66966.1, 66966.1, 66966.1
+              51555.3, 51555.3, 54383.9, 56550.9, 58215.2, 59634.1, 60879.2, 61993.1, 62972.7, 63850.5,
+              64633.9, 65334.9, 65962.4, 66524.8, 67026.1, 67275.9, 67275.9, 67275.9, 67275.9, 67275.9,
+              67275.9, 67275.9, 67275.9, 67275.9, 67275.9, 67275.9, 67275.9, 67275.9, 67275.9, 67275.9,
+              67275.9, 67275.9, 67275.9, 67275.9, 67275.9, 67275.9, 67275.9, 67275.9, 67275.9, 67275.9,
+              67275.9, 67275.9, 67275.9, 67275.9, 67275.9, 67275.9, 67275.9, 67275.9, 67275.9, 67275.9,
+              67275.9, 67275.9, 67275.9, 67275.9, 67275.9, 67275.9, 67275.9, 67275.9, 67275.9, 67275.9
           ]
       }
   },
@@ -89,12 +100,12 @@ function() {
           start: 0.5,    // First x-coordinate
           step: 1,     // Spacing between x-coordinates
           values: [
-              168164, 121580, 106502, 97597.8, 91530.3, 86988, 83424.8, 80550.7, 78246.6, 76105,
-              74362.4, 72802.9, 71404.2, 70214.2, 69064.4, 68103.9, 67192.4, 66351.2, 65625.7, 64912.5,
-              64277.4, 63696.8, 63125.3, 62622.6, 62146.3, 61680.3, 61270.1, 60875.2, 60489.6, 60153.2,
-              59827.8, 59509, 59223.8, 58947.6, 58674.6, 58429.1, 58191.7, 57956.2, 57738.5, 57530,
-              57322.4, 57134.3, 56963.2, 56792.5, 56628.5, 56475.6, 56323.7, 56185.6, 56100.1, 56022.7,
-              55945.3, 55867.9, 55790.7, 55713.5, 55636.3, 55559.2, 55482.3, 55405.3, 55328.5, 55251.7
+              170072, 122657, 107343, 98307.5, 92153.9, 87549.4, 83938.5, 81026.9, 78693.3, 76524.7,
+              74760.5, 73181.9, 71766.3, 70562.1, 69398.6, 68426.8, 67504.8, 66653.8, 65920.1, 65198.8,
+              64556.5, 63969.3, 63391.4, 62883.2, 62401.6, 61930.5, 61515.7, 61116.6, 60726.8, 60386.8,
+              60057.9, 59735.6, 59447.3, 59168.2, 58892.3, 58644.2, 58404.3, 58166.3, 57946.3, 57735.6,
+              57525.9, 57335.8, 57162.9, 56990.3, 56824.7, 56670.2, 56516.7, 56377.2, 56290.8, 56212.6,
+              56134.4, 56056.2, 55978.2, 55900.2, 55822.2, 55744.4, 55666.7, 55588.9, 55511.2, 55433.7
           ]
       }
   },
@@ -105,12 +116,12 @@ function() {
           start: 0.5,    // First x-coordinate
           step: 1,     // Spacing between x-coordinates
           values: [
-              215974, 163214, 144862, 133639, 126018, 119970, 114875, 110902, 107247, 104403,
-              101661, 99356.3, 97312.6, 95322.5, 93666, 92113.2, 90595.2, 89301.2, 88079.7, 86871.2,
-              85801.3, 84820.6, 83846.3, 82920.6, 82110.2, 81311.7, 80519.8, 79831.2, 79210.5, 78592.7,
-              77977.6, 77365.4, 76756.1, 76149.6, 75562.3, 75090.8, 74645.3, 74201.3, 73758.9, 73318.2,
-              72878.9, 72441.3, 72008.3, 71637.9, 71301.3, 70965.5, 70630.7, 70296.9, 69964, 69632.1,
-              69301.2, 68978.4, 68706.4, 68446.7, 68187.4, 67928.7, 67670.8, 67413.3, 67156.4, 66900.2
+              218801, 165011, 146330, 134914, 127167, 121021, 115845, 111810, 108099, 105212,
+              102429, 100091, 98018, 95999.3, 94319.5, 92744.9, 91205.8, 89894, 88655.8, 87431,
+              86346.7, 85352.9, 84365.6, 83427.7, 82606.6, 81797.8, 80995.6, 80298.1, 79669.5, 79043.7,
+              78420.9, 77801, 77183.9, 76569.8, 75975.2, 75497.9, 75046.8, 74597.4, 74149.6, 73703.4,
+              73258.8, 72815.9, 72377.6, 72002.8, 71662.1, 71322.3, 70983.5, 70645.7, 70308.9, 69973.1,
+              69638.2, 69311.6, 69036.4, 68773.6, 68511.3, 68249.6, 67988.7, 67728.2, 67468.3, 67209.2
           ]
       }
   },
@@ -121,12 +132,12 @@ function() {
           start: 0.5,    // First x-coordinate
           step: 1,     // Spacing between x-coordinates
           values: [
-              242071, 187202, 167487, 155265, 146516, 139759, 134293, 129726, 126169, 122975,
-              119819, 116808, 114558, 112466, 110393, 108348, 106681, 105213, 103756, 102309,
-              100896, 99742, 98661.7, 97587.5, 96519.9, 95459.2, 94536.8, 93713.9, 92894.9, 92079.9,
-              91268.7, 90472, 89792.4, 89146.6, 88503.4, 87862.7, 87224.7, 86592.6, 86040.8, 85523.1,
-              85007.3, 84493.2, 83980.9, 83470.4, 82985.1, 82559.4, 82137.4, 81716.7, 81297.2, 80878.9,
-              80461.9, 80082.6, 79754.8, 79428.1, 79102.1, 78776.9, 78452.5, 78128.9, 77806.1, 77484.1
+              245427, 189449, 169362, 156917, 148013, 141138, 135579, 130936, 127320, 124074,
+              120867, 117808, 115523, 113398, 111293, 109216, 107524, 106034, 104555, 103087,
+              101653, 100483, 99386.5, 98296.8, 97213.8, 96138, 95202.5, 94368, 93537.5, 92711.1,
+              91888.6, 91080.8, 90391.9, 89737.2, 89085.2, 88435.9, 87789.2, 87148.5, 86589.3, 86064.7,
+              85542, 85021.1, 84501.9, 83984.7, 83493.1, 83061.7, 82634.2, 82208, 81783, 81359.4,
+              80937, 80552.8, 80220.7, 79889.8, 79559.7, 79230.3, 78901.8, 78574.1, 78247.2, 77921.1
           ]
       }
   },
