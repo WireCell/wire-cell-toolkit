@@ -2,11 +2,14 @@
 
 **Scope.** Four changes to the strict connect-graph family and its two helpers.
 Three are byte-identical waste removal with no knob; the fourth is a new graph
-flavor carrying doc 78's busy-gated lazy walk, which no job selects by default.
-No production default is flipped by this round.
+flavor carrying doc 78's busy-gated lazy walk. No production default was
+flipped by round 1 itself.
 
-**Status.** Shipped, gated. The lazy flavor is available and measured but is
-**not** turned on anywhere — see *The flip is the owner's call* below.
+**Status.** Shipped, gated. Round 12 (below) widened the witness set from 1
+cluster to 2 via a full 120-event PDVD census and flipped
+`wcp-porting-img/pdvd/wct-pr-perevt.jsonnet`'s `protect_graph_name` default to
+the `_fast` flavor — see *§5a Round 12: the PDVD flip* for the evidence and
+the legacy escape.
 
 ## Repro
 
@@ -247,6 +250,62 @@ or change the `protect_graph_name` default in
 `wcp-porting-img/pdvd/wct-pr-perevt.jsonnet`. The value is for anyone running
 with the scope knob off, and for a future detector whose busy clusters land in
 the same regime.
+
+## 5a. Round 12: the PDVD flip
+
+The owner asked for exactly the validation named above, then to flip on pass.
+Both were done in the same round.
+
+**Repro:**
+
+```bash
+cd /home/xqian/toolkit-dev/wcp-porting-img/pdvd
+# reuse an existing arm's Q/L-stage pctree (protect_graph_name is a PR-stage
+# knob, so any prior arm's pctree-evt*.tar.gz/.tlas is valid input) for all
+# 120 doc-25 `_keep` events, seeded into two new tag dirs, then:
+PDVD_MAX_JOBS=6 ./run_pr_evt.sh -s d25r12eager -stm-fit 39252 all   # + 39253, 39349
+PDVD_MAX_JOBS=6 PDVD_PR_TLA="-S protect_graph_name='relaxed_strict_img_2d_rescue_long_wtrack_fast'" \
+    ./run_pr_evt.sh -s d25r12fast -stm-fit 39252 all                # + 39253, 39349
+python3 stm/gates/r12_lazy_gate.py   # hash gate + ncomp/lazy census -> stm/gates/r12_compare.txt, r12_census.tsv
+```
+
+**Result.** 119/120 events completed in both arms; `039349/32` SIGSEGVs
+identically in both, inside `TrackFitting::form_point_association` downstream
+of `TaggerCheckNeutrino`'s dual-chain-off pass — a pre-existing crash with no
+connection to `protect_graph_name` (same stack, same event, both arms), not
+fixed in this round. Of 189 STM-bundle clusters censused via the
+`connect_graph_relaxed_strict: ... ncomp=... lazy=...` debug line across the
+119 completed events, **exactly 2** crossed `ncomp>200` and actually took the
+lazy path:
+
+| event | nblobs | npoints | ncomp | lazy |
+|---|---|---|---|---|
+| 039252/8 (cluster 84, round 1's witness) | 18876 | 93584 | 509 | true |
+| 039253/5 | 7435 | 24204 | 205 | true |
+
+The rest of the 189-cluster tail drops off sharply below the threshold (117,
+83, 80, 56, ...) — `busy_num_threshold=200` is a rare gate on this manifest,
+not a common one. Both witnesses' `mabc-pr.zip` and `calib-pr-evt*.json`
+(`vertex_scoreboard.dual_chain` timer excluded, recursively) hashed
+byte-identical to the eager flavor via `abtest/hash_archive.py`. Across all
+119 completed events, all 238 possible bee+calib hash pairs matched — 0
+diffs. The only two unpaired entries (`039349/32` calib, `039349/60` calib)
+were **absent in both arms identically** (`/32` from the crash above; `/60`
+fires zero STM-tagged bundles, which doc 25 §13.10 already documents as
+producing no calib dump at all) — not a divergence.
+
+This raises the witness count for item 2's Kruskal-vs-Prim tie behaviour from
+**n = 1 to n = 2**, both real production clusters, both exact. **Flipped**:
+`wct-pr-perevt.jsonnet`'s `protect_graph_name` default is now
+`relaxed_strict_img_2d_rescue_long_wtrack_fast`; compiled-config proof grepped
+`"graph_name" : "relaxed_strict_img_2d_rescue_long_wtrack_fast"` with no
+override, and the legacy escape
+(`PDVD_PR_TLA="-S protect_graph_name='relaxed_strict_img_2d_rescue_long_wtrack'"`)
+was re-tested to restore the exact prior string. This is PDVD-only — the
+change lives in a PDVD job file, not in shared `cfg/pgrapher/common/` or in
+any C++ default, so no other detector is affected and no shared-component
+gate is needed. `dir1`/`dir2` are still eager (§6), so this remains a 2.15×
+lever on the pathological-cluster regime, not the un-gated ceiling.
 
 ## 6. What is left
 
