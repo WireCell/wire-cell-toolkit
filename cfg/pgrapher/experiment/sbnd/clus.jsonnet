@@ -912,9 +912,17 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, e
               // Cluster::get_flash() (the per-input "flash" row index, which the
               // multi-APA merge invalidates for every cluster not matched on the
               // primary input -- 49.4% of production rows name the wrong real
-              // flash).  C++ default false.  Key omitted when off =>
-              // byte-identical pre-fix config.
-              flash_by_gid=false,
+              // flash).  C++ default false, so PDVD's own fork
+              // (PdvdPrMagnifyTrackingVisitor) does not move -- its gid-uniqueness
+              // precondition is still unchecked and its doctest pins it off.
+              // FLIPPED TRUE for SBND production 2026-09-03 on the owner's word
+              // (doc 99 sec 10); ref/prod-2026-09-05.  The default lives here and
+              // not only on the per-event job's TLA because
+              // wcls-img-clus-matching-xin.jsonnet -- the SBND LArSoft chain --
+              // calls pr() without passing it (pr-operating-point.jsonnet does not
+              // carry the key), so a TLA-only flip would have left LArSoft on the
+              // defect.  Diagnostic columns only: no archive byte moves.
+              flash_by_gid=true,
               // pr_bee (doc 87): write pr_evt<ID>/mabc-pr.zip.  false => bee_zip is the
               // empty string, which MultiAlgBlobClustering reads as "write no Bee
               // zip at all" (an empty name used to raise IOError, so it was never

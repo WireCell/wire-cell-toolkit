@@ -869,8 +869,12 @@ function(
     // tree is flash_time_us == cluster_t0_us on every row with flash_id >= 0.
     // NB flash_id then carries the GID, joinable to the "opflash" PC's gid, not
     // the per-input row id.
-    // C++ default false.  Key omitted when off => byte-identical config.
-    flash_by_gid   = false,
+    // C++ default false, so PDVD's fork does not move (its precondition is
+    // unchecked; doctest_pdvd_tracking_defaults.cxx pins it off).  FLIPPED TRUE
+    // for SBND production 2026-09-03 on the owner's word (doc 99 sec 10);
+    // ref/prod-2026-09-05.  Diagnostic columns only -- 308 events show the PR
+    // archives (mabc-pr.zip, pctree) and the nusel verdict TSVs byte-identical.
+    flash_by_gid   = true,
     // pr_bee (doc 87): write pr_evt<ID>/mabc-pr.zip (~0.24 GB/1000 evt).
     // DEFAULT TRUE = today's behaviour, byte-identical.  false sets the MABC
     // node's bee_zip to '', which means "write no Bee zip at all".

@@ -31,10 +31,18 @@ TEST_CASE("root knob defaults: SbndPrMagnifyTrackingVisitor save_in_scope is OFF
 
     // doc 99.  flash_by_gid switches T_cluster's flash columns from the per-input
     // "flash" row index (Cluster::get_flash()) to matched_flash_gid resolved
-    // against the merge-safe "opflash" PC.  It MUST default false: with it on the
-    // three flash columns change value on ~half the rows, and flash_id changes
-    // MEANING (it carries the gid), so tracking-pr.root stops being comparable to
-    // every arm recorded before doc 99.
+    // against the merge-safe "opflash" PC.  With it on the three flash columns
+    // change value on ~half the rows, and flash_id changes MEANING (it carries
+    // the gid), so tracking-pr.root stops being comparable to every arm recorded
+    // before doc 99.
+    //
+    // A GREEN RUN HERE DOES NOT MEAN PRODUCTION IS ON THE LEGACY PATH.  Since
+    // 2026-09-03 SBND production runs this knob ON, set in
+    // cfg/pgrapher/experiment/sbnd/{clus,wct-pr-perevt}.jsonnet (doc 99 sec 10,
+    // ref/prod-2026-09-05).  What the C++ default still buys is the OTHER fork:
+    // PdvdPrMagnifyTrackingVisitor shares this default and its gid-uniqueness
+    // precondition has never been checked, so leaving it false here is what keeps
+    // PDVD off until someone does (doctest_pdvd_tracking_defaults.cxx asserts it).
     REQUIRE_MESSAGE(cfg.isMember("flash_by_gid"), "missing knob: flash_by_gid");
     CHECK(cfg["flash_by_gid"].asBool() == false);
 

@@ -96,11 +96,15 @@ function(
     // drops APA1's, so Cluster::get_flash() -- and therefore
     // tracking-pr.root:T_cluster's flash columns -- resolves a DIFFERENT, real
     // flash for every cluster matched on APA1.
-    // C++ default false.  Key omitted when off => byte-identical compiled config.
-    // NOT byte-identical when ON: the archive gains rows and its cluster "flash"
-    // scalars change, so every downstream hash moves.  Owner decision to flip.
+    // C++ default false (so pdhd/pdvd, which have their own qlmatching.jsonnet,
+    // do not move).  FLIPPED TRUE for SBND production 2026-09-03 on the owner's
+    // word (doc 99 sec 10); ref/prod-2026-09-05.
+    // NOT byte-identical: the archive gains rows and its cluster "flash" scalars
+    // change, so every downstream hash moves -- but ONLY those: 308 events show
+    // the 16 optical datapaths moving and every Bee zip, nusel verdict TSV and
+    // matching scalar byte-identical.  Set false to recover the pre-flip archive.
     // Only reaches the joint node -- the per-APA path never merges.
-    merge_flash    = false,
+    merge_flash    = true,
     // Hand-scan calibration dump path. '' (default) = off, production-identical.
     // When set, QLMatching writes one per-event JSON (both TPCs) for the Q/L
     // hand-scan viewer (sbnd_xin/ql_scan). run_ql_evt.sh -calib points it at

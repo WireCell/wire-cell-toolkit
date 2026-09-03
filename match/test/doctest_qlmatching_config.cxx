@@ -29,12 +29,20 @@ TEST_CASE("qlmatching default configuration knobs")
     CHECK(cfg["trigger_offsets"].isArray());
     CHECK(cfg["trigger_offsets"].size() == 0);
 
-    // Multi-input optical-PC merge (sbnd_xin/docs/99): default OFF, so the
-    // merge keeps exactly the historical name set (only root_pcs_to_merge) and
-    // nothing re-bases its flash-row indices.  ON is NOT byte-identical -- the
-    // merged tree gains the non-primary inputs' flash/light rows and its
-    // per-cluster "flash" scalars shift -- so this default is what keeps every
-    // pre-doc-99 archive hash reproducible.
+    // Multi-input optical-PC merge (sbnd_xin/docs/99): the C++ default stays
+    // OFF, so the merge keeps exactly the historical name set (only
+    // root_pcs_to_merge) and nothing re-bases its flash-row indices.  ON is NOT
+    // byte-identical -- the merged tree gains the non-primary inputs'
+    // flash/light rows and its per-cluster "flash" scalars shift.
+    //
+    // A GREEN RUN HERE DOES NOT MEAN PRODUCTION IS ON THE LEGACY PATH.  Since
+    // 2026-09-03 SBND production runs this knob ON: the value is set in
+    // cfg/pgrapher/experiment/sbnd/{qlmatching,wct-clus-matching-perevt}.jsonnet
+    // (doc 99 sec 10, ref/prod-2026-09-05).  The C++ default is what keeps the
+    // OTHER binders -- pdhd and pdvd, which have their own qlmatching.jsonnet
+    // and were never gated for this -- on the pre-doc-99 behaviour.  Flipping it
+    // here would ship an unvalidated archive change to both detectors, which is
+    // why the fix reaches production through config and not through this line.
     REQUIRE(cfg.isMember("merge_flash_pcs"));
     CHECK(cfg["merge_flash_pcs"].asBool() == false);
 

@@ -389,13 +389,21 @@ function(params) {
     // the merged list.  Without it the merge keeps only input 0's optical PCs and
     // drops the rest, so Cluster::get_flash() resolves a DIFFERENT, real flash for
     // every cluster matched on another APA (measured: 49.4% of SBND production
-    // rows).  C++ default false.  Key omitted when off => byte-identical config,
-    // and the merge is then the historical one byte-for-byte.
-    // NOT byte-identical when ON: the merged tree gains the other APAs' flash rows
-    // and its cluster "flash" scalars change, so every downstream archive hash
-    // moves.  Flipping it is an owner decision.
+    // rows).  C++ default false, so no other detector moves -- pdhd and pdvd
+    // call their OWN qlmatching.jsonnet and are unaffected by this line.
+    // FLIPPED TRUE for SBND production 2026-09-03 on the owner's word (doc 99
+    // sec 10); ref/prod-2026-09-05.  The default lives here and not only on the
+    // per-event job's TLA because wcls-img-clus-matching-xin.jsonnet -- the
+    // SBND LArSoft chain -- calls matching_joint() WITHOUT passing merge_flash,
+    // so a TLA-only flip would have left LArSoft on the defect.
+    // NOT byte-identical: the merged tree gains the other APAs' flash rows and
+    // its cluster "flash" scalars change, so every downstream archive hash
+    // moves.  Measured scope of that move, 308 events: the 16 optical datapaths
+    // ONLY -- every Bee zip, every nusel verdict TSV and every matching scalar
+    // (cluster_t0, matched_flash_gid, flag_main_cluster) is byte-identical.
+    // Set false to recover the pre-flip archive byte-for-byte.
     matching_joint(anodes, dv, reality, semimodel_file, cathode_fiducial='', calib_dump='', pmt_nl=true, lm=true, lm_params={}, realign_perblob=null,
-                   cathode_diag='', main_flag=true, auto_mask=null, beam_pref=null, beam_pref_weight=null, beam_pref_rescue=null, merge_flash=false, extra={}):: g.pnode({
+                   cathode_diag='', main_flag=true, auto_mask=null, beam_pref=null, beam_pref_weight=null, beam_pref_rescue=null, merge_flash=true, extra={}):: g.pnode({
         type: 'QLMatching',
         name: 'matching_joint',
         data: {
