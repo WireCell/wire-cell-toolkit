@@ -92,6 +92,63 @@ namespace {
         }
         return out;
     }
+
+    // doc pdvd/31 round 4.  The SAME AnodePlane rule, seen from the other side:
+    // `plane_channels` is pushed back in wire order while skipping segment>0, so
+    //
+    //     channels[i]->ident() == wires[i]->channel()
+    //
+    // holds ONLY while no segment>0 wire has been skipped yet, and
+    // channels.size() == wires.size() - n_seg_gt0.
+    //
+    // Two live sites index that vector by WIRE index and so depend on exactly
+    // this invariant: ImproveCluster_1::make_iblobs_improved
+    // (improvecluster_1.cxx:833-846), which is the retiler the Steiner stage
+    // runs (`cm.improve_cluster_2`), and the identical line in base
+    // RetileCluster (retile_cluster.cxx:426-437), which no production pipeline
+    // currently reaches.  Where the invariant fails, the retile writes a slice's
+    // activity under the WRONG IChannel, and past channels.size() it drops the
+    // wire's activity entirely.
+    struct PlaneRow {
+        int anode{-1}, face{-1}, plane{-1};   // idents, not array positions
+        int nwires{0}, seg_gt0{0}, first_bad{-1};
+    };
+    struct PlaneMap {
+        int planes{0};            // planes examined
+        int planes_broken{0};     // planes where channels[i] stops naming wire i
+        int seg_gt0{0};           // total segment>0 wires
+        int first_bad{-1};        // smallest wire index at which it first breaks
+        std::vector<PlaneRow> broken;
+    };
+
+    PlaneMap channel_index_invariant(const std::string& filename)
+    {
+        PlaneMap out;
+        const auto store = WireSchema::load(filename.c_str());
+        for (const auto& anode : store.anodes()) {
+            for (const auto& face : store.faces(anode)) {
+                for (const auto& plane : store.planes(face)) {
+                    const auto wires = store.wires(plane);
+                    ++out.planes;
+                    int here = 0, first = -1;
+                    for (size_t i = 0; i < wires.size(); ++i) {
+                        if (wires[i].segment > 0) {
+                            if (first < 0) first = (int) i;
+                            ++here;
+                        }
+                    }
+                    out.seg_gt0 += here;
+                    if (here) {
+                        ++out.planes_broken;
+                        if (out.first_bad < 0 || first < out.first_bad) out.first_bad = first;
+                        out.broken.push_back(PlaneRow{anode.ident, face.ident, plane.ident,
+                                                      (int) wires.size(), here, first});
+                    }
+                }
+            }
+        }
+        return out;
+    }
 }
 
 TEST_CASE("pdvd doc31: wrapped planes omit their continuations' channels")
@@ -142,4 +199,86 @@ TEST_CASE("pdvd doc31: wrapped_channel_charge defaults OFF and round-trips")
     cfg["wrapped_channel_charge"] = true;
     icfg->configure(cfg);
     CHECK(icfg->default_configuration()["wrapped_channel_charge"].asBool() == true);
+}
+
+TEST_CASE("pdvd doc31 round4: channels[wire_index] is not a valid lookup on wrapped planes")
+{
+    // The invariant two retile sites assume.  This is NOT the same statement as
+    // the orphan census above: an orphan is a channel the plane never lists at
+    // all, while ANY segment>0 wire -- orphan or a strip that wraps back inside
+    // its own plane -- shifts every later wire's position in `plane_channels`.
+    // So this is the count that bounds the retile defect, and it is >= orphans.
+    const auto pdvd = channel_index_invariant("protodunevd-wires-larsoft-v7-uvwfit.json.bz2");
+    const auto pdhd = channel_index_invariant("protodunehd-wires-larsoft-v1.json.bz2");
+    const auto sbnd = channel_index_invariant("sbnd-wires-geometry-v0206.json.bz2");
+    const auto ubon = channel_index_invariant("microboone-celltree-wires-v2.1.json.bz2");
+
+    MESSAGE("PDVD planes=" << pdvd.planes << " broken=" << pdvd.planes_broken
+            << " seg>0=" << pdvd.seg_gt0 << " first_bad_wire_index=" << pdvd.first_bad);
+    MESSAGE("PDHD planes=" << pdhd.planes << " broken=" << pdhd.planes_broken
+            << " seg>0=" << pdhd.seg_gt0 << " first_bad_wire_index=" << pdhd.first_bad);
+    for (const auto& r : pdvd.broken) {
+        MESSAGE("PDVD broken plane a" << r.anode << " f" << r.face << " p" << r.plane
+                << " nwires=" << r.nwires << " seg>0=" << r.seg_gt0
+                << " first_bad=" << r.first_bad);
+    }
+
+    // The negative controls, and the reason SBND/uBooNE cannot be affected by
+    // the retile mapping any more than they could by the sampler one: with no
+    // segment>0 wire anywhere, channels[i] names wire i on every plane.
+    CHECK(sbnd.seg_gt0 == 0);
+    CHECK(sbnd.planes_broken == 0);
+    CHECK(sbnd.planes == 6);      // 2 anodes x 1 face x 3 planes
+    CHECK(ubon.seg_gt0 == 0);
+    CHECK(ubon.planes_broken == 0);
+    CHECK(ubon.planes == 3);      // 1 anode x 1 face x 3 planes
+
+    // PDVD: 16 of 48 planes, 98 wrapped continuations each (= the 1568 above,
+    // so on PDVD every segment>0 wire is also an orphan).
+    CHECK(pdvd.planes == 48);
+    CHECK(pdvd.planes_broken == 16);
+    CHECK(pdvd.seg_gt0 == 1568);
+    CHECK(pdvd.first_bad >= 0);
+
+    // PDHD: 16 of 24 planes.  Note 11968 segment>0 wires against only 6400
+    // orphans -- 5568 PDHD continuations wrap back INSIDE their own plane, so
+    // they are invisible to the orphan census yet still shift plane_channels.
+    // That is why this count, not the orphan count, is the one that bounds the
+    // retile defect.  PDHD does not run the Steiner stage (no CreateSteinerGraph
+    // in any pdhd config), so the retile sites are not reached there -- recorded
+    // so the geometry fact is not mistaken for an exposure claim.
+    CHECK(pdhd.planes == 24);
+    CHECK(pdhd.planes_broken == 16);
+    CHECK(pdhd.seg_gt0 == 11968);
+    CHECK(pdhd.seg_gt0 > 6400);   // strictly more than the orphan count
+
+    // PDVD's structure, pinned because doc 31 section 9 reasons from it.  Every
+    // broken plane is 287 wires with 98 continuations, and they sit in ONE
+    // contiguous band at one end: first_bad is 0 (band at the BOTTOM, so every
+    // wire index is shifted by +98 and the top 98 are dropped) or 189 = 287-98
+    // (band at the TOP, so indices 0..188 are correct and only the top 98 are
+    // dropped).  Never interleaved -- which is what makes the consequence
+    // predictable per plane instead of per wire.
+    int n_bottom = 0, n_top = 0;
+    for (const auto& r : pdvd.broken) {
+        CHECK(r.nwires == 287);
+        CHECK(r.seg_gt0 == 98);
+        CHECK((r.first_bad == 0 || r.first_bad == 189));
+        if (r.first_bad == 0) ++n_bottom; else ++n_top;
+    }
+    CHECK(n_bottom == 8);
+    CHECK(n_top == 8);
+
+    // The face doc 31's flagship track lives on (anode 4, face 0).  U is the
+    // fully-shifted one and V is the top-band one, which is exactly the
+    // asymmetry section 9.2 explains the terminal starvation with: below the
+    // vertex the track's V wire is in the dropped top band while above it is
+    // not, and U is wrong in both halves.
+    int a4f0_u = -2, a4f0_v = -2;
+    for (const auto& r : pdvd.broken) {
+        if (r.anode == 4 && r.face == 0 && r.plane == 0) a4f0_u = r.first_bad;
+        if (r.anode == 4 && r.face == 0 && r.plane == 1) a4f0_v = r.first_bad;
+    }
+    CHECK(a4f0_u == 0);
+    CHECK(a4f0_v == 189);
 }

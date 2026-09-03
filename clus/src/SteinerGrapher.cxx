@@ -18,6 +18,18 @@ using namespace WireCell;
 using namespace WireCell::Clus;
 using namespace WireCell::Clus::Facade;
 
+namespace {
+    // doc pdvd/31: the per-phase Steiner dump gate.  getenv is read once; in
+    // production the variable is unset, every dump site returns immediately and
+    // no output changes.  Shared by create_steiner_tree (per-terminal positions
+    // and charges) and filter_by_path_constraints (its distance operands), so
+    // one env var turns the whole probe on.
+    bool steiner_phase_dump_enabled()
+    {
+        static const bool on = (getenv("WCT_STEINER_PHASE_DUMP") != nullptr);
+        return on;
+    }
+}
 
 void Steiner::Grapher::create_steiner_tree(
     const Facade::Cluster* reference_cluster, // may not be the same as m_cluster
@@ -39,15 +51,25 @@ void Steiner::Grapher::create_steiner_tree(
     // remove only ~4% -- so the question became WHERE the surviving terminals
     // are, which a count cannot answer.  Default OFF: getenv is null in
     // production, the lambda returns immediately, and no output changes.
-    static const bool s_phase_dump = (getenv("WCT_STEINER_PHASE_DUMP") != nullptr);
+    const bool s_phase_dump = steiner_phase_dump_enabled();
+    // doc pdvd/31 round 4: the three per-plane charges are appended LAST on
+    // purpose -- steiner_phase_census.py matches this line with re.search on a
+    // prefix pattern, so older parsers keep working.  They are the quantity
+    // Phase 1's candidacy gate actually reads (calc_charge_wcp -> ncharge>1),
+    // and they are NOT recoverable offline: the Steiner stage runs on a RETILED
+    // cluster whose point cloud is never persisted.
     auto dump_terminals = [&](const char* phase, const vertex_set& terms) {
         if (!s_phase_dump) return;
         for (const auto idx : terms) {
             const auto p = m_cluster.point3d(idx);
             SPDLOG_LOGGER_DEBUG(log,
-                "steiner_phase_pt: npts={} nterm={} phase={} x={:.2f} y={:.2f} z={:.2f}",
+                "steiner_phase_pt: npts={} nterm={} phase={} x={:.2f} y={:.2f} z={:.2f}"
+                " cu={:.1f} cv={:.1f} cw={:.1f}",
                 m_cluster.npoints(), terms.size(), phase,
-                p.x() / units::cm, p.y() / units::cm, p.z() / units::cm);
+                p.x() / units::cm, p.y() / units::cm, p.z() / units::cm,
+                m_cluster.charge_value(idx, 0),
+                m_cluster.charge_value(idx, 1),
+                m_cluster.charge_value(idx, 2));
         }
     };
 
@@ -60,8 +82,12 @@ void Steiner::Grapher::create_steiner_tree(
         for (int i = 0; i < npts; ++i) {
             const auto p = m_cluster.point3d(i);
             SPDLOG_LOGGER_DEBUG(log,
-                "steiner_phase_pt: npts={} nterm=0 phase=P0_cluster x={:.2f} y={:.2f} z={:.2f}",
-                npts, p.x() / units::cm, p.y() / units::cm, p.z() / units::cm);
+                "steiner_phase_pt: npts={} nterm=0 phase=P0_cluster x={:.2f} y={:.2f} z={:.2f}"
+                " cu={:.1f} cv={:.1f} cw={:.1f}",
+                npts, p.x() / units::cm, p.y() / units::cm, p.z() / units::cm,
+                m_cluster.charge_value(i, 0),
+                m_cluster.charge_value(i, 1),
+                m_cluster.charge_value(i, 2));
         }
     }
 
@@ -341,8 +367,23 @@ Steiner::Grapher::vertex_set Steiner::Grapher::filter_by_path_constraints(
                           (dis_2d[0] < distance_2d_threshold && dis_2d[2] < distance_2d_threshold) ||
                           (dis_2d[1] < distance_2d_threshold && dis_2d[2] < distance_2d_threshold);
         bool should_remove = close_in_2d && (dis_3d > distance_3d_threshold);
-        
+
         // std::cout << "Test1: " << point << " " << dis_3d << " " << dis_2d[0] << " " << dis_2d[1] << " " << dis_2d[2] << std::endl;
+
+        // doc pdvd/31 round 4, same env gate as the per-phase dump.  Round 2
+        // measured that this filter removes NOTHING on every call of the event;
+        // a count cannot say whether that is by design or because the operands
+        // are degenerate.  Note get_closest_2d_point_info returns a raw -1.0
+        // when the (plane, face, apa) 2-D tree is EMPTY
+        // (DynamicPointCloud.cxx:375-377) -- and -1 < 1.8 cm, so a sentinel
+        // reads here as "very close" and collapses the test into a bare
+        // dis_3d > 6 cm cut.  A negative value in this line is that sentinel.
+        if (steiner_phase_dump_enabled()) {
+            SPDLOG_LOGGER_DEBUG(log,
+                "steiner_p3_dis: dis3d={:.2f} du={:.3f} dv={:.3f} dw={:.3f} close2d={} remove={}",
+                dis_3d / units::cm, dis_2d[0] / units::cm, dis_2d[1] / units::cm,
+                dis_2d[2] / units::cm, (int) close_in_2d, (int) should_remove);
+        }
 
         if (!should_remove) {
             filtered_terminals.insert(terminal_idx);
