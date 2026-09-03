@@ -181,6 +181,7 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
         protect_bundle(name="", graph_name="relaxed",
                        beam_window_only=null, beam_window_low=null, beam_window_high=null,
                        skip_convicted=null, open_convicted_bundles=null,
+                       stm_only_bundles=null,
                        cathode_x=null, cathode_rejoin_xcut=null,
                        cathode_rejoin_dyz=null, cathode_rejoin_dis=null,
                        cathode_rejoin_perp=null, cathode_rejoin_angle=null,
@@ -207,6 +208,17 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
                 // guard is untouched).  C++ default false; key omitted when
                 // null => byte-identical pre-round-3 config.
                 [if open_convicted_bundles != null then 'open_convicted_bundles']: open_convicted_bundles,
+                // doc pdvd/25 sec 13.11.  The mirror of TaggerCheckNeutrino's
+                // nu_per_bundle_stm_only one stage earlier: open ONLY the
+                // bundles that hold an STM-tagged cluster, so the graph
+                // examination is not spent on bundles the per-bundle neutrino
+                // PR will never read (PDVD 039252/8: one 18876-blob cluster,
+                // 509 graph components, 129286 pairs, 26 min of a 27 min
+                // stage).  Needs beam_window_only.  NOT a no-op on the
+                // archives when on: a cosmic bundle that is no longer split
+                // keeps its over-clustered shape.  C++ default false; key
+                // omitted when null => byte-identical pre-knob config.
+                [if stm_only_bundles != null then 'stm_only_bundles']: stm_only_bundles,
                 [if cathode_x != null then 'cathode_x']: cathode_x,
                 [if cathode_rejoin_xcut != null then 'cathode_rejoin_xcut']: cathode_rejoin_xcut,
                 [if cathode_rejoin_dyz != null then 'cathode_rejoin_dyz']: cathode_rejoin_dyz,

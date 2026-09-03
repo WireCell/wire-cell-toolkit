@@ -136,6 +136,23 @@ public:
         // still opens the bundle.
         m_skip_convicted = get<bool>(config, "skip_convicted", m_skip_convicted);
         m_open_convicted_bundles = get<bool>(config, "open_convicted_bundles", m_open_convicted_bundles);
+        // doc pdvd/25 sec 13.11: the mirror of TaggerCheckNeutrino's
+        // nu_per_bundle_stm_only, one stage earlier.  With that knob on, the
+        // per-bundle neutrino PR only ever runs on STM-tagged activities, so
+        // every split this stage performs in a bundle that holds no STM tag is
+        // work the PR will never look at.  When true, a gid only enters
+        // beam_gids if SOME cluster carrying it is STM-tagged -- main or
+        // companion, because an STM-tagged activity need not be its bundle's
+        // longest main (doc 25 sec 13.10) and gating on the main alone would
+        // change the PR's input rather than only its cost.  Default false =
+        // the pre-knob behaviour, byte-identical.  Only meaningful with
+        // beam_window_only (without it there is no bundle gate at all).
+        m_stm_only_bundles = get<bool>(config, "stm_only_bundles", m_stm_only_bundles);
+        if (m_stm_only_bundles && !m_beam_window_only) {
+            log->warn("ClusteringProtectBundle: stm_only_bundles needs beam_window_only; "
+                      "without the beam gate every scope-passing cluster is examined and "
+                      "the STM restriction is ignored.");
+        }
         // Cathode re-join (SBND).  cathode_rejoin_xcut <= 0 (default) disables
         // the pass entirely => prototype-faithful behavior.  Internal units.
         m_cathode_x = get<double>(config, "cathode_x", m_cathode_x);
@@ -165,6 +182,7 @@ public:
         cfg["beam_window_high"] = m_beam_window_high;
         cfg["skip_convicted"] = m_skip_convicted;
         cfg["open_convicted_bundles"] = m_open_convicted_bundles;   // doc pr/94 round 3; false = a convicted main does not open its bundle (legacy)
+        cfg["stm_only_bundles"] = m_stm_only_bundles;               // doc pdvd/25 sec 13.11; false = every in-window bundle is opened (legacy)
         cfg["cathode_x"] = m_cathode_x;
         cfg["cathode_rejoin_xcut"] = m_cathode_rejoin_xcut;
         cfg["cathode_rejoin_dyz"] = m_cathode_rejoin_dyz;
@@ -194,7 +212,18 @@ public:
         // bundle member is the main itself or a companion sharing its gid.
         std::unordered_set<int> beam_gids;
         const bool gate = m_beam_window_only && m_beam_window_low < m_beam_window_high;
-        size_t n_convicted = 0;
+        size_t n_convicted = 0, n_no_stm = 0;
+        // doc pdvd/25 sec 13.11 (stm_only_bundles): gids of every STM-tagged
+        // cluster, main or companion.  Only ever queried with count(), never
+        // iterated, so no pointer/hash order reaches the output.
+        std::unordered_set<int> stm_gids;
+        if (gate && m_stm_only_bundles) {
+            for (const auto* cluster : clusters) {
+                if (!cluster->get_flag(Flags::STM)) continue;
+                const int sgid = cluster->get_scalar<int>("matched_flash_gid", -1);
+                if (sgid >= 0) stm_gids.insert(sgid);
+            }
+        }
         if (gate) {
             for (const auto* cluster : clusters) {
                 if (!cluster->get_flag(Flags::main_cluster)) continue;
@@ -202,6 +231,19 @@ public:
                 if (t0 < m_beam_window_low || t0 >= m_beam_window_high) continue;
                 const int gid = cluster->get_scalar<int>("matched_flash_gid", -1);
                 if (gid < 0) continue;
+                // doc pdvd/25 sec 13.11.  Checked before skip_convicted so an
+                // STM main reaches the open_convicted_bundles branch exactly as
+                // it does with the knob off -- on PDVD the STM flag IS the
+                // conviction, and that branch is what opens its bundle.
+                if (m_stm_only_bundles && stm_gids.count(gid) == 0) {
+                    ++n_no_stm;
+                    log->debug("OC25NOSTM main ident={} nblobs={} gid={} t0={:.2f}us "
+                               "TGM={} STM={} -- bundle holds no STM-tagged cluster, "
+                               "not opened (stm_only_bundles)",
+                               cluster->ident(), cluster->nchildren(), gid, t0/units::us,
+                               cluster->get_flag(Flags::TGM), cluster->get_flag(Flags::STM));
+                    continue;
+                }
                 // skip_convicted: honor the upstream cosmic verdicts
                 // (TaggerCheckNeutrino nu_skip_cosmic condition, lines
                 // 339-350: TGM/STM flags, lm_flag 1=low-energy
@@ -249,7 +291,18 @@ public:
                 && !cluster->get_scope_filter(cluster->get_default_scope())) continue;
             if (gate) {
                 const int gid = cluster->get_scalar<int>("matched_flash_gid", -1);
-                if (gid < 0 || beam_gids.count(gid) == 0) continue;
+                if (gid < 0 || beam_gids.count(gid) == 0) {
+                    // doc pdvd/25 sec 13.11: name what the STM gate cost us.
+                    // Log-only, and only when the knob is on.
+                    if (m_stm_only_bundles && gid >= 0) {
+                        log->debug("OC25NOSTM member ident={} nblobs={} gid={} main={} "
+                                   "TGM={} STM={} -- not examined (stm_only_bundles)",
+                                   cluster->ident(), cluster->nchildren(), gid,
+                                   cluster->get_flag(Flags::main_cluster),
+                                   cluster->get_flag(Flags::TGM), cluster->get_flag(Flags::STM));
+                    }
+                    continue;
+                }
             }
             // A convicted cluster is never split, even as a member of a
             // bundle an unconvicted mate opened (SBND evt 52195: gid 6 holds
@@ -276,8 +329,9 @@ public:
             }
         }
         log->debug("split {} bundle cluster(s) into {} extra cluster(s) "
-                   "({} cathode re-join(s), {} convicted main(s) skipped, graph '{}')",
-                   n_split, n_parts, n_rejoin, n_convicted, m_graph_name);
+                   "({} cathode re-join(s), {} convicted main(s) skipped, "
+                   "{} main(s) refused for holding no STM tag, graph '{}')",
+                   n_split, n_parts, n_rejoin, n_convicted, n_no_stm, m_graph_name);
     }
 
 private:
@@ -293,6 +347,16 @@ private:
     // skip_convicted guard keeps the convicted cluster itself from ever being
     // split.  Default false = the pre-pr/94 behaviour, byte-identical.
     bool m_open_convicted_bundles{false};
+    // doc pdvd/25 sec 13.11.  When true (and beam_window_only is on), only a
+    // bundle holding at least one STM-tagged cluster is opened for splitting.
+    // The exact mirror of TaggerCheckNeutrino's nu_per_bundle_stm_only: under
+    // that mode the neutrino PR reads no other bundle, so examining them here
+    // is pure cost (PDVD 039252/8: one 18876-blob cluster, 509 graph
+    // components, 129286 component pairs, 26 min of the stage's 27).  NOT a
+    // no-op on the archives: a cosmic bundle that is no longer split keeps its
+    // over-clustered shape in mabc-pr.zip and calib-pr-evt*.json.  Default
+    // false = the pre-knob behaviour, byte-identical.
+    bool m_stm_only_bundles{false};
     double m_beam_window_low{0};
     double m_beam_window_high{0};
     double m_cathode_x{0};

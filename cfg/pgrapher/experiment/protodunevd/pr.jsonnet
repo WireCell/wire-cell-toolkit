@@ -623,6 +623,12 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
               // bundle's unconvicted members are graph-examined.  C++ default
               // false; key omitted when null.
               protect_open_convicted_bundles=null,
+              // doc pdvd/25 sec 13.11: with nu_per_bundle_stm_only on, the
+              // per-bundle neutrino PR reads only STM-tagged bundles, so
+              // opening every other in-window bundle here is pure cost.  When
+              // true only a bundle holding an STM-tagged cluster is opened.
+              // C++ default false; key omitted when null.
+              protect_stm_only_bundles=null,
               protect_cathode_x=0,
               protect_cathode_rejoin_xcut=5 * wc.cm,
               protect_cathode_rejoin_dyz=4 * wc.cm,
@@ -1209,6 +1215,7 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
                 beam_window_high=beam_window[1],
                 skip_convicted=protect_skip_convicted,
                 open_convicted_bundles=protect_open_convicted_bundles,
+                stm_only_bundles=protect_stm_only_bundles,
                 cathode_x=protect_cathode_x,
                 cathode_rejoin_xcut=protect_cathode_rejoin_xcut,
                 cathode_rejoin_dyz=protect_cathode_rejoin_dyz,
