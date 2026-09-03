@@ -301,6 +301,16 @@ namespace WireCell::Clus::Facade {
         // In the Grouping class declaration in Facade_Grouping.h
         std::vector<int> test_good_point(const geo_point_t& point, const int apa, const int face, 
                                 double radius = 0.6 * units::cm, int ch_range = 1) const;
+        /// Allocation-free form of the above: fills a caller-owned [6] instead of
+        /// returning a freshly heap-allocated 6-element vector.  The per-pair 1 cm
+        /// path walks in connect_graph_relaxed{,_strict} call this once per step,
+        /// millions of times per busy cluster, and each of those was an
+        /// allocate-fill-move-free round trip for 24 bytes.  Same computation, same
+        /// values, same order; the vector form below now delegates to it, so the two
+        /// cannot drift.
+        void test_good_point(const geo_point_t& point, const int apa, const int face,
+                             int (&num_planes)[6],
+                             double radius = 0.6 * units::cm, int ch_range = 1) const;
 
 
         /// @brief

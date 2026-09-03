@@ -172,7 +172,7 @@ void Graphs::connect_graph_relaxed(
                     );
 
                     // Test point quality using grouping parameters
-                    std::vector<int> scores;
+                    int scores[6] = {0,0,0,0,0,0};   // stack, not heap (see the [6] overload)
                     if (use_ctpc) {
                         auto test_wpid = get_wireplaneid(test_p, wpid_p1, wpid_p2, dv);
                         if (test_wpid.apa()!=-1){
@@ -180,7 +180,7 @@ void Graphs::connect_graph_relaxed(
                             if (needs_transform) {
                                 test_p_raw = ctpc_transform->backward(test_p, cluster_t0, test_wpid.face(), test_wpid.apa());
                             }
-                            scores = grouping->test_good_point(test_p_raw, test_wpid.apa(), test_wpid.face());
+                            grouping->test_good_point(test_p_raw, test_wpid.apa(), test_wpid.face(), scores);
 
                             // Check overall quality
                             if (scores[0] + scores[3] + scores[1] + scores[4] + (scores[2]+scores[5])*2 < 3) {
@@ -951,24 +951,25 @@ void Graphs::connect_graph_relaxed(
         }
         
         // Get detailed scores for this point
-        std::vector<int> scores = grouping->test_good_point(test_p_raw, test_wpid.apa(), test_wpid.face(), test_radius);
+        int scores[6];
+        grouping->test_good_point(test_p_raw, test_wpid.apa(), test_wpid.face(), scores, test_radius);
         
         int num_bad_details = 0;
         
         // Check U plane (indices 0=live, 3=dead)
-        if (scores.at(0) + scores.at(3) == 0) {
+        if (scores[0] + scores[3] == 0) {
             if (!flag_prolonged_u) num_bad[0]++;
             num_bad_details++;
         }
         
         // Check V plane (indices 1=live, 4=dead)
-        if (scores.at(1) + scores.at(4) == 0) {
+        if (scores[1] + scores[4] == 0) {
             if (!flag_prolonged_v) num_bad[1]++;
             num_bad_details++;
         }
         
         // Check W plane (collection, indices 2=live, 5=dead)
-        if (scores.at(2) + scores.at(5) == 0) {
+        if (scores[2] + scores[5] == 0) {
             if (!flag_prolonged_w) num_bad[2]++;
             num_bad_details++;
         }

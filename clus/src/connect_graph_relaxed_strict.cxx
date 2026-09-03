@@ -857,7 +857,8 @@ void Graphs::connect_graph_relaxed_strict(
                 if (needs_transform) {
                     test_p_raw = ctpc_transform->backward(test_p, cluster_t0, test_wpid.face(), test_wpid.apa());
                 }
-                auto scores = grouping->test_good_point(test_p_raw, test_wpid.apa(), test_wpid.face());
+                int scores[6];
+                grouping->test_good_point(test_p_raw, test_wpid.apa(), test_wpid.face(), scores);
                 double img_dis = 1e9;
                 for (size_t q = 0; q != num; ++q) {
                     img_dis = std::min(img_dis, pt_clouds.at(q)->get_closest_dis(test_p));
@@ -1676,8 +1677,10 @@ void Graphs::connect_graph_relaxed_strict(
                         p1.z() + (p2.z() - p1.z())/num_steps*(ii + 1)
                     );
 
-                    // Test point quality using grouping parameters
-                    std::vector<int> scores;
+                    // Test point quality using grouping parameters.  Stack [6]
+                    // instead of a heap vector: this runs once per 1 cm step of
+                    // every walked pair (see the allocation-free overload).
+                    int scores[6] = {0,0,0,0,0,0};
                     if (use_ctpc) {
                         auto test_wpid = get_wireplaneid(test_p, wpid_p1, wpid_p2, dv);
                         if (test_wpid.apa()!=-1){
@@ -1685,7 +1688,7 @@ void Graphs::connect_graph_relaxed_strict(
                             if (needs_transform) {
                                 test_p_raw = ctpc_transform->backward(test_p, cluster_t0, test_wpid.face(), test_wpid.apa());
                             }
-                            scores = grouping->test_good_point(test_p_raw, test_wpid.apa(), test_wpid.face());
+                            grouping->test_good_point(test_p_raw, test_wpid.apa(), test_wpid.face(), scores);
 
                             // Check overall quality
                             if (scores[0] + scores[3] + scores[1] + scores[4] + (scores[2]+scores[5])*2 < 3) {

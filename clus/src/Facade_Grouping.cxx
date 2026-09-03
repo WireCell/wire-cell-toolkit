@@ -586,12 +586,20 @@ bool Grouping::is_good_point_wc(const geo_point_t& point, const int apa, const i
 std::vector<int> Grouping::test_good_point(const geo_point_t& point, const int apa, const int face, 
     double radius, int ch_range) const 
 {
-    std::vector<int> num_planes(6, 0);  // Initialize with 6 zeros
+    int scratch[6];
+    test_good_point(point, apa, face, scratch, radius, ch_range);
+    return std::vector<int>(scratch, scratch + 6);
+}
+
+void Grouping::test_good_point(const geo_point_t& point, const int apa, const int face,
+    int (&num_planes)[6], double radius, int ch_range) const
+{
+    for (int i = 0; i < 6; ++i) num_planes[i] = 0;   // was vector(6, 0)
     // Hand-declared dead gap: the full vertical W-defect column counts as dead on
     // all three planes (slots 3,4,5).  Default-empty -> falls through to normal check.
     if (in_dead_gap(point, ch_range, apa, face)) {
         num_planes[3] = num_planes[4] = num_planes[5] = 1;
-        return num_planes;
+        return;
     }
     // std::cout << "abc: " << point << " " << radius << " " << ch_range << std::endl;
     // Check each plane (0,1,2)
@@ -609,8 +617,6 @@ std::vector<int> Grouping::test_good_point(const geo_point_t& point, const int a
         }
         // std::cout << closest_pts.size() << " " << get_closest_dead_chs(point, ch_range, face, pind) << " " << num_planes[pind] << " " << num_planes[pind+3] << std::endl;
     }
-    
-    return num_planes;
 }
 
 double Facade::Grouping::get_ave_3d_charge(const geo_point_t& point, const int apa, const int face,  const double radius) const {
