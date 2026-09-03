@@ -9068,12 +9068,15 @@ void TrackFitting::do_multi_tracking(bool flag_dQ_dx_fit_reg, bool flag_dQ_dx_fi
         // Env-gated so default log output/verbosity is unchanged; no config
         // knob, no behavior change, read-only instrumentation.
         static const bool debug_seg_drop = (getenv("WCT_DQDX_DROP_DEBUG") != nullptr);
-        std::map<PR::SegmentPtr, size_t> seg_n_before;
+        std::map<PR::SegmentPtr, std::vector<WireCell::Point>> seg_pts_before;
         for (const auto& ed : get_segment_edges()) {
             auto& eb = (*m_graph)[ed];
             if (eb.segment) {
                 n_fits_before += eb.segment->fits().size();
-                if (debug_seg_drop) seg_n_before[eb.segment] = eb.segment->fits().size();
+                if (debug_seg_drop) {
+                    auto& v = seg_pts_before[eb.segment];
+                    for (const auto& f : eb.segment->fits()) v.push_back(f.point);
+                }
             }
         }
         // doc pr/107 (dqdx_fit_keep_all_points): the prototype never drops a
@@ -9096,8 +9099,9 @@ void TrackFitting::do_multi_tracking(bool flag_dQ_dx_fit_reg, bool flag_dQ_dx_fi
             for (const auto& ed : get_segment_edges()) {
                 auto& eb = (*m_graph)[ed];
                 if (!eb.segment) continue;
-                auto it = seg_n_before.find(eb.segment);
-                size_t before = (it != seg_n_before.end()) ? it->second : 0;
+                auto it = seg_pts_before.find(eb.segment);
+                const auto& before_pts = (it != seg_pts_before.end()) ? it->second : std::vector<WireCell::Point>();
+                size_t before = before_pts.size();
                 size_t after = eb.segment->fits().size();
                 if (before != after) {
                     int cid = eb.segment->cluster() ? eb.segment->cluster()->get_cluster_id() : -1;
@@ -9105,6 +9109,30 @@ void TrackFitting::do_multi_tracking(bool flag_dQ_dx_fit_reg, bool flag_dQ_dx_fi
                         "do_multi_tracking: WCT_DQDX_DROP_DEBUG segment gi={} cluster={} "
                         "zero-quantity drop {} -> {} points",
                         eb.segment->get_graph_index(), cid, before, after);
+                    // doc pdvd/30 follow-up: does the pre-drop point list trace
+                    // the segment's own (possibly bent) shape, or a straight
+                    // chord between its two ends?  Report each point's
+                    // perpendicular distance from the straight line through
+                    // before_pts.front()/back() -- near-zero everywhere means
+                    // "straight interpolation", real excursions mean the
+                    // resampler carried forward genuine (bent) geometry that
+                    // still found no charge.
+                    if (before_pts.size() >= 3) {
+                        const auto& a = before_pts.front();
+                        const auto& b = before_pts.back();
+                        const double ab = (b - a).magnitude();
+                        double max_perp = 0, sum_perp = 0;
+                        for (const auto& p : before_pts) {
+                            double perp = ab > 0 ? ((p - a).cross(b - a)).magnitude() / ab : 0;
+                            max_perp = std::max(max_perp, perp);
+                            sum_perp += perp;
+                        }
+                        SPDLOG_LOGGER_DEBUG(s_log,
+                            "do_multi_tracking: WCT_DQDX_DROP_DEBUG segment gi={} cluster={} "
+                            "pre-drop shape: n={} chord={:.2f}cm max_perp_dev={:.3f}cm mean_perp_dev={:.3f}cm",
+                            eb.segment->get_graph_index(), cid, before_pts.size(),
+                            ab / units::cm, max_perp / units::cm, sum_perp / before_pts.size() / units::cm);
+                    }
                 }
             }
         }
