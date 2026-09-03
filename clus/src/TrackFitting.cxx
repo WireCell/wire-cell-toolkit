@@ -9062,9 +9062,19 @@ void TrackFitting::do_multi_tracking(bool flag_dQ_dx_fit_reg, bool flag_dQ_dx_fi
         // zero-quantity point drop (:3201) on the final trajectory, which the
         // prototype never does.  Count the drop so it is never silent.
         size_t n_fits_before = 0;
+        // doc pdvd/30 investigation: WCT_DQDX_DROP_DEBUG=1 attributes the
+        // zero-quantity drop below to individual segments/clusters, which
+        // the pre-existing aggregate counter (n_fits_before/after) cannot.
+        // Env-gated so default log output/verbosity is unchanged; no config
+        // knob, no behavior change, read-only instrumentation.
+        static const bool debug_seg_drop = (getenv("WCT_DQDX_DROP_DEBUG") != nullptr);
+        std::map<PR::SegmentPtr, size_t> seg_n_before;
         for (const auto& ed : get_segment_edges()) {
             auto& eb = (*m_graph)[ed];
-            if (eb.segment) n_fits_before += eb.segment->fits().size();
+            if (eb.segment) {
+                n_fits_before += eb.segment->fits().size();
+                if (debug_seg_drop) seg_n_before[eb.segment] = eb.segment->fits().size();
+            }
         }
         // doc pr/107 (dqdx_fit_keep_all_points): the prototype never drops a
         // trajectory point between the last trajectory round and the dQ/dx
@@ -9081,6 +9091,22 @@ void TrackFitting::do_multi_tracking(bool flag_dQ_dx_fit_reg, bool flag_dQ_dx_fi
         for (const auto& ed : get_segment_edges()) {
             auto& eb = (*m_graph)[ed];
             if (eb.segment) n_fits_after += eb.segment->fits().size();
+        }
+        if (debug_seg_drop) {
+            for (const auto& ed : get_segment_edges()) {
+                auto& eb = (*m_graph)[ed];
+                if (!eb.segment) continue;
+                auto it = seg_n_before.find(eb.segment);
+                size_t before = (it != seg_n_before.end()) ? it->second : 0;
+                size_t after = eb.segment->fits().size();
+                if (before != after) {
+                    int cid = eb.segment->cluster() ? eb.segment->cluster()->get_cluster_id() : -1;
+                    SPDLOG_LOGGER_DEBUG(s_log,
+                        "do_multi_tracking: WCT_DQDX_DROP_DEBUG segment gi={} cluster={} "
+                        "zero-quantity drop {} -> {} points",
+                        eb.segment->get_graph_index(), cid, before, after);
+                }
+            }
         }
         if (n_fits_after != n_fits_before) {
             SPDLOG_LOGGER_DEBUG(s_log,
