@@ -4,6 +4,7 @@
 
 #include "WireCellUtil/HanaJsonCPP.h"
 #include "WireCellIface/IConfigurable.h"
+#include <sstream>
 
 namespace WireCell::SPNG {
     struct RebaselinerConfig {
@@ -29,7 +30,16 @@ namespace WireCell::SPNG {
         /// If true, after rebaseline, clamp all values to be non-negative.
         bool remove_negative = false;
 
-
+        std::string as_str() {
+            std::stringstream ss;
+            ss << "dim:" << std::to_string(dim) <<
+                  ", consec zeros:" << std::to_string(consequtive_zeros) <<
+                  ", min roi size:" << std::to_string(min_roi_size) <<
+                  ", shrink size:" << std::to_string(shrink_size) <<
+                  ", remove small:" << std::to_string(remove_small) <<
+                  ", remove neg:" << std::to_string(remove_negative);
+            return ss.str();
+        }
     };
 }
 

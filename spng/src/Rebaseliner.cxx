@@ -2,6 +2,7 @@
 #include "WireCellSpng/Rebaseline.h"
 #include "WireCellSpng/HanaConfigurable.h"
 #include "WireCellSpng/SimpleTorchTensor.h"
+#include "WireCellSpng/Util.h"
 
 #include "WireCellUtil/NamedFactory.h"
 
@@ -21,7 +22,10 @@ namespace WireCell::SPNG {
     ITorchTensor::pointer Rebaseliner::filter_tensor(const ITorchTensor::pointer& in)
     {
         auto tensor = in->tensor();
-
+        log->debug("Rebaselining Tensor {} with {} nonzero entries",
+            to_string(tensor),
+            tensor.count_nonzero().item<int64_t>()
+        );
         tensor = rebaseline_zero(tensor,
                                  m_config.dim,
                                  m_config.consequtive_zeros,
@@ -29,7 +33,7 @@ namespace WireCell::SPNG {
                                  m_config.shrink_size,
                                  m_config.remove_small,
                                  m_config.remove_negative);
-
+        log->debug("Finished Rebaselining");
         return std::make_shared<SimpleTorchTensor>(tensor, in->metadata());
     }
 
@@ -38,6 +42,9 @@ namespace WireCell::SPNG {
     {
         this->TensorFilter::configure(config);
         HanaJsonCPP::from_json(m_config, config);
+        log->debug("Rebaselining with options: {}",
+            m_config.as_str()
+        );
     }
 
     WireCell::Configuration Rebaseliner::default_configuration() const
