@@ -369,6 +369,8 @@ void TrackFitting::reset_for_new_event(){
     // Points into the per-event Points tree.
     m_grouping = nullptr;
     m_cluster_filter = nullptr;
+    m_channel_wires_memo.clear();   // doc pdvd/28 round 2: geometry memo follows the grouping
+    m_channel_wires_memo_grouping = nullptr;
 
     // Keyed by Facade::Blob* from the dead tree; fill_global_rb_map() refuses
     // to rebuild while it is non-empty, so leaving it is silent corruption
@@ -821,12 +823,27 @@ int TrackFitting::get_channel_for_wire(int apa, int face, int plane, int wire) c
     return channel;
 }
 
-std::vector<std::tuple<int, int, int>> TrackFitting::get_wires_for_channel(int apa, int channel_number) const {
+const std::vector<std::tuple<int, int, int>>& TrackFitting::get_wires_for_channel(int apa, int channel_number) const {
+    // doc pdvd/28 round 2: memoised.  Both dQ/dx fits ask this once per 2D row
+    // (up to ~90k rows per fit); the answer depends only on the fixed geometry.
+    // The memo is valid for one grouping (the anodes are looked up through it):
+    // a different grouping pointer, or none, empties it; a failed anode lookup
+    // is never cached, so a call made before the grouping is set answers
+    // "no wires" exactly as the unmemoised code did and leaves no trace.
+    if (m_channel_wires_memo_grouping != m_grouping) {
+        m_channel_wires_memo.clear();
+        m_channel_wires_memo_grouping = m_grouping;
+    }
+    const long long memo_key = (static_cast<long long>(apa) << 32) ^ static_cast<unsigned int>(channel_number);
+    auto memo_it = m_channel_wires_memo.find(memo_key);
+    if (memo_it != m_channel_wires_memo.end()) return memo_it->second;
+
     std::vector<std::tuple<int, int, int>> result;
     
     auto anode = get_anode(apa);
     if (!anode) {
-        return result;
+        static const std::vector<std::tuple<int, int, int>> no_wires;
+        return no_wires;
     }
     
     // Get all wires for this channel (handles wrapped wires)
@@ -837,7 +854,7 @@ std::vector<std::tuple<int, int, int>> TrackFitting::get_wires_for_channel(int a
         result.emplace_back(wpid.face(), wpid.index(), wire->index());
     }
     
-    return result;
+    return m_channel_wires_memo.emplace(memo_key, std::move(result)).first->second;
 }
 
 void TrackFitting::clear_cache() const {
@@ -1099,7 +1116,7 @@ void TrackFitting::prepare_data() {
                 if (!near_dead) continue;
 
                 // Determine induction vs collection to pick the right factor.
-                auto wire_info = get_wires_for_channel(apa, ch);
+                const auto& wire_info = get_wires_for_channel(apa, ch);
                 if (wire_info.empty()) continue;
                 int plane = std::get<1>(wire_info.front());  // (face, plane, wire)
                 double factor = (plane < 2) ? 5.0 : 2.5;    // U/V induction × 5, W collection × 2.5
@@ -1139,7 +1156,7 @@ void TrackFitting::collect_2D_charge(std::map<CoordReadout, ChargeMeasurement>& 
         processed_apa_channel.insert(apa_ch_pair);
         
         // Get wire information for this channel to determine plane
-        auto wire_info = get_wires_for_channel(apa, channel);
+        const auto& wire_info = get_wires_for_channel(apa, channel);
         
         // Classify charge data by plane and store in appropriate map
         // A channel can map to multiple wires (wrapped wires), but they should be on same plane
@@ -1166,7 +1183,7 @@ void TrackFitting::collect_2D_charge(std::map<CoordReadout, ChargeMeasurement>& 
         int channel = apa_ch_pair.second;
         
         // Get all wires for this channel (handles wrapped wires)
-        auto wire_info = get_wires_for_channel(apa, channel);
+        const auto& wire_info = get_wires_for_channel(apa, channel);
         
         // Store in map: (apa, channel) -> vector of (face, plane, wire)
         map_apa_ch_plane_wires[apa_ch_pair] = wire_info;
@@ -1316,6 +1333,112 @@ void TrackFitting::fill_fitted_charge_2d(
     process_plane(map_V, pred_v, 1, rel_uncer_ind, add_uncer_ind);
     process_plane(map_W, pred_w, 2, rel_uncer_col, add_uncer_col);
 
+    record_cluster_fitted_charge_2d();
+}
+
+// doc pdvd/28 round 2 (T2): row-table flavour for the single-track fit.  The
+// body mirrors the map flavour above line for line; the rows arrive in the
+// same CoordReadout order and each row's coords in the same Coord2D order.
+void TrackFitting::fill_fitted_charge_2d(const std::array<std::vector<DqdxRow>, 3>& plane_rows,
+                                         const std::vector<Coord2D>& coords,
+                                         const Eigen::VectorXd& pred_u, const Eigen::VectorXd& pred_v, const Eigen::VectorXd& pred_w,
+                                         double rel_uncer_ind, double rel_uncer_col,
+                                         double add_uncer_ind, double add_uncer_col)
+{
+    m_fitted_charge_2d.clear();
+
+    auto process_plane = [&](const std::vector<DqdxRow>& rows,
+                             const Eigen::VectorXd& pred_data,
+                             int plane_idx,
+                             double rel_uncer, double add_uncer) {
+        int idx = 0;
+        for (const auto& row : rows) {
+            const auto& measurement = row.meas;
+
+            double pred_charge = 0;
+            if (measurement.charge > 0 && measurement.flag != 0) {
+                double total_err = sqrt(pow(measurement.charge_err, 2)
+                                      + pow(measurement.charge * rel_uncer, 2)
+                                      + pow(add_uncer, 2));
+                pred_charge = pred_data(idx) * total_err;
+            }
+
+            std::set<Facade::Cluster*, PR::ClusterPtrCmp> clusters;
+            auto rb_it = global_rb_map.find(row.key);
+            if (rb_it != global_rb_map.end()) {
+                for (auto* blob : rb_it->second) {
+                    auto* cl = blob->cluster();
+                    if (cl) clusters.insert(cl);
+                }
+            }
+
+            for (uint32_t ci = row.c0; ci < row.c1; ++ci) {
+                const auto& c2d = coords[ci];
+                APAFacePlane afp{c2d.apa, c2d.face, plane_idx};
+                WireTime wt{c2d.wire, c2d.time};
+                auto& entry = m_fitted_charge_2d[afp][wt];
+                entry.charge = measurement.charge;
+                entry.charge_err = measurement.charge_err;
+                entry.pred_charge = pred_charge;
+                entry.flag = measurement.flag;
+                entry.clusters = clusters;
+            }
+
+            idx++;
+        }
+    };
+
+    process_plane(plane_rows[0], pred_u, 0, rel_uncer_ind, add_uncer_ind);
+    process_plane(plane_rows[1], pred_v, 1, rel_uncer_ind, add_uncer_ind);
+    process_plane(plane_rows[2], pred_w, 2, rel_uncer_col, add_uncer_col);
+
+    record_cluster_fitted_charge_2d();
+}
+
+void TrackFitting::build_dqdx_rows(const std::unordered_map<CoordReadout, ChargeMeasurement, CoordReadoutHash>& charge_source,
+                                   std::array<std::vector<DqdxRow>, 3>& plane_rows,
+                                   std::vector<Coord2D>& coords) const
+{
+    std::vector<const std::pair<const CoordReadout, ChargeMeasurement>*> ordered;
+    ordered.reserve(charge_source.size());
+    for (const auto& kv : charge_source) ordered.push_back(&kv);
+    std::sort(ordered.begin(), ordered.end(),
+              [](const std::pair<const CoordReadout, ChargeMeasurement>* a,
+                 const std::pair<const CoordReadout, ChargeMeasurement>* b) { return a->first < b->first; });
+
+    coords.clear();
+    coords.reserve(ordered.size());
+    for (auto& rows : plane_rows) rows.clear();
+    const auto coord_equal = [](const Coord2D& a, const Coord2D& b) { return !(a < b) && !(b < a); };
+
+    for (const auto* kv : ordered) {
+        const CoordReadout& key = kv->first;
+        const auto& wires_info = get_wires_for_channel(key.apa, key.channel);
+        if (wires_info.empty()) continue; // Skip if no wire mapping found
+
+        const uint32_t c0 = coords.size();
+        int plane = -1; // asssuming all wires are from the same plane name ...
+        for (const auto& wire_info : wires_info) {
+            int face = std::get<0>(wire_info);
+            plane = std::get<1>(wire_info);
+            int wire = std::get<2>(wire_info);
+            WirePlaneLayer_t plane_layer = (plane == 0) ? kUlayer : 
+                                        (plane == 1) ? kVlayer : kWlayer;
+            coords.emplace_back(key.apa, face, key.time, wire, key.channel, plane_layer);
+        }
+        // std::set<Coord2D> order and uniqueness.
+        std::sort(coords.begin() + c0, coords.end());
+        coords.erase(std::unique(coords.begin() + c0, coords.end(), coord_equal), coords.end());
+        if (plane < 0 || plane > 2) {   // the switch stored nothing for other planes
+            coords.erase(coords.begin() + c0, coords.end());
+            continue;
+        }
+        plane_rows[plane].push_back({key, kv->second, c0, static_cast<uint32_t>(coords.size())});
+    }
+}
+
+void TrackFitting::record_cluster_fitted_charge_2d()
+{
     // Persist this cluster's cells so they survive when the next
     // do_multi_tracking(..., &other_cluster) clears m_fitted_charge_2d.
     if (m_cluster_filter) {
@@ -6257,6 +6380,18 @@ void TrackFitting::recover_original_charge_data(){
     m_orig_charge_data.clear();
 }
 
+// doc pdvd/28 round 2: sparse lookup for the compact-matrix helpers (see pair_values there).
+static double dqdx_pair_value(const std::vector<std::pair<long long, double>>& pv, long long key)
+{
+    // The LAST entry with this key (pv is stable-sorted in the insertion order
+    // of the response matrix's nonzeros): the dense array this replaces was
+    // overwritten by every duplicate, so its final value was the last one.
+    auto it = std::upper_bound(pv.begin(), pv.end(), key,
+                               [](long long k, const std::pair<long long, double>& e) { return k < e.first; });
+    if (it != pv.begin() && (it - 1)->first == key) return (it - 1)->second;
+    return 0.0;
+}
+
 std::vector<std::vector<double>> TrackFitting::calculate_compact_matrix_multi(std::vector<std::vector<int> >& connected_vec,Eigen::SparseMatrix<double>& weight_matrix, const Eigen::SparseMatrix<double>& response_matrix_transpose, int n_2d_measurements, int n_3d_positions, double cut_position){
     // Initialize results vector - returns sharing ratios for each 3D position
     std::vector<std::vector<double>> results(n_3d_positions);
@@ -6268,7 +6403,13 @@ std::vector<std::vector<double>> TrackFitting::calculate_compact_matrix_multi(st
     std::map<int, std::set<int>> map_2d_to_3d;
     std::map<int, std::set<int>> map_3d_to_2d;
     // §4.5: flat vector gives O(1) access vs O(log N) for std::map<pair<int,int>,double>
-    std::vector<double> pair_values(static_cast<size_t>(n_3d_positions) * n_2d_measurements, 0.0);
+    // doc pdvd/28 round 2: the (row, col) -> value lookup used to be a DENSE
+    // n_3d x n_2d double array (a 1000-point STM fit over a 90k-row cluster:
+    // 720 MB, zero-filled per call).  Only the response matrix's nonzeros are
+    // ever written or read, so a sorted (key, value) vector answers every
+    // read identically (absent -> 0.0, as the zero-filled array did).
+    std::vector<std::pair<long long, double>> pair_values;
+    pair_values.reserve(response_matrix_transpose.nonZeros());
     
     // Build mapping structures by iterating through sparse matrix
     for (int k = 0; k < response_matrix_transpose.outerSize(); ++k) {
@@ -6298,12 +6439,17 @@ std::vector<std::vector<double>> TrackFitting::calculate_compact_matrix_multi(st
             }
             
             // Store pair values for later lookup
-            pair_values[static_cast<size_t>(row) * n_2d_measurements + col] = value;
+            pair_values.emplace_back(static_cast<long long>(row) * n_2d_measurements + col, value);
             count++;
         }
         
         count_2d.at(k) = count;
     }
+    // stable: a (row, col) can be entered twice -- a wrapped channel puts two wires
+    // of one plane into one 2D row and the response fill visits it once per wire
+    // -- and the dense array kept the LAST write in iteration order.
+    std::stable_sort(pair_values.begin(), pair_values.end(),
+                     [](const std::pair<long long, double>& a, const std::pair<long long, double>& b) { return a.first < b.first; });
     
     // Calculate average count for 3D positions
     std::vector<std::pair<double, int>> average_count(n_3d_positions);
@@ -6315,7 +6461,7 @@ std::vector<std::vector<double>> TrackFitting::calculate_compact_matrix_multi(st
         
         for (auto it1 = it->second.begin(); it1 != it->second.end(); ++it1) {
             int col = *it1;
-            double val = pair_values[static_cast<size_t>(row) * n_2d_measurements + col];
+            double val = dqdx_pair_value(pair_values, static_cast<long long>(row) * n_2d_measurements + col);
             sum1 += count_2d[col] * val;
             sum2 += val;
             if (count_2d[col] > 2) {
@@ -6334,7 +6480,7 @@ std::vector<std::vector<double>> TrackFitting::calculate_compact_matrix_multi(st
         
         for (auto it1 = it->second.begin(); it1 != it->second.end(); ++it1) {
             int row = *it1;
-            double val = pair_values[static_cast<size_t>(row) * n_2d_measurements + col];
+            double val = dqdx_pair_value(pair_values, static_cast<long long>(row) * n_2d_measurements + col);
             if (average_count.at(row).second == 1) {
                 flag = 1;
             }
@@ -6414,7 +6560,13 @@ std::vector<std::pair<double, double>> TrackFitting::calculate_compact_matrix(
     std::map<int, std::set<int>> map_2d_to_3d;
     std::map<int, std::set<int>> map_3d_to_2d;
     // §4.5: flat vector gives O(1) access vs O(log N) for std::map<pair<int,int>,double>
-    std::vector<double> pair_values(static_cast<size_t>(n_3d_positions) * n_2d_measurements, 0.0);
+    // doc pdvd/28 round 2: the (row, col) -> value lookup used to be a DENSE
+    // n_3d x n_2d double array (a 1000-point STM fit over a 90k-row cluster:
+    // 720 MB, zero-filled per call).  Only the response matrix's nonzeros are
+    // ever written or read, so a sorted (key, value) vector answers every
+    // read identically (absent -> 0.0, as the zero-filled array did).
+    std::vector<std::pair<long long, double>> pair_values;
+    pair_values.reserve(response_matrix_transpose.nonZeros());
     
     // Build mapping structures by iterating through sparse matrix
     for (int k = 0; k < response_matrix_transpose.outerSize(); ++k) {
@@ -6446,12 +6598,17 @@ std::vector<std::pair<double, double>> TrackFitting::calculate_compact_matrix(
             }
             
             // Store pair values for later lookup
-            pair_values[static_cast<size_t>(row) * n_2d_measurements + col] = value;
+            pair_values.emplace_back(static_cast<long long>(row) * n_2d_measurements + col, value);
             count++;
         }
         
         count_2d.at(k) = count;
     }
+    // stable: a (row, col) can be entered twice -- a wrapped channel puts two wires
+    // of one plane into one 2D row and the response fill visits it once per wire
+    // -- and the dense array kept the LAST write in iteration order.
+    std::stable_sort(pair_values.begin(), pair_values.end(),
+                     [](const std::pair<long long, double>& a, const std::pair<long long, double>& b) { return a.first < b.first; });
     
     // Calculate average count for 3D positions
     std::vector<std::pair<double, int>> average_count(n_3d_positions);
@@ -6463,7 +6620,7 @@ std::vector<std::pair<double, double>> TrackFitting::calculate_compact_matrix(
         
         for (auto it1 = it->second.begin(); it1 != it->second.end(); ++it1) {
             int col = *it1;
-            double val = pair_values[static_cast<size_t>(row) * n_2d_measurements + col];
+            double val = dqdx_pair_value(pair_values, static_cast<long long>(row) * n_2d_measurements + col);
             sum1 += count_2d[col] * val;
             sum2 += val;
             if (count_2d[col] > 2) {
@@ -6483,7 +6640,7 @@ std::vector<std::pair<double, double>> TrackFitting::calculate_compact_matrix(
         
         for (auto it1 = it->second.begin(); it1 != it->second.end(); ++it1) {
             int row = *it1;
-            double val = pair_values[static_cast<size_t>(row) * n_2d_measurements + col];
+            double val = dqdx_pair_value(pair_values, static_cast<long long>(row) * n_2d_measurements + col);
             if (average_count.at(row).second == 1) {
                 flag = 1;
             }
@@ -6690,38 +6847,39 @@ void TrackFitting::dQ_dx_multi_fit(double dis_end_point_ext, bool flag_dQ_dx_fit
 
     // Prepare charge data maps similar to dQ_dx_fit
     std::map<CoordReadout, std::pair<ChargeMeasurement, std::set<Coord2D>>> map_U_charge_2D, map_V_charge_2D, map_W_charge_2D;
-
-    // Fill the maps from charge_source (per-cluster when filter is set, global otherwise)
-    for (const auto& [coord_readout, charge_measurement] : charge_source) {
-        int apa = coord_readout.apa;
-        int time = coord_readout.time;
-        int channel = coord_readout.channel;
-        
-        auto wires_info = get_wires_for_channel(apa, channel);
-        if (wires_info.empty()) continue;
-        
-        std::set<TrackFitting::Coord2D> associated_coords;
-        int plane = -1;
-        
-        for (const auto& wire_info : wires_info) {
-            int face = std::get<0>(wire_info);
-            plane = std::get<1>(wire_info);
-            int wire = std::get<2>(wire_info);
-            
-            WirePlaneLayer_t plane_layer = (plane == 0) ? kUlayer : 
-                                          (plane == 1) ? kVlayer : kWlayer;
-            
-            TrackFitting::Coord2D coord_2d(apa, face, time, wire, channel, plane_layer);
-            associated_coords.insert(coord_2d);
-        }
-        
-        std::pair<ChargeMeasurement, std::set<TrackFitting::Coord2D>> charge_coord_pair = 
-            std::make_pair(charge_measurement, associated_coords);
-        
-        switch (plane) {
-            case 0: map_U_charge_2D[coord_readout] = charge_coord_pair; break;
-            case 1: map_V_charge_2D[coord_readout] = charge_coord_pair; break;
-            case 2: map_W_charge_2D[coord_readout] = charge_coord_pair; break;
+    // doc pdvd/28 round 2: the same maps as before, built in key order with an
+    // end() hint (O(1) per insert instead of a random-order O(log n) descent)
+    // from the memoised channel->wires lookup.  Unique keys => identical maps.
+    {
+        std::vector<const std::pair<const CoordReadout, ChargeMeasurement>*> ordered;
+        ordered.reserve(charge_source.size());
+        for (const auto& kv : charge_source) ordered.push_back(&kv);
+        std::sort(ordered.begin(), ordered.end(),
+                  [](const std::pair<const CoordReadout, ChargeMeasurement>* a,
+                     const std::pair<const CoordReadout, ChargeMeasurement>* b) { return a->first < b->first; });
+        for (const auto* kv : ordered) {
+            const CoordReadout& coord_readout = kv->first;
+            const ChargeMeasurement& charge_measurement = kv->second;
+            int apa = coord_readout.apa;
+            int time = coord_readout.time;
+            int channel = coord_readout.channel;
+            const auto& wires_info = get_wires_for_channel(apa, channel);
+            if (wires_info.empty()) continue;
+            std::set<TrackFitting::Coord2D> associated_coords;
+            int plane = -1; // asssuming all wires are from the same plane name ...
+            for (const auto& wire_info : wires_info) {
+                int face = std::get<0>(wire_info);
+                plane = std::get<1>(wire_info);
+                int wire = std::get<2>(wire_info);
+                WirePlaneLayer_t plane_layer = (plane == 0) ? kUlayer : 
+                                              (plane == 1) ? kVlayer : kWlayer;
+                associated_coords.emplace(apa, face, time, wire, channel, plane_layer);
+            }
+            switch (plane) {
+                case 0: map_U_charge_2D.emplace_hint(map_U_charge_2D.end(), coord_readout, std::make_pair(charge_measurement, std::move(associated_coords))); break;
+                case 1: map_V_charge_2D.emplace_hint(map_V_charge_2D.end(), coord_readout, std::make_pair(charge_measurement, std::move(associated_coords))); break;
+                case 2: map_W_charge_2D.emplace_hint(map_W_charge_2D.end(), coord_readout, std::make_pair(charge_measurement, std::move(associated_coords))); break;
+            }
         }
     }
     SPDLOG_LOGGER_TRACE(s_log, "dQ/dx: U={} V={} W={}", map_U_charge_2D.size(), map_V_charge_2D.size(), map_W_charge_2D.size());
@@ -7913,53 +8071,20 @@ void WireCell::Clus::TrackFitting::dQ_dx_fit(double dis_end_point_ext, bool flag
     const double add_uncer_col = m_params.add_uncer_col;
     const double add_sigma_L = m_params.add_sigma_L;
 
-    std::map<CoordReadout, std::pair<ChargeMeasurement, std::set<Coord2D>>> map_U_charge_2D, map_V_charge_2D, map_W_charge_2D;
-    // Fill the maps from charge_source (per-cluster when filter is set, global otherwise)
-    for (const auto& [coord_readout, charge_measurement] : charge_source) {
-        int apa = coord_readout.apa;
-        int time = coord_readout.time;
-        int channel = coord_readout.channel;
-        
-        // Get wires for this channel using the dedicated function
-        auto wires_info = get_wires_for_channel(apa, channel);
-        if (wires_info.empty()) continue; // Skip if no wire mapping found
-        
-        std::set<TrackFitting::Coord2D> associated_coords;
-        int plane = -1; // asssuming all wires are from the same plane name ...
-        // Process each wire associated with this channel
-        for (const auto& wire_info : wires_info) {
-            int face = std::get<0>(wire_info);
-            plane = std::get<1>(wire_info);
-            int wire = std::get<2>(wire_info);
-            
-            // Convert plane int to WirePlaneLayer_t
-            WirePlaneLayer_t plane_layer = (plane == 0) ? kUlayer : 
-                                        (plane == 1) ? kVlayer : kWlayer;
-            
-            // Create TrackFitting::Coord2D with all fields filled
-            TrackFitting::Coord2D coord_2d(apa, face, time, wire, channel, plane_layer);
-            associated_coords.insert(coord_2d);
-        }
+    // doc pdvd/28 round 2 (T2): this function used to build three
+    // std::map<CoordReadout, pair<measurement, std::set<Coord2D>>> over EVERY
+    // 2D cell of the loaded cluster -- up to ~90k rows and ~4 heap nodes per
+    // row, rebuilt and torn down for every segment fitted (22 % of PDVD
+    // 039349/7).  The same rows now live in flat per-plane tables in the same
+    // CoordReadout order, with the per-row wires as a range of one shared
+    // Coord2D vector in std::set order.  Row indices, response matrices,
+    // regularisation flags and the product map are identical; only the
+    // containers changed.  Exact; no knob.
+    std::vector<Coord2D> row_coords;
+    std::array<std::vector<DqdxRow>, 3> plane_rows;
+    build_dqdx_rows(charge_source, plane_rows, row_coords);
 
-        // Create the pair for storage
-        std::pair<ChargeMeasurement, std::set<TrackFitting::Coord2D>> charge_coord_pair = std::make_pair(charge_measurement, associated_coords);
-
-        // Store in appropriate plane map
-        switch (plane) {
-            case 0: // U plane
-                map_U_charge_2D[coord_readout] = charge_coord_pair;
-                break;
-            case 1: // V plane  
-                map_V_charge_2D[coord_readout] = charge_coord_pair;
-                break;
-            case 2: // W plane
-                map_W_charge_2D[coord_readout] = charge_coord_pair;
-                break;
-        }
-    }
-
-
-    SPDLOG_LOGGER_TRACE(s_log, "dQ/dx: U={} V={} W={}", map_U_charge_2D.size(), map_V_charge_2D.size(), map_W_charge_2D.size());
+    SPDLOG_LOGGER_TRACE(s_log, "dQ/dx: U={} V={} W={}", plane_rows[0].size(), plane_rows[1].size(), plane_rows[2].size());
     // for (const auto& [coord_key, result] : map_U_charge_2D) {
     //     std::cout << "CoordReadout: APA=" << coord_key.apa
     //               << ", Time=" << coord_key.time
@@ -7983,9 +8108,9 @@ void WireCell::Clus::TrackFitting::dQ_dx_fit(double dis_end_point_ext, bool flag
     int n_3D_pos = fine_tracking_path.size();
     // need to separate measurements into U, V, W and form separate matrices ... 
     // need to store measurement --> U, V, W --> measurements
-    int n_2D_u = map_U_charge_2D.size();
-    int n_2D_v = map_V_charge_2D.size();
-    int n_2D_w = map_W_charge_2D.size();
+    int n_2D_u = plane_rows[0].size();
+    int n_2D_v = plane_rows[1].size();
+    int n_2D_w = plane_rows[2].size();
     
     if (n_2D_u == 0 && n_2D_v == 0 && n_2D_w == 0) return;
     
@@ -8009,8 +8134,8 @@ void WireCell::Clus::TrackFitting::dQ_dx_fit(double dis_end_point_ext, bool flag
     // Fill data vectors with charge/uncertainty ratios
     {
         int n_u = 0;
-        for (const auto& [coord_key, result] : map_U_charge_2D) {
-            const auto& measurement = result.first;
+        for (const auto& row : plane_rows[0]) {
+            const auto& measurement = row.meas;
             if (measurement.charge >0) {
                 double charge = measurement.charge;
                 double charge_err = measurement.charge_err;
@@ -8023,8 +8148,8 @@ void WireCell::Clus::TrackFitting::dQ_dx_fit(double dis_end_point_ext, bool flag
             n_u++;
         }
         int n_v = 0;
-        for (const auto& [coord_key, result] : map_V_charge_2D) {
-            const auto& measurement = result.first;
+        for (const auto& row : plane_rows[1]) {
+            const auto& measurement = row.meas;
             if (measurement.charge >0) {
                 double charge = measurement.charge;
                 double charge_err = measurement.charge_err;
@@ -8036,8 +8161,8 @@ void WireCell::Clus::TrackFitting::dQ_dx_fit(double dis_end_point_ext, bool flag
             n_v++;
         }
         int n_w = 0;
-        for (const auto& [coord_key, result] : map_W_charge_2D) {
-            const auto& measurement = result.first;
+        for (const auto& row : plane_rows[2]) {
+            const auto& measurement = row.meas;
             if (measurement.charge >0) {
                 double charge = measurement.charge;
                 double charge_err = measurement.charge_err;
@@ -8101,30 +8226,30 @@ void WireCell::Clus::TrackFitting::dQ_dx_fit(double dis_end_point_ext, bool flag
         // std::cout << i << " " << dx[i] << std::endl;
     }
     
-    // Pre-build (wire, time) lookup sets keyed by (apa, face) so we don't rebuild them
-    // inside the n_3D_pos loop (which would be O(n_3D_pos * n_measurements)).
+    // The per-(apa,face) (wire, time) cell sets of each plane, used below only
+    // for membership tests: sorted+unique vectors answer exactly what the
+    // std::set<pair<int,int>> they replace answered.
     using WireTimePair = std::pair<int, int>;
     using ApaFaceKey   = std::pair<int, int>;
-    std::map<ApaFaceKey, std::set<WireTimePair>> precomp_UT, precomp_VT, precomp_WT;
-    for (const auto& [coord_key, result] : map_U_charge_2D) {
-        for (const auto& coord2d : result.second) {
-            if (coord2d.plane == kUlayer)
-                precomp_UT[{coord2d.apa, coord2d.face}].insert({coord2d.wire, coord2d.time});
+    std::array<std::map<ApaFaceKey, std::vector<WireTimePair>>, 3> cells_wt;
+    for (int p = 0; p < 3; ++p) {
+        const WirePlaneLayer_t layer = (p == 0) ? kUlayer : (p == 1) ? kVlayer : kWlayer;
+        for (const auto& row : plane_rows[p]) {
+            for (uint32_t ci = row.c0; ci < row.c1; ++ci) {
+                const auto& coord2d = row_coords[ci];
+                if (coord2d.plane == layer)
+                    cells_wt[p][{coord2d.apa, coord2d.face}].push_back({coord2d.wire, coord2d.time});
+            }
+        }
+        for (auto& [af, cells] : cells_wt[p]) {
+            std::sort(cells.begin(), cells.end());
+            cells.erase(std::unique(cells.begin(), cells.end()), cells.end());
         }
     }
-    for (const auto& [coord_key, result] : map_V_charge_2D) {
-        for (const auto& coord2d : result.second) {
-            if (coord2d.plane == kVlayer)
-                precomp_VT[{coord2d.apa, coord2d.face}].insert({coord2d.wire, coord2d.time});
-        }
-    }
-    for (const auto& [coord_key, result] : map_W_charge_2D) {
-        for (const auto& coord2d : result.second) {
-            if (coord2d.plane == kWlayer)
-                precomp_WT[{coord2d.apa, coord2d.face}].insert({coord2d.wire, coord2d.time});
-        }
-    }
-    static const std::set<WireTimePair> empty_wt_set;
+    static const std::vector<WireTimePair> empty_wt_set;
+    auto has_cell = [](const std::vector<WireTimePair>& cells, const WireTimePair& wt) {
+        return std::binary_search(cells.begin(), cells.end(), wt);
+    };
 
     // Wire-indexed lookup, as in dQ_dx_multi_fit: for each (apa,face),
     // wire -> rows carrying the 2D-measurement row index and its charge.
@@ -8143,33 +8268,22 @@ void WireCell::Clus::TrackFitting::dQ_dx_fit(double dis_end_point_ext, bool flag
     using WireRowMap = std::map<int, std::vector<PlaneRow>>;
     std::map<ApaFaceKey, WireRowMap> wire_idx_U, wire_idx_V, wire_idx_W;
     {
-        int n = 0;
-        for (const auto& [coord_key, result] : map_U_charge_2D) {
-            for (const auto& c : result.second) {
-                if (c.plane == kUlayer)
-                    wire_idx_U[{c.apa, c.face}][c.wire].push_back(
-                        {n, c.wire, c.time, result.first.charge, result.first.charge_err, result.first.flag});
+        auto index_plane = [&](const std::vector<DqdxRow>& rows, WirePlaneLayer_t layer,
+                               std::map<ApaFaceKey, WireRowMap>& wire_idx) {
+            int n = 0;
+            for (const auto& row : rows) {
+                for (uint32_t ci = row.c0; ci < row.c1; ++ci) {
+                    const auto& c = row_coords[ci];
+                    if (c.plane == layer)
+                        wire_idx[{c.apa, c.face}][c.wire].push_back(
+                            {n, c.wire, c.time, row.meas.charge, row.meas.charge_err, row.meas.flag});
+                }
+                ++n;
             }
-            ++n;
-        }
-        n = 0;
-        for (const auto& [coord_key, result] : map_V_charge_2D) {
-            for (const auto& c : result.second) {
-                if (c.plane == kVlayer)
-                    wire_idx_V[{c.apa, c.face}][c.wire].push_back(
-                        {n, c.wire, c.time, result.first.charge, result.first.charge_err, result.first.flag});
-            }
-            ++n;
-        }
-        n = 0;
-        for (const auto& [coord_key, result] : map_W_charge_2D) {
-            for (const auto& c : result.second) {
-                if (c.plane == kWlayer)
-                    wire_idx_W[{c.apa, c.face}][c.wire].push_back(
-                        {n, c.wire, c.time, result.first.charge, result.first.charge_err, result.first.flag});
-            }
-            ++n;
-        }
+        };
+        index_plane(plane_rows[0], kUlayer, wire_idx_U);
+        index_plane(plane_rows[1], kVlayer, wire_idx_V);
+        index_plane(plane_rows[2], kWlayer, wire_idx_W);
     }
 
     // Build response matrices using geometry information
@@ -8389,9 +8503,9 @@ void WireCell::Clus::TrackFitting::dQ_dx_fit(double dis_end_point_ext, bool flag
 
         // Fill response matrices using Gaussian integration
         ApaFaceKey af_key = {apa, face};
-        const auto& set_UT = precomp_UT.count(af_key) ? precomp_UT.at(af_key) : empty_wt_set;
-        const auto& set_VT = precomp_VT.count(af_key) ? precomp_VT.at(af_key) : empty_wt_set;
-        const auto& set_WT = precomp_WT.count(af_key) ? precomp_WT.at(af_key) : empty_wt_set;
+        const auto& set_UT = cells_wt[0].count(af_key) ? cells_wt[0].at(af_key) : empty_wt_set;
+        const auto& set_VT = cells_wt[1].count(af_key) ? cells_wt[1].at(af_key) : empty_wt_set;
+        const auto& set_WT = cells_wt[2].count(af_key) ? cells_wt[2].at(af_key) : empty_wt_set;
 
         // Wire-indexed response-matrix fill: for each plane visit only the
         // wires inside the search window (wire_idx_* built once above), then
@@ -8490,7 +8604,7 @@ void WireCell::Clus::TrackFitting::dQ_dx_fit(double dis_end_point_ext, bool flag
         // Additional dead channel checks
         if (reg_flag_u[i] == 0) { // apa, face
             for (size_t kk = 0; kk < centers_U.size(); kk++) {
-                if (set_UT.find(std::make_pair(std::round(centers_U[kk]), std::round(centers_T[kk]/cur_ntime_ticks)*cur_ntime_ticks)) == set_UT.end()) {
+                if (!has_cell(set_UT, std::make_pair(std::round(centers_U[kk]), std::round(centers_T[kk]/cur_ntime_ticks)*cur_ntime_ticks))) {
                     reg_flag_u[i] = 1;
                     break;
                 }
@@ -8498,7 +8612,7 @@ void WireCell::Clus::TrackFitting::dQ_dx_fit(double dis_end_point_ext, bool flag
         }
         if (reg_flag_v[i] == 0) { // apa, face
             for (size_t kk = 0; kk < centers_V.size(); kk++) {
-                if (set_VT.find(std::make_pair(std::round(centers_V[kk]), std::round(centers_T[kk]/cur_ntime_ticks)*cur_ntime_ticks)) == set_VT.end()) {
+                if (!has_cell(set_VT, std::make_pair(std::round(centers_V[kk]), std::round(centers_T[kk]/cur_ntime_ticks)*cur_ntime_ticks))) {
                     reg_flag_v[i] = 1;
                     break;
                 }
@@ -8506,7 +8620,7 @@ void WireCell::Clus::TrackFitting::dQ_dx_fit(double dis_end_point_ext, bool flag
         }
         if (reg_flag_w[i] == 0) { // apa, face
             for (size_t kk = 0; kk < centers_W.size(); kk++) {
-                if (set_WT.find(std::make_pair(std::round(centers_W[kk]), std::round(centers_T[kk]/cur_ntime_ticks)*cur_ntime_ticks)) == set_WT.end()) {
+                if (!has_cell(set_WT, std::make_pair(std::round(centers_W[kk]), std::round(centers_T[kk]/cur_ntime_ticks)*cur_ntime_ticks))) {
                     reg_flag_w[i] = 1;
                     break;
                 }
@@ -8653,7 +8767,7 @@ void WireCell::Clus::TrackFitting::dQ_dx_fit(double dis_end_point_ext, bool flag
     pred_data_w_2D = RW * pos_3D;
 
     // Persist fitted 2D charge results
-    fill_fitted_charge_2d(map_U_charge_2D, map_V_charge_2D, map_W_charge_2D,
+    fill_fitted_charge_2d(plane_rows, row_coords,
                           pred_data_u_2D, pred_data_v_2D, pred_data_w_2D,
                           rel_uncer_ind, rel_uncer_col, add_uncer_ind, add_uncer_col);
 

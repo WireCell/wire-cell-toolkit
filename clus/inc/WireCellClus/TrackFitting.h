@@ -11,6 +11,8 @@
 #include <Eigen/IterativeLinearSolvers>
 #include <unordered_map>
 #include <unordered_set>
+#include <array>
+#include <cstdint>
 
 
 namespace WireCell::Clus {
@@ -547,6 +549,31 @@ namespace WireCell::Clus {
             double rel_uncer_ind, double rel_uncer_col,
             double add_uncer_ind, double add_uncer_col);
 
+        /// doc pdvd/28 round 2 (T2): one row of the single-track dQ/dx fit's
+        /// 2D-measurement table -- a charge_source entry with its wires as the
+        /// [c0,c1) range of a shared Coord2D vector (Coord2D order, unique),
+        /// i.e. exactly the std::set<Coord2D> the map-based code held per row.
+        struct DqdxRow {
+            CoordReadout key;
+            ChargeMeasurement meas;
+            uint32_t c0, c1;
+        };
+        /// Build the per-plane (U,V,W) row tables in CoordReadout order from an
+        /// unordered charge source -- the order the std::map-based code produced.
+        /// Rows whose channel has no wires are dropped, rows whose last wire
+        /// is not on plane 0/1/2 are dropped (the switch stored nothing).
+        void build_dqdx_rows(const std::unordered_map<CoordReadout, ChargeMeasurement, CoordReadoutHash>& charge_source,
+                             std::array<std::vector<DqdxRow>, 3>& plane_rows,
+                             std::vector<Coord2D>& coords) const;
+        /// Row-table flavour of fill_fitted_charge_2d: identical product map.
+        void fill_fitted_charge_2d(const std::array<std::vector<DqdxRow>, 3>& plane_rows,
+                                   const std::vector<Coord2D>& coords,
+                                   const Eigen::VectorXd& pred_u, const Eigen::VectorXd& pred_v, const Eigen::VectorXd& pred_w,
+                                   double rel_uncer_ind, double rel_uncer_col,
+                                   double add_uncer_ind, double add_uncer_col);
+        /// Shared tail of both fill_fitted_charge_2d flavours: the per-cluster snapshot.
+        void record_cluster_fitted_charge_2d();
+
         /// Merge every per-cluster snapshot captured inside fill_fitted_charge_2d
         /// into m_fitted_charge_2d so the flat map covers every cluster fit this
         /// event.  Call once per event after all do_multi_tracking() calls are done
@@ -717,7 +744,9 @@ namespace WireCell::Clus {
          * @param channel_number Channel identifier
          * @return Vector of wire information (face, plane, wire_index)
          */
-        std::vector<std::tuple<int, int, int>> get_wires_for_channel(int apa, int channel_number) const;
+        /// doc pdvd/28 round 2: memoised per (apa, channel); the reference is
+        /// stable until reset_for_new_event() clears the memo with the grouping.
+        const std::vector<std::tuple<int, int, int>>& get_wires_for_channel(int apa, int channel_number) const;
 
         // map_apa_ch_plane_wires: (apa,channel) -> vector of (face, plane, wire)
         void collect_2D_charge(std::map<CoordReadout, ChargeMeasurement>& charge_2d_u, std::map<CoordReadout, ChargeMeasurement>& charge_2d_v, std::map<CoordReadout, ChargeMeasurement>& charge_2d_w, std::map<std::pair<int, int>, std::vector<std::tuple<int, int, int>>>& map_apa_ch_plane_wires);
@@ -1031,6 +1060,11 @@ namespace WireCell::Clus {
     
         // Global (apa, time, channel) to blobs
         std::unordered_map<CoordReadout, std::unordered_set<Facade::Blob*>, CoordReadoutHash> global_rb_map;
+
+        // doc pdvd/28 round 2: memo of get_wires_for_channel(), keyed (apa<<32 ^ channel).
+        // Geometry is fixed for the fitter's lifetime; cleared in reset_for_new_event().
+        mutable std::unordered_map<long long, std::vector<std::tuple<int, int, int>>> m_channel_wires_memo;
+        mutable const Facade::Grouping* m_channel_wires_memo_grouping{nullptr};   ///< grouping the memo was filled under
 
         // Fitted 2D charge organized by (apa, face, plane) -> (wire, time)
         std::map<APAFacePlane, std::map<WireTime, FittedCharge2D>> m_fitted_charge_2d;
