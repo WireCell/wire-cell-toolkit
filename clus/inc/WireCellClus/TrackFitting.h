@@ -160,6 +160,36 @@ namespace WireCell::Clus {
             // (0.6*0.300 = 0.180 cm < 0.200 cm).
             double good_point_pitch_frac = 0;
 
+            // doc pdvd/38 -- GAP-AWARE end trim.  A LENGTH in WCT internal
+            // units (mm); 0 (default) = off = byte-identical legacy.
+            // examine_end_ps_vec pops points off each end while the strict
+            // three-plane good-point test fails and BREAKS at the first point
+            // that passes -- a tip test that never examines the interior.  With
+            // this > 0 the trim additionally asks, at that surviving tip,
+            // whether the tip is ATTACHED: Clus::scan_tip_island
+            // (WireCellClus/EndTrimGap.h) measures the supported stretch at the
+            // tip, the unsupported run inward of it, and the supported body
+            // beyond that run; the stretch is dropped only when the run is
+            // longer than this value and the island is the SMALLEST of the
+            // three (shorter than the gap and shorter than the body).  Those
+            // comparisons carry the physics: a real track end lying beyond a
+            // dead-channel region reads as a long gap to this test -- which has
+            // no bad-plane allowance -- but its supported stretch is tens of cm
+            // and outweighs what is left beyond, so it is kept; a 1-2 point
+            // island holding a 54-66 cm chord is not.  Iterates, so a path
+            // ending in several islands loses them one at a time.
+            // Only useful WITH ctpc_aniso_metric: doc pdvd/36 sec 10.1 measured
+            // the isotropic test failing 82 % of points that sit on real
+            // charge, so under it failing runs are everywhere and no threshold
+            // separates a gap from a track; under the metric the on-charge pass
+            // rate is 0.91, on-charge failing runs are 1-6 points (0.6-3.6 cm)
+            // and the cluster-109 chord is a 90-point, 54 cm run.
+            // NOTE the physics this can get wrong: a long failing run is also
+            // what a genuine DEAD-CHANNEL region looks like, and this test is
+            // the strict three-plane one with no bad-plane allowance.  Measure
+            // that (doc 38 sweep) before choosing an operating point.
+            double end_trim_gap_len = 0;
+
             // doc sbnd_xin/docs/pr/107 -- dQ/dx-fit point retention (prototype
             // parity).  do_multi_tracking runs a THIRD form_map_graph pass
             // right before dQ_dx_multi_fit that the prototype does not have

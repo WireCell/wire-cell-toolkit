@@ -1,4 +1,5 @@
 #include "WireCellClus/TrackFitting.h"
+#include "WireCellClus/EndTrimGap.h"   // doc pdvd/38 gap-aware end trim
 #include "WireCellClus/TrackFitting_Util.h"
 #include "WireCellClus/PRSegmentFunctions.h"
 
@@ -64,6 +65,8 @@ void TrackFitting::set_parameter(const std::string& name, double value) {
         m_params.traj_cover_probe = value;
     } else if (name == "good_point_pitch_frac") {   // doc pdvd/32 round 3
         m_params.good_point_pitch_frac = value;
+    } else if (name == "end_trim_gap_len") {        // doc pdvd/38, WCT units (mm)
+        m_params.end_trim_gap_len = value;
     } else if (name == "dqdx_fit_keep_all_points") {   // doc pr/107
         m_params.dqdx_fit_keep_all_points = value;
     } else if (name == "DL") {
@@ -231,6 +234,8 @@ double TrackFitting::get_parameter(const std::string& name) const {
         return m_params.dqdx_fit_keep_all_points;
     } else if (name == "good_point_pitch_frac") {      // doc pdvd/32 round 3
         return m_params.good_point_pitch_frac;
+    } else if (name == "end_trim_gap_len") {           // doc pdvd/38
+        return m_params.end_trim_gap_len;
     } else if (name == "fit_blob_coverage") {
         return m_params.fit_blob_coverage;
     } else if (name == "fit_blob_coverage_ghost_dis") {
@@ -2302,9 +2307,27 @@ std::vector<WireCell::Point> TrackFitting::examine_end_ps_vec(std::shared_ptr<PR
     const auto transform = m_pcts->pc_transform(cluster->get_scope_transform(cluster->get_default_scope()));
     double cluster_t0 = cluster->get_cluster_t0();
 
+    // doc pdvd/38: the same strict three-plane support test the two pop loops
+    // below apply to a list end, as a predicate on an arbitrary point, so the
+    // gap scan can ask it about the INTERIOR.  A face-invalid point counts as
+    // unsupported, matching the pop loops (they pop it).  Only ever called when
+    // m_params.end_trim_gap_len > 0.
+    auto trim_point_supported = [&](const WireCell::Point& p) -> bool {
+        auto wpid = m_dv->contained_by(p);
+        if (wpid.face() == -1 || wpid.apa() == -1) return false;
+        auto p_raw = transform->backward(p, cluster_t0, wpid.face(), wpid.apa());
+        return m_grouping->is_good_point(p_raw, wpid.apa(), wpid.face(), 0.2*units::cm, 0, 0,
+                                         m_params.good_point_pitch_frac);
+    };
+
     if (flag_start) {
         // test start
         WireCell::Point temp_start = ps_list.front();
+        // doc pdvd/38: the pop loop is unchanged; the outer loop runs it exactly
+        // once and breaks when end_trim_gap_len is 0 (byte-identical legacy).
+        // The pop loop is deliberately LEFT AT ITS ORIGINAL INDENTATION so the
+        // diff of this production path shows only added lines.
+        while (true) {
         while (ps_list.size() > 0) {
             // figure out the wpid for ps_list.front() ...
             auto test_wpid = m_dv->contained_by(ps_list.front());
@@ -2318,6 +2341,24 @@ std::vector<WireCell::Point> TrackFitting::examine_end_ps_vec(std::shared_ptr<PR
             }
             temp_start = ps_list.front();
             ps_list.pop_front();
+        }
+            // doc pdvd/38: the surviving tip passes, but is it ATTACHED?
+            // Measure the supported stretch at the tip and the unsupported run
+            // inward of it; if that run is longer than the threshold AND longer
+            // than the stretch it holds, the stretch is a detached island --
+            // drop it and let the pop loop above eat the gap behind it.
+            // Terminates: each iteration removes at least one point.
+            if (m_params.end_trim_gap_len <= 0) break;
+            if (ps_list.size() < 2) break;
+            const auto isl = Clus::scan_tip_island(ps_list.begin(), ps_list.end(),
+                                                   trim_point_supported);
+            if (!(isl.detached && isl.gap_len > m_params.end_trim_gap_len
+                  && isl.gap_len > isl.supported_len
+                  && isl.body_len > isl.supported_len)) break;
+            for (std::size_t i = 0; i < isl.npoints && !ps_list.empty(); ++i) {
+                temp_start = ps_list.front();
+                ps_list.pop_front();
+            }
         }
 
         if (ps_list.size() > 0) {
@@ -2368,6 +2409,9 @@ std::vector<WireCell::Point> TrackFitting::examine_end_ps_vec(std::shared_ptr<PR
     // replaces is undefined, not a legacy path to be preserved.
     if (flag_end && !ps_list.empty()) {
         WireCell::Point temp_end = ps_list.back();
+        // doc pdvd/38: symmetric with the start block; inward is rbegin->rend.
+        // Pop loop left at its original indentation, as above.
+        while (true) {
         while (ps_list.size() > 0) {
             // figure out the wpid for the ps_list.back() ...
             auto test_wpid = m_dv->contained_by(ps_list.back());
@@ -2379,6 +2423,18 @@ std::vector<WireCell::Point> TrackFitting::examine_end_ps_vec(std::shared_ptr<PR
             }
             temp_end = ps_list.back();
             ps_list.pop_back();
+        }
+            if (m_params.end_trim_gap_len <= 0) break;
+            if (ps_list.size() < 2) break;
+            const auto isl = Clus::scan_tip_island(ps_list.rbegin(), ps_list.rend(),
+                                                   trim_point_supported);
+            if (!(isl.detached && isl.gap_len > m_params.end_trim_gap_len
+                  && isl.gap_len > isl.supported_len
+                  && isl.body_len > isl.supported_len)) break;
+            for (std::size_t i = 0; i < isl.npoints && !ps_list.empty(); ++i) {
+                temp_end = ps_list.back();
+                ps_list.pop_back();
+            }
         }
         if (ps_list.size() > 0) {
             double dis_step = 0.2*units::cm;
