@@ -933,6 +933,17 @@ namespace WireCell::Clus::PR {
         double m_sgp_min_edge{0.5*units::cm};   ///< edges shorter are never scanned/penalized
         double m_sgp_sample_step{0.3*units::cm};///< edge-interior sampling step
         double m_sgp_point_radius{0.2*units::cm};///< test_good_point radius (ch_range stays 0)
+        // doc pdvd/32 round 3: per-plane pitch floor for THIS file family's
+        // strict good-point tests -- the 18 `is_good_point(..., 0.2 or 0.3 cm,
+        // 0, 0)` sites in NeutrinoStructureExaminer, NeutrinoOtherSegments and
+        // NeutrinoShowerClustering.  Same quantity as TrackFitting's
+        // `good_point_pitch_frac` and the same max(radius, frac*pitch)
+        // semantics, but a SEPARATE knob on purpose: the trajectory end trim
+        // is the site doc 32 measured (0.064 -> 0.522 in the amputated region),
+        // whereas these sites are only inferred to be exposed from sharing the
+        // constant.  Turning this on moves vertex finding and segment
+        // structure, so it stays 0 until it has evidence of its own.
+        double m_good_point_pitch_frac{0};      ///< 0 = legacy; see doc pdvd/32 section 14
         // doc sbnd_xin/docs/pr/73: per-edge diagnostic sentinel for the scan
         // above.  When true, ensure_steiner_gap_graph emits one DEBUG line
         // per SCANNED edge -- endpoints, midpoint, w, bad, the two recovered

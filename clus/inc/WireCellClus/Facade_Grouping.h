@@ -293,8 +293,21 @@ namespace WireCell::Clus::Facade {
             return cache().pitch_mags;
         }
 
+        /// @param pitch_frac doc pdvd/32 round 3: per-plane floor on `radius`,
+        /// expressed as a fraction of that plane's wire pitch.  The ctpc is an
+        /// exact (drift-step x pitch) lattice (PointTreeBuilding.cxx:312,313),
+        /// so a radius below half a pitch cannot be satisfied for a whole band
+        /// of phases however much charge is present -- at PDVD's 0.765 cm U/V
+        /// pitch the shipped 0.2 cm spans 0.52 of a pitch and an interior
+        /// trajectory point passes only 17.5 % of the time, against 62.4 % at
+        /// SBND's 0.300 cm.  Applied as max(radius, pitch_frac*pitch[plane]),
+        /// so it can only ever LOOSEN a plane's test and is inert wherever the
+        /// pitch is fine enough (at 0.6: SBND/uBooNE 0.180 cm < 0.200 cm =>
+        /// byte-identical; PDHD 0.280 cm and PDVD 0.306/0.459 cm => loosened).
+        /// 0 (the default at every call site) => r == radius => no fastgeom
+        /// lookup and no behaviour change.
         bool is_good_point(const geo_point_t& point, const int apa, const int face, const double radius = 0.6 * units::cm, const int ch_range = 1,
-                           const int allowed_bad = 1) const;
+                           const int allowed_bad = 1, const double pitch_frac = 0.0) const;
         // In Facade_Grouping.h, inside the Grouping class declaration
         bool is_good_point_wc(const geo_point_t& point, const int apa, const int face, const double radius = 0.6 * units::cm, 
                             const int ch_range = 1, const int allowed_bad = 1) const;

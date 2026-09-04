@@ -534,15 +534,21 @@ const Grouping::kd2d_t& Grouping::kd2d(const int apa, const int face, const int 
 }
 
 
-bool Grouping::is_good_point(const geo_point_t& point, const int apa, const int face, double radius, int ch_range, int allowed_bad) const {
+bool Grouping::is_good_point(const geo_point_t& point, const int apa, const int face, double radius, int ch_range, int allowed_bad, const double pitch_frac) const {
     // Hand-declared dead gap: the full vertical W-defect column counts as dead on
     // all planes (generalizes the y~0 center patch).  Default-empty -> no-op.
     if (in_dead_gap(point, ch_range, apa, face)) return true;
     const int nplanes = 3;
     const int needed = nplanes - allowed_bad;
     int matched_planes = 0;
+    // doc pdvd/32 round 3: the per-plane pitch floor (see the header for why).
+    // This function runs per point per plane in the clustering good-point
+    // tests, so the legacy path must cost nothing: with pitch_frac == 0 the
+    // fastgeom lookup is skipped entirely and `r` folds back to `radius`.
+    const fastgeom_t* fg = (pitch_frac > 0.0) ? &fastgeom(apa, face) : nullptr;
     for (int pind = 0; pind < nplanes; ++pind) {
-        if (has_closest_point(point, radius, apa, face, pind)) {
+        const double r = fg ? std::max(radius, pitch_frac * fg->pitch[pind]) : radius;
+        if (has_closest_point(point, r, apa, face, pind)) {
             matched_planes++;
         } else if (get_closest_dead_chs(point, ch_range, apa, face, pind)) {
             matched_planes++;

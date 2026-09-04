@@ -146,6 +146,20 @@ namespace WireCell::Clus {
             // set_parameter(name, value) plumbing.
             double traj_cover_probe = 0;
 
+            // doc pdvd/32 round 3 -- per-plane pitch floor for the trajectory
+            // END TRIM's good-point test, as a fraction of the wire pitch.
+            // examine_end_ps_vec pops a fitted point unless all three planes
+            // have a ctpc hit within 0.2 cm; the ctpc is an exact
+            // (drift-step x pitch) lattice, so at PDVD's 0.765 cm U/V pitch
+            // that radius spans 0.52 of a pitch and 82.5 % of interior
+            // trajectory points fail a test they pass 62.4 % of the time at
+            // SBND's 0.300 cm.  Passed through as is_good_point's pitch_frac,
+            // i.e. applied as max(0.2 cm, frac*pitch) per plane, so it can
+            // only loosen.  0 (default) => byte-identical.  0.6 is the largest
+            // round value that leaves SBND and uBooNE untouched
+            // (0.6*0.300 = 0.180 cm < 0.200 cm).
+            double good_point_pitch_frac = 0;
+
             // doc sbnd_xin/docs/pr/107 -- dQ/dx-fit point retention (prototype
             // parity).  do_multi_tracking runs a THIRD form_map_graph pass
             // right before dQ_dx_multi_fit that the prototype does not have

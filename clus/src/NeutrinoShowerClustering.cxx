@@ -2912,7 +2912,11 @@ static bool pr118_connector_endpoints(Shower& absorber, Shower& fragment, Graph&
     return found;
 }
 
-static void pr118_connector_walk(Pr118Connector& c, TrackFitting& track_fitter, WireCell::IDetectorVolumes::pointer dv)
+// doc pdvd/32 round 3: `pitch_frac` is PatternAlgorithms::m_good_point_pitch_frac,
+// threaded in because this walk is a free function.  0 (every caller today)
+// leaves is_good_point exactly as it was.
+static void pr118_connector_walk(Pr118Connector& c, TrackFitting& track_fitter, WireCell::IDetectorVolumes::pointer dv,
+                                 const double pitch_frac = 0.0)
 {
     c.walked = false;
     if (!c.frag_seg) return;
@@ -2941,7 +2945,7 @@ static void pr118_connector_walk(Pr118Connector& c, TrackFitting& track_fitter, 
         bool good = false;
         if (wpid.face() != -1 && wpid.apa() != -1) {
             auto p_raw = transform->backward(tp, t0, wpid.face(), wpid.apa());
-            good = grouping->is_good_point(p_raw, wpid.apa(), wpid.face(), 0.2 * WireCell::units::cm, 0, 0);
+            good = grouping->is_good_point(p_raw, wpid.apa(), wpid.face(), 0.2 * WireCell::units::cm, 0, 0, pitch_frac);
             qs.push_back(grouping->get_ave_3d_charge(p_raw, wpid.apa(), wpid.face()));
         }
         if (good) { ++c.ngood; run = 0; }
@@ -3012,7 +3016,7 @@ static void pr118_probe_continuity_pairs(const std::vector<ShowerPtr>& sorted_sh
                 }
                 (void) d1_;
             }
-            pr118_connector_walk(c, track_fitter, dv);
+            pr118_connector_walk(c, track_fitter, dv);   // doc pdvd/32 r3: a PROBE keeps the legacy radius
 
             const double dqdx_frag = segment_median_dQ_dx(c.frag_seg);
             double dqdx_abs = -1;
@@ -3325,7 +3329,7 @@ static void pr119_probe_expel_groups(IndexedShowerSet& showers, Graph& graph,
             if (!g.anchor && have_anchor) {
                 have_jx = pr119_group_endpoints(g.segs, anchor_segs, c);
                 if (have_jx) {
-                    pr118_connector_walk(c, track_fitter, dv);
+                    pr118_connector_walk(c, track_fitter, dv);   // doc pdvd/32 r3: a PROBE keeps the legacy radius
                     const WireCell::Vector vj(c.p_frag.x() - sp.x(), c.p_frag.y() - sp.y(),
                                               c.p_frag.z() - sp.z());
                     dis_start = vj.magnitude();
@@ -3603,7 +3607,7 @@ void PatternAlgorithms::merge_shower_fragments(Graph& graph, IndexedShowerSet& s
                                 // T2: bright aligned stub -- the connector must
                                 // carry charge on every sample (a touching pair
                                 // has no samples and is T1's case, not T2's)
-                                pr118_connector_walk(c, track_fitter, dv);
+                                pr118_connector_walk(c, track_fitter, dv, m_good_point_pitch_frac);
                                 if (c.walked && c.nstep > 0 &&
                                     c.qfrac >= m_shower_merge_relax_cont_frac &&
                                     c.qmed > m_shower_merge_relax_cont_qmed) {

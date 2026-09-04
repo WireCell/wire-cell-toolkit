@@ -458,6 +458,9 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_sgp_min_edge            = get(config, "sgp_min_edge",            m_sgp_min_edge);      // cm
     m_sgp_sample_step         = get(config, "sgp_sample_step",         m_sgp_sample_step);   // cm
     m_sgp_point_radius        = get(config, "sgp_point_radius",        m_sgp_point_radius);  // cm
+    // doc pdvd/32 round 3: fraction of the wire pitch used as a per-plane floor
+    // on the strict good-point radius in the PR pattern code.  0 = legacy.
+    m_good_point_pitch_frac   = get(config, "good_point_pitch_frac",   m_good_point_pitch_frac);
     m_sgp_edge_probe          = get(config, "sgp_edge_probe",          m_sgp_edge_probe);
     m_vertex_scoreboard       = get(config, "vertex_scoreboard",       m_vertex_scoreboard);
     // doc sbnd_xin/docs/pr/79 §10: live-feature harvest (requires the board).
@@ -1028,6 +1031,7 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["sgp_min_edge"]            = m_sgp_min_edge;         // doc pr/51 round 5: cm; shorter edges never scanned (inert at scale 0)
     cfg["sgp_sample_step"]         = m_sgp_sample_step;      // doc pr/51 round 5: cm; edge-interior sampling step (inert at scale 0)
     cfg["sgp_point_radius"]        = m_sgp_point_radius;     // doc pr/51 round 5: cm; test_good_point radius (inert at scale 0)
+    cfg["good_point_pitch_frac"]   = m_good_point_pitch_frac;// doc pdvd/32 round 3: 0 = legacy (no per-plane pitch floor in the PR good-point tests)
     cfg["sgp_edge_probe"]          = m_sgp_edge_probe;       // doc pr/73: false = legacy (per-edge DEBUG sentinel never emits)
     cfg["vertex_scoreboard"]       = m_vertex_scoreboard;    // doc pr/75: false = legacy (no vertex scoreboard recorded)
     cfg["dl_vtx_harvest"]          = m_dl_vtx_harvest;       // doc pr/79 §10: false = legacy (no live-feature harvest; requires vertex_scoreboard)
@@ -2431,6 +2435,7 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
         pattern_algos.m_sgp_min_edge        = m_sgp_min_edge * units::cm;          // cm -> internal
         pattern_algos.m_sgp_sample_step     = m_sgp_sample_step * units::cm;       // cm -> internal
         pattern_algos.m_sgp_point_radius    = m_sgp_point_radius * units::cm;      // cm -> internal
+        pattern_algos.m_good_point_pitch_frac = m_good_point_pitch_frac;           // doc pdvd/32 round 3: fraction, no conversion
         pattern_algos.m_sgp_edge_probe      = m_sgp_edge_probe;                    // doc pr/73: diagnostic-only
         pattern_algos.m_vertex_scoreboard   = m_vertex_scoreboard;                 // doc pr/75: diagnostic-only
         // doc pr/79 §10: the conjunction, so fill sites may assume the board is active.

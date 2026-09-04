@@ -62,6 +62,8 @@ void TrackFitting::set_parameter(const std::string& name, double value) {
     // Map parameter names to struct members
     if (name == "traj_cover_probe") {          // doc pr/67, log-only
         m_params.traj_cover_probe = value;
+    } else if (name == "good_point_pitch_frac") {   // doc pdvd/32 round 3
+        m_params.good_point_pitch_frac = value;
     } else if (name == "dqdx_fit_keep_all_points") {   // doc pr/107
         m_params.dqdx_fit_keep_all_points = value;
     } else if (name == "DL") {
@@ -2309,7 +2311,8 @@ std::vector<WireCell::Point> TrackFitting::examine_end_ps_vec(std::shared_ptr<PR
                 // this function takes the raw points ...
                 auto temp_p_raw = transform->backward(ps_list.front(), cluster_t0, test_wpid.face(), test_wpid.apa());
                 // std::cout << temp_p_raw << " " << ps_list.front() << " " << test_wpid.apa() << " " << test_wpid.face() << std::endl;
-                if (m_grouping->is_good_point(temp_p_raw, test_wpid.apa(), test_wpid.face(), 0.2*units::cm, 0, 0)) break;
+                if (m_grouping->is_good_point(temp_p_raw, test_wpid.apa(), test_wpid.face(), 0.2*units::cm, 0, 0,
+                                              m_params.good_point_pitch_frac)) break;
             }
             temp_start = ps_list.front();
             ps_list.pop_front();
@@ -2328,7 +2331,8 @@ std::vector<WireCell::Point> TrackFitting::examine_end_ps_vec(std::shared_ptr<PR
                 if (test_wpid.face() != -1 && test_wpid.apa() != -1) {
                     // this function takes the raw points ...
                     auto temp_p_raw = transform->backward(test_p, cluster_t0, test_wpid.face(), test_wpid.apa());
-                    if (m_grouping->is_good_point(temp_p_raw, test_wpid.apa(), test_wpid.face(), 0.2*units::cm, 0, 0)) {
+                    if (m_grouping->is_good_point(temp_p_raw, test_wpid.apa(), test_wpid.face(), 0.2*units::cm, 0, 0,
+                                                  m_params.good_point_pitch_frac)) {
                         ps_list.push_front(test_p);
                         break;
                     }
@@ -2368,7 +2372,8 @@ std::vector<WireCell::Point> TrackFitting::examine_end_ps_vec(std::shared_ptr<PR
             if (test_wpid.face() != -1 && test_wpid.apa() != -1) {
                 //this function takes the raw points ...
                 auto temp_p_raw = transform->backward(ps_list.back(), cluster_t0, test_wpid.face(), test_wpid.apa());
-                if (m_grouping->is_good_point(temp_p_raw, test_wpid.apa(), test_wpid.face(), 0.2*units::cm, 0, 0)) break;
+                if (m_grouping->is_good_point(temp_p_raw, test_wpid.apa(), test_wpid.face(), 0.2*units::cm, 0, 0,
+                                              m_params.good_point_pitch_frac)) break;
             }
             temp_end = ps_list.back();
             ps_list.pop_back();
@@ -2387,7 +2392,8 @@ std::vector<WireCell::Point> TrackFitting::examine_end_ps_vec(std::shared_ptr<PR
                 if (test_wpid.face() != -1 && test_wpid.apa() != -1) {
                     // the following function takes raw points ...
                     auto temp_p_raw = transform->backward(test_p, cluster_t0, test_wpid.face(), test_wpid.apa());
-                    if (m_grouping->is_good_point(temp_p_raw, test_wpid.apa(), test_wpid.face(), 0.2*units::cm, 0, 0)) {
+                    if (m_grouping->is_good_point(temp_p_raw, test_wpid.apa(), test_wpid.face(), 0.2*units::cm, 0, 0,
+                                                  m_params.good_point_pitch_frac)) {
                         ps_list.push_back(test_p);
                         break;
                     }

@@ -1379,7 +1379,7 @@ bool PatternAlgorithms::modify_vertex_isochronous(Graph& graph, Facade::Cluster&
         auto test_wpid = dv->contained_by(step_p);
         if (test_wpid.face() != -1 && test_wpid.apa() != -1) {
             auto temp_p_raw = transform->backward(step_p, cluster_t0, test_wpid.face(), test_wpid.apa());
-            if (!grouping->is_good_point(temp_p_raw, test_wpid.apa(), test_wpid.face(), 0.2 * units::cm, 0, 0)) {
+            if (!grouping->is_good_point(temp_p_raw, test_wpid.apa(), test_wpid.face(), 0.2 * units::cm, 0, 0, m_good_point_pitch_frac)) {
                 n_bad++;
             }
         }
@@ -1565,7 +1565,7 @@ bool PatternAlgorithms::modify_segment_isochronous(Graph& graph, Facade::Cluster
             }
             {
                 auto temp_p_raw = transform->backward(step_p, cluster_t0, test_wpid.face(), test_wpid.apa());
-                if (!grouping->is_good_point(temp_p_raw, test_wpid.apa(), test_wpid.face(), 0.2 * units::cm, 0, 0)) {
+                if (!grouping->is_good_point(temp_p_raw, test_wpid.apa(), test_wpid.face(), 0.2 * units::cm, 0, 0, m_good_point_pitch_frac)) {
                     n_bad++;
                 }
             }

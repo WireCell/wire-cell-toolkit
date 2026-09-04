@@ -536,6 +536,12 @@ public:
         double m_sgp_min_edge{0.5};      // cm; shorter edges never scanned
         double m_sgp_sample_step{0.3};   // cm; edge-interior sampling step
         double m_sgp_point_radius{0.2};  // cm; test_good_point radius
+        // doc pdvd/32 round 3: per-plane pitch floor for the PR pattern code's
+        // strict good-point tests, as a fraction of the wire pitch (no units).
+        // Applied as max(radius, frac*pitch) per plane, so it can only loosen;
+        // 0 = legacy.  Deliberately separate from TrackFitting's knob of the
+        // same name -- see NeutrinoPatternBase.h for why.
+        double m_good_point_pitch_frac{0};
         // doc sbnd_xin/docs/pr/51 round 6: weak-charge deficit term on the
         // same gap flavor (see NeutrinoPatternBase.h).  Active only when
         // both m_steiner_gap_penalty > 0 and this scale > 0; 0 (default)

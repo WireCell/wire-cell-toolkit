@@ -208,7 +208,7 @@ bool PatternAlgorithms::examine_structure_1(Graph& graph, Facade::Cluster& clust
                 auto test_wpid = dv->contained_by(test_p);
                 if (test_wpid.face() != -1 && test_wpid.apa() != -1) {
                     auto temp_p_raw = transform->backward(test_p, cluster_t0, test_wpid.face(), test_wpid.apa());
-                    if (!grouping->is_good_point(temp_p_raw, test_wpid.apa(), test_wpid.face(), 0.2*units::cm, 0, 0)) {
+                    if (!grouping->is_good_point(temp_p_raw, test_wpid.apa(), test_wpid.face(), 0.2*units::cm, 0, 0, m_good_point_pitch_frac)) {
                         n_bad++;
                     }
                 } else {
@@ -370,7 +370,7 @@ bool PatternAlgorithms::examine_structure_2(Graph& graph, Facade::Cluster& clust
                 auto test_wpid = dv->contained_by(test_p);
                 if (test_wpid.face() != -1 && test_wpid.apa() != -1) {
                     auto temp_p_raw = transform->backward(test_p, cluster_t0, test_wpid.face(), test_wpid.apa());
-                    if (!grouping->is_good_point(temp_p_raw, test_wpid.apa(), test_wpid.face(), 0.2*units::cm, 0, 0)) {
+                    if (!grouping->is_good_point(temp_p_raw, test_wpid.apa(), test_wpid.face(), 0.2*units::cm, 0, 0, m_good_point_pitch_frac)) {
                         n_bad++;
                     }
                 } else {
@@ -904,7 +904,7 @@ bool PatternAlgorithms::examine_structure_4(VertexPtr vertex, bool flag_final_ve
                 auto test_wpid1 = dv->contained_by(test_p1);
                 if (test_wpid1.face() != -1 && test_wpid1.apa() != -1) {
                     auto temp_p_raw = transform->backward(test_p1, cluster_t0, test_wpid1.face(), test_wpid1.apa());
-                    if (!grouping->is_good_point(temp_p_raw, test_wpid1.apa(), test_wpid1.face(), 0.3*units::cm, 0, 0)) {
+                    if (!grouping->is_good_point(temp_p_raw, test_wpid1.apa(), test_wpid1.face(), 0.3*units::cm, 0, 0, m_good_point_pitch_frac)) {
                         n_bad++;
                     }
                 } else {
@@ -1104,7 +1104,7 @@ bool PatternAlgorithms::crawl_segment(Graph& graph, Facade::Cluster& cluster, Se
                 auto test_wpid = dv->contained_by(test_p);
                 if (test_wpid.face() != -1 && test_wpid.apa() != -1) {
                     auto temp_p_raw = transform->backward(test_p, cluster_t0, test_wpid.face(), test_wpid.apa());
-                    if (!cluster.grouping()->is_good_point(temp_p_raw, test_wpid.apa(), test_wpid.face(), 0.2 * units::cm, 0, 0)) {
+                    if (!cluster.grouping()->is_good_point(temp_p_raw, test_wpid.apa(), test_wpid.face(), 0.2 * units::cm, 0, 0, m_good_point_pitch_frac)) {
                         n_bad++;
                         if (n_bad > 0) break;
                     }
@@ -1675,7 +1675,7 @@ bool PatternAlgorithms::examine_vertices_1p(Graph&graph, VertexPtr v1, VertexPtr
                         auto test_wpid = dv->contained_by(test_p);
                         if (test_wpid.face() != -1 && test_wpid.apa() != -1) {
                             auto temp_p_raw = transform->backward(test_p, cluster_t0, test_wpid.face(), test_wpid.apa());
-                            if (!cluster.grouping()->is_good_point(temp_p_raw, test_wpid.apa(), test_wpid.face(), 0.2 * units::cm, 0, 0)) {
+                            if (!cluster.grouping()->is_good_point(temp_p_raw, test_wpid.apa(), test_wpid.face(), 0.2 * units::cm, 0, 0, m_good_point_pitch_frac)) {
                                 n_bad++;
                             }
                         }
@@ -2011,7 +2011,7 @@ bool PatternAlgorithms::examine_vertices_4p(Graph&graph, VertexPtr v1, VertexPtr
             auto test_wpid = dv->contained_by(test_p);
             if (test_wpid.face() != -1 && test_wpid.apa() != -1) {
                 auto temp_p_raw = transform->backward(test_p, cluster_t0, test_wpid.face(), test_wpid.apa());
-                if (!grouping->is_good_point(temp_p_raw, test_wpid.apa(), test_wpid.face(), 0.2 * units::cm, 0, 0)) {
+                if (!grouping->is_good_point(temp_p_raw, test_wpid.apa(), test_wpid.face(), 0.2 * units::cm, 0, 0, m_good_point_pitch_frac)) {
                     n_bad++;
                 }
             }
@@ -3249,7 +3249,7 @@ bool PatternAlgorithms::examine_structure_final_1(Graph& graph, VertexPtr main_v
                 auto test_wpid = dv->contained_by(test_p);
                 if (test_wpid.face() != -1 && test_wpid.apa() != -1) {
                     auto temp_p_raw = transform->backward(test_p, cluster_t0, test_wpid.face(), test_wpid.apa());
-                    if (!grouping->is_good_point(temp_p_raw, test_wpid.apa(), test_wpid.face(), 0.2*units::cm, 0, 0)) {
+                    if (!grouping->is_good_point(temp_p_raw, test_wpid.apa(), test_wpid.face(), 0.2*units::cm, 0, 0, m_good_point_pitch_frac)) {
                         n_bad++;
                     }
                 }
@@ -3618,7 +3618,7 @@ bool PatternAlgorithms::examine_structure_final_2(Graph& graph, VertexPtr main_v
                             auto test_wpid = dv->contained_by(sg1_wcpts.at(i).point);
                             if (test_wpid.face() != -1 && test_wpid.apa() != -1) {
                                 auto temp_p_raw = transform->backward(sg1_wcpts.at(i).point, cluster_t0, test_wpid.face(), test_wpid.apa());
-                                if (!grouping->is_good_point(temp_p_raw, test_wpid.apa(), test_wpid.face(), 0.2*units::cm, 0, 0)) {
+                                if (!grouping->is_good_point(temp_p_raw, test_wpid.apa(), test_wpid.face(), 0.2*units::cm, 0, 0, m_good_point_pitch_frac)) {
                                     flag_connect = false;
                                     break;
                                 }
@@ -3629,7 +3629,7 @@ bool PatternAlgorithms::examine_structure_final_2(Graph& graph, VertexPtr main_v
                             auto test_wpid = dv->contained_by(sg1_wcpts.at(i).point);
                             if (test_wpid.face() != -1 && test_wpid.apa() != -1) {
                                 auto temp_p_raw = transform->backward(sg1_wcpts.at(i).point, cluster_t0, test_wpid.face(), test_wpid.apa());
-                                if (!grouping->is_good_point(temp_p_raw, test_wpid.apa(), test_wpid.face(), 0.2*units::cm, 0, 0)) {
+                                if (!grouping->is_good_point(temp_p_raw, test_wpid.apa(), test_wpid.face(), 0.2*units::cm, 0, 0, m_good_point_pitch_frac)) {
                                     flag_connect = false;
                                     break;
                                 }
@@ -3655,7 +3655,7 @@ bool PatternAlgorithms::examine_structure_final_2(Graph& graph, VertexPtr main_v
                             auto test_wpid = dv->contained_by(test_p);
                             if (test_wpid.face() != -1 && test_wpid.apa() != -1) {
                                 auto temp_p_raw = transform->backward(test_p, cluster_t0, test_wpid.face(), test_wpid.apa());
-                                if (!grouping->is_good_point(temp_p_raw, test_wpid.apa(), test_wpid.face(), 0.2*units::cm, 0, 0)) {
+                                if (!grouping->is_good_point(temp_p_raw, test_wpid.apa(), test_wpid.face(), 0.2*units::cm, 0, 0, m_good_point_pitch_frac)) {
                                     n_bad++;
                                 }
                             }
@@ -3673,7 +3673,7 @@ bool PatternAlgorithms::examine_structure_final_2(Graph& graph, VertexPtr main_v
                         auto test_wpid = dv->contained_by(test_p);
                         if (test_wpid.face() != -1 && test_wpid.apa() != -1) {
                             auto temp_p_raw = transform->backward(test_p, cluster_t0, test_wpid.face(), test_wpid.apa());
-                            if (!grouping->is_good_point(temp_p_raw, test_wpid.apa(), test_wpid.face(), 0.2*units::cm, 0, 0)) {
+                            if (!grouping->is_good_point(temp_p_raw, test_wpid.apa(), test_wpid.face(), 0.2*units::cm, 0, 0, m_good_point_pitch_frac)) {
                                 flag_update = true;
                             }
                         }
@@ -3689,7 +3689,7 @@ bool PatternAlgorithms::examine_structure_final_2(Graph& graph, VertexPtr main_v
                             auto mid_wpid = dv->contained_by(mid_p);
                             if (mid_wpid.face() != -1 && mid_wpid.apa() != -1) {
                                 auto mid_p_raw = transform->backward(mid_p, cluster_t0, mid_wpid.face(), mid_wpid.apa());
-                                if (!grouping->is_good_point(mid_p_raw, mid_wpid.apa(), mid_wpid.face(), 0.2*units::cm, 0, 0)) {
+                                if (!grouping->is_good_point(mid_p_raw, mid_wpid.apa(), mid_wpid.face(), 0.2*units::cm, 0, 0, m_good_point_pitch_frac)) {
                                     flag_update = true;
                                 }
                             }
@@ -3807,7 +3807,7 @@ bool PatternAlgorithms::examine_structure_final_3(Graph& graph, VertexPtr main_v
                             auto test_wpid = dv->contained_by(sg1_wcpts.at(i).point);
                             if (test_wpid.face() != -1 && test_wpid.apa() != -1) {
                                 auto temp_p_raw = transform->backward(sg1_wcpts.at(i).point, cluster_t0, test_wpid.face(), test_wpid.apa());
-                                if (!grouping->is_good_point(temp_p_raw, test_wpid.apa(), test_wpid.face(), 0.2*units::cm, 0, 0)) {
+                                if (!grouping->is_good_point(temp_p_raw, test_wpid.apa(), test_wpid.face(), 0.2*units::cm, 0, 0, m_good_point_pitch_frac)) {
                                     flag_connect = false;
                                     break;
                                 }
@@ -3818,7 +3818,7 @@ bool PatternAlgorithms::examine_structure_final_3(Graph& graph, VertexPtr main_v
                             auto test_wpid = dv->contained_by(sg1_wcpts.at(i).point);
                             if (test_wpid.face() != -1 && test_wpid.apa() != -1) {
                                 auto temp_p_raw = transform->backward(sg1_wcpts.at(i).point, cluster_t0, test_wpid.face(), test_wpid.apa());
-                                if (!grouping->is_good_point(temp_p_raw, test_wpid.apa(), test_wpid.face(), 0.2*units::cm, 0, 0)) {
+                                if (!grouping->is_good_point(temp_p_raw, test_wpid.apa(), test_wpid.face(), 0.2*units::cm, 0, 0, m_good_point_pitch_frac)) {
                                     flag_connect = false;
                                     break;
                                 }
@@ -3844,7 +3844,7 @@ bool PatternAlgorithms::examine_structure_final_3(Graph& graph, VertexPtr main_v
                             auto test_wpid = dv->contained_by(test_p);
                             if (test_wpid.face() != -1 && test_wpid.apa() != -1) {
                                 auto temp_p_raw = transform->backward(test_p, cluster_t0, test_wpid.face(), test_wpid.apa());
-                                if (!grouping->is_good_point(temp_p_raw, test_wpid.apa(), test_wpid.face(), 0.3*units::cm, 0, 0)) {
+                                if (!grouping->is_good_point(temp_p_raw, test_wpid.apa(), test_wpid.face(), 0.3*units::cm, 0, 0, m_good_point_pitch_frac)) {
                                     n_bad++;
                                 }
                             }
