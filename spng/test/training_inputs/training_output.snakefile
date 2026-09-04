@@ -9,10 +9,10 @@ def get_with_chan_range(y, labels, chan_range):
     )
     return res
 
-def load_y_labels(filename):
+def load_y_labels(filename, device='cpu'):
     t = torch.load(filename)
-    labels = t['labels'][0].detach().cpu()
-    y = t['y'][0].detach().cpu()
+    labels = t['labels'][0].detach().to(device)
+    y = t['y'][0].detach().to(device)
 
     return y, labels
 
@@ -22,6 +22,7 @@ chan_ranges = {
     'w':(1600, 2560),
     'w0':(1600, 2080),
     'w1':(2080, 2560),
+    'all_planes':(0,2560),
 }
 
 rule roi_eff_pur:
@@ -54,11 +55,120 @@ rule roi_table:
         
         torch.save(res, output[0])
 
+
 use rule roi_table as xvu_angled_roi_table with:
     input:
         "<results>/xvu-test_line_{plane}plane_{angles}.pt"
     output:
         "<results>/xvu-{type}_roi_table_{plane}plane_{angles}-thresh-{threshold}.pt",
+
+config.setdefault('threshold_step', 0.1)
+rule threshold_scan:
+    input:
+        "run_one_{entry}.pt"
+    output:
+        "threshold_scan_roi_plane_{plane}_run_one_{entry}.pt"
+    params:
+        step=config['threshold_step']
+    run:
+        thresholds=np.arange(0., 1., params.step)
+        y, labels = load_y_labels(input[0], config['device'])
+        chan_range = chan_ranges[wildcards.plane]
+        res = roi_metrics.threshold_scan(y[chan_range[0]:chan_range[1]], labels[chan_range[0]:chan_range[1]], thresholds, as_eff_pur=False)
+        torch.save(res, output[0])
+
+rule threshold_pixel_scan:
+    input:
+        "run_one_{entry}.pt"
+    output:
+        "threshold_scan_pixel_plane_{plane}_run_one_{entry}.pt"
+    params:
+        step=config['threshold_step']
+    run:
+        thresholds=torch.arange(0., 1., params.step).to(config['device'])
+        chan_range = chan_ranges[wildcards.plane]
+        y, labels = load_y_labels(input[0], config['device'])
+        y, labels = y[chan_range[0]:chan_range[1]], labels[chan_range[0]:chan_range[1]]
+
+        n_true = labels.sum()
+        reco = (y.unsqueeze(-1).expand(-1,-1,len(thresholds)) > thresholds)
+        n_reco = reco.sum((0,1))
+        matched = ((labels>0).unsqueeze(-1).expand(-1,-1,reco.shape[-1]) == reco) * (reco > 0)
+
+        n_reco_matched = matched.sum((0,1))
+        n_true_matched = n_reco_matched #for compatibility with the other scan+aggregation
+        torch.save({
+            "threshold": thresholds,
+            "n_reco": n_reco,
+            "n_reco_matched": n_reco_matched,
+            "n_true_matched": n_true_matched,
+            "n_true": n_true,
+            "efficiency": (n_true_matched/n_true),
+            "purity": (n_reco_matched/n_reco),
+        }, output[0])
+
+config.setdefault('nentries', 1)
+rule aggregate_scan:
+    input:
+        collect('threshold_scan_{{type}}_plane_{{plane}}_run_one_{entry}.pt', entry=[i for i in range(config['nentries'])])
+    output:
+        'aggregated_scan_{type}_plane_{plane}.npz'
+    run:
+
+        effs = []
+        purs = []
+        n_trues = []
+        n_recos = []
+        n_trues_matched = []
+        n_recos_matched = []
+        thresholds = [] #Should all be the same
+
+        for input_file in input:
+            t = torch.load(input_file)
+            effs.append(t['efficiency'].cpu().numpy())
+            purs.append(t['purity'].cpu().numpy())
+            n_trues.append(t['n_true'].cpu().numpy())
+            n_recos.append(t['n_reco'].cpu().numpy())
+            n_recos_matched.append(t['n_reco_matched'].cpu().numpy())
+            n_trues_matched.append(t['n_true_matched'].cpu().numpy())
+            thresholds.append(t['threshold'].cpu().numpy())
+        
+        np.savez(
+            output[0],
+            effs=effs,
+            purs=purs,
+            n_trues=n_trues,
+            n_recos=n_recos,
+            n_recos_matched=n_recos_matched,
+            n_trues_matched=n_trues_matched,
+            n_recos_summed=np.array(n_recos).sum(axis=0),
+            n_trues_summed=sum(n_trues),
+            n_recos_matched_summed=np.array(n_recos_matched).sum(axis=0),
+            n_trues_matched_summed=np.array(n_trues_matched).sum(axis=0),
+            thresholds=thresholds[0]
+        )
+config.setdefault('device', 'cpu')
+config.setdefault('app', 'xvunet')
+config.setdefault('nevents', 10)
+rule run_n:
+    resources:
+        gpu = 1 if ('gpu' in config['device'] or 'cuda' in config['device']) else 0
+    output:
+        "run_one_{entry}.pt"
+    params:
+        paths=config['paths'],
+        model_file=config['model_file'],
+        device=config['device'],
+        config=config['cfg'],
+        app=config['app'],
+        nevents=config['nevents'],
+    shell:
+        """
+        wcpy dnn run_one -l {params.model_file} -c {params.config} --manual-sigmoid -d {params.device} \
+            -a {params.app} -o {output} -n {wildcards.entry} {params.paths}
+        """
+
+
 
 
 rule merge_roi_eff_pur:

@@ -189,7 +189,7 @@ rule spng_mpsigproc:
     envmodules:
       "wire-cell-toolkit/spng-gcc-11.5.0-fk4b2v4"
     output:
-        "sigproc-spng-mp-cosmics_{sample}.tar"
+        temp("sigproc-spng-mp-cosmics_{sample}.tar")
     params:
         # jsonnet='dnnroi-training.jsonnet',
         jsonnet=config['mpsigproc_training_js'],
@@ -212,7 +212,7 @@ use rule spng_mpsigproc as spng_mpsigproc_target with:
     input:
         "target-{target}_{sample}_wct-depos.npz"
     output:
-        "sigproc-spng-mp-target-{target}_{sample}.tar"
+        temp("sigproc-spng-mp-target-{target}_{sample}.tar")
 
 rule spng_mpsigproc_lines:
     resources:
@@ -220,7 +220,7 @@ rule spng_mpsigproc_lines:
     input:
         'linedepos-pdhd-{plane}plane-t1_{t1}-t2_{t2}_wct-depos.npz'
     output:
-        "sigproc-spng-mp-linedepos-pdhd-{plane}plane-t1_{t1}-t2_{t2}.tar"
+        temp("sigproc-spng-mp-linedepos-pdhd-{plane}plane-t1_{t1}-t2_{t2}.tar")
     params:
         jsonnet=config['mpsigproc_training_js'],
         tpcid=config['tpcid'],
@@ -267,7 +267,7 @@ rule spng_densesigproc_lines:
         #TODO Remove external loc
         os.path.join(config['external_loc'], 'linedepos-pdhd-{plane}plane-t1_{t1}-t2_{t2}_wct-depos.npz'),
     output:
-        "sigproc-spng-dense-linedepos-pdhd-{plane}plane-t1_{t1}-t2_{t2}.tar"
+        temp("sigproc-spng-dense-linedepos-pdhd-{plane}plane-t1_{t1}-t2_{t2}.tar")
     shadow: "minimal"
     params:
         jsonnet='dnnroi-training-dense-only.jsonnet',
@@ -433,10 +433,10 @@ rule run_one:
     input:
         rec=lambda w : ('linedepos-pdhd-{plane}plane-t1_{t1}-t2_{t2}-g4-rec-' + f'{plane_to_view[w.plane]}.h5'),
         tru=lambda w : ('linedepos-pdhd-{plane}plane-t1_{t1}-t2_{t2}-g4-tru-' + f'{plane_to_view[w.plane]}.h5'),
-    benchmark:
-        '<benchmarks>/run_one_{t1}_{t2}_{plane}'
+    #benchmark:
+    #    '<benchmarks>/run_one_{t1}_{t2}_{plane}'
     output:
-        '<results>/test_line_{plane}plane_t1-{t1}-t2-{t2}.pt'
+        temp('<results>/test_line_{plane}plane_t1-{t1}-t2-{t2}.pt')
     params:
         device=config['device'],
         model=config['model'],
@@ -461,7 +461,7 @@ config.setdefault('cluster', '0')
 use rule run_one as run_one_epoch with:
     pathvars:
       results="epoch_{epoch}",
-      benchmarks="epoch_benchmarks_{epoch}"
+      #benchmarks="epoch_benchmarks_{epoch}"
     params:
       model=f'{config["cpt_dir"]}/checkpoint_{config["proc"]}_{config["cluster"]}_{{epoch}}.pt'
 
@@ -470,12 +470,12 @@ use rule run_one as run_one_xvu with:
         rec=[f'linedepos-pdhd-{{plane}}plane-t1_{{t1}}-t2_{{t2}}-g4-rec-{i}.h5' for i in range(3)],
         tru=[f'linedepos-pdhd-{{plane}}plane-t1_{{t1}}-t2_{{t2}}-g4-tru-{i}.h5' for i in range(3)],
     output:
-        '<results>/xvu-test_line_{plane}plane_t1-{t1}-t2-{t2}.pt'
+        temp('<results>/xvu-test_line_{plane}plane_t1-{t1}-t2-{t2}.pt')
 
 use rule run_one_xvu as run_one_xvu_epoch with:
     pathvars:
       results="epoch_{epoch}",
-      benchmarks="epoch_benchmarks_{epoch}"
+      #benchmarks="epoch_benchmarks_{epoch}"
     params:
       model=f'{config["cpt_dir"]}/checkpoint_{config["proc"]}_{config["cluster"]}_{{epoch}}.pt'
 
@@ -541,8 +541,8 @@ rule plot_eff_pur:
         npz='<results>/all_eff_pur_{plane}plane.npz',
     params:
         test_tpcs = [int(i) for i in config['test_tpcs']] #This is a bad name for this but oh well
-    benchmark:
-        '<benchmarks>/{plane}_plot_eff_pur'
+    #benchmark:
+    #    '<benchmarks>/{plane}_plot_eff_pur'
     run:
         import torch
         import matplotlib.pyplot as plt
@@ -594,7 +594,7 @@ rule plot_eff_pur:
 use rule plot_eff_pur as plot_eff_pur_epoch with:
     pathvars:
         results="epoch_{epoch}",
-        benchmarks="{plane}_epoch_{epoch}_plot_eff_pur_benchmarks"
+        #benchmarks="{plane}_epoch_{epoch}_plot_eff_pur_benchmarks"
 
 use rule plot_eff_pur as plot_eff_pur_xvu with:
     input: get_input_by_plane_xvu
@@ -607,7 +607,7 @@ use rule plot_eff_pur as plot_eff_pur_xvu with:
 use rule plot_eff_pur_xvu as plot_eff_pur_xvu_epoch with:
     pathvars:
         results="epoch_{epoch}",
-        benchmarks="{plane}_epoch_{epoch}_plot_eff_pur_benchmarks"
+        #benchmarks="{plane}_epoch_{epoch}_plot_eff_pur_benchmarks"
 
 def get_input(wildcards):
     return f'test_line_{wildcards.plane}plane_t1-{wildcards.t1}-t2-{wildcards.t2}.pt'

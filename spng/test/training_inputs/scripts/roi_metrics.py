@@ -158,7 +158,7 @@ def roi_metrics(y, labels, threshold=0.5, per_sample=False):
     }
 
 
-def threshold_scan(y, labels, thresholds):
+def threshold_scan(y, labels, thresholds, as_eff_pur=True):
     """Run :func:`roi_metrics` over a sequence of thresholds.
 
     The truth ROIs are threshold independent, so they are enumerated once.
@@ -170,18 +170,46 @@ def threshold_scan(y, labels, thresholds):
     true_sample, n_true = true_tab["sample"], len(true_tab["start"])
     nsample = _as_batched(y).shape[0]
 
-    eff, pur, n_reco = [], [], []
-    for t in thresholds:
-        reco_mask = y > t
-        hit = roi_table(true_mask, reco_mask)["matched"]
-        reco = roi_table(reco_mask, true_mask)
-        eff.append(float(_rate(hit, true_sample, nsample, False)))
-        pur.append(float(_rate(reco["matched"], reco["sample"], nsample, False)))
-        n_reco.append(len(reco["start"]))
-    return {
-        "threshold": torch.tensor(thresholds),
-        "efficiency": torch.tensor(eff),
-        "purity": torch.tensor(pur),
-        "n_reco": torch.tensor(n_reco),
-        "n_true": n_true,
-    }
+    if as_eff_pur:
+        eff, pur, n_reco = [], [], []
+        for t in thresholds:
+            reco_mask = y > t
+            hit = roi_table(true_mask, reco_mask)["matched"]
+            reco = roi_table(reco_mask, true_mask)
+            eff.append(float(_rate(hit, true_sample, nsample, False)))
+            pur.append(float(_rate(reco["matched"], reco["sample"], nsample, False)))
+            n_reco.append(len(reco["start"]))
+        return {
+            "threshold": torch.tensor(thresholds),
+            "efficiency": torch.tensor(eff),
+            "purity": torch.tensor(pur),
+            "n_reco": torch.tensor(n_reco),
+            "n_true": n_true,
+        }
+    else:
+        eff, pur, n_reco, n_reco_matched, n_true_matched = [], [], [], [], []
+        n_true = len(true_tab["start"])
+        for t in thresholds:
+            reco_mask = y > t
+            hit = roi_table(true_mask, reco_mask)["matched"]
+            reco = roi_table(reco_mask, true_mask)
+
+            # tot = matched.numel()
+            #     if tot == 0:
+            #         return torch.tensor(float("nan"), dtype=torch.float64, device=matched.device)
+            #     return matched.sum().to(torch.float64) / tot
+            
+            eff.append(float(_rate(hit, true_sample, nsample, False)))
+            pur.append(float(_rate(reco["matched"], reco["sample"], nsample, False)))
+            n_reco.append(reco['matched'].numel())
+            n_reco_matched.append(reco['matched'].sum().to(torch.float64))
+            n_true_matched.append(hit.sum().to(torch.float64))
+        return {
+            "threshold": torch.tensor(thresholds),
+            "n_reco": torch.tensor(n_reco),
+            "n_reco_matched": torch.tensor(n_reco_matched),
+            "n_true_matched": torch.tensor(n_true_matched),
+            "n_true": n_true,
+            "efficiency": torch.tensor(eff),
+            "purity": torch.tensor(pur),
+        }
