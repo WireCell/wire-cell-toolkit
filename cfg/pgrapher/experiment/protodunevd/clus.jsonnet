@@ -369,6 +369,13 @@ local clus_per_apa (
     subRunNo = 1,
     eventNo = 1,
     stepped_center_fallback = false,
+    // doc pdvd/28 round 2: the SBND Q/L-tail fast flavors (sbnd docs 78/79).
+    // po_fast: ProtectOverclustering busy_num_threshold=200 (C++ default 0 =
+    // off).  dg_fast: Deghost on the 'ctpc_fast' graph flavor (C++ default
+    // 'ctpc').  Both false => the keys are omitted => byte-identical compiled
+    // config.
+    po_fast = false,
+    dg_fast = false,
     ) =
 {
     local cfout_live = g.pnode({
@@ -408,8 +415,9 @@ local clus_per_apa (
                                        pc_transforms=pcts,
                                        coords=common_coords),
     local cm_pipeline = [
-        cm.deghost(),
-        cm.protect_overclustering(),
+        // dg_fast / po_fast: see the clus_per_apa signature (doc pdvd/28 round 2).
+        cm.deghost(graph_name=(if dg_fast then 'ctpc_fast' else null)),
+        cm.protect_overclustering(busy_num_threshold=(if po_fast then 200 else null)),
     ],
 
     local mabc = g.pnode({
@@ -490,6 +498,9 @@ local clus_per_group (
     runNo = 1,
     subRunNo = 1,
     eventNo = 1,
+    // doc pdvd/28 round 2: Deghost 'ctpc_fast' flavor at the group stage too
+    // (C++ default 'ctpc'; false => key omitted => byte-identical).
+    dg_fast = false,
     ) = {
     local nanodes = std.length(anodes),
     local pcmerging = g.pnode({
@@ -534,7 +545,8 @@ local clus_per_group (
         // examine_x_boundary below.
         // empty_view_unique: required at group scope -- see common clus.jsonnet.
         cm.connect1(allow_mixed_faces=true, respect_separate_family=true),
-        cm.deghost(allow_mixed_faces=true, empty_view_unique=true),
+        cm.deghost(allow_mixed_faces=true, empty_view_unique=true,
+                   graph_name=(if dg_fast then 'ctpc_fast' else null)),
         cm.examine_x_boundary(allow_mixed_faces=true),
         cm.neutrino(protect_iso_band=true),
         cm.isolated(),
@@ -856,8 +868,8 @@ local clus_all_tpc (
 {
     local bee_dir = if output_dir == '' then 'data' else output_dir,
     per_face(anode, face=0, dump=true) :: clus_per_face(anode, face=face, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo, stepped_center_fallback=stepped_center_fallback),
-    per_apa(anode, dump=true) :: clus_per_apa(anode, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo, stepped_center_fallback=stepped_center_fallback),
-    per_group(anodes, group_name, dump=true) :: clus_per_group(anodes, group_name, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo),
+    per_apa(anode, dump=true, po_fast=false, dg_fast=false) :: clus_per_apa(anode, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo, stepped_center_fallback=stepped_center_fallback, po_fast=po_fast, dg_fast=dg_fast),
+    per_group(anodes, group_name, dump=true, dg_fast=false) :: clus_per_group(anodes, group_name, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo, dg_fast=dg_fast),
     all_tpc(anodes, ngroups=2, dump=true, save_opflash=false, premerged=false, cc_tip_touch_cut=null, cc_tip_touch_angle_cut=null, cc_cathode_x_cut=5*wc.cm, cc_drift_cut=8*wc.cm, cc_dis_cut=5*wc.cm, cc_crosser_conn_relax=null, cc_crosser_pca_angle=null, cc_cathode_band_dis=null, bee_img_per_side=false, tensor_outname='') :: clus_all_tpc(anodes, ngroups=ngroups, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo, save_opflash=save_opflash, premerged=premerged, cc_tip_touch_cut=cc_tip_touch_cut, cc_tip_touch_angle_cut=cc_tip_touch_angle_cut, cc_cathode_x_cut=cc_cathode_x_cut, cc_drift_cut=cc_drift_cut, cc_dis_cut=cc_dis_cut, cc_crosser_conn_relax=cc_crosser_conn_relax, cc_crosser_pca_angle=cc_crosser_pca_angle, cc_cathode_band_dis=cc_cathode_band_dis, bee_img_per_side=bee_img_per_side, tensor_outname=tensor_outname),
     // Expose the DetectorVolumes node builder so the Q/L matching graph can
     // reference the SAME all-anode DV the clustering uses (deterministic by name).
