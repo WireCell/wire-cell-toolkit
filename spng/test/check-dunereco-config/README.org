@@ -1,0 +1,146 @@
+#+title: check-dunereco-config
+#+subtitle: Detect SPNG signal-processing config drift from the official dunereco OSP config
+
+* What this is
+
+The SPNG (/signal processing, next generation/) configuration under
+=toolkit/spng/cfg/spng= was derived --- largely by LLM --- from the "official"
+dunereco configuration that drives WCT's original =OmnibusSigProc= (OSP). We
+want SPNG evaluations to remain *faithful* to that official configuration even
+as both evolve and as SPNG jobs take on "shapes" (wire-cell CLI, per-TPC,
+detector-parametrised) that the official art/larsoft-embedded jobs never had.
+
+This directory provides =check-dunereco-config=: a tool that detects when an
+SPNG configuration is not faithful to the official one and offers concrete
+changes to bring it back into compliance.
+
+The authoritative "official" source is the dunereco reference tree, by default:
+
+: <repo>/reference/dunereco/dunereco/DUNEWireCell/{pdhd,pdsp,protodunevd}/
+
+* Two-part method
+
+Faithfulness is checked along two complementary axes, because the two
+configurations are written in different idioms.
+
+** A. Mechanistic, like-for-like diff  (=diff=)
+
+Both the official config and the SPNG "mirror OSP" config (the OSP-idiom config
+under =spng/detconfs/<det>/sp.jsonnet= + =sp-filters.jsonnet=, driven through
+=spng/adc-to-osp.jsonnet=) evaluate to a graph containing one =OmnibusSigProc=
+node plus =HfFilter= / =LfFilter= filter components.
+
+The tool evaluates both to JSON, then diffs them after normalising away
+*superfluous* differences:
+
+- node-handle values (=anode=, =dft=, =field_response=, =elecresponse=,
+  =per_chan_resp=) are compared by /type/ only, not instance name (an empty
+  handle such as =per_chan_resp: ""= is kept, since "not wired" is meaningful);
+- per-anode frame tags (=wiener0=, =gauss3=, ...) have their trailing ident
+  digits stripped;
+- key order and float formatting are canonicalised (relative tolerance 1e-9).
+
+What remains is genuine parameter/filter drift. Each finding prints with a
+concrete =fix:= line. This axis directly catches, e.g., an =ROI_loose_lf.tau= or
+=ADC_mV= discrepancy.
+
+** B. Semantic comparison  (=emit-prompt= + skill)
+
+The SPNG-*native* config (used by =spng/adc-to-spng.jsonnet=) expresses the same
+physics in the "tensor data model" (TDM) idiom ---
+=SPNGFilterKernel= / =SPNGResponseKernel= / =SPNGDeconKernel= /
+=SPNGKernelConvolve= --- which does not map one-to-one onto =OmnibusSigProc=. A
+purely syntactic diff cannot compare it, so this axis is handled by an LLM.
+
+=emit-prompt= writes a self-contained Markdown prompt bundling the official OSP
+extract, the SPNG-native TDM extract, and a *mapping rubric* (e.g. HfFilter
+=sigma= <-> filter_function =scale=, =ADC_mV= <-> =SPNGResponseKernel.scale=,
+=ctoffset= <-> roll/=decon_roll=). Paste it into any LLM, or use the companion
+Claude Code skill =check-dunereco-config= (under
+=toolkit/.claude/skills/=), which runs both axes and produces a compliance
+report with proposed Jsonnet edits.
+
+* Usage
+
+The tool shells out to =wcsonnet= (default =<repo>/install/bin/wcsonnet=, else
+=wcsonnet= on =PATH=) and sets =WIRECELL_PATH= itself. Jsonnet top-level args
+(TLAs) and ext-vars required by each config are recorded per-detector in the
+=CASES= registry, so callers need not supply them.
+
+#+begin_src sh
+# list known detector cases and resolved paths
+./check-dunereco-config list
+
+# mechanistic like-for-like OSP diff (axis A); non-zero exit when drift found
+./check-dunereco-config diff --detector pdhd
+./check-dunereco-config diff --detector pdhd --json       # machine-readable
+./check-dunereco-config diff --detector pdhd --all-diffs   # include intentional deltas
+
+# semantic-comparison prompt (axis B)
+./check-dunereco-config emit-prompt --detector pdhd -o report.md
+
+# raw normalised extracts (debugging)
+./check-dunereco-config extract official   --detector pdhd
+./check-dunereco-config extract spng-osp   --detector pdhd
+./check-dunereco-config extract spng-tdm   --detector pdhd
+#+end_src
+
+Global options: =--reference DIR= (override the dunereco tree location),
+=--wcsonnet PATH=, =--keep= (retain generated temp fixtures).
+
+* TLAs and ext-vars
+
+Both sides need parameters supplied at evaluation time --- exactly the "TLAs will
+typically need to be required" situation:
+
+- *Official*: the pgrapher params require =-V elecGain=<mV/fC>= (e.g. =14.0= for
+  PDHD). The official =sp.jsonnet= is a =function(params, tools, override)=, so
+  it cannot be evaluated bare; the fixture template
+  =fixtures/official-<det>.jsonnet= builds =params=/=tools= from the standard
+  pgrapher tree (as the official jobs do) and instantiates the bare
+  =OmnibusSigProc= (=l1sp_pd_mode=''=).
+- *SPNG*: the jobs require =-A input=<file>= (a dummy filename is fine --- nothing
+  is read at evaluation time) plus =detname=/=tpcid= (and =model_file= for the
+  TDM job).
+
+The reference tree is imported by *absolute path* inside the fixture (not placed
+on =WIRECELL_PATH=) so it cannot shadow shared Jsonnet files (=wirecell.jsonnet=,
+=pgraph.jsonnet=, =pgrapher/...=). Because Jsonnet =import= needs a string
+literal, the fixture is a *template* with =@REFERENCE@= / =@ANODE@= placeholders
+that the script substitutes into a temp file before evaluation.
+
+* Adding a detector
+
+pdhd is fully wired; pdsp and protodunevd are the natural next entries. To add
+one:
+
+1. Copy =fixtures/official-pdhd.jsonnet= to =fixtures/official-<det>.jsonnet=;
+   change the =import '<det>/sp.jsonnet'= line and the =params=/=tools= imports
+   to the target experiment.
+2. Add a =CASES["<det>"]= entry naming that fixture (with =anode= and any
+   =extvars= such as =elecGain=), the SPNG =adc-to-osp= / =adc-to-spng= jobs, and
+   their TLAs.
+3. Optionally populate =expected_deltas= with =OmnibusSigProc= keys whose
+   official/SPNG difference is a known, intentional SPNG-context adaptation.
+   Keep it small --- anything not listed is reported as drift for human/LLM
+   judgement.
+
+* Files
+
+- =check-dunereco-config= --- the CLI (Python 3, no third-party deps).
+- =fixtures/official-<det>.jsonnet= --- official-side fixture templates.
+- =selftest.py= --- pure-logic tests of the normalise/diff engine plus an
+  optional live smoke test (=python3 selftest.py=).
+- =README.org= --- this file.
+- Skill: =toolkit/.claude/skills/check-dunereco-config/SKILL.md=.
+
+* Interpreting output
+
+=DRIFT= / =MISSING= are genuine deltas in shared / official-only parameters;
+=EXTRA= are SPNG-only keys. Not every delta is an infidelity: the SPNG mirror
+OSP config is deliberately simpler in places (e.g. it may omit an APA0-specific
+special-case, or add debug/dump toggles that only make sense in a wire-cell CLI
+run). The mechanistic axis reports *all* real deltas and leaves the
+"infidelity vs intentional adaptation" judgement to you (or to the skill's LLM
+pass, which is prompted to make exactly that call). Use =expected_deltas= in the
+registry to record, with a reason, any delta the team has decided is intentional.
