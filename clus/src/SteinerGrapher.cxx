@@ -687,10 +687,29 @@ Steiner::Grapher::vertex_set Steiner::Grapher::find_steiner_terminals(const std:
     
     // Process each blob individually (following prototype pattern).
     // Iterating by blob node index (size_t key) gives deterministic order.
+    //
+    // doc pdvd/31 round 6, the owner's density question ("we have some local
+    // maximum selection right?"): the suppression inside find_peak_point_indices
+    // is real, but it is scoped to ONE blob -- nlevel hops are taken on the
+    // graph, yet the candidate set handed in never leaves this blob.  So the
+    // peak finder can thin a blob to one terminal but can never remove a blob's
+    // last terminal, and the terminal count is floored at the number of
+    // candidate-bearing blobs.  The counters below measure exactly that floor.
+    size_t n_cand_blobs = 0;
     for (const auto& [blob_node_idx, point_indices] : cell_points_map) {
         (void)blob_node_idx;  // key used only for ordering; value suffices here
         auto blob_peaks = find_peak_point_indices(point_indices, graph_name, disable_dead_mix_cell);
+        if (!blob_peaks.empty()) ++n_cand_blobs;
         steiner_terminals.insert(blob_peaks.begin(), blob_peaks.end());
+    }
+
+    // Env-gated, log-only (WCT_STEINER_PHASE_DUMP), same gate as the per-phase
+    // dump above.  nterm == ncand_blob is the signature of the floor: every
+    // blob that has a candidate contributed exactly one terminal, and the
+    // per-blob suppression removed nothing across blob boundaries.
+    if (steiner_phase_dump_enabled()) {
+        SPDLOG_LOGGER_DEBUG(log, "steiner_p1_blobs: nblob={} ncand_blob={} nterm={}",
+                            cell_points_map.size(), n_cand_blobs, steiner_terminals.size());
     }
 
     return steiner_terminals;

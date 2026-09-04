@@ -36,7 +36,9 @@ function (output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback
           time_offset=0 * wc.us, relax_containment_filter=true,
           trigger_offset=0 * wc.us, trigger_offset_top=null,
           drift_speed_b=null, drift_speed_t=null,
-          wrapped_channel_charge=false)
+          // PDVD PRODUCTION ON, owner flip 2026-09-03 (doc pdvd/31 round 6).
+          // See the knob's comment at bs_live_face below.
+          wrapped_channel_charge=true)
 
 // Calibrated from PDVD data (anode->cathode crossing tracks: reconstructed drift
 // x-span vs the collection-plane->cathode-surface distance 338.55 cm; cathode

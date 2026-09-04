@@ -1406,8 +1406,15 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
         // C++ default false.  Key omitted when off => byte-identical pre-fix
         // config, which is what keeps SBND and uBooNE (whose configs never name
         // it) untouched.
+        // doc pdvd/31 round 6 (owner Q5): terminal_charge_threshold makes this
+        // component's internal Steiner terminal finder configurable.  It ran at
+        // the C++ default 4000 e unconditionally, so a detector that set
+        // CreateSteinerGraph's threshold (PDVD: 500) carried two different
+        // terminal thresholds in one stage.  null => key omitted =>
+        // byte-identical, and every detector that omits it keeps 4000.
         improve_cluster_2(name="", anodes=[], samplers=[], verbose=true,
-                          wrapped_channel_activity=false) :: {
+                          wrapped_channel_activity=false,
+                          terminal_charge_threshold=null) :: {
             local sampler_objs = [s.sobj for s in samplers],
             local sampler_cfgs = [{name:wc.tn(s.sobj), apa:s.apa, face:s.face} for s in samplers],
             type: "ImproveCluster_2",
@@ -1417,10 +1424,11 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
                 samplers: sampler_cfgs,
                 verbose: verbose,
                 [if wrapped_channel_activity then 'wrapped_channel_activity']: true,
+                [if terminal_charge_threshold != null then 'terminal_charge_threshold']: terminal_charge_threshold,
             } + dv_cfg + pcts_cfg,
             uses: [detector_volumes, pc_transforms]+anodes+sampler_objs,
         },
-        
+
 
         // Use an ImproveCluster_1 retiler for clustering retile operations
         improve_retile_1(name="", improver={}) :: {

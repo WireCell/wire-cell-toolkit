@@ -359,8 +359,11 @@ TEST_CASE("clus knob defaults: TaggerCheckNeutrino switches are all OFF")
     CHECK_KNOB_BOOL(cfg, "dl_vtx_cloud_no_exclusion", false);
     // doc pr/107: dQ/dx fit keeps every trajectory point (prototype parity) -- OFF.
     CHECK_KNOB_BOOL(cfg, "dqdx_fit_keep_all_points", false);
-    // doc pdvd/30: degenerate-fits() fallback to wcpts() in organize_segments_path_3rd -- OFF.
-    CHECK_KNOB_BOOL(cfg, "traj_degenerate_wcpts_fallback", false);
+    // doc pdvd/30's traj_degenerate_wcpts_fallback was RETIRED by owner
+    // decision 2026-09-03 (doc pdvd/31 round 6): inert on the event it was
+    // built for, never enabled in any config, and not the fix for the symptom.
+    // The knob must not come back silently.
+    CHECK_FALSE(cfg.isMember("traj_degenerate_wcpts_fallback"));
     // docs/73 sec 12 round 3: empty-2D-index sentinel guard in
     // eliminate_short_vertex_activities case 5 -- OFF.
     CHECK_KNOB_BOOL(cfg, "esva_ignore_empty_2d", false);
@@ -1311,21 +1314,23 @@ TEST_CASE("clus knob defaults: TrackFitting dqdx_fit_keep_all_points is off")
     CHECK(preset.get_parameters().dqdx_fit_keep_all_points == doctest::Approx(0.0));
 }
 
-TEST_CASE("clus knob defaults: TrackFitting traj_degenerate_wcpts_fallback is off")
+TEST_CASE("clus knob defaults: TrackFitting traj_degenerate_wcpts_fallback is retired")
 {
-    // doc pdvd/30 round 2: organize_segments_path_3rd takes its input from
-    // segment->fits() whenever that is merely non-empty, so a fits() collapsed
-    // to its two endpoint vertices is resampled as a straight chord and the
-    // bent wcpts() path in the same object is never reconsidered.  > 0 falls
-    // back to wcpts() in exactly that state.  Default 0 = legacy =
-    // byte-identical; same set_parameter round-trip contract as the other
-    // double-sentinel knobs.
+    // doc pdvd/31 round 6, owner decision 2026-09-03.  doc pdvd/30 shipped this
+    // knob to put genuinely bent geometry back into organize_segments_path_3rd
+    // when fits() had collapsed to a 2-point chord; it is a real defect but is
+    // inert on 039252/2 evt 298595 (the charge check drops the arm either way),
+    // it was never set in any detector's config, and doc pdvd/30 attributes the
+    // symptom to fit_exclusion contention with a duplicated segment instead.
+    //
+    // Retirement is byte-identical by construction: the default was 0 and no
+    // config set it, so the surviving expression is the one production ran.
+    // get_parameter raises on an unknown name (TrackFitting.cxx:269), which is
+    // what makes this a real guard rather than a vacuous one -- a silent
+    // reintroduction of the name would make it stop throwing.
     Clus::TrackFitting tf;
-    CHECK(tf.get_parameter("traj_degenerate_wcpts_fallback") == doctest::Approx(0.0));
-    tf.set_parameter("traj_degenerate_wcpts_fallback", 1.0);
-    CHECK(tf.get_parameter("traj_degenerate_wcpts_fallback") == doctest::Approx(1.0));
-    auto preset = Clus::TrackFittingPresets::create_with_current_values();
-    CHECK(preset.get_parameters().traj_degenerate_wcpts_fallback == doctest::Approx(0.0));
+    CHECK_THROWS(tf.get_parameter("traj_degenerate_wcpts_fallback"));
+    CHECK_THROWS(tf.set_parameter("traj_degenerate_wcpts_fallback", 1.0));
 }
 
 TEST_CASE("clus knob defaults: TrackFitting fit_blob_coverage is off")

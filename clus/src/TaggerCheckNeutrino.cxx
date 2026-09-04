@@ -324,8 +324,6 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_traj_cover_probe           = get(config, "traj_cover_probe",           m_traj_cover_probe);
     // doc sbnd_xin/docs/pr/107: dQ/dx fit keeps every trajectory point (prototype parity).
     m_dqdx_fit_keep_all_points   = get(config, "dqdx_fit_keep_all_points",   m_dqdx_fit_keep_all_points);
-    // doc pdvd/30: degenerate-fits() fallback to wcpts() in organize_segments_path_3rd.
-    m_traj_degenerate_wcpts_fallback = get(config, "traj_degenerate_wcpts_fallback", m_traj_degenerate_wcpts_fallback);
     m_pr_find_other_rounds       = get(config, "pr_find_other_rounds",       m_pr_find_other_rounds);
     // doc sbnd_xin/docs/pr/24 §18 (round 5).
     m_v3_extension_guard         = get(config, "v3_extension_guard",         m_v3_extension_guard);
@@ -967,7 +965,6 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["iso_endpoint_min_aspect"]    = m_iso_endpoint_min_aspect;     // trimmed transverse/axial extent ratio
     cfg["traj_cover_probe"]           = m_traj_cover_probe;            // false = no pr/67 diagnostic lines
     cfg["dqdx_fit_keep_all_points"]   = m_dqdx_fit_keep_all_points;    // doc pr/107: false = legacy (pre-dQ/dx pass drops zero-quantity points)
-    cfg["traj_degenerate_wcpts_fallback"] = m_traj_degenerate_wcpts_fallback;  // doc pdvd/30: false = legacy (a collapsed fits() is resampled as a straight chord)
     cfg["pr_find_other_rounds"]       = m_pr_find_other_rounds;        // 0 = keep find_proto_vertex's hardcoded budget
     cfg["v3_extension_guard"]         = m_v3_extension_guard;          // false = examine_vertices_3 unconditional accept
     cfg["v3_extension_min_gain"]      = m_v3_extension_min_gain;       // cm
@@ -2774,7 +2771,6 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
         // via inherit_from copy m_params, so every do_multi_tracking site is
         // covered.
         track_fitter->set_parameter("dqdx_fit_keep_all_points", m_dqdx_fit_keep_all_points ? 1.0 : 0.0);
-        track_fitter->set_parameter("traj_degenerate_wcpts_fallback", m_traj_degenerate_wcpts_fallback ? 1.0 : 0.0);
         // doc sbnd_xin/docs/pr/50 (fit_blob_coverage_defer, default false):
         // wrap the MAIN cluster's find_proto_vertex call so its recursive
         // break partition forms on legacy (undeweighted) fits -- the partition

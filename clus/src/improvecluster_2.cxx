@@ -29,7 +29,14 @@ namespace WireCell::Clus {
 
     private:
 
-       
+        // doc pdvd/31 round 6, the owner's Q5: this component ran the Steiner
+        // terminal finder at the C++ default 4000 e regardless of what
+        // CreateSteinerGraph was configured with, and the value was unreachable
+        // from jsonnet -- so PDVD carried two terminal thresholds in one stage
+        // (500 here, 4000 there).  The knob makes them syncable from one place.
+        // Default 4000 = the historical value = byte-identical when the key is
+        // absent (every detector today).
+        double m_steiner_terminal_charge{4000.0};
 
     };
 
@@ -62,15 +69,19 @@ namespace WireCell::Clus {
     {
         // Configure base class first
         ImproveCluster_1::configure(cfg);
-        
-  
+
+        // doc pdvd/31 round 6 (owner Q5).  Same key name as CreateSteinerGraph's
+        // so one jsonnet value can feed both and they cannot drift apart.
+        m_steiner_terminal_charge =
+            get(cfg, "terminal_charge_threshold", m_steiner_terminal_charge);
     }
 
     Configuration ImproveCluster_2::default_configuration() const
     {
         Configuration cfg = ImproveCluster_1::default_configuration();
-        
-    
+
+        cfg["terminal_charge_threshold"] = m_steiner_terminal_charge;
+
         return cfg;
     }
 
@@ -94,7 +105,11 @@ namespace WireCell::Clus {
         grapher_config.dv = m_dv;     // From NeedDV mixin
         grapher_config.pcts = m_pcts; // From NeedPCTS mixin
         grapher_config.perf = m_verbose; // toggle timing printouts with verbose=true
-        
+        // doc pdvd/31 round 6 (owner Q5): the one place this stage's terminal
+        // threshold is set.  Both graphers below share this config object, so
+        // the two internal find_steiner_terminals passes stay in step.
+        grapher_config.terminal_charge_threshold = m_steiner_terminal_charge;
+
         // Create the Steiner::Grapher instance
         t0 = Clock::now();
         Steiner::Grapher orig_steiner_grapher(*orig_cluster, grapher_config, log);

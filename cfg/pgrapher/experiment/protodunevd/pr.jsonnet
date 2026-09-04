@@ -36,8 +36,12 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
          time_offset=0 * wc.us, relax_containment_filter=true,
          trigger_offset=0 * wc.us, trigger_offset_top=null,
          drift_speed_b=null, drift_speed_t=null,
-         // See clus.jsonnet's bs_live_face.  false => key omitted => byte-identical.
-         wrapped_channel_charge=false) {
+         // See clus.jsonnet's bs_live_face.  PDVD PRODUCTION ON, owner flip
+         // 2026-09-03 (doc pdvd/31 round 6, hand scan of 039349/14 cluster 47
+         // and 039252/2 cluster 109): BlobSampler used IWirePlane::channels()
+         // -- a channel LIST that omits wrapped continuations -- as a wire
+         // lookup, zeroing the V-plane charge of wrapped strips.
+         wrapped_channel_charge=true) {
     // The PDVD clustering module, configured EXACTLY as the Q/L job configured it
     // (same drift speeds, trigger offsets, time offset): switch_scope re-derives
     // x_t0cor from cluster_t0 through these, so they must match for the M2
@@ -80,7 +84,17 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
               // by wire index.  C++ default false; key omitted when off =>
               // byte-identical.  PDVD is the only detector this can move: SBND
               // and uBooNE have no wrapped strips and PDHD runs no Steiner stage.
-              retile_wrapped_channel_activity=false,
+              retile_wrapped_channel_activity=true,
+              // doc pdvd/31 round 6 (owner Q5): the Steiner stage's OTHER
+              // terminal threshold.  ImproveCluster_2 runs its own terminal
+              // finder twice, and until round 6 it did so at the C++ default
+              // 4000 e no matter what steiner_terminal_charge said -- so PDVD
+              // ran 500 in CreateSteinerGraph and 4000 in the retiler that
+              // feeds it.  Set this to steiner_terminal_charge to sync them.
+              // PDVD PRODUCTION: synced to steiner_terminal_charge by owner
+              // decision 2026-09-03.  null => key omitted => 4000 => the
+              // historical value, and every other detector keeps it.
+              retile_steiner_terminal_charge=steiner_terminal_charge,
               // save_in_scope (doc 87): add the per-cluster T_cluster tree to
               // tracking-pr.root -- the in-scope set (switch_scope's scope_filter,
               // the SAME predicate the Bee clustering layer is gated on) plus the
@@ -1177,7 +1191,8 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
             anodes=anodes,
             samplers=[clus.sampler(clus_maker.live_sampler(a, f), apa=a.data.ident, face=f)
                       for a in anodes for f in [0, 1]],
-            wrapped_channel_activity=retile_wrapped_channel_activity),
+            wrapped_channel_activity=retile_wrapped_channel_activity,
+            terminal_charge_threshold=retile_steiner_terminal_charge),
         // Visitors available to the PR pipeline, by name.  switch_scope re-applies
         // the per-cluster T0 correction on the loaded tree (the corrected scope is
         // runtime state and does not persist through the tarball); it recomputes

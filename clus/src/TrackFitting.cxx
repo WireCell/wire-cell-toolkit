@@ -64,8 +64,6 @@ void TrackFitting::set_parameter(const std::string& name, double value) {
         m_params.traj_cover_probe = value;
     } else if (name == "dqdx_fit_keep_all_points") {   // doc pr/107
         m_params.dqdx_fit_keep_all_points = value;
-    } else if (name == "traj_degenerate_wcpts_fallback") {   // doc pdvd/30
-        m_params.traj_degenerate_wcpts_fallback = value;
     } else if (name == "DL") {
         m_params.DL = value;
     } else if (name == "DT") {
@@ -229,8 +227,6 @@ double TrackFitting::get_parameter(const std::string& name) const {
         return m_params.skip_revert_iso_xext_cut;
     } else if (name == "dqdx_fit_keep_all_points") {   // doc pr/107
         return m_params.dqdx_fit_keep_all_points;
-    } else if (name == "traj_degenerate_wcpts_fallback") {   // doc pdvd/30
-        return m_params.traj_degenerate_wcpts_fallback;
     } else if (name == "fit_blob_coverage") {
         return m_params.fit_blob_coverage;
     } else if (name == "fit_blob_coverage_ghost_dis") {
@@ -1588,22 +1584,18 @@ void TrackFitting::organize_segments_path_3rd(double step_size){
 
         // Get current fitted path from the segment.
         //
-        // doc pdvd/30 round 2: once fits() has collapsed to its two endpoint
-        // vertices it carries no shape at all, yet it is still *non-empty*, so
-        // the legacy test keeps it and the (bent) wcpts() path held in the very
-        // same object is never consulted again -- the pass resamples a straight
-        // chord instead.  With the knob on, that one state falls back to
-        // wcpts(), which is the input the prototype effectively always has
-        // (its ProtoSegment ctor seeds get_point_vec() from the full wcpt
-        // path; porting_dictionary.md:218-219 maps the two fields).  The
-        // wcpts() > 2*fits() test requires the raw path to carry strictly more
-        // shape than the chord, so a genuinely short 2-wcpt segment is left
-        // alone.  Knob 0 => `fits().empty()` => byte-identical.
-        const bool use_wcpts =
-            segment->fits().empty() ||
-            (m_params.traj_degenerate_wcpts_fallback > 0 &&
-             segment->fits().size() <= 2 &&
-             segment->wcpts().size() > 2 * segment->fits().size());
+        // doc pdvd/30 round 2 described a degenerate state here: once fits()
+        // has collapsed to its two endpoint vertices it carries no shape, yet
+        // it is still non-empty, so this test keeps it and the (bent) wcpts()
+        // path held in the same object is never consulted -- the pass resamples
+        // a straight chord.  `traj_degenerate_wcpts_fallback` guarded an opt-in
+        // fallback to wcpts() for that one state.  RETIRED by owner decision
+        // 2026-09-03 (doc pdvd/31 round 6): on the event it was built for it is
+        // inert -- the charge check drops the arm either way -- it was never
+        // enabled in any detector's config, and it is not the fix for the
+        // symptom (doc pdvd/30 attributes that to fit_exclusion contention with
+        // a duplicated segment).  Retiring restores the single legacy test.
+        const bool use_wcpts = segment->fits().empty();
 
         if (!use_wcpts) {
             for (const auto& fit : segment->fits()) {
