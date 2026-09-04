@@ -85,6 +85,8 @@ namespace WireCell::Clus::Facade {
 
         std::map<int, IAnodePlane::pointer> m_anodes;
         IDetectorVolumes::pointer m_dv{nullptr};
+        // doc pdvd/36; see set_ctpc_aniso_metric().  Default OFF = legacy.
+        bool m_ctpc_aniso_metric{false};
 
         // Memoized per-(apa,face,pind) state for kd2d().  The scope string ("ctpc_a*f*p*")
         // depends only on the indices, not on event content, so it is built once per key
@@ -116,6 +118,14 @@ namespace WireCell::Clus::Facade {
             std::array<double, 3> angle, pitch, center;
             double time_offset, drift_speed, tick;
             IAnodeFace::pointer iface;
+            // doc pdvd/36: the ctpc lattice constants for the anisotropic
+            // metric (CtpcAnisoMetric.h).  drift_step = nticks_live_slice *
+            // tick * drift_speed is the x edge of a ctpc cell; yscale[pind] =
+            // min(1, drift_step / pitch[pind]) is the pitch-axis scale.  Both
+            // are filled unconditionally (one multiply and three divides per
+            // (apa, face), once) but only READ when m_ctpc_aniso_metric is on.
+            double drift_step{0.0};
+            std::array<double, 3> yscale{1.0, 1.0, 1.0};
         };
         // Dense by key = apa*2+face (called per point in the good-point
         // tests; a hash lookup here was ~5% of busy clustering).  unique_ptr
@@ -265,6 +275,26 @@ namespace WireCell::Clus::Facade {
         void set_detector_volumes(const IDetectorVolumes::pointer dv) { m_dv = dv; }
         // const IDetectorVolumes::pointer get_detector_volumes() const { return m_dv; }
 
+        /// doc pdvd/36: switch the two ctpc radius queries
+        /// (get_closest_points / has_closest_point, and through them every
+        /// good-point test and charge average on this grouping) from the
+        /// legacy isotropic Euclidean metric to the lattice-normalised one of
+        /// CtpcAnisoMetric.h: d^2 = dx^2 + (s*dy)^2 with s = min(1,
+        /// drift_step/pitch) per (apa, face, plane).  OFF (default) is the
+        /// legacy code path, statement for statement.  ON is the identity on
+        /// any plane whose pitch is finer than the drift step (SBND: 3.13 mm
+        /// step vs 3.00 mm pitch, s clamps to 1) and loosens only the pitch
+        /// axis elsewhere (PDVD U/V s = 0.387, W 0.581; PDHD ~0.67; uBooNE
+        /// 0.73 -- its 2.20 mm step is FINER than its 3.00 mm pitch, so it is
+        /// not the identity there and must stay OFF).  Set once per job by
+        /// MultiAlgBlobClustering::load_grouping from its "ctpc_aniso_metric"
+        /// config key, and carried to derived groupings by from().  It is a
+        /// grouping-wide property on purpose: every ctpc caller must see the
+        /// same metric, or the good-point tests, the connectors and the
+        /// charge averages disagree about what "within 0.6 cm" means.
+        void set_ctpc_aniso_metric(bool on) { m_ctpc_aniso_metric = on; }
+        bool ctpc_aniso_metric() const { return m_ctpc_aniso_metric; }
+
         // Return a value representing the content of this grouping.
         size_t hash() const;
 
@@ -326,7 +356,12 @@ namespace WireCell::Clus::Facade {
                              double radius = 0.6 * units::cm, int ch_range = 1) const;
 
 
-        /// @brief
+        /// @brief All ctpc points of one plane within `radius` of `point`
+        /// (the point is projected to the plane's (x, y) lattice first).
+        /// Pairs of (flat index into the plane's ctpc, SQUARED isotropic
+        /// distance).  With ctpc_aniso_metric() on, membership is decided by
+        /// the lattice-normalised ellipse of CtpcAnisoMetric.h instead of the
+        /// circle; the distances stay isotropic (physical length squared).
         /// @param point
         /// @param radius
         /// @param face
@@ -340,6 +375,8 @@ namespace WireCell::Clus::Facade {
         /// the callers (good-point tests) that only need `size() > 0`.  Matches
         /// get_closest_points(...).size() > 0 exactly (same projection; nanoflann's radius
         /// search keeps points with dist < radius^2, so the same strict comparison is used).
+        /// With ctpc_aniso_metric() on it answers the same ellipse as
+        /// get_closest_points, exactly (CtpcAnisoMetric.h).
         bool has_closest_point(const geo_point_t& point, const double radius, const int apa, const int face, int pind) const;
 
         /// @brief true if the point is within the dead region, [wind+ch_range, wind-ch_range] and [xmin, xmax]

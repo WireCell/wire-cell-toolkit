@@ -703,6 +703,21 @@ namespace WireCell::Clus {
         // configurable parameters for dead-live clustering
         int m_dead_live_overlap_offset{2};
 
+        /** Config: "ctpc_aniso_metric"
+         *
+         * doc pdvd/36.  If true, every grouping this node loads answers its
+         * ctpc radius queries (Grouping::get_closest_points /
+         * has_closest_point, hence every good-point test, connector and
+         * charge average on it) with the lattice-normalised anisotropic
+         * metric of CtpcAnisoMetric.h instead of the isotropic Euclidean one.
+         * Job-wide on purpose: the callers must agree on the metric.
+         * Default false = legacy path, byte-identical.  Even when on it is the
+         * identity on SBND (pitch finer than the drift step, s clamps to 1);
+         * it loosens the pitch axis on PDVD (U/V s = 0.387, W 0.581), PDHD
+         * (~0.67) and uBooNE (0.73), so it must stay OFF outside PDVD.
+         */
+        bool m_ctpc_aniso_metric{false};
+
         // Keep track of configured clustering methods with their metadata to
         // assist in debugging/logging.
         struct EnsembleVisitor {

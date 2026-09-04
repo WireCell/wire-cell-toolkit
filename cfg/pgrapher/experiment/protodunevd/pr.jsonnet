@@ -1079,6 +1079,19 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
               // C++ default false.  Key omitted when off => byte-identical
               // pre-knob config.
               fast_xgb_forest=false,
+              // ctpc_aniso_metric: doc pdvd/36.  Switch the PR job's
+              // MultiAlgBlobClustering (and so every grouping it loads) to the
+              // lattice-normalised anisotropic ctpc metric of
+              // clus/inc/WireCellClus/CtpcAnisoMetric.h -- every ctpc radius
+              // query (good-point tests, connectors, charge averages) scales
+              // the pitch axis by min(1, drift_step/pitch).  C++ default
+              // false.  Key omitted when off => byte-identical pre-knob config.
+              // Identity on SBND even when on (s clamps to 1); loosens PDVD U/V
+              // (0.387) and W (0.581) -- and would loosen PDHD (0.67) and uBooNE
+              // (0.73), which is why it exists only here.  PDVD production stays
+              // OFF until the owner
+              // flips the TLA in pdvd/wct-pr-perevt.jsonnet (doc 36 sec 8).
+              ctpc_aniso_metric=false,
        // doc 77 round 2: the pattern-recognition knob bag, built once by the
        // job (wct-pr-perevt.jsonnet) from its TLAs and handed to
        // TaggerCheckNeutrino as-is.  An absent key is that knob's C++ default,
@@ -1757,6 +1770,9 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
                 save_deadarea: true,
                 dead_area_version: 2,
                 save_opflash: false,
+                // doc pdvd/36: C++ default false.  Key omitted when off =>
+                // byte-identical compiled config (see the pr() arg comment).
+                [if ctpc_aniso_metric then 'ctpc_aniso_metric']: true,
                 anodes: [wc.tn(a) for a in anodes],
                 detector_volumes: wc.tn(dv),
                 cluster_id_order: 'tree',

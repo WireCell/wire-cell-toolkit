@@ -248,6 +248,14 @@ void MultiAlgBlobClustering::configure(const WireCell::Configuration& cfg)
 
     m_dead_live_overlap_offset = get(cfg, "dead_live_overlap_offset", m_dead_live_overlap_offset);
 
+    // doc pdvd/36: lattice-normalised ctpc metric, applied to every grouping
+    // this node loads (load_grouping).  Absent key => legacy isotropic metric.
+    m_ctpc_aniso_metric = get(cfg, "ctpc_aniso_metric", m_ctpc_aniso_metric);
+    if (m_ctpc_aniso_metric) {
+        log->info("ctpc_aniso_metric ON: ctpc radius queries use the lattice-normalised "
+                  "metric (doc pdvd/36) on every grouping loaded by this node");
+    }
+
     for (auto jtn : cfg["pipeline"]) {
         std::string tn = jtn.asString();
         SPDLOG_LOGGER_DEBUG(log, "configuring clustering method: {}", tn);
@@ -487,6 +495,7 @@ WireCell::Configuration MultiAlgBlobClustering::default_configuration() const
     cfg["initial_index"] = m_initial_index;
 
     cfg["dead_live_overlap_offset"] = m_dead_live_overlap_offset;
+    cfg["ctpc_aniso_metric"] = m_ctpc_aniso_metric;  // doc pdvd/36: false = legacy isotropic ctpc metric
 
     cfg["use_config_rse"] = false;  // By default, don't use configured RSE
     cfg["runNo"] = m_runNo;
@@ -3528,6 +3537,7 @@ Grouping& MultiAlgBlobClustering::load_grouping(
     grouping->enumerate_idents();
     grouping->set_anodes(m_anodes);
     grouping->set_detector_volumes(m_dv);
+    grouping->set_ctpc_aniso_metric(m_ctpc_aniso_metric);  // doc pdvd/36
     check_perblob_provenance(*grouping->node(), "load:" + path);
     return *grouping;
 }

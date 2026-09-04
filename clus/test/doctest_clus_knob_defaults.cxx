@@ -1485,3 +1485,23 @@ TEST_CASE("clus knob defaults: MultiAlgBlobClustering bee_zip default is non-emp
     CHECK(cfg["bee_zip"].asString() == "mabc.zip");
     CHECK(!cfg["bee_zip"].asString().empty());
 }
+
+// ---------------------------------------------------------------------------
+// doc pdvd/36: the lattice-normalised ctpc metric is OFF by default, both at
+// the MultiAlgBlobClustering config key that sets it and on the Grouping
+// facade that answers the queries.  ON changes every ctpc radius query on
+// PDVD, PDHD and uBooNE (pitch coarser than the drift step); it is the
+// identity only on SBND.  Production PDVD stays on the legacy metric until the
+// owner flips the TLA in pdvd/wct-pr-perevt.jsonnet; that operating point is
+// gated by the compiled-config proof, not here.
+// ---------------------------------------------------------------------------
+TEST_CASE("clus knob defaults: ctpc_aniso_metric is off")
+{
+    auto cfg = defaults_of("MultiAlgBlobClustering");
+    CHECK_KNOB_BOOL(cfg, "ctpc_aniso_metric", false);
+
+    Clus::Facade::Grouping grouping;
+    CHECK(grouping.ctpc_aniso_metric() == false);
+    grouping.set_ctpc_aniso_metric(true);
+    CHECK(grouping.ctpc_aniso_metric() == true);
+}

@@ -1,6 +1,7 @@
 #include "WireCellClus/Facade_Blob.h"
 #include "WireCellClus/Facade_Cluster.h"
 #include "WireCellClus/Facade_Grouping.h"
+#include "WireCellClus/CtpcAnisoMetric.h"
 #include "WireCellClus/TrackFitting.h"
 #include "WireCellAux/PlaneTools.h"
 #include <boost/container_hash/hash.hpp>
@@ -120,6 +121,10 @@ void Facade::Grouping::from(const Grouping& other)
 {
     m_anodes = other.m_anodes;
     m_dv = other.m_dv;
+    // doc pdvd/36: a derived grouping (retile's shadow grouping) must answer
+    // the same metric as its source, or the connectors built on it disagree
+    // with the good-point tests on the original.
+    m_ctpc_aniso_metric = other.m_ctpc_aniso_metric;
 }
 
 
@@ -681,12 +686,19 @@ Grouping::kd_results_t Grouping::get_closest_points(const geo_point_t& point, co
                                                     int pind) const
 {
     double x = point[0];
-    const double angle = fastgeom(apa, face).angle[pind];
+    const fastgeom_t& fg = fastgeom(apa, face);
+    const double angle = fg.angle[pind];
     double y = cos(angle) * point[2] - sin(angle) * point[1];
     const auto& skd = kd2d(apa, face, pind);
     // Stack query (std::array) instead of a 2-element heap vector; this helper
     // runs per-point-per-plane in the clustering good-point tests.
     const std::array<double, 2> query{x, y};
+    // doc pdvd/36: the lattice-normalised ellipse (CtpcAnisoMetric.h), exact
+    // by a circumscribe-and-filter two-level query.  OFF => the legacy
+    // statement below, unchanged.
+    if (m_ctpc_aniso_metric) {
+        return ctpc_radius_aniso(skd, query, radius, fg.yscale[pind]);
+    }
     return skd.radius<std::array<double, 2>>(radius * radius, query);
 }
 
@@ -694,7 +706,8 @@ bool Grouping::has_closest_point(const geo_point_t& point, const double radius, 
                                  int pind) const
 {
     double x = point[0];
-    const double angle = fastgeom(apa, face).angle[pind];
+    const fastgeom_t& fg = fastgeom(apa, face);
+    const double angle = fg.angle[pind];
     double y = cos(angle) * point[2] - sin(angle) * point[1];
     const auto& skd = kd2d(apa, face, pind);
     // Existence-only query: boolean-identical to knn(1) + strict dist <
@@ -703,6 +716,13 @@ bool Grouping::has_closest_point(const geo_point_t& point, const double radius, 
     // resolving the true nearest neighbor.  Distances are squared (L2).
     // Stack query (std::array) to avoid a 2-element heap vector.
     const std::array<double, 2> query{x, y};
+    // doc pdvd/36: the lattice-normalised ellipse (CtpcAnisoMetric.h).  Two
+    // exact brackets (inscribed circle hit => true, circumscribed circle
+    // empty => false) keep the early exit for the common cases; only the
+    // in-between case enumerates.  OFF => the legacy statement, unchanged.
+    if (m_ctpc_aniso_metric) {
+        return ctpc_exists_within_aniso(skd, query, radius, fg.yscale[pind]);
+    }
     return skd.exists_within(radius * radius, query);
 }
 
@@ -764,6 +784,34 @@ const Grouping::fastgeom_t& Grouping::fastgeom(const int apa, const int face) co
     fg.time_offset = cache().map_time_offset.at(apa).at(face);
     fg.drift_speed = cache().map_drift_speed.at(apa).at(face);
     fg.tick = cache().map_tick.at(apa).at(face);
+    // doc pdvd/36: the ctpc lattice constants.  nticks_live_slice comes from
+    // the same DetectorVolumes metadata loop as tick and drift_speed
+    // (fill_dv_cache), so the .at() precondition is unchanged.  An absent
+    // key reads as 0 => drift_step 0 => yscale 1 on every plane, i.e. the
+    // knob is silently inert; that is reported loudly below when it is on.
+    {
+        const int nticks = cache().map_nticks_per_slice.at(apa).at(face);
+        fg.drift_step = nticks * fg.tick * fg.drift_speed;
+        for (int pind = 0; pind < 3; ++pind) {
+            fg.yscale[pind] = ctpc_yscale(fg.drift_step, fg.pitch[pind]);
+        }
+        if (m_ctpc_aniso_metric) {
+            static auto alog = Log::logger("clus");
+            if (fg.drift_step <= 0.0) {
+                alog->warn("Grouping ctpc_aniso_metric ON but apa {} face {} has drift_step {} "
+                           "(nticks_live_slice {} tick {} drift_speed {}): metric is the legacy "
+                           "isotropic one on this face -- an inert knob, check the DetectorVolumes metadata",
+                           apa, face, fg.drift_step, nticks, fg.tick, fg.drift_speed);
+            }
+            else {
+                alog->info("Grouping ctpc_aniso_metric ON: apa {} face {} drift_step {:.4f} mm, "
+                           "pitch U/V/W {:.4f}/{:.4f}/{:.4f} mm, yscale U/V/W {:.4f}/{:.4f}/{:.4f}",
+                           apa, face, fg.drift_step / units::mm,
+                           fg.pitch[0] / units::mm, fg.pitch[1] / units::mm, fg.pitch[2] / units::mm,
+                           fg.yscale[0], fg.yscale[1], fg.yscale[2]);
+            }
+        }
+    }
     if (key >= m_fastgeom.size()) m_fastgeom.resize(key + 1);
     m_fastgeom[key] = std::move(fgp);
     return *m_fastgeom[key];
