@@ -229,6 +229,8 @@ double TrackFitting::get_parameter(const std::string& name) const {
         return m_params.skip_revert_iso_xext_cut;
     } else if (name == "dqdx_fit_keep_all_points") {   // doc pr/107
         return m_params.dqdx_fit_keep_all_points;
+    } else if (name == "good_point_pitch_frac") {      // doc pdvd/32 round 3
+        return m_params.good_point_pitch_frac;
     } else if (name == "fit_blob_coverage") {
         return m_params.fit_blob_coverage;
     } else if (name == "fit_blob_coverage_ghost_dis") {

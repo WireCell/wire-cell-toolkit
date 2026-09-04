@@ -1300,6 +1300,29 @@ TEST_CASE("clus knob defaults: TrackFitting skip_revert_iso_xext_cut is off")
     CHECK(preset.get_parameters().skip_revert_iso_xext_cut == doctest::Approx(-1.0));
 }
 
+TEST_CASE("clus knob defaults: TrackFitting good_point_pitch_frac is off")
+{
+    // doc pdvd/32 round 3: per-plane floor on the trajectory END TRIM's
+    // good-point radius, as a fraction of the wire pitch --
+    // examine_end_ps_vec's is_good_point uses max(0.2 cm, frac*pitch[plane]).
+    // C++ default 0 = no floor = byte-identical (gate: d32r3ref vs d32r3base,
+    // 039252/2 evt 298595, identical mabc-pr member content, calib md5, all 21
+    // persist_stm_fit records and all 60 STM verdicts).
+    //
+    // This pins the C++ DEFAULT only.  PDVD deliberately runs 0.35 via
+    // cfg/pgrapher/experiment/protodunevd/pdvd_track_fitting.json (owner
+    // decision 2026-09-04); that operating point is gated by the config proof,
+    // not here -- exactly the split this file's header describes.
+    Clus::TrackFitting tf;
+    CHECK(tf.get_parameter("good_point_pitch_frac") == doctest::Approx(0.0));
+
+    tf.set_parameter("good_point_pitch_frac", 0.35);
+    CHECK(tf.get_parameter("good_point_pitch_frac") == doctest::Approx(0.35));
+
+    auto preset = Clus::TrackFittingPresets::create_with_current_values();
+    CHECK(preset.get_parameters().good_point_pitch_frac == doctest::Approx(0.0));
+}
+
 TEST_CASE("clus knob defaults: TrackFitting dqdx_fit_keep_all_points is off")
 {
     // doc pr/107: the pre-dQ/dx form_map_graph pass drops zero-quantity
