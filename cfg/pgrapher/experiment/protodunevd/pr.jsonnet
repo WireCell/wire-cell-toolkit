@@ -612,6 +612,20 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
               // output change (CLAUDE.md sec.5 rule 1) and is the owner's call.
               steiner_terminal_wire_tol=0,
               steiner_terminal_adjacent_slice=false,
+              // Cross-blob Steiner terminal thinning (doc pdvd/37 R1).  A
+              // LENGTH (WCT units; pass n*wc.cm).  0 here = the historical
+              // path, key omitted => byte-identical config.  Unlike the two
+              // knobs above this one can only REMOVE terminals: after the
+              // reference and path filters, the terminals are walked in
+              // decreasing charge and one is kept only when no already-kept
+              // terminal lies strictly within it.  It runs BEFORE the extreme
+              // points are added, so a cluster's endpoints are never thinnable.
+              // NOT flipped on by default here: that is an unconditional
+              // production output change (CLAUDE.md sec.5 rule 1).  The PDVD
+              // operating point is 0.5 cm and lives in the driver,
+              // pdvd/wct-pr-perevt.jsonnet, exactly as wire_tol/adjacent_slice
+              // do -- a bare pr.jsonnet run is NOT the PDVD operating point.
+              steiner_terminal_min_separation=0,
               // Steiner EDGE-WEIGHT charge fidelity (doc pr/29 D2).  OFF here =
               // the historical toolkit behaviour, key omitted => byte-identical.
               //   steiner_edge_charge_forward_dead_mix=true   weights steiner
@@ -1284,7 +1298,8 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
                                 beam_window_high=beam_window[1],
                                 terminal_wire_tol=steiner_terminal_wire_tol,
                                 terminal_adjacent_slice=steiner_terminal_adjacent_slice,
-                                edge_charge_forward_dead_mix=steiner_edge_charge_forward_dead_mix)
+                                edge_charge_forward_dead_mix=steiner_edge_charge_forward_dead_mix,
+                                terminal_min_separation=steiner_terminal_min_separation)
               + { data+: { [if steiner_terminal_charge != null then 'terminal_charge_threshold']: steiner_terminal_charge } },
             // The doc pr/23 second steiner pass, named right after protect_bundle:
             // replace=false rebuilds ONLY the clusters protect_bundle purged
@@ -1307,6 +1322,11 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
                                 terminal_wire_tol=steiner_terminal_wire_tol,
                                 terminal_adjacent_slice=steiner_terminal_adjacent_slice,
                                 edge_charge_forward_dead_mix=steiner_edge_charge_forward_dead_mix,
+                                // Same thinning as the first pass, same reason
+                                // as the filters above: the refresh rebuilds
+                                // only the clusters protect_bundle purged and
+                                // they must be built like their peers.
+                                terminal_min_separation=steiner_terminal_min_separation,
                                 replace=false)
               + { data+: { [if steiner_terminal_charge != null then 'terminal_charge_threshold']: steiner_terminal_charge } },
             fiducialutils: cm.fiducialutils(),

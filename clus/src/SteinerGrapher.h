@@ -90,6 +90,28 @@ namespace WireCell::Clus::Steiner {
             /// (a 3 m track included).  Default 4000 = bit-for-bit the
             /// historical behaviour; PDVD sets its own value.
             double terminal_charge_threshold{4000.0};
+
+            /// doc pdvd/37 R1.  Minimum spacing, a real length in the WCT
+            /// system of units, enforced ACROSS blob boundaries on the Steiner
+            /// terminal set before the extreme points are added.
+            ///
+            /// Why a separate pass rather than a wider suppression radius:
+            /// find_peak_point_indices runs once per blob
+            /// (find_steiner_terminals, SteinerGrapher.cxx), and its
+            /// map_index_charge holds only that blob's points, so an
+            /// out-of-blob neighbour is skipped and the local-maximum test can
+            /// never remove a blob's LAST candidate.  Terminal density is
+            /// therefore floored at the candidate-bearing blob density (doc
+            /// pdvd/31 round 6 measured 1.02 terminals per such blob), i.e. it
+            /// is set by the time-slice pitch and the track's drift alignment
+            /// rather than by anything physical.  Doc pdvd/37 sec.3.2 confirms
+            /// that law on PDVD, SBND and uBooNE alike.
+            ///
+            /// 0 (the default) = no thinning, bit-for-bit the historical
+            /// behaviour.  A positive value keeps terminals greedily in
+            /// DECREASING charge order, admitting one only when no
+            /// already-kept terminal lies strictly within it.
+            double terminal_min_separation{0.0};
         };
         Log::logptr_t log;
 
@@ -206,6 +228,16 @@ namespace WireCell::Clus::Steiner {
         vertex_set find_steiner_terminals(const std::string& graph_name, bool disable_dead_mix_cell=true);
         /// Overload that accepts a precomputed blob->points map to avoid calling form_cell_points_map() twice.
         vertex_set find_steiner_terminals(const std::string& graph_name, bool disable_dead_mix_cell, const blob_vertex_map& cell_points_map);
+
+        /// doc pdvd/37 R1.  Thin @p terminals so that no two survivors lie
+        /// closer than Config::terminal_min_separation, walking them in
+        /// decreasing charge order.  The charge is Cluster::calc_charge_wcp
+        /// evaluated with the SAME terminal_charge_threshold and
+        /// @p disable_dead_mix_cell that selected them in phase 1, so the
+        /// survivor of a crowd is the member the peak finder itself ranks
+        /// highest.  Returns @p terminals unchanged when the knob is <= 0.
+        vertex_set thin_terminals_by_separation(const vertex_set& terminals,
+                                                bool disable_dead_mix_cell);
 
         /// Establish edges between points in the same blob (mcell) with weighted connectivity
         /// This modifies the given graph and tracks added edges for later removal

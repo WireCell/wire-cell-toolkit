@@ -5,6 +5,8 @@
 #include "WireCellUtil/Point.h"
 #include "WireCellClus/Graphs.h"
 #include "WireCellClus/DynamicPointCloud.h"
+// doc pdvd/37 R1 -- the pure-geometry thinning core.
+#include "WireCellClus/SteinerThinning.h"
 // for Grouping::get_nticks_per_slice() -- the adjacent-slice step (doc pr/29 D12)
 #include "WireCellClus/Facade_Grouping.h"
 #include <algorithm>
@@ -131,6 +133,27 @@ void Steiner::Grapher::create_steiner_tree(
 
     // std::cout << "Test3: " << steiner_terminals.size() << std::endl;
 
+
+    // Phase 3b: cross-blob minimum-separation thinning (doc pdvd/37 R1).
+    // OFF by default (terminal_min_separation 0) => bit-for-bit the historical
+    // path, and the whole phase is skipped rather than run as a no-op.
+    //
+    // Placed AFTER phase 3 and BEFORE phase 4 on purpose.  After the two
+    // filters, because thinning what they are about to discard would let a
+    // doomed terminal suppress a surviving one.  Before phase 4, because that
+    // insert of get_extreme_points_for_reference is unconditional: a cluster's
+    // extreme points are what pin the ends of the tree, and they must not be
+    // suppressible by anything.  Moving this below phase 4 would break that.
+    if (m_config.terminal_min_separation > 0.0) {
+        const size_t pre_thin = steiner_terminals.size();
+        steiner_terminals = thin_terminals_by_separation(steiner_terminals, disable_dead_mix_cell);
+        // DEBUG, not TRACE: TRACE is compiled out of this build, and the ON arm
+        // has to be verifiable from the production log alone.
+        SPDLOG_LOGGER_DEBUG(log, "steiner_thin: nterm_in={} nterm_out={} min_sep_cm={:.3f}",
+                            pre_thin, steiner_terminals.size(),
+                            m_config.terminal_min_separation / units::cm);
+        dump_terminals("P3b_thin", steiner_terminals);
+    }
 
     // Phase 4: Add extreme points
     vertex_set extreme_points = get_extreme_points_for_reference(reference_cluster);
@@ -728,6 +751,50 @@ Steiner::Grapher::vertex_set Steiner::Grapher::find_steiner_terminals(const std:
     }
 
     return steiner_terminals;
+}
+
+
+// doc pdvd/37 R1.  Cross-blob minimum-separation thinning.
+//
+// Phase 1 selects terminals one blob at a time, so its local-maximum test never
+// compares a point against a better point in the neighbouring blob and can never
+// remove a blob's last candidate (see find_steiner_terminals above).  The
+// spacing that results is the time-slice pitch divided by the track's drift
+// alignment, not a physical scale -- doc pdvd/37 sec.3.2 measures the same law
+// on PDVD, SBND and uBooNE.  This pass leaves the selection untouched and
+// filters its output at a real length instead.
+//
+// The ordering is the peak finder's own: decreasing calc_charge_wcp, evaluated
+// with the same threshold and the same disable_dead_mix_cell that selected these
+// points, so the survivor of a crowd is the member phase 1 ranks highest.  The
+// std::set<pair<double,size_t>, greater<>> idiom is lifted verbatim from
+// find_peak_point_indices; the point index in the key makes the order total, so
+// equal charges cannot leave the outcome to container luck.
+Steiner::Grapher::vertex_set Steiner::Grapher::thin_terminals_by_separation(
+    const vertex_set& terminals, bool disable_dead_mix_cell)
+{
+    if (m_config.terminal_min_separation <= 0.0) return terminals;
+
+    std::set<std::pair<double, size_t>, std::greater<std::pair<double, size_t>>> ordered_set;
+    for (size_t idx : terminals) {
+        auto [charge_quality, charge] =
+            m_cluster.calc_charge_wcp(idx, m_config.terminal_charge_threshold, disable_dead_mix_cell);
+        // Quality is not re-tested: every point here already passed phase 1's
+        // (charge > threshold && charge_quality).  Extreme points, which have
+        // NOT been charge-tested, are added after this pass, never before.
+        (void) charge_quality;
+        ordered_set.insert(std::make_pair(charge, idx));
+    }
+
+    std::vector<std::pair<geo_point_t, size_t>> ordered;
+    ordered.reserve(ordered_set.size());
+    for (const auto& [charge, idx] : ordered_set) {
+        (void) charge;
+        ordered.emplace_back(m_cluster.point3d(idx), idx);
+    }
+
+    const auto kept = thin_by_min_separation(ordered, m_config.terminal_min_separation);
+    return vertex_set(kept.begin(), kept.end());
 }
 
 

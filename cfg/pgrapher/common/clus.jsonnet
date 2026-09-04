@@ -1468,7 +1468,7 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
         steiner(name="", retiler={}, grouping="live", graph="steiner", perf=true, require_beam_flash=true,
                 beam_window_only=false, beam_window_low=0, beam_window_high=0, replace=null,
                 terminal_wire_tol=0, terminal_adjacent_slice=false,
-                edge_charge_forward_dead_mix=false) :: {
+                edge_charge_forward_dead_mix=false, terminal_min_separation=0) :: {
             type: "CreateSteinerGraph",
             name: prefix+name,
             data: {
@@ -1502,6 +1502,19 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
                 // argument and its always-true downstream default.  Key
                 // omitted when false => byte-identical pre-knob config.
                 [if edge_charge_forward_dead_mix then 'edge_charge_forward_dead_mix']: true,
+                // doc pdvd/37 R1.  C++ default 0.  A positive LENGTH (WCT
+                // units, so pass n*wc.cm) enforced ACROSS blob boundaries on
+                // the terminal set, between the two filters and the extreme
+                // points: walk the terminals in decreasing charge and keep one
+                // only when no already-kept terminal is strictly within it.
+                // Phase 1 selects one blob at a time, so its local-maximum test
+                // can never remove a blob's last candidate and the spacing that
+                // results is the time-slice pitch over the drift alignment
+                // rather than a physical scale (doc pdvd/31 sec.10.3, doc
+                // pdvd/37 sec.3.2 on three detectors).  Key omitted when 0 =>
+                // byte-identical pre-knob config.  This is a SHARED function:
+                // SBND, uBooNE and ICARUS bind it too and are left at 0.
+                [if terminal_min_separation != 0 then 'terminal_min_separation']: terminal_min_separation,
             } + dv_cfg + pcts_cfg
               + (if beam_window_only then {
                      beam_window_only: true,

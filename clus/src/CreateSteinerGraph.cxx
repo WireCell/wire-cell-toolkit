@@ -70,6 +70,16 @@ void Steiner::CreateSteinerGraph::configure(const WireCell::Configuration& cfg)
     // the prototype constant => byte-identical when the key is absent).
     m_grapher_config.terminal_charge_threshold =
         get(cfg, "terminal_charge_threshold", m_grapher_config.terminal_charge_threshold);
+    // doc pdvd/37 R1: cross-blob minimum-separation thinning of the terminal
+    // set, in the WCT system of units.  C++ default 0 = no thinning, so a
+    // config without the key runs bit-for-bit as before.
+    m_grapher_config.terminal_min_separation =
+        get(cfg, "terminal_min_separation", m_grapher_config.terminal_min_separation);
+    if (m_grapher_config.terminal_min_separation < 0) {
+        log->warn("configure: terminal_min_separation {} cm is negative -- thinning "
+                  "disabled", m_grapher_config.terminal_min_separation / units::cm);
+        m_grapher_config.terminal_min_separation = 0;
+    }
     const std::string retiler_tn = get<std::string>(cfg, "retiler", "RetileCluster");
     m_grapher_config.retile = Factory::find_tn<IPCTreeMutate>(retiler_tn);
 }
@@ -102,6 +112,9 @@ Configuration Steiner::CreateSteinerGraph::default_configuration() const
     // (the prototype uses 1 there and 0 in get_extreme_wcps).  0 = legacy.
     cfg["terminal_wire_tol"] = m_grapher_config.terminal_wire_tol;
     cfg["terminal_charge_threshold"] = m_grapher_config.terminal_charge_threshold;
+    // doc pdvd/37 R1: minimum spacing enforced across blob boundaries on the
+    // terminal set, before the extreme points are added.  0 = legacy (none).
+    cfg["terminal_min_separation"] = m_grapher_config.terminal_min_separation;
     // doc pr/29 D12: step the terminal filter's adjacent-slice lookup by the
     // face's ticks-per-slice instead of by 1.  The map is tick-keyed, so the
     // legacy step of 1 never matches and the fallback is dead.  false = legacy.

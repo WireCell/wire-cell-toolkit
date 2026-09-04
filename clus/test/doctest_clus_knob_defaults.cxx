@@ -646,6 +646,18 @@ TEST_CASE("clus knob defaults: CreateSteinerGraph replace defaults TRUE")
     CHECK_KNOB_BOOL(cfg, "replace", true);
 }
 
+TEST_CASE("clus knob defaults: CreateSteinerGraph terminal_min_separation is OFF")
+{
+    // doc pdvd/37 R1.  0 = no cross-blob thinning, which is what makes a config
+    // without the key byte-identical to the pre-knob branch.  PDVD's operating
+    // point (0.5 cm) lives in pdvd/wct-pr-perevt.jsonnet, not here -- flipping
+    // this default would change SBND, uBooNE and ICARUS at the same time, which
+    // is exactly the failure this file exists to catch.
+    auto cfg = defaults_of("CreateSteinerGraph");
+    REQUIRE(cfg.isMember("terminal_min_separation"));
+    CHECK(cfg["terminal_min_separation"].asDouble() == 0.0);
+}
+
 // ---------------------------------------------------------------------------
 // The clustering visitors added or extended by the port.
 // ---------------------------------------------------------------------------
