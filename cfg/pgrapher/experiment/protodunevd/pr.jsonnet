@@ -175,7 +175,7 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
               // hard-coded -3 cm literal in both margin vectors below.  Default 3
               // == that literal => compiled JSON byte-identical.  Broken out so the
               // PDVD driver can carry the clustering FV's 15 cm space-charge inset
-              // on this face too (doc pdvd/34).
+              // on this face too (doc pdvd/35).
               tgm_fv_zmin_margin=3,
               save_stm_fit=false, unmerge_bundle_mode='real',
               // doc pr/34 §10 particle-flow (Bee mc tree) port-fidelity knobs.

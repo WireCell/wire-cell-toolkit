@@ -3,12 +3,12 @@
 // Counterpart of cfg/pgrapher/experiment/sbnd/cathode_fiducial.jsonnet.  SBND has
 // exactly ONE structural gap (the CPA) and models it from engineering drawings;
 // PDVD has four families of gap and this file models them from MEASUREMENT, for
-// the reason doc pdvd/34 sec 3 sets out: the width that matters to a fiducial
+// the reason doc pdvd/35 sec 3 sets out: the width that matters to a fiducial
 // volume is the width the reconstruction loses, and on PDVD that is not the
 // width the geometry declares -- in one direction for the cathode and in the
 // other for the CRU seams.
 //
-// PDVD geometry, read off the 16 AnodePlane 'sensvol' boxes (doc 34 sec 2):
+// PDVD geometry, read off the 16 AnodePlane 'sensvol' boxes (doc 35 sec 2):
 //   2 drift volumes; 2 CRPs per drift (y<0 and y>0), each 3357.8 x 2976.2 mm
 //   ~ the 3.0 x 3.4 m^2 ProtoDUNE-VD CRP; each CRP is 4 CRUs, 2 in y x 2 in z.
 // So the seams are three different things and must not be given one width:
@@ -17,7 +17,7 @@
 //   z = 149.65   CRU <-> CRU   (anode 0 <-> anode 1)   2.6 mm bot / 1.0 mm top
 //   |x| < 3.0    the cathode slab                     60.0 mm mechanical
 //
-// Measured half-widths (doc 34 sec 3; fv_gap_measure.py A2 = the median empty
+// Measured half-widths (doc 35 sec 3; fv_gap_measure.py A2 = the median empty
 // interval a crossing track loses, minus the same-axis control's point-pitch
 // floor, over the 120-event d28dlfp arm):
 //   cathode      4.08 cm   vs 3.00 geometric  -> the ONLY family that dilates
@@ -25,7 +25,7 @@
 //   |y| = 168.5  0.03-0.15 vs 0.01 geometric  -> at the measurement floor
 //   z = 149.65   0.00-0.06 vs 0.13/0.05 geom  -> consistent with zero
 // The CRU boxes are therefore built at their GEOMETRIC width: nothing was
-// measured that would justify dilating them, and doc 34 sec 3 says so.
+// measured that would justify dilating them, and doc 35 sec 3 says so.
 //
 // Returns BoxFiducial + CompositeFiducial{logic:'or'} component configs -- the
 // same generic IFiducial primitives SBND uses, so this is a point-in-structure
@@ -35,7 +35,7 @@
 //     tn:        'CompositeFiducial:<prefix>-gaps',   // reference by this tn
 //     configs:   boxes + [composite] }                // inject this whole list
 //
-// NOTE (doc 34 sec 6): nothing imports this file yet.  QLMatching's
+// NOTE (doc 35 sec 6): nothing imports this file yet.  QLMatching's
 // `cathode_fiducial` is read at QLMatching.cxx:5149 for the cathode-end
 // at_x_boundary flag only, where PDVD's flat 6 cm slab gains nothing from a 3-D
 // test and the CRU seams are invisible.  The consumer this was built for is a
@@ -51,7 +51,7 @@ local wc = import 'wirecell.jsonnet';
 // that matter here were measured on the reconstruction's own output, so they
 // already contain that; adding a cushion would double-count it.  The remaining
 // families are at geometric width precisely because no excess was measurable,
-// which is not a licence to pad them either.  A5 of doc 34 backs this from the
+// which is not a licence to pad them either.  A5 of doc 35 backs this from the
 // other side: at the outer y/z walls the imaged-point density goes from 0 to
 // full within ~2 mm, so there is no soft edge for a cushion to cover.  The
 // arguments stay exposed for a consumer that wants margin of its own.
