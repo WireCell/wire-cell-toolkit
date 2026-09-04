@@ -10,6 +10,7 @@
 #include <string>
 #include <vector>
 #include <iterator>
+#include <memory>
 
 namespace WireCell::PointCloud {
 
@@ -127,7 +128,7 @@ namespace WireCell::PointCloud {
         void assign(ElementType* elements, const shape_t& shape, bool share)
         {
             clear();
-            m_dtype = WireCell::dtype<ElementType>();
+            m_dtype = intern_dtype(WireCell::dtype<ElementType>());
             m_shape = shape;
             size_t nbytes = m_ele_size = sizeof(ElementType);
             for (const auto& s : m_shape) {
@@ -159,7 +160,7 @@ namespace WireCell::PointCloud {
         template<typename ElementType>
         void resize(const shape_t& shape) {
             clear();
-            m_dtype = WireCell::dtype<ElementType>();
+            m_dtype = intern_dtype(WireCell::dtype<ElementType>());
             m_shape = shape;
             size_t nbytes = m_ele_size = sizeof(ElementType);
             for (const auto& s : m_shape) {
@@ -174,7 +175,7 @@ namespace WireCell::PointCloud {
         void clear()
         {
             m_store.clear();
-            m_dtype = "";
+            m_dtype = nullptr;
             m_bytes = span_t<std::byte>();
             m_shape.clear();
             m_ele_size = 0;
@@ -340,24 +341,35 @@ namespace WireCell::PointCloud {
 
         std::string dtype() const
         {
-            return m_dtype;
+            return m_dtype ? *m_dtype : std::string();
         }
 
         template<typename ElementType>
         bool is_type() const
         {
-            if (m_dtype.empty()) {
+            if (!m_dtype || m_dtype->empty()) {
                 return false;
             }
-            return WireCell::dtype<ElementType>() == m_dtype;
+            return WireCell::dtype<ElementType>() == *m_dtype;
         }
 
         size_t element_size() const {
             return m_ele_size;
         }
 
-        metadata_t& metadata() { return m_metadata; }
-        const metadata_t& metadata() const { return m_metadata; }
+        /// Metadata is allocated on first mutable access; a const read of an
+        /// array that never had metadata set returns a shared empty (null)
+        /// value, which is what the always-present member used to hold.
+        metadata_t& metadata()
+        {
+            if (!m_metadata) m_metadata = std::make_unique<metadata_t>();
+            return *m_metadata;
+        }
+        const metadata_t& metadata() const
+        {
+            if (m_metadata) return *m_metadata;
+            return empty_metadata();
+        }
         bool operator==(const Array& other) const;
         bool operator!=(const Array& other) const;
 
@@ -365,7 +377,15 @@ namespace WireCell::PointCloud {
 
         shape_t m_shape{};
         size_t m_ele_size{0};
-        std::string m_dtype{""};
+        // doc pdvd/28 round 2: the dtype string is interned (one shared
+        // std::string per distinct dtype, never freed) and the metadata is
+        // allocated lazily.  A loaded point tree holds one Array per (blob,
+        // array) -- 2.5 M of them on a busy PDVD event -- so the 48 bytes this
+        // saves per object (144 -> 88 with the shared_ptr control block moving
+        // the allocation from the 160- to the 112-byte size class) is ~120 MB
+        // of live heap per event.  Public API unchanged: dtype() and shape()
+        // return by value, metadata() by reference as before.
+        const std::string* m_dtype{nullptr};
 
         // if sharing user data, m_store is empty.
         std::vector<std::byte> m_store{};
@@ -373,8 +393,11 @@ namespace WireCell::PointCloud {
         // all access is done.
         span_t<std::byte> m_bytes;
 
-        // Metadata is a passive carry.
-        metadata_t m_metadata;
+        // Metadata is a passive carry, allocated on first mutable access.
+        std::unique_ptr<metadata_t> m_metadata;
+
+        static const std::string* intern_dtype(const std::string& dt);
+        static const metadata_t& empty_metadata();
 
         void update_span() {
             m_bytes = span_t<std::byte>(m_store.data(), m_store.data() + m_store.size());
