@@ -18,6 +18,43 @@ The authoritative "official" source is the dunereco reference tree, by default:
 
 : <repo>/reference/dunereco/dunereco/DUNEWireCell/{pdhd,pdsp,protodunevd}/
 
+* Comparisons and the PDHD "bad APA" problem
+
+The tool compares a *SPNG* configuration against an *official* configuration.
+Usually these are the same detector, but not always. The real PDHD detector has
+a partly-broken first APA with a non-standard field response, and the official
+PDHD config bakes in "bad-APA" tunings --- most visibly =plane2layer: [0, 2, 1]=,
+which swaps the last two planes because the bad APA's physical W (collection)
+plane responds like a nominal V (induction) and vice-versa, plus per-APA Wiener
+filters (=Wiener_tight_*_APA1=). SPNG deliberately *idealises* PDHD as all-good.
+
+So comparing SPNG PDHD against official PDHD mixes genuine infidelities with
+these bad-APA quirks. PDSP is the nominal ProtoDUNE single-phase design (same
+plane layout and response philosophy, 6 good APAs, no bad-APA tunings), so
+*official PDSP is the faithful reference for an idealised SPNG PDHD*. The tool
+therefore offers a *cross comparison*.
+
+Named comparisons (see =./check-dunereco-config list=):
+
+| name          | SPNG | official | note                                             |
+|---------------+------+----------+--------------------------------------------------|
+| =pdhd=        | pdhd | pdhd     | confounded by official PDHD bad-APA tunings      |
+| =pdhd-x-pdsp= | pdhd | pdsp     | the cross comparison: idealised SPNG vs nominal  |
+| =pdsp=        | pdsp | pdsp     | UNAVAILABLE --- SPNG has no PDSP config yet       |
+| =pdvd=        | pdvd | protodunevd | SPNG pdvd currently fails to evaluate (see below) |
+
+In a cross comparison some deltas are genuine *detector* differences, not SPNG
+infidelities --- e.g. =ADC_mV= differs ~4x between PDSP (12-bit ADC) and PDHD
+(14-bit). The mechanistic axis reports them all; the =emit-prompt= text tells the
+LLM to call out cross-comparison detector quirks separately.
+
+Known gaps (state of the SPNG configs, not the tool):
+- *SPNG PDSP*: there is no =toolkit/spng/cfg/spng/detconfs/pdsp.jsonnet=, so the
+  =pdsp= comparison is not buildable. Use =pdhd-x-pdsp= for the nominal check.
+- *SPNG PDVD*: =detname=pdvd= currently aborts evaluation ("Field does not
+  exist: tpc"); its detconf is incomplete relative to the =adc-to-osp= /
+  =adc-to-spng= jobs. The =pdvd= comparison will work once that is fixed.
+
 * Two-part method
 
 Faithfulness is checked along two complementary axes, because the two
@@ -68,23 +105,25 @@ The tool shells out to =wcsonnet= (default =<repo>/install/bin/wcsonnet=, else
 =CASES= registry, so callers need not supply them.
 
 #+begin_src sh
-# list known detector cases and resolved paths
+# list comparisons, detectors and resolved paths
 ./check-dunereco-config list
 
 # mechanistic like-for-like OSP diff (axis A); non-zero exit when drift found
-./check-dunereco-config diff --detector pdhd
-./check-dunereco-config diff --detector pdhd --json       # machine-readable
-./check-dunereco-config diff --detector pdhd --all-diffs   # include intentional deltas
+./check-dunereco-config diff -c pdhd            # SPNG PDHD vs official PDHD
+./check-dunereco-config diff -c pdhd-x-pdsp     # cross: SPNG PDHD vs official PDSP
+./check-dunereco-config diff -c pdhd --json      # machine-readable
+./check-dunereco-config diff -c pdhd --all-diffs # include intentional deltas
 
 # semantic-comparison prompt (axis B)
-./check-dunereco-config emit-prompt --detector pdhd -o report.md
+./check-dunereco-config emit-prompt -c pdhd-x-pdsp -o report.md
 
 # raw normalised extracts (debugging)
-./check-dunereco-config extract official   --detector pdhd
-./check-dunereco-config extract spng-osp   --detector pdhd
-./check-dunereco-config extract spng-tdm   --detector pdhd
+./check-dunereco-config extract official -c pdhd-x-pdsp
+./check-dunereco-config extract spng-osp -c pdhd
+./check-dunereco-config extract spng-tdm -c pdhd
 #+end_src
 
+=-c= / =--comparison= selects the comparison (=--detector= is an accepted alias).
 Global options: =--reference DIR= (override the dunereco tree location),
 =--wcsonnet PATH=, =--keep= (retain generated temp fixtures).
 
@@ -109,21 +148,30 @@ on =WIRECELL_PATH=) so it cannot shadow shared Jsonnet files (=wirecell.jsonnet=
 literal, the fixture is a *template* with =@REFERENCE@= / =@ANODE@= placeholders
 that the script substitutes into a temp file before evaluation.
 
-* Adding a detector
+* Registry and adding coverage
 
-pdhd is fully wired; pdsp and protodunevd are the natural next entries. To add
-one:
+The registry (top of =check-dunereco-config=) is split into three parts so a
+SPNG config for one detector can be compared against the official config of
+*another* (the cross comparison):
 
-1. Copy =fixtures/official-pdhd.jsonnet= to =fixtures/official-<det>.jsonnet=;
-   change the =import '<det>/sp.jsonnet'= line and the =params=/=tools= imports
-   to the target experiment.
-2. Add a =CASES["<det>"]= entry naming that fixture (with =anode= and any
-   =extvars= such as =elecGain=), the SPNG =adc-to-osp= / =adc-to-spng= jobs, and
-   their TLAs.
-3. Optionally populate =expected_deltas= with =OmnibusSigProc= keys whose
-   official/SPNG difference is a known, intentional SPNG-context adaptation.
-   Keep it small --- anything not listed is reported as drift for human/LLM
-   judgement.
+- =OFFICIAL[det]= --- fixture template, =anode= index, =extvars=.
+- =SPNG[det]= --- the =adc-to-osp= / =adc-to-spng= jobs and their TLAs
+  (=None= means SPNG has no config for that detector).
+- =COMPARISONS[name]= --- a named =(spng, official)= pairing with a description
+  and optional =expected_deltas=.
+
+To add an official detector: copy =fixtures/official-pdhd.jsonnet= to
+=fixtures/official-<det>.jsonnet=, adjust the =import '<det>/sp.jsonnet'= line,
+the =params=/=tools= imports, and the =make_sigproc= call, then add an
+=OFFICIAL["<det>"]= entry. To add a SPNG detector, add a =SPNG["<det>"]= entry
+(usually just =_spng_jobs("<det>")=). Then add =COMPARISONS["..."]= entries for
+whatever pairings make sense. =expected_deltas= records =OmnibusSigProc= keys
+whose difference is a known intentional adaptation; keep it small --- anything not
+listed is reported as drift for human/LLM judgement.
+
+To close the two known gaps: create =toolkit/spng/cfg/spng/detconfs/pdsp.jsonnet=
+(then flip =SPNG["pdsp"]= to =_spng_jobs("pdsp")=), and fix the SPNG pdvd detconf
+so =adc-to-osp=/=adc-to-spng= evaluate for =detname=pdvd=.
 
 * Files
 

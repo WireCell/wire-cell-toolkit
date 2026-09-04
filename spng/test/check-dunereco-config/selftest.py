@@ -81,6 +81,20 @@ def test_pure(cdc):
     check(dd["only_spng"] == ["only_spng"], "only_spng detected")
     check(dd["changed"] == [("b", 2, 5)], "changed value detected")
 
+    print("[pure] comparison registry")
+    check("pdhd-x-pdsp" in cdc.COMPARISONS, "cross comparison registered")
+    check(cdc.COMPARISONS["pdhd-x-pdsp"]["spng"] == "pdhd"
+          and cdc.COMPARISONS["pdhd-x-pdsp"]["official"] == "pdsp",
+          "pdhd-x-pdsp pairs SPNG pdhd with official pdsp")
+    check(cdc.SPNG.get("pdsp") is None, "SPNG pdsp correctly absent")
+    # Unavailable SPNG side must raise a clear EvalError (no eval needed).
+    try:
+        cdc.resolve_comparison("pdsp")
+        check(False, "resolve_comparison('pdsp') should raise")
+    except cdc.EvalError as exc:
+        check("no 'pdsp' configuration" in str(exc),
+              "unavailable comparison raises explanatory EvalError")
+
 
 def test_live(cdc):
     print("[live] smoke test (needs wcsonnet + reference tree)")
@@ -92,8 +106,7 @@ def test_live(cdc):
               % (wcsonnet, have_wc, reference.exists()))
         return
     try:
-        case = cdc.get_case("pdhd")
-        result = cdc.compare(case, wcsonnet, reference)
+        result = cdc.compare("pdhd", wcsonnet, reference)
     except cdc.EvalError as exc:
         print("  skip: evaluation unavailable in this environment:\n    %s"
               % str(exc).splitlines()[0])

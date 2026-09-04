@@ -97,58 +97,99 @@ def wirecell_path():
 
 
 # --------------------------------------------------------------------------
-# Detector case registry.  Adding a detector should be data, not code.
+# Registry.  Adding coverage should be data, not code.
 #
-# For each detector:
-#   official : how to instantiate the official OSP node
+# The registry is split into three parts so that a SPNG config for one detector
+# can be compared against the official config of a *different* detector (a
+# "cross comparison").  This matters for PDHD: the real PDHD detector has a
+# partly-broken first APA with a non-standard field response, and the official
+# PDHD config bakes in bad-APA tunings (plane swaps, per-APA Wiener filters).
+# SPNG idealises PDHD as all-good.  The *nominal* design reference for an
+# all-good PDHD is therefore official PDSP (same design, 6 good APAs), not
+# official PDHD -- hence the "pdhd-x-pdsp" comparison below.
+#
+#   OFFICIAL[det] : how to instantiate the official OSP node
 #     fixture  -- template under fixtures/ with @REFERENCE@/@ANODE@ placeholders
-#     anode    -- APA/anode index (match the SPNG tpcid below)
+#     anode    -- APA/anode index (match the SPNG tpcid used on the SPNG side)
 #     extvars  -- ext-vars the official Jsonnet requires (e.g. elecGain)
-#   spng_osp : the SPNG "mirror OSP" job (axis A, OmnibusSigProc idiom)
-#   spng_tdm : the SPNG-native TDM job (axis B, SPNGKernel idiom)
-#     jsonnet  -- path resolved via WIRECELL_PATH
-#     tlas     -- top-level string args (-A key=val)
-#     extvars  -- ext-vars (-V key=val)
-#   expected_deltas : optional {param_name: reason} -- OmnibusSigProc data keys
-#     whose official/SPNG difference is a known, intentional SPNG-context
-#     adaptation rather than an infidelity.  Kept deliberately small and
-#     documented; everything not listed is reported as DRIFT for human/LLM
-#     judgement.
+#
+#   SPNG[det] : the SPNG jobs (None entry => SPNG has no config for that det)
+#     osp      -- {jsonnet, tlas, extvars} "mirror OSP" job (axis A)
+#     tdm      -- {jsonnet, tlas, extvars} SPNG-native TDM job (axis B)
+#     note     -- optional caveat surfaced to the user
+#
+#   COMPARISONS[name] : a named pairing
+#     spng      -- SPNG detector key (into SPNG)
+#     official  -- official detector key (into OFFICIAL)
+#     desc      -- one-line description
+#     expected_deltas -- optional {param: reason} OmnibusSigProc keys whose
+#        difference is a known intentional adaptation (kept small; anything not
+#        listed is reported as DRIFT for human/LLM judgement)
 # --------------------------------------------------------------------------
 
-CASES = {
-    "pdhd": {
-        "official": {
-            "fixture": "fixtures/official-pdhd.jsonnet",
-            "anode": 0,
-            "extvars": {"elecGain": "14.0"},
-        },
-        "spng_osp": {
+OFFICIAL = {
+    "pdhd": {"fixture": "fixtures/official-pdhd.jsonnet", "anode": 0,
+             "extvars": {"elecGain": "14.0"}},
+    "pdsp": {"fixture": "fixtures/official-pdsp.jsonnet", "anode": 0,
+             "extvars": {"elecGain": "14.0"}},
+    "pdvd": {"fixture": "fixtures/official-protodunevd.jsonnet", "anode": 0,
+             "extvars": {"elecGain": "14.0"}},
+}
+
+
+def _spng_jobs(detname, tpcid="0"):
+    # NB: run_dnnroi is left at its Jsonnet default (true); passing it as a
+    # string TLA would fail its boolean test.  Extra DNNROI nodes do not affect
+    # OmnibusSigProc/filter extraction.  A dummy input/model filename is fine --
+    # nothing is read at evaluation time.
+    return {
+        "osp": {
             "jsonnet": "spng/adc-to-osp.jsonnet",
-            # NB: run_dnnroi is left at its Jsonnet default (true); passing it as
-            # a string TLA would fail its boolean test.  The extra DNNROI nodes
-            # do not affect OmnibusSigProc/filter extraction.
-            "tlas": {
-                "input": "dummy.npz",
-                "detname": "pdhd",
-                "tpcid": "0",
-            },
+            "tlas": {"input": "dummy.npz", "detname": detname, "tpcid": tpcid},
             "extvars": {},
         },
-        "spng_tdm": {
+        "tdm": {
             "jsonnet": "spng/adc-to-spng.jsonnet",
-            "tlas": {
-                "input": "dummy.npz",
-                "model_file": "dummy.ts",
-                "detname": "pdhd",
-                "tpcid": "0",
-            },
+            "tlas": {"input": "dummy.npz", "model_file": "dummy.ts",
+                     "detname": detname, "tpcid": tpcid},
             "extvars": {},
         },
-        "expected_deltas": {
-            # Populate only with well-understood, intentional context deltas.
-            # (Left empty by default so nothing genuine is silently masked.)
-        },
+    }
+
+
+SPNG = {
+    "pdhd": dict(_spng_jobs("pdhd")),
+    "pdvd": dict(_spng_jobs("pdvd"),
+                 note="SPNG pdvd currently fails to evaluate ('Field does not "
+                      "exist: tpc'); its detconfs/pdvd.jsonnet is incomplete "
+                      "relative to the adc-to-osp/adc-to-spng jobs."),
+    # No SPNG PDSP: there is no toolkit/spng/cfg/spng/detconfs/pdsp.jsonnet.
+    "pdsp": None,
+}
+
+
+COMPARISONS = {
+    "pdhd": {
+        "spng": "pdhd", "official": "pdhd",
+        "desc": "SPNG PDHD vs official PDHD (official PDHD carries bad-APA1 "
+                "tunings; expect confounding drift -- see pdhd-x-pdsp)",
+        "expected_deltas": {},
+    },
+    "pdhd-x-pdsp": {
+        "spng": "pdhd", "official": "pdsp",
+        "desc": "SPNG PDHD vs official PDSP (nominal all-good design; the "
+                "faithful reference for an idealised SPNG PDHD)",
+        "expected_deltas": {},
+    },
+    "pdsp": {
+        "spng": "pdsp", "official": "pdsp",
+        "desc": "SPNG PDSP vs official PDSP (SPNG has no PDSP config yet)",
+        "expected_deltas": {},
+    },
+    "pdvd": {
+        "spng": "pdvd", "official": "pdvd",
+        "desc": "SPNG PDVD vs official protodunevd",
+        "expected_deltas": {},
     },
 }
 
@@ -261,14 +302,13 @@ def resolve_fixture(template_path, reference, anode, keep=False):
     return path
 
 
-def eval_official(case, wcsonnet, reference, keep=False):
-    off = case["official"]
-    template = SCRIPT_DIR / off["fixture"]
+def eval_official(off_spec, wcsonnet, reference, keep=False):
+    template = SCRIPT_DIR / off_spec["fixture"]
     if not template.exists():
         raise EvalError("missing official fixture template: %s" % template)
-    resolved = resolve_fixture(template, reference, off.get("anode", 0), keep=keep)
+    resolved = resolve_fixture(template, reference, off_spec.get("anode", 0), keep=keep)
     try:
-        return run_wcsonnet(wcsonnet, resolved, extvars=off.get("extvars"))
+        return run_wcsonnet(wcsonnet, resolved, extvars=off_spec.get("extvars"))
     finally:
         if not keep:
             try:
@@ -343,9 +383,31 @@ def diff_data(off, spng):
     return {"only_official": only_off, "only_spng": only_spng, "changed": changed}
 
 
-def compare(case, wcsonnet, reference, keep=False):
-    off_graph = eval_official(case, wcsonnet, reference, keep=keep)
-    spng_graph = eval_spng(case["spng_osp"], wcsonnet)
+def resolve_comparison(name):
+    """Return (cmp_dict, off_spec, spng_jobs).  Validates availability."""
+    if name not in COMPARISONS:
+        sys.exit("unknown comparison %r; known: %s"
+                 % (name, ", ".join(sorted(COMPARISONS))))
+    cmp_ = COMPARISONS[name]
+    off_det, spng_det = cmp_["official"], cmp_["spng"]
+    off_spec = OFFICIAL.get(off_det)
+    if off_spec is None:
+        raise EvalError("no official config registered for %r" % off_det)
+    spng_jobs = SPNG.get(spng_det)
+    if spng_jobs is None:
+        raise EvalError(
+            "comparison %r is not buildable: SPNG has no %r configuration "
+            "(there is no toolkit/spng/cfg/spng/detconfs/%s.jsonnet). "
+            "The cross-comparison that IS available for an idealised SPNG is "
+            "'pdhd-x-pdsp'." % (name, spng_det, spng_det)
+        )
+    return cmp_, off_spec, spng_jobs
+
+
+def compare(name, wcsonnet, reference, keep=False):
+    cmp_, off_spec, spng_jobs = resolve_comparison(name)
+    off_graph = eval_official(off_spec, wcsonnet, reference, keep=keep)
+    spng_graph = eval_spng(spng_jobs["osp"], wcsonnet)
     off_osp, off_filt = extract_osp(off_graph)
     spng_osp, spng_filt = extract_osp(spng_graph)
 
@@ -356,20 +418,24 @@ def compare(case, wcsonnet, reference, keep=False):
     filt_only_off = sorted(fnames_off - fnames_spng)
     filt_only_spng = sorted(fnames_spng - fnames_off)
     filt_changed = []
-    for name in sorted(fnames_off & fnames_spng):
-        d = diff_data(off_filt[name]["data"], spng_filt[name]["data"])
+    for fname in sorted(fnames_off & fnames_spng):
+        d = diff_data(off_filt[fname]["data"], spng_filt[fname]["data"])
         if d["only_official"] or d["only_spng"] or d["changed"]:
-            filt_changed.append((name, d))
+            filt_changed.append((fname, d))
 
     return {
-        "detector": case.get("_name"),
+        "comparison": name,
+        "detector": name,  # kept for backward-compat with report header
+        "desc": cmp_["desc"],
+        "spng_det": cmp_["spng"],
+        "official_det": cmp_["official"],
         "osp": osp_diff,
         "osp_official": off_osp,
         "osp_spng": spng_osp,
         "filters_only_official": filt_only_off,
         "filters_only_spng": filt_only_spng,
         "filters_changed": filt_changed,
-        "expected_deltas": case.get("expected_deltas", {}),
+        "expected_deltas": cmp_.get("expected_deltas", {}),
     }
 
 
@@ -395,8 +461,10 @@ def report_text(result, color=True, show_all=False):
 
     exp = result["expected_deltas"]
     lines = []
-    det = result["detector"]
-    lines.append(c("== check-dunereco-config: %s ==" % det, BOLD))
+    lines.append(c("== check-dunereco-config: %s ==" % result["comparison"], BOLD))
+    lines.append(c("   SPNG %s  vs  official %s"
+                   % (result["spng_det"], result["official_det"]), DIM))
+    lines.append(c("   %s" % result["desc"], DIM))
     lines.append("")
 
     n_findings = 0
@@ -525,28 +593,36 @@ Notes:
 """
 
 
-def emit_prompt(case, wcsonnet, reference, keep=False):
-    off_graph = eval_official(case, wcsonnet, reference, keep=keep)
+def emit_prompt(name, wcsonnet, reference, keep=False):
+    cmp_, off_spec, spng_jobs = resolve_comparison(name)
+    off_graph = eval_official(off_spec, wcsonnet, reference, keep=keep)
     off_osp, off_filt = extract_osp(off_graph)
-    tdm_graph = eval_spng(case["spng_tdm"], wcsonnet)
+    tdm_graph = eval_spng(spng_jobs["tdm"], wcsonnet)
     tdm = extract_tdm(tdm_graph)
 
-    det = case["_name"]
     filt_summary = {
-        name: info["data"] for name, info in sorted(off_filt.items())
+        fname: info["data"] for fname, info in sorted(off_filt.items())
     }
 
     doc = []
-    doc.append("# Faithfulness comparison: SPNG vs official dunereco OSP (%s)" % det)
+    doc.append("# Faithfulness comparison: SPNG %s vs official %s (%s)"
+               % (cmp_["spng"], cmp_["official"], name))
+    doc.append("")
+    doc.append("_%s_" % cmp_["desc"])
     doc.append("")
     doc.append(
         "You are auditing whether the SPNG-native (TDM) signal-processing "
-        "configuration for **%s** faithfully reproduces the official dunereco "
-        "OmnibusSigProc (OSP) configuration. Below are machine-extracted, "
-        "normalised parameters from both. Judge faithfulness, list any "
-        "infidelities (missing/extra/mis-valued physics), and propose concrete "
-        "Jsonnet edits under toolkit/spng/cfg/spng to bring SPNG into "
-        "compliance. Ignore pure instance-name / runtime-context differences." % det
+        "configuration for **SPNG %s** faithfully reproduces the official "
+        "dunereco OmnibusSigProc (OSP) configuration for **%s**. Below are "
+        "machine-extracted, normalised parameters from both. Judge faithfulness, "
+        "list any infidelities (missing/extra/mis-valued physics), and propose "
+        "concrete Jsonnet edits under toolkit/spng/cfg/spng to bring SPNG into "
+        "compliance. Ignore pure instance-name / runtime-context differences. "
+        "Note: when the SPNG and official detectors differ (a cross comparison), "
+        "the official side is chosen as the *nominal* design reference; call out "
+        "any difference that is actually the official config's detector-specific "
+        "quirk rather than an SPNG infidelity."
+        % (cmp_["spng"], cmp_["official"])
     )
     doc.append("")
     doc.append(MAPPING_RUBRIC)
@@ -582,36 +658,37 @@ def emit_prompt(case, wcsonnet, reference, keep=False):
 # --------------------------------------------------------------------------
 
 
-def get_case(name):
-    if name not in CASES:
-        sys.exit(
-            "unknown detector %r; known: %s" % (name, ", ".join(sorted(CASES)))
-        )
-    case = dict(CASES[name])
-    case["_name"] = name
-    return case
-
-
 def cmd_list(args):
-    print("Known detector cases:")
-    for name in sorted(CASES):
-        c = CASES[name]
-        print("  %-10s official=%s  spng_osp=%s"
-              % (name, c["official"]["fixture"], c["spng_osp"]["jsonnet"]))
-    print("\nreference : %s" % (args.reference or default_reference()))
+    print("Comparisons (use with --comparison / -c):")
+    for name in sorted(COMPARISONS):
+        c = COMPARISONS[name]
+        spng_ok = SPNG.get(c["spng"]) is not None
+        off_ok = OFFICIAL.get(c["official"]) is not None
+        status = "ok" if (spng_ok and off_ok) else "UNAVAILABLE"
+        print("  %-14s [%s]  SPNG %s vs official %s"
+              % (name, status, c["spng"], c["official"]))
+        print("      %s" % c["desc"])
+        if not spng_ok:
+            print("      (SPNG has no %r config)" % c["spng"])
+        elif SPNG[c["spng"]].get("note"):
+            print("      note: %s" % SPNG[c["spng"]]["note"])
+    print("\nOfficial detectors : %s" % ", ".join(sorted(OFFICIAL)))
+    print("SPNG detectors     : %s"
+          % ", ".join("%s%s" % (d, "" if SPNG[d] else " (missing)") for d in sorted(SPNG)))
+    print("reference : %s" % (args.reference or default_reference()))
     print("wcsonnet  : %s" % (args.wcsonnet or default_wcsonnet()))
 
 
 def cmd_diff(args):
-    case = get_case(args.detector)
-    result = compare(case, args.wcsonnet or default_wcsonnet(),
+    result = compare(args.comparison, args.wcsonnet or default_wcsonnet(),
                      Path(args.reference or default_reference()), keep=args.keep)
     if args.json:
-        # filters_changed tuples -> serialisable
+        # tuples -> serialisable
         result_ser = dict(result)
         result_ser["filters_changed"] = [
             {"name": n, **d} for n, d in result["filters_changed"]
         ]
+        result_ser["osp"] = dict(result["osp"])
         result_ser["osp"]["changed"] = [
             {"key": k, "official": o, "spng": s} for k, o, s in result["osp"]["changed"]
         ]
@@ -624,8 +701,7 @@ def cmd_diff(args):
 
 
 def cmd_emit_prompt(args):
-    case = get_case(args.detector)
-    doc = emit_prompt(case, args.wcsonnet or default_wcsonnet(),
+    doc = emit_prompt(args.comparison, args.wcsonnet or default_wcsonnet(),
                       Path(args.reference or default_reference()), keep=args.keep)
     if args.output:
         Path(args.output).write_text(doc)
@@ -636,19 +712,19 @@ def cmd_emit_prompt(args):
 
 
 def cmd_extract(args):
-    case = get_case(args.detector)
+    cmp_, off_spec, spng_jobs = resolve_comparison(args.comparison)
     wc = args.wcsonnet or default_wcsonnet()
     ref = Path(args.reference or default_reference())
     if args.which == "official":
-        g = eval_official(case, wc, ref, keep=args.keep)
+        g = eval_official(off_spec, wc, ref, keep=args.keep)
         osp, filt = extract_osp(g)
         print(json.dumps({"osp": osp, "filters": filt}, indent=2, sort_keys=True))
     elif args.which == "spng-osp":
-        g = eval_spng(case["spng_osp"], wc)
+        g = eval_spng(spng_jobs["osp"], wc)
         osp, filt = extract_osp(g)
         print(json.dumps({"osp": osp, "filters": filt}, indent=2, sort_keys=True))
     elif args.which == "spng-tdm":
-        g = eval_spng(case["spng_tdm"], wc)
+        g = eval_spng(spng_jobs["tdm"], wc)
         print(json.dumps(extract_tdm(g), indent=2, sort_keys=True))
     return 0
 
@@ -663,11 +739,16 @@ def main(argv=None):
     p.add_argument("--keep", action="store_true", help="keep generated temp fixtures")
     sub = p.add_subparsers(dest="cmd", required=True)
 
-    sp = sub.add_parser("list", help="list detector cases and paths")
+    def add_comparison_arg(parser):
+        parser.add_argument(
+            "-c", "--comparison", "--detector", dest="comparison", default="pdhd",
+            help="comparison name (see `list`); --detector is an alias")
+
+    sp = sub.add_parser("list", help="list comparisons, detectors and paths")
     sp.set_defaults(func=cmd_list)
 
     sp = sub.add_parser("diff", help="mechanistic like-for-like OSP diff (axis A)")
-    sp.add_argument("--detector", default="pdhd")
+    add_comparison_arg(sp)
     sp.add_argument("--json", action="store_true", help="machine-readable output")
     sp.add_argument("--all-diffs", action="store_true",
                     help="also show diffs marked as expected/intentional")
@@ -675,13 +756,13 @@ def main(argv=None):
     sp.set_defaults(func=cmd_diff)
 
     sp = sub.add_parser("emit-prompt", help="write semantic-comparison prompt (axis B)")
-    sp.add_argument("--detector", default="pdhd")
+    add_comparison_arg(sp)
     sp.add_argument("-o", "--output", help="write to file instead of stdout")
     sp.set_defaults(func=cmd_emit_prompt)
 
     sp = sub.add_parser("extract", help="dump a normalised extract (debug)")
     sp.add_argument("which", choices=["official", "spng-osp", "spng-tdm"])
-    sp.add_argument("--detector", default="pdhd")
+    add_comparison_arg(sp)
     sp.set_defaults(func=cmd_extract)
 
     args = p.parse_args(argv)
