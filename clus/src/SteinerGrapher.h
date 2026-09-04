@@ -189,8 +189,18 @@ namespace WireCell::Clus::Steiner {
         vertex_set find_peak_point_indices(const std::vector<const Facade::Blob*>& target_blobs, const std::string& graph_name,
                                    bool disable_dead_mix_cell = true, int nlevel = 1);
         /// Overload that accepts a precomputed point set for the target blobs, avoiding a rebuild of form_cell_points_map().
+        ///
+        /// doc pdvd/31 round 7: `n_candidate_points`, when non-null, receives the
+        /// number of points that cleared terminal_charge_threshold BEFORE the
+        /// local-maximum suppression ran.  That is the threshold's point-level
+        /// selectivity, which the blob-level counter alone cannot separate from
+        /// blob size -- PDVD blobs are geometrically larger than SBND's, so
+        /// equal candidate-BEARING-blob fractions do not imply equal
+        /// selectivity.  Measurement only; nullptr (the default) leaves every
+        /// caller unchanged.
         vertex_set find_peak_point_indices(const vertex_set& blob_point_indices, const std::string& graph_name,
-                                   bool disable_dead_mix_cell = true, int nlevel = 1);
+                                   bool disable_dead_mix_cell = true, int nlevel = 1,
+                                   size_t* n_candidate_points = nullptr);
 
         blob_vertex_map form_cell_points_map();
         vertex_set find_steiner_terminals(const std::string& graph_name, bool disable_dead_mix_cell=true);

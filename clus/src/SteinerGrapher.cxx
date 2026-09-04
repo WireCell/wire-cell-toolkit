@@ -492,7 +492,7 @@ Steiner::Grapher::vertex_set Steiner::Grapher::find_peak_point_indices(
 
 Steiner::Grapher::vertex_set Steiner::Grapher::find_peak_point_indices(
     const vertex_set& all_indices, const std::string& graph_name,
-    bool disable_dead_mix_cell, int nlevel)
+    bool disable_dead_mix_cell, int nlevel, size_t* n_candidate_points)
 {
     vertex_set peak_points;
 
@@ -517,6 +517,11 @@ Steiner::Grapher::vertex_set Steiner::Grapher::find_peak_point_indices(
     }
     
     // std::cout << "Xin2: candidates_set size: " << candidates_set.size() << std::endl;
+
+    // doc pdvd/31 round 7: the point-level selectivity of the threshold, taken
+    // before any suppression.  Set here rather than at the early return above
+    // so an all-below-threshold blob reports 0 and not "unset".
+    if (n_candidate_points) *n_candidate_points = candidates_set.size();
 
     if (candidates_set.empty()) {
         return peak_points;
@@ -695,11 +700,14 @@ Steiner::Grapher::vertex_set Steiner::Grapher::find_steiner_terminals(const std:
     // peak finder can thin a blob to one terminal but can never remove a blob's
     // last terminal, and the terminal count is floored at the number of
     // candidate-bearing blobs.  The counters below measure exactly that floor.
-    size_t n_cand_blobs = 0;
+    size_t n_cand_blobs = 0, n_points = 0, n_cand_points = 0;
     for (const auto& [blob_node_idx, point_indices] : cell_points_map) {
         (void)blob_node_idx;  // key used only for ordering; value suffices here
-        auto blob_peaks = find_peak_point_indices(point_indices, graph_name, disable_dead_mix_cell);
+        size_t ncp = 0;       // fresh per blob: the callee returns early on an empty blob
+        auto blob_peaks = find_peak_point_indices(point_indices, graph_name, disable_dead_mix_cell, 1, &ncp);
         if (!blob_peaks.empty()) ++n_cand_blobs;
+        n_points += point_indices.size();
+        n_cand_points += ncp;
         steiner_terminals.insert(blob_peaks.begin(), blob_peaks.end());
     }
 
@@ -707,9 +715,16 @@ Steiner::Grapher::vertex_set Steiner::Grapher::find_steiner_terminals(const std:
     // dump above.  nterm == ncand_blob is the signature of the floor: every
     // blob that has a candidate contributed exactly one terminal, and the
     // per-blob suppression removed nothing across blob boundaries.
+    //
+    // doc pdvd/31 round 7 adds npt / ncand_pt.  ncand_blob/nblob alone cannot
+    // be compared across detectors: PDVD blobs hold more sampled points than
+    // SBND's, so the same blob fraction can hide a very different point-level
+    // threshold.  npt/nblob gives the blob size and ncand_pt/npt the
+    // selectivity that the charge cut actually applies.
     if (steiner_phase_dump_enabled()) {
-        SPDLOG_LOGGER_DEBUG(log, "steiner_p1_blobs: nblob={} ncand_blob={} nterm={}",
-                            cell_points_map.size(), n_cand_blobs, steiner_terminals.size());
+        SPDLOG_LOGGER_DEBUG(log, "steiner_p1_blobs: nblob={} ncand_blob={} nterm={} npt={} ncand_pt={}",
+                            cell_points_map.size(), n_cand_blobs, steiner_terminals.size(),
+                            n_points, n_cand_points);
     }
 
     return steiner_terminals;
