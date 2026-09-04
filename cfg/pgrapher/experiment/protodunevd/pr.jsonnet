@@ -1102,9 +1102,15 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
               // false.  Key omitted when off => byte-identical pre-knob config.
               // Identity on SBND even when on (s clamps to 1); loosens PDVD U/V
               // (0.387) and W (0.581) -- and would loosen PDHD (0.67) and uBooNE
-              // (0.73), which is why it exists only here.  PDVD production stays
-              // OFF until the owner
-              // flips the TLA in pdvd/wct-pr-perevt.jsonnet (doc 36 sec 8).
+              // (0.73), which is why it exists only here.  **PDVD PRODUCTION IS
+              // ON**, owner decision 2026-09-04 (doc pdvd/36 sec 11): the flip
+              // lives in the driver, pdvd/wct-pr-perevt.jsonnet, exactly as the
+              // other PDVD operating points do -- this default stays false
+              // because a bare pr.jsonnet run is NOT the PDVD operating point,
+              // and because SBND (which this file was forked from) is staying
+              // isotropic at the owner's instruction.  The same flip retired
+              // good_point_pitch_frac to 0 in pdvd_track_fitting.json; the
+              // metric subsumes that floor and they must not stack.
               ctpc_aniso_metric=false,
        // doc 77 round 2: the pattern-recognition knob bag, built once by the
        // job (wct-pr-perevt.jsonnet) from its TLAs and handed to
