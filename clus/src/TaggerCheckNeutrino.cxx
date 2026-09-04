@@ -2827,7 +2827,19 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
         // and fitter, and hands production a DualChainHint.  Knob off => the
         // hint stays empty and a nullptr reaches determine_overall_main_vertex_DL.
         PR::DualChainHint dual_hint;
-        if (m_dl_vtx_dual_chain) {
+        if (m_dl_vtx_dual_chain && m_dl_weights.empty()) {
+            // doc pdvd/28 round 3: every consumer of the hint -- the snap
+            // transfer, the voxels/union re-rank and the scoreboard's
+            // dual_chain block -- lives inside determine_overall_main_vertex_DL,
+            // which only runs when DL weights are configured.  Without them
+            // the OFF pass (a full exclusion-free PR of the main cluster; 57 %
+            // of PDVD's neutrino stage, 262 s on one 6.6 m cosmic) cannot
+            // change any output, so it is not run.  The pass leaks nothing
+            // into production (pr/112 sec 11.2 probe gate), so this is
+            // output-identical by construction; PDVD gate in doc pdvd/28 sec 20.
+            SPDLOG_LOGGER_INFO(log, "dual_chain: OFF pass skipped for cluster {} -- no DL weights, so nothing consumes the hint (determine_overall_main_vertex_DL does not run)",
+                               main_cluster ? main_cluster->get_cluster_id() : -1);
+        } else if (m_dl_vtx_dual_chain) {
             dual_hint.mode              = m_dual_chain_mode;
             dual_hint.transfer          = m_dual_chain_transfer;
             dual_hint.transfer_max      = m_dual_chain_transfer_max * units::cm;
