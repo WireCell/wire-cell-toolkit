@@ -1962,6 +1962,15 @@ private:
             }
         }
 
+        if (max_bin == -1) {
+            // Same fallback as eval_stm_core_impl (doc pdvd/28 round 3): the
+            // prototype-shaped code indexed L[-1] here when no window bin had
+            // positive dQ/dx.  Not observed on any gated event; logged so a
+            // future fire is visible.
+            max_bin = static_cast<double>(std::min(max_num, L.size() - 1));
+            SPDLOG_LOGGER_DEBUG(s_log, "detect_proton: no positive dQ/dx window, end bin falls back to {} of {} (kink_num {})",
+                                static_cast<long>(max_bin), L.size(), kink_num);
+        }
         end_L = L[max_bin] + 0.2*units::cm;
         int ncount = 0, ncount_p = 0;
         std::vector<double> vec_x, vec_xp;
@@ -2690,8 +2699,18 @@ private:
             }
         }
 
-        if (max_bin == -1)
-            max_bin = max_num;
+        if (max_bin == -1) {
+            // No window bin carried positive dQ/dx: end the comparison at the
+            // kink point, or at the track's last point when there is no kink.
+            // Before doc pdvd/28 round 3 this was `max_bin = max_num` with
+            // max_num == L.size() in the no-kink branch, so the next line read
+            // L[L.size()] -- a heap value that changed with the allocator
+            // layout (PDVD 039253/3: end_L -2022 mm on one binary, 2 mm on
+            // another).  Clamping to the last point is the intended meaning.
+            max_bin = static_cast<double>(std::min(max_num, L.size() - 1));
+            SPDLOG_LOGGER_DEBUG(s_log, "eval_stm: no positive dQ/dx window, end bin falls back to {} of {} (kink_num {})",
+                                static_cast<long>(max_bin), L.size(), kink_num);
+        }
 
         end_L = L[max_bin] + 0.2 * units::cm;
         int ncount = 0;
