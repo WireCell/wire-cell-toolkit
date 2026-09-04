@@ -47,7 +47,8 @@ for k,v in dict(
         planes = [0,1,2],
         # Path to the roiuniter TorchScript ROI DNN model used by the spng chain.
         # Override with --config model_file=/path/to/model.ts.
-        model_file = "/nfs/data/1/calcuttj/toolkit_testing/legacy_roiuniter_083126.ts",
+        # model_file = "/nfs/data/1/calcuttj/toolkit_testing/legacy_roiuniter_083126.ts",
+        model_file="/nfs/data/1/calcuttj/toolkit_testing/legacy_roiuniter_090326.ts",
         # Optional, override the default jsonnet.
         wire_cell_config = workflow.basedir + "/spngdir.jsonnet",
 ).items():

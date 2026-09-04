@@ -46,7 +46,8 @@ for k, v in dict(
         outstage="roiuniter",
         # Path to the roiuniter TorchScript ROI DNN model (used by outstage=
         # roiuniter).  Override with --config model_file=/path/to/model.ts.
-        model_file="/nfs/data/1/calcuttj/toolkit_testing/legacy_roiuniter_083126.ts",
+        # model_file="/nfs/data/1/calcuttj/toolkit_testing/legacy_roiuniter_083126.ts",
+        model_file="/nfs/data/1/calcuttj/toolkit_testing/legacy_roiuniter_090326.ts",
         # Downsample factor for the filtered decon stages (ignored by "decon"
         # and "roiuniter").  1 keeps full time sampling so the spng waveform
         # aligns with splat/osp.
