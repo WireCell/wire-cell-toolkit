@@ -171,6 +171,12 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
               tgm_main_pair=true, tgm_main_pair_mode='real',
               tgm_fv_zmax_margin=5, tgm_fv_zmax_margin_interior=3,
               tgm_fv_x_margin=2.5, tgm_fv_y_margin=3,
+              // tgm_fv_zmin_margin (cm): the UPSTREAM-z inset, which was a
+              // hard-coded -3 cm literal in both margin vectors below.  Default 3
+              // == that literal => compiled JSON byte-identical.  Broken out so the
+              // PDVD driver can carry the clustering FV's 15 cm space-charge inset
+              // on this face too (doc pdvd/34).
+              tgm_fv_zmin_margin=3,
               save_stm_fit=false, unmerge_bundle_mode='real',
               // doc pr/34 §10 particle-flow (Bee mc tree) port-fidelity knobs.
               // C++ defaults false; keys omitted when off => byte-identical
@@ -1163,6 +1169,8 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
         // Margin vector convention (inside_fv / Clustering_Util fc_check): index 4
         // is applied as contained(z - tv[4]), so with a NEGATIVE entry it insets
         // the DOWNSTREAM (z ~ 500 cm) face; index 5 insets the upstream face.
+        // tgm_fv_zmin_margin (cm; default 3 = the byte-identical legacy literal)
+        // parametrizes the UPSTREAM (z ~ 0) inset, index 5.
         // tgm_fv_zmax_margin (cm; default 3 = byte-identical legacy value)
         // parametrizes only the downstream inset -- shared by tagger_check_tgm AND
         // tagger_check_fc below, so "contained" keeps one meaning across both
@@ -1171,7 +1179,7 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
         // legacy values) parametrize the drift-x and vertical-y insets, both faces
         // symmetric.  Shared by tagger_check_tgm AND tagger_check_fc, same as the
         // downstream-z knob, so "contained" keeps one meaning across both verdicts.
-        local pdvd_pr_fv_margins = [-tgm_fv_x_margin * wc.cm, -tgm_fv_x_margin * wc.cm, -tgm_fv_y_margin * wc.cm, -tgm_fv_y_margin * wc.cm, -tgm_fv_zmax_margin * wc.cm, -3 * wc.cm],
+        local pdvd_pr_fv_margins = [-tgm_fv_x_margin * wc.cm, -tgm_fv_x_margin * wc.cm, -tgm_fv_y_margin * wc.cm, -tgm_fv_y_margin * wc.cm, -tgm_fv_zmax_margin * wc.cm, -tgm_fv_zmin_margin * wc.cm],
         // tgm_fv_zmax_margin_interior (cm; default 0 = OFF, key omitted =>
         // byte-identical): when > 0, check_tgm's CASE-A interior-support tests
         // (chord midpoints + waypoint re-check) use THIS downstream-z inset
@@ -1183,7 +1191,7 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
         // and the ENDPOINT exit tests keep pdvd_pr_fv_margins unchanged.
         // x/y track the endpoint vector above: the doc-35 endpoint-only widening
         // applies to the downstream-z inset only.
-        local pdvd_pr_fv_margins_interior = [-tgm_fv_x_margin * wc.cm, -tgm_fv_x_margin * wc.cm, -tgm_fv_y_margin * wc.cm, -tgm_fv_y_margin * wc.cm, -tgm_fv_zmax_margin_interior * wc.cm, -3 * wc.cm],
+        local pdvd_pr_fv_margins_interior = [-tgm_fv_x_margin * wc.cm, -tgm_fv_x_margin * wc.cm, -tgm_fv_y_margin * wc.cm, -tgm_fv_y_margin * wc.cm, -tgm_fv_zmax_margin_interior * wc.cm, -tgm_fv_zmin_margin * wc.cm],
         // Retiler for the steiner stage: same 'stepped' samplers that built the 3d
         // PC (PointTreeBuilding), one per (anode, face) -- PDVD anodes are two-sided,
         // so 16 samplers, each with its crate's drift speed (clus.jsonnet live_sampler).
