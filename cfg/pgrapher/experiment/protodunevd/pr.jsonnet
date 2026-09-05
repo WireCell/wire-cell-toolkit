@@ -32,6 +32,9 @@ local wc = import 'wirecell.jsonnet';
 local g = import 'pgraph.jsonnet';
 local clus = import 'pgrapher/common/clus.jsonnet';
 local clus_mod = import 'pgrapher/experiment/protodunevd/clus.jsonnet';
+// doc pdvd/41 sec 9: the MEASURED curved (space-charge) fiducial surface.  Used
+// only when the curved_fv knob below is on; the file is otherwise inert.
+local curved_fiducial = import 'pgrapher/experiment/protodunevd/curved_fiducial.jsonnet';
 
 function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=false,
          time_offset=0 * wc.us, relax_containment_filter=true,
@@ -187,6 +190,18 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
               // PDVD driver can carry the clustering FV's 15 cm space-charge inset
               // on this face too (doc pdvd/35).
               tgm_fv_zmin_margin=3,
+              // curved_fv (doc pdvd/41 sec 9): replace the tagger's flat box with
+              // the MEASURED curved surface -- PolyFiducial(axis 2, (x,y)) +
+              // PolyFiducial(axis 1, (z,x)) AND-ed by a CompositeFiducial, mapped
+              // from 120 Q/L-matched cosmic data events.  The y/z margins then
+              // become the CUSHION ONLY (curved_fv_margin_y/z, default 3 cm =
+              // MicroBooNE's boundary_dis_cut), because the 15 cm space-charge
+              // allowance that today's y 17.5 / z 18 carry is exactly what the
+              // surface replaces -- keeping both would count it twice.  x keeps
+              // tgm_fv_x_margin: no drift-direction surface was measured.
+              // Default false => the BoxFiducial literal and the legacy margin
+              // vectors below are emitted verbatim, i.e. byte-identical.
+              curved_fv=false, curved_fv_margin_y=3, curved_fv_margin_z=3,
               save_stm_fit=false, unmerge_bundle_mode='real',
               // doc pr/34 §10 particle-flow (Bee mc tree) port-fidelity knobs.
               // C++ defaults false; keys omitted when off => byte-identical
@@ -1214,7 +1229,14 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
         // volume (+-336.4 cm, 0.05..299.25 cm: dvm overall FV_y/z are these inset
         // by 15 cm).  Margins enter through fv_tolerance below, whose defaults
         // (2 / 2.5 / 3 cm) equal dvm.overall's FV_*_margin values.
-        local pdvd_pr_fv = {
+        // doc pdvd/41 sec 9: with curved_fv on, every wc.tn(pdvd_pr_fv) reference
+        // below resolves to the composite of the two measured polygons instead,
+        // and pdvd_pr_fv_uses carries its three component configs in place of the
+        // box.  Off, both are the verbatim pre-knob literals.
+        local curved_fv_cfg = curved_fiducial(name_prefix='pdvdcurved'),
+        local pdvd_pr_fv = if curved_fv then curved_fv_cfg.composite else pdvd_pr_fv_box,
+        local pdvd_pr_fv_uses = if curved_fv then curved_fv_cfg.configs else [pdvd_pr_fv_box],
+        local pdvd_pr_fv_box = {
             type: 'BoxFiducial',
             name: 'pdvd_pr_fv',
             data: {
@@ -1237,7 +1259,13 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
         // legacy values) parametrize the drift-x and vertical-y insets, both faces
         // symmetric.  Shared by tagger_check_tgm AND tagger_check_fc, same as the
         // downstream-z knob, so "contained" keeps one meaning across both verdicts.
-        local pdvd_pr_fv_margins = [-tgm_fv_x_margin * wc.cm, -tgm_fv_x_margin * wc.cm, -tgm_fv_y_margin * wc.cm, -tgm_fv_y_margin * wc.cm, -tgm_fv_zmax_margin * wc.cm, -tgm_fv_zmin_margin * wc.cm],
+        // doc pdvd/41 sec 9: with curved_fv on the y/z entries become the cushion
+        // (3 cm) alone.  Off, these three locals are tgm_fv_y/zmax/zmin_margin and
+        // the vectors below are the verbatim pre-knob expressions.
+        local mgn_y = if curved_fv then curved_fv_margin_y else tgm_fv_y_margin,
+        local mgn_zmax = if curved_fv then curved_fv_margin_z else tgm_fv_zmax_margin,
+        local mgn_zmin = if curved_fv then curved_fv_margin_z else tgm_fv_zmin_margin,
+        local pdvd_pr_fv_margins = [-tgm_fv_x_margin * wc.cm, -tgm_fv_x_margin * wc.cm, -mgn_y * wc.cm, -mgn_y * wc.cm, -mgn_zmax * wc.cm, -mgn_zmin * wc.cm],
         // tgm_fv_zmax_margin_interior (cm; default 0 = OFF, key omitted =>
         // byte-identical): when > 0, check_tgm's CASE-A interior-support tests
         // (chord midpoints + waypoint re-check) use THIS downstream-z inset
@@ -1249,7 +1277,7 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
         // and the ENDPOINT exit tests keep pdvd_pr_fv_margins unchanged.
         // x/y track the endpoint vector above: the doc-35 endpoint-only widening
         // applies to the downstream-z inset only.
-        local pdvd_pr_fv_margins_interior = [-tgm_fv_x_margin * wc.cm, -tgm_fv_x_margin * wc.cm, -tgm_fv_y_margin * wc.cm, -tgm_fv_y_margin * wc.cm, -tgm_fv_zmax_margin_interior * wc.cm, -tgm_fv_zmin_margin * wc.cm],
+        local pdvd_pr_fv_margins_interior = [-tgm_fv_x_margin * wc.cm, -tgm_fv_x_margin * wc.cm, -mgn_y * wc.cm, -mgn_y * wc.cm, -tgm_fv_zmax_margin_interior * wc.cm, -mgn_zmin * wc.cm],
         // Retiler for the steiner stage: same 'stepped' samplers that built the 3d
         // PC (PointTreeBuilding), one per (anode, face) -- PDVD anodes are two-sided,
         // so 16 samplers, each with its crate's drift speed (clus.jsonnet live_sampler).
@@ -1841,7 +1869,7 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
                                // there; load-bearing only for a reduced pipeline.
                                || ((neutrino_consistent_fv || cosmic_consistent_fv || nue_sp_consistent_fv)
                                    && std.member(pipeline_names, 'tagger_check_neutrino'))
-                               then [pdvd_pr_fv] else []),
+                               then pdvd_pr_fv_uses else []),
         local bee_zip_path = evt_out_prefix + 'mabc-pr.zip',
         local mabc = g.pnode({
             type: 'MultiAlgBlobClustering',
