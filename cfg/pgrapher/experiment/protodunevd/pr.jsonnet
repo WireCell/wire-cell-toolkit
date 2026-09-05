@@ -35,6 +35,10 @@ local clus_mod = import 'pgrapher/experiment/protodunevd/clus.jsonnet';
 // doc pdvd/41 sec 9: the MEASURED curved (space-charge) fiducial surface.  Used
 // only when the curved_fv knob below is on; the file is otherwise inert.
 local curved_fiducial = import 'pgrapher/experiment/protodunevd/curved_fiducial.jsonnet';
+// doc pdvd/43: the exit-gap QUANTILE profiles (p80, p90) the curved_fv_profile
+// knob can select instead of the file's own d50 trapezoids.  Generated, inert
+// unless curved_fv is on and curved_fv_profile != 'd50'.
+local curved_fv_profiles = import 'pgrapher/experiment/protodunevd/curved_fiducial_profiles.jsonnet';
 
 function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=false,
          time_offset=0 * wc.us, relax_containment_filter=true,
@@ -202,6 +206,12 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
               // Default false => the BoxFiducial literal and the legacy margin
               // vectors below are emitted verbatim, i.e. byte-identical.
               curved_fv=false, curved_fv_margin_y=3, curved_fv_margin_z=3,
+              // curved_fv_profile (doc pdvd/43): which measured surface curved_fv
+              // installs -- 'd50' (doc 41 sec 9, the charge-density median; the
+              // byte-identical default of the curved_fv=true arm) or 'p80' / 'p90'
+              // (doc 43, the exit-gap quantiles of curved_fiducial_profiles.jsonnet).
+              // Ignored when curved_fv is off.
+              curved_fv_profile='d50',
               save_stm_fit=false, unmerge_bundle_mode='real',
               // doc pr/34 §10 particle-flow (Bee mc tree) port-fidelity knobs.
               // C++ defaults false; keys omitted when off => byte-identical
@@ -1233,7 +1243,9 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
         // below resolves to the composite of the two measured polygons instead,
         // and pdvd_pr_fv_uses carries its three component configs in place of the
         // box.  Off, both are the verbatim pre-knob literals.
-        local curved_fv_cfg = curved_fiducial(name_prefix='pdvdcurved'),
+        local curved_fv_cfg = curved_fiducial(
+            name_prefix='pdvdcurved',
+            profile=(if curved_fv_profile == 'd50' then null else curved_fv_profiles[curved_fv_profile])),
         local pdvd_pr_fv = if curved_fv then curved_fv_cfg.composite else pdvd_pr_fv_box,
         local pdvd_pr_fv_uses = if curved_fv then curved_fv_cfg.configs else [pdvd_pr_fv_box],
         local pdvd_pr_fv_box = {

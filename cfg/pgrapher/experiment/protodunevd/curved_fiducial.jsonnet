@@ -75,10 +75,22 @@ function(yp_bot={dc: 0.00, x1: CATH, x2: CATH},        // flat: amplitude under 
          zp_bot={dc: 17.66, x1: CATH, x2: 205.14},
          zp_top={dc: 11.02, x1: CATH, x2: 164.61},
          cushion_x=0.0, cushion_y=0.0, cushion_z=0.0,  // cm, inward from the surface
-         name_prefix='pdvdcurved')
+         name_prefix='pdvdcurved',
+         // profile (doc pdvd/43): an object with the same eight keys whose values are
+         // explicit knot lists [[|x|, inset], ...] in cm, anode face -> cathode face,
+         // e.g. one entry of curved_fiducial_profiles.jsonnet (the exit-gap p80 / p90
+         // surfaces).  null (the default) => the eight trapezoids above, byte-identical.
+         profile=null)
 
-  // knots of one wall of one volume, anode face -> cathode face, as [|x|, inset] in cm.
+  local W = if profile == null
+            then { yp_bot: yp_bot, yp_top: yp_top, ym_bot: ym_bot, ym_top: ym_top,
+                   zm_bot: zm_bot, zm_top: zm_top, zp_bot: zp_bot, zp_top: zp_top }
+            else profile;
+
+  // knots of one wall of one volume, anode face -> cathode face, as [|x|, inset] in cm:
+  // either the trapezoid's own corners, or an explicit knot list passed through.
   local knots(p) =
+    if std.isArray(p) then p else
     [[XW, 0.0]]
     + (if p.x2 < XW then [[p.x2, 0.0]] else [])
     + (if p.x1 > CATH then [[p.x1, p.dc]] else [])
@@ -90,16 +102,16 @@ function(yp_bot={dc: 0.00, x1: CATH, x2: CATH},        // flat: amplitude under 
     [[sgn * std.min(k[0], XW - cushion_x), wallpos + inward * (k[1] + cush)] for k in knots(p)];
 
   local xy =
-    side(ym_bot, -1, -YW, 1, cushion_y)
-    + std.reverse(side(ym_top, 1, -YW, 1, cushion_y))
-    + side(yp_top, 1, YW, -1, cushion_y)
-    + std.reverse(side(yp_bot, -1, YW, -1, cushion_y));
+    side(W.ym_bot, -1, -YW, 1, cushion_y)
+    + std.reverse(side(W.ym_top, 1, -YW, 1, cushion_y))
+    + side(W.yp_top, 1, YW, -1, cushion_y)
+    + std.reverse(side(W.yp_bot, -1, YW, -1, cushion_y));
 
   local xz =
-    side(zm_bot, -1, ZLO, 1, cushion_z)
-    + std.reverse(side(zm_top, 1, ZLO, 1, cushion_z))
-    + side(zp_top, 1, ZHI, -1, cushion_z)
-    + std.reverse(side(zp_bot, -1, ZHI, -1, cushion_z));
+    side(W.zm_bot, -1, ZLO, 1, cushion_z)
+    + std.reverse(side(W.zm_top, 1, ZLO, 1, cushion_z))
+    + side(W.zp_top, 1, ZHI, -1, cushion_z)
+    + std.reverse(side(W.zp_bot, -1, ZHI, -1, cushion_z));
 
   // drop a repeated vertex (a wall with x2 == XW has no ramp foot to name)
   local dedup(pts) = [pts[i] for i in std.range(0, std.length(pts) - 1)
