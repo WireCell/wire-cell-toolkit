@@ -60,6 +60,9 @@ namespace WireCell::Clus {
         // dead-area output.  When configured, each cluster (or dead blob) is
         // routed by its APA into the matching group and dumped as a single bee
         // instance named "<algorithm>-<group name>".  Unset -> behavior unchanged.
+        // (public so doctest_clus_knob_defaults can pin the in-class defaults --
+        // the same reason BeePFConfig below is public)
+       public:
         struct ApaGroup {
             std::string name;       // bee instance suffix, e.g. "group02"
             std::set<int> apas;     // APA idents that belong to this group
@@ -122,6 +125,17 @@ namespace WireCell::Clus {
             // so configs without the key are byte-identical.  Used by PDVD's
             // stm / steiner_graph / steiner_terminals layers (doc pdvd/39).
             std::string require_flag;
+            // require_pc: restrict this set to clusters carrying a non-empty
+            // local point cloud of the given name, e.g. "stm_fit" (written by
+            // TaggerCheckSTM::persist_stm_fit for every evaluated main that
+            // recorded a fit pass, regardless of the STM verdict).  This is the
+            // "the tagger actually fitted this cluster" marker, which no Facade
+            // flag expresses.  Empty => every cluster, i.e. the legacy dump, so
+            // configs without the key are byte-identical.  ANDs with
+            // require_flag.  Used by PDVD's stm / steiner_graph /
+            // steiner_terminals layers so they cover exactly the object set the
+            // stm_fit layer draws (doc pdvd/39 round 2).
+            std::string require_pc;
             // steiner_terminals_only: for a pcname=="steiner_pc" set, dump only
             // the points flagged flag_steiner_terminal.  Default false => the
             // whole Steiner node cloud, byte-identical.
@@ -131,6 +145,7 @@ namespace WireCell::Clus {
             // Non-empty -> route this set's clusters into group buckets.
             std::vector<ApaGroup> apa_groups;
         };
+       private:
 
         // Vector to store configurations for multiple bee points sets
         std::vector<BeePointsConfig> m_bee_points_configs;

@@ -7,8 +7,9 @@
 // clustering module so the PR job sees exactly what the clustering built.
 //
 // PDVD deltas vs SBND, each stated where it lives below:
-//   * no unmerge_bundle / unmerge_assoc stages (PDVD never runs examine_bundles
-//     nor writes assoc_cluster_id);
+//   * no unmerge_bundle stage (PDVD never runs examine_bundles), but it DOES
+//     carry unmerge_assoc (doc pdvd/39 round 2), off by default and live only
+//     when the clustering job ran with save_assoc_id;
 //   * 16 retiler samplers (8 two-sided anodes), per-crate drift speed;
 //   * pdvd_pr_fv: one BoxFiducial spanning both drift volumes;
 //   * pdvd_box_recomb at 0.44 kV/cm with the table parameter set;
@@ -1271,9 +1272,41 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
                     skip_flagged: true,
                 },
             },
-            // PDVD has NO unmerge_bundle / unmerge_assoc stages (doc pdvd/25 sec 4):
-            // examine_bundles is not run by the PDVD Q/L chain and its isolated()
-            // pass does not write assoc_cluster_id, so there is nothing to undo.
+            // PDVD has no unmerge_bundle stage (doc pdvd/25 sec 4): examine_bundles
+            // is not run by the PDVD Q/L chain, so there is no flash grouping to
+            // undo.  It DOES need unmerge_assoc -- see below.
+            //
+            // doc pdvd/39 round 2: undo the isolated GROUPING.  cm.isolated()
+            // (protodunevd/clus.jsonnet, group stage) physically MERGES a main
+            // cluster with the small clusters that are near it but NOT connected
+            // to it; the prototype only groups them (Clustering_isolated returns
+            // main -> [(assoc, dis)] and leaves live_clusters untouched).  The
+            // consequence, measured on evt 298595: cluster 109 reaches the STM
+            // tagger as a 938-point body plus NINE fragments of 5-19 points at
+            // 16-76 cm, ImproveCluster_2's retile then fabricates blobs along the
+            // shortest path across those gaps (21% of that cluster's Steiner
+            // points have no live 3D point within 3 cm; cluster 100 is 76%), and
+            // the tagger fits the bridged whole as one track.  Same defect and
+            // same cure as SBND (sbnd/clus.jsonnet unmerge_assoc, docs 50-52).
+            //
+            // Requires the provenance pair from the clustering job:
+            // cm.isolated(save_assoc_id=true) AND save_assoc_cluster_id on the
+            // MABC that writes the pctree (protodunevd/clus.jsonnet
+            // save_assoc_id).  Without them the perblob PC is absent and the
+            // visitor is inert -- it cannot invent what was never recorded.
+            //
+            // Position: after flag_mains and BEFORE steiner.  Before steiner
+            // because separate() does not carry node-local PCs, so the split must
+            // precede steiner_pc creation.  After flag_mains (owner's decision,
+            // doc pdvd/39 sec 11) so the split-off fragments are removed from the
+            // main's Steiner build and STM fit WITHOUT being promoted to mains
+            // and given cosmic verdicts of their own.
+            //
+            // Not in the default pipeline_names => absent from the compiled
+            // config => byte-identical.  Runner flag: -unmerge.
+            unmerge_assoc: cm.unmerge_bundle(name='assoc', mode='real',
+                                             id_aname='assoc_cluster_id',
+                                             main_aname='assoc_cluster_main'),
             // PR-stage overclustering protection (doc pr/23): uboone's SECOND
             // graph-examination round (WCPPID::Protect_Over_Clustering ->
             // Examine_graph, run after Q/L matching and before NeutrinoID) --
@@ -1942,20 +1975,32 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
                     dQdx_scale: 0.1,
                     dQdx_offset: -1000.0,
                 }] else [])
-                // doc pdvd/39: three STM-SCOPED layers, so the cosmic-only
+                // doc pdvd/39: four STM-SCOPED layers, so the cosmic-only
                 // chain's display shows the STM result and the inputs it was
-                // built from, and nothing else.  All three are bound to the
+                // built from, and nothing else.  All four are bound to the
                 // STM visitor, so they capture the grouping exactly as the
                 // tagger saw it -- before protect_bundle can split a cluster
-                // out from under its flag.  require_flag / steiner_terminals_only
-                // are C++ defaults ""/false, and the whole block is present only
-                // when tagger_check_stm is in the pipeline => the compiled
-                // config is byte-identical otherwise.  Names must avoid the
-                // substring '-track' (bee3 models.py filters such files).
+                // out from under its flag.  require_flag / require_pc /
+                // steiner_terminals_only are C++ defaults ""/""/false, and the
+                // whole block is present only when tagger_check_stm is in the
+                // pipeline => the compiled config is byte-identical otherwise.
+                // Names must avoid the substring '-track' (bee3 models.py
+                // filters such files).
+                //
+                // ROUND 2 SCOPE (doc pdvd/39 sec 11): the first three carry
+                // require_pc:'stm_fit', NOT require_flag:'STM'.  TaggerCheckSTM
+                // writes the 'stm_fit' local PC for every evaluated main that
+                // recorded a fit pass, whatever the verdict
+                // (TaggerCheckSTM.cxx persist_stm_fit, unconditional on is_stm),
+                // so gating on that PC makes these layers cover EXACTLY the
+                // object set the stm_fit layer draws -- 25 clusters vs 9 on
+                // evt 298595, the inconsistency the owner flagged.  The verdict
+                // itself moves to the separate 'stm_tagged' layer below.
                 + (if std.member(pipeline_names, 'tagger_check_stm') then [
                     {
-                        // The original 3D image of the STM-tagged clusters:
-                        // the 'clustering' layer restricted to flag_STM.
+                        // The original 3D image of every cluster the STM tagger
+                        // fitted: the 'clustering' layer restricted to the
+                        // stm_fit candidates.  Pairs 1:1 with 'stm_fit'.
                         name: 'stm',
                         visitor: 'TaggerCheckSTM:pr',
                         grouping: 'live',
@@ -1964,7 +2009,7 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
                         pcname: '3d',
                         coords: clus_maker.t0cor_coords,
                         individual: false,
-                        require_flag: 'STM',
+                        require_pc: 'stm_fit',
                     },
                     {
                         // The Steiner tree's NODE cloud for those clusters (Bee
@@ -1983,7 +2028,7 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
                         pcname: 'steiner_pc',
                         coords: clus_maker.t0cor_coords,
                         individual: false,
-                        require_flag: 'STM',
+                        require_pc: 'stm_fit',
                     },
                     {
                         // The same cloud thinned to flag_steiner_terminal only.
@@ -1995,8 +2040,24 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
                         pcname: 'steiner_pc',
                         coords: clus_maker.t0cor_coords,
                         individual: false,
-                        require_flag: 'STM',
+                        require_pc: 'stm_fit',
                         steiner_terminals_only: true,
+                    },
+                    {
+                        // The VERDICT layer: the 3D image of the clusters the
+                        // tagger actually tagged STM (flag_STM, set once at
+                        // TaggerCheckSTM.cxx set_flag(Flags::STM)).  A strict
+                        // subset of 'stm' above -- this is the small layer to
+                        // read first; 'stm' is the candidate population.
+                        name: 'stm_tagged',
+                        visitor: 'TaggerCheckSTM:pr',
+                        grouping: 'live',
+                        detector: 'protodunevd',
+                        algorithm: 'stm_tagged',
+                        pcname: '3d',
+                        coords: clus_maker.t0cor_coords,
+                        individual: false,
+                        require_flag: 'STM',
                     },
                 ] else []),
                 // Particle-flow Bee output ("mc" jsTree JSON), emitted once after

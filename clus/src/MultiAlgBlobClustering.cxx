@@ -314,6 +314,7 @@ void MultiAlgBlobClustering::configure(const WireCell::Configuration& cfg)
             // doc pdvd/39: STM-scoped layers.  Absent keys => ""/false =>
             // every cluster and the whole Steiner cloud => byte-identical.
             bpc.require_flag = get<std::string>(bps, "require_flag", "");
+            bpc.require_pc = get<std::string>(bps, "require_pc", "");
             bpc.steiner_terminals_only = get<bool>(bps, "steiner_terminals_only", false);
 
             // Optional drift-side / APA grouping (additive; absent -> unchanged)
@@ -849,14 +850,23 @@ void MultiAlgBlobClustering::fill_bee_points(const std::string& name, const Grou
 
     auto wpids = grouping.wpids();
 
-    // doc pdvd/39: an optional per-cluster tag gate.  require_flag empty (the
-    // default, and every pre-existing config) admits every cluster, so this is
-    // byte-identical unless a set asks for it.  PDVD's stm / steiner_graph /
-    // steiner_terminals layers ask for "STM" so the display carries only the
-    // clusters the STM tagger actually tagged.
+    // doc pdvd/39: an optional per-cluster gate, on a tagger flag and/or on the
+    // presence of a named local point cloud.  Both empty (the default, and every
+    // pre-existing config) admits every cluster, so this is byte-identical
+    // unless a set asks for it.  PDVD's stm_tagged layer asks for flag "STM"
+    // (the verdict); its stm / steiner_graph / steiner_terminals layers ask for
+    // the "stm_fit" PC (the candidates the tagger actually fitted), which is the
+    // same object set the stm_fit layer draws.  Cluster::get_pc const returns a
+    // static empty Dataset for a missing name (Facade_Mixins.h), so a cluster
+    // that never reached the fitter is simply not admitted.
     auto flag_admits = [&config](const Facade::Cluster* cluster) {
-        return config.require_flag.empty()
-            || cluster->get_flag(config.require_flag) != 0;
+        if (!config.require_flag.empty() && cluster->get_flag(config.require_flag) == 0) {
+            return false;
+        }
+        if (!config.require_pc.empty() && cluster->get_pc(config.require_pc).empty()) {
+            return false;
+        }
+        return true;
     };
 
     if (config.individual){ // fill in the individual APA

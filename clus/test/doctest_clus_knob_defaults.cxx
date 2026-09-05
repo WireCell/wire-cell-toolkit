@@ -1496,6 +1496,25 @@ TEST_CASE("clus knob defaults: MultiAlgBlobClustering BeePFConfig pf switches ar
 }
 
 // ---------------------------------------------------------------------------
+// doc pdvd/39: the per-cluster gates on a Bee points set.  All three are
+// "admit everything" by default, which is what makes every pre-existing
+// bee_points_sets entry byte-identical -- an absent key must never start
+// dropping clusters from a display layer.
+//
+// require_pc is the one that is easy to get wrong: it gates on the PRESENCE of
+// a named local point cloud, so an empty value must mean "no PC requirement",
+// NOT "require a PC named ''" -- Cluster::get_pc("") aliases the scalar PC
+// (Facade_Mixins.h), which every cluster has, so the wrong reading would be
+// silently inert here and wrong the moment the alias changed.
+TEST_CASE("clus knob defaults: MultiAlgBlobClustering BeePointsConfig gates admit everything")
+{
+    WireCell::Clus::MultiAlgBlobClustering::BeePointsConfig bpc;
+    CHECK(bpc.require_flag.empty());            // doc pdvd/39 round 1
+    CHECK(bpc.require_pc.empty());              // doc pdvd/39 round 2
+    CHECK(bpc.steiner_terminals_only == false); // doc pdvd/39 round 1
+}
+
+// ---------------------------------------------------------------------------
 // doc 87: bee_zip is a FILENAME, and its default must stay non-empty.
 //
 // Since doc 87 an EMPTY bee_zip means "write no Bee zip at all" (the empty

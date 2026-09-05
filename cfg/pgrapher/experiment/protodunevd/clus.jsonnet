@@ -501,6 +501,19 @@ local clus_per_group (
     // doc pdvd/28 round 2: Deghost 'ctpc_fast' flavor at the group stage too
     // (C++ default 'ctpc'; false => key omitted => byte-identical).
     dg_fast = false,
+    // doc pdvd/39 round 2: record what clustering_isolated merged, so the PR
+    // job can undo it (cm.unmerge_bundle with id_aname='assoc_cluster_id').
+    // cm.isolated() MERGES a main cluster with the small clusters that are near
+    // it but NOT connected to it -- the prototype only GROUPS them -- so the STM
+    // endpoint finder and the Steiner build walk across empty space into a
+    // detached clump (measured on PDVD evt 298595: cluster 109 = a 938-pt body
+    // plus nine 5-19 pt fragments at 16-76 cm).  SBND already carries this pair
+    // (sbnd/clus.jsonnet cm.isolated(save_assoc_id) + unmerge_assoc); PDVD never
+    // saved the provenance, so there was nothing to undo.  Writes the
+    // isolated/assoc_cluster_id/assoc_cluster_main perblob arrays ONLY --
+    // cluster membership is untouched.  false => both keys omitted =>
+    // byte-identical compiled config and byte-identical pctree.
+    save_assoc_id = false,
     ) = {
     local nanodes = std.length(anodes),
     local pcmerging = g.pnode({
@@ -549,7 +562,8 @@ local clus_per_group (
                    graph_name=(if dg_fast then 'ctpc_fast' else null)),
         cm.examine_x_boundary(allow_mixed_faces=true),
         cm.neutrino(protect_iso_band=true),
-        cm.isolated(),
+        // save_assoc_id: see the clus_per_group argument.  false => key omitted.
+        cm.isolated(save_assoc_id=save_assoc_id),
         // examine_bundles() DISABLED at the per-drift-group stage (2026-06-14),
         // matching the PDHD chain.  At this stage (use_flash_t0=false) it only
         // rewrites the "isolated"/"perblob" array (main -1 / associated >=0); it
@@ -579,6 +593,13 @@ local clus_per_group (
             eventNo: eventNo,
             save_deadarea: true,
             dead_area_version: 2,  // v2 wrapper (tpc=apa) so the dead slab lands on the correct PDVD anode face
+            // doc pdvd/39 round 2: homogenize the perblob key set so the
+            // isolated grouping's provenance pair survives Dataset::append into
+            // the next stage and, from there, into the saved pctree -- the
+            // serializer silently DROPS heterogeneous keys, and clusters that
+            // clustering_isolated never touched have no perblob PC at all.
+            // C++ default false; key omitted when off => byte-identical.
+            [if save_assoc_id then 'save_assoc_cluster_id']: true,
             anodes: [wc.tn(a) for a in anodes],
             detector_volumes: wc.tn(dv),
             bee_points_sets: [
@@ -683,6 +704,10 @@ local clus_all_tpc (
     // (pdvd/wct-pr-perevt.jsonnet, TensorFileSource) can load the tree.  Runner
     // flag: run_clus_evt.sh -save-pctree -> work/<RUN6>_<EVT>/pctree-evt<ID>.tar.gz.
     tensor_outname = '',
+    // doc pdvd/39 round 2: see clus_per_group's save_assoc_id.  This stage does
+    // not run cm.isolated(); it only needs the same key-set homogenization so
+    // the group stage's provenance arrays survive into the saved pctree.
+    save_assoc_id = false,
     ) = {
     local pcmerging = g.pnode({
         type: "PointTreeMerging",
@@ -775,6 +800,10 @@ local clus_all_tpc (
             // per-side pair to group).  0 = off (no column).
             flash_group_window: 0,
             dead_area_version: 2,  // v2 wrapper (tpc=apa) so the dead slab lands on the correct PDVD anode face
+            // doc pdvd/39 round 2: see the save_assoc_id argument.  This is the
+            // node whose TensorFileSink writes the pctree the PR job reads, so
+            // the key must be set HERE for unmerge_assoc to have provenance.
+            [if save_assoc_id then 'save_assoc_cluster_id']: true,
             dead_apa_groups: apa_drift_groups,  // group dead area by drift side -> 2 dead instances
             anodes: [wc.tn(a) for a in anodes],
             detector_volumes: wc.tn(dv),
@@ -869,8 +898,8 @@ local clus_all_tpc (
     local bee_dir = if output_dir == '' then 'data' else output_dir,
     per_face(anode, face=0, dump=true) :: clus_per_face(anode, face=face, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo, stepped_center_fallback=stepped_center_fallback),
     per_apa(anode, dump=true, po_fast=false, dg_fast=false) :: clus_per_apa(anode, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo, stepped_center_fallback=stepped_center_fallback, po_fast=po_fast, dg_fast=dg_fast),
-    per_group(anodes, group_name, dump=true, dg_fast=false) :: clus_per_group(anodes, group_name, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo, dg_fast=dg_fast),
-    all_tpc(anodes, ngroups=2, dump=true, save_opflash=false, premerged=false, cc_tip_touch_cut=null, cc_tip_touch_angle_cut=null, cc_cathode_x_cut=5*wc.cm, cc_drift_cut=8*wc.cm, cc_dis_cut=5*wc.cm, cc_crosser_conn_relax=null, cc_crosser_pca_angle=null, cc_cathode_band_dis=null, bee_img_per_side=false, tensor_outname='') :: clus_all_tpc(anodes, ngroups=ngroups, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo, save_opflash=save_opflash, premerged=premerged, cc_tip_touch_cut=cc_tip_touch_cut, cc_tip_touch_angle_cut=cc_tip_touch_angle_cut, cc_cathode_x_cut=cc_cathode_x_cut, cc_drift_cut=cc_drift_cut, cc_dis_cut=cc_dis_cut, cc_crosser_conn_relax=cc_crosser_conn_relax, cc_crosser_pca_angle=cc_crosser_pca_angle, cc_cathode_band_dis=cc_cathode_band_dis, bee_img_per_side=bee_img_per_side, tensor_outname=tensor_outname),
+    per_group(anodes, group_name, dump=true, dg_fast=false, save_assoc_id=false) :: clus_per_group(anodes, group_name, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo, dg_fast=dg_fast, save_assoc_id=save_assoc_id),
+    all_tpc(anodes, ngroups=2, dump=true, save_opflash=false, premerged=false, cc_tip_touch_cut=null, cc_tip_touch_angle_cut=null, cc_cathode_x_cut=5*wc.cm, cc_drift_cut=8*wc.cm, cc_dis_cut=5*wc.cm, cc_crosser_conn_relax=null, cc_crosser_pca_angle=null, cc_cathode_band_dis=null, bee_img_per_side=false, tensor_outname='', save_assoc_id=false) :: clus_all_tpc(anodes, ngroups=ngroups, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo, save_opflash=save_opflash, premerged=premerged, cc_tip_touch_cut=cc_tip_touch_cut, cc_tip_touch_angle_cut=cc_tip_touch_angle_cut, cc_cathode_x_cut=cc_cathode_x_cut, cc_drift_cut=cc_drift_cut, cc_dis_cut=cc_dis_cut, cc_crosser_conn_relax=cc_crosser_conn_relax, cc_crosser_pca_angle=cc_crosser_pca_angle, cc_cathode_band_dis=cc_cathode_band_dis, bee_img_per_side=bee_img_per_side, tensor_outname=tensor_outname, save_assoc_id=save_assoc_id),
     // Expose the DetectorVolumes node builder so the Q/L matching graph can
     // reference the SAME all-anode DV the clustering uses (deterministic by name).
     detector_volumes(anodes, face="") :: detector_volumes(anodes, face),
