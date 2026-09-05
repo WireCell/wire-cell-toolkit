@@ -311,6 +311,10 @@ void MultiAlgBlobClustering::configure(const WireCell::Configuration& cfg)
             // set) even if its name isn't "img".  Absent => false => legacy
             // name-based routing => byte-identical.
             bpc.prepipeline = get<bool>(bps, "prepipeline", false);
+            // doc pdvd/39: STM-scoped layers.  Absent keys => ""/false =>
+            // every cluster and the whole Steiner cloud => byte-identical.
+            bpc.require_flag = get<std::string>(bps, "require_flag", "");
+            bpc.steiner_terminals_only = get<bool>(bps, "steiner_terminals_only", false);
 
             // Optional drift-side / APA grouping (additive; absent -> unchanged)
             if (bps.isMember("apa_groups")) {
@@ -845,7 +849,15 @@ void MultiAlgBlobClustering::fill_bee_points(const std::string& name, const Grou
 
     auto wpids = grouping.wpids();
 
-
+    // doc pdvd/39: an optional per-cluster tag gate.  require_flag empty (the
+    // default, and every pre-existing config) admits every cluster, so this is
+    // byte-identical unless a set asks for it.  PDVD's stm / steiner_graph /
+    // steiner_terminals layers ask for "STM" so the display carries only the
+    // clusters the STM tagger actually tagged.
+    auto flag_admits = [&config](const Facade::Cluster* cluster) {
+        return config.require_flag.empty()
+            || cluster->get_flag(config.require_flag) != 0;
+    };
 
     if (config.individual){ // fill in the individual APA
         for (auto wpid: wpids) {
@@ -856,13 +868,15 @@ void MultiAlgBlobClustering::fill_bee_points(const std::string& name, const Grou
                 auto it2 = it->second.find(face);
                 if (it2 != it->second.end()) {
                     for (const auto* cluster : grouping.children()) {
-                        fill_bee_points_from_cluster(it2->second, *cluster, config.pcname, config.coords, config.filter, config.dQdx_scale, config.dQdx_offset);
+                        if (!flag_admits(cluster)) continue;
+                        fill_bee_points_from_cluster(it2->second, *cluster, config.pcname, config.coords, config.filter, config.dQdx_scale, config.dQdx_offset, config.steiner_terminals_only);
                     }
                 }
             }
         }
     }else if (!config.apa_groups.empty()){ // route each cluster to its APA group
         for (const auto* cluster : grouping.children()) {
+            if (!flag_admits(cluster)) continue;
             // Collect the APA(s) this cluster's blobs live on.
             std::set<int> capas;
             for (const auto& w : cluster->wpids_blob_set()) {
@@ -876,7 +890,7 @@ void MultiAlgBlobClustering::fill_bee_points(const std::string& name, const Grou
                 if (!match) continue;
                 auto it = apa_bpts.by_group.find(grp.name);
                 if (it != apa_bpts.by_group.end()) {
-                    fill_bee_points_from_cluster(it->second, *cluster, config.pcname, config.coords, config.filter, config.dQdx_scale, config.dQdx_offset);
+                    fill_bee_points_from_cluster(it->second, *cluster, config.pcname, config.coords, config.filter, config.dQdx_scale, config.dQdx_offset, config.steiner_terminals_only);
                 }
                 break;
             }
@@ -885,7 +899,8 @@ void MultiAlgBlobClustering::fill_bee_points(const std::string& name, const Grou
         // std::cout << "Test: " << name << " " << grouping.wpids().size() << " " << grouping.nchildren() << std::endl;
 
         for (const auto* cluster : grouping.children()) {
-            fill_bee_points_from_cluster(apa_bpts.global, *cluster, config.pcname, config.coords, config.filter, config.dQdx_scale, config.dQdx_offset);
+            if (!flag_admits(cluster)) continue;
+            fill_bee_points_from_cluster(apa_bpts.global, *cluster, config.pcname, config.coords, config.filter, config.dQdx_scale, config.dQdx_offset, config.steiner_terminals_only);
         }
     }
 }
@@ -2859,7 +2874,7 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
 void MultiAlgBlobClustering::fill_bee_points_from_cluster(
     Bee::Points& bpts, const Cluster& cluster,
     const std::string& pcname, const std::vector<std::string>& coords, int filter,
-    double dQdx_scale, double dQdx_offset)
+    double dQdx_scale, double dQdx_offset, bool steiner_terminals_only)
 {
     int clid = cluster.get_cluster_id(); //bpts.back_cluster_id() + 1;
 
@@ -2904,15 +2919,39 @@ void MultiAlgBlobClustering::fill_bee_points_from_cluster(
         if (steiner_pc.empty()) {
             return;
         }
-        // Get coordinate arrays from the point cloud
-        const auto& x_coords = steiner_pc.get(coords.at(0))->elements<double>();
-        const auto& y_coords = steiner_pc.get(coords.at(1))->elements<double>(); 
-        const auto& z_coords = steiner_pc.get(coords.at(2))->elements<double>();
-        const auto& flag_steiner_terminal = steiner_pc.get("flag_steiner_terminal")->elements<int>();
+        // Get coordinate arrays from the point cloud.
+        // Dataset::get() returns a NULL shared_ptr for a name the cloud does not
+        // carry, and the ->elements<>() below then segfaults.  The steiner cloud
+        // uses the default scope's array names (x_t0cor,y,z on PDVD and uBooNE),
+        // so a set configured with plain x/y/z crashes the job with no
+        // diagnostic -- which is exactly how doc pdvd/39's first arm died.  Name
+        // the missing array and skip the cluster instead.
+        auto arr_x = steiner_pc.get(coords.at(0));
+        auto arr_y = steiner_pc.get(coords.at(1));
+        auto arr_z = steiner_pc.get(coords.at(2));
+        auto arr_t = steiner_pc.get("flag_steiner_terminal");
+        if (!arr_x || !arr_y || !arr_z || !arr_t) {
+            SPDLOG_LOGGER_WARN(log, "bee points: steiner_pc on cluster {} has no array "
+                               "'{}' -- check this set's coords (the steiner cloud uses the "
+                               "default-scope names, e.g. x_t0cor); skipping the cluster",
+                               clid,
+                               !arr_x ? coords.at(0) : !arr_y ? coords.at(1)
+                                      : !arr_z ? coords.at(2) : std::string("flag_steiner_terminal"));
+            return;
+        }
+        const auto& x_coords = arr_x->elements<double>();
+        const auto& y_coords = arr_y->elements<double>();
+        const auto& z_coords = arr_z->elements<double>();
+        const auto& flag_steiner_terminal = arr_t->elements<int>();
 
         // std::cout << "Steiner Test: " << x_coords.size() << " " << y_coords.size() << " " << z_coords.size() << std::endl;
 
          for (size_t i = 0; i < x_coords.size(); ++i) {
+            // doc pdvd/39: a terminals-only variant of this same cloud, so the
+            // Bee display can carry the Steiner tree's nodes and its terminals
+            // as two separate layers.  Default false => every node => the
+            // legacy dump, byte-identical.
+            if (steiner_terminals_only && !flag_steiner_terminal[i]) continue;
             // Create point from steiner point cloud
             Point vtx(x_coords[i], y_coords[i], z_coords[i]);
 

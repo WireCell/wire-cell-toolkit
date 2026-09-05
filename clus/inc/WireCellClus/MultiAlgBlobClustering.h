@@ -115,6 +115,18 @@ namespace WireCell::Clus {
             // fill_skeleton_info_magnify vertex rows).
             bool include_vertex_points{false};
 
+            // require_flag: restrict this set to clusters carrying the named
+            // tagger flag, e.g. "STM" (Facade flags are flag_<NAME> scalars,
+            // Facade_Mixins.h set_flag/get_flag; names in ClusteringFuncs.h's
+            // Flags namespace).  Empty => every cluster, i.e. the legacy dump,
+            // so configs without the key are byte-identical.  Used by PDVD's
+            // stm / steiner_graph / steiner_terminals layers (doc pdvd/39).
+            std::string require_flag;
+            // steiner_terminals_only: for a pcname=="steiner_pc" set, dump only
+            // the points flagged flag_steiner_terminal.  Default false => the
+            // whole Steiner node cloud, byte-identical.
+            bool steiner_terminals_only{false};
+
             // Optional per-set drift-side / APA grouping (see ApaGroup above).
             // Non-empty -> route this set's clusters into group buckets.
             std::vector<ApaGroup> apa_groups;
@@ -159,7 +171,8 @@ namespace WireCell::Clus {
         void fill_bee_points_from_cluster(
             Bee::Points& bpts, const Facade::Cluster& cluster,
             const std::string& pcname, const std::vector<std::string>& coords,
-            int filter, double dQdx_scale = 1.0, double dQdx_offset = 0.0);
+            int filter, double dQdx_scale = 1.0, double dQdx_offset = 0.0,
+            bool steiner_terminals_only = false);
         // doc pr/94 Phase 4b: `tf_in` selects WHICH per-bundle TrackFitting to
         // render (null = the unnamed slot, i.e. the legacy single-candidate
         // behavior).  `do_reset` must be false on every call after the first of

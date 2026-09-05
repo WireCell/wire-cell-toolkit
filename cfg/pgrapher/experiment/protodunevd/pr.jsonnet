@@ -636,6 +636,21 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
               // Unlike the two above this can move a weight in EITHER
               // direction, so it can add or drop tree edges.
               steiner_edge_charge_forward_dead_mix=false,
+              // Skip the Steiner build for clusters an EARLIER visitor already
+              // tagged (doc pdvd/39).  [] here = build for every cluster the
+              // beam/scope rules keep, key omitted => byte-identical config.
+              // ["TGM"] requires tagger_check_tgm to precede 'steiner' in
+              // pipeline_names -- a through-going muon can never reach the STM
+              // tagger, which skips TGM-flagged mains (TaggerCheckSTM.cxx:566),
+              // so its Steiner graph is pure cost.  Applied to BOTH passes: the
+              // refresh pass is replace=false, i.e. it builds exactly the
+              // clusters that have no graph yet, so without it the refresh
+              // rebuilds everything the first pass skipped.  NOT flipped on
+              // here -- it changes what tagger_check_fc sees (a TGM cluster
+              // with no steiner_pc gets the conservative is_fc=false), which is
+              // an output change and the owner's call; the PDVD operating point
+              // lives in the driver, pdvd/wct-pr-perevt.jsonnet.
+              steiner_skip_flags=[],
               // Isochronous first-segment endpoint finding (doc pr/24 round 2,
               // SBND evt 271851): principal-axis endpoints for filled 2-D
               // sheet clusters instead of the wire-footprint boundary metric.
@@ -1305,7 +1320,8 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
                                 terminal_wire_tol=steiner_terminal_wire_tol,
                                 terminal_adjacent_slice=steiner_terminal_adjacent_slice,
                                 edge_charge_forward_dead_mix=steiner_edge_charge_forward_dead_mix,
-                                terminal_min_separation=steiner_terminal_min_separation)
+                                terminal_min_separation=steiner_terminal_min_separation,
+                                skip_flags=steiner_skip_flags)
               + { data+: { [if steiner_terminal_charge != null then 'terminal_charge_threshold']: steiner_terminal_charge } },
             // The doc pr/23 second steiner pass, named right after protect_bundle:
             // replace=false rebuilds ONLY the clusters protect_bundle purged
@@ -1333,6 +1349,11 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
                                 // only the clusters protect_bundle purged and
                                 // they must be built like their peers.
                                 terminal_min_separation=steiner_terminal_min_separation,
+                                // Same skip list as the first pass: replace=false
+                                // means this pass builds exactly the clusters
+                                // with no graph yet, i.e. everything the first
+                                // pass skipped (doc pdvd/39).
+                                skip_flags=steiner_skip_flags,
                                 replace=false)
               + { data+: { [if steiner_terminal_charge != null then 'terminal_charge_threshold']: steiner_terminal_charge } },
             fiducialutils: cm.fiducialutils(),
@@ -1920,7 +1941,64 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
                     individual: false,
                     dQdx_scale: 0.1,
                     dQdx_offset: -1000.0,
-                }] else []),
+                }] else [])
+                // doc pdvd/39: three STM-SCOPED layers, so the cosmic-only
+                // chain's display shows the STM result and the inputs it was
+                // built from, and nothing else.  All three are bound to the
+                // STM visitor, so they capture the grouping exactly as the
+                // tagger saw it -- before protect_bundle can split a cluster
+                // out from under its flag.  require_flag / steiner_terminals_only
+                // are C++ defaults ""/false, and the whole block is present only
+                // when tagger_check_stm is in the pipeline => the compiled
+                // config is byte-identical otherwise.  Names must avoid the
+                // substring '-track' (bee3 models.py filters such files).
+                + (if std.member(pipeline_names, 'tagger_check_stm') then [
+                    {
+                        // The original 3D image of the STM-tagged clusters:
+                        // the 'clustering' layer restricted to flag_STM.
+                        name: 'stm',
+                        visitor: 'TaggerCheckSTM:pr',
+                        grouping: 'live',
+                        detector: 'protodunevd',
+                        algorithm: 'stm',
+                        pcname: '3d',
+                        coords: clus_maker.t0cor_coords,
+                        individual: false,
+                        require_flag: 'STM',
+                    },
+                    {
+                        // The Steiner tree's NODE cloud for those clusters (Bee
+                        // point layers carry no edges).  real_cluster_id is
+                        // 1 on terminals, 0 elsewhere, from the existing
+                        // steiner_pc dump branch.  The steiner cloud carries the
+                        // SAME array names as the default scope, so these are
+                        // t0cor_coords and NOT plain x/y/z -- the uBooNE steiner
+                        // set (clus/test/uboone-mabc.jsonnet:387) spells it the
+                        // same way.  A wrong name here used to be a SIGSEGV.
+                        name: 'steiner_graph',
+                        visitor: 'TaggerCheckSTM:pr',
+                        grouping: 'live',
+                        detector: 'protodunevd',
+                        algorithm: 'steiner_graph',
+                        pcname: 'steiner_pc',
+                        coords: clus_maker.t0cor_coords,
+                        individual: false,
+                        require_flag: 'STM',
+                    },
+                    {
+                        // The same cloud thinned to flag_steiner_terminal only.
+                        name: 'steiner_terminals',
+                        visitor: 'TaggerCheckSTM:pr',
+                        grouping: 'live',
+                        detector: 'protodunevd',
+                        algorithm: 'steiner_terminals',
+                        pcname: 'steiner_pc',
+                        coords: clus_maker.t0cor_coords,
+                        individual: false,
+                        require_flag: 'STM',
+                        steiner_terminals_only: true,
+                    },
+                ] else []),
                 // Particle-flow Bee output ("mc" jsTree JSON), emitted once after
                 // TaggerCheckNeutrino runs; inert when the visitor is not in the pipeline.
                 bee_pf: [

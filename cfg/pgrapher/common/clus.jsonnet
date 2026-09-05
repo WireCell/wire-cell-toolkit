@@ -1468,7 +1468,8 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
         steiner(name="", retiler={}, grouping="live", graph="steiner", perf=true, require_beam_flash=true,
                 beam_window_only=false, beam_window_low=0, beam_window_high=0, replace=null,
                 terminal_wire_tol=0, terminal_adjacent_slice=false,
-                edge_charge_forward_dead_mix=false, terminal_min_separation=0) :: {
+                edge_charge_forward_dead_mix=false, terminal_min_separation=0,
+                skip_flags=[]) :: {
             type: "CreateSteinerGraph",
             name: prefix+name,
             data: {
@@ -1484,6 +1485,17 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
                 // GraphAlgorithms made in the tagger stage).  Key omitted
                 // when null => byte-identical pre-knob config.
                 [if replace != null then 'replace']: replace,
+                // doc pdvd/39.  C++ default [] = build for every cluster the
+                // rules above kept.  Non-empty skips clusters already carrying
+                // any named tagger flag, which requires that tagger to run
+                // EARLIER in pipeline_names.  PDVD passes ["TGM"]: a
+                // through-going muon can never reach the STM tagger, which
+                // skips TGM-flagged mains (TaggerCheckSTM.cxx:566).  Set it on
+                // the refresh pass too -- that pass is replace=false, i.e. it
+                // builds exactly the clusters with no graph yet.  SBND, uBooNE
+                // and ICARUS bind this same shared function and leave it empty.
+                // Key omitted when empty => byte-identical pre-knob config.
+                [if std.length(skip_flags) > 0 then 'skip_flags']: skip_flags,
                 // C++ default 0.  1 = the prototype's one wire of slack on
                 // both sides of all three planes in the terminal filter
                 // (PR3DCluster_steiner.h:285-290); get_extreme_wcps is

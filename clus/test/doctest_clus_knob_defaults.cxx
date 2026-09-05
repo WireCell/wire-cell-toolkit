@@ -658,6 +658,21 @@ TEST_CASE("clus knob defaults: CreateSteinerGraph terminal_min_separation is OFF
     CHECK(cfg["terminal_min_separation"].asDouble() == 0.0);
 }
 
+TEST_CASE("clus knob defaults: CreateSteinerGraph skip_flags is EMPTY")
+{
+    // doc pdvd/39.  An empty list builds the Steiner graph for every cluster the
+    // scope/beam rules kept -- the legacy behavior, and what makes a config
+    // without the key byte-identical.  A non-empty list is only meaningful when
+    // the tagger that sets the flag runs EARLIER in pipeline_names, so it can
+    // never be a safe global default: on the production order (steiner third,
+    // before every tagger) nothing has been flagged yet and ["TGM"] would be a
+    // silent no-op rather than an error.
+    auto cfg = defaults_of("CreateSteinerGraph");
+    REQUIRE(cfg.isMember("skip_flags"));
+    CHECK(cfg["skip_flags"].isArray());
+    CHECK(cfg["skip_flags"].size() == 0);
+}
+
 // ---------------------------------------------------------------------------
 // The clustering visitors added or extended by the port.
 // ---------------------------------------------------------------------------

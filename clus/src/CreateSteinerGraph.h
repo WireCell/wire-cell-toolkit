@@ -50,6 +50,17 @@ namespace WireCell::Clus::Steiner {
         bool m_beam_window_only{false};
         double m_beam_window_low{0};
         double m_beam_window_high{0};
+        // doc pdvd/39: skip clusters already carrying any of these tagger
+        // flags (Facade flag_<NAME> scalars; names in the Flags namespace).
+        // Empty (the default) processes every cluster the rules above kept,
+        // i.e. legacy behavior, so configs without the key are byte-identical.
+        // PDVD passes ["TGM"] with tagger_check_tgm moved ahead of this stage:
+        // a through-going muon can never reach the STM tagger
+        // (TaggerCheckSTM.cxx:566 skips TGM-flagged mains), so building its
+        // Steiner graph is pure cost.  NB whoever sets this must set it on the
+        // steiner_refresh pass too -- that pass runs replace=false, i.e. it
+        // builds exactly the clusters that have no graph yet.
+        std::vector<std::string> m_skip_flags;
 
         Grapher::Config m_grapher_config;
 

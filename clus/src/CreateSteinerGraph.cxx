@@ -41,6 +41,13 @@ void Steiner::CreateSteinerGraph::configure(const WireCell::Configuration& cfg)
     m_beam_window_only = get(cfg, "beam_window_only", m_beam_window_only);
     m_beam_window_low = get(cfg, "beam_window_low", m_beam_window_low);
     m_beam_window_high = get(cfg, "beam_window_high", m_beam_window_high);
+    // doc pdvd/39.  Absent key => empty => every cluster => byte-identical.
+    if (cfg.isMember("skip_flags")) {
+        m_skip_flags.clear();
+        for (const auto& f : cfg["skip_flags"]) {
+            m_skip_flags.push_back(f.asString());
+        }
+    }
     if (m_beam_window_only && !(m_beam_window_low < m_beam_window_high)) {
         log->warn("configure: beam_window_only set but the window is empty "
                   "([{}, {}) us) -- gate disabled, every cluster processed",
@@ -108,6 +115,10 @@ Configuration Steiner::CreateSteinerGraph::default_configuration() const
     cfg["beam_window_only"] = m_beam_window_only;
     cfg["beam_window_low"] = m_beam_window_low;
     cfg["beam_window_high"] = m_beam_window_high;
+    // doc pdvd/39: cluster flags that skip the build entirely (e.g. ["TGM"]).
+    // Empty = every cluster, i.e. legacy behavior.
+    cfg["skip_flags"] = Json::arrayValue;
+    for (const auto& f : m_skip_flags) cfg["skip_flags"].append(f);
     // doc pr/29 D1: wire slack, in wires, for the Steiner terminal filter ONLY
     // (the prototype uses 1 there and 0 in get_extreme_wcps).  0 = legacy.
     cfg["terminal_wire_tol"] = m_grapher_config.terminal_wire_tol;
@@ -141,13 +152,26 @@ void Steiner::CreateSteinerGraph::visit(Ensemble& ensemble) const
     std::vector<Cluster*> filtered_clusters;
 
     Cluster* main_cluster = nullptr;
+    size_t n_skipped_by_flag = 0;
 
     for (auto* cluster : grouping.children()) {
-        // check scope 
+        // check scope
         auto& default_scope = cluster->get_default_scope();
         auto& raw_scope = cluster->get_raw_scope();
         // if scope is not raw, apply filter ...
         if (default_scope.hash()!=raw_scope.hash() && (!cluster->get_scope_filter(default_scope)) ) continue;
+
+        // doc pdvd/39: drop clusters an earlier visitor already tagged.  The
+        // surviving vector stays a subsequence of the ungated one, so the
+        // processing order of the kept clusters is unchanged.  Empty
+        // m_skip_flags (the default) never enters the loop body.
+        {
+            bool skip = false;
+            for (const auto& f : m_skip_flags) {
+                if (cluster->get_flag(f)) { skip = true; break; }
+            }
+            if (skip) { ++n_skipped_by_flag; continue; }
+        }
 
         if (m_require_beam_flash) {
             if (cluster->get_flag(Flags::beam_flash)){
@@ -160,6 +184,16 @@ void Steiner::CreateSteinerGraph::visit(Ensemble& ensemble) const
         else {
             filtered_clusters.push_back(cluster);
         }
+    }
+
+    if (!m_skip_flags.empty()) {
+        std::string flags_str;
+        for (const auto& f : m_skip_flags) {
+            if (!flags_str.empty()) flags_str += ",";
+            flags_str += f;
+        }
+        SPDLOG_LOGGER_INFO(log, "CreateSteinerGraph: skip_flags [{}]: skipped {} cluster(s), {} remain",
+                           flags_str, n_skipped_by_flag, filtered_clusters.size());
     }
 
     // Beam-window gate: keep only the beam-coincident bundle(s) -- the main
