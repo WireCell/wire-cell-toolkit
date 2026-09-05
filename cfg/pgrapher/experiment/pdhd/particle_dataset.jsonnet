@@ -1,5 +1,5 @@
 // CANONICAL in-tree PDHD ParticleDataSet tables (pdhd/docs/stm-tagger-chain.md
-// sec 5), forked BY DUPLICATION from pgrapher/experiment/protodunevd/particle_dataset.jsonnet
+// sec 6), forked BY DUPLICATION from pgrapher/experiment/protodunevd/particle_dataset.jsonnet
 // (itself forked from sbnd/); both source files are untouched.  Imported by
 // pdhd/wct-pr-perevt.jsonnet and fed to TaggerCheckSTM / TaggerCheckNeutrino as
 // the "particle_dataset" service.  Import as

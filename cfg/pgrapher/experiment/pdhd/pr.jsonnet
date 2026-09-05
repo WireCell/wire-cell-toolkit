@@ -1,5 +1,5 @@
 // PDHD pattern-recognition (PR) builder -- the tail that runs AFTER Q/L matching
-// on the persisted point-cloud tree (pdhd/docs/stm-tagger-chain.md sec 6).
+// on the persisted point-cloud tree (pdhd/docs/stm-tagger-chain.md sec 7).
 // Forked BY DUPLICATION from the PDVD builder
 // pgrapher/experiment/protodunevd/pr.jsonnet (itself a duplication fork of the
 // SBND pr() builder in pgrapher/experiment/sbnd/clus.jsonnet); BOTH source files
