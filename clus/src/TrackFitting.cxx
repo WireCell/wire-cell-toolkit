@@ -69,6 +69,8 @@ void TrackFitting::set_parameter(const std::string& name, double value) {
         m_params.end_trim_gap_len = value;
     } else if (name == "dqdx_fit_keep_all_points") {   // doc pr/107
         m_params.dqdx_fit_keep_all_points = value;
+    } else if (name == "gaus_nsigma") {                 // doc pdvd/44
+        m_params.gaus_nsigma = value;
     } else if (name == "DL") {
         m_params.DL = value;
     } else if (name == "DT") {
@@ -232,6 +234,8 @@ double TrackFitting::get_parameter(const std::string& name) const {
         return m_params.skip_revert_iso_xext_cut;
     } else if (name == "dqdx_fit_keep_all_points") {   // doc pr/107
         return m_params.dqdx_fit_keep_all_points;
+    } else if (name == "gaus_nsigma") {                 // doc pdvd/44
+        return m_params.gaus_nsigma;
     } else if (name == "good_point_pitch_frac") {      // doc pdvd/32 round 3
         return m_params.good_point_pitch_frac;
     } else if (name == "end_trim_gap_len") {           // doc pdvd/38
@@ -7432,7 +7436,7 @@ void TrackFitting::dQ_dx_multi_fit(double dis_end_point_ext, bool flag_dQ_dx_fit
                         for (const auto& row : it->second) {
                             if (std::abs(row.time - centers_T.front()) > time_sr) continue;
                             double value = cal_gaus_integral_seg(row.time, row.wire, centers_T, sigmas_T,
-                                                               centers_U, sigmas_U, weights, 0, 4, cur_ntime_ticks);
+                                                               centers_U, sigmas_U, weights, 0, m_params.gaus_nsigma, cur_ntime_ticks);
                             if (row.flag == 0 && value > 0) reg_flag_u[idx] = 1;
                             if (value > 0 && row.charge > 0 && row.flag != 0) {
                                 double total_err = sqrt(row.charge_err*row.charge_err +
@@ -7457,7 +7461,7 @@ void TrackFitting::dQ_dx_multi_fit(double dis_end_point_ext, bool flag_dQ_dx_fit
                         for (const auto& row : it->second) {
                             if (std::abs(row.time - centers_T.front()) > time_sr) continue;
                             double value = cal_gaus_integral_seg(row.time, row.wire, centers_T, sigmas_T,
-                                                               centers_V, sigmas_V, weights, 0, 4, cur_ntime_ticks);
+                                                               centers_V, sigmas_V, weights, 0, m_params.gaus_nsigma, cur_ntime_ticks);
                             if (row.flag == 0 && value > 0) reg_flag_v[idx] = 1;
                             if (value > 0 && row.charge > 0 && row.flag != 0) {
                                 double total_err = sqrt(row.charge_err*row.charge_err +
@@ -7482,7 +7486,7 @@ void TrackFitting::dQ_dx_multi_fit(double dis_end_point_ext, bool flag_dQ_dx_fit
                         for (const auto& row : it->second) {
                             if (std::abs(row.time - centers_T.front()) > time_sr) continue;
                             double value = cal_gaus_integral_seg(row.time, row.wire, centers_T, sigmas_T,
-                                                               centers_W, sigmas_W, weights, 0, 4, cur_ntime_ticks);
+                                                               centers_W, sigmas_W, weights, 0, m_params.gaus_nsigma, cur_ntime_ticks);
                             if (row.flag == 0 && value > 0) reg_flag_w[idx] = 1;
                             if (value > 0 && row.charge > 0 && row.flag != 0) {
                                 double total_err = sqrt(row.charge_err*row.charge_err +
@@ -7709,7 +7713,7 @@ void TrackFitting::dQ_dx_multi_fit(double dis_end_point_ext, bool flag_dQ_dx_fit
                     for (const auto& row : it->second) {
                         if (std::abs(row.time - centers_T.front()) > time_sr_v) continue;
                         double value = cal_gaus_integral_seg(row.time, row.wire, centers_T, sigmas_T,
-                                                           centers_U, sigmas_U, weights, 0, 4, cur_ntime_ticks);
+                                                           centers_U, sigmas_U, weights, 0, m_params.gaus_nsigma, cur_ntime_ticks);
                         if (row.flag == 0 && value > 0) reg_flag_u[vertex_idx] = 1;
                         if (value > 0 && row.charge > 0 && row.flag != 0) {
                             double total_err = sqrt(row.charge_err*row.charge_err +
@@ -7734,7 +7738,7 @@ void TrackFitting::dQ_dx_multi_fit(double dis_end_point_ext, bool flag_dQ_dx_fit
                     for (const auto& row : it->second) {
                         if (std::abs(row.time - centers_T.front()) > time_sr_v) continue;
                         double value = cal_gaus_integral_seg(row.time, row.wire, centers_T, sigmas_T,
-                                                           centers_V, sigmas_V, weights, 0, 4, cur_ntime_ticks);
+                                                           centers_V, sigmas_V, weights, 0, m_params.gaus_nsigma, cur_ntime_ticks);
                         if (row.flag == 0 && value > 0) reg_flag_v[vertex_idx] = 1;
                         if (value > 0 && row.charge > 0 && row.flag != 0) {
                             double total_err = sqrt(row.charge_err*row.charge_err +
@@ -7759,7 +7763,7 @@ void TrackFitting::dQ_dx_multi_fit(double dis_end_point_ext, bool flag_dQ_dx_fit
                     for (const auto& row : it->second) {
                         if (std::abs(row.time - centers_T.front()) > time_sr_v) continue;
                         double value = cal_gaus_integral_seg(row.time, row.wire, centers_T, sigmas_T,
-                                                           centers_W, sigmas_W, weights, 0, 4, cur_ntime_ticks);
+                                                           centers_W, sigmas_W, weights, 0, m_params.gaus_nsigma, cur_ntime_ticks);
                         if (row.flag == 0 && value > 0) reg_flag_w[vertex_idx] = 1;
                         if (value > 0 && row.charge > 0 && row.flag != 0) {
                             double total_err = sqrt(row.charge_err*row.charge_err +
@@ -8601,7 +8605,7 @@ void WireCell::Clus::TrackFitting::dQ_dx_fit(double dis_end_point_ext, bool flag
                         int wire = prow.wire;
                         int time = prow.time;
                         if (abs(wire - centers_U.front()) <= m_params.search_range && abs(time - centers_T.front()) <= m_params.search_range * cur_ntime_ticks) {
-                            double value = cal_gaus_integral_seg(time, wire, centers_T, sigmas_T, centers_U, sigmas_U, weights, 0, 4, cur_ntime_ticks);
+                            double value = cal_gaus_integral_seg(time, wire, centers_T, sigmas_T, centers_U, sigmas_U, weights, 0, m_params.gaus_nsigma, cur_ntime_ticks);
 
                             if (prow.flag == 0 && value > 0) reg_flag_u[i] = 1; // Dead channel
 
@@ -8629,7 +8633,7 @@ void WireCell::Clus::TrackFitting::dQ_dx_fit(double dis_end_point_ext, bool flag
                         int wire = prow.wire;
                         int time = prow.time;
                         if (abs(wire - centers_V.front()) <= m_params.search_range && abs(time - centers_T.front()) <= m_params.search_range * cur_ntime_ticks) {
-                            double value = cal_gaus_integral_seg(time, wire, centers_T, sigmas_T, centers_V, sigmas_V, weights, 0, 4, cur_ntime_ticks);
+                            double value = cal_gaus_integral_seg(time, wire, centers_T, sigmas_T, centers_V, sigmas_V, weights, 0, m_params.gaus_nsigma, cur_ntime_ticks);
 
                             if (prow.flag == 0 && value > 0) reg_flag_v[i] = 1; // Dead channel
 
@@ -8657,7 +8661,7 @@ void WireCell::Clus::TrackFitting::dQ_dx_fit(double dis_end_point_ext, bool flag
                         int wire = prow.wire;
                         int time = prow.time;
                         if (abs(wire - centers_W.front()) <= m_params.search_range && abs(time - centers_T.front()) <= m_params.search_range * cur_ntime_ticks) {
-                            double value = cal_gaus_integral_seg(time, wire, centers_T, sigmas_T, centers_W, sigmas_W, weights, 0, 4, cur_ntime_ticks);
+                            double value = cal_gaus_integral_seg(time, wire, centers_T, sigmas_T, centers_W, sigmas_W, weights, 0, m_params.gaus_nsigma, cur_ntime_ticks);
 
                             if (prow.flag == 0 && value > 0) reg_flag_w[i] = 1; // Dead channel
 

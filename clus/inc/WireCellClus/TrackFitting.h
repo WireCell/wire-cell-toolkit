@@ -211,6 +211,17 @@ namespace WireCell::Clus {
             // double for the set_parameter(name, value) plumbing.
             double dqdx_fit_keep_all_points = 0;
 
+            // doc pdvd/44 -- acceptance window of cal_gaus_integral in sigmas:
+            // a (time, wire) bin farther than gaus_nsigma * sigma from a
+            // sub-point's centre receives nothing from it (no renormalisation).
+            // Was the bare literal 4 at all nine call sites; 4.0 reproduces
+            // that bit for bit (int 4 promoted to double).  Only bites when
+            // nsigma * sigma_T < 1 wire, i.e. PDVD's induction planes under
+            // the pre-doc-44 constants (doc 42 sec 8.5 bounds it at 5.6 % of
+            // the first-neighbour share).  Read from the runtime parameter
+            // JSON via set_parameter("gaus_nsigma", v).
+            double gaus_nsigma = 4.0;
+
             double default_dQ_dx = 5000;
 
             double end_point_factor=0.6;
