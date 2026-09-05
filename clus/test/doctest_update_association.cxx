@@ -66,6 +66,13 @@ namespace WireCell::Clus {
                                     std::make_pair(-sin(angle_w) / pitch, cos(angle_w) / pitch));
             }
         }
+        // doc pdvd/45: the per-volume drift-frame shift form_map_graph would
+        // compute from dirx * cluster_t0 * v_drift when excl_t0_frame > 0.
+        static void set_excl_x_shift(TrackFitting& tf, int apa, int face, double shift_x)
+        {
+            tf.m_excl_x_shift[WirePlaneId(kAllLayers, face, apa).ident()] = shift_x;
+        }
+        static void clear_excl_x_shift(TrackFitting& tf) { tf.m_excl_x_shift.clear(); }
     };
 
 }  // namespace WireCell::Clus
@@ -199,4 +206,55 @@ TEST_CASE("pr98 update_association keep rule with real measurements")
     // local-graph no-op).
     auto lone = rig.segment_on_face(0, {Point(0, -1.0 * units::cm, 0)});
     CHECK(rig.cell_kept(lone, {lone}));
+}
+
+// doc pdvd/45 -- the drift-frame shift.  update_association builds the cell's
+// test point in the RAW drift frame (time index -> x through the geometric
+// offset_t; here slope_t = 1/cm so time 90 is x = 90 cm) while the segment
+// clouds hold t0-CORRECTED fit points.  Model a cluster whose
+// dirx * t0 * v_drift = +90 cm: both clouds sit at corrected x ~ 0, the cell at
+// raw x = 90 cm.  The fitted segment is transversely 1 cm from the cell; the
+// competitor sits 20 cm further along x and 0.5 cm transversely from the cell.
+//   mixed frame : own = hypot(90, 1) = 90.0   competitor = hypot(70, 0.5) = 70.0  -> DROPPED
+//                 (the segment whose cloud reaches farthest toward the raw cell
+//                 wins -- the PDVD "one winner per cluster" symptom)
+//   same frame  : own = 1.0                   competitor = hypot(20, 0.5) = 20.0  -> KEPT
+// A shift for another volume, or a zero shift, must leave the legacy decision.
+TEST_CASE("pdvd45 update_association drift-frame shift restores proximity arbitration")
+{
+    Rig rig;
+    auto fitted = rig.segment_on_face(0, {Point(0, -1.0 * units::cm, 0)});
+    auto far_competitor = rig.segment_on_face(0, {Point(20.0 * units::cm, -1.5 * units::cm, 0)});
+    auto near_competitor = rig.segment_on_face(0, {Point(0, -1.5 * units::cm, 0)});
+
+    auto kept = [&](std::shared_ptr<PR::Segment> seg,
+                    const std::vector<std::shared_ptr<PR::Segment>>& all, int time) {
+        TrackFitting::PlaneData ut, vt, wt;
+        ut.associated_2d_points.insert(TrackFitting::Coord2D(0, 0, time, 2, 0, kUlayer));
+        rig.tf.update_association(seg, all, ut, vt, wt);
+        return ut.associated_2d_points.size() == 1;
+    };
+
+    // Legacy (empty shift map): mixed frame, far competitor wins, cell dropped.
+    TrackFittingTestHarness::clear_excl_x_shift(rig.tf);
+    CHECK_FALSE(kept(fitted, {fitted, far_competitor}, 90));
+
+    // Shift = +90 cm for (apa 0, face 0): same frame, cell kept.
+    TrackFittingTestHarness::set_excl_x_shift(rig.tf, 0, 0, 90.0 * units::cm);
+    CHECK(kept(fitted, {fitted, far_competitor}, 90));
+
+    // A shift registered only for face 1 must not move a face-0 cell.
+    TrackFittingTestHarness::clear_excl_x_shift(rig.tf);
+    TrackFittingTestHarness::set_excl_x_shift(rig.tf, 0, 1, 90.0 * units::cm);
+    CHECK_FALSE(kept(fitted, {fitted, far_competitor}, 90));
+
+    // Zero shift == legacy on a same-frame cell (time 0): near competitor at
+    // 0.5 cm strips it, far competitor at 20 cm does not.
+    TrackFittingTestHarness::clear_excl_x_shift(rig.tf);
+    TrackFittingTestHarness::set_excl_x_shift(rig.tf, 0, 0, 0.0);
+    CHECK_FALSE(kept(fitted, {fitted, near_competitor}, 0));
+    CHECK(kept(fitted, {fitted, far_competitor}, 0));
+    TrackFittingTestHarness::clear_excl_x_shift(rig.tf);
+    CHECK_FALSE(kept(fitted, {fitted, near_competitor}, 0));
+    CHECK(kept(fitted, {fitted, far_competitor}, 0));
 }

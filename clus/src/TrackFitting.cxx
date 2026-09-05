@@ -69,6 +69,8 @@ void TrackFitting::set_parameter(const std::string& name, double value) {
         m_params.end_trim_gap_len = value;
     } else if (name == "dqdx_fit_keep_all_points") {   // doc pr/107
         m_params.dqdx_fit_keep_all_points = value;
+    } else if (name == "excl_t0_frame") {              // doc pdvd/45
+        m_params.excl_t0_frame = value;
     } else if (name == "gaus_nsigma") {                 // doc pdvd/44
         m_params.gaus_nsigma = value;
     } else if (name == "DL") {
@@ -234,6 +236,8 @@ double TrackFitting::get_parameter(const std::string& name) const {
         return m_params.skip_revert_iso_xext_cut;
     } else if (name == "dqdx_fit_keep_all_points") {   // doc pr/107
         return m_params.dqdx_fit_keep_all_points;
+    } else if (name == "excl_t0_frame") {              // doc pdvd/45
+        return m_params.excl_t0_frame;
     } else if (name == "gaus_nsigma") {                 // doc pdvd/44
         return m_params.gaus_nsigma;
     } else if (name == "good_point_pitch_frac") {      // doc pdvd/32 round 3
@@ -1738,8 +1742,10 @@ void TrackFitting::organize_segments_path_3rd(double step_size){
         // 2026-09-03 (doc pdvd/31 round 6): on the event it was built for it is
         // inert -- the charge check drops the arm either way -- it was never
         // enabled in any detector's config, and it is not the fix for the
-        // symptom (doc pdvd/30 attributes that to fit_exclusion contention with
-        // a duplicated segment).  Retiring restores the single legacy test.
+        // symptom (doc pdvd/30 attributed that to fit_exclusion contention with
+        // a duplicated segment; doc pdvd/45 traced it to update_association
+        // comparing a raw-frame cell against t0-corrected segment clouds, knob
+        // excl_t0_frame).  Retiring restores the single legacy test.
         const bool use_wcpts = segment->fits().empty();
 
         if (!use_wcpts) {
@@ -3230,6 +3236,10 @@ void TrackFitting::update_association(std::shared_ptr<PR::Segment> segment,
 
         double raw_x = (coord.time - offset_t) / slope_x;
         double raw_y = (coord.wire - offset_u)/slope_yu;
+        if (!m_excl_x_shift.empty()) {   // doc pdvd/45: raw -> t0-corrected frame
+            auto sh = m_excl_x_shift.find(WirePlaneId(kAllLayers, face, apa).ident());
+            if (sh != m_excl_x_shift.end()) raw_x -= sh->second;
+        }
 
         WireCell::Point test_point(raw_x, raw_y, 0);
 
@@ -3279,6 +3289,10 @@ void TrackFitting::update_association(std::shared_ptr<PR::Segment> segment,
 
         double raw_x = (coord.time - offset_t) / slope_x;
         double raw_y = (coord.wire - offset_v)/slope_yv;
+        if (!m_excl_x_shift.empty()) {   // doc pdvd/45: raw -> t0-corrected frame
+            auto sh = m_excl_x_shift.find(WirePlaneId(kAllLayers, face, apa).ident());
+            if (sh != m_excl_x_shift.end()) raw_x -= sh->second;
+        }
         WireCell::Point test_point(raw_x, raw_y, 0);
 
         double min_dis_track = exclusion_closest_2d_dis(segment, test_point, apa, face, 1);
@@ -3329,6 +3343,10 @@ void TrackFitting::update_association(std::shared_ptr<PR::Segment> segment,
         // Using slope_yw (= -sin(angle_w)/pitch_w = 0) here would cause divide-by-zero.
         double raw_x = (coord.time - offset_t) / slope_x;
         double raw_z = (coord.wire - offset_w) / slope_zw;
+        if (!m_excl_x_shift.empty()) {   // doc pdvd/45: raw -> t0-corrected frame
+            auto sh = m_excl_x_shift.find(WirePlaneId(kAllLayers, face, apa).ident());
+            if (sh != m_excl_x_shift.end()) raw_x -= sh->second;
+        }
         WireCell::Point test_point(raw_x, 0, raw_z);
 
         double min_dis_track = exclusion_closest_2d_dis(segment, test_point, apa, face, 2);
@@ -4154,7 +4172,36 @@ void TrackFitting::form_map_graph(bool flag_exclusion, double end_point_factor, 
 
                 if (flag_exclusion) {
                     if (m_excl_dump) m_excl_dump_pt = fits[i].point;   // doc pr/109 sec 9, debug only
+                    // doc pdvd/45: put update_association's test points into the
+                    // frame of the segment clouds.  The cells were produced from
+                    // this fit point through backward(t0) + convert_3Dpoint_time_ch
+                    // (form_point_association); update_association turns a cell
+                    // back into x with the geometric (offset_t, slope_t).  Run
+                    // THIS point through exactly those two conversions and record,
+                    // per (apa, face), how far the result lands from the point
+                    // itself: that is the frame offset every cell of this point
+                    // carries (cluster t0 AND any time-origin difference between
+                    // the two conversions, e.g. PDVD's trigger offset), measured
+                    // rather than reconstructed from t0 arithmetic.  Knob-on only;
+                    // the map stays empty otherwise (legacy path untouched).
+                    m_excl_x_shift.clear();
+                    if (m_params.excl_t0_frame > 0 && segment->cluster() && m_grouping && m_pcts) {
+                        auto xcl = segment->cluster();
+                        const auto xform = m_pcts->pc_transform(xcl->get_scope_transform(xcl->get_default_scope()));
+                        const double xt0 = xcl->get_cluster_t0();
+                        const auto& fp = fits[i].point;
+                        for (const auto& [xwpid, xoff] : wpid_offsets) {
+                            auto xsl = wpid_slopes.find(xwpid);
+                            if (xsl == wpid_slopes.end()) continue;
+                            const int xapa = xwpid.apa(), xface = xwpid.face();
+                            const auto p_raw = xform->backward(geo_point_t(fp.x(), fp.y(), fp.z()), xt0, xface, xapa);
+                            const int tind = std::get<0>(m_grouping->convert_3Dpoint_time_ch(p_raw, xapa, xface, 0));
+                            const double x_geo = (tind - std::get<0>(xoff)) / std::get<0>(xsl->second);
+                            m_excl_x_shift[xwpid.ident()] = x_geo - fp.x();
+                        }
+                    }
                     update_association(segment, segments, temp_2dut, temp_2dvt, temp_2dwt, &excl_cache);
+                    m_excl_x_shift.clear();
                 }
                 const size_t dump_n1[3] = {temp_2dut.associated_2d_points.size(), temp_2dvt.associated_2d_points.size(), temp_2dwt.associated_2d_points.size()};  // doc pr/108: after exclusion, before examine
 

@@ -379,6 +379,11 @@ public:
         // junction-adjacent points whose cells fit_exclusion stripped).
         // false => TrackFitting param 0 => byte-identical.
         bool   m_dqdx_fit_keep_all_points{false};
+        // doc pdvd/45: exclusion tournament compares the cell in the segment
+        // clouds' t0-corrected drift frame (raw frame otherwise: off by
+        // v_drift * cluster_t0, metres on a PDVD cosmic).  false => TrackFitting
+        // param 0 => byte-identical.
+        bool   m_excl_t0_frame{false};
         int    m_pr_find_other_rounds{0};
         bool   m_v3_extension_guard{false};
         double m_v3_extension_min_gain{-1.0};   // cm

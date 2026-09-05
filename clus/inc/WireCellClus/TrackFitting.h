@@ -211,6 +211,30 @@ namespace WireCell::Clus {
             // double for the set_parameter(name, value) plumbing.
             double dqdx_fit_keep_all_points = 0;
 
+            // doc pdvd/45 -- the exclusion tournament (update_association) builds
+            // each candidate 2-D cell's test point from (time, wire) with the
+            // GEOMETRIC offset_t, i.e. in the raw t0 = 0 drift frame, but the
+            // per-segment "fit"/"main" clouds it queries hold the fitted points
+            // in the cluster's t0-CORRECTED frame (SCECorrection::backward adds
+            // dirx * t0 * v_drift to x).  Every distance is therefore off by
+            // v_drift * cluster_t0: 1-3 mm on an SBND beam candidate (t0 ~ 1 us),
+            // 0.6-6 m on a PDVD cosmic (t0 relative to trigger of ms), where the
+            // segment whose cloud reaches farthest in x wins every cell of the
+            // cluster and the others lose all charge (039252/2: 61 % of the PR
+            // trajectory points dropped, SBND 1 %).  The prototype is
+            // self-consistent by construction (its update_association derives
+            // offset_t from the cluster's OWN first point,
+            // PR3DCluster_multi_track_fitting.h:1043-1046).
+            // > 0: form_map_graph measures, per fit point and (apa, face), the
+            // offset between the geometric time->x inversion and the corrected
+            // frame (the point run through the cells' own backward(t0) +
+            // convert_3Dpoint_time_ch, minus itself -- so a time-origin difference
+            // between the two conversions, e.g. PDVD's trigger offset, is covered
+            // too) and update_association subtracts it from the test point's raw
+            // x before the cloud query.  0 = legacy = byte-identical.
+            // Reported as a double for the set_parameter(name, value) plumbing.
+            double excl_t0_frame = 0;
+
             // doc pdvd/44 -- acceptance window of cal_gaus_integral in sigmas:
             // a (time, wire) bin farther than gaus_nsigma * sigma from a
             // sub-point's centre receives nothing from it (no renormalisation).
@@ -967,6 +991,16 @@ namespace WireCell::Clus {
         // true form_map_graph stores zero-quantity interior points instead
         // of dropping them.  Always false while the knob is 0.
         bool m_keep_zero_quantity_points{false};
+        // doc pdvd/45: per-(apa,face) drift-frame offset (WCT mm) between the x
+        // update_association reconstructs from a cell's time (geometric offset_t /
+        // slope_t) and the t0-corrected frame of the segment clouds, keyed by
+        // WirePlaneId(kAllLayers, face, apa).ident().  Filled by form_map_graph for
+        // the fit point being associated while excl_t0_frame > 0 (the point run
+        // through the same backward(t0) + convert_3Dpoint_time_ch the cells came
+        // from, minus the point itself), read by update_association, cleared
+        // afterwards.  Empty while the knob is 0, so the legacy path never looks
+        // anything up.
+        std::map<int, double> m_excl_x_shift;
         // doc pr/108 stage dump (debug only, env WCT_TRAJ_DUMP=<path>; unset => no
         // code path): per trajectory round, every interior point's association
         // counts before/after exclusion, live-plane quantities, kept flag, and

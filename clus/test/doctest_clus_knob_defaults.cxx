@@ -359,6 +359,8 @@ TEST_CASE("clus knob defaults: TaggerCheckNeutrino switches are all OFF")
     CHECK_KNOB_BOOL(cfg, "dl_vtx_cloud_no_exclusion", false);
     // doc pr/107: dQ/dx fit keeps every trajectory point (prototype parity) -- OFF.
     CHECK_KNOB_BOOL(cfg, "dqdx_fit_keep_all_points", false);
+    // doc pdvd/45: exclusion cells compared in the t0-corrected drift frame -- OFF.
+    CHECK_KNOB_BOOL(cfg, "excl_t0_frame", false);
     // doc pdvd/30's traj_degenerate_wcpts_fallback was RETIRED by owner
     // decision 2026-09-03 (doc pdvd/31 round 6): inert on the event it was
     // built for, never enabled in any config, and not the fix for the symptom.
@@ -1362,6 +1364,19 @@ TEST_CASE("clus knob defaults: TrackFitting dqdx_fit_keep_all_points is off")
     CHECK(tf.get_parameter("dqdx_fit_keep_all_points") == doctest::Approx(1.0));
     auto preset = Clus::TrackFittingPresets::create_with_current_values();
     CHECK(preset.get_parameters().dqdx_fit_keep_all_points == doctest::Approx(0.0));
+}
+
+TEST_CASE("clus knob defaults: TrackFitting excl_t0_frame is off")
+{
+    // doc pdvd/45: update_association's cell test point is built in the raw
+    // drift frame while the segment clouds are t0-corrected; > 0 shifts the
+    // cell by dirx * cluster_t0 * v_drift.  Default 0 = legacy = byte-identical.
+    Clus::TrackFitting tf;
+    CHECK(tf.get_parameter("excl_t0_frame") == doctest::Approx(0.0));
+    tf.set_parameter("excl_t0_frame", 1.0);
+    CHECK(tf.get_parameter("excl_t0_frame") == doctest::Approx(1.0));
+    auto preset = Clus::TrackFittingPresets::create_with_current_values();
+    CHECK(preset.get_parameters().excl_t0_frame == doctest::Approx(0.0));
 }
 
 TEST_CASE("clus knob defaults: TrackFitting traj_degenerate_wcpts_fallback is retired")

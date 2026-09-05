@@ -1023,3 +1023,30 @@ Intentional divergences recorded the same round:
 - "shared wire" error inflation (8000): prototype = a wire also carrying an mcell of ANOTHER
   cluster; toolkit = a blob outside ALL loaded clusters (`update_dQ_dx_data`).  Hundreds of channels
   differ on 6805 (pr/108 sec 6).  Open.
+
+## The exclusion tournament compares the cell in the segment clouds' drift frame — `update_association` (doc pdvd/45, knob `excl_t0_frame`, default OFF)
+
+Prototype `PR3DCluster::update_association` (`PR3DCluster_multi_track_fitting.h:1023-1046`)
+turns each candidate 2-D cell `(time, wire)` back into a point with
+`offset_t = (pts[0].mcell->GetTimeSlice()*ts - pts[0].x)/ts`, i.e. the drift offset is read off
+the cluster's OWN first point, so the reconstructed x is in the same frame as the
+`ProtoSegment` point clouds it then queries with `get_closest_2d_dis(x, y, plane)`.  The toolkit's
+`TrackFitting::update_association` (`clus/src/TrackFitting.cxx`, the three plane loops) uses the
+GEOMETRIC `offset_t`/`slope_t` from `wpid_offsets`/`wpid_slopes` (built from `xorig`, drift speed and
+the grouping time offset), which yields the RAW (t0 = 0) drift x, while the per-segment `"fit"` /
+`"main"` `DynamicPointCloud`s hold the fitted points in the cluster's t0-CORRECTED default scope
+(`SCECorrection::backward` adds `dirx * cluster_t0 * v_drift` to x; `clustering_switch_scope`).
+Every own- and competitor distance in the keep rule
+`min_dis_track < 0.3 cm || min_dis_track < min-over-others` is therefore off by
+`v_drift * cluster_t0`: 1-3 mm on an SBND beam candidate (t0 ~ 1-2 us), 0.6-6 m on a PDVD cosmic
+whose t0 relative to the trigger is milliseconds — where the segment whose cloud reaches farthest in
+x wins every cell of the cluster and the others lose all charge (PDVD 039252/2: 61 % of the PR
+trajectory points dropped by `form_map_graph`'s zero-quantity test, SBND 1 %; doc pdvd/45 sec 2).
+**Undocumented port divergence, now recorded.**  `excl_t0_frame > 0` makes `form_map_graph`
+subtract `dirx * cluster_t0 * v_drift(apa, face)` from the test point's raw x before the cloud
+query (the same quantities `SCECorrection::backward` uses; the SCE displacement is not applied to
+the projected pseudo-point, matching the prototype which has no SCE in this path).  0 = legacy =
+byte-identical.  Flipping it is a production decision per detector (doc pdvd/45 sec 6).
+Related: doc pr/98 (the `-1.0` sentinel guard in the same function), doc pr/108 (parity-exact
+"through the association stage" was measured on uBooNE 5384, where the t0 folding leaves the
+two frames coincident), doc pdvd/30 (the cluster-86 symptom this explains).

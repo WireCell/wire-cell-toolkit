@@ -324,6 +324,8 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_traj_cover_probe           = get(config, "traj_cover_probe",           m_traj_cover_probe);
     // doc sbnd_xin/docs/pr/107: dQ/dx fit keeps every trajectory point (prototype parity).
     m_dqdx_fit_keep_all_points   = get(config, "dqdx_fit_keep_all_points",   m_dqdx_fit_keep_all_points);
+    // doc pdvd/45: exclusion cells compared in the t0-corrected frame.
+    m_excl_t0_frame              = get(config, "excl_t0_frame",              m_excl_t0_frame);
     m_pr_find_other_rounds       = get(config, "pr_find_other_rounds",       m_pr_find_other_rounds);
     // doc sbnd_xin/docs/pr/24 §18 (round 5).
     m_v3_extension_guard         = get(config, "v3_extension_guard",         m_v3_extension_guard);
@@ -968,6 +970,7 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["iso_endpoint_min_aspect"]    = m_iso_endpoint_min_aspect;     // trimmed transverse/axial extent ratio
     cfg["traj_cover_probe"]           = m_traj_cover_probe;            // false = no pr/67 diagnostic lines
     cfg["dqdx_fit_keep_all_points"]   = m_dqdx_fit_keep_all_points;    // doc pr/107: false = legacy (pre-dQ/dx pass drops zero-quantity points)
+    cfg["excl_t0_frame"]              = m_excl_t0_frame;               // doc pdvd/45: false = legacy (exclusion cells in the raw drift frame)
     cfg["pr_find_other_rounds"]       = m_pr_find_other_rounds;        // 0 = keep find_proto_vertex's hardcoded budget
     cfg["v3_extension_guard"]         = m_v3_extension_guard;          // false = examine_vertices_3 unconditional accept
     cfg["v3_extension_min_gain"]      = m_v3_extension_min_gain;       // cm
@@ -2776,6 +2779,13 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
         // via inherit_from copy m_params, so every do_multi_tracking site is
         // covered.
         track_fitter->set_parameter("dqdx_fit_keep_all_points", m_dqdx_fit_keep_all_points ? 1.0 : 0.0);
+        // doc pdvd/45: exclusion test points shifted into the segment clouds'
+        // t0-corrected frame.  Set ONLY when the config bool is true, so a value
+        // carried by the runtime TrackFitting JSON (load_trackfitting_config ->
+        // set_parameter, e.g. an SBND diagnostic arm via SBND_TRACKFIT_JSON with
+        // no cfg edit) is not stomped back to 0.  Config false + canonical JSON
+        // (no such key) => parameter stays at its C++ default 0 => byte-identical.
+        if (m_excl_t0_frame) track_fitter->set_parameter("excl_t0_frame", 1.0);
         // doc sbnd_xin/docs/pr/50 (fit_blob_coverage_defer, default false):
         // wrap the MAIN cluster's find_proto_vertex call so its recursive
         // break partition forms on legacy (undeweighted) fits -- the partition
