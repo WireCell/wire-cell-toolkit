@@ -96,6 +96,15 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
               // decision 2026-09-03.  null => key omitted => 4000 => the
               // historical value, and every other detector keeps it.
               retile_steiner_terminal_charge=steiner_terminal_charge,
+              // doc pdvd/40 round 3: the retiler's anti-ghost filter
+              // (ImproveCluster_1::remove_bad_blobs).  retile_bad_blob_max_run
+              // (cm; C++ default 0 = the historical component vote) removes a
+              // connected run of retiled blobs with no original-blob support
+              // whose extent exceeds this length -- the fabricated columns and
+              // bridges of doc 40 sec 5/7.  null => key omitted => byte-identical.
+              // retile_bad_blob_report (C++ default false) is a log-only census.
+              retile_bad_blob_max_run=null,
+              retile_bad_blob_report=false,
               // save_in_scope (doc 87): add the per-cluster T_cluster tree to
               // tracking-pr.root -- the in-scope set (switch_scope's scope_filter,
               // the SAME predicate the Bee clustering layer is gated on) plus the
@@ -1249,7 +1258,9 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
             samplers=[clus.sampler(clus_maker.live_sampler(a, f), apa=a.data.ident, face=f)
                       for a in anodes for f in [0, 1]],
             wrapped_channel_activity=retile_wrapped_channel_activity,
-            terminal_charge_threshold=retile_steiner_terminal_charge),
+            terminal_charge_threshold=retile_steiner_terminal_charge,
+            bad_blob_max_run=if retile_bad_blob_max_run == null then null else retile_bad_blob_max_run * wc.cm,
+            bad_blob_report=retile_bad_blob_report),
         // Visitors available to the PR pipeline, by name.  switch_scope re-applies
         // the per-cluster T0 correction on the loaded tree (the corrected scope is
         // runtime state and does not persist through the tarball); it recomputes

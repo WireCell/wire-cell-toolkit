@@ -31,14 +31,17 @@ namespace WireCell::Clus {
     {
         // Base class configure() handles NeedDV, NeedPCTS, samplers, and anodes.
         RetileCluster::configure(cfg);
+        // doc pdvd/40 round 3.  Both default to the historical filter; a config
+        // that never mentions the keys runs bit-for-bit as before.
+        m_bad_blob_max_run = get(cfg, "bad_blob_max_run", m_bad_blob_max_run);
+        m_bad_blob_report = get(cfg, "bad_blob_report", m_bad_blob_report);
     }
 
     Configuration ImproveCluster_1::default_configuration() const
     {
         Configuration cfg = RetileCluster::default_configuration();
-        
-      
-        
+        cfg["bad_blob_max_run"] = m_bad_blob_max_run;
+        cfg["bad_blob_report"] = m_bad_blob_report;
         return cfg;
     }
 
@@ -630,6 +633,20 @@ ImproveCluster_1::remove_bad_blobs(const Cluster& cluster, Cluster& shad_cluster
     // one APA -- a missing (apa,face) entry on either side means there is
     // nothing to filter for this pair.
     static const std::map<int, BlobSet> empty_tbm;
+    // doc pdvd/40 round 3.  The shadow cluster's ClusterCache (time_blob_map,
+    // npoints, ...) is filled on first use and is NOT invalidated when blob
+    // children are inserted or removed (Mixins::Cached has no child-change
+    // hook; Cluster::on_insert/on_remove clear only the sv3d memo).  The
+    // caller inserts one (apa, face)'s blobs, calls this, removes some, then
+    // inserts the next face's blobs and calls again -- so from the second
+    // face on, the cached map has no entry for the face being filtered and
+    // the filter silently returns nothing (PDVD 039252/2: 80 of 493 retiled
+    // clusters span >1 face; cluster 119's 122 cm column sits on its second
+    // face and was never examined).  With the run bound ON the cache is
+    // refreshed here; OFF keeps the historical behaviour byte-for-byte.
+    if (m_bad_blob_max_run > 0) {
+        shad_cluster.invalidate_cache();
+    }
     auto tbm_at = [](const auto& tbm, int apa, int face) -> const auto& {
         auto ait = tbm.find(apa);
         if (ait == tbm.end()) return empty_tbm;
@@ -668,7 +685,25 @@ ImproveCluster_1::remove_bad_blobs(const Cluster& cluster, Cluster& shad_cluster
     
     // If no new blobs or only one blob, nothing to filter.
     if (all_new_blobs.size() <= 1) {
+        if (m_bad_blob_report) {
+            // census: how often the stale cache (see above) hides a face
+            size_t nchildren_face = 0;
+            for (const Blob* b : shad_cluster.children())
+                if (b->wpid().apa() == apa && b->wpid().face() == face) ++nchildren_face;
+            SPDLOG_LOGGER_DEBUG(log, "BADBLOBSKIP ident={} apa={} face={} cached_nnew={} children_on_face={}",
+                                cluster.ident(), apa, face, all_new_blobs.size(), nchildren_face);
+        }
         return {};
+    }
+
+    // doc pdvd/40 round 3: the historical filter is kept textually intact
+    // below; the knob-ON path and the log-only census live in
+    // remove_bad_blobs_runs().  Either knob routes through it (the census must
+    // see the legacy vote next to the run structure), and with bad_blob_max_run
+    // <= 0 it returns exactly the legacy vote -- asserted in
+    // doctest_bad_blob_runs.cxx.
+    if (m_bad_blob_max_run > 0 || m_bad_blob_report) {
+        return remove_bad_blobs_runs(cluster, all_new_blobs, orig_time_blob_map, new_time_blob_map, tick_span, apa, face);
     }
     
     // Create graph for new blobs - establish connectivity between adjacent time slices
@@ -775,6 +810,136 @@ ImproveCluster_1::remove_bad_blobs(const Cluster& cluster, Cluster& shad_cluster
         }
     }
 
+    return blobs_to_remove;
+}
+
+
+// doc pdvd/40 round 3.  Knob-ON path and census for remove_bad_blobs.  See
+// BadBlobRuns.h for the decision semantics; this function only builds the
+// inputs (adjacency, per-blob support, centers) from the two blob maps.
+std::vector<const WireCell::Clus::Facade::Blob*>
+ImproveCluster_1::remove_bad_blobs_runs(const Cluster& cluster,
+                                        const std::vector<const Blob*>& all_new_blobs,
+                                        const std::map<int, BlobSet>& orig_time_blob_map,
+                                        const std::map<int, BlobSet>& new_time_blob_map,
+                                        int tick_span, int apa, int face) const
+{
+    const int N = all_new_blobs.size();
+    std::map<const Blob*, int> map_blob_index;
+    for (int i = 0; i < N; ++i) map_blob_index[all_new_blobs[i]] = i;
+
+    // Per-blob support: the historical +-1 slice overlap test, applied to EVERY blob.
+    auto supported_by_orig = [&](const Blob* blob) {
+        const int ts = blob->slice_index_min();
+        for (int dts : {-tick_span, 0, tick_span}) {
+            auto it = orig_time_blob_map.find(ts + dts);
+            if (it == orig_time_blob_map.end()) continue;
+            for (const Blob* ob : it->second)
+                if (blob->overlap_fast(*ob, 1)) return true;
+        }
+        return false;
+    };
+    std::vector<bool> supported(N, false);
+    std::vector<Point> centers(N);
+    std::vector<int> slice(N, 0);
+    int nsup = 0;
+    for (int i = 0; i < N; ++i) {
+        supported[i] = supported_by_orig(all_new_blobs[i]);
+        nsup += supported[i] ? 1 : 0;
+        centers[i] = all_new_blobs[i]->center_pos();
+        slice[i] = all_new_blobs[i]->slice_index_min();
+    }
+
+    // Adjacency.  Legacy = adjacent-slice overlap; the round-3 graph adds
+    // same-slice overlap (a column at fixed drift time is many blobs in ONE
+    // slice, with no adjacent-slice edge between them).  Blob sets iterate in
+    // pointer order, so edges are collected as index pairs and sorted.
+    std::vector<std::pair<int, int>> edges_legacy, edges_ss;
+    for (const auto& [time_slice, current_blobs] : new_time_blob_map) {
+        auto next_it = new_time_blob_map.find(time_slice + tick_span);
+        if (next_it != new_time_blob_map.end()) {
+            for (const Blob* b1 : current_blobs)
+                for (const Blob* b2 : next_it->second)
+                    if (b1->overlap_fast(*b2, 1))
+                        edges_legacy.emplace_back(map_blob_index[b1], map_blob_index[b2]);
+        }
+        for (const Blob* b1 : current_blobs)
+            for (const Blob* b2 : current_blobs) {
+                const int i1 = map_blob_index[b1], i2 = map_blob_index[b2];
+                if (i1 < i2 && b1->overlap_fast(*b2, 1)) edges_ss.emplace_back(i1, i2);
+            }
+    }
+    std::sort(edges_legacy.begin(), edges_legacy.end());
+    std::sort(edges_ss.begin(), edges_ss.end());
+    std::vector<std::pair<int, int>> edges_all(edges_legacy);
+    edges_all.insert(edges_all.end(), edges_ss.begin(), edges_ss.end());
+    std::sort(edges_all.begin(), edges_all.end());
+
+    const auto legacy_rm = BadBlobRuns::legacy_component_vote(N, edges_legacy, supported);
+    const auto res = BadBlobRuns::analyze(N, edges_all, supported, centers, m_bad_blob_max_run, slice);
+
+    if (m_bad_blob_report) {
+        // cid = the Bee / calib-dump cluster id (get_cluster_id), the key the
+        // offline census joins on; ident = the node ident used in other log
+        // lines.  Run centers are in the RAW drift frame (blob center_pos), not
+        // x_t0cor: match to the 3D census on (y, z) within a cluster.
+        size_t norig = 0;
+        for (const auto& kv : orig_time_blob_map) norig += kv.second.size();
+        std::vector<int> comp_legacy;
+        const int ncomp_legacy = BadBlobRuns::label_components(N, edges_legacy, comp_legacy);
+        std::string line = fmt::format(
+            "BADBLOB cid={} ident={} apa={} face={} nnew={} norig={} ncomp={} ncomp_ss={} nsup={} legacy_rm={} run_rm={} nruns={} maxrun_cm={:.1f}",
+            cluster.get_cluster_id(), cluster.ident(), apa, face, N, norig,
+            ncomp_legacy, res.ncomp, nsup, legacy_rm.size(), res.removed_by_run.size(),
+            res.runs.size(), res.runs.empty() ? 0.0 : res.runs.front().span / units::cm);
+        int shown = 0;
+        for (const auto& run : res.runs) {
+            if (shown >= 12) break;
+            if (run.span < 3 * units::cm && shown > 0) break;   // longest first; stop at the short tail
+            // bb = the run's raw-frame bounding box of blob centers (x0,x1,y0,y1,z0,z1)
+            Point lo = centers[run.blobs.front()], hi = lo;
+            for (int i : run.blobs) {
+                const auto& c = centers[i];
+                lo = Point(std::min(lo.x(), c.x()), std::min(lo.y(), c.y()), std::min(lo.z(), c.z()));
+                hi = Point(std::max(hi.x(), c.x()), std::max(hi.y(), c.y()), std::max(hi.z(), c.z()));
+            }
+            line += fmt::format(" | run {}: nb={} nslices={} span_cm={:.1f} craw=({:.1f},{:.1f},{:.1f}) bb=({:.1f},{:.1f},{:.1f},{:.1f},{:.1f},{:.1f})",
+                                shown, run.blobs.size(), run.nslices, run.span / units::cm,
+                                run.center.x() / units::cm, run.center.y() / units::cm, run.center.z() / units::cm,
+                                lo.x() / units::cm, hi.x() / units::cm, lo.y() / units::cm, hi.y() / units::cm,
+                                lo.z() / units::cm, hi.z() / units::cm);
+            ++shown;
+        }
+        SPDLOG_LOGGER_DEBUG(log, "{}", line);
+        // Per-blob detail at TRACE (PDVD_LOG_LEVEL=trace): the offline census
+        // labels every Steiner point by the retiled blob it came from.
+        // run = index into the longest-first run list, -1 = supported or voted out.
+        if (log->should_log(spdlog::level::trace)) {
+            std::vector<int> run_of(N, -1);
+            for (size_t k = 0; k < res.runs.size(); ++k)
+                for (int i : res.runs[k].blobs) run_of[i] = int(k);
+            std::vector<char> voted(N, 0);
+            for (int i : res.removed_by_vote) voted[i] = 1;
+            for (int i = 0; i < N; ++i) {
+                SPDLOG_LOGGER_TRACE(log, "BADBLOBPT ident={} apa={} face={} i={} slice={} sup={} comp={} voted={} run={} craw=({:.2f},{:.2f},{:.2f})",
+                                    cluster.ident(), apa, face, i, slice[i], supported[i] ? 1 : 0, res.component[i],
+                                    int(voted[i]), run_of[i],
+                                    centers[i].x() / units::cm, centers[i].y() / units::cm, centers[i].z() / units::cm);
+            }
+        }
+    }
+
+    std::vector<const Blob*> blobs_to_remove;
+    if (m_bad_blob_max_run > 0) {
+        std::vector<int> rm(res.removed_by_vote);
+        rm.insert(rm.end(), res.removed_by_run.begin(), res.removed_by_run.end());
+        std::sort(rm.begin(), rm.end());
+        rm.erase(std::unique(rm.begin(), rm.end()), rm.end());
+        for (int i : rm) blobs_to_remove.push_back(all_new_blobs[i]);
+    } else {
+        // report-only: the legacy vote, unchanged
+        for (int i : legacy_rm) blobs_to_remove.push_back(all_new_blobs[i]);
+    }
     return blobs_to_remove;
 }
 

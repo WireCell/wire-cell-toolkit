@@ -265,9 +265,22 @@ namespace WireCell::Clus {
             if (map_slices_measures.empty()) continue; // no tiled blobs for this face
             int tick_span = map_slices_measures.begin()->first.second -  map_slices_measures.begin()->first.first;
             auto blobs_to_remove = remove_bad_blobs(*orig_cluster, new_cluster, tick_span, apa, face);
+            // doc pdvd/40 round 3 census: point count before/after the removal
+            // (bad_blob_report only) -- the proof that a removed blob's points
+            // leave the retiled cluster the Steiner build sees.
+            // Counted over the blob children, NOT via Cluster::npoints(): that
+            // memo lives in the ClusterCache, which child insert/remove does
+            // not invalidate (see remove_bad_blobs), so it would read stale.
+            auto count_pts = [&]() { size_t n = 0; for (const Blob* b : new_cluster.children()) n += b->nbpoints(); return n; };
+            const size_t npts_before = m_bad_blob_report ? count_pts() : 0;
             for (const Blob* blob : blobs_to_remove) {
                 Blob& b = const_cast<Blob&>(*blob);
                 new_cluster.remove_child(b);
+            }
+            if (m_bad_blob_report) {
+                SPDLOG_LOGGER_DEBUG(log, "BADBLOBRM ident={} apa={} face={} removed={} npts {} -> {} nblobs {}",
+                                    orig_cluster->ident(), apa, face, blobs_to_remove.size(), npts_before,
+                                    count_pts(), new_cluster.children().size());
             }
             SPDLOG_LOGGER_TRACE(log, "timing: remove_bad_blobs (apa={},face={}) took {} ms", apa, face, MS(Clock::now()-t0).count());
             SPDLOG_LOGGER_TRACE(log, "{} blobs removed for apa {} face {} remaining {}", blobs_to_remove.size(), apa, face, new_cluster.children().size());
