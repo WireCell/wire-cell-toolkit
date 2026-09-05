@@ -204,12 +204,17 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
               // surface replaces -- keeping both would count it twice.  x keeps
               // tgm_fv_x_margin: no drift-direction surface was measured.
               // Default false => the BoxFiducial literal and the legacy margin
-              // vectors below are emitted verbatim, i.e. byte-identical.
+              // vectors below are emitted verbatim, i.e. byte-identical for a
+              // caller that passes nothing.  PDVD PRODUCTION is the driver
+              // (pdvd/wct-pr-perevt.jsonnet), which since 2026-09-05 passes
+              // curved_fv=true, curved_fv_profile='p90', curved_fv_margin_y/z=5
+              // (doc pdvd/43 sec 8, owner decision) -- the exit-gap p90 surface
+              // with a 5 cm cushion.
               curved_fv=false, curved_fv_margin_y=3, curved_fv_margin_z=3,
               // curved_fv_profile (doc pdvd/43): which measured surface curved_fv
-              // installs -- 'd50' (doc 41 sec 9, the charge-density median; the
-              // byte-identical default of the curved_fv=true arm) or 'p80' / 'p90'
-              // (doc 43, the exit-gap quantiles of curved_fiducial_profiles.jsonnet).
+              // installs -- 'd50' (doc 41 sec 9, the charge-density median) or
+              // 'p80' / 'p90' (doc 43, the exit-gap quantiles of
+              // curved_fiducial_profiles.jsonnet; production is 'p90').
               // Ignored when curved_fv is off.
               curved_fv_profile='d50',
               save_stm_fit=false, unmerge_bundle_mode='real',
