@@ -146,14 +146,29 @@ local pctransforms(dv) = {
 
 
 
-local bs_live_face(apa, face) = {
+local bs_live_face(apa, face, wrapped_channel_charge=false) = {
     type: "BlobSampler",
     name: "live-%s-%d"%[apa, face],
     data: {
         drift_speed: drift_speed,
         time_offset: time_offset,
         strategy: ["stepped"],
-        extra: [".*wire_index", ".*charge_val", ".*charge_unc", "wpid"]
+        extra: [".*wire_index", ".*charge_val", ".*charge_unc", "wpid"],
+        // wrapped_channel_charge: read a sampled point's induction charge by
+        // channel IDENT when its wire is a wrapped strip's continuation.  PDHD
+        // APAs WRAP their induction planes: each (anode, face, U or V) plane
+        // holds 1148 wires on only 800 channels -- 400 segment-0, 400
+        // segment-1, 348 segment-2 (protodunehd-wires-larsoft-v1), i.e. 65 % of
+        // the wires on an imaging face are continuations.  IWirePlane::channels()
+        // omits them (AnodePlane.cxx:244-247), so the legacy operator[] lookup
+        // reads the wrong channel and can leave charge_val AND charge_unc at 0,
+        // which calc_charge_wcp reads as "no signal".  This is the same defect
+        // doc pdvd/31 round 3 fixed on PDVD (which wraps 11.3 %).
+        // C++ default false; key omitted when off => byte-identical to every
+        // PDHD job ever run, so this is NOT a behaviour change until someone
+        // passes true.  UNGRADED on PDHD: turning it on changes clustering AND
+        // Q/L output and needs its own A/B (pdhd/docs/stm-tagger-chain.md sec 9).
+        [if wrapped_channel_charge then 'wrapped_channel_charge']: true,
     }
 };
 local bs_dead_face(apa, face) = {
@@ -567,6 +582,15 @@ local clus_all_tpc (
     eventNo = 1,
     save_opflash = false,
     premerged = false,   // skip the input PointTreeMerging (joint QLMatching already merged)
+    // Persist the post-Q/L point-cloud tree so the PDHD PR job can reload it
+    // (pdhd/docs/stm-tagger-chain.md sec 3; PDVD parity, protodunevd/clus.jsonnet).
+    // '' (default) keeps the inert dump_mode sink writing trash-all-apa.tar.gz =>
+    // compiled config byte-identical.  A non-empty path turns the SAME
+    // TensorFileSink into a real TensorDM writer (prefix 'clustering_',
+    // dump_mode false) so pdhd/wct-pr-perevt.jsonnet's TensorFileSource can load
+    // the tree.  Runner flag: run_clus_evt.sh -save-pctree ->
+    // work/<RUN6>_<EVT>/pctree-evt<ID>.tar.gz.
+    tensor_outname = '',
     ) = {
     local pcmerging = g.pnode({
         type: "PointTreeMerging",
@@ -731,9 +755,9 @@ local clus_all_tpc (
         type: "TensorFileSink",
         name: "clus_all_tpc",
         data: {
-            outname: "%s/trash-all-apa.tar.gz"%[bee_dir],
+            outname: if tensor_outname == '' then "%s/trash-all-apa.tar.gz"%[bee_dir] else tensor_outname,
             prefix: "clustering_", // json, numpy, dummy
-            dump_mode: true,
+            dump_mode: tensor_outname == '',
         }
     }, nin=1, nout=0),
     local end = if dump
@@ -758,8 +782,22 @@ local clus_all_tpc (
     per_face(anode, face=0, dump=true) :: clus_per_face(anode, face=face, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo),
     per_apa(anode, dump=true) :: clus_per_apa(anode, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo),
     per_group(anodes, group_name, face, dump=true) :: clus_per_group(anodes, group_name, face, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo),
-    all_tpc(anodes, ngroups=2, dump=true, save_opflash=false, premerged=false) :: clus_all_tpc(anodes, ngroups=ngroups, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo, save_opflash=save_opflash, premerged=premerged),
+    all_tpc(anodes, ngroups=2, dump=true, save_opflash=false, premerged=false, tensor_outname='') :: clus_all_tpc(anodes, ngroups=ngroups, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo, save_opflash=save_opflash, premerged=premerged, tensor_outname=tensor_outname),
     // Expose the DetectorVolumes node builder so the Q/L matching graph can
     // reference the SAME per-group DV the clustering uses (deterministic by name).
     detector_volumes(anodes, face="") :: detector_volumes(anodes, face),
+    // Primitives the PDHD pattern-recognition builder
+    // (pgrapher/experiment/pdhd/pr.jsonnet) needs to rebuild the SAME geometry
+    // objects the clustering used: the PCTransformSet for a DV, the
+    // per-(anode,face) 'stepped' live sampler, and the T0 scope coordinates.
+    // Hidden fields (::) => nothing here reaches a compiled clustering config.
+    // PDVD parity (protodunevd/clus.jsonnet), minus the per-crate drift speed:
+    // PDHD has ONE global drift speed.
+    pc_transforms(dv) :: pctransforms(dv),
+    live_sampler(anode, face, wrapped_channel_charge=false) ::
+        bs_live_face(anode.name, face, wrapped_channel_charge=wrapped_channel_charge),
+    drift_speed :: drift_speed,
+    time_offset :: time_offset,
+    scope_coords :: common_coords,
+    t0cor_coords :: common_corr_coords,
 }
