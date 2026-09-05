@@ -372,12 +372,15 @@ void Root::SbndMagnifyTrackingVisitor::write_proj_data(TFile* output_tf, Clus::F
 
     // doc pr/109 §8: prefer each cluster's OWN snapshot over the merged map,
     // whose pred_charge is last-writer-wins across clusters.  The STM slot this
-    // visitor normally reads is a holder fed by merge_fitted_charge_2d(), which
-    // carries no snapshots, so that path is unchanged and takes the fallback.
+    // visitor reads is a holder fed by merge_fitted_charge_2d() AND, since doc
+    // pdvd/42, by one add_fitted_charge_2d_snapshot() per fitted pass (the
+    // merged map alone kept only the LAST cluster's prediction).  The merged
+    // fallback below is reached only by a holder without snapshots.
     auto emit = [&](std::map<int, std::map<std::pair<int, int>, Cell>>& local,
                     int cid, int apa, int face, int plane_idx,
                     const Clus::TrackFitting::WireTime& wt,
-                    const Clus::TrackFitting::FittedCharge2D& fc) {
+                    const Clus::TrackFitting::FittedCharge2D& fc,
+                    int forced_pass = -1) {
         int nticks_per_slice = 1;
         auto ait = nticks_map.find(apa);
         if (ait != nticks_map.end()) {
@@ -393,7 +396,12 @@ void Root::SbndMagnifyTrackingVisitor::write_proj_data(TFile* output_tf, Clus::F
         // T_proj_data can hold a block with no T_rec track (the GUI
         // shows it only under "all clusters").
         static const std::vector<int> pass0{0};
-        const auto& passes = (pit == cluster_passes.end()) ? pass0 : pit->second;
+        // doc pdvd/42: a snapshot that names its STM pass goes under that one
+        // block only -- the forward and backward fits of one cluster are two
+        // different fits with two different predictions.
+        const std::vector<int> one{forced_pass};
+        const auto& passes = (forced_pass >= 0) ? one
+                           : (pit == cluster_passes.end()) ? pass0 : pit->second;
         for (int pass : passes) {
             auto& cell = local[cid * 10 + pass][{channel, time}];
             if (fc.flag != 0) {
@@ -427,8 +435,20 @@ void Root::SbndMagnifyTrackingVisitor::write_proj_data(TFile* output_tf, Clus::F
         for (const auto& snap : per_cluster) {
             std::map<int, std::map<std::pair<int, int>, Cell>> local;
             for (const auto& [afp, wt_map] : snap.cells)
-                for (const auto& [wt, fc] : wt_map)
-                    emit(local, snap.ident, std::get<0>(afp), std::get<1>(afp), std::get<2>(afp), wt, fc);
+                for (const auto& [wt, fc] : wt_map) {
+                    // doc pdvd/42: an STM pass snapshot spans the bounding box
+                    // of main + associated clusters (TrackFitting::prepare_data),
+                    // so most of its cells belong to OTHER clusters and carry
+                    // pred 0 by construction.  Keep the fitted cluster's own
+                    // cells (owner set from global_rb_map) plus owner-less
+                    // dead-region fillers; the block is then "this cluster's
+                    // measured 2D charge against THIS pass's prediction", which
+                    // is what the GUI showed before and what a residual metric
+                    // needs.  PR-stage snapshots (pass < 0) keep every cell.
+                    if (snap.pass >= 0 && snap.cluster && !fc.clusters.empty()
+                        && !fc.clusters.count(snap.cluster)) continue;
+                    emit(local, snap.ident, std::get<0>(afp), std::get<1>(afp), std::get<2>(afp), wt, fc, snap.pass);
+                }
             flush(local);
         }
     }

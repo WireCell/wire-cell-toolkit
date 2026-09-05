@@ -1478,6 +1478,15 @@ void TrackFitting::record_cluster_fitted_charge_2d()
     }
 }
 
+void TrackFitting::add_fitted_charge_2d_snapshot(Facade::Cluster* cluster, int ident, int pass,
+                                                 const std::map<APAFacePlane, std::map<WireTime, FittedCharge2D>>& cells)
+{
+    // doc pdvd/42: the STM tagger's hand-off holder.  One entry per fitted
+    // PASS, in the order the passes were fitted; a cluster fitted forward and
+    // backward contributes two entries that differ in `pass` and in `cells`.
+    m_cluster_fitted_charge_2d.push_back({cluster, ident, cells, pass});
+}
+
 void TrackFitting::assemble_fitted_charge_2d()
 {
     m_fitted_charge_2d.clear();

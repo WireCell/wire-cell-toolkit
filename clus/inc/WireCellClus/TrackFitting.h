@@ -581,7 +581,14 @@ namespace WireCell::Clus {
         struct ClusterFitted2D {
             Facade::Cluster* cluster{nullptr};
             int ident{-1};
+            /// doc pdvd/42: the STM tagger fits one cluster up to twice
+            /// (forward/backward pass) and each pass is its own fit with its
+            /// own prediction.  -1 = a PR-stage snapshot (one fit per cluster,
+            /// the pr/109 semantics); >= 0 = the STM pass this snapshot
+            /// belongs to, so a writer can emit it under block ident*10+pass
+            /// instead of duplicating one cluster's cells under every pass.
             std::map<APAFacePlane, std::map<WireTime, FittedCharge2D>> cells;
+            int pass{-1};   // declared LAST so the PR-stage {cluster, ident, cells} initializer keeps compiling
         };
 
         // Fill fitted 2D charge results after dQ/dx fitting
@@ -887,6 +894,14 @@ namespace WireCell::Clus {
         /// get_fitted_charge_2d() these are NOT merged, so pred_charge is the
         /// value the named cluster's own fit produced.
         const std::vector<ClusterFitted2D>& get_cluster_fitted_charge_2d() const { return m_cluster_fitted_charge_2d; }
+
+        /// doc pdvd/42: append a snapshot captured elsewhere (the STM tagger's
+        /// per-pass copy of its private fitter's map) so a holder TrackFitting
+        /// that never fitted anything can still answer
+        /// get_cluster_fitted_charge_2d().  Additive: capture order is kept,
+        /// nothing is merged or sorted, the merged map is untouched.
+        void add_fitted_charge_2d_snapshot(Facade::Cluster* cluster, int ident, int pass,
+                                           const std::map<APAFacePlane, std::map<WireTime, FittedCharge2D>>& cells);
 
         /**
          * Get geometry information for wire plane offsets

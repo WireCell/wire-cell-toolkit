@@ -626,12 +626,16 @@ public:
             saved->set_pc_transforms(m_pcts);
             for (auto& [cid, seg] : m_saved_segments) saved->add_segment(seg);
             saved->merge_fitted_charge_2d(m_acc_fitted_charge);
+            // doc pdvd/42: per-pass snapshots for the T_proj_data writers.
+            for (const auto& snap : m_acc_pass_snapshots)
+                saved->add_fitted_charge_2d_snapshot(snap.cluster, snap.ident, snap.pass, snap.cells);
             grouping.set_track_fitting("stm", saved);
             SPDLOG_LOGGER_INFO(s_log,
                 "visit: TaggerCheckSTM: save_stm_fit stored {} segment(s) in grouping slot 'stm'",
                 m_saved_segments.size());
             m_saved_segments.clear();
             m_acc_fitted_charge.clear();
+            m_acc_pass_snapshots.clear();
         }
 
         // (dead-code stub removed — see git history for the tracking-infrastructure
@@ -863,6 +867,14 @@ private:
         int status{6};
         int kink_num{-1};
         double exit_L{0}, left_L{0}, exit_Q{0}, left_Q{0};
+        // doc pdvd/42: THIS pass's pred/meas 2D charge, captured right after
+        // its round-2 fit.  The merged accumulator below is last-writer-wins
+        // and a later cluster's bounding-box cells (pred 0 off its own
+        // trajectory) overwrite every earlier cluster's prediction -- on PDVD
+        // 039252/2 only the last fitted cluster kept charge_pred (6923 of
+        // 177857 cells).  Same defect class as doc pr/109 sec 8 (PR stage).
+        std::map<TrackFitting::APAFacePlane,
+                 std::map<TrackFitting::WireTime, TrackFitting::FittedCharge2D>> cells;
     };
     struct StmEvalRecord {
         int pass{0};
@@ -878,6 +890,16 @@ private:
     mutable std::vector<std::pair<int, std::shared_ptr<PR::Segment>>> m_saved_segments;
     mutable std::map<TrackFitting::APAFacePlane,
                      std::map<TrackFitting::WireTime, TrackFitting::FittedCharge2D>> m_acc_fitted_charge;
+    // doc pdvd/42: per-pass snapshots (cluster, ident, pass, cells) in fit
+    // order, handed to the holder as get_cluster_fitted_charge_2d() entries.
+    struct StmPassSnapshot {
+        Cluster* cluster{nullptr};
+        int ident{-1};
+        int pass{0};
+        std::map<TrackFitting::APAFacePlane,
+                 std::map<TrackFitting::WireTime, TrackFitting::FittedCharge2D>> cells;
+    };
+    mutable std::vector<StmPassSnapshot> m_acc_pass_snapshots;
 
     // Called right after the round-2 (final) fit of a pass.
     void begin_pass_record(std::shared_ptr<PR::Segment> segment, bool is_forward) const {
@@ -885,9 +907,12 @@ private:
         StmPassRecord rec;
         rec.segment = segment;
         rec.pass = m_cur_pass;
+        // doc pdvd/42: keep this pass's own map (see StmPassRecord::cells).
+        rec.cells = m_track_fitter.get_fitted_charge_2d();
         m_pass_records.push_back(std::move(rec));
         // Snapshot this pass's pred/meas 2D charge before the next
-        // clear_segments() wipes it (last-writer-wins on overlap).
+        // clear_segments() wipes it (last-writer-wins on overlap).  Kept as
+        // the merged fallback for readers that do not use the snapshots.
         for (const auto& [afp, wt_map] : m_track_fitter.get_fitted_charge_2d()) {
             auto& dst = m_acc_fitted_charge[afp];
             for (const auto& [wt, fc] : wt_map) dst[wt] = fc;
@@ -940,6 +965,7 @@ private:
                     cluster.get_cluster_id(), rec.pass, rec.status, rec.kink_num,
                     rec.exit_L/units::cm, rec.left_L/units::cm, n);
                 m_saved_segments.emplace_back(cluster.get_cluster_id(), rec.segment);
+                m_acc_pass_snapshots.push_back({&cluster, cluster.get_cluster_id(), rec.pass, rec.cells});
             }
             std::map<std::string, Array> arrays;
             arrays.emplace("x", Array(x)); arrays.emplace("y", Array(y)); arrays.emplace("z", Array(z));
