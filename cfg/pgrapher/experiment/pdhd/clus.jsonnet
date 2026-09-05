@@ -191,6 +191,11 @@ local clus_per_face (
     runNo = 1,
     subRunNo = 1,
     eventNo = 1,
+    // Wrapped-plane induction charge for the SAMPLED points (doc
+    // pdhd/stm-tagger-chain.md sec 12).  C++ default false; key omitted when
+    // off => byte-identical compiled config.  DEFAULT FALSE: turning it on
+    // changes the pctree the Q/L job writes, hence production Q/L output.
+    wrapped_channel_charge = false,
     ) =
 {
 
@@ -214,7 +219,7 @@ local clus_per_face (
         }
     }, nin=1, nout=1, uses=[]),
 
-    local bsl = bs_live_face(anode.name, face),
+    local bsl = bs_live_face(anode.name, face, wrapped_channel_charge=wrapped_channel_charge),
     local bsd = bs_dead_face(anode.name, face),
 
     local ptb = g.pnode({
@@ -326,6 +331,11 @@ local clus_per_apa (
     runNo = 1,
     subRunNo = 1,
     eventNo = 1,
+    // Wrapped-plane induction charge for the SAMPLED points (doc
+    // pdhd/stm-tagger-chain.md sec 12).  C++ default false; key omitted when
+    // off => byte-identical compiled config.  DEFAULT FALSE: turning it on
+    // changes the pctree the Q/L job writes, hence production Q/L output.
+    wrapped_channel_charge = false,
     ) =
 {
     local cfout_live = g.pnode({
@@ -343,8 +353,8 @@ local clus_per_apa (
         }}, nin=1, nout=2),
 
     local per_face_pipes = [
-        clus_per_face(anode, face=0, dump=false, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo),
-        clus_per_face(anode, face=1, dump=false, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo),
+        clus_per_face(anode, face=0, dump=false, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo, wrapped_channel_charge=wrapped_channel_charge),
+        clus_per_face(anode, face=1, dump=false, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo, wrapped_channel_charge=wrapped_channel_charge),
     ],
 
     local pcmerging = g.pnode({
@@ -779,8 +789,8 @@ local clus_all_tpc (
 
 {
     local bee_dir = if output_dir == '' then 'data' else output_dir,
-    per_face(anode, face=0, dump=true) :: clus_per_face(anode, face=face, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo),
-    per_apa(anode, dump=true) :: clus_per_apa(anode, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo),
+    per_face(anode, face=0, dump=true, wrapped_channel_charge=false) :: clus_per_face(anode, face=face, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo, wrapped_channel_charge=wrapped_channel_charge),
+    per_apa(anode, dump=true, wrapped_channel_charge=false) :: clus_per_apa(anode, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo, wrapped_channel_charge=wrapped_channel_charge),
     per_group(anodes, group_name, face, dump=true) :: clus_per_group(anodes, group_name, face, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo),
     all_tpc(anodes, ngroups=2, dump=true, save_opflash=false, premerged=false, tensor_outname='') :: clus_all_tpc(anodes, ngroups=ngroups, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo, save_opflash=save_opflash, premerged=premerged, tensor_outname=tensor_outname),
     // Expose the DetectorVolumes node builder so the Q/L matching graph can
