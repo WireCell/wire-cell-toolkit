@@ -2297,11 +2297,33 @@ function(
     // segment of cluster 15 -- the cosmic pr/129 was written to keep out -- was
     // counted for 177.8 MeV, while the pr/129 test SKIPped that same segment
     // (impact 69.1 cm, miss 112.2 deg) because it is wired to the other pool.
-    // C++ default 0 = no test => key omitted => byte-identical.
-    // NOT flipped: it needs its own arm and its own negative control before it
-    // is anything more than a hypothesis with one supporting event.
-    kine_near_pointing_impact = 0,      // cm; 0 = off.  20 mirrors pr/129's SBND value
-    kine_near_pointing_miss_deg = 90,   // deg; only read when the impact cut is armed
+    // C++ default 0 = no test, so the keys are now always emitted.  NOT
+    // byte-identical to pre-2026-09-06 production; doc sbnd_xin/pr/145 §8 is
+    // the before/after, and --tla-code kine_near_pointing_impact=0 restores the
+    // legacy no-test path exactly.
+    //
+    // SBND PRODUCTION ON 2026-09-06 at 200 cm / 30 deg (owner decision, doc
+    // sbnd_xin/pr/145 §3.8 and §8).  Read the two numbers together:
+    //   impact = 200 cm  arms the test (the predicate is impact > 0) and
+    //                    places no effective bound -- the largest impact in the
+    //                    whole 3067-event population is 110.22 cm.
+    //   miss_deg = 30    is what actually decides.  The owner scanned all five
+    //                    candidates the pool admits across the population and
+    //                    ruled ONE a real daughter (392009, a long muon broken
+    //                    up by an SP failure at the cathode, miss 12.5 deg) and
+    //                    four overclustered cosmics (miss 90.8 / 103.8 / 112.2
+    //                    / 113.6 deg).  A 78.3 deg separation.
+    // THIS INVERTS WHICH KNOB CARRIES THE PHYSICS.  doc 145 §3.6 measured
+    // miss_deg INERT at the 20 cm point that was priced first -- impact refused
+    // all five on its own, including the one that must be kept, which is why
+    // 20/30 was NOT shipped.  At 200 cm miss_deg is the only live clause, so a
+    // future round must not read "miss_deg is inert on SBND" out of §3.6.
+    // Fitted on n = 5 with exactly one keep: the threshold was chosen after
+    // seeing the labels, so 30 deg is fitted, not predicted.  What is not
+    // fitted is the mechanism -- fragmentation preserves direction and destroys
+    // proximity.
+    kine_near_pointing_impact = 200,    // cm; 0 = off.  SBND PRODUCTION 2026-09-06
+    kine_near_pointing_miss_deg = 30,   // deg; the clause that decides at impact = 200
     kine_count_conn4_near = true,
     kine_conn4_near_gap_cm = null,     // null => C++ default 20cm
     straight_cont_cross_cluster = true,
