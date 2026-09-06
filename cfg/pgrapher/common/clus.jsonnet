@@ -370,6 +370,40 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
               + (if proton_c_peak_max != null then { proton_c_peak_max: proton_c_peak_max } else {})
         },
 
+        // doc pdvd/48: CheckSTM_Michel -- the stopping-muon + Michel-electron
+        // reconstruction stage that replaces the neutrino PR tail on a cosmic
+        // detector.  Runs AFTER tagger_check_stm (it anchors on Flags::STM and
+        // the stm_pass/stm_fit PCs, so save_stm_fit must be on upstream).
+        // Publishes the fitter/graph exactly like tagger_check_neutrino (the
+        // unnamed slot + "nu<i>"), so tracking_visitor / pr_display / the Bee
+        // PR layers read it unchanged with visitor 'CheckSTM_Michel:<prefix>'.
+        // mip_dqdx / mip_dqdx_median in e/cm (the TaggerCheckNeutrino
+        // convention).  `knobs` carries (a) the PR-partition keys the stage
+        // reads by the same names as tagger_check_neutrino (see
+        // CheckSTM_Michel.cxx pattern_knob_keys) and (b) the verdict
+        // thresholds (stop_fv_margin_cm, bragg_contrast_min, ...; C++ defaults
+        // documented in default_configuration()).  Keys omitted => C++ default.
+        // Only active when named in pipeline_names => absent from every other
+        // compiled config (byte-identical).
+        check_stm_michel(name="", trackfitting_config_file="", particle_dataset="", recombination_model="",
+                         fiducial=null, fv_tolerance=[],
+                         mip_dqdx=null, mip_dqdx_median=null, perf=false, knobs={}) :: {
+            type: "CheckSTM_Michel",
+            name: prefix + name,
+            data: {
+                grouping: "live",
+                trackfitting_config_file: trackfitting_config_file,
+                particle_dataset: particle_dataset,
+                recombination_model: recombination_model,
+            } + dv_cfg + pcts_cfg
+              + (if perf then { perf: true } else {})
+              + (if mip_dqdx != null then { mip_dqdx: mip_dqdx } else {})
+              + (if mip_dqdx_median != null then { mip_dqdx_median: mip_dqdx_median } else {})
+              + (if fiducial != null then { fiducial: fiducial } else {})
+              + (if std.length(fv_tolerance) > 0 then { fv_tolerance: fv_tolerance } else {})
+              + knobs,
+        },
+
         // Through-going-muon tagger (port of prototype check_tgm).  fiducial
         // names the IFiducial for the inside/outside-FV tests (e.g. a
         // BoxFiducial spanning ALL TPCs so cathode crossers are not exiters);

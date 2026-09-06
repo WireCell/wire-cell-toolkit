@@ -127,6 +127,15 @@ namespace WireCell {
             void write_t_rec_data(TFile* output_tf, Clus::Facade::Grouping& grouping, const ChanScheme& cs) const;
             void write_trun(TFile* output_tf) const;
             void write_cluster_summary(TFile* output_tf, Clus::Facade::Grouping& grouping) const;
+            // doc pdvd/48: the CheckSTM_Michel verdict rows (stm_michel PC, one
+            // per reconstructed STM candidate) and its point layer
+            // (stm_michel_pts) as T_stm_michel / T_stm_michel_pts.  Branches
+            // follow the PC columns.  Written ONLY when at least one cluster
+            // carries the PC, so a job without that stage (PDHD binds this
+            // class too) produces a byte-identical file.
+            void write_stm_michel_trees(TFile* output_tf, Clus::Facade::Grouping& grouping) const;
+            void write_pc_tree(TFile* output_tf, Clus::Facade::Grouping& grouping,
+                               const std::string& pcname, const std::string& treename) const;
         };
     }  // namespace Root
 }  // namespace WireCell

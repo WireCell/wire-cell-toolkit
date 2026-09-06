@@ -64,6 +64,11 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
     local evt_out_prefix = bee_dir + '/',
 
     pr(anodes, dump=true, pipeline_names=[], tensor_outname='',
+              // doc pdvd/48: knob bag for the check_stm_michel stage (verdict
+              // thresholds + PR-partition keys); {} => C++ defaults.  Its
+              // partition knobs are FILTERED from tcn_knobs below, so the
+              // production PR partition is reproduced without a second copy.
+              stm_michel_knobs={},
               // Readout length in ticks for the Magnify/PrDisplay writers (SBND 3427;
               // PDVD production window 10000, run_clus_evt.sh readout_window_ticks).
               nticks=10000,
@@ -1544,6 +1549,79 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
                     [if stm_readout_edge_guard then 'readout_nticks']: nticks,
                     [if stm_cathode_guard_cm != null then 'guard_cathode_cm']: stm_cathode_guard_cm,
                   } },
+            // doc pdvd/48: the stopping-muon + Michel stage that REPLACES
+            // tagger_check_neutrino in the PDVD -nu chain.  Anchors on the STM
+            // tagger's verdict and stm_pass/stm_fit PCs (save_stm_fit is PDVD
+            // production), reuses the PR partition (find_proto_vertex ->
+            // clustering_points -> separate_track_shower -> determine_direction
+            // -> examine_direction from the ENTRY vertex), then its own
+            // Bragg-contrast / KS / template / continuation verdict and the
+            // Michel + dots search at the stop.  Same fiducial + margins as the
+            // cosmic taggers for the stop-containment bit.  The PR-partition
+            // knobs are the SAME keys tagger_check_neutrino reads, filtered
+            // out of tcn_knobs so the two stages cannot drift apart; the
+            // mip scales and the two_end_break / kink family come from the
+            // same pr() args.  Publishes like tagger_check_neutrino, so
+            // tracking_visitor / pr_display / the Bee PR layers need no change
+            // beyond the visitor name (see pr_visitor below).
+            local stm_michel_partition_keys = [
+                'dir_weak_use_score', 'proton_dir_vote', 'proton_dir_score_max', 'proton_dir_asym_min',
+                'endpoint_trim_retry', 'cathode_x', 'cathode_kink_xcut',
+                'cathode_wide_kink_angle', 'cathode_wide_kink_skirt', 'cathode_wide_kink_baseline',
+                'two_end_break', 'teb_turn_min_arm_frac', 'teb_bragg_veto_turn',
+                'kink_walk_dqdx_stop', 'kink_break_protect', 'kink_dqdx_hot_ratio',
+                'shower_topo_demote_len', 'shower_topo_reset', 'shower_topo_dqdx_guard', 'shower_topo_proto_dir',
+                'shower_traj_straight_guard',
+                'fit_exclusion', 'oov_prototype_parity', 'first_seg_local_pca',
+                'other_seg_relaxed_accept', 'other_seg_empty_2d_guard', 'other_seg_keep_isolated',
+                'other_seg_keep_isolated_min_points', 'other_seg_keep_isolated_min_length',
+                'other_seg_keep_isolated_len_admit', 'iso_snap_min_dir_mag',
+                'assoc_full_recluster', 'assoc_reassign_orphans', 'assoc_clear_on_merge',
+                'track_comp_empty_abstain', 'reclass_preserve_4mom', 'reclass_never_computed_ke_floor',
+                'dir_track_median_local',
+                'iso_endpoint', 'iso_endpoint_min_length', 'iso_endpoint_max_xext', 'iso_endpoint_xext_frac',
+                'iso_endpoint_xext_quantile', 'iso_endpoint_tube_radius', 'iso_endpoint_min_aspect',
+                'pr_find_other_rounds', 'v3_extension_guard', 'v3_extension_min_gain',
+                'es3_stub_guard', 'es3sg_stub_max', 'es3sg_len_ratio', 'es3sg_ang3_min', 'es3sg_ang_ratio',
+                'es3sg_require_terminal',
+                'steiner_gap_penalty', 'sgp_dead_alpha', 'sgp_min_edge', 'sgp_sample_step', 'sgp_point_radius',
+                'sgp_weak_scale', 'sgp_weak_qref', 'sgp_max_sep', 'good_point_pitch_frac',
+                'break_seg_orient', 'graph_endpoint_tol',
+                'fit_blob_coverage', 'dqdx_fit_keep_all_points', 'excl_t0_frame',
+            ],
+            local stm_michel_partition = {
+                [k]: tcn_knobs[k] for k in std.objectFields(tcn_knobs) if std.member(stm_michel_partition_keys, k)
+            },
+            check_stm_michel: cm.check_stm_michel(
+                trackfitting_config_file=trackfitting_config_file,
+                particle_dataset=wc.tn(particle_dataset),
+                recombination_model=wc.tn(pdvd_recomb),
+                perf=true,
+                mip_dqdx=mip_dqdx,
+                mip_dqdx_median=mip_dqdx_median,
+                fiducial=(if stm_consistent_fv then wc.tn(pdvd_pr_fv) else null),
+                fv_tolerance=(if stm_consistent_fv then pdvd_pr_fv_margins else []),
+                knobs=stm_michel_partition + {
+                    [if dir_weak_use_score then 'dir_weak_use_score']: true,
+                    [if proton_dir_vote then 'proton_dir_vote']: true,
+                    [if endpoint_trim_retry then 'endpoint_trim_retry']: true,
+                    [if cathode_x != null then 'cathode_x']: cathode_x,
+                    [if teb_min_len != null then 'teb_min_len']: teb_min_len,
+                    [if teb_min_arm != null then 'teb_min_arm']: teb_min_arm,
+                    [if teb_min_arm_pts != null then 'teb_min_arm_pts']: teb_min_arm_pts,
+                    [if teb_stub_max != null then 'teb_stub_max']: teb_stub_max,
+                    [if teb_accept_range != null then 'teb_accept_range']: teb_accept_range,
+                    [if teb_rise_r1 != null then 'teb_rise_r1']: teb_rise_r1,
+                    [if teb_rise_r2 != null then 'teb_rise_r2']: teb_rise_r2,
+                    [if teb_abs_end_min != null then 'teb_abs_end_min']: teb_abs_end_min,
+                    [if teb_dip_floor != null then 'teb_dip_floor']: teb_dip_floor,
+                    [if teb_score_cap_r1 != null then 'teb_score_cap_r1']: teb_score_cap_r1,
+                    [if teb_score_cap_r2 != null then 'teb_score_cap_r2']: teb_score_cap_r2,
+                    [if teb_turn_angle != null then 'teb_turn_angle']: teb_turn_angle,
+                    [if teb_turn_baseline != null then 'teb_turn_baseline']: teb_turn_baseline,
+                    [if teb_turn_skirt != null then 'teb_turn_skirt']: teb_turn_skirt,
+                    [if kink_dqdx_hot_ratio != null then 'kink_dqdx_hot_ratio']: kink_dqdx_hot_ratio,
+                } + stm_michel_knobs),
             // STM-stage Magnify-tracking ROOT dump (doc sbnd_xin/docs/40): reads
             // the stm_fit/stm_pass cluster PCs and the "stm" TrackFitting slot,
             // writes tracking-stm.root (T_rec_charge/T_proj_data/T_bad_ch/Trun)
@@ -1874,6 +1952,7 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
         // extra_uses) when a tagger is in the pipeline.
         local tagger_uses = (if std.member(pipeline_names, 'tagger_check_stm')
                              || std.member(pipeline_names, 'tagger_check_neutrino')
+                             || std.member(pipeline_names, 'check_stm_michel')   // doc pdvd/48
                              then [pdvd_recomb] + extra_uses else [])
                             + (if std.member(pipeline_names, 'tagger_check_tgm')
                                || std.member(pipeline_names, 'tagger_check_fc')
@@ -1886,8 +1965,22 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
                                // there; load-bearing only for a reduced pipeline.
                                || ((neutrino_consistent_fv || cosmic_consistent_fv || nue_sp_consistent_fv)
                                    && std.member(pipeline_names, 'tagger_check_neutrino'))
+                               // doc pdvd/48: the STM+Michel stage names pdvd_pr_fv
+                               // under the same stm_consistent_fv switch.
+                               || (stm_consistent_fv
+                                   && std.member(pipeline_names, 'check_stm_michel'))
                                then pdvd_pr_fv_uses else []),
         local bee_zip_path = evt_out_prefix + 'mabc-pr.zip',
+        // doc pdvd/48: the PR-tail Bee layers (track_fit / shower_track /
+        // vertices / mc) render whichever stage published the fitter+graph.
+        // check_stm_michel publishes exactly like tagger_check_neutrino, so
+        // only the visitor NAME changes; the gates that used to test for
+        // tagger_check_neutrino now test for either.  With neither stage in
+        // pipeline_names both locals reduce to the legacy values => the
+        // production (-stm) compiled config is byte-identical.
+        local michel_on = std.member(pipeline_names, 'check_stm_michel'),
+        local pr_tail_on = std.member(pipeline_names, 'tagger_check_neutrino') || michel_on,
+        local pr_visitor = if michel_on then 'CheckSTM_Michel:pr' else 'TaggerCheckNeutrino:pr',
         local mabc = g.pnode({
             type: 'MultiAlgBlobClustering',
             name: 'clus_pr',
@@ -1934,7 +2027,7 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
                     // are already T0-corrected, hence plain x/y/z.
                     {
                         name: 'track_fit',
-                        visitor: 'TaggerCheckNeutrino:pr',
+                        visitor: pr_visitor,
                         grouping: 'live',
                         detector: 'protodunevd',
                         algorithm: 'track_fit',
@@ -1948,7 +2041,7 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
                         // fill_skeleton_info_magnify rows (docs/pr/3).  Key present
                         // only when the PR visitor is in the pipeline => default
                         // production compiled config stays byte-identical.
-                        [if std.member(pipeline_names, 'tagger_check_neutrino')
+                        [if pr_tail_on
                          then 'include_vertex_points']: true,
                         // require_pr_graph: this layer is PR output.  Without it,
                         // an event where TaggerCheckNeutrino selects no candidate
@@ -1957,12 +2050,12 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
                         // (the uBooNE steiner-bound sets rely on that fallback);
                         // key present only when the PR visitor is in the pipeline
                         // => default compiled config byte-identical.
-                        [if std.member(pipeline_names, 'tagger_check_neutrino')
+                        [if pr_tail_on
                          then 'require_pr_graph']: true,
                     },
                     {
                         name: 'shower_track',    // associated points: q=15000 shower, q=0 track
-                        visitor: 'TaggerCheckNeutrino:pr',
+                        visitor: pr_visitor,
                         grouping: 'live',
                         detector: 'protodunevd',
                         algorithm: 'shower_track',
@@ -1975,7 +2068,7 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
                         // (NeutrinoID::fill_point_info) so Bee can color by particle
                         // (docs/pr/3).  Key present only when the PR visitor is in
                         // the pipeline => default compiled config byte-identical.
-                        [if std.member(pipeline_names, 'tagger_check_neutrino')
+                        [if pr_tail_on
                          then 'particle_ids']: true,
                         // doc pr/45.  C++ default false.  Muon-typed (+-13)
                         // pseudo-showers paint as track (q=0), matching the PF
@@ -1990,12 +2083,12 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
                         // (the uBooNE steiner-bound sets rely on that fallback);
                         // key present only when the PR visitor is in the pipeline
                         // => default compiled config byte-identical.
-                        [if std.member(pipeline_names, 'tagger_check_neutrino')
+                        [if pr_tail_on
                          then 'require_pr_graph']: true,
                     },
                     {
                         name: 'vertices',        // PR graph vertices; main vertex q=15000
-                        visitor: 'TaggerCheckNeutrino:pr',
+                        visitor: pr_visitor,
                         grouping: 'live',
                         detector: 'protodunevd',
                         algorithm: 'vertices',
@@ -2010,7 +2103,7 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
                         // (the uBooNE steiner-bound sets rely on that fallback);
                         // key present only when the PR visitor is in the pipeline
                         // => default compiled config byte-identical.
-                        [if std.member(pipeline_names, 'tagger_check_neutrino')
+                        [if pr_tail_on
                          then 'require_pr_graph']: true,
                     },
                 ]
@@ -2125,23 +2218,23 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
                 bee_pf: [
                     {
                         name: 'mc',
-                        visitor: 'TaggerCheckNeutrino:pr',
+                        visitor: pr_visitor,
                         grouping: 'live',
                         // C++ defaults false/0 (legacy).  Prototype mc.json parity
                         // (docs/pr/3): TDatabasePDG-style names + integer MeV, and
                         // the WCReader::KeepMC display floors (5 MeV em, 10 MeV
                         // nucleon).  Keys present only when the PR visitor is in
                         // the pipeline => default compiled config byte-identical.
-                        [if std.member(pipeline_names, 'tagger_check_neutrino')
+                        [if pr_tail_on
                          then 'prototype_names']: true,
-                        [if std.member(pipeline_names, 'tagger_check_neutrino')
+                        [if pr_tail_on
                          then 'em_ke_min']: 5 * wc.MeV,
                         // doc pr/38: nucleon floor lowered from the prototype's
                         // 10 MeV (WCReader::KeepMC) to 3 MeV, owner decision
                         // 2026-08-05 -- sub-10-MeV protons attached at the
                         // neutrino vertex (18255-447477 3.2 MeV, 18255-52657
                         // 8 MeV) must show in the particle flow.
-                        [if std.member(pipeline_names, 'tagger_check_neutrino')
+                        [if pr_tail_on
                          then 'np_ke_min']: 3 * wc.MeV,
                         // doc pr/34 §10 port-fidelity knobs.  C++ defaults false;
                         // key omitted when off => byte-identical pre-knob config.

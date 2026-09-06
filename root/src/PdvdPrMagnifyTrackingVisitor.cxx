@@ -6,6 +6,7 @@
 #include "WireCellRoot/PdvdPrMagnifyTrackingVisitor.h"
 #include "WireCellRoot/UbooneMagnifyTrackingVisitor.h"  // WCPointTree
 
+#include <algorithm>
 #include <cmath>
 #include <set>
 #include <tuple>
@@ -214,6 +215,8 @@ void Root::PdvdPrMagnifyTrackingVisitor::visit(Clus::Facade::Ensemble& ensemble)
     if (m_save_in_scope) {
         write_cluster_summary(output_tf, grouping);
     }
+    // doc pdvd/48: no-op unless the stm_michel PC exists (see the header).
+    write_stm_michel_trees(output_tf, grouping);
 
     // Empty T_proj tree kept for reader compatibility.
     TTree* tree_proj = new TTree("T_proj", "T_proj");
@@ -281,6 +284,81 @@ void Root::PdvdPrMagnifyTrackingVisitor::write_bad_channels(TFile* output_tf, Cl
     }
 
     log->debug("PdvdPrMagnifyTrackingVisitor: wrote {} entries to T_bad_ch", tree->GetEntries());
+}
+
+// doc pdvd/48.  Generic "cluster PC -> flat TTree" writer: one entry per PC
+// row, a cluster_id/I branch plus one branch per PC column (int -> /I,
+// everything else -> /D).  The tree is created only after a first pass finds
+// a cluster carrying the PC, so an absent PC leaves the file schema untouched.
+void Root::PdvdPrMagnifyTrackingVisitor::write_pc_tree(TFile* output_tf, Clus::Facade::Grouping& grouping,
+                                                       const std::string& pcname, const std::string& treename) const
+{
+    namespace PC = WireCell::PointCloud;
+    // pass 1: does any cluster carry it, and with which columns?
+    std::vector<std::string> cols;
+    bool any = false;
+    for (const auto* cluster : grouping.children()) {
+        if (!cluster->has_pc(pcname)) continue;
+        const auto& pc = cluster->get_pc(pcname);
+        if (pc.empty()) continue;
+        any = true;
+        if (cols.empty()) {
+            cols = pc.keys();
+            std::sort(cols.begin(), cols.end());
+        }
+    }
+    if (!any || cols.empty()) return;
+
+    TTree* tree = new TTree(treename.c_str(), treename.c_str());
+    tree->SetDirectory(output_tf);
+    int cluster_id{0};
+    tree->Branch("cluster_id", &cluster_id, "cluster_id/I");
+    // Branch buffers: fixed addresses for the tree's lifetime.
+    std::vector<int> ibuf(cols.size(), 0);
+    std::vector<double> dbuf(cols.size(), 0.0);
+    std::vector<int> is_int(cols.size(), 0);
+    {
+        // dtype from the first carrier
+        const Clus::Facade::Cluster* first = nullptr;
+        for (const auto* cluster : grouping.children()) {
+            if (cluster->has_pc(pcname) && !cluster->get_pc(pcname).empty()) { first = cluster; break; }
+        }
+        const auto& pc = first->get_pc(pcname);
+        for (size_t i = 0; i < cols.size(); ++i) {
+            const auto arr = pc.get(cols[i]);
+            is_int[i] = (arr && arr->is_type<int>()) ? 1 : 0;
+            if (cols[i] == "cluster_id") { is_int[i] = -1; continue; }  // already a branch
+            if (is_int[i]) tree->Branch(cols[i].c_str(), &ibuf[i], (cols[i] + "/I").c_str());
+            else           tree->Branch(cols[i].c_str(), &dbuf[i], (cols[i] + "/D").c_str());
+        }
+    }
+    for (const auto* cluster : grouping.children()) {
+        if (!cluster->has_pc(pcname)) continue;
+        const auto& pc = cluster->get_pc(pcname);
+        if (pc.empty()) continue;
+        cluster_id = cluster->get_cluster_id();
+        const size_t nrows = pc.size_major();
+        for (size_t r = 0; r < nrows; ++r) {
+            for (size_t i = 0; i < cols.size(); ++i) {
+                if (is_int[i] < 0) continue;
+                const auto arr = pc.get(cols[i]);
+                if (!arr || arr->size_major() <= r) { ibuf[i] = 0; dbuf[i] = 0; continue; }
+                if (is_int[i]) ibuf[i] = arr->elements<int>()[r];
+                else if (arr->is_type<double>()) dbuf[i] = arr->elements<double>()[r];
+                else if (arr->is_type<float>()) dbuf[i] = arr->elements<float>()[r];
+                else if (arr->is_type<int>()) dbuf[i] = arr->elements<int>()[r];
+                else dbuf[i] = 0;
+            }
+            tree->Fill();
+        }
+    }
+    log->debug("PdvdPrMagnifyTrackingVisitor: wrote {} with {} entries from PC '{}'", treename, tree->GetEntries(), pcname);
+}
+
+void Root::PdvdPrMagnifyTrackingVisitor::write_stm_michel_trees(TFile* output_tf, Clus::Facade::Grouping& grouping) const
+{
+    write_pc_tree(output_tf, grouping, "stm_michel", "T_stm_michel");
+    write_pc_tree(output_tf, grouping, "stm_michel_pts", "T_stm_michel_pts");
 }
 
 void Root::PdvdPrMagnifyTrackingVisitor::write_trun(TFile* output_tf) const
