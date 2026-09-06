@@ -68,6 +68,7 @@
 #include "WireCellUtil/PointCloudDataset.h"
 #include "WireCellUtil/Units.h"
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <fstream>
@@ -145,6 +146,21 @@ public:
         m_dot_body_exclusion_cm = get<double>(config, "dot_body_exclusion_cm", m_dot_body_exclusion_cm);
         m_delta_max_len_cm = get<double>(config, "delta_max_len_cm", m_delta_max_len_cm);
         m_vertex_hadron_mip = get<double>(config, "vertex_hadron_mip", m_vertex_hadron_mip);
+        m_profile_min_dqdx_frac = get<double>(config, "profile_min_dqdx_frac", m_profile_min_dqdx_frac);
+        m_pid_mode = get<int>(config, "pid_mode", m_pid_mode);
+        m_plateau_mip_lo = get<double>(config, "plateau_mip_lo", m_plateau_mip_lo);
+        m_plateau_mip_hi = get<double>(config, "plateau_mip_hi", m_plateau_mip_hi);
+        m_stop_extend_max = get<int>(config, "stop_extend_max", m_stop_extend_max);
+        m_dead_volume_check = get<bool>(config, "dead_volume_check", m_dead_volume_check);
+        m_min_chain_coverage = get<double>(config, "min_chain_coverage", m_min_chain_coverage);
+        m_michel_guards_stop = get<bool>(config, "michel_guards_stop", m_michel_guards_stop);
+        m_michel_shower_min_kink_deg = get<double>(config, "michel_shower_min_kink_deg", m_michel_shower_min_kink_deg);
+        m_absorb_bragg_stub = get<bool>(config, "absorb_bragg_stub", m_absorb_bragg_stub);
+        m_stop_fv_use_config_tolerance = get<bool>(config, "stop_fv_use_config_tolerance", m_stop_fv_use_config_tolerance);
+        m_fv_tolerance.clear();
+        if (config.isMember("fv_tolerance") && config["fv_tolerance"].isArray())
+            for (const auto& t : config["fv_tolerance"]) m_fv_tolerance.push_back(t.asDouble());
+        m_coverage_radius_cm = get<double>(config, "coverage_radius_cm", m_coverage_radius_cm);
 
         // TrackFitting parameters carried by TaggerCheckNeutrino's config
         // rather than by the runtime JSON (TaggerCheckNeutrino.cxx:2777-2791).
@@ -197,6 +213,78 @@ public:
         cfg["dot_body_exclusion_cm"] = m_dot_body_exclusion_cm;
         cfg["delta_max_len_cm"] = m_delta_max_len_cm;
         cfg["vertex_hadron_mip"] = m_vertex_hadron_mip;
+        // doc pdhd/03: profile points with dQ/dx < frac * mip_dqdx are DEAD
+        // (a cell the fit could not read) and are dropped from the verdict
+        // metrics (Bragg medians, KS shape, template PID).  0 = keep every
+        // point (the doc pdvd/48 behaviour).
+        cfg["profile_min_dqdx_frac"] = m_profile_min_dqdx_frac;
+        // doc pdhd/03 sec 6: what the template PID's "muon" verdict requires.
+        //  0 (doc pdvd/48): do_track_comp's direction gate AND the muon
+        //    template beats BOTH the proton and the electron template.
+        //  1: the gate AND muon beats proton.
+        //  2: muon beats proton only (the proton veto).
+        // The electron table is near-flat at ~MIP, so on a real stopping muon
+        // whose Bragg rise the fit smears it scores within 20 % of the muon
+        // template and often below it; the gate itself fails on textbook
+        // muons whose last-35-cm rise is weaker than the table's (PDHD
+        // 029107/18 cluster 143: 269 cm, contrast 2.04 = the tabulated 1.95,
+        // ratio_mu 1.40, gate 0).  The Bragg-contrast and KS bits already
+        // carry the shape verdict.
+        cfg["pid_mode"] = m_pid_mode;
+        // doc pdhd/03 sec 6: plateau_med / mip_dqdx must lie in [lo, hi] or
+        // the candidate gets R_PLATEAU_OFF_MIP -- a track whose plateau reads
+        // 0.3 MIP has no trustworthy charge (PDHD: 8 of 15 passers at 0.27-0.45
+        // once the electron test was dropped).  hi <= lo disables (default).
+        cfg["plateau_mip_lo"] = m_plateau_mip_lo;
+        cfg["plateau_mip_hi"] = m_plateau_mip_hi;
+        // doc pdhd/03 sec 6: when the stop vertex has a collinear MIP arm
+        // (a continuation), extend the muon chain along it and re-judge at
+        // the new end, up to this many times.  0 = doc pdvd/48 (the tagger's
+        // stop is final and the continuation only rejects).
+        cfg["stop_extend_max"] = m_stop_extend_max;
+        // doc pdhd/03 sec 6: FiducialUtils::check_dead_volume from the end of
+        // the live profile along the muon direction; a stop that walks into a
+        // dead region is R_STOP_INTO_DEAD (three PDHD tracks end on the same
+        // y = 493 cm line where a dead block begins).  Needs the fiducialutils
+        // stage; false = off.
+        cfg["dead_volume_check"] = m_dead_volume_check;
+        // doc pdhd/03 sec 6: the fraction of the main cluster's own 3-D points
+        // within coverage_radius_cm of a reconstructed point (muon chain,
+        // deltas, Michel, dots).  Below min_chain_coverage the cluster is not a
+        // track with attachments but a shower / blob the fit threaded a path
+        // through (029107/11 cluster 18: a 65 cm chain inside a 1591-point EM
+        // blob, "contrast 3.2" on the shower core).  0 = off.
+        cfg["min_chain_coverage"] = m_min_chain_coverage;
+        // doc pdhd/03 sec 6.3: at a stop that already shows the Bragg rise
+        // (live contrast >= bragg_contrast_min x expected) AND has a
+        // Michel-class arm, a collinear MIP arm no longer than michel_max_len
+        // is stop debris (a delta, or the electron's other branch), not a
+        // continuation: it neither extends the chain nor sets R_CONTINUATION.
+        // 029107/12 cluster 112: an 11 cm arm at 10 deg beside a 108-deg,
+        // 12.7 MeV Michel -- extending along it walked the stop to the anode
+        // face and lost the Michel.  false = doc pdvd/48.
+        cfg["michel_guards_stop"] = m_michel_guards_stop;
+        // doc pdhd/03 sec 6.8: a shower-flagged stop arm with a MEASURABLE kink
+        // below this is not a Michel (the muon's own Bragg stub, mis-split);
+        // -1 = doc pdvd/48 (the flag alone admits).
+        cfg["michel_shower_min_kink_deg"] = m_michel_shower_min_kink_deg;
+        // doc pdhd/03 sec 6.8: with stop_extend_max > 0, also absorb a short
+        // collinear arm HOTTER than a MIP (the muon's own Bragg stub the
+        // partition split off) into the chain.  Measured on PDHD 029107/1
+        // cluster 113: absorbing its 5.5 cm 1.64-MIP stub moved the tail window
+        // onto the fading tip and turned a clean STM (contrast 1.76) into
+        // no_bragg -- so OFF by default and OFF in the PDHD bag; the stub is
+        // still not a Michel (michel_shower_min_kink_deg).
+        cfg["absorb_bragg_stub"] = m_absorb_bragg_stub;
+        // doc pdhd/03 sec 6.9: containment of the stop with the SAME per-wall
+        // margins the cosmic taggers get (config fv_tolerance, internal units,
+        // negative = inset) instead of the flat stop_fv_margin_cm inset; a
+        // 746 cm through-going muon leaving PDHD at y = 597 cm passed the flat
+        // 5 cm inset where TGM's 17.5 cm y-margin would have caught it.
+        // false = doc pdvd/48.
+        cfg["stop_fv_use_config_tolerance"] = m_stop_fv_use_config_tolerance;
+        cfg["fv_tolerance"] = Json::Value(Json::arrayValue);
+        cfg["coverage_radius_cm"] = m_coverage_radius_cm;
         cfg["fit_blob_coverage"] = m_fit_blob_coverage;
         cfg["dqdx_fit_keep_all_points"] = m_dqdx_fit_keep_all_points;
         cfg["excl_t0_frame"] = m_excl_t0_frame;
@@ -240,6 +328,17 @@ private:
     double m_michel_dot_radius_cm{15.0}, m_dot_max_len_cm{10.0}, m_dot_body_exclusion_cm{5.0};
     double m_delta_max_len_cm{8.0};
     double m_vertex_hadron_mip{1.4};
+    double m_profile_min_dqdx_frac{0.0};
+    int m_pid_mode{0};
+    double m_plateau_mip_lo{0.0}, m_plateau_mip_hi{0.0};
+    int m_stop_extend_max{0};
+    bool m_dead_volume_check{false};
+    double m_min_chain_coverage{0.0}, m_coverage_radius_cm{3.0};
+    bool m_michel_guards_stop{false};
+    double m_michel_shower_min_kink_deg{-1.0};
+    bool m_absorb_bragg_stub{false};
+    bool m_stop_fv_use_config_tolerance{false};
+    std::vector<double> m_fv_tolerance;
     double m_fit_blob_coverage{-1.0};
     bool m_dqdx_fit_keep_all_points{false};
     bool m_excl_t0_frame{false};
@@ -259,6 +358,8 @@ private:
         int entry_vtx_id{-1}, stop_vtx_id{-1};
         double stop_dis{0};             // graph stop vertex vs tagger stop point
         int n_chain_segs{0}, n_profile_pts{0};
+        int n_live_pts{0}, n_dead_pts{0}, n_cmp_live{0};   // doc pdhd/03: live = dQ/dx >= profile_min_dqdx_frac * mip
+        double dead_frac_cmp{0};                          // dead fraction within compare_range of the stop
         double muon_len{0};
         int n_delta{0}, n_body_other{0}, n_body_hadron{0};
         double delta_len{0};
@@ -271,6 +372,9 @@ private:
         double michel_len{0}, michel_mip{0}, michel_kink_deg{-1}, michel_far_len{0};
         double michel_ke_dqdx{0}, michel_ke_range{0}, michel_ke_best{0};
         double cont_len{0}, cont_angle_deg{-1}, cont_mip{0};
+        int n_ext{0}; double ext_len{0};          // doc pdhd/03: chain extensions past the tagger's stop
+        int dead_ahead{-1};                        // doc pdhd/03: 1 = the live end walks into a dead region
+        int n_cluster_pts{0}; double chain_coverage{-1};   // doc pdhd/03: cluster points within coverage_radius of a reconstructed point
         // dots
         int n_dots{0}, n_dot_clusters_unfit{0};
         double dots_ke_dqdx{0}, dots_charge_unfit{0};
@@ -462,7 +566,9 @@ private:
         add(R_NO_BRAGG, "no_bragg"); add(R_SHAPE_FLAT, "shape_flat");
         add(R_NOT_MUON_PID, "not_muon_pid"); add(R_CONTINUATION, "continuation");
         add(R_STOP_NEAR_BOUNDARY, "stop_near_boundary"); add(R_VERTEX_HADRON, "vertex_hadron");
-        add(R_SHORT, "short");
+        add(R_SHORT, "short"); add(R_PROFILE_SPARSE, "profile_sparse");
+        add(R_PLATEAU_OFF_MIP, "plateau_off_mip"); add(R_STOP_INTO_DEAD, "stop_into_dead");
+        add(R_CLUSTER_NOT_TRACK, "cluster_not_track");
         return s;
     }
 
@@ -596,6 +702,7 @@ private:
         D1("tagger_stop_x", r.tagger_stop_pt.x() / cm); D1("tagger_stop_y", r.tagger_stop_pt.y() / cm); D1("tagger_stop_z", r.tagger_stop_pt.z() / cm);
         I1("entry_vtx_id", r.entry_vtx_id); I1("stop_vtx_id", r.stop_vtx_id); D1("stop_dis", r.stop_dis / cm);
         I1("n_chain_segs", r.n_chain_segs); I1("n_profile_pts", r.n_profile_pts); D1("muon_len", r.muon_len / cm);
+        I1("n_live_pts", r.n_live_pts); I1("n_dead_pts", r.n_dead_pts); I1("n_cmp_live", r.n_cmp_live); D1("dead_frac_cmp", r.dead_frac_cmp);
         I1("n_delta", r.n_delta); I1("n_body_other", r.n_body_other); I1("n_body_hadron", r.n_body_hadron); D1("delta_len", r.delta_len / cm);
         D1("ks_mu", r.ks_mu); D1("ks_flat", r.ks_flat); D1("ratio_mu", r.ratio_mu); D1("ratio_flat", r.ratio_flat);
         for (int i = 0; i < 4; ++i) {
@@ -612,6 +719,8 @@ private:
         D1("michel_far_len", r.michel_far_len / cm);
         D1("michel_ke_dqdx", r.michel_ke_dqdx); D1("michel_ke_range", r.michel_ke_range); D1("michel_ke_best", r.michel_ke_best);
         D1("cont_len", r.cont_len / cm); D1("cont_angle_deg", r.cont_angle_deg); D1("cont_mip", r.cont_mip);
+        I1("n_ext", r.n_ext); D1("ext_len", r.ext_len / cm); I1("dead_ahead", r.dead_ahead);
+        I1("n_cluster_pts", r.n_cluster_pts); D1("chain_coverage", r.chain_coverage);
         I1("n_dots", r.n_dots); I1("n_dot_clusters_unfit", r.n_dot_clusters_unfit);
         D1("dots_ke_dqdx", r.dots_ke_dqdx); D1("dots_charge_unfit", r.dots_charge_unfit);
         I1("in_fv", r.in_fv);
@@ -668,6 +777,7 @@ void CheckSTM_Michel::visit(Ensemble& ensemble) const
 
     auto fiducial_utils = grouping.get_fiducialutils();
     std::vector<double> fv_tol(6, -m_stop_fv_margin_cm * units::cm);
+    if (m_stop_fv_use_config_tolerance && m_fv_tolerance.size() == 6) fv_tol = m_fv_tolerance;   // doc pdhd/03 sec 6.9
     auto mu_fn = particle_data() ? particle_data()->get_dEdx_function("muon") : nullptr;
 
     int n_stm = 0, n_michel = 0;
@@ -785,32 +895,91 @@ void CheckSTM_Michel::visit(Ensemble& ensemble) const
         std::vector<SegmentPtr> chain;
         if (entry_v && stop_v) chain = stm_michel_shortest_chain(g, entry_v, stop_v);
         if (entry_v && chain.empty()) {
-            // No vertex near the tagger's stop (or unreachable): walk greedily
-            // from the entry with find_cont_muon_segment, ignoring dQ/dx so the
-            // Bragg segment is admitted, and stop at the vertex nearest the
-            // tagger's stop point.
+            // No vertex near the tagger's stop, or it is unreachable from the
+            // entry (doc pdhd/03: the tagger's single-track fit bridged into a
+            // detached fragment 20-40 cm past the track's graph end, so the
+            // stop it recorded is in another component).  The muon is then the
+            // longest route out of the entry within the main cluster; the
+            // verdict keeps R_STOP_UNMATCHED.  (doc pdvd/48 walked greedily
+            // with find_cont_muon_segment instead, which on PDHD stopped at
+            // the first junction: 1-segment chains on 8 of 13 such cases.)
             rec.reject_bits |= R_STOP_UNMATCHED;
-            SegmentPtr cur; double best_len = -1;
-            for (auto e : sorted_out_edges(entry_v->get_descriptor(), g)) {
-                auto s = g[e].segment; if (!s) continue;
-                const double l = segment_track_length(s);
-                if (l > best_len) { best_len = l; cur = s; }
+            Cluster* main_ptr = main;
+            VertexPtr far = stm_michel_farthest_vertex(g, entry_v,
+                [main_ptr](const VertexPtr& v) { return v->cluster() == main_ptr; });
+            if (far) {
+                chain = stm_michel_shortest_chain(g, entry_v, far);
+                stop_v = chain.empty() ? nullptr : far;
             }
-            VertexPtr vtx = entry_v;
-            std::set<size_t> seen;
-            while (cur && seen.insert(cur->get_graph_index()).second) {
-                chain.push_back(cur);
-                VertexPtr far = find_other_vertex(g, cur, vtx);
-                if (!far) break;
-                vtx = far;
-                if ((stm_michel_vertex_point(far) - rec.stop_pt).magnitude() < m_stop_snap_tol_cm * units::cm) break;
-                auto [nseg, nvtx] = pa.find_cont_muon_segment(g, cur, far, true);
-                cur = nseg;
-            }
-            stop_v = vtx;
-            if (stop_v == entry_v) stop_v = nullptr;
         }
         if (chain.empty()) rec.reject_bits |= R_NO_CHAIN;
+
+        StmMichelArmThresholds th;
+        th.mip_dqdx_median = m_mip_dqdx_median / units::cm;
+        th.continuation_max_angle_deg = m_continuation_max_angle_deg;
+        th.continuation_min_len = m_continuation_min_len_cm * units::cm;
+        th.continuation_mip_lo = m_continuation_mip_lo;
+        th.continuation_mip_hi = m_continuation_mip_hi;
+        th.michel_max_len = m_michel_max_len_cm * units::cm;
+        th.michel_mip_hi = m_michel_mip_hi;
+        th.michel_mip_lo = m_michel_mip_lo;
+        th.michel_min_kink_deg = m_michel_min_kink_deg;
+        th.michel_shower_min_kink_deg = m_michel_shower_min_kink_deg;
+        th.delta_max_len = m_delta_max_len_cm * units::cm;
+        th.hadron_mip = m_vertex_hadron_mip;
+
+        // ---- doc pdhd/03 sec 6: the tagger's stop is often short of the muon's
+        // end (doc pdvd/42 sec 4.4: a collinear ~0.9 MIP leftover on 26 % of
+        // PDVD passes).  When the stop vertex has a continuation arm, the muon
+        // did not stop there: extend the chain along it and judge at the new
+        // end.  Up to stop_extend_max times; 0 = doc pdvd/48 behaviour.
+        std::function<double(double)> mu_at_ext = nullptr;
+        if (mu_fn) mu_at_ext = [mu_fn](double rr_cm) { return mu_fn->scalar_function(rr_cm); };
+        auto bragg_confirmed = [&](const std::vector<SegmentPtr>& ch) {
+            // the live profile of the current chain already shows the rise
+            auto pr = stm_michel_profile(g, ch, entry_v);
+            int nd = 0;
+            auto lv = stm_michel_profile_live(pr, m_profile_min_dqdx_frac * m_mip_dqdx, nd);
+            auto b = stm_michel_bragg_contrast(lv, mu_at_ext,
+                                               m_bragg_tail_lo_cm * units::cm, m_bragg_tail_hi_cm * units::cm,
+                                               m_bragg_plateau_lo_cm * units::cm, m_bragg_plateau_hi_cm * units::cm);
+            return b.valid && b.expected > 0 && b.contrast >= m_bragg_contrast_min * b.expected;
+        };
+        for (int it = 0; it < m_stop_extend_max && stop_v && !chain.empty(); ++it) {
+            SegmentPtr last = chain.back();
+            StmMichelArm best, stub; bool has_michel = false;
+            for (auto e : sorted_out_edges(stop_v->get_descriptor(), g)) {
+                auto arm = g[e].segment;
+                if (!arm || arm == last) continue;
+                if (std::find(chain.begin(), chain.end(), arm) != chain.end()) continue;
+                auto a = stm_michel_classify_stop_arm(g, last, arm, stop_v, th);
+                if (a.kind == StmMichelArm::kMichel) has_michel = true;
+                if (a.kind == StmMichelArm::kContinuation && a.len > best.len) best = a;
+                // doc pdhd/03 sec 6.8: a short collinear arm HOTTER than a MIP is
+                // the muon's own Bragg stub that the partition split off -- it
+                // belongs to the chain, whatever the shower flag says.
+                if (m_absorb_bragg_stub && a.kind != StmMichelArm::kContinuation && a.kink_deg >= 0 &&
+                    a.kink_deg < m_continuation_max_angle_deg && a.len <= m_delta_max_len_cm * units::cm &&
+                    a.mip > m_continuation_mip_hi && a.len > stub.len) stub = a;
+            }
+            if (stub.seg) best = stub;
+            if (!best.seg) break;
+            // doc pdhd/03 sec 6.3: a Michel arm, or a Bragg rise already in the
+            // profile, says the muon stopped HERE -- do not walk past it (a
+            // Bragg stub is absorbed regardless: it IS the stop).
+            if (m_michel_guards_stop && !stub.seg && (has_michel || bragg_confirmed(chain))) break;
+            VertexPtr far = find_other_vertex(g, best.seg, stop_v);
+            if (!far || far == entry_v) break;
+            chain.push_back(best.seg);
+            stop_v = far;
+            ++rec.n_ext; rec.ext_len += best.len;
+        }
+        if (rec.n_ext > 0 && stop_v) {
+            rec.stop_vtx_id = rec.cluster_id * 1000 + static_cast<int>(stop_v->get_graph_index());
+            rec.stop_pt = stm_michel_vertex_point(stop_v);
+            rec.stop_dis = (rec.stop_pt - rec.tagger_stop_pt).magnitude();
+            rec.n_chain_segs = static_cast<int>(chain.size());
+        }
 
         std::vector<VertexPtr> chain_vtxs = stm_michel_chain_vertices(g, chain, entry_v);
         if (!chain.empty() && chain_vtxs.size() != chain.size() + 1) { chain.clear(); chain_vtxs.clear(); rec.reject_bits |= R_NO_CHAIN; }
@@ -838,24 +1007,63 @@ void CheckSTM_Michel::visit(Ensemble& ensemble) const
         }
 
         // ---- dQ/dx vs residual range: contrast, KS shape, template PID ----
+        // All three metrics read the LIVE profile: points with dQ/dx below
+        // profile_min_dqdx_frac * mip are cells the fit could not read (dead
+        // channels, APA edges, wrapped-wire ambiguity on PDHD) and carry no
+        // particle information (doc pdhd/03 sec 5; frac = 0 keeps everything).
+        // A window with fewer than 3 live points is "cannot judge" ->
+        // R_PROFILE_SPARSE, not a shape or PID verdict.
         if (!prof.empty()) {
+            StmMichelProfile live = stm_michel_profile_live(prof, m_profile_min_dqdx_frac * m_mip_dqdx, rec.n_dead_pts);
+            rec.n_live_pts = static_cast<int>(live.L.size());
+            {
+                int n_cmp = 0, n_cmp_dead = 0;
+                for (size_t i = 0; i < prof.rr.size(); ++i) {
+                    if (prof.rr[i] > m_compare_range_cm * units::cm) continue;
+                    ++n_cmp;
+                    if (prof.dQdx[i] < m_profile_min_dqdx_frac * m_mip_dqdx) ++n_cmp_dead;
+                }
+                rec.n_cmp_live = n_cmp - n_cmp_dead;
+                rec.dead_frac_cmp = n_cmp > 0 ? double(n_cmp_dead) / n_cmp : 0.0;
+            }
             std::function<double(double)> mu_at = nullptr;
             if (mu_fn) mu_at = [mu_fn](double rr_cm) { return mu_fn->scalar_function(rr_cm); };
-            rec.bragg = stm_michel_bragg_contrast(prof, mu_at,
+            rec.bragg = stm_michel_bragg_contrast(live, mu_at,
                                                   m_bragg_tail_lo_cm * units::cm, m_bragg_tail_hi_cm * units::cm,
                                                   m_bragg_plateau_lo_cm * units::cm, m_bragg_plateau_hi_cm * units::cm);
-            if (!rec.bragg.valid || rec.bragg.expected <= 0 ||
-                rec.bragg.contrast < m_bragg_contrast_min * rec.bragg.expected) {
+            if (!rec.bragg.valid || rec.bragg.expected <= 0) {
+                rec.reject_bits |= R_PROFILE_SPARSE;
+            }
+            else if (rec.bragg.contrast < m_bragg_contrast_min * rec.bragg.expected) {
                 rec.reject_bits |= R_NO_BRAGG;
+            }
+            if (rec.bragg.valid && m_plateau_mip_hi > m_plateau_mip_lo && m_mip_dqdx > 0) {
+                const double pm = rec.bragg.plateau_med / m_mip_dqdx;
+                if (pm < m_plateau_mip_lo || pm > m_plateau_mip_hi) rec.reject_bits |= R_PLATEAU_OFF_MIP;
+            }
+            // doc pdhd/03 sec 6: does the visible end walk into a dead region?
+            // Direction = the last 10 cm of the chain; probe from the last LIVE
+            // point (where the detector stopped seeing) and from the stop.
+            if (m_dead_volume_check && fiducial_utils && !live.pts.empty() && prof.pts.size() >= 2) {
+                const Point& pend = prof.pts.back();
+                size_t k = prof.pts.size() - 1;
+                while (k > 0 && (prof.L.back() - prof.L[k]) < 10 * units::cm) --k;
+                Vector dir = pend - prof.pts[k];
+                if (dir.magnitude() > 0) {
+                    const bool live_ok = fiducial_utils->check_dead_volume(*main, live.pts.back(), dir, 1 * units::cm);
+                    const bool stop_ok = fiducial_utils->check_dead_volume(*main, rec.stop_pt, dir, 1 * units::cm);
+                    rec.dead_ahead = (live_ok && stop_ok) ? 0 : 1;
+                    if (rec.dead_ahead) rec.reject_bits |= R_STOP_INTO_DEAD;
+                }
             }
             // The TaggerCheckSTM::eval_stm_core_impl recipe (:2780-2797) over
             // the last compare_range of residual range, e/cm frame.
             if (mu_fn) {
                 std::vector<double> test, ref_mu, ref_flat;
-                for (size_t i = 0; i < prof.rr.size(); ++i) {
-                    if (prof.rr[i] > m_compare_range_cm * units::cm) continue;
-                    test.push_back(prof.dQdx[i]);
-                    ref_mu.push_back(mu_fn->scalar_function(prof.rr[i] / units::cm + m_offset_length_cm));
+                for (size_t i = 0; i < live.rr.size(); ++i) {
+                    if (live.rr[i] > m_compare_range_cm * units::cm) continue;
+                    test.push_back(live.dQdx[i]);
+                    ref_mu.push_back(mu_fn->scalar_function(live.rr[i] / units::cm + m_offset_length_cm));
                     ref_flat.push_back(m_mip_dqdx);
                 }
                 if (test.size() >= 3) {
@@ -865,38 +1073,33 @@ void CheckSTM_Michel::visit(Ensemble& ensemble) const
                     rec.ks_flat = WireCell::kslike_compare(test, ref_flat);
                     rec.ratio_flat = sum(ref_flat) / (sum(test) + 1e-9);
                     if (rec.ks_mu + m_ks_margin >= rec.ks_flat) rec.reject_bits |= R_SHAPE_FLAT;
+                    // do_track_comp: internal-unit arrays; forward = stop at L.back().
+                    std::vector<double> L_f(live.L), q_f(live.dQdx.size());
+                    for (size_t i = 0; i < q_f.size(); ++i) q_f[i] = live.dQdx[i] / units::cm;
+                    std::vector<double> L_b(L_f.size()), q_b(q_f.size());
+                    const size_t n = L_f.size();
+                    for (size_t i = 0; i < n; ++i) { L_b[i] = live.total_length - L_f[n - 1 - i]; q_b[i] = q_f[n - 1 - i]; }
+                    rec.comp_fwd = do_track_comp(L_f, q_f, m_compare_range_cm * units::cm, m_offset_length_cm * units::cm,
+                                                 particle_data(), m_mip_dqdx / units::cm);
+                    rec.comp_bwd = do_track_comp(L_b, q_b, m_compare_range_cm * units::cm, m_offset_length_cm * units::cm,
+                                                 particle_data(), m_mip_dqdx / units::cm);
+                    if (rec.comp_fwd.size() == 4) {
+                        const bool gate = rec.comp_fwd[0] > 0.5;
+                        const bool beats_p = rec.comp_fwd[1] < rec.comp_fwd[2];
+                        const bool beats_e = rec.comp_fwd[1] < rec.comp_fwd[3];
+                        const bool muon_like = (m_pid_mode == 2) ? beats_p
+                                             : (m_pid_mode == 1) ? (gate && beats_p)
+                                             : (gate && beats_p && beats_e);
+                        if (!muon_like) rec.reject_bits |= R_NOT_MUON_PID;
+                    }
                 }
-                // do_track_comp: internal-unit arrays; forward = stop at L.back().
-                std::vector<double> L_f(prof.L), q_f(prof.dQdx.size());
-                for (size_t i = 0; i < q_f.size(); ++i) q_f[i] = prof.dQdx[i] / units::cm;
-                std::vector<double> L_b(L_f.size()), q_b(q_f.size());
-                const size_t n = L_f.size();
-                for (size_t i = 0; i < n; ++i) { L_b[i] = prof.total_length - L_f[n - 1 - i]; q_b[i] = q_f[n - 1 - i]; }
-                rec.comp_fwd = do_track_comp(L_f, q_f, m_compare_range_cm * units::cm, m_offset_length_cm * units::cm,
-                                             particle_data(), m_mip_dqdx / units::cm);
-                rec.comp_bwd = do_track_comp(L_b, q_b, m_compare_range_cm * units::cm, m_offset_length_cm * units::cm,
-                                             particle_data(), m_mip_dqdx / units::cm);
-                if (rec.comp_fwd.size() == 4) {
-                    const bool muon_like = rec.comp_fwd[0] > 0.5 && rec.comp_fwd[1] < rec.comp_fwd[2] && rec.comp_fwd[1] < rec.comp_fwd[3];
-                    if (!muon_like) rec.reject_bits |= R_NOT_MUON_PID;
+                else {
+                    rec.reject_bits |= R_PROFILE_SPARSE;
                 }
             }
         }
 
         // ---- arms: body (delta rays / hadrons) and stop (Michel / continuation)
-        StmMichelArmThresholds th;
-        th.mip_dqdx_median = m_mip_dqdx_median / units::cm;
-        th.continuation_max_angle_deg = m_continuation_max_angle_deg;
-        th.continuation_min_len = m_continuation_min_len_cm * units::cm;
-        th.continuation_mip_lo = m_continuation_mip_lo;
-        th.continuation_mip_hi = m_continuation_mip_hi;
-        th.michel_max_len = m_michel_max_len_cm * units::cm;
-        th.michel_mip_hi = m_michel_mip_hi;
-        th.michel_mip_lo = m_michel_mip_lo;
-        th.michel_min_kink_deg = m_michel_min_kink_deg;
-        th.delta_max_len = m_delta_max_len_cm * units::cm;
-        th.hadron_mip = m_vertex_hadron_mip;
-
         IndexedShowerSet showers;
         std::shared_ptr<Shower> michel_shower;
         std::vector<StmMichelArm> michel_arms;
@@ -926,11 +1129,22 @@ void CheckSTM_Michel::visit(Ensemble& ensemble) const
             // the stop
             if (stop_v) {
                 SegmentPtr last = chain.back();
+                std::vector<StmMichelArm> stop_arms;
                 for (auto e : sorted_out_edges(stop_v->get_descriptor(), g)) {
                     auto arm = g[e].segment;
                     if (!arm || arm == last || chain_set.count(arm)) continue;
+                    stop_arms.push_back(stm_michel_classify_stop_arm(g, last, arm, stop_v, th));
+                }
+                bool any_michel = false;
+                for (const auto& a : stop_arms) any_michel = any_michel || a.kind == StmMichelArm::kMichel;
+                const bool bragg_here = rec.bragg.valid && rec.bragg.expected > 0 &&
+                                        rec.bragg.contrast >= m_bragg_contrast_min * rec.bragg.expected;
+                for (auto a : stop_arms) {
                     ++rec.n_stop_arms;
-                    auto a = stm_michel_classify_stop_arm(g, last, arm, stop_v, th);
+                    if (m_michel_guards_stop && a.kind == StmMichelArm::kContinuation && any_michel && bragg_here &&
+                        a.len <= m_michel_max_len_cm * units::cm) {
+                        a.kind = StmMichelArm::kOther;   // stop debris beside a Michel at a Bragg-confirmed stop
+                    }
                     if (a.kind == StmMichelArm::kContinuation) {
                         rec.reject_bits |= R_CONTINUATION;
                         if (a.len > rec.cont_len) { rec.cont_len = a.len; rec.cont_angle_deg = a.kink_deg; rec.cont_mip = a.mip; }
@@ -1031,6 +1245,28 @@ void CheckSTM_Michel::visit(Ensemble& ensemble) const
         if (michel_shower) showers.insert(michel_shower);
         tf->set_showers(showers);
 
+        // ---- doc pdhd/03 sec 6: is the cluster a track (+ attachments) at all?
+        // Fraction of the main cluster's 3-D points within coverage_radius of any
+        // reconstructed point (chain, deltas, Michel, dots).  Brute force: a few
+        // thousand cluster points x a few hundred reconstructed points.
+        if (m_min_chain_coverage > 0 && !rec.px.empty()) {
+            const double r2 = std::pow(m_coverage_radius_cm * units::cm, 2);
+            const int n = main->npoints();
+            int nin = 0;
+            for (int i = 0; i < n; ++i) {
+                const auto p = main->point3d(i);
+                bool in = false;
+                for (size_t j = 0; j < rec.px.size() && !in; ++j) {
+                    const double dx = p.x() - rec.px[j], dy = p.y() - rec.py[j], dz = p.z() - rec.pz[j];
+                    in = (dx * dx + dy * dy + dz * dz) < r2;
+                }
+                if (in) ++nin;
+            }
+            rec.n_cluster_pts = n;
+            rec.chain_coverage = n > 0 ? double(nin) / n : -1.0;
+            if (n > 0 && rec.chain_coverage < m_min_chain_coverage) rec.reject_bits |= R_CLUSTER_NOT_TRACK;
+        }
+
         // ---- containment of the stop -----------------------------------------
         if (fiducial_utils) {
             rec.in_fv = fiducial_utils->inside_fiducial_volume(rec.stop_pt, fv_tol) ? 1 : 0;
@@ -1046,17 +1282,17 @@ void CheckSTM_Michel::visit(Ensemble& ensemble) const
         if (rec.reject_bits == 0) ++n_stm;
         if (rec.michel_found) ++n_michel;
         SPDLOG_LOGGER_INFO(s_log,
-            "{}CheckSTM_Michel: cluster {} gid {} verdict {} bits {} | chain {} segs {:.1f} cm ({} pts) stop_dis {:.1f} cm | "
+            "{}CheckSTM_Michel: cluster {} gid {} verdict {} bits {} | chain {} segs {:.1f} cm ({} pts, {} dead) stop_dis {:.1f} cm | "
             "contrast {:.2f}/{:.2f} ks_mu {:.3f} ks_flat {:.3f} comp_fwd {:.0f}/{:.2f}/{:.2f}/{:.2f} | "
-            "delta {} hadron {} | michel {} ({} segs, {:.1f} cm, {:.2f} mip, kink {:.0f} deg, {:.1f} MeV) dots {} ({:.1f} MeV) unfit {} | cont {:.1f} cm @ {:.0f} deg | in_fv {} | {:.0f} ms",
+            "delta {} hadron {} | michel {} ({} segs, {:.1f} cm, {:.2f} mip, kink {:.0f} deg, {:.1f} MeV) dots {} ({:.1f} MeV) unfit {} | cont {:.1f} cm @ {:.0f} deg ext {} ({:.1f} cm) dead_ahead {} cov {:.2f} | in_fv {} | {:.0f} ms",
             m_evt_tag, rec.cluster_id, rec.gid, bits_string(rec.reject_bits), rec.reject_bits,
-            rec.n_chain_segs, rec.muon_len / units::cm, rec.n_profile_pts, rec.stop_dis / units::cm,
+            rec.n_chain_segs, rec.muon_len / units::cm, rec.n_profile_pts, rec.n_dead_pts, rec.stop_dis / units::cm,
             rec.bragg.contrast, rec.bragg.expected, rec.ks_mu, rec.ks_flat,
             rec.comp_fwd[0], rec.comp_fwd[1], rec.comp_fwd[2], rec.comp_fwd[3],
             rec.n_delta, rec.n_body_hadron,
             rec.michel_found, rec.n_michel_segs, rec.michel_len / units::cm, rec.michel_mip, rec.michel_kink_deg, rec.michel_ke_best,
             rec.n_dots, rec.dots_ke_dqdx, rec.n_dot_clusters_unfit,
-            rec.cont_len / units::cm, rec.cont_angle_deg, rec.in_fv,
+            rec.cont_len / units::cm, rec.cont_angle_deg, rec.n_ext, rec.ext_len / units::cm, rec.dead_ahead, rec.chain_coverage, rec.in_fv,
             MS(Clock::now() - t0).count());
     }
 

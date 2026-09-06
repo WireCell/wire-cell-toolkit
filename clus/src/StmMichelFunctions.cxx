@@ -22,50 +22,80 @@ WireCell::Point WireCell::Clus::PR::stm_michel_vertex_point(const VertexPtr& vtx
     return vtx->fit().valid() ? vtx->fit().point : vtx->wcpt().point;
 }
 
+namespace {
+    // Dijkstra from `from` over the whole reachable component, keyed on the
+    // graph index (VertexIndexCmp), tie-broken on the edge index, so the
+    // result does not depend on allocation order.  `stop_at` (may be null)
+    // ends the search early once that vertex is settled.
+    struct StmDijkstra {
+        std::map<VertexPtr, double, VertexIndexCmp> dist;
+        std::map<VertexPtr, std::pair<SegmentPtr, VertexPtr>, VertexIndexCmp> prev;
+    };
+    StmDijkstra stm_dijkstra(Graph& g, VertexPtr from, VertexPtr stop_at)
+    {
+        StmDijkstra out;
+        if (!from || !from->descriptor_valid()) return out;
+        // frontier: (distance, vertex index) -> vertex
+        std::set<std::pair<double, size_t>> frontier;
+        std::map<size_t, VertexPtr> by_index;
+
+        out.dist[from] = 0.0;
+        frontier.insert({0.0, from->get_graph_index()});
+        by_index[from->get_graph_index()] = from;
+
+        while (!frontier.empty()) {
+            auto it = frontier.begin();
+            const double d = it->first;
+            VertexPtr v = by_index.at(it->second);
+            frontier.erase(it);
+            if (stop_at && v == stop_at) break;
+            auto dv_it = out.dist.find(v);
+            if (dv_it != out.dist.end() && d > dv_it->second) continue;  // stale entry
+
+            for (auto e : sorted_out_edges(v->get_descriptor(), g)) {
+                SegmentPtr seg = g[e].segment;
+                if (!seg) continue;
+                VertexPtr other = find_other_vertex(g, seg, v);
+                if (!other) continue;
+                const double w = std::max(0.0, segment_track_length(seg));
+                const double nd = d + w;
+                auto od = out.dist.find(other);
+                if (od == out.dist.end() || nd < od->second) {
+                    if (od != out.dist.end()) frontier.erase({od->second, other->get_graph_index()});
+                    out.dist[other] = nd;
+                    out.prev[other] = {seg, v};
+                    frontier.insert({nd, other->get_graph_index()});
+                    by_index[other->get_graph_index()] = other;
+                }
+            }
+        }
+        return out;
+    }
+}
+
+VertexPtr WireCell::Clus::PR::stm_michel_farthest_vertex(Graph& g, VertexPtr from,
+                                                         const std::function<bool(const VertexPtr&)>& accept)
+{
+    if (!from || !from->descriptor_valid()) return nullptr;
+    auto dj = stm_dijkstra(g, from, nullptr);
+    VertexPtr best; double best_d = -1;
+    for (const auto& [v, d] : dj.dist) {      // index-ordered map: ties -> lowest index
+        if (v == from) continue;
+        if (accept && !accept(v)) continue;
+        if (d > best_d) { best_d = d; best = v; }
+    }
+    return best;
+}
+
 std::vector<SegmentPtr> WireCell::Clus::PR::stm_michel_shortest_chain(Graph& g, VertexPtr from, VertexPtr to)
 {
     std::vector<SegmentPtr> out;
     if (!from || !to || !from->descriptor_valid() || !to->descriptor_valid()) return out;
     if (from == to) return out;
 
-    // Dijkstra keyed on the graph index (VertexIndexCmp), tie-broken on the
-    // edge index, so the result does not depend on allocation order.
-    std::map<VertexPtr, double, VertexIndexCmp> dist;
-    std::map<VertexPtr, std::pair<SegmentPtr, VertexPtr>, VertexIndexCmp> prev;
-    // frontier: (distance, vertex index) -> vertex
-    std::set<std::pair<double, size_t>> frontier;
-    std::map<size_t, VertexPtr> by_index;
-
-    dist[from] = 0.0;
-    frontier.insert({0.0, from->get_graph_index()});
-    by_index[from->get_graph_index()] = from;
-
-    while (!frontier.empty()) {
-        auto it = frontier.begin();
-        const double d = it->first;
-        VertexPtr v = by_index.at(it->second);
-        frontier.erase(it);
-        if (v == to) break;
-        auto dv_it = dist.find(v);
-        if (dv_it != dist.end() && d > dv_it->second) continue;  // stale entry
-
-        for (auto e : sorted_out_edges(v->get_descriptor(), g)) {
-            SegmentPtr seg = g[e].segment;
-            if (!seg) continue;
-            VertexPtr other = find_other_vertex(g, seg, v);
-            if (!other) continue;
-            const double w = std::max(0.0, segment_track_length(seg));
-            const double nd = d + w;
-            auto od = dist.find(other);
-            if (od == dist.end() || nd < od->second) {
-                if (od != dist.end()) frontier.erase({od->second, other->get_graph_index()});
-                dist[other] = nd;
-                prev[other] = {seg, v};
-                frontier.insert({nd, other->get_graph_index()});
-                by_index[other->get_graph_index()] = other;
-            }
-        }
-    }
+    auto dj = stm_dijkstra(g, from, to);
+    auto& dist = dj.dist;
+    auto& prev = dj.prev;
 
     if (!dist.count(to)) return out;
     // Unwind.
@@ -133,6 +163,19 @@ StmMichelProfile WireCell::Clus::PR::stm_michel_profile(Graph& g, const std::vec
     prof.rr.resize(prof.L.size());
     for (size_t i = 0; i < prof.L.size(); ++i) prof.rr[i] = L - prof.L[i];
     return prof;
+}
+
+StmMichelProfile WireCell::Clus::PR::stm_michel_profile_live(const StmMichelProfile& prof, double min_dqdx, int& n_dead)
+{
+    StmMichelProfile out;
+    out.total_length = prof.total_length;
+    n_dead = 0;
+    for (size_t i = 0; i < prof.L.size(); ++i) {
+        if (prof.dQdx[i] < min_dqdx) { ++n_dead; continue; }
+        out.L.push_back(prof.L[i]); out.dQdx.push_back(prof.dQdx[i]); out.rr.push_back(prof.rr[i]);
+        out.pts.push_back(prof.pts[i]); out.seg_idx.push_back(prof.seg_idx[i]);
+    }
+    return out;
 }
 
 double WireCell::Clus::PR::stm_michel_median(std::vector<double> v)
@@ -214,7 +257,13 @@ StmMichelArm WireCell::Clus::PR::stm_michel_classify_stop_arm(Graph& g, SegmentP
     StmMichelArm a = measure_arm(g, last_muon, arm, stop, th, th.michel_max_len);
     if (!arm) return a;
     const bool kink_ok = a.kink_deg >= 0;
-    if (!a.shower_like && kink_ok && a.kink_deg < th.continuation_max_angle_deg &&
+    // A collinear MIP-like arm past the stop is the muon going on, whatever
+    // the track/shower separation stamped on it: doc pdhd/03 sec 6 found the
+    // shower flag on 20-24 cm arms at 2-3 deg and 1.2-1.3 MIP (029107/21
+    // cluster 116, 029107/28 cluster 35), which doc pdvd/48's
+    // "!shower_like" guard then handed to the Michel clause as 43-57 MeV
+    // electrons.  The shower flag is not consulted here.
+    if (kink_ok && a.kink_deg < th.continuation_max_angle_deg &&
         a.len > th.continuation_min_len &&
         a.mip >= th.continuation_mip_lo && a.mip <= th.continuation_mip_hi) {
         a.kind = StmMichelArm::kContinuation;
@@ -225,8 +274,14 @@ StmMichelArm WireCell::Clus::PR::stm_michel_classify_stop_arm(Graph& g, SegmentP
     // pdvd/42 sec 4.4 measured the PDVD leftover past the tagger's stop as
     // collinear muon continuation at ~0.9 MIP, which a dQ/dx-only clause would
     // call a Michel (first census: a fifth of the "Michels" had kink < 30 deg).
+    // doc pdhd/03 sec 6.8: the shower flag alone admitted the muon's own last
+    // 5 cm (a collinear 1.6 MIP stub at 4 deg, 029107/1 cluster 113) as a
+    // "Michel"; with michel_shower_min_kink_deg >= 0 a shower-flagged arm
+    // whose kink is measurable must also turn by at least that much.
+    const bool shower_admits = a.shower_like &&
+        (th.michel_shower_min_kink_deg < 0 || !kink_ok || a.kink_deg >= th.michel_shower_min_kink_deg);
     if (a.len + a.far_len <= th.michel_max_len && a.mip > th.michel_mip_lo && a.mip < th.michel_mip_hi &&
-        (a.shower_like || (kink_ok && a.kink_deg >= th.michel_min_kink_deg))) {
+        (shower_admits || (kink_ok && a.kink_deg >= th.michel_min_kink_deg))) {
         a.kind = StmMichelArm::kMichel;
         return a;
     }

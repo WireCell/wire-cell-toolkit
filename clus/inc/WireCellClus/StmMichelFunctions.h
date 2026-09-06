@@ -37,6 +37,16 @@ namespace WireCell::Clus::PR {
     /// walks sorted_out_edges and breaks ties on the edge index.
     std::vector<SegmentPtr> stm_michel_shortest_chain(Graph& g, VertexPtr from, VertexPtr to);
 
+    /// The reachable vertex farthest (by the same segment_track_length
+    /// metric) from `from`, optionally restricted to vertices `accept`
+    /// admits (e.g. those stamped with the main cluster).  Ties break on
+    /// the vertex index.  Null when nothing but `from` is reachable.  Used
+    /// when the tagger's stop has no graph vertex (doc pdhd/03: the tagger's
+    /// fit bridged into a detached fragment) -- the muon is then the longest
+    /// route out of the entry, and the verdict keeps R_STOP_UNMATCHED.
+    VertexPtr stm_michel_farthest_vertex(Graph& g, VertexPtr from,
+                                         const std::function<bool(const VertexPtr&)>& accept = nullptr);
+
     /// The chain's vertices in walk order: entry, every junction, the far
     /// vertex of the last segment.  Size = chain.size() + 1 (0 if chain empty
     /// or a segment is not attached to the running vertex).
@@ -64,6 +74,16 @@ namespace WireCell::Clus::PR {
         bool empty() const { return L.empty(); }
     };
     StmMichelProfile stm_michel_profile(Graph& g, const std::vector<SegmentPtr>& chain, VertexPtr entry);
+
+    /// The profile with every point whose dQdx < min_dqdx removed (L, rr and
+    /// total_length keep their geometric values, so residual range is still
+    /// measured from the stop).  n_dead receives the number removed.  A fit
+    /// point with (near-)zero charge is a cell the fit could not read -- a
+    /// dead / unresponsive channel stretch, an APA edge, a wrapped-wire
+    /// ambiguity -- and carries no particle information; left in, a 20 cm
+    /// zero stretch drags the plateau median to ~0 (a FAKE Bragg contrast of
+    /// 5) and hands the template PID to the electron (doc pdhd/03 sec 5).
+    StmMichelProfile stm_michel_profile_live(const StmMichelProfile& prof, double min_dqdx, int& n_dead);
 
     /// Median of a copy of v; 0 when empty.
     double stm_michel_median(std::vector<double> v);
@@ -107,6 +127,7 @@ namespace WireCell::Clus::PR {
         double michel_mip_hi{2.0};                    // upper cap: an electron is MIP-like or below
         double michel_mip_lo{0.3};                    // charge-desert guard
         double michel_min_kink_deg{30};               // required unless the arm is shower-flagged
+        double michel_shower_min_kink_deg{-1};        // doc pdhd/03: a shower-flagged arm still needs this kink (measurable); -1 = any (doc pdvd/48)
         // delta ray off the muon body
         double delta_max_len{8 * units::cm};
         // a long heavily-ionizing prong off the body = hadronic vertex
@@ -155,6 +176,10 @@ namespace WireCell::Clus::PR {
         R_STOP_NEAR_BOUNDARY = 1u << 6,   // stop outside the fiducial inset by stop_fv_margin
         R_VERTEX_HADRON      = 1u << 7,   // a long heavily-ionizing prong off the body
         R_SHORT              = 1u << 8,   // fewer than min_chain_points profile points
+        R_PROFILE_SPARSE     = 1u << 9,   // too few LIVE points to judge: a Bragg window or the compare range holds < 3 (doc pdhd/03)
+        R_PLATEAU_OFF_MIP    = 1u << 10,  // plateau_med / mip_dqdx outside [plateau_mip_lo, plateau_mip_hi] (doc pdhd/03)
+        R_STOP_INTO_DEAD     = 1u << 11,  // the visible end walks into a dead region (FiducialUtils::check_dead_volume) (doc pdhd/03)
+        R_CLUSTER_NOT_TRACK  = 1u << 12,  // too few of the cluster's points lie on the reconstructed track (doc pdhd/03)
     };
 
 }  // namespace WireCell::Clus::PR
