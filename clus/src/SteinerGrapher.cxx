@@ -60,18 +60,86 @@ void Steiner::Grapher::create_steiner_tree(
     // Phase 1's candidacy gate actually reads (calc_charge_wcp -> ncharge>1),
     // and they are NOT recoverable offline: the Steiner stage runs on a RETILED
     // cluster whose point cloud is never persisted.
+    //
+    // doc pdhd/steiner-wrapped-planes: ten more fields, again appended LAST so
+    // every existing parser keeps matching its prefix -- the point's wire index
+    // per plane (wu wv ww), its charge uncertainty per plane (uu uv uw; 1e12 is
+    // the retiler's dead/forced sentinel, calc_charge_wcp's dead_threshold is
+    // 1e10), its blob's slice index (ts), and the largest ctpc charge on a wire
+    // within +-kNeighbourWires of the point's wire in the SAME slice, face and
+    // plane, the point's own wire excluded (nu nv nw).  The ctpc 2-D clouds
+    // are what the retiler built its activity from (improvecluster_1.cxx
+    // get_activity_improved, Grouping::get_overlap_good_ch_charge), so "the
+    // neighbour wire had charge" is read from the retiler's own source.  One
+    // window query per (apa, face, plane) per call, then map lookups.  All of
+    // it lives under the env gate: in production nothing here executes.
+    constexpr int kNeighbourWires = 2;
+    struct NeighbourMaps {
+        std::map<std::pair<int, int>, std::pair<double, double>> plane[3];
+    };
+    std::map<std::pair<int, int>, NeighbourMaps> neighbour_maps;   // (apa, face)
+    if (s_phase_dump) {
+        const auto* grouping = m_cluster.grouping();
+        for (const auto& wpid : m_cluster.wpids_blob_set()) {
+            const auto key = std::make_pair(wpid.apa(), wpid.face());
+            if (!grouping || neighbour_maps.count(key)) continue;
+            const auto lo = m_cluster.get_uvwt_min(key.first, key.second);
+            const auto hi = m_cluster.get_uvwt_max(key.first, key.second);
+            if (std::get<3>(lo) < 0) continue;
+            const int wlo[3] = {std::get<0>(lo), std::get<1>(lo), std::get<2>(lo)};
+            const int whi[3] = {std::get<0>(hi), std::get<1>(hi), std::get<2>(hi)};
+            auto& nm = neighbour_maps[key];
+            for (int plane = 0; plane < 3; ++plane) {
+                nm.plane[plane] = grouping->get_overlap_good_ch_charge(
+                    std::get<3>(lo), std::get<3>(hi) + 1,
+                    wlo[plane] - kNeighbourWires, whi[plane] + 1 + kNeighbourWires,
+                    key.first, key.second, plane);
+            }
+        }
+    }
+    auto neighbour_max = [&](size_t idx, int plane, int wind, int ts, const std::pair<int, int>& key) {
+        double best = 0.0;
+        (void) idx;
+        auto it = neighbour_maps.find(key);
+        if (it == neighbour_maps.end()) return best;
+        const auto& m = it->second.plane[plane];
+        for (int dw = -kNeighbourWires; dw <= kNeighbourWires; ++dw) {
+            if (dw == 0) continue;
+            auto jt = m.find(std::make_pair(ts, wind + dw));
+            if (jt != m.end() && jt->second.first > best) best = jt->second.first;
+        }
+        return best;
+    };
+    auto dump_point = [&](const char* phase, size_t nterm, size_t idx) {
+        const auto p = m_cluster.point3d(idx);
+        const auto* blob = m_cluster.blob_with_point(idx);
+        const int ts = blob ? blob->slice_index_min() : -1;
+        const auto key = blob ? std::make_pair(blob->wpid().apa(), blob->wpid().face())
+                              : std::make_pair(-1, -1);
+        const int wind[3] = {m_cluster.wire_index(idx, 0), m_cluster.wire_index(idx, 1),
+                             m_cluster.wire_index(idx, 2)};
+        SPDLOG_LOGGER_DEBUG(log,
+            "steiner_phase_pt: npts={} nterm={} phase={} x={:.2f} y={:.2f} z={:.2f}"
+            " cu={:.1f} cv={:.1f} cw={:.1f}"
+            " wu={} wv={} ww={} uu={:.3g} uv={:.3g} uw={:.3g} ts={} nu={:.1f} nv={:.1f} nw={:.1f}",
+            m_cluster.npoints(), nterm, phase,
+            p.x() / units::cm, p.y() / units::cm, p.z() / units::cm,
+            m_cluster.charge_value(idx, 0),
+            m_cluster.charge_value(idx, 1),
+            m_cluster.charge_value(idx, 2),
+            wind[0], wind[1], wind[2],
+            m_cluster.charge_uncertainty(idx, 0),
+            m_cluster.charge_uncertainty(idx, 1),
+            m_cluster.charge_uncertainty(idx, 2),
+            ts,
+            neighbour_max(idx, 0, wind[0], ts, key),
+            neighbour_max(idx, 1, wind[1], ts, key),
+            neighbour_max(idx, 2, wind[2], ts, key));
+    };
     auto dump_terminals = [&](const char* phase, const vertex_set& terms) {
         if (!s_phase_dump) return;
         for (const auto idx : terms) {
-            const auto p = m_cluster.point3d(idx);
-            SPDLOG_LOGGER_DEBUG(log,
-                "steiner_phase_pt: npts={} nterm={} phase={} x={:.2f} y={:.2f} z={:.2f}"
-                " cu={:.1f} cv={:.1f} cw={:.1f}",
-                m_cluster.npoints(), terms.size(), phase,
-                p.x() / units::cm, p.y() / units::cm, p.z() / units::cm,
-                m_cluster.charge_value(idx, 0),
-                m_cluster.charge_value(idx, 1),
-                m_cluster.charge_value(idx, 2));
+            dump_point(phase, terms.size(), idx);
         }
     };
 
@@ -82,14 +150,7 @@ void Steiner::Grapher::create_steiner_tree(
     if (s_phase_dump && m_cluster.npoints() > 1000) {
         const int npts = m_cluster.npoints();
         for (int i = 0; i < npts; ++i) {
-            const auto p = m_cluster.point3d(i);
-            SPDLOG_LOGGER_DEBUG(log,
-                "steiner_phase_pt: npts={} nterm=0 phase=P0_cluster x={:.2f} y={:.2f} z={:.2f}"
-                " cu={:.1f} cv={:.1f} cw={:.1f}",
-                npts, p.x() / units::cm, p.y() / units::cm, p.z() / units::cm,
-                m_cluster.charge_value(i, 0),
-                m_cluster.charge_value(i, 1),
-                m_cluster.charge_value(i, 2));
+            dump_point("P0_cluster", 0, i);
         }
     }
 
