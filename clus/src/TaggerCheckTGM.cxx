@@ -28,6 +28,9 @@
 #include "WireCellClus/ClusteringFuncs.h"
 #include "WireCellClus/ClusteringFuncsMixins.h"
 #include "WireCellClus/FiducialUtils.h"
+
+#include <cstdlib>
+#include <fstream>
 #include "WireCellIface/IConfigurable.h"
 #include "WireCellUtil/NamedFactory.h"
 #include "WireCellUtil/String.h"
@@ -473,6 +476,37 @@ private:
         for (int i = 0; i < npts; ++i) {
             if (pt_vox[i] >= 0) comp[i] = find(pt_vox[i]);
         }
+        // doc pdhd/04 diagnostic.  INERT unless WCT_TGM_PATH_DUMP is set (a
+        // cluster ident, or -1 for every cluster): writes a side CSV of every
+        // point with its excluded flag and its path component, and logs the
+        // component census.  No verdict reads it => output byte-identical.
+        if (const char* env = std::getenv("WCT_TGM_PATH_DUMP")) {
+            const int want = std::atoi(env);
+            if (want < 0 || want == cluster.ident()) {
+                const char* dir = std::getenv("WCT_TGM_PATH_DUMP_DIR");
+                const std::string fn = std::string(dir ? dir : ".") + "/tgm_path_cluster"
+                                     + std::to_string(cluster.ident()) + ".csv";
+                std::ofstream os(fn);
+                os << "i,x,y,z,excluded,comp,qu,qv,qw\n";
+                int nexcl = 0;
+                for (int i = 0; i < npts; ++i) {
+                    const geo_point_t p = cluster.point3d(i);
+                    const bool ex = cluster.is_point_excluded(i);
+                    if (ex) ++nexcl;
+                    os << i << ',' << p.x()/units::cm << ',' << p.y()/units::cm << ','
+                       << p.z()/units::cm << ',' << (ex ? 1 : 0) << ',' << comp[i] << ','
+                       << cluster.charge_value(i, 0) << ',' << cluster.charge_value(i, 1) << ','
+                       << cluster.charge_value(i, 2) << '\n';
+                }
+                std::map<int, int> csz;
+                for (int c : comp) if (c >= 0) ++csz[c];
+                SPDLOG_LOGGER_INFO(t_log, "TGMPROBE: cluster {} npts={} excluded={} nvox={} ncomp={} -> {}",
+                                   cluster.ident(), npts, nexcl, nvox, (int)csz.size(), fn);
+                for (const auto& [c, n] : csz) {
+                    SPDLOG_LOGGER_INFO(t_log, "TGMPROBE: cluster {} comp {} npts {}", cluster.ident(), c, n);
+                }
+            }
+        }
         return comp;
     }
 
@@ -486,6 +520,14 @@ private:
         if (ra.empty() || rb.empty()) return true;
         const int ca = comp[ra[0].first];
         const int cb = comp[rb[0].first];
+        if (std::getenv("WCT_TGM_PATH_DUMP")) {
+            SPDLOG_LOGGER_INFO(t_log, "TGMPROBE: cluster {} path_connected "
+                "a=({:.1f},{:.1f},{:.1f}) i={} comp={} | b=({:.1f},{:.1f},{:.1f}) i={} comp={} -> {}",
+                cluster.ident(),
+                a.x()/units::cm, a.y()/units::cm, a.z()/units::cm, (int)ra[0].first, ca,
+                b.x()/units::cm, b.y()/units::cm, b.z()/units::cm, (int)rb[0].first, cb,
+                (ca < 0 || cb < 0) ? "OPEN(excluded)" : (ca == cb ? "connected" : "SPLIT"));
+        }
         if (ca < 0 || cb < 0) return true;  // nearest point excluded: don't veto
         return ca == cb;
     }
