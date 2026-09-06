@@ -42,6 +42,32 @@ namespace WireCell::Clus::PR {
     {
         if (! vtx->descriptor_valid()) { return false; }
         auto desc = vtx->get_descriptor();
+        // BGL's remove_vertex assumes the vertex has no incident edges; the
+        // caller is expected to clear_vertex() first.  Delete a vertex that
+        // still carries a segment and the NODE goes while the EDGE survives,
+        // so the next walker does boost::source(ed, graph) and dereferences a
+        // freed node bundle -- a use-after-free, not a crash at the delete.
+        // Reached on SBND mcp2k 494297 with excl_t0_frame on, through
+        // eliminate_short_vertex_activities case 3, which (alone among its
+        // five cases) does not guard the degree of the vertex it removes.
+        //
+        // Refusing is the conservative repair.  The prototype's
+        // del_proto_vertex (NeutrinoID_proto_vertex.h:2002) detaches the
+        // vertex from each of its segments' vertex sets, leaving segments with
+        // ONE vertex -- legal in a map-of-sets, unrepresentable as a BGL edge.
+        // Rather than invent a deletion the prototype never performs
+        // (clear_vertex would drop those segments' edges outright), the port
+        // does less: the vertex stays, its other segments stay intact, and the
+        // caller sees the `false` it already has to handle for an invalid
+        // descriptor.  doc sbnd_xin/pr/144 §6.4.
+        if (boost::degree(desc, graph) > 0) {
+            static auto s_log = WireCell::Log::logger("clus.PRGraph");
+            SPDLOG_LOGGER_WARN(s_log,
+                "pr144 remove_vertex: refusing to remove vertex gidx={} with degree={} "
+                "(BGL requires an isolated vertex; see doc sbnd_xin/pr/144 sec 6.4)",
+                vtx->get_graph_index(), boost::degree(desc, graph));
+            return false;
+        }
         boost::remove_vertex(desc, graph);
         vtx->invalidate_descriptor();
         return true;
