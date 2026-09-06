@@ -469,6 +469,19 @@ local clus_per_group (
     runNo = 1,
     subRunNo = 1,
     eventNo = 1,
+    // doc pdhd/06: record what clustering_isolated merged, so the PR job can undo
+    // it (cm.unmerge_bundle with id_aname='assoc_cluster_id').  cm.isolated()
+    // MERGES a main cluster with the small clusters that are near it but NOT
+    // connected to it -- the prototype only GROUPS them -- so the STM endpoint
+    // finder and the Steiner build walk across empty space into a detached
+    // clump.  Counterpart of protodunevd/clus.jsonnet save_assoc_id (doc
+    // pdvd/39 round 2); SBND carries the same pair.  PDHD DOES run
+    // cm.isolated() at this stage -- the pipeline comment in run_pr_evt.sh that
+    // said otherwise was wrong -- it simply never saved the provenance, so
+    // there was nothing to undo.  Writes the isolated/assoc_cluster_id/
+    // assoc_cluster_main perblob arrays ONLY; cluster membership is untouched.
+    // false => both keys omitted => byte-identical compiled config and pctree.
+    save_assoc_id = false,
     ) = {
     local nanodes = std.length(anodes),
     local pcmerging = g.pnode({
@@ -512,7 +525,8 @@ local clus_per_group (
         cm.deghost(empty_view_unique=true),
         cm.examine_x_boundary(),
         cm.neutrino(protect_iso_band=true),
-        cm.isolated(),
+        // save_assoc_id: see the clus_per_group argument.  false => key omitted.
+        cm.isolated(save_assoc_id=save_assoc_id),
         // examine_bundles() DISABLED at the per-drift-group stage (2026-06-14).
         // It rewrites the "isolated"/"perblob" array, splitting a cluster into a
         // main spine (-1) + associated sub-clusters at connectivity gaps (e.g. where
@@ -547,6 +561,13 @@ local clus_per_group (
             eventNo: eventNo,
             save_deadarea: true,
             dead_area_version: 2,  // v2 wrapper (tpc=apa) so the dead slab lands on the correct PD anode face
+            // doc pdhd/06: homogenize the perblob key set so the isolated
+            // grouping's provenance pair survives Dataset::append into the next
+            // stage and, from there, into the saved pctree -- the serializer
+            // silently DROPS heterogeneous keys, and clusters that
+            // clustering_isolated never touched have no perblob PC at all.
+            // C++ default false; key omitted when off => byte-identical.
+            [if save_assoc_id then 'save_assoc_cluster_id']: true,
             anodes: [wc.tn(a) for a in anodes],
             detector_volumes: wc.tn(dv),
             bee_points_sets: [
@@ -609,6 +630,10 @@ local clus_all_tpc (
     // the tree.  Runner flag: run_clus_evt.sh -save-pctree ->
     // work/<RUN6>_<EVT>/pctree-evt<ID>.tar.gz.
     tensor_outname = '',
+    // doc pdhd/06: see clus_per_group's save_assoc_id.  This stage does not run
+    // cm.isolated(); it only needs the same key-set homogenization so the group
+    // stage's provenance arrays survive into the saved pctree.
+    save_assoc_id = false,
     ) = {
     local pcmerging = g.pnode({
         type: "PointTreeMerging",
@@ -692,6 +717,10 @@ local clus_all_tpc (
             subRunNo: subRunNo,
             eventNo: eventNo,
             save_deadarea: true,
+            // doc pdhd/06: see the save_assoc_id argument.  This is the node
+            // whose TensorFileSink writes the pctree the PR job reads, so the
+            // key must be set HERE for unmerge_assoc to have provenance.
+            [if save_assoc_id then 'save_assoc_cluster_id']: true,
             // Dump the optical "op" bee instance (measured flash PE + Q/L
             // predicted PE per matched cluster) at the pre-pipeline point.
             // Needs do_qlmatch (the QLMatching "opflash" root PC); no-op
@@ -799,8 +828,8 @@ local clus_all_tpc (
     local bee_dir = if output_dir == '' then 'data' else output_dir,
     per_face(anode, face=0, dump=true, wrapped_channel_charge=true) :: clus_per_face(anode, face=face, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo, wrapped_channel_charge=wrapped_channel_charge),
     per_apa(anode, dump=true, wrapped_channel_charge=true) :: clus_per_apa(anode, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo, wrapped_channel_charge=wrapped_channel_charge),
-    per_group(anodes, group_name, face, dump=true) :: clus_per_group(anodes, group_name, face, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo),
-    all_tpc(anodes, ngroups=2, dump=true, save_opflash=false, premerged=false, tensor_outname='') :: clus_all_tpc(anodes, ngroups=ngroups, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo, save_opflash=save_opflash, premerged=premerged, tensor_outname=tensor_outname),
+    per_group(anodes, group_name, face, dump=true, save_assoc_id=false) :: clus_per_group(anodes, group_name, face, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo, save_assoc_id=save_assoc_id),
+    all_tpc(anodes, ngroups=2, dump=true, save_opflash=false, premerged=false, tensor_outname='', save_assoc_id=false) :: clus_all_tpc(anodes, ngroups=ngroups, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo, save_opflash=save_opflash, premerged=premerged, tensor_outname=tensor_outname, save_assoc_id=save_assoc_id),
     // Expose the DetectorVolumes node builder so the Q/L matching graph can
     // reference the SAME per-group DV the clustering uses (deterministic by name).
     detector_volumes(anodes, face="") :: detector_volumes(anodes, face),
