@@ -1050,3 +1050,23 @@ byte-identical.  Flipping it is a production decision per detector (doc pdvd/45 
 Related: doc pr/98 (the `-1.0` sentinel guard in the same function), doc pr/108 (parity-exact
 "through the association stage" was measured on uBooNE 5384, where the t0 folding leaves the
 two frames coincident), doc pdvd/30 (the cluster-86 symptom this explains).
+
+## The vector `cal_kine_dQdx` dropped the prototype's `dx + 1e-9` epsilon — a coincident fit pair makes `kine_reco_Enu` NaN (doc pdvd/45 sec 8, knob `kine_dqdx_skip_zero_dx`, default OFF)
+
+**Prototype** (`ProtoSegment.cxx:1316-1339`): `dQdx = dQ / (dx + 1e-9)`, then `kine_energy += dEdx * dx`.
+A fit point with `dx == 0` (a coincident pair after the resamplers) contributes exactly 0, and a
+negative `dx` gives a negative `dEdx` that the `< 0` clamp zeroes — also 0.
+
+**Toolkit** (`PRSegmentFunctions.cxx`, `cal_kine_dQdx(vec_dQ, vec_dx, model)`): the epsilon is
+gone; `recomb_model->dE(dQ, 0)` computes `dQ/dx = 0/0` (or `inf * 0`) and the NaN survives both
+clamps into `kenergy_dQdx` → `kine_reco_Enu` (11 of 569 PDVD candidates in production, 73 once
+`excl_t0_frame` restores the trajectories; 0 in 3067 SBND events). With `dx < 0` the
+`dE > 50 MeV/cm * dx` clamp flips sign and the point SUBTRACTS energy. The segment form
+`segment_cal_kine_dQdx` already had `if (fits[i].dx <= 0) continue;` — only the vector form lacked it.
+A second, silent consequence: `apply_hadronic_dqdx_best` (K3) tests `dqdx > 0`, which a NaN fails,
+so a hadronic shower silently kept `kine_best = 0`.
+
+**Status:** knob `kine_dqdx_skip_zero_dx` (TaggerCheckNeutrino → `KineChargeOptions::dqdx_skip_zero_dx`
+→ `PRShower::calculate_kinematics*` → `cal_kine_dQdx(..., skip_zero_dx)`) skips `dx <= 0` points, the
+prototype's outcome. Default OFF (byte-identical); **PDVD production ON since 2026-09-05**.
+Test: `clus/test/doctest_cal_kine_dqdx_zero_dx.cxx` (pins the legacy NaN and the guarded value).

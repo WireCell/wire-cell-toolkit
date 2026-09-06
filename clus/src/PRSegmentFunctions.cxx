@@ -2530,7 +2530,7 @@ namespace WireCell::Clus::PR {
         return kine_energy;
     }
 
-    double cal_kine_dQdx(std::vector<double>& vec_dQ, std::vector<double>& vec_dx, const IRecombinationModel::pointer& recomb_model){
+    double cal_kine_dQdx(std::vector<double>& vec_dQ, std::vector<double>& vec_dx, const IRecombinationModel::pointer& recomb_model, bool skip_zero_dx){
         if (vec_dQ.size() != vec_dx.size() || vec_dQ.empty() || !recomb_model) {
             return 0.0;
         }
@@ -2541,6 +2541,12 @@ namespace WireCell::Clus::PR {
               // Calculate dQ/dx with units conversion (same as original)
             double dQ = vec_dQ[i];
             double dx = vec_dx[i];
+
+            // doc pdvd/45 sec 5.4 (knob kine_dqdx_skip_zero_dx): a coincident pair of
+            // fit points gives dx == 0, recomb_model->dE computes dQ/dx = 0/0 and the
+            // NaN survives every clamp below into kine_reco_Enu.  The prototype's
+            // (dx + 1e-9) epsilon made such a point contribute 0; so does skipping it.
+            if (skip_zero_dx && dx <= 0) continue;
             
             // Filter out unreasonable values (same threshold as original)
             if (dQ/dx / (43e3/units::cm) > 1000) dQ = 0;

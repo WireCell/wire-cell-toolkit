@@ -361,6 +361,8 @@ TEST_CASE("clus knob defaults: TaggerCheckNeutrino switches are all OFF")
     CHECK_KNOB_BOOL(cfg, "dqdx_fit_keep_all_points", false);
     // doc pdvd/45: exclusion cells compared in the t0-corrected drift frame -- OFF.
     CHECK_KNOB_BOOL(cfg, "excl_t0_frame", false);
+    // doc pdvd/45 sec 5.4: skip dx<=0 fit points in the vector cal_kine_dQdx -- OFF.
+    CHECK_KNOB_BOOL(cfg, "kine_dqdx_skip_zero_dx", false);
     // doc pdvd/30's traj_degenerate_wcpts_fallback was RETIRED by owner
     // decision 2026-09-03 (doc pdvd/31 round 6): inert on the event it was
     // built for, never enabled in any config, and not the fix for the symptom.

@@ -946,7 +946,11 @@ namespace WireCell::Clus::PR {
 
     // kinemiatics calculations ...
     double segment_cal_kine_dQdx(SegmentPtr seg, const IRecombinationModel::pointer& recomb_model);
-    double cal_kine_dQdx(std::vector<double>& vec_dQ, std::vector<double>& vec_dx, const IRecombinationModel::pointer& recomb_model);
+    /// doc pdvd/45 sec 5.4: skip_zero_dx=true drops fit points with dx <= 0 before
+    /// the recombination model sees them (dQ/dx = 0/0 -> NaN poisons the sum).  The
+    /// prototype (ProtoSegment.cxx:1316) divides by (dx + 1e-9) and multiplies by dx,
+    /// so such a point contributes exactly 0 there.  Default false = byte-identical.
+    double cal_kine_dQdx(std::vector<double>& vec_dQ, std::vector<double>& vec_dx, const IRecombinationModel::pointer& recomb_model, bool skip_zero_dx = false);
     double cal_kine_range(double L, int pdg_code, const Clus::ParticleDataSet::pointer& particle_data);
     // 4-momentum: E, px, py, pz
     WireCell::D4Vector<double> segment_cal_4mom(SegmentPtr segment, int pdg_code, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, double MIP_dQdx = 50000/units::cm);

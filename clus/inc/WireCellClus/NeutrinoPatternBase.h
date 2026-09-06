@@ -158,6 +158,13 @@ namespace WireCell::Clus::PR {
         /// endpoint accumulators (dQdx already summed all members).  Config
         /// key long_muon_members_geometry; absent => byte-identical.
         bool   long_muon_members_geometry{false};
+        /// doc pdvd/45 sec 5.4.  The vector cal_kine_dQdx (multi-segment and
+        /// long-muon showers) has no dx <= 0 guard: a coincident fit pair gives
+        /// 0/0 and kenergy_dQdx -> kine_reco_Enu is NaN (10 PDVD candidates in
+        /// production, 72 with excl_t0_frame on).  true = skip such
+        /// points, the prototype's (dx + 1e-9) outcome.  Config key
+        /// kine_dqdx_skip_zero_dx; absent => byte-identical.
+        bool   dqdx_skip_zero_dx{false};
         /// doc pr/101 (K5).  The fill_kine_tree main-vertex pass lacks the
         /// `used_segments` guard its BFS has (prototype NeutrinoID_kine.h:72
         /// vs :130), so a shower MEMBER segment attached to the main vertex

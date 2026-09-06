@@ -917,6 +917,7 @@ public:
         int    m_kine_long_muon_mode{0};                            // doc pr/101 K4 (0 dQdx, 1 range, 2 range w/ fallback)
         double m_kine_long_muon_ratio_lo{0.3};                      // inert unless mode 2
         double m_kine_long_muon_ratio_hi{0.5};                      // inert unless mode 2
+        bool   m_kine_dqdx_skip_zero_dx{false};                     // doc pdvd/45 sec 5.4: skip dx<=0 fit points in the vector cal_kine_dQdx (NaN Enu)
         bool   m_long_muon_range_empty_chain_fallback{false};       // doc 84 round 1 (P1): range over muon-typed members when the chain missed the shower
         bool   m_long_muon_members_geometry{false};                 // doc 84 round 2: add out-of-chain muon members to range/endpoint (313847, 281595)
         bool   m_long_muon_cathode_bridge{false};                   // doc 84 round 2: absorb the cathode-split far half of a muon (53793, 177536, 77978)

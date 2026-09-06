@@ -646,6 +646,7 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_kine_long_muon_mode                       = get(config, "kine_long_muon_mode",                       m_kine_long_muon_mode);
     m_kine_long_muon_ratio_lo                   = get(config, "kine_long_muon_ratio_lo",                   m_kine_long_muon_ratio_lo);
     m_kine_long_muon_ratio_hi                   = get(config, "kine_long_muon_ratio_hi",                   m_kine_long_muon_ratio_hi);
+    m_kine_dqdx_skip_zero_dx                    = get(config, "kine_dqdx_skip_zero_dx",                    m_kine_dqdx_skip_zero_dx);                 // doc pdvd/45 sec 5.4
     m_long_muon_range_empty_chain_fallback      = get(config, "long_muon_range_empty_chain_fallback",      m_long_muon_range_empty_chain_fallback);  // doc 84 round 1 (P1)
     m_long_muon_members_geometry                = get(config, "long_muon_members_geometry",                m_long_muon_members_geometry);             // doc 84 round 2
     m_long_muon_cathode_bridge                  = get(config, "long_muon_cathode_bridge",                  m_long_muon_cathode_bridge);               // doc 84 round 2
@@ -1153,6 +1154,7 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["kine_long_muon_mode"]                       = m_kine_long_muon_mode;                       // doc pr/101 K4; 0 = legacy dQdx, byte-identical
     cfg["kine_long_muon_ratio_lo"]                   = m_kine_long_muon_ratio_lo;                   // inert unless mode 2
     cfg["kine_long_muon_ratio_hi"]                   = m_kine_long_muon_ratio_hi;                   // inert unless mode 2
+    cfg["kine_dqdx_skip_zero_dx"]                    = m_kine_dqdx_skip_zero_dx;                    // doc pdvd/45 sec 5.4; false = legacy (dx<=0 fit point -> NaN Enu), byte-identical
     cfg["long_muon_range_empty_chain_fallback"]      = m_long_muon_range_empty_chain_fallback;      // doc 84 round 1 (P1); false = legacy (chainless muon shower keeps range 0)
     cfg["long_muon_members_geometry"]                = m_long_muon_members_geometry;                // doc 84 round 2; false = legacy (chain-truncated range/endpoint)
     cfg["long_muon_cathode_bridge"]                  = m_long_muon_cathode_bridge;                  // doc 84 round 2; false = legacy (cathode-split muon stays split)
@@ -2561,6 +2563,7 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
         pattern_algos.m_kine_charge.long_muon_mode      = m_kine_long_muon_mode;                        // doc pr/101 K4
         pattern_algos.m_kine_charge.long_muon_ratio_lo  = m_kine_long_muon_ratio_lo;
         pattern_algos.m_kine_charge.long_muon_ratio_hi  = m_kine_long_muon_ratio_hi;
+        pattern_algos.m_kine_charge.dqdx_skip_zero_dx   = m_kine_dqdx_skip_zero_dx;                     // doc pdvd/45 sec 5.4
         pattern_algos.m_kine_charge.long_muon_range_fallback = m_long_muon_range_empty_chain_fallback;  // doc 84 round 1 (P1)
         pattern_algos.m_kine_charge.long_muon_members_geometry = m_long_muon_members_geometry;          // doc 84 round 2
         pattern_algos.m_kine_charge.mainvtx_used_guard  = m_kine_mainvtx_used_guard;                    // doc pr/101 K5

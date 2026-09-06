@@ -1586,7 +1586,7 @@ namespace WireCell::Clus::PR {
         return vec_dQ_dx;
     }
 
-    void Shower::calculate_kinematics(const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, bool exclude_start_vertex_from_endpoint, bool endpoint_skip_orphan_vertices){
+    void Shower::calculate_kinematics(const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, bool exclude_start_vertex_from_endpoint, bool endpoint_skip_orphan_vertices, bool dqdx_skip_zero_dx){
         // doc pr/91 round 1 -- the set of view nodes an actual member segment
         // touches.  Built once here and consulted by both farthest-vertex
         // searches below.  Empty (and never consulted) when the knob is off, so
@@ -1843,7 +1843,7 @@ namespace WireCell::Clus::PR {
             }
 
             // Calculate energies — only final quantities differ between single/multi-track
-            data.kenergy_dQdx = cal_kine_dQdx(vec_dQ, vec_dx, recomb_model);
+            data.kenergy_dQdx = cal_kine_dQdx(vec_dQ, vec_dx, recomb_model, dqdx_skip_zero_dx);  // doc pdvd/45 sec 5.4
             if (nsegments == nconnected_segs) {
                 // Single track: range-based energy is meaningful
                 data.kenergy_range = cal_kine_range(total_length, data.particle_type, particle_data);
@@ -1883,7 +1883,7 @@ namespace WireCell::Clus::PR {
         //           << std::endl;
     }
 
-    void Shower::calculate_kinematics_long_muon(IndexedSegmentSet& segments_in_muons, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, bool exclude_start_vertex_from_endpoint, int best_mode, double ratio_lo, double ratio_hi, bool range_empty_chain_fallback, bool members_geometry){
+    void Shower::calculate_kinematics_long_muon(IndexedSegmentSet& segments_in_muons, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, bool exclude_start_vertex_from_endpoint, int best_mode, double ratio_lo, double ratio_hi, bool range_empty_chain_fallback, bool members_geometry, bool dqdx_skip_zero_dx){
         // Invariant: this function is only called when shower->get_particle_type() == 13
         // (NeutrinoEnergyReco.cxx), which requires shower->set_particle_type(13) to have been
         // called (NeutrinoShowerClustering.cxx:118), which in turn requires m_start_segment to
@@ -1971,7 +1971,7 @@ namespace WireCell::Clus::PR {
 
         // Calculate kinetic energies
         data.kenergy_range = cal_kine_range(total_length, particle_type, particle_data);
-        data.kenergy_dQdx = cal_kine_dQdx(vec_dQ, vec_dx, recomb_model);
+        data.kenergy_dQdx = cal_kine_dQdx(vec_dQ, vec_dx, recomb_model, dqdx_skip_zero_dx);  // doc pdvd/45 sec 5.4
 
         // For long muon, use dQdx as best energy
         data.kenergy_best = data.kenergy_dQdx;

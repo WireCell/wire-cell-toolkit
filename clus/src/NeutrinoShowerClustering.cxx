@@ -2848,7 +2848,7 @@ void PatternAlgorithms::examine_merge_showers(IndexedShowerSet& showers, VertexP
             shower1->add_shower(*shower2);
         }
         shower1->update_particle_type(particle_data, recomb_model, m_mip_dqdx, main_vertex, m_shower_proton_daughter_pion, m_mip_dqdx_median, m_shower_vote_track_pid_counts, m_shower_accept_pid_guard, m_shower_pid_guard_min_len);
-        shower1->calculate_kinematics(particle_data, recomb_model, m_shower_endpoint_exclude_start_vertex, m_shower_endpoint_skip_orphan_vtx);
+        shower1->calculate_kinematics(particle_data, recomb_model, m_shower_endpoint_exclude_start_vertex, m_shower_endpoint_skip_orphan_vtx, m_kine_charge.dqdx_skip_zero_dx);
         double kine_charge = cal_kine_charge(shower1, m_charge_2d_u, m_charge_2d_v, m_charge_2d_w, m_map_apa_ch_plane_wires, track_fitter, dv);
         shower1->set_kine_charge(kine_charge);
         shower1->set_flag_kinematics(true);
@@ -3661,7 +3661,7 @@ void PatternAlgorithms::merge_shower_fragments(Graph& graph, IndexedShowerSet& s
             shower1->add_shower(*shower2);
         }
         shower1->update_particle_type(particle_data, recomb_model, m_mip_dqdx, main_vertex, m_shower_proton_daughter_pion, m_mip_dqdx_median, m_shower_vote_track_pid_counts, m_shower_accept_pid_guard, m_shower_pid_guard_min_len);
-        shower1->calculate_kinematics(particle_data, recomb_model, m_shower_endpoint_exclude_start_vertex, m_shower_endpoint_skip_orphan_vtx);
+        shower1->calculate_kinematics(particle_data, recomb_model, m_shower_endpoint_exclude_start_vertex, m_shower_endpoint_skip_orphan_vtx, m_kine_charge.dqdx_skip_zero_dx);
         shower1->set_kine_charge(cal_kine_charge(shower1, m_charge_2d_u, m_charge_2d_v, m_charge_2d_w, m_map_apa_ch_plane_wires, track_fitter, dv));
         shower1->set_flag_kinematics(true);
     }
@@ -3926,7 +3926,7 @@ void PatternAlgorithms::shower_clustering_in_other_clusters(Graph& graph, Vertex
 
             // Post-merge majority-vote and kinematics (prototype lines 1555-1556)
             shower->update_particle_type(particle_data, recomb_model, m_mip_dqdx, main_vertex, m_shower_proton_daughter_pion, m_mip_dqdx_median, m_shower_vote_track_pid_counts, m_shower_accept_pid_guard, m_shower_pid_guard_min_len);
-            shower->calculate_kinematics(particle_data, recomb_model, m_shower_endpoint_exclude_start_vertex, m_shower_endpoint_skip_orphan_vtx);
+            shower->calculate_kinematics(particle_data, recomb_model, m_shower_endpoint_exclude_start_vertex, m_shower_endpoint_skip_orphan_vtx, m_kine_charge.dqdx_skip_zero_dx);
 
             showers.insert(shower);
         }
@@ -4506,7 +4506,7 @@ void PatternAlgorithms::examine_shower_1(Graph& graph, VertexPtr main_vertex, In
                     shower1->add_shower(*shower);
                 }
 
-                shower1->calculate_kinematics(particle_data, recomb_model, m_shower_endpoint_exclude_start_vertex, m_shower_endpoint_skip_orphan_vtx);
+                shower1->calculate_kinematics(particle_data, recomb_model, m_shower_endpoint_exclude_start_vertex, m_shower_endpoint_skip_orphan_vtx, m_kine_charge.dqdx_skip_zero_dx);
                 double kine_charge = cal_kine_charge(shower1, m_charge_2d_u, m_charge_2d_v, m_charge_2d_w, m_map_apa_ch_plane_wires, track_fitter, dv);
                 shower1->set_kine_charge(kine_charge);
                 shower1->set_flag_kinematics(true);
@@ -4548,7 +4548,7 @@ void PatternAlgorithms::examine_shower_1(Graph& graph, VertexPtr main_vertex, In
                 // doc pr/121 r1: the kinematics above predate the re-home;
                 // recompute once so the absorbed membership is counted.
                 if (pr121_rehomed) {
-                    shower1->calculate_kinematics(particle_data, recomb_model, m_shower_endpoint_exclude_start_vertex, m_shower_endpoint_skip_orphan_vtx);
+                    shower1->calculate_kinematics(particle_data, recomb_model, m_shower_endpoint_exclude_start_vertex, m_shower_endpoint_skip_orphan_vtx, m_kine_charge.dqdx_skip_zero_dx);
                     double kine_charge2 = cal_kine_charge(shower1, m_charge_2d_u, m_charge_2d_v, m_charge_2d_w, m_map_apa_ch_plane_wires, track_fitter, dv);
                     shower1->set_kine_charge(kine_charge2);
                     shower1->set_flag_kinematics(true);
@@ -4748,7 +4748,7 @@ void PatternAlgorithms::examine_shower_1(Graph& graph, VertexPtr main_vertex, In
                 del_showers.insert(shower1);
             }
             
-            max_shower->calculate_kinematics(particle_data, recomb_model, m_shower_endpoint_exclude_start_vertex, m_shower_endpoint_skip_orphan_vtx);
+            max_shower->calculate_kinematics(particle_data, recomb_model, m_shower_endpoint_exclude_start_vertex, m_shower_endpoint_skip_orphan_vtx, m_kine_charge.dqdx_skip_zero_dx);
             max_shower->start_segment()->set_flags(SegmentFlags::kAvoidMuonCheck);
             double kine_charge = cal_kine_charge(max_shower, m_charge_2d_u, m_charge_2d_v, m_charge_2d_w, m_map_apa_ch_plane_wires, track_fitter, dv);
             max_shower->set_kine_charge(kine_charge);
@@ -5105,7 +5105,7 @@ void PatternAlgorithms::examine_showers(Graph& graph, VertexPtr main_vertex, Ind
             }
         }
         shower->update_particle_type(particle_data, recomb_model, m_mip_dqdx, main_vertex, m_shower_proton_daughter_pion, m_mip_dqdx_median, m_shower_vote_track_pid_counts, m_shower_accept_pid_guard, m_shower_pid_guard_min_len);
-        shower->calculate_kinematics(particle_data, recomb_model, m_shower_endpoint_exclude_start_vertex, m_shower_endpoint_skip_orphan_vtx);
+        shower->calculate_kinematics(particle_data, recomb_model, m_shower_endpoint_exclude_start_vertex, m_shower_endpoint_skip_orphan_vtx, m_kine_charge.dqdx_skip_zero_dx);
         shower->set_kine_charge(cal_kine_charge(shower, m_charge_2d_u, m_charge_2d_v, m_charge_2d_w, m_map_apa_ch_plane_wires, track_fitter, dv));
         shower->set_flag_kinematics(true);
     }
@@ -5149,7 +5149,7 @@ void PatternAlgorithms::examine_showers(Graph& graph, VertexPtr main_vertex, Ind
             if (angle_dir2 < 10 && angle_dir3 < 20) {
                 pr93_probe_absorb_splice("examine_showers_angle", shower, shower1);
                 shower->add_shower(*shower1);
-                shower->calculate_kinematics(particle_data, recomb_model, m_shower_endpoint_exclude_start_vertex, m_shower_endpoint_skip_orphan_vtx);
+                shower->calculate_kinematics(particle_data, recomb_model, m_shower_endpoint_exclude_start_vertex, m_shower_endpoint_skip_orphan_vtx, m_kine_charge.dqdx_skip_zero_dx);
                 shower->set_kine_charge(cal_kine_charge(shower, m_charge_2d_u, m_charge_2d_v, m_charge_2d_w, m_map_apa_ch_plane_wires, track_fitter, dv));
                 shower->set_flag_kinematics(true);
                 del_showers.insert(shower1);
@@ -6215,7 +6215,7 @@ void PatternAlgorithms::shower_split(Graph& graph, VertexPtr main_vertex, Indexe
                     // absorb pr125 satellite_absorb settled on.
                     h->calculate_kinematics(particle_data, recomb_model,
                                             m_shower_endpoint_exclude_start_vertex,
-                                            m_shower_endpoint_skip_orphan_vtx);
+                                            m_shower_endpoint_skip_orphan_vtx, m_kine_charge.dqdx_skip_zero_dx);
                     h->set_kine_charge(cal_kine_charge(h, m_charge_2d_u, m_charge_2d_v,
                                                        m_charge_2d_w, m_map_apa_ch_plane_wires,
                                                        track_fitter, dv));
@@ -6307,7 +6307,7 @@ void PatternAlgorithms::em_collinear_merge(IndexedShowerSet& showers,
             did = true;
         }
         if (!taken.empty()) {
-            host->calculate_kinematics(particle_data, recomb_model, m_shower_endpoint_exclude_start_vertex, m_shower_endpoint_skip_orphan_vtx);
+            host->calculate_kinematics(particle_data, recomb_model, m_shower_endpoint_exclude_start_vertex, m_shower_endpoint_skip_orphan_vtx, m_kine_charge.dqdx_skip_zero_dx);
             double kine_charge = cal_kine_charge(host, m_charge_2d_u, m_charge_2d_v, m_charge_2d_w, m_map_apa_ch_plane_wires, track_fitter, dv);
             host->set_kine_charge(kine_charge);
             host->set_flag_kinematics(true);
@@ -6429,7 +6429,7 @@ void PatternAlgorithms::em_start_backext(IndexedShowerSet& showers,
             gone.insert(frag);
             did = true;
         }
-        host->calculate_kinematics(particle_data, recomb_model, m_shower_endpoint_exclude_start_vertex, m_shower_endpoint_skip_orphan_vtx);
+        host->calculate_kinematics(particle_data, recomb_model, m_shower_endpoint_exclude_start_vertex, m_shower_endpoint_skip_orphan_vtx, m_kine_charge.dqdx_skip_zero_dx);
         double kine_charge = cal_kine_charge(host, m_charge_2d_u, m_charge_2d_v, m_charge_2d_w, m_map_apa_ch_plane_wires, track_fitter, dv);
         host->set_kine_charge(kine_charge);
         host->set_flag_kinematics(true);
@@ -7240,9 +7240,9 @@ void PatternAlgorithms::id_pi0_backproject_vertex(int& acc_segment_id, IndexedSh
         }
     }
     b1->set_start_vertex(main_vertex, 2);
-    b1->calculate_kinematics(particle_data, recomb_model, m_shower_endpoint_exclude_start_vertex, m_shower_endpoint_skip_orphan_vtx);
+    b1->calculate_kinematics(particle_data, recomb_model, m_shower_endpoint_exclude_start_vertex, m_shower_endpoint_skip_orphan_vtx, m_kine_charge.dqdx_skip_zero_dx);
     b2->set_start_vertex(main_vertex, 2);
-    b2->calculate_kinematics(particle_data, recomb_model, m_shower_endpoint_exclude_start_vertex, m_shower_endpoint_skip_orphan_vtx);
+    b2->calculate_kinematics(particle_data, recomb_model, m_shower_endpoint_exclude_start_vertex, m_shower_endpoint_skip_orphan_vtx, m_kine_charge.dqdx_skip_zero_dx);
     update_shower_maps(showers, map_vertex_in_shower, map_segment_in_shower,
                        map_vertex_to_shower, used_shower_clusters);
 }
@@ -7907,7 +7907,7 @@ void PatternAlgorithms::id_pi0_with_vertex(int& acc_segment_id, IndexedShowerSet
                     pr93_probe_absorb_splice("pi0_accept_merge", am_host, am_frag);
                     am_host->add_shower(*am_frag);
                     showers.erase(am_frag);
-                    am_host->calculate_kinematics(particle_data, recomb_model, m_shower_endpoint_exclude_start_vertex, m_shower_endpoint_skip_orphan_vtx);
+                    am_host->calculate_kinematics(particle_data, recomb_model, m_shower_endpoint_exclude_start_vertex, m_shower_endpoint_skip_orphan_vtx, m_kine_charge.dqdx_skip_zero_dx);
                     double am_kq = cal_kine_charge(am_host, m_charge_2d_u, m_charge_2d_v, m_charge_2d_w, m_map_apa_ch_plane_wires, track_fitter, dv);
                     am_host->set_kine_charge(am_kq);
                     am_host->set_flag_kinematics(true);
@@ -7975,7 +7975,7 @@ void PatternAlgorithms::id_pi0_with_vertex(int& acc_segment_id, IndexedShowerSet
                     }
                     hit->second.clear();
                     if (did) {
-                        host->calculate_kinematics(particle_data, recomb_model, m_shower_endpoint_exclude_start_vertex, m_shower_endpoint_skip_orphan_vtx);
+                        host->calculate_kinematics(particle_data, recomb_model, m_shower_endpoint_exclude_start_vertex, m_shower_endpoint_skip_orphan_vtx, m_kine_charge.dqdx_skip_zero_dx);
                         double kine_charge = cal_kine_charge(host, m_charge_2d_u, m_charge_2d_v, m_charge_2d_w, m_map_apa_ch_plane_wires, track_fitter, dv);
                         host->set_kine_charge(kine_charge);
                         host->set_flag_kinematics(true);
@@ -7998,13 +7998,13 @@ void PatternAlgorithms::id_pi0_with_vertex(int& acc_segment_id, IndexedShowerSet
         auto [sv1, ct1] = get_svc(shower_1);
         if (sv1 != vtx) {
             shower_1->set_start_vertex(vtx, 2);
-            shower_1->calculate_kinematics(particle_data, recomb_model, m_shower_endpoint_exclude_start_vertex, m_shower_endpoint_skip_orphan_vtx);
+            shower_1->calculate_kinematics(particle_data, recomb_model, m_shower_endpoint_exclude_start_vertex, m_shower_endpoint_skip_orphan_vtx, m_kine_charge.dqdx_skip_zero_dx);
             svc[shower_1] = {vtx, 2};  // keep cache consistent
         }
         auto [sv2, ct2] = get_svc(shower_2);
         if (sv2 != vtx) {
             shower_2->set_start_vertex(vtx, 2);
-            shower_2->calculate_kinematics(particle_data, recomb_model, m_shower_endpoint_exclude_start_vertex, m_shower_endpoint_skip_orphan_vtx);
+            shower_2->calculate_kinematics(particle_data, recomb_model, m_shower_endpoint_exclude_start_vertex, m_shower_endpoint_skip_orphan_vtx, m_kine_charge.dqdx_skip_zero_dx);
             svc[shower_2] = {vtx, 2};
         }
 
@@ -8761,10 +8761,10 @@ void PatternAlgorithms::id_pi0_without_vertex(int& acc_segment_id, IndexedShower
             }
             
             shower_1->set_start_vertex(main_vertex, 2);
-            shower_1->calculate_kinematics(particle_data, recomb_model, m_shower_endpoint_exclude_start_vertex, m_shower_endpoint_skip_orphan_vtx);
+            shower_1->calculate_kinematics(particle_data, recomb_model, m_shower_endpoint_exclude_start_vertex, m_shower_endpoint_skip_orphan_vtx, m_kine_charge.dqdx_skip_zero_dx);
             
             shower_2->set_start_vertex(main_vertex, 2);
-            shower_2->calculate_kinematics(particle_data, recomb_model, m_shower_endpoint_exclude_start_vertex, m_shower_endpoint_skip_orphan_vtx);
+            shower_2->calculate_kinematics(particle_data, recomb_model, m_shower_endpoint_exclude_start_vertex, m_shower_endpoint_skip_orphan_vtx, m_kine_charge.dqdx_skip_zero_dx);
 
 
             update_shower_maps(showers, map_vertex_in_shower, map_segment_in_shower,
@@ -9162,7 +9162,7 @@ void PatternAlgorithms::shower_clustering_with_nv(int acc_segment_id, IndexedSho
                                          m_shower_pid_guard_min_len);
             shower->calculate_kinematics(particle_data, recomb_model,
                                          m_shower_endpoint_exclude_start_vertex,
-                                         m_shower_endpoint_skip_orphan_vtx);
+                                         m_shower_endpoint_skip_orphan_vtx, m_kine_charge.dqdx_skip_zero_dx);
             shower->set_kine_charge(cal_kine_charge(shower, m_charge_2d_u, m_charge_2d_v,
                                                     m_charge_2d_w, m_map_apa_ch_plane_wires,
                                                     track_fitter, dv));
@@ -9374,7 +9374,7 @@ void PatternAlgorithms::shower_clustering_with_nv(int acc_segment_id, IndexedSho
                                                      m_shower_pid_guard_min_len);
                         shower->calculate_kinematics(particle_data, recomb_model,
                                                      m_shower_endpoint_exclude_start_vertex,
-                                                     m_shower_endpoint_skip_orphan_vtx);
+                                                     m_shower_endpoint_skip_orphan_vtx, m_kine_charge.dqdx_skip_zero_dx);
                         shower->set_kine_charge(cal_kine_charge(shower, m_charge_2d_u, m_charge_2d_v,
                                                                 m_charge_2d_w, m_map_apa_ch_plane_wires,
                                                                 track_fitter, dv));
@@ -10090,7 +10090,7 @@ void PatternAlgorithms::shower_clustering_with_nv(int acc_segment_id, IndexedSho
             pr93_probe_absorb_splice("samevtx_absorb", host, frag);
             host->add_shower(*frag);
             host->update_particle_type(particle_data, recomb_model, m_mip_dqdx, main_vertex, m_shower_proton_daughter_pion, m_mip_dqdx_median, m_shower_vote_track_pid_counts, m_shower_accept_pid_guard, m_shower_pid_guard_min_len);
-            host->calculate_kinematics(particle_data, recomb_model, m_shower_endpoint_exclude_start_vertex, m_shower_endpoint_skip_orphan_vtx);
+            host->calculate_kinematics(particle_data, recomb_model, m_shower_endpoint_exclude_start_vertex, m_shower_endpoint_skip_orphan_vtx, m_kine_charge.dqdx_skip_zero_dx);
             host->set_kine_charge(cal_kine_charge(host, m_charge_2d_u, m_charge_2d_v, m_charge_2d_w, m_map_apa_ch_plane_wires, track_fitter, dv));
             host->set_flag_kinematics(true);
             showers.erase(frag);
@@ -10200,7 +10200,7 @@ void PatternAlgorithms::shower_clustering_with_nv(int acc_segment_id, IndexedSho
                 // crumb must not re-vote its host's PID (first build re-typed
                 // 37112's 84070 e->pi via the vote; kinematics-only is the
                 // minimal absorb).
-                host->calculate_kinematics(particle_data, recomb_model, m_shower_endpoint_exclude_start_vertex, m_shower_endpoint_skip_orphan_vtx);
+                host->calculate_kinematics(particle_data, recomb_model, m_shower_endpoint_exclude_start_vertex, m_shower_endpoint_skip_orphan_vtx, m_kine_charge.dqdx_skip_zero_dx);
                 host->set_kine_charge(cal_kine_charge(host, m_charge_2d_u, m_charge_2d_v, m_charge_2d_w, m_map_apa_ch_plane_wires, track_fitter, dv));
                 host->set_flag_kinematics(true);
             }
