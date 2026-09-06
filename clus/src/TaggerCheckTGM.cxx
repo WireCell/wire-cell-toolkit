@@ -487,7 +487,31 @@ private:
                 const std::string fn = std::string(dir ? dir : ".") + "/tgm_path_cluster"
                                      + std::to_string(cluster.ident()) + ".csv";
                 std::ofstream os(fn);
-                os << "i,x,y,z,excluded,comp,qu,qv,qw\n";
+                // doc pdhd/04 sec 8: the first nine columns are doc pdhd/04's, so the
+                // pdhd/04 scripts keep reading this file.  The rest are the
+                // 3-D-vs-2-D consistency probe: for each plane, the SAMPLED
+                // per-point charge (what is_point_good judges) beside the ctpc
+                // 2-D measurement at the same (wire, tick), looked up at BOTH
+                // the sampler's wire index and the grouping's own projection.
+                os << "i,x,y,z,excluded,comp,qu,qv,qw"
+                      ",apa,face,tind"
+                      ",uunc,vunc,wunc"
+                      ",uw3,vw3,ww3,uw2,vw2,ww2"
+                      ",uq2,vq2,wq2,uu2,vu2,wu2"
+                      ",uq3,vq3,wq3,udead,vdead,wdead"
+                      ",uhcp,vhcp,whcp,uavg,vavg,wavg,xraw\n";
+                const Grouping* grp = cluster.grouping();
+                // The ctpc is stored in the RAW drift frame while the cluster's
+                // default scope is T0-corrected, so every ctpc query must be
+                // back-transformed first -- the same to_raw the verdict uses
+                // (check_neutrino_candidate, FiducialUtils::check_signal_processing
+                // pattern).  On this cluster the two frames differ by
+                // dirx * v_drift * t0 = 7.70 cm; querying with the corrected
+                // point finds nothing on 82 % of the points.
+                const auto dtransform =
+                    m_pcts->pc_transform(cluster.get_scope_transform(cluster.get_default_scope()));
+                const double dcluster_t0 = cluster.get_cluster_t0();
+                std::set<std::pair<int,int>> afs;
                 int nexcl = 0;
                 for (int i = 0; i < npts; ++i) {
                     const geo_point_t p = cluster.point3d(i);
@@ -496,7 +520,62 @@ private:
                     os << i << ',' << p.x()/units::cm << ',' << p.y()/units::cm << ','
                        << p.z()/units::cm << ',' << (ex ? 1 : 0) << ',' << comp[i] << ','
                        << cluster.charge_value(i, 0) << ',' << cluster.charge_value(i, 1) << ','
-                       << cluster.charge_value(i, 2) << '\n';
+                       << cluster.charge_value(i, 2);
+                    const WirePlaneId wp = cluster.wire_plane_id(i);
+                    const int apa = wp.apa(), face = wp.face();
+                    afs.emplace(apa, face);
+                    const geo_point_t p_raw = dtransform->backward(p, dcluster_t0, face, apa);
+                    int w3[3], w2[3], tind = -1;
+                    double q2[3], u2[3], q3[3];
+                    int dd[3];
+                    for (int pl = 0; pl < 3; ++pl) {
+                        w3[pl] = cluster.wire_index(i, pl);
+                        const auto [ti, wi] = grp->convert_3Dpoint_time_ch(p_raw, apa, face, pl);
+                        tind = ti;
+                        w2[pl] = wi;
+                        const auto c2 = grp->get_wire_charge(apa, face, pl, wi, ti);
+                        q2[pl] = c2.first; u2[pl] = c2.second;
+                        q3[pl] = grp->get_wire_charge(apa, face, pl, w3[pl], ti).first;
+                        dd[pl] = grp->is_wire_dead(apa, face, pl, wi, ti) ? 1 : 0;
+                    }
+                    os << ',' << apa << ',' << face << ',' << tind;
+                    for (int pl = 0; pl < 3; ++pl) os << ',' << cluster.charge_uncertainty(i, pl);
+                    for (int pl = 0; pl < 3; ++pl) os << ',' << w3[pl];
+                    for (int pl = 0; pl < 3; ++pl) os << ',' << w2[pl];
+                    for (int pl = 0; pl < 3; ++pl) os << ',' << q2[pl];
+                    for (int pl = 0; pl < 3; ++pl) os << ',' << u2[pl];
+                    for (int pl = 0; pl < 3; ++pl) os << ',' << q3[pl];
+                    for (int pl = 0; pl < 3; ++pl) os << ',' << dd[pl];
+                    // The production 2-D test: does the ctpc hold a measured
+                    // point within 0.6 cm of this 3-D point in this plane?
+                    // (is_good_point's own query.)  And the mean ctpc charge
+                    // there.  This is the 2-D measurement, independent of the
+                    // per-point charge the sampler attached.
+                    for (int pl = 0; pl < 3; ++pl) {
+                        os << ',' << (grp->has_closest_point(p_raw, 0.6*units::cm, apa, face, pl) ? 1 : 0);
+                    }
+                    for (int pl = 0; pl < 3; ++pl) {
+                        os << ',' << grp->get_ave_charge(p_raw, apa, face, pl, 0.6*units::cm);
+                    }
+                    os << ',' << p_raw.x()/units::cm;
+                    os << '\n';
+                }
+                // The competing explanation to a broken lookup: a contiguous
+                // block of genuinely dead channels.  One row per dead wire of
+                // every (apa, face) this cluster touches.
+                {
+                    const std::string dfn = std::string(dir ? dir : ".") + "/tgm_dead_cluster"
+                                          + std::to_string(cluster.ident()) + ".csv";
+                    std::ofstream ds(dfn);
+                    ds << "apa,face,plane,wind,tmin,tmax\n";
+                    for (const auto& [apa, face] : afs) {
+                        for (int pl = 0; pl < 3; ++pl) {
+                            for (const auto& [wind, rng] : grp->get_all_dead_chs(apa, face, pl)) {
+                                ds << apa << ',' << face << ',' << pl << ',' << wind << ','
+                                   << rng.first << ',' << rng.second << '\n';
+                            }
+                        }
+                    }
                 }
                 std::map<int, int> csz;
                 for (int c : comp) if (c >= 0) ++csz[c];
