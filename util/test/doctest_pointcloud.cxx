@@ -570,3 +570,60 @@ TEST_CASE("point cloud dataset allocate")
     REQUIRE(aspan[9] == 0);
     aspan[0] = 42;
 }
+
+TEST_CASE("point cloud array move assignment keeps the store with the span")
+{
+    // doc pdvd/46 sec 3.3.  Array::operator=(Array&&) swapped m_bytes but not
+    // m_store: the destination ended up viewing the SOURCE's buffer without
+    // owning it (so it dangled as soon as the source died) and the source was
+    // left owning a buffer it no longer viewed.  No caller in the tree
+    // move-assigns an owning Array, which is the only reason this never fired.
+    // The move CONSTRUCTOR was always correct; this pins both.
+    std::vector<double> v = {1.0, 2.0, 3.0};
+
+    // --- owning source ---------------------------------------------------
+    Array dst;
+    CHECK_FALSE(dst.owns_bytes());      // an empty array owns nothing
+
+    {
+        Array src(v);                   // assign(..., share=false) => owning
+        REQUIRE(src.owns_bytes());
+        REQUIRE(src.size_major() == 3);
+
+        dst = std::move(src);
+
+        CHECK(dst.owns_bytes());        // failed before the fix
+        CHECK(dst.size_major() == 3);
+        CHECK_FALSE(src.owns_bytes());  // failed before the fix
+        CHECK(src.size_major() == 0);
+        CHECK(src.bytes().size() == 0);
+    }
+    // source destroyed: the destination must still hold its own bytes
+    REQUIRE(dst.size_major() == 3);
+    auto ele = dst.elements<double>();
+    REQUIRE(ele.size() == 3);
+    CHECK(ele[0] == 1.0);
+    CHECK(ele[2] == 3.0);
+
+    // --- sharing source stays sharing ------------------------------------
+    Array shared;
+    {
+        Array src2(v.data(), Array::shape_t{v.size()}, true);   // share=true
+        REQUIRE_FALSE(src2.owns_bytes());
+        shared = std::move(src2);
+    }
+    CHECK_FALSE(shared.owns_bytes());
+    REQUIRE(shared.size_major() == 3);
+    CHECK(shared.elements<double>()[1] == 2.0);   // v is still alive
+
+    // --- the move constructor, for contrast ------------------------------
+    // NB the obvious spellings do not select the move ctor: Array x(Array(v))
+    // is a function declaration, and Array x{Array(v)} picks the
+    // initializer_list ctor with ElementType = Array (a 1-element array OF
+    // arrays, silently).  Name the temporary and move it.
+    Array to_move(v);
+    Array moved_ctor(std::move(to_move));
+    CHECK(moved_ctor.owns_bytes());
+    REQUIRE(moved_ctor.size_major() == 3);
+    CHECK(moved_ctor.elements<double>()[0] == 1.0);
+}

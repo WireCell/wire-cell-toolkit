@@ -110,6 +110,14 @@ Array& Array::operator=(Array&& rhs)
     std::swap(m_shape, rhs.m_shape);
     std::swap(m_ele_size, rhs.m_ele_size);
     std::swap(m_dtype, rhs.m_dtype);
+    // doc pdvd/46 sec 3.3: m_store must move together with m_bytes.  Without
+    // this swap the destination took the source's span while the bytes stayed
+    // behind in the source's store: the destination looked like a sharing
+    // array (m_store empty) and dangled the moment the source died, and the
+    // source was left owning a buffer it no longer viewed.  std::vector's swap
+    // preserves the buffer address, so the swapped span stays valid.  The move
+    // CONSTRUCTOR above never had the defect; only this assignment did.
+    std::swap(m_store, rhs.m_store);
     std::swap(m_bytes, rhs.m_bytes);
     std::swap(m_metadata, rhs.m_metadata);
     return *this;

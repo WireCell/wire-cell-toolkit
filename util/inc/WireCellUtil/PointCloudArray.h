@@ -192,6 +192,17 @@ namespace WireCell::PointCloud {
             }
         }
 
+        /** True when this array holds its own copy of the bytes it views,
+            false when it is only a view onto a caller's buffer (the
+            assign(..., share=true) / slice(..., share=true) forms) and when
+            it is empty.
+
+            Exposed so the ownership invariant is testable: doc pdvd/46 sec
+            3.3, operator=(Array&&) used to leave the destination in the
+            sharing state while pointing at the *source's* store.
+        */
+        bool owns_bytes() const { return !m_store.empty(); }
+
         /// The slice() methods return subset of this array starting at given
         /// major axis position and spanning given count major axis elements.
 
