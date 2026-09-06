@@ -167,7 +167,14 @@ local bs_live_face(apa, face, wrapped_channel_charge=false) = {
         // C++ default false; key omitted when off => byte-identical to every
         // PDHD job ever run, so this is NOT a behaviour change until someone
         // passes true.  UNGRADED on PDHD: turning it on changes clustering AND
-        // Q/L output and needs its own A/B (pdhd/docs/stm-tagger-chain.md sec 9).
+        // Q/L output and needs its own A/B (pdhd/docs/01_steiner-wrapped-planes.md
+        // sec 7; stm-tagger-chain sec 9 is superseded on the mechanism).
+        //
+        // NOT the same decision as the SAME-NAMED knob in pdhd/pr.jsonnet, which
+        // has defaulted TRUE since 2026-09-05: the PR job's samplers feed only
+        // ImproveCluster_2's retiler and their cloud is discarded after the
+        // Steiner stage, so nothing persists and the two jobs need not agree.
+        // THIS one rewrites the persisted pctree.  Still parked.
         [if wrapped_channel_charge then 'wrapped_channel_charge']: true,
     }
 };
