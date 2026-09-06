@@ -1425,44 +1425,35 @@ private:
             //     std::cout << "Channel ident: " << channel_ident << " " << p_chi2i.size() << std::endl;
             // }
 
-            // Look up channel index using the cache
+            // Look up channel index using the cache.  doc pdhd/04 sec 9: this is
+            // the SAME IWirePlane::channels() defect make_dataset carries, in its
+            // quieter form -- on a wrapped strip's continuation the plane's
+            // channel LIST has no entry and this site fails CLOSED (the wire is
+            // never bad) rather than reading channels[0].  Same knob, same fix:
+            // resolve the charge by channel IDENT through the slice.  Inert on a
+            // detector with no segment>0 wire, where the find never misses.
+            double uncertainty = 0;
+            bool have = false;
             auto chi2i_it = p_chi2i.find(channel_ident);
-            if (chi2i_it == p_chi2i.end()) {
-            return false;
+            if (chi2i_it != p_chi2i.end() &&
+                chi2i_it->second >= 0 && chi2i_it->second < (int)channels.size()) {
+                auto ait = activity.find(channels[chi2i_it->second]);
+                if (ait != activity.end()) {
+                    uncertainty = ait->second.uncertainty();
+                    have = true;
+                }
+            }
+            else if (cc.wrapped_channel_charge && iblob) {
+                const auto& abi = activity_by_ident(iblob->slice());
+                auto ait = abi.find(channel_ident);
+                if (ait != abi.end()) {
+                    uncertainty = ait->second.uncertainty();
+                    have = true;
+                }
             }
 
-            // if (flag_print) {
-            //     std::cout << "Found channel index: " << chi2i_it->second << " " << (int)channels.size() << std::endl;
-            // }
-
-            int channel_attach = chi2i_it->second;
-            if (channel_attach < 0 || channel_attach >= (int)channels.size()) {
-            return false;
-            }
-
-            auto ich = channels[channel_attach];
-
-            // if (flag_print){
-            //     std::cout << "Checking channel: " << ich << " " << activity.size() << std::endl;
-            // }
-
-            // Look up charge in activity map and check uncertainty
-            auto ait = activity.find(ich);
-            if (ait != activity.end()) {
-                auto act = ait->second;
-                double uncertainty = act.uncertainty();
-
-                // if (flag_print) {
-                //     std::cout << "Checking wire " << wire_index << " in plane " << plane_layer 
-                //             << ": charge=" << act.value() << ", uncertainty=" << uncertainty 
-                //             << ", threshold=" << dead_threshold << std::endl;
-                // }
-
-                // Plane is considered bad if uncertainty exceeds threshold
-                return uncertainty > dead_threshold;
-            }
-
-            return false;
+            // Plane is considered bad if uncertainty exceeds threshold
+            return have && uncertainty > dead_threshold;
         };
 
         // Check both first and last wire
@@ -1504,27 +1495,25 @@ private:
             }
         }
         
-        // Look up channel index using the cache
+        // Look up channel index using the cache.  Same defect and same fix as
+        // is_plane_bad above (doc pdhd/04 sec 9): a wrapped continuation is
+        // absent from the plane's channel LIST, so resolve it by channel IDENT.
         auto chi2i_it = p_chi2i.find(channel_ident);
-        if (chi2i_it == p_chi2i.end()) {
+        if (chi2i_it != p_chi2i.end() &&
+            chi2i_it->second >= 0 && chi2i_it->second < (int)channels.size()) {
+            auto ait = activity.find(channels[chi2i_it->second]);
+            if (ait != activity.end()) {
+                return ait->second.value();
+            }
             return 0.0;
         }
-        
-        int channel_attach = chi2i_it->second;
-        if (channel_attach < 0 || channel_attach >= (int)channels.size()) {
-            return 0.0;
+        if (cc.wrapped_channel_charge && iblob) {
+            const auto& abi = activity_by_ident(iblob->slice());
+            auto ait = abi.find(channel_ident);
+            if (ait != abi.end()) {
+                return ait->second.value();
+            }
         }
-        
-        auto ich = channels[channel_attach];
-        
-        // Look up charge in activity map
-        auto ait = activity.find(ich);
-
-        if (ait != activity.end()) {
-            auto act = ait->second;
-            return act.value();
-        }
-        
         return 0.0;
     }
 };

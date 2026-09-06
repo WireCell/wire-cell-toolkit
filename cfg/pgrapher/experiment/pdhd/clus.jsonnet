@@ -146,7 +146,7 @@ local pctransforms(dv) = {
 
 
 
-local bs_live_face(apa, face, wrapped_channel_charge=false) = {
+local bs_live_face(apa, face, wrapped_channel_charge=true) = {
     type: "BlobSampler",
     name: "live-%s-%d"%[apa, face],
     data: {
@@ -164,18 +164,19 @@ local bs_live_face(apa, face, wrapped_channel_charge=false) = {
         // reads the wrong channel and can leave charge_val AND charge_unc at 0,
         // which calc_charge_wcp reads as "no signal".  This is the same defect
         // doc pdvd/31 round 3 fixed on PDVD (which wraps 11.3 %).
-        // C++ default false; key omitted when off => byte-identical to every
-        // PDHD job ever run, so this is NOT a behaviour change until someone
-        // passes true.  UNGRADED on PDHD: turning it on changes clustering AND
-        // Q/L output and needs its own A/B (pdhd/docs/01_steiner-wrapped-planes.md
-        // sec 7; stm-tagger-chain sec 9 is superseded on the mechanism).
-        //
-        // NOT the same decision as the SAME-NAMED knob in pdhd/pr.jsonnet, which
-        // has defaulted TRUE since 2026-09-05: the PR job's samplers feed only
-        // ImproveCluster_2's retiler and their cloud is discarded after the
-        // Steiner stage, so nothing persists and the two jobs need not agree.
-        // THIS one rewrites the persisted pctree.  Still parked.
-        [if wrapped_channel_charge then 'wrapped_channel_charge']: true,
+        // ON since 2026-09-06 (doc pdhd/04 sec 8-9, owner decision).  THIS is the
+        // sampler that writes the PERSISTED pctree, so it is the one the cosmic
+        // taggers' per-point charge comes from: with it off, is_point_good threw
+        // away 29 % of every cluster's points on 029107/12 and a 790 cm
+        // through-going muon read TGM=false.  The PR job's same-named knob (true
+        // since 2026-09-05) feeds only ImproveCluster_2's retiler, whose cloud is
+        // discarded -- fixing that one did NOT fix this one.
+        // NOT byte-identical: it changes clustering AND Q/L output.
+        // BUG FIX, C++ DEFAULT TRUE since 2026-09-06 (doc pdhd/04 sec 9, owner
+        // decision).  Emitted UNCONDITIONALLY: with a true C++ default the old
+        // key-suppression idiom `[if x then 'x']: true` would make `false`
+        // unreachable, so an explicit false must reach the compiled config.
+        wrapped_channel_charge: wrapped_channel_charge,
     }
 };
 local bs_dead_face(apa, face) = {
@@ -202,7 +203,7 @@ local clus_per_face (
     // pdhd/stm-tagger-chain.md sec 12).  C++ default false; key omitted when
     // off => byte-identical compiled config.  DEFAULT FALSE: turning it on
     // changes the pctree the Q/L job writes, hence production Q/L output.
-    wrapped_channel_charge = false,
+    wrapped_channel_charge = true,
     ) =
 {
 
@@ -342,7 +343,7 @@ local clus_per_apa (
     // pdhd/stm-tagger-chain.md sec 12).  C++ default false; key omitted when
     // off => byte-identical compiled config.  DEFAULT FALSE: turning it on
     // changes the pctree the Q/L job writes, hence production Q/L output.
-    wrapped_channel_charge = false,
+    wrapped_channel_charge = true,
     ) =
 {
     local cfout_live = g.pnode({
@@ -796,8 +797,8 @@ local clus_all_tpc (
 
 {
     local bee_dir = if output_dir == '' then 'data' else output_dir,
-    per_face(anode, face=0, dump=true, wrapped_channel_charge=false) :: clus_per_face(anode, face=face, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo, wrapped_channel_charge=wrapped_channel_charge),
-    per_apa(anode, dump=true, wrapped_channel_charge=false) :: clus_per_apa(anode, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo, wrapped_channel_charge=wrapped_channel_charge),
+    per_face(anode, face=0, dump=true, wrapped_channel_charge=true) :: clus_per_face(anode, face=face, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo, wrapped_channel_charge=wrapped_channel_charge),
+    per_apa(anode, dump=true, wrapped_channel_charge=true) :: clus_per_apa(anode, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo, wrapped_channel_charge=wrapped_channel_charge),
     per_group(anodes, group_name, face, dump=true) :: clus_per_group(anodes, group_name, face, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo),
     all_tpc(anodes, ngroups=2, dump=true, save_opflash=false, premerged=false, tensor_outname='') :: clus_all_tpc(anodes, ngroups=ngroups, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo, save_opflash=save_opflash, premerged=premerged, tensor_outname=tensor_outname),
     // Expose the DetectorVolumes node builder so the Q/L matching graph can
@@ -811,7 +812,7 @@ local clus_all_tpc (
     // PDVD parity (protodunevd/clus.jsonnet), minus the per-crate drift speed:
     // PDHD has ONE global drift speed.
     pc_transforms(dv) :: pctransforms(dv),
-    live_sampler(anode, face, wrapped_channel_charge=false) ::
+    live_sampler(anode, face, wrapped_channel_charge=true) ::
         bs_live_face(anode.name, face, wrapped_channel_charge=wrapped_channel_charge),
     drift_speed :: drift_speed,
     time_offset :: time_offset,

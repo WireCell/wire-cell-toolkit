@@ -1437,9 +1437,14 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
         // doc pdvd/31 round 5: wrapped_channel_activity resolves a wire's
         // channel by ident instead of indexing IWirePlane::channels() -- a
         // channel LIST that omits wrapped continuations -- by wire index.
-        // C++ default false.  Key omitted when off => byte-identical pre-fix
-        // config, which is what keeps SBND and uBooNE (whose configs never name
-        // it) untouched.
+        // BUG FIX, C++ DEFAULT TRUE since 2026-09-06 (doc pdhd/04 sec 9, owner
+        // decision).  The key is now emitted UNCONDITIONALLY -- with a true C++
+        // default the old suppression idiom would make `false` unreachable -- so
+        // this builder's own `false` default must be flipped too or every caller
+        // would silently turn the fix OFF.  SBND and uBooNE are untouched not by
+        // key suppression but STRUCTURALLY: they have zero segment>0 wires, so
+        // the ident-resolved branch is unreachable there (pinned by the
+        // "unwrapped detectors have no orphans at all" doctest).
         // doc pdvd/31 round 6 (owner Q5): terminal_charge_threshold makes this
         // component's internal Steiner terminal finder configurable.  It ran at
         // the C++ default 4000 e unconditionally, so a detector that set
@@ -1447,7 +1452,7 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
         // terminal thresholds in one stage.  null => key omitted =>
         // byte-identical, and every detector that omits it keeps 4000.
         improve_cluster_2(name="", anodes=[], samplers=[], verbose=true,
-                          wrapped_channel_activity=false,
+                          wrapped_channel_activity=true,
                           terminal_charge_threshold=null,
                           // doc pdvd/40 round 3: ImproveCluster_1::remove_bad_blobs
                           // knobs.  C++ defaults 0 / false = the historical filter;
@@ -1462,7 +1467,7 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
                 anodes: wc.tns(anodes),
                 samplers: sampler_cfgs,
                 verbose: verbose,
-                [if wrapped_channel_activity then 'wrapped_channel_activity']: true,
+                wrapped_channel_activity: wrapped_channel_activity,
                 [if terminal_charge_threshold != null then 'terminal_charge_threshold']: terminal_charge_threshold,
                 [if bad_blob_max_run != null then 'bad_blob_max_run']: bad_blob_max_run,
                 [if bad_blob_report then 'bad_blob_report']: true,

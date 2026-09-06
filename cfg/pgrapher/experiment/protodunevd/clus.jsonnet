@@ -205,9 +205,12 @@ local bs_live_face(apa, face, center_fallback=false, speed=drift_speed) = {
         // channels() omits their channels (AnodePlane.cxx:244-247), so the
         // legacy operator[] lookup silently read channels[0] and left both
         // charge_val and charge_unc at 0 -- which calc_charge_wcp reads as "no
-        // signal".  C++ default false.  Key omitted when off => byte-identical
-        // pre-fix config.  See pdvd/docs/nf_sp_img_clus/31_*.md.
-        [if wrapped_channel_charge then 'wrapped_channel_charge']: true,
+        // signal".  BUG FIX, C++ DEFAULT TRUE since 2026-09-06 (doc pdhd/04
+        // sec 9); PDVD has passed true here since 2026-09-03 anyway, so this
+        // detector's compiled value does not move.  Emitted UNCONDITIONALLY:
+        // with a true C++ default the old key-suppression idiom would make
+        // `false` unreachable.  See pdvd/docs/nf_sp_img_clus/31_*.md.
+        wrapped_channel_charge: wrapped_channel_charge,
     }
 };
 local bs_dead_face(apa, face) = {

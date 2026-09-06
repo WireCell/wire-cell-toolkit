@@ -216,17 +216,33 @@ TEST_CASE("pdvd doc31: unwrapped detectors have no orphans at all")
     }
 }
 
-TEST_CASE("pdvd doc31: wrapped_channel_charge defaults OFF and round-trips")
+TEST_CASE("pdhd doc04: wrapped_channel_charge defaults ON and false is still reachable")
 {
+    // Flipped 2026-09-06 (doc pdhd/04 sec 9, owner decision: these are bug
+    // fixes, so the fixed path is the default).  The old test asserted false
+    // and said "this default is the whole of PDHD's protection" -- that reading
+    // was exactly the defect: PDHD's clustering config omitted the key, so the
+    // default WAS its behaviour, and the behaviour was the bug.
+    //
+    // SBND and uBooNE are not protected by this default and never were: they
+    // have zero segment>0 wires, so the ident-resolved branch is unreachable
+    // there.  That is the "unwrapped detectors have no orphans at all" case
+    // above, which is now load-bearing for the byte-identity claim.
     PluginManager::instance().add("WireCellClus");
     auto icfg = Factory::lookup<IConfigurable>("BlobSampler", "doc31_wrapped_channel_probe");
     REQUIRE(icfg);
 
     auto cfg = icfg->default_configuration();
     REQUIRE_MESSAGE(cfg.isMember("wrapped_channel_charge"), "missing knob: wrapped_channel_charge");
-    // The load-bearing assertion: PDHD's config never mentions this key, so
-    // this default is the whole of its protection.
-    CHECK(cfg["wrapped_channel_charge"].asBool() == false);
+    CHECK(cfg["wrapped_channel_charge"].asBool() == true);
+
+    // The escape hatch must survive the flip.  Every config that threads this
+    // knob now emits the key unconditionally (the `[if x then 'x']: true`
+    // suppression idiom would have made `false` unreachable), so an explicit
+    // false has to round-trip.
+    cfg["wrapped_channel_charge"] = false;
+    icfg->configure(cfg);
+    CHECK(icfg->default_configuration()["wrapped_channel_charge"].asBool() == false);
 
     cfg["wrapped_channel_charge"] = true;
     icfg->configure(cfg);
@@ -315,13 +331,14 @@ TEST_CASE("pdvd doc31 round4: channels[wire_index] is not a valid lookup on wrap
     CHECK(a4f0_v == 189);
 }
 
-TEST_CASE("pdvd doc31 round5: wrapped_channel_activity defaults OFF")
+TEST_CASE("pdhd doc04: wrapped_channel_activity defaults ON")
 {
     // ImproveCluster_2 is the retiler the Steiner stage actually runs
-    // (cm.improve_cluster_2 on PDVD, SBND and uBooNE alike).  This default is
-    // the whole of SBND's and uBooNE's protection -- neither config mentions the
-    // key -- and of PDVD's until the owner flips it, so pin it here rather than
-    // trusting the jsonnet key suppression alone.
+    // (cm.improve_cluster_2 on PDVD, SBND and uBooNE alike).  Flipped to a true
+    // default 2026-09-06 alongside wrapped_channel_charge (doc pdhd/04 sec 9):
+    // same misconception, same call-site family, and a bug fix belongs on by
+    // default.  SBND and uBooNE do not need the key omitted to stay unchanged --
+    // with no segment>0 wire the resolved-by-ident branch cannot be taken.
     //
     // Only the default is checked: configure() runs NeedDV, which requires a
     // live DetectorVolumes instance this test has no business standing up.  The
@@ -333,7 +350,7 @@ TEST_CASE("pdvd doc31 round5: wrapped_channel_activity defaults OFF")
     auto cfg = icfg->default_configuration();
     REQUIRE_MESSAGE(cfg.isMember("wrapped_channel_activity"),
                     "missing knob: wrapped_channel_activity");
-    CHECK(cfg["wrapped_channel_activity"].asBool() == false);
+    CHECK(cfg["wrapped_channel_activity"].asBool() == true);
 }
 
 TEST_CASE("pdvd doc31 round5: every continuation's channel resolves within its own anode")

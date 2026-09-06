@@ -121,9 +121,14 @@ protected:
     // does resolve within its own anode.
     std::map<int, IAnodePlane::pointer> m_anode;
 
-    // doc pdvd/31 round 5.  Default false = the historical positional lookup,
-    // reproduced exactly.  See make_iblobs() / make_iblobs_improved().
-    bool m_wrapped_channel_activity{false};
+    // doc pdvd/31 round 5.  DEFAULT TRUE since 2026-09-06 (doc pdhd/04 sec 9,
+    // owner decision): this is a bug fix, so the default is the fixed path and
+    // the historical positional lookup survives only for a config that asks for
+    // `false` explicitly.  Unreachable on a detector with no segment>0 wire
+    // (SBND, uBooNE), so byte-identity there is structural -- see the
+    // "unwrapped detectors have no orphans at all" doctest.
+    // See make_iblobs() / make_iblobs_improved().
+    bool m_wrapped_channel_activity{true};
 
     // Step 3. Form IBlobs from activities.
     std::vector<WireCell::IBlob::pointer> make_iblobs(std::map<std::pair<int, int>, std::vector<WireCell::RayGrid::measure_t> >& map_slices_measures, int apa, int face) const;
