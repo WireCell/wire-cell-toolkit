@@ -20,8 +20,9 @@
 //     SBND's sbnd_pr_fv and PDVD's pdvd_pr_fv do), margins via fv_tolerance;
 //   * NO curved fiducial: PDHD has no measured space-charge surface, so the
 //     curved_fv family of doc pdvd/41/43 is absent from this fork;
-//   * NO wrapped-strip knobs: PDHD APAs have no wrapped continuations, so
-//     wrapped_channel_charge / retile_wrapped_channel_activity are absent;
+//   * wrapped-strip knobs PRESENT and default true: PDHD APAs wrap their
+//     induction planes (1148 wires on 800 channels per U/V plane), see the
+//     wrapped_channel_charge / retile_wrapped_channel_activity arguments;
 //   * pdhd_box_recomb at 0.4959 kV/cm -- the field the CALIBRATED drift
 //     velocity 1.576 mm/us implies (pdhd/stm/pdhd_transport.py), the same field
 //     the pdhd/particle_dataset.jsonnet dQ/dx tables were generated at;
@@ -50,11 +51,12 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1,
          // See clus.jsonnet's bs_live_face.  PDHD APAs WRAP their induction
          // planes -- 65 % of the wires on an imaging U/V plane are segment > 0
          // continuations, against PDVD's 11.3 % -- so the doc pdvd/31 round 3
-         // defect applies here in full.  C++ default false and DEFAULT FALSE
-         // HERE: the PR job must sample the pctree exactly as the Q/L job that
-         // wrote it did, and PDHD's Q/L job has never run with this on.
-         // UNGRADED; see pdhd/docs/stm-tagger-chain.md sec 9.
-         wrapped_channel_charge=false) {
+         // defect applies here in full.  C++ default false; DEFAULT TRUE HERE
+         // (PDHD production, owner decision 2026-09-05, doc pdhd/01 sec 4-5):
+         // these samplers feed only ImproveCluster_2's retiler, whose cloud is
+         // never persisted, so they need not match the Q/L job's sampler.
+         // With the retiler knob: ncharge=3 0.000 -> 0.532 on 029107.
+         wrapped_channel_charge=true) {
     // The PDHD clustering module, configured EXACTLY as the Q/L job configured it
     // (same time offset, same trigger offset; PDHD's drift speed is fixed in
     // params.jsonnet): switch_scope re-derives x_t0cor from cluster_t0 through
@@ -97,10 +99,9 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1,
               // "PDHD runs no Steiner stage"; that was true only because PDHD had
               // no PR chain.  It does now.)
               // C++ default false; key omitted when off => byte-identical.
-              // DEFAULT FALSE here and UNGRADED: flipping it changes the Steiner
-              // input on every PDHD cluster and needs its own A/B.  See
-              // pdhd/docs/stm-tagger-chain.md sec 9.
-              retile_wrapped_channel_activity=false,
+              // DEFAULT TRUE here: PDHD production, owner decision 2026-09-05
+              // (doc pdhd/01 sec 4-5).  Pre-flip: pass false explicitly.
+              retile_wrapped_channel_activity=true,
               // doc pdvd/31 round 6 (owner Q5): the Steiner stage's OTHER
               // terminal threshold.  ImproveCluster_2 runs its own terminal
               // finder twice, and until round 6 it did so at the C++ default
