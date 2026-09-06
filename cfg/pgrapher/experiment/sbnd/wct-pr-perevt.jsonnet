@@ -2757,6 +2757,51 @@ function(
     // C++ default false => key omitted => byte-identical.  Validation:
     // --tla-code dqdx_fit_keep_all_points=true (or SBND_DQDX_FIT_KEEP_ALL_POINTS).
     dqdx_fit_keep_all_points = false,
+    // doc pdvd/45, measured for SBND in doc sbnd_xin/pr/144 -- the exclusion
+    // tournament (TrackFitting::update_association) builds each candidate 2-D
+    // cell's test point with the geometric (time - offset_t)/slope_t, i.e. the
+    // RAW t0 = 0 drift frame, while the per-segment "fit"/"main" clouds it
+    // queries are t0-CORRECTED.  Every distance is therefore off by the
+    // cluster's own drift offset.  SBND hid this because the beam candidate's
+    // t0 is 0.8-2.0 us => 1.2-3 mm, against pitch 3 mm and the 0.3 cm keep
+    // floor -- which is why pr/98/108/109 measured the exclusion fit
+    // "parity-exact" and shipped it; on PDVD cosmics the same offset is
+    // 0.6-6 m and one segment won every cell (51 % of PR trajectory points
+    // dropped).  true => form_map_graph MEASURES the offset per fit point and
+    // (apa, face) by running the point through the cells' own two conversions,
+    // and update_association subtracts it before the cloud query.  The offset
+    // must be measured, not computed as dirx*t0*v_drift -- the geometric
+    // offset_t and Grouping::convert_3Dpoint_time_ch do not share a time
+    // origin (doc pdvd/45 sec 4.1).
+    // PDVD PRODUCTION ON since 2026-09-05.  SBND PRODUCTION ON since
+    // 2026-09-06: doc 144 ran both arms over the 3067-event production (0
+    // selection-label changes, 0 nu_evaluated flips, +2 nue candidates past
+    // the uB 4.30103 point, track_fit points 49921 -> 50693 with the ghost
+    // count flat at 9, cost unchanged) and the owner scanned 12 before/after
+    // Bee pairs and ruled the fix better overall -- "turn on this, since it is
+    // a bug fix" (2026-09-06).  This is a BUG FIX, not a tuning knob: with it
+    // off the exclusion tournament is arbitrated in the wrong drift frame on
+    // every SBND neutrino candidate.
+    // C++ default false, so the key is now always emitted.  NOT byte-identical
+    // to pre-2026-09-06 production -- doc 144 sec 4 is the before/after.
+    // -A excl_t0_frame=false restores the legacy biased-frame path exactly.
+    excl_t0_frame = true,
+    // doc pdvd/45 sec 5.4 -- the vector cal_kine_dQdx (multi-segment and
+    // long-muon showers) sums recomb dE(dQ, dx) with no dx <= 0 guard; a
+    // coincident pair of fit points gives 0/0 and kine_reco_Enu is NaN.  On
+    // PDVD that is 11 of 569 candidates in production and 73 with
+    // excl_t0_frame on -- so the two knobs ship together.  true => such points
+    // are skipped, the prototype's (dx + 1e-9) outcome.  Measured INERT on
+    // SBND with excl_t0_frame off (0 NaN-Enu candidates in the 3067-event
+    // production, doc pdvd/45 sec 11); doc 144 sec 4.5 re-measures it with the
+    // frame knob ON by a byte gate, work-*-d144frameonly vs work-*-d144on --
+    // the score tables cannot answer it, because the guard masks the NaN
+    // kine_reco_Enu that is its own fire signature.  It ships ON with the
+    // frame knob as the PDVD production pair either way: it is the guard that
+    // stands between a coincident fit-point pair and a NaN reconstructed Enu.
+    // C++ default false, so the key is now always emitted.
+    // -A kine_dqdx_skip_zero_dx=false restores the legacy path exactly.
+    kine_dqdx_skip_zero_dx = true,
     // doc 77 round 1 (2026-08-24): dl_vtx_topo_weight/_center (pr/89 Arm C2
     // rule-1 outgoing-prong topology term) removed -- live A/B -8/1014.
     // See sbnd_xin/docs/77_knob-ledger.tsv.
@@ -3464,6 +3509,8 @@ function(
         [if dual_chain_allow_cluster_swap != null then 'dual_chain_allow_cluster_swap']: dual_chain_allow_cluster_swap,
         [if dual_chain_vtx_weight != null then 'dual_chain_vtx_weight']: dual_chain_vtx_weight,
         [if dqdx_fit_keep_all_points then 'dqdx_fit_keep_all_points']: true,
+        [if excl_t0_frame then 'excl_t0_frame']: true,
+        [if kine_dqdx_skip_zero_dx then 'kine_dqdx_skip_zero_dx']: true,
         [if main_vertex_swap_apply then 'main_vertex_swap_apply']: true,
         [if rough_path_probe then 'rough_path_probe']: true,
         [if steiner_gap_penalty != null then 'steiner_gap_penalty']: steiner_gap_penalty,
