@@ -632,16 +632,18 @@ private:
                     auto [ok, pair, nvtx] = break_segment(g, best, best_p, particle_data(), m_recomb_model, m_dv,
                                                           1e9 * units::cm, get<bool>(m_cfg, "break_seg_orient", false));
                     if (ok && nvtx) {
-                        // break_segment (PRSegmentFunctions.cxx:1105+) stamps the
-                        // cluster on the two child segments but NOT on the new
-                        // vertex.  A clusterless vertex is fatal downstream:
-                        // examine_direction returns false at once
-                        // (NeutrinoVertexFinder.cxx:1503) so nothing gets
-                        // oriented, and fill_bee_pf_tree's main-cluster test
-                        // (pf_track_main_cluster_only) then rejects every seed
-                        // from the main vertex -- smoke 039252/2 cluster 86 lost
-                        // its mu- node and its Michel fell back to a ROOT shower.
-                        if (!nvtx->cluster()) nvtx->cluster(&cluster);
+                        // The cluster is stamped by break_segment itself since
+                        // doc sbnd_xin/docs/pr/143; `best` is chosen from
+                        // find_cluster_segments(g, cluster) just above, so the
+                        // factory writes this cluster.  A clusterless vertex
+                        // here is fatal downstream -- examine_direction returns
+                        // false at once (NeutrinoVertexFinder.cxx:1503) so
+                        // nothing gets oriented, and fill_bee_pf_tree's
+                        // main-cluster test (pf_track_main_cluster_only) then
+                        // rejects every seed from the main vertex; 039252/2
+                        // cluster 86 lost its mu- node and its Michel fell back
+                        // to a ROOT shower (doc pdvd/48 sec 8.0).  The explicit
+                        // stamp that used to stand here is now redundant.
                         out_dis = best_d;
                         return nvtx;
                     }

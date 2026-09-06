@@ -2861,9 +2861,10 @@ bool PatternAlgorithms::snap_main_vertex_to_kink(Graph& graph, Facade::Cluster& 
             cluster.ident(), K.x()/units::cm, K.y()/units::cm, K.z()/units::cm);
         return false;
     }
-    // break_segment does not set the cluster: without it the new vertex is
-    // invisible to every candidate loop (same gotcha as break_two_end_dqdx).
-    vtx_new->cluster(&cluster);
+    // The cluster is stamped by break_segment itself (doc
+    // sbnd_xin/docs/pr/143).  `arms[].seg` comes only from `incident`, built
+    // above under `sg->cluster() == &cluster`, so the factory writes this
+    // cluster; the explicit stamp that used to live here was removed.
     // Shield against examine_vertices / ES2 / ES3 re-merging the deliberate
     // break (the pr/48 kProtectedBreak contract).
     vtx_new->set_flags(VertexFlags::kProtectedBreak);

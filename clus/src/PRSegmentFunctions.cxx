@@ -1192,6 +1192,16 @@ namespace WireCell::Clus::PR {
         seg1->cluster(seg->cluster()); 
         seg2->cluster(seg->cluster());
 
+        // doc sbnd_xin/docs/pr/143: the vertex gets the cluster too.  This was
+        // the one vertex factory in the PR chain that did not stamp it, and
+        // nothing back-fills afterwards, so a clusterless vertex stayed
+        // invisible to every cluster-filtered loop for the rest of the event.
+        // Two callers used to stamp it themselves; both selected their segment
+        // under `sg->cluster() == &cluster` (NeutrinoPatternBase.cxx:3018,
+        // NeutrinoVertexFinder.cxx:2669), so this writes the identical pointer
+        // and those call-site stamps were removed with this change.
+        vtx->cluster(seg->cluster());
+
         // Split fits - break point included in both
         if (fits.size()>0){
             seg1->fits(std::vector<Fit>(fits.begin(), itfits+1));

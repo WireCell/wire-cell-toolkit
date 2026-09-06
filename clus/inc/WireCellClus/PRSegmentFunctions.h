@@ -30,6 +30,16 @@ namespace WireCell::Clus::PR {
     /// on a reversed edge each child gets the WRONG half (doc
     /// sbnd_xin/docs/pr/83; C++ default false => byte-identical).
     ///
+    /// The NEW vertex carries the parent segment's cluster, exactly like the
+    /// two children.  This is the ONLY place any caller needs it done: doc
+    /// sbnd_xin/docs/pr/143 found that this was the one vertex factory in the
+    /// PR chain that left cluster() null (all 16 other make_vertex calls stamp,
+    /// and nothing back-fills), so every consumer that filters vertices by
+    /// cluster -- examine_direction's entry guard, determine_main_vertex's
+    /// candidate loops, pi0_identification_sp's cluster_acc_length lookup,
+    /// low_energy_overlapping_sp's shower-cluster guard, T_rec_charge's vertex
+    /// rows and the Bee/dump display ids -- silently skipped or mis-keyed it.
+    ///
     /// Returns true if the graph was modified.
     std::tuple<bool, std::pair<SegmentPtr, SegmentPtr>, VertexPtr> break_segment(Graph& graph, SegmentPtr seg, Point point, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, const IDetectorVolumes::pointer& dv,
                        double max_dist=1e9*units::cm, bool orient_split=false);

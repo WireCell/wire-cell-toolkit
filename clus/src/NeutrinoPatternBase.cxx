@@ -3089,12 +3089,11 @@ bool PatternAlgorithms::break_two_end_dqdx(Graph& graph, Facade::Cluster& cluste
     auto [ok, segs, vtx] = break_segment(graph, cand, break_pt, particle_data, m_recomb_model, dv,
                                          1e9*units::cm, m_break_seg_orient);
     if (!ok || !vtx) return false;
-    // break_segment does not associate the new vertex with a cluster; a
-    // null-cluster vertex is invisible to determine_main_vertex's candidate
-    // loops (they filter on vtx->cluster() == &cluster), which would defeat
-    // the entire purpose of the break.  (Deliberately set HERE, not inside
-    // break_segment -- its other caller keeps its current behavior.)
-    vtx->cluster(&cluster);
+    // The new vertex's cluster is stamped by break_segment itself (doc
+    // sbnd_xin/docs/pr/143).  `cand` is selected above under
+    // `sg->cluster() != &cluster -> continue`, so the pointer the factory
+    // writes is this cluster; the explicit stamp that used to live here was
+    // removed as redundant.
     // Mark both arms: their travel direction away from the junction is
     // established by the accept itself (each arm's Bragg is at its outer
     // end).  determine_direction reconstructs the outward direction from

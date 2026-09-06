@@ -1,6 +1,8 @@
 #include "WireCellClus/PRSegment.h"
 #include "WireCellClus/PRGraph.h"
 #include "WireCellClus/PRSegmentFunctions.h"
+#include "WireCellClus/Facade_Grouping.h"
+#include "WireCellClus/Facade_Cluster.h"
 
 #include "WireCellUtil/Units.h"
 #include "WireCellUtil/doctest.h"
@@ -411,4 +413,85 @@ TEST_CASE("clus pr72 es3 stub guard: threshold boundaries") {
     // ang_ratio: ang3 must strictly exceed ang_ratio * ang10.
     CHECK(es3_stub_suppress(6.28 * units::cm, 33.19 * units::cm, 20.0, 19.9, 1, 11, 56, p));
     CHECK_FALSE(es3_stub_suppress(6.28 * units::cm, 33.19 * units::cm, 20.0, 20.1, 1, 11, 56, p));
+}
+
+// doc sbnd_xin/docs/pr/143: break_segment was the ONLY vertex factory in the
+// PR chain that left the new vertex's cluster() null -- all 16 other
+// make_vertex calls stamp it, and nothing back-fills afterwards.  A clusterless
+// vertex is silently skipped (examine_direction's entry guard,
+// determine_main_vertex's candidate loops, T_rec_charge's vertex rows) or
+// mis-keyed (pi0_identification_sp's cluster_acc_length lookup, which misses on
+// the null key and reads acc_length 0).  The factory now stamps it, and the two
+// callers that used to do it themselves (break_two_end_dqdx,
+// snap_main_vertex_to_kink) had their explicit stamps removed -- both select
+// their segment under `sg->cluster() == &cluster`, so the factory writes the
+// same pointer.
+//
+// The children have ALWAYS carried the parent's cluster -- that half is pinned
+// here too, so a "fix" that MOVES the stamp instead of adding it fails.
+TEST_CASE("clus pr break_segment stamps the new vertex") {
+    // A Facade cluster to stamp.  break_segment only stores the pointer, so an
+    // empty cluster (no blobs) is enough.
+    WireCell::PointCloud::Tree::Points::node_t root;
+    auto& grouping = *root.value.facade<WireCell::Clus::Facade::Grouping>();
+    auto& cluster = grouping.make_child();
+
+    // Five collinear fits/wcpts so the break point is interior: break_segment
+    // refuses a split on the first or last fit (degenerate 1-point child).
+    auto build = [&](Graph& g, WireCell::Clus::Facade::Cluster* cl) {
+        auto v1 = make_vertex(g);
+        v1->wcpt().point = Point(0, 0, 0);
+        v1->cluster(cl);
+        auto v2 = make_vertex(g);
+        v2->wcpt().point = Point(10*units::cm, 0, 0);
+        v2->cluster(cl);
+        auto seg = make_segment(g, v1, v2);
+        std::vector<WCPoint> wcpts;
+        std::vector<Fit> fits;
+        for (int i = 0; i < 5; ++i) {
+            const Point p(i * 2.5*units::cm, 0, 0);
+            WCPoint w; w.point = p; wcpts.push_back(w);
+            Fit f; f.point = p; f.index = i; f.dx = 2.5*units::cm; f.dQ = 5e4; fits.push_back(f);
+        }
+        seg->wcpts(wcpts);
+        seg->fits(fits);
+        seg->cluster(cl);
+        return seg;
+    };
+
+    const Point break_pt(5*units::cm, 0, 0);
+
+    SUBCASE("the new vertex and both children carry the parent's cluster") {
+        Graph g;
+        auto seg = build(g, &cluster);
+        auto [ok, kids, vtx] = break_segment(g, seg, break_pt, nullptr, nullptr, nullptr);
+        REQUIRE(ok);
+        REQUIRE(vtx != nullptr);
+        CHECK(vtx->cluster() == &cluster);
+        REQUIRE(kids.first != nullptr);
+        REQUIRE(kids.second != nullptr);
+        CHECK(kids.first->cluster()  == &cluster);
+        CHECK(kids.second->cluster() == &cluster);
+    }
+
+    SUBCASE("a clusterless parent yields a clusterless vertex, not a crash") {
+        Graph g;
+        auto seg = build(g, nullptr);
+        auto [ok, kids, vtx] = break_segment(g, seg, break_pt, nullptr, nullptr, nullptr);
+        REQUIRE(ok);
+        REQUIRE(vtx != nullptr);
+        CHECK(vtx->cluster() == nullptr);
+        CHECK(kids.first->cluster()  == nullptr);
+        CHECK(kids.second->cluster() == nullptr);
+    }
+
+    SUBCASE("orient_split does not change who owns the vertex") {
+        Graph g;
+        auto seg = build(g, &cluster);
+        auto [ok, kids, vtx] = break_segment(g, seg, break_pt, nullptr, nullptr, nullptr,
+                                             1e9*units::cm, /*orient_split=*/true);
+        REQUIRE(ok);
+        REQUIRE(vtx != nullptr);
+        CHECK(vtx->cluster() == &cluster);
+    }
 }
