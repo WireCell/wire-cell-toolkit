@@ -2237,6 +2237,12 @@ function(
     long_muon_cathode_bridge_short_gap_angle = null, // deg; C++ default 10.0; inert while short_gap 0
     long_muon_cathode_bridge_short_gap_len = null,  // cm; C++ default 50.0; inert while short_gap 0
     kine_mainvtx_used_guard = true,  // SBND PRODUCTION ON 2026-08-20 (doc pr/101 K5; latent on the manifest)
+    // doc pr/145 item 3b: log-only instrumentation for the BFS
+    // particle-continuation detector (flag_reduce).  It emits SPDLOG lines and
+    // nothing else -- no arithmetic reads it -- so it cannot change
+    // reconstruction even when armed.  C++ default false => key omitted =>
+    // byte-identical.  Arm it with -A kine_continuation_debug=true.
+    kine_continuation_debug = false,
     shower_hadronic_tag = true,  // SBND PRODUCTION ON 2026-08-20 (doc pr/99 round 3, A5)
     shower_hadronic_min_len = null,   // cm; C++ default 10
     shower_hadronic_scan_len = null,  // cm; C++ default 30
@@ -3411,6 +3417,8 @@ function(
         [if long_muon_cathode_bridge_short_gap_angle != null then 'long_muon_cathode_bridge_short_gap_angle']: long_muon_cathode_bridge_short_gap_angle,  // doc 84 r4 G3; C++ default 10.0 deg
         [if long_muon_cathode_bridge_short_gap_len != null then 'long_muon_cathode_bridge_short_gap_len']: long_muon_cathode_bridge_short_gap_len,  // doc 84 r4 G3; C++ default 50.0 cm
         [if (if kine_mainvtx_used_guard == null then false else kine_mainvtx_used_guard) then 'kine_mainvtx_used_guard']: true,
+        // doc pr/145 item 3b; log-only.  C++ default false => key omitted when off => byte-identical.
+        [if (if kine_continuation_debug == null then false else kine_continuation_debug) then 'kine_continuation_debug']: true,
         [if (if shower_hadronic_tag == null then false else shower_hadronic_tag) then 'shower_hadronic_tag']: true,
         [if shower_hadronic_min_len != null then 'shower_hadronic_min_len']: shower_hadronic_min_len,
         [if shower_hadronic_scan_len != null then 'shower_hadronic_scan_len']: shower_hadronic_scan_len,

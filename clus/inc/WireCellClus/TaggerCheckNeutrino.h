@@ -931,6 +931,7 @@ public:
         double m_long_muon_cathode_bridge_short_gap_angle{10.0};    // doc 84 round 4 (G3): partner-direction angle cap [deg] required when the waiver applies; inert while short_gap == 0
         double m_long_muon_cathode_bridge_short_gap_len{50.0};      // doc 84 round 4 (G3): min partner length [cm] required when the waiver applies; inert while short_gap == 0
         bool   m_kine_mainvtx_used_guard{false};                    // doc pr/101 K5 (main-vertex member double count)
+        bool   m_kine_continuation_debug{false};                    // doc pr/145 item 3b; log-only, cannot change reco
         bool   m_shower_hadronic_tag{false};                        // doc pr/99 r3 A5 (hadronic shower labeled e-)
         double m_shower_hadronic_min_len{10.0};                     // cm; scaled at copy; inert while tag off
         double m_shower_hadronic_scan_len{30.0};                    // cm; scaled at copy; inert while tag off

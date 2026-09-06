@@ -220,6 +220,10 @@ KineInfo PatternAlgorithms::fill_kine_tree(
         else
             ktree.kine_energy_info.push_back(0); // dQdx
 
+        // doc pr/145 item 3b: the shower path charges a rest term too, and it
+        // has no continuation reduction at all -- record what it costs.
+        const float add_before_rest_shw = ktree.kine_reco_add_energy;
+
         // Add rest-mass correction for non-electrons/positrons
         if (m_kine_charge.mass_rules) {
             SegmentPtr start_sg = shower->start_segment();
@@ -235,6 +239,14 @@ KineInfo PatternAlgorithms::fill_kine_tree(
                 ktree.kine_reco_add_energy += static_cast<float>(
                     start_sg->particle_info()->mass() / units::MeV);
             }
+        }
+        if (m_kine_charge.continuation_debug) {
+            SegmentPtr ss = shower->start_segment();
+            SPDLOG_LOGGER_INFO(s_log,
+                "kine_cont: CHARGE_SHOWER start_seg={} pdg={} rest_mev={:.2f} ke_mev={:.2f}",
+                ss ? static_cast<long long>(ss->get_graph_index()) : -1LL, pdg,
+                ktree.kine_reco_add_energy - add_before_rest_shw,
+                kine_best / units::MeV);
         }
     };
 
@@ -268,6 +280,10 @@ KineInfo PatternAlgorithms::fill_kine_tree(
 
         ktree.kine_energy_included.push_back(include_flag);
 
+        // doc pr/145 item 3b: remember the rest term this node is about to be
+        // charged, so the instrumentation below can price each admission.
+        const float add_before_rest = ktree.kine_reco_add_energy;
+
         if (m_kine_charge.mass_rules) {
             if (pdg == 2212) add_energy_legacy += static_cast<float>(ave_binding_energy / units::MeV);
             else if (pdg != 11) add_energy_legacy += static_cast<float>(mass / units::MeV);
@@ -278,6 +294,13 @@ KineInfo PatternAlgorithms::fill_kine_tree(
         }
         else if (pdg != 11) { // not electron: add rest mass
             ktree.kine_reco_add_energy += static_cast<float>(mass / units::MeV);
+        }
+        if (m_kine_charge.continuation_debug) {
+            SPDLOG_LOGGER_INFO(s_log,
+                "kine_cont: CHARGE seg={} pdg={} rest_mev={:.2f} ke_mev={:.2f}",
+                seg->get_graph_index(), pdg,
+                ktree.kine_reco_add_energy - add_before_rest,
+                kine_best / units::MeV);
         }
         return pdg;
     };
@@ -326,7 +349,19 @@ KineInfo PatternAlgorithms::fill_kine_tree(
         std::vector<std::pair<VertexPtr, SegmentPtr>> temp_segments;
 
         for (auto& [curr_vtx, prev_sg] : segments_to_be_examined) {
-            if (used_vertices.count(curr_vtx)) continue;
+            if (used_vertices.count(curr_vtx)) {
+                // doc pr/145 item 3b: this early-continue skips the ENTIRE
+                // reduction block below, so prev_sg keeps a rest term that a
+                // continuation through this vertex would have given back.
+                // One of the four candidate escapes from flag_reduce.
+                if (m_kine_charge.continuation_debug) {
+                    SPDLOG_LOGGER_INFO(s_log,
+                        "kine_cont: SKIP_VISITED vtx={} prev_seg={} prev_pdg={}",
+                        curr_vtx->get_graph_index(), prev_sg->get_graph_index(),
+                        (prev_sg->particle_info() ? prev_sg->particle_info()->pdg() : 0));
+                }
+                continue;
+            }
 
             bool flag_reduce = false;
             int  prev_pdg = 0;
@@ -341,10 +376,25 @@ KineInfo PatternAlgorithms::fill_kine_tree(
                 if (curr_sg->particle_info()) curr_pdg = curr_sg->particle_info()->pdg();
 
                 // Detect particle continuation (same type, or muon<->pion flip)
-                if (curr_pdg == prev_pdg ||
-                    (prev_pdg == 211 && curr_pdg == 13) ||
-                    (prev_pdg == 13  && curr_pdg == 211))
-                    flag_reduce = true;
+                const bool cont_hit = (curr_pdg == prev_pdg ||
+                                       (prev_pdg == 211 && curr_pdg == 13) ||
+                                       (prev_pdg == 13  && curr_pdg == 211));
+                if (cont_hit) flag_reduce = true;
+
+                // doc pr/145 item 3b.  The test above is SIGNED: 13 vs -13
+                // never matches, and the mu<->pi clause covers only +211/+13.
+                // Log both pdgs verbatim so the escape can be named rather
+                // than guessed.
+                if (m_kine_charge.continuation_debug) {
+                    SPDLOG_LOGGER_INFO(s_log,
+                        "kine_cont: TEST vtx={} prev_seg={} prev_pdg={} curr_seg={} curr_pdg={} "
+                        "is_shower={} already_used={} -> {}",
+                        curr_vtx->get_graph_index(), prev_sg->get_graph_index(), prev_pdg,
+                        curr_sg->get_graph_index(), curr_pdg,
+                        (map_sg_shower.find(curr_sg) != map_sg_shower.end()) ? 1 : 0,
+                        used_segments.count(curr_sg) ? 1 : 0,
+                        cont_hit ? "CONT" : "no");
+                }
 
                 auto it2 = map_sg_shower.find(curr_sg);
                 if (it2 == map_sg_shower.end()) {
@@ -373,6 +423,12 @@ KineInfo PatternAlgorithms::fill_kine_tree(
             // If we detected a particle continuation, undo the rest-mass/binding-energy
             // added for prev_sg (it was already counted earlier in the chain).
             if (flag_reduce && prev_sg->particle_info()) {
+                if (m_kine_charge.continuation_debug) {
+                    SPDLOG_LOGGER_INFO(s_log,
+                        "kine_cont: REDUCE vtx={} prev_seg={} prev_pdg={} rest_mev={:.2f}",
+                        curr_vtx->get_graph_index(), prev_sg->get_graph_index(), prev_pdg,
+                        rest_term_rules(prev_pdg, prev_sg->particle_info()->mass()));
+                }
                 if (m_kine_charge.mass_rules) {
                     const double mass = prev_sg->particle_info()->mass();
                     if (prev_pdg == 2212) add_energy_legacy -= static_cast<float>(ave_binding_energy / units::MeV);

@@ -172,6 +172,15 @@ namespace WireCell::Clus::PR {
         /// true = guard the first pass too.  Config key
         /// kine_mainvtx_used_guard; absent => byte-identical.
         bool mainvtx_used_guard{false};
+        /// doc pr/145 (item 3b).  Pure instrumentation for the BFS
+        /// particle-continuation detector (`flag_reduce`): logs the SIGNED
+        /// pdg on both sides of every continuation test, the two segment
+        /// graph indices, whether the reduction fired, and the
+        /// already-visited early-continue that skips the reduction block
+        /// entirely.  Emits log lines only -- no arithmetic depends on it,
+        /// so the knob cannot change reconstruction.  Config key
+        /// kine_continuation_debug; absent => no lines.
+        bool continuation_debug{false};
     };
 
     struct Pi0KineFeatures {

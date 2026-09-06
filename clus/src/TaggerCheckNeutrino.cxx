@@ -660,6 +660,7 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_long_muon_cathode_bridge_short_gap_angle  = get(config, "long_muon_cathode_bridge_short_gap_angle",  m_long_muon_cathode_bridge_short_gap_angle); // doc 84 round 4 G3, deg
     m_long_muon_cathode_bridge_short_gap_len    = get(config, "long_muon_cathode_bridge_short_gap_len",    m_long_muon_cathode_bridge_short_gap_len); // doc 84 round 4 G3, cm
     m_kine_mainvtx_used_guard                   = get(config, "kine_mainvtx_used_guard",                   m_kine_mainvtx_used_guard);
+    m_kine_continuation_debug                   = get(config, "kine_continuation_debug",                   m_kine_continuation_debug);                // doc pr/145
     m_shower_hadronic_tag                       = get(config, "shower_hadronic_tag",                       m_shower_hadronic_tag);
     m_shower_hadronic_min_len                   = get(config, "shower_hadronic_min_len",                   m_shower_hadronic_min_len);
     m_shower_hadronic_scan_len                  = get(config, "shower_hadronic_scan_len",                  m_shower_hadronic_scan_len);
@@ -1170,6 +1171,7 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["long_muon_cathode_bridge_short_gap_angle"]  = m_long_muon_cathode_bridge_short_gap_angle;  // doc 84 round 4 G3, deg; inert while short_gap 0
     cfg["long_muon_cathode_bridge_short_gap_len"]    = m_long_muon_cathode_bridge_short_gap_len;    // doc 84 round 4 G3, cm; inert while short_gap 0
     cfg["kine_mainvtx_used_guard"]                   = m_kine_mainvtx_used_guard;                   // doc pr/101 K5; false = legacy, byte-identical
+    cfg["kine_continuation_debug"]                   = m_kine_continuation_debug;                   // doc pr/145 item 3b; log-only instrumentation
     cfg["shower_hadronic_tag"]                       = m_shower_hadronic_tag;                       // doc pr/99 r3 A5; false = legacy (label 11 stays), byte-identical
     cfg["shower_hadronic_min_len"]                   = m_shower_hadronic_min_len;                   // cm; inert while tag off (doc pr/99 r3)
     cfg["shower_hadronic_scan_len"]                  = m_shower_hadronic_scan_len;                  // cm; inert while tag off (doc pr/99 r3)
@@ -2571,6 +2573,7 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
         pattern_algos.m_kine_charge.long_muon_range_fallback = m_long_muon_range_empty_chain_fallback;  // doc 84 round 1 (P1)
         pattern_algos.m_kine_charge.long_muon_members_geometry = m_long_muon_members_geometry;          // doc 84 round 2
         pattern_algos.m_kine_charge.mainvtx_used_guard  = m_kine_mainvtx_used_guard;                    // doc pr/101 K5
+        pattern_algos.m_kine_charge.continuation_debug  = m_kine_continuation_debug;                    // doc pr/145 item 3b
         // doc sbnd_xin/docs/pr/36 §10 tagger-stage knobs (F4/F5/F6/F7).
         pattern_algos.m_tagger_ordered_segment_sets  = m_tagger_ordered_segment_sets;
         pattern_algos.m_stem_endpoint_wcpt_parity    = m_stem_endpoint_wcpt_parity;
