@@ -235,6 +235,14 @@ namespace WireCell::Clus {
             // Reported as a double for the set_parameter(name, value) plumbing.
             double excl_t0_frame = 0;
 
+            // doc pdvd/45 sec 13 -- do_single_tracking's 2nd-pass projection loop
+            // looks up wpid_offsets/wpid_slopes for the (apa, face) that
+            // contained_by() returns and dereferenced a MISSING entry (a volume
+            // with no wire planes: PDVD apa 2 face 0 at y ~ 1 cm), writing
+            // run-to-run garbage into pu/pv/pw/pt.  > 0 skips such a point, as
+            // trajectory_fit's loop already does.  0 = legacy = byte-identical.
+            double proj_skip_unmapped_face = 0;
+
             // doc pdvd/44 -- acceptance window of cal_gaus_integral in sigmas:
             // a (time, wire) bin farther than gaus_nsigma * sigma from a
             // sub-point's centre receives nothing from it (no renormalisation).

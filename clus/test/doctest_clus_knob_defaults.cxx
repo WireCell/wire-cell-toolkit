@@ -1568,3 +1568,16 @@ TEST_CASE("clus knob defaults: ctpc_aniso_metric is off")
     grouping.set_ctpc_aniso_metric(true);
     CHECK(grouping.ctpc_aniso_metric() == true);
 }
+
+TEST_CASE("clus knob defaults: TrackFitting proj_skip_unmapped_face is off")
+{
+    // doc pdvd/45 sec 13: the 2nd-pass projection loop dereferenced a missing
+    // wpid_offsets/wpid_slopes entry for a volume with no wire planes; > 0
+    // skips such points.  Default 0 = legacy = byte-identical.
+    Clus::TrackFitting tf;
+    CHECK(tf.get_parameter("proj_skip_unmapped_face") == doctest::Approx(0.0));
+    tf.set_parameter("proj_skip_unmapped_face", 1.0);
+    CHECK(tf.get_parameter("proj_skip_unmapped_face") == doctest::Approx(1.0));
+    auto preset = Clus::TrackFittingPresets::create_with_current_values();
+    CHECK(preset.get_parameters().proj_skip_unmapped_face == doctest::Approx(0.0));
+}

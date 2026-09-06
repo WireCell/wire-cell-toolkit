@@ -71,6 +71,8 @@ void TrackFitting::set_parameter(const std::string& name, double value) {
         m_params.dqdx_fit_keep_all_points = value;
     } else if (name == "excl_t0_frame") {              // doc pdvd/45
         m_params.excl_t0_frame = value;
+    } else if (name == "proj_skip_unmapped_face") {    // doc pdvd/45 sec 13
+        m_params.proj_skip_unmapped_face = value;
     } else if (name == "gaus_nsigma") {                 // doc pdvd/44
         m_params.gaus_nsigma = value;
     } else if (name == "DL") {
@@ -238,6 +240,8 @@ double TrackFitting::get_parameter(const std::string& name) const {
         return m_params.dqdx_fit_keep_all_points;
     } else if (name == "excl_t0_frame") {              // doc pdvd/45
         return m_params.excl_t0_frame;
+    } else if (name == "proj_skip_unmapped_face") {    // doc pdvd/45 sec 13
+        return m_params.proj_skip_unmapped_face;
     } else if (name == "gaus_nsigma") {                 // doc pdvd/44
         return m_params.gaus_nsigma;
     } else if (name == "good_point_pitch_frac") {      // doc pdvd/32 round 3
@@ -9973,6 +9977,8 @@ void TrackFitting::do_single_tracking(std::shared_ptr<PR::Segment> segment, bool
         pt.clear();
         ptss.clear();
         paf.clear();
+        size_t n_unmapped_skipped = 0;                                   // doc pdvd/45 sec 13
+        std::tuple<int, int, WireCell::Point> unmapped_first{-1, -1, WireCell::Point()};
         for (const auto& p : pts) {
             auto cluster = segment->cluster();
             const auto transform = m_pcts->pc_transform(cluster->get_scope_transform(cluster->get_default_scope()));
@@ -9988,6 +9994,23 @@ void TrackFitting::do_single_tracking(std::shared_ptr<PR::Segment> segment, bool
             WirePlaneId wpid(kAllLayers, face, apa);
             auto offset_it = wpid_offsets.find(wpid);
             auto slope_it = wpid_slopes.find(wpid);
+            // doc pdvd/45 sec 13: contained_by() can name an (apa, face) that has
+            // no wire planes -- PDVD 039253/16 cluster 37's gap-bridging points at
+            // y ~ 1 cm land in apa 2 face 0, which wpid_offsets/wpid_slopes never
+            // received (the face is not in the grouping's geometry) -- and the
+            // std::get<0>(end()->second) below then reads garbage: pu/pv/pw/pt of
+            // those 61 points are denormals that differ run to run, the dQ/dx fit
+            // sees no cells for them and leaves the 50000 e initial guess.  The
+            // first-pass loop (trajectory_fit) already skips such a point with a
+            // WARN; proj_skip_unmapped_face > 0 does the same here.  Default 0 =
+            // legacy = byte-identical (the UB path, kept for the gate).
+            if (offset_it == wpid_offsets.end() || slope_it == wpid_slopes.end()) {
+                if (m_params.proj_skip_unmapped_face > 0) {
+                    ++n_unmapped_skipped;
+                    if (n_unmapped_skipped == 1) unmapped_first = std::make_tuple(apa, face, p);
+                    continue;
+                }
+            }
 
             auto offset_t = std::get<0>(offset_it->second);
             auto offset_u = std::get<1>(offset_it->second);
@@ -10008,6 +10031,11 @@ void TrackFitting::do_single_tracking(std::shared_ptr<PR::Segment> segment, bool
             pt.push_back(offset_t + slope_x * p_raw.x());
             paf.push_back(std::make_pair(apa, face));
 
+        }
+        if (n_unmapped_skipped) {
+            const auto& [ua, uf, up] = unmapped_first;
+            SPDLOG_LOGGER_WARN(s_log, "do_single_tracking: skipped {} of {} 2nd-pass path point(s) in a volume with no wire planes (apa={} face={}; first at ({:.2f},{:.2f},{:.2f}) cm) -- proj_skip_unmapped_face",
+                               n_unmapped_skipped, pts.size(), ua, uf, up.x()/units::cm, up.y()/units::cm, up.z()/units::cm);
         }
     }
     
