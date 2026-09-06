@@ -2321,6 +2321,15 @@ namespace WireCell::Clus::PR {
         double m_kine_near_min_len{30*units::cm};
         double m_kine_near_end_tol{10*units::cm};
         double m_kine_near_kink_deg{30.0};
+        // doc sbnd_xin/pr/144 §13.2 -- the pointing test pr/129 gave the
+        // guard-freed pool, offered to this one.  SBND 18255-393505: with
+        // excl_t0_frame on the continuation gap collapsed to 0.00 cm and a
+        // 65.5 cm segment of an owner-adjudicated COSMIC (cluster 15) was
+        // admitted for 177.8 MeV; the pr/129 test SKIPped the very same
+        // segment (impact 69.1 cm, miss 112.2 deg) because it is wired to the
+        // other pool.  0 = no pointing test = byte-identical.
+        double m_kine_near_pointing_impact{0.0};         ///< doc pr/144; cm; 0 = off, byte-identical
+        double m_kine_near_pointing_miss_deg{90.0};      ///< doc pr/144; only read when the impact cut is armed
         bool   m_kine_count_conn4_near{false};           ///< doc pr/128; false = every conn-4 shower uncounted
         double m_kine_conn4_near_gap{20*units::cm};
         // kine_count_orphan_tracks (315167): fill_kine_tree counterpart of

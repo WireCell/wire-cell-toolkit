@@ -2283,6 +2283,19 @@ function(
     kine_near_min_len_cm = null,       // null => C++ default 30cm
     kine_near_end_tol_cm = null,       // null => C++ default 10cm
     kine_near_kink_deg = null,         // null => C++ default 30 deg
+    // doc pr/144 §13.2: the pr/129 pointing test, offered to the
+    // near-cross-cluster pool too.  The continuation terms above are geometry
+    // between the candidate and the counted set; none of them asks whether the
+    // candidate aims back at the neutrino vertex.  With excl_t0_frame on,
+    // SBND 18255-393505's continuation gap collapsed to 0.00 cm and a 65.5 cm
+    // segment of cluster 15 -- the cosmic pr/129 was written to keep out -- was
+    // counted for 177.8 MeV, while the pr/129 test SKIPped that same segment
+    // (impact 69.1 cm, miss 112.2 deg) because it is wired to the other pool.
+    // C++ default 0 = no test => key omitted => byte-identical.
+    // NOT flipped: it needs its own arm and its own negative control before it
+    // is anything more than a hypothesis with one supporting event.
+    kine_near_pointing_impact = 0,      // cm; 0 = off.  20 mirrors pr/129's SBND value
+    kine_near_pointing_miss_deg = 90,   // deg; only read when the impact cut is armed
     kine_count_conn4_near = true,
     kine_conn4_near_gap_cm = null,     // null => C++ default 20cm
     straight_cont_cross_cluster = true,
@@ -3421,6 +3434,10 @@ function(
         [if kine_near_min_len_cm != null then 'kine_near_min_len']: kine_near_min_len_cm,
         [if kine_near_end_tol_cm != null then 'kine_near_end_tol']: kine_near_end_tol_cm,
         [if kine_near_kink_deg != null then 'kine_near_kink_deg']: kine_near_kink_deg,
+        // doc pr/144: pointing test on the near-cross-cluster pool.  C++
+        // default 0 = no test => key omitted when off => byte-identical.
+        [if kine_near_pointing_impact != 0 then 'kine_near_pointing_impact']: kine_near_pointing_impact,
+        [if kine_near_pointing_impact != 0 then 'kine_near_pointing_miss_deg']: kine_near_pointing_miss_deg,
         [if kine_count_conn4_near then 'kine_count_conn4_near']: true,
         [if kine_conn4_near_gap_cm != null then 'kine_conn4_near_gap']: kine_conn4_near_gap_cm,
         [if straight_cont_cross_cluster then 'straight_cont_cross_cluster']: true,

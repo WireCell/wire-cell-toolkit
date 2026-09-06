@@ -861,6 +861,35 @@ KineInfo PatternAlgorithms::fill_kine_tree(
                   [](const auto& a, const auto& b) { return a.first < b.first; });
         size_t n_near = 0;
         for (const auto& [eidx, seg] : near_cands) {
+            // -----------------------------------------------------------------
+            // doc sbnd_xin/pr/144 §13.2 -- the pointing test, offered to THIS
+            // pool as well.  The continuation terms above are geometry between
+            // the candidate and the counted set; none of them asks whether the
+            // candidate aims back at the NEUTRINO VERTEX.  On SBND 18255-393505
+            // with excl_t0_frame on, the continuation gap collapsed to 0.00 cm
+            // and a 65.5 cm segment of cluster 15 -- an owner-adjudicated
+            // cosmic -- was counted for 177.8 MeV, while pr/129's identical
+            // test SKIPped that very segment (impact 69.1 cm, miss 112.2 deg)
+            // because it is wired only to the guard-freed pool.
+            //
+            // m_kine_near_pointing_impact == 0 => no test => every candidate
+            // counted exactly as before => byte-identical.
+            // -----------------------------------------------------------------
+            if (m_kine_near_pointing_impact > 0 && main_vertex) {
+                const auto p = segment_vertex_pointing(seg, main_vertex->fit().point);
+                const bool aims = p.d_vtx >= 0 &&
+                                  p.impact   <= m_kine_near_pointing_impact &&
+                                  p.miss_deg <= m_kine_near_pointing_miss_deg;
+                SPDLOG_LOGGER_INFO(s_log,
+                    "kine_near_pointing_impact: seg idx={} cluster={} ke_mev={:.2f} "
+                    "d_vtx_cm={:.2f} impact_cm={:.2f} miss_deg={:.1f} -> {}",
+                    eidx, seg->cluster() ? seg->cluster()->get_cluster_id() : -1,
+                    (seg->particle_info() ? seg->particle_info()->kinetic_energy() / units::MeV : 0.0),
+                    p.d_vtx < 0 ? -1.0 : p.d_vtx / units::cm,
+                    p.impact > 1e8 ? -1.0 : p.impact / units::cm,
+                    p.miss_deg, aims ? "COUNT" : "SKIP");
+                if (!aims) continue;
+            }
             used_segments.insert(seg);
             const int pdg = push_segment_kine(seg, 1);
             ++n_near;
