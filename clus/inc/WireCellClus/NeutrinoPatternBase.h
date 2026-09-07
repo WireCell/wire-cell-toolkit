@@ -2566,6 +2566,17 @@ namespace WireCell::Clus::PR {
         // folded (sign-insensitive) main-vertex angle fails.
         int    m_kine_sat_track_max_nseg{3};
         double m_kine_sat_em_far_dis{150*units::cm};
+        // doc sbnd_xin/pr/146: arm C above drops a TRACK-like satellite for
+        // BEING a straight continuation of a known track, with no direction
+        // test -- unlike arms A, B and E.  But that is the signature of a
+        // FRAGMENT of the candidate's own muon (SBND 94392 seg 45029, 392009
+        // seg 58014: both collinear at a shared vertex, both pointing at the
+        // main vertex within 7 deg, both lost from PF *and* Enu).  When this
+        // is > 0, arm C is waived for a satellite whose axis lies within this
+        // many degrees of its ATTACHMENT direction (ang_sv, arm A's own
+        // variable, on a tighter bar than arm A's 60).  0 => no waiver => arm C fires
+        // exactly as before => byte-identical.  DEGREES, not scaled.
+        double m_kine_sat_cont_keep_deg{0.0};
 
         // doc sbnd_xin/docs/pr/74 round 2 P2 (SBND 18255 evt 90055 seg
         // 11045).  override_michel_stem_muon (F14 above) accepts ANY

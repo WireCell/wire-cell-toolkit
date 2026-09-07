@@ -162,6 +162,9 @@ TEST_CASE("clus knob defaults: TaggerCheckNeutrino switches are all OFF")
     CHECK_KNOB_NUM(cfg, "kine_sat_cont_kink", 25.0);                             // deg; inert while pr/92 off
     CHECK_KNOB_NUM(cfg, "kine_sat_track_max_nseg", 3.0);                         // count; pr/92 r2 topology split
     CHECK_KNOB_NUM(cfg, "kine_sat_em_far_dis", 150.0);                           // cm; pr/92 r2 EM far-drop
+    // doc pr/146: 0 = arm C keeps its legacy unconditional drop.  A green run
+    // here does NOT mean SBND runs the waiver off -- check the jsonnet.
+    CHECK_KNOB_NUM(cfg, "kine_sat_cont_keep_deg", 0.0);                          // deg; pr/146 arm-C waiver, off
     CHECK_KNOB_BOOL(cfg, "shower_traj_michel_stem", false);                   // doc pr/74 round 4 K6
     CHECK_KNOB_NUM(cfg, "michel_stem_traj_min_len", 15.0);                    // cm; inert while K6 off
     CHECK_KNOB_NUM(cfg, "michel_stem_traj_max_len", 45.0);                    // cm; inert while K6 off

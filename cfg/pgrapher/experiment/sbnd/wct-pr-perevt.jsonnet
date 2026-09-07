@@ -1670,6 +1670,15 @@ function(
     // C++ defaults 3 / 150 cm.
     kine_sat_track_max_nseg = null,
     kine_sat_em_far_dis = null,
+    // doc sbnd_xin/pr/146 -- waive arm C (the direction-BLIND drop of a
+    // straight continuation) when the satellite's axis lies within this angle
+    // of its ATTACHMENT direction (ang_sv, the variable arm A already uses,
+    // on a tighter bar than arm A's 60 deg).  C++ default 0.0 = no waiver;
+    // key omitted when null => byte-identical pre-fix config.  Priced at 25
+    // (= kine_sat_cont_kink): on the owner's 2026-09-06 scan of all 8 arm-C
+    // drops in 3000 numu events it keeps the 7 he says are neutrino energy
+    // (+629.6 MeV) and refuses the one he calls over-clustering (321371).
+    kine_sat_cont_keep_deg = null,
     // doc sbnd_xin/docs/pr/74 round 2 P2: the F14 Michel rescue accepts ANY
     // shower-like sibling at the stem's far vertex; on a nueCC event that
     // sibling is the EM shower trunk and the rescue paints a muon at the
@@ -3299,6 +3308,7 @@ function(
         [if kine_sat_cont_kink != null then 'kine_sat_cont_kink']: kine_sat_cont_kink,
         [if kine_sat_track_max_nseg != null then 'kine_sat_track_max_nseg']: kine_sat_track_max_nseg,
         [if kine_sat_em_far_dis != null then 'kine_sat_em_far_dis']: kine_sat_em_far_dis,
+        [if kine_sat_cont_keep_deg != null then 'kine_sat_cont_keep_deg']: kine_sat_cont_keep_deg,
         [if michel_stem_michel_check then 'michel_stem_michel_check']: true,
         [if michel_stem_max_far_len != null then 'michel_stem_max_far_len']: michel_stem_max_far_len,
         [if shower_stem_backfill then 'shower_stem_backfill']: true,

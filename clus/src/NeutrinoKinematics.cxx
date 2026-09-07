@@ -530,7 +530,26 @@ KineInfo PatternAlgorithms::fill_kine_tree(
                     if (ang_sv > m_kine_sat_angle_bad)          { verdict = "drop:A"; break; }
                     if ((d_sv > m_kine_sat_far_dis || !in_main) &&
                         ang_mv >= m_kine_sat_angle_main)        { verdict = "drop:B"; break; }
-                    if (straight_cont)                          { verdict = "drop:C"; break; }
+                    if (straight_cont) {
+                        // doc sbnd_xin/pr/146: arm C drops a satellite for
+                        // BEING a straight continuation of a known track.
+                        // That is the signature of a fragment of the
+                        // candidate's own muon, and arms A and B above have
+                        // already rejected a continuation that points wrong.
+                        // Waive C when the axis still runs along the
+                        // ATTACHMENT direction -- the owner's 8-object scan
+                        // (doc pr/146 sec 8) keeps 2.1-19.6 deg and refuses
+                        // 28.5, while the main-vertex angle does NOT separate
+                        // them (a kept fragment sits at 107.8 deg).  This is
+                        // arm A's own variable on a tighter bar: a straight
+                        // continuation earns 25 deg where a generic track-like
+                        // satellite gets 60.
+                        // 0 => no waiver => byte-identical legacy.
+                        if (!(m_kine_sat_cont_keep_deg > 0 &&
+                              ang_sv <= m_kine_sat_cont_keep_deg)) {
+                            verdict = "drop:C"; break;
+                        }
+                    }
                 }
                 else if (d_mv > m_kine_sat_em_far_dis &&
                          ang_mv_fold >= m_kine_sat_angle_main)  { verdict = "drop:E"; break; }

@@ -867,6 +867,7 @@ public:
         double m_kine_sat_cont_kink{25.0};                          // degrees; Arm C continuation kink
         double m_kine_sat_track_max_nseg{3.0};                      // count; round-2 track-like max segments
         double m_kine_sat_em_far_dis{150.0};                        // cm; round-2 EM-satellite far-drop distance
+        double m_kine_sat_cont_keep_deg{0.0};                       // doc pr/146; deg (ang_sv), 0 = off => arm C unchanged
         bool m_michel_stem_michel_check{false};                     // doc pr/74 round 2 P2
         double m_michel_stem_max_far_len{40};                       // cm; pr/74 P2 tunable
         bool m_shower_stem_backfill{false};                         // doc pr/74 round 2 K4
