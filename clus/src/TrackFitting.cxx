@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdlib>
+#include <unordered_set>
 #include <string>
 #include <sstream>
 #include <iomanip>
@@ -28,7 +29,55 @@ static auto s_log = WireCell::Log::logger("clus.TrackFitting");
 // that is, i.e. how much a "predicted cells only" knob would actually buy,
 // without changing any output.
 static size_t d30_cells = 0, d30_cells_pred = 0, d30_cells_live = 0;
+// doc 30 round 3 adds two: the SEED count (cells whose RAW prediction is
+// nonzero -- the ungated test the pad filter actually uses, always >= the
+// pred_charge count above) and the KEPT count (cells that survive the pad).
+static size_t d30_cells_seed = 0, d30_cells_kept = 0;
 static const bool d30_census = (getenv("WCT_D30_FILL_CENSUS") != nullptr);
+
+// doc 30 round 3: the "predicted cells + a pad" filter for the DISPLAY product
+// both fill_fitted_charge_2d flavours build.  With the knob OFF
+// (Parameters::proj_pad_wire < 0) `on` is false, operator() short-circuits to
+// an unconditional true and nothing else here runs -- the legacy loop keeps its
+// exact row order and its last-writer-wins overwrite on cells two rows share.
+namespace {
+    struct ProjKeep {
+        bool on{false};
+        int pad_w{0};
+        int pad_slices{0};
+        std::unordered_set<uint64_t> keep;
+
+        /// (apa, face, plane, wire, time) -> 64 bits: apa 12 | face 2 | plane 2
+        /// | wire 20 | time 28.  Every field of a real cell is >= 0 and well
+        /// inside its field (PDHD/PDVD: apa < 150, wire < 2^11, time in ticks
+        /// < 2^14); dilated seeds that fall negative are dropped below, since
+        /// they can match no cell.
+        static inline uint64_t pack(int apa, int face, int plane, int wire, int time) {
+            return (uint64_t(apa & 0xFFF) << 52) | (uint64_t(face & 0x3) << 50)
+                 | (uint64_t(plane & 0x3) << 48) | (uint64_t(wire & 0xFFFFF) << 28)
+                 | uint64_t(time & 0xFFFFFFF);
+        }
+
+        /// Dilate one seed cell into the keep set.  Stored times are
+        /// slice-quantized (floor(tick/n)*n), so the time pad steps by the
+        /// slice width, not by one tick.
+        void seed(int apa, int face, int plane, int wire, int time, int nticks_per_slice) {
+            const int step = nticks_per_slice > 0 ? nticks_per_slice : 1;
+            const int dt = pad_slices * step;
+            for (int w = wire - pad_w; w <= wire + pad_w; ++w) {
+                if (w < 0) continue;
+                for (int t = time - dt; t <= time + dt; t += step) {
+                    if (t < 0) continue;
+                    keep.insert(pack(apa, face, plane, w, t));
+                }
+            }
+        }
+
+        inline bool operator()(int apa, int face, int plane, int wire, int time) const {
+            return !on || keep.count(pack(apa, face, plane, wire, time)) != 0;
+        }
+    };
+}
 
 using geo_point_t = WireCell::Point;
 
@@ -180,6 +229,10 @@ void TrackFitting::set_parameter(const std::string& name, double value) {
         m_params.lambda = value;
     } else if (name == "div_sigma") {
         m_params.div_sigma = value;
+    } else if (name == "proj_pad_wire") {
+        m_params.proj_pad_wire = value;
+    } else if (name == "proj_pad_time") {
+        m_params.proj_pad_time = value;
     } else {
         raise<ValueError>("TrackFitting: Unknown parameter name '%s'", name.c_str());
     }
@@ -295,6 +348,10 @@ double TrackFitting::get_parameter(const std::string& name) const {
         return m_params.lambda;
     } else if (name == "div_sigma") {
         return m_params.div_sigma;
+    } else if (name == "proj_pad_wire") {
+        return m_params.proj_pad_wire;
+    } else if (name == "proj_pad_time") {
+        return m_params.proj_pad_time;
     } else {
         raise<ValueError>("TrackFitting: Unknown parameter name '%s'", name.c_str());
         return 0;
@@ -1314,6 +1371,38 @@ void TrackFitting::fill_fitted_charge_2d(
 {
     m_fitted_charge_2d.clear();
 
+    // doc 30 round 3: seed pass, identical in meaning to the row flavour's --
+    // see Parameters::proj_pad_wire.  Inert while proj_pad_wire < 0.
+    ProjKeep pk;
+    pk.on = (m_params.proj_pad_wire >= 0);
+    if (pk.on) {
+        pk.pad_w = static_cast<int>(m_params.proj_pad_wire);
+        pk.pad_slices = m_params.proj_pad_time > 0 ? static_cast<int>(m_params.proj_pad_time) : 0;
+        std::map<int, std::map<int, int>> nticks_map;
+        if (m_grouping) nticks_map = m_grouping->get_nticks_per_slice();
+        auto nticks_at = [&nticks_map](int apa, int face) {
+            auto a = nticks_map.find(apa);
+            if (a == nticks_map.end()) return 1;
+            auto f = a->second.find(face);
+            return f == a->second.end() ? 1 : f->second;
+        };
+        auto seed_plane = [&](const std::map<CoordReadout, std::pair<ChargeMeasurement, std::set<Coord2D>>>& plane_map,
+                              const Eigen::VectorXd& pred_data, int plane_idx) {
+            int idx = 0;
+            for (const auto& [coord_key, result] : plane_map) {
+                const int ridx = idx++;
+                if (pred_data(ridx) == 0) continue;
+                for (const auto& c2d : result.second) {
+                    pk.seed(c2d.apa, c2d.face, plane_idx, c2d.wire, c2d.time,
+                            nticks_at(c2d.apa, c2d.face));
+                }
+            }
+        };
+        seed_plane(map_U, pred_u, 0);
+        seed_plane(map_V, pred_v, 1);
+        seed_plane(map_W, pred_w, 2);
+    }
+
     // Lambda to process one plane
     auto process_plane = [&](const std::map<CoordReadout, std::pair<ChargeMeasurement, std::set<Coord2D>>>& plane_map,
                              const Eigen::VectorXd& pred_data,
@@ -1321,6 +1410,7 @@ void TrackFitting::fill_fitted_charge_2d(
                              double rel_uncer, double add_uncer) {
         int idx = 0;
         for (const auto& [coord_key, result] : plane_map) {
+            const int ridx = idx++;   // doc 30 r3: hoisted so a skipped row still advances
             const auto& measurement = result.first;
             const auto& coord_2d_set = result.second;
 
@@ -1330,7 +1420,17 @@ void TrackFitting::fill_fitted_charge_2d(
                 double total_err = sqrt(pow(measurement.charge_err, 2)
                                       + pow(measurement.charge * rel_uncer, 2)
                                       + pow(add_uncer, 2));
-                pred_charge = pred_data(idx) * total_err;
+                pred_charge = pred_data(ridx) * total_err;
+            }
+
+            // doc 30 r3: drop the whole row, global_rb_map probe included, when
+            // no cell of it survives the pad.
+            if (pk.on) {
+                bool any = false;
+                for (const auto& c2d : coord_2d_set) {
+                    if (pk(c2d.apa, c2d.face, plane_idx, c2d.wire, c2d.time)) { any = true; break; }
+                }
+                if (!any) continue;
             }
 
             // Get cluster associations from global_rb_map
@@ -1345,6 +1445,7 @@ void TrackFitting::fill_fitted_charge_2d(
 
             // Store for each Coord2D (handles wrapped wires with multiple face/wire)
             for (const auto& c2d : coord_2d_set) {
+                if (!pk(c2d.apa, c2d.face, plane_idx, c2d.wire, c2d.time)) continue;
                 APAFacePlane afp{c2d.apa, c2d.face, plane_idx};
                 WireTime wt{c2d.wire, c2d.time};
                 auto& entry = m_fitted_charge_2d[afp][wt];
@@ -1354,8 +1455,6 @@ void TrackFitting::fill_fitted_charge_2d(
                 entry.flag = measurement.flag;
                 entry.clusters = clusters;
             }
-
-            idx++;
         }
     };
 
@@ -1377,12 +1476,49 @@ void TrackFitting::fill_fitted_charge_2d(const std::array<std::vector<DqdxRow>, 
 {
     m_fitted_charge_2d.clear();
 
+    // doc 30 round 3: seed pass -- collect the cells the fit actually predicts
+    // and dilate them by the configured pad.  Inert (and not even built) while
+    // proj_pad_wire < 0, which is every detector's shipped configuration.
+    ProjKeep pk;
+    pk.on = (m_params.proj_pad_wire >= 0);
+    if (pk.on) {
+        pk.pad_w = static_cast<int>(m_params.proj_pad_wire);
+        pk.pad_slices = m_params.proj_pad_time > 0 ? static_cast<int>(m_params.proj_pad_time) : 0;
+        std::map<int, std::map<int, int>> nticks_map;
+        if (m_grouping) nticks_map = m_grouping->get_nticks_per_slice();
+        auto nticks_at = [&nticks_map](int apa, int face) {
+            auto a = nticks_map.find(apa);
+            if (a == nticks_map.end()) return 1;
+            auto f = a->second.find(face);
+            return f == a->second.end() ? 1 : f->second;
+        };
+        auto seed_plane = [&](const std::vector<DqdxRow>& rows,
+                              const Eigen::VectorXd& pred_data, int plane_idx) {
+            int idx = 0;
+            for (const auto& row : rows) {
+                const int ridx = idx++;
+                // The RAW prediction, before the charge>0 && flag!=0 gate that
+                // zeroes pred_charge -- see Parameters::proj_pad_wire.
+                if (pred_data(ridx) == 0) continue;
+                for (uint32_t ci = row.c0; ci < row.c1; ++ci) {
+                    const auto& c2d = coords[ci];
+                    pk.seed(c2d.apa, c2d.face, plane_idx, c2d.wire, c2d.time,
+                            nticks_at(c2d.apa, c2d.face));
+                }
+            }
+        };
+        seed_plane(plane_rows[0], pred_u, 0);
+        seed_plane(plane_rows[1], pred_v, 1);
+        seed_plane(plane_rows[2], pred_w, 2);
+    }
+
     auto process_plane = [&](const std::vector<DqdxRow>& rows,
                              const Eigen::VectorXd& pred_data,
                              int plane_idx,
                              double rel_uncer, double add_uncer) {
         int idx = 0;
         for (const auto& row : rows) {
+            const int ridx = idx++;   // doc 30 r3: hoisted so a skipped row still advances
             const auto& measurement = row.meas;
 
             double pred_charge = 0;
@@ -1390,7 +1526,28 @@ void TrackFitting::fill_fitted_charge_2d(const std::array<std::vector<DqdxRow>, 
                 double total_err = sqrt(pow(measurement.charge_err, 2)
                                       + pow(measurement.charge * rel_uncer, 2)
                                       + pow(add_uncer, 2));
-                pred_charge = pred_data(idx) * total_err;
+                pred_charge = pred_data(ridx) * total_err;
+            }
+
+            if (d30_census) {
+                const uint32_t n = row.c1 - row.c0;
+                d30_cells += n;
+                if (pred_charge != 0) d30_cells_pred += n;
+                if (pred_data(ridx) != 0) d30_cells_seed += n;
+                if (measurement.charge > 0 && measurement.flag != 0) d30_cells_live += n;
+            }
+
+            // doc 30 r3: with the filter ON, drop the whole row -- including its
+            // global_rb_map probe, 10.3 % of the job's flat profile -- when none
+            // of its cells survive the pad.  Counted before this point so the
+            // census denominator stays the full map.
+            if (pk.on) {
+                bool any = false;
+                for (uint32_t ci = row.c0; ci < row.c1 && !any; ++ci) {
+                    const auto& c2d = coords[ci];
+                    any = pk(c2d.apa, c2d.face, plane_idx, c2d.wire, c2d.time);
+                }
+                if (!any) continue;
             }
 
             std::set<Facade::Cluster*, PR::ClusterPtrCmp> clusters;
@@ -1402,14 +1559,10 @@ void TrackFitting::fill_fitted_charge_2d(const std::array<std::vector<DqdxRow>, 
                 }
             }
 
-            if (d30_census) {
-                const uint32_t n = row.c1 - row.c0;
-                d30_cells += n;
-                if (pred_charge != 0) d30_cells_pred += n;
-                if (measurement.charge > 0 && measurement.flag != 0) d30_cells_live += n;
-            }
             for (uint32_t ci = row.c0; ci < row.c1; ++ci) {
                 const auto& c2d = coords[ci];
+                if (!pk(c2d.apa, c2d.face, plane_idx, c2d.wire, c2d.time)) continue;
+                if (d30_census) ++d30_cells_kept;
                 APAFacePlane afp{c2d.apa, c2d.face, plane_idx};
                 WireTime wt{c2d.wire, c2d.time};
                 auto& entry = m_fitted_charge_2d[afp][wt];
@@ -1419,8 +1572,6 @@ void TrackFitting::fill_fitted_charge_2d(const std::array<std::vector<DqdxRow>, 
                 entry.flag = measurement.flag;
                 entry.clusters = clusters;
             }
-
-            idx++;
         }
     };
 
@@ -1430,11 +1581,15 @@ void TrackFitting::fill_fitted_charge_2d(const std::array<std::vector<DqdxRow>, 
 
     if (d30_census) {
         SPDLOG_LOGGER_DEBUG(s_log,
-            "d30_fill_census: cells={} live={} predicted={} pred_frac={:.4f} live_frac={:.4f} "
-            "stored_this_fit={}",
-            d30_cells, d30_cells_live, d30_cells_pred,
+            "d30_fill_census: cells={} live={} predicted={} seed={} kept={} "
+            "pred_frac={:.4f} live_frac={:.4f} seed_frac={:.4f} keep_frac={:.4f} "
+            "pad_w={} pad_slices={} stored_this_fit={}",
+            d30_cells, d30_cells_live, d30_cells_pred, d30_cells_seed, d30_cells_kept,
             d30_cells ? double(d30_cells_pred) / d30_cells : 0.0,
             d30_cells ? double(d30_cells_live) / d30_cells : 0.0,
+            d30_cells ? double(d30_cells_seed) / d30_cells : 0.0,
+            d30_cells ? double(d30_cells_kept) / d30_cells : 0.0,
+            pk.on ? pk.pad_w : -1, pk.on ? pk.pad_slices : -1,
             m_fitted_charge_2d.size());
     }
     record_cluster_fitted_charge_2d();

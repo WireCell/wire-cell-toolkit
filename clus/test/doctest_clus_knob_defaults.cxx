@@ -1590,6 +1590,25 @@ TEST_CASE("clus knob defaults: ctpc_aniso_metric is off")
     CHECK(grouping.ctpc_aniso_metric() == true);
 }
 
+TEST_CASE("clus knob defaults: TrackFitting proj_pad_wire is off")
+{
+    // doc 30 round 3: restricts the fitted 2-D charge DISPLAY product to the
+    // neighbourhood of the cells the fit predicts.  Default -1 = OFF = every
+    // cell stored = byte-identical legacy product.  The guarantee that no
+    // detector moves is that no *_track_fitting.json carries the key; the
+    // behaviour itself is pinned in doctest_doc30_proj_pad.cxx.
+    Clus::TrackFitting tf;
+    CHECK(tf.get_parameter("proj_pad_wire") == doctest::Approx(-1.0));
+    CHECK(tf.get_parameter("proj_pad_time") == doctest::Approx(0.0));
+    tf.set_parameter("proj_pad_wire", 3.0);
+    tf.set_parameter("proj_pad_time", 2.0);
+    CHECK(tf.get_parameter("proj_pad_wire") == doctest::Approx(3.0));
+    CHECK(tf.get_parameter("proj_pad_time") == doctest::Approx(2.0));
+    auto preset = Clus::TrackFittingPresets::create_with_current_values();
+    CHECK(preset.get_parameters().proj_pad_wire == doctest::Approx(-1.0));
+    CHECK(preset.get_parameters().proj_pad_time == doctest::Approx(0.0));
+}
+
 TEST_CASE("clus knob defaults: TrackFitting proj_skip_unmapped_face is off")
 {
     // doc pdvd/45 sec 13: the 2nd-pass projection loop dereferenced a missing

@@ -279,6 +279,47 @@ namespace WireCell::Clus {
             double lambda= 0.0005;
 
             double div_sigma = 0.6*units::cm;            
+
+            // doc 30 round 3 -- restrict the fitted 2-D charge DISPLAY product
+            // to the neighbourhood of the cells the fit actually predicts.
+            //
+            // fill_fitted_charge_2d() stores one FittedCharge2D per cell of the
+            // fit's whole charge map, whether or not the fit predicts anything
+            // there (pred_charge just stays 0).  Measured on PDHD 029107/18:
+            // ~362 k cells per call, 103 calls per event, 2.4 % of them carrying
+            // a prediction -- a 40x over-storage that is the largest single
+            // carrier of both the PR job's peak RSS and ~20 % of its CPU
+            // (doc 30 sec 12.1/12.4).
+            //
+            // C++ default -1 = OFF: every cell is stored, byte-identical to the
+            // pre-round-3 product.  When >= 0, a cell is stored only if it lies
+            // within proj_pad_wire wires AND proj_pad_time SLICES of a cell
+            // whose RAW prediction (R*pos_3D, i.e. BEFORE the
+            // charge > 0 && flag != 0 gate that zeroes pred_charge) is nonzero,
+            // in the same (apa, face, plane).  The raw prediction is the seed on
+            // purpose: a dead or below-threshold channel crossed by the track
+            // has pred_charge == 0 but a nonzero response column, and dropping
+            // those would punch holes in the display exactly where the fit is
+            // most interesting.  pad 0 = predicted cells only.
+            //
+            // The product this trims is DIAGNOSTIC ONLY -- PrDisplayDump.cxx's
+            // dump_proj comment states it, and the consumer census in doc 30
+            // sec 13.1 lists every reader: the five *MagnifyTrackingVisitor
+            // T_proj_data writers, PrDisplayDump::dump_proj (the calib JSON
+            // "proj" block) and TaggerCheckSTM's stm_fit hand-off.  No tagger
+            // verdict, Bee layer or pctree tensor reads it.  It is still a knob
+            // and still defaults OFF: turning it on changes T_proj_data and the
+            // calib "proj" block, which are gated products.
+            //
+            // TrackFitting.cxx is shared by SBND and uBooNE, so the guarantee
+            // that no detector's behaviour moves is "no *_track_fitting.json
+            // carries proj_pad_wire" -- as of this commit, none does.
+            double proj_pad_wire = -1;
+            // Time pad in SLICES (not ticks): converted per (apa, face) with
+            // Grouping::get_nticks_per_slice(), the same map PrDisplayDump and
+            // the Magnify writers use to turn a stored time back into a slice.
+            // Read only while proj_pad_wire >= 0.
+            double proj_pad_time = 0;
         };
  
         /**
