@@ -44,6 +44,12 @@ local wc = import 'wirecell.jsonnet';
 local g = import 'pgraph.jsonnet';
 local clus = import 'pgrapher/common/clus.jsonnet';
 local clus_mod = import 'pgrapher/experiment/pdhd/clus.jsonnet';
+// doc pdhd/09: the measured space-charge (curved) fiducial surface, used only when
+// the curved_fv knob below is on; the file is otherwise inert.
+local curved_fiducial = import 'pgrapher/experiment/pdhd/curved_fiducial.jsonnet';
+// doc pdhd/09: the exit-gap QUANTILE profiles (p80, p90) the curved_fv_profile knob
+// selects.  Generated, inert unless curved_fv is on and curved_fv_profile != 'flat'.
+local curved_fv_profiles = import 'pgrapher/experiment/pdhd/curved_fiducial_profiles.jsonnet';
 
 function(output_dir='', runNo=1, subRunNo=1, eventNo=1,
          time_offset=0 * wc.us,
@@ -221,13 +227,24 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1,
               // PDVD driver can carry the clustering FV's 15 cm space-charge inset
               // on this face too (doc pdvd/35).
               tgm_fv_zmin_margin=3,
-              // NOTE: PDVD's curved_fv / curved_fv_margin_y / curved_fv_margin_z /
-              // curved_fv_profile family (doc pdvd/41, doc pdvd/43) is DELIBERATELY
-              // ABSENT from this fork.  It installs a MEASURED space-charge
-              // fiducial surface mapped from 120 PDVD cosmic events; PDHD has no
-              // such measurement, and a flat box is the honest statement.  If a
-              // PDHD exit-gap map is ever made, port the four arguments and the
-              // curved_fv_cfg / mgn_* locals from protodunevd/pr.jsonnet verbatim.
+              // curved_fv (doc pdhd/09): install the MEASURED space-charge fiducial
+              // surface in place of the pdhd_pr_fv box for the taggers.  This is the
+              // port the pre-doc-09 note in this file asked for -- the four arguments
+              // and the curved_fv_cfg / mgn_* locals below are protodunevd/pr.jsonnet's
+              // verbatim.  UNLIKE PDVD, whose tagger box carried a flat 15 cm
+              // space-charge shell that the surface REPLACED (doc pdvd/35 -> 41), PDHD's
+              // box is the ACTIVE volume with no shell, so the surface only ADDS an inset
+              // near the cathode: expect TGM up, fully-contained down, not PDVD's -33 %.
+              // Default OFF => the compiled config is byte-identical to pre-doc-09.
+              curved_fv=false, curved_fv_margin_y=3, curved_fv_margin_z=3,
+              // curved_fv_profile (doc pdhd/09): which measured surface curved_fv
+              // installs -- 'p80' or 'p90', the exit-gap quantiles of
+              // curved_fiducial_profiles.jsonnet, or 'flat' for the file's own
+              // zero-inset defaults (the nominal walls).  PDHD deliberately has no
+              // 'd50' option: doc pdvd/41 sec 13.3 withdrew the charge-density median
+              // as a tagger boundary, so it was never measured here.  Ignored when
+              // curved_fv is off.
+              curved_fv_profile='flat',
               save_stm_fit=false, unmerge_bundle_mode='real',
               // doc pr/34 §10 particle-flow (Bee mc tree) port-fidelity knobs.
               // C++ defaults false; keys omitted when off => byte-identical
@@ -1249,8 +1266,16 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1,
         //       pdvd/41/43), which PDHD has not measured.
         // Margins enter through fv_tolerance below, whose defaults (2 / 2.5 / 3 cm)
         // equal dvm.overall's FV_*_margin values.
-        local pdhd_pr_fv_uses = [pdhd_pr_fv],
-        local pdhd_pr_fv = {
+        // doc pdhd/09: with curved_fv on, pdhd_pr_fv resolves to the composite of the
+        // two measured polygons instead of the box, and pdhd_pr_fv_uses carries its
+        // three component configs in place of the box.  Off, both are the verbatim
+        // pre-knob literals, so every consumer below is untouched.
+        local curved_fv_cfg = curved_fiducial(
+            name_prefix='pdhdcurved',
+            profile=(if curved_fv_profile == 'flat' then null else curved_fv_profiles[curved_fv_profile])),
+        local pdhd_pr_fv = if curved_fv then curved_fv_cfg.composite else pdhd_pr_fv_box,
+        local pdhd_pr_fv_uses = if curved_fv then curved_fv_cfg.configs else [pdhd_pr_fv_box],
+        local pdhd_pr_fv_box = {
             type: 'BoxFiducial',
             name: 'pdhd_pr_fv',
             data: {
@@ -1265,12 +1290,20 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1,
         // the DOWNSTREAM face; index 5 insets the upstream face.
         // tgm_fv_{x,y,zmax,zmin}_margin are the four knobs; their defaults are the
         // SBND production operating point (see the pr() arguments above).
-        local pdhd_pr_fv_margins = [-tgm_fv_x_margin * wc.cm, -tgm_fv_x_margin * wc.cm, -tgm_fv_y_margin * wc.cm, -tgm_fv_y_margin * wc.cm, -tgm_fv_zmax_margin * wc.cm, -tgm_fv_zmin_margin * wc.cm],
+        // doc pdhd/09: with curved_fv on the y/z entries become the cushion alone --
+        // the surface carries the space-charge allowance, the tolerance carries only
+        // the band.  Off, these three locals ARE tgm_fv_y/zmax/zmin_margin and the
+        // vector below is the verbatim pre-knob expression.  x is untouched: no
+        // drift-direction surface was measured.
+        local mgn_y = if curved_fv then curved_fv_margin_y else tgm_fv_y_margin,
+        local mgn_zmax = if curved_fv then curved_fv_margin_z else tgm_fv_zmax_margin,
+        local mgn_zmin = if curved_fv then curved_fv_margin_z else tgm_fv_zmin_margin,
+        local pdhd_pr_fv_margins = [-tgm_fv_x_margin * wc.cm, -tgm_fv_x_margin * wc.cm, -mgn_y * wc.cm, -mgn_y * wc.cm, -mgn_zmax * wc.cm, -mgn_zmin * wc.cm],
         // tgm_fv_zmax_margin_interior (cm; default 0 = OFF, key omitted =>
         // byte-identical): when > 0, check_tgm's CASE-A interior-support tests use
         // THIS downstream-z inset instead of tgm_fv_zmax_margin, i.e. the doc-32
         // widening becomes endpoint-only.
-        local pdhd_pr_fv_margins_interior = [-tgm_fv_x_margin * wc.cm, -tgm_fv_x_margin * wc.cm, -tgm_fv_y_margin * wc.cm, -tgm_fv_y_margin * wc.cm, -tgm_fv_zmax_margin_interior * wc.cm, -tgm_fv_zmin_margin * wc.cm],
+        local pdhd_pr_fv_margins_interior = [-tgm_fv_x_margin * wc.cm, -tgm_fv_x_margin * wc.cm, -mgn_y * wc.cm, -mgn_y * wc.cm, -tgm_fv_zmax_margin_interior * wc.cm, -mgn_zmin * wc.cm],
         // Retiler for the steiner stage: same 'stepped' samplers that built the 3d
         // PC (PointTreeBuilding), one per (anode, face) -- 4 PDHD anodes x 2 faces
         // = 8 samplers.  Only one face per anode images (even idents face 0, odd
