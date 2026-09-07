@@ -52,7 +52,7 @@
 //   Consequence, measured (doc pdhd/09 sec 9.5, doc pdvd/43 sec 6.2, compared in doc
 // pdvd/49 sec 5): PDHD's p90 surface sits INSIDE the shell it replaced over ~76 % of the
 // drift, PDVD's over only ~25 % (y) / 44 % (z).  So the same knob moves the TOTAL TGM
-// count in opposite directions -- PDHD 1478 -> 1664 (+12.6 %), PDVD 2148 -> 2095 (-2.5 %)
+// count in opposite directions -- PDHD 1561 -> 1755 (+12.4 %), PDVD 2148 -> 2095 (-2.5 %)
 // -- while LONG-TRACK (> 2 m) TGM rises on BOTH, 430 -> 464 and 754 -> 769.  The opposite
 // total signs are a short-cluster effect (TaggerCheckTGM.cxx:1066), not a disagreement
 // about the boundary.  NB the often-quoted PDVD "-33 %" is the WITHDRAWN d50 arm
