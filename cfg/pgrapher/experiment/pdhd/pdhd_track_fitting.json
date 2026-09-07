@@ -49,5 +49,8 @@
     "overlap_th": 0.5,
     "dx_norm_length": 6.0,
     "lambda": 0.0005,
+    "_comment_proj_pad": "doc 30 round 3, owner flip 2026-09-07. Restricts the fitted 2-D charge DISPLAY product to cells within 3 wires and 3 time SLICES of a cell the fit actually predicts (the seed is the raw R*pos_3D prediction, not pred_charge, so a dead channel crossed by the track is not dropped). C++ default -1 = OFF; this key is what turns it on, and it is present in pdhd_track_fitting.json and pdvd_track_fitting.json ONLY -- sbnd_track_fitting.json and the uBooNE presets are untouched and unaffected, and TrackFitting.cxx is shared, so the absent key is what keeps them still. WHAT IT CHANGES: T_proj_data and the calib dump's proj block, i.e. the 2-D scan display, and nothing else. Gated per tree on 13 events (PDHD -stm busy 6, PDVD -nu busy 7): T_rec_charge, T_stm_pass, T_stm_eval, T_stm_michel, T_stm_michel_pts, mabc-pr.zip and the non-proj calib dump are all IDENTICAL. Every reader of the trimmed map is a dump writer -- PrDisplayDump.cxx:1173 states the blast radius is diagnostic-only, no tagger verdict, Bee layer or pctree tensor depends on it. WHY 3: measured, the pad is nearly free -- keep goes 2.42 % at pad 0 to 2.90 % at pad 5, so a generous context band costs 0.5 points. EFFECT: PDHD busy 6 329.4 -> 234.6 core-s (-28.8 %) and worst-event peak RSS 5.00 -> 2.19 GB (-56 %); PDVD busy 7 -10.1 % core-s, -16.2 % peak. Read at RUNTIME by TaggerCheckSTM, CheckSTM_Michel and TaggerCheckNeutrino (3 components per detector) -- doc 30 sec 13.",
+    "proj_pad_wire": 3,
+    "proj_pad_time": 3,
     "div_sigma": 6.0
 }
