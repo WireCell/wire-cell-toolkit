@@ -30,6 +30,21 @@
          both holes: a lone component is now examined (a), and a fabricated
          column attached to a real track no longer inherits its verdict (b).
          max_run <= 0 disables step 3.
+      4. run merge (doc pdhd/08).  Step 3 judges each run separately, so one
+         fabricated column broken into several runs -- by a supported blob in
+         the middle, or by a small gap in the retiled blobs -- survives as
+         pieces each shorter than max_run.  Measured on PDHD 029107/991: the
+         owner's cluster 42 is one 127.9 cm drift column cut into runs of
+         100.8, 18.5, 3.2 and 0.0 cm by gaps of 2.2, 2.2 and 1.2 cm; only the
+         first exceeds 20 cm, so only the first dies.  With run_merge > 0 the
+         runs of ONE component whose bounding boxes lie within run_merge of
+         each other are transitively merged first, and max_run is applied to
+         the merged group's union box.  No second threshold on the span: the
+         merge makes the EXISTING bound see the whole ghost.  Merging is
+         confined to a component because 84-95 % of adjacent run pairs on PDHD
+         are intra-component (doc pdhd/08 sec 3), and crossing a component
+         boundary would join objects the blob graph says are separate.
+         run_merge <= 0 disables step 4 and step 3 is textually as before.
     `legacy_component_vote` is the historical filter as a pure function; the
     unit test asserts analyze(...).removed_by_vote equals it.
  */
@@ -51,6 +66,8 @@ namespace WireCell::Clus::BadBlobRuns {
         double span{0};              // bbox diagonal of the blob centers
         Point center{0, 0, 0};       // bbox center
         int nslices{0};              // distinct slice keys among the blobs
+        Point lo{0, 0, 0};           // bbox of the blob centers, doc pdhd/08
+        Point hi{0, 0, 0};
     };
 
     struct Result {
@@ -59,7 +76,11 @@ namespace WireCell::Clus::BadBlobRuns {
         std::vector<bool> good_component;     // per component id
         std::vector<Run> runs;                // every unsupported run in a good component, longest first
         std::vector<int> removed_by_vote;     // indices, ascending
-        std::vector<int> removed_by_run;      // indices, ascending
+        std::vector<int> removed_by_run;      // indices, ascending -- THE authoritative
+                                              // run-bound removal, merged or not
+        std::vector<int> removed_by_merge;    // doc pdhd/08, census only: the subset of
+                                              // removed_by_run whose OWN run was within
+                                              // max_run, i.e. what the merge added
     };
 
     // Union-find labels, 0..ncomp-1, in order of first appearance by index.
@@ -104,10 +125,21 @@ namespace WireCell::Clus::BadBlobRuns {
         return out;
     }
 
+    /// True when two center-boxes come within `d` on every axis.
+    inline bool boxes_within(const Point& alo, const Point& ahi,
+                             const Point& blo, const Point& bhi, double d)
+    {
+        return (alo.x() - d <= bhi.x() && blo.x() - d <= ahi.x() &&
+                alo.y() - d <= bhi.y() && blo.y() - d <= ahi.y() &&
+                alo.z() - d <= bhi.z() && blo.z() - d <= ahi.z());
+    }
+
     /// The round-3 filter.  `slice` may be empty (nslices then reports 0).
+    /// `run_merge` > 0 enables step 4 (doc pdhd/08).
     inline Result analyze(int n, const std::vector<std::pair<int, int>>& edges,
                           const std::vector<bool>& supported, const std::vector<Point>& centers,
-                          double max_run, const std::vector<int>& slice = {})
+                          double max_run, const std::vector<int>& slice = {},
+                          double run_merge = 0.0)
     {
         Result r;
         r.ncomp = label_components(n, edges, r.component);
@@ -146,17 +178,63 @@ namespace WireCell::Clus::BadBlobRuns {
             }
             run.span = (hi - lo).magnitude();
             run.center = (hi + lo) * 0.5;
+            run.lo = lo;
+            run.hi = hi;
             std::sort(sl.begin(), sl.end());
             run.nslices = int(std::unique(sl.begin(), sl.end()) - sl.begin());
             r.runs.push_back(std::move(run));
         }
         std::stable_sort(r.runs.begin(), r.runs.end(),
                          [](const Run& a, const Run& b) { return a.span > b.span; });
-        if (max_run > 0) {
+        if (max_run > 0 && run_merge <= 0) {
             for (const auto& run : r.runs)
                 if (run.span > max_run)
                     r.removed_by_run.insert(r.removed_by_run.end(), run.blobs.begin(), run.blobs.end());
             std::sort(r.removed_by_run.begin(), r.removed_by_run.end());
+        }
+        else if (max_run > 0) {
+            // doc pdhd/08 step 4.  Transitively merge same-component runs whose
+            // center-boxes lie within run_merge, then apply the SAME max_run to
+            // the merged group's union box.  A run that already exceeds max_run
+            // is its own group and still dies, so this path subsumes the one
+            // above.
+            const int nr = int(r.runs.size());
+            std::vector<std::pair<int, int>> redges;
+            for (int i = 0; i < nr; ++i) {
+                for (int j = i + 1; j < nr; ++j) {
+                    if (r.runs[i].component != r.runs[j].component) continue;
+                    if (boxes_within(r.runs[i].lo, r.runs[i].hi,
+                                     r.runs[j].lo, r.runs[j].hi, run_merge))
+                        redges.emplace_back(i, j);
+                }
+            }
+            std::vector<int> rcomp;
+            const int ng = label_components(nr, redges, rcomp);
+            std::vector<Point> glo(ng), ghi(ng);
+            std::vector<char> seen(ng, 0);
+            for (int i = 0; i < nr; ++i) {
+                const int g = rcomp[i];
+                if (!seen[g]) { glo[g] = r.runs[i].lo; ghi[g] = r.runs[i].hi; seen[g] = 1; }
+                else {
+                    glo[g] = Point(std::min(glo[g].x(), r.runs[i].lo.x()),
+                                   std::min(glo[g].y(), r.runs[i].lo.y()),
+                                   std::min(glo[g].z(), r.runs[i].lo.z()));
+                    ghi[g] = Point(std::max(ghi[g].x(), r.runs[i].hi.x()),
+                                   std::max(ghi[g].y(), r.runs[i].hi.y()),
+                                   std::max(ghi[g].z(), r.runs[i].hi.z()));
+                }
+            }
+            for (int i = 0; i < nr; ++i) {
+                const int g = rcomp[i];
+                if ((ghi[g] - glo[g]).magnitude() <= max_run) continue;
+                const auto& run = r.runs[i];
+                r.removed_by_run.insert(r.removed_by_run.end(), run.blobs.begin(), run.blobs.end());
+                if (run.span <= max_run)   // census: what the merge added
+                    r.removed_by_merge.insert(r.removed_by_merge.end(),
+                                              run.blobs.begin(), run.blobs.end());
+            }
+            std::sort(r.removed_by_run.begin(), r.removed_by_run.end());
+            std::sort(r.removed_by_merge.begin(), r.removed_by_merge.end());
         }
         return r;
     }

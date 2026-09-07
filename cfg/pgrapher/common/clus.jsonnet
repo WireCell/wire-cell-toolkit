@@ -1458,7 +1458,12 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
                           // knobs.  C++ defaults 0 / false = the historical filter;
                           // keys omitted when unset => byte-identical config.
                           bad_blob_max_run=null,
-                          bad_blob_report=false) :: {
+                          bad_blob_report=false,
+                          // doc pdhd/08: the retiler's fabrication knobs.
+                          // C++ defaults 0 / 0 = uncapped bridge / no run merge;
+                          // keys omitted when null => byte-identical config.
+                          hack_max_bridge=null,
+                          bad_blob_run_merge=null) :: {
             local sampler_objs = [s.sobj for s in samplers],
             local sampler_cfgs = [{name:wc.tn(s.sobj), apa:s.apa, face:s.face} for s in samplers],
             type: "ImproveCluster_2",
@@ -1471,6 +1476,8 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
                 [if terminal_charge_threshold != null then 'terminal_charge_threshold']: terminal_charge_threshold,
                 [if bad_blob_max_run != null then 'bad_blob_max_run']: bad_blob_max_run,
                 [if bad_blob_report then 'bad_blob_report']: true,
+                [if hack_max_bridge != null then 'hack_max_bridge']: hack_max_bridge,
+                [if bad_blob_run_merge != null then 'bad_blob_run_merge']: bad_blob_run_merge,
             } + dv_cfg + pcts_cfg,
             uses: [detector_volumes, pc_transforms]+anodes+sampler_objs,
         },

@@ -117,6 +117,19 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
               // retile_bad_blob_report (C++ default false) is a log-only census.
               retile_bad_blob_max_run=null,
               retile_bad_blob_report=false,
+              // doc pdhd/08 (counterpart of pdhd/pr.jsonnet).  retile_hack_max_bridge
+              // (cm; C++ default 0 = uncapped, the prototype
+              // ImprovePR3DCluster.cxx:973-990) stops hack_activity_improved
+              // inventing a path tube across a gap longer than this.  The PDHD
+              // census measured 0.3-0.7 % of bridges (those over 20 cm) creating
+              // 49-62 % of every cell the retiler invents, and 0.88 of what a
+              // >60 cm bridge paints is a cell that did not exist before, while
+              // cells already flagged dead are 0.3-0.8 % of what any bridge
+              // touches -- so these long bridges are fabricating, not crossing
+              // dead regions.  The PDVD census (doc pdhd/08 sec 7) found the same
+              // shape: 0.13-0.23 % of bridges over 20 cm make 55-66 % of the new
+              // cells.  null => key omitted => byte-identical config.
+              retile_hack_max_bridge=null,
               // save_in_scope (doc 87): add the per-cluster T_cluster tree to
               // tracking-pr.root -- the in-scope set (switch_scope's scope_filter,
               // the SAME predicate the Bee clustering layer is gated on) plus the
@@ -1310,7 +1323,8 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
             wrapped_channel_activity=retile_wrapped_channel_activity,
             terminal_charge_threshold=retile_steiner_terminal_charge,
             bad_blob_max_run=if retile_bad_blob_max_run == null then null else retile_bad_blob_max_run * wc.cm,
-            bad_blob_report=retile_bad_blob_report),
+            bad_blob_report=retile_bad_blob_report,
+            hack_max_bridge=if retile_hack_max_bridge == null then null else retile_hack_max_bridge * wc.cm),
         // Visitors available to the PR pipeline, by name.  switch_scope re-applies
         // the per-cluster T0 correction on the loaded tree (the corrected scope is
         // runtime state and does not persist through the tarball); it recomputes

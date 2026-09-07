@@ -204,14 +204,23 @@ namespace WireCell::Clus {
             get_activity_improved(*orig_cluster, map_slices_measures, apa, face);
             SPDLOG_LOGGER_TRACE(log, "timing: get_activity_improved (apa={},face={}) took {} ms", apa, face, MS(Clock::now()-t0).count());
 
+            // doc pdhd/08 stage 1.  One cell-provenance set shared by the two
+            // calls below: they paint into the SAME map_slices_measures, so
+            // without this the temp pass reports a bridge retracing the orig
+            // pass's ghost as "nothing new" and the ghost reads as harmless.
+            // Allocated only when the census is on (it can hold millions of
+            // cells); nullptr in production.
+            bridge_cells_t bridge_cells;
+            bridge_cells_t* bcp = m_bad_blob_report ? &bridge_cells : nullptr;
+
             // hack activity according to original cluster
             t0 = Clock::now();
-            hack_activity_improved(*orig_cluster, map_slices_measures, orig_path_point_indices, apa, face); // may need more args
+            hack_activity_improved(*orig_cluster, map_slices_measures, orig_path_point_indices, apa, face, "orig", bcp); // may need more args
             SPDLOG_LOGGER_TRACE(log, "timing: hack_activity(orig) (apa={},face={}) took {} ms", apa, face, MS(Clock::now()-t0).count());
 
             // hack activities according to the new cluster
             t0 = Clock::now();
-            hack_activity_improved(temp_cluster, map_slices_measures, temp_path_point_indices, apa, face); // may need more args
+            hack_activity_improved(temp_cluster, map_slices_measures, temp_path_point_indices, apa, face, "temp", bcp); // may need more args
             SPDLOG_LOGGER_TRACE(log, "timing: hack_activity(temp) (apa={},face={}) took {} ms", apa, face, MS(Clock::now()-t0).count());
 
             // Step 3.

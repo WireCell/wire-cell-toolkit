@@ -35,6 +35,10 @@ namespace WireCell::Clus {
         // that never mentions the keys runs bit-for-bit as before.
         m_bad_blob_max_run = get(cfg, "bad_blob_max_run", m_bad_blob_max_run);
         m_bad_blob_report = get(cfg, "bad_blob_report", m_bad_blob_report);
+        // doc pdhd/08.  Both default 0 = OFF; a config that never mentions the
+        // keys runs bit-for-bit as before.
+        m_hack_max_bridge = get(cfg, "hack_max_bridge", m_hack_max_bridge);
+        m_bad_blob_run_merge = get(cfg, "bad_blob_run_merge", m_bad_blob_run_merge);
     }
 
     Configuration ImproveCluster_1::default_configuration() const
@@ -42,6 +46,8 @@ namespace WireCell::Clus {
         Configuration cfg = RetileCluster::default_configuration();
         cfg["bad_blob_max_run"] = m_bad_blob_max_run;
         cfg["bad_blob_report"] = m_bad_blob_report;
+        cfg["hack_max_bridge"] = m_hack_max_bridge;
+        cfg["bad_blob_run_merge"] = m_bad_blob_run_merge;
         return cfg;
     }
 
@@ -451,10 +457,21 @@ void ImproveCluster_1::get_activity_improved(const Cluster& cluster, std::map<st
 
 
 // Step 2. Modify activity to suit.
-void ImproveCluster_1::hack_activity_improved(const Cluster& cluster, std::map<std::pair<int, int>, std::vector<WRG::measure_t> >& map_slices_measures, const std::vector<size_t>& path_wcps, int apa, int face) const
+void ImproveCluster_1::hack_activity_improved(const Cluster& cluster, std::map<std::pair<int, int>, std::vector<WRG::measure_t> >& map_slices_measures, const std::vector<size_t>& path_wcps, int apa, int face, const char* which, bridge_cells_t* bridge_cells) const
 {
 
     const double low_dis_limit = 0.3 * units::cm;
+
+    // doc pdhd/08 stage 1.  Report-only bridge accounting.  A "bridge" is one
+    // gap between consecutive path points that this function fills with
+    // int(dis/0.3)+1 invented points (prototype ImprovePR3DCluster.cxx:973-990,
+    // uncapped there and here).  bridge_of[i] is the bridge that invented path
+    // point i, -1 for a real one.
+    const bool rep = m_bad_blob_report;
+    std::vector<int> bridge_of;
+    std::vector<double> bridge_gap;
+    std::vector<int> bridge_ncount;
+    long n_capped = 0;
     // Get path points
     // auto path_wcps = cluster.get_path_wcps();
     std::vector<std::pair<geo_point_t, WirePlaneId>> path_pts;
@@ -466,18 +483,38 @@ void ImproveCluster_1::hack_activity_improved(const Cluster& cluster, std::map<s
         // std::cerr << "retile: path:" << wcp << " p:" << p << " wpid:" << wpid_p << "\n";
         if (path_pts.empty()) {
             path_pts.push_back(std::make_pair(p, wpid_p));
+            if (rep) bridge_of.push_back(-1);
         } else {
             double dis = (p - path_pts.back().first).magnitude();
             if (dis < low_dis_limit) {
                 path_pts.push_back(std::make_pair(p, wpid_p));
+                if (rep) bridge_of.push_back(-1);
+            } else if (m_hack_max_bridge > 0 && dis > m_hack_max_bridge) {
+                // doc pdhd/08.  Refuse to invent a bridge longer than the cap.
+                // The prototype (ImprovePR3DCluster.cxx:973-990) has no cap and
+                // neither does the knob-off path.  The real endpoint is kept, so
+                // the path is not shortened -- only its invented interior is
+                // dropped.  Note this is NOT a subset of the uncapped path: the
+                // kept point carries wpid_p rather than the interpolated
+                // get_wireplaneid, and path_pts is shorter, which shifts the
+                // i+-1 coverage test below.
+                path_pts.push_back(std::make_pair(p, wpid_p));
+                if (rep) { bridge_of.push_back(-1); ++n_capped; }
             } else {
                 int ncount = int(dis/low_dis_limit) + 1;
                 auto p2 = path_pts.back().first;
                 auto wpid2 = path_pts.back().second;
+                int bid = -1;
+                if (rep) {
+                    bid = int(bridge_gap.size());
+                    bridge_gap.push_back(dis);
+                    bridge_ncount.push_back(ncount);
+                }
                 for (int i=0; i < ncount; i++) {
                     Point p1 = p2 + (p - p2) * (i+1)/ncount;
                     auto wpid_p1 = get_wireplaneid(p1, wpid_p, wpid2, m_dv);
                     path_pts.push_back(std::make_pair(p1, wpid_p1));
+                    if (rep) bridge_of.push_back(bid);
                 }
             }
         }
@@ -542,9 +579,16 @@ void ImproveCluster_1::hack_activity_improved(const Cluster& cluster, std::map<s
         // std::cout << wire_hits[0] << " " << wire_hits[1] << " " << wire_hits[2] << " " << path_pts_flag[i] << std::endl;    
     }
 
+    // doc pdhd/08 stage 1: per-bridge cell accounting.
+    const size_t nbridge = bridge_gap.size();
+    std::vector<long> b_new(nbridge, 0), b_sreal(nbridge, 0), b_sdead(nbridge, 0), b_sprior(nbridge, 0);
+    long n_onface = 0;
+
     // Add missing activity based on path points
     for (size_t i = 0; i < path_pts.size(); i++) {
         if (path_pts[i].second.apa() != apa || path_pts[i].second.face() != face) continue;
+        const int bid = rep ? bridge_of[i] : -1;
+        if (rep) ++n_onface;
 
         // Skip if point is well-covered by existing activity
         if (i == 0) {
@@ -588,8 +632,26 @@ void ImproveCluster_1::hack_activity_improved(const Cluster& cluster, std::map<s
                     if (wire < wire_limits[plane].first || wire > wire_limits[plane].second ||
                          pow(dw,2) + pow(dt,2)>3*3) 
                         continue;
-                    if (measures.at(wire) > 0.0) continue; // Already has activity
+                    if (measures.at(wire) > 0.0) {
+                        // doc pdhd/08 stage 1: classify the skip.  A cell already
+                        // painted BY A BRIDGE is the same fabrication counted twice
+                        // (the second hack_activity_improved call retraces the
+                        // first's ghost); a dead sentinel (:441) or real charge
+                        // means the bridge was riding on activity that already
+                        // existed, i.e. it was harmless here.
+                        if (rep && bid >= 0) {
+                            if (bridge_cells && bridge_cells->count(std::make_tuple(time_slice, int(plane), wire)))
+                                ++b_sprior[bid];
+                            else if (measures.at(wire) == 1.0e-3) ++b_sdead[bid];
+                            else ++b_sreal[bid];
+                        }
+                        continue; // Already has activity
+                    }
                     measures.at(wire) = 1.0e-3;  // Set activity
+                    if (rep) {
+                        if (bid >= 0) ++b_new[bid];
+                        if (bridge_cells) bridge_cells->insert(std::make_tuple(time_slice, int(plane), wire));
+                    }
                 }
             }
 
@@ -620,7 +682,40 @@ void ImproveCluster_1::hack_activity_improved(const Cluster& cluster, std::map<s
             ++it;
         }
     }
-   
+
+    // doc pdhd/08 stage 1.  One report line per call.  new_cells is what this
+    // call's bridges actually invented; skip_prior is what an earlier bridge had
+    // already invented at the same cell (the same ghost, painted twice);
+    // skip_dead / skip_real are cells the bridge found already covered by an
+    // admitted dead channel or by charge, where the bridge did nothing.
+    // new_frac = (new + sprior) / (all cells the segment touched) is the number
+    // that says whether a LENGTH cap on the gap is the right knob.
+    if (rep) {
+        long tot_new = 0, tot_sreal = 0, tot_sdead = 0, tot_sprior = 0;
+        for (size_t b = 0; b < nbridge; ++b) {
+            tot_new += b_new[b]; tot_sreal += b_sreal[b];
+            tot_sdead += b_sdead[b]; tot_sprior += b_sprior[b];
+        }
+        std::vector<size_t> order(nbridge);
+        for (size_t b = 0; b < nbridge; ++b) order[b] = b;
+        std::stable_sort(order.begin(), order.end(),
+                         [&](size_t a, size_t b) { return bridge_gap[a] > bridge_gap[b]; });
+        std::string line = fmt::format(
+            "BRIDGE cid={} ident={} apa={} face={} which={} npath={} npath_face={} nbridge={} capped={} new_cells={} skip_real={} skip_dead={} skip_prior={}",
+            cluster.get_cluster_id(), cluster.ident(), apa, face, which,
+            path_pts.size(), n_onface, nbridge, n_capped, tot_new, tot_sreal, tot_sdead, tot_sprior);
+        int shown = 0;
+        for (size_t b : order) {
+            if (shown >= 12) break;
+            const long touched = b_new[b] + b_sreal[b] + b_sdead[b] + b_sprior[b];
+            line += fmt::format(" | seg {}: gap_cm={:.2f} ncount={} new={} sprior={} sreal={} sdead={} new_frac={:.3f}",
+                                shown, bridge_gap[b] / units::cm, bridge_ncount[b],
+                                b_new[b], b_sprior[b], b_sreal[b], b_sdead[b],
+                                touched > 0 ? double(b_new[b] + b_sprior[b]) / double(touched) : 0.0);
+            ++shown;
+        }
+        SPDLOG_LOGGER_DEBUG(log, "{}", line);
+    }
 
 }
 
@@ -876,7 +971,8 @@ ImproveCluster_1::remove_bad_blobs_runs(const Cluster& cluster,
     std::sort(edges_all.begin(), edges_all.end());
 
     const auto legacy_rm = BadBlobRuns::legacy_component_vote(N, edges_legacy, supported);
-    const auto res = BadBlobRuns::analyze(N, edges_all, supported, centers, m_bad_blob_max_run, slice);
+    const auto res = BadBlobRuns::analyze(N, edges_all, supported, centers, m_bad_blob_max_run, slice,
+                                          m_bad_blob_run_merge);
 
     if (m_bad_blob_report) {
         // cid = the Bee / calib-dump cluster id (get_cluster_id), the key the
@@ -888,10 +984,11 @@ ImproveCluster_1::remove_bad_blobs_runs(const Cluster& cluster,
         std::vector<int> comp_legacy;
         const int ncomp_legacy = BadBlobRuns::label_components(N, edges_legacy, comp_legacy);
         std::string line = fmt::format(
-            "BADBLOB cid={} ident={} apa={} face={} nnew={} norig={} ncomp={} ncomp_ss={} nsup={} legacy_rm={} run_rm={} nruns={} maxrun_cm={:.1f}",
+            "BADBLOB cid={} ident={} apa={} face={} nnew={} norig={} ncomp={} ncomp_ss={} nsup={} legacy_rm={} run_rm={} nruns={} maxrun_cm={:.1f} merge_rm={}",
             cluster.get_cluster_id(), cluster.ident(), apa, face, N, norig,
             ncomp_legacy, res.ncomp, nsup, legacy_rm.size(), res.removed_by_run.size(),
-            res.runs.size(), res.runs.empty() ? 0.0 : res.runs.front().span / units::cm);
+            res.runs.size(), res.runs.empty() ? 0.0 : res.runs.front().span / units::cm,
+            res.removed_by_merge.size());
         int shown = 0;
         for (const auto& run : res.runs) {
             if (shown >= 12) break;
@@ -903,14 +1000,39 @@ ImproveCluster_1::remove_bad_blobs_runs(const Cluster& cluster,
                 lo = Point(std::min(lo.x(), c.x()), std::min(lo.y(), c.y()), std::min(lo.z(), c.z()));
                 hi = Point(std::max(hi.x(), c.x()), std::max(hi.y(), c.y()), std::max(hi.z(), c.z()));
             }
-            line += fmt::format(" | run {}: nb={} nslices={} span_cm={:.1f} craw=({:.1f},{:.1f},{:.1f}) bb=({:.1f},{:.1f},{:.1f},{:.1f},{:.1f},{:.1f})",
+            // comp= appended (not inserted) so the doc pdhd/07 parser's RE_RUN
+            // still matches this line unchanged.
+            line += fmt::format(" | run {}: nb={} nslices={} span_cm={:.1f} craw=({:.1f},{:.1f},{:.1f}) bb=({:.1f},{:.1f},{:.1f},{:.1f},{:.1f},{:.1f}) comp={}",
                                 shown, run.blobs.size(), run.nslices, run.span / units::cm,
                                 run.center.x() / units::cm, run.center.y() / units::cm, run.center.z() / units::cm,
                                 lo.x() / units::cm, hi.x() / units::cm, lo.y() / units::cm, hi.y() / units::cm,
-                                lo.z() / units::cm, hi.z() / units::cm);
+                                lo.z() / units::cm, hi.z() / units::cm, run.component);
             ++shown;
         }
         SPDLOG_LOGGER_DEBUG(log, "{}", line);
+
+        // doc pdhd/08 stage 1: the SAME runs again, one machine line each and
+        // UNTRUNCATED, carrying the component id.  The human line above stops at
+        // 12 entries / 3 cm, which is why doc 07 could not tell whether a
+        // fabrication broken into several runs was broken WITHIN one component
+        // (so a per-component bound would rejoin it) or ACROSS components (so it
+        // would not).  Run::component is already computed (BadBlobRuns.h:50).
+        for (size_t k = 0; k < res.runs.size(); ++k) {
+            const auto& run = res.runs[k];
+            if (run.blobs.empty()) continue;
+            Point lo = centers[run.blobs.front()], hi = lo;
+            for (int i : run.blobs) {
+                const auto& c = centers[i];
+                lo = Point(std::min(lo.x(), c.x()), std::min(lo.y(), c.y()), std::min(lo.z(), c.z()));
+                hi = Point(std::max(hi.x(), c.x()), std::max(hi.y(), c.y()), std::max(hi.z(), c.z()));
+            }
+            SPDLOG_LOGGER_DEBUG(log,
+                "BADBLOBRUN cid={} ident={} apa={} face={} k={} comp={} nb={} nslices={} span_cm={:.2f} bb=({:.2f},{:.2f},{:.2f},{:.2f},{:.2f},{:.2f})",
+                cluster.get_cluster_id(), cluster.ident(), apa, face, k, run.component,
+                run.blobs.size(), run.nslices, run.span / units::cm,
+                lo.x() / units::cm, hi.x() / units::cm, lo.y() / units::cm, hi.y() / units::cm,
+                lo.z() / units::cm, hi.z() / units::cm);
+        }
         // Per-blob detail at TRACE (PDVD_LOG_LEVEL=trace): the offline census
         // labels every Steiner point by the retiled blob it came from.
         // run = index into the longest-first run list, -1 = supported or voted out.

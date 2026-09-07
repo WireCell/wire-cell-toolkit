@@ -137,3 +137,80 @@ TEST_CASE("bad blob runs: runs are reported longest first")
     CHECK(r.runs[1].span == doctest::Approx(2 * units::cm));
     CHECK(r.runs[0].center.z() == doctest::Approx(15 * units::cm));
 }
+
+// ---------------------------------------------------------------------------
+// doc pdhd/08 -- step 4, the same-component run merge.
+// ---------------------------------------------------------------------------
+
+TEST_CASE("bad blob runs: run_merge=0 is textually the pre-doc-08 result")
+{
+    Chain c(41);
+    for (int i = 5; i <= 35; ++i) c.supported[i] = false;
+    auto a = analyze(c.n, c.edges, c.supported, c.centers, 20 * units::cm, c.slice);
+    auto b = analyze(c.n, c.edges, c.supported, c.centers, 20 * units::cm, c.slice, 0.0);
+    CHECK(a.removed_by_run == b.removed_by_run);
+    CHECK(a.removed_by_vote == b.removed_by_vote);
+    CHECK(a.runs.size() == b.runs.size());
+    CHECK(b.removed_by_merge.empty());   // nothing to credit when the merge is off
+}
+
+TEST_CASE("bad blob runs: a fragmented ghost dies only once the runs are merged")
+{
+    // The doc pdhd/07 cluster 42 shape, in miniature: one 26 cm column along z
+    // broken into three unsupported runs of 12, 6 and 4 cm by two supported
+    // blobs.  Every piece is under a 20 cm bound; the whole column is not.
+    Chain c(27);                                  // 0..26 cm, all supported
+    for (int i = 0; i <= 12; ++i) c.supported[i] = false;   // run A, span 12
+    c.supported[0] = true;                                 // anchor the component
+    for (int i = 15; i <= 21; ++i) c.supported[i] = false;  // run B, span 6
+    for (int i = 23; i <= 26; ++i) c.supported[i] = false;  // run C, span 3
+
+    auto off = analyze(c.n, c.edges, c.supported, c.centers, 20 * units::cm, c.slice);
+    REQUIRE(off.runs.size() == 3);
+    CHECK(off.removed_by_run.empty());            // no single run exceeds 20 cm
+    CHECK(off.removed_by_merge.empty());
+
+    // The gaps between the runs are 2 cm (13,14 supported) and 1 cm (22).
+    auto d1 = analyze(c.n, c.edges, c.supported, c.centers, 20 * units::cm, c.slice, 1 * units::cm);
+    CHECK(d1.removed_by_run.empty());             // 1 cm does not bridge the 2 cm gap
+
+    auto d3 = analyze(c.n, c.edges, c.supported, c.centers, 20 * units::cm, c.slice, 3 * units::cm);
+    // A--B--C chain transitively; union span 26 - 1 = 25 cm > 20.
+    CHECK(d3.removed_by_run.size() == 12 + 7 + 4);
+    CHECK(d3.removed_by_merge.size() == d3.removed_by_run.size());  // no run died on its own
+    CHECK(d3.removed_by_run.front() == 1);
+    CHECK(d3.removed_by_run.back() == 26);
+    CHECK(std::is_sorted(d3.removed_by_run.begin(), d3.removed_by_run.end()));
+}
+
+TEST_CASE("bad blob runs: the merge never crosses a component boundary")
+{
+    // Two disjoint components whose unsupported runs are spatially adjacent.
+    // A component-independent merge would join them; this one must not.
+    const int n = 12;
+    std::vector<Point> centers;
+    std::vector<bool> sup(n, false);
+    std::vector<int> slice(n);
+    for (int i = 0; i < n; ++i) { centers.emplace_back(0, 0, i * units::cm); slice[i] = i; }
+    std::vector<std::pair<int, int>> edges;
+    for (int i = 1; i < 6; ++i) edges.emplace_back(i - 1, i);      // comp 0: 0..5
+    for (int i = 7; i < n; ++i) edges.emplace_back(i - 1, i);      // comp 1: 6..11
+    sup[0] = true; sup[6] = true;                                  // both survive the vote
+
+    auto r = analyze(n, edges, sup, centers, 8 * units::cm, slice, 3 * units::cm);
+    CHECK(r.ncomp == 2);
+    REQUIRE(r.runs.size() == 2);
+    // Each run spans 4 cm (1..5 and 7..11); merged they would span 10 cm > 8.
+    CHECK(r.runs[0].span == doctest::Approx(4 * units::cm));
+    CHECK(r.removed_by_run.empty());
+    CHECK(r.removed_by_merge.empty());
+}
+
+TEST_CASE("bad blob runs: a run over the bound still dies with the merge on")
+{
+    Chain c(41);
+    for (int i = 5; i <= 35; ++i) c.supported[i] = false;   // one 30 cm run
+    auto r = analyze(c.n, c.edges, c.supported, c.centers, 20 * units::cm, c.slice, 3 * units::cm);
+    CHECK(r.removed_by_run.size() == 31);
+    CHECK(r.removed_by_merge.empty());   // it died on its own span, not on the merge
+}

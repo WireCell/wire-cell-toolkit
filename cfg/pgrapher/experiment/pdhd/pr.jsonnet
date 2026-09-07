@@ -127,6 +127,18 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1,
               // retile_bad_blob_report (C++ default false) is a log-only census.
               retile_bad_blob_max_run=null,
               retile_bad_blob_report=false,
+              // doc pdhd/08.  retile_hack_max_bridge (cm; C++ default 0 =
+              // uncapped, the prototype) stops hack_activity_improved inventing
+              // a path tube across a gap longer than this: 0.3-0.7 % of bridges
+              // (those over 20 cm) create 49-62 % of every cell the retiler
+              // invents.  retile_bad_blob_run_merge (cm; C++ default 0 = OFF)
+              // merges the runs of one component whose boxes lie within this
+              // distance BEFORE retile_bad_blob_max_run is applied, so a ghost
+              // broken into pieces is bounded whole; it needs
+              // retile_bad_blob_max_run > 0 to do anything.
+              // null => key omitted => byte-identical config.
+              retile_hack_max_bridge=null,
+              retile_bad_blob_run_merge=null,
               // save_in_scope (doc 87): add the per-cluster T_cluster tree to
               // tracking-pr.root -- the in-scope set (switch_scope's scope_filter,
               // the SAME predicate the Bee clustering layer is gated on) plus the
@@ -1273,7 +1285,9 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1,
             wrapped_channel_activity=retile_wrapped_channel_activity,
             terminal_charge_threshold=retile_steiner_terminal_charge,
             bad_blob_max_run=if retile_bad_blob_max_run == null then null else retile_bad_blob_max_run * wc.cm,
-            bad_blob_report=retile_bad_blob_report),
+            bad_blob_report=retile_bad_blob_report,
+            hack_max_bridge=if retile_hack_max_bridge == null then null else retile_hack_max_bridge * wc.cm,
+            bad_blob_run_merge=if retile_bad_blob_run_merge == null then null else retile_bad_blob_run_merge * wc.cm),
         // Visitors available to the PR pipeline, by name.  switch_scope re-applies
         // the per-cluster T0 correction on the loaded tree (the corrected scope is
         // runtime state and does not persist through the tarball); it recomputes
