@@ -946,6 +946,15 @@ namespace WireCell::Clus {
         void add_fitted_charge_2d_snapshot(Facade::Cluster* cluster, int ident, int pass,
                                            const std::map<APAFacePlane, std::map<WireTime, FittedCharge2D>>& cells);
 
+        /// doc 30 (memory): the same hand-off, taking ownership.  A caller whose
+        /// map is dead on the next line (TaggerCheckSTM's m_acc_pass_snapshots,
+        /// cleared three lines after the hand-off loop) passes std::move and the
+        /// snapshot is never duplicated.  Stores exactly the bytes the const&
+        /// overload stores -- same order, same values -- so the two are
+        /// output-interchangeable; only the copy is skipped.
+        void add_fitted_charge_2d_snapshot(Facade::Cluster* cluster, int ident, int pass,
+                                           std::map<APAFacePlane, std::map<WireTime, FittedCharge2D>>&& cells);
+
         /**
          * Get geometry information for wire plane offsets
          * @return Map of WirePlaneId to tuple (offset_t, offset_u, offset_v, offset_w)

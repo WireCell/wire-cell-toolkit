@@ -1499,6 +1499,16 @@ void TrackFitting::add_fitted_charge_2d_snapshot(Facade::Cluster* cluster, int i
     m_cluster_fitted_charge_2d.push_back({cluster, ident, cells, pass});
 }
 
+void TrackFitting::add_fitted_charge_2d_snapshot(Facade::Cluster* cluster, int ident, int pass,
+                                                 std::map<APAFacePlane, std::map<WireTime, FittedCharge2D>>&& cells)
+{
+    // doc 30 (memory): identical to the const& overload above except that the
+    // caller's map is moved in rather than copied.  The STM tagger held every
+    // pass's cell map twice at the hand-off (once in m_acc_pass_snapshots, once
+    // here); on PDHD 029107/18 that second copy was 1.97 GB of live heap.
+    m_cluster_fitted_charge_2d.push_back({cluster, ident, std::move(cells), pass});
+}
+
 void TrackFitting::assemble_fitted_charge_2d()
 {
     m_fitted_charge_2d.clear();

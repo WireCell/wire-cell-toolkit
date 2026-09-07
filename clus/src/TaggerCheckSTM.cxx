@@ -627,8 +627,14 @@ public:
             for (auto& [cid, seg] : m_saved_segments) saved->add_segment(seg);
             saved->merge_fitted_charge_2d(m_acc_fitted_charge);
             // doc pdvd/42: per-pass snapshots for the T_proj_data writers.
-            for (const auto& snap : m_acc_pass_snapshots)
-                saved->add_fitted_charge_2d_snapshot(snap.cluster, snap.ident, snap.pass, snap.cells);
+            // doc 30 (memory): MOVED, not copied.  m_acc_pass_snapshots is
+            // cleared three lines below and nothing reads snap.cells in between,
+            // so the copy this used to make only doubled the peak: the whole
+            // event's per-pass cell maps were live twice at this instant
+            // (1.97 GB of the 5.99 GB peak on PDHD 029107/18).  Same bytes
+            // stored, same order -- byte-identical output by construction.
+            for (auto& snap : m_acc_pass_snapshots)
+                saved->add_fitted_charge_2d_snapshot(snap.cluster, snap.ident, snap.pass, std::move(snap.cells));
             grouping.set_track_fitting("stm", saved);
             SPDLOG_LOGGER_INFO(s_log,
                 "visit: TaggerCheckSTM: save_stm_fit stored {} segment(s) in grouping slot 'stm'",
@@ -940,7 +946,9 @@ private:
         if (!m_pass_records.empty()) {
             std::vector<double> x, y, z, dQ, dx, L, rr, pu, pv, pw, pt, chi2;
             std::vector<int> apa, face, pass, status;
-            for (const auto& rec : m_pass_records) {
+            // doc 30: non-const so rec.cells can be moved into m_acc_pass_snapshots
+            // below; every other member is read, not written.
+            for (auto& rec : m_pass_records) {
                 const auto& fits = rec.segment->fits();
                 const size_t n = fits.size();
                 std::vector<double> cumL(n, 0);
@@ -965,7 +973,13 @@ private:
                     cluster.get_cluster_id(), rec.pass, rec.status, rec.kink_num,
                     rec.exit_L/units::cm, rec.left_L/units::cm, n);
                 m_saved_segments.emplace_back(cluster.get_cluster_id(), rec.segment);
-                m_acc_pass_snapshots.push_back({&cluster, cluster.get_cluster_id(), rec.pass, rec.cells});
+                // doc 30 (memory): MOVED.  rec.cells is dead after this line --
+                // m_pass_records is cleared at the top of the next cluster
+                // (visit(), "if (m_save_stm_fit) { m_pass_records.clear(); ... }")
+                // and the second loop below reads only pass/status/kink/segment,
+                // never cells.  The copy this used to make cost 2.06 GB of live
+                // heap on PDHD 029107/18.
+                m_acc_pass_snapshots.push_back({&cluster, cluster.get_cluster_id(), rec.pass, std::move(rec.cells)});
             }
             std::map<std::string, Array> arrays;
             arrays.emplace("x", Array(x)); arrays.emplace("y", Array(y)); arrays.emplace("z", Array(z));
