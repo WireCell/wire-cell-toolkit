@@ -252,7 +252,7 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1,
               curved_fv_profile='flat',
               save_stm_fit = false,
               // doc pdhd/11: see the tagger_check_stm binding below.  false => key omitted.
-              stm_rough_path_require_connected = false, unmerge_bundle_mode='real',
+              stm_rough_path_require_connected = true, unmerge_bundle_mode='real',
               // doc pr/34 §10 particle-flow (Bee mc tree) port-fidelity knobs.
               // C++ defaults false; keys omitted when off => byte-identical
               // pre-knob config.  Display-only stage: mc.json is the artifact.

@@ -1128,7 +1128,7 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
                  collinear_recover=false, collinear_interior=false,
                  collinear_member_merge=false,
                  track_repartition=false, band_merge_back=false, band_recarve=false,
-                 drift_side_fv_x=false, drift_side_fv_skip_degenerate=false,
+                 drift_side_fv_x=false,
                  far_point_x_cut=null, far_point_mid_dis=null, track_recarve=false,
                  fv_inset_yz=null,
                  dec1_guard_main_angle=null, iso_slab_split=false, tag_family=false,
@@ -1176,7 +1176,6 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
                 // drift_side_fv_x above is silently inert (doc pdhd/11).
                 // C++ default false.  Key omitted when off => byte-identical
                 // pre-fix config.
-                [if drift_side_fv_skip_degenerate then 'drift_side_fv_skip_degenerate']: drift_side_fv_skip_degenerate,
                 // Drift-x deviation promoting a boundary point to a "far" point in
                 // JudgeSeparateDec_2's two-endpoint test.  null (default) keeps the
                 // prototype-exact 140 cm (effectively dead); PDHD/PDVD set the

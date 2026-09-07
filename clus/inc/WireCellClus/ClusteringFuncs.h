@@ -361,19 +361,21 @@ namespace WireCell::Clus::Facade {
     // the cryostat overall x.  This makes the no-T0 "out-of-time" apparent-x test
     // reflect the group's drift volume rather than the union of both drift sides.
     //
-    // skip_degenerate_face_x (default false, bit-identical): when testing that
-    // agreement, ignore faces whose block carries FV_xmin == FV_xmax.  Such a
-    // block belongs to an INSENSITIVE face -- jsonnet declares the face `null`
-    // but Gen::AnodePlane constructs it anyway (gen/src/AnodePlane.cxx:160-163)
-    // and DetectorVolumes registers every geometry face, so PDHD's wall-face
-    // blocks (FV_xmin == FV_xmax == the anode plane) join the vote and always
-    // disagree with the sensitive face.  The result is that common_face_x can
-    // never succeed on PDHD and the drift-side x-range it exists to select is
-    // silently replaced by the cryostat-wide overall x.  PDVD is unaffected
-    // either way: its per-face blocks already agree within a drift volume.
-    // See doc pdhd/11.
-    ScopeFV select_scope_fv(IDetectorVolumes::pointer dv, bool common_face_x = false,
-                            bool skip_degenerate_face_x = false);
+    // Faces whose block carries FV_xmin == FV_xmax are excluded from that
+    // agreement test.  Such a block belongs to an INSENSITIVE face -- jsonnet
+    // declares the face `null` but Gen::AnodePlane constructs it anyway
+    // (gen/src/AnodePlane.cxx:160-163) and DetectorVolumes registers every
+    // geometry face.  A zero-width x block encloses no volume, so it can never
+    // contain a point and cannot speak for a drift volume; letting it vote only
+    // ever vetoes the test.  On PDHD the wall-face blocks (FV_xmin == FV_xmax ==
+    // the anode plane) always disagreed with the sensitive face, so
+    // common_face_x could never succeed and the drift-side x-range it exists to
+    // select was silently replaced by the cryostat-wide overall x -- i.e.
+    // separate(drift_side_fv_x=true) was inert on PDHD from ee054213 until this
+    // fix.  PDHD is the only detector with such blocks (pdhd/clus.jsonnet:89-94);
+    // protodunevd, sbnd and dune-vd declare none, so this is a no-op there.
+    // See doc pdhd/11 sec 5.2.
+    ScopeFV select_scope_fv(IDetectorVolumes::pointer dv, bool common_face_x = false);
 
     // Shrink a ScopeFV's y and z bounds by `inset_yz` on every side, leaving x,
     // every *_margin and the direction vectors alone.  inset_yz <= 0 returns the

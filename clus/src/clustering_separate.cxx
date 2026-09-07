@@ -33,8 +33,7 @@ static bool sep_debug()
     return v;
 }
 
-ScopeFV WireCell::Clus::Facade::select_scope_fv(IDetectorVolumes::pointer dv, bool common_face_x,
-                                                bool skip_degenerate_face_x)
+ScopeFV WireCell::Clus::Facade::select_scope_fv(IDetectorVolumes::pointer dv, bool common_face_x)
 {
     const Configuration overall = dv->metadata(WirePlaneId(0));
 
@@ -87,10 +86,10 @@ ScopeFV WireCell::Clus::Facade::select_scope_fv(IDetectorVolumes::pointer dv, bo
                 const Configuration blk = dv->metadata(faces[i]);
                 const double bxmin = field(blk, "FV_xmin"), bxmax = field(blk, "FV_xmax");
                 // A degenerate block (FV_xmin == FV_xmax) is an insensitive face's:
-                // it names no drift volume, so it cannot speak for one.  Skipping it
-                // is what lets a PDHD drift group reach agreement at all; default OFF
-                // keeps the legacy vote, in which one such face vetoes the whole test.
-                if (skip_degenerate_face_x && bxmin == bxmax) continue;
+                // it encloses no volume, so it can never contain a point and cannot
+                // speak for a drift volume.  Letting it vote only ever vetoes the
+                // test -- which is what made this branch dead on PDHD (doc pdhd/11).
+                if (bxmin == bxmax) continue;
                 if (!seen) {
                     xmin = bxmin;  xmax = bxmax;
                     xmin_m = field(blk, "FV_xmin_margin");  xmax_m = field(blk, "FV_xmax_margin");
@@ -2154,8 +2153,7 @@ static void clustering_separate(Grouping& live_grouping,
                                 const bool tag_family,
                                 const bool collinear_global_merge,
                                 const bool vertex_veto,
-                                const double fv_inset_yz,
-                                const bool drift_side_fv_skip_degenerate);
+                                const double fv_inset_yz);
 
 class ClusteringSeparate : public IConfigurable, public Clus::IEnsembleVisitor, private NeedDV, private NeedPCTS, private NeedScope {
 public:
@@ -2234,12 +2232,6 @@ public:
         // stops short of the wall (doc 97; SBND's own FV is inset 0.65-2.05 cm
         // and Dec_2 fires on 0 of 74 in-time clusters, doc 96 sec 6.1).
         fv_inset_yz_ = get(config, "fv_inset_yz", 0.0);
-        // Ignore insensitive ("wall") faces -- those whose metadata block has
-        // FV_xmin == FV_xmax -- when select_scope_fv tests whether a multi-APA
-        // scope's faces agree on a common drift-side x-range.  Default OFF =>
-        // the legacy vote, bit-identical.  PDHD needs it ON for drift_side_fv_x
-        // to have any effect at all; see doc pdhd/11.
-        drift_side_fv_skip_degenerate_ = get(config, "drift_side_fv_skip_degenerate", false);
     }
 
     void visit(Ensemble& ensemble) const {
@@ -2250,7 +2242,7 @@ public:
                             band_recarve_, drift_side_fv_x_,
                             far_point_x_cut_, far_point_mid_dis_, track_recarve_, dec1_guard_main_angle_,
                             iso_slab_split_, tag_family_, collinear_global_merge_, vertex_veto_,
-                            fv_inset_yz_, drift_side_fv_skip_degenerate_);
+                            fv_inset_yz_);
     }
 
 private:
@@ -2273,7 +2265,6 @@ private:
     bool collinear_global_merge_{false};
     bool vertex_veto_{false};
     double fv_inset_yz_{0.0};
-    bool drift_side_fv_skip_degenerate_{false};
 };
 
 
@@ -2305,8 +2296,7 @@ static void clustering_separate(
     const bool tag_family,
     const bool collinear_global_merge,
     const bool vertex_veto,
-    const double fv_inset_yz,
-    const bool drift_side_fv_skip_degenerate)
+    const double fv_inset_yz)
 {
     // Check that live_grouping has exactly one wpid
 	// if (live_grouping.wpids().size() != 1 ) {
@@ -2341,7 +2331,7 @@ static void clustering_separate(
     // counted.  doc 96 sec 6.1 measured the consequence on SBND: Dec_2 accepts
     // 0 of 74 in-time clusters, including 0 of the 33 longer than 250 cm.
     const ScopeFV fv =
-        inset_scope_fv(select_scope_fv(dv, drift_side_fv_x, drift_side_fv_skip_degenerate), fv_inset_yz);
+        inset_scope_fv(select_scope_fv(dv, drift_side_fv_x), fv_inset_yz);
 
     // Log-only (WCT_SEP_DEBUG): which fiducial volume this pass actually resolved,
     // and the per-face FV_x blocks select_scope_fv() had to agree on to adopt the
