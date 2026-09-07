@@ -211,6 +211,10 @@ TEST_CASE("clus knob defaults: TaggerCheckNeutrino switches are all OFF")
     CHECK_KNOB_NUM(cfg, "long_muon_cathode_bridge_short_gap", 0.0);           // doc 84 r4 G3; cm; 0 = waiver off
     CHECK_KNOB_NUM(cfg, "long_muon_cathode_bridge_short_gap_angle", 10.0);    // deg; inert while short_gap 0
     CHECK_KNOB_NUM(cfg, "long_muon_cathode_bridge_short_gap_len", 50.0);      // cm; inert while short_gap 0
+    CHECK_KNOB_BOOL(cfg, "long_muon_cathode_bridge_track_types", false);      // doc pr/147; false = both type guards exactly as doc 84 shipped them
+    CHECK_KNOB_NUM(cfg, "long_muon_cathode_bridge_trk_dqdx_lo", 0.8);         // doc pr/147; x mip_dqdx_median; inert unless track_types
+    CHECK_KNOB_NUM(cfg, "long_muon_cathode_bridge_trk_dqdx_hi", 2.0);         // doc pr/147; x mip_dqdx_median; inert unless track_types
+    CHECK_KNOB_NUM(cfg, "long_muon_cathode_bridge_trk_straight", 0.90);       // doc pr/147; chord/length; inert unless track_types
     CHECK_KNOB_BOOL(cfg, "kine_mainvtx_used_guard", false);                   // pr/101 K5; false = byte-identical
     CHECK_KNOB_BOOL(cfg, "shower_hadronic_tag", false);                       // pr/99 r3 A5 (315167/395148); false = byte-identical
     CHECK_KNOB_NUM(cfg, "shower_hadronic_min_len", 10.0);                     // cm; inert while tag off

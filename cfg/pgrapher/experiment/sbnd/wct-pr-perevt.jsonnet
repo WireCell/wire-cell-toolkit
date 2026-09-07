@@ -2245,6 +2245,18 @@ function(
     long_muon_cathode_bridge_short_gap = 8,         // cm; SBND PRODUCTION ON 2026-08-29 (doc 84 r4 G3, owner pre-authorization; C++ default 0.0 = off).  67026
     long_muon_cathode_bridge_short_gap_angle = null, // deg; C++ default 10.0; inert while short_gap 0
     long_muon_cathode_bridge_short_gap_len = null,  // cm; C++ default 50.0; inert while short_gap 0
+    // doc pr/147: the cathode bridge's two type guards keyed the whole pass on
+    // the PID.  After excl_t0_frame a cathode-split muon's halves are routinely
+    // re-typed EM, so the pass stops seeing them -- measured on 3000 numu
+    // events, 347890 (partner 211->11) and 168448 (receiver 13->11) both went
+    // from bridging to silent, and the production fire count fell 13 -> 11.
+    // track_types admits either side on track-LIKENESS instead, with every
+    // geometry gate untouched.  C++ default false.  Key omitted when off =>
+    // byte-identical pre-fix config.
+    long_muon_cathode_bridge_track_types = false,
+    long_muon_cathode_bridge_trk_dqdx_lo = null,   // x MIP; C++ default 0.8;  inert while track_types off
+    long_muon_cathode_bridge_trk_dqdx_hi = null,   // x MIP; C++ default 2.0;  inert while track_types off (289559's 3.48 receiver is what this refuses)
+    long_muon_cathode_bridge_trk_straight = null,  // chord/len; C++ default 0.90; inert while track_types off
     kine_mainvtx_used_guard = true,  // SBND PRODUCTION ON 2026-08-20 (doc pr/101 K5; latent on the manifest)
     // doc pr/145 item 3b: log-only instrumentation for the BFS
     // particle-continuation detector (flag_reduce).  It emits SPDLOG lines and
@@ -3448,6 +3460,10 @@ function(
         [if long_muon_cathode_bridge_short_gap != null then 'long_muon_cathode_bridge_short_gap']: long_muon_cathode_bridge_short_gap,  // doc 84 r4 G3; C++ default 0.0 cm = off
         [if long_muon_cathode_bridge_short_gap_angle != null then 'long_muon_cathode_bridge_short_gap_angle']: long_muon_cathode_bridge_short_gap_angle,  // doc 84 r4 G3; C++ default 10.0 deg
         [if long_muon_cathode_bridge_short_gap_len != null then 'long_muon_cathode_bridge_short_gap_len']: long_muon_cathode_bridge_short_gap_len,  // doc 84 r4 G3; C++ default 50.0 cm
+        [if long_muon_cathode_bridge_track_types then 'long_muon_cathode_bridge_track_types']: true,  // doc pr/147; C++ default false. Key omitted when off => byte-identical.
+        [if long_muon_cathode_bridge_trk_dqdx_lo != null then 'long_muon_cathode_bridge_trk_dqdx_lo']: long_muon_cathode_bridge_trk_dqdx_lo,  // doc pr/147; C++ default 0.8 x MIP
+        [if long_muon_cathode_bridge_trk_dqdx_hi != null then 'long_muon_cathode_bridge_trk_dqdx_hi']: long_muon_cathode_bridge_trk_dqdx_hi,  // doc pr/147; C++ default 2.0 x MIP
+        [if long_muon_cathode_bridge_trk_straight != null then 'long_muon_cathode_bridge_trk_straight']: long_muon_cathode_bridge_trk_straight,  // doc pr/147; C++ default 0.90
         [if (if kine_mainvtx_used_guard == null then false else kine_mainvtx_used_guard) then 'kine_mainvtx_used_guard']: true,
         // doc pr/145 item 3b; log-only.  C++ default false => key omitted when off => byte-identical.
         [if (if kine_continuation_debug == null then false else kine_continuation_debug) then 'kine_continuation_debug']: true,

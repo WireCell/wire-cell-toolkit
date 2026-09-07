@@ -660,6 +660,10 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_long_muon_cathode_bridge_short_gap        = get(config, "long_muon_cathode_bridge_short_gap",        m_long_muon_cathode_bridge_short_gap);     // doc 84 round 4 G3, cm
     m_long_muon_cathode_bridge_short_gap_angle  = get(config, "long_muon_cathode_bridge_short_gap_angle",  m_long_muon_cathode_bridge_short_gap_angle); // doc 84 round 4 G3, deg
     m_long_muon_cathode_bridge_short_gap_len    = get(config, "long_muon_cathode_bridge_short_gap_len",    m_long_muon_cathode_bridge_short_gap_len); // doc 84 round 4 G3, cm
+    m_long_muon_cathode_bridge_track_types      = get(config, "long_muon_cathode_bridge_track_types",      m_long_muon_cathode_bridge_track_types);   // doc pr/147
+    m_long_muon_cathode_bridge_trk_dqdx_lo      = get(config, "long_muon_cathode_bridge_trk_dqdx_lo",      m_long_muon_cathode_bridge_trk_dqdx_lo);   // doc pr/147, x MIP
+    m_long_muon_cathode_bridge_trk_dqdx_hi      = get(config, "long_muon_cathode_bridge_trk_dqdx_hi",      m_long_muon_cathode_bridge_trk_dqdx_hi);   // doc pr/147, x MIP
+    m_long_muon_cathode_bridge_trk_straight     = get(config, "long_muon_cathode_bridge_trk_straight",     m_long_muon_cathode_bridge_trk_straight);  // doc pr/147, chord/length
     m_kine_mainvtx_used_guard                   = get(config, "kine_mainvtx_used_guard",                   m_kine_mainvtx_used_guard);
     m_kine_continuation_debug                   = get(config, "kine_continuation_debug",                   m_kine_continuation_debug);                // doc pr/145
     m_shower_hadronic_tag                       = get(config, "shower_hadronic_tag",                       m_shower_hadronic_tag);
@@ -1172,6 +1176,10 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["long_muon_cathode_bridge_short_gap"]        = m_long_muon_cathode_bridge_short_gap;        // doc 84 round 4 G3, cm; 0 == off
     cfg["long_muon_cathode_bridge_short_gap_angle"]  = m_long_muon_cathode_bridge_short_gap_angle;  // doc 84 round 4 G3, deg; inert while short_gap 0
     cfg["long_muon_cathode_bridge_short_gap_len"]    = m_long_muon_cathode_bridge_short_gap_len;    // doc 84 round 4 G3, cm; inert while short_gap 0
+    cfg["long_muon_cathode_bridge_track_types"]      = m_long_muon_cathode_bridge_track_types;     // doc pr/147; false = legacy (both type guards as shipped)
+    cfg["long_muon_cathode_bridge_trk_dqdx_lo"]      = m_long_muon_cathode_bridge_trk_dqdx_lo;     // doc pr/147, x mip_dqdx_median; inert unless track_types
+    cfg["long_muon_cathode_bridge_trk_dqdx_hi"]      = m_long_muon_cathode_bridge_trk_dqdx_hi;     // doc pr/147, x mip_dqdx_median; inert unless track_types
+    cfg["long_muon_cathode_bridge_trk_straight"]     = m_long_muon_cathode_bridge_trk_straight;    // doc pr/147, chord/length; inert unless track_types
     cfg["kine_mainvtx_used_guard"]                   = m_kine_mainvtx_used_guard;                   // doc pr/101 K5; false = legacy, byte-identical
     cfg["kine_continuation_debug"]                   = m_kine_continuation_debug;                   // doc pr/145 item 3b; log-only instrumentation
     cfg["shower_hadronic_tag"]                       = m_shower_hadronic_tag;                       // doc pr/99 r3 A5; false = legacy (label 11 stays), byte-identical
@@ -1323,6 +1331,21 @@ struct CathodeBridgeCfg {
     double short_gap;       // 0 == off; below this gap the gap-vector angle is waived (G3)
     double short_gap_angle; // partner-direction cap [deg] required when the waiver applies
     double short_gap_len;   // min partner length required when the waiver applies
+    // doc pr/147 -- the PID-independent admission.  Rounds 2 and 4 keyed BOTH
+    // ends of the bridge on the PID: the receiver must be a |13| shower with a
+    // |13| member (:1404), the partner shower must be |13| or, with
+    // track_partner, |211| (:1431).  After the excl_t0_frame flip a
+    // cathode-split muon's halves are routinely re-typed EM, and then the pass
+    // is not refusing them on geometry -- it never sees them.  Measured on
+    // 1435 events: 347890 loses its PARTNER's type, 168448 loses its
+    // RECEIVER's, and both die above the angle tests with no log line.
+    // track_types admits either side on track-LIKENESS instead, leaving every
+    // geometry gate in force.  false => both guards behave exactly as before.
+    bool   track_types;     // master switch; false == rounds 2-4 behaviour
+    double trk_dqdx_lo;     // median dQ/dx band, x mip_dqdx_median
+    double trk_dqdx_hi;     // upper bound is the load-bearing half (see below)
+    double trk_straight;    // chord / track length
+    double mip_dqdx;        // the MIP reference itself [internal units]
 };
 
 struct CathodeEnd {
@@ -1331,6 +1354,7 @@ struct CathodeEnd {
     WireCell::Point p;     // the end near the cathode
     WireCell::Point far_p; // the other end of the segment
     WireCell::Vector into; // unit vector from p into the segment
+    bool relaxed;          // doc pr/147: admitted by track_types, not by PID
 };
 
 inline double cb_angle_deg(const WireCell::Vector& a, const WireCell::Vector& b)
@@ -1340,6 +1364,41 @@ inline double cb_angle_deg(const WireCell::Vector& a, const WireCell::Vector& b)
     double c = a.dot(b) / (ma * mb);
     c = std::max(-1.0, std::min(1.0, c));
     return std::acos(c) * 180.0 / 3.141592653589793;
+}
+
+// doc pr/147.  Is this segment track-LIKE, independent of what the PID says?
+//
+// Measured on the 225 segments within 12 cm of the SBND cathode carrying a
+// usable dQ/dx (docs/pr/147_cathode/): the charge alone does NOT separate the
+// two classes -- median dQ/dx is 1.227 x MIP for |13|-typed segments and
+// 1.242 for |11|-typed ones.  So this is deliberately NOT a positive electron
+// or muon identification; it is a VETO, the same discipline the do_track_comp
+// electron template needs.  The two vetoes that do measurable work:
+//
+//   trk_dqdx_hi   protons sit at 3.386 x MIP (p10 2.279) against 1.227 for
+//                 muons -- this is what refuses 289559, whose 19.3 cm
+//                 receiver is 3.480 x MIP and whose geometry (a_gap 21.5,
+//                 a_tan 11.4) would otherwise admit it.  The owner confirmed
+//                 289559 a correct reject in doc 84 R4.2.
+//   trk_straight  chord/length separates by more than the charge does:
+//                 median 0.964 for |13| vs 0.895 for |11| (p10 0.933 vs
+//                 0.693).  It refuses 171729 (0.560).
+//
+// trk_dqdx_lo catches dead / mis-attributed charge (171729 again, 0.552).
+// Fit points the fit could not attribute are already dropped by
+// segment_median_dQ_dx's own `fit.dx > 0 && fit.dQ >= 0` filter, so no
+// zero-charge cell reaches the median.
+inline bool cb_track_like(const SegmentPtr& seg, const CathodeBridgeCfg& cfg)
+{
+    if (!cfg.track_types || !seg) return false;
+    const auto& fits = seg->fits();
+    if (fits.size() < 2) return false;
+    const double L = segment_track_length(seg);
+    if (L <= 0 || cfg.mip_dqdx <= 0) return false;
+    const double chord = (fits.back().point - fits.front().point).magnitude();
+    if (chord / L < cfg.trk_straight) return false;
+    const double r = segment_median_dQ_dx(seg) / cfg.mip_dqdx;
+    return r >= cfg.trk_dqdx_lo && r <= cfg.trk_dqdx_hi;
 }
 
 // bridged_out (doc 84 round 3, may be null): collects the muon-typed
@@ -1383,6 +1442,29 @@ int long_muon_cathode_bridge_pass(PatternAlgorithms& pattern_algos, Graph& graph
         return tot;
     };
 
+    // doc pr/147.  Retype a shower and its non-|13| members to muon.  Both
+    // absorb branches already did this to the ABSORBED side; a receiver
+    // admitted by track_types needs the same treatment on the KEEPING side,
+    // or the merged object stays EM-typed and calculate_kinematics_long_muon
+    // never sees it -- the far half would be absorbed and still not counted.
+    auto retype_to_muon = [&](const ShowerPtr& sh) {
+        if (!sh) return;
+        auto it = members.find(sh);
+        if (it != members.end()) {
+            for (auto& seg : it->second) {
+                if (!seg) continue;
+                if (seg->has_particle_info() &&
+                    std::abs(seg->particle_info()->pdg()) == 13) continue;
+                auto mom = segment_cal_4mom(seg, 13, particle_data, recomb_model,
+                                            pattern_algos.m_mip_dqdx);
+                seg->particle_info(std::make_shared<Aux::ParticleInfo>(
+                    13, particle_data->get_particle_mass(13),
+                    particle_data->pdg_to_name(13), mom));
+            }
+        }
+        sh->set_particle_type(13);
+    };
+
     auto collect_ends = [&](SegmentPtr seg, ShowerPtr sh, std::vector<CathodeEnd>& out) {
         if (!seg) return;
         if (segment_track_length(seg) < min_len) return;
@@ -1394,20 +1476,36 @@ int long_muon_cathode_bridge_pass(PatternAlgorithms& pattern_algos, Graph& graph
             if (std::abs(p.x() - cfg.x) >= cfg.xcut) continue;
             WireCell::Vector into = segment_cal_dir_3vector(seg, p, lever);
             if (into.magnitude() <= 0) continue;
-            out.push_back({sh, seg, p, ends[1 - e], into});
+            out.push_back({sh, seg, p, ends[1 - e], into, false});
         }
     };
 
     // Receiver ends: muon-typed member segments of |13|-typed showers.
+    // doc pr/147: with track_types on, a segment that is track-LIKE is also a
+    // receiver even when its own PID and its shower's are not |13| -- 168448's
+    // near half is EM on BOTH after the frame flip (94.2 cm pdg 13 -> 20.2 cm
+    // pdg 11), so the pass never reached its partner.  A receiver admitted
+    // this way is remembered on the end (`relaxed`) and retyped to 13 when it
+    // actually bridges; absorbing a far half into a shower that stays EM would
+    // leave the merged object out of calculate_kinematics_long_muon, which is
+    // the same trap doc 84 round 4 hit from the partner side.
     std::vector<CathodeEnd> mu_ends;
     for (auto& sh : showers) {
-        if (!sh || std::abs(sh->get_particle_type()) != 13) continue;
+        if (!sh) continue;
+        const bool sh_mu = std::abs(sh->get_particle_type()) == 13;
         auto it = members.find(sh);
         if (it == members.end()) continue;
         for (auto& seg : it->second) {
             if (!seg || !seg->has_particle_info()) continue;
-            if (std::abs(seg->particle_info()->pdg()) != 13) continue;
+            const bool seg_mu = std::abs(seg->particle_info()->pdg()) == 13;
+            bool relaxed = false;
+            if (!sh_mu || !seg_mu) {
+                if (!cb_track_like(seg, cfg)) continue;
+                relaxed = true;
+            }
+            const size_t first = mu_ends.size();
             collect_ends(seg, sh, mu_ends);
+            for (size_t i = first; i < mu_ends.size(); ++i) mu_ends[i].relaxed = relaxed;
         }
     }
     if (mu_ends.empty()) return 0;
@@ -1420,6 +1518,18 @@ int long_muon_cathode_bridge_pass(PatternAlgorithms& pattern_algos, Graph& graph
         if (!seg) continue;
         auto mit = map_segment_in_shower.find(seg);
         ShowerPtr osh = (mit != map_segment_in_shower.end()) ? mit->second : nullptr;
+        // doc pr/147: run the geometry FIRST so the type guard below can be
+        // logged.  Round 4 added a reject line for every candidate that
+        // reaches the angle tests, but the type guards sit above them, so the
+        // class this round is about was invisible: over 1435 production events
+        // exactly ONE emitted a reject line.  A pass that cannot say why it
+        // did not fire cannot be diagnosed without re-deriving its geometry
+        // outside the toolkit, which is what doc 84 R3.8 had to do -- and got
+        // wrong.  collect_ends is pure, so calling it early moves nothing.
+        std::vector<CathodeEnd> cand;
+        collect_ends(seg, osh, cand);
+        if (cand.empty()) continue;
+        bool p_relaxed = false;
         // doc 84 round 4 (G2): a cathode-split muon's near-seam stub is often
         // mis-PID'd -- 347890's far half is a |13| shower but its facing
         // partner is a 27cm shower typed 211 (pi+), geometrically cleaner
@@ -1430,10 +1540,23 @@ int long_muon_cathode_bridge_pass(PatternAlgorithms& pattern_algos, Graph& graph
         // a 106 MeV electron shower with comparably good geometry).
         if (osh) {
             const int optype = std::abs(osh->get_particle_type());
-            const bool ok = (optype == 13) || (cfg.track_partner && optype == 211);
-            if (!ok) continue;
+            bool ok = (optype == 13) || (cfg.track_partner && optype == 211);
+            // doc pr/147 (the 347890 seat): a track-LIKE partner is admitted
+            // whatever its PID says.  EM is no longer excluded by type -- it is
+            // excluded by cb_track_like's vetoes, which is the only form of the
+            // guard that can tell a mis-PID'd muon stub from a real shower.
+            if (!ok && cb_track_like(seg, cfg)) { ok = true; p_relaxed = true; }
+            if (!ok) {
+                SPDLOG_LOGGER_DEBUG(log,
+                    "long_muon_cathode_bridge: reject partner_type seg={} shower_pdg={} "
+                    "len={:.1f}cm ends x=({:.1f},{:.1f})cm",
+                    seg->get_graph_index(), osh->get_particle_type(),
+                    segment_track_length(seg) / units::cm,
+                    cand.front().p.x() / units::cm, cand.back().p.x() / units::cm);
+                continue;
+            }
         }
-        collect_ends(seg, osh, partner_ends);
+        for (auto& ce : cand) { ce.relaxed = p_relaxed; partner_ends.push_back(ce); }
     }
     if (partner_ends.empty()) return 0;
 
@@ -1498,6 +1621,19 @@ int long_muon_cathode_bridge_pass(PatternAlgorithms& pattern_algos, Graph& graph
             best_gap = gap;
         }
         if (!best) continue;
+
+        // doc pr/147: a receiver admitted on track-likeness is a mis-PID'd
+        // muon half, so it becomes one now -- BEFORE the keeper contest below,
+        // whose second rank key is muon_member_length and would otherwise read
+        // this shower as carrying zero muon.
+        if (me.relaxed) {
+            SPDLOG_LOGGER_DEBUG(log,
+                "long_muon_cathode_bridge: relaxed receiver sid={} pdg={} seg={} "
+                "len={:.1f}cm retyped to 13",
+                me.shower->get_shower_id(), me.shower->get_particle_type(),
+                me.seg->get_graph_index(), segment_track_length(me.seg) / units::cm);
+            retype_to_muon(me.shower);
+        }
 
         if (best->shower) {
             // Shower partner: decide the keeper -- main-vertex attachment
@@ -3280,7 +3416,16 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
                     m_long_muon_cathode_bridge_track_partner,
                     m_long_muon_cathode_bridge_short_gap * units::cm,
                     m_long_muon_cathode_bridge_short_gap_angle,
-                    m_long_muon_cathode_bridge_short_gap_len * units::cm};
+                    m_long_muon_cathode_bridge_short_gap_len * units::cm,
+                    m_long_muon_cathode_bridge_track_types,          // doc pr/147
+                    m_long_muon_cathode_bridge_trk_dqdx_lo,
+                    m_long_muon_cathode_bridge_trk_dqdx_hi,
+                    m_long_muon_cathode_bridge_trk_straight,
+                    // single source of truth: TaggerCheckNeutrino.cxx:2466 already
+                    // converted e/cm -> internal for pattern_algos, and every other
+                    // median-dQ/dx ratio in clus divides by THAT.  Re-deriving it
+                    // here would be a second place for the unit to drift.
+                    pattern_algos.m_mip_dqdx_median};
                 const int n_bridged = long_muon_cathode_bridge_pass(
                     pattern_algos, *pr_graph, final_main_vertex, showers,
                     map_segment_in_shower, particle_data(), m_recomb_model,

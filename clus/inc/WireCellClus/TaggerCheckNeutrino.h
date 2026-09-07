@@ -931,6 +931,14 @@ public:
         double m_long_muon_cathode_bridge_short_gap{0.0};           // doc 84 round 4 (G3): 0 == off; below this gap [cm] the gap-vector angle is waived (67026)
         double m_long_muon_cathode_bridge_short_gap_angle{10.0};    // doc 84 round 4 (G3): partner-direction angle cap [deg] required when the waiver applies; inert while short_gap == 0
         double m_long_muon_cathode_bridge_short_gap_len{50.0};      // doc 84 round 4 (G3): min partner length [cm] required when the waiver applies; inert while short_gap == 0
+        // doc pr/147: admit BOTH sides of the bridge on track-likeness rather
+        // than PID.  false == the rounds 2-4 guards exactly, so default-legacy.
+        // 347890 loses its partner's type (211->11), 168448 its receiver's
+        // (13->11); both then die above the geometry with no log line.
+        bool   m_long_muon_cathode_bridge_track_types{false};       // doc pr/147: master switch
+        double m_long_muon_cathode_bridge_trk_dqdx_lo{0.8};         // doc pr/147: x mip_dqdx_median; below = dead/mis-attributed charge (171729: 0.55)
+        double m_long_muon_cathode_bridge_trk_dqdx_hi{2.0};         // doc pr/147: x mip_dqdx_median; above = proton-like (289559: 3.48, owner-confirmed correct reject)
+        double m_long_muon_cathode_bridge_trk_straight{0.90};       // doc pr/147: chord/length; |13| median 0.964 vs |11| 0.895 (p10 0.933 vs 0.693)
         bool   m_kine_mainvtx_used_guard{false};                    // doc pr/101 K5 (main-vertex member double count)
         bool   m_kine_continuation_debug{false};                    // doc pr/145 item 3b; log-only, cannot change reco
         bool   m_shower_hadronic_tag{false};                        // doc pr/99 r3 A5 (hadronic shower labeled e-)
