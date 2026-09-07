@@ -2270,10 +2270,13 @@ function(
     // to a |13| shower member over 1368 events, 37 are protons and 18 pions
     // against 9 muons.  C++ default 0.0 = off.  Key omitted when off =>
     // byte-identical.
-    // HELD OFF pending the owner's scan: "2 should be a long muon as well"
-    // states the goal, not a verdict on this mechanism.  Arm it with
-    // -A long_muon_cathode_bridge_tail_min_len=20 (doc pr/147 round 2).
-    long_muon_cathode_bridge_tail_min_len = null,
+    // SBND PRODUCTION ON 2026-09-06 (doc pr/147 round 2, owner-directed:
+    // "Please turn them on for SBND running", after "2 should be a long muon
+    // as well").  177536: two muon nodes (276.0 + 644.3) become one of
+    // 917.3 MeV, add_energy 219.9 -> 114.3, Enu 1339.8 -> 1231.0 against a
+    // pre-regression 1222.4.  Moves 1 archive in 17; the 8 hadron-tail
+    // controls are byte-identical.
+    long_muon_cathode_bridge_tail_min_len = 20,
     kine_mainvtx_used_guard = true,  // SBND PRODUCTION ON 2026-08-20 (doc pr/101 K5; latent on the manifest)
     // doc pr/145 item 3b: log-only instrumentation for the BFS
     // particle-continuation detector (flag_reduce).  It emits SPDLOG lines and
