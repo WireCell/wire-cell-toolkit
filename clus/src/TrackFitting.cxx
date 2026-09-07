@@ -21,6 +21,15 @@ using namespace WireCell::Clus::Facade;
 //   Log::set_level("debug", "clus");                 // whole clus subsystem
 static auto s_log = WireCell::Log::logger("clus.TrackFitting");
 
+// doc 30 r2: log-only census, off unless WCT_D30_FILL_CENSUS is set.  It sizes
+// the one remaining large lever in fill_fitted_charge_2d -- the function stores
+// an entry for EVERY cell of the fit's charge map, including cells the fit
+// predicts nothing on (pred_charge stays 0).  These counters say what fraction
+// that is, i.e. how much a "predicted cells only" knob would actually buy,
+// without changing any output.
+static size_t d30_cells = 0, d30_cells_pred = 0, d30_cells_live = 0;
+static const bool d30_census = (getenv("WCT_D30_FILL_CENSUS") != nullptr);
+
 using geo_point_t = WireCell::Point;
 
 // Temporary determinism-debug helpers, enabled with WCT_DET_DEBUG=1.
@@ -1393,6 +1402,12 @@ void TrackFitting::fill_fitted_charge_2d(const std::array<std::vector<DqdxRow>, 
                 }
             }
 
+            if (d30_census) {
+                const uint32_t n = row.c1 - row.c0;
+                d30_cells += n;
+                if (pred_charge != 0) d30_cells_pred += n;
+                if (measurement.charge > 0 && measurement.flag != 0) d30_cells_live += n;
+            }
             for (uint32_t ci = row.c0; ci < row.c1; ++ci) {
                 const auto& c2d = coords[ci];
                 APAFacePlane afp{c2d.apa, c2d.face, plane_idx};
@@ -1413,6 +1428,15 @@ void TrackFitting::fill_fitted_charge_2d(const std::array<std::vector<DqdxRow>, 
     process_plane(plane_rows[1], pred_v, 1, rel_uncer_ind, add_uncer_ind);
     process_plane(plane_rows[2], pred_w, 2, rel_uncer_col, add_uncer_col);
 
+    if (d30_census) {
+        SPDLOG_LOGGER_DEBUG(s_log,
+            "d30_fill_census: cells={} live={} predicted={} pred_frac={:.4f} live_frac={:.4f} "
+            "stored_this_fit={}",
+            d30_cells, d30_cells_live, d30_cells_pred,
+            d30_cells ? double(d30_cells_pred) / d30_cells : 0.0,
+            d30_cells ? double(d30_cells_live) / d30_cells : 0.0,
+            m_fitted_charge_2d.size());
+    }
     record_cluster_fitted_charge_2d();
 }
 
