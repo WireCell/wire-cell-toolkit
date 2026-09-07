@@ -44,6 +44,10 @@
 // space-charge allowance in y and z (doc pdvd/35); this surface REPLACES the 15 cm, so
 // a consumer wanting uBooNE's arrangement passes cushion 0 here and drops fv_tolerance
 // back to the 2.5 / 2.5 / 3 cm cushion.
+//   PRODUCTION (pdvd/wct-pr-perevt.jsonnet, owner decision 2026-09-05) is the doc-43 p90
+// profile with curved_fv_margin_y/z = 5, i.e. fv_tolerance x 2.5 / y 5 / z 5.  PDHD runs
+// the same arrangement at cushion 3 (doc pdhd/09 sec 12); doc pdvd/49 compares the two
+// surfaces wall by wall.
 //
 // The polygon spans BOTH drift volumes and is continuous across the 6 cm cathode slab,
 // exactly as pr.jsonnet's pdvd_pr_fv box is, so a cathode-crossing track is not an

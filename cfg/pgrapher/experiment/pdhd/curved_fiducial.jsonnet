@@ -41,11 +41,22 @@
 //   - the cosmic tagger keeps the uncushioned surface and probes it with a tolerance
 //     BAND (Cosmic_tagger.h:34-36) -- in WCT that is the taggers' fv_tolerance, which
 //     offsets the POINT instead of the vertex (FiducialUtils.cxx:79-119).
-// PDHD's tagger margins today are x 2.5 / y 3 / z 5 (zmin 3) cm and, unlike PDVD's, they
-// carry NO flat 15 cm space-charge allowance -- pdhd_pr_fv is the ACTIVE volume
-// (pr.jsonnet:1244-1248).  So on PDHD this surface ADDS an inset near the cathode rather
-// than replacing a shell, and the consumer passes cushion 0 here and keeps the cushion in
-// fv_tolerance (pr.jsonnet curved_fv_margin_y/z).
+// PDHD carries the SAME flat 15 cm space-charge allowance PDVD does, and this surface
+// REPLACES it.  pr.jsonnet's tgm_fv_*_margin function DEFAULTS (x 2.5 / y 3 / z 5, zmin 3)
+// are not the operating point: the production driver pdhd/wct-pr-perevt.jsonnet overrides
+// them to x 2 / y 17.5 / z 18, i.e. the dvm margins (2.5 y, 3 z) PLUS 15 cm of flat shell,
+// exactly as PDVD's driver does.  Carrying both the shell and this surface would count the
+// 15 cm twice, so ONE knob moves both halves: curved_fv swaps the fiducial AND drops the
+// y/z entries of fv_tolerance to the cushion alone (curved_fv_margin_y/z).  The consumer
+// therefore passes cushion 0 here and keeps the cushion in fv_tolerance.
+//   Consequence, measured (doc pdhd/09 sec 9.5, doc pdvd/43 sec 6.2, compared in doc
+// pdvd/49 sec 5): PDHD's p90 surface sits INSIDE the shell it replaced over ~76 % of the
+// drift, PDVD's over only ~25 % (y) / 44 % (z).  So the same knob moves the TOTAL TGM
+// count in opposite directions -- PDHD 1478 -> 1664 (+12.6 %), PDVD 2148 -> 2095 (-2.5 %)
+// -- while LONG-TRACK (> 2 m) TGM rises on BOTH, 430 -> 464 and 754 -> 769.  The opposite
+// total signs are a short-cluster effect (TaggerCheckTGM.cxx:1066), not a disagreement
+// about the boundary.  NB the often-quoted PDVD "-33 %" is the WITHDRAWN d50 arm
+// (doc pdvd/41 sec 13.3), not production.
 //
 // The polygon spans BOTH drift volumes and is continuous across the cathode, exactly as
 // pdhd_pr_fv's box is, so a cathode-crossing track is not an "exiter" at x = 0.  In x the
