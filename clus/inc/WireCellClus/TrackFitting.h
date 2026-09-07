@@ -296,11 +296,14 @@ namespace WireCell::Clus {
             // within proj_pad_wire wires AND proj_pad_time SLICES of a cell
             // whose RAW prediction (R*pos_3D, i.e. BEFORE the
             // charge > 0 && flag != 0 gate that zeroes pred_charge) is nonzero,
-            // in the same (apa, face, plane).  The raw prediction is the seed on
-            // purpose: a dead or below-threshold channel crossed by the track
-            // has pred_charge == 0 but a nonzero response column, and dropping
-            // those would punch holes in the display exactly where the fit is
-            // most interesting.  pad 0 = predicted cells only.
+            // in the same (apa, face, plane).  The raw prediction is the seed
+            // rather than pred_charge because pred_charge is forced to 0 by the
+            // charge > 0 && flag != 0 gate, so seeding on it would drop any cell
+            // the fit predicts on a dead or below-threshold channel.  MEASURED
+            // (doc 30 sec 13.3): on PDHD 029107/18 and 028084/2 the two sets are
+            // identical (seed = predicted = 902722), because the fit excludes
+            // dead rows from R -- so this is a trap removed at zero cost, not a
+            // difference observed.  pad 0 = predicted cells only.
             //
             // The product this trims is DIAGNOSTIC ONLY -- PrDisplayDump.cxx's
             // dump_proj comment states it, and the consumer census in doc 30

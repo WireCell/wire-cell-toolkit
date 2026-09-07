@@ -43,6 +43,7 @@ static const bool d30_census = (getenv("WCT_D30_FILL_CENSUS") != nullptr);
 namespace {
     struct ProjKeep {
         bool on{false};
+        bool overflow{false};   ///< a coordinate did not fit pack(); fail OPEN
         int pad_w{0};
         int pad_slices{0};
         std::unordered_set<uint64_t> keep;
@@ -50,18 +51,37 @@ namespace {
         /// (apa, face, plane, wire, time) -> 64 bits: apa 12 | face 2 | plane 2
         /// | wire 20 | time 28.  Every field of a real cell is >= 0 and well
         /// inside its field (PDHD/PDVD: apa < 150, wire < 2^11, time in ticks
-        /// < 2^14); dilated seeds that fall negative are dropped below, since
-        /// they can match no cell.
+        /// < 2^14).  A value that did NOT fit would alias two cells onto one key
+        /// and silently keep the wrong one, with no log line -- so the range is
+        /// CHECKED rather than masked, and anything out of range degrades this
+        /// filter to the legacy "store everything" behaviour.  The next detector
+        /// to bind this is not PDHD.
+        static inline bool in_range(int apa, int face, int plane, int wire, int time) {
+            return apa >= 0 && apa < (1 << 12) && face >= 0 && face < 4
+                && plane >= 0 && plane < 4 && wire >= 0 && wire < (1 << 20)
+                && time >= 0 && time < (1 << 28);
+        }
         static inline uint64_t pack(int apa, int face, int plane, int wire, int time) {
-            return (uint64_t(apa & 0xFFF) << 52) | (uint64_t(face & 0x3) << 50)
-                 | (uint64_t(plane & 0x3) << 48) | (uint64_t(wire & 0xFFFFF) << 28)
-                 | uint64_t(time & 0xFFFFFFF);
+            return (uint64_t(apa) << 52) | (uint64_t(face) << 50)
+                 | (uint64_t(plane) << 48) | (uint64_t(wire) << 28)
+                 | uint64_t(time);
         }
 
         /// Dilate one seed cell into the keep set.  Stored times are
         /// slice-quantized (floor(tick/n)*n), so the time pad steps by the
         /// slice width, not by one tick.
         void seed(int apa, int face, int plane, int wire, int time, int nticks_per_slice) {
+            if (!in_range(apa, face, plane, wire, time)) {
+                if (!overflow) {
+                    SPDLOG_LOGGER_WARN(s_log,
+                        "fill_fitted_charge_2d: proj_pad coordinate out of packing range "
+                        "(apa={} face={} plane={} wire={} time={}); the display filter is "
+                        "disabled for this fit and every cell is stored",
+                        apa, face, plane, wire, time);
+                }
+                overflow = true;
+                return;
+            }
             const int step = nticks_per_slice > 0 ? nticks_per_slice : 1;
             const int dt = pad_slices * step;
             for (int w = wire - pad_w; w <= wire + pad_w; ++w) {
@@ -74,7 +94,9 @@ namespace {
         }
 
         inline bool operator()(int apa, int face, int plane, int wire, int time) const {
-            return !on || keep.count(pack(apa, face, plane, wire, time)) != 0;
+            if (!on || overflow) return true;
+            if (!in_range(apa, face, plane, wire, time)) return true;   // fail OPEN
+            return keep.count(pack(apa, face, plane, wire, time)) != 0;
         }
     };
 }
