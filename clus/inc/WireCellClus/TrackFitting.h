@@ -243,6 +243,22 @@ namespace WireCell::Clus {
             // trajectory_fit's loop already does.  0 = legacy = byte-identical.
             double proj_skip_unmapped_face = 0;
 
+            // doc pdhd/11 -- the FINAL organize_ps_path (do_single_tracking's
+            // third call, low_dis_limit / end_point_limit 0) straight-line-fills
+            // every gap >= 1.6 * low_dis_limit, and nothing between it and the
+            // PR::Fit construction charge-tests the points it inserts: no
+            // form_map, no examine_point_association, no skip_trajectory_point.
+            // So a point form_map had ALREADY dropped for carrying no charge on
+            // any plane is re-created by interpolation and reaches stm_fit,
+            // T_rec_charge and the dQ/dx fit.  On a sparse Steiner seed that is
+            // most of the trajectory: PDHD 028084/9 cluster 126's rough path is
+            // a SINGLE 592 cm edge and 62 % of its 1030 final points are
+            // inserted here, 33 % of them more than 10 cm from any charge in
+            // the event.  > 0 re-applies form_map's own keep rule (a point
+            // survives iff qU + qV + qW > 0) to the final set.  0 = legacy =
+            // byte-identical.
+            double traj_final_fill_charge_test = 0;
+
             // doc pdvd/44 -- acceptance window of cal_gaus_integral in sigmas:
             // a (time, wire) bin farther than gaus_nsigma * sigma from a
             // sub-point's centre receives nothing from it (no renormalisation).
@@ -841,6 +857,13 @@ namespace WireCell::Clus {
         void dQ_dx_multi_fit(double dis_end_point_ext=0.45*units::cm, bool flag_dQ_dx_fit_reg=true);
 
         void do_single_tracking(std::shared_ptr<PR::Segment> segment, bool flag_dQ_dx_fit_reg= true, bool flag_dQ_dx_fit= true, bool flag_force_load_data = false, bool flag_hack = false, Facade::Cluster* cluster_filter = nullptr);
+
+        // doc pdhd/11: label carried into the WCT_STM_PATH_DEBUG trajectory trace
+        // so a dumped stage can be attributed to a cluster / pass.  Log-only: the
+        // string is read nowhere unless that environment variable is set, and it
+        // takes part in no decision, so it cannot change output.
+        void set_path_debug_tag(const std::string& tag) { m_path_debug_tag = tag; }
+        std::string m_path_debug_tag{"-"};
         void do_multi_tracking(bool flag_dQ_dx_fit_reg= true, bool flag_dQ_dx_fit= true, bool flag_force_load_data = false, bool flag_exclusion =false, bool flag_hack = false, Facade::Cluster* cluster_filter = nullptr);
 
 

@@ -284,7 +284,7 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
         // muon hypothesis in shape and normalization is not called a proton.
         tagger_check_stm(name="", trackfitting_config_file="", particle_dataset="", recombination_model="",
                          require_in_scope=false, evaluate_demoted_mains=false,
-                         save_stm_fit=false, mip_dqdx=null,
+                         save_stm_fit=false, rough_path_require_connected=false, mip_dqdx=null,
                          fiducial=null, fv_tolerance=[],
                          beam_window_only=false, beam_window_low=0, beam_window_high=0,
                          accept_guards=false, proton_muon_guard=false,
@@ -311,6 +311,12 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
               + (if require_in_scope then { require_in_scope: true } else {})
               + (if evaluate_demoted_mains then { evaluate_demoted_mains: true } else {})
               + (if save_stm_fit then { save_stm_fit: true } else {})
+              // doc pdhd/11: a Dijkstra query whose two endpoints are in different
+              // connected components of "steiner_graph" returns the stub {src,dst,dst}
+              // instead of failing, and the chain interpolates a straight line between
+              // the two ends.  ON re-anchors the start into the end's component.
+              // C++ default false.  Key omitted when off => byte-identical pre-fix config.
+              + (if rough_path_require_connected then { rough_path_require_connected: true } else {})
               + (if mip_dqdx != null then { mip_dqdx: mip_dqdx } else {})
               + (if fiducial != null then { fiducial: fiducial } else {})
               + (if std.length(fv_tolerance) > 0 then { fv_tolerance: fv_tolerance } else {})
@@ -1122,7 +1128,7 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
                  collinear_recover=false, collinear_interior=false,
                  collinear_member_merge=false,
                  track_repartition=false, band_merge_back=false, band_recarve=false,
-                 drift_side_fv_x=false,
+                 drift_side_fv_x=false, drift_side_fv_skip_degenerate=false,
                  far_point_x_cut=null, far_point_mid_dis=null, track_recarve=false,
                  fv_inset_yz=null,
                  dec1_guard_main_angle=null, iso_slab_split=false, tag_family=false,
@@ -1161,6 +1167,16 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
                 // side instead of the cryostat overall x.  Key omitted when false
                 // so existing configs stay bit-identical.
                 [if drift_side_fv_x then 'drift_side_fv_x']: drift_side_fv_x,
+                // Ignore insensitive ("wall") faces when select_scope_fv tests
+                // whether a multi-APA scope's faces agree on a drift-side
+                // x-range.  Such a face's metadata block carries
+                // FV_xmin == FV_xmax; jsonnet declares the face null but
+                // Gen::AnodePlane builds it anyway and DetectorVolumes
+                // registers it, so on PDHD one always disagrees and
+                // drift_side_fv_x above is silently inert (doc pdhd/11).
+                // C++ default false.  Key omitted when off => byte-identical
+                // pre-fix config.
+                [if drift_side_fv_skip_degenerate then 'drift_side_fv_skip_degenerate']: drift_side_fv_skip_degenerate,
                 // Drift-x deviation promoting a boundary point to a "far" point in
                 // JudgeSeparateDec_2's two-endpoint test.  null (default) keeps the
                 // prototype-exact 140 cm (effectively dead); PDHD/PDVD set the

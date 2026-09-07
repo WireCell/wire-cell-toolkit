@@ -482,6 +482,19 @@ local clus_per_group (
     // assoc_cluster_main perblob arrays ONLY; cluster membership is untouched.
     // false => both keys omitted => byte-identical compiled config and pctree.
     save_assoc_id = false,
+    // doc pdhd/11: make drift_side_fv_x below actually apply on PDHD.
+    // select_scope_fv() adopts the drift group's x-range only if EVERY configured
+    // face of the group agrees on FV_xmin/FV_xmax -- and DetectorVolumes registers
+    // both faces of every anode, including the insensitive "wall" face whose block
+    // here is degenerate (a0f1pA/a2f1pA carry FV_xmin == FV_xmax == -3579.85 mm).
+    // One such face always disagrees, so on PDHD the drift-side x-range is never
+    // adopted and the pass silently runs against the cryostat-wide overall x
+    // (+/-357.985 cm, BOTH drift volumes) -- which makes JudgeSeparateDec_2's
+    // surface-contact count zero, exactly the failure clus/docs/clustering-separate-fv.md
+    // describes.  PDVD is immune: its per-face blocks already agree.
+    // false => key omitted => byte-identical compiled config.  NOT set by the
+    // PDHD driver: this is a graded knob, not a production flip.
+    drift_side_fv_skip_degenerate = false,
     ) = {
     local nanodes = std.length(anodes),
     local pcmerging = g.pnode({
@@ -516,7 +529,8 @@ local clus_per_group (
                     collinear_member_merge=true,
                     track_repartition=true, band_merge_back=true, band_recarve=true, drift_side_fv_x=true,
                     far_point_x_cut=14*wc.cm, far_point_mid_dis=60*wc.cm, track_recarve=true, dec1_guard_main_angle=45,
-                    iso_slab_split=true, tag_family=true, collinear_global_merge=true),
+                    iso_slab_split=true, tag_family=true, collinear_global_merge=true,
+                    drift_side_fv_skip_degenerate=drift_side_fv_skip_degenerate),
         // MicroBooNE order after separate: connect1 (reconnect dashed-line
         // fragments, e.g. drift-direction tracks split across the group) then
         // deghost (remove ghosts that only the group scope can adjudicate).
@@ -828,7 +842,7 @@ local clus_all_tpc (
     local bee_dir = if output_dir == '' then 'data' else output_dir,
     per_face(anode, face=0, dump=true, wrapped_channel_charge=true) :: clus_per_face(anode, face=face, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo, wrapped_channel_charge=wrapped_channel_charge),
     per_apa(anode, dump=true, wrapped_channel_charge=true) :: clus_per_apa(anode, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo, wrapped_channel_charge=wrapped_channel_charge),
-    per_group(anodes, group_name, face, dump=true, save_assoc_id=false) :: clus_per_group(anodes, group_name, face, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo, save_assoc_id=save_assoc_id),
+    per_group(anodes, group_name, face, dump=true, save_assoc_id=false, drift_side_fv_skip_degenerate=false) :: clus_per_group(anodes, group_name, face, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo, save_assoc_id=save_assoc_id, drift_side_fv_skip_degenerate=drift_side_fv_skip_degenerate),
     all_tpc(anodes, ngroups=2, dump=true, save_opflash=false, premerged=false, tensor_outname='', save_assoc_id=false) :: clus_all_tpc(anodes, ngroups=ngroups, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo, save_opflash=save_opflash, premerged=premerged, tensor_outname=tensor_outname, save_assoc_id=save_assoc_id),
     // Expose the DetectorVolumes node builder so the Q/L matching graph can
     // reference the SAME per-group DV the clustering uses (deterministic by name).

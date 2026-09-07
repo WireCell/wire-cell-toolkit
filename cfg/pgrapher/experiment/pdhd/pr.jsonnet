@@ -250,7 +250,9 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1,
               // as a tagger boundary, so it was never measured here.  Ignored when
               // curved_fv is off.
               curved_fv_profile='flat',
-              save_stm_fit=false, unmerge_bundle_mode='real',
+              save_stm_fit = false,
+              // doc pdhd/11: see the tagger_check_stm binding below.  false => key omitted.
+              stm_rough_path_require_connected = false, unmerge_bundle_mode='real',
               // doc pr/34 §10 particle-flow (Bee mc tree) port-fidelity knobs.
               // C++ defaults false; keys omitted when off => byte-identical
               // pre-knob config.  Display-only stage: mc.json is the artifact.
@@ -1477,6 +1479,15 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1,
                 // grouping slot "stm" for the Bee stm_fit layer and the
                 // stm_magnify ROOT dump below.  Runner flag: -stm-fit.
                 save_stm_fit=save_stm_fit,
+                // doc pdhd/11: do_rough_path's Dijkstra query does not check that its
+                // two boundary vertices share a connected component of "steiner_graph".
+                // When they do not, boost returns the stub {src, dst, dst} and the fit
+                // chain interpolates a straight line between the two ends -- PDHD
+                // 028084/9 cluster 126, a 1019-point trajectory across 592 cm of empty
+                // detector, seeded by a single detached 3-D point 60.5 cm off the track
+                // that clustering had absorbed into the main cluster.  C++ default
+                // false; key omitted when off => byte-identical.
+                rough_path_require_connected=stm_rough_path_require_connected,
                 // mip_dqdx: SBND MIP dQ/dx scale in e/cm, replacing the inherited
                 // MicroBooNE 50000.  Anchored to the muon reference table the same
                 // way 50000 was anchored to MicroBooNE's: the uBooNE table plateau

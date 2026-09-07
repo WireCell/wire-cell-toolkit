@@ -103,6 +103,46 @@ namespace {
 
 using geo_point_t = WireCell::Point;
 
+// doc pdhd/11: per-stage trajectory trace, log-only, off unless WCT_STM_PATH_DEBUG
+// is set.  It answers "at which step of the fitting chain does the trajectory
+// leave the image?" -- the owner's question about PDHD 028084/9 cluster 126,
+// whose stm_fit runs 8-17 cm off the Steiner path for its whole x<0 leg.
+//
+// Emits, per stage, one STMPATHN header and one STMPATH line per point:
+//     STMPATHN <tag> <stage> <npoints>
+//     STMPATH  <tag> <stage> <i> <x_cm> <y_cm> <z_cm>
+// The seed's own Dijkstra edge lengths are recoverable offline as consecutive
+// point distances of the "seed" stage, so a single long MST bridge edge in the
+// Steiner walk shows up without instrumenting the graph itself.
+static bool stm_path_debug()
+{
+    static const bool v = (getenv("WCT_STM_PATH_DEBUG") != nullptr);
+    return v;
+}
+
+static void stm_path_dump(const std::string& tag, const char* stage,
+                          const std::vector<WireCell::Point>& pts)
+{
+    if (!stm_path_debug()) return;
+    std::cout << "STMPATHN " << tag << " " << stage << " " << pts.size() << std::endl;
+    for (size_t i = 0; i != pts.size(); ++i) {
+        std::cout << "STMPATH " << tag << " " << stage << " " << i
+                  << " " << pts[i].x() / units::cm
+                  << " " << pts[i].y() / units::cm
+                  << " " << pts[i].z() / units::cm << std::endl;
+    }
+}
+
+static void stm_path_dump(const std::string& tag, const char* stage,
+                          const std::vector<std::pair<WireCell::Point, std::shared_ptr<PR::Segment>>>& ptss)
+{
+    if (!stm_path_debug()) return;
+    std::vector<WireCell::Point> pts;
+    pts.reserve(ptss.size());
+    for (const auto& pr : ptss) pts.push_back(pr.first);
+    stm_path_dump(tag, stage, pts);
+}
+
 // Temporary determinism-debug helpers, enabled with WCT_DET_DEBUG=1.
 // FNV-1a over raw double bytes; prints stable per-call checksums of solver
 // inputs so two runs can be diffed to localize run-to-run divergence.
@@ -153,6 +193,8 @@ void TrackFitting::set_parameter(const std::string& name, double value) {
         m_params.excl_t0_frame = value;
     } else if (name == "proj_skip_unmapped_face") {    // doc pdvd/45 sec 13
         m_params.proj_skip_unmapped_face = value;
+    } else if (name == "traj_final_fill_charge_test") {  // doc pdhd/11
+        m_params.traj_final_fill_charge_test = value;
     } else if (name == "gaus_nsigma") {                 // doc pdvd/44
         m_params.gaus_nsigma = value;
     } else if (name == "DL") {
@@ -326,6 +368,8 @@ double TrackFitting::get_parameter(const std::string& name) const {
         return m_params.excl_t0_frame;
     } else if (name == "proj_skip_unmapped_face") {    // doc pdvd/45 sec 13
         return m_params.proj_skip_unmapped_face;
+    } else if (name == "traj_final_fill_charge_test") {  // doc pdhd/11
+        return m_params.traj_final_fill_charge_test;
     } else if (name == "gaus_nsigma") {                 // doc pdvd/44
         return m_params.gaus_nsigma;
     } else if (name == "good_point_pitch_frac") {      // doc pdvd/32 round 3
@@ -9969,7 +10013,14 @@ void TrackFitting::do_single_tracking(std::shared_ptr<PR::Segment> segment, bool
     }
     // auto segment = *m_segments.begin();
     
+    if (stm_path_debug()) {
+        std::vector<WireCell::Point> seed;
+        for (const auto& w : segment->wcpts()) seed.emplace_back(w.point.x(), w.point.y(), w.point.z());
+        stm_path_dump(m_path_debug_tag, "seed", seed);
+    }
+
     auto pts = organize_orig_path(segment, low_dis_limit, end_point_limit); 
+    stm_path_dump(m_path_debug_tag, "org1", pts);
     if (pts.size() == 0) return;
     else if (pts.size() == 1) {
         const auto& segment_wcpts = segment->wcpts();
@@ -9997,9 +10048,11 @@ void TrackFitting::do_single_tracking(std::shared_ptr<PR::Segment> segment, bool
 
     if (flag_1st_tracking) {
         form_map(ptss, m_params.end_point_factor, m_params.mid_point_factor, m_params.nlevel, m_params.time_tick_cut, m_params.charge_cut);
+        stm_path_dump(m_path_debug_tag, "map1", ptss);
         // if (m_perf) std::cout << "do_single_tracking timing: form_map took " << DST_MS(DST_Clock::now() - t_dst).count() << " ms" << std::endl; t_dst = DST_Clock::now();
 
         trajectory_fit(ptss, 1, m_params.div_sigma);
+        stm_path_dump(m_path_debug_tag, "fit1", ptss);
         // if (m_perf) std::cout << "do_single_tracking timing: 1st trajectory_fit took " << DST_MS(DST_Clock::now() - t_dst).count() << " ms" << std::endl; t_dst = DST_Clock::now();
     }
     // Check for very close start/end points and reset if needed
@@ -10052,6 +10105,7 @@ void TrackFitting::do_single_tracking(std::shared_ptr<PR::Segment> segment, bool
         // //
 
         organize_ps_path(segment, pts, low_dis_limit, end_point_limit);
+        stm_path_dump(m_path_debug_tag, "org2", pts);
         // if (m_perf) std::cout << "do_single_tracking timing: organize path " << DST_MS(DST_Clock::now() - t_dst).count() << " ms" << std::endl; t_dst = DST_Clock::now();
 
         
@@ -10065,9 +10119,11 @@ void TrackFitting::do_single_tracking(std::shared_ptr<PR::Segment> segment, bool
             ptss.emplace_back(pt, segment);
         }
         form_map(ptss, m_params.end_point_factor, m_params.mid_point_factor, m_params.nlevel, m_params.time_tick_cut, m_params.charge_cut);
+        stm_path_dump(m_path_debug_tag, "map2", ptss);
         // if (m_perf) std::cout << "do_single_tracking timing: form_map took " << DST_MS(DST_Clock::now() - t_dst).count() << " ms" << std::endl; t_dst = DST_Clock::now();
 
         trajectory_fit(ptss, 2, m_params.div_sigma);
+        stm_path_dump(m_path_debug_tag, "fit2", ptss);
         // if (m_perf) std::cout << "do_single_tracking timing: 2nd trajectory_fit took " << DST_MS(DST_Clock::now() - t_dst).count() << " ms" << std::endl;t_dst = DST_Clock::now();
 
         pts.clear();
@@ -10077,6 +10133,33 @@ void TrackFitting::do_single_tracking(std::shared_ptr<PR::Segment> segment, bool
         
         // Final path organization
         organize_ps_path(segment, pts, low_dis_limit, 0);
+        stm_path_dump(m_path_debug_tag, "org3", pts);
+
+        // doc pdhd/11: charge-test what that fill just inserted.  The middle
+        // resample above interpolates a straight line across every gap, and it is
+        // the LAST thing to touch positions -- no form_map, no
+        // examine_point_association and no skip_trajectory_point runs between here
+        // and the PR::Fit construction -- so points the chain already rejected for
+        // having no charge on any plane come back and reach the output.  Re-apply
+        // form_map's own keep rule (qU + qV + qW > 0); it is the same test, the
+        // same thresholds and the same code the two earlier stages used.
+        // The size guard mirrors the degenerate handling below: never hand the
+        // projection loop a path this test emptied.
+        // m_params.traj_final_fill_charge_test <= 0 (default) => not called =>
+        // byte-identical.
+        if (m_params.traj_final_fill_charge_test > 0 && pts.size() > 1) {
+            std::vector<std::pair<WireCell::Point, std::shared_ptr<PR::Segment>>> ptss_final;
+            ptss_final.reserve(pts.size());
+            for (const auto& pt : pts) ptss_final.emplace_back(pt, segment);
+            form_map(ptss_final, m_params.end_point_factor, m_params.mid_point_factor,
+                     m_params.nlevel, m_params.time_tick_cut, m_params.charge_cut);
+            if (ptss_final.size() > 1) {
+                pts.clear();
+                pts.reserve(ptss_final.size());
+                for (const auto& pr : ptss_final) pts.push_back(pr.first);
+            }
+            stm_path_dump(m_path_debug_tag, "org3f", pts);
+        }
         // if (m_perf) std::cout << "do_single_tracking timing: organize path " << DST_MS(DST_Clock::now() - t_dst).count() << " ms" << std::endl; t_dst = DST_Clock::now();
 
 
@@ -10308,6 +10391,8 @@ void TrackFitting::do_single_tracking(std::shared_ptr<PR::Segment> segment, bool
         return;
     }
     
+    stm_path_dump(m_path_debug_tag, "final", fine_tracking_path);
+
     // Calculate cumulative range (distance along track)
     std::vector<double> cumulative_range(npoints, 0.0);
     if (npoints > 1) {

@@ -133,6 +133,30 @@ public:
             SPDLOG_LOGGER_DEBUG(s_log, "configure: TaggerCheckSTM: save_stm_fit ON");
         }
 
+        // rough_path_require_connected (C++ default false = byte-identical).
+        //
+        // doc pdhd/11.  do_rough_path walks Dijkstra on "steiner_graph" between the
+        // two boundary points cluster_fc_check chose.  Nothing checks that those two
+        // vertices are in the SAME connected component of that graph, and when they
+        // are not, boost leaves predecessor[dst] == dst, so ShortestPaths::path
+        // (Graphs.cxx:19-40) returns the stub {src, dst, dst} -- two endpoints and no
+        // route.  It is indistinguishable from a real 2-node path, so the whole chain
+        // accepts it: organize_orig_path interpolates a straight line between the two
+        // ends and the fit reports a trajectory that never existed.
+        //
+        // PDHD 028084/9 cluster 126 is the owner's case.  Clustering absorbed a SINGLE
+        // detached 3-D point 60.5 cm from the cluster body into the main cluster; the
+        // boundary finder picked it as the track's extreme; it carries its own 2-vertex
+        // Steiner component (the other 5084 vertices are the track); and the resulting
+        // stub became a 1019-point straight line across 592 cm of empty detector.
+        //
+        // ON: when the two endpoints are in different components, re-anchor the START
+        // to the Steiner vertex nearest it *within the destination's component*, so the
+        // pass runs on the track instead of on the stub.  The cluster is not modified;
+        // only which vertex this pass starts from.
+        m_rough_path_require_connected =
+            get<bool>(config, "rough_path_require_connected", m_rough_path_require_connected);
+
         // mip_dqdx (electrons per cm; C++ default 50e3 = the MicroBooNE value,
         // so an absent key is byte-identical to the pre-knob code).  See the
         // m_mip_dqdx declaration for the two roles this one number drives.
@@ -409,6 +433,7 @@ public:
         cfg["beam_window_low"] = m_beam_window_low;
         cfg["beam_window_high"] = m_beam_window_high;
         cfg["save_stm_fit"] = m_save_stm_fit;
+        cfg["rough_path_require_connected"] = m_rough_path_require_connected;
         cfg["mip_dqdx"] = m_mip_dqdx;
         // doc-63 round-1 acceptance guards; false = byte-identical legacy.
         cfg["accept_guards"] = m_accept_guards;
@@ -867,6 +892,8 @@ private:
     // Round-1 rough fits and passes aborted with <=3 fit points are NOT
     // recorded (no round-2 segment exists).
     bool m_save_stm_fit{false};
+    // doc pdhd/11: see configure().  false => the legacy path, byte-identical.
+    bool m_rough_path_require_connected{false};
     struct StmPassRecord {
         std::shared_ptr<PR::Segment> segment;
         int pass{0};        // 0 forward, 1 backward
@@ -1111,9 +1138,72 @@ private:
         auto first_index = first_knn_results[0].first;  // Get the index from the first result
         auto last_index = last_knn_results[0].first;   // Get the index from the first result
  
+        // doc pdhd/11: a Dijkstra query across two connected components does not fail,
+        // it returns the stub {src, dst, dst} -- see the knob's comment in configure().
+        // Re-anchor the start into the destination's component rather than hand that
+        // stub on as a trajectory.  Knob off => not evaluated => byte-identical.
+        if (m_rough_path_require_connected) {
+            const auto& ga = cluster.graph_algorithms("steiner_graph");
+            const auto& cc = ga.connected_components();
+            if (first_index < cc.size() && last_index < cc.size() && cc[first_index] != cc[last_index]) {
+                const auto& spc = cluster.get_pc("steiner_pc");
+                const auto& sco = cluster.get_default_scope().coords;
+                const auto& sx = spc.get(sco.at(0))->elements<double>();
+                const auto& sy = spc.get(sco.at(1))->elements<double>();
+                const auto& sz = spc.get(sco.at(2))->elements<double>();
+                const size_t want = cc[last_index];
+                double best = -1;
+                size_t best_idx = first_index;
+                const size_t n = std::min(cc.size(), sx.size());
+                for (size_t i = 0; i != n; ++i) {
+                    if (cc[i] != want) continue;
+                    const double d2 = pow(sx[i] - first_point.x(), 2) + pow(sy[i] - first_point.y(), 2)
+                                    + pow(sz[i] - first_point.z(), 2);
+                    if (best < 0 || d2 < best) { best = d2; best_idx = i; }
+                }
+                if (best >= 0 && best_idx != first_index) {
+                    SPDLOG_LOGGER_DEBUG(s_log,
+                        "{}do_rough_path: cluster {} start vertex is in Steiner component {} but the "
+                        "end is in {}; re-anchoring the start {:.1f} cm to the nearest vertex of the "
+                        "end's component (rough_path_require_connected)",
+                        m_evt_tag, cluster.ident(), (long)cc[first_index], (long)cc[last_index],
+                        sqrt(best) / units::cm);
+                    first_index = best_idx;
+                    first_point = geo_point_t(sx[best_idx], sy[best_idx], sz[best_idx]);
+                }
+            }
+        }
+
         // 4. Use Steiner graph to find the shortest path
         const std::vector<size_t>& path_indices = 
             cluster.graph_algorithms("steiner_graph").shortest_path(first_index, last_index);
+
+        // doc pdhd/11: log-only (WCT_STM_PATH_DEBUG) anatomy of the graph this path was
+        // walked on.  The question it answers is whether a sparse rough path means the
+        // graph is DISCONNECTED along the track (so the only route is an uncapped
+        // connect_graph_ctpc MST bridge) or CONNECTED but out-priced by a chord (the
+        // [0.8, 1.2] endpoint-only charge weighting of create_enhanced_steiner_graph).
+        // The two have different fixes, so they must not be guessed at.
+        if (getenv("WCT_STM_PATH_DEBUG") != nullptr) {
+            const auto& ga = cluster.graph_algorithms("steiner_graph");
+            const auto& gr = cluster.get_graph("steiner_graph");
+            const auto& cc = ga.connected_components();
+            std::map<size_t, size_t> csize;
+            for (auto c : cc) csize[c]++;
+            size_t big = 0;
+            for (const auto& kv : csize) big = std::max(big, kv.second);
+            std::cout << "STMGRAPH cluster=" << cluster.ident()
+                      << " nvert=" << boost::num_vertices(gr)
+                      << " nedge=" << boost::num_edges(gr)
+                      << " ncomp=" << csize.size()
+                      << " biggest_comp=" << big
+                      << " src_comp=" << (first_index < cc.size() ? (long)cc[first_index] : -1)
+                      << " dst_comp=" << (last_index < cc.size() ? (long)cc[last_index] : -1)
+                      << " same_comp="
+                      << (first_index < cc.size() && last_index < cc.size() && cc[first_index] == cc[last_index])
+                      << " npath=" << path_indices.size()
+                      << std::endl;
+        }
             
         std::vector<geo_point_t> path_points;
         if (!cluster.has_pc("steiner_pc")) return path_points;
@@ -3603,6 +3693,9 @@ private:
                 m_track_fitter.clear_segments();
                 auto segment = create_segment_for_cluster(cluster, path_points);
                 m_track_fitter.add_segment(segment);
+                // doc pdhd/11: label for the WCT_STM_PATH_DEBUG trace only.
+                m_track_fitter.set_path_debug_tag(std::to_string(cluster.ident()) + "/" +
+                                                 (is_forward ? "fwd" : "bwd") + "/r1");
                 m_track_fitter.do_single_tracking(segment, false);
                 if (is_forward && segment->fits().size() <= 3) {
                     SPDLOG_LOGGER_DEBUG(s_log, "{}check_stm_conditions: cluster {} no STM fit: round-1 forward fit gave only {} points (<=3)", m_evt_tag,
@@ -3619,6 +3712,9 @@ private:
             auto adjusted_segment = create_segment_for_cluster(cluster, adjusted_path_points);
             m_track_fitter.clear_segments();
             m_track_fitter.add_segment(adjusted_segment);
+            // doc pdhd/11: label for the WCT_STM_PATH_DEBUG trace only.
+            m_track_fitter.set_path_debug_tag(std::to_string(cluster.ident()) + "/" +
+                                              (is_forward ? "fwd" : "bwd") + "/r2");
             m_track_fitter.do_single_tracking(adjusted_segment);
 
             if (m_save_stm_fit) begin_pass_record(adjusted_segment, is_forward);

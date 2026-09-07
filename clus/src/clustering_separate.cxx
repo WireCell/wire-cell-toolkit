@@ -33,7 +33,8 @@ static bool sep_debug()
     return v;
 }
 
-ScopeFV WireCell::Clus::Facade::select_scope_fv(IDetectorVolumes::pointer dv, bool common_face_x)
+ScopeFV WireCell::Clus::Facade::select_scope_fv(IDetectorVolumes::pointer dv, bool common_face_x,
+                                                bool skip_degenerate_face_x)
 {
     const Configuration overall = dv->metadata(WirePlaneId(0));
 
@@ -80,20 +81,27 @@ ScopeFV WireCell::Clus::Facade::select_scope_fv(IDetectorVolumes::pointer dv, bo
         // and keep the overall x.
         if (common_face_x && !faces.empty()) {
             bool common = true;
+            bool seen = false;
             double xmin = 0, xmax = 0, xmin_m = 0, xmax_m = 0;
             for (size_t i = 0; i != faces.size(); i++) {
                 const Configuration blk = dv->metadata(faces[i]);
                 const double bxmin = field(blk, "FV_xmin"), bxmax = field(blk, "FV_xmax");
-                if (i == 0) {
+                // A degenerate block (FV_xmin == FV_xmax) is an insensitive face's:
+                // it names no drift volume, so it cannot speak for one.  Skipping it
+                // is what lets a PDHD drift group reach agreement at all; default OFF
+                // keeps the legacy vote, in which one such face vetoes the whole test.
+                if (skip_degenerate_face_x && bxmin == bxmax) continue;
+                if (!seen) {
                     xmin = bxmin;  xmax = bxmax;
                     xmin_m = field(blk, "FV_xmin_margin");  xmax_m = field(blk, "FV_xmax_margin");
+                    seen = true;
                 }
                 else if (bxmin != xmin || bxmax != xmax) {
                     common = false;
                     break;
                 }
             }
-            if (common) {
+            if (common && seen) {
                 fv.xmin = xmin;  fv.xmax = xmax;
                 fv.xmin_margin = xmin_m;  fv.xmax_margin = xmax_m;
             }
@@ -2146,7 +2154,8 @@ static void clustering_separate(Grouping& live_grouping,
                                 const bool tag_family,
                                 const bool collinear_global_merge,
                                 const bool vertex_veto,
-                                const double fv_inset_yz);
+                                const double fv_inset_yz,
+                                const bool drift_side_fv_skip_degenerate);
 
 class ClusteringSeparate : public IConfigurable, public Clus::IEnsembleVisitor, private NeedDV, private NeedPCTS, private NeedScope {
 public:
@@ -2225,6 +2234,12 @@ public:
         // stops short of the wall (doc 97; SBND's own FV is inset 0.65-2.05 cm
         // and Dec_2 fires on 0 of 74 in-time clusters, doc 96 sec 6.1).
         fv_inset_yz_ = get(config, "fv_inset_yz", 0.0);
+        // Ignore insensitive ("wall") faces -- those whose metadata block has
+        // FV_xmin == FV_xmax -- when select_scope_fv tests whether a multi-APA
+        // scope's faces agree on a common drift-side x-range.  Default OFF =>
+        // the legacy vote, bit-identical.  PDHD needs it ON for drift_side_fv_x
+        // to have any effect at all; see doc pdhd/11.
+        drift_side_fv_skip_degenerate_ = get(config, "drift_side_fv_skip_degenerate", false);
     }
 
     void visit(Ensemble& ensemble) const {
@@ -2235,7 +2250,7 @@ public:
                             band_recarve_, drift_side_fv_x_,
                             far_point_x_cut_, far_point_mid_dis_, track_recarve_, dec1_guard_main_angle_,
                             iso_slab_split_, tag_family_, collinear_global_merge_, vertex_veto_,
-                            fv_inset_yz_);
+                            fv_inset_yz_, drift_side_fv_skip_degenerate_);
     }
 
 private:
@@ -2258,6 +2273,7 @@ private:
     bool collinear_global_merge_{false};
     bool vertex_veto_{false};
     double fv_inset_yz_{0.0};
+    bool drift_side_fv_skip_degenerate_{false};
 };
 
 
@@ -2289,7 +2305,8 @@ static void clustering_separate(
     const bool tag_family,
     const bool collinear_global_merge,
     const bool vertex_veto,
-    const double fv_inset_yz)
+    const double fv_inset_yz,
+    const bool drift_side_fv_skip_degenerate)
 {
     // Check that live_grouping has exactly one wpid
 	// if (live_grouping.wpids().size() != 1 ) {
@@ -2323,7 +2340,36 @@ static void clustering_separate(
     // the physical wall and a track that stops a few cm short of it is not
     // counted.  doc 96 sec 6.1 measured the consequence on SBND: Dec_2 accepts
     // 0 of 74 in-time clusters, including 0 of the 33 longer than 250 cm.
-    const ScopeFV fv = inset_scope_fv(select_scope_fv(dv, drift_side_fv_x), fv_inset_yz);
+    const ScopeFV fv =
+        inset_scope_fv(select_scope_fv(dv, drift_side_fv_x, drift_side_fv_skip_degenerate), fv_inset_yz);
+
+    // Log-only (WCT_SEP_DEBUG): which fiducial volume this pass actually resolved,
+    // and the per-face FV_x blocks select_scope_fv() had to agree on to adopt the
+    // drift-side x-range.  A face whose block is degenerate (FV_xmin == FV_xmax --
+    // an insensitive "wall" face that jsonnet declares null but Gen::AnodePlane
+    // still constructs) makes common_face_x fail, and the pass silently falls back
+    // to the cryostat-wide overall x.  See doc pdhd/11.
+    if (sep_debug()) {
+        std::cout << "SEPDBG scopefv drift_side_fv_x=" << drift_side_fv_x
+                  << " inset_yz=" << fv_inset_yz / units::cm
+                  << " x=[" << fv.xmin / units::cm << "," << fv.xmax / units::cm << "]"
+                  << " y=[" << fv.ymin / units::cm << "," << fv.ymax / units::cm << "]"
+                  << " z=[" << fv.zmin / units::cm << "," << fv.zmax / units::cm << "]"
+                  << std::endl;
+        for (const auto& kv : dv->wpident_faces()) {
+            const WirePlaneId wpid(kv.first);
+            const Configuration blk = dv->metadata(wpid);
+            const bool have = blk.isMember("FV_xmin") && blk.isMember("FV_xmax");
+            const double bxmin = have ? blk["FV_xmin"].asDouble() : 0;
+            const double bxmax = have ? blk["FV_xmax"].asDouble() : 0;
+            std::cout << "SEPDBG scopefv_face apa=" << wpid.apa() << " face=" << wpid.face()
+                      << " have_x=" << have
+                      << " x=[" << bxmin / units::cm << "," << bxmax / units::cm << "]"
+                      << " degenerate=" << (have && bxmin == bxmax)
+                      << std::endl;
+        }
+    }
+
     const double det_FV_ymax = fv.ymax;
     const geo_point_t beam_dir = fv.beam_dir;
     const geo_point_t vertical_dir = fv.vertical_dir;
