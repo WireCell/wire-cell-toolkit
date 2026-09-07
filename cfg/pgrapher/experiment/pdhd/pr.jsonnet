@@ -236,6 +236,11 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1,
               // box is the ACTIVE volume with no shell, so the surface only ADDS an inset
               // near the cathode: expect TGM up, fully-contained down, not PDVD's -33 %.
               // Default OFF => the compiled config is byte-identical to pre-doc-09.
+              // PDHD PRODUCTION runs curved_fv=true, curved_fv_profile='p90',
+              // curved_fv_margin_y/z=3 (doc pdhd/09 sec 12, owner decision
+              // 2026-09-07), set in the DRIVER pdhd/wct-pr-perevt.jsonnet -- the
+              // only production caller -- exactly as PDVD does it.  These function
+              // defaults stay off so a caller passing nothing keeps the legacy box.
               curved_fv=false, curved_fv_margin_y=3, curved_fv_margin_z=3,
               // curved_fv_profile (doc pdhd/09): which measured surface curved_fv
               // installs -- 'p80' or 'p90', the exit-gap quantiles of
