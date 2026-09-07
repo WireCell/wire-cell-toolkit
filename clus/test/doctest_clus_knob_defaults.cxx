@@ -211,6 +211,7 @@ TEST_CASE("clus knob defaults: TaggerCheckNeutrino switches are all OFF")
     CHECK_KNOB_NUM(cfg, "long_muon_cathode_bridge_short_gap", 0.0);           // doc 84 r4 G3; cm; 0 = waiver off
     CHECK_KNOB_NUM(cfg, "long_muon_cathode_bridge_short_gap_angle", 10.0);    // deg; inert while short_gap 0
     CHECK_KNOB_NUM(cfg, "long_muon_cathode_bridge_short_gap_len", 50.0);      // cm; inert while short_gap 0
+    CHECK_KNOB_NUM(cfg, "long_muon_cathode_bridge_tail_min_len", 0.0);        // doc pr/147 r2; cm; 0 == off = legacy (no receiver-side tail absorb)
     CHECK_KNOB_BOOL(cfg, "long_muon_cathode_bridge_track_types", false);      // doc pr/147; false = both type guards exactly as doc 84 shipped them
     CHECK_KNOB_NUM(cfg, "long_muon_cathode_bridge_trk_dqdx_lo", 0.8);         // doc pr/147; x mip_dqdx_median; inert unless track_types
     CHECK_KNOB_NUM(cfg, "long_muon_cathode_bridge_trk_dqdx_hi", 2.0);         // doc pr/147; x mip_dqdx_median; inert unless track_types

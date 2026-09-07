@@ -660,6 +660,7 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_long_muon_cathode_bridge_short_gap        = get(config, "long_muon_cathode_bridge_short_gap",        m_long_muon_cathode_bridge_short_gap);     // doc 84 round 4 G3, cm
     m_long_muon_cathode_bridge_short_gap_angle  = get(config, "long_muon_cathode_bridge_short_gap_angle",  m_long_muon_cathode_bridge_short_gap_angle); // doc 84 round 4 G3, deg
     m_long_muon_cathode_bridge_short_gap_len    = get(config, "long_muon_cathode_bridge_short_gap_len",    m_long_muon_cathode_bridge_short_gap_len); // doc 84 round 4 G3, cm
+    m_long_muon_cathode_bridge_tail_min_len     = get(config, "long_muon_cathode_bridge_tail_min_len",     m_long_muon_cathode_bridge_tail_min_len);  // doc pr/147 r2, cm; 0 = off
     m_long_muon_cathode_bridge_track_types      = get(config, "long_muon_cathode_bridge_track_types",      m_long_muon_cathode_bridge_track_types);   // doc pr/147
     m_long_muon_cathode_bridge_trk_dqdx_lo      = get(config, "long_muon_cathode_bridge_trk_dqdx_lo",      m_long_muon_cathode_bridge_trk_dqdx_lo);   // doc pr/147, x MIP
     m_long_muon_cathode_bridge_trk_dqdx_hi      = get(config, "long_muon_cathode_bridge_trk_dqdx_hi",      m_long_muon_cathode_bridge_trk_dqdx_hi);   // doc pr/147, x MIP
@@ -1176,6 +1177,7 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["long_muon_cathode_bridge_short_gap"]        = m_long_muon_cathode_bridge_short_gap;        // doc 84 round 4 G3, cm; 0 == off
     cfg["long_muon_cathode_bridge_short_gap_angle"]  = m_long_muon_cathode_bridge_short_gap_angle;  // doc 84 round 4 G3, deg; inert while short_gap 0
     cfg["long_muon_cathode_bridge_short_gap_len"]    = m_long_muon_cathode_bridge_short_gap_len;    // doc 84 round 4 G3, cm; inert while short_gap 0
+    cfg["long_muon_cathode_bridge_tail_min_len"]     = m_long_muon_cathode_bridge_tail_min_len;    // doc pr/147 r2, cm; 0 == off = legacy
     cfg["long_muon_cathode_bridge_track_types"]      = m_long_muon_cathode_bridge_track_types;     // doc pr/147; false = legacy (both type guards as shipped)
     cfg["long_muon_cathode_bridge_trk_dqdx_lo"]      = m_long_muon_cathode_bridge_trk_dqdx_lo;     // doc pr/147, x mip_dqdx_median; inert unless track_types
     cfg["long_muon_cathode_bridge_trk_dqdx_hi"]      = m_long_muon_cathode_bridge_trk_dqdx_hi;     // doc pr/147, x mip_dqdx_median; inert unless track_types
@@ -1341,6 +1343,19 @@ struct CathodeBridgeCfg {
     // RECEIVER's, and both die above the angle tests with no log line.
     // track_types admits either side on track-LIKENESS instead, leaving every
     // geometry gate in force.  false => both guards behave exactly as before.
+    // doc pr/147 round 2 -- the RECEIVER-SIDE bare tail.  177536's second muon
+    // node was read (wrongly, in round 1) as a cathode pair held out by the gap
+    // cap.  It is not a cathode pair at all: its 279.6 cm bare |13| segment
+    // 17008 shares graph vertex 17005 with segment 17009, an 11.6 cm MEMBER of
+    // the shower the bridge just built, on the SAME side of the seam.  The
+    // muon crosses the cathode and then keeps going.  The bare-chain BFS below
+    // walks only from the PARTNER, so it never reaches the receiver's own far
+    // end.  absorb_tail walks it, and unlike the partner BFS it retypes
+    // NOTHING: the tail must already be |13|.  Measured over 1368 events, the
+    // bare segments >= 20 cm adjacent to a |13| shower member are 37 protons,
+    // 18 pions and 9 muons -- absorbing on geometry alone would swallow a
+    // hadronic prong 6 times out of 7, so the pdg test is the whole guard.
+    double tail_min_len;    // 0 == off
     bool   track_types;     // master switch; false == rounds 2-4 behaviour
     double trk_dqdx_lo;     // median dQ/dx band, x mip_dqdx_median
     double trk_dqdx_hi;     // upper bound is the load-bearing half (see below)
@@ -1564,6 +1579,59 @@ int long_muon_cathode_bridge_pass(PatternAlgorithms& pattern_algos, Graph& graph
     std::set<size_t> taken;                     // graph indices of absorbed bare segments
     int n_bridged = 0;
 
+    // doc pr/147 round 2.  Absorb the bare, ALREADY-|13|-typed continuation
+    // hanging off the bridged muon's own vertices.  seeds = the segments whose
+    // vertices open the walk (the shower's members plus whatever this bridge
+    // just absorbed, since `members` was built before the bridge fired).
+    auto absorb_bare_tail = [&](const ShowerPtr& sh,
+                                const std::vector<SegmentPtr>& seeds) -> double {
+        if (cfg.tail_min_len <= 0 || !sh) return 0.0;
+        std::set<VertexPtr, VertexIndexCmp> open;
+        auto add_vertices = [&](const SegmentPtr& seg) {
+            auto [va, vb] = find_vertices(graph, seg);
+            for (auto* vp : {&va, &vb}) {
+                VertexPtr v = *vp;
+                // Same rule the partner BFS uses: other prongs at the
+                // interaction point are their own particles, not this muon.
+                if (v && v->descriptor_valid() && v != main_vertex) open.insert(v);
+            }
+        };
+        for (auto& seg : seeds) if (seg) add_vertices(seg);
+        double absorbed = 0.0;
+        int nseg = 0;
+        bool grew = true;
+        while (grew) {
+            grew = false;
+            std::vector<VertexPtr> frontier(open.begin(), open.end());
+            for (auto& v : frontier) {
+                for (auto ed : sorted_out_edges(v->get_descriptor(), graph)) {
+                    SegmentPtr nx = graph[ed].segment;
+                    if (!nx) continue;
+                    if (map_segment_in_shower.count(nx)) continue;   // bare only
+                    if (taken.count(nx->get_graph_index())) continue;
+                    if (!nx->has_particle_info()) continue;
+                    if (std::abs(nx->particle_info()->pdg()) != 13) continue;
+                    if (segment_track_length(nx) < cfg.tail_min_len) continue;
+                    sh->add_segment(nx, true);
+                    taken.insert(nx->get_graph_index());
+                    if (bridged_out) bridged_out->insert(nx);
+                    absorbed += segment_track_length(nx);
+                    ++nseg;
+                    add_vertices(nx);
+                    grew = true;
+                }
+            }
+            if (nseg > 64) break;   // safety valve, mirrors the partner BFS
+        }
+        if (nseg > 0) {
+            SPDLOG_LOGGER_DEBUG(log,
+                "long_muon_cathode_bridge: absorb receiver tail into sid={} nseg={} len={:.1f}cm",
+                sh->get_shower_id(), nseg, absorbed / units::cm);
+        }
+        return absorbed;
+    };
+
+
     for (auto& me : mu_ends) {
         if (gone.count(me.shower)) continue;
         const CathodeEnd* best = nullptr;
@@ -1696,6 +1764,13 @@ int long_muon_cathode_bridge_pass(PatternAlgorithms& pattern_algos, Graph& graph
             keep->add_shower(*drop);
             showers.erase(drop);
             gone.insert(drop);
+            // doc pr/147 r2: both halves' members open the tail walk, since
+            // `members` predates this merge.
+            {
+                std::vector<SegmentPtr> seeds = members[keep];
+                for (auto& sg : members[drop]) seeds.push_back(sg);
+                absorb_bare_tail(keep, seeds);
+            }
             keep->set_flag_kinematics(false);
         }
         else {
@@ -1767,6 +1842,14 @@ int long_muon_cathode_bridge_pass(PatternAlgorithms& pattern_algos, Graph& graph
                 me.shower->get_shower_id(), chain.size(), absorbed_len / units::cm,
                 best_gap / units::cm, me.p.x() / units::cm, best->p.x() / units::cm,
                 vtx_seg ? 1 : 0);
+            // doc pr/147 r2: the receiver's own members seed the tail walk as
+            // well as the chain just absorbed -- 177536's 279.6 cm tail hangs
+            // off member 17009, not off the absorbed partner.
+            {
+                std::vector<SegmentPtr> seeds = members[me.shower];
+                for (auto& sg : chain) seeds.push_back(sg);
+                absorb_bare_tail(me.shower, seeds);
+            }
             me.shower->set_flag_kinematics(false);
         }
         ++n_bridged;
@@ -3417,6 +3500,7 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
                     m_long_muon_cathode_bridge_short_gap * units::cm,
                     m_long_muon_cathode_bridge_short_gap_angle,
                     m_long_muon_cathode_bridge_short_gap_len * units::cm,
+                    m_long_muon_cathode_bridge_tail_min_len * units::cm, // doc pr/147 r2
                     m_long_muon_cathode_bridge_track_types,          // doc pr/147
                     m_long_muon_cathode_bridge_trk_dqdx_lo,
                     m_long_muon_cathode_bridge_trk_dqdx_hi,

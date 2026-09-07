@@ -2253,10 +2253,27 @@ function(
     // track_types admits either side on track-LIKENESS instead, with every
     // geometry gate untouched.  C++ default false.  Key omitted when off =>
     // byte-identical pre-fix config.
-    long_muon_cathode_bridge_track_types = false,
+    // FLIPPED TRUE for SBND production 2026-09-06 on the owner's scan of the
+    // doc pr/147 Bee pair (BEFORE 6130f074 / AFTER 2b6b166d): "0 and 1 are
+    // good".  idx 0 = 347890 (partner guard), idx 1 = 168448 (receiver guard).
+    long_muon_cathode_bridge_track_types = true,
     long_muon_cathode_bridge_trk_dqdx_lo = null,   // x MIP; C++ default 0.8;  inert while track_types off
     long_muon_cathode_bridge_trk_dqdx_hi = null,   // x MIP; C++ default 2.0;  inert while track_types off (289559's 3.48 receiver is what this refuses)
     long_muon_cathode_bridge_trk_straight = null,  // chord/len; C++ default 0.90; inert while track_types off
+    // doc pr/147 round 2: absorb the bare, ALREADY-|13|-typed continuation
+    // hanging off the bridged muon's own vertices.  177536 (the owner's idx 2,
+    // "2 should be a long muon as well") is a 279.6 cm bare |13| segment
+    // sharing a graph vertex with an 11.6 cm member of the shower the bridge
+    // built -- the SAME side of the cathode: the muon crosses, then keeps
+    // going, and the partner-side BFS never walks the receiver's far end.
+    // The pdg test is the whole guard: of the bare segments >= 20 cm adjacent
+    // to a |13| shower member over 1368 events, 37 are protons and 18 pions
+    // against 9 muons.  C++ default 0.0 = off.  Key omitted when off =>
+    // byte-identical.
+    // HELD OFF pending the owner's scan: "2 should be a long muon as well"
+    // states the goal, not a verdict on this mechanism.  Arm it with
+    // -A long_muon_cathode_bridge_tail_min_len=20 (doc pr/147 round 2).
+    long_muon_cathode_bridge_tail_min_len = null,
     kine_mainvtx_used_guard = true,  // SBND PRODUCTION ON 2026-08-20 (doc pr/101 K5; latent on the manifest)
     // doc pr/145 item 3b: log-only instrumentation for the BFS
     // particle-continuation detector (flag_reduce).  It emits SPDLOG lines and
@@ -3461,6 +3478,7 @@ function(
         [if long_muon_cathode_bridge_short_gap_angle != null then 'long_muon_cathode_bridge_short_gap_angle']: long_muon_cathode_bridge_short_gap_angle,  // doc 84 r4 G3; C++ default 10.0 deg
         [if long_muon_cathode_bridge_short_gap_len != null then 'long_muon_cathode_bridge_short_gap_len']: long_muon_cathode_bridge_short_gap_len,  // doc 84 r4 G3; C++ default 50.0 cm
         [if long_muon_cathode_bridge_track_types then 'long_muon_cathode_bridge_track_types']: true,  // doc pr/147; C++ default false. Key omitted when off => byte-identical.
+        [if long_muon_cathode_bridge_tail_min_len != null then 'long_muon_cathode_bridge_tail_min_len']: long_muon_cathode_bridge_tail_min_len,  // doc pr/147 r2; C++ default 0.0 cm = off
         [if long_muon_cathode_bridge_trk_dqdx_lo != null then 'long_muon_cathode_bridge_trk_dqdx_lo']: long_muon_cathode_bridge_trk_dqdx_lo,  // doc pr/147; C++ default 0.8 x MIP
         [if long_muon_cathode_bridge_trk_dqdx_hi != null then 'long_muon_cathode_bridge_trk_dqdx_hi']: long_muon_cathode_bridge_trk_dqdx_hi,  // doc pr/147; C++ default 2.0 x MIP
         [if long_muon_cathode_bridge_trk_straight != null then 'long_muon_cathode_bridge_trk_straight']: long_muon_cathode_bridge_trk_straight,  // doc pr/147; C++ default 0.90

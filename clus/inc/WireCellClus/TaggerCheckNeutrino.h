@@ -935,6 +935,7 @@ public:
         // than PID.  false == the rounds 2-4 guards exactly, so default-legacy.
         // 347890 loses its partner's type (211->11), 168448 its receiver's
         // (13->11); both then die above the geometry with no log line.
+        double m_long_muon_cathode_bridge_tail_min_len{0.0};        // doc pr/147 r2: 0 == off; absorb the bare ALREADY-|13| continuation off the bridged muon's own vertices [cm] (177536's 279.6 cm tail)
         bool   m_long_muon_cathode_bridge_track_types{false};       // doc pr/147: master switch
         double m_long_muon_cathode_bridge_trk_dqdx_lo{0.8};         // doc pr/147: x mip_dqdx_median; below = dead/mis-attributed charge (171729: 0.55)
         double m_long_muon_cathode_bridge_trk_dqdx_hi{2.0};         // doc pr/147: x mip_dqdx_median; above = proton-like (289559: 3.48, owner-confirmed correct reject)
