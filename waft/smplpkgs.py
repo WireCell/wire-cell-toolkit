@@ -165,10 +165,10 @@ class ValidationContext:
         if tdir:
             self.script_environ['.bats'] = dict(BATS_LIB_PATH=tdir.abspath())
 
-        # fixme: want to still build but just not run tests if --tests is omitted....
-        # if not self.bld.env.TESTS:
-        #     debug("smplpkgs: tests suppressed for " + self.bld.path.name)
-        #     return
+        # Do not even build tests if --notests are configured.  Note, this will hide a lot of potential code bugs!
+        if not self.bld.env.TESTS:
+            debug("smplpkgs: tests suppressed for " + self.bld.path.name)
+            return
         debug(f"smplpkgs: test status: {self.bld.env.TESTS}")
 
         for group in test_group_sequence:
