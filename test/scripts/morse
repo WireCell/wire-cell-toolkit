@@ -81,10 +81,13 @@ for k, v in dict(
         channel_ranges={
             # uboone single APA: U=2400, V=2400, Y=3456.
             "uboone": "0,2400,4800,8256",
-            # NOTE: pdvd's morse-summary peak finder does not yet succeed on the
-            # VD anode-0 channel layout (idents in 3 blocks at 0/952/1904);
-            # supplying ranges is necessary but not sufficient -- the wire-cell
-            # -python morse peak finder needs VD support.  Left unset here.
+            # NOTE (morse smear-measurement only): the wire-cell-python
+            # morse-summary peak finder currently succeeds for pdsp and pdhd but
+            # NOT for pdvd or uboone -- it finds no/too-few peaks (pdvd's VD
+            # anode-0 idents come in 3 blocks at 0/952/1904; uboone fails even
+            # with the ranges above).  Supplying ranges is necessary but not
+            # sufficient; morse-summary needs work for those detectors.  The
+            # spcmp subgraph below does NOT use morse-summary and is unaffected.
         },
         # Optional override of the layers job Jsonnet.
         wire_cell_config=workflow.basedir + "/../../cfg/layers/omnijob.jsonnet",
