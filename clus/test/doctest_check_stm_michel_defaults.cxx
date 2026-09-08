@@ -83,6 +83,14 @@ TEST_CASE("clus knob defaults: CheckSTM_Michel verdict thresholds")
     D("vertex_hadron_mip", 1.4);
     D("profile_min_dqdx_frac", 0.0);   // doc pdhd/03: 0 = keep every profile point
     D("fit_blob_coverage", -1.0);
+    // doc pdhd/16: MCS is default OFF in C++ so an absent bag leaves the
+    // compiled config and the tree values exactly where doc pdhd/15 left them;
+    // both ProtoDUNE drivers set mcs_enable true.  cathode_xcut 0 = the
+    // excision is off, which is bit-for-bit upstream (MuonMCS.h:79).
+    B("mcs_enable", false);
+    D("mcs_min_len_cm", 40.0);
+    D("mcs_cathode_x", 0.0);
+    D("mcs_cathode_xcut", 0.0);
     CHECK(cfg["max_candidates"].asInt() == 8);
     CHECK(cfg["min_chain_points"].asInt() == 10);
     // the PR-partition knobs are published (null = ride the C++ default)

@@ -57,6 +57,7 @@
 #include "WireCellClus/TrackFitting.h"
 #include "WireCellClus/TrackFittingPresets.h"
 #include "WireCellClus/StmMichelFunctions.h"
+#include "WireCellMcs/MuonMCS.h"
 #include "WireCellAux/ParticleInfo.h"
 #include "WireCellIface/IConfigurable.h"
 #include "WireCellIface/IScalarFunction.h"
@@ -171,6 +172,12 @@ public:
         m_fit_blob_coverage = get<double>(config, "fit_blob_coverage", m_fit_blob_coverage);
         m_dqdx_fit_keep_all_points = get<bool>(config, "dqdx_fit_keep_all_points", m_dqdx_fit_keep_all_points);
         m_excl_t0_frame = get<bool>(config, "excl_t0_frame", m_excl_t0_frame);
+
+        // doc pdhd/16
+        m_mcs_enable = get<bool>(config, "mcs_enable", m_mcs_enable);
+        m_mcs_min_len_cm = get<double>(config, "mcs_min_len_cm", m_mcs_min_len_cm);
+        m_mcs_cathode_x = get<double>(config, "mcs_cathode_x", m_mcs_cathode_x);
+        m_mcs_cathode_xcut = get<double>(config, "mcs_cathode_xcut", m_mcs_cathode_xcut);
 
         auto tf_config = get<std::string>(config, "trackfitting_config_file", "");
         if (!tf_config.empty()) load_trackfitting_config(tf_config);
@@ -312,6 +319,20 @@ public:
         cfg["fit_blob_coverage"] = m_fit_blob_coverage;
         cfg["dqdx_fit_keep_all_points"] = m_dqdx_fit_keep_all_points;
         cfg["excl_t0_frame"] = m_excl_t0_frame;
+        // doc pdhd/16.  A stopping muon's range energy is the baseline and MCS
+        // is the independent cross-check -- the one estimator that reads no
+        // charge at all, so it is blind to gain, lifetime and recombination.
+        // The engine (mcs/, WireCell::Mcs::MuonMCS) is already a clus
+        // dependency; PR::mcs_fill_kine is NOT reused because it writes a
+        // KineInfo this component does not have and its beam_window_only
+        // default returns silently on cosmics.
+        // mcs_cathode_xcut: half-width (cm) of the band around mcs_cathode_x
+        // whose segments are dropped; both ProtoDUNEs are cathode-centred at
+        // x = 0 and lose charge at the seam.
+        cfg["mcs_enable"] = m_mcs_enable;
+        cfg["mcs_min_len_cm"] = m_mcs_min_len_cm;
+        cfg["mcs_cathode_x"] = m_mcs_cathode_x;
+        cfg["mcs_cathode_xcut"] = m_mcs_cathode_xcut;
         // The PR-partition knobs (the four early stages) are read straight
         // from the config with PatternAlgorithms' own C++ defaults -- see
         // apply_pattern_knobs().  Published here so a compiled config can be
@@ -368,6 +389,13 @@ private:
     double m_fit_blob_coverage{-1.0};
     bool m_dqdx_fit_keep_all_points{false};
     bool m_excl_t0_frame{false};
+    // doc pdhd/16: multiple-Coulomb-scattering momentum for the STM muon.
+    // Default OFF so an absent bag leaves the compiled config and the tree
+    // values exactly where doc pdhd/15 left them; both ProtoDUNE drivers set
+    // mcs_enable true.
+    bool m_mcs_enable{false};
+    double m_mcs_min_len_cm{40.0};
+    double m_mcs_cathode_x{0.0}, m_mcs_cathode_xcut{0.0};
 
     // The member fitter is only the parameter holder the runtime JSON lands
     // in; every candidate gets its own fitter seeded from it (see visit()).
@@ -399,6 +427,13 @@ private:
         double michel_ke_dqdx{0}, michel_ke_range{0}, michel_ke_best{0};
         // doc pdhd/14
         double muon_ke_range{0}, muon_ke_dqdx{0}, muon_ke_best{0};
+        // doc pdhd/16.  -1 means "not computed" and must survive as -1: the
+        // engine returns -1 for every path it refuses (bad_path, < 20 trimmed
+        // points, trimmed end < 2*14 cm from the stop, < 2 fitted segments),
+        // and a 0 there would read as a measured zero energy.
+        double muon_ke_mcs{-1}, muon_mcs_amb{-1}, muon_mcs_tracklen{-1}, muon_mcs_range_ke{-1};
+        int muon_mcs_nsegs{0}, muon_mcs_bad_path{0};
+        double muon_p_range{-1}, muon_p_dqdx{-1}, muon_p_mcs{-1};
         int michel_seg_id{-1};                     // the daughter, named the way stop_vtx_id names the shared vertex
         // doc pdhd/15: the Michel as ONE object -- core + pieces
         double michel_ke_core{0};                  // the core only: what michel_ke_dqdx meant before doc 15
@@ -730,6 +765,49 @@ private:
         }
     }
 
+    // doc pdhd/16: p = sqrt((KE + m)^2 - m^2), the segment_cal_4mom idiom
+    // (PRSegmentFunctions.cxx:2912).  -1 in, -1 out: a KE that was never
+    // computed must not become a momentum of zero.
+    static double mom_from_ke(double ke_mev) {
+        static const double mmu = 105.658;      // MeV, mcs/src/MuonMCS.cxx:37
+        if (!(ke_mev > 0) || !std::isfinite(ke_mev)) return -1;
+        const double e = ke_mev + mmu;
+        return std::sqrt(std::max(e * e - mmu * mmu, 0.0));
+    }
+
+    // doc pdhd/16: the MCS momentum of the muon chain.
+    //
+    // Mcs::MuonMCS::run() is a plain numeric library -- three vectors of
+    // doubles in CENTIMETRES, no graph, no fitter, no particle data (mcs/inc/
+    // WireCellMcs/MuonMCS.h:207-222).  vtx_start MUST be the high-energy end:
+    // the likelihood walks the CSDA range from there, so for a stopping muon
+    // it is the entry and vtx_end is the stop.  The profile's own points are
+    // handed over rather than seg->fits() so that the trimmed path is the same
+    // object muon_len and muon_ke_dqdx were measured on.
+    void fill_mcs(Record& r, const StmMichelProfile& prof) const {
+        if (!m_mcs_enable) return;
+        if (r.muon_len < m_mcs_min_len_cm * units::cm) return;
+        if (prof.pts.size() < 2) return;
+        std::vector<std::vector<double>> points;
+        points.reserve(prof.pts.size());
+        for (const auto& p : prof.pts)
+            points.push_back({p.x() / units::cm, p.y() / units::cm, p.z() / units::cm});
+        const std::vector<double> start{r.entry_pt.x() / units::cm, r.entry_pt.y() / units::cm,
+                                        r.entry_pt.z() / units::cm};
+        const std::vector<double> stop{r.stop_pt.x() / units::cm, r.stop_pt.y() / units::cm,
+                                       r.stop_pt.z() / units::cm};
+        Mcs::McsOptions opt;                 // the five upstream-bug fixes stay ON
+        opt.cathode_x = m_mcs_cathode_x;
+        opt.cathode_xcut = m_mcs_cathode_xcut;
+        const Mcs::McsResult res = Mcs::MuonMCS(opt).run(start, stop, points);
+        r.muon_ke_mcs = res.ke_MCS;                  // MeV, -1 when not computed
+        r.muon_mcs_amb = res.ambiguity_MCS;          // 1 = maximally ambiguous
+        r.muon_mcs_tracklen = res.mu_tracklen;       // cm, the TRIMMED path
+        r.muon_mcs_range_ke = res.ke_tracklen;       // MeV, the engine's own CSDA
+        r.muon_mcs_nsegs = res.nsegs;
+        r.muon_mcs_bad_path = res.bad_path ? 1 : 0;
+    }
+
     // Units in the persisted rows (and hence in T_stm_michel): lengths and
     // coordinates in CM, energies in MeV, dQ/dx in e/cm, angles in degrees --
     // the generic PC->TTree writer has no unit knowledge, so the PC carries
@@ -784,6 +862,18 @@ private:
         // this output is NOT bit-identical to the pre-doc-14 tree.
         D1("muon_ke_range", r.muon_ke_range); D1("muon_ke_dqdx", r.muon_ke_dqdx);
         D1("muon_ke_best", r.muon_ke_best); I1("michel_seg_id", r.michel_seg_id);
+        // doc pdhd/16.  Three energy scales for the same muon, and their
+        // momenta: range (the baseline -- charge-blind apart from where the
+        // track ends), dQ/dx (calorimetric, and therefore the one that carries
+        // the gain x lifetime x recombination normalization), and MCS (purely
+        // geometric, blind to charge entirely).  muon_ke_best is deliberately
+        // NOT changed: on a stopping muon range is the better estimator and
+        // MCS is a cross-check, gated by muon_mcs_amb.
+        D1("muon_ke_mcs", r.muon_ke_mcs); D1("muon_mcs_amb", r.muon_mcs_amb);
+        D1("muon_mcs_tracklen", r.muon_mcs_tracklen); D1("muon_mcs_range_ke", r.muon_mcs_range_ke);
+        I1("muon_mcs_nsegs", r.muon_mcs_nsegs); I1("muon_mcs_bad_path", r.muon_mcs_bad_path);
+        D1("muon_p_range", r.muon_p_range); D1("muon_p_dqdx", r.muon_p_dqdx);
+        D1("muon_p_mcs", r.muon_p_mcs);
         // doc pdhd/15.  The Michel is ONE object -- the stop arm (or the seed
         // piece when the 3-D clustering detached it), everything the shower walk
         // reaches, and every fitted segment of an admitted companion cluster.
@@ -1096,6 +1186,10 @@ void CheckSTM_Michel::visit(Ensemble& ensemble) const
                 rec.muon_ke_range = cal_kine_range(rec.muon_len, 13, particle_data()) / units::MeV;
             for (auto& s : chain) rec.muon_ke_dqdx += segment_cal_kine_dQdx(s, m_recomb_model) / units::MeV;
             rec.muon_ke_best = (rec.muon_len < 4 * units::cm) ? rec.muon_ke_dqdx : rec.muon_ke_range;
+            fill_mcs(rec, prof);        // doc pdhd/16
+            rec.muon_p_range = mom_from_ke(rec.muon_ke_range);
+            rec.muon_p_dqdx = mom_from_ke(rec.muon_ke_dqdx);
+            rec.muon_p_mcs = mom_from_ke(rec.muon_ke_mcs);
             add_points(rec, chain.back(), 1, &prof);
             if (rec.n_profile_pts < m_min_chain_points) rec.reject_bits |= R_SHORT;
         }
@@ -1501,6 +1595,18 @@ void CheckSTM_Michel::visit(Ensemble& ensemble) const
                 *e = 0;
             }
         }
+        // doc pdhd/16: the MCS fields carry a -1 = "not computed" sentinel, so
+        // a non-finite one goes back to -1, not to 0 (a zero there would read
+        // as a measured zero energy and pass every `>= 0` gate).
+        for (double* e : {&rec.muon_ke_mcs, &rec.muon_mcs_amb, &rec.muon_mcs_tracklen,
+                          &rec.muon_mcs_range_ke, &rec.muon_p_range, &rec.muon_p_dqdx,
+                          &rec.muon_p_mcs}) {
+            if (!std::isfinite(*e)) {
+                SPDLOG_LOGGER_WARN(s_log, "{}CheckSTM_Michel: cluster {} produced a non-finite MCS field; set to -1",
+                                   m_evt_tag, rec.cluster_id);
+                *e = -1;
+            }
+        }
         tf->set_showers(showers);
 
         // ---- doc pdhd/03 sec 6: is the cluster a track (+ attachments) at all?
@@ -1542,6 +1648,7 @@ void CheckSTM_Michel::visit(Ensemble& ensemble) const
         SPDLOG_LOGGER_INFO(s_log,
             "{}CheckSTM_Michel: cluster {} gid {} verdict {} bits {} | chain {} segs {:.1f} cm ({} pts, {} dead) stop_dis {:.1f} cm | "
             "contrast {:.2f}/{:.2f} ks_mu {:.3f} ks_flat {:.3f} comp_fwd {:.0f}/{:.2f}/{:.2f}/{:.2f} | "
+            "mu E range {:.1f} dQ/dx {:.1f} MCS {:.1f} MeV (amb {:.2f}, {} segs, {:.1f} cm) | "
             "delta {} hadron {} | michel {} conn {} ({} segs / {} pieces, {:.1f} cm, kink {:.0f} deg, gap {:.1f} cm) "
             "E {:.1f} MeV = dQ/dx {:.1f} + unfit {:.1f} (core {:.1f}, range {:.1f}, charge {:.1f}) dots {} ({:.1f} MeV) unfit_cl {} | "
             "cont {:.1f} cm @ {:.0f} deg ext {} ({:.1f} cm) dead_ahead {} cov {:.2f} | in_fv {} | {:.0f} ms",
@@ -1549,6 +1656,8 @@ void CheckSTM_Michel::visit(Ensemble& ensemble) const
             rec.n_chain_segs, rec.muon_len / units::cm, rec.n_profile_pts, rec.n_dead_pts, rec.stop_dis / units::cm,
             rec.bragg.contrast, rec.bragg.expected, rec.ks_mu, rec.ks_flat,
             rec.comp_fwd[0], rec.comp_fwd[1], rec.comp_fwd[2], rec.comp_fwd[3],
+            rec.muon_ke_range, rec.muon_ke_dqdx, rec.muon_ke_mcs, rec.muon_mcs_amb,
+            rec.muon_mcs_nsegs, rec.muon_mcs_tracklen,
             rec.n_delta, rec.n_body_hadron,
             rec.michel_found, rec.michel_conn_type, rec.n_michel_segs, rec.michel_n_pieces,
             rec.michel_len / units::cm, rec.michel_kink_deg, rec.michel_dis_cm,

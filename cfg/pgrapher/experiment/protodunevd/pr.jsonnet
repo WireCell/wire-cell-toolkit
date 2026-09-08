@@ -1150,6 +1150,15 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
               // same numbers it did then -- upstream e6fb7ef3 changed what
               // Gen::BoxRecombination does with practical-unit parameters.
               use_power_recomb=true,
+              // stm_recomb_calibrated (doc pdhd/16): give check_stm_michel ALONE
+              // a Modified-Box inverse that carries the 0.85 the *DeDx tables
+              // were built with, times the charge deficit measured against the
+              // range energy of the same stopping muons -- C = 0.7941 on PDVD.
+              // The STM and neutrino taggers keep pdvd_recomb either way.
+              // false => the component keeps pdvd_recomb and the compiled config
+              // is byte-identical to the pre-doc-16 job.  DEFAULT false; both
+              // ProtoDUNE drivers set it true.
+              stm_recomb_calibrated=false,
               // sp_dedx_use_recomb_model: route the single-photon stem dE/dx
               // through the configured recombination model instead of the
               // inline uBooNE-field (0.273 kV/cm) inverse Box.  DEFAULT ON
@@ -1248,6 +1257,42 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
         // The recombination model the taggers actually receive.  With
         // use_power_recomb=false this compiles to exactly the pre-knob config.
         local pdvd_recomb = if use_power_recomb then pdvd_power_recomb else pdvd_box_recomb,
+        // doc pdhd/16: the CALIBRATED dQ/dx -> dE/dx inverse, and it is bound to
+        // check_stm_michel ALONE -- pdvd_recomb above still goes to the STM and
+        // neutrino taggers untouched.
+        //
+        // PowerBoxRecombination at p = 1 and k = beta'*pivot IS the Modified Box
+        // at field E (gen/test/doctest_powerbox_recombination.cxx pins the
+        // identity to 1e-9 for both ProtoDUNE fields), with C exposed as the
+        // normalization PracticalBoxRecombination has no slot for.  That factor
+        // is not optional: the *DeDx PID tables this same config carries are the
+        // Modified Box TIMES 0.85 (particle_dataset.jsonnet:19-30,
+        // energy_loss/pion_travel/convert_field.C:42,71), so recomb_model->dE()
+        // on a measured dQ/dx was landing 1/0.85 away from the scale its own
+        // tables were built on.
+        //
+        //   k = 0.212/(1.38*0.45)*2.1 = 0.7169082125603865  (E = 0.45 kV/cm)
+        //   C = 0.7941 +- 0.0093, fitted on 151 is_stm stopping muons of the
+        //       d15vnu arm (120 events) by requiring the median dQ/dx energy to
+        //       equal the CSDA range energy of the same muon.  Flat in muon
+        //       length (0.97-1.02 over <80 to >250 cm), so it is a
+        //       NORMALIZATION, not a shape: a free power p and a free field
+        //       both fail to improve it (doc pdhd/16 sec 4).
+        //   C = 0.85 x 0.93: the tables' own factor times the charge PDVD's
+        //       reconstruction does not recover, which doc pdvd/50 sec 14
+        //       measures differentially as k = 0.86-0.95.  It absorbs
+        //       gain x lifetime x recombination together and is NOT a
+        //       recombination measurement on its own.
+        //
+        // ONE carrier only: the kine_recom_factor / kine_fudge_factor family in
+        // the driver stays where it is, or the same degeneracy is counted twice.
+        local pdvd_stm_recomb = {
+            type: 'PowerBoxRecombination',
+            name: 'pdvd_stm_recomb',
+            data: { A: 0.93, k: 0.7169082125603865, p: 1.0, C: 0.7941,
+                    pivot: 2.1, Wi: 23.6e-6, dedx_max: 77.0 },
+        },
+        local pdvd_stm_michel_recomb = if stm_recomb_calibrated then pdvd_stm_recomb else pdvd_recomb,
         // TGM fiducial: ONE box spanning BOTH TPCs (the overall FV bounds of
         // dvm above), so a cathode-crossing track is not an "exiter" at x=0.
         // The default fiducial=dv cannot serve here: DetectorVolumes::contained()
@@ -1609,7 +1654,8 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
             check_stm_michel: cm.check_stm_michel(
                 trackfitting_config_file=trackfitting_config_file,
                 particle_dataset=wc.tn(particle_dataset),
-                recombination_model=wc.tn(pdvd_recomb),
+                // doc pdhd/16: THIS component only; the taggers keep pdvd_recomb.
+                recombination_model=wc.tn(pdvd_stm_michel_recomb),
                 perf=true,
                 mip_dqdx=mip_dqdx,
                 mip_dqdx_median=mip_dqdx_median,
@@ -1968,6 +2014,13 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
                              || std.member(pipeline_names, 'tagger_check_neutrino')
                              || std.member(pipeline_names, 'check_stm_michel')   // doc pdvd/48
                              then [pdvd_recomb] + extra_uses else [])
+                            // doc pdhd/16: check_stm_michel's own calibrated
+                            // model.  Only when the knob is on AND the component
+                            // is in the pipeline, so the compiled config is
+                            // byte-identical with stm_recomb_calibrated=false.
+                            + (if stm_recomb_calibrated
+                                  && std.member(pipeline_names, 'check_stm_michel')
+                               then [pdvd_stm_recomb] else [])
                             + (if std.member(pipeline_names, 'tagger_check_tgm')
                                || std.member(pipeline_names, 'tagger_check_fc')
                                || (stm_consistent_fv

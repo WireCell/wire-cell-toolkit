@@ -1167,6 +1167,14 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1,
               // same numbers it did then -- upstream e6fb7ef3 changed what
               // Gen::BoxRecombination does with practical-unit parameters.
               use_power_recomb=true,
+              // stm_recomb_calibrated (doc pdhd/16): give check_stm_michel ALONE
+              // a Modified-Box inverse that carries the 0.85 the *DeDx tables
+              // were built with, times the charge deficit measured against the
+              // range energy of the same stopping muons -- C = 0.8120 on PDHD
+              // (APA0 excluded).  The STM and neutrino taggers keep pdhd_recomb
+              // either way.  false => byte-identical to the pre-doc-16 job.
+              // DEFAULT false; both ProtoDUNE drivers set it true.
+              stm_recomb_calibrated=false,
               // sp_dedx_use_recomb_model: route the single-photon stem dE/dx
               // through the configured recombination model instead of the
               // inline uBooNE-field (0.273 kV/cm) inverse Box.  DEFAULT ON
@@ -1257,6 +1265,28 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1,
             data: { A: 0.93, k: 0.282371, p: 1.362179, C: 0.855175, pivot: 2.1, Wi: 23.6e-6, dedx_max: 77.0 },
         },
         local pdhd_recomb = if use_power_recomb then pdhd_power_recomb else pdhd_box_recomb,
+        // doc pdhd/16: the CALIBRATED dQ/dx -> dE/dx inverse for
+        // check_stm_michel ALONE; pdhd_recomb above still goes to the STM and
+        // neutrino taggers untouched.  Counterpart of protodunevd/pr.jsonnet's
+        // pdvd_stm_recomb -- see the reasoning there.
+        //
+        //   k = 0.212/(1.38*0.4959)*2.1 = 0.6505519170239442  (E = 0.4959 kV/cm)
+        //   C = 0.8120 +- 0.0138, fitted on the 54 is_stm stopping muons of the
+        //       d15hnu arm (61 events) that do NOT stop in APA0.  APA0 is
+        //       excluded on purpose: doc pdvd/50 sec 13 measures it at 0.654 of
+        //       the muon table against 1.01-1.03 for APA1/2/3 (the
+        //       pdhd/docs/sp-apa0-plane2.md hardware fault), and this sample
+        //       puts it at 0.845 against 1.00-1.03.  Including it gives
+        //       C = 0.8088 +- 0.0151, i.e. the two agree inside their errors --
+        //       only 7 of 61 muons stop there -- but a blended constant would
+        //       still be absorbing a known instrumental defect.
+        local pdhd_stm_recomb = {
+            type: 'PowerBoxRecombination',
+            name: 'pdhd_stm_recomb',
+            data: { A: 0.93, k: 0.6505519170239442, p: 1.0, C: 0.8120,
+                    pivot: 2.1, Wi: 23.6e-6, dedx_max: 77.0 },
+        },
+        local pdhd_stm_michel_recomb = if stm_recomb_calibrated then pdhd_stm_recomb else pdhd_recomb,
         // TGM/STM/FC fiducial: ONE box spanning BOTH drift volumes, so a
         // cathode-crossing track is not an "exiter" at x=0.  The default
         // fiducial=dv cannot serve here: DetectorVolumes::contained() is the union
@@ -1623,7 +1653,8 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1,
             check_stm_michel: cm.check_stm_michel(
                 trackfitting_config_file=trackfitting_config_file,
                 particle_dataset=wc.tn(particle_dataset),
-                recombination_model=wc.tn(pdhd_recomb),
+                // doc pdhd/16: THIS component only; the taggers keep pdhd_recomb.
+                recombination_model=wc.tn(pdhd_stm_michel_recomb),
                 perf=true,
                 mip_dqdx=mip_dqdx,
                 mip_dqdx_median=mip_dqdx_median,
@@ -1982,6 +2013,13 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1,
                              || std.member(pipeline_names, 'tagger_check_neutrino')
                              || std.member(pipeline_names, 'check_stm_michel')   // doc pdhd/03
                              then [pdhd_recomb] + extra_uses else [])
+                            // doc pdhd/16: check_stm_michel's own calibrated
+                            // model.  Only when the knob is on AND the component
+                            // is in the pipeline, so the compiled config is
+                            // byte-identical with stm_recomb_calibrated=false.
+                            + (if stm_recomb_calibrated
+                                  && std.member(pipeline_names, 'check_stm_michel')
+                               then [pdhd_stm_recomb] else [])
                             + (if std.member(pipeline_names, 'tagger_check_tgm')
                                || std.member(pipeline_names, 'tagger_check_fc')
                                || (stm_consistent_fv
