@@ -187,6 +187,15 @@ double WireCell::Clus::PR::stm_michel_median(std::vector<double> v)
     return 0.5 * (v[n / 2 - 1] + v[n / 2]);
 }
 
+// doc pdhd/15.  See the header for the citation and the calibration.
+double WireCell::Clus::PR::stm_michel_charge_to_energy(double dQ_electrons, double recom_factor,
+                                                       double fudge_factor, double w_value_ev)
+{
+    if (!std::isfinite(dQ_electrons) || dQ_electrons <= 0) return 0.0;
+    if (!(recom_factor > 0) || !(fudge_factor > 0) || !(w_value_ev > 0)) return 0.0;
+    return dQ_electrons / recom_factor / fudge_factor * w_value_ev / 1e6 * units::MeV;
+}
+
 StmMichelBragg WireCell::Clus::PR::stm_michel_bragg_contrast(const StmMichelProfile& prof,
                                                               const std::function<double(double)>& mu_dqdx_at_rr_cm,
                                                               double tail_lo, double tail_hi,

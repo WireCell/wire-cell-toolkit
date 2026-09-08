@@ -143,6 +143,10 @@ public:
         m_michel_min_kink_deg = get<double>(config, "michel_min_kink_deg", m_michel_min_kink_deg);
         m_michel_dot_radius_cm = get<double>(config, "michel_dot_radius_cm", m_michel_dot_radius_cm);
         m_dot_max_len_cm = get<double>(config, "dot_max_len_cm", m_dot_max_len_cm);
+        m_companion_max_len_cm = get<double>(config, "companion_max_len_cm", m_companion_max_len_cm);
+        m_michel_unfit_recom = get<double>(config, "michel_unfit_recom", m_michel_unfit_recom);
+        m_michel_unfit_fudge = get<double>(config, "michel_unfit_fudge", m_michel_unfit_fudge);
+        m_michel_unfit_w_ev = get<double>(config, "michel_unfit_w_ev", m_michel_unfit_w_ev);
         m_dot_body_exclusion_cm = get<double>(config, "dot_body_exclusion_cm", m_dot_body_exclusion_cm);
         m_delta_max_len_cm = get<double>(config, "delta_max_len_cm", m_delta_max_len_cm);
         m_vertex_hadron_mip = get<double>(config, "vertex_hadron_mip", m_vertex_hadron_mip);
@@ -209,7 +213,27 @@ public:
         cfg["michel_mip_lo"] = m_michel_mip_lo;
         cfg["michel_min_kink_deg"] = m_michel_min_kink_deg;
         cfg["michel_dot_radius_cm"] = m_michel_dot_radius_cm;
+        // doc pdhd/15 sec 3: the per-PIECE length cap at the dot loop.  Default
+        // raised 10 -> 25 cm (= michel_max_len_cm, the ceiling an ATTACHED Michel
+        // arm already faces) so a detached Michel is judged by the same size rule
+        // as an attached one.  DECLARED DEFAULT CHANGE: a job that does not set
+        // this key changes behaviour.  Set it back to 10 with
+        // companion_max_len_cm 10 to reproduce the doc pdhd/14 tree.
         cfg["dot_max_len_cm"] = m_dot_max_len_cm;
+        // doc pdhd/15 sec 3: which same-bundle clusters enter the PR at all.
+        // Was the same knob as the piece cap, so raising one loosened the other
+        // (doc pdhd/13 defect D2).  PDVD 039252_15 cluster 77's Michel is a
+        // 20.1 cm cluster 1.91 cm from the stop: the 10 cm cap kept it out of
+        // `companions` entirely, so it could become neither an arm nor a dot.
+        cfg["companion_max_len_cm"] = m_companion_max_len_cm;
+        // doc pdhd/15 sec 6: charge -> energy for a companion cluster the fitter
+        // never reached (no dx, so no dQ/dx to invert).  The KineChargeOptions
+        // TRACK pair; measured against the chain's own segment_cal_kine_dQdx at
+        // ratio median 1.19 (PDVD) / 1.01 (PDHD), against 1.98 / 1.67 for the
+        // SHOWER pair (0.5 / 0.8).
+        cfg["michel_unfit_recom"] = m_michel_unfit_recom;
+        cfg["michel_unfit_fudge"] = m_michel_unfit_fudge;
+        cfg["michel_unfit_w_ev"] = m_michel_unfit_w_ev;
         cfg["dot_body_exclusion_cm"] = m_dot_body_exclusion_cm;
         cfg["delta_max_len_cm"] = m_delta_max_len_cm;
         cfg["vertex_hadron_mip"] = m_vertex_hadron_mip;
@@ -325,7 +349,9 @@ private:
     double m_continuation_max_angle_deg{20.0}, m_continuation_min_len_cm{3.0};
     double m_continuation_mip_lo{0.7}, m_continuation_mip_hi{1.3};
     double m_michel_max_len_cm{25.0}, m_michel_mip_hi{2.0}, m_michel_mip_lo{0.3}, m_michel_min_kink_deg{30.0};
-    double m_michel_dot_radius_cm{15.0}, m_dot_max_len_cm{10.0}, m_dot_body_exclusion_cm{5.0};
+    double m_michel_dot_radius_cm{15.0}, m_dot_max_len_cm{25.0}, m_dot_body_exclusion_cm{5.0};
+    double m_companion_max_len_cm{25.0};                                   // doc pdhd/15
+    double m_michel_unfit_recom{0.7}, m_michel_unfit_fudge{0.95}, m_michel_unfit_w_ev{23.6};
     double m_delta_max_len_cm{8.0};
     double m_vertex_hadron_mip{1.4};
     double m_profile_min_dqdx_frac{0.0};
@@ -374,6 +400,13 @@ private:
         // doc pdhd/14
         double muon_ke_range{0}, muon_ke_dqdx{0}, muon_ke_best{0};
         int michel_seg_id{-1};                     // the daughter, named the way stop_vtx_id names the shared vertex
+        // doc pdhd/15: the Michel as ONE object -- core + pieces
+        double michel_ke_core{0};                  // the core only: what michel_ke_dqdx meant before doc 15
+        double michel_ke_charge{0};                // Shower::get_kine_charge(), for comparison -- never `best`
+        int michel_n_pieces{0};                    // fitted member segments + unfitted companion clusters
+        int michel_parent_vtx_id{-1};              // the muon vertex the object hangs from (= stop_vtx_id)
+        double michel_dis_cm{-1};                  // stop -> object start; 0 when attached
+        Point michel_start_pt;
         double cont_len{0}, cont_angle_deg{-1}, cont_mip{0};
         int n_ext{0}; double ext_len{0};          // doc pdhd/03: chain extensions past the tagger's stop
         int dead_ahead{-1};                        // doc pdhd/03: 1 = the live end walks into a dead region
@@ -381,6 +414,7 @@ private:
         // dots
         int n_dots{0}, n_dot_clusters_unfit{0};
         double dots_ke_dqdx{0}, dots_charge_unfit{0};
+        double dots_ke_unfit{0};                   // doc pdhd/15: dots_charge_unfit converted to MeV
         int in_fv{-1};
         // points for the Bee/ROOT layer
         std::vector<double> px, py, pz, pq, pL, prr;
@@ -437,6 +471,15 @@ private:
         pa.m_perf = m_perf;
         pa.m_mip_dqdx        = m_mip_dqdx / units::cm;
         pa.m_mip_dqdx_median = m_mip_dqdx_median / units::cm;
+        // doc pdhd/15 sec 7.  A coincident pair of fit points gives dx == 0;
+        // cal_kine_dQdx then evaluates the Box model at 0/0, and the NaN survives
+        // every clamp into the sum, so ONE such point zeroes the whole object's
+        // energy.  doc pdvd/45 sec 5.4 added this knob for exactly that; it is
+        // off by default for bit-identicality elsewhere, and this module turns it
+        // on because a Michel assembled from several segments meets a zero-dx
+        // point often (6 of 280 objects on the d15 arms).  Skipping the point
+        // makes it contribute 0, which is what the prototype's (dx + 1e-9) did.
+        pa.m_kine_charge.dqdx_skip_zero_dx = true;
         pa.m_sgp_dv   = m_dv;
         pa.m_sgp_pcts = m_pcts;
         pa.m_recomb_model = m_recomb_model;
@@ -728,6 +771,7 @@ private:
         I1("n_cluster_pts", r.n_cluster_pts); D1("chain_coverage", r.chain_coverage);
         I1("n_dots", r.n_dots); I1("n_dot_clusters_unfit", r.n_dot_clusters_unfit);
         D1("dots_ke_dqdx", r.dots_ke_dqdx); D1("dots_charge_unfit", r.dots_charge_unfit);
+        D1("dots_ke_unfit", r.dots_ke_unfit);
         I1("in_fv", r.in_fv);
         // doc pdhd/14.  The muon energy was the one thing this tree never
         // carried: set_pdg (:661) builds a 4-momentum for every chain segment
@@ -740,6 +784,19 @@ private:
         // this output is NOT bit-identical to the pre-doc-14 tree.
         D1("muon_ke_range", r.muon_ke_range); D1("muon_ke_dqdx", r.muon_ke_dqdx);
         D1("muon_ke_best", r.muon_ke_best); I1("michel_seg_id", r.michel_seg_id);
+        // doc pdhd/15.  The Michel is ONE object -- the stop arm (or the seed
+        // piece when the 3-D clustering detached it), everything the shower walk
+        // reaches, and every fitted segment of an admitted companion cluster.
+        // michel_ke_dqdx is now that whole object; michel_ke_core is the core
+        // alone, i.e. exactly what michel_ke_dqdx meant through doc pdhd/14, so
+        // the old number stays in the tree.  michel_ke_charge is the chain's
+        // charge-based estimate of the same object, persisted for comparison and
+        // never used as `best` (its recombination factors are the SHOWER pair).
+        D1("michel_ke_core", r.michel_ke_core); D1("michel_ke_charge", r.michel_ke_charge);
+        I1("michel_n_pieces", r.michel_n_pieces);
+        I1("michel_parent_vtx_id", r.michel_parent_vtx_id); D1("michel_dis_cm", r.michel_dis_cm);
+        D1("michel_start_x", r.michel_start_pt.x() / cm); D1("michel_start_y", r.michel_start_pt.y() / cm);
+        D1("michel_start_z", r.michel_start_pt.z() / cm);
         cluster.local_pcs()["stm_michel"] = Dataset(a);
 
         if (!r.px.empty()) {
@@ -823,7 +880,14 @@ void CheckSTM_Michel::visit(Ensemble& ensemble) const
             for (auto* oc : grouping.children()) {
                 if (oc == main) continue;
                 if (oc->get_scalar<int>("matched_flash_gid", -1) != rec.gid) continue;
-                if (oc->get_length() > m_dot_max_len_cm * units::cm) continue;
+                // doc pdhd/15 sec 3: ADMISSION, a separate knob from the per-piece
+                // cap below (doc pdhd/13 D2).  A cluster kept out here never
+                // reaches the fitter, never gets find_proto_vertex, and can
+                // therefore become neither an attached arm nor a dot -- silently,
+                // no log line.  PDVD 039252_15 cluster 77's Michel is exactly
+                // that: 20.1 cm, 1.91 cm from the stop, 9.12e5 e, dropped by the
+                // old 10 cm cap.
+                if (oc->get_length() > m_companion_max_len_cm * units::cm) continue;
                 if (oc->npoints() == 0) continue;
                 const auto [cp, blob] = oc->get_closest_point_blob(rec.stop_pt);
                 if ((cp - rec.stop_pt).magnitude() > m_michel_dot_radius_cm * units::cm) continue;
@@ -1186,7 +1250,22 @@ void CheckSTM_Michel::visit(Ensemble& ensemble) const
             }
         }
 
-        // ---- the Michel shower ---------------------------------------------
+        // ---- the Michel: ONE object (doc pdhd/15) ---------------------------
+        // A Michel is a track plus whatever the 3-D clustering broke off it.
+        // The object is assembled first -- the stop arm and everything the
+        // shower walk reaches inside the main cluster, then every fitted
+        // segment of an admitted companion near the stop -- and energised
+        // ONCE, after the last piece is in.
+        //
+        // Through doc pdhd/14 the attached path called calculate_kinematics
+        // BEFORE the dot loop and only re-ran it for conn_type 2, so a dot the
+        // loop added to the very same shower never reached the energy: PDVD
+        // 039252_15 cluster 91 reported 16.2 MeV for a 29.2 MeV Michel whose
+        // second piece sits 4.33 cm past the arm's tip at 20 deg, and the same
+        // 16 MeV is what mc.json's mu- -> e- node shows.  Measured on the d14
+        // arms: 9 PDHD / 17 PDVD candidates, missing fraction median 22.5 % /
+        // 12.2 %, max 62 % / 65 %.
+        std::vector<std::pair<SegmentPtr, double>> michel_pieces;   // (segment, distance to the stop)
         if (!michel_arms.empty() && stop_v) {
             std::sort(michel_arms.begin(), michel_arms.end(),
                       [](const StmMichelArm& a, const StmMichelArm& b) {
@@ -1194,15 +1273,11 @@ void CheckSTM_Michel::visit(Ensemble& ensemble) const
                           return a.seg->get_graph_index() < b.seg->get_graph_index();
                       });
             const auto& seed = michel_arms.front();
-            rec.michel_found = 1;
             rec.michel_len = seed.len; rec.michel_mip = seed.mip; rec.michel_kink_deg = seed.kink_deg; rec.michel_far_len = seed.far_len;
             rec.michel_conn_type = 1;
+            rec.michel_dis_cm = 0;              // attached: the arm leaves the stop vertex itself
             // doc pdhd/14: the daughter's id, in the same cluster*1000 + graph
-            // index encoding as stop_vtx_id and T_stm_michel_pts.seg_id.  With
-            // stop_vtx_id (the vertex both particles share) this closes the
-            // mu -> e link on the ATTACHED side; conn_type 2 has no shared
-            // vertex to name, so the seed dot is recorded instead and the
-            // relation there remains proximity, not topology.
+            // index encoding as stop_vtx_id and T_stm_michel_pts.seg_id.
             if (seed.seg)
                 rec.michel_seg_id = rec.cluster_id * 1000 + static_cast<int>(seed.seg->get_graph_index());
             for (auto& a : michel_arms) { set_pdg(a.seg, 11); add_points(rec, a.seg, 3); }
@@ -1215,39 +1290,74 @@ void CheckSTM_Michel::visit(Ensemble& ensemble) const
                 // every member is the electron's
                 IndexedVertexSet mv; IndexedSegmentSet ms;
                 michel_shower->fill_sets(mv, ms, false);
-                for (auto& s : ms) { if (!chain_set.count(s)) set_pdg(s, 11); }
-                rec.n_michel_segs = static_cast<int>(ms.size());
+                for (auto& sg : ms) { if (!chain_set.count(sg)) set_pdg(sg, 11); }
                 michel_shower->set_particle_type(11);
+                // The CORE alone, measured before any companion piece joins:
+                // michel_ke_core is exactly what michel_ke_dqdx meant through
+                // doc pdhd/14, and michel_ke_range is the TRACK's range energy
+                // (the object call below zeroes range whenever a member is
+                // graph-disconnected, PRShower.cxx:1855-1859).
                 michel_shower->calculate_kinematics(particle_data(), m_recomb_model);
-                rec.michel_ke_dqdx = michel_shower->get_kine_dQdx() / units::MeV;
+                rec.michel_ke_core = michel_shower->get_kine_dQdx() / units::MeV;
                 rec.michel_ke_range = michel_shower->get_kine_range() / units::MeV;
-                // range energy is meaningless for an electron
-                michel_shower->set_kine_best(michel_shower->get_kine_dQdx());
-                rec.michel_ke_best = michel_shower->get_kine_best() / units::MeV;
             }
             else {
-                rec.n_michel_segs = static_cast<int>(michel_arms.size());
-                rec.michel_ke_dqdx = segment_cal_kine_dQdx(seed.seg, m_recomb_model) / units::MeV;
-                rec.michel_ke_best = rec.michel_ke_dqdx;
+                rec.michel_ke_core = segment_cal_kine_dQdx(seed.seg, m_recomb_model) / units::MeV;
             }
+            for (auto& a : michel_arms) if (a.seg) michel_pieces.emplace_back(a.seg, 0.0);
         }
 
-        // ---- dots: companion segments near the stop, closer to the stop
-        // than to the muon body ------------------------------------------------
+        // ---- the companion pieces: near the stop, closer to the stop than to
+        // the muon body ---------------------------------------------------------
+        // doc pdhd/15 sec 3: michel_dot_radius_cm is a CLUSTER admission test
+        // (applied at :871 on the cluster's closest approach), not a per-segment
+        // one.  It used to be re-applied to every segment here, which clipped
+        // 39.8 % of the charge of PDVD 039252_15 cluster 77's Michel -- that
+        // cluster spans 1.91 -> 19.36 cm from the stop, so more than a third of
+        // the object sat outside a radius its closest point had already passed.
+        // A segment of an admitted cluster is bounded by radius + cluster length
+        // by construction, so the cluster test is the whole bound.  The
+        // body-exclusion test and the per-piece length cap stay.
         if (stop_v && !companions.empty()) {
-            std::set<int> fitted_ids;
+            // Two passes: collect every admissible piece with its distance to the
+            // stop, then assemble.  The seed of a BRIDGED object is then the
+            // NEAREST piece rather than whichever the graph's edge order reached
+            // first, and michel_seg_id names the piece the gap is measured to.
+            struct Piece { SegmentPtr seg; double d_stop; int cluster_id, gidx; };
+            std::vector<Piece> pieces;
+            double d_unfit = 1e9;            // closest approach of an UNFITTED companion
             for (auto* oc : companions) {
-                auto segs = pa.find_cluster_segments(g, *oc);
+                // The radius test again, at CLUSTER level, against the stop the
+                // chain actually ended on.  `companions` was selected against
+                // the TAGGER's stop (:880), and the two are not the same point:
+                // R_STOP_UNMATCHED walks the chain to the farthest vertex of the
+                // main cluster (:922-929) and stop_extend_max walks it along a
+                // continuation, so the two can be hundreds of cm apart -- PDHD
+                // 029107_17 cluster 33 has stop_dis 266.3 cm.  The per-SEGMENT
+                // radius test that used to stand below hid this; dropping it
+                // (sec 3) exposed it, and the cluster-level test is the right
+                // place for it because the object is admitted whole.
+                const auto [ccp, cblob] = oc->get_closest_point_blob(rec.stop_pt);
+                if ((ccp - rec.stop_pt).magnitude() > m_michel_dot_radius_cm * units::cm) continue;
+                auto segs = pa.find_cluster_segments(g, *oc);   // ordered_edges: deterministic
                 if (segs.empty()) {
                     ++rec.n_dot_clusters_unfit;
                     double q = 0; for (const auto* b : oc->children()) q += b->charge();
                     rec.dots_charge_unfit += q;
+                    d_unfit = std::min(d_unfit, (ccp - rec.stop_pt).magnitude());
                     continue;
                 }
-                fitted_ids.insert(oc->get_cluster_id());
                 for (auto& seg : segs) {
                     auto [d_stop, cp] = segment_get_closest_point(seg, rec.stop_pt, "fit", "main");
-                    if (d_stop > m_michel_dot_radius_cm * units::cm) continue;
+                    // segment_get_closest_point returns a 1e9 sentinel when the
+                    // segment carries no usable point, and the body test below
+                    // cannot catch it: on a chain shorter than
+                    // dot_body_exclusion_cm the body distance is the same
+                    // sentinel, so `d_body < d_stop` is false and the piece is
+                    // kept with michel_dis_cm = 1e8 cm (PDHD 028084_12 cluster 3,
+                    // a 1.0 cm 3-point chain).  A piece of an admitted cluster
+                    // can be at most radius + the cluster cap from the stop.
+                    if (d_stop > (m_michel_dot_radius_cm + m_companion_max_len_cm) * units::cm) continue;
                     if (segment_track_length(seg) > m_dot_max_len_cm * units::cm) continue;
                     // distance to the muon body beyond its last dot_body_exclusion
                     double d_body = 1e9;
@@ -1255,34 +1365,142 @@ void CheckSTM_Michel::visit(Ensemble& ensemble) const
                         if (prof.rr[i] < m_dot_body_exclusion_cm * units::cm) continue;
                         d_body = std::min(d_body, (prof.pts[i] - cp).magnitude());
                     }
-                    if (d_body < d_stop) continue;   // a delta ray / body fragment, not a Michel dot
-                    ++rec.n_dots;
-                    if (rec.michel_seg_id < 0 && seg)
-                        rec.michel_seg_id = oc->get_cluster_id() * 1000 + static_cast<int>(seg->get_graph_index());
-                    rec.dots_ke_dqdx += segment_cal_kine_dQdx(seg, m_recomb_model) / units::MeV;
-                    set_pdg(seg, 11);
-                    add_points(rec, seg, 4);
-                    if (m_build_michel_shower) {
-                        if (!michel_shower) {
-                            michel_shower = std::make_shared<Shower>(g);
-                            michel_shower->set_start_vertex(stop_v, 2);
-                            michel_shower->set_start_segment(seg, false, "fit", "associate_points");
-                            michel_shower->set_particle_type(11);
-                            rec.michel_conn_type = 2;
-                        }
-                        else {
-                            michel_shower->add_segment(seg, true, "fit", "associate_points");
-                        }
-                    }
+                    if (d_body < d_stop) continue;   // a delta ray / body fragment, not a Michel piece
+                    pieces.push_back({seg, d_stop, oc->get_cluster_id(),
+                                      static_cast<int>(seg->get_graph_index())});
                 }
             }
-            if (michel_shower && rec.michel_conn_type == 2) {
-                michel_shower->calculate_kinematics(particle_data(), m_recomb_model);
-                michel_shower->set_kine_best(michel_shower->get_kine_dQdx());
-                rec.michel_ke_best = michel_shower->get_kine_best() / units::MeV;
+            std::sort(pieces.begin(), pieces.end(), [](const Piece& a, const Piece& b) {
+                if (a.d_stop != b.d_stop) return a.d_stop < b.d_stop;
+                if (a.cluster_id != b.cluster_id) return a.cluster_id < b.cluster_id;
+                return a.gidx < b.gidx;
+            });
+            for (const auto& pc : pieces) {
+                ++rec.n_dots;
+                rec.dots_ke_dqdx += segment_cal_kine_dQdx(pc.seg, m_recomb_model) / units::MeV;
+                set_pdg(pc.seg, 11);
+                add_points(rec, pc.seg, 4);
+                michel_pieces.emplace_back(pc.seg, pc.d_stop);
+                if (rec.michel_conn_type == 0) {
+                    // Nothing attached survived at the stop: the 3-D clustering
+                    // detached the Michel.  The nearest piece is the seed and the
+                    // object is BRIDGED, not attached.  Set outside the
+                    // build_michel_shower guard -- through doc pdhd/14 this lived
+                    // inside it, so with that knob off a real Michel reported
+                    // conn_type 0 with n_dots > 0.
+                    rec.michel_conn_type = 2;
+                    rec.michel_dis_cm = pc.d_stop / units::cm;
+                    rec.michel_seg_id = pc.cluster_id * 1000 + pc.gidx;
+                    rec.michel_len = segment_track_length(pc.seg);
+                    if (m_build_michel_shower) {
+                        michel_shower = std::make_shared<Shower>(g);
+                        michel_shower->set_start_vertex(stop_v, 2);
+                        michel_shower->set_start_segment(pc.seg, false, "fit", "associate_points");
+                        michel_shower->set_particle_type(11);
+                        michel_shower->calculate_kinematics(particle_data(), m_recomb_model);
+                        rec.michel_ke_core = michel_shower->get_kine_dQdx() / units::MeV;
+                        rec.michel_ke_range = michel_shower->get_kine_range() / units::MeV;
+                    }
+                    else {
+                        rec.michel_ke_core = segment_cal_kine_dQdx(pc.seg, m_recomb_model) / units::MeV;
+                    }
+                }
+                else if (michel_shower) {
+                    michel_shower->add_segment(pc.seg, true, "fit", "associate_points");
+                }
+            }
+            // doc pdhd/15 sec 5: a companion that passed every admission test and
+            // that the fitter produced no segment for is still the muon's
+            // "additional activity" -- it just has no dx, so only its charge can
+            // be read.  Through doc pdhd/14 it landed in n_dot_clusters_unfit and
+            // nowhere else, leaving michel_found 0 beside a non-zero energy on 15
+            // of 302 PDHD candidates.  conn type 3 = CHARGE ONLY: no fitted
+            // segment, no shower, michel_seg_id stays -1, and the whole energy is
+            // the charge conversion.
+            if (rec.michel_conn_type == 0 && rec.n_dot_clusters_unfit > 0 && d_unfit < 1e8) {
+                rec.michel_conn_type = 3;
+                rec.michel_dis_cm = d_unfit / units::cm;
             }
         }
-        if (michel_shower) showers.insert(michel_shower);
+
+        // Unfitted companion clusters have no dx, so dQ/dx cannot be inverted;
+        // the only route is charge (doc pdhd/15 sec 6).  Computed before the
+        // shower is energised because the object energy is stamped back onto it.
+        rec.dots_ke_unfit = stm_michel_charge_to_energy(rec.dots_charge_unfit, m_michel_unfit_recom,
+                                                        m_michel_unfit_fudge, m_michel_unfit_w_ev) / units::MeV;
+
+        // ---- energise the object, once ---------------------------------------
+        // doc pdhd/15 sec 5.  PatternAlgorithms::calculate_shower_kinematics
+        // (NeutrinoEnergyReco.cxx:303) is the chain's own production entry
+        // point: it runs Shower::calculate_kinematics AND sets kine_charge from
+        // the 2-D charge maps.  Using it rather than a local recipe keeps the
+        // owner's standing rule from doc pdhd/14 -- every number in this tree is
+        // the chain's, not this file's.
+        if (michel_shower) {
+            showers.insert(michel_shower);
+            michel_shower->set_particle_type(11);
+            IndexedVertexSet lm_v; IndexedSegmentSet lm_s;
+            pa.calculate_shower_kinematics(showers, lm_v, lm_s, g, *tf, m_dv,
+                                           particle_data(), m_recomb_model);
+            rec.michel_ke_dqdx = michel_shower->get_kine_dQdx() / units::MeV;
+            rec.michel_ke_charge = michel_shower->get_kine_charge() / units::MeV;
+            IndexedVertexSet mv2; IndexedSegmentSet ms2;
+            michel_shower->fill_sets(mv2, ms2, false);
+            rec.n_michel_segs = static_cast<int>(ms2.size());
+            rec.michel_start_pt = michel_shower->get_start_point();
+            if (auto sv = michel_shower->start_vertex())
+                rec.michel_parent_vtx_id = rec.cluster_id * 1000 + static_cast<int>(sv->get_graph_index());
+            // Stamp the object energy back onto the Shower.  Shower::kenergy_best
+            // is 0 whenever a member is graph-disconnected (PRShower.cxx:1855) --
+            // which is EVERY bridged Michel and every attached one that gathered
+            // a companion piece -- and get_kine_best() then falls back to
+            // kenergy_charge, 0 on this path (sec 6).  fill_bee_pf_tree prunes an
+            // EM leaf whose ke is below em_ke_min (MultiAlgBlobClustering.cxx:2082),
+            // so leaving it at 0 DELETES the e- node from mc.json: 039252_15
+            // cluster 91 lost the daughter it had had since doc pdvd/48.  The
+            // module's own object energy is the right value for it to carry.
+            michel_shower->set_kine_best((rec.michel_ke_dqdx + rec.dots_ke_unfit) * units::MeV);
+        }
+        else if (!michel_pieces.empty()) {
+            // build_michel_shower off: no Shower object exists, so the object
+            // energy is the plain sum over its fitted pieces.
+            rec.n_michel_segs = static_cast<int>(michel_pieces.size());
+            double sum = 0;
+            for (const auto& [sg, d] : michel_pieces) { (void)d; sum += segment_cal_kine_dQdx(sg, m_recomb_model) / units::MeV; }
+            rec.michel_ke_dqdx = sum;
+        }
+        if (rec.michel_parent_vtx_id < 0 && rec.michel_conn_type > 0) rec.michel_parent_vtx_id = rec.stop_vtx_id;
+
+        rec.michel_n_pieces = rec.n_michel_segs + rec.n_dot_clusters_unfit;
+
+        // The owner's rule, doc pdhd/15 sec 1: "there should be range, dQ/dx for
+        // the track.  For the dots etc ... either dQ/dx -> dE/dx or the charge
+        // conversion."  So `best` is dQ/dx over everything fitted plus the
+        // charge term for what is not -- NOT Shower::get_kine_best(), which for
+        // a shower-flagged or graph-disconnected object falls back to
+        // kenergy_charge computed with the SHOWER recombination pair and
+        // overshoots the chain's own dQ/dx by ~1.66x (sec 6).
+        rec.michel_ke_best = rec.michel_ke_dqdx + rec.dots_ke_unfit;
+
+        // doc pdhd/15 sec 4: michel_found now means "a Michel object exists" --
+        // 1 attached, 2 bridged across a clustering gap, 3 charge only.  Through
+        // doc pdhd/14 it was set on the attached path only, so 33 PDHD / 41 PDVD
+        // reconstructed Michels reported 0, about 30 % of them (doc pdhd/13
+        // defect D1).  The old meaning is exactly
+        // (michel_found && michel_conn_type == 1).
+        rec.michel_found = (rec.michel_conn_type > 0) ? 1 : 0;
+
+        // A NaN passes no gate and fails every one silently (PDVD 039349_3
+        // cluster 26 persisted michel_ke_best = NaN through doc pdhd/14).
+        for (double* e : {&rec.michel_ke_dqdx, &rec.michel_ke_range, &rec.michel_ke_best,
+                          &rec.michel_ke_core, &rec.michel_ke_charge, &rec.dots_ke_dqdx,
+                          &rec.dots_ke_unfit, &rec.muon_ke_range, &rec.muon_ke_dqdx, &rec.muon_ke_best}) {
+            if (!std::isfinite(*e)) {
+                SPDLOG_LOGGER_WARN(s_log, "{}CheckSTM_Michel: cluster {} produced a non-finite energy; zeroed",
+                                   m_evt_tag, rec.cluster_id);
+                *e = 0;
+            }
+        }
         tf->set_showers(showers);
 
         // ---- doc pdhd/03 sec 6: is the cluster a track (+ attachments) at all?
@@ -1324,18 +1542,25 @@ void CheckSTM_Michel::visit(Ensemble& ensemble) const
         SPDLOG_LOGGER_INFO(s_log,
             "{}CheckSTM_Michel: cluster {} gid {} verdict {} bits {} | chain {} segs {:.1f} cm ({} pts, {} dead) stop_dis {:.1f} cm | "
             "contrast {:.2f}/{:.2f} ks_mu {:.3f} ks_flat {:.3f} comp_fwd {:.0f}/{:.2f}/{:.2f}/{:.2f} | "
-            "delta {} hadron {} | michel {} ({} segs, {:.1f} cm, {:.2f} mip, kink {:.0f} deg, {:.1f} MeV) dots {} ({:.1f} MeV) unfit {} | cont {:.1f} cm @ {:.0f} deg ext {} ({:.1f} cm) dead_ahead {} cov {:.2f} | in_fv {} | {:.0f} ms",
+            "delta {} hadron {} | michel {} conn {} ({} segs / {} pieces, {:.1f} cm, kink {:.0f} deg, gap {:.1f} cm) "
+            "E {:.1f} MeV = dQ/dx {:.1f} + unfit {:.1f} (core {:.1f}, range {:.1f}, charge {:.1f}) dots {} ({:.1f} MeV) unfit_cl {} | "
+            "cont {:.1f} cm @ {:.0f} deg ext {} ({:.1f} cm) dead_ahead {} cov {:.2f} | in_fv {} | {:.0f} ms",
             m_evt_tag, rec.cluster_id, rec.gid, bits_string(rec.reject_bits), rec.reject_bits,
             rec.n_chain_segs, rec.muon_len / units::cm, rec.n_profile_pts, rec.n_dead_pts, rec.stop_dis / units::cm,
             rec.bragg.contrast, rec.bragg.expected, rec.ks_mu, rec.ks_flat,
             rec.comp_fwd[0], rec.comp_fwd[1], rec.comp_fwd[2], rec.comp_fwd[3],
             rec.n_delta, rec.n_body_hadron,
-            rec.michel_found, rec.n_michel_segs, rec.michel_len / units::cm, rec.michel_mip, rec.michel_kink_deg, rec.michel_ke_best,
+            rec.michel_found, rec.michel_conn_type, rec.n_michel_segs, rec.michel_n_pieces,
+            rec.michel_len / units::cm, rec.michel_kink_deg, rec.michel_dis_cm,
+            rec.michel_ke_best, rec.michel_ke_dqdx, rec.dots_ke_unfit,
+            rec.michel_ke_core, rec.michel_ke_range, rec.michel_ke_charge,
             rec.n_dots, rec.dots_ke_dqdx, rec.n_dot_clusters_unfit,
             rec.cont_len / units::cm, rec.cont_angle_deg, rec.n_ext, rec.ext_len / units::cm, rec.dead_ahead, rec.chain_coverage, rec.in_fv,
             MS(Clock::now() - t0).count());
     }
 
+    // doc pdhd/15: "with a Michel" now counts the detached ones too (michel_found
+    // means "a Michel object exists"); it used to count the attached only.
     SPDLOG_LOGGER_INFO(s_log, "{}CheckSTM_Michel: {} candidate(s), {} pass every check, {} with a Michel; {:.0f} ms",
                        m_evt_tag, candidates.size(), n_stm, n_michel, MS(Clock::now() - t_total).count());
 }

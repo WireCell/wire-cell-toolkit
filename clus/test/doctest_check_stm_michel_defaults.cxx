@@ -66,7 +66,18 @@ TEST_CASE("clus knob defaults: CheckSTM_Michel verdict thresholds")
     D("michel_mip_lo", 0.3);
     D("michel_min_kink_deg", 30.0);
     D("michel_dot_radius_cm", 15.0);
-    D("dot_max_len_cm", 10.0);
+    // doc pdhd/15: DECLARED DEFAULT CHANGE, 10 -> 25 cm.  The per-piece cap now
+    // matches michel_max_len_cm, the ceiling an attached Michel arm already
+    // faces, so a detached Michel is judged by the same size rule.
+    D("dot_max_len_cm", 25.0);
+    // doc pdhd/15: companion ADMISSION, split off dot_max_len_cm (doc pdhd/13
+    // defect D2).  25 = michel_max_len_cm; measured on the d14 arms to admit the
+    // 11-24 cm Michel-sized neighbours and exclude every 57-292 cm cosmic.
+    D("companion_max_len_cm", 25.0);
+    // doc pdhd/15 sec 6: the KineChargeOptions TRACK pair for an unfitted piece
+    D("michel_unfit_recom", 0.7);
+    D("michel_unfit_fudge", 0.95);
+    D("michel_unfit_w_ev", 23.6);
     D("dot_body_exclusion_cm", 5.0);
     D("delta_max_len_cm", 8.0);
     D("vertex_hadron_mip", 1.4);

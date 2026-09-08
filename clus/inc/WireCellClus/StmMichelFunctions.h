@@ -88,6 +88,26 @@ namespace WireCell::Clus::PR {
     /// Median of a copy of v; 0 when empty.
     double stm_michel_median(std::vector<double> v);
 
+    /// Charge (electrons) -> energy, for a Michel piece the fitter never
+    /// reached so there is no dx and hence no dQ/dx to invert (doc pdhd/15).
+    ///
+    /// Forked BY DUPLICATION (CLAUDE.md M10) from the one line every
+    /// charge-based energy in this repo ends on,
+    /// NeutrinoEnergyReco.cxx:509 (itself the port of the prototype's
+    /// NeutrinoID_energy_reco.h:248):
+    ///
+    ///     overall / recom_factor / fudge_factor * w_value / 1e6 * units::MeV
+    ///
+    /// `w_value` is in eV per ion pair (23.6).  The factor pair is the
+    /// caller's: KineChargeOptions offers TRACK (0.7 / 0.95) and SHOWER
+    /// (0.5 / 0.8) -- doc pdhd/15 sec 6 measures the track pair against the
+    /// chain's own segment_cal_kine_dQdx on 47 PDVD / 26 PDHD single-piece
+    /// Michels (ratio median 1.19 / 1.01) and the shower pair at 1.98 / 1.67,
+    /// so the track pair is what puts an unfitted piece on the same scale as
+    /// the fitted ones.  Returns 0 for a non-positive or non-finite input.
+    double stm_michel_charge_to_energy(double dQ_electrons, double recom_factor,
+                                       double fudge_factor, double w_value_ev);
+
     /// The Bragg-contrast metric (doc pdvd/25 sec 13.9 item 3): median dQ/dx
     /// over the tail window rr in [tail_lo, tail_hi] divided by the median
     /// over the plateau window rr in [pl_lo, pl_hi].  `expected` is the SAME

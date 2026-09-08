@@ -320,3 +320,38 @@ TEST_CASE("stm_michel chain arm: 5 cm terminal arm is delta, 15 cm 1.6x MIP bran
     CHECK_FALSE(ah.terminal);
     (void)s2;
 }
+
+// doc pdhd/15: charge -> energy for a Michel piece the fitter never reached.
+TEST_CASE("stm_michel charge to energy: the KineChargeOptions arithmetic, guarded")
+{
+    // The one line every charge-based energy in this repo ends on
+    // (NeutrinoEnergyReco.cxx:509): Q / recom / fudge * W / 1e6 * MeV.
+    const double W = 23.6;            // eV per ion pair
+    const double Q = 3.85e5;          // PDVD 039252_15 cluster 309, the piece the
+                                      // doc-14 code added to the shower and never counted
+    const double track = stm_michel_charge_to_energy(Q, 0.7, 0.95, W) / units::MeV;
+    CHECK(track == doctest::Approx(Q / 0.7 / 0.95 * W / 1e6));
+    CHECK(track == doctest::Approx(13.67).epsilon(0.01));
+    // that piece's own segment_cal_kine_dQdx on the production arm was 13.00 MeV,
+    // so the TRACK factor pair puts an unfitted piece on the fitted scale
+    CHECK(std::abs(track - 13.00) / 13.00 < 0.10);
+
+    // the SHOWER pair is the one that overshoots (doc pdhd/15 sec 6: median
+    // ratio 1.98 PDVD / 1.67 PDHD against the chain's own dQ/dx)
+    const double shower = stm_michel_charge_to_energy(Q, 0.5, 0.8, W) / units::MeV;
+    CHECK(shower / track == doctest::Approx(0.7 * 0.95 / (0.5 * 0.8)));
+    CHECK(shower > 1.6 * track);
+
+    // linear in the charge
+    CHECK(stm_michel_charge_to_energy(2 * Q, 0.7, 0.95, W)
+          == doctest::Approx(2 * stm_michel_charge_to_energy(Q, 0.7, 0.95, W)));
+
+    // guards: nothing here may return a NaN or a negative energy, because a
+    // non-finite value passes no gate and fails every one silently
+    CHECK(stm_michel_charge_to_energy(0.0, 0.7, 0.95, W) == 0.0);
+    CHECK(stm_michel_charge_to_energy(-1.0, 0.7, 0.95, W) == 0.0);
+    CHECK(stm_michel_charge_to_energy(std::nan(""), 0.7, 0.95, W) == 0.0);
+    CHECK(stm_michel_charge_to_energy(Q, 0.0, 0.95, W) == 0.0);
+    CHECK(stm_michel_charge_to_energy(Q, 0.7, 0.0, W) == 0.0);
+    CHECK(stm_michel_charge_to_energy(Q, 0.7, 0.95, 0.0) == 0.0);
+}
