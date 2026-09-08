@@ -196,6 +196,22 @@ double WireCell::Clus::PR::stm_michel_charge_to_energy(double dQ_electrons, doub
     return dQ_electrons / recom_factor / fudge_factor * w_value_ev / 1e6 * units::MeV;
 }
 
+// doc pdhd/17 sec 9.  See the header for the MIP-equivalence caveat.
+double WireCell::Clus::PR::stm_michel_charge_to_energy_model(
+    double dQ_electrons, const IRecombinationModel::pointer& model, double dedx_mev_per_cm)
+{
+    if (!std::isfinite(dQ_electrons) || dQ_electrons <= 0) return 0.0;
+    if (!model) return 0.0;
+    if (!std::isfinite(dedx_mev_per_cm) || dedx_mev_per_cm <= 0) return 0.0;
+    // dx cancels between the two factors below; 1 cm keeps every intermediate
+    // in the range the practical-unit models were written for (doc 88).
+    const double dx = 1.0 * units::cm;
+    const double dE = dedx_mev_per_cm * units::MeV / units::cm * dx;
+    const double dQ_model = (*model)(dE, dx);          // electrons for that dE over dx
+    if (!std::isfinite(dQ_model) || dQ_model <= 0) return 0.0;
+    return dQ_electrons * dE / dQ_model;
+}
+
 StmMichelBragg WireCell::Clus::PR::stm_michel_bragg_contrast(const StmMichelProfile& prof,
                                                               const std::function<double(double)>& mu_dqdx_at_rr_cm,
                                                               double tail_lo, double tail_hi,

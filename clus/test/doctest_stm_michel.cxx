@@ -355,3 +355,109 @@ TEST_CASE("stm_michel charge to energy: the KineChargeOptions arithmetic, guarde
     CHECK(stm_michel_charge_to_energy(Q, 0.7, 0.0, W) == 0.0);
     CHECK(stm_michel_charge_to_energy(Q, 0.7, 0.95, 0.0) == 0.0);
 }
+
+namespace {
+    // Local mirrors of the two gen models, transcribed from
+    // gen/src/PracticalRecombinationModels.cxx:37-42 and
+    // gen/src/RecombinationModels.cxx:152-160.  Local because a clus test must
+    // not depend on the gen plugin (the doctest_cal_kine_dqdx_zero_dx pattern).
+    struct BoxFwd : public IRecombinationModel {
+        double m_efield, m_a{0.93}, m_b{0.212}, m_rho{1.38}, m_wi{23.6e-6};
+        explicit BoxFwd(double E) : m_efield(E) {}
+        virtual ~BoxFwd() {}
+        double operator()(double dE, double dX) override
+        {
+            const double tmp = (dE / units::MeV * units::cm / dX) * m_b / (m_efield * m_rho);
+            return std::log(m_a + tmp) / tmp * dE / m_wi;
+        }
+        double dE(double, double) override { return 0.0; }   // unused here
+    };
+    struct PowerFwd : public IRecombinationModel {
+        double m_a{0.93}, m_k, m_p{1.0}, m_c, m_pivot{2.1}, m_wi{23.6e-6};
+        PowerFwd(double k, double C) : m_k(k), m_c(C) {}
+        virtual ~PowerFwd() {}
+        double operator()(double dE, double dX) override
+        {
+            const double dedx = dE / units::MeV * units::cm / dX;
+            if (dedx <= 0) return 0.0;
+            const double u = m_k * std::pow(dedx / m_pivot, m_p);
+            return m_c * (std::log(m_a + u) / u) * dedx / m_wi * (dX / units::cm);
+        }
+        double dE(double, double) override { return 0.0; }
+    };
+}
+
+// doc pdhd/17 sec 9: the unfitted-charge conversion read out of the bound
+// recombination model instead of the hard-coded 0.7 x 0.95 pair.
+TEST_CASE("stm_michel_charge_to_energy_model: MeV per electron comes from the bound model")
+{
+    const double Q = 1e6;                       // electrons
+    const double MIP = 2.1;                     // MeV/cm, the assumed dE/dx
+    const double flat = stm_michel_charge_to_energy(Q, 0.7, 0.95, 23.6) / units::MeV;
+
+    // ABSOLUTE numbers, not just ratios: the practical-unit models carry a
+    // units::cm/units::MeV factor of 10 that a wrong conversion silently eats
+    // (doc 88 / e6fb7ef3), and a ratio test would not see it.
+    IRecombinationModel::pointer pdvd_box = std::make_shared<BoxFwd>(0.45);
+    IRecombinationModel::pointer pdhd_box = std::make_shared<BoxFwd>(0.4959);
+    // pr.jsonnet {pdvd,pdhd}_stm_recomb: p = 1, k = beta'*pivot, C measured.
+    IRecombinationModel::pointer pdvd_pow = std::make_shared<PowerFwd>(0.7169082125603865, 0.7941);
+    IRecombinationModel::pointer pdhd_pow = std::make_shared<PowerFwd>(0.6505519170239442, 0.8120);
+
+    const double e_pdvd_box = stm_michel_charge_to_energy_model(Q, pdvd_box, MIP) / units::MeV;
+    const double e_pdhd_box = stm_michel_charge_to_energy_model(Q, pdhd_box, MIP) / units::MeV;
+    const double e_pdvd_pow = stm_michel_charge_to_energy_model(Q, pdvd_pow, MIP) / units::MeV;
+    const double e_pdhd_pow = stm_michel_charge_to_energy_model(Q, pdhd_pow, MIP) / units::MeV;
+
+    // 1e6 electrons at MIP, in MeV = 1e6 * Wi / (C * R(2.1))
+    CHECK(flat == doctest::Approx(35.48872).epsilon(1e-6));
+    CHECK(e_pdvd_box == doctest::Approx(33.91269).epsilon(1e-6));
+    CHECK(e_pdhd_box == doctest::Approx(33.53843).epsilon(1e-6));
+    CHECK(e_pdvd_pow == doctest::Approx(42.70582).epsilon(1e-6));
+    CHECK(e_pdhd_pow == doctest::Approx(41.30349).epsilon(1e-6));
+
+    // The point of the knob, stated as the four ratios doc pdhd/17 sec 6 quotes:
+    // the flat pair was within 5 % of the UNCALIBRATED inverse and is 16-20 %
+    // from the calibrated one.  Both models are seen here, so "it follows
+    // whatever is bound" is tested rather than asserted.
+    CHECK(e_pdvd_box / flat == doctest::Approx(0.9556).epsilon(1e-3));
+    CHECK(e_pdhd_box / flat == doctest::Approx(0.9450).epsilon(1e-3));
+    CHECK(e_pdvd_pow / flat == doctest::Approx(1.2034).epsilon(1e-3));
+    CHECK(e_pdhd_pow / flat == doctest::Approx(1.1638).epsilon(1e-3));
+
+    // dx cancels: the function fixes dx = 1 cm, and any other choice agrees.
+    // (Checked through the model directly, since the function takes no dx.)
+    const double dx2 = 7.3 * units::cm;
+    const double dE2 = MIP * units::MeV / units::cm * dx2;
+    CHECK(Q * dE2 / (*pdhd_pow)(dE2, dx2) / units::MeV == doctest::Approx(e_pdhd_pow).epsilon(1e-9));
+
+    // MIP-EQUIVALENT, and the direction of the bias is not the obvious one:
+    // quenching RISES with dE/dx, so a denser deposit needs MORE MeV per
+    // electron and assuming MIP UNDER-estimates it.
+    const double e_dense = stm_michel_charge_to_energy_model(Q, pdhd_pow, 5.0) / units::MeV;
+    CHECK(e_dense > e_pdhd_pow);
+    CHECK(e_dense / e_pdhd_pow == doctest::Approx(1.201).epsilon(1e-2));
+
+    // linear in the charge
+    CHECK(stm_michel_charge_to_energy_model(2 * Q, pdhd_pow, MIP)
+          == doctest::Approx(2 * stm_michel_charge_to_energy_model(Q, pdhd_pow, MIP)));
+
+    // guards: a non-finite or negative energy passes no gate and fails every
+    // one silently, so every bad input must give exactly 0.
+    IRecombinationModel::pointer null_model;
+    CHECK(stm_michel_charge_to_energy_model(0.0, pdhd_pow, MIP) == 0.0);
+    CHECK(stm_michel_charge_to_energy_model(-1.0, pdhd_pow, MIP) == 0.0);
+    CHECK(stm_michel_charge_to_energy_model(std::nan(""), pdhd_pow, MIP) == 0.0);
+    CHECK(stm_michel_charge_to_energy_model(Q, null_model, MIP) == 0.0);
+    CHECK(stm_michel_charge_to_energy_model(Q, pdhd_pow, 0.0) == 0.0);
+    CHECK(stm_michel_charge_to_energy_model(Q, pdhd_pow, -2.1) == 0.0);
+    // Below the Modified Box's A < 1 zero crossing the forward charge goes
+    // NEGATIVE; that must give 0, not a negative energy.  The crossing is where
+    // A + u = 1, i.e. u = 0.07: at p = 1 that is dE/dx = 0.07*pivot/k, so
+    // 0.205 MeV/cm on PDVD and 0.226 on PDHD.  (RecombinationModels.cxx:156's
+    // "~0.75 MeV/cm" is the SBND fit's crossing at p = 1.362179, NOT these.)
+    CHECK((*pdhd_pow)(0.30 * units::MeV / units::cm * units::cm, 1.0 * units::cm) > 0.0);
+    CHECK((*pdhd_pow)(0.15 * units::MeV / units::cm * units::cm, 1.0 * units::cm) < 0.0);
+    CHECK(stm_michel_charge_to_energy_model(Q, pdhd_pow, 0.15) == 0.0);
+    CHECK(stm_michel_charge_to_energy_model(Q, pdvd_pow, 0.15) == 0.0);
+}

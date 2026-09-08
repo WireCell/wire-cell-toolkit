@@ -148,6 +148,12 @@ public:
         m_michel_unfit_recom = get<double>(config, "michel_unfit_recom", m_michel_unfit_recom);
         m_michel_unfit_fudge = get<double>(config, "michel_unfit_fudge", m_michel_unfit_fudge);
         m_michel_unfit_w_ev = get<double>(config, "michel_unfit_w_ev", m_michel_unfit_w_ev);
+        // doc pdhd/17: derive the unfitted-charge survival FROM the bound
+        // recombination model at michel_unfit_dedx instead of the hard-coded
+        // michel_unfit_recom x michel_unfit_fudge pair.  C++ default false =>
+        // an absent key leaves dots_ke_unfit where doc pdhd/15 put it.
+        m_michel_unfit_from_model = get<bool>(config, "michel_unfit_from_model", m_michel_unfit_from_model);
+        m_michel_unfit_dedx = get<double>(config, "michel_unfit_dedx", m_michel_unfit_dedx);
         m_dot_body_exclusion_cm = get<double>(config, "dot_body_exclusion_cm", m_dot_body_exclusion_cm);
         m_delta_max_len_cm = get<double>(config, "delta_max_len_cm", m_delta_max_len_cm);
         m_vertex_hadron_mip = get<double>(config, "vertex_hadron_mip", m_vertex_hadron_mip);
@@ -241,6 +247,8 @@ public:
         cfg["michel_unfit_recom"] = m_michel_unfit_recom;
         cfg["michel_unfit_fudge"] = m_michel_unfit_fudge;
         cfg["michel_unfit_w_ev"] = m_michel_unfit_w_ev;
+        cfg["michel_unfit_from_model"] = m_michel_unfit_from_model;   // doc pdhd/17
+        cfg["michel_unfit_dedx"] = m_michel_unfit_dedx;
         cfg["dot_body_exclusion_cm"] = m_dot_body_exclusion_cm;
         cfg["delta_max_len_cm"] = m_delta_max_len_cm;
         cfg["vertex_hadron_mip"] = m_vertex_hadron_mip;
@@ -373,6 +381,11 @@ private:
     double m_michel_dot_radius_cm{15.0}, m_dot_max_len_cm{25.0}, m_dot_body_exclusion_cm{5.0};
     double m_companion_max_len_cm{25.0};                                   // doc pdhd/15
     double m_michel_unfit_recom{0.7}, m_michel_unfit_fudge{0.95}, m_michel_unfit_w_ev{23.6};
+    // doc pdhd/17.  false = the doc pdhd/15 pair, so an absent key is
+    // byte-identical.  2.1 MeV/cm is the MIP operating point the
+    // PowerBoxRecombination fit also pivots on (RecombinationModels.h).
+    bool m_michel_unfit_from_model{false};
+    double m_michel_unfit_dedx{2.1};
     double m_delta_max_len_cm{8.0};
     double m_vertex_hadron_mip{1.4};
     double m_profile_min_dqdx_frac{0.0};
@@ -1520,8 +1533,18 @@ void CheckSTM_Michel::visit(Ensemble& ensemble) const
         // Unfitted companion clusters have no dx, so dQ/dx cannot be inverted;
         // the only route is charge (doc pdhd/15 sec 6).  Computed before the
         // shower is energised because the object energy is stamped back onto it.
-        rec.dots_ke_unfit = stm_michel_charge_to_energy(rec.dots_charge_unfit, m_michel_unfit_recom,
-                                                        m_michel_unfit_fudge, m_michel_unfit_w_ev) / units::MeV;
+        // doc pdhd/17: the flat pair and this component's own dQ/dx -> dE/dx
+        // inverse are two carriers of ONE quantity, and doc pdhd/16 moved only
+        // the second.  With michel_unfit_from_model the survival comes out of
+        // the model actually bound here, so the two cannot drift apart again.
+        // MIP-EQUIVALENT either way -- an unfitted cluster has no dx.
+        rec.dots_ke_unfit =
+            (m_michel_unfit_from_model
+                 ? stm_michel_charge_to_energy_model(rec.dots_charge_unfit, m_recomb_model,
+                                                     m_michel_unfit_dedx)
+                 : stm_michel_charge_to_energy(rec.dots_charge_unfit, m_michel_unfit_recom,
+                                               m_michel_unfit_fudge, m_michel_unfit_w_ev))
+            / units::MeV;
 
         // ---- energise the object, once ---------------------------------------
         // doc pdhd/15 sec 5.  PatternAlgorithms::calculate_shower_kinematics

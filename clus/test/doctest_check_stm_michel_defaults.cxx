@@ -78,6 +78,13 @@ TEST_CASE("clus knob defaults: CheckSTM_Michel verdict thresholds")
     D("michel_unfit_recom", 0.7);
     D("michel_unfit_fudge", 0.95);
     D("michel_unfit_w_ev", 23.6);
+    // doc pdhd/17: derive the unfitted-charge survival from the bound
+    // recombination model instead of the pair above.  C++ default OFF, so an
+    // absent key leaves dots_ke_unfit exactly where doc pdhd/15 put it; both
+    // ProtoDUNE drivers set it true.  2.1 MeV/cm = the MIP assumption, and the
+    // same pivot PowerBoxRecombination uses.
+    B("michel_unfit_from_model", false);
+    D("michel_unfit_dedx", 2.1);
     D("dot_body_exclusion_cm", 5.0);
     D("delta_max_len_cm", 8.0);
     D("vertex_hadron_mip", 1.4);

@@ -17,6 +17,7 @@
 #include "WireCellClus/PRGraph.h"
 #include "WireCellClus/PRSegment.h"
 #include "WireCellClus/PRVertex.h"
+#include "WireCellIface/IRecombinationModel.h"
 #include "WireCellUtil/Point.h"
 #include "WireCellUtil/Units.h"
 
@@ -107,6 +108,40 @@ namespace WireCell::Clus::PR {
     /// the fitted ones.  Returns 0 for a non-positive or non-finite input.
     double stm_michel_charge_to_energy(double dQ_electrons, double recom_factor,
                                        double fudge_factor, double w_value_ev);
+
+    /// doc pdhd/17 sec 9: the SAME conversion, but with the survival read out
+    /// of the recombination model the component is already holding instead of
+    /// the hard-coded pair above.
+    ///
+    ///     E = dQ_electrons * (dedx * dx) / model(dedx * dx, dx)
+    ///
+    /// i.e. "how many MeV does one collected electron stand for, if this charge
+    /// was deposited at `dedx_mev_per_cm`", asked of the model itself.  `dx`
+    /// cancels, so any positive value gives the same answer; 1 cm is used.
+    ///
+    /// This exists because the pair (0.7 / 0.95 = 0.665 survival) and the
+    /// component's dQ/dx -> dE/dx inverse are two carriers of ONE physical
+    /// quantity, and doc pdhd/16 moved only the second: after it the two sit
+    /// 20 % (PDVD) / 16 % (PDHD) apart at MIP, where before they were within
+    /// 5 %.  Deriving the first FROM the second cannot drift again, whatever
+    /// model is bound.
+    ///
+    /// The MIP assumption is unavoidable and it is not neutral: an unfitted
+    /// cluster has no dx, so there is no dQ/dx to invert and a dE/dx must be
+    /// assumed.  Because quenching rises with dE/dx, a deposit DENSER than the
+    /// assumption needs MORE MeV per electron than this returns -- at the
+    /// calibrated PDHD model, 4.13e-5 MeV/e at 2.1 MeV/cm against 4.96e-5 at
+    /// 5 MeV/cm -- so assuming MIP UNDER-estimates a dense deposit by up to
+    /// ~20 %.  Everything quoted through this function is MIP-equivalent.
+    ///
+    /// Returns 0 for a non-positive or non-finite input, a null model, a
+    /// non-positive `dedx_mev_per_cm`, or a model that returns a non-positive
+    /// charge there (the Modified Box's forward goes negative below its A < 1
+    /// zero crossing, u = 1 - A: at p = 1 that is 0.205 MeV/cm on PDVD and
+    /// 0.226 on PDHD, far below any MIP assumption).
+    double stm_michel_charge_to_energy_model(double dQ_electrons,
+                                             const IRecombinationModel::pointer& model,
+                                             double dedx_mev_per_cm);
 
     /// The Bragg-contrast metric (doc pdvd/25 sec 13.9 item 3): median dQ/dx
     /// over the tail window rr in [tail_lo, tail_hi] divided by the median
