@@ -371,6 +371,9 @@ private:
         int n_stop_arms{0}, n_michel_segs{0}, michel_found{0}, michel_conn_type{0};
         double michel_len{0}, michel_mip{0}, michel_kink_deg{-1}, michel_far_len{0};
         double michel_ke_dqdx{0}, michel_ke_range{0}, michel_ke_best{0};
+        // doc pdhd/14
+        double muon_ke_range{0}, muon_ke_dqdx{0}, muon_ke_best{0};
+        int michel_seg_id{-1};                     // the daughter, named the way stop_vtx_id names the shared vertex
         double cont_len{0}, cont_angle_deg{-1}, cont_mip{0};
         int n_ext{0}; double ext_len{0};          // doc pdhd/03: chain extensions past the tagger's stop
         int dead_ahead{-1};                        // doc pdhd/03: 1 = the live end walks into a dead region
@@ -726,6 +729,17 @@ private:
         I1("n_dots", r.n_dots); I1("n_dot_clusters_unfit", r.n_dot_clusters_unfit);
         D1("dots_ke_dqdx", r.dots_ke_dqdx); D1("dots_charge_unfit", r.dots_charge_unfit);
         I1("in_fv", r.in_fv);
+        // doc pdhd/14.  The muon energy was the one thing this tree never
+        // carried: set_pdg (:661) builds a 4-momentum for every chain segment
+        // with segment_cal_4mom(seg, 13, ...) and hangs it on the segment,
+        // where nothing ever reads it again.  A hand scan cannot ask whether a
+        // 40 MeV blob beside a 250 MeV muon is a Michel if the muon's energy is
+        // not in the output at all.  Unconditional (owner decision 2026-09-07:
+        // a new feature of a module under active development on both
+        // ProtoDUNEs, not a knob) -- so T_stm_michel gains four branches and
+        // this output is NOT bit-identical to the pre-doc-14 tree.
+        D1("muon_ke_range", r.muon_ke_range); D1("muon_ke_dqdx", r.muon_ke_dqdx);
+        D1("muon_ke_best", r.muon_ke_best); I1("michel_seg_id", r.michel_seg_id);
         cluster.local_pcs()["stm_michel"] = Dataset(a);
 
         if (!r.px.empty()) {
@@ -1004,6 +1018,20 @@ void CheckSTM_Michel::visit(Ensemble& ensemble) const
             prof = stm_michel_profile(g, chain, entry_v);
             rec.n_profile_pts = static_cast<int>(prof.L.size());
             rec.muon_len = prof.total_length;
+            // doc pdhd/14: the same two estimators Shower::calculate_kinematics
+            // uses, and its >= 4 cm rule for choosing between them
+            // (PRSegmentFunctions.cxx:2900).  Range is taken on the
+            // CHAIN's total length, not per segment: cal_kine_range is not
+            // additive, so summing per-segment range energies over a chain the
+            // stop-extension walked would be wrong.  dQ/dx is additive and is
+            // summed segment by segment, exactly as :1262 sums the dots.
+            // cal_kine_range dereferences particle_data without checking it,
+            // and this component tolerates a null one elsewhere (:797), so
+            // guard rather than inherit a crash on a config that omits it.
+            if (particle_data())
+                rec.muon_ke_range = cal_kine_range(rec.muon_len, 13, particle_data()) / units::MeV;
+            for (auto& s : chain) rec.muon_ke_dqdx += segment_cal_kine_dQdx(s, m_recomb_model) / units::MeV;
+            rec.muon_ke_best = (rec.muon_len < 4 * units::cm) ? rec.muon_ke_dqdx : rec.muon_ke_range;
             add_points(rec, chain.back(), 1, &prof);
             if (rec.n_profile_pts < m_min_chain_points) rec.reject_bits |= R_SHORT;
         }
@@ -1169,6 +1197,14 @@ void CheckSTM_Michel::visit(Ensemble& ensemble) const
             rec.michel_found = 1;
             rec.michel_len = seed.len; rec.michel_mip = seed.mip; rec.michel_kink_deg = seed.kink_deg; rec.michel_far_len = seed.far_len;
             rec.michel_conn_type = 1;
+            // doc pdhd/14: the daughter's id, in the same cluster*1000 + graph
+            // index encoding as stop_vtx_id and T_stm_michel_pts.seg_id.  With
+            // stop_vtx_id (the vertex both particles share) this closes the
+            // mu -> e link on the ATTACHED side; conn_type 2 has no shared
+            // vertex to name, so the seed dot is recorded instead and the
+            // relation there remains proximity, not topology.
+            if (seed.seg)
+                rec.michel_seg_id = rec.cluster_id * 1000 + static_cast<int>(seed.seg->get_graph_index());
             for (auto& a : michel_arms) { set_pdg(a.seg, 11); add_points(rec, a.seg, 3); }
             if (m_build_michel_shower) {
                 michel_shower = std::make_shared<Shower>(g);
@@ -1221,6 +1257,8 @@ void CheckSTM_Michel::visit(Ensemble& ensemble) const
                     }
                     if (d_body < d_stop) continue;   // a delta ray / body fragment, not a Michel dot
                     ++rec.n_dots;
+                    if (rec.michel_seg_id < 0 && seg)
+                        rec.michel_seg_id = oc->get_cluster_id() * 1000 + static_cast<int>(seg->get_graph_index());
                     rec.dots_ke_dqdx += segment_cal_kine_dQdx(seg, m_recomb_model) / units::MeV;
                     set_pdg(seg, 11);
                     add_points(rec, seg, 4);
