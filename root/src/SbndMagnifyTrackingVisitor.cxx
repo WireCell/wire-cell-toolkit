@@ -107,6 +107,11 @@ namespace {
 
 void Root::SbndMagnifyTrackingVisitor::visit(Clus::Facade::Ensemble& ensemble) const
 {
+    // (Our scalar-PC RSE reads removed in the 09-05 merge: upstream now
+    // resolves the per-event triplet through event_rse() below, and its
+    // m_runNo/m_subRunNo/m_eventNo are no longer mutable, so assigning to
+    // them inside this const visit() would not compile.)
+
     auto groupings = ensemble.with_name(m_grouping_name);
     if (groupings.empty()) {
         log->debug("SbndMagnifyTrackingVisitor: no grouping '{}'", m_grouping_name);

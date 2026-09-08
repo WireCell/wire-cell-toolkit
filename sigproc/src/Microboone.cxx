@@ -910,10 +910,28 @@ WireCell::Configuration Microboone::CoherentNoiseSub::default_configuration() co
 Microboone::OneChannelNoise::OneChannelNoise(const std::string& anode, const std::string& noisedb)
   : ConfigFilterBase(anode, noisedb)
   , m_check_chirp()    // fixme, there are magic numbers hidden here
-  , m_check_partial()  // fixme, here too.
 {
 }
 Microboone::OneChannelNoise::~OneChannelNoise() {}
+
+void Microboone::OneChannelNoise::configure(const WireCell::Configuration& cfg)
+{
+    ConfigFilterBase::configure(cfg);
+    m_partial_enable = get<bool>(cfg, "partial_enable", m_partial_enable);
+    m_partial_signal_blind = get<bool>(cfg, "partial_signal_blind", m_partial_signal_blind);
+    m_partial_nfreqs = get<int>(cfg, "partial_nfreqs", m_partial_nfreqs);
+    m_partial_maxpower = get<double>(cfg, "partial_maxpower", m_partial_maxpower);
+}
+
+WireCell::Configuration Microboone::OneChannelNoise::default_configuration() const
+{
+    Configuration cfg = ConfigFilterBase::default_configuration();
+    cfg["partial_enable"] = m_partial_enable;
+    cfg["partial_signal_blind"] = m_partial_signal_blind;
+    cfg["partial_nfreqs"] = m_partial_nfreqs;
+    cfg["partial_maxpower"] = m_partial_maxpower;
+    return cfg;
+}
 
 WireCell::Waveform::ChannelMaskMap Microboone::OneChannelNoise::apply(int ch, signal_t& signal) const
 {
@@ -960,7 +978,56 @@ WireCell::Waveform::ChannelMaskMap Microboone::OneChannelNoise::apply(int ch, si
     auto spectrum = fwd_r2c(m_dft, signal);
     // std::cerr << "OneChannelNoise: "<<ch<<" dft spectral sum="<<Waveform::sum(spectrum)<<"\n";
 
-    bool is_partial = m_check_partial(spectrum);  // Xin's "IS_RC()"
+    // IS_RC / "partial waveform" detection (Xin's "IS_RC()").
+    //
+    // Diagnostics::Partial flags a channel when the lowest non-DC frequency bins
+    // hold large, monotonically falling power.  Judged on the raw spectrum that
+    // misfires on REAL signal: a long, large ionisation pulse has exactly that
+    // signature, and the consequences below (skip the RC-RC deconvolution, then
+    // run RawAdapativeBaselineAlg with its 20-tick window) then delete most of
+    // it.  Measured on SBND MC run 270/6/46 the flagged collection channels lost
+    // 43-90 % of their true signal, the loss scaling with pulse duration.
+    //
+    // partial_signal_blind=true judges the test on a copy whose SIGNAL regions
+    // have been replaced by the baseline, so a localised ionisation pulse stops
+    // contributing low-frequency power.  It is OFF by default because it only
+    // works where the noise estimate is not itself inflated by the signal.
+    // Measured on the same event: it correctly cleared four of the five false
+    // positives, but on the worst channel (10038) the pulse is broad enough that
+    // CalcRMSWithFlags returns 49.6 ADC, so the 4x threshold of 198 ADC flags
+    // NOTHING and the probe equals the raw waveform.  Estimators immune to that
+    // feedback (median |first difference|, or an HF-band RMS) fail the other way
+    // on this detector -- ADC quantisation pins the former at 1 count and SBND's
+    // noise is low-frequency dominated, so both under-read the true RMS by ~3x
+    // and mask 75-98 % of even a quiet channel, disabling the test by stealth.
+    //
+    // Within a single channel a big slow ionisation pulse and an RC-droop
+    // pathology are not reliably separable; doing so needs either cross-channel
+    // coherence (not available in this per-channel overload) or a requirement
+    // that the slow structure be present across the WHOLE readout.  Detectors
+    // that have no genuine partial-RC channels should set partial_enable=false,
+    // which keeps the RC-RC deconvolution below on every channel.
+    const Diagnostics::Partial check_partial(m_partial_nfreqs, m_partial_maxpower);
+    bool is_partial = false;
+    if (m_partial_enable) {
+        if (m_partial_signal_blind) {
+            auto probe = signal;             // pedestal-subtracted, pre-filtering
+            Microboone::SignalFilter(probe); // flags |x|>4*robustRMS (+-8 ticks) with +20000
+            Waveform::realseq_t keep;
+            keep.reserve(probe.size());
+            for (auto v : probe) {
+                if (v < 4096.0) keep.push_back(v);
+            }
+            const float fill = keep.empty() ? 0.0f : Waveform::median_binned(keep);
+            for (auto& v : probe) {
+                if (v > 4096.0) v = fill;
+            }
+            is_partial = check_partial(fwd_r2c(m_dft, probe));
+        }
+        else {
+            is_partial = check_partial(spectrum);
+        }
+    }
 
     int nspec = 0;  // just catch any non-zero
     if (!is_partial) {
@@ -1042,6 +1109,13 @@ WireCell::Waveform::ChannelMaskMap Microboone::OneChannelNoise::apply(int ch, si
             ret["lf_noisy"][ch].push_back(temp_chirped_bins);
             // std::cout << "Partial " << ch << std::endl;
         }
+        // Record the IS_RC decision on EVERY plane, including collection.  The
+        // "lf_noisy" mask above is deliberately induction-only, which meant a
+        // flagged collection channel had its waveform rewritten by the adaptive
+        // baseline below leaving no trace anywhere downstream -- that is why this
+        // went unnoticed.  This mask is informational: no known maskmap sends
+        // "partial" to "bad", so it changes no existing behaviour.
+        ret["partial"][ch].push_back(temp_chirped_bins);
         Microboone::SignalFilter(signal);
         Microboone::RawAdapativeBaselineAlg(signal);
     }
