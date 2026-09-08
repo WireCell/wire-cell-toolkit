@@ -26,6 +26,10 @@ local smeared = nominal + {
     // additional smearing.  No extra smear -> the method measures it.
     morse_nominal: nominal,
 
+    // splat with the (measured/placeholder) extra smearing; used by the
+    // morse 'spcmp' comparison so splat approximates sim+OSP.
+    smeared: smeared,
+
     spdir: nominal,
 
     spdir_lofr: smeared {

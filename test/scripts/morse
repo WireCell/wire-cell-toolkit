@@ -27,6 +27,18 @@
 #                variants/ssss.jsonnet "smeared" splat.
 #   5. plots   : wirecell-gen morse-plots    -- point-spread QA plots.
 #
+# It ALSO provides an "spcmp" subgraph (target `spcmp`), the OSP equivalent of
+# SPNG's spcmp: for each wire plane an ideal MIP-like line source (5000 e/mm,
+# ~0.1 mm depo spacing, parallel to the planes and perpendicular to the target
+# plane's wires) is processed in two drift cases -- 1 m in front of the
+# collection plane (diffusion) and at the response plane (no diffusion; the
+# response-plane distance is the FR "origin", which differs per detector).  The
+# result is a 3 (plane) x 2 (case) figure overlaying splat and sim+OSP at the
+# middle channel of each line, zoomed to +/-5 sigma of the 1 m peak with a
+# shared y-axis.  It uses the "smeared" variant so splat approximates sim+OSP.
+#
+#     $ morse --config detector=pdsp --directory=pdsp-morse spcmp
+#
 # Suggested running:
 #
 #     $ morse --config detector=pdsp --directory=pdsp-morse
@@ -76,6 +88,28 @@ for k, v in dict(
         },
         # Optional override of the layers job Jsonnet.
         wire_cell_config=workflow.basedir + "/../../cfg/layers/omnijob.jsonnet",
+
+        # ---- "spcmp" subgraph (splat vs sim+OSP per plane, 2 drift cases) ----
+        # Wire plane indices to compare.
+        planes=[0, 1, 2],
+        # APA / anode index the omnijob populates (jsonnet hard-wires TPC 0).
+        apa=0,
+        # drift1m case: line source distance in front of the collection plane [mm].
+        spcmp_drift_mm=1000.0,
+        # Line-source length (along the target plane's pitch direction).
+        spcmp_length="1*m",
+        # Linear ionization density ~ MIP (5000 electrons / mm).
+        spcmp_electron_density="5000/mm",
+        # Depo spacing along the line: ~0.1 mm samples the 10 impact positions
+        # per wire region without "beating" against them.
+        spcmp_step="0.1*mm",
+        # Zoom half-window, in sigma of the 1 m peak.
+        spcmp_nsigma=5.0,
+        # Variant for the spcmp comparison.  Default "smeared" (nominal + the
+        # extra splat smearing) so the splat "true signal" approximates sim+OSP,
+        # as in SPNG's spcmp.  Use "morse_nominal" to compare the *un-smeared*
+        # splat against sim+OSP instead.
+        spcmp_variant="smeared",
 ).items():
     config.setdefault(k, v)
 
@@ -84,6 +118,15 @@ import json
 variant = config['variant']
 tasks = config['tasks']
 wire_cell_config = config['wire_cell_config']
+planes = config['planes']
+apa = int(config['apa'])
+spcmp_cases = ("drift1m", "resp")
+
+
+wildcard_constraints:
+    detector=r"[A-Za-z0-9_]+",
+    plane=r"\d+",
+    case=r"drift1m|resp"
 
 
 def fname(tier, ext='npz'):
@@ -174,6 +217,76 @@ rule plots:
     shell: '''
     wcpy gen morse-plots {params.cr} -S {input.summary} -o {output} {input.signal}
     '''
+
+
+# ---------------------------------------------------------------------------
+# "spcmp" subgraph: per-plane splat-vs-sim+OSP comparison at two drift cases.
+#
+# For each wire plane, an ideal MIP-like line source (5000 e/mm, ~0.1 mm depo
+# spacing) is fired parallel to the wire planes and perpendicular to that plane's
+# wires.  Two cases are processed: placed 1 m in front of the collection plane
+# (diffusion) and placed at the response plane (no diffusion; response-plane
+# distance taken from the FR "origin", which differs per detector).  A single
+# 3x2 figure overlays splat and sim+OSP at the middle channel of each line, per
+# plane per case, zoomed to +/-Nsigma of the 1 m peak with a shared y-axis.
+# ---------------------------------------------------------------------------
+
+# 1. Generate the line-source depos for one (plane, case).
+rule spcmp_depos:
+    output:
+        depos='{detector}-spcmp-depos-p{plane}-{case}.npz',
+        meta='{detector}-spcmp-depos-p{plane}-{case}.json'
+    shell: '''
+    offset=$(LD_LIBRARY_PATH="" python3 {workflow.basedir}/morse-spcmp-offset.py \
+             --detector {wildcards.detector} --apa %d \
+             --plane {wildcards.plane} --case {wildcards.case} --drift-mm %g) && \
+    wcpy gen detlinegen \
+    --detector={wildcards.detector} --apa=%d --plane={wildcards.plane} \
+    --angle-coords=wire-plane --theta_y="90*deg" --theta_xz="0*deg" \
+    --length="%s" --electron-density="%s" --step-size="%s" \
+    --offset="$offset" \
+    --output_depos {output.depos} --output_meta {output.meta}
+    ''' % (apa, config['spcmp_drift_mm'], apa, config['spcmp_length'], config['spcmp_electron_density'], config['spcmp_step'])
+
+
+# 2. One wire-cell job per (plane, case): splat and sim+OSP signal.
+rule spcmp_wct:
+    input:
+        cfg=wire_cell_config,
+        depos='{detector}-spcmp-depos-p{plane}-{case}.npz'
+    output:
+        splat='{detector}-spcmp-splat-p{plane}-{case}.npz',
+        osp='{detector}-spcmp-osp-p{plane}-{case}.npz',
+        log='{detector}-spcmp-p{plane}-{case}.log'
+    shell: '''
+    wire-cell -c {input.cfg} -l {output.log} -L debug \
+    -A input={input.depos} \
+    -A detector={wildcards.detector} \
+    -A variant=%s \
+    -A tasks="drift,splat,sim,sp" \
+    --tla-code output='{{splat:"{output.splat}",sp:"{output.osp}"}}'
+    ''' % config['spcmp_variant']
+
+
+# 3. The 3 (plane) x 2 (case) comparison figure.
+rule spcmp_plot:
+    input:
+        lambda w: expand(
+            '{detector}-spcmp-{kind}-p{plane}-{case}.npz',
+            detector=w.detector, kind=("splat", "osp"),
+            plane=planes, case=spcmp_cases)
+    output:
+        '{detector}-spcmp.pdf'
+    shell: '''
+    LD_LIBRARY_PATH="" python3 {workflow.basedir}/morse-spcmp-plot.py \
+      --detector {wildcards.detector} --nsigma %g -o {output} {input}
+    ''' % float(config['spcmp_nsigma'])
+
+
+# spcmp target: the comparison figure for the configured detector.
+rule spcmp:
+    input:
+        expand('{detector}-spcmp.pdf', detector=[config['detector']])
 
 
 # Convenience: only the wire-cell frames (through SP).
