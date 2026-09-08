@@ -446,6 +446,14 @@ private:
         // and a 0 there would read as a measured zero energy.
         double muon_ke_mcs{-1}, muon_mcs_amb{-1}, muon_mcs_tracklen{-1}, muon_mcs_range_ke{-1};
         int muon_mcs_nsegs{0}, muon_mcs_bad_path{0};
+        // doc pdhd/16 sec 9: how often the cathode-band excision actually
+        // fired on THIS muon.  Both are 0 when mcs_cathode_xcut is 0, and
+        // also when it is on but no 14 cm segment reaches the band -- in
+        // which case the engine's angle mask stays empty and the result is
+        // bit-identical to the excision being off (MuonMCS.cxx:1181-1210).
+        // A cathode-caused abort needs no branch of its own: it is exactly
+        // muon_ke_mcs < 0 && muon_mcs_nsegs >= 2 && muon_mcs_cathode_angles > 0.
+        int muon_mcs_cathode_segs{0}, muon_mcs_cathode_angles{0};
         double muon_p_range{-1}, muon_p_dqdx{-1}, muon_p_mcs{-1};
         int michel_seg_id{-1};                     // the daughter, named the way stop_vtx_id names the shared vertex
         // doc pdhd/15: the Michel as ONE object -- core + pieces
@@ -819,6 +827,8 @@ private:
         r.muon_mcs_range_ke = res.ke_tracklen;       // MeV, the engine's own CSDA
         r.muon_mcs_nsegs = res.nsegs;
         r.muon_mcs_bad_path = res.bad_path ? 1 : 0;
+        r.muon_mcs_cathode_segs = res.counters.cathode_seg_dropped;    // doc pdhd/16 sec 9
+        r.muon_mcs_cathode_angles = res.counters.cathode_angle_masked; // incl. the bridging angle
     }
 
     // Units in the persisted rows (and hence in T_stm_michel): lengths and
@@ -885,6 +895,8 @@ private:
         D1("muon_ke_mcs", r.muon_ke_mcs); D1("muon_mcs_amb", r.muon_mcs_amb);
         D1("muon_mcs_tracklen", r.muon_mcs_tracklen); D1("muon_mcs_range_ke", r.muon_mcs_range_ke);
         I1("muon_mcs_nsegs", r.muon_mcs_nsegs); I1("muon_mcs_bad_path", r.muon_mcs_bad_path);
+        I1("muon_mcs_cathode_segs", r.muon_mcs_cathode_segs);
+        I1("muon_mcs_cathode_angles", r.muon_mcs_cathode_angles);
         D1("muon_p_range", r.muon_p_range); D1("muon_p_dqdx", r.muon_p_dqdx);
         D1("muon_p_mcs", r.muon_p_mcs);
         // doc pdhd/15.  The Michel is ONE object -- the stop arm (or the seed
@@ -1671,7 +1683,7 @@ void CheckSTM_Michel::visit(Ensemble& ensemble) const
         SPDLOG_LOGGER_INFO(s_log,
             "{}CheckSTM_Michel: cluster {} gid {} verdict {} bits {} | chain {} segs {:.1f} cm ({} pts, {} dead) stop_dis {:.1f} cm | "
             "contrast {:.2f}/{:.2f} ks_mu {:.3f} ks_flat {:.3f} comp_fwd {:.0f}/{:.2f}/{:.2f}/{:.2f} | "
-            "mu E range {:.1f} dQ/dx {:.1f} MCS {:.1f} MeV (amb {:.2f}, {} segs, {:.1f} cm) | "
+            "mu E range {:.1f} dQ/dx {:.1f} MCS {:.1f} MeV (amb {:.2f}, {} segs, {:.1f} cm, cath {}/{}) | "
             "delta {} hadron {} | michel {} conn {} ({} segs / {} pieces, {:.1f} cm, kink {:.0f} deg, gap {:.1f} cm) "
             "E {:.1f} MeV = dQ/dx {:.1f} + unfit {:.1f} (core {:.1f}, range {:.1f}, charge {:.1f}) dots {} ({:.1f} MeV) unfit_cl {} | "
             "cont {:.1f} cm @ {:.0f} deg ext {} ({:.1f} cm) dead_ahead {} cov {:.2f} | in_fv {} | {:.0f} ms",
@@ -1681,6 +1693,7 @@ void CheckSTM_Michel::visit(Ensemble& ensemble) const
             rec.comp_fwd[0], rec.comp_fwd[1], rec.comp_fwd[2], rec.comp_fwd[3],
             rec.muon_ke_range, rec.muon_ke_dqdx, rec.muon_ke_mcs, rec.muon_mcs_amb,
             rec.muon_mcs_nsegs, rec.muon_mcs_tracklen,
+            rec.muon_mcs_cathode_segs, rec.muon_mcs_cathode_angles,
             rec.n_delta, rec.n_body_hadron,
             rec.michel_found, rec.michel_conn_type, rec.n_michel_segs, rec.michel_n_pieces,
             rec.michel_len / units::cm, rec.michel_kink_deg, rec.michel_dis_cm,
