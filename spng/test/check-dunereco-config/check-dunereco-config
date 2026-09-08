@@ -159,10 +159,11 @@ def _spng_jobs(detname, tpcid="0"):
 
 SPNG = {
     "pdhd": dict(_spng_jobs("pdhd")),
+    # tpcid 0..3 = bottom drift, 4..7 = top drift (different electronics/ADC).
     "pdvd": dict(_spng_jobs("pdvd"),
-                 note="SPNG pdvd currently fails to evaluate ('Field does not "
-                      "exist: tpc'); its detconfs/pdvd.jsonnet is incomplete "
-                      "relative to the adc-to-osp/adc-to-spng jobs."),
+                 note="tpcid 0..3 = bottom drift, 4..7 = top drift; the official "
+                      "fixture uses a bottom anode, so compare against a bottom "
+                      "tpcid."),
     # No SPNG PDSP: there is no toolkit/spng/cfg/spng/detconfs/pdsp.jsonnet.
     "pdsp": None,
 }

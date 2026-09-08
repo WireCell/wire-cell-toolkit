@@ -41,19 +41,20 @@ Named comparisons (see =./check-dunereco-config list=):
 | =pdhd=        | pdhd | pdhd     | confounded by official PDHD bad-APA tunings      |
 | =pdhd-x-pdsp= | pdhd | pdsp     | the cross comparison: idealised SPNG vs nominal  |
 | =pdsp=        | pdsp | pdsp     | UNAVAILABLE --- SPNG has no PDSP config yet       |
-| =pdvd=        | pdvd | protodunevd | SPNG pdvd currently fails to evaluate (see below) |
+| =pdvd=        | pdvd | protodunevd | tpcid 0..3 = bottom drift, 4..7 = top drift    |
 
 In a cross comparison some deltas are genuine *detector* differences, not SPNG
 infidelities --- e.g. =ADC_mV= differs ~4x between PDSP (12-bit ADC) and PDHD
 (14-bit). The mechanistic axis reports them all; the =emit-prompt= text tells the
 LLM to call out cross-comparison detector quirks separately.
 
+PDVD note: the official fixture instantiates a *bottom*-drift anode, so the
+=pdvd= comparison uses a bottom SPNG tpcid (0..3).  The top drift (tpcid 4..7)
+has different electronics (a measured JsonElecResponse) and ADC scaling.
+
 Known gaps (state of the SPNG configs, not the tool):
 - *SPNG PDSP*: there is no =toolkit/spng/cfg/spng/detconfs/pdsp.jsonnet=, so the
   =pdsp= comparison is not buildable. Use =pdhd-x-pdsp= for the nominal check.
-- *SPNG PDVD*: =detname=pdvd= currently aborts evaluation ("Field does not
-  exist: tpc"); its detconf is incomplete relative to the =adc-to-osp= /
-  =adc-to-spng= jobs. The =pdvd= comparison will work once that is fixed.
 
 * Two-part method
 
