@@ -13,11 +13,10 @@ This makes a 3 (plane: U,V,W) x 2 (case: 1m, response) grid of panels.  Each
 panel overlays the splat "true signal" and the sim+OSP signal for the channel
 nearest the middle of that plane's line source.
 
-Zoom: for each plane, the time half-window is 5 * sigma of the 1 m peak (sigma
-measured from that plane's 1 m sim+OSP waveform).  Both the 1 m and the response
-panels of that plane use this same window WIDTH (centered on each panel's own
-peak) so the no-diffusion peak is seen at the same time scale.  All six panels
-share a single y-axis scale.
+Zoom: each COLUMN (case) has one shared time window, +/- nsigma (default 5)
+about the W (collection) plane's splat peak.  W is the cleanest signal, so this
+keeps the U/V/W rows of a column on a common, noise-free time axis (the two
+columns get their own windows).  All six panels share a single y-axis scale.
 
 Input files are the per (plane, case) splat/osp frames named by the workflow as:
 
@@ -147,34 +146,30 @@ def main():
     planes = sorted({p for (p, _c, _k) in inp})
     frames = {key: Frame(f) for key, f in inp.items()}
 
-    def ref_frame(p, c):
-        '''Frame to take peak/sigma from: sim+OSP if it has significant signal
-        at this channel, else splat (keeps things sane where OSP is degenerate).'''
-        splat = frames[(p, c, "splat")]
-        osp = frames.get((p, c, "osp"))
-        if osp is not None and (np.abs(osp.wf(chan[p])).max()
-                                > 0.05 * (np.abs(splat.wf(chan[p])).max() or 1.0)):
-            return osp
-        return splat
-
-    # Per-plane middle channel (from the 1 m splat) and 1 m peak sigma.
-    chan, halfwin = {}, {}
+    # Per-plane middle channel (from the 1 m splat).
+    chan = {}
     for p in planes:
         splat_1m = frames[(p, "drift1m", "splat")]
         ranges = channel_ranges(args.detector, int(splat_1m.chans.max()))
         chan[p] = middle_channel_id(splat_1m, ranges[p], ranges[p + 1])
-        ref = ref_frame(p, "drift1m")
-        _tp, sig = peak_time_and_sigma(ref.times_us(), ref.wf(chan[p]))
-        halfwin[p] = args.nsigma * sig
 
-    # Per-panel x-window (centered on the panel's own peak) and global y-range.
+    # One x-window PER COLUMN (case), shared by all three rows.  The window is
+    # +/- nsigma about the W (collection) plane's splat peak -- W is the cleanest
+    # signal, so this avoids the broadly-distributed noise hits that otherwise
+    # widen the U/V windows.
+    wplane = max(planes)
+    xwin_col = {}
+    for c in CASES:
+        wsplat = frames[(wplane, c, "splat")]
+        tpk, sig = peak_time_and_sigma(wsplat.times_us(), wsplat.wf(chan[wplane]))
+        xwin_col[c] = (tpk - args.nsigma * sig, tpk + args.nsigma * sig)
+
+    # Global y-range over all in-window samples (shared y-axis).
     xwin = {}
     gymin, gymax = 0.0, 0.0
     for p in planes:
         for c in CASES:
-            fr = ref_frame(p, c)
-            tpk, _s = peak_time_and_sigma(fr.times_us(), fr.wf(chan[p]))
-            lo, hi = tpk - halfwin[p], tpk + halfwin[p]
+            lo, hi = xwin_col[c]
             xwin[(p, c)] = (lo, hi)
             for k in KINDS:
                 key = (p, c, k)
