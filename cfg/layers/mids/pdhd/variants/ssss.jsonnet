@@ -22,6 +22,10 @@ local smeared = nominal + {
 };
 
 {
+    // Used by the morse workflow (test/scripts/morse) to measure DepoFluxSplat
+    // additional smearing.  No extra smear -> the method measures it.
+    morse_nominal: nominal,
+
     // Used by test/scripts/spdir metric (no generated FR).
     spdir: nominal,
 

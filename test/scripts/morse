@@ -1,0 +1,188 @@
+#!/usr/bin/env -S snakemake --cores all --snakefile
+# -*- snakemake -*-
+
+#
+# The "Morse method" measures the additional Gaussian smearing that the
+# DepoFluxSplat ("splat") algorithm must add so that its "true signal" matches
+# the height and width of the full sim+SP signal.  See
+#
+#     toolkit/gen/docs/morse-smearing-method.org
+#
+# This workflow is the automation of what test/test/test-morse-pdsp.bats does,
+# generalized to run on any layers-supported detector (pdsp, pdhd, pdvd, uboone,
+# ...).  It is a sibling of the "spdir" workflow and, like it, drives the
+# cfg/layers "omnijob" configuration.
+#
+# The pipeline per detector:
+#
+#   1. depos   : wirecell-gen depo-morse --wires <det>  -- point depos in the
+#                "morse code" pattern on the response plane.
+#   2. wct     : wire-cell omnijob tasks=drift,splat,sim,sp with the
+#                "morse_nominal" variant (no extra splat smearing -- the method
+#                measures it), producing drift/splat/digit/signal frames.
+#   3. summary : wirecell-gen morse-summary  -- fit the isolated point-spread
+#                functions in the SP signal -> peaks JSON.
+#   4. splat   : wirecell-gen morse-splat    -- reduce peaks to per-plane scalar
+#                smear_long/smear_tran -> the numbers to paste into a detector's
+#                variants/ssss.jsonnet "smeared" splat.
+#   5. plots   : wirecell-gen morse-plots    -- point-spread QA plots.
+#
+# Suggested running:
+#
+#     $ morse --config detector=pdsp --directory=pdsp-morse
+#     $ morse --config detector=pdhd --directory=pdhd-morse
+#     $ morse --config detector=pdvd --directory=pdvd-morse
+#     $ morse --config detector=uboone --directory=uboone-morse
+#
+# The default target ("rule all") produces the splat-params JSON and the QA PDF
+# for the configured detector.
+#
+# Requirements: snakemake, wire-cell, and wire-cell-python ("wcpy").  The
+# detector's wires / field-response / noise files must be resolvable on
+# WIRECELL_PATH.
+#
+# CAVEATS:
+#
+# - The morse-summary / morse-plots peak finder splits the single-anode signal
+#   into per-plane regions.  For most detectors the default works; if a detector
+#   needs explicit per-plane channel boundaries, set them per detector via the
+#   "channel_ranges" config (a dict of detector -> comma-separated channel
+#   idents), e.g.:
+#       morse --config detector=pdvd channel_ranges='{"pdvd":"0,512,1024"}'
+#
+# - PDVD is vertical-drift; the single-APA omnijob uses its bottom-drift anode 0.
+
+# Hard-wired configuration defaults; override with --config on the CLI.
+for k, v in dict(
+        # The canonical, layers-supported detector name.
+        detector="pdsp",
+        # The layers "mids" variant.  Must define un-smeared splat so the method
+        # measures the smearing rather than baking it in.
+        variant="morse_nominal",
+        # The wire-cell tasks run to turn morse depos into an SP signal.
+        tasks="drift,splat,sim,sp",
+        # Per-detector morse-summary/plots channel boundaries (comma-separated
+        # channel idents delimiting the U/V/W plane regions of the single anode).
+        # morse-summary's own default (0,800,1600,2560) fits pdsp AND pdhd
+        # (2560 chan/APA), so they are omitted here.  Override on the CLI, e.g.:
+        #   morse --config detector=X channel_ranges='{"X":"0,a,b,c"}'
+        channel_ranges={
+            # uboone single APA: U=2400, V=2400, Y=3456.
+            "uboone": "0,2400,4800,8256",
+            # NOTE: pdvd's morse-summary peak finder does not yet succeed on the
+            # VD anode-0 channel layout (idents in 3 blocks at 0/952/1904);
+            # supplying ranges is necessary but not sufficient -- the wire-cell
+            # -python morse peak finder needs VD support.  Left unset here.
+        },
+        # Optional override of the layers job Jsonnet.
+        wire_cell_config=workflow.basedir + "/../../cfg/layers/omnijob.jsonnet",
+).items():
+    config.setdefault(k, v)
+
+import json
+
+variant = config['variant']
+tasks = config['tasks']
+wire_cell_config = config['wire_cell_config']
+
+
+def fname(tier, ext='npz'):
+    'Standard morse file-name pattern.  {detector} is a Snakemake wildcard.'
+    return '{detector}-morse-%s.%s' % (tier, ext)
+
+
+def channel_ranges_arg(w):
+    'Return a --channel-ranges option for this detector, or empty.'
+    cr = config.get('channel_ranges', {})
+    if isinstance(cr, str):
+        cr = json.loads(cr)
+    val = cr.get(w.detector)
+    return "--channel-ranges '%s'" % val if val else ""
+
+
+# Default target: the smear parameters JSON and the QA plot for the configured
+# detector.  (This rule has no wildcards so it can be the default target.)
+rule all:
+    input:
+        expand([fname('splat-params', 'json'), fname('peaks', 'pdf')],
+               detector=[config['detector']])
+
+
+# 1. Generate the "morse code" pattern of point depos on the response plane.
+rule depos:
+    output:
+        fname('depos')
+    shell: '''
+    wcpy gen depo-morse --wires {wildcards.detector} --output {output}
+    '''
+
+
+# 2. The single wire-cell job: morse depos -> drift/splat/sim/sp frames.
+rule wct:
+    input:
+        cfg=wire_cell_config,
+        depos=fname('depos')
+    output:
+        drift=fname('drift'),
+        splat=fname('splat'),
+        digit=fname('digit'),
+        signal=fname('signal'),
+        log=fname('wct', ext='log')
+    shell: '''
+    wire-cell -c {input.cfg} -l {output.log} -L debug \
+    -A input={input.depos} \
+    -A detector={wildcards.detector} \
+    -A variant=%s \
+    -A tasks="%s" \
+    --tla-code output='{{drift:"{output.drift}",splat:"{output.splat}",sim:"{output.digit}",sp:"{output.signal}"}}'
+    ''' % (variant, tasks)
+
+
+# 3. Fit the per-point point-spread functions in the SP signal.
+rule summary:
+    input:
+        signal=fname('signal')
+    output:
+        fname('peaks', 'json')
+    params:
+        cr=channel_ranges_arg
+    shell: '''
+    wcpy gen morse-summary {params.cr} -o {output} {input.signal}
+    '''
+
+
+# 4. Reduce the point-spread fits to per-plane scalar splat smearing.
+rule splat_params:
+    input:
+        fname('peaks', 'json')
+    output:
+        fname('splat-params', 'json')
+    shell: '''
+    wcpy gen morse-splat -o {output} {input}
+    '''
+
+
+# 5. Point-spread QA plots (reusing the summary fit).
+rule plots:
+    input:
+        signal=fname('signal'),
+        summary=fname('peaks', 'json')
+    output:
+        fname('peaks', 'pdf')
+    params:
+        cr=channel_ranges_arg
+    shell: '''
+    wcpy gen morse-plots {params.cr} -S {input.summary} -o {output} {input.signal}
+    '''
+
+
+# Convenience: only the wire-cell frames (through SP).
+rule frames:
+    input:
+        expand(fname('signal'), detector=[config['detector']])
+
+
+# Convenience: only the measured smear parameters.
+rule params:
+    input:
+        expand(fname('splat-params', 'json'), detector=[config['detector']])
