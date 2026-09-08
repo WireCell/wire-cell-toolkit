@@ -406,6 +406,8 @@ def build_wcdoctest_all(bld):
     This must be called after all packages have been recursed so that
     bld.all_doctest_srcs (and friends) are fully populated by smplpkg().
     '''
+    if not bld.env.TESTS:      # honor --notests: don't build the combined doctest either
+        return
     if not getattr(bld, 'all_doctest_srcs', None):
         return
 
