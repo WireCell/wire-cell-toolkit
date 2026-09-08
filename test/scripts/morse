@@ -108,6 +108,9 @@ for k, v in dict(
         spcmp_step="0.1*mm",
         # Zoom half-window, in sigma of the 1 m peak.
         spcmp_nsigma=5.0,
+        # Shift splat by this many ticks in the plot to align with sim+OSP (OSP
+        # applies a 129-tick response roll vs splat's 128).
+        spcmp_splat_tick_offset=1.0,
         # Variant for the spcmp comparison.  Default "smeared" (nominal + the
         # extra splat smearing) so the splat "true signal" approximates sim+OSP,
         # as in SPNG's spcmp.  Use "morse_nominal" to compare the *un-smeared*
@@ -282,8 +285,9 @@ rule spcmp_plot:
         '{detector}-spcmp.pdf'
     shell: '''
     LD_LIBRARY_PATH="" python3 {workflow.basedir}/morse-spcmp-plot.py \
-      --detector {wildcards.detector} --nsigma %g -o {output} {input}
-    ''' % float(config['spcmp_nsigma'])
+      --detector {wildcards.detector} --nsigma %g --splat-tick-offset %g \
+      -o {output} {input}
+    ''' % (float(config['spcmp_nsigma']), float(config['spcmp_splat_tick_offset']))
 
 
 # spcmp target: the comparison figure for the configured detector.

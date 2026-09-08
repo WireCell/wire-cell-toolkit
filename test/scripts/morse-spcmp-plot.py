@@ -74,6 +74,8 @@ class Frame:
         self.t0 = float(ti[0])
         self.tick = float(ti[1])
         self.id2row = {int(c): i for i, c in enumerate(self.chans)}
+        # Optional plotting time shift (us), e.g. to align splat with OSP.
+        self.toffset_us = 0.0
 
     def wf(self, chid):
         row = self.id2row.get(int(chid))
@@ -83,7 +85,7 @@ class Frame:
 
     def times_us(self):
         nt = self.mat.shape[1]
-        return (self.t0 + np.arange(nt) * self.tick) / US
+        return (self.t0 + np.arange(nt) * self.tick) / US + self.toffset_us
 
 
 def parse_inputs(files):
@@ -138,6 +140,10 @@ def main():
     ap.add_argument("-o", "--output", required=True)
     ap.add_argument("--nsigma", type=float, default=5.0,
                     help="half-window in sigma of the 1m peak (default 5)")
+    ap.add_argument("--splat-tick-offset", type=float, default=1.0,
+                    help="shift splat waveforms by this many ticks to align with "
+                         "OSP (OSP applies a 129-tick response roll vs splat's "
+                         "128; default 1)")
     ap.add_argument("--title", default="")
     ap.add_argument("files", nargs="+")
     args = ap.parse_args()
@@ -145,6 +151,14 @@ def main():
     inp = parse_inputs(args.files)
     planes = sorted({p for (p, _c, _k) in inp})
     frames = {key: Frame(f) for key, f in inp.items()}
+
+    # Shift splat in time by the requested number of ticks so it aligns with the
+    # OSP response roll (applied to windowing and curves alike).
+    for (p, c, k), fr in frames.items():
+        if k == "splat":
+            fr.toffset_us = args.splat_tick_offset * fr.tick / US
+    splat_label = ("splat (+%g tick)" % args.splat_tick_offset
+                   if args.splat_tick_offset else "splat")
 
     # Per-plane middle channel (from the 1 m splat).
     chan = {}
@@ -196,7 +210,10 @@ def main():
                 if key not in frames:
                     continue
                 fk = frames[key]
-                ax.plot(fk.times_us(), fk.wf(chan[p]), **STYLES[k])
+                style = dict(STYLES[k])
+                if k == "splat":
+                    style["label"] = splat_label
+                ax.plot(fk.times_us(), fk.wf(chan[p]), **style)
             ax.set_xlim(*xwin[(p, c)])
             ax.set_ylim(gymin, gymax)
             ax.grid(True, alpha=0.3)
