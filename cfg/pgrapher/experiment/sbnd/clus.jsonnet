@@ -877,7 +877,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
     per_apa(anode, dump=true, per_face_bee=true, bee_sink=null, pre_mabc=null, trace_bee=false, save_assoc_id=false, sep_vertex_veto=true, sep_track_recarve=false, sep_fv_point=true, nu_iso_band_guard=true, iso_cathode_guard=false, nu_band_veto=true, eb_fast=false, po_fast=false, dg_fast=false)::
         clus_per_face(anode, face=0, dump=dump, evt_subdir=evt_subdir, per_face_bee=per_face_bee,
                       output_dir=output_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo,
-                      bee_sink=bee_sink, rse_from_ident=rse_from_ident, rse_from_metadata=rse_from_metadata, event_from_ident=event_from_ident, rse_map=rse_map, pos_offset_on=pos_offset_on,
+                      bee_sink=bee_sink, pre_mabc=pre_mabc, rse_from_ident=rse_from_ident, rse_from_metadata=rse_from_metadata, event_from_ident=event_from_ident, rse_map=rse_map, pos_offset_on=pos_offset_on,
                       trace_bee=trace_bee, save_assoc_id=save_assoc_id, sep_vertex_veto=sep_vertex_veto,
                       sep_track_recarve=sep_track_recarve, sep_fv_point=sep_fv_point,
                       nu_iso_band_guard=nu_iso_band_guard, iso_cathode_guard=iso_cathode_guard,
@@ -2571,6 +2571,12 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 [if rse_from_ident then 'rse_from_ident']: true,
                 [if event_from_ident then 'event_from_ident']: true,
                 [if event_from_ident && std.length(rse_map) > 0 then 'rse_map']: rse_map,
+                // rse_from_metadata MUST be here: this is the PR-stage MABC, the node that
+                // stamps tracking-pr.root's Trun in the 1-step LArSoft chain.  With only
+                // rse_from_ident the ident carries the EVENT but run/subrun stay 0, so Trun
+                // reports 0/0/<evt> -- the issue-13 G3 bug.  Measured on all 19 ncpi0
+                // events before this line was restored.
+                [if rse_from_metadata then 'rse_from_metadata']: true,
                 save_deadarea: bee_sink == null,   // only ONE node may write dead area into a shared zip
                 dead_area_version: 2,
                 save_opflash: false,
