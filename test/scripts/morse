@@ -36,6 +36,9 @@
 # result is a 3 (plane) x 2 (case) figure overlaying splat and sim+OSP at the
 # middle channel of each line, zoomed to +/-5 sigma of the 1 m peak with a
 # shared y-axis.  It uses the "smeared" variant so splat approximates sim+OSP.
+# The 'spcmp' target also emits <det>-spcmp-fft.pdf: the Fourier amplitude
+# spectra of the central waveforms and a comparison of two 4x downsamplings
+# ("rebin" = sum N samples; "resample" = Fourier low-pass) in time and frequency.
 #
 #     $ morse --config detector=pdsp --directory=pdsp-morse spcmp
 #
@@ -111,6 +114,8 @@ for k, v in dict(
         # Shift splat by this many ticks in the plot to align with sim+OSP (OSP
         # applies a 129-tick response roll vs splat's 128).
         spcmp_splat_tick_offset=1.0,
+        # Downsampling factor for the rebin-vs-resample Fourier report.
+        spcmp_ds_factor=4,
         # Variant for the spcmp comparison.  Default "smeared" (nominal + the
         # extra splat smearing) so the splat "true signal" approximates sim+OSP,
         # as in SPNG's spcmp.  Use "morse_nominal" to compare the *un-smeared*
@@ -290,10 +295,26 @@ rule spcmp_plot:
     ''' % (float(config['spcmp_nsigma']), float(config['spcmp_splat_tick_offset']))
 
 
-# spcmp target: the comparison figure for the configured detector.
+# 4. Fourier-spectra + downsampling (rebin vs resample) report.
+rule spcmp_fft:
+    input:
+        lambda w: expand(
+            '{detector}-spcmp-{kind}-p{plane}-{case}.npz',
+            detector=w.detector, kind=("splat", "osp"),
+            plane=planes, case=spcmp_cases)
+    output:
+        '{detector}-spcmp-fft.pdf'
+    shell: '''
+    LD_LIBRARY_PATH="" python3 {workflow.basedir}/morse-spcmp-fft.py \
+      --detector {wildcards.detector} -n %d -o {output} {input}
+    ''' % int(config['spcmp_ds_factor'])
+
+
+# spcmp target: the comparison figure AND the Fourier/downsampling report.
 rule spcmp:
     input:
-        expand('{detector}-spcmp.pdf', detector=[config['detector']])
+        expand(['{detector}-spcmp.pdf', '{detector}-spcmp-fft.pdf'],
+               detector=[config['detector']])
 
 
 # Convenience: only the wire-cell frames (through SP).
