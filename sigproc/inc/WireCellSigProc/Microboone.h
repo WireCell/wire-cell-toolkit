@@ -123,9 +123,31 @@ namespace WireCell {
                 /** Filter in place a group of signals together. */
                 virtual WireCell::Waveform::ChannelMaskMap apply(channel_signals_t& chansig) const;
 
+                /// IConfigurable interface.  Extends ConfigFilterBase with the
+                /// IS_RC ("partial waveform") knobs, which used to be magic
+                /// numbers hidden in Diagnostics::Partial's constructor:
+                ///
+                ///   partial_enable       (true)  false disables the branch entirely
+                ///                                and so keeps the RC-RC deconvolution
+                ///                                on every channel
+                ///   partial_signal_blind (false) judge IS_RC on a signal-suppressed
+                ///                                copy of the waveform instead of the
+                ///                                raw spectrum.  Off by default: see
+                ///                                OneChannelNoise::apply() for the
+                ///                                measured limits of the probe.
+                ///   partial_nfreqs       (4)     Diagnostics::Partial arguments
+                ///   partial_maxpower     (6000)
+                virtual void configure(const WireCell::Configuration& config);
+                virtual WireCell::Configuration default_configuration() const;
+
                private:
                 Diagnostics::Chirp m_check_chirp;      // fixme, these should be done via service interfaces
-                Diagnostics::Partial m_check_partial;  // at least need to expose them to configuration
+
+                // IS_RC / "partial waveform" detection; see OneChannelNoise::apply().
+                bool m_partial_enable{true};
+                bool m_partial_signal_blind{false};
+                int m_partial_nfreqs{4};
+                double m_partial_maxpower{6000.0};
             };
 
             class OneChannelStatus : public WireCell::IChannelFilter, public WireCell::IConfigurable {
