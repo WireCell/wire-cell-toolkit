@@ -526,3 +526,64 @@ TEST_CASE("stm_michel stop gamma: the energy window is a SEPARATE, post-fit stag
     CHECK_FALSE(stm_michel_stop_gamma_energy(-1.0, lo, hi));
     CHECK_FALSE(stm_michel_stop_gamma_energy(std::numeric_limits<double>::quiet_NaN(), lo, hi));
 }
+
+TEST_CASE("stm_michel survey: the admission radius is a maximum over live stages")
+{
+    using WireCell::Clus::PR::stm_michel_admit_radius;
+    const double michel = 15.0, gamma = 35.0, survey = 60.0;
+
+    // doc pdvd/53.  The shipped ProtoDUNE setting: all three stages on.
+    CHECK(stm_michel_admit_radius(michel, gamma, true, survey, true) == doctest::Approx(60.0));
+
+    // Each stage off drops exactly its own contribution, and nothing else.
+    CHECK(stm_michel_admit_radius(michel, gamma, true,  survey, false) == doctest::Approx(35.0));
+    CHECK(stm_michel_admit_radius(michel, gamma, false, survey, true)  == doctest::Approx(60.0));
+    CHECK(stm_michel_admit_radius(michel, gamma, false, survey, false) == doctest::Approx(15.0));
+
+    // THE GATE THIS ROUND RESTS ON: survey off reproduces the doc pdvd/51
+    // admission exactly, for every survey radius -- including one larger than
+    // the gamma's, which is the only case that could widen anything.
+    for (double r : {0.0, 10.0, 35.0, 60.0, 1e4})
+        CHECK(stm_michel_admit_radius(michel, gamma, true, r, false) == doctest::Approx(35.0));
+
+    // The survey never NARROWS: a radius inside the gamma ring leaves the gamma
+    // stage's reach untouched, so turning the survey on cannot remove a
+    // companion the doc pdvd/51 chain admitted.
+    for (double r : {0.0, 1.0, 15.0, 34.9})
+        CHECK(stm_michel_admit_radius(michel, gamma, true, r, true) == doctest::Approx(35.0));
+
+    // A non-finite radius from a live stage contributes nothing rather than
+    // poisoning the maximum -- a NaN max() is implementation-defined and would
+    // silently admit everything or nothing (feedback: a NaN fails every gate).
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    CHECK(stm_michel_admit_radius(michel, nan, true, survey, true) == doctest::Approx(60.0));
+    CHECK(stm_michel_admit_radius(michel, gamma, true, nan, true) == doctest::Approx(35.0));
+    CHECK(stm_michel_admit_radius(nan, gamma, true, survey, true) == doctest::Approx(60.0));
+}
+
+TEST_CASE("stm_michel survey: the ring and the survey partition the companions")
+{
+    using WireCell::Clus::PR::stm_michel_stop_gamma_ring;
+    using WireCell::Clus::PR::stm_michel_admit_radius;
+    const double michel = 15.0, gamma = 35.0, survey = 60.0, maxlen = 10.0;
+    const double admit = stm_michel_admit_radius(michel, gamma, true, survey, true);
+
+    // The five same-bundle blobs of 039253_14 cluster 49, at their measured
+    // distances.  Every one is now ADMITTED (so it is fitted and gets a role-6
+    // row), and exactly the two inside the ring are offered to the gamma stage.
+    struct Case { double d; bool admitted; bool offered_to_gamma; };
+    const Case cases[] = {
+        {14.51, true,  false},   // cluster 185 -- inside the Michel radius
+        {33.98, true,  true },   // cluster 184 -- in the ring
+        {35.67, true,  false},   // cluster 186 -- past the ring, survey only
+        {48.89, true,  false},   // cluster 183 -- survey only
+        {54.44, true,  false},   // cluster 187 -- survey only
+        {33.09, true,  true },   // 039253_13 cluster 431, the owner's gamma
+        {99.30, false, false},   // 039252_0's next neighbour: beyond the survey too
+    };
+    for (const auto& c : cases) {
+        CHECK((c.d <= admit) == c.admitted);
+        CHECK(stm_michel_stop_gamma_ring(c.d, 2.0, michel, gamma, maxlen) == c.offered_to_gamma);
+    }
+}
+

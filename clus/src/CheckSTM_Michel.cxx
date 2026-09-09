@@ -162,6 +162,10 @@ public:
         m_stop_gamma_min_ke_mev = get<double>(config, "stop_gamma_min_ke_mev", m_stop_gamma_min_ke_mev);
         m_stop_gamma_max_ke_mev = get<double>(config, "stop_gamma_max_ke_mev", m_stop_gamma_max_ke_mev);
         m_stop_gamma_max_n = get<int>(config, "stop_gamma_max_n", m_stop_gamma_max_n);
+        // doc pdvd/53: the survey.
+        m_survey_enable = get<bool>(config, "survey_enable", m_survey_enable);
+        m_survey_radius_cm = get<double>(config, "survey_radius_cm", m_survey_radius_cm);
+        m_survey_max_len_cm = get<double>(config, "survey_max_len_cm", m_survey_max_len_cm);
         m_delta_max_len_cm = get<double>(config, "delta_max_len_cm", m_delta_max_len_cm);
         m_vertex_hadron_mip = get<double>(config, "vertex_hadron_mip", m_vertex_hadron_mip);
         m_profile_min_dqdx_frac = get<double>(config, "profile_min_dqdx_frac", m_profile_min_dqdx_frac);
@@ -264,6 +268,11 @@ public:
         cfg["stop_gamma_min_ke_mev"] = m_stop_gamma_min_ke_mev;
         cfg["stop_gamma_max_ke_mev"] = m_stop_gamma_max_ke_mev;
         cfg["stop_gamma_max_n"] = m_stop_gamma_max_n;
+        // doc pdvd/53.  survey_enable false reproduces the doc pdvd/51 tree,
+        // stm_michel_pts included (no role-6 rows, no rej/d_stop/d_body columns).
+        cfg["survey_enable"] = m_survey_enable;
+        cfg["survey_radius_cm"] = m_survey_radius_cm;
+        cfg["survey_max_len_cm"] = m_survey_max_len_cm;
         cfg["delta_max_len_cm"] = m_delta_max_len_cm;
         cfg["vertex_hadron_mip"] = m_vertex_hadron_mip;
         // doc pdhd/03: profile points with dQ/dx < frac * mip_dqdx are DEAD
@@ -422,6 +431,18 @@ private:
     double m_stop_gamma_min_ke_mev{0.2};
     double m_stop_gamma_max_ke_mev{20.0};
     int m_stop_gamma_max_n{8};
+    // doc pdvd/53: the SURVEY.  Scaffolding for the hand scan, not a physics
+    // selection.  A companion admitted only by the survey is fitted into the
+    // graph and given role-6 point rows so the display can draw it, click it
+    // and let the scanner group it; it can become neither a Michel piece (the
+    // cluster re-test at michel_dot_radius_cm is untouched) nor a capture gamma
+    // (the ring's outer edge is stop_gamma_radius_cm).  The ONLY physics delta
+    // is the preload perturbation of the candidate's own fit.  Default OFF, so
+    // an absent key leaves every branch AND every stm_michel_pts row
+    // byte-identical; the two ProtoDUNE pr.jsonnet turn it on.
+    bool m_survey_enable{false};
+    double m_survey_radius_cm{60.0};      // admission ring, outer edge, from the stop
+    double m_survey_max_len_cm{25.0};     // mirrors companion_max_len_cm
     double m_delta_max_len_cm{8.0};
     double m_vertex_hadron_mip{1.4};
     double m_profile_min_dqdx_frac{0.0};
@@ -514,10 +535,25 @@ private:
         int n_stop_gammas{0}, stop_gamma_n_unfit{0}, stop_gamma_seg_id{-1};
         double stop_gamma_ke_tot{0}, stop_gamma_ke_max{0}, stop_gamma_charge{0};
         double stop_gamma_dis_min{-1}, stop_gamma_dis_max{-1};
+        // doc pdvd/53: the survey.  n_survey_clusters counts admitted companion
+        // clusters that yielded at least one UNCLAIMED fitted segment;
+        // n_survey_segs counts those segments; n_survey_unfit counts admitted
+        // companions that produced no segment at all (so they have charge but
+        // no dx, and the display must fall back to their image points).
+        int n_survey_clusters{0}, n_survey_segs{0}, n_survey_unfit{0};
         int in_fv{-1};
         // points for the Bee/ROOT layer
         std::vector<double> px, py, pz, pq, pL, prr;
         std::vector<int> prole, pseg;
+        // doc pdvd/53.  Written only when the survey is on, so the knob-off
+        // stm_michel_pts schema is unchanged.  prej names the gate that dropped
+        // a role-6 segment (0 for a claimed role); pdstop/pdbody are the
+        // distances the SHIPPED predicates measured, in WCT units, emitted here
+        // rather than recomputed offline -- doc pdvd/51 sec 6.5 is the record of
+        // what an offline re-derivation costs.
+        std::vector<int> prej;
+        std::vector<double> pdstop, pdbody;
+        std::set<int> claimed;      // seg_ids already given a role 1/2/3/5
     };
 
     // ---- helpers -------------------------------------------------------------
@@ -809,15 +845,29 @@ private:
         seg->particle_score(100.0);
     }
 
-    void add_points(Record& rec, const SegmentPtr& seg, int role, const StmMichelProfile* prof = nullptr) const {
+    // doc pdvd/53: rej/d_stop/d_body ride along on every row so the three
+    // arrays stay parallel to the other six.  They are pushed ONLY when the
+    // survey is on, which is what keeps the knob-off PC schema identical.
+    void add_survey_cols(Record& rec, size_t n, int rej, double d_stop, double d_body) const {
+        if (!m_survey_enable) return;
+        for (size_t i = 0; i < n; ++i) {
+            rec.prej.push_back(rej); rec.pdstop.push_back(d_stop); rec.pdbody.push_back(d_body);
+        }
+    }
+
+    void add_points(Record& rec, const SegmentPtr& seg, int role, const StmMichelProfile* prof = nullptr,
+                    int rej = 0, double d_stop = -1, double d_body = -1) const {
         const int seg_id = (seg && seg->cluster() ? seg->cluster()->get_cluster_id() : 0) * 1000
                          + (seg ? static_cast<int>(seg->get_graph_index()) : 0);
+        if (role != 6) rec.claimed.insert(seg_id);
+        const size_t n0 = rec.px.size();
         if (prof) {
             for (size_t i = 0; i < prof->pts.size(); ++i) {
                 rec.px.push_back(prof->pts[i].x()); rec.py.push_back(prof->pts[i].y()); rec.pz.push_back(prof->pts[i].z());
                 rec.pq.push_back(prof->dQdx[i]); rec.pL.push_back(prof->L[i]); rec.prr.push_back(prof->rr[i]);
                 rec.prole.push_back(role); rec.pseg.push_back(seg_id);
             }
+            add_survey_cols(rec, rec.px.size() - n0, rej, d_stop, d_body);
             return;
         }
         if (!seg) return;
@@ -827,6 +877,7 @@ private:
             rec.pq.push_back(f.dQ / (f.dx / units::cm)); rec.pL.push_back(-1); rec.prr.push_back(-1);
             rec.prole.push_back(role); rec.pseg.push_back(seg_id);
         }
+        add_survey_cols(rec, rec.px.size() - n0, rej, d_stop, d_body);
     }
 
     // doc pdhd/16: p = sqrt((KE + m)^2 - m^2), the segment_cal_4mom idiom
@@ -929,6 +980,12 @@ private:
         D1("stop_gamma_ke_tot", r.stop_gamma_ke_tot); D1("stop_gamma_ke_max", r.stop_gamma_ke_max);
         D1("stop_gamma_charge", r.stop_gamma_charge);
         D1("stop_gamma_dis_min", r.stop_gamma_dis_min); D1("stop_gamma_dis_max", r.stop_gamma_dis_max);
+        // doc pdvd/53: the survey.  Written only when the knob is on, so the
+        // knob-off T_stm_michel branch list is exactly the doc pdvd/51 one.
+        if (m_survey_enable) {
+            I1("n_survey_clusters", r.n_survey_clusters); I1("n_survey_segs", r.n_survey_segs);
+            I1("n_survey_unfit", r.n_survey_unfit);
+        }
         I1("in_fv", r.in_fv);
         // doc pdhd/14.  The muon energy was the one thing this tree never
         // carried: set_pdg (:661) builds a 4-momentum for every chain segment
@@ -978,6 +1035,14 @@ private:
             p.emplace("x", Array(x)); p.emplace("y", Array(y)); p.emplace("z", Array(z));
             p.emplace("q", Array(r.pq)); p.emplace("L", Array(tocm(r.pL))); p.emplace("rr", Array(tocm(r.prr)));
             p.emplace("role", Array(r.prole)); p.emplace("seg_id", Array(r.pseg));
+            // doc pdvd/53.  Absent when the survey is off, so write_pc_tree
+            // (PdvdPrMagnifyTrackingVisitor.cxx:293, which takes its column set
+            // from the first carrier) reproduces the old schema exactly.
+            if (m_survey_enable) {
+                p.emplace("rej", Array(r.prej));
+                p.emplace("d_stop", Array(tocm(r.pdstop)));
+                p.emplace("d_body", Array(tocm(r.pdbody)));
+            }
             cluster.local_pcs()["stm_michel_pts"] = Dataset(p);
         }
     }
@@ -1048,9 +1113,15 @@ void CheckSTM_Michel::visit(Ensemble& ensemble) const
         // hence a drift coordinate), near the stop, short ------------------
         std::vector<Cluster*> companions;
         std::vector<Cluster*> dot_clusters;
-        const double admit_radius = m_stop_gamma_enable
-            ? std::max(m_michel_dot_radius_cm, m_stop_gamma_radius_cm)
-            : m_michel_dot_radius_cm;
+        // doc pdvd/53: the survey widens ADMISSION and nothing else.  The Michel
+        // cluster re-test below still uses michel_dot_radius_cm and the gamma
+        // ring's outer edge is still stop_gamma_radius_cm, so a cluster reached
+        // only by this radius is fitted, given role-6 rows, and claimed by
+        // neither stage.  The predicate lives in StmMichelFunctions so its
+        // stage-off behaviour is doctested.
+        const double admit_radius = stm_michel_admit_radius(
+            m_michel_dot_radius_cm, m_stop_gamma_radius_cm, m_stop_gamma_enable,
+            m_survey_radius_cm, m_survey_enable);
         if (rec.gid >= 0) {
             for (auto* oc : grouping.children()) {
                 if (oc == main) continue;
@@ -1062,7 +1133,13 @@ void CheckSTM_Michel::visit(Ensemble& ensemble) const
                 // no log line.  PDVD 039252_15 cluster 77's Michel is exactly
                 // that: 20.1 cm, 1.91 cm from the stop, 9.12e5 e, dropped by the
                 // old 10 cm cap.
-                if (oc->get_length() > m_companion_max_len_cm * units::cm) continue;
+                // doc pdvd/53: the survey may carry its own length cap; it
+                // defaults to companion_max_len_cm, so the knob-off pool is the
+                // same pool.
+                const double len_cap = m_survey_enable
+                    ? std::max(m_companion_max_len_cm, m_survey_max_len_cm)
+                    : m_companion_max_len_cm;
+                if (oc->get_length() > len_cap * units::cm) continue;
                 if (oc->npoints() == 0) continue;
                 const auto [cp, blob] = oc->get_closest_point_blob(rec.stop_pt);
                 // doc pdvd/51: ADMISSION reaches as far as the capture-gamma
@@ -1476,6 +1553,32 @@ void CheckSTM_Michel::visit(Ensemble& ensemble) const
                 IndexedVertexSet mv; IndexedSegmentSet ms;
                 michel_shower->fill_sets(mv, ms, false);
                 for (auto& sg : ms) { if (!chain_set.count(sg)) set_pdg(sg, 11); }
+                // doc pdvd/53: those members are PDG 11 and belong to the Michel
+                // object, but through doc pdvd/51 only `michel_arms` got point
+                // rows -- so a real member such as 039253_14 cluster 49's 49004
+                // carried PDG 11 and NO role, and a display grouping off roles
+                // put it in "unassigned".  Behind survey_enable so the knob-off
+                // stm_michel_pts is unchanged.
+                if (m_survey_enable) {
+                    std::vector<SegmentPtr> extra_members;
+                    for (auto& sg : ms) {
+                        if (!sg || chain_set.count(sg)) continue;
+                        const int sid = (sg->cluster() ? sg->cluster()->get_cluster_id() : 0) * 1000
+                                      + static_cast<int>(sg->get_graph_index());
+                        if (rec.claimed.count(sid)) continue;
+                        extra_members.push_back(sg);
+                    }
+                    // IndexedSegmentSet is index-ordered, but sort on the id we
+                    // actually write so the row order cannot depend on it.
+                    std::sort(extra_members.begin(), extra_members.end(),
+                              [](const SegmentPtr& a, const SegmentPtr& b) {
+                                  const int ca = a->cluster() ? a->cluster()->get_cluster_id() : 0;
+                                  const int cb = b->cluster() ? b->cluster()->get_cluster_id() : 0;
+                                  if (ca != cb) return ca < cb;
+                                  return a->get_graph_index() < b->get_graph_index();
+                              });
+                    for (auto& sg : extra_members) add_points(rec, sg, 3);
+                }
                 michel_shower->set_particle_type(11);
                 // The CORE alone, measured before any companion piece joins:
                 // michel_ke_core is exactly what michel_ke_dqdx meant through
@@ -1503,6 +1606,37 @@ void CheckSTM_Michel::visit(Ensemble& ensemble) const
         // A segment of an admitted cluster is bounded by radius + cluster length
         // by construction, so the cluster test is the whole bound.  The
         // body-exclusion test and the per-piece length cap stay.
+        // doc pdvd/53: the survey ledger.  Every gate below that drops an
+        // admitted companion records WHY here, so a role-6 row can say it.  The
+        // first gate to fire wins -- note_cl/note_seg never overwrite.  Codes
+        // are the doc pdvd/53 table; 9 = the survey reached it and neither stage
+        // was ever offered it; 10 = there was no stop vertex, so every companion
+        // was fitted and nothing examined it.
+        std::map<int, int> sv_cl_rej;                       // cluster id -> gate
+        std::map<int, double> sv_cl_dstop;                  // cluster id -> d_stop (cluster level)
+        std::map<int, double> sv_cl_dbody;                  // cluster id -> d_body (cluster level, gate 6)
+        std::map<int, int> sv_seg_rej;                      // seg_id -> gate
+        std::map<int, std::pair<double, double>> sv_seg_d;  // seg_id -> (d_stop, d_body)
+        // Codes 1 and 9 are PROVISIONAL: "the Michel stage was not interested"
+        // and "nobody has looked yet" are both states a later stage overwrites
+        // with a real verdict.  Without this the Michel loop's code 1 masks the
+        // gamma stage's answer on exactly the clusters the owner asks about --
+        // 039253_13 cluster 431 read `1` when the interesting answer is that the
+        // gamma body exclusion rejected it by 0.03 cm.  Every other code is
+        // final: the first stage to reject for a real reason owns the row.
+        auto note_cl = [&](int cid, int code, double d) {
+            if (!m_survey_enable) return;
+            auto it = sv_cl_rej.find(cid);
+            if (it != sv_cl_rej.end() && it->second != 1 && it->second != 9) return;
+            sv_cl_rej[cid] = code; sv_cl_dstop[cid] = d;
+        };
+        auto note_seg = [&](int sid, int code, double d_stop, double d_body) {
+            if (!m_survey_enable) return;
+            if (sv_seg_rej.count(sid)) return;
+            sv_seg_rej[sid] = code; sv_seg_d[sid] = {d_stop, d_body};
+        };
+        (void)note_cl; (void)note_seg;
+
         if (stop_v && !companions.empty()) {
             // Two passes: collect every admissible piece with its distance to the
             // stop, then assemble.  The seed of a BRIDGED object is then the
@@ -1522,14 +1656,25 @@ void CheckSTM_Michel::visit(Ensemble& ensemble) const
                 // radius test that used to stand below hid this; dropping it
                 // (sec 3) exposed it, and the cluster-level test is the right
                 // place for it because the object is admitted whole.
+                // doc pdvd/53: a cluster the SURVEY admitted only because it is
+                // longer than companion_max_len_cm is not a Michel candidate.
+                // With survey_max_len_cm at its default this cannot fire; the
+                // guard is here so "the survey changes no selection" is true by
+                // construction rather than by a coincidence of two defaults.
                 const auto [ccp, cblob] = oc->get_closest_point_blob(rec.stop_pt);
-                if ((ccp - rec.stop_pt).magnitude() > m_michel_dot_radius_cm * units::cm) continue;
+                const double d_cl = (ccp - rec.stop_pt).magnitude();
+                if (oc->get_length() > m_companion_max_len_cm * units::cm) {
+                    note_cl(oc->get_cluster_id(), 3, d_cl); continue;
+                }
+                if (d_cl > m_michel_dot_radius_cm * units::cm) {
+                    note_cl(oc->get_cluster_id(), 1, d_cl); continue;
+                }
                 auto segs = pa.find_cluster_segments(g, *oc);   // ordered_edges: deterministic
                 if (segs.empty()) {
                     ++rec.n_dot_clusters_unfit;
                     double q = 0; for (const auto* b : oc->children()) q += b->charge();
                     rec.dots_charge_unfit += q;
-                    d_unfit = std::min(d_unfit, (ccp - rec.stop_pt).magnitude());
+                    d_unfit = std::min(d_unfit, d_cl);
                     continue;
                 }
                 for (auto& seg : segs) {
@@ -1542,15 +1687,22 @@ void CheckSTM_Michel::visit(Ensemble& ensemble) const
                     // kept with michel_dis_cm = 1e8 cm (PDHD 028084_12 cluster 3,
                     // a 1.0 cm 3-point chain).  A piece of an admitted cluster
                     // can be at most radius + the cluster cap from the stop.
-                    if (d_stop > (m_michel_dot_radius_cm + m_companion_max_len_cm) * units::cm) continue;
-                    if (segment_track_length(seg) > m_dot_max_len_cm * units::cm) continue;
+                    const int sid = oc->get_cluster_id() * 1000 + static_cast<int>(seg->get_graph_index());
+                    if (d_stop > (m_michel_dot_radius_cm + m_companion_max_len_cm) * units::cm) {
+                        note_seg(sid, 2, d_stop, -1); continue;
+                    }
+                    if (segment_track_length(seg) > m_dot_max_len_cm * units::cm) {
+                        note_seg(sid, 3, d_stop, -1); continue;
+                    }
                     // distance to the muon body beyond its last dot_body_exclusion
                     double d_body = 1e9;
                     for (size_t i = 0; i < prof.pts.size(); ++i) {
                         if (prof.rr[i] < m_dot_body_exclusion_cm * units::cm) continue;
                         d_body = std::min(d_body, (prof.pts[i] - cp).magnitude());
                     }
-                    if (d_body < d_stop) continue;   // a delta ray / body fragment, not a Michel piece
+                    if (d_body < d_stop) {           // a delta ray / body fragment, not a Michel piece
+                        note_seg(sid, 4, d_stop, d_body); continue;
+                    }
                     pieces.push_back({seg, d_stop, oc->get_cluster_id(),
                                       static_cast<int>(seg->get_graph_index())});
                 }
@@ -1675,9 +1827,11 @@ void CheckSTM_Michel::visit(Ensemble& ensemble) const
             };
             std::vector<GObj> objs;
             for (auto* oc : companions) {
-                if (michel_cluster_ids.count(oc->get_cluster_id())) continue;
                 const auto [ccp, cblob] = oc->get_closest_point_blob(rec.stop_pt);
                 const double d_cl = (ccp - rec.stop_pt).magnitude();
+                if (michel_cluster_ids.count(oc->get_cluster_id())) {
+                    note_cl(oc->get_cluster_id(), 7, d_cl); continue;
+                }
                 // THE RING, plus compactness.  Inside michel_dot_radius_cm the
                 // charge is the Michel's to claim and this stage must not touch
                 // it; outside stop_gamma_radius_cm the stop-anchored excess has
@@ -1690,7 +1844,13 @@ void CheckSTM_Michel::visit(Ensemble& ensemble) const
                 if (!stm_michel_stop_gamma_ring(d_cl, oc->get_length(),
                                                 m_michel_dot_radius_cm * units::cm,
                                                 m_stop_gamma_radius_cm * units::cm,
-                                                m_stop_gamma_max_len_cm * units::cm)) continue;
+                                                m_stop_gamma_max_len_cm * units::cm)) {
+                    // 9 says "the survey brought it and neither stage was ever
+                    // offered it"; 5 says "the gamma stage looked and said no".
+                    note_cl(oc->get_cluster_id(),
+                            d_cl > m_stop_gamma_radius_cm * units::cm ? 9 : 5, d_cl);
+                    continue;
+                }
                 // THE BODY EXCLUSION -- at CLUSTER level, and against
                 // EVERYTHING THE CHAIN HAS ALREADY CLAIMED, not just the muon.
                 //
@@ -1719,9 +1879,26 @@ void CheckSTM_Michel::visit(Ensemble& ensemble) const
                     for (const auto& bp0 : body_pts) {
                         const auto [bp, bblob] = oc->get_closest_point_blob(bp0);
                         d_body_cl = std::min(d_body_cl, (bp - bp0).magnitude());
-                        if (d_body_cl < d_cl) break;          // already decided
+                        // doc pdvd/53: the early exit is CORRECT for the verdict
+                        // and WRONG for the number.  It stops at the first body
+                        // point that undercuts the stop, so d_body_cl is then an
+                        // upper bound on the true minimum, not the minimum --
+                        // 039252_8 cluster 97's segment 466032 came out at 27.42
+                        // against a true 0.41 cm, i.e. a blob sitting ON the muon
+                        // read as "rejected by 0.02 cm".  With the survey on that
+                        // number is shown to a scanner, so run the loop out.
+                        // The verdict cannot change: finishing can only LOWER
+                        // d_body_cl, and it is already below d_cl.
+                        if (d_body_cl < d_cl && !m_survey_enable) break;
                     }
-                    if (d_body_cl < d_cl) continue;
+                    if (d_body_cl < d_cl) {
+                        note_cl(oc->get_cluster_id(), 6, d_cl);
+                        // Only when 6 actually took the row, so d_body cannot
+                        // describe a gate that did not fire.
+                        if (m_survey_enable && sv_cl_rej[oc->get_cluster_id()] == 6)
+                            sv_cl_dbody[oc->get_cluster_id()] = d_body_cl;
+                        continue;
+                    }
                 }
 
                 GObj o; o.oc = oc; o.d_stop = d_cl; o.cluster_id = oc->get_cluster_id();
@@ -1750,7 +1927,10 @@ void CheckSTM_Michel::visit(Ensemble& ensemble) const
                 }
                 for (auto& seg : segs) {
                     auto [d_stop, cp] = segment_get_closest_point(seg, rec.stop_pt, "fit", "main");
-                    if (d_stop > (m_stop_gamma_radius_cm + m_stop_gamma_max_len_cm) * units::cm) continue;
+                    const int sid = oc->get_cluster_id() * 1000 + static_cast<int>(seg->get_graph_index());
+                    if (d_stop > (m_stop_gamma_radius_cm + m_stop_gamma_max_len_cm) * units::cm) {
+                        note_seg(sid, 2, d_stop, -1); continue;
+                    }
                     // The body exclusion, the same test the Michel pieces face
                     // (:1520): a piece closer to the muon BODY than to the stop
                     // is a delta ray thrown along the track, not something the
@@ -1760,7 +1940,7 @@ void CheckSTM_Michel::visit(Ensemble& ensemble) const
                         if (prof.rr[i] < m_dot_body_exclusion_cm * units::cm) continue;
                         d_body = std::min(d_body, (prof.pts[i] - cp).magnitude());
                     }
-                    if (d_body < d_stop) continue;
+                    if (d_body < d_stop) { note_seg(sid, 6, d_stop, d_body); continue; }
                     o.segs.emplace_back(seg, d_stop);
                     o.ke += segment_cal_kine_dQdx(seg, m_recomb_model) / units::MeV;
                 }
@@ -1783,9 +1963,19 @@ void CheckSTM_Michel::visit(Ensemble& ensemble) const
                 return a.cluster_id < b.cluster_id;
             });
             for (const auto& o : objs) {
-                if (rec.n_stop_gammas >= m_stop_gamma_max_n) break;
+                if (rec.n_stop_gammas >= m_stop_gamma_max_n) {
+                    // The knob-off path keeps the original `break` exactly.  With
+                    // the survey on we walk the rest only to record that they were
+                    // capped out; n_stop_gammas cannot fall, so the accepted set
+                    // is the same either way.
+                    if (!m_survey_enable) break;
+                    note_cl(o.cluster_id, 8, o.d_stop);
+                    continue;
+                }
                 if (!stm_michel_stop_gamma_energy(o.ke, m_stop_gamma_min_ke_mev,
-                                                  m_stop_gamma_max_ke_mev)) continue;
+                                                  m_stop_gamma_max_ke_mev)) {
+                    note_cl(o.cluster_id, 8, o.d_stop); continue;
+                }
                 ++rec.n_stop_gammas;
                 rec.stop_gamma_ke_tot += o.ke;
                 rec.stop_gamma_ke_max = std::max(rec.stop_gamma_ke_max, o.ke);
@@ -1815,6 +2005,57 @@ void CheckSTM_Michel::visit(Ensemble& ensemble) const
                     gsh->add_segment(o.segs[i].first, true, "fit", "associate_points");
                 gamma_showers.emplace_back(gsh, o.ke);
             }
+        }
+
+        // doc pdvd/53: THE SURVEY.  Every admitted companion segment that no
+        // stage claimed gets role-6 rows plus the gate that dropped it, so the
+        // hand-scan display can draw it, select it and let the scanner group it.
+        // This deliberately covers the companions INSIDE stop_gamma_radius_cm as
+        // well as the ones only the survey radius reached: 039253_13 cluster
+        // 102's isolated gamma is cluster 431 / segment 431017, already fitted
+        // at doc pdvd/51 and invisible only because nothing named it.
+        if (m_survey_enable && !companions.empty()) {
+            struct SvSeg { SegmentPtr seg; int cluster_id, gidx, rej; double d_stop, d_body; };
+            std::vector<SvSeg> sv;
+            std::set<int> sv_clusters;
+            for (auto* oc : companions) {
+                const int cid = oc->get_cluster_id();
+                auto segs = pa.find_cluster_segments(g, *oc);
+                if (segs.empty()) { ++rec.n_survey_unfit; continue; }
+                for (auto& seg : segs) {
+                    if (!seg) continue;
+                    const int gidx = static_cast<int>(seg->get_graph_index());
+                    const int sid = cid * 1000 + gidx;
+                    if (rec.claimed.count(sid)) continue;
+                    int rej = 0; double d_stop = -1, d_body = -1;
+                    auto its = sv_seg_rej.find(sid);
+                    if (its != sv_seg_rej.end()) {
+                        rej = its->second;
+                        d_stop = sv_seg_d[sid].first; d_body = sv_seg_d[sid].second;
+                    }
+                    else {
+                        auto itc = sv_cl_rej.find(cid);
+                        // 10: there was no stop vertex, so the companion was
+                        // fitted and then examined by nothing at all.
+                        rej = (itc != sv_cl_rej.end()) ? itc->second : (stop_v ? 9 : 10);
+                        if (sv_cl_dstop.count(cid)) d_stop = sv_cl_dstop[cid];
+                        if (sv_cl_dbody.count(cid)) d_body = sv_cl_dbody[cid];
+                        if (d_stop < 0) {
+                            const auto [ccp, cblob] = oc->get_closest_point_blob(rec.stop_pt);
+                            d_stop = (ccp - rec.stop_pt).magnitude();
+                        }
+                    }
+                    sv.push_back({seg, cid, gidx, rej, d_stop, d_body});
+                    sv_clusters.insert(cid);
+                }
+            }
+            std::sort(sv.begin(), sv.end(), [](const SvSeg& a, const SvSeg& b) {
+                if (a.cluster_id != b.cluster_id) return a.cluster_id < b.cluster_id;
+                return a.gidx < b.gidx;
+            });
+            for (const auto& e : sv) add_points(rec, e.seg, 6, nullptr, e.rej, e.d_stop, e.d_body);
+            rec.n_survey_segs = static_cast<int>(sv.size());
+            rec.n_survey_clusters = static_cast<int>(sv_clusters.size());
         }
 
         // Unfitted companion clusters have no dx, so dQ/dx cannot be inverted;

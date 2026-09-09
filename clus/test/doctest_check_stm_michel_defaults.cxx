@@ -86,6 +86,22 @@ TEST_CASE("clus knob defaults: CheckSTM_Michel verdict thresholds")
     D("stop_gamma_min_ke_mev", 0.2);
     D("stop_gamma_max_ke_mev", 20.0);
     D("stop_gamma_max_n", 8);
+
+    // doc pdvd/53: the SURVEY.  Default OFF is the load-bearing value -- with it
+    // false an absent key leaves the whole component byte-identical, including
+    // the stm_michel_pts column set (no rej/d_stop/d_body) and the
+    // T_stm_michel branch list (no n_survey_*).  The two ProtoDUNE pr.jsonnet
+    // turn it on; nothing else binds this component.
+    B("survey_enable", false);
+    // 60 cm: the survey exists to put the pieces a scanner can SEE in front of
+    // them, and the display's own near-image radius is the same 60 cm.  It is
+    // not a physics boundary -- the Michel keeps michel_dot_radius_cm and the
+    // gamma keeps stop_gamma_radius_cm, so widening this admits nothing to
+    // either object.
+    D("survey_radius_cm", 60.0);
+    // Mirrors companion_max_len_cm, so the knob-on companion POOL is the same
+    // pool the knob-off path builds, only reaching further.
+    D("survey_max_len_cm", 25.0);
     // doc pdhd/15 sec 6: the KineChargeOptions TRACK pair for an unfitted piece
     D("michel_unfit_recom", 0.7);
     D("michel_unfit_fudge", 0.95);

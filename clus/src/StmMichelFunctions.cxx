@@ -347,3 +347,13 @@ bool WireCell::Clus::PR::stm_michel_stop_gamma_energy(double ke_mev, double lo_m
     if (!std::isfinite(ke_mev)) return false;
     return ke_mev >= lo_mev && ke_mev <= hi_mev;
 }
+
+double WireCell::Clus::PR::stm_michel_admit_radius(double michel_cm,
+                                                   double gamma_cm, bool gamma_on,
+                                                   double survey_cm, bool survey_on)
+{
+    double r = std::isfinite(michel_cm) ? michel_cm : 0.0;
+    if (gamma_on && std::isfinite(gamma_cm)) r = std::max(r, gamma_cm);
+    if (survey_on && std::isfinite(survey_cm)) r = std::max(r, survey_cm);
+    return r;
+}

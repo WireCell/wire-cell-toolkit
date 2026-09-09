@@ -69,6 +69,21 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
               // partition knobs are FILTERED from tcn_knobs below, so the
               // production PR partition is reproduced without a second copy.
               stm_michel_knobs={},
+              // doc pdvd/53: the SURVEY.  Fit every same-bundle cluster within
+              // stm_survey_radius_cm of the STM stop (not just the 35 cm the
+              // capture-gamma stage reaches), give every fitted-but-unclaimed
+              // companion segment role-6 rows in stm_michel_pts, and record the
+              // gate that dropped it (rej/d_stop/d_body).  Scaffolding for the
+              // hand scan, NOT a selection change: the Michel's cluster test
+              // still uses michel_dot_radius_cm and the gamma ring's outer edge
+              // is still stop_gamma_radius_cm, so a cluster reached only by this
+              // radius is claimed by neither.  The one physics effect is the
+              // preload perturbation of the candidate's own fit (doc pdvd/53
+              // sec 6).  C++ default FALSE -- false here omits every key and
+              // reproduces the doc pdvd/51 job byte-for-byte.
+              stm_survey=true,
+              stm_survey_radius_cm=60.0,
+              stm_survey_max_len_cm=25.0,
               // Readout length in ticks for the Magnify/PrDisplay writers (SBND 3427;
               // PDVD production window 10000, run_clus_evt.sh readout_window_ticks).
               nticks=10000,
@@ -1681,6 +1696,9 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
                     [if teb_turn_baseline != null then 'teb_turn_baseline']: teb_turn_baseline,
                     [if teb_turn_skirt != null then 'teb_turn_skirt']: teb_turn_skirt,
                     [if kink_dqdx_hot_ratio != null then 'kink_dqdx_hot_ratio']: kink_dqdx_hot_ratio,
+                    [if stm_survey then 'survey_enable']: true,
+                    [if stm_survey then 'survey_radius_cm']: stm_survey_radius_cm,
+                    [if stm_survey then 'survey_max_len_cm']: stm_survey_max_len_cm,
                 } + stm_michel_knobs),
             // STM-stage Magnify-tracking ROOT dump (doc sbnd_xin/docs/40): reads
             // the stm_fit/stm_pass cluster PCs and the "stm" TrackFitting slot,

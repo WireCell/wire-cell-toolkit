@@ -139,6 +139,17 @@ namespace WireCell::Clus::PR {
     /// pdhd/15 sec 7).
     bool stm_michel_stop_gamma_energy(double ke_mev, double lo_mev, double hi_mev);
 
+    /// doc pdvd/53: the companion ADMISSION radius -- the one number that says
+    /// which clusters ever reach the fitter, and therefore which pieces can
+    /// exist at all for a later stage or a hand scanner to judge.  It is a
+    /// maximum over the stages that are switched on, never a stage's own test:
+    /// the Michel still applies `michel_cm` at cluster level and the gamma still
+    /// applies its ring, so widening this admits nothing to either object.  A
+    /// non-finite or negative radius from a disabled stage contributes nothing.
+    double stm_michel_admit_radius(double michel_cm,
+                                   double gamma_cm, bool gamma_on,
+                                   double survey_cm, bool survey_on);
+
     /// doc pdhd/17 sec 9: the SAME conversion, but with the survival read out
     /// of the recombination model the component is already holding instead of
     /// the hard-coded pair above.
