@@ -6,16 +6,18 @@ extended (more inputs/events, more cores/GPUs, other detectors later).
 
 * What it does
 
-The =spngdir= workflow runs a single "kitchen sink" wire-cell job producing
-splat + OSP + SPNG signals.  This benchmark *factors* that into two isolated
-chains so each can be timed on its own:
+The =spngdir= workflow runs a single "kitchen sink" wire-cell job.  This
+benchmark *factors* it into three separate jobs (=stage= TLA / driver stage):
 
-- =depos -> drift -> detsim -> OSP=   (=which=osp=)
-- =depos -> drift -> detsim -> SPNG=  (=which=spng=)
+- =stage=sim=  : =depos -> drift -> detsim=  -> ADC frame file(s)
+- =stage=osp=  : ADC frame file(s) -> OSP    -> signal frame file(s)
+- =stage=spng= : ADC frame file(s) -> SPNG   -> signal frame file(s)
 
-both provided directly by =spng/det.jsonnet= (=depos_to_osp= / =depos_to_spng=).
-The shared simulation front-end is timed too but is separately visible in the
-per-node accounting, so an OSP-vs-SPNG comparison is fair.
+The sim job is run *once* per depo input; its ADC frame file feeds *both* the
+OSP and SPNG jobs, so they process identical input and the shared simulation
+cost is excluded from the SP timing.  Later the ADC file may be replaced by one
+made from real detector data to compare against.  The factored pieces come from
+=spng/det.jsonnet= (=depos_to_adc=, =osp=, =spng=).
 
 Two files:
 - =spngbench.jsonnet= — the factored wire-cell config (TLAs: =input=, =model_file=,
@@ -67,10 +69,17 @@ python3 spngbench.py grid --mode cpu --which both
 # subset the grid
 python3 spngbench.py grid --mode cpu --which spng --wc-cores 1 2 --torch-cores 1 4
 
-# GPU grid (device=gpu, torch=1, wc {1,2,3,4}); OOM is recorded, not fatal
+# single-GPU grid (device=gpu, torch=1, wc {1,2,3,4}); OOM is recorded, not fatal
 python3 spngbench.py grid --mode gpu --which both
 
-# everything (cpu + gpu + the two-GPU split), from a config file
+# multi-GPU sharded grid (transverse/longitudinal x ngpu x wc); cells needing
+# more GPUs than present are recorded as skipped
+python3 spngbench.py grid --mode shard --which both
+
+# a single sharded SPNG run
+python3 spngbench.py run spng --device gpu0 --gpu-scheme transverse --ngpu 2
+
+# everything (cpu + gpu + shard), from a config file
 python3 spngbench.py grid --mode all --config spngbench.json
 
 # see the effective configuration
@@ -104,10 +113,20 @@ override the file.  Keys: =detname=, =model_file=, =inputs=, =outdir=, =repeats=
 
 - *More inputs/events*: set =inputs= to a list; per-node stats become mean±stdev.
 - *More cores*: bump =cpu_grid= ranges and =hw.max_hyperthreads=.
-- *More GPUs / two-GPU split*: the =two-gpu= cell is enumerated but currently
-  recorded as skipped — it needs (a) two visible GPUs and (b) =spngbench.jsonnet=
-  extended to assign half the graph to each device (spng-fra.7).
+- *More GPUs*: the SPNG graph is sharded by a device MATRIX (=gpu_scheme=, =ngpu=),
+  applied by rewriting =data.device= on per-APA SPNG node configs (names start
+  "tpc<N>"), so it extends to any GPU count:
+  - =transverse= : device = gpu[ tpc_index % ngpu ].  All nodes of one APA share
+    a GPU; APA pipelines are independent so with one event in flight only one
+    runs at a time and the GPU never OOMs.  Up to (#APA) GPUs (4 for PDHD).
+  - =longitudinal= : device = gpu[ stage_index % ngpu ], stages (decon/filter/
+    dnn/roi) matched by node-name keyword; tensors cross GPUs at stage
+    boundaries.  Extend the =stages= list in =spngbench.jsonnet= for finer control.
+  OSP (a single DNN) is not sharded and uses the base =device=.  Cells needing
+  more GPUs than present are recorded as skipped.
 - *Other detectors* (DUNE FD): set =detname= once SPNG detconf exists for it.
+  Multi-APA detectors automatically get per-TPC ADC frame files (=-tpc<N>= suffix)
+  and enable the transverse scheme across their APAs.
 
 * Diagnostics
 
