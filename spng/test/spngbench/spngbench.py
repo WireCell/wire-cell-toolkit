@@ -32,6 +32,7 @@ import sys
 import json
 import time
 import socket
+import shutil
 import argparse
 import subprocess
 from pathlib import Path
@@ -772,6 +773,397 @@ def run_grid(cfg, cells, which_list, dry_run=False):
 
 
 # ---------------------------------------------------------------------------
+# Human-readable reporting (Markdown / HTML / LaTeX from a benchmark JSON).
+# ---------------------------------------------------------------------------
+# Report categories, finer than the rollup's forward/sp_other/other: separate
+# I/O from compute, and within compute separate DNN (the neural-net forward)
+# from the rest of signal processing.
+_IO_HINTS = ("::Sio::", "FrameFile", "DepoFile", "TensorFile")
+CAT_ORDER = ["dnn", "sp_nondnn", "io", "other"]
+CAT_LABEL = {"dnn": "DNN forward", "sp_nondnn": "SP (non-DNN)",
+             "io": "I/O", "other": "other"}
+CAT_COLOR = {"dnn": "#d95f5f", "sp_nondnn": "#5f8fbf", "io": "#7fb37f",
+             "other": "#c8c8c8"}
+
+
+def report_category(cls):
+    if cls in FORWARD_CLASSES:
+        return "dnn"
+    if any(h in cls for h in _IO_HINTS):
+        return "io"
+    if classify(cls) == "sp_other":
+        return "sp_nondnn"
+    return "other"
+
+
+def _short(cls):
+    return cls.split("::")[-1]
+
+
+def per_node_list(report):
+    """Flat list of timed nodes from a report's per-node rollup."""
+    pn = (report.get("summary") or {}).get("per_node") or {}
+    out = []
+    for v in pn.values():
+        out.append({
+            "class": v["class"], "short": _short(v["class"]),
+            "instance": v["instance"], "cat": report_category(v["class"]),
+            "wall": v["wall"]["mean"] or 0.0, "wall_sd": v["wall"]["stdev"] or 0.0,
+            "core": v["core"]["mean"] or 0.0,
+        })
+    return sorted(out, key=lambda n: -n["wall"])
+
+
+def cat_sums(nodes):
+    d = {c: 0.0 for c in CAT_ORDER}
+    for n in nodes:
+        d[n["cat"]] += n["wall"]
+    return d
+
+
+def load_bench(path):
+    """Load a benchmark JSON and return {'meta':..., 'reports': {stage: report}}.
+
+    Accepts compare/1 (osp+spng), config/1 (one stage), or grid/1 (uses the
+    first cell that has a compare file).
+    """
+    j = json.loads(Path(path).read_text())
+    schema = j.get("schema", "")
+    if schema.startswith("spngbench-compare"):
+        return {"meta": j["meta"], "reports": {"osp": j["osp"], "spng": j["spng"]}}
+    if schema.startswith("spngbench-config"):
+        return {"meta": j["meta"], "reports": {j["meta"]["stage"]: j}}
+    if schema.startswith("spngbench-grid"):
+        base = Path(path).parent
+        for c in j.get("cells", []):
+            cp = c.get("compare_path")
+            if cp and Path(cp).exists():
+                return load_bench(cp)
+            if cp and (base / Path(cp).name).exists():
+                return load_bench(base / Path(cp).name)
+        raise SystemExit("grid index has no usable compare file; point report at a compare-*.json")
+    raise SystemExit(f"unrecognized benchmark JSON schema: {schema!r}")
+
+
+def _fmt(x, nd=2):
+    return "-" if x is None else f"{x:.{nd}f}"
+
+
+# ---- figures (PNG, shared by all three output formats) ----
+def make_figures(reports, figdir):
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    figdir = Path(figdir)
+    figdir.mkdir(parents=True, exist_ok=True)
+    figs = {}
+    stages = [s for s in ("osp", "spng") if s in reports]
+
+    # (1) Stacked category composition, OSP vs SPNG.
+    sums = {s: cat_sums(per_node_list(reports[s])) for s in stages}
+    fig, ax = plt.subplots(figsize=(5, 4))
+    bottoms = {s: 0.0 for s in stages}
+    x = range(len(stages))
+    for cat in CAT_ORDER:
+        vals = [sums[s][cat] for s in stages]
+        ax.bar(x, vals, bottom=[bottoms[s] for s in stages],
+               color=CAT_COLOR[cat], label=CAT_LABEL[cat], width=0.6)
+        for s in stages:
+            bottoms[s] += sums[s][cat]
+    ax.set_xticks(list(x))
+    ax.set_xticklabels([s.upper() for s in stages])
+    ax.set_ylabel("wall time [s]")
+    ax.set_title("Time composition by category")
+    ax.legend(fontsize=8)
+    fig.tight_layout()
+    p = figdir / "categories.png"
+    fig.savefig(p, dpi=120)
+    plt.close(fig)
+    figs["categories"] = p.name
+
+    # (2) Per-stage top-node horizontal bars, colored by category.
+    for s in stages:
+        nodes = per_node_list(reports[s])[:14]
+        if not nodes:
+            continue
+        fig, ax = plt.subplots(figsize=(6.5, max(2.5, 0.36 * len(nodes))))
+        y = range(len(nodes))
+        ax.barh(list(y), [n["wall"] for n in nodes],
+                color=[CAT_COLOR[n["cat"]] for n in nodes],
+                xerr=[n["wall_sd"] for n in nodes], error_kw=dict(lw=0.6))
+        ax.set_yticks(list(y))
+        ax.set_yticklabels([f'{n["short"]}:{n["instance"]}'[:34] for n in nodes], fontsize=7)
+        ax.invert_yaxis()
+        ax.set_xlabel("wall time [s]")
+        ax.set_title(f"{s.upper()} — top nodes by wall time")
+        fig.tight_layout()
+        p = figdir / f"nodes_{s}.png"
+        fig.savefig(p, dpi=120)
+        plt.close(fig)
+        figs[f"nodes_{s}"] = p.name
+
+    return figs
+
+
+# ---- annotated flow graphs (GraphViz dot -> PNG) ----
+def _tlas_from_cmd(cmd):
+    jsonnet, tlas = None, {}
+    i = 0
+    while i < len(cmd):
+        if cmd[i] == "-c" and i + 1 < len(cmd):
+            jsonnet = cmd[i + 1]; i += 2; continue
+        if cmd[i] == "-A" and i + 1 < len(cmd):
+            k, _, v = cmd[i + 1].partition("="); tlas[k] = v; i += 2; continue
+        i += 1
+    return jsonnet, tlas
+
+
+def _dot_node_ids(dot_text):
+    """Collect node identifiers referenced by edges in a dot file."""
+    ids = set()
+    for line in dot_text.splitlines():
+        if "->" not in line:
+            continue
+        for side in line.split("->"):
+            side = side.strip()
+            m = re.match(r'\s*("(?:[^"]*)"|[A-Za-z0-9_.]+)', side)
+            if m:
+                ids.add(m.group(1).strip('"'))
+    return ids
+
+
+def render_flow_graph(report, out_png, device_hint=None):
+    """Render this report's flow graph annotated with per-node wall/core time.
+
+    Runs `wcpy pgraph dotify` for the topology, appends node statements with
+    timing labels/colors, and renders with `dot`.  Returns the PNG basename or
+    None if any tool is missing.
+    """
+    if not shutil.which("dot") or not shutil.which("wcpy"):
+        return None
+    cmd = report.get("meta", {}).get("cmd")
+    if not cmd:
+        return None
+    jsonnet, tlas = _tlas_from_cmd(cmd)
+    if not jsonnet:
+        return None
+
+    out_png = Path(out_png)
+    base_dot = out_png.with_suffix(".base.dot")
+    ann_dot = out_png.with_suffix(".dot")
+
+    env = os.environ.copy()
+    env["LD_LIBRARY_PATH"] = ""
+    env.setdefault("MPLCONFIGDIR", "/tmp/mpl-spngbench")
+    dargs = ["wcpy", "pgraph", "dotify", "--no-services", "--no-params"]
+    for k, v in tlas.items():
+        dargs += ["-A", f"{k}={v}"]
+    dargs += [jsonnet, str(base_dot)]
+    try:
+        r = subprocess.run(dargs, env=env, stdout=subprocess.PIPE,
+                           stderr=subprocess.STDOUT, timeout=120)
+        if r.returncode != 0 or not base_dot.exists():
+            return None
+    except Exception:
+        return None
+
+    dot_text = base_dot.read_text()
+    ids = _dot_node_ids(dot_text)
+    # Map node timing by dot id "<Type>_<instance>".  dotify uses the factory
+    # type name, which for SPNG nodes carries an "SPNG" prefix the demangled
+    # Timer class short lacks (e.g. dot "SPNGKernelConvolve" vs "KernelConvolve"),
+    # so index by both spellings.
+    lut = {}
+    for n in per_node_list(report):
+        lut[f'{n["short"]}_{n["instance"]}'] = n
+        lut[f'SPNG{n["short"]}_{n["instance"]}'] = n
+
+    stmts = []
+    for nid in ids:
+        n = lut.get(nid)
+        if not n:
+            continue
+        cat = n["cat"]
+        label = f'{n["short"]}\\n{n["instance"]}\\nwall={n["wall"]:.2f}s core={n["core"]:.2f}s'
+        stmts.append(f'  "{nid}" [style=filled, fillcolor="{CAT_COLOR[cat]}", '
+                     f'label="{label}"];')
+    if stmts:
+        idx = dot_text.rfind("}")
+        dot_text = dot_text[:idx] + "\n" + "\n".join(stmts) + "\n}\n"
+    ann_dot.write_text(dot_text)
+
+    try:
+        r = subprocess.run(["dot", "-Tpng", "-o", str(out_png), str(ann_dot)],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=120)
+        if r.returncode != 0 or not out_png.exists():
+            return None
+    except Exception:
+        return None
+    return out_png.name
+
+
+# ---- format emitters ----
+def _node_rows(report, n=20):
+    return [(x["short"], x["instance"], CAT_LABEL[x["cat"]], x["wall"], x["wall_sd"], x["core"])
+            for x in per_node_list(report)[:n]]
+
+
+def _summary_context(bench):
+    meta, reports = bench["meta"], bench["reports"]
+    ctx = {"meta": meta, "stages": [s for s in ("osp", "spng") if s in reports]}
+    ctx["cat"] = {s: cat_sums(per_node_list(reports[s])) for s in ctx["stages"]}
+    ctx["total"] = {s: sum(ctx["cat"][s].values()) for s in ctx["stages"]}
+    return ctx
+
+
+def emit_markdown(bench, ctx, figs, graphs):
+    m, R = bench["meta"], bench["reports"]
+    L = []
+    L.append(f"# spngbench summary — {m.get('detname','?')}\n")
+    L.append(f"host **{m.get('host','?')}**, device **{m.get('device','?')}**, "
+             f"wc_cores **{m.get('wc_cores','?')}**, torch_cores **{m.get('torch_cores','?')}**, "
+             f"gpu_scheme **{m.get('gpu_scheme','none')}** (ngpu {m.get('ngpu',1)})\n")
+
+    L.append("\n## OSP vs SPNG\n")
+    L.append("| category | " + " | ".join(s.upper() + " [s]" for s in ctx["stages"]) + " |")
+    L.append("|---|" + "---|" * len(ctx["stages"]))
+    for cat in CAT_ORDER:
+        L.append(f"| {CAT_LABEL[cat]} | " +
+                 " | ".join(_fmt(ctx['cat'][s][cat]) for s in ctx["stages"]) + " |")
+    L.append(f"| **total** | " + " | ".join(f"**{_fmt(ctx['total'][s])}**" for s in ctx["stages"]) + " |")
+    if "osp" in ctx["stages"] and "spng" in ctx["stages"]:
+        o, s = ctx["total"]["osp"], ctx["total"]["spng"]
+        L.append(f"\nSPNG/OSP total wall ratio: **{_fmt(s / o if o else None, 2)}×**\n")
+    L.append(f"\n![category composition]({figs['categories']})\n")
+
+    L.append("\n## Per-node timing\n")
+    for s in ctx["stages"]:
+        L.append(f"\n### {s.upper()}\n")
+        if f"nodes_{s}" in figs:
+            L.append(f"![{s} nodes]({figs[f'nodes_{s}']})\n")
+        L.append("\n| node | instance | category | wall [s] | ±sd | core [s] |")
+        L.append("|---|---|---|--:|--:|--:|")
+        for sh, inst, cl, w, sd, co in _node_rows(R[s]):
+            L.append(f"| {sh} | {inst} | {cl} | {_fmt(w)} | {_fmt(sd)} | {_fmt(co)} |")
+
+    if graphs:
+        L.append("\n## Flow graphs (per-node CPU/GPU timing)\n")
+        for s in ctx["stages"]:
+            if graphs.get(s):
+                L.append(f"\n### {s.upper()}\n")
+                L.append(f"![{s} flow graph]({graphs[s]})\n")
+    return "\n".join(L) + "\n"
+
+
+def emit_html(bench, ctx, figs, graphs):
+    m, R = bench["meta"], bench["reports"]
+    def esc(x):
+        return str(x).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    H = ["<!doctype html><meta charset='utf-8'><title>spngbench summary</title>",
+         "<style>body{font-family:sans-serif;margin:2em;max-width:60em}"
+         "table{border-collapse:collapse}td,th{border:1px solid #ccc;padding:3px 8px}"
+         "th{background:#eee}img{max-width:100%}</style>"]
+    H.append(f"<h1>spngbench summary — {esc(m.get('detname','?'))}</h1>")
+    H.append(f"<p>host <b>{esc(m.get('host','?'))}</b>, device <b>{esc(m.get('device','?'))}</b>, "
+             f"wc_cores <b>{m.get('wc_cores','?')}</b>, torch_cores <b>{m.get('torch_cores','?')}</b>, "
+             f"gpu_scheme <b>{esc(m.get('gpu_scheme','none'))}</b> (ngpu {m.get('ngpu',1)})</p>")
+    H.append("<h2>OSP vs SPNG</h2><table><tr><th>category</th>" +
+             "".join(f"<th>{s.upper()} [s]</th>" for s in ctx["stages"]) + "</tr>")
+    for cat in CAT_ORDER:
+        H.append("<tr><td>" + CAT_LABEL[cat] + "</td>" +
+                 "".join(f"<td>{_fmt(ctx['cat'][s][cat])}</td>" for s in ctx["stages"]) + "</tr>")
+    H.append("<tr><td><b>total</b></td>" +
+             "".join(f"<td><b>{_fmt(ctx['total'][s])}</b></td>" for s in ctx["stages"]) + "</tr></table>")
+    H.append(f"<p><img src='{figs['categories']}'></p>")
+    H.append("<h2>Per-node timing</h2>")
+    for s in ctx["stages"]:
+        H.append(f"<h3>{s.upper()}</h3>")
+        if f"nodes_{s}" in figs:
+            H.append(f"<p><img src='{figs[f'nodes_{s}']}'></p>")
+        H.append("<table><tr><th>node</th><th>instance</th><th>category</th>"
+                 "<th>wall [s]</th><th>±sd</th><th>core [s]</th></tr>")
+        for sh, inst, cl, w, sd, co in _node_rows(R[s]):
+            H.append(f"<tr><td>{esc(sh)}</td><td>{esc(inst)}</td><td>{cl}</td>"
+                     f"<td>{_fmt(w)}</td><td>{_fmt(sd)}</td><td>{_fmt(co)}</td></tr>")
+        H.append("</table>")
+    if graphs:
+        H.append("<h2>Flow graphs (per-node CPU/GPU timing)</h2>")
+        for s in ctx["stages"]:
+            if graphs.get(s):
+                H.append(f"<h3>{s.upper()}</h3><p><img src='{graphs[s]}'></p>")
+    return "\n".join(H) + "\n"
+
+
+def emit_latex(bench, ctx, figs, graphs):
+    m, R = bench["meta"], bench["reports"]
+    def esc(x):
+        return str(x).replace("_", r"\_").replace("&", r"\&").replace("%", r"\%")
+    ncol = len(ctx["stages"])
+    T = [r"\documentclass{article}",
+         r"\usepackage{graphicx}\usepackage{booktabs}\usepackage[margin=1in]{geometry}",
+         r"\begin{document}",
+         r"\section*{spngbench summary --- " + esc(m.get("detname", "?")) + "}"]
+    T.append(f"host \\texttt{{{esc(m.get('host','?'))}}}, device \\texttt{{{esc(m.get('device','?'))}}}, "
+             f"wc\\_cores {m.get('wc_cores','?')}, torch\\_cores {m.get('torch_cores','?')}, "
+             f"gpu\\_scheme \\texttt{{{esc(m.get('gpu_scheme','none'))}}} (ngpu {m.get('ngpu',1)}).")
+    T.append(r"\subsection*{OSP vs SPNG}")
+    T.append(r"\begin{tabular}{l" + "r" * ncol + "}\\toprule")
+    T.append("category & " + " & ".join(s.upper() for s in ctx["stages"]) + r" \\\midrule")
+    for cat in CAT_ORDER:
+        T.append(f"{CAT_LABEL[cat].replace('(non-DNN)','(non-DNN)')} & " +
+                 " & ".join(_fmt(ctx['cat'][s][cat]) for s in ctx["stages"]) + r" \\")
+    T.append(r"\midrule total & " + " & ".join(_fmt(ctx['total'][s]) for s in ctx["stages"]) + r" \\\bottomrule")
+    T.append(r"\end{tabular}")
+    T.append(r"\begin{center}\includegraphics[width=0.6\textwidth]{" + figs["categories"] + r"}\end{center}")
+    T.append(r"\subsection*{Per-node timing}")
+    for s in ctx["stages"]:
+        T.append(r"\paragraph{" + s.upper() + "}")
+        if f"nodes_{s}" in figs:
+            T.append(r"\begin{center}\includegraphics[width=0.8\textwidth]{" + figs[f"nodes_{s}"] + r"}\end{center}")
+        T.append(r"\begin{tabular}{lllrrr}\toprule")
+        T.append(r"node & instance & category & wall [s] & sd & core [s] \\\midrule")
+        for sh, inst, cl, w, sd, co in _node_rows(R[s], n=14):
+            T.append(f"{esc(sh)} & {esc(inst)} & {cl.replace('(non-DNN)','')} & "
+                     f"{_fmt(w)} & {_fmt(sd)} & {_fmt(co)} " + r"\\")
+        T.append(r"\bottomrule\end{tabular}")
+    if graphs:
+        T.append(r"\subsection*{Flow graphs}")
+        for s in ctx["stages"]:
+            if graphs.get(s):
+                T.append(r"\paragraph{" + s.upper() + "}")
+                T.append(r"\begin{center}\includegraphics[width=\textwidth]{" + graphs[s] + r"}\end{center}")
+    T.append(r"\end{document}")
+    return "\n".join(T) + "\n"
+
+
+def report_command(bench_path, outdir, formats=("md", "html", "tex"), with_graphs=True):
+    """Write a Markdown/HTML/LaTeX summary directory from a benchmark JSON."""
+    bench = load_bench(bench_path)
+    outdir = Path(outdir)
+    outdir.mkdir(parents=True, exist_ok=True)
+
+    figs = make_figures(bench["reports"], outdir)
+    graphs = {}
+    if with_graphs:
+        for s in bench["reports"]:
+            g = render_flow_graph(bench["reports"][s], outdir / f"graph_{s}.png")
+            if g:
+                graphs[s] = g
+    ctx = _summary_context(bench)
+
+    written = []
+    if "md" in formats:
+        p = outdir / "summary.md"; p.write_text(emit_markdown(bench, ctx, figs, graphs)); written.append(p)
+    if "html" in formats:
+        p = outdir / "summary.html"; p.write_text(emit_html(bench, ctx, figs, graphs)); written.append(p)
+    if "tex" in formats:
+        p = outdir / "summary.tex"; p.write_text(emit_latex(bench, ctx, figs, graphs)); written.append(p)
+    return {"outdir": str(outdir), "figures": figs, "graphs": graphs,
+            "written": [str(p) for p in written]}
+
+
+# ---------------------------------------------------------------------------
 # CLI.
 # ---------------------------------------------------------------------------
 def _add_common(p):
@@ -833,6 +1225,13 @@ def main(argv=None):
     psc = sub.add_parser("show-config", help="print the effective config (defaults + --config)")
     psc.add_argument("--config", default=None)
 
+    prep = sub.add_parser("report", help="write a Markdown/HTML/LaTeX summary from a benchmark JSON")
+    prep.add_argument("bench_json", help="a compare-*.json, report-*.json, or grid-index.json")
+    prep.add_argument("-o", "--outdir", default="spngbench-report", help="output directory")
+    prep.add_argument("--formats", default="md,html,tex",
+                      help="comma list of md,html,tex (default all)")
+    prep.add_argument("--no-graphs", action="store_true", help="skip the flow-graph figures")
+
     args = ap.parse_args(argv)
 
     if args.cmd == "analyze":
@@ -842,6 +1241,16 @@ def main(argv=None):
     if args.cmd == "show-config":
         cfg = load_config(args.config) if args.config else default_config()
         print(json.dumps(cfg, indent=2))
+        return 0
+
+    if args.cmd == "report":
+        formats = tuple(f.strip() for f in args.formats.split(",") if f.strip())
+        res = report_command(args.bench_json, args.outdir, formats=formats,
+                             with_graphs=not args.no_graphs)
+        log(f"wrote {len(res['written'])} summary file(s), "
+            f"{len(res['figures'])} figure(s), {len(res['graphs'])} flow graph(s)")
+        for w in res["written"]:
+            print(w)
         return 0
 
     if args.cmd == "grid":

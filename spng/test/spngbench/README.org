@@ -80,6 +80,9 @@ python3 spngbench.py grid --mode all --config spngbench.json
 
 # see the effective configuration
 python3 spngbench.py show-config --config spngbench.json
+
+# human-readable summary (Markdown + HTML + LaTeX) from a compare/report/grid JSON
+python3 spngbench.py report spngbench-pdhd/compare-cpu-wc1-omp1.json -o report-dir
 #+end_src
 
 Default input is =toolkit/test/data/muon-depos.npz=; override with =--input= (repeatable)
@@ -96,6 +99,18 @@ Into =--outdir= (default =spngbench-pdhd/=):
   incrementally so partial runs survive.
 
 Outcomes: =ok=, =oom= (GPU out-of-memory, marked and skipped), =error=, =skipped=.
+
+* Summary report
+
+=report= reads a =compare-*.json= (or a per-config report, or a grid index) and
+writes a directory with =summary.{md,html,tex}= sharing the same PNG figures.
+It surfaces OSP-vs-SPNG and per-node differences, separating I/O from SP nodes
+and, within SP, the DNN forward (=Pytorch::DNNROIFinding= / =SPNG::TensorForward=)
+from the non-DNN algorithms.  Figures: category-composition bars (OSP vs SPNG),
+per-stage top-node bars, and the OSP and SPNG *flow graphs* (GraphViz =dot=)
+with each node annotated by wall/core time and colored by category.  The LaTeX
+builds with =pdflatex= (needs =graphicx=, =booktabs=); the flow graphs need the
+=dot= and =wcpy= programs (skipped with =--no-graphs= or if absent).
 
 * Config file
 
