@@ -41,6 +41,11 @@ HERE = Path(__file__).resolve().parent
 JSONNET = HERE / "spngbench.jsonnet"
 DEFAULT_MODEL = "/nfs/data/1/calcuttj/toolkit_testing/legacy_roiuniter_090326.ts"
 
+
+def log(msg):
+    """Progress message to stderr (stdout stays reserved for JSON output)."""
+    print(msg, file=sys.stderr, flush=True)
+
 # ---------------------------------------------------------------------------
 # Node classification.  Rule-based and intentionally extensible: to add a new
 # forward-inference node type or a new SP implementation, extend these sets /
@@ -527,7 +532,192 @@ def combine(osp_report, spng_report, outdir=None, stem=None):
 
 
 # ---------------------------------------------------------------------------
-# CLI (single-config; grid scan lives in the higher-level driver).
+# Configuration and grid enumeration.
+# ---------------------------------------------------------------------------
+def default_config():
+    """The default benchmark configuration.
+
+    Everything the grid needs lives here so a committed YAML/JSON file can
+    reproduce or extend a run.  Designed to grow: add inputs, bump core/GPU
+    ranges, or add detectors without touching the driver code.
+    """
+    return {
+        "detname": "pdhd",
+        "model_file": DEFAULT_MODEL,
+        "inputs": None,                 # None -> the standard muon-depos.npz
+        "outdir": "spngbench-pdhd",
+        "repeats": 1,
+        "which": ["osp", "spng"],
+        "engine": "TbbFlow",
+        "hw": {"max_hyperthreads": 64},  # cap: skip cpu cells with wc*torch > this
+        "cpu_grid": {
+            "wc_cores": [1, 2, 3, 4],
+            "torch_cores": [1, 2, 4, 8, 16, 32],
+        },
+        "gpu_grid": {
+            "device": "gpu",
+            "wc_cores": [1, 2, 3, 4],
+            "torch_cores": 1,           # torch always 1 core on GPU
+        },
+        "two_gpu": {                    # special: half graph on each GPU, wc=4
+            "wc_cores": 4,
+            "devices": ["gpu0", "gpu1"],
+        },
+    }
+
+
+def _merge(base, over):
+    out = dict(base)
+    for k, v in (over or {}).items():
+        if isinstance(v, dict) and isinstance(out.get(k), dict):
+            out[k] = _merge(out[k], v)
+        else:
+            out[k] = v
+    return out
+
+
+def load_config(path):
+    """Load a JSON or YAML config file, merged over default_config()."""
+    text = Path(path).read_text()
+    if str(path).endswith((".yaml", ".yml")):
+        import yaml                     # optional dependency
+        over = yaml.safe_load(text)
+    else:
+        over = json.loads(text)
+    return _merge(default_config(), over)
+
+
+def cpu_cells(cfg, wc_sel=None, torch_sel=None):
+    """Enumerate CPU grid cells (device=cpu), skipping wc*torch > max_hyperthreads."""
+    g = cfg["cpu_grid"]
+    cap = cfg["hw"]["max_hyperthreads"]
+    wcs = wc_sel or g["wc_cores"]
+    tcs = torch_sel or g["torch_cores"]
+    cells = []
+    for wc in wcs:
+        for tc in tcs:
+            if wc * tc > cap:
+                continue
+            cells.append({"device": "cpu", "wc_cores": wc, "torch_cores": tc})
+    return cells
+
+
+def gpu_cells(cfg, wc_sel=None):
+    """Enumerate GPU grid cells (all GPU-capable nodes on device, torch=1)."""
+    g = cfg["gpu_grid"]
+    wcs = wc_sel or g["wc_cores"]
+    return [{"device": g.get("device", "gpu"), "wc_cores": wc,
+             "torch_cores": g.get("torch_cores", 1)} for wc in wcs]
+
+
+def two_gpu_cells(cfg):
+    """The special two-GPU split cell (half the graph per GPU, wc=4)."""
+    t = cfg["two_gpu"]
+    return [{"device": "two-gpu", "wc_cores": t["wc_cores"], "torch_cores": 1,
+             "devices": t["devices"]}]
+
+
+def select_cells(cfg, mode, wc_sel=None, torch_sel=None):
+    """Return the list of cells for the selected mode: cpu|gpu|two-gpu|all."""
+    cells = []
+    if mode in ("cpu", "all"):
+        cells += cpu_cells(cfg, wc_sel, torch_sel)
+    if mode in ("gpu", "all"):
+        cells += gpu_cells(cfg, wc_sel)
+    if mode in ("two-gpu", "all"):
+        cells += two_gpu_cells(cfg)
+    return cells
+
+
+# ---------------------------------------------------------------------------
+# Grid execution.
+# ---------------------------------------------------------------------------
+def _cat_mean(rep, name, field="wall"):
+    try:
+        return rep["summary"]["categories"][name][field]["mean"]
+    except (TypeError, KeyError):
+        return None
+
+
+def _cell_summary(cell, reports, compare):
+    """Compact per-cell summary for the grid index."""
+    s = {k: cell[k] for k in ("device", "wc_cores", "torch_cores")}
+    for w, rep in reports.items():
+        s[w] = {
+            "outcome": rep["outcome"],
+            "forward_wall": _cat_mean(rep, "forward"),
+            "sp_rest_wall": _cat_mean(rep, "sp_other"),
+            "sp_total_wall": _cat_mean(rep, "sp_total"),
+            "all_total_wall": _cat_mean(rep, "all_total"),
+            "report_path": rep.get("_path"),
+        }
+    if compare:
+        s["compare_path"] = compare.get("_path")
+        s["spng_over_osp_sp_total"] = compare["comparison"]["sp_total"]["spng_over_osp"]
+    return s
+
+
+def run_grid(cfg, cells, which_list, dry_run=False):
+    """Run each grid cell (osp/spng as selected), writing per-cell compare JSONs
+    and an incrementally-updated grid index.  GPU OOM and missing GPUs are
+    recorded, never fatal.
+    """
+    outdir = Path(cfg["outdir"])
+    outdir.mkdir(parents=True, exist_ok=True)
+    inputs = cfg["inputs"] or [str(HERE.parents[2] / "test" / "data" / "muon-depos.npz")]
+    ngpu = _ngpu()
+
+    index = {
+        "schema": "spngbench-grid/1",
+        "meta": {
+            "detname": cfg["detname"], "host": socket.gethostname(), "ngpu": ngpu,
+            "engine": cfg["engine"], "repeats": cfg["repeats"],
+            "inputs": inputs, "which": which_list,
+            "created": time.strftime("%Y-%m-%dT%H:%M:%S"),
+            "ncells": len(cells),
+        },
+        "cells": [],
+    }
+    index_path = outdir / "grid-index.json"
+
+    def flush():
+        index_path.write_text(json.dumps(index, indent=2))
+
+    for i, cell in enumerate(cells):
+        device = cell["device"]
+        tag = f"{device}-wc{cell['wc_cores']}-omp{cell['torch_cores']}"
+        log(f"[cell {i+1}/{len(cells)}] {tag} which={which_list}")
+
+        # The two-GPU split needs 2 GPUs and jsonnet device-split support (see
+        # spng-fra.7); record it as skipped rather than failing the grid.
+        if device == "two-gpu":
+            index["cells"].append({**{k: cell[k] for k in ("device", "wc_cores", "torch_cores")},
+                                   "skipped": True,
+                                   "reason": ("needs 2 GPUs" if ngpu < 2 else
+                                              "two-gpu graph split not yet implemented"),
+                                   "have_gpus": ngpu})
+            flush()
+            continue
+
+        reports = {}
+        for w in which_list:
+            reports[w] = bench_config(
+                w, device, cell["wc_cores"], cell["torch_cores"], inputs, str(outdir),
+                repeats=cfg["repeats"], model_file=cfg["model_file"],
+                detname=cfg["detname"], engine=cfg["engine"], dry_run=dry_run)
+        compare = None
+        if "osp" in reports and "spng" in reports:
+            compare = combine(reports["osp"], reports["spng"], outdir=str(outdir))
+        index["cells"].append(_cell_summary(cell, reports, compare))
+        flush()
+
+    log(f"wrote grid index {index_path} ({len(index['cells'])} cells)")
+    index["_path"] = str(index_path)
+    return index
+
+
+# ---------------------------------------------------------------------------
+# CLI.
 # ---------------------------------------------------------------------------
 def _add_common(p):
     p.add_argument("--device", default="cpu", help="cpu|gpu|gpu0|gpu1 (default cpu)")
@@ -566,10 +756,65 @@ def main(argv=None):
     pa = sub.add_parser("analyze", help="(re)analyze an existing log into a report fragment")
     pa.add_argument("logfile")
 
+    pg = sub.add_parser("grid", help="scan a grid of (device, wc_cores, torch_cores) configs")
+    pg.add_argument("--config", default=None, help="JSON/YAML config file (merged over defaults)")
+    pg.add_argument("--mode", choices=["cpu", "gpu", "two-gpu", "all"], default="cpu",
+                    help="which cell family to run (default cpu)")
+    pg.add_argument("--which", choices=["osp", "spng", "both"], default="both")
+    pg.add_argument("--wc-cores", type=int, nargs="+", default=None,
+                    help="subset of wire-cell core counts")
+    pg.add_argument("--torch-cores", type=int, nargs="+", default=None,
+                    help="subset of torch core counts (cpu mode)")
+    pg.add_argument("--outdir", default=None)
+    pg.add_argument("--repeats", type=int, default=None)
+    pg.add_argument("--input", action="append", default=None)
+    pg.add_argument("--model-file", default=None)
+    pg.add_argument("--detname", default=None)
+    pg.add_argument("--dry-run", action="store_true")
+
+    psc = sub.add_parser("show-config", help="print the effective config (defaults + --config)")
+    psc.add_argument("--config", default=None)
+
     args = ap.parse_args(argv)
 
     if args.cmd == "analyze":
         print(json.dumps(analyze_log(args.logfile), indent=2))
+        return 0
+
+    if args.cmd == "show-config":
+        cfg = load_config(args.config) if args.config else default_config()
+        print(json.dumps(cfg, indent=2))
+        return 0
+
+    if args.cmd == "grid":
+        cfg = load_config(args.config) if args.config else default_config()
+        # CLI overrides win over the config file.
+        for key, val in (("outdir", args.outdir), ("repeats", args.repeats),
+                         ("model_file", args.model_file), ("detname", args.detname)):
+            if val is not None:
+                cfg[key] = val
+        if args.input:
+            cfg["inputs"] = args.input
+        which_list = ["osp", "spng"] if args.which == "both" else [args.which]
+        cells = select_cells(cfg, args.mode, wc_sel=args.wc_cores, torch_sel=args.torch_cores)
+        if not cells:
+            log("no cells selected")
+            return 1
+        log(f"grid: mode={args.mode} which={which_list} cells={len(cells)} "
+            f"outdir={cfg['outdir']}")
+        idx = run_grid(cfg, cells, which_list, dry_run=args.dry_run)
+        # Compact human-facing summary to stdout.
+        for c in idx["cells"]:
+            if c.get("skipped"):
+                print(f"  {c['device']} wc{c['wc_cores']} omp{c['torch_cores']}: "
+                      f"SKIPPED ({c['reason']})")
+            else:
+                osp = c.get("osp", {}); spng = c.get("spng", {})
+                print(f"  {c['device']} wc{c['wc_cores']} omp{c['torch_cores']}: "
+                      f"osp={osp.get('outcome')}({osp.get('sp_total_wall')}s) "
+                      f"spng={spng.get('outcome')}({spng.get('sp_total_wall')}s) "
+                      f"spng/osp={c.get('spng_over_osp_sp_total')}")
+        print(f"grid index: {idx['_path']}")
         return 0
 
     inputs = _default_inputs(args)

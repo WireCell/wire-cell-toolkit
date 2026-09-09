@@ -1,0 +1,116 @@
+#+TITLE: spngbench — SPNG vs OSP compute-performance benchmark
+
+Compare the compute performance of the SPNG and OSP signal-processing chains for
+the PDHD detector, across CPU-core and GPU allowances.  Designed to be re-run and
+extended (more inputs/events, more cores/GPUs, other detectors later).
+
+* What it does
+
+The =spngdir= workflow runs a single "kitchen sink" wire-cell job producing
+splat + OSP + SPNG signals.  This benchmark *factors* that into two isolated
+chains so each can be timed on its own:
+
+- =depos -> drift -> detsim -> OSP=   (=which=osp=)
+- =depos -> drift -> detsim -> SPNG=  (=which=spng=)
+
+both provided directly by =spng/det.jsonnet= (=depos_to_osp= / =depos_to_spng=).
+The shared simulation front-end is timed too but is separately visible in the
+per-node accounting, so an OSP-vs-SPNG comparison is fair.
+
+Two files:
+- =spngbench.jsonnet= — the factored wire-cell config (TLAs: =input=, =model_file=,
+  =output=, =which=, =detname=, =device=, =engine=, =wc_cores=).
+- =spngbench.py= — the driver (single runs, grid scan, log analysis, rollups).
+
+* Timing
+
+Each wire-cell log is harvested two ways:
+
+1. *Phase intervals* from log timestamps: =startup=, =config=, =first_execute=,
+   =execution=, =last_execute=, =finalize= (robust to spdlog reordering and
+   continuation lines; engine-agnostic markers).
+2. *Per-node* wall/core seconds from the "Timer:" lines (Pgrapher) or the
+   =TbbDataFlowGraph= "calls=..." summary (TbbFlow).  Rolled up per node as
+   mean±stdev over repeats/inputs, plus category sums:
+   - =forward=  — the DNN forward (OSP =Pytorch::DNNROIFinding=, SPNG
+     =SPNG::TensorForward=),
+   - =sp_other= — all other SP nodes (OSP =OmnibusSigProc=, other =SPNG::*=),
+   - =sp_total= = forward + sp_other, =all_total= from the timer total.
+
+** Thread control (important)
+
+- *Wire-cell* node parallelism is set by =wc_cores= → =TbbDataFlowGraph.max_threads=.
+- *Torch* intra-op threads are set by the =OMP_NUM_THREADS= environment variable
+  (the driver sets it per run); it maps to torch's =at::get_num_threads=.
+
+These are independent axes.  Note the TbbFlow engine previously kept idle worker
+threads busy-spinning under a thread limit, which polluted the =std::clock=-based
+core-sec; that is fixed in =tbb/src/DataFlowGraph.cxx= (sized =task_arena=).  Rebuild
++ reinstall the toolkit (=cmake --build build && cmake --install build=) before
+running.
+
+* Usage
+
+#+begin_src sh
+# one chain at one config
+python3 spngbench.py run spng --device cpu --wc-cores 1 --torch-cores 1
+
+# both chains at one config, with the OSP/SPNG comparison JSON
+python3 spngbench.py pair --device cpu --wc-cores 2 --torch-cores 4
+
+# re-analyze an existing wire-cell log
+python3 spngbench.py analyze some-wire-cell.log
+
+# grid scan (CPU): wc {1,2,3,4} x torch {1,2,4,8,16,32}, skipping wc*torch>64
+python3 spngbench.py grid --mode cpu --which both
+
+# subset the grid
+python3 spngbench.py grid --mode cpu --which spng --wc-cores 1 2 --torch-cores 1 4
+
+# GPU grid (device=gpu, torch=1, wc {1,2,3,4}); OOM is recorded, not fatal
+python3 spngbench.py grid --mode gpu --which both
+
+# everything (cpu + gpu + the two-GPU split), from a config file
+python3 spngbench.py grid --mode all --config spngbench.json
+
+# see the effective configuration
+python3 spngbench.py show-config --config spngbench.json
+#+end_src
+
+Default input is =toolkit/test/data/muon-depos.npz=; override with =--input= (repeatable)
+or the config file's =inputs=.
+
+* Outputs
+
+Into =--outdir= (default =spngbench-pdhd/=):
+- =report-<which>-<device>-wc<N>-omp<M>.json= — per-config rollup (schema
+  =spngbench-config/1=): meta, phase durations, raw nodes, per-node stats,
+  category sums.
+- =compare-<device>-wc<N>-omp<M>.json= — combined OSP+SPNG (=spngbench-compare/1=).
+- =grid-index.json= — one row per grid cell (=spngbench-grid/1=), updated
+  incrementally so partial runs survive.
+
+Outcomes: =ok=, =oom= (GPU out-of-memory, marked and skipped), =error=, =skipped=.
+
+* Config file
+
+JSON is always supported; YAML if =pyyaml= is installed.  A committed
+=spngbench.json= mirrors the built-in defaults — copy and edit it.  CLI flags
+override the file.  Keys: =detname=, =model_file=, =inputs=, =outdir=, =repeats=,
+=which=, =engine=, =hw.max_hyperthreads=, =cpu_grid.{wc_cores,torch_cores}=,
+=gpu_grid.{device,wc_cores,torch_cores}=, =two_gpu.{wc_cores,devices}=.
+
+* Extending
+
+- *More inputs/events*: set =inputs= to a list; per-node stats become mean±stdev.
+- *More cores*: bump =cpu_grid= ranges and =hw.max_hyperthreads=.
+- *More GPUs / two-GPU split*: the =two-gpu= cell is enumerated but currently
+  recorded as skipped — it needs (a) two visible GPUs and (b) =spngbench.jsonnet=
+  extended to assign half the graph to each device (spng-fra.7).
+- *Other detectors* (DUNE FD): set =detname= once SPNG detconf exists for it.
+
+* Diagnostics
+
+=spng/test/check_threads.cxx= is a standalone torch+TBB toy (CLI-driven) used to
+root-cause thread-control and core-time behavior.  Build target
+=WireCellSpng__check_threads=.
