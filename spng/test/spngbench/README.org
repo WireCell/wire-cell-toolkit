@@ -9,9 +9,9 @@ extended (more inputs/events, more cores/GPUs, other detectors later).
 The =spngdir= workflow runs a single "kitchen sink" wire-cell job.  This
 benchmark *factors* it into three separate jobs (=stage= TLA / driver stage):
 
-- =stage=sim=  : =depos -> drift -> detsim=  -> ADC frame file(s)
-- =stage=osp=  : ADC frame file(s) -> OSP    -> signal frame file(s)
-- =stage=spng= : ADC frame file(s) -> SPNG   -> signal frame file(s)
+- ~stage=sim~  : =depos -> drift -> detsim=  -> ADC frame file(s)
+- ~stage=osp~  : ADC frame file(s) -> OSP    -> signal frame file(s)
+- ~stage=spng~ : ADC frame file(s) -> SPNG   -> signal frame file(s)
 
 The sim job is run *once* per depo input; its ADC frame file feeds *both* the
 OSP and SPNG jobs, so they process identical input and the shared simulation
@@ -45,11 +45,7 @@ Each wire-cell log is harvested two ways:
 - *Torch* intra-op threads are set by the =OMP_NUM_THREADS= environment variable
   (the driver sets it per run); it maps to torch's =at::get_num_threads=.
 
-These are independent axes.  Note the TbbFlow engine previously kept idle worker
-threads busy-spinning under a thread limit, which polluted the =std::clock=-based
-core-sec; that is fixed in =tbb/src/DataFlowGraph.cxx= (sized =task_arena=).  Rebuild
-+ reinstall the toolkit (=cmake --build build && cmake --install build=) before
-running.
+These are independent axes. 
 
 * Usage
 
