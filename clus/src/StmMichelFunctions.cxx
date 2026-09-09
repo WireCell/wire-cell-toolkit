@@ -330,3 +330,20 @@ StmMichelArm WireCell::Clus::PR::stm_michel_classify_chain_arm(Graph& g, Segment
     a.kind = StmMichelArm::kOther;
     return a;
 }
+
+bool WireCell::Clus::PR::stm_michel_stop_gamma_ring(double d_stop, double len,
+                                                    double inner_cm, double outer_cm,
+                                                    double max_len_cm)
+{
+    if (!std::isfinite(d_stop) || !std::isfinite(len)) return false;
+    if (d_stop <= inner_cm) return false;   // the Michel's, not the gamma's
+    if (d_stop > outer_cm) return false;
+    if (len > max_len_cm) return false;     // a blob, not another cosmic
+    return true;
+}
+
+bool WireCell::Clus::PR::stm_michel_stop_gamma_energy(double ke_mev, double lo_mev, double hi_mev)
+{
+    if (!std::isfinite(ke_mev)) return false;
+    return ke_mev >= lo_mev && ke_mev <= hi_mev;
+}

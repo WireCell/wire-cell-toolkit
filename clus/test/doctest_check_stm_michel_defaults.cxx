@@ -74,6 +74,18 @@ TEST_CASE("clus knob defaults: CheckSTM_Michel verdict thresholds")
     // defect D2).  25 = michel_max_len_cm; measured on the d14 arms to admit the
     // 11-24 cm Michel-sized neighbours and exclude every 57-292 cm cosmic.
     D("companion_max_len_cm", 25.0);
+    // doc pdvd/51: the muon-capture gamma at the stop.  A SEPARATE object class
+    // from the Michel -- its ring starts where michel_dot_radius_cm ends, so
+    // nothing the Michel gathers can move when these change.  stop_gamma_enable
+    // false reproduces the doc pdhd/17 tree on all 97 scalar branches.
+    B("stop_gamma_enable", true);
+    // 35 cm: the same-bundle stop-anchored density knee, and the plateau of the
+    // mu- (no-Michel) anti-correlation, which collapses by 45 cm.
+    D("stop_gamma_radius_cm", 35.0);
+    D("stop_gamma_max_len_cm", 10.0);   // a gamma deposit is a blob, not a track
+    D("stop_gamma_min_ke_mev", 0.2);
+    D("stop_gamma_max_ke_mev", 20.0);
+    D("stop_gamma_max_n", 8);
     // doc pdhd/15 sec 6: the KineChargeOptions TRACK pair for an unfitted piece
     D("michel_unfit_recom", 0.7);
     D("michel_unfit_fudge", 0.95);

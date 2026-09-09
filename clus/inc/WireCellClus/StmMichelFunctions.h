@@ -109,6 +109,36 @@ namespace WireCell::Clus::PR {
     double stm_michel_charge_to_energy(double dQ_electrons, double recom_factor,
                                        double fudge_factor, double w_value_ev);
 
+    /// doc pdvd/51: the capture-gamma RING test, on one companion cluster.
+    ///
+    /// A mu- that stops in argon is captured far more often than it decays, and
+    /// the capture leaves de-excitation gammas of order an MeV.  A gamma is
+    /// NEUTRAL: it leaves no track from the stop, travels a couple of Compton
+    /// mean free paths and deposits a compact blob at an arbitrary angle.  So
+    /// the reconstructible object is "small, detached, same-bundle, past the
+    /// stop", and it is a DIFFERENT object from a Michel.
+    ///
+    /// The ring's inner edge is deliberately the Michel's own admission radius:
+    /// inside it the charge is the Michel object's to claim, and this stage
+    /// must not touch it -- widening the Michel radius instead would feed the
+    /// Michel piece assembly, and PDVD 039252_15 cluster 77 is already the only
+    /// object above the 52.8 MeV Michel endpoint.
+    ///
+    /// Boundaries, pinned here because they are the whole semantics:
+    /// `d_stop` must be STRICTLY greater than `inner_cm` (the Michel's test is
+    /// `<=`, so the two partitions do not overlap and do not leave a gap) and
+    /// at most `outer_cm`; `len` at most `max_len_cm`.  All arguments in the
+    /// same length unit.  A non-finite input admits nothing.
+    bool stm_michel_stop_gamma_ring(double d_stop, double len,
+                                    double inner_cm, double outer_cm, double max_len_cm);
+
+    /// doc pdvd/51: the capture-gamma ACCEPTANCE window, a separate stage from
+    /// the ring test above because a companion's energy does not exist until
+    /// the fitter has run on it.  Inclusive at both ends; a non-finite energy is
+    /// rejected (a NaN passes no gate and fails every one silently -- doc
+    /// pdhd/15 sec 7).
+    bool stm_michel_stop_gamma_energy(double ke_mev, double lo_mev, double hi_mev);
+
     /// doc pdhd/17 sec 9: the SAME conversion, but with the survival read out
     /// of the recombination model the component is already holding instead of
     /// the hard-coded pair above.

@@ -13,6 +13,7 @@
 #include "WireCellUtil/doctest.h"
 
 #include <cmath>
+#include <limits>
 
 using namespace WireCell;
 using namespace WireCell::Clus::PR;
@@ -460,4 +461,68 @@ TEST_CASE("stm_michel_charge_to_energy_model: MeV per electron comes from the bo
     CHECK((*pdhd_pow)(0.15 * units::MeV / units::cm * units::cm, 1.0 * units::cm) < 0.0);
     CHECK(stm_michel_charge_to_energy_model(Q, pdhd_pow, 0.15) == 0.0);
     CHECK(stm_michel_charge_to_energy_model(Q, pdvd_pow, 0.15) == 0.0);
+}
+
+// doc pdvd/51: the capture-gamma predicates.  Both are trivial arithmetic and
+// that is exactly why they are pinned: the ring's inner edge has to abut the
+// Michel's admission test with NO overlap and NO gap, and the whole reason the
+// gamma is a separate object class is that a Michel radius wide enough to reach
+// it would also feed the Michel piece assembly.
+TEST_CASE("stm_michel stop gamma: the ring abuts the Michel radius, and the caps bite")
+{
+    using WireCell::Clus::PR::stm_michel_stop_gamma_ring;
+    const double inner = 15.0, outer = 35.0, maxlen = 10.0;
+
+    // 039252_0 cluster 77's gamma: 6 points, 2.17 cm, 26.5 cm from the stop.
+    CHECK(stm_michel_stop_gamma_ring(26.5, 2.17, inner, outer, maxlen));
+
+    // The inner edge is EXCLUSIVE and the Michel's own test is `<=`, so a
+    // cluster at exactly the Michel radius belongs to the Michel and to nothing
+    // else -- the two partitions must not overlap...
+    CHECK_FALSE(stm_michel_stop_gamma_ring(15.0, 2.0, inner, outer, maxlen));
+    // ...and must not leave a gap either: anything past it is the gamma's.
+    CHECK(stm_michel_stop_gamma_ring(15.0001, 2.0, inner, outer, maxlen));
+
+    // The outer edge is inclusive.
+    CHECK(stm_michel_stop_gamma_ring(35.0, 2.0, inner, outer, maxlen));
+    CHECK_FALSE(stm_michel_stop_gamma_ring(35.0001, 2.0, inner, outer, maxlen));
+
+    // Compactness.  039252_0 cluster 77's other five same-bundle neighbours sit
+    // at 99.3 .. 168.9 cm; the one thing that keeps a NEAR long object out is
+    // this cap.
+    CHECK(stm_michel_stop_gamma_ring(20.0, 10.0, inner, outer, maxlen));
+    CHECK_FALSE(stm_michel_stop_gamma_ring(20.0, 10.0001, inner, outer, maxlen));
+    CHECK_FALSE(stm_michel_stop_gamma_ring(99.3, 2.68, inner, outer, maxlen));
+
+    // A NaN admits nothing.  It passes no gate and fails every one silently
+    // (doc pdhd/15 sec 7 lost an entire object's energy to one).
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    CHECK_FALSE(stm_michel_stop_gamma_ring(nan, 2.0, inner, outer, maxlen));
+    CHECK_FALSE(stm_michel_stop_gamma_ring(20.0, nan, inner, outer, maxlen));
+
+    // The feature-off configuration cannot admit anything: with the outer edge
+    // at or below the inner one the ring is empty for every distance.
+    for (double d : {0.0, 1.0, 15.0, 20.0, 35.0, 400.0})
+        CHECK_FALSE(stm_michel_stop_gamma_ring(d, 1.0, inner, /*outer*/ inner, maxlen));
+}
+
+TEST_CASE("stm_michel stop gamma: the energy window is a SEPARATE, post-fit stage")
+{
+    using WireCell::Clus::PR::stm_michel_stop_gamma_energy;
+    const double lo = 0.2, hi = 20.0;
+
+    // The measured population: p10 0.37, p50 0.97, p90 4.37 MeV (d16vnu).
+    CHECK(stm_michel_stop_gamma_energy(0.80, lo, hi));   // 039252_0 cluster 77
+    CHECK(stm_michel_stop_gamma_energy(0.97, lo, hi));
+
+    // Inclusive at both ends.
+    CHECK(stm_michel_stop_gamma_energy(lo, lo, hi));
+    CHECK(stm_michel_stop_gamma_energy(hi, lo, hi));
+    CHECK_FALSE(stm_michel_stop_gamma_energy(0.199, lo, hi));
+    CHECK_FALSE(stm_michel_stop_gamma_energy(20.001, lo, hi));
+
+    // Zero and negative are not "small": they are a failed measurement.
+    CHECK_FALSE(stm_michel_stop_gamma_energy(0.0, lo, hi));
+    CHECK_FALSE(stm_michel_stop_gamma_energy(-1.0, lo, hi));
+    CHECK_FALSE(stm_michel_stop_gamma_energy(std::numeric_limits<double>::quiet_NaN(), lo, hi));
 }

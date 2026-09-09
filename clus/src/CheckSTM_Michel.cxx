@@ -155,6 +155,13 @@ public:
         m_michel_unfit_from_model = get<bool>(config, "michel_unfit_from_model", m_michel_unfit_from_model);
         m_michel_unfit_dedx = get<double>(config, "michel_unfit_dedx", m_michel_unfit_dedx);
         m_dot_body_exclusion_cm = get<double>(config, "dot_body_exclusion_cm", m_dot_body_exclusion_cm);
+        // doc pdvd/51: the muon-capture gamma at the stop.
+        m_stop_gamma_enable = get<bool>(config, "stop_gamma_enable", m_stop_gamma_enable);
+        m_stop_gamma_radius_cm = get<double>(config, "stop_gamma_radius_cm", m_stop_gamma_radius_cm);
+        m_stop_gamma_max_len_cm = get<double>(config, "stop_gamma_max_len_cm", m_stop_gamma_max_len_cm);
+        m_stop_gamma_min_ke_mev = get<double>(config, "stop_gamma_min_ke_mev", m_stop_gamma_min_ke_mev);
+        m_stop_gamma_max_ke_mev = get<double>(config, "stop_gamma_max_ke_mev", m_stop_gamma_max_ke_mev);
+        m_stop_gamma_max_n = get<int>(config, "stop_gamma_max_n", m_stop_gamma_max_n);
         m_delta_max_len_cm = get<double>(config, "delta_max_len_cm", m_delta_max_len_cm);
         m_vertex_hadron_mip = get<double>(config, "vertex_hadron_mip", m_vertex_hadron_mip);
         m_profile_min_dqdx_frac = get<double>(config, "profile_min_dqdx_frac", m_profile_min_dqdx_frac);
@@ -250,6 +257,13 @@ public:
         cfg["michel_unfit_from_model"] = m_michel_unfit_from_model;   // doc pdhd/17
         cfg["michel_unfit_dedx"] = m_michel_unfit_dedx;
         cfg["dot_body_exclusion_cm"] = m_dot_body_exclusion_cm;
+        // doc pdvd/51.  stop_gamma_enable false reproduces the doc pdhd/17 tree.
+        cfg["stop_gamma_enable"] = m_stop_gamma_enable;
+        cfg["stop_gamma_radius_cm"] = m_stop_gamma_radius_cm;
+        cfg["stop_gamma_max_len_cm"] = m_stop_gamma_max_len_cm;
+        cfg["stop_gamma_min_ke_mev"] = m_stop_gamma_min_ke_mev;
+        cfg["stop_gamma_max_ke_mev"] = m_stop_gamma_max_ke_mev;
+        cfg["stop_gamma_max_n"] = m_stop_gamma_max_n;
         cfg["delta_max_len_cm"] = m_delta_max_len_cm;
         cfg["vertex_hadron_mip"] = m_vertex_hadron_mip;
         // doc pdhd/03: profile points with dQ/dx < frac * mip_dqdx are DEAD
@@ -386,6 +400,28 @@ private:
     // PowerBoxRecombination fit also pivots on (RecombinationModels.h).
     bool m_michel_unfit_from_model{false};
     double m_michel_unfit_dedx{2.1};
+    // doc pdvd/51.  A mu- that stops in argon is CAPTURED far more often than
+    // it decays, and the capture leaves de-excitation gammas.  A gamma is
+    // neutral: it travels, then deposits a compact blob off the muon's axis --
+    // 039252_0 cluster 77's is 6 points, 2.17 cm, 0.8 MeV, 26.5 cm from the
+    // stop at 73.5 deg to the muon direction.  That is a DIFFERENT object from a
+    // Michel and it must not be reached by widening michel_dot_radius_cm, which
+    // also feeds the Michel piece assembly: 039252_15 cluster 77 is already the
+    // only PDVD object above the 52.8 MeV Michel endpoint (76.8 of 160), and
+    // handing it more distant charge makes exactly the item the owner is
+    // scanning worse.  So: its own ring, its own compactness and energy caps,
+    // its own branches, its own PF nodes.
+    bool m_stop_gamma_enable{true};
+    // 35 cm: the same-bundle stop-anchored blob density knee (1.66 -> 0.60 per
+    // candidate per 1e6 cm^3 between the 20-30 and 30-40 shells, against an
+    // ambient floor the foreign-bundle control measures FLAT at ~0.6), and the
+    // plateau of the mu- anti-correlation, which peaks at 2.05 here and
+    // collapses to 1.41 by 45 cm.  039252_0 cluster 77's gamma is at 26.5 cm.
+    double m_stop_gamma_radius_cm{35.0};      // ring outer edge; inner edge is michel_dot_radius_cm
+    double m_stop_gamma_max_len_cm{10.0};     // a gamma deposit is a blob, not a track
+    double m_stop_gamma_min_ke_mev{0.2};
+    double m_stop_gamma_max_ke_mev{20.0};
+    int m_stop_gamma_max_n{8};
     double m_delta_max_len_cm{8.0};
     double m_vertex_hadron_mip{1.4};
     double m_profile_min_dqdx_frac{0.0};
@@ -471,6 +507,13 @@ private:
         int n_dots{0}, n_dot_clusters_unfit{0};
         double dots_ke_dqdx{0}, dots_charge_unfit{0};
         double dots_ke_unfit{0};                   // doc pdhd/15: dots_charge_unfit converted to MeV
+        int michel_n_clusters{0};                  // doc pdvd/51: how many clusters the Michel object spans
+        // doc pdvd/51: the capture gammas.  A SEPARATE object list -- never
+        // folded into michel_ke_*, so the Michel spectrum keeps its meaning
+        // against the free 52.8 MeV endpoint.
+        int n_stop_gammas{0}, stop_gamma_n_unfit{0}, stop_gamma_seg_id{-1};
+        double stop_gamma_ke_tot{0}, stop_gamma_ke_max{0}, stop_gamma_charge{0};
+        double stop_gamma_dis_min{-1}, stop_gamma_dis_max{-1};
         int in_fv{-1};
         // points for the Bee/ROOT layer
         std::vector<double> px, py, pz, pq, pL, prr;
@@ -873,6 +916,19 @@ private:
         I1("n_dots", r.n_dots); I1("n_dot_clusters_unfit", r.n_dot_clusters_unfit);
         D1("dots_ke_dqdx", r.dots_ke_dqdx); D1("dots_charge_unfit", r.dots_charge_unfit);
         D1("dots_ke_unfit", r.dots_ke_unfit);
+        // doc pdvd/51.  michel_n_clusters is the one membership fact a consumer
+        // reading T_stm_michel ALONE cannot derive: > 1 says the object is not
+        // in the candidate's own cluster, which is why doc pdhd/12's PF panel
+        // (selector `sub_cluster_id // 1000 == cluster_id`) could not show it.
+        // The member list itself is T_stm_michel_pts (role 3/4/5 + seg_id), and
+        // it joins the PF stream exactly -- both ids are
+        // cluster_id * 1000 + graph_index, verified 1107/1107 on d16vnu.
+        I1("michel_n_clusters", r.michel_n_clusters);
+        I1("n_stop_gammas", r.n_stop_gammas); I1("stop_gamma_n_unfit", r.stop_gamma_n_unfit);
+        I1("stop_gamma_seg_id", r.stop_gamma_seg_id);
+        D1("stop_gamma_ke_tot", r.stop_gamma_ke_tot); D1("stop_gamma_ke_max", r.stop_gamma_ke_max);
+        D1("stop_gamma_charge", r.stop_gamma_charge);
+        D1("stop_gamma_dis_min", r.stop_gamma_dis_min); D1("stop_gamma_dis_max", r.stop_gamma_dis_max);
         I1("in_fv", r.in_fv);
         // doc pdhd/14.  The muon energy was the one thing this tree never
         // carried: set_pdg (:661) builds a 4-momentum for every chain segment
@@ -969,6 +1025,7 @@ void CheckSTM_Michel::visit(Ensemble& ensemble) const
     auto mu_fn = particle_data() ? particle_data()->get_dEdx_function("muon") : nullptr;
 
     int n_stm = 0, n_michel = 0;
+    int n_gamma_cand = 0, n_gamma = 0;            // doc pdvd/51
     for (size_t ci = 0; ci < candidates.size(); ++ci) {
         auto t0 = Clock::now();
         Cluster* main = candidates[ci];
@@ -991,6 +1048,9 @@ void CheckSTM_Michel::visit(Ensemble& ensemble) const
         // hence a drift coordinate), near the stop, short ------------------
         std::vector<Cluster*> companions;
         std::vector<Cluster*> dot_clusters;
+        const double admit_radius = m_stop_gamma_enable
+            ? std::max(m_michel_dot_radius_cm, m_stop_gamma_radius_cm)
+            : m_michel_dot_radius_cm;
         if (rec.gid >= 0) {
             for (auto* oc : grouping.children()) {
                 if (oc == main) continue;
@@ -1005,7 +1065,13 @@ void CheckSTM_Michel::visit(Ensemble& ensemble) const
                 if (oc->get_length() > m_companion_max_len_cm * units::cm) continue;
                 if (oc->npoints() == 0) continue;
                 const auto [cp, blob] = oc->get_closest_point_blob(rec.stop_pt);
-                if ((cp - rec.stop_pt).magnitude() > m_michel_dot_radius_cm * units::cm) continue;
+                // doc pdvd/51: ADMISSION reaches as far as the capture-gamma
+                // ring; the MICHEL's own radius is unchanged and is re-applied
+                // at cluster level in the piece loop below, so nothing the
+                // Michel object gathers moves.  Admitting more companions does
+                // perturb the candidate's own fit through preload_clusters --
+                // that is measured, not assumed (doc pdvd/51 sec 6).
+                if ((cp - rec.stop_pt).magnitude() > admit_radius * units::cm) continue;
                 companions.push_back(oc);
             }
         }
@@ -1498,7 +1564,15 @@ void CheckSTM_Michel::visit(Ensemble& ensemble) const
                 ++rec.n_dots;
                 rec.dots_ke_dqdx += segment_cal_kine_dQdx(pc.seg, m_recomb_model) / units::MeV;
                 set_pdg(pc.seg, 11);
-                add_points(rec, pc.seg, 4);
+                // doc pdvd/51: role 3 = "a member of the Michel OBJECT", for
+                // every connection type.  Through doc pdhd/17 role 3 was set on
+                // the ATTACHED arms only (:1390) and every bridged piece got
+                // role 4, so the hand-scan display drew every bridged Michel in
+                // the `dots` colour and named it a dot -- which is exactly what
+                // the owner saw on 039252_15 cluster 77.  Role 4 stays as the
+                // residual bucket for a fitted piece the object does not absorb
+                // (today: none -- every admitted piece joins the object).
+                add_points(rec, pc.seg, 3);
                 michel_pieces.emplace_back(pc.seg, pc.d_stop);
                 if (rec.michel_conn_type == 0) {
                     // Nothing attached survived at the stop: the 3-D clustering
@@ -1542,6 +1616,207 @@ void CheckSTM_Michel::visit(Ensemble& ensemble) const
             }
         }
 
+
+        // ---- doc pdvd/51: the muon-capture gammas at the stop -------------------
+        // The physics.  A mu- that ranges out in argon is captured by a nucleus
+        // far more often than it decays (in LAr, capture dominates), and the
+        // capture de-excitation emits gammas of order an MeV.  A gamma is
+        // neutral: it leaves no track from the stop, travels a couple of
+        // Compton mean free paths, and deposits a compact blob at an arbitrary
+        // angle.  So the object the reconstruction can see is "a small,
+        // detached, same-bundle blob past the stop", and the muon -> gamma edge
+        // is a CLAIM about a neutral, not a reconstructed connection -- which is
+        // precisely what the renderer's pseudo-carrier expresses
+        // (MultiAlgBlobClustering.cxx:2154, selected by start_connection_type 2).
+        //
+        // Measured before it was built (doc pdvd/51 sec 4, d16vnu, 119 events,
+        // 151 is_stm candidates): the stop-anchored density of compact
+        // same-bundle blobs falls by a factor ~4000 from the 0-10 cm shell to
+        // the 100-150 cm one, while the SAME predicate on foreign-bundle
+        // companions at the SAME anchor is flat at ~0.6 per candidate per
+        // 1e6 cm^3 -- so the population belongs to the stop rather than filling
+        // the volume.  And it is ~2x commoner on candidates with NO Michel,
+        // which is what the mechanism predicts (capture gives gammas and no
+        // Michel; decay gives a Michel and no capture gammas).  That
+        // anti-correlation owes nothing to any threshold here, and it is what
+        // sec 6.5's body-exclusion defect inverted.
+        //
+        // NOT folded into the Michel.  One object per companion CLUSTER, its own
+        // Shower, its own branches, role 5 in the point cloud.
+        std::vector<std::pair<ShowerPtr, double>> gamma_showers;   // (shower, KE MeV)
+        if (m_stop_gamma_enable && stop_v && !companions.empty()) {
+            // Clusters the Michel object already owns are off limits.  The ring
+            // makes this near-vacuous -- the Michel's cluster test is the ring's
+            // inner edge, so a Michel cluster cannot be in the ring -- but it is
+            // stated rather than relied on, because the two radii are knobs.
+            std::set<int> michel_cluster_ids;
+            for (const auto& [sg, d] : michel_pieces) {
+                (void)d;
+                if (sg && sg->cluster()) michel_cluster_ids.insert(sg->cluster()->get_cluster_id());
+            }
+
+            // The body set, snapshotted before any gamma is accepted (see the
+            // body-exclusion comment below).  rec.px/py/pz hold every point
+            // add_points() has taken so far: role 1 the muon chain, 2 deltas,
+            // 3 the Michel object, 4 a dot the object did not absorb.
+            std::vector<Point> body_pts;
+            body_pts.reserve(rec.px.size());
+            for (size_t bi = 0; bi < rec.px.size(); ++bi) {
+                const Point bp(rec.px[bi], rec.py[bi], rec.pz[bi]);
+                if ((bp - rec.stop_pt).magnitude() < m_dot_body_exclusion_cm * units::cm) continue;
+                body_pts.push_back(bp);
+            }
+
+            struct GObj {
+                Cluster* oc{nullptr};
+                std::vector<std::pair<SegmentPtr, double>> segs;   // (segment, d to stop)
+                double d_stop{1e9}, ke{0}, charge{0};
+                int cluster_id{-1}, gidx{-1};
+            };
+            std::vector<GObj> objs;
+            for (auto* oc : companions) {
+                if (michel_cluster_ids.count(oc->get_cluster_id())) continue;
+                const auto [ccp, cblob] = oc->get_closest_point_blob(rec.stop_pt);
+                const double d_cl = (ccp - rec.stop_pt).magnitude();
+                // THE RING, plus compactness.  Inside michel_dot_radius_cm the
+                // charge is the Michel's to claim and this stage must not touch
+                // it; outside stop_gamma_radius_cm the stop-anchored excess has
+                // died.  A gamma deposit is a blob, so a 30 cm object past a
+                // stop is another cosmic in the same bundle: 039252_0 cluster 77
+                // has six same-bundle neighbours at 26.5 .. 168.9 cm and only
+                // the first is a candidate -- "same Q-L bundle" alone is not a
+                // discriminator, the ring and the cap are.  The predicate lives
+                // in StmMichelFunctions so its boundaries are doctested.
+                if (!stm_michel_stop_gamma_ring(d_cl, oc->get_length(),
+                                                m_michel_dot_radius_cm * units::cm,
+                                                m_stop_gamma_radius_cm * units::cm,
+                                                m_stop_gamma_max_len_cm * units::cm)) continue;
+                // THE BODY EXCLUSION -- at CLUSTER level, and against
+                // EVERYTHING THE CHAIN HAS ALREADY CLAIMED, not just the muon.
+                //
+                // Both halves of that sentence are measured, and each was got
+                // wrong once (doc pdvd/51 sec 6.5).  With EITHER mistake -- per
+                // fitted SEGMENT instead of per cluster, or against the muon
+                // profile alone instead of the whole claimed object -- the mu-
+                // signature, the one physics test this class has, reads
+                // 0.44 on PDVD d51gv; with both fixed it reads 1.64, against
+                // 2.05 for the same predicate measured offline.  The mechanism
+                // is that 29 of the 30 spurious admissions land on candidates
+                // that ALSO have a Michel: they are Michel SATELLITES.  A
+                // Michel showers, and its outlying blobs sit past the stop, in
+                // the bundle, compact, and pass every other test -- and the
+                // muon profile cannot see them, because an ATTACHED Michel's
+                // arms are not in it.
+                //
+                // `body` is therefore every point already attributed to this
+                // candidate -- muon chain, deltas, and the whole Michel object
+                // (roles 1-4), snapshotted BEFORE this loop so one accepted
+                // gamma cannot exclude the next -- minus the
+                // dot_body_exclusion_cm around the stop itself, which is the
+                // one place a real daughter is allowed to start.
+                {
+                    double d_body_cl = 1e9;
+                    for (const auto& bp0 : body_pts) {
+                        const auto [bp, bblob] = oc->get_closest_point_blob(bp0);
+                        d_body_cl = std::min(d_body_cl, (bp - bp0).magnitude());
+                        if (d_body_cl < d_cl) break;          // already decided
+                    }
+                    if (d_body_cl < d_cl) continue;
+                }
+
+                GObj o; o.oc = oc; o.d_stop = d_cl; o.cluster_id = oc->get_cluster_id();
+                auto segs = pa.find_cluster_segments(g, *oc);   // ordered_edges: deterministic
+                if (segs.empty()) {
+                    // No dx, so no dQ/dx and no segment -- and without a segment
+                    // there is nothing a Shower can hold (PR::Shower is a view
+                    // over graph edges; set_start_segment requires a valid
+                    // descriptor).  It is counted and its charge is converted,
+                    // and it produces NO particle-flow node.  PDVD measured zero
+                    // of these in 579 candidates; PDHD is where this path lives.
+                    double q = 0; for (const auto* b : oc->children()) q += b->charge();
+                    ++rec.stop_gamma_n_unfit;
+                    rec.stop_gamma_charge += q;
+                    rec.stop_gamma_ke_tot +=
+                        (m_michel_unfit_from_model
+                             ? stm_michel_charge_to_energy_model(q, m_recomb_model, m_michel_unfit_dedx)
+                             : stm_michel_charge_to_energy(q, m_michel_unfit_recom,
+                                                           m_michel_unfit_fudge, m_michel_unfit_w_ev))
+                        / units::MeV;
+                    if (rec.stop_gamma_dis_min < 0 || d_cl / units::cm < rec.stop_gamma_dis_min)
+                        rec.stop_gamma_dis_min = d_cl / units::cm;
+                    if (d_cl / units::cm > rec.stop_gamma_dis_max)
+                        rec.stop_gamma_dis_max = d_cl / units::cm;
+                    continue;
+                }
+                for (auto& seg : segs) {
+                    auto [d_stop, cp] = segment_get_closest_point(seg, rec.stop_pt, "fit", "main");
+                    if (d_stop > (m_stop_gamma_radius_cm + m_stop_gamma_max_len_cm) * units::cm) continue;
+                    // The body exclusion, the same test the Michel pieces face
+                    // (:1520): a piece closer to the muon BODY than to the stop
+                    // is a delta ray thrown along the track, not something the
+                    // stop emitted.
+                    double d_body = 1e9;
+                    for (size_t i = 0; i < prof.pts.size(); ++i) {
+                        if (prof.rr[i] < m_dot_body_exclusion_cm * units::cm) continue;
+                        d_body = std::min(d_body, (prof.pts[i] - cp).magnitude());
+                    }
+                    if (d_body < d_stop) continue;
+                    o.segs.emplace_back(seg, d_stop);
+                    o.ke += segment_cal_kine_dQdx(seg, m_recomb_model) / units::MeV;
+                }
+                if (o.segs.empty()) continue;
+                std::sort(o.segs.begin(), o.segs.end(),
+                          [](const auto& a, const auto& b) {
+                              if (a.second != b.second) return a.second < b.second;
+                              return a.first->get_graph_index() < b.first->get_graph_index();
+                          });
+                o.gidx = static_cast<int>(o.segs.front().first->get_graph_index());
+                o.d_stop = o.segs.front().second;
+                objs.push_back(std::move(o));
+            }
+            // ACCEPTANCE is a separate stage from admission: the energy only
+            // exists after the fitter has run, so it cannot gate the cluster
+            // loop above.  A candidate rejected here is dropped from the object
+            // list, not from the fitter -- its charge stays in the 2-D maps.
+            std::sort(objs.begin(), objs.end(), [](const GObj& a, const GObj& b) {
+                if (a.d_stop != b.d_stop) return a.d_stop < b.d_stop;
+                return a.cluster_id < b.cluster_id;
+            });
+            for (const auto& o : objs) {
+                if (rec.n_stop_gammas >= m_stop_gamma_max_n) break;
+                if (!stm_michel_stop_gamma_energy(o.ke, m_stop_gamma_min_ke_mev,
+                                                  m_stop_gamma_max_ke_mev)) continue;
+                ++rec.n_stop_gammas;
+                rec.stop_gamma_ke_tot += o.ke;
+                rec.stop_gamma_ke_max = std::max(rec.stop_gamma_ke_max, o.ke);
+                for (const auto* b : o.oc->children()) rec.stop_gamma_charge += b->charge();
+                const double d_cm = o.d_stop / units::cm;
+                if (rec.stop_gamma_dis_min < 0 || d_cm < rec.stop_gamma_dis_min) rec.stop_gamma_dis_min = d_cm;
+                if (d_cm > rec.stop_gamma_dis_max) rec.stop_gamma_dis_max = d_cm;
+                if (rec.stop_gamma_seg_id < 0) rec.stop_gamma_seg_id = o.cluster_id * 1000 + o.gidx;
+                for (const auto& [sg, d] : o.segs) { (void)d; set_pdg(sg, 11); add_points(rec, sg, 5); }
+                if (!m_build_michel_shower) continue;
+                // The particle-flow node.  set_start_vertex(stop_v, 2) is the
+                // whole stitch: the gamma's segments live in a companion
+                // cluster with no graph edge into the muon's component, so the
+                // track BFS could never reach them at any knob setting, but
+                // stop_v is BFS-reachable and the renderer hangs the shower off
+                // the last muon segment through it.  particle_type stays 11 --
+                // PDG 22 is never stored anywhere in this codebase
+                // (get_particle_mass(22) is 0 and cal_kine_range falls back to
+                // the MUON range function); the `gamma` node is synthesised by
+                // the renderer from the connection type, and the e- leaf under
+                // it is what was actually reconstructed: the conversion.
+                auto gsh = std::make_shared<Shower>(g);
+                gsh->set_start_vertex(stop_v, 2);
+                gsh->set_start_segment(o.segs.front().first, false, "fit", "associate_points");
+                gsh->set_particle_type(11);
+                for (size_t i = 1; i < o.segs.size(); ++i)
+                    gsh->add_segment(o.segs[i].first, true, "fit", "associate_points");
+                gamma_showers.emplace_back(gsh, o.ke);
+            }
+        }
+
         // Unfitted companion clusters have no dx, so dQ/dx cannot be inverted;
         // the only route is charge (doc pdhd/15 sec 6).  Computed before the
         // shower is energised because the object energy is stamped back onto it.
@@ -1565,17 +1840,41 @@ void CheckSTM_Michel::visit(Ensemble& ensemble) const
         // the 2-D charge maps.  Using it rather than a local recipe keeps the
         // owner's standing rule from doc pdhd/14 -- every number in this tree is
         // the chain's, not this file's.
+        // doc pdvd/51: the capture gammas join the SAME shower set, so they are
+        // energised by the same call and reach the same tf->set_showers()
+        // publication.  When the feature is off gamma_showers is empty and this
+        // block is line-for-line the doc pdhd/17 one.
+        for (const auto& [gsh, gke] : gamma_showers) { (void)gke; showers.insert(gsh); }
         if (michel_shower) {
             showers.insert(michel_shower);
             michel_shower->set_particle_type(11);
+        }
+        if (!showers.empty()) {
             IndexedVertexSet lm_v; IndexedSegmentSet lm_s;
             pa.calculate_shower_kinematics(showers, lm_v, lm_s, g, *tf, m_dv,
                                            particle_data(), m_recomb_model);
+        }
+        for (const auto& [gsh, gke] : gamma_showers) {
+            // Same reason as the Michel's stamp below: for a conn-2 EM shower
+            // kenergy_best is 0 and get_kine_best() falls back to
+            // kenergy_charge, which is 0 on this path (doc pdhd/15 sec 6), so
+            // the renderer's em_ke_min prune would delete the node entirely.
+            gsh->set_kine_best(gke * units::MeV);
+        }
+        if (michel_shower) {
             rec.michel_ke_dqdx = michel_shower->get_kine_dQdx() / units::MeV;
             rec.michel_ke_charge = michel_shower->get_kine_charge() / units::MeV;
             IndexedVertexSet mv2; IndexedSegmentSet ms2;
             michel_shower->fill_sets(mv2, ms2, false);
             rec.n_michel_segs = static_cast<int>(ms2.size());
+            // doc pdvd/51: > 1 says the object is not in the candidate's own
+            // cluster -- the fact a T_stm_michel-only consumer cannot derive.
+            {
+                std::set<int> mcl;
+                for (const auto& sg : ms2)
+                    if (sg && sg->cluster()) mcl.insert(sg->cluster()->get_cluster_id());
+                rec.michel_n_clusters = static_cast<int>(mcl.size());
+            }
             rec.michel_start_pt = michel_shower->get_start_point();
             if (auto sv = michel_shower->start_vertex())
                 rec.michel_parent_vtx_id = rec.cluster_id * 1000 + static_cast<int>(sv->get_graph_index());
@@ -1623,7 +1922,8 @@ void CheckSTM_Michel::visit(Ensemble& ensemble) const
         // cluster 26 persisted michel_ke_best = NaN through doc pdhd/14).
         for (double* e : {&rec.michel_ke_dqdx, &rec.michel_ke_range, &rec.michel_ke_best,
                           &rec.michel_ke_core, &rec.michel_ke_charge, &rec.dots_ke_dqdx,
-                          &rec.dots_ke_unfit, &rec.muon_ke_range, &rec.muon_ke_dqdx, &rec.muon_ke_best}) {
+                          &rec.dots_ke_unfit, &rec.muon_ke_range, &rec.muon_ke_dqdx, &rec.muon_ke_best,
+                          &rec.stop_gamma_ke_tot, &rec.stop_gamma_ke_max, &rec.stop_gamma_charge}) {
             if (!std::isfinite(*e)) {
                 SPDLOG_LOGGER_WARN(s_log, "{}CheckSTM_Michel: cluster {} produced a non-finite energy; zeroed",
                                    m_evt_tag, rec.cluster_id);
@@ -1680,12 +1980,14 @@ void CheckSTM_Michel::visit(Ensemble& ensemble) const
 
         if (rec.reject_bits == 0) ++n_stm;
         if (rec.michel_found) ++n_michel;
+        if (rec.n_stop_gammas > 0) { ++n_gamma_cand; n_gamma += rec.n_stop_gammas; }
         SPDLOG_LOGGER_INFO(s_log,
             "{}CheckSTM_Michel: cluster {} gid {} verdict {} bits {} | chain {} segs {:.1f} cm ({} pts, {} dead) stop_dis {:.1f} cm | "
             "contrast {:.2f}/{:.2f} ks_mu {:.3f} ks_flat {:.3f} comp_fwd {:.0f}/{:.2f}/{:.2f}/{:.2f} | "
             "mu E range {:.1f} dQ/dx {:.1f} MCS {:.1f} MeV (amb {:.2f}, {} segs, {:.1f} cm, cath {}/{}) | "
             "delta {} hadron {} | michel {} conn {} ({} segs / {} pieces, {:.1f} cm, kink {:.0f} deg, gap {:.1f} cm) "
             "E {:.1f} MeV = dQ/dx {:.1f} + unfit {:.1f} (core {:.1f}, range {:.1f}, charge {:.1f}) dots {} ({:.1f} MeV) unfit_cl {} | "
+            "gammas {} ({:.1f} MeV, max {:.1f}, {:.1f}-{:.1f} cm, {} unfit) | "
             "cont {:.1f} cm @ {:.0f} deg ext {} ({:.1f} cm) dead_ahead {} cov {:.2f} | in_fv {} | {:.0f} ms",
             m_evt_tag, rec.cluster_id, rec.gid, bits_string(rec.reject_bits), rec.reject_bits,
             rec.n_chain_segs, rec.muon_len / units::cm, rec.n_profile_pts, rec.n_dead_pts, rec.stop_dis / units::cm,
@@ -1700,12 +2002,17 @@ void CheckSTM_Michel::visit(Ensemble& ensemble) const
             rec.michel_ke_best, rec.michel_ke_dqdx, rec.dots_ke_unfit,
             rec.michel_ke_core, rec.michel_ke_range, rec.michel_ke_charge,
             rec.n_dots, rec.dots_ke_dqdx, rec.n_dot_clusters_unfit,
+            rec.n_stop_gammas, rec.stop_gamma_ke_tot, rec.stop_gamma_ke_max,
+            rec.stop_gamma_dis_min, rec.stop_gamma_dis_max, rec.stop_gamma_n_unfit,
             rec.cont_len / units::cm, rec.cont_angle_deg, rec.n_ext, rec.ext_len / units::cm, rec.dead_ahead, rec.chain_coverage, rec.in_fv,
             MS(Clock::now() - t0).count());
     }
 
     // doc pdhd/15: "with a Michel" now counts the detached ones too (michel_found
     // means "a Michel object exists"); it used to count the attached only.
-    SPDLOG_LOGGER_INFO(s_log, "{}CheckSTM_Michel: {} candidate(s), {} pass every check, {} with a Michel; {:.0f} ms",
-                       m_evt_tag, candidates.size(), n_stm, n_michel, MS(Clock::now() - t_total).count());
+    SPDLOG_LOGGER_INFO(s_log,
+                       "{}CheckSTM_Michel: {} candidate(s), {} pass every check, {} with a Michel, "
+                       "{} with a capture gamma ({} gammas); {:.0f} ms",
+                       m_evt_tag, candidates.size(), n_stm, n_michel, n_gamma_cand, n_gamma,
+                       MS(Clock::now() - t_total).count());
 }

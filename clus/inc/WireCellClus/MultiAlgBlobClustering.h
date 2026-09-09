@@ -223,6 +223,16 @@ namespace WireCell::Clus {
             // em_ke_min applies to gamma/e+-, np_ke_min to n/p/nuclei
             // (prototype WCReader::KeepMC: 5 MeV / 10 MeV).
             double em_ke_min{0.0};
+            // doc pdvd/51: prototype_names renders KE as an INTEGER number of
+            // MeV (WCReader::MCJSON's "int e = KE*1000"), so every node below
+            // 1 MeV reads "0 MeV".  That was harmless while the smallest thing
+            // in a PF tree was a several-MeV shower; CheckSTM_Michel's
+            // muon-capture gammas are ~1 MeV (median 0.97 on PDVD d16vnu), so
+            // half of them would be labelled 0.  When this is > 0, a KE below
+            // it is written with two decimals instead.  0 = off = the prototype
+            // formatting for every energy, so the default is byte-identical and
+            // SBND is untouched.
+            double ke_decimal_below{0.0};
             double np_ke_min{0.0};
             // ---- doc sbnd_xin/docs/pr/34 §10 port-fidelity knobs ----
             // pf_track_main_cluster_only: the track BFS skips segments whose

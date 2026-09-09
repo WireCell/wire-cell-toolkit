@@ -379,6 +379,7 @@ void MultiAlgBlobClustering::configure(const WireCell::Configuration& cfg)
             // Prototype-parity options; absent => legacy output, byte-identical.
             pfc.prototype_names = get<bool>(pf, "prototype_names", false);
             pfc.em_ke_min = get<double>(pf, "em_ke_min", 0.0);
+            pfc.ke_decimal_below = get<double>(pf, "ke_decimal_below", 0.0);   // doc pdvd/51
             pfc.np_ke_min = get<double>(pf, "np_ke_min", 0.0);
             // doc pr/34 §10 port-fidelity knobs; absent => legacy, byte-identical.
             pfc.pf_track_main_cluster_only = get<bool>(pf, "pf_track_main_cluster_only", false);
@@ -2064,6 +2065,14 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
         // prototype_names: integer MeV like the prototype's
         // WCReader::MCJSON ("int e = KE(...)*1000").  Legacy: "%.2f".
         if (cfg.prototype_names) {
+            // doc pdvd/51: an integer MeV label reads "0" for everything below
+            // 1 MeV.  ke_decimal_below 0 (the default) keeps the prototype's
+            // formatting for every energy.
+            if (cfg.ke_decimal_below > 0.0 && energy < cfg.ke_decimal_below) {
+                char sbuf[32];
+                std::snprintf(sbuf, sizeof(sbuf), "%.2f", energy / units::MeV);
+                return std::string(sbuf);
+            }
             return std::to_string(static_cast<int>(energy / units::MeV));
         }
         char buf[32];

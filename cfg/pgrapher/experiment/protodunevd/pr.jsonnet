@@ -2294,8 +2294,27 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
                         // the pipeline => default compiled config byte-identical.
                         [if pr_tail_on
                          then 'prototype_names']: true,
+                        // doc pdvd/51: 5 -> 0.2 MeV.  The floor is a DISPLAY floor
+                        // (MultiAlgBlobClustering.cxx:2078 keep_node), and at 5 MeV it
+                        // deletes every muon-capture gamma this chain now reconstructs:
+                        // that population is ~1 MeV (d16vnu p10 0.37 / p50 0.97 / p90
+                        // 4.37).  append_pseudo_shower drops the carrier too when its
+                        // only leaf goes (:2174), so the node would vanish whole.
+                        // COLLATERAL, measured not assumed: over d16vnu (119 events) the
+                        // PR labels 1096 segments pdg 11 and 666 reach mc.json, so this
+                        // can restore at most ~430 nodes (~3.6/event), mostly sub-5-MeV
+                        // delta rays.  Only the two ProtoDUNE PR configs carry it -- no
+                        // MultiAlgBlobClustering change, so SBND is untouched.
                         [if pr_tail_on
-                         then 'em_ke_min']: 5 * wc.MeV,
+                         then 'em_ke_min']: 0.2 * wc.MeV,
+                        // doc pdvd/51: prototype_names writes an INTEGER MeV, so
+                        // a ~1 MeV capture gamma is labelled "0 MeV".  Below this
+                        // value the node text carries two decimals instead.
+                        // C++ default 0 = off = prototype formatting everywhere,
+                        // so the key's absence is byte-identical and no other
+                        // detector sees it.
+                        [if pr_tail_on
+                         then 'ke_decimal_below']: 10 * wc.MeV,
                         // doc pr/38: nucleon floor lowered from the prototype's
                         // 10 MeV (WCReader::KeepMC) to 3 MeV, owner decision
                         // 2026-08-05 -- sub-10-MeV protons attached at the
