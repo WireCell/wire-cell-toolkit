@@ -4,6 +4,7 @@
 #include "WireCellUtil/NamedFactory.h"
 
 #include <tbb/global_control.h>
+#include <tbb/task_arena.h>
 
 #include <iostream>
 
@@ -15,12 +16,37 @@ using namespace WireCellTbb;
 
 DataFlowGraph::DataFlowGraph(int max_threads)
     : WireCell::Aux::Logger("DataFlowGraph", "tbb")
-    , m_graph()
-    , m_factory(m_graph)
+    , m_thread_limit(max_threads)
 {
+    // The graph/factory are built lazily in ensure() so they can be constructed
+    // inside a sized task_arena when a thread limit is set.
 }
 
 DataFlowGraph::~DataFlowGraph() {}
+
+void DataFlowGraph::ensure()
+{
+    if (m_graph) {
+        return;
+    }
+    auto make = [this]() {
+        m_graph = std::make_unique<tbb::flow::graph>();
+        m_factory = std::make_unique<WrapperFactory>(*m_graph);
+    };
+    if (m_thread_limit > 0) {
+        // A sized arena bounds Wire-Cell node parallelism to m_thread_limit
+        // worker slots.  Unlike tbb::global_control(max_allowed_parallelism),
+        // this is arena-LOCAL: it does not throttle a host framework's own TBB
+        // work (e.g. Phlex) and creates no excess workers that busy-spin.
+        m_arena = std::make_unique<tbb::task_arena>(m_thread_limit);
+        m_arena->execute(make);
+    }
+    else {
+        // No WCT limit: build in the current arena so the graph inherits whatever
+        // the host framework (or the default arena) provides.
+        make();
+    }
+}
 
 Configuration DataFlowGraph::default_configuration() const
 {
@@ -39,6 +65,16 @@ void DataFlowGraph::configure(const Configuration& cfg)
 }
 
 bool DataFlowGraph::connect(INode::pointer tail, INode::pointer head, size_t sport, size_t rport)
+{
+    ensure();
+    // Create/wire the TBB nodes inside the (possibly sized) arena so they belong
+    // to it.  See ensure() and spng-fra.12.
+    bool result = false;
+    in_arena([&]() { result = do_connect(tail, head, sport, rport); });
+    return result;
+}
+
+bool DataFlowGraph::do_connect(INode::pointer tail, INode::pointer head, size_t sport, size_t rport)
 {
     using namespace WireCellTbb;
 
@@ -65,13 +101,13 @@ bool DataFlowGraph::connect(INode::pointer tail, INode::pointer head, size_t spo
         }
     }
 
-    Node mytail = m_factory(tail);
+    Node mytail = (*m_factory)(tail);
     if (!mytail) {
         log->critical("no tail node wrapper for {}", tname);
         return false;
     }
 
-    Node myhead = m_factory(head);
+    Node myhead = (*m_factory)(head);
     if (!myhead) {
         log->critical("no head node wrapper for {}", hname);
         return false;
@@ -109,18 +145,22 @@ bool DataFlowGraph::connect(INode::pointer tail, INode::pointer head, size_t spo
 
 bool DataFlowGraph::run()
 {
-    for (auto it : m_factory.seen()) {
+    ensure();
+
+    for (auto it : m_factory->seen()) {
         //log->debug("Initialize node of type: {}", demangle(it.first->signature()));
         it.second->initialize();
     }
 
-    std::unique_ptr<tbb::global_control> gc;
-    if (m_thread_limit) {
-        gc = std::make_unique<tbb::global_control>(
-            tbb::global_control::max_allowed_parallelism,
-            m_thread_limit);
-    }
-    m_graph.wait_for_all();
+    // Run the graph in its arena.  When a thread limit is configured the graph
+    // was built inside a sized task_arena (ensure()), which bounds Wire-Cell
+    // node parallelism to that worker count.  This replaces the former
+    // tbb::global_control(max_allowed_parallelism) approach, which kept a full
+    // hardware-sized worker pool that busy-spun (sched_yield) while a long node
+    // ran -- burning every core and polluting the std::clock-based per-node
+    // core-sec -- and which also composed by minimum with a host framework's
+    // own global_control (clamping e.g. Phlex to WCT's limit).  See spng-fra.12.
+    in_arena([this]() { m_graph->wait_for_all(); });
 
     if (m_summary) {
         double coretot_s = 0;
