@@ -91,7 +91,16 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1,
               // preload perturbation of the candidate's own fit (doc pdvd/53
               // sec 6).  C++ default FALSE -- false here omits every key and
               // reproduces the doc pdvd/51 job byte-for-byte.
-              stm_survey=true,
+              //
+              // OWNER RULING 2026-09-08: it stays FALSE here.  The survey costs a
+              // 20-25 % mover rate on the muon's OWN profile branches through
+              // preload_clusters (doc pdvd/53 sec 6.2) for a feature with no
+              // physics value -- it is hand-scan scaffolding.  The scan arms turn
+              // it on per job with
+              //   -S stm_michel_extra={survey_enable:true, survey_radius_cm:60.0,
+              //                        survey_max_len_cm:25.0}
+              // so PRODUCTION PR output stays bit-identical to doc pdvd/51.
+              stm_survey=false,
               stm_survey_radius_cm=60.0,
               stm_survey_max_len_cm=25.0,
               // Readout length in ticks for the Magnify/PrDisplay writers (SBND 3427;

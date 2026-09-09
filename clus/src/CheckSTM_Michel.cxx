@@ -855,8 +855,19 @@ private:
         }
     }
 
+    // keep_dead: emit a row even for a fit with dx <= 0, carrying the -1 dQ/dx
+    // sentinel roles 2/3/4 already use for "the fit found no charge here".  doc
+    // pdvd/53: without it a SURVEYED segment whose every fit has dx <= 0 is
+    // counted in n_survey_segs, emits no point row, is therefore never named in
+    // stm_michel_pts, and is therefore dropped by the display's role-keyed
+    // selector -- which is precisely the doc pdvd/51 defect this round exists to
+    // fix, surviving on 33 of 872 PDVD and 26 of 610 PDHD surveyed segments.
+    // The points are real and drawable: 039252_12 cluster 130's companion
+    // segment 429055 has two rows in T_rec_charge, with nq 0 and q at the
+    // dQdx_offset sentinel.  Role 6 only, so nothing else moves.
     void add_points(Record& rec, const SegmentPtr& seg, int role, const StmMichelProfile* prof = nullptr,
-                    int rej = 0, double d_stop = -1, double d_body = -1) const {
+                    int rej = 0, double d_stop = -1, double d_body = -1,
+                    bool keep_dead = false) const {
         const int seg_id = (seg && seg->cluster() ? seg->cluster()->get_cluster_id() : 0) * 1000
                          + (seg ? static_cast<int>(seg->get_graph_index()) : 0);
         if (role != 6) rec.claimed.insert(seg_id);
@@ -872,9 +883,10 @@ private:
         }
         if (!seg) return;
         for (const auto& f : seg->fits()) {
-            if (f.dx <= 0) continue;
+            if (f.dx <= 0 && !keep_dead) continue;
             rec.px.push_back(f.point.x()); rec.py.push_back(f.point.y()); rec.pz.push_back(f.point.z());
-            rec.pq.push_back(f.dQ / (f.dx / units::cm)); rec.pL.push_back(-1); rec.prr.push_back(-1);
+            rec.pq.push_back(f.dx > 0 ? f.dQ / (f.dx / units::cm) : -1.0);
+            rec.pL.push_back(-1); rec.prr.push_back(-1);
             rec.prole.push_back(role); rec.pseg.push_back(seg_id);
         }
         add_survey_cols(rec, rec.px.size() - n0, rej, d_stop, d_body);
@@ -2053,7 +2065,8 @@ void CheckSTM_Michel::visit(Ensemble& ensemble) const
                 if (a.cluster_id != b.cluster_id) return a.cluster_id < b.cluster_id;
                 return a.gidx < b.gidx;
             });
-            for (const auto& e : sv) add_points(rec, e.seg, 6, nullptr, e.rej, e.d_stop, e.d_body);
+            for (const auto& e : sv)
+                add_points(rec, e.seg, 6, nullptr, e.rej, e.d_stop, e.d_body, /*keep_dead*/ true);
             rec.n_survey_segs = static_cast<int>(sv.size());
             rec.n_survey_clusters = static_cast<int>(sv_clusters.size());
         }
