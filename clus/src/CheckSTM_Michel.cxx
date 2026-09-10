@@ -173,6 +173,11 @@ public:
         m_plateau_mip_lo = get<double>(config, "plateau_mip_lo", m_plateau_mip_lo);
         m_plateau_mip_hi = get<double>(config, "plateau_mip_hi", m_plateau_mip_hi);
         m_stop_extend_max = get<int>(config, "stop_extend_max", m_stop_extend_max);
+        // doc pdvd/57
+        m_stop_retreat_max = get<int>(config, "stop_retreat_max", m_stop_retreat_max);
+        m_retreat_collapse_frac = get<double>(config, "retreat_collapse_frac", m_retreat_collapse_frac);
+        m_retreat_peak_frac = get<double>(config, "retreat_peak_frac", m_retreat_peak_frac);
+        m_retreat_peak_window_cm = get<double>(config, "retreat_peak_window_cm", m_retreat_peak_window_cm);
         m_dead_volume_check = get<bool>(config, "dead_volume_check", m_dead_volume_check);
         m_min_chain_coverage = get<double>(config, "min_chain_coverage", m_min_chain_coverage);
         m_michel_guards_stop = get<bool>(config, "michel_guards_stop", m_michel_guards_stop);
@@ -304,6 +309,30 @@ public:
         // the new end, up to this many times.  0 = doc pdvd/48 (the tagger's
         // stop is final and the continuation only rejects).
         cfg["stop_extend_max"] = m_stop_extend_max;
+        // doc pdvd/57: the mirror of stop_extend_max.  find_first_kink's
+        // charge gate wants BOTH arms of a kink >= 0.6 MIP, so an asymmetric
+        // muon->Michel junction returns the sentinel and the stop is clamped
+        // to the fit's far end -- the Michel's own tip on 51 of 125 missed
+        // stoppers (doc pdvd/56 sec 2).  stop_extend_max only walks the stop
+        // OUTWARD; this walks it back onto an existing chain vertex while the
+        // dropped tail is collapsed and a Bragg rise survives before it (see
+        // StmMichelFunctions.h stm_michel_stop_retreat).  0 = off (doc
+        // pdvd/48/56 behaviour); measured on the d53v census at 2 to recover
+        // 8 of 51 missed collapse-shaped stoppers with 1 new false positive
+        // at this frac (doc pdvd/57); the default frac below is the point
+        // that measured 0 new false positives (7 recovered).
+        cfg["stop_retreat_max"] = m_stop_retreat_max;
+        // doc pdvd/57: the dropped tail's median dQ/dx must be below this
+        // fraction of the plateau (a muon plateau, even at the top of PDVD's
+        // [0.6, 1.6] MIP admission window, cannot fall this low without
+        // actually collapsing).
+        cfg["retreat_collapse_frac"] = m_retreat_collapse_frac;
+        // doc pdvd/57: the profile surviving the drop must still peak at this
+        // fraction of the plateau within retreat_peak_window_cm of the new
+        // end -- there must be a Bragg rise to retreat TO, not just charge to
+        // drop (same ratio and window stm_michel's own shape census uses).
+        cfg["retreat_peak_frac"] = m_retreat_peak_frac;
+        cfg["retreat_peak_window_cm"] = m_retreat_peak_window_cm;
         // doc pdhd/03 sec 6: FiducialUtils::check_dead_volume from the end of
         // the live profile along the muon direction; a stop that walks into a
         // dead region is R_STOP_INTO_DEAD (three PDHD tracks end on the same
@@ -449,6 +478,10 @@ private:
     int m_pid_mode{0};
     double m_plateau_mip_lo{0.0}, m_plateau_mip_hi{0.0};
     int m_stop_extend_max{0};
+    int m_stop_retreat_max{0};                    // doc pdvd/57
+    double m_retreat_collapse_frac{0.5};
+    double m_retreat_peak_frac{1.4};
+    double m_retreat_peak_window_cm{15.0};
     bool m_dead_volume_check{false};
     double m_min_chain_coverage{0.0}, m_coverage_radius_cm{3.0};
     bool m_michel_guards_stop{false};
@@ -522,6 +555,7 @@ private:
         Point michel_start_pt;
         double cont_len{0}, cont_angle_deg{-1}, cont_mip{0};
         int n_ext{0}; double ext_len{0};          // doc pdhd/03: chain extensions past the tagger's stop
+        int n_retreat{0}; double retreat_len{0};  // doc pdvd/57: chain segments retreated off the fit's far end
         int dead_ahead{-1};                        // doc pdhd/03: 1 = the live end walks into a dead region
         int n_cluster_pts{0}; double chain_coverage{-1};   // doc pdhd/03: cluster points within coverage_radius of a reconstructed point
         // dots
@@ -975,6 +1009,7 @@ private:
         D1("michel_ke_dqdx", r.michel_ke_dqdx); D1("michel_ke_range", r.michel_ke_range); D1("michel_ke_best", r.michel_ke_best);
         D1("cont_len", r.cont_len / cm); D1("cont_angle_deg", r.cont_angle_deg); D1("cont_mip", r.cont_mip);
         I1("n_ext", r.n_ext); D1("ext_len", r.ext_len / cm); I1("dead_ahead", r.dead_ahead);
+        I1("n_retreat", r.n_retreat); D1("retreat_len", r.retreat_len / cm);
         I1("n_cluster_pts", r.n_cluster_pts); D1("chain_coverage", r.chain_coverage);
         I1("n_dots", r.n_dots); I1("n_dot_clusters_unfit", r.n_dot_clusters_unfit);
         D1("dots_ke_dqdx", r.dots_ke_dqdx); D1("dots_charge_unfit", r.dots_charge_unfit);
@@ -1329,6 +1364,47 @@ void CheckSTM_Michel::visit(Ensemble& ensemble) const
             rec.stop_pt = stm_michel_vertex_point(stop_v);
             rec.stop_dis = (rec.stop_pt - rec.tagger_stop_pt).magnitude();
             rec.n_chain_segs = static_cast<int>(chain.size());
+        }
+
+        // ---- doc pdvd/57: the STOP RETREAT.  Mirror of stop_extend_max above,
+        // run AFTER it so a wrong extension can still be undone.  find_first_kink
+        // returns its no-kink sentinel whenever the muon->Michel junction is
+        // asymmetric (Bragg on one side, 0.1-0.4 MIP on the other -- doc
+        // pdvd/56 sec 2.2 measured this on 74 of 131 accepted stoppers and 29
+        // of 51 missed collapse-shaped ones), so the tagger's stop is the
+        // Steiner path's far end, not where the muon stopped.  Graph-only:
+        // it can only retreat onto a vertex the chain ALREADY has, which is
+        // what keeps it from firing on a through-going track that merely
+        // trails off (doc pdvd/56 sec 2.3 / doc pdvd/57 sec 3: an on-chain
+        // vertex within 4 cm of the collapse exists on 24 of 51 missed
+        // collapse-shaped stoppers but only 11 of 80 collapse-shaped
+        // through-going ones).  R_STOP_UNMATCHED chains were never anchored
+        // to the tagger's stop at all -- retreating one would mean something
+        // different, so they are excluded.
+        if (m_stop_retreat_max > 0 && stop_v && chain.size() > 1 &&
+            !(rec.reject_bits & R_STOP_UNMATCHED) && !bragg_confirmed(chain)) {
+            auto prof_pre = stm_michel_profile(g, chain, entry_v);
+            StmMichelRetreatThresholds rth;
+            rth.max_drop = m_stop_retreat_max;
+            rth.collapse_frac = m_retreat_collapse_frac;
+            rth.peak_frac = m_retreat_peak_frac;
+            rth.peak_window = m_retreat_peak_window_cm * units::cm;
+            rth.max_drop_len = m_michel_max_len_cm * units::cm;   // same ceiling an attached Michel arm faces
+            rth.plateau_lo = m_bragg_plateau_lo_cm * units::cm;
+            rth.plateau_hi = m_bragg_plateau_hi_cm * units::cm;
+            rth.min_dqdx_live = m_profile_min_dqdx_frac * m_mip_dqdx;
+            auto rr = stm_michel_stop_retreat(prof_pre, static_cast<int>(chain.size()), rth);
+            if (rr.n_drop > 0) {
+                auto vtxs = stm_michel_chain_vertices(g, chain, entry_v);
+                VertexPtr new_stop = (vtxs.size() == chain.size() + 1)
+                    ? vtxs[chain.size() - rr.n_drop] : nullptr;
+                if (new_stop && new_stop != entry_v) {
+                    chain.resize(chain.size() - rr.n_drop);
+                    stop_v = new_stop;
+                    rec.n_retreat = rr.n_drop;
+                    rec.retreat_len = rr.drop_len;
+                }
+            }
         }
 
         std::vector<VertexPtr> chain_vtxs = stm_michel_chain_vertices(g, chain, entry_v);

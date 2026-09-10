@@ -587,3 +587,126 @@ TEST_CASE("stm_michel survey: the ring and the survey partition the companions")
     }
 }
 
+
+// doc pdvd/57 -- the STOP RETREAT.  Three chain segments: a plateau body
+// (seg1), a plateau segment whose last 10 cm is a Bragg-boosted rise (seg2),
+// and a trailing segment (seg3) that stands in for the Michel/other object
+// the fit's Steiner path reached beyond the muon's real stop.  seg3's charge
+// and reverse_storage vary case by case; seg1/seg2 are shared.
+namespace {
+StmMichelRetreatThresholds retreat_thresholds(int max_drop = 2, double max_drop_len_cm = 25.0,
+                                              double peak_window_cm = 15.0)
+{
+    StmMichelRetreatThresholds th;
+    th.max_drop = max_drop;
+    th.collapse_frac = 0.5;
+    th.peak_frac = 1.4;
+    th.peak_window = peak_window_cm * units::cm;
+    th.max_drop_len = max_drop_len_cm * units::cm;
+    th.plateau_lo = 20 * units::cm;
+    th.plateau_hi = 40 * units::cm;
+    th.min_dqdx_live = 0;
+    th.min_tail_pts = 2;
+    return th;
+}
+}
+
+TEST_CASE("stm_michel stop retreat: fires on a collapsed tail behind a Bragg rise")
+{
+    Graph g;
+    auto entry = make_vtx(g, 0, 0, 0);
+    auto mid   = make_vtx(g, 0, 0, 50);
+    auto near  = make_vtx(g, 0, 0, 80);
+    auto stop  = make_vtx(g, 0, 0, 88);
+    auto s1 = make_track(g, entry, mid, 1.0);
+    auto s2 = make_track(g, mid, near, 1.0, false, /*bragg_last_cm=*/10, /*bragg_factor=*/3.0);
+    auto s3 = make_track(g, near, stop, 0.15);   // the collapsed tail
+    std::vector<SegmentPtr> chain{s1, s2, s3};
+    auto prof = stm_michel_profile(g, chain, entry);
+    REQUIRE(!prof.empty());
+    auto rr = stm_michel_stop_retreat(prof, static_cast<int>(chain.size()), retreat_thresholds());
+    CHECK(rr.n_drop == 1);
+    CHECK(rr.drop_len == doctest::Approx(8 * units::cm).epsilon(0.05));
+    CHECK(rr.plateau > 0);
+}
+
+TEST_CASE("stm_michel stop retreat: does not fire on a 1.0 MIP continuation tail")
+{
+    Graph g;
+    auto entry = make_vtx(g, 0, 0, 0);
+    auto mid   = make_vtx(g, 0, 0, 50);
+    auto near  = make_vtx(g, 0, 0, 80);
+    auto stop  = make_vtx(g, 0, 0, 88);
+    auto s1 = make_track(g, entry, mid, 1.0);
+    auto s2 = make_track(g, mid, near, 1.0, false, 10, 3.0);
+    auto s3 = make_track(g, near, stop, 1.0);   // the muon carrying on, not collapsing
+    std::vector<SegmentPtr> chain{s1, s2, s3};
+    auto prof = stm_michel_profile(g, chain, entry);
+    auto rr = stm_michel_stop_retreat(prof, static_cast<int>(chain.size()), retreat_thresholds());
+    CHECK(rr.n_drop == 0);
+}
+
+TEST_CASE("stm_michel stop retreat: does not fire when nothing peaks before the collapse")
+{
+    Graph g;
+    auto entry = make_vtx(g, 0, 0, 0);
+    auto mid   = make_vtx(g, 0, 0, 50);
+    auto near  = make_vtx(g, 0, 0, 80);
+    auto stop  = make_vtx(g, 0, 0, 88);
+    auto s1 = make_track(g, entry, mid, 1.0);
+    auto s2 = make_track(g, mid, near, 1.0);   // flat -- no Bragg rise to retreat TO
+    auto s3 = make_track(g, near, stop, 0.15);
+    std::vector<SegmentPtr> chain{s1, s2, s3};
+    auto prof = stm_michel_profile(g, chain, entry);
+    auto rr = stm_michel_stop_retreat(prof, static_cast<int>(chain.size()), retreat_thresholds());
+    CHECK(rr.n_drop == 0);
+}
+
+TEST_CASE("stm_michel stop retreat: max_drop = 0 is off")
+{
+    Graph g;
+    auto entry = make_vtx(g, 0, 0, 0);
+    auto mid   = make_vtx(g, 0, 0, 50);
+    auto near  = make_vtx(g, 0, 0, 80);
+    auto stop  = make_vtx(g, 0, 0, 88);
+    auto s1 = make_track(g, entry, mid, 1.0);
+    auto s2 = make_track(g, mid, near, 1.0, false, 10, 3.0);
+    auto s3 = make_track(g, near, stop, 0.15);
+    std::vector<SegmentPtr> chain{s1, s2, s3};
+    auto prof = stm_michel_profile(g, chain, entry);
+    auto rr = stm_michel_stop_retreat(prof, static_cast<int>(chain.size()), retreat_thresholds(/*max_drop=*/0));
+    CHECK(rr.n_drop == 0);
+}
+
+TEST_CASE("stm_michel stop retreat: a collapsed tail longer than max_drop_len is refused")
+{
+    Graph g;
+    auto entry = make_vtx(g, 0, 0, 0);
+    auto mid   = make_vtx(g, 0, 0, 50);
+    auto near  = make_vtx(g, 0, 0, 80);
+    auto stop  = make_vtx(g, 0, 0, 88);   // an 8 cm tail
+    auto s1 = make_track(g, entry, mid, 1.0);
+    auto s2 = make_track(g, mid, near, 1.0, false, 10, 3.0);
+    auto s3 = make_track(g, near, stop, 0.15);
+    std::vector<SegmentPtr> chain{s1, s2, s3};
+    auto prof = stm_michel_profile(g, chain, entry);
+    auto rr = stm_michel_stop_retreat(prof, static_cast<int>(chain.size()), retreat_thresholds(2, /*max_drop_len_cm=*/2.0));
+    CHECK(rr.n_drop == 0);   // 8 cm tail > 2 cm cap
+}
+
+TEST_CASE("stm_michel stop retreat: fires the same way when the last segment is stored reversed")
+{
+    Graph g;
+    auto entry = make_vtx(g, 0, 0, 0);
+    auto mid   = make_vtx(g, 0, 0, 50);
+    auto near  = make_vtx(g, 0, 0, 80);
+    auto stop  = make_vtx(g, 0, 0, 88);
+    auto s1 = make_track(g, entry, mid, 1.0);
+    auto s2 = make_track(g, mid, near, 1.0, false, 10, 3.0);
+    auto s3 = make_track(g, near, stop, 0.15, /*reverse_storage=*/true);
+    std::vector<SegmentPtr> chain{s1, s2, s3};
+    auto prof = stm_michel_profile(g, chain, entry);
+    auto rr = stm_michel_stop_retreat(prof, static_cast<int>(chain.size()), retreat_thresholds());
+    CHECK(rr.n_drop == 1);
+    CHECK(rr.drop_len == doctest::Approx(8 * units::cm).epsilon(0.05));
+}

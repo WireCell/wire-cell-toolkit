@@ -38,6 +38,10 @@ TEST_CASE("clus knob defaults: CheckSTM_Michel verdict thresholds")
     D("plateau_mip_lo", 0.0);    // doc pdhd/03: hi <= lo = window off
     D("plateau_mip_hi", 0.0);
     D("stop_extend_max", 0);     // doc pdhd/03: 0 = the tagger's stop is final
+    D("stop_retreat_max", 0);           // doc pdvd/57: 0 = off, the tagger's stop is final
+    D("retreat_collapse_frac", 0.5);
+    D("retreat_peak_frac", 1.4);
+    D("retreat_peak_window_cm", 15.0);
     B("dead_volume_check", false);
     D("min_chain_coverage", 0.0);  // doc pdhd/03: 0 = off
     D("coverage_radius_cm", 3.0);

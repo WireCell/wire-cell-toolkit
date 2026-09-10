@@ -244,6 +244,101 @@ StmMichelBragg WireCell::Clus::PR::stm_michel_bragg_contrast(const StmMichelProf
     return b;
 }
 
+namespace {
+    // 3-point running median over consecutive entries of v, same convention
+    // as pdhd/stm_michel_scan/census_lib.py:running_median (which this
+    // mirrors so the offline probe and the C++ agree on one definition).
+    std::vector<double> running_median3(const std::vector<double>& v)
+    {
+        std::vector<double> out(v.size());
+        for (size_t i = 0; i < v.size(); ++i) {
+            const size_t lo = (i >= 1) ? i - 1 : 0;
+            const size_t hi = std::min(v.size() - 1, i + 1);
+            std::vector<double> w(v.begin() + lo, v.begin() + hi + 1);
+            std::sort(w.begin(), w.end());
+            out[i] = w[w.size() / 2];
+        }
+        return out;
+    }
+}
+
+StmMichelRetreat WireCell::Clus::PR::stm_michel_stop_retreat(const StmMichelProfile& prof, int n_chain_segs,
+                                                              const StmMichelRetreatThresholds& th)
+{
+    StmMichelRetreat out;
+    if (th.max_drop <= 0 || prof.empty() || n_chain_segs <= 1) return out;
+
+    // The reference plateau: SAME window and short-track halving as
+    // stm_michel_bragg_contrast, computed ONCE from the full chain so the
+    // reference does not chase the shrinking frame.  Live points only (a
+    // dead stretch must not fake a low plateau or a fake collapse).
+    double pl_lo = th.plateau_lo, pl_hi = th.plateau_hi;
+    if (prof.total_length < pl_hi) { pl_lo *= 0.5; pl_hi *= 0.5; }
+    std::vector<double> pl;
+    for (size_t i = 0; i < prof.rr.size(); ++i) {
+        if (prof.dQdx[i] < th.min_dqdx_live) continue;
+        if (prof.rr[i] >= pl_lo && prof.rr[i] <= pl_hi) pl.push_back(prof.dQdx[i]);
+    }
+    if (pl.size() < 3) return out;   // cannot judge
+    const double plateau = stm_michel_median(pl);
+    if (!(plateau > 0)) return out;
+    out.plateau = plateau;
+
+    for (int n_drop = 1; n_drop <= th.max_drop && n_chain_segs - n_drop > 0; ++n_drop) {
+        const int cutoff = n_chain_segs - n_drop;   // segments < cutoff are kept
+        // the boundary L: earliest point of the segment about to be dropped
+        // (ALL points, live or dead -- the geometry does not depend on charge)
+        double boundary_L = -1;
+        for (size_t i = 0; i < prof.L.size(); ++i) {
+            if (prof.seg_idx[i] >= cutoff) { boundary_L = prof.L[i]; break; }
+        }
+        if (boundary_L < 0) break;   // no point carries that seg_idx -> nothing to drop
+        const double drop_len = prof.total_length - boundary_L;
+        if (drop_len > th.max_drop_len) break;   // only grows with n_drop; further tries are worse
+
+        std::vector<double> tail;
+        for (size_t i = 0; i < prof.L.size(); ++i) {
+            if (prof.L[i] < boundary_L) continue;
+            if (prof.dQdx[i] < th.min_dqdx_live) continue;
+            tail.push_back(prof.dQdx[i]);
+        }
+        if (static_cast<int>(tail.size()) < th.min_tail_pts) break;   // cannot judge this candidate
+        const double tail_med = stm_michel_median(tail);
+        if (!(tail_med < th.collapse_frac * plateau)) break;   // not a collapsed tail
+
+        // The profile that would SURVIVE this drop: live points with L <=
+        // boundary_L, in ascending-L order (new_rr = boundary_L - L is then
+        // descending).  The running median is taken over the whole surviving
+        // sequence, exactly as census_lib.shape() computes it over the whole
+        // array before selecting a window -- so a peak just outside the
+        // window still borrows its neighbour correctly.
+        std::vector<double> kept_q; std::vector<double> kept_new_rr;
+        for (size_t i = 0; i < prof.L.size(); ++i) {
+            if (prof.L[i] > boundary_L) continue;
+            if (prof.dQdx[i] < th.min_dqdx_live) continue;
+            kept_q.push_back(prof.dQdx[i]);
+            kept_new_rr.push_back(boundary_L - prof.L[i]);
+        }
+        if (kept_q.size() < 3) break;
+        const auto rm = running_median3(kept_q);
+        double peak = -1;
+        int n_win = 0;
+        for (size_t i = 0; i < rm.size(); ++i) {
+            if (kept_new_rr[i] > th.peak_window) continue;
+            ++n_win;
+            peak = std::max(peak, rm[i]);
+        }
+        if (n_win < 3) break;   // window too sparse to judge
+        if (!(peak >= th.peak_frac * plateau)) break;   // nothing to retreat TO
+
+        out.n_drop = n_drop;
+        out.drop_len = drop_len;
+        out.last_tail_med = tail_med;
+        out.last_peak = peak;
+    }
+    return out;
+}
+
 bool WireCell::Clus::PR::stm_michel_seg_is_shower(const SegmentPtr& seg)
 {
     if (!seg) return false;

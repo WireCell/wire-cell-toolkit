@@ -259,6 +259,59 @@ namespace WireCell::Clus::PR {
     StmMichelArm stm_michel_classify_chain_arm(Graph& g, SegmentPtr in_seg, SegmentPtr arm,
                                                VertexPtr vtx, const StmMichelArmThresholds& th);
 
+    /// doc pdvd/57: the STOP RETREAT.  `find_first_kink`'s charge gate wants
+    /// BOTH arms of a kink >= 0.6 MIP, so an asymmetric muon->Michel junction
+    /// (Bragg on one side, 0.1-0.4 MIP on the other) returns the sentinel and
+    /// `CheckSTM_Michel` clamps the stop to the fit's far end -- the tip of
+    /// whatever the Steiner path's boundary-to-boundary search reached, not
+    /// where the muon actually stopped.  `stop_extend_max` only walks the
+    /// stop OUTWARD (:1298); this is the mirror, graph-only so it needs no
+    /// fitter to test.
+    ///
+    /// Walks the chain's OWN vertices backward from its current end, up to
+    /// `max_drop` times, dropping one trailing chain segment per iteration
+    /// while ALL of:
+    ///   - the segment(s) already dropped plus this one span <= max_drop_len
+    ///     (michel_max_len_cm: the same ceiling an attached Michel arm faces);
+    ///   - the LIVE points on the dropped tail (>= min_tail_pts of them) have
+    ///     median dQ/dx < collapse_frac * plateau -- a collapsed tail, not a
+    ///     continuation (a muon at 0.7-1.3 MIP plateau cannot pass this at
+    ///     collapse_frac 0.5 without a physically implausible plateau);
+    ///   - the profile that SURVIVES the drop still peaks >= peak_frac *
+    ///     plateau somewhere within peak_window of its new end -- there is a
+    ///     Bragg rise to retreat TO, not just charge to drop.
+    /// `plateau` is the SAME median dQ/dx over [plateau_lo, plateau_hi] (with
+    /// the short-track halving) that stm_michel_bragg_contrast uses, computed
+    /// ONCE from the profile as first passed in -- never recomputed in the
+    /// shrinking frame, so the reference does not chase the retreat.
+    ///
+    /// `prof` must be the profile BEFORE stm_michel_profile_live (seg_idx and
+    /// L/rr must match the chain the caller will actually shrink); the
+    /// function filters dead points internally via min_dqdx_live so a dead
+    /// stretch cannot fake a collapse.  Returns n_drop = 0 (a default-built
+    /// result) when the input is too short to judge, when no candidate tail
+    /// qualifies, or when max_drop <= 0.
+    struct StmMichelRetreatThresholds {
+        int    max_drop{0};                   // stop_retreat_max; <= 0 = off
+        double collapse_frac{0.5};            // retreat_collapse_frac
+        double peak_frac{1.4};                 // retreat_peak_frac
+        double peak_window{15 * units::cm};   // retreat_peak_window_cm
+        double max_drop_len{25 * units::cm};  // reuses michel_max_len_cm
+        double plateau_lo{20 * units::cm};    // reuses bragg_plateau_lo_cm
+        double plateau_hi{40 * units::cm};    // reuses bragg_plateau_hi_cm
+        double min_dqdx_live{0};              // reuses profile_min_dqdx_frac * mip_dqdx
+        int    min_tail_pts{2};
+    };
+    struct StmMichelRetreat {
+        int n_drop{0};              // chain segments to pop from the back
+        double drop_len{0};         // their total segment_track_length
+        double plateau{0};          // the reference plateau this was judged against
+        double last_tail_med{0};    // the last-accepted drop's tail median (diagnostic)
+        double last_peak{0};        // the last-accepted drop's surviving peak (diagnostic)
+    };
+    StmMichelRetreat stm_michel_stop_retreat(const StmMichelProfile& prof, int n_chain_segs,
+                                             const StmMichelRetreatThresholds& th);
+
     /// Reject bits carried in the stm_michel PC / T_stm_michel.reject_bits.
     /// is_stm = (reject_bits == 0).  Michel presence is deliberately NOT a
     /// criterion (mu- capture in argon).
