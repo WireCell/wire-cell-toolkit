@@ -403,6 +403,7 @@ namespace WireCell::Clus::PR {
         R_PLATEAU_OFF_MIP    = 1u << 10,  // plateau_med / mip_dqdx outside [plateau_mip_lo, plateau_mip_hi] (doc pdhd/03)
         R_STOP_INTO_DEAD     = 1u << 11,  // the visible end walks into a dead region (FiducialUtils::check_dead_volume) (doc pdhd/03)
         R_CLUSTER_NOT_TRACK  = 1u << 12,  // too few of the cluster's points lie on the reconstructed track (doc pdhd/03)
+        R_PROFILE_GEOMETRY   = 1u << 13,  // the profile is not a measurement: a coiled end (arc/span) or a long fitted segment the charge does not support (doc pdvd/66)
     };
 
 }  // namespace WireCell::Clus::PR

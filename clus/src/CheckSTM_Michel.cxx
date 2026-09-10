@@ -214,6 +214,13 @@ public:
         // rather than on the chain's geometric far end.
         m_bragg_peak_anchor = get<bool>(config, "bragg_peak_anchor", m_bragg_peak_anchor);
         m_bragg_peak_search_cm = get<double>(config, "bragg_peak_search_cm", m_bragg_peak_search_cm);
+        // doc pdvd/66 (T8): the profile-geometry fields are always written; the guard
+        // turns them into a reject bit (R_PROFILE_GEOMETRY).
+        m_profile_geometry_guard = get<bool>(config, "profile_geometry_guard", m_profile_geometry_guard);
+        m_profile_arc_span_max = get<double>(config, "profile_arc_span_max", m_profile_arc_span_max);
+        m_unsupported_min_len_cm = get<double>(config, "unsupported_min_len_cm", m_unsupported_min_len_cm);
+        m_unsupported_frac = get<double>(config, "unsupported_frac", m_unsupported_frac);
+        m_end_window_cm = get<double>(config, "end_window_cm", m_end_window_cm);
         m_dead_volume_check = get<bool>(config, "dead_volume_check", m_dead_volume_check);
         m_min_chain_coverage = get<double>(config, "min_chain_coverage", m_min_chain_coverage);
         m_michel_guards_stop = get<bool>(config, "michel_guards_stop", m_michel_guards_stop);
@@ -475,6 +482,20 @@ public:
         // move (0 when off, or when the peak is the last row).
         cfg["bragg_peak_anchor"] = m_bragg_peak_anchor;
         cfg["bragg_peak_search_cm"] = m_bragg_peak_search_cm;
+        // doc pdvd/66 (T8): default off.  The fields end_arc_span (fit arc over 3-D
+        // span in the last end_window_cm of the chain profile -- doc 55 sec 17.1
+        // item 5, the coiled end) and n_unsupported_segs (fitted segments of the
+        // main cluster at least unsupported_min_len_cm long whose median dQ/dx is
+        // below unsupported_frac of the chain's plateau median -- item 4, the fit
+        // that spans ground the imaging never covered) are ALWAYS written; with
+        // the guard on, either condition sets R_PROFILE_GEOMETRY ("the profile is
+        // not a measurement"), a hard veto like every other bit.  The literals
+        // are doc 55 sec 17.1's own class definitions (1.5, 20 cm, 0.25).
+        cfg["profile_geometry_guard"] = m_profile_geometry_guard;
+        cfg["profile_arc_span_max"] = m_profile_arc_span_max;
+        cfg["unsupported_min_len_cm"] = m_unsupported_min_len_cm;
+        cfg["unsupported_frac"] = m_unsupported_frac;
+        cfg["end_window_cm"] = m_end_window_cm;
         // doc pdhd/03 sec 6: FiducialUtils::check_dead_volume from the end of
         // the live profile along the muon direction; a stop that walks into a
         // dead region is R_STOP_INTO_DEAD (three PDHD tracks end on the same
@@ -641,6 +662,8 @@ private:
     bool m_publish_other_arms{false};             // doc pdvd/64 (T6): role-7 rows for kOther arms
     bool m_bragg_peak_anchor{false};              // doc pdvd/65 (T7): peak-anchored rr origin for the verdict shape tests
     double m_bragg_peak_search_cm{10.0};          // cm
+    bool m_profile_geometry_guard{false};         // doc pdvd/66 (T8)
+    double m_profile_arc_span_max{1.5}, m_unsupported_min_len_cm{20.0}, m_unsupported_frac{0.25}, m_end_window_cm{20.0};
     bool m_dead_volume_check{false};
     double m_min_chain_coverage{0.0}, m_coverage_radius_cm{3.0};
     bool m_michel_guards_stop{false};
@@ -680,6 +703,9 @@ private:
         int n_delta{0}, n_body_other{0}, n_body_hadron{0};
         int n_stop_other{0}, n_other_published{0};   // doc pdvd/64 (T6): kOther arms at the stop; role-7 segments actually published
         double bragg_anchor_shift{0};                // doc pdvd/65 (T7): how far back of the geometric end the peak anchor put rr = 0 (0 = off / peak at the end)
+        // doc pdvd/66 (T8): the profile's end geometry and the fitted segments' charge support -- reject-class inputs.  -1 = not computed.
+        double end_arc_cm{-1}, end_span_cm{-1}, end_arc_span{-1}; int n_end_pts{0};
+        int n_unsupported_segs{-1}; double unsupported_len_cm{-1}, unsupported_frac_min{-1}, chain_support_min{-1};
         double delta_len{0};
         // dQ/dx shape
         double ks_mu{0}, ks_flat{0}, ratio_mu{0}, ratio_flat{0};
@@ -745,6 +771,7 @@ private:
         int in_fv{-1};
         // points for the Bee/ROOT layer
         std::vector<double> px, py, pz, pq, pL, prr;
+        std::vector<double> pmed;   // doc pdvd/66: the owning segment's median dQ/dx (e/cm) per point; persisted as q_sup = pmed / plateau_med
         std::vector<int> prole, pseg;
         // doc pdvd/53.  Written only when the survey is on, so the knob-off
         // stm_michel_pts schema is unchanged.  prej names the gate that dropped
@@ -956,6 +983,7 @@ private:
         add(R_SHORT, "short"); add(R_PROFILE_SPARSE, "profile_sparse");
         add(R_PLATEAU_OFF_MIP, "plateau_off_mip"); add(R_STOP_INTO_DEAD, "stop_into_dead");
         add(R_CLUSTER_NOT_TRACK, "cluster_not_track");
+        add(R_PROFILE_GEOMETRY, "profile_geometry");   // doc pdvd/66
         return s;
     }
 
@@ -1077,12 +1105,14 @@ private:
         const int seg_id = (seg && seg->cluster() ? seg->cluster()->get_cluster_id() : 0) * 1000
                          + (seg ? static_cast<int>(seg->get_graph_index()) : 0);
         if (role != 6 && role != 7) rec.claimed.insert(seg_id);   // 6 survey, 7 other (doc pdvd/64): rows, not claims
+        const double seg_med = seg ? segment_median_dQ_dx(seg) * units::cm : -1.0;   // doc pdvd/66: e/cm, the offline dqdx_med's C++ twin
         const size_t n0 = rec.px.size();
         if (prof) {
             for (size_t i = 0; i < prof->pts.size(); ++i) {
                 rec.px.push_back(prof->pts[i].x()); rec.py.push_back(prof->pts[i].y()); rec.pz.push_back(prof->pts[i].z());
                 rec.pq.push_back(prof->dQdx[i]); rec.pL.push_back(prof->L[i]); rec.prr.push_back(prof->rr[i]);
                 rec.prole.push_back(role); rec.pseg.push_back(seg_id);
+                rec.pmed.push_back(seg_med);
             }
             add_survey_cols(rec, rec.px.size() - n0, rej, d_stop, d_body);
             return;
@@ -1094,6 +1124,7 @@ private:
             rec.pq.push_back(f.dx > 0 ? f.dQ / (f.dx / units::cm) : -1.0);
             rec.pL.push_back(-1); rec.prr.push_back(-1);
             rec.prole.push_back(role); rec.pseg.push_back(seg_id);
+            rec.pmed.push_back(seg_med);
         }
         add_survey_cols(rec, rec.px.size() - n0, rej, d_stop, d_body);
     }
@@ -1167,6 +1198,9 @@ private:
         I1("n_delta", r.n_delta); I1("n_body_other", r.n_body_other); I1("n_body_hadron", r.n_body_hadron); D1("delta_len", r.delta_len / cm);
         I1("n_stop_other", r.n_stop_other); I1("n_other_published", r.n_other_published);   // doc pdvd/64
         D1("bragg_anchor_shift_cm", r.bragg_anchor_shift / cm);                                // doc pdvd/65
+        D1("end_arc_cm", r.end_arc_cm); D1("end_span_cm", r.end_span_cm); D1("end_arc_span", r.end_arc_span); I1("n_end_pts", r.n_end_pts);   // doc pdvd/66
+        I1("n_unsupported_segs", r.n_unsupported_segs); D1("unsupported_len_cm", r.unsupported_len_cm);
+        D1("unsupported_frac_min", r.unsupported_frac_min); D1("chain_support_min", r.chain_support_min);
         D1("ks_mu", r.ks_mu); D1("ks_flat", r.ks_flat); D1("ratio_mu", r.ratio_mu); D1("ratio_flat", r.ratio_flat);
         for (int i = 0; i < 4; ++i) {
             D1(("comp_fwd" + std::to_string(i)).c_str(), r.comp_fwd[i]);
@@ -1261,6 +1295,15 @@ private:
             p.emplace("x", Array(x)); p.emplace("y", Array(y)); p.emplace("z", Array(z));
             p.emplace("q", Array(r.pq)); p.emplace("L", Array(tocm(r.pL))); p.emplace("rr", Array(tocm(r.prr)));
             p.emplace("role", Array(r.prole)); p.emplace("seg_id", Array(r.pseg));
+            // doc pdvd/66 (T8): per point, the owning segment's median dQ/dx over the
+            // chain's plateau median -- the offline class-H "charge_supported" ratio,
+            // written by the chain.  Unconditional (every carrier has it), -1 when
+            // there is no plateau.
+            {
+                std::vector<double> qs(r.pmed.size(), -1.0);
+                if (r.bragg.plateau_med > 0) for (size_t i = 0; i < qs.size(); ++i) qs[i] = r.pmed[i] > 0 ? r.pmed[i] / r.bragg.plateau_med : -1.0;
+                p.emplace("q_sup", Array(qs));
+            }
             // doc pdvd/53.  Absent when the survey is off, so write_pc_tree
             // (PdvdPrMagnifyTrackingVisitor.cxx:293, which takes its column set
             // from the first carrier) reproduces the old schema exactly.
@@ -1828,6 +1871,46 @@ void CheckSTM_Michel::visit(Ensemble& ensemble) const
                 else {
                     rec.reject_bits |= R_PROFILE_SPARSE;
                 }
+            }
+        }
+
+        // ---- doc pdvd/66 (T8): the profile's end geometry and the fit's charge support
+        // Computed on the GEOMETRIC profile (every fit row, dead or live) -- the
+        // offline class-G rule (census_score.py) reads the same rows -- and on every
+        // fitted segment of the main cluster against the chain's plateau median
+        // (class H).  Writer fields; the guard below is the only verdict path and
+        // is off by default.
+        if (!prof.empty()) {
+            std::vector<size_t> idx;
+            for (size_t i = 0; i < prof.rr.size(); ++i) if (prof.rr[i] <= m_end_window_cm * units::cm) idx.push_back(i);
+            rec.n_end_pts = static_cast<int>(idx.size());
+            if (idx.size() >= 2) {
+                const double arc = std::abs(prof.L[idx.back()] - prof.L[idx.front()]);
+                double span = 0;
+                for (size_t a = 0; a < idx.size(); ++a)
+                    for (size_t b = a + 1; b < idx.size(); ++b)
+                        span = std::max(span, (prof.pts[idx[a]] - prof.pts[idx[b]]).magnitude());
+                rec.end_arc_cm = arc / units::cm; rec.end_span_cm = span / units::cm;
+                rec.end_arc_span = span > 0.01 * units::cm ? arc / span : -1.0;
+            }
+            if (rec.bragg.plateau_med > 0) {
+                rec.n_unsupported_segs = 0; rec.unsupported_len_cm = 0;
+                for (auto& seg : pa.find_cluster_segments(g, *main)) {   // ordered_edges: deterministic
+                    if (!seg) continue;
+                    const double med = segment_median_dQ_dx(seg) * units::cm;   // e/cm
+                    if (med <= 0) continue;
+                    const double frac = med / rec.bragg.plateau_med;
+                    if (chain_set.count(seg) && (rec.chain_support_min < 0 || frac < rec.chain_support_min)) rec.chain_support_min = frac;
+                    const double len = segment_track_length(seg);
+                    if (len >= m_unsupported_min_len_cm * units::cm && frac < m_unsupported_frac) {
+                        ++rec.n_unsupported_segs; rec.unsupported_len_cm += len / units::cm;
+                        if (rec.unsupported_frac_min < 0 || frac < rec.unsupported_frac_min) rec.unsupported_frac_min = frac;
+                    }
+                }
+            }
+            if (m_profile_geometry_guard &&
+                (rec.end_arc_span >= m_profile_arc_span_max || rec.n_unsupported_segs > 0)) {
+                rec.reject_bits |= R_PROFILE_GEOMETRY;
             }
         }
 

@@ -59,6 +59,11 @@ TEST_CASE("clus knob defaults: CheckSTM_Michel verdict thresholds")
     B("publish_other_arms", false);        // doc pdvd/64 (T6): role-7 rows for kOther arms, rows only
     B("bragg_peak_anchor", false);         // doc pdvd/65 (T7): geometric rr origin unless on
     D("bragg_peak_search_cm", 10.0);
+    B("profile_geometry_guard", false);    // doc pdvd/66 (T8): fields always written, the reject bit only when on
+    D("profile_arc_span_max", 1.5);
+    D("unsupported_min_len_cm", 20.0);
+    D("unsupported_frac", 0.25);
+    D("end_window_cm", 20.0);
     B("dead_volume_check", false);
     D("min_chain_coverage", 0.0);  // doc pdhd/03: 0 = off
     D("coverage_radius_cm", 3.0);
