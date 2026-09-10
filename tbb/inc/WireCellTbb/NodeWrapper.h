@@ -64,7 +64,11 @@ namespace WireCellTbb {
         void start() {
             m_wall = std::chrono::high_resolution_clock::now();
             m_core = std::clock();
-
+            // Also stamp a wall-clock (CLOCK_REALTIME) start when collecting
+            // per-execution intervals, so they align with an external sampler.
+            if (s_collect_intervals) {
+                m_wall_sys = std::chrono::system_clock::now();
+            }
         }
         void stop() {
             duration_t delta = std::chrono::high_resolution_clock::now() - m_wall;
@@ -75,7 +79,22 @@ namespace WireCellTbb {
 
             m_coretime = m_coretime + ((double) (std::clock() - m_core)) / CLOCKS_PER_SEC;
             ++m_calls;
+
+            if (s_collect_intervals) {
+                auto now = std::chrono::system_clock::now();
+                m_intervals.emplace_back(sys_seconds(m_wall_sys), sys_seconds(now));
+            }
         }
+
+        // Per-execution [start,end] wall-clock (CLOCK_REALTIME) intervals in
+        // seconds since epoch.  Only populated when collection is enabled.
+        const std::vector<std::pair<double, double>>& intervals() const {
+            return m_intervals;
+        }
+
+        // Globally enable/disable per-execution interval collection.  Set once
+        // (single threaded) before the graph runs; read on every node call.
+        static void set_collect_intervals(bool on) { s_collect_intervals = on; }
 
         //using duration_t = std::chrono::high_resolution_clock::duration;
         using duration_t = std::chrono::duration<double>;
@@ -109,6 +128,16 @@ namespace WireCellTbb {
 
 
         size_t m_calls{0};
+
+        // Per-execution wall-clock intervals (seconds since epoch), collected
+        // only when s_collect_intervals is set.
+        static bool s_collect_intervals;
+        std::chrono::system_clock::time_point m_wall_sys;
+        std::vector<std::pair<double, double>> m_intervals;
+
+        static double sys_seconds(std::chrono::system_clock::time_point tp) {
+            return std::chrono::duration<double>(tp.time_since_epoch()).count();
+        }
     };
     std::ostream& operator<<(std::ostream& os, const NodeInfo& info);
 

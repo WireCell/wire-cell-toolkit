@@ -1,6 +1,9 @@
 #include "WireCellTbb/NodeWrapper.h"
 #include "WireCellUtil/Type.h"
 
+// Off by default; DataFlowGraph turns it on when a timeline file is configured.
+bool WireCellTbb::NodeInfo::s_collect_intervals = false;
+
 std::ostream& WireCellTbb::operator<<(std::ostream& os, const WireCellTbb::NodeInfo& info)
 {
     WireCell::INode::pointer n = info.inode();

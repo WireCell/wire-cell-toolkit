@@ -34,6 +34,7 @@ import time
 import socket
 import shutil
 import argparse
+import threading
 import subprocess
 from pathlib import Path
 from statistics import mean, stdev as _sstdev
@@ -212,13 +213,47 @@ def analyze_nodes(lines):
     return nodes, total
 
 
+def analyze_timeline(path):
+    """Parse a TbbFlow node timeline JSON into (nodes, total).
+
+    Each node carries per-execution [start,end] intervals; wall-sec is the sum of
+    interval lengths (== the old Timer wall total), core-sec from core_sum.
+    """
+    j = json.loads(Path(path).read_text())
+    nodes = []
+    tot_wall = tot_core = 0.0
+    for n in j.get("nodes", []):
+        ivals = n.get("intervals", [])
+        wall = sum(b - a for a, b in ivals) if ivals else n.get("wall_sum", 0.0)
+        core = n.get("core_sum", 0.0)
+        tot_wall += wall
+        tot_core += core
+        nodes.append({
+            "instance": n.get("instance", ""), "class": n.get("class", ""),
+            "wall-sec": wall, "core-sec": core, "calls": n.get("calls", 0),
+            "intervals": ivals,
+        })
+    return nodes, {"wall": tot_wall, "core": tot_core}
+
+
 def analyze_log(logfile):
-    """Parse one wire-cell log into {phases, nodes, timer_total}."""
+    """Parse one wire-cell run into {phases, nodes, timer_total, timeline}.
+
+    Per-node timing comes from the TbbFlow node timeline JSON when present (it
+    carries per-execution intervals); otherwise it falls back to parsing the
+    log's Timer/summary lines.  Phase intervals always come from log timestamps.
+    """
     with open(logfile, errors="replace") as fp:
         lines = fp.readlines()
     phases = analyze_phases(lines)
+    tl = Path(str(logfile)[:-4] + ".timeline.json") if str(logfile).endswith(".log") \
+        else Path(str(logfile) + ".timeline.json")
+    if tl.exists():
+        nodes, total = analyze_timeline(tl)
+        return {"phases": phases, "nodes": nodes, "timer_total": total,
+                "timeline": str(tl)}
     nodes, total = analyze_nodes(lines)
-    return {"phases": phases, "nodes": nodes, "timer_total": total}
+    return {"phases": phases, "nodes": nodes, "timer_total": total, "timeline": None}
 
 
 # ---------------------------------------------------------------------------
@@ -230,7 +265,7 @@ _OOM_RE = re.compile(r"out of memory|CUDA error: out of memory|CUDA_ERROR_OUT_OF
 
 def build_cmd(stage, device, wc_cores, input, model_file, output, logfile,
               detname="pdhd", engine="TbbFlow", gpu_scheme="none", ngpu=1, napa=1,
-              verbosity=0):
+              timeline="", verbosity=0):
     return [
         "wire-cell",
         "-c", str(JSONNET),
@@ -247,29 +282,136 @@ def build_cmd(stage, device, wc_cores, input, model_file, output, logfile,
         "-A", f"napa={napa}",
         "-A", f"engine={engine}",
         "-A", f"wc_cores={wc_cores}",
+        "-A", f"timeline={timeline}",
         "-A", f"verbosity={verbosity}",
     ]
+
+
+# ---------------------------------------------------------------------------
+# Memory sampler: samples the child process's CPU RSS and per-process GPU VRAM
+# at a fixed rate while wire-cell runs, timestamped with CLOCK_REALTIME so the
+# samples align with the TbbFlow node timeline.
+# ---------------------------------------------------------------------------
+def _read_rss_bytes(pid):
+    try:
+        with open(f"/proc/{pid}/status") as fp:
+            for line in fp:
+                if line.startswith("VmRSS:"):
+                    return int(line.split()[1]) * 1024   # kB -> bytes
+    except OSError:
+        return None
+    return None
+
+
+def _nvml_init():
+    """Return a pynvml module with handles, or None (fall back to nvidia-smi)."""
+    try:
+        import pynvml
+        pynvml.nvmlInit()
+        return pynvml
+    except Exception:
+        return None
+
+
+def _vram_bytes_nvml(nvml, pid):
+    total = 0
+    try:
+        for i in range(nvml.nvmlDeviceGetCount()):
+            h = nvml.nvmlDeviceGetHandleByIndex(i)
+            for p in nvml.nvmlDeviceGetComputeRunningProcesses(h):
+                if p.pid == pid and p.usedGpuMemory:
+                    total += int(p.usedGpuMemory)
+    except Exception:
+        pass
+    return total
+
+
+def _vram_bytes_smi(pid):
+    try:
+        out = subprocess.run(
+            ["nvidia-smi", "--query-compute-apps=pid,used_memory",
+             "--format=csv,noheader,nounits"],
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=3).stdout.decode()
+        total = 0
+        for line in out.splitlines():
+            parts = [x.strip() for x in line.split(",")]
+            if len(parts) >= 2 and parts[0].isdigit() and int(parts[0]) == pid:
+                total += int(parts[1]) * 1024 * 1024   # MiB -> bytes
+        return total
+    except Exception:
+        return 0
+
+
+class MemorySampler(threading.Thread):
+    """Sample a PID's RSS (+ per-process VRAM when gpu=True) at `rate` Hz."""
+    def __init__(self, pid, rate=20.0, gpu=False):
+        super().__init__(daemon=True)
+        self.pid = pid
+        self.dt = 1.0 / rate
+        self.rate = rate
+        self.gpu = gpu
+        self.samples = []                 # list of [t, rss_bytes, vram_bytes]
+        self._halt = threading.Event()
+        self._nvml = _nvml_init() if gpu else None
+
+    def _vram(self):
+        if not self.gpu:
+            return 0
+        if self._nvml:
+            return _vram_bytes_nvml(self._nvml, self.pid)
+        return _vram_bytes_smi(self.pid)
+
+    def run(self):
+        while not self._halt.is_set():
+            t = time.time()
+            rss = _read_rss_bytes(self.pid)
+            if rss is None:
+                break                     # process gone
+            self.samples.append([t, rss, self._vram()])
+            rest = self.dt - (time.time() - t)
+            if rest > 0:
+                self._halt.wait(rest)
+
+    def stop(self):
+        self._halt.set()
+        self.join(timeout=3)
+
+    def result(self):
+        rss = [s[1] for s in self.samples]
+        vram = [s[2] for s in self.samples]
+        return {
+            "clock": "CLOCK_REALTIME", "rate_hz": self.rate,
+            "gpu": self.gpu, "vram_tool": ("pynvml" if self._nvml else "nvidia-smi"),
+            "nsamples": len(self.samples),
+            "peak_rss": max(rss, default=0), "peak_vram": max(vram, default=0),
+            "samples": self.samples,
+        }
 
 
 def run_wirecell(stage, device, wc_cores, torch_cores, input, outdir,
                  model_file=DEFAULT_MODEL, detname="pdhd", engine="TbbFlow",
                  gpu_scheme="none", ngpu=1, napa=1, tag="", output=None,
-                 verbosity=0, extra_env=None, dry_run=False):
+                 mem_rate=20.0, verbosity=0, extra_env=None, dry_run=False):
     """
     Run one wire-cell job (stage=sim|osp|spng) and classify the outcome.
 
-    Returns a dict describing the run; the log is left on disk for analyze_log.
-    outcome is one of: ok | oom | error | skipped(dry).
+    Collects a TbbFlow node timeline JSON (per-execution intervals) and a memory
+    profile JSON (RSS + per-process VRAM, sampled at mem_rate Hz) alongside the
+    log.  outcome is one of: ok | oom | error | skipped(dry).
     """
     outdir = Path(outdir)
     outdir.mkdir(parents=True, exist_ok=True)
     stem = tag or f"{stage}-{device}-wc{wc_cores}-omp{torch_cores}"
     logfile = outdir / f"{stem}.log"
     output = Path(output) if output else outdir / f"{stem}.npz"
+    # The node timeline is a TbbFlow feature; skip it for Pgrapher (e.g. sim).
+    timeline = outdir / f"{stem}.timeline.json" if engine == "TbbFlow" else None
+    memprofile = outdir / f"{stem}.memprofile.json"
 
     cmd = build_cmd(stage, device, wc_cores, input, model_file, output, logfile,
                     detname=detname, engine=engine, gpu_scheme=gpu_scheme,
-                    ngpu=ngpu, napa=napa, verbosity=verbosity)
+                    ngpu=ngpu, napa=napa, timeline=(str(timeline) if timeline else ""),
+                    verbosity=verbosity)
 
     env = os.environ.copy()
     env["OMP_NUM_THREADS"] = str(torch_cores)
@@ -281,7 +423,8 @@ def run_wirecell(stage, device, wc_cores, torch_cores, input, outdir,
         "torch_cores": torch_cores, "engine": engine, "input": str(input),
         "gpu_scheme": gpu_scheme, "ngpu": ngpu, "napa": napa,
         "detname": detname, "logfile": str(logfile), "output": str(output),
-        "cmd": cmd, "stem": stem,
+        "timeline": str(timeline) if timeline else None,
+        "memprofile": str(memprofile), "cmd": cmd, "stem": stem,
     }
 
     if dry_run:
@@ -290,12 +433,21 @@ def run_wirecell(stage, device, wc_cores, torch_cores, input, outdir,
         result["wall_clock"] = 0.0
         return result
 
+    gpu_run = str(device).startswith("gpu") or gpu_scheme != "none"
     t0 = time.time()
-    proc = subprocess.run(cmd, env=env, stdout=subprocess.PIPE,
-                          stderr=subprocess.STDOUT)
+    proc = subprocess.Popen(cmd, env=env, stdout=subprocess.PIPE,
+                            stderr=subprocess.STDOUT)
+    sampler = MemorySampler(proc.pid, rate=mem_rate, gpu=gpu_run)
+    sampler.start()
+    captured = proc.stdout.read().decode(errors="replace") if proc.stdout else ""
+    proc.wait()
+    sampler.stop()
     result["wall_clock"] = round(time.time() - t0, 3)
     result["returncode"] = proc.returncode
-    captured = proc.stdout.decode(errors="replace") if proc.stdout else ""
+    try:
+        memprofile.write_text(json.dumps(sampler.result()))
+    except OSError:
+        pass
 
     # Scan both captured stdio and the log file for OOM markers.
     oom = bool(_OOM_RE.search(captured))
@@ -421,6 +573,67 @@ def config_stem(stage, device, wc_cores, torch_cores, gpu_scheme="none", ngpu=1)
     return s
 
 
+# Map the fine-grained node category to the 3-way memory-blame category.
+_BLAME_CAT = {"dnn": "dnn", "sp_nondnn": "sp_other", "io": "other", "other": "other"}
+
+
+def load_memprofile(run):
+    p = run.get("memprofile") if isinstance(run, dict) else run
+    if p and Path(p).exists():
+        try:
+            return json.loads(Path(p).read_text())
+        except Exception:
+            return None
+    return None
+
+
+def memory_blame(analysis, mp):
+    """Correlate node intervals with memory samples -> peak RSS/VRAM per category.
+
+    A sample is attributed to a category if its time lies within any execution
+    interval of a node in that category.  Categories overlap under parallelism,
+    so per-category peaks are not additive.  Requires the timeline (intervals);
+    returns only the overall peaks if intervals are absent.
+    """
+    samples = (mp or {}).get("samples", [])
+    out = {"peak_rss": (mp or {}).get("peak_rss", 0),
+           "peak_vram": (mp or {}).get("peak_vram", 0), "by_category": {}}
+    if not samples:
+        return out
+    cats = {"dnn": [], "sp_other": [], "other": []}
+    for nd in analysis.get("nodes", []):
+        key = _BLAME_CAT.get(report_category(nd["class"]), "other")
+        cats[key].extend(nd.get("intervals", []))
+    for key, ivals in cats.items():
+        ivals = sorted(ivals)
+        rss = vram = 0
+        for t, r, v in samples:
+            if any(a <= t <= b for a, b in ivals):
+                rss = max(rss, r); vram = max(vram, v)
+        out["by_category"][key] = {"peak_rss": rss, "peak_vram": vram}
+    return out
+
+
+def memory_summary(runs, analyses):
+    """Aggregate memory blame over ok runs (peak = max across runs)."""
+    blames = []
+    for r, a in zip(runs, analyses):
+        mp = load_memprofile(r)
+        if mp:
+            blames.append(memory_blame(a, mp))
+    if not blames:
+        return None
+    agg = {"peak_rss": max(b["peak_rss"] for b in blames),
+           "peak_vram": max(b["peak_vram"] for b in blames),
+           "by_category": {}}
+    for key in ("dnn", "sp_other", "other"):
+        rss = [b["by_category"].get(key, {}).get("peak_rss", 0) for b in blames]
+        vram = [b["by_category"].get(key, {}).get("peak_vram", 0) for b in blames]
+        agg["by_category"][key] = {"peak_rss": max(rss, default=0),
+                                   "peak_vram": max(vram, default=0)}
+    return agg
+
+
 def make_report(stage, device, wc_cores, torch_cores, runs, engine="TbbFlow",
                 detname="pdhd", gpu_scheme="none", ngpu=1, napa=1):
     """Build a per-config report (schema spngbench-config/1) from run dicts.
@@ -456,6 +669,7 @@ def make_report(stage, device, wc_cores, torch_cores, runs, engine="TbbFlow",
             "input": r.get("input"), "outcome": r.get("outcome"),
             "returncode": r.get("returncode"), "wall_clock": r.get("wall_clock"),
             "logfile": r.get("logfile"), "stem": r.get("stem"),
+            "timeline": r.get("timeline"), "memprofile": r.get("memprofile"),
             **({"stdio_tail": r["stdio_tail"]} if r.get("stdio_tail") else {}),
         } for r in runs],
         "phases": rollup_phases(analyses) if analyses else None,
@@ -463,6 +677,7 @@ def make_report(stage, device, wc_cores, torch_cores, runs, engine="TbbFlow",
             "per_node": rollup_nodes(analyses),
             "categories": rollup_categories(analyses),
         } if analyses else None,
+        "memory": memory_summary(ok, analyses) if analyses else None,
     }
     return report
 

@@ -2,6 +2,7 @@
 
 #include "WireCellUtil/Type.h"
 #include "WireCellUtil/NamedFactory.h"
+#include "WireCellUtil/Persist.h"
 
 #include <tbb/global_control.h>
 #include <tbb/task_arena.h>
@@ -53,6 +54,8 @@ Configuration DataFlowGraph::default_configuration() const
     Configuration cfg;
     cfg["max_threads"] = 0;
     cfg["summary"] = m_summary;
+    // If set, write per-node execution intervals as JSON to this file.
+    cfg["timeline"] = m_timeline;
     return cfg;
 }
 
@@ -62,6 +65,12 @@ void DataFlowGraph::configure(const Configuration& cfg)
         m_thread_limit = cfg["max_threads"].asInt();
     }
     m_summary = get(cfg, "summary", m_summary);
+    m_timeline = get<std::string>(cfg, "timeline", m_timeline);
+    // Enabling interval collection is global to all NodeInfo, so set it here,
+    // before the graph is connected/built.
+    if (!m_timeline.empty()) {
+        WireCellTbb::NodeInfo::set_collect_intervals(true);
+    }
 }
 
 bool DataFlowGraph::connect(INode::pointer tail, INode::pointer head, size_t sport, size_t rport)
@@ -194,7 +203,38 @@ bool DataFlowGraph::run()
             log->info("totals: wall={:.3f} s, core={:.3f} s, (counts include any EOS)",
                       walltot_ms / 1000.0, coretot_s);
         }
-            
+
+    }
+
+    if (!m_timeline.empty()) {
+        // Emit the per-node execution timeline as JSON: each node's [start,end]
+        // wall-clock (CLOCK_REALTIME) intervals in seconds since epoch, plus the
+        // wall/core sums and call count.  Aligns with an external memory sampler.
+        Configuration jroot;
+        jroot["clock"] = "CLOCK_REALTIME";
+        jroot["unit"] = "seconds";
+        Configuration jnodes(Json::arrayValue);
+        for (const auto& node : m_nodes) {
+            const auto& info = node->info();
+            Configuration jn;
+            jn["instance"] = info.instance_name();
+            jn["class"] = WireCell::type(*info.inode());
+            jn["calls"] = (Json::UInt64) info.calls();
+            jn["wall_sum"] = info.runtime().count();
+            jn["core_sum"] = info.coretime();
+            Configuration jints(Json::arrayValue);
+            for (const auto& iv : info.intervals()) {
+                Configuration jiv(Json::arrayValue);
+                jiv.append(iv.first);
+                jiv.append(iv.second);
+                jints.append(jiv);
+            }
+            jn["intervals"] = jints;
+            jnodes.append(jn);
+        }
+        jroot["nodes"] = jnodes;
+        WireCell::Persist::dump(m_timeline, jroot);
+        log->debug("wrote node timeline ({} nodes) to {}", m_nodes.size(), m_timeline);
     }
 
     return true;

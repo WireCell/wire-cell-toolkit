@@ -154,6 +154,7 @@ function(input,
          napa=1,
          engine='Pgrapher',
          wc_cores=1,
+         timeline='',
          verbosity=0)
 
     assert stage == "sim" || stage == "osp" || stage == "spng"
@@ -205,7 +206,8 @@ function(input,
     local tbb_dfp = {
         type: "TbbDataFlowGraph",
         name: "",
-        data: { max_threads: wc.intify(wc_cores), summary: 1 },
+        data: { max_threads: wc.intify(wc_cores), summary: 1 }
+              + (if timeline == '' then {} else { timeline: timeline }),
     };
     local extra_uses = if engine == "TbbFlow" then [tbb_dfp] else [];
 

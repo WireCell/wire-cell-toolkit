@@ -51,6 +51,10 @@ namespace WireCellTbb {
 
         // if 0, no summary logged, else log at level 1=debug, 2=info
         int m_summary{1};
+
+        // If non-empty, per-node execution intervals are collected and written
+        // as JSON to this file after the graph runs.
+        std::string m_timeline{""};
         std::unordered_set<WireCellTbb::Node> m_nodes;
 
         // Lazily build arena (if limited) + graph + factory, once.
