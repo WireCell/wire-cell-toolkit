@@ -241,6 +241,11 @@ public:
         m_retreat_tail_strict = get<bool>(config, "retreat_tail_strict", m_retreat_tail_strict);
         m_retreat_tail_sublive = get<bool>(config, "retreat_tail_sublive", m_retreat_tail_sublive);
         m_michel_collinear_split = get<bool>(config, "michel_collinear_split", m_michel_collinear_split);
+        // doc pdvd/75 (P1b): when the peak anchor (T7) rejects a profile on a
+        // shape bit although its anchored peak is prominent, and the same
+        // tests pass at the geometric origin, the geometric reading stands.
+        m_bragg_anchor_geo_fallback = get<bool>(config, "bragg_anchor_geo_fallback", m_bragg_anchor_geo_fallback);
+        m_bragg_anchor_rise_min = get<double>(config, "bragg_anchor_rise_min", m_bragg_anchor_rise_min);
         // doc pdvd/66 (T8): the profile-geometry fields are always written; the guard
         // turns them into a reject bit (R_PROFILE_GEOMETRY).
         m_profile_geometry_guard = get<bool>(config, "profile_geometry_guard", m_profile_geometry_guard);
@@ -599,6 +604,22 @@ public:
         cfg["retreat_tail_strict"] = m_retreat_tail_strict;
         cfg["retreat_tail_sublive"] = m_retreat_tail_sublive;
         cfg["michel_collinear_split"] = m_michel_collinear_split;
+        // doc pdvd/75 (P1b): default off.  The 3 cm peak anchor (T7) discards
+        // the rows past the running-mean maximum; on a rise that runs to the
+        // fit's last row the low partial-step end row pulls that maximum 2-3
+        // rows back and the anchor throws away the top of the Bragg rise, so
+        // the anchored profile reads flat.  When on: if the anchor fired, the
+        // anchored reading set any of no_bragg / shape_flat / plateau_off_mip
+        // / profile_sparse, and the anchored peak (the winning 5-point mean)
+        // is at least bragg_anchor_rise_min x the anchored plateau median,
+        // the contrast, plateau and KS tests are re-read at the geometric
+        // origin; if none of the four bits is set there, that reading (bragg,
+        // ks_*, ratio_*) replaces the anchored one and the four bits are
+        // cleared.  It can only clear bits.  bragg_anchor_fallback (1 when it
+        // fired) is written only when on.  The do_track_comp and dead-volume
+        // probes keep the anchored profile.
+        cfg["bragg_anchor_geo_fallback"] = m_bragg_anchor_geo_fallback;
+        cfg["bragg_anchor_rise_min"] = m_bragg_anchor_rise_min;
         // doc pdvd/66 (T8): default off.  The fields end_arc_span (fit arc over 3-D
         // span in the last end_window_cm of the chain profile -- doc 55 sec 17.1
         // item 5, the coiled end) and n_unsupported_segs (fitted segments of the
@@ -797,6 +818,8 @@ private:
     bool m_retreat_tail_strict{false};            // doc pdvd/74 (P3)
     bool m_retreat_tail_sublive{false};           // doc pdvd/74 (P3)
     bool m_michel_collinear_split{false};         // doc pdvd/74 (P3, doc 70's literal)
+    bool m_bragg_anchor_geo_fallback{false};      // doc pdvd/75 (P1b): the geometric reading may stand when the anchor rejects a prominent peak
+    double m_bragg_anchor_rise_min{1.5};          // x the anchored plateau median
     bool m_profile_geometry_guard{false};         // doc pdvd/66 (T8)
     double m_profile_arc_span_max{1.5}, m_unsupported_min_len_cm{20.0}, m_unsupported_frac{0.25}, m_end_window_cm{20.0};
     bool m_dead_volume_check{false};
@@ -881,6 +904,7 @@ private:
         int n_retreat{0}; double retreat_len{0};  // doc pdvd/57: chain segments retreated off the fit's far end
         int n_split{0}; double split_len{0}, split_kink_deg{0};  // doc pdvd/58: T1c fit-row split
         int stop_move_p3_bits{0};  // doc pdvd/74 (P3): bit0 the P3 tail reading changed the retreat's answer, bit1 the stop moved on a Bragg-confirmed chain
+        int bragg_anchor_fallback{0};  // doc pdvd/75 (P1b): 1 = the anchor's rejection was replaced by the geometric reading
         int n_michel_veto{0};  // doc pdvd/61: T2c fired -- an attached moved-stop Michel with too little charge was demoted
         int n_michel_veto_exempt{0};  // doc pdvd/72 (P3b): T2c would have fired, and the Michel's turn spared it
         int n_kept_near_stop_main{0}, n_kept_near_stop_comp{0};  // doc pdvd/62 (T3a): pr54 residuals kept by the stop anchor, main cluster / companions
@@ -1380,6 +1404,8 @@ private:
         // doc pdvd/74 (P3): the same pattern.
         if (m_retreat_tail_strict || m_retreat_tail_sublive || m_michel_collinear_split)
             I1("stop_move_p3_bits", r.stop_move_p3_bits);
+        // doc pdvd/75 (P1b): the same pattern.
+        if (m_bragg_anchor_geo_fallback) I1("bragg_anchor_fallback", r.bragg_anchor_fallback);
         I1("n_cluster_pts", r.n_cluster_pts); D1("chain_coverage", r.chain_coverage);
         I1("n_dots", r.n_dots); I1("n_dot_clusters_unfit", r.n_dot_clusters_unfit);
         D1("dots_ke_dqdx", r.dots_ke_dqdx); D1("dots_charge_unfit", r.dots_charge_unfit);
@@ -1975,6 +2001,11 @@ void CheckSTM_Michel::visit(Ensemble& ensemble) const
             // is; this decides where the peak is read.  rr' = end_L - L, rows
             // past the peak dropped; n_live_pts / dead_frac_cmp above stay
             // geometric.  Off => `live` untouched, byte-identical.
+            // doc pdvd/75 (P1b): the geometric live profile and the anchor's
+            // winning 5-point mean, kept for the fallback below.  Unused when
+            // the fallback is off.
+            const StmMichelProfile live_geo = live;
+            double anchor_peak_mean = -1;
             if (m_bragg_peak_anchor && live.L.size() >= 5) {
                 const size_t n = live.L.size();
                 double best = -1; size_t ibest = n - 1;
@@ -2002,6 +2033,7 @@ void CheckSTM_Michel::visit(Ensemble& ensemble) const
                     if (anch.L.size() >= 3) {
                         rec.bragg_anchor_shift = live.total_length - end_L;
                         live = anch;
+                        anchor_peak_mean = best;   // doc pdvd/75
                     }
                 }
             }
@@ -2074,6 +2106,65 @@ void CheckSTM_Michel::visit(Ensemble& ensemble) const
                 }
                 else {
                     rec.reject_bits |= R_PROFILE_SPARSE;
+                }
+            }
+            // ---- doc pdvd/75 (P1b): the geometric reading may stand ---------
+            // The anchor above only ever moves the origin back; on a Bragg
+            // rise that runs to the fit's last row it discards the top of the
+            // rise (the low partial-step end row pulls the 5-point maximum
+            // back), and the anchored profile reads flat.  When the anchor
+            // fired, rejected on a shape bit, and its own peak is prominent
+            // against the anchored plateau, the four shape tests are re-read
+            // at the geometric origin with the very same expressions; a
+            // reading that sets none of the four bits replaces the anchored
+            // one.  Bits can only be cleared here.  do_track_comp and the
+            // dead-volume probe above keep the anchored profile.  Off =>
+            // nothing below runs, byte-identical.
+            {
+                const int shape_bits = R_NO_BRAGG | R_SHAPE_FLAT | R_PLATEAU_OFF_MIP | R_PROFILE_SPARSE;
+                if (m_bragg_anchor_geo_fallback && mu_fn && rec.bragg_anchor_shift > 0 && anchor_peak_mean > 0
+                    && rec.bragg.valid && rec.bragg.plateau_med > 0
+                    && anchor_peak_mean >= m_bragg_anchor_rise_min * rec.bragg.plateau_med
+                    && (rec.reject_bits & shape_bits)) {
+                    const StmMichelBragg geo = stm_michel_bragg_contrast(live_geo, mu_at,
+                                                                         m_bragg_tail_lo_cm * units::cm, m_bragg_tail_hi_cm * units::cm,
+                                                                         m_bragg_plateau_lo_cm * units::cm, m_bragg_plateau_hi_cm * units::cm);
+                    int geo_bits = 0;
+                    if (!geo.valid || geo.expected <= 0) geo_bits |= R_PROFILE_SPARSE;
+                    else if (geo.contrast < m_bragg_contrast_min * geo.expected) geo_bits |= R_NO_BRAGG;
+                    if (geo.valid && m_plateau_mip_hi > m_plateau_mip_lo && m_mip_dqdx > 0) {
+                        const double pm = geo.plateau_med / m_mip_dqdx;
+                        if (pm < m_plateau_mip_lo || pm > m_plateau_mip_hi) geo_bits |= R_PLATEAU_OFF_MIP;
+                    }
+                    std::vector<double> test, ref_mu, ref_flat;
+                    for (size_t i = 0; i < live_geo.rr.size(); ++i) {
+                        if (live_geo.rr[i] > m_compare_range_cm * units::cm) continue;
+                        test.push_back(live_geo.dQdx[i]);
+                        ref_mu.push_back(mu_fn->scalar_function(live_geo.rr[i] / units::cm + m_offset_length_cm));
+                        ref_flat.push_back(m_mip_dqdx);
+                    }
+                    double ks_mu = 0, ks_flat = 0, ratio_mu = 0, ratio_flat = 0;
+                    if (test.size() >= 3) {
+                        auto sum = [](const std::vector<double>& v) { double s = 0; for (double x : v) s += x; return s; };
+                        ks_mu = WireCell::kslike_compare(test, ref_mu);
+                        ratio_mu = sum(ref_mu) / (sum(test) + 1e-9);
+                        ks_flat = WireCell::kslike_compare(test, ref_flat);
+                        ratio_flat = sum(ref_flat) / (sum(test) + 1e-9);
+                        if (ks_mu + m_ks_margin >= ks_flat) geo_bits |= R_SHAPE_FLAT;
+                    }
+                    else {
+                        geo_bits |= R_PROFILE_SPARSE;
+                    }
+                    SPDLOG_LOGGER_DEBUG(s_log, "{}anchor_geo_fallback: cluster {} shift {:.2f} cm peak/plateau {:.2f} | anchored contrast {:.2f}/{:.2f} ks {:.3f}/{:.3f} bits {} | geometric contrast {:.2f}/{:.2f} ks {:.3f}/{:.3f} bits {} -> {}",
+                                        m_evt_tag, rec.cluster_id, rec.bragg_anchor_shift / units::cm, anchor_peak_mean / rec.bragg.plateau_med,
+                                        rec.bragg.contrast, rec.bragg.expected, rec.ks_mu, rec.ks_flat, rec.reject_bits & shape_bits,
+                                        geo.contrast, geo.expected, ks_mu, ks_flat, geo_bits, geo_bits == 0 ? "geometric stands" : "anchored stands");
+                    if (geo_bits == 0) {
+                        rec.reject_bits &= ~shape_bits;
+                        rec.bragg = geo;
+                        rec.ks_mu = ks_mu; rec.ks_flat = ks_flat; rec.ratio_mu = ratio_mu; rec.ratio_flat = ratio_flat;
+                        rec.bragg_anchor_fallback = 1;
+                    }
                 }
             }
         }

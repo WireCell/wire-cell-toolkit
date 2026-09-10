@@ -82,6 +82,8 @@ TEST_CASE("clus knob defaults: CheckSTM_Michel verdict thresholds")
     B("retreat_tail_strict", false);        // doc pdvd/74 (P3): the doc 57 tail reading unless on
     B("retreat_tail_sublive", false);
     B("michel_collinear_split", false);     // doc pdvd/74 (P3): a Bragg-confirmed chain is never retreated / split
+    B("bragg_anchor_geo_fallback", false);  // doc pdvd/75 (P1b): the anchored reading alone decides unless on
+    D("bragg_anchor_rise_min", 1.5);        // x the anchored plateau median
     B("dead_volume_check", false);
     D("min_chain_coverage", 0.0);  // doc pdhd/03: 0 = off
     D("coverage_radius_cm", 3.0);
