@@ -90,7 +90,10 @@ python3 spngbench.py grid --mode shard --which both
 # a single sharded SPNG run
 python3 spngbench.py run spng --device gpu0 --gpu-scheme transverse --ngpu 2
 
-# everything (cpu + gpu + shard), from a config file
+# process-parallel: N concurrent single-APA jobs (wc1/omp1), cpu + 1 GPU
+python3 spngbench.py grid --mode proc --which both --nproc 1 2 3 4
+
+# everything (cpu + gpu + shard + proc), from a config file
 python3 spngbench.py grid --mode all --config spngbench.json
 
 # see the effective configuration
@@ -162,6 +165,25 @@ spans every grid point.  It contains:
 
 Per-point flow graphs are off by default for speed; enable with =--point-graphs=.
 
+* Process-level parallelism
+
+A third parallelism axis (orthogonal to wire-cell cores and GPU sharding):
+=grid --mode proc= runs *N independent single-APA jobs at once* (each =wc1/omp1=,
+selected by the =apa= TLA), on the CPU or *one shared GPU* (never 2-GPU).  This
+models production (one job per APA) and measures how many jobs co-fit.  Each cell
+=(device, nproc)= launches =nproc= wire-cell processes simultaneously and a
+=GroupMemorySampler= records the *summed* RSS and *summed* per-process VRAM over
+time; the peak of each sum is the group's simultaneous footprint.  Records are
+=proc-<which>-<device>-n<N>.json= (schema =spngbench-proc/1=); the grid-report gains
+a *Process parallelism* section (wall / RAM / VRAM vs =nproc=, plus a table).
+
+Measured (PDHD =napa=4=, RTX 4090 24 GiB): SPNG on one shared GPU scales VRAM
+essentially linearly (~6.6 GB per job -> 6.6 / 13.3 / 19.9 / 25.0 GB for
+=nproc= 1..4) while wall time stays ~flat (the GPU serializes; see below).  Four
+concurrent SPNG APAs use ~97% of a 4090's VRAM --- an L40S (48 GB) gives ~2x
+headroom.  On the CPU, wall stays flat while RAM scales linearly (true throughput
+gain, cores permitting).
+
 * Interpreting scaling
 
 Two effects are easy to misread (measured PDHD, =napa=4=, 2x RTX 4090):
@@ -184,13 +206,23 @@ Two effects are easy to misread (measured PDHD, =napa=4=, 2x RTX 4090):
   must dominate the fixed I/O --- i.e. larger frames / more events per job, or an
   I/O path that overlaps with compute.
 
+- *OSP DNN device.*  OSP's decon (=OmnibusSigProc=) is a CPU FFT algorithm; only its
+  final DNN-ROI (=Pytorch::DNNROIFinding=) uses torch.  With =device=gpu*= that DNN
+  runs on the GPU (~0.1 s/plane, ~1.3 GB VRAM); its wall is dominated by the CPU
+  decon.  SPNG instead runs the *whole* chain (decon / filters / ROI-uniter DNN) on
+  the GPU, so on GPU SPNG is far faster but uses much more VRAM.  This is an
+  architectural difference, not a benchmark artifact.  (Earlier the OSP TorchService
+  was mistakenly pinned to CPU regardless of =device=; fixed by forwarding =device=
+  into =detconf.get=.)
+
 * Config file
 
 JSON is always supported; YAML if =pyyaml= is installed.  A committed
 =spngbench.json= mirrors the built-in defaults — copy and edit it.  CLI flags
 override the file.  Keys: =detname=, =model_file=, =inputs=, =outdir=, =repeats=,
-=which=, =engine=, =hw.max_hyperthreads=, =cpu_grid.{wc_cores,torch_cores}=,
-=gpu_grid.{device,wc_cores,torch_cores}=, =two_gpu.{wc_cores,devices}=.
+=napa=, =which=, =engine=, =hw.max_hyperthreads=, =cpu_grid.{wc_cores,torch_cores}=,
+=gpu_grid.{device,wc_cores,torch_cores}=, =shard_grid.{device,schemes,ngpu,wc_cores}=,
+=proc_grid.{devices,nproc}=.
 
 * Extending
 
@@ -217,6 +249,9 @@ override the file.  Keys: =detname=, =model_file=, =inputs=, =outdir=, =repeats=
   range at =napa= (a single-APA job cannot use more than one wc-core unless
   longitudinal parallelism -- multiple events in flight -- is allowed, which the
   current inputs do not; that variation is left for later).
+- *Process parallelism* (=proc_grid=): add =nproc= values or devices (see the
+  "Process-level parallelism" section).  Each process runs one APA via the =apa=
+  single-APA TLA; =nproc= is clamped to the physical APA count.
 - *Other detectors* (DUNE FD): set =detname= once SPNG detconf exists for it.
 
 * Diagnostics

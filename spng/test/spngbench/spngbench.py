@@ -265,7 +265,7 @@ _OOM_RE = re.compile(r"out of memory|CUDA error: out of memory|CUDA_ERROR_OUT_OF
 
 def build_cmd(stage, device, wc_cores, input, model_file, output, logfile,
               detname="pdhd", engine="TbbFlow", gpu_scheme="none", ngpu=1, napa=1,
-              timeline="", verbosity=0):
+              apa=-1, timeline="", verbosity=0):
     return [
         "wire-cell",
         "-c", str(JSONNET),
@@ -280,6 +280,7 @@ def build_cmd(stage, device, wc_cores, input, model_file, output, logfile,
         "-A", f"gpu_scheme={gpu_scheme}",
         "-A", f"ngpu={ngpu}",
         "-A", f"napa={napa}",
+        "-A", f"apa={apa}",
         "-A", f"engine={engine}",
         "-A", f"wc_cores={wc_cores}",
         "-A", f"timeline={timeline}",
@@ -388,6 +389,92 @@ class MemorySampler(threading.Thread):
         }
 
 
+def _vram_map_smi(pids):
+    """One nvidia-smi call -> {pid: used_vram_bytes} for pids in the given set."""
+    try:
+        out = subprocess.run(
+            ["nvidia-smi", "--query-compute-apps=pid,used_memory",
+             "--format=csv,noheader,nounits"],
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=3).stdout.decode()
+        m = {}
+        for line in out.splitlines():
+            parts = [x.strip() for x in line.split(",")]
+            if len(parts) >= 2 and parts[0].isdigit():
+                pid = int(parts[0])
+                if pid in pids:
+                    m[pid] = m.get(pid, 0) + int(parts[1]) * 1024 * 1024
+        return m
+    except Exception:
+        return {}
+
+
+class GroupMemorySampler(threading.Thread):
+    """Sample the SUMMED RSS (+ summed per-process VRAM) across a set of PIDs at
+    `rate` Hz.  For the process-parallel axis: the peak of the summed footprint is
+    the group's simultaneous RAM/VRAM demand (the number that decides whether N
+    jobs co-fit on one host / one shared GPU)."""
+    def __init__(self, pids, rate=20.0, gpu=False):
+        super().__init__(daemon=True)
+        self.pids = list(pids)
+        self.dt = 1.0 / rate
+        self.rate = rate
+        self.gpu = gpu
+        self.samples = []                 # [t, sum_rss_bytes, sum_vram_bytes]
+        self.peak_rss = {p: 0 for p in self.pids}
+        self.peak_vram = {p: 0 for p in self.pids}
+        self._halt = threading.Event()
+        self._nvml = _nvml_init() if gpu else None
+
+    def _vram_map(self):
+        if not self.gpu:
+            return {}
+        if self._nvml:
+            return {p: _vram_bytes_nvml(self._nvml, p) for p in self.pids}
+        return _vram_map_smi(set(self.pids))
+
+    def run(self):
+        while not self._halt.is_set():
+            t = time.time()
+            srss = 0
+            alive = False
+            for p in self.pids:
+                r = _read_rss_bytes(p)
+                if r is not None:
+                    alive = True
+                    srss += r
+                    if r > self.peak_rss[p]:
+                        self.peak_rss[p] = r
+            vm = self._vram_map()
+            svram = sum(vm.values())
+            for p, v in vm.items():
+                if v > self.peak_vram.get(p, 0):
+                    self.peak_vram[p] = v
+            if not alive:
+                break                     # all processes gone
+            self.samples.append([t, srss, svram])
+            rest = self.dt - (time.time() - t)
+            if rest > 0:
+                self._halt.wait(rest)
+
+    def stop(self):
+        self._halt.set()
+        self.join(timeout=3)
+
+    def result(self):
+        rss = [s[1] for s in self.samples]
+        vram = [s[2] for s in self.samples]
+        return {
+            "clock": "CLOCK_REALTIME", "rate_hz": self.rate, "gpu": self.gpu,
+            "vram_tool": ("pynvml" if self._nvml else "nvidia-smi"),
+            "npids": len(self.pids), "nsamples": len(self.samples),
+            "peak_rss_sum": max(rss, default=0),
+            "peak_vram_sum": max(vram, default=0),
+            "per_pid_peak_rss": self.peak_rss,
+            "per_pid_peak_vram": self.peak_vram,
+            "samples": self.samples,
+        }
+
+
 def run_wirecell(stage, device, wc_cores, torch_cores, input, outdir,
                  model_file=DEFAULT_MODEL, detname="pdhd", engine="TbbFlow",
                  gpu_scheme="none", ngpu=1, napa=1, tag="", output=None,
@@ -470,6 +557,118 @@ def run_wirecell(stage, device, wc_cores, torch_cores, input, outdir,
     if result["outcome"] != "ok":
         result["stdio_tail"] = "\n".join(captured.splitlines()[-30:])
     return result
+
+
+# ---------------------------------------------------------------------------
+# Process-parallel axis: launch nproc concurrent single-APA jobs (one per APA),
+# each wc1/omp1 on a shared CPU or one shared GPU, and measure the aggregate
+# wall time and the summed RAM/VRAM footprint.  This models running one job per
+# APA in parallel (as in production) and, crucially, the VRAM pressure of N jobs
+# sharing one GPU -- the number that decides how many co-fit (e.g. RTX-4090 24GB
+# vs L40S 48GB).
+# ---------------------------------------------------------------------------
+def run_proc_group(which, device, nproc, adc_base, outdir, model_file=DEFAULT_MODEL,
+                   detname="pdhd", engine="TbbFlow", napa_phys=4, mem_rate=20.0,
+                   verbosity=0, dry_run=False):
+    outdir = Path(outdir)
+    outdir.mkdir(parents=True, exist_ok=True)
+    stem = f"proc-{which}-{device}-n{nproc}"
+    gpu_run = str(device).startswith("gpu")
+
+    def adc_for(k):
+        cand = str(Path(str(adc_base)).with_suffix("")) + f"-tpc{k}.npz"
+        return cand if Path(cand).exists() else str(adc_base)
+
+    base_meta = {
+        "which": which, "device": device, "nproc": nproc, "wc_cores": 1,
+        "torch_cores": 1, "gpu_scheme": "none", "ngpu": 1, "napa_phys": napa_phys,
+        "detname": detname, "engine": engine, "host": socket.gethostname(),
+        "host_ngpu": _ngpu(), "created": time.strftime("%Y-%m-%dT%H:%M:%S"),
+    }
+
+    if dry_run:
+        rec = {"schema": "spngbench-proc/1", "meta": base_meta, "outcome": "skipped",
+               "wall_clock": 0.0, "procs": [], "memory": None}
+        path = outdir / f"{stem}.json"
+        path.write_text(json.dumps(rec, indent=2))
+        rec["_path"] = str(path)
+        return rec
+
+    env = os.environ.copy()
+    env["OMP_NUM_THREADS"] = "1"
+
+    launched = []                         # (apa, popen, outfh, logfile, timeline, output, cmd)
+    t0 = time.time()
+    for k in range(nproc):
+        logfile = outdir / f"{stem}-apa{k}.log"
+        output = outdir / f"{stem}-apa{k}.npz"
+        timeline = outdir / f"{stem}-apa{k}.timeline.json" if engine == "TbbFlow" else None
+        cmd = build_cmd(which, device, 1, adc_for(k), model_file, output, logfile,
+                        detname=detname, engine=engine, gpu_scheme="none", ngpu=1,
+                        napa=napa_phys, apa=k,
+                        timeline=(str(timeline) if timeline else ""), verbosity=verbosity)
+        outfh = open(outdir / f"{stem}-apa{k}.out", "wb")
+        p = subprocess.Popen(cmd, env=env, stdout=outfh, stderr=subprocess.STDOUT)
+        launched.append((k, p, outfh, logfile, timeline, output, cmd))
+
+    sampler = GroupMemorySampler([p.pid for _, p, *_ in launched],
+                                 rate=mem_rate, gpu=gpu_run)
+    sampler.start()
+    for _, p, outfh, *_ in launched:
+        p.wait()
+        outfh.close()
+    sampler.stop()
+    wall = round(time.time() - t0, 3)
+
+    procs = []
+    n_ok = 0
+    any_oom = False
+    for k, p, _outfh, logfile, timeline, output, cmd in launched:
+        oom = False
+        if logfile.exists():
+            try:
+                with open(logfile, errors="replace") as fp:
+                    oom = bool(_OOM_RE.search(fp.read()))
+            except OSError:
+                pass
+        oc = "ok" if p.returncode == 0 else ("oom" if oom else "error")
+        n_ok += (oc == "ok")
+        any_oom = any_oom or oom
+        procs.append({
+            "apa": k, "returncode": p.returncode, "outcome": oc,
+            "input": adc_for(k), "logfile": str(logfile),
+            "timeline": str(timeline) if timeline else None, "output": str(output),
+        })
+    outcome = ("ok" if n_ok == nproc else
+               "oom" if any_oom else
+               "partial" if n_ok else "error")
+
+    memres = sampler.result()
+    memprofile = outdir / f"{stem}.memprofile.json"
+    try:
+        memprofile.write_text(json.dumps(memres))
+    except OSError:
+        pass
+
+    rec = {
+        "schema": "spngbench-proc/1",
+        "meta": {**base_meta, "cmd": launched[0][6] if launched else None},
+        "outcome": outcome,
+        "wall_clock": wall,
+        "procs": procs,
+        "memory": {
+            "peak_rss_sum": memres["peak_rss_sum"],
+            "peak_vram_sum": memres["peak_vram_sum"],
+            "per_pid_peak_rss": memres["per_pid_peak_rss"],
+            "per_pid_peak_vram": memres["per_pid_peak_vram"],
+            "vram_tool": memres["vram_tool"], "nsamples": memres["nsamples"],
+        },
+        "memprofile": str(memprofile),
+    }
+    path = outdir / f"{stem}.json"
+    path.write_text(json.dumps(rec, indent=2))
+    rec["_path"] = str(path)
+    return rec
 
 
 # ---------------------------------------------------------------------------
@@ -835,6 +1034,10 @@ def default_config():
             "wc_cores": [4],
             "torch_cores": 1,
         },
+        "proc_grid": {                  # process-level parallelism: nproc concurrent
+            "devices": ["cpu", "gpu0"], # single-APA jobs (wc1/omp1), CPU-only or 1 GPU
+            "nproc": [1, 2, 3, 4],      # (never 2-GPU); nproc clamped to physical APAs
+        },
     }
 
 
@@ -907,8 +1110,21 @@ def shard_cells(cfg, wc_sel=None):
             for scheme in g["schemes"] for ng in g["ngpu"] for wc in wcs]
 
 
-def select_cells(cfg, mode, wc_sel=None, torch_sel=None):
-    """Return the list of cells for the selected mode: cpu|gpu|shard|all."""
+def proc_cells(cfg, nproc_sel=None):
+    """Enumerate process-parallel cells: nproc concurrent single-APA jobs on each
+    configured device (cpu / one GPU), wc1/omp1.  nproc is clamped to the
+    detector's physical APA count."""
+    g = cfg.get("proc_grid", {})
+    phys = DETECTOR_MAX_APA.get(cfg.get("detname", "pdhd")) or max(
+        (nproc_sel or g.get("nproc", [1])), default=1)
+    nprocs = [n for n in (nproc_sel or g.get("nproc", [1, 2, 3, 4])) if 1 <= n <= phys]
+    devs = g.get("devices", ["cpu", "gpu0"])
+    return [{"device": d, "wc_cores": 1, "torch_cores": 1, "gpu_scheme": "none",
+             "ngpu": 1, "nproc": n} for d in devs for n in nprocs]
+
+
+def select_cells(cfg, mode, wc_sel=None, torch_sel=None, nproc_sel=None):
+    """Return the list of cells for the selected mode: cpu|gpu|shard|proc|all."""
     cells = []
     if mode in ("cpu", "all"):
         cells += cpu_cells(cfg, wc_sel, torch_sel)
@@ -916,6 +1132,8 @@ def select_cells(cfg, mode, wc_sel=None, torch_sel=None):
         cells += gpu_cells(cfg, wc_sel)
     if mode in ("shard", "two-gpu", "all"):
         cells += shard_cells(cfg, wc_sel)
+    if mode in ("proc", "all"):
+        cells += proc_cells(cfg, nproc_sel)
     return cells
 
 
@@ -958,10 +1176,15 @@ def run_grid(cfg, cells, which_list, dry_run=False):
     host_ngpu = _ngpu()
     napa = clamp_napa(cfg)
 
+    # The process-parallel axis addresses individual APAs by per-APA ADC file, so
+    # the sim must produce at least max(nproc) per-APA files.
+    max_nproc = max((c["nproc"] for c in cells if c.get("nproc")), default=0)
+    sim_napa = max(napa, max_nproc)
+
     # Run the sim once per depo input; OSP and SPNG share the ADC frame file(s).
-    log(f"sim: producing ADC frames for {len(depos)} depo input(s), napa={napa}")
+    log(f"sim: producing ADC frames for {len(depos)} depo input(s), napa={sim_napa}")
     adc_inputs = [ensure_adc(d, str(outdir), model_file=cfg["model_file"],
-                             detname=cfg["detname"], napa=napa, dry_run=dry_run)
+                             detname=cfg["detname"], napa=sim_napa, dry_run=dry_run)
                   for d in depos]
 
     index = {
@@ -974,14 +1197,43 @@ def run_grid(cfg, cells, which_list, dry_run=False):
             "ncells": len(cells),
         },
         "cells": [],
+        "proc": [],                     # process-parallel records (schema proc/1)
     }
     index_path = outdir / "grid-index.json"
 
     def flush():
         index_path.write_text(json.dumps(index, indent=2))
 
+    phys_napa = DETECTOR_MAX_APA.get(cfg["detname"]) or sim_napa
+
     for i, cell in enumerate(cells):
         device = cell["device"]
+
+        # Process-parallel cell: nproc concurrent single-APA jobs (per which).
+        if cell.get("nproc"):
+            nproc = cell["nproc"]
+            if device.startswith("gpu") and host_ngpu < 1:
+                index["proc"].append({"device": device, "nproc": nproc,
+                                      "skipped": True, "reason": "needs 1 GPU, have 0"})
+                flush()
+                continue
+            log(f"[cell {i+1}/{len(cells)}] proc {device} nproc{nproc} which={which_list}")
+            for w in which_list:
+                rec = run_proc_group(w, device, nproc, adc_inputs[0], str(outdir),
+                                     model_file=cfg["model_file"], detname=cfg["detname"],
+                                     engine=cfg["engine"], napa_phys=phys_napa,
+                                     dry_run=dry_run)
+                mem = rec.get("memory") or {}
+                index["proc"].append({
+                    "which": w, "device": device, "nproc": nproc,
+                    "outcome": rec["outcome"], "wall_clock": rec["wall_clock"],
+                    "peak_rss_sum": mem.get("peak_rss_sum"),
+                    "peak_vram_sum": mem.get("peak_vram_sum"),
+                    "path": rec.get("_path"),
+                })
+            flush()
+            continue
+
         scheme, ngpu = cell.get("gpu_scheme", "none"), cell.get("ngpu", 1)
         stag = f"-{scheme}{ngpu}" if scheme != "none" else ""
         log(f"[cell {i+1}/{len(cells)}] {device} wc{cell['wc_cores']} "
@@ -1876,6 +2128,104 @@ def make_grid_membars(cells, figdir):
     return figs
 
 
+# ---------------------------------------------------------------------------
+# Process-parallel axis reporting: read the proc-*.json records and chart the
+# aggregate wall time and the summed RAM/VRAM footprint vs the number of
+# simultaneous single-APA jobs, per stage and device.
+# ---------------------------------------------------------------------------
+def proc_records(base):
+    """Load every proc-*.json (schema spngbench-proc/1) in a directory."""
+    base = Path(base)
+    recs = []
+    for pf in sorted(base.glob("proc-*.json")):
+        try:
+            j = json.loads(pf.read_text())
+        except Exception:
+            continue
+        if not j.get("schema", "").startswith("spngbench-proc"):
+            continue
+        recs.append(j)
+    return recs
+
+
+def _proc_series(recs):
+    """Group proc records into {(which, device): [(nproc, wall, rss, vram, outcome)...]}."""
+    ser = {}
+    for j in recs:
+        m = j["meta"]; mem = j.get("memory") or {}
+        key = (m["which"], m["device"])
+        ser.setdefault(key, []).append((
+            m["nproc"], j.get("wall_clock"),
+            mem.get("peak_rss_sum") or 0, mem.get("peak_vram_sum") or 0,
+            j.get("outcome")))
+    for key in ser:
+        ser[key] = sorted(ser[key])
+    return ser
+
+
+def make_proc_figures(recs, figdir):
+    """Wall / peak-RAM / peak-VRAM vs number of simultaneous single-APA jobs."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    figs = {}
+    figdir = Path(figdir)
+    ser = _proc_series(recs)
+    if not ser:
+        return figs
+
+    STY = {"osp": "-o", "spng": "-s"}
+    COL = {"cpu": "#5f8fbf", "gpu0": "#d95f5f", "gpu": "#d95f5f"}
+
+    def lab(which, dev):
+        return f"{which.upper()} / {dev}"
+
+    def plot(idx, ylabel, title, fname, scale=1.0, gpu_only=False):
+        fig, ax = plt.subplots(figsize=(6, 4))
+        drew = False
+        for (which, dev), pts in sorted(ser.items()):
+            if gpu_only and not dev.startswith("gpu"):
+                continue
+            xs = [p[0] for p in pts]
+            ys = [p[idx] / scale if p[idx] else None for p in pts]
+            if not any(v for v in ys):
+                continue
+            ax.plot(xs, ys, STY.get(which, "-o"), color=COL.get(dev, "#7a5fbf"),
+                    label=lab(which, dev))
+            drew = True
+        if not drew:
+            plt.close(fig)
+            return
+        ax.set_xlabel("number of simultaneous single-APA jobs (nproc)")
+        ax.set_ylabel(ylabel); ax.set_title(title)
+        xs_all = sorted({p[0] for pts in ser.values() for p in pts})
+        ax.set_xticks(xs_all)
+        ax.grid(True, alpha=0.3); ax.legend(fontsize=8)
+        fig.tight_layout()
+        p = figdir / fname; fig.savefig(p, dpi=120); plt.close(fig)
+        figs[fname.split(".")[0].replace("proc_", "")] = p.name
+
+    plot(1, "elapsed wall time [s]",
+         "Process-parallel: wall time vs simultaneous jobs", "proc_wall.png")
+    plot(2, "summed peak RSS [GB]",
+         "Process-parallel: total RAM vs simultaneous jobs", "proc_ram.png", scale=1e9)
+    plot(3, "summed peak VRAM [GB]",
+         "Process-parallel: total VRAM (shared GPU) vs simultaneous jobs",
+         "proc_vram.png", scale=1e9, gpu_only=True)
+    return figs
+
+
+def _proc_table_rows(recs):
+    """Rows (which, device, nproc, outcome, wall, RAM_GB, VRAM_GB) for the table."""
+    rows = []
+    for (which, dev), pts in sorted(_proc_series(recs).items()):
+        for nproc, wall, rss, vram, outcome in pts:
+            rows.append((which, dev, nproc, outcome,
+                         wall, (rss or 0) / 1e9, (vram or 0) / 1e9))
+    return rows
+
+
 def _grid_overview_rows(cells):
     out = []
     for c in sorted(cells, key=lambda c: (c["gpu"], c["torch"], c["scheme"], c["wc"])):
@@ -1981,6 +2331,11 @@ def grid_report_command(grid_path, outdir, formats=("md", "html", "tex"),
     bars.update(make_grid_membars(cells, outdir))
     job_graphs, inputs = make_job_graphs(grid, cells, outdir)
 
+    # Process-parallel axis (proc-*.json), if any were run into this directory.
+    precs = proc_records(base)
+    proc_figs = make_proc_figures(precs, outdir) if precs else {}
+    proc_rows = _proc_table_rows(precs) if precs else []
+
     # Per-point summaries (one sub-directory each), for every compare file.
     points = []
     for c in sorted(cells, key=lambda c: (c["gpu"], c["torch"], c["scheme"], c["wc"])):
@@ -1998,7 +2353,8 @@ def grid_report_command(grid_path, outdir, formats=("md", "html", "tex"),
 
     ctx = {"grid": grid, "mats": mats, "bars": bars,
            "overview": _grid_overview_rows(cells), "points": points,
-           "ncells": len(cells), "jobs": job_graphs, "inputs": inputs}
+           "ncells": len(cells), "jobs": job_graphs, "inputs": inputs,
+           "proc_figs": proc_figs, "proc_rows": proc_rows}
     written = []
     if "md" in formats:
         p = outdir / "grid-summary.md"; p.write_text(_emit_grid_md(ctx)); written.append(p)
@@ -2007,7 +2363,8 @@ def grid_report_command(grid_path, outdir, formats=("md", "html", "tex"),
     if "tex" in formats:
         p = outdir / "grid-summary.tex"; p.write_text(_emit_grid_tex(ctx)); written.append(p)
     return {"outdir": str(outdir), "written": [str(p) for p in written],
-            "npoints": len(points), "matrices": mats, "bars": bars}
+            "npoints": len(points), "matrices": mats, "bars": bars,
+            "proc_figs": proc_figs}
 
 
 _MATRIX_BLURB = ("The outer product of device modes (rows) and node categories "
@@ -2026,6 +2383,7 @@ def _emit_grid_md(ctx):
          "- [Jobs](#jobs)",
          "- [Grid matrix](#grid-matrix)",
          "- [Trends](#trends)",
+         *(["- [Process parallelism](#process-parallelism)"] if ctx.get("proc_rows") else []),
          "- [Overview table](#overview-table)",
          "- Per-grid-point summaries:"]
     for stem, rlab, w, ratio in ctx["points"]:
@@ -2058,6 +2416,22 @@ def _emit_grid_md(ctx):
         if ctx["bars"].get(k):
             L.append(f"\n![{k}]({ctx['bars'][k]})\n")
 
+    if ctx.get("proc_rows"):
+        L.append("\n## Process parallelism\n")
+        L.append("A separate axis: instead of one job over N APAs, run *N independent "
+                 "single-APA jobs at once* (wc1/omp1), on the CPU or **one shared GPU**. "
+                 "Wall time measures throughput at fixed per-job cost; the summed "
+                 "RAM/VRAM is the simultaneous footprint that decides how many jobs "
+                 "co-fit on a host or a shared GPU (e.g. 24 GB RTX-4090 vs 48 GB L40S).\n")
+        for k in ("wall", "ram", "vram"):
+            if ctx["proc_figs"].get(k):
+                L.append(f"\n![proc {k}]({ctx['proc_figs'][k]})\n")
+        L.append("\n| stage | device | nproc | outcome | wall [s] | RAM [GB] | VRAM [GB] |")
+        L.append("|---|---|--:|---|--:|--:|--:|")
+        for which, dev, nproc, outcome, wall, ram, vram in ctx["proc_rows"]:
+            L.append(f"| {which} | {dev} | {nproc} | {outcome} | {_fmt(wall)} | "
+                     f"{_fmt(ram)} | {_fmt(vram)} |")
+
     L.append("\n## Overview table\n")
     L.append("| mode | config | wc | OSP DNN/spo/oth/tot | SPNG DNN/spo/oth/tot |")
     L.append("|---|---|--:|---|---|")
@@ -2080,6 +2454,7 @@ def _emit_grid_html(ctx):
          "<li><a href='#jobs'>Jobs</a></li>",
          "<li><a href='#matrix'>Grid matrix</a></li>",
          "<li><a href='#trends'>Trends</a></li>",
+         *(["<li><a href='#proc'>Process parallelism</a></li>"] if ctx.get("proc_rows") else []),
          "<li><a href='#overview'>Overview table</a></li>",
          "<li>Per-grid-point summaries:<ul>"]
     for stem, rlab, w, ratio in ctx["points"]:
@@ -2111,6 +2486,23 @@ def _emit_grid_html(ctx):
     for k in ("latency", "total", "ratio", "peakram", "peakvram"):
         if ctx["bars"].get(k):
             H.append(f"<p><img src='{ctx['bars'][k]}'></p>")
+    if ctx.get("proc_rows"):
+        H.append("<h2 id='proc'>Process parallelism</h2>")
+        H.append("<p>A separate axis: run <em>N independent single-APA jobs at once</em> "
+                 "(wc1/omp1) on the CPU or <b>one shared GPU</b>.  Wall time measures "
+                 "throughput at fixed per-job cost; the summed RAM/VRAM is the "
+                 "simultaneous footprint that decides how many jobs co-fit on a host or a "
+                 "shared GPU (e.g. 24 GB RTX-4090 vs 48 GB L40S).</p>")
+        for k in ("wall", "ram", "vram"):
+            if ctx["proc_figs"].get(k):
+                H.append(f"<p><img src='{ctx['proc_figs'][k]}'></p>")
+        H.append("<table><tr><th>stage</th><th>device</th><th>nproc</th><th>outcome</th>"
+                 "<th>wall [s]</th><th>RAM [GB]</th><th>VRAM [GB]</th></tr>")
+        for which, dev, nproc, outcome, wall, ram, vram in ctx["proc_rows"]:
+            H.append(f"<tr><td>{esc(which)}</td><td>{esc(dev)}</td><td>{nproc}</td>"
+                     f"<td>{esc(outcome)}</td><td>{_fmt(wall)}</td><td>{_fmt(ram)}</td>"
+                     f"<td>{_fmt(vram)}</td></tr>")
+        H.append("</table>")
     H.append("<h2 id='overview'>Overview table</h2>")
     H.append("<table><tr><th>mode</th><th>config</th><th>wc</th>"
              "<th>OSP DNN/spo/oth/tot</th><th>SPNG DNN/spo/oth/tot</th></tr>")
@@ -2161,6 +2553,23 @@ def _emit_grid_tex(ctx):
     for k in ("latency", "total", "ratio", "peakram", "peakvram"):
         if ctx["bars"].get(k):
             T.append(r"\begin{center}\includegraphics[width=\textwidth]{" + ctx["bars"][k] + r"}\end{center}")
+    if ctx.get("proc_rows"):
+        T.append(r"\clearpage\section{Process parallelism}")
+        T.append(r"A separate axis: run \emph{N independent single-APA jobs at once} "
+                 r"(wc1/omp1) on the CPU or \textbf{one shared GPU}.  Wall time measures "
+                 r"throughput at fixed per-job cost; the summed RAM/VRAM is the "
+                 r"simultaneous footprint that decides how many jobs co-fit on a host or "
+                 r"a shared GPU (e.g.\ 24\,GB RTX-4090 vs 48\,GB L40S).")
+        for k in ("wall", "ram", "vram"):
+            if ctx["proc_figs"].get(k):
+                T.append(r"\begin{center}\includegraphics[width=0.8\textwidth]{"
+                         + ctx["proc_figs"][k] + r"}\end{center}")
+        T.append(r"\small\begin{tabular}{llrlrrr}\toprule")
+        T.append(r"stage & device & nproc & outcome & wall [s] & RAM [GB] & VRAM [GB] \\\midrule")
+        for which, dev, nproc, outcome, wall, ram, vram in ctx["proc_rows"]:
+            T.append(f"{esc(which)} & {esc(dev)} & {nproc} & {esc(outcome)} & "
+                     f"{_fmt(wall)} & {_fmt(ram)} & {_fmt(vram)} " + r"\\")
+        T.append(r"\bottomrule\end{tabular}\normalsize")
     T.append(r"\section{Overview table}")
     T.append(r"\small\begin{tabular}{lllll}\toprule")
     T.append(r"mode & config & wc & OSP D/s/o/t & SPNG D/s/o/t \\\midrule")
@@ -2223,13 +2632,17 @@ def main(argv=None):
 
     pg = sub.add_parser("grid", help="scan a grid of (device, wc_cores, torch_cores) configs")
     pg.add_argument("--config", default=None, help="JSON/YAML config file (merged over defaults)")
-    pg.add_argument("--mode", choices=["cpu", "gpu", "shard", "two-gpu", "all"], default="cpu",
-                    help="which cell family to run (default cpu); 'shard' = multi-GPU")
+    pg.add_argument("--mode", choices=["cpu", "gpu", "shard", "two-gpu", "proc", "all"],
+                    default="cpu",
+                    help="which cell family to run (default cpu); 'shard' = multi-GPU, "
+                         "'proc' = process-parallel (N single-APA jobs at once)")
     pg.add_argument("--which", choices=["osp", "spng", "both"], default="both")
     pg.add_argument("--wc-cores", type=int, nargs="+", default=None,
                     help="subset of wire-cell core counts")
     pg.add_argument("--torch-cores", type=int, nargs="+", default=None,
                     help="subset of torch core counts (cpu mode)")
+    pg.add_argument("--nproc", type=int, nargs="+", default=None,
+                    help="subset of process counts (proc mode)")
     pg.add_argument("--napa", type=int, default=None,
                     help="number of APAs / per-APA pipelines (fixed, not scanned)")
     pg.add_argument("--outdir", default=None)
@@ -2298,7 +2711,8 @@ def main(argv=None):
         if args.input:
             cfg["inputs"] = args.input
         which_list = ["osp", "spng"] if args.which == "both" else [args.which]
-        cells = select_cells(cfg, args.mode, wc_sel=args.wc_cores, torch_sel=args.torch_cores)
+        cells = select_cells(cfg, args.mode, wc_sel=args.wc_cores,
+                             torch_sel=args.torch_cores, nproc_sel=args.nproc)
         if not cells:
             log("no cells selected")
             return 1
@@ -2306,6 +2720,15 @@ def main(argv=None):
             f"outdir={cfg['outdir']}")
         idx = run_grid(cfg, cells, which_list, dry_run=args.dry_run)
         # Compact human-facing summary to stdout.
+        for c in idx.get("proc", []):
+            if c.get("skipped"):
+                print(f"  proc {c['device']} n{c['nproc']}: SKIPPED ({c['reason']})")
+                continue
+            rss = c.get("peak_rss_sum"); vram = c.get("peak_vram_sum")
+            rss_s = f"{rss/1e9:.2f}GB" if rss else "-"
+            vram_s = f"{vram/1e9:.2f}GB" if vram else "-"
+            print(f"  proc {c['which']} {c['device']} n{c['nproc']}: "
+                  f"{c['outcome']} wall={c['wall_clock']}s RAM={rss_s} VRAM={vram_s}")
         for c in idx["cells"]:
             stag = f" {c['gpu_scheme']}{c['ngpu']}" if c.get("gpu_scheme", "none") != "none" else ""
             label = f"  {c['device']} wc{c['wc_cores']} omp{c['torch_cores']}{stag}"

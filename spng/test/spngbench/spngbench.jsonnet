@@ -152,6 +152,7 @@ function(input,
          gpu_scheme='none',
          ngpu=1,
          napa=1,
+         apa=-1,
          engine='Pgrapher',
          wc_cores=1,
          timeline='',
@@ -166,12 +167,22 @@ function(input,
     // (and more wire-cell cores can be usefully applied).
     local phys_napa = std.length(detconf[detname].tpcs);
     local nap = std.max(1, std.min(wc.intify(napa), phys_napa));
-    local tpcids = std.range(0, nap - 1);
+    // apa>=0 selects a SINGLE physical APA (process-parallel axis: each process
+    // runs one APA's pipeline).  apa<0 (default) runs the first `napa` APAs in
+    // one job (the intra-process wc-core / GPU-shard axes).
+    local apai = wc.intify(apa);
+    local tpcids = if apai >= 0 then [std.min(apai, phys_napa - 1)]
+                   else std.range(0, nap - 1);
 
     local osp_dump_prefix = std.strReplace(output, ".npz", "") + "_osp_dump";
 
     local controls = control_mod(device=device, verbosity=wc.intify(verbosity));
-    local det = detconf.get(detname, tpcids, sp_dump_prefix=osp_dump_prefix);
+    // Pass `device` so OSP's DNN-ROI TorchService uses the same device as SPNG.
+    // Without it detconf.get defaults the OSP TorchService to "cpu", so OSP's DNN
+    // silently ran on CPU even for device=gpu* -- making OSP-vs-SPNG GPU
+    // comparisons unfair (and OSP's VRAM zero).  For a single-GPU-shard base, OSP
+    // is not sharded and uses this base device.
+    local det = detconf.get(detname, tpcids, device=device, sp_dump_prefix=osp_dump_prefix);
     local ntpcs = std.length(det.tpcs);
 
     local spng_maker = roiuniter(model_file, do_transpose=false);
