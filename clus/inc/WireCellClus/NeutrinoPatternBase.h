@@ -1164,6 +1164,20 @@ namespace WireCell::Clus::PR {
         // named nue loss at 8 (pr/102 sec 8.3), so it never left 0.
         double m_other_seg_keep_isolated_len_admit{0.0 * units::cm};    // 0 = off; internal units
 
+        // doc pdvd/62 (T3 of doc pdvd/56) -- a STOP-LOCAL admission for the
+        // isolated residual: when anchor_cm > 0 and either fitted endpoint of
+        // the residual lies within anchor_cm of one of the anchors, the
+        // residual is kept regardless of the terminal-count / length floors
+        // above (doc pdvd/54 sec 2: the pr54 drop discards every residual in
+        // the 2-24 terminal band, which is exactly a Michel fragment's size,
+        // with no notion of WHERE it sits).  Nothing in the neutrino path
+        // (TaggerCheckNeutrino) sets these; CheckSTM_Michel sets the STM
+        // tagger's stop as the single anchor per candidate.  0 / empty =
+        // off, byte-identical.  anchor_fires counts the keeps this made.
+        double m_other_seg_keep_anchor_cm{0.0};                          // internal units; 0 = off
+        std::vector<WireCell::Point> m_other_seg_keep_anchors;
+        int m_other_seg_keep_anchor_fires{0};
+
         // doc sbnd_xin/docs/pr/102 P2 -- the B2 family (Steiner
         // fragmentation / nnf=0 shadowing): imaged charge farther than this
         // radius in 3-D from EVERY existing fitted trajectory is real

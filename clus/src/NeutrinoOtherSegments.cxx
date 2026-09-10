@@ -853,11 +853,35 @@ void PatternAlgorithms::find_other_segments(Graph& graph, Facade::Cluster& clust
                     const double kept_length = segment_track_length(new_seg);
                     const int    kept_points = temp_segments[max_length_cluster].number_points;
                     const int    kept_nnf    = temp_segments[max_length_cluster].number_not_faked;
-                    if (other_seg_keep_isolated_ok(m_other_seg_keep_isolated, kept_points,
+                    const bool floors_ok = other_seg_keep_isolated_ok(m_other_seg_keep_isolated, kept_points,
                                                    kept_length,
                                                    m_other_seg_keep_isolated_min_points,
                                                    m_other_seg_keep_isolated_min_length,
-                                                   m_other_seg_keep_isolated_len_admit)) {
+                                                   m_other_seg_keep_isolated_len_admit);
+                    // doc pdvd/62 (T3): the stop-local admission.  Off (0 /
+                    // no anchors) in every job but CheckSTM_Michel's, which
+                    // anchors the STM tagger's stop; a residual whose fitted
+                    // endpoint lies within anchor_cm of an anchor is kept
+                    // whatever the floors above said.  Evaluated only when the
+                    // floors refused, so the legacy keep path is untouched.
+                    double d_anchor = -1;
+                    if (!floors_ok && m_other_seg_keep_anchor_cm > 0) {
+                        for (const auto& a : m_other_seg_keep_anchors) {
+                            const double d = std::min((v1_fit_pt - a).magnitude(), (v2_fit_pt - a).magnitude());
+                            if (d_anchor < 0 || d < d_anchor) d_anchor = d;
+                        }
+                    }
+                    const bool near_anchor = d_anchor >= 0 && d_anchor <= m_other_seg_keep_anchor_cm;
+                    if (near_anchor) {
+                        ++m_other_seg_keep_anchor_fires;
+                        SPDLOG_LOGGER_INFO(s_log,
+                            "pr54 keep-isolated near-anchor: cluster {} n_points={} length={:.2f} cm d_anchor={:.2f} cm "
+                            "v1=({:.1f},{:.1f},{:.1f}) v2=({:.1f},{:.1f},{:.1f}) cm",
+                            cluster.get_cluster_id(), kept_points, kept_length / units::cm, d_anchor / units::cm,
+                            v1_fit_pt.x() / units::cm, v1_fit_pt.y() / units::cm, v1_fit_pt.z() / units::cm,
+                            v2_fit_pt.x() / units::cm, v2_fit_pt.y() / units::cm, v2_fit_pt.z() / units::cm);
+                    }
+                    if (floors_ok || near_anchor) {
                         // doc pr/102 P1 sentinel: fires ONLY for an admission
                         // the legacy floors would have refused, so the events
                         // emitting it are exactly the set the knobs can move.

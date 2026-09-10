@@ -193,6 +193,18 @@ public:
         // through-going tracks that pick up a spurious attached arm (docs 57/58/59).
         m_moved_stop_michel_guard = get<bool>(config, "moved_stop_michel_guard", m_moved_stop_michel_guard);
         m_moved_stop_michel_ke_min = get<double>(config, "moved_stop_michel_ke_min", m_moved_stop_michel_ke_min);
+        // doc pdvd/62 (T3): the Michel with no trajectory.  A: keep the
+        // pr54 isolated residual when it sits within stop_local_residual_cm
+        // of the tagger's stop (0 = off); B: admit a DISCONNECTED same-cluster
+        // piece near the stop into the Michel object the way a companion
+        // piece is; C: doc 55 sec 15.1's range-energy guard on a bridged /
+        // charge-only Michel (dis > michel_range_energy_dis_cm and KE <
+        // michel_range_energy_ke_min cannot be an electron born at the stop).
+        m_stop_local_residual_cm = get<double>(config, "stop_local_residual_cm", m_stop_local_residual_cm);
+        m_stop_local_michel_pieces = get<bool>(config, "stop_local_michel_pieces", m_stop_local_michel_pieces);
+        m_michel_range_energy_guard = get<bool>(config, "michel_range_energy_guard", m_michel_range_energy_guard);
+        m_michel_range_energy_dis_cm = get<double>(config, "michel_range_energy_dis_cm", m_michel_range_energy_dis_cm);
+        m_michel_range_energy_ke_min = get<double>(config, "michel_range_energy_ke_min", m_michel_range_energy_ke_min);
         m_dead_volume_check = get<bool>(config, "dead_volume_check", m_dead_volume_check);
         m_min_chain_coverage = get<double>(config, "min_chain_coverage", m_min_chain_coverage);
         m_michel_guards_stop = get<bool>(config, "michel_guards_stop", m_michel_guards_stop);
@@ -402,6 +414,37 @@ public:
         // targets conn_type==2, dis_cm>3; this targets conn_type==1, dis_cm==0
         // -- the two do not overlap).
         cfg["moved_stop_michel_ke_min"] = m_moved_stop_michel_ke_min;
+        // doc pdvd/62 (T3a): cm, 0 = off.  When > 0, the PR partition's pr54
+        // isolated-residual test (NeutrinoOtherSegments.cxx) keeps a residual
+        // whose fitted endpoint lies within this distance of the STM tagger's
+        // stop, whatever the terminal-count / length floors said -- doc
+        // pdvd/54 sec 2: 363 residuals per 120 events are dropped in the
+        // 2-24 terminal band, which is a Michel fragment's size, 74 of them
+        // within 20 cm of a scan candidate's stop.  Applies to the main
+        // cluster's partition AND the admitted companions' (same pa).
+        cfg["stop_local_residual_cm"] = m_stop_local_residual_cm;
+        // doc pdvd/62 (T3b): default off.  A kept residual is a DISCONNECTED
+        // piece of the main cluster's graph, which neither the attached path
+        // (needs an arm at stop_v) nor the dots loop (companion clusters
+        // only) ever looks at; when on, such a piece within michel_dot_radius_cm
+        // of the stop, no longer than dot_max_len_cm and passing the same
+        // body test as a companion piece joins the Michel object exactly as a
+        // companion piece does (conn_type 2).  Attached interior arms are
+        // excluded by construction.
+        cfg["stop_local_michel_pieces"] = m_stop_local_michel_pieces;
+        // doc pdvd/62 (T3c): default off.  doc 55 sec 15.1's kinematic test as
+        // a knob: a bridged (conn_type 2) or charge-only (3) Michel farther
+        // than michel_range_energy_dis_cm from the stop carrying less than
+        // michel_range_energy_ke_min MeV cannot be an electron born at the
+        // stop (26 of 45 conn_type-2 objects on the census fail it; 0 of 113
+        // attached ones).  Demotes via michel_conn_type only -- michel_found
+        // follows, reject_bits / is_stm untouched.  The 5 cm default is the
+        // argued distance ("cannot travel 5 cm ... under 10 MeV"); doc 55's
+        // best-F1 row was 3 cm, chosen on the same record, so it is offered
+        // as the owner's option rather than shipped.
+        cfg["michel_range_energy_guard"] = m_michel_range_energy_guard;
+        cfg["michel_range_energy_dis_cm"] = m_michel_range_energy_dis_cm;
+        cfg["michel_range_energy_ke_min"] = m_michel_range_energy_ke_min;
         // doc pdhd/03 sec 6: FiducialUtils::check_dead_volume from the end of
         // the live profile along the muon direction; a stop that walks into a
         // dead region is R_STOP_INTO_DEAD (three PDHD tracks end on the same
@@ -560,6 +603,11 @@ private:
     double m_split_dir_window_cm{5.0};
     bool m_moved_stop_michel_guard{false};        // doc pdvd/61 (T2c)
     double m_moved_stop_michel_ke_min{10.0};      // MeV
+    double m_stop_local_residual_cm{0.0};         // doc pdvd/62 (T3a): 0 = off
+    bool m_stop_local_michel_pieces{false};       // doc pdvd/62 (T3b)
+    bool m_michel_range_energy_guard{false};      // doc pdvd/62 (T3c)
+    double m_michel_range_energy_dis_cm{5.0};     // cm
+    double m_michel_range_energy_ke_min{10.0};    // MeV
     bool m_dead_volume_check{false};
     double m_min_chain_coverage{0.0}, m_coverage_radius_cm{3.0};
     bool m_michel_guards_stop{false};
@@ -636,6 +684,9 @@ private:
         int n_retreat{0}; double retreat_len{0};  // doc pdvd/57: chain segments retreated off the fit's far end
         int n_split{0}; double split_len{0}, split_kink_deg{0};  // doc pdvd/58: T1c fit-row split
         int n_michel_veto{0};  // doc pdvd/61: T2c fired -- an attached moved-stop Michel with too little charge was demoted
+        int n_kept_near_stop_main{0}, n_kept_near_stop_comp{0};  // doc pdvd/62 (T3a): pr54 residuals kept by the stop anchor, main cluster / companions
+        int n_local_pieces{0};      // doc pdvd/62 (T3b): disconnected same-cluster pieces admitted into the Michel object
+        int n_michel_range_veto{0}; // doc pdvd/62 (T3c): a bridged / charge-only Michel demoted by the range-energy guard
         int dead_ahead{-1};                        // doc pdhd/03: 1 = the live end walks into a dead region
         int n_cluster_pts{0}; double chain_coverage{-1};   // doc pdhd/03: cluster points within coverage_radius of a reconstructed point
         // dots
@@ -703,6 +754,7 @@ private:
             "steiner_gap_penalty", "sgp_dead_alpha", "sgp_min_edge", "sgp_sample_step", "sgp_point_radius",
             "sgp_weak_scale", "sgp_weak_qref", "sgp_max_sep", "good_point_pitch_frac",
             "break_seg_orient", "graph_endpoint_tol",
+            "traj_cover_probe",   // doc pdvd/62: the pr/67 fos census lines (log-only, byte-identical when off)
         };
         return keys;
     }
@@ -811,6 +863,10 @@ private:
         CM(pa.m_sgp_max_sep, "sgp_max_sep");
         D(pa.m_good_point_pitch_frac, "good_point_pitch_frac");
         B(pa.m_break_seg_orient, "break_seg_orient");
+        // doc pdvd/62: forward the pr/67 find_other_segments census switch so
+        // the "already covered" tagging of doc pdvd/54 sec 2.5's 27 lumps can
+        // be read on an arm.  Log lines only (NeutrinoOtherSegments.cxx:179).
+        B(pa.m_traj_cover_probe, "traj_cover_probe");
         // Process-wide state (TaggerCheckNeutrino.cxx:2505): only written
         // when the job configures it, so a job that does not name the key
         // leaves whatever the process already had.
@@ -1092,6 +1148,8 @@ private:
         I1("n_retreat", r.n_retreat); D1("retreat_len", r.retreat_len / cm);
         I1("n_split", r.n_split); D1("split_len", r.split_len / cm); D1("split_kink_deg", r.split_kink_deg);
         I1("n_michel_veto", r.n_michel_veto);
+        I1("n_kept_near_stop_main", r.n_kept_near_stop_main); I1("n_kept_near_stop_comp", r.n_kept_near_stop_comp);   // doc pdvd/62
+        I1("n_local_pieces", r.n_local_pieces); I1("n_michel_range_veto", r.n_michel_range_veto);
         I1("n_cluster_pts", r.n_cluster_pts); D1("chain_coverage", r.chain_coverage);
         I1("n_dots", r.n_dots); I1("n_dot_clusters_unfit", r.n_dot_clusters_unfit);
         D1("dots_ke_dqdx", r.dots_ke_dqdx); D1("dots_charge_unfit", r.dots_charge_unfit);
@@ -1304,9 +1362,17 @@ void CheckSTM_Michel::visit(Ensemble& ensemble) const
 
         PatternAlgorithms pa;
         apply_pattern_knobs(pa);
+        // doc pdvd/62 (T3a): anchor the partition's isolated-residual keep on
+        // the TAGGER's stop -- the only stop known before the partition runs
+        // (read_stm_anchor above; the chain's own stop does not exist yet).
+        if (m_stop_local_residual_cm > 0) {
+            pa.m_other_seg_keep_anchor_cm = m_stop_local_residual_cm * units::cm;
+            pa.m_other_seg_keep_anchors = {rec.tagger_stop_pt};
+        }
 
         // ---- the four PR stages on the main cluster ----------------------
         const bool ok_main = pa.find_proto_vertex(g, *main, *tf, m_dv, true, 2, true, particle_data());
+        rec.n_kept_near_stop_main = pa.m_other_seg_keep_anchor_fires;
         if (ok_main) {
             pa.clustering_points(g, *main, m_dv);
             pa.separate_track_shower(g, *main);
@@ -1329,6 +1395,7 @@ void CheckSTM_Michel::visit(Ensemble& ensemble) const
             pa.separate_track_shower(g, *cluster);
             pa.determine_direction(g, *cluster, particle_data(), m_recomb_model);
         }
+        rec.n_kept_near_stop_comp = pa.m_other_seg_keep_anchor_fires - rec.n_kept_near_stop_main;   // doc pdvd/62
 
         // ---- entry and stop vertices -------------------------------------
         VertexPtr entry_v, stop_v;
@@ -1866,7 +1933,7 @@ void CheckSTM_Michel::visit(Ensemble& ensemble) const
         };
         (void)note_cl; (void)note_seg;
 
-        if (stop_v && !companions.empty()) {
+        if (stop_v && (!companions.empty() || m_stop_local_michel_pieces)) {
             // Two passes: collect every admissible piece with its distance to the
             // stop, then assemble.  The seed of a BRIDGED object is then the
             // NEAREST piece rather than whichever the graph's edge order reached
@@ -1874,6 +1941,43 @@ void CheckSTM_Michel::visit(Ensemble& ensemble) const
             struct Piece { SegmentPtr seg; double d_stop; int cluster_id, gidx; };
             std::vector<Piece> pieces;
             double d_unfit = 1e9;            // closest approach of an UNFITTED companion
+            // doc pdvd/62 (T3b): a DISCONNECTED piece of the main cluster --
+            // what a pr54-kept residual is (its own two vertices, no edge to
+            // the chain) -- is admitted with the same three gates a companion
+            // piece gets below (radius, length, body test).  "Disconnected"
+            // is: neither endpoint vertex belongs to a chain segment and
+            // neither has an out-edge to one; an attached interior arm fails
+            // that by construction and stays T6's population.
+            if (m_stop_local_michel_pieces && !chain.empty()) {
+                std::set<VertexPtr> chain_vset(chain_vtxs.begin(), chain_vtxs.end());   // membership only, never iterated
+                for (auto& seg : pa.find_cluster_segments(g, *main)) {   // ordered_edges: deterministic
+                    if (!seg || chain_set.count(seg)) continue;
+                    const int sid = main->get_cluster_id() * 1000 + static_cast<int>(seg->get_graph_index());
+                    if (rec.claimed.count(sid)) continue;
+                    auto [va, vb] = find_vertices(g, seg);
+                    if (!va || !vb) continue;
+                    bool touches_chain = chain_vset.count(va) || chain_vset.count(vb);
+                    for (VertexPtr v : {va, vb}) {
+                        if (touches_chain) break;
+                        for (auto e : sorted_out_edges(v->get_descriptor(), g)) {
+                            auto s2 = g[e].segment;
+                            if (s2 && chain_set.count(s2)) { touches_chain = true; break; }
+                        }
+                    }
+                    if (touches_chain) continue;
+                    auto [d_stop, cp] = segment_get_closest_point(seg, rec.stop_pt, "fit", "main");
+                    if (d_stop > m_michel_dot_radius_cm * units::cm) continue;
+                    if (segment_track_length(seg) > m_dot_max_len_cm * units::cm) continue;
+                    double d_body = 1e9;
+                    for (size_t i = 0; i < prof.pts.size(); ++i) {
+                        if (prof.rr[i] < m_dot_body_exclusion_cm * units::cm) continue;
+                        d_body = std::min(d_body, (prof.pts[i] - cp).magnitude());
+                    }
+                    if (d_body < d_stop) continue;    // a delta ray / body fragment, not a Michel piece
+                    ++rec.n_local_pieces;
+                    pieces.push_back({seg, d_stop, main->get_cluster_id(), static_cast<int>(seg->get_graph_index())});
+                }
+            }
             for (auto* oc : companions) {
                 // The radius test again, at CLUSTER level, against the stop the
                 // chain actually ended on.  `companions` was selected against
@@ -2399,6 +2503,20 @@ void CheckSTM_Michel::visit(Ensemble& ensemble) const
             rec.michel_ke_best < m_moved_stop_michel_ke_min) {   // both plain MeV, no units:: scale (michel_ke_best is already / units::MeV)
             rec.michel_conn_type = 0;
             ++rec.n_michel_veto;
+        }
+        // doc pdvd/62 (T3c): doc 55 sec 15.1's kinematic test.  A bridged
+        // (2) or charge-only (3) Michel more than michel_range_energy_dis_cm
+        // from the stop with less than michel_range_energy_ke_min MeV cannot
+        // be an electron born at the stop (0 of 113 attached objects fail
+        // this; 26 of 45 bridged ones do, median 9.1 cm / 4.1 MeV -- a gamma
+        // or debris).  Same demotion route as the veto above: michel_conn_type
+        // only, so is_stm is untouched by construction; the role-3 point rows
+        // already written stay, as they do for the T2c veto.
+        if (m_michel_range_energy_guard && (rec.michel_conn_type == 2 || rec.michel_conn_type == 3) &&
+            rec.michel_dis_cm > m_michel_range_energy_dis_cm &&
+            rec.michel_ke_best < m_michel_range_energy_ke_min) {   // cm and MeV, both plain
+            rec.michel_conn_type = 0;
+            ++rec.n_michel_range_veto;
         }
 
         // doc pdhd/15 sec 4: michel_found now means "a Michel object exists" --

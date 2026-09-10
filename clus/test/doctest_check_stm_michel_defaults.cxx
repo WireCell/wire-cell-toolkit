@@ -51,6 +51,11 @@ TEST_CASE("clus knob defaults: CheckSTM_Michel verdict thresholds")
     D("split_dir_window_cm", 5.0);
     B("moved_stop_michel_guard", false);   // doc pdvd/61 (T2c): 0/false = off, no attached-arm veto
     D("moved_stop_michel_ke_min", 10.0);
+    D("stop_local_residual_cm", 0.0);      // doc pdvd/62 (T3a): 0 = off, the pr54 floors alone decide
+    B("stop_local_michel_pieces", false);  // doc pdvd/62 (T3b)
+    B("michel_range_energy_guard", false); // doc pdvd/62 (T3c)
+    D("michel_range_energy_dis_cm", 5.0);  // the argued distance, not doc 55's best-F1 3 cm row
+    D("michel_range_energy_ke_min", 10.0);
     B("dead_volume_check", false);
     D("min_chain_coverage", 0.0);  // doc pdhd/03: 0 = off
     D("coverage_radius_cm", 3.0);
