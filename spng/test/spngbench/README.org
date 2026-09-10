@@ -149,12 +149,40 @@ spans every grid point.  It contains:
   black, crashed sub-pixels white.  The full grid is reconstructed from every
   =compare-*.json= in the grid-index's directory (the index itself only records
   the last run), so cpu/gpu/shard runs into one =--outdir= are all included.
-- Trend *bar charts* (total wall per point; SPNG/OSP ratio per point).
+- Trend *bar charts*.  The headline is *elapsed execution wall time* (=latency=,
+  =bars_latency.png=) --- the true job duration, which *falls* as wire-cell cores
+  rise (real parallel speedup).  A second chart plots *total node-work*
+  (=bars_total.png=): the sum of per-node wall spans, a work/utilization measure
+  that *rises* with cores because each concurrently-running node's wall span
+  inflates under GPU serialization and CPU contention; it is *not* latency and
+  must not be read as one.  The SPNG/OSP ratio uses elapsed latency.
 - A grid *overview table*.
 - A *per-grid-point summary* for every cell (=report= output), linked from the
   Markdown/HTML and =\input= into the LaTeX, with a table of contents.
 
 Per-point flow graphs are off by default for speed; enable with =--point-graphs=.
+
+* Interpreting scaling
+
+Two effects are easy to misread (measured PDHD, =napa=4=, 2x RTX 4090):
+
+- *Wall time vs wire-cell cores.*  Use =latency= (elapsed execution wall), not
+  =total= node-work.  Latency *falls* with cores (e.g. 1-GPU SPNG 4.3 -> 2.6 s for
+  wc 1 -> 4; timeline shows average concurrency 1.0/1.9/3.7 as the four APA
+  pipelines run in parallel).  The =total= node-work *rises* (4.3 -> 9.4 s) only
+  because each concurrent node's wall span inflates --- it is throughput/utilization,
+  not duration.
+
+- *1 GPU vs 2 GPUs (transverse).*  The sharding is correct: each APA pipeline runs
+  wholly on one GPU (=tpc_index % ngpu=), the four APAs split 2+2.  Yet 2 GPUs give
+  *no* speedup (slightly slower) for two reasons.  (1) *I/O bound*: ~50% of the SP
+  wall is CPU-side =npz= read/write (=FrameFileSource= + =FrameFileSink=) that no GPU
+  count accelerates.  (2) *Multi-device overhead*: splitting the ~35% GPU compute
+  across two CUDA contexts inflates per-op time even single-threaded (DNN forward
+  +37%, cuFFT =KernelConvolve= +72%) as the per-device cuFFT/cudnn caches thrash on
+  every device switch.  To actually benefit from multiple GPUs the per-APA compute
+  must dominate the fixed I/O --- i.e. larger frames / more events per job, or an
+  I/O path that overlaps with compute.
 
 * Config file
 

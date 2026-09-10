@@ -1545,7 +1545,13 @@ def report_command(bench_path, outdir, formats=("md", "html", "tex"), with_graph
 # Grid-level report (across all grid points from a grid-index.json).
 # ---------------------------------------------------------------------------
 def _report_cat4(report):
-    """Return {DNN, sp_other, other, total} wall seconds from a per-node report."""
+    """Return {DNN, sp_other, other, total} wall seconds from a per-node report.
+
+    NOTE: these are SUMS of per-node wall spans -- a work/utilization measure, not
+    job latency.  Under TBB concurrency each node's wall span inflates (GPU
+    serialization + CPU contention), so this sum RISES with wc-cores even as the
+    real elapsed latency falls.  For latency use _report_latency() instead.
+    """
     d = {"DNN": 0.0, "sp_other": 0.0, "other": 0.0, "total": 0.0}
     for n in per_node_list(report):
         d["total"] += n["wall"]
@@ -1556,6 +1562,42 @@ def _report_cat4(report):
         else:
             d["other"] += n["wall"]
     return d
+
+
+def _report_latency(report):
+    """Elapsed job latency (seconds) for a stage report -- the meaningful 'how
+    long did it take' number, distinct from the sum-of-node-walls work measure.
+
+    Prefers the timeline execution span (max end - min start over all node
+    intervals), then the log 'execution' phase, then the whole-process
+    wall_clock.  Returns None if none are available.
+    """
+    # 1) Timeline span: the true SP execution wall (excludes startup/model load).
+    best = None
+    for r in (report.get("runs") or []):
+        tl = r.get("timeline")
+        if tl and Path(tl).exists():
+            try:
+                j = json.loads(Path(tl).read_text())
+                ivs = [(a, b) for n in j.get("nodes", [])
+                       for a, b in n.get("intervals", []) if b > a]
+                if ivs:
+                    span = max(b for _, b in ivs) - min(a for a, _ in ivs)
+                    best = span if best is None else min(best, span)
+            except Exception:
+                pass
+    if best is not None:
+        return best
+    # 2) 'execution' phase from the log timestamps (engine-agnostic).
+    try:
+        ex = report["phases"]["execution"]["mean"]
+        if ex is not None:
+            return ex
+    except (TypeError, KeyError):
+        pass
+    # 3) Whole-process wall clock (includes startup + model load).
+    wc = [r.get("wall_clock") for r in (report.get("runs") or []) if r.get("wall_clock")]
+    return min(wc) if wc else None
 
 
 SUBPIX = ["DNN", "sp_other", "other", "total"]          # the four categories
@@ -1595,10 +1637,12 @@ def grid_cells(base, compare_path=None):
             "wc": m["wc_cores"], "torch": m["torch_cores"],
             "scheme": m.get("gpu_scheme", "none"), "ngpu": int(m.get("ngpu", 1)),
             "outcome": {"osp": j["osp"]["outcome"], "spng": j["spng"]["outcome"]},
-            "cat": {}, "mem": {},
+            "cat": {}, "lat": {}, "mem": {},
         }
         for s in ("osp", "spng"):
-            rec["cat"][s] = _report_cat4(j[s]) if j[s].get("outcome") == "ok" else None
+            ok = j[s].get("outcome") == "ok"
+            rec["cat"][s] = _report_cat4(j[s]) if ok else None
+            rec["lat"][s] = _report_latency(j[s]) if ok else None
             rec["mem"][s] = j[s].get("memory")   # None for pre-mem-profiling runs
         cells.append(rec)
     return cells
@@ -1732,29 +1776,47 @@ def make_grid_bars(cells, figdir):
         return f"{base}/{conf}/wc{c['wc']}"
 
     labels = [lab(c) for c in ok]
+    x = range(len(labels))
+
+    # (1) Elapsed job latency -- the meaningful "how long did it take" metric.
+    #     This is what shows real speedup: it falls as wc-cores rise.
+    osp_l = [c["lat"]["osp"] or 0.0 for c in ok]
+    spng_l = [c["lat"]["spng"] or 0.0 for c in ok]
+    fig, ax = plt.subplots(figsize=(max(6, 0.3 * len(labels) + 2), 4))
+    ax.bar([i - 0.2 for i in x], osp_l, width=0.4, label="OSP", color="#5f8fbf")
+    ax.bar([i + 0.2 for i in x], spng_l, width=0.4, label="SPNG", color="#d95f5f")
+    ax.set_xticks(list(x)); ax.set_xticklabels(labels, rotation=90, fontsize=6)
+    ax.set_ylabel("elapsed wall time [s]"); ax.set_yscale("log"); ax.legend()
+    ax.set_title("Elapsed execution wall time per grid point (log) -- lower is faster")
+    fig.tight_layout()
+    p = figdir / "bars_latency.png"; fig.savefig(p, dpi=120); plt.close(fig)
+    figs["latency"] = p.name
+
+    # (2) Sum of per-node wall spans -- a WORK/utilization measure (NOT latency);
+    #     it rises with wc-cores as concurrent nodes' spans inflate.  Kept for
+    #     comparison but clearly distinguished from latency above.
     osp_t = [c["cat"]["osp"]["total"] if c["cat"]["osp"] else 0.0 for c in ok]
     spng_t = [c["cat"]["spng"]["total"] if c["cat"]["spng"] else 0.0 for c in ok]
-    x = range(len(labels))
     fig, ax = plt.subplots(figsize=(max(6, 0.3 * len(labels) + 2), 4))
     ax.bar([i - 0.2 for i in x], osp_t, width=0.4, label="OSP", color="#5f8fbf")
     ax.bar([i + 0.2 for i in x], spng_t, width=0.4, label="SPNG", color="#d95f5f")
     ax.set_xticks(list(x)); ax.set_xticklabels(labels, rotation=90, fontsize=6)
-    ax.set_ylabel("total wall time [s]"); ax.set_yscale("log"); ax.legend()
-    ax.set_title("Total wall time per grid point (log)")
+    ax.set_ylabel("sum of per-node wall [s]"); ax.set_yscale("log"); ax.legend()
+    ax.set_title("Total node-work per grid point (sum of per-node wall; utilization, not latency)")
     fig.tight_layout()
     p = figdir / "bars_total.png"; fig.savefig(p, dpi=120); plt.close(fig)
     figs["total"] = p.name
 
     rl, ratios = [], []
     for c in ok:
-        if c["cat"]["osp"] and c["cat"]["spng"] and c["cat"]["osp"]["total"]:
-            rl.append(lab(c)); ratios.append(c["cat"]["spng"]["total"] / c["cat"]["osp"]["total"])
+        if c["lat"]["osp"] and c["lat"]["spng"]:
+            rl.append(lab(c)); ratios.append(c["lat"]["spng"] / c["lat"]["osp"])
     if rl:
         fig, ax = plt.subplots(figsize=(max(6, 0.3 * len(rl) + 2), 3.5))
         ax.bar(range(len(rl)), ratios, color="#7a5fbf")
         ax.axhline(1.0, color="k", lw=0.6)
         ax.set_xticks(range(len(rl))); ax.set_xticklabels(rl, rotation=90, fontsize=6)
-        ax.set_ylabel("SPNG / OSP total wall"); ax.set_title("SPNG-over-OSP ratio per grid point")
+        ax.set_ylabel("SPNG / OSP elapsed wall"); ax.set_title("SPNG-over-OSP elapsed-latency ratio per grid point")
         fig.tight_layout()
         p = figdir / "bars_ratio.png"; fig.savefig(p, dpi=120); plt.close(fig)
         figs["ratio"] = p.name
@@ -1988,7 +2050,11 @@ def _emit_grid_md(ctx):
         L.append(f"\n![grid matrix]({ctx['mats']['matrix']})\n")
 
     L.append("\n## Trends\n")
-    for k in ("total", "ratio", "peakram", "peakvram"):
+    L.append("*`latency` is elapsed execution wall time (job duration) — the metric "
+             "that shows real speedup: it falls as wire-cell cores rise. `total` is the "
+             "sum of per-node wall spans, a work/utilization measure that RISES with "
+             "cores as concurrent nodes' spans inflate; it is not latency.*\n")
+    for k in ("latency", "total", "ratio", "peakram", "peakvram"):
         if ctx["bars"].get(k):
             L.append(f"\n![{k}]({ctx['bars'][k]})\n")
 
@@ -2037,7 +2103,12 @@ def _emit_grid_html(ctx):
     if ctx["mats"].get("matrix"):
         H.append(f"<p><img src='{ctx['mats']['matrix']}'></p>")
     H.append("<h2 id='trends'>Trends</h2>")
-    for k in ("total", "ratio", "peakram", "peakvram"):
+    H.append("<p><em><code>latency</code> is elapsed execution wall time (job duration) "
+             "&mdash; the metric that shows real speedup: it falls as wire-cell cores "
+             "rise. <code>total</code> is the sum of per-node wall spans, a "
+             "work/utilization measure that RISES with cores as concurrent nodes' spans "
+             "inflate; it is not latency.</em></p>")
+    for k in ("latency", "total", "ratio", "peakram", "peakvram"):
         if ctx["bars"].get(k):
             H.append(f"<p><img src='{ctx['bars'][k]}'></p>")
     H.append("<h2 id='overview'>Overview table</h2>")
@@ -2082,7 +2153,12 @@ def _emit_grid_tex(ctx):
     if ctx["mats"].get("matrix"):
         T.append(r"\begin{center}\includegraphics[width=\textwidth]{" + ctx["mats"]["matrix"] + r"}\end{center}")
     T.append(r"\section{Trends}")
-    for k in ("total", "ratio", "peakram", "peakvram"):
+    T.append(r"\emph{\texttt{latency} is elapsed execution wall time (job duration) --- "
+             r"the metric that shows real speedup: it falls as wire-cell cores rise. "
+             r"\texttt{total} is the sum of per-node wall spans, a work/utilization "
+             r"measure that RISES with cores as concurrent nodes' spans inflate; it is "
+             r"not latency.}" + "\n")
+    for k in ("latency", "total", "ratio", "peakram", "peakvram"):
         if ctx["bars"].get(k):
             T.append(r"\begin{center}\includegraphics[width=\textwidth]{" + ctx["bars"][k] + r"}\end{center}")
     T.append(r"\section{Overview table}")
