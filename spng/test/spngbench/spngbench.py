@@ -1095,32 +1095,38 @@ def emit_html(bench, ctx, figs, graphs):
     return "\n".join(H) + "\n"
 
 
-def emit_latex(bench, ctx, figs, graphs):
+def emit_latex(bench, ctx, figs, graphs, fragment=False, figpre=""):
     m, R = bench["meta"], bench["reports"]
     def esc(x):
         return str(x).replace("_", r"\_").replace("&", r"\&").replace("%", r"\%")
+    def fig(name):
+        return figpre + name
     ncol = len(ctx["stages"])
-    T = [r"\documentclass{article}",
-         r"\usepackage{graphicx}\usepackage{booktabs}\usepackage[margin=1in]{geometry}",
-         r"\begin{document}",
-         r"\section*{spngbench summary --- " + esc(m.get("detname", "?")) + "}"]
+    T = []
+    if not fragment:
+        T += [r"\documentclass{article}",
+              r"\usepackage{graphicx}\usepackage{booktabs}\usepackage[margin=1in]{geometry}",
+              r"\begin{document}"]
+    sec = r"\subsection*{" if fragment else r"\section*{"
+    T.append(sec + "spngbench summary --- " + esc(m.get("detname", "?")) + "}")
     T.append(f"host \\texttt{{{esc(m.get('host','?'))}}}, device \\texttt{{{esc(m.get('device','?'))}}}, "
              f"wc\\_cores {m.get('wc_cores','?')}, torch\\_cores {m.get('torch_cores','?')}, "
              f"gpu\\_scheme \\texttt{{{esc(m.get('gpu_scheme','none'))}}} (ngpu {m.get('ngpu',1)}).")
-    T.append(r"\subsection*{OSP vs SPNG}")
+    sub = r"\subsubsection*{" if fragment else r"\subsection*{"
+    T.append(sub + "OSP vs SPNG}")
     T.append(r"\begin{tabular}{l" + "r" * ncol + "}\\toprule")
     T.append("category & " + " & ".join(s.upper() for s in ctx["stages"]) + r" \\\midrule")
     for cat in CAT_ORDER:
-        T.append(f"{CAT_LABEL[cat].replace('(non-DNN)','(non-DNN)')} & " +
+        T.append(f"{CAT_LABEL[cat]} & " +
                  " & ".join(_fmt(ctx['cat'][s][cat]) for s in ctx["stages"]) + r" \\")
     T.append(r"\midrule total & " + " & ".join(_fmt(ctx['total'][s]) for s in ctx["stages"]) + r" \\\bottomrule")
     T.append(r"\end{tabular}")
-    T.append(r"\begin{center}\includegraphics[width=0.6\textwidth]{" + figs["categories"] + r"}\end{center}")
-    T.append(r"\subsection*{Per-node timing}")
+    T.append(r"\begin{center}\includegraphics[width=0.6\textwidth]{" + fig(figs["categories"]) + r"}\end{center}")
+    T.append(sub + "Per-node timing}")
     for s in ctx["stages"]:
         T.append(r"\paragraph{" + s.upper() + "}")
         if f"nodes_{s}" in figs:
-            T.append(r"\begin{center}\includegraphics[width=0.8\textwidth]{" + figs[f"nodes_{s}"] + r"}\end{center}")
+            T.append(r"\begin{center}\includegraphics[width=0.8\textwidth]{" + fig(figs[f"nodes_{s}"]) + r"}\end{center}")
         T.append(r"\begin{tabular}{lllrrr}\toprule")
         T.append(r"node & instance & category & wall [s] & sd & core [s] \\\midrule")
         for sh, inst, cl, w, sd, co in _node_rows(R[s], n=14):
@@ -1128,17 +1134,24 @@ def emit_latex(bench, ctx, figs, graphs):
                      f"{_fmt(w)} & {_fmt(sd)} & {_fmt(co)} " + r"\\")
         T.append(r"\bottomrule\end{tabular}")
     if graphs:
-        T.append(r"\subsection*{Flow graphs}")
+        T.append(sub + "Flow graphs}")
         for s in ctx["stages"]:
             if graphs.get(s):
                 T.append(r"\paragraph{" + s.upper() + "}")
-                T.append(r"\begin{center}\includegraphics[width=\textwidth]{" + graphs[s] + r"}\end{center}")
-    T.append(r"\end{document}")
+                T.append(r"\begin{center}\includegraphics[width=\textwidth]{" + fig(graphs[s]) + r"}\end{center}")
+    if not fragment:
+        T.append(r"\end{document}")
     return "\n".join(T) + "\n"
 
 
-def report_command(bench_path, outdir, formats=("md", "html", "tex"), with_graphs=True):
-    """Write a Markdown/HTML/LaTeX summary directory from a benchmark JSON."""
+def report_command(bench_path, outdir, formats=("md", "html", "tex"), with_graphs=True,
+                   tex_fragment=False, figpre=""):
+    """Write a Markdown/HTML/LaTeX summary directory from a benchmark JSON.
+
+    tex_fragment: emit summary.tex as a \\input-able fragment (no preamble);
+    figpre: prefix for figure paths in the tex fragment (for inclusion from a
+    parent document in a different directory).
+    """
     bench = load_bench(bench_path)
     outdir = Path(outdir)
     outdir.mkdir(parents=True, exist_ok=True)
@@ -1158,9 +1171,386 @@ def report_command(bench_path, outdir, formats=("md", "html", "tex"), with_graph
     if "html" in formats:
         p = outdir / "summary.html"; p.write_text(emit_html(bench, ctx, figs, graphs)); written.append(p)
     if "tex" in formats:
-        p = outdir / "summary.tex"; p.write_text(emit_latex(bench, ctx, figs, graphs)); written.append(p)
+        p = outdir / "summary.tex"
+        p.write_text(emit_latex(bench, ctx, figs, graphs, fragment=tex_fragment, figpre=figpre))
+        written.append(p)
     return {"outdir": str(outdir), "figures": figs, "graphs": graphs,
             "written": [str(p) for p in written]}
+
+
+# ---------------------------------------------------------------------------
+# Grid-level report (across all grid points from a grid-index.json).
+# ---------------------------------------------------------------------------
+def _cell_row(cell):
+    """(sort_key, label) for a cell's compute-config row of the grid matrix."""
+    if cell.get("gpu_scheme", "none") != "none":
+        return ((2, cell["ngpu"], cell["gpu_scheme"]), f"GPU×{cell['ngpu']} {cell['gpu_scheme'][:5]}")
+    if str(cell.get("device", "")).startswith("gpu"):
+        return ((1, 1, ""), "GPU×1")
+    return ((0, cell["torch_cores"], ""), f"CPU omp{cell['torch_cores']}")
+
+
+def _report_cat4(report):
+    """Return {DNN, sp_other, other, total} wall seconds from a per-node report."""
+    d = {"DNN": 0.0, "sp_other": 0.0, "other": 0.0, "total": 0.0}
+    for n in per_node_list(report):
+        d["total"] += n["wall"]
+        if n["cat"] == "dnn":
+            d["DNN"] += n["wall"]
+        elif n["cat"] == "sp_nondnn":
+            d["sp_other"] += n["wall"]
+        else:
+            d["other"] += n["wall"]
+    return d
+
+
+SUBPIX = ["DNN", "sp_other", "other", "total"]   # 2x2: [DNN sp_other; other total]
+
+
+def _grid_matrix_data(grid, base):
+    """Assemble the grid matrix: axes and per-cell category times / status.
+
+    Returns (rows, cols, data) where data[stage][(ri,ci)] is a dict with keys
+    'status' (ok|crash|absent) and the four category times when ok.  Cells not
+    present in the grid are 'absent'; cells present but crashed are 'crash'.
+    """
+    cells = grid.get("cells", [])
+    cols = sorted({c["wc_cores"] for c in cells})
+    rowset = {}
+    for c in cells:
+        k, lab = _cell_row(c)
+        rowset[k] = lab
+    rows = sorted(rowset)
+    row_labels = [rowset[k] for k in rows]
+    col_index = {w: i for i, w in enumerate(cols)}
+    row_index = {k: i for i, k in enumerate(rows)}
+
+    stages = grid["meta"].get("which", ["osp", "spng"])
+    data = {s: {} for s in stages}
+    for c in cells:
+        rk, _ = _cell_row(c)
+        ri, ci = row_index[rk], col_index[c["wc_cores"]]
+        skipped = c.get("skipped")
+        cpath = c.get("compare_path")
+        loaded = None
+        if not skipped and cpath:
+            for cand in (Path(cpath), base / Path(cpath).name):
+                if cand.exists():
+                    loaded = load_bench(cand)
+                    break
+        for s in stages:
+            key = (ri, ci)
+            if skipped:
+                data[s][key] = {"status": "absent"}
+            elif loaded and s in loaded["reports"]:
+                oc = c.get(s, {}).get("outcome")
+                if oc == "ok":
+                    d = _report_cat4(loaded["reports"][s])
+                    d["status"] = "ok"
+                    data[s][key] = d
+                else:
+                    data[s][key] = {"status": "crash"}
+            else:
+                # No compare loaded: fall back to the cell summary numbers.
+                cs = c.get(s, {})
+                if cs.get("outcome") == "ok" and cs.get("all_total_wall") is not None:
+                    dnn = cs.get("forward_wall") or 0.0
+                    spo = cs.get("sp_rest_wall") or 0.0
+                    tot = cs.get("all_total_wall") or 0.0
+                    data[s][key] = {"status": "ok", "DNN": dnn, "sp_other": spo,
+                                    "other": max(0.0, tot - dnn - spo), "total": tot}
+                else:
+                    data[s][key] = {"status": "crash" if cs else "absent"}
+    return rows, row_labels, cols, data
+
+
+def make_grid_matrices(grid, base, figdir):
+    """Render the OSP and SPNG sub-pixel heatmap matrices on a shared scale."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from matplotlib.patches import Rectangle
+    import matplotlib.cm as cm
+    from matplotlib.colors import Normalize
+    try:
+        cmap = matplotlib.colormaps["viridis"]
+    except AttributeError:
+        cmap = cm.get_cmap("viridis")
+
+    rows, row_labels, cols, data = _grid_matrix_data(grid, base)
+    stages = [s for s in ("osp", "spng") if s in data]
+    R, C = len(rows), len(cols)
+    if R == 0 or C == 0:
+        return {}, {"rows": row_labels, "cols": cols}
+
+    vmax = 0.0
+    for s in stages:
+        for cell in data[s].values():
+            if cell.get("status") == "ok":
+                vmax = max(vmax, cell["total"])
+    vmax = vmax or 1.0
+    norm = Normalize(vmin=0.0, vmax=vmax)
+    # 2x2 sub-pixel offsets: DNN(0,0) sp_other(0,1) other(1,0) total(1,1)
+    off = {"DNN": (0, 0), "sp_other": (1, 0), "other": (0, 1), "total": (1, 1)}
+
+    figs = {}
+    figdir = Path(figdir)
+    for s in stages:
+        fig, ax = plt.subplots(figsize=(max(4, 1.1 * C + 2), max(3, 0.6 * R + 1.5)))
+        for (ri, ci), cell in data[s].items():
+            x0, y0 = ci, ri
+            st = cell.get("status")
+            if st == "absent":
+                ax.add_patch(Rectangle((x0, y0), 1, 1, facecolor="black", edgecolor="none"))
+            elif st == "crash":
+                ax.add_patch(Rectangle((x0, y0), 1, 1, facecolor="white", edgecolor="red", lw=0.5))
+            elif st == "ok":
+                for cat, (dx, dy) in off.items():
+                    ax.add_patch(Rectangle((x0 + dx * 0.5, y0 + dy * 0.5), 0.5, 0.5,
+                                           facecolor=cmap(norm(cell[cat])), edgecolor="none"))
+            ax.add_patch(Rectangle((x0, y0), 1, 1, fill=False, edgecolor="#888", lw=0.8))
+        ax.set_xlim(0, C); ax.set_ylim(0, R); ax.invert_yaxis()
+        ax.set_xticks([c + 0.5 for c in range(C)]); ax.set_xticklabels(cols)
+        ax.set_yticks([r + 0.5 for r in range(R)]); ax.set_yticklabels(row_labels, fontsize=8)
+        ax.set_xlabel("wire-cell cores (wc_cores)")
+        ax.set_title(f"{s.upper()} wall time  [sub-pixels: DNN | sp_other / other | total]")
+        ax.tick_params(length=0)
+        fig.colorbar(cm.ScalarMappable(norm=norm, cmap=cmap), ax=ax, label="wall time [s]", shrink=0.8)
+        fig.tight_layout()
+        p = figdir / f"matrix_{s}.png"
+        fig.savefig(p, dpi=130)
+        plt.close(fig)
+        figs[s] = p.name
+    return figs, {"rows": row_labels, "cols": cols}
+
+
+def make_grid_bars(grid, base, figdir):
+    """Bar charts of higher-level trends across the grid."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    rows, row_labels, cols, data = _grid_matrix_data(grid, base)
+    stages = [s for s in ("osp", "spng") if s in data]
+    figs = {}
+    figdir = Path(figdir)
+
+    # Total wall per cell, OSP vs SPNG, as grouped bars over all grid points.
+    labels, osp_t, spng_t = [], [], []
+    for ri, rlab in enumerate(row_labels):
+        for ci, w in enumerate(cols):
+            key = (ri, ci)
+            od = data.get("osp", {}).get(key, {})
+            sd = data.get("spng", {}).get(key, {})
+            if od.get("status") == "ok" or sd.get("status") == "ok":
+                labels.append(f"{rlab}/wc{w}")
+                osp_t.append(od.get("total", 0.0) if od.get("status") == "ok" else 0.0)
+                spng_t.append(sd.get("total", 0.0) if sd.get("status") == "ok" else 0.0)
+    if labels:
+        x = range(len(labels))
+        fig, ax = plt.subplots(figsize=(max(6, 0.32 * len(labels) + 2), 4))
+        ax.bar([i - 0.2 for i in x], osp_t, width=0.4, label="OSP", color="#5f8fbf")
+        ax.bar([i + 0.2 for i in x], spng_t, width=0.4, label="SPNG", color="#d95f5f")
+        ax.set_xticks(list(x)); ax.set_xticklabels(labels, rotation=90, fontsize=6)
+        ax.set_ylabel("total wall time [s]"); ax.legend()
+        ax.set_title("Total wall time per grid point")
+        fig.tight_layout()
+        p = figdir / "bars_total.png"; fig.savefig(p, dpi=120); plt.close(fig)
+        figs["total"] = p.name
+
+    # SPNG/OSP total ratio per grid point.
+    rlabels, ratios = [], []
+    for ri, rlab in enumerate(row_labels):
+        for ci, w in enumerate(cols):
+            od = data.get("osp", {}).get((ri, ci), {})
+            sd = data.get("spng", {}).get((ri, ci), {})
+            if od.get("status") == "ok" and sd.get("status") == "ok" and od.get("total"):
+                rlabels.append(f"{rlab}/wc{w}"); ratios.append(sd["total"] / od["total"])
+    if rlabels:
+        fig, ax = plt.subplots(figsize=(max(6, 0.32 * len(rlabels) + 2), 3.5))
+        ax.bar(range(len(rlabels)), ratios, color="#7a5fbf")
+        ax.axhline(1.0, color="k", lw=0.6)
+        ax.set_xticks(range(len(rlabels))); ax.set_xticklabels(rlabels, rotation=90, fontsize=6)
+        ax.set_ylabel("SPNG / OSP total wall"); ax.set_title("SPNG-over-OSP ratio per grid point")
+        fig.tight_layout()
+        p = figdir / "bars_ratio.png"; fig.savefig(p, dpi=120); plt.close(fig)
+        figs["ratio"] = p.name
+    return figs
+
+
+def _grid_overview_rows(grid, base):
+    rows, row_labels, cols, data = _grid_matrix_data(grid, base)
+    out = []
+    for ri, rlab in enumerate(row_labels):
+        for ci, w in enumerate(cols):
+            od = data.get("osp", {}).get((ri, ci), {})
+            sd = data.get("spng", {}).get((ri, ci), {})
+            if od.get("status") == "absent" and sd.get("status") == "absent":
+                continue
+            def cell4(d):
+                if d.get("status") != "ok":
+                    return (d.get("status", "-"),) * 4
+                return (_fmt(d["DNN"]), _fmt(d["sp_other"]), _fmt(d["other"]), _fmt(d["total"]))
+            out.append((rlab, w, cell4(od), cell4(sd)))
+    return out
+
+
+def grid_report_command(grid_path, outdir, formats=("md", "html", "tex"),
+                        point_graphs=False):
+    """Produce a cross-grid report from a grid-index.json.
+
+    Renders OSP/SPNG sub-pixel matrices and trend bars, a grid overview table,
+    per-grid-point summaries (linked in md/html, included in latex), and a TOC.
+    """
+    grid = json.loads(Path(grid_path).read_text())
+    if not grid.get("schema", "").startswith("spngbench-grid"):
+        raise SystemExit("grid-report expects a grid-index.json (schema spngbench-grid/*)")
+    base = Path(grid_path).parent
+    outdir = Path(outdir)
+    (outdir / "points").mkdir(parents=True, exist_ok=True)
+
+    mats, axes = make_grid_matrices(grid, base, outdir)
+    bars = make_grid_bars(grid, base, outdir)
+
+    # Per-point summaries (one sub-directory each).
+    points = []
+    for c in grid.get("cells", []):
+        if c.get("skipped"):
+            continue
+        cp = c.get("compare_path")
+        cand = None
+        for x in ((Path(cp),) if cp else ()) + ((base / Path(cp).name,) if cp else ()):
+            if x.exists():
+                cand = x; break
+        if not cand:
+            continue
+        _, rlab = _cell_row(c)
+        stem = f"{rlab}-wc{c['wc_cores']}".replace(" ", "_").replace("×", "x")
+        pdir = outdir / "points" / stem
+        report_command(str(cand), str(pdir), formats=formats,
+                       with_graphs=point_graphs, tex_fragment=True,
+                       figpre=f"points/{stem}/")
+        points.append((stem, rlab, c["wc_cores"], c.get("spng_over_osp_sp_total")))
+
+    ctx = {"grid": grid, "mats": mats, "bars": bars, "axes": axes,
+           "overview": _grid_overview_rows(grid, base), "points": points}
+    written = []
+    if "md" in formats:
+        p = outdir / "grid-summary.md"; p.write_text(_emit_grid_md(ctx)); written.append(p)
+    if "html" in formats:
+        p = outdir / "grid-summary.html"; p.write_text(_emit_grid_html(ctx)); written.append(p)
+    if "tex" in formats:
+        p = outdir / "grid-summary.tex"; p.write_text(_emit_grid_tex(ctx)); written.append(p)
+    return {"outdir": str(outdir), "written": [str(p) for p in written],
+            "npoints": len(points), "matrices": mats, "bars": bars}
+
+
+def _emit_grid_md(ctx):
+    g = ctx["grid"]; m = g["meta"]
+    L = [f"# spngbench grid summary — {m.get('detname','?')}\n",
+         f"host **{m.get('host','?')}** ({m.get('host_ngpu','?')} GPU), engine **{m.get('engine','?')}**, "
+         f"{m.get('ncells','?')} cells, {len(ctx['points'])} run.\n"]
+    L.append("\n## Contents\n")
+    L.append("- [Grid matrices](#grid-matrices)")
+    L.append("- [Trends](#trends)")
+    L.append("- [Overview table](#overview-table)")
+    L.append("- Per-grid-point summaries:")
+    for stem, rlab, w, ratio in ctx["points"]:
+        L.append(f"  - [{rlab} / wc{w}](points/{stem}/summary.md) (SPNG/OSP {_fmt(ratio,2)}×)")
+
+    L.append("\n## Grid matrices\n")
+    L.append("Each cell is a grid point; 2×2 sub-pixels are **DNN** (top-left), "
+             "**sp_other** (top-right), **other** (bottom-left), **total** (bottom-right), "
+             "on a shared time colour scale.  Black = not tested, white = crashed.\n")
+    for s in ("osp", "spng"):
+        if ctx["mats"].get(s):
+            L.append(f"\n![{s} matrix]({ctx['mats'][s]})\n")
+
+    L.append("\n## Trends\n")
+    for k in ("total", "ratio"):
+        if ctx["bars"].get(k):
+            L.append(f"\n![{k}]({ctx['bars'][k]})\n")
+
+    L.append("\n## Overview table\n")
+    L.append("| config | wc | OSP DNN/spo/oth/tot | SPNG DNN/spo/oth/tot |")
+    L.append("|---|--:|---|---|")
+    for rlab, w, o, s in ctx["overview"]:
+        L.append(f"| {rlab} | {w} | {'/'.join(map(str,o))} | {'/'.join(map(str,s))} |")
+    return "\n".join(L) + "\n"
+
+
+def _emit_grid_html(ctx):
+    g = ctx["grid"]; m = g["meta"]
+    def esc(x): return str(x).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    H = ["<!doctype html><meta charset='utf-8'><title>spngbench grid summary</title>",
+         "<style>body{font-family:sans-serif;margin:2em;max-width:70em}"
+         "table{border-collapse:collapse}td,th{border:1px solid #ccc;padding:2px 6px}"
+         "th{background:#eee}img{max-width:100%}</style>",
+         f"<h1>spngbench grid summary — {esc(m.get('detname','?'))}</h1>",
+         f"<p>host <b>{esc(m.get('host','?'))}</b> ({m.get('host_ngpu','?')} GPU), engine "
+         f"<b>{esc(m.get('engine','?'))}</b>, {m.get('ncells','?')} cells, {len(ctx['points'])} run.</p>",
+         "<h2 id='toc'>Contents</h2><ul>",
+         "<li><a href='#matrices'>Grid matrices</a></li>",
+         "<li><a href='#trends'>Trends</a></li>",
+         "<li><a href='#overview'>Overview table</a></li>",
+         "<li>Per-grid-point summaries:<ul>"]
+    for stem, rlab, w, ratio in ctx["points"]:
+        H.append(f"<li><a href='points/{stem}/summary.html'>{esc(rlab)} / wc{w}</a> "
+                 f"(SPNG/OSP {_fmt(ratio,2)}×)</li>")
+    H.append("</ul></li></ul>")
+    H.append("<h2 id='matrices'>Grid matrices</h2>")
+    H.append("<p>Each cell is a grid point; 2×2 sub-pixels are DNN (top-left), sp_other "
+             "(top-right), other (bottom-left), total (bottom-right), shared colour scale. "
+             "Black = not tested, white = crashed.</p>")
+    for s in ("osp", "spng"):
+        if ctx["mats"].get(s):
+            H.append(f"<p><img src='{ctx['mats'][s]}'></p>")
+    H.append("<h2 id='trends'>Trends</h2>")
+    for k in ("total", "ratio"):
+        if ctx["bars"].get(k):
+            H.append(f"<p><img src='{ctx['bars'][k]}'></p>")
+    H.append("<h2 id='overview'>Overview table</h2>")
+    H.append("<table><tr><th>config</th><th>wc</th><th>OSP DNN/spo/oth/tot</th>"
+             "<th>SPNG DNN/spo/oth/tot</th></tr>")
+    for rlab, w, o, s in ctx["overview"]:
+        H.append(f"<tr><td>{esc(rlab)}</td><td>{w}</td><td>{'/'.join(map(str,o))}</td>"
+                 f"<td>{'/'.join(map(str,s))}</td></tr>")
+    H.append("</table>")
+    return "\n".join(H) + "\n"
+
+
+def _emit_grid_tex(ctx):
+    g = ctx["grid"]; m = g["meta"]
+    def esc(x): return str(x).replace("_", r"\_").replace("&", r"\&").replace("%", r"\%")
+    T = [r"\documentclass{article}",
+         r"\usepackage{graphicx}\usepackage{booktabs}\usepackage[margin=1in]{geometry}",
+         r"\usepackage{hyperref}",
+         r"\begin{document}",
+         r"\title{spngbench grid summary --- " + esc(m.get("detname", "?")) + "}",
+         r"\author{}\date{}\maketitle",
+         r"\tableofcontents\newpage",
+         r"\section{Grid matrices}",
+         r"Each cell is a grid point; 2$\times$2 sub-pixels are DNN, sp\_other, other, total "
+         r"on a shared time colour scale.  Black = not tested, white = crashed."]
+    for s in ("osp", "spng"):
+        if ctx["mats"].get(s):
+            T.append(r"\begin{center}\includegraphics[width=0.8\textwidth]{" + ctx["mats"][s] + r"}\end{center}")
+    T.append(r"\section{Trends}")
+    for k in ("total", "ratio"):
+        if ctx["bars"].get(k):
+            T.append(r"\begin{center}\includegraphics[width=\textwidth]{" + ctx["bars"][k] + r"}\end{center}")
+    T.append(r"\section{Overview table}")
+    T.append(r"\small\begin{tabular}{llll}\toprule")
+    T.append(r"config & wc & OSP D/s/o/t & SPNG D/s/o/t \\\midrule")
+    for rlab, w, o, s in ctx["overview"]:
+        T.append(f"{esc(rlab)} & {w} & {esc('/'.join(map(str,o)))} & {esc('/'.join(map(str,s)))} " + r"\\")
+    T.append(r"\bottomrule\end{tabular}\normalsize")
+    T.append(r"\section{Per-grid-point summaries}")
+    for stem, rlab, w, ratio in ctx["points"]:
+        T.append(r"\clearpage")
+        T.append(r"\input{points/" + stem + "/summary.tex}")
+    T.append(r"\end{document}")
+    return "\n".join(T) + "\n"
 
 
 # ---------------------------------------------------------------------------
@@ -1232,6 +1622,13 @@ def main(argv=None):
                       help="comma list of md,html,tex (default all)")
     prep.add_argument("--no-graphs", action="store_true", help="skip the flow-graph figures")
 
+    pgr = sub.add_parser("grid-report", help="cross-grid summary from a grid-index.json")
+    pgr.add_argument("grid_json", help="a grid-index.json")
+    pgr.add_argument("-o", "--outdir", default="spngbench-grid-report", help="output directory")
+    pgr.add_argument("--formats", default="md,html,tex", help="comma list of md,html,tex")
+    pgr.add_argument("--point-graphs", action="store_true",
+                     help="also render flow graphs in each per-point summary (slow)")
+
     args = ap.parse_args(argv)
 
     if args.cmd == "analyze":
@@ -1249,6 +1646,16 @@ def main(argv=None):
                              with_graphs=not args.no_graphs)
         log(f"wrote {len(res['written'])} summary file(s), "
             f"{len(res['figures'])} figure(s), {len(res['graphs'])} flow graph(s)")
+        for w in res["written"]:
+            print(w)
+        return 0
+
+    if args.cmd == "grid-report":
+        formats = tuple(f.strip() for f in args.formats.split(",") if f.strip())
+        res = grid_report_command(args.grid_json, args.outdir, formats=formats,
+                                  point_graphs=args.point_graphs)
+        log(f"wrote grid summary + {res['npoints']} per-point summaries; "
+            f"matrices={list(res['matrices'])} bars={list(res['bars'])}")
         for w in res["written"]:
             print(w)
         return 0

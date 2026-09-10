@@ -83,6 +83,9 @@ python3 spngbench.py show-config --config spngbench.json
 
 # human-readable summary (Markdown + HTML + LaTeX) from a compare/report/grid JSON
 python3 spngbench.py report spngbench-pdhd/compare-cpu-wc1-omp1.json -o report-dir
+
+# cross-grid summary spanning every grid point in a grid-index.json
+python3 spngbench.py grid-report spngbench-pdhd/grid-index.json -o grid-report-dir
 #+end_src
 
 Default input is =toolkit/test/data/muon-depos.npz=; override with =--input= (repeatable)
@@ -111,6 +114,24 @@ per-stage top-node bars, and the OSP and SPNG *flow graphs* (GraphViz =dot=)
 with each node annotated by wall/core time and colored by category.  The LaTeX
 builds with =pdflatex= (needs =graphicx=, =booktabs=); the flow graphs need the
 =dot= and =wcpy= programs (skipped with =--no-graphs= or if absent).
+
+* Grid report
+
+=grid-report= consumes a =grid-index.json= and writes a cross-grid summary that
+spans every grid point.  It contains:
+
+- OSP and SPNG *matrices* (same axes): columns = wire-cell cores, rows = the
+  compute config (torch cores for CPU cells, GPU-device/scheme for GPU cells).
+  Each cell is a grid point drawn as 2×2 *sub-pixels* --- DNN (top-left),
+  sp\_other (top-right), other (bottom-left), total (bottom-right) --- on a
+  single shared time colour scale (one colour bar).  Not-tested cells are black,
+  crashed cells white.
+- Trend *bar charts* (total wall per point; SPNG/OSP ratio per point).
+- A grid *overview table*.
+- A *per-grid-point summary* for every cell (=report= output), linked from the
+  Markdown/HTML and =\input= into the LaTeX, with a table of contents.
+
+Per-point flow graphs are off by default for speed; enable with =--point-graphs=.
 
 * Config file
 
