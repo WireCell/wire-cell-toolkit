@@ -164,9 +164,17 @@ override the file.  Keys: =detname=, =model_file=, =inputs=, =outdir=, =repeats=
     boundaries.  Extend the =stages= list in =spngbench.jsonnet= for finer control.
   OSP (a single DNN) is not sharded and uses the base =device=.  Cells needing
   more GPUs than present are recorded as skipped.
+- *More APAs* (=napa=): the number of per-APA pipelines a job covers, clamped to
+  the detector's physical APA count (PDHD 4, FDHD 150).  =napa= is a fixed
+  parameter of a grid run (not a scanned axis): =grid --napa 4=, or =napa= in the
+  config; =run=/=pair= also take =--napa=.  It is consumed by the jsonnet (more
+  per-APA pipelines, visible in the Jobs data-flow graphs) and per-APA ADC files
+  get a =-tpc<N>= suffix.  Because the APA pipelines are independent, useful
+  wire-cell parallelism is bounded by =napa=, so the grid caps the =wc_cores=
+  range at =napa= (a single-APA job cannot use more than one wc-core unless
+  longitudinal parallelism -- multiple events in flight -- is allowed, which the
+  current inputs do not; that variation is left for later).
 - *Other detectors* (DUNE FD): set =detname= once SPNG detconf exists for it.
-  Multi-APA detectors automatically get per-TPC ADC frame files (=-tpc<N>= suffix)
-  and enable the transverse scheme across their APAs.
 
 * Diagnostics
 

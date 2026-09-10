@@ -229,7 +229,8 @@ _OOM_RE = re.compile(r"out of memory|CUDA error: out of memory|CUDA_ERROR_OUT_OF
 
 
 def build_cmd(stage, device, wc_cores, input, model_file, output, logfile,
-              detname="pdhd", engine="TbbFlow", gpu_scheme="none", ngpu=1, verbosity=0):
+              detname="pdhd", engine="TbbFlow", gpu_scheme="none", ngpu=1, napa=1,
+              verbosity=0):
     return [
         "wire-cell",
         "-c", str(JSONNET),
@@ -243,6 +244,7 @@ def build_cmd(stage, device, wc_cores, input, model_file, output, logfile,
         "-A", f"device={device}",
         "-A", f"gpu_scheme={gpu_scheme}",
         "-A", f"ngpu={ngpu}",
+        "-A", f"napa={napa}",
         "-A", f"engine={engine}",
         "-A", f"wc_cores={wc_cores}",
         "-A", f"verbosity={verbosity}",
@@ -251,7 +253,7 @@ def build_cmd(stage, device, wc_cores, input, model_file, output, logfile,
 
 def run_wirecell(stage, device, wc_cores, torch_cores, input, outdir,
                  model_file=DEFAULT_MODEL, detname="pdhd", engine="TbbFlow",
-                 gpu_scheme="none", ngpu=1, tag="", output=None,
+                 gpu_scheme="none", ngpu=1, napa=1, tag="", output=None,
                  verbosity=0, extra_env=None, dry_run=False):
     """
     Run one wire-cell job (stage=sim|osp|spng) and classify the outcome.
@@ -267,7 +269,7 @@ def run_wirecell(stage, device, wc_cores, torch_cores, input, outdir,
 
     cmd = build_cmd(stage, device, wc_cores, input, model_file, output, logfile,
                     detname=detname, engine=engine, gpu_scheme=gpu_scheme,
-                    ngpu=ngpu, verbosity=verbosity)
+                    ngpu=ngpu, napa=napa, verbosity=verbosity)
 
     env = os.environ.copy()
     env["OMP_NUM_THREADS"] = str(torch_cores)
@@ -277,7 +279,7 @@ def run_wirecell(stage, device, wc_cores, torch_cores, input, outdir,
     result = {
         "stage": stage, "device": device, "wc_cores": wc_cores,
         "torch_cores": torch_cores, "engine": engine, "input": str(input),
-        "gpu_scheme": gpu_scheme, "ngpu": ngpu,
+        "gpu_scheme": gpu_scheme, "ngpu": ngpu, "napa": napa,
         "detname": detname, "logfile": str(logfile), "output": str(output),
         "cmd": cmd, "stem": stem,
     }
@@ -420,7 +422,7 @@ def config_stem(stage, device, wc_cores, torch_cores, gpu_scheme="none", ngpu=1)
 
 
 def make_report(stage, device, wc_cores, torch_cores, runs, engine="TbbFlow",
-                detname="pdhd", gpu_scheme="none", ngpu=1):
+                detname="pdhd", gpu_scheme="none", ngpu=1, napa=1):
     """Build a per-config report (schema spngbench-config/1) from run dicts.
 
     Each run dict is a run_wirecell() result; ok runs are analyzed and rolled up.
@@ -442,7 +444,7 @@ def make_report(stage, device, wc_cores, torch_cores, runs, engine="TbbFlow",
         "meta": {
             "stage": stage, "device": device,
             "wc_cores": wc_cores, "torch_cores": torch_cores,
-            "gpu_scheme": gpu_scheme, "ngpu": ngpu,
+            "gpu_scheme": gpu_scheme, "ngpu": ngpu, "napa": napa,
             "engine": engine, "detname": detname,
             "host": socket.gethostname(), "host_ngpu": _ngpu(),
             "nrun": len(runs), "nok": len(ok),
@@ -466,24 +468,27 @@ def make_report(stage, device, wc_cores, torch_cores, runs, engine="TbbFlow",
 
 
 def ensure_adc(depo_input, outdir, model_file=DEFAULT_MODEL, detname="pdhd",
-               engine="Pgrapher", dry_run=False):
-    """Run the sim stage (depos -> ADC frame file) once for a depo input, cached.
+               engine="Pgrapher", napa=1, dry_run=False):
+    """Run the sim stage (depos -> ADC frame file(s)) once for a depo input, cached.
 
-    Returns the ADC file path.  The sim is CPU-only and shared by OSP and SPNG,
-    so it is run once per depo input and reused across the whole grid.  Later the
-    returned ADC file can be replaced by one made from real detector data.
+    Returns the ADC file base path.  For napa>1 the sim writes one ADC file per
+    APA (base-tpc<N>.npz); the base path is what OSP/SPNG are given and the
+    jsonnet re-derives the per-APA names.  The sim is CPU-only and shared by OSP
+    and SPNG, so it runs once per depo input and is reused across the grid.
     """
     outdir = Path(outdir)
     outdir.mkdir(parents=True, exist_ok=True)
     stem = "adc-" + Path(depo_input).stem
     adc = outdir / f"{stem}.npz"
-    if adc.exists() and adc.stat().st_size > 0:
+    # Existence probe: base name for napa==1, first per-APA file for napa>1.
+    probe = adc if napa == 1 else outdir / f"{stem}-tpc0.npz"
+    if probe.exists() and probe.stat().st_size > 0:
         return str(adc)
     if dry_run:
         return str(adc)
     r = run_wirecell("sim", "cpu", 1, 1, depo_input, outdir,
                      model_file=model_file, detname=detname, engine=engine,
-                     tag=stem, output=str(adc))
+                     napa=napa, tag=stem, output=str(adc))
     if r["outcome"] != "ok":
         log(f"WARNING: sim failed for {depo_input}: {r['outcome']}")
     return str(adc)
@@ -491,7 +496,7 @@ def ensure_adc(depo_input, outdir, model_file=DEFAULT_MODEL, detname="pdhd",
 
 def bench_config(stage, device, wc_cores, torch_cores, inputs, outdir,
                  repeats=1, model_file=DEFAULT_MODEL, detname="pdhd",
-                 engine="TbbFlow", gpu_scheme="none", ngpu=1,
+                 engine="TbbFlow", gpu_scheme="none", ngpu=1, napa=1,
                  verbosity=0, dry_run=False):
     """Run one config (stage osp|spng) over inputs x repeats.
 
@@ -512,12 +517,12 @@ def bench_config(stage, device, wc_cores, torch_cores, inputs, outdir,
             runs.append(run_wirecell(
                 stage, device, wc_cores, torch_cores, inp, outdir,
                 model_file=model_file, detname=detname, engine=engine,
-                gpu_scheme=gpu_scheme, ngpu=ngpu,
+                gpu_scheme=gpu_scheme, ngpu=ngpu, napa=napa,
                 tag=base + suffix, verbosity=verbosity, dry_run=dry_run))
 
     report = make_report(stage, device, wc_cores, torch_cores, runs,
                          engine=engine, detname=detname,
-                         gpu_scheme=gpu_scheme, ngpu=ngpu)
+                         gpu_scheme=gpu_scheme, ngpu=ngpu, napa=napa)
     rpath = Path(outdir) / f"report-{base}.json"
     rpath.write_text(json.dumps(report, indent=2))
     report["_path"] = str(rpath)
@@ -591,6 +596,11 @@ def default_config():
         "inputs": None,                 # None -> the standard muon-depos.npz
         "outdir": "spngbench-pdhd",
         "repeats": 1,
+        # Number of APAs (per-APA pipelines) each job covers.  Fixed for a grid
+        # run (not a scanned axis); clamped to the detector's physical APA count.
+        # More APAs give more independent pipelines that multiple wire-cell cores
+        # can run concurrently, so the wc_cores range is capped at napa.
+        "napa": 1,
         "which": ["osp", "spng"],
         "engine": "TbbFlow",
         "hw": {"max_hyperthreads": 64},  # cap: skip cpu cells with wc*torch > this
@@ -611,6 +621,18 @@ def default_config():
             "torch_cores": 1,
         },
     }
+
+
+# Physical APA counts for known detectors (used to clamp napa and the wc_cores
+# range; the jsonnet clamps the actual pipeline count regardless).
+DETECTOR_MAX_APA = {"pdhd": 4, "pdsp": 6, "pdvd": 8, "fdhd": 150, "fdvd": 160}
+
+
+def clamp_napa(cfg):
+    """Clamp cfg['napa'] to the detector's physical APA count (best effort)."""
+    napa = max(1, int(cfg.get("napa", 1)))
+    phys = DETECTOR_MAX_APA.get(cfg.get("detname", "pdhd"))
+    return min(napa, phys) if phys else napa
 
 
 def _merge(base, over):
@@ -639,11 +661,17 @@ def _cell(device, wc, torch, gpu_scheme="none", ngpu=1):
             "gpu_scheme": gpu_scheme, "ngpu": ngpu}
 
 
+def _wc_range(cfg, wc_sel, default):
+    """Wire-cell core counts to scan, capped at napa (independent APA pipelines)."""
+    napa = clamp_napa(cfg)
+    return [w for w in (wc_sel or default) if w <= napa]
+
+
 def cpu_cells(cfg, wc_sel=None, torch_sel=None):
     """Enumerate CPU grid cells (device=cpu), skipping wc*torch > max_hyperthreads."""
     g = cfg["cpu_grid"]
     cap = cfg["hw"]["max_hyperthreads"]
-    wcs = wc_sel or g["wc_cores"]
+    wcs = _wc_range(cfg, wc_sel, g["wc_cores"])
     tcs = torch_sel or g["torch_cores"]
     return [_cell("cpu", wc, tc) for wc in wcs for tc in tcs if wc * tc <= cap]
 
@@ -651,14 +679,14 @@ def cpu_cells(cfg, wc_sel=None, torch_sel=None):
 def gpu_cells(cfg, wc_sel=None):
     """Enumerate single-GPU grid cells (all GPU-capable nodes on device, torch=1)."""
     g = cfg["gpu_grid"]
-    wcs = wc_sel or g["wc_cores"]
+    wcs = _wc_range(cfg, wc_sel, g["wc_cores"])
     return [_cell(g.get("device", "gpu"), wc, g.get("torch_cores", 1)) for wc in wcs]
 
 
 def shard_cells(cfg, wc_sel=None):
     """Enumerate multi-GPU sharded cells: (scheme x ngpu x wc_cores)."""
     g = cfg["shard_grid"]
-    wcs = wc_sel or g["wc_cores"]
+    wcs = _wc_range(cfg, wc_sel, g["wc_cores"])
     return [_cell(g.get("device", "gpu0"), wc, g.get("torch_cores", 1),
                   gpu_scheme=scheme, ngpu=ng)
             for scheme in g["schemes"] for ng in g["ngpu"] for wc in wcs]
@@ -713,17 +741,19 @@ def run_grid(cfg, cells, which_list, dry_run=False):
     outdir.mkdir(parents=True, exist_ok=True)
     depos = cfg["inputs"] or [str(HERE.parents[2] / "test" / "data" / "muon-depos.npz")]
     host_ngpu = _ngpu()
+    napa = clamp_napa(cfg)
 
     # Run the sim once per depo input; OSP and SPNG share the ADC frame file(s).
-    log(f"sim: producing ADC frames for {len(depos)} depo input(s)")
+    log(f"sim: producing ADC frames for {len(depos)} depo input(s), napa={napa}")
     adc_inputs = [ensure_adc(d, str(outdir), model_file=cfg["model_file"],
-                             detname=cfg["detname"], dry_run=dry_run) for d in depos]
+                             detname=cfg["detname"], napa=napa, dry_run=dry_run)
+                  for d in depos]
 
     index = {
         "schema": "spngbench-grid/1",
         "meta": {
             "detname": cfg["detname"], "host": socket.gethostname(), "host_ngpu": host_ngpu,
-            "engine": cfg["engine"], "repeats": cfg["repeats"],
+            "engine": cfg["engine"], "repeats": cfg["repeats"], "napa": napa,
             "depos": depos, "adc_inputs": adc_inputs, "which": which_list,
             "created": time.strftime("%Y-%m-%dT%H:%M:%S"),
             "ncells": len(cells),
@@ -760,7 +790,7 @@ def run_grid(cfg, cells, which_list, dry_run=False):
                 w, device, cell["wc_cores"], cell["torch_cores"], adc_inputs, str(outdir),
                 repeats=cfg["repeats"], model_file=cfg["model_file"],
                 detname=cfg["detname"], engine=cfg["engine"],
-                gpu_scheme=w_scheme, ngpu=ngpu, dry_run=dry_run)
+                gpu_scheme=w_scheme, ngpu=ngpu, napa=napa, dry_run=dry_run)
         compare = None
         if "osp" in reports and "spng" in reports:
             compare = combine(reports["osp"], reports["spng"], outdir=str(outdir))
@@ -1457,7 +1487,8 @@ def make_job_graphs(grid, cells, outdir):
             pass
     common = dict(model_file=tlas0.get("model_file", DEFAULT_MODEL), output="signals.npz",
                   detname=tlas0.get("detname", "pdhd"), device="cpu", gpu_scheme="none",
-                  ngpu=1, engine="Pgrapher", wc_cores=1, verbosity=0)
+                  ngpu=1, napa=grid["meta"].get("napa", tlas0.get("napa", 1)),
+                  engine="Pgrapher", wc_cores=1, verbosity=0)
     stage_input = {"sim": (depos[0] if depos else "depos.npz"),
                    "osp": (adc[0] if adc else "adc.npz"),
                    "spng": (adc[0] if adc else "adc.npz")}
@@ -1697,6 +1728,8 @@ def _add_common(p):
     p.add_argument("--gpu-scheme", default="none", choices=["none", "transverse", "longitudinal"],
                    help="SPNG GPU sharding scheme (default none)")
     p.add_argument("--ngpu", type=int, default=1, help="number of GPUs the scheme may use")
+    p.add_argument("--napa", type=int, default=1,
+                   help="number of APAs / per-APA pipelines (clamped to detector max)")
     p.add_argument("--dry-run", action="store_true")
 
 
@@ -1733,6 +1766,8 @@ def main(argv=None):
                     help="subset of wire-cell core counts")
     pg.add_argument("--torch-cores", type=int, nargs="+", default=None,
                     help="subset of torch core counts (cpu mode)")
+    pg.add_argument("--napa", type=int, default=None,
+                    help="number of APAs / per-APA pipelines (fixed, not scanned)")
     pg.add_argument("--outdir", default=None)
     pg.add_argument("--repeats", type=int, default=None)
     pg.add_argument("--input", action="append", default=None)
@@ -1792,7 +1827,8 @@ def main(argv=None):
         cfg = load_config(args.config) if args.config else default_config()
         # CLI overrides win over the config file.
         for key, val in (("outdir", args.outdir), ("repeats", args.repeats),
-                         ("model_file", args.model_file), ("detname", args.detname)):
+                         ("model_file", args.model_file), ("detname", args.detname),
+                         ("napa", args.napa)):
             if val is not None:
                 cfg[key] = val
         if args.input:
@@ -1822,8 +1858,10 @@ def main(argv=None):
     depos = _default_inputs(args)
 
     # run/pair: sim each depo input to an ADC file once, then run the SP chain(s).
+    napa = clamp_napa({"detname": args.detname, "napa": args.napa})
     adc_inputs = [ensure_adc(d, args.outdir, model_file=args.model_file,
-                             detname=args.detname, dry_run=args.dry_run) for d in depos]
+                             detname=args.detname, napa=napa, dry_run=args.dry_run)
+                  for d in depos]
 
     if args.cmd == "run":
         scheme = args.gpu_scheme if args.which == "spng" else "none"
@@ -1831,7 +1869,7 @@ def main(argv=None):
                            adc_inputs, args.outdir, repeats=args.repeats,
                            model_file=args.model_file, detname=args.detname,
                            engine=args.engine, gpu_scheme=scheme, ngpu=args.ngpu,
-                           dry_run=args.dry_run)
+                           napa=napa, dry_run=args.dry_run)
         print(f"outcome={rep['outcome']} wrote {rep['_path']}")
         return 0
 
@@ -1839,12 +1877,12 @@ def main(argv=None):
         osp = bench_config("osp", args.device, args.wc_cores, args.torch_cores,
                            adc_inputs, args.outdir, repeats=args.repeats,
                            model_file=args.model_file, detname=args.detname,
-                           engine=args.engine, dry_run=args.dry_run)
+                           engine=args.engine, napa=napa, dry_run=args.dry_run)
         spng = bench_config("spng", args.device, args.wc_cores, args.torch_cores,
                             adc_inputs, args.outdir, repeats=args.repeats,
                             model_file=args.model_file, detname=args.detname,
                             engine=args.engine, gpu_scheme=args.gpu_scheme, ngpu=args.ngpu,
-                            dry_run=args.dry_run)
+                            napa=napa, dry_run=args.dry_run)
         comb = combine(osp, spng, outdir=args.outdir)
         print(f"osp={osp['outcome']} spng={spng['outcome']} wrote {comb['_path']}")
         return 0

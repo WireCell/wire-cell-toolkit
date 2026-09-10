@@ -120,6 +120,7 @@ function(input,
          device='cpu',
          gpu_scheme='none',
          ngpu=1,
+         napa=1,
          engine='Pgrapher',
          wc_cores=1,
          verbosity=0)
@@ -127,7 +128,13 @@ function(input,
     assert stage == "sim" || stage == "osp" || stage == "spng"
            : "spngbench: 'stage' must be sim|osp|spng, got " + stage;
 
-    local tpcids = [0];   // PDHD; extend for multi-APA detectors.
+    // Number of APAs (per-APA pipelines) the job covers, clamped to the
+    // detector's physical APA count.  tpcids [0 .. napa-1] select that many
+    // per-APA pipelines; more APAs means more independent pipelines in the graph
+    // (and more wire-cell cores can be usefully applied).
+    local phys_napa = std.length(detconf[detname].tpcs);
+    local nap = std.max(1, std.min(wc.intify(napa), phys_napa));
+    local tpcids = std.range(0, nap - 1);
 
     local osp_dump_prefix = std.strReplace(output, ".npz", "") + "_osp_dump";
 
