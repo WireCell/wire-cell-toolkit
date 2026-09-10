@@ -39,6 +39,21 @@ Each wire-cell log is harvested two ways:
    - =sp_other= — all other SP nodes (OSP =OmnibusSigProc=, other =SPNG::*=),
    - =sp_total= = forward + sp_other, =all_total= from the timer total.
 
+** Node timeline and memory profiling
+
+Each osp/spng job (TbbFlow) also emits a *node timeline* JSON --- per-execution
+=[start,end]= wall-clock (CLOCK_REALTIME) intervals for every DFP node
+(=TbbDataFlowGraph.timeline= config; =NodeInfo= collects the intervals).  The
+driver reads this instead of parsing =Timer= log lines (summing intervals
+recovers the per-node totals), and while wire-cell runs it samples the child
+process's *CPU RSS* (=/proc/PID/status=) and *per-process GPU VRAM* (=pynvml= if
+importable, else =nvidia-smi=) at 20 Hz into a =*.memprofile.json= (CLOCK_REALTIME,
+so samples align with the node intervals).  Correlating the two gives a per
+category (DNN / sp_other / other) *peak-memory blame*; note per-category peaks
+overlap under parallelism and are not additive.  VRAM/RSS are the *reserved*
+footprint (CUDA context + torch caching allocator; glibc heap) which grows to a
+peak but does not shrink on free.
+
 ** Thread control (important)
 
 - *Wire-cell* node parallelism is set by =wc_cores= → =TbbDataFlowGraph.max_threads=.
