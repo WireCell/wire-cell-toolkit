@@ -205,6 +205,10 @@ public:
         m_michel_range_energy_guard = get<bool>(config, "michel_range_energy_guard", m_michel_range_energy_guard);
         m_michel_range_energy_dis_cm = get<double>(config, "michel_range_energy_dis_cm", m_michel_range_energy_dis_cm);
         m_michel_range_energy_ke_min = get<double>(config, "michel_range_energy_ke_min", m_michel_range_energy_ke_min);
+        // doc pdvd/64 (T6): give every kOther arm (interior or stop) a role-7 row
+        // in stm_michel_pts so display and scan can see what the chain fitted
+        // and classified as neither delta, hadron, Michel nor continuation.
+        m_publish_other_arms = get<bool>(config, "publish_other_arms", m_publish_other_arms);
         m_dead_volume_check = get<bool>(config, "dead_volume_check", m_dead_volume_check);
         m_min_chain_coverage = get<double>(config, "min_chain_coverage", m_min_chain_coverage);
         m_michel_guards_stop = get<bool>(config, "michel_guards_stop", m_michel_guards_stop);
@@ -445,6 +449,17 @@ public:
         cfg["michel_range_energy_guard"] = m_michel_range_energy_guard;
         cfg["michel_range_energy_dis_cm"] = m_michel_range_energy_dis_cm;
         cfg["michel_range_energy_ke_min"] = m_michel_range_energy_ke_min;
+        // doc pdvd/64 (T6): default off.  When on, every arm the classifier
+        // returned kOther for -- at an interior chain vertex (> delta_max_len_cm
+        // and cooler than vertex_hadron_mip, or a short arm whose far vertex
+        // continues) or at the stop (a hot stub not absorbed, debris beside a
+        // Michel, a demoted continuation) -- gets role-7 rows in stm_michel_pts,
+        // written LAST and claiming nothing, so no verdict row changes and an
+        // arm the Michel object walk absorbed keeps its role 3.  Rows only:
+        // stm_michel_pts grows, every verdict branch is unchanged.  The
+        // interior count (n_body_other) has always been persisted; the stop
+        // count (n_stop_other) and the published count are new.
+        cfg["publish_other_arms"] = m_publish_other_arms;
         // doc pdhd/03 sec 6: FiducialUtils::check_dead_volume from the end of
         // the live profile along the muon direction; a stop that walks into a
         // dead region is R_STOP_INTO_DEAD (three PDHD tracks end on the same
@@ -608,6 +623,7 @@ private:
     bool m_michel_range_energy_guard{false};      // doc pdvd/62 (T3c)
     double m_michel_range_energy_dis_cm{5.0};     // cm
     double m_michel_range_energy_ke_min{10.0};    // MeV
+    bool m_publish_other_arms{false};             // doc pdvd/64 (T6): role-7 rows for kOther arms
     bool m_dead_volume_check{false};
     double m_min_chain_coverage{0.0}, m_coverage_radius_cm{3.0};
     bool m_michel_guards_stop{false};
@@ -645,6 +661,7 @@ private:
         double dead_frac_cmp{0};                          // dead fraction within compare_range of the stop
         double muon_len{0};
         int n_delta{0}, n_body_other{0}, n_body_hadron{0};
+        int n_stop_other{0}, n_other_published{0};   // doc pdvd/64 (T6): kOther arms at the stop; role-7 segments actually published
         double delta_len{0};
         // dQ/dx shape
         double ks_mu{0}, ks_flat{0}, ratio_mu{0}, ratio_flat{0};
@@ -1041,7 +1058,7 @@ private:
                     bool keep_dead = false) const {
         const int seg_id = (seg && seg->cluster() ? seg->cluster()->get_cluster_id() : 0) * 1000
                          + (seg ? static_cast<int>(seg->get_graph_index()) : 0);
-        if (role != 6) rec.claimed.insert(seg_id);
+        if (role != 6 && role != 7) rec.claimed.insert(seg_id);   // 6 survey, 7 other (doc pdvd/64): rows, not claims
         const size_t n0 = rec.px.size();
         if (prof) {
             for (size_t i = 0; i < prof->pts.size(); ++i) {
@@ -1130,6 +1147,7 @@ private:
         I1("n_chain_segs", r.n_chain_segs); I1("n_profile_pts", r.n_profile_pts); D1("muon_len", r.muon_len / cm);
         I1("n_live_pts", r.n_live_pts); I1("n_dead_pts", r.n_dead_pts); I1("n_cmp_live", r.n_cmp_live); D1("dead_frac_cmp", r.dead_frac_cmp);
         I1("n_delta", r.n_delta); I1("n_body_other", r.n_body_other); I1("n_body_hadron", r.n_body_hadron); D1("delta_len", r.delta_len / cm);
+        I1("n_stop_other", r.n_stop_other); I1("n_other_published", r.n_other_published);   // doc pdvd/64
         D1("ks_mu", r.ks_mu); D1("ks_flat", r.ks_flat); D1("ratio_mu", r.ratio_mu); D1("ratio_flat", r.ratio_flat);
         for (int i = 0; i < 4; ++i) {
             D1(("comp_fwd" + std::to_string(i)).c_str(), r.comp_fwd[i]);
@@ -1758,6 +1776,7 @@ void CheckSTM_Michel::visit(Ensemble& ensemble) const
         IndexedShowerSet showers;
         std::shared_ptr<Shower> michel_shower;
         std::vector<StmMichelArm> michel_arms;
+        std::vector<SegmentPtr> other_arms;      // doc pdvd/64 (T6): kOther arms, published as role 7 at the end when publish_other_arms
         if (!chain.empty()) {
             // interior vertices
             for (size_t vi = 1; vi + 1 < chain_vtxs.size(); ++vi) {
@@ -1778,6 +1797,7 @@ void CheckSTM_Michel::visit(Ensemble& ensemble) const
                     }
                     else {
                         ++rec.n_body_other;
+                        if (m_publish_other_arms) other_arms.push_back(arm);   // doc pdvd/64
                     }
                 }
             }
@@ -1817,6 +1837,13 @@ void CheckSTM_Michel::visit(Ensemble& ensemble) const
                     }
                     else if (a.kind == StmMichelArm::kMichel) {
                         michel_arms.push_back(a);
+                    }
+                    else {
+                        // doc pdvd/64 (T6): a kOther stop arm (hot stub not absorbed,
+                        // debris beside a Michel, a continuation demoted above) had
+                        // no counter and no rows through doc pdvd/63.
+                        ++rec.n_stop_other;
+                        if (m_publish_other_arms) other_arms.push_back(a.seg);
                     }
                 }
             }
@@ -2404,6 +2431,23 @@ void CheckSTM_Michel::visit(Ensemble& ensemble) const
                 add_points(rec, e.seg, 6, nullptr, e.rej, e.d_stop, e.d_body, /*keep_dead*/ true);
             rec.n_survey_segs = static_cast<int>(sv.size());
             rec.n_survey_clusters = static_cast<int>(sv_clusters.size());
+        }
+
+        // doc pdvd/64 (T6): publish the kOther arms as role 7, LAST -- after the
+        // Michel object, the capture gamma and the survey have claimed what
+        // they claim -- so an interior arm the Michel shower walk pulled in
+        // keeps its role-3 row, and role 7 itself claims nothing (add_points
+        // exempts it, like the survey's 6).  Rows only; no verdict reads them.
+        if (m_publish_other_arms && !other_arms.empty()) {
+            std::set<int> seen;   // membership only, never iterated
+            for (const auto& seg : other_arms) {
+                if (!seg) continue;
+                const int sid = (seg->cluster() ? seg->cluster()->get_cluster_id() : 0) * 1000 + static_cast<int>(seg->get_graph_index());
+                if (rec.claimed.count(sid) || seen.count(sid)) continue;
+                seen.insert(sid);
+                add_points(rec, seg, 7);
+                ++rec.n_other_published;
+            }
         }
 
         // Unfitted companion clusters have no dx, so dQ/dx cannot be inverted;
