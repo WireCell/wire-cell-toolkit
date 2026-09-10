@@ -1732,17 +1732,31 @@ def make_memory_figures(bench, base, figdir):
         axp.plot(ts, rss, color="#5f8fbf", lw=1.2, label="RSS")
         axp.set_ylabel("RSS [MB]", color="#5f8fbf")
         axp.set_title(f"{stage.upper()} — memory vs time and node activity")
+        # X+Y grid on the profile; X grid on the timeline, both sharing X so their
+        # vertical grid lines align.
+        axp.grid(True, which="major", axis="both", alpha=0.3, linestyle=":")
         if has_v:
             axv = axp.twinx()
             axv.plot(ts, vram, color="#d95f5f", lw=1.2, label="VRAM")
             axv.set_ylabel("VRAM [MB]", color="#d95f5f")
+        # Draw the intervals and remember, per node type (class), the first one so
+        # we can label the trace with the node-type name.
+        first_of_class = {}
         for i, n in enumerate(nodes):
-            col = CAT_COLOR[report_category(n["class"])]
+            cls = n["class"]
+            col = CAT_COLOR[report_category(cls)]
             for a, b in n["intervals"]:
                 axg.hlines(i, a - t0, b - t0, color=col, lw=2.2)
+            start = min(a for a, b in n["intervals"]) - t0
+            if cls not in first_of_class or start < first_of_class[cls][1]:
+                first_of_class[cls] = (i, start)
+        for cls, (i, start) in first_of_class.items():
+            axg.text(start, i - 0.4, _short(cls), fontsize=5, va="bottom", ha="left",
+                     color=CAT_COLOR[report_category(cls)], clip_on=True)
         axg.set_ylim(-1, max(1, nrows)); axg.invert_yaxis()
         axg.set_yticks([]); axg.set_ylabel(f"{nrows} nodes")
         axg.set_xlabel("time since run start [s]")
+        axg.grid(True, which="major", axis="x", alpha=0.3, linestyle=":")
         # category legend
         from matplotlib.patches import Patch
         axg.legend(handles=[Patch(color=CAT_COLOR[c], label=CAT_LABEL[c])
@@ -2107,16 +2121,21 @@ def make_grid_membars(cells, figdir):
         if not any(v > 0 for v in allvals):
             continue
         n = len(ok)
-        x = list(range(n))
         w = 0.13
+        # Extra whitespace between grid points: space the case centers by `pitch`
+        # (> the ~0.78 cluster width) so each point's two triplets stay grouped and
+        # clearly separated from its neighbours.
+        pitch = 1.5
+        x = [i * pitch for i in range(n)]
         offs = {"osp": [-3 * w, -2 * w, -1 * w], "spng": [1 * w, 2 * w, 3 * w]}
-        fig, ax = plt.subplots(figsize=(max(6, 0.42 * n + 2), 4.2))
+        fig, ax = plt.subplots(figsize=(max(6, 0.42 * pitch * n + 2), 4.2))
         for s in ("osp", "spng"):
             for k, (ck, colkey) in enumerate(cats):
-                ax.bar([i + offs[s][k] for i in x], [val(c, s, ck, which) for c in ok],
+                ax.bar([xi + offs[s][k] for xi in x], [val(c, s, ck, which) for c in ok],
                        width=w, color=CAT_COLOR[colkey],
                        hatch=("" if s == "osp" else "//"), edgecolor="white", linewidth=0.2)
         ax.set_xticks(x); ax.set_xticklabels(labels, rotation=90, fontsize=6)
+        ax.set_xlim(-pitch * 0.5, (n - 0.5) * pitch)
         ax.set_ylabel(f"{title} [MB]")
         ax.set_title(f"{title} per grid point (left triplet = OSP, right hatched = SPNG)")
         ax.legend(handles=[Patch(color=CAT_COLOR[c], label=CAT_LABEL[c]) for _, c in cats]
@@ -2367,11 +2386,48 @@ def grid_report_command(grid_path, outdir, formats=("md", "html", "tex"),
             "proc_figs": proc_figs}
 
 
-_MATRIX_BLURB = ("The outer product of device modes (rows) and node categories "
-                 "(columns).  Each cell is a grid point split into two sub-pixels: "
-                 "**left = OSP, right = SPNG**, coloured by that category's wall time "
-                 "on a per-column log scale.  Not-tested cells are black; crashed "
-                 "sub-pixels white.")
+_MATRIX_BLURB = (
+    "The outer product of device modes (rows) and node categories (columns).  "
+    "Each cell is a grid point split into two sub-pixels: **left = OSP, "
+    "right = SPNG**, coloured by that category's wall time on a per-column log "
+    "scale.  Not-tested cells are black; crashed sub-pixels white.\n\n"
+    "The category columns sum per-node wall time by kind: **DNN** = the neural-net "
+    "forward (`Pytorch::DNNROIFinding` for OSP, `SPNG::TensorForward` for SPNG); "
+    "**sp_other** = all other signal-processing nodes (decon, filters, ROI); "
+    "**other** = everything else, chiefly frame I/O; **total** = the sum of all "
+    "three.  (These are node-work sums, not latency — see Trends.)\n\n"
+    "Within each cell the axes are the intra-job parallelism: **x = wire-cell "
+    "cores** (`TbbDataFlowGraph.max_threads`, the number of graph nodes that may "
+    "run at once) and **y = omp** (`OMP_NUM_THREADS`, torch intra-op threads) for "
+    "CPU / single-GPU rows, or the shard scheme for multi-GPU rows.")
+
+
+def _blurb_html(text):
+    """Render the light markdown used in blurbs (**bold**, `code`, blank-line
+    paragraphs) as HTML paragraphs."""
+    import re as _re
+    paras = text.split("\n\n")
+    out = []
+    for para in paras:
+        p = (para.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
+        p = _re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", p)
+        p = _re.sub(r"`(.+?)`", r"<code>\1</code>", p)
+        out.append(f"<p>{p}</p>")
+    return "".join(out)
+
+
+def _blurb_tex(text):
+    """Render the light markdown used in blurbs as LaTeX (\\textbf, \\texttt,
+    paragraph breaks)."""
+    import re as _re
+    paras = text.split("\n\n")
+    out = []
+    for para in paras:
+        p = para.replace("_", r"\_").replace("&", r"\&").replace("%", r"\%")
+        p = _re.sub(r"\*\*(.+?)\*\*", r"\\textbf{\1}", p)
+        p = _re.sub(r"`(.+?)`", r"\\texttt{\1}", p)
+        out.append(p)
+    return "\n\n".join(out)
 
 
 def _emit_grid_md(ctx):
@@ -2474,7 +2530,7 @@ def _emit_grid_html(ctx):
         if ctx["jobs"].get(st):
             H.append(f"<p><img src='{ctx['jobs'][st]}'></p>")
     H.append("<h2 id='matrix'>Grid matrix</h2>")
-    H.append("<p>" + _MATRIX_BLURB.replace("**", "") + "</p>")
+    H.append(_blurb_html(_MATRIX_BLURB))
     if ctx["mats"].get("matrix"):
         H.append(f"<p><img src='{ctx['mats']['matrix']}'></p>")
     H.append("<h2 id='trends'>Trends</h2>")
@@ -2538,10 +2594,7 @@ def _emit_grid_tex(ctx):
                      r"keepaspectratio]{" + ctx["jobs"][st] + r"}\end{center}")
     T += [r"\clearpage",
          r"\section{Grid matrix}",
-         "The outer product of device modes (rows) and node categories (columns). "
-         "Each cell is a grid point split into two sub-pixels: left = OSP, right = SPNG, "
-         "coloured by that category's wall time on a per-column log scale.  "
-         "Not-tested cells are black; crashed sub-pixels white."]
+         _blurb_tex(_MATRIX_BLURB)]
     if ctx["mats"].get("matrix"):
         T.append(r"\begin{center}\includegraphics[width=\textwidth]{" + ctx["mats"]["matrix"] + r"}\end{center}")
     T.append(r"\section{Trends}")
