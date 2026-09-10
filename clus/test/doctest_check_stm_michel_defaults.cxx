@@ -74,6 +74,11 @@ TEST_CASE("clus knob defaults: CheckSTM_Michel verdict thresholds")
     D("michel_gamma_cos_min", 0.5);         // a 60 deg cone about the Michel direction
     D("michel_gamma_max_ke_mev", 20.0);     // per blob, the capture-gamma stage's cap
     D("michel_gamma_total_ke_max_mev", 60.0);   // the 52.8 MeV endpoint plus resolution
+    D("moved_stop_michel_kink_min", -1.0);  // doc pdvd/72 (P3b): -1 = off, the KE floor alone decides
+    D("michel_mip_lo_turned", -1.0);        // doc pdvd/73 (P2a): -1 = off, michel_mip_lo for every arm
+    D("michel_mip_lo_turned_kink_deg", 60.0);
+    D("michel_far_len_shower_max_cm", -1.0);   // doc pdvd/73 (P2b): -1 = off, len + far_len for every arm
+    D("michel_kink_window_cm", -1.0);       // doc pdvd/73 (P2c): -1 = off, the classifier's window alone
     B("dead_volume_check", false);
     D("min_chain_coverage", 0.0);  // doc pdhd/03: 0 = off
     D("coverage_radius_cm", 3.0);

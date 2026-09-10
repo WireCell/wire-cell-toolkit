@@ -298,6 +298,111 @@ TEST_CASE("stm_michel stop arm: short wide-angle low-MIP arm is Michel, collinea
     CHECK(ao.kind == StmMichelArm::kOther);
 }
 
+TEST_CASE("stm_michel michel gate (doc pdvd/73 P2): all P2 fields off = the doc pdvd/48 expression")
+{
+    for (double smk : {-1.0, 15.0}) {
+        auto th = thresholds();
+        th.michel_shower_min_kink_deg = smk;
+        int n = 0, mismatch = 0;
+        for (double len : {0.0, 5.0, 10.0, 20.0, 25.0, 30.0})
+        for (double far : {0.0, 5.0, 15.0, 30.0, 70.0})
+        for (double mip : {0.1, 0.2, 0.3, 0.31, 1.0, 1.99, 2.0, 2.5})
+        for (double kink : {-1.0, 10.0, 14.9, 15.0, 29.9, 30.0, 59.9, 60.0, 90.0})
+        for (int sh : {0, 1}) {
+            const double L = len * units::cm, F = far * units::cm;
+            const bool kink_ok = kink >= 0;
+            const bool shower_admits = sh && (th.michel_shower_min_kink_deg < 0 || !kink_ok ||
+                                              kink >= th.michel_shower_min_kink_deg);
+            const bool legacy = L + F <= th.michel_max_len && mip > th.michel_mip_lo && mip < th.michel_mip_hi &&
+                                (shower_admits || (kink_ok && kink >= th.michel_min_kink_deg));
+            // kink_w is ignored while (c) is off
+            if (stm_michel_michel_gate(L, F, mip, kink, 45.0, sh, th) != legacy) ++mismatch;
+            ++n;
+        }
+        CHECK(n == 6 * 5 * 8 * 9 * 2);
+        CHECK(mismatch == 0);
+    }
+}
+
+TEST_CASE("stm_michel michel gate (doc pdvd/73 P2): the three operating points and their boundaries")
+{
+    auto th = thresholds();
+    th.michel_shower_min_kink_deg = 15;   // PDVD production
+    const double cm = units::cm;
+    // (a) 039349_11/19's arm 19004: 8.7 cm, 0.22 MIP, 81 deg -- under the 0.3 floor
+    CHECK_FALSE(stm_michel_michel_gate(8.7 * cm, 0, 0.22, 81.1, -1, false, th));
+    auto ta = th; ta.michel_mip_lo_turned = 0.15;
+    CHECK(stm_michel_michel_gate(8.7 * cm, 0, 0.22, 81.1, -1, false, ta));
+    CHECK(stm_michel_michel_gate(8.7 * cm, 0, 0.22, 60.0, -1, false, ta));         // the turn is inclusive
+    CHECK_FALSE(stm_michel_michel_gate(8.7 * cm, 0, 0.22, 59.9, -1, false, ta));   // not turned: the 0.3 floor stands
+    CHECK_FALSE(stm_michel_michel_gate(8.7 * cm, 0, 0.22, -1, -1, true, ta));      // an unmeasurable turn never lowers it
+    CHECK_FALSE(stm_michel_michel_gate(8.7 * cm, 0, 0.15, 81.1, -1, false, ta));   // the lowered floor is strict
+    // (b) a shower-flagged 8.7 cm arm carrying a 54 cm subtree
+    CHECK_FALSE(stm_michel_michel_gate(8.7 * cm, 54 * cm, 0.5, 81.1, -1, true, th));
+    auto tb = th; tb.michel_far_len_shower_max = 60 * cm;
+    CHECK(stm_michel_michel_gate(8.7 * cm, 54 * cm, 0.5, 81.1, -1, true, tb));
+    CHECK(stm_michel_michel_gate(8.7 * cm, 60 * cm, 0.5, 81.1, -1, true, tb));         // inclusive
+    CHECK_FALSE(stm_michel_michel_gate(8.7 * cm, 60.1 * cm, 0.5, 81.1, -1, true, tb));
+    CHECK_FALSE(stm_michel_michel_gate(26 * cm, 0, 0.5, 81.1, -1, true, tb));          // the arm itself stays <= michel_max_len
+    CHECK_FALSE(stm_michel_michel_gate(8.7 * cm, 54 * cm, 0.5, 81.1, -1, false, tb));  // not shower-flagged: len + far_len
+    // (c) 039253_3/61's arm 61007: 7.8 cm, 0.62 MIP, 18 deg over the classifier window
+    CHECK_FALSE(stm_michel_michel_gate(7.8 * cm, 7.1 * cm, 0.62, 18.0, 40.0, false, th));   // off: kink_w ignored
+    auto tc = th; tc.michel_kink_window = 5 * cm;
+    CHECK(stm_michel_michel_gate(7.8 * cm, 7.1 * cm, 0.62, 18.0, 40.0, false, tc));
+    CHECK(stm_michel_michel_gate(7.8 * cm, 7.1 * cm, 0.62, 18.0, 30.0, false, tc));          // inclusive
+    CHECK_FALSE(stm_michel_michel_gate(7.8 * cm, 7.1 * cm, 0.62, 18.0, 29.9, false, tc));
+    CHECK_FALSE(stm_michel_michel_gate(7.8 * cm, 7.1 * cm, 0.62, 18.0, -1, false, tc));
+    // none of them rescues a hot arm
+    auto tall = th;
+    tall.michel_mip_lo_turned = 0.15; tall.michel_far_len_shower_max = 60 * cm; tall.michel_kink_window = 5 * cm;
+    CHECK_FALSE(stm_michel_michel_gate(8.7 * cm, 0, 2.0, 81.1, 81.1, true, tall));
+}
+
+TEST_CASE("stm_michel stop arm (doc pdvd/73 P2): a turned 0.2 MIP arm; a shower arm's subtree, fenced at the stop")
+{
+    Graph g;
+    auto entry = make_vtx(g, 0, 0, 0);
+    auto stop  = make_vtx(g, 0, 0, 60);
+    auto muon = make_track(g, entry, stop, 1.0, false, 3.0, 3.0);
+    auto th = thresholds();
+    th.michel_shower_min_kink_deg = 15;
+    // (a) 8 cm at 90 deg, 0.2 MIP, terminal
+    auto va = make_vtx(g, 0, 8, 60);
+    auto arm_a = make_track(g, stop, va, 0.2);
+    CHECK(stm_michel_classify_stop_arm(g, muon, arm_a, stop, th).kind == StmMichelArm::kOther);
+    auto ta = th; ta.michel_mip_lo_turned = 0.15;
+    auto aa = stm_michel_classify_stop_arm(g, muon, arm_a, stop, ta);
+    CHECK(aa.kind == StmMichelArm::kMichel);
+    CHECK(aa.kink_deg == doctest::Approx(90.0).epsilon(0.02));
+    CHECK(aa.kink_w_deg == -1);   // (c) off: not measured
+    auto tc = th; tc.michel_kink_window = 5 * units::cm;
+    CHECK(stm_michel_classify_stop_arm(g, muon, arm_a, stop, tc).kink_w_deg == doctest::Approx(90.0).epsilon(0.02));
+    // (b) a shower-flagged 8 cm arm at 90 deg the other way; its far vertex
+    // carries a 40 cm branch and a two-segment loop back into the stop
+    auto vb = make_vtx(g, 0, -8, 60);
+    auto arm_b = make_track(g, stop, vb, 0.6);
+    arm_b->set_flags(SegmentFlags::kShowerTrajectory);
+    auto vb2 = make_vtx(g, 0, -48, 60);
+    make_track(g, vb, vb2, 0.6);
+    auto vl = make_vtx(g, 0, -4, 64);
+    make_track(g, vb, vl, 0.6);
+    make_track(g, vl, stop, 0.6);
+    const double hop = std::sqrt(32.0) * units::cm;   // vb -> vl and vl -> stop
+    // fenced: the branch and the first hop of the loop, never the muon behind the stop
+    CHECK(stm_michel_far_subtree_len(g, vb, arm_b, stop, 1e9) == doctest::Approx(40 * units::cm + hop));
+    // the unfenced walk goes through the stop into the muon chain
+    CHECK(segment_far_subtree_track_length(g, vb, arm_b, 1e9) > 40 * units::cm + hop + 50 * units::cm);
+    auto b0 = stm_michel_classify_stop_arm(g, muon, arm_b, stop, th);
+    CHECK_FALSE(b0.terminal);
+    CHECK(b0.kind == StmMichelArm::kOther);        // len + far_len > 25 cm
+    auto tb = th; tb.michel_far_len_shower_max = 60 * units::cm;
+    auto b1 = stm_michel_classify_stop_arm(g, muon, arm_b, stop, tb);
+    CHECK(b1.kind == StmMichelArm::kMichel);
+    CHECK(b1.far_len == doctest::Approx(40 * units::cm + hop));
+    auto tb40 = th; tb40.michel_far_len_shower_max = 40 * units::cm;
+    CHECK(stm_michel_classify_stop_arm(g, muon, arm_b, stop, tb40).kind == StmMichelArm::kOther);
+}
+
 TEST_CASE("stm_michel chain arm: 5 cm terminal arm is delta, 15 cm 1.6x MIP branching arm is hadron")
 {
     Graph g;

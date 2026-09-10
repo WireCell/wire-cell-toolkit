@@ -228,6 +228,14 @@ public:
         m_michel_gamma_cos_min = get<double>(config, "michel_gamma_cos_min", m_michel_gamma_cos_min);
         m_michel_gamma_max_ke_mev = get<double>(config, "michel_gamma_max_ke_mev", m_michel_gamma_max_ke_mev);
         m_michel_gamma_total_ke_max_mev = get<double>(config, "michel_gamma_total_ke_max_mev", m_michel_gamma_total_ke_max_mev);
+        // doc pdvd/72 (P3b): the moved-stop veto (T2c) spares an attached
+        // Michel that turns at least this hard at the stop.  -1 = off.
+        m_moved_stop_michel_kink_min = get<double>(config, "moved_stop_michel_kink_min", m_moved_stop_michel_kink_min);
+        // doc pdvd/73 (P2): PDVD operating points for the attached Michel gate.
+        m_michel_mip_lo_turned = get<double>(config, "michel_mip_lo_turned", m_michel_mip_lo_turned);
+        m_michel_mip_lo_turned_kink_deg = get<double>(config, "michel_mip_lo_turned_kink_deg", m_michel_mip_lo_turned_kink_deg);
+        m_michel_far_len_shower_max_cm = get<double>(config, "michel_far_len_shower_max_cm", m_michel_far_len_shower_max_cm);
+        m_michel_kink_window_cm = get<double>(config, "michel_kink_window_cm", m_michel_kink_window_cm);
         // doc pdvd/66 (T8): the profile-geometry fields are always written; the guard
         // turns them into a reject bit (R_PROFILE_GEOMETRY).
         m_profile_geometry_guard = get<bool>(config, "profile_geometry_guard", m_profile_geometry_guard);
@@ -540,6 +548,32 @@ public:
         cfg["michel_gamma_cos_min"] = m_michel_gamma_cos_min;
         cfg["michel_gamma_max_ke_mev"] = m_michel_gamma_max_ke_mev;
         cfg["michel_gamma_total_ke_max_mev"] = m_michel_gamma_total_ke_max_mev;
+        // doc pdvd/72 (P3b): deg, -1 = off.  When >= 0, the moved-stop veto
+        // (moved_stop_michel_guard) does not demote an attached Michel whose
+        // kink at the stop (michel_kink_deg) is at least this -- the turn is
+        // the Michel's own evidence, which the KE floor alone does not read.
+        // n_michel_veto_exempt counts the spared ones and is written only
+        // when the knob is on.  is_stm is untouched: T2c fires below
+        // moved_stop_michel_ke_min and topology_stop_evidence needs at least
+        // topology_michel_ke_min, both 10 MeV, so a spared Michel cannot
+        // reach P1 -- true only while those two stay equal.
+        cfg["moved_stop_michel_kink_min"] = m_moved_stop_michel_kink_min;
+        // doc pdvd/73 (P2): three operating points for the attached Michel
+        // gate (stm_michel_michel_gate), each off at -1; with all three off
+        // the classifier runs its doc pdvd/48 expression verbatim.
+        //   michel_mip_lo_turned (+ _kink_deg 60): the charge floor for an
+        //     arm that turns at least _kink_deg (a diluted Michel admitted by
+        //     its topology, never by low dQ/dx alone);
+        //   michel_far_len_shower_max_cm: a shower-flagged arm's far subtree
+        //     (its own brems) is capped on its own instead of counting in
+        //     len + far_len <= michel_max_len_cm;
+        //   michel_kink_window_cm: the Michel turn test also accepts the
+        //     kink over this (shorter) window -- the continuation test and
+        //     michel_kink_deg keep the classifier's window.
+        cfg["michel_mip_lo_turned"] = m_michel_mip_lo_turned;
+        cfg["michel_mip_lo_turned_kink_deg"] = m_michel_mip_lo_turned_kink_deg;
+        cfg["michel_far_len_shower_max_cm"] = m_michel_far_len_shower_max_cm;
+        cfg["michel_kink_window_cm"] = m_michel_kink_window_cm;
         // doc pdvd/66 (T8): default off.  The fields end_arc_span (fit arc over 3-D
         // span in the last end_window_cm of the chain profile -- doc 55 sec 17.1
         // item 5, the coiled end) and n_unsupported_segs (fitted segments of the
@@ -730,6 +764,11 @@ private:
     double m_michel_gamma_cos_min{0.5};           // 60 deg about the stop -> Michel direction
     double m_michel_gamma_max_ke_mev{20.0};       // per blob
     double m_michel_gamma_total_ke_max_mev{60.0}; // the Michel object with its blobs: the 52.8 MeV endpoint plus resolution
+    double m_moved_stop_michel_kink_min{-1.0};    // doc pdvd/72 (P3b): deg, -1 = off
+    double m_michel_mip_lo_turned{-1.0};          // doc pdvd/73 (P2a): -1 = off
+    double m_michel_mip_lo_turned_kink_deg{60.0}; // deg
+    double m_michel_far_len_shower_max_cm{-1.0};  // doc pdvd/73 (P2b): cm, -1 = off
+    double m_michel_kink_window_cm{-1.0};         // doc pdvd/73 (P2c): cm, -1 = off
     bool m_profile_geometry_guard{false};         // doc pdvd/66 (T8)
     double m_profile_arc_span_max{1.5}, m_unsupported_min_len_cm{20.0}, m_unsupported_frac{0.25}, m_end_window_cm{20.0};
     bool m_dead_volume_check{false};
@@ -814,6 +853,7 @@ private:
         int n_retreat{0}; double retreat_len{0};  // doc pdvd/57: chain segments retreated off the fit's far end
         int n_split{0}; double split_len{0}, split_kink_deg{0};  // doc pdvd/58: T1c fit-row split
         int n_michel_veto{0};  // doc pdvd/61: T2c fired -- an attached moved-stop Michel with too little charge was demoted
+        int n_michel_veto_exempt{0};  // doc pdvd/72 (P3b): T2c would have fired, and the Michel's turn spared it
         int n_kept_near_stop_main{0}, n_kept_near_stop_comp{0};  // doc pdvd/62 (T3a): pr54 residuals kept by the stop anchor, main cluster / companions
         int n_local_pieces{0};      // doc pdvd/62 (T3b): disconnected same-cluster pieces admitted into the Michel object
         int n_michel_range_veto{0}; // doc pdvd/62 (T3c): a bridged / charge-only Michel demoted by the range-energy guard
@@ -1306,6 +1346,8 @@ private:
             D1("michel_ke_gamma", r.michel_ke_gamma); D1("michel_ke_total", r.michel_ke_total);
             D1("michel_gamma_dis_max", r.michel_gamma_dis_max);
         }
+        // doc pdvd/72 (P3b): the same pattern.
+        if (m_moved_stop_michel_kink_min >= 0) I1("n_michel_veto_exempt", r.n_michel_veto_exempt);
         I1("n_cluster_pts", r.n_cluster_pts); D1("chain_coverage", r.chain_coverage);
         I1("n_dots", r.n_dots); I1("n_dot_clusters_unfit", r.n_dot_clusters_unfit);
         D1("dots_ke_dqdx", r.dots_ke_dqdx); D1("dots_charge_unfit", r.dots_charge_unfit);
@@ -1631,6 +1673,11 @@ void CheckSTM_Michel::visit(Ensemble& ensemble) const
         th.michel_mip_lo = m_michel_mip_lo;
         th.michel_min_kink_deg = m_michel_min_kink_deg;
         th.michel_shower_min_kink_deg = m_michel_shower_min_kink_deg;
+        // doc pdvd/73 (P2): -1 stays -1 (off); the two lengths go to internal units only when set
+        th.michel_mip_lo_turned = m_michel_mip_lo_turned;
+        th.michel_mip_lo_turned_kink_deg = m_michel_mip_lo_turned_kink_deg;
+        th.michel_far_len_shower_max = m_michel_far_len_shower_max_cm >= 0 ? m_michel_far_len_shower_max_cm * units::cm : -1.0;
+        th.michel_kink_window = m_michel_kink_window_cm > 0 ? m_michel_kink_window_cm * units::cm : -1.0;
         th.delta_max_len = m_delta_max_len_cm * units::cm;
         th.hadron_mip = m_vertex_hadron_mip;
 
@@ -2045,13 +2092,22 @@ void CheckSTM_Michel::visit(Ensemble& ensemble) const
                     // classifier saw, so a hand-scan item's "Bragg stub past the fit
                     // end" can be matched to the C++ kink/mip rather than an offline
                     // re-derivation.  Log only.
+                    // doc pdvd/73 (P2): plus the kink over 5 cm and the far
+                    // subtree walked to 100 cm with the stop fenced off, so any
+                    // arm sizes the (b) cap and the (c) window from the C++'s
+                    // own numbers (the payload points are not the fits), and
+                    // kink_w, the (c) kink this arm was classified with (-1 off).
                     const auto& sa = stop_arms.back();
                     SPDLOG_LOGGER_DEBUG(s_log,
-                        "{}CheckSTM_Michel stop-arm: cluster {} seg {} kind {} len {:.2f} cm far_len {:.2f} cm mip {:.2f} kink {:.1f} deg shower {} terminal {}",
+                        "{}CheckSTM_Michel stop-arm: cluster {} seg {} kind {} len {:.2f} cm far_len {:.2f} cm mip {:.2f} kink {:.1f} deg shower {} terminal {} kink5 {:.1f} far_full {:.2f} kink_w {:.1f}",
                         m_evt_tag, rec.cluster_id,
                         (arm->cluster() ? arm->cluster()->get_cluster_id() : 0) * 1000 + static_cast<int>(arm->get_graph_index()),
                         static_cast<int>(sa.kind), sa.len / units::cm, sa.far_len / units::cm, sa.mip, sa.kink_deg,
-                        sa.shower_like ? 1 : 0, sa.terminal ? 1 : 0);
+                        sa.shower_like ? 1 : 0, sa.terminal ? 1 : 0,
+                        segment_pair_kink_deg(last, arm, stm_michel_vertex_point(stop_v), 5 * units::cm),
+                        sa.terminal ? 0.0 : stm_michel_far_subtree_len(g, find_other_vertex(g, arm, stop_v), arm, stop_v,
+                                                                       100 * units::cm) / units::cm,
+                        sa.kink_w_deg);
                 }
                 bool any_michel = false;
                 for (const auto& a : stop_arms) any_michel = any_michel || a.kind == StmMichelArm::kMichel;
@@ -2891,8 +2947,18 @@ void CheckSTM_Michel::visit(Ensemble& ensemble) const
         if (m_moved_stop_michel_guard && rec.michel_conn_type == 1 &&
             (rec.n_retreat > 0 || rec.n_split > 0) &&
             rec.michel_ke_best < m_moved_stop_michel_ke_min) {   // both plain MeV, no units:: scale (michel_ke_best is already / units::MeV)
-            rec.michel_conn_type = 0;
-            ++rec.n_michel_veto;
+            // doc pdvd/72 (P3b): the KE floor does not read the arm's turn.
+            // On the owner's scan the two real Michels this veto demoted turn
+            // 59.6 and 132.6 deg, the three through-going items 17-59 deg; a
+            // hard turn is the Michel's own evidence, so it is spared.  Off at
+            // -1; michel_kink_deg is -1 when unmeasurable, which never spares.
+            if (m_moved_stop_michel_kink_min >= 0 && rec.michel_kink_deg >= m_moved_stop_michel_kink_min) {
+                ++rec.n_michel_veto_exempt;
+            }
+            else {
+                rec.michel_conn_type = 0;
+                ++rec.n_michel_veto;
+            }
         }
         // doc pdvd/62 (T3c): doc 55 sec 15.1's kinematic test.  A bridged
         // (2) or charge-only (3) Michel more than michel_range_energy_dis_cm

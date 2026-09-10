@@ -224,6 +224,13 @@ namespace WireCell::Clus::PR {
         double michel_mip_lo{0.3};                    // charge-desert guard
         double michel_min_kink_deg{30};               // required unless the arm is shower-flagged
         double michel_shower_min_kink_deg{-1};        // doc pdhd/03: a shower-flagged arm still needs this kink (measurable); -1 = any (doc pdvd/48)
+        // doc pdvd/73 (P2): PDVD operating points for the Michel clause.  Each
+        // is OFF at its default (-1), and with all three off the classifier
+        // runs its doc pdvd/48 expression verbatim.
+        double michel_mip_lo_turned{-1};              // (a) a lower charge floor, only for an arm that turns hard; -1 = off
+        double michel_mip_lo_turned_kink_deg{60};     // (a) "turns hard"
+        double michel_far_len_shower_max{-1};         // (b) a shower-flagged arm's far subtree is judged on its own cap, not in len + far_len; -1 = off
+        double michel_kink_window{-1};                // (c) the Michel turn test may also read the kink over this shorter window; -1 = off
         // delta ray off the muon body
         double delta_max_len{8 * units::cm};
         // a long heavily-ionizing prong off the body = hadronic vertex
@@ -240,6 +247,7 @@ namespace WireCell::Clus::PR {
         double far_len{0};      // track length reachable beyond the arm's far vertex (capped)
         bool shower_like{false};
         bool terminal{false};   // far vertex has degree 1
+        double kink_w_deg{-1};  // doc pdvd/73 (P2c): the kink over michel_kink_window; -1 = not measured (off, or unmeasurable)
     };
 
     /// Classify a non-muon arm at the STOP vertex.
@@ -251,6 +259,33 @@ namespace WireCell::Clus::PR {
     ///  - else Other.
     StmMichelArm stm_michel_classify_stop_arm(Graph& g, SegmentPtr last_muon, SegmentPtr arm,
                                               VertexPtr stop, const StmMichelArmThresholds& th);
+
+    /// doc pdvd/73 (P2): the Michel clause of stm_michel_classify_stop_arm as a
+    /// pure predicate, used when any P2 field of `th` is on (with all of them
+    /// off the classifier keeps its own expression, and this function returns
+    /// the same answer -- the doctest pins that on a grid).  An arm that is
+    /// not a continuation is a Michel when
+    ///  - reach: len + far_len <= michel_max_len; with (b) on, a shower-flagged
+    ///    arm instead needs len <= michel_max_len and far_len <=
+    ///    michel_far_len_shower_max;
+    ///  - charge: michel_mip_lo < mip < michel_mip_hi; with (a) on, the floor
+    ///    is michel_mip_lo_turned when kink_deg >= michel_mip_lo_turned_kink_deg;
+    ///  - turn: shower-flagged (subject to michel_shower_min_kink_deg), or
+    ///    kink_deg >= michel_min_kink_deg; with (c) on, kink_w_deg >=
+    ///    michel_min_kink_deg also counts.
+    /// kink_deg / kink_w_deg < 0 = unmeasurable.  Lengths in one unit.
+    bool stm_michel_michel_gate(double len, double far_len, double mip, double kink_deg, double kink_w_deg,
+                                bool shower_like, const StmMichelArmThresholds& th);
+
+    /// doc pdvd/73 (P2b): the track length reachable from `far_vtx` without
+    /// crossing `stem` and without stepping back into `stop_vtx` -- the
+    /// segment_far_subtree_track_length walk (PRSegmentFunctions.h) with the
+    /// stop vertex fenced off, so a loop back to the stop never adds the muon
+    /// chain behind it.  Returns as soon as the total exceeds `cap` (the value
+    /// is then a lower bound above the cap).  Deterministic: out-edges are
+    /// walked in sorted order.
+    double stm_michel_far_subtree_len(Graph& g, VertexPtr far_vtx, SegmentPtr stem, VertexPtr stop_vtx,
+                                      double cap);
 
     /// Classify a non-chain arm at an INTERIOR chain vertex.
     ///  - Delta: len <= delta_max_len, far_len <= delta_max_len, terminal.

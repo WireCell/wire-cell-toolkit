@@ -506,15 +506,88 @@ StmMichelArm WireCell::Clus::PR::stm_michel_classify_stop_arm(Graph& g, SegmentP
     // 5 cm (a collinear 1.6 MIP stub at 4 deg, 029107/1 cluster 113) as a
     // "Michel"; with michel_shower_min_kink_deg >= 0 a shower-flagged arm
     // whose kink is measurable must also turn by at least that much.
-    const bool shower_admits = a.shower_like &&
-        (th.michel_shower_min_kink_deg < 0 || !kink_ok || a.kink_deg >= th.michel_shower_min_kink_deg);
-    if (a.len + a.far_len <= th.michel_max_len && a.mip > th.michel_mip_lo && a.mip < th.michel_mip_hi &&
-        (shower_admits || (kink_ok && a.kink_deg >= th.michel_min_kink_deg))) {
+    const bool p2_on = th.michel_mip_lo_turned >= 0 || th.michel_far_len_shower_max >= 0 || th.michel_kink_window > 0;
+    if (!p2_on) {
+        const bool shower_admits = a.shower_like &&
+            (th.michel_shower_min_kink_deg < 0 || !kink_ok || a.kink_deg >= th.michel_shower_min_kink_deg);
+        if (a.len + a.far_len <= th.michel_max_len && a.mip > th.michel_mip_lo && a.mip < th.michel_mip_hi &&
+            (shower_admits || (kink_ok && a.kink_deg >= th.michel_min_kink_deg))) {
+            a.kind = StmMichelArm::kMichel;
+            return a;
+        }
+        a.kind = StmMichelArm::kOther;
+        return a;
+    }
+    // doc pdvd/73 (P2).  (b): measure_arm capped the far walk at michel_max_len,
+    // so a shower-flagged arm's subtree is re-measured up to its own cap, with
+    // the stop vertex fenced off (a loop back to the stop must not add the
+    // muon chain).  (c): the turn over the shorter window.  Only the Michel
+    // clause reads either; the continuation test above and the persisted
+    // kink keep the michel/continuation window.
+    if (th.michel_far_len_shower_max >= 0 && a.shower_like && !a.terminal) {
+        VertexPtr far = find_other_vertex(g, arm, stop);
+        a.far_len = stm_michel_far_subtree_len(g, far, arm, stop,
+                                               std::max(th.michel_max_len, th.michel_far_len_shower_max));
+    }
+    if (th.michel_kink_window > 0 && last_muon)
+        a.kink_w_deg = segment_pair_kink_deg(last_muon, arm, stm_michel_vertex_point(stop), th.michel_kink_window);
+    if (stm_michel_michel_gate(a.len, a.far_len, a.mip, a.kink_deg, a.kink_w_deg, a.shower_like, th)) {
         a.kind = StmMichelArm::kMichel;
         return a;
     }
     a.kind = StmMichelArm::kOther;
     return a;
+}
+
+bool WireCell::Clus::PR::stm_michel_michel_gate(double len, double far_len, double mip, double kink_deg,
+                                                double kink_w_deg, bool shower_like,
+                                                const StmMichelArmThresholds& th)
+{
+    const bool kink_ok = kink_deg >= 0;
+    const bool reach = (th.michel_far_len_shower_max >= 0 && shower_like)
+        ? (len <= th.michel_max_len && far_len <= th.michel_far_len_shower_max)    // (b)
+        : (len + far_len <= th.michel_max_len);
+    // (a): a diluted PDVD Michel is admitted below michel_mip_lo by its
+    // TOPOLOGY -- a hard turn -- never by low dQ/dx alone (the comment above
+    // the continuation test keeps its meaning).
+    const bool charge_lo = mip > th.michel_mip_lo ||
+        (th.michel_mip_lo_turned >= 0 && kink_ok && kink_deg >= th.michel_mip_lo_turned_kink_deg &&
+         mip > th.michel_mip_lo_turned);
+    const bool charge = charge_lo && mip < th.michel_mip_hi;
+    const bool shower_admits = shower_like &&
+        (th.michel_shower_min_kink_deg < 0 || !kink_ok || kink_deg >= th.michel_shower_min_kink_deg);
+    const bool turn = (kink_ok && kink_deg >= th.michel_min_kink_deg) ||
+        (th.michel_kink_window > 0 && kink_w_deg >= 0 && kink_w_deg >= th.michel_min_kink_deg);   // (c)
+    return reach && charge && (shower_admits || turn);
+}
+
+double WireCell::Clus::PR::stm_michel_far_subtree_len(Graph& g, VertexPtr far_vtx, SegmentPtr stem,
+                                                      VertexPtr stop_vtx, double cap)
+{
+    double total = 0;
+    if (!far_vtx || !far_vtx->descriptor_valid()) return total;
+    std::set<SegmentPtr> used_segs{stem};      // membership only, never iterated
+    std::set<VertexPtr> used_vtx{far_vtx};
+    std::vector<VertexPtr> stack{far_vtx};
+    while (!stack.empty()) {
+        VertexPtr v = stack.back();
+        stack.pop_back();
+        if (!v || !v->descriptor_valid()) continue;
+        for (auto edesc : sorted_out_edges(v->get_descriptor(), g)) {
+            SegmentPtr sg = g[edesc].segment;
+            if (!sg || used_segs.count(sg)) continue;
+            used_segs.insert(sg);
+            VertexPtr ov = find_other_vertex(g, sg, v);
+            if (stop_vtx && ov == stop_vtx) continue;   // back into the stop: the muon's side
+            total += segment_track_length(sg);
+            if (total > cap) return total;
+            if (ov && !used_vtx.count(ov)) {
+                used_vtx.insert(ov);
+                stack.push_back(ov);
+            }
+        }
+    }
+    return total;
 }
 
 StmMichelArm WireCell::Clus::PR::stm_michel_classify_chain_arm(Graph& g, SegmentPtr in_seg, SegmentPtr arm,
