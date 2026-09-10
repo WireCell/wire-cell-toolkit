@@ -120,12 +120,15 @@ builds with =pdflatex= (needs =graphicx=, =booktabs=); the flow graphs need the
 =grid-report= consumes a =grid-index.json= and writes a cross-grid summary that
 spans every grid point.  It contains:
 
-- OSP and SPNG *matrices* (same axes): columns = wire-cell cores, rows = the
-  compute config (torch cores for CPU cells, GPU-device/scheme for GPU cells).
-  Each cell is a grid point drawn as 2×2 *sub-pixels* --- DNN (top-left),
-  sp\_other (top-right), other (bottom-left), total (bottom-right) --- on a
-  single shared time colour scale (one colour bar).  Not-tested cells are black,
-  crashed cells white.
+- A *matrix* that is the outer product of *device modes* (rows: CPU only,
+  CPU+1GPU, CPU+2GPU, ...) and *node categories* (columns: DNN, sp\_other, other,
+  total).  Each cell is a grid point split into two *sub-pixels* --- left = OSP,
+  right = SPNG --- coloured by that category's wall time on a per-column log
+  scale.  Within a cell the axes are x = wire-cell cores and y = torch cores
+  (CPU / 1-GPU rows) or shard scheme (multi-GPU rows).  Not-tested cells are
+  black, crashed sub-pixels white.  The full grid is reconstructed from every
+  =compare-*.json= in the grid-index's directory (the index itself only records
+  the last run), so cpu/gpu/shard runs into one =--outdir= are all included.
 - Trend *bar charts* (total wall per point; SPNG/OSP ratio per point).
 - A grid *overview table*.
 - A *per-grid-point summary* for every cell (=report= output), linked from the
