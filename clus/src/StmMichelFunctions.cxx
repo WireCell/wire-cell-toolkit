@@ -260,6 +260,25 @@ namespace {
         }
         return out;
     }
+
+    // The reference plateau: median dQ/dx over [lo, hi] (halved for a chain
+    // shorter than hi, same short-track convention stm_michel_bragg_contrast
+    // uses), live points only.  Shared by stm_michel_stop_retreat and
+    // stm_michel_stop_split so the two mechanisms cannot drift on what
+    // "collapsed" and "Bragg rise" are judged against.  Returns 0 (never
+    // negative) when there are too few live points to judge.
+    double profile_plateau(const StmMichelProfile& prof, double lo, double hi, double min_dqdx_live)
+    {
+        if (prof.total_length < hi) { lo *= 0.5; hi *= 0.5; }
+        std::vector<double> pl;
+        for (size_t i = 0; i < prof.rr.size(); ++i) {
+            if (prof.dQdx[i] < min_dqdx_live) continue;
+            if (prof.rr[i] >= lo && prof.rr[i] <= hi) pl.push_back(prof.dQdx[i]);
+        }
+        if (pl.size() < 3) return 0;
+        const double plateau = stm_michel_median(pl);
+        return plateau > 0 ? plateau : 0;
+    }
 }
 
 StmMichelRetreat WireCell::Clus::PR::stm_michel_stop_retreat(const StmMichelProfile& prof, int n_chain_segs,
@@ -272,16 +291,8 @@ StmMichelRetreat WireCell::Clus::PR::stm_michel_stop_retreat(const StmMichelProf
     // stm_michel_bragg_contrast, computed ONCE from the full chain so the
     // reference does not chase the shrinking frame.  Live points only (a
     // dead stretch must not fake a low plateau or a fake collapse).
-    double pl_lo = th.plateau_lo, pl_hi = th.plateau_hi;
-    if (prof.total_length < pl_hi) { pl_lo *= 0.5; pl_hi *= 0.5; }
-    std::vector<double> pl;
-    for (size_t i = 0; i < prof.rr.size(); ++i) {
-        if (prof.dQdx[i] < th.min_dqdx_live) continue;
-        if (prof.rr[i] >= pl_lo && prof.rr[i] <= pl_hi) pl.push_back(prof.dQdx[i]);
-    }
-    if (pl.size() < 3) return out;   // cannot judge
-    const double plateau = stm_michel_median(pl);
-    if (!(plateau > 0)) return out;
+    const double plateau = profile_plateau(prof, th.plateau_lo, th.plateau_hi, th.min_dqdx_live);
+    if (!(plateau > 0)) return out;   // cannot judge
     out.plateau = plateau;
 
     for (int n_drop = 1; n_drop <= th.max_drop && n_chain_segs - n_drop > 0; ++n_drop) {
@@ -335,6 +346,103 @@ StmMichelRetreat WireCell::Clus::PR::stm_michel_stop_retreat(const StmMichelProf
         out.drop_len = drop_len;
         out.last_tail_med = tail_med;
         out.last_peak = peak;
+    }
+    return out;
+}
+
+double WireCell::Clus::PR::stm_michel_row_kink_deg(const StmMichelProfile& prof, size_t i, double window)
+{
+    if (i >= prof.L.size()) return -1;
+    const double Li = prof.L[i];
+    // prof.L is non-decreasing along the array index (it is the walked
+    // polyline arclength), so a fixed-arclength arm on either side of `i` is
+    // found by walking the index outward, not by searching rr (rr runs the
+    // opposite way but is not otherwise guaranteed monotonic here).
+    size_t j_lo = i;
+    bool have_lo = false;
+    while (j_lo > 0) {
+        --j_lo;
+        if (Li - prof.L[j_lo] >= window) { have_lo = true; break; }
+    }
+    if (!have_lo) return -1;
+    size_t j_hi = i;
+    bool have_hi = false;
+    while (j_hi + 1 < prof.L.size()) {
+        ++j_hi;
+        if (prof.L[j_hi] - Li >= window) { have_hi = true; break; }
+    }
+    if (!have_hi) return -1;
+    const Vector d_in = prof.pts[i] - prof.pts[j_lo];    // direction of travel arriving at i
+    const Vector d_out = prof.pts[j_hi] - prof.pts[i];   // direction of travel leaving i
+    if (!(d_in.magnitude() > 0) || !(d_out.magnitude() > 0)) return -1;
+    return d_in.angle(d_out) * 180.0 / M_PI;
+}
+
+StmMichelSplit WireCell::Clus::PR::stm_michel_stop_split(const StmMichelProfile& prof, int n_chain_segs,
+                                                          const StmMichelSplitThresholds& th)
+{
+    StmMichelSplit out;
+    if (th.max_split <= 0 || prof.empty() || n_chain_segs <= 0) return out;
+
+    // SAME reference the retreat uses -- the two mechanisms must not drift
+    // on what "collapsed" and "Bragg rise" mean.
+    const double plateau = profile_plateau(prof, th.plateau_lo, th.plateau_hi, th.min_dqdx_live);
+    if (!(plateau > 0)) return out;   // cannot judge
+
+    const int last_seg = n_chain_segs - 1;
+    double best_kink = -1;
+    for (size_t i = 0; i < prof.L.size(); ++i) {
+        // Only rows INSIDE the last chain segment: anywhere else a graph
+        // vertex already exists and belongs to stm_michel_stop_retreat, not
+        // this function -- that is the whole division of labor between them.
+        if (prof.seg_idx[i] != last_seg) continue;
+        if (prof.rr[i] < th.min_drop || prof.rr[i] > th.max_drop_len) continue;
+
+        const double kink = stm_michel_row_kink_deg(prof, i, th.dir_window);
+        if (kink < th.kink_min_deg) continue;   // also excludes the -1 "unmeasurable" case
+
+        const double boundary_L = prof.L[i];
+
+        std::vector<double> tail;
+        for (size_t j = 0; j < prof.L.size(); ++j) {
+            if (prof.L[j] < boundary_L) continue;
+            if (prof.dQdx[j] < th.min_dqdx_live) continue;
+            tail.push_back(prof.dQdx[j]);
+        }
+        if (static_cast<int>(tail.size()) < th.min_tail_pts) continue;
+        const double tail_med = stm_michel_median(tail);
+        if (!(tail_med < th.collapse_frac * plateau)) continue;   // not a collapsed tail
+
+        std::vector<double> kept_q; std::vector<double> kept_new_rr;
+        for (size_t j = 0; j < prof.L.size(); ++j) {
+            if (prof.L[j] > boundary_L) continue;
+            if (prof.dQdx[j] < th.min_dqdx_live) continue;
+            kept_q.push_back(prof.dQdx[j]);
+            kept_new_rr.push_back(boundary_L - prof.L[j]);
+        }
+        if (kept_q.size() < 3) continue;
+        const auto rm = running_median3(kept_q);
+        double peak = -1;
+        int n_win = 0;
+        for (size_t j = 0; j < rm.size(); ++j) {
+            if (kept_new_rr[j] > th.peak_window) continue;
+            ++n_win;
+            peak = std::max(peak, rm[j]);
+        }
+        if (n_win < 3) continue;   // window too sparse to judge
+        if (!(peak >= th.peak_frac * plateau)) continue;   // nothing to retreat TO
+
+        if (kink > best_kink) {
+            best_kink = kink;
+            out.ok = true;
+            out.index = i;
+            out.cut_rr = prof.rr[i];
+            out.drop_len = prof.total_length - boundary_L;
+            out.kink_deg = kink;
+            out.plateau = plateau;
+            out.tail_med = tail_med;
+            out.peak = peak;
+        }
     }
     return out;
 }

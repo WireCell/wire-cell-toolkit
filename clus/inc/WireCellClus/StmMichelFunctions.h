@@ -312,6 +312,80 @@ namespace WireCell::Clus::PR {
     StmMichelRetreat stm_michel_stop_retreat(const StmMichelProfile& prof, int n_chain_segs,
                                              const StmMichelRetreatThresholds& th);
 
+    /// The bend of the FITTED trajectory at profile row `i`: the angle between
+    /// the incoming direction (row i back to the row `window` of arclength
+    /// behind it, i.e. larger rr) and the outgoing direction (row i forward to
+    /// the row `window` ahead, i.e. smaller rr).  0 deg = straight; a real
+    /// second particle at the stop bends this, a through-going track's own
+    /// multiple scattering mostly does not (doc 58 sec 1: median 18.5 deg on
+    /// the missed-collapse population that has no chain vertex to retreat
+    /// onto, vs 6.3 deg on the collapse-shaped through-going control -- the
+    /// owner's kink discriminator, applied at a fit row instead of a segment
+    /// pair). Returns -1 when `i` is too close to either end of `prof` to
+    /// measure a `window`-long arm on both sides.
+    double stm_michel_row_kink_deg(const StmMichelProfile& prof, size_t i, double window);
+
+    /// doc pdvd/58 (T1c): the STOP SPLIT.  stm_michel_stop_retreat can only
+    /// move the stop onto a vertex the chain ALREADY has; on a population of
+    /// missed collapse-shaped stoppers the collapse sits INSIDE the last
+    /// chain segment (no chain vertex near it at all -- doc 57 sec 1's 23-item
+    /// finding), so no graph-local retreat reaches them.  This function picks
+    /// a FIT ROW inside that last segment for the caller to split at
+    /// (PR::break_segment -- CheckSTM_Michel already uses it in
+    /// anchor_vertex()), rather than an existing vertex.
+    ///
+    /// Losing the vertex constraint removes the guard that kept the retreat
+    /// honest (doc 57 sec 1: a vertex within 4cm existed on 24/51 missed vs
+    /// 11/80 through-going), so this function requires instead that the row's
+    /// OWN trajectory bend (stm_michel_row_kink_deg) reach kink_min_deg -- a
+    /// real kink in the fitted path, not just a charge-shape collapse.  Doc 58
+    /// sec 1 measured this discriminator BEFORE this function existed: over
+    /// the population with no chain vertex, bend >= 15 deg keeps every one of
+    /// 58 through-going negative-control items from qualifying while still
+    /// reaching 3 of 23 missed ones (probe numbers; the real graph typically
+    /// recovers fewer, as it did for stm_michel_stop_retreat's 7 -> 2).
+    ///
+    /// Candidate rows: seg_idx[i] == n_chain_segs - 1 (INSIDE the last chain
+    /// segment only -- anywhere else already has a vertex and belongs to
+    /// stm_michel_stop_retreat, never this function), min_drop <= rr[i] <=
+    /// max_drop_len, kink >= kink_min_deg, PLUS the same collapsed-tail /
+    /// Bragg-rise-to-retreat-to tests stm_michel_stop_retreat applies (same
+    /// plateau reference, same running-median-then-window convention). Among
+    /// qualifying rows, the LARGEST kink wins (doc 58 sec 1: this beat
+    /// anchoring on the shape classifier's own collapse onset by costing 0
+    /// rather than 2 new false positives at the same recovery).
+    ///
+    /// `prof` must be the profile BEFORE stm_michel_profile_live, exactly as
+    /// stm_michel_stop_retreat requires. Returns ok=false (a default-built
+    /// result) when max_split <= 0, prof is empty, n_chain_segs <= 0, or no
+    /// candidate row qualifies.
+    struct StmMichelSplitThresholds {
+        int    max_split{0};                  // stop_split_max; <= 0 = off
+        double kink_min_deg{15.0};             // split_kink_min_deg
+        double min_drop{3 * units::cm};        // split_min_drop_cm
+        double collapse_frac{0.5};             // split_collapse_frac
+        double peak_frac{1.4};                 // split_peak_frac
+        double peak_window{15 * units::cm};   // split_peak_window_cm
+        double dir_window{5 * units::cm};     // split_dir_window_cm
+        double max_drop_len{25 * units::cm};  // reuses michel_max_len_cm
+        double plateau_lo{20 * units::cm};    // reuses bragg_plateau_lo_cm
+        double plateau_hi{40 * units::cm};    // reuses bragg_plateau_hi_cm
+        double min_dqdx_live{0};              // reuses profile_min_dqdx_frac * mip_dqdx
+        int    min_tail_pts{3};
+    };
+    struct StmMichelSplit {
+        bool   ok{false};
+        size_t index{0};            // row into prof.pts/L/rr to split the segment at
+        double cut_rr{0};           // prof.rr[index]: residual range of the chosen split
+        double drop_len{0};         // prof.total_length - prof.L[index]
+        double kink_deg{0};         // the row's own bend, for the record
+        double plateau{0};          // the reference plateau this was judged against
+        double tail_med{0};         // the dropped tail's median (diagnostic)
+        double peak{0};             // the surviving profile's peak (diagnostic)
+    };
+    StmMichelSplit stm_michel_stop_split(const StmMichelProfile& prof, int n_chain_segs,
+                                         const StmMichelSplitThresholds& th);
+
     /// Reject bits carried in the stm_michel PC / T_stm_michel.reject_bits.
     /// is_stm = (reject_bits == 0).  Michel presence is deliberately NOT a
     /// criterion (mu- capture in argon).

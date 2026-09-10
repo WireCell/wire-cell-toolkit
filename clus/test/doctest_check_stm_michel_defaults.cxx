@@ -42,6 +42,13 @@ TEST_CASE("clus knob defaults: CheckSTM_Michel verdict thresholds")
     D("retreat_collapse_frac", 0.5);
     D("retreat_peak_frac", 1.4);
     D("retreat_peak_window_cm", 15.0);
+    D("stop_split_max", 0);             // doc pdvd/58 (T1c): 0 = off, no fit-row split
+    D("split_kink_min_deg", 15.0);
+    D("split_min_drop_cm", 3.0);
+    D("split_collapse_frac", 0.5);
+    D("split_peak_frac", 1.4);
+    D("split_peak_window_cm", 15.0);
+    D("split_dir_window_cm", 5.0);
     B("dead_volume_check", false);
     D("min_chain_coverage", 0.0);  // doc pdhd/03: 0 = off
     D("coverage_radius_cm", 3.0);

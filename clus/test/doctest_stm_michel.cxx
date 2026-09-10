@@ -710,3 +710,173 @@ TEST_CASE("stm_michel stop retreat: fires the same way when the last segment is 
     CHECK(rr.n_drop == 1);
     CHECK(rr.drop_len == doctest::Approx(8 * units::cm).epsilon(0.05));
 }
+
+// ---------------------------------------------------------------------------
+// doc pdvd/58 (T1c): stm_michel_row_kink_deg and stm_michel_stop_split.
+// These two build the StmMichelProfile directly rather than through a graph:
+// row_kink_deg only ever reads L/pts, and stop_split needs points bent at an
+// exact, hand-picked row inside a single segment -- easier to state exactly
+// with parallel arrays than to coax out of make_track's straight geometry.
+namespace {
+
+StmMichelProfile mkprof(const std::vector<double>& L_cm, const std::vector<double>& dQdx,
+                        const std::vector<Point>& pts, const std::vector<int>& seg_idx)
+{
+    REQUIRE(L_cm.size() == dQdx.size());
+    REQUIRE(L_cm.size() == pts.size());
+    REQUIRE(L_cm.size() == seg_idx.size());
+    StmMichelProfile p;
+    p.dQdx = dQdx;
+    p.pts = pts;
+    p.seg_idx = seg_idx;
+    p.L.resize(L_cm.size());
+    for (size_t i = 0; i < L_cm.size(); ++i) p.L[i] = L_cm[i] * units::cm;
+    p.total_length = p.L.empty() ? 0 : p.L.back();
+    p.rr.resize(p.L.size());
+    for (size_t i = 0; i < p.L.size(); ++i) p.rr[i] = p.total_length - p.L[i];
+    return p;
+}
+
+StmMichelSplitThresholds split_thresholds(int max_split = 1, double kink_min_deg = 15.0,
+                                          double min_drop_cm = 3.0, double peak_window_cm = 15.0,
+                                          double dir_window_cm = 5.0, double max_drop_len_cm = 25.0)
+{
+    StmMichelSplitThresholds th;
+    th.max_split = max_split;
+    th.kink_min_deg = kink_min_deg;
+    th.min_drop = min_drop_cm * units::cm;
+    th.collapse_frac = 0.5;
+    th.peak_frac = 1.4;
+    th.peak_window = peak_window_cm * units::cm;
+    th.dir_window = dir_window_cm * units::cm;
+    th.max_drop_len = max_drop_len_cm * units::cm;
+    th.plateau_lo = 20 * units::cm;
+    th.plateau_hi = 40 * units::cm;
+    th.min_dqdx_live = 0;
+    th.min_tail_pts = 3;
+    return th;
+}
+
+// The single-bend profile every basic stop_split test starts from: a flat
+// plateau (seg 0, 100/cm, L 0-35), a warmup peak inside the LAST chain
+// segment (seg 1, 200/cm, L 40-50, still on the z axis), a bend exactly at
+// L=50 (still 200/cm there -- the bend is a position change, not yet the
+// collapse), then the collapsed tail (15/cm, L 50-60) that turns 90 degrees
+// off the z axis at that same row.  Candidate row = index 10 (L=50): the
+// only one where seg_idx==1 (last segment), rr in range, tail beyond it
+// collapsed, and a Bragg peak survives within dir_window/peak_window of it.
+StmMichelProfile bent_profile(bool bend)
+{
+    std::vector<double> L; std::vector<double> dQdx; std::vector<Point> pts; std::vector<int> seg;
+    auto add = [&](double l_cm, double q, double x, double y, double z, int s) {
+        L.push_back(l_cm); dQdx.push_back(q); pts.push_back(Point(x, y, z) * units::cm); seg.push_back(s);
+    };
+    for (double l = 0; l <= 35; l += 5) add(l, 100, 0, 0, l, 0);        // seg 0: the plateau reference
+    add(40, 200, 0, 0, 40, 1);                                        // seg 1: warmup peak, still +z
+    add(45, 200, 0, 0, 45, 1);
+    add(50, 200, 0, 0, 50, 1);                                        // the bend row
+    if (bend) {
+        add(55, 15, 0, 5, 50, 1);                                    // leg turns +y here
+        add(60, 15, 0, 10, 50, 1);
+    }
+    else {
+        add(55, 15, 0, 0, 55, 1);                                    // no bend: straight on down +z
+        add(60, 15, 0, 0, 60, 1);
+    }
+    return mkprof(L, dQdx, pts, seg);
+}
+
+}  // namespace
+
+TEST_CASE("stm_michel_row_kink_deg: 0 deg on a straight run, unmeasurable past either end")
+{
+    std::vector<double> L; std::vector<Point> pts;
+    for (double l = 0; l <= 30; l += 5) { L.push_back(l); pts.push_back(Point(0, 0, l) * units::cm); }
+    std::vector<double> zeros_d(L.size(), 0); std::vector<int> zeros_i(L.size(), 0);
+    auto prof = mkprof(L, zeros_d, pts, zeros_i);
+    CHECK(stm_michel_row_kink_deg(prof, 3, 5 * units::cm) == doctest::Approx(0).epsilon(1e-6));
+    CHECK(stm_michel_row_kink_deg(prof, 0, 5 * units::cm) == -1);   // no room behind
+    CHECK(stm_michel_row_kink_deg(prof, 6, 5 * units::cm) == -1);   // no room ahead
+    CHECK(stm_michel_row_kink_deg(prof, 3, 100 * units::cm) == -1); // window past both ends
+}
+
+TEST_CASE("stm_michel_row_kink_deg: 90 deg at a right-angle bend")
+{
+    std::vector<double> L{0, 5, 10, 15, 20};
+    std::vector<Point> pts{Point(0, 0, 0) * units::cm, Point(0, 0, 5) * units::cm, Point(0, 0, 10) * units::cm,
+                           Point(0, 5, 10) * units::cm, Point(0, 10, 10) * units::cm};
+    std::vector<double> zeros_d(L.size(), 0); std::vector<int> zeros_i(L.size(), 0);
+    auto prof = mkprof(L, zeros_d, pts, zeros_i);
+    CHECK(stm_michel_row_kink_deg(prof, 2, 5 * units::cm) == doctest::Approx(90).epsilon(1e-6));
+}
+
+TEST_CASE("stm_michel stop split: fires on a collapsed tail behind a Bragg rise, WITH a kink")
+{
+    auto prof = bent_profile(/*bend=*/true);
+    auto sp = stm_michel_stop_split(prof, /*n_chain_segs=*/2, split_thresholds());
+    REQUIRE(sp.ok);
+    CHECK(sp.index == 10);
+    CHECK(sp.cut_rr == doctest::Approx(10 * units::cm).epsilon(0.05));
+    CHECK(sp.drop_len == doctest::Approx(10 * units::cm).epsilon(0.05));
+    CHECK(sp.kink_deg == doctest::Approx(90).epsilon(0.5));
+    CHECK(sp.plateau > 0);
+}
+
+TEST_CASE("stm_michel stop split: the SAME collapsed tail does NOT fire with no kink -- the discriminator")
+{
+    auto prof = bent_profile(/*bend=*/false);
+    auto sp = stm_michel_stop_split(prof, /*n_chain_segs=*/2, split_thresholds());
+    CHECK_FALSE(sp.ok);
+}
+
+TEST_CASE("stm_michel stop split: max_split = 0 is off")
+{
+    auto prof = bent_profile(true);
+    auto sp = stm_michel_stop_split(prof, 2, split_thresholds(/*max_split=*/0));
+    CHECK_FALSE(sp.ok);
+}
+
+TEST_CASE("stm_michel stop split: a qualifying row outside the LAST chain segment is refused")
+{
+    auto prof = bent_profile(true);   // every point carries seg_idx 0 or 1
+    auto sp = stm_michel_stop_split(prof, /*n_chain_segs=*/3, split_thresholds());   // last_seg = 2
+    CHECK_FALSE(sp.ok);
+}
+
+TEST_CASE("stm_michel stop split: a drop shorter than min_drop is refused")
+{
+    auto prof = bent_profile(true);   // the only qualifying row has rr = 10 cm
+    auto sp = stm_michel_stop_split(prof, 2, split_thresholds(1, 15.0, /*min_drop_cm=*/11.0));
+    CHECK_FALSE(sp.ok);
+}
+
+TEST_CASE("stm_michel stop split: picks the LARGER of two qualifying kinks")
+{
+    // Two genuine bends inside the last chain segment, both landing on a
+    // collapsed tail with a Bragg rise still in reach: a shallow 45 deg turn
+    // at L=44, then a sharper 90 deg turn at L=48.  dir_window/peak_window
+    // are loosened from the shipped defaults purely so both bends fit inside
+    // one short synthetic segment; the shipped operating point is what doc
+    // 58's tests above pin, not this one.
+    const double s = 1.0 / std::sqrt(2.0);
+    std::vector<double> L; std::vector<double> dQdx; std::vector<Point> pts; std::vector<int> seg;
+    auto add = [&](double l_cm, double q, double x, double y, double z, int sidx) {
+        L.push_back(l_cm); dQdx.push_back(q); pts.push_back(Point(x, y, z) * units::cm); seg.push_back(sidx);
+    };
+    for (double l = 0; l <= 30; l += 5) add(l, 100, 0, 0, l, 0);   // seg 0: plateau reference
+    add(34, 200, 0, 0, 34, 1); add(36, 200, 0, 0, 36, 1);          // seg 1: warmup peak
+    add(38, 200, 0, 0, 38, 1); add(40, 200, 0, 0, 40, 1);
+    add(42, 15, 0, 0, 42, 1);
+    add(44, 15, 0, 0, 44, 1);                                     // row A: bend to (s,0,s) starts here
+    add(46, 15, 2 * s, 0, 44 + 2 * s, 1);                         // +z -> unit_A, 45 deg at row A
+    add(48, 15, 4 * s, 0, 44 + 4 * s, 1);                         // row B: bend to (s,0,-s) starts here
+    add(50, 15, 4 * s + 2 * s, 0, 44 + 4 * s - 2 * s, 1);         // unit_A -> unit_B, 90 deg at row B
+    add(52, 15, 4 * s + 4 * s, 0, 44 + 4 * s - 4 * s, 1);
+    auto prof = mkprof(L, dQdx, pts, seg);
+    auto th = split_thresholds(/*max_split=*/1, /*kink_min_deg=*/30.0, /*min_drop_cm=*/3.0,
+                               /*peak_window_cm=*/25.0, /*dir_window_cm=*/2.0, /*max_drop_len_cm=*/30.0);
+    auto sp = stm_michel_stop_split(prof, /*n_chain_segs=*/2, th);
+    REQUIRE(sp.ok);
+    CHECK(sp.index == 14);   // L=48, the 90 deg row -- NOT index 12 (L=44, 45 deg), even though it is found first
+    CHECK(sp.kink_deg == doctest::Approx(90).epsilon(0.5));
+}

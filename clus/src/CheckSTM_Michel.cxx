@@ -178,6 +178,14 @@ public:
         m_retreat_collapse_frac = get<double>(config, "retreat_collapse_frac", m_retreat_collapse_frac);
         m_retreat_peak_frac = get<double>(config, "retreat_peak_frac", m_retreat_peak_frac);
         m_retreat_peak_window_cm = get<double>(config, "retreat_peak_window_cm", m_retreat_peak_window_cm);
+        // doc pdvd/58 (T1c)
+        m_stop_split_max = get<int>(config, "stop_split_max", m_stop_split_max);
+        m_split_kink_min_deg = get<double>(config, "split_kink_min_deg", m_split_kink_min_deg);
+        m_split_min_drop_cm = get<double>(config, "split_min_drop_cm", m_split_min_drop_cm);
+        m_split_collapse_frac = get<double>(config, "split_collapse_frac", m_split_collapse_frac);
+        m_split_peak_frac = get<double>(config, "split_peak_frac", m_split_peak_frac);
+        m_split_peak_window_cm = get<double>(config, "split_peak_window_cm", m_split_peak_window_cm);
+        m_split_dir_window_cm = get<double>(config, "split_dir_window_cm", m_split_dir_window_cm);
         m_dead_volume_check = get<bool>(config, "dead_volume_check", m_dead_volume_check);
         m_min_chain_coverage = get<double>(config, "min_chain_coverage", m_min_chain_coverage);
         m_michel_guards_stop = get<bool>(config, "michel_guards_stop", m_michel_guards_stop);
@@ -333,6 +341,44 @@ public:
         // drop (same ratio and window stm_michel's own shape census uses).
         cfg["retreat_peak_frac"] = m_retreat_peak_frac;
         cfg["retreat_peak_window_cm"] = m_retreat_peak_window_cm;
+        // doc pdvd/58 (T1c): stop_retreat_max can only move the stop onto a
+        // vertex the chain ALREADY has.  On a population of missed
+        // collapse-shaped stoppers the collapse sits INSIDE the fit's last
+        // chain segment -- no chain vertex anywhere near it (doc pdvd/57 sec
+        // 1's 23-item finding) -- so no graph-local retreat reaches them.
+        // This walks the SAME collapsed-tail/Bragg-rise test as the retreat,
+        // but at a FIT ROW (PR::break_segment splits the segment there,
+        // exactly as anchor_vertex() already does at the tagger's own
+        // entry/stop), gated additionally on the fitted trajectory's own bend
+        // at that row (stm_michel_row_kink_deg) -- losing the vertex
+        // constraint removes the guard that kept the retreat honest, and the
+        // kink is what replaces it (the owner's kink discriminator: charge
+        // shape alone cannot tell a second particle).  0 = off (doc pdvd/56/57
+        // behaviour).  Skipped whenever the retreat already fired.
+        cfg["stop_split_max"] = m_stop_split_max;
+        // doc pdvd/58: the fitted-trajectory bend (deg) a candidate split row
+        // must reach.  Measured (over the missed-collapse population with no
+        // chain vertex to retreat onto vs. the collapse-shaped through-going
+        // control): median bend 18.5 deg (n=23) vs 6.3 deg (n=58); 15 deg
+        // costs 0 of 58 new false positives while still reaching 3 of 23.
+        // Deliberately its OWN knob, not stop_retreat_max's: coupling T1c's
+        // operating point to the retreat's would silently move it if either
+        // is retuned later.
+        cfg["split_kink_min_deg"] = m_split_kink_min_deg;
+        // doc pdvd/58: minimum residual range of the split row from the
+        // fit's current far end -- a candidate closer than this trims almost
+        // nothing (the offline probe's "first satisfying row" rule degenerated
+        // to 1-2 cm trims before this floor was added).
+        cfg["split_min_drop_cm"] = m_split_min_drop_cm;
+        // doc pdvd/58: same meaning as retreat_collapse_frac, judged against
+        // the SAME plateau reference (profile_plateau, shared with the
+        // retreat) -- kept as a separate key for the reason given above.
+        cfg["split_collapse_frac"] = m_split_collapse_frac;
+        cfg["split_peak_frac"] = m_split_peak_frac;
+        cfg["split_peak_window_cm"] = m_split_peak_window_cm;
+        // doc pdvd/58: the +/- arm (cm of arclength) stm_michel_row_kink_deg
+        // measures the incoming/outgoing direction over.
+        cfg["split_dir_window_cm"] = m_split_dir_window_cm;
         // doc pdhd/03 sec 6: FiducialUtils::check_dead_volume from the end of
         // the live profile along the muon direction; a stop that walks into a
         // dead region is R_STOP_INTO_DEAD (three PDHD tracks end on the same
@@ -482,6 +528,13 @@ private:
     double m_retreat_collapse_frac{0.5};
     double m_retreat_peak_frac{1.4};
     double m_retreat_peak_window_cm{15.0};
+    int m_stop_split_max{0};                      // doc pdvd/58 (T1c)
+    double m_split_kink_min_deg{15.0};
+    double m_split_min_drop_cm{3.0};
+    double m_split_collapse_frac{0.5};
+    double m_split_peak_frac{1.4};
+    double m_split_peak_window_cm{15.0};
+    double m_split_dir_window_cm{5.0};
     bool m_dead_volume_check{false};
     double m_min_chain_coverage{0.0}, m_coverage_radius_cm{3.0};
     bool m_michel_guards_stop{false};
@@ -556,6 +609,7 @@ private:
         double cont_len{0}, cont_angle_deg{-1}, cont_mip{0};
         int n_ext{0}; double ext_len{0};          // doc pdhd/03: chain extensions past the tagger's stop
         int n_retreat{0}; double retreat_len{0};  // doc pdvd/57: chain segments retreated off the fit's far end
+        int n_split{0}; double split_len{0}, split_kink_deg{0};  // doc pdvd/58: T1c fit-row split
         int dead_ahead{-1};                        // doc pdhd/03: 1 = the live end walks into a dead region
         int n_cluster_pts{0}; double chain_coverage{-1};   // doc pdhd/03: cluster points within coverage_radius of a reconstructed point
         // dots
@@ -1010,6 +1064,7 @@ private:
         D1("cont_len", r.cont_len / cm); D1("cont_angle_deg", r.cont_angle_deg); D1("cont_mip", r.cont_mip);
         I1("n_ext", r.n_ext); D1("ext_len", r.ext_len / cm); I1("dead_ahead", r.dead_ahead);
         I1("n_retreat", r.n_retreat); D1("retreat_len", r.retreat_len / cm);
+        I1("n_split", r.n_split); D1("split_len", r.split_len / cm); D1("split_kink_deg", r.split_kink_deg);
         I1("n_cluster_pts", r.n_cluster_pts); D1("chain_coverage", r.chain_coverage);
         I1("n_dots", r.n_dots); I1("n_dot_clusters_unfit", r.n_dot_clusters_unfit);
         D1("dots_ke_dqdx", r.dots_ke_dqdx); D1("dots_charge_unfit", r.dots_charge_unfit);
@@ -1403,6 +1458,65 @@ void CheckSTM_Michel::visit(Ensemble& ensemble) const
                     stop_v = new_stop;
                     rec.n_retreat = rr.n_drop;
                     rec.retreat_len = rr.drop_len;
+                }
+            }
+        }
+
+        // ---- doc pdvd/58 (T1c): the STOP SPLIT.  stm_michel_stop_retreat
+        // above can only move the stop onto a vertex the chain already has;
+        // a population of missed collapse-shaped stoppers has no such vertex
+        // at all -- the collapse sits INSIDE the fit's last chain segment
+        // (doc pdvd/57 sec 1's 23-item finding).  Only tried when the retreat
+        // did NOT already fire (n_retreat == 0): the retreat is the cheaper,
+        // safer mechanism (an existing vertex, no graph mutation) and always
+        // wins when it applies. Same anchoring guards as the retreat, plus
+        // the >= 4 fits anchor_vertex():901 already requires of a segment it
+        // is willing to split.
+        if (m_stop_split_max > 0 && rec.n_retreat == 0 && stop_v && !chain.empty() &&
+            chain.back() && chain.back()->fits().size() >= 4 &&
+            !(rec.reject_bits & R_STOP_UNMATCHED) && !bragg_confirmed(chain)) {
+            auto prof_pre = stm_michel_profile(g, chain, entry_v);
+            StmMichelSplitThresholds sth;
+            sth.max_split = m_stop_split_max;
+            sth.kink_min_deg = m_split_kink_min_deg;
+            sth.min_drop = m_split_min_drop_cm * units::cm;
+            sth.collapse_frac = m_split_collapse_frac;
+            sth.peak_frac = m_split_peak_frac;
+            sth.peak_window = m_split_peak_window_cm * units::cm;
+            sth.dir_window = m_split_dir_window_cm * units::cm;
+            sth.max_drop_len = m_michel_max_len_cm * units::cm;   // same ceiling the retreat uses
+            sth.plateau_lo = m_bragg_plateau_lo_cm * units::cm;
+            sth.plateau_hi = m_bragg_plateau_hi_cm * units::cm;
+            sth.min_dqdx_live = m_profile_min_dqdx_frac * m_mip_dqdx;
+            auto sp = stm_michel_stop_split(prof_pre, static_cast<int>(chain.size()), sth);
+            if (sp.ok) {
+                try {
+                    auto [ok, pair, nvtx] = break_segment(g, chain.back(), prof_pre.pts[sp.index],
+                                                          particle_data(), m_recomb_model, m_dv,
+                                                          1e9 * units::cm,
+                                                          get<bool>(m_cfg, "break_seg_orient", false));
+                    if (ok && nvtx) {
+                        // No examine_vertices*/examine_structure_final* pass
+                        // runs downstream of this component, but the flag is
+                        // what protects a split from the merge family in
+                        // general and costs nothing to set.
+                        nvtx->set_flags(VertexFlags::kProtectedBreak);
+                        auto new_chain = stm_michel_shortest_chain(g, entry_v, nvtx);
+                        if (!new_chain.empty()) {
+                            chain = new_chain;
+                            stop_v = nvtx;
+                            rec.n_split = 1;
+                            rec.split_len = sp.drop_len;
+                            rec.split_kink_deg = sp.kink_deg;
+                        }
+                        // else: the split already happened to the graph (it
+                        // cannot be undone), but no route from entry to the
+                        // new vertex exists -- leave chain/stop_v as they
+                        // were before the split and fall through unrecorded,
+                        // same as any other "no chain" outcome below.
+                    }
+                } catch (const std::exception& e) {
+                    SPDLOG_LOGGER_WARN(s_log, "{}stop_split: break_segment threw: {}", m_evt_tag, e.what());
                 }
             }
         }
