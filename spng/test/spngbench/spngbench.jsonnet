@@ -110,6 +110,37 @@ local devices = {
         else obj
         for i in std.range(0, std.length(cfg) - 1)
     ],
+
+    // Split the shared torch forward service (SPNGTensorForwardTS, which holds
+    // the model) into one clone per device used by the forward nodes referencing
+    // it, and rewire each forward node to the clone on its own device.  Without
+    // this, sharding puts (say) gpu1 inputs into a gpu0-resident model -> a
+    // "tensors on cuda:0 and cuda:1" device mismatch.  A no-op when the forward
+    // nodes all share one device (single GPU / no sharding).
+    local is_fsvc(o) = std.isObject(o) && std.objectHas(o, "type")
+                       && o.type == "SPNGTensorForwardTS",
+    local is_fnode(o) = std.isObject(o) && std.objectHas(o, "type")
+                        && o.type == "SPNGTensorForward",
+    split_forward_services(cfg)::
+        local fnodes = [o for o in cfg if is_fnode(o) && std.objectHas(o.data, "device")];
+        local svcs = [o for o in cfg if is_fsvc(o)];
+        local devs = std.set([o.data.device for o in fnodes]);
+        if std.length(svcs) == 0 || std.length(devs) <= 1 then cfg
+        else
+            local sfx(d) = "@" + d;
+            local clones = std.flattenArrays([
+                [svc { name: svc.name + sfx(d), data+: { device: d } } for d in devs]
+                for svc in svcs]);
+            local rewritten = [
+                local o = cfg[i];
+                if is_fsvc(o) then null
+                else if is_fnode(o) && std.objectHas(o.data, "device")
+                        && std.objectHas(o.data, "forward")
+                then o { data+: { forward: o.data.forward + sfx(o.data.device) } }
+                else o
+                for i in std.range(0, std.length(cfg) - 1)
+            ];
+            [x for x in rewritten if x != null] + clones,
 };
 
 function(input,
@@ -182,6 +213,8 @@ function(input,
                              plugins=["WireCellSpng", "WireCellSigProc", "WireCellGen", "WireCellPytorch"],
                              uses=controls.uses + extra_uses);
 
-    // Apply GPU sharding by rewriting per-APA SPNG node devices.
+    // Apply GPU sharding by rewriting per-APA SPNG node devices, then split the
+    // shared forward service so each APA's model lives on its inputs' GPU.
     if gpu_scheme == "none" then base_cfg
-    else devices.reassign(base_cfg, devices.assigner(gpu_scheme, wc.intify(ngpu)))
+    else devices.split_forward_services(
+        devices.reassign(base_cfg, devices.assigner(gpu_scheme, wc.intify(ngpu))))
