@@ -681,6 +681,7 @@ private:
         Point michel_start_pt;
         double cont_len{0}, cont_angle_deg{-1}, cont_mip{0};
         int n_ext{0}; double ext_len{0};          // doc pdhd/03: chain extensions past the tagger's stop
+        int n_stub_absorb{0};                     // doc pdvd/63 (T5): of those, absorb_bragg_stub's (a hot collinear stub taken as the true end)
         int n_retreat{0}; double retreat_len{0};  // doc pdvd/57: chain segments retreated off the fit's far end
         int n_split{0}; double split_len{0}, split_kink_deg{0};  // doc pdvd/58: T1c fit-row split
         int n_michel_veto{0};  // doc pdvd/61: T2c fired -- an attached moved-stop Michel with too little charge was demoted
@@ -1145,6 +1146,7 @@ private:
         D1("michel_ke_dqdx", r.michel_ke_dqdx); D1("michel_ke_range", r.michel_ke_range); D1("michel_ke_best", r.michel_ke_best);
         D1("cont_len", r.cont_len / cm); D1("cont_angle_deg", r.cont_angle_deg); D1("cont_mip", r.cont_mip);
         I1("n_ext", r.n_ext); D1("ext_len", r.ext_len / cm); I1("dead_ahead", r.dead_ahead);
+        I1("n_stub_absorb", r.n_stub_absorb);   // doc pdvd/63
         I1("n_retreat", r.n_retreat); D1("retreat_len", r.retreat_len / cm);
         I1("n_split", r.n_split); D1("split_len", r.split_len / cm); D1("split_kink_deg", r.split_kink_deg);
         I1("n_michel_veto", r.n_michel_veto);
@@ -1507,6 +1509,7 @@ void CheckSTM_Michel::visit(Ensemble& ensemble) const
             chain.push_back(best.seg);
             stop_v = far;
             ++rec.n_ext; rec.ext_len += best.len;
+            if (stub.seg) ++rec.n_stub_absorb;   // doc pdvd/63 (T5): this extension was absorb_bragg_stub's, not a continuation's
         }
         if (rec.n_ext > 0 && stop_v) {
             rec.stop_vtx_id = rec.cluster_id * 1000 + static_cast<int>(stop_v->get_graph_index());
@@ -1786,6 +1789,17 @@ void CheckSTM_Michel::visit(Ensemble& ensemble) const
                     auto arm = g[e].segment;
                     if (!arm || arm == last || chain_set.count(arm)) continue;
                     stop_arms.push_back(stm_michel_classify_stop_arm(g, last, arm, stop_v, th));
+                    // doc pdvd/62/63 (T5): name every stop arm with the numbers the
+                    // classifier saw, so a hand-scan item's "Bragg stub past the fit
+                    // end" can be matched to the C++ kink/mip rather than an offline
+                    // re-derivation.  Log only.
+                    const auto& sa = stop_arms.back();
+                    SPDLOG_LOGGER_DEBUG(s_log,
+                        "{}CheckSTM_Michel stop-arm: cluster {} seg {} kind {} len {:.2f} cm far_len {:.2f} cm mip {:.2f} kink {:.1f} deg shower {} terminal {}",
+                        m_evt_tag, rec.cluster_id,
+                        (arm->cluster() ? arm->cluster()->get_cluster_id() : 0) * 1000 + static_cast<int>(arm->get_graph_index()),
+                        static_cast<int>(sa.kind), sa.len / units::cm, sa.far_len / units::cm, sa.mip, sa.kink_deg,
+                        sa.shower_like ? 1 : 0, sa.terminal ? 1 : 0);
                 }
                 bool any_michel = false;
                 for (const auto& a : stop_arms) any_michel = any_michel || a.kind == StmMichelArm::kMichel;
