@@ -173,6 +173,16 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
               // '' selects the C++ preset defaults, which are uBooNE-hard-coded --
               // never right for SBND, which is why this no longer defaults to ''.
               trackfitting_config_file='pgrapher/experiment/protodunevd/pdvd_track_fitting.json',
+              // stm_trackfitting_config_file (doc pdvd/76, P5 of doc pdvd/70): the
+              // TrackFitting parameter JSON for the STM side ONLY -- TaggerCheckSTM
+              // and CheckSTM_Michel.  TaggerCheckNeutrino keeps
+              // trackfitting_config_file.  null => the shared file above, so the
+              // compiled config is byte-identical when unset.  Exists so a
+              // sampling / smoothing study (doc 65 sec 4, doc 68 sec 4:
+              // dx_norm_length, low_dis_limit) can be scoped to the STM chain
+              // without touching the neutrino path; any change to it that moves
+              // the candidate set still needs a new scan (doc 70 sec 2.3).
+              stm_trackfitting_config_file=null,
               particle_dataset=null, extra_uses=[],
               // dl_weights: SCN (DL) neutrino-vertex weights, WIRECELL_PATH-resolved.
               // DEFAULT = the uBooNE-trained net, i.e. the DL vertex is ON for SBND
@@ -1545,9 +1555,11 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
                                 replace=false)
               + { data+: { [if steiner_terminal_charge != null then 'terminal_charge_threshold']: steiner_terminal_charge } },
             fiducialutils: cm.fiducialutils(),
+            // doc pdvd/76 (P5): the STM side's fit file; null => the shared one.
+            local stm_trackfitting_config = if stm_trackfitting_config_file == null then trackfitting_config_file else stm_trackfitting_config_file,
             tagger_check_stm: cm.tagger_check_stm(
                 evaluate_demoted_mains=evaluate_demoted_mains,
-                trackfitting_config_file=trackfitting_config_file,
+                trackfitting_config_file=stm_trackfitting_config,
                 particle_dataset=wc.tn(particle_dataset),
                 recombination_model=wc.tn(pdvd_recomb),
                 require_in_scope=true,
@@ -1692,7 +1704,7 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
                 [k]: tcn_knobs[k] for k in std.objectFields(tcn_knobs) if std.member(stm_michel_partition_keys, k)
             },
             check_stm_michel: cm.check_stm_michel(
-                trackfitting_config_file=trackfitting_config_file,
+                trackfitting_config_file=stm_trackfitting_config,   // doc pdvd/76 (P5)
                 particle_dataset=wc.tn(particle_dataset),
                 // doc pdhd/16: THIS component only; the taggers keep pdvd_recomb.
                 recombination_model=wc.tn(pdvd_stm_michel_recomb),
