@@ -210,6 +210,6 @@ DftTools::real_vector_t DftTools::replace(const IDFT::pointer& dft,
         cmeas[ind] *= cres1[ind]/den;
     }
 
-    return DftTools::inv_c2r(dft, cmeas);;
+    return DftTools::inv_c2r(dft, cmeas);
 }
 
