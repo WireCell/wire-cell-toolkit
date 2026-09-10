@@ -573,3 +573,33 @@ unsigned WireCell::Clus::PR::stm_michel_topology_clear(unsigned reject_bits, int
     if (clears_sparse) clearable |= R_PROFILE_SPARSE;
     return reject_bits & clearable;
 }
+
+int WireCell::Clus::PR::stm_michel_gamma_gate(double d_stop, double len, double cos_dir, double d_mich,
+                                              double d_body, double ke_mev, double radius, double max_len,
+                                              double cos_min, double max_ke_mev)
+{
+    for (double v : {d_stop, len, cos_dir, d_mich, d_body, ke_mev})
+        if (!std::isfinite(v)) return 6;
+    if (d_stop > radius) return 1;       // near the stop
+    if (len > max_len) return 2;         // a dot, not a track
+    if (cos_dir < cos_min) return 3;     // along the Michel electron
+    if (d_body <= d_mich) return 4;      // the Michel's, not the muon body's
+    if (ke_mev > max_ke_mev) return 5;   // a gamma's energy, not an over-clustered lump's
+    return 0;
+}
+
+std::vector<int> WireCell::Clus::PR::stm_michel_gamma_take(double core_ke_mev, const std::vector<double>& ke_mev,
+                                                           double total_max_mev)
+{
+    std::vector<int> take(ke_mev.size(), 0);
+    if (!std::isfinite(core_ke_mev)) return take;
+    double total = core_ke_mev;
+    for (size_t i = 0; i < ke_mev.size(); ++i) {
+        const double e = ke_mev[i];
+        if (!std::isfinite(e) || e < 0) continue;
+        if (total + e > total_max_mev) continue;   // skipped; a smaller, farther blob may still fit
+        take[i] = 1;
+        total += e;
+    }
+    return take;
+}

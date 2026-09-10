@@ -420,6 +420,31 @@ namespace WireCell::Clus::PR {
                                        double ke_mev, double len_cm,
                                        double ke_min_mev, double len_min_cm, bool clears_sparse);
 
+    /// doc pdvd/71 (P4, michel_gamma_collect): the per-cluster test for an
+    /// isolated gamma blob that belongs to the Michel -- the owner's three
+    /// criteria: it lies along the Michel electron's direction, it is a
+    /// compact dot near the stop, and it carries a gamma's energy, not an
+    /// over-clustered lump's.  Returns 0 to accept, else the FIRST gate that
+    /// fails, in this order: 6 a non-finite input; 1 d_stop > radius; 2 len >
+    /// max_len; 3 cos_dir < cos_min (cos of the angle between the stop -> blob
+    /// centroid and the stop -> Michel-object centroid directions); 4 d_body <=
+    /// d_mich (the blob is at least as close to the muon body as to the Michel
+    /// object and the stop); 5 ke_mev > max_ke_mev.  All boundaries inclusive
+    /// on the accepting side.  Lengths in one unit, energies in MeV.
+    int stm_michel_gamma_gate(double d_stop, double len, double cos_dir, double d_mich,
+                              double d_body, double ke_mev, double radius, double max_len,
+                              double cos_min, double max_ke_mev);
+
+    /// doc pdvd/71 (P4): the total-energy guard -- over-clustering can hand the
+    /// Michel a huge energy, so the object never grows past `total_max_mev`.
+    /// Walks `ke_mev` in the caller's order (nearest first) from a running total
+    /// of `core_ke_mev` and takes a blob only when the total stays <= the cap;
+    /// a blob that does not fit is skipped and the walk continues.  Returns a
+    /// 0/1 mask parallel to `ke_mev`.  A non-finite core takes nothing; a
+    /// non-finite or negative blob energy is never taken.
+    std::vector<int> stm_michel_gamma_take(double core_ke_mev, const std::vector<double>& ke_mev,
+                                           double total_max_mev);
+
 }  // namespace WireCell::Clus::PR
 
 #endif

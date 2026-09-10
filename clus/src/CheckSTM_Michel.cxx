@@ -220,6 +220,14 @@ public:
         m_topology_michel_ke_min = get<double>(config, "topology_michel_ke_min", m_topology_michel_ke_min);
         m_topology_michel_len_min_cm = get<double>(config, "topology_michel_len_min_cm", m_topology_michel_len_min_cm);
         m_topology_clears_sparse = get<bool>(config, "topology_clears_sparse", m_topology_clears_sparse);
+        // doc pdvd/71 (P4): collect the Michel's isolated gamma blobs as role-4
+        // members, with their own energy -- michel_ke_best is never touched.
+        m_michel_gamma_collect = get<bool>(config, "michel_gamma_collect", m_michel_gamma_collect);
+        m_michel_gamma_radius_cm = get<double>(config, "michel_gamma_radius_cm", m_michel_gamma_radius_cm);
+        m_michel_gamma_max_len_cm = get<double>(config, "michel_gamma_max_len_cm", m_michel_gamma_max_len_cm);
+        m_michel_gamma_cos_min = get<double>(config, "michel_gamma_cos_min", m_michel_gamma_cos_min);
+        m_michel_gamma_max_ke_mev = get<double>(config, "michel_gamma_max_ke_mev", m_michel_gamma_max_ke_mev);
+        m_michel_gamma_total_ke_max_mev = get<double>(config, "michel_gamma_total_ke_max_mev", m_michel_gamma_total_ke_max_mev);
         // doc pdvd/66 (T8): the profile-geometry fields are always written; the guard
         // turns them into a reject bit (R_PROFILE_GEOMETRY).
         m_profile_geometry_guard = get<bool>(config, "profile_geometry_guard", m_profile_geometry_guard);
@@ -506,6 +514,32 @@ public:
         cfg["topology_michel_ke_min"] = m_topology_michel_ke_min;
         cfg["topology_michel_len_min_cm"] = m_topology_michel_len_min_cm;
         cfg["topology_clears_sparse"] = m_topology_clears_sparse;
+        // doc pdvd/71 (P4): default off.  The owner's Q4 (doc pdvd/70 sec 5):
+        // isolated gamma blobs near the stop -- the Michel electron's brems and
+        // Compton pieces -- belong to the Michel object, and through doc 70
+        // ~150 of the ~165 the owner tagged sat outside it.  When on, after the
+        // capture-gamma stage, every UNCLAIMED companion cluster with a fitted
+        // segment is offered to stm_michel_gamma_gate (StmMichelFunctions.h):
+        // within michel_gamma_radius_cm of the FINAL stop, no longer than
+        // michel_gamma_max_len_cm, inside a cone of cos >= michel_gamma_cos_min
+        // about the stop -> Michel-object direction, closer to the Michel than
+        // to the muon body, and at most michel_gamma_max_ke_mev.  Survivors are
+        // taken nearest first while michel_ke_best + michel_ke_gamma stays
+        // <= michel_gamma_total_ke_max_mev (over-clustering must not hand the
+        // Michel a huge energy), once michel_found is final.  They get role-4
+        // rows and nothing else: no PDG, no Shower, no PF node, and
+        // michel_ke_best / michel_found / is_stm are not read back, so every
+        // pre-existing branch is unchanged.  35 cm = the capture-gamma radius,
+        // i.e. today's admission radius, so switching the knob on admits no new
+        // companion (a larger radius widens admission, and doc pdvd/53 measured
+        // what that does to the fit through preload_clusters).  The six new
+        // branches are written only when the knob is on.
+        cfg["michel_gamma_collect"] = m_michel_gamma_collect;
+        cfg["michel_gamma_radius_cm"] = m_michel_gamma_radius_cm;
+        cfg["michel_gamma_max_len_cm"] = m_michel_gamma_max_len_cm;
+        cfg["michel_gamma_cos_min"] = m_michel_gamma_cos_min;
+        cfg["michel_gamma_max_ke_mev"] = m_michel_gamma_max_ke_mev;
+        cfg["michel_gamma_total_ke_max_mev"] = m_michel_gamma_total_ke_max_mev;
         // doc pdvd/66 (T8): default off.  The fields end_arc_span (fit arc over 3-D
         // span in the last end_window_cm of the chain profile -- doc 55 sec 17.1
         // item 5, the coiled end) and n_unsupported_segs (fitted segments of the
@@ -690,6 +724,12 @@ private:
     double m_topology_michel_ke_min{10.0};        // MeV
     double m_topology_michel_len_min_cm{3.0};     // cm
     bool m_topology_clears_sparse{false};         // doc pdvd/70 sec 9.4: also clear R_PROFILE_SPARSE
+    bool m_michel_gamma_collect{false};           // doc pdvd/71 (P4)
+    double m_michel_gamma_radius_cm{35.0};        // from the FINAL stop; = the admission radius today
+    double m_michel_gamma_max_len_cm{10.0};       // a dot, not a track
+    double m_michel_gamma_cos_min{0.5};           // 60 deg about the stop -> Michel direction
+    double m_michel_gamma_max_ke_mev{20.0};       // per blob
+    double m_michel_gamma_total_ke_max_mev{60.0}; // the Michel object with its blobs: the 52.8 MeV endpoint plus resolution
     bool m_profile_geometry_guard{false};         // doc pdvd/66 (T8)
     double m_profile_arc_span_max{1.5}, m_unsupported_min_len_cm{20.0}, m_unsupported_frac{0.25}, m_end_window_cm{20.0};
     bool m_dead_volume_check{false};
@@ -778,6 +818,10 @@ private:
         int n_local_pieces{0};      // doc pdvd/62 (T3b): disconnected same-cluster pieces admitted into the Michel object
         int n_michel_range_veto{0}; // doc pdvd/62 (T3c): a bridged / charge-only Michel demoted by the range-energy guard
         int topology_cleared_bits{0}; // doc pdvd/70 (P1): the reject bits topology_stop_evidence cleared (0 = none)
+        // doc pdvd/71 (P4): the Michel's gamma blobs.  cand = passed every gate;
+        // capped = passed and then refused by the total-energy guard.
+        int n_michel_gammas{0}, n_michel_gamma_cand{0}, n_michel_gamma_capped{0};
+        double michel_ke_gamma{0}, michel_ke_total{0}, michel_gamma_dis_max{-1};
         int dead_ahead{-1};                        // doc pdhd/03: 1 = the live end walks into a dead region
         int n_cluster_pts{0}; double chain_coverage{-1};   // doc pdhd/03: cluster points within coverage_radius of a reconstructed point
         // dots
@@ -1255,6 +1299,13 @@ private:
         // doc pdvd/70 (P1): written only when the knob is on (the survey's
         // pattern), so the knob-off tree keeps its branch list byte-identical.
         if (m_topology_stop_evidence) I1("topology_cleared_bits", r.topology_cleared_bits);
+        // doc pdvd/71 (P4): the same pattern -- absent when the knob is off.
+        if (m_michel_gamma_collect) {
+            I1("n_michel_gammas", r.n_michel_gammas); I1("n_michel_gamma_cand", r.n_michel_gamma_cand);
+            I1("n_michel_gamma_capped", r.n_michel_gamma_capped);
+            D1("michel_ke_gamma", r.michel_ke_gamma); D1("michel_ke_total", r.michel_ke_total);
+            D1("michel_gamma_dis_max", r.michel_gamma_dis_max);
+        }
         I1("n_cluster_pts", r.n_cluster_pts); D1("chain_coverage", r.chain_coverage);
         I1("n_dots", r.n_dots); I1("n_dot_clusters_unfit", r.n_dot_clusters_unfit);
         D1("dots_ke_dqdx", r.dots_ke_dqdx); D1("dots_charge_unfit", r.dots_charge_unfit);
@@ -1420,9 +1471,16 @@ void CheckSTM_Michel::visit(Ensemble& ensemble) const
         // only by this radius is fitted, given role-6 rows, and claimed by
         // neither stage.  The predicate lives in StmMichelFunctions so its
         // stage-off behaviour is doctested.
-        const double admit_radius = stm_michel_admit_radius(
+        // doc pdvd/71 (P4): the gamma-blob radius reaches only what admission
+        // brought, so a radius past today's widens admission -- with the
+        // preload perturbation doc pdvd/53 measured.  At its 35 cm default it
+        // equals the capture-gamma radius and the max() is a no-op; with the
+        // knob off the expression is the old one, untouched.
+        const double admit_radius_base = stm_michel_admit_radius(
             m_michel_dot_radius_cm, m_stop_gamma_radius_cm, m_stop_gamma_enable,
             m_survey_radius_cm, m_survey_enable);
+        const double admit_radius = m_michel_gamma_collect
+            ? std::max(admit_radius_base, m_michel_gamma_radius_cm) : admit_radius_base;
         if (rec.gid >= 0) {
             for (auto* oc : grouping.children()) {
                 if (oc == main) continue;
@@ -2555,6 +2613,106 @@ void CheckSTM_Michel::visit(Ensemble& ensemble) const
             }
         }
 
+        // ---- doc pdvd/71 (P4): the Michel's isolated gamma blobs, phase 1 ------
+        // The owner (2026-09-10): isolated gamma blobs near the stop -- the
+        // Michel electron's brems and Compton pieces -- belong to the Michel;
+        // look along the electron's direction, take the dots nearby, and be
+        // careful of energy, because over-clustering can hand it a huge one.
+        // Here, AFTER the capture-gamma stage (its body snapshot and its role-5
+        // claims are untouched) and BEFORE the survey (which then leaves these
+        // segments alone), every companion cluster that no stage claimed is
+        // measured and gated; the survivors are only RESERVED.  Rows are written
+        // in phase 2, once michel_found and michel_ke_best are final, because
+        // the total-energy guard needs the final core.  Geometry comes from the
+        // dx > 0 fit points -- exactly the points a role-4 row will carry -- so
+        // an accepted blob's numbers re-derive offline from the payload.
+        struct MGam { std::vector<SegmentPtr> segs; double d_stop{0}, ke{0}; int cluster_id{-1}, gidx{-1}; };
+        std::vector<MGam> mgam;
+        if (m_michel_gamma_collect && stop_v && !companions.empty() &&
+            (rec.michel_conn_type == 1 || rec.michel_conn_type == 2)) {
+            // The Michel object's rows so far (role 3: arms + pieces, plus the
+            // shower walk's members when the survey is on) set the direction;
+            // the muon beyond dot_body_exclusion_cm and the deltas are the body.
+            std::vector<Point> mrows, brows;
+            for (size_t i = 0; i < rec.px.size(); ++i) {
+                const Point p(rec.px[i], rec.py[i], rec.pz[i]);
+                if (rec.prole[i] == 3) mrows.push_back(p);
+                else if (rec.prole[i] == 2) brows.push_back(p);
+            }
+            for (size_t i = 0; i < prof.pts.size(); ++i)
+                if (prof.rr[i] >= m_dot_body_exclusion_cm * units::cm) brows.push_back(prof.pts[i]);
+            double ux = 0, uy = 0, uz = 0;
+            for (const auto& p : mrows) { ux += p.x() - rec.stop_pt.x(); uy += p.y() - rec.stop_pt.y(); uz += p.z() - rec.stop_pt.z(); }
+            const double un = std::sqrt(ux * ux + uy * uy + uz * uz);
+            if (un > 1e-6 * units::cm) {
+                ux /= un; uy /= un; uz /= un;
+                SPDLOG_LOGGER_DEBUG(s_log, "{}CheckSTM_Michel michel-gamma: cluster {} conn {} rows {} dir {:.4f} {:.4f} {:.4f}",
+                                    m_evt_tag, rec.cluster_id, rec.michel_conn_type, mrows.size(), ux, uy, uz);
+                // Clusters the Michel object already spans are its own, not blobs.
+                std::set<int> own;   // membership only, never iterated
+                for (const auto& [sg, d] : michel_pieces) {
+                    (void)d;
+                    if (sg && sg->cluster()) own.insert(sg->cluster()->get_cluster_id());
+                }
+                if (michel_shower) {
+                    IndexedVertexSet mv; IndexedSegmentSet ms;
+                    michel_shower->fill_sets(mv, ms, false);
+                    for (const auto& sg : ms) if (sg && sg->cluster()) own.insert(sg->cluster()->get_cluster_id());
+                }
+                for (auto* oc : companions) {
+                    const int cid = oc->get_cluster_id();
+                    if (own.count(cid)) continue;
+                    auto segs = pa.find_cluster_segments(g, *oc);   // ordered_edges: deterministic
+                    if (segs.empty()) continue;                     // no dx, no row: PDVD fits every companion
+                    bool taken = false;
+                    int gidx0 = -1;
+                    std::vector<Point> pts;
+                    for (const auto& seg : segs) {
+                        if (!seg) continue;
+                        const int gi = static_cast<int>(seg->get_graph_index());
+                        if (rec.claimed.count(cid * 1000 + gi)) taken = true;
+                        if (gidx0 < 0 || gi < gidx0) gidx0 = gi;
+                        for (const auto& f : seg->fits()) if (f.dx > 0) pts.push_back(f.point);
+                    }
+                    if (taken || pts.empty()) continue;   // another object's, or nothing drawable
+                    double d_stop = 1e9, d_m = 1e9, d_b = 1e9, cx = 0, cy = 0, cz = 0;
+                    for (const auto& p : pts) {
+                        d_stop = std::min(d_stop, (p - rec.stop_pt).magnitude());
+                        for (const auto& m : mrows) d_m = std::min(d_m, (p - m).magnitude());
+                        for (const auto& b : brows) d_b = std::min(d_b, (p - b).magnitude());
+                        cx += p.x(); cy += p.y(); cz += p.z();
+                    }
+                    cx = cx / pts.size() - rec.stop_pt.x(); cy = cy / pts.size() - rec.stop_pt.y(); cz = cz / pts.size() - rec.stop_pt.z();
+                    const double cn = std::sqrt(cx * cx + cy * cy + cz * cz);
+                    const double cosv = cn > 0 ? (cx * ux + cy * uy + cz * uz) / cn : 1.0;
+                    const double d_mich = std::min(d_stop, d_m);
+                    double ke = 0;
+                    for (const auto& seg : segs) if (seg) ke += segment_cal_kine_dQdx(seg, m_recomb_model) / units::MeV;
+                    const int gate = stm_michel_gamma_gate(
+                        d_stop / units::cm, oc->get_length() / units::cm, cosv, d_mich / units::cm, d_b / units::cm, ke,
+                        m_michel_gamma_radius_cm, m_michel_gamma_max_len_cm, m_michel_gamma_cos_min, m_michel_gamma_max_ke_mev);
+                    SPDLOG_LOGGER_DEBUG(s_log,
+                        "{}CheckSTM_Michel michel-gamma-cl: cluster {} comp {} d_stop {:.3f} len {:.3f} cos {:.4f} d_mich {:.3f} d_body {:.3f} ke {:.4f} gate {}",
+                        m_evt_tag, rec.cluster_id, cid, d_stop / units::cm, oc->get_length() / units::cm, cosv,
+                        d_mich / units::cm, d_b / units::cm, ke, gate);
+                    if (gate != 0) continue;
+                    MGam c; c.segs = segs; c.d_stop = d_stop; c.ke = ke; c.cluster_id = cid; c.gidx = gidx0;
+                    mgam.push_back(std::move(c));
+                }
+                // Nearest first: the total-energy guard makes the taken set
+                // depend on the order, so the order is stated, not inherited.
+                std::sort(mgam.begin(), mgam.end(), [](const MGam& a, const MGam& b) {
+                    if (a.d_stop != b.d_stop) return a.d_stop < b.d_stop;
+                    if (a.cluster_id != b.cluster_id) return a.cluster_id < b.cluster_id;
+                    return a.gidx < b.gidx;
+                });
+                for (const auto& c : mgam)
+                    for (const auto& seg : c.segs)
+                        if (seg) rec.claimed.insert(c.cluster_id * 1000 + static_cast<int>(seg->get_graph_index()));
+                rec.n_michel_gamma_cand = static_cast<int>(mgam.size());
+            }
+        }
+
         // doc pdvd/53: THE SURVEY.  Every admitted companion segment that no
         // stage claimed gets role-6 rows plus the gate that dropped it, so the
         // hand-scan display can draw it, select it and let the scanner group it.
@@ -2830,6 +2988,42 @@ void CheckSTM_Michel::visit(Ensemble& ensemble) const
                                     m_evt_tag, rec.cluster_id, bits_string(clr), rec.michel_conn_type,
                                     rec.michel_ke_best, rec.michel_len / units::cm, bits_string(rec.reject_bits));
             }
+        }
+
+        // ---- doc pdvd/71 (P4): the Michel's gamma blobs, phase 2 --------------
+        // Last, after every verdict input is final: michel_found has been
+        // through the T2c / T3c vetoes, michel_ke_best through the NaN guard,
+        // and the chain_coverage test above has counted rec.px WITHOUT these
+        // rows (it reads every row, so writing them earlier would move
+        // R_CLUSTER_NOT_TRACK).  A reserved blob of a vetoed Michel, or one the
+        // total-energy guard refuses, gets no member row; with the survey on it
+        // gets its role-6 row back, rej 12 (vetoed) or 11 (energy guard).
+        if (m_michel_gamma_collect) {
+            const bool live = rec.michel_found && (rec.michel_conn_type == 1 || rec.michel_conn_type == 2);
+            std::vector<double> kes;
+            kes.reserve(mgam.size());
+            for (const auto& c : mgam) kes.push_back(c.ke);
+            const std::vector<int> take = live
+                ? stm_michel_gamma_take(rec.michel_ke_best, kes, m_michel_gamma_total_ke_max_mev)
+                : std::vector<int>(mgam.size(), 0);
+            for (size_t i = 0; i < mgam.size(); ++i) {
+                const auto& c = mgam[i];
+                if (take[i]) {
+                    ++rec.n_michel_gammas;
+                    rec.michel_ke_gamma += c.ke;
+                    rec.michel_gamma_dis_max = std::max(rec.michel_gamma_dis_max, c.d_stop / units::cm);
+                    for (const auto& sg : c.segs) if (sg) add_points(rec, sg, 4);
+                }
+                else {
+                    if (live) ++rec.n_michel_gamma_capped;
+                    if (m_survey_enable)
+                        for (const auto& sg : c.segs)
+                            if (sg) add_points(rec, sg, 6, nullptr, live ? 11 : 12, c.d_stop, -1, /*keep_dead*/ true);
+                }
+                SPDLOG_LOGGER_DEBUG(s_log, "{}CheckSTM_Michel michel-gamma-take: cluster {} comp {} ke {:.4f} take {} live {} core {:.4f}",
+                                    m_evt_tag, rec.cluster_id, c.cluster_id, c.ke, take[i], live ? 1 : 0, rec.michel_ke_best);
+            }
+            rec.michel_ke_total = rec.michel_ke_best + rec.michel_ke_gamma;
         }
 
         // ---- publish (TaggerCheckNeutrino.cxx:3580-3590) --------------------

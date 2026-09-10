@@ -923,3 +923,49 @@ TEST_CASE("stm_michel topology clear: no Michel, a charge-only object, a small o
     CHECK(stm_michel_topology_clear(shape, 1, 1, std::numeric_limits<double>::quiet_NaN(), 8.0, 10.0, 3.0, true) == 0u);
     CHECK(stm_michel_topology_clear(shape, 1, 1, 30.0, std::numeric_limits<double>::quiet_NaN(), 10.0, 3.0, true) == 0u);
 }
+
+// ---- doc pdvd/71 (P4): the Michel's isolated gamma blobs --------------------
+// The owner's three criteria: along the Michel electron, a dot near the stop,
+// and an energy that over-clustering cannot inflate.  Arguments: d_stop, len,
+// cos, d_mich, d_body, ke; then radius 35, max_len 10, cos_min 0.5, max_ke 20.
+
+TEST_CASE("stm_michel gamma gate: each gate, its boundary, and the order they fire in")
+{
+    CHECK(stm_michel_gamma_gate(26.5, 2.2, 0.90, 20.0, 40.0, 3.1, 35.0, 10.0, 0.5, 20.0) == 0);
+    CHECK(stm_michel_gamma_gate(35.0, 10.0, 0.5, 20.0, 20.0001, 20.0, 35.0, 10.0, 0.5, 20.0) == 0);   // every boundary inclusive
+    CHECK(stm_michel_gamma_gate(35.0001, 2.0, 0.9, 20.0, 40.0, 3.0, 35.0, 10.0, 0.5, 20.0) == 1);     // radius
+    CHECK(stm_michel_gamma_gate(20.0, 10.0001, 0.9, 20.0, 40.0, 3.0, 35.0, 10.0, 0.5, 20.0) == 2);    // length
+    CHECK(stm_michel_gamma_gate(20.0, 2.0, 0.4999, 20.0, 40.0, 3.0, 35.0, 10.0, 0.5, 20.0) == 3);     // cone
+    CHECK(stm_michel_gamma_gate(20.0, 2.0, -0.9, 20.0, 40.0, 3.0, 35.0, 10.0, 0.5, 20.0) == 3);       // behind the stop
+    CHECK(stm_michel_gamma_gate(20.0, 2.0, 0.9, 12.0, 12.0, 3.0, 35.0, 10.0, 0.5, 20.0) == 4);        // a tie goes to the body
+    CHECK(stm_michel_gamma_gate(20.0, 2.0, 0.9, 12.0, 11.0, 3.0, 35.0, 10.0, 0.5, 20.0) == 4);
+    CHECK(stm_michel_gamma_gate(20.0, 2.0, 0.9, 12.0, 40.0, 20.0001, 35.0, 10.0, 0.5, 20.0) == 5);    // an over-clustered lump
+    // the first failing gate is the one reported
+    CHECK(stm_michel_gamma_gate(50.0, 30.0, -1.0, 12.0, 1.0, 99.0, 35.0, 10.0, 0.5, 20.0) == 1);
+    CHECK(stm_michel_gamma_gate(20.0, 30.0, -1.0, 12.0, 1.0, 99.0, 35.0, 10.0, 0.5, 20.0) == 2);
+    // the knobs move the boundaries: a 60 cm radius admits the 50 cm blob
+    CHECK(stm_michel_gamma_gate(50.0, 2.0, 0.9, 30.0, 60.0, 3.0, 60.0, 10.0, 0.5, 20.0) == 0);
+}
+
+TEST_CASE("stm_michel gamma gate: a non-finite input is rejected before any other gate")
+{
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    const double inf = std::numeric_limits<double>::infinity();
+    CHECK(stm_michel_gamma_gate(nan, 2.0, 0.9, 20.0, 40.0, 3.0, 35.0, 10.0, 0.5, 20.0) == 6);
+    CHECK(stm_michel_gamma_gate(20.0, 2.0, nan, 20.0, 40.0, 3.0, 35.0, 10.0, 0.5, 20.0) == 6);
+    CHECK(stm_michel_gamma_gate(20.0, 2.0, 0.9, 20.0, 40.0, nan, 35.0, 10.0, 0.5, 20.0) == 6);
+    CHECK(stm_michel_gamma_gate(20.0, 2.0, 0.9, 20.0, inf, 3.0, 35.0, 10.0, 0.5, 20.0) == 6);
+}
+
+TEST_CASE("stm_michel gamma take: the running total never passes the cap; a blob that does not fit is skipped")
+{
+    using V = std::vector<int>;
+    CHECK(stm_michel_gamma_take(30.0, {2.0, 5.0, 1.0}, 60.0) == V{1, 1, 1});
+    CHECK(stm_michel_gamma_take(50.0, {5.0, 12.0, 3.0}, 60.0) == V{1, 0, 1});   // 55, 67 skipped, 58
+    CHECK(stm_michel_gamma_take(50.0, {10.0}, 60.0) == V{1});                   // exactly at the cap is taken
+    CHECK(stm_michel_gamma_take(76.0, {0.5, 1.0}, 60.0) == V{0, 0});            // a core already over the cap gets nothing
+    CHECK(stm_michel_gamma_take(30.0, {}, 60.0).empty());
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    CHECK(stm_michel_gamma_take(nan, {1.0}, 60.0) == V{0});
+    CHECK(stm_michel_gamma_take(30.0, {nan, -1.0, 2.0}, 60.0) == V{0, 0, 1});
+}

@@ -68,6 +68,12 @@ TEST_CASE("clus knob defaults: CheckSTM_Michel verdict thresholds")
     D("topology_michel_ke_min", 10.0);      // the T2c / T3c floor
     D("topology_michel_len_min_cm", 3.0);   // the range-energy distance
     B("topology_clears_sparse", false);     // doc pdvd/70 sec 9.4: the owner's option
+    B("michel_gamma_collect", false);       // doc pdvd/71 (P4): the Michel keeps its core only unless on
+    D("michel_gamma_radius_cm", 35.0);      // = today's admission radius, so on never widens it
+    D("michel_gamma_max_len_cm", 10.0);     // a dot, the capture-gamma stage's compactness cap
+    D("michel_gamma_cos_min", 0.5);         // a 60 deg cone about the Michel direction
+    D("michel_gamma_max_ke_mev", 20.0);     // per blob, the capture-gamma stage's cap
+    D("michel_gamma_total_ke_max_mev", 60.0);   // the 52.8 MeV endpoint plus resolution
     B("dead_volume_check", false);
     D("min_chain_coverage", 0.0);  // doc pdhd/03: 0 = off
     D("coverage_radius_cm", 3.0);
