@@ -87,6 +87,16 @@ namespace WireCell {
             // by 32).
             int tick_pad_multiple{0};
 
+            // Zero-pad the channel (wire) axis up to a multiple of this
+            // value before running inference and crop the output back.
+            // Models with stride-2 levels on the channel axis need the
+            // channel count divisible by 2^levels (e.g. 4 for the
+            // PDVD/PDHD 6-ch distilled models).  Detector planes whose
+            // channel counts do not satisfy this (e.g. DUNE FD-VD CRMs
+            // with 286 U/V strips) must set this.  0 (default) disables
+            // padding.
+            int chan_pad_multiple{0};
+
             // An output file used for special debugging.
             std::string debugfile{""};
 

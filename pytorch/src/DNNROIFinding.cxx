@@ -103,6 +103,7 @@ void Pytorch::DNNROIFinding::configure(const WireCell::Configuration& cfg)
     m_cfg.summary_tag = get(cfg, "summary_tag", m_cfg.summary_tag);
     m_cfg.tick_per_slice = get(cfg, "tick_per_slice", m_cfg.tick_per_slice);
     m_cfg.tick_pad_multiple = get(cfg, "tick_pad_multiple", m_cfg.tick_pad_multiple);
+    m_cfg.chan_pad_multiple = get(cfg, "chan_pad_multiple", m_cfg.chan_pad_multiple);
     m_cfg.decon_charge_tag = get(cfg, "decon_charge_tag", m_cfg.decon_charge_tag);
     m_cfg.outtag = get(cfg, "outtag", m_cfg.outtag);
     m_cfg.debugfile = get(cfg, "debugfile", m_cfg.debugfile);
@@ -173,6 +174,7 @@ WireCell::Configuration Pytorch::DNNROIFinding::default_configuration() const
     }
     cfg["tick_per_slice"] = m_cfg.tick_per_slice;
     cfg["tick_pad_multiple"] = m_cfg.tick_pad_multiple;
+    cfg["chan_pad_multiple"] = m_cfg.chan_pad_multiple;
     cfg["decon_charge_tag"] = m_cfg.decon_charge_tag;
     cfg["outtag"] = m_cfg.outtag;
     cfg["debugfile"] = m_cfg.debugfile;
@@ -381,6 +383,24 @@ bool Pytorch::DNNROIFinding::operator()(const IFrame::pointer& inframe, IFrame::
     // ret: {1, ntags, nchannels, nticks}
     auto batch = torch::stack({torch::transpose(img, 1, 2)}, 0);
 
+    // Zero-pad the channel axis (dim 2) up to a multiple of
+    // chan_pad_multiple so models with stride-2 levels on the channel
+    // axis (e.g. the PDVD/PDHD 6-ch distilled models need a multiple of
+    // 4) accept planes with arbitrary channel counts (e.g. FD-VD CRMs
+    // with 286 U/V strips).  The padded rows are cropped from the model
+    // output below.
+    int chan_pad = 0;
+    if (m_cfg.chan_pad_multiple > 0) {
+        const int nch = static_cast<int>(batch.size(2));
+        chan_pad = (m_cfg.chan_pad_multiple - nch % m_cfg.chan_pad_multiple) % m_cfg.chan_pad_multiple;
+        if (chan_pad) {
+            // pad spec is (last dim lo, hi, 2nd-to-last dim lo, hi)
+            batch = torch::constant_pad_nd(batch, {0, 0, 0, chan_pad}, 0.0);
+            log->debug("call={} chan_pad={} to multiple of {} (nch={})",
+                       m_save_count, chan_pad, m_cfg.chan_pad_multiple, nch);
+        }
+    }
+
     auto chunks = batch.chunk(m_cfg.nchunks, 2);
     std::vector<torch::Tensor> outputs;
 
@@ -399,6 +419,11 @@ bool Pytorch::DNNROIFinding::operator()(const IFrame::pointer& inframe, IFrame::
         outputs.push_back(ochunk.clone());
     }
     torch::Tensor output = torch::cat(outputs, 2);
+    // Crop the channel padding (if any) so the output rows match the
+    // plane's real channel list again.
+    if (chan_pad) {
+        output = output.narrow(2, 0, output.size(2) - chan_pad).contiguous();
+    }
     log->debug(tk(fmt::format("call={} inference done", m_save_count)));
 
     // Optional .pt dump for offline validation against the model.
