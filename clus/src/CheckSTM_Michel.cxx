@@ -236,6 +236,11 @@ public:
         m_michel_mip_lo_turned_kink_deg = get<double>(config, "michel_mip_lo_turned_kink_deg", m_michel_mip_lo_turned_kink_deg);
         m_michel_far_len_shower_max_cm = get<double>(config, "michel_far_len_shower_max_cm", m_michel_far_len_shower_max_cm);
         m_michel_kink_window_cm = get<double>(config, "michel_kink_window_cm", m_michel_kink_window_cm);
+        // doc pdvd/74 (P3): how the stop retreat reads the dropped tail, and
+        // whether the retreat / split may run on a Bragg-confirmed chain.
+        m_retreat_tail_strict = get<bool>(config, "retreat_tail_strict", m_retreat_tail_strict);
+        m_retreat_tail_sublive = get<bool>(config, "retreat_tail_sublive", m_retreat_tail_sublive);
+        m_michel_collinear_split = get<bool>(config, "michel_collinear_split", m_michel_collinear_split);
         // doc pdvd/66 (T8): the profile-geometry fields are always written; the guard
         // turns them into a reject bit (R_PROFILE_GEOMETRY).
         m_profile_geometry_guard = get<bool>(config, "profile_geometry_guard", m_profile_geometry_guard);
@@ -574,6 +579,26 @@ public:
         cfg["michel_mip_lo_turned_kink_deg"] = m_michel_mip_lo_turned_kink_deg;
         cfg["michel_far_len_shower_max_cm"] = m_michel_far_len_shower_max_cm;
         cfg["michel_kink_window_cm"] = m_michel_kink_window_cm;
+        // doc pdvd/74 (P3): the Michel the fit carried inside the muon chain.
+        //   retreat_tail_strict: stop_retreat_max's collapse test reads only
+        //     the rows strictly past the vertex it would retreat onto.  That
+        //     vertex's own row is the kept segment's end -- on an overshoot it
+        //     is the Bragg peak, and over a 2-3 cm segment it sets the tail
+        //     median by itself (039252_16/32).
+        //   retreat_tail_sublive: the same test also counts rows below the
+        //     profile_min_dqdx_frac floor -- a collapsed overshoot reads
+        //     0.1-0.2 MIP, which the floor calls dead (039253_3/61).  It
+        //     cannot tell a dead-channel stretch from a collapse.
+        //   michel_collinear_split: doc 70's P3 as proposed -- the retreat and
+        //     the split also run on a chain whose profile already shows the
+        //     Bragg rise.
+        // stop_move_p3_bits (bit0: the tail reading changed the retreat's
+        // answer; bit1: the stop moved on a Bragg-confirmed chain) is written
+        // only when one of the three is on.  A P3 retreat is a retreat: the
+        // moved-stop veto (T2c) reads it like any other.
+        cfg["retreat_tail_strict"] = m_retreat_tail_strict;
+        cfg["retreat_tail_sublive"] = m_retreat_tail_sublive;
+        cfg["michel_collinear_split"] = m_michel_collinear_split;
         // doc pdvd/66 (T8): default off.  The fields end_arc_span (fit arc over 3-D
         // span in the last end_window_cm of the chain profile -- doc 55 sec 17.1
         // item 5, the coiled end) and n_unsupported_segs (fitted segments of the
@@ -769,6 +794,9 @@ private:
     double m_michel_mip_lo_turned_kink_deg{60.0}; // deg
     double m_michel_far_len_shower_max_cm{-1.0};  // doc pdvd/73 (P2b): cm, -1 = off
     double m_michel_kink_window_cm{-1.0};         // doc pdvd/73 (P2c): cm, -1 = off
+    bool m_retreat_tail_strict{false};            // doc pdvd/74 (P3)
+    bool m_retreat_tail_sublive{false};           // doc pdvd/74 (P3)
+    bool m_michel_collinear_split{false};         // doc pdvd/74 (P3, doc 70's literal)
     bool m_profile_geometry_guard{false};         // doc pdvd/66 (T8)
     double m_profile_arc_span_max{1.5}, m_unsupported_min_len_cm{20.0}, m_unsupported_frac{0.25}, m_end_window_cm{20.0};
     bool m_dead_volume_check{false};
@@ -852,6 +880,7 @@ private:
         int n_stub_absorb{0};                     // doc pdvd/63 (T5): of those, absorb_bragg_stub's (a hot collinear stub taken as the true end)
         int n_retreat{0}; double retreat_len{0};  // doc pdvd/57: chain segments retreated off the fit's far end
         int n_split{0}; double split_len{0}, split_kink_deg{0};  // doc pdvd/58: T1c fit-row split
+        int stop_move_p3_bits{0};  // doc pdvd/74 (P3): bit0 the P3 tail reading changed the retreat's answer, bit1 the stop moved on a Bragg-confirmed chain
         int n_michel_veto{0};  // doc pdvd/61: T2c fired -- an attached moved-stop Michel with too little charge was demoted
         int n_michel_veto_exempt{0};  // doc pdvd/72 (P3b): T2c would have fired, and the Michel's turn spared it
         int n_kept_near_stop_main{0}, n_kept_near_stop_comp{0};  // doc pdvd/62 (T3a): pr54 residuals kept by the stop anchor, main cluster / companions
@@ -1348,6 +1377,9 @@ private:
         }
         // doc pdvd/72 (P3b): the same pattern.
         if (m_moved_stop_michel_kink_min >= 0) I1("n_michel_veto_exempt", r.n_michel_veto_exempt);
+        // doc pdvd/74 (P3): the same pattern.
+        if (m_retreat_tail_strict || m_retreat_tail_sublive || m_michel_collinear_split)
+            I1("stop_move_p3_bits", r.stop_move_p3_bits);
         I1("n_cluster_pts", r.n_cluster_pts); D1("chain_coverage", r.chain_coverage);
         I1("n_dots", r.n_dots); I1("n_dot_clusters_unfit", r.n_dot_clusters_unfit);
         D1("dots_ke_dqdx", r.dots_ke_dqdx); D1("dots_charge_unfit", r.dots_charge_unfit);
@@ -1750,8 +1782,16 @@ void CheckSTM_Michel::visit(Ensemble& ensemble) const
         // through-going ones).  R_STOP_UNMATCHED chains were never anchored
         // to the tagger's stop at all -- retreating one would mean something
         // different, so they are excluded.
-        if (m_stop_retreat_max > 0 && stop_v && chain.size() > 1 &&
-            !(rec.reject_bits & R_STOP_UNMATCHED) && !bragg_confirmed(chain)) {
+        // doc pdvd/74 (P3, doc 70's literal proposal): michel_collinear_split
+        // lets this retreat and the split below also run on a chain whose
+        // profile already shows the Bragg rise -- the stopper is then found,
+        // and what the fit carried past the peak is the Michel's.  Off, the
+        // condition is the doc 57/58 one: bragg_confirmed is pure, and it is
+        // evaluated exactly when it was before.
+        const bool retreat_try = m_stop_retreat_max > 0 && stop_v && chain.size() > 1 &&
+                                 !(rec.reject_bits & R_STOP_UNMATCHED);
+        const bool retreat_bragg = retreat_try && bragg_confirmed(chain);
+        if (retreat_try && (!retreat_bragg || m_michel_collinear_split)) {
             auto prof_pre = stm_michel_profile(g, chain, entry_v);
             StmMichelRetreatThresholds rth;
             rth.max_drop = m_stop_retreat_max;
@@ -1762,7 +1802,22 @@ void CheckSTM_Michel::visit(Ensemble& ensemble) const
             rth.plateau_lo = m_bragg_plateau_lo_cm * units::cm;
             rth.plateau_hi = m_bragg_plateau_hi_cm * units::cm;
             rth.min_dqdx_live = m_profile_min_dqdx_frac * m_mip_dqdx;
+            rth.tail_strict = m_retreat_tail_strict;     // doc pdvd/74 (P3): how the dropped tail is read
+            rth.tail_sublive = m_retreat_tail_sublive;
             auto rr = stm_michel_stop_retreat(prof_pre, static_cast<int>(chain.size()), rth);
+            // doc pdvd/74: did that reading change the answer?  The doc 57
+            // reading is re-run (a pure function) only when it can differ.
+            if (m_retreat_tail_strict || m_retreat_tail_sublive) {
+                auto lth = rth;
+                lth.tail_strict = false;
+                lth.tail_sublive = false;
+                const int legacy_drop = stm_michel_stop_retreat(prof_pre, static_cast<int>(chain.size()), lth).n_drop;
+                if (legacy_drop != rr.n_drop) {
+                    rec.stop_move_p3_bits |= 1;
+                    SPDLOG_LOGGER_DEBUG(s_log, "{}CheckSTM_Michel P3: cluster {} retreat n_drop {} ({:.2f} cm) where the doc-57 tail reading gave {}",
+                                        m_evt_tag, rec.cluster_id, rr.n_drop, rr.drop_len / units::cm, legacy_drop);
+                }
+            }
             if (rr.n_drop > 0) {
                 auto vtxs = stm_michel_chain_vertices(g, chain, entry_v);
                 VertexPtr new_stop = (vtxs.size() == chain.size() + 1)
@@ -1772,6 +1827,11 @@ void CheckSTM_Michel::visit(Ensemble& ensemble) const
                     stop_v = new_stop;
                     rec.n_retreat = rr.n_drop;
                     rec.retreat_len = rr.drop_len;
+                    if (retreat_bragg) {
+                        rec.stop_move_p3_bits |= 2;
+                        SPDLOG_LOGGER_DEBUG(s_log, "{}CheckSTM_Michel P3: cluster {} retreat on a Bragg-confirmed chain, n_drop {} ({:.2f} cm)",
+                                            m_evt_tag, rec.cluster_id, rr.n_drop, rr.drop_len / units::cm);
+                    }
                 }
             }
         }
@@ -1786,9 +1846,11 @@ void CheckSTM_Michel::visit(Ensemble& ensemble) const
         // wins when it applies. Same anchoring guards as the retreat, plus
         // the >= 4 fits anchor_vertex():901 already requires of a segment it
         // is willing to split.
-        if (m_stop_split_max > 0 && rec.n_retreat == 0 && stop_v && !chain.empty() &&
-            chain.back() && chain.back()->fits().size() >= 4 &&
-            !(rec.reject_bits & R_STOP_UNMATCHED) && !bragg_confirmed(chain)) {
+        const bool split_try = m_stop_split_max > 0 && rec.n_retreat == 0 && stop_v && !chain.empty() &&
+                               chain.back() && chain.back()->fits().size() >= 4 &&
+                               !(rec.reject_bits & R_STOP_UNMATCHED);
+        const bool split_bragg = split_try && bragg_confirmed(chain);   // doc pdvd/74 (P3): see the retreat above
+        if (split_try && (!split_bragg || m_michel_collinear_split)) {
             auto prof_pre = stm_michel_profile(g, chain, entry_v);
             StmMichelSplitThresholds sth;
             sth.max_split = m_stop_split_max;
@@ -1822,6 +1884,11 @@ void CheckSTM_Michel::visit(Ensemble& ensemble) const
                             rec.n_split = 1;
                             rec.split_len = sp.drop_len;
                             rec.split_kink_deg = sp.kink_deg;
+                            if (split_bragg) {   // doc pdvd/74 (P3)
+                                rec.stop_move_p3_bits |= 2;
+                                SPDLOG_LOGGER_DEBUG(s_log, "{}CheckSTM_Michel P3: cluster {} split on a Bragg-confirmed chain, {:.2f} cm at {:.1f} deg",
+                                                    m_evt_tag, rec.cluster_id, sp.drop_len / units::cm, sp.kink_deg);
+                            }
                         }
                         // else: the split already happened to the graph (it
                         // cannot be undone), but no route from entry to the

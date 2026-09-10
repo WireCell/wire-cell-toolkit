@@ -79,6 +79,9 @@ TEST_CASE("clus knob defaults: CheckSTM_Michel verdict thresholds")
     D("michel_mip_lo_turned_kink_deg", 60.0);
     D("michel_far_len_shower_max_cm", -1.0);   // doc pdvd/73 (P2b): -1 = off, len + far_len for every arm
     D("michel_kink_window_cm", -1.0);       // doc pdvd/73 (P2c): -1 = off, the classifier's window alone
+    B("retreat_tail_strict", false);        // doc pdvd/74 (P3): the doc 57 tail reading unless on
+    B("retreat_tail_sublive", false);
+    B("michel_collinear_split", false);     // doc pdvd/74 (P3): a Bragg-confirmed chain is never retreated / split
     B("dead_volume_check", false);
     D("min_chain_coverage", 0.0);  // doc pdhd/03: 0 = off
     D("coverage_radius_cm", 3.0);

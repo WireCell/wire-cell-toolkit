@@ -336,6 +336,20 @@ namespace WireCell::Clus::PR {
         double plateau_hi{40 * units::cm};    // reuses bragg_plateau_hi_cm
         double min_dqdx_live{0};              // reuses profile_min_dqdx_frac * mip_dqdx
         int    min_tail_pts{2};
+        // doc pdvd/74 (P3): how the dropped tail is read.  Both false = the
+        // doc pdvd/57 reading above, verbatim.
+        //  tail_strict:  only rows strictly past the vertex the retreat lands
+        //    on.  That vertex's row (written twice, once per segment) is the
+        //    kept segment's end: on an overshoot it carries the Bragg peak and,
+        //    over a 2-3 cm segment of a few rows, sets the median by itself
+        //    (039252_16/32: 1.17 x plateau with it, 0.47 without).
+        //  tail_sublive: the live floor is not applied to the tail.  A
+        //    collapsed overshoot reads 0.1-0.2 MIP, which is exactly what the
+        //    floor calls a dead cell (039253_3/61).  The peak test stays
+        //    live-only.  HAZARD: a dead-channel stretch past a live Bragg rise
+        //    then reads as a collapse -- nothing here knows the channel map.
+        bool   tail_strict{false};
+        bool   tail_sublive{false};
     };
     struct StmMichelRetreat {
         int n_drop{0};              // chain segments to pop from the back

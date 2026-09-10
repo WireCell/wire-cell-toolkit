@@ -310,7 +310,8 @@ StmMichelRetreat WireCell::Clus::PR::stm_michel_stop_retreat(const StmMichelProf
         std::vector<double> tail;
         for (size_t i = 0; i < prof.L.size(); ++i) {
             if (prof.L[i] < boundary_L) continue;
-            if (prof.dQdx[i] < th.min_dqdx_live) continue;
+            if (th.tail_strict && !(prof.L[i] > boundary_L)) continue;              // doc pdvd/74 (P3)
+            if (!th.tail_sublive && prof.dQdx[i] < th.min_dqdx_live) continue;
             tail.push_back(prof.dQdx[i]);
         }
         if (static_cast<int>(tail.size()) < th.min_tail_pts) break;   // cannot judge this candidate

@@ -816,6 +816,132 @@ TEST_CASE("stm_michel stop retreat: fires the same way when the last segment is 
     CHECK(rr.drop_len == doctest::Approx(8 * units::cm).epsilon(0.05));
 }
 
+// doc pdvd/74 (P3): how the retreat reads the dropped tail.  Built from
+// arrays -- the overshoot's charge changes row by row, which make_track
+// cannot state: a 1.0 plateau (seg 0, L 0-44), a body (seg 1, L 46-80) whose
+// last 10 cm rise to 3.0, and a 3 cm overshoot (seg 2) whose first row is the
+// vertex again, at the same position -- as stm_michel_profile writes it
+// (039252_16/32 carries 92720 on both copies).  The live floor is 0.15, so
+// rows below it are what the doc 57 reading calls dead.
+namespace {
+StmMichelProfile overshoot_profile(double q_vtx, double q_a, double q_mid, double q_e)
+{
+    std::vector<double> L, q; std::vector<Point> pts; std::vector<int> seg;
+    auto add = [&](double l_cm, double c, int s) {
+        L.push_back(l_cm * units::cm); q.push_back(c); pts.push_back(Point(0, 0, l_cm) * units::cm); seg.push_back(s);
+    };
+    for (double l = 0; l <= 44; l += 2) add(l, 1.0, 0);
+    for (double l = 46; l <= 70; l += 2) add(l, 1.0, 1);
+    add(72, 1.6, 1); add(74, 2.0, 1); add(76, 2.4, 1); add(78, 2.8, 1); add(80, 3.0, 1);
+    add(80, q_vtx, 2);                                  // the vertex again: seg 2's first row
+    add(80.6, q_a, 2); add(81.2, q_mid, 2); add(81.8, q_mid, 2); add(82.4, q_mid, 2); add(83.0, q_e, 2);
+    StmMichelProfile p;
+    p.L = L; p.dQdx = q; p.pts = pts; p.seg_idx = seg;
+    p.total_length = L.back();
+    p.rr.resize(L.size());
+    for (size_t i = 0; i < L.size(); ++i) p.rr[i] = p.total_length - L[i];
+    return p;
+}
+
+StmMichelRetreatThresholds p3_thresholds(bool strict, bool sublive)
+{
+    auto th = retreat_thresholds();
+    th.min_dqdx_live = 0.15;
+    th.tail_strict = strict;
+    th.tail_sublive = sublive;
+    return th;
+}
+
+// doc pdvd/57's reading, copied literally, for the one drop these shapes
+// allow (seg 2 alone; seg 1 as well would be 37 cm > max_drop_len).
+int legacy_one_drop(const StmMichelProfile& p, const StmMichelRetreatThresholds& th)
+{
+    std::vector<double> pl;
+    for (size_t i = 0; i < p.rr.size(); ++i)
+        if (p.dQdx[i] >= th.min_dqdx_live && p.rr[i] >= th.plateau_lo && p.rr[i] <= th.plateau_hi) pl.push_back(p.dQdx[i]);
+    if (pl.size() < 3) return 0;
+    const double plateau = stm_michel_median(pl);
+    double bL = -1;
+    for (size_t i = 0; i < p.L.size(); ++i) if (p.seg_idx[i] >= 2) { bL = p.L[i]; break; }
+    std::vector<double> tail;
+    for (size_t i = 0; i < p.L.size(); ++i)
+        if (p.L[i] >= bL && p.dQdx[i] >= th.min_dqdx_live) tail.push_back(p.dQdx[i]);
+    if (static_cast<int>(tail.size()) < th.min_tail_pts) return 0;
+    if (!(stm_michel_median(tail) < th.collapse_frac * plateau)) return 0;
+    std::vector<double> kq, kr;
+    for (size_t i = 0; i < p.L.size(); ++i)
+        if (p.L[i] <= bL && p.dQdx[i] >= th.min_dqdx_live) { kq.push_back(p.dQdx[i]); kr.push_back(bL - p.L[i]); }
+    double peak = -1; int nw = 0;
+    for (size_t i = 0; i < kq.size(); ++i) {
+        const size_t lo = i ? i - 1 : 0, hi = std::min(kq.size() - 1, i + 1);
+        std::vector<double> w(kq.begin() + lo, kq.begin() + hi + 1);
+        std::sort(w.begin(), w.end());
+        if (kr[i] > th.peak_window) continue;
+        ++nw;
+        peak = std::max(peak, w[w.size() / 2]);
+    }
+    return (nw >= 3 && peak >= th.peak_frac * plateau) ? 1 : 0;
+}
+}
+
+TEST_CASE("stm_michel stop retreat P3: both readings off = the doc 57 reading, on a grid of overshoot shapes")
+{
+    int n = 0, fires = 0;
+    for (double q_vtx : {3.0, 0.2})
+        for (double q_a : {0.1, 0.4, 0.6, 1.0, 3.0})
+            for (double q_mid : {0.0, 0.1, 0.3, 1.0})
+                for (double q_e : {0.05, 0.2, 1.0}) {
+                    auto p = overshoot_profile(q_vtx, q_a, q_mid, q_e);
+                    auto th = p3_thresholds(false, false);
+                    const int got = stm_michel_stop_retreat(p, 3, th).n_drop;
+                    CHECK(got == legacy_one_drop(p, th));
+                    ++n;
+                    fires += got;
+                }
+    CHECK(n == 120);
+    CHECK(fires > 0);   // the grid exercises both answers
+    CHECK(fires < n);
+}
+
+TEST_CASE("stm_michel stop retreat P3: the vertex row sets a short tail's median -- tail_strict reads past it")
+{
+    // 039252_16/32's shape: the doc 57 tail is {3, 3, 0.6, 0.2} (median 1.8),
+    // the strict one {0.6, 0.2} (median 0.4 < 0.5 x plateau).
+    auto p = overshoot_profile(3.0, 0.6, 0.1, 0.2);
+    CHECK(stm_michel_stop_retreat(p, 3, p3_thresholds(false, false)).n_drop == 0);
+    auto rr = stm_michel_stop_retreat(p, 3, p3_thresholds(true, false));
+    CHECK(rr.n_drop == 1);
+    CHECK(rr.drop_len == doctest::Approx(3.0 * units::cm));
+}
+
+TEST_CASE("stm_michel stop retreat P3: a collapse below the live floor is read only with tail_sublive")
+{
+    // 039253_3/61's shape: nothing live past the vertex.
+    auto p = overshoot_profile(3.0, 0.1, 0.1, 0.1);
+    CHECK(stm_michel_stop_retreat(p, 3, p3_thresholds(false, false)).n_drop == 0);   // {3, 3}
+    CHECK(stm_michel_stop_retreat(p, 3, p3_thresholds(true, false)).n_drop == 0);    // {} -- too few rows to judge
+    CHECK(stm_michel_stop_retreat(p, 3, p3_thresholds(true, true)).n_drop == 1);     // {0.1 x 5}
+    CHECK(stm_michel_stop_retreat(p, 3, p3_thresholds(false, true)).n_drop == 1);    // {3, 3, 0.1 x 5}: median 0.1
+}
+
+TEST_CASE("stm_michel stop retreat P3: tail_sublive takes a dead stretch for a collapse (the known hazard)")
+{
+    // dQ/dx 0 past a live Bragg rise is what a run of dead channels reads.
+    // Nothing at this site knows the channel map, so the sub-live reading
+    // retreats off it exactly as off a collapsed Michel -- pinned so the
+    // hazard is stated behaviour, not a surprise.
+    auto p = overshoot_profile(3.0, 0.0, 0.0, 0.0);
+    CHECK(stm_michel_stop_retreat(p, 3, p3_thresholds(false, false)).n_drop == 0);
+    CHECK(stm_michel_stop_retreat(p, 3, p3_thresholds(true, true)).n_drop == 1);
+}
+
+TEST_CASE("stm_michel stop retreat P3: a live continuation past the vertex is refused under every reading")
+{
+    auto p = overshoot_profile(3.0, 1.0, 1.0, 1.0);
+    for (bool s : {false, true})
+        for (bool u : {false, true}) CHECK(stm_michel_stop_retreat(p, 3, p3_thresholds(s, u)).n_drop == 0);
+}
+
 // ---------------------------------------------------------------------------
 // doc pdvd/58 (T1c): stm_michel_row_kink_deg and stm_michel_stop_split.
 // These two build the StmMichelProfile directly rather than through a graph:
