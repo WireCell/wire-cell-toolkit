@@ -186,6 +186,13 @@ public:
         m_split_peak_frac = get<double>(config, "split_peak_frac", m_split_peak_frac);
         m_split_peak_window_cm = get<double>(config, "split_peak_window_cm", m_split_peak_window_cm);
         m_split_dir_window_cm = get<double>(config, "split_dir_window_cm", m_split_dir_window_cm);
+        // doc pdvd/61 (T2c): veto an attached (conn_type 1) Michel whose stop was
+        // moved this event (a retreat or split fired) when its assembled KE
+        // cannot support the claim -- the mechanism that moves the stop is not
+        // itself a Michel test, and 5 of the items it moves the stop on are
+        // through-going tracks that pick up a spurious attached arm (docs 57/58/59).
+        m_moved_stop_michel_guard = get<bool>(config, "moved_stop_michel_guard", m_moved_stop_michel_guard);
+        m_moved_stop_michel_ke_min = get<double>(config, "moved_stop_michel_ke_min", m_moved_stop_michel_ke_min);
         m_dead_volume_check = get<bool>(config, "dead_volume_check", m_dead_volume_check);
         m_min_chain_coverage = get<double>(config, "min_chain_coverage", m_min_chain_coverage);
         m_michel_guards_stop = get<bool>(config, "michel_guards_stop", m_michel_guards_stop);
@@ -379,6 +386,22 @@ public:
         // doc pdvd/58: the +/- arm (cm of arclength) stm_michel_row_kink_deg
         // measures the incoming/outgoing direction over.
         cfg["split_dir_window_cm"] = m_split_dir_window_cm;
+        // doc pdvd/61 (T2c): default off.  When on, an attached Michel
+        // (michel_conn_type == 1) whose stop was moved this event (n_retreat
+        // > 0 or n_split > 0) is demoted (michel_conn_type reset to 0, so
+        // michel_found follows) when its assembled michel_ke_best falls below
+        // moved_stop_michel_ke_min -- touches michel_found only, never
+        // reject_bits/is_stm.  Measured against the census: 5 named
+        // through-going items acquired a spurious attached Michel exactly
+        // this way across T1a/T1b/T1c (docs 57/58/59), median KE 7.97 MeV,
+        // against a 21.4 MeV median for the same conn_type==1 population's
+        // true Michels.
+        cfg["moved_stop_michel_guard"] = m_moved_stop_michel_guard;
+        // doc pdvd/61: MeV, doc 55 sec 15.1's own KE floor re-used here for a
+        // narrower, moved-stop-only population (that section's own cut
+        // targets conn_type==2, dis_cm>3; this targets conn_type==1, dis_cm==0
+        // -- the two do not overlap).
+        cfg["moved_stop_michel_ke_min"] = m_moved_stop_michel_ke_min;
         // doc pdhd/03 sec 6: FiducialUtils::check_dead_volume from the end of
         // the live profile along the muon direction; a stop that walks into a
         // dead region is R_STOP_INTO_DEAD (three PDHD tracks end on the same
@@ -535,6 +558,8 @@ private:
     double m_split_peak_frac{1.4};
     double m_split_peak_window_cm{15.0};
     double m_split_dir_window_cm{5.0};
+    bool m_moved_stop_michel_guard{false};        // doc pdvd/61 (T2c)
+    double m_moved_stop_michel_ke_min{10.0};      // MeV
     bool m_dead_volume_check{false};
     double m_min_chain_coverage{0.0}, m_coverage_radius_cm{3.0};
     bool m_michel_guards_stop{false};
@@ -610,6 +635,7 @@ private:
         int n_ext{0}; double ext_len{0};          // doc pdhd/03: chain extensions past the tagger's stop
         int n_retreat{0}; double retreat_len{0};  // doc pdvd/57: chain segments retreated off the fit's far end
         int n_split{0}; double split_len{0}, split_kink_deg{0};  // doc pdvd/58: T1c fit-row split
+        int n_michel_veto{0};  // doc pdvd/61: T2c fired -- an attached moved-stop Michel with too little charge was demoted
         int dead_ahead{-1};                        // doc pdhd/03: 1 = the live end walks into a dead region
         int n_cluster_pts{0}; double chain_coverage{-1};   // doc pdhd/03: cluster points within coverage_radius of a reconstructed point
         // dots
@@ -1065,6 +1091,7 @@ private:
         I1("n_ext", r.n_ext); D1("ext_len", r.ext_len / cm); I1("dead_ahead", r.dead_ahead);
         I1("n_retreat", r.n_retreat); D1("retreat_len", r.retreat_len / cm);
         I1("n_split", r.n_split); D1("split_len", r.split_len / cm); D1("split_kink_deg", r.split_kink_deg);
+        I1("n_michel_veto", r.n_michel_veto);
         I1("n_cluster_pts", r.n_cluster_pts); D1("chain_coverage", r.chain_coverage);
         I1("n_dots", r.n_dots); I1("n_dot_clusters_unfit", r.n_dot_clusters_unfit);
         D1("dots_ke_dqdx", r.dots_ke_dqdx); D1("dots_charge_unfit", r.dots_charge_unfit);
@@ -2353,6 +2380,26 @@ void CheckSTM_Michel::visit(Ensemble& ensemble) const
         // kenergy_charge computed with the SHOWER recombination pair and
         // overshoots the chain's own dQ/dx by ~1.66x (sec 6).
         rec.michel_ke_best = rec.michel_ke_dqdx + rec.dots_ke_unfit;
+
+        // doc pdvd/61 (T2c): an ATTACHED Michel (conn_type 1 -- the arm hangs
+        // off the stop vertex itself, dis_cm 0 by construction, :1742) whose
+        // stop was MOVED this event (a retreat or split fired -- the mechanism
+        // that finds a stop the tagger's own fit missed, docs pdvd/57/58) is
+        // not itself evidence of a Michel: the census found 5 named
+        // through-going items (039252_2/79, 039252_4/55, 039349_20/41,
+        // 039349_48/21, 039349_61/62) picking up exactly this spurious
+        // attachment, 4.6-8.9 MeV, against a 21.4 MeV median for genuine
+        // conn_type==1 Michels.  Demote by resetting michel_conn_type (which
+        // michel_found reads next) -- deliberately NOT via reject_bits, so
+        // is_stm is untouched (that is the whole design constraint: this is
+        // a michel_found-only veto).  n_michel_veto records that it fired
+        // even when nothing else about the record changes visibly.
+        if (m_moved_stop_michel_guard && rec.michel_conn_type == 1 &&
+            (rec.n_retreat > 0 || rec.n_split > 0) &&
+            rec.michel_ke_best < m_moved_stop_michel_ke_min) {   // both plain MeV, no units:: scale (michel_ke_best is already / units::MeV)
+            rec.michel_conn_type = 0;
+            ++rec.n_michel_veto;
+        }
 
         // doc pdhd/15 sec 4: michel_found now means "a Michel object exists" --
         // 1 attached, 2 bridged across a clustering gap, 3 charge only.  Through

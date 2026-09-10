@@ -243,7 +243,13 @@ namespace WireCell::Clus {
             // trajectory_fit's loop already does.  0 = legacy = byte-identical.
             double proj_skip_unmapped_face = 0;
 
-            // doc pdhd/11 -- the FINAL organize_ps_path (do_single_tracking's
+            // doc pdhd/11 (comment corrected doc pdvd/61 sec 9 item 1: the
+            // low_dis_limit named below is the local variable AS ALREADY
+            // HALVED by do_single_tracking's own pass-2 reassignment
+            // (TrackFitting.cxx ~:10088, m_params.low_dis_limit/2.), not the
+            // config default -- so with the shipped 12.0 mm default the gap
+            // threshold below is 1.6 * 6.0 mm = 9.6 mm = 0.96 cm, not 1.92 cm)
+            // -- the FINAL organize_ps_path (do_single_tracking's
             // third call, low_dis_limit / end_point_limit 0) straight-line-fills
             // every gap >= 1.6 * low_dis_limit, and nothing between it and the
             // PR::Fit construction charge-tests the points it inserts: no

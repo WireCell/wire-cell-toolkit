@@ -49,6 +49,8 @@ TEST_CASE("clus knob defaults: CheckSTM_Michel verdict thresholds")
     D("split_peak_frac", 1.4);
     D("split_peak_window_cm", 15.0);
     D("split_dir_window_cm", 5.0);
+    B("moved_stop_michel_guard", false);   // doc pdvd/61 (T2c): 0/false = off, no attached-arm veto
+    D("moved_stop_michel_ke_min", 10.0);
     B("dead_volume_check", false);
     D("min_chain_coverage", 0.0);  // doc pdhd/03: 0 = off
     D("coverage_radius_cm", 3.0);

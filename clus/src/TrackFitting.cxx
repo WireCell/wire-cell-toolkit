@@ -9711,7 +9711,22 @@ void TrackFitting::do_multi_tracking(bool flag_dQ_dx_fit_reg, bool flag_dQ_dx_fi
         // }
 
         // organize path
-        low_dis_limit = 0.6*units::cm;
+        // doc pdvd/56 sec 9 item 1 / doc pdvd/61: this was a bare prototype
+        // literal (PR3DCluster_multi_track_fitting.h:198 hard-codes all three
+        // passes' steps; the toolkit port parameterized passes 1/2 via
+        // m_params.low_dis_limit but left pass 3 as the verbatim prototype
+        // constant, with no comment recording that as a decision).  Reusing
+        // pass 2's own expression (:9536) is PROVEN byte-identical, not just
+        // matched in value: low_dis_limit is 12.0 mm on every detector this
+        // tree configures (PDVD/PDHD/SBND *_track_fitting.json) and equals
+        // the C++ default (so uBooNE, which sets none of these keys,
+        // inherits it too), so m_params.low_dis_limit/2. == 0.6*units::cm ==
+        // 6.0 in IEEE double on every configuration in the tree today.  Do
+        // NOT also touch end_point_limit nearby: it is halved at :9537 and
+        // never reset before dQ_dx_multi_fit consumes it at :9890, so a
+        // "symmetric" edit there would be a real behavior change, not a
+        // no-op.
+        low_dis_limit = m_params.low_dis_limit/2.;
         organize_segments_path_3rd(low_dis_limit);
         det_fits("organize_3rd");
         // if (m_perf) std::cout << "do_multiple_tracking timing: organize_segments_path_3rd took " << DST_MS(DST_Clock::now() - t_dst).count() << " ms" << std::endl; t_dst = DST_Clock::now();
