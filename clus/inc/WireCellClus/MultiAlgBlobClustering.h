@@ -86,6 +86,7 @@ namespace WireCell::Clus {
             std::vector<std::string> coords;
             bool individual;
             int filter{1};// 1 for on, 0 for off, -1 for inverse filter
+            bool opflash_time{false}; // add a per-point "opflash_time" column (cluster matched flash time, us; -999999 if none)
             double dQdx_scale{1.0};
             double dQdx_offset{0.0};
             bool use_associate_points{false};  // use dpcloud("associate_points") + shower-based charge
@@ -158,6 +159,9 @@ namespace WireCell::Clus {
             
             // Global points (used when individual == false)
             Bee::Points global;
+            // Parallel per-point opflash_time column for `global` (only filled
+            // when the set's config has opflash_time=true; injected at flush).
+            std::vector<double> global_oft;
             
             // Individual points (used when individual == true)
             // Key is "anode_id-face_id" string
@@ -187,7 +191,8 @@ namespace WireCell::Clus {
             Bee::Points& bpts, const Facade::Cluster& cluster,
             const std::string& pcname, const std::vector<std::string>& coords,
             int filter, double dQdx_scale = 1.0, double dQdx_offset = 0.0,
-            bool steiner_terminals_only = false);
+            bool steiner_terminals_only = false,
+            std::vector<double>* oft_out = nullptr);
         // doc pr/94 Phase 4b: `tf_in` selects WHICH per-bundle TrackFitting to
         // render (null = the unnamed slot, i.e. the legacy single-candidate
         // behavior).  `do_reset` must be false on every call after the first of
@@ -213,6 +218,35 @@ namespace WireCell::Clus {
        public:
         struct BeePFConfig {
             std::string name{"mc"};          // Bee file name (default "mc")
+            // Merge an upstream particle tree (published into the input
+            // TensorSet metadata under this key by wclsTensorSetLabeler's
+            // pf_metadata_key) with this one, and emit a SINGLE tree.  Bee
+            // renders exactly one particle tree per event -- bee.js fetches a
+            // hardcoded base_url + "mc/" into one <div id="mc"> -- so a truth
+            // tree and a reco tree can only both be seen if they are grafted
+            // together here.  Empty (default) = no merge, unchanged output.
+            std::string merge_metadata_key{""};
+            // Text of the node the merged reco flow is hung under.  The
+            // reconstructed neutrino energy and the numu/nue scores are
+            // appended when available (they live in the same TrackFitting this
+            // function already reads).  Empty = "reco nu".
+            std::string merge_node_text{""};
+            // Added to every grafted reco node id.  jsTree ids must be unique
+            // across the merged tree; the labeler uses 9000000+ / 10000000+ and
+            // the reco side uses cluster*1000+seg, so they do not collide today
+            // -- this makes that structural rather than lucky.
+            int merge_id_offset{20000000};
+            // Emit this tree even when it ends up with no nodes at all, so the
+            // Bee layer is always present for the event.  Default false keeps
+            // the historical behaviour (the flush skips empty trees), so a
+            // config that does not set it is unchanged.
+            bool emit_empty{false};
+            // Text of the marker node emitted when the event has NO
+            // reconstructed neutrino candidate, so "the tagger declined" is
+            // visible in Bee instead of looking like a bare particle list (or,
+            // on data, like nothing at all).  The reason is appended in
+            // parentheses.  Empty disables the marker entirely.
+            std::string no_candidate_text{"no reco neutrino candidate"};
             std::string visitor;             // dump after this visitor runs
             std::string grouping{"live"};    // grouping to read PR graph from
             // Prototype-parity options (defaults => legacy output, byte-identical):
@@ -444,6 +478,8 @@ namespace WireCell::Clus {
 
         // Storage: flushed at end of each event (same lifecycle as m_bee_points)
         std::map<std::string, WireCell::Bee::ParticleTree> m_bee_pf_trees;
+        // Names from m_bee_pf_configs whose emit_empty is set.
+        std::set<std::string> m_bee_pf_emit_empty;
 
         /// Render one neutrino candidate's particle flow into the named Bee
         /// tree.  The three trailing arguments are doc pr/94 Phase 4 and all
@@ -465,6 +501,26 @@ namespace WireCell::Clus {
                               std::shared_ptr<WireCell::Clus::TrackFitting> tf_in = nullptr,
                               std::set<int>* shared_used_ids = nullptr,
                               Configuration* out_particles = nullptr);
+
+        /// Publish a reco PF forest into the named Bee particle tree, grafting
+        /// an upstream (truth) forest on top when cfg.merge_metadata_key names
+        /// one that the input tensor-set metadata carries.  Bee renders ONE
+        /// particle tree per event, so truth and reco can only both be seen as
+        /// a single array.  Shared by the legacy single-candidate tail of
+        /// fill_bee_pf_tree and by the doc pr/94 per-bundle caller, which
+        /// concatenates bundles itself and would otherwise bypass the graft.
+        void pf_set_particles(const BeePFConfig& cfg, Configuration particles,
+                              std::shared_ptr<WireCell::Clus::TrackFitting> tf);
+
+        /// Build the single node that carries the reconstructed-neutrino
+        /// summary ("reco nu <Enu> MeV numu <s> nue <s>") with `children` hung
+        /// under it.  Independent of whether an upstream truth tree exists:
+        /// the summary describes THIS event's reco, and coupling it to the
+        /// truth merge is what hid Enu and the BDT scores on every data event
+        /// (data publishes no truth tree, so the merge branch never ran).
+        Configuration pf_summary_node(const BeePFConfig& cfg,
+                                      std::shared_ptr<WireCell::Clus::TrackFitting> tf,
+                                      Configuration children) const;
 
         std::map<int, std::map<int, Bee::Patches>> m_bee_dead_patches;
         // Bee::Patches m_bee_dead; // dead region ...
@@ -526,6 +582,21 @@ namespace WireCell::Clus {
         // chain whose ident already carries the real event id.  Default off keeps
         // the existing use_config_rse / auto-increment behavior unchanged.
         bool m_rse_from_ident{false};
+        // Take RSE from the INPUT tensor-set metadata ("runNo"/"subRunNo"/
+        // "eventNo"), which is the only route by which the true art run and
+        // subrun can reach a WCT component -- the tensor ident carries the
+        // event number alone.  Filled upstream by larwirecell's
+        // wclsTensorSetMetadataAttacher (or by wclsTensorSetLabeler, which
+        // stamps the same three keys).  PRECEDENCE, highest first:
+        //   1. this, when enabled AND the keys are actually present
+        //   2. m_rse_from_ident  (0 / 0 / ident)
+        //   3. m_use_config_rse  (the configured constants)
+        // so enabling it cannot silently degrade a chain whose upstream has no
+        // attacher: absent keys fall through to the historical behavior.
+        bool m_rse_from_metadata{false};
+        // Input set metadata of the event being processed, kept so operator()
+        // can forward it to the output (see as_tensorset below).
+        WireCell::Configuration m_in_metadata{Json::objectValue};
 
         // Like m_rse_from_ident for the EVENT number, but the configured run
         // and subrun are kept.  A group of events streamed through one process

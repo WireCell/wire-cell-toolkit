@@ -158,8 +158,17 @@ function(params, anode, field, n, rms_cuts=[])
       //  channels: std.range(n * 2560 + 1600, n * 2560 + 2560- 1),
         channels: std.range(n * 5638 + 3968, n * 5638 + 5638-1),
         response: { waveform: handmade.w_resp, waveformid: wc.Wlayer },
-        response_offset: 129, 
+        response_offset: 129,
         nominal_baseline: 650,
+        // NoisyFilterAlg's RMS comes from CalcRMSWithFlags, a 16/50/84 percentile
+        // spread that is only signal-blind if SignalFilter flagged the signal
+        // first -- and SignalFilter's own threshold is 4x that same spread.  A
+        // long, large collection pulse therefore inflates the estimate and the
+        // channel is masked "noisy" -> "bad", i.e. deleted.  Measured on MC run
+        // 270/6/46: every live W channel sits at 2.0-10.1 except ch 10038 at
+        // 49.0, which is pure signal.  30 left no headroom, so raise it well
+        // clear of any real pulse while staying ~10x above the noise floor.
+        max_rms_cut: 100.0,
         pad_window_front: 30, // 20
         pad_window_back: 30, // 20
         decon_limit: 0.0025,
