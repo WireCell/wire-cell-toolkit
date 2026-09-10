@@ -209,6 +209,11 @@ public:
         // in stm_michel_pts so display and scan can see what the chain fitted
         // and classified as neither delta, hadron, Michel nor continuation.
         m_publish_other_arms = get<bool>(config, "publish_other_arms", m_publish_other_arms);
+        // doc pdvd/65 (T7): read the two shape tests from a residual-range origin
+        // anchored on the profile's Bragg peak (the prototype eval_stm recipe)
+        // rather than on the chain's geometric far end.
+        m_bragg_peak_anchor = get<bool>(config, "bragg_peak_anchor", m_bragg_peak_anchor);
+        m_bragg_peak_search_cm = get<double>(config, "bragg_peak_search_cm", m_bragg_peak_search_cm);
         m_dead_volume_check = get<bool>(config, "dead_volume_check", m_dead_volume_check);
         m_min_chain_coverage = get<double>(config, "min_chain_coverage", m_min_chain_coverage);
         m_michel_guards_stop = get<bool>(config, "michel_guards_stop", m_michel_guards_stop);
@@ -460,6 +465,16 @@ public:
         // interior count (n_body_other) has always been persisted; the stop
         // count (n_stop_other) and the published count are new.
         cfg["publish_other_arms"] = m_publish_other_arms;
+        // doc pdvd/65 (T7): default off.  When on, the verdict-stage contrast
+        // and KS tests read the live profile from rr' = end_L - L with end_L =
+        // L[peak] + 0.2 cm, the peak being the row maximising the 5-point
+        // running mean of dQ/dx within bragg_peak_search_cm of the geometric
+        // end (TaggerCheckSTM::eval_stm_core_impl's recipe, ToyFiducial.cxx:
+        // 1551); rows past the peak are dropped.  The chain walk's own Bragg
+        // guards keep the geometric origin.  bragg_anchor_shift_cm records the
+        // move (0 when off, or when the peak is the last row).
+        cfg["bragg_peak_anchor"] = m_bragg_peak_anchor;
+        cfg["bragg_peak_search_cm"] = m_bragg_peak_search_cm;
         // doc pdhd/03 sec 6: FiducialUtils::check_dead_volume from the end of
         // the live profile along the muon direction; a stop that walks into a
         // dead region is R_STOP_INTO_DEAD (three PDHD tracks end on the same
@@ -624,6 +639,8 @@ private:
     double m_michel_range_energy_dis_cm{5.0};     // cm
     double m_michel_range_energy_ke_min{10.0};    // MeV
     bool m_publish_other_arms{false};             // doc pdvd/64 (T6): role-7 rows for kOther arms
+    bool m_bragg_peak_anchor{false};              // doc pdvd/65 (T7): peak-anchored rr origin for the verdict shape tests
+    double m_bragg_peak_search_cm{10.0};          // cm
     bool m_dead_volume_check{false};
     double m_min_chain_coverage{0.0}, m_coverage_radius_cm{3.0};
     bool m_michel_guards_stop{false};
@@ -662,6 +679,7 @@ private:
         double muon_len{0};
         int n_delta{0}, n_body_other{0}, n_body_hadron{0};
         int n_stop_other{0}, n_other_published{0};   // doc pdvd/64 (T6): kOther arms at the stop; role-7 segments actually published
+        double bragg_anchor_shift{0};                // doc pdvd/65 (T7): how far back of the geometric end the peak anchor put rr = 0 (0 = off / peak at the end)
         double delta_len{0};
         // dQ/dx shape
         double ks_mu{0}, ks_flat{0}, ratio_mu{0}, ratio_flat{0};
@@ -1148,6 +1166,7 @@ private:
         I1("n_live_pts", r.n_live_pts); I1("n_dead_pts", r.n_dead_pts); I1("n_cmp_live", r.n_cmp_live); D1("dead_frac_cmp", r.dead_frac_cmp);
         I1("n_delta", r.n_delta); I1("n_body_other", r.n_body_other); I1("n_body_hadron", r.n_body_hadron); D1("delta_len", r.delta_len / cm);
         I1("n_stop_other", r.n_stop_other); I1("n_other_published", r.n_other_published);   // doc pdvd/64
+        D1("bragg_anchor_shift_cm", r.bragg_anchor_shift / cm);                                // doc pdvd/65
         D1("ks_mu", r.ks_mu); D1("ks_flat", r.ks_flat); D1("ratio_mu", r.ratio_mu); D1("ratio_flat", r.ratio_flat);
         for (int i = 0; i < 4; ++i) {
             D1(("comp_fwd" + std::to_string(i)).c_str(), r.comp_fwd[i]);
@@ -1698,6 +1717,46 @@ void CheckSTM_Michel::visit(Ensemble& ensemble) const
                 }
                 rec.n_cmp_live = n_cmp - n_cmp_dead;
                 rec.dead_frac_cmp = n_cmp > 0 ? double(n_cmp_dead) / n_cmp : 0.0;
+            }
+            // doc pdvd/65 (T7): the peak-anchored residual-range origin -- the
+            // prototype eval_stm / TaggerCheckSTM::eval_stm_core_impl recipe
+            // (end_L = L[max_bin] + 0.2 cm after a 5-point running-mean peak
+            // search), applied to the LIVE profile within bragg_peak_search_cm
+            // of the geometric end, for the two verdict-stage shape tests
+            // ONLY.  The chain walk (bragg_confirmed: extend / retreat / split
+            // guards) keeps the geometric origin -- it decides WHERE the stop
+            // is; this decides where the peak is read.  rr' = end_L - L, rows
+            // past the peak dropped; n_live_pts / dead_frac_cmp above stay
+            // geometric.  Off => `live` untouched, byte-identical.
+            if (m_bragg_peak_anchor && live.L.size() >= 5) {
+                const size_t n = live.L.size();
+                double best = -1; size_t ibest = n - 1;
+                for (size_t i = 0; i < n; ++i) {
+                    if (live.rr[i] > m_bragg_peak_search_cm * units::cm) continue;
+                    double s = 0; int c = 0;
+                    for (int d = -2; d <= 2; ++d) {
+                        const long j = static_cast<long>(i) + d;
+                        if (j < 0 || j >= static_cast<long>(n)) continue;
+                        s += live.dQdx[j]; ++c;
+                    }
+                    s /= c;
+                    if (s > best) { best = s; ibest = i; }
+                }
+                const double end_L = live.L[ibest] + 0.2 * units::cm;
+                if (end_L < live.total_length) {          // the anchor only moves the origin BACK
+                    StmMichelProfile anch;
+                    for (size_t i = 0; i < n; ++i) {
+                        const double r = end_L - live.L[i];
+                        if (r < 0) continue;
+                        anch.L.push_back(live.L[i]); anch.dQdx.push_back(live.dQdx[i]); anch.rr.push_back(r);
+                        anch.pts.push_back(live.pts[i]); anch.seg_idx.push_back(live.seg_idx[i]);
+                    }
+                    anch.total_length = end_L;
+                    if (anch.L.size() >= 3) {
+                        rec.bragg_anchor_shift = live.total_length - end_L;
+                        live = anch;
+                    }
+                }
             }
             std::function<double(double)> mu_at = nullptr;
             if (mu_fn) mu_at = [mu_fn](double rr_cm) { return mu_fn->scalar_function(rr_cm); };

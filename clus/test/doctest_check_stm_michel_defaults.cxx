@@ -57,6 +57,8 @@ TEST_CASE("clus knob defaults: CheckSTM_Michel verdict thresholds")
     D("michel_range_energy_dis_cm", 5.0);  // the argued distance, not doc 55's best-F1 3 cm row
     D("michel_range_energy_ke_min", 10.0);
     B("publish_other_arms", false);        // doc pdvd/64 (T6): role-7 rows for kOther arms, rows only
+    B("bragg_peak_anchor", false);         // doc pdvd/65 (T7): geometric rr origin unless on
+    D("bragg_peak_search_cm", 10.0);
     B("dead_volume_check", false);
     D("min_chain_coverage", 0.0);  // doc pdhd/03: 0 = off
     D("coverage_radius_cm", 3.0);
