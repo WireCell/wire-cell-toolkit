@@ -1105,7 +1105,7 @@ def emit_latex(bench, ctx, figs, graphs, fragment=False, figpre=""):
     T = []
     if not fragment:
         T += [r"\documentclass{article}",
-              r"\usepackage{graphicx}\usepackage{booktabs}\usepackage[margin=1in]{geometry}",
+              r"\usepackage{lmodern}\usepackage{graphicx}\usepackage{booktabs}\usepackage[margin=1in]{geometry}",
               r"\begin{document}"]
     sec = r"\subsection*{" if fragment else r"\section*{"
     T.append(sec + "spngbench summary --- " + esc(m.get("detname", "?")) + "}")
@@ -1408,6 +1408,77 @@ def _grid_overview_rows(cells):
     return out
 
 
+def render_stage_graph(tlas, out_png):
+    """Render a plain data-flow graph for one stage via `wcpy pgraph dotify`.
+
+    Uses --no-services --no-params so service components and config parameters
+    are omitted.  Returns the PNG basename or None if a tool is missing.
+    """
+    if not shutil.which("dot") or not shutil.which("wcpy"):
+        return None
+    out_png = Path(out_png)
+    base_dot = out_png.with_suffix(".dot")
+    env = os.environ.copy()
+    env["LD_LIBRARY_PATH"] = ""
+    env.setdefault("MPLCONFIGDIR", "/tmp/mpl-spngbench")
+    dargs = ["wcpy", "pgraph", "dotify", "--no-services", "--no-params"]
+    for k, v in tlas.items():
+        dargs += ["-A", f"{k}={v}"]
+    dargs += [str(JSONNET), str(base_dot)]
+    try:
+        r = subprocess.run(dargs, env=env, stdout=subprocess.PIPE,
+                           stderr=subprocess.STDOUT, timeout=120)
+        if r.returncode != 0 or not base_dot.exists():
+            return None
+        r = subprocess.run(["dot", "-Tpng", "-o", str(out_png), str(base_dot)],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=120)
+        if r.returncode != 0 or not out_png.exists():
+            return None
+    except Exception:
+        return None
+    return out_png.name
+
+
+def make_job_graphs(grid, cells, outdir):
+    """Render sim/osp/spng data-flow graphs and gather the driving input files.
+
+    Returns (job_graphs, inputs) where job_graphs maps stage -> png basename and
+    inputs is the list of depo files used to drive the benchmark.
+    """
+    depos = grid["meta"].get("depos") or []
+    adc = grid["meta"].get("adc_inputs") or []
+    # Recover model_file / detname from a representative per-point command.
+    tlas0 = {}
+    if cells:
+        try:
+            b = load_bench(cells[0]["path"])
+            _, tlas0 = _tlas_from_cmd(b["reports"]["osp"]["meta"].get("cmd", []))
+        except Exception:
+            pass
+    common = dict(model_file=tlas0.get("model_file", DEFAULT_MODEL), output="signals.npz",
+                  detname=tlas0.get("detname", "pdhd"), device="cpu", gpu_scheme="none",
+                  ngpu=1, engine="Pgrapher", wc_cores=1, verbosity=0)
+    stage_input = {"sim": (depos[0] if depos else "depos.npz"),
+                   "osp": (adc[0] if adc else "adc.npz"),
+                   "spng": (adc[0] if adc else "adc.npz")}
+    job_graphs = {}
+    for st in ("sim", "osp", "spng"):
+        g = render_stage_graph(dict(common, stage=st, input=stage_input[st]),
+                               Path(outdir) / f"job_{st}.png")
+        if g:
+            job_graphs[st] = g
+    return job_graphs, depos
+
+
+JOB_DESC = {
+    "sim": "**sim** — depos → drift → detsim → ADC frame file.  Run once per input; "
+           "its ADC output feeds both OSP and SPNG.",
+    "osp": "**osp** — ADC frame file → OmnibusSigProc → DNN-ROI → signal frame file.",
+    "spng": "**spng** — ADC frame file → SPNG (decon / filters / ROI-uniter DNN) → "
+            "signal frame file.",
+}
+
+
 def grid_report_command(grid_path, outdir, formats=("md", "html", "tex"),
                         point_graphs=False):
     """Produce a cross-grid report from a grid-index.json.
@@ -1427,6 +1498,7 @@ def grid_report_command(grid_path, outdir, formats=("md", "html", "tex"),
     cells = grid_cells(base)
     mats = make_grid_matrix(cells, outdir)
     bars = make_grid_bars(cells, outdir)
+    job_graphs, inputs = make_job_graphs(grid, cells, outdir)
 
     # Per-point summaries (one sub-directory each), for every compare file.
     points = []
@@ -1445,7 +1517,7 @@ def grid_report_command(grid_path, outdir, formats=("md", "html", "tex"),
 
     ctx = {"grid": grid, "mats": mats, "bars": bars,
            "overview": _grid_overview_rows(cells), "points": points,
-           "ncells": len(cells)}
+           "ncells": len(cells), "jobs": job_graphs, "inputs": inputs}
     written = []
     if "md" in formats:
         p = outdir / "grid-summary.md"; p.write_text(_emit_grid_md(ctx)); written.append(p)
@@ -1470,12 +1542,26 @@ def _emit_grid_md(ctx):
          f"host **{m.get('host','?')}** ({m.get('host_ngpu','?')} GPU), engine "
          f"**{m.get('engine','?')}**, {ctx['ncells']} grid points.\n",
          "\n## Contents\n",
+         "- [Jobs](#jobs)",
          "- [Grid matrix](#grid-matrix)",
          "- [Trends](#trends)",
          "- [Overview table](#overview-table)",
          "- Per-grid-point summaries:"]
     for stem, rlab, w, ratio in ctx["points"]:
         L.append(f"  - [{rlab} / wc{w}](points/{stem}/summary.md) (SPNG/OSP {_fmt(ratio,2)}×)")
+
+    L.append("\n## Jobs\n")
+    L.append("The benchmark factors the work into three wire-cell jobs.  Data-flow "
+             "graphs below are from `wcpy pgraph dotify --no-services --no-params` "
+             "(service components and config parameters omitted).\n")
+    L.append("\n**Input depo file(s):**\n")
+    for f in (ctx["inputs"] or ["(none recorded)"]):
+        L.append(f"- `{f}`")
+    for st in ("sim", "osp", "spng"):
+        L.append(f"\n### {st}\n")
+        L.append(JOB_DESC[st] + "\n")
+        if ctx["jobs"].get(st):
+            L.append(f"\n![{st} graph]({ctx['jobs'][st]})\n")
 
     L.append("\n## Grid matrix\n")
     L.append(_MATRIX_BLURB.replace("**", "**") + "\n")
@@ -1506,6 +1592,7 @@ def _emit_grid_html(ctx):
          f"<p>host <b>{esc(m.get('host','?'))}</b> ({m.get('host_ngpu','?')} GPU), engine "
          f"<b>{esc(m.get('engine','?'))}</b>, {ctx['ncells']} grid points.</p>",
          "<h2 id='toc'>Contents</h2><ul>",
+         "<li><a href='#jobs'>Jobs</a></li>",
          "<li><a href='#matrix'>Grid matrix</a></li>",
          "<li><a href='#trends'>Trends</a></li>",
          "<li><a href='#overview'>Overview table</a></li>",
@@ -1514,6 +1601,18 @@ def _emit_grid_html(ctx):
         H.append(f"<li><a href='points/{stem}/summary.html'>{esc(rlab)} / wc{w}</a> "
                  f"(SPNG/OSP {_fmt(ratio,2)}×)</li>")
     H.append("</ul></li></ul>")
+    H.append("<h2 id='jobs'>Jobs</h2>")
+    H.append("<p>The benchmark factors the work into three wire-cell jobs.  Graphs are "
+             "from <code>wcpy pgraph dotify --no-services --no-params</code> (service "
+             "components and config parameters omitted).</p>")
+    H.append("<p><b>Input depo file(s):</b></p><ul>")
+    for f in (ctx["inputs"] or ["(none recorded)"]):
+        H.append(f"<li><code>{esc(f)}</code></li>")
+    H.append("</ul>")
+    for st in ("sim", "osp", "spng"):
+        H.append(f"<h3>{st}</h3><p>{esc(JOB_DESC[st]).replace('**','')}</p>")
+        if ctx["jobs"].get(st):
+            H.append(f"<p><img src='{ctx['jobs'][st]}'></p>")
     H.append("<h2 id='matrix'>Grid matrix</h2>")
     H.append("<p>" + _MATRIX_BLURB.replace("**", "") + "</p>")
     if ctx["mats"].get("matrix"):
@@ -1536,12 +1635,26 @@ def _emit_grid_tex(ctx):
     m = ctx["grid"]["meta"]
     def esc(x): return str(x).replace("_", r"\_").replace("&", r"\&").replace("%", r"\%")
     T = [r"\documentclass{article}",
-         r"\usepackage{graphicx}\usepackage{booktabs}\usepackage[margin=1in]{geometry}",
+         r"\usepackage{lmodern}\usepackage{graphicx}\usepackage{booktabs}\usepackage[margin=1in]{geometry}",
          r"\usepackage{hyperref}",
          r"\begin{document}",
          r"\title{spngbench grid summary --- " + esc(m.get("detname", "?")) + "}",
          r"\author{}\date{}\maketitle",
          r"\tableofcontents\newpage",
+         r"\section{Jobs}",
+         r"The benchmark factors the work into three wire-cell jobs.  Data-flow graphs "
+         r"are from \texttt{wcpy pgraph dotify -{}-no-services -{}-no-params} (service "
+         r"components and config parameters omitted).",
+         r"\paragraph{Input depo file(s):}~\\"]
+    for f in (ctx["inputs"] or ["(none recorded)"]):
+        T.append(r"\texttt{" + esc(f) + r"}\\")
+    for st in ("sim", "osp", "spng"):
+        T.append(r"\subsection*{" + st + "}")
+        T.append(esc(JOB_DESC[st].replace("**", "")))
+        if ctx["jobs"].get(st):
+            T.append(r"\begin{center}\includegraphics[width=\textwidth,height=0.55\textheight,"
+                     r"keepaspectratio]{" + ctx["jobs"][st] + r"}\end{center}")
+    T += [r"\clearpage",
          r"\section{Grid matrix}",
          "The outer product of device modes (rows) and node categories (columns). "
          "Each cell is a grid point split into two sub-pixels: left = OSP, right = SPNG, "

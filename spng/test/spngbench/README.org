@@ -120,6 +120,11 @@ builds with =pdflatex= (needs =graphicx=, =booktabs=); the flow graphs need the
 =grid-report= consumes a =grid-index.json= and writes a cross-grid summary that
 spans every grid point.  It contains:
 
+- A *Jobs* section describing the three wire-cell jobs (sim, osp, spng) with a
+  data-flow graph for each (from =wcpy pgraph dotify --no-services --no-params=,
+  so service components and config parameters are omitted) and the list of input
+  depo file(s) that drove the benchmark.
+
 - A *matrix* that is the outer product of *device modes* (rows: CPU only,
   CPU+1GPU, CPU+2GPU, ...) and *node categories* (columns: DNN, sp\_other, other,
   total).  Each cell is a grid point split into two *sub-pixels* --- left = OSP,
