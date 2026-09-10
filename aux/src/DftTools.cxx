@@ -201,14 +201,15 @@ DftTools::real_vector_t DftTools::replace(const IDFT::pointer& dft,
     dft->fwd1d(cmeas.data(), cmeas.data(), size);
     dft->fwd1d(cres1.data(), cres1.data(), size);
     dft->fwd1d(cres2.data(), cres2.data(), size);
-
+    
     for (size_t ind=0; ind<size; ++ind) {
-        cmeas[ind] *= res2[ind]/res1[ind];
+        const complex_t den = cres2[ind];
+        if (std::abs(den) == 0.0) {
+            continue;           
+        }
+        cmeas[ind] *= cres1[ind]/den;
     }
-    DftTools::real_vector_t ret(size);
-    std::transform(cmeas.begin(), cmeas.end(), ret.begin(),
-                   [](const complex_t& c) { return std::real(c); });
 
-    return ret;
+    return DftTools::inv_c2r(dft, cmeas);;
 }
 
