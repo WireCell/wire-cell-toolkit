@@ -406,6 +406,20 @@ namespace WireCell::Clus::PR {
         R_PROFILE_GEOMETRY   = 1u << 13,  // the profile is not a measurement: a coiled end (arc/span) or a long fitted segment the charge does not support (doc pdvd/66)
     };
 
+    /// doc pdvd/70 (P1, topology_stop_evidence): the reject bits that a Michel
+    /// of sufficient quality at the stop clears -- the owner's rule that a
+    /// Michel at the end is by itself strong evidence of a stop, while the
+    /// dQ/dx rise counts only when it genuinely matches a Bragg peak.
+    /// Returns the SUBSET of `reject_bits` to clear: R_NO_BRAGG | R_SHAPE_FLAT
+    /// (| R_PROFILE_SPARSE when `clears_sparse`) when `michel_found`, the
+    /// object is attached (conn_type 1) or bridged (2), ke_mev >= ke_min_mev
+    /// and len_cm >= len_min_cm; 0 otherwise.  Every other bit is left to the
+    /// caller, so is_stm = (bits & ~clear) == 0 can only move 0 -> 1.  A
+    /// non-finite energy or length never qualifies.
+    unsigned stm_michel_topology_clear(unsigned reject_bits, int michel_found, int conn_type,
+                                       double ke_mev, double len_cm,
+                                       double ke_min_mev, double len_min_cm, bool clears_sparse);
+
 }  // namespace WireCell::Clus::PR
 
 #endif

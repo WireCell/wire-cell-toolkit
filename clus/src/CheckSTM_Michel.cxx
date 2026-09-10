@@ -214,6 +214,12 @@ public:
         // rather than on the chain's geometric far end.
         m_bragg_peak_anchor = get<bool>(config, "bragg_peak_anchor", m_bragg_peak_anchor);
         m_bragg_peak_search_cm = get<double>(config, "bragg_peak_search_cm", m_bragg_peak_search_cm);
+        // doc pdvd/70 (P1): topology-first stop evidence -- a Michel of
+        // sufficient quality at the stop clears the two dQ/dx-shape bits.
+        m_topology_stop_evidence = get<bool>(config, "topology_stop_evidence", m_topology_stop_evidence);
+        m_topology_michel_ke_min = get<double>(config, "topology_michel_ke_min", m_topology_michel_ke_min);
+        m_topology_michel_len_min_cm = get<double>(config, "topology_michel_len_min_cm", m_topology_michel_len_min_cm);
+        m_topology_clears_sparse = get<bool>(config, "topology_clears_sparse", m_topology_clears_sparse);
         // doc pdvd/66 (T8): the profile-geometry fields are always written; the guard
         // turns them into a reject bit (R_PROFILE_GEOMETRY).
         m_profile_geometry_guard = get<bool>(config, "profile_geometry_guard", m_profile_geometry_guard);
@@ -482,6 +488,24 @@ public:
         // move (0 when off, or when the peak is the last row).
         cfg["bragg_peak_anchor"] = m_bragg_peak_anchor;
         cfg["bragg_peak_search_cm"] = m_bragg_peak_search_cm;
+        // doc pdvd/70 (P1): default off.  The owner's rule: a Michel at the end
+        // is by itself strong evidence of a stop; the dQ/dx rise counts only
+        // when it genuinely matches a Bragg peak.  When on, a candidate whose
+        // Michel object exists (michel_found, after the T2c / T3c vetoes),
+        // attached (conn_type 1) or bridged (2), with michel_ke_best >=
+        // topology_michel_ke_min MeV and michel_len >=
+        // topology_michel_len_min_cm, has R_NO_BRAGG and R_SHAPE_FLAT cleared
+        // (and R_PROFILE_SPARSE with topology_clears_sparse) just before the
+        // verdict is persisted -- after every other bit is set, so is_stm moves
+        // only 0 -> 1 and only when nothing else rejects.  michel_found is read,
+        // never written.  10 MeV = the T2c / T3c floor already in the bag, 3 cm
+        // = the range-energy distance.  topology_cleared_bits (the bits this
+        // cleared) is written only when the knob is on, so the tree is
+        // byte-identical when off.
+        cfg["topology_stop_evidence"] = m_topology_stop_evidence;
+        cfg["topology_michel_ke_min"] = m_topology_michel_ke_min;
+        cfg["topology_michel_len_min_cm"] = m_topology_michel_len_min_cm;
+        cfg["topology_clears_sparse"] = m_topology_clears_sparse;
         // doc pdvd/66 (T8): default off.  The fields end_arc_span (fit arc over 3-D
         // span in the last end_window_cm of the chain profile -- doc 55 sec 17.1
         // item 5, the coiled end) and n_unsupported_segs (fitted segments of the
@@ -662,6 +686,10 @@ private:
     bool m_publish_other_arms{false};             // doc pdvd/64 (T6): role-7 rows for kOther arms
     bool m_bragg_peak_anchor{false};              // doc pdvd/65 (T7): peak-anchored rr origin for the verdict shape tests
     double m_bragg_peak_search_cm{10.0};          // cm
+    bool m_topology_stop_evidence{false};         // doc pdvd/70 (P1)
+    double m_topology_michel_ke_min{10.0};        // MeV
+    double m_topology_michel_len_min_cm{3.0};     // cm
+    bool m_topology_clears_sparse{false};         // doc pdvd/70 sec 9.4: also clear R_PROFILE_SPARSE
     bool m_profile_geometry_guard{false};         // doc pdvd/66 (T8)
     double m_profile_arc_span_max{1.5}, m_unsupported_min_len_cm{20.0}, m_unsupported_frac{0.25}, m_end_window_cm{20.0};
     bool m_dead_volume_check{false};
@@ -749,6 +777,7 @@ private:
         int n_kept_near_stop_main{0}, n_kept_near_stop_comp{0};  // doc pdvd/62 (T3a): pr54 residuals kept by the stop anchor, main cluster / companions
         int n_local_pieces{0};      // doc pdvd/62 (T3b): disconnected same-cluster pieces admitted into the Michel object
         int n_michel_range_veto{0}; // doc pdvd/62 (T3c): a bridged / charge-only Michel demoted by the range-energy guard
+        int topology_cleared_bits{0}; // doc pdvd/70 (P1): the reject bits topology_stop_evidence cleared (0 = none)
         int dead_ahead{-1};                        // doc pdhd/03: 1 = the live end walks into a dead region
         int n_cluster_pts{0}; double chain_coverage{-1};   // doc pdhd/03: cluster points within coverage_radius of a reconstructed point
         // dots
@@ -1223,6 +1252,9 @@ private:
         I1("n_michel_veto", r.n_michel_veto);
         I1("n_kept_near_stop_main", r.n_kept_near_stop_main); I1("n_kept_near_stop_comp", r.n_kept_near_stop_comp);   // doc pdvd/62
         I1("n_local_pieces", r.n_local_pieces); I1("n_michel_range_veto", r.n_michel_range_veto);
+        // doc pdvd/70 (P1): written only when the knob is on (the survey's
+        // pattern), so the knob-off tree keeps its branch list byte-identical.
+        if (m_topology_stop_evidence) I1("topology_cleared_bits", r.topology_cleared_bits);
         I1("n_cluster_pts", r.n_cluster_pts); D1("chain_coverage", r.chain_coverage);
         I1("n_dots", r.n_dots); I1("n_dot_clusters_unfit", r.n_dot_clusters_unfit);
         D1("dots_ke_dqdx", r.dots_ke_dqdx); D1("dots_charge_unfit", r.dots_charge_unfit);
@@ -2779,6 +2811,25 @@ void CheckSTM_Michel::visit(Ensemble& ensemble) const
         if (fiducial_utils) {
             rec.in_fv = fiducial_utils->inside_fiducial_volume(rec.stop_pt, fv_tol) ? 1 : 0;
             if (!rec.in_fv) rec.reject_bits |= R_STOP_NEAR_BOUNDARY;
+        }
+
+        // ---- doc pdvd/70 (P1): topology-first stop evidence -------------------
+        // Here and not earlier: R_CLUSTER_NOT_TRACK and R_STOP_NEAR_BOUNDARY are
+        // OR'd in just above, so every bit is final and a clear that fires is
+        // exactly an item whose only objections were the dQ/dx-shape tests (or
+        // the sparse profile) -- topology_cleared_bits then names what moved.
+        if (m_topology_stop_evidence) {
+            const unsigned clr = stm_michel_topology_clear(
+                rec.reject_bits, rec.michel_found, rec.michel_conn_type,
+                rec.michel_ke_best, rec.michel_len / units::cm,   // plain MeV (see :2703), internal length -> cm
+                m_topology_michel_ke_min, m_topology_michel_len_min_cm, m_topology_clears_sparse);
+            if (clr) {
+                rec.reject_bits &= ~clr;
+                rec.topology_cleared_bits = static_cast<int>(clr);
+                SPDLOG_LOGGER_DEBUG(s_log, "{}CheckSTM_Michel: cluster {} topology cleared {} (michel conn {} {:.1f} MeV {:.1f} cm) -> bits {}",
+                                    m_evt_tag, rec.cluster_id, bits_string(clr), rec.michel_conn_type,
+                                    rec.michel_ke_best, rec.michel_len / units::cm, bits_string(rec.reject_bits));
+            }
         }
 
         // ---- publish (TaggerCheckNeutrino.cxx:3580-3590) --------------------

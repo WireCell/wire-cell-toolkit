@@ -560,3 +560,16 @@ double WireCell::Clus::PR::stm_michel_admit_radius(double michel_cm,
     if (survey_on && std::isfinite(survey_cm)) r = std::max(r, survey_cm);
     return r;
 }
+
+unsigned WireCell::Clus::PR::stm_michel_topology_clear(unsigned reject_bits, int michel_found, int conn_type,
+                                                       double ke_mev, double len_cm,
+                                                       double ke_min_mev, double len_min_cm, bool clears_sparse)
+{
+    if (!michel_found) return 0;
+    if (conn_type != 1 && conn_type != 2) return 0;   // attached or bridged; a charge-only object (3) is not topology
+    if (!std::isfinite(ke_mev) || !std::isfinite(len_cm)) return 0;
+    if (ke_mev < ke_min_mev || len_cm < len_min_cm) return 0;
+    unsigned clearable = R_NO_BRAGG | R_SHAPE_FLAT;
+    if (clears_sparse) clearable |= R_PROFILE_SPARSE;
+    return reject_bits & clearable;
+}

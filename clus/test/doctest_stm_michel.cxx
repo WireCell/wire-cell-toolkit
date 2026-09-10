@@ -880,3 +880,46 @@ TEST_CASE("stm_michel stop split: picks the LARGER of two qualifying kinks")
     CHECK(sp.index == 14);   // L=48, the 90 deg row -- NOT index 12 (L=44, 45 deg), even though it is found first
     CHECK(sp.kink_deg == doctest::Approx(90).epsilon(0.5));
 }
+
+// ---- doc pdvd/70 (P1): topology-first stop evidence -----------------------
+// The rule the verdict applies and the census predicted offline are the same
+// expression: clear R_NO_BRAGG | R_SHAPE_FLAT (| R_PROFILE_SPARSE when asked)
+// on a Michel that exists, attached or bridged, at or above both minima.
+
+TEST_CASE("stm_michel topology clear: a good Michel clears the two shape bits and nothing else")
+{
+    const unsigned shape = R_NO_BRAGG | R_SHAPE_FLAT;
+    CHECK(stm_michel_topology_clear(shape, 1, 1, 24.0, 6.6, 10.0, 3.0, false) == shape);
+    CHECK(stm_michel_topology_clear(R_SHAPE_FLAT, 1, 2, 12.9, 4.8, 10.0, 3.0, false) == R_SHAPE_FLAT);
+    CHECK(stm_michel_topology_clear(R_NO_BRAGG, 1, 1, 10.0, 3.0, 10.0, 3.0, false) == R_NO_BRAGG);   // both minima inclusive
+    // any other bit survives, so the caller's is_stm still rejects
+    for (unsigned b : {unsigned(R_NO_CHAIN), unsigned(R_STOP_UNMATCHED), unsigned(R_NOT_MUON_PID),
+                       unsigned(R_CONTINUATION), unsigned(R_STOP_NEAR_BOUNDARY), unsigned(R_VERTEX_HADRON),
+                       unsigned(R_SHORT), unsigned(R_PROFILE_SPARSE), unsigned(R_PLATEAU_OFF_MIP),
+                       unsigned(R_STOP_INTO_DEAD), unsigned(R_CLUSTER_NOT_TRACK), unsigned(R_PROFILE_GEOMETRY)}) {
+        const unsigned clr = stm_michel_topology_clear(b | shape, 1, 1, 30.0, 8.0, 10.0, 3.0, false);
+        CHECK(clr == shape);
+        CHECK(((b | shape) & ~clr) == b);
+    }
+    CHECK(stm_michel_topology_clear(0u, 1, 1, 30.0, 8.0, 10.0, 3.0, true) == 0u);   // nothing to clear
+}
+
+TEST_CASE("stm_michel topology clear: R_PROFILE_SPARSE only with clears_sparse")
+{
+    const unsigned bits = R_SHAPE_FLAT | R_PROFILE_SPARSE;
+    CHECK(stm_michel_topology_clear(bits, 1, 1, 25.4, 6.5, 10.0, 3.0, false) == unsigned(R_SHAPE_FLAT));
+    CHECK(stm_michel_topology_clear(bits, 1, 1, 25.4, 6.5, 10.0, 3.0, true) == bits);
+    CHECK(stm_michel_topology_clear(R_PROFILE_SPARSE, 1, 2, 27.1, 22.1, 10.0, 3.0, true) == unsigned(R_PROFILE_SPARSE));
+}
+
+TEST_CASE("stm_michel topology clear: no Michel, a charge-only object, a small one or a NaN clears nothing")
+{
+    const unsigned shape = R_NO_BRAGG | R_SHAPE_FLAT;
+    CHECK(stm_michel_topology_clear(shape, 0, 1, 30.0, 8.0, 10.0, 3.0, true) == 0u);   // michel_found 0 (e.g. a T2c/T3c veto)
+    CHECK(stm_michel_topology_clear(shape, 1, 0, 30.0, 8.0, 10.0, 3.0, true) == 0u);
+    CHECK(stm_michel_topology_clear(shape, 1, 3, 30.0, 8.0, 10.0, 3.0, true) == 0u);   // charge only: no topology
+    CHECK(stm_michel_topology_clear(shape, 1, 1, 9.966, 4.2, 10.0, 3.0, true) == 0u);  // 039349_77/52's KE
+    CHECK(stm_michel_topology_clear(shape, 1, 1, 21.6, 2.3, 10.0, 3.0, true) == 0u);   // short
+    CHECK(stm_michel_topology_clear(shape, 1, 1, std::numeric_limits<double>::quiet_NaN(), 8.0, 10.0, 3.0, true) == 0u);
+    CHECK(stm_michel_topology_clear(shape, 1, 1, 30.0, std::numeric_limits<double>::quiet_NaN(), 10.0, 3.0, true) == 0u);
+}

@@ -64,6 +64,10 @@ TEST_CASE("clus knob defaults: CheckSTM_Michel verdict thresholds")
     D("unsupported_min_len_cm", 20.0);
     D("unsupported_frac", 0.25);
     D("end_window_cm", 20.0);
+    B("topology_stop_evidence", false);     // doc pdvd/70 (P1): the dQ/dx shape tests alone decide unless on
+    D("topology_michel_ke_min", 10.0);      // the T2c / T3c floor
+    D("topology_michel_len_min_cm", 3.0);   // the range-energy distance
+    B("topology_clears_sparse", false);     // doc pdvd/70 sec 9.4: the owner's option
     B("dead_volume_check", false);
     D("min_chain_coverage", 0.0);  // doc pdhd/03: 0 = off
     D("coverage_radius_cm", 3.0);
