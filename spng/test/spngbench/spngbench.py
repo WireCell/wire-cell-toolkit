@@ -1292,6 +1292,25 @@ def emit_markdown(bench, ctx, figs, graphs):
         for sh, inst, cl, w, sd, co in _node_rows(R[s]):
             L.append(f"| {sh} | {inst} | {cl} | {_fmt(w)} | {_fmt(sd)} | {_fmt(co)} |")
 
+    if ctx.get("memfigs"):
+        L.append("\n## Memory\n")
+        L.append("Peak RSS / VRAM, and per-category peak (a category's peak is the "
+                 "max sample while any node of that category is active; overlapping, "
+                 "not additive):\n")
+        L.append("\n| stage | peak RSS [MB] | peak VRAM [MB] | DNN | sp_other | other (RSS MB) |")
+        L.append("|---|--:|--:|--:|--:|--:|")
+        for s in ctx["stages"]:
+            mem = (R[s].get("memory") or {})
+            bc = mem.get("by_category", {})
+            def mb(x): return _fmt((x or 0) / 1e6, 0)
+            L.append(f"| {s.upper()} | {mb(mem.get('peak_rss'))} | {mb(mem.get('peak_vram'))} | "
+                     f"{mb(bc.get('dnn',{}).get('peak_rss'))} | {mb(bc.get('sp_other',{}).get('peak_rss'))} | "
+                     f"{mb(bc.get('other',{}).get('peak_rss'))} |")
+        for s in ctx["stages"]:
+            if ctx["memfigs"].get(s):
+                L.append(f"\n### {s.upper()} memory + node activity\n")
+                L.append(f"![{s} memory]({ctx['memfigs'][s]})\n")
+
     if graphs:
         L.append("\n## Flow graphs (per-node CPU/GPU timing)\n")
         for s in ctx["stages"]:
@@ -1332,6 +1351,22 @@ def emit_html(bench, ctx, figs, graphs):
             H.append(f"<tr><td>{esc(sh)}</td><td>{esc(inst)}</td><td>{cl}</td>"
                      f"<td>{_fmt(w)}</td><td>{_fmt(sd)}</td><td>{_fmt(co)}</td></tr>")
         H.append("</table>")
+    if ctx.get("memfigs"):
+        H.append("<h2>Memory</h2>")
+        H.append("<table><tr><th>stage</th><th>peak RSS [MB]</th><th>peak VRAM [MB]</th>"
+                 "<th>DNN</th><th>sp_other</th><th>other (RSS MB)</th></tr>")
+        for s in ctx["stages"]:
+            mem = (R[s].get("memory") or {}); bc = mem.get("by_category", {})
+            def mb(x): return _fmt((x or 0) / 1e6, 0)
+            H.append(f"<tr><td>{s.upper()}</td><td>{mb(mem.get('peak_rss'))}</td>"
+                     f"<td>{mb(mem.get('peak_vram'))}</td><td>{mb(bc.get('dnn',{}).get('peak_rss'))}</td>"
+                     f"<td>{mb(bc.get('sp_other',{}).get('peak_rss'))}</td>"
+                     f"<td>{mb(bc.get('other',{}).get('peak_rss'))}</td></tr>")
+        H.append("</table>")
+        for s in ctx["stages"]:
+            if ctx["memfigs"].get(s):
+                H.append(f"<h3>{s.upper()} memory + node activity</h3><p><img src='{ctx['memfigs'][s]}'></p>")
+
     if graphs:
         H.append("<h2>Flow graphs (per-node CPU/GPU timing)</h2>")
         for s in ctx["stages"]:
@@ -1378,6 +1413,14 @@ def emit_latex(bench, ctx, figs, graphs, fragment=False, figpre=""):
             T.append(f"{esc(sh)} & {esc(inst)} & {cl.replace('(non-DNN)','')} & "
                      f"{_fmt(w)} & {_fmt(sd)} & {_fmt(co)} " + r"\\")
         T.append(r"\bottomrule\end{tabular}")
+    if ctx.get("memfigs"):
+        T.append(sub + "Memory}")
+        for s in ctx["stages"]:
+            if ctx["memfigs"].get(s):
+                T.append(r"\paragraph{" + s.upper() + "}")
+                T.append(r"\begin{center}\includegraphics[width=\textwidth,height=0.5\textheight,"
+                         r"keepaspectratio]{" + fig(ctx["memfigs"][s]) + r"}\end{center}")
+
     if graphs:
         T.append(sub + "Flow graphs}")
         for s in ctx["stages"]:
@@ -1387,6 +1430,78 @@ def emit_latex(bench, ctx, figs, graphs, fragment=False, figpre=""):
     if not fragment:
         T.append(r"\end{document}")
     return "\n".join(T) + "\n"
+
+
+def _resolve_json(path, base):
+    if not path:
+        return None
+    for cand in (Path(path), Path(base) / Path(path).name):
+        if cand.exists():
+            try:
+                return json.loads(cand.read_text())
+            except Exception:
+                return None
+    return None
+
+
+def make_memory_figures(bench, base, figdir):
+    """Per-stage memory-vs-time profile + node-activity Gantt (needs memprofile
+    and timeline JSON, i.e. runs made with memory profiling on).  Returns
+    {stage: png} for whichever stages have data."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    figdir = Path(figdir)
+    figs = {}
+    for stage in [s for s in ("osp", "spng") if s in bench["reports"]]:
+        rep = bench["reports"][stage]
+        runs = rep.get("runs") or []
+        if not runs:
+            continue
+        mp = _resolve_json(runs[0].get("memprofile"), base)
+        if not mp or not mp.get("samples"):
+            continue
+        tl = _resolve_json(runs[0].get("timeline"), base)
+        samples = mp["samples"]
+        t0 = samples[0][0]
+        ts = [s[0] - t0 for s in samples]
+        rss = [s[1] / 1e6 for s in samples]
+        vram = [s[2] / 1e6 for s in samples]
+        has_v = bool(mp.get("gpu")) and max(vram) > 0
+
+        nodes = [n for n in (tl or {}).get("nodes", []) if n.get("intervals")]
+        nodes.sort(key=lambda n: min(a for a, b in n["intervals"]))
+        nrows = len(nodes)
+        gh = max(1.2, min(9.0, 0.14 * nrows))
+        fig, (axp, axg) = plt.subplots(
+            2, 1, figsize=(9, 2.6 + gh), sharex=True,
+            gridspec_kw={"height_ratios": [2.4, gh]})
+        axp.plot(ts, rss, color="#5f8fbf", lw=1.2, label="RSS")
+        axp.set_ylabel("RSS [MB]", color="#5f8fbf")
+        axp.set_title(f"{stage.upper()} — memory vs time and node activity")
+        if has_v:
+            axv = axp.twinx()
+            axv.plot(ts, vram, color="#d95f5f", lw=1.2, label="VRAM")
+            axv.set_ylabel("VRAM [MB]", color="#d95f5f")
+        for i, n in enumerate(nodes):
+            col = CAT_COLOR[report_category(n["class"])]
+            for a, b in n["intervals"]:
+                axg.hlines(i, a - t0, b - t0, color=col, lw=2.2)
+        axg.set_ylim(-1, max(1, nrows)); axg.invert_yaxis()
+        axg.set_yticks([]); axg.set_ylabel(f"{nrows} nodes")
+        axg.set_xlabel("time since run start [s]")
+        # category legend
+        from matplotlib.patches import Patch
+        axg.legend(handles=[Patch(color=CAT_COLOR[c], label=CAT_LABEL[c])
+                            for c in ("dnn", "sp_nondnn", "io", "other")],
+                   fontsize=6, ncol=4, loc="upper right")
+        fig.tight_layout()
+        p = figdir / f"mem_{stage}.png"
+        fig.savefig(p, dpi=120)
+        plt.close(fig)
+        figs[stage] = p.name
+    return figs
 
 
 def report_command(bench_path, outdir, formats=("md", "html", "tex"), with_graphs=True,
@@ -1400,8 +1515,10 @@ def report_command(bench_path, outdir, formats=("md", "html", "tex"), with_graph
     bench = load_bench(bench_path)
     outdir = Path(outdir)
     outdir.mkdir(parents=True, exist_ok=True)
+    base = Path(bench_path).parent
 
     figs = make_figures(bench["reports"], outdir)
+    memfigs = make_memory_figures(bench, base, outdir)
     graphs = {}
     if with_graphs:
         for s in bench["reports"]:
@@ -1409,6 +1526,7 @@ def report_command(bench_path, outdir, formats=("md", "html", "tex"), with_graph
             if g:
                 graphs[s] = g
     ctx = _summary_context(bench)
+    ctx["memfigs"] = memfigs
 
     written = []
     if "md" in formats:
@@ -1419,7 +1537,7 @@ def report_command(bench_path, outdir, formats=("md", "html", "tex"), with_graph
         p = outdir / "summary.tex"
         p.write_text(emit_latex(bench, ctx, figs, graphs, fragment=tex_fragment, figpre=figpre))
         written.append(p)
-    return {"outdir": str(outdir), "figures": figs, "graphs": graphs,
+    return {"outdir": str(outdir), "figures": figs, "graphs": graphs, "memfigs": memfigs,
             "written": [str(p) for p in written]}
 
 
@@ -1477,10 +1595,11 @@ def grid_cells(base, compare_path=None):
             "wc": m["wc_cores"], "torch": m["torch_cores"],
             "scheme": m.get("gpu_scheme", "none"), "ngpu": int(m.get("ngpu", 1)),
             "outcome": {"osp": j["osp"]["outcome"], "spng": j["spng"]["outcome"]},
-            "cat": {},
+            "cat": {}, "mem": {},
         }
         for s in ("osp", "spng"):
             rec["cat"][s] = _report_cat4(j[s]) if j[s].get("outcome") == "ok" else None
+            rec["mem"][s] = j[s].get("memory")   # None for pre-mem-profiling runs
         cells.append(rec)
     return cells
 
@@ -1642,6 +1761,59 @@ def make_grid_bars(cells, figdir):
     return figs
 
 
+def make_grid_membars(cells, figdir):
+    """Peak-RSS (and peak-VRAM) per grid point, OSP vs SPNG, split into the
+    DNN / sp_other / other categories (per-category peak; overlapping)."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from matplotlib.patches import Patch
+
+    figs = {}
+    figdir = Path(figdir)
+    ok = [c for c in cells if (c.get("mem", {}).get("osp") or c.get("mem", {}).get("spng"))]
+    ok = sorted(ok, key=lambda c: (c["gpu"], c["torch"], c["scheme"], c["wc"]))
+    if not ok:
+        return figs
+
+    def lab(c):
+        b = GPU_MODE_LABEL.get(c["gpu"], f"{c['gpu']}gpu").replace("CPU + ", "").replace("CPU only", "cpu")
+        return f"{b}/{c['scheme'][:4] if c['gpu']>=2 else 'omp'+str(c['torch'])}/wc{c['wc']}"
+
+    labels = [lab(c) for c in ok]
+    cats = [("dnn", "dnn"), ("sp_other", "sp_nondnn"), ("other", "other")]
+
+    def val(c, s, catkey, which):
+        m = (c.get("mem", {}).get(s) or {}).get("by_category", {}).get(catkey, {})
+        return (m.get(which) or 0) / 1e6   # MB
+
+    for which, title, fname in (("peak_rss", "Peak RSS", "peakram"),
+                                ("peak_vram", "Peak VRAM", "peakvram")):
+        allvals = [val(c, s, ck, which) for c in ok for s in ("osp", "spng") for ck, _ in cats]
+        if not any(v > 0 for v in allvals):
+            continue
+        n = len(ok)
+        x = list(range(n))
+        w = 0.13
+        offs = {"osp": [-3 * w, -2 * w, -1 * w], "spng": [1 * w, 2 * w, 3 * w]}
+        fig, ax = plt.subplots(figsize=(max(6, 0.42 * n + 2), 4.2))
+        for s in ("osp", "spng"):
+            for k, (ck, colkey) in enumerate(cats):
+                ax.bar([i + offs[s][k] for i in x], [val(c, s, ck, which) for c in ok],
+                       width=w, color=CAT_COLOR[colkey],
+                       hatch=("" if s == "osp" else "//"), edgecolor="white", linewidth=0.2)
+        ax.set_xticks(x); ax.set_xticklabels(labels, rotation=90, fontsize=6)
+        ax.set_ylabel(f"{title} [MB]")
+        ax.set_title(f"{title} per grid point (left triplet = OSP, right hatched = SPNG)")
+        ax.legend(handles=[Patch(color=CAT_COLOR[c], label=CAT_LABEL[c]) for _, c in cats]
+                  + [Patch(facecolor="#ccc", hatch="//", label="SPNG (hatched)")],
+                  fontsize=7, ncol=4)
+        fig.tight_layout()
+        p = figdir / f"bars_{fname}.png"; fig.savefig(p, dpi=120); plt.close(fig)
+        figs[fname] = p.name
+    return figs
+
+
 def _grid_overview_rows(cells):
     out = []
     for c in sorted(cells, key=lambda c: (c["gpu"], c["torch"], c["scheme"], c["wc"])):
@@ -1744,6 +1916,7 @@ def grid_report_command(grid_path, outdir, formats=("md", "html", "tex"),
     cells = grid_cells(base)
     mats = make_grid_matrix(cells, outdir)
     bars = make_grid_bars(cells, outdir)
+    bars.update(make_grid_membars(cells, outdir))
     job_graphs, inputs = make_job_graphs(grid, cells, outdir)
 
     # Per-point summaries (one sub-directory each), for every compare file.
@@ -1815,7 +1988,7 @@ def _emit_grid_md(ctx):
         L.append(f"\n![grid matrix]({ctx['mats']['matrix']})\n")
 
     L.append("\n## Trends\n")
-    for k in ("total", "ratio"):
+    for k in ("total", "ratio", "peakram", "peakvram"):
         if ctx["bars"].get(k):
             L.append(f"\n![{k}]({ctx['bars'][k]})\n")
 
@@ -1864,7 +2037,7 @@ def _emit_grid_html(ctx):
     if ctx["mats"].get("matrix"):
         H.append(f"<p><img src='{ctx['mats']['matrix']}'></p>")
     H.append("<h2 id='trends'>Trends</h2>")
-    for k in ("total", "ratio"):
+    for k in ("total", "ratio", "peakram", "peakvram"):
         if ctx["bars"].get(k):
             H.append(f"<p><img src='{ctx['bars'][k]}'></p>")
     H.append("<h2 id='overview'>Overview table</h2>")
@@ -1909,7 +2082,7 @@ def _emit_grid_tex(ctx):
     if ctx["mats"].get("matrix"):
         T.append(r"\begin{center}\includegraphics[width=\textwidth]{" + ctx["mats"]["matrix"] + r"}\end{center}")
     T.append(r"\section{Trends}")
-    for k in ("total", "ratio"):
+    for k in ("total", "ratio", "peakram", "peakvram"):
         if ctx["bars"].get(k):
             T.append(r"\begin{center}\includegraphics[width=\textwidth]{" + ctx["bars"][k] + r"}\end{center}")
     T.append(r"\section{Overview table}")
