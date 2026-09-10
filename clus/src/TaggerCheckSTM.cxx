@@ -312,6 +312,13 @@ public:
             SPDLOG_LOGGER_DEBUG(s_log, "configure: TaggerCheckSTM: vertex_kink_guard ON (turn>{} deg && post>{} MIP)",
                                 m_guard_vertex_turn, m_guard_vertex_mip);
         }
+        m_kink_asym_enable = get<bool>(config, "kink_asym_enable", m_kink_asym_enable);
+        m_kink_asym_entry_mip = get<double>(config, "kink_asym_entry_mip", m_kink_asym_entry_mip);
+        m_kink_asym_far_mip = get<double>(config, "kink_asym_far_mip", m_kink_asym_far_mip);
+        if (m_kink_asym_enable) {
+            SPDLOG_LOGGER_DEBUG(s_log, "configure: TaggerCheckSTM: kink_asym_enable ON (entry>={} MIP && far<={} MIP, either arm)",
+                                m_kink_asym_entry_mip, m_kink_asym_far_mip);
+        }
 
         // descent_guard (C++ default false => byte-identical legacy): the
         // doc-94 round-1 veto on a stop that was reached travelling UPWARD or
@@ -474,6 +481,10 @@ public:
         cfg["vertex_kink_guard"] = m_vertex_kink_guard;
         cfg["guard_vertex_turn"] = m_guard_vertex_turn;
         cfg["guard_vertex_mip"] = m_guard_vertex_mip;
+        // doc pdvd/56 T1b asymmetric kink clause; false = byte-identical legacy.
+        cfg["kink_asym_enable"] = m_kink_asym_enable;
+        cfg["kink_asym_entry_mip"] = m_kink_asym_entry_mip;
+        cfg["kink_asym_far_mip"] = m_kink_asym_far_mip;
         // doc-94 round-1 vertex-hadron veto; false = byte-identical legacy.
         cfg["vertex_hadron_guard"] = m_vertex_hadron_guard;
         cfg["guard_hadron_len_cm"] = m_guard_hadron_len_cm;
@@ -810,6 +821,20 @@ private:
     double m_guard_vertex_turn{45.0};    // sharpest end-region turn above this (deg) ...
     double m_guard_vertex_mip{2.2};      // ... into a post-turn median above this (MIP) => vertex
 
+    // doc pdvd/56 T1b: a third, ADDITIVE clause in find_first_kink's charge
+    // gate (both sweeps), admitting an ASYMMETRIC kink -- Bragg into a cold
+    // Michel -- that the existing "both arms hot" gates never accept, so the
+    // kink search falls through to its no-kink sentinel on a real muon/Michel
+    // junction (doc 54 sec 1.2: 039349_18/36, sum_fQ 1.77, sum_bQ 0.09).
+    // false => byte-identical legacy (every existing geometry precondition
+    // and both existing charge clauses are untouched; this only adds a third
+    // OR-branch to each).  Thresholds are already-normalized MIP fractions
+    // (sum_fQ/sum_bQ are divided by m_mip_dqdx upstream), so no new absolute
+    // e/cm literal is introduced.
+    bool m_kink_asym_enable{false};
+    double m_kink_asym_entry_mip{1.2};   // hot arm >= this (MIP) ...
+    double m_kink_asym_far_mip{0.5};     // ... cold arm <= this (MIP), either direction => kink
+
     // doc-94 round-1 descent veto (see configure()).  cos_y default +1.01 is
     // above the feature's range => a pure probe even when the boolean is on,
     // which is how the population distribution is measured before a cut is
@@ -973,6 +998,8 @@ private:
         if (!m_pass_records.empty()) {
             std::vector<double> x, y, z, dQ, dx, L, rr, pu, pv, pw, pt, chi2;
             std::vector<int> apa, face, pass, status;
+            // doc pdvd/56 T4: writer-only per-plane dead-channel flags.
+            std::vector<int> reg_u, reg_v, reg_w;
             // doc 30: non-const so rec.cells can be moved into m_acc_pass_snapshots
             // below; every other member is read, not written.
             for (auto& rec : m_pass_records) {
@@ -994,6 +1021,9 @@ private:
                     chi2.push_back(f.reduced_chi2);
                     apa.push_back(f.paf.first); face.push_back(f.paf.second);
                     pass.push_back(rec.pass); status.push_back(rec.status);
+                    reg_u.push_back(f.reg_flag_u ? 1 : 0);
+                    reg_v.push_back(f.reg_flag_v ? 1 : 0);
+                    reg_w.push_back(f.reg_flag_w ? 1 : 0);
                 }
                 SPDLOG_LOGGER_INFO(s_log,
                     "persist_stm_fit: cluster {} stmfit pass={} status={} kink={} exit_L={:.1f} left_L={:.1f} npts={}",
@@ -1017,6 +1047,8 @@ private:
             arrays.emplace("reduced_chi2", Array(chi2));
             arrays.emplace("apa", Array(apa)); arrays.emplace("face", Array(face));
             arrays.emplace("pass", Array(pass)); arrays.emplace("status", Array(status));
+            arrays.emplace("reg_flag_u", Array(reg_u)); arrays.emplace("reg_flag_v", Array(reg_v));
+            arrays.emplace("reg_flag_w", Array(reg_w));
             cluster.local_pcs()["stm_fit"] = Dataset(arrays);
 
             std::vector<int> p_pass, p_status, p_kink, p_npts;
@@ -1793,9 +1825,15 @@ private:
                     sum_bQ /= (sum_bx / units::cm + 1e-9) * m_mip_dqdx;
                     
                     // Final selection criteria
-                    if ((sum_fQ > 0.6 && sum_bQ > 0.6) || 
-                        (sum_fQ + sum_bQ > 1.4 && (sum_fQ > 0.8 || sum_bQ > 0.8) && 
-                        v10.magnitude() > 10*units::cm && v20.magnitude() > 10*units::cm)) {
+                    if ((sum_fQ > 0.6 && sum_bQ > 0.6) ||
+                        (sum_fQ + sum_bQ > 1.4 && (sum_fQ > 0.8 || sum_bQ > 0.8) &&
+                        v10.magnitude() > 10*units::cm && v20.magnitude() > 10*units::cm) ||
+                        // doc pdvd/56 T1b: additive asymmetric clause (Bragg
+                        // into a cold Michel).  false by default => the two
+                        // clauses above are the only path, byte-identical.
+                        (m_kink_asym_enable &&
+                         ((sum_fQ >= m_kink_asym_entry_mip && sum_bQ <= m_kink_asym_far_mip) ||
+                          (sum_bQ >= m_kink_asym_entry_mip && sum_fQ <= m_kink_asym_far_mip)))) {
                         
                         if (i + 2 < dq_size) {
                             SPDLOG_LOGGER_TRACE(s_log, "find_first_kink: Kink: {} {} {} {} {} {} {} {} {} {}", i, refl_angles.at(i), para_angles.at(i), ave_angles.at(i), max_numbers.at(i), angle3, dQ.at(i)/dx.at(i)*units::cm/m_mip_dqdx, pu.at(i), pv.at(i), pw.at(i));
@@ -1898,7 +1936,13 @@ private:
                     //std::cout << sum_fQ << " " << sum_bQ << std::endl;
                     if (std::abs(sum_fQ-sum_bQ) < 0.07*(sum_fQ+sum_bQ) && (flag_bad_u||flag_bad_v||flag_bad_w)) continue;
                     
-                    if (sum_fQ > 0.6 && sum_bQ > 0.6 ){
+                    if ((sum_fQ > 0.6 && sum_bQ > 0.6) ||
+                        // doc pdvd/56 T1b: same additive asymmetric clause as
+                        // sweep 1, so a candidate this sweep's tighter
+                        // geometry admits is not lost to the strict gate.
+                        (m_kink_asym_enable &&
+                         ((sum_fQ >= m_kink_asym_entry_mip && sum_bQ <= m_kink_asym_far_mip) ||
+                          (sum_bQ >= m_kink_asym_entry_mip && sum_fQ <= m_kink_asym_far_mip)))) {
                         if (i+2<dq_size){
                             SPDLOG_LOGGER_TRACE(s_log, "find_first_kink: Kink: {} {} {} {} {} {} {}", i, refl_angles.at(i), para_angles.at(i), ave_angles.at(i), max_numbers.at(i), angle3, dQ.at(i)/dx.at(i)*units::cm/m_mip_dqdx);
                             return max_numbers.at(i);

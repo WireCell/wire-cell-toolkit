@@ -7100,6 +7100,11 @@ void TrackFitting::dQ_dx_fill(double dis_end_point_ext) {
     dQ.resize(fine_tracking_path.size(), 0);
     dx.resize(fine_tracking_path.size(), 0);
     reduced_chi2.resize(fine_tracking_path.size(), 0);
+    // doc pdvd/56 T4: no per-plane information on the placeholder path (no
+    // real fit ran), so the flags are all "no dead-channel information", 0.
+    reg_flag_u.assign(fine_tracking_path.size(), 0);
+    reg_flag_v.assign(fine_tracking_path.size(), 0);
+    reg_flag_w.assign(fine_tracking_path.size(), 0);
     
     // Loop through each point in the fine tracking path
     for (size_t i = 0; i != fine_tracking_path.size(); i++) {
@@ -8506,9 +8511,16 @@ void WireCell::Clus::TrackFitting::dQ_dx_fit(double dis_end_point_ext, bool flag
     Eigen::SparseMatrix<double> RW(n_2D_w, n_3D_pos);
     
     Eigen::VectorXd pos_3D_init(n_3D_pos);
-    std::vector<int> reg_flag_u(n_3D_pos, 0), reg_flag_v(n_3D_pos, 0), reg_flag_w(n_3D_pos, 0);
-    
-    
+    // doc pdvd/56 T4: these are the TrackFitting MEMBER vectors (declared
+    // beside dQ/dx/pu/pv/pw), not a function-local shadow -- do_single_tracking
+    // reads them back after this function returns, the same way it already
+    // reads dQ/dx/pu/pv/pw/pt/paf/reduced_chi2.  dQ_dx_multi_fit keeps its own
+    // unrelated local of the same name; untouched.
+    reg_flag_u.assign(n_3D_pos, 0);
+    reg_flag_v.assign(n_3D_pos, 0);
+    reg_flag_w.assign(n_3D_pos, 0);
+
+
     // Initialize solution vector
     for (int i = 0; i < n_3D_pos; i++) {
         pos_3D_init(i) = 50000.0; // Initial guess
@@ -10427,12 +10439,21 @@ void TrackFitting::do_single_tracking(std::shared_ptr<PR::Segment> segment, bool
         // std::cout <<"test " << fit.paf.first << " " << fit.paf.second << " " << paf[i].first << " " << paf[i].second << std::endl;
         fit.reduced_chi2 = reduced_chi2[i];
 
+        // doc pdvd/56 T4: writer-only per-plane dead-channel flags, already
+        // computed by dQ_dx_fit's regulariser.  Bounds-guarded, not .at(i):
+        // dQ_dx_fill's placeholder path resizes these to fine_tracking_path's
+        // size (all 0), but a caller that skips both leaves them empty, and
+        // "no information" (Fit's own false default) is the correct read then.
+        if (i < reg_flag_u.size()) fit.reg_flag_u = reg_flag_u[i];
+        if (i < reg_flag_v.size()) fit.reg_flag_v = reg_flag_v[i];
+        if (i < reg_flag_w.size()) fit.reg_flag_w = reg_flag_w[i];
+
         // Set trajectory information
         fit.index = static_cast<int>(i);
         fit.range = cumulative_range[i];
-        
+
         // Set fix flags (typically fix endpoints for track fitting)
-        fit.flag_fix = false;        
+        fit.flag_fix = false;
         segment_fits.push_back(fit);
     }
 

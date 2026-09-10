@@ -1306,6 +1306,15 @@ namespace WireCell::Clus {
         std::vector<double> pt;
         std::vector<std::pair<int, int>> paf;
         std::vector<double> reduced_chi2;
+        // doc pdvd/56 T4: per-plane dead-channel flags, populated by
+        // dQ_dx_fit only (the single-segment path CheckSTM_Michel/
+        // TaggerCheckSTM actually call); dQ_dx_multi_fit keeps its own
+        // function-local reg_flag_u/v/w, unrelated to these.  Sized/zeroed by
+        // dQ_dx_fill too so do_single_tracking's Fit-build loop always sees a
+        // consistent (possibly empty) vector; see the bounds guard there.
+        std::vector<int> reg_flag_u;
+        std::vector<int> reg_flag_v;
+        std::vector<int> reg_flag_w;
     };
 
 } // namespace WireCell::Clus

@@ -1173,6 +1173,17 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, e
               // (owner 2026-07-26, after validation).
               stm_deficit_guard=true,
               stm_vertex_kink_guard=true,
+              // stm_kink_asym_enable: doc pdvd/56 T1b -- a third, additive
+              // OR-clause in find_first_kink's charge gate, admitting an
+              // ASYMMETRIC kink (Bragg into a cold Michel) that the existing
+              // "both arms hot" clauses never accept.  C++ defaults
+              // false/1.2/0.5; keys omitted when off => byte-identical.
+              // DEFAULT FALSE: out of scope this round (doc pdvd/56 T1b is
+              // scored on PDVD's hand-scan record only; no SBND validation
+              // has run).
+              stm_kink_asym_enable=false,
+              stm_kink_asym_entry_mip=1.2,
+              stm_kink_asym_far_mip=0.5,
               // stm_descent_guard: doc-94 round-1 veto on a stop reached
               // travelling UPWARD or near-horizontally.  A cosmic stopping
               // muon arrived from the sky, so it entered a boundary face
@@ -2137,6 +2148,11 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, e
                 // omitted when off => byte-identical): doc-63 round-5 vetoes.
                 deficit_guard=stm_deficit_guard,
                 vertex_kink_guard=stm_vertex_kink_guard,
+                // kink_asym_enable (C++ default false; keys omitted when off
+                // => byte-identical): doc pdvd/56 T1b asymmetric kink clause.
+                kink_asym_enable=stm_kink_asym_enable,
+                kink_asym_entry_mip=(if stm_kink_asym_enable then stm_kink_asym_entry_mip else null),
+                kink_asym_far_mip=(if stm_kink_asym_enable then stm_kink_asym_far_mip else null),
                 // descent_guard (C++ default false; keys omitted when off =>
                 // byte-identical): doc-94 round-1 travel-direction veto.
                 descent_guard=stm_descent_guard,

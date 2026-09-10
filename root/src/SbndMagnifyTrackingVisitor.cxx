@@ -510,6 +510,8 @@ void Root::SbndMagnifyTrackingVisitor::write_t_rec_data(TFile* output_tf, Clus::
     int b_flag_vertex{0}, b_flag_shower{0};
     int b_cluster_id{0}, b_real_cluster_id{0}, b_sub_cluster_id{0};
     int b_pass{0}, b_status{0};
+    // doc pdvd/56 T4: writer-only per-plane dead-channel flags.
+    int b_reg_flag_u{0}, b_reg_flag_v{0}, b_reg_flag_w{0};
 
     TTree* t_rec_charge = new TTree("T_rec_charge", "T_rec_charge");
     t_rec_charge->SetDirectory(output_tf);
@@ -534,6 +536,10 @@ void Root::SbndMagnifyTrackingVisitor::write_t_rec_data(TFile* output_tf, Clus::
     // STM-stage extras (absent in the uBooNE PR-stage writer).
     t_rec_charge->Branch("pass", &b_pass, "pass/I");
     t_rec_charge->Branch("status", &b_status, "status/I");
+    // doc pdvd/56 T4: writer-only, no verdict path reads these.
+    t_rec_charge->Branch("reg_flag_u", &b_reg_flag_u, "reg_flag_u/I");
+    t_rec_charge->Branch("reg_flag_v", &b_reg_flag_v, "reg_flag_v/I");
+    t_rec_charge->Branch("reg_flag_w", &b_reg_flag_w, "reg_flag_w/I");
 
     int npoints = 0;
     for (const auto* cluster : grouping.children()) {
@@ -555,6 +561,9 @@ void Root::SbndMagnifyTrackingVisitor::write_t_rec_data(TFile* output_tf, Clus::
         const auto& face = fit_pc.get("face")->elements<int>();
         const auto& pass = fit_pc.get("pass")->elements<int>();
         const auto& status = fit_pc.get("status")->elements<int>();
+        const auto& reg_u = fit_pc.get("reg_flag_u")->elements<int>();
+        const auto& reg_v = fit_pc.get("reg_flag_v")->elements<int>();
+        const auto& reg_w = fit_pc.get("reg_flag_w")->elements<int>();
 
         const int cid = cluster->get_cluster_id();
 
@@ -584,6 +593,9 @@ void Root::SbndMagnifyTrackingVisitor::write_t_rec_data(TFile* output_tf, Clus::
             b_sub_cluster_id = cid * 10 + pass[i];
             b_pass = pass[i];
             b_status = status[i];
+            b_reg_flag_u = reg_u[i];
+            b_reg_flag_v = reg_v[i];
+            b_reg_flag_w = reg_w[i];
             t_rec_charge->Fill();
             ++npoints;
         }

@@ -299,7 +299,9 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
                          guard_entry_min_cm=null, guard_entry_max_cm=null,
                          guard_entry_min_len_cm=null, guard_entry_kink_deg=null,
                          michel_res_length_cut=null, proton_tm_max=null,
-                         proton_b_ks2_max=null, proton_c_peak_max=null) :: {
+                         proton_b_ks2_max=null, proton_c_peak_max=null,
+                         kink_asym_enable=false, kink_asym_entry_mip=null,
+                         kink_asym_far_mip=null) :: {
             type: "TaggerCheckSTM",
             name: prefix + name,
             data: {
@@ -374,6 +376,14 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
               + (if proton_tm_max != null then { proton_tm_max: proton_tm_max } else {})
               + (if proton_b_ks2_max != null then { proton_b_ks2_max: proton_b_ks2_max } else {})
               + (if proton_c_peak_max != null then { proton_c_peak_max: proton_c_peak_max } else {})
+              // doc pdvd/56 T1b: a third, additive OR-clause in find_first_kink's
+              // charge gate (both sweeps), admitting an ASYMMETRIC kink (Bragg
+              // into a cold Michel) that the existing "both arms hot" clauses
+              // never accept.  C++ defaults false/1.2/0.5; keys omitted when
+              // off => byte-identical legacy config.
+              + (if kink_asym_enable then { kink_asym_enable: true } else {})
+              + (if kink_asym_entry_mip != null then { kink_asym_entry_mip: kink_asym_entry_mip } else {})
+              + (if kink_asym_far_mip != null then { kink_asym_far_mip: kink_asym_far_mip } else {})
         },
 
         // doc pdvd/48: CheckSTM_Michel -- the stopping-muon + Michel-electron
