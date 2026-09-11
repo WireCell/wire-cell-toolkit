@@ -338,8 +338,9 @@ StmMichelRetreat WireCell::Clus::PR::stm_michel_stop_retreat(const StmMichelProf
         // the boundary L: earliest point of the segment about to be dropped
         // (ALL points, live or dead -- the geometry does not depend on charge)
         double boundary_L = -1;
+        size_t boundary_i = 0;       // doc pdvd/82: the row itself, for the bend at it
         for (size_t i = 0; i < prof.L.size(); ++i) {
-            if (prof.seg_idx[i] >= cutoff) { boundary_L = prof.L[i]; break; }
+            if (prof.seg_idx[i] >= cutoff) { boundary_L = prof.L[i]; boundary_i = i; break; }
         }
         if (boundary_L < 0) break;   // no point carries that seg_idx -> nothing to drop
         const double drop_len = prof.total_length - boundary_L;
@@ -354,7 +355,13 @@ StmMichelRetreat WireCell::Clus::PR::stm_michel_stop_retreat(const StmMichelProf
         }
         if (static_cast<int>(tail.size()) < th.min_tail_pts) break;   // cannot judge this candidate
         const double tail_med = stm_michel_median(tail);
-        if (!(tail_med < th.collapse_frac * plateau)) break;   // not a collapsed tail
+        // doc pdvd/82: the doc 57 reading is the FIRST clause and exits at the
+        // same point it always did.  Only with tail_peak_frac > 0 does control
+        // reach the peak-relative alternative below, so the knob-off path runs
+        // the doc 57 test alone -- byte-identical by construction, not by
+        // re-derivation.
+        const bool collapsed_plateau = tail_med < th.collapse_frac * plateau;
+        if (!collapsed_plateau && !(th.tail_peak_frac > 0)) break;   // not a collapsed tail
 
         // The profile that would SURVIVE this drop: live points with L <=
         // boundary_L, in ascending-L order (new_rr = boundary_L - L is then
@@ -381,10 +388,23 @@ StmMichelRetreat WireCell::Clus::PR::stm_michel_stop_retreat(const StmMichelProf
         if (n_win < 3) break;   // window too sparse to judge
         if (!(peak >= th.peak_frac * plateau)) break;   // nothing to retreat TO
 
+        // doc pdvd/82: reached with collapsed_plateau false only when the knob
+        // is on.  The tail is then judged against the PEAK, and the row's own
+        // bend must carry the move -- charge shape alone cannot tell a Michel
+        // continuing past the Bragg peak from a muon that simply keeps going
+        // (the tail sits at 0.5-1.9 x plateau in both cases).
+        double kink = -1;
+        if (!collapsed_plateau) {
+            kink = stm_michel_row_kink_deg(prof, boundary_i, th.dir_window);
+            if (!(tail_med <= th.tail_peak_frac * peak && kink >= th.tail_peak_kink_min)) break;
+        }
+
         out.n_drop = n_drop;
         out.drop_len = drop_len;
         out.last_tail_med = tail_med;
         out.last_peak = peak;
+        out.by_tail_peak = !collapsed_plateau;
+        out.last_kink_deg = kink;
     }
     return out;
 }
@@ -450,7 +470,10 @@ StmMichelSplit WireCell::Clus::PR::stm_michel_stop_split(const StmMichelProfile&
         }
         if (static_cast<int>(tail.size()) < th.min_tail_pts) continue;
         const double tail_med = stm_michel_median(tail);
-        if (!(tail_med < th.collapse_frac * plateau)) continue;   // not a collapsed tail
+        // doc pdvd/82: see stm_michel_stop_retreat -- the doc 58 reading is the
+        // first clause and exits where it always did.
+        const bool collapsed_plateau = tail_med < th.collapse_frac * plateau;
+        if (!collapsed_plateau && !(th.tail_peak_frac > 0)) continue;   // not a collapsed tail
 
         std::vector<double> kept_q; std::vector<double> kept_new_rr;
         for (size_t j = 0; j < prof.L.size(); ++j) {
@@ -470,6 +493,10 @@ StmMichelSplit WireCell::Clus::PR::stm_michel_stop_split(const StmMichelProfile&
         }
         if (n_win < 3) continue;   // window too sparse to judge
         if (!(peak >= th.peak_frac * plateau)) continue;   // nothing to retreat TO
+        // doc pdvd/82: the peak-relative tail, when it is what admits this row.
+        // `kink` is the row's own bend, already measured above; this asks it to
+        // clear the higher tail_peak_kink_min bar as well.
+        if (!collapsed_plateau && !(tail_med <= th.tail_peak_frac * peak && kink >= th.tail_peak_kink_min)) continue;
 
         if (kink > best_kink) {
             best_kink = kink;
@@ -481,6 +508,7 @@ StmMichelSplit WireCell::Clus::PR::stm_michel_stop_split(const StmMichelProfile&
             out.plateau = plateau;
             out.tail_med = tail_med;
             out.peak = peak;
+            out.by_tail_peak = !collapsed_plateau;
         }
     }
     return out;

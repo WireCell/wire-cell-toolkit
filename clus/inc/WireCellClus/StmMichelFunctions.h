@@ -369,6 +369,23 @@ namespace WireCell::Clus::PR {
         //    then reads as a collapse -- nothing here knows the channel map.
         bool   tail_strict{false};
         bool   tail_sublive{false};
+        // doc pdvd/82 (doc 78 action item 2): an ALTERNATIVE admission for the
+        // collapsed-tail test, judged against the surviving profile's PEAK
+        // instead of the plateau.  On the population doc 78 sec 2.3 named, the
+        // fit rides through the Michel: after a Bragg peak of 1.5-2.9 x plateau
+        // the tail falls back to 0.54-1.87 x plateau -- far below what a
+        // post-Bragg muon carries, but not below the track's own plateau, so
+        // collapse_frac never fires.  tail_med <= tail_peak_frac * peak admits
+        // that shape.  It is much looser than the plateau test (with peak /
+        // plateau in 1.4-3, tail_peak_frac 0.5 is tail <= 0.7-1.5 x plateau),
+        // so it is paired with tail_peak_kink_min: the row's OWN trajectory
+        // bend (stm_michel_row_kink_deg, the doc 58 discriminator) must reach
+        // it.  The bend is required ONLY when this test is what admits -- a row
+        // the plateau test already accepts is unaffected, which is what keeps
+        // the OFF path and the doc 57/58 path byte-identical.  0 = off.
+        double tail_peak_frac{0};             // stop_tail_peak_frac; <= 0 = off
+        double tail_peak_kink_min{25.0};      // stop_tail_peak_kink_min_deg
+        double dir_window{5 * units::cm};     // the bend's arm length; = split_dir_window_cm
     };
     struct StmMichelRetreat {
         int n_drop{0};              // chain segments to pop from the back
@@ -376,6 +393,8 @@ namespace WireCell::Clus::PR {
         double plateau{0};          // the reference plateau this was judged against
         double last_tail_med{0};    // the last-accepted drop's tail median (diagnostic)
         double last_peak{0};        // the last-accepted drop's surviving peak (diagnostic)
+        bool by_tail_peak{false};   // doc pdvd/82: the peak-relative test is what admitted the last drop
+        double last_kink_deg{-1};   // doc pdvd/82: the bend at the boundary row (diagnostic; -1 = not measured)
     };
     StmMichelRetreat stm_michel_stop_retreat(const StmMichelProfile& prof, int n_chain_segs,
                                              const StmMichelRetreatThresholds& th);
@@ -440,6 +459,13 @@ namespace WireCell::Clus::PR {
         double plateau_hi{40 * units::cm};    // reuses bragg_plateau_hi_cm
         double min_dqdx_live{0};              // reuses profile_min_dqdx_frac * mip_dqdx
         int    min_tail_pts{3};
+        // doc pdvd/82: the same alternative collapsed-tail admission the
+        // retreat carries -- see StmMichelRetreatThresholds.  Here the row's
+        // bend is already required to reach kink_min_deg, so tail_peak_kink_min
+        // is the HIGHER bar this looser tail reading must additionally clear
+        // (the effective requirement is max(kink_min_deg, tail_peak_kink_min)).
+        double tail_peak_frac{0};             // stop_tail_peak_frac; <= 0 = off
+        double tail_peak_kink_min{25.0};      // stop_tail_peak_kink_min_deg
     };
     struct StmMichelSplit {
         bool   ok{false};
@@ -450,6 +476,7 @@ namespace WireCell::Clus::PR {
         double plateau{0};          // the reference plateau this was judged against
         double tail_med{0};         // the dropped tail's median (diagnostic)
         double peak{0};             // the surviving profile's peak (diagnostic)
+        bool by_tail_peak{false};   // doc pdvd/82: the peak-relative test is what admitted this row
     };
     StmMichelSplit stm_michel_stop_split(const StmMichelProfile& prof, int n_chain_segs,
                                          const StmMichelSplitThresholds& th);

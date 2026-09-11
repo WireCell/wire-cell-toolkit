@@ -251,6 +251,10 @@ public:
         m_retreat_tail_strict = get<bool>(config, "retreat_tail_strict", m_retreat_tail_strict);
         m_retreat_tail_sublive = get<bool>(config, "retreat_tail_sublive", m_retreat_tail_sublive);
         m_michel_collinear_split = get<bool>(config, "michel_collinear_split", m_michel_collinear_split);
+        // doc pdvd/82 (doc 78 action item 2): the peak-relative collapsed-tail
+        // admission shared by the retreat and the split.
+        m_stop_tail_peak_frac = get<double>(config, "stop_tail_peak_frac", m_stop_tail_peak_frac);
+        m_stop_tail_peak_kink_min_deg = get<double>(config, "stop_tail_peak_kink_min_deg", m_stop_tail_peak_kink_min_deg);
         // doc pdvd/75 (P1b): when the peak anchor (T7) rejects a profile on a
         // shape bit although its anchored peak is prominent, and the same
         // tests pass at the geometric origin, the geometric reading stands.
@@ -653,6 +657,25 @@ public:
         cfg["retreat_tail_strict"] = m_retreat_tail_strict;
         cfg["retreat_tail_sublive"] = m_retreat_tail_sublive;
         cfg["michel_collinear_split"] = m_michel_collinear_split;
+        // doc pdvd/82 (doc 78 action item 2): an ALTERNATIVE admission for the
+        // collapsed-tail test both stop movers apply.  Today a tail counts as
+        // collapsed only below retreat_collapse_frac/split_collapse_frac x the
+        // PLATEAU.  On the 14 items doc 78 sec 2.3 named, the fit runs through
+        // the Michel: after a Bragg peak of 1.5-2.9 x plateau the tail reads
+        // 0.54-1.87 x plateau -- far under a post-Bragg muon, never under the
+        // track's own plateau.  stop_tail_peak_frac admits tail_med <= frac x
+        // the surviving PEAK instead.  That reading is much looser (with peak /
+        // plateau in 1.4-3, 0.5 x peak is 0.7-1.5 x plateau), so it is allowed
+        // only when the row's own trajectory bend reaches
+        // stop_tail_peak_kink_min_deg -- the doc 58 discriminator, which is
+        // what separates a second particle from a muon that keeps going.  A row
+        // the plateau test already accepts never sees the bend requirement, so
+        // 0 (off) leaves the doc 57/58/74 path byte-identical.
+        // Both movers still refuse to run at all on a Bragg-confirmed chain
+        // unless michel_collinear_split (doc 74) is also on -- which is the
+        // real reason they are silent on 14 of doc 78's 21 items.
+        cfg["stop_tail_peak_frac"] = m_stop_tail_peak_frac;
+        cfg["stop_tail_peak_kink_min_deg"] = m_stop_tail_peak_kink_min_deg;
         // doc pdvd/75 (P1b): default off.  The 3 cm peak anchor (T7) discards
         // the rows past the running-mean maximum; on a rise that runs to the
         // fit's last row the low partial-step end row pulls that maximum 2-3
@@ -872,6 +895,8 @@ private:
     bool m_retreat_tail_strict{false};            // doc pdvd/74 (P3)
     bool m_retreat_tail_sublive{false};           // doc pdvd/74 (P3)
     bool m_michel_collinear_split{false};         // doc pdvd/74 (P3, doc 70's literal)
+    double m_stop_tail_peak_frac{0.0};            // doc pdvd/82: <= 0 = off
+    double m_stop_tail_peak_kink_min_deg{25.0};   // doc pdvd/82: deg
     bool m_bragg_anchor_geo_fallback{false};      // doc pdvd/75 (P1b): the geometric reading may stand when the anchor rejects a prominent peak
     double m_bragg_anchor_rise_min{1.5};          // x the anchored plateau median
     bool m_profile_geometry_guard{false};         // doc pdvd/66 (T8)
@@ -958,7 +983,7 @@ private:
         int n_stub_absorb{0};                     // doc pdvd/63 (T5): of those, absorb_bragg_stub's (a hot collinear stub taken as the true end)
         int n_retreat{0}; double retreat_len{0};  // doc pdvd/57: chain segments retreated off the fit's far end
         int n_split{0}; double split_len{0}, split_kink_deg{0};  // doc pdvd/58: T1c fit-row split
-        int stop_move_p3_bits{0};  // doc pdvd/74 (P3): bit0 the P3 tail reading changed the retreat's answer, bit1 the stop moved on a Bragg-confirmed chain
+        int stop_move_p3_bits{0};  // doc pdvd/74 (P3): bit0 the P3 tail reading changed the retreat's answer, bit1 the stop moved on a Bragg-confirmed chain; doc pdvd/82: bit2 the peak-relative tail is what admitted the move
         int bragg_anchor_fallback{0};  // doc pdvd/75 (P1b): 1 = the anchor's rejection was replaced by the geometric reading
         int n_michel_veto{0};  // doc pdvd/61: T2c fired -- an attached moved-stop Michel with too little charge was demoted
         int n_michel_veto_exempt{0};  // doc pdvd/72 (P3b): T2c would have fired, and the Michel's turn spared it
@@ -1834,7 +1859,8 @@ private:
         // doc pdvd/72 (P3b): the same pattern.
         if (m_moved_stop_michel_kink_min >= 0) I1("n_michel_veto_exempt", r.n_michel_veto_exempt);
         // doc pdvd/74 (P3): the same pattern.
-        if (m_retreat_tail_strict || m_retreat_tail_sublive || m_michel_collinear_split)
+        if (m_retreat_tail_strict || m_retreat_tail_sublive || m_michel_collinear_split ||
+            m_stop_tail_peak_frac > 0)
             I1("stop_move_p3_bits", r.stop_move_p3_bits);
         // doc pdvd/75 (P1b): the same pattern.
         if (m_bragg_anchor_geo_fallback) I1("bragg_anchor_fallback", r.bragg_anchor_fallback);
@@ -2283,6 +2309,9 @@ void CheckSTM_Michel::visit(Ensemble& ensemble) const
             rth.min_dqdx_live = m_profile_min_dqdx_frac * m_mip_dqdx;
             rth.tail_strict = m_retreat_tail_strict;     // doc pdvd/74 (P3): how the dropped tail is read
             rth.tail_sublive = m_retreat_tail_sublive;
+            rth.tail_peak_frac = m_stop_tail_peak_frac;  // doc pdvd/82: the peak-relative admission
+            rth.tail_peak_kink_min = m_stop_tail_peak_kink_min_deg;
+            rth.dir_window = m_split_dir_window_cm * units::cm;   // one bend definition for both movers
             auto rr = stm_michel_stop_retreat(prof_pre, static_cast<int>(chain.size()), rth);
             // doc pdvd/74: did that reading change the answer?  The doc 57
             // reading is re-run (a pure function) only when it can differ.
@@ -2306,6 +2335,12 @@ void CheckSTM_Michel::visit(Ensemble& ensemble) const
                     stop_v = new_stop;
                     rec.n_retreat = rr.n_drop;
                     rec.retreat_len = rr.drop_len;
+                    if (rr.by_tail_peak) {   // doc pdvd/82
+                        rec.stop_move_p3_bits |= 4;
+                        SPDLOG_LOGGER_DEBUG(s_log, "{}CheckSTM_Michel doc82: cluster {} retreat admitted by the peak-relative tail, {} seg(s) {:.2f} cm, tail {:.0f} peak {:.0f} plateau {:.0f} bend {:.1f} deg",
+                                            m_evt_tag, rec.cluster_id, rr.n_drop, rr.drop_len / units::cm,
+                                            rr.last_tail_med, rr.last_peak, rr.plateau, rr.last_kink_deg);
+                    }
                     if (retreat_bragg) {
                         rec.stop_move_p3_bits |= 2;
                         SPDLOG_LOGGER_DEBUG(s_log, "{}CheckSTM_Michel P3: cluster {} retreat on a Bragg-confirmed chain, n_drop {} ({:.2f} cm)",
@@ -2339,6 +2374,8 @@ void CheckSTM_Michel::visit(Ensemble& ensemble) const
             sth.peak_frac = m_split_peak_frac;
             sth.peak_window = m_split_peak_window_cm * units::cm;
             sth.dir_window = m_split_dir_window_cm * units::cm;
+            sth.tail_peak_frac = m_stop_tail_peak_frac;  // doc pdvd/82: the peak-relative admission
+            sth.tail_peak_kink_min = m_stop_tail_peak_kink_min_deg;
             sth.max_drop_len = m_michel_max_len_cm * units::cm;   // same ceiling the retreat uses
             sth.plateau_lo = m_bragg_plateau_lo_cm * units::cm;
             sth.plateau_hi = m_bragg_plateau_hi_cm * units::cm;
@@ -2363,6 +2400,12 @@ void CheckSTM_Michel::visit(Ensemble& ensemble) const
                             rec.n_split = 1;
                             rec.split_len = sp.drop_len;
                             rec.split_kink_deg = sp.kink_deg;
+                            if (sp.by_tail_peak) {   // doc pdvd/82
+                                rec.stop_move_p3_bits |= 4;
+                                SPDLOG_LOGGER_DEBUG(s_log, "{}CheckSTM_Michel doc82: cluster {} split admitted by the peak-relative tail, {:.2f} cm at {:.1f} deg, tail {:.0f} peak {:.0f} plateau {:.0f}",
+                                                    m_evt_tag, rec.cluster_id, sp.drop_len / units::cm, sp.kink_deg,
+                                                    sp.tail_med, sp.peak, sp.plateau);
+                            }
                             if (split_bragg) {   // doc pdvd/74 (P3)
                                 rec.stop_move_p3_bits |= 2;
                                 SPDLOG_LOGGER_DEBUG(s_log, "{}CheckSTM_Michel P3: cluster {} split on a Bragg-confirmed chain, {:.2f} cm at {:.1f} deg",

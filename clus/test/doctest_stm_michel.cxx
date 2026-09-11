@@ -1200,3 +1200,170 @@ TEST_CASE("stm_michel gamma take: the running total never passes the cap; a blob
     CHECK(stm_michel_gamma_take(nan, {1.0}, 60.0) == V{0});
     CHECK(stm_michel_gamma_take(30.0, {nan, -1.0, 2.0}, 60.0) == V{0, 0, 1});
 }
+
+// ---------------------------------------------------------------------------
+// doc pdvd/82 (doc 78 action item 2): the peak-relative collapsed-tail
+// admission.  Every profile here has a HOT tail -- 0.9 x the plateau, which is
+// nothing like a collapse and is exactly what the 14 items of doc 78 sec 2.3
+// carry: the fit rides through the Michel, so the charge after the Bragg peak
+// falls to 0.5-1.9 x plateau, never under it.  0.9 x plateau is 0.45 x the peak.
+// ---------------------------------------------------------------------------
+namespace {
+
+// The split's bent_profile above with the tail raised from 15 (0.15 x plateau,
+// a real collapse) to 90 (0.9 x plateau, 0.45 x peak).  Fork by duplication:
+// bent_profile is what the doc 58 cases pin and must not move.
+StmMichelProfile hot_tail_split_profile(bool bend)
+{
+    std::vector<double> L; std::vector<double> dQdx; std::vector<Point> pts; std::vector<int> seg;
+    auto add = [&](double l_cm, double q, double x, double y, double z, int s) {
+        L.push_back(l_cm); dQdx.push_back(q); pts.push_back(Point(x, y, z) * units::cm); seg.push_back(s);
+    };
+    for (double l = 0; l <= 35; l += 5) add(l, 100, 0, 0, l, 0);        // seg 0: the plateau reference
+    add(40, 200, 0, 0, 40, 1);                                        // seg 1: the Bragg peak, still +z
+    add(45, 200, 0, 0, 45, 1);
+    add(50, 200, 0, 0, 50, 1);                                        // the candidate row
+    if (bend) {
+        add(55, 90, 0, 5, 50, 1);                                     // the Michel, turning +y
+        add(60, 90, 0, 10, 50, 1);
+    }
+    else {
+        add(55, 90, 0, 0, 55, 1);                                     // straight on: a muon still going
+        add(60, 90, 0, 0, 60, 1);
+    }
+    return mkprof(L, dQdx, pts, seg);
+}
+
+// The same shape as three CHAIN SEGMENTS, so stm_michel_stop_retreat can drop
+// the last one: the bend sits exactly on the segment boundary (L = 55), which
+// is the row the retreat measures its kink at.
+StmMichelProfile hot_tail_retreat_profile(bool bend)
+{
+    std::vector<double> L; std::vector<double> dQdx; std::vector<Point> pts; std::vector<int> seg;
+    auto add = [&](double l_cm, double q, double x, double y, double z, int s) {
+        L.push_back(l_cm); dQdx.push_back(q); pts.push_back(Point(x, y, z) * units::cm); seg.push_back(s);
+    };
+    for (double l = 0; l <= 35; l += 5) add(l, 100, 0, 0, l, 0);       // seg 0: plateau
+    add(40, 200, 0, 0, 40, 1); add(45, 200, 0, 0, 45, 1);             // seg 1: the Bragg peak
+    add(50, 200, 0, 0, 50, 1);
+    if (bend) {                                                       // seg 2: the hot tail
+        add(55, 90, 0, 0, 55, 2);                                     // the boundary row, still +z
+        add(60, 90, 0, 5, 55, 2);                                     // turns +y past it -> 90 deg AT L=55
+        add(65, 90, 0, 10, 55, 2);
+    }
+    else {
+        add(55, 90, 0, 0, 55, 2);
+        add(60, 90, 0, 0, 60, 2);
+        add(65, 90, 0, 0, 65, 2);
+    }
+    return mkprof(L, dQdx, pts, seg);
+}
+
+StmMichelRetreatThresholds doc82_retreat_th(double tail_peak_frac, double kink_min = 25.0)
+{
+    auto th = retreat_thresholds();
+    th.tail_peak_frac = tail_peak_frac;
+    th.tail_peak_kink_min = kink_min;
+    th.dir_window = 5 * units::cm;
+    return th;
+}
+
+StmMichelSplitThresholds doc82_split_th(double tail_peak_frac, double kink_min = 25.0)
+{
+    auto th = split_thresholds();
+    th.tail_peak_frac = tail_peak_frac;
+    th.tail_peak_kink_min = kink_min;
+    return th;
+}
+
+}  // namespace
+
+TEST_CASE("stm_michel doc82 retreat: a hot tail is refused with the knob off and taken with it on")
+{
+    auto prof = hot_tail_retreat_profile(/*bend=*/true);
+    // off: the doc 57 reading alone -- 0.9 x plateau is not a collapse
+    auto off = stm_michel_stop_retreat(prof, 3, doc82_retreat_th(0.0));
+    CHECK(off.n_drop == 0);
+    CHECK_FALSE(off.by_tail_peak);
+    // on: 0.9 x plateau IS 0.45 x the surviving peak, and the boundary row turns 90 deg
+    auto on = stm_michel_stop_retreat(prof, 3, doc82_retreat_th(0.5));
+    REQUIRE(on.n_drop == 1);
+    CHECK(on.by_tail_peak);
+    CHECK(on.drop_len == doctest::Approx(10 * units::cm).epsilon(0.05));
+    CHECK(on.plateau == doctest::Approx(100).epsilon(0.01));
+    CHECK(on.last_peak == doctest::Approx(200).epsilon(0.01));
+    CHECK(on.last_tail_med == doctest::Approx(90).epsilon(0.01));
+    CHECK(on.last_kink_deg == doctest::Approx(90).epsilon(0.5));
+}
+
+TEST_CASE("stm_michel doc82 retreat: the bend is what carries the looser tail -- straight is refused")
+{
+    auto prof = hot_tail_retreat_profile(/*bend=*/false);
+    auto on = stm_michel_stop_retreat(prof, 3, doc82_retreat_th(0.5));
+    CHECK(on.n_drop == 0);
+    // and the same profile is refused by a kink bar above the bend it does have
+    auto bent = hot_tail_retreat_profile(true);
+    CHECK(stm_michel_stop_retreat(bent, 3, doc82_retreat_th(0.5, /*kink_min=*/95.0)).n_drop == 0);
+}
+
+TEST_CASE("stm_michel doc82 retreat: a tail above tail_peak_frac x peak is still refused")
+{
+    auto prof = hot_tail_retreat_profile(true);   // tail / peak = 0.45
+    CHECK(stm_michel_stop_retreat(prof, 3, doc82_retreat_th(0.4)).n_drop == 0);
+    CHECK(stm_michel_stop_retreat(prof, 3, doc82_retreat_th(0.5)).n_drop == 1);
+}
+
+TEST_CASE("stm_michel doc82 retreat: a genuine collapse still fires, and NOT by the peak rule")
+{
+    Graph g;
+    auto entry = make_vtx(g, 0, 0, 0);
+    auto mid   = make_vtx(g, 0, 0, 50);
+    auto near  = make_vtx(g, 0, 0, 80);
+    auto stop  = make_vtx(g, 0, 0, 88);
+    auto s1 = make_track(g, entry, mid, 1.0);
+    auto s2 = make_track(g, mid, near, 1.0, false, 10, 3.0);
+    auto s3 = make_track(g, near, stop, 0.15);   // the doc 57 collapse
+    std::vector<SegmentPtr> chain{s1, s2, s3};
+    auto prof = stm_michel_profile(g, chain, entry);
+    auto legacy = stm_michel_stop_retreat(prof, 3, doc82_retreat_th(0.0));
+    auto with82 = stm_michel_stop_retreat(prof, 3, doc82_retreat_th(0.5));
+    CHECK(with82.n_drop == legacy.n_drop);            // the knob only ADDS admissions
+    CHECK(with82.drop_len == legacy.drop_len);
+    CHECK_FALSE(with82.by_tail_peak);                 // this one is the plateau rule's, straight chain and all
+}
+
+TEST_CASE("stm_michel doc82 split: a hot tail is refused with the knob off and taken with it on")
+{
+    auto prof = hot_tail_split_profile(/*bend=*/true);
+    auto off = stm_michel_stop_split(prof, 2, doc82_split_th(0.0));
+    CHECK_FALSE(off.ok);
+    auto on = stm_michel_stop_split(prof, 2, doc82_split_th(0.5));
+    REQUIRE(on.ok);
+    CHECK(on.by_tail_peak);
+    CHECK(on.index == 10);
+    CHECK(on.cut_rr == doctest::Approx(10 * units::cm).epsilon(0.05));
+    CHECK(on.kink_deg == doctest::Approx(90).epsilon(0.5));
+    CHECK(on.tail_med == doctest::Approx(90).epsilon(0.01));
+    CHECK(on.peak == doctest::Approx(200).epsilon(0.01));
+}
+
+TEST_CASE("stm_michel doc82 split: no bend, or a bend under tail_peak_kink_min, is refused")
+{
+    CHECK_FALSE(stm_michel_stop_split(hot_tail_split_profile(false), 2, doc82_split_th(0.5)).ok);
+    CHECK_FALSE(stm_michel_stop_split(hot_tail_split_profile(true), 2, doc82_split_th(0.5, 95.0)).ok);
+}
+
+TEST_CASE("stm_michel doc82 split: the doc 58 collapse cases are untouched by the knob")
+{
+    // bent_profile's 0.15 x plateau tail: the plateau rule admits it, so the
+    // bend bar the peak rule would impose never applies -- tail_peak_kink_min
+    // is set absurdly high here to prove exactly that.
+    auto legacy = stm_michel_stop_split(bent_profile(true), 2, split_thresholds());
+    auto with82 = stm_michel_stop_split(bent_profile(true), 2, doc82_split_th(0.5, 179.0));
+    REQUIRE(legacy.ok);
+    REQUIRE(with82.ok);
+    CHECK(with82.index == legacy.index);
+    CHECK(with82.cut_rr == legacy.cut_rr);
+    CHECK_FALSE(with82.by_tail_peak);
+    CHECK_FALSE(stm_michel_stop_split(bent_profile(false), 2, doc82_split_th(0.5, 179.0)).ok);
+}
