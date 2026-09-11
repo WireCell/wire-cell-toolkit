@@ -205,6 +205,11 @@ public:
         // charge-only Michel (dis > michel_range_energy_dis_cm and KE <
         // michel_range_energy_ke_min cannot be an electron born at the stop).
         m_stop_local_residual_cm = get<double>(config, "stop_local_residual_cm", m_stop_local_residual_cm);
+        // doc pdvd/87 (doc 78 action item 7): a size floor on A's keep --
+        // Steiner terminals and fitted length (cm); 0 = no floor.  Read only
+        // when stop_local_residual_cm > 0.
+        m_stop_local_residual_min_points = get<int>(config, "stop_local_residual_min_points", m_stop_local_residual_min_points);
+        m_stop_local_residual_min_len_cm = get<double>(config, "stop_local_residual_min_len_cm", m_stop_local_residual_min_len_cm);
         m_stop_local_michel_pieces = get<bool>(config, "stop_local_michel_pieces", m_stop_local_michel_pieces);
         m_michel_range_energy_guard = get<bool>(config, "michel_range_energy_guard", m_michel_range_energy_guard);
         m_michel_range_energy_dis_cm = get<double>(config, "michel_range_energy_dis_cm", m_michel_range_energy_dis_cm);
@@ -496,6 +501,17 @@ public:
         // within 20 cm of a scan candidate's stop.  Applies to the main
         // cluster's partition AND the admitted companions' (same pa).
         cfg["stop_local_residual_cm"] = m_stop_local_residual_cm;
+        // doc pdvd/87 (doc pdvd/78 action item 7): 0 / 0 = no floor, doc 62's
+        // keep unchanged.  A residual inside stop_local_residual_cm is kept
+        // only with at least this many Steiner terminals AND at least this
+        // fitted length (cm).  Doc pdvd/86 sec 8.1 on PDVD production: at 5 cm
+        // with 5 / 5 the keep reaches 5 judged items (the owner's two unfitted
+        // Michels 039253_0/44 and 039349_30/45, 0 through-going) where the
+        // unfloored 5 cm keep reaches 11 (3 through-going 1-7 cm stubs) and
+        // doc 62's 20 cm keep 31 (14 through-going).  Inert when
+        // stop_local_residual_cm is 0.
+        cfg["stop_local_residual_min_points"] = m_stop_local_residual_min_points;
+        cfg["stop_local_residual_min_len_cm"] = m_stop_local_residual_min_len_cm;
         // doc pdvd/62 (T3b): default off.  A kept residual is a DISCONNECTED
         // piece of the main cluster's graph, which neither the attached path
         // (needs an arm at stop_v) nor the dots loop (companion clusters
@@ -920,6 +936,8 @@ private:
     bool m_moved_stop_michel_guard{false};        // doc pdvd/61 (T2c)
     double m_moved_stop_michel_ke_min{10.0};      // MeV
     double m_stop_local_residual_cm{0.0};         // doc pdvd/62 (T3a): 0 = off
+    int m_stop_local_residual_min_points{0};      // doc pdvd/87: Steiner terminals, 0 = no floor
+    double m_stop_local_residual_min_len_cm{0.0}; // doc pdvd/87: cm, 0 = no floor
     bool m_stop_local_michel_pieces{false};       // doc pdvd/62 (T3b)
     bool m_michel_range_energy_guard{false};      // doc pdvd/62 (T3c)
     double m_michel_range_energy_dis_cm{5.0};     // cm
@@ -1049,6 +1067,7 @@ private:
         int n_michel_veto_exempt{0};  // doc pdvd/72 (P3b): T2c would have fired, and the Michel's turn spared it
         int n_michel_veto_reach_exempt{0};  // doc pdvd/84: T2c would have fired, the turn did not spare it, its reach did
         int n_kept_near_stop_main{0}, n_kept_near_stop_comp{0};  // doc pdvd/62 (T3a): pr54 residuals kept by the stop anchor, main cluster / companions
+        int n_floored_near_stop{0};  // doc pdvd/87: residuals inside the stop anchor's radius the size floor refused (main + companions)
         int n_local_pieces{0};      // doc pdvd/62 (T3b): disconnected same-cluster pieces admitted into the Michel object
         int n_michel_range_veto{0}; // doc pdvd/62 (T3c): a bridged / charge-only Michel demoted by the range-energy guard
         int topology_cleared_bits{0}; // doc pdvd/70 (P1): the reject bits topology_stop_evidence cleared (0 = none)
@@ -1895,6 +1914,10 @@ private:
         I1("n_michel_veto", r.n_michel_veto);
         I1("n_kept_near_stop_main", r.n_kept_near_stop_main); I1("n_kept_near_stop_comp", r.n_kept_near_stop_comp);   // doc pdvd/62
         I1("n_local_pieces", r.n_local_pieces); I1("n_michel_range_veto", r.n_michel_range_veto);
+        // doc pdvd/87: written only when a floor is set (the pattern below),
+        // so the floor-off tree keeps its branch list byte-identical.
+        if (m_stop_local_residual_min_points > 0 || m_stop_local_residual_min_len_cm > 0)
+            I1("n_floored_near_stop", r.n_floored_near_stop);
         // doc pdvd/70 (P1): written only when the knob is on (the survey's
         // pattern), so the knob-off tree keeps its branch list byte-identical.
         if (m_topology_stop_evidence) I1("topology_cleared_bits", r.topology_cleared_bits);
@@ -2188,6 +2211,9 @@ void CheckSTM_Michel::visit(Ensemble& ensemble) const
         if (m_stop_local_residual_cm > 0) {
             pa.m_other_seg_keep_anchor_cm = m_stop_local_residual_cm * units::cm;
             pa.m_other_seg_keep_anchors = {rec.tagger_stop_pt};
+            // doc pdvd/87: the size floor, 0 / 0 = none.
+            pa.m_other_seg_keep_anchor_min_points = m_stop_local_residual_min_points;
+            pa.m_other_seg_keep_anchor_min_length = m_stop_local_residual_min_len_cm * units::cm;
         }
 
         // ---- the four PR stages on the main cluster ----------------------
@@ -2216,6 +2242,7 @@ void CheckSTM_Michel::visit(Ensemble& ensemble) const
             pa.determine_direction(g, *cluster, particle_data(), m_recomb_model);
         }
         rec.n_kept_near_stop_comp = pa.m_other_seg_keep_anchor_fires - rec.n_kept_near_stop_main;   // doc pdvd/62
+        rec.n_floored_near_stop = pa.m_other_seg_keep_anchor_floored;                                 // doc pdvd/87
 
         // ---- entry and stop vertices -------------------------------------
         VertexPtr entry_v, stop_v;

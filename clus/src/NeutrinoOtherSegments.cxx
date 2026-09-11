@@ -45,6 +45,16 @@ bool WireCell::Clus::PR::other_seg_keep_isolated_ok(bool keep_isolated, int comp
     return false;
 }
 
+// doc pdvd/87 -- see the declaration in PRSegmentFunctions.h.  The first two
+// terms are doc pdvd/62's near_anchor expression verbatim.
+bool WireCell::Clus::PR::other_seg_keep_anchor_ok(double d_anchor, double anchor_cm,
+                                                  int component_points, double track_length,
+                                                  int min_points, double min_length)
+{
+    if (!(d_anchor >= 0 && d_anchor <= anchor_cm)) return false;
+    return component_points >= min_points && track_length >= min_length;
+}
+
 void PatternAlgorithms::find_other_segments(Graph& graph, Facade::Cluster& cluster, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, bool flag_break_track, double search_range, double scaling_2d)
 {
     if (!cluster.has_pc("steiner_pc")) return;
@@ -871,7 +881,23 @@ void PatternAlgorithms::find_other_segments(Graph& graph, Facade::Cluster& clust
                             if (d_anchor < 0 || d < d_anchor) d_anchor = d;
                         }
                     }
-                    const bool near_anchor = d_anchor >= 0 && d_anchor <= m_other_seg_keep_anchor_cm;
+                    // doc pdvd/87: the size floor (0 / 0 = none, doc 62's
+                    // radius test unchanged).  A residual inside the radius
+                    // that the floor refuses is counted and logged, and is
+                    // dropped exactly as the legacy path drops it.
+                    const bool near_anchor = other_seg_keep_anchor_ok(d_anchor, m_other_seg_keep_anchor_cm,
+                                                   kept_points, kept_length,
+                                                   m_other_seg_keep_anchor_min_points,
+                                                   m_other_seg_keep_anchor_min_length);
+                    if (!near_anchor && d_anchor >= 0 && d_anchor <= m_other_seg_keep_anchor_cm) {
+                        ++m_other_seg_keep_anchor_floored;
+                        SPDLOG_LOGGER_DEBUG(s_log,
+                            "pr54 keep-isolated near-anchor floored: cluster {} n_points={} length={:.2f} cm d_anchor={:.2f} cm "
+                            "v1=({:.1f},{:.1f},{:.1f}) v2=({:.1f},{:.1f},{:.1f}) cm",
+                            cluster.get_cluster_id(), kept_points, kept_length / units::cm, d_anchor / units::cm,
+                            v1_fit_pt.x() / units::cm, v1_fit_pt.y() / units::cm, v1_fit_pt.z() / units::cm,
+                            v2_fit_pt.x() / units::cm, v2_fit_pt.y() / units::cm, v2_fit_pt.z() / units::cm);
+                    }
                     if (near_anchor) {
                         ++m_other_seg_keep_anchor_fires;
                         SPDLOG_LOGGER_INFO(s_log,

@@ -171,6 +171,19 @@ namespace WireCell::Clus::PR {
                                     double min_length,
                                     double len_admit = 0.0);
 
+    /// doc pdvd/87 (doc pdvd/78 action item 7): the stop-local keep of doc
+    /// pdvd/62 (T3a) with an optional size floor.  True when an anchor was
+    /// measured (d_anchor >= 0), the residual's nearer fitted endpoint lies
+    /// within anchor_cm of it, and the residual clears both floors
+    /// (component_points counts STEINER TERMINALS, as in
+    /// other_seg_keep_isolated_ok; track_length is the fitted length).  Both
+    /// floors are inclusive and AND-ed; at 0 / 0 this is exactly doc 62's
+    /// radius test, so every caller that leaves them unset is byte-identical.
+    /// All lengths in the same (internal) units.
+    bool other_seg_keep_anchor_ok(double d_anchor, double anchor_cm,
+                                  int component_points, double track_length,
+                                  int min_points, double min_length);
+
     /// doc sbnd_xin/docs/pr/51 (main-vertex graph audit): fraction of pts_a
     /// whose distance to the NEAREST point of pts_b is <= tol.  The
     /// duplicate-corridor test: two segments riding one charge ribbon give a

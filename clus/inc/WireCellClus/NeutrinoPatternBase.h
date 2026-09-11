@@ -1177,6 +1177,15 @@ namespace WireCell::Clus::PR {
         double m_other_seg_keep_anchor_cm{0.0};                          // internal units; 0 = off
         std::vector<WireCell::Point> m_other_seg_keep_anchors;
         int m_other_seg_keep_anchor_fires{0};
+        // doc pdvd/87 (doc pdvd/78 action item 7) -- a size floor on the
+        // stop-local keep above (other_seg_keep_anchor_ok): a residual inside
+        // anchor_cm is kept only with >= min_points Steiner terminals AND a
+        // fitted length >= min_length.  0 / 0 = no floor, doc 62's keep
+        // byte-identical; with anchor_cm at 0 they are never read.  floored
+        // counts the residuals inside the radius the floor refused.
+        int    m_other_seg_keep_anchor_min_points{0};
+        double m_other_seg_keep_anchor_min_length{0.0};                  // internal units; 0 = no floor
+        int m_other_seg_keep_anchor_floored{0};
 
         // doc sbnd_xin/docs/pr/102 P2 -- the B2 family (Steiner
         // fragmentation / nnf=0 shadowing): imaged charge farther than this
