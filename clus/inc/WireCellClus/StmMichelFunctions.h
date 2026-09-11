@@ -21,6 +21,7 @@
 #include "WireCellUtil/Point.h"
 #include "WireCellUtil/Units.h"
 
+#include <array>
 #include <functional>
 #include <vector>
 
@@ -183,6 +184,24 @@ namespace WireCell::Clus::PR {
     double stm_michel_charge_to_energy_model(double dQ_electrons,
                                              const IRecombinationModel::pointer& model,
                                              double dedx_mev_per_cm);
+
+    /// doc pdvd/81: the chain's own three-plane charge combination, forked BY
+    /// DUPLICATION (CLAUDE.md M10) from kine_charge_from_maps
+    /// (NeutrinoEnergyReco.cxx:149-186, the port of the prototype's
+    /// NeutrinoID_energy_reco.h:248 block): the weighted mean
+    /// sum(w_p q_p) / sum(w) of the per-plane sums, replaced by the (median,
+    /// minimum) pair's weighted mean when the two largest planes disagree by a
+    /// relative asymmetry |med - max| / (med + max) above `asym_switch` (the
+    /// largest plane is then treated as contaminated).  The asymmetry is only
+    /// evaluated when med + max > 0; with an all-zero weight triple the result
+    /// is 0.  Written for SIGNED input: a plane sum that came out negative
+    /// (measured minus predicted) takes part like any other number, so the
+    /// caller converts the result with a charge-to-energy that returns 0 for a
+    /// non-positive charge.  `dropped_plane`, when given, receives the plane
+    /// index the switch dropped, else -1.  Pure.
+    double stm_michel_combine_planes(const std::array<double, 3>& sums,
+                                     const std::array<double, 3>& weights,
+                                     double asym_switch, int* dropped_plane = nullptr);
 
     /// The Bragg-contrast metric (doc pdvd/25 sec 13.9 item 3): median dQ/dx
     /// over the tail window rr in [tail_lo, tail_hi] divided by the median

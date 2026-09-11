@@ -235,6 +235,17 @@ namespace WireCell::Clus {
             // Reported as a double for the set_parameter(name, value) plumbing.
             double excl_t0_frame = 0;
 
+            // doc pdvd/81 -- keep the multi-track dQ/dx fit's RESPONSE for the
+            // fitted cluster: the whitened sparse matrices R (U,V,W), the
+            // solution pos_3D and the 2-D row keys with their un-whitening
+            // scale, so a caller can form the prediction of a SUBSET of the
+            // trajectory rows (e.g. the stopping muon's chain alone) as
+            // scale * R * (pos_3D masked).  CheckSTM_Michel reads it for the
+            // charge-based Michel energy.  0 = OFF = nothing stored, no code
+            // path touched (TrackFitting.cxx is shared with SBND / uBooNE).
+            // Reported as a double for the set_parameter(name, value) plumbing.
+            double keep_dqdx_response = 0;
+
             // doc pdvd/45 sec 13 -- do_single_tracking's 2nd-pass projection loop
             // looks up wpid_offsets/wpid_slopes for the (apa, face) that
             // contained_by() returns and dereferenced a MISSING entry (a volume
@@ -700,6 +711,30 @@ namespace WireCell::Clus {
             int pass{-1};   // declared LAST so the PR-stage {cluster, ident, cells} initializer keeps compiling
         };
 
+        /// doc pdvd/81: one 2-D row of a stored dQ/dx multi-fit response.  `scale`
+        /// is the row's whitening denominator total_err (the same expression the
+        /// fit divides the data by) for a live measured row, 0 otherwise -- the
+        /// prediction in electrons is scale * (R * pos_3D)(row).
+        struct DqdxResponseRow {
+            explicit DqdxResponseRow(const CoordReadout& k) : key(k) {}
+            CoordReadout key;
+            double charge{0}, charge_err{0}, scale{0};
+            int flag{0};
+            std::vector<Coord2D> coords;   // the (face, wire) cells the readout row maps to, set order
+        };
+        /// doc pdvd/81: the multi-fit response of ONE cluster's LAST dQ_dx_multi_fit
+        /// (Parameters::keep_dqdx_response).  Row i of R[p] is rows[p][i]; column k
+        /// is trajectory row k (PR::Fit::index of every segment/vertex fit the
+        /// fit wrote back).  Erased at the next dQ_dx_multi_fit entry for the
+        /// same cluster, so an early-returning fit never leaves a stale pairing.
+        struct DqdxResponse {
+            Facade::Cluster* cluster{nullptr};
+            int ident{-1};
+            std::array<Eigen::SparseMatrix<double>, 3> R;
+            Eigen::VectorXd pos_3D;
+            std::array<std::vector<DqdxResponseRow>, 3> rows;
+        };
+
         // Fill fitted 2D charge results after dQ/dx fitting
         void fill_fitted_charge_2d(
             const std::map<CoordReadout, std::pair<ChargeMeasurement, std::set<Coord2D>>>& map_U,
@@ -992,6 +1027,15 @@ namespace WireCell::Clus {
         /// (doc pdvd/25 M3: PDVD trajectories cross 16 (anode,face) volumes).
         /// Identical to the former branch order whenever i+1 exists.
         static int dqdx_path_point_role(int i, int n, const std::vector<std::pair<int, int>>& paf);
+
+        /// doc pdvd/81: un-whitened prediction of a SUBSET of trajectory rows:
+        /// out(i) = row_scale[i] * sum_k R(i,k) * pos(k) * (col_mask[k] != 0).
+        /// Pure; col_mask shorter than pos.size() reads as 0 beyond its end,
+        /// row_scale shorter than R.rows() reads as 0 beyond its end.
+        static Eigen::VectorXd masked_response_prediction(const Eigen::SparseMatrix<double>& R,
+                                                          const Eigen::VectorXd& pos,
+                                                          const std::vector<char>& col_mask,
+                                                          const std::vector<double>& row_scale);
         std::vector<double> get_reduced_chi2() const { return reduced_chi2; }
 
         // Measured 2D charge data access
@@ -1010,6 +1054,12 @@ namespace WireCell::Clus {
         /// get_fitted_charge_2d() these are NOT merged, so pred_charge is the
         /// value the named cluster's own fit produced.
         const std::vector<ClusterFitted2D>& get_cluster_fitted_charge_2d() const { return m_cluster_fitted_charge_2d; }
+
+        /// doc pdvd/81: the stored multi-fit response of `cluster` (nullptr when
+        /// keep_dqdx_response was off, the cluster was never multi-fitted with
+        /// a cluster filter, or its last fit returned early).
+        const DqdxResponse* get_dqdx_response(const Facade::Cluster* cluster) const;
+        void clear_dqdx_responses() { m_dqdx_responses.clear(); }
 
         /// doc pdvd/42: append a snapshot captured elsewhere (the STM tagger's
         /// per-pass copy of its private fitter's map) so a holder TrackFitting
@@ -1282,6 +1332,10 @@ namespace WireCell::Clus {
         /// (ident, capture index) order, so the merged map is unchanged
         /// wherever no collision occurs.
         std::vector<ClusterFitted2D> m_cluster_fitted_charge_2d;
+
+        /// doc pdvd/81: per-cluster multi-fit responses, capture order (see
+        /// DqdxResponse).  Empty unless Parameters::keep_dqdx_response > 0.
+        std::vector<DqdxResponse> m_dqdx_responses;
 
         // global geometry
 

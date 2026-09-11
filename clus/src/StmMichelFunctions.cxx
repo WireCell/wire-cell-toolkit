@@ -212,6 +212,44 @@ double WireCell::Clus::PR::stm_michel_charge_to_energy_model(
     return dQ_electrons * dE / dQ_model;
 }
 
+// doc pdvd/81.  See the header; the arithmetic is kine_charge_from_maps's,
+// statement for statement, so a symmetric input reproduces it bit for bit.
+double WireCell::Clus::PR::stm_michel_combine_planes(const std::array<double, 3>& sums,
+                                                     const std::array<double, 3>& weights,
+                                                     double asym_switch, int* dropped_plane)
+{
+    if (dropped_plane) *dropped_plane = -1;
+    int min_idx = 0, max_idx = 0, med_idx = 0;
+    double min_q = 1e9, max_q = -1e9;
+    for (int i = 0; i < 3; ++i) {
+        if (sums[i] < min_q) { min_q = sums[i]; min_idx = i; }
+        if (sums[i] > max_q) { max_q = sums[i]; max_idx = i; }
+    }
+    if (min_idx != max_idx) {
+        for (int i = 0; i < 3; ++i) {
+            if (i != min_idx && i != max_idx) { med_idx = i; break; }
+        }
+    }
+    else {
+        min_idx = 0; med_idx = 1; max_idx = 2;
+    }
+    const double weight_sum = weights[0] + weights[1] + weights[2];
+    double max_asy = 0;
+    if (sums[med_idx] + sums[max_idx] > 0)
+        max_asy = std::abs(sums[med_idx] - sums[max_idx]) / (sums[med_idx] + sums[max_idx]);
+    double overall = 0;
+    if (weight_sum > 0)
+        overall = (weights[0]*sums[0] + weights[1]*sums[1] + weights[2]*sums[2]) / weight_sum;
+    if (max_asy > asym_switch) {
+        const double pair_sum = weights[med_idx] + weights[min_idx];
+        if (pair_sum > 0) {
+            overall = (weights[med_idx]*sums[med_idx] + weights[min_idx]*sums[min_idx]) / pair_sum;
+            if (dropped_plane) *dropped_plane = max_idx;
+        }
+    }
+    return overall;
+}
+
 StmMichelBragg WireCell::Clus::PR::stm_michel_bragg_contrast(const StmMichelProfile& prof,
                                                               const std::function<double(double)>& mu_dqdx_at_rr_cm,
                                                               double tail_lo, double tail_hi,

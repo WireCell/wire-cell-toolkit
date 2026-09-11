@@ -71,6 +71,10 @@ TEST_CASE("clus knob defaults: CheckSTM_Michel verdict thresholds")
     B("topology_clears_sparse", false);     // doc pdvd/70 sec 9.4: the owner's option
     B("michel_gamma_collect", false);       // doc pdvd/71 (P4): the Michel keeps its core only unless on
     D("michel_gamma_radius_cm", 35.0);      // = today's admission radius, so on never widens it
+    B("michel_q2d", false);                 // doc pdvd/81: the charge-based Michel energy, branches only when on
+    B("michel_q2d_cells", false);           // doc pdvd/81: the Michel / STM 2-D cell table (T_stm_michel_2d)
+    D("michel_q2d_dis_cm", 0.6);            // = kine_charge_from_maps's association radius
+    D("michel_q2d_stm_window_cm", 30.0);    // STM footprint rows within this of the stop; -1 = whole chain
     D("michel_gamma_max_len_cm", 10.0);     // a dot, the capture-gamma stage's compactness cap
     D("michel_gamma_cos_min", 0.5);         // a 60 deg cone about the Michel direction
     D("michel_gamma_max_ke_mev", 20.0);     // per blob, the capture-gamma stage's cap

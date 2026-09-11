@@ -76,6 +76,8 @@
 #include <iostream>
 #include <map>
 #include <set>
+#include <tuple>
+#include <unordered_map>
 #include <vector>
 
 class CheckSTM_Michel;
@@ -229,6 +231,13 @@ public:
         m_michel_gamma_cos_min = get<double>(config, "michel_gamma_cos_min", m_michel_gamma_cos_min);
         m_michel_gamma_max_ke_mev = get<double>(config, "michel_gamma_max_ke_mev", m_michel_gamma_max_ke_mev);
         m_michel_gamma_total_ke_max_mev = get<double>(config, "michel_gamma_total_ke_max_mev", m_michel_gamma_total_ke_max_mev);
+        // doc pdvd/81: the charge-based Michel energy (2-D charge minus the muon
+        // fit's prediction) and the Michel / STM 2-D cell table.  Rows and
+        // branches only; michel_ke_best is never touched.
+        m_michel_q2d = get<bool>(config, "michel_q2d", m_michel_q2d);
+        m_michel_q2d_cells = get<bool>(config, "michel_q2d_cells", m_michel_q2d_cells);
+        m_michel_q2d_dis_cm = get<double>(config, "michel_q2d_dis_cm", m_michel_q2d_dis_cm);
+        m_michel_q2d_stm_window_cm = get<double>(config, "michel_q2d_stm_window_cm", m_michel_q2d_stm_window_cm);
         // doc pdvd/72 (P3b): the moved-stop veto (T2c) spares an attached
         // Michel that turns at least this hard at the stop.  -1 = off.
         m_moved_stop_michel_kink_min = get<double>(config, "moved_stop_michel_kink_min", m_moved_stop_michel_kink_min);
@@ -572,6 +581,32 @@ public:
         cfg["michel_gamma_cos_min"] = m_michel_gamma_cos_min;
         cfg["michel_gamma_max_ke_mev"] = m_michel_gamma_max_ke_mev;
         cfg["michel_gamma_total_ke_max_mev"] = m_michel_gamma_total_ke_max_mev;
+        // doc pdvd/81: the charge-based Michel energy.  The owner's estimator:
+        // a Michel trajectory wiggles, so neither its range nor the fitted
+        // dQ/dx integral (michel_ke_best) is trusted; instead every 2-D cell the
+        // chain's own association rule (kine_charge_from_maps: nearest
+        // associated point within michel_q2d_dis_cm, per plane) assigns to the
+        // Michel object is summed as measured charge MINUS the charge the muon
+        // chain's own multi-track fit predicts on that cell (the fit's stored
+        // response, TrackFitting keep_dqdx_response; the muon rows are the
+        // chain's Fit::index set, the shared stop-vertex row counted as muon),
+        // the three planes are combined with the chain's rule
+        // (stm_michel_combine_planes: 0.25/0.25/1.0, 4 % asymmetry switch) and
+        // the charge is converted with the unfitted-piece constant
+        // (michel_unfit_from_model / michel_unfit_dedx).  The taken role-4 gamma
+        // blobs get the same treatment as a separate term.  Nothing reads the
+        // result back: michel_ke_best, michel_found, is_stm and every reject bit
+        // are unchanged, and the branches are written only when on.
+        cfg["michel_q2d"] = m_michel_q2d;
+        // doc pdvd/81: the per-cell table behind it (PC stm_michel_2d ->
+        // T_stm_michel_2d): every Michel (role 3) and gamma (role 4) cell with
+        // its measured charge, error, flag, the muon-only and the full fit
+        // prediction, plus the STM's own footprint (role 1: cells the fit
+        // predicts from chain rows within michel_q2d_stm_window_cm of the stop;
+        // -1 = the whole chain).  Read only when michel_q2d is on.
+        cfg["michel_q2d_cells"] = m_michel_q2d_cells;
+        cfg["michel_q2d_dis_cm"] = m_michel_q2d_dis_cm;              // cm, = kine_charge_from_maps's 0.6 cm literal
+        cfg["michel_q2d_stm_window_cm"] = m_michel_q2d_stm_window_cm;
         // doc pdvd/72 (P3b): deg, -1 = off.  When >= 0, the moved-stop veto
         // (moved_stop_michel_guard) does not demote an attached Michel whose
         // kink at the stop (michel_kink_deg) is at least this -- the turn is
@@ -825,6 +860,10 @@ private:
     double m_michel_gamma_cos_min{0.5};           // 60 deg about the stop -> Michel direction
     double m_michel_gamma_max_ke_mev{20.0};       // per blob
     double m_michel_gamma_total_ke_max_mev{60.0}; // the Michel object with its blobs: the 52.8 MeV endpoint plus resolution
+    bool m_michel_q2d{false};                     // doc pdvd/81: the charge-based Michel energy
+    bool m_michel_q2d_cells{false};               // doc pdvd/81: the Michel / STM 2-D cell table (stm_michel_2d)
+    double m_michel_q2d_dis_cm{0.6};              // cm, the chain's association radius (kine_charge_from_maps)
+    double m_michel_q2d_stm_window_cm{30.0};      // cm from the stop for the role-1 STM footprint rows; -1 = whole chain
     double m_moved_stop_michel_kink_min{-1.0};    // doc pdvd/72 (P3b): deg, -1 = off
     double m_michel_mip_lo_turned{-1.0};          // doc pdvd/73 (P2a): -1 = off
     double m_michel_mip_lo_turned_kink_deg{60.0}; // deg
@@ -931,6 +970,37 @@ private:
         // capped = passed and then refused by the total-energy guard.
         int n_michel_gammas{0}, n_michel_gamma_cand{0}, n_michel_gamma_capped{0};
         double michel_ke_gamma{0}, michel_ke_total{0}, michel_gamma_dis_max{-1};
+        // doc pdvd/81: the charge-based Michel energy.  valid 0/1; reason 0 ok,
+        // 1 no stored response, 2 a chain row's index is outside the response,
+        // 3 a chain row's dQ is not the response's solution (a later refit),
+        // 4 empty chain, 5 no grouping.  Per-plane sums are SIGNED
+        // (measured - muon prediction) electrons; *_mu_* the subtracted muon
+        // charge; *_n_* the cells.  q2d / q2d_gamma the plane-combined charge,
+        // ke_* their MeV, total = the two added.
+        int michel_q2d_valid{0}, michel_q2d_reason{0}, michel_q2d_dropped_plane{-1};
+        double michel_q2d_u{0}, michel_q2d_v{0}, michel_q2d_w{0};
+        double michel_q2d_mu_u{0}, michel_q2d_mu_v{0}, michel_q2d_mu_w{0};
+        int michel_q2d_n_u{0}, michel_q2d_n_v{0}, michel_q2d_n_w{0};
+        // the cross-shared cells (charge_err at the fitter's share sentinel: the
+        // channel-slice also carries another, non-preloaded cluster's blob) --
+        // their count per plane, and the plain sum (measured - muon) over ALL
+        // Michel cells, shared included, that the headline replaces on them
+        // with the fit's own non-muon prediction.
+        int michel_q2d_nx_u{0}, michel_q2d_nx_v{0}, michel_q2d_nx_w{0};
+        double michel_q2d_raw_u{0}, michel_q2d_raw_v{0}, michel_q2d_raw_w{0};
+        double michel_q2d{0}, michel_q2d_gamma{0};
+        double michel_ke_q2d{0}, michel_ke_q2d_gamma{0}, michel_ke_q2d_total{0};
+        // doc pdvd/81: every segment that received a row, by role (in row
+        // order; a segment can repeat) -- the estimator's fallback source of
+        // the Michel (role 3) and its source of the taken gammas (role 4).
+        std::map<int, std::vector<SegmentPtr>> role_segs;
+        // doc pdvd/81: the admitted companion clusters the fitter produced no
+        // segment for (dots_charge_unfit's owners; a conn_type 3 Michel is
+        // nothing but these) -- their cells are the Michel's, by blob coverage.
+        std::vector<const Cluster*> unfit_dot_clusters;
+        // doc pdvd/81: the cell table (PC stm_michel_2d), parallel vectors.
+        std::vector<int> c_apa, c_face, c_plane, c_wire, c_time, c_time_slice, c_channel, c_flag, c_role, c_shared, c_xshared, c_sel;
+        std::vector<double> c_q, c_qerr, c_pred_mu, c_pred_all;
         int dead_ahead{-1};                        // doc pdhd/03: 1 = the live end walks into a dead region
         int n_cluster_pts{0}; double chain_coverage{-1};   // doc pdhd/03: cluster points within coverage_radius of a reconstructed point
         // dots
@@ -1287,6 +1357,7 @@ private:
         const int seg_id = (seg && seg->cluster() ? seg->cluster()->get_cluster_id() : 0) * 1000
                          + (seg ? static_cast<int>(seg->get_graph_index()) : 0);
         if (role != 6 && role != 7 && role != 8) rec.claimed.insert(seg_id);   // 6 survey, 7 other (doc pdvd/64), 8 census (doc pdvd/80): rows, not claims
+        if (seg) rec.role_segs[role].push_back(seg);   // doc pdvd/81: bookkeeping only, no row or branch depends on it
         const double seg_med = seg ? segment_median_dQ_dx(seg) * units::cm : -1.0;   // doc pdvd/66: e/cm, the offline dqdx_med's C++ twin
         const size_t n0 = rec.px.size();
         if (prof) {
@@ -1361,6 +1432,338 @@ private:
     // the generic PC->TTree writer has no unit knowledge, so the PC carries
     // the human units directly (unlike stm_fit, whose dedicated writer
     // divides by units::cm).
+    // ---- doc pdvd/81: the charge-based Michel energy ------------------------
+    // The owner's estimator (default_configuration, "michel_q2d"): the Michel's
+    // 2-D charge, cell by cell, MINUS the charge the muon chain's own
+    // multi-track fit predicts on those cells, combined across planes with the
+    // chain's rule and converted with the unfitted-piece constant.  The muon
+    // prediction is scale * R * (pos_3D masked to the chain's Fit::index rows)
+    // from the response the fitter stored at its LAST multi fit of the main
+    // cluster (TrackFitting::Parameters::keep_dqdx_response) -- guarded row by
+    // row: every chain row's dQ must BE the stored solution, bit for bit, or the
+    // estimate is declared invalid (a refit or re-index after the store).
+    //
+    // Cells: the union charge maps of every preloaded cluster (the chain's own
+    // caches, pa.m_charge_2d_*), walked in map order; a cell is the Michel's
+    // (role 3) when the nearest point of a Michel segment's associate_points /
+    // fit cloud lies within michel_q2d_dis_cm in that plane (kine_charge_from_
+    // maps's rule, NeutrinoEnergyReco.cxx:85-140, cloud fallback included),
+    // else a taken gamma's (role 4) by the same test, else the STM's footprint
+    // (role 1) when the windowed muon rows predict charge there.  `sel` bit 1 =
+    // that nearest-point rule, bit 2 = fit support (a nonzero response entry
+    // in a Michel-segment column of the MAIN cluster's fit; companion segments
+    // live in their own fits and have none).  The headline sums use bit 1.
+    //
+    // The Michel segments are the Shower's members when there is one (the
+    // in-cluster members get no rows in production, doc pdvd/53), else the
+    // role-3 row owners; the gammas are the role-4 row owners.  Companion
+    // segments' Fit::index values belong to THEIR cluster's fit, so only
+    // main-cluster segments enter the fit-support mask.
+    //
+    // Writes rec.michel_q2d_* (+ the cell vectors); nothing upstream reads them.
+    void michel_q2d_estimate(Record& rec, TrackFitting& tf, PatternAlgorithms& pa, Cluster* main,
+                             const std::vector<SegmentPtr>& chain, const IndexedSegmentSet& chain_set,
+                             const std::shared_ptr<Shower>& michel_shower) const
+    {
+        using CoordReadout = TrackFitting::CoordReadout;
+        const auto t0 = Clock::now();
+        rec.michel_q2d_valid = 0; rec.michel_q2d_reason = 0;
+        if (chain.empty()) { rec.michel_q2d_reason = 4; return; }
+        const TrackFitting::DqdxResponse* resp = tf.get_dqdx_response(main);
+        if (!resp) {
+            rec.michel_q2d_reason = 1;
+            SPDLOG_LOGGER_DEBUG(s_log, "{}CheckSTM_Michel michel-q2d: cluster {} no stored fit response", m_evt_tag, rec.cluster_id);
+            return;
+        }
+        auto* grouping = tf.grouping();
+        if (!grouping) { rec.michel_q2d_reason = 5; return; }
+        const Eigen::Index n3 = resp->pos_3D.size();
+
+        // the muon rows (and the windowed subset for the footprint), guarded
+        std::vector<char> mask_mu(n3, 0), mask_win(n3, 0), mask_michel(n3, 0);
+        int n_rows = 0, n_oor = 0, n_mis = 0;
+        const double win = m_michel_q2d_stm_window_cm * units::cm;
+        for (const auto& seg : chain) {
+            if (!seg) continue;
+            for (const auto& f : seg->fits()) {
+                ++n_rows;
+                if (f.index < 0 || f.index >= n3) { ++n_oor; continue; }
+                if (!(resp->pos_3D(f.index) == f.dQ)) { ++n_mis; continue; }
+                mask_mu[f.index] = 1;
+                if (m_michel_q2d_stm_window_cm < 0 || (f.point - rec.stop_pt).magnitude() <= win) mask_win[f.index] = 1;
+            }
+        }
+        if (n_oor || n_mis) {
+            rec.michel_q2d_reason = n_oor ? 2 : 3;
+            SPDLOG_LOGGER_DEBUG(s_log, "{}CheckSTM_Michel michel-q2d: cluster {} response mismatch: {} chain rows, {} outside [0,{}), {} dQ != solution",
+                                m_evt_tag, rec.cluster_id, n_rows, n_oor, n3, n_mis);
+            return;
+        }
+
+        // the Michel and gamma segments, graph-index ordered, unique
+        auto tidy = [](std::vector<SegmentPtr>& v) {
+            v.erase(std::remove(v.begin(), v.end(), nullptr), v.end());
+            std::sort(v.begin(), v.end(), [](const SegmentPtr& a, const SegmentPtr& b) { return a->get_graph_index() < b->get_graph_index(); });
+            v.erase(std::unique(v.begin(), v.end()), v.end());
+        };
+        std::vector<SegmentPtr> michel_segs, gamma_segs;
+        if (michel_shower) {
+            IndexedVertexSet mv; IndexedSegmentSet ms;
+            michel_shower->fill_sets(mv, ms, false);
+            for (const auto& sg : ms) if (!chain_set.count(sg)) michel_segs.push_back(sg);
+        }
+        else if (auto it = rec.role_segs.find(3); it != rec.role_segs.end()) {
+            michel_segs = it->second;
+        }
+        if (auto it = rec.role_segs.find(4); it != rec.role_segs.end()) gamma_segs = it->second;
+        tidy(michel_segs); tidy(gamma_segs);
+        for (const auto* lst : {&michel_segs, &gamma_segs}) {
+            for (const auto& sg : *lst) {
+                if (sg->cluster() != main) continue;
+                for (const auto& f : sg->fits()) if (f.index >= 0 && f.index < n3) mask_michel[f.index] = 1;
+            }
+        }
+
+        // the four predictions per plane, in electrons, and the row lookup
+        std::array<Eigen::VectorXd, 3> pred_mu, pred_all, pred_win, pred_mich;
+        std::array<std::unordered_map<CoordReadout, int, TrackFitting::CoordReadoutHash>, 3> row_of;
+        {
+            const std::vector<char> ones(static_cast<size_t>(n3), 1);
+            for (int p = 0; p < 3; ++p) {
+                std::vector<double> scale;
+                scale.reserve(resp->rows[p].size());
+                for (const auto& r : resp->rows[p]) scale.push_back(r.scale);
+                pred_mu[p]   = TrackFitting::masked_response_prediction(resp->R[p], resp->pos_3D, mask_mu, scale);
+                pred_all[p]  = TrackFitting::masked_response_prediction(resp->R[p], resp->pos_3D, ones, scale);
+                pred_win[p]  = TrackFitting::masked_response_prediction(resp->R[p], resp->pos_3D, mask_win, scale);
+                pred_mich[p] = TrackFitting::masked_response_prediction(resp->R[p], resp->pos_3D, mask_michel, scale);
+                for (size_t i = 0; i < resp->rows[p].size(); ++i) row_of[p].emplace(resp->rows[p][i].key, static_cast<int>(i));
+            }
+        }
+
+        // the union charge maps -- the chain's caches, collected once
+        if (pa.m_charge_2d_u.empty()) pa.collect_charge_maps(tf);
+        const PR::ChargeMap* maps[3] = {&pa.m_charge_2d_u, &pa.m_charge_2d_v, &pa.m_charge_2d_w};
+
+        // the clouds, kine_charge_from_maps's pair-and-fallback -- plus the frame.
+        // doc pdvd/45: a cell's geometric 2-D point (convert_time_wire_2Dpoint,
+        // the raw t0 = 0 drift frame) and a segment cloud's points (the
+        // cluster's t0-CORRECTED frame) differ in drift by the cluster's t0
+        // drift and any time-origin difference between the two conversions
+        // (PDVD's trigger offset) -- metres on PDVD, which is why the chain's
+        // own michel_ke_charge is 0 on nearly every PDVD Michel (doc pdhd/16).
+        // Measured per segment and (apa, face) from its own fit points, the
+        // way the fitter's excl_t0_frame does: the point run backward(t0) into
+        // the raw frame, its x minus the point's x (the drift conversions are
+        // each other's inverse, so this is the round trip without the tick
+        // rounding).  A cloud with no shift for a cell's (apa, face) has no
+        // points there and is skipped.
+        struct CloudPair {
+            std::shared_ptr<const Facade::DynamicPointCloud> a, f;
+            std::map<std::pair<int, int>, double> shift;   // (apa, face) -> drift shift, WCT length
+        };
+        auto clouds_of = [&](const std::vector<SegmentPtr>& segs) {
+            std::vector<CloudPair> out;
+            for (const auto& sg : segs) {
+                CloudPair c;
+                c.a = sg->dpcloud("associate_points");
+                c.f = sg->dpcloud("fit");
+                if (!c.a && !c.f) continue;
+                if (!c.a) c.a = c.f;
+                if (!c.f) c.f = c.a;
+                auto* cl = sg->cluster();
+                if (cl && m_pcts) {
+                    const auto xform = m_pcts->pc_transform(cl->get_scope_transform(cl->get_default_scope()));
+                    const double t0 = cl->get_cluster_t0();
+                    std::map<std::pair<int, int>, std::vector<double>> acc;
+                    for (const auto& f : sg->fits()) {
+                        if (f.paf.first < 0 || f.paf.second < 0) continue;
+                        const auto p_raw = xform->backward(geo_point_t(f.point.x(), f.point.y(), f.point.z()), t0, f.paf.second, f.paf.first);
+                        acc[f.paf].push_back(p_raw.x() - f.point.x());
+                    }
+                    for (auto& [paf, v] : acc) {
+                        std::sort(v.begin(), v.end());
+                        c.shift[paf] = v[v.size() / 2];
+                    }
+                }
+                out.push_back(std::move(c));
+            }
+            return out;
+        };
+        const auto michel_clouds = clouds_of(michel_segs);
+        const auto gamma_clouds = clouds_of(gamma_segs);
+        const double dis_cut = m_michel_q2d_dis_cm * units::cm;
+        double dbg_dmin = 1e9; int dbg_nq = 0, dbg_noshift = 0;   // diagnostics for the DEBUG line only
+        auto within = [&](const std::vector<CloudPair>& clouds, double drift, double wp, int plane, int face, int apa) {
+            for (const auto& c : clouds) {
+                auto sit = c.shift.find({apa, face});
+                if (sit == c.shift.end()) { ++dbg_noshift; continue; }
+                const double d = drift - sit->second;
+                auto r1 = c.a->get_closest_2d_point_info_direct(d, wp, plane, face, apa);
+                ++dbg_nq;
+                if (std::get<0>(r1) >= 0 && std::get<0>(r1) < dbg_dmin) dbg_dmin = std::get<0>(r1);
+                if (std::get<0>(r1) >= 0 && std::get<0>(r1) < dis_cut && std::get<1>(r1)) return true;
+                if (c.f != c.a) {
+                    auto r2 = c.f->get_closest_2d_point_info_direct(d, wp, plane, face, apa);
+                    if (std::get<0>(r2) >= 0 && std::get<0>(r2) < dis_cut && std::get<1>(r2)) return true;
+                }
+            }
+            return false;
+        };
+
+        // cross-shared cells: update_dQ_dx_data sets charge_err to the share
+        // sentinel on a channel-slice that another, NON-preloaded cluster's blob
+        // also covers (the fitter's own deweighting; the multi path never
+        // restores it).  The measured charge there is not attributable -- on a
+        // dense PDHD beam event nearly every Michel cell is one (028084_18/17:
+        // 14.2M e measured on 103 W cells the fit predicts 0.28M on).  Rule:
+        // measured - muon where the cell is the preloaded clusters' alone,
+        // the fit's own non-muon prediction (pred_all - pred_mu, floored at 0)
+        // where it is shared -- measured where attributable, fitted where not.
+        // The plain sum is persisted beside it (michel_q2d_raw_*).
+        const double share_err = tf.get_parameters().share_charge_err;
+        auto nticks_map = grouping->get_nticks_per_slice();
+        auto nticks_at = [&nticks_map](int apa, int face) {
+            auto a = nticks_map.find(apa);
+            if (a == nticks_map.end()) return 1;
+            auto f = a->second.find(face);
+            return f == a->second.end() ? 1 : f->second;
+        };
+        struct Cell { int role, plane, apa, face, wire, time, time_slice, channel, flag, shared, xshared, sel; double q, qerr, pmu, pall; };
+        std::vector<Cell> cells;
+        std::array<double, 3> qm{{0, 0, 0}}, mum{{0, 0, 0}}, qg{{0, 0, 0}}, mug{{0, 0, 0}}, rawm{{0, 0, 0}};
+        std::array<int, 3> nm{{0, 0, 0}}, ng{{0, 0, 0}}, nxm{{0, 0, 0}};
+        int n_role1 = 0, n_sel2_only = 0, n_unfit_cells = 0;
+        for (int plane = 0; plane < 3; ++plane) {
+            for (const auto& [key, meas] : *maps[plane]) {
+                auto wit = pa.m_map_apa_ch_plane_wires.find({key.apa, key.channel});
+                if (wit == pa.m_map_apa_ch_plane_wires.end()) continue;
+                // every (face, wire) the readout channel maps to in this plane
+                // (a channel can serve both faces / wrapped wires; the cloud
+                // query is per (apa, face), so each candidate is tested and the
+                // one that matches names the row -- the first otherwise)
+                std::vector<std::pair<int, int>> fw;
+                for (const auto& [f, pl, w] : wit->second) { if (pl == plane) fw.emplace_back(f, w); }
+                if (fw.empty()) continue;
+                int face = fw.front().first, wire = fw.front().second;
+                double pmu = 0, pall = 0, pwin = 0, pmich = 0;
+                if (auto rit = row_of[plane].find(key); rit != row_of[plane].end()) {
+                    const int i = rit->second;
+                    pmu = pred_mu[plane](i); pall = pred_all[plane](i); pwin = pred_win[plane](i); pmich = pred_mich[plane](i);
+                }
+                auto any_within = [&](const std::vector<CloudPair>& clouds) {
+                    for (const auto& [f, w] : fw) {
+                        const auto p2d = grouping->convert_time_wire_2Dpoint(key.time, w, key.apa, f, plane);
+                        if (within(clouds, p2d.first, p2d.second, plane, f, key.apa)) { face = f; wire = w; return true; }
+                    }
+                    return false;
+                };
+                int role = 0, sel = 0;
+                if (any_within(michel_clouds)) { role = 3; sel |= 1; }
+                else if (any_within(gamma_clouds)) { role = 4; sel |= 1; }
+                if (!role && !rec.unfit_dot_clusters.empty()) {
+                    // a charge-only piece: the cell is covered by an unfitted
+                    // admitted cluster's own blobs (the fitter's predicate, the
+                    // fit's tick key, no tolerance)
+                    for (const auto* cl : rec.unfit_dot_clusters) {
+                        for (const auto& [f, w] : fw) {
+                            if (tf.is_cell_covered_by_own_blobs(cl, key.apa, f, plane, w, key.time, 0, nticks_at(key.apa, f))) {
+                                role = 3; sel |= 4; face = f; wire = w; ++n_unfit_cells; break;
+                            }
+                        }
+                        if (role) break;
+                    }
+                }
+                if (pmich > 0) { sel |= 2; if (!role) { role = 3; ++n_sel2_only; } }
+                if (!role) {
+                    if (pwin > 0) { role = 1; ++n_role1; }
+                    else continue;
+                }
+                const bool xshared = meas.charge_err >= share_err;
+                const bool headline = (sel & 1) || (sel & 4);
+                const double contrib = xshared ? std::max(pall - pmu, 0.0) : (meas.charge - pmu);
+                if (role == 3 && headline) {
+                    qm[plane] += contrib; rawm[plane] += meas.charge - pmu; mum[plane] += pmu; ++nm[plane];
+                    if (xshared) ++nxm[plane];
+                }
+                if (role == 4 && headline) { qg[plane] += contrib; mug[plane] += pmu; ++ng[plane]; }
+                if (m_michel_q2d_cells)
+                    cells.push_back({role, plane, key.apa, face, wire, key.time, key.time / std::max(1, nticks_at(key.apa, face)), key.channel, meas.flag,
+                                     pmu > 0 ? 1 : 0, xshared ? 1 : 0, sel, meas.charge, meas.charge_err, pmu, pall});
+            }
+        }
+
+        // qm already holds the per-cell contributions (measured - muon, or the
+        // fit's non-muon prediction on a cross-shared cell); qg likewise
+        rec.michel_q2d_u = qm[0]; rec.michel_q2d_v = qm[1]; rec.michel_q2d_w = qm[2];
+        rec.michel_q2d_raw_u = rawm[0]; rec.michel_q2d_raw_v = rawm[1]; rec.michel_q2d_raw_w = rawm[2];
+        rec.michel_q2d_mu_u = mum[0]; rec.michel_q2d_mu_v = mum[1]; rec.michel_q2d_mu_w = mum[2];
+        rec.michel_q2d_n_u = nm[0]; rec.michel_q2d_n_v = nm[1]; rec.michel_q2d_n_w = nm[2];
+        rec.michel_q2d_nx_u = nxm[0]; rec.michel_q2d_nx_v = nxm[1]; rec.michel_q2d_nx_w = nxm[2];
+        // the chain's plane rule, on the planes that HAVE cells: a plane the
+        // association reached nothing on (0 cells) takes weight 0 rather than
+        // reading as a zero-charge plane (which would make the one populated
+        // plane "the largest" and drop it); a zero weight is the rule's own
+        // "ignore this plane" (KineChargeOptions::plane_weights).
+        const auto& ko = pa.m_kine_charge;
+        auto weights_for = [&](const std::array<int, 3>& n) {
+            std::array<double, 3> w = ko.plane_weights;
+            for (int p = 0; p < 3; ++p) if (n[p] == 0) w[p] = 0;
+            return w;
+        };
+        int dropped = -1;
+        rec.michel_q2d = stm_michel_combine_planes({{rec.michel_q2d_u, rec.michel_q2d_v, rec.michel_q2d_w}},
+                                                   weights_for(nm), ko.plane_asym_switch, &dropped);
+        rec.michel_q2d_dropped_plane = dropped;
+        rec.michel_q2d_gamma = stm_michel_combine_planes({{qg[0], qg[1], qg[2]}}, weights_for(ng), ko.plane_asym_switch, nullptr);
+        // the unfitted-piece conversion (doc pdhd/17 sec 9), plain MeV out
+        auto to_mev = [&](double q) {
+            return (m_michel_unfit_from_model
+                        ? stm_michel_charge_to_energy_model(q, m_recomb_model, m_michel_unfit_dedx)
+                        : stm_michel_charge_to_energy(q, m_michel_unfit_recom, m_michel_unfit_fudge, m_michel_unfit_w_ev))
+                   / units::MeV;
+        };
+        rec.michel_ke_q2d = to_mev(rec.michel_q2d);
+        rec.michel_ke_q2d_gamma = to_mev(rec.michel_q2d_gamma);
+        rec.michel_ke_q2d_total = rec.michel_ke_q2d + rec.michel_ke_q2d_gamma;
+        for (double* e : {&rec.michel_q2d_u, &rec.michel_q2d_v, &rec.michel_q2d_w, &rec.michel_q2d_mu_u, &rec.michel_q2d_mu_v,
+                          &rec.michel_q2d_mu_w, &rec.michel_q2d_raw_u, &rec.michel_q2d_raw_v, &rec.michel_q2d_raw_w,
+                          &rec.michel_q2d, &rec.michel_q2d_gamma, &rec.michel_ke_q2d,
+                          &rec.michel_ke_q2d_gamma, &rec.michel_ke_q2d_total}) {
+            if (!std::isfinite(*e)) {
+                SPDLOG_LOGGER_WARN(s_log, "{}CheckSTM_Michel michel-q2d: cluster {} produced a non-finite value; zeroed", m_evt_tag, rec.cluster_id);
+                *e = 0;
+            }
+        }
+        rec.michel_q2d_valid = 1;
+
+        if (m_michel_q2d_cells) {
+            std::sort(cells.begin(), cells.end(), [](const Cell& a, const Cell& b) {
+                return std::tie(a.role, a.plane, a.apa, a.face, a.wire, a.time) < std::tie(b.role, b.plane, b.apa, b.face, b.wire, b.time);
+            });
+            for (const auto& c : cells) {
+                rec.c_role.push_back(c.role); rec.c_plane.push_back(c.plane); rec.c_apa.push_back(c.apa); rec.c_face.push_back(c.face);
+                rec.c_wire.push_back(c.wire); rec.c_time.push_back(c.time); rec.c_time_slice.push_back(c.time_slice);
+                rec.c_channel.push_back(c.channel); rec.c_flag.push_back(c.flag);
+                rec.c_shared.push_back(c.shared); rec.c_xshared.push_back(c.xshared); rec.c_sel.push_back(c.sel);
+                rec.c_q.push_back(c.q); rec.c_qerr.push_back(c.qerr); rec.c_pred_mu.push_back(c.pmu); rec.c_pred_all.push_back(c.pall);
+            }
+        }
+        SPDLOG_LOGGER_DEBUG(s_log,
+            "{}CheckSTM_Michel michel-q2d: cluster {} rows {} michel segs {} gamma segs {} | cells u/v/w {}/{}/{} q-mu {:.0f}/{:.0f}/{:.0f} "
+            "(mu {:.0f}/{:.0f}/{:.0f}) dropped {} -> q {:.0f} e = {:.2f} MeV | gamma {}/{}/{} -> {:.2f} MeV | total {:.2f} MeV "
+            "(best {:.2f}, total {:.2f}) | footprint cells {} fit-support-only {} unfit-cluster cells {} cross-shared {}/{}/{} raw q-mu {:.0f}/{:.0f}/{:.0f} | clouds {} (pts {}/{}) queries {} dmin {:.3f} cm no-shift-skips {} shift0 {:.2f} cm | {:.0f} ms",
+            m_evt_tag, rec.cluster_id, n_rows, michel_segs.size(), gamma_segs.size(),
+            nm[0], nm[1], nm[2], rec.michel_q2d_u, rec.michel_q2d_v, rec.michel_q2d_w, mum[0], mum[1], mum[2], dropped,
+            rec.michel_q2d, rec.michel_ke_q2d, ng[0], ng[1], ng[2], rec.michel_ke_q2d_gamma, rec.michel_ke_q2d_total,
+            rec.michel_ke_best, rec.michel_ke_total, n_role1, n_sel2_only, n_unfit_cells, nxm[0], nxm[1], nxm[2], rawm[0], rawm[1], rawm[2],
+            michel_clouds.size(), michel_clouds.empty() ? -1 : (int)michel_clouds.front().a->npoints(),
+            michel_clouds.empty() ? -1 : (int)michel_clouds.front().f->npoints(),
+            dbg_nq, dbg_dmin / units::cm, dbg_noshift,
+            (michel_clouds.empty() || michel_clouds.front().shift.empty()) ? 0.0 : michel_clouds.front().shift.begin()->second / units::cm,
+            MS(Clock::now() - t0).count());
+    }
+
     void persist(Cluster& cluster, const Record& r) const {
         using WireCell::PointCloud::Array;
         using WireCell::PointCloud::Dataset;
@@ -1414,6 +1817,19 @@ private:
             I1("n_michel_gamma_capped", r.n_michel_gamma_capped);
             D1("michel_ke_gamma", r.michel_ke_gamma); D1("michel_ke_total", r.michel_ke_total);
             D1("michel_gamma_dis_max", r.michel_gamma_dis_max);
+        }
+        // doc pdvd/81: the same pattern -- absent when the knob is off.
+        if (m_michel_q2d) {
+            I1("michel_q2d_valid", r.michel_q2d_valid); I1("michel_q2d_reason", r.michel_q2d_reason);
+            I1("michel_q2d_dropped_plane", r.michel_q2d_dropped_plane);
+            D1("michel_q2d_u", r.michel_q2d_u); D1("michel_q2d_v", r.michel_q2d_v); D1("michel_q2d_w", r.michel_q2d_w);
+            D1("michel_q2d_mu_u", r.michel_q2d_mu_u); D1("michel_q2d_mu_v", r.michel_q2d_mu_v); D1("michel_q2d_mu_w", r.michel_q2d_mu_w);
+            I1("michel_q2d_n_u", r.michel_q2d_n_u); I1("michel_q2d_n_v", r.michel_q2d_n_v); I1("michel_q2d_n_w", r.michel_q2d_n_w);
+            I1("michel_q2d_nx_u", r.michel_q2d_nx_u); I1("michel_q2d_nx_v", r.michel_q2d_nx_v); I1("michel_q2d_nx_w", r.michel_q2d_nx_w);
+            D1("michel_q2d_raw_u", r.michel_q2d_raw_u); D1("michel_q2d_raw_v", r.michel_q2d_raw_v); D1("michel_q2d_raw_w", r.michel_q2d_raw_w);
+            D1("michel_q2d", r.michel_q2d); D1("michel_q2d_gamma", r.michel_q2d_gamma);
+            D1("michel_ke_q2d", r.michel_ke_q2d); D1("michel_ke_q2d_gamma", r.michel_ke_q2d_gamma);
+            D1("michel_ke_q2d_total", r.michel_ke_q2d_total);
         }
         // doc pdvd/72 (P3b): the same pattern.
         if (m_moved_stop_michel_kink_min >= 0) I1("n_michel_veto_exempt", r.n_michel_veto_exempt);
@@ -1516,6 +1932,22 @@ private:
                 p.emplace("d_body", Array(tocm(r.pdbody)));
             }
             cluster.local_pcs()["stm_michel_pts"] = Dataset(p);
+        }
+        // doc pdvd/81: the Michel / STM 2-D cells, one row each (see
+        // michel_q2d_estimate).  Absent unless michel_q2d_cells is on AND the
+        // candidate produced a row -- write_pc_tree creates T_stm_michel_2d from
+        // the first carrier, and TensorDM's as_tensors needs same-named PCs to
+        // share their columns, so every column is knob-only, never per-cluster.
+        if (m_michel_q2d && m_michel_q2d_cells && !r.c_q.empty()) {
+            std::map<std::string, Array> c;
+            c.emplace("apa", Array(r.c_apa)); c.emplace("face", Array(r.c_face)); c.emplace("plane", Array(r.c_plane));
+            c.emplace("wire", Array(r.c_wire)); c.emplace("time", Array(r.c_time)); c.emplace("time_slice", Array(r.c_time_slice));
+            c.emplace("channel", Array(r.c_channel));
+            c.emplace("flag", Array(r.c_flag)); c.emplace("role", Array(r.c_role)); c.emplace("shared", Array(r.c_shared));
+            c.emplace("xshared", Array(r.c_xshared)); c.emplace("sel", Array(r.c_sel));
+            c.emplace("charge", Array(r.c_q)); c.emplace("charge_err", Array(r.c_qerr));
+            c.emplace("pred_mu", Array(r.c_pred_mu)); c.emplace("pred_all", Array(r.c_pred_all));
+            cluster.local_pcs()["stm_michel_2d"] = Dataset(c);
         }
     }
 };
@@ -1642,6 +2074,7 @@ void CheckSTM_Michel::visit(Ensemble& ensemble) const
         tf->set_pc_transforms(m_pcts);
         tf->set_parameter("fit_blob_coverage", m_fit_blob_coverage);
         tf->set_parameter("dqdx_fit_keep_all_points", m_dqdx_fit_keep_all_points ? 1.0 : 0.0);
+        if (m_michel_q2d) tf->set_parameter("keep_dqdx_response", 1.0);   // doc pdvd/81: store every multi-fit's response
         if (m_excl_t0_frame) tf->set_parameter("excl_t0_frame", 1.0);
         {
             std::vector<Cluster*> to_preload{main};
@@ -2514,6 +2947,7 @@ void CheckSTM_Michel::visit(Ensemble& ensemble) const
                     ++rec.n_dot_clusters_unfit;
                     double q = 0; for (const auto* b : oc->children()) q += b->charge();
                     rec.dots_charge_unfit += q;
+                    rec.unfit_dot_clusters.push_back(oc);   // doc pdvd/81: bookkeeping only
                     d_unfit = std::min(d_unfit, d_cl);
                     continue;
                 }
@@ -3333,6 +3767,12 @@ void CheckSTM_Michel::visit(Ensemble& ensemble) const
             SPDLOG_LOGGER_DEBUG(s_log, "{}CheckSTM_Michel segment-census: cluster {} unclaimed PR segments {} (rej 14: {})",
                                 m_evt_tag, rec.cluster_id, rec.n_census_segs, rec.n_census_admissible);
         }
+
+        // ---- doc pdvd/81: the charge-based Michel energy and the 2-D cells ---
+        // After every row and verdict is final (the gamma take above decides
+        // the role-4 set); reads the fit's stored response, writes only its
+        // own branches.
+        if (m_michel_q2d) michel_q2d_estimate(rec, *tf, pa, main, chain, chain_set, michel_shower);
 
         // ---- publish (TaggerCheckNeutrino.cxx:3580-3590) --------------------
         tf->assemble_fitted_charge_2d();

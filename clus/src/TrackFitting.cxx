@@ -189,6 +189,8 @@ void TrackFitting::set_parameter(const std::string& name, double value) {
         m_params.end_trim_gap_len = value;
     } else if (name == "dqdx_fit_keep_all_points") {   // doc pr/107
         m_params.dqdx_fit_keep_all_points = value;
+    } else if (name == "keep_dqdx_response") {          // doc pdvd/81
+        m_params.keep_dqdx_response = value;
     } else if (name == "excl_t0_frame") {              // doc pdvd/45
         m_params.excl_t0_frame = value;
     } else if (name == "proj_skip_unmapped_face") {    // doc pdvd/45 sec 13
@@ -364,6 +366,8 @@ double TrackFitting::get_parameter(const std::string& name) const {
         return m_params.skip_revert_iso_xext_cut;
     } else if (name == "dqdx_fit_keep_all_points") {   // doc pr/107
         return m_params.dqdx_fit_keep_all_points;
+    } else if (name == "keep_dqdx_response") {          // doc pdvd/81
+        return m_params.keep_dqdx_response;
     } else if (name == "excl_t0_frame") {              // doc pdvd/45
         return m_params.excl_t0_frame;
     } else if (name == "proj_skip_unmapped_face") {    // doc pdvd/45 sec 13
@@ -454,6 +458,7 @@ void TrackFitting::clear_graph(){
 // live heap in these members across the 12 candidate fitters.
 void TrackFitting::release_fit_scratch(){
     m_charge_data.clear();
+    m_dqdx_responses.clear();   // doc pdvd/81
     m_orig_charge_data.clear();
     m_2d_to_3d.clear();
     m_3d_to_2d.clear();
@@ -1701,6 +1706,35 @@ void TrackFitting::build_dqdx_rows(const std::unordered_map<CoordReadout, Charge
         }
         plane_rows[plane].push_back({key, kv->second, c0, static_cast<uint32_t>(coords.size())});
     }
+}
+
+// doc pdvd/81
+const TrackFitting::DqdxResponse* TrackFitting::get_dqdx_response(const Facade::Cluster* cluster) const
+{
+    for (const auto& r : m_dqdx_responses) {
+        if (r.cluster == cluster) return &r;
+    }
+    return nullptr;
+}
+
+// doc pdvd/81
+Eigen::VectorXd TrackFitting::masked_response_prediction(const Eigen::SparseMatrix<double>& R,
+                                                         const Eigen::VectorXd& pos,
+                                                         const std::vector<char>& col_mask,
+                                                         const std::vector<double>& row_scale)
+{
+    Eigen::VectorXd masked = Eigen::VectorXd::Zero(pos.size());
+    const Eigen::Index nmask = static_cast<Eigen::Index>(col_mask.size());
+    for (Eigen::Index k = 0; k < pos.size() && k < nmask; ++k) {
+        if (col_mask[k]) masked(k) = pos(k);
+    }
+    Eigen::VectorXd out = Eigen::VectorXd::Zero(R.rows());
+    if (pos.size() == R.cols()) out = R * masked;
+    const Eigen::Index nscale = static_cast<Eigen::Index>(row_scale.size());
+    for (Eigen::Index i = 0; i < out.size(); ++i) {
+        out(i) *= (i < nscale) ? row_scale[i] : 0.0;
+    }
+    return out;
 }
 
 void TrackFitting::record_cluster_fitted_charge_2d()
@@ -7221,6 +7255,19 @@ void TrackFitting::dQ_dx_multi_fit(double dis_end_point_ext, bool flag_dQ_dx_fit
     }
     const auto& charge_source = *p_charge_source;
 
+    // doc pdvd/81: drop this cluster's stored response BEFORE the fit so an
+    // early return below (no rows, no 2-D data) cannot leave a response paired
+    // with fits that were reset to -1.  Re-captured after the prediction.
+    const bool keep_response = m_params.keep_dqdx_response > 0 && m_cluster_filter;
+    if (keep_response) {
+        for (size_t i = 0; i < m_dqdx_responses.size(); ++i) {
+            if (m_dqdx_responses[i].cluster == m_cluster_filter) {
+                m_dqdx_responses.erase(m_dqdx_responses.begin() + i);
+                break;
+            }
+        }
+    }
+
     // Use parameters from member variable
     const double DL = m_params.DL;
     const double DT = m_params.DT;
@@ -8332,6 +8379,38 @@ void TrackFitting::dQ_dx_multi_fit(double dis_end_point_ext, bool flag_dQ_dx_fit
     pred_data_u_2D = RU * pos_3D;
     pred_data_v_2D = RV * pos_3D;
     pred_data_w_2D = RW * pos_3D;
+
+    // doc pdvd/81: keep this cluster's response (see Parameters::keep_dqdx_response).
+    // Row order = the map iteration order the data vectors were filled in above;
+    // `scale` is that fill's total_err for a live row (charge > 0, flag != 0 --
+    // the same gate fill_fitted_charge_2d applies to pred_charge), else 0.
+    if (keep_response) {
+        DqdxResponse resp;
+        resp.cluster = m_cluster_filter;
+        resp.ident = m_cluster_filter->ident();
+        resp.R = {RU, RV, RW};
+        resp.pos_3D = pos_3D;
+        auto fill_rows = [](const std::map<CoordReadout, std::pair<ChargeMeasurement, std::set<Coord2D>>>& plane_map,
+                            double rel_uncer, double add_uncer, std::vector<DqdxResponseRow>& out) {
+            out.reserve(plane_map.size());
+            for (const auto& [coord_key, result] : plane_map) {
+                const auto& m = result.first;
+                DqdxResponseRow row(coord_key);
+                row.charge = m.charge;
+                row.charge_err = m.charge_err;
+                row.flag = m.flag;
+                row.scale = (m.charge > 0 && m.flag != 0)
+                    ? sqrt(m.charge_err*m.charge_err + (m.charge*rel_uncer)*(m.charge*rel_uncer) + add_uncer*add_uncer)
+                    : 0.0;
+                row.coords.assign(result.second.begin(), result.second.end());
+                out.push_back(std::move(row));
+            }
+        };
+        fill_rows(map_U_charge_2D, rel_uncer_ind, add_uncer_ind, resp.rows[0]);
+        fill_rows(map_V_charge_2D, rel_uncer_ind, add_uncer_ind, resp.rows[1]);
+        fill_rows(map_W_charge_2D, rel_uncer_col, add_uncer_col, resp.rows[2]);
+        m_dqdx_responses.push_back(std::move(resp));
+    }
 
     // Persist fitted 2D charge results
     fill_fitted_charge_2d(map_U_charge_2D, map_V_charge_2D, map_W_charge_2D,

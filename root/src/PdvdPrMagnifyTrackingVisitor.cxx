@@ -359,6 +359,9 @@ void Root::PdvdPrMagnifyTrackingVisitor::write_stm_michel_trees(TFile* output_tf
 {
     write_pc_tree(output_tf, grouping, "stm_michel", "T_stm_michel");
     write_pc_tree(output_tf, grouping, "stm_michel_pts", "T_stm_michel_pts");
+    // doc pdvd/81: the Michel / STM 2-D cell table, present only when
+    // CheckSTM_Michel's michel_q2d_cells is on (no carrier => no tree).
+    write_pc_tree(output_tf, grouping, "stm_michel_2d", "T_stm_michel_2d");
 }
 
 void Root::PdvdPrMagnifyTrackingVisitor::write_trun(TFile* output_tf) const
