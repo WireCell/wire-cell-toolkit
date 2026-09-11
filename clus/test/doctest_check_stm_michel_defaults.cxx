@@ -57,6 +57,7 @@ TEST_CASE("clus knob defaults: CheckSTM_Michel verdict thresholds")
     D("michel_range_energy_dis_cm", 5.0);  // the argued distance, not doc 55's best-F1 3 cm row
     D("michel_range_energy_ke_min", 10.0);
     B("publish_other_arms", false);        // doc pdvd/64 (T6): role-7 rows for kOther arms, rows only
+    B("segment_census", false);            // doc pdvd/80: role-8 rows for every unclaimed PR segment of the main cluster, rows only
     B("bragg_peak_anchor", false);         // doc pdvd/65 (T7): geometric rr origin unless on
     D("bragg_peak_search_cm", 10.0);
     B("profile_geometry_guard", false);    // doc pdvd/66 (T8): fields always written, the reject bit only when on

@@ -209,6 +209,7 @@ public:
         // in stm_michel_pts so display and scan can see what the chain fitted
         // and classified as neither delta, hadron, Michel nor continuation.
         m_publish_other_arms = get<bool>(config, "publish_other_arms", m_publish_other_arms);
+        m_segment_census = get<bool>(config, "segment_census", m_segment_census);   // doc pdvd/80
         // doc pdvd/65 (T7): read the two shape tests from a residual-range origin
         // anchored on the profile's Bragg peak (the prototype eval_stm recipe)
         // rather than on the chain's geometric far end.
@@ -504,6 +505,19 @@ public:
         // interior count (n_body_other) has always been persisted; the stop
         // count (n_stop_other) and the published count are new.
         cfg["publish_other_arms"] = m_publish_other_arms;
+        // doc pdvd/80 (doc 78 action item 1): THE SEGMENT CENSUS.  Every PR
+        // segment of the MAIN cluster that no stage claimed and no stage
+        // published gets role-8 rows, plus the same rej / d_stop / d_body
+        // columns the survey (role 6) carries: the doc 62 T3b piece gates read
+        // on it (2 too far from the stop, 3 longer than the piece cap, 4 body
+        // exclusion), or 13 attached to the chain and not taken, 14 passes
+        // every T3b gate yet unclaimed, 15 no endpoint vertices, 9 T3b off,
+        // 10 no stop vertex.  Rows only, written LAST; no verdict reads them.
+        // On the production record 42 of the scanner's michel tags sit on such
+        // segments (doc 78 sec 3.2) and nothing in the output names them.
+        // Default false: the knob-off T_stm_michel_pts schema and every branch
+        // are byte-identical.
+        cfg["segment_census"] = m_segment_census;
         // doc pdvd/65 (T7): default off.  When on, the verdict-stage contrast
         // and KS tests read the live profile from rr' = end_L - L with end_L =
         // L[peak] + 0.2 cm, the peak being the row maximising the 5-point
@@ -798,6 +812,7 @@ private:
     double m_michel_range_energy_dis_cm{5.0};     // cm
     double m_michel_range_energy_ke_min{10.0};    // MeV
     bool m_publish_other_arms{false};             // doc pdvd/64 (T6): role-7 rows for kOther arms
+    bool m_segment_census{false};                 // doc pdvd/80: role-8 rows for every unclaimed PR segment of the main cluster
     bool m_bragg_peak_anchor{false};              // doc pdvd/65 (T7): peak-anchored rr origin for the verdict shape tests
     double m_bragg_peak_search_cm{10.0};          // cm
     bool m_topology_stop_evidence{false};         // doc pdvd/70 (P1)
@@ -860,6 +875,7 @@ private:
         double muon_len{0};
         int n_delta{0}, n_body_other{0}, n_body_hadron{0};
         int n_stop_other{0}, n_other_published{0};   // doc pdvd/64 (T6): kOther arms at the stop; role-7 segments actually published
+        int n_census_segs{0}, n_census_admissible{0};   // doc pdvd/80: role-8 segments written; of them, rej 14 (passes every T3b gate, unclaimed)
         double bragg_anchor_shift{0};                // doc pdvd/65 (T7): how far back of the geometric end the peak anchor put rr = 0 (0 = off / peak at the end)
         // doc pdvd/66 (T8): the profile's end geometry and the fitted segments' charge support -- reject-class inputs.  -1 = not computed.
         double end_arc_cm{-1}, end_span_cm{-1}, end_arc_span{-1}; int n_end_pts{0};
@@ -1249,7 +1265,7 @@ private:
     // arrays stay parallel to the other six.  They are pushed ONLY when the
     // survey is on, which is what keeps the knob-off PC schema identical.
     void add_survey_cols(Record& rec, size_t n, int rej, double d_stop, double d_body) const {
-        if (!m_survey_enable) return;
+        if (!m_survey_enable && !m_segment_census) return;   // doc pdvd/80: the census carries the same three columns
         for (size_t i = 0; i < n; ++i) {
             rec.prej.push_back(rej); rec.pdstop.push_back(d_stop); rec.pdbody.push_back(d_body);
         }
@@ -1270,7 +1286,7 @@ private:
                     bool keep_dead = false) const {
         const int seg_id = (seg && seg->cluster() ? seg->cluster()->get_cluster_id() : 0) * 1000
                          + (seg ? static_cast<int>(seg->get_graph_index()) : 0);
-        if (role != 6 && role != 7) rec.claimed.insert(seg_id);   // 6 survey, 7 other (doc pdvd/64): rows, not claims
+        if (role != 6 && role != 7 && role != 8) rec.claimed.insert(seg_id);   // 6 survey, 7 other (doc pdvd/64), 8 census (doc pdvd/80): rows, not claims
         const double seg_med = seg ? segment_median_dQ_dx(seg) * units::cm : -1.0;   // doc pdvd/66: e/cm, the offline dqdx_med's C++ twin
         const size_t n0 = rec.px.size();
         if (prof) {
@@ -1429,6 +1445,10 @@ private:
             I1("n_survey_clusters", r.n_survey_clusters); I1("n_survey_segs", r.n_survey_segs);
             I1("n_survey_unfit", r.n_survey_unfit);
         }
+        // doc pdvd/80: the segment census.  Written only when the knob is on.
+        if (m_segment_census) {
+            I1("n_census_segs", r.n_census_segs); I1("n_census_admissible", r.n_census_admissible);
+        }
         I1("in_fv", r.in_fv);
         // doc pdhd/14.  The muon energy was the one thing this tree never
         // carried: set_pdg (:661) builds a 4-momentum for every chain segment
@@ -1490,7 +1510,7 @@ private:
             // doc pdvd/53.  Absent when the survey is off, so write_pc_tree
             // (PdvdPrMagnifyTrackingVisitor.cxx:293, which takes its column set
             // from the first carrier) reproduces the old schema exactly.
-            if (m_survey_enable) {
+            if (m_survey_enable || m_segment_census) {   // doc pdvd/80: the census writes the same three columns
                 p.emplace("rej", Array(r.prej));
                 p.emplace("d_stop", Array(tocm(r.pdstop)));
                 p.emplace("d_body", Array(tocm(r.pdbody)));
@@ -3248,6 +3268,70 @@ void CheckSTM_Michel::visit(Ensemble& ensemble) const
                                     m_evt_tag, rec.cluster_id, c.cluster_id, c.ke, take[i], live ? 1 : 0, rec.michel_ke_best);
             }
             rec.michel_ke_total = rec.michel_ke_best + rec.michel_ke_gamma;
+        }
+
+        // doc pdvd/80 (doc 78 action item 1): THE SEGMENT CENSUS, written last
+        // of all -- after the Michel object, the capture gamma, the survey, the
+        // kOther arms and the gamma collect have claimed or published what they
+        // do.  Every remaining PR segment of the MAIN cluster gets role-8 rows
+        // with the doc 62 T3b piece gates read on it, so the hand-scan display
+        // can draw it, name it and say why the chain left it: on the production
+        // record 42 of the scanner's michel tags (32 items) sit on exactly such
+        // segments, 21 of them touching the stop, and four missed Michels run
+        // backward along the muon body inside the body exclusion (doc 78 sec
+        // 3.2).  Rows only: role 8 claims nothing (add_points exempts it) and no
+        // verdict reads it; the chain_coverage test above counted rec.px before
+        // these rows exist.  Deterministic: find_cluster_segments walks
+        // ordered_edges, and the rows are sorted by graph index.
+        if (m_segment_census) {
+            const std::set<int> written(rec.pseg.begin(), rec.pseg.end());          // membership only, never iterated
+            const std::set<VertexPtr> chain_vset(chain_vtxs.begin(), chain_vtxs.end());   // membership only, never iterated
+            struct CsSeg { SegmentPtr seg; int gidx, rej; double d_stop, d_body; };
+            std::vector<CsSeg> cs;
+            for (auto& seg : pa.find_cluster_segments(g, *main)) {
+                if (!seg || chain_set.count(seg)) continue;
+                const int gidx = static_cast<int>(seg->get_graph_index());
+                const int sid = main->get_cluster_id() * 1000 + gidx;
+                if (rec.claimed.count(sid) || written.count(sid)) continue;
+                int rej = 10; double d_stop = -1, d_body = -1;
+                if (stop_v) {
+                    auto [va, vb] = find_vertices(g, seg);
+                    bool touches_chain = false;
+                    if (va && vb) {
+                        touches_chain = chain_vset.count(va) || chain_vset.count(vb);
+                        for (VertexPtr v : {va, vb}) {
+                            if (touches_chain) break;
+                            for (auto e : sorted_out_edges(v->get_descriptor(), g)) {
+                                auto s2 = g[e].segment;
+                                if (s2 && chain_set.count(s2)) { touches_chain = true; break; }
+                            }
+                        }
+                    }
+                    auto [ds, cp] = segment_get_closest_point(seg, rec.stop_pt, "fit", "main");
+                    d_stop = ds;
+                    double db = 1e9;
+                    for (size_t i = 0; i < prof.pts.size(); ++i) {
+                        if (prof.rr[i] < m_dot_body_exclusion_cm * units::cm) continue;
+                        db = std::min(db, (prof.pts[i] - cp).magnitude());
+                    }
+                    if (db < 1e9) d_body = db;
+                    if (!va || !vb) rej = 15;
+                    else if (touches_chain) rej = 13;
+                    else if (d_stop > m_michel_dot_radius_cm * units::cm) rej = 2;
+                    else if (segment_track_length(seg) > m_dot_max_len_cm * units::cm) rej = 3;
+                    else if (d_body < d_stop) rej = 4;
+                    else rej = m_stop_local_michel_pieces ? 14 : 9;
+                }
+                cs.push_back({seg, gidx, rej, d_stop, d_body});
+            }
+            std::sort(cs.begin(), cs.end(), [](const CsSeg& a, const CsSeg& b) { return a.gidx < b.gidx; });
+            for (const auto& e : cs) {
+                add_points(rec, e.seg, 8, nullptr, e.rej, e.d_stop, e.d_body, /*keep_dead*/ true);
+                if (e.rej == 14) ++rec.n_census_admissible;
+            }
+            rec.n_census_segs = static_cast<int>(cs.size());
+            SPDLOG_LOGGER_DEBUG(s_log, "{}CheckSTM_Michel segment-census: cluster {} unclaimed PR segments {} (rej 14: {})",
+                                m_evt_tag, rec.cluster_id, rec.n_census_segs, rec.n_census_admissible);
         }
 
         // ---- publish (TaggerCheckNeutrino.cxx:3580-3590) --------------------
