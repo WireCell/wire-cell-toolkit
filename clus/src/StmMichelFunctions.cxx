@@ -87,6 +87,33 @@ VertexPtr WireCell::Clus::PR::stm_michel_farthest_vertex(Graph& g, VertexPtr fro
     return best;
 }
 
+std::vector<VertexPtr> WireCell::Clus::PR::stm_michel_reachable_vertices(Graph& g, VertexPtr from)
+{
+    std::vector<VertexPtr> out;
+    if (!from || !from->descriptor_valid()) return out;
+    auto dj = stm_dijkstra(g, from, nullptr);
+    for (const auto& [v, d] : dj.dist) { (void)d; out.push_back(v); }
+    // explicit, whatever the map's own order
+    std::sort(out.begin(), out.end(),
+              [](const VertexPtr& a, const VertexPtr& b) { return a->get_graph_index() < b->get_graph_index(); });
+    return out;
+}
+
+std::pair<VertexPtr, double> WireCell::Clus::PR::stm_michel_closest_vertex_of(const std::vector<VertexPtr>& cands,
+                                                                              const WireCell::Point& pt,
+                                                                              const std::function<bool(const VertexPtr&)>& accept)
+{
+    VertexPtr best;
+    double best_d = 1e9;
+    for (const auto& v : cands) {
+        if (!v) continue;
+        if (accept && !accept(v)) continue;
+        const double d = (v->wcpt().point - pt).magnitude();
+        if (d < best_d) { best_d = d; best = v; }
+    }
+    return {best, best_d};
+}
+
 std::vector<SegmentPtr> WireCell::Clus::PR::stm_michel_shortest_chain(Graph& g, VertexPtr from, VertexPtr to)
 {
     std::vector<SegmentPtr> out;

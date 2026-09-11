@@ -54,6 +54,7 @@ TEST_CASE("clus knob defaults: CheckSTM_Michel verdict thresholds")
     D("stop_local_residual_cm", 0.0);      // doc pdvd/62 (T3a): 0 = off, the pr54 floors alone decide
     D("stop_local_residual_min_points", 0);  // doc pdvd/87: 0 = no floor on T3a's keep
     D("stop_local_residual_min_len_cm", 0.0);
+    B("stop_snap_reachable", false);        // doc pdvd/88: 0 = the legacy nearest-vertex stop snap everywhere
     B("stop_local_michel_pieces", false);  // doc pdvd/62 (T3b)
     B("michel_range_energy_guard", false); // doc pdvd/62 (T3c)
     D("michel_range_energy_dis_cm", 5.0);  // the argued distance, not doc 55's best-F1 3 cm row

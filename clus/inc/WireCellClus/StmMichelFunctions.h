@@ -49,6 +49,19 @@ namespace WireCell::Clus::PR {
     VertexPtr stm_michel_farthest_vertex(Graph& g, VertexPtr from,
                                          const std::function<bool(const VertexPtr&)>& accept = nullptr);
 
+    /// doc pdvd/88 (doc pdvd/78 action item 7b): every vertex reachable from
+    /// `from` along graph edges, `from` included, sorted by graph index.
+    /// Empty when `from` is null or has no descriptor.
+    std::vector<VertexPtr> stm_michel_reachable_vertices(Graph& g, VertexPtr from);
+
+    /// doc pdvd/88: the vertex of `cands` nearest `pt` (by its wcpt, the
+    /// point PatternAlgorithms::closest_cluster_vertex measures) among those
+    /// `accept` admits; ties keep the earlier candidate.  {nullptr, 1e9} when
+    /// none qualifies -- closest_cluster_vertex's own "none" value.
+    std::pair<VertexPtr, double> stm_michel_closest_vertex_of(const std::vector<VertexPtr>& cands,
+                                                              const WireCell::Point& pt,
+                                                              const std::function<bool(const VertexPtr&)>& accept = nullptr);
+
     /// The chain's vertices in walk order: entry, every junction, the far
     /// vertex of the last segment.  Size = chain.size() + 1 (0 if chain empty
     /// or a segment is not attached to the running vertex).

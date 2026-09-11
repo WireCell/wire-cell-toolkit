@@ -127,6 +127,9 @@ public:
         // verdict thresholds (cm / deg / ratios; see default_configuration)
         m_stop_snap_tol_cm = get<double>(config, "stop_snap_tol_cm", m_stop_snap_tol_cm);
         m_entry_snap_tol_cm = get<double>(config, "entry_snap_tol_cm", m_entry_snap_tol_cm);
+        // doc pdvd/88 (doc 78 action item 7b): on a candidate where the
+        // stop-local keep fired, snap the stop only onto what the entry can reach.
+        m_stop_snap_reachable = get<bool>(config, "stop_snap_reachable", m_stop_snap_reachable);
         m_stop_fv_margin_cm = get<double>(config, "stop_fv_margin_cm", m_stop_fv_margin_cm);
         m_bragg_contrast_min = get<double>(config, "bragg_contrast_min", m_bragg_contrast_min);
         m_bragg_tail_lo_cm = get<double>(config, "bragg_tail_lo_cm", m_bragg_tail_lo_cm);
@@ -326,6 +329,19 @@ public:
         cfg["mip_dqdx_median"] = m_mip_dqdx_median;   // e/cm
         cfg["stop_snap_tol_cm"] = m_stop_snap_tol_cm;
         cfg["entry_snap_tol_cm"] = m_entry_snap_tol_cm;   // looser: an existing end vertex beats a split that leaves a stub
+        // doc pdvd/88 (doc pdvd/78 action item 7b): default off.  The stop
+        // snap takes the main cluster's nearest vertex (or splits its nearest
+        // segment) with no test that the entry can reach it.  A pr54 residual
+        // the stop-local keep (stop_local_residual_cm) added is disconnected
+        // by construction, and doc pdvd/87 sec 6.2 traced it capturing the
+        // stop: 039349_36/63's kept residual ends 0.64 cm from the tagger's
+        // stop, nearer than the chain's own end (2.29 cm) -> empty chain ->
+        // stop_unmatched.  When on, and ONLY on a candidate where that keep
+        // fired on the main cluster, the snap considers only vertices and
+        // segments the entry reaches; every other candidate runs the legacy
+        // snap.  stop_snap_skipped (written only when on) = 1 where the
+        // legacy snap's nearest vertex was unreachable.
+        cfg["stop_snap_reachable"] = m_stop_snap_reachable;
         cfg["stop_fv_margin_cm"] = m_stop_fv_margin_cm;
         cfg["bragg_contrast_min"] = m_bragg_contrast_min;   // fraction of the tabulated rise
         cfg["bragg_tail_lo_cm"] = m_bragg_tail_lo_cm;
@@ -938,6 +954,7 @@ private:
     double m_stop_local_residual_cm{0.0};         // doc pdvd/62 (T3a): 0 = off
     int m_stop_local_residual_min_points{0};      // doc pdvd/87: Steiner terminals, 0 = no floor
     double m_stop_local_residual_min_len_cm{0.0}; // doc pdvd/87: cm, 0 = no floor
+    bool m_stop_snap_reachable{false};            // doc pdvd/88: reachable-only stop snap on keep-fire candidates
     bool m_stop_local_michel_pieces{false};       // doc pdvd/62 (T3b)
     bool m_michel_range_energy_guard{false};      // doc pdvd/62 (T3c)
     double m_michel_range_energy_dis_cm{5.0};     // cm
@@ -1068,6 +1085,7 @@ private:
         int n_michel_veto_reach_exempt{0};  // doc pdvd/84: T2c would have fired, the turn did not spare it, its reach did
         int n_kept_near_stop_main{0}, n_kept_near_stop_comp{0};  // doc pdvd/62 (T3a): pr54 residuals kept by the stop anchor, main cluster / companions
         int n_floored_near_stop{0};  // doc pdvd/87: residuals inside the stop anchor's radius the size floor refused (main + companions)
+        int stop_snap_skipped{0};    // doc pdvd/88: 1 = the legacy stop snap's nearest vertex was unreachable from the entry, and was skipped
         int n_local_pieces{0};      // doc pdvd/62 (T3b): disconnected same-cluster pieces admitted into the Michel object
         int n_michel_range_veto{0}; // doc pdvd/62 (T3c): a bridged / charge-only Michel demoted by the range-energy guard
         int topology_cleared_bits{0}; // doc pdvd/70 (P1): the reject bits topology_stop_evidence cleared (0 = none)
@@ -1397,6 +1415,58 @@ private:
             SegmentPtr best; double best_d = 1e9; Point best_p;
             for (auto& seg : pa.find_cluster_segments(g, cluster)) {
                 if (!seg || seg->fits().size() < 4) continue;
+                auto [d, p] = segment_get_closest_point(seg, pt, "fit", "main");
+                if (d < best_d) { best_d = d; best = seg; best_p = p; }
+            }
+            if (best && best_d <= tol) {
+                try {
+                    auto [ok, pair, nvtx] = break_segment(g, best, best_p, particle_data(), m_recomb_model, m_dv,
+                                                          1e9 * units::cm, get<bool>(m_cfg, "break_seg_orient", false));
+                    if (ok && nvtx) {
+                        // The cluster is stamped by break_segment itself since
+                        // doc sbnd_xin/docs/pr/143; `best` is chosen from
+                        // find_cluster_segments(g, cluster) just above, so the
+                        // factory writes this cluster.  A clusterless vertex
+                        // here is fatal downstream -- examine_direction returns
+                        // false at once (NeutrinoVertexFinder.cxx:1503) so
+                        // nothing gets oriented, and fill_bee_pf_tree's
+                        // main-cluster test (pf_track_main_cluster_only) then
+                        // rejects every seed from the main vertex; 039252/2
+                        // cluster 86 lost its mu- node and its Michel fell back
+                        // to a ROOT shower (doc pdvd/48 sec 8.0).  The explicit
+                        // stamp that used to stand here is now redundant.
+                        out_dis = best_d;
+                        return nvtx;
+                    }
+                } catch (const std::exception& e) {
+                    SPDLOG_LOGGER_WARN(s_log, "{}anchor_vertex: break_segment threw: {}", m_evt_tag, e.what());
+                }
+            }
+        }
+        return vtx;  // may be null
+    }
+
+    // doc pdvd/88 (doc pdvd/78 action item 7b): anchor_vertex restricted to
+    // what `from` reaches.  Fork by duplication of anchor_vertex above
+    // (CLAUDE.md M10) -- the same nearest-vertex-then-split rule, except that
+    // a vertex, or a segment with an endpoint, the entry cannot reach is never
+    // a candidate.  A pr54 residual kept by the stop-local keep is exactly
+    // such a piece (doc pdvd/87 sec 6.2).
+    VertexPtr anchor_vertex_reachable(PatternAlgorithms& pa, Graph& g, Cluster& cluster, const Point& pt,
+                                      double tol, bool allow_split, double& out_dis, VertexPtr from) const {
+        const auto reach_v = stm_michel_reachable_vertices(g, from);
+        std::set<VertexPtr> reach(reach_v.begin(), reach_v.end());   // membership only, never iterated
+        const Cluster* cl = &cluster;
+        auto [vtx, dis] = stm_michel_closest_vertex_of(reach_v, pt,
+                                                       [cl](const VertexPtr& v) { return v->cluster() == cl; });
+        out_dis = dis;
+        if (vtx && dis <= tol) return vtx;
+        if (allow_split) {
+            SegmentPtr best; double best_d = 1e9; Point best_p;
+            for (auto& seg : pa.find_cluster_segments(g, cluster)) {
+                if (!seg || seg->fits().size() < 4) continue;
+                auto [va, vb] = find_vertices(g, seg);
+                if (!va || !vb || !reach.count(va) || !reach.count(vb)) continue;   // doc pdvd/88
                 auto [d, p] = segment_get_closest_point(seg, pt, "fit", "main");
                 if (d < best_d) { best_d = d; best = seg; best_p = p; }
             }
@@ -1918,6 +1988,8 @@ private:
         // so the floor-off tree keeps its branch list byte-identical.
         if (m_stop_local_residual_min_points > 0 || m_stop_local_residual_min_len_cm > 0)
             I1("n_floored_near_stop", r.n_floored_near_stop);
+        // doc pdvd/88: the same pattern -- absent when the knob is off.
+        if (m_stop_snap_reachable) I1("stop_snap_skipped", r.stop_snap_skipped);
         // doc pdvd/70 (P1): written only when the knob is on (the survey's
         // pattern), so the knob-off tree keeps its branch list byte-identical.
         if (m_topology_stop_evidence) I1("topology_cleared_bits", r.topology_cleared_bits);
@@ -2254,7 +2326,21 @@ void CheckSTM_Michel::visit(Ensemble& ensemble) const
             // cluster 86: a 0.8 cm "pi+" leaf).  So the entry snaps loosely;
             // the stop, whose position the Michel search keys on, snaps tightly.
             entry_v = anchor_vertex(pa, g, *main, rec.entry_pt, m_entry_snap_tol_cm * units::cm, true, entry_dis);
-            stop_v  = anchor_vertex(pa, g, *main, rec.stop_pt,  m_stop_snap_tol_cm * units::cm, true, stop_dis);
+            if (m_stop_snap_reachable && entry_v && rec.n_kept_near_stop_main > 0) {
+                // doc pdvd/88 (item 7b): a residual the stop-local keep added
+                // is disconnected by construction and must not capture the
+                // stop.  The legacy nearest vertex is read (read-only) only to
+                // record whether it was one the entry cannot reach.
+                const auto reach0 = stm_michel_reachable_vertices(g, entry_v);
+                const auto [v_any, d_any] = pa.closest_cluster_vertex(g, *main, rec.stop_pt);
+                rec.stop_snap_skipped = (v_any && std::find(reach0.begin(), reach0.end(), v_any) == reach0.end()) ? 1 : 0;
+                stop_v = anchor_vertex_reachable(pa, g, *main, rec.stop_pt, m_stop_snap_tol_cm * units::cm, true, stop_dis, entry_v);
+                SPDLOG_LOGGER_DEBUG(s_log, "{}stop-snap-reachable: cluster {} skipped {} (nearest vertex d={:.2f} cm) -> stop d={:.2f} cm",
+                                    m_evt_tag, main->get_cluster_id(), rec.stop_snap_skipped, d_any / units::cm, stop_dis / units::cm);
+            }
+            else {
+                stop_v  = anchor_vertex(pa, g, *main, rec.stop_pt,  m_stop_snap_tol_cm * units::cm, true, stop_dis);
+            }
             if (stop_v && stop_v == entry_v) stop_v = nullptr;
         }
         if (!entry_v) {

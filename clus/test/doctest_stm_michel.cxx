@@ -12,6 +12,7 @@
 #include "WireCellUtil/Units.h"
 #include "WireCellUtil/doctest.h"
 
+#include <algorithm>
 #include <cmath>
 #include <limits>
 
@@ -1549,4 +1550,44 @@ TEST_CASE("stm_michel rows keep-mask (doc pdvd/85): drops one role, keeps the re
     const std::vector<char> want{1, 1, 0, 1, 0, 1, 1};
     CHECK(stm_michel_rows_keep(roles, 5) == want);
     CHECK(stm_michel_rows_keep(roles, 9) == std::vector<char>(roles.size(), 1));   // nothing of that role: all kept
+}
+
+TEST_CASE("stm_michel reachable snap (doc pdvd/88): a detached residual nearer the stop is skipped")
+{
+    // doc pdvd/87 sec 6.2 (039349_36/63): the chain's end is 2.3 cm from the
+    // tagger's stop, a kept residual's near end 0.6 cm.  The unrestricted
+    // nearest vertex is the residual's; the reachable one is the chain's end.
+    const Point stop(0, 0, 102.3 * units::cm);
+    Graph g;
+    auto r2    = make_vtx(g, 0, 10.6, 102.3);    // inserted first: order must not matter
+    auto entry = make_vtx(g, 0, 0, 0);
+    auto end   = make_vtx(g, 0, 0, 100);
+    auto r1    = make_vtx(g, 0, 0.6, 102.3);
+    make_track(g, entry, end, 1.0);
+    make_track(g, r1, r2, 1.0);
+
+    auto reach = stm_michel_reachable_vertices(g, entry);
+    REQUIRE(reach.size() == 2);
+    CHECK(reach[0]->get_graph_index() < reach[1]->get_graph_index());
+    CHECK(std::find(reach.begin(), reach.end(), r1) == reach.end());
+
+    auto [v_all, d_all] = stm_michel_closest_vertex_of({r2, entry, end, r1}, stop);
+    CHECK(v_all == r1);                                   // what the legacy snap takes
+    CHECK(d_all == doctest::Approx(0.6 * units::cm));
+    auto [v, d] = stm_michel_closest_vertex_of(reach, stop);
+    CHECK(v == end);                                      // what the reachable snap takes
+    CHECK(d == doctest::Approx(2.3 * units::cm));
+
+    // the predicate still applies (the cluster test); nothing left -> none
+    auto [v2, d2] = stm_michel_closest_vertex_of(reach, stop, [end](const VertexPtr& c) { return c != end; });
+    CHECK(v2 == entry);
+    auto [v3, d3] = stm_michel_closest_vertex_of({}, stop);
+    CHECK(!v3);
+    CHECK(d3 == doctest::Approx(1e9));
+    CHECK(stm_michel_reachable_vertices(g, nullptr).empty());
+    // a lone vertex reaches itself
+    auto lone = make_vtx(g, 50, 0, 0);
+    auto rl = stm_michel_reachable_vertices(g, lone);
+    REQUIRE(rl.size() == 1);
+    CHECK(rl[0] == lone);
 }
