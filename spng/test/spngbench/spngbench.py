@@ -304,6 +304,74 @@ def _read_rss_bytes(pid):
     return None
 
 
+# Clock ticks per second, for turning /proc/<pid>/stat CPU ticks into seconds.
+try:
+    _CLK_TCK = os.sysconf("SC_CLK_TCK") or 100
+except (ValueError, OSError):
+    _CLK_TCK = 100
+
+
+def _cpu_ticks(pid):
+    """Cumulative CPU ticks (utime+stime, all threads) of a process, or None.
+
+    Parsed robustly around the parenthesised comm field (which may itself contain
+    spaces or ')'); utime/stime are fields 14/15 counted from the token after the
+    last ')'.  The value is process-wide (thread group), so multi-threaded jobs
+    accrue more than one tick per wall tick -> CPU% can exceed 100%."""
+    try:
+        with open(f"/proc/{pid}/stat") as fp:
+            data = fp.read()
+    except OSError:
+        return None
+    rp = data.rfind(")")
+    if rp < 0:
+        return None
+    rest = data[rp + 1:].split()
+    # rest[0] = state (field 3); utime = field 14 -> rest[11], stime -> rest[12].
+    try:
+        return int(rest[11]) + int(rest[12])
+    except (IndexError, ValueError):
+        return None
+
+
+def _gpu_util_nvml(nvml):
+    """Device-wide GPU utilization percent: the busiest GPU (max over devices).
+
+    Per-process GPU utilization is unreliable across drivers; with one job in
+    flight the device-wide busy fraction of the GPU(s) it uses is the job's."""
+    best = 0
+    try:
+        for i in range(nvml.nvmlDeviceGetCount()):
+            h = nvml.nvmlDeviceGetHandleByIndex(i)
+            u = int(nvml.nvmlDeviceGetUtilizationRates(h).gpu)
+            if u > best:
+                best = u
+    except Exception:
+        pass
+    return best
+
+
+def _gpu_util_smi():
+    """Device-wide GPU utilization percent (max over devices) via nvidia-smi."""
+    try:
+        out = subprocess.run(
+            ["nvidia-smi", "--query-gpu=utilization.gpu",
+             "--format=csv,noheader,nounits"],
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=3).stdout.decode()
+        best = 0
+        for line in out.splitlines():
+            s = line.strip()
+            if s.isdigit():
+                best = max(best, int(s))
+        return best
+    except Exception:
+        return 0
+
+
+def _avg(values):
+    return round(sum(values) / len(values), 2) if values else 0.0
+
+
 def _nvml_init():
     """Return a pynvml module with handles, or None (fall back to nvidia-smi)."""
     try:
@@ -344,16 +412,20 @@ def _vram_bytes_smi(pid):
 
 
 class MemorySampler(threading.Thread):
-    """Sample a PID's RSS (+ per-process VRAM when gpu=True) at `rate` Hz."""
+    """Sample a PID's RSS + CPU% (+ per-process VRAM and device GPU-util when
+    gpu=True) at `rate` Hz.  Each sample is
+    [t, rss_bytes, vram_bytes, cpu_pct, gpu_util_pct]."""
     def __init__(self, pid, rate=20.0, gpu=False):
         super().__init__(daemon=True)
         self.pid = pid
         self.dt = 1.0 / rate
         self.rate = rate
         self.gpu = gpu
-        self.samples = []                 # list of [t, rss_bytes, vram_bytes]
+        self.samples = []                 # [t, rss, vram, cpu_pct, gpu_util_pct]
         self._halt = threading.Event()
         self._nvml = _nvml_init() if gpu else None
+        self._prev_ticks = None
+        self._prev_t = None
 
     def _vram(self):
         if not self.gpu:
@@ -362,13 +434,30 @@ class MemorySampler(threading.Thread):
             return _vram_bytes_nvml(self._nvml, self.pid)
         return _vram_bytes_smi(self.pid)
 
+    def _gpu_util(self):
+        if not self.gpu:
+            return 0
+        return _gpu_util_nvml(self._nvml) if self._nvml else _gpu_util_smi()
+
+    def _cpu_pct(self, t):
+        ticks = _cpu_ticks(self.pid)
+        cpu = 0.0
+        if ticks is not None and self._prev_ticks is not None:
+            dt = t - self._prev_t
+            if dt > 0:
+                cpu = round((ticks - self._prev_ticks) / _CLK_TCK / dt * 100.0, 1)
+        if ticks is not None:
+            self._prev_ticks, self._prev_t = ticks, t
+        return cpu
+
     def run(self):
         while not self._halt.is_set():
             t = time.time()
             rss = _read_rss_bytes(self.pid)
             if rss is None:
                 break                     # process gone
-            self.samples.append([t, rss, self._vram()])
+            cpu = self._cpu_pct(t)
+            self.samples.append([t, rss, self._vram(), cpu, self._gpu_util()])
             rest = self.dt - (time.time() - t)
             if rest > 0:
                 self._halt.wait(rest)
@@ -380,11 +469,16 @@ class MemorySampler(threading.Thread):
     def result(self):
         rss = [s[1] for s in self.samples]
         vram = [s[2] for s in self.samples]
+        cpu = [s[3] for s in self.samples if len(s) > 3]
+        gutil = [s[4] for s in self.samples if len(s) > 4]
         return {
             "clock": "CLOCK_REALTIME", "rate_hz": self.rate,
             "gpu": self.gpu, "vram_tool": ("pynvml" if self._nvml else "nvidia-smi"),
             "nsamples": len(self.samples),
             "peak_rss": max(rss, default=0), "peak_vram": max(vram, default=0),
+            "avg_vram": _avg(vram),
+            "peak_cpu": max(cpu, default=0.0), "avg_cpu": _avg(cpu),
+            "peak_gpu_util": max(gutil, default=0), "avg_gpu_util": _avg(gutil),
             "samples": self.samples,
         }
 
@@ -419,11 +513,14 @@ class GroupMemorySampler(threading.Thread):
         self.dt = 1.0 / rate
         self.rate = rate
         self.gpu = gpu
-        self.samples = []                 # [t, sum_rss_bytes, sum_vram_bytes]
+        # [t, sum_rss, sum_vram, sum_cpu_pct, gpu_util_pct]
+        self.samples = []
         self.peak_rss = {p: 0 for p in self.pids}
         self.peak_vram = {p: 0 for p in self.pids}
         self._halt = threading.Event()
         self._nvml = _nvml_init() if gpu else None
+        self._prev_ticks = {p: None for p in self.pids}
+        self._prev_t = None
 
     def _vram_map(self):
         if not self.gpu:
@@ -431,6 +528,25 @@ class GroupMemorySampler(threading.Thread):
         if self._nvml:
             return {p: _vram_bytes_nvml(self._nvml, p) for p in self.pids}
         return _vram_map_smi(set(self.pids))
+
+    def _gpu_util(self):
+        if not self.gpu:
+            return 0
+        return _gpu_util_nvml(self._nvml) if self._nvml else _gpu_util_smi()
+
+    def _cpu_sum(self, t):
+        scpu = 0.0
+        dt = (t - self._prev_t) if self._prev_t is not None else 0.0
+        for p in self.pids:
+            ticks = _cpu_ticks(p)
+            if ticks is None:
+                continue
+            prev = self._prev_ticks.get(p)
+            if prev is not None and dt > 0:
+                scpu += (ticks - prev) / _CLK_TCK / dt * 100.0
+            self._prev_ticks[p] = ticks
+        self._prev_t = t
+        return round(scpu, 1)
 
     def run(self):
         while not self._halt.is_set():
@@ -444,6 +560,7 @@ class GroupMemorySampler(threading.Thread):
                     srss += r
                     if r > self.peak_rss[p]:
                         self.peak_rss[p] = r
+            scpu = self._cpu_sum(t)
             vm = self._vram_map()
             svram = sum(vm.values())
             for p, v in vm.items():
@@ -451,7 +568,7 @@ class GroupMemorySampler(threading.Thread):
                     self.peak_vram[p] = v
             if not alive:
                 break                     # all processes gone
-            self.samples.append([t, srss, svram])
+            self.samples.append([t, srss, svram, scpu, self._gpu_util()])
             rest = self.dt - (time.time() - t)
             if rest > 0:
                 self._halt.wait(rest)
@@ -463,12 +580,17 @@ class GroupMemorySampler(threading.Thread):
     def result(self):
         rss = [s[1] for s in self.samples]
         vram = [s[2] for s in self.samples]
+        cpu = [s[3] for s in self.samples if len(s) > 3]
+        gutil = [s[4] for s in self.samples if len(s) > 4]
         return {
             "clock": "CLOCK_REALTIME", "rate_hz": self.rate, "gpu": self.gpu,
             "vram_tool": ("pynvml" if self._nvml else "nvidia-smi"),
             "npids": len(self.pids), "nsamples": len(self.samples),
             "peak_rss_sum": max(rss, default=0),
             "peak_vram_sum": max(vram, default=0),
+            "avg_vram_sum": _avg(vram),
+            "peak_cpu_sum": max(cpu, default=0.0), "avg_cpu_sum": _avg(cpu),
+            "peak_gpu_util": max(gutil, default=0), "avg_gpu_util": _avg(gutil),
             "per_pid_peak_rss": self.peak_rss,
             "per_pid_peak_vram": self.peak_vram,
             "samples": self.samples,
@@ -659,6 +781,11 @@ def run_proc_group(which, device, nproc, adc_base, outdir, model_file=DEFAULT_MO
         "memory": {
             "peak_rss_sum": memres["peak_rss_sum"],
             "peak_vram_sum": memres["peak_vram_sum"],
+            "avg_vram_sum": memres.get("avg_vram_sum", 0.0),
+            "peak_cpu_sum": memres.get("peak_cpu_sum", 0.0),
+            "avg_cpu_sum": memres.get("avg_cpu_sum", 0.0),
+            "peak_gpu_util": memres.get("peak_gpu_util", 0),
+            "avg_gpu_util": memres.get("avg_gpu_util", 0),
             "per_pid_peak_rss": memres["per_pid_peak_rss"],
             "per_pid_peak_vram": memres["per_pid_peak_vram"],
             "vram_tool": memres["vram_tool"], "nsamples": memres["nsamples"],
@@ -806,7 +933,8 @@ def memory_blame(analysis, mp):
     for key, ivals in cats.items():
         ivals = sorted(ivals)
         rss = vram = 0
-        for t, r, v in samples:
+        for s in samples:
+            t, r, v = s[0], s[1], s[2]
             if any(a <= t <= b for a, b in ivals):
                 rss = max(rss, r); vram = max(vram, v)
         out["by_category"][key] = {"peak_rss": rss, "peak_vram": vram}
@@ -814,17 +942,35 @@ def memory_blame(analysis, mp):
 
 
 def memory_summary(runs, analyses):
-    """Aggregate memory blame over ok runs (peak = max across runs)."""
+    """Aggregate memory + compute over ok runs.
+
+    RSS/VRAM peaks and per-category peaks are the max across runs.  The compute
+    duty-cycle stats (VRAM avg, GPU utilization %, CPU %) come straight from each
+    run's memprofile: peak = max across runs, avg = mean of the per-run averages."""
     blames = []
+    mps = []
     for r, a in zip(runs, analyses):
         mp = load_memprofile(r)
         if mp:
             blames.append(memory_blame(a, mp))
+            mps.append(mp)
     if not blames:
         return None
     agg = {"peak_rss": max(b["peak_rss"] for b in blames),
            "peak_vram": max(b["peak_vram"] for b in blames),
            "by_category": {}}
+    # Compute duty-cycle rollup (avg over the per-run averages so a long run does
+    # not out-weigh a short one; peaks are the true max seen in any run).
+    def pk(k):
+        return max((mp.get(k, 0) or 0) for mp in mps) if mps else 0
+    def av(k):
+        vals = [mp.get(k, 0) or 0 for mp in mps]
+        return round(sum(vals) / len(vals), 2) if vals else 0.0
+    agg["avg_vram"] = av("avg_vram")
+    agg["peak_gpu_util"] = pk("peak_gpu_util")
+    agg["avg_gpu_util"] = av("avg_gpu_util")
+    agg["peak_cpu"] = pk("peak_cpu")
+    agg["avg_cpu"] = av("avg_cpu")
     for key in ("dnn", "sp_other", "other"):
         rss = [b["by_category"].get(key, {}).get("peak_rss", 0) for b in blames]
         vram = [b["by_category"].get(key, {}).get("peak_vram", 0) for b in blames]
@@ -1545,7 +1691,7 @@ def emit_markdown(bench, ctx, figs, graphs):
             L.append(f"| {sh} | {inst} | {cl} | {_fmt(w)} | {_fmt(sd)} | {_fmt(co)} |")
 
     if ctx.get("memfigs"):
-        L.append("\n## Memory\n")
+        L.append("\n## Memory and Compute\n")
         L.append("Peak RSS / VRAM, and per-category peak (a category's peak is the "
                  "max sample while any node of that category is active; overlapping, "
                  "not additive):\n")
@@ -1558,10 +1704,21 @@ def emit_markdown(bench, ctx, figs, graphs):
             L.append(f"| {s.upper()} | {mb(mem.get('peak_rss'))} | {mb(mem.get('peak_vram'))} | "
                      f"{mb(bc.get('dnn',{}).get('peak_rss'))} | {mb(bc.get('sp_other',{}).get('peak_rss'))} | "
                      f"{mb(bc.get('other',{}).get('peak_rss'))} |")
+        L.append("\nCompute utilization over the job lifecycle (peak and lifecycle "
+                 "average; CPU% is process-wide and exceeds 100% when multi-threaded, "
+                 "GPU util% is the busiest device):\n")
+        L.append("\n| stage | peak GPU util [%] | avg GPU util [%] | peak VRAM [MB] | avg VRAM [MB] | peak CPU [%] | avg CPU [%] |")
+        L.append("|---|--:|--:|--:|--:|--:|--:|")
+        for s in ctx["stages"]:
+            mem = (R[s].get("memory") or {})
+            def mb(x): return _fmt((x or 0) / 1e6, 0)
+            L.append(f"| {s.upper()} | {_fmt(mem.get('peak_gpu_util'),0)} | {_fmt(mem.get('avg_gpu_util'),1)} | "
+                     f"{mb(mem.get('peak_vram'))} | {mb(mem.get('avg_vram'))} | "
+                     f"{_fmt(mem.get('peak_cpu'),0)} | {_fmt(mem.get('avg_cpu'),1)} |")
         for s in ctx["stages"]:
             if ctx["memfigs"].get(s):
-                L.append(f"\n### {s.upper()} memory + node activity\n")
-                L.append(f"![{s} memory]({ctx['memfigs'][s]})\n")
+                L.append(f"\n### {s.upper()} memory, compute + node activity\n")
+                L.append(f"![{s} memory and compute]({ctx['memfigs'][s]})\n")
 
     if graphs:
         L.append("\n## Flow graphs (per-node CPU/GPU timing)\n")
@@ -1604,7 +1761,7 @@ def emit_html(bench, ctx, figs, graphs):
                      f"<td>{_fmt(w)}</td><td>{_fmt(sd)}</td><td>{_fmt(co)}</td></tr>")
         H.append("</table>")
     if ctx.get("memfigs"):
-        H.append("<h2>Memory</h2>")
+        H.append("<h2>Memory and Compute</h2>")
         H.append("<table><tr><th>stage</th><th>peak RSS [MB]</th><th>peak VRAM [MB]</th>"
                  "<th>DNN</th><th>sp_other</th><th>other (RSS MB)</th></tr>")
         for s in ctx["stages"]:
@@ -1615,9 +1772,23 @@ def emit_html(bench, ctx, figs, graphs):
                      f"<td>{mb(bc.get('sp_other',{}).get('peak_rss'))}</td>"
                      f"<td>{mb(bc.get('other',{}).get('peak_rss'))}</td></tr>")
         H.append("</table>")
+        H.append("<p>Compute utilization over the job lifecycle (peak and lifecycle "
+                 "average; CPU% is process-wide and exceeds 100% when multi-threaded, "
+                 "GPU util% is the busiest device):</p>")
+        H.append("<table><tr><th>stage</th><th>peak GPU util [%]</th><th>avg GPU util [%]</th>"
+                 "<th>peak VRAM [MB]</th><th>avg VRAM [MB]</th><th>peak CPU [%]</th>"
+                 "<th>avg CPU [%]</th></tr>")
+        for s in ctx["stages"]:
+            mem = (R[s].get("memory") or {})
+            def mb(x): return _fmt((x or 0) / 1e6, 0)
+            H.append(f"<tr><td>{s.upper()}</td><td>{_fmt(mem.get('peak_gpu_util'),0)}</td>"
+                     f"<td>{_fmt(mem.get('avg_gpu_util'),1)}</td><td>{mb(mem.get('peak_vram'))}</td>"
+                     f"<td>{mb(mem.get('avg_vram'))}</td><td>{_fmt(mem.get('peak_cpu'),0)}</td>"
+                     f"<td>{_fmt(mem.get('avg_cpu'),1)}</td></tr>")
+        H.append("</table>")
         for s in ctx["stages"]:
             if ctx["memfigs"].get(s):
-                H.append(f"<h3>{s.upper()} memory + node activity</h3><p><img src='{ctx['memfigs'][s]}'></p>")
+                H.append(f"<h3>{s.upper()} memory, compute + node activity</h3><p><img src='{ctx['memfigs'][s]}'></p>")
 
     if graphs:
         H.append("<h2>Flow graphs (per-node CPU/GPU timing)</h2>")
@@ -1666,7 +1837,16 @@ def emit_latex(bench, ctx, figs, graphs, fragment=False, figpre=""):
                      f"{_fmt(w)} & {_fmt(sd)} & {_fmt(co)} " + r"\\")
         T.append(r"\bottomrule\end{tabular}")
     if ctx.get("memfigs"):
-        T.append(sub + "Memory}")
+        T.append(sub + "Memory and Compute}")
+        T.append(r"\begin{tabular}{lrrrrrr}\toprule")
+        T.append(r"stage & peak GPU\% & avg GPU\% & peak VRAM & avg VRAM & peak CPU\% & avg CPU\% \\\midrule")
+        for s in ctx["stages"]:
+            mem = (R[s].get("memory") or {})
+            def mb(x): return _fmt((x or 0) / 1e6, 0)
+            T.append(f"{s.upper()} & {_fmt(mem.get('peak_gpu_util'),0)} & {_fmt(mem.get('avg_gpu_util'),1)} & "
+                     f"{mb(mem.get('peak_vram'))} & {mb(mem.get('avg_vram'))} & "
+                     f"{_fmt(mem.get('peak_cpu'),0)} & {_fmt(mem.get('avg_cpu'),1)} " + r"\\")
+        T.append(r"\bottomrule\end{tabular}")
         for s in ctx["stages"]:
             if ctx["memfigs"].get(s):
                 T.append(r"\paragraph{" + s.upper() + "}")
@@ -1720,18 +1900,22 @@ def make_memory_figures(bench, base, figdir):
         ts = [s[0] - t0 for s in samples]
         rss = [s[1] / 1e6 for s in samples]
         vram = [s[2] / 1e6 for s in samples]
+        cpu = [(s[3] if len(s) > 3 else 0.0) for s in samples]
+        gutil = [(s[4] if len(s) > 4 else 0) for s in samples]
         has_v = bool(mp.get("gpu")) and max(vram) > 0
+        has_g = bool(mp.get("gpu")) and max(gutil, default=0) > 0
 
         nodes = [n for n in (tl or {}).get("nodes", []) if n.get("intervals")]
         nodes.sort(key=lambda n: min(a for a, b in n["intervals"]))
         nrows = len(nodes)
         gh = max(1.2, min(9.0, 0.14 * nrows))
-        fig, (axp, axg) = plt.subplots(
-            2, 1, figsize=(9, 2.6 + gh), sharex=True,
-            gridspec_kw={"height_ratios": [2.4, gh]})
+        # Three time-aligned panels: memory, compute (CPU%/GPU-util%), node Gantt.
+        fig, (axp, axc, axg) = plt.subplots(
+            3, 1, figsize=(9, 4.4 + gh), sharex=True,
+            gridspec_kw={"height_ratios": [2.4, 1.8, gh]})
         axp.plot(ts, rss, color="#5f8fbf", lw=1.2, label="RSS")
         axp.set_ylabel("RSS [MB]", color="#5f8fbf")
-        axp.set_title(f"{stage.upper()} — memory vs time and node activity")
+        axp.set_title(f"{stage.upper()} — memory and compute vs time, and node activity")
         # X+Y grid on the profile; X grid on the timeline, both sharing X so their
         # vertical grid lines align.
         axp.grid(True, which="major", axis="both", alpha=0.3, linestyle=":")
@@ -1739,6 +1923,17 @@ def make_memory_figures(bench, base, figdir):
             axv = axp.twinx()
             axv.plot(ts, vram, color="#d95f5f", lw=1.2, label="VRAM")
             axv.set_ylabel("VRAM [MB]", color="#d95f5f")
+        # Compute panel: CPU% (left, may exceed 100% for multi-threaded jobs) and
+        # device GPU utilization % (right), time-aligned with the memory panel.
+        axc.plot(ts, cpu, color="#4a9f6f", lw=1.2, label="CPU")
+        axc.set_ylabel("CPU [%]", color="#4a9f6f")
+        axc.grid(True, which="major", axis="both", alpha=0.3, linestyle=":")
+        axc.set_ylim(bottom=0)
+        if has_g:
+            axgu = axc.twinx()
+            axgu.plot(ts, gutil, color="#c78a3b", lw=1.2, label="GPU util")
+            axgu.set_ylabel("GPU util [%]", color="#c78a3b")
+            axgu.set_ylim(0, 100)
         # Draw the intervals and remember, per node type (class), the first one so
         # we can label the trace with the node-type name.
         first_of_class = {}
@@ -2147,6 +2342,71 @@ def make_grid_membars(cells, figdir):
     return figs
 
 
+def make_grid_computebars(cells, figdir):
+    """Per grid point compute utilization (GPU busy % and CPU %), OSP vs SPNG.
+
+    Each grid point shows the lifecycle PEAK as a bar and the lifecycle AVERAGE
+    as an overlaid marker, from the top-level compute duty-cycle stats."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from matplotlib.patches import Patch
+    from matplotlib.lines import Line2D
+
+    figs = {}
+    figdir = Path(figdir)
+    ok = [c for c in cells if (c.get("mem", {}).get("osp") or c.get("mem", {}).get("spng"))]
+    ok = sorted(ok, key=lambda c: (c["gpu"], c["torch"], c["scheme"], c["wc"]))
+    if not ok:
+        return figs
+
+    def lab(c):
+        b = GPU_MODE_LABEL.get(c["gpu"], f"{c['gpu']}gpu").replace("CPU + ", "").replace("CPU only", "cpu")
+        return f"{b}/{c['scheme'][:4] if c['gpu']>=2 else 'omp'+str(c['torch'])}/wc{c['wc']}"
+
+    labels = [lab(c) for c in ok]
+    x = list(range(len(labels)))
+
+    def val(c, s, key, scale=1.0):
+        return ((c.get("mem", {}).get(s) or {}).get(key) or 0) * scale
+
+    colors = {"osp": "#5f8fbf", "spng": "#d95f5f"}
+    for peakkey, avgkey, ylabel, title, fname, ymax, scale in (
+        ("peak_gpu_util", "avg_gpu_util", "GPU utilization [%]",
+         "GPU utilization per grid point (bar = peak, marker = lifecycle avg)",
+         "gpuutil", 100, 1.0),
+        ("peak_vram", "avg_vram", "GPU VRAM [MB]",
+         "GPU VRAM per grid point (bar = peak, marker = lifecycle avg)",
+         "vram", None, 1e-6),
+        ("peak_cpu", "avg_cpu", "CPU utilization [%]",
+         "CPU utilization per grid point (bar = peak, marker = lifecycle avg)",
+         "cpu", None, 1.0)):
+        if not any(val(c, s, peakkey) > 0 for c in ok for s in ("osp", "spng")):
+            continue
+        fig, ax = plt.subplots(figsize=(max(6, 0.3 * len(labels) + 2), 4))
+        for s, dx in (("osp", -0.2), ("spng", 0.2)):
+            peaks = [val(c, s, peakkey, scale) for c in ok]
+            avgs = [val(c, s, avgkey, scale) for c in ok]
+            ax.bar([i + dx for i in x], peaks, width=0.4, color=colors[s],
+                   alpha=0.55, label=f"{s.upper()} peak")
+            ax.scatter([i + dx for i in x], avgs, s=14, color=colors[s],
+                       edgecolor="black", linewidth=0.3, zorder=3)
+        ax.set_xticks(x); ax.set_xticklabels(labels, rotation=90, fontsize=6)
+        ax.set_ylabel(ylabel)
+        if ymax:
+            ax.set_ylim(0, max(ymax, ax.get_ylim()[1]))
+        ax.set_title(title)
+        ax.legend(handles=[Patch(color=colors["osp"], alpha=0.55, label="OSP peak"),
+                           Patch(color=colors["spng"], alpha=0.55, label="SPNG peak"),
+                           Line2D([0], [0], marker="o", color="w", markerfacecolor="#444",
+                                  markeredgecolor="black", markersize=6, label="lifecycle avg")],
+                  fontsize=7, ncol=3)
+        fig.tight_layout()
+        p = figdir / f"bars_{fname}.png"; fig.savefig(p, dpi=120); plt.close(fig)
+        figs[fname] = p.name
+    return figs
+
+
 # ---------------------------------------------------------------------------
 # Process-parallel axis reporting: read the proc-*.json records and chart the
 # aggregate wall time and the summed RAM/VRAM footprint vs the number of
@@ -2287,11 +2547,41 @@ def render_stage_graph(tlas, out_png):
     return out_png.name
 
 
+def _osp_dnnroi_model(tlas):
+    """Extract the OSP DNN-ROI TorchScript model path from the compiled config.
+
+    The OSP DNN model is baked into the detector config (not a benchmark TLA), so
+    compile the osp-stage jsonnet with `wcsonnet` and read the TorchService's
+    `model` field.  Returns the path string, or None if wcsonnet is unavailable or
+    the field is absent."""
+    if not shutil.which("wcsonnet"):
+        return None
+    args = ["wcsonnet"]
+    for k, v in tlas.items():
+        args += ["-A", f"{k}={v}"]
+    args += [str(JSONNET)]
+    try:
+        r = subprocess.run(args, env=os.environ.copy(), stdout=subprocess.PIPE,
+                           stderr=subprocess.DEVNULL, timeout=120)
+        if r.returncode != 0:
+            return None
+        cfg = json.loads(r.stdout.decode())
+    except Exception:
+        return None
+    for o in (cfg if isinstance(cfg, list) else []):
+        if isinstance(o, dict) and o.get("type") == "TorchService":
+            m = (o.get("data") or {}).get("model")
+            if m:
+                return m
+    return None
+
+
 def make_job_graphs(grid, cells, outdir):
     """Render sim/osp/spng data-flow graphs and gather the driving input files.
 
-    Returns (job_graphs, inputs) where job_graphs maps stage -> png basename and
-    inputs is the list of depo files used to drive the benchmark.
+    Returns (job_graphs, inputs, models) where job_graphs maps stage -> png
+    basename, inputs is the list of depo files, and models maps
+    {"osp": DNN-ROI model, "spng": ROI-uniter model} (paths, or None).
     """
     depos = grid["meta"].get("depos") or []
     adc = grid["meta"].get("adc_inputs") or []
@@ -2316,7 +2606,11 @@ def make_job_graphs(grid, cells, outdir):
                                Path(outdir) / f"job_{st}.png")
         if g:
             job_graphs[st] = g
-    return job_graphs, depos
+    # SPNG ROI-uniter model is the model_file TLA; OSP's DNN-ROI model is baked
+    # into the detector config, recovered by compiling the osp-stage jsonnet.
+    models = {"spng": common["model_file"],
+              "osp": _osp_dnnroi_model(dict(common, stage="osp", input=stage_input["osp"]))}
+    return job_graphs, depos, models
 
 
 JOB_DESC = {
@@ -2348,7 +2642,8 @@ def grid_report_command(grid_path, outdir, formats=("md", "html", "tex"),
     mats = make_grid_matrix(cells, outdir)
     bars = make_grid_bars(cells, outdir)
     bars.update(make_grid_membars(cells, outdir))
-    job_graphs, inputs = make_job_graphs(grid, cells, outdir)
+    bars.update(make_grid_computebars(cells, outdir))
+    job_graphs, inputs, models = make_job_graphs(grid, cells, outdir)
 
     # Process-parallel axis (proc-*.json), if any were run into this directory.
     precs = proc_records(base)
@@ -2373,7 +2668,7 @@ def grid_report_command(grid_path, outdir, formats=("md", "html", "tex"),
     ctx = {"grid": grid, "mats": mats, "bars": bars,
            "overview": _grid_overview_rows(cells), "points": points,
            "ncells": len(cells), "jobs": job_graphs, "inputs": inputs,
-           "proc_figs": proc_figs, "proc_rows": proc_rows}
+           "models": models, "proc_figs": proc_figs, "proc_rows": proc_rows}
     written = []
     if "md" in formats:
         p = outdir / "grid-summary.md"; p.write_text(_emit_grid_md(ctx)); written.append(p)
@@ -2452,6 +2747,10 @@ def _emit_grid_md(ctx):
     L.append("\n**Input depo file(s):**\n")
     for f in (ctx["inputs"] or ["(none recorded)"]):
         L.append(f"- `{f}`")
+    models = ctx.get("models") or {}
+    L.append("\n**Model files:**\n")
+    L.append(f"- OSP DNN-ROI: `{models.get('osp') or '(not resolved)'}`")
+    L.append(f"- SPNG ROI-uniter: `{models.get('spng') or '(not resolved)'}`")
     for st in ("sim", "osp", "spng"):
         L.append(f"\n### {st}\n")
         L.append(JOB_DESC[st] + "\n")
@@ -2468,7 +2767,7 @@ def _emit_grid_md(ctx):
              "that shows real speedup: it falls as wire-cell cores rise. `total` is the "
              "sum of per-node wall spans, a work/utilization measure that RISES with "
              "cores as concurrent nodes' spans inflate; it is not latency.*\n")
-    for k in ("latency", "total", "ratio", "peakram", "peakvram"):
+    for k in ("latency", "total", "ratio", "peakram", "peakvram", "vram", "gpuutil", "cpu"):
         if ctx["bars"].get(k):
             L.append(f"\n![{k}]({ctx['bars'][k]})\n")
 
@@ -2525,6 +2824,11 @@ def _emit_grid_html(ctx):
     for f in (ctx["inputs"] or ["(none recorded)"]):
         H.append(f"<li><code>{esc(f)}</code></li>")
     H.append("</ul>")
+    models = ctx.get("models") or {}
+    H.append("<p><b>Model files:</b></p><ul>")
+    H.append(f"<li>OSP DNN-ROI: <code>{esc(models.get('osp') or '(not resolved)')}</code></li>")
+    H.append(f"<li>SPNG ROI-uniter: <code>{esc(models.get('spng') or '(not resolved)')}</code></li>")
+    H.append("</ul>")
     for st in ("sim", "osp", "spng"):
         H.append(f"<h3>{st}</h3><p>{esc(JOB_DESC[st]).replace('**','')}</p>")
         if ctx["jobs"].get(st):
@@ -2539,7 +2843,7 @@ def _emit_grid_html(ctx):
              "rise. <code>total</code> is the sum of per-node wall spans, a "
              "work/utilization measure that RISES with cores as concurrent nodes' spans "
              "inflate; it is not latency.</em></p>")
-    for k in ("latency", "total", "ratio", "peakram", "peakvram"):
+    for k in ("latency", "total", "ratio", "peakram", "peakvram", "vram", "gpuutil", "cpu"):
         if ctx["bars"].get(k):
             H.append(f"<p><img src='{ctx['bars'][k]}'></p>")
     if ctx.get("proc_rows"):
@@ -2586,6 +2890,10 @@ def _emit_grid_tex(ctx):
          r"\paragraph{Input depo file(s):}~\\"]
     for f in (ctx["inputs"] or ["(none recorded)"]):
         T.append(r"\texttt{" + esc(f) + r"}\\")
+    models = ctx.get("models") or {}
+    T.append(r"\paragraph{Model files:}~\\")
+    T.append(r"OSP DNN-ROI: \texttt{" + esc(models.get("osp") or "(not resolved)") + r"}\\")
+    T.append(r"SPNG ROI-uniter: \texttt{" + esc(models.get("spng") or "(not resolved)") + r"}\\")
     for st in ("sim", "osp", "spng"):
         T.append(r"\subsection*{" + st + "}")
         T.append(esc(JOB_DESC[st].replace("**", "")))
@@ -2603,7 +2911,7 @@ def _emit_grid_tex(ctx):
              r"\texttt{total} is the sum of per-node wall spans, a work/utilization "
              r"measure that RISES with cores as concurrent nodes' spans inflate; it is "
              r"not latency.}" + "\n")
-    for k in ("latency", "total", "ratio", "peakram", "peakvram"):
+    for k in ("latency", "total", "ratio", "peakram", "peakvram", "vram", "gpuutil", "cpu"):
         if ctx["bars"].get(k):
             T.append(r"\begin{center}\includegraphics[width=\textwidth]{" + ctx["bars"][k] + r"}\end{center}")
     if ctx.get("proc_rows"):

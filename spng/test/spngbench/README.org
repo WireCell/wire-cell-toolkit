@@ -46,13 +46,18 @@ Each osp/spng job (TbbFlow) also emits a *node timeline* JSON --- per-execution
 (=TbbDataFlowGraph.timeline= config; =NodeInfo= collects the intervals).  The
 driver reads this instead of parsing =Timer= log lines (summing intervals
 recovers the per-node totals), and while wire-cell runs it samples the child
-process's *CPU RSS* (=/proc/PID/status=) and *per-process GPU VRAM* (=pynvml= if
-importable, else =nvidia-smi=) at 20 Hz into a =*.memprofile.json= (CLOCK_REALTIME,
-so samples align with the node intervals).  Correlating the two gives a per
+process's *CPU RSS* (=/proc/PID/status=), *CPU utilization* (=/proc/PID/stat=
+utime+stime deltas; process-wide, so it exceeds 100% when multi-threaded),
+*per-process GPU VRAM*, and the *device GPU utilization* (busiest GPU; =pynvml=
+if importable, else =nvidia-smi=) at 20 Hz into a =*.memprofile.json=
+(CLOCK_REALTIME, so samples align with the node intervals).  Each sample is
+=[t, rss, vram, cpu%, gpu_util%]=.  Correlating with the timeline gives a per
 category (DNN / sp_other / other) *peak-memory blame*; note per-category peaks
 overlap under parallelism and are not additive.  VRAM/RSS are the *reserved*
 footprint (CUDA context + torch caching allocator; glibc heap) which grows to a
-peak but does not shrink on free.
+peak but does not shrink on free.  The memory summary also records lifecycle
+*peak and average* VRAM, GPU utilization and CPU utilization (a duty-cycle
+measure over the whole job).
 
 ** Thread control (important)
 
@@ -129,7 +134,12 @@ It surfaces OSP-vs-SPNG and per-node differences, separating I/O from SP nodes
 and, within SP, the DNN forward (=Pytorch::DNNROIFinding= / =SPNG::TensorForward=)
 from the non-DNN algorithms.  Figures: category-composition bars (OSP vs SPNG),
 per-stage top-node bars, and the OSP and SPNG *flow graphs* (GraphViz =dot=)
-with each node annotated by wall/core time and colored by category.  The LaTeX
+with each node annotated by wall/core time and colored by category.  A *Memory
+and Compute* section tabulates peak RSS/VRAM (with per-category blame) and the
+lifecycle peak/average of GPU utilization, VRAM and CPU utilization, and for each
+stage draws a three-panel time-aligned figure: memory (RSS/VRAM) vs time, compute
+(CPU% and GPU-util%) vs time, and the node-activity Gantt --- so a compute
+plateau or stall can be read against which nodes were running.  The LaTeX
 builds with =pdflatex= (needs =graphicx=, =booktabs=); the flow graphs need the
 =dot= and =wcpy= programs (skipped with =--no-graphs= or if absent).
 
@@ -140,8 +150,11 @@ spans every grid point.  It contains:
 
 - A *Jobs* section describing the three wire-cell jobs (sim, osp, spng) with a
   data-flow graph for each (from =wcpy pgraph dotify --no-services --no-params=,
-  so service components and config parameters are omitted) and the list of input
-  depo file(s) that drove the benchmark.
+  so service components and config parameters are omitted), the list of input
+  depo file(s) that drove the benchmark, and the two DNN *model files*: the OSP
+  DNN-ROI model (a =TorchService= baked into the detector config, recovered by
+  compiling the osp-stage jsonnet with =wcsonnet=) and the SPNG ROI-uniter model
+  (the =model_file= TLA).
 
 - A *matrix* that is the outer product of *device modes* (rows: CPU only,
   CPU+1GPU, CPU+2GPU, ...) and *node categories* (columns: DNN, sp\_other, other,
@@ -158,7 +171,10 @@ spans every grid point.  It contains:
   (=bars_total.png=): the sum of per-node wall spans, a work/utilization measure
   that *rises* with cores because each concurrently-running node's wall span
   inflates under GPU serialization and CPU contention; it is *not* latency and
-  must not be read as one.  The SPNG/OSP ratio uses elapsed latency.
+  must not be read as one.  The SPNG/OSP ratio uses elapsed latency.  Further
+  charts plot per-grid-point *peak RAM/VRAM* (per category), and lifecycle
+  *GPU VRAM*, *GPU utilization* and *CPU utilization* (each a bar = peak with an
+  overlaid marker = lifecycle average, OSP vs SPNG).
 - A grid *overview table*.
 - A *per-grid-point summary* for every cell (=report= output), linked from the
   Markdown/HTML and =\input= into the LaTeX, with a table of contents.
