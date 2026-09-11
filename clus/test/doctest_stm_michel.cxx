@@ -1532,3 +1532,21 @@ TEST_CASE("stm_michel moved-stop spare: the record's 12 veto instances at 60 deg
     // The kink alone (doc 72's 60) leaves 039252_2/79 at 59.58 vetoed.
     CHECK(stm_michel_moved_stop_spare(59.58, 9.3, 60, -1) == StmMichelMovedStopSpare::kVeto);
 }
+
+TEST_CASE("stm_michel capture-gamma withhold (doc pdvd/85): only with the knob on, only on a rejected candidate")
+{
+    CHECK_FALSE(stm_michel_stop_gamma_withhold(false, 0u));
+    CHECK_FALSE(stm_michel_stop_gamma_withhold(false, 1u));   // knob off: published on every candidate, as before
+    CHECK_FALSE(stm_michel_stop_gamma_withhold(true, 0u));    // is_stm 1: kept
+    CHECK(stm_michel_stop_gamma_withhold(true, 1u));
+    CHECK(stm_michel_stop_gamma_withhold(true, 0x80000000u)); // any bit rejects
+}
+
+TEST_CASE("stm_michel rows keep-mask (doc pdvd/85): drops one role, keeps the rest in order")
+{
+    CHECK(stm_michel_rows_keep({}, 5).empty());
+    const std::vector<int> roles{1, 1, 5, 3, 5, 6, 4};
+    const std::vector<char> want{1, 1, 0, 1, 0, 1, 1};
+    CHECK(stm_michel_rows_keep(roles, 5) == want);
+    CHECK(stm_michel_rows_keep(roles, 9) == std::vector<char>(roles.size(), 1));   // nothing of that role: all kept
+}

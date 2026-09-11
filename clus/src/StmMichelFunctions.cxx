@@ -796,3 +796,16 @@ WireCell::Clus::PR::stm_michel_moved_stop_spare(double kink_deg, double reach_cm
     if (reach_min_cm >= 0 && reach_cm >= reach_min_cm) return StmMichelMovedStopSpare::kReach;
     return StmMichelMovedStopSpare::kVeto;
 }
+
+bool WireCell::Clus::PR::stm_michel_stop_gamma_withhold(bool require_stm, unsigned reject_bits)
+{
+    return require_stm && reject_bits != 0;
+}
+
+std::vector<char> WireCell::Clus::PR::stm_michel_rows_keep(const std::vector<int>& roles, int drop_role)
+{
+    std::vector<char> keep(roles.size(), 1);
+    for (size_t i = 0; i < roles.size(); ++i)
+        if (roles[i] == drop_role) keep[i] = 0;
+    return keep;
+}

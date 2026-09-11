@@ -585,6 +585,16 @@ namespace WireCell::Clus::PR {
     StmMichelMovedStopSpare stm_michel_moved_stop_spare(double kink_deg, double reach_cm,
                                                         double kink_min_deg, double reach_min_cm);
 
+    /// doc pdvd/85 (doc 78 action item 5): whether a candidate's capture
+    /// gammas (the doc pdvd/51 stage, role 5) are withheld -- true exactly when
+    /// the knob is on and the verdict rejects the candidate (any reject bit
+    /// set, i.e. is_stm 0).  A capture gamma presupposes a muon that stopped.
+    bool stm_michel_stop_gamma_withhold(bool require_stm, unsigned reject_bits);
+
+    /// doc pdvd/85: the keep-mask for an order-preserving row erase -- 0 where
+    /// roles[i] == drop_role, 1 elsewhere, parallel to `roles`.
+    std::vector<char> stm_michel_rows_keep(const std::vector<int>& roles, int drop_role);
+
 }  // namespace WireCell::Clus::PR
 
 #endif

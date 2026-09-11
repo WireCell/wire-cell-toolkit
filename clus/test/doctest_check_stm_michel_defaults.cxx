@@ -141,6 +141,7 @@ TEST_CASE("clus knob defaults: CheckSTM_Michel verdict thresholds")
     D("stop_gamma_min_ke_mev", 0.2);
     D("stop_gamma_max_ke_mev", 20.0);
     D("stop_gamma_max_n", 8);
+    B("stop_gamma_require_stm", false);  // doc pdvd/85: capture gamma on every candidate, stopper or not
 
     // doc pdvd/53: the SURVEY.  Default OFF is the load-bearing value -- with it
     // false an absent key leaves the whole component byte-identical, including

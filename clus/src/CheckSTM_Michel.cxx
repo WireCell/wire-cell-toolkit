@@ -164,6 +164,8 @@ public:
         m_stop_gamma_min_ke_mev = get<double>(config, "stop_gamma_min_ke_mev", m_stop_gamma_min_ke_mev);
         m_stop_gamma_max_ke_mev = get<double>(config, "stop_gamma_max_ke_mev", m_stop_gamma_max_ke_mev);
         m_stop_gamma_max_n = get<int>(config, "stop_gamma_max_n", m_stop_gamma_max_n);
+        // doc pdvd/85 (doc 78 action item 5): a capture gamma only on a stopper.
+        m_stop_gamma_require_stm = get<bool>(config, "stop_gamma_require_stm", m_stop_gamma_require_stm);
         // doc pdvd/53: the survey.
         m_survey_enable = get<bool>(config, "survey_enable", m_survey_enable);
         m_survey_radius_cm = get<double>(config, "survey_radius_cm", m_survey_radius_cm);
@@ -368,6 +370,9 @@ public:
         cfg["stop_gamma_min_ke_mev"] = m_stop_gamma_min_ke_mev;
         cfg["stop_gamma_max_ke_mev"] = m_stop_gamma_max_ke_mev;
         cfg["stop_gamma_max_n"] = m_stop_gamma_max_n;
+        // doc pdvd/85.  false reproduces the doc pdvd/84 tree: the capture
+        // gamma is published on every candidate, stopper or not.
+        cfg["stop_gamma_require_stm"] = m_stop_gamma_require_stm;
         // doc pdvd/53.  survey_enable false reproduces the doc pdvd/51 tree,
         // stm_michel_pts included (no role-6 rows, no rej/d_stop/d_body columns).
         cfg["survey_enable"] = m_survey_enable;
@@ -873,6 +878,16 @@ private:
     double m_stop_gamma_min_ke_mev{0.2};
     double m_stop_gamma_max_ke_mev{20.0};
     int m_stop_gamma_max_n{8};
+    // doc pdvd/85 (doc 78 action item 5): a capture gamma is the claim that
+    // the muon STOPPED and was captured, so on a candidate the verdict rejects
+    // it has no stop to belong to.  On the owner's merged scan record the
+    // stage's clusters are 36 gamma / 0 delta-other on is_stm 1 candidates and
+    // 7 gamma / 33 delta-other on is_stm 0 ones (27 of those on through-going
+    // muons).  On: after the verdict is final, a rejected candidate's capture
+    // gammas are withheld -- no role-5 rows, no PF showers, the segments'
+    // particle info restored, stop_gamma_* at their defaults, and the count in
+    // n_stop_gammas_withheld.  Off (default): published on every candidate.
+    bool m_stop_gamma_require_stm{false};
     // doc pdvd/53: the SURVEY.  Scaffolding for the hand scan, not a physics
     // selection.  A companion admitted only by the survey is fitted into the
     // graph and given role-6 point rows so the display can draw it, click it
@@ -1085,6 +1100,7 @@ private:
         int n_stop_gammas{0}, stop_gamma_n_unfit{0}, stop_gamma_seg_id{-1};
         double stop_gamma_ke_tot{0}, stop_gamma_ke_max{0}, stop_gamma_charge{0};
         double stop_gamma_dis_min{-1}, stop_gamma_dis_max{-1};
+        int n_stop_gammas_withheld{0};   // doc pdvd/85
         // doc pdvd/53: the survey.  n_survey_clusters counts admitted companion
         // clusters that yielded at least one UNCLAIMED fitted segment;
         // n_survey_segs counts those segments; n_survey_unfit counts admitted
@@ -1933,6 +1949,7 @@ private:
         D1("stop_gamma_ke_tot", r.stop_gamma_ke_tot); D1("stop_gamma_ke_max", r.stop_gamma_ke_max);
         D1("stop_gamma_charge", r.stop_gamma_charge);
         D1("stop_gamma_dis_min", r.stop_gamma_dis_min); D1("stop_gamma_dis_max", r.stop_gamma_dis_max);
+        if (m_stop_gamma_require_stm) I1("n_stop_gammas_withheld", r.n_stop_gammas_withheld);   // doc pdvd/85
         // doc pdvd/53: the survey.  Written only when the knob is on, so the
         // knob-off T_stm_michel branch list is exactly the doc pdvd/51 one.
         if (m_survey_enable) {
@@ -3249,6 +3266,11 @@ void CheckSTM_Michel::visit(Ensemble& ensemble) const
         // NOT folded into the Michel.  One object per companion CLUSTER, its own
         // Shower, its own branches, role 5 in the point cloud.
         std::vector<std::pair<ShowerPtr, double>> gamma_showers;   // (shower, KE MeV)
+        // doc pdvd/85: what the withhold step needs to undo, filled only with
+        // stop_gamma_require_stm on -- each accepted segment, its distance to
+        // the stop, and the particle info set_pdg is about to overwrite.
+        struct GWithhold { SegmentPtr seg; double d_stop; std::shared_ptr<Aux::ParticleInfo> info; double score; };
+        std::vector<GWithhold> sg_withhold;
         if (m_stop_gamma_enable && stop_v && !companions.empty()) {
             // Clusters the Michel object already owns are off limits.  The ring
             // makes this near-vacuous -- the Michel's cluster test is the ring's
@@ -3437,6 +3459,9 @@ void CheckSTM_Michel::visit(Ensemble& ensemble) const
                 if (rec.stop_gamma_dis_min < 0 || d_cm < rec.stop_gamma_dis_min) rec.stop_gamma_dis_min = d_cm;
                 if (d_cm > rec.stop_gamma_dis_max) rec.stop_gamma_dis_max = d_cm;
                 if (rec.stop_gamma_seg_id < 0) rec.stop_gamma_seg_id = o.cluster_id * 1000 + o.gidx;
+                if (m_stop_gamma_require_stm)
+                    for (const auto& [sg, d] : o.segs)
+                        if (sg) sg_withhold.push_back({sg, d, sg->particle_info(), sg->particle_score()});
                 for (const auto& [sg, d] : o.segs) { (void)d; set_pdg(sg, 11); add_points(rec, sg, 5); }
                 if (!m_build_michel_shower) continue;
                 // The particle-flow node.  set_start_vertex(stop_v, 2) is the
@@ -3859,6 +3884,53 @@ void CheckSTM_Michel::visit(Ensemble& ensemble) const
                                     m_evt_tag, rec.cluster_id, bits_string(clr), rec.michel_conn_type,
                                     rec.michel_ke_best, rec.michel_len / units::cm, bits_string(rec.reject_bits));
             }
+        }
+
+        // ---- doc pdvd/85 (doc 78 action item 5): a capture gamma only on a stopper
+        // The capture stage (doc pdvd/51) runs on every candidate and publishes
+        // before the verdict exists; here, with every reject bit final (nothing
+        // below sets one, and the coverage test above has already counted these
+        // rows), a REJECTED candidate's capture gammas are withheld.  Their
+        // role-5 rows go (order of the rest kept), their segments get back the
+        // particle info they had before set_pdg, their showers leave the
+        // published set -- calculate_shower_kinematics energised every shower
+        // on its own, so the Michel's numbers above are the knob-off ones -- and
+        // stop_gamma_* read as if the stage had accepted nothing.  rec.claimed
+        // keeps them, so the gamma collect and the census see the knob-off pool.
+        // With the survey on they come back as role-6 rows, rej 16, so the scan
+        // display still draws them.  An accepted candidate is untouched.
+        if (stm_michel_stop_gamma_withhold(m_stop_gamma_require_stm, rec.reject_bits) &&
+            (rec.n_stop_gammas > 0 || rec.stop_gamma_n_unfit > 0)) {
+            const std::vector<char> keep = stm_michel_rows_keep(rec.prole, 5);
+            auto squeeze = [&keep](auto& v) {
+                if (v.size() != keep.size()) return;   // rej / d_stop / d_body exist only with the survey or census on
+                size_t j = 0;
+                for (size_t i = 0; i < v.size(); ++i)
+                    if (keep[i]) v[j++] = v[i];
+                v.resize(j);
+            };
+            squeeze(rec.px); squeeze(rec.py); squeeze(rec.pz); squeeze(rec.pq); squeeze(rec.pL); squeeze(rec.prr);
+            squeeze(rec.pseg); squeeze(rec.pmed); squeeze(rec.prej); squeeze(rec.pdstop); squeeze(rec.pdbody);
+            squeeze(rec.prole);
+            rec.role_segs.erase(5);
+            for (const auto& w : sg_withhold) {
+                w.seg->particle_info(w.info);
+                w.seg->particle_score(w.score);
+            }
+            if (!gamma_showers.empty()) {
+                for (const auto& [gsh, gke] : gamma_showers) { (void)gke; showers.erase(gsh); }
+                tf->set_showers(showers);
+            }
+            rec.n_stop_gammas_withheld = rec.n_stop_gammas + rec.stop_gamma_n_unfit;
+            SPDLOG_LOGGER_DEBUG(s_log, "{}CheckSTM_Michel stop-gamma-withheld: cluster {} bits {} gammas {} unfit {} segs {} showers {}",
+                                m_evt_tag, rec.cluster_id, bits_string(rec.reject_bits), rec.n_stop_gammas,
+                                rec.stop_gamma_n_unfit, sg_withhold.size(), gamma_showers.size());
+            rec.n_stop_gammas = 0; rec.stop_gamma_n_unfit = 0; rec.stop_gamma_seg_id = -1;
+            rec.stop_gamma_ke_tot = 0; rec.stop_gamma_ke_max = 0; rec.stop_gamma_charge = 0;
+            rec.stop_gamma_dis_min = -1; rec.stop_gamma_dis_max = -1;
+            if (m_survey_enable)
+                for (const auto& w : sg_withhold)
+                    add_points(rec, w.seg, 6, nullptr, 16, w.d_stop, -1, /*keep_dead*/ true);
         }
 
         // ---- doc pdvd/71 (P4): the Michel's gamma blobs, phase 2 --------------
