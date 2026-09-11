@@ -1367,3 +1367,121 @@ TEST_CASE("stm_michel doc82 split: the doc 58 collapse cases are untouched by th
     CHECK_FALSE(with82.by_tail_peak);
     CHECK_FALSE(stm_michel_stop_split(bent_profile(false), 2, doc82_split_th(0.5, 179.0)).ok);
 }
+
+// doc pdvd/83 (doc 78 action item 4): a Michel leaving the chain BEFORE the
+// stop.  The shape of all four owner-scan items: entry -> pen (the muon) ->
+// stop (a short stub), with the Michel hanging off `pen`, turned back.
+namespace {
+struct NearChain {
+    std::vector<SegmentPtr> chain;
+    std::vector<VertexPtr> vtxs;
+    VertexPtr pen;
+};
+// muon along +z to z = z_pen, then a stub of `stub_cm` to the stop
+NearChain near_chain(Graph& g, double z_pen, double stub_cm)
+{
+    NearChain c;
+    auto entry = make_vtx(g, 0, 0, 0);
+    c.pen = make_vtx(g, 0, 0, z_pen);
+    auto stop = make_vtx(g, 0, 0, z_pen + stub_cm);
+    c.chain = {make_track(g, entry, c.pen, 1.0), make_track(g, c.pen, stop, 1.0, false, stub_cm, 2.5)};
+    c.vtxs = {entry, c.pen, stop};
+    return c;
+}
+// an arm `len_cm` long leaving v at `kink_deg` from +z, in the y-z plane
+SegmentPtr arm_at(Graph& g, VertexPtr v, double len_cm, double kink_deg, double ratio)
+{
+    const auto p = v->wcpt().point;
+    const double a = kink_deg * M_PI / 180;
+    auto far = make_vtx(g, p.x() / units::cm, p.y() / units::cm + len_cm * std::sin(a),
+                        p.z() / units::cm + len_cm * std::cos(a));
+    return make_track(g, v, far, ratio);
+}
+const auto no_skip = [](const SegmentPtr&) { return false; };
+}  // namespace
+
+TEST_CASE("stm_michel near-stop arm (doc pdvd/83): a turned-back arm off the penultimate vertex is the Michel")
+{
+    Graph g;
+    auto c = near_chain(g, 60, 2.5);
+    auto arm = arm_at(g, c.pen, 14.4, 146, 1.1);    // 039349_64/24 s24003's numbers
+    auto th = thresholds();
+    auto r = stm_michel_near_stop_arms(g, c.chain, c.vtxs, 5 * units::cm, th, no_skip);
+    REQUIRE(r.vtx_index == 1);
+    CHECK(r.dist == doctest::Approx(2.5 * units::cm).epsilon(0.02));
+    CHECK(r.n_examined == 1);
+    REQUIRE(r.michel.size() == 1);
+    CHECK(r.michel[0].seg == arm);
+    CHECK(r.michel[0].kind == StmMichelArm::kMichel);
+    CHECK(r.michel[0].kink_deg == doctest::Approx(146).epsilon(0.05));   // against the INCOMING segment, not the stub
+    // off, or a one-segment chain: nothing
+    CHECK(stm_michel_near_stop_arms(g, c.chain, c.vtxs, 0, th, no_skip).vtx_index == -1);
+    CHECK(stm_michel_near_stop_arms(g, {c.chain[0]}, {c.vtxs[0], c.vtxs[1]}, 5 * units::cm, th, no_skip).vtx_index == -1);
+    // the skip predicate (the caller's chain set + claimed ids) is honoured
+    auto rs = stm_michel_near_stop_arms(g, c.chain, c.vtxs, 5 * units::cm, th,
+                                        [&](const SegmentPtr& s) { return s == arm; });
+    CHECK(rs.vtx_index == -1);
+    CHECK(rs.n_examined == 0);
+}
+
+TEST_CASE("stm_michel near-stop arm (doc pdvd/83): the distance gate")
+{
+    Graph g;
+    auto c = near_chain(g, 51, 9.0);
+    arm_at(g, c.pen, 14.4, 146, 1.1);
+    auto th = thresholds();
+    auto r5 = stm_michel_near_stop_arms(g, c.chain, c.vtxs, 5 * units::cm, th, no_skip);
+    CHECK(r5.vtx_index == -1);
+    CHECK(r5.n_examined == 0);                       // the vertex is never reached
+    auto r10 = stm_michel_near_stop_arms(g, c.chain, c.vtxs, 10 * units::cm, th, no_skip);
+    CHECK(r10.vtx_index == 1);
+    CHECK(r10.dist == doctest::Approx(9.0 * units::cm).epsilon(0.02));
+}
+
+TEST_CASE("stm_michel near-stop arm (doc pdvd/83): deltas, hadrons and a continuation are not taken")
+{
+    Graph g;
+    auto c = near_chain(g, 60, 2.5);
+    arm_at(g, c.pen, 5, 120, 1.2);                   // <= 8 cm terminal: the interior loop's delta
+    auto h = arm_at(g, c.pen, 15, 100, 1.6);         // > 8 cm at 1.6 MIP: the interior loop's hadron
+    make_track(g, find_other_vertex(g, h, c.pen), make_vtx(g, 0, 20, 50), 1.5);
+    auto th = thresholds();
+    auto r = stm_michel_near_stop_arms(g, c.chain, c.vtxs, 5 * units::cm, th, no_skip);
+    CHECK(r.vtx_index == -1);
+    CHECK(r.n_examined == 0);
+    // a collinear MIP arm is offered the gate and read as a continuation -- never taken
+    Graph g2;
+    auto c2 = near_chain(g2, 60, 2.5);
+    arm_at(g2, c2.pen, 10, 5, 1.0);
+    auto r2 = stm_michel_near_stop_arms(g2, c2.chain, c2.vtxs, 5 * units::cm, th, no_skip);
+    CHECK(r2.vtx_index == -1);
+    CHECK(r2.n_examined == 1);
+    // below the Michel charge floor (0.3 MIP): offered, refused -- 039349_69/56 s56006 reads 0.29
+    Graph g3;
+    auto c3 = near_chain(g3, 60, 6.5);
+    arm_at(g3, c3.pen, 13.6, 90, 0.25);
+    auto r3 = stm_michel_near_stop_arms(g3, c3.chain, c3.vtxs, 7 * units::cm, th, no_skip);
+    CHECK(r3.vtx_index == -1);
+    CHECK(r3.n_examined == 1);
+}
+
+TEST_CASE("stm_michel near-stop arm (doc pdvd/83): the nearest vertex wins, longest arm first")
+{
+    Graph g;
+    auto entry = make_vtx(g, 0, 0, 0);
+    auto v1 = make_vtx(g, 0, 0, 40);
+    auto v2 = make_vtx(g, 0, 0, 56);
+    auto stop = make_vtx(g, 0, 0, 58.5);
+    std::vector<SegmentPtr> chain{make_track(g, entry, v1, 1.0), make_track(g, v1, v2, 1.0), make_track(g, v2, stop, 1.0)};
+    std::vector<VertexPtr> vtxs{entry, v1, v2, stop};
+    arm_at(g, v1, 12, 140, 1.0);                     // 18.5 cm from the stop
+    auto a_short = arm_at(g, v2, 9, 130, 0.9);       // 2.5 cm from the stop
+    auto a_long = arm_at(g, v2, 13, 150, 1.0);
+    auto th = thresholds();
+    auto r = stm_michel_near_stop_arms(g, chain, vtxs, 20 * units::cm, th, no_skip);
+    REQUIRE(r.vtx_index == 2);
+    REQUIRE(r.michel.size() == 2);
+    CHECK(r.michel[0].seg == a_long);
+    CHECK(r.michel[1].seg == a_short);
+    CHECK(r.n_examined == 2);                        // v1 is never reached: v2 already won
+}

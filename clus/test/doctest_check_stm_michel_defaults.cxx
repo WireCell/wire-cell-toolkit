@@ -89,6 +89,7 @@ TEST_CASE("clus knob defaults: CheckSTM_Michel verdict thresholds")
     B("michel_collinear_split", false);     // doc pdvd/74 (P3): a Bragg-confirmed chain is never retreated / split
     D("stop_tail_peak_frac", 0.0);           // doc pdvd/82: the peak-relative collapsed-tail admission, off
     D("stop_tail_peak_kink_min_deg", 25.0);  // doc pdvd/82: the bend that reading must carry
+    D("michel_near_stop_arm_cm", 0.0);       // doc pdvd/83: the Michel gate for an arm before the stop, off
     B("bragg_anchor_geo_fallback", false);  // doc pdvd/75 (P1b): the anchored reading alone decides unless on
     D("bragg_anchor_rise_min", 1.5);        // x the anchored plateau median
     B("dead_volume_check", false);

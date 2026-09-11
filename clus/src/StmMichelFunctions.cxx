@@ -674,6 +674,47 @@ StmMichelArm WireCell::Clus::PR::stm_michel_classify_chain_arm(Graph& g, Segment
     return a;
 }
 
+WireCell::Clus::PR::StmMichelNearArms
+WireCell::Clus::PR::stm_michel_near_stop_arms(Graph& g, const std::vector<SegmentPtr>& chain,
+                                              const std::vector<VertexPtr>& chain_vtxs, double max_dist,
+                                              const StmMichelArmThresholds& th,
+                                              const std::function<bool(const SegmentPtr&)>& skip)
+{
+    StmMichelNearArms out;
+    if (!(max_dist > 0) || chain.size() < 2 || chain_vtxs.size() != chain.size() + 1) return out;
+    std::set<SegmentPtr> chain_set(chain.begin(), chain.end());   // membership only, never iterated
+    double dist = 0;
+    for (size_t vi = chain.size() - 1; vi >= 1; --vi) {
+        dist += std::max(0.0, segment_track_length(chain[vi]));
+        if (dist > max_dist) break;
+        VertexPtr v = chain_vtxs[vi];
+        SegmentPtr in_seg = chain[vi - 1];
+        if (!v || !v->descriptor_valid()) continue;
+        std::vector<StmMichelArm> found;
+        for (auto e : sorted_out_edges(v->get_descriptor(), g)) {
+            auto arm = g[e].segment;
+            if (!arm || chain_set.count(arm)) continue;
+            if (skip && skip(arm)) continue;
+            const auto body = stm_michel_classify_chain_arm(g, in_seg, arm, v, th);
+            if (body.kind == StmMichelArm::kDelta || body.kind == StmMichelArm::kHadron) continue;
+            ++out.n_examined;
+            auto a = stm_michel_classify_stop_arm(g, in_seg, arm, v, th);
+            if (a.kind == StmMichelArm::kMichel) found.push_back(a);
+        }
+        if (!found.empty()) {
+            std::sort(found.begin(), found.end(), [](const StmMichelArm& a, const StmMichelArm& b) {
+                if (a.len != b.len) return a.len > b.len;
+                return a.seg->get_graph_index() < b.seg->get_graph_index();
+            });
+            out.vtx_index = static_cast<int>(vi);
+            out.dist = dist;
+            out.michel = std::move(found);
+            return out;
+        }
+    }
+    return out;
+}
+
 bool WireCell::Clus::PR::stm_michel_stop_gamma_ring(double d_stop, double len,
                                                     double inner_cm, double outer_cm,
                                                     double max_len_cm)

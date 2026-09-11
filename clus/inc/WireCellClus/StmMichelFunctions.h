@@ -313,6 +313,38 @@ namespace WireCell::Clus::PR {
     StmMichelArm stm_michel_classify_chain_arm(Graph& g, SegmentPtr in_seg, SegmentPtr arm,
                                                VertexPtr vtx, const StmMichelArmThresholds& th);
 
+    /// doc pdvd/83 (doc 78 action item 4): a Michel that leaves the muon
+    /// chain a few cm BEFORE its stop.  On the owner's scan the four missed
+    /// Michels of doc 78 sec 3.2 all hang off the chain's penultimate vertex
+    /// (2.5-6.5 cm before the stop, the last chain segment a short stub), so
+    /// the stop-arm classifier never sees them and the interior-vertex one
+    /// calls them kOther.  This offers every such arm the STOP-arm gate.
+    ///
+    /// Walks the chain's interior vertices from the stop backward
+    /// (vi = chain.size()-1 ... 1; chain_vtxs[vi] joins chain[vi-1] and
+    /// chain[vi]) while the along-chain distance to the stop,
+    /// sum_{j >= vi} segment_track_length(chain[j]), is <= max_dist.  At each
+    /// vertex, every out-edge segment that is not a chain segment and not
+    /// skip(arm) is re-read with stm_michel_classify_chain_arm; kDelta and
+    /// kHadron are left alone (the caller already acted on them), the rest
+    /// are counted in n_examined and classified with
+    /// stm_michel_classify_stop_arm(g, chain[vi-1], arm, v, th) -- the same
+    /// gate, with the incoming chain segment as the kink reference.  The
+    /// NEAREST vertex with at least one kMichel wins; its kMichel arms are
+    /// returned longest first (graph index breaks ties).  max_dist <= 0 or a
+    /// chain shorter than 2 segments returns vtx_index -1.  Deterministic:
+    /// out-edges are walked in sorted order.
+    struct StmMichelNearArms {
+        int vtx_index{-1};                 // index into chain_vtxs of the vertex the Michel leaves; -1 = none
+        double dist{-1};                   // along-chain distance stop -> that vertex (internal units)
+        int n_examined{0};                 // kOther body arms offered the gate, nearest vertex out to the winner (or max_dist)
+        std::vector<StmMichelArm> michel;  // kMichel arms at that vertex, longest first
+    };
+    StmMichelNearArms stm_michel_near_stop_arms(Graph& g, const std::vector<SegmentPtr>& chain,
+                                                const std::vector<VertexPtr>& chain_vtxs, double max_dist,
+                                                const StmMichelArmThresholds& th,
+                                                const std::function<bool(const SegmentPtr&)>& skip);
+
     /// doc pdvd/57: the STOP RETREAT.  `find_first_kink`'s charge gate wants
     /// BOTH arms of a kink >= 0.6 MIP, so an asymmetric muon->Michel junction
     /// (Bragg on one side, 0.1-0.4 MIP on the other) returns the sentinel and

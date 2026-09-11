@@ -255,6 +255,9 @@ public:
         // admission shared by the retreat and the split.
         m_stop_tail_peak_frac = get<double>(config, "stop_tail_peak_frac", m_stop_tail_peak_frac);
         m_stop_tail_peak_kink_min_deg = get<double>(config, "stop_tail_peak_kink_min_deg", m_stop_tail_peak_kink_min_deg);
+        // doc pdvd/83 (doc 78 action item 4): the Michel gate offered to an arm
+        // leaving the chain within this many cm before the stop.
+        m_michel_near_stop_arm_cm = get<double>(config, "michel_near_stop_arm_cm", m_michel_near_stop_arm_cm);
         // doc pdvd/75 (P1b): when the peak anchor (T7) rejects a profile on a
         // shape bit although its anchored peak is prominent, and the same
         // tests pass at the geometric origin, the geometric reading stands.
@@ -676,6 +679,24 @@ public:
         // real reason they are silent on 14 of doc 78's 21 items.
         cfg["stop_tail_peak_frac"] = m_stop_tail_peak_frac;
         cfg["stop_tail_peak_kink_min_deg"] = m_stop_tail_peak_kink_min_deg;
+        // doc pdvd/83 (doc 78 action item 4): default 0 (off).  The four
+        // Michels doc 78 sec 3.2 found missing on michel_found-0 stoppers are
+        // PR segments ATTACHED to the muon chain (doc 80: rej 13), each hanging
+        // off the chain's penultimate vertex 2.5-6.5 cm before the stop, the
+        // last chain segment a short stub.  The stop-arm classifier never sees
+        // them and the interior-vertex one calls them kOther, which nothing
+        // reads.  When > 0 and NO Michel was found (michel_conn_type still 0
+        // after the attached and companion stages), every kOther body arm at a
+        // chain vertex within this along-chain distance of the stop is offered
+        // the stop-arm gate (stm_michel_classify_stop_arm, kink against the
+        // incoming chain segment); the nearest vertex with a kMichel becomes
+        // an ATTACHED Michel (conn 1) started at that vertex.  Offline on the
+        // owner's scan: 2 of the 4 within 5-7 cm, 0 control items; at 10 cm
+        // the first STM_ONLY and THRU arms enter -- the distance is what holds
+        // the purity.  The block writes the Michel object and nothing else a
+        // verdict reads; topology_stop_evidence is the one declared channel
+        // through which is_stm can then move.
+        cfg["michel_near_stop_arm_cm"] = m_michel_near_stop_arm_cm;
         // doc pdvd/75 (P1b): default off.  The 3 cm peak anchor (T7) discards
         // the rows past the running-mean maximum; on a rise that runs to the
         // fit's last row the low partial-step end row pulls that maximum 2-3
@@ -897,6 +918,7 @@ private:
     bool m_michel_collinear_split{false};         // doc pdvd/74 (P3, doc 70's literal)
     double m_stop_tail_peak_frac{0.0};            // doc pdvd/82: <= 0 = off
     double m_stop_tail_peak_kink_min_deg{25.0};   // doc pdvd/82: deg
+    double m_michel_near_stop_arm_cm{0.0};        // doc pdvd/83: cm, <= 0 = off
     bool m_bragg_anchor_geo_fallback{false};      // doc pdvd/75 (P1b): the geometric reading may stand when the anchor rejects a prominent peak
     double m_bragg_anchor_rise_min{1.5};          // x the anchored plateau median
     bool m_profile_geometry_guard{false};         // doc pdvd/66 (T8)
@@ -976,7 +998,7 @@ private:
         double michel_ke_charge{0};                // Shower::get_kine_charge(), for comparison -- never `best`
         int michel_n_pieces{0};                    // fitted member segments + unfitted companion clusters
         int michel_parent_vtx_id{-1};              // the muon vertex the object hangs from (= stop_vtx_id)
-        double michel_dis_cm{-1};                  // stop -> object start; 0 when attached
+        double michel_dis_cm{-1};                  // stop -> object start; 0 when attached (doc pdvd/83: the along-chain distance when michel_near_arm)
         Point michel_start_pt;
         double cont_len{0}, cont_angle_deg{-1}, cont_mip{0};
         int n_ext{0}; double ext_len{0};          // doc pdhd/03: chain extensions past the tagger's stop
@@ -985,6 +1007,9 @@ private:
         int n_split{0}; double split_len{0}, split_kink_deg{0};  // doc pdvd/58: T1c fit-row split
         int stop_move_p3_bits{0};  // doc pdvd/74 (P3): bit0 the P3 tail reading changed the retreat's answer, bit1 the stop moved on a Bragg-confirmed chain; doc pdvd/82: bit2 the peak-relative tail is what admitted the move
         int bragg_anchor_fallback{0};  // doc pdvd/75 (P1b): 1 = the anchor's rejection was replaced by the geometric reading
+        int michel_near_arm{0};        // doc pdvd/83: 1 = the Michel is an arm leaving the chain before the stop
+        double near_arm_dist_cm{-1};   // doc pdvd/83: along-chain distance stop -> that arm's vertex; -1 = none
+        int n_near_arms_examined{0};   // doc pdvd/83: kOther body arms near the stop offered the gate
         int n_michel_veto{0};  // doc pdvd/61: T2c fired -- an attached moved-stop Michel with too little charge was demoted
         int n_michel_veto_exempt{0};  // doc pdvd/72 (P3b): T2c would have fired, and the Michel's turn spared it
         int n_kept_near_stop_main{0}, n_kept_near_stop_comp{0};  // doc pdvd/62 (T3a): pr54 residuals kept by the stop anchor, main cluster / companions
@@ -1864,6 +1889,11 @@ private:
             I1("stop_move_p3_bits", r.stop_move_p3_bits);
         // doc pdvd/75 (P1b): the same pattern.
         if (m_bragg_anchor_geo_fallback) I1("bragg_anchor_fallback", r.bragg_anchor_fallback);
+        // doc pdvd/83: the same pattern.
+        if (m_michel_near_stop_arm_cm > 0) {
+            I1("michel_near_arm", r.michel_near_arm); D1("near_arm_dist_cm", r.near_arm_dist_cm);
+            I1("n_near_arms_examined", r.n_near_arms_examined);
+        }
         I1("n_cluster_pts", r.n_cluster_pts); D1("chain_coverage", r.chain_coverage);
         I1("n_dots", r.n_dots); I1("n_dot_clusters_unfit", r.n_dot_clusters_unfit);
         D1("dots_ke_dqdx", r.dots_ke_dqdx); D1("dots_charge_unfit", r.dots_charge_unfit);
@@ -3086,6 +3116,90 @@ void CheckSTM_Michel::visit(Ensemble& ensemble) const
         }
 
 
+        // ---- doc pdvd/83 (doc 78 action item 4): a Michel that leaves the muon
+        // chain a few cm BEFORE its stop.  The four missed Michels of doc 78
+        // sec 3.2 (039349_64/24 s24003, 039349_9/19 s19003, 039349_64/52
+        // s52018, 039349_69/56 s56006) are attached to the chain (doc 80: rej
+        // 13) at its penultimate vertex, 2.5-6.5 cm before the stop: the
+        // stop-arm loop above never sees them and the interior loop files them
+        // as kOther, which nothing reads.  Only where NO Michel exists yet
+        // (conn 0 after the attached and companion stages), so no found
+        // Michel's energy or connection type can change.
+        //
+        // Design constraint, the same one T2c states for itself: this writes
+        // the Michel object and NOTHING ELSE a verdict reads.  A kContinuation
+        // answer from the classifier is ignored (never OR'd into
+        // R_CONTINUATION); n_stop_arms / n_stop_other / n_body_other and the
+        // michel_guards_stop demotion above are untouched.  The one declared
+        // channel through which is_stm can move is topology_stop_evidence,
+        // which reads michel_found like any other attached Michel.
+        if (m_michel_near_stop_arm_cm > 0 && stop_v && chain.size() >= 2 && rec.michel_conn_type == 0) {
+            const int mcid = main->get_cluster_id();
+            auto near = stm_michel_near_stop_arms(g, chain, chain_vtxs, m_michel_near_stop_arm_cm * units::cm, th,
+                [&](const SegmentPtr& sg) {
+                    return chain_set.count(sg) > 0 ||
+                           rec.claimed.count(mcid * 1000 + static_cast<int>(sg->get_graph_index())) > 0;
+                });
+            rec.n_near_arms_examined = near.n_examined;
+            for (const auto& a : near.michel) {
+                SPDLOG_LOGGER_DEBUG(s_log,
+                    "{}CheckSTM_Michel near-arm: cluster {} seg {} vtx_index {} dist {:.2f} cm len {:.2f} cm far_len {:.2f} cm mip {:.2f} kink {:.1f} deg shower {} terminal {}",
+                    m_evt_tag, rec.cluster_id, mcid * 1000 + static_cast<int>(a.seg->get_graph_index()), near.vtx_index,
+                    near.dist / units::cm, a.len / units::cm, a.far_len / units::cm, a.mip, a.kink_deg,
+                    a.shower_like ? 1 : 0, a.terminal ? 1 : 0);
+            }
+            if (near.vtx_index > 0 && !near.michel.empty()) {
+                VertexPtr nv = chain_vtxs[near.vtx_index];
+                const auto& seed = near.michel.front();
+                rec.michel_near_arm = 1;
+                rec.near_arm_dist_cm = near.dist / units::cm;
+                rec.michel_len = seed.len; rec.michel_mip = seed.mip; rec.michel_kink_deg = seed.kink_deg; rec.michel_far_len = seed.far_len;
+                rec.michel_conn_type = 1;                       // attached: graph-connected to the chain
+                rec.michel_dis_cm = near.dist / units::cm;      // the one conn-1 Michel whose dis is not 0 (see T2c below)
+                rec.michel_seg_id = mcid * 1000 + static_cast<int>(seed.seg->get_graph_index());
+                for (const auto& a : near.michel) { set_pdg(a.seg, 11); add_points(rec, a.seg, 3); }
+                // Duplicated from the attached path above (M10), the start
+                // vertex being the arm's own chain vertex, not the stop.
+                if (m_build_michel_shower) {
+                    michel_shower = std::make_shared<Shower>(g);
+                    michel_shower->set_start_vertex(nv, 1);
+                    michel_shower->set_start_segment(seed.seg, false, "fit", "associate_points");
+                    IndexedSegmentSet used(chain_set);
+                    michel_shower->complete_structure_with_start_segment(used, "fit", "associate_points", true);
+                    IndexedVertexSet mv; IndexedSegmentSet ms;
+                    michel_shower->fill_sets(mv, ms, false);
+                    for (auto& sg : ms) { if (!chain_set.count(sg)) set_pdg(sg, 11); }
+                    if (m_survey_enable) {
+                        std::vector<SegmentPtr> extra_members;
+                        for (auto& sg : ms) {
+                            if (!sg || chain_set.count(sg)) continue;
+                            const int sid = (sg->cluster() ? sg->cluster()->get_cluster_id() : 0) * 1000
+                                          + static_cast<int>(sg->get_graph_index());
+                            if (rec.claimed.count(sid)) continue;
+                            extra_members.push_back(sg);
+                        }
+                        std::sort(extra_members.begin(), extra_members.end(),
+                                  [](const SegmentPtr& a, const SegmentPtr& b) {
+                                      const int ca = a->cluster() ? a->cluster()->get_cluster_id() : 0;
+                                      const int cb = b->cluster() ? b->cluster()->get_cluster_id() : 0;
+                                      if (ca != cb) return ca < cb;
+                                      return a->get_graph_index() < b->get_graph_index();
+                                  });
+                        for (auto& sg : extra_members) add_points(rec, sg, 3);
+                    }
+                    michel_shower->set_particle_type(11);
+                    michel_shower->calculate_kinematics(particle_data(), m_recomb_model);
+                    rec.michel_ke_core = michel_shower->get_kine_dQdx() / units::MeV;
+                    rec.michel_ke_range = michel_shower->get_kine_range() / units::MeV;
+                }
+                else {
+                    rec.michel_ke_core = segment_cal_kine_dQdx(seed.seg, m_recomb_model) / units::MeV;
+                }
+                for (const auto& a : near.michel) if (a.seg) michel_pieces.emplace_back(a.seg, near.dist);
+            }
+        }
+
+
         // ---- doc pdvd/51: the muon-capture gammas at the stop -------------------
         // The physics.  A mu- that ranges out in argon is captured by a nucleus
         // far more often than it decays (in LAr, capture dominates), and the
@@ -3587,7 +3701,10 @@ void CheckSTM_Michel::visit(Ensemble& ensemble) const
         rec.michel_ke_best = rec.michel_ke_dqdx + rec.dots_ke_unfit;
 
         // doc pdvd/61 (T2c): an ATTACHED Michel (conn_type 1 -- the arm hangs
-        // off the stop vertex itself, dis_cm 0 by construction, :1742) whose
+        // off the stop vertex itself, dis_cm 0 by construction, :1742; since
+        // doc pdvd/83 also an arm leaving the chain up to
+        // michel_near_stop_arm_cm before the stop, dis_cm = that distance --
+        // this veto reads neither dis_cm nor where the arm leaves) whose
         // stop was MOVED this event (a retreat or split fired -- the mechanism
         // that finds a stop the tagger's own fit missed, docs pdvd/57/58) is
         // not itself evidence of a Michel: the census found 5 named
