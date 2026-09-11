@@ -784,3 +784,15 @@ std::vector<int> WireCell::Clus::PR::stm_michel_gamma_take(double core_ke_mev, c
     }
     return take;
 }
+
+WireCell::Clus::PR::StmMichelMovedStopSpare
+WireCell::Clus::PR::stm_michel_moved_stop_spare(double kink_deg, double reach_cm,
+                                                double kink_min_deg, double reach_min_cm)
+{
+    // The kink test is doc pdvd/72's expression verbatim, first, so with the
+    // reach test off this returns exactly what the T2c site decided before
+    // doc pdvd/84.  A NaN fails both comparisons and is vetoed.
+    if (kink_min_deg >= 0 && kink_deg >= kink_min_deg) return StmMichelMovedStopSpare::kKink;
+    if (reach_min_cm >= 0 && reach_cm >= reach_min_cm) return StmMichelMovedStopSpare::kReach;
+    return StmMichelMovedStopSpare::kVeto;
+}

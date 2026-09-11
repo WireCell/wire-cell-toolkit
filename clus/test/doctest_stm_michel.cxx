@@ -1485,3 +1485,50 @@ TEST_CASE("stm_michel near-stop arm (doc pdvd/83): the nearest vertex wins, long
     CHECK(r.michel[1].seg == a_short);
     CHECK(r.n_examined == 2);                        // v1 is never reached: v2 already won
 }
+
+// ---- doc pdvd/84 (doc 78 action item 3): the moved-stop veto's exemptions ----
+
+TEST_CASE("stm_michel moved-stop spare: both off vetoes, the kink wins first, then the reach")
+{
+    using S = StmMichelMovedStopSpare;
+    CHECK(stm_michel_moved_stop_spare(132.6, 11.9, -1, -1) == S::kVeto);   // both tests off
+    CHECK(stm_michel_moved_stop_spare(132.6, 11.9, 60, -1) == S::kKink);   // doc 72 alone
+    CHECK(stm_michel_moved_stop_spare(132.6, 11.9, 60, 6.5) == S::kKink);  // both pass: the kink is counted, as before
+    CHECK(stm_michel_moved_stop_spare(59.58, 9.3, 60, 6.5) == S::kReach);  // under the kink, over the reach
+    CHECK(stm_michel_moved_stop_spare(59.58, 9.3, 60, -1) == S::kVeto);    // reach off: doc 72's answer
+    CHECK(stm_michel_moved_stop_spare(59.58, 9.3, -1, 6.5) == S::kReach);  // kink off, reach alone
+    CHECK(stm_michel_moved_stop_spare(58.68, 5.4, 60, 6.5) == S::kVeto);   // neither
+}
+
+TEST_CASE("stm_michel moved-stop spare: boundaries inclusive, unmeasured and non-finite never spare")
+{
+    using S = StmMichelMovedStopSpare;
+    CHECK(stm_michel_moved_stop_spare(60.0, 0.0, 60, 6.5) == S::kKink);    // kink == min
+    CHECK(stm_michel_moved_stop_spare(10.0, 6.5, 60, 6.5) == S::kReach);   // reach == min
+    CHECK(stm_michel_moved_stop_spare(-1.0, 0.0, 0, -1) == S::kVeto);      // kink -1 (unmeasurable), even at min 0
+    CHECK(stm_michel_moved_stop_spare(-1.0, 7.0, 0, 6.5) == S::kReach);    // ... but the reach still reads
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    CHECK(stm_michel_moved_stop_spare(nan, nan, 60, 6.5) == S::kVeto);
+    CHECK(stm_michel_moved_stop_spare(nan, 9.3, 60, 6.5) == S::kReach);
+    CHECK(stm_michel_moved_stop_spare(132.6, nan, 60, 6.5) == S::kKink);
+}
+
+TEST_CASE("stm_michel moved-stop spare: the record's 12 veto instances at 60 deg / 6.5 cm spare only the owner's Michels")
+{
+    // d84_t2c_census.py sec 2: every distinct T2c instance on 28 PDVD arms,
+    // (kink deg, len + far cm, owner-confirmed Michel?).
+    struct I { double kink, reach; bool michel; };
+    const I rec[] = {
+        {59.58, 9.3, true},  {59.58, 9.3, true},  {89.34, 7.5, true},  {89.34, 7.5, true},    // 039252_2/79
+        {132.64, 11.9, true},                                                                 // 039349_48/21
+        {17.19, 5.1, false}, {43.47, 4.9, false},                                             // 039252_4/55, 039349_20/41
+        {48.21, 5.8, false}, {48.21, 5.8, false}, {58.68, 5.4, false},                        // 039349_61/62
+        {33.93, 5.6, false}, {23.89, 5.4, false},                                             // 039349_72/54, 039349_75/73
+    };
+    for (const auto& i : rec) {
+        const bool spared = stm_michel_moved_stop_spare(i.kink, i.reach, 60, 6.5) != StmMichelMovedStopSpare::kVeto;
+        CHECK(spared == i.michel);
+    }
+    // The kink alone (doc 72's 60) leaves 039252_2/79 at 59.58 vetoed.
+    CHECK(stm_michel_moved_stop_spare(59.58, 9.3, 60, -1) == StmMichelMovedStopSpare::kVeto);
+}

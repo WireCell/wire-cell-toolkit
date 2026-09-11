@@ -572,6 +572,19 @@ namespace WireCell::Clus::PR {
     std::vector<int> stm_michel_gamma_take(double core_ke_mev, const std::vector<double>& ke_mev,
                                            double total_max_mev);
 
+    /// doc pdvd/84 (doc 78 action item 3): which exemption, if any, spares a
+    /// would-be moved-stop veto (T2c, moved_stop_michel_guard) of an attached
+    /// Michel.  kKink when kink_min_deg >= 0 and kink_deg >= kink_min_deg (doc
+    /// pdvd/72, checked first so its precedence and counter are unchanged);
+    /// else kReach when reach_min_cm >= 0 and reach_cm >= reach_min_cm, where
+    /// reach is the arm's length plus its far subtree (michel_len +
+    /// michel_far_len); else kVeto.  A threshold < 0 is off; kink_deg < 0
+    /// (unmeasurable) never spares by the kink; a non-finite value never
+    /// spares.  Degrees and cm, plain.
+    enum class StmMichelMovedStopSpare { kVeto, kKink, kReach };
+    StmMichelMovedStopSpare stm_michel_moved_stop_spare(double kink_deg, double reach_cm,
+                                                        double kink_min_deg, double reach_min_cm);
+
 }  // namespace WireCell::Clus::PR
 
 #endif

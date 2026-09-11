@@ -241,6 +241,9 @@ public:
         // doc pdvd/72 (P3b): the moved-stop veto (T2c) spares an attached
         // Michel that turns at least this hard at the stop.  -1 = off.
         m_moved_stop_michel_kink_min = get<double>(config, "moved_stop_michel_kink_min", m_moved_stop_michel_kink_min);
+        // doc pdvd/84 (doc 78 item 3): ... or that reaches at least this far
+        // (arm length + far subtree, cm).  -1 = off.
+        m_moved_stop_michel_reach_min_cm = get<double>(config, "moved_stop_michel_reach_min_cm", m_moved_stop_michel_reach_min_cm);
         // doc pdvd/73 (P2): PDVD operating points for the attached Michel gate.
         m_michel_mip_lo_turned = get<double>(config, "michel_mip_lo_turned", m_michel_mip_lo_turned);
         m_michel_mip_lo_turned_kink_deg = get<double>(config, "michel_mip_lo_turned_kink_deg", m_michel_mip_lo_turned_kink_deg);
@@ -624,6 +627,22 @@ public:
         // topology_michel_ke_min, both 10 MeV, so a spared Michel cannot
         // reach P1 -- true only while those two stay equal.
         cfg["moved_stop_michel_kink_min"] = m_moved_stop_michel_kink_min;
+        // doc pdvd/84 (doc 78 action item 3): cm, -1 = off.  When >= 0, the
+        // moved-stop veto also spares an attached Michel the kink test did
+        // not, if its reach -- michel_len + michel_far_len, the arm plus the
+        // subtree past its far end -- is at least this.  On the PDVD record
+        // the veto's instances (12 on 7 items, 28 arms) put every
+        // through-going arm at <= 5.8 cm and every owner-confirmed Michel at
+        // >= 7.5 cm, while the kink leaves a 0.9 deg window and the KE floor
+        // does not separate at all.  n_michel_veto_reach_exempt counts the
+        // spared ones and is written only when the knob is on.  The same P1
+        // argument as the kink test holds: a spared Michel is under
+        // moved_stop_michel_ke_min, so topology_stop_evidence cannot fire on
+        // it while that and topology_michel_ke_min stay equal.  The far
+        // subtree is the stop-arm classifier's walk, which can re-enter the
+        // muon chain through a side loop (doc pdvd/83 sec 9.4) and read the
+        // muon as the arm's reach; no T2c instance on the record does.
+        cfg["moved_stop_michel_reach_min_cm"] = m_moved_stop_michel_reach_min_cm;
         // doc pdvd/73 (P2): three operating points for the attached Michel
         // gate (stm_michel_michel_gate), each off at -1; with all three off
         // the classifier runs its doc pdvd/48 expression verbatim.
@@ -909,6 +928,7 @@ private:
     double m_michel_q2d_dis_cm{0.6};              // cm, the chain's association radius (kine_charge_from_maps)
     double m_michel_q2d_stm_window_cm{30.0};      // cm from the stop for the role-1 STM footprint rows; -1 = whole chain
     double m_moved_stop_michel_kink_min{-1.0};    // doc pdvd/72 (P3b): deg, -1 = off
+    double m_moved_stop_michel_reach_min_cm{-1.0};// doc pdvd/84: cm, -1 = off
     double m_michel_mip_lo_turned{-1.0};          // doc pdvd/73 (P2a): -1 = off
     double m_michel_mip_lo_turned_kink_deg{60.0}; // deg
     double m_michel_far_len_shower_max_cm{-1.0};  // doc pdvd/73 (P2b): cm, -1 = off
@@ -1012,6 +1032,7 @@ private:
         int n_near_arms_examined{0};   // doc pdvd/83: kOther body arms near the stop offered the gate
         int n_michel_veto{0};  // doc pdvd/61: T2c fired -- an attached moved-stop Michel with too little charge was demoted
         int n_michel_veto_exempt{0};  // doc pdvd/72 (P3b): T2c would have fired, and the Michel's turn spared it
+        int n_michel_veto_reach_exempt{0};  // doc pdvd/84: T2c would have fired, the turn did not spare it, its reach did
         int n_kept_near_stop_main{0}, n_kept_near_stop_comp{0};  // doc pdvd/62 (T3a): pr54 residuals kept by the stop anchor, main cluster / companions
         int n_local_pieces{0};      // doc pdvd/62 (T3b): disconnected same-cluster pieces admitted into the Michel object
         int n_michel_range_veto{0}; // doc pdvd/62 (T3c): a bridged / charge-only Michel demoted by the range-energy guard
@@ -1883,6 +1904,7 @@ private:
         }
         // doc pdvd/72 (P3b): the same pattern.
         if (m_moved_stop_michel_kink_min >= 0) I1("n_michel_veto_exempt", r.n_michel_veto_exempt);
+        if (m_moved_stop_michel_reach_min_cm >= 0) I1("n_michel_veto_reach_exempt", r.n_michel_veto_reach_exempt);
         // doc pdvd/74 (P3): the same pattern.
         if (m_retreat_tail_strict || m_retreat_tail_sublive || m_michel_collinear_split ||
             m_stop_tail_peak_frac > 0)
@@ -3724,12 +3746,23 @@ void CheckSTM_Michel::visit(Ensemble& ensemble) const
             // 59.6 and 132.6 deg, the three through-going items 17-59 deg; a
             // hard turn is the Michel's own evidence, so it is spared.  Off at
             // -1; michel_kink_deg is -1 when unmeasurable, which never spares.
-            if (m_moved_stop_michel_kink_min >= 0 && rec.michel_kink_deg >= m_moved_stop_michel_kink_min) {
+            // doc pdvd/84 (doc 78 item 3): then the arm's reach (length + far
+            // subtree), for the owner-confirmed Michel at 59.6 deg that sits
+            // 0.9 deg above a through-going arm; off at -1.  With it off the
+            // predicate is the doc 72 expression above, verbatim.
+            switch (stm_michel_moved_stop_spare(rec.michel_kink_deg,
+                                                (rec.michel_len + rec.michel_far_len) / units::cm,
+                                                m_moved_stop_michel_kink_min, m_moved_stop_michel_reach_min_cm)) {
+            case StmMichelMovedStopSpare::kKink:
                 ++rec.n_michel_veto_exempt;
-            }
-            else {
+                break;
+            case StmMichelMovedStopSpare::kReach:
+                ++rec.n_michel_veto_reach_exempt;
+                break;
+            case StmMichelMovedStopSpare::kVeto:
                 rec.michel_conn_type = 0;
                 ++rec.n_michel_veto;
+                break;
             }
         }
         // doc pdvd/62 (T3c): doc 55 sec 15.1's kinematic test.  A bridged

@@ -90,6 +90,7 @@ TEST_CASE("clus knob defaults: CheckSTM_Michel verdict thresholds")
     D("stop_tail_peak_frac", 0.0);           // doc pdvd/82: the peak-relative collapsed-tail admission, off
     D("stop_tail_peak_kink_min_deg", 25.0);  // doc pdvd/82: the bend that reading must carry
     D("michel_near_stop_arm_cm", 0.0);       // doc pdvd/83: the Michel gate for an arm before the stop, off
+    D("moved_stop_michel_reach_min_cm", -1.0); // doc pdvd/84: the moved-stop veto's reach exemption, off
     B("bragg_anchor_geo_fallback", false);  // doc pdvd/75 (P1b): the anchored reading alone decides unless on
     D("bragg_anchor_rise_min", 1.5);        // x the anchored plateau median
     B("dead_volume_check", false);
