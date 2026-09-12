@@ -248,6 +248,10 @@ public:
         m_michel_q2d_cells = get<bool>(config, "michel_q2d_cells", m_michel_q2d_cells);
         m_michel_q2d_dis_cm = get<double>(config, "michel_q2d_dis_cm", m_michel_q2d_dis_cm);
         m_michel_q2d_stm_window_cm = get<double>(config, "michel_q2d_stm_window_cm", m_michel_q2d_stm_window_cm);
+        // doc pdvd/95 (doc 78 action item 9): the region reading and its body
+        // control.  Both default off, and nothing reads either back.
+        m_michel_q2d_region_cm = get<double>(config, "michel_q2d_region_cm", m_michel_q2d_region_cm);
+        m_michel_q2d_region_ctl_cm = get<double>(config, "michel_q2d_region_ctl_cm", m_michel_q2d_region_ctl_cm);
         // doc pdvd/72 (P3b): the moved-stop veto (T2c) spares an attached
         // Michel that turns at least this hard at the stop.  -1 = off.
         m_moved_stop_michel_kink_min = get<double>(config, "moved_stop_michel_kink_min", m_moved_stop_michel_kink_min);
@@ -659,6 +663,24 @@ public:
         cfg["michel_q2d_cells"] = m_michel_q2d_cells;
         cfg["michel_q2d_dis_cm"] = m_michel_q2d_dis_cm;              // cm, = kine_charge_from_maps's 0.6 cm literal
         cfg["michel_q2d_stm_window_cm"] = m_michel_q2d_stm_window_cm;
+        // doc pdvd/95 (doc 78 action item 9): the owner's region definition.
+        // michel_q2d above still selects the Michel's cells by ASSOCIATION to a
+        // Michel segment, so charge PR never gave a Michel segment -- a dropped
+        // residual, blob points partitioned to the muon's last segment, or a
+        // Michel with no segment at all -- is outside its sum.  With
+        // michel_q2d_region_cm > 0 a second, segmentation-free sum is taken over
+        // EVERY cell within that 2-D radius of the stop, role or no role: the
+        // trajectory then enters only through the muon prediction that is
+        // subtracted and through the stop position itself, which is the stated
+        // intent.  The owner's constraint (2026-09-11): the Michel is near the
+        // stop, so this radius stays small -- a wide one buys muon body, the
+        // capture-gamma ring (stop_gamma_radius_cm) and dead exposure.
+        // michel_q2d_region_ctl_cm puts the SAME radius on a second centre that
+        // far back up the fit, where no Michel can be, as the body control.
+        // Both write branches only; michel_ke_best, michel_found, is_stm and
+        // every reject bit are untouched, exactly as for michel_q2d.
+        cfg["michel_q2d_region_cm"] = m_michel_q2d_region_cm;
+        cfg["michel_q2d_region_ctl_cm"] = m_michel_q2d_region_ctl_cm;
         // doc pdvd/72 (P3b): deg, -1 = off.  When >= 0, the moved-stop veto
         // (moved_stop_michel_guard) does not demote an attached Michel whose
         // kink at the stop (michel_kink_deg) is at least this -- the turn is
@@ -1004,6 +1026,12 @@ private:
     bool m_michel_q2d_cells{false};               // doc pdvd/81: the Michel / STM 2-D cell table (stm_michel_2d)
     double m_michel_q2d_dis_cm{0.6};              // cm, the chain's association radius (kine_charge_from_maps)
     double m_michel_q2d_stm_window_cm{30.0};      // cm from the stop for the role-1 STM footprint rows; -1 = whole chain
+    // doc pdvd/95 (doc 78 action item 9): the REGION reading.  Every cell within
+    // this 2-D radius of the stop contributes (measured - muon prediction),
+    // whatever role -- if any -- claimed it, so the sum does not depend on the
+    // Michel's own segmentation.  0 = off.
+    double m_michel_q2d_region_cm{0.0};           // cm, 2-D radius about the stop; 0 = off
+    double m_michel_q2d_region_ctl_cm{-1.0};      // cm back up the fit for the body-control centre; -1 = off
     double m_moved_stop_michel_kink_min{-1.0};    // doc pdvd/72 (P3b): deg, -1 = off
     double m_moved_stop_michel_reach_min_cm{-1.0};// doc pdvd/84: cm, -1 = off
     double m_michel_mip_lo_turned{-1.0};          // doc pdvd/73 (P2a): -1 = off
@@ -1145,6 +1173,24 @@ private:
         double michel_q2d_raw_u{0}, michel_q2d_raw_v{0}, michel_q2d_raw_w{0};
         double michel_q2d{0}, michel_q2d_gamma{0};
         double michel_ke_q2d{0}, michel_ke_q2d_gamma{0}, michel_ke_q2d_total{0};
+        // doc pdvd/95: the REGION reading -- the same signed (measured - muon)
+        // contribution, summed over every cell within michel_q2d_region_cm of
+        // the stop whatever its role, so no Michel segment need exist.  *_ctl_*
+        // is the identical sum on a centre michel_q2d_region_ctl_cm back up the
+        // fit, where no Michel can be: the control that prices the subtraction.
+        // *_nd_* counts the DEAD cells inside the region (a dead row predicts
+        // nothing, so it contributes ~0 rather than a negative bias -- counted,
+        // not assumed).
+        double michel_q2d_region_u{0}, michel_q2d_region_v{0}, michel_q2d_region_w{0};
+        double michel_q2d_region_mu_u{0}, michel_q2d_region_mu_v{0}, michel_q2d_region_mu_w{0};
+        int michel_q2d_region_n_u{0}, michel_q2d_region_n_v{0}, michel_q2d_region_n_w{0};
+        int michel_q2d_region_nd_u{0}, michel_q2d_region_nd_v{0}, michel_q2d_region_nd_w{0};
+        int michel_q2d_region_dropped_plane{-1}, michel_q2d_n_role0{0};
+        double michel_q2d_region{0}, michel_ke_q2d_region{0};
+        double michel_q2d_ctl_u{0}, michel_q2d_ctl_v{0}, michel_q2d_ctl_w{0};
+        int michel_q2d_ctl_n_u{0}, michel_q2d_ctl_n_v{0}, michel_q2d_ctl_n_w{0};
+        int michel_q2d_ctl_dropped_plane{-1}, michel_q2d_ctl_valid{0};
+        double michel_q2d_ctl{0}, michel_ke_q2d_ctl{0};
         // doc pdvd/81: every segment that received a row, by role (in row
         // order; a segment can repeat) -- the estimator's fallback source of
         // the Michel (role 3) and its source of the taken gammas (role 4).
@@ -1156,6 +1202,18 @@ private:
         // doc pdvd/81: the cell table (PC stm_michel_2d), parallel vectors.
         std::vector<int> c_apa, c_face, c_plane, c_wire, c_time, c_time_slice, c_channel, c_flag, c_role, c_shared, c_xshared, c_sel;
         std::vector<double> c_q, c_qerr, c_pred_mu, c_pred_all;
+        // doc pdvd/95: each cell's 2-D distance (cm) to the stop and to the body
+        // control centre, -1 where the centre could not be projected into that
+        // (apa, face, plane).  Both the cell and the centre are put through
+        // convert_time_wire_2Dpoint, so they share a frame by construction --
+        // this is what makes ANY radius re-computable offline from the committed
+        // table instead of costing an arm per radius (docs 91/92's twin rule).
+        std::vector<double> c_dstop, c_dctl;
+        // doc pdvd/95: whose blobs cover this cell -- bit 1 the main cluster's,
+        // bit 2 an admitted unfitted companion's, 0 neither (so the charge is
+        // some other preloaded cluster's, which its own fit already accounts
+        // for and which this candidate's muon prediction cannot speak to).
+        std::vector<int> c_own;
         int dead_ahead{-1};                        // doc pdhd/03: 1 = the live end walks into a dead region
         int n_cluster_pts{0}; double chain_coverage{-1};   // doc pdhd/03: cluster points within coverage_radius of a reconstructed point
         // dots
@@ -1837,11 +1895,62 @@ private:
             auto f = a->second.find(face);
             return f == a->second.end() ? 1 : f->second;
         };
-        struct Cell { int role, plane, apa, face, wire, time, time_slice, channel, flag, shared, xshared, sel; double q, qerr, pmu, pall; };
+        // ---- doc pdvd/95: the region centres --------------------------------
+        // The owner's definition needs each cell's distance to the STOP, and the
+        // frame trap above is exactly what makes that delicate: a cell's 2-D
+        // point is in the raw t0 = 0 drift frame, a 3-D fit point in the
+        // cluster's t0-CORRECTED one -- metres apart on PDVD.  So a centre is
+        // put through backward(t0) + convert_3Dpoint_time_ch and then the SAME
+        // convert_time_wire_2Dpoint the cells use.  Both sides of every distance
+        // are then one identical conversion apart, in one frame, by
+        // construction -- rather than by an offset anyone has to keep correct.
+        // (convert_3Dpoint_time_ch returns (tick, LOCAL WIRE) despite its name,
+        // which is what convert_time_wire_2Dpoint wants; TrackFitting.cxx:3881.)
+        const bool region_on = m_michel_q2d_region_cm > 0;
+        const bool ctl_on = m_michel_q2d_region_ctl_cm >= 0;
+        // the control centre: the chain fit row closest to region_ctl_cm back
+        // from the stop -- pure muon, where no Michel can be.
+        geo_point_t ctl_pt;
+        bool have_ctl = false;
+        if (ctl_on) {
+            double best = 1e18;
+            const double want = m_michel_q2d_region_ctl_cm * units::cm;
+            for (const auto& seg : chain) {
+                if (!seg) continue;
+                for (const auto& f : seg->fits()) {
+                    if (f.dx <= 0) continue;
+                    const double d = std::abs((f.point - rec.stop_pt).magnitude() - want);
+                    if (d < best) { best = d; ctl_pt = f.point; have_ctl = true; }
+                }
+            }
+        }
+        struct Ctr { bool ok{false}; double d{0}, w{0}; };
+        std::map<std::tuple<int, int, int>, Ctr> ctr_stop, ctr_ctl;
+        auto xform_main = (m_pcts && main) ? m_pcts->pc_transform(main->get_scope_transform(main->get_default_scope())) : nullptr;
+        const double main_t0 = main ? main->get_cluster_t0() : 0.0;
+        auto centre_of = [&](std::map<std::tuple<int, int, int>, Ctr>& cache, const geo_point_t& pt3,
+                             bool have, int apa, int face, int plane) -> const Ctr& {
+            const auto k3 = std::make_tuple(apa, face, plane);
+            auto it = cache.find(k3);
+            if (it != cache.end()) return it->second;
+            Ctr c;
+            if (have && xform_main) {
+                const auto p_raw = xform_main->backward(pt3, main_t0, face, apa);
+                const auto tw = grouping->convert_3Dpoint_time_ch(p_raw, apa, face, plane);
+                const auto p2 = grouping->convert_time_wire_2Dpoint(std::get<0>(tw), std::get<1>(tw), apa, face, plane);
+                c.ok = true; c.d = p2.first; c.w = p2.second;
+            }
+            return cache.emplace(k3, c).first->second;
+        };
+
+        struct Cell { int role, plane, apa, face, wire, time, time_slice, channel, flag, shared, xshared, sel, own; double q, qerr, pmu, pall, dstop, dctl; };
         std::vector<Cell> cells;
         std::array<double, 3> qm{{0, 0, 0}}, mum{{0, 0, 0}}, qg{{0, 0, 0}}, mug{{0, 0, 0}}, rawm{{0, 0, 0}};
         std::array<int, 3> nm{{0, 0, 0}}, ng{{0, 0, 0}}, nxm{{0, 0, 0}};
-        int n_role1 = 0, n_sel2_only = 0, n_unfit_cells = 0;
+        // doc pdvd/95: the region and its body control, role-blind by design
+        std::array<double, 3> qr{{0, 0, 0}}, mur{{0, 0, 0}}, qc{{0, 0, 0}};
+        std::array<int, 3> nr{{0, 0, 0}}, nrd{{0, 0, 0}}, nc{{0, 0, 0}};
+        int n_role1 = 0, n_sel2_only = 0, n_unfit_cells = 0, n_role0 = 0;
         for (int plane = 0; plane < 3; ++plane) {
             for (const auto& [key, meas] : *maps[plane]) {
                 auto wit = pa.m_map_apa_ch_plane_wires.find({key.apa, key.channel});
@@ -1883,8 +1992,50 @@ private:
                     }
                 }
                 if (pmich > 0) { sel |= 2; if (!role) { role = 3; ++n_sel2_only; } }
+                // doc pdvd/95: the cell's distance to each centre, in the cells'
+                // own frame.  Computed AFTER the role tests because any_within
+                // may have named a different (face, wire) for this cell.
+                double dstop = -1, dctl = -1;
+                if (region_on || ctl_on) {
+                    const auto p2c = grouping->convert_time_wire_2Dpoint(key.time, wire, key.apa, face, plane);
+                    if (region_on) {
+                        const auto& c0 = centre_of(ctr_stop, rec.stop_pt, true, key.apa, face, plane);
+                        if (c0.ok) dstop = std::hypot(p2c.first - c0.d, p2c.second - c0.w) / units::cm;
+                    }
+                    if (ctl_on) {
+                        const auto& c1 = centre_of(ctr_ctl, ctl_pt, have_ctl, key.apa, face, plane);
+                        if (c1.ok) dctl = std::hypot(p2c.first - c1.d, p2c.second - c1.w) / units::cm;
+                    }
+                }
+                const bool in_region = region_on && dstop >= 0 && dstop <= m_michel_q2d_region_cm;
+                const bool in_ctl = ctl_on && dctl >= 0 && dctl <= m_michel_q2d_region_cm;
+                // doc pdvd/95: WHOSE charge is this cell?  doc 78 item 9 scopes the
+                // region to "every cell of the main cluster and the admitted
+                // companions", but the charge maps are the union over EVERY
+                // preloaded cluster.  Without this flag the region also sums charge
+                // that another cluster's own fit already accounts for -- and on such
+                // a cell the main cluster's response has no row, so pmu is 0 and
+                // "measured - muon" is the raw measurement rather than an excess.
+                // bit 1 = the main cluster's own blobs, bit 2 = an admitted unfitted
+                // companion's.  Computed only for cells in a region, so it costs
+                // nothing on the rest of the event.
+                int own = 0;
+                if (in_region || in_ctl) {
+                    const int nt = nticks_at(key.apa, face);
+                    if (tf.is_cell_covered_by_own_blobs(main, key.apa, face, plane, wire, key.time, 0, nt)) own |= 1;
+                    if (!own) {
+                        for (const auto* cl : rec.unfit_dot_clusters) {
+                            if (tf.is_cell_covered_by_own_blobs(cl, key.apa, face, plane, wire, key.time, 0, nt)) { own |= 2; break; }
+                        }
+                    }
+                }
                 if (!role) {
                     if (pwin > 0) { role = 1; ++n_role1; }
+                    // doc pdvd/95: a cell inside a region that NOTHING claimed --
+                    // role 0, the population the association-based selection
+                    // drops on the floor (doc 78 item 9).  Emitted so the sum is
+                    // auditable cell by cell, not just asserted.
+                    else if (in_region || in_ctl) { role = 0; ++n_role0; }
                     else continue;
                 }
                 const bool xshared = meas.charge_err >= share_err;
@@ -1895,9 +2046,18 @@ private:
                     if (xshared) ++nxm[plane];
                 }
                 if (role == 4 && headline) { qg[plane] += contrib; mug[plane] += pmu; ++ng[plane]; }
+                // doc pdvd/95: the region sums take EVERY cell in radius, whatever
+                // role claimed it (role 1 muon footprint included -- there the
+                // subtraction is what makes it net to ~0, and that netting is the
+                // estimator's own validation, not a thing to exclude).
+                if (in_region) {
+                    qr[plane] += contrib; mur[plane] += pmu; ++nr[plane];
+                    if (!meas.flag) ++nrd[plane];
+                }
+                if (in_ctl) { qc[plane] += contrib; ++nc[plane]; }
                 if (m_michel_q2d_cells)
                     cells.push_back({role, plane, key.apa, face, wire, key.time, key.time / std::max(1, nticks_at(key.apa, face)), key.channel, meas.flag,
-                                     pmu > 0 ? 1 : 0, xshared ? 1 : 0, sel, meas.charge, meas.charge_err, pmu, pall});
+                                     pmu > 0 ? 1 : 0, xshared ? 1 : 0, sel, own, meas.charge, meas.charge_err, pmu, pall, dstop, dctl});
             }
         }
 
@@ -1934,10 +2094,42 @@ private:
         rec.michel_ke_q2d = to_mev(rec.michel_q2d);
         rec.michel_ke_q2d_gamma = to_mev(rec.michel_q2d_gamma);
         rec.michel_ke_q2d_total = rec.michel_ke_q2d + rec.michel_ke_q2d_gamma;
+        // doc pdvd/95: the region reading, through the SAME plane rule and the
+        // SAME constant.  The only difference from the association reading above
+        // is WHICH CELLS were summed -- which is the whole of the definition
+        // change, and keeping everything else identical is what makes the two
+        // numbers comparable item by item.
+        if (region_on) {
+            rec.michel_q2d_region_u = qr[0]; rec.michel_q2d_region_v = qr[1]; rec.michel_q2d_region_w = qr[2];
+            rec.michel_q2d_region_mu_u = mur[0]; rec.michel_q2d_region_mu_v = mur[1]; rec.michel_q2d_region_mu_w = mur[2];
+            rec.michel_q2d_region_n_u = nr[0]; rec.michel_q2d_region_n_v = nr[1]; rec.michel_q2d_region_n_w = nr[2];
+            rec.michel_q2d_region_nd_u = nrd[0]; rec.michel_q2d_region_nd_v = nrd[1]; rec.michel_q2d_region_nd_w = nrd[2];
+            int dropped_r = -1;
+            rec.michel_q2d_region = stm_michel_combine_planes({{qr[0], qr[1], qr[2]}}, weights_for(nr), ko.plane_asym_switch, &dropped_r);
+            rec.michel_q2d_region_dropped_plane = dropped_r;
+            rec.michel_ke_q2d_region = to_mev(rec.michel_q2d_region);
+            rec.michel_q2d_n_role0 = n_role0;
+        }
+        if (ctl_on) {
+            rec.michel_q2d_ctl_u = qc[0]; rec.michel_q2d_ctl_v = qc[1]; rec.michel_q2d_ctl_w = qc[2];
+            rec.michel_q2d_ctl_n_u = nc[0]; rec.michel_q2d_ctl_n_v = nc[1]; rec.michel_q2d_ctl_n_w = nc[2];
+            int dropped_c = -1;
+            rec.michel_q2d_ctl = stm_michel_combine_planes({{qc[0], qc[1], qc[2]}}, weights_for(nc), ko.plane_asym_switch, &dropped_c);
+            rec.michel_q2d_ctl_dropped_plane = dropped_c;
+            rec.michel_ke_q2d_ctl = to_mev(rec.michel_q2d_ctl);
+            // 0 when no fit row sat near the requested control range, so a
+            // control that never had a centre reads as absent, not as a zero.
+            rec.michel_q2d_ctl_valid = have_ctl ? 1 : 0;
+        }
         for (double* e : {&rec.michel_q2d_u, &rec.michel_q2d_v, &rec.michel_q2d_w, &rec.michel_q2d_mu_u, &rec.michel_q2d_mu_v,
                           &rec.michel_q2d_mu_w, &rec.michel_q2d_raw_u, &rec.michel_q2d_raw_v, &rec.michel_q2d_raw_w,
                           &rec.michel_q2d, &rec.michel_q2d_gamma, &rec.michel_ke_q2d,
-                          &rec.michel_ke_q2d_gamma, &rec.michel_ke_q2d_total}) {
+                          &rec.michel_ke_q2d_gamma, &rec.michel_ke_q2d_total,
+                          &rec.michel_q2d_region_u, &rec.michel_q2d_region_v, &rec.michel_q2d_region_w,
+                          &rec.michel_q2d_region_mu_u, &rec.michel_q2d_region_mu_v, &rec.michel_q2d_region_mu_w,
+                          &rec.michel_q2d_region, &rec.michel_ke_q2d_region,
+                          &rec.michel_q2d_ctl_u, &rec.michel_q2d_ctl_v, &rec.michel_q2d_ctl_w,
+                          &rec.michel_q2d_ctl, &rec.michel_ke_q2d_ctl}) {
             if (!std::isfinite(*e)) {
                 SPDLOG_LOGGER_WARN(s_log, "{}CheckSTM_Michel michel-q2d: cluster {} produced a non-finite value; zeroed", m_evt_tag, rec.cluster_id);
                 *e = 0;
@@ -1955,6 +2147,7 @@ private:
                 rec.c_channel.push_back(c.channel); rec.c_flag.push_back(c.flag);
                 rec.c_shared.push_back(c.shared); rec.c_xshared.push_back(c.xshared); rec.c_sel.push_back(c.sel);
                 rec.c_q.push_back(c.q); rec.c_qerr.push_back(c.qerr); rec.c_pred_mu.push_back(c.pmu); rec.c_pred_all.push_back(c.pall);
+                rec.c_dstop.push_back(c.dstop); rec.c_dctl.push_back(c.dctl); rec.c_own.push_back(c.own);
             }
         }
         SPDLOG_LOGGER_DEBUG(s_log,
@@ -2044,6 +2237,34 @@ private:
             D1("michel_q2d", r.michel_q2d); D1("michel_q2d_gamma", r.michel_q2d_gamma);
             D1("michel_ke_q2d", r.michel_ke_q2d); D1("michel_ke_q2d_gamma", r.michel_ke_q2d_gamma);
             D1("michel_ke_q2d_total", r.michel_ke_q2d_total);
+        }
+        // doc pdvd/95: the region reading -- the same knob-only pattern.  Note
+        // this means turning the radius on CHANGES THE SCHEMA, which is exactly
+        // the blind spot doc pdvd/93 had to fix in its gate: compare branch
+        // SETS over the union, never just the baseline's branches.
+        if (m_michel_q2d && m_michel_q2d_region_cm > 0) {
+            D1("michel_q2d_region_u", r.michel_q2d_region_u); D1("michel_q2d_region_v", r.michel_q2d_region_v);
+            D1("michel_q2d_region_w", r.michel_q2d_region_w);
+            D1("michel_q2d_region_mu_u", r.michel_q2d_region_mu_u); D1("michel_q2d_region_mu_v", r.michel_q2d_region_mu_v);
+            D1("michel_q2d_region_mu_w", r.michel_q2d_region_mu_w);
+            I1("michel_q2d_region_n_u", r.michel_q2d_region_n_u); I1("michel_q2d_region_n_v", r.michel_q2d_region_n_v);
+            I1("michel_q2d_region_n_w", r.michel_q2d_region_n_w);
+            I1("michel_q2d_region_nd_u", r.michel_q2d_region_nd_u); I1("michel_q2d_region_nd_v", r.michel_q2d_region_nd_v);
+            I1("michel_q2d_region_nd_w", r.michel_q2d_region_nd_w);
+            I1("michel_q2d_region_dropped_plane", r.michel_q2d_region_dropped_plane);
+            I1("michel_q2d_n_role0", r.michel_q2d_n_role0);
+            D1("michel_q2d_region", r.michel_q2d_region); D1("michel_ke_q2d_region", r.michel_ke_q2d_region);
+        }
+        // doc pdvd/95: the body control, on its own knob so it can be measured
+        // on an arm and left out of production once it has done its job.
+        if (m_michel_q2d && m_michel_q2d_region_ctl_cm >= 0) {
+            D1("michel_q2d_ctl_u", r.michel_q2d_ctl_u); D1("michel_q2d_ctl_v", r.michel_q2d_ctl_v);
+            D1("michel_q2d_ctl_w", r.michel_q2d_ctl_w);
+            I1("michel_q2d_ctl_n_u", r.michel_q2d_ctl_n_u); I1("michel_q2d_ctl_n_v", r.michel_q2d_ctl_n_v);
+            I1("michel_q2d_ctl_n_w", r.michel_q2d_ctl_n_w);
+            I1("michel_q2d_ctl_dropped_plane", r.michel_q2d_ctl_dropped_plane);
+            I1("michel_q2d_ctl_valid", r.michel_q2d_ctl_valid);
+            D1("michel_q2d_ctl", r.michel_q2d_ctl); D1("michel_ke_q2d_ctl", r.michel_ke_q2d_ctl);
         }
         // doc pdvd/72 (P3b): the same pattern.
         if (m_moved_stop_michel_kink_min >= 0) I1("n_michel_veto_exempt", r.n_michel_veto_exempt);
@@ -2173,6 +2394,12 @@ private:
             c.emplace("xshared", Array(r.c_xshared)); c.emplace("sel", Array(r.c_sel));
             c.emplace("charge", Array(r.c_q)); c.emplace("charge_err", Array(r.c_qerr));
             c.emplace("pred_mu", Array(r.c_pred_mu)); c.emplace("pred_all", Array(r.c_pred_all));
+            // doc pdvd/95: always present whenever the table is (-1 where the
+            // centre was off or unprojectable), so the column set stays a
+            // function of michel_q2d_cells alone -- TensorDM's as_tensors needs
+            // same-named PCs to share columns across every carrier.
+            c.emplace("d_stop_cm", Array(r.c_dstop)); c.emplace("d_ctl_cm", Array(r.c_dctl));
+            c.emplace("own_blob", Array(r.c_own));
             cluster.local_pcs()["stm_michel_2d"] = Dataset(c);
         }
     }

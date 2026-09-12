@@ -78,6 +78,12 @@ TEST_CASE("clus knob defaults: CheckSTM_Michel verdict thresholds")
     B("michel_q2d_cells", false);           // doc pdvd/81: the Michel / STM 2-D cell table (T_stm_michel_2d)
     D("michel_q2d_dis_cm", 0.6);            // = kine_charge_from_maps's association radius
     D("michel_q2d_stm_window_cm", 30.0);    // STM footprint rows within this of the stop; -1 = whole chain
+    // doc pdvd/95 (doc 78 action item 9): the region-based Michel charge.  0 /
+    // -1 are load-bearing: with them the estimator sums exactly the cells doc
+    // pdvd/81 summed, emits no region branch and no role-0 cell, so an absent
+    // key leaves the component byte-identical.
+    D("michel_q2d_region_cm", 0.0);         // 2-D radius about the stop; 0 = off
+    D("michel_q2d_region_ctl_cm", -1.0);    // body-control centre, cm back up the fit; -1 = off
     D("michel_gamma_max_len_cm", 10.0);     // a dot, the capture-gamma stage's compactness cap
     D("michel_gamma_cos_min", 0.5);         // a 60 deg cone about the Michel direction
     D("michel_gamma_max_ke_mev", 20.0);     // per blob, the capture-gamma stage's cap
