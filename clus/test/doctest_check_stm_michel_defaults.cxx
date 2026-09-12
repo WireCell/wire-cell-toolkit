@@ -84,6 +84,11 @@ TEST_CASE("clus knob defaults: CheckSTM_Michel verdict thresholds")
     // key leaves the component byte-identical.
     D("michel_q2d_region_cm", 0.0);         // 2-D radius about the stop; 0 = off
     D("michel_q2d_region_ctl_cm", -1.0);    // body-control centre, cm back up the fit; -1 = off
+    // doc pdvd/96 (doc 95 sec 9 item 1): the region's scope.  0 is load-bearing
+    // in three ways at once -- the sum takes every cell in radius, own_blob
+    // keeps doc 95's two bits and its single-(face,wire) test, and a negative
+    // muon prediction is NOT clamped.  So an absent key leaves doc 95 exact.
+    D("michel_q2d_region_scope", 0);        // 0 = off; 1 = main + companions; 2 = main only
     D("michel_gamma_max_len_cm", 10.0);     // a dot, the capture-gamma stage's compactness cap
     D("michel_gamma_cos_min", 0.5);         // a 60 deg cone about the Michel direction
     D("michel_gamma_max_ke_mev", 20.0);     // per blob, the capture-gamma stage's cap

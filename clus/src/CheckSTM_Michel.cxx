@@ -252,6 +252,9 @@ public:
         // control.  Both default off, and nothing reads either back.
         m_michel_q2d_region_cm = get<double>(config, "michel_q2d_region_cm", m_michel_q2d_region_cm);
         m_michel_q2d_region_ctl_cm = get<double>(config, "michel_q2d_region_ctl_cm", m_michel_q2d_region_ctl_cm);
+        // doc pdvd/96 (doc 95 sec 9 item 1): the region's scope.  0 = off, and
+        // at 0 the sum, the own_blob column and the clamp are all doc 95's.
+        m_michel_q2d_region_scope = get<int>(config, "michel_q2d_region_scope", m_michel_q2d_region_scope);
         // doc pdvd/72 (P3b): the moved-stop veto (T2c) spares an attached
         // Michel that turns at least this hard at the stop.  -1 = off.
         m_moved_stop_michel_kink_min = get<double>(config, "moved_stop_michel_kink_min", m_moved_stop_michel_kink_min);
@@ -681,6 +684,25 @@ public:
         // every reject bit are untouched, exactly as for michel_q2d.
         cfg["michel_q2d_region_cm"] = m_michel_q2d_region_cm;
         cfg["michel_q2d_region_ctl_cm"] = m_michel_q2d_region_ctl_cm;
+        // doc pdvd/96 (doc 95 sec 9 item 1): the region's SCOPE, and the one
+        // correction doc 95 could not make from a column.  own_blob as doc 95
+        // shipped it carries bit 1 (the main cluster) and bit 2 (an admitted
+        // UNFITTED companion) -- but n_dot_clusters_unfit is 0 on all 596 PDVD
+        // candidates, so bit 2 never fires and the column is main-cluster-only.
+        // A companion that DID produce segments is preloaded, its charge IS in
+        // the union maps, and it sets no bit at all.  So "own_blob > 0" is NOT
+        // doc 78 item 9's "main cluster and the admitted companions", which is
+        // what doc 95 sec 9 item 1 claimed.  At scope > 0 a third bit (4) marks
+        // a preloaded fitted companion, the test sweeps every (face, wire) the
+        // channel maps to rather than the first alone, and a negative muon
+        // prediction is clamped to 0.  1 = main + companions (the specification),
+        // 2 = main only.  0 leaves every one of those as doc 95 shipped them.
+        // NOTE under scope > 0: michel_q2d_region_nd_* (dead cells) and
+        // michel_q2d_n_role0 stay REGION-WIDE by design, while
+        // michel_q2d_region_n_* counts only the cells summed -- so nd/n is NOT
+        // a fraction and can exceed 1.  Branches only; michel_ke_best,
+        // michel_found, is_stm and every reject bit are untouched.
+        cfg["michel_q2d_region_scope"] = m_michel_q2d_region_scope;
         // doc pdvd/72 (P3b): deg, -1 = off.  When >= 0, the moved-stop veto
         // (moved_stop_michel_guard) does not demote an attached Michel whose
         // kink at the stop (michel_kink_deg) is at least this -- the turn is
@@ -1032,6 +1054,16 @@ private:
     // Michel's own segmentation.  0 = off.
     double m_michel_q2d_region_cm{0.0};           // cm, 2-D radius about the stop; 0 = off
     double m_michel_q2d_region_ctl_cm{-1.0};      // cm back up the fit for the body-control centre; -1 = off
+    // doc pdvd/96 (doc pdvd/95 sec 9 item 1): WHOSE charge the region sums.
+    // doc 78 item 9 scopes it to "the main cluster and the admitted companions",
+    // but the charge maps are the union over EVERY preloaded cluster, so scope 0
+    // also sums charge another cluster's own fit already accounts for -- and
+    // there the main fit has no row, so pmu is 0 and "measured - muon" is the
+    // raw measurement rather than an excess.  0 = off (doc 95 exactly),
+    // 1 = own != 0 (main + admitted companions), 2 = own & 1 (main only).
+    // Any value > 0 ALSO clamps a negative muon prediction to 0: pred_mu < 0 is
+    // unphysical (measured to -58016 e on 0.167 % of cells) and can only inflate.
+    int m_michel_q2d_region_scope{0};             // 0 = off / every cell in radius
     double m_moved_stop_michel_kink_min{-1.0};    // doc pdvd/72 (P3b): deg, -1 = off
     double m_moved_stop_michel_reach_min_cm{-1.0};// doc pdvd/84: cm, -1 = off
     double m_michel_mip_lo_turned{-1.0};          // doc pdvd/73 (P2a): -1 = off
@@ -1729,7 +1761,8 @@ private:
     // Writes rec.michel_q2d_* (+ the cell vectors); nothing upstream reads them.
     void michel_q2d_estimate(Record& rec, TrackFitting& tf, PatternAlgorithms& pa, Cluster* main,
                              const std::vector<SegmentPtr>& chain, const IndexedSegmentSet& chain_set,
-                             const std::shared_ptr<Shower>& michel_shower) const
+                             const std::shared_ptr<Shower>& michel_shower,
+                             const std::vector<Cluster*>& companions) const
     {
         using CoordReadout = TrackFitting::CoordReadout;
         const auto t0 = Clock::now();
@@ -1908,6 +1941,9 @@ private:
         // which is what convert_time_wire_2Dpoint wants; TrackFitting.cxx:3881.)
         const bool region_on = m_michel_q2d_region_cm > 0;
         const bool ctl_on = m_michel_q2d_region_ctl_cm >= 0;
+        // doc pdvd/96: the region's scope.  Off leaves the sum, the own_blob
+        // column and the prediction clamp exactly as doc pdvd/95 shipped them.
+        const bool scope_on = m_michel_q2d_region_scope > 0;
         // the control centre: the chain fit row closest to region_ctl_cm back
         // from the stop -- pure muon, where no Michel can be.
         geo_point_t ctl_pt;
@@ -2019,13 +2055,52 @@ private:
                 // bit 1 = the main cluster's own blobs, bit 2 = an admitted unfitted
                 // companion's.  Computed only for cells in a region, so it costs
                 // nothing on the rest of the event.
+                // doc pdvd/96: at scope 0 this is computed exactly as doc pdvd/95
+                // shipped it -- bits 1 and 2, and the FIRST (face, wire) only.
+                // At scope > 0 two defects are repaired, because the column stops
+                // being a diagnostic and starts filtering the sum:
+                //   * bit 4 marks a preloaded FITTED companion.  Bit 2 covers only
+                //     the segment-less ones (rec.unfit_dot_clusters), and
+                //     n_dot_clusters_unfit is 0 on all 596 PDVD candidates, so
+                //     without bit 4 "own" means the MAIN CLUSTER ALONE and doc 78
+                //     item 9's admitted companions are silently dropped.
+                //   * every (face, wire) the channel maps to is tested, as the
+                //     role tests above already do.  Testing fw.front() alone was
+                //     cosmetic for a column but is a systematic loss on wrapped
+                //     channels once it filters -- exactly the role-0 population
+                //     this knob targets.
                 int own = 0;
                 if (in_region || in_ctl) {
                     const int nt = nticks_at(key.apa, face);
-                    if (tf.is_cell_covered_by_own_blobs(main, key.apa, face, plane, wire, key.time, 0, nt)) own |= 1;
-                    if (!own) {
-                        for (const auto* cl : rec.unfit_dot_clusters) {
-                            if (tf.is_cell_covered_by_own_blobs(cl, key.apa, face, plane, wire, key.time, 0, nt)) { own |= 2; break; }
+                    if (!scope_on) {
+                        if (tf.is_cell_covered_by_own_blobs(main, key.apa, face, plane, wire, key.time, 0, nt)) own |= 1;
+                        if (!own) {
+                            for (const auto* cl : rec.unfit_dot_clusters) {
+                                if (tf.is_cell_covered_by_own_blobs(cl, key.apa, face, plane, wire, key.time, 0, nt)) { own |= 2; break; }
+                            }
+                        }
+                    }
+                    else {
+                        for (const auto& [f, w] : fw) {
+                            if (tf.is_cell_covered_by_own_blobs(main, key.apa, f, plane, w, key.time, 0, nticks_at(key.apa, f))) { own |= 1; break; }
+                        }
+                        if (!own) {
+                            for (const auto* cl : rec.unfit_dot_clusters) {
+                                for (const auto& [f, w] : fw) {
+                                    if (tf.is_cell_covered_by_own_blobs(cl, key.apa, f, plane, w, key.time, 0, nticks_at(key.apa, f))) { own |= 2; break; }
+                                }
+                                if (own) break;
+                            }
+                        }
+                        if (!own) {
+                            // companions are sorted by ident() at the admission
+                            // site, so this walk is order-stable (no pointer order)
+                            for (const auto* cl : companions) {
+                                for (const auto& [f, w] : fw) {
+                                    if (tf.is_cell_covered_by_own_blobs(cl, key.apa, f, plane, w, key.time, 0, nticks_at(key.apa, f))) { own |= 4; break; }
+                                }
+                                if (own) break;
+                            }
                         }
                     }
                 }
@@ -2050,11 +2125,30 @@ private:
                 // role claimed it (role 1 muon footprint included -- there the
                 // subtraction is what makes it net to ~0, and that netting is the
                 // estimator's own validation, not a thing to exclude).
+                // doc pdvd/96: the region's OWN contribution, identical to contrib
+                // at scope 0.  At scope > 0 the muon prediction is clamped at 0
+                // first: pred_mu < 0 is unphysical (measured to -58016 e on
+                // 0.167 % of cells, 0.59 % of the total sum) and subtracting a
+                // negative only inflates.  The clamp is deliberately NOT applied
+                // to contrib above -- qm / qg are doc pdvd/81's association
+                // branches and a pre-existing branch must not move.
+                const double pmu_r = scope_on ? std::max(pmu, 0.0) : pmu;
+                const double contrib_r = xshared ? std::max(pall - pmu_r, 0.0) : (meas.charge - pmu_r);
+                // scope 1 = own != 0 (main + admitted companions, doc 78 item 9);
+                // scope 2 = own & 1 (the main cluster alone).
+                const bool scope_ok = !scope_on || (m_michel_q2d_region_scope >= 2 ? (own & 1) != 0 : own != 0);
                 if (in_region) {
-                    qr[plane] += contrib; mur[plane] += pmu; ++nr[plane];
+                    // doc pdvd/96: the dead count stays REGION-WIDE.  A dead cell
+                    // usually has no blob covering it at all, so filtering it too
+                    // would silently redefine michel_q2d_region_nd_* from "dead
+                    // exposure in the region" to "dead exposure among own cells".
+                    // Consequence, stated because it is a trap: under scope > 0
+                    // nd counts the region while n counts what was summed, so
+                    // nd / n is NOT a fraction and can exceed 1.
                     if (!meas.flag) ++nrd[plane];
+                    if (scope_ok) { qr[plane] += contrib_r; mur[plane] += pmu_r; ++nr[plane]; }
                 }
-                if (in_ctl) { qc[plane] += contrib; ++nc[plane]; }
+                if (in_ctl && scope_ok) { qc[plane] += contrib_r; ++nc[plane]; }
                 if (m_michel_q2d_cells)
                     cells.push_back({role, plane, key.apa, face, wire, key.time, key.time / std::max(1, nticks_at(key.apa, face)), key.channel, meas.flag,
                                      pmu > 0 ? 1 : 0, xshared ? 1 : 0, sel, own, meas.charge, meas.charge_err, pmu, pall, dstop, dctl});
@@ -4512,7 +4606,7 @@ void CheckSTM_Michel::visit(Ensemble& ensemble) const
         // After every row and verdict is final (the gamma take above decides
         // the role-4 set); reads the fit's stored response, writes only its
         // own branches.
-        if (m_michel_q2d) michel_q2d_estimate(rec, *tf, pa, main, chain, chain_set, michel_shower);
+        if (m_michel_q2d) michel_q2d_estimate(rec, *tf, pa, main, chain, chain_set, michel_shower, companions);
 
         // ---- publish (TaggerCheckNeutrino.cxx:3580-3590) --------------------
         tf->assemble_fitted_charge_2d();
