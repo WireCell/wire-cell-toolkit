@@ -1204,6 +1204,12 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
               // is byte-identical to the pre-doc-16 job.  DEFAULT false; both
               // ProtoDUNE drivers set it true.
               stm_recomb_calibrated=false,
+              // stm_recomb_C (doc pdvd/100): the C of that calibrated inverse.
+              // DEFAULT 0.7941 = the doc pdhd/16 fit, so the compiled config is
+              // byte-identical to the pre-doc-100 job.  Doc pdvd/100 refits it
+              // after the top-electronics gain (sp.jsonnet top_gain_scale) moves
+              // top charge x1.125; the PDVD driver sets the production value.
+              stm_recomb_C=0.7941,
               // sp_dedx_use_recomb_model: route the single-photon stem dE/dx
               // through the configured recombination model instead of the
               // inline uBooNE-field (0.273 kV/cm) inverse Box.  DEFAULT ON
@@ -1334,7 +1340,7 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
         local pdvd_stm_recomb = {
             type: 'PowerBoxRecombination',
             name: 'pdvd_stm_recomb',
-            data: { A: 0.93, k: 0.7169082125603865, p: 1.0, C: 0.7941,
+            data: { A: 0.93, k: 0.7169082125603865, p: 1.0, C: stm_recomb_C,
                     pivot: 2.1, Wi: 23.6e-6, dedx_max: 77.0 },
         },
         local pdvd_stm_michel_recomb = if stm_recomb_calibrated then pdvd_stm_recomb else pdvd_recomb,
