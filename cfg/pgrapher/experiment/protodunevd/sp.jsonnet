@@ -58,6 +58,17 @@ function(params, tools, override = {}) {
                // pdvd-anode-time-consistency.md (anode-stop ensemble).
                ctoffset_b=4*wc.microsecond,
                ctoffset_t=4*wc.microsecond,
+               // One charge-scale constant for the TOP (TDE, ident 4..7)
+               // electronics, SP only (params.elecs is shared with sim and is
+               // not touched).  s = real / assumed top ADC-per-electron.  It
+               // sets the top OmnibusSigProc postgain (charge out ~ 1/s) and
+               // the top L1SPFilterPD gain_scale (kernels_scale and the three
+               // ADC thresholds; kernels are ADC/e, so charge out ~ 1/s as
+               // well).  Default 1.0 = the legacy literals (postgain 1.0, top
+               // gain_scale 1.0) => compiled config byte-identical.  Bottom
+               // anodes never read it.  See pdvd/docs/nf_sp_img_clus/
+               // 99_top-electronics-gain-in-sp.md (s = 0.889, doc pdhd/29 M2).
+               top_gain_scale=1.0,
                dump_rawdecon=false)::
     // Top (_t) vs bottom (_b) anode filter suffix.  Bottom = ident 0..3,
     // top = ident 4..7.  See sp-filters.jsonnet for the registered names.
@@ -127,7 +138,7 @@ function(params, tools, override = {}) {
       ctoffset: if anode.data.ident < 4 then ctoffset_b else ctoffset_t, // per-side; both default 4us (byte-identical). consistent with FR: protodunevd_FR_imbalance3p_260501.json.bz2
       per_chan_resp: pc.name,
       fft_flag: 0,  // 1 is faster but higher memory, 0 is slightly slower but lower memory
-      postgain: 1.0,  // default 1.2
+      postgain: if anode.data.ident < 4 then 1.0 else top_gain_scale,  // default 1.2; top = top_gain_scale (legacy 1.0)
       ADC_mV: ADC_mV_ratio, // 4096 / (1400.0 * wc.mV), 
       troi_col_th_factor: 5.0,  // default 5
       troi_ind_th_factor: 3.0,  // default 3
@@ -199,7 +210,7 @@ function(params, tools, override = {}) {
       // are gain-invariant — same convention as chndb-base.
       local gain_scale = if anode.data.ident < 4
                          then params.elec.gain / (7.8 * wc.mV / wc.fC)
-                         else 1.0;
+                         else top_gain_scale;  // legacy 1.0; see make_sigproc arg
       // Per-region kernel JSON, generated offline via
       //   wirecell-sigproc gen-l1sp-kernels -d pdvd-bottom  pdvd_bottom_l1sp_kernels.json.bz2
       //   wirecell-sigproc gen-l1sp-kernels -d pdvd-top     pdvd_top_l1sp_kernels.json.bz2
