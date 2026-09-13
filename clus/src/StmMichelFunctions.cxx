@@ -277,6 +277,38 @@ double WireCell::Clus::PR::stm_michel_combine_planes(const std::array<double, 3>
     return overall;
 }
 
+// doc pdhd/28.  See the header.
+WireCell::Clus::PR::StmMichelWirePick WireCell::Clus::PR::stm_michel_pick_wire(
+    const std::vector<std::pair<double, double>>& dist, double radius, bool use_stop, bool use_ctl,
+    const std::function<int(size_t)>& own_of)
+{
+    StmMichelWirePick pick;
+    const double inf = std::numeric_limits<double>::infinity();
+    auto in = [radius](double d) { return d >= 0 && d <= radius; };
+    size_t best = 0, best_in = 0;
+    double k_best = inf, k_best_in = inf;
+    bool any_in = false;
+    for (size_t i = 0; i < dist.size(); ++i) {
+        double k = inf;
+        if (use_stop && dist[i].first >= 0) k = std::min(k, dist[i].first);
+        if (use_ctl && dist[i].second >= 0) k = std::min(k, dist[i].second);
+        if (k < k_best) { k_best = k; best = i; }
+        const bool inr = (use_stop && in(dist[i].first)) || (use_ctl && in(dist[i].second));
+        if (!inr) continue;
+        if (own_of) {
+            const int o = own_of(i);
+            if (o != 0) {
+                pick.index = i; pick.own = o; pick.in_radius = true;
+                return pick;
+            }
+        }
+        if (!any_in || k < k_best_in) { any_in = true; k_best_in = k; best_in = i; }
+    }
+    if (any_in) { pick.index = best_in; pick.in_radius = true; }
+    else pick.index = best;
+    return pick;
+}
+
 StmMichelBragg WireCell::Clus::PR::stm_michel_bragg_contrast(const StmMichelProfile& prof,
                                                               const std::function<double(double)>& mu_dqdx_at_rr_cm,
                                                               double tail_lo, double tail_hi,

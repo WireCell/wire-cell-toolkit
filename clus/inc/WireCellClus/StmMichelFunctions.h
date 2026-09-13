@@ -216,6 +216,29 @@ namespace WireCell::Clus::PR {
                                      const std::array<double, 3>& weights,
                                      double asym_switch, int* dropped_plane = nullptr);
 
+    /// doc pdhd/28 (doc pdhd/27 sec 2): which of a readout channel's
+    /// (face, wire) incarnations a 2-D charge cell IS, for the region reading.
+    /// `dist[i]` holds incarnation i's 2-D distance to the stop centre and to
+    /// the body-control centre, cm (< 0 = that centre could not be projected);
+    /// `use_stop` / `use_ctl` say which centres are on.  An incarnation is in
+    /// radius when an enabled distance is in [0, radius].  The pick is:
+    ///   1. the first in-radius incarnation, in `dist` order, whose own-blob
+    ///      bits `own_of(i)` are non-zero -- own_of is called only for
+    ///      in-radius incarnations and stops at the first covered one;
+    ///   2. else the nearest in-radius incarnation (own 0);
+    ///   3. else the nearest incarnation overall (in_radius false), index 0
+    ///      when no distance is projectable.
+    /// "Nearest" is the smaller enabled, projectable distance; ties keep the
+    /// earlier index.  Pure: no geometry, the caller supplies both.
+    struct StmMichelWirePick {
+        size_t index{0};
+        int own{0};
+        bool in_radius{false};
+    };
+    StmMichelWirePick stm_michel_pick_wire(const std::vector<std::pair<double, double>>& dist, double radius,
+                                           bool use_stop, bool use_ctl,
+                                           const std::function<int(size_t)>& own_of);
+
     /// The Bragg-contrast metric (doc pdvd/25 sec 13.9 item 3): median dQ/dx
     /// over the tail window rr in [tail_lo, tail_hi] divided by the median
     /// over the plateau window rr in [pl_lo, pl_hi].  `expected` is the SAME

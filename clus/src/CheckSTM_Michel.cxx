@@ -255,6 +255,9 @@ public:
         // doc pdvd/96 (doc 95 sec 9 item 1): the region's scope.  0 = off, and
         // at 0 the sum, the own_blob column and the clamp are all doc 95's.
         m_michel_q2d_region_scope = get<int>(config, "michel_q2d_region_scope", m_michel_q2d_region_scope);
+        // doc pdhd/28 (doc pdhd/27 sec 2): take the region / control distance on
+        // the (face, wire) the cell's charge is on, not the channel's first one.
+        m_michel_q2d_region_wire_lookup = get<bool>(config, "michel_q2d_region_wire_lookup", m_michel_q2d_region_wire_lookup);
         // doc pdvd/72 (P3b): the moved-stop veto (T2c) spares an attached
         // Michel that turns at least this hard at the stop.  -1 = off.
         m_moved_stop_michel_kink_min = get<double>(config, "moved_stop_michel_kink_min", m_moved_stop_michel_kink_min);
@@ -703,6 +706,24 @@ public:
         // a fraction and can exceed 1.  Branches only; michel_ke_best,
         // michel_found, is_stm and every reject bit are untouched.
         cfg["michel_q2d_region_scope"] = m_michel_q2d_region_scope;
+        // doc pdhd/28 (doc pdhd/27 sec 2): the WIRE LOOKUP.  A 2-D cell is a
+        // readout channel at a tick; on a wrapped plane the channel is several
+        // wires, and unless a Michel / gamma cloud match placed it the cell
+        // keeps the channel's FIRST (face, wire).  The region and control
+        // distances were taken on that wire.  On PDHD every U/V channel wraps
+        // onto both faces with face 0 listed first, and 348 of 800 have two
+        // segments on one face, so on APA1/3 every muon-footprint U/V cell and
+        // on every APA half the two-segment ones were measured on a wire the
+        // charge never touched: out of radius when they are in it (the plane
+        // then drops out of the sum), occasionally in radius when they are not.
+        // true: every (face, wire) of an unplaced cell is measured, and the cell
+        // becomes the first in-radius one its own blobs cover (else the nearest
+        // in-radius one, else the nearest) -- stm_michel_pick_wire.  own_blob is
+        // then evaluated on that (face, wire) alone, at the scope's bits.
+        // Branches michel_q2d_region*/ctl*, michel_q2d_n_role0 and the
+        // T_stm_michel_2d rows move; michel_q2d_n_rewired is added.  No verdict
+        // reads any of them.  false = the doc pdvd/95-96 lookup, exactly.
+        cfg["michel_q2d_region_wire_lookup"] = m_michel_q2d_region_wire_lookup;
         // doc pdvd/72 (P3b): deg, -1 = off.  When >= 0, the moved-stop veto
         // (moved_stop_michel_guard) does not demote an attached Michel whose
         // kink at the stop (michel_kink_deg) is at least this -- the turn is
@@ -1064,6 +1085,9 @@ private:
     // Any value > 0 ALSO clamps a negative muon prediction to 0: pred_mu < 0 is
     // unphysical (measured to -58016 e on 0.167 % of cells) and can only inflate.
     int m_michel_q2d_region_scope{0};             // 0 = off / every cell in radius
+    // doc pdhd/28: region / control distances on the wire the charge is on
+    // (stm_michel_pick_wire) rather than the channel's first (face, wire).
+    bool m_michel_q2d_region_wire_lookup{false};
     double m_moved_stop_michel_kink_min{-1.0};    // doc pdvd/72 (P3b): deg, -1 = off
     double m_moved_stop_michel_reach_min_cm{-1.0};// doc pdvd/84: cm, -1 = off
     double m_michel_mip_lo_turned{-1.0};          // doc pdvd/73 (P2a): -1 = off
@@ -1223,6 +1247,9 @@ private:
         int michel_q2d_ctl_n_u{0}, michel_q2d_ctl_n_v{0}, michel_q2d_ctl_n_w{0};
         int michel_q2d_ctl_dropped_plane{-1}, michel_q2d_ctl_valid{0};
         double michel_q2d_ctl{0}, michel_ke_q2d_ctl{0};
+        // doc pdhd/28: cells the wire lookup moved OFF the channel's first
+        // (face, wire) and into a radius (written only with the lookup on).
+        int michel_q2d_n_rewired{0};
         // doc pdvd/81: every segment that received a row, by role (in row
         // order; a segment can repeat) -- the estimator's fallback source of
         // the Michel (role 3) and its source of the taken gammas (role 4).
@@ -1978,6 +2005,27 @@ private:
             }
             return cache.emplace(k3, c).first->second;
         };
+        // doc pdhd/28: the own-blob bits of ONE (face, wire) -- bit 1 the main
+        // cluster, bit 2 an admitted unfitted companion, bit 4 (scope > 0 only) a
+        // preloaded fitted companion; first match wins, as in the scope walk
+        // below.  Used only by the wire lookup (michel_q2d_region_wire_lookup).
+        auto own_at_fw = [&](int apa, int f, int plane, int w, int time) {
+            const int nt = nticks_at(apa, f);
+            int o = 0;
+            if (tf.is_cell_covered_by_own_blobs(main, apa, f, plane, w, time, 0, nt)) o |= 1;
+            if (!o) {
+                for (const auto* cl : rec.unfit_dot_clusters) {
+                    if (tf.is_cell_covered_by_own_blobs(cl, apa, f, plane, w, time, 0, nt)) { o |= 2; break; }
+                }
+            }
+            if (!o && scope_on) {
+                // companions are sorted by ident() at the admission site (order-stable)
+                for (const auto* cl : companions) {
+                    if (tf.is_cell_covered_by_own_blobs(cl, apa, f, plane, w, time, 0, nt)) { o |= 4; break; }
+                }
+            }
+            return o;
+        };
 
         struct Cell { int role, plane, apa, face, wire, time, time_slice, channel, flag, shared, xshared, sel, own; double q, qerr, pmu, pall, dstop, dctl; };
         std::vector<Cell> cells;
@@ -1987,6 +2035,7 @@ private:
         std::array<double, 3> qr{{0, 0, 0}}, mur{{0, 0, 0}}, qc{{0, 0, 0}};
         std::array<int, 3> nr{{0, 0, 0}}, nrd{{0, 0, 0}}, nc{{0, 0, 0}};
         int n_role1 = 0, n_sel2_only = 0, n_unfit_cells = 0, n_role0 = 0;
+        int n_rewired = 0;   // doc pdhd/28
         for (int plane = 0; plane < 3; ++plane) {
             for (const auto& [key, meas] : *maps[plane]) {
                 auto wit = pa.m_map_apa_ch_plane_wires.find({key.apa, key.channel});
@@ -2031,6 +2080,38 @@ private:
                 // doc pdvd/95: the cell's distance to each centre, in the cells'
                 // own frame.  Computed AFTER the role tests because any_within
                 // may have named a different (face, wire) for this cell.
+                // doc pdhd/28 (doc pdhd/27 sec 2): WHICH wire is this cell?  Unless
+                // a cloud / blob match above placed it, (face, wire) is still
+                // fw.front() -- on PDHD's wrapped U/V the far face (APA1/3) or the
+                // first of two same-face segments.  With the lookup on, every
+                // (face, wire) of an unplaced multi-wire cell is measured and the
+                // cell becomes stm_michel_pick_wire's choice; the distances below
+                // are then recomputed on it (same arithmetic, same value).  Off:
+                // own_picked stays -1 and nothing below changes.
+                int own_picked = -1;
+                if (m_michel_q2d_region_wire_lookup && (region_on || ctl_on) && !((sel & 1) || (sel & 4)) && fw.size() > 1) {
+                    std::vector<std::pair<double, double>> dfw(fw.size(), {-1.0, -1.0});
+                    for (size_t i = 0; i < fw.size(); ++i) {
+                        const int fi = fw[i].first, wi = fw[i].second;
+                        const auto p2 = grouping->convert_time_wire_2Dpoint(key.time, wi, key.apa, fi, plane);
+                        if (region_on) {
+                            const auto& c0 = centre_of(ctr_stop, rec.stop_pt, true, key.apa, fi, plane);
+                            if (c0.ok) dfw[i].first = std::hypot(p2.first - c0.d, p2.second - c0.w) / units::cm;
+                        }
+                        if (ctl_on) {
+                            const auto& c1 = centre_of(ctr_ctl, ctl_pt, have_ctl, key.apa, fi, plane);
+                            if (c1.ok) dfw[i].second = std::hypot(p2.first - c1.d, p2.second - c1.w) / units::cm;
+                        }
+                    }
+                    const auto pick = stm_michel_pick_wire(
+                        dfw, region_on ? m_michel_q2d_region_cm : 0.0, region_on, ctl_on,
+                        [&](size_t i) { return own_at_fw(key.apa, fw[i].first, plane, fw[i].second, key.time); });
+                    face = fw[pick.index].first; wire = fw[pick.index].second;
+                    if (pick.in_radius) {
+                        own_picked = pick.own;
+                        if (pick.index != 0) ++n_rewired;
+                    }
+                }
                 double dstop = -1, dctl = -1;
                 if (region_on || ctl_on) {
                     const auto p2c = grouping->convert_time_wire_2Dpoint(key.time, wire, key.apa, face, plane);
@@ -2070,7 +2151,12 @@ private:
                 //     channels once it filters -- exactly the role-0 population
                 //     this knob targets.
                 int own = 0;
-                if (in_region || in_ctl) {
+                // doc pdhd/28: with the wire lookup on, own_blob belongs to the
+                // chosen (face, wire) alone -- walking every incarnation would let
+                // a far segment's coverage vouch for a near one.
+                if ((in_region || in_ctl) && own_picked >= 0) own = own_picked;
+                else if ((in_region || in_ctl) && m_michel_q2d_region_wire_lookup) own = own_at_fw(key.apa, face, plane, wire, key.time);
+                else if (in_region || in_ctl) {
                     const int nt = nticks_at(key.apa, face);
                     if (!scope_on) {
                         if (tf.is_cell_covered_by_own_blobs(main, key.apa, face, plane, wire, key.time, 0, nt)) own |= 1;
@@ -2204,6 +2290,7 @@ private:
             rec.michel_ke_q2d_region = to_mev(rec.michel_q2d_region);
             rec.michel_q2d_n_role0 = n_role0;
         }
+        rec.michel_q2d_n_rewired = n_rewired;   // doc pdhd/28: 0 unless the wire lookup is on
         if (ctl_on) {
             rec.michel_q2d_ctl_u = qc[0]; rec.michel_q2d_ctl_v = qc[1]; rec.michel_q2d_ctl_w = qc[2];
             rec.michel_q2d_ctl_n_u = nc[0]; rec.michel_q2d_ctl_n_v = nc[1]; rec.michel_q2d_ctl_n_w = nc[2];
@@ -2360,6 +2447,10 @@ private:
             I1("michel_q2d_ctl_valid", r.michel_q2d_ctl_valid);
             D1("michel_q2d_ctl", r.michel_q2d_ctl); D1("michel_ke_q2d_ctl", r.michel_ke_q2d_ctl);
         }
+        // doc pdhd/28: the wire lookup's count, on its own knob (the schema grows
+        // by one branch only when it is on).
+        if (m_michel_q2d && (m_michel_q2d_region_cm > 0 || m_michel_q2d_region_ctl_cm >= 0) && m_michel_q2d_region_wire_lookup)
+            I1("michel_q2d_n_rewired", r.michel_q2d_n_rewired);
         // doc pdvd/72 (P3b): the same pattern.
         if (m_moved_stop_michel_kink_min >= 0) I1("n_michel_veto_exempt", r.n_michel_veto_exempt);
         if (m_moved_stop_michel_reach_min_cm >= 0) I1("n_michel_veto_reach_exempt", r.n_michel_veto_reach_exempt);

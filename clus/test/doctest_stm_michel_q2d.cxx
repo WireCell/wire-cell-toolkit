@@ -22,6 +22,59 @@
 using namespace WireCell;
 using WireCell::Clus::TrackFitting;
 using WireCell::Clus::PR::stm_michel_combine_planes;
+using WireCell::Clus::PR::stm_michel_pick_wire;
+
+// doc pdhd/28: the wrapped-channel wire lookup for the region reading.
+TEST_CASE("stm_michel_pick_wire: a single incarnation is itself")
+{
+    int calls = 0;
+    auto p = stm_michel_pick_wire({{3.0, 40.0}}, 10.0, true, true, [&](size_t) { ++calls; return 1; });
+    CHECK(p.index == 0); CHECK(p.own == 1); CHECK(p.in_radius); CHECK(calls == 1);
+    auto q = stm_michel_pick_wire({{30.0, 40.0}}, 10.0, true, true, [&](size_t) { ++calls; return 1; });
+    CHECK(q.index == 0); CHECK(q.own == 0); CHECK_FALSE(q.in_radius); CHECK(calls == 1);   // not in radius: no own test
+}
+
+TEST_CASE("stm_michel_pick_wire: the far face listed first loses to the covered near one")
+{
+    std::vector<size_t> asked;
+    auto p = stm_michel_pick_wire({{150.0, 160.0}, {3.0, 40.0}}, 10.0, true, true,
+                                  [&](size_t i) { asked.push_back(i); return i == 1 ? 4 : 0; });
+    CHECK(p.index == 1); CHECK(p.own == 4); CHECK(p.in_radius);
+    CHECK(asked == std::vector<size_t>{1});                  // the out-of-radius one is never tested
+}
+
+TEST_CASE("stm_michel_pick_wire: coverage decides among in-radius incarnations, then distance")
+{
+    // both in radius, the nearer one NOT covered: the covered one wins
+    auto p = stm_michel_pick_wire({{2.0, -1.0}, {8.0, -1.0}}, 10.0, true, false, [](size_t i) { return i == 1 ? 1 : 0; });
+    CHECK(p.index == 1); CHECK(p.own == 1);
+    // both covered: the first in order, and the second is never asked
+    int calls = 0;
+    auto q = stm_michel_pick_wire({{8.0, -1.0}, {2.0, -1.0}}, 10.0, true, false, [&](size_t) { ++calls; return 1; });
+    CHECK(q.index == 0); CHECK(calls == 1);
+    // none covered: the nearest in-radius one, own 0
+    auto r = stm_michel_pick_wire({{8.0, -1.0}, {2.0, -1.0}, {50.0, -1.0}}, 10.0, true, false, [](size_t) { return 0; });
+    CHECK(r.index == 1); CHECK(r.own == 0); CHECK(r.in_radius);
+}
+
+TEST_CASE("stm_michel_pick_wire: disabled centres, unprojectable distances, ties")
+{
+    // the stop distance is ignored when only the control is on
+    auto p = stm_michel_pick_wire({{1.0, 90.0}, {80.0, 5.0}}, 10.0, false, true, [](size_t) { return 0; });
+    CHECK(p.index == 1); CHECK(p.in_radius);
+    // nothing in radius: the nearest overall
+    auto q = stm_michel_pick_wire({{300.0, 280.0}, {40.0, 60.0}}, 10.0, true, true, [](size_t) { return 1; });
+    CHECK(q.index == 1); CHECK_FALSE(q.in_radius); CHECK(q.own == 0);
+    // nothing projectable: index 0
+    auto r = stm_michel_pick_wire({{-1.0, -1.0}, {-1.0, -1.0}}, 10.0, true, true, [](size_t) { return 1; });
+    CHECK(r.index == 0); CHECK_FALSE(r.in_radius);
+    // a tie keeps the earlier index
+    auto s = stm_michel_pick_wire({{4.0, -1.0}, {4.0, -1.0}}, 10.0, true, true, [](size_t) { return 0; });
+    CHECK(s.index == 0);
+    // an empty own_of is allowed: coverage is never decided, distance picks
+    auto t = stm_michel_pick_wire({{9.0, -1.0}, {1.0, -1.0}}, 10.0, true, true, nullptr);
+    CHECK(t.index == 1); CHECK(t.own == 0);
+}
 
 TEST_CASE("stm_michel_combine_planes: symmetric input is the weighted mean")
 {
