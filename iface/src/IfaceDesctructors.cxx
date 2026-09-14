@@ -76,6 +76,10 @@
 #include "WireCellIface/INode.h"
 #include "WireCellIface/IPlaneImpactResponse.h"
 #include "WireCellIface/IPointFieldSink.h"
+#include "WireCellIface/IPrimaryParticle.h"
+#include "WireCellIface/IPrimaryTracker.h"
+#include "WireCellIface/IPrimaryVertex.h"
+#include "WireCellIface/IPrimaryVertexSet.h"
 #include "WireCellIface/IProcessor.h"
 #include "WireCellIface/IQueuedoutNode.h"
 #include "WireCellIface/IQueuedoutNode.h"
@@ -187,6 +191,10 @@ INamed::~INamed() {}
 INode::~INode() {}
 IPlaneImpactResponse::~IPlaneImpactResponse() {}
 IPointFieldSink::~IPointFieldSink() {}
+IPrimaryParticle::~IPrimaryParticle() {}
+IPrimaryTracker::~IPrimaryTracker() {}
+IPrimaryVertex::~IPrimaryVertex() {}
+IPrimaryVertexSet::~IPrimaryVertexSet() {}
 IProcessor::~IProcessor() {}
 IQueuedoutNodeBase::~IQueuedoutNodeBase() {}
 IRecombinationModel::~IRecombinationModel() {}

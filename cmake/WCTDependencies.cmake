@@ -39,13 +39,13 @@ set(WCT_DEP_MANDATORY
     SPDLOG BOOST FFTW EIGEN DYNAMO JSONCPP JSONNET ZLIB BZIP2 PTHREAD)
 set(WCT_DEP_OPTIONAL
     FFTWTHREADS GLPK TBB HDF5 ZMQ CZMQ ZYRE ZIO GRPC PROTOBUF TRITON
-    PYTHON ROOTSYS LIBTORCH CUDA BACKTRACE)
+    PYTHON ROOTSYS LIBTORCH CUDA EDEPSIM BACKTRACE)
 
 # Opt-in dependencies: like waf's with_p() gating (waft/wcb.py), these are only
 # probed when their WITH_<TOKEN> is set; an empty value means "do not use",
 # never auto-detect.  (ROOT, libtorch and CUDA pull in heavy toolchains and are
 # enabled deliberately, e.g. configit.sh passes --with-root.)
-set(WCT_DEP_OPTIN ROOTSYS LIBTORCH CUDA KOKKOS)
+set(WCT_DEP_OPTIN ROOTSYS LIBTORCH CUDA KOKKOS EDEPSIM)
 
 # Declare the per-dependency options.  These mirror waf's family of
 # --with-NAME[/-include/-lib/-libs] options:
@@ -450,6 +450,25 @@ else()
     _wct_provide(LIBTORCH LINK ${TORCH_LIBRARIES} INCLUDE ${TORCH_INCLUDE_DIRS})
   else()
     _wct_missing(LIBTORCH)
+  endif()
+endif()
+
+# --- edep-sim (Geant4 energy-deposition simulation) ---
+# Opt-in; only the 'edep' package uses it.  It provides the EDepSim:: targets
+# (edepsim_service = the thread-affine tracking service, plus edepsim + io) and
+# needs Geant4 for the plugin's direct G4 primary-generator code.
+_wct_intent(EDEPSIM)
+if(_wct_mode STREQUAL "SKIP")
+  _wct_missing(EDEPSIM)
+else()
+  find_package(EDepSim QUIET)
+  find_package(Geant4 QUIET)
+  if(EDepSim_FOUND AND Geant4_FOUND)
+    _wct_provide(EDEPSIM
+      LINK "EDepSim::edepsim_service;EDepSim::edepsim;EDepSim::edepsim_io;${Geant4_LIBRARIES}"
+      INCLUDE "${Geant4_INCLUDE_DIRS}")
+  else()
+    _wct_missing(EDEPSIM)
   endif()
 endif()
 
