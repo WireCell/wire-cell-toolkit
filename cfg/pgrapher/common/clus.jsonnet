@@ -810,7 +810,7 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
         // Write T_tagger and T_kine trees into the existing tracking output ROOT file.
         // Must run AFTER numu_bdt_scorer and nue_bdt_scorer (BDT scores must be filled).
         // Must run AFTER UbooneMagnifyTrackingVisitor (file must already exist to UPDATE).
-        tagger_output(name="", output_filename="tracking_proj.root", neutrino_type_bitmask=false, nu_per_bundle=false, mcs_output=false) :: {
+        tagger_output(name="", output_filename="tracking_proj.root", neutrino_type_bitmask=false, nu_per_bundle=false, mcs_output=false, nu_provenance=false) :: {
             type: "UbooneTaggerOutputVisitor",
             name: prefix + name,
             data: {
@@ -834,7 +834,14 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
               // doc 80 round 3: book the five kine_mcs_* T_kine branches (MCS
               // muon momentum).  C++ default false = branches not booked; key
               // omitted when off => byte-identical pre-knob config AND schema.
-              + (if mcs_output then { mcs_output: true } else {}),
+              + (if mcs_output then { mcs_output: true } else {})
+              // sbnd_xin/docs/109: book the selection-provenance branches
+              // (T_tagger run/subrun/event, sel_cluster_id,
+              // vertex_moved_cluster, has_vertex, flash_*, act_role,
+              // act_is_final; T_kine run/subrun/event, has_vertex).  C++
+              // default false = branches not booked; key omitted when off =>
+              // byte-identical pre-knob config AND schema.
+              + (if nu_provenance then { nu_provenance: true } else {}),
         },
 
         pointed(name="", groupings=["live"]) :: {

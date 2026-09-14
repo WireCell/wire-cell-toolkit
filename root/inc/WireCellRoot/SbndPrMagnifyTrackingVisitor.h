@@ -35,6 +35,8 @@
 #include "WireCellUtil/Logging.h"
 
 #include <array>
+#include <map>
+#include <string>
 
 class TFile;
 
@@ -79,6 +81,27 @@ namespace WireCell {
             // per-input row index the multi-APA merge invalidates).  DEFAULT
             // FALSE => tracking-pr.root byte-identical.
             bool m_flash_by_gid{false};
+            // sbnd_xin/docs/109 group 1: write TaggerCheckNeutrino's selection
+            // census (Grouping::get_nu_census) as T_bundle (one row per
+            // in-beam-window flash bundle, with the reason it did or did not
+            // yield a candidate) and T_flash (one row per optical flash, with
+            // its TPC and flash group), plus the event counters and the
+            // selection's window in Trun.  Written on every event, including
+            // those with no T_tagger row.  DEFAULT FALSE => byte-identical.
+            bool m_nu_provenance{false};
+            // sbnd_xin/docs/109 group 2: T_cluster tgm/stm/fc read the flags
+            // SBND's taggers set (Flags::TGM/STM/FC; the legacy reads are the
+            // lowercase flags only the unconfigured ClusteringTaggerFlagTransfer
+            // sets, so they are always 0 here), lm reads the "lm_flag" scalar
+            // Q/L matching sets, beam_flash is DERIVED with the selection's own
+            // test (matched_flash_gid >= 0 and cluster_t0 in the beam window;
+            // -1 without a census), and matched_flash_gid / flash_tpc are
+            // added.  DEFAULT FALSE => byte-identical.
+            bool m_fix_cluster_flags{false};
+            // sbnd_xin/docs/109 group 4: provenance strings written into Trun
+            // as std::string branches, one per key (sorted), plus
+            // wct_version.  Empty (the default) => nothing written.
+            std::map<std::string, std::string> m_provenance;
             double m_dQdx_scale{0.1};
             double m_dQdx_offset{-1000};
             bool m_flag_skip_vertex{false};
@@ -101,8 +124,9 @@ namespace WireCell {
             void write_bad_channels(TFile* output_tf, Clus::Facade::Grouping& grouping, const ChanScheme& cs) const;
             void write_proj_data(TFile* output_tf, Clus::Facade::Grouping& grouping, const ChanScheme& cs) const;
             void write_t_rec_data(TFile* output_tf, Clus::Facade::Grouping& grouping, const ChanScheme& cs) const;
-            void write_trun(TFile* output_tf) const;
+            void write_trun(TFile* output_tf, Clus::Facade::Grouping& grouping) const;
             void write_cluster_summary(TFile* output_tf, Clus::Facade::Grouping& grouping) const;
+            void write_nu_census(TFile* output_tf, Clus::Facade::Grouping& grouping) const;
         };
     }  // namespace Root
 }  // namespace WireCell

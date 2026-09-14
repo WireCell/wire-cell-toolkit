@@ -58,6 +58,14 @@ namespace WireCell {
             // derives this and mcs_enable from ONE jsonnet argument so the
             // computation gate and the branch gate can never disagree.
             bool m_mcs_output{false};
+            // sbnd_xin/docs/109: book the selection-provenance branches
+            // TaggerCheckNeutrino's nu_provenance knob fills -- T_tagger
+            // run/subrun/event, sel_cluster_id, vertex_moved_cluster,
+            // has_vertex, flash_time_us/flash_pe/flash_tpc/flash_group,
+            // act_role, act_in_pr, act_is_final; T_kine run/subrun/event, has_vertex.
+            // C++ default false => branches not booked => schema
+            // byte-identical (this writer is shared with PDHD/PDVD).
+            bool m_nu_provenance{false};
         };
 
     }  // namespace Root

@@ -107,6 +107,11 @@ TEST_CASE("clus knob defaults: TaggerCheckNeutrino switches are all OFF")
     // DL-swap main-flag leak fix.  Both false = legacy path, byte-identical.
     CHECK_KNOB_BOOL(cfg, "nue_sp_consistent_fv", false);
     CHECK_KNOB_BOOL(cfg, "nu_selected_as_main_snapshot_all", false);
+    // sbnd_xin/docs/109 -- record the selection for the ROOT writers.  false =
+    // no TaggerInfo/KineInfo provenance fields, no NuBundleCensus published.
+    CHECK_KNOB_BOOL(cfg, "nu_provenance", false);
+    REQUIRE_MESSAGE(cfg.isMember("flash_pair_dt_us"), "missing knob: flash_pair_dt_us");
+    CHECK(cfg["flash_pair_dt_us"].asDouble() == doctest::Approx(0.05));
     // doc pr/40: track (proton/pion/muon) mis-identified as electron.
     CHECK_KNOB_BOOL(cfg, "track_pid_persist_dqdx", false);      // F1
     CHECK_KNOB_BOOL(cfg, "shower_reclass_dqdx_guard", false);   // F2

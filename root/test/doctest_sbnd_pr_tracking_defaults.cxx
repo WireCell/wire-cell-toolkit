@@ -46,8 +46,35 @@ TEST_CASE("root knob defaults: SbndPrMagnifyTrackingVisitor save_in_scope is OFF
     REQUIRE_MESSAGE(cfg.isMember("flash_by_gid"), "missing knob: flash_by_gid");
     CHECK(cfg["flash_by_gid"].asBool() == false);
 
+    // sbnd_xin/docs/109.  nu_provenance adds T_bundle/T_flash and Trun census
+    // branches, fix_cluster_flags changes the VALUES of T_cluster's
+    // tgm/stm/fc/lm/beam_flash columns, and a non-empty provenance map adds
+    // Trun string branches.  All must default off, so every arm recorded
+    // before doc 109 stays comparable; SBND production turns them on in
+    // cfg/pgrapher/experiment/sbnd/wct-pr-perevt.jsonnet.
+    REQUIRE_MESSAGE(cfg.isMember("nu_provenance"), "missing knob: nu_provenance");
+    CHECK(cfg["nu_provenance"].asBool() == false);
+    REQUIRE_MESSAGE(cfg.isMember("fix_cluster_flags"), "missing knob: fix_cluster_flags");
+    CHECK(cfg["fix_cluster_flags"].asBool() == false);
+    REQUIRE_MESSAGE(cfg.isMember("provenance"), "missing knob: provenance");
+    CHECK(cfg["provenance"].isObject());
+    CHECK(cfg["provenance"].size() == 0);
+
     // The legacy output name must not drift either -- the runner and every
     // gate script look for exactly this file.
     REQUIRE(cfg.isMember("output_filename"));
     CHECK(cfg["output_filename"].asString() == "tracking-pr.root");
+}
+
+// sbnd_xin/docs/109.  UbooneTaggerOutputVisitor is shared with the PDHD and
+// PDVD PR configs, so its provenance branches must stay unbooked by default.
+TEST_CASE("root knob defaults: UbooneTaggerOutputVisitor nu_provenance is OFF")
+{
+    PluginManager::instance().add("WireCellRoot");
+    auto icfg = Factory::lookup<IConfigurable>("UbooneTaggerOutputVisitor",
+                                               "doc109_knobdefaults_probe");
+    REQUIRE(icfg);
+    auto cfg = icfg->default_configuration();
+    REQUIRE_MESSAGE(cfg.isMember("nu_provenance"), "missing knob: nu_provenance");
+    CHECK(cfg["nu_provenance"].asBool() == false);
 }

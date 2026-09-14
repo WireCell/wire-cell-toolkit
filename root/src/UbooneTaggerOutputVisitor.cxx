@@ -47,6 +47,8 @@ void Root::UbooneTaggerOutputVisitor::configure(const WireCell::Configuration& c
     m_nu_per_bundle = get<bool>(cfg, "nu_per_bundle", m_nu_per_bundle);
     // doc 80 round 3: see the member comment in the header.
     m_mcs_output = get<bool>(cfg, "mcs_output", m_mcs_output);
+    // sbnd_xin/docs/109: see the member comment in the header.
+    m_nu_provenance = get<bool>(cfg, "nu_provenance", m_nu_provenance);
 }
 
 WireCell::Configuration Root::UbooneTaggerOutputVisitor::default_configuration() const
@@ -57,6 +59,7 @@ WireCell::Configuration Root::UbooneTaggerOutputVisitor::default_configuration()
     cfg["neutrino_type_bitmask"] = m_neutrino_type_bitmask;  // false = branch not booked, schema-identical
     cfg["nu_per_bundle"] = m_nu_per_bundle;  // false = branches not booked, schema-identical
     cfg["mcs_output"] = m_mcs_output;  // false = kine_mcs_* branches not booked, schema-identical
+    cfg["nu_provenance"] = m_nu_provenance;  // sbnd_xin/docs/109; false = provenance branches not booked, schema-identical
     return cfg;
 }
 
@@ -137,6 +140,30 @@ void Root::UbooneTaggerOutputVisitor::visit(Clus::Facade::Ensemble& ensemble) co
         t_tagger->Branch("act_fc", &ti.act_fc);
         t_tagger->Branch("act_lm", &ti.act_lm);
         t_tagger->Branch("act_evaluated", &ti.act_evaluated);
+    }
+
+    // sbnd_xin/docs/109: what the selection did, and which event this row is.
+    // The RSE is the triplet MultiAlgBlobClustering publishes on the ensemble
+    // (resolved metadata > ident > config), the same numbers Trun carries.
+    // Booked only under nu_provenance, so the knob-off schema is
+    // byte-identical.
+    int rse_run = ensemble.get_scalar<int>("runNo", -1);
+    int rse_subrun = ensemble.get_scalar<int>("subRunNo", -1);
+    int rse_event = ensemble.get_scalar<int>("eventNo", -1);
+    if (m_nu_provenance) {
+        t_tagger->Branch("run", &rse_run, "run/I");
+        t_tagger->Branch("subrun", &rse_subrun, "subrun/I");
+        t_tagger->Branch("event", &rse_event, "event/I");
+        t_tagger->Branch("sel_cluster_id", &ti.sel_cluster_id, "sel_cluster_id/I");
+        t_tagger->Branch("vertex_moved_cluster", &ti.vertex_moved_cluster, "vertex_moved_cluster/I");
+        t_tagger->Branch("has_vertex", &ti.has_vertex, "has_vertex/I");
+        t_tagger->Branch("flash_time_us", &ti.flash_time_us, "flash_time_us/F");
+        t_tagger->Branch("flash_pe", &ti.flash_pe, "flash_pe/F");
+        t_tagger->Branch("flash_tpc", &ti.flash_tpc, "flash_tpc/I");
+        t_tagger->Branch("flash_group", &ti.flash_group, "flash_group/I");
+        t_tagger->Branch("act_role", &ti.act_role);
+        t_tagger->Branch("act_in_pr", &ti.act_in_pr);
+        t_tagger->Branch("act_is_final", &ti.act_is_final);
     }
 
     // ---- cosmic tagger (top-level flag) ----
@@ -1201,6 +1228,14 @@ void Root::UbooneTaggerOutputVisitor::visit(Clus::Facade::Ensemble& ensemble) co
         t_kine->Branch("cluster_id", &ki.cluster_id, "cluster_id/I");
         t_kine->Branch("matched_flash_gid", &ki.matched_flash_gid, "matched_flash_gid/I");
         t_kine->Branch("nu_index", &ki.nu_index, "nu_index/I");
+    }
+
+    // sbnd_xin/docs/109: the event and the vertex-found flag, as on T_tagger.
+    if (m_nu_provenance) {
+        t_kine->Branch("run", &rse_run, "run/I");
+        t_kine->Branch("subrun", &rse_subrun, "subrun/I");
+        t_kine->Branch("event", &rse_event, "event/I");
+        t_kine->Branch("has_vertex", &ki.has_vertex, "has_vertex/I");
     }
 
     // doc 80 round 3: MCS muon momentum scalars + join key.  Booked only

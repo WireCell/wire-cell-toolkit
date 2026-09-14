@@ -1349,6 +1349,28 @@ function(
     // mcs_enable, so the OFF compiled config is byte-identical pre-MCS.
     // C++ default false.
     mcs_enable = true,               // SBND PRODUCTION ON 2026-08-28 (doc 84 round 1, owner pre-authorization; books the five kine_mcs_* T_kine branches)
+    // ---- sbnd_xin/docs/109: self-describing tracking-pr.root ------------ //
+    // root_nu_record: record what the neutrino selection did -- T_bundle (one
+    // row per in-beam-window flash bundle with the reason it did or did not
+    // yield a candidate), T_flash (every optical flash with its TPC and flash
+    // group), Trun event counters, and on T_tagger/T_kine the run/subrun/event,
+    // sel_cluster_id, vertex_moved_cluster, has_vertex, the row's flash and
+    // the companions appended to act_* (act_role / act_is_final).  One switch
+    // for TaggerCheckNeutrino's computing key and both writers' booking keys.
+    // root_cluster_flags: T_cluster tgm/stm/fc/lm read the flags SBND's
+    // taggers set (always 0 before), beam_flash derived with the selection's
+    // own in-window test, matched_flash_gid and flash_tpc added.
+    // root_provenance: Trun wct_version, the BDT weight files, the DL weights
+    // and the TrackFitting file, plus provenance_extra (run_pr_chain_batch.sh
+    // passes the operating-point sha256 and the git revisions).
+    // flash_pair_dt_us: null => C++ default 0.05 us (doc 108 sec 4.1).
+    // Observation only: no reconstruction output moves (doc 109 gates).
+    // C++ defaults false/empty; false here => keys omitted => byte-identical.
+    root_nu_record = false,
+    root_cluster_flags = false,
+    root_provenance = false,
+    provenance_extra = {},
+    flash_pair_dt_us = null,
     mcs_muon_source = 'long_muon_else_pf',  // SBND PRODUCTION ON 2026-08-28 (doc 84 round 1 P4: chain when one exists, else the pf muon; pf_muon | long_muon | longest_segment | long_muon_else_pf)
     mcs_point_source = 'muon_segments',  // muon_segments | whole_event (validation only, doc 80 sec 7.3)
     mcs_cathode_xcut = 5,                // cm half-band excised around cathode_x (doc 80 sec 7.5);
@@ -3753,6 +3775,11 @@ function(
                              nu_per_bundle=nu_per_bundle,
                              nu_per_bundle_min_length=nu_per_bundle_min_length,
                              mcs_enable=mcs_enable,
+                             root_nu_record=root_nu_record,
+                             flash_pair_dt_us=flash_pair_dt_us,
+                             root_cluster_flags=root_cluster_flags,
+                             root_provenance=root_provenance,
+                             provenance_extra=provenance_extra,
                              pseudo_shower_track_paint=pseudo_shower_track_paint,
                              use_power_recomb=use_power_recomb,
                              fast_xgb_forest=fast_xgb_forest,

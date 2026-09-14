@@ -743,6 +743,23 @@ public:
         // visible downstream.  A no-op unless armed.  C++ default false =>
         // byte-identical.
         bool m_nu_selected_as_main_snapshot_all{false};
+        // ---- sbnd_xin/docs/109 -- nu_provenance ----------------------- //
+        // Record what the candidate selection did, for the ROOT writers:
+        // TaggerInfo sel_cluster_id / vertex_moved_cluster / has_vertex / the
+        // row's flash (time, PE, TPC, flash group) and the companions
+        // appended to the act_* roster (act_role, act_is_final); KineInfo
+        // has_vertex; and a NuBundleCensus (per-bundle reason codes, event
+        // counters incl. in-window clusters with no matched flash, the flash
+        // table) published on the grouping BEFORE the no-candidate return, so
+        // an event with no T_tagger row still says why.  Observation only:
+        // every selection decision is unchanged.  C++ default false =>
+        // nothing filled, nothing published => byte-identical.
+        bool m_nu_provenance{false};
+        // us.  Two flashes on different TPCs closer than this in time are one
+        // physical flash seen by both TPCs (NuBundleCensus flash_group).  0.05
+        // = where the one-flash peak of the different-TPC |dt| ends on 3000
+        // production events (doc 108 sec 4.1).  Read only under nu_provenance.
+        double m_flash_pair_dt_us{0.05};
         bool m_sp_photon_flag{false};  // doc pr/26 sec. 8.2 port gap.  If true, the single-photon
                                        // tagger's verdict is stored in TaggerInfo::photon_flag,
                                        // as prototype NeutrinoID.cxx:271 does

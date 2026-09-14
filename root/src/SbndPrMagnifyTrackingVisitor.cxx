@@ -6,7 +6,9 @@
 #include "WireCellRoot/SbndPrMagnifyTrackingVisitor.h"
 #include "WireCellRoot/UbooneMagnifyTrackingVisitor.h"  // WCPointTree
 
+#include <cctype>
 #include <cmath>
+#include <vector>
 
 #include "TFile.h"
 #include "TTree.h"
@@ -21,6 +23,8 @@
 #include "WireCellClus/PRVertex.h"
 #include "WireCellClus/PRSegment.h"
 #include "WireCellClus/PRShower.h"   // PR::ClusterPtrCmp / ClusterPtrSet
+#include "WireCellClus/NuBundleCensus.h"   // sbnd_xin/docs/109
+#include "WireCellUtil/BuildConfig.h"      // WIRECELL_VERSION (sbnd_xin/docs/109)
 
 #include <boost/graph/graph_traits.hpp>
 
@@ -102,6 +106,18 @@ void Root::SbndPrMagnifyTrackingVisitor::configure(const WireCell::Configuration
     m_save_in_scope = get<bool>(cfg, "save_in_scope", m_save_in_scope);
     // doc 99: DEFAULT FALSE keeps the legacy (per-input row index) resolution.
     m_flash_by_gid = get<bool>(cfg, "flash_by_gid", m_flash_by_gid);
+    // sbnd_xin/docs/109: DEFAULT FALSE / empty keep tracking-pr.root byte-identical.
+    m_nu_provenance = get<bool>(cfg, "nu_provenance", m_nu_provenance);
+    m_fix_cluster_flags = get<bool>(cfg, "fix_cluster_flags", m_fix_cluster_flags);
+    m_provenance.clear();
+    if (cfg["provenance"].isObject()) {
+        const auto& prov = cfg["provenance"];
+        for (const auto& key : prov.getMemberNames()) {
+            std::string val = prov[key].isString() ? prov[key].asString() : prov[key].toStyledString();
+            while (!val.empty() && (val.back() == '\n' || val.back() == ' ')) val.pop_back();
+            m_provenance[key] = val;
+        }
+    }
 
     auto anode_tns = cfg["anodes"];
     for (auto anode_tn : anode_tns) {
@@ -119,6 +135,9 @@ WireCell::Configuration Root::SbndPrMagnifyTrackingVisitor::default_configuratio
     cfg["grouping"] = "live";
     cfg["save_in_scope"] = m_save_in_scope;
     cfg["flash_by_gid"] = m_flash_by_gid;
+    cfg["nu_provenance"] = m_nu_provenance;          // sbnd_xin/docs/109; false = no T_bundle/T_flash, no Trun census branches
+    cfg["fix_cluster_flags"] = m_fix_cluster_flags;  // sbnd_xin/docs/109; false = legacy T_cluster flag columns
+    cfg["provenance"] = Json::objectValue;           // sbnd_xin/docs/109; empty = no Trun provenance strings
     cfg["anodes"] = Json::arrayValue;
     cfg["detector_volumes"] = "";
     cfg["runNo"] = 0;
@@ -189,11 +208,14 @@ void Root::SbndPrMagnifyTrackingVisitor::visit(Clus::Facade::Ensemble& ensemble)
     }
 
     write_bad_channels(output_tf, grouping, cs);
-    write_trun(output_tf);
+    write_trun(output_tf, grouping);
     write_proj_data(output_tf, grouping, cs);
     write_t_rec_data(output_tf, grouping, cs);
     if (m_save_in_scope) {
         write_cluster_summary(output_tf, grouping);
+    }
+    if (m_nu_provenance) {
+        write_nu_census(output_tf, grouping);
     }
 
     // Empty T_proj tree kept for reader compatibility.
@@ -264,7 +286,7 @@ void Root::SbndPrMagnifyTrackingVisitor::write_bad_channels(TFile* output_tf, Cl
     log->debug("SbndPrMagnifyTrackingVisitor: wrote {} entries to T_bad_ch", tree->GetEntries());
 }
 
-void Root::SbndPrMagnifyTrackingVisitor::write_trun(TFile* output_tf) const
+void Root::SbndPrMagnifyTrackingVisitor::write_trun(TFile* output_tf, Clus::Facade::Grouping& grouping) const
 {
     TTree* tree = new TTree("Trun", "Trun");
     tree->SetDirectory(output_tf);
@@ -280,6 +302,72 @@ void Root::SbndPrMagnifyTrackingVisitor::write_trun(TFile* output_tf) const
     tree->Branch("subRunNo", &subRunNo, "subRunNo/I");
     tree->Branch("dQdx_scale", &dQdx_scale, "dQdx_scale/D");
     tree->Branch("dQdx_offset", &dQdx_offset, "dQdx_offset/D");
+
+    // sbnd_xin/docs/109 group 1: the selection census's event counters and
+    // the selection's own window / flash pairing, read from the census so no
+    // second copy of TaggerCheckNeutrino's configuration exists.  nu_census_filled
+    // = 0 means TaggerCheckNeutrino published no census on this event.
+    const auto census = grouping.get_nu_census();
+    int nu_census_filled = census ? 1 : 0;
+    int nu_beam_gate = census ? census->beam_gate : -1;
+    int nu_per_bundle = census ? census->per_bundle : -1;
+    double beam_window_low_us = census ? census->beam_window_low_us : 0;
+    double beam_window_high_us = census ? census->beam_window_high_us : 0;
+    double flash_pair_dt_us = census ? census->flash_pair_dt_us : 0;
+    int nu_n_main = census ? census->n_main : -1;
+    int nu_n_in_window_main = census ? census->n_in_window_main : -1;
+    int nu_n_in_window_demoted = census ? census->n_in_window_demoted : -1;
+    int nu_n_in_window_nogid = census ? census->n_in_window_nogid : -1;
+    int nu_n_bundles = census ? census->n_bundles : -1;
+    int nu_n_candidates = census ? census->n_candidates : -1;
+    int nu_n_flashes = census ? static_cast<int>(census->flashes.size()) : -1;
+    int nu_n_flashes_in_window = -1;
+    if (census) {
+        nu_n_flashes_in_window = 0;
+        for (const auto& f : census->flashes) nu_n_flashes_in_window += f.in_window;
+    }
+    if (m_nu_provenance) {
+        tree->Branch("nu_census_filled", &nu_census_filled, "nu_census_filled/I");
+        tree->Branch("nu_beam_gate", &nu_beam_gate, "nu_beam_gate/I");
+        tree->Branch("nu_per_bundle", &nu_per_bundle, "nu_per_bundle/I");
+        tree->Branch("beam_window_low_us", &beam_window_low_us, "beam_window_low_us/D");
+        tree->Branch("beam_window_high_us", &beam_window_high_us, "beam_window_high_us/D");
+        tree->Branch("flash_pair_dt_us", &flash_pair_dt_us, "flash_pair_dt_us/D");
+        tree->Branch("nu_n_main", &nu_n_main, "nu_n_main/I");
+        tree->Branch("nu_n_in_window_main", &nu_n_in_window_main, "nu_n_in_window_main/I");
+        tree->Branch("nu_n_in_window_demoted", &nu_n_in_window_demoted, "nu_n_in_window_demoted/I");
+        tree->Branch("nu_n_in_window_nogid", &nu_n_in_window_nogid, "nu_n_in_window_nogid/I");
+        tree->Branch("nu_n_bundles", &nu_n_bundles, "nu_n_bundles/I");
+        tree->Branch("nu_n_candidates", &nu_n_candidates, "nu_n_candidates/I");
+        tree->Branch("nu_n_flashes", &nu_n_flashes, "nu_n_flashes/I");
+        tree->Branch("nu_n_flashes_in_window", &nu_n_flashes_in_window, "nu_n_flashes_in_window/I");
+    }
+
+    // sbnd_xin/docs/109 group 4: self-describing file.  wct_version is the
+    // library's own build string; every other value is passed in through the
+    // configuration (the jsonnet that also configures the BDT scorers, and the
+    // runner's operating-point hash / git revisions).  One std::string branch
+    // per key, in sorted key order; none at all when the map is empty.
+    std::string wct_version = WIRECELL_VERSION;
+    std::vector<std::string> prov_keys, prov_vals;
+    for (const auto& kv : m_provenance) {
+        std::string key = kv.first;
+        for (auto& ch : key) {
+            if (!std::isalnum(static_cast<unsigned char>(ch)) && ch != '_') ch = '_';
+        }
+        if (key == "wct_version" || tree->GetBranch(key.c_str())) {
+            log->warn("SbndPrMagnifyTrackingVisitor: provenance key '{}' collides with an existing Trun branch; skipped", kv.first);
+            continue;
+        }
+        prov_keys.push_back(key);
+        prov_vals.push_back(kv.second);
+    }
+    if (!m_provenance.empty()) {
+        tree->Branch("wct_version", &wct_version);
+        for (size_t i = 0; i < prov_keys.size(); ++i) {
+            tree->Branch(prov_keys[i].c_str(), &prov_vals[i]);
+        }
+    }
 
     tree->Fill();
 
@@ -327,6 +415,23 @@ void Root::SbndPrMagnifyTrackingVisitor::write_cluster_summary(TFile* output_tf,
     tree->Branch("length_cm", &length_cm, "length_cm/D");
     tree->Branch("cluster_t0_us", &cluster_t0_us, "cluster_t0_us/D");
 
+    // sbnd_xin/docs/109 group 2: the matched flash's gid and physical TPC.
+    int matched_flash_gid = -1, flash_tpc = -1;
+    std::map<int, int> gid_tpc;   // opflash "apa" column = the flash's drift side
+    const auto census = grouping.get_nu_census();
+    if (m_fix_cluster_flags) {
+        tree->Branch("matched_flash_gid", &matched_flash_gid, "matched_flash_gid/I");
+        tree->Branch("flash_tpc", &flash_tpc, "flash_tpc/I");
+        if (grouping.has_pc("opflash") && grouping.has_pcarray("gid", "opflash")
+            && grouping.has_pcarray("apa", "opflash")) {
+            const auto ogid = grouping.get_pcarray<int>("gid", "opflash");
+            const auto oapa = grouping.get_pcarray<int>("apa", "opflash");
+            for (size_t i = 0; i < ogid.size() && i < oapa.size(); ++i) {
+                gid_tpc.emplace(ogid[i], oapa[i]);
+            }
+        }
+    }
+
     // Determinism: children() order is not guaranteed stable, so emit by
     // ascending cluster id (CLAUDE.md -- never iterate pointer-keyed order).
     std::vector<const Facade::Cluster*> clusters;
@@ -346,11 +451,34 @@ void Root::SbndPrMagnifyTrackingVisitor::write_cluster_summary(TFile* output_tf,
 
         is_main = cl->get_flag(Facade::Flags::main_cluster);
         is_associated = cl->get_flag(Facade::Flags::associated_cluster);
-        tgm = cl->get_flag(Facade::Flags::tgm);
-        stm = cl->get_flag(Facade::Flags::short_track_muon);
-        fc = cl->get_flag(Facade::Flags::fully_contained);
-        lm = cl->get_flag(Facade::Flags::light_mismatch);
-        beam_flash = cl->get_flag(Facade::Flags::beam_flash);
+        if (m_fix_cluster_flags) {
+            // sbnd_xin/docs/109: the flags SBND's taggers actually set
+            // (TaggerCheckTGM/STM/FC set Flags::TGM/STM/FC), the lm_flag
+            // scalar Q/L matching sets (-1 = never set), and beam_flash with
+            // TaggerCheckNeutrino's own in-window test, in internal units.
+            tgm = cl->get_flag(Facade::Flags::TGM);
+            stm = cl->get_flag(Facade::Flags::STM);
+            fc = cl->get_flag(Facade::Flags::FC);
+            lm = cl->get_scalar<int>("lm_flag", -1);
+            matched_flash_gid = cl->get_scalar<int>("matched_flash_gid", -1);
+            auto git = gid_tpc.find(matched_flash_gid);
+            flash_tpc = git == gid_tpc.end() ? -1 : git->second;
+            if (census && census->beam_gate) {
+                const double t0 = cl->get_cluster_t0();
+                beam_flash = (matched_flash_gid >= 0 && t0 >= census->beam_window_low
+                              && t0 < census->beam_window_high) ? 1 : 0;
+            }
+            else {
+                beam_flash = -1;
+            }
+        }
+        else {
+            tgm = cl->get_flag(Facade::Flags::tgm);
+            stm = cl->get_flag(Facade::Flags::short_track_muon);
+            fc = cl->get_flag(Facade::Flags::fully_contained);
+            lm = cl->get_flag(Facade::Flags::light_mismatch);
+            beam_flash = cl->get_flag(Facade::Flags::beam_flash);
+        }
 
         npoints = cl->npoints();
         length_cm = cl->get_length() / units::cm;
@@ -380,6 +508,78 @@ void Root::SbndPrMagnifyTrackingVisitor::write_cluster_summary(TFile* output_tf,
 
     log->debug("pr87 in_scope: wrote T_cluster with {} clusters, {} in scope",
                clusters.size(), n_in);
+}
+
+// sbnd_xin/docs/109 group 1: TaggerCheckNeutrino's selection census as two
+// trees.  Both are written on every event (empty when no census was
+// published), so the schema does not depend on the event.
+//   T_bundle  one row per in-beam-window flash bundle the selection examined,
+//             with the reason it did (0, 1) or did not (2-5) yield a
+//             candidate; nu_index joins to T_tagger/T_kine.
+//   T_flash   one row per optical flash in the event (all inputs), with its
+//             physical TPC, whether it is in the beam window, its flash group
+//             and how many clusters matched it.
+void Root::SbndPrMagnifyTrackingVisitor::write_nu_census(TFile* output_tf,
+                                                         Clus::Facade::Grouping& grouping) const
+{
+    using Census = WireCell::Clus::PR::NuBundleCensus;
+    const auto census = grouping.get_nu_census();
+    int run = m_evt_runNo, subrun = m_evt_subRunNo, event = m_evt_eventNo;
+
+    Census::Bundle b;
+    TTree* tb = new TTree("T_bundle", "T_bundle");
+    tb->SetDirectory(output_tf);
+    tb->Branch("run", &run, "run/I");
+    tb->Branch("subrun", &subrun, "subrun/I");
+    tb->Branch("event", &event, "event/I");
+    tb->Branch("gid", &b.gid, "gid/I");
+    tb->Branch("flash_tpc", &b.flash_tpc, "flash_tpc/I");
+    tb->Branch("flash_time_us", &b.flash_time_us, "flash_time_us/F");
+    tb->Branch("flash_pe", &b.flash_pe, "flash_pe/F");
+    tb->Branch("flash_group", &b.flash_group, "flash_group/I");
+    tb->Branch("n_main", &b.n_main, "n_main/I");
+    tb->Branch("n_demoted", &b.n_demoted, "n_demoted/I");
+    tb->Branch("n_companion", &b.n_companion, "n_companion/I");
+    tb->Branch("n_companion_dropped", &b.n_companion_dropped, "n_companion_dropped/I");
+    tb->Branch("n_rej_cosmic", &b.n_rej_cosmic, "n_rej_cosmic/I");
+    tb->Branch("n_rej_stm_only", &b.n_rej_stm_only, "n_rej_stm_only/I");
+    tb->Branch("n_rej_floor", &b.n_rej_floor, "n_rej_floor/I");
+    tb->Branch("reason", &b.reason, "reason/I");
+    tb->Branch("nu_index", &b.nu_index, "nu_index/I");
+    tb->Branch("sel_cluster_id", &b.sel_cluster_id, "sel_cluster_id/I");
+    tb->Branch("final_cluster_id", &b.final_cluster_id, "final_cluster_id/I");
+    tb->Branch("sel_length_cm", &b.sel_length_cm, "sel_length_cm/F");
+    if (census) {
+        for (const auto& row : census->bundles) {
+            b = row;   // copies into the object the branches point at
+            tb->Fill();
+        }
+    }
+
+    Census::Flash f;
+    TTree* tfl = new TTree("T_flash", "T_flash");
+    tfl->SetDirectory(output_tf);
+    tfl->Branch("run", &run, "run/I");
+    tfl->Branch("subrun", &subrun, "subrun/I");
+    tfl->Branch("event", &event, "event/I");
+    tfl->Branch("gid", &f.gid, "gid/I");
+    tfl->Branch("tpc", &f.tpc, "tpc/I");
+    tfl->Branch("time_us", &f.time_us, "time_us/F");
+    tfl->Branch("pe", &f.pe, "pe/F");
+    tfl->Branch("in_window", &f.in_window, "in_window/I");
+    tfl->Branch("flash_group", &f.flash_group, "flash_group/I");
+    tfl->Branch("n_matched_clusters", &f.n_matched_clusters, "n_matched_clusters/I");
+    tfl->Branch("n_matched_main", &f.n_matched_main, "n_matched_main/I");
+    tfl->Branch("nu_index", &f.nu_index, "nu_index/I");
+    if (census) {
+        for (const auto& row : census->flashes) {
+            f = row;
+            tfl->Fill();
+        }
+    }
+
+    log->debug("SbndPrMagnifyTrackingVisitor: wrote T_bundle ({} rows) and T_flash ({} rows){}",
+               tb->GetEntries(), tfl->GetEntries(), census ? "" : " -- no census published");
 }
 
 void Root::SbndPrMagnifyTrackingVisitor::write_proj_data(TFile* output_tf, Clus::Facade::Grouping& grouping,

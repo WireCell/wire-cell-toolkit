@@ -1933,7 +1933,28 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
        // job (wct-pr-perevt.jsonnet) from its TLAs and handed to
        // TaggerCheckNeutrino as-is.  An absent key is that knob's C++ default,
        // exactly as the per-knob `+ (if x then {x: ...})` clauses it replaces.
-       tcn_knobs={}):: {
+       tcn_knobs={},
+       // ---- sbnd_xin/docs/109: self-describing tracking-pr.root -------- //
+       // root_nu_record: record what the neutrino selection did.  ONE switch
+       // for the computing key (TaggerCheckNeutrino nu_provenance, which
+       // fills the fields and publishes the census) and both writers' booking
+       // keys (tagger_output and tracking_visitor nu_provenance), so the
+       // computation and the schema can never disagree.  Adds T_bundle,
+       // T_flash, Trun census branches and the T_tagger/T_kine provenance
+       // branches; appends the companions to act_* (act_role 2/3).
+       // flash_pair_dt_us: null => C++ default 0.05 us.
+       // root_cluster_flags: T_cluster tgm/stm/fc/lm read the flags SBND's
+       // taggers set, beam_flash is derived, matched_flash_gid/flash_tpc added.
+       // root_provenance: Trun wct_version + the BDT weight files, DL weights
+       // and TrackFitting file this job configured, merged with
+       // provenance_extra (the runner's operating-point hash, git revisions).
+       // All C++ default false/empty; keys omitted when off => byte-identical
+       // pre-knob config AND tracking-pr.root.
+       root_nu_record=false,
+       flash_pair_dt_us=null,
+       root_cluster_flags=false,
+       root_provenance=false,
+       provenance_extra={}):: {
         // Only gate when the caller actually supplied a window; beam_window=[0,0]
         // (the arg default, i.e. "no beam window") must not silently drop every
         // cluster's tagger evaluation.
@@ -2407,6 +2428,8 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                   [if cathode_x != null then 'cathode_x']: cathode_x,
                   [if cosmic_consistent_fv then 'cosmic_consistent_fv']: true,
                   [if mcs_enable then 'mcs_enable']: true,  // doc 80; sub-knobs arrive via tcn_knobs
+                  [if root_nu_record then 'nu_provenance']: true,  // sbnd_xin/docs/109
+                  [if root_nu_record && flash_pair_dt_us != null then 'flash_pair_dt_us']: flash_pair_dt_us,
                   [if mip_dqdx != null then 'mip_dqdx']: mip_dqdx,
                   [if neutrino_type_bitmask then 'neutrino_type_bitmask']: true,
                   [if nue_sp_consistent_fv then 'nue_sp_consistent_fv']: true,
@@ -2419,12 +2442,16 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
             // is docs/pr/2 gap G1).  Must run after tagger_check_neutrino, nue
             // after numu.  Only compiled in when named in pipeline_names.
             local bdt_weights_dir = 'uboone/weights',
+            // Named once so the scorers and the doc-109 provenance strings
+            // below read the same value (compiled strings unchanged).
+            local numu_xgboost_xml = bdt_weights_dir + '/numu_scalars_scores_0923.xml',
+            local nue_xgboost_xml = bdt_weights_dir + '/XGB_nue_seed2_0923.xml',
             numu_bdt_scorer: cm.numu_bdt_scorer(
                 numu1_weights_xml=     bdt_weights_dir + '/numu_tagger1.weights.xml',
                 numu2_weights_xml=     bdt_weights_dir + '/numu_tagger2.weights.xml',
                 numu3_weights_xml=     bdt_weights_dir + '/numu_tagger3.weights.xml',
                 cosmict10_weights_xml= bdt_weights_dir + '/cos_tagger_10.weights.xml',
-                numu_xgboost_xml=      bdt_weights_dir + '/numu_scalars_scores_0923.xml',
+                numu_xgboost_xml=      numu_xgboost_xml,
                 fast_xgb_forest=fast_xgb_forest),
             nue_bdt_scorer: cm.nue_bdt_scorer(
                 mipid_weights_xml=       bdt_weights_dir + '/mipid_BDT.weights.xml',
@@ -2457,7 +2484,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 tro_2_weights_xml=       bdt_weights_dir + '/tro_2_BDT.weights.xml',
                 tro_4_weights_xml=       bdt_weights_dir + '/tro_4_BDT.weights.xml',
                 tro_5_weights_xml=       bdt_weights_dir + '/tro_5_BDT.weights.xml',
-                nue_xgboost_xml=         bdt_weights_dir + '/XGB_nue_seed2_0923.xml',
+                nue_xgboost_xml=         nue_xgboost_xml,
                 fast_xgb_forest=fast_xgb_forest),
             // PR-stage Magnify-tracking ROOT dump (docs/pr/3): fork of the uBooNE
             // writer reading the unnamed TrackFitting slot + PRGraph filled by
@@ -2488,6 +2515,16 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                     [if save_in_scope then 'save_in_scope']: true,
                     // doc 99.  Key omitted when off => byte-identical config.
                     [if flash_by_gid then 'flash_by_gid']: true,
+                    // sbnd_xin/docs/109.  Keys omitted when off => byte-identical config.
+                    [if root_nu_record then 'nu_provenance']: true,
+                    [if root_cluster_flags then 'fix_cluster_flags']: true,
+                    [if root_provenance then 'provenance']: {
+                        bdt_weights_dir: bdt_weights_dir,
+                        numu_xgboost_xml: numu_xgboost_xml,
+                        nue_xgboost_xml: nue_xgboost_xml,
+                        dl_weights: dl_weights,
+                        trackfitting_config: trackfitting_config_file,
+                    } + provenance_extra,
                 },
             },
             // T_tagger/T_kine writer (UbooneTaggerOutputVisitor, reused as-is: it
@@ -2505,7 +2542,8 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
             tagger_output: cm.tagger_output(output_filename=tracking_pr_root,
                                             neutrino_type_bitmask=neutrino_type_bitmask,
                                             nu_per_bundle=nu_per_bundle,
-                                            mcs_output=mcs_enable),
+                                            mcs_output=mcs_enable,
+                                            nu_provenance=root_nu_record),
             // PR event-display calib dump (docs/pr/26): ONE self-contained JSON per
             // event carrying the PR-graph segments as polylines, the associated
             // track/shower points, the Steiner skeleton with its terminal flag, the

@@ -28,6 +28,7 @@ namespace WireCell::Clus {
     class FiducialUtils;
     using FiducialUtilsPtr = std::shared_ptr<FiducialUtils>;
     class TrackFitting;
+    namespace PR { struct NuBundleCensus; }
 }
 
 namespace WireCell::Clus::Facade {
@@ -475,10 +476,19 @@ namespace WireCell::Clus::Facade {
         // Convenience accessor for PRGraph (delegates to TrackFitting)
         std::shared_ptr<WireCell::Clus::PR::Graph> get_pr_graph() const;
 
+        // sbnd_xin/docs/109: TaggerCheckNeutrino's selection census (per-bundle
+        // reasons, event counters, the flash table), carried to the ROOT
+        // writers the same way the TrackFitting is.  Null unless
+        // TaggerCheckNeutrino's nu_provenance knob is on.  Not a PC array, so
+        // it is never serialized.
+        std::shared_ptr<const WireCell::Clus::PR::NuBundleCensus> get_nu_census() const { return m_nu_census; }
+        void set_nu_census(std::shared_ptr<const WireCell::Clus::PR::NuBundleCensus> c) { m_nu_census = c; }
+
       private:
         FiducialUtilsPtr m_fiducialutils;
         std::shared_ptr<WireCell::Clus::TrackFitting> m_track_fitting;
         std::map<std::string, std::shared_ptr<WireCell::Clus::TrackFitting>> m_named_track_fitting;
+        std::shared_ptr<const WireCell::Clus::PR::NuBundleCensus> m_nu_census;
 
         // Build cache for a specific APA/face/plane
         void build_wire_cache(int apa, int face, int plane) const;
