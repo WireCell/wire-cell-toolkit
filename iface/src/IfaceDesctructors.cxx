@@ -90,6 +90,7 @@
 #include "WireCellIface/ISemaphore.h"
 #include "WireCellIface/ISequence.h"
 #include "WireCellIface/ISimTruth.h"
+#include "WireCellIface/ISimTruthSegments.h"
 #include "WireCellIface/ISinkNode.h"
 #include "WireCellIface/ISlice.h"
 #include "WireCellIface/ISliceFanout.h"
@@ -208,6 +209,7 @@ IRecombinationModel::~IRecombinationModel() {}
 IScalarFieldSink::~IScalarFieldSink() {}
 ISemaphore::~ISemaphore() {}
 ISimTruth::~ISimTruth() {}
+ISimTruthSegments::~ISimTruthSegments() {}
 ISinkNodeBase::~ISinkNodeBase() {}
 ISlice::~ISlice() {}
 ISliceFanout::~ISliceFanout() {}
