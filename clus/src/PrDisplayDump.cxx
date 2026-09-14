@@ -94,6 +94,7 @@ WireCell::Configuration Clus::PrDisplayDump::default_configuration() const
     cfg["mip_dqdx_flat"] = m_mip_dqdx_flat;
     cfg["dqdx_ref_grid_n"] = m_dqdx_ref_grid_n;
     cfg["dqdx_ref_grid_step"] = m_dqdx_ref_grid_step;
+    cfg["rse_from_ensemble"] = m_rse_from_ensemble;  // sbnd_xin/docs/110
     return cfg;
 }
 
@@ -116,6 +117,8 @@ void Clus::PrDisplayDump::configure(const WireCell::Configuration& cfg)
     m_dqdx_ref_grid_step = get<double>(cfg, "dqdx_ref_grid_step", m_dqdx_ref_grid_step);
     // doc sbnd_xin/docs/pr/45 -- mirror of MABC bee_points pseudo_shower_track_paint.
     m_pseudo_shower_track_paint = get<bool>(cfg, "pseudo_shower_track_paint", m_pseudo_shower_track_paint);
+    // sbnd_xin/docs/110 -- see the header.
+    m_rse_from_ensemble = get<bool>(cfg, "rse_from_ensemble", m_rse_from_ensemble);
 
     for (auto anode_tn : cfg["anodes"]) {
         m_anodes.push_back(Factory::find_tn<IAnodePlane>(anode_tn.asString()));
@@ -184,6 +187,13 @@ void Clus::PrDisplayDump::visit(Facade::Ensemble& ensemble) const
 
     Configuration top;
     top["meta"] = dump_meta(grouping, cs);
+    // sbnd_xin/docs/110: in a multi-event process the configured run/subrun are
+    // the group leader's; MABC publishes this event's RSE on the ensemble.
+    if (m_rse_from_ensemble && ensemble.rse_valid()) {
+        top["meta"]["runNo"] = ensemble.runNo();
+        top["meta"]["subRunNo"] = ensemble.subRunNo();
+        top["meta"]["eventNo"] = ensemble.eventNo();
+    }
 
     Configuration graph = dump_graph(grouping);
     top["segments"] = graph["segments"];

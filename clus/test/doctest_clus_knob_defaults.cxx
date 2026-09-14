@@ -83,6 +83,14 @@ static Configuration defaults_of(const std::string& type)
 // switch through this component.
 // ---------------------------------------------------------------------------
 
+TEST_CASE("clus knob defaults: group-mode calib-dump fixes are OFF (sbnd_xin/docs/110)")
+{
+    auto mabc = defaults_of("MultiAlgBlobClustering");
+    CHECK_KNOB_BOOL(mabc, "reset_shower_ids_per_event", false);
+    auto dump = defaults_of("PrDisplayDump");
+    CHECK_KNOB_BOOL(dump, "rse_from_ensemble", false);
+}
+
 TEST_CASE("clus knob defaults: TaggerCheckNeutrino switches are all OFF")
 {
     auto cfg = defaults_of("TaggerCheckNeutrino");

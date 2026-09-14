@@ -225,6 +225,9 @@ void MultiAlgBlobClustering::configure(const WireCell::Configuration& cfg)
     // the precedence rule.  Default false => compiled config byte-identical.
     m_rse_from_metadata = get(cfg, "rse_from_metadata", m_rse_from_metadata);
 
+    // sbnd_xin/docs/110 -- restart the shower-id counter per event (see the header).
+    m_reset_shower_ids_per_event = get(cfg, "reset_shower_ids_per_event", m_reset_shower_ids_per_event);
+
     // Same, but keep the configured run/subrun -- with an optional per-ident
     // override table, because a group of events can span several runs.
     m_event_from_ident = get(cfg, "event_from_ident", m_event_from_ident);
@@ -536,6 +539,7 @@ WireCell::Configuration MultiAlgBlobClustering::default_configuration() const
     cfg["eventNo"] = m_eventNo;
     cfg["rse_from_ident"] = m_rse_from_ident;
     cfg["event_from_ident"] = m_event_from_ident;
+    cfg["reset_shower_ids_per_event"] = m_reset_shower_ids_per_event;  // sbnd_xin/docs/110
     // UNION, not either/or: upstream's ident-based sources and our
     // metadata-based source coexist (issue 13 G3).  The 1-step LArSoft chain
     // gets its RSE from wclsTensorSetMetadataAttacher; the standalone driver
@@ -3903,6 +3907,11 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
     // are already right and must keep being used, byte for byte.
     if (m_rse_from_ident || m_event_from_ident) {
         ensemble.set_rse(m_runNo, m_subRunNo, m_eventNo);
+    }
+    // sbnd_xin/docs/110: here, before the pipeline visitors below can build a
+    // PR::Shower, so this event's shower ids start at 0 as in a one-event process.
+    if (m_reset_shower_ids_per_event) {
+        WireCell::Clus::PR::reset_shower_id_counter();
     }
 
     // Publish the event's RSE on the ensemble scalar PC so pipeline visitors

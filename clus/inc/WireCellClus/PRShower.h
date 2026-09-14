@@ -60,6 +60,14 @@ namespace WireCell::Clus::PR {
     };
 
 
+    /// Restart the process-wide shower-id counter at 0 (PRShower.cxx).  Shower
+    /// ids only need to be unique within an event -- that is all their
+    /// comparators use -- but the counter is process-wide, so a process that
+    /// streams several events numbers event N's showers after event N-1's.
+    /// MultiAlgBlobClustering calls this at each event start when
+    /// reset_shower_ids_per_event is on (sbnd_xin/docs/110).
+    void reset_shower_id_counter();
+
     /** Model a shower-like view of a trajectory.
 
         This is the WCT equivalent to a WCT WCShower.

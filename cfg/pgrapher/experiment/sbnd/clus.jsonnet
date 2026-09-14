@@ -2580,6 +2580,12 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                     // layer knob.  Key omitted when off => byte-identical.
                     [if pseudo_shower_track_paint
                      then 'pseudo_shower_track_paint']: true,
+                    // sbnd_xin/docs/110 (owner: ON for SBND group mode).  C++
+                    // default false.  A group run (event_from_ident) stamps meta
+                    // run/subrun/event from the RSE the PR MABC publishes, not the
+                    // job's leader-event constants.  Key omitted when
+                    // event_from_ident is off => the per-event job is byte-identical.
+                    [if event_from_ident then 'rse_from_ensemble']: true,
                 },
             },
         },
@@ -2625,6 +2631,11 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 [if rse_from_ident then 'rse_from_ident']: true,
                 [if event_from_ident then 'event_from_ident']: true,
                 [if event_from_ident && std.length(rse_map) > 0 then 'rse_map']: rse_map,
+                // sbnd_xin/docs/110 (owner: ON for SBND group mode).  C++ default
+                // false.  Group run only: restart the shower-id counter at each event
+                // so the calib dump's shower ids match a one-event process.  Key
+                // omitted when event_from_ident is off => per-event job byte-identical.
+                [if event_from_ident then 'reset_shower_ids_per_event']: true,
                 // rse_from_metadata MUST be here: this is the PR-stage MABC, the node that
                 // stamps tracking-pr.root's Trun in the 1-step LArSoft chain.  With only
                 // rse_from_ident the ident carries the EVENT but run/subrun stay 0, so Trun

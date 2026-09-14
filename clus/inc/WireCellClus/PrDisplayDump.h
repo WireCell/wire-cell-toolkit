@@ -124,6 +124,13 @@ namespace WireCell::Clus {
         // track in dump_track_shower, mirroring MABC's bee_points knob.
         // Default false => legacy membership-first paint, byte-identical.
         bool m_pseudo_shower_track_paint{false};
+        // sbnd_xin/docs/110 -- stamp meta.runNo/subRunNo/eventNo from the RSE
+        // MultiAlgBlobClustering published on the ensemble (Ensemble::set_rse,
+        // called only in its multi-event modes) instead of the configure-time
+        // constants, which in a group process are the group leader's.  Inert
+        // when no RSE was published.  Default false => configured values,
+        // byte-identical.
+        bool m_rse_from_ensemble{false};
 
         // Per-plane per-TPC channel counts, the same derivation
         // SbndPrMagnifyTrackingVisitor uses.  Recorded in the dump so the

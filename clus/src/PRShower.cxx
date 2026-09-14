@@ -14,6 +14,12 @@ static std::atomic<int> s_shower_id_counter{0};
 
 namespace WireCell::Clus::PR {
 
+    // sbnd_xin/docs/110 -- see PRShower.h.
+    void reset_shower_id_counter()
+    {
+        s_shower_id_counter.store(0, std::memory_order_relaxed);
+    }
+
     namespace {
         /// Deep-copy a segment's dynamic point cloud so the shower owns its own.
         ///

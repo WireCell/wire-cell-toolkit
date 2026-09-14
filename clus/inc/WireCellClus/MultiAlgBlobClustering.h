@@ -606,6 +606,13 @@ namespace WireCell::Clus {
         bool m_event_from_ident{false};
         // ident -> (run, subrun), consulted only when m_event_from_ident.
         std::map<int, std::pair<int,int>> m_rse_map;
+        // sbnd_xin/docs/110 -- restart PR::Shower's process-wide id counter at
+        // the start of every event this node processes, before any pipeline
+        // visitor can build a Shower, so a multi-event (group) process numbers
+        // each event's showers from 0 exactly as a one-event process does.  The
+        // ids reach the PrDisplayDump calib json.  Default false => the legacy
+        // process-wide numbering, byte-identical.
+        bool m_reset_shower_ids_per_event{false};
 
         // Own (non-shared) Bee zip.  A printf conversion in the configured
         // "bee_zip" means one zip per event: the open zip is closed and the
