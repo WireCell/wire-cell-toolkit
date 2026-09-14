@@ -1366,9 +1366,13 @@ function(
     // flash_pair_dt_us: null => C++ default 0.05 us (doc 108 sec 4.1).
     // Observation only: no reconstruction output moves (doc 109 gates).
     // C++ defaults false/empty; false here => keys omitted => byte-identical.
-    root_nu_record = false,
-    root_cluster_flags = false,
-    root_provenance = false,
+    // SBND PRODUCTION ON 2026-09-14 on the owner's word (doc 109 sec 5): on 267
+    // sbnd_xin data events mabc-pr.zip, the pctree, nusel and the calib dump are
+    // identical knob-off vs knob-on; tracking-pr.root gains trees/branches and
+    // the corrected T_cluster flag columns.  Pre-flip arm: SBND_ROOT_OUTPUT=0.
+    root_nu_record = true,
+    root_cluster_flags = true,
+    root_provenance = true,
     provenance_extra = {},
     flash_pair_dt_us = null,
     mcs_muon_source = 'long_muon_else_pf',  // SBND PRODUCTION ON 2026-08-28 (doc 84 round 1 P4: chain when one exists, else the pf muon; pf_muon | long_muon | longest_segment | long_muon_else_pf)
