@@ -74,6 +74,8 @@
 #include "WireCellIface/IMeasure.h"
 #include "WireCellIface/INamed.h"
 #include "WireCellIface/INode.h"
+#include "WireCellIface/IPhotonHit.h"
+#include "WireCellIface/IPhotonHitSet.h"
 #include "WireCellIface/IPlaneImpactResponse.h"
 #include "WireCellIface/IPointFieldSink.h"
 #include "WireCellIface/IPrimaryParticle.h"
@@ -87,6 +89,7 @@
 #include "WireCellIface/IScalarFieldSink.h"
 #include "WireCellIface/ISemaphore.h"
 #include "WireCellIface/ISequence.h"
+#include "WireCellIface/ISimTruth.h"
 #include "WireCellIface/ISinkNode.h"
 #include "WireCellIface/ISlice.h"
 #include "WireCellIface/ISliceFanout.h"
@@ -109,6 +112,8 @@
 #include "WireCellIface/ITrackSegment.h"
 #include "WireCellIface/ITrackSegmentSampler.h"
 #include "WireCellIface/ITrackSegmentSet.h"
+#include "WireCellIface/ITrajectory.h"
+#include "WireCellIface/ITrajectorySet.h"
 #include "WireCellIface/IWaveform.h"
 #include "WireCellIface/IWaveformMap.h"
 #include "WireCellIface/IWireGenerator.h"
@@ -189,6 +194,8 @@ IJoinNodeBase::~IJoinNodeBase() {}
 IMeasure::~IMeasure() {}
 INamed::~INamed() {}
 INode::~INode() {}
+IPhotonHit::~IPhotonHit() {}
+IPhotonHitSet::~IPhotonHitSet() {}
 IPlaneImpactResponse::~IPlaneImpactResponse() {}
 IPointFieldSink::~IPointFieldSink() {}
 IPrimaryParticle::~IPrimaryParticle() {}
@@ -200,6 +207,7 @@ IQueuedoutNodeBase::~IQueuedoutNodeBase() {}
 IRecombinationModel::~IRecombinationModel() {}
 IScalarFieldSink::~IScalarFieldSink() {}
 ISemaphore::~ISemaphore() {}
+ISimTruth::~ISimTruth() {}
 ISinkNodeBase::~ISinkNodeBase() {}
 ISlice::~ISlice() {}
 ISliceFanout::~ISliceFanout() {}
@@ -222,6 +230,8 @@ ITraceRanker::~ITraceRanker() {}
 ITrackSegment::~ITrackSegment() {}
 ITrackSegmentSampler::~ITrackSegmentSampler() {}
 ITrackSegmentSet::~ITrackSegmentSet() {}
+ITrajectory::~ITrajectory() {}
+ITrajectorySet::~ITrajectorySet() {}
 IWaveform::~IWaveform() {}
 IWaveformMap::~IWaveformMap() {}
 IWireGenerator::~IWireGenerator() {}
