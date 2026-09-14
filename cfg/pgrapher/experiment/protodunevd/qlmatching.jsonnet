@@ -51,6 +51,10 @@ local wc = import 'wirecell.jsonnet';
 // until the time base is calibrated) without editing this file.
 function(params, trigger_offset=0 * wc.us, readout_window_ticks=10000,
          light_model='library', require_containment=true, flash_minPE=25,
+         // QLMatching QtoL (charge -> light scale).  Default 0.094 = the value
+         // that was a literal below => compiled config byte-identical.  The
+         // PDVD driver forwards its ql_qtol TLA (doc pdvd/100 sec 8).
+         qtol=0.094,
          trigger_offsets=null, drift_speed=null, drift_speeds=null,
          cathode_ext1=null, anode_ext1_margin=null, use_saturation_flag=false,
          saturation_mask_fit=true, chi2_sat_inflate=null,
@@ -313,7 +317,10 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=10000,
             // 2026-07-14: the crosser-anchor recalibration on the
             // saturation-fixed dumps keeps this value; the per-type residuals
             // are absorbed by the VUVEfficiency scale factors above.
-            QtoL: 0.094,
+            // 2026-09-13: the `qtol` arg (default 0.094).  Prediction is
+            // QtoL x VUVEfficiency, so a QtoL other than 0.094 renormalises
+            // all three per-type factors together (pdvd doc 100 sec 8).
+            QtoL: qtol,
             doReflectedLight: false,   // library vis is total photon arrival
             nchan: nchan,
             ch_mask: ch_mask,
