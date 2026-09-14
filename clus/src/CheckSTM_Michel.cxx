@@ -119,6 +119,11 @@ public:
         m_build_michel_shower = get<bool>(config, "build_michel_shower", m_build_michel_shower);
         m_max_candidates = get<int>(config, "max_candidates", m_max_candidates);
         m_min_chain_points = get<int>(config, "min_chain_points", m_min_chain_points);
+        // doc pdvd/100 round 2: apply the readout-edge veto TaggerCheckSTM
+        // deferred (readout_edge_defer, cluster scalar stm_readout_edge) unless
+        // a Michel object exists at the stop (R_READOUT_EDGE).  C++ default
+        // false => byte-identical legacy: the bit is never set.
+        m_readout_edge_require_michel = get<bool>(config, "readout_edge_require_michel", m_readout_edge_require_michel);
 
         // e/cm, the TaggerCheckNeutrino convention (converted at the PA copy).
         m_mip_dqdx = get<double>(config, "mip_dqdx", m_mip_dqdx);
@@ -340,6 +345,7 @@ public:
         cfg["build_michel_shower"] = m_build_michel_shower;
         cfg["max_candidates"] = m_max_candidates;
         cfg["min_chain_points"] = m_min_chain_points;
+        cfg["readout_edge_require_michel"] = m_readout_edge_require_michel;   // doc pdvd/100 round 2
         cfg["mip_dqdx"] = m_mip_dqdx;                 // e/cm
         cfg["mip_dqdx_median"] = m_mip_dqdx_median;   // e/cm
         cfg["stop_snap_tol_cm"] = m_stop_snap_tol_cm;
@@ -959,6 +965,7 @@ private:
     bool m_build_michel_shower{true};
     int m_max_candidates{8};
     int m_min_chain_points{10};
+    bool m_readout_edge_require_michel{false};   // doc pdvd/100 round 2: R_READOUT_EDGE
     double m_mip_dqdx{50000.0};          // e/cm
     double m_mip_dqdx_median{43000.0};   // e/cm
     double m_stop_snap_tol_cm{2.0};
@@ -1509,6 +1516,7 @@ private:
         add(R_PLATEAU_OFF_MIP, "plateau_off_mip"); add(R_STOP_INTO_DEAD, "stop_into_dead");
         add(R_CLUSTER_NOT_TRACK, "cluster_not_track");
         add(R_PROFILE_GEOMETRY, "profile_geometry");   // doc pdvd/66
+        add(R_READOUT_EDGE, "readout_edge");           // doc pdvd/100
         return s;
     }
 
@@ -4472,6 +4480,14 @@ void CheckSTM_Michel::visit(Ensemble& ensemble) const
         // defect D1).  The old meaning is exactly
         // (michel_found && michel_conn_type == 1).
         rec.michel_found = (rec.michel_conn_type > 0) ? 1 : 0;
+
+        // doc pdvd/100 round 2 (readout_edge_require_michel): the tagger
+        // deferred its readout-edge veto on this cluster's accepted pass
+        // (readout_edge_defer); a stop that close to the window edge stands
+        // only with a Michel object at it.  Here, after the T2c / T3c vetoes,
+        // so michel_found is final; the topology clear below never clears it.
+        if (m_readout_edge_require_michel)
+            rec.reject_bits |= stm_michel_readout_edge_bits(main->get_scalar<int>("stm_readout_edge", 0), rec.michel_found);
 
         // A NaN passes no gate and fails every one silently (PDVD 039349_3
         // cluster 26 persisted michel_ke_best = NaN through doc pdhd/14).

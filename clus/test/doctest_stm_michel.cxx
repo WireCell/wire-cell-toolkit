@@ -1156,6 +1156,30 @@ TEST_CASE("stm_michel topology clear: no Michel, a charge-only object, a small o
     CHECK(stm_michel_topology_clear(shape, 1, 1, 30.0, std::numeric_limits<double>::quiet_NaN(), 10.0, 3.0, true) == 0u);
 }
 
+// ---- doc pdvd/100 round 2: the readout-edge guard's Michel exemption --------
+// TaggerCheckSTM defers its readout-edge veto (readout_edge_defer); the verdict
+// applies it unless a Michel object exists at the stop.
+
+TEST_CASE("stm_michel readout edge: only a deferred stop with no Michel is rejected")
+{
+    CHECK(stm_michel_readout_edge_bits(1, 0) == unsigned(R_READOUT_EDGE));
+    CHECK(stm_michel_readout_edge_bits(1, 1) == 0u);   // own100: 4 of 4 such objects were stoppers
+    CHECK(stm_michel_readout_edge_bits(0, 0) == 0u);   // not deferred: the bit never fires
+    CHECK(stm_michel_readout_edge_bits(0, 1) == 0u);
+}
+
+TEST_CASE("stm_michel readout edge: a new bit, which the topology clear leaves in place")
+{
+    const unsigned before = R_NO_CHAIN | R_STOP_UNMATCHED | R_NO_BRAGG | R_SHAPE_FLAT | R_NOT_MUON_PID |
+                            R_CONTINUATION | R_STOP_NEAR_BOUNDARY | R_VERTEX_HADRON | R_SHORT |
+                            R_PROFILE_SPARSE | R_PLATEAU_OFF_MIP | R_STOP_INTO_DEAD | R_CLUSTER_NOT_TRACK |
+                            R_PROFILE_GEOMETRY;
+    CHECK((before & unsigned(R_READOUT_EDGE)) == 0u);
+    const unsigned bits = R_READOUT_EDGE | R_NO_BRAGG | R_SHAPE_FLAT | R_PROFILE_SPARSE;
+    const unsigned clr = stm_michel_topology_clear(bits, 1, 1, 30.0, 8.0, 10.0, 3.0, true);
+    CHECK((bits & ~clr) == unsigned(R_READOUT_EDGE));
+}
+
 // ---- doc pdvd/71 (P4): the Michel's isolated gamma blobs --------------------
 // The owner's three criteria: along the Michel electron, a dot near the stop,
 // and an energy that over-clustering cannot inflate.  Arguments: d_stop, len,

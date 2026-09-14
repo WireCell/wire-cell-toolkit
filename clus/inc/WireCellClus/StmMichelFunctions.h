@@ -567,6 +567,7 @@ namespace WireCell::Clus::PR {
         R_STOP_INTO_DEAD     = 1u << 11,  // the visible end walks into a dead region (FiducialUtils::check_dead_volume) (doc pdhd/03)
         R_CLUSTER_NOT_TRACK  = 1u << 12,  // too few of the cluster's points lie on the reconstructed track (doc pdhd/03)
         R_PROFILE_GEOMETRY   = 1u << 13,  // the profile is not a measurement: a coiled end (arc/span) or a long fitted segment the charge does not support (doc pdvd/66)
+        R_READOUT_EDGE       = 1u << 14,  // the tagger deferred its readout-edge veto on the accepted pass and no Michel object exists (readout_edge_require_michel; doc pdvd/100)
     };
 
     /// doc pdvd/70 (P1, topology_stop_evidence): the reject bits that a Michel
@@ -582,6 +583,15 @@ namespace WireCell::Clus::PR {
     unsigned stm_michel_topology_clear(unsigned reject_bits, int michel_found, int conn_type,
                                        double ke_mev, double len_cm,
                                        double ke_min_mev, double len_min_cm, bool clears_sparse);
+
+    /// doc pdvd/100 round 2 (readout_edge_require_michel): the veto the
+    /// tagger's readout-edge guard deferred (TaggerCheckSTM readout_edge_defer
+    /// marks the cluster scalar stm_readout_edge).  A stop within the guard's
+    /// ticks of the readout window's edge stands only when a Michel object
+    /// exists at it -- `michel_found`, any connection type, after the T2c / T3c
+    /// vetoes.  Returns R_READOUT_EDGE when `readout_edge` and not
+    /// `michel_found`, 0 otherwise.
+    unsigned stm_michel_readout_edge_bits(int readout_edge, int michel_found);
 
     /// doc pdvd/71 (P4, michel_gamma_collect): the per-cluster test for an
     /// isolated gamma blob that belongs to the Michel -- the owner's three

@@ -110,6 +110,13 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
               // 5 cm; PDVD's cathode is a 6 cm slab, so 12 cm) when cathode_guard is on.
               stm_readout_edge_guard=false,
               stm_readout_edge_ticks=60,
+              // stm_readout_edge_defer (doc pdvd/100 round 2): TaggerCheckSTM
+              // readout_edge_defer -- the guard leaves its veto to
+              // check_stm_michel, which applies it unless a Michel object exists
+              // at the stop (knob-bag key readout_edge_require_michel; WITHOUT
+              // that key the guard is effectively off).  C++ default false; key
+              // emitted only with the guard on => byte-identical when off.
+              stm_readout_edge_defer=false,
               stm_cathode_guard_cm=null,
               // Steiner-terminal per-point charge floor (electrons; CreateSteinerGraph
               // terminal_charge_threshold, C++ default 4000 = prototype).  null =>
@@ -1664,6 +1671,7 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
                     [if stm_readout_edge_guard then 'readout_edge_guard']: true,
                     [if stm_readout_edge_guard then 'guard_readout_edge_ticks']: stm_readout_edge_ticks,
                     [if stm_readout_edge_guard then 'readout_nticks']: nticks,
+                    [if stm_readout_edge_guard && stm_readout_edge_defer then 'readout_edge_defer']: true,   // doc pdvd/100 round 2
                     [if stm_cathode_guard_cm != null then 'guard_cathode_cm']: stm_cathode_guard_cm,
                   } },
             // doc pdvd/48: the stopping-muon + Michel stage that REPLACES

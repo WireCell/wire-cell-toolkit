@@ -216,6 +216,14 @@ public:
         m_readout_edge_guard = get<bool>(config, "readout_edge_guard", m_readout_edge_guard);
         m_guard_readout_edge_ticks = get<double>(config, "guard_readout_edge_ticks", m_guard_readout_edge_ticks);
         m_readout_nticks = get<int>(config, "readout_nticks", m_readout_nticks);
+        // readout_edge_defer (C++ default false => byte-identical legacy; doc
+        // pdvd/100 round 2): instead of rejecting, a pass the readout-edge guard
+        // fires on carries on exactly as with the guard off, and a cluster that
+        // pass accepts gets the scalar stm_readout_edge = 1.  The veto is then
+        // CheckSTM_Michel's readout_edge_require_michel (kept only with a Michel
+        // object at the stop, which does not exist yet here).  ON WITHOUT that
+        // key the guard is effectively off.
+        m_readout_edge_defer = get<bool>(config, "readout_edge_defer", m_readout_edge_defer);
         if (m_readout_edge_guard) {
             SPDLOG_LOGGER_DEBUG(s_log, "configure: TaggerCheckSTM: readout_edge_guard ON (stop tick within {} of [0,{}))",
                                 m_guard_readout_edge_ticks, m_readout_nticks);
@@ -463,6 +471,7 @@ public:
         cfg["readout_edge_guard"] = m_readout_edge_guard;
         cfg["guard_readout_edge_ticks"] = m_guard_readout_edge_ticks;
         cfg["readout_nticks"] = m_readout_nticks;
+        cfg["readout_edge_defer"] = m_readout_edge_defer;   // doc pdvd/100 round 2
         cfg["guard_cathode_cm"] = m_guard_cathode_cm;
         cfg["guard_cathode_peak"] = m_guard_cathode_peak;
         // doc-63 round-4a dist_to_anode face fix; false = byte-identical legacy.
@@ -624,11 +633,17 @@ public:
 
             if (m_save_stm_fit) { m_pass_records.clear(); m_eval_records.clear(); }
 
+            m_readout_edge_accepted = false;   // doc pdvd/100 round 2
             bool is_stm = check_stm_conditions(*main_cluster, associated_clusters);
 
             // TGM is set inside check_stm_conditions; set STM only when not TGM
             if (is_stm && !main_cluster->get_flag(Flags::TGM)) {
                 main_cluster->set_flag(Flags::STM);
+                // doc pdvd/100 round 2 (readout_edge_defer): name the cluster
+                // whose accepted pass the readout-edge guard deferred, for
+                // CheckSTM_Michel's readout_edge_require_michel.  Never set
+                // with the knob off.
+                if (m_readout_edge_accepted) main_cluster->set_scalar<int>("stm_readout_edge", 1);
             }
 
             SPDLOG_LOGGER_INFO(s_log, "{}visit: TaggerCheckSTM: cluster {} → STM={} TGM={}", m_evt_tag,
@@ -870,6 +885,8 @@ private:
     bool m_readout_edge_guard{false};       // doc pdvd/25: readout-window truncation veto
     double m_guard_readout_edge_ticks{60};  // stop tick within this of the window edges
     int m_readout_nticks{0};                // readout length in ticks; <= 0 = late edge unchecked
+    bool m_readout_edge_defer{false};       // doc pdvd/100: leave the veto to CheckSTM_Michel
+    mutable bool m_readout_edge_accepted{false};   // the accepted pass was a deferred one (per check_stm_conditions call)
     double m_guard_cathode_cm{5.0};     // stop-to-cathode distance below this
     double m_guard_cathode_peak{2.5};   // ... with end peak below this x MIP
 
@@ -3724,6 +3741,7 @@ private:
         //   is_forward=false: none of the above; always returns false if left_L>40cm.
         auto run_pass = [&](const geo_point_t& start_wcp, const geo_point_t& end_wcp,
                             bool is_forward) -> std::optional<bool> {
+            bool edge_deferred = false;   // doc pdvd/100 round 2: readout_edge_defer fired on THIS pass
             if (is_forward && flag_double_end)
                 SPDLOG_LOGGER_TRACE(s_log, "check_stm_conditions: Forward check!");
             if (!is_forward)
@@ -3963,8 +3981,17 @@ private:
             // placement rationale as cathode_guard above).
             if (m_readout_edge_guard && flag_pass &&
                 readout_edge_guard_reject(eval_arrs, kink_num, cluster.ident())) {
-                if (m_save_stm_fit) set_pass_status(7);
-                return std::nullopt;
+                // doc pdvd/100 round 2 (readout_edge_defer): carry on as with the
+                // guard off; the veto waits for CheckSTM_Michel's Michel.
+                if (m_readout_edge_defer) {
+                    edge_deferred = true;
+                    SPDLOG_LOGGER_INFO(s_log, "readout_edge_guard: cluster {} deferred to CheckSTM_Michel (readout_edge_defer)",
+                                       cluster.ident());
+                }
+                else {
+                    if (m_save_stm_fit) set_pass_status(7);
+                    return std::nullopt;
+                }
             }
             // doc-63 round-4b: long straight leftover = second track (own
             // knob; same placement rationale).  The short-track reset cannot
@@ -4022,6 +4049,7 @@ private:
                 }
                 if (!detect_proton(adjusted_segment, kink_num, fitted_segments)) {
                     if (m_save_stm_fit) set_pass_status(0);
+                    if (edge_deferred) m_readout_edge_accepted = true;   // doc pdvd/100 round 2
                     return true;
                 }
             }

@@ -814,6 +814,11 @@ unsigned WireCell::Clus::PR::stm_michel_topology_clear(unsigned reject_bits, int
     return reject_bits & clearable;
 }
 
+unsigned WireCell::Clus::PR::stm_michel_readout_edge_bits(int readout_edge, int michel_found)
+{
+    return (readout_edge && !michel_found) ? unsigned(R_READOUT_EDGE) : 0u;
+}
+
 int WireCell::Clus::PR::stm_michel_gamma_gate(double d_stop, double len, double cos_dir, double d_mich,
                                               double d_body, double ke_mev, double radius, double max_len,
                                               double cos_min, double max_ke_mev)
