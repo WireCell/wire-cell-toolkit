@@ -263,6 +263,10 @@ void TrackFitting::set_parameter(const std::string& name, double value) {
         m_params.fit_blob_coverage_ghost_dis = value;
     } else if (name == "fit_blob_coverage_weight") {
         m_params.fit_blob_coverage_weight = value;
+    } else if (name == "fit_weight_pow") {
+        m_params.fit_weight_pow = value;
+    } else if (name == "assoc_cont_center") {
+        m_params.assoc_cont_center = value;
     } else if (name == "default_dQ_dx") {
         m_params.default_dQ_dx = value;
     } else if (name == "end_point_factor") {
@@ -386,6 +390,10 @@ double TrackFitting::get_parameter(const std::string& name) const {
         return m_params.fit_blob_coverage_ghost_dis;
     } else if (name == "fit_blob_coverage_weight") {
         return m_params.fit_blob_coverage_weight;
+    } else if (name == "fit_weight_pow") {
+        return m_params.fit_weight_pow;
+    } else if (name == "assoc_cont_center") {
+        return m_params.assoc_cont_center;
     } else if (name == "default_dQ_dx") {
         return m_params.default_dQ_dx;
     } else if (name == "end_point_factor") {
@@ -3033,6 +3041,15 @@ void TrackFitting::organize_ps_path(std::shared_ptr<PR::Segment> segment, std::v
             int cur_wire_w2      = std::get<1>(ch_w2);
             int cur_time_slice2  = std::floor(std::get<0>(ch_u2) / cur_ntime_ticks) * cur_ntime_ticks;
 
+            // doc pdvd/101 assoc_cont_center: centre of the wire window below -- the rounded wire
+            // when off (int -> float is exact, so the window is the legacy one bit for bit).
+            float cen_u2 = cur_wire_u2, cen_v2 = cur_wire_v2, cen_w2 = cur_wire_w2;
+            if (m_params.assoc_cont_center != 0) {
+                cen_u2 = m_grouping->convert_3Dpoint_wire_cont(p_raw2, apa2, face2, 0);
+                cen_v2 = m_grouping->convert_3Dpoint_wire_cont(p_raw2, apa2, face2, 1);
+                cen_w2 = m_grouping->convert_3Dpoint_wire_cont(p_raw2, apa2, face2, 2);
+            }
+
             // Adaptive distance cuts for this face.
             double dis_cut_u2 = dis_cut, dis_cut_v2 = dis_cut, dis_cut_w2 = dis_cut;
             double max_ts_u2 = 0, max_ts_v2 = 0, max_ts_w2 = 0;
@@ -3089,17 +3106,17 @@ void TrackFitting::organize_ps_path(std::shared_ptr<PR::Segment> segment, std::v
                         float half_v = sqrt(range_sq_v2) / pitch_v2;
                         float half_w = sqrt(range_sq_w2) / pitch_w2;
 
-                        for (int j = std::round(cur_wire_u2 - half_u); j <= std::round(cur_wire_u2 + half_u); j++) {
+                        for (int j = std::round(cen_u2 - half_u); j <= std::round(cen_u2 + half_u); j++) {
                             Coord2D coord(apa2, face2, this_time_slice, j,
                                          get_channel_for_wire(apa2, face2, 0, j), WirePlaneLayer_t::kUlayer);
                             temp_2dut.associated_2d_points.insert(coord);
                         }
-                        for (int j = std::round(cur_wire_v2 - half_v); j <= std::round(cur_wire_v2 + half_v); j++) {
+                        for (int j = std::round(cen_v2 - half_v); j <= std::round(cen_v2 + half_v); j++) {
                             Coord2D coord(apa2, face2, this_time_slice, j,
                                          get_channel_for_wire(apa2, face2, 1, j), WirePlaneLayer_t::kVlayer);
                             temp_2dvt.associated_2d_points.insert(coord);
                         }
-                        for (int j = std::round(cur_wire_w2 - half_w); j <= std::round(cur_wire_w2 + half_w); j++) {
+                        for (int j = std::round(cen_w2 - half_w); j <= std::round(cen_w2 + half_w); j++) {
                             Coord2D coord(apa2, face2, this_time_slice, j,
                                          get_channel_for_wire(apa2, face2, 2, j), WirePlaneLayer_t::kWlayer);
                             temp_2dwt.associated_2d_points.insert(coord);
@@ -3181,6 +3198,14 @@ void TrackFitting::organize_ps_path(std::shared_ptr<PR::Segment> segment, std::v
             int cur_wire_u = std::get<1>(cur_u);
             int cur_wire_v = std::get<1>(cur_v);
             int cur_wire_w = std::get<1>(cur_w);
+
+            // doc pdvd/101 assoc_cont_center: window centre (the rounded wire when off; exact).
+            float cen_u = cur_wire_u, cen_v = cur_wire_v, cen_w = cur_wire_w;
+            if (m_params.assoc_cont_center != 0) {
+                cen_u = m_grouping->convert_3Dpoint_wire_cont(closest_point_raw, st_apa, st_face, 0);
+                cen_v = m_grouping->convert_3Dpoint_wire_cont(closest_point_raw, st_apa, st_face, 1);
+                cen_w = m_grouping->convert_3Dpoint_wire_cont(closest_point_raw, st_apa, st_face, 2);
+            }
 
             // Calculate adaptive distance cuts (equivalent to original max_time_slice_u/v/w calculation)
             double dis_cut_u = dis_cut;
@@ -3306,12 +3331,12 @@ void TrackFitting::organize_ps_path(std::shared_ptr<PR::Segment> segment, std::v
                         float half_u = sqrt(range_u) / st_pitch_u;
                         float half_v = sqrt(range_v) / st_pitch_v;
                         float half_w = sqrt(range_w) / st_pitch_w;
-                        float low_u_limit = cur_wire_u - half_u;
-                        float high_u_limit = cur_wire_u + half_u;
-                        float low_v_limit = cur_wire_v - half_v;
-                        float high_v_limit = cur_wire_v + half_v;
-                        float low_w_limit = cur_wire_w - half_w;
-                        float high_w_limit = cur_wire_w + half_w;
+                        float low_u_limit = cen_u - half_u;
+                        float high_u_limit = cen_u + half_u;
+                        float low_v_limit = cen_v - half_v;
+                        float high_v_limit = cen_v + half_v;
+                        float low_w_limit = cen_w - half_w;
+                        float high_w_limit = cen_w + half_w;
 
                         for (int j = std::round(low_u_limit); j <= std::round(high_u_limit); j++) {
                             Coord2D coord(st_apa, st_face, vertex_time_slice, j,
@@ -4860,6 +4885,10 @@ WireCell::Point TrackFitting::fit_point(WireCell::Point& init_p, int i, std::sha
         }
 
 
+        // doc pdvd/101: position-LSQ weight power (TrackFitting.h fit_weight_pow).  The row
+        // scale s becomes |s|^(pow/2), so the weight is |s|^pow; the default 2 skips this.
+        if (m_params.fit_weight_pow != 2.0) scaling = std::pow(std::abs(scaling), 0.5 * m_params.fit_weight_pow);
+
         if (scaling != 0) {
             data_u_2D(2 * index) = scaling * (it->wire - offset_u);
             data_u_2D(2 * index + 1) = scaling * (it->time - offset_t);
@@ -4917,6 +4946,9 @@ WireCell::Point TrackFitting::fit_point(WireCell::Point& init_p, int i, std::sha
             scaling *= m_params.fit_blob_coverage_weight;
         }
 
+        // doc pdvd/101: fit_weight_pow (see fit_point, U plane).
+        if (m_params.fit_weight_pow != 2.0) scaling = std::pow(std::abs(scaling), 0.5 * m_params.fit_weight_pow);
+
         if (scaling != 0) {
             data_v_2D(2 * index) = scaling * (it->wire - offset_v);
             data_v_2D(2 * index + 1) = scaling * (it->time - offset_t);
@@ -4972,6 +5004,9 @@ WireCell::Point TrackFitting::fit_point(WireCell::Point& init_p, int i, std::sha
         if (!plane_data_w.deweighted_2d_points.empty() && plane_data_w.deweighted_2d_points.count(*it)) {
             scaling *= m_params.fit_blob_coverage_weight;
         }
+
+        // doc pdvd/101: fit_weight_pow (see fit_point, U plane).
+        if (m_params.fit_weight_pow != 2.0) scaling = std::pow(std::abs(scaling), 0.5 * m_params.fit_weight_pow);
 
         if (scaling != 0) {
             data_w_2D(2 * index) = scaling * (it->wire - offset_w);
@@ -5652,6 +5687,9 @@ void TrackFitting::trajectory_fit(std::vector<std::pair<WireCell::Point, std::sh
             auto slope_yu = std::get<1>(u_slope_it->second).first;
             auto slope_zu = std::get<1>(u_slope_it->second).second;
                
+            // doc pdvd/101: fit_weight_pow (see fit_point, U plane).
+            if (m_params.fit_weight_pow != 2.0) scaling = std::pow(std::abs(scaling), 0.5 * m_params.fit_weight_pow);
+
             if (scaling != 0) {
                 data_u_2D(2 * index) = scaling * (it->wire - offset_u);
                 data_u_2D(2 * index + 1) = scaling * (it->time - offset_t);
@@ -5734,6 +5772,9 @@ void TrackFitting::trajectory_fit(std::vector<std::pair<WireCell::Point, std::sh
             auto slope_zv = std::get<2>(v_slope_it->second).second;
             
             // std::cout << "Test: " << std::endl;
+            // doc pdvd/101: fit_weight_pow (see fit_point, U plane).
+            if (m_params.fit_weight_pow != 2.0) scaling = std::pow(std::abs(scaling), 0.5 * m_params.fit_weight_pow);
+
             if (scaling != 0) {
                 data_v_2D(2 * index) = scaling * (it->wire - offset_v);
                 data_v_2D(2 * index + 1) = scaling * (it->time - offset_t);
@@ -5817,6 +5858,9 @@ void TrackFitting::trajectory_fit(std::vector<std::pair<WireCell::Point, std::sh
             auto slope_yw = std::get<3>(w_slope_it->second).first;
             auto slope_zw = std::get<3>(w_slope_it->second).second;
             
+            // doc pdvd/101: fit_weight_pow (see fit_point, U plane).
+            if (m_params.fit_weight_pow != 2.0) scaling = std::pow(std::abs(scaling), 0.5 * m_params.fit_weight_pow);
+
             if (scaling != 0) {
                 data_w_2D(2 * index) = scaling * (it->wire - offset_w);
                 data_w_2D(2 * index + 1) = scaling * (it->time - offset_t);

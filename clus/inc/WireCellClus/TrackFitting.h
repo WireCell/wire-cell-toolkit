@@ -133,6 +133,24 @@ namespace WireCell::Clus {
             // Inert while fit_blob_coverage < 0.
             double fit_blob_coverage_weight = 0.1;
 
+            // doc pdvd/101 -- position least-squares WEIGHT POWER.  Each wire
+            // row of fit_point / trajectory_fit is scaled by s = q/err * div
+            // factor * quality factors, so its weight is s^2; with a flat
+            // charge_err that is q^2, and on a coarse pitch (PDVD U/V 7.65 mm)
+            // the brightest wire wins and the fitted point snaps to its centre.
+            // When != 2 the row scale becomes |s|^(fit_weight_pow/2), i.e. the
+            // weight is |s|^fit_weight_pow.  2 (default) skips the line =>
+            // byte-identical.
+            double fit_weight_pow = 2;
+
+            // doc pdvd/101 -- centre form_point_association's per-plane wire
+            // window on the CONTINUOUS wire coordinate of the point instead of
+            // its rounded wire index.  The rounded centre puts the window
+            // edges on the wire lattice, so a point half-way between two wires
+            // collects one side's wires.  Non-zero = on; 0 (default) =>
+            // byte-identical.  (A double for the set_parameter plumbing.)
+            double assoc_cont_center = 0;
+
             // doc sbnd_xin/docs/pr/67 -- LOG-ONLY probe (0 = off = no lines =
             // byte-identical).  examine_end_ps_vec is the primary END trimmer:
             // it pops points off the front and back of a trajectory while

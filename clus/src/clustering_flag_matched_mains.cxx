@@ -52,6 +52,15 @@ public:
         m_require_t0 = get<bool>(config, "require_t0", m_require_t0);
         m_min_length = get<double>(config, "min_length", m_min_length);   // internal units
         m_skip_flagged = get<bool>(config, "skip_flagged", m_skip_flagged);
+        // doc pdvd/101: flag_unmatched (C++ default false) lets a cluster that
+        // Q/L matching never saw (matched_flash_gid < 0) become a main too.  It
+        // exists for LIGHT-LESS SIMULATION only -- a single simulated muon has no
+        // flash, so without it the taggers and the track fit evaluate nothing.
+        // An unmatched cluster keeps Cluster::get_cluster_t0()'s unstamped
+        // default of 0 (QLMatching's -1e12 sentinel is only written when Q/L
+        // matching runs), which is the true t0 of a t=0 simulation, so
+        // require_t0 passes.  Absent key => the legacy path, byte-identical.
+        m_flag_unmatched = get<bool>(config, "flag_unmatched", m_flag_unmatched);
     }
 
     WireCell::Configuration default_configuration() const {
@@ -60,6 +69,7 @@ public:
         cfg["require_t0"] = m_require_t0;
         cfg["min_length"] = m_min_length;
         cfg["skip_flagged"] = m_skip_flagged;
+        cfg["flag_unmatched"] = m_flag_unmatched;
         return cfg;
     }
 
@@ -71,10 +81,16 @@ public:
         }
         Grouping& grouping = *vec.at(0);
         int n_matched = 0, n_flagged = 0, n_already = 0, n_short = 0, n_not0 = 0;
+        int n_unmatched = 0;                                    // doc pdvd/101 (flag_unmatched only)
         for (Cluster* cluster : grouping.children()) {          // tree order: deterministic
             const int gid = cluster->get_scalar<int>("matched_flash_gid", -1);
-            if (gid < 0) continue;
-            ++n_matched;
+            if (gid < 0) {
+                if (!m_flag_unmatched) continue;                // legacy: unmatched clusters are never mains
+                ++n_unmatched;
+            }
+            else {
+                ++n_matched;
+            }
             if (m_require_t0 && !(cluster->get_cluster_t0() > -1e11)) { ++n_not0; continue; }
             if (m_min_length > 0 && cluster->get_length() < m_min_length) { ++n_short; continue; }
             if (cluster->get_flag(Flags::main_cluster)) { ++n_already; if (m_skip_flagged) continue; }
@@ -85,6 +101,11 @@ public:
                        " ({} already, {} without t0, {} below min_length {:.1f} cm)",
                        grouping.children().size(), n_matched, n_flagged, n_already, n_not0, n_short,
                        m_min_length / units::cm);
+        if (m_flag_unmatched) {
+            // separate line so the legacy line above stays byte-identical when off
+            logger()->info("ClusteringFlagMatchedMains: flag_unmatched admitted {} unmatched cluster(s)"
+                           " (counted in the flagged/without-t0/below-min_length totals above)", n_unmatched);
+        }
     }
 
 private:
@@ -92,6 +113,7 @@ private:
     bool m_require_t0{true};
     double m_min_length{0.0};
     bool m_skip_flagged{true};
+    bool m_flag_unmatched{false};   // doc pdvd/101: light-less simulation only
 };
 
 // Local Variables:

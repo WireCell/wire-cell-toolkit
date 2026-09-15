@@ -102,6 +102,17 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
               // flash-matched cluster (matched_flash_gid >= 0 with a real t0)
               // at least this long as a main.  0 = every matched cluster.
               flag_mains_min_length=0,
+              // doc pdvd/101: admit clusters without a Q/L match as mains (light-less
+              // SIMULATION only).  C++ default false.  Key omitted when false =>
+              // byte-identical compiled config.
+              flag_mains_unmatched=false,
+              // doc pdvd/101: sampling of the RETILE samplers only, i.e. the Steiner
+              // cloud (the fit's association reads the clustering job's points).
+              // retile_sampler_half_pitch (C++ Stepped default false) adds half-pitch
+              // crossings; retile_sampler_min_step (wires; C++ default 3) is the
+              // stepped spacing.  false / null => keys omitted => byte-identical.
+              retile_sampler_half_pitch=false,
+              retile_sampler_min_step=null,
               // PDVD boundary vetoes for the STM verdict (doc 25 M3).  All C++
               // default OFF; keys omitted when off => byte-identical config.
               // readout_edge_guard: the stop's fitted arrival tick within
@@ -1421,7 +1432,9 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
         // so 16 samplers, each with its crate's drift speed (clus.jsonnet live_sampler).
         local improve2 = cm.improve_cluster_2(
             anodes=anodes,
-            samplers=[clus.sampler(clus_maker.live_sampler(a, f), apa=a.data.ident, face=f)
+            samplers=[clus.sampler(clus_maker.live_sampler(a, f, half_pitch=retile_sampler_half_pitch,
+                                                           min_step_size=retile_sampler_min_step),   // doc pdvd/101
+                                   apa=a.data.ident, face=f)
                       for a in anodes for f in [0, 1]],
             wrapped_channel_activity=retile_wrapped_channel_activity,
             terminal_charge_threshold=retile_steiner_terminal_charge,
@@ -1448,6 +1461,7 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
                     require_t0: true,
                     min_length: flag_mains_min_length,
                     skip_flagged: true,
+                    [if flag_mains_unmatched then 'flag_unmatched']: true,   // doc pdvd/101
                 },
             },
             // PDVD has no unmerge_bundle stage (doc pdvd/25 sec 4): examine_bundles

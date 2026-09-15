@@ -146,13 +146,21 @@ local pctransforms(dv) = {
 
 
 
-local bs_live_face(apa, face, wrapped_channel_charge=true) = {
+local bs_live_face(apa, face, wrapped_channel_charge=true, half_pitch=false, min_step_size=null) = {
     type: "BlobSampler",
     name: "live-%s-%d"%[apa, face],
     data: {
         drift_speed: drift_speed,
         time_offset: time_offset,
-        strategy: ["stepped"],
+        // doc pdvd/101: half_pitch (C++ Stepped default false) adds the half-pitch
+        // crossings; min_step_size (C++ default 3 wires) is the stepped spacing.
+        // Passed only by the PR job's retile samplers (live_sampler).  Both at
+        // their defaults => the legacy string form => byte-identical config.
+        strategy: if half_pitch || min_step_size != null then
+            [{name: "stepped",
+              [if half_pitch then 'half_pitch']: true,
+              [if min_step_size != null then 'min_step_size']: min_step_size}]
+        else ["stepped"],
         extra: [".*wire_index", ".*charge_val", ".*charge_unc", "wpid"],
         // wrapped_channel_charge: read a sampled point's induction charge by
         // channel IDENT when its wire is a wrapped strip's continuation.  PDHD
@@ -853,8 +861,9 @@ local clus_all_tpc (
     // PDVD parity (protodunevd/clus.jsonnet), minus the per-crate drift speed:
     // PDHD has ONE global drift speed.
     pc_transforms(dv) :: pctransforms(dv),
-    live_sampler(anode, face, wrapped_channel_charge=true) ::
-        bs_live_face(anode.name, face, wrapped_channel_charge=wrapped_channel_charge),
+    live_sampler(anode, face, wrapped_channel_charge=true, half_pitch=false, min_step_size=null) ::
+        bs_live_face(anode.name, face, wrapped_channel_charge=wrapped_channel_charge,
+                     half_pitch=half_pitch, min_step_size=min_step_size),   // doc pdvd/101
     drift_speed :: drift_speed,
     time_offset :: time_offset,
     scope_coords :: common_coords,

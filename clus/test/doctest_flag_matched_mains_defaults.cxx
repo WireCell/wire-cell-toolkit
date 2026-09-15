@@ -28,4 +28,9 @@ TEST_CASE("clus knob defaults: ClusteringFlagMatchedMains")
     CHECK(cfg["min_length"].asDouble() == 0.0);
     REQUIRE(cfg.isMember("skip_flagged"));
     CHECK(cfg["skip_flagged"].asBool() == true);
+    // doc pdvd/101: the light-less-simulation admission is OFF by default, so a
+    // production job (every cluster Q/L-matched or not) never flags an unmatched
+    // cluster as a main.
+    REQUIRE(cfg.isMember("flag_unmatched"));
+    CHECK(cfg["flag_unmatched"].asBool() == false);
 }

@@ -828,6 +828,11 @@ std::tuple<int, int> Grouping::convert_3Dpoint_time_ch(const geo_point_t& point,
     return {tind, wind};
 }
 
+double Grouping::convert_3Dpoint_wire_cont(const geo_point_t& point, const int apa, const int face, const int pind) const {
+    const auto& fg = fastgeom(apa, face);
+    return point2wind_cont(point, fg.angle[pind], fg.pitch[pind], fg.center[pind]);
+}
+
 std::pair<double,double> Grouping::convert_time_wire_2Dpoint(const int timeslice, const int wire, const int apa, const int face, const int plane) const
 {
     const int nplanes = 3;

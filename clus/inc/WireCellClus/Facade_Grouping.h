@@ -391,6 +391,9 @@ namespace WireCell::Clus::Facade {
 
         /// @brief convert_3Dpoint_time_ch
         std::tuple<int, int> convert_3Dpoint_time_ch(const geo_point_t& point, const int apa, const int face, const int pind) const;
+        /// @brief doc pdvd/101: the UNROUNDED wire coordinate convert_3Dpoint_time_ch
+        /// rounds (wire k's centre at k).  std::round of it is exactly that wind.
+        double convert_3Dpoint_wire_cont(const geo_point_t& point, const int apa, const int face, const int pind) const;
         // In class Grouping definition
         /// @param wire  local wire index within the plane (NOT global channel number)
         std::pair<double,double> convert_time_wire_2Dpoint(const int timeslice, const int wire, const int apa, const int face, const int plane) const;

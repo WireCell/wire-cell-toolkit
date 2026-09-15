@@ -189,7 +189,7 @@ local pctransforms(dv) = {
 
 
 
-local bs_live_face(apa, face, center_fallback=false, speed=drift_speed) = {
+local bs_live_face(apa, face, center_fallback=false, speed=drift_speed, half_pitch=false, min_step_size=null) = {
     type: "BlobSampler",
     name: "live-%s-%d"%[apa, face],
     data: {
@@ -197,7 +197,13 @@ local bs_live_face(apa, face, center_fallback=false, speed=drift_speed) = {
         time_offset: time_offset,
         // center_fallback: emit one point at the blob center when the stepped
         // grid yields none (tiny 1-wire blobs); default off -> bit-identical.
-        strategy: [{name: "stepped", center_fallback: center_fallback}],
+        // doc pdvd/101: half_pitch (C++ Stepped default false) adds the half-pitch
+        // crossings; min_step_size (C++ default 3 wires) is the stepped spacing.
+        // Passed only by the PR job's retile samplers (live_sampler); false / null
+        // => keys omitted => byte-identical compiled config.
+        strategy: [{name: "stepped", center_fallback: center_fallback,
+                    [if half_pitch then 'half_pitch']: true,
+                    [if min_step_size != null then 'min_step_size']: min_step_size}],
         extra: [".*wire_index", ".*charge_val", ".*charge_unc", "wpid"],
         // wrapped_channel_charge: read a sampled point's induction charge by
         // channel IDENT when its wire is a wrapped strip's continuation.  PDVD
@@ -913,8 +919,9 @@ local clus_all_tpc (
     // the T0 scope coordinates.  Hidden fields => nothing here reaches a compiled
     // clustering config.
     pc_transforms(dv) :: pctransforms(dv),
-    live_sampler(anode, face, center_fallback=stepped_center_fallback) ::
+    live_sampler(anode, face, center_fallback=stepped_center_fallback, half_pitch=false, min_step_size=null) ::
         bs_live_face(anode.name, face, center_fallback=center_fallback,
+                     half_pitch=half_pitch, min_step_size=min_step_size,   // doc pdvd/101
                      speed=if anode.data.ident < 4 then drift_speed_bot else drift_speed_top),
     drift_speed_bot :: drift_speed_bot,
     drift_speed_top :: drift_speed_top,

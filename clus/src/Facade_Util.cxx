@@ -555,6 +555,12 @@ int Facade::point2wind(const geo_point_t& point, const double angle, const doubl
     double wind = (y - center) / pitch - 0.5; // subtract 0.5 to match WCP (wire center vs. edge difference ...) ...
     return std::round(wind);
 }
+double Facade::point2wind_cont(const geo_point_t& point, const double angle, const double pitch, const double center)
+{
+    // doc pdvd/101: point2wind before the rounding (same expression, so the rounding of this is point2wind).
+    double y = cos(angle) * point[2] - sin(angle) * point[1];
+    return (y - center) / pitch - 0.5;
+}
 
 
 

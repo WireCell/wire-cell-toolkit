@@ -804,12 +804,21 @@ struct Stepped : public BlobSampler::Sampler
     // third view's strip window) is given one point at the blob center.
     bool center_fallback{false};
 
+    // doc pdvd/101: if true, also sample HALF-WAY between the stepped wires of
+    // the min and max views (a crossing of a wire centre with a wire boundary,
+    // or of two boundaries), i.e. the lattice is refined to half a pitch in
+    // both views.  The mid-view strip test and the integer-crossing range test
+    // are applied exactly as for the legacy points.  False (default) => the
+    // legacy points only, in the legacy order => byte-identical.
+    bool half_pitch{false};
+
     virtual void configure(const Configuration& cfg)
     {
         min_step_size = get(cfg, "min_step_size", min_step_size);
         max_step_fraction = get(cfg, "max_step_fraction", max_step_fraction);
         offset = get(cfg, "offset", offset);
         center_fallback = get(cfg, "center_fallback", center_fallback);
+        half_pitch = get(cfg, "half_pitch", half_pitch);
     }
 
 
@@ -957,6 +966,52 @@ struct Stepped : public BlobSampler::Sampler
         //         SPDLOG_LOGGER_WARN(log, "Blob {} strip: {}", ident, strip);
         //     }
         // }
+
+        if (half_pitch) {
+            // doc pdvd/101 (toy d101_toy.py sample(), lever A2): refine the lattice to half a
+            // pitch in the min and max views.  The ray grid is affine in the two indices, so
+            // one pitch step in the min (max) view along the other view's ray is dmin (dmax)
+            // in space and pmin (pmax) in mid-view pitch.  A stepped wire g gets a half
+            // position g+1/2 unless it is its strip's last wire (it stays inside the strip).
+            // The legacy (integer, integer) points were added above; only combinations with
+            // at least one half position are added here, each with the legacy range test at
+            // its integer crossing and the legacy mid-view strip test at its own position.
+            const Vector dmin = coords.ray_crossing({smin.layer, 1}, {smax.layer, 0}) -
+                                coords.ray_crossing({smin.layer, 0}, {smax.layer, 0});
+            const Vector dmax = coords.ray_crossing({smin.layer, 0}, {smax.layer, 1}) -
+                                coords.ray_crossing({smin.layer, 0}, {smax.layer, 0});
+            const double pmin = coords.pitch_location({smin.layer, 1}, {smax.layer, 0}, smid.layer) -
+                                coords.pitch_location({smin.layer, 0}, {smax.layer, 0}, smid.layer);
+            const double pmax = coords.pitch_location({smin.layer, 0}, {smax.layer, 1}, smid.layer) -
+                                coords.pitch_location({smin.layer, 0}, {smax.layer, 0}, smid.layer);
+            const auto last_min = smin.bounds.second - 1;
+            const auto last_max = smax.bounds.second - 1;
+            for (auto gmin : min_wires_set) {
+                for (int hmin = 0; hmin <= 1; ++hmin) {
+                    if (hmin == 1 && gmin >= last_min) continue;
+                    coordinate_t cmin{smin.layer, gmin};
+                    for (auto gmax : max_wires_set) {
+                        for (int hmax = 0; hmax <= 1; ++hmax) {
+                            if (hmin == 0 && hmax == 0) continue;  // the legacy point
+                            if (hmax == 1 && gmax >= last_max) continue;
+                            coordinate_t cmax{smax.layer, gmax};
+                            const double ploc0 = coords.pitch_location(cmin, cmax, 0);
+                            const double prel0 = coords.pitch_relative(ploc0, 0);
+                            const double ploc1 = coords.pitch_location(cmin, cmax, 1);
+                            const double prel1 = coords.pitch_relative(ploc1, 1);
+                            if (prel0 > 1 or prel0 < 0 or prel1 > 1 or prel1 < 0) continue;
+                            const double pitch = coords.pitch_location(cmin, cmax, smid.layer) + pitch_adjust
+                                               + 0.5 * hmin * pmin + 0.5 * hmax * pmax;
+                            const double pitch_relative = coords.pitch_relative(pitch, smid.layer);
+                            if (pitch_relative > smid.bounds.first - tolerance && pitch_relative < smid.bounds.second + tolerance) {
+                                points.push_back(coords.ray_crossing(cmin, cmax) + adjust
+                                                 + (0.5 * hmin) * dmin + (0.5 * hmax) * dmax);
+                            }
+                        }
+                    }
+                }
+            }
+        }
 
         if (points.empty() && center_fallback) {
             const auto& corners = iblob->shape().corners();
