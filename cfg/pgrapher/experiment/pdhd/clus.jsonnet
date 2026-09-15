@@ -146,7 +146,10 @@ local pctransforms(dv) = {
 
 
 
-local bs_live_face(apa, face, wrapped_channel_charge=true, half_pitch=false, min_step_size=null) = {
+local bs_live_face(apa, face, wrapped_channel_charge=true, half_pitch=false, min_step_size=null,
+                   strategy_name='stepped', wire_product=null, charge_threshold=null) = {
+    assert strategy_name == 'stepped' || strategy_name == 'charge_stepped' :
+        "bs_live_face: strategy_name must be 'stepped' or 'charge_stepped'",
     type: "BlobSampler",
     name: "live-%s-%d"%[apa, face],
     data: {
@@ -156,7 +159,25 @@ local bs_live_face(apa, face, wrapped_channel_charge=true, half_pitch=false, min
         // crossings; min_step_size (C++ default 3 wires) is the stepped spacing.
         // Passed only by the PR job's retile samplers (live_sampler).  Both at
         // their defaults => the legacy string form => byte-identical config.
-        strategy: if half_pitch || min_step_size != null then
+        // doc pdvd/102: strategy_name 'charge_stepped' selects the port of the
+        // prototype's RETILE sampler, WCPPID::calc_sampling_points(...,
+        // disable_mix_dead_cell=false) (prototype ImprovePR3DCluster.cxx:59,
+        // CalcPoints.cxx:75-160): every wire of the min/max views when
+        // N_max*N_min <= max_wire_product_threshold (C++ 2500), stepped wires
+        // otherwise, non-stepped wires kept only above charge_threshold_* (C++
+        // 4000).  The toolkit Stepped strategy is the 2dtoy variant with no
+        // all-wire rule.  wire_product / charge_threshold null => the C++
+        // defaults.  Default 'stepped' => this branch is never taken =>
+        // byte-identical compiled config.
+        strategy: if strategy_name == 'charge_stepped' then
+            [{name: "charge_stepped",
+              disable_mix_dead_cell: false,
+              [if min_step_size != null then 'min_step_size']: min_step_size,
+              [if wire_product != null then 'max_wire_product_threshold']: wire_product,
+              [if charge_threshold != null then 'charge_threshold_max']: charge_threshold,
+              [if charge_threshold != null then 'charge_threshold_min']: charge_threshold,
+              [if charge_threshold != null then 'charge_threshold_other']: charge_threshold}]
+        else if half_pitch || min_step_size != null then
             [{name: "stepped",
               [if half_pitch then 'half_pitch']: true,
               [if min_step_size != null then 'min_step_size']: min_step_size}]
@@ -861,9 +882,12 @@ local clus_all_tpc (
     // PDVD parity (protodunevd/clus.jsonnet), minus the per-crate drift speed:
     // PDHD has ONE global drift speed.
     pc_transforms(dv) :: pctransforms(dv),
-    live_sampler(anode, face, wrapped_channel_charge=true, half_pitch=false, min_step_size=null) ::
+    live_sampler(anode, face, wrapped_channel_charge=true, half_pitch=false, min_step_size=null,
+                 strategy_name='stepped', wire_product=null, charge_threshold=null) ::
         bs_live_face(anode.name, face, wrapped_channel_charge=wrapped_channel_charge,
-                     half_pitch=half_pitch, min_step_size=min_step_size),   // doc pdvd/101
+                     half_pitch=half_pitch, min_step_size=min_step_size,   // doc pdvd/101
+                     strategy_name=strategy_name, wire_product=wire_product,   // doc pdvd/102
+                     charge_threshold=charge_threshold),
     drift_speed :: drift_speed,
     time_offset :: time_offset,
     scope_coords :: common_coords,

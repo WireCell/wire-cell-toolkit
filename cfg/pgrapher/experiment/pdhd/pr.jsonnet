@@ -123,6 +123,14 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1,
               // stepped spacing.  false / null => keys omitted => byte-identical.
               retile_sampler_half_pitch=false,
               retile_sampler_min_step=null,
+              // doc pdvd/102: the RETILE samplers' strategy.  null => 'stepped'
+              // (production); 'charge_stepped' => the prototype's retile rule
+              // (clus.jsonnet bs_live_face).  retile_sampler_wire_product /
+              // retile_sampler_charge_threshold override its C++ 2500 / 4000.
+              // All null => strategy untouched => byte-identical.
+              retile_sampler_strategy=null,
+              retile_sampler_wire_product=null,
+              retile_sampler_charge_threshold=null,
               // PDVD boundary vetoes for the STM verdict (doc 25 M3).  All C++
               // default OFF; keys omitted when off => byte-identical config.
               // readout_edge_guard: the stop's fitted arrival tick within
@@ -1396,7 +1404,10 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1,
             anodes=anodes,
             samplers=[clus.sampler(clus_maker.live_sampler(a, f, wrapped_channel_charge=wrapped_channel_charge,
                                                            half_pitch=retile_sampler_half_pitch,
-                                                           min_step_size=retile_sampler_min_step),   // doc pdvd/101
+                                                           min_step_size=retile_sampler_min_step,   // doc pdvd/101
+                                                           strategy_name=if retile_sampler_strategy == null then 'stepped' else retile_sampler_strategy,
+                                                           wire_product=retile_sampler_wire_product,   // doc pdvd/102
+                                                           charge_threshold=retile_sampler_charge_threshold),
                                    apa=a.data.ident, face=f)
                       for a in anodes for f in [0, 1]],
             wrapped_channel_activity=retile_wrapped_channel_activity,

@@ -40,7 +40,15 @@
 // that header holds a vector<unique_ptr<Sampler>> of an incomplete type and so
 // cannot be included outside its own translation unit.
 #include "WireCellIface/IConfigurable.h"
+#include "WireCellIface/IAnodePlane.h"
+#include "WireCellIface/IBlobSampler.h"
 
+#include "WireCellAux/SimpleBlob.h"
+#include "WireCellAux/SimpleSlice.h"
+
+#include "WireCellUtil/RayHelpers.h"
+#include "WireCellUtil/RayTiling.h"
+#include "WireCellUtil/Units.h"
 #include "WireCellUtil/WireSchema.h"
 #include "WireCellUtil/NamedFactory.h"
 #include "WireCellUtil/PluginManager.h"
@@ -366,4 +374,189 @@ TEST_CASE("pdvd doc31 round5: every continuation's channel resolves within its o
     // statement "no channel of this detector needs the anode-level lookup".
     CHECK(unresolvable_channels("sbnd-wires-geometry-v0206.json.bz2") == 0);
     CHECK(unresolvable_channels("microboone-celltree-wires-v2.1.json.bz2") == 0);
+}
+
+namespace {
+
+    // doc pdvd/102 sec 6.  The prototype retile samples with calc_sampling_points
+    // (CalcPoints.cxx:75-160), whose toolkit port is the "charge_stepped"
+    // strategy.  Unlike "stepped" it DECIDES which wires to sample from their
+    // charge (ChargeStepped::get_wire_charge / is_plane_bad), on top of the
+    // per-point charge every strategy gets from make_dataset.  Both of those
+    // lookups carry their own copy of the wrapped-continuation fix, so the
+    // fix has to be pinned for this strategy separately.
+    struct SampledCharges {
+        size_t npts{0};
+        std::set<double> charge[3];   // distinct charge_val per plane over all points
+    };
+
+    // PDHD apa1 exactly as the compiled PDHD clustering config builds it: one
+    // sensitive face (faces[0] is null), the production wires file.
+    IAnodePlane::pointer pdhd_apa1()
+    {
+        static IAnodePlane::pointer anode;
+        if (anode) return anode;
+        PluginManager& pm = PluginManager::instance();
+        pm.add("WireCellAux");
+        pm.add("WireCellGen");
+        pm.add("WireCellClus");
+        {
+            auto icfg = Factory::lookup<IConfigurable>("WireSchemaFile", "doc102_pdhd_wires");
+            auto cfg = icfg->default_configuration();
+            cfg["filename"] = "protodunehd-wires-larsoft-v1.json.bz2";
+            icfg->configure(cfg);
+        }
+        auto icfg = Factory::lookup<IConfigurable>("AnodePlane", "doc102_pdhd_apa1");
+        auto cfg = icfg->default_configuration();
+        cfg["ident"] = 1;
+        cfg["nimpacts"] = 10;
+        cfg["wire_schema"] = "WireSchemaFile:doc102_pdhd_wires";
+        cfg["faces"][0] = Json::nullValue;
+        cfg["faces"][1]["anode"] = 3520.945;
+        cfg["faces"][1]["response"] = 3430.465;
+        cfg["faces"][1]["cathode"] = 1.5875;
+        icfg->configure(cfg);
+        anode = Factory::find<IAnodePlane>("AnodePlane", "doc102_pdhd_apa1");
+        return anode;
+    }
+
+    SampledCharges sample_charges(const IBlob::pointer& iblob, const std::string& name,
+                                  const std::string& strategy, bool wrapped)
+    {
+        auto icfg = Factory::lookup<IConfigurable>("BlobSampler", name);
+        auto cfg = icfg->default_configuration();
+        Json::Value one(Json::objectValue);
+        one["name"] = strategy;
+        if (strategy == "charge_stepped") {
+            one["disable_mix_dead_cell"] = false;   // the PR retile's setting (pdhd/clus.jsonnet bs_live_face)
+        }
+        cfg["strategy"] = Json::Value(Json::arrayValue);
+        cfg["strategy"].append(one);
+        cfg["extra"] = Json::Value(Json::arrayValue);
+        cfg["extra"].append(".*charge_val");
+        cfg["wrapped_channel_charge"] = wrapped;
+        icfg->configure(cfg);
+        auto bs = Factory::find<IBlobSampler>("BlobSampler", name);
+        auto [ds, aux] = bs->sample_blob(iblob, 0);
+        SampledCharges out;
+        out.npts = ds.size_major();
+        const std::string letters[3] = {"u", "v", "w"};
+        for (int p = 0; p < 3 && out.npts; ++p) {
+            auto arr = ds.get(letters[p] + "charge_val");
+            REQUIRE(arr);
+            for (double q : arr->elements<double>()) out.charge[p].insert(q);
+        }
+        return out;
+    }
+}
+
+TEST_CASE("pdvd doc102: charge_stepped resolves wrapped continuations' charge exactly as stepped")
+{
+    auto anode = pdhd_apa1();
+    REQUIRE(anode);
+    IAnodeFace::pointer face;
+    for (const auto& f : anode->faces()) {
+        if (f) face = f;
+    }
+    REQUIRE(face);
+    const auto& coords = face->raygrid();
+    const auto planes = face->planes();
+    REQUIRE(planes.size() == 3);
+
+    // A 4 cm x 4 cm patch at (y, z) = (286, 115) cm, the middle of apa1's
+    // wrapped band: there BOTH induction planes are continuations whose channel
+    // their own plane does not list (U wires 400-799, V 348-747), and W is never
+    // wrapped.
+    std::vector<Point> pts;
+    for (double y = 2840; y <= 2880; y += 1.0) {
+        for (double z = 1132; z <= 1172; z += 1.0) {
+            pts.emplace_back(3520.945 * units::mm, y * units::mm, z * units::mm);
+        }
+    }
+    auto measures = RayGrid::make_measures(coords, pts);
+    auto activities = RayGrid::make_activities(coords, measures);
+    auto blobs = RayGrid::make_blobs(coords, activities);
+    REQUIRE(!blobs.empty());
+    auto width = [](const RayGrid::Strip& s) { return s.bounds.second - s.bounds.first; };
+    size_t best = 0;
+    for (size_t i = 1; i < blobs.size(); ++i) {
+        const auto& a = blobs[i].strips();
+        const auto& b = blobs[best].strips();
+        if (width(a[2]) * width(a[4]) > width(b[2]) * width(b[4])) best = i;
+    }
+    const auto& shape = blobs[best];
+    const auto& strips = shape.strips();
+    REQUIRE(strips.size() == 5);
+
+    // The premise, from the anode itself rather than the wires file: the blob's
+    // U and V strips hold orphan continuations, its W strip holds none.
+    int orphans[3] = {0, 0, 0};
+    for (int p = 0; p < 3; ++p) {
+        std::set<int> listed;
+        for (const auto& ich : planes[p]->channels()) listed.insert(ich->ident());
+        const auto& wires = planes[p]->wires();
+        for (int wi = strips[2 + p].bounds.first; wi < strips[2 + p].bounds.second; ++wi) {
+            if (wires[wi]->segment() > 0 && !listed.count(wires[wi]->channel())) ++orphans[p];
+        }
+    }
+    MESSAGE("strip widths u/v/w " << width(strips[2]) << "/" << width(strips[3]) << "/" << width(strips[4])
+            << ", orphans u/v/w " << orphans[0] << "/" << orphans[1] << "/" << orphans[2]);
+    REQUIRE(orphans[0] > 0);
+    REQUIRE(orphans[1] > 0);
+    REQUIRE(orphans[2] == 0);
+    // The prototype's all-wires branch (N_max * N_min <= 2500) is the one that
+    // reads charge for every non-stepped wire.
+    REQUIRE(std::max({width(strips[2]), width(strips[3]), width(strips[4])}) *
+            std::min({width(strips[2]), width(strips[3]), width(strips[4])}) <= 2500);
+
+    // Wrapped planes carry charge BELOW the 4000 threshold but non-zero (live,
+    // not dead); W carries charge above it.  Keyed by the anode's channel, so a
+    // continuation's activity sits under its real channel exactly as imaging
+    // leaves it.
+    const double qwrap = 2000, qw = 5000;
+    ISlice::map_t activity;
+    for (int p = 0; p < 3; ++p) {
+        const auto& wires = planes[p]->wires();
+        const int lo = std::max(0, strips[2 + p].bounds.first - 3);
+        const int hi = std::min((int) wires.size(), strips[2 + p].bounds.second + 3);
+        for (int wi = lo; wi < hi; ++wi) {
+            auto ich = anode->channel(wires[wi]->channel());
+            REQUIRE(ich);
+            activity[ich] = ISlice::value_t(p == 2 ? qw : qwrap, 1.0f);
+        }
+    }
+    auto slice = std::make_shared<Aux::SimpleSlice>(nullptr, 0, 0.0, 2 * units::ms, activity);
+    IBlob::pointer iblob = std::make_shared<Aux::SimpleBlob>(0, 1.0f, 0.0f, shape, slice, face);
+
+    const auto cs_on = sample_charges(iblob, "doc102_cs_on", "charge_stepped", true);
+    const auto cs_off = sample_charges(iblob, "doc102_cs_off", "charge_stepped", false);
+    const auto st_on = sample_charges(iblob, "doc102_st_on", "stepped", true);
+    const auto st_off = sample_charges(iblob, "doc102_st_off", "stepped", false);
+    MESSAGE("points: charge_stepped on/off " << cs_on.npts << "/" << cs_off.npts
+            << ", stepped on/off " << st_on.npts << "/" << st_off.npts);
+    REQUIRE(cs_on.npts > 0);
+    REQUIRE(st_on.npts > 0);
+
+    // With the fix, every sampled point of BOTH strategies reads the wrapped
+    // planes' real charge: no point sees a wrapped plane as empty.
+    const std::set<double> want_wrap{qwrap}, want_w{qw};
+    CHECK(cs_on.charge[0] == want_wrap);
+    CHECK(cs_on.charge[1] == want_wrap);
+    CHECK(cs_on.charge[2] == want_w);
+    CHECK(st_on.charge[0] == want_wrap);
+    CHECK(st_on.charge[1] == want_wrap);
+    CHECK(st_on.charge[2] == want_w);
+
+    // Negative control: the legacy lookup loses it, for both strategies.
+    CHECK((cs_off.charge[0].count(0.0) + cs_off.charge[1].count(0.0)) > 0);
+    CHECK((st_off.charge[0].count(0.0) + st_off.charge[1].count(0.0)) > 0);
+
+    // And charge_stepped's wire SELECTION depends on it.  A non-stepped wire at
+    // 2000 is live-below-threshold and dropped; the 0 the legacy lookup reads is
+    // "dead", which disable_mix_dead_cell=false keeps (BlobSampler.cxx
+    // ChargeStepped, `charge != 0 || disable_mix_dead_cell`).  So without the fix
+    // the retile would sample the wrapped band MORE densely than live charge
+    // warrants.  Stepped never reads charge to select, so its count cannot move.
+    CHECK(cs_off.npts > cs_on.npts);
+    CHECK(st_off.npts == st_on.npts);
 }

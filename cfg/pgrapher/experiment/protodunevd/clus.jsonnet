@@ -189,7 +189,10 @@ local pctransforms(dv) = {
 
 
 
-local bs_live_face(apa, face, center_fallback=false, speed=drift_speed, half_pitch=false, min_step_size=null) = {
+local bs_live_face(apa, face, center_fallback=false, speed=drift_speed, half_pitch=false, min_step_size=null,
+                   strategy_name='stepped', wire_product=null, charge_threshold=null) = {
+    assert strategy_name == 'stepped' || strategy_name == 'charge_stepped' :
+        "bs_live_face: strategy_name must be 'stepped' or 'charge_stepped'",
     type: "BlobSampler",
     name: "live-%s-%d"%[apa, face],
     data: {
@@ -201,7 +204,24 @@ local bs_live_face(apa, face, center_fallback=false, speed=drift_speed, half_pit
         // crossings; min_step_size (C++ default 3 wires) is the stepped spacing.
         // Passed only by the PR job's retile samplers (live_sampler); false / null
         // => keys omitted => byte-identical compiled config.
-        strategy: [{name: "stepped", center_fallback: center_fallback,
+        // doc pdvd/102 (counterpart of pdhd/clus.jsonnet): strategy_name
+        // 'charge_stepped' selects the port of the prototype's RETILE sampler,
+        // WCPPID::calc_sampling_points(..., disable_mix_dead_cell=false)
+        // (prototype ImprovePR3DCluster.cxx:59, CalcPoints.cxx:75-160): every
+        // wire of the min/max views when N_max*N_min <= max_wire_product_threshold
+        // (C++ 2500), non-stepped wires kept only above charge_threshold_* (C++
+        // 4000).  ChargeStepped has no center_fallback.  Default 'stepped' =>
+        // this branch is never taken => byte-identical compiled config.
+        strategy: if strategy_name == 'charge_stepped' then
+                  [{name: "charge_stepped",
+                    disable_mix_dead_cell: false,
+                    [if min_step_size != null then 'min_step_size']: min_step_size,
+                    [if wire_product != null then 'max_wire_product_threshold']: wire_product,
+                    [if charge_threshold != null then 'charge_threshold_max']: charge_threshold,
+                    [if charge_threshold != null then 'charge_threshold_min']: charge_threshold,
+                    [if charge_threshold != null then 'charge_threshold_other']: charge_threshold}]
+                  else
+                  [{name: "stepped", center_fallback: center_fallback,
                     [if half_pitch then 'half_pitch']: true,
                     [if min_step_size != null then 'min_step_size']: min_step_size}],
         extra: [".*wire_index", ".*charge_val", ".*charge_unc", "wpid"],
@@ -919,9 +939,12 @@ local clus_all_tpc (
     // the T0 scope coordinates.  Hidden fields => nothing here reaches a compiled
     // clustering config.
     pc_transforms(dv) :: pctransforms(dv),
-    live_sampler(anode, face, center_fallback=stepped_center_fallback, half_pitch=false, min_step_size=null) ::
+    live_sampler(anode, face, center_fallback=stepped_center_fallback, half_pitch=false, min_step_size=null,
+                 strategy_name='stepped', wire_product=null, charge_threshold=null) ::
         bs_live_face(anode.name, face, center_fallback=center_fallback,
                      half_pitch=half_pitch, min_step_size=min_step_size,   // doc pdvd/101
+                     strategy_name=strategy_name, wire_product=wire_product,   // doc pdvd/102
+                     charge_threshold=charge_threshold,
                      speed=if anode.data.ident < 4 then drift_speed_bot else drift_speed_top),
     drift_speed_bot :: drift_speed_bot,
     drift_speed_top :: drift_speed_top,
