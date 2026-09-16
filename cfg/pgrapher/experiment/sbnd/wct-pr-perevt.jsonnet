@@ -892,6 +892,15 @@ function(
     retile_sampler_strategy         = null,
     retile_sampler_wire_product     = null,
     retile_sampler_charge_threshold = null,
+    // doc sbnd_xin/pr/149 round 2: the PR job's RESAMPLE stage (ClusteringResampleLive,
+    // sbnd/clus.jsonnet cm_by_name.resample_live).  Non-null => 'resample_live' is
+    // prepended to pipeline_names and re-samples every live blob's "3d" cloud with this
+    // strategy before any other stage, as the prototype's PR executables do
+    // (wire-cell-prod-nue.cxx:1289-1294).  'charge_stepped' = the prototype's rule
+    // (disable_mix_dead_cell true); 'stepped' = the clustering job's settings (the
+    // identity gate).  null => nothing prepended => byte-identical.
+    // A string TLA needs inner quotes: --tla-code "resample_live_strategy='charge_stepped'".
+    resample_live_strategy          = null,
     // doc sbnd_xin/pr/149 amendment 1: Steiner terminal minimum separation (cm) on
     // both CreateSteinerGraph instances (doc pdvd/37 round 2 lever; PDVD production
     // 0.5).  0 => key omitted => byte-identical.
@@ -3693,7 +3702,9 @@ function(
     };
 
     local pr = clus_maker.pr(anodes, dump=true,
-                             pipeline_names=pipeline_names,
+                             // doc sbnd_xin/pr/149 round 2: resample_live runs FIRST when set.
+                             pipeline_names=(if resample_live_strategy != null then ['resample_live'] else [])
+                                            + pipeline_names,
                              tensor_outname=save_tensors,
                              save_in_scope=save_in_scope,
                              flash_by_gid=flash_by_gid,
@@ -3701,6 +3712,7 @@ function(
                              retile_sampler_strategy=retile_sampler_strategy,   // doc sbnd_xin/pr/149
                              retile_sampler_wire_product=retile_sampler_wire_product,
                              retile_sampler_charge_threshold=retile_sampler_charge_threshold,
+                             resample_live_strategy=resample_live_strategy,   // doc sbnd_xin/pr/149 round 2
                              steiner_terminal_min_separation=steiner_terminal_min_separation,
                              trackfitting_config_file=trackfitting_config,
                              particle_dataset=pds.particle_dataset,

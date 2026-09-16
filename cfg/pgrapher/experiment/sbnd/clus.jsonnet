@@ -232,6 +232,32 @@ local bs_live_face(apa, face, strategy_name='stepped', wire_product=null, charge
         extra: ['.*wire_index', '.*charge_val', '.*charge_unc', 'wpid'],
     },
 };
+// doc sbnd_xin/pr/149 round 2: the sampler of the PR job's RESAMPLE stage
+// (ClusteringResampleLive, pr() cm_by_name.resample_live), which replaces every
+// live blob's "3d" cloud before any other PR stage, as the prototype's PR
+// executables do (wire-cell-prod-nue.cxx:1289-1294: calc_sampling_points +
+// Create_point_cloud on every live cluster).  'charge_stepped' => the prototype's
+// rule with disable_mix_dead_cell TRUE (pid/inc/WCPPID/CalcPoints.h:9-10; the C++
+// default, emitted for the record) -- NOT the retile's false.  'stepped' => the
+// clustering job's own sampler settings, for the identity gate (a stepped resample
+// must reproduce the saved cloud).  Its own name 'live-rs-<cs|st>-*', distinct from
+// both bs_live_face names, because the LArSoft one-step chain resolves same-named
+// components last-wins (see bs_live_face).  Built only when pr() is given
+// resample_live_strategy.
+local bs_live_face_resample(apa, face, strategy_name) = {
+    assert strategy_name == 'stepped' || strategy_name == 'charge_stepped' :
+        "bs_live_face_resample: strategy_name must be 'stepped' or 'charge_stepped'",
+    type: 'BlobSampler',
+    name: 'live-rs-%s-%s-%d' % [if strategy_name == 'charge_stepped' then 'cs' else 'st', apa, face],
+    data: {
+        drift_speed: drift_speed,
+        time_offset: time_offset,
+        strategy: if strategy_name == 'charge_stepped' then
+            [{name: 'charge_stepped', disable_mix_dead_cell: true}]
+        else ['stepped'],
+        extra: ['.*wire_index', '.*charge_val', '.*charge_unc', 'wpid'],
+    },
+};
 local bs_dead_face(apa, face) = {
     type: 'BlobSampler',
     name: 'dead-%s-%d' % [apa, face],
@@ -995,6 +1021,16 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
               retile_sampler_strategy=null,
               retile_sampler_wire_product=null,
               retile_sampler_charge_threshold=null,
+              // resample_live_strategy (doc sbnd_xin/pr/149 round 2): the strategy of
+              // the 'resample_live' stage (ClusteringResampleLive), which re-samples
+              // every live blob's "3d" cloud -- the cloud switch_scope, the taggers,
+              // basic_pid and TrackFitting's main association read -- before any other
+              // stage, as the prototype's PR executables do.  The stage runs only when
+              // named in pipeline_names (wct-pr-perevt.jsonnet prepends it when its TLA
+              // is set); null here => cm_by_name.resample_live is never evaluated =>
+              // compiled config byte-identical.  'charge_stepped' / 'stepped' (the
+              // latter = the identity gate).
+              resample_live_strategy=null,
               // steiner_terminal_min_separation (doc sbnd_xin/pr/149 amendment 1; cm,
               // default 0): Grapher::Config::terminal_min_separation (doc pdvd/37
               // round 2) on BOTH CreateSteinerGraph instances (steiner,
@@ -2102,6 +2138,23 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
         // deterministically from cluster_t0.  fiducialutils MUST precede any
         // tagger (they silently no-op without it).
         local cm_by_name = {
+            // doc sbnd_xin/pr/149 round 2.  MUST be first when named: switch_scope
+            // rebuilds x_t0cor and the in-volume split from the "3d" points.  One
+            // sampler per (APA, face 0), as improve2 below.  Not in pipeline_names
+            // => absent from the compiled config.
+            resample_live: {
+                local samplers = [bs_live_face_resample(a.name, 0, resample_live_strategy) for a in anodes],
+                type: 'ClusteringResampleLive',
+                name: 'pr',
+                data: {
+                    grouping: 'live',
+                    anodes: [wc.tn(a) for a in anodes],
+                    detector_volumes: wc.tn(dv),
+                    samplers: [{name: wc.tn(samplers[i]), apa: anodes[i].data.ident, face: 0}
+                               for i in std.range(0, std.length(anodes) - 1)],
+                },
+                uses: anodes + [dv] + samplers,
+            },
             switch_scope: cm_old.switch_scope(),
             // Restore the prototype main+associated data product before anything
             // fits or walks a "main cluster".  The Q/L stage's flash-time merge
