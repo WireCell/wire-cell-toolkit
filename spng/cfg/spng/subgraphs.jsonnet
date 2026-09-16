@@ -383,7 +383,10 @@ function(tpc, control={}, pg=real_pg, context_name="") {
     
     /// A kernel providing a response built from FR*ER (not a ponode)
     response_kernel(view_index, // the index of the view in the FR to use
-                    extra_name="")::
+                    extra_name="",
+                    // Debug pickle dump of the response kernel.  Empty (default)
+                    // means no dump; pass a filename to re-enable.
+                    debug_filename="")::
         {
             type: "SPNGResponseKernel",
             name: $.this_name(extra_name, "v" + std.toString(view_index)),
@@ -396,7 +399,7 @@ function(tpc, control={}, pg=real_pg, context_name="") {
                 plane_index: view_index,
                 // Scale to units of ADC
                 scale: -1 / tpc.adc.lsb_voltage,
-                debug_filename: "spng_resp_v" + std.toString(view_index)+".pkl",
+                debug_filename: debug_filename,
             } + control,
             uses: [tpc.fr, tpc.er],
         },
@@ -450,7 +453,10 @@ function(tpc, control={}, pg=real_pg, context_name="") {
     /// Return kernel convolve pnode for one FR*ER decon node for one group in a
     /// TPC.  The node will be named uniquely for that context.  If more than
     /// one decon in the same tpc+group, pass extra_name.
-    tpc_group_decon_frer(group_index, kernel, tag="", extra_name="")::
+    tpc_group_decon_frer(group_index, kernel, tag="", extra_name="",
+                         // Debug pickle dump of this group's convolution.  Empty
+                         // (default) = no dump; pass a filename to re-enable.
+                         debug_filename="")::
         local group = tpc.view_groups[group_index];
         local name = tpc.name + '_' + group.name + extra_name;
         //local co = $.convo_options(group.connection, group.view_index);
@@ -467,7 +473,7 @@ function(tpc, control={}, pg=real_pg, context_name="") {
         };
         $.kernel_convolve(kernel, [co_channel, co_time],
                           datapath_format='/traces/group/' + std.toString(group_index) + "/KernelConvolve/" + name,
-                          debug_filename='spng_kernel_convolve'+std.toString(group_index)+'_dump.pkl',
+                          debug_filename=debug_filename,
                           tag="decon", extra_name='_'+group.name+extra_name),
 
     /// Return nodes[0] if length one else return a subgraph with a fanin that stacks the tensors.

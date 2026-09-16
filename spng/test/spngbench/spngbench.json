@@ -1,0 +1,23 @@
+{
+  "detname": "pdhd",
+  "model_file": "/nfs/data/1/calcuttj/toolkit_testing/legacy_roiuniter_090326.ts",
+  "inputs": null,
+  "outdir": "spngbench-pdhd",
+  "repeats": 1,
+  "which": ["osp", "spng"],
+  "engine": "TbbFlow",
+  "hw": {"max_hyperthreads": 64},
+  "cpu_grid": {
+    "wc_cores": [1, 2, 3, 4],
+    "torch_cores": [1, 2, 4, 8, 16, 32]
+  },
+  "gpu_grid": {
+    "device": "gpu",
+    "wc_cores": [1, 2, 3, 4],
+    "torch_cores": 1
+  },
+  "two_gpu": {
+    "wc_cores": 4,
+    "devices": ["gpu0", "gpu1"]
+  }
+}
