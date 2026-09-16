@@ -113,11 +113,17 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
               // stepped spacing.  false / null => keys omitted => byte-identical.
               retile_sampler_half_pitch=false,
               retile_sampler_min_step=null,
-              // doc pdvd/102: the RETILE samplers' strategy.  null => 'stepped'
-              // (production); 'charge_stepped' => the prototype's retile rule
-              // (clus.jsonnet bs_live_face).  retile_sampler_wire_product /
-              // retile_sampler_charge_threshold override its C++ 2500 / 4000.
-              // All null => strategy untouched => byte-identical.
+              // doc pdvd/102: the RETILE samplers' strategy.  FLIPPED FOR PDVD by
+              // doc pdvd/103 sec 14, applied on the owner's go: null =>
+              // 'charge_stepped', the prototype's retile rule (clus.jsonnet
+              // bs_live_face; CalcPoints.cxx), now PDVD production.  Graded WITH the
+              // doc-101 fit keys on the production lineage (arms d103v0 -> d103v1,
+              // owner records own103v / own103v2): D1 on all four STM/Michel metrics.
+              // Doc 102 round 2 proposed the same flip for BOTH detectors and failed
+              // its gate; PDHD keeps 'stepped' (doc 103 sec 12.3).  'stepped' => the
+              // pre-flip retile; it compiles byte-identical to the pre-flip default.
+              // retile_sampler_wire_product / retile_sampler_charge_threshold
+              // override the C++ 2500 / 4000.
               retile_sampler_strategy=null,
               retile_sampler_wire_product=null,
               retile_sampler_charge_threshold=null,
@@ -1442,7 +1448,7 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
             anodes=anodes,
             samplers=[clus.sampler(clus_maker.live_sampler(a, f, half_pitch=retile_sampler_half_pitch,
                                                            min_step_size=retile_sampler_min_step,   // doc pdvd/101
-                                                           strategy_name=if retile_sampler_strategy == null then 'stepped' else retile_sampler_strategy,
+                                                           strategy_name=if retile_sampler_strategy == null then 'charge_stepped' else retile_sampler_strategy,   // doc pdvd/103 sec 14 flip (PDVD only)
                                                            wire_product=retile_sampler_wire_product,   // doc pdvd/102
                                                            charge_threshold=retile_sampler_charge_threshold),
                                    apa=a.data.ident, face=f)
