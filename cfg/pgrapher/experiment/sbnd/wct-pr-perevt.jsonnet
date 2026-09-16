@@ -882,6 +882,20 @@ function(
     // cluster set from this zip, so turning it off costs nusel-evt<ID>.tsv
     // UNLESS save_in_scope is also on (then T_cluster carries it instead).
     pr_bee         = true,
+    // doc sbnd_xin/pr/149: the PR RETILE samplers' strategy (improve2 -> steiner /
+    // steiner_refresh, the Steiner cloud every PR stage reads); the clustering
+    // job's 3d PC is unaffected.  null => 'stepped' = today's config,
+    // byte-identical.  'charge_stepped' => the prototype's retile rule
+    // (sbnd/clus.jsonnet bs_live_face).  wire_product / charge_threshold override
+    // the C++ 2500 / 4000 under 'charge_stepped' only; null => keys omitted.
+    // A string TLA needs inner quotes: --tla-code "retile_sampler_strategy='charge_stepped'".
+    retile_sampler_strategy         = null,
+    retile_sampler_wire_product     = null,
+    retile_sampler_charge_threshold = null,
+    // doc sbnd_xin/pr/149 amendment 1: Steiner terminal minimum separation (cm) on
+    // both CreateSteinerGraph instances (doc pdvd/37 round 2 lever; PDVD production
+    // 0.5).  0 => key omitted => byte-identical.
+    steiner_terminal_min_separation = 0,
     // SCN (DL) neutrino-vertex weights, WIRECELL_PATH-resolved.
     // DEFAULT = ON, the uBooNE-trained net (owner adopted 2026-07-30 on nueCC48
     // evt 18253/1/172230: the geometric vertex sat at the far end of a proton
@@ -3684,6 +3698,10 @@ function(
                              save_in_scope=save_in_scope,
                              flash_by_gid=flash_by_gid,
                              pr_bee=pr_bee,
+                             retile_sampler_strategy=retile_sampler_strategy,   // doc sbnd_xin/pr/149
+                             retile_sampler_wire_product=retile_sampler_wire_product,
+                             retile_sampler_charge_threshold=retile_sampler_charge_threshold,
+                             steiner_terminal_min_separation=steiner_terminal_min_separation,
                              trackfitting_config_file=trackfitting_config,
                              particle_dataset=pds.particle_dataset,
                              extra_uses=pds.all,

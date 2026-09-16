@@ -197,13 +197,38 @@ local pctransforms(dv) = {
     uses: [dv, sce_field],
 };
 
-local bs_live_face(apa, face) = {
+// doc sbnd_xin/pr/149: strategy_name 'charge_stepped' selects the port of the
+// prototype's RETILE sampler, WCPPID::calc_sampling_points(...,
+// disable_mix_dead_cell=false) (prototype ImprovePR3DCluster.cxx:59,
+// CalcPoints.cxx:75-160): every wire of the min/max views when
+// N_max*N_min <= max_wire_product_threshold (C++ 2500), stepped wires otherwise,
+// non-stepped wires kept only when no nonzero charge is below charge_threshold_*
+// (C++ 4000).  Same emission as pdhd/clus.jsonnet bs_live_face (doc pdvd/102).
+// Passed only by pr()'s retile samplers (improve2); the clustering job's
+// PointTreeBuilding sampler below never passes it.  The charge_stepped variant
+// carries its OWN name: the LArSoft one-step chain
+// (wcls-img-clus-matching-xin.jsonnet) compiles per_apa() and pr() into one
+// config, and ConfigManager::add silently lets the last 'BlobSampler:live-*'
+// win, which would move stage-A imaging.  wire_product / charge_threshold null
+// => the C++ defaults.  Default 'stepped' => today's name and ['stepped'] =>
+// byte-identical compiled config.
+local bs_live_face(apa, face, strategy_name='stepped', wire_product=null, charge_threshold=null) = {
+    assert strategy_name == 'stepped' || strategy_name == 'charge_stepped' :
+        "bs_live_face: strategy_name must be 'stepped' or 'charge_stepped'",
     type: 'BlobSampler',
-    name: 'live-%s-%d' % [apa, face],
+    name: if strategy_name == 'charge_stepped' then 'live-cs-%s-%d' % [apa, face]
+          else 'live-%s-%d' % [apa, face],
     data: {
         drift_speed: drift_speed,
         time_offset: time_offset,
-        strategy: ['stepped'],
+        strategy: if strategy_name == 'charge_stepped' then
+            [{name: 'charge_stepped',
+              disable_mix_dead_cell: false,
+              [if wire_product != null then 'max_wire_product_threshold']: wire_product,
+              [if charge_threshold != null then 'charge_threshold_max']: charge_threshold,
+              [if charge_threshold != null then 'charge_threshold_min']: charge_threshold,
+              [if charge_threshold != null then 'charge_threshold_other']: charge_threshold}]
+        else ['stepped'],
         extra: ['.*wire_index', '.*charge_val', '.*charge_unc', 'wpid'],
     },
 };
@@ -958,6 +983,25 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
               // zip at all" (an empty name used to raise IOError, so it was never
               // a legal value).  DEFAULT TRUE = today's behaviour, byte-identical.
               pr_bee=true,
+              // retile_sampler_strategy (doc sbnd_xin/pr/149): the strategy of the
+              // RETILE samplers only (improve2 -> steiner / steiner_refresh, i.e. the
+              // Steiner cloud every PR stage reads); the clustering job's 3d PC keeps
+              // 'stepped'.  null => 'stepped' = today's config, byte-identical.
+              // 'charge_stepped' => the prototype's retile rule (bs_live_face above;
+              // PDHD/PDVD production since docs pdvd/108 / 103).
+              // retile_sampler_wire_product / retile_sampler_charge_threshold
+              // override the C++ 2500 / 4000 and are read only under
+              // 'charge_stepped'.  null => keys omitted.
+              retile_sampler_strategy=null,
+              retile_sampler_wire_product=null,
+              retile_sampler_charge_threshold=null,
+              // steiner_terminal_min_separation (doc sbnd_xin/pr/149 amendment 1; cm,
+              // default 0): Grapher::Config::terminal_min_separation (doc pdvd/37
+              // round 2) on BOTH CreateSteinerGraph instances (steiner,
+              // steiner_refresh), as PDHD/PDVD pr.jsonnet pass it.  A kept terminal
+              // suppresses every lower-charge terminal strictly within this 3-D
+              // distance.  0 => key omitted => byte-identical.
+              steiner_terminal_min_separation=0,
               // trackfitting_config_file: the SBND TrackFitting parameter JSON.
               // DEFAULT = the canonical in-tree file, resolved through
               // WIRECELL_PATH by TaggerCheckSTM/TaggerCheckNeutrino
@@ -2042,10 +2086,16 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
         // applies to the downstream-z inset only.
         local sbnd_pr_fv_margins_interior = [-tgm_fv_x_margin * wc.cm, -tgm_fv_x_margin * wc.cm, -tgm_fv_y_margin * wc.cm, -tgm_fv_y_margin * wc.cm, -tgm_fv_zmax_margin_interior * wc.cm, -3 * wc.cm],
         // Retiler for the steiner stage: same 'stepped' samplers that built the 3d
-        // PC (PointTreeBuilding), one per (APA, face 0).
+        // PC (PointTreeBuilding), one per (APA, face 0) -- unless
+        // retile_sampler_strategy selects 'charge_stepped' (doc sbnd_xin/pr/149),
+        // which moves ONLY these retile samplers.
         local improve2 = cm.improve_cluster_2(
             anodes=anodes,
-            samplers=[clus.sampler(bs_live_face(a.name, 0), apa=a.data.ident, face=0) for a in anodes]),
+            samplers=[clus.sampler(bs_live_face(a.name, 0,
+                                                strategy_name=if retile_sampler_strategy == null then 'stepped' else retile_sampler_strategy,
+                                                wire_product=retile_sampler_wire_product,
+                                                charge_threshold=retile_sampler_charge_threshold),
+                                   apa=a.data.ident, face=0) for a in anodes]),
         // Visitors available to the PR pipeline, by name.  switch_scope re-applies
         // the per-cluster T0 correction on the loaded tree (the corrected scope is
         // runtime state and does not persist through the tarball); it recomputes
@@ -2136,7 +2186,8 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                                 beam_window_high=beam_window[1],
                                 terminal_wire_tol=steiner_terminal_wire_tol,
                                 terminal_adjacent_slice=steiner_terminal_adjacent_slice,
-                                edge_charge_forward_dead_mix=steiner_edge_charge_forward_dead_mix),
+                                edge_charge_forward_dead_mix=steiner_edge_charge_forward_dead_mix,
+                                terminal_min_separation=steiner_terminal_min_separation * wc.cm),   // doc sbnd_xin/pr/149 amendment 1
             // The doc pr/23 second steiner pass, named right after protect_bundle:
             // replace=false rebuilds ONLY the clusters protect_bundle purged
             // (split retained + fragments).  A replace=true second pass would
@@ -2158,6 +2209,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                                 terminal_wire_tol=steiner_terminal_wire_tol,
                                 terminal_adjacent_slice=steiner_terminal_adjacent_slice,
                                 edge_charge_forward_dead_mix=steiner_edge_charge_forward_dead_mix,
+                                terminal_min_separation=steiner_terminal_min_separation * wc.cm,   // doc sbnd_xin/pr/149 amendment 1
                                 replace=false),
             fiducialutils: cm.fiducialutils(),
             tagger_check_stm: cm.tagger_check_stm(
