@@ -151,6 +151,25 @@ namespace WireCell::Clus {
             // byte-identical.  (A double for the set_parameter plumbing.)
             double assoc_cont_center = 0;
 
+            // doc pdvd/111 -- SEED RE-CENTRING before the first trajectory_fit
+            // pass.  The fit only refines a point inside its association window
+            // (~1.1 cm on pass 1, ~0.5 cm on pass 2) and the area smoothing
+            // reverts a point that moves away from its neighbours, so a seed
+            // (the Steiner Dijkstra path, filled by organize_orig_path) that runs
+            // 1-5 cm off the track's charge ridge -- a straight chord across the
+            // Steiner cloud at a bend, a path along the cloud's edge -- stays
+            // there.  When > 0, every organize_orig_path point is moved
+            // TRANSVERSELY to the local path direction by a Gaussian-kernel
+            // mean shift (width seed_recenter_sigma, mm) over the cluster's own
+            // 3-D points weighted by blob charge per point, restricted to a slab
+            // of half the pass-1 spacing along the path; at most
+            // seed_recenter_iter shifts; a point whose total move would exceed
+            // seed_recenter_max_move (mm) keeps its seed position.  0 (default)
+            // => not called => byte-identical.
+            double seed_recenter_sigma = 0;
+            double seed_recenter_iter = 5;
+            double seed_recenter_max_move = 30;
+
             // doc sbnd_xin/docs/pr/67 -- LOG-ONLY probe (0 = off = no lines =
             // byte-identical).  examine_end_ps_vec is the primary END trimmer:
             // it pops points off the front and back of a trajectory while
@@ -554,6 +573,9 @@ namespace WireCell::Clus {
          * @return Vector of organized 3D points
          */
         std::vector<WireCell::Point> organize_orig_path(std::shared_ptr<PR::Segment> segment, double low_dis_limit=1.2*units::cm, double end_point_limit=0.6*units::cm);
+
+        // doc pdvd/111: the seed_recenter_sigma step (see Parameters); no-op when the knob is 0.
+        void recenter_seed_path(std::shared_ptr<PR::Segment> segment, std::vector<WireCell::Point>& pts, double half_slab) const;
 
         std::vector<WireCell::Point> examine_end_ps_vec(std::shared_ptr<PR::Segment> segment, const std::vector<WireCell::Point>& pts, bool flag_start, bool flag_end);
 

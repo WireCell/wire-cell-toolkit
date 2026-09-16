@@ -1,7 +1,30 @@
 #ifndef WIRECELLCLUS_TRACKFITTING_UTIL_H
 #define WIRECELLCLUS_TRACKFITTING_UTIL_H
 
+#include "WireCellUtil/Point.h"
+
+#include <vector>
+
 namespace WireCell::Clus::TrackFittingUtil {
+
+    /** doc pdvd/111 -- move a seed point TRANSVERSELY onto the local charge ridge.
+     *
+     * Gaussian-kernel mean shift restricted to the plane perpendicular to `dir`:
+     * each step adds sum_i w_i k_i perp_i / sum_i w_i k_i, where perp_i is the
+     * component of (pts[i] - p) perpendicular to dir, k_i = exp(-|perp_i|^2 / 2 sigma^2),
+     * and only points with |along_i| <= half_slab and |perp_i| <= 3 sigma count.
+     * The along-dir coordinate of the point never changes.  Stops after max_iter
+     * steps or when a step is below 1e-3 sigma.
+     *
+     * Returns p0 unchanged when dir is zero, sigma <= 0, no point carries weight,
+     * or the total move would exceed max_move (a far mode is not this track's ridge).
+     * The sums run in the given order; callers wanting run-to-run bit identity
+     * pass the points in a stable order.
+     */
+    WireCell::Point recenter_point_transverse(const WireCell::Point& p0, const WireCell::Vector& dir,
+                                              const std::vector<WireCell::Point>& pts,
+                                              const std::vector<double>& weights,
+                                              double sigma, double half_slab, int max_iter, double max_move);
 
     /** Calculate ranges for track fitting using simplified coupling coefficients.
      *
