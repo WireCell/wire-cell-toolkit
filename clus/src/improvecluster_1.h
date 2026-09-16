@@ -39,7 +39,11 @@ namespace WireCell::Clus {
         virtual std::unique_ptr<node_t> mutate(node_t& node) const override;
 
     protected:
-       void get_activity_improved(const Cluster& cluster, std::map<std::pair<int, int>,std::vector<WireCell::RayGrid::measure_t>>& map_slices_measures, int apa, int face) const;
+       // doc pdvd/113: extend=false keeps only Step 1 (the cluster's own blob
+       // footprints) and skips Steps 2-3 (dead channels and good CTPC charge
+       // within 20 cm).  Default true = the historical activity, so every
+       // existing call is unchanged.
+       void get_activity_improved(const Cluster& cluster, std::map<std::pair<int, int>,std::vector<WireCell::RayGrid::measure_t>>& map_slices_measures, int apa, int face, bool extend = true) const;
 
        // doc pdhd/08 stage 1.  bridge_cells is the set of (time_slice, plane,
        // wire) cells a bridge has painted.  It is owned by the caller so the two

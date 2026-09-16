@@ -127,6 +127,14 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
               retile_sampler_strategy=null,
               retile_sampler_wire_product=null,
               retile_sampler_charge_threshold=null,
+              // doc pdvd/113: how much of the retile the Steiner copy gets
+              // (ImproveCluster_2 retile_mode; C++ default "full" = the historical
+              // retile inherited from MicroBooNE).  "no_paint" drops the two
+              // path-disc paintings, "footprint" also the dead / nearby-charge
+              // extension, "none" re-samples the cluster's own blobs in place with
+              // the retile samplers above (so charge_stepped is kept).  null => key
+              // omitted => byte-identical compiled config.  Study knob, not flipped.
+              retile_mode=null,
               // PDVD boundary vetoes for the STM verdict (doc 25 M3).  All C++
               // default OFF; keys omitted when off => byte-identical config.
               // readout_edge_guard: the stop's fitted arrival tick within
@@ -1457,7 +1465,10 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
             terminal_charge_threshold=retile_steiner_terminal_charge,
             bad_blob_max_run=if retile_bad_blob_max_run == null then null else retile_bad_blob_max_run * wc.cm,
             bad_blob_report=retile_bad_blob_report,
-            hack_max_bridge=if retile_hack_max_bridge == null then null else retile_hack_max_bridge * wc.cm),
+            hack_max_bridge=if retile_hack_max_bridge == null then null else retile_hack_max_bridge * wc.cm)
+            // doc pdvd/113: key omitted when null => byte-identical (same idiom as steiner's
+            // terminal_charge_threshold below).
+            + { data+: { [if retile_mode != null then 'retile_mode']: retile_mode } },
         // Visitors available to the PR pipeline, by name.  switch_scope re-applies
         // the per-cluster T0 correction on the loaded tree (the corrected scope is
         // runtime state and does not persist through the tarball); it recomputes
