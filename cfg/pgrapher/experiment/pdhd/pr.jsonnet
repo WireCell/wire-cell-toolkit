@@ -123,11 +123,24 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1,
               // stepped spacing.  false / null => keys omitted => byte-identical.
               retile_sampler_half_pitch=false,
               retile_sampler_min_step=null,
-              // doc pdvd/102: the RETILE samplers' strategy.  null => 'stepped'
-              // (production); 'charge_stepped' => the prototype's retile rule
-              // (clus.jsonnet bs_live_face).  retile_sampler_wire_product /
-              // retile_sampler_charge_threshold override its C++ 2500 / 4000.
-              // All null => strategy untouched => byte-identical.
+              // doc pdvd/102: the RETILE samplers' strategy.  FLIPPED FOR PDHD by
+              // doc pdvd/108, applied on the owner's go 2026-09-15: null =>
+              // 'charge_stepped', the prototype's retile rule (clus.jsonnet
+              // bs_live_face; CalcPoints.cxx), now PDHD production.  Graded WITH
+              // the doc-101 fit keys on the PDHD production lineage (arms
+              // d101hnew -> d102hcs, truth own103h > smx27 > smx28 under amendment
+              // 5, plus the symmetric owner check own103h2): is_stm purity
+              // 0.975 -> 0.959, efficiency 0.626 -> 0.616; michel purity
+              // 0.914 -> 0.880, efficiency 0.604 -> 0.689.
+              // This is D2, NOT D1: michel purity -0.035 misses the -0.020 bar of
+              // frozen amendment 7 (figs/104_pred_amend7.txt, sha 321360da).  The
+              // owner accepted the trade explicitly -- purity for efficiency, both
+              // is_stm metrics passing -- after rounds 7-10 (docs pdvd/104, 105,
+              // 106, 107) refuted five candidate explanations for the cost and
+              // localised what remains to 8 shared clusters.  'stepped' => the
+              // pre-flip retile; it compiles byte-identical to the pre-flip default.
+              // retile_sampler_wire_product / retile_sampler_charge_threshold
+              // override the C++ 2500 / 4000.
               retile_sampler_strategy=null,
               retile_sampler_wire_product=null,
               retile_sampler_charge_threshold=null,
@@ -1394,8 +1407,11 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1,
         // THIS downstream-z inset instead of tgm_fv_zmax_margin, i.e. the doc-32
         // widening becomes endpoint-only.
         local pdhd_pr_fv_margins_interior = [-tgm_fv_x_margin * wc.cm, -tgm_fv_x_margin * wc.cm, -mgn_y * wc.cm, -mgn_y * wc.cm, -tgm_fv_zmax_margin_interior * wc.cm, -mgn_zmin * wc.cm],
-        // Retiler for the steiner stage: same 'stepped' samplers that built the 3d
-        // PC (PointTreeBuilding), one per (anode, face) -- 4 PDHD anodes x 2 faces
+        // Retiler for the steiner stage: the same sampler OBJECTS that built the 3d
+        // PC (PointTreeBuilding), one per (anode, face), but since doc pdvd/108 no
+        // longer the same strategy -- clustering still builds the PC with 'stepped'
+        // (clus.jsonnet bs_live_face's default, untouched on both detectors), while
+        // the retile below runs 'charge_stepped'.  4 PDHD anodes x 2 faces
         // = 8 samplers.  Only one face per anode images (even idents face 0, odd
         // face 1; the other is a PDHD wall face), but bs_live_face's config does
         // not depend on the face, so both are emitted and the retiler's (apa,face)
@@ -1405,7 +1421,7 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1,
             samplers=[clus.sampler(clus_maker.live_sampler(a, f, wrapped_channel_charge=wrapped_channel_charge,
                                                            half_pitch=retile_sampler_half_pitch,
                                                            min_step_size=retile_sampler_min_step,   // doc pdvd/101
-                                                           strategy_name=if retile_sampler_strategy == null then 'stepped' else retile_sampler_strategy,
+                                                           strategy_name=if retile_sampler_strategy == null then 'charge_stepped' else retile_sampler_strategy,   // doc pdvd/108 flip (PDHD only)
                                                            wire_product=retile_sampler_wire_product,   // doc pdvd/102
                                                            charge_threshold=retile_sampler_charge_threshold),
                                    apa=a.data.ident, face=f)
