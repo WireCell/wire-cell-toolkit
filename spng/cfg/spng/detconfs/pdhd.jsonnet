@@ -29,7 +29,7 @@ local response_start_time = tick0_time - response_time_offset;
 
 // How much to roll the response deconvolution. This essentially the ADC tick
 // where FR*ER goes to zero.
-local decon_roll = 129;
+local decon_roll = 128;
 
 local ductor = api.ductor(adc_tick, response_duration, response_start_time);
 local splat = api.splat(

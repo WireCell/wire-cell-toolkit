@@ -123,13 +123,14 @@ function(input,
 
     local truth = {
         frame: pg.pipeline([
-            // sg.splat_frame(ratio=1.0/irebin, scale=1.0/fscale, extra_name="_splat"),
-            sg.splat_cellview_frame(ratio=1.0/irebin, scale=1.0/fscale, extra_name="_splat"),
+            sg.splat_frame(factor=irebin, scale=1.0/fscale, extra_name="_splat"),
+            //sg.splat_cellview_frame(factor=irebin, scale=1.0/fscale, extra_name="_splat"),
             io.frame_sink(output)
         ]),
         tensor: pg.pipeline([
-            sg.splat_cellview_tensor(ratio=1.0/irebin, scale=1.0/fscale, extra_name="_splat"),
-            // sg.splat_tensor(ratio=1.0/irebin, scale=1.0/fscale, extra_name="_splat"),
+            //sg.splat_cellview_tensor(factor=irebin, scale=1.0/fscale, extra_name="_splat"),
+            sg.splat_tensor(factor=irebin, scale=1.0/fscale, extra_name="_splat"),
+            // sg.splat(extra_name="_splat"),
             io.ttensors_sink(output, gzip=wc.numberify(gzip), control=control),
         ]),
     }[schema];
