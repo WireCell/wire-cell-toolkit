@@ -26,6 +26,10 @@ local smeared = nominal + {
     // Used for test-morse-pdsp
     morse_nominal: nominal,
 
+    // splat with the (measured/placeholder) extra smearing; used by the
+    // morse 'spcmp' comparison so splat approximates sim+OSP.
+    smeared: smeared,
+
     // Used for test-ssss-pdsp
     ssss_nominal: nominal,
     ssss_smeared: smeared,

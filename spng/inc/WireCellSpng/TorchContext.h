@@ -19,6 +19,7 @@
 
 #include "WireCellIface/ISemaphore.h"
 #include "WireCellSpng/Torch.h"
+#include "WireCellUtil/Exceptions.h"
 
 namespace WireCell::SPNG {
 
@@ -68,7 +69,16 @@ namespace WireCell::SPNG {
         std::string m_devname{"cpu"}, m_semname{""};
         ISemaphore::pointer m_sem;
         mutable bool m_agm{false};   // to store autogradmode through the context
-
+        int get_devnum(const std::string & devname, int loc=-1) const {
+            int result = 0;
+            try {
+                result = (loc < 0 ? stoi(devname) : stoi(devname.substr(loc)));
+            }
+            catch (const std::invalid_argument & e) {
+                raise<RuntimeError>("TorchContext: Failed to interpret \"%s\" as integer", devname);
+            }
+            return result;
+        }
      };
 
     /// Use like:

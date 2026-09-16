@@ -31,6 +31,11 @@ function(nominal,
     ssss_nominal: nominal,
     ssss_smeared: smeared,
 
+    // splat with the extra smearing; used by the morse "spcmp" comparison so
+    // splat approximates sim+OSP.  (Same as ssss_smeared, under the name the
+    // per-detector local ssss files also expose.)
+    smeared: smeared,
+
     // Used for test-spdir-metric-pdsp.bats
     spdir: nominal,
 

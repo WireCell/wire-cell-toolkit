@@ -128,6 +128,39 @@ function(tpc, control={}, pg=real_pg, context_name="") {
             $.resample_crossline_nodes(ratio=ratio, scale=scale, multiplicity=multiplicity, extra_name=extra_name)
         ),
 
+    // A crossline to resample and scale.  This is probably best applied across
+    // "groups" (connected views).
+    rebin_crossline_nodes(factor=4, scale=1.0, multiplicity=4, extra_name="")::
+    [
+            local this_name = $.this_name(extra_name, "_v"+std.toString(view));
+            local res = pg.pnode({
+                type:'SPNGRebinner',
+                name: this_name,
+                data: {
+                    factor: factor,
+                    norm: "interpolation",
+                } + control
+            }, nin=1, nout=1);
+            local scaler = pg.pnode({
+                type:'SPNGTransform',
+                name: this_name,
+                data: {
+                    operations: [
+                        { operation: "scale", scalar: scale },
+                    ],                
+                } + control,
+            }, nin=1, nout=1);
+            pg.pipeline([res, scaler])
+            for view in wc.iota(multiplicity)
+    ],
+    rebin_crossline(factor=4, scale=1.0, multiplicity=4, extra_name="")::
+        pg.crossline(
+            $.rebin_crossline_nodes(
+                factor=factor,
+                scale=scale,
+                multiplicity=multiplicity,
+                extra_name=extra_name)
+        ),
 
     // Splat ending in TDM ITorchTensorSet.
     splat_tdm(extra_name="_splat")::
@@ -145,23 +178,33 @@ function(tpc, control={}, pg=real_pg, context_name="") {
             $.tensor_packer(multiplicity=ngroups, extra_name=extra_name),
         ]),
 
+    // Resample a TDM ITorchTensorSet, eg following depo flux splat.
+    tdm_rebin(factor=4, scale=1.0, extra_name="_splat")::
+        local unpack = $.tpc_group_unpacker(extra_name=extra_name);
+        local ngroups = std.length(unpack.oports);
+        pg.shuntlines([
+            unpack,
+            $.rebin_crossline(factor=factor, scale=scale, multiplicity=ngroups, extra_name=extra_name),
+            $.tensor_packer(multiplicity=ngroups, extra_name=extra_name),
+        ]),
+
     // Splat ending with ITorchTensorSet
-    splat_tensor(ratio=1.0/4.0, scale=1.0, extra_name="_splat")::
+    splat_tensor(factor=4, scale=1.0, extra_name="_splat")::
         local splat = $.splat_tdm(extra_name=extra_name);
-        local resample = $.tdm_resample(ratio=ratio, scale=scale, extra_name=extra_name);
+        local rebin = $.tdm_rebin(factor=factor, scale=scale, extra_name=extra_name);
         pg.pipeline([
             splat,
-            resample,
+            rebin,
         ]),
 
     /// Splat ending with IFrame.  This uses the bypass.
-    splat_frame(ratio=1.0/4.0, scale=1.0, extra_name="_splat")::
+    splat_frame(factor=4, scale=1.0, extra_name="_splat")::
         local splat = $.splat_tdm(extra_name=extra_name);
-        local resample = $.tdm_resample(ratio=ratio, scale=scale, extra_name=extra_name);
-        local resample_wrapped = $.wrap_bypass(resample, extra_name);
+        local rebin = $.tdm_rebin(factor=factor, scale=scale, extra_name=extra_name);
+        local rebin_wrapped = $.wrap_bypass(rebin, extra_name);
         pg.pipeline([
             splat,
-            resample_wrapped,
+            rebin_wrapped,
             $.tdm_to_frame(extra_name=extra_name),
         ]),
     /// Produce an ngroup (4)->nview (3) subgraph doing thresholding
@@ -355,7 +398,10 @@ function(tpc, control={}, pg=real_pg, context_name="") {
     
     /// A kernel providing a response built from FR*ER (not a ponode)
     response_kernel(view_index, // the index of the view in the FR to use
-                    extra_name="")::
+                    extra_name="",
+                    // Debug pickle dump of the response kernel.  Empty (default)
+                    // means no dump; pass a filename to re-enable.
+                    debug_filename="")::
         {
             type: "SPNGResponseKernel",
             name: $.this_name(extra_name, "v" + std.toString(view_index)),
@@ -368,7 +414,7 @@ function(tpc, control={}, pg=real_pg, context_name="") {
                 plane_index: view_index,
                 // Scale to units of ADC
                 scale: -1 / tpc.adc.lsb_voltage,
-                debug_filename: "spng_resp_v" + std.toString(view_index)+".pkl",
+                debug_filename: debug_filename,
             } + control,
             uses: [tpc.fr, tpc.er],
         },
@@ -422,7 +468,10 @@ function(tpc, control={}, pg=real_pg, context_name="") {
     /// Return kernel convolve pnode for one FR*ER decon node for one group in a
     /// TPC.  The node will be named uniquely for that context.  If more than
     /// one decon in the same tpc+group, pass extra_name.
-    tpc_group_decon_frer(group_index, kernel, tag="", extra_name="")::
+    tpc_group_decon_frer(group_index, kernel, tag="", extra_name="",
+                         // Debug pickle dump of this group's convolution.  Empty
+                         // (default) = no dump; pass a filename to re-enable.
+                         debug_filename="")::
         local group = tpc.view_groups[group_index];
         local name = tpc.name + '_' + group.name + extra_name;
         //local co = $.convo_options(group.connection, group.view_index);
@@ -439,7 +488,7 @@ function(tpc, control={}, pg=real_pg, context_name="") {
         };
         $.kernel_convolve(kernel, [co_channel, co_time],
                           datapath_format='/traces/group/' + std.toString(group_index) + "/KernelConvolve/" + name,
-                          debug_filename='spng_kernel_convolve'+std.toString(group_index)+'_dump.pkl',
+                          debug_filename=debug_filename,
                           tag="decon", extra_name='_'+group.name+extra_name),
 
     /// Return nodes[0] if length one else return a subgraph with a fanin that stacks the tensors.

@@ -64,6 +64,8 @@ To provide users with questionable flexibility, ~DepoFluxSplat~ accepts two type
 
 - ~nsigma~ :: the cut-off of the Gaussian extent of a depo in units of number-of-sigma.
 
+See [[file:morse-smearing-method.org]] for one way to measure the additional smearing.
+
 * Anode and field response
 
 - ~anode~ :: names an ~IAnodePlane~ giving the context for the instance of ~DepoFluxSplat~.

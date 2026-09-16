@@ -154,6 +154,15 @@ def tracking_params(w):
         return "--offset '1*m,0*m,0*m'"
     if w.detector == "pdsp":
         return "--offset '-1*m,0*m,0*m'"
+    # PDHD is HD (double-sided drift) like PDSP: place the track in the far
+    # drift volume of anode 0.
+    if w.detector == "pdhd":
+        return "--offset '-1*m,0*m,0*m'"
+    # PDVD is vertical-drift (single drift per CRP): anode 0 is a bottom CRP with
+    # its drift toward the central cathode (+X), so offset the track the other
+    # way to land it inside that drift volume.
+    if w.detector == "pdvd":
+        return "--offset '1*m,0*m,0*m'"
     return ""
 
 rule tracking:

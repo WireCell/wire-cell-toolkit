@@ -1,0 +1,277 @@
+#+TITLE: spngbench — SPNG vs OSP compute-performance benchmark
+
+Compare the compute performance of the SPNG and OSP signal-processing chains for
+the PDHD detector, across CPU-core and GPU allowances.  Designed to be re-run and
+extended (more inputs/events, more cores/GPUs, other detectors later).
+
+* What it does
+
+The =spngdir= workflow runs a single "kitchen sink" wire-cell job.  This
+benchmark *factors* it into three separate jobs (=stage= TLA / driver stage):
+
+- ~stage=sim~  : =depos -> drift -> detsim=  -> ADC frame file(s)
+- ~stage=osp~  : ADC frame file(s) -> OSP    -> signal frame file(s)
+- ~stage=spng~ : ADC frame file(s) -> SPNG   -> signal frame file(s)
+
+The sim job is run *once* per depo input; its ADC frame file feeds *both* the
+OSP and SPNG jobs, so they process identical input and the shared simulation
+cost is excluded from the SP timing.  Later the ADC file may be replaced by one
+made from real detector data to compare against.  The factored pieces come from
+=spng/det.jsonnet= (=depos_to_adc=, =osp=, =spng=).
+
+Two files:
+- =spngbench.jsonnet= — the factored wire-cell config (TLAs: =input=, =model_file=,
+  =output=, =which=, =detname=, =device=, =engine=, =wc_cores=).
+- =spngbench.py= — the driver (single runs, grid scan, log analysis, rollups).
+
+* Timing
+
+Each wire-cell log is harvested two ways:
+
+1. *Phase intervals* from log timestamps: =startup=, =config=, =first_execute=,
+   =execution=, =last_execute=, =finalize= (robust to spdlog reordering and
+   continuation lines; engine-agnostic markers).
+2. *Per-node* wall/core seconds from the "Timer:" lines (Pgrapher) or the
+   =TbbDataFlowGraph= "calls=..." summary (TbbFlow).  Rolled up per node as
+   mean±stdev over repeats/inputs, plus category sums:
+   - =forward=  — the DNN forward (OSP =Pytorch::DNNROIFinding=, SPNG
+     =SPNG::TensorForward=),
+   - =sp_other= — all other SP nodes (OSP =OmnibusSigProc=, other =SPNG::*=),
+   - =sp_total= = forward + sp_other, =all_total= from the timer total.
+
+** Node timeline and memory profiling
+
+Each osp/spng job (TbbFlow) also emits a *node timeline* JSON --- per-execution
+=[start,end]= wall-clock (CLOCK_REALTIME) intervals for every DFP node
+(=TbbDataFlowGraph.timeline= config; =NodeInfo= collects the intervals).  The
+driver reads this instead of parsing =Timer= log lines (summing intervals
+recovers the per-node totals), and while wire-cell runs it samples the child
+process's *CPU RSS* (=/proc/PID/status=), *CPU utilization* (=/proc/PID/stat=
+utime+stime deltas; process-wide, so it exceeds 100% when multi-threaded),
+*per-process GPU VRAM*, and the *device GPU utilization* (busiest GPU; =pynvml=
+if importable, else =nvidia-smi=) at 20 Hz into a =*.memprofile.json=
+(CLOCK_REALTIME, so samples align with the node intervals).  Each sample is
+=[t, rss, vram, cpu%, gpu_util%]=.  Correlating with the timeline gives a per
+category (DNN / sp_other / other) *peak-memory blame*; note per-category peaks
+overlap under parallelism and are not additive.  VRAM/RSS are the *reserved*
+footprint (CUDA context + torch caching allocator; glibc heap) which grows to a
+peak but does not shrink on free.  The memory summary also records lifecycle
+*peak and average* VRAM, GPU utilization and CPU utilization (a duty-cycle
+measure over the whole job).
+
+** Thread control (important)
+
+- *Wire-cell* node parallelism is set by =wc_cores= → =TbbDataFlowGraph.max_threads=.
+- *Torch* intra-op threads are set by the =OMP_NUM_THREADS= environment variable
+  (the driver sets it per run); it maps to torch's =at::get_num_threads=.
+
+These are independent axes. 
+
+* Usage
+
+#+begin_src sh
+# one chain at one config
+python3 spngbench.py run spng --device cpu --wc-cores 1 --torch-cores 1
+
+# both chains at one config, with the OSP/SPNG comparison JSON
+python3 spngbench.py pair --device cpu --wc-cores 2 --torch-cores 4
+
+# re-analyze an existing wire-cell log
+python3 spngbench.py analyze some-wire-cell.log
+
+# grid scan (CPU): wc {1,2,3,4} x torch {1,2,4,8,16,32}, skipping wc*torch>64
+python3 spngbench.py grid --mode cpu --which both
+
+# subset the grid
+python3 spngbench.py grid --mode cpu --which spng --wc-cores 1 2 --torch-cores 1 4
+
+# single-GPU grid (device=gpu, torch=1, wc {1,2,3,4}); OOM is recorded, not fatal
+python3 spngbench.py grid --mode gpu --which both
+
+# multi-GPU sharded grid (transverse/longitudinal x ngpu x wc); cells needing
+# more GPUs than present are recorded as skipped
+python3 spngbench.py grid --mode shard --which both
+
+# a single sharded SPNG run
+python3 spngbench.py run spng --device gpu0 --gpu-scheme transverse --ngpu 2
+
+# process-parallel: N concurrent single-APA jobs (wc1/omp1), cpu + 1 GPU
+python3 spngbench.py grid --mode proc --which both --nproc 1 2 3 4
+
+# everything (cpu + gpu + shard + proc), from a config file
+python3 spngbench.py grid --mode all --config spngbench.json
+
+# see the effective configuration
+python3 spngbench.py show-config --config spngbench.json
+
+# human-readable summary (Markdown + HTML + LaTeX) from a compare/report/grid JSON
+python3 spngbench.py report spngbench-pdhd/compare-cpu-wc1-omp1.json -o report-dir
+
+# cross-grid summary spanning every grid point in a grid-index.json
+python3 spngbench.py grid-report spngbench-pdhd/grid-index.json -o grid-report-dir
+#+end_src
+
+Default input is =toolkit/test/data/muon-depos.npz=; override with =--input= (repeatable)
+or the config file's =inputs=.
+
+* Outputs
+
+Into =--outdir= (default =spngbench-pdhd/=):
+- =report-<which>-<device>-wc<N>-omp<M>.json= — per-config rollup (schema
+  =spngbench-config/1=): meta, phase durations, raw nodes, per-node stats,
+  category sums.
+- =compare-<device>-wc<N>-omp<M>.json= — combined OSP+SPNG (=spngbench-compare/1=).
+- =grid-index.json= — one row per grid cell (=spngbench-grid/1=), updated
+  incrementally so partial runs survive.
+
+Outcomes: =ok=, =oom= (GPU out-of-memory, marked and skipped), =error=, =skipped=.
+
+* Summary report
+
+=report= reads a =compare-*.json= (or a per-config report, or a grid index) and
+writes a directory with =summary.{md,html,tex}= sharing the same PNG figures.
+It surfaces OSP-vs-SPNG and per-node differences, separating I/O from SP nodes
+and, within SP, the DNN forward (=Pytorch::DNNROIFinding= / =SPNG::TensorForward=)
+from the non-DNN algorithms.  Figures: category-composition bars (OSP vs SPNG),
+per-stage top-node bars, and the OSP and SPNG *flow graphs* (GraphViz =dot=)
+with each node annotated by wall/core time and colored by category.  A *Memory
+and Compute* section tabulates peak RSS/VRAM (with per-category blame) and the
+lifecycle peak/average of GPU utilization, VRAM and CPU utilization, and for each
+stage draws a three-panel time-aligned figure: memory (RSS/VRAM) vs time, compute
+(CPU% and GPU-util%) vs time, and the node-activity Gantt --- so a compute
+plateau or stall can be read against which nodes were running.  The LaTeX
+builds with =pdflatex= (needs =graphicx=, =booktabs=); the flow graphs need the
+=dot= and =wcpy= programs (skipped with =--no-graphs= or if absent).
+
+* Grid report
+
+=grid-report= consumes a =grid-index.json= and writes a cross-grid summary that
+spans every grid point.  It contains:
+
+- A *Jobs* section describing the three wire-cell jobs (sim, osp, spng) with a
+  data-flow graph for each (from =wcpy pgraph dotify --no-services --no-params=,
+  so service components and config parameters are omitted), the list of input
+  depo file(s) that drove the benchmark, and the two DNN *model files*: the OSP
+  DNN-ROI model (a =TorchService= baked into the detector config, recovered by
+  compiling the osp-stage jsonnet with =wcsonnet=) and the SPNG ROI-uniter model
+  (the =model_file= TLA).
+
+- A *matrix* that is the outer product of *device modes* (rows: CPU only,
+  CPU+1GPU, CPU+2GPU, ...) and *node categories* (columns: DNN, sp\_other, other,
+  total).  Each cell is a grid point split into two *sub-pixels* --- left = OSP,
+  right = SPNG --- coloured by that category's wall time on a per-column log
+  scale.  Within a cell the axes are x = wire-cell cores and y = torch cores
+  (CPU / 1-GPU rows) or shard scheme (multi-GPU rows).  Not-tested cells are
+  black, crashed sub-pixels white.  The full grid is reconstructed from every
+  =compare-*.json= in the grid-index's directory (the index itself only records
+  the last run), so cpu/gpu/shard runs into one =--outdir= are all included.
+- Trend *bar charts*.  The headline is *elapsed execution wall time* (=latency=,
+  =bars_latency.png=) --- the true job duration, which *falls* as wire-cell cores
+  rise (real parallel speedup).  A second chart plots *total node-work*
+  (=bars_total.png=): the sum of per-node wall spans, a work/utilization measure
+  that *rises* with cores because each concurrently-running node's wall span
+  inflates under GPU serialization and CPU contention; it is *not* latency and
+  must not be read as one.  The SPNG/OSP ratio uses elapsed latency.  Further
+  charts plot per-grid-point *peak RAM/VRAM* (per category), and lifecycle
+  *GPU VRAM*, *GPU utilization* and *CPU utilization* (each a bar = peak with an
+  overlaid marker = lifecycle average, OSP vs SPNG).
+- A grid *overview table*.
+- A *per-grid-point summary* for every cell (=report= output), linked from the
+  Markdown/HTML and =\input= into the LaTeX, with a table of contents.
+
+Per-point flow graphs are off by default for speed; enable with =--point-graphs=.
+
+* Process-level parallelism
+
+A third parallelism axis (orthogonal to wire-cell cores and GPU sharding):
+=grid --mode proc= runs *N independent single-APA jobs at once* (each =wc1/omp1=,
+selected by the =apa= TLA), on the CPU or *one shared GPU* (never 2-GPU).  This
+models production (one job per APA) and measures how many jobs co-fit.  Each cell
+=(device, nproc)= launches =nproc= wire-cell processes simultaneously and a
+=GroupMemorySampler= records the *summed* RSS and *summed* per-process VRAM over
+time; the peak of each sum is the group's simultaneous footprint.  Records are
+=proc-<which>-<device>-n<N>.json= (schema =spngbench-proc/1=); the grid-report gains
+a *Process parallelism* section (wall / RAM / VRAM vs =nproc=, plus a table).
+
+Measured (PDHD =napa=4=, RTX 4090 24 GiB): SPNG on one shared GPU scales VRAM
+essentially linearly (~6.6 GB per job -> 6.6 / 13.3 / 19.9 / 25.0 GB for
+=nproc= 1..4) while wall time stays ~flat (the GPU serializes; see below).  Four
+concurrent SPNG APAs use ~97% of a 4090's VRAM --- an L40S (48 GB) gives ~2x
+headroom.  On the CPU, wall stays flat while RAM scales linearly (true throughput
+gain, cores permitting).
+
+* Interpreting scaling
+
+Two effects are easy to misread (measured PDHD, =napa=4=, 2x RTX 4090):
+
+- *Wall time vs wire-cell cores.*  Use =latency= (elapsed execution wall), not
+  =total= node-work.  Latency *falls* with cores (e.g. 1-GPU SPNG 4.3 -> 2.6 s for
+  wc 1 -> 4; timeline shows average concurrency 1.0/1.9/3.7 as the four APA
+  pipelines run in parallel).  The =total= node-work *rises* (4.3 -> 9.4 s) only
+  because each concurrent node's wall span inflates --- it is throughput/utilization,
+  not duration.
+
+- *1 GPU vs 2 GPUs (transverse).*  The sharding is correct: each APA pipeline runs
+  wholly on one GPU (=tpc_index % ngpu=), the four APAs split 2+2.  Yet 2 GPUs give
+  *no* speedup (slightly slower) for two reasons.  (1) *I/O bound*: ~50% of the SP
+  wall is CPU-side =npz= read/write (=FrameFileSource= + =FrameFileSink=) that no GPU
+  count accelerates.  (2) *Multi-device overhead*: splitting the ~35% GPU compute
+  across two CUDA contexts inflates per-op time even single-threaded (DNN forward
+  +37%, cuFFT =KernelConvolve= +72%) as the per-device cuFFT/cudnn caches thrash on
+  every device switch.  To actually benefit from multiple GPUs the per-APA compute
+  must dominate the fixed I/O --- i.e. larger frames / more events per job, or an
+  I/O path that overlaps with compute.
+
+- *OSP DNN device.*  OSP's decon (=OmnibusSigProc=) is a CPU FFT algorithm; only its
+  final DNN-ROI (=Pytorch::DNNROIFinding=) uses torch.  With =device=gpu*= that DNN
+  runs on the GPU (~0.1 s/plane, ~1.3 GB VRAM); its wall is dominated by the CPU
+  decon.  SPNG instead runs the *whole* chain (decon / filters / ROI-uniter DNN) on
+  the GPU, so on GPU SPNG is far faster but uses much more VRAM.  This is an
+  architectural difference, not a benchmark artifact.  (Earlier the OSP TorchService
+  was mistakenly pinned to CPU regardless of =device=; fixed by forwarding =device=
+  into =detconf.get=.)
+
+* Config file
+
+JSON is always supported; YAML if =pyyaml= is installed.  A committed
+=spngbench.json= mirrors the built-in defaults — copy and edit it.  CLI flags
+override the file.  Keys: =detname=, =model_file=, =inputs=, =outdir=, =repeats=,
+=napa=, =which=, =engine=, =hw.max_hyperthreads=, =cpu_grid.{wc_cores,torch_cores}=,
+=gpu_grid.{device,wc_cores,torch_cores}=, =shard_grid.{device,schemes,ngpu,wc_cores}=,
+=proc_grid.{devices,nproc}=.
+
+* Extending
+
+- *More inputs/events*: set =inputs= to a list; per-node stats become mean±stdev.
+- *More cores*: bump =cpu_grid= ranges and =hw.max_hyperthreads=.
+- *More GPUs*: the SPNG graph is sharded by a device MATRIX (=gpu_scheme=, =ngpu=),
+  applied by rewriting =data.device= on per-APA SPNG node configs (names start
+  "tpc<N>"), so it extends to any GPU count:
+  - =transverse= : device = gpu[ tpc_index % ngpu ].  All nodes of one APA share
+    a GPU; APA pipelines are independent so with one event in flight only one
+    runs at a time and the GPU never OOMs.  Up to (#APA) GPUs (4 for PDHD).
+  - =longitudinal= : device = gpu[ stage_index % ngpu ], stages (decon/filter/
+    dnn/roi) matched by node-name keyword; tensors cross GPUs at stage
+    boundaries.  Extend the =stages= list in =spngbench.jsonnet= for finer control.
+  OSP (a single DNN) is not sharded and uses the base =device=.  Cells needing
+  more GPUs than present are recorded as skipped.
+- *More APAs* (=napa=): the number of per-APA pipelines a job covers, clamped to
+  the detector's physical APA count (PDHD 4, FDHD 150).  =napa= is a fixed
+  parameter of a grid run (not a scanned axis): =grid --napa 4=, or =napa= in the
+  config; =run=/=pair= also take =--napa=.  It is consumed by the jsonnet (more
+  per-APA pipelines, visible in the Jobs data-flow graphs) and per-APA ADC files
+  get a =-tpc<N>= suffix.  Because the APA pipelines are independent, useful
+  wire-cell parallelism is bounded by =napa=, so the grid caps the =wc_cores=
+  range at =napa= (a single-APA job cannot use more than one wc-core unless
+  longitudinal parallelism -- multiple events in flight -- is allowed, which the
+  current inputs do not; that variation is left for later).
+- *Process parallelism* (=proc_grid=): add =nproc= values or devices (see the
+  "Process-level parallelism" section).  Each process runs one APA via the =apa=
+  single-APA TLA; =nproc= is clamped to the physical APA count.
+- *Other detectors* (DUNE FD): set =detname= once SPNG detconf exists for it.
+
+* Diagnostics
+
+=spng/test/check_threads.cxx= is a standalone torch+TBB toy (CLI-driven) used to
+root-cause thread-control and core-time behavior.  Build target
+=WireCellSpng__check_threads=.

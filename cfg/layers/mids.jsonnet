@@ -1,14 +1,22 @@
 // This file is generated, do not edit.
-// Generated on Fri Mar  1 03:29:06 PM EST 2024 by bv on haiku.home
-// with /home/bv/wrk/wct/spdir-metric/toolkit/cfg/layers/gen-mids.sh
+// Generated on Tue Sep  8 11:13:04 AM EDT 2026 by bviren on wcgpu0.phy.bnl.gov
+// with /home/bviren/newsp/toolkit/cfg/layers/gen-mids.sh
 {
     base : {
         api: import "mids/base/api.jsonnet",
         variants: import "mids/base/variants.jsonnet",
     },
+    pdhd : {
+        api: import "mids/pdhd/api.jsonnet",
+        variants: import "mids/pdhd/variants.jsonnet",
+    },
     pdsp : {
         api: import "mids/pdsp/api.jsonnet",
         variants: import "mids/pdsp/variants.jsonnet",
+    },
+    pdvd : {
+        api: import "mids/pdvd/api.jsonnet",
+        variants: import "mids/pdvd/variants.jsonnet",
     },
     uboone : {
         api: import "mids/uboone/api.jsonnet",
