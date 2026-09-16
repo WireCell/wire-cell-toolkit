@@ -82,6 +82,7 @@
 #include "WireCellIface/IPrimaryTracker.h"
 #include "WireCellIface/IPrimaryVertex.h"
 #include "WireCellIface/IPrimaryVertexSet.h"
+#include "WireCellIface/IPrimaryVertexSetSource.h"
 #include "WireCellIface/IProcessor.h"
 #include "WireCellIface/IQueuedoutNode.h"
 #include "WireCellIface/IQueuedoutNode.h"
@@ -203,6 +204,7 @@ IPrimaryParticle::~IPrimaryParticle() {}
 IPrimaryTracker::~IPrimaryTracker() {}
 IPrimaryVertex::~IPrimaryVertex() {}
 IPrimaryVertexSet::~IPrimaryVertexSet() {}
+IPrimaryVertexSetSource::~IPrimaryVertexSetSource() {}
 IProcessor::~IProcessor() {}
 IQueuedoutNodeBase::~IQueuedoutNodeBase() {}
 IRecombinationModel::~IRecombinationModel() {}

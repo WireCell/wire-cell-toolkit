@@ -79,6 +79,12 @@ namespace WireCell::Aux {
         static std::string pdg_to_name(int pdg_code);
         static double pdg_to_mass(int pdg_code);
         static double pdg_to_charge(int pdg_code);
+
+        // Resolve a canonical name (eg "electron", "muon", "antimuon"), an
+        // "anti-"/"anti"-prefixed name, a common alias (eg "e-", "mu+",
+        // "gamma", "positron"), or a numeric PDG string to a PDG code.  Returns
+        // 0 if unrecognized.
+        static int name_to_pdg(const std::string& name);
         
         // Factory method to create from PDG code
         static ParticleInfo from_pdg(int pdg_code, 
