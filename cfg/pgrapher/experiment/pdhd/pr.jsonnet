@@ -2262,6 +2262,14 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1,
                 // PR track_fit layer.  Entry present only when save_stm_fit is on
                 // => compiled config byte-identical otherwise.  Name must avoid
                 // the substring '-track' (bee3 models.py filters such files).
+                //
+                // ROUND 3 SCOPE (doc pdvd/39 sec 17, owner decision 2026-09-05;
+                // propagated to PDHD in doc pdvd/109).  require_flag:'STM' -- the
+                // trajectories of the clusters the tagger TAGGED, not of every
+                // cluster it fitted.  PDHD was left on the round-2 scope when PDVD
+                // moved, so this layer drew 18.6 clusters/event against PDVD's 4.6
+                // and the PDHD display read 5x busier for a config reason, not a
+                // physics one (doc pdvd/109 sec 2).
                 + (if save_stm_fit then [{
                     name: 'stm_fit',
                     visitor: 'TaggerCheckSTM:pr',
@@ -2273,10 +2281,11 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1,
                     individual: false,
                     dQdx_scale: 0.1,
                     dQdx_offset: -1000.0,
+                    require_flag: 'STM',
                 }] else [])
-                // doc pdvd/39: four STM-SCOPED layers, so the cosmic-only
+                // doc pdvd/39: three STM-SCOPED layers, so the cosmic-only
                 // chain's display shows the STM result and the inputs it was
-                // built from, and nothing else.  All four are bound to the
+                // built from, and nothing else.  All three are bound to the
                 // STM visitor, so they capture the grouping exactly as the
                 // tagger saw it -- before protect_bundle can split a cluster
                 // out from under its flag.  require_flag / require_pc /
@@ -2286,20 +2295,27 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1,
                 // Names must avoid the substring '-track' (bee3 models.py
                 // filters such files).
                 //
-                // ROUND 2 SCOPE (doc pdvd/39 sec 11): the first three carry
-                // require_pc:'stm_fit', NOT require_flag:'STM'.  TaggerCheckSTM
-                // writes the 'stm_fit' local PC for every evaluated main that
-                // recorded a fit pass, whatever the verdict
-                // (TaggerCheckSTM.cxx persist_stm_fit, unconditional on is_stm),
-                // so gating on that PC makes these layers cover EXACTLY the
-                // object set the stm_fit layer draws -- 25 clusters vs 9 on
-                // evt 298595, the inconsistency the owner flagged.  The verdict
-                // itself moves to the separate 'stm_tagged' layer below.
+                // Round 2 (doc pdvd/39 sec 11) gated these on require_pc:'stm_fit'
+                // -- the set the tagger FITTED -- so they paired 1:1 with an
+                // unscoped 'stm_fit'.  ROUND 3 (doc pdvd/39 sec 17, owner decision
+                // 2026-09-05; reached PDHD only in doc pdvd/109) moves all four
+                // layers to require_flag:'STM' together, so the pairing is kept
+                // and the whole STM display carries the VERDICT population.
+                // require_flag alone, not ANDed with require_pc: a cluster can be
+                // tagged after a pass that recorded no fit, and require_pc would
+                // hide it (doc pdvd/39 sec 17.1).  Measured on PDHD: 0 such
+                // clusters in 61 events, so the two agree today -- the AND is
+                // omitted for what it would do, not for what it does.
+                // 'stm_tagged' is gone: with 'stm' on require_flag the two select
+                // the same clusters and dump the same PC through the same coords.
+                // Verified on PDHD 028084_3/12, 029107_5/16/18 (doc pdvd/109 sec 4):
+                // the new 0-stm-global.json equals the old 0-stm_tagged-global.json
+                // on every array, differing only in the layer's own type string.
                 + (if std.member(pipeline_names, 'tagger_check_stm') then [
                     {
                         // The original 3D image of every cluster the STM tagger
-                        // fitted: the 'clustering' layer restricted to the
-                        // stm_fit candidates.  Pairs 1:1 with 'stm_fit'.
+                        // TAGGED: the 'clustering' layer restricted to the
+                        // flag_STM set.  Pairs 1:1 with 'stm_fit'.
                         name: 'stm',
                         visitor: 'TaggerCheckSTM:pr',
                         grouping: 'live',
@@ -2308,7 +2324,7 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1,
                         pcname: '3d',
                         coords: clus_maker.t0cor_coords,
                         individual: false,
-                        require_pc: 'stm_fit',
+                        require_flag: 'STM',
                     },
                     {
                         // The Steiner tree's NODE cloud for those clusters (Bee
@@ -2327,7 +2343,7 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1,
                         pcname: 'steiner_pc',
                         coords: clus_maker.t0cor_coords,
                         individual: false,
-                        require_pc: 'stm_fit',
+                        require_flag: 'STM',
                     },
                     {
                         // The same cloud thinned to flag_steiner_terminal only.
@@ -2339,24 +2355,8 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1,
                         pcname: 'steiner_pc',
                         coords: clus_maker.t0cor_coords,
                         individual: false,
-                        require_pc: 'stm_fit',
-                        steiner_terminals_only: true,
-                    },
-                    {
-                        // The VERDICT layer: the 3D image of the clusters the
-                        // tagger actually tagged STM (flag_STM, set once at
-                        // TaggerCheckSTM.cxx set_flag(Flags::STM)).  A strict
-                        // subset of 'stm' above -- this is the small layer to
-                        // read first; 'stm' is the candidate population.
-                        name: 'stm_tagged',
-                        visitor: 'TaggerCheckSTM:pr',
-                        grouping: 'live',
-                        detector: 'protodunehd',
-                        algorithm: 'stm_tagged',
-                        pcname: '3d',
-                        coords: clus_maker.t0cor_coords,
-                        individual: false,
                         require_flag: 'STM',
+                        steiner_terminals_only: true,
                     },
                 ] else []),
                 // Particle-flow Bee output ("mc" jsTree JSON), emitted once after
