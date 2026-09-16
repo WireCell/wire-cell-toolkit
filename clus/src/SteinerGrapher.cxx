@@ -7,6 +7,13 @@
 #include "WireCellClus/DynamicPointCloud.h"
 // doc pdvd/37 R1 -- the pure-geometry thinning core.
 #include "WireCellClus/SteinerThinning.h"
+// doc pdvd/111 round 2 -- the per-edge 2-D support count of WCT_STEINER_GRAPH_DUMP,
+// and the two graph stages it rebuilds for edge provenance.
+#include "WireCellClus/SteinerEdgeSupport.h"
+#include "make_graphs.h"
+#include "connect_graphs.h"
+#include <cstdio>
+#include <iostream>
 // for Grouping::get_nticks_per_slice() -- the adjacent-slice step (doc pr/29 D12)
 #include "WireCellClus/Facade_Grouping.h"
 #include <algorithm>
@@ -30,6 +37,209 @@ namespace {
     {
         static const bool on = (getenv("WCT_STEINER_PHASE_DUMP") != nullptr);
         return on;
+    }
+
+    // doc pdvd/111 round 2: the whole-graph Steiner dump gate, log-only.  Same
+    // pattern as the gate above: read once, unset in production.
+    bool steiner_graph_dump_enabled()
+    {
+        static const bool on = (getenv("WCT_STEINER_GRAPH_DUMP") != nullptr);
+        return on;
+    }
+
+    using WireCell::Clus::Graphs::Weighted::EnhancedSteinerResult;
+    using SteinerGraphType = WireCell::Clus::Graphs::Weighted::graph_type;
+    using SteinerVertexSet = WireCell::Clus::Graphs::Weighted::vertex_set;
+
+    // doc pdvd/111 round 2 (WCT_STEINER_GRAPH_DUMP).  Doc 111 found the STM
+    // trajectory leaves the image where the Steiner Dijkstra seed already has,
+    // and the owner asked why, given that the terminals are charge-selected.
+    // This prints, to stdout, what that question needs and nothing persists:
+    //   STGC <ref ident> <call> <counts...>      one header per call
+    //   STGR <ref ident> <x> <y> <z> <slice> <qu> <qv> <qw>
+    //        every point of the RETILED cluster (never persisted anywhere else)
+    //   STGV <ref ident> <i> <x> <y> <z> <old> <term> <extreme> <q> <m02> <m61>
+    //        every steiner_pc vertex; i is the steiner_pc index TaggerCheckSTM's
+    //        do_rough_path walks; m02 / m61 are 6-bit live/dead plane masks at
+    //        the vertex (bits 0-2 live U/V/W, 3-5 dead) for test_good_point
+    //        radius 0.2 cm / ch_range 0 and radius 0.6 cm / ch_range 1
+    //   STGE <ref ident> <s> <t> <len cm> <weight cm> <src> <base> <base w cm>
+    //        <n ok3 ok2 ok1 live1 @0.2/0> <n ok3 ok2 ok1 live1 @0.6/1>
+    //        every steiner_graph edge.  src: path (a Voronoi last_edge chain),
+    //        connect (the edge joining two terminal regions), sbt (added by
+    //        establish_same_blob_steiner_edges_steiner_graph).  base: which
+    //        stage of ctpc_ref_pid made the underlying edge -- closely_same /
+    //        closely_other (connect_graph_closely_pid, same or other blob),
+    //        ctpc (connect_graph_ctpc_with_reference), mst
+    //        (connect_graph_with_reference), found by rebuilding the first two
+    //        stages here.  The sample counts come from Steiner::edge_support
+    //        for edges >= 0.5 cm and are 0 below.
+    // Every value is recomputed on the side (a second voronoi, a second
+    // closely/ctpc build); nothing here feeds back into the graph, and with the
+    // variable unset this function is never called.
+    void steiner_graph_dump(const WireCell::Clus::Facade::Cluster& cluster,
+                            const WireCell::Clus::Steiner::Grapher::Config& cfg,
+                            const WireCell::Clus::Facade::Cluster* reference_cluster,
+                            const SteinerGraphType& base_graph,
+                            const SteinerVertexSet& terminals,
+                            const SteinerVertexSet& extremes,
+                            const EnhancedSteinerResult& res,
+                            const std::set<std::pair<size_t, size_t>>& tree_pairs,
+                            const WireCell::PointCloud::Dataset& original_pc)
+    {
+        using namespace WireCell;
+        using namespace WireCell::Clus;
+        static int s_call = 0;
+        ++s_call;
+        const long ident = reference_cluster ? (long) reference_cluster->ident() : -1;
+
+        const auto& coords = cluster.get_default_scope().coords;
+        const auto xa = original_pc.get(coords.at(0));
+        const auto ya = original_pc.get(coords.at(1));
+        const auto za = original_pc.get(coords.at(2));
+        if (!xa || !ya || !za) return;
+        const auto& X = xa->elements<double>();
+        const auto& Y = ya->elements<double>();
+        const auto& Z = za->elements<double>();
+
+        // Base-edge provenance: rebuild the first two stages of make_graph_ctpc_pid.
+        Graphs::Weighted::Graph g_close = Graphs::make_graph_closely_pid(cluster);
+        Graphs::Weighted::Graph g_ctpc = g_close;
+        if (reference_cluster && cfg.dv && cfg.pcts) {
+            Graphs::connect_graph_ctpc_with_reference(cluster, *reference_cluster, cfg.dv, cfg.pcts, g_ctpc);
+        }
+        auto ncomp = [](const Graphs::Weighted::Graph& g) -> int {
+            if (boost::num_vertices(g) == 0) return 0;
+            std::vector<int> comp(boost::num_vertices(g));
+            return boost::connected_components(g, &comp[0]);
+        };
+
+        // Voronoi regions of the same terminal set, to split tree edges into
+        // "path" (same region) and "connect" (two regions).
+        std::vector<size_t> tvec(terminals.begin(), terminals.end());
+        const auto vor = Graphs::Weighted::voronoi(base_graph, tvec);
+
+        // 2-D support classifier, the NeutrinoSteinerGapGraph.cxx classify_point
+        // recipe (duplicated, not shared: that one is file-local) with the per-plane
+        // counts kept.
+        const auto* grouping = cluster.grouping();
+        const Facade::Cluster* tcl = reference_cluster ? reference_cluster : &cluster;
+        IPCTransform::pointer transform = cfg.pcts
+            ? cfg.pcts->pc_transform(tcl->get_scope_transform(tcl->get_default_scope())) : nullptr;
+        const double t0 = tcl->get_cluster_t0();
+        const bool can_classify = grouping && cfg.dv && transform;
+        auto make_classify = [&](double radius, int ch_range) {
+            return [&, radius, ch_range](const Point& p, int planes[6]) -> bool {
+                if (!can_classify) return false;
+                auto wpid = cfg.dv->contained_by(p);
+                if (wpid.face() == -1 || wpid.apa() == -1) return false;
+                auto p_raw = transform->backward(p, t0, wpid.face(), wpid.apa());
+                int np[6];
+                grouping->test_good_point(p_raw, wpid.apa(), wpid.face(), np, radius, ch_range);
+                for (int k = 0; k < 6; ++k) planes[k] = np[k];
+                return true;
+            };
+        };
+        auto cls02 = make_classify(0.2 * units::cm, 0);
+        auto cls61 = make_classify(0.6 * units::cm, 1);
+        auto mask_of = [](auto& cls, const Point& p) -> int {
+            int planes[6] = {0, 0, 0, 0, 0, 0};
+            if (!cls(p, planes)) return -1;
+            int m = 0;
+            for (int k = 0; k < 6; ++k) if (planes[k] > 0) m |= (1 << k);
+            return m;
+        };
+
+        const size_t nsv = boost::num_vertices(res.graph);
+        size_t nterm = 0, next = 0;
+        for (size_t i = 0; i < nsv; ++i) {
+            const auto it = res.new_to_old_index.find(i);
+            if (it == res.new_to_old_index.end()) continue;
+            if (terminals.count(it->second)) ++nterm;
+            if (extremes.count(it->second)) ++next;
+        }
+        std::cout << "STGC " << ident << " " << s_call
+                  << " nret=" << cluster.npoints()
+                  << " nbase_v=" << boost::num_vertices(base_graph)
+                  << " nbase_e=" << boost::num_edges(base_graph)
+                  << " ncomp_closely=" << ncomp(g_close)
+                  << " ncomp_ctpc=" << ncomp(g_ctpc)
+                  << " ncomp_base=" << ncomp(base_graph)
+                  << " nterm=" << nterm << " nextreme=" << next
+                  << " nsv=" << nsv << " nse=" << boost::num_edges(res.graph)
+                  << " classify=" << (int) can_classify << std::endl;
+
+        char buf[512];
+        const int npts = cluster.npoints();
+        for (int i = 0; i < npts; ++i) {
+            const auto* blob = cluster.blob_with_point(i);
+            std::snprintf(buf, sizeof(buf), "STGR %ld %.2f %.2f %.2f %d %.0f %.0f %.0f", ident,
+                          X[i] / units::cm, Y[i] / units::cm, Z[i] / units::cm,
+                          blob ? (int) blob->slice_index_min() : -1,
+                          cluster.charge_value(i, 0), cluster.charge_value(i, 1), cluster.charge_value(i, 2));
+            std::cout << buf << "\n";
+        }
+
+        for (size_t i = 0; i < nsv; ++i) {
+            const auto it = res.new_to_old_index.find(i);
+            if (it == res.new_to_old_index.end()) continue;
+            const size_t old = it->second;
+            const Point p(X[old], Y[old], Z[old]);
+            const auto qit = res.vertex_charges.find(old);
+            // coordinates in the default ostream format, as stm_path_dump prints them
+            std::cout << "STGV " << ident << " " << i << " " << X[old] / units::cm << " " << Y[old] / units::cm
+                      << " " << Z[old] / units::cm << " " << old << " " << (int) terminals.count(old) << " "
+                      << (int) extremes.count(old) << " "
+                      << (qit != res.vertex_charges.end() ? qit->second : -1.0) << " "
+                      << mask_of(cls02, p) << " " << mask_of(cls61, p) << "\n";
+        }
+
+        const auto& sv = cluster.sv3d();
+        const auto& majs = sv.kd().major_indices();
+        const auto base_w = boost::get(boost::edge_weight, base_graph);
+        const auto res_w = boost::get(boost::edge_weight, res.graph);
+        for (auto [ei, ee] = boost::edges(res.graph); ei != ee; ++ei) {
+            size_t s = boost::source(*ei, res.graph), t = boost::target(*ei, res.graph);
+            const auto is = res.new_to_old_index.find(s), it = res.new_to_old_index.find(t);
+            if (is == res.new_to_old_index.end() || it == res.new_to_old_index.end()) continue;
+            const size_t os = is->second, ot = it->second;
+            const Point a(X[os], Y[os], Z[os]), b(X[ot], Y[ot], Z[ot]);
+            const double len = (b - a).magnitude();
+            const auto key = std::make_pair(std::min(s, t), std::max(s, t));
+            const char* src = "sbt";
+            if (tree_pairs.count(key)) {
+                src = (vor.terminal[os] == vor.terminal[ot]) ? "path" : "connect";
+            }
+            const char* base = "none";
+            double bw = -1;
+            const auto be = boost::edge(os, ot, base_graph);
+            if (be.second) {
+                bw = boost::get(base_w, be.first);
+                if (boost::edge(os, ot, g_close).second) {
+                    const bool same = os < majs.size() && ot < majs.size() && majs[os] == majs[ot];
+                    base = same ? "closely_same" : "closely_other";
+                }
+                else if (boost::edge(os, ot, g_ctpc).second) {
+                    base = "ctpc";
+                }
+                else {
+                    base = "mst";
+                }
+            }
+            Steiner::EdgeSupport s02, s61;
+            if (len >= 0.5 * units::cm) {
+                s02 = Steiner::edge_support(a, b, 0.3 * units::cm, cls02);
+                s61 = Steiner::edge_support(a, b, 0.3 * units::cm, cls61);
+            }
+            std::snprintf(buf, sizeof(buf),
+                          "STGE %ld %zu %zu %.4f %.17g %s %s %.17g %d %d %d %d %d %d %d %d %d %d",
+                          ident, s, t, len / units::cm, boost::get(res_w, *ei) / units::cm, src, base,
+                          bw > 0 ? bw / units::cm : -1.0,
+                          s02.n, s02.ok3, s02.ok2, s02.ok1, s02.live1,
+                          s61.n, s61.ok3, s61.ok2, s61.ok1, s61.live1);
+            std::cout << buf << "\n";
+        }
+        std::cout << std::flush;
     }
 }
 
@@ -258,8 +468,24 @@ void Steiner::Grapher::create_steiner_tree(
 
     // std::cout << "Test5: " <<  " Graph vertices: " << boost::num_vertices(steiner_result.graph) << ", edges: " << boost::num_edges(steiner_result.graph) << std::endl;
 
+    // doc pdvd/111 round 2: the tree edges before the same-blob terminal edges
+    // are added, so the dump can tell them apart.  Env-gated, log-only.
+    const bool s_graph_dump = steiner_graph_dump_enabled();
+    std::set<std::pair<size_t, size_t>> dump_tree_pairs;
+    if (s_graph_dump) {
+        for (auto [ei, ee] = boost::edges(steiner_result.graph); ei != ee; ++ei) {
+            size_t a = boost::source(*ei, steiner_result.graph), b = boost::target(*ei, steiner_result.graph);
+            dump_tree_pairs.insert(std::make_pair(std::min(a, b), std::max(a, b)));
+        }
+    }
+
     // just run this once the steiner graph is created
     Graphs::Weighted::establish_same_blob_steiner_edges_steiner_graph(steiner_result, m_cluster);
+
+    if (s_graph_dump) {
+        steiner_graph_dump(m_cluster, m_config, reference_cluster, base_graph, steiner_terminals,
+                           extreme_points, steiner_result, dump_tree_pairs, original_pc);
+    }
 
     // std::cout << "Test5: " <<  " Graph vertices: " << boost::num_vertices(steiner_result.graph) << ", edges: " << boost::num_edges(steiner_result.graph) << std::endl;
 

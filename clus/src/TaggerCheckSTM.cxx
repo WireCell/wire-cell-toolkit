@@ -1227,6 +1227,13 @@ private:
         const std::vector<size_t>& path_indices = 
             cluster.graph_algorithms("steiner_graph").shortest_path(first_index, last_index);
 
+        // doc pdvd/111 round 2: log-only, the steiner_pc indices this walk ran between, so the
+        // WCT_STEINER_GRAPH_DUMP graph of this cluster can replay it offline.
+        if (getenv("WCT_STEINER_GRAPH_DUMP") != nullptr) {
+            std::cout << "STMRP " << cluster.ident() << " rough " << first_index << " " << last_index
+                      << " " << path_indices.size() << std::endl;
+        }
+
         // doc pdhd/11: log-only (WCT_STM_PATH_DEBUG) anatomy of the graph this path was
         // walked on.  The question it answers is whether a sparse rough path means the
         // graph is DISCONNECTED along the track (so the only route is an uncapped
@@ -1572,6 +1579,13 @@ private:
                 const std::vector<size_t>& path2_indices = 
                     cluster.graph_algorithms("steiner_graph").shortest_path(curr_index, last_index);
                 
+                // doc pdvd/111 round 2: log-only, the two crawl walks (see do_rough_path's STMRP).
+                if (getenv("WCT_STEINER_GRAPH_DUMP") != nullptr) {
+                    std::cout << "STMRP " << cluster.ident() << " crawl1 " << first_index << " " << curr_index
+                              << " " << path1_indices.size() << std::endl;
+                    std::cout << "STMRP " << cluster.ident() << " crawl2 " << curr_index << " " << last_index
+                              << " " << path2_indices.size() << std::endl;
+                }
                 std::list<size_t> path2_indices_list(path2_indices.begin(), path2_indices.end());
                 // Combine paths, removing duplicate middle point
                 // Copy first path to temporary storage
