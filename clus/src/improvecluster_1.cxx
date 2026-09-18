@@ -201,7 +201,7 @@ namespace WireCell::Clus {
                     oy0 = std::min(oy0, pp.y()); oy1 = std::max(oy1, pp.y());
                     oz0 = std::min(oz0, pp.z()); oz1 = std::max(oz1, pp.z());
                 }
-                const auto& bb = m_face.at(apa).at(face)->sensitive().bounds();
+                const auto bb = m_face.at(apa).at(face)->sensitive().bounds();  // copy: sensitive() returns by value
                 const double tol = 1 * units::cm;
                 const double sy0 = std::min(bb.first.y(), bb.second.y()) - tol, sy1 = std::max(bb.first.y(), bb.second.y()) + tol;
                 const double sz0 = std::min(bb.first.z(), bb.second.z()) - tol, sz1 = std::max(bb.first.z(), bb.second.z()) + tol;

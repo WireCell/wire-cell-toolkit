@@ -2550,7 +2550,7 @@ private:
             std::map<std::string, Array> p;
             auto tocm = [&](const std::vector<double>& v) { std::vector<double> o(v); for (auto& x : o) if (x > -0.5) x /= cm; return o; };
             std::vector<double> x(r.px), y(r.py), z(r.pz);
-            for (auto& v : x) v /= cm; for (auto& v : y) v /= cm; for (auto& v : z) v /= cm;
+            for (auto& v : x) { v /= cm; } for (auto& v : y) { v /= cm; } for (auto& v : z) { v /= cm; }
             p.emplace("x", Array(x)); p.emplace("y", Array(y)); p.emplace("z", Array(z));
             p.emplace("q", Array(r.pq)); p.emplace("L", Array(tocm(r.pL))); p.emplace("rr", Array(tocm(r.prr)));
             p.emplace("role", Array(r.prole)); p.emplace("seg_id", Array(r.pseg));
