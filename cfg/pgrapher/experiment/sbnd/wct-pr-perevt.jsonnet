@@ -1427,7 +1427,12 @@ function(
     // admitted as companions.  Bundles that share the light but do NOT touch
     // -- two neutrinos, one per volume -- stay two candidates.
     // C++ default false.  Key omitted when off => byte-identical config.
-    nu_bundle_flash_group = false,
+    // SBND PRODUCTION ON 2026-09-18 (doc 109 rev 4 sec 9.7, owner-directed): on
+    // the 142 of 3067 data events it can touch, 116 merges on the DL arm and
+    // 42 of 53 on the geometric arm, every dropped row a vertex-less
+    // placeholder, no non-eligible event moved (216 749 branches), no row
+    // lost its vertex; kept-apart pairs all >= 24.5 cm apart.
+    nu_bundle_flash_group = true,
     provenance_extra = {},
     flash_pair_dt_us = null,
     mcs_muon_source = 'long_muon_else_pf',  // SBND PRODUCTION ON 2026-08-28 (doc 84 round 1 P4: chain when one exists, else the pf muon; pf_muon | long_muon | longest_segment | long_muon_else_pf)
