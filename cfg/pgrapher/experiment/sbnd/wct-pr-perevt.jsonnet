@@ -1400,8 +1400,13 @@ function(
     // (cluster_id from the candidate's own TaggerInfo, + nu_index and
     // point_cluster_id), and T_rec_charge / T_proj_data booked even when empty.
     // Observation only: no reconstruction output moves (doc 109 rev 3 gates).
-    // C++ default false; false here => key omitted => byte-identical.
-    root_point_ids = false,
+    // C++ default stays false.
+    // SBND PRODUCTION ON 2026-09-17 on the owner's word (doc 109 sec 8.9): on
+    // 267 sbnd_xin data events mabc-pr.zip, the pctree, nusel and the calib
+    // dump are identical knob-off vs knob-on, and all 233 055 ROOT branches
+    // match except T_rec_charge.cluster_id (7 files, the column this fixes),
+    // the two added branches and the operating-point hash.
+    root_point_ids = true,
     // sbnd_xin/docs/109 rev 3: collapse neutrino candidates that come from one
     // physical beam flash seen by both drift volumes (same flash_group), keeping
     // the longest selected activity.  This MOVES the selection -- it removes
