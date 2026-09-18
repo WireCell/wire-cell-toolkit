@@ -109,6 +109,8 @@ void Root::SbndPrMagnifyTrackingVisitor::configure(const WireCell::Configuration
     // sbnd_xin/docs/109: DEFAULT FALSE / empty keep tracking-pr.root byte-identical.
     m_nu_provenance = get<bool>(cfg, "nu_provenance", m_nu_provenance);
     m_fix_cluster_flags = get<bool>(cfg, "fix_cluster_flags", m_fix_cluster_flags);
+    // sbnd_xin/docs/109 rev 3: DEFAULT FALSE keeps T_rec_charge and the tree set byte-identical.
+    m_rec_charge_provenance = get<bool>(cfg, "rec_charge_provenance", m_rec_charge_provenance);
     m_provenance.clear();
     if (cfg["provenance"].isObject()) {
         const auto& prov = cfg["provenance"];
@@ -137,6 +139,7 @@ WireCell::Configuration Root::SbndPrMagnifyTrackingVisitor::default_configuratio
     cfg["flash_by_gid"] = m_flash_by_gid;
     cfg["nu_provenance"] = m_nu_provenance;          // sbnd_xin/docs/109; false = no T_bundle/T_flash, no Trun census branches
     cfg["fix_cluster_flags"] = m_fix_cluster_flags;  // sbnd_xin/docs/109; false = legacy T_cluster flag columns
+    cfg["rec_charge_provenance"] = m_rec_charge_provenance;  // sbnd_xin/docs/109 rev 3; false = legacy T_rec_charge.cluster_id, no nu_index/point_cluster_id, T_proj_data omitted when empty
     cfg["provenance"] = Json::objectValue;           // sbnd_xin/docs/109; empty = no Trun provenance strings
     cfg["anodes"] = Json::arrayValue;
     cfg["detector_volumes"] = "";
@@ -582,6 +585,28 @@ void Root::SbndPrMagnifyTrackingVisitor::write_nu_census(TFile* output_tf,
                tb->GetEntries(), tfl->GetEntries(), census ? "" : " -- no census published");
 }
 
+// sbnd_xin/docs/109 rev 3: T_proj_data with the schema but no clusters.  The
+// tree is one row of vector-of-vector branches per event, so "no projection
+// this event" is that row with every vector empty -- not a missing tree.  1675
+// of the 3067 sbnd_xin events used to omit it (no candidate, or an empty
+// fitted_charge_2d), which is why a reader's tree count varied 7 vs 8 from one
+// event to the next.  Same idiom as the empty T_proj kept in visit().
+static void write_empty_proj_data(TFile* output_tf)
+{
+    std::vector<int> v_cluster_id;
+    std::vector<std::vector<int>> v_channel, v_time_slice;
+    std::vector<std::vector<double>> v_charge, v_charge_err, v_charge_pred;
+    TTree* tree = new TTree("T_proj_data", "T_proj_data");
+    tree->SetDirectory(output_tf);
+    tree->Branch("cluster_id", &v_cluster_id);
+    tree->Branch("channel", &v_channel);
+    tree->Branch("time_slice", &v_time_slice);
+    tree->Branch("charge", &v_charge);
+    tree->Branch("charge_err", &v_charge_err);
+    tree->Branch("charge_pred", &v_charge_pred);
+    tree->Fill();
+}
+
 void Root::SbndPrMagnifyTrackingVisitor::write_proj_data(TFile* output_tf, Clus::Facade::Grouping& grouping,
                                                          const ChanScheme& cs) const
 {
@@ -593,6 +618,7 @@ void Root::SbndPrMagnifyTrackingVisitor::write_proj_data(TFile* output_tf, Clus:
     auto nu_fitters = collect_nu_fitters(grouping);
     if (!nu_fitters.front()) {
         log->warn("SbndPrMagnifyTrackingVisitor: no TrackFitting in grouping");
+        if (m_rec_charge_provenance) write_empty_proj_data(output_tf);
         return;
     }
     // Empty only if EVERY candidate is empty: bailing on candidate 0 alone
@@ -609,6 +635,7 @@ void Root::SbndPrMagnifyTrackingVisitor::write_proj_data(TFile* output_tf, Clus:
     }
     if (!any_fitted) {
         log->warn("SbndPrMagnifyTrackingVisitor: fitted_charge_2d is empty");
+        if (m_rec_charge_provenance) write_empty_proj_data(output_tf);
         return;
     }
 
@@ -759,6 +786,45 @@ void Root::SbndPrMagnifyTrackingVisitor::write_proj_data(TFile* output_tf, Clus:
                v_cluster_id.size(), nu_fitters.size());
 }
 
+// sbnd_xin/docs/109 rev 3: T_rec_charge with its branches and zero rows, for
+// the events whose write_t_rec_data() bails before creating the tree (no
+// TrackFitting, or a TrackFitting with no Graph -- 1632 of the 3067 sbnd_xin
+// events, all of them events with no neutrino candidate).  A zero-row
+// T_rec_charge is already a shape the file takes today (an event whose only
+// candidate produced no fit points writes one), so this only makes the tree
+// unconditional.  The branch list MUST track the canonical one in
+// write_t_rec_data below; it is duplicated rather than factored out so the
+// knob-off path there stays byte-for-byte what it was.
+static void write_empty_rec_charge(TFile* output_tf)
+{
+    WireCell::Root::WCPointTree pt;
+    int nu_index = 0, point_cluster_id = -1;
+    TTree* t = new TTree("T_rec_charge", "T_rec_charge");
+    t->SetDirectory(output_tf);
+    t->Branch("x", &pt.reco_x, "x/D");
+    t->Branch("y", &pt.reco_y, "y/D");
+    t->Branch("z", &pt.reco_z, "z/D");
+    t->Branch("q", &pt.reco_dQ, "q/D");
+    t->Branch("nq", &pt.reco_dx, "nq/D");
+    t->Branch("chi2", &pt.reco_chi2, "chi2/D");
+    t->Branch("ndf", &pt.reco_ndf, "ndf/D");
+    t->Branch("pu", &pt.reco_pu, "pu/D");
+    t->Branch("pv", &pt.reco_pv, "pv/D");
+    t->Branch("pw", &pt.reco_pw, "pw/D");
+    t->Branch("pt", &pt.reco_pt, "pt/D");
+    t->Branch("reduced_chi2", &pt.reco_reduced_chi2, "reduced_chi2/D");
+    t->Branch("flag_vertex", &pt.reco_flag_vertex, "flag_vertex/I");
+    t->Branch("flag_shower", &pt.reco_flag_track_shower, "flag_shower/I");
+    t->Branch("rr", &pt.reco_rr, "rr/D");
+    t->Branch("cluster_id", &pt.reco_mother_cluster_id, "cluster_id/I");
+    t->Branch("real_cluster_id", &pt.reco_proto_cluster_id, "real_cluster_id/I");
+    t->Branch("sub_cluster_id", &pt.reco_proto_cluster_id, "sub_cluster_id/I");
+    t->Branch("particle_id", &pt.reco_particle_id, "particle_id/I");
+    t->Branch("nu_index", &nu_index, "nu_index/I");
+    t->Branch("point_cluster_id", &point_cluster_id, "point_cluster_id/I");
+    // No Fill(): the tree is written with its schema and zero entries.
+}
+
 void Root::SbndPrMagnifyTrackingVisitor::write_t_rec_data(TFile* output_tf, Clus::Facade::Grouping& grouping,
                                                           const ChanScheme& cs) const
 {
@@ -777,12 +843,14 @@ void Root::SbndPrMagnifyTrackingVisitor::write_t_rec_data(TFile* output_tf, Clus
     auto tf = nu_fitters.front();
     if (!tf) {
         log->warn("SbndPrMagnifyTrackingVisitor: no TrackFitting in grouping");
+        if (m_rec_charge_provenance) write_empty_rec_charge(output_tf);   // sbnd_xin/docs/109 rev 3
         return;
     }
 
     auto graph = tf->get_graph();
     if (!graph) {
         log->warn("SbndPrMagnifyTrackingVisitor: no Graph in TrackFitting");
+        if (m_rec_charge_provenance) write_empty_rec_charge(output_tf);   // sbnd_xin/docs/109 rev 3
         return;
     }
 
@@ -815,6 +883,17 @@ void Root::SbndPrMagnifyTrackingVisitor::write_t_rec_data(TFile* output_tf, Clus
     // evt 172230/444187, so this is a guard, not a change of what is written.
     int n_paf_fallback = 0;
     WCPointTree point_tree;
+    // sbnd_xin/docs/109 rev 3.  Function-scope so the lambda below can set them
+    // and the Branch() addresses stay valid for every Fill().
+    //   nu_index         -- which T_tagger/T_kine row these points belong to.
+    //   point_cluster_id -- the row's OWN cluster, as opposed to the candidate's
+    //                       main cluster in cluster_id.  It is what `ndf` has
+    //                       been carrying (see the reco_ndf writes below);
+    //                       `ndf` is left exactly as it is because
+    //                       wire-cell-sbnd-magnify-tracking-convert blocks
+    //                       tracks on std::round(ndf).
+    int rec_nu_index = 0;
+    int rec_point_cluster_id = -1;
     auto project_fit = [&](const PR::Fit& fit) {
         const bool have_paf = fit.paf.first >= 0;
         if (!have_paf) ++n_paf_fallback;
@@ -850,6 +929,10 @@ void Root::SbndPrMagnifyTrackingVisitor::write_t_rec_data(TFile* output_tf, Clus
     t_rec_charge->Branch("real_cluster_id", &point_tree.reco_proto_cluster_id, "real_cluster_id/I");
     t_rec_charge->Branch("sub_cluster_id", &point_tree.reco_proto_cluster_id, "sub_cluster_id/I");
     t_rec_charge->Branch("particle_id", &point_tree.reco_particle_id, "particle_id/I");
+    if (m_rec_charge_provenance) {   // sbnd_xin/docs/109 rev 3
+        t_rec_charge->Branch("nu_index", &rec_nu_index, "nu_index/I");
+        t_rec_charge->Branch("point_cluster_id", &rec_point_cluster_id, "point_cluster_id/I");
+    }
 
     // Use calibration parameters from configuration
     const double dQdx_scale = m_dQdx_scale;
@@ -931,10 +1014,33 @@ void Root::SbndPrMagnifyTrackingVisitor::write_t_rec_data(TFile* output_tf, Clus
 
     // Find the main cluster ID
     int mother_cluster_id = -1;
-    for (const auto& [cluster, _] : cluster_edges) {
-        if (cluster && cluster->get_flag(Facade::Flags::main_cluster)) {
-            mother_cluster_id = cluster->get_cluster_id();
-            break;
+    rec_nu_index = static_cast<int>(cand);
+    // sbnd_xin/docs/109 rev 3: prefer the candidate's OWN main-cluster id --
+    // TaggerInfo::cluster_id, set from the main_cluster POINTER at
+    // TaggerCheckNeutrino.cxx `tagger_info.cluster_id = main_cluster->get_cluster_id()`,
+    // which is exactly what T_tagger/T_kine's cluster_id carries.  The flag scan
+    // below cannot reproduce it in two measured situations:
+    //   - the selected activity is a demoted main.  ClusteringUnmergeBundle
+    //     clears Flags::main_cluster on every split-off part and deliberately
+    //     never restores it, and TaggerCheckNeutrino's own restore guards have
+    //     destructed by the time this writer runs -- so no cluster in the
+    //     candidate's graph carries the flag and every row got cluster_id = -1
+    //     (T_bundle.reason 1; 57 of the 3067 sbnd_xin events).
+    //   - the overall-vertex search moved the main onto a companion
+    //     (vertex_moved_cluster = 1).  The flag stayed on the PRE-swap cluster,
+    //     so the rows got an id that is not the row's T_tagger cluster_id
+    //     (122 of 1460 candidate rows).
+    // Falling back to the scan keeps every other case, and an unset TaggerInfo
+    // (cluster_id defaults to -1) behaves exactly as before.
+    if (m_rec_charge_provenance && cand < nu_fitters.size() && nu_fitters[cand]) {
+        mother_cluster_id = nu_fitters[cand]->get_tagger_info().cluster_id;
+    }
+    if (mother_cluster_id < 0) {
+        for (const auto& [cluster, _] : cluster_edges) {
+            if (cluster && cluster->get_flag(Facade::Flags::main_cluster)) {
+                mother_cluster_id = cluster->get_cluster_id();
+                break;
+            }
         }
     }
     if (mother_cluster_id < 0) {
@@ -977,6 +1083,7 @@ void Root::SbndPrMagnifyTrackingVisitor::write_t_rec_data(TFile* output_tf, Clus
                 point_tree.reco_proto_cluster_id = -1;
                 point_tree.reco_particle_id = -1;
                 point_tree.reco_ndf = cluster->get_cluster_id();
+                rec_point_cluster_id = cluster->get_cluster_id();   // sbnd_xin/docs/109 rev 3
                 point_tree.reco_flag_vertex = 1;
                 point_tree.reco_flag_track_shower = 0;
 
@@ -1012,6 +1119,7 @@ void Root::SbndPrMagnifyTrackingVisitor::write_t_rec_data(TFile* output_tf, Clus
 
             point_tree.reco_cluster_id = cluster->get_cluster_id();   // cluster id ...
             point_tree.reco_ndf = cluster->get_cluster_id();
+            rec_point_cluster_id = cluster->get_cluster_id();   // sbnd_xin/docs/109 rev 3
             point_tree.reco_proto_cluster_id = seg->cluster()->get_cluster_id() * 1000 + static_cast<int>(seg->get_graph_index());
             point_tree.reco_flag_vertex = 0;
 

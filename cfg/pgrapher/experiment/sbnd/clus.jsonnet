@@ -2034,6 +2034,16 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
        flash_pair_dt_us=null,
        root_cluster_flags=false,
        root_provenance=false,
+       // sbnd_xin/docs/109 rev 3: root_point_ids -- make T_rec_charge joinable
+       // to the candidate that owns its points.  cluster_id is taken from the
+       // candidate's own TaggerInfo (what T_tagger/T_kine carry) instead of a
+       // Flags::main_cluster scan that returns -1 on a demoted-main candidate
+       // and the pre-swap cluster on a vertex-moved row; adds nu_index and
+       // point_cluster_id; and books T_rec_charge / T_proj_data even when they
+       // are empty so the file's tree set stops varying with the event.
+       // C++ default false; key omitted when off => byte-identical pre-knob
+       // config AND tracking-pr.root.
+       root_point_ids=false,
        provenance_extra={}):: {
         // Only gate when the caller actually supplied a window; beam_window=[0,0]
         // (the arg default, i.e. "no beam window") must not silently drop every
@@ -2623,6 +2633,8 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                     // sbnd_xin/docs/109.  Keys omitted when off => byte-identical config.
                     [if root_nu_record then 'nu_provenance']: true,
                     [if root_cluster_flags then 'fix_cluster_flags']: true,
+                    // sbnd_xin/docs/109 rev 3.  Key omitted when off => byte-identical config.
+                    [if root_point_ids then 'rec_charge_provenance']: true,
                     [if root_provenance then 'provenance']: {
                         bdt_weights_dir: bdt_weights_dir,
                         numu_xgboost_xml: numu_xgboost_xml,

@@ -18,6 +18,7 @@
 /// Units: times in microseconds, lengths in cm, charge in PE.
 
 #include <cstddef>
+#include <map>
 #include <vector>
 
 namespace WireCell::Clus::PR {
@@ -52,6 +53,9 @@ namespace WireCell::Clus::PR {
             kLengthFloor = 3,       // at least one activity failed only the nu_per_bundle_min_length floor
             kStmOnly = 4,           // rejected by nu_per_bundle_stm_only (and nothing failed the floor)
             kNoEligible = 5,        // no activity examined (e.g. only demoted mains and the fallback is off)
+            kDedupFlashGroup = 6,   // sbnd_xin/docs/109 rev 3: a candidate was selected, then dropped
+                                    // because another bundle of the SAME flash_group (one physical
+                                    // flash seen by both TPCs) kept a longer one (nu_dedup_flash_group)
         };
 
         struct Bundle {
@@ -111,6 +115,17 @@ namespace WireCell::Clus::PR {
     /// gives every flash its own group.  Order-independent.
     std::vector<int> group_flashes(const std::vector<int>& gid, const std::vector<int>& tpc,
                                    const std::vector<double>& time_us, double dt_us);
+
+    /// sbnd_xin/docs/109 rev 3.  Collapse neutrino candidates that come from
+    /// one physical flash.  `gid` lists the candidates' bundle gids IN THE
+    /// ORDER THE SELECTION RANKED THEM (longest selected activity first), and
+    /// `gid_group` maps a gid to its flash group (group_flashes above).
+    /// Returns the indices to KEEP: the first candidate of each group, i.e. the
+    /// longest, which is also the one the row ordering would have put in slot 0.
+    /// A gid absent from the map keeps its own gid as its group, so a flash that
+    /// could not be grouped can never be mistaken for a duplicate.
+    std::vector<std::size_t> dedup_flash_groups(const std::vector<int>& gid,
+                                                const std::map<int, int>& gid_group);
 
 }  // namespace WireCell::Clus::PR
 

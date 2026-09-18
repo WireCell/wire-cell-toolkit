@@ -505,6 +505,8 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     // sbnd_xin/docs/109: see the member comments in the header.
     m_nu_provenance = get(config, "nu_provenance", m_nu_provenance);
     m_flash_pair_dt_us = get(config, "flash_pair_dt_us", m_flash_pair_dt_us);  // us
+    // sbnd_xin/docs/109 rev 3: DEFAULT FALSE => one candidate per bundle, as today.
+    m_nu_dedup_flash_group = get(config, "nu_dedup_flash_group", m_nu_dedup_flash_group);
     m_sp_photon_flag          = get(config, "sp_photon_flag",          m_sp_photon_flag);
 
     // ---- doc sbnd_xin/docs/pr/36 §10 tagger-stage knobs ---------------------
@@ -1076,6 +1078,7 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["nu_selected_as_main_snapshot_all"] = m_nu_selected_as_main_snapshot_all;  // doc 75; closes the DL-swap flag leak; false = legacy
     cfg["nu_provenance"]            = m_nu_provenance;                 // sbnd_xin/docs/109; record the selection (TaggerInfo/KineInfo fields + NuBundleCensus); false = nothing filled
     cfg["flash_pair_dt_us"]         = m_flash_pair_dt_us;              // sbnd_xin/docs/109; us; different-TPC flashes closer than this share a flash_group; read only under nu_provenance
+    cfg["nu_dedup_flash_group"]     = m_nu_dedup_flash_group;          // sbnd_xin/docs/109 rev 3; collapse candidates from one physical flash seen by both TPCs, keeping the longest; false = one candidate per bundle
     cfg["sp_photon_flag"] = m_sp_photon_flag;     // doc pr/26 sec. 8.2; store singlephoton_tagger()'s verdict in TaggerInfo::photon_flag (prototype NeutrinoID.cxx:271)
     // doc sbnd_xin/docs/pr/36 §10.
     cfg["fiducial"] = Json::Value();                 // null = the historical FiducialUtils containment fallback
@@ -2480,6 +2483,93 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
                              if (la != lb) return la > lb;
                              return a.gid < b.gid;
                          });
+        // ---- sbnd_xin/docs/109 rev 3 -- nu_dedup_flash_group ------------ //
+        // One physical beam flash is seen by both SBND drift volumes and
+        // arrives as two opflash gids a few ns apart.  Each gid keys its own
+        // bundle (see the gid_mains/gid_demoted maps above), so one flash makes
+        // two candidates and the event gets two neutrino rows -- 12 of the 3067
+        // sbnd_xin events.  Collapse them here, AFTER the longest-first sort, so
+        // the survivor is the same candidate slot 0 would have held anyway.
+        // DEFAULT OFF: with the knob off not a single line below runs.
+        if (m_nu_dedup_flash_group && candidates.size() > 1) {
+            // gid -> flash group (the smallest gid of the group).  From the
+            // census when nu_provenance built it; otherwise computed here from
+            // the same merge-safe "opflash" PC with the same group_flashes(),
+            // so this knob does not silently need nu_provenance on as well.
+            std::map<int, int> gid_group;
+            if (census) {
+                for (const auto& f : census->flashes) gid_group[f.gid] = f.flash_group;
+            }
+            else if (grouping.has_pc("opflash") && grouping.has_pcarray("gid", "opflash")) {
+                const auto ogid = grouping.get_pcarray<int>("gid", "opflash");
+                std::vector<int> apa_col;
+                if (grouping.has_pcarray("apa", "opflash")) {
+                    const auto oapa = grouping.get_pcarray<int>("apa", "opflash");
+                    for (size_t i = 0; i < oapa.size(); ++i) apa_col.push_back(oapa[i]);
+                }
+                std::map<int, int> gid_tpc;   // gid-keyed => ascending, deterministic
+                for (size_t i = 0; i < ogid.size(); ++i) {
+                    if (gid_tpc.count(ogid[i])) continue;
+                    gid_tpc[ogid[i]] = i < apa_col.size() ? apa_col[i] : -1;
+                }
+                std::vector<int> vgid, vtpc;
+                std::vector<double> vtime;
+                for (const auto& [g, tpc] : gid_tpc) {
+                    const auto fl = grouping.flash_by_gid(g);
+                    vgid.push_back(g);
+                    vtpc.push_back(tpc);
+                    // An unresolvable flash never groups (group_flashes' NaN rule).
+                    vtime.push_back(fl ? fl.time() / units::us : std::nan(""));
+                }
+                const auto groups = group_flashes(vgid, vtpc, vtime, m_flash_pair_dt_us);
+                for (size_t i = 0; i < vgid.size() && i < groups.size(); ++i) {
+                    gid_group[vgid[i]] = groups[i];
+                }
+            }
+            // The rule itself is PR::dedup_flash_groups (unit-tested in
+            // clus/test/doctest_nu_bundle_census.cxx): keep the first candidate
+            // of each group, which in this order is the longest.
+            std::vector<int> cand_gids;
+            cand_gids.reserve(candidates.size());
+            for (const auto& c : candidates) cand_gids.push_back(c.gid);
+            const auto keep_idx = dedup_flash_groups(cand_gids, gid_group);
+            std::set<size_t> keep_set(keep_idx.begin(), keep_idx.end());
+            std::vector<NuCandidate> kept, dropped;
+            for (size_t i = 0; i < candidates.size(); ++i) {
+                auto& c = candidates[i];
+                if (!keep_set.count(i)) {
+                    auto git = gid_group.find(c.gid);
+                    SPDLOG_LOGGER_INFO(log, "TaggerCheckNeutrino: [nu_dedup_flash_group] gid {} (flash group {}) dropped: cluster {} (L {:.1f} cm) is not the longest candidate of this physical flash",
+                                       c.gid, git == gid_group.end() ? c.gid : git->second,
+                                       c.main ? c.main->get_cluster_id() : -1,
+                                       c.main ? c.main->get_length() / units::cm : 0.0);
+                    dropped.push_back(std::move(c));
+                    continue;
+                }
+                kept.push_back(std::move(c));
+            }
+            // UNCONDITIONAL: the loop above moved EVERY candidate into `kept`
+            // or `dropped`, so `candidates` now holds moved-from shells whether
+            // or not anything was dropped.  Guarding this assignment on
+            // `!dropped.empty()` silently emptied each candidate's `others`
+            // (its companions) and `acts` on every event where the knob found
+            // nothing to drop -- caught by d109r3_dedup_census.py's
+            // "changed surviving rows" check on ncpi0 18625, whose two rows
+            // are in different flash groups and whose reco Enu still moved
+            // 1448.6 -> 693.5 MeV and 174.1 -> 105.0 MeV.
+            candidates = std::move(kept);
+            // The dropped bundles still get a census row, so T_bundle keeps
+            // one row per examined bundle and names why this one has no
+            // T_tagger row.
+            if (census) {
+                for (const auto& c : dropped) {
+                    auto b = census_row(c, -1);
+                    b.reason = NuBundleCensus::kDedupFlashGroup;
+                    census->bundles.push_back(b);
+                }
+            }
+        }
+
         // sbnd_xin/docs/109: the selected bundles' census rows, now that the
         // row order (nu_index) is fixed; then every row in ascending gid.
         if (census) {

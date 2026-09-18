@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <numeric>
+#include <set>
 
 using namespace WireCell::Clus::PR;
 
@@ -45,4 +46,18 @@ std::vector<int> WireCell::Clus::PR::group_flashes(const std::vector<int>& gid,
     std::vector<int> out(n);
     for (size_t i = 0; i < n; ++i) out[i] = min_gid[find(i)];
     return out;
+}
+
+std::vector<std::size_t> WireCell::Clus::PR::dedup_flash_groups(const std::vector<int>& gid,
+                                                                const std::map<int, int>& gid_group)
+{
+    std::set<int> kept_groups;
+    std::vector<std::size_t> keep;
+    for (std::size_t i = 0; i < gid.size(); ++i) {
+        auto it = gid_group.find(gid[i]);
+        const int grp = (it == gid_group.end()) ? gid[i] : it->second;
+        if (!kept_groups.insert(grp).second) continue;   // a longer candidate already holds this flash
+        keep.push_back(i);
+    }
+    return keep;
 }

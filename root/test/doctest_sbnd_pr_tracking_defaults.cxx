@@ -60,6 +60,16 @@ TEST_CASE("root knob defaults: SbndPrMagnifyTrackingVisitor save_in_scope is OFF
     CHECK(cfg["provenance"].isObject());
     CHECK(cfg["provenance"].size() == 0);
 
+    // sbnd_xin/docs/109 rev 3.  rec_charge_provenance changes the VALUE of
+    // T_rec_charge.cluster_id (from a Flags::main_cluster scan of the
+    // candidate's graph to the candidate's own TaggerInfo::cluster_id), adds
+    // the nu_index and point_cluster_id branches, and books T_rec_charge /
+    // T_proj_data on events that used to omit them -- so with it on, neither
+    // the tree set nor that column is comparable to an arm recorded before
+    // doc 109 rev 3.  It must default off.
+    REQUIRE_MESSAGE(cfg.isMember("rec_charge_provenance"), "missing knob: rec_charge_provenance");
+    CHECK(cfg["rec_charge_provenance"].asBool() == false);
+
     // The legacy output name must not drift either -- the runner and every
     // gate script look for exactly this file.
     REQUIRE(cfg.isMember("output_filename"));

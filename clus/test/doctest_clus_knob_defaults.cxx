@@ -120,6 +120,11 @@ TEST_CASE("clus knob defaults: TaggerCheckNeutrino switches are all OFF")
     CHECK_KNOB_BOOL(cfg, "nu_provenance", false);
     REQUIRE_MESSAGE(cfg.isMember("flash_pair_dt_us"), "missing knob: flash_pair_dt_us");
     CHECK(cfg["flash_pair_dt_us"].asDouble() == doctest::Approx(0.05));
+    // sbnd_xin/docs/109 rev 3 -- nu_dedup_flash_group REMOVES T_tagger rows
+    // (the second candidate one physical flash makes when both drift volumes
+    // see it), so it moves the selection and must default off.  It is built and
+    // measured in doc 109 rev 3 and deliberately NOT flipped in production.
+    CHECK_KNOB_BOOL(cfg, "nu_dedup_flash_group", false);
     // doc pr/40: track (proton/pion/muon) mis-identified as electron.
     CHECK_KNOB_BOOL(cfg, "track_pid_persist_dqdx", false);      // F1
     CHECK_KNOB_BOOL(cfg, "shower_reclass_dqdx_guard", false);   // F2

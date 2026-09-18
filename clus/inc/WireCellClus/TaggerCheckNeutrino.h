@@ -760,6 +760,20 @@ public:
         // = where the one-flash peak of the different-TPC |dt| ends on 3000
         // production events (doc 108 sec 4.1).  Read only under nu_provenance.
         double m_flash_pair_dt_us{0.05};
+        // sbnd_xin/docs/109 rev 3.  One physical beam flash is seen by BOTH
+        // SBND drift volumes and arrives as two opflash gids a few ns apart
+        // (e.g. 5 on TPC 0 and 1000006 on TPC 1).  Bundles are keyed on the raw
+        // gid, so each side builds its own candidate and the event gets two
+        // neutrino rows for one flash -- 12 of the 3067 sbnd_xin events, and in
+        // the hand-scanned example only one of the two rows is the true
+        // neutrino.  group_flashes() already says which gids are one flash;
+        // until now that answer was only written to the output, never read back
+        // into a decision.  When true, candidates sharing a flash_group are
+        // collapsed to the longest selected activity (the same rule the row
+        // ordering already uses), and the dropped bundle keeps its census row
+        // with reason kDedupFlashGroup so the event still explains itself.
+        // C++ default false => every bundle keeps its candidate, as today.
+        bool m_nu_dedup_flash_group{false};
         bool m_sp_photon_flag{false};  // doc pr/26 sec. 8.2 port gap.  If true, the single-photon
                                        // tagger's verdict is stored in TaggerInfo::photon_flag,
                                        // as prototype NeutrinoID.cxx:271 does

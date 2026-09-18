@@ -98,6 +98,23 @@ namespace WireCell {
             // -1 without a census), and matched_flash_gid / flash_tpc are
             // added.  DEFAULT FALSE => byte-identical.
             bool m_fix_cluster_flags{false};
+            // sbnd_xin/docs/109 rev 3: make T_rec_charge joinable to the
+            // candidate that owns its points.
+            //   - cluster_id is taken from the candidate's own TrackFitting
+            //     (TaggerInfo::cluster_id, the same POINTER-derived value
+            //     T_tagger/T_kine carry) instead of scanning this candidate's
+            //     graph for Flags::main_cluster.  That scan returns -1 when the
+            //     selected activity is a demoted main -- ClusteringUnmergeBundle
+            //     clears the flag and never restores it -- and returns the
+            //     PRE-swap cluster when the overall-vertex search moved the main
+            //     onto a companion, so neither case joins back to T_tagger.
+            //   - nu_index and point_cluster_id are added: which candidate a row
+            //     belongs to, and the row's own cluster (previously readable
+            //     only out of the overloaded `ndf` branch).
+            //   - T_proj_data is booked even when there is nothing to write, so
+            //     the tree set of the file does not vary with the event.
+            // DEFAULT FALSE => tracking-pr.root byte-identical.
+            bool m_rec_charge_provenance{false};
             // sbnd_xin/docs/109 group 4: provenance strings written into Trun
             // as std::string branches, one per key (sorted), plus
             // wct_version.  Empty (the default) => nothing written.

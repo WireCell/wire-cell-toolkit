@@ -1396,6 +1396,18 @@ function(
     root_nu_record = true,
     root_cluster_flags = true,
     root_provenance = true,
+    // sbnd_xin/docs/109 rev 3: T_rec_charge joinable to its candidate
+    // (cluster_id from the candidate's own TaggerInfo, + nu_index and
+    // point_cluster_id), and T_rec_charge / T_proj_data booked even when empty.
+    // Observation only: no reconstruction output moves (doc 109 rev 3 gates).
+    // C++ default false; false here => key omitted => byte-identical.
+    root_point_ids = false,
+    // sbnd_xin/docs/109 rev 3: collapse neutrino candidates that come from one
+    // physical beam flash seen by both drift volumes (same flash_group), keeping
+    // the longest selected activity.  This MOVES the selection -- it removes
+    // T_tagger rows -- so it is built, measured and left OFF; flipping it is a
+    // separate owner decision.  C++ default false.
+    nu_dedup_flash_group = false,
     provenance_extra = {},
     flash_pair_dt_us = null,
     mcs_muon_source = 'long_muon_else_pf',  // SBND PRODUCTION ON 2026-08-28 (doc 84 round 1 P4: chain when one exists, else the pf muon; pf_muon | long_muon | longest_segment | long_muon_else_pf)
@@ -3287,6 +3299,7 @@ function(
         [if skip_cosmic_companions then 'skip_cosmic_companions']: true,
         [if cosmic_companion_min_length != null then 'cosmic_companion_min_length']: cosmic_companion_min_length,
         [if nu_fallback_demoted_mains then 'nu_fallback_demoted_mains']: true,
+        [if nu_dedup_flash_group then 'nu_dedup_flash_group']: true,  // sbnd_xin/docs/109 rev 3; C++ default false
         [if sp_photon_flag then 'sp_photon_flag']: true,
         // Same offsets below the top face as clus.jsonnet's
         // pr() defaults, re-anchored to pr_y_top.
@@ -3813,6 +3826,7 @@ function(
                              flash_pair_dt_us=flash_pair_dt_us,
                              root_cluster_flags=root_cluster_flags,
                              root_provenance=root_provenance,
+                             root_point_ids=root_point_ids,  // sbnd_xin/docs/109 rev 3
                              provenance_extra=provenance_extra,
                              pseudo_shower_track_paint=pseudo_shower_track_paint,
                              use_power_recomb=use_power_recomb,
