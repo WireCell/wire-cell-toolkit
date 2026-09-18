@@ -769,6 +769,14 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
               // pdvd/wct-pr-perevt.jsonnet, exactly as wire_tol/adjacent_slice
               // do -- a bare pr.jsonnet run is NOT the PDVD operating point.
               steiner_terminal_min_separation=0,
+              // doc pdvd/114: blank-plane admission policy for the Steiner
+              // terminal candidates ("prefer3" | "nearby" | "prefer3+nearby")
+              // and the nearby radius (a LENGTH).  null here = C++ default
+              // "wcp" / 0, keys omitted => byte-identical config.  Threaded
+              // into BOTH steiner passes so the refresh builds its clusters
+              // like their peers.  Set from the driver, not here.
+              steiner_blank_plane_mode=null,
+              steiner_blank_plane_radius=null,
               // Steiner EDGE-WEIGHT charge fidelity (doc pr/29 D2).  OFF here =
               // the historical toolkit behaviour, key omitted => byte-identical.
               //   steiner_edge_charge_forward_dead_mix=true   weights steiner
@@ -1574,6 +1582,8 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
                                 terminal_adjacent_slice=steiner_terminal_adjacent_slice,
                                 edge_charge_forward_dead_mix=steiner_edge_charge_forward_dead_mix,
                                 terminal_min_separation=steiner_terminal_min_separation,
+                                terminal_blank_plane_mode=steiner_blank_plane_mode,   // doc pdvd/114
+                                terminal_blank_plane_radius=steiner_blank_plane_radius,
                                 skip_flags=steiner_skip_flags)
               + { data+: { [if steiner_terminal_charge != null then 'terminal_charge_threshold']: steiner_terminal_charge } },
             // The doc pr/23 second steiner pass, named right after protect_bundle:
@@ -1602,6 +1612,8 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
                                 // only the clusters protect_bundle purged and
                                 // they must be built like their peers.
                                 terminal_min_separation=steiner_terminal_min_separation,
+                                terminal_blank_plane_mode=steiner_blank_plane_mode,   // doc pdvd/114
+                                terminal_blank_plane_radius=steiner_blank_plane_radius,
                                 // Same skip list as the first pass: replace=false
                                 // means this pass builds exactly the clusters
                                 // with no graph yet, i.e. everything the first

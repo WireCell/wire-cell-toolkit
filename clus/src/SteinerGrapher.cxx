@@ -7,6 +7,7 @@
 #include "WireCellClus/DynamicPointCloud.h"
 // doc pdvd/37 R1 -- the pure-geometry thinning core.
 #include "WireCellClus/SteinerThinning.h"
+#include "WireCellClus/SteinerBlankPlane.h"
 // doc pdvd/111 round 2 -- the per-edge 2-D support count of WCT_STEINER_GRAPH_DUMP,
 // and the two graph stages it rebuilds for edge provenance.
 #include "WireCellClus/SteinerEdgeSupport.h"
@@ -56,8 +57,13 @@ namespace {
     // and the owner asked why, given that the terminals are charge-selected.
     // This prints, to stdout, what that question needs and nothing persists:
     //   STGC <ref ident> <call> <counts...>      one header per call
-    //   STGR <ref ident> <x> <y> <z> <slice> <qu> <qv> <qw>
-    //        every point of the RETILED cluster (never persisted anywhere else)
+    //   STGR <ref ident> <x> <y> <z> <slice> <qu> <qv> <qw> <bi> <wu> <wv> <ww> <uu> <uv> <uw>
+    //        every point of the RETILED cluster (never persisted anywhere else);
+    //        bi..uw appended for doc pdvd/114 (blob major index, wire index and
+    //        charge uncertainty per plane)
+    //   STGB <ref ident> <bi> <apa> <face> <slice> <umin umax vmin vmax wmin wmax>
+    //        <max_wire_type> <min_wire_type> <max_wire_interval> <min_wire_interval>
+    //        every blob of the retiled cluster (doc pdvd/114)
     //   STGV <ref ident> <i> <x> <y> <z> <old> <term> <extreme> <q> <m02> <m61>
     //        every steiner_pc vertex; i is the steiner_pc index TaggerCheckSTM's
     //        do_rough_path walks; m02 / m61 are 6-bit live/dead plane masks at
@@ -171,13 +177,44 @@ namespace {
 
         char buf[512];
         const int npts = cluster.npoints();
+        // doc pdvd/114: seven fields appended LAST to STGR, so every doc-111/112/113
+        // parser keeps matching its prefix -- the point's blob (the sv3d major
+        // index, the key find_steiner_terminals groups by), its wire index per
+        // plane, and its charge uncertainty per plane (1e12 = the retiler's
+        // dead/forced sentinel).  Together with the STGB line below they let the
+        // per-blob Phase-1 peak search be replayed offline under other scores.
+        const auto& sv_r = cluster.sv3d();
+        const auto& majs_r = sv_r.kd().major_indices();
         for (int i = 0; i < npts; ++i) {
             const auto* blob = cluster.blob_with_point(i);
-            std::snprintf(buf, sizeof(buf), "STGR %ld %.2f %.2f %.2f %d %.0f %.0f %.0f", ident,
+            std::snprintf(buf, sizeof(buf), "STGR %ld %.2f %.2f %.2f %d %.0f %.0f %.0f %ld %d %d %d %.3g %.3g %.3g", ident,
                           X[i] / units::cm, Y[i] / units::cm, Z[i] / units::cm,
                           blob ? (int) blob->slice_index_min() : -1,
-                          cluster.charge_value(i, 0), cluster.charge_value(i, 1), cluster.charge_value(i, 2));
+                          cluster.charge_value(i, 0), cluster.charge_value(i, 1), cluster.charge_value(i, 2),
+                          (size_t) i < majs_r.size() ? (long) majs_r[i] : -1L,
+                          cluster.wire_index(i, 0), cluster.wire_index(i, 1), cluster.wire_index(i, 2),
+                          cluster.charge_uncertainty(i, 0), cluster.charge_uncertainty(i, 1),
+                          cluster.charge_uncertainty(i, 2));
             std::cout << buf << "\n";
+        }
+        // doc pdvd/114: one STGB line per blob of the retiled cluster -- its major
+        // index (joins STGR's bi), apa, face, slice, the three wire ranges
+        // (half-open [min, max)), and the max/min wire type + interval that
+        // connect_graph_closely_pid uses for the in-blob edges.
+        {
+            const auto& children = cluster.children();
+            for (size_t bi = 0; bi < children.size(); ++bi) {
+                const auto* b = children[bi];
+                if (!b) continue;
+                std::snprintf(buf, sizeof(buf), "STGB %ld %zu %d %d %d %d %d %d %d %d %d %d %d %d %d", ident, bi,
+                              b->wpid().apa(), b->wpid().face(), (int) b->slice_index_min(),
+                              (int) b->u_wire_index_min(), (int) b->u_wire_index_max(),
+                              (int) b->v_wire_index_min(), (int) b->v_wire_index_max(),
+                              (int) b->w_wire_index_min(), (int) b->w_wire_index_max(),
+                              (int) b->get_max_wire_type(), (int) b->get_min_wire_type(),
+                              (int) b->get_max_wire_interval(), (int) b->get_min_wire_interval());
+                std::cout << buf << "\n";
+            }
         }
 
         for (size_t i = 0; i < nsv; ++i) {
@@ -832,6 +869,57 @@ Steiner::Grapher::vertex_set Steiner::Grapher::find_peak_point_indices(
     // before any suppression.  Set here rather than at the early return above
     // so an all-below-threshold blob reports 0 and not "unset".
     if (n_candidate_points) *n_candidate_points = candidates_set.size();
+
+    // doc pdvd/114: the blank-plane admission policy (SteinerBlankPlane.h),
+    // applied to this blob's candidates before the peak search.  Under the
+    // default "wcp" the parse yields the no-op branch and nothing below runs.
+    {
+        BlankPlaneMode bpm = BlankPlaneMode::wcp;
+        if (!parse_blank_plane_mode(m_config.terminal_blank_plane_mode, bpm)) {
+            raise<ValueError>("find_peak_point_indices: unknown terminal_blank_plane_mode '%s'",
+                              m_config.terminal_blank_plane_mode.c_str());
+        }
+        if (bpm != BlankPlaneMode::wcp && !candidates_set.empty()) {
+            auto nzero = [&](size_t idx) -> int {
+                int nz = 0;
+                for (int p = 0; p < 3; ++p) {
+                    if (m_cluster.charge_value(idx, p) == 0) ++nz;
+                }
+                return nz;
+            };
+            // a three-plane candidate: no zero plane and it clears the same
+            // charge test the blob's own candidates cleared (cached per point
+            // across the blobs of one find_steiner_terminals call)
+            auto live3 = [&](size_t j) -> bool {
+                const size_t npts = m_cluster.npoints();
+                if (m_live3_cache.size() != npts) m_live3_cache.assign(npts, -1);
+                if (j >= npts) return false;
+                if (m_live3_cache[j] < 0) {
+                    bool ok = nzero(j) == 0;
+                    if (ok) {
+                        auto [q_ok, q] = m_cluster.calc_charge_wcp(j, charge_threshold, disable_dead_mix_cell);
+                        ok = q_ok && q > charge_threshold;
+                    }
+                    m_live3_cache[j] = ok ? 1 : 0;
+                }
+                return m_live3_cache[j] > 0;
+            };
+            auto near3 = [&](size_t idx) -> bool {
+                const double r = m_config.terminal_blank_plane_radius;
+                if (r <= 0) return false;
+                const auto res = m_cluster.kd_radius(r, m_cluster.point3d(idx));
+                for (const auto& item : res) {
+                    const size_t j = item.first;
+                    if (j != idx && live3(j)) return true;
+                }
+                return false;
+            };
+            const size_t before = candidates_set.size();
+            candidates_set = apply_blank_plane_policy(candidates_set, bpm, nzero, near3);
+            SPDLOG_LOGGER_TRACE(log, "find_peak_point_indices: blank-plane policy {} kept {} of {} candidates",
+                                m_config.terminal_blank_plane_mode, candidates_set.size(), before);
+        }
+    }
 
     if (candidates_set.empty()) {
         return peak_points;

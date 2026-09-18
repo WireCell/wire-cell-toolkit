@@ -8,6 +8,8 @@
 #include "WireCellUtil/PointTree.h"
 #include "WireCellUtil/NamedFactory.h"
 #include "WireCellClus/ClusteringFuncs.h"
+#include "WireCellClus/SteinerBlankPlane.h"
+#include "WireCellUtil/Exceptions.h"
 
 
 WIRECELL_FACTORY(CreateSteinerGraph, WireCell::Clus::Steiner::CreateSteinerGraph,
@@ -87,6 +89,22 @@ void Steiner::CreateSteinerGraph::configure(const WireCell::Configuration& cfg)
                   "disabled", m_grapher_config.terminal_min_separation / units::cm);
         m_grapher_config.terminal_min_separation = 0;
     }
+    // doc pdvd/114: blank-plane admission policy for the Steiner terminal
+    // candidates (SteinerBlankPlane.h).  C++ default "wcp" = no policy, so a
+    // config without the key runs bit-for-bit as before.  A typo is refused
+    // here rather than silently running the legacy path.
+    m_grapher_config.terminal_blank_plane_mode =
+        get<std::string>(cfg, "terminal_blank_plane_mode", m_grapher_config.terminal_blank_plane_mode);
+    {
+        Steiner::BlankPlaneMode bpm;
+        if (!Steiner::parse_blank_plane_mode(m_grapher_config.terminal_blank_plane_mode, bpm)) {
+            raise<ValueError>("CreateSteinerGraph: unknown terminal_blank_plane_mode '%s' "
+                              "(wcp | prefer3 | nearby | prefer3+nearby)",
+                              m_grapher_config.terminal_blank_plane_mode.c_str());
+        }
+    }
+    m_grapher_config.terminal_blank_plane_radius =
+        get(cfg, "terminal_blank_plane_radius", m_grapher_config.terminal_blank_plane_radius);
     const std::string retiler_tn = get<std::string>(cfg, "retiler", "RetileCluster");
     m_grapher_config.retile = Factory::find_tn<IPCTreeMutate>(retiler_tn);
 }
@@ -134,6 +152,11 @@ Configuration Steiner::CreateSteinerGraph::default_configuration() const
     // steiner edges (the prototype does; the toolkit dropped the argument and
     // always used true).  false = legacy.
     cfg["edge_charge_forward_dead_mix"] = m_grapher_config.edge_charge_forward_dead_mix;
+    // doc pdvd/114: blank-plane admission policy for the terminal candidates
+    // ("wcp" | "prefer3" | "nearby" | "prefer3+nearby") and the nearby radius.
+    // "wcp" / 0 = legacy.
+    cfg["terminal_blank_plane_mode"] = m_grapher_config.terminal_blank_plane_mode;
+    cfg["terminal_blank_plane_radius"] = m_grapher_config.terminal_blank_plane_radius;
 
     return cfg;
 }

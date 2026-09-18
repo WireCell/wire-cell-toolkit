@@ -1554,7 +1554,11 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
                 beam_window_only=false, beam_window_low=0, beam_window_high=0, replace=null,
                 terminal_wire_tol=0, terminal_adjacent_slice=false,
                 edge_charge_forward_dead_mix=false, terminal_min_separation=0,
-                skip_flags=[]) :: {
+                skip_flags=[],
+                // doc pdvd/114: blank-plane admission policy for the terminal
+                // candidates.  C++ default "wcp" (no policy).  null => keys
+                // omitted => byte-identical pre-knob config.
+                terminal_blank_plane_mode=null, terminal_blank_plane_radius=null) :: {
             type: "CreateSteinerGraph",
             name: prefix+name,
             data: {
@@ -1612,6 +1616,17 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
                 // byte-identical pre-knob config.  This is a SHARED function:
                 // SBND, uBooNE and ICARUS bind it too and are left at 0.
                 [if terminal_min_separation != 0 then 'terminal_min_separation']: terminal_min_separation,
+                // doc pdvd/114.  C++ default "wcp".  "prefer3" drops a blob's
+                // two-plane candidates when the blob holds a three-plane one;
+                // "nearby" drops them when a three-plane candidate of the
+                // cluster lies within terminal_blank_plane_radius (a LENGTH,
+                // WCT units); "prefer3+nearby" both.  A blob whose candidates
+                // all have a zero plane is never touched, so dead / inefficient
+                // regions keep their terminals.  Keys omitted when null =>
+                // byte-identical pre-knob config.  Shared function: SBND,
+                // uBooNE and ICARUS bind it too and leave both null.
+                [if terminal_blank_plane_mode != null then 'terminal_blank_plane_mode']: terminal_blank_plane_mode,
+                [if terminal_blank_plane_radius != null then 'terminal_blank_plane_radius']: terminal_blank_plane_radius,
             } + dv_cfg + pcts_cfg
               + (if beam_window_only then {
                      beam_window_only: true,

@@ -112,6 +112,31 @@ namespace WireCell::Clus::Steiner {
             /// DECREASING charge order, admitting one only when no
             /// already-kept terminal lies strictly within it.
             double terminal_min_separation{0.0};
+
+            /// doc pdvd/114.  Blank-plane admission policy for the Phase-1
+            /// terminal candidates of one blob, applied BEFORE the per-blob
+            /// peak search (see WireCellClus/SteinerBlankPlane.h).
+            /// calc_charge_wcp (disable_dead_mix_cell = false, the value this
+            /// chain passes) lets a plane at charge exactly 0 pass and grades
+            /// the point on its other planes, so a point on two bright planes
+            /// and one empty (painted or dead) cell is a terminal candidate;
+            /// docs 112-114 measured that the Steiner seed leaves the image
+            /// through such points, and that about three in four of them sit
+            /// in a blob that ALSO holds a three-plane on-image candidate.
+            ///   "wcp"            no policy: bit-for-bit the historical
+            ///                    behaviour (the default);
+            ///   "prefer3"        a candidate with a zero plane is dropped when
+            ///                    the blob holds a three-plane candidate;
+            ///   "nearby"         ... when a three-plane candidate of the
+            ///                    cluster lies within terminal_blank_plane_radius;
+            ///   "prefer3+nearby" both.
+            /// A blob whose candidates all have a zero plane is never touched,
+            /// so a dead or inefficient region keeps its terminals and the
+            /// graph bridges it as before.
+            std::string terminal_blank_plane_mode{"wcp"};
+            /// Radius (WCT length units) of the "nearby" query; <= 0 disables
+            /// the nearby half.  Only read when the mode names "nearby".
+            double terminal_blank_plane_radius{0.0};
         };
         Log::logptr_t log;
 
@@ -317,6 +342,11 @@ namespace WireCell::Clus::Steiner {
 
         // Enable per-step timing printouts inside hot functions
         bool m_perf{false};
+
+        // doc pdvd/114: per-point cache for the "nearby" blank-plane policy
+        // (-1 unknown, 0 not a three-plane candidate, 1 is one).  Sized on
+        // first use in a nearby mode; never touched under "wcp".
+        mutable std::vector<signed char> m_live3_cache;
 
 
         // XIN: add any more data and methods you need here.  
