@@ -121,6 +121,31 @@ namespace WireCell::Gen {
         std::vector<double> m_smear_long;
 
 
+        /// trio_file - if non-empty, the name of a .npz file to which the
+        /// depo-to-channel association ("trios") is also written.  Empty
+        /// (default) disables this entirely and the component behaves exactly
+        /// as before.
+        ///
+        /// Each depo lands on one wire in each of the three planes, and those
+        /// three channels at their ticks are a "trio": a cross-plane
+        /// correspondence known to be real because one deposition made it.
+        /// The frame this component produces sums every depo's contribution
+        /// and so discards which depo went where; recovering that downstream
+        /// would mean replaying Drifter (whose lifetime attenuation is
+        /// stochastic) and this component.  Emitting it here is exact.
+        ///
+        /// Two arrays are appended per call, named with the frame ident:
+        ///   trio_index_<ident> (M,6) int32   tbin_{u,v,w}, chan_{u,v,w}
+        ///   trio_value_<ident> (M,3) double  charge, sigma_long, sigma_tran
+        /// Depos landing on the same six indices are summed into one row; the
+        /// sigmas are charge-weighted means over those depos.  Charge and
+        /// sigmas are post-drift, as seen by this component.
+        std::string m_trio_file{""};
+
+        /// trio_min_charge - drop aggregated trios whose absolute summed
+        /// charge is below this.  Default 0 keeps everything.
+        double m_trio_min_charge{0};
+
         // internal, return nullptr if depo is not in anode plane.  o.w. return
         // anode face.
         IAnodeFace::pointer find_face(const WireCell::IDepo::pointer& depo);
