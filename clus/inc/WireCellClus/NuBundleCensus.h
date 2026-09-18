@@ -19,6 +19,7 @@
 
 #include <cstddef>
 #include <map>
+#include <utility>
 #include <vector>
 
 namespace WireCell::Clus::PR {
@@ -126,6 +127,42 @@ namespace WireCell::Clus::PR {
     /// could not be grouped can never be mistaken for a duplicate.
     std::vector<std::size_t> dedup_flash_groups(const std::vector<int>& gid,
                                                 const std::map<int, int>& gid_group);
+
+    /// sbnd_xin/docs/109 rev 4 (nu_bundle_flash_group).  The pure parts of
+    /// "one candidate per physical flash, but only when the two halves touch".
+    /// A flash group (group_flashes) says two bundles saw the SAME light; it
+    /// cannot say whether that light came from ONE interaction whose particle
+    /// crossed the cathode (one candidate, double counted today) or from TWO
+    /// interactions, one per drift volume (two candidates, both real).  The
+    /// physical contact of their charge is what separates the two.  Measured on
+    /// the colleague's r472 s36 e40 (doc 109 sec 9): the two bundles touch at
+    /// 0.4 cm -- at the VERTEX, not at the cathode, because the Q/L matching
+    /// had already put the muon's near-side segment into the far flash's
+    /// bundle as an associated cluster.  So the contact test is a distance,
+    /// and the cathode window is an optional tightening (xcut > 0), off by
+    /// default.
+
+    /// The bundle pairs worth testing: same flash group, DIFFERENT TPC, both
+    /// gids in `gids`.  Ascending (min gid, max gid) order, so the caller's
+    /// union-find is deterministic.  A gid absent from gid_group is its own
+    /// group and is never paired; a gid absent from gid_tpc has tpc -1 and is
+    /// never paired either (an unknown side cannot be "the other side").
+    std::vector<std::pair<int, int>> cathode_pair_candidates(const std::vector<int>& gids,
+                                                             const std::map<int, int>& gid_group,
+                                                             const std::map<int, int>& gid_tpc);
+
+    /// The contact predicate on one closest-approach pair: distance `d`
+    /// between the two clusters' closest points, whose drift coordinates are
+    /// `xa` and `xb`.  Contact iff d < gap AND, only when xcut > 0, both
+    /// points lie within xcut of cathode_x.  All in the caller's units.  NaN
+    /// never contacts.
+    bool bundle_contact(double d, double xa, double xb, double cathode_x, double xcut, double gap);
+
+    /// Union-find over `gids` with the pairs the caller found in contact.
+    /// Returns gid -> root, the SMALLEST gid of its merged bundle; a gid in no
+    /// contacting pair maps to itself (the legacy bundle, byte-for-byte).
+    std::map<int, int> merge_bundles(const std::vector<int>& gids,
+                                     const std::vector<std::pair<int, int>>& contacts);
 
 }  // namespace WireCell::Clus::PR
 

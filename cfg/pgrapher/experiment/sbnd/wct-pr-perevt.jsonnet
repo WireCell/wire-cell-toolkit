@@ -1413,6 +1413,21 @@ function(
     // T_tagger rows -- so it is built, measured and left OFF; flipping it is a
     // separate owner decision.  C++ default false.
     nu_dedup_flash_group = false,
+    // sbnd_xin/docs/109 rev 4: one neutrino candidate per physical flash WHEN the
+    // two drift volumes' bundles meet at the cathode -- the merge the dedup
+    // could not be.  Doc 109 sec 8.7.3: the "same neutrino on both sides" event
+    // is ONE interaction whose muon crossed x = 0; today its vertex half and its
+    // muon half are two candidates and can never share a PR pass.  With this
+    // on, two in-window bundles of one flash_group on different TPCs whose
+    // charge touches (closest points within nu_bundle_flash_group_gap, C++
+    // default 20 cm = the long_muon_cathode_bridge_gap value; the cathode
+    // window nu_bundle_flash_group_xcut is 0 = off, because on the colleague's
+    // event the halves touch at the VERTEX, not at the seam) become one bundle:
+    // same selection rule, companions from both sides, the other side's mains
+    // admitted as companions.  Bundles that share the light but do NOT touch
+    // -- two neutrinos, one per volume -- stay two candidates.
+    // C++ default false.  Key omitted when off => byte-identical config.
+    nu_bundle_flash_group = false,
     provenance_extra = {},
     flash_pair_dt_us = null,
     mcs_muon_source = 'long_muon_else_pf',  // SBND PRODUCTION ON 2026-08-28 (doc 84 round 1 P4: chain when one exists, else the pf muon; pf_muon | long_muon | longest_segment | long_muon_else_pf)
@@ -3305,6 +3320,7 @@ function(
         [if cosmic_companion_min_length != null then 'cosmic_companion_min_length']: cosmic_companion_min_length,
         [if nu_fallback_demoted_mains then 'nu_fallback_demoted_mains']: true,
         [if nu_dedup_flash_group then 'nu_dedup_flash_group']: true,  // sbnd_xin/docs/109 rev 3; C++ default false
+        [if nu_bundle_flash_group then 'nu_bundle_flash_group']: true,  // sbnd_xin/docs/109 rev 4; C++ default false
         [if sp_photon_flag then 'sp_photon_flag']: true,
         // Same offsets below the top face as clus.jsonnet's
         // pr() defaults, re-anchored to pr_y_top.

@@ -774,6 +774,46 @@ public:
         // with reason kDedupFlashGroup so the event still explains itself.
         // C++ default false => every bundle keeps its candidate, as today.
         bool m_nu_dedup_flash_group{false};
+        // sbnd_xin/docs/109 rev 4 -- nu_bundle_flash_group.  The MERGE that
+        // rev 3's dedup could not be: doc 109 sec 8.7.3 showed that the
+        // colleague's "same neutrino on both sides" event is ONE interaction
+        // whose 1540 MeV muon crossed the cathode -- vertex and hadrons in one
+        // drift volume (one bundle), most of the muon in the other (a second
+        // bundle with a fake vertex on the cathode) -- and that the companion
+        // rule (matched_flash_gid == gid) can never put the two halves in one
+        // PR pass.  Deleting one row (the dedup) throws away half the event.
+        //
+        // But a shared flash_group has TWO readings: one interaction split at
+        // the cathode, or two interactions -- one per drift volume -- whose
+        // light merged.  The owner wants no double counting AND no lost second
+        // neutrino.  So the group alone is not the bundle key: two in-window
+        // bundles of one flash group on different TPCs are merged ONLY when
+        // their charge TOUCHES -- the closest points of some cluster pair (one
+        // per bundle) closer than `gap` (PR::bundle_contact).  Two separate
+        // interactions' charge does not touch, so a second neutrino keeps its
+        // own row.  Measured on the colleague's event (doc 109 sec 9.2): the
+        // two bundles touch at 0.4 cm -- at the VERTEX, not at the cathode,
+        // because the Q/L matching had already put the muon's near-side
+        // segment into the far flash's bundle as an associated cluster.  That
+        // is why the contact is a distance and the cathode window (`xcut` > 0:
+        // both closest points within xcut of the plane `x`) is only an
+        // optional tightening, OFF by default.  Each side keeps its OWN
+        // selection (main, then the demoted-main fallback); the merged
+        // candidate is the LONGER of the two selected activities, and the
+        // other side's selected activity and mains -- the partner half --
+        // join the companions (subject to skip_cosmic_companions like any
+        // companion) with their main_cluster flag cleared for that PR pass
+        // only.  A merge needs a real winner: when the longer selected
+        // activity is under the nu_per_bundle_min_length floor the pair stays
+        // apart (two stubs merged only gave a placeholder a fake vertex).
+        // Inert unless nu_per_bundle.  C++ default false => every bundle
+        // keyed on its raw gid, as today.  gap's default is the
+        // long_muon_cathode_bridge_gap production value, the measured cathode
+        // charge-loss scale, so a split that DOES happen at the seam is caught.
+        bool   m_nu_bundle_flash_group{false};
+        double m_nu_bundle_flash_group_x{0.0};      // cm; the cathode plane (SBND seam at x = 0); read only when xcut > 0
+        double m_nu_bundle_flash_group_xcut{0.0};   // cm; > 0 = require both closest points within this of the plane; 0 = distance only
+        double m_nu_bundle_flash_group_gap{20.0};   // cm; max distance between the closest points
         bool m_sp_photon_flag{false};  // doc pr/26 sec. 8.2 port gap.  If true, the single-photon
                                        // tagger's verdict is stored in TaggerInfo::photon_flag,
                                        // as prototype NeutrinoID.cxx:271 does

@@ -61,6 +61,9 @@ TEST_CASE("nu census: grouping is transitive and order independent")
 #include <map>
 
 using WireCell::Clus::PR::dedup_flash_groups;
+using WireCell::Clus::PR::cathode_pair_candidates;
+using WireCell::Clus::PR::bundle_contact;
+using WireCell::Clus::PR::merge_bundles;
 
 TEST_CASE("nu dedup: two candidates from one physical flash collapse to the first")
 {
@@ -113,4 +116,82 @@ TEST_CASE("nu dedup: a three-way group keeps exactly one, and one candidate is a
     REQUIRE(single.size() == 1);
     CHECK(single[0] == 0);
     CHECK(dedup_flash_groups({}, {}).empty());
+}
+
+// sbnd_xin/docs/109 rev 4 -- nu_bundle_flash_group.  One physical flash seen by
+// both drift volumes can be ONE interaction split across the two (merge) or
+// TWO interactions, one per volume (keep both).  Whether the two bundles'
+// charge touches is what tells them apart.
+
+TEST_CASE("nu bundle: only same-group different-TPC pairs are tested")
+{
+    // r472 s36 e40: gids 5 (tpc 0) and 1000006 (tpc 1), 6 ns apart -> one group.
+    std::map<int, int> group{{5, 5}, {1000006, 5}};
+    std::map<int, int> tpc{{5, 0}, {1000006, 1}};
+    const auto p = cathode_pair_candidates({1000006, 5}, group, tpc);
+    REQUIRE(p.size() == 1);
+    CHECK(p[0].first == 5);            // ascending (min, max), whatever the input order
+    CHECK(p[0].second == 1000006);
+
+    // r474 s72 e31: gids 2 (tpc 0) and 1000011 (tpc 1) are 709 ns apart -> two
+    // groups -> never tested, so two objects can never be merged by accident.
+    std::map<int, int> group2{{2, 2}, {1000011, 1000011}};
+    std::map<int, int> tpc2{{2, 0}, {1000011, 1}};
+    CHECK(cathode_pair_candidates({2, 1000011}, group2, tpc2).empty());
+
+    // Same group but the same TPC (a 3-way group's same-side members): not a
+    // cathode pair.  An unknown TPC is never paired either.
+    std::map<int, int> group3{{3, 3}, {4, 3}, {1000001, 3}};
+    std::map<int, int> tpc3{{3, 0}, {4, 0}, {1000001, 1}};
+    const auto p3 = cathode_pair_candidates({3, 4, 1000001}, group3, tpc3);
+    REQUIRE(p3.size() == 2);
+    CHECK(p3[0] == std::make_pair(3, 1000001));
+    CHECK(p3[1] == std::make_pair(4, 1000001));
+    std::map<int, int> tpc4{{3, 0}};
+    CHECK(cathode_pair_candidates({3, 1000001}, group3, tpc4).empty());
+    // An unmapped gid is its own group.
+    CHECK(cathode_pair_candidates({3, 1000001}, {}, tpc3).empty());
+}
+
+TEST_CASE("nu bundle: contact is a distance; the cathode window only when asked")
+{
+    const double cx = 0.0, gap = 20.0;
+    // Default: xcut 0 = distance alone.  r472 s36 e40's two bundles touch at
+    // 0.4 cm at x = -10.8 / -11.1 (the VERTEX, not the seam): merged.
+    CHECK(bundle_contact(0.4, -10.8, -11.1, cx, 0.0, gap));
+    CHECK_FALSE(bundle_contact(30.0, -2.1, 3.0, cx, 0.0, gap));          // too far apart: two objects
+    CHECK_FALSE(bundle_contact(20.0, 0.0, 0.0, cx, 0.0, gap));           // boundary is exclusive
+    CHECK_FALSE(bundle_contact(std::nan(""), 0.0, 0.0, cx, 0.0, gap));   // NaN never contacts
+    // xcut > 0: the optional cathode window, both points within it.
+    const double xcut = 6.0;
+    CHECK(bundle_contact(7.8, -2.1, 3.0, cx, xcut, gap));                // halves meeting at the seam
+    CHECK_FALSE(bundle_contact(0.4, -10.8, -11.1, cx, xcut, gap));       // r472 would be REFUSED by the window
+    CHECK_FALSE(bundle_contact(7.8, -2.1, 9.0, cx, xcut, gap));          // one side off the seam
+    CHECK(bundle_contact(7.8, 100.0 - 2.1, 103.0, 100.0, xcut, gap));    // the plane is a parameter
+    CHECK_FALSE(bundle_contact(1.0, std::nan(""), 0.0, cx, xcut, gap));
+    CHECK_FALSE(bundle_contact(1.0, 6.0, 0.0, cx, xcut, gap));           // window boundary is exclusive
+}
+
+TEST_CASE("nu bundle: merged bundles take the smallest gid as root, the rest stay themselves")
+{
+    // The r472 pair in contact: one bundle, root 5.
+    auto r = merge_bundles({5, 1000006}, {{5, 1000006}});
+    CHECK(r[5] == 5);
+    CHECK(r[1000006] == 5);
+    // The same pair NOT in contact (the two-neutrino reading): two bundles.
+    auto k = merge_bundles({5, 1000006}, {});
+    CHECK(k[5] == 5);
+    CHECK(k[1000006] == 1000006);
+    // A three-way group where only one pair touches: the third keeps its row.
+    auto t = merge_bundles({3, 4, 1000001}, {{4, 1000001}});
+    CHECK(t[3] == 3);
+    CHECK(t[4] == 4);
+    CHECK(t[1000001] == 4);
+    // Transitive contact, and a contact naming an unknown gid is ignored.
+    auto u = merge_bundles({3, 4, 1000001}, {{3, 1000001}, {4, 1000001}, {7, 3}});
+    CHECK(u[3] == 3);
+    CHECK(u[4] == 3);
+    CHECK(u[1000001] == 3);
+    CHECK(u.count(7) == 0);
+    CHECK(merge_bundles({}, {}).empty());
 }

@@ -61,3 +61,65 @@ std::vector<std::size_t> WireCell::Clus::PR::dedup_flash_groups(const std::vecto
     }
     return keep;
 }
+
+std::vector<std::pair<int, int>> WireCell::Clus::PR::cathode_pair_candidates(
+    const std::vector<int>& gids, const std::map<int, int>& gid_group, const std::map<int, int>& gid_tpc)
+{
+    std::vector<int> sorted(gids.begin(), gids.end());
+    std::sort(sorted.begin(), sorted.end());
+    sorted.erase(std::unique(sorted.begin(), sorted.end()), sorted.end());
+    auto group_of = [&gid_group](int g) {
+        auto it = gid_group.find(g);
+        return it == gid_group.end() ? g : it->second;
+    };
+    auto tpc_of = [&gid_tpc](int g) {
+        auto it = gid_tpc.find(g);
+        return it == gid_tpc.end() ? -1 : it->second;
+    };
+    std::vector<std::pair<int, int>> out;
+    for (size_t i = 0; i < sorted.size(); ++i) {
+        for (size_t j = i + 1; j < sorted.size(); ++j) {
+            const int a = sorted[i], b = sorted[j];
+            if (group_of(a) != group_of(b)) continue;
+            const int ta = tpc_of(a), tb = tpc_of(b);
+            if (ta < 0 || tb < 0 || ta == tb) continue;
+            out.emplace_back(a, b);
+        }
+    }
+    return out;
+}
+
+bool WireCell::Clus::PR::bundle_contact(double d, double xa, double xb, double cathode_x, double xcut, double gap)
+{
+    // Written as !(x < cut) so a NaN never contacts.
+    if (!(d < gap)) return false;
+    if (xcut > 0) {
+        if (!(std::abs(xa - cathode_x) < xcut)) return false;
+        if (!(std::abs(xb - cathode_x) < xcut)) return false;
+    }
+    return true;
+}
+
+std::map<int, int> WireCell::Clus::PR::merge_bundles(const std::vector<int>& gids,
+                                                     const std::vector<std::pair<int, int>>& contacts)
+{
+    std::map<int, int> parent;
+    for (int g : gids) parent[g] = g;
+    auto find = [&parent](int g) {
+        while (parent[g] != g) {
+            parent[g] = parent[parent[g]];
+            g = parent[g];
+        }
+        return g;
+    };
+    for (const auto& [a, b] : contacts) {
+        if (!parent.count(a) || !parent.count(b)) continue;
+        const int ra = find(a), rb = find(b);
+        if (ra == rb) continue;
+        // Root = the smaller gid, so the merged bundle's key is order-independent.
+        parent[std::max(ra, rb)] = std::min(ra, rb);
+    }
+    std::map<int, int> out;
+    for (int g : gids) out[g] = find(g);
+    return out;
+}
