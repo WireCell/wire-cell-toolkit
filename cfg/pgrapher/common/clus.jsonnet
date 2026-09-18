@@ -1558,7 +1558,11 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
                 // doc pdvd/114: blank-plane admission policy for the terminal
                 // candidates.  C++ default "wcp" (no policy).  null => keys
                 // omitted => byte-identical pre-knob config.
-                terminal_blank_plane_mode=null, terminal_blank_plane_radius=null) :: {
+                terminal_blank_plane_mode=null, terminal_blank_plane_radius=null,
+                // doc pdvd/115: charge-aware pricing of the Steiner BASE graph
+                // before the Voronoi step.  C++ default 0 / "tree".  null =>
+                // keys omitted => byte-identical pre-knob config.
+                base_weight_blank_alpha=null, base_weight_scope=null) :: {
             type: "CreateSteinerGraph",
             name: prefix+name,
             data: {
@@ -1627,6 +1631,19 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
                 // uBooNE and ICARUS bind it too and leave both null.
                 [if terminal_blank_plane_mode != null then 'terminal_blank_plane_mode']: terminal_blank_plane_mode,
                 [if terminal_blank_plane_radius != null then 'terminal_blank_plane_radius']: terminal_blank_plane_radius,
+                // doc pdvd/115.  C++ default 0.  A positive alpha multiplies
+                // every BASE graph edge weight by 1 + alpha * 0.5 * (nz(s) +
+                // nz(t)), nz = planes at charge exactly 0 at the endpoint,
+                // before the Voronoi step that admits the tree's interiors, so
+                // an on-image route wins where one exists; a dead or empty
+                // region is priced alike everywhere and keeps its only route.
+                // base_weight_scope "tree" (C++ default) keeps the reduced
+                // graph's weights geometric; "tree+path" carries the priced
+                // length into the reduced graph too.  Keys omitted when null
+                // => byte-identical pre-knob config.  Shared function: SBND,
+                // uBooNE and ICARUS bind it too and leave both null.
+                [if base_weight_blank_alpha != null then 'base_weight_blank_alpha']: base_weight_blank_alpha,
+                [if base_weight_scope != null then 'base_weight_scope']: base_weight_scope,
             } + dv_cfg + pcts_cfg
               + (if beam_window_only then {
                      beam_window_only: true,

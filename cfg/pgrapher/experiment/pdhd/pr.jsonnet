@@ -783,6 +783,13 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1,
               // like their peers.  Set from the driver, not here.
               steiner_blank_plane_mode=null,
               steiner_blank_plane_radius=null,
+              // doc pdvd/115: charge-aware pricing of the Steiner BASE graph
+              // before the Voronoi step (alpha per zero-charge plane at the
+              // edge endpoints; scope "tree" | "tree+path").  null here = C++
+              // default 0 / "tree", keys omitted => byte-identical config.
+              // Threaded into BOTH steiner passes.  Set from the driver.
+              steiner_base_weight_blank_alpha=null,
+              steiner_base_weight_scope=null,
               // Steiner EDGE-WEIGHT charge fidelity (doc pr/29 D2).  OFF here =
               // the historical toolkit behaviour, key omitted => byte-identical.
               //   steiner_edge_charge_forward_dead_mix=true   weights steiner
@@ -1558,6 +1565,8 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1,
                                 terminal_min_separation=steiner_terminal_min_separation,
                                 terminal_blank_plane_mode=steiner_blank_plane_mode,   // doc pdvd/114
                                 terminal_blank_plane_radius=steiner_blank_plane_radius,
+                                base_weight_blank_alpha=steiner_base_weight_blank_alpha,   // doc pdvd/115
+                                base_weight_scope=steiner_base_weight_scope,
                                 skip_flags=steiner_skip_flags)
               + { data+: { [if steiner_terminal_charge != null then 'terminal_charge_threshold']: steiner_terminal_charge } },
             // The doc pr/23 second steiner pass, named right after protect_bundle:
@@ -1588,6 +1597,8 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1,
                                 terminal_min_separation=steiner_terminal_min_separation,
                                 terminal_blank_plane_mode=steiner_blank_plane_mode,   // doc pdvd/114
                                 terminal_blank_plane_radius=steiner_blank_plane_radius,
+                                base_weight_blank_alpha=steiner_base_weight_blank_alpha,   // doc pdvd/115
+                                base_weight_scope=steiner_base_weight_scope,
                                 // Same skip list as the first pass: replace=false
                                 // means this pass builds exactly the clusters
                                 // with no graph yet, i.e. everything the first

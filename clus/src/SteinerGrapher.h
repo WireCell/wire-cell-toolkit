@@ -137,6 +137,23 @@ namespace WireCell::Clus::Steiner {
             /// Radius (WCT length units) of the "nearby" query; <= 0 disables
             /// the nearby half.  Only read when the mode names "nearby".
             double terminal_blank_plane_radius{0.0};
+
+            /// doc pdvd/115.  Charge-aware pricing of the BASE graph before
+            /// the Voronoi step of create_enhanced_steiner_graph (see
+            /// WireCellClus/SteinerBaseWeight.h).  Each base edge weight is
+            /// multiplied by 1 + alpha * 0.5 * (nz(s) + nz(t)), nz = number of
+            /// planes at charge exactly 0 at the endpoint, so the tree's
+            /// interiors (the vertices on the Dijkstra paths, admitted with no
+            /// charge test) prefer on-image routes where one exists.  0 (the
+            /// default) = no pricing: bit-for-bit the historical behaviour, the
+            /// priced copy is never built.
+            double base_weight_blank_alpha{0.0};
+            /// "tree" (default): the priced graph drives the Voronoi and the
+            /// bridge selection only; the reduced graph keeps the GEOMETRIC
+            /// length times the production charge factor.  "tree+path": the
+            /// priced length also enters the reduced graph, so the STM rough
+            /// path avoids blank interiors too.  Only read when alpha > 0.
+            std::string base_weight_scope{"tree"};
         };
         Log::logptr_t log;
 
@@ -465,14 +482,26 @@ namespace WireCell::Clus::Graphs::Weighted {
             std::map<vertex_type, double> vertex_charges;        // calculated charges
         };
 
-        /// Create steiner graph with full prototype matching functionality
+        /// Create steiner graph with full prototype matching functionality.
+        ///
+        /// doc pdvd/115: `routing_graph`, when given, is a priced COPY of
+        /// base_graph (same vertex indices, same edge set,
+        /// SteinerBaseWeight.h) that drives the Voronoi tessellation, the
+        /// bridge selection and the path back-walk in place of base_graph.
+        /// The reduced graph's edge weight then multiplies the production
+        /// charge factor onto the base_graph (geometric) weight of the edge,
+        /// or onto the routing weight when `priced_path` is true.  With
+        /// routing_graph == nullptr (the default) the code path is the
+        /// historical one, bit for bit.
         EnhancedSteinerResult create_enhanced_steiner_graph(
             const graph_type& base_graph,
             const vertex_set& terminal_vertices,
             const PointCloud::Dataset& original_pc,
             const WireCell::Clus::Facade::Cluster& cluster,
             const ChargeWeightingConfig& charge_config = ChargeWeightingConfig{},
-            bool disable_dead_mix_cell = true
+            bool disable_dead_mix_cell = true,
+            const graph_type* routing_graph = nullptr,
+            bool priced_path = false
         );
 
         void establish_same_blob_steiner_edges_steiner_graph(EnhancedSteinerResult& result, 

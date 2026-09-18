@@ -8,6 +8,7 @@
 // doc pdvd/37 R1 -- the pure-geometry thinning core.
 #include "WireCellClus/SteinerThinning.h"
 #include "WireCellClus/SteinerBlankPlane.h"
+#include "WireCellClus/SteinerBaseWeight.h"
 // doc pdvd/111 round 2 -- the per-edge 2-D support count of WCT_STEINER_GRAPH_DUMP,
 // and the two graph stages it rebuilds for edge provenance.
 #include "WireCellClus/SteinerEdgeSupport.h"
@@ -22,6 +23,7 @@
 #include <unordered_set>
 #include <map>
 #include <chrono>
+#include <memory>
 #include <boost/graph/copy.hpp>
 
 using namespace WireCell;
@@ -45,6 +47,15 @@ namespace {
     bool steiner_graph_dump_enabled()
     {
         static const bool on = (getenv("WCT_STEINER_GRAPH_DUMP") != nullptr);
+        return on;
+    }
+
+    // doc pdvd/115: the BASE graph's full edge list, log-only, on top of the
+    // graph dump (both env vars must be set: the base graph has ~13 edges per
+    // point, so this is kept off the doc-114 dump arms).
+    bool steiner_base_dump_enabled()
+    {
+        static const bool on = (getenv("WCT_STEINER_BASE_DUMP") != nullptr);
         return on;
     }
 
@@ -91,7 +102,10 @@ namespace {
                             const SteinerVertexSet& extremes,
                             const EnhancedSteinerResult& res,
                             const std::set<std::pair<size_t, size_t>>& tree_pairs,
-                            const WireCell::PointCloud::Dataset& original_pc)
+                            const WireCell::PointCloud::Dataset& original_pc,
+                            const SteinerGraphType* routing_graph = nullptr,
+                            double base_weight_alpha = 0.0,
+                            const std::string& base_weight_scope = "tree")
     {
         using namespace WireCell;
         using namespace WireCell::Clus;
@@ -121,9 +135,10 @@ namespace {
         };
 
         // Voronoi regions of the same terminal set, to split tree edges into
-        // "path" (same region) and "connect" (two regions).
+        // "path" (same region) and "connect" (two regions).  doc pdvd/115: on
+        // the priced routing graph when the knob built one, as the tree was.
         std::vector<size_t> tvec(terminals.begin(), terminals.end());
-        const auto vor = Graphs::Weighted::voronoi(base_graph, tvec);
+        const auto vor = Graphs::Weighted::voronoi(routing_graph ? *routing_graph : base_graph, tvec);
 
         // 2-D support classifier, the NeutrinoSteinerGapGraph.cxx classify_point
         // recipe (duplicated, not shared: that one is file-local) with the per-plane
@@ -275,6 +290,31 @@ namespace {
                           s02.n, s02.ok3, s02.ok2, s02.ok1, s02.live1,
                           s61.n, s61.ok3, s61.ok2, s61.ok1, s61.live1);
             std::cout << buf << "\n";
+        }
+        // doc pdvd/115: the knob's setting for this call (STGW), and under
+        // WCT_STEINER_BASE_DUMP the whole BASE graph (STGA: one line per base
+        // edge, point indices, geometric weight, provenance as in STGE), so
+        // the Voronoi / bridge / back-walk construction can be replayed offline
+        // under other pricings.  Prefixes chosen not to collide with the
+        // doc-111..114 parsers' 4-character keys (STGB is the blob line).
+        std::snprintf(buf, sizeof(buf), "STGW %ld %.6g %s %d", ident, base_weight_alpha, base_weight_scope.c_str(),
+                      routing_graph ? 1 : 0);
+        std::cout << buf << "\n";
+        if (steiner_base_dump_enabled()) {
+            for (auto [ei, ee] = boost::edges(base_graph); ei != ee; ++ei) {
+                const size_t a = boost::source(*ei, base_graph), b = boost::target(*ei, base_graph);
+                const char* base = "mst";
+                if (boost::edge(a, b, g_close).second) {
+                    const bool same = a < majs.size() && b < majs.size() && majs[a] == majs[b];
+                    base = same ? "closely_same" : "closely_other";
+                }
+                else if (boost::edge(a, b, g_ctpc).second) {
+                    base = "ctpc";
+                }
+                std::snprintf(buf, sizeof(buf), "STGA %ld %zu %zu %.17g %s", ident, a, b,
+                              boost::get(base_w, *ei) / units::cm, base);
+                std::cout << buf << "\n";
+            }
         }
         std::cout << std::flush;
     }
@@ -498,10 +538,39 @@ void Steiner::Grapher::create_steiner_tree(
     const bool edge_dead_mix =
         m_config.edge_charge_forward_dead_mix ? disable_dead_mix_cell : true;
 
+    // doc pdvd/115: charge-aware pricing of the base graph BEFORE the Voronoi
+    // step (WireCellClus/SteinerBaseWeight.h).  alpha 0 (the default) builds
+    // nothing and the historical call below is made bit for bit.  A typo in
+    // the scope is refused (configure already did; this is the belt).
+    Steiner::BaseWeightScope bw_scope = Steiner::BaseWeightScope::tree;
+    if (!Steiner::parse_base_weight_scope(m_config.base_weight_scope, bw_scope)) {
+        raise<ValueError>("create_steiner_tree: unknown base_weight_scope '%s' (tree | tree+path)",
+                          m_config.base_weight_scope.c_str());
+    }
+    const double bw_alpha = m_config.base_weight_blank_alpha;
+    std::unique_ptr<Graphs::Weighted::graph_type> routing;
+    if (bw_alpha > 0) {
+        const size_t nbv = boost::num_vertices(base_graph);
+        const size_t npts = (size_t) m_cluster.npoints();
+        std::vector<signed char> nz(nbv, 0);
+        for (size_t i = 0; i < nbv && i < npts; ++i) {
+            int n = 0;
+            for (int p = 0; p < 3; ++p) {
+                if (m_cluster.charge_value(i, p) == 0) ++n;
+            }
+            nz[i] = (signed char) n;
+        }
+        routing = std::make_unique<Graphs::Weighted::graph_type>(
+            Steiner::reweight_base_graph(base_graph, [&nz](size_t v) { return (int) nz[v]; }, bw_alpha));
+        SPDLOG_LOGGER_DEBUG(log, "create_steiner_tree: base graph priced with base_weight_blank_alpha={} scope={} "
+                            "({} vertices, {} edges)", bw_alpha, m_config.base_weight_scope, nbv,
+                            boost::num_edges(*routing));
+    }
+
     // Use the enhanced approach with cluster reference for charge calculation
     auto steiner_result = Graphs::Weighted::create_enhanced_steiner_graph(
         base_graph, steiner_terminals, original_pc, m_cluster, charge_config,
-        edge_dead_mix);
+        edge_dead_mix, routing.get(), bw_scope == Steiner::BaseWeightScope::tree_path);
 
     // std::cout << "Test5: " <<  " Graph vertices: " << boost::num_vertices(steiner_result.graph) << ", edges: " << boost::num_edges(steiner_result.graph) << std::endl;
 
@@ -521,7 +590,8 @@ void Steiner::Grapher::create_steiner_tree(
 
     if (s_graph_dump) {
         steiner_graph_dump(m_cluster, m_config, reference_cluster, base_graph, steiner_terminals,
-                           extreme_points, steiner_result, dump_tree_pairs, original_pc);
+                           extreme_points, steiner_result, dump_tree_pairs, original_pc,
+                           routing.get(), bw_alpha, m_config.base_weight_scope);
     }
 
     // std::cout << "Test5: " <<  " Graph vertices: " << boost::num_vertices(steiner_result.graph) << ", edges: " << boost::num_edges(steiner_result.graph) << std::endl;
@@ -1541,27 +1611,34 @@ EnhancedSteinerResult create_enhanced_steiner_graph(
             const PointCloud::Dataset& original_pc,
             const WireCell::Clus::Facade::Cluster& cluster, // Added cluster parameter
             const ChargeWeightingConfig& charge_config,
-            bool disable_dead_mix_cell
+            bool disable_dead_mix_cell,
+            const graph_type* routing_graph,
+            bool priced_path
         )
 {
     using namespace WireCell::Clus::Graphs::Weighted;
     
     EnhancedSteinerResult result;
+
+    // doc pdvd/115: `rg` is the graph the tree is ROUTED on.  Without the
+    // knob it aliases base_graph and every line below is the historical one;
+    // with it, a priced copy with the same vertex indices and edge set.
+    const graph_type& rg = routing_graph ? *routing_graph : base_graph;
     
     // Step 1: Create Voronoi tessellation
     std::vector<vertex_type> terminal_vector(terminal_vertices.begin(), terminal_vertices.end());
-    auto vor = voronoi(base_graph, terminal_vector);
+    auto vor = voronoi(rg, terminal_vector);
     
     // Step 2: Build complete terminal distance map (matches prototype map_saved_edge)
-    auto edge_weight = get(boost::edge_weight, base_graph);
+    auto edge_weight = get(boost::edge_weight, rg);
     std::map<vertex_pair, std::pair<double, edge_type>> map_saved_edge;
     std::vector<edge_type> all_terminal_connecting_edges;
     
     // Find best edges between all terminal pairs (matches prototype logic exactly)
-    auto [edge_iter, edge_end] = boost::edges(base_graph);
+    auto [edge_iter, edge_end] = boost::edges(rg);
     for (auto fine_edge : boost::make_iterator_range(edge_iter, edge_end)) {
-        const vertex_type fine_tail = boost::source(fine_edge, base_graph);
-        const vertex_type fine_head = boost::target(fine_edge, base_graph);
+        const vertex_type fine_tail = boost::source(fine_edge, rg);
+        const vertex_type fine_head = boost::target(fine_edge, rg);
         const double fine_distance = edge_weight[fine_edge];
         
         const vertex_type term_tail = vor.terminal[fine_tail];
@@ -1610,16 +1687,16 @@ EnhancedSteinerResult create_enhanced_steiner_graph(
     std::vector<std::pair<vertex_pair, edge_type>> tree_edge_pairs;
 
     for (auto edge : all_terminal_connecting_edges) {
-        auto vs = boost::source(edge, base_graph);
-        auto vt = boost::target(edge, base_graph);
+        auto vs = boost::source(edge, rg);
+        auto vt = boost::target(edge, rg);
         tree_edge_pairs.push_back({make_vertex_pair(vs, vt), edge});
 
         for (auto endpoint : {vs, vt}) {
             vertex_type current_vtx = endpoint;
             while (vor.terminal[current_vtx] != current_vtx) {
                 auto path_edge = vor.last_edge[current_vtx];
-                auto ps = boost::source(path_edge, base_graph);
-                auto pt = boost::target(path_edge, base_graph);
+                auto ps = boost::source(path_edge, rg);
+                auto pt = boost::target(path_edge, rg);
                 tree_edge_pairs.push_back({make_vertex_pair(ps, pt), path_edge});
                 current_vtx = ps;
             }
@@ -1694,6 +1771,13 @@ EnhancedSteinerResult create_enhanced_steiner_graph(
         vertex_type new_target = result.old_to_new_index[old_target];
 
         double geometric_distance = edge_weight[edge];
+        if (routing_graph && !priced_path) {
+            // doc pdvd/115 scope "tree": the reduced graph keeps the geometric
+            // length (the base_graph weight of this vertex pair); only the
+            // topology came from the priced routing graph.
+            const auto be = boost::edge(old_source, old_target, base_graph);
+            if (be.second) geometric_distance = boost::get(boost::edge_weight, base_graph, be.first);
+        }
 
         double final_distance = geometric_distance;
         if (charge_config.enable_weighting && !result.vertex_charges.empty()) {
