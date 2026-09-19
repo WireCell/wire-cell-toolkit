@@ -771,17 +771,30 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
               steiner_terminal_min_separation=0,
               // doc pdvd/114: blank-plane admission policy for the Steiner
               // terminal candidates ("prefer3" | "nearby" | "prefer3+nearby")
-              // and the nearby radius (a LENGTH).  null here = C++ default
-              // "wcp" / 0, keys omitted => byte-identical config.  Threaded
-              // into BOTH steiner passes so the refresh builds its clusters
-              // like their peers.  Set from the driver, not here.
+              // and the nearby radius (a LENGTH).  Threaded into BOTH steiner
+              // passes so the refresh builds its clusters like their peers.  Set
+              // from the driver, not here.  FLIPPED FOR PDVD by doc pdvd/116 on
+              // the owner's go 2026-09-18: null mode => 'prefer3' at the call
+              // sites below (was the C++ default 'wcp' = key omitted).  Escape
+              // hatch: -S steiner_blank_plane_mode='wcp' emits the C++ default
+              // (the OFF gates of docs 114/115 cover the binary).  The radius
+              // stays null = C++ default 0, key omitted.
               steiner_blank_plane_mode=null,
               steiner_blank_plane_radius=null,
               // doc pdvd/115: charge-aware pricing of the Steiner BASE graph
               // before the Voronoi step (alpha per zero-charge plane at the
-              // edge endpoints; scope "tree" | "tree+path").  null here = C++
-              // default 0 / "tree", keys omitted => byte-identical config.
-              // Threaded into BOTH steiner passes.  Set from the driver.
+              // edge endpoints; scope "tree" | "tree+path").  Threaded into
+              // BOTH steiner passes.  Set from the driver.  FLIPPED FOR PDVD by
+              // doc pdvd/116 (owner 2026-09-18): null => alpha 0.5, scope
+              // 'tree+path' at the call sites below (was the C++ default 0 /
+              // 'tree' = keys omitted).  Graded with the doc-116 tagger point
+              // (proton_muon_guard, michel_min_kink_deg 20, michel_max_len_cm 30
+              // in the driver bag) against production after the owner scans
+              // own116h / own116v: PDHD is_stm purity +0.002 / efficiency +0.032,
+              // Michel +0.019 / +0.064; PDVD +0.000 / +0.018 and +0.003 / +0.037
+              // (figs/116_grade_*_own116.txt; rule figs/116_pred.txt sha ad24efda).
+              // Escape hatch: -S steiner_base_weight_blank_alpha=0
+              // -S steiner_base_weight_scope='tree' emits the C++ defaults.
               steiner_base_weight_blank_alpha=null,
               steiner_base_weight_scope=null,
               // Steiner EDGE-WEIGHT charge fidelity (doc pr/29 D2).  OFF here =
@@ -1589,10 +1602,10 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
                                 terminal_adjacent_slice=steiner_terminal_adjacent_slice,
                                 edge_charge_forward_dead_mix=steiner_edge_charge_forward_dead_mix,
                                 terminal_min_separation=steiner_terminal_min_separation,
-                                terminal_blank_plane_mode=steiner_blank_plane_mode,   // doc pdvd/114
+                                terminal_blank_plane_mode=if steiner_blank_plane_mode == null then 'prefer3' else steiner_blank_plane_mode,   // doc pdvd/114; FLIPPED by doc pdvd/116 (owner 2026-09-18)
                                 terminal_blank_plane_radius=steiner_blank_plane_radius,
-                                base_weight_blank_alpha=steiner_base_weight_blank_alpha,   // doc pdvd/115
-                                base_weight_scope=steiner_base_weight_scope,
+                                base_weight_blank_alpha=if steiner_base_weight_blank_alpha == null then 0.5 else steiner_base_weight_blank_alpha,   // doc pdvd/115; FLIPPED by doc pdvd/116
+                                base_weight_scope=if steiner_base_weight_scope == null then 'tree+path' else steiner_base_weight_scope,   // doc pdvd/116
                                 skip_flags=steiner_skip_flags)
               + { data+: { [if steiner_terminal_charge != null then 'terminal_charge_threshold']: steiner_terminal_charge } },
             // The doc pr/23 second steiner pass, named right after protect_bundle:
@@ -1621,10 +1634,10 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
                                 // only the clusters protect_bundle purged and
                                 // they must be built like their peers.
                                 terminal_min_separation=steiner_terminal_min_separation,
-                                terminal_blank_plane_mode=steiner_blank_plane_mode,   // doc pdvd/114
+                                terminal_blank_plane_mode=if steiner_blank_plane_mode == null then 'prefer3' else steiner_blank_plane_mode,   // doc pdvd/114; FLIPPED by doc pdvd/116 (owner 2026-09-18)
                                 terminal_blank_plane_radius=steiner_blank_plane_radius,
-                                base_weight_blank_alpha=steiner_base_weight_blank_alpha,   // doc pdvd/115
-                                base_weight_scope=steiner_base_weight_scope,
+                                base_weight_blank_alpha=if steiner_base_weight_blank_alpha == null then 0.5 else steiner_base_weight_blank_alpha,   // doc pdvd/115; FLIPPED by doc pdvd/116
+                                base_weight_scope=if steiner_base_weight_scope == null then 'tree+path' else steiner_base_weight_scope,   // doc pdvd/116
                                 // Same skip list as the first pass: replace=false
                                 // means this pass builds exactly the clusters
                                 // with no graph yet, i.e. everything the first
