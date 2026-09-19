@@ -905,6 +905,16 @@ function(
     // both CreateSteinerGraph instances (doc pdvd/37 round 2 lever; PDVD production
     // 0.5).  0 => key omitted => byte-identical.
     steiner_terminal_min_separation = 0,
+    // doc sbnd_xin/pr/150: the PDHD/PDVD Steiner seed knobs (docs pdvd/114-116),
+    // forwarded to BOTH CreateSteinerGraph instances by sbnd/clus.jsonnet pr().
+    // PDHD/PDVD production runs 'prefer3' / 0.5 / 'tree+path'; SBND does NOT
+    // (study knobs, not adopted).  null => keys omitted => byte-identical.
+    // String TLAs need inner quotes: --tla-code "steiner_blank_plane_mode='prefer3'"
+    // --tla-code steiner_base_weight_blank_alpha=0.5 --tla-code "steiner_base_weight_scope='tree+path'".
+    steiner_blank_plane_mode        = null,
+    steiner_blank_plane_radius      = null,   // a LENGTH (e.g. 1.0 * wc.cm); C++ default 0
+    steiner_base_weight_blank_alpha = null,
+    steiner_base_weight_scope       = null,
     // SCN (DL) neutrino-vertex weights, WIRECELL_PATH-resolved.
     // DEFAULT = ON, the uBooNE-trained net (owner adopted 2026-07-30 on nueCC48
     // evt 18253/1/172230: the geometric vertex sat at the far end of a proton
@@ -3753,6 +3763,10 @@ function(
                              retile_sampler_charge_threshold=retile_sampler_charge_threshold,
                              resample_live_strategy=resample_live_strategy,   // doc sbnd_xin/pr/149 round 2
                              steiner_terminal_min_separation=steiner_terminal_min_separation,
+                             steiner_blank_plane_mode=steiner_blank_plane_mode,   // doc sbnd_xin/pr/150
+                             steiner_blank_plane_radius=steiner_blank_plane_radius,
+                             steiner_base_weight_blank_alpha=steiner_base_weight_blank_alpha,
+                             steiner_base_weight_scope=steiner_base_weight_scope,
                              trackfitting_config_file=trackfitting_config,
                              particle_dataset=pds.particle_dataset,
                              extra_uses=pds.all,

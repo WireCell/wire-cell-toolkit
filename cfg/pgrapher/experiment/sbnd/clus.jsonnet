@@ -1038,6 +1038,25 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
               // suppresses every lower-charge terminal strictly within this 3-D
               // distance.  0 => key omitted => byte-identical.
               steiner_terminal_min_separation=0,
+              // doc sbnd_xin/pr/150: the PDHD/PDVD Steiner seed knobs, threaded into
+              // BOTH CreateSteinerGraph instances (steiner, steiner_refresh) exactly
+              // as pdhd/pr.jsonnet and protodunevd/pr.jsonnet pass them.
+              //   steiner_blank_plane_mode   (doc pdvd/114) blank-plane admission
+              //     policy for the terminal candidates: 'wcp' (C++ default,
+              //     SteinerGrapher.h:136) | 'prefer3' | 'nearby' | 'prefer3+nearby';
+              //     steiner_blank_plane_radius is the nearby radius (a LENGTH, C++ 0).
+              //   steiner_base_weight_blank_alpha / steiner_base_weight_scope
+              //     (doc pdvd/115) price the Steiner BASE graph by zero-charge planes
+              //     before the Voronoi step: alpha per blank plane (C++ 0,
+              //     SteinerGrapher.h:150), scope 'tree' (C++ default, :156) |
+              //     'tree+path'.
+              // PDHD/PDVD production = 'prefer3' / 0.5 / 'tree+path' (doc pdvd/116).
+              // SBND: NOT adopted -- null => keys omitted (cm.steiner suppresses
+              // them) => compiled config byte-identical to today's.  Study knobs only.
+              steiner_blank_plane_mode=null,
+              steiner_blank_plane_radius=null,
+              steiner_base_weight_blank_alpha=null,
+              steiner_base_weight_scope=null,
               // trackfitting_config_file: the SBND TrackFitting parameter JSON.
               // DEFAULT = the canonical in-tree file, resolved through
               // WIRECELL_PATH by TaggerCheckSTM/TaggerCheckNeutrino
@@ -2250,7 +2269,12 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                                 terminal_wire_tol=steiner_terminal_wire_tol,
                                 terminal_adjacent_slice=steiner_terminal_adjacent_slice,
                                 edge_charge_forward_dead_mix=steiner_edge_charge_forward_dead_mix,
-                                terminal_min_separation=steiner_terminal_min_separation * wc.cm),   // doc sbnd_xin/pr/149 amendment 1
+                                terminal_min_separation=steiner_terminal_min_separation * wc.cm,   // doc sbnd_xin/pr/149 amendment 1
+                                // doc sbnd_xin/pr/150: study knobs, null => keys omitted (byte-identical).
+                                terminal_blank_plane_mode=steiner_blank_plane_mode,
+                                terminal_blank_plane_radius=steiner_blank_plane_radius,
+                                base_weight_blank_alpha=steiner_base_weight_blank_alpha,
+                                base_weight_scope=steiner_base_weight_scope),
             // The doc pr/23 second steiner pass, named right after protect_bundle:
             // replace=false rebuilds ONLY the clusters protect_bundle purged
             // (split retained + fragments).  A replace=true second pass would
@@ -2273,6 +2297,11 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                                 terminal_adjacent_slice=steiner_terminal_adjacent_slice,
                                 edge_charge_forward_dead_mix=steiner_edge_charge_forward_dead_mix,
                                 terminal_min_separation=steiner_terminal_min_separation * wc.cm,   // doc sbnd_xin/pr/149 amendment 1
+                                // doc sbnd_xin/pr/150: the same seed knobs as the first pass.
+                                terminal_blank_plane_mode=steiner_blank_plane_mode,
+                                terminal_blank_plane_radius=steiner_blank_plane_radius,
+                                base_weight_blank_alpha=steiner_base_weight_blank_alpha,
+                                base_weight_scope=steiner_base_weight_scope,
                                 replace=false),
             fiducialutils: cm.fiducialutils(),
             tagger_check_stm: cm.tagger_check_stm(
