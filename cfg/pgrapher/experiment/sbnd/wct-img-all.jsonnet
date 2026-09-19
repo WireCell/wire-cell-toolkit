@@ -39,6 +39,7 @@ function(
   anode_indices = [0, 1],
   output_dir    = '',
   full_deghost  = true,   // matches uBooNE chain (ProjectionDeghosting x2 + 3 ChargeSolving + 3 InSliceDeghosting); pass --tla-code full_deghost=false to revert to simple-solving
+  img_knobs     = {},     // doc sbnd_xin/113: optional imaging overrides (see img.jsonnet slicing()); {} => byte-identical
 )
   local anodes  = [tools_all.anodes[i] for i in anode_indices];
   local nanodes = std.length(anodes);
@@ -46,7 +47,7 @@ function(
   local img = import 'pgrapher/experiment/sbnd/img.jsonnet';
   local img_maker = img();
 
-  local img_pipes = [img_maker.per_anode(anodes[n], 'multi-3view', add_dump=false, full_deghost=full_deghost)
+  local img_pipes = [img_maker.per_anode(anodes[n], 'multi-3view', add_dump=false, full_deghost=full_deghost, knobs=img_knobs)
                      for n in std.range(0, nanodes - 1)];
 
   // ClusterFileSink helpers — port 0 = active (live), port 1 = masked (dead)

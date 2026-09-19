@@ -430,6 +430,9 @@ function(
     // detector is untouched.  Escape: SBND_DG_FAST=0 compiles back to the
     // byte-identical legacy config.
     dg_fast = true,
+    // dg_length_cut (doc sbnd_xin/113, default 0 = legacy => byte-identical): ClusteringDeghost length_cut
+    // in internal units; clusters longer than it are never deleted by the clustering-stage deghost.
+    dg_length_cut = 0,
 )
     // Build params inside the function so all physics values are TLAs.  These
     // are the documented Q/L drift/diffusion values (matching run_clust_QL_evt.sh),
@@ -468,7 +471,7 @@ function(
         rse_map=rse_map,
         evt_subdir=evt_subdir,
         reality=reality);
-    local clus_pipes = [clus_maker.per_apa(anodes[n], dump=false, per_face_bee=perface_bee, trace_bee=trace_bee, save_assoc_id=save_assoc, sep_vertex_veto=sep_vertex_veto, sep_track_recarve=sep_track_recarve, sep_fv_point=sep_fv_point, nu_iso_band_guard=nu_iso_band_guard, iso_cathode_guard=iso_cathode_guard, nu_band_veto=nu_band_veto, eb_fast=eb_fast, po_fast=po_fast, dg_fast=dg_fast)
+    local clus_pipes = [clus_maker.per_apa(anodes[n], dump=false, per_face_bee=perface_bee, trace_bee=trace_bee, save_assoc_id=save_assoc, sep_vertex_veto=sep_vertex_veto, sep_track_recarve=sep_track_recarve, sep_fv_point=sep_fv_point, nu_iso_band_guard=nu_iso_band_guard, iso_cathode_guard=iso_cathode_guard, nu_band_veto=nu_band_veto, eb_fast=eb_fast, po_fast=po_fast, dg_fast=dg_fast, dg_length_cut=dg_length_cut)
                         for n in std.range(0, nanodes - 1)];
 
     // --- Q/L matching nodes ---

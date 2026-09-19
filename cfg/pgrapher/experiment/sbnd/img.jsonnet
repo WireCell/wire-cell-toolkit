@@ -130,7 +130,22 @@ local img = {
     }.ret,
 
     // A functio that sets up slicing for an APA.
-    slicing :: function(anode, aname, span=4, active_planes=[0,1,2], masked_planes=[], dummy_planes=[]) {
+    // doc sbnd_xin/113: `knobs` (default {}) carries optional imaging overrides used by the standalone
+    // counterfactual arms.  Every key is read with std.objectHas, so an empty object leaves the compiled
+    // JSON byte-identical (proof: sbnd_xin/docs/113_figs/113_cfg_proof.txt).
+    //   ms_nthreshold       [u,v,w]   MaskSlices nthreshold          (default [3.6,3.6,3.6])
+    //   ms_default_threshold [u,v,w]  MaskSlices default_threshold   (C++ MaskSlices.h:79 when absent)
+    //   pd_dryrun            bool     ProjectionDeghosting dryrun    (default false)
+    //   isd_dryrun           bool     InSliceDeghosting dryrun       (default false)
+    //   isd_good_blob_charge_th  e    InSliceDeghosting/blob weight  (default 300)
+    //   cs_meas_value_threshold  e    ChargeSolving meas_value_threshold (C++ default 10 when absent)
+    //   ms_quiet_mask_window     int  MaskSlices quiet_mask_window on the 2-view branches (C++ default -1 = off):
+    //                                 a masked-plane channel with no active tick within +-N slices is treated as
+    //                                 masked there, so two live planes can tile where the third is silent
+    //   ms_quiet_mask_gap        int  MaskSlices quiet_mask_gap (C++ default -1): with it, only quiet slices within
+    //                                 +-N slices of that channel's own activity are masked (silent-everywhere
+    //                                 channels stay live and empty -> no ghosts on them)
+    slicing :: function(anode, aname, span=4, active_planes=[0,1,2], masked_planes=[], dummy_planes=[], knobs={}) {
         ret: g.pnode({
             type: "MaskSlices",
             name: "slicing-"+aname,
@@ -147,9 +162,14 @@ local img = {
                 masked_planes: masked_planes,
                 dummy_planes: dummy_planes,
                 //nthreshold: [1e-6, 1e-6, 1e-6],
-                nthreshold: [3.6, 3.6, 3.6], //original
+                nthreshold: if std.objectHas(knobs, 'ms_nthreshold') then knobs.ms_nthreshold else [3.6, 3.6, 3.6], //original
                 //nthreshold: [2.5, 2.5, 2.5], //changed Ewerton
                 // nthreshold: [0, 0, 0], //changed Ewerton
+                [if std.objectHas(knobs, 'ms_default_threshold') then 'default_threshold']: knobs.ms_default_threshold,
+                // quiet-plane 2-view tiling (MaskSlices.h m_quiet_mask_window, C++ default -1 = off): key omitted
+                // when absent => byte-identical.  Only meaningful for the 2-view branches (masked_planes != []).
+                [if std.objectHas(knobs, 'ms_quiet_mask_window') && std.length(masked_planes) > 0 then 'quiet_mask_window']: knobs.ms_quiet_mask_window,
+                [if std.objectHas(knobs, 'ms_quiet_mask_gap') && std.length(masked_planes) > 0 then 'quiet_mask_gap']: knobs.ms_quiet_mask_gap,
             },
         }, nin=1, nout=1, uses=[anode]),
     }.ret,
@@ -175,11 +195,11 @@ local img = {
    }.ret,
 
     //
-    multi_active_slicing_tiling :: function(anode, name, span=4) {
+    multi_active_slicing_tiling :: function(anode, name, span=4, knobs={}) {
         local active_planes = [[0,1,2],[0,1],[1,2],[0,2],],
         local masked_planes = [[],[2],[0],[1]],
         local iota = std.range(0,std.length(active_planes)-1),
-        local slicings = [$.slicing(anode, name+"_%d"%n, span, active_planes[n], masked_planes[n]) 
+        local slicings = [$.slicing(anode, name+"_%d"%n, span, active_planes[n], masked_planes[n], knobs=knobs) 
             for n in iota],
         local tilings = [$.tiling(anode, name+"_%d"%n)
             for n in iota],
@@ -221,7 +241,7 @@ local img = {
     //           ProjectionDeghosting passes, three ChargeSolving triples,
     //           three InSliceDeghosting rounds. See sbnd_xin/docs/4_imaging.md
     //           "Comparison with the uBooNE imaging chain" for derivation.
-    solving :: function(anode, aname, full_deghost=false) {
+    solving :: function(anode, aname, full_deghost=false, knobs={}) {
 
         local bc = g.pnode({
             type: "BlobClustering",
@@ -249,6 +269,7 @@ local img = {
                     weighting_strategies: ["uniform"], //"uniform", "simple", "uboone"
                     solve_config: "uboone",
                     whiten: true,
+                    [if std.objectHas(knobs, 'cs_meas_value_threshold') then 'meas_value_threshold']: knobs.cs_meas_value_threshold,
                 }
             }, nin=1, nout=1),
             local cs2 = g.pnode({
@@ -258,6 +279,7 @@ local img = {
                     weighting_strategies: ["uboone"], //"uniform", "simple", "uboone"
                     solve_config: "uboone",
                     whiten: true,
+                    [if std.objectHas(knobs, 'cs_meas_value_threshold') then 'meas_value_threshold']: knobs.cs_meas_value_threshold,
                 }
             }, nin=1, nout=1),
             local local_clustering = g.pnode({
@@ -276,7 +298,7 @@ local img = {
                 type: "ProjectionDeghosting",
                 name: "ProjectionDeghosting-" + aname + suffix,
                 data:  {
-                    dryrun: false,
+                    dryrun: if std.objectHas(knobs, 'pd_dryrun') then knobs.pd_dryrun else false,
                 }
             }, nin=1, nout=1),
         }.ret,
@@ -286,9 +308,9 @@ local img = {
                 type: "InSliceDeghosting",
                 name: "inslice_deghosting-" + aname + suffix,
                 data:  {
-                    dryrun: false,
+                    dryrun: if std.objectHas(knobs, 'isd_dryrun') then knobs.isd_dryrun else false,
                     config_round: config_round,
-                    good_blob_charge_th: good_blob_charge_th,
+                    good_blob_charge_th: if std.objectHas(knobs, 'isd_good_blob_charge_th') then knobs.isd_good_blob_charge_th else good_blob_charge_th,
                 }
             }, nin=1, nout=1),
         }.ret,
@@ -323,7 +345,7 @@ local img = {
 };
 
 function() {
-    local imgpipe (anode, multi_slicing, add_dump = true, full_deghost = false) =
+    local imgpipe (anode, multi_slicing, add_dump = true, full_deghost = false, knobs = {}) =
     if multi_slicing == "single"
     then g.pipeline([
             // img.slicing(anode, anode.name, 109, active_planes=[0,1,2], masked_planes=[],dummy_planes=[]), // 109*22*4
@@ -349,13 +371,13 @@ function() {
             img.dump(anode, anode.name+"-ms-masked", params.lar.drift_speed),] else [])
     else {
         local st = if multi_slicing == "multi-2view" || multi_slicing == "multi-3view"
-        then img.multi_active_slicing_tiling(anode, anode.name+"-ms-active", 4)
+        then img.multi_active_slicing_tiling(anode, anode.name+"-ms-active", 4, knobs=knobs)
         else g.pipeline([
             img.slicing(anode, anode.name, 4, active_planes=[0,1,2], masked_planes=[],dummy_planes=[]), // 109*22*4
             img.tiling(anode, anode.name),]),
         local active_fork = g.pipeline([
             st,
-            img.solving(anode, anode.name+"-ms-active", full_deghost=full_deghost),
+            img.solving(anode, anode.name+"-ms-active", full_deghost=full_deghost, knobs=knobs),
             ] + if add_dump then [
             img.dump(anode, anode.name+"-ms-active", params.lar.drift_speed),] else []),
         local masked_fork = g.pipeline([
@@ -367,8 +389,8 @@ function() {
     }.ret,
 
 
-    per_anode(anode, multi_slicing = "single", add_dump = true, full_deghost = false) :: g.pipeline([
+    per_anode(anode, multi_slicing = "single", add_dump = true, full_deghost = false, knobs = {}) :: g.pipeline([
         img.pre_proc(anode, anode.name),
-        imgpipe(anode, multi_slicing, add_dump, full_deghost),
+        imgpipe(anode, multi_slicing, add_dump, full_deghost, knobs),
         ], "per_anode"),
 }

@@ -1254,6 +1254,14 @@ function(
     // SBND_SKIP_COSMIC_COMPANIONS=0).
     skip_cosmic_companions = true,
     cosmic_companion_min_length = 15,
+    // nu_adopt_touching (doc sbnd_xin/113 sec 6; C++ default false, keys omitted when off => byte-identical):
+    // adopt untagged flashless (rescue-gid) image clusters that touch the candidate's main cluster as
+    // companions.  Study knob, NOT production.  dis / min_length / max_length in cm, null => C++ defaults 3 / 3 / 100.
+    nu_adopt_touching = false,
+    nu_adopt_touching_dis = null,
+    nu_adopt_touching_min_length = null,
+    nu_adopt_touching_max_length = null,
+    nu_adopt_touching_unmatched_only = null,
     // nu_fallback_demoted_mains (sbnd_xin/docs/73 sec 12, round 3; C++
     // default false = OFF): when the primary loop selects NO candidate
     // (every in-window main convicted or vetoed), consider DEMOTED mains
@@ -3333,6 +3341,11 @@ function(
         [if nu_skip_cosmic_bundle then 'nu_skip_cosmic_bundle']: true,
         [if skip_cosmic_companions then 'skip_cosmic_companions']: true,
         [if cosmic_companion_min_length != null then 'cosmic_companion_min_length']: cosmic_companion_min_length,
+        [if nu_adopt_touching then 'nu_adopt_touching']: true,   // doc sbnd_xin/113 sec 6; C++ default false
+        [if nu_adopt_touching && nu_adopt_touching_dis != null then 'nu_adopt_touching_dis']: nu_adopt_touching_dis,
+        [if nu_adopt_touching && nu_adopt_touching_min_length != null then 'nu_adopt_touching_min_length']: nu_adopt_touching_min_length,
+        [if nu_adopt_touching && nu_adopt_touching_max_length != null then 'nu_adopt_touching_max_length']: nu_adopt_touching_max_length,
+        [if nu_adopt_touching && nu_adopt_touching_unmatched_only != null then 'nu_adopt_touching_unmatched_only']: nu_adopt_touching_unmatched_only,
         [if nu_fallback_demoted_mains then 'nu_fallback_demoted_mains']: true,
         [if nu_dedup_flash_group then 'nu_dedup_flash_group']: true,  // sbnd_xin/docs/109 rev 3; C++ default false
         [if nu_bundle_flash_group then 'nu_bundle_flash_group']: true,  // sbnd_xin/docs/109 rev 4; C++ default false

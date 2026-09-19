@@ -823,6 +823,21 @@ public:
                                        // discarded.  C++ default false = legacy: photon_flag
                                        // stays at its init_tagger_info() 0, so the uBooNE tagger
                                        // ntuple branch is byte-identical.
+        // doc sbnd_xin/113 sec 6 -- nu_adopt_touching (default OFF): the candidate's companions are
+        // the associated clusters of its own flash bundle only, so an image cluster that TOUCHES the
+        // candidate but carries no flash (a rescue gid >= 1000000: the Q/L matching left it flashless)
+        // is never reconstructed and its charge never reaches kine_reco_Enu.  On the 3067 data events
+        // the blind scan found such prongs leaving the vertex (doc 113 sec 6).  With the knob on, after
+        // the bundle's own companions are gathered, every untagged (not TGM/STM), non-main cluster
+        // whose closest approach to the candidate's main cluster is <= nu_adopt_touching_dis (cm) and
+        // whose length lies in [min, max] (cm) is added to other_clusters; unmatched_only restricts it
+        // to rescue-gid clusters (a cluster matched to another flash keeps its own bundle).  Side result of
+        // doc 113 (the owner's target is the matched beam bundle itself); measured on a stage-B arm, not pursued.
+        bool   m_nu_adopt_touching{false};
+        double m_nu_adopt_touching_dis{3.0};          // cm
+        double m_nu_adopt_touching_min_length{3.0};   // cm
+        double m_nu_adopt_touching_max_length{100.0}; // cm; through-going cosmics are long
+        bool   m_nu_adopt_touching_unmatched_only{true};
         double m_cosmic_companion_min_length{0};  // cm.  A tagged companion SHORTER than this
                                                   // stays in regardless of verdict, so a
                                                   // mis-tagged short neutrino daughter can never

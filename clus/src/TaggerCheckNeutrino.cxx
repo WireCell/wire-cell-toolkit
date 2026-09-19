@@ -490,6 +490,12 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_nu_skip_cosmic_bundle_min_length = get(config, "nu_skip_cosmic_bundle_min_length", m_nu_skip_cosmic_bundle_min_length);  // cm
     m_skip_cosmic_companions  = get(config, "skip_cosmic_companions",  m_skip_cosmic_companions);
     m_cosmic_companion_min_length = get(config, "cosmic_companion_min_length", m_cosmic_companion_min_length);  // cm
+    // doc sbnd_xin/113 sec 6 (see the header)
+    m_nu_adopt_touching            = get(config, "nu_adopt_touching",            m_nu_adopt_touching);
+    m_nu_adopt_touching_dis        = get(config, "nu_adopt_touching_dis",        m_nu_adopt_touching_dis);         // cm
+    m_nu_adopt_touching_min_length = get(config, "nu_adopt_touching_min_length", m_nu_adopt_touching_min_length);  // cm
+    m_nu_adopt_touching_max_length = get(config, "nu_adopt_touching_max_length", m_nu_adopt_touching_max_length);  // cm
+    m_nu_adopt_touching_unmatched_only = get(config, "nu_adopt_touching_unmatched_only", m_nu_adopt_touching_unmatched_only);
     m_nu_fallback_demoted_mains = get(config, "nu_fallback_demoted_mains", m_nu_fallback_demoted_mains);
     // doc pr/94 Phase 2: see the member comments in the header.
     m_nu_per_bundle = get(config, "nu_per_bundle", m_nu_per_bundle);
@@ -1081,6 +1087,11 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["nu_skip_cosmic_bundle_min_length"] = m_nu_skip_cosmic_bundle_min_length;  // cm; > 0 spares untagged bundle-mates at least this long (docs/pr/16 design A); 0 = veto all
     cfg["skip_cosmic_companions"] = m_skip_cosmic_companions;          // doc pr/20 I P4; drop a TGM/STM-tagged companion from other_clusters
     cfg["cosmic_companion_min_length"] = m_cosmic_companion_min_length;  // cm; a tagged companion shorter than this stays in regardless
+    cfg["nu_adopt_touching"]            = m_nu_adopt_touching;            // doc sbnd_xin/113 sec 6; adopt untagged flashless clusters touching the candidate as companions
+    cfg["nu_adopt_touching_dis"]        = m_nu_adopt_touching_dis;        // cm; closest approach to the main cluster
+    cfg["nu_adopt_touching_min_length"] = m_nu_adopt_touching_min_length; // cm
+    cfg["nu_adopt_touching_max_length"] = m_nu_adopt_touching_max_length; // cm
+    cfg["nu_adopt_touching_unmatched_only"] = m_nu_adopt_touching_unmatched_only;  // true = rescue-gid (>= 1000000) clusters only
     cfg["nu_fallback_demoted_mains"] = m_nu_fallback_demoted_mains;    // docs/73 sec 12 round 3; when NO candidate survives, consider demoted mains (same gates); false = legacy
     cfg["nu_per_bundle"]             = m_nu_per_bundle;                // doc pr/94; false = legacy single event-wide candidate
     cfg["nu_per_bundle_demoted_acts"] = m_nu_per_bundle_demoted_acts;  // doc pr/94; mirror of the taggers' evaluate_demoted_mains; inert unless nu_per_bundle
@@ -2527,6 +2538,28 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
                     continue;
                 }
                 cand.others.push_back(cluster);
+            }
+            // doc sbnd_xin/113 sec 6: adopt untagged clusters that touch the candidate's main cluster but
+            // belong to no flash bundle (rescue gid >= 1000000) -- or, with unmatched_only false, to any
+            // other gid -- as companions.  Off by default => the companion set above is untouched.
+            if (m_nu_adopt_touching) {
+                const double dcut = m_nu_adopt_touching_dis * units::cm;
+                for (auto* cluster : grouping.children()) {
+                    if (cluster == cand.main) continue;
+                    if (std::find(cand.others.begin(), cand.others.end(), cluster) != cand.others.end()) continue;
+                    if (std::find(cand.dropped_companions.begin(), cand.dropped_companions.end(), cluster) != cand.dropped_companions.end()) continue;
+                    if (cluster->get_flag(Flags::TGM) || cluster->get_flag(Flags::STM)) continue;
+                    const int cgid = cluster->get_scalar<int>("matched_flash_gid", -1);
+                    if (cgid == gid) continue;                       // the bundle's own non-associated clusters are the taggers' business
+                    if (m_nu_adopt_touching_unmatched_only && cgid < 1000000) continue;
+                    const double len_cm = cluster->get_length() / units::cm;
+                    if (len_cm < m_nu_adopt_touching_min_length || len_cm > m_nu_adopt_touching_max_length) continue;
+                    const auto [ia, ib, d] = cand.main->get_closest_points(*cluster);
+                    if (d > dcut) continue;
+                    SPDLOG_LOGGER_INFO(log, "TaggerCheckNeutrino: [nu_adopt_touching] gid {}: adopted cluster {} (gid {}, L {:.1f} cm, closest approach {:.2f} cm) as a companion of main {}",
+                                       gid, cluster->get_cluster_id(), cgid, len_cm, d / units::cm, cand.main->get_cluster_id());
+                    cand.others.push_back(cluster);
+                }
             }
             SPDLOG_LOGGER_INFO(log, "TaggerCheckNeutrino: [nu_per_bundle] gid {}: candidate main cluster {} (t0 {:.3f} us, L {:.1f} cm, {} associated) of {} evaluated activit(ies)",
                                gid, cand.main->get_cluster_id(), cand.main->get_cluster_t0()/units::us,

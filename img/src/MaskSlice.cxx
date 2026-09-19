@@ -110,6 +110,8 @@ WireCell::Configuration Img::MaskSliceBase::default_configuration() const
     // frame.
     cfg["min_tbin"] = m_min_tbin;
     cfg["max_tbin"] = m_max_tbin;
+    cfg["quiet_mask_window"] = m_quiet_mask_window;
+    cfg["quiet_mask_gap"] = m_quiet_mask_gap;
 
     return cfg;
 }
@@ -129,6 +131,8 @@ void Img::MaskSliceBase::configure(const WireCell::Configuration& cfg)
     m_masked_error = get<double>(cfg, "masked_error", m_masked_error);
     m_min_tbin = get<int>(cfg, "min_tbin", m_min_tbin);
     m_max_tbin = get<int>(cfg, "max_tbin", m_max_tbin);
+    m_quiet_mask_window = get<int>(cfg, "quiet_mask_window", m_quiet_mask_window);
+    m_quiet_mask_gap = get<int>(cfg, "quiet_mask_gap", m_quiet_mask_gap);
     if (cfg.isMember("active_planes")) {
         m_active_planes.clear();
         for (auto id : cfg["active_planes"]) {
@@ -378,6 +382,86 @@ void Img::MaskSliceBase::slice(const IFrame::pointer& in, slice_map_t& svcmap)
                 s->assign(ich, {(float)m_dummy_charge, (float)m_dummy_error});
             }
         }
+    }
+
+    // doc sbnd_xin/113: quiet-plane masking.  For each channel of a masked plane, find the slices that
+    // hold an active tick (the same thresholding rule the active planes use), dilate that set by
+    // +-m_quiet_mask_window slices, and mark every OTHER slice of the channel as masked.  Off (-1) leaves
+    // the legacy path untouched.
+    if (m_quiet_mask_window >= 0 && !m_masked_planes.empty()) {
+        const std::unordered_set<int> masked_planes_set(m_masked_planes.begin(), m_masked_planes.end());
+        const size_t nsb = max_slicebin > min_slicebin ? max_slicebin - min_slicebin : 0;
+        std::vector<char> active_sb(nsb, 0), quiet_sb(nsb, 0);
+        size_t nquiet_cells = 0, nquiet_chans = 0;
+        for (size_t idx = 0; idx < charge_traces.size(); ++idx) {
+            auto trace = charge_traces[idx];
+            auto wiener_trace = wiener_traces[idx];
+            const int tbin = trace->tbin();
+            const int chid = trace->channel();
+            IChannel::pointer ich = m_anode->channel(chid);
+            auto planeid = ich->planeid();
+            if (masked_planes_set.find(planeid.index()) == masked_planes_set.end()) {
+                continue;
+            }
+            const auto& charge = trace->charge();
+            const auto& wiener_charge = wiener_trace->charge();
+            double threshold = m_nthreshold[planeid.index()] * summary[idx];
+            if (threshold == 0) {
+                threshold = m_default_threshold[planeid.index()];
+            }
+            std::fill(active_sb.begin(), active_sb.end(), 0);
+            const size_t nq = charge.size();
+            for (size_t qind = 0; qind != nq; ++qind) {
+                const int t = tbin + (int) qind;
+                if (t < min_tbin || t >= max_tbin) continue;
+                const size_t sb = t / m_tick_span;
+                if (sb < min_slicebin || sb >= max_slicebin) continue;
+                if (active_sb[sb - min_slicebin]) continue;
+                if (thresholding(wiener_charge, charge, qind, threshold, m_tick_span, false)) {
+                    active_sb[sb - min_slicebin] = 1;
+                }
+            }
+            // quiet = not within +-window of an active slice; with quiet_mask_gap >= 0 ALSO within +-gap of one
+            // (a channel silent everywhere stays live and empty)
+            if (m_quiet_mask_gap >= 0) {
+                std::fill(quiet_sb.begin(), quiet_sb.end(), 0);
+                for (size_t i = 0; i < nsb; ++i) {
+                    if (!active_sb[i]) continue;
+                    const size_t lo = i > (size_t) m_quiet_mask_gap ? i - m_quiet_mask_gap : 0;
+                    const size_t hi = std::min(nsb - 1, i + (size_t) m_quiet_mask_gap);
+                    for (size_t j = lo; j <= hi; ++j) quiet_sb[j] = 1;
+                }
+            }
+            else {
+                std::fill(quiet_sb.begin(), quiet_sb.end(), 1);
+            }
+            for (size_t i = 0; i < nsb; ++i) {
+                if (!active_sb[i]) continue;
+                const size_t lo = i > (size_t) m_quiet_mask_window ? i - m_quiet_mask_window : 0;
+                const size_t hi = std::min(nsb - 1, i + (size_t) m_quiet_mask_window);
+                for (size_t j = lo; j <= hi; ++j) quiet_sb[j] = 0;
+            }
+            bool any = false;
+            for (size_t i = 0; i < nsb; ++i) {
+                if (!quiet_sb[i]) continue;
+                const size_t slicebin = min_slicebin + i;
+                auto s = svcmap[slicebin];
+                if (!s) {
+#ifdef SLICE_START_TIME_IS_RELATIVE
+                    const double start = slicebin * span;  // thus relative to slice frame's time.
+#else
+                    const double start = in->time() + slicebin * span;
+#endif
+                    s = new Img::Data::Slice(tlframe_ptr, slicebin, start, span);
+                    svcmap[slicebin] = s;
+                }
+                s->assign(ich, {(float) m_masked_charge, (float) m_masked_error});
+                ++nquiet_cells; any = true;
+            }
+            if (any) ++nquiet_chans;
+        }
+        log->debug("quiet-plane masking: window {} gap {} slices, {} masked-plane channels, {} (channel, slice) cells marked masked",
+                   m_quiet_mask_window, m_quiet_mask_gap, nquiet_chans, nquiet_cells);
     }
 
     // masked slices
