@@ -204,8 +204,11 @@ rule spng_mpsigproc:
             -A "tpcid={params.tpcid}" -A "detname={params.detname}" --tla-code "crossed_views=[1,1,1]" \
             -A "device={params.device}"
         # tar the output files
-        tar -cf {output} dnnroi-training-truth.npz \
-        dnnroi-training-fodder.npz
+	to_tar="dnnroi-training-truth.npz dnnroi-training-fodder.npz"
+	if [[ {params.jsonnet} == "dnnroi-training-trios.jsonnet" ]]; then
+	  to_tar="$to_tar dnnroi-training-trio.npz"
+	fi
+        tar -cf {output} $to_tar
         """
 
 use rule spng_mpsigproc as spng_mpsigproc_target with:
@@ -281,6 +284,19 @@ rule spng_densesigproc_lines:
         dnnroi-training-fodder.npz
         """
 
+rule convert_trio:
+    input:
+      "sigproc-spng-mp-cosmics_{sample}.tar"
+    output:
+      'cosmics_{sample}-g4-trio.h5'
+    shell: 
+      """
+      tar -xf {input} dnnroi-training-trio.npz
+      python  {SRC_DIR}/scripts/trios_npz_to_h5.py \
+        dnnroi-training-trio.npz -o {output}
+      """
+  
+
 ## For more flexibility, create a separate rule to unpack into hdf5 for each plane
 for i in range(3):
     rule:
@@ -294,6 +310,14 @@ for i in range(3):
             }
         script:
             "scripts/convert_to_h5mpSnake.py"
+    #rule:
+    #    name: f'convert_spng_trio_to_hdf5_{i}'
+    #    input:
+    #        "sigproc-spng-mp-cosmics_{sample}.tar"
+    #    output:
+    #        **{
+    #          f'trio{i}':f'cosmics_{{sample}}-g4-trio-{i}.h5',
+    #        }
     rule:
         name: f'convert_spng_mp_to_hdf5_lines_{i}'
         input:

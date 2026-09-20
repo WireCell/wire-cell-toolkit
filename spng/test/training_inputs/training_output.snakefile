@@ -90,7 +90,7 @@ rule threshold_pixel_scan:
         y, labels = load_y_labels(input[0], config['device'])
         y, labels = y[chan_range[0]:chan_range[1]], labels[chan_range[0]:chan_range[1]]
 
-        n_true = labels.sum()
+        n_true = torch.tensor(labels.sum())
         reco = (y.unsqueeze(-1).expand(-1,-1,len(thresholds)) > thresholds)
         n_reco = reco.sum((0,1))
         matched = ((labels>0).unsqueeze(-1).expand(-1,-1,reco.shape[-1]) == reco) * (reco > 0)
@@ -127,7 +127,7 @@ rule aggregate_scan:
             t = torch.load(input_file)
             effs.append(t['efficiency'].cpu().numpy())
             purs.append(t['purity'].cpu().numpy())
-            n_trues.append(t['n_true'].cpu().numpy())
+            n_trues.append(t['n_true'].cpu().numpy() if type(t['n_true']) is torch.Tensor else t['n_true'])
             n_recos.append(t['n_reco'].cpu().numpy())
             n_recos_matched.append(t['n_reco_matched'].cpu().numpy())
             n_trues_matched.append(t['n_true_matched'].cpu().numpy())
@@ -147,6 +147,35 @@ rule aggregate_scan:
             n_trues_matched_summed=np.array(n_trues_matched).sum(axis=0),
             thresholds=thresholds[0]
         )
+
+
+def fbeta(R, P, beta=1.0):
+    return (1+beta*beta)*(R*P)/(beta*beta*P + R)
+
+rule plot_fbeta_scan:
+    output:
+        'aggregated_scan_{type}_plane_{plane}_fbetas.png'
+    input:
+        'aggregated_scan_{type}_plane_{plane}.npz'
+    run:
+        import matplotlib.pyplot as plt
+        t = np.load(input[0])
+        
+        betas = np.array([0.50, 0.75, 1.00, 1.25, 1.50, 2.00]).reshape(-1,1)
+
+
+        R = t['n_recos_matched_summed']/t['n_trues_summed']
+        P = t['n_trues_matched_summed']/t['n_recos_summed']
+        fbeta = (1+betas*betas)*(R*P)/(betas*betas*P + R)
+        for i, fb in enumerate(fbeta):
+          maxloc =t['thresholds'][np.argmax(fb)]
+          themax = np.max(fb)
+          plt.plot(t['thresholds'], fb, label=r"$\beta$"+f"={betas[i][0]:.2f} | max = {maxloc:.2f}")
+          plt.scatter(maxloc, themax)
+        plt.legend()
+        plt.savefig(output[0])
+
+
 config.setdefault('device', 'cpu')
 config.setdefault('app', 'xvunet')
 config.setdefault('nevents', 10)
@@ -307,3 +336,4 @@ use rule roi_lengths as true_w_roi_lengths with:
     input:
         expand("<results>/xvu-{{type}}_roi_table_wplane_{angles}-thresh-0.5.pt", angles=wangles)
     output: "<results>/xvu-{type}_roi_table_info_wplane-thresh-0.5.npz"
+
