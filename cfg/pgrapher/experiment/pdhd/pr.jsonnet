@@ -30,9 +30,16 @@
 //   * Bee detector 'protodunehd'; single-event RSE from the job TLAs.
 // Every knob keeps the SBND key-suppression idiom: an unset knob is absent from
 // the compiled config and means "C++ default".  The SBND/PDVD-tuned DEFAULTS of
-// the pr() arguments are kept verbatim (they document those operating points);
-// the PDHD operating point is set in pdhd/wct-pr-perevt.jsonnet, which passes
-// every physics knob explicitly.
+// the pr() arguments here are kept verbatim; the PDHD operating point is set in
+// cfg/pgrapher/experiment/pdhd/wct-pr-perevt.jsonnet (promoted in-tree by doc
+// sbnd_xin/120 round A), which passes every physics knob explicitly.
+//
+// NOTE, doc sbnd_xin/120 sec 4: those verbatim defaults no longer document the
+// SBND operating point.  SBND's own pr() defaults, in
+// cfg/pgrapher/experiment/sbnd/clus.jsonnet, ARE that operating point now -- it
+// moved there so the LArSoft 1-step chain gets it by calling pr().  This fork
+// was NOT changed with it, so read these as the values SBND's pr() carried when
+// this file was forked, not as SBND production today.
 //
 // Import as
 //   local pr_mod = import 'pgrapher/experiment/pdhd/pr.jsonnet';
