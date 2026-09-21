@@ -275,6 +275,12 @@ namespace WireCell::Clus::Facade {
                       const double drift_speed, const double drift);
     int point2wind(const geo_point_t& point, const double angle, const double pitch, const double center);
     // doc pdvd/101: the continuous coordinate point2wind rounds; std::round(point2wind_cont(...)) == point2wind(...).
+    // That identity is NOT structural -- doc sbnd_xin/119 round 3 kept the two bodies as separate
+    // copies on purpose, because carrying each one across textually is what made the cos/sin hoist
+    // byte-identical.  Two spellings of `cos(a)*z - sin(a)*y` can be FMA-contracted differently, so
+    // the identity is CHECKED, in clus/test/doctest_projection_constant_hoist.cxx, over the three
+    // detectors' plane geometries and over inputs driven onto the .5 rounding boundary.  If you
+    // unify these bodies, that test is what tells you whether you changed a wire index.
     double point2wind_cont(const geo_point_t& point, const double angle, const double pitch, const double center);
     // doc sbnd_xin/119 round 3: as the two above, but taking cos(angle) and sin(angle) rather than
     // the angle.  The angle is a per-(apa,face,plane) constant, so the two transcendentals were

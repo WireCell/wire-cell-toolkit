@@ -85,14 +85,16 @@ TEST_CASE("doc sbnd_xin/119 r3: point2wind_cs reproduces the legacy body exactly
             // bit-for-bit, not approximately
             CHECK(Facade::point2wind_cont_cs(p, ca, sa, pl.pitch, pl.center)
                   == legacy_point2wind_cont(p, pl.angle, pl.pitch, pl.center));
+            // The ANGLE-taking forms still exist for callers with no memo -- DynamicPointCloud.cxx
+            // is one -- and they now DELEGATE to the _cs forms.  That delegation is the same
+            // FMA-contraction question as above, so it gets the same full sweep and not a spot
+            // check: these are the calls whose results reach production outside the fit.
+            CHECK(Facade::point2wind(p, pl.angle, pl.pitch, pl.center)
+                  == legacy_point2wind(p, pl.angle, pl.pitch, pl.center));
+            CHECK(Facade::point2wind_cont(p, pl.angle, pl.pitch, pl.center)
+                  == legacy_point2wind_cont(p, pl.angle, pl.pitch, pl.center));
             ++n;
         }
-        // The angle-taking forms still exist for callers with no memo; they must agree too.
-        const geo_point_t q(12.5, -33.25, 807.125);
-        CHECK(Facade::point2wind(q, pl.angle, pl.pitch, pl.center)
-              == legacy_point2wind(q, pl.angle, pl.pitch, pl.center));
-        CHECK(Facade::point2wind_cont(q, pl.angle, pl.pitch, pl.center)
-              == legacy_point2wind_cont(q, pl.angle, pl.pitch, pl.center));
     }
     CHECK(n == 20000 * planes.size());
 }
@@ -109,6 +111,8 @@ TEST_CASE("doc sbnd_xin/119 r3: point2wind_cs agrees at the rounding boundary")
             const double z = (k + frac + 0.5) * pitch + center;
             const geo_point_t p(0.0, 0.0, z);
             CHECK(Facade::point2wind_cs(p, ca, sa, pitch, center)
+                  == legacy_point2wind(p, angle, pitch, center));
+            CHECK(Facade::point2wind(p, angle, pitch, center)
                   == legacy_point2wind(p, angle, pitch, center));
         }
     }
