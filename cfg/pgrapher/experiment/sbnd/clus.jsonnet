@@ -1014,12 +1014,22 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
               // retile_sampler_strategy (doc sbnd_xin/pr/149): the strategy of the
               // RETILE samplers only (improve2 -> steiner / steiner_refresh, i.e. the
               // Steiner cloud every PR stage reads); the clustering job's 3d PC keeps
-              // 'stepped'.  null => 'stepped' = today's config, byte-identical.
-              // 'charge_stepped' => the prototype's retile rule (bs_live_face above;
-              // PDHD/PDVD production since docs pdvd/108 / 103).
+              // 'stepped'.  'charge_stepped' => the prototype's retile rule
+              // (bs_live_face above; PDHD/PDVD production since docs pdvd/108 / 103).
+              // FLIPPED FOR SBND by doc sbnd_xin/118 on the owner's go 2026-09-20:
+              // null => 'charge_stepped' at the improve2 call site below (was
+              // 'stepped').  It is one third of the PDHD/PDVD trajectory package and
+              // was NOT separable on its own -- doc 116 sec 16.3 measures the vertex
+              // gain as super-additive (cs alone +0.8 pt at 1 cm, p 0.52; with the
+              // Steiner pricing +2.5; with the fit keys +4.3, p 0.00027), so the three
+              // are flipped together and no subset of them was ever graded.  It is
+              // also the whole CPU cost: it triples both Steiner graph builds
+              // (doc 116 sec 14, x2.9 and x3.4).  Escape hatch:
+              // -S retile_sampler_strategy='stepped' restores the pre-flip sampler.
               // retile_sampler_wire_product / retile_sampler_charge_threshold
               // override the C++ 2500 / 4000 and are read only under
-              // 'charge_stepped'.  null => keys omitted.
+              // 'charge_stepped'.  null => keys omitted (untuned on SBND; doc pr/150
+              // level R2 tried 6000 and it did not pass).
               retile_sampler_strategy=null,
               retile_sampler_wire_product=null,
               retile_sampler_charge_threshold=null,
@@ -1053,8 +1063,29 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
               //     SteinerGrapher.h:150), scope 'tree' (C++ default, :156) |
               //     'tree+path'.
               // PDHD/PDVD production = 'prefer3' / 0.5 / 'tree+path' (doc pdvd/116).
-              // SBND: NOT adopted -- null => keys omitted (cm.steiner suppresses
-              // them) => compiled config byte-identical to today's.  Study knobs only.
+              // FLIPPED FOR SBND by doc sbnd_xin/118 on the owner's go 2026-09-20:
+              // null => 'prefer3' / 0.5 / 'tree+path' at BOTH call sites below (was
+              // the C++ defaults 'wcp' / 0 / 'tree' = keys omitted).  Graded on the
+              // round-3 SBND MC with truth (docs 115/116/117): no primary metric
+              // moves, and the true vertex gets closer -- nuecc within 1 cm
+              // 599 -> 669 of 1626 (+4.31 pt, p 0.00027), within 2 cm +2.8 pt
+              // (p 0.023), median nearest-candidate distance 0.960 -> 0.840 cm
+              // (p 0.00026), and the SELECTED signal's own vertex 0.850 -> 0.780 cm
+              // on nuecc>4 (p 0.00026) and 0.830 -> 0.760 cm on cv numu (p 0.017);
+              // trajectory closure R2D_W 2.13 -> 1.44 % nuecc, 0.81 -> 0.54 % cv.
+              // This flip OVERRIDES the recommendations of doc 116 sec 15.4 and the
+              // frozen HOLD of doc 117 sec 11: those rules had the vertex metric
+              // pre-registered as SECONDARY.  The owner overrode that explicitly --
+              // see doc 118 sec 1, and the pdhd_track_fitting.json _comment_d108
+              // precedent, before assuming the frozen table was satisfied.
+              // Flipped as a package with retile_sampler_strategy='charge_stepped'
+              // and the two fit keys in sbnd_track_fitting.json; the gain is
+              // super-additive, so no partial adoption is graded.  MUST stay paired
+              // with dl_vtx_dual_chain=true (doc 117 sec 10.2: the trajectory with
+              // fit_exclusion=false is the worst cell of that grid).
+              // Escape hatch: -S steiner_blank_plane_mode='wcp'
+              // -S steiner_base_weight_blank_alpha=0 -S steiner_base_weight_scope='tree'
+              // emits the C++ defaults.  The radius stays null = C++ 0, key omitted.
               steiner_blank_plane_mode=null,
               steiner_blank_plane_radius=null,
               steiner_base_weight_blank_alpha=null,
@@ -2159,7 +2190,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
         local improve2 = cm.improve_cluster_2(
             anodes=anodes,
             samplers=[clus.sampler(bs_live_face(a.name, 0,
-                                                strategy_name=if retile_sampler_strategy == null then 'stepped' else retile_sampler_strategy,
+                                                strategy_name=if retile_sampler_strategy == null then 'charge_stepped' else retile_sampler_strategy,   // doc sbnd_xin/pr/149; FLIPPED by doc sbnd_xin/118 (owner 2026-09-20)
                                                 wire_product=retile_sampler_wire_product,
                                                 charge_threshold=retile_sampler_charge_threshold),
                                    apa=a.data.ident, face=0) for a in anodes]),
@@ -2272,11 +2303,11 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                                 terminal_adjacent_slice=steiner_terminal_adjacent_slice,
                                 edge_charge_forward_dead_mix=steiner_edge_charge_forward_dead_mix,
                                 terminal_min_separation=steiner_terminal_min_separation * wc.cm,   // doc sbnd_xin/pr/149 amendment 1
-                                // doc sbnd_xin/pr/150: study knobs, null => keys omitted (byte-identical).
-                                terminal_blank_plane_mode=steiner_blank_plane_mode,
+                                // doc sbnd_xin/pr/150 study knobs; FLIPPED by doc sbnd_xin/118 (owner 2026-09-20).
+                                terminal_blank_plane_mode=if steiner_blank_plane_mode == null then 'prefer3' else steiner_blank_plane_mode,
                                 terminal_blank_plane_radius=steiner_blank_plane_radius,
-                                base_weight_blank_alpha=steiner_base_weight_blank_alpha,
-                                base_weight_scope=steiner_base_weight_scope),
+                                base_weight_blank_alpha=if steiner_base_weight_blank_alpha == null then 0.5 else steiner_base_weight_blank_alpha,
+                                base_weight_scope=if steiner_base_weight_scope == null then 'tree+path' else steiner_base_weight_scope),
             // The doc pr/23 second steiner pass, named right after protect_bundle:
             // replace=false rebuilds ONLY the clusters protect_bundle purged
             // (split retained + fragments).  A replace=true second pass would
@@ -2299,11 +2330,12 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                                 terminal_adjacent_slice=steiner_terminal_adjacent_slice,
                                 edge_charge_forward_dead_mix=steiner_edge_charge_forward_dead_mix,
                                 terminal_min_separation=steiner_terminal_min_separation * wc.cm,   // doc sbnd_xin/pr/149 amendment 1
-                                // doc sbnd_xin/pr/150: the same seed knobs as the first pass.
-                                terminal_blank_plane_mode=steiner_blank_plane_mode,
+                                // doc sbnd_xin/pr/150: the same seed knobs as the first pass,
+                                // and the same doc sbnd_xin/118 flip (owner 2026-09-20).
+                                terminal_blank_plane_mode=if steiner_blank_plane_mode == null then 'prefer3' else steiner_blank_plane_mode,
                                 terminal_blank_plane_radius=steiner_blank_plane_radius,
-                                base_weight_blank_alpha=steiner_base_weight_blank_alpha,
-                                base_weight_scope=steiner_base_weight_scope,
+                                base_weight_blank_alpha=if steiner_base_weight_blank_alpha == null then 0.5 else steiner_base_weight_blank_alpha,
+                                base_weight_scope=if steiner_base_weight_scope == null then 'tree+path' else steiner_base_weight_scope,
                                 replace=false),
             fiducialutils: cm.fiducialutils(),
             tagger_check_stm: cm.tagger_check_stm(
