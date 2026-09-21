@@ -780,7 +780,14 @@ const Grouping::fastgeom_t& Grouping::fastgeom(const int apa, const int face) co
     for (int pind = 0; pind < 3; ++pind) {
         fg.pitch[pind] = pitch_mags().at(apa).at(face).at(pind);
         fg.center[pind] = proj_centers().at(apa).at(face).at(pind);
+        // doc sbnd_xin/119 round 3: hoisted out of point2wind, which called both per point.
+        fg.cos_angle[pind] = std::cos(fg.angle[pind]);
+        fg.sin_angle[pind] = std::sin(fg.angle[pind]);
     }
+    // doc sbnd_xin/119 round 3: hoisted out of drift2time, which walked the face's plane and wire
+    // containers (both returned BY VALUE) on every projected point to recover these two.
+    fg.xsign = fg.iface->dirx();
+    fg.xorig = fg.iface->planes()[2]->wires().front()->center().x();
     fg.time_offset = cache().map_time_offset.at(apa).at(face);
     fg.drift_speed = cache().map_drift_speed.at(apa).at(face);
     fg.tick = cache().map_tick.at(apa).at(face);
@@ -820,9 +827,11 @@ const Grouping::fastgeom_t& Grouping::fastgeom(const int apa, const int face) co
 std::tuple<int, int> Grouping::convert_3Dpoint_time_ch(const geo_point_t& point, const int apa, const int face, const int pind) const {
     const auto& fg = fastgeom(apa, face);
 
-    const int wind = point2wind(point, fg.angle[pind], fg.pitch[pind], fg.center[pind]);
+    // doc sbnd_xin/119 round 3: the _cs / (xsign, xorig) forms take the per-(apa,face) constants
+    // from the memo instead of re-deriving them here, per point.  Same expressions, same values.
+    const int wind = point2wind_cs(point, fg.cos_angle[pind], fg.sin_angle[pind], fg.pitch[pind], fg.center[pind]);
 
-    const double time = drift2time(fg.iface, fg.time_offset, fg.drift_speed, point[0]);
+    const double time = drift2time(fg.xsign, fg.xorig, fg.time_offset, fg.drift_speed, point[0]);
     const int tind = std::round(time / fg.tick);
 
     return {tind, wind};
@@ -830,7 +839,7 @@ std::tuple<int, int> Grouping::convert_3Dpoint_time_ch(const geo_point_t& point,
 
 double Grouping::convert_3Dpoint_wire_cont(const geo_point_t& point, const int apa, const int face, const int pind) const {
     const auto& fg = fastgeom(apa, face);
-    return point2wind_cont(point, fg.angle[pind], fg.pitch[pind], fg.center[pind]);
+    return point2wind_cont_cs(point, fg.cos_angle[pind], fg.sin_angle[pind], fg.pitch[pind], fg.center[pind]);
 }
 
 std::pair<double,double> Grouping::convert_time_wire_2Dpoint(const int timeslice, const int wire, const int apa, const int face, const int plane) const

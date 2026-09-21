@@ -127,6 +127,15 @@ namespace WireCell::Clus::Facade {
             // (apa, face), once) but only READ when m_ctpc_aniso_metric is on.
             double drift_step{0.0};
             std::array<double, 3> yscale{1.0, 1.0, 1.0};
+            // doc sbnd_xin/119 round 3: the rest of what the per-point projection used to
+            // re-derive on every call.  cos_angle/sin_angle are cos/sin of angle[pind]; xsign and
+            // xorig are the two IAnodeFace constants drift2time() dug out of
+            // anodeface->planes()[2]->wires().front()->center() per call.  Same reasoning, and
+            // the same output-identity argument, as the memo above: these hold exactly the values
+            // the per-call derivation returns.  On SBND nuecc evt 2925 that derivation was 4.2 %
+            // of the job in drift2time and a further ~1.4 % in sin/cos under point2wind.
+            std::array<double, 3> cos_angle{}, sin_angle{};
+            double xsign{0.0}, xorig{0.0};
         };
         // Dense by key = apa*2+face (called per point in the good-point
         // tests; a hash lookup here was ~5% of busy clustering).  unique_ptr

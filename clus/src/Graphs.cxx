@@ -286,11 +286,15 @@ Weighted::filtered_graph_type Weighted::GraphAlgorithms::weight_threshold(double
     return Weighted::filtered_graph_type(m_graph, filter, boost::keep_all());
 }
 
-Weighted::vertex_set 
+// doc sbnd_xin/119 round 3: returns an ASCENDING, unique vector where this returned a std::set.
+// Every `result.insert(...)` below is now a push_back into a container the BFS already knows is
+// duplicate-free (the `visited` array), and the single std::sort at the end restores exactly the
+// order std::set was providing.  See the declaration in Graphs.h for why order is load-bearing.
+std::vector<Weighted::vertex_type>
 Weighted::GraphAlgorithms::find_neighbors_nlevel(size_t index, int nlevel, bool include_self) const
 {
-    vertex_set result;
-    
+    std::vector<vertex_type> result;
+
     // Input validation
     if (nlevel < 0) {
         return result; // Return empty set for invalid nlevel
@@ -307,7 +311,7 @@ Weighted::GraphAlgorithms::find_neighbors_nlevel(size_t index, int nlevel, bool 
     // Special case: if nlevel is 0, only return the original vertex if include_self is true
     if (nlevel == 0) {
         if (include_self) {
-            result.insert(start_vertex);
+            result.push_back(start_vertex);
         }
         return result;
     }
@@ -324,7 +328,7 @@ Weighted::GraphAlgorithms::find_neighbors_nlevel(size_t index, int nlevel, bool 
     // Initialize with the starting vertex
     current_level.push(start_vertex);
     if (include_self) {
-        result.insert(start_vertex);
+        result.push_back(start_vertex);
     }
     visited[start_vertex] = 1;
     
@@ -345,7 +349,7 @@ Weighted::GraphAlgorithms::find_neighbors_nlevel(size_t index, int nlevel, bool 
                 // If we haven't visited this neighbor yet
                 if (!visited[neighbor]) {
                     visited[neighbor] = 1;
-                    result.insert(neighbor);
+                    result.push_back(neighbor);
                     next_level.push(neighbor);
                 }
             }
@@ -356,5 +360,8 @@ Weighted::GraphAlgorithms::find_neighbors_nlevel(size_t index, int nlevel, bool 
         next_level = std::queue<vertex_type>(); // Clear next_level
     }
     
+    // doc sbnd_xin/119 round 3: restore the std::set's ascending order.  `visited` already
+    // guarantees uniqueness, so no std::unique is needed.
+    std::sort(result.begin(), result.end());
     return result;
 }
