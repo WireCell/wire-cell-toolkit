@@ -32,7 +32,16 @@ local flash = import 'pgrapher/experiment/pdhd/flash.jsonnet';
 // Full-stream record length (rawdump/raw_waveform nsamples for opch 120-159).
 local FULLSTREAM_SAMPLES = 343808;
 
-function(snip_file, fs_file, output_dir='.', run=27980, event=8, offset_us=0, fixed_snr=-1, spe_file='', sat_pad=1024)
+function(snip_file, fs_file, output_dir='.', run=27980, event=8, offset_us=0, fixed_snr=-1, spe_file='', sat_pad=1024,
+         // frames_dir: when non-empty, ALSO dump the optical waveform frames of both
+         // branches (FrameFileSink, dense arrays per trace tag) into
+         //   <frames_dir>/light-frames-allpd-snip-wct.tar.bz2   tags raw, decon
+         //   <frames_dir>/light-frames-allpd-fs-wct.tar.bz2     tags raw, decon, decon_roi
+         // through a FrameFanout in front of each OpHitFinder.  Default '' => no
+         // fanout and no sink nodes are built: the compiled config is byte-identical
+         // to the pre-knob job (doc pdhd/30, the STM+Michel release).  The flashes
+         // are unaffected either way -- the fanout only duplicates the frame.
+         frames_dir='')
 
   local run_n = if std.type(run) == 'string' then std.parseInt(run) else run;
   local evt_n = if std.type(event) == 'string' then std.parseInt(event) else event;
@@ -63,16 +72,39 @@ function(snip_file, fs_file, output_dir='.', run=27980, event=8, offset_us=0, fi
   local opflash_finder = flash.opflash_finder(offset_us=off_us);
   local fl_sink = flash.opflash_sink('%s/opflash_pdhd-allpd-wct.tar.gz' % output_dir, name='allpd');
 
+  // --- optional waveform dump (frames_dir): fanout + FrameFileSink per branch ---
+  local dump_frames = frames_dir != '';
+  local snip_fan = g.pnode({ type: 'FrameFanout', name: 'snip_frames', data: { multiplicity: 2 } }, nin=1, nout=2);
+  local fs_fan = g.pnode({ type: 'FrameFanout', name: 'fs_frames', data: { multiplicity: 2 } }, nin=1, nout=2);
+  local snip_wf_sink = flash.waveform_sink('%s/light-frames-allpd-snip-wct.tar.bz2' % frames_dir, tags=['raw', 'decon'], name='snip');
+  local fs_wf_sink = flash.waveform_sink('%s/light-frames-allpd-fs-wct.tar.bz2' % frames_dir, tags=['raw', 'decon', 'decon_roi'], name='fs');
+
   local graph = g.intern(
     innodes=[snip_src, fs_src],
-    centernodes=[snip_decon, snip_hit, fs_decon, fs_roi, fs_hit, merge, opflash_finder],
-    outnodes=[fl_sink],
+    centernodes=[snip_decon, snip_hit, fs_decon, fs_roi, fs_hit, merge, opflash_finder]
+                + (if dump_frames then [snip_fan, fs_fan] else []),
+    outnodes=[fl_sink] + (if dump_frames then [snip_wf_sink, fs_wf_sink] else []),
+    // Edge ORDER is kept exactly as before the knob (the compiled JSON edge
+    // list is part of the byte-identity gate); the knob only replaces the
+    // decon->hit link of each branch by decon->fanout->{sink,hit}.
     edges=[
       g.edge(snip_src, snip_decon),
+    ] + (if dump_frames then [
+      g.edge(snip_decon, snip_fan),
+      g.edge(snip_fan, snip_wf_sink, 0, 0),
+      g.edge(snip_fan, snip_hit, 1, 0),
+    ] else [
       g.edge(snip_decon, snip_hit),
+    ]) + [
       g.edge(fs_src, fs_decon),
       g.edge(fs_decon, fs_roi),
+    ] + (if dump_frames then [
+      g.edge(fs_roi, fs_fan),
+      g.edge(fs_fan, fs_wf_sink, 0, 0),
+      g.edge(fs_fan, fs_hit, 1, 0),
+    ] else [
       g.edge(fs_roi, fs_hit),
+    ]) + [
       g.edge(snip_hit, merge, 0, 0),
       g.edge(fs_hit, merge, 0, 1),
       g.edge(merge, opflash_finder),
