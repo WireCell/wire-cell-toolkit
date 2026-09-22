@@ -1,6 +1,8 @@
 #include "WireCellSpng/Rebaseline.h"
 #include "WireCellSpng/Util.h"  // for modulo
 
+#include <algorithm>
+
 namespace WireCell::SPNG {
 
     namespace {
@@ -217,6 +219,125 @@ namespace WireCell::SPNG {
             return batch_view.view(permuted_output.sizes()).permute(reverse_permutation).contiguous();
         }
 
+        // CPU-specialized implementation.  batch_view is contiguous float32
+        // storage with one waveform per row.  The rows have no shared writes,
+        // so their ROI scans and baseline corrections may run concurrently.
+        void apply_rebaseline_to_cpu_row(float* wave,
+                                         int64_t start_idx,
+                                         int64_t end_idx,
+                                         int64_t min_roi_size,
+                                         int64_t shrink_size,
+                                         bool remove_small)
+        {
+            start_idx += shrink_size;
+            end_idx -= shrink_size;
+
+            if (start_idx > end_idx) {
+                return;
+            }
+            if (end_idx - start_idx <= min_roi_size - 1) {
+                if (remove_small) {
+                    std::fill(wave + start_idx, wave + end_idx + 1, 0.0f);
+                }
+                return;
+            }
+
+            const float start_val = wave[start_idx];
+            const float end_val = wave[end_idx];
+            const float slope = (end_val - start_val) /
+                                static_cast<float>(end_idx - start_idx);
+            for (int64_t tick = start_idx; tick <= end_idx; ++tick) {
+                wave[tick] -= start_val + slope * static_cast<float>(tick - start_idx);
+            }
+        }
+
+        void rebaseline_zero_cpu_rows(float* samples,
+                                      int64_t first_row,
+                                      int64_t last_row,
+                                      int64_t nticks,
+                                      int64_t consequtive_zeros,
+                                      int64_t min_roi_size,
+                                      int64_t shrink_size,
+                                      bool remove_small)
+        {
+            for (int64_t row = first_row; row < last_row; ++row) {
+                float* wave = samples + row * nticks;
+                bool in_roi = false;
+                int64_t roi_start = -1;
+
+                int64_t tick = 0;
+                while (tick < nticks) {
+                    if (wave[tick] == 0.0f) {
+                        const int64_t run_start = tick;
+                        while (tick < nticks && wave[tick] == 0.0f) {
+                            ++tick;
+                        }
+                        if (tick - run_start >= consequtive_zeros) {
+                            if (in_roi) {
+                                apply_rebaseline_to_cpu_row(wave, roi_start, run_start - 1,
+                                                            min_roi_size, shrink_size, remove_small);
+                                in_roi = false;
+                            }
+                        }
+                        else if (!in_roi) {
+                            roi_start = run_start;
+                            in_roi = true;
+                        }
+                        continue;
+                    }
+
+                    if (!in_roi) {
+                        roi_start = tick;
+                        in_roi = true;
+                    }
+                    ++tick;
+                }
+
+                if (in_roi) {
+                    apply_rebaseline_to_cpu_row(wave, roi_start, nticks - 1,
+                                                min_roi_size, shrink_size, remove_small);
+                }
+            }
+        }
+
+        torch::Tensor rebaseline_zero_cpu_direct(const torch::Tensor& tensor,
+                                                    int64_t dim,
+                                                    int64_t consequtive_zeros,
+                                                    int64_t min_roi_size,
+                                                    int64_t shrink_size,
+                                                    bool remove_small,
+                                                    bool remove_negative)
+        {
+            if (!tensor.numel()) {
+                return tensor.clone();
+            }
+
+            dim = modulo(dim, tensor.dim());
+            const auto permutation = rebaseline_permutation(tensor.dim(), dim);
+            auto output = tensor.clone();
+            auto permuted_output = output.permute(permutation).contiguous();
+
+            const int64_t nticks = output.size(dim);
+            if (!nticks) {
+                return restore_rebaseline_shape(permuted_output, permuted_output, permutation);
+            }
+            const int64_t nbatches = permuted_output.numel() / nticks;
+            auto batch_view = permuted_output.view({nbatches, nticks});
+            auto* samples = batch_view.data_ptr<float>();
+
+            // Process all independent waveform rows on the calling thread.
+            // This retains the direct-memory ROI algorithm without creating
+            // a second, uncoordinated CPU worker pool.
+            rebaseline_zero_cpu_rows(samples, 0, nbatches,
+                                     nticks, consequtive_zeros, min_roi_size,
+                                     shrink_size, remove_small);
+
+            if (remove_negative) {
+                output.clamp_min_(0.0);
+            }
+            return restore_rebaseline_shape(batch_view, permuted_output, permutation);
+        }
+
     }
 
     torch::Tensor rebaseline( const torch::Tensor& tensor, 
@@ -359,10 +480,14 @@ namespace WireCell::SPNG {
                                   bool remove_small,
                                   bool remove_negative)
     {
-        // CPU path: intentionally call the direct original implementation.
-        // This preserves byte-for-byte behavior with the original CPU code,
-        // including the original remove_negative behavior after permute().contiguous().
+        // Float tensors use the direct contiguous-storage CPU implementation.
+        // Other dtypes retain the reference path, which uses item<float>().
         if (!tensor.is_cuda()) {
+            if (tensor.scalar_type() == torch::kFloat) {
+                return rebaseline_zero_cpu_direct(tensor, dim, consequtive_zeros,
+                                                    min_roi_size, shrink_size,
+                                                    remove_small, remove_negative);
+            }
             return rebaseline_zero_original_cpu(tensor, dim, consequtive_zeros,
                                                 min_roi_size, shrink_size,
                                                 remove_small, remove_negative);

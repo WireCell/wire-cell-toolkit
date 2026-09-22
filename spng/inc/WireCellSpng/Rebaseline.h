@@ -31,6 +31,8 @@ namespace WireCell::SPNG {
                              bool remove_negative = false);
 
 
+    /// CPU float32 tensors use direct contiguous row memory and parallel row
+    /// processing.  CUDA tensors retain the GPU-specific bulk zero-mask path.
     torch::Tensor rebaseline_zero(const torch::Tensor& tensor,
                                   int64_t dim = -1,
                                   int64_t consequtive_zeros = 2,
@@ -40,4 +42,3 @@ namespace WireCell::SPNG {
                                   bool remove_negative = false);
 
 }
-
