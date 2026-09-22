@@ -8,6 +8,7 @@
 # For every external "use" token referenced by the package wscript_build files
 # (SPDLOG BOOST FFTW EIGEN DYNAMO JSONCPP JSONNET ZLIB BZIP2 FFTWTHREADS TBB
 # HDF5 ZMQ CZMQ ZYRE ZIO GRPC PROTOBUF TRITON PYTHON GLPK ROOTSYS LIBTORCH CUDA
+# NVTX
 # PTHREAD) this module, on success, creates an INTERFACE IMPORTED target
 #
 #     WCT::<TOKEN>
@@ -440,6 +441,27 @@ else()
   endif()
 endif()
 
+# --- NVTX ---
+if(WCT_WITH_NVTX)
+  find_path(WCT_NVTX_INCLUDE_DIR
+    NAMES nvToolsExt.h
+    HINTS ${CMAKE_PREFIX_PATH} ${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES}
+    PATH_SUFFIXES include targets/x86_64-linux/include)
+  find_library(WCT_NVTX_LIBRARY
+    NAMES nvToolsExt
+    HINTS ${CMAKE_PREFIX_PATH}
+    PATH_SUFFIXES lib lib64 targets/x86_64-linux/lib)
+  if(WCT_NVTX_INCLUDE_DIR AND WCT_NVTX_LIBRARY)
+    _wct_provide(NVTX LINK ${WCT_NVTX_LIBRARY} INCLUDE ${WCT_NVTX_INCLUDE_DIR})
+    add_compile_definitions(HAVE_NVTX=1)
+  else()
+    message(FATAL_ERROR
+      "WCT_WITH_NVTX is enabled, but nvToolsExt.h or libnvToolsExt was not found")
+  endif()
+else()
+  set(WCT_HAVE_NVTX FALSE CACHE INTERNAL "WCT has NVTX")
+endif()
+
 # --- libtorch ---
 _wct_intent(LIBTORCH)
 if(_wct_mode STREQUAL "SKIP")
@@ -447,7 +469,11 @@ if(_wct_mode STREQUAL "SKIP")
 else()
   find_package(Torch QUIET)
   if(Torch_FOUND)
-    _wct_provide(LIBTORCH LINK ${TORCH_LIBRARIES} INCLUDE ${TORCH_INCLUDE_DIRS})
+    set(_wct_libtorch_links ${TORCH_LIBRARIES})
+    if(TARGET WCT::NVTX)
+      list(APPEND _wct_libtorch_links WCT::NVTX)
+    endif()
+    _wct_provide(LIBTORCH LINK ${_wct_libtorch_links} INCLUDE ${TORCH_INCLUDE_DIRS})
   else()
     _wct_missing(LIBTORCH)
   endif()
