@@ -97,6 +97,13 @@ Opflash::Opflash(const Clus::Facade::Flash& flash, double threshold, int nchan,
     }
 }
 
+void Opflash::clear_sat(const std::vector<int>& chans)
+{
+    for (int ch : chans) {
+        if (ch >= 0 && ch < (int) sat.size()) sat[ch] = 0;
+    }
+}
+
 void Opflash::inflate_nodata_err(double err, double cov_min)
 {
     if (err <= 0 || cov.empty()) return;

@@ -56,7 +56,7 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=10000,
          // PDVD driver forwards its ql_qtol TLA (doc pdvd/100 sec 8).
          qtol=0.094,
          trigger_offsets=null, drift_speed=null, drift_speeds=null,
-         cathode_ext1=null, anode_ext1_margin=null, use_saturation_flag=false,
+         cathode_ext1=null, anode_ext1_margin=null, use_saturation_flag=false, sat_flag_ignore_cathode=false,
          saturation_mask_fit=true, chi2_sat_inflate=null,
          use_coverage_flag=false, coverage_min=1.0,
          coverage_mask_fit=true, pe_err_nodata=null,
@@ -462,6 +462,10 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=10000,
             // pdvd-saturation-recovery.md).  C++ default false.  Key omitted
             // when off => byte-identical pre-fix config.
             [if use_saturation_flag then 'use_saturation_flag']: true,
+            // Clear the rail flag on the cathode XAs (their railed pulses are
+            // repaired into measurements by the ToT fill; docs/qlmatch/32).
+            // C++ default empty list.  Key omitted when off => byte-identical.
+            [if sat_flag_ignore_cathode then 'sat_flag_ignore_channels']: cathode_channels,
             // ...and whether a railed channel is DROPPED from the chi2/KS or
             // kept there at its clipped PE.  Keeping it is right: the clipped
             // value is a LOWER BOUND on the true light (11_pdvd-saturation-

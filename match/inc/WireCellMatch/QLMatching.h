@@ -163,6 +163,14 @@ namespace WireCell::Match {
         // self-trigger-silent families never enters matching.  Empty channel
         // list (default) => no-op => bit-identical legacy admission.
         std::vector<int> m_flash_sel_channels;
+        // Channels whose per-flash saturation flag is cleared when the flash is
+        // read (Opflash::clear_sat), so use_saturation_flag no longer masks them
+        // out of chi2/KS/LASSO nor inflates their chi2 term.  Meant for channels
+        // whose railed pulses the light chain repairs into a measurement (PDVD
+        // cathode X-ARAPUCAs under the OpDecon ToT fill, docs/qlmatch/32);
+        // other channels keep their flags.  Empty (default) => no-op =>
+        // bit-identical.
+        std::vector<int> m_sat_flag_ignore_channels;
         double m_flash_sel_minPE{0.0};
         int m_flash_sel_min_fired{0};
         double m_flash_sel_fired_pe{1.0};

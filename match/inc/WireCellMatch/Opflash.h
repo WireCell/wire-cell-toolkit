@@ -92,6 +92,13 @@ namespace WireCell::Match {
         /// bit-identical by default.
         void inflate_nodata_err(double err, double cov_min);
 
+        /// Clear the saturation flag on the listed channels (QLMatching
+        /// sat_flag_ignore_channels): a channel whose railed pulse the light
+        /// chain has already repaired into a measurement (PDVD ToT fill,
+        /// docs/qlmatch/32) then enters chi2/KS/LASSO like any unrailed
+        /// channel.  Out-of-range channels are ignored.
+        void clear_sat(const std::vector<int>& chans);
+
     private:
         // Shared ctor body: fills PE/PE_err/total_PE/fired from a per-channel
         // PE vector (resized to nchan). flash_id is left 0 for callers to set.

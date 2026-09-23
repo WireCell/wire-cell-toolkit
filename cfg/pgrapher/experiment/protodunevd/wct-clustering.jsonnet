@@ -113,6 +113,12 @@ function(
     // PDVD_FLAG_SATURATION=1).  C++ default false; key suppressed when off =>
     // compiled config byte-identical.  docs/qlmatch/pdvd-saturation-recovery.md.
     ql_use_saturation_flag = false,
+    // Clear the rail flag on the cathode X-ARAPUCAs (OpDets 4-11) when the
+    // light chain repaired their railed pulses into a measurement (OpDecon
+    // ToT fill + OpHitFinder int_samples, docs/qlmatch/32): they then enter
+    // chi2/KS/LASSO like unrailed channels.  C++ default empty list; key
+    // suppressed when false => compiled config byte-identical.
+    ql_sat_flag_ignore_cathode = false,
     // Whether a rail-flagged channel is also DROPPED from the chi2/KS (the
     // 2026-07-14..16 operating point) or kept there at its clipped PE.
     // Keeping it is right -- the clipped PE is a LOWER BOUND on the true
@@ -447,6 +453,7 @@ local qlm_maker = qlm(params_w, trigger_offset_bot, readout_window_ticks, light_
                       anode_ext1_margin=if ql_anode_margin_cm == null then null
                                         else ql_anode_margin_cm * wc.cm,
                       use_saturation_flag=ql_use_saturation_flag,
+                      sat_flag_ignore_cathode=ql_sat_flag_ignore_cathode,
                       saturation_mask_fit=ql_saturation_mask_fit,
                       chi2_sat_inflate=ql_chi2_sat_inflate,
                       use_coverage_flag=ql_use_coverage_flag,

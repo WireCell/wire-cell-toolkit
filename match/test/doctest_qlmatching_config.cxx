@@ -69,3 +69,21 @@ TEST_CASE("qlmatching default configuration knobs")
     CHECK(cfg["postcull_pin_overpred"].asBool() == false);
     CHECK(cfg["postcull_pin_ratio_hi"].asDouble() == doctest::Approx(2.0));
 }
+
+TEST_CASE("qlmatching sat_flag_ignore_channels round-trips empty (docs/qlmatch/32)")
+{
+    Match::QLMatching qlm;
+    auto cfg = qlm.default_configuration();
+    REQUIRE(cfg.isMember("sat_flag_ignore_channels"));
+    CHECK(cfg["sat_flag_ignore_channels"].isArray());
+    CHECK(cfg["sat_flag_ignore_channels"].size() == 0);
+}
+
+#include "WireCellMatch/Opflash.h"
+
+TEST_CASE("opflash clear_sat is safe on flag-free flashes and bad channels")
+{
+    Match::Opflash f(0.0, std::vector<double>(40, 5.0), 1.0, 40);
+    f.clear_sat({-1, 4, 11, 40, 99});
+    for (int ch = -1; ch <= 40; ++ch) CHECK_FALSE(f.get_sat(ch));
+}

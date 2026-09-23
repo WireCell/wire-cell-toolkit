@@ -295,6 +295,10 @@ void QLMatching::configure(const WireCell::Configuration& cfg)
         m_flash_sel_channels.clear();
         for (const auto& jch : cfg["flash_sel_channels"]) m_flash_sel_channels.push_back(jch.asInt());
     }
+    if (cfg.isMember("sat_flag_ignore_channels") && cfg["sat_flag_ignore_channels"].isArray()) {
+        m_sat_flag_ignore_channels.clear();
+        for (const auto& jch : cfg["sat_flag_ignore_channels"]) m_sat_flag_ignore_channels.push_back(jch.asInt());
+    }
     m_flash_sel_minPE     = get(cfg, "flash_sel_minPE",     m_flash_sel_minPE);
     m_flash_sel_min_fired = get(cfg, "flash_sel_min_fired", m_flash_sel_min_fired);
     m_flash_sel_fired_pe  = get(cfg, "flash_sel_fired_pe",  m_flash_sel_fired_pe);
@@ -799,6 +803,7 @@ WireCell::Configuration QLMatching::default_configuration() const
     cfg["anode_pd_channels"]      = Json::arrayValue;
     cfg["flash_minPE"]     = m_flash_minPE;
     cfg["flash_sel_channels"]  = Json::arrayValue;
+    cfg["sat_flag_ignore_channels"] = Json::arrayValue;
     cfg["flash_sel_minPE"]     = m_flash_sel_minPE;
     cfg["flash_sel_min_fired"] = m_flash_sel_min_fired;
     cfg["flash_sel_fired_pe"]  = m_flash_sel_fired_pe;
@@ -1252,6 +1257,9 @@ void QLMatching::read_flashes(ApaRun& run)
         // "0 +- pe_err_floor"; widen its error to the threshold band before the
         // flash reaches the chi2/LASSO. No-op when pe_err_nodata <= 0 (default).
         flash->inflate_nodata_err(m_pe_err_nodata, m_coverage_min);
+        // Repaired-rail channels leave the saturation mask (docs/qlmatch/32).
+        // Empty list (default) => not called => bit-identical.
+        if (!m_sat_flag_ignore_channels.empty()) flash->clear_sat(m_sat_flag_ignore_channels);
         if (flash->get_time() < m_flash_mintime || flash->get_time() > m_flash_maxtime) continue;
         if (flash->get_total_PE() < m_flash_minPE) continue;
         // Channel-scoped admission (see the knob doc in the header): the flash must
