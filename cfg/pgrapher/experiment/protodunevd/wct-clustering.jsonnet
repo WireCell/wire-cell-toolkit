@@ -119,6 +119,14 @@ function(
     // chi2/KS/LASSO like unrailed channels.  C++ default empty list; key
     // suppressed when false => compiled config byte-identical.
     ql_sat_flag_ignore_cathode = false,
+    // Skip rail-flagged rows in the round-2 shared LASSO too (fit_round2_shared
+    // was the one fill site without the skip; docs/qlmatch/33).  C++ default
+    // false; key suppressed when false => compiled config byte-identical.
+    ql_sat_skip_round2 = false,
+    // Shared-fit LASSO weight base from the unrailed LASSO-row channels
+    // instead of the all-channel flash total (docs/qlmatch/33).  C++ default
+    // false; key suppressed when false => compiled config byte-identical.
+    ql_lasso_weight_unrailed = false,
     // Whether a rail-flagged channel is also DROPPED from the chi2/KS (the
     // 2026-07-14..16 operating point) or kept there at its clipped PE.
     // Keeping it is right -- the clipped PE is a LOWER BOUND on the true
@@ -454,6 +462,8 @@ local qlm_maker = qlm(params_w, trigger_offset_bot, readout_window_ticks, light_
                                         else ql_anode_margin_cm * wc.cm,
                       use_saturation_flag=ql_use_saturation_flag,
                       sat_flag_ignore_cathode=ql_sat_flag_ignore_cathode,
+                      sat_skip_round2=ql_sat_skip_round2,
+                      lasso_weight_unrailed=ql_lasso_weight_unrailed,
                       saturation_mask_fit=ql_saturation_mask_fit,
                       chi2_sat_inflate=ql_chi2_sat_inflate,
                       use_coverage_flag=ql_use_coverage_flag,

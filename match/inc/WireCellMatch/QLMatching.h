@@ -494,6 +494,27 @@ namespace WireCell::Match {
         // Default TRUE = the legacy drop => bit-identical for existing cfgs.
         bool m_saturation_mask_fit{true};
 
+        // fit_round2_shared was the one LASSO fill site that did NOT skip
+        // rail-flagged rows (d29d5f670 zeroed them in fit_round1, fit_round2
+        // and fit_round1_shared).  With saturation_mask_fit=false the railed
+        // channel's clipped/repaired PE and its prediction therefore enter the
+        // joint round-2 solve that sets `strength`.  true => skip those rows
+        // there too (same test as fit_round1_shared).  Default FALSE = the
+        // legacy fill => bit-identical for existing cfgs.  (doc pdvd/qlmatch/33)
+        bool m_sat_skip_round2_shared{false};
+
+        // LASSO column weight base |pred_tot - meas_tot| / meas_tot in the
+        // shared fits uses the flash total over ALL channels (railed and
+        // masked included) against the bundle's summed prediction.  On a
+        // cathode-railed flash most of meas_tot sits on railed channels, so
+        // the weight follows the light's rail repair rather than the pattern
+        // the fit uses.  true => both totals are summed over the LASSO row
+        // channels (opdet_idx_v) that are not rail-flagged; a flash with no
+        // unrailed light falls back to the legacy totals.  Shared fits only
+        // (fit_round1_shared, fit_round2_shared).  Default FALSE = legacy
+        // totals => bit-identical for existing cfgs.  (doc pdvd/qlmatch/33)
+        bool m_lasso_weight_unrailed{false};
+
         // Track readout coverage PER FLASH (Opflash::get_cov, fed by the
         // OpHitFinder emit_coverage -> OpFlashFinder flash_cov chain): a
         // self-triggered channel (PDVD membrane XA / PMT 16.4-us snippets,

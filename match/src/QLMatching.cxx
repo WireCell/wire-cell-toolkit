@@ -448,6 +448,8 @@ void QLMatching::configure(const WireCell::Configuration& cfg)
     m_flash_pe_threshold = get(cfg, "flash_pe_threshold", m_flash_pe_threshold);
     m_use_saturation_flag = get(cfg, "use_saturation_flag", m_use_saturation_flag);
     m_saturation_mask_fit = get(cfg, "saturation_mask_fit", m_saturation_mask_fit);
+    m_sat_skip_round2_shared = get(cfg, "sat_skip_round2_shared", m_sat_skip_round2_shared);
+    m_lasso_weight_unrailed = get(cfg, "lasso_weight_unrailed", m_lasso_weight_unrailed);
     m_use_coverage_flag = get(cfg, "use_coverage_flag", m_use_coverage_flag);
     m_coverage_min = get(cfg, "coverage_min", m_coverage_min);
     m_coverage_mask_fit = get(cfg, "coverage_mask_fit", m_coverage_mask_fit);
@@ -736,6 +738,14 @@ void QLMatching::configure(const WireCell::Configuration& cfg)
                    "chi2/KS at their clipped PE (chi2_sat_inflate={}); LASSO rows stay zeroed",
                    m_chi2_sat_inflate);
     }
+    if (m_lasso_weight_unrailed) {
+        log->debug("QLMatching lasso_weight_unrailed=true => shared-fit LASSO weight base from unrailed "
+                   "LASSO-row channels (use_saturation_flag={})", m_use_saturation_flag);
+    }
+    if (m_sat_skip_round2_shared) {
+        log->debug("QLMatching sat_skip_round2_shared=true => fit_round2_shared skips rail-flagged "
+                   "LASSO rows (use_saturation_flag={})", m_use_saturation_flag);
+    }
 }
 
 WireCell::Configuration QLMatching::default_configuration() const
@@ -878,6 +888,8 @@ WireCell::Configuration QLMatching::default_configuration() const
     cfg["flash_pe_threshold"] = m_flash_pe_threshold;
     cfg["use_saturation_flag"] = m_use_saturation_flag;
     cfg["saturation_mask_fit"] = m_saturation_mask_fit;
+    cfg["sat_skip_round2_shared"] = m_sat_skip_round2_shared;
+    cfg["lasso_weight_unrailed"] = m_lasso_weight_unrailed;
     cfg["use_coverage_flag"] = m_use_coverage_flag;
     cfg["coverage_min"] = m_coverage_min;
     cfg["coverage_mask_fit"] = m_coverage_mask_fit;
@@ -2728,6 +2740,23 @@ namespace {
     };
 }
 
+// lasso_weight_unrailed (doc pdvd/qlmatch/33): replace the weight-base totals by sums over the LASSO row channels
+// that are not rail-flagged; keep the legacy totals when the flash has no unrailed light there.
+static void unrailed_totals(const Opflash* f, const std::vector<int>& rows, const std::vector<double>& pred,
+                            double& meas_tot, double& pred_tot)
+{
+    double m = 0, p = 0;
+    for (const int ch : rows) {
+        if (f->get_sat(ch)) continue;
+        m += f->get_PE(ch);
+        p += pred.at(ch);
+    }
+    if (m > 0) {
+        meas_tot = m;
+        pred_tot = p;
+    }
+}
+
 void QLMatching::fit_round1_shared(std::vector<ApaRun>& runs)
 {
     const auto t_build0 = wallclock::now();
@@ -2830,8 +2859,9 @@ void QLMatching::fit_round1_shared(std::vector<ApaRun>& runs)
                     const double pe_err = std::sqrt(f0->get_PE(opdet_idx) + std::pow(f0->get_PE_err(opdet_idx), 2));
                     P_trip.emplace_back((int)(i * nopdet + j), (int)col_bundles.size(), pred_pe / pe_err);
                 }
-                const auto meas_pe_tot = f0->get_total_PE();
-                const auto pred_pe_tot = bundle->get_total_pred_light();
+                double meas_pe_tot = f0->get_total_PE();
+                double pred_pe_tot = bundle->get_total_pred_light();
+                if (m_lasso_weight_unrailed) unrailed_totals(f0, r0.opdet_idx_v, pred_flash, meas_pe_tot, pred_pe_tot);
                 const double base = (std::abs(pred_pe_tot - meas_pe_tot) > m_pe_mismatch_knee * meas_pe_tot)
                                         ? std::abs(pred_pe_tot - meas_pe_tot) / meas_pe_tot
                                         : m_pe_mismatch_floor;
@@ -2945,12 +2975,16 @@ void QLMatching::fit_round2_shared(std::vector<ApaRun>& runs)
     col_bundles.reserve(nbundle);
     col_run.reserve(nbundle);
 
+    // sat_skip_round2_shared: skip rail-flagged rows like fit_round1_shared (off => legacy fill).
+    const bool skip_sat = m_sat_skip_round2_shared && m_use_saturation_flag;
+    std::size_t nskip_rows = 0;
     std::size_t i = 0, ik = 0;
     for (auto& [fid, pf] : phys) {
         (void)fid;
         Opflash* f0 = pf.insts.front().second;
         for (unsigned int j = 0; j < nopdet; ++j) {
             const int opdet_idx = r0.opdet_idx_v.at(j);
+            if (skip_sat && f0->get_sat(opdet_idx)) { ++nskip_rows; continue; }
             const double pe = f0->get_PE(opdet_idx);
             const double pe_err = std::sqrt(f0->get_PE(opdet_idx) + std::pow(f0->get_PE_err(opdet_idx), 2));
             M(i * nopdet + j) = pe / pe_err;
@@ -2961,12 +2995,14 @@ void QLMatching::fit_round2_shared(std::vector<ApaRun>& runs)
                 const auto& pred_flash = bundle->get_pred_flash();
                 for (unsigned int j = 0; j < nopdet; ++j) {
                     const int opdet_idx = r0.opdet_idx_v.at(j);
+                    if (skip_sat && f0->get_sat(opdet_idx)) continue;
                     const double pred_pe = pred_flash.at(opdet_idx);
                     const double pe_err = std::sqrt(f0->get_PE(opdet_idx) + std::pow(f0->get_PE_err(opdet_idx), 2));
                     P_trip.emplace_back((int)(i * nopdet + j), (int)col_bundles.size(), pred_pe / pe_err);
                 }
-                const auto meas_pe_tot = f0->get_total_PE();
-                const auto pred_pe_tot = bundle->get_total_pred_light();
+                double meas_pe_tot = f0->get_total_PE();
+                double pred_pe_tot = bundle->get_total_pred_light();
+                if (m_lasso_weight_unrailed) unrailed_totals(f0, r0.opdet_idx_v, pred_flash, meas_pe_tot, pred_pe_tot);
                 const double base = (std::abs(pred_pe_tot - meas_pe_tot) > m_pe_mismatch_knee * meas_pe_tot)
                                         ? std::abs(pred_pe_tot - meas_pe_tot) / meas_pe_tot
                                         : m_pe_mismatch_floor;
@@ -2981,6 +3017,7 @@ void QLMatching::fit_round2_shared(std::vector<ApaRun>& runs)
     for (std::size_t n = 0; n < col_bundles.size(); ++n) {
         PF_trip.emplace_back(cluster_idx_map.at(col_bundles[n]->get_main_cluster()), (int)n, 1. / delta_charge);
     }
+    if (skip_sat) log->debug("QLSATR2 fit_round2_shared skipped rows {} (of {})", nskip_rows, (std::size_t) nopdet * i);
 
     Eigen::SparseMatrix<double> P_sp((int)(nopdet * nflash), (int)nbundle);
     Eigen::SparseMatrix<double> PF_sp((int)ncluster, (int)nbundle);

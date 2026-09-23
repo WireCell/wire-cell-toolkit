@@ -57,6 +57,7 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=10000,
          qtol=0.094,
          trigger_offsets=null, drift_speed=null, drift_speeds=null,
          cathode_ext1=null, anode_ext1_margin=null, use_saturation_flag=false, sat_flag_ignore_cathode=false,
+         sat_skip_round2=false, lasso_weight_unrailed=false,
          saturation_mask_fit=true, chi2_sat_inflate=null,
          use_coverage_flag=false, coverage_min=1.0,
          coverage_mask_fit=true, pe_err_nodata=null,
@@ -466,6 +467,17 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=10000,
             // repaired into measurements by the ToT fill; docs/qlmatch/32).
             // C++ default empty list.  Key omitted when off => byte-identical.
             [if sat_flag_ignore_cathode then 'sat_flag_ignore_channels']: cathode_channels,
+            // Skip the rail-flagged rows in fit_round2_shared as well (the
+            // other three LASSO fill sites already skip them; that one did
+            // not, so with saturation_mask_fit=false the railed PE entered the
+            // round-2 solve that sets strength; docs/qlmatch/33).  C++ default
+            // false.  Key omitted when off => byte-identical.
+            [if sat_skip_round2 then 'sat_skip_round2_shared']: true,
+            // Shared-fit LASSO weight base |pred-meas|/meas summed over the
+            // unrailed LASSO-row channels, not the all-channel flash total that
+            // a rail repair moves (docs/qlmatch/33).  C++ default false.  Key
+            // omitted when off => byte-identical.
+            [if lasso_weight_unrailed then 'lasso_weight_unrailed']: true,
             // ...and whether a railed channel is DROPPED from the chi2/KS or
             // kept there at its clipped PE.  Keeping it is right: the clipped
             // value is a LOWER BOUND on the true light (11_pdvd-saturation-

@@ -81,6 +81,26 @@ TEST_CASE("qlmatching sat_flag_ignore_channels round-trips empty (docs/qlmatch/3
 
 #include "WireCellMatch/Opflash.h"
 
+TEST_CASE("qlmatching sat_skip_round2_shared defaults off (docs/qlmatch/33)")
+{
+    // Off => fit_round2_shared keeps its legacy fill (railed rows enter the
+    // round-2 joint solve); only a config that sets the key changes the fit.
+    Match::QLMatching qlm;
+    auto cfg = qlm.default_configuration();
+    REQUIRE(cfg.isMember("sat_skip_round2_shared"));
+    CHECK(cfg["sat_skip_round2_shared"].isBool());
+    CHECK(cfg["sat_skip_round2_shared"].asBool() == false);
+}
+
+TEST_CASE("qlmatching lasso_weight_unrailed defaults off (docs/qlmatch/33)")
+{
+    Match::QLMatching qlm;
+    auto cfg = qlm.default_configuration();
+    REQUIRE(cfg.isMember("lasso_weight_unrailed"));
+    CHECK(cfg["lasso_weight_unrailed"].isBool());
+    CHECK(cfg["lasso_weight_unrailed"].asBool() == false);
+}
+
 TEST_CASE("opflash clear_sat is safe on flag-free flashes and bad channels")
 {
     Match::Opflash f(0.0, std::vector<double>(40, 5.0), 1.0, 40);
