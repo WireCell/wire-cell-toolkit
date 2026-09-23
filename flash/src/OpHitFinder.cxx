@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <type_traits>
 
 WIRECELL_FACTORY(OpHitFinder, WireCell::Flash::OpHitFinder,
                  WireCell::INamed,
@@ -44,6 +45,8 @@ WireCell::Configuration Flash::OpHitFinder::default_configuration() const
     cfg["wide_hit_mode"] = m_wide_hit_mode;
     cfg["wide_hit_min_width"] = m_wide_hit_min_width;
     cfg["slice_width"] = m_slice_width;
+    // int sample stream instead of short (default false -> short, bit-identical).
+    cfg["int_samples"] = m_int_samples;
     // AlgoSlidingWindow parameters, dune_ophit_finder_deco values.
     Configuration algo;
     algo["adc_threshold"] = 3.0;
@@ -84,6 +87,11 @@ void Flash::OpHitFinder::configure(const WireCell::Configuration& cfg)
     m_wide_hit_mode = get(cfg, "wide_hit_mode", m_wide_hit_mode);
     m_wide_hit_min_width = get(cfg, "wide_hit_min_width", m_wide_hit_min_width);
     m_slice_width = get(cfg, "slice_width", m_slice_width);
+    m_int_samples = get(cfg, "int_samples", m_int_samples);
+    if (m_int_samples) {
+        log->debug("int_samples on: scaled samples held as int (no 16-bit wrap above {} PE/tick)",
+                   32767 / m_scale);
+    }
     if (!m_wide_hit_mode.empty()) {
         if (m_wide_hit_mode != "start" && m_wide_hit_mode != "slice") {
             raise<ValueError>("OpHitFinder: unknown wide_hit_mode '%s' (want \"\", \"start\" or \"slice\")",
@@ -100,8 +108,14 @@ void Flash::OpHitFinder::configure(const WireCell::Configuration& cfg)
     }
 }
 
-std::vector<Flash::OpHitFinder::Pulse> Flash::OpHitFinder::sliding_window(
-    const std::vector<short>& wf, double ped_mean, double ped_sigma, const Configuration& pars)
+// The pulse-finding algorithms are templated on the sample type: short is the
+// legacy (larana) stream, int is the int_samples knob (doc pdvd/qlmatch/32).
+// The public static overloads below forward to them.
+using Pulse = Flash::OpHitFinder::Pulse;
+
+template <typename S>
+static std::vector<Pulse> sliding_window_impl(
+    const std::vector<S>& wf, double ped_mean, double ped_sigma, const Configuration& pars)
 {
     // Direct port of pmtana::AlgoSlidingWindow::RecoPulse (positive
     // polarity) with the constant pedestal of PedAlgoEdges (kHEAD).
@@ -193,8 +207,9 @@ std::vector<Flash::OpHitFinder::Pulse> Flash::OpHitFinder::sliding_window(
     return pulses;
 }
 
-std::vector<Flash::OpHitFinder::Pulse> Flash::OpHitFinder::split_pulse(
-    const std::vector<short>& wf, double ped_mean, const Pulse& pulse,
+template <typename S>
+static std::vector<Pulse> split_pulse_impl(
+    const std::vector<S>& wf, double ped_mean, const Pulse& pulse,
     const Configuration& pars)
 {
     // Disabled, or a degenerate window: pass the pulse through verbatim so
@@ -297,8 +312,9 @@ std::vector<Flash::OpHitFinder::Pulse> Flash::OpHitFinder::split_pulse(
     return subs;
 }
 
-std::vector<Flash::OpHitFinder::Pulse> Flash::OpHitFinder::slice_pulse(
-    const std::vector<short>& wf, double ped_mean, const Pulse& pulse, int nticks_slice)
+template <typename S>
+static std::vector<Pulse> slice_pulse_impl(
+    const std::vector<S>& wf, double ped_mean, const Pulse& pulse, int nticks_slice)
 {
     // Degenerate request, or the pulse already fits in one slice: pass it
     // through verbatim (caller gates on slice_max_width; this is a guard).
@@ -324,6 +340,37 @@ std::vector<Flash::OpHitFinder::Pulse> Flash::OpHitFinder::slice_pulse(
     }
     if (slices.empty()) return {pulse};
     return slices;
+}
+
+std::vector<Flash::OpHitFinder::Pulse> Flash::OpHitFinder::sliding_window(
+    const std::vector<short>& wf, double ped_mean, double ped_sigma, const Configuration& pars)
+{
+    return sliding_window_impl(wf, ped_mean, ped_sigma, pars);
+}
+std::vector<Flash::OpHitFinder::Pulse> Flash::OpHitFinder::sliding_window(
+    const std::vector<int>& wf, double ped_mean, double ped_sigma, const Configuration& pars)
+{
+    return sliding_window_impl(wf, ped_mean, ped_sigma, pars);
+}
+std::vector<Flash::OpHitFinder::Pulse> Flash::OpHitFinder::split_pulse(
+    const std::vector<short>& wf, double ped_mean, const Pulse& pulse, const Configuration& pars)
+{
+    return split_pulse_impl(wf, ped_mean, pulse, pars);
+}
+std::vector<Flash::OpHitFinder::Pulse> Flash::OpHitFinder::split_pulse(
+    const std::vector<int>& wf, double ped_mean, const Pulse& pulse, const Configuration& pars)
+{
+    return split_pulse_impl(wf, ped_mean, pulse, pars);
+}
+std::vector<Flash::OpHitFinder::Pulse> Flash::OpHitFinder::slice_pulse(
+    const std::vector<short>& wf, double ped_mean, const Pulse& pulse, int nticks_slice)
+{
+    return slice_pulse_impl(wf, ped_mean, pulse, nticks_slice);
+}
+std::vector<Flash::OpHitFinder::Pulse> Flash::OpHitFinder::slice_pulse(
+    const std::vector<int>& wf, double ped_mean, const Pulse& pulse, int nticks_slice)
+{
+    return slice_pulse_impl(wf, ped_mean, pulse, nticks_slice);
 }
 
 bool Flash::OpHitFinder::operator()(const input_pointer& in, output_pointer& out)
@@ -377,101 +424,118 @@ bool Flash::OpHitFinder::operator()(const input_pointer& in, output_pointer& out
             if (mit != sat_masks.end()) chan_sat = &mit->second;
         }
 
+        // Pulse finding on the scaled sample stream `wf` (short: legacy;
+        // int: int_samples knob).  One body for both, so the knob changes
+        // only the sample type.
+        auto find_hits = [&](const auto& wf) {
+            // Pedestal and noise.  Default (m_robust_baseline false): PedAlgoEdges
+            // head method (mean/std of the first samples) -- bit-identical to the
+            // self-trigger snippet path and every existing config.
+            double ped_mean = 0, ped_sigma = 0;
+            Configuration algo = m_algo;
+            if (m_fixed_ped_sigma > 0) {
+                // ROI-cleaned input: baseline is 0 (endpoint-zeroed) and the noise
+                // floor is the known clean value (the in-ROI samples are too
+                // signal-dominated to estimate from).  See the header.
+                ped_mean = 0;
+                ped_sigma = m_fixed_ped_sigma;
+                algo["nsigma_threshold"] = m_robust_nsigma;
+            }
+            else if (m_robust_baseline) {
+                // Robust per-channel baseline for the CONTINUOUS full stream, where
+                // the head method is meaningless: ped_mean = median, ped_sigma =
+                // MAD (both over the whole waveform; signal is sparse so the median
+                // is the baseline -- removes a per-channel DC offset).  Channels
+                // whose MAD is far above the noise floor are ringing data-quality
+                // channels and emit no hits.  The start gate is raised to
+                // robust_nsigma * MAD (high for noisy, ~unchanged for clean).  See
+                // pdhd/docs/pdhd-fullstream-light-reco.md.
+                if (wf.empty()) return;
+                std::decay_t<decltype(wf)> tmp(wf);
+                const size_t mid = tmp.size() / 2;
+                std::nth_element(tmp.begin(), tmp.begin() + mid, tmp.end());
+                ped_mean = tmp[mid];
+                std::vector<double> dev(tmp.size());
+                for (size_t i = 0; i < tmp.size(); ++i) dev[i] = std::abs(tmp[i] - ped_mean);
+                std::nth_element(dev.begin(), dev.begin() + mid, dev.end());
+                ped_sigma = 1.4826 * dev[mid];
+                if (ped_sigma >= m_robust_veto_sigma) return;  // veto ringing channel
+                algo["nsigma_threshold"] = m_robust_nsigma;
+            }
+            else {
+                const int nped = std::min<int>(m_ped_nsamples, wf.size());
+                for (int i = 0; i < nped; ++i) ped_mean += wf[i];
+                ped_mean /= nped;
+                for (int i = 0; i < nped; ++i) ped_sigma += (wf[i] - ped_mean) * (wf[i] - ped_mean);
+                ped_sigma = std::sqrt(ped_sigma / nped);
+            }
+
+            for (const auto& pulse : sliding_window(wf, ped_mean, ped_sigma, algo)) {
+              // Split each found pulse at prominent sub-peaks (no-op and
+              // bit-identical when split_enable is false: one sub == pulse).
+              for (const auto& sub0 : split_pulse(wf, ped_mean, pulse, algo)) {
+               // Wide-hit handling (no-op and bit-identical when wide_hit_mode
+               // is "": subs == {sub0} and book time == peak time).
+               const bool wide = !m_wide_hit_mode.empty() &&
+                                 (sub0.t_end - sub0.t_start) * tick > m_wide_hit_min_width;
+               const std::vector<Pulse> subs =
+                   (wide && m_wide_hit_mode == "slice")
+                       ? slice_pulse(wf, ped_mean, sub0,
+                                     std::max(1, (int) std::lround(m_slice_width / tick)))
+                       : std::vector<Pulse>{sub0};
+               for (const auto& sub : subs) {
+                if (sub.peak < m_hit_threshold) continue;
+                bool sat = false;
+                if (chan_sat) {  // hit overlaps a saturated tick sub-range?
+                    const int hs = trace->tbin() + sub.t_start;
+                    const int he = trace->tbin() + sub.t_end;
+                    for (const auto& [a, b] : *chan_sat) {
+                        if (a < he && hs < b) { sat = true; break; }
+                    }
+                    if (sat && m_veto_saturation) { ++nvetoed; continue; }
+                    if (sat) ++nflagged;
+                }
+                const double peak_time = t0 + tick * (trace->tbin() + sub.t_max);
+                const double start_time = t0 + tick * (trace->tbin() + sub.t_start);
+                const double width = (sub.t_end - sub.t_start) * tick;
+                // "start" mode: book the wide hit at its onset so the full
+                // integral lands on the flash that produced it (== peak_time
+                // when the mode is off -> bit-identical).
+                const double book_time =
+                    (wide && m_wide_hit_mode == "start") ? start_time : peak_time;
+                hits.push_back(trace->channel());
+                hits.push_back(book_time);
+                hits.push_back(width);
+                hits.push_back(sub.area);
+                hits.push_back(sub.peak);
+                hits.push_back(sub.area / m_spe_area);
+                hits.push_back(start_time);
+                hits.push_back(-1);  // flash_id, assigned by OpFlashFinder
+                hits.push_back(0);   // fast_to_total
+                if (m_flag_saturation) hits.push_back(sat ? 1.0 : 0.0);
+               }
+              }
+            }
+        };
+
         // Scale and cast to short, as RunHitFinder_deco does before
         // pulse finding (thresholds and areas are in these units).
         std::vector<short> wf(charge.size());
         for (size_t i = 0; i < charge.size(); ++i) {
             wf[i] = static_cast<short>(m_scale * charge[i]);
         }
-
-        // Pedestal and noise.  Default (m_robust_baseline false): PedAlgoEdges
-        // head method (mean/std of the first samples) -- bit-identical to the
-        // self-trigger snippet path and every existing config.
-        double ped_mean = 0, ped_sigma = 0;
-        Configuration algo = m_algo;
-        if (m_fixed_ped_sigma > 0) {
-            // ROI-cleaned input: baseline is 0 (endpoint-zeroed) and the noise
-            // floor is the known clean value (the in-ROI samples are too
-            // signal-dominated to estimate from).  See the header.
-            ped_mean = 0;
-            ped_sigma = m_fixed_ped_sigma;
-            algo["nsigma_threshold"] = m_robust_nsigma;
+        if (!m_int_samples) {
+            find_hits(wf);
+            continue;
         }
-        else if (m_robust_baseline) {
-            // Robust per-channel baseline for the CONTINUOUS full stream, where
-            // the head method is meaningless: ped_mean = median, ped_sigma =
-            // MAD (both over the whole waveform; signal is sparse so the median
-            // is the baseline -- removes a per-channel DC offset).  Channels
-            // whose MAD is far above the noise floor are ringing data-quality
-            // channels and emit no hits.  The start gate is raised to
-            // robust_nsigma * MAD (high for noisy, ~unchanged for clean).  See
-            // pdhd/docs/pdhd-fullstream-light-reco.md.
-            if (wf.empty()) continue;
-            std::vector<short> tmp(wf);
-            const size_t mid = tmp.size() / 2;
-            std::nth_element(tmp.begin(), tmp.begin() + mid, tmp.end());
-            ped_mean = tmp[mid];
-            std::vector<double> dev(tmp.size());
-            for (size_t i = 0; i < tmp.size(); ++i) dev[i] = std::abs(tmp[i] - ped_mean);
-            std::nth_element(dev.begin(), dev.begin() + mid, dev.end());
-            ped_sigma = 1.4826 * dev[mid];
-            if (ped_sigma >= m_robust_veto_sigma) continue;  // veto ringing channel
-            algo["nsigma_threshold"] = m_robust_nsigma;
+        // int_samples: the same scaling without the 16-bit wrap (clamped to
+        // the int range so the cast is always defined).
+        std::vector<int> wfi(charge.size());
+        for (size_t i = 0; i < charge.size(); ++i) {
+            const double x = m_scale * charge[i];
+            wfi[i] = static_cast<int>(std::clamp(x, -2147483648.0, 2147483647.0));
         }
-        else {
-            const int nped = std::min<int>(m_ped_nsamples, wf.size());
-            for (int i = 0; i < nped; ++i) ped_mean += wf[i];
-            ped_mean /= nped;
-            for (int i = 0; i < nped; ++i) ped_sigma += (wf[i] - ped_mean) * (wf[i] - ped_mean);
-            ped_sigma = std::sqrt(ped_sigma / nped);
-        }
-
-        for (const auto& pulse : sliding_window(wf, ped_mean, ped_sigma, algo)) {
-          // Split each found pulse at prominent sub-peaks (no-op and
-          // bit-identical when split_enable is false: one sub == pulse).
-          for (const auto& sub0 : split_pulse(wf, ped_mean, pulse, algo)) {
-           // Wide-hit handling (no-op and bit-identical when wide_hit_mode
-           // is "": subs == {sub0} and book time == peak time).
-           const bool wide = !m_wide_hit_mode.empty() &&
-                             (sub0.t_end - sub0.t_start) * tick > m_wide_hit_min_width;
-           const std::vector<Pulse> subs =
-               (wide && m_wide_hit_mode == "slice")
-                   ? slice_pulse(wf, ped_mean, sub0,
-                                 std::max(1, (int) std::lround(m_slice_width / tick)))
-                   : std::vector<Pulse>{sub0};
-           for (const auto& sub : subs) {
-            if (sub.peak < m_hit_threshold) continue;
-            bool sat = false;
-            if (chan_sat) {  // hit overlaps a saturated tick sub-range?
-                const int hs = trace->tbin() + sub.t_start;
-                const int he = trace->tbin() + sub.t_end;
-                for (const auto& [a, b] : *chan_sat) {
-                    if (a < he && hs < b) { sat = true; break; }
-                }
-                if (sat && m_veto_saturation) { ++nvetoed; continue; }
-                if (sat) ++nflagged;
-            }
-            const double peak_time = t0 + tick * (trace->tbin() + sub.t_max);
-            const double start_time = t0 + tick * (trace->tbin() + sub.t_start);
-            const double width = (sub.t_end - sub.t_start) * tick;
-            // "start" mode: book the wide hit at its onset so the full
-            // integral lands on the flash that produced it (== peak_time
-            // when the mode is off -> bit-identical).
-            const double book_time =
-                (wide && m_wide_hit_mode == "start") ? start_time : peak_time;
-            hits.push_back(trace->channel());
-            hits.push_back(book_time);
-            hits.push_back(width);
-            hits.push_back(sub.area);
-            hits.push_back(sub.peak);
-            hits.push_back(sub.area / m_spe_area);
-            hits.push_back(start_time);
-            hits.push_back(-1);  // flash_id, assigned by OpFlashFinder
-            hits.push_back(0);   // fast_to_total
-            if (m_flag_saturation) hits.push_back(sat ? 1.0 : 0.0);
-           }
-          }
-        }
+        find_hits(wfi);
     }
 
     ITensor::vector* tensors = new ITensor::vector;

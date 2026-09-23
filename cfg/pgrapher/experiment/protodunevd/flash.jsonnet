@@ -154,7 +154,7 @@ local wc = import 'wirecell.jsonnet';
     // units (100 = 1 PE/tick); starting values from the WI noise floors
     // (pdvd-light-filter.md): cathode ~3.7, membrane ~4 (top-wall 5
     // sigma), PMT ~2.2.
-    ophit(name='', hit_threshold=3.0, robust_baseline=false, intag='decon', fixed_ped_sigma=0, veto_saturation=false, flag_saturation=false, emit_coverage=false, wide_hit_mode='', wide_hit_min_width_us=2.0, slice_width_us=1.0)::  g.pnode({
+    ophit(name='', hit_threshold=3.0, robust_baseline=false, intag='decon', fixed_ped_sigma=0, veto_saturation=false, flag_saturation=false, emit_coverage=false, wide_hit_mode='', wide_hit_min_width_us=2.0, slice_width_us=1.0, int_samples=false)::  g.pnode({
         type: 'OpHitFinder',
         name: name,
         data: {
@@ -182,6 +182,11 @@ local wc = import 'wirecell.jsonnet';
             // channel is scored measured = 0).  C++ default false.  Key
             // omitted when off => byte-identical.
             [if emit_coverage then 'emit_coverage']: true,
+            // Hold the scaled samples as int, not short (the short cast wraps
+            // above 327.67 PE/tick and fragments bright pulses; doc
+            // qlmatch/32).  C++ default false.  Key omitted when off =>
+            // byte-identical.
+            [if int_samples then 'int_samples']: true,
             algo: {
                 split_enable: true,
                 split_min_prominence: 0.4,

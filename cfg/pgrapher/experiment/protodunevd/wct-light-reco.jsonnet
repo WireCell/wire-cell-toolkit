@@ -60,6 +60,13 @@ function(input_file, output_dir='.', run=39252, event=298567, offset_us=0,
          // C++ default "twoside", keys suppressed => byte-identical when
          // 'twoside'.
          saturation_repair_mode='twoside',
+         // Cathode OpHitFinder holds the scaled decon samples as int instead
+         // of short.  The short cast wraps above 327.67 PE/tick, which
+         // fragments bright (ToT-filled) cathode pulses into several hits
+         // and loses about half their PE (docs/qlmatch/32).  Cathode only,
+         // like saturation_repair_mode.  C++ default false, key suppressed
+         // => byte-identical when off.
+         hit_int_samples=false,
          // Per-trace livetime rows -> OpFlashFinder flash_cov tensor ->
          // QLMatching use_coverage_flag masks self-trigger channels with no
          // snippet over a flash's window (membrane XA / PMT, duty ~5-30%;
@@ -146,6 +153,7 @@ function(input_file, output_dir='.', run=39252, event=298567, offset_us=0,
   local tot_shapes = if rep_mode == 'tot' && !spe_v2b
                      then error "saturation_repair_mode 'tot' needs spe_v2 (the shapes are fit with the v2 templates)"
                      else 'pgrapher/experiment/protodunevd/pdvd-tot-shapes-v2.json';
+  local hit_int = if std.type(hit_int_samples) == 'string' then std.parseJson(hit_int_samples) else hit_int_samples;
   local tmerge = if std.type(tail_merge) == 'string' then std.parseJson(tail_merge) else tail_merge;
   local twin = if std.type(tail_window_us) == 'string' then std.parseJson(tail_window_us) else tail_window_us;
   local tminw = if std.type(tail_min_width_us) == 'string' then std.parseJson(tail_min_width_us) else tail_min_width_us;
@@ -161,7 +169,8 @@ function(input_file, output_dir='.', run=39252, event=298567, offset_us=0,
   local cath_roi = flash.oproi(name='cath');
   local cath_hit = flash.ophit(name='cath', hit_threshold=cath_th, intag='decon_roi',
                                fixed_ped_sigma=cath_ps, veto_saturation=veto_sat,
-                               flag_saturation=flag_sat, emit_coverage=emit_cov);
+                               flag_saturation=flag_sat, emit_coverage=emit_cov,
+                               int_samples=hit_int);
 
   // --- membrane XA branch (opch 20xx, snippets; top+bottom walls share
   //     sigma=1.0, the top-wall pickup sets the threshold) ---

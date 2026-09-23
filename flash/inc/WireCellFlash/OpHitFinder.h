@@ -44,6 +44,10 @@ namespace WireCell {
             static std::vector<Pulse> sliding_window(const std::vector<short>& wf,
                                                      double ped_mean, double ped_sigma,
                                                      const Configuration& pars);
+            // Same algorithm on an int sample stream (int_samples knob).
+            static std::vector<Pulse> sliding_window(const std::vector<int>& wf,
+                                                     double ped_mean, double ped_sigma,
+                                                     const Configuration& pars);
 
             // Post-process one (possibly merged) pulse, splitting it at
             // prominent valleys between sub-peaks so two optical pulses
@@ -52,6 +56,9 @@ namespace WireCell {
             // (pars["split_enable"] false) or nothing qualifies.  Public
             // and static for unit testing.
             static std::vector<Pulse> split_pulse(const std::vector<short>& wf,
+                                                  double ped_mean, const Pulse& pulse,
+                                                  const Configuration& pars);
+            static std::vector<Pulse> split_pulse(const std::vector<int>& wf,
                                                   double ped_mean, const Pulse& pulse,
                                                   const Configuration& pars);
 
@@ -64,6 +71,9 @@ namespace WireCell {
             // instead of as one hit at its peak time (doc 25 §7).  Public
             // and static for unit testing.
             static std::vector<Pulse> slice_pulse(const std::vector<short>& wf,
+                                                  double ped_mean, const Pulse& pulse,
+                                                  int nticks_slice);
+            static std::vector<Pulse> slice_pulse(const std::vector<int>& wf,
                                                   double ped_mean, const Pulse& pulse,
                                                   int nticks_slice);
 
@@ -147,6 +157,16 @@ namespace WireCell {
             std::string m_wide_hit_mode{""};
             double m_wide_hit_min_width{2000.0};  // WCT ns; only wider hits treated
             double m_slice_width{1000.0};         // WCT ns per slice ("slice" mode)
+            // Hold the scaled samples as int instead of short.  The legacy
+            // short cast cannot represent a sample above 32767 scaled units
+            // (327.67 PE/tick at scale 100); static_cast<short> of such a
+            // value is undefined and on gcc/x86-64 wraps, which fragments a
+            // bright pulse into several hits and loses about half its PE
+            // (PDVD cathode rails, doc pdvd/qlmatch/32).  When true the same
+            // algorithm runs on int samples (scaled values clamped to the int
+            // range).  Default false -> short, bit-identical to every
+            // existing config.
+            bool m_int_samples{false};
             Configuration m_algo;        // SlidingWindow parameters
 
             int m_count{0};
