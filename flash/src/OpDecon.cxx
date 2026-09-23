@@ -8,7 +8,9 @@
 #include "WireCellUtil/NamedFactory.h"
 #include "WireCellUtil/Persist.h"
 #include "WireCellUtil/Units.h"
+#include "WireCellUtil/Exceptions.h"
 
+#include <algorithm>
 #include <cmath>
 #include <complex>
 
@@ -59,6 +61,9 @@ WireCell::Configuration Flash::OpDecon::default_configuration() const
     cfg["overflow_adc"] = m_overflow_adc;
     cfg["overflow_min_samples"] = m_overflow_min_samples;
     cfg["overflow_min_neighbor"] = m_overflow_min_neighbor;
+    cfg["saturation_repair_mode"] = m_saturation_repair_mode;
+    cfg["tot_shape_file"] = m_tot_shape_file;
+    cfg["tot_merge_gap"] = m_tot_merge_gap;
     cfg["dft"] = "FftwDFT";
     return cfg;
 }
@@ -96,6 +101,17 @@ void Flash::OpDecon::configure(const WireCell::Configuration& cfg)
     m_overflow_adc = get(cfg, "overflow_adc", m_overflow_adc);
     m_overflow_min_samples = get(cfg, "overflow_min_samples", m_overflow_min_samples);
     m_overflow_min_neighbor = get(cfg, "overflow_min_neighbor", m_overflow_min_neighbor);
+    m_saturation_repair_mode = get(cfg, "saturation_repair_mode", m_saturation_repair_mode);
+    m_tot_shape_file = get(cfg, "tot_shape_file", m_tot_shape_file);
+    m_tot_merge_gap = get(cfg, "tot_merge_gap", m_tot_merge_gap);
+    if (m_saturation_repair_mode != "twoside" && m_saturation_repair_mode != "tot") {
+        THROW(ValueError() << errmsg{"OpDecon: saturation_repair_mode must be \"twoside\" or \"tot\", got \""
+                                     + m_saturation_repair_mode + "\""});
+    }
+    const bool use_tot = m_saturation_repair && m_saturation_repair_mode == "tot";
+    if (use_tot && m_tot_shape_file.empty()) {
+        THROW(ValueError() << errmsg{"OpDecon: saturation_repair_mode \"tot\" needs tot_shape_file"});
+    }
     if (m_overflow_to_rail && !m_detect_saturation) {
         log->warn("overflow_to_rail requires detect_saturation; it is off, so the "
                   "remapped runs would never be flagged -- overflow_to_rail disabled");
@@ -178,6 +194,31 @@ void Flash::OpDecon::configure(const WireCell::Configuration& cfg)
     }
     log->debug("loaded {} SPE templates, {} mapped channels from {}",
                m_templates.size(), m_chan2tmpl.size(), m_spe_file);
+
+    // saturation_repair_mode "tot": per-channel model shapes.  A channel that
+    // is absent from the file (or has no template / failed tau fit) keeps the
+    // twoside fill.
+    m_tot_shapes.clear();
+    if (use_tot) {
+        auto jtot = Persist::load(m_tot_shape_file);
+        const auto& jc = jtot["channels"];
+        const auto& jp = jtot["values"];
+        for (Json::ArrayIndex k = 0; k < jc.size(); ++k) {
+            const int chan = jc[k].asInt();
+            auto tit = m_chan2tmpl.find(chan);
+            if (tit == m_chan2tmpl.end() || tit->second >= m_templates.size()) continue;
+            const auto& spe = m_templates[tit->second];
+            if (spe.tau_fall <= 0) continue;
+            std::vector<double> par;
+            for (const auto& v : jp[k]) par.push_back(v.asDouble());
+            if (par.size() != 5) {
+                THROW(ValueError() << errmsg{"OpDecon: tot_shape_file entry needs 5 parameters"});
+            }
+            m_tot_shapes[chan] = tot_shape(tot_model(spe.wave, spe.tau_fall, par));
+        }
+        log->debug("saturation_repair_mode tot: {} channel shapes from {} (merge gap {})",
+                   m_tot_shapes.size(), m_tot_shape_file, m_tot_merge_gap);
+    }
 
     // Optional per-channel noise power spectra (half-spectrum bins,
     // zero-padded/truncated to samples/2+1 as in the LArSoft module).
@@ -374,6 +415,160 @@ void Flash::OpDecon::repair_runs(std::vector<float>& w,
     }
 }
 
+// ---- saturation_repair_mode "tot" -------------------------------------
+// Line-for-line port of pdvd/docs/qlmatch/scripts/saturation_tot_study.py
+// (kernel / model / Shape / methods_pe tot_fill, doc qlmatch/30 sec 2 and 4).
+
+// kernel() + model(): template (extended past its end by the tau_fall
+// exponential, as Channel.tshape of saturation_recovery_study.py) convolved
+// with ff*delta + (1-ff)[bi exp(-t/ti) + (1-bi) exp(-t/ts)] (per-tick
+// integrated) and, if sigma > 0.05, a Gauss centred at 4 sigma.  Each
+// convolution is the full one truncated to n (np.convolve(...)[:n]).
+std::vector<double> Flash::OpDecon::tot_model(const std::vector<float>& wave, double tau_fall,
+                                              const std::vector<double>& par, int n)
+{
+    const double ff = par[0], bi = par[1], ti = par[2], ts = par[3], sg = par[4];
+    auto conv_trunc = [n](const std::vector<double>& a, const std::vector<double>& b) {
+        std::vector<double> c(n, 0.0);
+        for (int i = 0; i < n; ++i) {
+            if (a[i] == 0.0) continue;
+            for (int j = 0; i + j < n; ++j) c[i + j] += a[i] * b[j];
+        }
+        return c;
+    };
+    std::vector<double> k(n, 0.0);
+    k[0] += ff;
+    for (int t = 0; t < n; ++t) {
+        k[t] += (1 - ff) * bi * (std::exp(-t / ti) - std::exp(-(t + 1) / ti));
+        k[t] += (1 - ff) * (1 - bi) * (std::exp(-t / ts) - std::exp(-(t + 1) / ts));
+    }
+    if (sg > 0.05) {
+        std::vector<double> g(n);
+        double gs = 0;
+        for (int t = 0; t < n; ++t) {
+            const double x = (t - 4 * sg) / sg;
+            g[t] = std::exp(-0.5 * x * x);
+            gs += g[t];
+        }
+        for (auto& v : g) v /= gs;
+        k = conv_trunc(k, g);
+    }
+    // template + exponential extension (Channel.tshape)
+    const int nw = (int) wave.size();
+    const int ipk = (int) std::distance(wave.begin(), std::max_element(wave.begin(), wave.end()));
+    const double amp = *std::max_element(wave.begin(), wave.end());
+    const double last = wave[nw - 1] > 0 ? (double) wave[nw - 1]
+                                         : amp * std::exp(-(nw - 1 - ipk) / tau_fall);
+    std::vector<double> tpl(n, 0.0);
+    for (int t = 0; t < n; ++t) {
+        tpl[t] = t < nw ? (double) wave[t] : last * std::exp(-(t - (nw - 1)) / tau_fall);
+    }
+    return conv_trunc(tpl, k);
+}
+
+// Shape.__init__: s = y / max(y); for 2999 log-spaced levels in [1e-3, 1)
+// the first/last samples at or above the level, widened by the fractional
+// crossings on each side.
+Flash::OpDecon::TotShape Flash::OpDecon::tot_shape(const std::vector<double>& y)
+{
+    TotShape shp;
+    const int n = (int) y.size();
+    const int ip = (int) std::distance(y.begin(), std::max_element(y.begin(), y.end()));
+    shp.s.resize(n);
+    for (int t = 0; t < n; ++t) shp.s[t] = y[t] / y[ip];
+    const auto& s = shp.s;
+    const int nlev = 3000;                        // np.logspace(-3, 0, 3000)[:-1]
+    const double step = 3.0 / (nlev - 1);
+    for (int q = 0; q < nlev - 1; ++q) {
+        const double L = std::pow(10.0, -3.0 + q * step);
+        int a = -1, e = -1;
+        for (int t = 0; t < n; ++t) {
+            if (s[t] >= L) {
+                if (a < 0) a = t;
+                e = t + 1;
+            }
+        }
+        const double fa = a > 0 ? (s[a] - L) / std::max(1e-12, s[a] - s[a - 1]) : 0.0;
+        const double fe = e < n ? (s[e - 1] - L) / std::max(1e-12, s[e - 1] - s[e]) : 0.0;
+        shp.lam.push_back(L);
+        shp.u.push_back(a);
+        shp.w.push_back((e - a) + fa + fe);
+    }
+    return shp;
+}
+
+// Shape.level_for: np.interp(tot, w[::-1], lam[::-1]) -- clamps to the end
+// levels outside the table.
+double Flash::OpDecon::tot_level_for(const TotShape& shp, double tot)
+{
+    const int m = (int) shp.w.size();
+    // reversed arrays: xp[k] = w[m-1-k] (increasing), fp[k] = lam[m-1-k]
+    auto xp = [&](int k) { return shp.w[m - 1 - k]; };
+    auto fp = [&](int k) { return shp.lam[m - 1 - k]; };
+    if (tot <= xp(0)) return fp(0);
+    if (tot >= xp(m - 1)) return fp(m - 1);
+    int lo = 0, hi = m - 1;                       // xp(lo) <= tot < xp(hi)
+    while (hi - lo > 1) {
+        const int mid = (lo + hi) / 2;
+        if (xp(mid) <= tot) lo = mid;
+        else hi = mid;
+    }
+    const double dx = xp(hi) - xp(lo);
+    if (dx <= 0) return fp(lo);
+    return fp(lo) + (tot - xp(lo)) * (fp(hi) - fp(lo)) / dx;
+}
+
+// methods_pe tot_fill: A = R / lambda, the fill starts at the model's
+// up-crossing index of the level, clamped >= the measured samples.
+bool Flash::OpDecon::tot_fill_run(std::vector<float>& w, int i, int j, double pedestal,
+                                  double rail, const TotShape& shp)
+{
+    const double tot = j - i;
+    if (shp.w.empty() || tot >= shp.w.front()) return false;   // beyond the widest level
+    const double R = rail + 0.5 - pedestal;
+    const double lam = tot_level_for(shp, tot);
+    const double A = R / lam;
+    const int m = (int) shp.lam.size();
+    const int is = (int) std::distance(shp.lam.begin(),
+                                       std::lower_bound(shp.lam.begin(), shp.lam.end(), lam));
+    const int k0 = shp.u[std::min(m - 1, is)];
+    const int ns = (int) shp.s.size();
+    for (int t = i; t < j; ++t) {
+        const int kk = k0 + (t - i);
+        const double fill = kk < ns ? A * shp.s[std::max(0, kk)] : 0.0;
+        w[t] = std::max(w[t], (float) (pedestal + fill));
+    }
+    return true;
+}
+
+void Flash::OpDecon::repair_runs_tot(std::vector<float>& w,
+                                     const std::vector<std::pair<int, int>>& runs,
+                                     double pedestal, const SPETemplate& spe,
+                                     const TotShape* shp, int& nfill, int& nfallback) const
+{
+    const int n = (int) w.size();
+    size_t a = 0;
+    while (a < runs.size()) {
+        // merge runs separated by <= tot_merge_gap samples (rail_run MERGE_GAP)
+        size_t b = a + 1;
+        while (b < runs.size() && runs[b].first - runs[b - 1].second <= m_tot_merge_gap) ++b;
+        const int i = runs[a].first, j = runs[b - 1].second;
+        bool done = false;
+        if (shp && i > 0 && j < n) {
+            done = tot_fill_run(w, i, j, pedestal, m_saturation_adc, *shp);
+        }
+        if (done) {
+            ++nfill;
+        }
+        else {
+            std::vector<std::pair<int, int>> sub(runs.begin() + a, runs.begin() + b);
+            repair_runs(w, sub, pedestal, spe);
+            ++nfallback;
+        }
+        a = b;
+    }
+}
+
 // Rewrite floor-pinned OVERFLOW runs to the rail so the ordinary rail scan
 // sees them.  A run of >= m_overflow_min_samples samples at <= m_overflow_adc
 // is an overflow ONLY if the true signal was above the ceiling across it; the
@@ -540,6 +735,7 @@ bool Flash::OpDecon::operator()(const IFrame::pointer& in, IFrame::pointer& out)
     Waveform::ChannelMaskMap cmm;
     int nsaturated = 0;
     int noverflow = 0;   // floor-pinned overflow runs rewritten to the rail
+    int ntotfill = 0, ntotfallback = 0;   // saturation_repair_mode "tot" only
     for (const auto& trace : traces) {
         const int chan = trace->channel();
         auto it = m_chan2tmpl.find(chan);
@@ -617,7 +813,15 @@ bool Flash::OpDecon::operator()(const IFrame::pointer& in, IFrame::pointer& out)
             double pedestal = 0;
             for (int k = 0; k < nped; ++k) pedestal += repaired[k];
             pedestal /= nped;
-            repair_runs(repaired, sat_runs, pedestal, m_templates[it->second]);
+            if (m_saturation_repair_mode == "tot") {
+                auto sit = m_tot_shapes.find(chan);
+                repair_runs_tot(repaired, sat_runs, pedestal, m_templates[it->second],
+                                sit == m_tot_shapes.end() ? nullptr : &sit->second,
+                                ntotfill, ntotfallback);
+            }
+            else {
+                repair_runs(repaired, sat_runs, pedestal, m_templates[it->second]);
+            }
             wf = &repaired;
         }
         auto dec = deconvolve(*wf, m_templates[it->second], noise);
@@ -626,6 +830,10 @@ bool Flash::OpDecon::operator()(const IFrame::pointer& in, IFrame::pointer& out)
     }
     if (nskipped) {
         log->warn("frame {}: skipped {} traces with no SPE template", in->ident(), nskipped);
+    }
+    if (m_saturation_repair && m_saturation_repair_mode == "tot") {
+        log->debug("frame {}: saturation_repair_mode tot: {} merged runs ToT-filled, {} twoside fallback",
+                   in->ident(), ntotfill, ntotfallback);
     }
 
     // When saturation detection is off, build the frame exactly as before

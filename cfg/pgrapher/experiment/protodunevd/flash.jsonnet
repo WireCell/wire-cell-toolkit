@@ -82,7 +82,8 @@ local wc = import 'wirecell.jsonnet';
     // (the 468800-sample records are zero-padded by OpDecon).
     // DAPHNE 14-bit rail saturation flags as in PDHD.
     opdecon(name='', samples=1024, wi_sigma=1.0, detect_saturation=false, saturation_pad=0,
-            saturation_repair=false, overflow_to_rail=false)::  g.pnode({
+            saturation_repair=false, overflow_to_rail=false,
+            saturation_repair_mode='twoside', tot_shape_file='')::  g.pnode({
         type: 'OpDecon',
         name: name,
         data: {
@@ -104,6 +105,16 @@ local wc = import 'wirecell.jsonnet';
             // false.  Key omitted when off => byte-identical pre-fix config.
             // See pdvd/docs/qlmatch/pdvd-saturation-recovery.md.
             [if saturation_repair then 'saturation_repair']: true,
+            // Fill method of the repair: 'twoside' (the bridge above) or
+            // 'tot' (time-over-threshold: the channel's bright-pulse model
+            // shape from tot_shape_file, scaled to be ToT wide at the rail;
+            // pdvd/docs/qlmatch/30_*, 31_*).  C++ default "twoside" / "".
+            // Keys omitted unless repair is on and the mode is not twoside
+            // => byte-identical pre-knob config.
+            [if saturation_repair && saturation_repair_mode != 'twoside' then 'saturation_repair_mode']:
+                saturation_repair_mode,
+            [if saturation_repair && saturation_repair_mode != 'twoside' then 'tot_shape_file']:
+                tot_shape_file,
             // Remap floor-pinned OVERFLOW runs to saturation_adc before the
             // rail scan, so detect/flag/repair handle the membrane self-trigger
             // snippets whose over-range pulses pin at ADC 0 instead of clamping

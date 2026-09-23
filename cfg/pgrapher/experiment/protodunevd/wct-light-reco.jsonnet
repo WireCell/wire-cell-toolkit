@@ -52,6 +52,14 @@ function(input_file, output_dir='.', run=39252, event=298567, offset_us=0,
          // (better flash totals; the mask still applies).  Both C++-default
          // false, keys suppressed => byte-identical when off.
          flag_saturation=false, saturation_repair=false,
+         // Fill method of saturation_repair on the CATHODE full streams:
+         // 'twoside' (default, the exp bridge) or 'tot' (time-over-threshold
+         // fill with the per-channel shapes of pdvd-tot-shapes-v2.json, fit
+         // with the v2 templates, so it requires spe_v2; docs/qlmatch/30, 31).
+         // Membrane and PMT snippets keep twoside (ToT untested there).
+         // C++ default "twoside", keys suppressed => byte-identical when
+         // 'twoside'.
+         saturation_repair_mode='twoside',
          // Per-trace livetime rows -> OpFlashFinder flash_cov tensor ->
          // QLMatching use_coverage_flag masks self-trigger channels with no
          // snippet over a flash's window (membrane XA / PMT, duty ~5-30%;
@@ -133,6 +141,11 @@ function(input_file, output_dir='.', run=39252, event=298567, offset_us=0,
   } else {});
   local sat_rep = if std.type(saturation_repair) == 'string' then std.parseJson(saturation_repair) else saturation_repair;
   local ovf_rail = if std.type(overflow_to_rail) == 'string' then std.parseJson(overflow_to_rail) else overflow_to_rail;
+  local rep_mode = if saturation_repair_mode == 'twoside' || saturation_repair_mode == 'tot' then saturation_repair_mode
+                   else error "saturation_repair_mode must be 'twoside' or 'tot', got " + saturation_repair_mode;
+  local tot_shapes = if rep_mode == 'tot' && !spe_v2b
+                     then error "saturation_repair_mode 'tot' needs spe_v2 (the shapes are fit with the v2 templates)"
+                     else 'pgrapher/experiment/protodunevd/pdvd-tot-shapes-v2.json';
   local tmerge = if std.type(tail_merge) == 'string' then std.parseJson(tail_merge) else tail_merge;
   local twin = if std.type(tail_window_us) == 'string' then std.parseJson(tail_window_us) else tail_window_us;
   local tminw = if std.type(tail_min_width_us) == 'string' then std.parseJson(tail_min_width_us) else tail_min_width_us;
@@ -142,7 +155,9 @@ function(input_file, output_dir='.', run=39252, event=298567, offset_us=0,
   local cath_src = flash.opwaveform_source(input_file, run_n, evt_n, opch_lo=1000, opch_hi=1999, name='cath');
   local cath_decon = flash.opdecon(name='cath', samples=FULLSTREAM_SAMPLES, wi_sigma=1.25,
                                    detect_saturation=true, saturation_pad=sat_pad_n,
-                                   saturation_repair=sat_rep, overflow_to_rail=ovf_rail);
+                                   saturation_repair=sat_rep, overflow_to_rail=ovf_rail,
+                                   saturation_repair_mode=rep_mode,
+                                   tot_shape_file=if rep_mode == 'tot' then tot_shapes else '');
   local cath_roi = flash.oproi(name='cath');
   local cath_hit = flash.ophit(name='cath', hit_threshold=cath_th, intag='decon_roi',
                                fixed_ped_sigma=cath_ps, veto_saturation=veto_sat,
