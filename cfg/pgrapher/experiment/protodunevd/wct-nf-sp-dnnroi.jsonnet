@@ -109,6 +109,10 @@ function(
   // SP frames were made with).  '' = params.files.wires (production) => compiled config byte-identical.
   // The runner's --wires sets it.  doc pdvd/99 sec 4.3 (SP depends on the per-plane channel order).
   wires_file               = '',
+  // Collection-plane SP wire filter, X in sigma = X/sqrt(pi) (toolkit protodunevd/sp.jsonnet make_sigproc).
+  // null = the registered Wire_col_b/_t (X = 10) => compiled config byte-identical.  3.0 = the DUNE-VD value the
+  // simulation-trained drift regressor saw; doc pdvd/117 study S4.  The runner's --wire-col-x sets it.
+  wire_col_sigma_x         = null,
 )
 
   local tools = if wires_file == '' then tools_all
@@ -152,7 +156,8 @@ function(
   local sp_pipes = [sp.make_sigproc(a, l1sp_pd_mode='',
                                     ctoffset_b=4*wc.microsecond,
                                     ctoffset_t=4*wc.microsecond,
-                                    top_gain_scale=top_gain_scale)
+                                    top_gain_scale=top_gain_scale,
+                                    wire_col_sigma_x=wire_col_sigma_x)
                     for a in tools.anodes];
 
   // TorchService instance shared by all per-anode DNN-ROI nodes.

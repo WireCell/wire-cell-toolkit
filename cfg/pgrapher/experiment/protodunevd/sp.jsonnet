@@ -69,10 +69,24 @@ function(params, tools, override = {}) {
                // anodes never read it.  See pdvd/docs/nf_sp_img_clus/
                // 99_top-electronics-gain-in-sp.md (s = 0.889, doc pdhd/29 M2).
                top_gain_scale=1.0,
+               // Collection-plane SP wire filter override, doc pdvd/117 study S4.
+               // X with sigma = X/sqrt(pi) (the sp-filters.jsonnet idiom; sigma is
+               // in the FREQUENCY domain, units of Nyquist -- a smaller X is a
+               // WIDER real-space kernel).  null (default) = the registered
+               // 'Wire_col_b'/'Wire_col_t' (X = 10) and no extra component =>
+               // compiled config byte-identical.  X = 3.0 is the DUNE-VD value the
+               // simulation-trained drift regressor saw (dune-vd/sp-filters.jsonnet:114).
+               wire_col_sigma_x=null,
                dump_rawdecon=false)::
     // Top (_t) vs bottom (_b) anode filter suffix.  Bottom = ident 0..3,
     // top = ident 4..7.  See sp-filters.jsonnet for the registered names.
     local sfx = if anode.data.ident < 4 then '_b' else '_t';
+    // doc pdvd/117 S4: registered only when the override is given.
+    local wire_colx = if std.type(wire_col_sigma_x) == 'null' then [] else [{
+      type: 'HfFilter',
+      name: 'Wire_colx' + sfx,
+      data: { max_freq: 1, power: 2, flag: false, sigma: wire_col_sigma_x / wc.sqrtpi },
+    }];
     local sp_node = g.pnode({
       type: 'OmnibusSigProc',
       name:
@@ -132,7 +146,8 @@ function(params, tools, override = {}) {
       // Default Wire_filters layout is [ind, ind, col]; preserve it.
       Wire_filters:         ['Wire_ind'       + sfx,
                              'Wire_ind'       + sfx,
-                             'Wire_col'       + sfx],
+                             (if std.type(wire_col_sigma_x) == 'null'
+                              then 'Wire_col' else 'Wire_colx') + sfx],
       ftoffset: 0.0, // default 0.0
       // ctoffset: 1.0*wc.microsecond, // default -8.0
       ctoffset: if anode.data.ident < 4 then ctoffset_b else ctoffset_t, // per-side; both default 4us (byte-identical). consistent with FR: protodunevd_FR_imbalance3p_260501.json.bz2
@@ -188,7 +203,7 @@ function(params, tools, override = {}) {
       // process_planes: [0, 2],
 
       } + override,
-    }, nin=1, nout=1, uses=[anode, tools.dft, tools.field, tools.elec_resps[0], tools.elec_resps[1] ] + pc.uses + spfilt);
+    }, nin=1, nout=1, uses=[anode, tools.dft, tools.field, tools.elec_resps[0], tools.elec_resps[1] ] + pc.uses + spfilt + wire_colx);
 
     // L1SP process mode applies to both bottom (ident < 4) and top (ident >= 4).
     // Top kernels: pdvd_top_l1sp_kernels.json.bz2 (selected below).
