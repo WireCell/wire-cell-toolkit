@@ -9,9 +9,17 @@ Last reviewed / updated: **2026-05-18**.
 
 ## 1. What this is
 
-- DUNE FD-HD, 12 APAs (`params.jsonnet:91`, `std.range(0,11)`).
+- DUNE FD-HD, 12 APAs (`params.jsonnet`, `std.range(0,11)`).
 - Horizontal-drift geometry: `apa_cpa = 3.63075 m`, `apa_w2w = 60.031 mm`,
   3-plane U/V/W.
+- **Layout (verified against `dune10kt-1x2x6-wires-larsoft-v1.json.bz2`,
+  2026-09-24):** all 12 APAs sit at x = 0, arranged 2 rows in y (even ident
+  y < 0, odd ident y > 0) x 6 columns in z (2306.4 mm long, 2323.9 mm pitch),
+  with BOTH faces live: face 0 (+x wires) drifts to the cathode at +3.63 m,
+  face 1 (-x) to -3.63 m.  Per APA: U channels 0-799 and V 800-1599 are
+  wrapped over both faces (1149/1148 wires on 800 channels); W 1600-2079 is
+  face 1 and W 2080-2559 is face 0.  Not "2 APA columns" in x, as the old
+  text here said.
 - Builds on the shared base `pgrapher/common/params.jsonnet`.
 - Distinct from `pdhd` (the ProtoDUNE-HD prototype, 4 APAs) and from `dune-vd`
   (vertical drift) — see §6.
@@ -92,8 +100,39 @@ removed repo-wide; see §4) — and three also referenced an undefined
   which lacks the sim-only `sys_resp`/`sys_status` fields — consistent with its
   two sibling sim configs.
 
+## 3c — 2026-09-24: `params.jsonnet` APA centerline bug
+
+`params.jsonnet` set every APA's `centerline = sign*apa_cpa`, i.e. the APAs
+at x = +-3.63 m -- the position of their *cathodes* -- 3.63 m away from
+where the wires file puts the wires (x = 0).  `simparams.jsonnet` always had
+`centerline = 0`.  Consequence before the fix: any consumer of the data
+`params` (`wcls-sp.jsonnet`, `wcls-nf-sp.jsonnet` with `reality=data`) built
+`AnodePlane` faces whose anode/response/cathode x were 3.6 m off (face 0
+anode at -3591 mm, cathode at -1.6 mm).  Signal processing itself does not
+read those x values, so NF/SP output was unaffected; imaging, drifting and
+anything using `AnodePlane` face volumes would have been wrong.
+
+Fix: `centerline = 0` in `params.jsonnet`.  Gate (compiled JSON of every
+entry config before/after, `wcsonnet` with the LArSoft ext-vars): only
+`wcls-sp` and `wcls-nf-sp` at `reality=data` change, and only the 72
+`AnodePlane` `faces[].{anode,response,cathode}` leaves of the 12 anodes;
+after the fix their compiled JSON is byte-identical to the `reality=sim`
+one.  All `simparams`-based entries are byte-identical before/after.
+Also in this change: `wct-sim-check.jsonnet` dropped its dead
+`pgrapher/common/fileio.jsonnet` import and passes the 4th argument to
+`chndb-perfect` (latent, `nf_pipes` is commented out); compiled JSON
+identical.
+
+Users of this config since 2026-09-24: `wcp-porting-img/wcfm/` (the
+foundation-model campaign: iso-track sim -> NF -> SP -> imaging ->
+clustering on this geometry; `wcfm/docs/02`).
+
 ## 4. Known limitations / remaining issues
 
+- **Drift speed.** `lar.drift_speed` is the common base's 1.6 mm/us while the
+  field-response file (`dune-garfield-1d565`) carries 1.565 mm/us; PDHD
+  overrides to 1.565.  Left as is (changing it moves the sim `Reframer`
+  `tbin`); the `wcfm` campaign uses 1.6 consistently.
 - **`pgrapher/common/fileio.jsonnet` and `pgrapher/ui/cli/nodes.jsonnet` are
   missing repo-wide.** Commit `6b8ef2e2` ("Remove helpers in favor of layers")
   removed them, yet ~75 configs across nearly every experiment (`pdsp`,

@@ -759,7 +759,11 @@ cluster_graph_t ClusterArrays::to_cluster(const node_array_set_t& nas,
         }        
     }
 
-    {                           // blobs
+    // A cluster whose blobs were ALL removed downstream (e.g. every blob of an
+    // isochronous track tagged by ProjectionDeghosting) is written with slices,
+    // channels and wires but no 'b' array; it must load back as such rather
+    // than throw std::out_of_range (wcp-porting-img/wcfm/docs/02, 2026-09-24).
+    if (nas.find('b') != nas.end()) { // blobs
         const auto& arr = nas.at('b');
         const size_t nnodes = arr.shape()[0];
         for (size_t ind=0; ind<nnodes; ++ind) {

@@ -271,9 +271,21 @@ bool Img::BlobDepoFill::operator()(const input_tuple_type& intup,
         auto mydepos = sensitive(*(ideposet->depos()), ianodeface);
         log->debug("call={} face={} nblobs={} ndepos={}",
                    m_count, ianodeface->ident(), bdescvector.size(), mydepos.size());
+        // A depo is "behind the face" when it sits on the wire side of the
+        // response plane.  Measure that along the face's drift direction
+        // (IAnodeFace::dirx(): +1 when the drift volume is at +x of the
+        // wires, -1 when at -x).  The raw x difference used before was
+        // sign-blind: on a -x face every depo in the volume has x below
+        // the response plane, so every one was skipped and the face's blobs
+        // all came out with zero true charge (dune10kt-1x2x6 face 1,
+        // wcp-porting-img/wcfm/docs/02, 2026-09-24).  The tolerance covers
+        // float32 depo files: a depo drifted exactly onto the response plane
+        // reads back a few um off, on either side.
+        const int dirx = ianodeface->dirx();
+        const double behind_tolerance = 0.01*units::mm;
         for (const auto& maybe : mydepos) {
             const auto rpos = pimpos->relative(maybe->pos());
-            if (rpos[0] < 0) {
+            if (dirx * rpos[0] < -behind_tolerance) {
                 continue;       // depo is behind the face.
             }
             depos.push_back(maybe);
