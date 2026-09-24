@@ -60,6 +60,32 @@ namespace {
     }
 } // namespace
 
+int WireCell::Match::ks_sat_clamp(std::vector<double>& meas, const std::vector<double>& pred,
+                                  const std::vector<char>& rail, const std::vector<char>& fit, double tol)
+{
+    if (!(tol > 0)) return 0;
+    const std::size_t n = meas.size();
+    double sm = 0, sp = 0;
+    for (std::size_t j = 0; j < n; ++j) {
+        if (fit[j] && !rail[j]) {
+            sm += meas[j];
+            sp += pred[j];
+        }
+    }
+    if (!(sm > 0 && sp > 0)) return 0;
+    const double s = sm / sp;
+    int nchanged = 0;
+    for (std::size_t j = 0; j < n; ++j) {
+        if (!rail[j] || !(meas[j] > 0)) continue;
+        const double v = std::clamp(pred[j] * s, meas[j] / (1 + tol), meas[j] * (1 + tol));
+        if (v != meas[j]) {
+            meas[j] = v;
+            ++nchanged;
+        }
+    }
+    return nchanged;
+}
+
 TimingTPCBundle::TimingTPCBundle(Opflash* flash, Cluster* main_cluster,
                                  int flash_index_id, int cluster_index_id)
     : flash(flash)
@@ -135,6 +161,18 @@ bool TimingTPCBundle::examine_bundle(TimingTPCBundle* candidate_bundle)
         predicted_dist[j] = p;
         total_predicted  += p;
         total_measured   += m;
+    }
+    // doc pdvd/qlmatch/34 ks_sat_tol (default 0 => skipped, bit-identical).
+    if (m_qp.ks_sat_tol > 0 && flash) {
+        std::vector<char> rail(m_nchan), fit(m_nchan);
+        for (int j = 0; j < m_nchan; ++j) {
+            rail[j] = flash->get_sat(j);
+            fit[j]  = opdet_mask[j] != 0;
+        }
+        if (ks_sat_clamp(measured_dist, predicted_dist, rail, fit, m_qp.ks_sat_tol) > 0) {
+            total_measured = 0;
+            for (int j = 0; j < m_nchan; ++j) total_measured += measured_dist[j];
+        }
     }
     if (total_predicted > 0) {
         for (int j = 0; j < m_nchan; ++j) predicted_dist[j] /= total_predicted;
@@ -240,6 +278,18 @@ bool TimingTPCBundle::examine_bundle()
         predicted_dist[j] = p;
         total_predicted  += p;
         total_measured   += m;
+    }
+    // doc pdvd/qlmatch/34 ks_sat_tol (default 0 => skipped, bit-identical).
+    if (m_qp.ks_sat_tol > 0 && flash) {
+        std::vector<char> rail(m_nchan), fit(m_nchan);
+        for (int j = 0; j < m_nchan; ++j) {
+            rail[j] = flash->get_sat(j);
+            fit[j]  = opdet_mask[j] != 0;
+        }
+        if (ks_sat_clamp(measured_dist, predicted_dist, rail, fit, m_qp.ks_sat_tol) > 0) {
+            total_measured = 0;
+            for (int j = 0; j < m_nchan; ++j) total_measured += measured_dist[j];
+        }
     }
     if (total_predicted > 0) {
         for (int j = 0; j < m_nchan; ++j) predicted_dist[j] /= total_predicted;

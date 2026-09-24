@@ -450,6 +450,7 @@ void QLMatching::configure(const WireCell::Configuration& cfg)
     m_saturation_mask_fit = get(cfg, "saturation_mask_fit", m_saturation_mask_fit);
     m_sat_skip_round2_shared = get(cfg, "sat_skip_round2_shared", m_sat_skip_round2_shared);
     m_lasso_weight_unrailed = get(cfg, "lasso_weight_unrailed", m_lasso_weight_unrailed);
+    m_ks_sat_tol = get(cfg, "ks_sat_tol", m_ks_sat_tol);
     m_use_coverage_flag = get(cfg, "use_coverage_flag", m_use_coverage_flag);
     m_coverage_min = get(cfg, "coverage_min", m_coverage_min);
     m_coverage_mask_fit = get(cfg, "coverage_mask_fit", m_coverage_mask_fit);
@@ -738,6 +739,11 @@ void QLMatching::configure(const WireCell::Configuration& cfg)
                    "chi2/KS at their clipped PE (chi2_sat_inflate={}); LASSO rows stay zeroed",
                    m_chi2_sat_inflate);
     }
+    if (m_ks_sat_tol > 0) {
+        log->debug("QLMatching ks_sat_tol={} => rail-flagged channels enter the bundle KS clamped to within "
+                   "x(1+tol) of the unrailed-scaled prediction (use_saturation_flag={})",
+                   m_ks_sat_tol, m_use_saturation_flag);
+    }
     if (m_lasso_weight_unrailed) {
         log->debug("QLMatching lasso_weight_unrailed=true => shared-fit LASSO weight base from unrailed "
                    "LASSO-row channels (use_saturation_flag={})", m_use_saturation_flag);
@@ -890,6 +896,7 @@ WireCell::Configuration QLMatching::default_configuration() const
     cfg["saturation_mask_fit"] = m_saturation_mask_fit;
     cfg["sat_skip_round2_shared"] = m_sat_skip_round2_shared;
     cfg["lasso_weight_unrailed"] = m_lasso_weight_unrailed;
+    cfg["ks_sat_tol"] = m_ks_sat_tol;
     cfg["use_coverage_flag"] = m_use_coverage_flag;
     cfg["coverage_min"] = m_coverage_min;
     cfg["coverage_mask_fit"] = m_coverage_mask_fit;
@@ -1523,6 +1530,7 @@ void QLMatching::compute_geometry(ApaRun& run)
     run.qp.pe_err_ch_frac       = m_pe_err_ch_frac;
     run.qp.pe_err_ch_lowpe_frac = m_pe_err_ch_lowpe_frac;
     run.qp.pe_err_ch_lowpe_knee = m_pe_err_ch_lowpe_knee;
+    run.qp.ks_sat_tol           = m_ks_sat_tol;   // 0 (default) => off
 
     // Shared-flash mode relies on the ident-based sign_offset above encoding the
     // physical relation sign_offset == -s (true for SBND TPC0/1 and the PDVD
@@ -4049,6 +4057,7 @@ void QLMatching::dump_calib(const std::vector<ApaRun>& runs)
     qp["chi2_pmt_ratio"]   = m_chi2_pmt_ratio;
     qp["chi2_pmt_inflate"] = m_chi2_pmt_inflate;
     qp["chi2_sat_inflate"] = m_chi2_sat_inflate;
+    if (m_ks_sat_tol > 0) qp["ks_sat_tol"] = m_ks_sat_tol;   // key absent when off => dump bit-identical
     qp["xtpc_pin_min_strength"] = m_xtpc_pin_min_strength;
     qp["xtpc_sc1_light_gate"]   = m_xtpc_sc1_light_gate;
     qp["xtpc_sc1_ks_max"]       = m_xtpc_sc1_ks_max;

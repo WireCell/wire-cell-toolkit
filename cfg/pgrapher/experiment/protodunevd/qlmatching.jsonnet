@@ -57,7 +57,7 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=10000,
          qtol=0.094,
          trigger_offsets=null, drift_speed=null, drift_speeds=null,
          cathode_ext1=null, anode_ext1_margin=null, use_saturation_flag=false, sat_flag_ignore_cathode=false,
-         sat_skip_round2=false, lasso_weight_unrailed=false,
+         sat_skip_round2=false, lasso_weight_unrailed=false, ks_sat_tol=null,
          saturation_mask_fit=true, chi2_sat_inflate=null,
          use_coverage_flag=false, coverage_min=1.0,
          coverage_mask_fit=true, pe_err_nodata=null,
@@ -478,6 +478,12 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=10000,
             // a rail repair moves (docs/qlmatch/33).  C++ default false.  Key
             // omitted when off => byte-identical.
             [if lasso_weight_unrailed then 'lasso_weight_unrailed']: true,
+            // Tolerance on a railed channel in the bundle KS: it enters the KS
+            // clamped to within x(1+tol) of the bundle prediction scaled to its
+            // unrailed light (docs/qlmatch/34; tol calibrated on cathode
+            // crossers, 0.615 on ToT light).  C++ default 0 = off.  Key omitted
+            // when null => byte-identical.
+            [if ks_sat_tol != null then 'ks_sat_tol']: ks_sat_tol,
             // ...and whether a railed channel is DROPPED from the chi2/KS or
             // kept there at its clipped PE.  Keeping it is right: the clipped
             // value is a LOWER BOUND on the true light (11_pdvd-saturation-

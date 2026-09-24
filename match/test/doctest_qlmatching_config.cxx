@@ -107,3 +107,57 @@ TEST_CASE("opflash clear_sat is safe on flag-free flashes and bad channels")
     f.clear_sat({-1, 4, 11, 40, 99});
     for (int ch = -1; ch <= 40; ++ch) CHECK_FALSE(f.get_sat(ch));
 }
+
+TEST_CASE("qlmatching ks_sat_tol defaults off (docs/qlmatch/34)")
+{
+    Match::QLMatching qlm;
+    auto cfg = qlm.default_configuration();
+    REQUIRE(cfg.isMember("ks_sat_tol"));
+    CHECK(cfg["ks_sat_tol"].asDouble() == 0.0);
+    Match::BundleQualityParams qp;
+    CHECK(qp.ks_sat_tol == 0.0);
+}
+
+TEST_CASE("ks_sat_clamp: repaired rails in a shared flash (docs/qlmatch/34)")
+{
+    // 4 channels; ch 0 railed.  The bundle predicts 0.3 of the flash on every
+    // unrailed channel (other clusters make the rest), so s = meas/pred = 1/0.3.
+    const std::vector<char> rail{1, 0, 0, 0};
+    const std::vector<char> fit{1, 1, 1, 1};
+    const std::vector<double> pred{300, 30, 60, 90};         // x0.3 of the flash shape
+    const double s = (100.0 + 200.0 + 300.0) / (30.0 + 60.0 + 90.0);
+
+    SUBCASE("off: tol 0 changes nothing")
+    {
+        std::vector<double> meas{1000, 100, 200, 300};
+        CHECK(Match::ks_sat_clamp(meas, pred, rail, fit, 0.0) == 0);
+        CHECK(meas[0] == 1000);
+    }
+    SUBCASE("a rail matching the scaled shape is untouched")
+    {
+        std::vector<double> meas{300 * s, 100, 200, 300};
+        const double before = meas[0];
+        CHECK(Match::ks_sat_clamp(meas, pred, rail, fit, 0.615) == 0);
+        CHECK(meas[0] == before);
+    }
+    SUBCASE("a rail 3x the scaled prediction moves down by at most 1+tol")
+    {
+        std::vector<double> meas{3 * 300 * s, 100, 200, 300};
+        CHECK(Match::ks_sat_clamp(meas, pred, rail, fit, 0.615) == 1);
+        CHECK(meas[0] == doctest::Approx(3 * 300 * s / 1.615));
+        CHECK(meas[1] == 100);   // unrailed untouched
+    }
+    SUBCASE("a rail within the tolerance becomes the scaled prediction")
+    {
+        std::vector<double> meas{1.3 * 300 * s, 100, 200, 300};
+        CHECK(Match::ks_sat_clamp(meas, pred, rail, fit, 0.615) == 1);
+        CHECK(meas[0] == doctest::Approx(300 * s));
+    }
+    SUBCASE("no unrailed light in the fit mask => no clamp")
+    {
+        std::vector<double> meas{1000, 100, 200, 300};
+        const std::vector<char> fit0{1, 0, 0, 0};
+        CHECK(Match::ks_sat_clamp(meas, pred, rail, fit0, 0.615) == 0);
+        CHECK(meas[0] == 1000);
+    }
+}

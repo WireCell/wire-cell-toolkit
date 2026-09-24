@@ -127,6 +127,10 @@ function(
     // instead of the all-channel flash total (docs/qlmatch/33).  C++ default
     // false; key suppressed when false => compiled config byte-identical.
     ql_lasso_weight_unrailed = false,
+    // Railed-channel tolerance in the bundle KS (QLMatching ks_sat_tol,
+    // docs/qlmatch/34).  null => key suppressed => C++ default 0 = off,
+    // compiled config byte-identical.
+    ql_ks_sat_tol = null,
     // Whether a rail-flagged channel is also DROPPED from the chi2/KS (the
     // 2026-07-14..16 operating point) or kept there at its clipped PE.
     // Keeping it is right -- the clipped PE is a LOWER BOUND on the true
@@ -464,6 +468,7 @@ local qlm_maker = qlm(params_w, trigger_offset_bot, readout_window_ticks, light_
                       sat_flag_ignore_cathode=ql_sat_flag_ignore_cathode,
                       sat_skip_round2=ql_sat_skip_round2,
                       lasso_weight_unrailed=ql_lasso_weight_unrailed,
+                      ks_sat_tol=ql_ks_sat_tol,
                       saturation_mask_fit=ql_saturation_mask_fit,
                       chi2_sat_inflate=ql_chi2_sat_inflate,
                       use_coverage_flag=ql_use_coverage_flag,

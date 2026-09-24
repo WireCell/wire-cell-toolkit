@@ -515,6 +515,15 @@ namespace WireCell::Match {
         // totals => bit-identical for existing cfgs.  (doc pdvd/qlmatch/33)
         bool m_lasso_weight_unrailed{false};
 
+        // Repaired-rail tolerance in the bundle KS shape test (forwarded as
+        // BundleQualityParams::ks_sat_tol; see TimingTPCBundle.h ks_sat_clamp).
+        // > 0: a rail-flagged channel left in the KS by saturation_mask_fit=false
+        // enters the KS clamped to within a factor (1+tol) of the bundle
+        // prediction scaled to its unrailed light.  The KS feeds the LASSO weight
+        // (delta_shape term), the ks cuts and the bundle merges.  Default 0 =
+        // off => bit-identical for existing cfgs.  (doc pdvd/qlmatch/34)
+        double m_ks_sat_tol{0.0};
+
         // Track readout coverage PER FLASH (Opflash::get_cov, fed by the
         // OpHitFinder emit_coverage -> OpFlashFinder flash_cov chain): a
         // self-triggered channel (PDVD membrane XA / PMT 16.4-us snippets,
