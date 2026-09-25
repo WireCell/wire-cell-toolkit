@@ -1814,6 +1814,9 @@ function(
     // for the main cluster's axis end; null => the C++ defaults (doc pdvd/120
     // sec 1: entry (110, 159, 0.6) from the run-39305 beam-matched tracks,
     // direction (-0.095, -0.704, 0.704) from the GDML beam plug, 50 cm).
+    // OWNER RULING 2026-09-25 (doc 120 sec 1.3): the DATA-derived entry is
+    // production; the GDML plug axis crosses the face 100 cm higher in x
+    // (210.6) and is NOT used.
     beam_entry_point_cm = null,
     beam_dir = null,
     beam_entry_max_dist_cm = null,
@@ -1824,7 +1827,8 @@ function(
     // rule alone picked a 2.2 cm fragment 27.8 cm from the entry over the
     // 405 cm beam track 34.7 cm away (doc pdvd/120 sec 5.2); a length floor
     // keeps fragments out of the contest.  Reachable only through the beam
-    // stage, so every other compiled config is unchanged.
+    // stage, so every other compiled config is unchanged.  OWNER RULING
+    // 2026-09-25: keep the 10 cm floor.
     beam_pr_knobs = { min_main_length_cm: 10.0 },
     // nu_skip_cosmic / nu_skip_cosmic_bundle: TaggerCheckNeutrino refuses to run
     // neutrino PR on an in-window main already convicted as cosmic -- per-main
