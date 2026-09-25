@@ -71,6 +71,23 @@ namespace WireCell::Clus::PR {
         /// :187), correct independently of the cache's refresh schedule.
         /// Config key kine_shower_pdg_live; absent => legacy, byte-identical.
         bool shower_pdg_live{false};
+        /// doc pdvd/120 sec 9.4 (kine_charge_t0_frame).  A 2-D charge cell's
+        /// geometric point (Grouping::convert_time_wire_2Dpoint) is in the raw
+        /// t0 = 0 drift frame; a segment's "fit"/"associate_points" clouds are
+        /// in the cluster's t0-CORRECTED frame.  They differ in drift by the
+        /// cluster's t0 drift plus any time-origin difference between the two
+        /// conversions -- negligible for a beam neutrino (t0 ~ 0) but tens of
+        /// cm on a PDVD beam particle (flash t0 ~ 2.8 ms after the readout
+        /// origin), where every cell then fails the 0.6 cm proximity test and
+        /// every EM shower gets kine_charge = 0 (measured: 5226 hits, 0 within
+        /// the cut, on run 39305 evt 157312 -- the same defect doc pdhd/16
+        /// found for the Michel charge).  false = legacy, byte-identical.
+        /// true = before the proximity test shift each cell's drift by the
+        /// median (raw - corrected) x of the object's OWN fit points in that
+        /// (apa, face) -- the CheckSTM_Michel michel_q2d rule, the round trip
+        /// through IPCTransform::backward without the tick rounding -- and skip
+        /// the cells of an (apa, face) the object has no fit point in.
+        bool t0_frame{false};
         /// doc pr/99 round 3 (C1).  false = legacy: every shower's
         /// cal_kine_charge independently rescans the whole event's 2D charge
         /// maps, so two spatially interleaved showers each collect the SAME

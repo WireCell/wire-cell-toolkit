@@ -54,11 +54,42 @@ TEST_CASE("clus knob defaults: CheckBeamParticle")
     D("min_main_length_cm", 0.0);
     B("improve_entry_vertex", false);
     B("entry_fail_fallback_geo", false);
+    B("entry_long_muon_absorb", false);   // doc pdvd/120 sec 9.3: release the entry-rooted chain
+    B("kine_charge_t0_frame", true);      // doc pdvd/120 sec 9.4: this stage's own default is ON
     B("dqdx_fit_keep_all_points", false);
     B("excl_t0_frame", false);
     D("fit_blob_coverage", -1.0);
-    // the PR-partition knobs are published (null = ride the C++ default)
-    CHECK(cfg.isMember("two_end_break"));
-    CHECK(cfg.isMember("kink_dqdx_hot_ratio"));
+    // doc pdvd/120 sec 9: the stage reads TaggerCheckNeutrino's PR knob set
+    // (same names, same C++ defaults, TaggerCheckNeutrino.h) -- a sample from
+    // each family the first cut missed ...
+    B("two_end_break", false);
+    D("kink_dqdx_hot_ratio", 1.7);
+    B("main_vertex_graph_audit", false);
+    D("mvga_radius", 15.0);
+    B("shower_nv_bridge_track", false);
+    D("shower_nv_bridge_max_gap", 1.8);
+    B("straight_cont_cross_cluster", false);
+    B("kine_count_conn4_near", false);
+    D("kine_conn4_near_gap", 20.0);
+    B("shower_split", false);
+    D("pi0_mass_offset", 10.0);
+    D("conn3_stitch_max", 0.0);
+    B("swap_orphan_dup_audit", false);
+    B("long_muon_range_empty_chain_fallback", false);
+    B("fit_blob_coverage_defer", false);
+    D("kine_fudge_factor", 0.95);
+    D("vertex_z_prior_scale", 200.0);
+    REQUIRE(cfg["kine_plane_weights"].isArray());
+    CHECK(cfg["kine_plane_weights"][2].asDouble() == doctest::Approx(1.0));
+    // ... and the families it deliberately does not read
+    CHECK(!cfg.isMember("dl_weights"));
+    CHECK(!cfg.isMember("nu_per_bundle"));
+    CHECK(!cfg.isMember("nu_skip_cosmic"));
+    CHECK(!cfg.isMember("vertex_kink_snap"));
+    CHECK(!cfg.isMember("vertex_junction_snap"));
+    CHECK(!cfg.isMember("mcs_enable"));
+    CHECK(!cfg.isMember("long_muon_cathode_bridge"));
+    CHECK(!cfg.isMember("cosmic_y_top_main"));
+    CHECK(!cfg.isMember("muon_dqdx_curve"));
     CHECK(cfg["fiducial"].isNull());
 }

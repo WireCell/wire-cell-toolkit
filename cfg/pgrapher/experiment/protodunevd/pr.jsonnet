@@ -1848,11 +1848,39 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
                 } + stm_michel_knobs),
             // doc pdvd/120: the beam-particle PR stage.  Same fitter config,
             // particle dataset and recombination model as tagger_check_neutrino
-            // (pdvd_recomb, NOT the STM+Michel calibrated one), the same
-            // PR-partition knob subset (stm_michel_partition = the keys both
-            // stages read by tagger_check_neutrino's names), and the beam
+            // (pdvd_recomb, NOT the STM+Michel calibrated one), and the beam
             // window the whole PR tail shares (beam_window, i.e. the
             // beam_window_us TLA after the wct-pr-perevt trigger arithmetic).
+            //
+            // doc pdvd/120 sec 9: the stage reads TaggerCheckNeutrino's PR
+            // knob set (same names, units and C++ defaults), so it is handed
+            // the NEUTRINO NODE's compiled data -- one config, two consumers
+            // -- rather than a hand-kept subset (the first cut forwarded only
+            // the 79-key STM+Michel partition and the beam bundle's particle
+            // flow lost every cross-cluster piece).  Dropped: the keys the
+            // beam builder sets itself and the families CheckBeamParticle
+            // does not read (DL/dual chain, candidate selection, cosmic
+            // taggers/BDT, MCS, vertex snaps, cathode bridge, probes).
+            // beam_pr_knobs (job TLA) merges last so it overrides.
+            local beam_knob_drop_exact = [
+                'grouping', 'trackfitting_config_file', 'particle_dataset', 'recombination_model', 'perf',
+                'detector_volumes', 'pc_transforms', 'fiducial', 'fv_tolerance',
+                'beam_window_low', 'beam_window_high', 'mip_dqdx', 'mip_dqdx_median',
+                'dQdx_scale', 'dQdx_offset', 'clus_geom_helper', 'main_vertex_swap_apply',
+                'rough_path_probe', 'sgp_edge_probe', 'vertex_scoreboard',
+                'skip_cosmic_companions', 'cosmic_companion_min_length', 'flash_pair_dt_us',
+                'nue_sp_consistent_fv', 'ssm_target_dir', 'ssm_absorber_dir', 'muon_dqdx_curve',
+                'tagger_ordered_segment_sets', 'stem_endpoint_wcpt_parity', 'broken_muon_cluster_id_count',
+                'neutrino_type_bitmask', 'vertex_kink_snap', 'vertex_junction_snap', 'kine_continuation_debug',
+            ],
+            local beam_knob_drop_prefix = ['mcs_', 'dl_', 'dual_chain_', 'nu_', 'cosmic_', 'sp_',
+                                           'long_muon_cathode_bridge', 'vks_', 'vjs_'],
+            local beam_knob_dropped(k) = std.member(beam_knob_drop_exact, k)
+                || std.foldl(function(acc, p) acc || std.startsWith(k, p), beam_knob_drop_prefix, false),
+            local tcn_node_data = self.tagger_check_neutrino.data,
+            local beam_neutrino_knobs = {
+                [k]: tcn_node_data[k] for k in std.objectFields(tcn_node_data) if !beam_knob_dropped(k)
+            },
             check_beam_particle: cm.check_beam_particle(
                 trackfitting_config_file=trackfitting_config_file,
                 particle_dataset=wc.tn(particle_dataset),
@@ -1867,7 +1895,7 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
                 beam_entry_point_cm=beam_entry_point_cm,
                 beam_dir=beam_dir,
                 beam_entry_max_dist_cm=beam_entry_max_dist_cm,
-                knobs=stm_michel_partition + beam_pr_knobs),
+                knobs=beam_neutrino_knobs + beam_pr_knobs),
             // STM-stage Magnify-tracking ROOT dump (doc sbnd_xin/docs/40): reads
             // the stm_fit/stm_pass cluster PCs and the "stm" TrackFitting slot,
             // writes tracking-stm.root (T_rec_charge/T_proj_data/T_bad_ch/Trun)
