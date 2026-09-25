@@ -175,3 +175,91 @@ TEST_CASE("blobdepofill gives nothing to blobs outside the depo's extent along t
     CHECK(nfar_nonzero == 0);       // before the fix: every far blob on the depo's W wires > 0
     CHECK(far == 0.0);
 }
+
+/** The fill of one blob is independent of the other blobs in the slice: BlobDepoFill has no
+ *  cross-blob normalisation, and the charge of a blob is accumulated over (slice, depo, wire)
+ *  in a fixed order.  The per-slice blob-by-wire index (wcp-porting-img/wcfm/docs/08) relies
+ *  on exactly this: a blob filled alone must carry bit-for-bit the value it gets when filled
+ *  together with every other blob of the slice, for several depos at once.
+ */
+TEST_CASE("blobdepofill fills each blob independently of the others in the slice")
+{
+    auto anode = make_fdhd_anode(8);
+    REQUIRE(anode);
+    auto face = anode->face(0);
+    REQUIRE(face);
+    const double span = 2.0 * units::us;
+    auto slice = make_slice(face, 0.0, span, 200);
+
+    Img::GridTiling gt;
+    auto gcfg = gt.default_configuration();
+    gcfg["anode"] = "AnodePlane:8";
+    gcfg["face"] = 0;
+    gt.configure(gcfg);
+    IBlobSet::pointer bs;
+    REQUIRE(gt(slice, bs));
+    REQUIRE(bs);
+    const auto blobs = bs->blobs();
+    REQUIRE(blobs.size() >= 3);
+
+    // depos: one at the centroid of every other blob, plus one between two blobs, all with a
+    // wide transverse extent so that several blobs share each depo
+    const double xresp = face->planes()[2]->pimpos()->origin()[0];
+    IDepo::vector dv;
+    for (size_t i = 0; i < blobs.size(); i += 2) {
+        const Point cen = centroid(face, blobs[i]);
+        const Point pos(xresp + face->dirx() * 1.0 * units::mm, cen.y(), cen.z());
+        dv.push_back(std::make_shared<Aux::SimpleDepo>(0.5 * span, pos, 50000.0 + 1000.0 * i, nullptr,
+                                                       0.1 * units::mm, 6.0 * units::mm));
+    }
+    {
+        const Point c0 = centroid(face, blobs[0]), c1 = centroid(face, blobs[1]);
+        const Point mid = 0.5 * (c0 + c1);
+        const Point pos(xresp + face->dirx() * 1.0 * units::mm, mid.y(), mid.z());
+        dv.push_back(std::make_shared<Aux::SimpleDepo>(0.3 * span, pos, 70000.0, nullptr, 0.1 * units::mm,
+                                                       (c0 - c1).magnitude()));
+    }
+    auto depos = std::make_shared<Aux::SimpleDepoSet>(0, dv);
+
+    Img::BlobDepoFill fill;
+    auto fcfg = fill.default_configuration();
+    fcfg["speed"] = 1.6 * units::mm / units::us;
+    fcfg["time_offset"] = 0.0;
+    fcfg["nsigma"] = 3.0;
+    fill.configure(fcfg);
+
+    auto fill_values = [&](const IBlob::vector& bv) {
+        cluster_graph_t g;
+        for (const auto& b : bv) {
+            boost::add_vertex(cluster_node_t(IBlob::pointer(b)), g);
+        }
+        auto icl = std::make_shared<Aux::SimpleCluster>(g, 100);
+        ICluster::pointer out;
+        REQUIRE(fill(std::make_tuple(icl, depos), out));
+        REQUIRE(out);
+        std::map<int, double> vals;      // ident -> filled value
+        for (const auto& v : boost::make_iterator_range(boost::vertices(out->graph()))) {
+            const auto& node = out->graph()[v];
+            if (node.code() != 'b') continue;
+            auto b = std::get<IBlob::pointer>(node.ptr);
+            vals[b->ident()] = b->value();
+        }
+        return vals;
+    };
+
+    const auto together = fill_values(blobs);
+    REQUIRE(together.size() == blobs.size());
+    double total = 0;
+    int nonzero = 0;
+    for (const auto& b : blobs) {
+        const auto alone = fill_values({b});
+        REQUIRE(alone.size() == 1);
+        const double va = alone.begin()->second;
+        const double vt = together.at(b->ident());
+        CHECK(va == vt);            // bit-for-bit, not approximately
+        total += vt;
+        if (vt != 0.0) ++nonzero;
+    }
+    CHECK(nonzero >= 3);            // the depos did land in several blobs
+    CHECK(total > 0.5 * 50000.0);
+}

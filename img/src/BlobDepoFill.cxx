@@ -11,6 +11,8 @@
 #include "WireCellUtil/GraphTools.h"
 #include "WireCellUtil/NamedFactory.h"
 
+#include <limits>
+
 
 WIRECELL_FACTORY(BlobDepoFill, WireCell::Img::BlobDepoFill,
                  WireCell::INamed,
@@ -300,10 +302,61 @@ bool Img::BlobDepoFill::operator()(const input_tuple_type& intup,
         auto gr = slice_and_dice_depos(log, sbins, depos, *pimpos,
                                        m_speed, m_nsigma, m_toffset);
 
+        // Per-slice blob-by-wire index (wcp-porting-img/wcfm/docs/08, 2026-09-25).  The
+        // exhaustive form of this loop visited EVERY blob of the slice for every (depo,
+        // wire) pair, copying the blob's shared_ptr out of the graph variant each time
+        // (78 % of the node's CPU on a 628 k-blob FD-HD shower anode: 300 s) and
+        // recomputing the four ray crossings that depend only on (blob, wire).  Both are
+        // hoisted: per blob a raw pointer and its primary-plane wire range, per (blob,
+        // wire) the along-wire extent [wlo, whi] of the blob, and per wire the list of
+        // blobs covering it in the slice's blob order.  A blob's charge is still
+        // accumulated in the same (slice, depo, wire) order from the same doubles, so
+        // the result is bit-identical to the exhaustive loop.
+        struct blobwire_t {
+            double* acc;        // &blob_value[bdesc].first
+            double wlo, whi;    // blob extent along the primary wire, from the other planes
+        };
+        const int nfake = 2;    // fixme: assumes first 2 layers are "fake planes" given the
+                                // overall sensitive bounds.  Should always hold, but someone
+                                // someday may get "creative".
+        const int nplanes = coords.nlayers() - nfake;
+
         // Each slice
         for (const auto& [islice,bdescs] : slice2blobs) {
             const auto sdesc = sbins.bin(islice->start() + 0.5*islice->span());
             nblobs += bdescs.size();
+
+            // Index the slice's blobs by primary-plane wire, in bdescs order.
+            std::unordered_map<int, std::vector<blobwire_t>> bywire;
+            for (const auto& bdesc : bdescs) {
+                const IBlob* iblob = std::get<IBlob::pointer>(ingr[bdesc].ptr).get();
+                const auto& strips = iblob->shape().strips();
+                const auto& wiprange = strips[2 + m_pindex].bounds;
+                double* acc = &blob_value[bdesc].first;
+                for (int wip = wiprange.first; wip < wiprange.second; ++wip) {
+                    RayGrid::coordinate_t rgc{2+m_pindex, wip};
+                    double wlo = -std::numeric_limits<double>::infinity();
+                    double whi = std::numeric_limits<double>::infinity();
+                    for (int irel=1; irel<nplanes; ++irel) {
+                        int other_pindex = (m_pindex + irel)%nplanes;
+                        const auto owipr = strips[nfake + other_pindex].bounds;
+
+                        RayGrid::coordinate_t orgc1{nfake+other_pindex, owipr.first};
+                        RayGrid::coordinate_t orgc2{nfake+other_pindex, owipr.second};
+
+                        auto p1 = coords.ray_crossing(rgc, orgc1);
+                        auto p2 = coords.ray_crossing(rgc, orgc2);
+
+                        auto w1 = pimpos->transform(p1)[1];
+                        auto w2 = pimpos->transform(p2)[1];
+                        if (w2 < w1) std::swap(w1,w2);
+
+                        wlo = std::max(wlo, w1);    // == *max_element of the lo's
+                        whi = std::min(whi, w2);    // == *min_element of the hi's
+                    }
+                    bywire[wip].push_back({acc, wlo, whi});
+                }
+            }
 
             // Each depo in the slice
             for (auto sdedge : mir(boost::out_edges(sdesc, gr))) {
@@ -321,51 +374,14 @@ bool Img::BlobDepoFill::operator()(const input_tuple_type& intup,
                     const auto wdesc = boost::target(dwedge, gr);
                     const int wip = gr[wdesc].idx;
 
-                    // Each blob in slice
-                    for (const auto& bdesc : bdescs) {
-                        auto iblob = std::get<IBlob::pointer>(ingr[bdesc].ptr);
-        
-                        // blob bounds
-                        const auto& strips = iblob->shape().strips();
-
-                        // wire in plane range for blob
-                        const auto& wiprange = strips[2 + m_pindex].bounds;
-
-                        if (wip < wiprange.first or wip >= wiprange.second) {
-                            continue; // wire not in blob.
-                        }
-
-                        RayGrid::coordinate_t rgc{2+m_pindex, wip};
-
-                        std::vector<double> lo, hi;
-                        // fixme: assumes first 2 layers are "fake
-                        // planes" given the overall sensitive bounds.
-                        // Should always hold, but someone someday may
-                        // get "creative".
-                        const int nfake = 2;
-                        const int nplanes = coords.nlayers() - nfake;
-                        for (int irel=1; irel<nplanes; ++irel) {
-                            int other_pindex = (m_pindex + irel)%nplanes;
-                            const auto owipr = strips[nfake + other_pindex].bounds;
-
-                            RayGrid::coordinate_t orgc1{nfake+other_pindex, owipr.first};
-                            RayGrid::coordinate_t orgc2{nfake+other_pindex, owipr.second};
-
-                            auto p1 = coords.ray_crossing(rgc, orgc1);
-                            auto p2 = coords.ray_crossing(rgc, orgc2);
-
-                            auto w1 = pimpos->transform(p1)[1];
-                            auto w2 = pimpos->transform(p2)[1];
-                            if (w2 < w1) std::swap(w1,w2);
-                            
-                            lo.push_back(w1);
-                            hi.push_back(w2);
-                        }
-                        const double wlo = *std::max_element(lo.begin(), lo.end());
-                        const double whi = *std::min_element(hi.begin(), hi.end());
-
-                        const double w1 = std::max(wlo, depo_min);
-                        const double w2 = std::min(whi, depo_max);
+                    // Each blob in the slice covering this wire
+                    const auto bwit = bywire.find(wip);
+                    if (bwit == bywire.end()) {
+                        continue;   // no blob of the slice on this wire
+                    }
+                    for (const auto& bw : bwit->second) {
+                        const double w1 = std::max(bw.wlo, depo_min);
+                        const double w2 = std::min(bw.whi, depo_max);
 
                         // No overlap between the blob's extent along the wire
                         // [wlo, whi] and the depo's +-nsigma window: the blob
@@ -383,10 +399,9 @@ bool Img::BlobDepoFill::operator()(const input_tuple_type& intup,
 
                         const double w_weight = gbounds(w1,w2,depo_center, idepo->extent_tran());
                         const double dq = sd_weight * dw_weight * w_weight * std::abs(idepo->charge());
-                        auto& bv = blob_value[bdesc];
-                        bv.first += dq;
-                        bv.second += 0; // how to estimate?
-                    } // over blobs
+                        *bw.acc += dq;
+                        // uncertainty: how to estimate?
+                    } // over blobs on the wire
                 } // over wires
             } // over s-d edges
         } // over slices
