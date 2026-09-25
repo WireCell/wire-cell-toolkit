@@ -258,15 +258,23 @@ function(
     // cluster's other bundles -- only if its OWN light fits (KS <= xtpc_sc1_ks_max,
     // chi2/ndf <= xtpc_sc1_c2n_max); geometry alone no longer decides.  The
     // C++ knob (QLMatching, default false, ks 0.3 / c2n 50) was written for
-    // PDVD (pdvd/docs/qlmatch/19, 27).  All three are tri-state: null (default)
-    // omits the key => compiled config byte-identical; a value emits it.
-    xtpc_sc1_light_gate = null,
+    // PDVD (pdvd/docs/qlmatch/19, 27).  All three are tri-state: null omits the
+    // key (the C++ default applies); a value emits it.
+    // SBND PRODUCTION DEFAULT: ON since 2026-09-25 (owner: "Flip the light gate
+    // on for production"; doc sbnd_xin/123 sec 19, measured in sec 18 and doc
+    // 124: mcp1k 271 -> 273, 3000 data events 661 -> 664 numu (FV), 0 lost; MC
+    // cv purity 86.8 -> 87.0 %).  ks/c2n stay null = the C++ 0.3 / 50 that was
+    // measured.  Runner escape: SBND_XTPC_SC1_GATE=0 passes null for the gate
+    // and the ceiling => compiled config byte-identical to before the flip.
+    xtpc_sc1_light_gate = true,
     xtpc_sc1_ks_max = null,
     xtpc_sc1_c2n_max = null,
     // xtpc_sc1_overpred_max: the same gate's over-prediction ceiling (C++
     // default 0 = not tested; evt 59003's dim-flash half predicts 36x its
-    // measured light and passes ks/chi2).  null omits the key.
-    xtpc_sc1_overpred_max = null,
+    // measured light and passes ks/chi2).  null omits the key.  SBND
+    // production default 2.9 since 2026-09-25 (the prefilter's ratio, doc 123
+    // sec 18.2), flipped together with the gate.
+    xtpc_sc1_overpred_max = 2.9,
     // sep_vertex_veto (SBND default TRUE since doc pr/15, owner decision
     // 2026-08-01): per-APA separate() un-splits a neutrino-vertex "V" whose two
     // dominant pieces both END at their mutual closest approach (run 18255 evt
