@@ -1,5 +1,6 @@
-// doc pdvd/119: Bee::Flashes op_beam label.  The array is written only when
-// set_beam() is called, so every existing op JSON stays byte-identical.
+// doc pdvd/119: Bee::Flashes op_beam label and (sec 8) op_cluster_anodes.
+// Each array is written only when its setter is called, so every existing op
+// JSON stays byte-identical.
 
 #include "WireCellUtil/Bee.h"
 #include "WireCellUtil/doctest.h"
@@ -29,6 +30,7 @@ TEST_CASE("bee flashes op_beam absent unless set")
     CHECK(j.isMember("op_cluster_ids"));
     CHECK_FALSE(j.isMember("op_t1"));
     CHECK_FALSE(j.isMember("op_flash_group"));
+    CHECK_FALSE(j.isMember("op_cluster_anodes"));
 }
 
 TEST_CASE("bee flashes op_beam written row-aligned when set")
@@ -51,4 +53,23 @@ TEST_CASE("bee flashes op_beam all-zero means labelled, no beam flash")
     REQUIRE(j.isMember("op_beam"));
     CHECK(j["op_beam"].size() == 2);
     CHECK(j["op_beam"][0].asInt() + j["op_beam"][1].asInt() == 0);
+}
+
+TEST_CASE("bee flashes op_cluster_anodes row-aligned and parallel to cluster ids")
+{
+    Bee::Flashes f("protodunevd", "op", 39305, 0, 317673);
+    f.append(414.9, {1.0, 2.0}, 3.0, {33, 12}, {1.5, 1.5}, 1);
+    f.append(430.6, {10.0, 20.0}, 30.0, {}, {}, 1);
+    f.set_cluster_anodes(std::vector<std::vector<int>>{{5, 1}, {}});
+    const auto j = f.asJson();
+    REQUIRE(j.isMember("op_cluster_anodes"));
+    const auto& ja = j["op_cluster_anodes"];
+    REQUIRE(ja.size() == j["op_t"].size());
+    REQUIRE(ja[0].size() == j["op_cluster_ids"][0].size());
+    CHECK(ja[0][0].asInt() == 5);
+    CHECK(ja[0][1].asInt() == 1);
+    CHECK(ja[1].isArray());
+    CHECK(ja[1].size() == 0);
+    // The per-flash apa is untouched by the per-cluster array.
+    CHECK(j["apa"][0].asString() == "1");
 }

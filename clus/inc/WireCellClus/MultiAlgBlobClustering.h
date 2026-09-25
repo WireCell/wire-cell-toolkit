@@ -567,6 +567,14 @@ namespace WireCell::Clus {
         // byte-identical to the pre-knob output.  Display label only: the Q/L
         // selection is not touched.
         std::vector<double> m_bee_beam_window_us;
+        // doc pdvd/119 sec 8.  When set, fill_bee_flashes also writes a per-row
+        // "op_cluster_anodes" array: each matched cluster's anode ident (the
+        // anode holding most of its blobs; at this pre-pipeline point a cluster
+        // lives on one drift side).  The Bee side panel needs it to put a
+        // cluster in its drift volume: from the uncorrected x alone a cluster
+        // within v*t of the cathode fits either volume.  Default OFF = no array,
+        // op JSON byte-identical.  Display only.
+        bool m_bee_flash_cluster_anodes{false};
         // When > 0, group the root opflash flashes across both TPC sides by this
         // ±time window (stored as a per-flash "group" array on the root opflash
         // PC, pre-pipeline) so the Bee viewer can show a TPC0/TPC1 coincidence

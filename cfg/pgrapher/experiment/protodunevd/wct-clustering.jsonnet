@@ -100,6 +100,12 @@ function(
     // -0.90 +- 0.05 us on the flash axis (runs 39252/39305/39349, doc pdvd/119
     // sec 3), so -0.9 +- 0.6 us; accidental ~1.2 us x 72 flashes/ms ~ 0.09/evt.
     beam_window_rel_us = [-1.5, -0.3],
+    // doc pdvd/119 sec 8: write each matched cluster's anode into the Bee op
+    // dump (op_cluster_anodes), read by the Bee side panel to place a cluster in
+    // its drift volume (from the uncorrected x a cluster within v*t of the
+    // cathode fits either volume).  Display only; Q/L jobs only.  ON for PDVD
+    // (owner, 2026-09-25); false => key omitted => the pre-fix compiled config.
+    bee_cluster_anodes = true,
     // Post-resample readout-window length (ticks) for the Q/L window-truncation
     // flag.  run_clus_evt.sh reads the real value from the SP frame (10000).
     readout_window_ticks = 10000,
@@ -462,6 +468,7 @@ local cc_dis_cut = if cc_dis_cut_cm == null then 5*wc.cm else cc_dis_cut_cm * wc
 local clus_all_tpc = if do_qlmatch
     then clus_maker.all_tpc(anodes, premerged=true, save_opflash=save_opflash,
                             bee_beam_window_us=bee_beam_window_us,
+                            bee_flash_cluster_anodes=bee_cluster_anodes,
                             cc_tip_touch_cut=cc_tip_touch_cut, cc_tip_touch_angle_cut=cc_tip_touch_angle_cut,
                             cc_cathode_x_cut=cc_cathode_x_cut, cc_drift_cut=cc_drift_cut, cc_dis_cut=cc_dis_cut,
                             cc_crosser_conn_relax=cc_crosser_conn_relax, cc_crosser_pca_angle=cc_crosser_pca_angle,

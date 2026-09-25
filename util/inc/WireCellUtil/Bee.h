@@ -228,7 +228,9 @@ namespace WireCell::Bee {
     /// An unmatched flash is one row with empty cluster_id / op_pes_pred.
     /// Optionally an op_flash_group:[gid] array (via set_groups) ties together
     /// the rows of one ±80 ns TPC0/TPC1 flash coincidence for joint display,
-    /// and an op_beam:[0|1] array (via set_beam) labels the in-beam flash.
+    /// an op_beam:[0|1] array (via set_beam) labels the in-beam flash, and an
+    /// op_cluster_anodes:[[anode]] array (via set_cluster_anodes) gives each
+    /// matched cluster's anode.
     class Flashes : public Object {
     public:
         Flashes();
@@ -275,6 +277,16 @@ namespace WireCell::Bee {
         /// prefers this label over its per-experiment op_t window.  Not written
         /// unless this is called, so existing op JSON stays bit-identical.
         void set_beam(const std::vector<int>& beam);
+
+        /// Optionally attach a per-row "op_cluster_anodes" array (one entry per
+        /// appended row, same order): for each row a list parallel to that
+        /// row's matched cluster ids giving each cluster's anode ident (the
+        /// anode holding most of its blobs), empty for an unmatched row.  The
+        /// Bee viewer's detector-frame side panel reads a cluster's drift
+        /// volume from it instead of guessing it from the uncorrected x.  Not
+        /// written unless this is called, so existing op JSON stays
+        /// bit-identical.
+        void set_cluster_anodes(const std::vector<std::vector<int>>& anodes);
 
         size_t size() const;
         bool empty() const;

@@ -390,6 +390,17 @@ void Bee::Flashes::set_beam(const std::vector<int>& beam)
     m_data["op_beam"] = jb;
 }
 
+void Bee::Flashes::set_cluster_anodes(const std::vector<std::vector<int>>& anodes)
+{
+    Json::Value ja(Json::arrayValue);
+    for (const auto& row : anodes) {
+        Json::Value jr(Json::arrayValue);
+        for (int a : row) jr.append(a);
+        ja.append(jr);
+    }
+    m_data["op_cluster_anodes"] = ja;
+}
+
 size_t Bee::Flashes::size() const
 {
     return m_data["op_t"].size();

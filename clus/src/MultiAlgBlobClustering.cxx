@@ -274,6 +274,7 @@ void MultiAlgBlobClustering::configure(const WireCell::Configuration& cfg)
         m_bee_beam_window_us = {jw[0].asDouble(), jw[1].asDouble()};
         log->debug("in-beam flash label window [{}, {}] us on op_t", jw[0].asDouble(), jw[1].asDouble());
     }
+    m_bee_flash_cluster_anodes = get(cfg, "bee_flash_cluster_anodes", m_bee_flash_cluster_anodes);
     m_flash_group_window = get(cfg, "flash_group_window", m_flash_group_window);
     m_flash_group_greedy = get(cfg, "flash_group_greedy", m_flash_group_greedy);
 
@@ -3621,6 +3622,7 @@ void MultiAlgBlobClustering::fill_bee_flashes(const WireCell::Clus::Facade::Grou
     // enumeration (this runs at the same pre-pipeline point), so the Bee viewer
     // associates each flash to the same physical charge cluster.
     std::map<int, std::vector<std::pair<int, std::vector<double>>>> matched;
+    std::map<int, int> cluster_anode;   // cluster id -> anode (bee_flash_cluster_anodes)
     for (const auto* cluster : grouping.children()) {
         const int mgid = cluster->get_scalar<int>("matched_flash_gid", -1);
         if (mgid < 0) continue;
@@ -3645,6 +3647,19 @@ void MultiAlgBlobClustering::fill_bee_flashes(const WireCell::Clus::Facade::Grou
                       pred_tot >= 100);
         }
         if (pred_tot < m_bee_flash_pred_min) continue;
+        if (m_bee_flash_cluster_anodes) {
+            // doc pdvd/119 sec 8: the anode holding most of the cluster's blobs
+            // (ties -> the lowest ident; int-keyed map, deterministic).
+            std::map<int, int> nblob;
+            for (const auto& wpid : cluster->wpids_blob()) ++nblob[wpid.apa()];
+            int best = -1, nbest = 0;
+            for (const auto& an : nblob) {
+                if (an.second > nbest) { nbest = an.second; best = an.first; }
+            }
+            cluster_anode[cluster->get_cluster_id()] = best;
+            log->debug("op cluster {} anode {} ({} of {} blobs)", cluster->get_cluster_id(), best,
+                       nbest, cluster->nchildren());
+        }
         matched[mgid].push_back({cluster->get_cluster_id(), std::move(pred)});
     }
 
@@ -3682,6 +3697,12 @@ void MultiAlgBlobClustering::fill_bee_flashes(const WireCell::Clus::Facade::Grou
     std::vector<int> appended_beam;     // one 0/1 per appended row, same order
     std::vector<int> appended_groups;   // one per appended row, same order
     std::vector<double> appended_t1;    // ditto, input-1-clock time (us)
+    std::vector<std::vector<int>> appended_anodes;   // ditto, parallel to the row's cluster ids
+    auto anodes_of = [&](const std::vector<int>& cids) {
+        std::vector<int> an;
+        for (int c : cids) an.push_back(cluster_anode.count(c) ? cluster_anode[c] : -1);
+        return an;
+    };
     for (const int g : flash_order) {
         const int apa = have_apa ? flash_apa[g] : (g / kFlashGidStride);
         const int grp = have_group ? flash_group[g] : -1;
@@ -3707,12 +3728,14 @@ void MultiAlgBlobClustering::fill_bee_flashes(const WireCell::Clus::Facade::Grou
                     for (size_t k = 0; k < cp.second.size(); ++k) pred_sum[k] += cp.second[k];
                 }
                 m_bee_flash.append(t_us, pes, peTotal, cids, pred_sum, apa);
+                appended_anodes.push_back(anodes_of(cids));
                 appended_groups.push_back(grp);
                 appended_t1.push_back(t1_us);
                 appended_beam.push_back(g == beam_gid ? 1 : 0);
             } else {
                 for (const auto& cp : mit->second) {
                     m_bee_flash.append(t_us, pes, peTotal, std::vector<int>{cp.first}, cp.second, apa);
+                    appended_anodes.push_back(anodes_of(std::vector<int>{cp.first}));
                     appended_groups.push_back(grp);
                     appended_t1.push_back(t1_us);
                     appended_beam.push_back(g == beam_gid ? 1 : 0);
@@ -3720,6 +3743,7 @@ void MultiAlgBlobClustering::fill_bee_flashes(const WireCell::Clus::Facade::Grou
             }
         } else {
             m_bee_flash.append(t_us, pes, peTotal, std::vector<int>{}, std::vector<double>{}, apa);
+            appended_anodes.push_back(std::vector<int>{});
             appended_groups.push_back(grp);
             appended_t1.push_back(t1_us);
             appended_beam.push_back(g == beam_gid ? 1 : 0);
@@ -3734,6 +3758,8 @@ void MultiAlgBlobClustering::fill_bee_flashes(const WireCell::Clus::Facade::Grou
     if (have_time1) m_bee_flash.set_t1(appended_t1);
     // Attach the in-beam label only when a window is configured (doc pdvd/119).
     if (label_beam) m_bee_flash.set_beam(appended_beam);
+    // Attach each matched cluster's anode only when asked (doc pdvd/119 sec 8).
+    if (m_bee_flash_cluster_anodes) m_bee_flash.set_cluster_anodes(appended_anodes);
 }
 
 struct Perf {
