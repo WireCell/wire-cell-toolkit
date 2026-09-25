@@ -85,6 +85,13 @@ BlobShadow::Shadows BlobShadow::shadow_list(const cluster_graph_t& cgraph, char 
 {
     BlobShadow::Shadows shadows; // will return
     shadows.stype = leaf_code;
+    // The (blob pair, layer) -> edge index map that merges the wires a pair shares.  Both
+    // blobs of a pair are neighbours of the SAME slice vertex below and a blob belongs to
+    // one slice, so a key can only recur inside one slice's loop: the map is cleared per
+    // slice instead of accumulating over the frame.  Same edges in the same first-encounter
+    // order with the same beg/end -- byte-identical -- but the live size is the largest
+    // slice's pair count instead of the sum over all slices (11.5 GB of 13.9 GB in use on a
+    // 628 k-blob FD-HD shower anode, wcp-porting-img/wcfm/docs/08 sec 3, 2026-09-25).
     layer_edge_map_t layer_edges;
 
     // Loop over blobs, to load up output nodes, old->new map.
@@ -101,6 +108,8 @@ BlobShadow::Shadows BlobShadow::shadow_list(const cluster_graph_t& cgraph, char 
         if (cgraph[svtx].code() != 's') {
             continue;
         }
+
+        layer_edges.clear();    // keys are slice-local (see above)
 
         // Keep track of every blob in a slice from whence we came to a leaf.
         std::unordered_map<cluster_vertex_t, std::vector<cluster_vertex_t>> leaf2blob;
