@@ -367,6 +367,20 @@ bool Img::BlobDepoFill::operator()(const input_tuple_type& intup,
                         const double w1 = std::max(wlo, depo_min);
                         const double w2 = std::min(whi, depo_max);
 
+                        // No overlap between the blob's extent along the wire
+                        // [wlo, whi] and the depo's +-nsigma window: the blob
+                        // holds none of this depo.  gbounds() swaps inverted
+                        // bounds, so without this test every blob elsewhere on
+                        // the same primary wire in the slice received the
+                        // Gaussian mass between the window edge and the blob,
+                        // 0.5*erfc(nsigma/sqrt2) ~ 1.3e-3 per (depo, wire) at
+                        // nsigma 3 -- tens of electrons in cells hundreds of cm
+                        // from the track, in primary-wire columns
+                        // (wcp-porting-img/wcfm/docs/05 sec 8-9, 2026-09-25).
+                        if (w1 >= w2) {
+                            continue;
+                        }
+
                         const double w_weight = gbounds(w1,w2,depo_center, idepo->extent_tran());
                         const double dq = sd_weight * dw_weight * w_weight * std::abs(idepo->charge());
                         auto& bv = blob_value[bdesc];
