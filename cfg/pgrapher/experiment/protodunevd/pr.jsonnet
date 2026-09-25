@@ -76,6 +76,16 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
               // partition knobs are FILTERED from tcn_knobs below, so the
               // production PR partition is reproduced without a second copy.
               stm_michel_knobs={},
+              // doc pdvd/120: the beam-particle PR stage (check_beam_particle):
+              // its knob bag (PR-partition keys + the stage's own switches; {}
+              // => C++ defaults) and the nominal beam entry / direction /
+              // acceptance radius (null => the C++ defaults documented in
+              // CheckBeamParticle::default_configuration()).  All inert unless
+              // 'check_beam_particle' is in pipeline_names.
+              beam_pr_knobs={},
+              beam_entry_point_cm=null,
+              beam_dir=null,
+              beam_entry_max_dist_cm=null,
               // doc pdvd/53: the SURVEY.  Fit every same-bundle cluster within
               // stm_survey_radius_cm of the STM stop (not just the 35 cm the
               // capture-gamma stage reaches), give every fitted-but-unclaimed
@@ -1836,6 +1846,28 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
                     [if stm_survey then 'survey_radius_cm']: stm_survey_radius_cm,
                     [if stm_survey then 'survey_max_len_cm']: stm_survey_max_len_cm,
                 } + stm_michel_knobs),
+            // doc pdvd/120: the beam-particle PR stage.  Same fitter config,
+            // particle dataset and recombination model as tagger_check_neutrino
+            // (pdvd_recomb, NOT the STM+Michel calibrated one), the same
+            // PR-partition knob subset (stm_michel_partition = the keys both
+            // stages read by tagger_check_neutrino's names), and the beam
+            // window the whole PR tail shares (beam_window, i.e. the
+            // beam_window_us TLA after the wct-pr-perevt trigger arithmetic).
+            check_beam_particle: cm.check_beam_particle(
+                trackfitting_config_file=trackfitting_config_file,
+                particle_dataset=wc.tn(particle_dataset),
+                recombination_model=wc.tn(pdvd_recomb),
+                perf=true,
+                mip_dqdx=mip_dqdx,
+                mip_dqdx_median=mip_dqdx_median,
+                fiducial=(if neutrino_consistent_fv then wc.tn(pdvd_pr_fv) else null),
+                fv_tolerance=(if neutrino_consistent_fv then pdvd_pr_fv_margins else []),
+                beam_window_low=beam_window[0],
+                beam_window_high=beam_window[1],
+                beam_entry_point_cm=beam_entry_point_cm,
+                beam_dir=beam_dir,
+                beam_entry_max_dist_cm=beam_entry_max_dist_cm,
+                knobs=stm_michel_partition + beam_pr_knobs),
             // STM-stage Magnify-tracking ROOT dump (doc sbnd_xin/docs/40): reads
             // the stm_fit/stm_pass cluster PCs and the "stm" TrackFitting slot,
             // writes tracking-stm.root (T_rec_charge/T_proj_data/T_bad_ch/Trun)
@@ -2167,6 +2199,7 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
         local tagger_uses = (if std.member(pipeline_names, 'tagger_check_stm')
                              || std.member(pipeline_names, 'tagger_check_neutrino')
                              || std.member(pipeline_names, 'check_stm_michel')   // doc pdvd/48
+                             || std.member(pipeline_names, 'check_beam_particle')   // doc pdvd/120
                              then [pdvd_recomb] + extra_uses else [])
                             // doc pdhd/16: check_stm_michel's own calibrated
                             // model.  Only when the knob is on AND the component
@@ -2190,6 +2223,10 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
                                // under the same stm_consistent_fv switch.
                                || (stm_consistent_fv
                                    && std.member(pipeline_names, 'check_stm_michel'))
+                               // doc pdvd/120: the beam-particle stage names pdvd_pr_fv
+                               // under the neutrino stage's consistent-FV switch.
+                               || (neutrino_consistent_fv
+                                   && std.member(pipeline_names, 'check_beam_particle'))
                                then pdvd_pr_fv_uses else []),
         local bee_zip_path = evt_out_prefix + 'mabc-pr.zip',
         // doc pdvd/48: the PR-tail Bee layers (track_fit / shower_track /
@@ -2200,8 +2237,15 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
         // pipeline_names both locals reduce to the legacy values => the
         // production (-stm) compiled config is byte-identical.
         local michel_on = std.member(pipeline_names, 'check_stm_michel'),
-        local pr_tail_on = std.member(pipeline_names, 'tagger_check_neutrino') || michel_on,
-        local pr_visitor = if michel_on then 'CheckSTM_Michel:pr' else 'TaggerCheckNeutrino:pr',
+        // doc pdvd/120: a third publisher, the beam-particle stage.  It wins
+        // when both it and check_stm_michel are named (a beam pipeline has no
+        // STM stage, so this never arises in the shipped modes); with neither
+        // the locals reduce to the legacy values exactly as before.
+        local beam_on = std.member(pipeline_names, 'check_beam_particle'),
+        local pr_tail_on = std.member(pipeline_names, 'tagger_check_neutrino') || michel_on || beam_on,
+        local pr_visitor = if beam_on then 'CheckBeamParticle:pr'
+                           else if michel_on then 'CheckSTM_Michel:pr'
+                           else 'TaggerCheckNeutrino:pr',
         local mabc = g.pnode({
             type: 'MultiAlgBlobClustering',
             name: 'clus_pr',

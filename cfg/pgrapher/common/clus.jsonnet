@@ -420,6 +420,52 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
               + knobs,
         },
 
+        // doc pdvd/120: CheckBeamParticle -- the neutrino PR chain run on the
+        // BEAM-flash-matched bundle only, with the main vertex at the beam
+        // particle's ENTRY point (the bundle cluster closest to the nominal
+        // entry, its axis end nearer that entry, snapped onto the PR graph),
+        // no DL vertex and no taggers.  Publishes the fitter/graph exactly like
+        // tagger_check_neutrino (the unnamed slot + "nu0"), so tracking_visitor /
+        // tagger_output (T_kine) / pr_display / the Bee PR layers read it
+        // unchanged with visitor 'CheckBeamParticle:<prefix>'.
+        // beam_window_low/high: internal units on cluster_t0 (the RAW matched
+        // flash time); C++ default 0/0 = the gate is OFF and the stage selects
+        // NOTHING (it never falls back to every bundle).  beam_entry_point_cm
+        // [x,y,z] cm and beam_dir [x,y,z] (travel sense): C++ defaults are the
+        // doc pdvd/120 sec 1 values; beam_entry_max_dist_cm (C++ 50).  `knobs`
+        // carries the PR-partition keys (CheckBeamParticle.cxx
+        // pattern_knob_keys, the same names as tagger_check_neutrino) and the
+        // stage's own switches (improve_entry_vertex, entry_fail_fallback_geo,
+        // ...; C++ defaults in default_configuration()).  Keys omitted => C++
+        // default.  Only active when named in pipeline_names => absent from
+        // every other compiled config (byte-identical).
+        check_beam_particle(name="", trackfitting_config_file="", particle_dataset="", recombination_model="",
+                            fiducial=null, fv_tolerance=[],
+                            mip_dqdx=null, mip_dqdx_median=null, perf=false,
+                            beam_window_low=null, beam_window_high=null,
+                            beam_entry_point_cm=null, beam_dir=null, beam_entry_max_dist_cm=null,
+                            knobs={}) :: {
+            type: "CheckBeamParticle",
+            name: prefix + name,
+            data: {
+                grouping: "live",
+                trackfitting_config_file: trackfitting_config_file,
+                particle_dataset: particle_dataset,
+                recombination_model: recombination_model,
+            } + dv_cfg + pcts_cfg
+              + (if perf then { perf: true } else {})
+              + (if mip_dqdx != null then { mip_dqdx: mip_dqdx } else {})
+              + (if mip_dqdx_median != null then { mip_dqdx_median: mip_dqdx_median } else {})
+              + (if fiducial != null then { fiducial: fiducial } else {})
+              + (if std.length(fv_tolerance) > 0 then { fv_tolerance: fv_tolerance } else {})
+              + (if beam_window_low != null then { beam_window_low: beam_window_low } else {})
+              + (if beam_window_high != null then { beam_window_high: beam_window_high } else {})
+              + (if beam_entry_point_cm != null then { beam_entry_point_cm: beam_entry_point_cm } else {})
+              + (if beam_dir != null then { beam_dir: beam_dir } else {})
+              + (if beam_entry_max_dist_cm != null then { beam_entry_max_dist_cm: beam_entry_max_dist_cm } else {})
+              + knobs,
+        },
+
         // Through-going-muon tagger (port of prototype check_tgm).  fiducial
         // names the IFiducial for the inside/outside-FV tests (e.g. a
         // BoxFiducial spanning ALL TPCs so cathode crossers are not exiters);

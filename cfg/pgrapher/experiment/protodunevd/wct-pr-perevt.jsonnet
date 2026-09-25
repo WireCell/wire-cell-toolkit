@@ -1791,6 +1791,41 @@ function(
     // byte-identical to the pre-doc-56 one.  Inert when beam_window_us is empty.
     // Runner flag: -no-bwonly.
     beam_window_only = true,
+    // doc pdvd/120: the beam-particle PR stage (pipeline name
+    // 'check_beam_particle'; runner mode run_pr_evt.sh -beam).  The per-event
+    // beam window is derived HERE from the light stage's trigger metadata --
+    // beam_trigger_us is the CTB trigger on the RAW flash-time axis, the axis
+    // cluster_t0 lives on, so NO side trigger offset is added (the Bee op_beam
+    // label in wct-clustering.jsonnet adds one because op_t is offset; do not
+    // copy that arithmetic here).  When beam_trigger_us is given and
+    // beam_tc_type is a beam trigger, beam_window_eff_us below REPLACES
+    // beam_window_us for every consumer of the window (steiner, the taggers,
+    // protect_bundle, tagger_check_neutrino and check_beam_particle), so only
+    // the beam bundle gets a Steiner graph.  All null (the default) =>
+    // beam_window_eff_us == beam_window_us => every existing compiled config is
+    // byte-identical.  The window itself is doc 119's [-1.5, -0.3] us about
+    // the trigger (the beam flash sits at trigger - 0.90 +- 0.05 us).
+    beam_trigger_us = null,
+    beam_tc_type = null,
+    beam_tc_types = [14, 15, 20, 21, 22],   // CTB beam trigger types (trgdataformats; doc 119 sec 1)
+    beam_window_rel_us = [-1.5, -0.3],
+    // The nominal beam entry [x,y,z] cm (detector frame, T0-corrected x), the
+    // travel direction [x,y,z], and the acceptance radius (cm) around the entry
+    // for the main cluster's axis end; null => the C++ defaults (doc pdvd/120
+    // sec 1: entry (110, 159, 0.6) from the run-39305 beam-matched tracks,
+    // direction (-0.095, -0.704, 0.704) from the GDML beam plug, 50 cm).
+    beam_entry_point_cm = null,
+    beam_dir = null,
+    beam_entry_max_dist_cm = null,
+    // Knob bag for check_beam_particle (its own switches + PR-partition keys;
+    // C++ defaults in CheckBeamParticle::default_configuration()).
+    // PDVD DEFAULT: min_main_length_cm 10 (C++ 0) -- the main cluster is the
+    // bundle member closest to the nominal entry, and on 039305/317673 that
+    // rule alone picked a 2.2 cm fragment 27.8 cm from the entry over the
+    // 405 cm beam track 34.7 cm away (doc pdvd/120 sec 5.2); a length floor
+    // keeps fragments out of the contest.  Reachable only through the beam
+    // stage, so every other compiled config is unchanged.
+    beam_pr_knobs = { min_main_length_cm: 10.0 },
     // nu_skip_cosmic / nu_skip_cosmic_bundle: TaggerCheckNeutrino refuses to run
     // neutrino PR on an in-window main already convicted as cosmic -- per-main
     // (TGM/STM/lm_flag) and, lifted to the whole flash bundle, per-bundle.
@@ -4524,6 +4559,13 @@ function(
         [if dl_vtx_cut != null then 'dl_vtx_cut']: dl_vtx_cut,
     };
 
+    // doc pdvd/120: the effective beam window (see the beam_trigger_us TLA).
+    local beam_label = beam_trigger_us != null && beam_tc_type != null
+                       && std.length(std.find(beam_tc_type, beam_tc_types)) > 0;
+    local beam_window_eff_us = if beam_label
+                               then [beam_trigger_us + beam_window_rel_us[0], beam_trigger_us + beam_window_rel_us[1]]
+                               else beam_window_us;
+
     local pr = clus_maker.pr(anodes, dump=true,
                              nticks=readout_window_ticks,
                              flag_mains_min_length=flag_mains_min_cm * wc.cm,
@@ -4549,8 +4591,12 @@ function(
                              dl_vtx_min_accept_score=dl_vtx_min_accept_score,
                              dl_vtx_top_k=dl_vtx_top_k,
                              dl_vtx_rerank=dl_vtx_rerank,
-                             beam_window=[t * wc.us for t in beam_window_us],
+                             beam_window=[t * wc.us for t in beam_window_eff_us],   // doc pdvd/120: == beam_window_us unless a beam trigger is given
                              beam_window_only=beam_window_only,
+                             beam_pr_knobs=beam_pr_knobs,   // doc pdvd/120
+                             beam_entry_point_cm=beam_entry_point_cm,
+                             beam_dir=beam_dir,
+                             beam_entry_max_dist_cm=beam_entry_max_dist_cm,
                              tgm_neutrino_candidate=tgm_neutrino_candidate,
                              tgm_chord_charge=tgm_chord_charge,
                              tgm_chord_mode=tgm_chord_mode,

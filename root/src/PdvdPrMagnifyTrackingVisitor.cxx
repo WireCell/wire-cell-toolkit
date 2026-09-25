@@ -362,6 +362,9 @@ void Root::PdvdPrMagnifyTrackingVisitor::write_stm_michel_trees(TFile* output_tf
     // doc pdvd/81: the Michel / STM 2-D cell table, present only when
     // CheckSTM_Michel's michel_q2d_cells is on (no carrier => no tree).
     write_pc_tree(output_tf, grouping, "stm_michel_2d", "T_stm_michel_2d");
+    // doc pdvd/120: the beam-particle stage's one-row record (CheckBeamParticle),
+    // present only when that stage ran and selected a bundle (no carrier => no tree).
+    write_pc_tree(output_tf, grouping, "beam_particle", "T_beam_particle");
 }
 
 void Root::PdvdPrMagnifyTrackingVisitor::write_trun(TFile* output_tf) const
