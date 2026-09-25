@@ -386,11 +386,19 @@ local clus_maker = clus(output_dir=output_dir, runNo=run, subRunNo=subrun, event
 // With a subset anode_indices only non-empty groups are built and the final
 // merge multiplicity shrinks to match.
 local group_defs = [
-    { name: "group0123", anodes: [a for a in anodes if a.data.ident < 4] },
-    { name: "group4567", anodes: [a for a in anodes if a.data.ident >= 4] },
+    { name: "group0123", side: "bottom", anodes: [a for a in anodes if a.data.ident < 4] },
+    { name: "group4567", side: "top", anodes: [a for a in anodes if a.data.ident >= 4] },
 ];
 local groups = [gd for gd in group_defs if std.length(gd.anodes) > 0];
 local ngroups = std.length(groups);
+// Per-input (joint QLMatching port order = groups order) side lists.  With both
+// sides built these are exactly the legacy [bottom, top] literals (compiled
+// config byte-identical); a top-only subset (e.g. the top-drift-only run 39305,
+// doc pdvd/118) now gives its single input the TOP offset / speed / PD list
+// instead of the bottom ones it silently inherited by position.
+local side_trigger_offset = { bottom: trigger_offset_bot, top: trigger_offset_top };
+local side_drift_speed = { bottom: drift_speed_bot, top: drift_speed_top };
+local group_sides = [gd.side for gd in groups];
 
 // One drift-side pipe: per-anode sources -> per_apa (stages 1+2) -> per_group (stage 3).
 local group_pipe(gd) =
@@ -445,7 +453,8 @@ local clus_all_tpc = if do_qlmatch
 local qlm = import 'pgrapher/experiment/protodunevd/qlmatching.jsonnet';
 local qlm_maker = qlm(params_w, trigger_offset_bot, readout_window_ticks, light_model,
                       ql_require_containment, ql_flash_minpe,
-                      trigger_offsets=[trigger_offset_bot, trigger_offset_top],
+                      trigger_offsets=[side_trigger_offset[s] for s in group_sides],
+                      anode_pd_sides=group_sides,
                       // Single recalibrated velocity => scalar override (the
                       // calib dump's d["drift_speed"] then carries it for the
                       // viewers/scripts); genuinely split values => per-input
@@ -457,7 +466,7 @@ local qlm_maker = qlm(params_w, trigger_offset_bot, readout_window_ticks, light_
                                       || drift_speed_top == null
                                       || drift_speed_bot == drift_speed_top
                                    then null
-                                   else [drift_speed_bot, drift_speed_top],
+                                   else [side_drift_speed[s] for s in group_sides],
                       // null => qlmatching omits the key => C++ default +1.2 cm.
                       cathode_ext1=if ql_cathode_ext1_cm == null then null
                                    else ql_cathode_ext1_cm * wc.cm,

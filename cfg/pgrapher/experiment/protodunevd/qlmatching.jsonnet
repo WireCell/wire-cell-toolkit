@@ -56,6 +56,11 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=10000,
          // PDVD driver forwards its ql_qtol TLA (doc pdvd/100 sec 8).
          qtol=0.094,
          trigger_offsets=null, drift_speed=null, drift_speeds=null,
+         // Drift side ('bottom'/'top') of each joint input, in port order; sets
+         // anode_pd_channels per input.  null => the legacy [bottom, top]
+         // literal (byte-identical); wct-clustering.jsonnet passes the sides of
+         // the groups it actually built (doc pdvd/118: top-only runs).
+         anode_pd_sides=null,
          cathode_ext1=null, anode_ext1_margin=null, use_saturation_flag=false, sat_flag_ignore_cathode=false,
          sat_skip_round2=false, lasso_weight_unrailed=false, ks_sat_tol=null,
          saturation_mask_fit=true, chi2_sat_inflate=null,
@@ -366,7 +371,10 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=10000,
             // byte-identical pre-study config.
             pd_wall_channels_ylo: if wall_flags then wall_ylo_channels else [],
             pd_wall_channels_yhi: if wall_flags then wall_yhi_channels else [],
-            anode_pd_channels: [bottom_pmt_channels, []],  // [bottom volume, top volume]
+            anode_pd_channels: if anode_pd_sides == null
+                               then [bottom_pmt_channels, []]  // [bottom volume, top volume]
+                               else [if s == 'bottom' then bottom_pmt_channels else []
+                                     for s in anode_pd_sides],
 
             // Dead-PD self-check: per-event dynamic auto-mask on top of the
             // static ch_mask.  Same-type neighbour pool (XA vs PMT efficiencies
