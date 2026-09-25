@@ -209,6 +209,7 @@ void QLMatching::configure(const WireCell::Configuration& cfg)
     m_xtpc_sc1_light_gate   = get(cfg, "xtpc_sc1_light_gate",   m_xtpc_sc1_light_gate);
     m_xtpc_sc1_ks_max       = get(cfg, "xtpc_sc1_ks_max",       m_xtpc_sc1_ks_max);
     m_xtpc_sc1_c2n_max      = get(cfg, "xtpc_sc1_c2n_max",      m_xtpc_sc1_c2n_max);
+    m_xtpc_sc1_overpred_max = get(cfg, "xtpc_sc1_overpred_max", m_xtpc_sc1_overpred_max);
     m_xtpc_cathode_ks_max   = get(cfg, "xtpc_cathode_ks_max",   m_xtpc_cathode_ks_max);
     m_xtpc_pin_confirms_rescue = get(cfg, "xtpc_pin_confirms_rescue", m_xtpc_pin_confirms_rescue);
     m_cathode_rescue_solo_ks   = get(cfg, "cathode_rescue_solo_ks",   m_cathode_rescue_solo_ks);
@@ -230,10 +231,11 @@ void QLMatching::configure(const WireCell::Configuration& cfg)
     if (m_xtpc_pin_min_strength > 0 || m_xtpc_sc1_light_gate ||
         m_xtpc_cathode_ks_max > 0 || m_postcull_unflagged) {
         log->debug("quality gates on: pin_min_strength={} sc1_light_gate={} "
-                   "(ks<={} c2n<={}) cathode_ks_max={} postcull_unflagged={} "
+                   "(ks<={} c2n<={} overpred<={}) cathode_ks_max={} postcull_unflagged={} "
                    "(ks<={} c2n<={})",
                    m_xtpc_pin_min_strength, m_xtpc_sc1_light_gate,
-                   m_xtpc_sc1_ks_max, m_xtpc_sc1_c2n_max, m_xtpc_cathode_ks_max,
+                   m_xtpc_sc1_ks_max, m_xtpc_sc1_c2n_max, m_xtpc_sc1_overpred_max,
+                   m_xtpc_cathode_ks_max,
                    m_postcull_unflagged, m_postcull_ks_max, m_postcull_c2n_max);
     }
 
@@ -779,6 +781,7 @@ WireCell::Configuration QLMatching::default_configuration() const
     cfg["xtpc_sc1_light_gate"]   = m_xtpc_sc1_light_gate;
     cfg["xtpc_sc1_ks_max"]       = m_xtpc_sc1_ks_max;
     cfg["xtpc_sc1_c2n_max"]      = m_xtpc_sc1_c2n_max;
+    cfg["xtpc_sc1_overpred_max"] = m_xtpc_sc1_overpred_max;
     cfg["xtpc_cathode_ks_max"]   = m_xtpc_cathode_ks_max;
     cfg["xtpc_pin_confirms_rescue"] = m_xtpc_pin_confirms_rescue;
     cfg["cathode_rescue_solo_ks"]  = m_cathode_rescue_solo_ks;
@@ -4062,6 +4065,7 @@ void QLMatching::dump_calib(const std::vector<ApaRun>& runs)
     qp["xtpc_sc1_light_gate"]   = m_xtpc_sc1_light_gate;
     qp["xtpc_sc1_ks_max"]       = m_xtpc_sc1_ks_max;
     qp["xtpc_sc1_c2n_max"]      = m_xtpc_sc1_c2n_max;
+    if (m_xtpc_sc1_overpred_max > 0) qp["xtpc_sc1_overpred_max"] = m_xtpc_sc1_overpred_max;   // key absent when off => dump bit-identical
     qp["xtpc_cathode_ks_max"]   = m_xtpc_cathode_ks_max;
     qp["postcull_unflagged"]    = m_postcull_unflagged;
     qp["postcull_ks_max"]       = m_postcull_ks_max;
@@ -4772,7 +4776,13 @@ void QLMatching::cull_cross_tpc(std::vector<ApaRun>& runs)
             auto sc1_light_pass = [this](const TimingTPCBundle* b) {
                 if (!m_xtpc_sc1_light_gate) return true;
                 const double c2n = b->get_ndf() > 0 ? b->get_chi2() / b->get_ndf() : 1e9;
-                return b->get_ks_dis() <= m_xtpc_sc1_ks_max && c2n <= m_xtpc_sc1_c2n_max;
+                if (!(b->get_ks_dis() <= m_xtpc_sc1_ks_max && c2n <= m_xtpc_sc1_c2n_max)) return false;
+                // Over-prediction ceiling (doc sbnd_xin/123 sec 18, evt 59003); 0 => not tested.
+                if (m_xtpc_sc1_overpred_max > 0 && b->get_flash()) {
+                    const double meas = std::max(b->get_flash()->get_total_PE(), 1.0);
+                    if (b->get_total_pred_light() > m_xtpc_sc1_overpred_max * meas) return false;
+                }
+                return true;
             };
             if (sc1_light_pass(cands[i].mc.b)) {
                 cands[i].mc.b->set_flag_xtpc_consistent(true);

@@ -1157,6 +1157,15 @@ namespace WireCell::Match {
         bool   m_xtpc_sc1_light_gate{false};
         double m_xtpc_sc1_ks_max{0.3};
         double m_xtpc_sc1_c2n_max{50.0};
+        // Over-prediction ceiling for the same gate (doc sbnd_xin/123 sec 18,
+        // SBND evt 59003): a cathode-side crosser half at a dim coincident
+        // flash can pass ks/chi2 (ks 0.13, chi2/ndf 14.6) while predicting 36x
+        // the measured light (pred 5966 PE vs meas 164 PE) -- the prefilter's
+        // over-prediction cut exempts at_x_boundary bundles, so it never saw
+        // it.  > 0 (with the gate on): the flags are denied when
+        // total_pred_light > overpred_max * max(flash total PE, 1).  0 (default)
+        // => not tested, bit-identical.
+        double m_xtpc_sc1_overpred_max{0.0};
         // Cathode-rescue ks ceiling: purge_unconfirmed_cathode_rescue keeps a
         // provisional overshoot bundle on scenario-1 confirmation alone; scan
         // shows those survivors at 69% phantom (ks p50 0.435 vs agrees 0.20).
