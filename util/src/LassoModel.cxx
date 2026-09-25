@@ -138,12 +138,12 @@ std::vector<size_t> WireCell::LassoModel::Fit()
         const long col_reserve =
             dense_X ? (long)(nbeta / 2)
                     : std::max(8L, std::min((long)nbeta, (long)(4 * xnnz / std::max(nbeta, 1))));
-        XdX.reserve(Eigen::VectorXi::Constant(nbeta, (int)col_reserve));
+        if (dense_X) XdX.reserve(Eigen::VectorXi::Constant(nbeta, (int)col_reserve));   // sparse X: sized exactly below
         typedef Eigen::Triplet<double> T;
         std::vector<T> tripletList;
         // Worst case (dense X) is nbeta diagonal + 2 mirrored per off-diagonal pair =
         // nbeta^2 triplets; for sparse X size to ~2 per XdX nonzero (mirrored).
-        tripletList.reserve(dense_X ? nb2 : (size_t)(2L * nbeta * col_reserve + nbeta));
+        if (dense_X) tripletList.reserve(nb2);   // sparse X: no triplets (see below)
         // XdX is symmetric and dot() is element-wise commutative (identical
         // multiply/accumulate sequence under operand swap), so compute each
         // off-diagonal dot once and mirror it -- bit-identical to the full
@@ -156,16 +156,14 @@ std::vector<size_t> WireCell::LassoModel::Fit()
         // UNCHANGED dense dot on just those pairs -- identical triplets, identical
         // XdX, at a fraction of the nbeta^2 * nrows cost (the dominant hd-max
         // imaging term).  Dense X keeps the plain double loop.
-        std::vector<int> jstamp(dense_X ? 0 : nbeta, -1);
-        std::vector<int> jlist;
-        for (int i = 0; i < nbeta; i++) {
-            ydX(i) = y.dot(X.col(i));
-            {
-                double value = X.col(i).dot(X.col(i));
-                if (value != 0)
-                    tripletList.push_back(T(i,i,value));
-            }
-            if (dense_X) {
+        if (dense_X) {
+            for (int i = 0; i < nbeta; i++) {
+                ydX(i) = y.dot(X.col(i));
+                {
+                    double value = X.col(i).dot(X.col(i));
+                    if (value != 0)
+                        tripletList.push_back(T(i,i,value));
+                }
                 for (int j = i + 1; j < nbeta; j++) {
                     double value = X.col(i).dot(X.col(j));
                     if (value != 0) {
@@ -173,22 +171,71 @@ std::vector<size_t> WireCell::LassoModel::Fit()
                         tripletList.push_back(T(j,i,value));
                     }
                 }
-                continue;
             }
-            jlist.clear();
-            for (int r : col_rows[i])
-                for (int j : row_cols[r])
-                    if (j > i && jstamp[j] != i) { jstamp[j] = i; jlist.push_back(j); }
-            std::sort(jlist.begin(), jlist.end());
-            for (int j : jlist) {
-                double value = X.col(i).dot(X.col(j));
-                if (value != 0) {
-                    tripletList.push_back(T(i,j,value));
-                    tripletList.push_back(T(j,i,value));
+            XdX.setFromTriplets(tripletList.begin(), tripletList.end());
+        }
+        else {
+            // Sparse X: assemble XdX directly in compressed-column order instead of
+            // triplets + setFromTriplets() + a copy.  The support-overlap enumeration
+            // below emits, for each i in ascending order, the diagonal (i,i) and then the
+            // pairs (i,j), j > i ascending.  Scattered as (row i, col j) and (row j, col
+            // i), every column therefore receives its rows in ascending order: rows i < c
+            // from the earlier outer iterations, then c, then j > c from its own sorted
+            // list -- exactly the row-sorted, duplicate-free matrix setFromTriplets()
+            // built, entry for entry and double for double, so the coordinate-descent
+            // sweep reads the same (row, value) sequence per column.  Byte-identical fit;
+            // no triplet list, no transposed temporary, no sort inside Eigen.  On the
+            // FD-HD 4-wire sub-blob tier (components of ~13 k blobs x 12 measures, a
+            // near-dense Gram) the assembly was 27 % of the imaging job and a 3.3 GB
+            // transient (wcp-porting-img/wcfm/docs/08 sec 3, 2026-09-25).
+            struct pair_t { int i, j; double v; };
+            std::vector<pair_t> pairs;
+            pairs.reserve((size_t)nbeta * (size_t)col_reserve);
+            std::vector<double> diag(nbeta, 0.0);
+            std::vector<char> hasdiag(nbeta, 0);
+            Eigen::VectorXi colcount = Eigen::VectorXi::Zero(nbeta);
+            std::vector<int> jstamp(nbeta, -1);
+            std::vector<int> jlist;
+            for (int i = 0; i < nbeta; i++) {
+                ydX(i) = y.dot(X.col(i));
+                {
+                    double value = X.col(i).dot(X.col(i));
+                    if (value != 0) {
+                        diag[i] = value;
+                        hasdiag[i] = 1;
+                        ++colcount(i);
+                    }
+                }
+                jlist.clear();
+                for (int r : col_rows[i])
+                    for (int j : row_cols[r])
+                        if (j > i && jstamp[j] != i) { jstamp[j] = i; jlist.push_back(j); }
+                std::sort(jlist.begin(), jlist.end());
+                for (int j : jlist) {
+                    double value = X.col(i).dot(X.col(j));
+                    if (value != 0) {
+                        pairs.push_back({i, j, value});
+                        ++colcount(i);
+                        ++colcount(j);
+                    }
                 }
             }
+            XdX.resize(nbeta, nbeta);
+            XdX.reserve(colcount);      // uncompressed mode, exact per-column capacity
+            size_t ip = 0;
+            const size_t npairs = pairs.size();
+            for (int i = 0; i < nbeta; i++) {
+                if (hasdiag[i]) {
+                    XdX.insertBackUncompressed(i, i) = diag[i];
+                }
+                for (; ip < npairs && pairs[ip].i == i; ++ip) {
+                    const auto& p = pairs[ip];
+                    XdX.insertBackUncompressed(i, p.j) = p.v;   // row i in column j
+                    XdX.insertBackUncompressed(p.j, i) = p.v;   // row j in column i
+                }
+            }
+            XdX.makeCompressed();
         }
-        XdX.setFromTriplets(tripletList.begin(), tripletList.end());
     }
     }  // end dense Gram build (the sparse path is handled above)
     // std::cout << "Lasso end inner product. sum_non_zeros " << sum_non_zeros << " XdX.nonZeros() " << XdX.nonZeros()
