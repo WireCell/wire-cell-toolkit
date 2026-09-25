@@ -225,6 +225,7 @@ local wc = import 'wirecell.jsonnet';
     // charge time base).  Measured per event from the rawwf trigoff tree by
     // run_light_evt.sh and stamped verbatim into the archive metadata for
     // run_clus_evt.sh / QLMatching trigger_offsets.
+    // trigger_us / tc_type: see metadata_extra below (doc pdvd/119).
     // tail_merge: absorb the split-off LAr slow-tail flash (pdvd doc 23 §7d:
     // one physical flash cut at the fast/slow boundary by the 1 us binning;
     // late member = wide cathode-XA tail hits on the seed's own lit PDs).
@@ -234,6 +235,7 @@ local wc = import 'wirecell.jsonnet';
     // width 1.0 us, PE-dominance fraction 0.7, PE-ratio cap 1.0.
     opflash_finder(name='', offset_us=0, min_fired_pds=2, min_total_pe=10.0,
                    offset_bot_us=null, offset_top_us=null,
+                   trigger_us=null, tc_type=null,
                    tail_merge=false, tail_window_us=3.0, tail_min_width_us=1.0,
                    tail_pe_frac=0.7, tail_pe_ratio=1.0)::  g.pnode({
         type: 'OpFlashFinder',
@@ -253,10 +255,19 @@ local wc = import 'wirecell.jsonnet';
             [if tail_merge then 'tail_min_width_us']: tail_min_width_us,
             [if tail_merge then 'tail_pe_frac']: tail_pe_frac,
             [if tail_merge then 'tail_pe_ratio']: tail_pe_ratio,
-        } + if offset_bot_us == null && offset_top_us == null then {} else {
-            metadata_extra: {
+        } + if offset_bot_us == null && offset_top_us == null
+               && trigger_us == null && tc_type == null then {} else {
+            metadata_extra: (if offset_bot_us == null && offset_top_us == null then {} else {
                 offset_bot_us: offset_bot_us,
                 offset_top_us: offset_top_us,
+            }) + {
+                // doc pdvd/119: the event's trigger on the raw flash axis (us,
+                // rawwf trigoff tc_us - chain light t0) and its trigger-candidate
+                // type, for the per-event in-beam flash label (run_clus_evt.sh ->
+                // wct-clustering beam_trigger_us/beam_tc_type).  null => key
+                // omitted => byte-identical config and archive metadata.
+                [if trigger_us != null then 'trigger_us']: trigger_us,
+                [if tc_type != null then 'tc_type']: tc_type,
             },
         },
     }, nin=1, nout=1),

@@ -227,7 +227,8 @@ namespace WireCell::Bee {
     ///     op_nomatching_cluster_ids:[] }
     /// An unmatched flash is one row with empty cluster_id / op_pes_pred.
     /// Optionally an op_flash_group:[gid] array (via set_groups) ties together
-    /// the rows of one ±80 ns TPC0/TPC1 flash coincidence for joint display.
+    /// the rows of one ±80 ns TPC0/TPC1 flash coincidence for joint display,
+    /// and an op_beam:[0|1] array (via set_beam) labels the in-beam flash.
     class Flashes : public Object {
     public:
         Flashes();
@@ -267,6 +268,13 @@ namespace WireCell::Bee {
         /// (top).  Not written unless this is called, so existing op JSON
         /// (single-clock detectors, e.g. PDHD/SBND) stays bit-identical.
         void set_t1(const std::vector<double>& t1);
+
+        /// Optionally attach a per-flash "op_beam" array (one 0/1 entry per
+        /// appended row, same order): 1 marks the flash the producer labelled
+        /// as the in-beam (beam-trigger) flash.  The Bee viewer's "/" key
+        /// prefers this label over its per-experiment op_t window.  Not written
+        /// unless this is called, so existing op JSON stays bit-identical.
+        void set_beam(const std::vector<int>& beam);
 
         size_t size() const;
         bool empty() const;

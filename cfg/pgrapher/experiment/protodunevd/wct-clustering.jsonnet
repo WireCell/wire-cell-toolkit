@@ -79,6 +79,27 @@ function(
     // Defaults 0.
     trigger_offset_bot_us = 0,
     trigger_offset_top_us = 0,
+    // doc pdvd/119: label the in-beam flash for the Bee "/" key.  The beam
+    // flash sits ~0.9 us before the beam trigger, but the trigger moves on the
+    // Bee op_t axis from event to event, so the window is built per event here:
+    //   op_t window = beam_trigger_us + (input-0 trigger offset) + beam_window_rel_us
+    // using the SAME side_trigger_offset[group_sides[0]] that QLMatching adds to
+    // the displayed flash time (write_opflash_pc, input 0) -- one copy of the
+    // offset, right for two-sided and top-only jobs alike.
+    // beam_trigger_us: trigger time on the raw light (flash) axis, us
+    //   (rawwf trigoff tc_us - chain light t0; opflash metadata trigger_us).
+    // beam_tc_type: the event's trigger-candidate type (metadata tc_type); the
+    //   label is made only for the CTB beam types in beam_tc_types
+    //   (trgdataformats TriggerCandidateData::Type 14 kCTBBeam, 15 ChkvHL,
+    //   20 ChkvHLx, 21 ChkvHxL, 22 ChkvHxLx).
+    // Defaults null => no bee_beam_window_us key => compiled config byte-identical.
+    beam_trigger_us = null,
+    beam_tc_type = null,
+    beam_tc_types = [14, 15, 20, 21, 22],
+    // Relative window (us) around the trigger: the beam flash sits at
+    // -0.90 +- 0.05 us on the flash axis (runs 39252/39305/39349, doc pdvd/119
+    // sec 3), so -0.9 +- 0.6 us; accidental ~1.2 us x 72 flashes/ms ~ 0.09/evt.
+    beam_window_rel_us = [-1.5, -0.3],
     // Post-resample readout-window length (ticks) for the Q/L window-truncation
     // flag.  run_clus_evt.sh reads the real value from the SP frame (10000).
     readout_window_ticks = 10000,
@@ -399,6 +420,15 @@ local ngroups = std.length(groups);
 local side_trigger_offset = { bottom: trigger_offset_bot, top: trigger_offset_top };
 local side_drift_speed = { bottom: drift_speed_bot, top: drift_speed_top };
 local group_sides = [gd.side for gd in groups];
+// doc pdvd/119: per-event in-beam flash window on the Bee op_t axis (us), or
+// null (no label).  op_t = raw flash time + trigger offset of QLMatching input 0.
+local beam_label = beam_trigger_us != null && beam_tc_type != null
+                   && std.length(std.find(beam_tc_type, beam_tc_types)) > 0;
+local op_t_offset_us = side_trigger_offset[group_sides[0]] / wc.us;
+local bee_beam_window_us = if beam_label
+    then [beam_trigger_us + op_t_offset_us + beam_window_rel_us[0],
+          beam_trigger_us + op_t_offset_us + beam_window_rel_us[1]]
+    else null;
 
 // One drift-side pipe: per-anode sources -> per_apa (stages 1+2) -> per_group (stage 3).
 local group_pipe(gd) =
@@ -431,6 +461,7 @@ local cc_drift_cut = if cc_drift_cut_cm == null then 8*wc.cm else cc_drift_cut_c
 local cc_dis_cut = if cc_dis_cut_cm == null then 5*wc.cm else cc_dis_cut_cm * wc.cm;
 local clus_all_tpc = if do_qlmatch
     then clus_maker.all_tpc(anodes, premerged=true, save_opflash=save_opflash,
+                            bee_beam_window_us=bee_beam_window_us,
                             cc_tip_touch_cut=cc_tip_touch_cut, cc_tip_touch_angle_cut=cc_tip_touch_angle_cut,
                             cc_cathode_x_cut=cc_cathode_x_cut, cc_drift_cut=cc_drift_cut, cc_dis_cut=cc_dis_cut,
                             cc_crosser_conn_relax=cc_crosser_conn_relax, cc_crosser_pca_angle=cc_crosser_pca_angle,

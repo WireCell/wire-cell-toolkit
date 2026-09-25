@@ -383,6 +383,13 @@ void Bee::Flashes::set_t1(const std::vector<double>& t1)
     m_data["op_t1"] = jt;
 }
 
+void Bee::Flashes::set_beam(const std::vector<int>& beam)
+{
+    Json::Value jb(Json::arrayValue);
+    for (int b : beam) jb.append(b);
+    m_data["op_beam"] = jb;
+}
+
 size_t Bee::Flashes::size() const
 {
     return m_data["op_t"].size();

@@ -557,6 +557,16 @@ namespace WireCell::Clus {
         // the legacy filter, byte-identical output; 0 shows every genuine
         // match.
         double m_bee_flash_pred_min{100.0};
+        // doc pdvd/119.  Optional [lo, hi] window (microseconds, on the op_t
+        // axis, i.e. the root opflash "time" = input-0 charge clock) inside which
+        // the brightest flash is labelled the in-beam flash: fill_bee_flashes
+        // then writes a per-row "op_beam" 0/1 array that the Bee "/" key prefers
+        // over its per-experiment op_t window.  PDVD computes the window per
+        // event from the beam-trigger time (the beam flash moves on op_t from
+        // event to event).  Empty (key absent) = no op_beam array, op JSON
+        // byte-identical to the pre-knob output.  Display label only: the Q/L
+        // selection is not touched.
+        std::vector<double> m_bee_beam_window_us;
         // When > 0, group the root opflash flashes across both TPC sides by this
         // ±time window (stored as a per-flash "group" array on the root opflash
         // PC, pre-pipeline) so the Bee viewer can show a TPC0/TPC1 coincidence

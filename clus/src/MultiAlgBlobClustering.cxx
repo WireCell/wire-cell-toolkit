@@ -263,6 +263,17 @@ void MultiAlgBlobClustering::configure(const WireCell::Configuration& cfg)
     }
     m_bee_flash_per_flash = get(cfg, "bee_flash_per_flash", m_bee_flash_per_flash);
     m_bee_flash_pred_min = get(cfg, "bee_flash_pred_min", m_bee_flash_pred_min);
+    // doc pdvd/119: optional in-beam flash label window [lo, hi] (us, op_t axis).
+    // Absent => no op_beam array (byte-identical op JSON).
+    m_bee_beam_window_us.clear();
+    if (cfg.isMember("bee_beam_window_us")) {
+        const auto& jw = cfg["bee_beam_window_us"];
+        if (!jw.isArray() || jw.size() != 2 || !(jw[0].asDouble() <= jw[1].asDouble())) {
+            THROW(ValueError() << errmsg{"MultiAlgBlobClustering: bee_beam_window_us must be [lo, hi] with lo <= hi"});
+        }
+        m_bee_beam_window_us = {jw[0].asDouble(), jw[1].asDouble()};
+        log->debug("in-beam flash label window [{}, {}] us on op_t", jw[0].asDouble(), jw[1].asDouble());
+    }
     m_flash_group_window = get(cfg, "flash_group_window", m_flash_group_window);
     m_flash_group_greedy = get(cfg, "flash_group_greedy", m_flash_group_greedy);
 
@@ -3644,6 +3655,31 @@ void MultiAlgBlobClustering::fill_bee_flashes(const WireCell::Clus::Facade::Grou
     // back to the legacy gid encoding gid = anode_ident*kFlashGidStride + idx,
     // so apa = gid / kFlashGidStride (correct only for single-face anodes).
     constexpr int kFlashGidStride = 1000000;
+
+    // doc pdvd/119: the in-beam flash = the brightest flash whose op_t (us)
+    // lies inside the configured window; -1 = none (still emit an all-zero
+    // op_beam so the viewer knows the event was labelled and has no beam flash).
+    const bool label_beam = (m_bee_beam_window_us.size() == 2);
+    int beam_gid = -1;
+    if (label_beam) {
+        double best_pe = -1;
+        for (const int g : flash_order) {
+            const double t_us = flash_time[g] * 1e-3;
+            if (t_us < m_bee_beam_window_us[0] || t_us > m_bee_beam_window_us[1]) continue;
+            double tot = 0;
+            for (const auto& cv : flash_pe[g]) tot += cv.second;
+            if (tot > best_pe) { best_pe = tot; beam_gid = g; }
+        }
+        if (beam_gid >= 0) {
+            log->debug("in-beam flash: gid {} t={:.3f} us PE={:.1f} (window [{}, {}] us)",
+                       beam_gid, flash_time[beam_gid] * 1e-3, best_pe,
+                       m_bee_beam_window_us[0], m_bee_beam_window_us[1]);
+        } else {
+            log->debug("in-beam flash: none in window [{}, {}] us",
+                       m_bee_beam_window_us[0], m_bee_beam_window_us[1]);
+        }
+    }
+    std::vector<int> appended_beam;     // one 0/1 per appended row, same order
     std::vector<int> appended_groups;   // one per appended row, same order
     std::vector<double> appended_t1;    // ditto, input-1-clock time (us)
     for (const int g : flash_order) {
@@ -3673,17 +3709,20 @@ void MultiAlgBlobClustering::fill_bee_flashes(const WireCell::Clus::Facade::Grou
                 m_bee_flash.append(t_us, pes, peTotal, cids, pred_sum, apa);
                 appended_groups.push_back(grp);
                 appended_t1.push_back(t1_us);
+                appended_beam.push_back(g == beam_gid ? 1 : 0);
             } else {
                 for (const auto& cp : mit->second) {
                     m_bee_flash.append(t_us, pes, peTotal, std::vector<int>{cp.first}, cp.second, apa);
                     appended_groups.push_back(grp);
                     appended_t1.push_back(t1_us);
+                    appended_beam.push_back(g == beam_gid ? 1 : 0);
                 }
             }
         } else {
             m_bee_flash.append(t_us, pes, peTotal, std::vector<int>{}, std::vector<double>{}, apa);
             appended_groups.push_back(grp);
             appended_t1.push_back(t1_us);
+            appended_beam.push_back(g == beam_gid ? 1 : 0);
         }
     }
 
@@ -3693,6 +3732,8 @@ void MultiAlgBlobClustering::fill_bee_flashes(const WireCell::Clus::Facade::Grou
     // Attach the per-row input-1-clock time only when the opflash PC carries it
     // (per-input trigger_offsets, PDVD), so other detectors' op JSON is unchanged.
     if (have_time1) m_bee_flash.set_t1(appended_t1);
+    // Attach the in-beam label only when a window is configured (doc pdvd/119).
+    if (label_beam) m_bee_flash.set_beam(appended_beam);
 }
 
 struct Perf {

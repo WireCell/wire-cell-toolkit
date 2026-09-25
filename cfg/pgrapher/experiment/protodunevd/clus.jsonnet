@@ -682,6 +682,10 @@ local clus_all_tpc (
     eventNo = 1,
     save_opflash = false,
     premerged = false,   // skip the input PointTreeMerging (joint QLMatching already merged)
+    // doc pdvd/119: [lo, hi] in MICROSECONDS on the Bee op_t axis; the brightest
+    // flash inside is labelled the in-beam flash (op_beam array, Bee "/" key).
+    // C++ default: no window.  null => key omitted => byte-identical config.
+    bee_beam_window_us = null,
     // Tip-touch relaxation for the cathode-crossing connector (see the
     // cm.cathode_connect call below).  null => the C++ defaults leave the
     // relaxation OFF, so the compiled config is byte-identical when unset.
@@ -828,6 +832,7 @@ local clus_all_tpc (
             // No flash-flash grouping: PDVD has ONE all-PD flash per time (no
             // per-side pair to group).  0 = off (no column).
             flash_group_window: 0,
+            [if bee_beam_window_us != null then 'bee_beam_window_us']: bee_beam_window_us,
             dead_area_version: 2,  // v2 wrapper (tpc=apa) so the dead slab lands on the correct PDVD anode face
             // doc pdvd/39 round 2: see the save_assoc_id argument.  This is the
             // node whose TensorFileSink writes the pctree the PR job reads, so
@@ -928,7 +933,7 @@ local clus_all_tpc (
     per_face(anode, face=0, dump=true) :: clus_per_face(anode, face=face, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo, stepped_center_fallback=stepped_center_fallback),
     per_apa(anode, dump=true, po_fast=false, dg_fast=false) :: clus_per_apa(anode, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo, stepped_center_fallback=stepped_center_fallback, po_fast=po_fast, dg_fast=dg_fast),
     per_group(anodes, group_name, dump=true, dg_fast=false, save_assoc_id=false) :: clus_per_group(anodes, group_name, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo, dg_fast=dg_fast, save_assoc_id=save_assoc_id),
-    all_tpc(anodes, ngroups=2, dump=true, save_opflash=false, premerged=false, cc_tip_touch_cut=null, cc_tip_touch_angle_cut=null, cc_cathode_x_cut=5*wc.cm, cc_drift_cut=8*wc.cm, cc_dis_cut=5*wc.cm, cc_crosser_conn_relax=null, cc_crosser_pca_angle=null, cc_cathode_band_dis=null, bee_img_per_side=false, tensor_outname='', save_assoc_id=false) :: clus_all_tpc(anodes, ngroups=ngroups, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo, save_opflash=save_opflash, premerged=premerged, cc_tip_touch_cut=cc_tip_touch_cut, cc_tip_touch_angle_cut=cc_tip_touch_angle_cut, cc_cathode_x_cut=cc_cathode_x_cut, cc_drift_cut=cc_drift_cut, cc_dis_cut=cc_dis_cut, cc_crosser_conn_relax=cc_crosser_conn_relax, cc_crosser_pca_angle=cc_crosser_pca_angle, cc_cathode_band_dis=cc_cathode_band_dis, bee_img_per_side=bee_img_per_side, tensor_outname=tensor_outname, save_assoc_id=save_assoc_id),
+    all_tpc(anodes, ngroups=2, dump=true, save_opflash=false, premerged=false, cc_tip_touch_cut=null, cc_tip_touch_angle_cut=null, cc_cathode_x_cut=5*wc.cm, cc_drift_cut=8*wc.cm, cc_dis_cut=5*wc.cm, cc_crosser_conn_relax=null, cc_crosser_pca_angle=null, cc_cathode_band_dis=null, bee_img_per_side=false, tensor_outname='', save_assoc_id=false, bee_beam_window_us=null) :: clus_all_tpc(anodes, ngroups=ngroups, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo, save_opflash=save_opflash, premerged=premerged, cc_tip_touch_cut=cc_tip_touch_cut, cc_tip_touch_angle_cut=cc_tip_touch_angle_cut, cc_cathode_x_cut=cc_cathode_x_cut, cc_drift_cut=cc_drift_cut, cc_dis_cut=cc_dis_cut, cc_crosser_conn_relax=cc_crosser_conn_relax, cc_crosser_pca_angle=cc_crosser_pca_angle, cc_cathode_band_dis=cc_cathode_band_dis, bee_img_per_side=bee_img_per_side, tensor_outname=tensor_outname, save_assoc_id=save_assoc_id, bee_beam_window_us=bee_beam_window_us),
     // Expose the DetectorVolumes node builder so the Q/L matching graph can
     // reference the SAME all-anode DV the clustering uses (deterministic by name).
     detector_volumes(anodes, face="") :: detector_volumes(anodes, face),

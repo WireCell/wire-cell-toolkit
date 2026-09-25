@@ -35,6 +35,10 @@ local FULLSTREAM_SAMPLES = 468864;
 
 function(input_file, output_dir='.', run=39252, event=298567, offset_us=0,
          offset_bot_us=null, offset_top_us=null,
+         // doc pdvd/119: trigger time on the raw flash axis (us) and the
+         // trigger-candidate type, stamped into the archive metadata for the
+         // in-beam flash label.  null => keys omitted => byte-identical.
+         trigger_us=null, tc_type=null,
          cath_thresh=3.7, mem_thresh=4.0, pmt_thresh=2.2,
          cath_ped_sigma=0.75, sat_pad=1024,
          // Drop OpHits overlapping a DAPHNE 14-bit rail (+- sat_pad).
@@ -130,6 +134,8 @@ function(input_file, output_dir='.', run=39252, event=298567, offset_us=0,
   // Stamped verbatim into the archive metadata for downstream Q/L matching.
   local off_bot_us = if std.type(offset_bot_us) == 'string' then std.parseJson(offset_bot_us) else offset_bot_us;
   local off_top_us = if std.type(offset_top_us) == 'string' then std.parseJson(offset_top_us) else offset_top_us;
+  local trig_us = if std.type(trigger_us) == 'string' then std.parseJson(trigger_us) else trigger_us;
+  local tc_type_n = if std.type(tc_type) == 'string' then std.parseInt(tc_type) else tc_type;
   local sat_pad_n = if std.type(sat_pad) == 'string' then std.parseInt(sat_pad) else sat_pad;
   local cath_th = if std.type(cath_thresh) == 'string' then std.parseJson(cath_thresh) else cath_thresh;
   local mem_th = if std.type(mem_thresh) == 'string' then std.parseJson(mem_thresh) else mem_thresh;
@@ -200,6 +206,8 @@ function(input_file, output_dir='.', run=39252, event=298567, offset_us=0,
   local opflash_finder = flash.opflash_finder(offset_us=off_us,
                                               offset_bot_us=off_bot_us,
                                               offset_top_us=off_top_us,
+                                              trigger_us=trig_us,
+                                              tc_type=tc_type_n,
                                               tail_merge=tmerge,
                                               tail_window_us=twin,
                                               tail_min_width_us=tminw,
