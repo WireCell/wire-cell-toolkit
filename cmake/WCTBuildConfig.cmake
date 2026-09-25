@@ -50,7 +50,8 @@ set(_wct_have_map
     "PYTHON:HAVE,LIB,INC"
     "ROOTSYS:HAVE"
     "LIBTORCH:HAVE"
-    "CUDA:HAVE")
+    "CUDA:HAVE"
+    "NVTX:HAVE")
 
 set(_lines "")
 foreach(_entry IN LISTS _wct_have_map)

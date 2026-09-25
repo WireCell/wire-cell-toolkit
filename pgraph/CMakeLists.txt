@@ -1,1 +1,1 @@
-wct_package(WireCellPgraph USE WireCellAux)
+wct_package(WireCellPgraph USE WireCellAux NVTX)

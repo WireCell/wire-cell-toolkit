@@ -64,6 +64,9 @@ option(WCT_WITH_TESTS "Build and register the test suite (mirrors --tests)" OFF)
 # --with-spng=yes in waf).  See https://github.com/WireCell/wire-cell-toolkit/issues/496
 option(WCT_WITH_SPNG "Build the experimental WireCellSpng package (needs recent libtorch)" OFF)
 
+option(WCT_WITH_NVTX
+  "Enable NVTX annotations and link nvToolsExt when available" OFF)
+
 # Comma-separated experiment names whose pgrapher/experiment configs to install
 # ("all" for every experiment); mirrors --install-config.  Empty installs only
 # the common/ui jsonnet.

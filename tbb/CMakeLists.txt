@@ -1,1 +1,1 @@
-wct_package(WireCellTbb    USE WireCellAux TBB  TEST_USE PTHREAD)
+wct_package(WireCellTbb    USE WireCellAux TBB NVTX  TEST_USE PTHREAD)

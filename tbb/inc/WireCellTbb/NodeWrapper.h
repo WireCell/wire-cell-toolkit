@@ -4,6 +4,7 @@
 #include "WireCellIface/INode.h"
 #include "WireCellIface/INamed.h"
 #include "WireCellUtil/TupleHelpers.h"
+#include "WireCellTbb/NvtxTools.h"
 
 #include <tbb/flow_graph.h>
 #include <boost/any.hpp>
@@ -62,6 +63,7 @@ namespace WireCellTbb {
 
         // Start/stop the stop watch.
         void start() {
+            NVTX_RANGE_PUSH(instance_name().c_str());
             m_wall = std::chrono::high_resolution_clock::now();
             m_core = std::clock();
             // Also stamp a wall-clock (CLOCK_REALTIME) start when collecting
@@ -71,6 +73,7 @@ namespace WireCellTbb {
             }
         }
         void stop() {
+            NVTX_RANGE_POP();
             duration_t delta = std::chrono::high_resolution_clock::now() - m_wall;
             m_runtime += delta;
             if (delta > m_maxrt) {
